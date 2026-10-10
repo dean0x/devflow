@@ -1,11 +1,11 @@
 ---
 feature: resolve-pipeline
 name: Resolve Pipeline (Triage → Fix → Verify)
-description: "Use when modifying /resolve or /code-review convergence logic, adding or changing Triage disposition rules (including DUPLICATE collapsing), adjusting Code-agent operating modes (issue-fix/validation-fix), touching the resolution-summary.md parser contract, changing the Verification Gate retry loop, understanding how DIFF_FILES flows from git validate-branch into blast-radius triage, or working on traceability operations (fetch-review-threads, resolve-review-threads, post-resolution-summary, check-merge-readiness, THREAD_MAP). Keywords: resolve, triage, disposition matrix, blast-radius, FIX_NOW, FIX_SEPARATE, TECH_DEBT, FALSE_POSITIVE, BY_DESIGN, ESCALATED, DUPLICATE, duplicate-grouping, duplicates-collapse, duplicate_of, resolution-summary, convergence parser, DIFF_FILES, issue-fix, validation-fix, Verification Gate, manage-debt, EVIDENCE_POLICY gates, TRACEABILITY DEGRADED, fetch-review-threads, THREAD_MAP, post-resolution-summary, Third-Party Threads, check-merge-readiness, ext-N, D7, D9."
+description: "Use when changing /resolve triage, DUPLICATE collapsing, Code issue-fix mode, the resolution-summary.md parser contract, the Verification Gate or thread resolution. Keywords: resolve, triage, FIX_NOW."
 category: architecture
-directories: [src/assets/commands/resolve.mds, src/assets/agents/triage.md, src/assets/agents/code.md, src/core/plugins.ts, src/assets/commands/code-review.mds]
+directories: [src/assets/commands/resolve.mds, src/assets/agents/triage.mds, src/assets/agents/code.mds, src/core/plugins.ts, src/assets/commands/code-review.mds]
 created: 2026-07-08
-updated: 2026-09-26
+updated: 2026-10-10
 ---
 
 # Resolve Pipeline (Triage → Fix → Verify)
@@ -14,7 +14,7 @@ updated: 2026-09-26
 
 `/resolve` implements "no agent grades its own homework": a dedicated Triage agent (opus) classifies every review issue independently before Code agents touch any code. The key architectural insight is **separation of judgment from execution** — the Triage agent assigns verdicts using blast-radius scope, the Code agent fixes only what it is told to fix with `OPERATION: issue-fix`, and a Validate agent (haiku) independently verifies correctness before any commit reaches remote.
 
-PR #288 added a traceability layer: compliance-gated phases (1b, 9b-1, 9c) fetch external review threads, resolve them post-push, and check merge readiness. Phase 9b-2 posts a resolution comment to the PR unconditionally when a PR is known — regardless of compliance installation.
+PR #288 added a traceability layer: phases 1b, 9b-1 and 9c fetch external review threads, resolve them post-push, and check merge readiness, gated on the evidence policy and non-author approval, never on compliance. Phase 9b-2 posts a resolution comment whenever a PR is known.
 
 PR #307 added a seventh verdict bucket — **DUPLICATE** — and a pre-pass that collapses same-defect issues before the blast-radius matrix runs. This de-skews the `fp_ratio` convergence formula and eliminates duplicate debt tickets without any change to the code-review.mds parser.
 
@@ -33,8 +33,9 @@ Agents in the pipeline:
 | Code | sonnet | issue-fix, validation-fix, alignment-fix, qa-fix modes |
 | Simplify | sonnet | refine changed code after fixes |
 | Validate | **haiku** | build/typecheck/lint/test gate |
+| Test | sonnet | Step 9b-0 only: re-verify stale test-plan items (at most one spawn per cycle) |
 
-Plugin registry (`DEVFLOW_PLUGINS` in `plugins.ts`) and its tests (`tests/registry-integrity.test.ts`) must stay consistent: `agents: [git, triage, code, simplify, validate]`.
+Plugin registry (`DEVFLOW_PLUGINS` in `plugins.ts`) and its tests (`tests/registry-integrity.test.ts`) must stay consistent: `agents: [git, triage, code, simplify, validate, test, knowledge]`.
 
 ## Component Architecture
 
@@ -45,9 +46,9 @@ Phase 0   Worktree Discovery & Pre-Flight
   Step 0a  git worktree list → filter resolvable
   Step 0b  Git agent (validate-branch) per worktree [parallel] ← DIFF_FILES
   Step 0c  Target latest review directory per worktree
-  Step 0d  Load DECISIONS_CONTEXT + FEATURE_KNOWLEDGE
-           Resolve EVIDENCE_POLICY (evidence_policy(), once per run) and, per worktree,
-           the settings line: REVIEW_PUBLICATION and COMPLIANCE_FRAMEWORKS.
+  Step 0d  settings_resolve() once, before any consumer; load DECISIONS_CONTEXT (learning on only),
+           FEATURE_KNOWLEDGE and FEATURE_KNOWLEDGE_RULES; resolve EVIDENCE_POLICY (evidence_policy(), once
+           per run) and, per worktree from the settings line, REVIEW_PUBLICATION and COMPLIANCE_FRAMEWORKS.
 Phase 1   Orchestrator parses issues → ISSUES (with reviewer_confidence %)
 Phase 1b  Git agent (fetch-review-threads) → THREAD_MAP  [only when EVIDENCE_POLICY is required]
 Phase 2   Single global Triage agent → verdict ledger (one verdict per issue, none vanish)
@@ -61,14 +62,17 @@ Phase 5   Write resolution-summary.md ← compaction safety; Tracked = "(pending
           and new additive section "## Duplicates". DUPLICATE issues appear ONLY in ## Duplicates.
 Phase 6   Simplify (only if fixes were made)
 Phase 7   Validate gate (haiku) + Code validation-fix loop ≤ 2 + SINGLE push
-Phase 8   CI Status Gate (conditional — skipped if no fixes or Phase 7 FAILED)
+Phase 8   CI Status Gate (conditional — skipped if no fixes or Phase 7 FAILED); ci-wait.cjs,
+          Code ci-fix on FAILING (at most 3 waits + 2 fixes per worktree)
 Phase 9   manage-debt (FIX_SEPARATE + TECH_DEBT → backfill Tracked = #N)  [SEQUENTIAL]
           DUPLICATE issues NEVER create their own debt tickets — covered by the primary's ticket.
 Phase 9b  Thread Resolution + Resolution Comment
-  Step 9b-1  Git agent (resolve-review-threads)  [compliance-gated; D9 gate applies]
+  Step 9b-0  verify-evidence.cjs → at most one Test agent on stale TPs  [only after this run's push]
+  Step 9b-1  Git agent (resolve-review-threads)  [EVIDENCE_POLICY required; D9 gate applies]
              ext-{N} matching a DUPLICATE → use primary's verdict/verification status (caller-side mapping)
   Step 9b-2  Git agent (post-resolution-summary)  [ALWAYS-ON when PR known]
-Phase 9c  Git agent (check-merge-readiness)  [compliance-gated, report-only]
+  Step 9b-3  Git agent (update-pr-evidence)  [only when the head moved]
+Phase 9c  Git agent (check-merge-readiness)  [REQUIRE_NON_AUTHOR_APPROVAL true, report-only]
 Phase 10  Display results
 ```
 
@@ -76,7 +80,11 @@ Phase 10  Display results
 
 **Phase 7 push timing**: The single `git push` fires at the END of Phase 7, whether the gate PASSED or FAILED. This ensures the branch is always visible on remote before CI, debt management, or thread resolution runs. Code agents (Phase 4) and validation-fix Code agents (Phase 7 loop) both receive `PUSH: false`; the orchestrator owns the push.
 
-**Evidence gates**: Phases 1b and 9b-1 run only when `EVIDENCE_POLICY` is `required`; Phase 9c runs only when `REQUIRE_NON_AUTHOR_APPROVAL` is `true`. Phase 9b-2 (post-resolution-summary) still runs if a PR is known. /resolve takes no compliance gate: from the same settings line as `REVIEW_PUBLICATION` it sets `COMPLIANCE_FRAMEWORKS` (`compliance_frameworks()` from `_partials/_compliance.mds`, alias-imported) and passes it to every issue-fix Code agent, which loads the compliance skill only when it is not `off`.
+**Evidence gates**: Phases 1b and 9b-1 run only when `EVIDENCE_POLICY` is `required`; Phase 9c runs only when `REQUIRE_NON_AUTHOR_APPROVAL` is `true`. Phase 9b-2 (post-resolution-summary) still runs if a PR is known. /resolve takes no compliance gate: from the same settings line as `REVIEW_PUBLICATION` it sets `COMPLIANCE_FRAMEWORKS` (`compliance_frameworks()` from `_partials/_compliance.mds`, alias-imported) and passes it to every Code spawn (issue-fix, validation-fix, ci-fix), which loads the compliance skill only when it is not `off`.
+
+**One settings block**: `resolve.mds` alias-imports `_partials/_settings.mds` and expands `settings_resolve()` once in Step 0d, ahead of the decisions load, publication gate and compliance lens. Those partials import nothing from it; they refer to "the line resolved above" for a root, so `REVIEW_PUBLICATION` and `COMPLIANCE_FRAMEWORKS` are still read per worktree.
+
+**`DECISIONS_CONTEXT` reaches only its declared receivers**: Triage and the Code spawns (issue-fix, validation-fix, ci-fix); the Validate, Simplify, Test and Git spawns never get it. It exists only in the learning-on build, where `decisions_gate()` sets it to `(none)` when the settings line says `LEARNING=off`. `decisions-seam.test.ts` pins this.
 
 ### DIFF_FILES Flow
 
@@ -138,7 +146,7 @@ Summary tally gains `- DUPLICATE: {n}`.
 |----------|---------|-----------|-------------------|
 | 0 | SECURITY GATE | Any security finding | Overrides everything; → FIX_NOW or ESCALATED only |
 | 1 | FALSE_POSITIVE | Review agent factually wrong | Cited grep/file:line proving the issue does not exist |
-| 2 | BY_DESIGN | Code is intentional | Cited ADR or inline comment/doc |
+| 2 | BY_DESIGN | Code is intentional | An ADR whose body was read, stated in words (learning on only), or an inline comment/doc |
 | 3 | FIX_NOW | File in DIFF_FILES, OR isolated Standard fix, OR security/correctness in touched path | Risk tier: Standard or Careful |
 | 4 | FIX_SEPARATE | Valid but exceeds diff blast radius | Must become tracked manage-debt ticket |
 | 5 | TECH_DEBT | LAST RESORT — complete architectural overhaul only | Not "touches many files" or "changes public API" |
@@ -155,7 +163,7 @@ Summary tally gains `- DUPLICATE: {n}`.
 
 ## Code Agent Operating Modes
 
-The Code agent has five modes selected by the `OPERATION` input:
+The Code agent selects its mode by the `OPERATION` input, the first prompt line of every spawn. /resolve spawns issue-fix, validation-fix and ci-fix; `pr-create` (/implement opens the PR) and `edit` (a mechanical rename or move) are the other two:
 
 | Mode | Who triggers | Key constraints |
 |------|-------------|-----------------|
@@ -164,6 +172,7 @@ The Code agent has five modes selected by the `OPERATION` input:
 | `validation-fix` | /resolve Phase 7 gate and /implement Phase 3 | Fix validation failures only, no other changes; PUSH: false |
 | `alignment-fix` | /implement Phase 7 Evaluate agent | Fix misalignments only, no other changes |
 | `qa-fix` | /implement Phase 8 Test agent | Fix QA failures only, no other changes |
+| `ci-fix` | /resolve Phase 8 and the /implement CI gate, on FAILING | Fix only the checks named in `CI_FAILURES`; PUSH: false |
 
 **issue-fix mode rules:**
 - Receives pre-classified FIX_NOW issues — never re-litigates Triage dispositions
@@ -244,19 +253,28 @@ The caller spawn in code-review.mds passes `REVIEW_TIMESTAMP: {timestamp}` as an
 
 ## Triage Agent Contract
 
-The Triage agent (opus) is the sole judgment agent. Key constraints in `triage.md`:
+The Triage agent (opus) is the sole judgment agent. Key constraints in `triage.mds` (compiled with a learning-off variant):
 
-- Skills preloaded in frontmatter: `devflow:security`, `devflow:worktree-support`, `devflow:apply-decisions`, `devflow:apply-feature-knowledge`
+- Skills preloaded in frontmatter: `devflow:security`, `devflow:worktree-support`, `devflow:apply-feature-knowledge`, and `devflow:apply-decisions` in the learning-on build only
+- `FEATURE_KNOWLEDGE` is per KB: the Rules bullets most relevant to the issues, the KB path and a heading index (sections are read on demand)
 - **Never instructed to invoke skills via body text** (re-invoking a skill already preloaded in frontmatter trips its re-entrancy guard)
 - Reads 30-line context around each reported file:line to verify issues
 - **Runs the Duplicate Grouping Pre-Pass first** — groups same-defect issues, elects primaries (security member is always primary in mixed groups), then runs the matrix on primaries only
 - For FALSE_POSITIVE: must provide grep output or file:line citation — opinion is not evidence
-- For BY_DESIGN: must cite an ADR or inline comment/doc — gut feeling is not a citation
+- For BY_DESIGN: must cite an ADR whose body it has read, stated in words, or an inline comment/doc (the code comment/doc alone in the learning-off build) — gut feeling is not a citation
 - For ESCALATED: security findings with ambiguous context go here rather than FALSE_POSITIVE
 - For DUPLICATE: `duplicate_of` must reference a non-DUPLICATE issue — never chained
 - Output is a verdict ledger grouped by disposition (7 buckets including DUPLICATE) with a Summary section
 
 **Triage output is consumed by the orchestrator, not by Code agents.** The Triage agent never spawns sub-agents.
+
+## Learning Variants
+
+`resolve.mds`, `triage.mds` and `code.mds` (MDS hosts) carry whole-line `<!-- learning:on -->` / `<!-- learning:off -->` / `<!-- learning:end -->` arms. The build compiles each host twice: the learning-on file in `dist/commands/` or `dist/agents/`, and a learning-off file under `dist/learning-off/`; install and the learning toggle pick one from the machine's learning switch. The learning-off /resolve drops:
+- Step 0d's decisions load (the heading becomes "Load Project Context"), `DECISIONS_CONTEXT` in Produces/Requires and the Triage and Code spawns, the apply-decisions instruction, the Reasoning-column collection sentence, and the additive `## Decisions Citations` section of resolution-summary.md;
+- in Triage, the apply-decisions preload, the Apply Decisions responsibility (later numbers become on/off pairs) and the ADR route to BY_DESIGN.
+
+Where an item is rewritten rather than removed (Step 0d's heading and Produces, the Phase 2 and 4 Requires, the `ci-fix` step 6), edit both arms; arms cannot nest. `tests/learning/learning-variants-arms.test.ts` checks each variant against an independent resolution of the compiled host.
 
 ## Verification Gate (Phase 7)
 
@@ -280,7 +298,7 @@ The following test files provide static content guards that fail loudly when loa
 
 **`tests/git-agent.test.ts`** (source-file guards, no build required):
 - Guard 0: file non-vacuousness
-- Guard 1: required operation sections (`## Operation: {name}`) exist for all 17 operations (15 original + `fetch-issue` and `fetch-issues-batch` added in Phase 0)
+- Guard 1: required operation sections (`## Operation: {name}`) exist for every operation in `REQUIRED_OPS` (the traceability ops, `fetch-issue`, `fetch-issues-batch`, `update-pr-evidence`, `associate-release`)
 - Guard 2: numeric bounds — 60000-char caps for post-review-summary, post-resolution-summary, post-wave-report, and manage-debt; ≤50 threads bound for resolve-review-threads; ≤50 issues bound for backlink-shipped-issues and fetch-issues-batch (the latter also pins `TRUNCATED ({n} not processed)`, the `## Issues Batch ({n} issues)` output header, and the single-GraphQL-query mechanic — AC-0.3); ≤2-page / 100-thread bound for fetch-review-threads; learn-conventions branch/tag/PR scan bounds
 - Section-scope caveat: `extractOpSectionFromCorpus` ends an op section at the next `\n## `, so a literal that lives inside an op's Output template *after* a `## ` heading (e.g. `## Issues Batch ({n} issues)`) is invisible to an op-scoped assertion and must be asserted against the whole file
 - Guard 3: D9 gate — pins the exact "ONLY when VERIFICATION_STATUS == PASS AND verdict == FIXED AND commit_sha non-empty" sentence; also pins FALSE_POSITIVE and BY_DESIGN as reply-only
@@ -290,7 +308,7 @@ The following test files provide static content guards that fail loudly when loa
 **`tests/registry-integrity.test.ts` — Guard 6** (build-gated):
 - **Forward check**: every `OPERATION: X` inside a Git-agent spawn block (`Agent(subagent_type="Git")`) in any compiled command must have a matching `## Operation: X` heading in git.md
 - **Reverse check**: every `## Operation: X` in git.md must be referenced by name in at least one compiled command, OR appear in `INTERNAL_OPS`
-- `INTERNAL_OPS` allowlist: `learn-conventions` only (invoked internally by setup-task, not from commands directly). `fetch-issues-batch` was removed from INTERNAL_OPS in Phase 0 — it is now wired live from `plan.mds` (AC-0.11, SG-11)
+- `INTERNAL_OPS` allowlist: `learn-conventions` (invoked by setup-task) and `check-ci-status` (run only by check-merge-readiness; commands wait on CI through `ci-wait.cjs`). `fetch-issues-batch` is wired live from `plan.mds` (AC-0.11, SG-11)
 - Fail-loud: asserts `dist/commands/` exists before checking — a guard that silently skips on a missing build artifact is not a guard
 
 **`tests/build-mds.test.ts §15`** (build-gated, Phase D traceability ops):
@@ -305,7 +323,7 @@ The following test files provide static content guards that fail loudly when loa
 - Pins `| Duplicates Collapsed | ` Statistics row label — additive extension; existing parser labels unchanged
 - Pins `## Duplicates` section heading in compiled `resolve.md` — additive, so the convergence parser is unaffected
 
-**`tests/resolve/duplicate-verdict.test.ts`** (source-file guards — producer side):
+**`tests/resolve/duplicate-verdict.test.ts`** (producer side; reads the compiled Triage agent through `resolveAgentSource('triage')` and the `resolve.mds` source):
 - Guards the duplicate grouping pre-pass ordering: `## Duplicate Grouping Pre-Pass` must appear before `## Blast-Radius Disposition Matrix` in `triage.md`
 - Guards chaining prohibition: pre-pass section must contain "must reference a non-DUPLICATE issue"
 - Guards security-primary election: pre-pass section must contain "the security member is always the primary" and "Security Gate"
@@ -359,16 +377,18 @@ The following test files provide static content guards that fail loudly when loa
 
 ## Key Files
 
-- `src/assets/commands/resolve.mds` — MDS source for /resolve orchestration command (phases 0-10 + 1b, 9b, 9c); compiled to `dist/commands/`
-- `src/assets/agents/triage.md` — Triage agent (opus): duplicate grouping pre-pass, blast-radius disposition matrix, evidence rules, verdict ledger format (7 buckets including DUPLICATE)
-- `src/assets/agents/code.md` — Code agent: `issue-fix`, `validation-fix`, `alignment-fix`, `qa-fix` modes documented in Mode sections
+- `src/assets/commands/resolve.mds` — MDS source for /resolve orchestration command (phases 0-10 + 1b, 9b, 9c); compiled to `dist/commands/` and, for learning off, `dist/learning-off/commands/`
+- `src/assets/agents/triage.mds` — Triage agent (opus; MDS host, compiled to `dist/agents/triage.md` and `dist/learning-off/agents/`): duplicate grouping pre-pass, blast-radius disposition matrix, evidence rules, verdict ledger format (7 buckets including DUPLICATE)
+- `src/assets/agents/code.mds` — Code agent, an MDS generator host: `issue-fix`, `validation-fix`, `alignment-fix`, `qa-fix`, `pr-create`, `ci-fix`, `edit` modes documented in Mode sections
 - `src/assets/agents/git.mds` (compiles to `dist/agents/git.md`) — Git agent: all traceability operations (validate-branch, fetch-review-threads, resolve-review-threads, post-review-summary, post-resolution-summary, check-merge-readiness, manage-debt, check-ci-status); D7/D8/D9 decision markers defined here
+- `src/assets/commands/_partials/_settings.mds` — `settings_resolve()`, expanded once in Step 0d (alias-imported)
 - `src/assets/commands/_partials/_compliance.mds` — `compliance_frameworks()` (sets `COMPLIANCE_FRAMEWORKS` from the settings line; alias-imported by /resolve) and `compliance_gate()` (adds `COMPLIANCE_ACTIVE`; /code-review and /plan)
-- `src/core/plugins.ts` — DEVFLOW_PLUGINS entry for devflow-resolve: agents registry `[git, triage, code, simplify, validate, knowledge]`
+- `src/core/plugins.ts` — DEVFLOW_PLUGINS entry for devflow-resolve: agents registry `[git, triage, code, simplify, validate, test, knowledge]`
 - `src/assets/commands/code-review.mds` — Contains convergence parser (fp_ratio), Phase 3 sequential synthesis+comment pattern, Step 0b compliance-lens resolution, REVIEW_TIMESTAMP spawn input
 - `tests/git-agent.test.ts` — Static content guards for git.md: ops, bounds, D9 gate, D4 rate-limit, dedup markers
 - `tests/registry-integrity.test.ts` — Guard 6: forward+reverse OPERATION: ↔ ## Operation: contract with INTERNAL_OPS allowlist (build-gated)
 - `tests/build-mds.test.ts` — §15: REVIEW_TIMESTAMP input assertion; §16: resolve.md traceability ops; §16b: DUPLICATE verdict guards (consumer side — DUPLICATE bucket, duplicate_of, Duplicates Collapsed row, ## Duplicates section); all beforeAll blocks assert exit-0 + non-empty corpus
+- `tests/learning/learning-variants-arms.test.ts` — each learning variant against an independent resolution of the compiled host
 - `tests/resolve/duplicate-verdict.test.ts` — DUPLICATE producer-side guards: pre-pass ordering, chaining prohibition, security-primary election, ledger bucket/column, two-sided spawn↔op enum seam, section exclusivity
 
 ## Related
