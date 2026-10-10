@@ -13,7 +13,7 @@
 //   get-field <field> [default]           Read field from stdin JSON
 //   get-string-field <field>              Read field from stdin JSON only when it is a string
 //   extract-cwd-field <field>             Extract cwd + arbitrary field, SOH-byte delimited
-//   session-output <context>              Build SessionStart output envelope
+//   session-output <context> [message]    Build SessionStart output envelope (+ systemMessage)
 //   prompt-output <context>               Build UserPromptSubmit output envelope
 //   backup-construct                      Build pre-compact backup JSON from --arg pairs
 //   assign-anchor <decision|pitfall> <obs_id>
@@ -293,13 +293,21 @@ try {
     }
 
     case 'session-output': {
+      // D-SYSTEMMESSAGE-ENVELOPE (json-parse json_session_output): an optional second
+      // argument is a user-facing message, carried in the top-level `systemMessage` key.
+      // One argument, or an empty message, gives today's envelope; a message with an
+      // empty context gives `systemMessage` alone, with no hookSpecificOutput key.
       const ctx = args[0];
-      console.log(JSON.stringify({
-        hookSpecificOutput: {
+      const message = args[1] || '';
+      const envelope = {};
+      if (message === '' || ctx !== '') {
+        envelope.hookSpecificOutput = {
           hookEventName: 'SessionStart',
           additionalContext: ctx,
-        },
-      }));
+        };
+      }
+      if (message !== '') envelope.systemMessage = message;
+      console.log(JSON.stringify(envelope));
       break;
     }
 

@@ -23,6 +23,31 @@
 # Section 4: Legacy install notice — one line when this repository still carries
 # a retired project-local devflow install (its .claude/settings.json registers
 # devflow hooks), pointing at `devflow uninstall --scope local`.
+# Section 5: Compaction resume directive — on a `compact` SessionStart, one fixed
+# line telling the model to re-read the devflow command it was running from the
+# phase in progress (D-COMPACT-RESUME-DIRECTIVE).
+# Section 6: CLAUDE.md import audit — a top-level systemMessage (shown to the user,
+# never part of additionalContext) naming an `@path` import that puts a large file
+# into every thread's always-loaded context, once per finding, with a stamp that
+# makes an unchanged start free (D-CLAUDE-MD-IMPORT-AUDIT, D-AUDIT-STAMP,
+# D-SYSTEMMESSAGE-ENVELOPE).
+#
+# Sections 5 and 6 add NO new exit path: neither calls `exit`, a failure in either
+# leaves the other sections and the directive intact, and the hook still exits as it
+# did before (the existing exits are the bad-CWD and re-entrancy returns, the
+# no-JSON-tool return at the top, and the two sourcing failures). With neither jq nor
+# node the hook returns before Section 5 can run, so there is no directive then; that
+# is accepted and documented.
+#
+# Cost of Sections 5 and 6 (the [DR-10] table below belongs to Section 3):
+#   - Section 5: a `case` on a value parsed with the CWD, in the same single
+#     subprocess as before; zero extra forks.
+#   - Section 6, unchanged start (the stamp's root set equals the current one and no
+#     recorded path changed): shell builtins only, one bounded read of the stamp, no
+#     fork, no node process.
+#   - Section 6, changed start: ONE node process (claude-md-audit.cjs), and a
+#     sibling temp file renamed over the stamp. When none of the roots exists there
+#     is nothing to audit: the stamp is written with builtins, and node is not started.
 
 # Safe no-op fallback: must exist before hook-bootstrap is sourced.
 dbg() { :; }
@@ -49,7 +74,13 @@ source "$SCRIPT_DIR/hook-bootstrap" "session-start-context"
 source "$SCRIPT_DIR/json-parse" || { echo "session-start-context: failed to source json-parse" >&2; exit 1; }
 if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
 
-CWD=$(printf '%s' "$INPUT" | json_field "cwd" "")
+# One subprocess yields both fields: the working directory and the SessionStart
+# `source` (startup|resume|clear|compact) that Section 5 gates on, so the directive
+# costs no fork of its own. Sections 3 and 4 keep reading `source` themselves, where
+# they gate (startup|clear), so neither depends on this value.
+_SC_FIELDS=$(printf '%s' "$INPUT" | json_extract_cwd_field "source")
+CWD="${_SC_FIELDS%%$'\001'*}"
+SESSION_SOURCE="${_SC_FIELDS#*$'\001'}"
 if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then
   dbg "EXIT: bad CWD"
   exit 0
@@ -789,11 +820,267 @@ ${LEGACY_SECTION}"
   fi
 fi
 
+# --- Section 5: Compaction resume directive ---
+# D-COMPACT-RESUME-DIRECTIVE: after a compaction nothing tells the model to re-read
+# the devflow command it was running; Claude Code re-injects a long command only in
+# part (the plan records commands over about 5k tokens being truncated on re-injection,
+# which this repository cannot verify). On the SessionStart whose source is `compact`
+# this section adds one fixed line, appended to CONTEXT with the other sections'
+# join, and never sent as a systemMessage.
+#
+# The line is a constant: a single-quoted string that interpolates nothing, so the
+# `$CLAUDE_CONFIG_DIR` in it reaches the model as text and its bytes do not depend on
+# the caller. It names, in at most 250 ASCII characters (tests/session-start-compact
+# holds the cap and the numeric-floors ceiling `compact-directive-max-chars`):
+#   (a) an if-clause, so it applies only when a devflow command was running, with an
+#       explicit ignore clause;
+#   (b) where the command file lives, by rule: commands/devflow/ under the Claude
+#       config directory ($CLAUDE_CONFIG_DIR, else ~/.claude);
+#   (c) the read mechanics: list the headings, then read from the phase in progress,
+#       never the whole file;
+#   (d) that the command's input (COMMAND_INPUT in the commands that bind it, an
+#       ARGUMENTS line in the others) comes from the conversation summary, not from a
+#       placeholder in the file;
+#   (e) to resume after the last finished phase.
+# The gate is a POSITIVE `compact` case, emitted on every compact run whatever the
+# project (the directive does no project work), so it never becomes a denylist and a
+# missing, absent or unrecognised source emits nothing. The model decides whether a
+# command was running: detecting one here would be judgment, which stays out of hooks.
+case "$SESSION_SOURCE" in
+  compact)
+    dbg "compaction resume directive emitted"
+    COMPACT_SECTION='If a devflow command was running: re-read {$CLAUDE_CONFIG_DIR or ~/.claude}/commands/devflow/<name>.md, list headings, read from current phase, take input (COMMAND_INPUT/ARGUMENTS) from the summary, resume after the last finished phase. Else ignore.'
+    if [ -n "$CONTEXT" ]; then
+      CONTEXT="${CONTEXT}
+
+${COMPACT_SECTION}"
+    else
+      CONTEXT="$COMPACT_SECTION"
+    fi
+    ;;
+esac
+
+# --- Section 6: CLAUDE.md import audit and its stamp ---
+# D-CLAUDE-MD-IMPORT-AUDIT: a CLAUDE.md `@path` import loads its file into every
+# thread at launch, so a large import is paid for in every session. This section
+# reports the ones over the thresholds that claude-md-audit.cjs holds (and documents:
+# grammar, bounds, thresholds, the upstream differences) in a top-level systemMessage,
+# which the user sees and the model does not (D-SYSTEMMESSAGE-ENVELOPE, json-parse).
+# It never enters CONTEXT, and the audit READS only: this section and init write the
+# stamp, nothing else.
+#
+# D-AUDIT-STAMP: one machine-root file, $HOME/.devflow/.claude-md-audit, so a changed
+# start costs one node process and an unchanged one costs none. Its rows are `V 1`,
+# `R <root>` (the gated root set), `P <flag> <path>` (every path the last audit
+# examined: 0 absent, 1 regular file, 2 exists but is not one), `K <key>` (a finding
+# already displayed) and `E <reason>`; the format is specified in claude-md-audit.cjs.
+#   Gated roots: CLAUDE.md in the Claude config directory ($CLAUDE_CONFIG_DIR when
+#   absolute, else ~/.claude) always; in a git project that is not HOME
+#   (PROJECT_OK) also its CLAUDE.md, .claude/CLAUDE.md and CLAUDE.local.md.
+#   Fast path (builtins only, no fork): the audit is skipped when the stamp's R rows
+#   equal the current root set and every P row still holds: `-e` agrees with the
+#   flag, and a regular file is not `-nt` (newer than) the stamp. Mtimes are whole
+#   seconds. Two gaps are accepted: a file whose mtime is moved back before the stamp
+#   is missed until its next forward change, and a write landing while an audit runs
+#   can be missed the same way. The fast path decides only whether the audit runs.
+#   Slow path: ONE node process over the roots (none when no root exists: there is
+#   nothing to read, so the stamp records the absent roots with builtins). A finding is recorded as displayed
+#   only after the output below was emitted, so a lost stamp update can repeat a
+#   message and can never hide a new finding.
+#   Failure: node failing, the script missing or throwing, or output that is not the
+#   framed block shows nothing, and writes a stamp holding the R rows, the keys
+#   already displayed and an error marker; an unchanged broken state then starts no
+#   node process, and a changed root set retries. A root path holding a control byte
+#   is never recorded, so a setup with one re-audits at every start (rare).
+#   Skipped silently: no node on PATH, no ~/.devflow (a session never creates the
+#   machine root), or a stamp path that is a link or not a regular file.
+# A stamp over 256 KiB, or one with a NUL byte, is read as absent.
+SYSTEM_MESSAGE=""
+AUDIT_STAMP_NEXT=""
+AUDIT_STAMP_FILE="$TRACKER_DEVFLOW_DIR/.claude-md-audit"
+AUDIT_SCRIPT="$SCRIPT_DIR/../claude-md-audit.cjs"
+_SC_AUDIT_OLD_STAMP=""
+_SC_AUDIT_ROOTS=()
+
+# _sc_audit_stamp_blocked — succeeds when the stamp path is a link or exists and is
+# not a regular file: the write is refused and the audit skipped (D-AUDIT-STAMP).
+_sc_audit_stamp_blocked() {
+  if [ -L "$AUDIT_STAMP_FILE" ]; then return 0; fi
+  if [ -e "$AUDIT_STAMP_FILE" ] && [ ! -f "$AUDIT_STAMP_FILE" ]; then return 0; fi
+  return 1
+}
+
+# _sc_audit_stamp_fresh — succeeds when the audit can be skipped. Builtins only.
+# Sets _SC_AUDIT_OLD_STAMP to the stamp text (empty when absent, over 256 KiB or
+# holding a NUL: `read -d '' -n N` succeeds only when it stops short of the end of
+# the file, which is a stamp the shell cannot vouch for). Ends in an explicit return
+# so a caller running under set -e would not die on the normal path (PF-078).
+_sc_audit_stamp_fresh() {
+  local line="" have="" want="" root="" path=""
+  _SC_AUDIT_OLD_STAMP=""
+  [ -f "$AUDIT_STAMP_FILE" ] || return 1
+  if IFS= read -r -d '' -n 262145 _SC_AUDIT_OLD_STAMP 2>/dev/null < "$AUDIT_STAMP_FILE"; then
+    _SC_AUDIT_OLD_STAMP=""
+    return 1
+  fi
+  case "$_SC_AUDIT_OLD_STAMP" in
+    'V 1'|'V 1'$'\n'*) ;;
+    *) _SC_AUDIT_OLD_STAMP=""; return 1 ;;
+  esac
+  for root in "${_SC_AUDIT_ROOTS[@]}"; do
+    want="${want}R ${root}"$'\n'
+  done
+  while IFS= read -r line; do
+    case "$line" in
+      'R '*) have="${have}${line}"$'\n' ;;
+    esac
+  done <<< "$_SC_AUDIT_OLD_STAMP"
+  if [ "$have" != "$want" ]; then return 1; fi
+  while IFS= read -r line; do
+    case "$line" in
+      'P 0 '*)
+        path="${line#P 0 }"
+        if [ -e "$path" ]; then return 1; fi
+        ;;
+      'P 1 '*)
+        path="${line#P 1 }"
+        if [ ! -e "$path" ] || [ "$path" -nt "$AUDIT_STAMP_FILE" ]; then return 1; fi
+        ;;
+      'P 2 '*)
+        path="${line#P 2 }"
+        if [ ! -e "$path" ]; then return 1; fi
+        ;;
+    esac
+  done <<< "$_SC_AUDIT_OLD_STAMP"
+  return 0
+}
+
+# _sc_audit_shell_stamp <absent|failed> — a stamp the shell writes without node, for the
+# two cases that need no audit text. Sets AUDIT_STAMP_NEXT. The rows are the ones
+# claude-md-audit.cjs renders for the same state (tests/session-start-compact.test.ts
+# holds the two equal): a root with a control byte is left out, as the script leaves it
+# out, and the keys of the previous stamp are kept.
+#   absent  No root exists, so there is nothing to audit and nothing to show: the root
+#           rows and a `P 0` row each. A CLAUDE.md appearing at any of them re-audits.
+#   failed  The audit could not run: the root rows and an error marker, no P rows, so
+#           only a changed root set retries.
+_sc_audit_shell_stamp() {
+  local kind="$1" line="" root="" text='V 1'$'\n'
+  for root in "${_SC_AUDIT_ROOTS[@]}"; do
+    case "$root" in
+      *[[:cntrl:]]*) ;;
+      *) text="${text}R ${root}"$'\n' ;;
+    esac
+  done
+  if [ "$kind" = "absent" ]; then
+    for root in "${_SC_AUDIT_ROOTS[@]}"; do
+      case "$root" in
+        *[[:cntrl:]]*) ;;
+        *) text="${text}P 0 ${root}"$'\n' ;;
+      esac
+    done
+  fi
+  while IFS= read -r line; do
+    case "$line" in
+      'K '*) text="${text}${line}"$'\n' ;;
+    esac
+  done <<< "$_SC_AUDIT_OLD_STAMP"
+  if [ "$kind" = "failed" ]; then text="${text}E audit-failed"$'\n'; fi
+  AUDIT_STAMP_NEXT="$text"
+  return 0
+}
+
+# _sc_audit_no_root — succeeds when none of the gated roots exists. The common case on a
+# machine with no CLAUDE.md anywhere, settled by `-e` tests alone: no node process.
+_sc_audit_no_root() {
+  local root=""
+  for root in "${_SC_AUDIT_ROOTS[@]}"; do
+    if [ -e "$root" ]; then return 1; fi
+  done
+  return 0
+}
+
+# _sc_audit_run — the slow path: one node process, its framed block parsed with
+# builtins. `M ` rows are the systemMessage lines; V/R/P/K/E rows are the new stamp.
+# Sets SYSTEM_MESSAGE and AUDIT_STAMP_NEXT; a block that is not complete is a failure.
+_sc_audit_run() {
+  local out="" line="" rc=0 magic="" end="" msg="" stamp=""
+  out=$(node "$AUDIT_SCRIPT" hook "$HOME" "$AUDIT_STAMP_FILE" "${_SC_AUDIT_ROOTS[@]}" 2>/dev/null)
+  rc=$?
+  if [ "$rc" -eq 0 ]; then
+    while IFS= read -r line; do
+      case "$line" in
+        'devflow-claude-md-audit 1') magic="yes" ;;
+        'END') end="yes" ;;
+        'M '*)
+          if [ -n "$msg" ]; then msg="${msg}"$'\n'"${line#M }"; else msg="${line#M }"; fi
+          ;;
+        [VRPKE]' '*) stamp="${stamp}${line}"$'\n' ;;
+      esac
+    done <<< "$out"
+  fi
+  if [ "$rc" -eq 0 ] && [ -n "$magic" ] && [ -n "$end" ] && [ -n "$stamp" ]; then
+    SYSTEM_MESSAGE="$msg"
+    AUDIT_STAMP_NEXT="$stamp"
+    dbg "claude-md audit ran (message=${#msg} chars)"
+  else
+    dbg "claude-md audit failed — recording the failure, showing nothing"
+    _sc_audit_shell_stamp failed
+  fi
+  return 0
+}
+
+# _sc_audit_record — write AUDIT_STAMP_NEXT, after the output has been emitted. A
+# sibling temp file (owner-only: the umask is set before the copy exists, PF-087) is
+# renamed over the stamp; nothing stands at either name that is a link or not a
+# regular file (PF-085), and a failed write leaves the old stamp. Never fails the hook.
+_sc_audit_record() {
+  local tmp="${AUDIT_STAMP_FILE}.tmp.$$"
+  [ -n "$AUDIT_STAMP_NEXT" ] || return 0
+  [ -d "$TRACKER_DEVFLOW_DIR" ] || return 0
+  if _sc_audit_stamp_blocked; then return 0; fi
+  if [ -e "$tmp" ] || [ -L "$tmp" ]; then return 0; fi
+  if ( umask 077; set -o noclobber; printf '%s' "$AUDIT_STAMP_NEXT" > "$tmp" ) 2>/dev/null; then
+    if _sc_audit_stamp_blocked; then
+      rm -f -- "$tmp" 2>/dev/null
+      return 0
+    fi
+    mv -f -- "$tmp" "$AUDIT_STAMP_FILE" 2>/dev/null || rm -f -- "$tmp" 2>/dev/null
+  else
+    rm -f -- "$tmp" 2>/dev/null
+  fi
+  return 0
+}
+
+if [ "$_HAS_NODE" = "true" ] && [ -d "$TRACKER_DEVFLOW_DIR" ]; then
+  if _sc_audit_stamp_blocked; then
+    dbg "claude-md audit skipped: the stamp path is a link or not a regular file"
+  else
+    _SC_AUDIT_CLAUDE_DIR="$HOME/.claude"
+    case "${CLAUDE_CONFIG_DIR:-}" in /*) _SC_AUDIT_CLAUDE_DIR="$CLAUDE_CONFIG_DIR" ;; esac
+    _SC_AUDIT_ROOTS=("$_SC_AUDIT_CLAUDE_DIR/CLAUDE.md")
+    if [ -n "$PROJECT_OK" ]; then
+      _SC_AUDIT_ROOTS+=("$PROJECT_ROOT/CLAUDE.md" "$PROJECT_ROOT/.claude/CLAUDE.md" "$PROJECT_ROOT/CLAUDE.local.md")
+    fi
+    if _sc_audit_stamp_fresh; then
+      dbg "claude-md audit skipped: the stamp is current"
+    elif _sc_audit_no_root; then
+      dbg "claude-md audit skipped: no root exists — recording that"
+      _sc_audit_shell_stamp absent
+    else
+      _sc_audit_run
+    fi
+  fi
+fi
+
 # --- Output ---
 
-# Only output if we have something to inject
-if [ -z "$CONTEXT" ]; then
+# Only output if we have something to inject or to tell the user. The stamp is
+# recorded here too: an audit that found nothing to show still ran, and recording it
+# is what makes the next unchanged start free.
+if [ -z "$CONTEXT" ] && [ -z "$SYSTEM_MESSAGE" ]; then
   dbg "EXIT: no context to inject"
+  _sc_audit_record
   exit 0
 fi
 
@@ -801,5 +1088,13 @@ dbg "OUTPUT_LENGTH=${#CONTEXT}"
 log "Injecting context (${#CONTEXT} chars)"
 dbg "=== HOOK COMPLETE ==="
 
-# Output as additionalContext JSON envelope (Claude sees it as system context, not user-visible)
-json_session_output "$CONTEXT"
+# Output as additionalContext JSON envelope (Claude sees it as system context, not
+# user-visible). The audit text, if any, travels in the envelope's top-level
+# systemMessage and never in the context (D-SYSTEMMESSAGE-ENVELOPE). With no message
+# the second argument is empty and the envelope is the one callers always got.
+json_session_output "$CONTEXT" "$SYSTEM_MESSAGE"
+_SC_OUT_RC=$?
+
+# A finding is recorded as displayed only after it was shown (D-AUDIT-STAMP).
+if [ "$_SC_OUT_RC" -eq 0 ]; then _sc_audit_record; fi
+exit "$_SC_OUT_RC"

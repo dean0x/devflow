@@ -170,6 +170,16 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     }
   }
 
+  /**
+   * Section 6 (the CLAUDE.md import audit) costs one node process on a start that has no
+   * current stamp and none on a start that has one. The [DR-10] counts below measure
+   * Section 3's forks against a baseline, so every measured run must meet the same Section 6
+   * state: a stamp that is already current. This run records it, outside any recording shim.
+   */
+  function primeAuditStamp(input: Record<string, unknown>, home: string): void {
+    run(input, home);
+  }
+
   /** SessionStart event JSON. `source` defaults to startup — Section 3's only live sources. */
   function sessionStart(cwd: string, source: string | null = 'startup'): Record<string, unknown> {
     const input: Record<string, unknown> = { cwd, session_id: 'test-session' };
@@ -677,6 +687,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     fs.mkdirSync(path.join(bareHome, '.devflow', 'logs'), { recursive: true });
     seedTracker(bareHome, { sentinel: false });
     try {
+      primeAuditStamp(sessionStart(tmpDir), bareHome);
       run(sessionStart(tmpDir), bareHome, withShim);
       const baseline = collectShimInvocations(shim.logPath).length;
       expect(baseline, 'the shim recorded nothing — the wrappers are not on PATH').toBeGreaterThan(0);
@@ -685,6 +696,8 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
       // Section 3 must cost the same as not existing.
       fs.rmSync(shim.logPath);
       seedTracker(homeDir, { provider: 'github', sentinel: false });
+      primeAuditStamp(sessionStart(tmpDir), homeDir);
+      fs.rmSync(shim.logPath, { force: true });
       run(sessionStart(tmpDir), homeDir, withShim);
       const githubPath = collectShimInvocations(shim.logPath).length;
       expect(
@@ -731,6 +744,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     seedTracker(bareHome, { sentinel: false });
     try {
       // Baseline: the same repository with no project.json, on a github machine.
+      primeAuditStamp(sessionStart(repo), bareHome);
       run(sessionStart(repo), bareHome, withShim);
       const baseline = collectShimInvocations(shim.logPath);
       expect(baseline.length).toBeGreaterThan(0);
@@ -748,6 +762,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
       seedTracker(homeDir, { provider: 'github', sentinel: false });
       fs.mkdirSync(path.dirname(conventionsOf(homeDir, 'jira')), { recursive: true });
       fs.writeFileSync(conventionsOf(homeDir, 'jira'), '---\nprovider: jira\n---\n');
+      primeAuditStamp(sessionStart(repo), homeDir);
       fs.rmSync(shim.logPath);
       const { stdout } = run(sessionStart(repo), homeDir, withShim);
       const withProject = collectShimInvocations(shim.logPath);
@@ -847,6 +862,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     const repo = makeGitRepo('devflow-ctx-tracker-personal-gh-');
     try {
       seedTracker(homeDir, { provider: 'github', sentinel: false });
+      primeAuditStamp(sessionStart(repo), homeDir);
       run(sessionStart(repo), homeDir, withShim);
       const baseline = collectShimInvocations(shim.logPath).length;
       expect(baseline).toBeGreaterThan(0);
