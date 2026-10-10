@@ -104,7 +104,20 @@ const nodeAuditRuns = (farm: Farm): string[] => invocations(farm).filter(l => l.
 describe('session-start-context: Sections 5 and 6', () => {
   beforeAll(() => {
     farmRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-sc-farms-'));
-  });
+    // Pay the first-exec cost of every wrapper (and of node behind it) here, under this hook's
+    // own timeout, rather than inside the first test: on macOS the first exec of a new
+    // executable is held for seconds after a fork-heavy parallel run.
+    for (const opts of [{ jq: HAS_JQ, node: true }, { jq: HAS_JQ, node: false }, { jq: false, node: true }, { jq: false, node: false }]) {
+      if (opts.jq && !HAS_JQ) continue;
+      const warm = cachedFarm(opts);
+      for (const [tool, args] of [['git', ['--version']], ['stat', ['/']], ['date', []], ['node', ['--version']], ['jq', ['--version']]] as const) {
+        if (fs.existsSync(path.join(warm.path, tool))) {
+          spawnSync(path.join(warm.path, tool), [...args], { stdio: 'ignore', timeout: 30_000 });
+        }
+      }
+      fs.rmSync(warm.log, { force: true });
+    }
+  }, 120_000);
 
   afterAll(() => {
     fs.rmSync(farmRoot, { recursive: true, force: true });
@@ -664,14 +677,19 @@ describe('session-start-context: Sections 5 and 6', () => {
       seedFlaggedGlobal();
       const victim = write(path.join(tmp, 'victim.txt'), 'precious\n');
       // The node wrapper runs the real audit, then plants the link: the window between the fast-path check and the write.
-      // A farm of its own, because this test edits the wrapper.
-      const own = buildFarm(tmp, { jq: true, node: true });
+      // The cached farm's wrapper is replaced for this run only, and restored.
+      const wrapper = path.join(farm.path, 'node');
+      const original = fs.readFileSync(wrapper, 'utf-8');
       fs.writeFileSync(
-        path.join(own.path, 'node'),
+        wrapper,
         `#!/bin/bash\n${JSON.stringify(process.execPath)} "$@"\nrc=$?\nln -s ${JSON.stringify(victim)} ${JSON.stringify(stamp())}\nexit $rc\n`,
       );
-      const { exitCode } = run(plain, 'startup', {}, own.path);
-      expect(exitCode).toBe(0);
+      try {
+        const { exitCode } = run(plain, 'startup');
+        expect(exitCode).toBe(0);
+      } finally {
+        fs.writeFileSync(wrapper, original);
+      }
       expect(fs.readFileSync(victim, 'utf-8')).toBe('precious\n');
       expect(fs.lstatSync(stamp()).isSymbolicLink()).toBe(true);
       expect(fs.readdirSync(machine).filter(n => n.includes('.tmp.'))).toEqual([]);
