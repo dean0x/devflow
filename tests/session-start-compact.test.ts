@@ -12,7 +12,7 @@
  * assumed. A test that sabotages the audit script runs a COPY of the scripts tree.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from 'vitest';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -80,11 +80,37 @@ function buildFarm(base: string, opts: { jq: boolean; node: boolean }): Farm {
   return { path: dir, log };
 }
 
+/**
+ * Farms are built once per file and reused: every wrapper is a new executable, and the first
+ * exec of each new file costs a macOS security scan, which a farm per test pays many times over.
+ * A test resets the recording logs in beforeEach and never edits a cached farm.
+ */
+const farmCache = new Map<string, Farm>();
+let farmRoot = '';
+function cachedFarm(opts: { jq: boolean; node: boolean }): Farm {
+  const key = `${opts.jq}-${opts.node}`;
+  let farm = farmCache.get(key);
+  if (farm === undefined) {
+    farm = buildFarm(farmRoot, opts);
+    farmCache.set(key, farm);
+  }
+  return farm;
+}
+
 const invocations = (farm: Farm): string[] =>
   fs.existsSync(farm.log) ? fs.readFileSync(farm.log, 'utf-8').split('\n').filter(Boolean) : [];
 const nodeAuditRuns = (farm: Farm): string[] => invocations(farm).filter(l => l.startsWith('node ') && l.includes(AUDIT_SCRIPT_NAME));
 
 describe('session-start-context: Sections 5 and 6', () => {
+  beforeAll(() => {
+    farmRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-sc-farms-'));
+  });
+
+  afterAll(() => {
+    fs.rmSync(farmRoot, { recursive: true, force: true });
+    farmCache.clear();
+  });
+
   let tmp: string;
   let home: string;
   let repo: string;
@@ -107,7 +133,8 @@ describe('session-start-context: Sections 5 and 6', () => {
     fs.mkdirSync(plain);
     scriptsRoot = SCRIPTS_DIR;
     hook = path.join(HOOKS_DIR, 'session-start-context');
-    farm = buildFarm(tmp, { jq: HAS_JQ, node: true });
+    for (const cached of farmCache.values()) fs.rmSync(cached.log, { force: true });
+    farm = cachedFarm({ jq: HAS_JQ, node: true });
   });
 
   afterEach(() => {
@@ -257,7 +284,7 @@ describe('session-start-context: Sections 5 and 6', () => {
     }, NODE_RUN_MS * 3);
 
     it('still emits when the audit cannot run (no node on PATH)', () => {
-      const noNode = buildFarm(tmp, { jq: HAS_JQ, node: false });
+      const noNode = cachedFarm({ jq: HAS_JQ, node: false });
       if (!HAS_JQ) return; // with neither tool the hook returns before Section 5 (documented)
       const { stdout, exitCode } = run(plain, 'compact', {}, noNode.path);
       expect(exitCode).toBe(0);
@@ -266,7 +293,7 @@ describe('session-start-context: Sections 5 and 6', () => {
     }, NODE_RUN_MS);
 
     it('with neither jq nor node the hook exits 0 with nothing (Section 5 cannot emit; accepted and documented)', () => {
-      const neither = buildFarm(tmp, { jq: false, node: false });
+      const neither = cachedFarm({ jq: false, node: false });
       const { stdout, exitCode } = run(plain, 'compact', {}, neither.path);
       expect(exitCode).toBe(0);
       expect(stdout.trim()).toBe('');
@@ -284,7 +311,7 @@ describe('session-start-context: Sections 5 and 6', () => {
     describe.each(backends)('on the $name path', ({ skip, jq }) => {
       let backendFarm: Farm;
       beforeEach(() => {
-        backendFarm = buildFarm(tmp, { jq, node: true });
+        backendFarm = cachedFarm({ jq, node: true });
       });
       const go = (cwd: string, source = 'startup') => run(cwd, source, {}, backendFarm.path);
 
@@ -340,7 +367,7 @@ describe('session-start-context: Sections 5 and 6', () => {
       const unchanged = invocations(farm).map(l => l.split(' ')[0]).sort();
 
       // Control: the same start with the audit unable to run at all (no node on PATH).
-      const noNode = buildFarm(tmp, { jq: true, node: false });
+      const noNode = cachedFarm({ jq: true, node: false });
       run(plain, 'startup', {}, noNode.path);
       const withoutAudit = invocations(noNode).map(l => l.split(' ')[0]).sort();
       expect(unchanged).toEqual(withoutAudit);
@@ -581,7 +608,7 @@ describe('session-start-context: Sections 5 and 6', () => {
     it('no node on PATH: the audit is skipped silently, no stamp is written, and the hook exits 0', () => {
       if (!HAS_JQ) return;
       seedFlaggedGlobal();
-      const noNode = buildFarm(tmp, { jq: true, node: false });
+      const noNode = cachedFarm({ jq: true, node: false });
       const { stdout, exitCode } = run(plain, 'startup', {}, noNode.path);
       expect(exitCode).toBe(0);
       expect(stdout.trim()).toBe('');
@@ -637,12 +664,13 @@ describe('session-start-context: Sections 5 and 6', () => {
       seedFlaggedGlobal();
       const victim = write(path.join(tmp, 'victim.txt'), 'precious\n');
       // The node wrapper runs the real audit, then plants the link: the window between the fast-path check and the write.
-      const wrapper = path.join(farm.path, 'node');
+      // A farm of its own, because this test edits the wrapper.
+      const own = buildFarm(tmp, { jq: true, node: true });
       fs.writeFileSync(
-        wrapper,
+        path.join(own.path, 'node'),
         `#!/bin/bash\n${JSON.stringify(process.execPath)} "$@"\nrc=$?\nln -s ${JSON.stringify(victim)} ${JSON.stringify(stamp())}\nexit $rc\n`,
       );
-      const { exitCode } = run(plain, 'startup');
+      const { exitCode } = run(plain, 'startup', {}, own.path);
       expect(exitCode).toBe(0);
       expect(fs.readFileSync(victim, 'utf-8')).toBe('precious\n');
       expect(fs.lstatSync(stamp()).isSymbolicLink()).toBe(true);
