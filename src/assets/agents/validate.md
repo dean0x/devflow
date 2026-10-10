@@ -36,12 +36,14 @@ You receive from orchestrator:
 
 Execute in this order, stopping on first failure:
 
-| Priority | Command Type | Common Examples |
-|----------|-------------|-----------------|
-| 1 | Build | `npm run build`, `cargo build`, `make build` |
-| 2 | Typecheck | `npm run typecheck`, `tsc --noEmit` |
-| 3 | Lint | `npm run lint`, `cargo clippy`, `make lint` |
-| 4 | Test | `npm test`, `cargo test`, `make test` |
+| Priority | Command Type | Common Examples | Quiet form |
+|----------|-------------|-----------------|------------|
+| 1 | Build | `npm run build`, `cargo build`, `make build` | `cargo build -q`, `gradle -q build`, `mvn -q package` |
+| 2 | Typecheck | `npm run typecheck`, `tsc --noEmit` | `tsc --pretty false` |
+| 3 | Lint | `npm run lint`, `cargo clippy`, `make lint` | none |
+| 4 | Test | `npm test`, `cargo test`, `make test` | `vitest run --reporter=dot`, `jest --silent`, `pytest -q`, `cargo test -q`, `go test` without `-v`, `gradle -q test`, `mvn -q test` |
+
+Use the quiet form where the project's command runs that tool. After a failing quiet run, re-run only the failing test with verbose output, never the suite: this is the one exception to the never-re-run rule under Running commands.
 
 **Gate ownership:** Run the full suite once per HEAD. You are the only agent that does.
 
