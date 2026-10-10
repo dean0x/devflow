@@ -596,7 +596,7 @@ describe('claude-md-audit', () => {
       const out = spawnSync(process.execPath, [SCRIPT, 'hook', home, path.join(home, '.devflow', CLAUDE_MD_AUDIT_STAMP_FILE), path.join(project, 'CLAUDE.md')], { encoding: 'utf-8' });
       expect(out.status).toBe(0);
       expect(snapshot(tmp)).toEqual(before);
-    });
+    }, 30_000);
   });
 
   // ── Display gate (AC-420) ────────────────────────────────────────────────────
@@ -847,7 +847,8 @@ describe('claude-md-audit', () => {
 
   // ── The hook-mode CLI ────────────────────────────────────────────────────────
 
-  describe('hook-mode CLI', () => {
+  // Each case execs node (once, or four times): the macOS exec stall can pass the 5 s default.
+  describe('hook-mode CLI', { timeout: 30_000 }, () => {
     const stamp = (): string => path.join(home, '.devflow', CLAUDE_MD_AUDIT_STAMP_FILE);
     const hook = (...roots: string[]) =>
       spawnSync(process.execPath, [SCRIPT, 'hook', home, stamp(), ...roots], { encoding: 'utf-8' });
