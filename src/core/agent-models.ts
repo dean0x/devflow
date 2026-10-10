@@ -764,6 +764,50 @@ export async function loadShippedAgentDefaults(
 }
 
 // ---------------------------------------------------------------------------
+// carryAgentOverrides — the frontmatter a converge keeps
+// ---------------------------------------------------------------------------
+
+/**
+ * D-AGENT-OVERRIDE-CARRY: the text a prompt converge installs for an agent is the
+ * variant `source` wearing the installed copy's `model:` and `effort:`.
+ *
+ * Those two lines are the only frontmatter keys reapplyAgentMapping manages, and
+ * `devflow agents` and the proxy put their values there. A converge that installed
+ * the bare variant would write every overridden agent back to its shipped model
+ * and effort and leave reapplyAgentMapping to restore it: a window with default
+ * models, and a no-op converge that rewrites everything. Carrying the two lines
+ * keeps that window shut, so a copy already holding the right variant and its
+ * overrides compares byte-equal and is not touched.
+ *
+ * The carry is an optimisation, never the authority: reapplyAgentMapping reads
+ * agent-models.json and decides what the installed frontmatter must say. It
+ * agrees with the carry whenever the installed copy was last written by it, and
+ * where they disagree the later reapply wins. Both go through
+ * rewriteAgentFrontmatter, so the model-name charset guard, the first-block scope
+ * and the EOL handling are the ones the reapply uses.
+ *
+ * `source` is returned unchanged when there is nothing safe to carry: either side
+ * has no well-formed frontmatter, the installed copy has no model, its model
+ * fails the model-name charset or its effort is not an EFFORT_LEVELS member. An
+ * installed copy with no `effort:` line carries no effort (a mapping effort of
+ * `inherit` yields exactly that).
+ *
+ * Pure function — no I/O.
+ */
+export function carryAgentOverrides(source: string, installed: string): string {
+  const model = readFrontmatterModel(installed);
+  const effort = readFrontmatterEffort(installed);
+  if (!model.ok || !effort.ok || model.value === '') return source;
+  if (effort.value !== '' && !isEffortLevel(effort.value)) return source;
+
+  const carried = rewriteAgentFrontmatter(source, {
+    model: model.value,
+    effort: effort.value === '' ? null : effort.value,
+  });
+  return carried.ok ? carried.value.content : source;
+}
+
+// ---------------------------------------------------------------------------
 // reapplyAgentMapping — convergence function
 // ---------------------------------------------------------------------------
 

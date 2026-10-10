@@ -49,9 +49,12 @@
  *     When the manifest records another version, the installed files are not the
  *     ones this package would rewrite, so {@link applyLearningToggle} skips the
  *     converge and says to run `devflow init`.
- *   - A toggle rewrites agent files back to their shipped model and effort, so
- *     {@link applyLearningToggle} runs reapplyAgentMapping straight after, and the
- *     overrides `devflow agents` saved in agent-models.json survive.
+ *   - An agent's installed `model:` and `effort:` are carried into the variant before
+ *     the byte comparison (D-AGENT-OVERRIDE-CARRY, see {@link withInstalledState}),
+ *     so the overrides `devflow agents` and the proxy put there are never written
+ *     back to the shipped values and a no-op converge writes no agent.
+ *     {@link applyLearningToggle} still runs reapplyAgentMapping straight after a
+ *     converge that rewrote an agent: it reads agent-models.json and is the authority.
  *
  * D-LEARNING-PRELOAD-MACHINE-ONLY (amended): the apply-decisions preload follows
  * the machine switch only, never a repository's narrowing, because a repository
@@ -72,7 +75,7 @@ import {
   commandSourceDirs,
   learningOffDir,
 } from '../../core/assets.js';
-import { reapplyAgentMapping } from '../../core/agent-models.js';
+import { carryAgentOverrides, reapplyAgentMapping } from '../../core/agent-models.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import type { LearningVariantKind } from '../../core/learning-variants.js';
 import { readManifest } from '../../core/manifest.js';
@@ -208,6 +211,45 @@ async function firstReadable(candidates: readonly string[]): Promise<{ file: str
 }
 
 /**
+ * The bytes a write would install: the variant `source` wearing the state the
+ * installed copy carries, so the byte comparison in {@link convergeFile} compares
+ * variants and nothing else.
+ *
+ * D-LANGUAGE-FOCUS-STAMP, composition: the variant on disk carries the language list the
+ * install stamped (code-review.md), and the source carries the shipped `(none)`. The stamp is
+ * carried from the installed copy into the text this write would install, so the byte
+ * comparison stays honest (a stamped copy of the right variant is `unchanged`, not
+ * rewritten on every run) and a variant switch never loses or changes the list. A copy with
+ * no list to carry (installed before the stamp existed) is stamped from the selection instead.
+ *
+ * D-AGENT-OVERRIDE-CARRY, composition: an installed agent carries the `model:` and `effort:`
+ * that `devflow agents` and the proxy put there, and the source carries the shipped ones.
+ * Carrying them keeps the override window shut (no write ever leaves an agent on its shipped
+ * model while reapplyAgentMapping has yet to restore it) and keeps a no-op converge
+ * write-free, so "N agent(s) rewritten" counts only real variant switches. reapplyAgentMapping
+ * stays the authority: it reads agent-models.json after the converge and the carry only agrees
+ * with it (see carryAgentOverrides).
+ *
+ * Pure.
+ */
+function withInstalledState(
+  kind: LearningVariantKind,
+  fileName: string,
+  source: Buffer,
+  installed: Buffer,
+  focuses: readonly string[],
+): Buffer {
+  if (kind === 'agents') {
+    const sourceText = source.toString('utf-8');
+    const carried = carryAgentOverrides(sourceText, installed.toString('utf-8'));
+    return carried === sourceText ? source : Buffer.from(carried, 'utf-8');
+  }
+  return LANGUAGE_STAMPED_COMMANDS.includes(fileName.replace(/\.md$/, ''))
+    ? Buffer.from(stampForConverge(source.toString('utf-8'), installed.toString('utf-8'), focuses), 'utf-8')
+    : source;
+}
+
+/**
  * Converge ONE installed prompt onto the variant the switch wants.
  *
  * Never throws: every failure is a warning and the outcome `failed`, so the next
@@ -243,15 +285,7 @@ async function convergeFile(
     return 'failed';
   }
 
-  // D-LANGUAGE-FOCUS-STAMP, composition: the variant on disk carries the language list the
-  // install stamped (code-review.md), and the source carries the shipped `(none)`. The stamp is
-  // carried from the installed copy into the text this write would install, so the byte
-  // comparison below stays honest (a stamped copy of the right variant is `unchanged`, not
-  // rewritten on every run) and a variant switch never loses or changes the list. A copy with
-  // no list to carry (installed before the stamp existed) is stamped from the selection instead.
-  const wanted = kind === 'commands' && LANGUAGE_STAMPED_COMMANDS.includes(fileName.replace(/\.md$/, ''))
-    ? Buffer.from(stampForConverge(source.bytes.toString('utf-8'), installed.toString('utf-8'), focuses), 'utf-8')
-    : source.bytes;
+  const wanted = withInstalledState(kind, fileName, source.bytes, installed, focuses);
 
   // Byte-compared: an installed file already holding the target bytes is not
   // rewritten, so a run that changes nothing writes nothing.
@@ -498,10 +532,12 @@ export function learningToggleSkew(installedVersion: string, runningVersion: str
  * converge the installed tree onto the new value, then reapply the saved agent
  * model and effort mapping.
  *
- * The order is load-bearing: converge writes each agent file back to its shipped
- * model and effort, and reapplyAgentMapping puts the `devflow agents` overrides
- * back on top. It runs only when the converge rewrote an agent, and a failure there
- * is a warning like every other failure here.
+ * The converge carries each installed agent's model and effort into the variant it
+ * writes (D-AGENT-OVERRIDE-CARRY), so the overrides are already on the file and this
+ * reapply is the authority behind that carry, not a repair of a default window: it
+ * re-reads agent-models.json and corrects any agent whose installed values had
+ * drifted from it. It runs only when the converge rewrote an agent, and a failure
+ * there is a warning like every other failure here.
  *
  * Never throws.
  */

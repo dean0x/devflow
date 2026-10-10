@@ -28,6 +28,7 @@ import {
   readRunningVersion,
   type ConvergeLearningVariantsResult,
 } from '../../src/targets/claude-code/learning-install.js';
+import { saveAgentMapping } from '../../src/core/agent-models.js';
 import {
   agentSourceDirs,
   commandSourceDirs,
@@ -369,6 +370,93 @@ describe('convergeLearningVariants: installed prompts', () => {
 });
 
 // ---------------------------------------------------------------------------
+// convergeLearningVariants: agent overrides (D-AGENT-OVERRIDE-CARRY)
+// ---------------------------------------------------------------------------
+
+describe('convergeLearningVariants: agent model and effort overrides', () => {
+  /** An agent file: frontmatter with the given model and effort (null: no effort line), then the variant body. */
+  const agentText = (variant: 'ON' | 'OFF', model = 'sonnet', effort: string | null = 'high'): string =>
+    `---\nname: Code\nmodel: ${model}\n${effort === null ? '' : `effort: ${effort}\n`}---\n\nbody ${variant}\n`;
+
+  beforeEach(async () => {
+    await write(path.join(pkg, 'dist', 'agents', 'code.md'), agentText('ON'));
+    await write(path.join(learningOffDir('agents', pkg), 'code.md'), agentText('OFF'));
+  });
+
+  it.each([true, false])('a no-op converge (learning %s) with an override installed writes no agent file and reports none rewritten', async (learning) => {
+    const variant = learning ? 'ON' : 'OFF';
+    await write(installedAgent('code'), agentText(variant, 'opus', 'low'));
+    await converge(learning); // settles the skill, the one other thing a converge installs or removes
+    const before = await fs.stat(installedAgent('code'));
+
+    const result = await converge(learning);
+
+    expect(result.converged).toBe(true);
+    expect(result.agentsRewritten).toEqual([]);
+    expect(result.unchanged).toBe(1);
+    expect(await read(installedAgent('code'))).toBe(agentText(variant, 'opus', 'low'));
+    expect((await fs.stat(installedAgent('code'))).ino, 'an atomic rewrite would have replaced the inode').toBe(before.ino);
+    expect(describeLearningConverge(result, learning), 'a no-op prints nothing').toBeNull();
+    expect(warnings).toEqual([]);
+  });
+
+  it('a real switch writes the other variant with the override already on it: no intermediate default is ever on disk', async () => {
+    await write(installedAgent('code'), agentText('ON', 'opus', 'low'));
+
+    const off = await converge(false);
+
+    // Read straight after the converge, before any reapplyAgentMapping: the shipped sonnet/high never lands.
+    expect(off.agentsRewritten).toEqual(['code.md']);
+    expect(await read(installedAgent('code'))).toBe(agentText('OFF', 'opus', 'low'));
+
+    const back = await converge(true);
+
+    expect(back.agentsRewritten).toEqual(['code.md']);
+    expect(await read(installedAgent('code'))).toBe(agentText('ON', 'opus', 'low'));
+  });
+
+  it('an override that removes the effort ("inherit") survives a real switch and a following no-op', async () => {
+    await write(installedAgent('code'), agentText('ON', 'opus', null));
+
+    await converge(false);
+    expect(await read(installedAgent('code'))).toBe(agentText('OFF', 'opus', null));
+
+    const again = await converge(false);
+    expect(again.agentsRewritten).toEqual([]);
+  });
+
+  it('with no override the behaviour is unchanged: the variant\'s own bytes are installed, then left alone', async () => {
+    await write(installedAgent('code'), agentText('ON'));
+
+    const off = await converge(false);
+
+    expect(off.agentsRewritten).toEqual(['code.md']);
+    expect(await read(installedAgent('code'))).toBe(agentText('OFF'));
+    const again = await converge(false);
+    expect(again.agentsRewritten).toEqual([]);
+    expect(again.unchanged).toBe(1);
+  });
+
+  it('known-bad probe: an installed effort that is not an effort level is not carried, so the variant\'s own effort installs', async () => {
+    await write(installedAgent('code'), agentText('ON', 'opus', 'turbo'));
+
+    await converge(false);
+
+    expect(await read(installedAgent('code'))).toBe(agentText('OFF'));
+  });
+
+  it('commands are never given an agent\'s frontmatter carry', async () => {
+    await write(path.join(pkg, 'dist', 'commands', 'implement.md'), '---\nmodel: sonnet\n---\n\nimplement ON\n');
+    await write(path.join(learningOffDir('commands', pkg), 'implement.md'), '---\nmodel: sonnet\n---\n\nimplement OFF\n');
+    await write(installedCommand('implement'), '---\nmodel: opus\n---\n\nimplement ON\n');
+
+    await converge(false);
+
+    expect(await read(installedCommand('implement'))).toBe('---\nmodel: sonnet\n---\n\nimplement OFF\n');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // convergeLearningVariants: failure handling (AC-146)
 // ---------------------------------------------------------------------------
 
@@ -601,6 +689,56 @@ describe('applyLearningToggle', () => {
     expect(outcome.kind).toBe('converged');
     expect(await exists(installedSkill())).toBe(false);
     expect(await read(installedCommand('implement'))).toBe('implement ON\n');
+  });
+});
+
+describe('applyLearningToggle with a saved agent override (D-AGENT-OVERRIDE-CARRY)', () => {
+  const agent = (variant: 'ON' | 'OFF', model: string, effort: string): string =>
+    `---\nname: Code\nmodel: ${model}\neffort: ${effort}\n---\n\nbody ${variant}\n`;
+
+  beforeEach(async () => {
+    await write(path.join(pkg, 'dist', 'agents', 'code.md'), agent('ON', 'sonnet', 'high'));
+    await write(path.join(learningOffDir('agents', pkg), 'code.md'), agent('OFF', 'sonnet', 'high'));
+    await write(path.join(devflowDir, 'manifest.json'), JSON.stringify({
+      version: '3.3.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { ambient: false, memory: false, hud: false, knowledge: true, learning: true, rules: false },
+      installedAt: '2026-10-10T00:00:00.000Z',
+      updatedAt: '2026-10-10T00:00:00.000Z',
+    }));
+    await saveAgentMapping(devflowDir, { version: 1, agents: { code: { model: 'opus', effort: 'low' } } });
+  });
+
+  const toggle = (learning: boolean) =>
+    applyLearningToggle({ claudeDir, devflowDir, learning, runningVersion: '3.3.0', warn, packageRoot: pkg });
+
+  it('a no-op toggle writes no agent file, reports none rewritten and does not reach for the reapply', async () => {
+    await write(installedAgent('code'), agent('OFF', 'opus', 'low'));
+    const before = await fs.stat(installedAgent('code'));
+
+    const outcome = await toggle(false);
+
+    expect(outcome.kind).toBe('converged');
+    if (outcome.kind !== 'converged') return;
+    expect(outcome.result.agentsRewritten).toEqual([]);
+    expect(outcome.agentMappingReapplied).toBe(false);
+    expect(describeLearningConverge(outcome.result, false)).toBeNull();
+    expect((await fs.stat(installedAgent('code'))).ino).toBe(before.ino);
+    expect(warnings).toEqual([]);
+  });
+
+  it('a real toggle leaves the saved override on the file, and the reapply that follows finds nothing to change', async () => {
+    await write(installedAgent('code'), agent('ON', 'opus', 'low'));
+
+    const outcome = await toggle(false);
+
+    expect(outcome.kind).toBe('converged');
+    if (outcome.kind !== 'converged') return;
+    expect(outcome.result.agentsRewritten).toEqual(['code.md']);
+    expect(outcome.agentMappingReapplied).toBe(true);
+    expect(await read(installedAgent('code'))).toBe(agent('OFF', 'opus', 'low'));
+    expect(warnings).toEqual([]);
   });
 });
 
