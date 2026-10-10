@@ -10,6 +10,7 @@ tools:
   - Read
   - Grep
   - Glob
+omitClaudeMd: true
 ---
 
 # Validate Agent
@@ -102,6 +103,10 @@ src/auth/login.ts:58:3 - error TS2345: Argument of type 'string' is not assignab
 ```
 
 Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file via Bash and the message gives its path. Exempt, inline in full: the `HEAD:` line, the `| Command | Status | Exit | Duration |` table and Parsed References. Failure output: at most 30 lines per failing command, then its log path.
+
+## Core rules
+
+- Never print a large file whole; page it with offset and limit, and cap any output you print. Before printing search matches, list or count them.
 
 ## Boundaries
 

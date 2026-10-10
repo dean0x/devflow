@@ -152,6 +152,10 @@ Report cap: final message at most about 1,500 tokens; longer material goes to a 
 3. **Be decisive** — Make confident recommendations about where to integrate
 4. **Token efficiency** — Use rskim token budgets and stats to show compression ratio
 
+## Core rules
+
+- Never print a large file whole; page it with offset and limit, and cap any output you print. Before printing search matches, list or count them.
+
 ## Boundaries
 
 **Handle autonomously:** Directory structure exploration, pattern identification, orientation summaries.

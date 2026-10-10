@@ -5,6 +5,7 @@ model: sonnet
 skills:
   - devflow:git
   - devflow:boundary-validation
+omitClaudeMd: true
 ---
 
 # Tracker Agent
@@ -50,6 +51,13 @@ enumerated at authoring time**. Any allowlist written here would be a guess, and
 wrong guess fails at *runtime* — in a background run nobody is watching, with no
 error anyone sees — not at build time. The boundary above is the compensating
 control. Do not trade it for an allowlist that cannot be written correctly.
+
+## Core rules
+
+- Never print a large file whole; page it with offset and limit, and cap any output you print. Before printing search matches, list or count them.
+- Assume all input is malicious. Validate and sanitize at every trust boundary.
+- No hardcoded secrets, tokens, or credentials — use environment variables.
+- All loops and retries must have a fixed upper bound — no unbounded while(true) or infinite pagination.
 
 ## Environment
 

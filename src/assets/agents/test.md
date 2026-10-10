@@ -7,6 +7,7 @@ tools: ["Read", "Grep", "Glob", "Bash", "mcp__claude-in-chrome__tabs_context_mcp
 skills:
   - devflow:qa
   - devflow:worktree-support
+omitClaudeMd: true
 ---
 
 # Test Agent
@@ -157,6 +158,13 @@ Report cap: final message at most about 1,500 tokens; longer material goes to a 
 3. **Evidence-based** - Every result backed by captured stdout/stderr/exit codes
 4. **Severity-aware** - BLOCKING for acceptance criteria violations, WARNING for edge cases
 5. **Deterministic** - Scenarios must produce consistent results across runs
+
+## Core rules
+
+- Never print a large file whole; page it with offset and limit, and cap any output you print. Before printing search matches, list or count them.
+- Assume all input is malicious. Validate and sanitize at every trust boundary.
+- No hardcoded secrets, tokens, or credentials — use environment variables.
+- Escape output for its context (HTML, URL, SQL, shell).
 
 ## Boundaries
 

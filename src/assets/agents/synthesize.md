@@ -407,6 +407,12 @@ Report cap: final message at most about 1,500 tokens; longer material goes to a 
 7. **Be decisive** - Make confident synthesis choices
 8. **Never un-mask** - Masked values (`[REDACTED:…]`) from Review agents pass through untouched; if a live unmasked secret arrives in any input, mask it as `{first ≤4 chars}…[REDACTED:{type}]` before it enters any output (review mode)
 
+## Core rules
+
+- Never print a large file whole; page it with offset and limit, and cap any output you print. Before printing search matches, list or count them.
+- Assume all input is malicious. Validate and sanitize at every trust boundary.
+- No hardcoded secrets, tokens, or credentials — use environment variables.
+
 ## Boundaries
 
 **Handle autonomously:**

@@ -13,6 +13,21 @@
  *
  * One table instead of one copy per file is what lets a shipped tier change be
  * an edit to a row, with the frontmatter line it describes, and nothing else.
+ *
+ * D-OMIT-CLAUDEMD-SET: twelve agents ship `omitClaudeMd: true`: Validate, Git, Triage,
+ * Evaluate, Test, Research, Knowledge, Tracker, Learning, Skim, Synthesize and Explore.
+ * Code, Scrutinize and Simplify keep CLAUDE.md, because they write or rewrite code to the
+ * project's conventions; Review, Design and Diagnose are not in the set. A live probe (Claude Code 2.1.296) found that the flag drops BOTH the CLAUDE.md files and
+ * `~/.claude/rules/**`, where devflow installs its rules (`~/.claude/rules/devflow/*.md`):
+ * an agent without the flag carries an `instructions` attachment of CLAUDE.md plus the rule
+ * files, an agent with it carries none. That attachment is about 7K tokens per spawn in this
+ * repository, billed again on every turn of every spawn. The flag therefore costs those
+ * agents the rules, and the in-body CORE_RULES_DIGEST replaces them: each omitting agent
+ * body carries exactly the digest lines its row declares, and
+ * tests/guards/core-rules-digest.test.ts holds the bodies to the rows. An agent whose body
+ * needs more of CLAUDE.md than the digest states reads it itself (Learning does).
+ * Tracker has no AGENT_CONFIG row (EXEMPT_AGENTS), so EXEMPT_AGENT_DIGEST declares its
+ * digest.
  */
 
 import type { EffortLevel } from '../../src/core/agent-models.js';
@@ -25,6 +40,21 @@ import type { EffortLevel } from '../../src/core/agent-models.js';
 export type ToolPolicy =
   | { readonly kind: 'allow'; readonly tools: readonly string[] }
   | { readonly kind: 'deny'; readonly extra: readonly string[] };
+
+/** The id of one line of the core-rules digest. */
+export type DigestKey = 'context-economy' | 'untrusted-input' | 'no-secrets' | 'escape-output' | 'bounded-loops';
+
+/** One digest line and the rule-file phrases it restates. */
+export interface DigestEntry {
+  /** The exact line an agent body carries, as a bullet under its `## Core rules` heading. */
+  readonly line: string;
+  /**
+   * Distinctive phrases of the line, each of which has to appear verbatim in the line and in
+   * a file under src/assets/rules/. A digest line whose phrase leaves the rules is a rule
+   * devflow no longer states, and the guard reports it.
+   */
+  readonly phrases: readonly string[];
+}
 
 /** What one agent's shipped frontmatter must carry. */
 export interface AgentConfigRow {
@@ -42,6 +72,12 @@ export interface AgentConfigRow {
    * pinned by its own guard.
    */
   readonly skills: readonly string[] | null;
+  /**
+   * The CORE_RULES_DIGEST lines the agent's body carries, in body order. Empty exactly when
+   * the agent keeps CLAUDE.md and the rules (`omitClaudeMd` false): an agent that omits them
+   * declares at least the line it relies on most.
+   */
+  readonly digest: readonly DigestKey[];
 }
 
 /**
@@ -76,6 +112,44 @@ export const SHARED_DENYLIST: readonly string[] = [
   'PushNotification',
   'DesignSync',
 ];
+
+/**
+ * D-CORE-RULES-DIGEST: the core rules an agent that omits the rules keeps in its own body.
+ * `omitClaudeMd` drops `~/.claude/rules/devflow/*.md` with CLAUDE.md (D-OMIT-CLAUDEMD-SET),
+ * so a rule an agent still works by is restated in that agent's body. This map is the single
+ * source: a body carries exactly the lines its row declares, byte for byte, as bullets under
+ * one `## Core rules` heading, and every line restates text that is still in a rule file,
+ * so a digest cannot keep a rule devflow dropped or invent one it never had.
+ *
+ * Only core rules (`security`, `context-economy`, `reliability`) have a line. The language
+ * rules (`typescript`, `python`, ...) stay with the agents that write code in them, and the
+ * quiet-form guidance Validate follows is its own Validation Order table.
+ */
+export const CORE_RULES_DIGEST: Readonly<Record<DigestKey, DigestEntry>> = {
+  'context-economy': {
+    line: 'Never print a large file whole; page it with offset and limit, and cap any output you print. Before printing search matches, list or count them.',
+    phrases: [
+      'Never print a large file whole; page it with offset and limit, and cap any output you print',
+      'Before printing search matches, list or count them',
+    ],
+  },
+  'untrusted-input': {
+    line: 'Assume all input is malicious. Validate and sanitize at every trust boundary.',
+    phrases: ['Assume all input is malicious', 'Validate and sanitize at every trust boundary'],
+  },
+  'no-secrets': {
+    line: 'No hardcoded secrets, tokens, or credentials — use environment variables.',
+    phrases: ['No hardcoded secrets, tokens, or credentials — use environment variables'],
+  },
+  'escape-output': {
+    line: 'Escape output for its context (HTML, URL, SQL, shell).',
+    phrases: ['Escape output for its context (HTML, URL, SQL, shell)'],
+  },
+  'bounded-loops': {
+    line: 'All loops and retries must have a fixed upper bound — no unbounded while(true) or infinite pagination.',
+    phrases: ['All loops and retries must have a fixed upper bound — no unbounded while(true) or infinite pagination'],
+  },
+};
 
 /** The tools Test keeps: its browser tools are part of its allowlist, unchanged. */
 const TEST_TOOLS: readonly string[] = [
@@ -126,6 +200,7 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     policy: { kind: 'deny', extra: [] },
     omitClaudeMd: false,
     skills: null,
+    digest: [],
   },
   scrutinize: {
     model: 'opus',
@@ -133,6 +208,7 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     policy: { kind: 'deny', extra: ['Skill'] },
     omitClaudeMd: false,
     skills: ['quality-gates', 'software-design', 'worktree-support', 'apply-decisions', 'apply-feature-knowledge'],
+    digest: [],
   },
   simplify: {
     model: 'sonnet',
@@ -140,13 +216,15 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     policy: { kind: 'deny', extra: ['Skill'] },
     omitClaudeMd: false,
     skills: ['software-design', 'worktree-support'],
+    digest: [],
   },
   research: {
     model: 'opus',
     effort: 'medium',
     policy: { kind: 'deny', extra: [] },
-    omitClaudeMd: false,
+    omitClaudeMd: true,
     skills: ['worktree-support', 'apply-decisions', 'apply-feature-knowledge'],
+    digest: ['context-economy', 'untrusted-input'],
   },
   /**
    * D-REVIEW-SHIPPED-ROW: Review ships opus at high effort. An A/B run of the
@@ -160,13 +238,15 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     policy: { kind: 'allow', tools: ['Read', 'Grep', 'Glob', 'Bash', 'Write', 'Edit', 'Skill', 'StructuredOutput'] },
     omitClaudeMd: false,
     skills: ['review-methodology', 'worktree-support', 'apply-decisions', 'apply-feature-knowledge'],
+    digest: [],
   },
   triage: {
     model: 'opus',
     effort: 'high',
     policy: { kind: 'allow', tools: ['Read', 'Grep', 'Glob', 'Bash'] },
-    omitClaudeMd: false,
+    omitClaudeMd: true,
     skills: ['security', 'worktree-support', 'apply-decisions', 'apply-feature-knowledge'],
+    digest: ['context-economy', 'untrusted-input'],
   },
   /**
    * D-EVALUATE-SHIPPED-ROW: Evaluate ships sonnet at medium effort. Its Opus tier
@@ -181,8 +261,9 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     model: 'sonnet',
     effort: 'medium',
     policy: { kind: 'allow', tools: ['Read', 'Grep', 'Glob', 'Bash', 'Write'] },
-    omitClaudeMd: false,
+    omitClaudeMd: true,
     skills: ['worktree-support', 'apply-feature-knowledge'],
+    digest: ['context-economy', 'untrusted-input'],
   },
   design: {
     model: 'opus',
@@ -190,6 +271,7 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     policy: { kind: 'allow', tools: ['Read', 'Grep', 'Glob', 'Bash', 'Write', 'Edit', 'Skill', 'StructuredOutput'] },
     omitClaudeMd: false,
     skills: ['worktree-support', 'apply-decisions', 'gap-analysis', 'design-review', 'apply-feature-knowledge'],
+    digest: [],
   },
   diagnose: {
     model: 'opus',
@@ -197,48 +279,56 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     policy: { kind: 'allow', tools: ['Read', 'Grep', 'Glob', 'Bash', 'Write', 'Skill'] },
     omitClaudeMd: false,
     skills: ['worktree-support', 'apply-decisions', 'apply-feature-knowledge'],
+    digest: [],
   },
   test: {
     model: 'sonnet',
     effort: 'medium',
     policy: { kind: 'allow', tools: TEST_TOOLS },
-    omitClaudeMd: false,
+    omitClaudeMd: true,
     skills: ['qa', 'worktree-support'],
+    digest: ['context-economy', 'untrusted-input', 'no-secrets', 'escape-output'],
   },
   knowledge: {
     model: 'sonnet',
     effort: 'medium',
     policy: { kind: 'allow', tools: ['Read', 'Grep', 'Glob', 'Write', 'Edit', 'Bash'] },
-    omitClaudeMd: false,
+    omitClaudeMd: true,
     skills: ['feature-knowledge', 'apply-feature-knowledge', 'apply-decisions', 'worktree-support'],
+    digest: ['context-economy', 'untrusted-input', 'no-secrets'],
   },
   /**
-   * D-LEARNING-SHIPPED-ROW: Learning keeps the model, the absent effort and the
-   * CLAUDE.md context that main ships. An A/B run over frozen batches decided it:
-   * the cheaper candidate (sonnet at high effort) fell clearly short of the capture
-   * bar, and the opus-at-medium fallback came in just under it. Series 2's other
-   * changes stay: no preload and the same Read/Bash/Glob/Grep tools.
+   * D-LEARNING-SHIPPED-ROW: Learning keeps the model and the absent effort that main ships,
+   * and omits CLAUDE.md and the rules. An A/B run over frozen batches decided the tier: the
+   * cheaper candidate (sonnet at high effort) fell clearly short of the capture bar, and the
+   * opus-at-medium fallback came in just under it. Series 2's other changes stay: no preload
+   * and the same Read/Bash/Glob/Grep tools.
    *
-   * Learning does not omit CLAUDE.md. Its Encoded-retirement check reads the root
-   * CLAUDE.md for the rule that already states a lesson, and the A/B showed that
-   * without that context Learning stops retiring entries as Encoded. A change of
-   * tier is an edit to this row and to the `model:` and `effort:` lines of
-   * learning.md, and the default model in src/core/learning-tuning-config.ts,
-   * which tests/decisions/config.test.ts holds equal to this row.
+   * The same A/B showed that without the injected CLAUDE.md context Learning stops retiring
+   * entries as Encoded, because its Encoded check compares a lesson against the rule that
+   * already states it. The explicit Read replaces that context: Learning reads the root
+   * CLAUDE.md and the installed rule files itself, once per run, before its first
+   * already-encoded comparison (the Inputs section of learning.md; tests/learning-agent.test.ts
+   * holds the step and its position). A change of tier is an edit to this row and to the
+   * `model:` and `effort:` lines of learning.md, and the default model in
+   * src/core/learning-tuning-config.ts, which tests/decisions/config.test.ts holds equal to
+   * this row.
    */
   learning: {
     model: 'opus',
     effort: null,
     policy: { kind: 'allow', tools: ['Read', 'Bash', 'Glob', 'Grep'] },
-    omitClaudeMd: false,
+    omitClaudeMd: true,
     skills: [],
+    digest: ['context-economy', 'untrusted-input'],
   },
   validate: {
     model: 'haiku',
     effort: 'medium',
     policy: { kind: 'allow', tools: ['Bash', 'Read', 'Grep', 'Glob'] },
-    omitClaudeMd: false,
+    omitClaudeMd: true,
     skills: ['worktree-support'],
+    digest: ['context-economy'],
   },
   synthesize: {
     model: 'haiku',
@@ -246,6 +336,7 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     policy: { kind: 'allow', tools: ['Read', 'Write', 'Edit', 'Bash', 'Grep', 'Glob', 'StructuredOutput'] },
     omitClaudeMd: true,
     skills: ['review-methodology', 'docs-framework', 'worktree-support'],
+    digest: ['context-economy', 'untrusted-input', 'no-secrets'],
   },
   skim: {
     model: 'haiku',
@@ -253,6 +344,7 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     policy: { kind: 'allow', tools: ['Bash', 'Read'] },
     omitClaudeMd: true,
     skills: ['worktree-support'],
+    digest: ['context-economy'],
   },
   /**
    * D-EXPLORE-ROW: Explore is devflow's override of the Explore agent built into
@@ -273,6 +365,7 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     policy: { kind: 'allow', tools: ['Read', 'Bash'] },
     omitClaudeMd: true,
     skills: [],
+    digest: ['context-economy'],
   },
   /**
    * D-GIT-ROW: Git keeps haiku and gains medium effort and the shared denylist, the
@@ -285,8 +378,9 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     model: 'haiku',
     effort: 'medium',
     policy: { kind: 'deny', extra: [] },
-    omitClaudeMd: false,
+    omitClaudeMd: true,
     skills: ['git', 'worktree-support'],
+    digest: ['context-economy', 'untrusted-input', 'no-secrets'],
   },
 };
 
@@ -298,6 +392,40 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
 export const EXEMPT_AGENTS: Readonly<Record<string, string>> = {
   tracker: 'A deliberate constant: it declares no tool list, and its model is pinned equal to the hook that spawns it.',
 };
+
+/**
+ * The digest of an exempt agent that omits CLAUDE.md and the rules (D-OMIT-CLAUDEMD-SET). An
+ * exempt agent has no AGENT_CONFIG row to carry `omitClaudeMd` and `digest`, and the
+ * tests/guards/core-rules-digest.test.ts guard reads this map for it. Tracker works with the
+ * issue tracker's text, which it treats as untrusted, writes one scrubbed file, and runs a
+ * bounded scan.
+ */
+export const EXEMPT_AGENT_DIGEST: Readonly<Record<string, readonly DigestKey[]>> = {
+  tracker: ['context-economy', 'untrusted-input', 'no-secrets', 'bounded-loops'],
+};
+
+/**
+ * The agents that ship `omitClaudeMd: true`, each with the digest lines its body carries.
+ * Derived, never listed: the table rows that omit CLAUDE.md, plus the exempt agents that
+ * declare a digest, so a new omitting row is covered without an edit here.
+ */
+export function deriveOmitDigests(
+  table: Readonly<Record<string, AgentConfigRow>>,
+  exemptDigests: Readonly<Record<string, readonly DigestKey[]>>,
+): ReadonlyMap<string, readonly DigestKey[]> {
+  const out = new Map<string, readonly DigestKey[]>();
+  for (const [name, row] of Object.entries(table)) {
+    if (row.omitClaudeMd) out.set(name, row.digest);
+  }
+  for (const [name, digest] of Object.entries(exemptDigests)) out.set(name, digest);
+  return out;
+}
+
+/** The live omitting set: AGENT_CONFIG and EXEMPT_AGENT_DIGEST through deriveOmitDigests. */
+export const OMIT_CLAUDE_MD_DIGESTS: ReadonlyMap<string, readonly DigestKey[]> = deriveOmitDigests(
+  AGENT_CONFIG,
+  EXEMPT_AGENT_DIGEST,
+);
 
 /**
  * D-DIAGNOSE-FOCUS-SKILLS: the pattern skills the Diagnose agent loads on demand

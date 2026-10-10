@@ -41,6 +41,10 @@ Match effort to the breadth the caller names; with none, use medium.
 - Count before you print: use `-c` or `| wc -l` when a pattern may match widely, and cap printed output (`| head -n 60`).
 - Read with `offset` and `limit` once a search names the spot. Read a whole file only when it is short and the question needs all of it.
 
+## Core rules
+
+- Never print a large file whole; page it with offset and limit, and cap any output you print. Before printing search matches, list or count them.
+
 ## Output
 
 Reply with a regular message. Never write the report to a file.

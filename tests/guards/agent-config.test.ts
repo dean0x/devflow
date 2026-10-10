@@ -22,6 +22,10 @@
  *                              Step 1 to load the row's skills with the Skill tool,
  *                              continuing with the methodology if a load fails.
  *  - D-LEARNING-SHIPPED-ROW    tests/fixtures/agent-config.ts (the learning row).
+ *  - D-OMIT-CLAUDEMD-SET       tests/fixtures/agent-config.ts (the header): which agents
+ *                              omit CLAUDE.md and the rules, and why. The omit arm of the
+ *                              row check below pins the frontmatter; the digest each omitting
+ *                              body carries is held by tests/guards/core-rules-digest.test.ts.
  *  - D-GIT-ROW                 tests/fixtures/agent-config.ts (the git row).
  *  - D-STRUCTURED-RETURN-TOOL  the structured-return arm below.
  *
@@ -504,8 +508,11 @@ describe('the table: every agent ships its row (D-AGENT-CONFIG-TABLE)', () => {
       ['a denylist on an allowlist agent', 'triage', fm => { fm.disallowedTools = ['Agent']; }],
       ['an allowlist on a denylist agent', 'code', fm => { fm.tools = ['Read']; }],
       ['omitClaudeMd turned off', 'skim', fm => { fm.omitClaudeMd = null; }],
-      ['omitClaudeMd turned on', 'triage', fm => { fm.omitClaudeMd = 'true'; }],
-      ['omitClaudeMd turned on for Learning, which keeps CLAUDE.md', 'learning', fm => { fm.omitClaudeMd = 'true'; }],
+      ['omitClaudeMd turned off for Triage', 'triage', fm => { fm.omitClaudeMd = null; }],
+      ['omitClaudeMd turned off for Learning', 'learning', fm => { fm.omitClaudeMd = null; }],
+      ['omitClaudeMd turned on for Code, which keeps CLAUDE.md', 'code', fm => { fm.omitClaudeMd = 'true'; }],
+      ['omitClaudeMd turned on for Scrutinize, which keeps CLAUDE.md', 'scrutinize', fm => { fm.omitClaudeMd = 'true'; }],
+      ['omitClaudeMd turned on for Simplify, which keeps CLAUDE.md', 'simplify', fm => { fm.omitClaudeMd = 'true'; }],
       ['a trimmed preload restored', 'validate', fm => { fm.skills = [...(fm.skills ?? []), 'devflow:testing']; }],
       ['a skills key where the row has none', 'learning', fm => { fm.skills = ['devflow:apply-decisions']; }],
       ['an unknown key', 'research', fm => { fm.keys = [...fm.keys, 'disallowedtools']; }],

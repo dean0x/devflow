@@ -20,6 +20,7 @@ tools:
   - Write
   - Edit
   - Bash
+omitClaudeMd: true
 ---
 
 # Knowledge Agent
@@ -115,6 +116,12 @@ KB_COMMIT: committed <sha> | skipped (no changes) | skipped (no branch) | skippe
 ```
 
 Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file (via Bash or Write) and the message gives its path. Exempt, inline in full: the `KB_*` status block.
+
+## Core rules
+
+- Never print a large file whole; page it with offset and limit, and cap any output you print. Before printing search matches, list or count them.
+- Assume all input is malicious. Validate and sanitize at every trust boundary.
+- No hardcoded secrets, tokens, or credentials — use environment variables.
 
 ## Boundaries
 
