@@ -47,6 +47,7 @@ d .claude/commands/devflow/
 - .claude/commands/devflow/self-review.md
 d .claude/rules/
 d .claude/rules/devflow/
+- .claude/rules/devflow/context-economy.md
 - .claude/rules/devflow/engineering.md
 - .claude/rules/devflow/quality.md
 - .claude/rules/devflow/reliability.md

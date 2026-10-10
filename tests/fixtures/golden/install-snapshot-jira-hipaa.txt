@@ -48,6 +48,7 @@ d .claude/commands/devflow/
 d .claude/rules/
 d .claude/rules/devflow/
 - .claude/rules/devflow/compliance.md
+- .claude/rules/devflow/context-economy.md
 - .claude/rules/devflow/engineering.md
 - .claude/rules/devflow/quality.md
 - .claude/rules/devflow/reliability.md
