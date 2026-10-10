@@ -571,9 +571,6 @@ TASK_DESCRIPTION: Create the unified PR for the parallel implementation
 BASE_BRANCH: {base branch}
 CREATE_PR: true
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
-<!-- learning:on -->
-DECISIONS_CONTEXT: {decisions_context}
-<!-- learning:end -->
 ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
 ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
 PR_EXCEPTIONS: {the ## Evidence Exceptions section of {worktree}/.devflow/docs/handoff-{branch_slug}.md verbatim, or (none)}
