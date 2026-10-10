@@ -633,7 +633,7 @@ describe('session-start-context: Sections 5 and 6', () => {
       expect(nodeAuditRuns(farm)).toEqual([]);
     }, NODE_RUN_MS);
 
-    it.skipIf(!HAS_JQ)('a link planted at the stamp path WHILE the audit runs is still refused at the write (PF-085)', () => {
+    it.skipIf(!HAS_JQ)('a link planted at the stamp path WHILE the audit runs is still refused at the write', () => {
       seedFlaggedGlobal();
       const victim = write(path.join(tmp, 'victim.txt'), 'precious\n');
       // The node wrapper runs the real audit, then plants the link: the window between the fast-path check and the write.
@@ -672,7 +672,7 @@ describe('session-start-context: Sections 5 and 6', () => {
       expect(readStamp().split('\n')[0]).toBe('V 1');
     }, NODE_RUN_MS * 2);
 
-    it.skipIf(!HAS_JQ)('is written owner-only whatever the runner\'s umask, through a temp file that does not linger (PF-087)', () => {
+    it.skipIf(!HAS_JQ)('is written owner-only whatever the runner\'s umask, through a temp file that does not linger', () => {
       const previous = process.umask(0o022);
       try {
         seedFlaggedGlobal();
@@ -775,7 +775,7 @@ describe('session-start-context: Sections 5 and 6', () => {
       expect(text.slice(from, to)).not.toMatch(/^\s*exit\b/m);
     });
 
-    it('every audit helper ends in an explicit return (PF-078)', () => {
+    it('every audit helper ends in an explicit return, so a caller under errexit survives the normal path', () => {
       const text = source();
       for (const fn of ['_sc_audit_stamp_blocked', '_sc_audit_stamp_fresh', '_sc_audit_shell_stamp', '_sc_audit_no_root', '_sc_audit_run', '_sc_audit_record']) {
         const start = text.indexOf(`${fn}() {`);

@@ -579,7 +579,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
   {
     // D-AUTO-COMPACT-WINDOW-OPT-IN: opt-in and unset by default (undefined → manifest null →
     // key never written). devflow writes CLAUDE_CODE_AUTO_COMPACT_WINDOW only when the user sets
-    // this flag. ADR-020 (init applies a seeded record unseen) is why the default is neutral
+    // this flag. Init applies a seeded record without asking, which is why the default is neutral
     // and `recommended` stays false: a smaller window compacts sooner, and a compaction
     // mid-command is exactly what the SessionStart resume directive (D-COMPACT-RESUME-DIRECTIVE)
     // recovers from, so the flag is not recommended until a forced mid-/implement /compact has

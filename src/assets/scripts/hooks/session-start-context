@@ -914,7 +914,8 @@ _sc_audit_stamp_blocked() {
 # Sets _SC_AUDIT_OLD_STAMP to the stamp text (empty when absent, over 256 KiB or
 # holding a NUL: `read -d '' -n N` succeeds only when it stops short of the end of
 # the file, which is a stamp the shell cannot vouch for). Ends in an explicit return
-# so a caller running under set -e would not die on the normal path (PF-078).
+# so a caller running under set -e would not die on the normal path: a function's last
+# status is the status of its call, and under errexit a non-zero one is fatal.
 _sc_audit_stamp_fresh() {
   local line="" have="" want="" root="" path=""
   _SC_AUDIT_OLD_STAMP=""
@@ -1031,9 +1032,11 @@ _sc_audit_run() {
 }
 
 # _sc_audit_record — write AUDIT_STAMP_NEXT, after the output has been emitted. A
-# sibling temp file (owner-only: the umask is set before the copy exists, PF-087) is
+# sibling temp file (owner-only: the umask is set before the copy exists, because a rename
+# installs the copy's mode and not the replaced file's) is
 # renamed over the stamp; nothing stands at either name that is a link or not a
-# regular file (PF-085), and a failed write leaves the old stamp. Never fails the hook.
+# regular file (noclobber alone would still open a FIFO, and mv onto a linked directory
+# moves into it), and a failed write leaves the old stamp. Never fails the hook.
 _sc_audit_record() {
   local tmp="${AUDIT_STAMP_FILE}.tmp.$$"
   [ -n "$AUDIT_STAMP_NEXT" ] || return 0

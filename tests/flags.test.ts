@@ -1034,7 +1034,7 @@ describe('bash-max-timeout-ms flag', () => {
 
 /**
  * D-AUTO-COMPACT-WINDOW-OPT-IN (AC-406). The flag is opt-in: unset by default, so a
- * fresh install and a re-init (ADR-020: init applies the seeded record unseen) never
+ * fresh install and a re-init (init applies the seeded record without asking) never
  * write CLAUDE_CODE_AUTO_COMPACT_WINDOW, and it is not recommended until a forced
  * mid-/implement compaction has been seen to resume correctly.
  */

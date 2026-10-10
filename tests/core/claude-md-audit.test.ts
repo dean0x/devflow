@@ -619,7 +619,7 @@ describe('claude-md-audit', () => {
     it('a chain finding hides an undisplayable root and an undisplayable largest member alike', () => {
       const line = A.formatFinding({
         kind: 'chain', path: '/p/\u001b[2Jroot', total: 50000, mtime: 1, truncated: false,
-        largest: { path: '/p/‮big.md', size: 20000 },
+        largest: { path: '/p/\u202ebig.md', size: 20000 },
       });
       expect(line).toBe(
         'CLAUDE.md import audit: <path not shown> loads 50,000 bytes through its imports (over the 40,000-byte chain threshold); the largest file is <path not shown> at 20,000 bytes.',
@@ -645,7 +645,7 @@ describe('claude-md-audit', () => {
 
     it('isDisplayable admits printable ASCII and nothing else', () => {
       expect(A.isDisplayable('/a b/c-d_e.md')).toBe(true);
-      for (const bad of ['', 'a\nb', 'a\u001bb', 'café', 'a‮b', 'a\u007fb', 'a\tb']) {
+      for (const bad of ['', 'a\nb', 'a\u001bb', 'caf\u00e9', 'a\u202eb', 'a\u007fb', 'a\tb']) {
         expect(A.isDisplayable(bad), JSON.stringify(bad)).toBe(false);
       }
     });
