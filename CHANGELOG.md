@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Learning off means the decisions text is absent, not just gated** ([#426](https://github.com/dean0x/devflow/issues/426)). The build now writes a learning-off variant of every command and agent that carries decisions text, and `devflow init` installs the variant for the machine's learning switch: a learning-off machine gets prompts with no decisions index, no `DECISIONS_CONTEXT` pass and no `apply-decisions` preload, and does not install `devflow:apply-decisions`. `devflow learning --enable` and `--disable` converge what is already installed (only files already on disk, atomically, keeping your `devflow agents` overrides) and skip with a "run `devflow init`" message if the installed version differs. The settings line is now resolved once per command, decisions loads and passes are gated on learning and reach only the agents whose contract declares them, the Code agent no longer reads the decisions index itself, and `release` and the nine agents that carry the text (`code`, `design`, `diagnose`, `knowledge`, `research`, `review`, `scrutinize`, `triage`, `skim`) are now MDS sources. The orchestrator charter drops its decisions bullet (2,709 to 2,514 characters); the rule is now one line in the session-start decisions block, after its `Index:` line.
+
 ---
 
 ## [3.3.0] - 2026-10-09

@@ -44,8 +44,8 @@ Registry-driven CLI tool with 21 plugins (12 core + 9 optional). Plugins are ent
 
 ```bash
 # 1. Edit source files
-vim src/assets/commands/code-review.mds     # Commands (MDS sources; .md for static commands)
-vim src/assets/agents/code.md              # Agents (hand-authored)
+vim src/assets/commands/code-review.mds     # Commands (MDS sources)
+vim src/assets/agents/evaluate.md          # Agents (hand-authored)
 vim src/assets/agents/git.mds              # Agents (MDS generator host → dist/agents/git.md)
 vim src/assets/mds/tracker/_github.mds      # Reference modules (→ dist/skills/git/references/; also mds/git/_pr.mds)
 vim src/assets/skills/security/SKILL.md     # Skills
@@ -89,7 +89,7 @@ The host and partial rosters are named in `tests/fixtures/mds-manifest.ts` rathe
 ### Commands
 
 - Commands are orchestration-only — spawn agents, never do agent work in main session
-- Author as `.mds` sources in `src/assets/commands/` (or static `.md` for commands with no MDS partials); compiled output lands in `dist/commands/`
+- Author as `.mds` sources in `src/assets/commands/`; compiled output lands in `dist/commands/`. A host or partial that carries learning arms also builds a learning-off variant under `dist/learning-off/`, which a learning-off machine installs and `devflow learning --enable/--disable` converges
 - Register new plugins in `DEVFLOW_PLUGINS` in `src/core/plugins.ts`
 
 ### Commits

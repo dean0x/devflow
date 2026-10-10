@@ -52,8 +52,8 @@ devflow/
 │       │   └── ...
 │       ├── agents/                   # 17 agents — hand-authored .md, plus MDS generator hosts (.mds → dist/agents/)
 │       │   ├── git.mds                 # MDS generator host → dist/agents/git.md
+│       │   ├── code.mds                # MDS generator host → dist/agents/code.md (nine agents are hosts besides git)
 │       │   ├── synthesize.md
-│       │   ├── code.md
 │       │   └── ...
 │       ├── rules/                    # 13 rules (flat .md files)
 │       │   ├── engineering.md
@@ -61,7 +61,6 @@ devflow/
 │       │   └── ...
 │       ├── commands/                 # Command sources
 │       │   ├── *.mds                 # MDS command hosts (compiled to dist/commands/ by build:mds)
-│       │   ├── *.md                  # 1 static command file
 │       │   └── _partials/            # MDS partials (no output-dir:, never compiled directly)
 │       ├── mds/                      # MDS reference modules (compiled to dist/skills/git/references/ by build:mds)
 │       │   ├── tracker/_github.mds     # One file per GitHub tracker operation
@@ -177,14 +176,15 @@ Assets live once in `src/assets/` and install to the user's `~/.claude/` — no 
 | Agents (hand-authored) | `src/assets/agents/{name}.md` | `~/.claude/agents/devflow/{name}.md` | None — edit → init |
 | Agents (generator host) | `src/assets/agents/{name}.mds` → `dist/agents/{name}.md` | `~/.claude/agents/devflow/{name}.md` | `npm run build:mds` |
 | Rules | `src/assets/rules/{name}.md` | `~/.claude/rules/devflow/{name}.md` | None — edit → init |
-| Commands | `dist/commands/{name}.md` | `~/.claude/commands/devflow/{name}.md` | `npm run build:mds` |
+| Commands | `src/assets/commands/{name}.mds` → `dist/commands/{name}.md` | `~/.claude/commands/devflow/{name}.md` | `npm run build:mds` |
+| Learning-off variants | `dist/learning-off/{commands,agents}/{name}.md`, built only for a host or partial with a learning arm | `~/.claude/{commands,agents}/devflow/{name}.md`, in place of the file above, on a learning-off machine | `npm run build:mds` |
 | Skill references (generated) | `src/assets/mds/**/*.mds` → `dist/skills/git/references/**` | `~/.claude/skills/devflow:git/references/**` | `npm run build:mds` |
 | Scripts (root) | `src/assets/scripts/*.cjs`, `lib/`, `hud.sh` | `~/.devflow/scripts/` | None — edit → init |
 | Scripts (hooks) | `src/assets/scripts/hooks/` | `~/.devflow/scripts/hooks/` | None — edit → init |
 
 ### Packaging
 
-`npm pack` ships `dist/` (compiled JS, commands, compiled agents, and generated skill references) and `src/assets/` (skills, agents — hand-authored `.md` and `.mds` generator hosts alike — rules, scripts). No `plugins/` or `shared/` directories are included.
+`npm pack` ships `dist/` (compiled JS, commands, compiled agents, learning-off variants, and generated skill references) and `src/assets/` (skills, agents — hand-authored `.md` and `.mds` generator hosts alike — rules, scripts). No `plugins/` or `shared/` directories are included.
 
 ### Adding a Skill to a Plugin
 
@@ -201,9 +201,11 @@ Assets live once in `src/assets/` and install to the user's `~/.claude/` — no 
 
 ### Agents
 
-All 17 agents (`git`, `synthesize`, `skim`, `simplify`, `code`, `review`, `triage`, `evaluate`, `test`, `scrutinize`, `validate`, `design`, `knowledge`, `research`, `diagnose`, `learning`, `tracker`) are shared, and every source lives in `src/assets/agents/`. Sixteen are hand-authored `.md` files that install verbatim. `git` is an `.mds` generator host, compiled to `dist/agents/git.md` by `npm run build:mds`.
+All 17 agents (`git`, `synthesize`, `skim`, `simplify`, `code`, `review`, `triage`, `evaluate`, `test`, `scrutinize`, `validate`, `design`, `knowledge`, `research`, `diagnose`, `learning`, `tracker`) are shared, and every source lives in `src/assets/agents/`. Seven (`synthesize`, `simplify`, `evaluate`, `test`, `validate`, `learning`, `tracker`) are hand-authored `.md` files that install verbatim. The other ten (`git`, `code`, `design`, `diagnose`, `knowledge`, `research`, `review`, `scrutinize`, `triage`, `skim`) are `.mds` generator hosts, compiled to `dist/agents/{name}.md` by `npm run build:mds`.
 
 The installer resolves each declared agent over `agentSourceDirs()` in `src/core/assets.ts` — `dist/agents/`, then `src/assets/agents/` — and copies the first hit, so a compiled artifact supersedes a hand-authored file of the same name. When neither directory has the agent, the install throws naming both candidate paths and `npm run build:mds` rather than silently skipping it. `npm run build:cli` alone (TypeScript) does not produce installable agents; `npm run build` runs both steps.
+
+The learning switch (`features.learning` in `~/.devflow/manifest.json`) picks the variant. With learning off, the installer reads `dist/learning-off/{commands,agents}/` ahead of the normal order and leaves `devflow:apply-decisions` out. `devflow init` passes its settled value, and `devflow learning --enable/--disable` converges what is already installed: it rewrites only the commands and agents already on disk (a `--plugin` install gains nothing), compares bytes and writes atomically, installs or removes the skill, reapplies the `devflow agents` mapping, and skips with a "run `devflow init`" message when the manifest version differs from the running one. A failure only warns. A repository that narrows learning off changes nothing installed; the learning-on prompts gate that at run time.
 
 ## Settings
 

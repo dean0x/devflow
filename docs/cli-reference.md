@@ -19,7 +19,7 @@ Use `--recommended` or `--advanced` flags for non-interactive setup.
 | `--plugin <names>` | Comma-separated plugin names (e.g., `implement,code-review`) |
 | `--ambient` / `--no-ambient` | Enable/disable ambient mode — orchestrator charter + plan handoff (default: on) |
 | `--memory` / `--no-memory` | Enable/disable working memory (default: on) |
-| `--learning` / `--no-learning` | Enable/disable learning agent (default: on) |
+| `--learning` / `--no-learning` | Enable/disable learning agent (default: on); with learning off, init installs the learning-off prompts and not `devflow:apply-decisions` |
 | `--knowledge` / `--no-knowledge` | Enable/disable feature knowledge (default: on) |
 | `--rules` / `--no-rules` | Enable/disable rules (default: on) |
 | `--hud` / `--no-hud` | Enable/disable HUD status line (default: on) |
@@ -91,8 +91,8 @@ npx devflow-kit ambient --status     # Show current status (partial state detect
 ## Learning
 
 ```bash
-npx devflow-kit learning --enable         # Enable learning (decision + pitfall detection)
-npx devflow-kit learning --disable        # Disable learning (drains the learning queue)
+npx devflow-kit learning --enable         # Enable learning (decision + pitfall detection; installs the learning-on prompts and the apply-decisions skill)
+npx devflow-kit learning --disable        # Disable learning (drains the learning queue; installs the learning-off prompts and removes the skill)
 npx devflow-kit learning --status         # Show status and entry counts
 npx devflow-kit learning --list           # List entries, inactive entries with their notes, and observations
 npx devflow-kit learning --show <id>      # Print one entry (ADR-NNN or PF-NNN) or observation as JSON
