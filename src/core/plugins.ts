@@ -215,15 +215,20 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-debug',
     description: 'Debugging workflows with competing hypothesis investigation via parallel subagents',
     commands: ['/debug'],
-    agents: ['git', 'synthesize', 'simplify', 'knowledge', 'explore'],
+    agents: ['git', 'synthesize', 'simplify', 'knowledge', 'explore', 'code'],
     skills: ['git', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
+    // D-DEBUG-FIX-VIA-CODE: the fix is a Code spawn, and Code names boundary-validation, whose
+    // detection reference names security. security names review-methodology, which names the
+    // pattern skills below it, so the closure installs that chain whole.
     requires: [
       'apply-decisions',
       'architecture',
+      'boundary-validation',
       'complexity',
       'consistency',
       'database',
       'dependencies',
+      'dependency-research',
       'documentation',
       'patterns',
       'performance',

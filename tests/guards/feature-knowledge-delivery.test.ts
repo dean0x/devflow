@@ -36,7 +36,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync } from 'fs'
 import * as path from 'path'
 
-import { ROOT, requireDistFile, requireDistFiles, resolveAgentSource, resolveLearningOffSource } from '../helpers.js'
+import { ROOT, collectCodeSpawnSites, requireDistFile, requireDistFiles, resolveAgentSource, resolveLearningOffSource } from '../helpers.js'
 
 const LOAD_HEADING = '### Load Feature Knowledge'
 
@@ -430,6 +430,21 @@ describe('Validate, Git and Test take no input, and explore, debug and the hooks
     const scripts = readdirSync(hooks, { withFileTypes: true }).filter(e => e.isFile()).map(e => e.name)
     expect(scripts.length, 'nothing scanned').toBeGreaterThan(10)
     expect(scripts.filter(f => readFileSync(path.join(hooks, f), 'utf-8').includes('FEATURE_KNOWLEDGE'))).toEqual([])
+  })
+
+  it('debug hands its fix to Code with the literal (none) in both variants, so it has no TIER_TABLE row (D-DEBUG-FIX-VIA-CODE)', () => {
+    // Debug loads no feature knowledge, so its one Code spawn has no variable to name. The tier collector
+    // reads `{variable}` sites only, and the literal is what keeps debug out of the table.
+    for (const [variant, text] of [
+      ['learning-on', requireDistFile('debug.md')],
+      ['learning-off', resolveLearningOffSource('commands', 'debug') ?? ''],
+    ] as const) {
+      const sites = collectCodeSpawnSites('debug.md', text)
+      expect(sites, `${variant}: debug spawns Code once`).toHaveLength(1)
+      expect(sites[0].payload, variant).toContain('FEATURE_KNOWLEDGE: (none)')
+      expect(collectFkSites(text), `${variant}: no variable site`).toEqual([])
+    }
+    expect(TIER_TABLE.debug).toBeUndefined()
   })
 
   it('known-bad probe: a Validate body that declares the input is reported by the same check', () => {

@@ -40,6 +40,7 @@ const PREAMBLE_PATH = path.join(ROOT, 'src', 'assets', 'commands', '_partials', 
 const OPERATION_FLOORS: Readonly<Record<string, number>> = {
   'implement.md': 10,
   'resolve.md': 3,
+  'debug.md': 1,
   'dynamic-build.md': 8,
 }
 
@@ -90,6 +91,7 @@ const MODE_PINS: ReadonlyArray<readonly [string, string, string]> = [
   ['resolve.md', 'ISSUES: {fix_now_issues_in_batch}', 'issue-fix'],
   ['resolve.md', 'VALIDATION_FAILURES: {parsed failures from Validate agent}', 'validation-fix'],
   ['resolve.md', '`CI_FAILURES`', 'ci-fix'],
+  ['debug.md', 'TASK_DESCRIPTION: Implement the fix for this root cause', 'implement'],
   ['dynamic-build.md', 'Implement the following ticket on branch', 'implement'],
   ['dynamic-build.md', 'Fix the validation failures on branch', 'validation-fix'],
   ['dynamic-build.md', 'Fix the alignment issues identified by the Evaluate agent', 'alignment-fix'],
@@ -136,7 +138,7 @@ export function collectModeContractDefects(codeText: string): string[] {
 const compiled = (): Array<readonly [string, string]> => requireDistFiles().map(f => [f, requireDistFile(f)] as const)
 
 describe('every compiled Code spawn opens with its OPERATION (D-CODE-OPERATION-MODES)', () => {
-  it('finds every spawn the floors name, in the three hosts and no other', () => {
+  it('finds every spawn the floors name, in the four hosts and no other', () => {
     const sites = compiled().flatMap(([file, text]) => collectCodeSpawnSites(file, text))
     for (const [host, floor] of Object.entries(OPERATION_FLOORS)) {
       const n = sites.filter(s => s.file === host).length
