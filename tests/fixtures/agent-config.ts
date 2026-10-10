@@ -168,8 +168,17 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     omitClaudeMd: false,
     skills: ['security', 'worktree-support', 'apply-decisions', 'apply-feature-knowledge'],
   },
+  /**
+   * D-EVALUATE-SHIPPED-ROW: Evaluate ships sonnet at medium effort. Its Opus tier
+   * had no recorded rationale. The subagent baseline measured 44 Evaluate spawns,
+   * every one on Opus, and 3.1% of all subagent cache-equivalent tokens (report
+   * .devflow/docs/research/token-diet-subagents/report.2026-10-10_0256.md). The
+   * check compares a diff against a plan and a request, which fits the Sonnet tier
+   * Code and Test already ship. The row, the `model:` line of evaluate.md and the
+   * dynamic roster table move together.
+   */
   evaluate: {
-    model: 'opus',
+    model: 'sonnet',
     effort: 'medium',
     policy: { kind: 'allow', tools: ['Read', 'Grep', 'Glob', 'Bash', 'Write'] },
     omitClaudeMd: false,

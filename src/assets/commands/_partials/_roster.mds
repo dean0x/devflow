@@ -9,7 +9,7 @@ The following agentType values are valid. Model tiers are shown for reference �
 | Validate | haiku | Build / typecheck / lint / test — fast correctness gate |
 | Simplify | sonnet | Reduces complexity, removes duplication, improves readability |
 | Scrutinize | opus | 9-pillar self-review — deep structural analysis |
-| Evaluate | opus | Plan-fidelity / alignment — "was the plan implemented correctly?" |
+| Evaluate | sonnet | Plan-fidelity / alignment — "was the plan implemented correctly?" |
 | Test | sonnet | Scenario-based acceptance tests against acceptance criteria |
 | Review | opus | Focus-parameterized code review — spawn ONE agent() per focus area |
 | Git | haiku | Git operations — branches, commits, merges, worktree management |

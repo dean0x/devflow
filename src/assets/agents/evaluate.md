@@ -1,7 +1,7 @@
 ---
 name: Evaluate
 description: Validates implementation aligns with original request and plan. Catches missed requirements, scope creep, and intent drift. Reports misalignments for Code agent to fix.
-model: opus
+model: sonnet
 effort: medium
 skills:
   - devflow:worktree-support
