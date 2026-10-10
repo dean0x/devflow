@@ -1,7 +1,7 @@
 ---
 feature: feature-knowledge-system
 name: Feature Knowledge Base System
-description: "Use when changing knowledge load or write-back, KB shape, or the MDS build: hosts, learning variants, reference modules. Keywords: KNOWLEDGE.md, knowledge_load, build-mds."
+description: "Use when changing knowledge load or write-back, delivery as Rules plus a heading index, KB shape, or the MDS build. Keywords: KNOWLEDGE.md, knowledge_load, build-mds."
 category: architecture
 directories:
   - src/cli/commands/knowledge
