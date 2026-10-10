@@ -9,6 +9,13 @@
     "declarationMap": false,
     "sourceMap": false
   },
-  "include": ["scripts/**/*.ts", "tests/build-mds.test.ts", "tests/build-mds-compile-time.test.ts"],
+  "include": [
+    "scripts/**/*.ts",
+    "tests/build-mds.test.ts",
+    "tests/build-mds-compile-time.test.ts",
+    "tests/token-audit.test.ts",
+    "tests/integration/helpers.ts",
+    "tests/integration/helpers.test.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }
