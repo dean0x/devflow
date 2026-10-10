@@ -30,6 +30,7 @@ import {
   TRACKER_PROVIDER_IDS,
   TRACKER_STAGED_PREFIX,
 } from '../../core/tracker.js';
+import { CLAUDE_MD_AUDIT_STAMP_FILE, CLAUDE_MD_AUDIT_STAMP_TMP_PREFIX } from '../../core/claude-md-audit.js';
 import { revertExternalAgents } from '../../core/agent-models.js';
 import type { Settings } from '../../targets/claude-code/hooks.js';
 import { detectShell, getProfilePath } from '../../core/safe-delete.js';
@@ -725,6 +726,12 @@ export function installArtifactPaths(devflowDir: string): ReadonlyArray<InstallA
     ...TRACKER_ATTEMPTS_NAMES.map(name => ({ relPath: name })),
     { relPath: TRACKER_LEGACY_ATTEMPTS_FILE },
     { relPath: TRACKER_ENABLED_FILE },
+    // The CLAUDE.md import audit's stamp (D-AUDIT-STAMP): machine state the SessionStart
+    // hook and `devflow init` write, holding paths, existence flags and finding keys and no
+    // user-authored content. Its sibling temp file, `<stamp>.tmp.<pid>`, is a prefix family:
+    // a SIGKILL between the write and the rename leaves one behind.
+    { relPath: CLAUDE_MD_AUDIT_STAMP_FILE },
+    { relPath: CLAUDE_MD_AUDIT_STAMP_TMP_PREFIX, isPrefix: true },
     // The agent's scrubbed staging file, one per invocation under a mktemp name
     // it removes from a trap — a SIGKILL outruns the trap and leaves it behind.
     // A prefix, because the names exist only on disk. Content is a scrubbed copy

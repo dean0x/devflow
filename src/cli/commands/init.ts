@@ -89,6 +89,14 @@ import {
 } from './attribution-prompts.js';
 import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
 import { convergeLearningVariants } from '../../targets/claude-code/learning-install.js';
+import {
+  auditAndRecordClaudeMd,
+  formatClaudeMdAuditNote,
+  formatClaudeMdAuditUnavailable,
+  type ClaudeMdAuditError,
+  type ClaudeMdAuditResult,
+} from '../../core/claude-md-audit.js';
+import type { Result } from '../../core/evidence-policy.js';
 import * as os from 'os';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
@@ -414,6 +422,30 @@ export function trackerOverrideMessage(provider: TrackerProvider): TrackerStepMe
     level: provider === DEFAULT_TRACKER_PROVIDER ? 'info' : 'success',
     text: `Tracker: ${formatTrackerSummary(provider)}`,
   };
+}
+
+/** What init prints for the CLAUDE.md import audit: a note naming what is flagged, a degraded line, or neither. */
+export interface ClaudeMdAuditStep {
+  readonly note: string | null;
+  readonly degraded: string | null;
+}
+
+/**
+ * The audit's printable outcome, the ONE function both init paths use.
+ *
+ * D-CLAUDE-MD-IMPORT-AUDIT, D-INIT-REAL-OUTCOME: the Recommended summary note prints
+ * before the install runs, and the Advanced path prints no end-of-wizard summary
+ * (D-TRACKER-CLI-SURFACE), so the audit cannot be a row of either. It is decided after
+ * the install, from the CLAUDE.md files as they are, and printed as one note by the single
+ * call site in `run`, whichever path got there: the lines are the script's own formatter's,
+ * the ones the SessionStart hook shows in its systemMessage. Nothing is printed when
+ * nothing is flagged; a failure is at most one degraded line and never changes the exit code.
+ *
+ * Pure — returns text, prints nothing.
+ */
+export function claudeMdAuditStep(outcome: Result<ClaudeMdAuditResult, ClaudeMdAuditError>): ClaudeMdAuditStep {
+  if (!outcome.ok) return { note: null, degraded: formatClaudeMdAuditUnavailable(outcome.error) };
+  return { note: formatClaudeMdAuditNote(outcome.value), degraded: null };
 }
 
 /** A message produced by an init lifecycle step. Emitted by the caller, never logged here. */
@@ -2630,6 +2662,19 @@ export const initCommand = new Command('init')
       agent: trackerLifecycle.agent,
     });
     logSummaryLines(trackerLines);
+
+    // CLAUDE.md import audit (D-CLAUDE-MD-IMPORT-AUDIT, D-AUDIT-STAMP): after the install, on
+    // both paths, through claudeMdAuditStep. Global roots always; the project's roots when init
+    // runs inside a git repository that is not HOME, at its toplevel. The stamp is written here,
+    // now that the machine root exists, so the first SessionStart repeats nothing printed below.
+    const auditStep = claudeMdAuditStep(await auditAndRecordClaudeMd({
+      claudeDir,
+      projectRoot: gitRoot,
+      home: homeDir,
+      devflowDir,
+    }));
+    if (auditStep.note !== null) p.note(auditStep.note, 'CLAUDE.md import audit');
+    if (auditStep.degraded !== null) p.log.warn(auditStep.degraded);
 
     // External model routing status line (Advanced path / explicit --proxy flag only)
     if (proxyEnabled) {

@@ -204,6 +204,13 @@ export interface RunClaudeMdAuditOptions {
   readonly devflowDir: string;
   /** The directory holding the script; defaults to the package's own. Injectable for tests. */
   readonly scriptsDir?: string;
+  /**
+   * Display every finding, not only those the stamp has not recorded. `devflow init` is a
+   * deliberate command, so it states what is flagged now even when an earlier start already
+   * showed it; the stamp it returns keeps the earlier keys and adds these. The SessionStart
+   * hook never sets this: it shows a finding once.
+   */
+  readonly showAll?: boolean;
 }
 
 /** The stamp's text when it is a regular file of at most MAX_STAMP_BYTES, else null (read as absent). */
@@ -228,12 +235,29 @@ export async function runClaudeMdAudit(opts: RunClaudeMdAuditOptions): Promise<R
   const audit = loaded.value;
   try {
     const stampText = await readClaudeMdAuditStamp(opts.devflowDir, audit.MAX_STAMP_BYTES);
-    const keys = stampText === null ? [] : audit.parseStamp(stampText).keys;
-    const result = audit.audit({ roots: claudeMdAuditRoots(opts.claudeDir, opts.projectRoot), home: opts.home, keys });
-    return { ok: true, value: result };
+    const prior = stampText === null ? [] : audit.parseStamp(stampText).keys;
+    const roots = claudeMdAuditRoots(opts.claudeDir, opts.projectRoot);
+    if (opts.showAll !== true) return { ok: true, value: audit.audit({ roots, home: opts.home, keys: prior }) };
+    const result = audit.audit({ roots, home: opts.home, keys: [] });
+    const keys = [...prior.filter(key => !result.shown.includes(key)), ...result.shown].slice(-audit.MAX_KEYS);
+    return { ok: true, value: { ...result, stamp: audit.renderStamp({ roots, examined: result.examined, keys }) } };
   } catch (err: unknown) {
     return { ok: false, error: { kind: 'failed', detail: err instanceof Error ? err.message : String(err) } };
   }
+}
+
+/**
+ * Run the audit and record its stamp (D-AUDIT-STAMP): what `devflow init` does after the
+ * install. Every finding over a threshold is displayed (`showAll`), as init is a deliberate
+ * command. The stamp carries the examined paths and every key the audit displayed, so the
+ * first SessionStart afterwards repeats nothing it was just shown. A stamp that cannot be
+ * written (no machine root, a link in the way, a full disk) costs a repeated message at
+ * most, never the audit's result, so that failure is not reported. Never throws.
+ */
+export async function auditAndRecordClaudeMd(opts: RunClaudeMdAuditOptions): Promise<Result<ClaudeMdAuditResult, ClaudeMdAuditError>> {
+  const run = await runClaudeMdAudit({ ...opts, showAll: true });
+  if (run.ok) await writeClaudeMdAuditStamp(opts.devflowDir, run.value.stamp);
+  return run;
 }
 
 /**
