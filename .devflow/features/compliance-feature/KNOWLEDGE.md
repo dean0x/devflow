@@ -21,7 +21,7 @@ directories:
   - src/assets/commands/resolve.mds
   - src/assets/commands/dynamic-build.mds
   - src/assets/commands/_partials/_compliance.mds
-  - src/assets/commands/release.md
+  - src/assets/commands/release.mds
 created: 2026-08-20
 updated: 2026-09-29
 ---
@@ -432,7 +432,7 @@ Step 5 composes the release notes body: `CHANGELOG_CONTENT` first, then an optio
 | `src/assets/commands/plan.mds` | `compliance_gate()` for the compliance Design agent (`COMPLIANCE_ACTIVE`, `COMPLIANCE_FRAMEWORKS` in its spawn); issue linking is mandatory only under `EVIDENCE_POLICY` `required` |
 | `src/assets/commands/implement.mds` | alias-imports `_compliance.mds`; `COMPLIANCE_FRAMEWORKS` to every Code spawn, fix-phase and `pr-create` included (no gate) |
 | `src/assets/commands/dynamic-build.mds` | alias-imports `_compliance.mds`; `compliance_lens()` at Pre-authoring step 0b, the shape-gated `COMPLIANCE_FRAMEWORKS` constant, `COMPLIANCE_FRAMEWORKS` in every engine Code prompt (no gate) |
-| `src/assets/commands/release.md` | Phase 1c (the evidence policy), gather-release-evidence and backlink-shipped-issues on `EVIDENCE_POLICY` — no compliance gate |
+| `src/assets/commands/release.mds` | Phase 1c (the evidence policy), gather-release-evidence and backlink-shipped-issues on `EVIDENCE_POLICY` — no compliance gate |
 | `src/assets/skills/git/SKILL.md` | Extended References table row for `references/tracker/{provider}/{op}.md`; naming-conventions authority pointer to `learn-conventions` |
 | `tests/git-agent.test.ts` | Static guards: required ops list, 60000-char caps, D9 gate, D4 backpressure, D7/D8 dedup markers, AC-0.10 containment (split into issue-body and external-thread guards); reads the joined corpus via `gitAgentSinkCorpus()` for guards whose literal moved, and via `sinkCorpusWithoutPrHost()`/`gitPlusPrHostCorpus()` for PR-host-specific non-vacuity and detection guards (#326) |
 | `tests/compliance-install.test.ts` · `tests/skills.test.ts` | TP-44: the skill and all six references install on every convergence, the rule only when enabled; a shadow seeded from source is re-stamped by `--set` (known-bad probe: a shadow seeded from the installed copy) |
