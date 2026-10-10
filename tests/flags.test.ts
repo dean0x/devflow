@@ -236,6 +236,7 @@ describe('getDefaultFlagsRecord', () => {
     expect(record['default-model']).toBeNull();
     expect(record['goal-checkin-minutes']).toBeNull();
     expect(record['bash-max-timeout-ms']).toBeNull();
+    expect(record['auto-compact-window']).toBeNull();
     expect(record['spellcheck']).toBeNull();
 
     // New optional boolean flag
@@ -1026,6 +1027,101 @@ describe('bash-max-timeout-ms flag', () => {
     expect(coerceFlagValue(flag(), 599999)).toBeNull();
     expect(coerceFlagValue(flag(), 7200001)).toBeNull();
     expect(coerceFlagValue(flag(), 900000.5)).toBeNull();
+  });
+});
+
+// ─── New flag: auto-compact-window ────────────────────────────────────────────
+
+/**
+ * D-AUTO-COMPACT-WINDOW-OPT-IN (AC-406). The flag is opt-in: unset by default, so a
+ * fresh install and a re-init (ADR-020: init applies the seeded record unseen) never
+ * write CLAUDE_CODE_AUTO_COMPACT_WINDOW, and it is not recommended until a forced
+ * mid-/implement compaction has been seen to resume correctly.
+ */
+describe('auto-compact-window flag', () => {
+  const flag = (): NumberFlagDef =>
+    FLAG_REGISTRY.find(f => f.id === 'auto-compact-window') as NumberFlagDef;
+
+  it('is registered as a number flag with the env target, bounds 100000-1000000 and integer: true', () => {
+    expect(flag()).toBeDefined();
+    expect(flag().kind).toBe('number');
+    expect(flag().target).toEqual({ type: 'env', key: 'CLAUDE_CODE_AUTO_COMPACT_WINDOW' });
+    expect(flag().min).toBe(100000);
+    expect(flag().max).toBe(1000000);
+    expect(flag().integer).toBe(true);
+  });
+
+  it('is opt-in: defaultValue undefined, recommended false, manifest record null', () => {
+    expect(flag().defaultValue).toBeUndefined();
+    expect(flag().recommended).toBe(false);
+    expect(getDefaultFlagsRecord()['auto-compact-window']).toBeNull();
+  });
+
+  it('records no upstreamDefault: the env name and range were not confirmed against the binary', () => {
+    expect(flag().upstreamDefault).toBeUndefined();
+  });
+
+  it('sits immediately after bash-max-timeout-ms, in the valued block', () => {
+    const ids = FLAG_REGISTRY.map(f => f.id);
+    expect(ids.indexOf('auto-compact-window')).toBe(ids.indexOf('bash-max-timeout-ms') + 1);
+    const lastBoolean = Math.max(...FLAG_REGISTRY.map((f, i) => (f.kind === 'boolean' ? i : -1)));
+    expect(ids.indexOf('auto-compact-window')).toBeGreaterThan(lastBoolean);
+  });
+
+  it('the registry holds 31 flags (docs/cli-reference.md and file-organization.md state the count)', () => {
+    expect(FLAG_REGISTRY).toHaveLength(31);
+  });
+
+  it('a set value is written to the settings env block as a decimal string', () => {
+    const result = JSON.parse(applyFlags(JSON.stringify({}, null, 2), { 'auto-compact-window': 200000 }));
+    expect(result.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe('200000');
+  });
+
+  it('a null record entry never writes the key', () => {
+    const result = JSON.parse(applyFlags(JSON.stringify({}, null, 2), { 'auto-compact-window': null }));
+    expect(result).toEqual({});
+  });
+
+  it('resetting the flag deletes the env key, and the empty env block with it', () => {
+    const set = applyFlags(JSON.stringify({}, null, 2), { 'auto-compact-window': 200000 });
+    const reset = JSON.parse(applyFlags(set, { 'auto-compact-window': null }));
+    expect(reset).toEqual({});
+  });
+
+  it('coerceFlagValue accepts both bounds', () => {
+    expect(coerceFlagValue(flag(), 100000)).toBe(100000);
+    expect(coerceFlagValue(flag(), 1000000)).toBe(1000000);
+  });
+
+  it.each([99999, 1000001, 150000.5, Number.NaN, -1])('coerceFlagValue rejects %s', (value) => {
+    expect(coerceFlagValue(flag(), value)).toBeNull();
+  });
+
+  it.each(['99999', '1000001', '150000.5', '0100000', '1e5', ' 200000'])(
+    'parseFlagValueInput rejects the text %j (strict decimal grammar and bounds)',
+    (text) => {
+      expect(parseFlagValueInput(flag(), text)).toBeNull();
+    },
+  );
+
+  it('parseFlagValueInput accepts 200000 and reads "unset" as null', () => {
+    expect(parseFlagValueInput(flag(), '200000')).toBe(200000);
+    expect(parseFlagValueInput(flag(), 'unset')).toBeNull();
+  });
+
+  it('a hand-set in-range value is folded into the record and kept when the manifest lacks the flag id (AC-410)', () => {
+    const settings = JSON.stringify({ env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '200000' } }, null, 2);
+    const { settings: out, record } = convergeFlagsIntoSettings(settings, {}, { viewModeExplicit: false, ownedRecord: null });
+    expect(record['auto-compact-window']).toBe(200000);
+    expect(JSON.parse(out).env.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe('200000');
+  });
+
+  it('a hand-set out-of-range value is coerced to null by the fold (OQ8) and removed', () => {
+    const settings = JSON.stringify({ env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '50000' } }, null, 2);
+    const { settings: out, record } = convergeFlagsIntoSettings(settings, {}, { viewModeExplicit: false, ownedRecord: null });
+    // Not adopted: the record holds no entry (or null) and the key is removed.
+    expect(record['auto-compact-window'] ?? null).toBeNull();
+    expect(JSON.parse(out)).toEqual({});
   });
 });
 

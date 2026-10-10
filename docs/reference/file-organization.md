@@ -23,7 +23,7 @@ devflow/
 │   │   ├── paths.ts                  # getPackageRoot + asset path helpers
 │   │   ├── assets.ts                 # skillsDir, agentsDir, rulesDir, scriptsDir, commandsDir,
 │   │   │                             #   compiledAgentsDir, agentSourceDirs (dist-first order owner)
-│   │   ├── flags.ts                  # Claude Code flag registry (30 flags)
+│   │   ├── flags.ts                  # Claude Code flag registry (31 flags)
 │   │   ├── fs-atomic.ts              # Atomic write helper (D34)
 │   │   ├── manifest.ts               # Manifest read/write
 │   │   ├── migrations.ts             # Run-once migration registry (2.x entries only; first: canonicalise-agent-keys-v1)

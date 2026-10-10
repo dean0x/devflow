@@ -330,6 +330,58 @@ describe('flags CLI — createFlagsCommand factory', () => {
       expect(await fs.readFile(path.join(tmpClaudeDir, 'settings.json'), 'utf-8')).toBe('{}');
     });
 
+    it('whole-post-state: set auto-compact-window=200000 writes CLAUDE_CODE_AUTO_COMPACT_WINDOW as "200000" (AC-407)', async () => {
+      await fs.writeFile(path.join(tmpDevflowDir, 'manifest.json'), makeEmptyFlagsManifest(), 'utf-8');
+
+      await flagsCmd.parseAsync(['--set', 'auto-compact-window=200000'], { from: 'user' });
+      expect(process.exitCode).toBe(0);
+
+      const settings = parseSettings(await fs.readFile(path.join(tmpClaudeDir, 'settings.json'), 'utf-8'));
+      expect(settings).toEqual({ env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '200000' } });
+
+      const flags = parseFlagsRecord(await fs.readFile(path.join(tmpDevflowDir, 'manifest.json'), 'utf-8'));
+      expect(flags).toEqual({ 'auto-compact-window': 200000, 'view-mode': 'default' });
+    });
+
+    it.each(['99999', '1000001', '150000.5', '0100000'])(
+      'auto-compact-window=%s → "Invalid value", exit code 1, settings.json and manifest byte-identical (AC-409)',
+      async (text) => {
+        const initialManifest = makeEmptyFlagsManifest();
+        const initialSettings = '{\n  "theme": "dark"\n}\n';
+        await fs.writeFile(path.join(tmpDevflowDir, 'manifest.json'), initialManifest, 'utf-8');
+        await fs.writeFile(path.join(tmpClaudeDir, 'settings.json'), initialSettings, 'utf-8');
+
+        await flagsCmd.parseAsync(['--set', `auto-compact-window=${text}`], { from: 'user' });
+        expect(process.exitCode).toBe(1);
+
+        const errors = vi.mocked(p.log.error).mock.calls.map(call => String(call[0]));
+        expect(errors.some(line => line.includes('Invalid value'))).toBe(true);
+        expect(await fs.readFile(path.join(tmpDevflowDir, 'manifest.json'), 'utf-8')).toBe(initialManifest);
+        expect(await fs.readFile(path.join(tmpClaudeDir, 'settings.json'), 'utf-8')).toBe(initialSettings);
+      },
+    );
+
+    it('a hand-set in-range CLAUDE_CODE_AUTO_COMPACT_WINDOW survives a --set of another flag, folded into the record (AC-410)', async () => {
+      // The manifest predates the flag: it lacks the id, as one written before this release does.
+      await fs.writeFile(path.join(tmpDevflowDir, 'manifest.json'), makeEmptyFlagsManifest(), 'utf-8');
+      await fs.writeFile(
+        path.join(tmpClaudeDir, 'settings.json'),
+        JSON.stringify({ env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '300000' } }, null, 2) + '\n',
+        'utf-8',
+      );
+
+      await flagsCmd.parseAsync(['--set', 'max-concurrent-subagents=50'], { from: 'user' });
+      expect(process.exitCode).toBe(0);
+
+      const settings = parseSettings(await fs.readFile(path.join(tmpClaudeDir, 'settings.json'), 'utf-8'));
+      expect(settings).toEqual({
+        env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '300000', CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS: '50' },
+      });
+      const flags = parseFlagsRecord(await fs.readFile(path.join(tmpDevflowDir, 'manifest.json'), 'utf-8'));
+      expect(flags['auto-compact-window']).toBe(300000);
+      expect(flags['max-concurrent-subagents']).toBe(50);
+    });
+
     it('whole-post-state: set an enum flag (workflow-size-guideline=large)', async () => {
       await fs.writeFile(path.join(tmpDevflowDir, 'manifest.json'), makeEmptyFlagsManifest(), 'utf-8');
 
@@ -572,6 +624,27 @@ describe('flags CLI — createFlagsCommand factory', () => {
       expect(settings).toEqual({});
       const flags = parseFlagsRecord(await fs.readFile(path.join(tmpDevflowDir, 'manifest.json'), 'utf-8'));
       expect(flags['bash-max-timeout-ms']).toBeNull();
+    });
+
+    it('unset auto-compact-window deletes CLAUDE_CODE_AUTO_COMPACT_WINDOW and leaves the record neutral (AC-407)', async () => {
+      await fs.writeFile(
+        path.join(tmpDevflowDir, 'manifest.json'),
+        makeManifestWithFlags({ 'auto-compact-window': 200000 }),
+        'utf-8',
+      );
+      await fs.writeFile(
+        path.join(tmpClaudeDir, 'settings.json'),
+        JSON.stringify({ env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '200000' } }, null, 2) + '\n',
+        'utf-8',
+      );
+
+      await flagsCmd.parseAsync(['--unset', 'auto-compact-window'], { from: 'user' });
+      expect(process.exitCode).toBe(0);
+
+      const settings = parseSettings(await fs.readFile(path.join(tmpClaudeDir, 'settings.json'), 'utf-8'));
+      expect(settings).toEqual({});
+      const flags = parseFlagsRecord(await fs.readFile(path.join(tmpDevflowDir, 'manifest.json'), 'utf-8'));
+      expect(flags['auto-compact-window']).toBeNull();
     });
 
     it('whole-post-state: unset a boolean flag → false in record, key deleted from settings', async () => {
