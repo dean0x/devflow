@@ -17,7 +17,7 @@ import {
   modelFamily,
 } from './tokens.js';
 import type { ModelFamily, TokenCounts } from './tokens.js';
-import { mdCell, sanitizeText } from './types.js';
+import { MAX_PATH_CHARS, mdCell, sanitizeText } from './types.js';
 import type { AuditError, CapNotice, Limits, Result, SkipCounts } from './types.js';
 
 // ── Input ────────────────────────────────────────────────────────────────────
@@ -222,10 +222,16 @@ export interface AuditReport {
   readonly weights: typeof WEIGHTS;
   readonly caps: readonly CapNotice[];
   readonly skipped: SkipCounts & {
+    /** Subagents whose transcript holds no request at all. */
     readonly emptySubagents: number;
     readonly undatedExcluded: number;
     readonly syntheticDropped: number;
     readonly chunksCollapsed: number;
+  };
+  /** What the date window removed; not a skip, the transcripts were read and had data. */
+  readonly filtered: {
+    /** Subagents with requests, every one of them outside the window. */
+    readonly subagentsOutsideWindow: number;
   };
 }
 
@@ -275,8 +281,18 @@ function quantile(values: readonly number[], p: number): number {
   return sorted[index] ?? 0;
 }
 
-function ratio(part: number, whole: number): number {
-  return whole > 0 ? part / whole : 0;
+/** Decimal places kept on every share and ratio in the output. */
+const SHARE_DECIMALS = 6;
+const SHARE_SCALE = 10 ** SHARE_DECIMALS;
+
+/**
+ * `part / whole`, rounded to `SHARE_DECIMALS` for output. It is only called where a value
+ * enters a report row, on accumulators that are still unrounded, so the float noise of summing
+ * in different orders (0.9999999999999981) never reaches the JSON and no rounding feeds back
+ * into the aggregation.
+ */
+function share(part: number, whole: number): number {
+  return whole > 0 ? Math.round((part / whole) * SHARE_SCALE) / SHARE_SCALE : 0;
 }
 
 interface TotalsAcc {
@@ -333,9 +349,9 @@ function freezeTtl(acc: TtlAcc): TtlRow {
   const total = acc.tokens5m + acc.tokens1h + acc.tokensUnknown;
   return {
     ...acc,
-    share5m: ratio(acc.tokens5m, total),
-    share1h: ratio(acc.tokens1h, total),
-    shareUnknown: ratio(acc.tokensUnknown, total),
+    share5m: share(acc.tokens5m, total),
+    share1h: share(acc.tokens1h, total),
+    shareUnknown: share(acc.tokensUnknown, total),
   };
 }
 
@@ -355,7 +371,7 @@ function freezeMiss(acc: MissAcc): MissSummary {
   return {
     events: acc.events,
     cacheWriteTokens: acc.tokens,
-    shareOfCacheWrites: ratio(acc.tokens, acc.writeTokens),
+    shareOfCacheWrites: share(acc.tokens, acc.writeTokens),
     byGap: labels.map(gap => ({
       gap,
       events: acc.byGap.get(gap)?.events ?? 0,
@@ -432,6 +448,7 @@ export function buildReport(input: ReportInput): Result<AuditReport, AuditError>
   let skillNamesCapped = false;
   let skillLoadTotal = 0;
   let emptySubagents = 0;
+  let subagentsOutsideWindow = 0;
   let undatedExcluded = 0;
   let sessionsWithData = 0;
 
@@ -546,7 +563,8 @@ export function buildReport(input: ReportInput): Result<AuditReport, AuditError>
       const requests = agent.requests.filter(r => countWindow(r.timestampMs));
       const first = requests[0];
       if (first === undefined) {
-        emptySubagents += 1;
+        if (agent.requests.length === 0) emptySubagents += 1;
+        else subagentsOutsideWindow += 1;
         continue;
       }
       sessionHasData = true;
@@ -629,7 +647,7 @@ export function buildReport(input: ReportInput): Result<AuditReport, AuditError>
       ce: Math.round(ce),
       price: FAMILY_PRICE[family],
       priced: Math.round(priced),
-      pricedShare: ratio(priced, pricedTotal),
+      pricedShare: share(priced, pricedTotal),
     };
   });
   const unpricedModels = [...unpriced.entries()]
@@ -653,13 +671,13 @@ export function buildReport(input: ReportInput): Result<AuditReport, AuditError>
       medianStartupContext: quantile(t.startups, 0.5),
       p90StartupContext: quantile(t.startups, 0.9),
       ce: Math.round(t.ce),
-      shareOfSubagentCe: ratio(t.ce, subTotals.ce),
-      startupCeShare: ratio(t.startupCe, t.ce),
+      shareOfSubagentCe: share(t.ce, subTotals.ce),
+      startupCeShare: share(t.startupCe, t.ce),
       modelMix: {
-        opus: ratio(t.familyCe.opus, t.ce),
-        sonnet: ratio(t.familyCe.sonnet, t.ce),
-        haiku: ratio(t.familyCe.haiku, t.ce),
-        other: ratio(t.familyCe.other, t.ce),
+        opus: share(t.familyCe.opus, t.ce),
+        sonnet: share(t.familyCe.sonnet, t.ce),
+        haiku: share(t.familyCe.haiku, t.ce),
+        other: share(t.familyCe.other, t.ce),
       },
     }))
     .sort((a, b) => b.ce - a.ce || (a.agentType < b.agentType ? -1 : 1));
@@ -670,14 +688,15 @@ export function buildReport(input: ReportInput): Result<AuditReport, AuditError>
       spawns: acc.spawns,
       turns: acc.turns,
       ce: Math.round(acc.ce),
-      shareOfSubagentCe: ratio(acc.ce, subTotals.ce),
-      startupCeShare: ratio(acc.startupCe, acc.ce),
+      shareOfSubagentCe: share(acc.ce, subTotals.ce),
+      startupCeShare: share(acc.startupCe, acc.ce),
     };
   });
 
-  // Workflow runs.
-  const runRows: RunRow[] = [...runs.values()]
-    .filter(r => r.mainTurns > 0 || r.spawns > 0)
+  // Workflow runs. Rows and labels are both rounded once, from the unrounded accumulators, so
+  // a label's figures agree with the totals instead of summing already-rounded parts.
+  const liveRuns = [...runs.values()].filter(r => r.mainTurns > 0 || r.spawns > 0);
+  const runRows: RunRow[] = liveRuns
     .map(r => ({
       session: sanitizeText(r.session),
       workflow: r.workflow,
@@ -692,12 +711,12 @@ export function buildReport(input: ReportInput): Result<AuditReport, AuditError>
     }))
     .sort((a, b) => b.totalCe - a.totalCe || (a.session < b.session ? -1 : 1));
   const labels = new Map<string, { runs: number; spawns: number; mainCe: number; subCe: number }>();
-  for (const r of runRows) {
+  for (const r of liveRuns) {
     const acc = labels.get(r.workflow) ?? { runs: 0, spawns: 0, mainCe: 0, subCe: 0 };
     acc.runs += 1;
     acc.spawns += r.spawns;
     acc.mainCe += r.mainCe;
-    acc.subCe += r.subagentCe;
+    acc.subCe += r.subCe;
     labels.set(r.workflow, acc);
   }
   const labelRows: WorkflowRow[] = [...labels.entries()]
@@ -705,10 +724,10 @@ export function buildReport(input: ReportInput): Result<AuditReport, AuditError>
       workflow,
       runs: v.runs,
       spawns: v.spawns,
-      mainCe: v.mainCe,
-      subagentCe: v.subCe,
-      totalCe: v.mainCe + v.subCe,
-      subagentShare: ratio(v.subCe, v.mainCe + v.subCe),
+      mainCe: Math.round(v.mainCe),
+      subagentCe: Math.round(v.subCe),
+      totalCe: Math.round(v.mainCe + v.subCe),
+      subagentShare: share(v.subCe, v.mainCe + v.subCe),
     }))
     .sort((a, b) => b.totalCe - a.totalCe || (a.workflow < b.workflow ? -1 : 1));
 
@@ -728,7 +747,7 @@ export function buildReport(input: ReportInput): Result<AuditReport, AuditError>
         main: freezeTotals(mainTotals),
         subagent: freezeTotals(subTotals),
         combined: freezeTotals(combined),
-        subagentShareOfCe: ratio(subTotals.ce, combined.ce),
+        subagentShareOfCe: share(subTotals.ce, combined.ce),
       },
       models: {
         families: familyRows,
@@ -755,6 +774,7 @@ export function buildReport(input: ReportInput): Result<AuditReport, AuditError>
         syntheticDropped: input.parseTotals.syntheticDropped,
         chunksCollapsed: input.parseTotals.chunksCollapsed,
       },
+      filtered: { subagentsOutsideWindow },
     },
   };
 }
@@ -826,7 +846,7 @@ export function renderMarkdown(report: AuditReport): string {
   const w = report.weights;
 
   out.push('# Token audit', '');
-  out.push(`- Directory: \`${mdCell(s.dir)}\``);
+  out.push(`- Directory: \`${mdCell(s.dir, MAX_PATH_CHARS)}\``);
   out.push(
     `- Sessions with data: ${int(s.sessions)} (${int(s.mainTranscripts)} main transcripts, ${int(s.subagentTranscripts)} subagent transcripts)`,
   );
@@ -1013,6 +1033,7 @@ export function renderMarkdown(report: AuditReport): string {
   out.push(
     '',
     `Skipped: ${int(k.symlinks)} symlinks, ${int(k.badNames)} unexpected file names, ${int(k.unreadableFiles)} unreadable files, ${int(k.badMeta)} bad meta files, ${int(k.malformedLines)} malformed lines, ${int(k.oversizeLines)} oversize lines, ${int(k.emptySubagents)} subagents with no requests, ${int(k.undatedExcluded)} undated requests outside the window.`,
+    `Filtered by the window: ${int(report.filtered.subagentsOutsideWindow)} subagents with every request outside it.`,
     `Dropped or merged: ${int(k.syntheticDropped)} synthetic entries, ${int(k.chunksCollapsed)} duplicate chunks.`,
     '',
   );

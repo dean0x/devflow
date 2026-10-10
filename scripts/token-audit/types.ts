@@ -88,6 +88,16 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 
 const MAX_LABEL_CHARS = 80;
 
+/** Longest path printed whole (Linux PATH_MAX). A longer one is cut, and the cut shows as "…". */
+export const MAX_PATH_CHARS = 4096;
+
+/**
+ * D-AUDIT-UNTRUSTED: a workflow run id, which is also the name of its `workflows/wf_*` directory.
+ * The one shape both discovery (the directory name) and the parser (`toolUseResult.runId`)
+ * accept, so the two can only ever join on a value that passed this pattern.
+ */
+export const WORKFLOW_RUN_ID_RE = /^wf_[A-Za-z0-9_-]{1,128}$/;
+
 /**
  * Make a transcript-derived string safe to store and print: control characters, format
  * characters (zero-width, bidi, BOM) and line/paragraph separators become spaces, runs of
@@ -99,8 +109,8 @@ export function sanitizeText(input: string, maxChars: number = MAX_LABEL_CHARS):
 }
 
 /** Sanitize, then escape for one markdown table cell: backslash, pipe and angle brackets. */
-export function mdCell(input: string): string {
-  return sanitizeText(input)
+export function mdCell(input: string, maxChars: number = MAX_LABEL_CHARS): string {
+  return sanitizeText(input, maxChars)
     .replace(/\\/g, '\\\\')
     .replace(/\|/g, '\\|')
     .replace(/</g, '&lt;')

@@ -22,7 +22,7 @@ import type { ParsedStream } from './parse.js';
 import { buildReport, renderJson, renderMarkdown } from './report.js';
 import type { AuditReport, SessionData, SubagentData, TimeWindow } from './report.js';
 import { buildSegments, linkSubagents } from './segment.js';
-import { DEFAULT_LIMITS, NO_SKIPS, addSkips, exitCodeFor, sanitizeText } from './types.js';
+import { DEFAULT_LIMITS, MAX_PATH_CHARS, NO_SKIPS, addSkips, exitCodeFor, sanitizeText } from './types.js';
 import type { AuditError, CapNotice, Limits, Result, SkipCounts } from './types.js';
 
 const USAGE = `Usage: npm run audit:tokens -- (--project <cwd> | --dir <path>) [options]
@@ -237,6 +237,7 @@ async function loadSession(files: SessionFiles, opts: AuditOptions): Promise<Loa
 
   let main: SessionData['main'] = null;
   let spawns: ParsedStream['spawns'] = [];
+  let workflowRuns: ParsedStream['workflowRuns'] = [];
   let segments = buildSegments(files.sessionId, [], []);
   if (files.mainPath !== null) {
     const parsed = await parseTranscriptFile(files.mainPath, limits);
@@ -245,6 +246,7 @@ async function loadSession(files: SessionFiles, opts: AuditOptions): Promise<Loa
       mainTranscripts = 1;
       segments = buildSegments(files.sessionId, stream.commands, stream.skillCalls);
       spawns = stream.spawns;
+      workflowRuns = stream.workflowRuns;
       main = { requests: stream.requests, segments, skillCalls: stream.skillCalls };
       skipped = addSkips(skipped, streamSkips(stream));
       caps.push(...capsFor(stream, `${sanitizeText(files.sessionId)}.jsonl`, limits));
@@ -259,7 +261,12 @@ async function loadSession(files: SessionFiles, opts: AuditOptions): Promise<Loa
     }
   }
 
-  const loaded: Array<{ readonly agentId: string; readonly meta: SubagentMeta; readonly stream: ParsedStream }> = [];
+  const loaded: Array<{
+    readonly agentId: string;
+    readonly meta: SubagentMeta;
+    readonly workflowRunId: string | null;
+    readonly stream: ParsedStream;
+  }> = [];
   for (const file of files.subagents) {
     const metaRead = await readSubagentMeta(file);
     if (!metaRead.ok) skipped = addSkips(skipped, { badMeta: 1 });
@@ -279,14 +286,20 @@ async function loadSession(files: SessionFiles, opts: AuditOptions): Promise<Loa
     lines += parsed.value.stats.lines;
     syntheticDropped += parsed.value.stats.syntheticDropped;
     chunksCollapsed += parsed.value.stats.chunksCollapsed;
-    loaded.push({ agentId: file.agentId, meta, stream: parsed.value });
+    loaded.push({ agentId: file.agentId, meta, workflowRunId: file.workflowRunId, stream: parsed.value });
   }
 
   const links = linkSubagents(
     files.sessionId,
     segments,
     spawns,
-    loaded.map(l => ({ agentId: l.agentId, toolUseId: l.meta.toolUseId, parentAgentId: l.meta.parentAgentId })),
+    loaded.map(l => ({
+      agentId: l.agentId,
+      toolUseId: l.meta.toolUseId,
+      parentAgentId: l.meta.parentAgentId,
+      workflowRunId: l.workflowRunId,
+    })),
+    workflowRuns,
   );
   const subagents: SubagentData[] = [];
   for (const l of loaded) {
@@ -352,7 +365,7 @@ export async function runAudit(opts: AuditOptions): Promise<Result<AuditReport, 
   return buildReport({
     sessions: data,
     scope: {
-      dir: sanitizeText(opts.dir, 400),
+      dir: sanitizeText(opts.dir, MAX_PATH_CHARS),
       session: opts.session,
       exclude: opts.exclude,
       agentType: opts.agentType,

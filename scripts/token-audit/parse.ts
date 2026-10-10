@@ -12,7 +12,7 @@ import { describeError, openRegularFile } from './fs-safe.js';
 import type { OpenError } from './fs-safe.js';
 import { normalizeUsage } from './tokens.js';
 import type { TokenCounts } from './tokens.js';
-import { isRecord, sanitizeText } from './types.js';
+import { WORKFLOW_RUN_ID_RE, isRecord, sanitizeText } from './types.js';
 import type { Limits, Result } from './types.js';
 
 /** One deduplicated API request. */
@@ -34,6 +34,17 @@ export interface SpawnCall {
   readonly toolUseId: string;
   readonly order: number;
   readonly subagentType: string;
+}
+
+/**
+ * A `Workflow` tool_use paired with the run its tool_result reports. `runId` names the
+ * `subagents/workflows/<runId>/` directory the run's subagents live in; `order` is the line of
+ * the tool_use, the position that run is attributed to.
+ */
+export interface WorkflowRunCall {
+  readonly runId: string;
+  readonly toolUseId: string;
+  readonly order: number;
 }
 
 /** A `Skill` tool_use. */
@@ -64,6 +75,7 @@ export interface StreamStats {
 export interface ParsedStream {
   readonly requests: readonly AuditRequest[];
   readonly spawns: readonly SpawnCall[];
+  readonly workflowRuns: readonly WorkflowRunCall[];
   readonly skillCalls: readonly SkillCall[];
   readonly commands: readonly CommandMention[];
   readonly stats: StreamStats;
@@ -105,6 +117,20 @@ function userText(content: unknown): string {
 }
 
 /**
+ * The `Workflow` tool_use a user entry's tool_result answers: the first `tool_result` block
+ * whose `tool_use_id` is a known, not yet answered Workflow launch.
+ */
+function answeredWorkflowUse(content: unknown, pendingUses: ReadonlyMap<string, number>): string | null {
+  if (!Array.isArray(content)) return null;
+  for (const block of content) {
+    if (!isRecord(block) || block['type'] !== 'tool_result') continue;
+    const id = block['tool_use_id'];
+    if (typeof id === 'string' && pendingUses.has(id)) return id;
+  }
+  return null;
+}
+
+/**
  * Parse transcript lines into requests. Pure over its input: the caller supplies the lines
  * (a file stream in production, an array in tests).
  *
@@ -124,6 +150,10 @@ export async function parseTranscriptLines(
 ): Promise<ParsedStream> {
   const pending = new Map<string, Pending>();
   const spawns: SpawnCall[] = [];
+  const workflowRuns: WorkflowRunCall[] = [];
+  /** `Workflow` tool_use id -> line, until its tool_result arrives. */
+  const pendingWorkflowUses = new Map<string, number>();
+  const seenRunIds = new Set<string>();
   const skillCalls: SkillCall[] = [];
   const commands: CommandMention[] = [];
   const seenToolUses = new Set<string>();
@@ -173,6 +203,19 @@ export async function parseTranscriptLines(
           }
         }
       }
+      const result = entry['toolUseResult'];
+      if (isRecord(result) && isRecord(message)) {
+        const runId = result['runId'];
+        if (typeof runId === 'string' && WORKFLOW_RUN_ID_RE.test(runId) && !seenRunIds.has(runId)) {
+          const toolUseId = answeredWorkflowUse(message['content'], pendingWorkflowUses);
+          const useOrder = toolUseId === null ? undefined : pendingWorkflowUses.get(toolUseId);
+          if (toolUseId !== null && useOrder !== undefined) {
+            seenRunIds.add(runId);
+            pendingWorkflowUses.delete(toolUseId);
+            workflowRuns.push({ runId, toolUseId, order: useOrder });
+          }
+        }
+      }
       continue;
     }
 
@@ -201,6 +244,8 @@ export async function parseTranscriptLines(
             order,
             subagentType: typeof type === 'string' ? sanitizeText(type, MAX_MODEL_CHARS) : '',
           });
+        } else if (name === 'Workflow' && id !== '') {
+          pendingWorkflowUses.set(id, order);
         } else if (name === 'Skill' && typeof input['skill'] === 'string') {
           skillCalls.push({ name: sanitizeText(input['skill'], MAX_NAME_CHARS), order, timestampMs });
         }
@@ -254,6 +299,7 @@ export async function parseTranscriptLines(
   return {
     requests,
     spawns,
+    workflowRuns,
     skillCalls,
     commands,
     stats: {

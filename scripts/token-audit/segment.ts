@@ -4,11 +4,21 @@
  *
  * A main session is cut at the user's workflow slash commands (`<command-name>` tags) and at
  * `Skill` tool_use events naming a workflow; `/clear` ends the current run and returns to an
- * ad-hoc segment. A subagent is linked to its spawn by `meta.toolUseId` -> the main session's
- * `Agent` tool_use id, else by `meta.parentAgentId` (a nested spawn inherits its parent's run).
+ * ad-hoc segment.
+ *
+ * D-AUDIT-SEGMENT-LINK: a subagent joins the segment that contains the main-session tool_use
+ * which spawned it, found by the first rule that applies:
+ *   1. `meta.toolUseId` -> the main session's `Agent`/`Task` tool_use id.
+ *   2. The `subagents/workflows/<runId>/` directory the transcript sits in -> the main
+ *      session's `Workflow` tool_use whose tool_result reports `toolUseResult.runId` equal to
+ *      that directory name. A workflow's subagents carry no `toolUseId` (the `Workflow` tool, not
+ *      the `Agent` tool, spawned them), so the run id is the only key; both sides must match
+ *      `WORKFLOW_RUN_ID_RE` and the id is only ever compared, never built into a path.
+ *   3. `meta.parentAgentId` (a nested spawn inherits its parent's run).
+ * Anything still unlinked lands in the `unattributed` segment with no main turns of its own.
  */
 
-import type { CommandMention, SkillCall, SpawnCall } from './parse.js';
+import type { CommandMention, SkillCall, SpawnCall, WorkflowRunCall } from './parse.js';
 
 /** Workflow commands and skills that open a run. */
 export const WORKFLOW_SKILLS: ReadonlySet<string> = new Set([
@@ -96,22 +106,30 @@ export interface SubagentLinkInput {
   readonly agentId: string;
   readonly toolUseId: string | null;
   readonly parentAgentId: string | null;
+  /** The `wf_*` directory of a workflow-run subagent; absent or null for any other. */
+  readonly workflowRunId?: string | null;
 }
 
 /**
- * Map each subagent id to the segment that spawned it. Joins are Map-based: one pass over the
- * main session's spawns, then one memoised resolution per subagent (a nested subagent follows
- * `parentAgentId`, at most `MAX_PARENT_HOPS` hops, so a cycle cannot loop).
+ * Map each subagent id to the segment that spawned it (D-AUDIT-SEGMENT-LINK in the file header).
+ * Joins are Map-based: one pass over the main session's spawns and workflow runs, then one
+ * memoised resolution per subagent (a nested subagent follows `parentAgentId`, at most
+ * `MAX_PARENT_HOPS` hops, so a cycle cannot loop).
  */
 export function linkSubagents(
   sessionId: string,
   segments: Segments,
   spawns: readonly SpawnCall[],
   agents: readonly SubagentLinkInput[],
+  workflowRuns: readonly WorkflowRunCall[] = [],
 ): ReadonlyMap<string, Segment> {
   const spawnOrder = new Map<string, number>();
   for (const spawn of spawns) {
     if (!spawnOrder.has(spawn.toolUseId)) spawnOrder.set(spawn.toolUseId, spawn.order);
+  }
+  const runOrder = new Map<string, number>();
+  for (const run of workflowRuns) {
+    if (!runOrder.has(run.runId)) runOrder.set(run.runId, run.order);
   }
   const byId = new Map<string, SubagentLinkInput>();
   for (const agent of agents) byId.set(agent.agentId, agent);
@@ -125,7 +143,10 @@ export function linkSubagents(
     const agent = byId.get(agentId);
     let segment = orphan;
     if (agent !== undefined) {
-      const order = agent.toolUseId === null ? undefined : spawnOrder.get(agent.toolUseId);
+      const spawnAt = agent.toolUseId === null ? undefined : spawnOrder.get(agent.toolUseId);
+      const runKey = agent.workflowRunId ?? null;
+      const runAt = runKey === null ? undefined : runOrder.get(runKey);
+      const order = spawnAt ?? runAt;
       if (order !== undefined) {
         segment = segmentAt(segments, order);
       } else if (agent.parentAgentId !== null && hops < MAX_PARENT_HOPS && byId.has(agent.parentAgentId)) {

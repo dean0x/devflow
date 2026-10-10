@@ -32,11 +32,13 @@ import type { SubagentFile } from '../scripts/token-audit/discover.js';
 import { parseCliArgs, parseWindow, runAudit, runCli } from '../scripts/token-audit/index.js';
 import type { AuditOptions } from '../scripts/token-audit/index.js';
 import { parseTranscriptFile, parseTranscriptLines } from '../scripts/token-audit/parse.js';
-import { gapBin, inWindow, renderMarkdown } from '../scripts/token-audit/report.js';
-import type { AuditReport } from '../scripts/token-audit/report.js';
+import type { AuditRequest } from '../scripts/token-audit/parse.js';
+import { buildReport, gapBin, inWindow, renderJson, renderMarkdown } from '../scripts/token-audit/report.js';
+import type { AuditReport, ReportInput, SessionData } from '../scripts/token-audit/report.js';
 import { buildSegments, linkSubagents, segmentAt } from '../scripts/token-audit/segment.js';
 import { costEquivalent, modelFamily, normalizeUsage } from '../scripts/token-audit/tokens.js';
-import { DEFAULT_LIMITS, exitCodeFor, mdCell, sanitizeText } from '../scripts/token-audit/types.js';
+import type { TokenCounts } from '../scripts/token-audit/tokens.js';
+import { DEFAULT_LIMITS, NO_SKIPS, WORKFLOW_RUN_ID_RE, exitCodeFor, mdCell, sanitizeText } from '../scripts/token-audit/types.js';
 
 const FIXTURE_DIR = path.join(import.meta.dirname, 'fixtures', 'token-audit', 'project');
 const S1 = '5a1f0000-0000-4000-8000-000000000001';
@@ -368,6 +370,237 @@ describe('segmentation', () => {
   });
 });
 
+// ── Workflow-tool spawns (D-AUDIT-SEGMENT-LINK) ──────────────────────────────
+
+/** The assistant entry that launches a workflow (or another tool), as Claude Code writes it. */
+function launchLine(toolUseId: string, name: string = 'Workflow', inputTokens: number = 1): string {
+  return chunk({
+    id: `m-${toolUseId}`,
+    req: `r-${toolUseId}`,
+    usage: { input_tokens: inputTokens },
+    content: [{ type: 'tool_use', id: toolUseId, name, input: { script: 'redacted' } }],
+  });
+}
+
+/** The user entry carrying the tool_result of a launched workflow: `toolUseResult.runId` names the run directory. */
+function launchedLine(toolUseId: string, runId: string): string {
+  return JSON.stringify({
+    type: 'user',
+    timestamp: '2026-09-01T10:00:01.000Z',
+    toolUseResult: {
+      status: 'async_launched',
+      taskId: 'redacted',
+      taskType: 'local_workflow',
+      workflowName: 'redacted',
+      runId,
+      summary: 'redacted',
+      transcriptDir: `/redacted/${runId}`,
+      scriptPath: '/redacted/script.js',
+    },
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: 'redacted', is_error: false }] },
+  });
+}
+
+describe('workflow-tool spawns (D-AUDIT-SEGMENT-LINK)', () => {
+  it('pairs each Workflow tool_use with the run id its tool_result reports', async () => {
+    const parsed = await parseTranscriptLines(
+      [launchLine('toolu_a'), launchedLine('toolu_a', 'wf_run-A'), launchLine('toolu_b'), launchedLine('toolu_b', 'wf_run-B')],
+      LIMITS,
+    );
+    expect(parsed.workflowRuns).toEqual([
+      { runId: 'wf_run-A', toolUseId: 'toolu_a', order: 0 },
+      { runId: 'wf_run-B', toolUseId: 'toolu_b', order: 2 },
+    ]);
+  });
+
+  it('ignores a run id that is malformed, belongs to a non-Workflow tool_use or names an unknown tool_use', async () => {
+    const parsed = await parseTranscriptLines(
+      [
+        launchLine('toolu_a'),
+        launchedLine('toolu_a', '../wf_evil'),
+        launchedLine('toolu_a', `wf_${'x'.repeat(129)}`),
+        launchedLine('toolu_a', 'run-without-prefix'),
+        launchLine('toolu_agent', 'Agent'),
+        launchedLine('toolu_agent', 'wf_run-C'),
+        launchedLine('toolu_unknown', 'wf_run-D'),
+      ],
+      LIMITS,
+    );
+    expect(parsed.workflowRuns).toEqual([]);
+    expect(parsed.spawns.map(s => s.toolUseId)).toEqual(['toolu_agent']);
+  });
+
+  it('keeps the first run id when a tool_use is reported twice', async () => {
+    const parsed = await parseTranscriptLines(
+      [launchLine('toolu_a'), launchedLine('toolu_a', 'wf_first'), launchedLine('toolu_a', 'wf_second')],
+      LIMITS,
+    );
+    expect(parsed.workflowRuns.map(r => r.runId)).toEqual(['wf_first']);
+  });
+
+  it('accepts only wf_<id> run names of bounded length', () => {
+    expect(WORKFLOW_RUN_ID_RE.test('wf_4f2746aa-aae')).toBe(true);
+    expect(WORKFLOW_RUN_ID_RE.test(`wf_${'a'.repeat(128)}`)).toBe(true);
+    for (const bad of [`wf_${'a'.repeat(129)}`, 'wf_', 'wf_a/b', 'wf_a b', 'wf_a\n', 'xwf_a', '../wf_a']) {
+      expect(WORKFLOW_RUN_ID_RE.test(bad)).toBe(false);
+    }
+  });
+
+  it('records the run directory a workflow subagent lives in, and null for a flat one', async () => {
+    const found = await discoverSessions({ dir: FIXTURE_DIR, session: S1, exclude: new Set(), limits: { maxEntries: 1000 } });
+    expect(found.ok).toBe(true);
+    if (!found.ok) return;
+    const files = found.value.sessions.flatMap(s => s.subagents);
+    expect(files.find(f => f.agentId === 'awork01')).toMatchObject({ layout: 'workflow', workflowRunId: 'wf_run01' });
+    expect(files.find(f => f.agentId === 'acode01')).toMatchObject({ layout: 'flat', workflowRunId: null });
+  });
+
+  it('links a workflow subagent to the segment holding the Workflow tool_use that launched its run', () => {
+    const segments = buildSegments('S', [{ name: 'devflow:implement', order: 0 }, { name: 'clear', order: 9 }], []);
+    const links = linkSubagents(
+      'S',
+      segments,
+      [{ toolUseId: 'tu_code', order: 2, subagentType: 'Code' }],
+      [
+        { agentId: 'w1', toolUseId: null, parentAgentId: null, workflowRunId: 'wf_a' },
+        { agentId: 'w2', toolUseId: null, parentAgentId: null, workflowRunId: 'wf_b' },
+        { agentId: 'w3', toolUseId: null, parentAgentId: null, workflowRunId: 'wf_unknown' },
+        { agentId: 'both', toolUseId: 'tu_code', parentAgentId: null, workflowRunId: 'wf_b' },
+        { agentId: 'flat', toolUseId: null, parentAgentId: null, workflowRunId: null },
+      ],
+      [
+        { runId: 'wf_a', toolUseId: 'tw_a', order: 4 },
+        { runId: 'wf_b', toolUseId: 'tw_b', order: 12 },
+      ],
+    );
+    expect(links.get('w1')?.label).toBe('devflow:implement');
+    expect(links.get('w2')?.label).toBe('adhoc');
+    expect(links.get('w3')?.label).toBe('unattributed');
+    expect(links.get('both')?.label).toBe('devflow:implement');
+    expect(links.get('flat')?.label).toBe('unattributed');
+  });
+
+  it('end to end: workflow subagents join the run that launched them, the rest stay unattributed', async () => {
+    const dir = await freshDir();
+    const runs = path.join(dir, 'wfsess01', 'subagents', 'workflows');
+    const command = (name: string): string =>
+      JSON.stringify({ type: 'user', timestamp: '2026-09-01T10:00:00.000Z', message: { role: 'user', content: `<command-name>/${name}</command-name>` } });
+    await writeFile(
+      path.join(dir, 'wfsess01.jsonl'),
+      `${[
+        command('devflow:implement'),
+        launchLine('toolu_wf_a', 'Workflow', 10),
+        launchedLine('toolu_wf_a', 'wf_runA'),
+        command('clear'),
+        chunk({ id: 'plain', req: 'plain', usage: { input_tokens: 20 } }),
+        launchLine('toolu_wf_b', 'Workflow', 30),
+        launchedLine('toolu_wf_b', 'wf_runB'),
+      ].join('\n')}\n`,
+    );
+    for (const [runId, agentId, inputTokens] of [
+      ['wf_runA', 'aw1', 100],
+      ['wf_runB', 'aw2', 200],
+      ['wf_runC', 'aw3', 400],
+    ] as const) {
+      await mkdir(path.join(runs, runId), { recursive: true });
+      await writeFile(path.join(runs, runId, `agent-${agentId}.jsonl`), `${chunk({ id: agentId, req: agentId, usage: { input_tokens: inputTokens } })}\n`);
+      await writeFile(path.join(runs, runId, `agent-${agentId}.meta.json`), JSON.stringify({ agentType: 'general-purpose' }));
+    }
+
+    const report = await audit({ dir });
+    const run = (workflow: string): AuditReport['workflows']['runs'][number] | undefined =>
+      report.workflows.runs.find(r => r.workflow === workflow);
+    expect(run('devflow:implement')).toMatchObject({ spawns: 1, mainTurns: 1, mainCe: 10, subagentCe: 100 });
+    expect(run('adhoc')).toMatchObject({ spawns: 1, mainTurns: 2, mainCe: 50, subagentCe: 200 });
+    expect(run('unattributed')).toMatchObject({ spawns: 1, mainTurns: 0, mainCe: 0, subagentCe: 400 });
+    expect(report.workflows.runs).toHaveLength(3);
+  });
+});
+
+// ── Output rounding: float noise at the boundary, exact aggregation ──────────
+
+const NO_COUNTS: TokenCounts = { input: 0, cacheWrite5m: 0, cacheWrite1h: 0, cacheWriteUnknown: 0, cacheRead: 0, output: 0 };
+
+function request(order: number, usage: Partial<TokenCounts>): AuditRequest {
+  return { order, model: 'claude-opus-4-5', timestampMs: null, usage: { ...NO_COUNTS, ...usage }, isFirst: order === 0, gapMs: null };
+}
+
+function build(sessions: readonly SessionData[]): AuditReport {
+  const input: ReportInput = {
+    sessions,
+    scope: { dir: '/d', session: null, exclude: [], agentType: null, since: null, until: null, mainTranscripts: sessions.length, subagentTranscripts: 0 },
+    window: { sinceMs: null, untilMs: null },
+    skipped: NO_SKIPS,
+    parseTotals: { lines: 0, syntheticDropped: 0, chunksCollapsed: 0 },
+    caps: [],
+    limits: { maxSkillNames: 500, maxUnpricedModels: 20 },
+  };
+  const result = buildReport(input);
+  if (!result.ok) throw new Error(`report failed: ${result.error.kind}`);
+  return result.value;
+}
+
+/** A session with only a main transcript of one request carrying `usage`. */
+function mainOnly(sessionId: string, usage: Partial<TokenCounts>): SessionData {
+  return { sessionId, main: { requests: [request(0, usage)], segments: buildSegments(sessionId, [], []), skillCalls: [] }, subagents: [] };
+}
+
+describe('output rounding', () => {
+  it('rounds a share to 6 decimals instead of printing float noise', () => {
+    // Cache-read tokens weigh 0.1 each. Two Code agents of [1,1] and [1,4] tokens sum to 0.1+0.1 | 0.1+0.4 per agent,
+    // but the stream total adds the requests one by one: the two orders differ in the last bits (0.9999999999999999).
+    const segment = buildSegments('S', [], [])[0];
+    const agent = (agentId: string, reads: readonly number[]): SessionData['subagents'][number] => ({
+      agentId,
+      agentType: 'Code',
+      segment,
+      requests: reads.map((cacheRead, i) => request(i, { cacheRead })),
+    });
+    const report = build([{ sessionId: 'S', main: null, subagents: [agent('a1', [1, 1]), agent('a2', [1, 4])] }]);
+    expect(report.agentTypes[0]?.shareOfSubagentCe).toBe(1);
+    expect(report.totals.subagentShareOfCe).toBe(1);
+  });
+
+  it('prints no number with more than 6 decimals in the JSON', async () => {
+    const json = renderJson(await audit());
+    expect(json.match(/\d+\.\d{7,}/g)).toBeNull();
+    expect(JSON.parse(json).totals.subagentShareOfCe).toBe(Math.round((10021 / 16054) * 1e6) / 1e6);
+  });
+
+  it('keeps byLabel, runs and totals in agreement by summing unrounded parts and rounding once', () => {
+    // Two sessions of one 0.4 ce request each: rounding each part first gives 0 + 0, summing first gives 0.8 -> 1.
+    const report = build([mainOnly('s1', { cacheRead: 4 }), mainOnly('s2', { cacheRead: 4 })]);
+    expect(report.totals.main.ce).toBe(1);
+    expect(report.totals.combined.ce).toBe(1);
+    expect(report.workflows.byLabel).toHaveLength(1);
+    expect(report.workflows.byLabel[0]).toMatchObject({ workflow: 'adhoc', runs: 2, spawns: 0, mainCe: 1, subagentCe: 0, totalCe: 1 });
+    expect(report.workflows.runs.map(r => r.totalCe)).toEqual([0, 0]);
+  });
+});
+
+// ── Markdown paths ───────────────────────────────────────────────────────────
+
+describe('markdown directory line', () => {
+  it('prints the whole directory path, not a truncated one', async () => {
+    const dir = path.join(await freshDir(), 'a'.repeat(150), 'b'.repeat(150), 'c'.repeat(150));
+    await mkdir(dir, { recursive: true });
+    await cp(FIXTURE_DIR, dir, { recursive: true });
+    expect(dir.length).toBeGreaterThan(450);
+    const result = await runCli(['--dir', dir], NO_ENV, '/');
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain(`- Directory: \`${dir}\``);
+    expect(result.stdout).not.toContain('…');
+  });
+
+  it('still strips control characters and escapes pipes in the path', async () => {
+    const report = await audit();
+    const hostile = `/x/${'p'.repeat(300)}|y\u0007z`;
+    const md = renderMarkdown({ ...report, scope: { ...report.scope, dir: hostile } });
+    expect(md).toContain(`- Directory: \`/x/${'p'.repeat(300)}\\|y z\``);
+    expect(/[\u0000-\u0008\u000b-\u001f\u007f]/.test(md)).toBe(false);
+  });
+});
+
 // ── Full-report numbers over the fixture ─────────────────────────────────────
 
 describe('report over the fixture', () => {
@@ -525,14 +758,41 @@ describe('filters', () => {
     const report = await audit({ until: '2026-08-01T09:00:10Z' });
     expect(report.totals.main.requests).toBe(1);
     expect(report.totals.subagent.requests).toBe(0);
-    expect(report.skipped.emptySubagents).toBe(7);
+    expect(report.skipped.emptySubagents).toBe(0);
+    expect(report.filtered.subagentsOutsideWindow).toBe(7);
   });
 
   it('filters per request, so a window inside a session keeps only the requests inside it', async () => {
     const report = await audit({ since: '2026-09-01T12:00:00Z', until: '2026-09-02' });
     expect(report.totals.main.requests).toBe(4);
     expect(report.totals.subagent.requests).toBe(0);
-    expect(report.skipped.emptySubagents).toBe(7);
+    expect(report.skipped.emptySubagents).toBe(0);
+    expect(report.filtered.subagentsOutsideWindow).toBe(7);
+  });
+
+  it('keeps subagents the window filtered out apart from subagents that have no requests at all', async () => {
+    const dir = await freshDir();
+    const sub = path.join(dir, 's1', 'subagents');
+    await mkdir(sub, { recursive: true });
+    const at = (ts: string, id: string): string => `${chunk({ id, req: id, ts, usage: { input_tokens: 1 } })}\n`;
+    await writeFile(path.join(dir, 's1.jsonl'), at('2026-09-02T10:00:00.000Z', 'm'));
+    await writeFile(path.join(sub, 'agent-early1.jsonl'), at('2026-08-01T10:00:00.000Z', 'e'));
+    await writeFile(path.join(sub, 'agent-late1.jsonl'), at('2026-09-03T10:00:00.000Z', 'l'));
+    await writeFile(path.join(sub, 'agent-empty1.jsonl'), `${JSON.stringify({ type: 'user', message: { role: 'user', content: 'hi' } })}\n`);
+
+    const windowed = await audit({ dir, since: '2026-09-01' });
+    expect(windowed.skipped.emptySubagents).toBe(1);
+    expect(windowed.filtered.subagentsOutsideWindow).toBe(1);
+    expect(windowed.totals.subagent.requests).toBe(1);
+
+    const unwindowed = await audit({ dir });
+    expect(unwindowed.skipped.emptySubagents).toBe(1);
+    expect(unwindowed.filtered.subagentsOutsideWindow).toBe(0);
+
+    const md = renderMarkdown(windowed);
+    expect(md).toContain('1 subagents with no requests');
+    expect(md).toContain('Filtered by the window: 1 subagents with every request outside it.');
+    expect(md).not.toMatch(/Skipped:[^\n]*outside it/);
   });
 
   it('--agent-type keeps only that subagent type and leaves main alone', async () => {
@@ -895,6 +1155,7 @@ describe('transcripts are untrusted', () => {
       path: path.join(scratch, 'agent-x.jsonl'),
       metaPath: path.join(scratch, 'agent-x.meta.json'),
       layout: 'flat',
+      workflowRunId: null,
     };
     const meta = await readSubagentMeta(file);
     expect(meta).toEqual({ ok: true, value: { agentType: null, toolUseId: null, parentAgentId: null } });

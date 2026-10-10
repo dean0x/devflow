@@ -13,7 +13,7 @@ import { lstat, readdir, stat } from 'node:fs/promises';
 import type { Dirent } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { describeError, readSmallText } from './fs-safe.js';
-import { isRecord, sanitizeText } from './types.js';
+import { WORKFLOW_RUN_ID_RE, isRecord, sanitizeText } from './types.js';
 import type { CapNotice, Limits, Result, SkipCounts } from './types.js';
 import { NO_SKIPS, addSkips } from './types.js';
 
@@ -45,7 +45,6 @@ export function projectTranscriptDir(
 export const SUBAGENT_FILE_RE = /^agent-[A-Za-z0-9_-]{1,128}\.jsonl$/;
 /** Main-session ids (the file or directory stem). */
 export const SESSION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
-const WORKFLOW_DIR_RE = /^wf_[A-Za-z0-9_-]{1,128}$/;
 const META_MAX_BYTES = 65_536;
 const ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -55,6 +54,8 @@ export interface SubagentFile {
   readonly path: string;
   readonly metaPath: string;
   readonly layout: 'flat' | 'workflow';
+  /** The `wf_*` run directory a workflow-layout file lives in (already shape-checked); null for a flat file. */
+  readonly workflowRunId: string | null;
 }
 
 export interface SessionFiles {
@@ -125,20 +126,24 @@ interface SubagentScan {
   skipped: SkipCounts;
 }
 
-function subagentFile(dir: string, name: string, layout: SubagentFile['layout']): SubagentFile {
+function subagentFile(dir: string, name: string, workflowRunId: string | null): SubagentFile {
   const stem = name.slice(0, -'.jsonl'.length);
   return {
     agentId: stem.slice('agent-'.length),
     path: join(dir, name),
     metaPath: join(dir, `${stem}.meta.json`),
-    layout,
+    layout: workflowRunId === null ? 'flat' : 'workflow',
+    workflowRunId,
   };
 }
 
-/** Scan one `subagents/` directory (flat) or one `workflows/wf_*` directory (workflow). */
+/**
+ * Scan one `subagents/` directory (`workflowRunId` null) or one `workflows/wf_*` directory
+ * (`workflowRunId` is that directory's name).
+ */
 async function scanSubagentDir(
   dir: string,
-  layout: SubagentFile['layout'],
+  workflowRunId: string | null,
   budget: Budget,
   acc: SubagentScan,
 ): Promise<void> {
@@ -150,10 +155,10 @@ async function scanSubagentDir(
     if (entry.isSymbolicLink()) {
       acc.skipped = addSkips(acc.skipped, { symlinks: 1 });
     } else if (entry.isFile() && SUBAGENT_FILE_RE.test(entry.name)) {
-      acc.files.push(subagentFile(dir, entry.name, layout));
+      acc.files.push(subagentFile(dir, entry.name, workflowRunId));
     } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
       acc.skipped = addSkips(acc.skipped, { badNames: 1 });
-    } else if (layout === 'flat' && entry.isDirectory() && entry.name === 'workflows') {
+    } else if (workflowRunId === null && entry.isDirectory() && entry.name === 'workflows') {
       hasWorkflows = true;
     }
   }
@@ -165,8 +170,8 @@ async function scanSubagentDir(
     if (!spend(budget)) return;
     if (run.isSymbolicLink()) {
       acc.skipped = addSkips(acc.skipped, { symlinks: 1 });
-    } else if (run.isDirectory() && WORKFLOW_DIR_RE.test(run.name)) {
-      await scanSubagentDir(join(workflowsDir, run.name), 'workflow', budget, acc);
+    } else if (run.isDirectory() && WORKFLOW_RUN_ID_RE.test(run.name)) {
+      await scanSubagentDir(join(workflowsDir, run.name), run.name, budget, acc);
     }
   }
 }
@@ -227,7 +232,7 @@ export async function discoverSessions(opts: DiscoverOptions): Promise<Result<Di
     if (dirs.has(sessionId)) {
       const subagentsDir = join(opts.dir, sessionId, 'subagents');
       const kind = await entryKind(subagentsDir);
-      if (kind === 'directory') await scanSubagentDir(subagentsDir, 'flat', budget, scan);
+      if (kind === 'directory') await scanSubagentDir(subagentsDir, null, budget, scan);
       else if (kind === 'symlink') scan.skipped = addSkips(scan.skipped, { symlinks: 1 });
     }
     skipped = addSkips(skipped, scan.skipped);
