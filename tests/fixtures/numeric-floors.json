@@ -64,7 +64,7 @@
       "pattern": "expect(focuses).toHaveLength(8)",
       "occurrences": 1,
       "sourceFile": "tests/skill-references.test.ts",
-      "description": "Language focuses /code-review's presence gate names, each held to a canonical skill. Compiled commands name no skill by install path (D-CLAUDE-DIR-PROMPTS): the gate is the one install path a command builds, templated on the focus under the Claude Code directory the installer resolves, so this count is what keeps the Format 3 compiled-command check from passing on an empty set."
+      "description": "Language focuses /code-review's stamp paragraph names, each held to a canonical skill. Compiled commands name no skill by install path (D-LANGUAGE-FOCUS-STAMP): the stamp paragraph is the one place a command lists the language skills, so this count is what keeps the Format 3 compiled-command check from passing on an empty set."
     },
     {
       "id": "d11-posting-ops",

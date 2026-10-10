@@ -349,10 +349,9 @@ describe('Format 3: Install path references', () => {
     }
 
     // Commands name no skill by install path: the worktree-support pointers are
-    // directory-neutral, and the one path a command builds — /code-review's
-    // language presence gate — is templated on the focus under the Claude Code
-    // directory the installer resolves (D-CLAUDE-DIR-PROMPTS). So the loop above
-    // may see nothing; non-vacuity comes from the extractor and the gate instead.
+    // directory-neutral, and /code-review's language gate is the install-time
+    // stamp, not a path (D-LANGUAGE-FOCUS-STAMP). So the loop above sees nothing;
+    // non-vacuity comes from the extractor and the stamp test below instead.
     expect(totalRefs, 'a command names a skill by install path again').toBe(0);
   });
 
@@ -363,13 +362,13 @@ describe('Format 3: Install path references', () => {
     )).toEqual(['go', 'rust']);
   });
 
-  it("/code-review's language presence gate probes installed skills, and every focus it names is canonical", () => {
+  it("/code-review's language stamp paragraph names the eight candidate focuses, and every one is canonical", () => {
     const canonicalSkills = new Set(getAllSkillNames());
     requireDistFiles();
     const content = readFileSync(path.join(ROOT, 'dist', 'commands', 'code-review.md'), 'utf-8');
-    expect(content).toContain('/skills/devflow:{focus}/SKILL.md');
-    const gate = /\*\*Language focus presence gate\.\*\* The eight language focuses — ([^\n]*?) — ship with/.exec(content);
-    expect(gate, 'the presence gate paragraph').not.toBeNull();
+    expect(content).not.toContain('/skills/devflow:{focus}/SKILL.md');
+    const gate = /\*\*Language focus stamp\.\*\* The eight language focuses — ([^\n]*?) — ship with/.exec(content);
+    expect(gate, 'the stamp paragraph').not.toBeNull();
     const focuses = [...(gate?.[1] ?? '').matchAll(/`([\w-]+)`/g)].map(m => m[1]);
     expect(focuses).toHaveLength(8);
     for (const focus of focuses) {

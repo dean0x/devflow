@@ -34,7 +34,8 @@ The orchestrator provides:
 - **Focus**: Which review type to perform
 - **Branch context**: What changes to review
 - **Output path**: Where to save findings (e.g., `.devflow/docs/reviews/{branch}/{timestamp}/{focus}.md`)
-- **DIFF_COMMAND** (optional): Specific diff command to use (e.g., `git diff {sha}...HEAD` for incremental reviews). If not provided, default to `git diff {base_branch}...HEAD`.
+- **DIFF_FILE** (optional): Absolute path of the patch to review; read changed lines from it. Page a `DIFF_FILE` larger than one Read with offset/limit. If not provided, default to `git diff {base_branch}...HEAD`.
+- **DIFF_RANGE** (optional): The git range the patch covers, for information only; any extra git read uses this range.
 <!-- learning:on -->
 - **DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this repository (pre-rendered to `.devflow/learning/index.md` in its main worktree). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.
 <!-- learning:end -->
@@ -90,9 +91,9 @@ Apply the `devflow:apply-decisions` algorithm — scan the `DECISIONS_CONTEXT` i
 2. **Apply Decisions** - Follow `devflow:apply-decisions` (see section above) to scan the index and state relevant entries in words in findings.
 <!-- learning:end -->
 <!-- learning:on -->
-3. **Identify changed lines** - Get diff against base branch (main/master/develop/integration/trunk)
+3. **Identify changed lines** - Read the diff from `DIFF_FILE` when passed, else get it against the base branch (main/master/develop/integration/trunk)
 <!-- learning:off -->
-2. **Identify changed lines** - Get diff against base branch (main/master/develop/integration/trunk)
+2. **Identify changed lines** - Read the diff from `DIFF_FILE` when passed, else get it against the base branch (main/master/develop/integration/trunk)
 <!-- learning:end -->
 <!-- learning:on -->
 4. **Apply 3-category classification** - Sort issues by where they occur
@@ -125,10 +126,10 @@ Apply the `devflow:apply-decisions` algorithm — scan the `DECISIONS_CONTEXT` i
 8. **Self-verify findings** — For each finding at ≥80% confidence (CRITICAL, HIGH, or MEDIUM):
 <!-- learning:end -->
    If the flagged lines are already visible in the diff output, skip the Read — the diff is
-   sufficient for verification. Otherwise, Read the actual code at the flagged file:line
-   (30 lines context). If the issue is already handled (guard clause, try/catch, validation
-   present), downgrade to Suggestions or drop. If Read fails or line is out of range, retain
-   finding at original confidence.
+   sufficient for verification. Otherwise, Read the code at the flagged file:line as a
+   ranged read of 30 lines either side, never the whole file. If the issue is already
+   handled (guard clause, try/catch, validation present), downgrade to Suggestions or drop.
+   If Read fails or line is out of range, retain finding at original confidence.
 <!-- learning:on -->
 10. **Consolidate similar issues** - Group related findings to reduce noise (see Consolidation Rules)
 <!-- learning:off -->

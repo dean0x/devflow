@@ -123,7 +123,9 @@ function resolveRef(ref: RawRef, scope: ReadonlySet<string>): 'in-scope' | 'temp
     return [...scope].some(s => s.startsWith(prefix)) ? 'in-scope' : 'out-of-scope';
   }
   // Presence-gated and feature-owned skills are referenced opportunistically:
-  // the referencing prompt probes for the skill and proceeds without it.
+  // /code-review spawns a language focus only when the installer stamped it
+  // (D-LANGUAGE-FOCUS-STAMP), and the Review and Code agents proceed without a
+  // skill whose invocation fails.
   if ((PRESENCE_GATED_SKILLS as readonly string[]).includes(ref.token)) return 'in-scope';
   if ((FEATURE_OWNED_SKILLS as readonly string[]).includes(ref.token)) return 'in-scope';
   return scope.has(ref.token) ? 'in-scope' : 'out-of-scope';
@@ -356,28 +358,34 @@ describe('requires structure', () => {
       p.requires.filter(r => (PRESENCE_GATED_SKILLS as readonly string[]).includes(r)).map(r => `${p.name}: ${r}`));
     expect(
       leaked,
-      'Language skills ship with optional plugins and are probed for at spawn time, never ' +
+      'Language skills ship with optional plugins and are stamped at install time, never ' +
       `required:\n  ${leaked.join('\n  ')}`,
     ).toEqual([]);
   });
 
-  it('/code-review presence-gates every language focus before spawning it', async () => {
+  it('/code-review stamp-gates every language focus before spawning it', async () => {
     // The counterpart of the arm above: language skills stay out of `requires`
-    // ONLY because the command probes for them. If this gate is ever removed,
+    // ONLY because the command spawns a language focus solely when the installer
+    // stamped it (D-LANGUAGE-FOCUS-STAMP). If this gate is ever removed,
     // `/code-review` spawns a Review agent whose pattern skill is not installed.
+    // tests/guards/code-review-diff-gating.test.ts owns the gate's full wording
+    // and tests/installer/language-stamp*.test.ts the installer side.
     const body = await fs.readFile(path.join(COMMANDS_DIR, 'code-review.md'), 'utf-8');
-    const gate = body.split('\n').find(line => line.includes('Language focus presence gate'));
-    expect(gate, 'dist/commands/code-review.md must carry the language focus presence gate').toBeDefined();
-    expect(gate).toContain('{claude_dir}/skills/devflow:{focus}/SKILL.md');
-    // The probe resolves Claude Code's directory as the installer does
-    // (D-CLAUDE-DIR-PROMPTS); tests/guards/claude-dir.test.ts owns its spelling.
-    expect(body).toContain('test -f "$d/skills/devflow:{focus}/SKILL.md"; echo "exit=$?"');
+    const stamps = body.split('\n').filter(line => line.startsWith('Installed language focuses: '));
+    expect(stamps, 'dist/commands/code-review.md must carry exactly one stamp line').toHaveLength(1);
+    const gate = body.split('\n').find(line => line.includes('**Language focus stamp.**'));
+    expect(gate, 'dist/commands/code-review.md must carry the language focus stamp paragraph').toBeDefined();
+    expect(body).toContain(
+      'A language focus is spawned only when its file-type condition above fires AND its name appears in that stamped line.',
+    );
+    // The probe it replaced is gone: no command tests for an installed skill file.
+    expect(body).not.toMatch(/test -f [^\n]*skills\/devflow:/);
     for (const focus of PRESENCE_GATED_SKILLS) {
       expect(gate, `the gate must name the ${focus} focus`).toContain(`\`${focus}\``);
       expect(
         body,
-        `the Phase 2 spawn table must mark ${focus} presence-gated, not merely conditional`,
-      ).toContain(`| ${focus} | presence-gated | devflow:${focus} |`);
+        `the Phase 2 spawn table must mark ${focus} stamp-gated, not merely conditional`,
+      ).toContain(`| ${focus} | stamp-gated | devflow:${focus} |`);
     }
   });
 
