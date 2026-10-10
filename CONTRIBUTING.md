@@ -26,7 +26,7 @@ After setup, Devflow commands (`/code-review`, `/implement`, etc.) are available
 devflow/
 ├── src/assets/skills/   # 41 skills (single source of truth)
 ├── src/assets/agents/   # 17 agents (single source of truth)
-├── src/assets/rules/    # 13 rules (single source of truth, flat .md files)
+├── src/assets/rules/    # 14 rules (single source of truth, flat .md files)
 ├── src/assets/commands/ # Command sources (.mds hosts; partials in _partials/)
 ├── src/assets/scripts/hooks/  # Working Memory + ambient hooks
 ├── src/core/            # Shared CLI logic (DEVFLOW_PLUGINS registry, paths, flags, …)

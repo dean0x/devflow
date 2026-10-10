@@ -55,7 +55,7 @@ devflow/
 │       │   ├── code.mds                # MDS generator host → dist/agents/code.md (nine agents are hosts besides git)
 │       │   ├── synthesize.md
 │       │   └── ...
-│       ├── rules/                    # 13 rules (flat .md files)
+│       ├── rules/                    # 14 rules (flat .md files)
 │       │   ├── engineering.md
 │       │   ├── security.md
 │       │   └── ...

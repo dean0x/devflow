@@ -118,7 +118,13 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
       'security',
       'worktree-support',
     ],
-    rules: ['security', 'engineering', 'quality', 'reliability'],
+    // D-CONTEXT-ECONOMY-RULE: reading discipline is a core rule, not a skill, because it
+    // must reach every session and every spawned agent without an activation step. It
+    // tells the model to list a large file's headings and read ranges, and to count
+    // search matches before printing them. Its body stays near 400 characters (ceiling
+    // 450) and names no search binary, since the rule is loaded into every session;
+    // tests/rules.test.ts enforces the length, the directives and this registration.
+    rules: ['security', 'engineering', 'quality', 'reliability', 'context-economy'],
   },
   {
     name: 'devflow-plan',

@@ -2482,11 +2482,12 @@ describe('buildRulesMap', () => {
   it('returns rules only from selected plugins', () => {
     const coreOnly = DEVFLOW_PLUGINS.filter(p => p.name === 'devflow-core-skills');
     const map = buildRulesMap(coreOnly);
-    expect(map.size).toBe(4);
+    expect(map.size).toBe(5);
     expect(map.get('security')).toBe('devflow-core-skills');
     expect(map.get('engineering')).toBe('devflow-core-skills');
     expect(map.get('quality')).toBe('devflow-core-skills');
     expect(map.get('reliability')).toBe('devflow-core-skills');
+    expect(map.get('context-economy')).toBe('devflow-core-skills');
   });
 
   it('includes optional plugin rules when selected', () => {
