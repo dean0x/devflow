@@ -47,8 +47,6 @@ d .claude/commands/devflow/
 - .claude/commands/devflow/self-review.md
 - .claude/settings.json
 d .claude/skills/
-d .claude/skills/devflow:apply-decisions/
-- .claude/skills/devflow:apply-decisions/SKILL.md
 d .claude/skills/devflow:apply-feature-knowledge/
 - .claude/skills/devflow:apply-feature-knowledge/SKILL.md
 d .claude/skills/devflow:architecture/
