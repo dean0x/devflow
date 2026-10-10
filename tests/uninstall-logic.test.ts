@@ -31,14 +31,14 @@ describe('computeAssetsToRemove: the retained set comes from what is INSTALLED',
   });
 
   it('retains across the CLOSURE — a skill another installed plugin REQUIRES survives', () => {
-    // devflow-explore requires review-methodology without owning it. Uninstalling
+    // devflow-explore requires apply-decisions without owning it. Uninstalling
     // its owner while explore is still installed must not take it away.
-    const installed = [byName('devflow-code-review'), byName('devflow-explore')];
-    const { skills } = computeAssetsToRemove([byName('devflow-code-review')], installed);
+    const installed = [byName('devflow-core-skills'), byName('devflow-explore')];
+    const { skills } = computeAssetsToRemove([byName('devflow-core-skills')], installed);
     expect(
       skills,
       'a skill an installed plugin merely requires is still a skill it needs',
-    ).not.toContain('review-methodology');
+    ).not.toContain('apply-decisions');
   });
 
   it('removes the closure of the selected plugins, not only what they own', () => {

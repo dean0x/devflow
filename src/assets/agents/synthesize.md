@@ -4,8 +4,6 @@ description: "Combines outputs from multiple agents into actionable summaries (m
 model: haiku
 effort: medium
 skills:
-  - devflow:review-methodology
-  - devflow:docs-framework
   - devflow:worktree-support
 tools:
   - Read
@@ -327,14 +325,16 @@ Synthesize outputs from multiple Review agents. Apply strict merge rules.
 3. Apply confidence-aware aggregation: when multiple Review agents flag the same file:line, boost confidence by 10% per additional Review agent (cap at 100%). **Exception — merge, don't boost:** a compliance finding and a security finding at the same file:line identify a single issue from two regulatory angles — merge into one finding, do not apply the confidence boost. Multi-Review-agent agreement on a compliance+security overlap is not corroboration; it is one issue seen by two lenses.
 4. Maintain ≥80% confidence threshold in final output
 5. If CYCLE_NUMBER > 1 and PRIOR_RESOLUTIONS is not (none): cross-reference findings against PRIOR_RESOLUTIONS to note recurring vs new issues
-6. Categorize issues into 3 buckets (from devflow:review-methodology)
+6. Categorize each issue into one of the 3 buckets below by where its line sits relative to this branch's diff. Every bucket is reported for resolution; the bucket decides only whether an issue blocks the merge
 7. Count by severity (CRITICAL, HIGH, MEDIUM, LOW)
 8. Determine merge recommendation based on blocking issues
 
 **Issue Categories:**
-- **Blocking** (Category 1): Issues in YOUR changes - CRITICAL/HIGH must block
-- **Should-Fix** (Category 2): Issues in code you touched - HIGH/MEDIUM
-- **Pre-existing** (Category 3): Legacy issues - informational only
+| Category | Scope | Effect |
+|----------|-------|--------|
+| **Blocking** (1) | Lines added or modified in this branch | CRITICAL/HIGH must block |
+| **Should-Fix** (2) | Same file or function as a change, but a line it did not touch | HIGH/MEDIUM, fix while there |
+| **Pre-existing** (3) | Lines the branch did not touch | Informational only; never blocks |
 
 **Merge Rules:**
 | Condition | Recommendation |

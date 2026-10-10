@@ -182,11 +182,21 @@ describe.skipIf(!isClaudeAvailable())('subagent skill preload', () => {
     }
   }
 
-  it('Triage agent preloads security, worktree-support, apply-decisions, apply-feature-knowledge', async () => {
+  it('Triage agent preloads worktree-support, apply-decisions, apply-feature-knowledge, and no longer security', async () => {
     await expectRetainedPreloads(
       'Triage',
       'reply with one line only — do not create, modify, or delete any file, do not run git: there are no issues to triage.',
-      ['security', 'worktree-support', 'apply-decisions', 'apply-feature-knowledge'],
+      ['worktree-support', 'apply-decisions', 'apply-feature-knowledge'],
+      ['security'],
+    );
+  }, 90000);
+
+  it('Knowledge agent preloads feature-knowledge, apply-decisions, worktree-support, and no longer apply-feature-knowledge', async () => {
+    await expectRetainedPreloads(
+      'Knowledge',
+      'reply with one line only — do not create, modify, or delete any file, do not run git: there is no feature area to document.',
+      ['feature-knowledge', 'apply-decisions', 'worktree-support'],
+      ['apply-feature-knowledge'],
     );
   }, 90000);
 
@@ -208,11 +218,12 @@ describe.skipIf(!isClaudeAvailable())('subagent skill preload', () => {
     );
   }, 90000);
 
-  it('Synthesize agent preloads review-methodology, docs-framework, worktree-support', async () => {
+  it('Synthesize agent preloads worktree-support, and no longer review-methodology or docs-framework', async () => {
     await expectRetainedPreloads(
       'Synthesize',
       'reply with one line only — do not create, modify, or delete any file, do not run git: there are no agent outputs to synthesize.',
-      ['review-methodology', 'docs-framework', 'worktree-support'],
+      ['worktree-support'],
+      ['review-methodology', 'docs-framework'],
     );
   }, 90000);
 

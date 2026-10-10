@@ -180,7 +180,7 @@ Write the amended ticket file to ${OUTDIR}/${a.title.toLowerCase().replace(/[^a-
 return phase("tracking-issue", () =>
   agent(`Write ticket files and a tracking-issue document for initiative: "${initiative}"
 
-For each ticket in the revised set, write a file to ${OUTDIR}/{slug}.md using the ticket_body_template structure:
+For each ticket in the revised set, write a file to ${OUTDIR}/{ticket-slug}.md using the ticket_body_template structure. {ticket-slug} is the ticket title run through title.toLowerCase().replace(/[^a-z0-9]+/g, '-') with nothing trimmed, the same rule the amend phase applied, so a ticket keeps the file name its amendment wrote:
 - Wave: N header
 - Depends on: list or "none"
 - Summary, Scope (In/Out + anti-features), Invariants, numbered Acceptance Criteria (at least one negative), Open Questions

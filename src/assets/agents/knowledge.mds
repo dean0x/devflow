@@ -8,7 +8,6 @@ model: sonnet
 effort: medium
 skills:
   - devflow:feature-knowledge
-  - devflow:apply-feature-knowledge
 <!-- learning:on -->
   - devflow:apply-decisions
 <!-- learning:end -->
@@ -41,7 +40,7 @@ omitClaudeMd: true
 ## Responsibilities
 
 1. **Resolve worktree path**: Use `devflow:worktree-support` to determine the working directory (WORKTREE_PATH or cwd)
-2. **Orient on feature area**: Read EXPLORATION_OUTPUTS or EXISTING_KB to understand the feature's architecture, patterns, and boundaries
+2. **Orient on feature area**: Read EXPLORATION_OUTPUTS or EXISTING_KB to understand the feature's architecture, patterns, and boundaries. EXISTING_KB is a snapshot: keep an assertion only after checking it against current code, and trust the code where they differ
 3. **Follow the feature-knowledge skill**: Execute the 4-phase process (Scan → Extract → Distill → Forge) from `devflow:feature-knowledge`, keeping the leading `## Rules` section current: one-line `KB-AP-n` / `KB-INV-n` bullets whose IDs never change or get reused, with no volatile numbers (name the pinning test or constant instead)
 <!-- learning:on -->
 4. **State decisions in words**: If DECISIONS_CONTEXT is provided, state each relevant decision or pitfall in words in the section it governs — never its ADR/PF ID, one already in EXISTING_KB included. The "Related" section links only to other knowledge bases and files.

@@ -34,7 +34,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { spawnSync } from 'child_process'
 import { createHash } from 'crypto'
-import { mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync } from 'fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync } from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 import { initCommand } from '../src/cli/commands/init.js'
@@ -248,6 +248,12 @@ function describeConfig(config: InstallConfig): void {
       expect(renderReinitDiff(first, second)).toBe('(none)')
     })
 
+    it('the sandbox HOME holds devflow:docs-framework after the install (AC-502)', () => {
+      const skill = path.join(sandbox().home, '.claude', 'skills', 'devflow:docs-framework', 'SKILL.md')
+      expect(sandbox().home.startsWith(os.tmpdir()), 'the install ran in a temp HOME').toBe(true)
+      expect(existsSync(skill), skill).toBe(true)
+    })
+
     if (config.name === HOOK_MATRIX_CONFIG) describeHookMatrix(sandbox)
 
     it('a non-interactive uninstall restores the baseline apart from the golden keep list (TP-6)', () => {
@@ -259,6 +265,14 @@ function describeConfig(config: InstallConfig): void {
 }
 
 for (const config of INSTALL_CONFIGS.filter(c => c.name !== GENERATOR_CONFIG)) describeConfig(config)
+
+describe('docs-framework stays installed under every snapshot selection (AC-502)', () => {
+  it.each(INSTALL_CONFIGS.map(c => c.name))('install-snapshot-%s lists the skill and its SKILL.md', (name) => {
+    const tree = loadGolden(installGoldenName(findConfig(name)))
+    expect(tree).toContain('d .claude/skills/devflow:docs-framework/')
+    expect(tree).toContain('- .claude/skills/devflow:docs-framework/SKILL.md')
+  })
+})
 
 describe('re-init goldens (TP-5, AC-3)', () => {
   it.each(INSTALL_CONFIGS.map(c => c.name))('install-snapshot-%s records no re-init difference', (name) => {

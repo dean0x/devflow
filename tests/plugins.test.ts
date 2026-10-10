@@ -23,6 +23,7 @@ import {
   type PluginDefinition,
 } from '../src/core/plugins.js';
 import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
+import { resolvePluginsToInstall } from '../src/cli/commands/init-seed.js';
 
 describe('getAllSkillNames', () => {
   it('returns a deduplicated list of skills across all plugins', () => {
@@ -150,12 +151,17 @@ describe('skillsOf', () => {
     expect(closure.size).toBe(new Set([...explore.skills, ...explore.requires]).size);
   });
 
-  it('review-methodology reaches devflow-explore through its Synthesize agent', () => {
+  it('apply-decisions reaches devflow-explore through its Knowledge agent and its own thread', () => {
     // The widened corpus (design review C1) is what puts it there: explore owns
-    // none of the pattern skills, and synthesize.md names review-methodology,
-    // whose own body then names the ten focus skills.
-    expect(byName('devflow-explore').requires).toContain('review-methodology');
-    expect(skillsOf([byName('devflow-explore')]).has('review-methodology')).toBe(true);
+    // no consumer skill, and knowledge.mds and explore.mds name apply-decisions.
+    // Synthesize no longer preloads review-methodology, so neither that skill nor
+    // the ten focus skills its body names is part of explore's closure any more.
+    expect(byName('devflow-explore').requires).toContain('apply-decisions');
+    const closure = skillsOf([byName('devflow-explore')]);
+    expect(closure.has('apply-decisions')).toBe(true);
+    for (const gone of ['review-methodology', 'security', 'architecture', 'docs-framework']) {
+      expect(closure.has(gone), `${gone} must not reach devflow-explore`).toBe(false);
+    }
   });
 
   it('deduplicates across plugins and is empty for an empty selection', () => {
@@ -181,6 +187,26 @@ describe('skillsOf', () => {
   });
 });
 
+describe('docs-framework stays installed under every selection (AC-502)', () => {
+  // Synthesize no longer preloads docs-framework and most plugins stopped requiring
+  // it, so the skill now reaches a machine only through devflow-core-skills, which
+  // init adds to every non-empty selection. The property is held at the registry:
+  // one selection per plugin, resolved the way init resolves it.
+  it('every single-plugin selection, with or without ambient, installs docs-framework', () => {
+    for (const plugin of DEVFLOW_PLUGINS) {
+      for (const ambient of [false, true]) {
+        const installed = resolvePluginsToInstall([plugin.name], ambient, DEVFLOW_PLUGINS);
+        expect(skillsOf(installed).has('docs-framework'), `${plugin.name} (ambient ${ambient})`).toBe(true);
+      }
+    }
+  });
+
+  it('the default selection installs it, and devflow-core-skills owns it', () => {
+    expect(skillsOf(resolvePluginsToInstall([], false, DEVFLOW_PLUGINS)).has('docs-framework')).toBe(true);
+    expect(skillOwners('docs-framework')).toContain('devflow-core-skills');
+  });
+});
+
 describe('skillOwners', () => {
   it('returns every declaring plugin, not the first', () => {
     const owners = skillOwners('worktree-support');
@@ -197,9 +223,9 @@ describe('skillOwners', () => {
   });
 
   it('never reports a plugin that merely requires the skill', () => {
-    // devflow-explore requires review-methodology; devflow-code-review owns it.
-    expect(skillOwners('review-methodology')).not.toContain('devflow-explore');
-    expect(skillOwners('review-methodology')).toContain('devflow-code-review');
+    // devflow-explore requires apply-decisions; devflow-core-skills owns it.
+    expect(skillOwners('apply-decisions')).not.toContain('devflow-explore');
+    expect(skillOwners('apply-decisions')).toContain('devflow-core-skills');
   });
 
   it('is empty for an unknown name', () => {
@@ -217,8 +243,8 @@ describe('buildScopedSkillsMap', () => {
 
   it('attributes a required-but-unowned skill to its real owner', () => {
     const map = buildScopedSkillsMap([explore]);
-    expect(map.get('review-methodology')).toBe(skillOwners('review-methodology')[0]);
-    expect(map.get('review-methodology')).not.toBe('devflow-explore');
+    expect(map.get('apply-decisions')).toBe(skillOwners('apply-decisions')[0]);
+    expect(map.get('apply-decisions')).not.toBe('devflow-explore');
   });
 
   it('attributes an owned skill to the selected plugin that owns it', () => {

@@ -254,7 +254,7 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     effort: 'high',
     policy: { kind: 'allow', tools: ['Read', 'Grep', 'Glob', 'Bash'] },
     omitClaudeMd: true,
-    skills: ['security', 'worktree-support', 'apply-decisions', 'apply-feature-knowledge'],
+    skills: ['worktree-support', 'apply-decisions', 'apply-feature-knowledge'],
     digest: ['context-economy', 'untrusted-input'],
   },
   /**
@@ -303,7 +303,7 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     effort: 'medium',
     policy: { kind: 'allow', tools: ['Read', 'Grep', 'Glob', 'Write', 'Edit', 'Bash'] },
     omitClaudeMd: true,
-    skills: ['feature-knowledge', 'apply-feature-knowledge', 'apply-decisions', 'worktree-support'],
+    skills: ['feature-knowledge', 'apply-decisions', 'worktree-support'],
     digest: ['context-economy', 'untrusted-input', 'no-secrets'],
   },
   /**
@@ -344,7 +344,7 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     effort: 'medium',
     policy: { kind: 'allow', tools: ['Read', 'Write', 'Edit', 'Bash', 'Grep', 'Glob', 'StructuredOutput'] },
     omitClaudeMd: true,
-    skills: ['review-methodology', 'docs-framework', 'worktree-support'],
+    skills: ['worktree-support'],
     digest: ['context-economy', 'untrusted-input', 'no-secrets'],
   },
   skim: {
@@ -417,7 +417,7 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     effort: null,
     policy: { kind: 'allow', tools: ['Bash', 'Read', 'ToolSearch'] },
     omitClaudeMd: true,
-    skills: ['git', 'boundary-validation'],
+    skills: ['git'],
     digest: ['context-economy', 'untrusted-input', 'no-secrets', 'bounded-loops'],
   },
 };

@@ -4,7 +4,6 @@ description: Background tracker-conventions agent — probes the configured issu
 model: sonnet
 skills:
   - devflow:git
-  - devflow:boundary-validation
 tools: ["Bash", "Read", "ToolSearch"]
 omitClaudeMd: true
 ---

@@ -7,7 +7,6 @@ description: Validates review issues against blast-radius disposition matrix. As
 model: opus
 effort: high
 skills:
-  - devflow:security
   - devflow:worktree-support
 <!-- learning:on -->
   - devflow:apply-decisions
@@ -77,6 +76,8 @@ Apply the disposition matrix to each group's **primary only**.
 **First match wins. Apply in the order listed.**
 
 **0. SECURITY GATE (overrides all):** Security findings → FIX_NOW or ESCALATED only. Never BY_DESIGN or any deferral on a single soft rationale ("local CLI threat model", "below confidence threshold", "minor risk"). Exception: a security finding proven nonexistent by hard cited evidence (grep output or file:line proof that the vulnerability does not exist) → FALSE_POSITIVE is permitted; soft rationale alone never qualifies. Security finding with ambiguous context → ESCALATED, not dismissed.
+
+A security finding is one whose `type` is the `security` focus, or whose description names injection or an unescaped sink, authn/authz, secrets or crypto, untrusted input, deserialization or integrity, SSRF, unpinned supply-chain input, or a check-then-act race. Never quote a live secret in a verdict or its reasoning: cite `file:line` and the secret's type, and recommend rotation.
 
 **1. FALSE_POSITIVE** — Review agent factually wrong.
 REQUIRES cited evidence: grep output, file:line showing the issue does not exist, or the Review agent demonstrably misunderstood the code. Cannot cite evidence → cannot use this verdict.
