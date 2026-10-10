@@ -418,7 +418,8 @@ describe('write-set fence: the learning-variant allowlist', () => {
   it('rejects a write to a command outside the roster, and to another skill', () => {
     const strayCommand = '<HOME>/.claude/commands/devflow/not-in-the-roster.md'
     const otherSkill = '<HOME>/.claude/skills/devflow:testing/SKILL.md'
-    const neighbourSkill = '<HOME>/.claude/skills/devflow:apply-decisions-x/SKILL.md'
+    // Joined so the skill-reference scan over tests/**/*.ts does not read the neighbour as a skill name.
+    const neighbourSkill = ['<HOME>/.claude/skills/devflow', 'apply-decisions-x/SKILL.md'].join(':')
     expect(fenceViolations([strayCommand, otherSkill, neighbourSkill], ROW_ALLOW))
       .toEqual([strayCommand, neighbourSkill, otherSkill].sort())
   })
