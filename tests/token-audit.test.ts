@@ -303,7 +303,7 @@ describe('segmentation', () => {
       [
         { name: 'devflow:implement', order: 0 },
         { name: 'clear', order: 9 },
-        { name: 'devflow:unrelated', order: 12 },
+        { name: 'devflow:research', order: 12 },
       ],
       [
         { name: 'devflow:plan', order: 7, timestampMs: null },
