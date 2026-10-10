@@ -270,8 +270,9 @@ const BUDGET_LOADED_SET = 62_433;
  * by #393 from a measured 74_977 (git.md -315 ch, the site rung +28 ch): 75_057. Re-derived by #423 from a measured 73_255 (the same
  * two preloaded-skill cuts as the GitHub row): 73_335. The next
  * addition to the contract or to a Jira mechanics file must fund itself with a cut
- * rather than reach for slack. Re-derived by #425 from a measured 72_715: 72_795, the same
- * git.md cut with `tracker/_contract.md` billed once per spawn beside the tool-call contract. Trimming
+ * rather than reach for slack. Re-derived by #425 to 72_795, the same
+ * git.md cut with `tracker/_contract.md` billed once per spawn beside the tool-call contract.
+ * The row measures 72_737 today, 58 ch under this ceiling. Trimming
  * `references/tracker/_mcp.md` is the honest first move: it is contract prose, it
  * is the single largest term this row adds over the GitHub one, and a pass over it
  * is cheaper than another ceiling.
@@ -294,8 +295,8 @@ const BUDGET_LOADED_SET_JIRA = 72_795;
  * Derived from a measured 75_860 (setup-task and its step 1c hop into
  * ensure-traceable-issue) plus the 80 ch general headroom above: 75_940. Re-derived by
  * #393 from a measured 75_573 (git.md -315 ch, the site rung +28 ch): 75_653. Re-derived by #423 from a measured 73_851 (the same
- * two preloaded-skill cuts as the GitHub row): 73_931. Re-derived by #425 from a measured 73_311:
- * 73_391, as the Jira row. This is the
+ * two preloaded-skill cuts as the GitHub row): 73_931. Re-derived by #425 to
+ * 73_391, as the Jira row. The row measures 73_333 today, 58 ch under this ceiling. This is the
  * LARGEST of the four ceilings but not the binding one: a character added to git.md
  * is a character added to every row, and every row carries the same headroom. Re-run
  * this file for each row's current headroom.

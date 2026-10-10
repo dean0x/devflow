@@ -45,8 +45,9 @@ export function scriptsDir(): string {
 
 /**
  * Compiled commands directory: dist/commands/
- * Single lookup directory for installed commands — .mds compile output
- * plus verbatim hand-authored .md copies.
+ * Single lookup directory for installed commands: one compiled file per `.mds`
+ * command host in src/assets/commands/. A host that carries a learning arm also
+ * has a learning-off variant (see learningOffDir).
  */
 export function commandsDir(): string {
   return join(getPackageRoot(), 'dist', 'commands');
