@@ -49,6 +49,9 @@ export const CLAUDE_MD_AUDIT_STAMP_FILE = '.claude-md-audit';
  */
 export const CLAUDE_MD_AUDIT_STAMP_TMP_PREFIX = `${CLAUDE_MD_AUDIT_STAMP_FILE}.tmp.`;
 
+/** The stamp is created owner-only, the mode the hook's `umask 077` write gives it. */
+const STAMP_CREATE_MODE = 0o600;
+
 // ── Transcribed shapes (claude-md-audit.cjs JSDoc) ─────────────────────────────
 
 /** A finding: an import over the file threshold, or a root whose chain totals over the chain threshold. */
@@ -312,7 +315,8 @@ export async function writeClaudeMdAuditStamp(devflowDir: string, text: string):
     if (existing !== null && !existing.isFile()) {
       return { ok: false, error: { kind: 'refused', detail: existing.isSymbolicLink() ? 'the stamp path is a symbolic link' : 'the stamp path is not a regular file' } };
     }
-    await writeFileAtomicExclusive(stampPath, text);
+    // Owner-only, as the hook writes it: the stamp names the user's project paths.
+    await writeFileAtomicExclusive(stampPath, text, STAMP_CREATE_MODE);
     return { ok: true, value: undefined };
   } catch (err: unknown) {
     return { ok: false, error: { kind: 'write-failed', detail: err instanceof Error ? err.message : String(err) } };

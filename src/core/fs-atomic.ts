@@ -30,22 +30,27 @@ import { promises as fs } from 'fs';
  *
  * @param filePath - Absolute path to the target file.
  * @param data - UTF-8 encoded content to write.
+ * @param createMode - Permission bits the temp file is CREATED with (masked by the
+ *   umask), so a file that must be owner-only is never readable by others, not even
+ *   between the write and the rename. Omitted, the umask default applies. Either way
+ *   an existing target's mode wins (below).
  */
-export async function writeFileAtomicExclusive(filePath: string, data: string): Promise<void> {
+export async function writeFileAtomicExclusive(filePath: string, data: string, createMode?: number): Promise<void> {
   // PID-scope the tmp name so concurrent writers from different processes
   // (e.g., two Claude Code sessions) never collide on the same .tmp path.
   // mirrors proxy-log.ts rotation at src/core/proxy-log.ts which PID-scopes
   // for the same reason.
   const tmp = `${filePath}.tmp.${process.pid}`;
+  const options = { encoding: 'utf-8', flag: 'wx', ...(createMode === undefined ? {} : { mode: createMode }) } as const;
   try {
-    await fs.writeFile(tmp, data, { encoding: 'utf-8', flag: 'wx' });
+    await fs.writeFile(tmp, data, options);
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
     // Stale or adversarially-placed .tmp — unlink and retry once.
     // Race-tolerant: if a concurrent writer already removed the file,
     // the unlinkSync in the CJS counterpart silently ignores ENOENT here too.
     try { await fs.unlink(tmp); } catch { /* race — already removed */ }
-    await fs.writeFile(tmp, data, { encoding: 'utf-8', flag: 'wx' });
+    await fs.writeFile(tmp, data, options);
   }
 
   // Preserve the target's permission mode across the atomic replace.

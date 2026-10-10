@@ -795,6 +795,19 @@ describe('claude-md-audit', () => {
       expect(fs.readdirSync(devflowDir()).filter(n => n.includes('.tmp.'))).toEqual([]);
     });
 
+    it('creates the stamp owner-only whatever the umask, as the hook does', async () => {
+      const previous = process.umask(0o022);
+      try {
+        expect((await writeClaudeMdAuditStamp(devflowDir(), 'V 1\nR /x\n')).ok).toBe(true);
+        expect(fs.statSync(stampPath()).mode & 0o777).toBe(0o600);
+        // A rewrite keeps the mode the stamp already has.
+        expect((await writeClaudeMdAuditStamp(devflowDir(), 'V 1\nR /y\n')).ok).toBe(true);
+        expect(fs.statSync(stampPath()).mode & 0o777).toBe(0o600);
+      } finally {
+        process.umask(previous);
+      }
+    });
+
     it('rewrites an existing regular stamp', async () => {
       fs.writeFileSync(stampPath(), 'old\n');
       expect((await writeClaudeMdAuditStamp(devflowDir(), 'new\n')).ok).toBe(true);
