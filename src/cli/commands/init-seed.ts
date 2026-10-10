@@ -16,6 +16,7 @@
 import {
   resolveExistingViewMode,
   settingHoldsManagedShape,
+  settingHoldsUserValue,
   FLAG_REGISTRY,
   defaultValueOf,
   readViewMode,
@@ -151,6 +152,44 @@ export function resolveSeedFlags(
   for (const flag of registry) {
     if (flag.id in result) continue; // known → keep
     result[flag.id] = defaultValueOf(flag); // single default-rule source (CONS-M2)
+  }
+  return result;
+}
+
+/**
+ * D-ADOPT-RESPECTS-USER: seed a guarded setting flag OFF when adopting it ON would
+ * overwrite a value the user already owns.
+ *
+ * `resolveSeedFlags` adopts every flag the manifest does not record at its
+ * `defaultValue`. For a flag whose target is a settings.json key with a
+ * `settingDeleteGuard`, adopting ON writes its managed payload over whatever is on
+ * disk (the guard protects deletion, not writes). When the key already holds a value
+ * that is not the managed shape - a user's own `"1h"` under `subagentPromptCacheTtl`
+ * - that write would silently replace a deliberate choice. Such a flag is seeded
+ * `false` instead; with the record then claiming `false`, the converge pipeline
+ * neither writes nor deletes the user's value.
+ *
+ * Scope: only flags ABSENT from the manifest (or all of them on a fresh install, when
+ * `manifestFlags` is null). A flag the manifest records keeps its recorded value, so
+ * an explicit enable still wins. `--reset` hands this function an empty settings
+ * snapshot (resolveResetGatedInputs), so nothing is detected and the factory default
+ * stands. The rule is generic over guarded setting flags: the registry is not
+ * consulted for particular ids, and `settingHoldsUserValue` is the one place that
+ * decides "the disk holds something that is not ours". For a flag whose default is
+ * already OFF (suppress-attribution) it changes nothing.
+ *
+ * Pure function - the settings snapshot is read by the caller and passed in.
+ */
+export function respectUserOwnedSettings(
+  flags: FlagsRecord,
+  manifestFlags: FlagsRecord | null,
+  settingsSnapshot: string,
+): FlagsRecord {
+  const result: FlagsRecord = { ...flags };
+  for (const flag of FLAG_REGISTRY) {
+    const adoptedAtDefault = manifestFlags === null || !(flag.id in manifestFlags);
+    if (!adoptedAtDefault) continue;
+    if (settingHoldsUserValue(settingsSnapshot, flag.id)) result[flag.id] = false;
   }
   return result;
 }
@@ -311,7 +350,9 @@ export function resolveInitSeed(
   // seedManifest?.features.flags may be absent at runtime on very old manifests not yet
   // healed — ?? null collapses to fresh-install behavior (all flags at registry defaults).
   const manifestFlags: FlagsRecord | null = seedManifest?.features.flags ?? null;
-  const flags = resolveSeedFlags(manifestFlags);
+  const flags = respectUserOwnedSettings(
+    resolveSeedFlags(manifestFlags), manifestFlags, settingsSnapshot,
+  );
 
   const manifestPlugins: string[] | null = seedManifest !== null ? seedManifest.plugins : null;
   const { workflowPlugins, languagePlugins } = resolveSeedPlugins(

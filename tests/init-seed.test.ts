@@ -143,6 +143,7 @@ describe('resolveSeedFlags', () => {
     expect(result['tool-search']).toBe(true);
     expect(result['lsp']).toBe(true);
     expect(result['prompt-caching-1h']).toBe(true);
+    expect(result['subagent-cache-5m']).toBe(true);
     expect(result['show-turn-duration']).toBe(true);
     expect(result['clear-context-on-plan']).toBe(true);
     // Default-OFF boolean flags are false
@@ -1156,5 +1157,71 @@ describe('resolveInitSeed — suppress-attribution seeding (D27)', () => {
     expect(seed.flags['suppress-attribution']).toBe(false);
     // Non-vacuity: neighbouring flag from prior manifest survives unchanged.
     expect(seed.flags['tui']).toBe(true);
+  });
+});
+
+// ── resolveInitSeed — D-ADOPT-RESPECTS-USER (subagent-cache-5m) ───────────────
+//
+// A guarded setting flag that is absent from the manifest is adopted at its
+// defaultValue. When the settings already hold a value the flag's guard does not
+// recognise (a user's own "1h"), adopting ON would overwrite it on the next write —
+// so the flag seeds OFF and init leaves the value alone.
+
+describe('resolveInitSeed — D-ADOPT-RESPECTS-USER (subagent-cache-5m)', () => {
+  const FLAG = 'subagent-cache-5m';
+  const withFlags = (flags: FlagsRecord) =>
+    makeManifest({ features: { ...makeManifest().features, flags } });
+  const settingsWith = (value: unknown): string => JSON.stringify({ subagentPromptCacheTtl: value });
+
+  it('re-init over a user "1h" with the flag absent from the manifest → seeds OFF (AC-203)', () => {
+    const seed = resolveInitSeed(withFlags({ tui: true }), settingsWith('1h'), DEVFLOW_PLUGINS);
+    expect(seed.flags[FLAG]).toBe(false);
+    // Non-vacuity: neighbours of the same manifest are untouched by the rule.
+    expect(seed.flags['tui']).toBe(true);
+    expect(seed.flags['prompt-caching-1h']).toBe(true);
+  });
+
+  it('no manifest at all but a user "1h" on disk → seeds OFF', () => {
+    const seed = resolveInitSeed(null, settingsWith('1h'), DEVFLOW_PLUGINS);
+    expect(seed.flags[FLAG]).toBe(false);
+  });
+
+  it('a user value that is not a string is also respected', () => {
+    expect(resolveInitSeed(null, settingsWith({ main: '1h' }), DEVFLOW_PLUGINS).flags[FLAG]).toBe(false);
+    expect(resolveInitSeed(null, settingsWith(null), DEVFLOW_PLUGINS).flags[FLAG]).toBe(false);
+  });
+
+  it('flag absent and no key on disk → adopted at the default (ON)', () => {
+    expect(resolveInitSeed(withFlags({ tui: true }), JSON.stringify({}), DEVFLOW_PLUGINS).flags[FLAG]).toBe(true);
+    expect(resolveInitSeed(null, JSON.stringify({}), DEVFLOW_PLUGINS).flags[FLAG]).toBe(true);
+  });
+
+  it('flag absent and the managed "5m" on disk → adopted ON', () => {
+    expect(resolveInitSeed(withFlags({ tui: true }), settingsWith('5m'), DEVFLOW_PLUGINS).flags[FLAG]).toBe(true);
+  });
+
+  it('a malformed or empty settings snapshot never blocks adoption', () => {
+    expect(resolveInitSeed(null, 'not json', DEVFLOW_PLUGINS).flags[FLAG]).toBe(true);
+    expect(resolveInitSeed(null, '', DEVFLOW_PLUGINS).flags[FLAG]).toBe(true);
+  });
+
+  it('a flag the manifest already records keeps its recorded value over a user "1h"', () => {
+    expect(resolveInitSeed(withFlags({ [FLAG]: true }), settingsWith('1h'), DEVFLOW_PLUGINS).flags[FLAG]).toBe(true);
+    expect(resolveInitSeed(withFlags({ [FLAG]: false }), settingsWith('1h'), DEVFLOW_PLUGINS).flags[FLAG]).toBe(false);
+    expect(resolveInitSeed(withFlags({ [FLAG]: null }), settingsWith('1h'), DEVFLOW_PLUGINS).flags[FLAG]).toBeNull();
+  });
+
+  it('--reset overwrites: the emptied settings snapshot seeds the flag ON (ADR-014)', () => {
+    const { seedManifest, seedSettings } = resolveResetGatedInputs(
+      true, withFlags({ tui: true }), null, settingsWith('1h'),
+    );
+    expect(resolveInitSeed(seedManifest, seedSettings, DEVFLOW_PLUGINS).flags[FLAG]).toBe(true);
+  });
+
+  it('leaves the suppress-attribution seeding unchanged (custom value absent from manifest → OFF)', () => {
+    const custom = JSON.stringify({ attribution: { commit: 'Acme', pr: 'Acme' } });
+    expect(resolveInitSeed(withFlags({ tui: true }), custom, DEVFLOW_PLUGINS).flags['suppress-attribution']).toBe(false);
+    const managed = JSON.stringify({ attribution: { commit: '', pr: '' } });
+    expect(resolveInitSeed(withFlags({ tui: true }), managed, DEVFLOW_PLUGINS).flags['suppress-attribution']).toBe(true);
   });
 });

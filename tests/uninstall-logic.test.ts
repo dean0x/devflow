@@ -2192,7 +2192,7 @@ describe('runCleanupPhase (A8)', () => {
 // registry entry makes the "custom attribution survives" case fail here.
 // ---------------------------------------------------------------------------
 
-describe('R5: uninstall settings cleanup — attribution shape guard (D27, production path)', () => {
+describe('R5: uninstall settings cleanup — shape guards (D27 attribution, D-GUARD-SCALAR subagent cache; production path)', () => {
   let tmpHome: string;
   let tmpClaudeDir: string;
   let tmpCwd: string;
@@ -2276,6 +2276,38 @@ describe('R5: uninstall settings cleanup — attribution shape guard (D27, produ
     // Non-vacuity anchor: the managed env flag must be stripped, proving
     // the settings loop ran; an early-exit would leave ENABLE_TOOL_SEARCH intact.
     expect(after.env?.ENABLE_TOOL_SEARCH, 'managed env flag stripped → settings loop ran').toBeUndefined();
+  });
+
+  it('removes the devflow-managed subagent cache TTL "5m" (AC-202)', async () => {
+    await fs.writeFile(settingsPath, JSON.stringify({
+      subagentPromptCacheTtl: '5m',
+      model: 'opus',
+      env: { ENABLE_PROMPT_CACHING_1H: 'true' },
+    }, null, 2), 'utf-8');
+
+    await runCleanup();
+
+    const after = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
+    expect(after).not.toHaveProperty('subagentPromptCacheTtl');
+    expect(after.model, 'unmanaged keys must survive').toBe('opus');
+    // Non-vacuity anchor: the managed env flag is stripped by the same pass.
+    expect(after.env?.ENABLE_PROMPT_CACHING_1H, 'managed env flag stripped → settings loop ran').toBeUndefined();
+  });
+
+  it('preserves a user-set subagent cache TTL "1h" (scalar shape guard, AC-202)', async () => {
+    await fs.writeFile(settingsPath, JSON.stringify({
+      subagentPromptCacheTtl: '1h',
+      model: 'opus',
+      env: { ENABLE_PROMPT_CACHING_1H: 'true' },
+    }, null, 2), 'utf-8');
+
+    await runCleanup();
+
+    const after = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
+    expect(after.subagentPromptCacheTtl).toBe('1h');
+    expect(after.model).toBe('opus');
+    // Non-vacuity anchor: the managed env flag was stripped, so the loop really ran.
+    expect(after.env?.ENABLE_PROMPT_CACHING_1H, 'managed env flag stripped → settings loop ran').toBeUndefined();
   });
 
   it('leaves settings.json without an attribution key untouched', async () => {
