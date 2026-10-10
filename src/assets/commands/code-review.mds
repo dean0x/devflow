@@ -174,6 +174,9 @@ Per worktree, in order. Each `git` command here writes to a file and prints noth
 
 #### Step 1.1: Classify the diff
 
+**Produces:** DIFF_CLASS, CHANGED_PATHS, REVIEW_FOCUS_LIST (reduced classes)
+**Requires:** DIFF_RANGE, REVIEW_DIR
+
 List the changed paths into `{REVIEW_DIR}/paths.txt` and print only the line count (drop `-C "{WORKTREE_PATH}"` when there is no `WORKTREE_PATH`):
 
 ```bash
@@ -202,6 +205,9 @@ A mixed non-code diff runs the union of the sets of the classes it holds. Langua
 
 #### Step 1.2: Choose the focuses
 
+**Produces:** REVIEW_FOCUS_LIST (code class)
+**Requires:** DIFF_CLASS, CHANGED_PATHS, COMPLIANCE_ACTIVE
+
 When `DIFF_CLASS` is `code`, read the file types from the paths in `paths.txt` to determine conditional reviews:
 
 | Condition | Adds Review |
@@ -228,6 +234,9 @@ Installed language focuses: (none)
 A language focus is spawned only when its file-type condition above fires AND its name appears in that stamped line. A focus missing from the line is never spawned, even when its trigger fires. The eight core focuses are unconditional and are never stamp-gated.
 
 #### Step 1.3: Write the diff files
+
+**Produces:** DIFF_FILES
+**Requires:** DIFF_RANGE, REVIEW_DIR, REVIEW_FOCUS_LIST
 
 Write `diff.patch` once per worktree, by redirect:
 
