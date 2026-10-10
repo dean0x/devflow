@@ -294,7 +294,8 @@ describe('Guard 4 (command integrity): declared commands ↔ source files', () =
 // Commands that contain NO subagent_type pattern at all are skipped from both
 // checks (they use a different spawn syntax, e.g. agentType in dynamic-*).
 //
-// Built-in Explore agent (not a registered agent file) is excluded from both checks.
+// Explore is a registered agent like any other: devflow ships an agent named Explore that
+// overrides the Claude Code built-in, so it is declared and checked in both directions.
 // Fails LOUD when dist/commands/ is absent — a silent skip is not a guard.
 
 describe('Guard 5 (build-gated): spawned agents ↔ plugin agent declarations', () => {
@@ -306,9 +307,6 @@ describe('Guard 5 (build-gated): spawned agents ↔ plugin agent declarations', 
   // Also matches agentType: "Name" (used by dynamic-* Workflow commands).
   // Harvesting this signal lets Guard 5 verify dynamic plugin agents without a blanket exemption.
   const AGENT_TYPE_RE = /agentType:\s*"([^"]+)"/gi;
-
-  // Built-in agent not backed by a src/assets/agents/ file — excluded from all checks.
-  const EXCLUDED_AGENTS_NORMALIZED = new Set(['explore']);
 
   /**
    * Normalize an agent name for comparison across naming conventions:
@@ -356,12 +354,10 @@ describe('Guard 5 (build-gated): spawned agents ↔ plugin agent declarations', 
       // Workflow commands (which use agentType) are covered without a blanket exemption.
       const spawned = new Set<string>();
       for (const m of content.matchAll(SPAWN_RE)) {
-        const norm = normalize(m[1]);
-        if (!EXCLUDED_AGENTS_NORMALIZED.has(norm)) spawned.add(norm);
+        spawned.add(normalize(m[1]));
       }
       for (const m of content.matchAll(AGENT_TYPE_RE)) {
-        const norm = normalize(m[1]);
-        if (!EXCLUDED_AGENTS_NORMALIZED.has(norm)) spawned.add(norm);
+        spawned.add(normalize(m[1]));
       }
 
       // If the command uses no known spawn syntax at all, skip both checks.

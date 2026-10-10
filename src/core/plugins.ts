@@ -130,7 +130,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-plan',
     description: 'Unified design planning with gap analysis and design review',
     commands: ['/plan'],
-    agents: ['git', 'skim', 'synthesize', 'design'],
+    agents: ['git', 'skim', 'synthesize', 'design', 'explore'],
     skills: ['gap-analysis', 'design-review', 'patterns', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
     // D-CHARTER-BOUNDED-INLINE: /plan's main thread orchestrates and loads no
     // companion skills, so `requires:` lists only skills this plugin's command,
@@ -227,7 +227,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-debug',
     description: 'Debugging workflows with competing hypothesis investigation via parallel subagents',
     commands: ['/debug'],
-    agents: ['git', 'synthesize', 'simplify', 'knowledge'],
+    agents: ['git', 'synthesize', 'simplify', 'knowledge', 'explore'],
     skills: ['git', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
     requires: [
       'apply-decisions',
@@ -254,7 +254,9 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-explore',
     description: 'Codebase exploration with structured analysis and optional knowledge base creation',
     commands: ['/explore'],
-    agents: ['skim', 'synthesize', 'knowledge'],
+    // 'explore' is devflow's override of Claude Code's built-in Explore agent, spawned by
+    // type name (D-EXPLORE-OVERRIDE and D-EXPLORE-NO-CLOBBER, targets/claude-code/agent-type-owner.ts).
+    agents: ['skim', 'synthesize', 'knowledge', 'explore'],
     skills: ['worktree-support', 'apply-feature-knowledge', 'feature-knowledge'],
     requires: [
       'apply-decisions',
@@ -353,7 +355,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-ambient',
     description: 'Orchestrator ambient mode — session charter, per-prompt reminder, plan handoff',
     commands: [],
-    agents: ['code', 'validate', 'simplify', 'scrutinize', 'evaluate', 'test', 'skim', 'review', 'git', 'synthesize', 'triage', 'design', 'knowledge', 'research', 'learning'],
+    agents: ['code', 'validate', 'simplify', 'scrutinize', 'evaluate', 'test', 'skim', 'review', 'git', 'synthesize', 'triage', 'design', 'knowledge', 'research', 'learning', 'explore'],
     skills: [
       'review-methodology',
       'security',

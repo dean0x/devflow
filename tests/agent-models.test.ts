@@ -37,6 +37,7 @@ import {
 } from '../src/core/agent-models.js';
 import { CLAUDE_MODEL_ALIASES } from '../src/core/external-models.js';
 import { getAllAgentNames } from '../src/core/plugins.js';
+import { resolveAgentSource } from './helpers.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1649,5 +1650,71 @@ describe('carryAgentOverrides', () => {
     expect(carryAgentOverrides(crlfVariant, installed)).toBe(
       '---\r\nname: Code\r\nmodel: opus\r\neffort: low\r\n---\r\n\r\nbody OFF\r\n',
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC-301: a saved `devflow agents` override still wins over a shipped sonnet tier
+// ---------------------------------------------------------------------------
+
+describe('a saved override wins over the shipped sonnet tiers of Evaluate and Explore (AC-301)', () => {
+  let installDir: string;
+  let devflowDir: string;
+
+  beforeEach(async () => {
+    installDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-ac301-install-'));
+    devflowDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-ac301-state-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(installDir, { recursive: true, force: true });
+    await fs.rm(devflowDir, { recursive: true, force: true });
+  });
+
+  it('reads sonnet from the shipped files: Evaluate at medium effort, Explore at high', async () => {
+    const defaults = await loadShippedAgentDefaults();
+    expect(defaults['evaluate']).toMatchObject({ model: 'sonnet', effort: 'medium' });
+    expect(defaults['explore']).toMatchObject({ model: 'sonnet', effort: 'high' });
+  });
+
+  it.each(['evaluate', 'explore'])('%s: the override survives a re-init that copies the shipped file again', async (name) => {
+    await saveAgentMapping(devflowDir, { version: 1, agents: { [name]: { model: 'opus', effort: 'low' } } });
+    const target = path.join(installDir, `${name}.md`);
+
+    // Two inits in a row: each copies the shipped file (sonnet), then the mapping is re-applied.
+    for (let init = 0; init < 2; init++) {
+      await fs.writeFile(target, resolveAgentSource(name).content, 'utf-8');
+      await reapplyAgentMapping({ installDir, devflowDir, proxyEnabled: false });
+
+      const after = await fs.readFile(target, 'utf-8');
+      expect(after, `${name} init ${init + 1}`).toMatch(/^model: opus$/m);
+      expect(after, `${name} init ${init + 1}`).toMatch(/^effort: low$/m);
+    }
+  });
+
+  it('applying an Explore override touches only model and effort: the read-only frontmatter stays', async () => {
+    const shipped = resolveAgentSource('explore').content;
+    const target = path.join(installDir, 'explore.md');
+    await fs.writeFile(target, shipped, 'utf-8');
+    await saveAgentMapping(devflowDir, { version: 1, agents: { explore: { model: 'haiku' } } });
+
+    await reapplyAgentMapping({ installDir, devflowDir, proxyEnabled: false });
+
+    const after = await fs.readFile(target, 'utf-8');
+    expect(after).toMatch(/^model: haiku$/m);
+    expect(after).toMatch(/^omitClaudeMd: true$/m);
+    expect(after).toMatch(/^tools:\n {2}- Read\n {2}- Bash$/m);
+    expect(after.replace(/^model: haiku$/m, 'model: sonnet')).toBe(shipped);
+  });
+
+  it('with no override the shipped sonnet stays', async () => {
+    for (const name of ['evaluate', 'explore']) {
+      const target = path.join(installDir, `${name}.md`);
+      await fs.writeFile(target, resolveAgentSource(name).content, 'utf-8');
+    }
+    await reapplyAgentMapping({ installDir, devflowDir, proxyEnabled: false });
+    for (const name of ['evaluate', 'explore']) {
+      expect(await fs.readFile(path.join(installDir, `${name}.md`), 'utf-8')).toMatch(/^model: sonnet$/m);
+    }
   });
 });

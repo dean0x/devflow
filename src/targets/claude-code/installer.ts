@@ -9,6 +9,7 @@ import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '
 import { generatedReferenceManifest, installedReferenceManifest, PR_HOST_DESTINATION_ROOT, SKILL_REFS_SKILL_NAME, TRACKER_DESTINATION_ROOT } from '../../core/mds-variants.js';
 import { sweepOrphanedReferences, MAX_REFERENCE_SWEEP_DEPTH } from '../../core/reference-sweep.js';
 import { TRACKER_AGENT_NAME } from './tracker-install.js';
+import { BUILTIN_OVERRIDE_AGENTS, findForeignAgentOwner } from './agent-type-owner.js';
 import { restampInstalledCommands } from './language-stamp.js';
 
 // ---------------------------------------------------------------------------
@@ -1711,6 +1712,49 @@ export interface FileCopyOptions {
 }
 
 /**
+ * D-EXPLORE-NO-CLOBBER, install half: true when `agentName` takes over a built-in
+ * agent type (Explore) and the user already owns an agent of that type under
+ * `{claudeDir}/agents`, so devflow's copy must not be installed.
+ *
+ * The user's file is only ever read. A copy of devflow's own left by an earlier install
+ * is removed from `agentsTarget`, since two user-level agents of one type fall back to
+ * file load order and the stale one could win. Every outcome that is not a conflict
+ * installs: an unreadable agents directory warns and installs rather than withholding
+ * the override on a guess. Warn-not-throw, so it never aborts an install.
+ */
+async function skipsForUserOwnedType(
+  agentName: string,
+  claudeDir: string,
+  agentsTarget: string,
+  warn: (msg: string) => void,
+): Promise<boolean> {
+  const agentType = BUILTIN_OVERRIDE_AGENTS.get(agentName);
+  if (agentType === undefined) return false;
+
+  const scan = await findForeignAgentOwner({
+    agentsRoot: path.join(claudeDir, 'agents'),
+    ownDir: agentsTarget,
+    agentType,
+  });
+  if (!scan.ok) {
+    warn(`Could not check ${scan.error.dir} for an existing ${agentType} agent (${scan.error.reason}); installing devflow's ${agentType} agent`);
+    return false;
+  }
+  if (scan.value === undefined) return false;
+
+  try {
+    await fs.rm(path.join(agentsTarget, mdFileName(agentName)), { force: true });
+  } catch (err) {
+    warn(`Could not remove devflow's earlier ${agentType} agent — ${String(err)}`);
+  }
+  warn(
+    `Skipped devflow's ${agentType} agent: ${scan.value} already defines ${agentType}, and Claude Code keys agents by name. ` +
+    `That file is left untouched; delete or rename it and re-run \`devflow init\` to use devflow's.`,
+  );
+  return true;
+}
+
+/**
  * First path in `candidates` that exists on disk, or undefined when none do.
  * Bounded by candidates.length. The fs.access rejection is the existence probe,
  * not a failure: callers decide what an exhausted candidate list means.
@@ -2090,6 +2134,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   if (allAgentNames.size > 0) {
     await fs.mkdir(agentsTarget, { recursive: true });
     for (const agentName of allAgentNames) {
+      if (await skipsForUserOwnedType(agentName, claudeDir, agentsTarget, warn)) continue;
       const candidates = agentDirs.map(dir => path.join(dir, mdFileName(agentName)));
       const srcFile = await firstExisting(candidates);
       if (srcFile === undefined) {

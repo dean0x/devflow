@@ -255,6 +255,26 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     skills: ['worktree-support'],
   },
   /**
+   * D-EXPLORE-ROW: Explore is devflow's override of the Explore agent built into
+   * Claude Code (D-EXPLORE-OVERRIDE in src/targets/claude-code/agent-type-owner.ts
+   * holds the precedence rule, the version it was read from, and why the install
+   * never beside-installs over a user's own Explore). The built-in inherits the
+   * session model: the baseline measured 81 Explore spawns, 98% of them on Opus at a
+   * median 11.9K tokens of starting context. The override runs them on Sonnet at
+   * high effort, read-only (Read and Bash: the other search tools are withheld from
+   * an agent that holds Bash), and omits CLAUDE.md and the rules, as the built-in
+   * does. The override applies to every session on the machine, plan mode included,
+   * and uninstalling devflow restores the built-in. The row, the frontmatter of
+   * explore.md and the parity checklist in tests/explore-agent.test.ts move together.
+   */
+  explore: {
+    model: 'sonnet',
+    effort: 'high',
+    policy: { kind: 'allow', tools: ['Read', 'Bash'] },
+    omitClaudeMd: true,
+    skills: [],
+  },
+  /**
    * D-GIT-ROW: Git keeps haiku and gains medium effort and the shared denylist, the
    * Git agent split's frontmatter change (#425). A denylist and not an allowlist, so
    * the tracker MCP tools configured in the user's environment stay callable: an

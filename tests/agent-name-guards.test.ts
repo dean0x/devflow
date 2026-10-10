@@ -557,11 +557,11 @@ describe('GAP-1: slug (form A) ↔ frontmatter name: (form B)', () => {
 
 describe('GAP-2: agentType: values in dist ↔ declared roster', () => {
   /**
-   * subagent_type="Explore" is a Claude Code built-in — not a devflow agent,
-   * not in the roster, must not be flagged, and must never be renamed.
+   * Explore is a devflow agent that overrides the Claude Code built-in of the same
+   * name (D-EXPLORE-OVERRIDE). The prose commands spawn it by type name and it is
+   * not a member of the dynamic roster, so a workflow `agentType` of Explore would
+   * be held against the roster like any other type: none is expected.
    */
-  const BUILTINS_NORMALIZED = new Set(['explore'])
-
   it('agentType values in dist match the _roster.mds roster exactly (fail-loud when dist absent)', () => {
     // FAIL-LOUD: requireDistFiles() throws when dist is absent — not a skip.
     const distFiles = requireDistFiles()
@@ -574,9 +574,7 @@ describe('GAP-2: agentType: values in dist ↔ declared roster', () => {
     for (const file of distFiles) {
       const content = readFileSync(path.join(DIST_COMMANDS_DIR, file), 'utf-8')
       for (const name of extractAgentTypes(content)) {
-        if (!BUILTINS_NORMALIZED.has(normalize(name))) {
-          agentTypesInDist.add(name)
-        }
+        agentTypesInDist.add(name)
       }
     }
 
@@ -625,11 +623,10 @@ describe('GAP-2: agentType: values in dist ↔ declared roster', () => {
      * slugs case-INSENSITIVELY, and GAP-1 ties slugs to form B — but nothing
      * enforced exact case on the literal itself. subagent_type="CODE" would
      * pass both while failing at spawn time. This closes that hole: every
-     * literal must byte-equal an actual frontmatter name: value (or a
-     * Claude Code built-in).
+     * literal must byte-equal an actual frontmatter name: value. Explore is
+     * one: devflow's explore.md ships `name: Explore`, so the built-in's name
+     * needs no exemption.
      */
-    const BUILTINS_EXACT = new Set(['Explore'])
-
     // Truth set: the real frontmatter name: values via the resolver, not a derived transform.
     const agents = resolveAllAgents()
     expect([...agents.keys()]).toEqual(expect.arrayContaining(getAllAgentNames()))
@@ -647,7 +644,7 @@ describe('GAP-2: agentType: values in dist ↔ declared roster', () => {
       for (const m of content.matchAll(re)) {
         matchCount++
         const name = m[1]
-        if (BUILTINS_EXACT.has(name) || formBNames.has(name)) continue
+        if (formBNames.has(name)) continue
         violations.push(
           `  ${displayPath}: subagent_type "${name}" does not byte-equal any agent frontmatter name:`,
         )

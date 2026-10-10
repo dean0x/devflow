@@ -76,11 +76,11 @@
     },
     {
       "id": "agent-roster-count",
-      "floor": 17,
-      "pattern": "toBe(17)",
+      "floor": 18,
+      "pattern": "toBe(18)",
       "occurrences": 1,
       "sourceFile": "tests/guards/agent-source-resolver.test.ts",
-      "description": "resolveAllAgents() size — every DEVFLOW_PLUGINS agent resolves through the shared resolver (AC-0.7, GAP-07). 17 includes the hook-spawned Tracker agent, which is declared in devflow-core-skills.agents and filtered at install time rather than held outside the roster. A floor may only rise."
+      "description": "resolveAllAgents() size — every DEVFLOW_PLUGINS agent resolves through the shared resolver (AC-0.7, GAP-07). 18 includes the hook-spawned Tracker agent, which is declared in devflow-core-skills.agents and filtered at install time rather than held outside the roster, and Explore, devflow's override of the Claude Code built-in. A floor may only rise."
     },
     {
       "id": "seam-op-section-map",
@@ -276,11 +276,11 @@
     },
     {
       "id": "report-cap-roster-count",
-      "floor": 15,
-      "pattern": "roster.length).toBeGreaterThanOrEqual(15)",
+      "floor": 16,
+      "pattern": "roster.length).toBeGreaterThanOrEqual(16)",
       "occurrences": 1,
       "sourceFile": "tests/guards/report-cap.test.ts",
-      "description": "Roster agents that carry a `Report cap:` line (D-REPORT-CAP): the union of the plugin `agents` arrays, less `learning` and `tracker` (hook-spawned). The guard derives the roster rather than listing it and requires an exempt-field record for each member; this floor stops the derivation quietly returning fewer agents. The Git agent split (#425) removed the `git` exclusion and raised it from 14 to 15. Floors rise, never fall."
+      "description": "Roster agents that carry a `Report cap:` line (D-REPORT-CAP): the union of the plugin `agents` arrays, less `learning` and `tracker` (hook-spawned). The guard derives the roster rather than listing it and requires an exempt-field record for each member; this floor stops the derivation quietly returning fewer agents. The Git agent split (#425) removed the `git` exclusion and raised it from 14 to 15; the Explore override raised it to 16. Floors rise, never fall."
     },
     {
       "id": "running-commands-site-count",
