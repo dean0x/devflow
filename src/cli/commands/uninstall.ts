@@ -8,7 +8,7 @@ import { getInstallationPaths, getClaudeDirectory, getHomeDirectory, getManagedS
 import { getGitRoot } from '../../core/git.js';
 import { isSameLocation } from '../../core/same-location.js';
 import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, getAllSkillNames, getAllAgentNames, getAllCommandNames, parsePluginSelection, resolveFeatureRedirect, prefixSkillName, unprefixSkillName, skillsOf, FEATURE_OWNED_SKILLS, type PluginDefinition } from '../../core/plugins.js';
-import { readManifest } from '../../core/manifest.js';
+import { readManifest, removeManifestPlugins } from '../../core/manifest.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '../../core/orphan-sweep.js';
 import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
 import { removeAmbientHook } from './ambient.js';
@@ -1065,6 +1065,23 @@ export async function runSelectivePhaseForScope(opts: {
       warn: (msg) => p.log.warn(msg),
       mayChange,
     });
+  }
+
+  // D-UNINSTALL-DROPS-PLUGIN: the manifest is the install record `devflow init` seeds its plugin
+  // selection from (a re-init keeps the prior selection), so a plugin removed here but still listed
+  // would be installed again by the next plain init. Take the selected names off the list;
+  // knownPlugins and every other key stay.
+  // Behind the scope guard like every other write here. A failed write is a warning, never a failure.
+  {
+    const manifestPath = path.join(devflowDir, 'manifest.json');
+    if (await mayChange(manifestPath)) {
+      const recorded = await removeManifestPlugins(devflowDir, selectedPlugins.map(sp => sp.name));
+      if (!recorded.ok) {
+        p.log.warn(`Could not drop the plugin from manifest.json — a later devflow init would install it again: ${recorded.error}`);
+      } else if (verbose && recorded.removed.length > 0) {
+        p.log.success(`Removed ${recorded.removed.join(', ')} from manifest.json`);
+      }
+    }
   }
 
   // Clean up ambient hook if ambient plugin is being removed

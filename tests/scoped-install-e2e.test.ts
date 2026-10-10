@@ -338,4 +338,35 @@ describe('partial install and selective uninstall', () => {
     ).toContain(prefixSkillName('git'));
     expect(after.length).toBeLessThan(before.length);
   }, SUBPROCESS_TIMEOUT_MS * 2);
+
+  it('uninstall --plugin drops the plugin from manifest.plugins, so the next plain init does not install it again (D-UNINSTALL-DROPS-PLUGIN)', async () => {
+    expect(init().status).toBe(0);
+    const manifestFile = path.join(devflowDir(), 'manifest.json');
+    const exploreCommand = path.join(claudeDir(), 'commands', 'devflow', 'explore.md');
+    const readManifest = async (): Promise<Record<string, unknown> & { plugins: string[] }> =>
+      JSON.parse(await fs.readFile(manifestFile, 'utf-8'));
+
+    const installed = await readManifest();
+    expect(installed.plugins, 'non-vacuity: the full install records the plugin').toContain('devflow-explore');
+    await expect(fs.access(exploreCommand), 'and installs its command').resolves.toBeUndefined();
+    // A key only a newer devflow writes: the uninstall must carry it, not drop it.
+    await fs.writeFile(manifestFile, JSON.stringify({ ...installed, futureKey: { kept: true } }, null, 2) + '\n', 'utf-8');
+
+    const removed = run(['uninstall', '--plugin=devflow-explore']);
+    expect(removed.status, `uninstall failed:\n${removed.stdout}\n${removed.stderr}`).toBe(0);
+
+    const afterUninstall = await readManifest();
+    expect(afterUninstall.plugins).toEqual(installed.plugins.filter(name => name !== 'devflow-explore'));
+    expect(afterUninstall.futureKey).toEqual({ kept: true });
+    for (const key of ['version', 'scope', 'knownPlugins', 'features', 'installedAt']) {
+      expect(afterUninstall[key], `${key} is carried verbatim`).toEqual(installed[key]);
+    }
+    await expect(fs.access(exploreCommand), 'the command went with the plugin').rejects.toThrow();
+
+    const reinit = init();
+    expect(reinit.status, `re-init failed:\n${reinit.stdout}\n${reinit.stderr}`).toBe(0);
+    expect((await readManifest()).plugins, 'the re-init seeds from the manifest, which no longer lists it').not.toContain('devflow-explore');
+    await expect(fs.access(exploreCommand), 'and does not bring the command back').rejects.toThrow();
+    expect([...(await readManifest()).plugins].sort(), 'every other plugin is still installed').toEqual([...afterUninstall.plugins].sort());
+  }, SUBPROCESS_TIMEOUT_MS * 3);
 });

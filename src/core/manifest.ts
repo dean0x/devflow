@@ -330,6 +330,76 @@ export async function syncManifestFeature<K extends keyof ManifestData['features
 }
 
 /**
+ * Drop `names` from a RAW parsed manifest's `plugins` list. Pure — returns a new
+ * object and never mutates its input. Null when there is nothing to write: the
+ * value is not a manifest-shaped object, or none of `names` is listed.
+ *
+ * Only `plugins` and `updatedAt` change; every other key is carried verbatim,
+ * `knownPlugins` included. That snapshot records which registry plugins the last
+ * install knew, and init adopts a registry plugin that is in neither list as new
+ * (`resolveSeedPlugins`), so dropping a removed plugin from it would make the next
+ * re-init install it again. Going through readManifest()/writeManifest() instead
+ * would drop every key ManifestData does not model (one a newer devflow wrote,
+ * say) and persist that reader's unrelated heals as a side effect of a removal.
+ * Entries that are not strings are neither matched nor dropped.
+ */
+export function withoutManifestPlugins(
+  rawManifest: unknown,
+  names: readonly string[],
+  now: string,
+): Record<string, unknown> | null {
+  if (typeof rawManifest !== 'object' || rawManifest === null || Array.isArray(rawManifest)) return null;
+  const record = rawManifest as Record<string, unknown>;
+  if (!Array.isArray(record.plugins)) return null;
+  const doomed = new Set(names);
+  const kept = record.plugins.filter(entry => !(typeof entry === 'string' && doomed.has(entry)));
+  if (kept.length === record.plugins.length) return null;
+  return { ...record, plugins: kept, updatedAt: now };
+}
+
+/** What {@link removeManifestPlugins} did: the names it dropped (empty when it wrote nothing), or why it could not write. */
+export type ManifestPluginRemoval =
+  | { readonly ok: true; readonly removed: readonly string[] }
+  | { readonly ok: false; readonly error: string };
+
+/**
+ * D-UNINSTALL-DROPS-PLUGIN: record a selective uninstall in `<devflowDir>/manifest.json`.
+ *
+ * The manifest is the install record init seeds from (a re-init keeps the prior
+ * selection), so a plugin `devflow uninstall --plugin` removed but the manifest
+ * still lists would come back on the next plain `devflow init`. This is the one
+ * writer that takes a name off that list (atomic temp + rename).
+ *
+ * A quiet no-op, not an error, when there is nothing to record: no manifest (a
+ * pre-manifest install), one that is not valid JSON or not manifest-shaped, or
+ * none of `names` listed — the file is left byte-identical. Never throws: a failed
+ * write comes back as `{ ok: false }` for the caller to report.
+ */
+export async function removeManifestPlugins(
+  devflowDir: string,
+  names: readonly string[],
+): Promise<ManifestPluginRemoval> {
+  const manifestPath = path.join(devflowDir, 'manifest.json');
+  let raw: unknown;
+  try {
+    raw = JSON.parse(await fs.readFile(manifestPath, 'utf-8'));
+  } catch {
+    // ENOENT, EACCES or SyntaxError — no usable manifest, so nothing to record.
+    return { ok: true, removed: [] };
+  }
+  const next = withoutManifestPlugins(raw, names, new Date().toISOString());
+  if (next === null) return { ok: true, removed: [] };
+  try {
+    await writeFileAtomicExclusive(manifestPath, JSON.stringify(next, null, 2) + '\n');
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+  const doomed = new Set(names);
+  const before = (raw as { plugins: unknown[] }).plugins;
+  return { ok: true, removed: before.filter((entry): entry is string => typeof entry === 'string' && doomed.has(entry)) };
+}
+
+/**
  * Merge new plugins into existing plugin list (union, no duplicates).
  * Preserves order: existing plugins first, then new ones appended.
  */

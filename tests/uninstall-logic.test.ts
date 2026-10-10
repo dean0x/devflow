@@ -1807,6 +1807,68 @@ describe('runSelectivePhaseForScope (A8)', () => {
       verbose: false,
     })).resolves.not.toThrow();
   });
+
+  describe('the manifest stops listing what was uninstalled (D-UNINSTALL-DROPS-PLUGIN)', () => {
+    const byName = (name: string) => DEVFLOW_PLUGINS.find(p => p.name === name)!;
+    const manifestPath = (): string => path.join(devflowDir, 'manifest.json');
+    const seedBody = (plugins: string[]): string => JSON.stringify({
+      version: '3.2.0',
+      plugins,
+      scope: 'user',
+      knownPlugins: ['devflow-core-skills', 'devflow-explore', 'devflow-plan'],
+      futureKey: 'kept',
+      features: { ambient: false, memory: false },
+      installedAt: 'then',
+      updatedAt: 'then',
+    });
+    const readPlugins = async (): Promise<unknown> =>
+      (JSON.parse(await fs.readFile(manifestPath(), 'utf-8')) as { plugins: unknown }).plugins;
+
+    it('removes the selected plugin from manifest.plugins and keeps the rest of the manifest', async () => {
+      await fs.writeFile(manifestPath(), seedBody(['devflow-core-skills', 'devflow-explore', 'devflow-plan']), 'utf-8');
+
+      await runSelectivePhaseForScope({ claudeDir, devflowDir, selectedPlugins: [byName('devflow-explore')], verbose: false });
+
+      const after = JSON.parse(await fs.readFile(manifestPath(), 'utf-8')) as Record<string, unknown>;
+      expect(after.plugins).toEqual(['devflow-core-skills', 'devflow-plan']);
+      expect(after.knownPlugins, 'the registry snapshot is not the selection').toEqual(['devflow-core-skills', 'devflow-explore', 'devflow-plan']);
+      expect(after.futureKey).toBe('kept');
+      expect(after.features).toEqual({ ambient: false, memory: false });
+    });
+
+    it('removes every selected plugin', async () => {
+      await fs.writeFile(manifestPath(), seedBody(['devflow-core-skills', 'devflow-explore', 'devflow-plan']), 'utf-8');
+
+      await runSelectivePhaseForScope({
+        claudeDir, devflowDir, selectedPlugins: [byName('devflow-explore'), byName('devflow-plan')], verbose: false,
+      });
+
+      expect(await readPlugins()).toEqual(['devflow-core-skills']);
+    });
+
+    it('leaves the manifest byte-identical when the plugin was not listed', async () => {
+      const body = seedBody(['devflow-core-skills', 'devflow-plan']);
+      await fs.writeFile(manifestPath(), body, 'utf-8');
+
+      await runSelectivePhaseForScope({ claudeDir, devflowDir, selectedPlugins: [byName('devflow-explore')], verbose: false });
+
+      expect(await fs.readFile(manifestPath(), 'utf-8')).toBe(body);
+    });
+
+    it('creates no manifest where there was none', async () => {
+      await runSelectivePhaseForScope({ claudeDir, devflowDir, selectedPlugins: [byName('devflow-explore')], verbose: false });
+
+      await expect(fs.access(manifestPath())).rejects.toThrow();
+    });
+
+    it('a later selective uninstall retains from the updated list, not the removed plugin', async () => {
+      await fs.writeFile(manifestPath(), seedBody(['devflow-core-skills', 'devflow-explore', 'devflow-plan']), 'utf-8');
+
+      await runSelectivePhaseForScope({ claudeDir, devflowDir, selectedPlugins: [byName('devflow-explore')], verbose: false });
+
+      expect((await resolveInstalledPlugins(devflowDir)).map(plugin => plugin.name)).toEqual(['devflow-core-skills', 'devflow-plan']);
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
