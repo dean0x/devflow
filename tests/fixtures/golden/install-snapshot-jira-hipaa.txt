@@ -490,6 +490,7 @@ d sub/
     "ENABLE_PROMPT_CACHING_1H": "true",
     "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "40"
   },
+  "subagentPromptCacheTtl": "5m",
   "showTurnDuration": true,
   "showClearContextOnPlanAccept": true,
   "permissions": {
@@ -550,6 +551,7 @@ d sub/
       "tool-search": true,
       "lsp": true,
       "prompt-caching-1h": true,
+      "subagent-cache-5m": true,
       "show-turn-duration": true,
       "clear-context-on-plan": true,
       "disable-bundled-skills": false,
