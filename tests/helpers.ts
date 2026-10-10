@@ -1324,6 +1324,7 @@ export const STATUS_LINE_REFERENCE_FILES = [
   'pr/resolve-review-threads.md',
   'tracker/github/backlink-shipped-issues.md',
   'tracker/github/ensure-traceable-issue.md',
+  'tracker/github/gather-release-evidence.md',
   'tracker/github/manage-debt.md',
   'tracker/github/post-wave-report.md',
 ] as const
@@ -1517,8 +1518,24 @@ export function extractStatusLines(gitContent?: string): string {
     between(ref('pr/check-ci-status.md'), '1. If `PR_NUMBER` not provided', '6. List failing/pending checks with names') + '\n',
     // create-release process steps (baseline lines 479-485)
     between(gitOp('create-release'), '1b. Conventions: if `.devflow/conventions.md` exists', '…and {n} more commits` line (D4 degrade if enrichment fails)'),
-    // gather-release-evidence input + process (baseline lines 507-518)
-    between(gitOp('gather-release-evidence'), '**Input:** `WORKTREE_PATH` (optional)', '**Output:**'),
+    // gather-release-evidence input + process (baseline lines 507-518) — STRADDLES, split per
+    // D-STRADDLE-SPLIT (#425). Steps 1, 2, 3 and 5 are provider-neutral step text that moved out of
+    // the agent into each provider's reference (D-NEUTRAL-STEP-MOVE), at their numeric positions
+    // between the provider's own steps, so no contiguous slice of one file holds the original
+    // bytes. The agent keeps the Input line, the D4 clause and the Mechanics pointer; the reference
+    // holds the four steps, and the `**Output:**` label stayed. Each moved step is one line, read
+    // by its own anchor and rejoined in step order, so the sample is byte-identical to the
+    // pre-split text: pointer, blank, the four steps with no blank between them, blank, label.
+    between(gitOp('gather-release-evidence'), '**Input:** `WORKTREE_PATH` (optional)', "**Mechanics:** load this operation's provider reference."),
+    '',
+    [
+      singleLine(ref('tracker/github/gather-release-evidence.md'), '1. Find last tag: `git describe'),
+      singleLine(ref('tracker/github/gather-release-evidence.md'), '2. Collect commit list: `git log'),
+      singleLine(ref('tracker/github/gather-release-evidence.md'), '3. Extract CANDIDATE issue references'),
+      singleLine(ref('tracker/github/gather-release-evidence.md'), "5. Gate each candidate against that provider's grammar"),
+    ].join('\n'),
+    '',
+    singleLine(gitOp('gather-release-evidence'), '**Output:**'),
     // learn-conventions — STRADDLES, split per D-STRADDLE-SPLIT. The bounded scan,
     // the file template and the post-composition verification moved to
     // references/learn-conventions.md (P2-S5 cut 1, loaded only when
@@ -1549,8 +1566,16 @@ export function extractStatusLines(gitContent?: string): string {
     between(ref('tracker/github/backlink-shipped-issues.md'), '1. Fetch existing comments authored by the viewer:', 'Apply the Comment-sink scrub (D11) and post via `gh issue comment {number} --body-file "$DEVFLOW_BODY"`.'),
     // ensure-traceable-issue plan-artifact + create steps — MOVED whole (P2-S6)
     between(ref('tracker/github/ensure-traceable-issue.md'), '     ```\n   - If `PLAN_ARTIFACT_PATH` provided:', '- Title: derived from `TASK_DESCRIPTION` (same slug logic as setup-task)'),
-    // post-wave-report dedup check + compose steps — MOVED whole (P2-S6)
-    between(ref('tracker/github/post-wave-report.md'), '   - If found: skip — report `Skipped: wave report for {WAVE_ID} already posted`', '3. Compose the comment body:\n   ```markdown'),
+    // post-wave-report dedup check + compose steps — MOVED whole (P2-S6), then split by #425
+    // (D-STRADDLE-SPLIT). The moved step 2 ("Resolve and read WAVE_REPORT_PATH", provider-neutral
+    // step text, D-NEUTRAL-STEP-MOVE) now sits in the reference BETWEEN the dedup check and step 3,
+    // where it was never part of this sample (it lived in the agent). So the sample is read in two
+    // pieces, the dedup line and the compose opener, and rejoined with the single newline the
+    // pre-split reference had between them.
+    [
+      singleLine(ref('tracker/github/post-wave-report.md'), '   - If found: skip — report `Skipped: wave report for {WAVE_ID} already posted`'),
+      between(ref('tracker/github/post-wave-report.md'), '3. Compose the comment body:', '   ```markdown'),
+    ].join('\n'),
     // Guard-5 dedup marker lines (baseline lines 366, 742, 921)
     // Use 5-space / 3-space prefix to target the template lines, not the search-step lines
     // that also reference these markers within the same operation section.

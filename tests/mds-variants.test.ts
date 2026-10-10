@@ -986,7 +986,7 @@ describe('validateContractOutputName — the narrow underscore allowance', () =>
  * apart (installed-reference-count-github, installed-reference-count-provider),
  * which rose from 24 and 36 to meet here.
  */
-const INSTALLED_REFS = 47;
+const INSTALLED_REFS = 48;
 
 describe('installedReferenceManifest — every provider, whatever the machine selected', () => {
   const generated = generatedReferenceManifest();

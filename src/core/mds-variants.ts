@@ -514,6 +514,30 @@ export const GIT_CROSS_CUTTING_DOCS = [
  * Registering a provider whose `subdir` is one of MCP_BACKED_PROVIDER_SUBDIRS is
  * also what opens the generation gate on the tool-call contract; see
  * {@link mcpContractIsGenerated}. There is no second edit and no flag.
+ *
+ * D-TRACKER-CONTRACT-ON-DEMAND. The last entry, `_contract.mds`, is the first
+ * UNGATED `kind: 'contract'` module (the tool-call contract of
+ * {@link MCP_CONTRACT_MODULE} is gated, so it is not in this array). It emits
+ * `tracker/_contract.md`: the provider resolution and the tracker input contract
+ * that used to sit in the always-loaded Git agent, where every spawn paid for
+ * them although most spawns run a PR-host operation that never touches the
+ * issue tracker. A spawn now reads the file once, only when it runs a tracker
+ * operation, before its first tracker step. The agent's retained
+ * `## Loading the mechanics` section is the one line that names it; it keeps
+ * the PR-mechanics load rule and the merged step order, which a PR-only spawn
+ * needs and which this file cannot instruct a spawn to load. It is ungated for
+ * the reason the registry's other provider-independent files are: every install
+ * carries every provider, GitHub included, so no registered provider is the
+ * condition it depends on.
+ *
+ * The budget clause: the file is a per-SPAWN term of each tracker row (GitHub,
+ * Jira, Linear), charged the way the tool-call contract is (`contractTerm` in
+ * tests/tracker/budget-model.ts) and added in `providerLoadedSet`. It is not part
+ * of `ownLoadForProvider`, of the PR-host row or of the per-operation PR-host
+ * cap. ensure-pr-ready is both a PR-host and a tracker operation, so charging it
+ * the contract there would put it over a lower-only cap; its full cost,
+ * contract included, is priced through the tracker rows, where it is already a
+ * candidate.
  */
 export const VARIANT_MODULES = [
   {
@@ -545,6 +569,12 @@ export const VARIANT_MODULES = [
     subdir: '',
     kind: 'named',
     ops: GIT_CROSS_CUTTING_DOCS,
+  },
+  {
+    source: 'src/assets/mds/tracker/_contract.mds',
+    subdir: 'tracker',
+    kind: 'contract',
+    ops: ['_contract'],
   },
 ] as const satisfies readonly VariantModule[];
 

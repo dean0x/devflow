@@ -773,13 +773,20 @@ function rateLimitSleepCorpus(): CorpusEntry[] {
   }));
 }
 
+/** A provider's generated setup-task reference, wherever the build root is. */
+const PROVIDER_SETUP_TASK_PATH = /[\\/]tracker[\\/][a-z]+[\\/]setup-task\.md$/;
+
 /**
  * Collect conventions-commit placement violations from a corpus.
  *
  * Pins, so the conventions commit lands on the feature branch and a missing batch ref is
  * reported rather than dropped:
- *   (a) setup-task step 4b commits `.devflow/conventions.md` after branch creation — sole mode;
- *       git.md is the single authority.
+ *   (a) setup-task step 4b commits `.devflow/conventions.md` after branch creation. The step is
+ *       provider-neutral text that moved out of git.md into EVERY provider's setup-task reference
+ *       (D-NEUTRAL-STEP-MOVE), so it is read per provider reference from the sink corpus — mode
+ *       'union' at the call site, each provider's section checked on its own so one provider
+ *       losing the step cannot hide behind the others. The Output trailer that names
+ *       `CONVENTIONS_COMMIT` stays in git.md and is still read in 'sole' mode.
  *   (b) learn-conventions contains NO `commit --only` — the commit has moved to setup-task step 4b
  *       (end state only; the old **Commit (non-blocking):** block must not reappear).
  *   (c) fetch-issues-batch reports `NOT_FOUND ({refs})` and strips #-prefixed refs before parsing.
@@ -830,40 +837,59 @@ function collectConventionsCommitPlacementViolations(
   }
 
   // ── (a) setup-task ─────────────────────────────────────────────────────────
-  // sole mode: git.md is the single authority for setup-task.
+  // The Output trailer names the skip reasons and stays in git.md: sole mode, git.md is the
+  // single authority for the contract.
   const setupTask = getSection(contractCorpus, 'setup-task', 'sole');
-  if (setupTask !== null) {
-    if (!setupTask.includes('commit --only -m "docs(devflow): record project conventions" -- .devflow/conventions.md')) {
+  if (setupTask !== null && !setupTask.includes('CONVENTIONS_COMMIT: skipped (no branch)')) {
+    violations.push(
+      'setup-task: missing "CONVENTIONS_COMMIT: skipped (no branch)" in the Output trailer — ' +
+      'the caller must be told when step 4 left HEAD on the base branch',
+    );
+  }
+
+  // The steps themselves moved into each provider's setup-task reference. Mode 'union' over the
+  // sink corpus, one provider reference at a time: the sections are read through the same
+  // extractor, but each is checked alone so a provider that lost the step is named.
+  const providerSetupRefs = sinkCorpus.filter(entry => PROVIDER_SETUP_TASK_PATH.test(entry.path));
+  if (providerSetupRefs.length === 0) {
+    violations.push(
+      'setup-task: no provider reference declares the operation in the corpus — the conventions commit ' +
+      'steps moved out of git.md and cannot be verified from git.md alone',
+    );
+  }
+  for (const ref of providerSetupRefs) {
+    const label = `setup-task (${path.basename(path.dirname(ref.path))})`;
+    const section = getSection([ref], 'setup-task', 'union');
+    if (section === null) continue;
+    if (!section.includes('commit --only -m "docs(devflow): record project conventions" -- .devflow/conventions.md')) {
       violations.push(
-        'setup-task: missing \'commit --only -m "docs(devflow): record project conventions" -- .devflow/conventions.md\' — ' +
+        `${label}: missing 'commit --only -m "docs(devflow): record project conventions" -- .devflow/conventions.md' — ` +
         'conventions commit must happen in setup-task step 4b, not inside learn-conventions',
       );
     }
-    if (!setupTask.includes('CONVENTIONS_COMMIT: skipped (no branch)')) {
+    if (!section.includes('CONVENTIONS_COMMIT: skipped (no branch)')) {
       violations.push(
-        'setup-task: missing "CONVENTIONS_COMMIT: skipped (no branch)" — ' +
+        `${label}: missing "CONVENTIONS_COMMIT: skipped (no branch)" — ` +
         'step 4b must guard against a detached/base HEAD before committing',
       );
     }
-    // 4b. step must appear AFTER the git checkout -b line.
-    // Scoped to this extracted section: ensure-pr-ready has its own unrelated 4b. at git.md:~113,
-    // but that section is never included when extracting setup-task (sole mode).
-    const lines = setupTask.split('\n');
+    // 4b. step must appear AFTER the git checkout -b line, in the same reference.
+    const lines = section.split('\n');
     const checkoutIdx = lines.findIndex(l => l.includes('git checkout -b "$DEVFLOW_BRANCH"'));
     const step4bIdx = lines.findIndex(l => /^\s*4b\./.test(l));
     if (step4bIdx === -1) {
       violations.push(
-        'setup-task: "4b." step is absent — conventions commit step must be present in setup-task, ' +
+        `${label}: "4b." step is absent — conventions commit step must be present in setup-task, ` +
         'immediately after the git checkout -b step',
       );
     } else if (checkoutIdx === -1) {
       violations.push(
-        'setup-task: "git checkout -b \\"$DEVFLOW_BRANCH\\"" line not found — ' +
+        `${label}: "git checkout -b \\"$DEVFLOW_BRANCH\\"" line not found — ` +
         'cannot verify that 4b. appears after branch creation',
       );
     } else if (step4bIdx <= checkoutIdx) {
       violations.push(
-        'setup-task: "4b." step appears at or before the git checkout -b line — ' +
+        `${label}: "4b." step appears at or before the git checkout -b line — ` +
         'conventions commit must happen AFTER branch creation so it lands on the feature branch',
       );
     }
@@ -1287,16 +1313,16 @@ describe('git agent — static content guards', () => {
     // "sections" of which 18 were fenced Output-template headings from inside
     // operation bodies — a count cannot tell an honest corpus from that one, and the
     // scan was simultaneously too wide (operation payload) and unable to say so. The
-    // real cross-cutting text is the header — D4, the tracker preamble, D11, the
+    // real cross-cutting text is the header — D4, the loading section, D11, the
     // operations table, the marker legend all sit above the first operation — plus
-    // the two shared trailers (the narrower corpus is reclassified here,
-    // not accommodated by loosening the assertion).
+    // the three shared trailers, `## Output` (the report cap, #425) included (the
+    // narrower corpus is reclassified here, not accommodated by loosening the assertion).
     expect(
       sections.map(s => s.label),
       'the cross-cutting slices changed shape: a new always-loaded `## ` section was added, or ' +
       'one of the two shared trailers was renamed. Name it here — an unnamed section is text ' +
       'every spawn loads that nothing scans (GAP-03)',
-    ).toEqual(['(header)', 'Principles', 'Boundaries']);
+    ).toEqual(['(header)', 'Output', 'Principles', 'Boundaries']);
     expect(
       collectProviderDetectors(sections),
       'provider detector(s) in always-loaded text. The invariant belongs here; the signal that ' +
@@ -2387,6 +2413,11 @@ describe('git agent — static content guards', () => {
       'non-vacuity: fetch-issues-batch must be detected as remote-I/O (gh api graphql in Process)',
     ).toContain('fetch-issues-batch');
     expect(
+      remoteOps,
+      'create-release must stay detected as remote-I/O: its steps carry `gh release create` and stay inline ' +
+      'in git.md (D-NEUTRAL-STEP-MOVE keeps them out of the shared step text)',
+    ).toContain('create-release');
+    expect(
       remoteOps.length,
       'no REQUIRED_OPS detected as remote-I/O — guard is vacuous',
     ).toBeGreaterThan(0);
@@ -2504,9 +2535,27 @@ describe('git agent — static content guards', () => {
     // These three ops pre-existed on main; the assertion existed there too — its non-vacuity
     // is proved by the named-set: removing <external-thread> from any listed op fails toContain.
     const EXPECTED_EXTERNAL_THREAD_OPS = ['fetch-review-threads', 'post-resolution-summary', 'post-wave-report'];
+    // post-wave-report's non-reproduction reminder is provider-neutral step text that moved out of
+    // git.md into the provider references (D-NEUTRAL-STEP-MOVE), so its literal is read in mode
+    // 'union' — named here at the call site — and the others in 'sole'. Principle 8 in git.md still
+    // names post-wave-report, and the probe below proves the union read is load-bearing.
+    const MOVED_EXTERNAL_THREAD_OPS: readonly string[] = ['post-wave-report'];
     const opsWithExternalThread = opNames.filter(
-      op => opSection(op).includes('<external-thread>'),
+      op => (MOVED_EXTERNAL_THREAD_OPS.includes(op)
+        ? extractOpSection(cachedSinkCorpus(), op, 'union')
+        : opSection(op)
+      ).includes('<external-thread>'),
     );
+    for (const moved of MOVED_EXTERNAL_THREAD_OPS) {
+      expect(
+        opSection(moved),
+        `${moved}: the literal came back to git.md — re-classify it 'sole' and drop it from MOVED_EXTERNAL_THREAD_OPS`,
+      ).not.toContain('<external-thread>');
+      expect(
+        extractOpSection(sinkCorpusWithoutPrHost(), moved, 'union'),
+        `${moved}: the union read must still see the literal in the provider references`,
+      ).toContain('<external-thread>');
+    }
     for (const expectedOp of EXPECTED_EXTERNAL_THREAD_OPS) {
       expect(
         opsWithExternalThread,
@@ -2684,7 +2733,8 @@ describe('git agent — static content guards', () => {
   // Named collector + known-bad probe (H10): proves detection is live.
 
   it('conventions-commit placement and batch NOT_FOUND rule: live corpus has no violations', () => {
-    // contract corpus: git.md only (mode 'sole'); sink corpus: git.md ∪ references (arm b).
+    // contract corpus: git.md only (mode 'sole'); sink corpus: git.md ∪ references — arm (a) reads
+    // each provider's setup-task reference in mode 'union', arm (b) is a negative check.
     const violations = collectConventionsCommitPlacementViolations(soleCorpus, cachedSinkCorpus());
     expect(
       violations,
@@ -2692,55 +2742,74 @@ describe('git agent — static content guards', () => {
     ).toEqual([]);
   });
 
+  it('conventions-commit placement: the steps are in every provider reference and not in git.md (union is load-bearing)', () => {
+    const providerRefs = cachedSinkCorpus().filter(entry => PROVIDER_SETUP_TASK_PATH.test(entry.path));
+    expect(
+      providerRefs.map(entry => path.basename(path.dirname(entry.path))).sort(),
+      'one setup-task reference per registered tracker provider',
+    ).toEqual(['github', 'jira', 'linear']);
+    // Known-bad: with the moved files taken out of the corpus the same collector reports the steps
+    // as unverifiable — if this ever passes, the 4b steps came back to git.md and arm (a) should
+    // be re-classified 'sole'.
+    expect(extractOpSection(soleCorpus, 'setup-task', 'sole'), 'git.md no longer holds step 4b').not.toMatch(/^\s*4b\./m);
+    expect(
+      collectConventionsCommitPlacementViolations(soleCorpus, soleCorpus)
+        .filter(v => v.startsWith('setup-task:')),
+      'a corpus without the provider references must be reported, not skipped',
+    ).toHaveLength(1);
+  });
+
   it('conventions-commit placement: known-bad synthetic corpus triggers violations (H10)', () => {
-    // Synthetic corpus built from real git.md content (copy + targeted mutation),
-    // never hand-authored, so it holds only shapes the real file can have. It calls
-    // the same named collector as the live guard.
+    // Synthetic corpus built from the real corpus (copy + targeted mutation), never
+    // hand-authored, so it holds only shapes the real files can have. It calls the same named
+    // collector as the live guard.
     //
-    // Mutation 1: remove setup-task's 4b step block.
-    //   Search from the setup-task marker so ensure-pr-ready's unrelated 4b. (git.md:~113)
-    //   is not mistakenly targeted.
+    // Mutation 1: remove setup-task's 4b step block from the GitHub provider's reference, where the
+    //   step now lives (D-NEUTRAL-STEP-MOVE). Only that provider is mutated: the other two stay
+    //   intact, which is what proves each reference is read on its own.
     // Mutation 2: replace learn-conventions' **Commit boundary:** one-liner with an old-style
     //   **Commit (non-blocking):** block containing commit --only, reproducing the pre-ae62d0a shape.
     const realContent = resolveAgentSource('git').content;
 
-    // Mutation 1: delete the 4b block from setup-task.
-    const setupTaskMarker = '## Operation: setup-task';
-    const setupTaskStart = realContent.indexOf(setupTaskMarker);
-    if (setupTaskStart === -1) throw new Error('probe: ## Operation: setup-task not found in git.md');
-    const step4bStart = realContent.indexOf('\n4b. ', setupTaskStart);
-    const step5Start = realContent.indexOf('\n5. Return setup summary', step4bStart);
-    if (step4bStart === -1 || step5Start === -1) {
-      throw new Error('probe: could not locate 4b./5. boundaries in setup-task for mutation');
-    }
-    let mutated = realContent.slice(0, step4bStart) + realContent.slice(step5Start);
-
-    // Mutation 2: replace the **Commit boundary:** one-liner with an old-style block.
+    // Mutation 2 first: it edits git.md.
     const commitBoundaryAnchor = '\n**Commit boundary:**';
-    const cbIdx = mutated.indexOf(commitBoundaryAnchor);
-    if (cbIdx === -1) throw new Error('probe: "**Commit boundary:**" not found after mutation 1');
-    const cbLineEnd = mutated.indexOf('\n', cbIdx + 1);
+    const cbIdx = realContent.indexOf(commitBoundaryAnchor);
+    if (cbIdx === -1) throw new Error('probe: "**Commit boundary:**" not found in git.md');
+    const cbLineEnd = realContent.indexOf('\n', cbIdx + 1);
     const oldStyleBlock =
       '\n**Commit (non-blocking):** Run only if learn-conventions returned `**Status**: WRITTEN`.\n' +
       '```bash\n' +
       'git commit --only -m "docs(devflow): record project conventions" -- .devflow/conventions.md\n' +
       '```\n';
-    mutated =
-      mutated.slice(0, cbIdx) +
-      oldStyleBlock +
-      (cbLineEnd === -1 ? '' : mutated.slice(cbLineEnd));
+    const mutatedGit =
+      realContent.slice(0, cbIdx) + oldStyleBlock + (cbLineEnd === -1 ? '' : realContent.slice(cbLineEnd));
 
-    const syntheticCorpus: CorpusEntry[] = [{ path: '/synthetic/git.md', content: mutated }];
-    const violations = collectConventionsCommitPlacementViolations(syntheticCorpus, syntheticCorpus);
+    // Mutation 1: delete the 4b block from the GitHub setup-task reference.
+    const syntheticSink: CorpusEntry[] = cachedSinkCorpus().map(entry => {
+      if (entry.path === GIT_AGENT_PATH) return { path: entry.path, content: mutatedGit };
+      if (!PROVIDER_SETUP_TASK_PATH.test(entry.path) || path.basename(path.dirname(entry.path)) !== 'github') return entry;
+      const step4bStart = entry.content.indexOf('\n4b. ');
+      const step5Start = entry.content.indexOf('\n5. Return setup summary', step4bStart);
+      if (step4bStart === -1 || step5Start === -1) {
+        throw new Error('probe: could not locate 4b./5. boundaries in the github setup-task reference for mutation');
+      }
+      return { path: entry.path, content: entry.content.slice(0, step4bStart) + entry.content.slice(step5Start) };
+    });
+    const syntheticContract: CorpusEntry[] = [{ path: GIT_AGENT_PATH, content: mutatedGit }];
+    const violations = collectConventionsCommitPlacementViolations(syntheticContract, syntheticSink);
 
     expect(
       violations.length,
       `probe must detect >= 2 violations on the known-bad corpus; got: ${JSON.stringify(violations)}`,
     ).toBeGreaterThan(1);
     expect(
-      violations.some(v => v.startsWith('setup-task:')),
-      `probe must name 'setup-task' in at least one violation; got: ${JSON.stringify(violations)}`,
-    ).toBe(true);
+      violations.filter(v => v.startsWith('setup-task (github):')).length,
+      `probe must name the mutated provider's setup-task reference; got: ${JSON.stringify(violations)}`,
+    ).toBeGreaterThan(0);
+    expect(
+      violations.some(v => v.startsWith('setup-task (jira):') || v.startsWith('setup-task (linear):')),
+      `the unmutated providers must stay silent; got: ${JSON.stringify(violations)}`,
+    ).toBe(false);
     expect(
       violations.some(v => v.startsWith('learn-conventions:')),
       `probe must name 'learn-conventions' in at least one violation; got: ${JSON.stringify(violations)}`,

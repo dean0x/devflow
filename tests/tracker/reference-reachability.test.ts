@@ -253,44 +253,108 @@ function providerReachablePaths(template: string): string[] {
     .flatMap(mod => reachablePaths(template, mod.subdir.slice('tracker/'.length), mod.ops));
 }
 
-const CONTRACT_REL = 'tracker/_mcp.md';
+/**
+ * The two CONTRACT documents — `kind: 'contract'` modules, each a single
+ * cross-cutting file at the `tracker/` root that every tracker spawn reads once.
+ *
+ * D-TRACKER-CONTRACT-ON-DEMAND. `tracker/_contract.md` is the provider resolution and
+ * the tracker input contract, moved out of the always-loaded agent so a PR-only spawn
+ * never pays for them; `tracker/_mcp.md` is the tool-call contract of the MCP-backed
+ * providers. Both are named by the agent's retained `## Loading the mechanics`
+ * section — and by nothing else. The section also keeps the two rules a PR-only spawn
+ * needs and a contract cannot load for it: the PR-mechanics load rule and the merged
+ * step order (see {@link collectLoadingPlacementDefects}).
+ */
+const TRACKER_CONTRACT_REL = 'tracker/_contract.md';
+const TOOL_CALL_CONTRACT_REL = 'tracker/_mcp.md';
+const CONTRACT_RELS = [TRACKER_CONTRACT_REL, TOOL_CALL_CONTRACT_REL] as const;
 
 /**
- * The tool-call CONTRACT document's own reachability rule — a third kind, matching
- * its third module kind.
+ * The CONTRACT documents' own reachability rule — a third kind, matching their third
+ * module kind.
  *
  * A `fanout` file is reachable by instantiating the template; a `named` document is
- * reachable because the agent spells its path; and so is the contract — the agent
+ * reachable because the agent spells its path; and so is a contract — the agent
  * names it, as a fixed literal, on the SAME physical line that composes the
  * per-operation mechanics path.
  *
- * IT USED TO BE THE CONSUMERS THAT NAMED IT, and that is the defect this rule
- * replaces. The contract carries the transport prohibition and the trust
- * discipline for every tracker call a non-github spawn makes, but only five of the
- * ten per-operation files happened to name it: the other five ran tracker calls
+ * IT USED TO BE THE CONSUMERS THAT NAMED THE TOOL-CALL CONTRACT, and that is the
+ * defect this rule replaces. The contract carries the transport prohibition and the
+ * trust discipline for every tracker call a non-github spawn makes, but only five of
+ * the ten per-operation files happened to name it: the other five ran tracker calls
  * with neither. An extraction that turns a universal obligation into per-consumer
  * opt-in drops it wherever a consumer forgets to opt in, and "some shipped file
  * names it" could never have caught it — five namers satisfy it as completely as
- * ten do.
+ * ten do. The tracker contract is held to the same rule for the same reason, and the
+ * rule gains a second half with it (D-TRACKER-CONTRACT-ON-DEMAND): the naming line
+ * puts the tracker contract FIRST, because the settings line it defines yields the
+ * provider token the composed mechanics path needs.
  *
- * It is named from the preamble WITHOUT becoming a second convergence point,
- * because it shares the one existing naming line and is a fixed literal composed
- * from nothing: the validated provider token selects the mechanics directory and
- * never reaches this name. The inverse — no generated op file may name it — is a
- * live arm below, not a comment.
+ * They are named from the loading section WITHOUT becoming a second convergence
+ * point, because they share the one existing naming line and are fixed literals
+ * composed from nothing: the validated provider token selects the mechanics
+ * directory and never reaches these names. The inverse — no generated op file may
+ * name either — is a live arm below, not a comment.
  */
-function contractIsNamedByThePreamble(content: string): boolean {
-  if (!generatedReferenceManifest().includes(CONTRACT_REL)) return false;
+function contractsNamedByTheLoadingSection(content: string): string[] {
   const naming = collectTrackerNamingLines(content);
-  return naming.length === 1 && naming[0].includes(`references/${CONTRACT_REL}`);
+  if (naming.length !== 1) return [];
+  const manifest = generatedReferenceManifest();
+  return CONTRACT_RELS.filter(rel => manifest.includes(rel) && naming[0].includes(`references/${rel}`));
 }
 
-/** Named collector: generated op files that name the contract — must always be empty. */
+/** Named collector: generated op files that name a contract — must always be empty. */
 function collectContractNamers(): string[] {
   return walkFiles(path.join(REFS_DIR, 'tracker'), f => f.endsWith('.md'))
-    .filter(file => path.basename(file) !== '_mcp.md')
-    .filter(file => requireFile('generated reference', file).includes(CONTRACT_REL))
+    .filter(file => !CONTRACT_RELS.some(rel => path.basename(file) === path.basename(rel)))
+    .filter(file => {
+      const body = requireFile('generated reference', file);
+      return CONTRACT_RELS.some(rel => body.includes(rel));
+    })
     .map(file => path.relative(REFS_DIR, file).split(path.sep).join('/'));
+}
+
+/** The loading section's two rules that a PR-only spawn needs and the contract cannot load for it. */
+const PLACED_IN_THE_AGENT = [
+  { label: 'the PR-mechanics load rule', marker: '- **PR mechanics:**' },
+  { label: 'the merged step order', marker: '- **Merged step order:**' },
+] as const;
+
+/**
+ * Named collector: where the two always-loaded loading rules sit.
+ *
+ * AC-524. A PR-only spawn never reads the tracker contract, and the contract cannot
+ * instruct a spawn to load itself, so a rule moved into it would reach tracker spawns
+ * only: a PR-host operation would lose its load rule, and a two-reference operation its
+ * step order. Each rule must therefore be in the agent's `## Loading the mechanics`
+ * section — the always-loaded part, before the first operation — and in the contract
+ * not at all.
+ */
+function collectLoadingPlacementDefects(agentContent: string, contractContent: string): string[] {
+  const firstOp = agentContent.search(/^## Operation: /m);
+  const alwaysLoaded = firstOp === -1 ? agentContent : agentContent.slice(0, firstOp);
+  const heading = alwaysLoaded.indexOf('## Loading the mechanics');
+  const section = heading === -1 ? '' : alwaysLoaded.slice(heading);
+  const defects: string[] = [];
+  for (const { label, marker } of PLACED_IN_THE_AGENT) {
+    if (!section.includes(marker)) defects.push(`${label} is not in the agent's always-loaded Loading section`);
+    if (contractContent.includes(marker)) defects.push(`${label} appears in the tracker contract`);
+  }
+  return defects;
+}
+
+/**
+ * Named collector: lines that name a contract file and say what to do when it is
+ * absent — a stop, a DEGRADED reason or an abort.
+ *
+ * AC-519. A missing contract can only come from a corrupted install, which the
+ * installer already reports; a prompt rule for it is prompt bloat on every spawn, and
+ * no rule is written for a failure only install corruption can cause.
+ */
+function collectMissingContractRules(text: string): string[] {
+  return text.split('\n').filter(line =>
+    /_contract(?:\.md)?/.test(line)
+    && /\b(?:DEGRADED|stop|abort|missing|absent|unavailable|not found|cannot be read|fails? to load)\b/i.test(line));
 }
 
 /**
@@ -360,7 +424,7 @@ function readEmittedPrBody(rel: string): string | null {
  *                       second templated instruction would be a second path
  *                       composed from the provider token, breaking the single
  *                       convergence point that token's validation relies on;
- *   contract            the preamble names it, as a fixed literal.
+ *   contract            the loading section names each, as a fixed literal.
  *
  * `readPrBody` is injectable so the hop's probe can take it away.
  */
@@ -379,14 +443,14 @@ function reachableSetFrom(
       (GIT_CROSS_CUTTING_DOCS as readonly string[]).includes(path.basename(rel, '.md')),
     ),
     ...prNames,
-    ...(contractIsNamedByThePreamble(content) ? [CONTRACT_REL] : []),
+    ...contractsNamedByTheLoadingSection(content),
   ]);
 }
 
 describe('generated references: every reference is reachable from the agent (AC-2.7)', () => {
   const agent = resolveAgentSource('git');
 
-  it('the preamble states exactly one load instruction, and it is the template', () => {
+  it('the loading section states exactly one load instruction, and it is the template', () => {
     const naming = collectTrackerNamingLines(agent.content);
     expect(
       naming.length,
@@ -451,17 +515,22 @@ describe('generated references: every reference is reachable from the agent (AC-
     ).toBeGreaterThanOrEqual(
       providers.reduce((n, mod) => n + mod.ops.length, 0) + GIT_CROSS_CUTTING_DOCS.length,
     );
-    // The contract's own rule, asserted rather than assumed: it is in the manifest
-    // AND the preamble names it. Either half alone would let an unreachable
+    // The contracts' own rule, asserted rather than assumed: each is in the manifest
+    // AND the loading section names it. Either half alone would let an unreachable
     // contract ship or a named one go missing.
     expect(
-      contractIsNamedByThePreamble(agent.content),
-      'the tool-call contract is in the manifest but the preamble does not name it — it would be ' +
-      'installed on every machine of every user of that provider and read by nothing',
-    ).toBe(generatedReferenceManifest().includes(CONTRACT_REL));
+      contractsNamedByTheLoadingSection(agent.content),
+      'a contract is in the manifest but the loading section does not name it — it would be ' +
+      'installed on every machine and read by nothing',
+    ).toEqual(CONTRACT_RELS.filter(rel => generatedReferenceManifest().includes(rel)));
+    expect(
+      CONTRACT_RELS.filter(rel => generatedReferenceManifest().includes(rel)),
+      'both contracts are generated on this tree: the tracker contract ungated, the tool-call ' +
+      'contract because a tool-call provider is registered',
+    ).toEqual([...CONTRACT_RELS]);
   });
 
-  it('the contract is a FIXED per-spawn load: no generated op file names it', () => {
+  it('the contracts are FIXED per-spawn loads: no generated op file names either', () => {
     // The inverse of the rule above, and the half that makes it a fix rather than a
     // relocation. While the per-operation files were the namers, five of ten named
     // it and five did not, and every guard in the tree was satisfied by the five.
@@ -469,21 +538,79 @@ describe('generated references: every reference is reachable from the agent (AC-
     // prohibition is absolute rather than a floor on the count.
     expect(
       collectContractNamers(),
-      'generated op file(s) name the tool-call contract. It is loaded once per SPAWN from the ' +
-      'agent preamble under every non-github provider; a per-operation naming line makes the ' +
+      'generated op file(s) name a contract. Each is loaded once per SPAWN from the agent\'s ' +
+      'loading section (the tracker contract under every provider, the tool-call contract under ' +
+      'every non-github one); a per-operation naming line makes the ' +
       'load look conditional on which operation ran, which is how half the operations lost it:\n  ' +
       collectContractNamers().join('\n  '),
     ).toEqual([]);
+  });
+
+  it('AC-524: the PR-mechanics load rule and the merged step order sit in the agent, never in the tracker contract', () => {
+    const contract = requireFile('tracker contract', path.join(REFS_DIR, ...TRACKER_CONTRACT_REL.split('/')));
+    expect(
+      collectLoadingPlacementDefects(agent.content, contract),
+      'a PR-only spawn reads the agent and never the tracker contract, which cannot load itself: ' +
+      'each rule must be in the agent\'s always-loaded Loading section and absent from the contract',
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: a loading rule moved into the tracker contract, or below the first operation, is reported', () => {
+    const contract = requireFile('tracker contract', path.join(REFS_DIR, ...TRACKER_CONTRACT_REL.split('/')));
+    for (const { label, marker } of PLACED_IN_THE_AGENT) {
+      const line = agent.content.split('\n').find(l => l.startsWith(marker));
+      expect(line, `${label} must be a line of the shipped agent for this probe to seed`).toBeDefined();
+      const withoutRule = agent.content.replace(`${line}\n`, '');
+      expect(withoutRule, 'the strip must change the agent copy').not.toBe(agent.content);
+
+      // Moved into the contract: reported in both halves.
+      expect(
+        collectLoadingPlacementDefects(withoutRule, `${contract}\n${line}\n`),
+        `${label} moved into the contract must be reported in both halves`,
+      ).toEqual([
+        `${label} is not in the agent's always-loaded Loading section`,
+        `${label} appears in the tracker contract`,
+      ]);
+
+      // Moved below the first operation: only the spawns that load that operation read it.
+      expect(
+        collectLoadingPlacementDefects(`${withoutRule}\n${line}\n`, contract),
+        `${label} appended after the operations is not in the always-loaded part`,
+      ).toEqual([`${label} is not in the agent's always-loaded Loading section`]);
+
+      // Left where it is, with the contract untouched: silent.
+      expect(collectLoadingPlacementDefects(agent.content, contract)).toEqual([]);
+    }
+  });
+
+  it('AC-519: neither the agent nor the tracker contract carries a stop or DEGRADED rule for a missing contract', () => {
+    const contract = requireFile('tracker contract', path.join(REFS_DIR, ...TRACKER_CONTRACT_REL.split('/')));
+    expect(collectMissingContractRules(agent.content), 'git.md').toEqual([]);
+    expect(collectMissingContractRules(contract), '_contract.md').toEqual([]);
+    expect(
+      agent.content.split('\n').filter(l => /_contract\.md/.test(l)).length,
+      'the agent names the contract on exactly one line, so the absence above is not vacuous',
+    ).toBe(1);
+  });
+
+  it('known-bad probe: a rule for a missing contract is reported by the same collector', () => {
+    expect(collectMissingContractRules('If `references/tracker/_contract.md` is missing, stop.')).toHaveLength(1);
+    expect(collectMissingContractRules('- DEGRADED when _contract.md cannot be read')).toHaveLength(1);
+    expect(collectMissingContractRules('read `references/tracker/_contract.md` once per spawn')).toEqual([]);
   });
 
   it('known-bad probe: a seeded op-file naming line is reported by the same collector', () => {
     // The collector reads the built tree, so the probe re-runs its predicate over a
     // seeded body rather than writing into dist/ (a non-vacuity check without a
     // side effect).
-    const namesContract = (body: string): boolean => body.includes(CONTRACT_REL);
+    const namesContract = (body: string): boolean => CONTRACT_RELS.some(rel => body.includes(rel));
     expect(
       namesContract('## Operation: setup-task\n\nRead `references/tracker/_mcp.md` first.\n'),
       'the predicate must see a seeded naming line — otherwise the prohibition above is inert',
+    ).toBe(true);
+    expect(
+      namesContract('## Operation: setup-task\n\nRead `references/tracker/_contract.md` first.\n'),
+      'and the tracker contract is held to the same prohibition',
     ).toBe(true);
     expect(
       namesContract('## Operation: setup-task\n\nRead the tool-call contract first.\n'),

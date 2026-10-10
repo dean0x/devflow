@@ -15,14 +15,11 @@
  *
  * The roster is DERIVED from DEVFLOW_PLUGINS, never listed here, so a new agent
  * without a cap line fails the guard instead of slipping past a stale list.
- * Three agents are excluded, each by name and for a stated reason:
- *
- *   - `learning` and `tracker` are spawned by the session-start hook and are never
- *     roster members of a command or workflow;
- *   - `git` is deferred: its source has no `## Output` heading (its output is per
- *     operation), it sits 98 characters under its byte-equality baseline, and its
- *     fixture is frozen for every ticket except the Git agent split. That ticket
- *     removes this exclusion.
+ * Two agents are excluded, each by name and for a stated reason: `learning` and
+ * `tracker` are spawned by the session-start hook and are never roster members of a
+ * command or workflow. `git` was a third until the Git agent split (#425) gave it
+ * an `## Output` section that ends in a cap line and paid for it out of that
+ * split's byte cut; its per-operation Output templates stay where they are.
  *
  * Sections are read fence-aware: the Design, Review and Diagnose templates carry
  * `## ` lines inside fenced blocks, and those are template payload, not section
@@ -36,14 +33,13 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import * as path from 'path'
-import { ROOT, collectUnfencedH2, resolveAgentSource } from '../helpers.js'
+import { ROOT, collectUnfencedH2, resolveAgentSource, walkFiles } from '../helpers.js'
 import { DEVFLOW_PLUGINS } from '../../src/core/plugins.js'
 
 /** Agents outside the roster, with the reason each is out. */
 const EXCLUDED: Readonly<Record<string, string>> = {
   learning: 'hook-spawned by the session-start learning directive, never a roster member',
   tracker: 'hook-spawned by the session-start tracker-setup directive, never a roster member',
-  git: 'deferred to the Git agent split: no `## Output` heading, 98 characters under its byte-equality baseline, frozen fixture',
 }
 
 /** The Output heading each agent uses when it is not `## Output`. */
@@ -68,6 +64,44 @@ const EXEMPT_MARKERS: Readonly<Record<string, readonly string[]>> = {
   research: ['Exempt: none'],
   triage: ['whole ledger'],
   synthesize: ['exploration, planning and design'],
+  // The fields the commands parse from Git's per-operation templates, the ones the
+  // Git agent split's sweep found beyond the ticket's list included: resolve-review-threads'
+  // `### Status:` and `THREAD_MAP`, the validate-branch and ensure-pr-ready returns,
+  // check-merge-readiness' `- Test plan:` line, the `cannot push to fork` degradation
+  // that sets `fork_no_push`, and the wave-2 merge and undo returns. check-ci-status'
+  // `**Status**:` is exempt as the enum `ci-wait.cjs` is pinned to, not as a field a
+  // command reads.
+  git: [
+    '`TRACEABILITY: DEGRADED ({reason})`',
+    '`cannot push to fork`',
+    '`**Status**:`',
+    '`### Status:`',
+    '`**Publication**:`',
+    '`- Test plan:`',
+    '`ci-wait.cjs`',
+    '`### TRACE_MAP`',
+    '`THREAD_MAP`',
+    '`**PR**: #{number}`',
+    '`## Issue {ISSUE_REF}:`',
+    '`<untrusted-issue-body>`',
+    '`- **Branch name**:`',
+    '`- **Issue ID**:`',
+    '`- **PR link line**:`',
+    '`- **Branch token**:`',
+    '`## PR Evidence`',
+    '`branch`',
+    '`base_branch`',
+    '`branch_slug`',
+    '`pr_number`',
+    '`review_count`',
+    '`diff_files`',
+    '`issueId`',
+    '`prLinkLine`',
+    '`merged`',
+    '`mergeSha`',
+    '`treeEqual`',
+    '`undone`',
+  ],
 }
 
 /** What every cap line states, whatever the agent. */
@@ -118,13 +152,14 @@ function collectCapDefects(name: string, content: string): string[] {
 const roster = rosterOf(DEVFLOW_PLUGINS)
 
 describe('D-REPORT-CAP: the report cap on the roster', () => {
-  it('derives a roster of at least 14 agents from DEVFLOW_PLUGINS', () => {
-    expect(roster.length).toBeGreaterThanOrEqual(14)
+  it('derives a roster of at least 15 agents from DEVFLOW_PLUGINS', () => {
+    expect(roster.length).toBeGreaterThanOrEqual(15)
     expect(Object.keys(EXEMPT_MARKERS).sort(), 'every roster agent has an exempt-field record').toEqual([...roster].sort())
   })
 
-  it('excludes learning, tracker and git by name, each with a reason', () => {
-    expect(Object.keys(EXCLUDED).sort()).toEqual(['git', 'learning', 'tracker'])
+  it('excludes learning and tracker by name, each with a reason; git is on the roster', () => {
+    expect(Object.keys(EXCLUDED).sort()).toEqual(['learning', 'tracker'])
+    expect(roster, 'the Git agent split removed git\'s exclusion').toContain('git')
     for (const [name, reason] of Object.entries(EXCLUDED)) {
       expect(reason.length, `${name} needs a stated reason`).toBeGreaterThan(20)
       expect(roster, `${name} is out of the roster`).not.toContain(name)
@@ -146,6 +181,33 @@ describe('D-REPORT-CAP: the report cap on the roster', () => {
     const doc = readFileSync(path.join(ROOT, 'docs', 'reference', 'agent-design.md'), 'utf-8')
     const template = doc.slice(doc.indexOf('## Output\n[Simple structured report format]'))
     expect(template.split('\n')[2], 'the line follows the output placeholder').toMatch(/^Report cap: /)
+  })
+
+  it('git\'s Output section sits outside every operation\'s extent and ends in the cap line', () => {
+    const git = resolveAgentSource('git').content
+    const headings = collectUnfencedH2(git).map(h => h.text)
+    const at = headings.indexOf('## Output')
+    expect(at, 'git.md has an unfenced `## Output` heading').toBeGreaterThan(-1)
+    const ops = headings.filter(h => h.startsWith('## Operation: '))
+    expect(ops.length).toBeGreaterThan(0)
+    expect(headings.indexOf(ops[ops.length - 1]), 'after every operation').toBeLessThan(at)
+    expect(headings[at + 1], 'before Principles').toBe('## Principles')
+    expect(collectCapDefects('git', git)).toEqual([])
+  })
+
+  it('git: check-ci-status stays defined, and its Status line is exempt as the ci-wait enum, not as a field a command reads', () => {
+    const git = resolveAgentSource('git').content
+    expect(git, 'the operation is still defined').toContain('## Operation: check-ci-status')
+    const capLine = git.split('\n').find(l => l.startsWith('Report cap:')) ?? ''
+    expect(
+      capLine,
+      'the cap line must say why check-ci-status\'s `**Status**:` is exempt: `ci-wait.cjs` is pinned to its enum',
+    ).toMatch(/check-ci-status's `\*\*Status\*\*:` being the enum `ci-wait\.cjs` is pinned to/)
+    // No command spawns the operation, so the Status line cannot be a field a command reads.
+    const commandsDir = path.join(ROOT, 'src', 'assets', 'commands')
+    const spawners = walkFiles(commandsDir, f => f.endsWith('.mds'))
+      .filter(f => readFileSync(f, 'utf-8').includes('OPERATION: check-ci-status'))
+    expect(spawners.map(f => path.relative(commandsDir, f)), 'no command spawns check-ci-status').toEqual([])
   })
 
   it('known-bad probe: an agent without the line is reported', () => {
@@ -177,6 +239,18 @@ describe('D-REPORT-CAP: the report cap on the roster', () => {
     expect(collectCapDefects('diagnose', naive), 'a cap line inside the fence is not the last line').toEqual([
       'diagnose: the "## Output" section does not end with a "Report cap:" line',
     ])
+  })
+
+  it('known-bad probe: a git.md without its cap line, or with an exempt field dropped, is reported', () => {
+    const real = resolveAgentSource('git').content
+    const capLine = real.split('\n').find(l => l.startsWith('Report cap:'))
+    expect(capLine, 'the seed must land').toBeDefined()
+    expect(collectCapDefects('git', real.replace(`${capLine}\n`, ''))).toEqual([
+      'git: the "## Output" section does not end with a "Report cap:" line',
+    ])
+    const dropped = real.replace(capLine!, capLine!.replace('`THREAD_MAP`', '`THREADS`'))
+    expect(dropped, 'the seed must land').not.toBe(real)
+    expect(collectCapDefects('git', dropped)).toContain('git: the cap line does not name its exempt field "`THREAD_MAP`"')
   })
 
   it('known-bad probe: a roster that gains an agent without a record is caught by the derivation', () => {

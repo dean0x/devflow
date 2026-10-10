@@ -83,26 +83,35 @@ const GIT_MD = GIT_AGENT.content;
  */
 const TRACKER_MD = resolveAgentSource('tracker').content;
 
-const PREAMBLE_CONTRACT_HEADING = '## Tracker input contract';
+/**
+ * The compiled tracker contract, `tracker/_contract.md` — the provider resolution and
+ * the tracker input contract that left the always-loaded agent for a file a tracker
+ * spawn reads once (D-TRACKER-CONTRACT-ON-DEMAND). Read at module scope, fail-loud.
+ */
+const CONTRACT_PATH = path.join(compiledSkillRefsDir(), 'tracker', '_contract.md');
+const CONTRACT_MD = readFileSync(CONTRACT_PATH, 'utf-8');
+
+const PREAMBLE_CONTRACT_HEADING = '### Tracker input contract';
+const PREAMBLE_RESOLUTION_HEADING = '### Tracker provider resolution';
 
 /**
- * The READER side: the `## Tracker input contract` block of the compiled agent.
+ * The READER side: the `### Tracker input contract` block of the compiled tracker contract.
  *
- * Sliced to the next column-0 `## `, which is the same boundary rule every
- * union-mode guard uses. Throws rather than returning '' — an empty reader block
+ * Sliced to the next column-0 heading of level 2 or 3, which is the same boundary rule
+ * every union-mode guard uses. Throws rather than returning '' — an empty reader block
  * would make direction 1 of the heading test report every section as missing and
  * direction 2 report none, which reads as a writer problem.
  */
-function preambleContractBlock(content: string = GIT_MD): string {
+function preambleContractBlock(content: string = CONTRACT_MD): string {
   const start = content.indexOf(PREAMBLE_CONTRACT_HEADING);
   if (start === -1) {
     throw new Error(
-      `'${PREAMBLE_CONTRACT_HEADING}' not found in ${GIT_AGENT.path} — the reader half of the ` +
+      `'${PREAMBLE_CONTRACT_HEADING}' not found in ${CONTRACT_PATH} — the reader half of the ` +
       `schema is missing or was renamed (P3a-S14).`,
     );
   }
   const rest = content.slice(start + PREAMBLE_CONTRACT_HEADING.length);
-  const next = rest.search(/^## /m);
+  const next = rest.search(/^##{1,2} /m);
   return next === -1 ? rest : rest.slice(0, next);
 }
 
@@ -320,12 +329,12 @@ export function collectTrackerFileReaders(corpus: readonly CorpusEntry[]): strin
   return sites;
 }
 
-/** The provider-resolution preamble: from its heading to the input contract that follows it. */
-function resolutionPreambleBlock(content: string = GIT_MD): string {
-  const start = content.indexOf('## Tracker provider resolution');
+/** The provider resolution: from its heading to the input contract that follows it. */
+function resolutionPreambleBlock(content: string = CONTRACT_MD): string {
+  const start = content.indexOf(PREAMBLE_RESOLUTION_HEADING);
   const end = content.indexOf(PREAMBLE_CONTRACT_HEADING);
   if (start === -1 || end === -1 || end < start) {
-    throw new Error(`the provider-resolution preamble is not bounded in ${GIT_AGENT.path}`);
+    throw new Error(`the provider resolution is not bounded in ${CONTRACT_PATH}`);
   }
   return content.slice(start, end);
 }
@@ -389,11 +398,25 @@ describe('AC-3.16: the tracker configuration file has exactly ONE reader', () =>
     }
   });
 
-  it('no generated reference reads it', () => {
-    const refs = gitAgentSinkCorpus().filter(e => e.path !== GIT_AGENT.path);
+  it('no generated reference reads it — the tracker contract is the one reader', () => {
+    // The reader moved with the rest of the provider resolution from the agent's
+    // preamble into tracker/_contract.md (D-TRACKER-CONTRACT-ON-DEMAND), so it is the
+    // one generated file allowed to name the configuration file; the positive arm
+    // above reads that block. Every other reference stays an absence.
+    const refs = gitAgentSinkCorpus().filter(
+      e => e.path !== GIT_AGENT.path && e.path !== CONTRACT_PATH,
+    );
     expect(refs.length, 'the generated reference corpus is empty — run `npm run build`')
       .toBeGreaterThan(0);
+    expect(
+      gitAgentSinkCorpus().some(e => e.path === CONTRACT_PATH),
+      'the sink corpus must contain the contract, or the exclusion above excludes nothing',
+    ).toBe(true);
     expect(collectTrackerFileReaders(refs)).toEqual([]);
+    expect(
+      collectTrackerFileReaders([{ path: CONTRACT_PATH, content: CONTRACT_MD }]).length,
+      'the contract is the reader, so it must name the file',
+    ).toBeGreaterThan(0);
   });
 
   it('no command source and no dist/commands/*.md reads it — release.md included by name', () => {
@@ -1624,6 +1647,9 @@ function renderSiteReferences(): CorpusEntry[] {
   const refs = compiledSkillRefsDir();
   return walkFiles(path.join(refs, 'tracker'), f => f.endsWith('.md'))
     .map(file => ({ path: path.relative(refs, file), content: readFileSync(file, 'utf-8') }))
+    // The tracker contract lists `### Substitutions` among the sections it reads; it
+    // renders no token, so it owes no discard record.
+    .filter(entry => entry.path !== path.join('tracker', '_contract.md'))
     .filter(entry => entry.content.includes('### Substitutions'));
 }
 

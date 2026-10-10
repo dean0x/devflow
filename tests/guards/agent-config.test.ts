@@ -1,5 +1,5 @@
 /**
- * agent-config — the shipped model, effort, tool policy and preload of fifteen
+ * agent-config — the shipped model, effort, tool policy and preload of sixteen
  * agents, and the rule that no agent body directs a tool its frontmatter removes.
  *
  * Decisions recorded here. Each is a D-series note at the code that carries it;
@@ -22,6 +22,7 @@
  *                              Step 1 to load the row's skills with the Skill tool,
  *                              continuing with the methodology if a load fails.
  *  - D-LEARNING-SHIPPED-ROW    tests/fixtures/agent-config.ts (the learning row).
+ *  - D-GIT-ROW                 tests/fixtures/agent-config.ts (the git row).
  *  - D-STRUCTURED-RETURN-TOOL  the structured-return arm below.
  *
  * Body-level decisions, pinned by the phrases they carry:
@@ -535,7 +536,7 @@ describe('completeness: every registered agent has a row or a reason', () => {
   });
 
   it('records a reason for each exemption', () => {
-    expect(Object.keys(EXEMPT_AGENTS).sort()).toEqual(['git', 'tracker']);
+    expect(Object.keys(EXEMPT_AGENTS).sort()).toEqual(['tracker']);
     for (const reason of Object.values(EXEMPT_AGENTS)) expect(reason.trim().length).toBeGreaterThan(0);
   });
 

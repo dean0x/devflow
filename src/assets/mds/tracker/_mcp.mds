@@ -24,14 +24,14 @@ tool-call provider NAMES this file, this file names nothing back, and that file
 may INVOKE a rule here but never restate its substance. On any conflict between a
 per-operation file and this contract, THIS CONTRACT WINS.
 
-THE NAMER IS THE AGENT PREAMBLE, and not the per-operation file. This contract is
+THE NAMER IS THE AGENT'S LOADING SECTION, and not the per-operation file. This contract is
 read once per SPAWN, so a per-operation naming reached it only for the operations
 that happened to carry one — five of ten — and the other five ran tracker calls
 with neither the transport prohibition nor the trust discipline below. An
 extraction that turns a universal obligation into per-consumer opt-in is the
 defect, not the saving.
 
-The preamble names it on the SAME physical line that composes the per-operation
+The loading section names it on the SAME physical line that composes the per-operation
 mechanics path, which is what keeps the single convergence point (validation lives
 at the one sink every path passes through, not at each entry) at exactly one line.
 That is sound rather than a loophole: what that rule counts is where a path is

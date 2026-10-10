@@ -68,7 +68,9 @@ devflow/
 │       │   ├── tracker/_jira.mds       # One file per Jira tracker operation
 │       │   ├── tracker/_linear.mds     # One file per Linear tracker operation
 │       │   ├── tracker/_mcp.mds        # Provider-independent tool-call contract (emitted as tracker/_mcp.md)
+│       │   ├── tracker/_contract.mds   # Provider resolution and tracker input contract, read once by tracker spawns (emitted as tracker/_contract.md)
 │       │   ├── tracker/_common.mds     # Partial: lines the tracker modules share (no output-dir:, never compiled directly)
+│       │   ├── tracker/_steps.mds      # Partial: provider-neutral step text of the tracker operations (no output-dir:, never compiled directly)
 │       │   ├── git/_references.mds     # Cross-cutting documents the Git agent names
 │       │   └── git/_pr.mds             # One file per PR-host operation (provider-independent)
 │       └── scripts/                  # Installed verbatim to ~/.devflow/scripts/

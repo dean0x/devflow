@@ -102,11 +102,14 @@ export const MDS_PARTIALS = [
  * source path — the same addressing as MDS_REFERENCE_MODULES, and for the same
  * reason: a basename is only unique inside one directory.
  *
- * One today. `_common.mds` holds the lines every tracker module writes
+ * Two today. `_common.mds` holds the lines every tracker module writes
  * identically, including the CLI provider's — the counterpart to `_mcp.mds`,
- * which owns what is shared only by the TOOL-CALL providers. It is a partial
- * because it declares no `output-dir:`: the build skips it and it reaches the
- * artifact only through the modules that import it.
+ * which owns what is shared only by the TOOL-CALL providers. `_steps.mds` holds the
+ * provider-neutral step text of the tracker operations that left the Git agent
+ * (D-NEUTRAL-STEP-MOVE), in a module of its own because the resolver's compile cost
+ * is exponential in a module's define count and `_common.mds` has no room left. Each
+ * is a partial because it declares no `output-dir:`: the build skips it and it
+ * reaches the artifact only through the modules that import it.
  *
  * This roster is what makes the partial discovery below a repo-wide walk rather
  * than a listing of one directory. A partial parked outside `_partials/` was
@@ -115,6 +118,7 @@ export const MDS_PARTIALS = [
  */
 export const MDS_REFERENCE_PARTIALS = [
   'src/assets/mds/tracker/_common.mds',
+  'src/assets/mds/tracker/_steps.mds',
 ] as const;
 
 /**
@@ -311,6 +315,7 @@ export const MDS_REFERENCE_MODULES = [
   'src/assets/mds/tracker/_jira.mds',
   'src/assets/mds/tracker/_linear.mds',
   'src/assets/mds/tracker/_mcp.mds',
+  'src/assets/mds/tracker/_contract.mds',
   'src/assets/mds/git/_pr.mds',
   'src/assets/mds/git/_references.mds',
 ] as const;

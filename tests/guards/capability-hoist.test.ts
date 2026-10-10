@@ -403,6 +403,30 @@ describe('capability-hoist: no capability probe runs inside a loop [DR-11]', () 
       .toEqual(['iterate-over']);
   });
 
+  it('known-bad probe 5: a shared step that opens a loop ahead of the hoisted lookup is reported', () => {
+    // D-NEUTRAL-STEP-MOVE. Provider-neutral steps expand into the SAME `### Process` block as the
+    // provider's own, so a shared step that states the loop would sit above the provider's
+    // hoisted identity lookup and turn the lookup into an in-loop probe. This is why
+    // backlink-shipped-issues' loop bound stays in the agent instead of joining the shared steps.
+    const seeded: CorpusEntry[] = [
+      {
+        path: 'seed/shared-step-first.md',
+        content: [
+          '## Operation: seeded-backlink',
+          '',
+          '### Process',
+          '',
+          'For each issue reference in `SHIPPED_ISSUES` (sequentially, the first ≤50 in list order):',
+          '',
+          "**Setup (once, before the loop):** Fetch viewer login: `gh api user --jq '.login'`",
+          '',
+        ].join('\n'),
+      },
+    ];
+    expect(collectCapabilityHoistViolations(collectProcessBlocks(seeded)).map(v => v.probe))
+      .toEqual(['identify-current-user']);
+  });
+
   it('known-bad probe 3: the same probe ABOVE the loop is not a violation', () => {
     // Without this arm the collector could report every probe line and still pass
     // the two fixtures above — the hoisted form is what the rule permits.

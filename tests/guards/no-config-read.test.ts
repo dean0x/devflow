@@ -436,13 +436,21 @@ describe('no compiled prompt reads .devflow/project.json or .devflow/config.json
   })
 
   it('the Git agent resolves its tracker from the settings line, and reads neither file', () => {
-    // The positive half of the empty exemption list: git.md is in the corpus AND
-    // carries the resolver invocation, so a clean result is an agent that moved,
-    // not one that stopped resolving its tracker.
-    const git = promptSurface().find(c => c.label === 'agents')!.files.find(f => f.name === 'dist/agents/git.md')!
+    // The positive half of the empty exemption list. The resolver invocation moved with the rest
+    // of the provider resolution from git.md into the tracker contract (D-TRACKER-CONTRACT-ON-DEMAND),
+    // which a tracker spawn reads once: both files are in the corpus, the contract carries the
+    // invocation and git.md names the contract, so a clean result is a prompt that moved, not one
+    // that stopped resolving its tracker.
+    const surface = promptSurface()
+    const git = surface.find(c => c.label === 'agents')!.files.find(f => f.name === 'dist/agents/git.md')!
     expect(git, 'dist/agents/git.md is not in the agents class').toBeDefined()
-    expect(git.content).toContain('node "$HOME/.devflow/scripts/resolve-settings.cjs" "{root}" 2>/dev/null; echo "exit=$?"')
-    expect(collectConfigReads([git])).toEqual([])
+    const contract = surface.find(c => c.label === 'references')!.files
+      .find(f => f.name === 'dist/skills/git/references/tracker/_contract.md')!
+    expect(contract, 'the tracker contract is not in the references class').toBeDefined()
+    expect(contract.content).toContain('node "$HOME/.devflow/scripts/resolve-settings.cjs" "{root}" 2>/dev/null; echo "exit=$?"')
+    expect(git.content, 'git.md names the contract that runs the resolver').toContain('references/tracker/_contract.md')
+    expect(git.content, 'and no longer runs it itself').not.toContain('resolve-settings.cjs')
+    expect(collectConfigReads([git, contract])).toEqual([])
   })
 
   it('red probe: a seeded config read in a real compiled command is reported by the same collector', () => {
