@@ -12,8 +12,10 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
 
+import { stampAgentTools } from '../../core/agent-frontmatter.js';
 import { agentSourceDirs, type AgentSourceDirs } from '../../core/assets.js';
 import { mdFileName } from '../../core/orphan-sweep.js';
+import { TRACKER_MCP_SERVERS_DEFAULT, trackerServerTools } from '../../core/tracker.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -30,11 +32,17 @@ export interface ConvergeTrackerArtifactsOptions {
    * a test can prove the preference order against a temp tree.
    */
   agentSourceDirs?: AgentSourceDirs;
+  /**
+   * The tracker tool servers stamped onto the agent's `tools:` line
+   * (D-TRACKER-SERVER-ALLOWLIST). `devflow init` passes the manifest's setting; absent means
+   * the default list, the meaning an absent manifest field has.
+   */
+  servers?: readonly string[];
 }
 
 export interface ConvergeTrackerArtifactsResult {
   /**
-   * True when the agent file is byte-identical to its source after this run.
+   * True when the agent file is byte-identical to its stamped source after this run.
    * False when any warn path was taken.
    *
    * Converge is warn-not-throw, so callers cannot detect partial failure
@@ -83,26 +91,25 @@ async function firstExisting(candidates: readonly string[]): Promise<string | un
 }
 
 /**
- * Would copying `source` over `target` change anything?
+ * Would writing `wanted` over `target` change anything?
  *
- * Asked once, between resolving the source and copying it, so a run that would write a
+ * Asked once, between resolving the wanted bytes and writing them, so a run that would write a
  * byte-identical copy of the installed agent reports `unchanged` instead of `installed`
  * — the same question the reference overlay asks per unit, for the same reason: a
  * summary that can only ever say "installed" says nothing, and a steady-state re-init
  * announcing "tracker agent installed" is the noise this closes (QA S2).
  *
- * It does NOT weaken the self-heal. A hand-edited or truncated agent differs from its
- * source, so it is copied and reported as written; only an identical file is skipped,
- * and skipping a copy of what is already there changes nothing on disk.
+ * It does NOT weaken the self-heal. A hand-edited or truncated agent differs from what is
+ * wanted, so it is written and reported as written; only an identical file is skipped,
+ * and skipping a write of what is already there changes nothing on disk.
  *
  * Any error — an absent target, an unreadable one — answers "no". The fallback is the
- * copy that was going to happen anyway, so a failure to compare costs a write, never
+ * write that was going to happen anyway, so a failure to compare costs a write, never
  * correctness.
  */
-async function copyWouldChangeNothing(source: string, target: string): Promise<boolean> {
+async function writeWouldChangeNothing(wanted: string, target: string): Promise<boolean> {
   try {
-    const [from, to] = await Promise.all([fs.readFile(source), fs.readFile(target)]);
-    return from.equals(to);
+    return (await fs.readFile(target, 'utf-8')) === wanted;
   } catch { return false; }
 }
 
@@ -119,11 +126,14 @@ async function copyWouldChangeNothing(source: string, target: string): Promise<b
  * INERT until that directive fires, which happens only for a provider with no
  * learned conventions.
  *
- * Copies the agent in unless the installed file is already byte-identical to the
- * source. Compared rather than trusted for existing, so a truncated or hand-edited
- * file self-heals; compared rather than re-copied blind, so a run that changes
+ * Writes the agent in unless the installed file is already byte-identical to the
+ * source wearing the tracker-server stamp (D-TRACKER-SERVER-ALLOWLIST; the stamp is the
+ * only difference between the installed file and its source, which is why the comparison
+ * is against the STAMPED text: against the bare source the file would differ on every run).
+ * Compared rather than trusted for existing, so a truncated or hand-edited
+ * file self-heals; compared rather than re-written blind, so a run that changes
  * nothing reports `unchanged` and the summary stays quiet
- * (see {@link copyWouldChangeNothing}).
+ * (see {@link writeWouldChangeNothing}).
  *
  * Never throws. A caller reads `converged`; it does not catch. The one refusal
  * that is not an I/O degradation — a claudeDir that is not absolute — is reported
@@ -154,16 +164,32 @@ export async function convergeTrackerArtifacts(
     return { converged: false, agent: 'unchanged' };
   }
 
+  let wanted: string;
+  try {
+    const stamped = stampAgentTools(
+      await fs.readFile(source, 'utf-8'),
+      trackerServerTools(opts.servers ?? TRACKER_MCP_SERVERS_DEFAULT),
+    );
+    if (!stamped.ok) {
+      warn(`tracker: the Tracker agent source could not take the tracker servers (${stamped.error}) — not installed`);
+      return { converged: false, agent: 'unchanged' };
+    }
+    wanted = stamped.value.content;
+  } catch (err) {
+    warn(`tracker: cannot read the Tracker agent source (${source}) — ${String(err)}`);
+    return { converged: false, agent: 'unchanged' };
+  }
+
   // Already converged — nothing to write, and nothing for the summary to announce.
   // The directory is not created either: an identical file at the target means it is
-  // already there (see {@link copyWouldChangeNothing}).
-  if (await copyWouldChangeNothing(source, target)) {
+  // already there (see {@link writeWouldChangeNothing}).
+  if (await writeWouldChangeNothing(wanted, target)) {
     return { converged: true, agent: 'unchanged' };
   }
 
   try {
     await fs.mkdir(path.dirname(target), { recursive: true });
-    await fs.copyFile(source, target);
+    await fs.writeFile(target, wanted);
   } catch (err) {
     warn(`tracker: failed to install the Tracker agent (${target}) — ${String(err)}`);
     return { converged: false, agent: 'unchanged' };

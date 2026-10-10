@@ -9,6 +9,9 @@ import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '
 import { generatedReferenceManifest, installedReferenceManifest, PR_HOST_DESTINATION_ROOT, SKILL_REFS_SKILL_NAME, TRACKER_DESTINATION_ROOT } from '../../core/mds-variants.js';
 import { sweepOrphanedReferences, MAX_REFERENCE_SWEEP_DEPTH } from '../../core/reference-sweep.js';
 import { TRACKER_AGENT_NAME } from './tracker-install.js';
+import { isTrackerStampedAgent } from './tracker-servers.js';
+import { stampAgentTools } from '../../core/agent-frontmatter.js';
+import { TRACKER_MCP_SERVERS_DEFAULT, trackerServerTools } from '../../core/tracker.js';
 import { BUILTIN_OVERRIDE_AGENTS, findForeignAgentOwner } from './agent-type-owner.js';
 import { restampInstalledCommands } from './language-stamp.js';
 
@@ -1704,11 +1707,43 @@ export interface FileCopyOptions {
    */
   agentSourceDirs?: AgentSourceDirs;
   /**
+   * The tracker tool servers stamped onto the installed Git agent's `tools:` line as it is
+   * written (D-TRACKER-SERVER-ALLOWLIST; the Tracker agent is stamped by its own converge).
+   * `devflow init` passes the manifest's setting; absent means the default list, the same
+   * meaning an absent manifest field has.
+   */
+  trackerServers?: readonly string[];
+  /**
    * Receives non-fatal install notices that have no other reporting channel — today the
    * reference overlay's skipped symlinks and mode-normalisation failures. Defaults to a
    * no-op so callers with no logger are unaffected; `devflow init` passes its own.
    */
   warn?: (msg: string) => void;
+}
+
+/**
+ * Install one agent that carries the tracker-server stamp: the shipped source with
+ * `servers` appended to its `tools:` line, written in one step so no copy of it ever sits on
+ * disk unstamped (D-TRACKER-SERVER-ALLOWLIST, src/targets/claude-code/tracker-servers.ts).
+ *
+ * A source that cannot take the stamp is installed as shipped and reported: an install must
+ * not die on a stamp, and the unstamped agent then reaches no tracker server, which
+ * `devflow tracker --servers` or a re-run of `devflow init` repairs.
+ */
+async function writeStampedAgent(
+  srcFile: string,
+  target: string,
+  servers: readonly string[],
+  warn: (msg: string) => void,
+): Promise<void> {
+  const source = await fs.readFile(srcFile, 'utf-8');
+  const stamped = stampAgentTools(source, trackerServerTools(servers));
+  if (!stamped.ok) {
+    warn(`tracker servers: ${path.basename(target)} could not be stamped (${stamped.error}); installed without tracker servers`);
+    await fs.copyFile(srcFile, target);
+    return;
+  }
+  await fs.writeFile(target, stamped.value.content);
 }
 
 /**
@@ -1901,6 +1936,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     isPartialInstall,
     spinner,
     learning,
+    trackerServers = TRACKER_MCP_SERVERS_DEFAULT,
     warn = () => { /* no-op: callers without a logger still get the full InstallReport */ },
   } = options;
 
@@ -2144,7 +2180,12 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
           `ensure the agent file exists in src/assets/agents/ (searched: ${candidates.join(', ')}).`,
         );
       }
-      await fs.copyFile(srcFile, path.join(agentsTarget, mdFileName(agentName)));
+      const agentTarget = path.join(agentsTarget, mdFileName(agentName));
+      if (isTrackerStampedAgent(agentName)) {
+        await writeStampedAgent(srcFile, agentTarget, trackerServers, warn);
+      } else {
+        await fs.copyFile(srcFile, agentTarget);
+      }
     }
   }
 

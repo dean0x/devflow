@@ -16,6 +16,9 @@
  * --set converges the sentinel in BOTH directions, so flipping
  *   back to github removes what flipping away wrote.
  * A failed re-arm or sentinel step warns, it never aborts.
+ * --servers sets the machine's tracker tool servers (D-TRACKER-SERVER-ALLOWLIST) and
+ *   re-stamps the installed Git and Tracker agents at once; it is orthogonal to --set and
+ *   neither flag touches the other's manifest field.
  */
 
 import { Command } from 'commander';
@@ -31,20 +34,24 @@ import {
   TRACKER_PROVIDERS,
   applyTrackerSentinel,
   describeTrackerValue,
+  effectiveTrackerServers,
   parseTrackerFrontmatter,
   parseTrackerId,
+  parseTrackerServers,
   readBoundedHead,
   rearmTrackerInference,
   trackerConventionsPath,
   type TrackerFeatureState,
   type TrackerProvider,
   type TrackerResult,
+  type TrackerServersSelection,
 } from '../../core/tracker.js';
 import { readManifest, syncManifestFeature } from '../../core/manifest.js';
 import { loadSettingsModule, personalConfigTrackedWarning, repoTrackerSelection, type RepoTrackerSelection } from '../../core/evidence-policy.js';
 import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
 import { SKILL_REFS_SKILL_NAME, installedReferenceManifest } from '../../core/mds-variants.js';
 import { prefixSkillName } from '../../core/plugins.js';
+import { restampTrackerAgents, type RestampTrackerAgentsResult } from '../../targets/claude-code/tracker-servers.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -180,6 +187,11 @@ export async function readTrackerStatusConventions(
   };
 }
 
+/** Render the tracker servers for the `--status` note. Pure; every name was validated at its boundary. */
+export function formatTrackerServers(list: readonly string[], isDefault: boolean): string {
+  return `${list.join(', ')}${isDefault ? ` ${color.dim('(default)')}` : ''}`;
+}
+
 /**
  * The `--status` note's lines. Pure.
  *
@@ -194,6 +206,8 @@ export function formatTrackerStatus(input: {
   readonly selection: RepoTrackerSelection | null;
   readonly conventions: TrackerStatusConventions;
   readonly mechanics: TrackerMechanicsState;
+  /** The tracker tool servers in force, and whether they are the shipped default. */
+  readonly servers: { readonly list: readonly string[]; readonly isDefault: boolean };
   readonly inference: string;
 }): string {
   const providerLabel = input.machine === DEFAULT_TRACKER_PROVIDER
@@ -208,6 +222,7 @@ export function formatTrackerStatus(input: {
       ? ['Conventions: none (GitHub needs no learned conventions)', 'File:        none']
       : [`Conventions: ${formatTrackerProvenance(input.conventions.provenance)}`, `File:        ${input.conventions.file}`]),
     `Mechanics:   ${formatTrackerMechanics(input.mechanics)}`,
+    `Servers:     ${formatTrackerServers(input.servers.list, input.servers.isDefault)}`,
     `Inference:   ${input.inference}`,
   );
   return lines.join('\n');
@@ -271,7 +286,8 @@ export async function runTrackerSet(opts: {
   const { devflowDir, current, requested, io } = opts;
   const messages: TrackerCliActionMessage[] = [];
 
-  await io.syncManifest(devflowDir, { provider: requested });
+  // The provider changes; the tracker servers are a different setting and ride along.
+  await io.syncManifest(devflowDir, { ...current, provider: requested });
 
   // [DR-22] a selection change re-arms the attempt counters; [DR-10] the
   // sentinel converges in both directions.
@@ -290,28 +306,115 @@ export async function runTrackerSet(opts: {
   return { provider: requested, messages };
 }
 
+// ── --servers: the tracker tool servers ───────────────────────────────────────
+
+/**
+ * Injectable I/O seam for {@link runTrackerServers}: the manifest writer and the re-stamp of
+ * the installed agents. Tests substitute a recorder so the CALL ORDER is assertable.
+ */
+export interface TrackerServersIO {
+  syncManifest(devflowDir: string, state: TrackerFeatureState): Promise<void>;
+  restamp(claudeDir: string, servers: readonly string[], warn: (message: string) => void): Promise<RestampTrackerAgentsResult>;
+}
+
+/** The real adapter — the ONE binding of each operation into the `--servers` path. */
+export function buildTrackerServersIO(): TrackerServersIO {
+  return {
+    syncManifest: (devflowDir, state) => syncManifestFeature(devflowDir, 'tracker', state),
+    restamp: (claudeDir, servers, warn) => restampTrackerAgents({ claudeDir, servers, warn }),
+  };
+}
+
+export interface TrackerServersOutcome {
+  /** False only when the manifest could not be written; nothing was re-stamped then. */
+  readonly ok: boolean;
+  /** The state in force when this returned. */
+  readonly state: TrackerFeatureState;
+  readonly messages: TrackerCliActionMessage[];
+}
+
+/**
+ * Set the machine's tracker tool servers.
+ *
+ * Follows `--set`'s convergence order (D-TRACKER-CONVERGE-SET): the manifest first, then
+ * the installed agents, which are re-stamped ONLY when the manifest write landed, so an
+ * installed agent never names a list the manifest does not record. Unlike `--set`, a failed
+ * manifest write is the whole command failing (there is nothing else for it to do), so it is
+ * returned as `ok: false` for the caller to exit on; a failed re-stamp warns, it never aborts.
+ *
+ * `default` removes the key, so an absent `servers` stays the one spelling of the default.
+ * Never throws.
+ */
+export async function runTrackerServers(opts: {
+  devflowDir: string;
+  claudeDir: string;
+  current: TrackerFeatureState;
+  requested: TrackerServersSelection;
+  io: TrackerServersIO;
+}): Promise<TrackerServersOutcome> {
+  const { devflowDir, claudeDir, current, requested, io } = opts;
+  const messages: TrackerCliActionMessage[] = [];
+
+  const next: TrackerFeatureState = requested.kind === 'default'
+    ? { provider: current.provider }
+    : { provider: current.provider, servers: requested.servers };
+
+  try {
+    await io.syncManifest(devflowDir, next);
+  } catch (err) {
+    messages.push({
+      level: 'error',
+      text: `Could not write the manifest — the tracker servers were not changed (${err instanceof Error ? err.message : String(err)})`,
+    });
+    return { ok: false, state: current, messages };
+  }
+
+  const servers = effectiveTrackerServers(next);
+  const unchanged = servers.join('\n') === effectiveTrackerServers(current).join('\n');
+  const label = `${servers.join(', ')}${requested.kind === 'default' ? ' (default)' : ''}`;
+  messages.push({ level: unchanged ? 'info' : 'success', text: `Tracker servers: ${label}${unchanged ? ' (unchanged)' : ''}` });
+
+  const restamp = await io.restamp(claudeDir, servers, (message) => messages.push({ level: 'warn', text: message }));
+  const done = restamp.rewritten.length + restamp.unchanged.length;
+  if (restamp.absent.length === 2 && restamp.failed.length === 0) {
+    messages.push({ level: 'info', text: 'No installed Git or Tracker agent to update — run devflow init' });
+  } else if (restamp.rewritten.length > 0) {
+    messages.push({ level: 'info', text: `Updated the installed ${restamp.rewritten.join(' and ')} agent${restamp.rewritten.length > 1 ? 's' : ''}` });
+  } else if (done > 0 && restamp.failed.length === 0) {
+    messages.push({ level: 'info', text: 'The installed agents already carry this list' });
+  }
+
+  return { ok: true, state: next, messages };
+}
+
 interface TrackerOptions {
   status?: boolean;
   set?: string;
+  servers?: string;
 }
 
 export const trackerCommand = new Command('tracker')
-  .description('Show or set the machine\'s issue tracker provider')
+  .description('Show or set the machine\'s issue tracker provider and tracker servers')
   .option(
     '--status',
     'Show the provider in effect and its learned conventions file, and re-arm background inference',
   )
   .option('--set <id>', 'Set the machine\'s default issue tracker provider: github, jira, or linear')
+  .option(
+    '--servers <names>',
+    'Set the tracker servers the Git and Tracker agents may call: comma-separated names, or "default"',
+  )
   .action(async (options: TrackerOptions) => {
     const devflowDir = getDevFlowDirectory();
 
-    const hasFlag = options.status || options.set !== undefined;
+    const hasFlag = options.status || options.set !== undefined || options.servers !== undefined;
     if (!hasFlag) {
       p.intro(color.bgCyan(color.white(' Tracker ')));
       const validIds = TRACKER_PROVIDERS.map(t => `${t.id} — ${t.hint}`).join('\n  ');
       p.note(
         `${color.cyan('devflow tracker --status')}      Show the provider and learned conventions\n` +
-        `${color.cyan('devflow tracker --set <id>')}    Set the machine's default provider\n\n` +
+        `${color.cyan('devflow tracker --set <id>')}    Set the machine's default provider\n` +
+        `${color.cyan('devflow tracker --servers <names>')}  Set the tracker servers the agents may call\n\n` +
         `Valid provider IDs:\n  ${validIds}`,
         'Usage',
       );
@@ -330,7 +433,18 @@ export const trackerCommand = new Command('tracker')
       setProvider = parsed.value;
     }
 
-    const manifest = await readManifest(devflowDir);
+    // Validate --servers the same way: a bad name exits before any I/O, never repaired.
+    let setServers: TrackerServersSelection | undefined;
+    if (options.servers !== undefined) {
+      const parsed = parseTrackerServers(options.servers);
+      if (!parsed.ok) {
+        p.log.error(parsed.error);
+        process.exit(1);
+      }
+      setServers = parsed.value;
+    }
+
+    const manifest = await readManifest(devflowDir, { onWarning: (message) => p.log.warn(message) });
     if (!manifest) {
       p.log.error('No manifest found. Run devflow init first.');
       process.exit(1);
@@ -367,6 +481,7 @@ export const trackerCommand = new Command('tracker')
           selection,
           conventions,
           mechanics,
+          servers: { list: effectiveTrackerServers(current), isDefault: current.servers === undefined },
           inference,
         }),
         'Tracker Status',
@@ -380,14 +495,35 @@ export const trackerCommand = new Command('tracker')
     }
 
     // ── Set ────────────────────────────────────────────────────────────────────
-    const outcome = await runTrackerSet({
-      devflowDir,
-      current,
-      requested: setProvider ?? current.provider,
-      io: buildTrackerSetIO(),
-    });
+    // `--set` and `--servers` are independent settings and may be given together: the provider
+    // first, then the servers against the state it left.
+    const messages: TrackerCliActionMessage[] = [];
+    let state: TrackerFeatureState = current;
+    if (setProvider !== undefined) {
+      const outcome = await runTrackerSet({
+        devflowDir,
+        current,
+        requested: setProvider,
+        io: buildTrackerSetIO(),
+      });
+      messages.push(...outcome.messages);
+      state = { ...current, provider: outcome.provider };
+    }
+    let failed = false;
+    if (setServers !== undefined) {
+      const outcome = await runTrackerServers({
+        devflowDir,
+        claudeDir: getClaudeDirectory(),
+        current: state,
+        requested: setServers,
+        io: buildTrackerServersIO(),
+      });
+      messages.push(...outcome.messages);
+      state = outcome.state;
+      failed = !outcome.ok;
+    }
 
-    for (const msg of outcome.messages) {
+    for (const msg of messages) {
       switch (msg.level) {
         case 'success': p.log.success(msg.text); break;
         case 'warn': p.log.warn(msg.text); break;
@@ -396,7 +532,9 @@ export const trackerCommand = new Command('tracker')
       }
     }
 
-    if (outcome.provider !== DEFAULT_TRACKER_PROVIDER) {
+    if (failed) process.exit(1);
+
+    if (setProvider !== undefined && state.provider !== DEFAULT_TRACKER_PROVIDER) {
       p.log.info(color.dim(
         'Your issue conventions are learned in the background at the next session start',
       ));

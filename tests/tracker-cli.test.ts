@@ -34,6 +34,7 @@ import {
   formatTrackerStatus,
 } from '../src/cli/commands/tracker.js';
 import {
+  TRACKER_MCP_SERVERS_DEFAULT,
   TRACKER_PROVIDER_IDS,
   parseTrackerId,
   trackerAttemptsPath,
@@ -176,6 +177,7 @@ describe('formatTrackerStatus', () => {
     machine: 'github' as const,
     conventions: { kind: 'none' } as const,
     mechanics: { kind: 'installed', count: 47 } as const,
+    servers: { list: TRACKER_MCP_SERVERS_DEFAULT, isDefault: true },
     inference: 're-armed (5 attempts available)',
   };
 
@@ -183,8 +185,17 @@ describe('formatTrackerStatus', () => {
     const note = formatTrackerStatus({ ...base, selection: null });
     expect(note).not.toContain('Effective:');
     expect(note.split('\n').map(l => l.slice(0, 13))).toEqual([
-      'Provider:    ', 'Conventions: ', 'File:        ', 'Mechanics:   ', 'Inference:   ',
+      'Provider:    ', 'Conventions: ', 'File:        ', 'Mechanics:   ', 'Servers:     ', 'Inference:   ',
     ]);
+  });
+
+  it('prints the servers in force on one line, marking the default and leaving a chosen list unmarked', () => {
+    const line = (servers: { list: readonly string[]; isDefault: boolean }): string =>
+      formatTrackerStatus({ ...base, selection: null, servers }).split('\n').find(l => l.startsWith('Servers:')) ?? '';
+    expect(line({ list: TRACKER_MCP_SERVERS_DEFAULT, isDefault: true })).toBe(
+      `Servers:     ${TRACKER_MCP_SERVERS_DEFAULT.join(', ')} (default)`,
+    );
+    expect(line({ list: ['corp_tracker', 'github'], isDefault: false })).toBe('Servers:     corp_tracker, github');
   });
 
   it('prints `Effective: jira (project)` second when project.json selects it', () => {
@@ -195,7 +206,7 @@ describe('formatTrackerStatus', () => {
     });
     const lines = note.split('\n');
     expect(lines[1]).toMatch(/^Effective:\s+\S*jira\S* \(project\)$/);
-    expect(lines).toHaveLength(6);
+    expect(lines).toHaveLength(7);
     expect(lines[3]).toBe('File:        /h/.devflow/tracker/jira.md');
   });
 
@@ -512,7 +523,7 @@ describe('devflow tracker call sites', () => {
     const source = await fs.readFile(TRACKER_CLI_SOURCE, 'utf-8');
     const body = source.slice(
       source.indexOf('export async function runTrackerSet('),
-      source.indexOf('interface TrackerOptions'),
+      source.indexOf('// ── --servers'),
     );
     expect(body.length, 'the orchestrator body must be locatable').toBeGreaterThan(0);
     for (const direct of ['rearmTrackerInference(', 'applyTrackerSentinel(', 'syncManifestFeature(']) {

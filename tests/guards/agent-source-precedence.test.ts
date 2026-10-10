@@ -28,7 +28,9 @@ import { installViaFileCopy } from '../../src/targets/claude-code/installer.js';
 import { convergeTrackerArtifacts } from '../../src/targets/claude-code/tracker-install.js';
 import { loadShippedAgentDefaults } from '../../src/core/agent-models.js';
 import { agentSourceDirs, agentsDir, compiledAgentsDir, type AgentSourceDirs } from '../../src/core/assets.js';
-import { readFrontmatterEffort, readFrontmatterModel } from '../../src/core/agent-frontmatter.js';
+import { readFrontmatterEffort, readFrontmatterModel, stampAgentTools } from '../../src/core/agent-frontmatter.js';
+import { TRACKER_MCP_SERVERS_DEFAULT, trackerServerTools } from '../../src/core/tracker.js';
+import { isTrackerStampedAgent } from '../../src/targets/claude-code/tracker-servers.js';
 import { buildAssetMaps, getAllAgentNames } from '../../src/core/plugins.js';
 import type { PluginDefinition } from '../../src/core/plugins.js';
 import { resolveAgentSource, splitFrontmatter } from '../helpers.js';
@@ -236,13 +238,21 @@ describe('the real tree resolves identically in all three consumers', () => {
     await fs.rm(tmpRoot, { recursive: true, force: true });
   });
 
-  it('the installer installs byte-for-byte what resolveAgentSource resolves', async () => {
+  it('the installer installs byte-for-byte what resolveAgentSource resolves, bar the tracker-server stamp', async () => {
     const installed = await installAll(tmpRoot);
     for (const name of ALL_AGENTS) {
-      expect(
-        installed.get(name),
-        `installed '${name}' differs from the harness-resolved source`,
-      ).toBe(resolveAgentSource(name).content);
+      const content = installed.get(name) as string;
+      const source = resolveAgentSource(name).content;
+      if (!isTrackerStampedAgent(name)) {
+        expect(content, `installed '${name}' differs from the harness-resolved source`).toBe(source);
+        continue;
+      }
+      // Git and Tracker wear the default tracker servers on their tools line and nothing else
+      // differs: stripping the stamp gives the resolved source back, byte for byte.
+      expect(content, `installed '${name}' carries no stamp`).not.toBe(source);
+      expect(content).toContain(trackerServerTools(TRACKER_MCP_SERVERS_DEFAULT).map(t => `"${t}"`).join(', '));
+      const stripped = stampAgentTools(content, []);
+      expect(stripped.ok && stripped.value.content, `installed '${name}' differs from the source beyond the stamp`).toBe(source);
     }
   });
 
