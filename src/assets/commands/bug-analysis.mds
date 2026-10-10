@@ -170,9 +170,9 @@ If no tool produced findings: set `STATIC_FINDINGS` to `(none)`.
 ### Phase 3: Context Loading
 
 <!-- learning:on -->
-**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PLAN_CONTEXT, ACCEPTANCE_RULES
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PLAN_CONTEXT, ACCEPTANCE_RULES
 <!-- learning:off -->
-**Produces:** FEATURE_KNOWLEDGE, PLAN_CONTEXT, ACCEPTANCE_RULES
+**Produces:** FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PLAN_CONTEXT, ACCEPTANCE_RULES
 <!-- learning:end -->
 
 <!-- learning:on -->

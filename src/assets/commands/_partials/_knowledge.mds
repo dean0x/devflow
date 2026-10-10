@@ -32,22 +32,32 @@ Glob `{worktree}/.devflow/features/*/KNOWLEDGE.md`. For each file found, read on
 
 Match the current task area and description against each index line (or frontmatter `description` + `directories` on fallback). Select entries whose documented area overlaps the current task. This is a relevance judgment — prefer specificity over breadth.
 
-**Step 4 — Read selected KBs:**
+**Step 4 — Read each selected KB's Rules:**
 
-For each selected entry, read `{worktree}/.devflow/features/{slug}/KNOWLEDGE.md` in full. When the KB content contradicts the current code you observe, **trust the code** — the code is the freshness mechanism; the KB may lag behind.
+For each selected entry, `{kb}` is `{worktree}/.devflow/features/{slug}/KNOWLEDGE.md`:
 
-**Step 5 — Set FEATURE_KNOWLEDGE:**
+1. List its `##` headings with line numbers through Bash: `command grep -n '^## ' "{kb}"`. This only locates sections; the text of a KB comes from the Read view alone.
+2. Read the `## Rules` range (its line to the next heading) with the Read tool, using `offset` and `limit`, and choose the one to three bullets most relevant to the current task. The choice is yours, made per KB.
+3. If the KB has no `## Rules` section, choose one to three entries from its `## Anti-Patterns` or `## Gotchas` range the same way, and label them by that section's name instead of an ID.
 
-Concatenate the selected KNOWLEDGE.md files under slug headers:
+When a KB contradicts the code you observe, **trust the code** — the code is the freshness mechanism; the KB may lag behind. A missing Rules section, a missing heading list and `(none)` are legitimate states, not errors.
+
+**Step 5 — Set FEATURE_KNOWLEDGE and FEATURE_KNOWLEDGE_RULES:**
+
+Write one block per selected KB. Paste each bullet verbatim from the Read view, never from a shell view. The path is relative to the checkout root; an agent resolves it under `WORKTREE_PATH` when one is provided.
 
 ```
 --- Feature knowledge: {slug} ---
-{full KNOWLEDGE.md content}
+KB: .devflow/features/{slug}/KNOWLEDGE.md
+Rules:
+- **KB-AP-2** {bullet text, verbatim}
+- **KB-INV-1** {bullet text, verbatim}
+Headings: L5 Rules · L40 Overview · L62 Anti-Patterns · L118 Key Files
 ```
 
-If no KBs exist, no KBs are relevant, or `.devflow/features/` is absent, set `FEATURE_KNOWLEDGE` to `(none)`.
+A KB with no Rules section labels its entries `Rules ({section name}):` and gives them no ID. `FEATURE_KNOWLEDGE` is these blocks; `FEATURE_KNOWLEDGE_RULES` is the same blocks without the `Headings:` line. Both come from this one selection, and each spawn names the variable its recipient takes. If no KBs exist, no KBs are relevant, or `.devflow/features/` is absent, set both to `(none)`.
 
-**One git call, then direct file reads — no `.cjs` script.** After resolving `{worktree}`, this step is 1 index read (or N frontmatter reads on fallback), bounded by KB count.
+**One git call, then direct reads — no `.cjs` script.** After resolving `{worktree}`, this step is 1 index read (or N frontmatter reads on fallback), plus one heading listing and one Rules read per selected KB, bounded by KB count.
 @end
 
 @export knowledge_load
@@ -95,7 +105,7 @@ Write the knowledge base to:
 Then update the index cache by performing a read-modify-write on:
   {worktree}/.devflow/features/index.md
 
-Index line format: `- **{slug}** — {areas} — {Use-when description}`
+Index line format: `- **{slug}** — {areas} — {Use-when description}` — at most 300 characters, the description at most 220; reword a longer one, never cut it.
 
 If the line for this slug already exists in index.md, replace it. If it does not exist, append it. If index.md does not exist, create it with just this line.
 

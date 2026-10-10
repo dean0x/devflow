@@ -41,9 +41,9 @@ $ARGUMENTS
 <!-- learning:end -->
 
 <!-- learning:on -->
-**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES
 <!-- learning:off -->
-**Produces:** FEATURE_KNOWLEDGE
+**Produces:** FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES
 <!-- learning:end -->
 
 {{docs_root()}}
@@ -100,7 +100,7 @@ Each Research agent receives:
 <!-- learning:on -->
 - `DECISIONS_CONTEXT`: From Phase 1
 <!-- learning:end -->
-- `FEATURE_KNOWLEDGE`: From Phase 1
+- `FEATURE_KNOWLEDGE`: `{feature_knowledge}` from Phase 1
 - `ORIENT_OUTPUT`: Only for `codebase` type
 - `WORKTREE_PATH`: If in a worktree context
 

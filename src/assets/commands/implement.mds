@@ -59,9 +59,9 @@ If the user prompt does NOT match re-validation, proceed with the full pipeline 
 ### Phase 1: Setup
 
 <!-- learning:on -->
-**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION
+**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION
 <!-- learning:off -->
-**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, FEATURE_KNOWLEDGE, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION
+**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION
 <!-- learning:end -->
 
 Record the current branch name as `BASE_BRANCH` - this will be the PR target.
@@ -231,7 +231,7 @@ PR_TEST_PLAN_BLOCK: {PR_TEST_PLAN_BLOCK from Phase 1 verbatim, or (none)}"
 
 **SEQUENTIAL_CODE_AGENTS** (for HIGH/CRITICAL context risk):
 
-Spawn Code agents one at a time, passing handoff summaries between phases:
+Spawn Code agents one at a time. Each appends its own phase section to the handoff file, and the next reads only the section before it:
 
 **Phase 1 Code agent:**
 ```
@@ -283,7 +283,7 @@ HANDOFF_REQUIRED: {true if not last phase}
 HANDOFF_FILE: {worktree}/.devflow/docs/handoff-{branch_slug}.md"
 ```
 
-**Handoff Protocol**: Each sequential Code agent receives the prior Code agent's implementation summary via PRIOR_PHASE_SUMMARY and FILES_FROM_PRIOR_PHASE. The Code agent's built-in branch orientation step handles git log scanning, file reading, and pattern discovery automatically. After each Code agent with HANDOFF_REQUIRED=true completes, write its phase summary to `{worktree}/.devflow/docs/handoff-{branch_slug}.md` using the Write tool (survives context compaction), keeping any `## Evidence Exceptions` section byte-identical. Delete `{worktree}/.devflow/docs/handoff-{branch_slug}.md` once the PR exists — after the final Code agent, which creates it, completes (cleanup).
+**Handoff Protocol**: Each sequential Code agent receives the prior Code agent's implementation summary via PRIOR_PHASE_SUMMARY and FILES_FROM_PRIOR_PHASE. The Code agent's built-in branch orientation step handles git log scanning, file reading, and pattern discovery automatically. Each Code agent with HANDOFF_REQUIRED=true appends its own `## Phase {N} Implementation Summary` section, at most 8,192 bytes, to `{worktree}/.devflow/docs/handoff-{branch_slug}.md` (survives context compaction), never rewriting an earlier section and keeping any `## Evidence Exceptions` section byte-identical; the next Code agent reads only the section of the phase immediately before its own through HANDOFF_FILE. The orchestrator writes no phase section. Delete `{worktree}/.devflow/docs/handoff-{branch_slug}.md` once the PR exists — after the final Code agent, which creates it, completes (cleanup).
 
 ---
 
@@ -365,7 +365,7 @@ FILES_CHANGED: {list of files from Code agent output}
 <!-- learning:on -->
 DECISIONS_CONTEXT: {decisions_context}
 <!-- learning:end -->
-FEATURE_KNOWLEDGE: {feature_knowledge}
+FEATURE_KNOWLEDGE: {feature_knowledge_rules}
 Evaluate 9 pillars, fix P0/P1 issues, report status"
 ```
 
@@ -376,7 +376,7 @@ Scrutinize agent reports `### Status: PASS | FIXED | BLOCKED`. **If BLOCKED:** r
 **Produces:** ALIGNMENT_RESULT
 **Requires:** FILES_CHANGED, EXECUTION_PLAN
 
-After Scrutinize agent passes, spawn Evaluate agent to validate alignment. Evaluate agent receives `FEATURE_KNOWLEDGE` as acceptance context only; pattern and anti-pattern judgments belong to Scrutinize agent:
+After Scrutinize agent passes, spawn Evaluate agent to validate alignment. Evaluate agent receives `FEATURE_KNOWLEDGE_RULES` as acceptance context only; pattern and anti-pattern judgments belong to Scrutinize agent:
 
 ```
 Agent(subagent_type="Evaluate"):
@@ -384,7 +384,7 @@ Agent(subagent_type="Evaluate"):
 EXECUTION_PLAN: {execution plan from Phase 1}
 FILES_CHANGED: {list of files from Code agent output}
 ACCEPTANCE_CRITERIA: {extracted criteria if available}
-FEATURE_KNOWLEDGE: {feature_knowledge}
+FEATURE_KNOWLEDGE: {feature_knowledge_rules}
 Validate alignment with request and plan. Report ALIGNED or MISALIGNED with details."
 ```
 

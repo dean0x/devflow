@@ -204,9 +204,9 @@ Only `exit=0` means the skill is installed. On any other result, do NOT add that
 <!-- learning:end -->
 
 <!-- learning:on -->
-**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, COMPLIANCE_FRAMEWORKS (carried from Step 0b)
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, COMPLIANCE_FRAMEWORKS (carried from Step 0b)
 <!-- learning:off -->
-**Produces:** FEATURE_KNOWLEDGE, COMPLIANCE_FRAMEWORKS (carried from Step 0b)
+**Produces:** FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, COMPLIANCE_FRAMEWORKS (carried from Step 0b)
 <!-- learning:end -->
 
 {{decisions_load()}}

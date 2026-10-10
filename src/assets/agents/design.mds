@@ -42,7 +42,7 @@ The orchestrator provides:
 - **DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this repository (pre-rendered to `.devflow/learning/index.md` in its main worktree). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.
 <!-- learning:end -->
 - **COMPLIANCE_FRAMEWORKS** (compliance focus): `none` (generic controls) or the framework ids in force. Load `references/{id}.md` only for these ids.
-- **FEATURE_KNOWLEDGE** (optional): Pre-computed feature area context for pattern-aware gap analysis. Incorporate feature area patterns and architecture into gap analysis — design additions that fit existing structure. Follow `devflow:apply-feature-knowledge`.
+- **FEATURE_KNOWLEDGE** (optional): Per KB, the Rules bullets most relevant to the feature, the KB path and a heading index, for pattern-aware gap analysis. Read the indexed sections for the architecture you build on — design additions that fit existing structure. Follow `devflow:apply-feature-knowledge`.
 
 <!-- learning:on -->
 ## Apply Decisions

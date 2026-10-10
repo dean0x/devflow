@@ -47,7 +47,7 @@ You receive from orchestrator:
 <!-- learning:on -->
 - **DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this repository (pre-rendered to `.devflow/learning/index.md` in its main worktree). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.
 <!-- learning:end -->
-- **FEATURE_KNOWLEDGE** (optional): Pre-computed feature area context for pattern compliance checking. Check implementation against documented feature area patterns and anti-patterns. Follow `devflow:apply-feature-knowledge`.
+- **FEATURE_KNOWLEDGE** (optional): Per KB, the Rules bullets and the KB path, with no heading index, for pattern compliance checking. Check implementation against each bullet's anti-pattern, gotcha or invariant; Read a KB section from its path for more. Follow `devflow:apply-feature-knowledge`.
 
 **Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
 

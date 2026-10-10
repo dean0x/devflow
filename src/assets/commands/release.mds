@@ -4,6 +4,7 @@ output-dir: dist/commands
 ---
 @import { evidence_policy } from "./_partials/_evidence_policy.mds"
 @import { decisions_gate, decisions_locate } from "./_partials/_decisions.mds"
+@import { knowledge_load } from "./_partials/_knowledge.mds"
 @import "./_partials/_settings.mds" as settings
 
 # Release Command
@@ -57,9 +58,9 @@ Read `.release/RELEASE-FLOW.md`:
 ### Phase 1b: Load Context
 
 <!-- learning:on -->
-**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES
 <!-- learning:off -->
-**Produces:** FEATURE_KNOWLEDGE
+**Produces:** FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES
 <!-- learning:end -->
 
 <!-- learning:on -->
@@ -72,7 +73,7 @@ Read `.release/RELEASE-FLOW.md`:
 Read `{ledger}/.devflow/learning/index.md`. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
 
 <!-- learning:end -->
-Load feature knowledge: Attempt to read `.devflow/features/index.md` (the regenerable cache). If absent or empty, glob `.devflow/features/*/KNOWLEDGE.md` and read each file's YAML frontmatter (`name`, `description`, `directories`) as the relevance surface. Pick release-relevant KBs by matching their documented area against the release context. For each selected KB, read the full `KNOWLEDGE.md` — trust current code over KB content on any mismatch. Concatenate under slug headers and set `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant). No `index.json`, no subprocess, no `.cjs` script.
+{{knowledge_load()}}
 
 <!-- learning:on -->
 Pass `DECISIONS_CONTEXT` and `FEATURE_KNOWLEDGE` only to agents whose contract declares them; the Validate and Git agents this command spawns do not.

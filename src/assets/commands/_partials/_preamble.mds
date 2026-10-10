@@ -80,7 +80,7 @@ The `budget` global governs depth. Scale Review agent roster and verification vo
 
 ### Handoff convention for sequential Code agents within a ticket
 
-When a ticket requires multiple sequential Code agent phases, each Code agent writes `{toplevel}/.devflow/docs/handoff-{branch_slug}.md` (branch-scoped to prevent concurrent session clobber), `{toplevel}` being `git rev-parse --show-toplevel` in the checkout the ticket's branch is in — never a subdirectory. The next Code agent reads it via HANDOFF_FILE input. PRIOR_PHASE_SUMMARY is the compact in-context form; the handoff file is the durable form that survives context compaction. Always read the handoff file directly — code is authoritative, summaries are supplementary.
+When a ticket requires multiple sequential Code agent phases, each Code agent appends its own `## Phase {N} Implementation Summary` section, at most 8,192 bytes, to `{toplevel}/.devflow/docs/handoff-{branch_slug}.md` (branch-scoped to prevent concurrent session clobber), `{toplevel}` being `git rev-parse --show-toplevel` in the checkout the ticket's branch is in — never a subdirectory. It never rewrites an earlier section. The next Code agent reads, via HANDOFF_FILE input, only the section of the phase immediately before its own, not the whole file. PRIOR_PHASE_SUMMARY is the compact in-context form; the handoff file is the durable form that survives context compaction. Code is authoritative, summaries are supplementary.
 
 ### IRON RULE (LLM-vs-plumbing)
 

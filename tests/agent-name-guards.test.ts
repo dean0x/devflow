@@ -1188,3 +1188,59 @@ describe('GAP-6: shipped LEGACY_AGENT_KEYS integrity', () => {
     expect(Object.keys(agents)).toHaveLength(13)
   })
 })
+
+// ---------------------------------------------------------------------------
+// D-KB-DELIVERY-TIERS (#427): the charter's Feature knowledge bullet
+// ---------------------------------------------------------------------------
+
+/**
+ * The charter reaches direct delegations that no workflow covers, so its bullet passes the same
+ * delivery the workflows use: each matching KB's one to three most relevant Rules bullets (verbatim,
+ * IDs included), the KB path and its heading index. It keeps its three limits: direct delegations
+ * only, before non-trivial code work only, and a delegated change to a covered area spawns
+ * Knowledge afterwards. Knowledge is never loaded at session start, so the bullet is the only
+ * place the charter mentions it. The length ceiling is held by the charter size test above, the
+ * single site the numeric-floor manifest pins.
+ */
+export function collectCharterKnowledgeDefects(charter: string): string[] {
+  const bullet = charter.split('\n').find(l => l.startsWith('- Feature knowledge')) ?? ''
+  if (bullet === '') return ['no "- Feature knowledge" bullet']
+  const out: string[] = []
+  for (const [label, re] of [
+    ['direct delegations only', /direct delegations only/],
+    ['before non-trivial code work only', /before delegating non-trivial code work/],
+    ['matches the task area against the index', /match the task area against \.devflow\/features\/index\.md/],
+    ['the one to three Rules bullets', /one to three most relevant `## Rules` bullets/],
+    ['verbatim with IDs', /verbatim, IDs included/],
+    ['the KB path', /\bits path\b/],
+    ['the heading index', /`##` heading index/],
+    ['the legacy fallback by section', /Anti-Patterns or Gotchas entries, cited by section/],
+    ['passed as FEATURE_KNOWLEDGE', /as FEATURE_KNOWLEDGE/],
+    ['a covered change spawns Knowledge afterwards', /after delegated changes to a covered area, spawn Knowledge to refresh that KB/],
+  ] as const) if (!re.test(bullet)) out.push(`the bullet does not state: ${label}`)
+  if (/KNOWLEDGE\.md content/.test(bullet)) out.push('the bullet still passes whole KNOWLEDGE.md content')
+  return out
+}
+
+describe('charter Feature knowledge bullet (D-KB-DELIVERY-TIERS)', () => {
+  it('passes Rules bullets with IDs, the path and the heading index, and keeps its three limits', () => {
+    const charter = readFileSync(CHARTER_PATH, 'utf-8')
+    expect(charter.length, 'nothing read').toBeGreaterThan(1000)
+    expect(collectCharterKnowledgeDefects(charter)).toEqual([])
+  })
+
+  it('known-bad probe: the whole-file wording, a lost limit and a lost element are each reported', () => {
+    const charter = readFileSync(CHARTER_PATH, 'utf-8')
+    expect(collectCharterKnowledgeDefects(charter)).toEqual([])
+    const whole = charter.replace(/pass each matching KB's one to three.*?as FEATURE_KNOWLEDGE/, 'pass matching KNOWLEDGE.md content as FEATURE_KNOWLEDGE')
+    expect(whole, 'the seed must land').not.toBe(charter)
+    const defects = collectCharterKnowledgeDefects(whole)
+    expect(defects).toContain('the bullet still passes whole KNOWLEDGE.md content')
+    expect(defects).toContain('the bullet does not state: the one to three Rules bullets')
+    const noLimit = charter.replace('direct delegations only', 'every delegation')
+    expect(collectCharterKnowledgeDefects(noLimit)).toEqual(['the bullet does not state: direct delegations only'])
+    const noKnowledge = charter.replace('spawn Knowledge to refresh that KB', 'do nothing')
+    expect(collectCharterKnowledgeDefects(noKnowledge)).toEqual(['the bullet does not state: a covered change spawns Knowledge afterwards'])
+    expect(collectCharterKnowledgeDefects('no bullet')).toEqual(['no "- Feature knowledge" bullet'])
+  })
+})

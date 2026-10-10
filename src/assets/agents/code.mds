@@ -59,7 +59,7 @@ You receive from orchestrator:
 
 **Domain hint** (optional):
 - **DOMAIN**: `backend` | `frontend` | `tests` | `fullstack` - Load/apply relevant domain skills
-- **FEATURE_KNOWLEDGE** (optional): Pre-computed feature area context — patterns, architecture, anti-patterns, gotchas
+- **FEATURE_KNOWLEDGE** (optional): Per KB, the Rules bullets most relevant to the task (anti-patterns, gotchas, invariants), the KB path and a heading index; sections are read on demand
 <!-- learning:on -->
 - **DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries.
   When provided, use `devflow:apply-decisions` to Read full bodies on demand.
@@ -73,7 +73,7 @@ You receive from orchestrator:
 - **PRIOR_PHASE_SUMMARY**: Implementation summary from previous Code agent (see format below)
 - **FILES_FROM_PRIOR_PHASE**: Files created that must be read and understood
 - **HANDOFF_REQUIRED**: true if another Code agent follows this one
-- **HANDOFF_FILE** (optional): Path to branch-scoped handoff file for prior phase context (e.g., `.devflow/docs/handoff-feat-my-feature.md`)
+- **HANDOFF_FILE** (optional): Path to the branch-scoped handoff file (e.g., `.devflow/docs/handoff-feat-my-feature.md`): read the one section of the phase before yours, and append your own section when HANDOFF_REQUIRED=true
 
 ## Step 0: Mode Skills
 
@@ -92,7 +92,7 @@ Four skills are not preloaded. Load one with `Skill(skill="devflow:<name>")` onl
 
 ## Responsibilities
 
-1. **Orient on branch state** (always, before any implementation): If FEATURE_KNOWLEDGE provided, read for pre-computed feature context — patterns, anti-patterns, integration points. Use as starting point; verify against current code. Follow `devflow:apply-feature-knowledge`.
+1. **Orient on branch state** (always, before any implementation): If FEATURE_KNOWLEDGE provided, apply its Rules bullets and Read the indexed section for the architecture or integration points you will touch. Verify against current code. Follow `devflow:apply-feature-knowledge`.
    - Run `git log --oneline --stat -n 10` to scan recent commit history on this branch
    - Run `git status` and `git diff --stat` and `git diff --cached --stat` to see uncommitted/unstaged work
    - Cross-reference changed files against EXECUTION_PLAN to identify what's relevant to your task
@@ -101,7 +101,7 @@ Four skills are not preloaded. Load one with `Skill(skill="devflow:<name>")` onl
 <!-- learning:on -->
    - If `DECISIONS_CONTEXT` is provided, follow `devflow:apply-decisions` on it. An absent key or `(none)` means no decisions context. State every decision or pitfall you apply in words in code, comments, tests and commit messages, never by its ID.
 <!-- learning:end -->
-   - If `HANDOFF_FILE` is provided, read it for prior phase context. Cross-reference against actual code — code is authoritative, handoff is supplementary.
+   - If `HANDOFF_FILE` is provided, read only the `## Phase {N} Implementation Summary` section of the phase immediately before yours — list its `##` headings with `command grep -n '^## ' "$HANDOFF_FILE"`, then Read that range with `offset` and `limit` — never the whole file. Cross-reference against actual code — code is authoritative, handoff is supplementary.
 
 2. **Load domain skills**: Before any analysis, invoke the Skill tool for the domain skills matching the language and stack of the code being touched:
    - `backend` (TypeScript): `Skill(skill="devflow:typescript")`
@@ -163,7 +163,7 @@ Four skills are not preloaded. Load one with `Skill(skill="devflow:<name>")` onl
 
    **D11 scrub (PR body is a GitHub-visible sink):** Compose the final PR body to `$DEVFLOW_BODY_RAW` (`DEVFLOW_BODY_RAW="$(mktemp)"`); scrub via `node "$HOME/.devflow/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY"` (where `DEVFLOW_BODY="$(mktemp)"`). On success: create PR with `gh pr create … --body-file "$DEVFLOW_BODY"`. **On scrubber failure** (non-zero exit or script missing): still create the PR — PR existence is the deliverable — but with a minimal body containing only the task reference, plan path (if available), and issue link (if ISSUE_NUMBER provided), plus the literal line `TRACEABILITY: DEGRADED (redaction unavailable)`. Never post `$DEVFLOW_BODY_RAW`.
 
-8. **Generate handoff** (if HANDOFF_REQUIRED=true): Include implementation summary for next Code agent (see Output section).
+8. **Write your handoff** (if HANDOFF_REQUIRED=true): when `HANDOFF_FILE` is provided, append your own `## Phase {N} Implementation Summary` section (template in Output; `{N}` is one more than the `## Phase` headings already in the file) with a Bash `>>` redirect, never rewriting an earlier section or the `## Evidence Exceptions` section. Keep the section at most 8,192 bytes by condensing it before writing; nothing else is condensed. Then end your report with the same section.
 
 ## Running commands
 
@@ -300,7 +300,7 @@ Return structured completion status:
 {Description of blocker or failure with recommendation}
 ```
 
-**If HANDOFF_REQUIRED=true**, append implementation summary for next Code agent:
+**If HANDOFF_REQUIRED=true**, end with the section you appended to `HANDOFF_FILE` (the orchestrator passes it on as PRIOR_PHASE_SUMMARY):
 
 ```markdown
 ## Phase {N} Implementation Summary

@@ -19,9 +19,9 @@ Run Simplify agent and Scrutinize agent sequentially on changed files for post-i
 ### Phase 0: Context Gathering
 
 <!-- learning:on -->
-**Produces:** FILES_CHANGED, TASK_DESCRIPTION, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, HEAD_BEFORE
+**Produces:** FILES_CHANGED, TASK_DESCRIPTION, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, HEAD_BEFORE
 <!-- learning:off -->
-**Produces:** FILES_CHANGED, TASK_DESCRIPTION, FEATURE_KNOWLEDGE, HEAD_BEFORE
+**Produces:** FILES_CHANGED, TASK_DESCRIPTION, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, HEAD_BEFORE
 <!-- learning:end -->
 
 Detect changed files and build context:
@@ -41,12 +41,12 @@ Pass `DECISIONS_CONTEXT` to Scrutinize agent — the compact index lists active 
 <!-- learning:end -->
 {{knowledge_load()}}
 
-Pass `FEATURE_KNOWLEDGE` to Scrutinize agent.
+Pass `FEATURE_KNOWLEDGE_RULES` to Scrutinize agent.
 
 <!-- learning:on -->
-**Extract:** FILES_CHANGED (list), TASK_DESCRIPTION (string), DECISIONS_CONTEXT (string, optional), FEATURE_KNOWLEDGE (string, optional), HEAD_BEFORE (40-hex SHA)
+**Extract:** FILES_CHANGED (list), TASK_DESCRIPTION (string), DECISIONS_CONTEXT (string, optional), FEATURE_KNOWLEDGE (string, optional), FEATURE_KNOWLEDGE_RULES (string, optional), HEAD_BEFORE (40-hex SHA)
 <!-- learning:off -->
-**Extract:** FILES_CHANGED (list), TASK_DESCRIPTION (string), FEATURE_KNOWLEDGE (string, optional), HEAD_BEFORE (40-hex SHA)
+**Extract:** FILES_CHANGED (list), TASK_DESCRIPTION (string), FEATURE_KNOWLEDGE (string, optional), FEATURE_KNOWLEDGE_RULES (string, optional), HEAD_BEFORE (40-hex SHA)
 <!-- learning:end -->
 
 ### Phase 1: Simplify agent (Code Refinement)
@@ -81,7 +81,7 @@ FILES_CHANGED: {files_changed}
 <!-- learning:on -->
 DECISIONS_CONTEXT: {decisions_context}
 <!-- learning:end -->
-FEATURE_KNOWLEDGE: {feature_knowledge}
+FEATURE_KNOWLEDGE: {feature_knowledge_rules}
 Evaluate against 9-pillar framework. Fix P0/P1 issues. Return structured report.
 <!-- learning:on -->
 Follow devflow:apply-decisions to scan DECISIONS_CONTEXT and Read full ADR/PF bodies on demand. Skip if (none).

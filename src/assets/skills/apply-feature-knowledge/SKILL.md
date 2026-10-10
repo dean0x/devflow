@@ -2,7 +2,7 @@
 name: apply-feature-knowledge
 description: Consume FEATURE_KNOWLEDGE, the pre-computed feature context
 user-invocable: false
-allowed-tools: Read
+allowed-tools: Read, Bash
 ---
 
 # Apply Feature Knowledge
@@ -19,9 +19,9 @@ allowed-tools: Read
 
 ## 3-Step Algorithm
 
-1. **Read** each section of `FEATURE_KNOWLEDGE` (headed `--- Feature knowledge: {slug} ---`) for architecture, data flow, patterns, anti-patterns, gotchas and the integration points your task touches.
-2. **Apply** it: follow documented patterns unless you have a specific reason not to; check your work against each anti-pattern and gotcha; respect documented integration boundaries; start exploring from the key files.
-3. **Verify** against current code: it may not reflect recent changes. Where it is silent on your area, explore further. Where an assertion seems outdated or contradicts the code, Read the source and trust it. Note a discrepancy in your output when it matters for the task.
+1. **Read** each `FEATURE_KNOWLEDGE` block (headed `--- Feature knowledge: {slug} ---`): `Rules:` holds anti-patterns, gotchas and invariants; `KB:` is the full file's path (under `WORKTREE_PATH` when given).
+2. **Apply** them: check your work against every bullet and cite it as `{slug} KB-AP-n` (a section-labelled bullet as `{slug} {section}`), never a bare ID. For architecture or integration context, Read that section on demand, with `offset` and `limit`: its start line is on the `Headings:` line, or comes from `command grep -n '^## ' "<KB path>"`. Quote KB text only from a Read view.
+3. **Verify** against current code: where an assertion is outdated or contradicts the code, Read the source and trust it. Note a discrepancy in your output when it matters.
 
 ---
 
@@ -32,4 +32,4 @@ Do not mention feature knowledge or its absence in your output.
 
 ## Freshness Model
 
-Feature knowledge is **verify-on-read**: check key assertions against current code, not staleness markers, and when in doubt Read the file.
+Feature knowledge is **verify-on-read**: check key assertions against current code, and when in doubt Read the file.

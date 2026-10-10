@@ -115,9 +115,9 @@ If the user says "skip" or "just proceed" — skip remaining questions, present 
 <!-- learning:end -->
 
 <!-- learning:on -->
-**Produces:** SKIM_CONTEXT, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
+**Produces:** SKIM_CONTEXT, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES
 <!-- learning:off -->
-**Produces:** SKIM_CONTEXT, FEATURE_KNOWLEDGE
+**Produces:** SKIM_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES
 <!-- learning:end -->
 **Requires:** CONFIRMED_SCOPE
 
@@ -159,7 +159,7 @@ Pass `FEATURE_KNOWLEDGE` to Explore and Design agents.
 **Produces:** EXPLORE_OUTPUTS
 **Requires:** SKIM_CONTEXT
 
-Spawn 4 Explore agents **in a single message**, each with Skim agent context and `FEATURE_KNOWLEDGE` (from Phase 2). Include the instruction: "The FEATURE_KNOWLEDGE is a baseline — VALIDATE, EXTEND, and CORRECT it, don't repeat it. Focus on areas the feature knowledge doesn't cover and changes since it was last updated." Ask each agent for a final report of at most about 1,500 tokens: findings with file:line references, not file dumps.
+Spawn 4 Explore agents **in a single message**, each with Skim agent context and `FEATURE_KNOWLEDGE: {feature_knowledge}` (from Phase 2). Include the instruction: "The FEATURE_KNOWLEDGE is a baseline — VALIDATE, EXTEND, and CORRECT it. For anything it already covers, cite its KB IDs (`{slug} KB-AP-n`) instead of restating the text. Focus on areas the feature knowledge doesn't cover and changes since it was last updated." Ask each agent for a final report of at most about 1,500 tokens: findings with file:line references, not file dumps.
 
 | Focus | Thoroughness | Find |
 |-------|-------------|------|

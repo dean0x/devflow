@@ -45,7 +45,7 @@ The orchestrator provides:
 <!-- learning:on -->
 - **DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries. Use `devflow:apply-decisions` to Read full bodies on demand. `(none)` when absent.
 <!-- learning:end -->
-- **FEATURE_KNOWLEDGE** (optional): Pre-computed feature area context. Follow `devflow:apply-feature-knowledge`. `(none)` when absent.
+- **FEATURE_KNOWLEDGE** (optional): Per KB, the Rules bullets most relevant to the question, the KB path and a heading index; read a section on demand. Follow `devflow:apply-feature-knowledge`. `(none)` when absent.
 - **WORKTREE_PATH** (optional): If provided, follow `devflow:worktree-support` for path resolution.
 - **ORIENT_OUTPUT** (optional): Codebase orientation from a prior Skim agent (codebase type only).
 
@@ -98,7 +98,7 @@ Follow `devflow:apply-decisions` to scan the DECISIONS_CONTEXT index. Read full 
 ### 3. Apply Feature Knowledge
 <!-- learning:end -->
 
-Follow `devflow:apply-feature-knowledge` to absorb FEATURE_KNOWLEDGE patterns and integration points. Use as a starting point — verify against current state. Skip when FEATURE_KNOWLEDGE is `(none)` or absent.
+Follow `devflow:apply-feature-knowledge` to apply the FEATURE_KNOWLEDGE Rules and read the indexed sections you need. Use as a starting point — verify against current state. Skip when FEATURE_KNOWLEDGE is `(none)` or absent.
 
 <!-- learning:on -->
 ### 5. Execute Research Methodology
