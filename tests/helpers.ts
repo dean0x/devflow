@@ -1299,6 +1299,16 @@ export function loadGolden(name: string): string {
 // the D9 gate application, stays in the agent because D9 has one authority — so
 // that sample is reference / git.md / reference in step order.
 //
+// #425 RETARGET — NO RE-CAPTURE. The Git agent split moved the provider-neutral step text of the
+// tracker operations into the three providers' references (D-NEUTRAL-STEP-MOVE). Two samples
+// read moved text: `gather-release-evidence` (steps 1, 2, 3 and 5, now in the GitHub reference
+// between the provider's own steps) and `post-wave-report` (whose reference gained step 2 inside a
+// sampled range). Both are split per D-STRADDLE-SPLIT, each moved line read by its own anchor and
+// rejoined in its original order, so `extractStatusLines()` still equals the frozen fixture byte
+// for byte and the `--unfreeze --out-dir` derivation test matches it. No line changed, so no
+// authorisation was spent. The remaining samples read Output templates, D4 clauses and pointers,
+// all of which stayed in the agent.
+//
 // `ensure-pr-ready` and `validate-branch` are NOT on the list: both are sampled
 // from Output templates in the agent. Declaring them would trip the unread-entry
 // arm below, which is exactly what that arm is for.
