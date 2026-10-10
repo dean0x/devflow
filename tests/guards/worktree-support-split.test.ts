@@ -10,6 +10,10 @@
  * directory. No install path is named, and the protected-branch list stays in the skill's canonical
  * section, which `tests/git.test.ts` holds equal to `TRUNK_BRANCHES`: `discovery.md` points at that
  * section and copies none of it (the single-authority rule).
+ *
+ * D-WORKTREE-DISCOVERY-GATED: the load itself happens only when `git worktree list` shows more than one
+ * worktree. With one, that worktree is the only candidate and the Git agent's pre-flight validates its
+ * branch, so neither the skill nor the reference is read.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -66,6 +70,26 @@ export function collectDiscoveryDefects(discovery: string, branches: readonly st
   return out
 }
 
+/** The pointer sentence every discovery host carries; the gate puts it inside its multi-worktree branch. */
+const DISCOVERY_POINTER = 'Invoke the `devflow:worktree-support` skill, then Read its `references/discovery.md` from the skill\'s base directory'
+
+/** Named collector: how a host's worktree discovery step falls short of the multi-worktree gate. */
+export function collectDiscoveryGateDefects(host: string, text: string): string[] {
+  const out: string[] = []
+  const lines = text.split('\n')
+  const pointerLines = lines.filter(line => line.includes(DISCOVERY_POINTER))
+  if (pointerLines.length !== 1) return [`${pointerLines.length} lines carry the pointer, expected one`]
+  if (!pointerLines[0].includes('**More than one listed:**')) out.push('the pointer is not inside a "More than one listed" bullet')
+  if (!text.includes('`git worktree list --porcelain` and count the worktrees it lists')) {
+    out.push('the gate does not run `git worktree list --porcelain` and count the worktrees')
+  }
+  const single = lines.find(line => line.includes('**Exactly one listed:**')) ?? ''
+  if (!single.includes('load neither the skill nor the reference')) {
+    out.push('no "Exactly one listed" bullet says to load neither the skill nor the reference')
+  }
+  return out
+}
+
 describe('worktree-support keeps the preload small (D-WORKTREE-DISCOVERY-ON-DEMAND)', () => {
   it('SKILL.md keeps the path resolution and the canonical list, and moves the algorithm out', () => {
     expect(collectSkillDefects(read('SKILL.md'))).toEqual([])
@@ -92,6 +116,26 @@ describe('worktree-support keeps the preload small (D-WORKTREE-DISCOVERY-ON-DEMA
       expect(text, `${host}: an install path`).not.toMatch(/skills\/devflow:worktree-support/)
       expect(text, `${host}: the old pointer`).not.toContain('See the `devflow:worktree-support` skill for the full 7-step algorithm')
     }
+  })
+
+  it('the skill and its reference load only when `git worktree list` shows more than one worktree (D-WORKTREE-DISCOVERY-GATED)', () => {
+    for (const host of ['code-review.md', 'resolve.md']) {
+      expect(collectDiscoveryGateDefects(host, requireDistFile(host)), host).toEqual([])
+    }
+  })
+
+  it('known-bad probe: an ungated pointer, a lost single-worktree arm and a lost count are each reported', () => {
+    const real = requireDistFile('code-review.md')
+    expect(collectDiscoveryGateDefects('code-review.md', real)).toEqual([])
+    const ungated = real.replace('- **More than one listed:** Invoke', '- Invoke')
+    expect(ungated, 'the seed must land').not.toBe(real)
+    expect(collectDiscoveryGateDefects('code-review.md', ungated)).toEqual(['the pointer is not inside a "More than one listed" bullet'])
+    const noSingle = real.replace('- **Exactly one listed:** load neither', '- load neither')
+    expect(noSingle, 'the seed must land').not.toBe(real)
+    expect(collectDiscoveryGateDefects('code-review.md', noSingle)).toEqual(['no "Exactly one listed" bullet says to load neither the skill nor the reference'])
+    const noCount = real.replace('and count the worktrees it lists', '')
+    expect(noCount, 'the seed must land').not.toBe(real)
+    expect(collectDiscoveryGateDefects('code-review.md', noCount)).toEqual(['the gate does not run `git worktree list --porcelain` and count the worktrees'])
   })
 
   it('known-bad probe: each way of undoing the split is reported by the same collectors', () => {
