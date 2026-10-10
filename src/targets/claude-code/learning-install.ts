@@ -133,7 +133,7 @@ export interface ConvergeLearningVariantsOptions {
   /** The effective plugin selection: the skill is installed on switch-on only if its closure holds it. */
   plugins: readonly PluginDefinition[];
   warn: (msg: string) => void;
-  /** Package root the variants and sources are read from. Injectable for a temp tree; defaults to this package. */
+  /** Package root the variants and sources, the apply-decisions skill included, are read from. Injectable for a temp tree; defaults to this package. */
   packageRoot?: string;
 }
 
@@ -393,7 +393,7 @@ async function convergeSkills(opts: ConvergeLearningVariantsOptions): Promise<Le
         if (state === 'unchanged') state = 'not-selected';
         continue;
       }
-      const resolved = await resolveSkillSource(skill, devflowDir);
+      const resolved = await resolveSkillSource(skill, devflowDir, opts.packageRoot);
       if ((await pathExists(target)) && (await treesIdentical(resolved.dir, target))) continue;
       await swapInSkillDirectory(claudeDir, resolved.dir, target);
       state = 'installed';

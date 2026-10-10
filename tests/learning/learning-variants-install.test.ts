@@ -8,9 +8,10 @@
  * CLI under a temp HOME.
  *
  * Every converge here runs against a temp CLAUDE dir and a temp package root, and
- * the skill steps read the real src/assets/skills/apply-decisions through the
- * installer's own resolver, so the shadow rule is the production one. Nothing
- * touches the real HOME.
+ * the skill steps read the temp root's own src/assets/skills/apply-decisions
+ * through the installer's own resolver, so the shadow rule is the production one
+ * and an injected root governs the skill source as it governs the variants.
+ * Nothing touches the real HOME.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -33,6 +34,7 @@ import {
   agentSourceDirs,
   commandSourceDirs,
   learningOffDir,
+  skillsDir,
 } from '../../src/core/assets.js';
 import {
   DEVFLOW_PLUGINS,
@@ -48,6 +50,8 @@ import { assertTempHome } from '../setup/home-isolation.js';
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const SKILL = 'apply-decisions';
 const SKILL_DIR = 'devflow:apply-decisions';
+/** The temp package's own apply-decisions text: not the real skill's, so a read of the wrong root shows. */
+const PKG_SKILL = 'apply-decisions of the injected package root\n';
 
 let tmp: string;
 let claudeDir: string;
@@ -94,6 +98,7 @@ async function seedPackage(): Promise<void> {
   await write(path.join(pkg, 'dist', 'commands', 'no-arm.md'), 'no-arm\n');
   await write(path.join(pkg, 'dist', 'agents', 'code.md'), 'code ON\n');
   await write(path.join(learningOffDir('agents', pkg), 'code.md'), 'code OFF\n');
+  await write(path.join(skillsDir(pkg), SKILL, 'SKILL.md'), PKG_SKILL);
 }
 
 async function installOn(): Promise<void> {
@@ -518,7 +523,7 @@ describe('convergeLearningVariants: failures only warn (AC-146)', () => {
 // ---------------------------------------------------------------------------
 
 describe('convergeLearningVariants: the apply-decisions skill', () => {
-  const sourceSkill = (): Promise<string> => read(path.join(ROOT, 'src', 'assets', 'skills', SKILL, 'SKILL.md'));
+  const sourceSkill = (): Promise<string> => read(path.join(skillsDir(pkg), SKILL, 'SKILL.md'));
 
   it('learning on installs the skill when the selection requires it (AC-140)', async () => {
     const result = await converge(true);
@@ -567,6 +572,29 @@ describe('convergeLearningVariants: the apply-decisions skill', () => {
     expect(await read(path.join(installedSkill(), 'SKILL.md'))).toBe(await sourceSkill());
     expect(await exists(path.join(installedSkill(), 'EXTRA.md'))).toBe(false);
     expect((await fs.readdir(claudeDir)).filter(name => name.startsWith('.devflow-learning-'))).toEqual([]);
+  });
+
+  it('the skill source is the injected package root\'s, never the running package\'s', async () => {
+    const result = await converge(true);
+
+    expect(result.skill).toBe('installed');
+    const text = await read(path.join(installedSkill(), 'SKILL.md'));
+    expect(text).toBe(PKG_SKILL);
+    expect(
+      text,
+      'non-vacuity: the running package ships a different apply-decisions',
+    ).not.toBe(await read(path.join(skillsDir(ROOT), SKILL, 'SKILL.md')));
+  });
+
+  it('an injected root with no skill source fails the skill step naming that root, and never falls back to the running package', async () => {
+    await fs.rm(path.join(skillsDir(pkg), SKILL), { recursive: true });
+
+    const result = await converge(true);
+
+    expect(result.skill).toBe('failed');
+    expect(result.converged).toBe(false);
+    expect(warnings.some(w => w.includes(skillsDir(pkg)))).toBe(true);
+    expect(await exists(installedSkill())).toBe(false);
   });
 
   it('a valid shadow is what the toggle installs, exactly as the install installs it', async () => {

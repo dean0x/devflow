@@ -1746,9 +1746,17 @@ export interface ResolvedSkillSource {
  * absent source is a packaging failure that throws (the hard-error policy for a
  * declared source) rather than being masked by a shadow. Callers that must not
  * throw catch it.
+ *
+ * @param packageRoot - Package root the shipped source is read from. Injectable so
+ *   a caller working on a temp tree resolves the skill from the same root as its
+ *   other sources; omitted, it is the running package.
  */
-export async function resolveSkillSource(skillName: string, devflowDir: string): Promise<ResolvedSkillSource> {
-  const skillSource = path.join(skillsDir(), skillName);
+export async function resolveSkillSource(
+  skillName: string,
+  devflowDir: string,
+  packageRoot?: string,
+): Promise<ResolvedSkillSource> {
+  const skillSource = path.join(skillsDir(packageRoot), skillName);
   let isDir = false;
   try {
     isDir = (await fs.stat(skillSource)).isDirectory();

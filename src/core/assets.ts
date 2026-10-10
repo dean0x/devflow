@@ -6,9 +6,13 @@ import { LEARNING_OFF_OUTPUT_DIR, type LearningVariantKind } from './learning-va
 /**
  * Flat skills source directory: src/assets/skills/{name}/
  * All plugins' skills live here directly (no per-plugin subdirectory).
+ *
+ * @param root - Package root to resolve against. Injectable so a caller working
+ *   on a temp tree (the learning converge) reads the skill source from the same
+ *   root as the rest of its sources.
  */
-export function skillsDir(): string {
-  return join(getPackageRoot(), 'src', 'assets', 'skills');
+export function skillsDir(root: string = getPackageRoot()): string {
+  return join(root, 'src', 'assets', 'skills');
 }
 
 /**
