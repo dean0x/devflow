@@ -778,6 +778,27 @@ describe('GAP-3: orchestrator charter integrity', () => {
     expect(violations, `Orchestrator charter content violations:\n  ${violations.join('\n  ')}`).toEqual([])
   })
 
+  /**
+   * D-CHARTER-ROSTER-ONLY. The open-ended "delegate all of it" left the orchestrator
+   * to improvise a type for work no routing line covered, and it reached for
+   * general-purpose, which inherits the session model and has no roster discipline.
+   * The last routing line sends everything else to the closest roster agent. It names
+   * no model: dispatch is by kind of work, and tiers live in each agent's frontmatter.
+   */
+  it('routing ends with a roster-only fallback that names no model', () => {
+    const charter = readFileSync(CHARTER_PATH, 'utf-8')
+    const lines = charter.split('\n')
+    const routingStart = lines.findIndex(line => line.startsWith('Routing (Agent tool)'))
+    expect(routingStart).toBeGreaterThan(-1)
+    const routing: string[] = []
+    for (const line of lines.slice(routingStart + 1)) {
+      if (!line.startsWith('- ')) break
+      routing.push(line)
+    }
+    expect(routing[routing.length - 1]).toBe('- Anything else: the closest roster agent, never general-purpose.')
+    expect(routing.join('\n')).not.toMatch(/\b(?:opus|sonnet|haiku)\b/i)
+  })
+
   it('known-bad probe: a charter without the bounds, without a report figure, without OPERATION on the Code line, or with "full plan" is reported', () => {
     const charter = readFileSync(CHARTER_PATH, 'utf-8')
     // Non-vacuity: the real charter is clean, so each seed below fails for its own reason.
