@@ -140,6 +140,11 @@ import type {
  * 28 ch each (the settings `SITE` ahead of `## Project`). Every git.md-carrying row
  * fell again to min(previous ceiling, measurement + 80).
  *
+ * #445 (part 2: the Git and Tracker tool allowlists) replaced the 17-name `disallowedTools` block of
+ * git.md with a one-line `tools:` allowlist, which took 251 ch out of dist/agents/git.md. Every
+ * git.md-carrying row fell by exactly that cut, so each keeps the headroom it had: the ceilings
+ * moved from 35_554, 62_433, 72_795, 73_391 and 47_961 to their present values.
+ *
  * The 80 ch is general headroom, not a reservation: no line of it is spoken for,
  * and an addition still funds itself with a cut. Each ceiling was set as
  * min(its previous ceiling, measured actual + 80), so a row's headroom drifts away
@@ -189,7 +194,7 @@ import type {
  * pattern in the same commit; that is the permitted direction for a ceiling, and the
  * manifest guard's probe still proves an INCREMENT would go red.
  */
-const BUDGET_GIT_MD = 35_554;
+const BUDGET_GIT_MD = 35_303;
 
 /**
  * Design-time derivation: the PRE-SPLIT capture of skills/git/SKILL.md, less the
@@ -243,7 +248,7 @@ const BUDGET_SKILL_MD = 6_445;
  * tests/fixtures/numeric-floors.json; lowering re-pins the value AND the pattern
  * in the same commit.
  */
-const BUDGET_LOADED_SET = 62_433;
+const BUDGET_LOADED_SET = 62_182;
 
 /**
  * THE JIRA-SCOPED loaded-set ceiling — a spawn under the Jira provider.
@@ -281,7 +286,7 @@ const BUDGET_LOADED_SET = 62_433;
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-jira` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_JIRA = 72_795;
+const BUDGET_LOADED_SET_JIRA = 72_544;
 
 /**
  * THE LINEAR-SCOPED loaded-set ceiling — a spawn under the Linear provider.
@@ -318,7 +323,7 @@ const BUDGET_LOADED_SET_JIRA = 72_795;
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-linear` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_LINEAR = 73_391;
+const BUDGET_LOADED_SET_LINEAR = 73_140;
 
 /**
  * THE PR-HOST loaded-set ceiling — the worst-case cost of a spawn that runs one of
@@ -364,7 +369,7 @@ const BUDGET_LOADED_SET_LINEAR = 73_391;
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-pr-host` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_PR_HOST = 47_961;
+const BUDGET_LOADED_SET_PR_HOST = 47_710;
 
 /**
  * THE PER-OP PR-HOST CAP — no single PR-host operation may load more than this,
