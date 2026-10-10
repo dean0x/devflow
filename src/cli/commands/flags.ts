@@ -47,6 +47,7 @@ import { sanitizeCell } from '../tui/cells.js';
 // --list/--status code paths; buildFlagRows and collectFlagRecord are pure.
 import { buildFlagRows, collectFlagRecord } from '../flags-view/state.js';
 import type { FlagsTuiResult } from '../flags-view/terminal.js';
+import { respectUserOwnedSettings } from './init-seed.js';
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
@@ -568,7 +569,15 @@ async function handleBare(
 
     // ── Build initial rows from registry + current record ──────────────
     // buildFlagRows is a static import (pure — no TTY); only runFlagsTui is lazy.
-    const initialRows = buildFlagRows(record);
+    // D-ADOPT-RESPECTS-USER: a guarded setting flag the manifest has not recorded yet
+    // (an upgrade before the first init) would show its registry default, and a Save
+    // would write the managed payload over a value the user owns. The same rule init
+    // applies decides the starting row: respectUserOwnedSettings (the one authority,
+    // built on settingHoldsUserValue) flips such a flag to OFF. The settings snapshot
+    // is read here and passed in, so the reducer and renderer stay pure.
+    const initialRows = buildFlagRows(
+      respectUserOwnedSettings(record, record, ctx.value.settingsContent),
+    );
 
     // ── Launch TUI ────────────────────────────────────────────────────
     const { runFlagsTui } = await import('../flags-view/index.js');
