@@ -340,9 +340,13 @@ Skills are removed individually rather than by namespace directory, because `~/.
 
 ### Selective Uninstall (`devflow uninstall --plugin <name>`)
 
-1. Compute assets to remove via `computeAssetsToRemove` — skills and agents shared by remaining plugins are retained.
-2. Remove individual files for each asset (agents, commands, skills, rules) belonging to the selected plugins.
-3. Run `sweepDevflowNamespaces` for a registry-diff sweep across all three namespaces — catches any orphaned files whose names left the registry regardless of this uninstall run.
+1. Revert external-model (GPT) overrides in the installed agents' frontmatter via `revertExternalAgents`, while their files are still present.
+2. Compute assets to remove via `computeAssetsToRemove` — skills and agents shared by remaining plugins are retained.
+3. Remove individual files for each asset (agents, commands, skills, rules) belonging to the selected plugins.
+4. Run `sweepDevflowNamespaces` for a registry-diff sweep across all three namespaces — catches any orphaned files whose names left the registry regardless of this uninstall run.
+5. Re-stamp the installed `/code-review` command's language-focus line from the plugins that remain (`restampInstalledCommands`), so a removed language plugin's focus leaves the line with its skill.
+6. Drop the selected plugins from `manifest.plugins` via `removeManifestPlugins`, so the next `devflow init` does not reinstall them — `knownPlugins` and every other key stay.
+7. If `devflow-ambient` was selected, remove its hook from `settings.json`.
 
 ### Install Artifacts Removed on Uninstall
 
