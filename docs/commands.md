@@ -53,7 +53,7 @@ Multi-perspective code review with up to 20 specialized Review agents running in
 
 **Always active:** Security, Architecture, Performance, Complexity, Consistency, Regression, Testing, Reliability
 
-**Conditionally active** (when relevant files detected): TypeScript, React, Accessibility, UI Design, Go, Python, Java, Rust, Database, Dependencies, Documentation. The eight language focuses run only when their optional plugin's skill is installed in Claude Code's directory (`$CLAUDE_CONFIG_DIR` when it is an absolute path, else `~/.claude`).
+**Conditionally active** (when relevant files detected): TypeScript, React, Accessibility, UI Design, Go, Python, Java, Rust, Database, Dependencies, Documentation. The eight language focuses run only when their optional plugin is installed: the installer stamps the installed ones into the command, and a focus missing from that list is never spawned. A diff of only docs, only tests or only lockfiles runs a reduced focus set instead of the eight always-active reviews, and the orchestrator writes the diff to a patch file once so Review agents read it instead of running git.
 
 **Diff-driven** (when compliance skill installed and diff touches regulated surface): Compliance
 
