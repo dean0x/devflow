@@ -2,6 +2,7 @@ import { execSync, spawn, ChildProcess } from 'child_process';
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import { randomUUID } from 'crypto';
+import { encodeProjectDir } from '../../scripts/token-audit/discover.js';
 
 /**
  * Check if the `claude` CLI is available on this machine.
@@ -28,12 +29,12 @@ export function isClaudeAvailable(): boolean {
  *
  * Pure function — no filesystem access — so it can be unit-tested in isolation.
  * The encoding mirrors Claude Code's own layout:
- *   ~/.claude/projects/-{encoded-cwd}/{sessionId}/subagents/
- * where the cwd encoding replaces every '/' with '-' and ensures a leading '-'.
+ *   ~/.claude/projects/{encoded-cwd}/{sessionId}/subagents/
+ * where `encodeProjectDir` replaces every character outside [A-Za-z0-9] with '-' (so a
+ * leading '/' becomes the leading '-', and '.' maps too).
  */
 export function buildSubagentsPath(homeDir: string, cwd: string, sessionId: string): string {
-  const encodedPath = '-' + cwd.replace(/\//g, '-').replace(/^-/, '');
-  return resolve(homeDir, '.claude', 'projects', encodedPath, sessionId, 'subagents');
+  return resolve(homeDir, '.claude', 'projects', encodeProjectDir(cwd), sessionId, 'subagents');
 }
 
 // ---------------------------------------------------------------------------
