@@ -919,10 +919,8 @@ async function compileHost(host: HostEntry, plan: HostPlan): Promise<CompileOutc
   }
 
   const learningOff = plan.variant !== "skill-refs" && outputs.length > 1 ? 1 : 0;
-  const destLabel = plan.variant === "skill-refs"
-    ? (outputs.length === 1
-        ? path.relative(ROOT, outputs[0].dest)
-        : `${path.relative(ROOT, outAbs)}/ (${outputs.length} file(s))`)
+  const destLabel = plan.variant === "skill-refs" && outputs.length > 1
+    ? `${path.relative(ROOT, outAbs)}/ (${outputs.length} file(s))`
     : outputs.map(o => path.relative(ROOT, o.dest)).join(" + ");
 
   return {
