@@ -1,6 +1,6 @@
 /**
- * agent-config — the shipped model, effort, tool policy and preload of sixteen
- * agents, and the rule that no agent body directs a tool its frontmatter removes.
+ * agent-config — the shipped model, effort, tool policy and preload of every registered
+ * agent, and the rule that no agent body directs a tool its frontmatter removes.
  *
  * Decisions recorded here. Each is a D-series note at the code that carries it;
  * the ones that live in a markdown body, which cannot hold JSDoc, are named here.
@@ -28,7 +28,14 @@
  *                              body carries is held by tests/guards/core-rules-digest.test.ts.
  *  - D-SCAN-IN-CODE            tests/fixtures/agent-config.ts (MCP_DENY_AGENTS) and the
  *                              denylist arm below: Scrutinize and Simplify deny `mcp__*`.
- *  - D-GIT-ROW                 tests/fixtures/agent-config.ts (the git row).
+ *  - D-GIT-ROW                 tests/fixtures/agent-config.ts (the git row): an allowlist of
+ *                              the tools its bodies direct, with no tracker server named.
+ *  - D-TRACKER-ROW             tests/fixtures/agent-config.ts (the tracker row) and the
+ *                              Tracker arm below: the row's model equals the hook's literal.
+ *  - D-TRACKER-SERVER-ALLOWLIST src/core/tracker.ts (TRACKER_MCP_SERVERS_DEFAULT): the tracker
+ *                              servers are stamped onto the INSTALLED tools line of Git and
+ *                              Tracker, so the shipped lists tested here name none;
+ *                              tests/tracker-servers.test.ts holds the stamped half.
  *  - D-STRUCTURED-RETURN-TOOL  the structured-return arm below.
  *
  * Body-level decisions, pinned by the phrases they carry:
@@ -60,10 +67,10 @@ import * as path from 'path';
 
 import { getAllAgentNames } from '../../src/core/plugins.js';
 import { ROOT, resolveAgentSource, splitFrontmatter, walkFiles } from '../helpers.js';
+import { loadShippedAgentDefaults } from '../../src/core/agent-models.js';
 import {
   AGENT_CONFIG,
   DIAGNOSE_FOCUS_SKILLS,
-  EXEMPT_AGENTS,
   MCP_DENY_AGENTS,
   SHARED_DENYLIST,
   type AgentConfigRow,
@@ -236,25 +243,14 @@ function collectDenylistViolations(name: string, fm: AgentFrontmatter): string[]
   return out;
 }
 
-/** Registered agents and table rows that do not line up, and exemptions without a reason. */
-function collectCompletenessViolations(
-  registered: readonly string[],
-  table: readonly string[],
-  exempt: Readonly<Record<string, string>>,
-): string[] {
+/** Registered agents and table rows that do not line up. Every registered agent has a row. */
+function collectCompletenessViolations(registered: readonly string[], table: readonly string[]): string[] {
   const out: string[] = [];
   for (const name of registered) {
-    if (!table.includes(name) && !Object.hasOwn(exempt, name)) {
-      out.push(`${name}: registered, but in neither AGENT_CONFIG nor EXEMPT_AGENTS`);
-    }
+    if (!table.includes(name)) out.push(`${name}: registered, but has no row in AGENT_CONFIG`);
   }
   for (const name of table) {
     if (!registered.includes(name)) out.push(`${name}: has a row but is not a registered agent`);
-    if (Object.hasOwn(exempt, name)) out.push(`${name}: is both in AGENT_CONFIG and exempt`);
-  }
-  for (const [name, reason] of Object.entries(exempt)) {
-    if (!registered.includes(name)) out.push(`${name}: exempt but not a registered agent`);
-    if (reason.trim() === '') out.push(`${name}: exempt with no recorded reason`);
   }
   return out;
 }
@@ -550,26 +546,57 @@ describe('the table: every agent ships its row (D-AGENT-CONFIG-TABLE)', () => {
   });
 });
 
-describe('completeness: every registered agent has a row or a reason', () => {
-  it('lines the registry up with the table and the exemptions', () => {
-    expect(collectCompletenessViolations(getAllAgentNames(), AGENT_NAMES, EXEMPT_AGENTS)).toEqual([]);
+describe('completeness: every registered agent has a row', () => {
+  it('lines the registry up with the table', () => {
+    expect(collectCompletenessViolations(getAllAgentNames(), AGENT_NAMES)).toEqual([]);
   });
 
-  it('records a reason for each exemption', () => {
-    expect(Object.keys(EXEMPT_AGENTS).sort()).toEqual(['tracker']);
-    for (const reason of Object.values(EXEMPT_AGENTS)) expect(reason.trim().length).toBeGreaterThan(0);
-  });
-
-  it('known-bad probes: an unlisted agent, a stale row and an unexplained exemption are reported', () => {
-    expect(collectCompletenessViolations(['code', 'newagent'], ['code'], {})).toEqual([
-      'newagent: registered, but in neither AGENT_CONFIG nor EXEMPT_AGENTS',
+  it('known-bad probes: an unlisted agent and a stale row are reported', () => {
+    expect(collectCompletenessViolations(['code', 'newagent'], ['code'])).toEqual([
+      'newagent: registered, but has no row in AGENT_CONFIG',
     ]);
-    expect(collectCompletenessViolations(['code'], ['code', 'gone'], {})).toEqual([
+    expect(collectCompletenessViolations(['code'], ['code', 'gone'])).toEqual([
       'gone: has a row but is not a registered agent',
     ]);
-    expect(collectCompletenessViolations(['code', 'git'], ['code'], { git: ' ' })).toEqual([
-      'git: exempt with no recorded reason',
-    ]);
+  });
+});
+
+describe('Git and Tracker hold vendor-neutral allowlists (D-GIT-ROW, D-TRACKER-ROW, D-TRACKER-SERVER-ALLOWLIST)', () => {
+  it('both are allowlist agents, and the shipped list names no tool server and no wildcard', () => {
+    for (const name of ['git', 'tracker']) {
+      const tools = agent(name).fm.tools;
+      expect(tools, `${name}.md must hold a tools: allowlist`).not.toBeNull();
+      expect(agent(name).fm.disallowedTools, `${name}.md must not also deny`).toBeNull();
+      expect((tools ?? []).filter(tool => tool.startsWith('mcp__') || tool.includes('*')), name).toEqual([]);
+    }
+  });
+
+  it('both grant ToolSearch, which loads a connected server\'s deferred tool schemas', () => {
+    for (const name of ['git', 'tracker']) expect(agent(name).fm.tools, name).toContain('ToolSearch');
+  });
+
+  it('neither holds Grep or Glob, which Claude Code never offers to an agent that has Bash', () => {
+    for (const name of ['git', 'tracker']) {
+      expect(agent(name).fm.tools, name).toContain('Bash');
+      expect(agent(name).fm.tools, name).not.toContain('Grep');
+      expect(agent(name).fm.tools, name).not.toContain('Glob');
+    }
+  });
+
+  it('the Tracker row\'s model equals the hook\'s literal and the shipped default (D-TRACKER-ROW)', async () => {
+    const hook = readFileSync(path.join(ROOT, 'src', 'assets', 'scripts', 'hooks', 'session-start-context'), 'utf-8');
+    expect(hook).toContain(`TRACKER_MODEL="${AGENT_CONFIG.tracker.model}"`);
+    const defaults = await loadShippedAgentDefaults();
+    expect(defaults.tracker?.model).toBe(AGENT_CONFIG.tracker.model);
+  });
+
+  it('known-bad probe: a seeded server entry, a wildcard and a denylist are all reported by the row check', () => {
+    const row = AGENT_CONFIG.git;
+    const withServer = renderRow('git', row, fm => { fm.tools = [...(fm.tools ?? []), 'mcp__github']; });
+    expect(collectRowViolations('git', withServer, row).length).toBeGreaterThan(0);
+    const denying = renderRow('git', row, fm => { fm.disallowedTools = ['Agent']; });
+    expect(collectRowViolations('git', denying, row).length).toBeGreaterThan(0);
+    expect(collectDenylistViolations('git', { ...withServer, tools: ['Bash', 'mcp__*'] })).toHaveLength(1);
   });
 });
 

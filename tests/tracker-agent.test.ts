@@ -86,6 +86,17 @@ export function collectFrontmatterKeys(inner: string): string[] {
     .filter((k): k is string => k !== undefined);
 }
 
+/**
+ * The entries of a frontmatter block's inline `tools: [...]` line, or null when it has none.
+ * Drives the allowlist guard below and its known-bad probe.
+ */
+export function collectToolsEntries(inner: string): string[] | null {
+  const line = inner.split('\n').find(l => /^tools:/.test(l));
+  const list = line === undefined ? null : /^tools:[ \t]*\[(.*)\][ \t]*$/.exec(line);
+  if (list === null) return null;
+  return list[1].split(',').map(item => item.trim().replace(/^(["'])(.*)\1$/, '$2')).filter(item => item !== '');
+}
+
 /** Lines naming a delegation primitive. The Tracker agent never spawns anything. */
 export function collectDelegationLiterals(content: string): string[] {
   return content
@@ -790,26 +801,34 @@ describe('Tracker agent frontmatter', () => {
     ).toBe('sonnet');
   });
 
-  it('declares NO tools: key, and says why (EC-69)', () => {
+  it('holds a tools: allowlist that names no tracker server, and says why (EC-69)', () => {
     const split = splitFrontmatter(TRACKER_TEXT);
-    const keys = collectFrontmatterKeys(split!.inner);
-    expect(keys.length, 'frontmatter parsed to no keys — the shape changed').toBeGreaterThan(0);
+    const entries = collectToolsEntries(split!.inner);
+    expect(entries, 'the frontmatter must carry an inline tools: allowlist').not.toBeNull();
     expect(
-      keys,
-      'a tools: allowlist here is a silent constraint: the tracker server names this ' +
-      'agent must reach are user-configured and cannot be enumerated at authoring time, so any ' +
-      'allowlist a reviewer "tightens" it to would kill tracker access at runtime, not at build time',
-    ).not.toContain('tools');
-    // The reason must be IN the file, or the next reviewer tightens it.
-    expect(
-      /cannot be\s+enumerated at authoring time/.test(TRACKER_TEXT),
-      'the no-tools: rationale must be stated in the agent, not only in this test',
-    ).toBe(true);
+      (entries ?? []).filter(entry => entry.startsWith('mcp__')),
+      'the tracker servers this agent must reach are user-configured and cannot be written at ' +
+      'authoring time: the installer stamps one whole-server entry per configured server onto the ' +
+      'INSTALLED tools: line (D-TRACKER-SERVER-ALLOWLIST), so the shipped list names none',
+    ).toEqual([]);
+    // The reason must be IN the file, or the next reviewer "completes" the list with a guess.
+    const prose = TRACKER_TEXT.replace(/\s+/g, ' ');
+    for (const phrase of [
+      'cannot be written at authoring time',
+      '`devflow tracker --servers`',
+      'TRACEABILITY: DEGRADED (no tracker tool for {capability})',
+    ]) {
+      expect(prose, `the allowlist rationale must state: ${phrase}`).toContain(phrase);
+    }
   });
 
-  it('known-bad probe: the same extractor reports a seeded tools: key', () => {
-    const seeded = 'name: Tracker\ndescription: seeded probe\nmodel: sonnet\ntools: Read, Bash\n';
-    expect(collectFrontmatterKeys(seeded)).toEqual(['name', 'description', 'model', 'tools']);
+  it('known-bad probe: a seeded tracker server in the shipped list is reported, a built-in tool is not', () => {
+    const seeded = 'name: Tracker\nmodel: sonnet\ntools: ["Bash", "mcp__github"]\n';
+    expect(collectToolsEntries(seeded)).toEqual(['Bash', 'mcp__github']);
+    expect(collectToolsEntries('name: Tracker\ntools: []\n')).toEqual([]);
+    expect(collectToolsEntries('name: Tracker\nskills:\n  - devflow:git\n')).toBeNull();
+    expect(collectToolsEntries('name: Tracker\n  tools: ["Bash"]\n')).toBeNull();
+    expect(collectFrontmatterKeys(seeded)).toEqual(['name', 'model', 'tools']);
     expect(collectFrontmatterKeys('skills:\n  - devflow:git\n  tools: Read\n')).toEqual(['skills']);
   });
 
@@ -841,8 +860,8 @@ describe('Tracker agent read-only boundary (§14.9 constraint 12, EC-69)', () =>
   it('carries an explicit read-only boundary section', () => {
     expect(
       TRACKER_TEXT,
-      'the absent tools: key is compensated in prose — without this section the agent has no ' +
-      'stated boundary at all',
+      'an allowlist says which tools the agent holds, never what it may do with them — without ' +
+      'this section the agent has no stated boundary at all',
     ).toContain('## Read-only boundary');
   });
 

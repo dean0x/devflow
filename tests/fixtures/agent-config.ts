@@ -26,8 +26,6 @@
  * body carries exactly the digest lines its row declares, and
  * tests/guards/core-rules-digest.test.ts holds the bodies to the rows. An agent whose body
  * needs more of CLAUDE.md than the digest states reads it itself (Learning does).
- * Tracker has no AGENT_CONFIG row (EXEMPT_AGENTS), so EXEMPT_AGENT_DIGEST declares its
- * digest.
  */
 
 import type { EffortLevel } from '../../src/core/agent-models.js';
@@ -84,9 +82,11 @@ export interface AgentConfigRow {
  * D-SHARED-DENYLIST: the orchestration and host-UI tools that no worker agent
  * needs. One list, spelled exactly, with no wildcard: a wildcard in
  * `disallowedTools` removes MCP names, and the denylist agents that keep their
- * user-environment MCP and web access (Code, Research and Git) must not lose
+ * user-environment MCP and web access (Code and Research) must not lose
  * them, so every name is written out. A denied name the runtime does not expose
- * is assumed to be a no-op.
+ * is assumed to be a no-op. Git and Tracker are not denylist agents: they hold an
+ * allowlist and reach their tracker servers through whole-server entries the installer
+ * stamps (D-GIT-ROW, D-TRACKER-ROW).
  *
  * Code and Research deny exactly this list. Scrutinize and Simplify deny it plus
  * `Skill`, and `mcp__*` as their own `extra` (D-SCAN-IN-CODE): the only wildcards
@@ -179,7 +179,7 @@ const TEST_TOOLS: readonly string[] = [
 
 /**
  * D-AGENT-CONFIG-TABLE: the shipped model, effort, tool policy, omitClaudeMd and
- * preload of the sixteen agents this table covers. Each agent's frontmatter is the
+ * preload of every registered agent. Each agent's frontmatter is the
  * sole authority for these values at runtime; this table is the pin that holds the
  * frontmatter to the decision. `_roster.mds` carries no effort column, and its
  * model tiers are held to the same frontmatter by the roster guard in
@@ -377,64 +377,68 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     digest: ['context-economy'],
   },
   /**
-   * D-GIT-ROW: Git keeps haiku and gains medium effort and the shared denylist, the
-   * Git agent split's frontmatter change (#425). A denylist and not an allowlist, so
-   * the tracker MCP tools configured in the user's environment stay callable: an
-   * allowlist would strip them from every Jira or Linear spawn. Model and effort
-   * stay overridable through `devflow agents`.
+   * D-GIT-ROW: Git keeps haiku at medium effort (the Git agent split's frontmatter change,
+   * #425) and holds an ALLOWLIST: the built-in tools its operation bodies and the references
+   * they load direct. Bash runs `git`, `gh` and the helper scripts; Read opens the
+   * conventions, summary and mechanics files; Write composes a body to a temp file; ToolSearch
+   * loads a tracker server's deferred tool schemas. No body edits a file in place, so Edit is
+   * not granted. Grep and Glob are withheld because Claude Code does not offer them to an
+   * agent that holds Bash, so the Git bodies search with Bash commands. The earlier row was a
+   * denylist, kept so the user's tracker tool servers stayed callable; the allowlist replaces
+   * it and those servers come back through the install-time stamp (D-TRACKER-SERVER-ALLOWLIST,
+   * src/targets/claude-code/tracker-servers.ts). The shipped list therefore names no server:
+   * this row pins that vendor-neutral half, and tests/tracker-servers.test.ts pins the
+   * stamped half. tests/guards/provider-scope.test.ts holds the list to the bodies. Model and
+   * effort stay overridable through `devflow agents`.
    */
   git: {
     model: 'haiku',
     effort: 'medium',
-    policy: { kind: 'deny', extra: [] },
+    policy: { kind: 'allow', tools: ['Bash', 'Read', 'Write', 'ToolSearch'] },
     omitClaudeMd: true,
     skills: ['git', 'worktree-support'],
     digest: ['context-economy', 'untrusted-input', 'no-secrets'],
   },
-};
-
-/**
- * The registered agents this table does not cover, each with the reason. An agent
- * is in AGENT_CONFIG or here, never neither: a new agent has to be placed on
- * purpose.
- */
-export const EXEMPT_AGENTS: Readonly<Record<string, string>> = {
-  tracker: 'A deliberate constant: it declares no tool list, and its model is pinned equal to the hook that spawns it.',
-};
-
-/**
- * The digest of an exempt agent that omits CLAUDE.md and the rules (D-OMIT-CLAUDEMD-SET). An
- * exempt agent has no AGENT_CONFIG row to carry `omitClaudeMd` and `digest`, and the
- * tests/guards/core-rules-digest.test.ts guard reads this map for it. Tracker works with the
- * issue tracker's text, which it treats as untrusted, writes one scrubbed file, and runs a
- * bounded scan.
- */
-export const EXEMPT_AGENT_DIGEST: Readonly<Record<string, readonly DigestKey[]>> = {
-  tracker: ['context-economy', 'untrusted-input', 'no-secrets', 'bounded-loops'],
+  /**
+   * D-TRACKER-ROW: Tracker is a deliberate constant: its model is pinned equal to the
+   * session-start hook that spawns it (`TRACKER_MODEL`; tests/guards/agent-config.test.ts holds
+   * this row equal to both the hook literal and `loadShippedAgentDefaults()['tracker'].model`),
+   * and it ships no effort line. It holds an allowlist of the built-in tools its body directs:
+   * Bash for the claim, the history sampling and the one scrub-gated write chain, Read for the
+   * file it opens, ToolSearch to load a tracker server's tool schemas. It has no Write: its one
+   * file is written by that Bash chain, and a Write tool would be a second way to write outside
+   * it. Its tracker servers are stamped at install like Git's (D-TRACKER-SERVER-ALLOWLIST), and a
+   * name no connected server answers to surfaces as `TRACEABILITY: DEGRADED (no tracker tool for
+   * {capability})`. It works with the issue tracker's text, which it treats as untrusted, writes
+   * one scrubbed file and runs a bounded scan: the digest says so.
+   */
+  tracker: {
+    model: 'sonnet',
+    effort: null,
+    policy: { kind: 'allow', tools: ['Bash', 'Read', 'ToolSearch'] },
+    omitClaudeMd: true,
+    skills: ['git', 'boundary-validation'],
+    digest: ['context-economy', 'untrusted-input', 'no-secrets', 'bounded-loops'],
+  },
 };
 
 /**
  * The agents that ship `omitClaudeMd: true`, each with the digest lines its body carries.
- * Derived, never listed: the table rows that omit CLAUDE.md, plus the exempt agents that
- * declare a digest, so a new omitting row is covered without an edit here.
+ * Derived from the table rows that omit CLAUDE.md, never listed, so a new omitting row is
+ * covered without an edit here.
  */
 export function deriveOmitDigests(
   table: Readonly<Record<string, AgentConfigRow>>,
-  exemptDigests: Readonly<Record<string, readonly DigestKey[]>>,
 ): ReadonlyMap<string, readonly DigestKey[]> {
   const out = new Map<string, readonly DigestKey[]>();
   for (const [name, row] of Object.entries(table)) {
     if (row.omitClaudeMd) out.set(name, row.digest);
   }
-  for (const [name, digest] of Object.entries(exemptDigests)) out.set(name, digest);
   return out;
 }
 
-/** The live omitting set: AGENT_CONFIG and EXEMPT_AGENT_DIGEST through deriveOmitDigests. */
-export const OMIT_CLAUDE_MD_DIGESTS: ReadonlyMap<string, readonly DigestKey[]> = deriveOmitDigests(
-  AGENT_CONFIG,
-  EXEMPT_AGENT_DIGEST,
-);
+/** The live omitting set: AGENT_CONFIG through deriveOmitDigests. */
+export const OMIT_CLAUDE_MD_DIGESTS: ReadonlyMap<string, readonly DigestKey[]> = deriveOmitDigests(AGENT_CONFIG);
 
 /**
  * D-DIAGNOSE-FOCUS-SKILLS: the pattern skills the Diagnose agent loads on demand

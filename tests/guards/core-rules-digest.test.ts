@@ -11,9 +11,8 @@
  *  - D-CORE-RULES-DIGEST   tests/fixtures/agent-config.ts (CORE_RULES_DIGEST): one source of
  *                          truth, one short line per core rule. A body carries the lines its row
  *                          declares, byte for byte, as bullets under one `## Core rules`
- *                          heading. The set of omitting agents is derived from the table rows
- *                          (and the exempt agents' declaration), so a new omitting agent is
- *                          covered without an edit to this file.
+ *                          heading. The set of omitting agents is derived from the table rows,
+ *                          so a new omitting agent is covered without an edit to this file.
  *
  * The arms run through named collectors, each with a known-bad probe over the same collector.
  *
@@ -35,8 +34,6 @@ import { ROOT, resolveAgentSource, splitFrontmatter } from '../helpers.js';
 import {
   AGENT_CONFIG,
   CORE_RULES_DIGEST,
-  EXEMPT_AGENTS,
-  EXEMPT_AGENT_DIGEST,
   OMIT_CLAUDE_MD_DIGESTS,
   deriveOmitDigests,
   type AgentConfigRow,
@@ -207,21 +204,15 @@ describe('the rows declare their digest (D-OMIT-CLAUDEMD-SET)', () => {
     );
   });
 
-  it('Tracker, which has no row, declares its digest through EXEMPT_AGENT_DIGEST', () => {
-    for (const [name, digest] of Object.entries(EXEMPT_AGENT_DIGEST)) {
-      expect(Object.hasOwn(EXEMPT_AGENTS, name), `${name} declares a digest but is not exempt`).toBe(true);
-      expect(Object.hasOwn(AGENT_CONFIG, name), `${name} is both a row and an exempt digest`).toBe(false);
-      expect(collectRowDigestDefects(name, { ...AGENT_CONFIG.triage, digest }), name).toEqual([]);
-    }
+  it('Tracker declares its digest on its row, like every other omitting agent', () => {
+    expect(AGENT_CONFIG.tracker.digest).toEqual(['context-economy', 'untrusted-input', 'no-secrets', 'bounded-loops']);
+    expect(collectRowDigestDefects('tracker', AGENT_CONFIG.tracker)).toEqual([]);
   });
 });
 
 describe('the set of omitting agents is derived from the rows', () => {
-  it('holds every row that omits CLAUDE.md, with its digest, plus the exempt declaration', () => {
-    const expected = new Set([
-      ...Object.entries(AGENT_CONFIG).filter(([, row]) => row.omitClaudeMd).map(([name]) => name),
-      ...Object.keys(EXEMPT_AGENT_DIGEST),
-    ]);
+  it('holds every row that omits CLAUDE.md, with its digest', () => {
+    const expected = Object.entries(AGENT_CONFIG).filter(([, row]) => row.omitClaudeMd).map(([name]) => name);
     expect([...OMIT_CLAUDE_MD_DIGESTS.keys()].sort()).toEqual([...expected].sort());
   });
 
@@ -240,9 +231,8 @@ describe('the set of omitting agents is derived from the rows', () => {
 
   it('known-bad probe: a new omitting row joins the set without any list being edited', () => {
     const table = { ...AGENT_CONFIG, newagent: { ...AGENT_CONFIG.skim, digest: ['no-secrets'] as DigestKey[] } };
-    expect(deriveOmitDigests(table, {}).get('newagent')).toEqual(['no-secrets']);
-    expect(deriveOmitDigests(AGENT_CONFIG, {}).has('newagent')).toBe(false);
-    expect(deriveOmitDigests(AGENT_CONFIG, { ghost: ['no-secrets'] }).get('ghost')).toEqual(['no-secrets']);
+    expect(deriveOmitDigests(table).get('newagent')).toEqual(['no-secrets']);
+    expect(deriveOmitDigests(AGENT_CONFIG).has('newagent')).toBe(false);
   });
 });
 
