@@ -289,18 +289,16 @@ function listFiles(root: string, dir: string, keep: (file: string) => boolean): 
 
 /**
  * Every compiled prompt under `root` with its inputs: a command host with every
- * command partial (a partial edit can move any host that imports it), release.md
- * with its hand-authored source, the Git agent with its host, and each generated
- * reference with every reference module.
+ * command partial (a partial edit can move any host that imports it), each agent
+ * with its generator host, and each generated reference with every reference
+ * module.
  */
 function compiledPrompts(root: string): CompiledPrompt[] {
   const partials = listFiles(root, 'src/assets/commands/_partials', f => f.endsWith('.mds'))
-  const hosts = new Set(listFiles(root, 'src/assets/commands', f => f.endsWith('.mds')))
   const modules = listFiles(root, 'src/assets/mds', f => f.endsWith('.mds'))
   const commands = listFiles(root, 'dist/commands', f => f.endsWith('.md')).map(output => {
     const base = path.basename(output, '.md')
-    const host = `src/assets/commands/${base}.mds`
-    return { output, inputs: hosts.has(host) ? [host, ...partials] : [`src/assets/commands/${base}.md`] }
+    return { output, inputs: [`src/assets/commands/${base}.mds`, ...partials] }
   })
   const agents = listFiles(root, 'dist/agents', f => f.endsWith('.md'))
     .map(output => ({ output, inputs: [`${AGENT_HOSTS_DIR}/${path.basename(output, '.md')}.mds`] }))
@@ -353,19 +351,19 @@ describe('the compiled prompt corpus is current (#406)', () => {
       utimesSync(file, seconds, seconds)
     }
     try {
-      for (const src of ['src/assets/commands/plan.mds', 'src/assets/commands/release.md', 'src/assets/commands/_partials/_docs_root.mds', GIT_HOST, 'src/assets/mds/git/_pr.mds']) {
+      for (const src of ['src/assets/commands/plan.mds', 'src/assets/commands/release.mds', 'src/assets/commands/_partials/_docs_root.mds', GIT_HOST, 'src/assets/mds/git/_pr.mds']) {
         at(src, 1_700_000_000)
       }
       for (const out of ['dist/commands/plan.md', 'dist/commands/release.md', 'dist/agents/git.md', 'dist/skills/git/references/pr/x.md']) {
         at(out, 1_700_001_000)
       }
       expect(collectStaleOutputs(root), 'built after every source: current').toEqual([])
-      for (const src of ['src/assets/commands/_partials/_docs_root.mds', 'src/assets/commands/release.md', GIT_HOST, 'src/assets/mds/git/_pr.mds']) {
+      for (const src of ['src/assets/commands/_partials/_docs_root.mds', 'src/assets/commands/release.mds', GIT_HOST, 'src/assets/mds/git/_pr.mds']) {
         at(src, 1_700_002_000)
       }
       expect(collectStaleOutputs(root)).toEqual([
         'dist/commands/plan.md is STALE: src/assets/commands/_partials/_docs_root.mds changed after it was built',
-        'dist/commands/release.md is STALE: src/assets/commands/release.md changed after it was built',
+        'dist/commands/release.md is STALE: src/assets/commands/release.mds changed after it was built',
         `dist/agents/git.md is STALE: ${GIT_HOST} changed after it was built`,
         'dist/skills/git/references/pr/x.md is STALE: src/assets/mds/git/_pr.mds changed after it was built',
       ])
@@ -438,13 +436,21 @@ describe('no compiled prompt reads .devflow/project.json or .devflow/config.json
   })
 
   it('the Git agent resolves its tracker from the settings line, and reads neither file', () => {
-    // The positive half of the empty exemption list: git.md is in the corpus AND
-    // carries the resolver invocation, so a clean result is an agent that moved,
-    // not one that stopped resolving its tracker.
-    const git = promptSurface().find(c => c.label === 'agents')!.files.find(f => f.name === 'dist/agents/git.md')!
+    // The positive half of the empty exemption list. The resolver invocation moved with the rest
+    // of the provider resolution from git.md into the tracker contract (D-TRACKER-CONTRACT-ON-DEMAND),
+    // which a tracker spawn reads once: both files are in the corpus, the contract carries the
+    // invocation and git.md names the contract, so a clean result is a prompt that moved, not one
+    // that stopped resolving its tracker.
+    const surface = promptSurface()
+    const git = surface.find(c => c.label === 'agents')!.files.find(f => f.name === 'dist/agents/git.md')!
     expect(git, 'dist/agents/git.md is not in the agents class').toBeDefined()
-    expect(git.content).toContain('node "$HOME/.devflow/scripts/resolve-settings.cjs" "{root}" 2>/dev/null; echo "exit=$?"')
-    expect(collectConfigReads([git])).toEqual([])
+    const contract = surface.find(c => c.label === 'references')!.files
+      .find(f => f.name === 'dist/skills/git/references/tracker/_contract.md')!
+    expect(contract, 'the tracker contract is not in the references class').toBeDefined()
+    expect(contract.content).toContain('node "$HOME/.devflow/scripts/resolve-settings.cjs" "{root}" 2>/dev/null; echo "exit=$?"')
+    expect(git.content, 'git.md names the contract that runs the resolver').toContain('references/tracker/_contract.md')
+    expect(git.content, 'and no longer runs it itself').not.toContain('resolve-settings.cjs')
+    expect(collectConfigReads([git, contract])).toEqual([])
   })
 
   it('red probe: a seeded config read in a real compiled command is reported by the same collector', () => {

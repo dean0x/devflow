@@ -96,7 +96,7 @@ const TEST_TOOLS: readonly string[] = [
 
 /**
  * D-AGENT-CONFIG-TABLE: the shipped model, effort, tool policy, omitClaudeMd and
- * preload of the fifteen agents this table covers. Each agent's frontmatter is the
+ * preload of the sixteen agents this table covers. Each agent's frontmatter is the
  * sole authority for these values at runtime; this table is the pin that holds the
  * frontmatter to the decision. `_roster.mds` carries no effort column, and its
  * model tiers are held to the same frontmatter by the roster guard in
@@ -245,6 +245,20 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     omitClaudeMd: true,
     skills: ['worktree-support'],
   },
+  /**
+   * D-GIT-ROW: Git keeps haiku and gains medium effort and the shared denylist, the
+   * Git agent split's frontmatter change (#425). A denylist and not an allowlist, so
+   * the tracker MCP tools configured in the user's environment stay callable: an
+   * allowlist would strip them from every Jira or Linear spawn. Model and effort
+   * stay overridable through `devflow agents`.
+   */
+  git: {
+    model: 'haiku',
+    effort: 'medium',
+    policy: { kind: 'deny', extra: [] },
+    omitClaudeMd: false,
+    skills: ['git', 'worktree-support'],
+  },
 };
 
 /**
@@ -253,7 +267,6 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
  * purpose.
  */
 export const EXEMPT_AGENTS: Readonly<Record<string, string>> = {
-  git: 'Its row waits for the Git agent split, which pays for the change from the git.md byte cut.',
   tracker: 'A deliberate constant: it declares no tool list, and its model is pinned equal to the hook that spawns it.',
 };
 

@@ -6,8 +6,9 @@
  * `FEATURE_KNOWLEDGE`, so each sentence it carries is paid on every spawn. Two things it
  * used to restate belong to the commands that build and refresh the knowledge:
  *
- *   - the concatenation template (`--- Feature knowledge: {slug} ---` over the full
- *     KNOWLEDGE.md) lives once, in `knowledge_load()`;
+ *   - the block format (`--- Feature knowledge: {slug} ---`, the `KB:` path, the `Rules:`
+ *     bullets and the `Headings:` index) lives once, in `knowledge_load()`; the skill points at
+ *     the header and tells its reader how to apply a block, and never restates the template;
  *   - the write-through rule (a KB is written at the point a documented area changes,
  *     never on a background schedule) lives once, in `knowledge_writeback()`.
  *
@@ -15,7 +16,8 @@
  * each partial carry its text exactly once. The compiled commands are the text the agents
  * receive, so the count is read from `dist/commands`, not from the partial. The counts
  * are sampled from the commands themselves, and a floor on the number of hosts stops a
- * collector that read nothing from passing.
+ * collector that read nothing from passing. The load floor is a floor, not a count: release
+ * loads by the same partial, so it is an eighth host beside the seven that call it.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -28,6 +30,8 @@ const ROOT = path.resolve(import.meta.dirname, '..', '..')
 const SKILL_PATH = path.join(ROOT, 'src', 'assets', 'skills', 'apply-feature-knowledge', 'SKILL.md')
 
 const TEMPLATE_HEADER = '--- Feature knowledge: {slug} ---'
+/** The block's own lines: the path, the Rules label and the heading index live in the partial alone. */
+const BLOCK_LINES = ['KB: .devflow/features/{slug}/KNOWLEDGE.md', 'Headings: L5 Rules · L40 Overview']
 const LOAD_HEADING = '### Load Feature Knowledge'
 const WRITEBACK_HEADING = '### Feature Knowledge Write-Back (Conditional)'
 const WRITE_THROUGH = 'Knowledge bases are written through at that point, never on a background schedule.'
@@ -44,6 +48,7 @@ export function collectSkillRestatements(skill: string): string[] {
   const out: string[] = []
   if (/^## Concatenation Format/m.test(skill)) out.push('a `## Concatenation Format` section')
   if (skill.includes('[full KNOWLEDGE.md content]')) out.push('the concatenation template body')
+  for (const line of BLOCK_LINES) if (skill.includes(line)) out.push(`the block format line "${line.slice(0, 20)}"`)
   if (/write-through/i.test(skill) || /background schedule/i.test(skill)) out.push('the write-through rule')
   return out
 }
@@ -74,6 +79,7 @@ describe('the consumer skill repeats nothing its producers own (D-KNOWLEDGE-SING
   it('the skill still holds the consumer algorithm, the verify-on-read sentences and the skip guard', () => {
     const skill = readFileSync(SKILL_PATH, 'utf-8')
     expect(skill).toContain('## 3-Step Algorithm')
+    expect(skill).toContain('headed `--- Feature knowledge: {slug} ---`')
     expect(skill).toContain('Read the source and trust it')
     expect(skill).toContain('verify-on-read')
     expect(skill).toMatch(/When `FEATURE_KNOWLEDGE` is `\(none\)`, empty, or not provided — skip this skill entirely/)
@@ -85,12 +91,20 @@ describe('the consumer skill repeats nothing its producers own (D-KNOWLEDGE-SING
     expect(collectSkillRestatements(withTemplate)).toEqual(['a `## Concatenation Format` section', 'the concatenation template body'])
     const withRule = `${skill}\n- KBs are written at the point a documented area changes (not on a background schedule)\n`
     expect(collectSkillRestatements(withRule)).toEqual(['the write-through rule'])
+    const withBlock = `${skill}\n${TEMPLATE_HEADER}\n${BLOCK_LINES[0]}\nRules:\n${BLOCK_LINES[1]}\n`
+    expect(collectSkillRestatements(withBlock)).toEqual([
+      `the block format line "${BLOCK_LINES[0].slice(0, 20)}"`,
+      `the block format line "${BLOCK_LINES[1].slice(0, 20)}"`,
+    ])
   })
 })
 
 describe('each producer carries its text once in every compiled command that has it (D-KNOWLEDGE-SINGLE-AUTHORITY)', () => {
-  it('the concatenation template appears exactly once in each command that loads feature knowledge', () => {
+  it('the block format appears exactly once in each command that loads feature knowledge', () => {
     expect(collectProducerCopyDefects(compiled(), LOAD_HEADING, TEMPLATE_HEADER, LOAD_HOST_FLOOR)).toEqual([])
+    for (const line of BLOCK_LINES) {
+      expect(collectProducerCopyDefects(compiled(), LOAD_HEADING, line, LOAD_HOST_FLOOR), line).toEqual([])
+    }
   })
 
   it('the write-through sentence appears exactly once in each command that writes feature knowledge back', () => {

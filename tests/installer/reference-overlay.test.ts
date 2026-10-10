@@ -154,7 +154,7 @@ describe('generated reference manifest (bidirectional registry doctrine)', () =>
     expect(
       manifest.length,
       'a manifest short enough to enumerate by hand makes every convergence assertion vacuous',
-    ).toBeGreaterThanOrEqual(47);
+    ).toBeGreaterThanOrEqual(48);
     expect(manifest).toContain('tracker/github/setup-task.md');
     expect(manifest).toContain('decision-markers.md');
     expect(manifest.filter(p => p.startsWith('tracker/github/')).length).toBeGreaterThanOrEqual(10);
@@ -167,7 +167,7 @@ describe('generated reference manifest (bidirectional registry doctrine)', () =>
       'no manifest entry lands directly in tracker/ — the unit shape that is neither a provider ' +
       'directory nor a references-root document is unrepresented, and the arms below that cover ' +
       'it are testing nothing',
-    ).toEqual(['tracker/_mcp.md']);
+    ).toEqual(['tracker/_contract.md', 'tracker/_mcp.md']);
   });
 });
 
@@ -224,7 +224,7 @@ describe('overlay unit classification (D-OVERLAY-PROVIDER-SHAPE)', () => {
     expect(
       units.flatMap(u => (u.kind === 'cross-cutting' && u.dir === 'tracker' ? [u.files] : [])),
       'the real manifest carries no flat set in tracker/ — the shape under test is absent',
-    ).toEqual([['tracker/_mcp.md']]);
+    ).toEqual([['tracker/_contract.md', 'tracker/_mcp.md']]);
 
     const flatDirs = units.flatMap(u => (u.kind === 'cross-cutting' ? [u.dir] : []));
     expect(flatDirs, 'the references root is a flat set too').toContain('');
@@ -259,6 +259,7 @@ describe('reference overlay through installViaFileCopy (AC-2.4a)', () => {
 
   async function runInstall(effectivePlugins?: typeof DEVFLOW_PLUGINS) {
     return installViaFileCopy({
+      learning: true,
       plugins: [],
       effectivePlugins,
       claudeDir,
@@ -579,7 +580,7 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
     await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest });
 
     const files = (await walkTree(target)).filter(p => !p.endsWith('/'));
-    expect(files.length, 'no files installed — the mode assertion would be vacuous').toBeGreaterThanOrEqual(47);
+    expect(files.length, 'no files installed — the mode assertion would be vacuous').toBeGreaterThanOrEqual(48);
     for (const rel of files) {
       const stat = await fs.stat(abs(target, rel));
       expect(stat.mode & 0o777, `${rel} must be normalised to 0644`).toBe(0o644);

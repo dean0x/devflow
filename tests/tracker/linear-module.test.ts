@@ -65,6 +65,8 @@ import {
   collectMissingMechanicsClaims,
   collectSiteRungProblems,
   collectPerItemFetchVerbs,
+  extractOpSectionFromCorpus,
+  resolveAgentSource,
   type ProviderCorpus,
   type ProviderRefVocabulary,
 } from '../helpers.js';
@@ -806,6 +808,28 @@ describe('linear module: tool calls only — no HTTP, no CLI, no credential read
       'the scrub invocation must not be reported — it is the gate, not a transport',
     ).toEqual([]);
     expect(FORBIDDEN_TRANSPORTS.length, 'the transport table is empty').toBeGreaterThan(0);
+  });
+
+  it('AC-507: create-release steps 1a-6 stay inline in the agent, and step 6 moved into the shared steps would turn this guard red', () => {
+    // The release-host steps carry `gh release create`, so they cannot join the provider-neutral
+    // step text that every provider's reference expands (D-NEUTRAL-STEP-MOVE): this guard would
+    // report it in the generated reference. They stay in git.md, which is also what keeps
+    // create-release in the remote-I/O detection set.
+    const agent = resolveAgentSource('git');
+    const section = extractOpSectionFromCorpus(
+      [{ path: agent.path, content: agent.content }], 'create-release', { mode: 'sole' },
+    ).content;
+    for (const label of ['1a', '1b', '2', '3', '4', '5', '6']) {
+      expect(section, `create-release step ${label} must stay in the agent`).toMatch(new RegExp(`^${label}\\. `, 'm'));
+    }
+    const step6 = section.split('\n').find(l => /^6\. /.test(l)) ?? '';
+    expect(step6, 'step 6 creates the release').toContain('gh release create');
+    const reference = readGenerated(linearRel('create-release'));
+    expect(collectForbiddenTransports(reference), 'the shipped reference is clean').toEqual([]);
+    expect(
+      collectForbiddenTransports(`${reference}\n${step6}`).length,
+      'step 6 expanded into this provider\'s reference would be reported as a forbidden transport',
+    ).toBeGreaterThan(0);
   });
 });
 

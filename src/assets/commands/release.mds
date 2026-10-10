@@ -1,6 +1,11 @@
 ---
 description: Release project using adaptive learned configuration
+output-dir: dist/commands
 ---
+@import { evidence_policy } from "./_partials/_evidence_policy.mds"
+@import { decisions_gate, decisions_locate } from "./_partials/_decisions.mds"
+@import { knowledge_load } from "./_partials/_knowledge.mds"
+@import "./_partials/_settings.mds" as settings
 
 # Release Command
 
@@ -52,41 +57,35 @@ Read `.release/RELEASE-FLOW.md`:
 
 ### Phase 1b: Load Context
 
-**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
+<!-- learning:on -->
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES
+<!-- learning:off -->
+**Produces:** FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES
+<!-- learning:end -->
 
-The decisions ledger belongs to the repository, not to one checkout: in a linked worktree it lives in the main worktree, and a session started in a subdirectory reads the copy at the repository root. Locate it with ONE git call, run from the start directory — `WORKTREE_PATH` if provided, otherwise cwd (`devflow:worktree-support`):
+<!-- learning:on -->
+{{settings.settings_resolve()}}
 
-```bash
-git -C "{start}" rev-parse --path-format=absolute --show-toplevel --git-common-dir
-```
+{{decisions_gate()}}
 
-Line 1 is the checkout's toplevel, line 2 the repository's common git directory. A git older than 2.31 echoes `--path-format=absolute` back as a line of its own first. `{ledger}` is the first of these that applies:
-
-1. **The main worktree** — line 2 without its trailing `/.git`, when the output is exactly two lines each beginning with `/`, line 2 ends in `/.git`, and the directory left once it is removed is not your home directory and contains a `.devflow/` directory.
-2. **The toplevel** — line 1, or on an older git the line after the echoed flag.
-3. **The start directory itself** — when the command failed or printed no absolute toplevel (outside a git repository).
-
-This is the rule the learning hooks apply (D-LEDGER-MAIN-WORKTREE, D-PROMPT-ROOT), so you read the index the Learning agent writes.
+{{decisions_locate()}}
 
 Read `{ledger}/.devflow/learning/index.md`. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
 
-Load feature knowledge: Attempt to read `.devflow/features/index.md` (the regenerable cache). If absent or empty, glob `.devflow/features/*/KNOWLEDGE.md` and read each file's YAML frontmatter (`name`, `description`, `directories`) as the relevance surface. Pick release-relevant KBs by matching their documented area against the release context. For each selected KB, read the full `KNOWLEDGE.md` — trust current code over KB content on any mismatch. Concatenate under slug headers and set `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant). No `index.json`, no subprocess, no `.cjs` script.
+<!-- learning:end -->
+{{knowledge_load()}}
 
-Pass both to all subsequent agents via their input contracts.
+<!-- learning:on -->
+Pass `DECISIONS_CONTEXT` and `FEATURE_KNOWLEDGE` only to agents whose contract declares them; the Validate and Git agents this command spawns do not.
+<!-- learning:off -->
+Pass `FEATURE_KNOWLEDGE` only to agents whose contract declares it; the Validate and Git agents this command spawns do not.
+<!-- learning:end -->
 
 ### Phase 1c: Resolve the Evidence Policy
 
 **Produces:** EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL
 
-**Resolve the evidence policy once per run**, from the repository root, before any step reads the values:
-
-```bash
-node "$HOME/.devflow/scripts/resolve-evidence-policy.cjs" 2>/dev/null; echo "exit=$?"
-```
-
-Accept the output only when it is exactly two lines: `exit=0` last and, before it, one line of the form `EVIDENCE_POLICY=<required|standard> SOURCE=<file|worktree|default|invalid|error> REF=<branch|none>[ WARN=<remote-unavailable|invalid-file|raised-by-compliance|pr-changes-policy>[,…]] ISSUE_REQUIRED=<true|false> APPLY_CONVENTIONS=<true|false> REQUIRE_NON_AUTHOR_APPROVAL=<true|false>` — these fields, in this order, nothing else, where `<branch>` is a branch name such as `main`. **Anything else** (a non-zero exit, no line, extra text, or a missing, reordered or unlisted field or value) ⇒ use `EVIDENCE_POLICY=required SOURCE=error REF=none ISSUE_REQUIRED=true APPLY_CONVENTIONS=true REQUIRE_NON_AUTHOR_APPROVAL=true` instead.
-
-Set `EVIDENCE_POLICY`, `ISSUE_REQUIRED`, `APPLY_CONVENTIONS` and `REQUIRE_NON_AUTHOR_APPROVAL` from the accepted line. Pass agents only the three mechanism inputs, never `EVIDENCE_POLICY`. Report `Evidence policy: {EVIDENCE_POLICY} (source: {SOURCE})`, plus any `WARN` tokens as advisory, once in the final report.
+{{evidence_policy()}}
 
 Reuse this result for all subsequent phases: it decides whether a real release gathers and traces its evidence (Phases 4–5), passes it to the release notes (step 4), and back-links shipped issues and associates them with the release (steps 4b–4c).
 
@@ -230,7 +229,11 @@ On completion:
 │  └─ Read .release/RELEASE-FLOW.md (learned) or proceed to detect (fresh)
 │
 ├─ Phase 1b: Load Context
-│  └─ Load DECISIONS_CONTEXT and FEATURE_KNOWLEDGE for downstream agents
+<!-- learning:on -->
+│  └─ Load DECISIONS_CONTEXT and FEATURE_KNOWLEDGE for the agents that declare them
+<!-- learning:off -->
+│  └─ Load FEATURE_KNOWLEDGE for the agents that declare it
+<!-- learning:end -->
 │
 ├─ Phase 2: Detect Release Process (first run only)
 │  └─ Tiered scan: package.json, CI workflows, git history

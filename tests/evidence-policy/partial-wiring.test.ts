@@ -7,9 +7,9 @@
  *   AC-1  The partial holds at most two defines and no imports, which bound its
  *         MDS compile cost. Exactly the EVIDENCE_POLICY_PARTIAL_ADOPTERS hosts
  *         import it, and each calls `evidence_policy()` once.
- *   AC-2  The invocation line is byte-identical in all eight command files (seven
- *         built adopters plus the hand-authored release.md). release.md also holds
- *         the define's whole expansion. The parse template is pinned to the
+ *   AC-2  The invocation line is byte-identical in all eight adopter command files,
+ *         and each holds the define's whole expansion once. A source that re-inlines
+ *         the expansion instead of importing it is reported. The parse template is pinned to the
  *         script's own OUTPUT_LINE_RE by key order and by a differential
  *         accept/reject table. The fallback is FAIL_CLOSED_LINE, pinned by equality.
  *   AC-3  No prompt restates the policy → mechanism mapping (MECHANISM_INPUTS in
@@ -38,7 +38,7 @@ import {
   resolveAllAgents,
   walkFiles,
 } from '../helpers.js'
-import { EVIDENCE_POLICY_PARTIAL_ADOPTERS, HAND_AUTHORED_COMMAND_FILES } from '../fixtures/mds-manifest.js'
+import { EVIDENCE_POLICY_PARTIAL_ADOPTERS } from '../fixtures/mds-manifest.js'
 import { getAllAgentNames } from '../../src/core/plugins.js'
 import { RESOLVER_SCRIPT } from './scripted-shim.js'
 
@@ -97,8 +97,8 @@ const RESOLUTION_SENTENCE = '**Resolve the evidence policy once per run**'
 
 const SCRIPT_NAME = 'resolve-evidence-policy.cjs'
 
-/** The hand-authored command that carries the expansion instead of importing it. */
-const RELEASE = HAND_AUTHORED_COMMAND_FILES[0]
+/** The adopter the seeded probes below mutate; any member of the corpus would do. */
+const PROBED = 'release.md'
 
 interface TextFile {
   readonly name: string
@@ -120,7 +120,7 @@ function defineBody(source: string, name: string): string | null {
 }
 
 /**
- * The define's built text: what every adopter expands to and release.md carries.
+ * The define's built text: what every adopter expands to.
  *
  * The body as written. Under MDS 0.4 a define body with no `{{…}}` compiles to
  * itself (single braces are literal text). That is a model of the compiler, and
@@ -133,9 +133,9 @@ function builtExpansion(): string {
   return body
 }
 
-/** The eight command files that resolve the policy: seven built adopters, then release.md. */
+/** The eight compiled command files that resolve the policy: one per adopter. */
 function policyCommandCorpus(): TextFile[] {
-  return [...EVIDENCE_POLICY_PARTIAL_ADOPTERS.map(h => `${h}.md`), RELEASE].map(name => ({
+  return EVIDENCE_POLICY_PARTIAL_ADOPTERS.map(h => `${h}.md`).map(name => ({
     name,
     content: requireDistFile(name),
   }))
@@ -245,6 +245,11 @@ function collectExpansionDefects(files: readonly TextFile[], expansion: string):
     if (count !== 1) defects.push(`${f.name}: holds the evidence_policy() expansion ${count} times (expected 1)`)
   }
   return defects
+}
+
+/** Named collector: the sources whose text contains the define's whole expansion verbatim. */
+function collectInlinedExpansions(files: readonly TextFile[], expansion: string): string[] {
+  return files.filter(f => f.content.includes(expansion)).map(f => f.name).sort()
 }
 
 /** Change one character of `content` inside its first line that contains `anchor`. */
@@ -444,7 +449,7 @@ function partialTemplate(): string {
 describe('AC-2: the invocation is identical in all eight command files', () => {
   it('each command file holds exactly one invocation line, and all eight are the same bytes', () => {
     const corpus = policyCommandCorpus()
-    expect(corpus.map(f => f.name), 'the corpus is the seven adopters plus release.md').toHaveLength(8)
+    expect(corpus.map(f => f.name), 'the corpus is the eight adopters').toHaveLength(8)
 
     const invocations = collectPolicyInvocations(corpus)
     for (const { name, lines } of invocations) {
@@ -457,30 +462,48 @@ describe('AC-2: the invocation is identical in all eight command files', () => {
     )
   })
 
-  it('known-bad probe: a one-character change in release.md\'s copy yields two distinct lines', () => {
+  it('known-bad probe: a one-character change in one adopter\'s invocation yields two distinct lines', () => {
     const corpus = policyCommandCorpus()
-    const seeded = corpus.map(f => (f.name === RELEASE ? { ...f, content: mutateOneChar(f.content, SCRIPT_NAME) } : f))
+    const seeded = corpus.map(f => (f.name === PROBED ? { ...f, content: mutateOneChar(f.content, SCRIPT_NAME) } : f))
     const distinct = new Set(collectPolicyInvocations(seeded).flatMap(i => i.lines))
     expect(distinct.size).toBe(2)
   })
 
-  it('every adopter and release.md hold the define\'s whole expansion exactly once', () => {
+  it('every adopter holds the define\'s whole expansion exactly once', () => {
     const expansion = builtExpansion()
     expect(expansion.length, 'the define body is empty — nothing is being compared').toBeGreaterThan(400)
     expect(expansion.startsWith(RESOLUTION_SENTENCE), 'the define must open with its resolution sentence').toBe(true)
-    // The adopters prove the as-written model of the compiler; release.md is the
-    // hand-kept copy this arm exists for.
+    // The adopters prove the as-written model of the compiler.
     expect(collectExpansionDefects(policyCommandCorpus(), expansion)).toEqual([])
   })
 
-  it('known-bad probe: a one-character change inside release.md\'s expansion is reported', () => {
+  it('known-bad probe: a one-character change inside one adopter\'s expansion is reported', () => {
     const expansion = builtExpansion()
     const seeded = policyCommandCorpus().map(f =>
-      f.name === RELEASE ? { ...f, content: mutateOneChar(f.content, 'these fields, in this order') } : f,
+      f.name === PROBED ? { ...f, content: mutateOneChar(f.content, 'Pass agents only the three mechanism inputs') } : f,
     )
     expect(collectExpansionDefects(seeded, expansion)).toEqual([
-      `${RELEASE}: holds the evidence_policy() expansion 0 times (expected 1)`,
+      `${PROBED}: holds the evidence_policy() expansion 0 times (expected 1)`,
     ])
+  })
+
+  it('no command source re-inlines the expansion: each adopter imports the define', () => {
+    // The import model: the expansion text lives in the partial alone. A host that
+    // pastes it would drift from the define with every compiled file still
+    // agreeing with its own copy.
+    const corpus = srcMdsCorpus().filter(s => s.name !== '_evidence_policy')
+    expect(corpus.length, 'the src/ .mds walk found nothing, so this guard proves nothing').toBeGreaterThanOrEqual(20)
+    expect(corpus.map(s => s.name), 'the walk must reach release').toContain('release')
+    expect(collectInlinedExpansions(corpus, builtExpansion())).toEqual([])
+  })
+
+  it('known-bad probe: a host that pastes the expansion instead of importing it is reported', () => {
+    const expansion = builtExpansion()
+    const seeded: TextFile[] = [
+      { name: 'pasted', content: `# Release\n\n${expansion}\n` },
+      { name: 'imported', content: `@import { ${DEFINE} } from "${PARTIAL_IMPORT}"\n\n{{${DEFINE}()}}\n` },
+    ]
+    expect(collectInlinedExpansions(seeded, expansion)).toEqual(['pasted'])
   })
 })
 
@@ -749,7 +772,7 @@ function collectPolicyReadsBeforeResolution(file: string, content: string): stri
 }
 
 describe('order: the evidence policy resolves before its first read', () => {
-  it('in every adopter and in release.md', () => {
+  it('in every adopter', () => {
     const corpus = policyCommandCorpus()
     expect(corpus).toHaveLength(8)
     expect(corpus.flatMap(f => collectPolicyReadsBeforeResolution(f.name, f.content))).toEqual([])

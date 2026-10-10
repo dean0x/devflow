@@ -19,7 +19,7 @@ Use `--recommended` or `--advanced` flags for non-interactive setup.
 | `--plugin <names>` | Comma-separated plugin names (e.g., `implement,code-review`) |
 | `--ambient` / `--no-ambient` | Enable/disable ambient mode — orchestrator charter + plan handoff (default: on) |
 | `--memory` / `--no-memory` | Enable/disable working memory (default: on) |
-| `--learning` / `--no-learning` | Enable/disable learning agent (default: on) |
+| `--learning` / `--no-learning` | Enable/disable learning agent (default: on); with learning off, init installs the learning-off prompts and not `devflow:apply-decisions` |
 | `--knowledge` / `--no-knowledge` | Enable/disable feature knowledge (default: on) |
 | `--rules` / `--no-rules` | Enable/disable rules (default: on) |
 | `--hud` / `--no-hud` | Enable/disable HUD status line (default: on) |
@@ -91,8 +91,8 @@ npx devflow-kit ambient --status     # Show current status (partial state detect
 ## Learning
 
 ```bash
-npx devflow-kit learning --enable         # Enable learning (decision + pitfall detection)
-npx devflow-kit learning --disable        # Disable learning (drains the learning queue)
+npx devflow-kit learning --enable         # Enable learning (decision + pitfall detection; installs the learning-on prompts and the apply-decisions skill)
+npx devflow-kit learning --disable        # Disable learning (drains the learning queue; installs the learning-off prompts and removes the skill)
 npx devflow-kit learning --status         # Show status and entry counts
 npx devflow-kit learning --list           # List entries, inactive entries with their notes, and observations
 npx devflow-kit learning --show <id>      # Print one entry (ADR-NNN or PF-NNN) or observation as JSON
@@ -154,7 +154,7 @@ The machine default is stored in `~/.devflow/manifest.json` under `features.trac
 
 **A repository can select its own tracker** in its committed `.devflow/project.json` — `{"tracker":{"provider":"jira","site":"https://acme.atlassian.net","key":"ACME"}}` — and devflow follows it there automatically, on every teammate's machine. The provider resolves in this order: the repository's `project.json`, then the machine default, then `github`. Your personal `.devflow/config.json` `tracker` key can only narrow that, to `github` or to the same provider; one that names a different provider makes the Git agent report `TRACEABILITY: DEGRADED (tracker configuration mismatch (repository override))` and make no tracker call; correct or drop that key to fix it. A `config.json` that git tracks is ignored, override included. The Git agent learns all of this from the one local settings line (`resolve-settings.cjs`), never by reading the files itself.
 
-**Every install carries every provider.** All 47 generated reference files are installed under the `devflow:git` skill — every provider's mechanics, the tool-call contract `references/tracker/_mcp.md` and the PR-host mechanics — plus the Tracker agent. `devflow tracker --set <id>` therefore installs nothing: it writes the manifest, re-arms the attempt counters and writes the `~/.devflow/.tracker.enabled` sentinel (the provider's name; removed for `github`), in that order.
+**Every install carries every provider.** All 48 generated reference files are installed under the `devflow:git` skill — every provider's mechanics, the tracker contract `references/tracker/_contract.md`, the tool-call contract `references/tracker/_mcp.md` and the PR-host mechanics — plus the Tracker agent. `devflow tracker --set <id>` therefore installs nothing: it writes the manifest, re-arms the attempt counters and writes the `~/.devflow/.tracker.enabled` sentinel (the provider's name; removed for `github`), in that order.
 
 `devflow tracker --status` prints the machine provider; an `Effective:` line when the current directory's repository selects one — `Effective:   jira (project)`; whether the effective provider's conventions file has been learned, and its path — `none` on GitHub, which learns no conventions; and a `Mechanics:` line — `installed (N file(s))`, `MISSING — run devflow init`, or `unreadable (<errno>)`. The three are different facts with different remedies: nothing installed is fixed by an install, a permissions problem is not.
 
@@ -294,7 +294,7 @@ npx devflow-kit flags --unset <ids>      # Reset flag(s) to neutral, comma-separ
 
 `--enable` and `--disable` accept boolean flags only. Non-boolean flags (enum, number, string) use `--set id=value`. Passing a non-boolean id to `--enable`/`--disable` prints an error and redirects to `--set`.
 
-All 30 flags by kind and devflow default:
+All 31 flags by kind and devflow default:
 
 | Flag ID | Kind | Target | Devflow Default |
 |---------|------|--------|-----------------|
@@ -326,6 +326,7 @@ All 30 flags by kind and devflow default:
 | `default-model` | string | env `ANTHROPIC_DEFAULT_MODEL` | unset |
 | `goal-checkin-minutes` | number | env `CLAUDE_CODE_GOAL_CHECKIN_MINUTES` | unset (upstream: 30 min) |
 | `bash-max-timeout-ms` | number | env `BASH_MAX_TIMEOUT_MS` | unset (upstream: 600000 ms)³ |
+| `auto-compact-window` | number | env `CLAUDE_CODE_AUTO_COMPACT_WINDOW` | unset⁴ |
 | `spellcheck` | string | setting `spellcheck` | unset |
 | `view-mode` | enum | setting `viewMode` | `default` (key omitted when default) |
 
@@ -334,6 +335,8 @@ All 30 flags by kind and devflow default:
 ² `suppress-attribution` writes the object `{"commit":"","pr":""}` to the `attribution` key in `settings.json` when enabled — not `true`. Disabling or uninstalling removes the `attribution` key only when its current value exactly matches that shape; a custom attribution object is preserved. Enabling always replaces any existing `attribution` value, including a custom one.
 
 ³ `bash-max-timeout-ms` raises the ceiling on a foreground Bash command's `timeout` (600000 ms upstream; accepted range 600000–7200000). Agents run builds and tests in the foreground under an explicit timeout and report BLOCKED when a run that cannot be split exceeds the ceiling; `devflow flags --set bash-max-timeout-ms=900000` is the remedy they name. Unsetting the flag deletes `BASH_MAX_TIMEOUT_MS`.
+
+⁴ `auto-compact-window` is opt-in: devflow writes `CLAUDE_CODE_AUTO_COMPACT_WINDOW` only when you set it (accepted range 100000–1000000), `devflow init` never does, and unsetting the flag deletes the key. It is not recommended yet: a smaller window compacts sooner, and the resume directive that follows a compaction has not been checked against a forced mid-`/implement` compaction. devflow does not write or manage the percent-based auto-compact override.
 
 ## External Model Routing (Devflow Proxy)
 

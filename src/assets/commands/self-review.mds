@@ -4,6 +4,7 @@ output-dir: dist/commands
 ---
 @import { knowledge_load, knowledge_writeback } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
+@import "./_partials/_settings.mds" as settings
 # Self-Review Command
 
 Run Simplify agent and Scrutinize agent sequentially on changed files for post-implementation quality refinement.
@@ -17,7 +18,11 @@ Run Simplify agent and Scrutinize agent sequentially on changed files for post-i
 
 ### Phase 0: Context Gathering
 
-**Produces:** FILES_CHANGED, TASK_DESCRIPTION, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, HEAD_BEFORE
+<!-- learning:on -->
+**Produces:** FILES_CHANGED, TASK_DESCRIPTION, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, HEAD_BEFORE
+<!-- learning:off -->
+**Produces:** FILES_CHANGED, TASK_DESCRIPTION, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, HEAD_BEFORE
+<!-- learning:end -->
 
 Detect changed files and build context:
 
@@ -26,15 +31,23 @@ Detect changed files and build context:
 3. If no changes found, report "No changes to review" and exit
 4. Build TASK_DESCRIPTION from recent commit messages or branch name
 5. Record `HEAD_BEFORE` (`git rev-parse HEAD`) now, before Simplify runs — Phase 3 compares against it
-{{decisions_load()}}
 
+{{settings.settings_resolve()}}
+
+{{decisions_load()}}
+<!-- learning:on -->
 Pass `DECISIONS_CONTEXT` to Scrutinize agent — the compact index lists active ADR/PF entries; Scrutinize agent uses `devflow:apply-decisions` to Read full entry bodies on demand. Known pitfalls help identify reintroduced issues, prior decisions help validate architectural consistency. (Simplify agent does not consume decisions — it operates at code-shape level and Scrutinize agent runs after to catch any architectural drift.)
 
+<!-- learning:end -->
 {{knowledge_load()}}
 
-Pass `FEATURE_KNOWLEDGE` to Scrutinize agent.
+Pass `FEATURE_KNOWLEDGE_RULES` to Scrutinize agent.
 
-**Extract:** FILES_CHANGED (list), TASK_DESCRIPTION (string), DECISIONS_CONTEXT (string, optional), FEATURE_KNOWLEDGE (string, optional), HEAD_BEFORE (40-hex SHA)
+<!-- learning:on -->
+**Extract:** FILES_CHANGED (list), TASK_DESCRIPTION (string), DECISIONS_CONTEXT (string, optional), FEATURE_KNOWLEDGE (string, optional), FEATURE_KNOWLEDGE_RULES (string, optional), HEAD_BEFORE (40-hex SHA)
+<!-- learning:off -->
+**Extract:** FILES_CHANGED (list), TASK_DESCRIPTION (string), FEATURE_KNOWLEDGE (string, optional), FEATURE_KNOWLEDGE_RULES (string, optional), HEAD_BEFORE (40-hex SHA)
+<!-- learning:end -->
 
 ### Phase 1: Simplify agent (Code Refinement)
 
@@ -54,17 +67,25 @@ Commit any improvements with a conventional-commit message."
 ### Phase 2: Scrutinize agent (9-Pillar Quality Gate)
 
 **Produces:** SCRUTINIZE_STATUS
+<!-- learning:on -->
 **Requires:** FILES_CHANGED, TASK_DESCRIPTION, DECISIONS_CONTEXT
+<!-- learning:off -->
+**Requires:** FILES_CHANGED, TASK_DESCRIPTION
+<!-- learning:end -->
 
 Spawn Scrutinize agent for quality evaluation and fixing:
 
 Agent(subagent_type="Scrutinize", run_in_background=false):
 "TASK_DESCRIPTION: {task_description}
 FILES_CHANGED: {files_changed}
+<!-- learning:on -->
 DECISIONS_CONTEXT: {decisions_context}
-FEATURE_KNOWLEDGE: {feature_knowledge}
+<!-- learning:end -->
+FEATURE_KNOWLEDGE: {feature_knowledge_rules}
 Evaluate against 9-pillar framework. Fix P0/P1 issues. Return structured report.
+<!-- learning:on -->
 Follow devflow:apply-decisions to scan DECISIONS_CONTEXT and Read full ADR/PF bodies on demand. Skip if (none).
+<!-- learning:end -->
 Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE. Skip if (none)."
 
 **Wait for completion.** Extract: STATUS (PASS|FIXED|BLOCKED) from the `### Status` line
@@ -126,8 +147,12 @@ Display summary:
 │
 ├─ Phase 0: Context gathering
 │  ├─ Git diff for changed files
+<!-- learning:on -->
 │  ├─ Record HEAD_BEFORE
 │  └─ Read index.md → DECISIONS_CONTEXT
+<!-- learning:off -->
+│  └─ Record HEAD_BEFORE
+<!-- learning:end -->
 │
 ├─ Phase 1: Simplify agent
 │  └─ Code refinement (commits directly)

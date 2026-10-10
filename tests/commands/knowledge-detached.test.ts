@@ -11,12 +11,8 @@
  * with a known-bad probe over the wording it replaced.
  */
 import { describe, it, expect } from 'vitest';
-import * as fs from 'fs';
-import * as path from 'path';
-import { requireDistFile, requireDistFiles } from '../helpers.js';
+import { requireDistFile, requireDistFiles, resolveAgentSource } from '../helpers.js';
 
-const ROOT = path.resolve(import.meta.dirname, '..', '..');
-const KNOWLEDGE_AGENT = path.join(ROOT, 'src', 'assets', 'agents', 'knowledge.md');
 const WRITEBACK_HEADING = '### Feature Knowledge Write-Back (Conditional)';
 const DETACHED_OUTCOME = 'KB_COMMIT: skipped (detached HEAD) — uncommitted: ';
 
@@ -52,7 +48,7 @@ const writebackCommands = () => requireDistFiles().filter(f => requireDistFile(f
 
 describe('a detached-HEAD knowledge write-back is surfaced to the user (TP-52)', () => {
   it('the Knowledge agent reports the paths it left uncommitted', () => {
-    expect(collectAgentGuardProblems(fs.readFileSync(KNOWLEDGE_AGENT, 'utf-8'))).toEqual([]);
+    expect(collectAgentGuardProblems(resolveAgentSource('knowledge').content)).toEqual([]);
   });
 
   it('every compiled write-back tells the user which paths still need a commit', () => {

@@ -264,6 +264,9 @@ describe('init e2e — flags Phase 6 integration', () => {
 
     // Settings: max-concurrent-subagents applied
     expect((settings['env'] as Record<string, string>)?.CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS).toBe('40');
+    // AC-408 (D-AUTO-COMPACT-WINDOW-OPT-IN): the opt-in flag is recorded as unset and never written unseen.
+    expect(flagsRecord, 'record names the flag').toHaveProperty('auto-compact-window', null);
+    expect((settings['env'] as Record<string, string>)).not.toHaveProperty('CLAUDE_CODE_AUTO_COMPACT_WINDOW');
     // viewMode absent (default → neutral → key deleted)
     expect(settings).not.toHaveProperty('viewMode');
     // Custom user var preserved
@@ -385,6 +388,7 @@ describe('init e2e — flags Phase 6 integration', () => {
         ANTHROPIC_DEFAULT_MODEL: 'claude-opus-4',    // string flag
         CLAUDE_CODE_GOAL_CHECKIN_MINUTES: '15',      // number flag
         CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: '5',   // number flag
+        CLAUDE_CODE_AUTO_COMPACT_WINDOW: '250000',   // number flag added after this manifest was written (AC-410)
       },
     };
     await fs.writeFile(
@@ -406,7 +410,7 @@ describe('init e2e — flags Phase 6 integration', () => {
     const flagsRecord = manifest.features.flags as Record<string, unknown>;
     const env = settings['env'] as Record<string, string>;
 
-    // Whole-post-state: all six hand-set managed keys must survive
+    // Whole-post-state: all seven hand-set managed keys must survive
     // concurrency: hand-set '8' must NOT become '40' (core REG-H1 probe)
     expect(env.CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS, 'concurrency hand-set "8" survived').toBe('8');
     expect(flagsRecord['max-concurrent-subagents'], 'manifest concurrency is 8').toBe(8);
@@ -422,6 +426,10 @@ describe('init e2e — flags Phase 6 integration', () => {
     // subagent-spawn-depth preserved
     expect(env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH, 'spawn-depth "5" survived').toBe('5');
     expect(flagsRecord['subagent-spawn-depth'], 'manifest subagent-spawn-depth is 5').toBe(5);
+
+    // auto-compact-window preserved: the first init after an upgrade folds it into the record (AC-410)
+    expect(env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, 'auto-compact-window "250000" survived').toBe('250000');
+    expect(flagsRecord['auto-compact-window'], 'manifest auto-compact-window is 250000').toBe(250000);
 
     // spellcheck preserved (wrapKey path: { command: 'hunspell' } → 'hunspell' → back to { command: 'hunspell' })
     expect(settings['spellcheck'], 'spellcheck { command: "hunspell" } survived').toEqual({ command: 'hunspell' });

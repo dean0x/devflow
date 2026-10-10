@@ -1,9 +1,10 @@
-@import "./_settings.mds" as settings
+A partial: the publication-value gate. D-SETTINGS-LINE: it imports nothing from
+`_settings.mds`. Its host expands the settings block once, before the earliest of
+its consumers, and this text takes `REVIEW_PUBLICATION` from the line resolved
+there for the worktree's root.
 
 @define publication_gate():
-{{settings.settings_resolve()}}
-
-**Resolve `REVIEW_PUBLICATION` per worktree:** take `REVIEW_PUBLICATION` from that worktree's settings line, with `{root}` the worktree's root — multi-worktree repos may resolve different values per worktree. The line already caps the personal choice at the team's (D-PUBLICATION-CEILING), so it is `off`, `auto` or `full`, and `off` when the line was unresolvable.
+**Resolve `REVIEW_PUBLICATION` per worktree:** take `REVIEW_PUBLICATION` from that worktree's settings line — the line resolved above for `{root}`, the worktree's root, by the settings block when this run has not yet resolved that root; multi-worktree repos may resolve different values per worktree. The line already caps the personal choice at the team's (D-PUBLICATION-CEILING), so it is `off`, `auto` or `full`, and `off` when the line was unresolvable.
 
 **Evidence stub:** only when `EVIDENCE_POLICY` is `required`, a resolved `off` becomes `stub`, so a counts-only record still reaches the PR. `stub` is never a config value: the settings line never carries it.
 

@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { loadFile, extractSection, computeFpRatio } from '../helpers'
+import { loadFile, extractSection, computeFpRatio, resolveAgentSource } from '../helpers'
 
 // -------------------------------------------------------------------------
 // Group 1: review.md — convergence inputs
 // -------------------------------------------------------------------------
 
 describe('review.md — convergence inputs', () => {
-  const content = loadFile('src/assets/agents/review.md')
+  const content = resolveAgentSource('review').content
 
   it('declares PRIOR_RESOLUTIONS in Input section', () => {
     const input = extractSection(content, '## Input', '## Focus Areas')
@@ -150,7 +150,7 @@ describe('synthesize.md — convergence status', () => {
 // -------------------------------------------------------------------------
 
 describe('Cross-cutting convergence consistency', () => {
-  const reviewAgent = loadFile('src/assets/agents/review.md')
+  const reviewAgent = resolveAgentSource('review').content
   const codeReview = loadFile('dist/commands/code-review.md')
   const synthesizeAgent = loadFile('src/assets/agents/synthesize.md')
 

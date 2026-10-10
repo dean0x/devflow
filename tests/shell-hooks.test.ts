@@ -228,6 +228,86 @@ describe('json-helper.js operations', () => {
     expect(parsed.hookSpecificOutput.additionalContext).toBe('test context');
   });
 
+  // D-SYSTEMMESSAGE-ENVELOPE (AC-427): json_session_output gains an optional second argument, a
+  // message for the user carried in the top-level `systemMessage` key. With one argument the bytes
+  // are what every existing caller has always received; jq pretty-prints, node prints compact, and
+  // the two carry the same content.
+  describe('json_session_output: the optional systemMessage (AC-427)', () => {
+    const hasJq = spawnSync('jq', ['--version'], { encoding: 'utf8' }).status === 0;
+    const JSON_PARSE = path.join(HOOKS_DIR, 'json-parse');
+    const TRICKY = 'line one\nline "two" \\ three \u2014 four';
+
+    const call = (backend: 'jq' | 'node', ...args: string[]): string => {
+      const prelude = backend === 'node' ? '_HAS_JQ=false && ' : '';
+      const quoted = args.map((_, i) => `"$${i + 2}"`).join(' ');
+      const run = spawnSync('bash', ['-c', `source "$1" && ${prelude}json_session_output ${quoted}`, '_', JSON_PARSE, ...args], { encoding: 'utf8' });
+      expect(run.status, run.stderr).toBe(0);
+      return run.stdout;
+    };
+    const hook = (context: string) => ({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } });
+
+    it.skipIf(!hasJq)('one argument, jq: byte-identical to the envelope callers have always received', () => {
+      expect(call('jq', 'ctx')).toBe('{\n  "hookSpecificOutput": {\n    "hookEventName": "SessionStart",\n    "additionalContext": "ctx"\n  }\n}\n');
+    }, 60_000);
+
+    it('one argument, node: byte-identical to the envelope callers have always received', () => {
+      expect(call('node', 'ctx')).toBe('{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"ctx"}}\n');
+    }, 60_000);
+
+    it.each(['jq', 'node'] as const)('%s: one argument with an EMPTY context is still the hookSpecificOutput envelope', (backend) => {
+      if (backend === 'jq' && !hasJq) return;
+      expect(JSON.parse(call(backend, ''))).toEqual(hook(''));
+    }, 60_000);
+
+    it.each(['jq', 'node'] as const)('%s: a context and a message carry both keys, hookSpecificOutput first', (backend) => {
+      if (backend === 'jq' && !hasJq) return;
+      const out = JSON.parse(call(backend, TRICKY, 'for the user'));
+      expect(Object.keys(out)).toEqual(['hookSpecificOutput', 'systemMessage']);
+      expect(out).toEqual({ ...hook(TRICKY), systemMessage: 'for the user' });
+    }, 60_000);
+
+    it.each(['jq', 'node'] as const)('%s: a message with no context is systemMessage alone, with no hookSpecificOutput key', (backend) => {
+      if (backend === 'jq' && !hasJq) return;
+      const out = JSON.parse(call(backend, '', TRICKY));
+      expect(out).toEqual({ systemMessage: TRICKY });
+      expect(out).not.toHaveProperty('hookSpecificOutput');
+    }, 60_000);
+
+    it.each(['jq', 'node'] as const)('%s: an empty message is the one-argument envelope for that context', (backend) => {
+      if (backend === 'jq' && !hasJq) return;
+      expect(call(backend, 'ctx', '')).toBe(call(backend, 'ctx'));
+    }, 60_000);
+
+    it.skipIf(!hasJq)('the two backends carry equal content for every shape (jq pretty, node compact)', () => {
+      for (const args of [['ctx'], [''], [TRICKY, 'msg'], ['', TRICKY], ['ctx', '']]) {
+        expect(JSON.parse(call('node', ...args)), JSON.stringify(args)).toEqual(JSON.parse(call('jq', ...args)));
+      }
+      expect(call('jq', 'ctx', 'msg')).toContain('\n'); // jq pretty-prints
+      expect(call('node', 'ctx', 'msg').trim().split('\n')).toHaveLength(1); // node is compact
+    }, 120_000);
+
+    it('json-helper session-output takes the message as its second argument', () => {
+      const out = JSON.parse(execSync(`node "${JSON_HELPER}" session-output "" "only a message"`, { stdio: 'pipe' }).toString());
+      expect(out).toEqual({ systemMessage: 'only a message' });
+    }, 60_000);
+
+    it('every other caller passes exactly one argument, so its envelope is unchanged', () => {
+      const callers: Array<[string, number]> = [['ensure-proxy', 6], ['session-start-orchestrator', 1], ['session-start-memory', 1]];
+      for (const [name, expected] of callers) {
+        const source = fs.readFileSync(path.join(HOOKS_DIR, name), 'utf-8');
+        const sites = source.split('\n').filter(line => /^\s*json_session_output\b/.test(line));
+        expect(sites, name).toHaveLength(expected);
+        for (const site of sites) expect(site.trim(), name).toMatch(/^json_session_output "\$[A-Z_]+"$/);
+      }
+    });
+
+    it('session-start-context passes the message as the second argument and never inside the context', () => {
+      const source = fs.readFileSync(path.join(HOOKS_DIR, 'session-start-context'), 'utf-8');
+      expect(source).toContain('json_session_output "$CONTEXT" "$SYSTEM_MESSAGE"');
+      expect(source).not.toMatch(/CONTEXT="\$\{CONTEXT\}[^"]*SYSTEM_MESSAGE/);
+    });
+  });
+
   it('prompt-output builds correct envelope', () => {
     const result = execSync(
       `node "${JSON_HELPER}" prompt-output "test preamble"`,
@@ -571,6 +651,12 @@ describe('D-HOOKS-GIT-ONLY: no project scaffolding outside a git project or at H
     'capture-prompt',
   ] as const;
 
+  /**
+   * When the repository IS HOME its .devflow is the machine root, and machine data is not
+   * project scaffolding: the logs, and the CLAUDE.md audit's stamp (D-AUDIT-STAMP).
+   */
+  const MACHINE_DATA = ['.devflow/logs', '.devflow/.claude-md-audit'];
+
   let base: string;
   let homeDir: string;
 
@@ -609,13 +695,13 @@ describe('D-HOOKS-GIT-ONLY: no project scaffolding outside a git project or at H
   it('a repository rooted at HOME (a dotfiles repo) gets no project .devflow data and no .gitignore', () => {
     const dotfiles = path.join(base, 'dotfiles');
     initCommittedRepo(dotfiles);
-    // Its .devflow IS the machine root; logs are machine data and are excluded.
+    // Its .devflow IS the machine root; logs and the audit stamp are machine data and are excluded.
     fs.mkdirSync(path.join(dotfiles, '.devflow', 'logs'), { recursive: true });
-    const before = collectTree(dotfiles, ['.devflow/logs']);
+    const before = collectTree(dotfiles, MACHINE_DATA);
 
     runSessionAndPrompt(dotfiles, dotfiles);
 
-    expect(collectTree(dotfiles, ['.devflow/logs'])).toEqual(before);
+    expect(collectTree(dotfiles, MACHINE_DATA)).toEqual(before);
     expect(fs.existsSync(path.join(dotfiles, '.gitignore'))).toBe(false);
   });
 
@@ -625,14 +711,14 @@ describe('D-HOOKS-GIT-ONLY: no project scaffolding outside a git project or at H
     fs.mkdirSync(path.join(realHome, '.devflow', 'logs'), { recursive: true });
     const linkHome = path.join(base, 'link-home');
     fs.symlinkSync(realHome, linkHome);
-    const before = collectTree(realHome, ['.devflow/logs']);
+    const before = collectTree(realHome, MACHINE_DATA);
 
     // HOME is the link, the session starts in the real directory …
     runSessionAndPrompt(realHome, linkHome);
     // … and HOME is real while the session starts through the link.
     runSessionAndPrompt(linkHome, realHome);
 
-    expect(collectTree(realHome, ['.devflow/logs'])).toEqual(before);
+    expect(collectTree(realHome, MACHINE_DATA)).toEqual(before);
   });
 
   it('TP-50: a repo under the macOS /var → /private/var temp tree still matches its HOME', () => {
@@ -645,11 +731,11 @@ describe('D-HOOKS-GIT-ONLY: no project scaffolding outside a git project or at H
     if (process.platform === 'darwin') {
       expect(fs.realpathSync(tmpHome), 'the fixture must exercise the /var link').not.toBe(tmpHome);
     }
-    const before = collectTree(tmpHome, ['.devflow/logs']);
+    const before = collectTree(tmpHome, MACHINE_DATA);
 
     runSessionAndPrompt(tmpHome, tmpHome);
 
-    expect(collectTree(tmpHome, ['.devflow/logs'])).toEqual(before);
+    expect(collectTree(tmpHome, MACHINE_DATA)).toEqual(before);
   });
 
   it('non-vacuity: the same hooks in a git project below HOME do scaffold', () => {
@@ -780,6 +866,15 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
   const learningOf = (root: string) => path.join(root, '.devflow', 'learning');
   const indexOf = (root: string) => path.join(learningOf(root), 'index.md');
 
+  /**
+   * The pass rule the section ends with (D-DECISIONS-CHARTER-HANDOFF). It lived in the
+   * orchestrator charter until the section took it over, so it is written out here
+   * rather than read back from the hook: the pin is on what the model is TOLD.
+   */
+  const PASS_RULE =
+    'Decisions (direct delegations only — workflow skills load their own): ' +
+    'pass this index as DECISIONS_CONTEXT — its content, read once — to every agent that takes it.';
+
   /** The PROJECT DECISIONS section of the injected context, up to the blank line that ends it. */
   function decisionsSection(cwd: string): string {
     const { stdout, exitCode } = runHook(SESSION_CONTEXT, { cwd, source: 'startup' }, homeDir);
@@ -800,25 +895,27 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
     if (index !== undefined) fs.writeFileSync(indexOf(root), index);
   }
 
-  it('TP-17: in a linked worktree, PROJECT DECISIONS names the main checkout index, last', () => {
+  it('TP-17: in a linked worktree, PROJECT DECISIONS names the main checkout index, then the pass rule', () => {
     seedRendered(main, 'Decisions (1):\n  ADR-001  Main decision  [Accepted]\n');
 
     expect(decisionsSection(wt)).toBe(
-      `--- PROJECT DECISIONS (TL;DR) ---\n3 decisions\n2 pitfalls\nIndex: ${indexOf(main)}`,
+      `--- PROJECT DECISIONS (TL;DR) ---\n3 decisions\n2 pitfalls\nIndex: ${indexOf(main)}\n${PASS_RULE}`,
     );
   });
 
-  it('PROJECT DECISIONS carries the index line alone when no TL;DR is rendered', () => {
+  it('PROJECT DECISIONS carries the index line and the pass rule alone when no TL;DR is rendered', () => {
     fs.mkdirSync(learningOf(main), { recursive: true });
     fs.writeFileSync(indexOf(main), 'Pitfalls (1):\n  PF-001  Main pitfall  [Active]\n');
 
-    expect(decisionsSection(wt)).toBe(`--- PROJECT DECISIONS (TL;DR) ---\nIndex: ${indexOf(main)}`);
+    expect(decisionsSection(wt)).toBe(`--- PROJECT DECISIONS (TL;DR) ---\nIndex: ${indexOf(main)}\n${PASS_RULE}`);
   });
 
-  it('no index line when the index is missing', () => {
+  it('no index line when the index is missing, and no pass rule either: there is nothing to pass', () => {
     seedRendered(main);
 
-    expect(decisionsSection(wt)).toBe('--- PROJECT DECISIONS (TL;DR) ---\n3 decisions\n2 pitfalls');
+    const section = decisionsSection(wt);
+    expect(section).toBe('--- PROJECT DECISIONS (TL;DR) ---\n3 decisions\n2 pitfalls');
+    expect(section).not.toContain('DECISIONS_CONTEXT');
   });
 
   it('no index line when the index lists no entry — (none) — or is empty', () => {
@@ -849,12 +946,40 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
     expect(decisionsSection(admitted)).toContain(`Index: ${fs.realpathSync(indexOf(admitted))}`);
   });
 
-  it('the orchestrator charter passes the index this section names on as DECISIONS_CONTEXT', () => {
+  it('the pass rule lives in this section and not in the orchestrator charter (D-DECISIONS-CHARTER-HANDOFF)', () => {
     const charter = fs.readFileSync(path.join(HOOKS_DIR, 'assets', 'orchestrator-charter.md'), 'utf-8');
     const hook = fs.readFileSync(SESSION_CONTEXT, 'utf-8');
     expect(hook).toContain('--- PROJECT DECISIONS (TL;DR) ---');
     expect(hook).toContain('DECISIONS_INDEX_LINE="Index: $_SC_INDEX"');
-    expect(charter).toContain('pass the index named under PROJECT DECISIONS as DECISIONS_CONTEXT');
+    expect(hook).toContain(PASS_RULE);
+    // The charter is paid for in every ambient session, learning or not; the section is
+    // gated on the machine switch narrowed by the repository.
+    expect(charter).not.toContain('DECISIONS_CONTEXT');
+    expect(charter).not.toContain('PROJECT DECISIONS');
+  });
+
+  it('the rule is appended in the same branch as the Index line, so a section without an index never carries it', () => {
+    // The hook text orders the two: the rule is appended inside the same `if` that appends the index.
+    const hook = fs.readFileSync(SESSION_CONTEXT, 'utf-8');
+    const indexAt = hook.indexOf('${DECISIONS_INDEX_LINE}\n${DECISIONS_PASS_RULE}');
+    expect(indexAt).toBeGreaterThan(-1);
+    expect(hook.slice(Math.max(0, indexAt - 80), indexAt)).toContain('DECISIONS_SECTION="${DECISIONS_SECTION}');
+  });
+
+  describe.each([
+    { name: 'jq', prelude: '' },
+    { name: 'node fallback', prelude: '_HAS_JQ=false &&' },
+  ] as const)('the section reaches the model unchanged through the $name envelope', ({ name, prelude }) => {
+    const hasJq = spawnSync('jq', ['--version'], { encoding: 'utf8' }).status === 0;
+    it.skipIf(name === 'jq' && !hasJq)('em dashes and newlines in the pass rule survive json_session_output', () => {
+      const section = `--- PROJECT DECISIONS (TL;DR) ---\nIndex: /x/.devflow/learning/index.md\n${PASS_RULE}`;
+      const run = spawnSync('bash', [
+        '-c', `source "$1" && ${prelude} json_session_output "$2"`,
+        '_', path.join(HOOKS_DIR, 'json-parse'), section,
+      ], { encoding: 'utf8' });
+      expect(run.status).toBe(0);
+      expect(JSON.parse(run.stdout).hookSpecificOutput.additionalContext).toBe(section);
+    }, 60_000);
   });
 
   it('a main checkout that never ran devflow keeps the ledger in the worktree, and is not scaffolded', () => {

@@ -34,7 +34,7 @@ import { loadGolden, resolveAgentSource } from '../helpers.js'
  * never on its own to clear a red assertion: a baseline edited to match what the
  * artifact happens to be today pins nothing.
  */
-const GIT_AGENT_BYTES = 44_131
+const GIT_AGENT_BYTES = 35_699
 
 describe('golden: git agent source equality', () => {
   it('the resolved git agent is byte-equal to the golden fixture (AC-0.2)', () => {

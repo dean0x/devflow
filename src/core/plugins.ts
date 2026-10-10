@@ -66,7 +66,7 @@ export interface PluginDefinition {
    * an unreferenced entry is a skill the user installs for no reason.
    *
    * Never contains a {@link FEATURE_OWNED_SKILLS} entry (the feature installs
-   * those) nor a {@link PRESENCE_GATED_SKILLS} entry (those are probed for).
+   * those) nor a {@link PRESENCE_GATED_SKILLS} entry (those are stamped, not required).
    */
   requires: readonly string[];
   /** Optional plugins are not installed by default — require explicit --plugin flag */
@@ -118,7 +118,13 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
       'security',
       'worktree-support',
     ],
-    rules: ['security', 'engineering', 'quality', 'reliability'],
+    // D-CONTEXT-ECONOMY-RULE: reading discipline is a core rule, not a skill, because it
+    // must reach every session and every spawned agent without an activation step. It
+    // tells the model to list a large file's headings and read ranges, and to count
+    // search matches before printing them. Its body stays near 400 characters (ceiling
+    // 450) and names no search binary, since the rule is loaded into every session;
+    // tests/rules.test.ts enforces the length, the directives and this registration.
+    rules: ['security', 'engineering', 'quality', 'reliability', 'context-economy'],
   },
   {
     name: 'devflow-plan',
@@ -554,6 +560,43 @@ export const FEATURE_OWNED_SKILLS = ['compliance'] as const satisfies readonly s
  */
 export const FEATURE_OWNED_RULES = ['compliance'] as const satisfies readonly string[];
 
+/**
+ * Skills a learning-off machine does not install.
+ *
+ * D-LEARNING-VARIANT-INSTALL: the learning-off variants of the commands and
+ * agents (D-LEARNING-VARIANTS) carry no decisions text and preload no
+ * apply-decisions, so the skill has no reader on a machine with learning off. It
+ * stays OWNED and REQUIRED by its plugins in the registry — the closure guard
+ * reasons over the learning-on variant, the superset — and the install drops it
+ * on top of the selection: `installViaFileCopy` skips it when `learning` is false
+ * and `convergeLearningVariants` installs or removes it when the switch flips.
+ *
+ * This is a machine-switch condition, not a deselection: the plan
+ * ({@link resolveSkillInstallPlan}) is untouched, so a learning-off machine never
+ * reports the skill as "removed because no selected plugin requires it" nor its
+ * shadow as inactive for a plugin that is not selected.
+ *
+ * Used by:
+ *   - installer.ts installViaFileCopy: omits these from the install loop when learning is off
+ *   - learning-install.ts convergeLearningVariants: installs or removes the directory
+ *   - tests: independent literal ['apply-decisions'] (avoids the EXCLUDED-as-oracle trap)
+ */
+export const LEARNING_GATED_SKILLS = ['apply-decisions'] as const satisfies readonly string[];
+
+/**
+ * A skills map with the learning-gated skills left out when learning is off.
+ *
+ * Pure: the same map instance comes back when learning is on, a copy otherwise.
+ */
+export function omitLearningGatedSkills<V>(
+  skillsMap: ReadonlyMap<string, V>,
+  learning: boolean,
+): ReadonlyMap<string, V> {
+  if (learning) return skillsMap;
+  const gated: readonly string[] = LEARNING_GATED_SKILLS;
+  return new Map([...skillsMap].filter(([skill]) => !gated.includes(skill)));
+}
+
 // ── Skill-closure boundaries ──────────────────────────────────────────────────
 
 /**
@@ -561,13 +604,13 @@ export const FEATURE_OWNED_RULES = ['compliance'] as const satisfies readonly st
  *
  * D-PRESENCE-GATED: every language/ecosystem skill ships with an optional,
  * command-less plugin, so a reference to one is a reference to something the
- * user may deliberately not have. The referencing prompts are written to probe
- * first and proceed without it — `/code-review` checks
- * `skills/devflow:{focus}/SKILL.md` under Claude Code's directory (`CLAUDE_CONFIG_DIR`
- * when absolute, else `~/.claude` — D-CLAUDE-DIR-PROMPTS) before spawning that focus, the
- * Review and Code agents continue when the Skill invocation fails. Putting them
- * in a `requires` would reinstate the universal install for exactly the eight
- * skills the selection prompt exists to let a user decline (AC-25).
+ * user may deliberately not have. The referencing prompts are written to
+ * proceed without it: `/code-review` spawns a language focus only when the
+ * installer stamped it into the command (D-LANGUAGE-FOCUS-STAMP,
+ * {@link installedLanguageFocuses}), and the Review and Code agents continue
+ * when the Skill invocation fails. Putting them in a `requires` would reinstate
+ * the universal install for exactly the eight skills the selection prompt
+ * exists to let a user decline (AC-25).
  *
  * DERIVED from the registry rather than hand-listed: a ninth language plugin is
  * presence-gated by being declared, with no second roster to remember. Guarded
@@ -618,7 +661,7 @@ export const TEMPLATE_SKILL_REFS: readonly TemplateSkillRef[] = [
   },
   {
     literal: 'devflow:{FOCUS}',
-    site: 'src/assets/agents/review.md (the Review agent loading its own focus skill)',
+    site: 'src/assets/agents/review.mds (the Review agent loading its own focus skill)',
     why: 'receiving half of the same substitution — the agent is told which focus it is, not which skill exists',
   },
 ];
@@ -820,6 +863,30 @@ export function buildScopedSkillsMap(plugins: readonly PluginDefinition[]): Map<
     if (owner !== undefined) skillsMap.set(skill, owner);
   }
   return skillsMap;
+}
+
+/**
+ * The language focuses an install selection makes available — the list the
+ * installer stamps into the installed /code-review command.
+ *
+ * D-LANGUAGE-FOCUS-STAMP: the language gate moved from a run-time `test -f`
+ * probe of Claude Code's directory to this list, computed once at install time.
+ * Pure plumbing and nothing more: the registry's {@link PRESENCE_GATED_SKILLS}
+ * filtered to the skills the selection's closure installs
+ * ({@link buildScopedSkillsMap}), in registry order. Which focuses a diff gets
+ * stays a prompt rule that the orchestrator executes; no code here, or anywhere
+ * in the installer, classifies a diff or chooses a focus.
+ *
+ * The selection is the EFFECTIVE one (`FileCopyOptions.effectivePlugins`), never
+ * the plugins one run copies: `--plugin=X` installs X alone while the machine's
+ * selection is the manifest's plugins plus X, and the stamp has to describe what
+ * is on disk. Selective uninstall passes the plugins that remain.
+ *
+ * @param effectivePlugins - The plugins whose skill closure is, or stays, installed.
+ */
+export function installedLanguageFocuses(effectivePlugins: readonly PluginDefinition[]): string[] {
+  const installed = buildScopedSkillsMap(effectivePlugins);
+  return PRESENCE_GATED_SKILLS.filter(skill => installed.has(skill));
 }
 
 /**

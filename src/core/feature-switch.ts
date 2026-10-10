@@ -127,6 +127,17 @@ export function setMachineFeature(
   };
 }
 
+/**
+ * Whether a RAW parsed manifest already records `feature` as exactly `enabled`:
+ * `features.<feature>` is that boolean. Pure. Stricter than
+ * {@link isMachineFeatureOn} on purpose — an absent key, a non-boolean value and
+ * a legacy key all read as a state without being recorded as it, so writing the
+ * explicit boolean is still a change.
+ */
+function isMachineFeatureRecorded(rawManifest: unknown, feature: MachineFeature, enabled: boolean): boolean {
+  return isJsonObject(rawManifest) && isJsonObject(rawManifest.features) && rawManifest.features[feature] === enabled;
+}
+
 async function readRawManifest(devflowDir: string): Promise<unknown> {
   try {
     return JSON.parse(await fs.readFile(path.join(devflowDir, 'manifest.json'), 'utf-8'));
@@ -149,13 +160,21 @@ export async function readMachineFeature(devflowDir: string, feature: MachineFea
  * temp + rename). Refuses with `not-installed` when there is no manifest to
  * write into — a manifest is created by `devflow init`, never by a toggle,
  * because a bare `{features: {...}}` file is not a manifest any reader accepts.
+ *
+ * D-NOOP-TOGGLE: a toggle to the value the manifest already records writes
+ * nothing. The only bytes such a write could change are `updatedAt`, and that
+ * field means "the manifest's content last changed", so a no-op must not move
+ * it. This is the one write point of `devflow memory|learning|knowledge
+ * --enable/--disable`, so the rule holds for all three at once.
  */
 export async function writeMachineFeature(
   devflowDir: string,
   feature: MachineFeature,
   enabled: boolean,
 ): Promise<Result<void, MachineFeatureWriteError>> {
-  const next = setMachineFeature(await readRawManifest(devflowDir), feature, enabled, new Date().toISOString());
+  const raw = await readRawManifest(devflowDir);
+  if (isMachineFeatureRecorded(raw, feature, enabled)) return { ok: true, value: undefined };
+  const next = setMachineFeature(raw, feature, enabled, new Date().toISOString());
   if (next === null) return { ok: false, error: 'not-installed' };
   await writeFileAtomicExclusive(path.join(devflowDir, 'manifest.json'), JSON.stringify(next, null, 2) + '\n');
   return { ok: true, value: undefined };

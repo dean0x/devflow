@@ -98,18 +98,42 @@ json_extract_cwd_prompt() {
 
 # --- Hook output envelopes ---
 
-# Build SessionStart output. Usage: json_session_output "$CONTEXT"
+# Build SessionStart output. Usage: json_session_output "$CONTEXT" ["$SYSTEM_MESSAGE"]
+#
+# D-SYSTEMMESSAGE-ENVELOPE: the optional second argument is a message shown to the
+# user, carried in the top-level `systemMessage` key beside (never inside)
+# `hookSpecificOutput`; it does not enter the model's context. With ONE argument the
+# envelope is exactly what every existing caller has always received, byte for byte
+# (ensure-proxy, session-start-orchestrator, session-start-memory and Sections 1-5 of
+# session-start-context pass one). With two:
+#   - a message and a context  -> both keys, hookSpecificOutput first;
+#   - a message and no context -> `systemMessage` alone, with NO hookSpecificOutput key;
+#   - an empty message         -> the one-argument envelope for that context.
+# The node fallback (json-helper.cjs session-output) builds the same content, compact
+# where jq pretty-prints.
 json_session_output() {
-  local ctx="$1"
-  if [ "$_HAS_JQ" = "true" ]; then
-    jq -n --arg ctx "$ctx" '{
-      "hookSpecificOutput": {
-        "hookEventName": "SessionStart",
-        "additionalContext": $ctx
-      }
-    }'
+  local ctx="$1" msg="${2:-}"
+  if [ "$#" -lt 2 ] || [ -z "$msg" ]; then
+    if [ "$_HAS_JQ" = "true" ]; then
+      jq -n --arg ctx "$ctx" '{
+        "hookSpecificOutput": {
+          "hookEventName": "SessionStart",
+          "additionalContext": $ctx
+        }
+      }'
+    else
+      node "$_JSON_HELPER" session-output "$ctx"
+    fi
+  elif [ "$_HAS_JQ" = "true" ]; then
+    jq -n --arg ctx "$ctx" --arg msg "$msg" '
+      (if $ctx != "" then {
+        "hookSpecificOutput": {
+          "hookEventName": "SessionStart",
+          "additionalContext": $ctx
+        }
+      } else {} end) + {"systemMessage": $msg}'
   else
-    node "$_JSON_HELPER" session-output "$ctx"
+    node "$_JSON_HELPER" session-output "$ctx" "$msg"
   fi
 }
 

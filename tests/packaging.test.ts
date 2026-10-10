@@ -28,6 +28,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import {
   DIST_COMMAND_FILES,
+  LEARNING_OFF_FILES,
   MDS_COMMAND_HOSTS,
   MDS_GENERATOR_HOSTS,
   MDS_REFERENCE_MODULES,
@@ -426,9 +427,12 @@ describe('Guard 5 (files[] coverage): package.json includes required directories
  *  (b) Contain exactly the dist/commands/*.md set named in tests/fixtures/mds-manifest.ts.
  *      If the set changes, this guard forces an intentional manifest update.
  *  (c) Carry the compiled agent for every generator host (dist/agents/*.md) — the
- *      only shipping form of the Git agent since its hand-authored source was removed.
+ *      only shipping form of each of those agents.
  *  (d) Carry all src/assets/**\/*.mds generator sources, at the pinned count.
  *      Shipping them is decision D-A(a), accepted at Gate 2.
+ *  (e) Carry exactly the learning-off variants named in LEARNING_VARIANT_HOSTS
+ *      (dist/learning-off/), the files a learning-off machine installs in place of
+ *      the dist/commands/ and dist/agents/ prompts.
  *
  * Assert on parsed `npm pack --dry-run --json` output (structured
  * data), not on pipeline tails or partial string matching.
@@ -491,11 +495,11 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
     ).toEqual([...DIST_COMMAND_FILES].sort());
   });
 
-  it('tarball carries the compiled Git agent (dist/agents/git.md)', () => {
-    // dist/agents/git.md is now the ONLY shipping form of the Git agent — its
-    // hand-authored .md source no longer exists. `files[]` already contains
-    // `dist/`, so it ships; nothing pinned that it does. A build that silently
-    // skipped the generator host would publish a package with no Git agent at all.
+  it('tarball carries the compiled agent of every generator host (dist/agents/*.md)', () => {
+    // The compiled file is the ONLY shipping form of a generator-host agent — no
+    // hand-authored .md source exists. `files[]` already contains `dist/`, so it
+    // ships; nothing pinned that it does. A build that silently skipped a generator
+    // host would publish a package with no such agent at all.
     const files = getPackFiles();
     expect(
       files.length,
@@ -511,11 +515,63 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
   });
 
   /**
+   * Named collector: the learning-off variants a file list carries, relative to
+   * dist/learning-off/. Used by the live assertion AND its probe, so the probe
+   * cannot pass against a re-implementation of the filter.
+   */
+  function collectLearningOffFiles(files: readonly string[]): string[] {
+    return files
+      .filter(f => /^dist\/learning-off\/.+\.md$/.test(f))
+      .map(f => f.replace(/^dist\/learning-off\//, ''))
+      .sort();
+  }
+
+  it('tarball carries exactly the manifest\'s learning-off variants (dist/learning-off/)', () => {
+    const files = getPackFiles();
+    expect(
+      files.length,
+      'npm pack --dry-run produced no files — run `npm run build` first (guard cannot verify)',
+    ).toBeGreaterThan(0);
+    // Set equality against the roster, so it holds at every step: an arm added
+    // without a row, or a row left after its arm is gone, moves the tarball off it.
+    expect(
+      collectLearningOffFiles(files),
+      'Tarball dist/learning-off/*.md set does not match LEARNING_VARIANT_HOSTS in ' +
+      'tests/fixtures/mds-manifest.ts. A learning-off machine installs these files; one missing ' +
+      'ships the learning-on prompt there.',
+    ).toEqual([...LEARNING_OFF_FILES].sort());
+  });
+
+  it('known-bad probe: the collector reports a stray and a nested learning-off file, and ignores other dist files', () => {
+    const seeded = [
+      'dist/learning-off/commands/x.md',
+      'dist/learning-off/agents/y.md',
+      'dist/learning-off/agents/notes.txt',
+      'dist/commands/x.md',
+    ];
+    expect(collectLearningOffFiles(seeded)).toEqual(['agents/y.md', 'commands/x.md']);
+  });
+
+  it('package.json files[] ships dist/ wholesale and excludes nothing under dist/learning-off/', async () => {
+    // The tarball arm above is a roster comparison and so holds with an empty
+    // roster; this one is the presence arm. It reads the packaging contract itself:
+    // `dist/` ships whole, and no negated pattern can take the variants back out.
+    const pkg = JSON.parse(await fs.readFile(path.join(ROOT, 'package.json'), 'utf-8')) as { files?: string[] };
+    const patterns = pkg.files ?? [];
+    expect(patterns, 'package.json files[] must ship dist/ wholesale').toContain('dist/');
+    const excluded = patterns.filter(p => p.startsWith('!') && !/^!dist\/\*\*\/\*\.(map|d\.ts)$/.test(p));
+    expect(
+      excluded,
+      'a negated files[] pattern other than the map and declaration excludes must be checked against dist/learning-off/',
+    ).toEqual([]);
+  });
+
+  /**
    * Tarball decision D-A(a), ACCEPTED at Gate 2: the .mds generator sources ship.
    *
-   * `src/assets/` already ships wholesale, so the 13 command hosts and 11 partials
-   * were already inside every published tarball; `src/assets/agents/git.mds` simply
-   * joins them. No `files[]` change was made. Shipping the sources costs ~0.3% of
+   * `src/assets/` already ships wholesale, so the command hosts and the partials
+   * were already inside every published tarball; the agent generator hosts
+   * (`src/assets/agents/*.mds`) simply join them. No `files[]` change was made. Shipping the sources costs ~0.3% of
    * the tarball and means a consumer inspecting an installed package can see what
    * dist/ was generated from.
    *
@@ -538,12 +594,12 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
       shippedMds.length,
       `Expected ${EXPECTED_SHIPPED_MDS} .mds sources in the tarball ` +
       `(${MDS_COMMAND_HOSTS.length} command hosts + ${ALL_MDS_PARTIALS.length} partials + ` +
-      `${MDS_GENERATOR_HOSTS.length} generator host + ${MDS_REFERENCE_MODULES.length} reference ` +
+      `${MDS_GENERATOR_HOSTS.length} generator hosts + ${MDS_REFERENCE_MODULES.length} reference ` +
       `module(s)), got ${shippedMds.length}:\n  ${shippedMds.join('\n  ')}\n` +
       `Shipping the sources is deliberate (decision D-A(a)); update the manifest if a source was added or removed.`,
     ).toBe(EXPECTED_SHIPPED_MDS);
 
-    // Name the generator host explicitly — it is the one whose shipping is new.
+    // Name each generator host explicitly: its compiled form is the only one that ships.
     for (const host of MDS_GENERATOR_HOSTS) {
       expect(shippedMds, `src/assets/agents/${host}.mds must ship`).toContain(`src/assets/agents/${host}.mds`);
     }
@@ -610,7 +666,7 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
     expect(
       manifest.length,
       'a manifest short enough to enumerate by hand makes this assertion vacuous',
-    ).toBeGreaterThanOrEqual(47);
+    ).toBeGreaterThanOrEqual(48);
 
     expect(
       collectMissingPackedReferences(files, manifest),

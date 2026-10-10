@@ -30,18 +30,17 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import * as path from 'path'
 
-import { CODE_OPERATIONS, collectCodeSpawnSites, requireDistFile, requireDistFiles } from '../helpers.js'
+import { CODE_OPERATIONS, collectCodeSpawnSites, requireDistFile, requireDistFiles, resolveAgentSource } from '../helpers.js'
 import type { CodeSpawnSite } from '../helpers.js'
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..')
-const CODE_PATH = path.join(ROOT, 'src', 'assets', 'agents', 'code.md')
 const PREAMBLE_PATH = path.join(ROOT, 'src', 'assets', 'commands', '_partials', '_preamble.mds')
 
 /** Compiled commands that spawn Code, and the spawn sites each carries today. Floors: may only rise. */
 const OPERATION_FLOORS: Readonly<Record<string, number>> = {
   'implement.md': 10,
   'resolve.md': 3,
-  'dynamic-build.md': 7,
+  'dynamic-build.md': 8,
 }
 
 /** Named collector: the mode a spawn site names where its prompt opens, or why it names none. */
@@ -60,7 +59,7 @@ export function collectOperationDefect(site: CodeSpawnSite): string | null {
     if (mode === undefined) return `${where}: the first prompt line is "${first.slice(0, 60)}", not OPERATION: <mode>`
   } else {
     // A prose spawn sentence.
-    mode = /OPERATION: (\S+)/.exec(site.payload)?.[1]?.replace(/[`,.:;]+$/, '')
+    mode = /OPERATION: (\S+)/.exec(site.payload)?.[1]?.replace(/[`",.:;]+$/, '')
     if (mode === undefined) return `${where}: the spawn sentence names no OPERATION: <mode>`
   }
   if (!CODE_OPERATIONS.includes(mode)) return `${where}: OPERATION: ${mode} is not one of ${CODE_OPERATIONS.join(', ')}`
@@ -202,7 +201,7 @@ describe('known-bad probes: each shape of untagged spawn is reported (D-CODE-OPE
   it('(c) a prose spawn sentence with no OPERATION', () => {
     const defects = collectOperationDefects(seeded(
       'dynamic-build.md',
-      ' whose prompt opens with `OPERATION: implement` and carries `COMPLIANCE_FRAMEWORKS`, with FULL intent context:',
+      ' whose prompt opens with `OPERATION: implement` and carries `COMPLIANCE_FRAMEWORKS` and `DECISIONS_CONTEXT`, with FULL intent context:',
       ' with FULL intent context:',
     ))
     expect(defects).toHaveLength(1)
@@ -235,11 +234,11 @@ describe('known-bad probes: each shape of untagged spawn is reported (D-CODE-OPE
 
 describe('code.md states the eight-mode contract (D-CODE-OPERATION-MODES)', () => {
   it('the OPERATION line lists exactly the eight values, and ci-fix and edit have Inputs, Protocol and Return', () => {
-    expect(collectModeContractDefects(readFileSync(CODE_PATH, 'utf-8'))).toEqual([])
+    expect(collectModeContractDefects(resolveAgentSource('code').content)).toEqual([])
   })
 
   it('known-bad probe: a lost mode, a lost default and a lost Protocol are each reported', () => {
-    const real = readFileSync(CODE_PATH, 'utf-8')
+    const real = resolveAgentSource('code').content
     expect(collectModeContractDefects(real), 'the real contract is clean, so each seed fails for its own reason').toEqual([])
     const lostMode = real.replace(' | `ci-fix` | `edit` —', ' | `ci-fix` —')
     expect(lostMode, 'the seed must land').not.toBe(real)

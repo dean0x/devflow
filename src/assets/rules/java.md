@@ -10,3 +10,4 @@ paths: ["**/*.java"]
 - Optional over null — never return null from public methods
 - Streams for collection pipelines — no manual iteration for transforms
 - Pool heavy resources (connections, threads, buffers) — no allocation in hot loops
+- Quiet form: `gradle -q`, `mvn -q`; re-run only a failing test verbosely

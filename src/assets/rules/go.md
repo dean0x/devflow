@@ -10,3 +10,4 @@ paths: ["**/*.go"]
 - No bare goroutines — always handle lifecycle and cancellation
 - Accept interfaces, return structs
 - No `**T` (pointer-to-pointer) — single indirection only; prefer value receivers
+- Quiet form: `go test` without `-v`; re-run only a failing test verbosely

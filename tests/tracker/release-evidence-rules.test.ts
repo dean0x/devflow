@@ -273,11 +273,14 @@ describe('G1: the GitHub merged-PR listing', () => {
     expect(fallbacks[0]).toContain('THROTTLED ({n} not processed)')
   })
 
-  it('the agent declares the five-value status and the trace map, and reads the flagged-empty case', () => {
+  it('the agent declares the five-value status and the trace map, and the reference reads the flagged-empty case', () => {
     const section = gatherSection()
     expect(section).toContain(GATHER_STATUS_LINE)
     expect(section).toContain('### TRACE_MAP\n{the trace script\'s lines, verbatim}')
-    expect(section).toContain('unless the Mechanics flag merged PRs they could not resolve')
+    // Step 5 (the candidate gate, with its flagged-empty case) is provider-neutral step text that
+    // left the agent for the reference the operation loads (D-NEUTRAL-STEP-MOVE).
+    expect(section, 'step 5 is no longer in the always-loaded agent').not.toContain('unless the Mechanics flag merged PRs they could not resolve')
+    expect(text).toContain('unless the Mechanics flag merged PRs they could not resolve')
   })
 
   it('the fallback also resolves a range `(#N)` that no listed PR maps (the G1 residual)', () => {

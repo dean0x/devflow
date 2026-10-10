@@ -102,16 +102,20 @@ updated: {ISO date}
 
 # {Feature Area Name}
 
+## Rules
+- **KB-AP-1** [one-line anti-pattern or gotcha: what to avoid, and the consequence]
+- **KB-INV-1** [one-line invariant that must hold]
+
 ## Overview
 [1-2 paragraphs: what this knowledge covers and why it matters for this codebase]
 
 ## [Main Sections — vary by category, see Category Templates below]
 
 ## Anti-Patterns
-[What to avoid and why — with explanation of consequences]
+[The longer explanation of each anti-pattern, headed by its ID — never a restatement of the Rules bullet]
 
 ## Gotchas
-[Non-obvious behaviors, edge cases, things that break silently]
+[Non-obvious behaviors, edge cases, things that break silently — headed by the ID of the Rules bullet each explains]
 
 ## Key Files
 [Most important files with one-line descriptions]
@@ -119,6 +123,23 @@ updated: {ISO date}
 ## Related
 [Links to other feature knowledge entries and key source files — never an ADR/PF ID]
 ```
+
+### Rules Section
+
+`## Rules` comes first, after the title: the anti-patterns, gotchas and invariants of the feature area as one-line bullets, in about 3–5K characters. A bullet fits one line and never starts with `## `.
+
+- **IDs**: anti-pattern and gotcha bullets take `KB-AP-n`; invariant bullets take `KB-INV-n`. Numbers are unique within a KB. A bullet keeps its ID across rewrites; a removed bullet's ID is retired and never reused. A citation names the slug and the ID together, as `{slug} KB-AP-n`; a bare ID is never cited.
+- **Explanations**: `## Anti-Patterns` and `## Gotchas` stay below Rules as the longer explanations, each headed by the IDs it explains.
+- **No volatile numbers**: a volatile number is a count, size, line number, version or threshold that changes when the code changes. Where a value matters, name the test or constant that pins it. Bullet IDs are not volatile numbers.
+- **Legacy KBs**: a KB without `## Rules` is valid until curated. Readers take one to three entries from its Anti-Patterns or Gotchas, cited by section name, with the KB path and heading index.
+
+### Size Budget
+
+Per KB: target 30,000 characters, ceiling 40,000. An index line is at most 300 characters and a description at most 220, so slug, areas and description fit one line. **Curate, never truncate**: reword or consolidate, and nothing is cut or dropped to meet the budget. Split into focused sub-knowledge bases (each with its own index entry) only when curation cannot bring a KB under the ceiling.
+
+### Refreshing an Existing KB
+
+When `EXISTING_KB` is provided, change only the sections the new work touches, and add or update Rules bullets for what changed. Never renumber, and never rewrite untouched sections to meet the budget. A KB still above the ceiling after a refresh is written as it stands, and the final message says so.
 
 ### Category Templates
 
@@ -159,6 +180,7 @@ The `description` field is how this feature knowledge entry gets discovered. It 
 - Start with "Use when"
 - Name specific scenarios where this knowledge applies
 - Include keywords a developer would search for
+- Stay within 220 characters
 
 Good: `"Use when adding a new vendor integration, implementing API clients, or connecting to external services. Keywords: integration, vendor, API client, webhook."`
 Bad: `"Integration stuff"`
@@ -205,7 +227,7 @@ Never include bare code snippets without context.
 | No code examples at all | Insufficient actionable guidance |
 | Examples without inline comments | Missing required context |
 | "In the future, we might..." | Speculative — remove it |
-| 500+ lines in a single file | Should be split into focused files |
+| Over 40,000 characters, or volatile numbers in Rules | Curate it; name the pinning test or constant instead of a count |
 | No cross-references in Related | Isolated knowledge island |
 
 ---
@@ -228,7 +250,8 @@ Run through this before writing. If any check fails, go back and fix it.
 **Structure:**
 - [ ] Category is correct and main sections follow the matching template
 - [ ] Description field starts with "Use when" and includes keywords
-- [ ] File stays under 500 lines (split if necessary)
+- [ ] `## Rules` comes first: one-line bullets with `KB-AP-n` / `KB-INV-n` IDs, about 3–5K characters, no volatile numbers
+- [ ] File within the 40,000-character ceiling (curate, never truncate); description at most 220 characters
 
 **Connections:**
 - [ ] Cross-references to related feature knowledge entries in Related section; decisions and pitfalls stated in words, with no ADR/PF ID anywhere in the file
@@ -249,10 +272,10 @@ After writing KNOWLEDGE.md, update the index cache directly:
 - **{slug}** — {areas} — {Use-when description}
 ```
 
-Where:
+The whole line is at most 300 characters; reword a longer one, never cut it. Where:
 - `{slug}` matches the `feature:` frontmatter field
 - `{areas}` is a comma-separated summary of the `directories:` frontmatter field
-- `{Use-when description}` is the `description:` frontmatter field value (the full "Use when..." sentence)
+- `{Use-when description}` is the `description:` frontmatter field value (the full "Use when..." sentence, at most 220 characters)
 
 If `index.md` does not exist, create it with just this line. If the file already has an entry for this slug, replace that line in-place. This is the discoverable cache read by `knowledge_load()` — the KNOWLEDGE.md frontmatter is always authoritative.
 
@@ -275,9 +298,17 @@ updated: 2026-04-30
 
 # Third-Party Integrations
 
+## Rules
+
+- **KB-AP-1** Fetch logic never lives in a command file: it breaks the lib/command split and cannot be tested alone.
+- **KB-AP-2** URLs never live in lib modules: they go through `config.ts`.
+- **KB-AP-3** A lib module never calls `showError()`: lib modules throw, commands catch and display.
+- **KB-AP-4** `spawn` needs the binary on PATH: detect `ENOENT` and give an install URL.
+- **KB-INV-1** Every external constant lives in `src/lib/config.ts`.
+
 ## Overview
 
-This project integrates with external systems in three ways: spawning CLI processes, fetching files from remote registries, and writing to directories that AI editors watch. Each integration lives in its own module under `src/lib/` and is wired into a command in `src/commands/`. All external constants are centralized in `src/lib/config.ts`.
+This project integrates with external systems by spawning CLI processes, fetching files from remote registries, and writing to directories that AI editors watch. Each integration lives in its own module under `src/lib/` and is wired into a command in `src/commands/`. All external constants are centralized in `src/lib/config.ts`.
 
 The key cross-cutting pattern is the separation between lib modules (which integrate) and commands (which orchestrate). Violating this creates coupling that breaks the error handling model.
 
@@ -289,7 +320,7 @@ The key cross-cutting pattern is the separation between lib modules (which integ
 
 ## Standard Structure
 
-Every integration follows the same file organization. This example shows the pattern that all three existing integrations (Claude CLI, GitHub, AI editors) follow:
+Every integration follows the same file organization. This example shows the pattern that every existing integration (Claude CLI, GitHub, AI editors) follows:
 
 ```
 src/lib/
@@ -309,13 +340,13 @@ All constants use `SCREAMING_SNAKE_CASE` with a descriptive prefix. If a value c
 
 ## Anti-Patterns
 
-- **Putting fetch logic in a command file** — breaks the lib/command separation and makes the integration untestable in isolation.
-- **Hardcoding URLs in lib modules** — always use `config.ts`. Scattered strings become stale and hard to find.
-- **Calling `showError()` from a lib module** — lib modules throw; commands catch and display.
+- **KB-AP-1, putting fetch logic in a command file** — breaks the lib/command separation and makes the integration untestable in isolation.
+- **KB-AP-2, hardcoding URLs in lib modules** — always use `config.ts`. Scattered strings become stale and hard to find.
+- **KB-AP-3, calling `showError()` from a lib module** — lib modules throw; commands catch and display.
 
 ## Gotchas
 
-- `spawn` requires the binary on PATH. If integrating a tool that may not be globally installed, detect `ENOENT` and provide an install URL.
+- **KB-AP-4**: `spawn` requires the binary on PATH. If integrating a tool that may not be globally installed, detect `ENOENT` and provide an install URL.
 - Temp files use `Date.now()`. If two processes run simultaneously, add a random suffix to avoid collisions.
 
 ## Key Files

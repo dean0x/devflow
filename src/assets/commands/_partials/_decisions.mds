@@ -1,3 +1,28 @@
+A partial: the decisions-index steps the knowledge-workflow commands and the
+dynamic commands share.
+
+D-DECISIONS-LEARNING-GATE: a decisions load is gated on the settings line's
+`LEARNING`. Learning can be narrowed by the repository or the machine, and neither
+can turn it back on (D-FEATURES-NARROW-ONLY), so `decisions_gate()` is the one
+sentence every decisions host carries: with `LEARNING=off` the step is skipped
+before it locates a ledger or reads an index. An unresolvable settings line keeps
+`LEARNING=on`, as the fail-closed line does — decisions are advisory context, not a
+safety control, so a failed resolution loads them exactly as it did before the
+gate. The gate reads the line the host's settings block resolved above; this
+partial imports nothing from `_settings.mds`. In a multi-worktree run the line is the start
+root's: the root the ledger is located from.
+
+D-LEARNING-VARIANTS: the gate guards a repository that narrows learning off on a machine
+where it is on. On a machine with learning off the decisions text is absent altogether: the
+whole of `decisions_load()` is a learning-on arm, so every expansion of it exists only in the
+learning-on build. `decisions_gate()` and `decisions_locate()` are leaves, reached only from
+inside an arm (`decisions_load()`, `authoring_decisions()`, or a host's own on arm), and carry
+no arm of their own: an arm cannot nest.
+
+@define decisions_gate():
+When the settings line says `LEARNING=off`, set `DECISIONS_CONTEXT` to `(none)` and skip this step, locating no ledger and reading no index.
+@end
+
 @define decisions_locate():
 The decisions ledger belongs to the repository, not to one checkout: in a linked worktree it lives in the main worktree, and a session started in a subdirectory reads the copy at the repository root. Locate it with ONE git call, run from the start directory — `WORKTREE_PATH` if provided, otherwise cwd (`devflow:worktree-support`):
 
@@ -15,7 +40,10 @@ This is the rule the learning hooks apply (D-LEDGER-MAIN-WORKTREE, D-PROMPT-ROOT
 @end
 
 @define decisions_load():
+<!-- learning:on -->
 ### Load DECISIONS_CONTEXT
+
+{{decisions_gate()}}
 
 {{decisions_locate()}}
 
@@ -31,7 +59,10 @@ The index is one direct file read, written at render time by `render-decisions.c
 **Step 2 — Apply decisions using `devflow:apply-decisions`:**
 
 When `DECISIONS_CONTEXT` is not `(none)`, follow `devflow:apply-decisions` to scan the index, identify plausibly-relevant entries, Read full entry bodies on demand, and cite verbatim IDs in downstream agent prompts and reasoning.
+
+<!-- learning:end -->
 @end
 
+@export decisions_gate
 @export decisions_locate
 @export decisions_load

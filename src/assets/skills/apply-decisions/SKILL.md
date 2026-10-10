@@ -47,4 +47,4 @@ Cite only IDs in `DECISIONS_CONTEXT`; never guess or rebuild one. When nothing c
 
 ## Skip Guard
 
-When `DECISIONS_CONTEXT` is empty, `(none)` or not provided, skip this skill — unless your instructions tell you to read the decisions index yourself; that index is then your `DECISIONS_CONTEXT`. Never load decisions files otherwise.
+When `DECISIONS_CONTEXT` is empty, `(none)` or not provided, skip this skill. Never load decisions files otherwise.

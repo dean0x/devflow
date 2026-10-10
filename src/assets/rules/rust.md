@@ -10,3 +10,4 @@ paths: ["**/*.rs"]
 - Small, focused traits — one capability per trait
 - `#[must_use]` on functions with important return values
 - debug_assert! for invariants in hot paths — assert! at module boundaries
+- Quiet form: `cargo build -q`, `cargo test -q`; re-run only a failing test verbosely

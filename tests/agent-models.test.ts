@@ -20,6 +20,7 @@ import * as path from 'path';
 import * as os from 'os';
 import {
   LEGACY_AGENT_KEYS,
+  carryAgentOverrides,
   canonicaliseAgentKeys,
   parseAgentMappingEnvelope,
   readAgentMapping,
@@ -1566,5 +1567,87 @@ describe('reapplyAgentMapping — shipped effort survives', () => {
 
     expect(await installedCode()).toBe(SHIPPED_CODE);
     expect(result.unchanged).toContain('code');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// carryAgentOverrides — the converge's frontmatter carry
+// ---------------------------------------------------------------------------
+
+describe('carryAgentOverrides', () => {
+  const shipped = '---\nname: Code\nmodel: sonnet\neffort: high\n---\n\nbody ON\n';
+  const variant = '---\nname: Code\nmodel: sonnet\neffort: high\n---\n\nbody OFF\n';
+
+  it('carries the installed model and effort into the source text and leaves the body alone', () => {
+    const installed = '---\nname: Code\nmodel: opus\neffort: low\n---\n\nbody ON\n';
+
+    expect(carryAgentOverrides(variant, installed)).toBe('---\nname: Code\nmodel: opus\neffort: low\n---\n\nbody OFF\n');
+  });
+
+  it('returns the source unchanged when the installed copy already holds the shipped values', () => {
+    expect(carryAgentOverrides(variant, shipped)).toBe(variant);
+  });
+
+  it('an installed copy with no effort line (mapping "inherit") drops the shipped effort, as the reapply does', () => {
+    const installed = '---\nname: Code\nmodel: sonnet\n---\n\nbody ON\n';
+
+    expect(carryAgentOverrides(variant, installed)).toBe('---\nname: Code\nmodel: sonnet\n---\n\nbody OFF\n');
+  });
+
+  it('agrees with reapplyAgentMapping: carrying an installed copy that was reapplied yields what the reapply would write', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-carry-'));
+    try {
+      const installDir = path.join(dir, 'installed');
+      const sourceDir = path.join(dir, 'source');
+      const devflowDir = path.join(dir, 'devflow');
+      await fs.mkdir(installDir, { recursive: true });
+      await fs.mkdir(sourceDir, { recursive: true });
+      await fs.mkdir(devflowDir, { recursive: true });
+      await fs.writeFile(path.join(sourceDir, 'code.md'), variant, 'utf-8');
+      await fs.writeFile(path.join(installDir, 'code.md'), shipped, 'utf-8');
+      await saveAgentMapping(devflowDir, { version: 1, agents: { code: { model: 'opus', effort: 'low' } } });
+
+      await reapplyAgentMapping({ installDir, devflowDir, proxyEnabled: false, agentSourceDirs: [sourceDir] });
+      const reapplied = await fs.readFile(path.join(installDir, 'code.md'), 'utf-8');
+
+      expect(carryAgentOverrides(variant, reapplied)).toBe(
+        '---\nname: Code\nmodel: opus\neffort: low\n---\n\nbody OFF\n',
+      );
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('known-bad probe: an installed model that fails the model-name charset is never copied into the source', () => {
+    const installed = '---\nname: Code\nmodel: "opus\\ntools: bash"\neffort: high\n---\n';
+
+    expect(carryAgentOverrides(variant, installed)).toBe(variant);
+  });
+
+  it('an installed effort that is not an effort level is never copied into the source', () => {
+    const installed = '---\nname: Code\nmodel: opus\neffort: turbo\n---\n';
+
+    expect(carryAgentOverrides(variant, installed)).toBe(variant);
+  });
+
+  it('returns the source unchanged when either side has no frontmatter, or the installed copy has no model', () => {
+    expect(carryAgentOverrides(variant, 'code ON\n')).toBe(variant);
+    expect(carryAgentOverrides('code OFF\n', shipped)).toBe('code OFF\n');
+    expect(carryAgentOverrides(variant, '---\nname: Code\n---\n\nbody\n')).toBe(variant);
+  });
+
+  it('reads only the leading frontmatter block of the installed copy', () => {
+    const installed = '---\nname: Code\nmodel: sonnet\neffort: high\n---\n\nmodel: opus\neffort: low\n';
+
+    expect(carryAgentOverrides(variant, installed)).toBe(variant);
+  });
+
+  it('keeps the file\'s CRLF line endings', () => {
+    const crlfVariant = variant.replace(/\n/g, '\r\n');
+    const installed = '---\r\nname: Code\r\nmodel: opus\r\neffort: low\r\n---\r\n\r\nbody ON\r\n';
+
+    expect(carryAgentOverrides(crlfVariant, installed)).toBe(
+      '---\r\nname: Code\r\nmodel: opus\r\neffort: low\r\n---\r\n\r\nbody OFF\r\n',
+    );
   });
 });

@@ -27,11 +27,10 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import * as path from 'path'
 
-import { CODE_OPERATIONS, parseFrontmatterSkills } from '../helpers.js'
+import { CODE_OPERATIONS, parseFrontmatterSkills, resolveAgentSource, resolveLearningOffSource } from '../helpers.js'
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..')
 const SKILLS_DIR = path.join(ROOT, 'src', 'assets', 'skills')
-const CODE_PATH = path.join(ROOT, 'src', 'assets', 'agents', 'code.md')
 
 /** The skills Code preloads, in the order its frontmatter lists them. */
 export const CODE_PRELOAD: readonly string[] = [
@@ -111,7 +110,7 @@ export function collectStepZeroDefects(codeText: string): string[] {
   return out
 }
 
-const code = (): string => readFileSync(CODE_PATH, 'utf-8')
+const code = (): string => resolveAgentSource('code').content
 const bodyOf = (text: string): string => text.slice(text.indexOf('\n---\n', 4) + 5)
 
 describe('Code preloads six skills and loads four on demand (D-MODE-SKILLS-ON-DEMAND)', () => {
@@ -188,5 +187,58 @@ describe('the six preloaded SKILL.md files stay within their caps (D-CODE-PRELOA
     expect(collectPreloadSizeDefects(bloated, Infinity)).toEqual(['worktree-support is 1901 bytes, cap 1900'])
     const total = CODE_PRELOAD.reduce((sum, name) => sum + real[name], 0)
     expect(collectPreloadSizeDefects(real, total - 1)).toEqual([`the preload is ${total} bytes, ceiling ${total - 1}`])
+  })
+})
+
+// ── The learning-off Code (D-LEARNING-VARIANTS, AC-150) ─────────────────────────────────────────────
+//
+// A machine with learning off installs dist/learning-off/agents/code.md, which loses the
+// `devflow:apply-decisions` preload line with the rest of the decisions text. The learning-on file above
+// stays the file the six-skill total is measured against (25,646 bytes); the learning-off Code preloads the
+// same list minus that skill, so its total is the on total less the skill's bytes.
+
+/** The skills the learning-off Code preloads: the six minus `apply-decisions`. */
+const OFF_PRELOAD: readonly string[] = CODE_PRELOAD.filter(name => name !== 'apply-decisions')
+
+/** Named collector: how a learning-off preload list differs from the five. */
+export function collectOffPreloadDefects(skills: readonly string[]): string[] {
+  const out: string[] = []
+  if (skills.includes('apply-decisions')) out.push('apply-decisions is preloaded under learning off')
+  for (const name of OFF_PRELOAD) if (!skills.includes(name)) out.push(`missing ${name}`)
+  for (const name of skills) if (name !== 'apply-decisions' && !OFF_PRELOAD.includes(name)) out.push(`unexpected ${name}`)
+  return out
+}
+
+const codeOff = (): string => resolveLearningOffSource('agents', 'code') as string
+
+describe('the learning-off Code preloads the six minus apply-decisions (AC-150)', () => {
+  it('the learning-off file exists, and its skills: list is the five', () => {
+    expect(codeOff(), 'dist/learning-off/agents/code.md is built').not.toBeNull()
+    const skills = parseFrontmatterSkills(codeOff())
+    expect(skills.length, 'the skills block was not read').toBeGreaterThan(0)
+    expect(collectOffPreloadDefects(skills)).toEqual([])
+  })
+
+  it('the off total is the on total minus apply-decisions, and the on total stays within the ceiling', () => {
+    const total = (skills: readonly string[]): number => skills.reduce((sum, name) => sum + skillBytes(name), 0)
+    const on = total(parseFrontmatterSkills(code()))
+    const off = total(parseFrontmatterSkills(codeOff()))
+    expect(on, 'the learning-on six-file total').toBeLessThanOrEqual(CODE_PRELOAD_MAX_BYTES)
+    expect(off).toBe(on - skillBytes('apply-decisions'))
+    expect(off).toBeLessThan(on)
+  })
+
+  it('the learning-off body keeps Step 0 and the mode-skill names, and drops every decisions instruction', () => {
+    expect(collectStepZeroDefects(codeOff())).toEqual([])
+    for (const name of MODE_SKILLS) expect(bodyOf(codeOff()), name).toContain(`devflow:${name}`)
+    expect(codeOff()).not.toContain('DECISIONS_CONTEXT')
+    expect(codeOff()).not.toContain('apply-decisions')
+  })
+
+  it('known-bad probe: a kept preload, a missing skill and an extra skill are each reported', () => {
+    expect(collectOffPreloadDefects(OFF_PRELOAD)).toEqual([])
+    expect(collectOffPreloadDefects([...OFF_PRELOAD, 'apply-decisions'])).toEqual(['apply-decisions is preloaded under learning off'])
+    expect(collectOffPreloadDefects(OFF_PRELOAD.filter(n => n !== 'git'))).toEqual(['missing git'])
+    expect(collectOffPreloadDefects([...OFF_PRELOAD, 'security'])).toEqual(['unexpected security'])
   })
 })

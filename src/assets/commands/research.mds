@@ -5,6 +5,7 @@ output-dir: dist/commands
 @import { knowledge_load } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
 @import { docs_root } from "./_partials/_docs_root.mds"
+@import "./_partials/_settings.mds" as settings
 # Research Command
 
 Research a topic by spawning parallel Research agents across multiple research types (codebase, external, market, competitor, technology). Findings are trust-annotated and synthesized into structured output.
@@ -33,16 +34,29 @@ $ARGUMENTS
 
 ## Phases
 
+<!-- learning:on -->
 ### Phase 1: Load Decisions (Orchestrator-Local)
+<!-- learning:off -->
+### Phase 1: Load Context (Orchestrator-Local)
+<!-- learning:end -->
 
-**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
+<!-- learning:on -->
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES
+<!-- learning:off -->
+**Produces:** FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES
+<!-- learning:end -->
 
 {{docs_root()}}
 
-{{decisions_load()}}
+<!-- learning:on -->
+{{settings.settings_resolve()}}
 
+<!-- learning:end -->
+{{decisions_load()}}
+<!-- learning:on -->
 Use `DECISIONS_CONTEXT` locally when framing research — prior decisions and pitfalls suggest areas to investigate. Follow `devflow:apply-decisions` to Read full entry bodies on demand. Pass `DECISIONS_CONTEXT` to each Research agent in Phase 4 so their findings can account for relevant decisions.
 
+<!-- learning:end -->
 {{knowledge_load()}}
 
 Use `FEATURE_KNOWLEDGE` **locally** for research framing. Pass to each Research agent in Phase 4.
@@ -66,7 +80,11 @@ Generate topic slug from the research question (kebab-case, lowercase, no articl
 
 Only if `codebase` type is in RESEARCH_PLAN.
 
+<!-- learning:on -->
+Spawn `Agent(subagent_type="Skim")` with `LEARNING` from the settings line, targeting codebase areas relevant to the research question.
+<!-- learning:off -->
 Spawn `Agent(subagent_type="Skim")` targeting codebase areas relevant to the research question.
+<!-- learning:end -->
 
 Skip and set ORIENT_OUTPUT = "(none)" if `codebase` type is not in RESEARCH_PLAN.
 
@@ -79,8 +97,10 @@ Spawn 2-5 `Agent(subagent_type="Research")` agents **in a single message** (para
 
 Each Research agent receives:
 - `RESEARCH_TYPE`, `RESEARCH_QUESTION`, `OUTPUT_PATH` from RESEARCH_PLAN
+<!-- learning:on -->
 - `DECISIONS_CONTEXT`: From Phase 1
-- `FEATURE_KNOWLEDGE`: From Phase 1
+<!-- learning:end -->
+- `FEATURE_KNOWLEDGE`: `{feature_knowledge}` from Phase 1
 - `ORIENT_OUTPUT`: Only for `codebase` type
 - `WORKTREE_PATH`: If in a worktree context
 
@@ -111,7 +131,7 @@ If external research was skipped due to tool unavailability: inform user.
 
 ### Phase 7: Feature Knowledge Creation (Conditional)
 
-**Requires:** RESEARCH_SUMMARY, DECISIONS_CONTEXT
+**Requires:** RESEARCH_SUMMARY
 **Produces:** FEATURE_KNOWLEDGE_STATUS (created | skipped)
 
 1. If `codebase` type was not in RESEARCH_PLAN → skip
@@ -137,7 +157,11 @@ Research findings saved to `{worktree}/.devflow/docs/research/{topic-slug}/{YYYY
 ```
 /research (orchestrator)
 │
+<!-- learning:on -->
 ├─ Phase 1: Load Decisions (Orchestrator-Local)
+<!-- learning:off -->
+├─ Phase 1: Load Context (Orchestrator-Local)
+<!-- learning:end -->
 │
 ├─ Phase 2: Requirements
 │  └─ Infer 2-5 research types from question

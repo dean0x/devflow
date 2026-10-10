@@ -47,8 +47,6 @@ d .claude/commands/devflow/
 - .claude/commands/devflow/self-review.md
 - .claude/settings.json
 d .claude/skills/
-d .claude/skills/devflow:apply-decisions/
-- .claude/skills/devflow:apply-decisions/SKILL.md
 d .claude/skills/devflow:apply-feature-knowledge/
 - .claude/skills/devflow:apply-feature-knowledge/SKILL.md
 d .claude/skills/devflow:architecture/
@@ -146,6 +144,7 @@ d .claude/skills/devflow:git/references/pr/
 - .claude/skills/devflow:git/references/publication-gate.md
 - .claude/skills/devflow:git/references/sources.md
 d .claude/skills/devflow:git/references/tracker/
+- .claude/skills/devflow:git/references/tracker/_contract.md
 - .claude/skills/devflow:git/references/tracker/_mcp.md
 d .claude/skills/devflow:git/references/tracker/github/
 - .claude/skills/devflow:git/references/tracker/github/associate-release.md
@@ -275,11 +274,13 @@ d .claude/skills/devflow:worktree-support/references/
 - .claude/skills/devflow:worktree-support/references/discovery.md
 - .claude/skills/devflow:worktree-support/references/roots.md
 d .devflow/
+- .devflow/.claude-md-audit
 - .devflow/hud.json
 - .devflow/manifest.json
 - .devflow/migrations.json
 d .devflow/scripts/
 x .devflow/scripts/ci-wait.cjs
+x .devflow/scripts/claude-md-audit.cjs
 d .devflow/scripts/core/
 - .devflow/scripts/core/ansi.js
 - .devflow/scripts/core/cache.js
@@ -510,6 +511,7 @@ d sub/
       "default-model": null,
       "goal-checkin-minutes": null,
       "bash-max-timeout-ms": null,
+      "auto-compact-window": null,
       "spellcheck": null,
       "view-mode": "default"
     },

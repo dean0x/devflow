@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { loadFile, extractSection } from '../helpers'
+import { loadFile, extractSection, resolveAgentSource } from '../helpers'
 
 // -------------------------------------------------------------------------
 // triage.md — DUPLICATE verdict contract (agent side of the command-agent seam)
@@ -10,11 +10,11 @@ import { loadFile, extractSection } from '../helpers'
 // would then abort on every run with a completeness failure and no test
 // would say why. This file pins the producer side of the same seam.
 //
-// Read target: src/assets/agents/triage.md (source of truth; agents install
-// directly with no build step, so there is no compiled artifact to read).
+// Read target: the Triage agent, through resolveAgentSource (the compiled
+// dist/agents/triage.md, the artifact the installer ships).
 // -------------------------------------------------------------------------
 
-const TRIAGE = loadFile('src/assets/agents/triage.md')
+const TRIAGE = resolveAgentSource('triage').content
 
 describe('triage.md — duplicate grouping pre-pass', () => {
   it('is non-vacuous', () => {

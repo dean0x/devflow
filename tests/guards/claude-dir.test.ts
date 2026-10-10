@@ -5,10 +5,7 @@
  * `~/.claude` (D-CLAUDE-CONFIG-DIR, src/targets/claude-code/claude-paths.ts), and
  * the installer writes skills there by the same rule. A prompt that probes or
  * reads `~/.claude/…` directly disagrees with both the moment the variable is
- * set: `/code-review`'s language-focus presence gate looked for
- * `~/.claude/skills/devflow:{focus}/SKILL.md`, found nothing on a machine that
- * installs into `CLAUDE_CONFIG_DIR`, and silently dropped every language focus;
- * `/dynamic-profile` mined an empty or stale `~/.claude/projects`.
+ * set: `/dynamic-profile` mined an empty or stale `~/.claude/projects`.
  *
  * THE SANCTIONED FORM is one shell line that resolves the directory the way the
  * installer does, and a prompt names paths under the result (`$d/…`,
@@ -40,10 +37,13 @@
 
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
+import { mkdtemp, readFile, rm } from 'fs/promises'
+import * as os from 'os'
 import * as path from 'path'
 
 import { ROOT, requireDistFile, requireDistFiles, resolveAllAgents, walkFiles } from '../helpers.js'
-import { getAllAgentNames } from '../../src/core/plugins.js'
+import { DEVFLOW_PLUGINS, buildScopedSkillsMap, getAllAgentNames } from '../../src/core/plugins.js'
+import { installViaFileCopy } from '../../src/targets/claude-code/installer.js'
 
 /** The resolution line every compiled probe of the Claude directory must use. */
 const SANCTIONED_RESOLUTION = 'd="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac;'
@@ -121,15 +121,45 @@ describe('no prompt reaches ~/.claude outside the CLAUDE_CONFIG_DIR rule (D-CLAU
     expect(found.map(u => `${u.file}:${u.line}: ${u.text}`)).toEqual([])
   })
 
-  it('the consumers carry the sanctioned resolution: /code-review\'s presence gate and /dynamic-profile', () => {
-    // The positive half: a clean scan must mean the probes moved onto the rule,
-    // not that they were deleted.
-    const review = requireDistFile('code-review.md')
-    expect(review).toContain(`${SANCTIONED_RESOLUTION} test -f "$d/skills/devflow:{focus}/SKILL.md"; echo "exit=$?"`)
+  it('the consumer carries the sanctioned resolution: /dynamic-profile', () => {
+    // The positive half: a clean scan must mean the probe moved onto the rule,
+    // not that it was deleted.
     const profile = requireDistFile('dynamic-profile.md')
     expect(profile).toContain(`${SANCTIONED_RESOLUTION} printf '%s\\n' "$d"`)
     for (const sub of ['{claude_dir}/projects/', '{claude_dir}/history.jsonl', '{claude_dir}/rules/']) {
       expect(profile, `dynamic-profile reads ${sub} under the resolved directory`).toContain(sub)
+    }
+  })
+
+  it('/code-review no longer probes the Claude directory: its language gate is the install-time stamp (D-LANGUAGE-FOCUS-STAMP)', async () => {
+    // The positive half for the command whose probe moved: the compiled command carries the
+    // stamp rule and the stamp line, and nothing in it resolves or names the Claude directory;
+    // the installed copy carries the list. tests/installer/language-stamp*.test.ts holds the
+    // rest of the installer side.
+    const review = requireDistFile('code-review.md')
+    expect(review).toContain('A language focus is spawned only when its file-type condition above fires AND its name appears in that stamped line.')
+    expect(review.split('\n').filter(line => line.startsWith('Installed language focuses: '))).toHaveLength(1)
+    expect(review).not.toContain(SANCTIONED_RESOLUTION)
+    expect(review).not.toContain('CLAUDE_CONFIG_DIR')
+    expect(review).not.toContain('{claude_dir}')
+
+    // The installed copy, into injected temp directories (never the real home): a selection with
+    // devflow-typescript installs a code-review whose stamp lists typescript.
+    const claudeDir = await mkdtemp(path.join(os.tmpdir(), 'devflow-claude-dir-claude-'))
+    const devflowDir = await mkdtemp(path.join(os.tmpdir(), 'devflow-claude-dir-home-'))
+    try {
+      const plugins = ['devflow-core-skills', 'devflow-code-review', 'devflow-typescript']
+        .map(name => DEVFLOW_PLUGINS.find(p => p.name === name)!)
+      await installViaFileCopy({
+        plugins, claudeDir, devflowDir, learning: true,
+        skillsMap: buildScopedSkillsMap(plugins), agentsMap: new Map(), isPartialInstall: false,
+        spinner: { start() {}, stop() {}, message() {} },
+      })
+      const installed = await readFile(path.join(claudeDir, 'commands', 'devflow', 'code-review.md'), 'utf-8')
+      expect(installed.split('\n').filter(line => line.startsWith('Installed language focuses: '))).toEqual(['Installed language focuses: typescript'])
+    } finally {
+      await rm(claudeDir, { recursive: true, force: true })
+      await rm(devflowDir, { recursive: true, force: true })
     }
   })
 

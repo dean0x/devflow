@@ -3,9 +3,17 @@ description: Decision-preference profile distiller — mine past session transcr
 argument-hint: "[--dry-run]"
 output-dir: dist/commands
 ---
-@import { authoring_preamble } from "./_partials/_preamble.mds"
+@import { authoring_preamble, authoring_decisions } from "./_partials/_preamble.mds"
+@import "./_partials/_settings.mds" as settings
 {{authoring_preamble()}}
 
+<!-- learning:on -->
+### Settings line
+
+{{settings.settings_resolve()}}
+
+<!-- learning:end -->
+{{authoring_decisions()}}
 ---
 
 ## dynamic-profile — distill a decision-preference profile from past sessions

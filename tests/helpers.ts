@@ -8,6 +8,7 @@ import { getAllAgentNames } from '../src/core/plugins.js'
 import { agentSourceDirs, compiledSkillRefsDir } from '../src/core/assets.js'
 import { MAX_REFERENCE_SWEEP_DEPTH } from '../src/core/reference-sweep.js'
 import { PR_HOST_DESTINATION_ROOT } from '../src/core/mds-variants.js'
+import { learningOffRelPath, type LearningVariantKind } from '../src/core/learning-variants.js'
 import { assertTempHome } from './setup/home-isolation.js'
 
 export const ROOT = path.resolve(import.meta.dirname, '..')
@@ -340,6 +341,21 @@ export function resolveAgentSource(name: string, root: string = ROOT): AgentSour
 }
 
 /**
+ * The learning-off variant of a compiled prompt (D-LEARNING-VARIANTS): the file the build writes under
+ * `dist/learning-off/<kind>/<name>.md` for a host that has an arm, or null when the host has none. The
+ * learning-on variant is what `resolveAgentSource` and `requireDistFile` read.
+ *
+ * @param root - Repository root to resolve paths against (default: ROOT).
+ */
+export function resolveLearningOffSource(kind: LearningVariantKind, name: string, root: string = ROOT): string | null {
+  try {
+    return readFileSync(path.join(root, learningOffRelPath(kind, `${name}.md`)), 'utf-8')
+  } catch {
+    return null
+  }
+}
+
+/**
  * Resolve all agents declared in DEVFLOW_PLUGINS.
  * Returns a Map keyed by agent name. Every consumer must assert:
  *   expect([...resolveAllAgents().keys()]).toEqual(expect.arrayContaining(getAllAgentNames()))
@@ -372,30 +388,37 @@ export interface CodeSpawnSite {
 }
 
 /**
- * Named collector: every Code spawn site in a compiled command — the ONE collector, shared by the
- * compliance-lens test (tests/compliance-prompts.test.ts) and the OPERATION guard
- * (tests/guards/code-operation.test.ts), so the two cannot disagree about what a spawn is. Four
- * shapes, as the command layer writes them: a fenced spawn (`Agent(subagent_type="Code"):` then a
- * quoted payload up to its closing quote, indented or not; one fence may hold two spawns), a
- * one-line prose spawn (Spawn `Agent(subagent_type="Code")` …), a prose sentence that begins
- * "Spawn a Code agent" (the merge-conflict resolver in the wave partial, which reaches no fence),
- * and a workflow template literal (agent(`…`, { agentType: "Code" })). The preamble's
- * `agent("your prompt here", …)` usage example is not a template literal, so it is not a site.
+ * Named collector: every spawn site of one agent type in a compiled command — the ONE collector,
+ * shared by the compliance-lens test (tests/compliance-prompts.test.ts), the OPERATION guard
+ * (tests/guards/code-operation.test.ts) and the decisions seam guard (tests/decisions/decisions-seam.test.ts),
+ * so the three cannot disagree about what a spawn is. `agentType` defaults to Code, which is what the first
+ * two read; the seam guard asks for every declared type (D-DECISIONS-DECLARED-ONLY). Five shapes, as the
+ * command layer writes them: a fenced spawn (`Agent(subagent_type="<T>"):` then a quoted payload up to its
+ * closing quote, indented or not; one fence may hold two spawns), a one-line prose spawn (Spawn
+ * `Agent(subagent_type="<T>")` …), a prose sentence that begins "Spawn a <T> agent" (the merge-conflict
+ * resolver in the wave partial, which reaches no fence), a workflow template literal
+ * (agent(`…`, { agentType: "<T>" }), other options allowed beside it) and the engine partial's pseudo-form
+ * (`<T>(agentType:"<T>", …)`). The preamble's `agent("your prompt here", …)` usage example is not a
+ * template literal, so it is not a site.
  */
-export function collectCodeSpawnSites(file: string, text: string): CodeSpawnSite[] {
+export function collectCodeSpawnSites(file: string, text: string, agentType: string = 'Code'): CodeSpawnSite[] {
+  // The type is spliced into the patterns below, so it must be a bare type name.
+  if (!/^[A-Z][A-Za-z]{0,30}$/.test(agentType)) throw new Error(`collectCodeSpawnSites: "${agentType}" is not an agent type name`)
   const MAX_SITES = 64
+  const T = agentType
   const SHAPES = [
-    /Agent\(subagent_type="Code"\):[^\n]*\n[ \t]*"[\s\S]*?"[ \t]*\n[ \t]*(?:\n|```)/g,
-    /^.*Spawn `Agent\(subagent_type="Code"\)`.*$/gm,
-    /^[ \t]*(?:\d+\.[ \t]+)?Spawn a Code agent.*$/gm,
-    /agent\(`(?:(?!agent\(`)[\s\S])*?`, \{ agentType: "Code" \}/g,
+    new RegExp(`Agent\\(subagent_type="${T}"(?:, [^)]*)?\\):[^\\n]*\\n[ \\t]*"[\\s\\S]*?"[ \\t]*\\n[ \\t]*(?:\\n|\`\`\`)`, 'g'),
+    new RegExp(`^.*[Ss]pawn [^\\n\`]{0,24}?\`Agent\\(subagent_type="${T}"(?:, [^)]*)?\\)\`.*$`, 'gm'),
+    new RegExp(`^[ \\t]*(?:\\d+\\.[ \\t]+)?Spawn (?:an? |\\d+ )${T} agents?.*$`, 'gm'),
+    new RegExp(`agent\\(\`(?:(?!agent\\(\`)[\\s\\S])*?\`,\\s*\\{[^}]*\\bagentType: "${T}"`, 'g'),
+    new RegExp(`^.*\\b${T}\\(agentType:"${T}",.*$`, 'gm'),
   ]
   const sites = SHAPES.flatMap(re => [...text.matchAll(re)].map(m => ({
     file,
     line: text.slice(0, m.index).split('\n').length,
     payload: m[0],
   })))
-  if (sites.length > MAX_SITES) throw new Error(`${file}: more than ${MAX_SITES} Code spawn sites — bound exceeded`)
+  if (sites.length > MAX_SITES) throw new Error(`${file}: more than ${MAX_SITES} ${T} spawn sites — bound exceeded`)
   return sites
 }
 
@@ -1276,6 +1299,16 @@ export function loadGolden(name: string): string {
 // the D9 gate application, stays in the agent because D9 has one authority — so
 // that sample is reference / git.md / reference in step order.
 //
+// #425 RETARGET — NO RE-CAPTURE. The Git agent split moved the provider-neutral step text of the
+// tracker operations into the three providers' references (D-NEUTRAL-STEP-MOVE). Two samples
+// read moved text: `gather-release-evidence` (steps 1, 2, 3 and 5, now in the GitHub reference
+// between the provider's own steps) and `post-wave-report` (whose reference gained step 2 inside a
+// sampled range). Both are split per D-STRADDLE-SPLIT, each moved line read by its own anchor and
+// rejoined in its original order, so `extractStatusLines()` still equals the frozen fixture byte
+// for byte and the `--unfreeze --out-dir` derivation test matches it. No line changed, so no
+// authorisation was spent. The remaining samples read Output templates, D4 clauses and pointers,
+// all of which stayed in the agent.
+//
 // `ensure-pr-ready` and `validate-branch` are NOT on the list: both are sampled
 // from Output templates in the agent. Declaring them would trip the unread-entry
 // arm below, which is exactly what that arm is for.
@@ -1301,6 +1334,7 @@ export const STATUS_LINE_REFERENCE_FILES = [
   'pr/resolve-review-threads.md',
   'tracker/github/backlink-shipped-issues.md',
   'tracker/github/ensure-traceable-issue.md',
+  'tracker/github/gather-release-evidence.md',
   'tracker/github/manage-debt.md',
   'tracker/github/post-wave-report.md',
 ] as const
@@ -1494,8 +1528,24 @@ export function extractStatusLines(gitContent?: string): string {
     between(ref('pr/check-ci-status.md'), '1. If `PR_NUMBER` not provided', '6. List failing/pending checks with names') + '\n',
     // create-release process steps (baseline lines 479-485)
     between(gitOp('create-release'), '1b. Conventions: if `.devflow/conventions.md` exists', '…and {n} more commits` line (D4 degrade if enrichment fails)'),
-    // gather-release-evidence input + process (baseline lines 507-518)
-    between(gitOp('gather-release-evidence'), '**Input:** `WORKTREE_PATH` (optional)', '**Output:**'),
+    // gather-release-evidence input + process (baseline lines 507-518) — STRADDLES, split per
+    // D-STRADDLE-SPLIT (#425). Steps 1, 2, 3 and 5 are provider-neutral step text that moved out of
+    // the agent into each provider's reference (D-NEUTRAL-STEP-MOVE), at their numeric positions
+    // between the provider's own steps, so no contiguous slice of one file holds the original
+    // bytes. The agent keeps the Input line, the D4 clause and the Mechanics pointer; the reference
+    // holds the four steps, and the `**Output:**` label stayed. Each moved step is one line, read
+    // by its own anchor and rejoined in step order, so the sample is byte-identical to the
+    // pre-split text: pointer, blank, the four steps with no blank between them, blank, label.
+    between(gitOp('gather-release-evidence'), '**Input:** `WORKTREE_PATH` (optional)', "**Mechanics:** load this operation's provider reference."),
+    '',
+    [
+      singleLine(ref('tracker/github/gather-release-evidence.md'), '1. Find last tag: `git describe'),
+      singleLine(ref('tracker/github/gather-release-evidence.md'), '2. Collect commit list: `git log'),
+      singleLine(ref('tracker/github/gather-release-evidence.md'), '3. Extract CANDIDATE issue references'),
+      singleLine(ref('tracker/github/gather-release-evidence.md'), "5. Gate each candidate against that provider's grammar"),
+    ].join('\n'),
+    '',
+    singleLine(gitOp('gather-release-evidence'), '**Output:**'),
     // learn-conventions — STRADDLES, split per D-STRADDLE-SPLIT. The bounded scan,
     // the file template and the post-composition verification moved to
     // references/learn-conventions.md (P2-S5 cut 1, loaded only when
@@ -1526,8 +1576,16 @@ export function extractStatusLines(gitContent?: string): string {
     between(ref('tracker/github/backlink-shipped-issues.md'), '1. Fetch existing comments authored by the viewer:', 'Apply the Comment-sink scrub (D11) and post via `gh issue comment {number} --body-file "$DEVFLOW_BODY"`.'),
     // ensure-traceable-issue plan-artifact + create steps — MOVED whole (P2-S6)
     between(ref('tracker/github/ensure-traceable-issue.md'), '     ```\n   - If `PLAN_ARTIFACT_PATH` provided:', '- Title: derived from `TASK_DESCRIPTION` (same slug logic as setup-task)'),
-    // post-wave-report dedup check + compose steps — MOVED whole (P2-S6)
-    between(ref('tracker/github/post-wave-report.md'), '   - If found: skip — report `Skipped: wave report for {WAVE_ID} already posted`', '3. Compose the comment body:\n   ```markdown'),
+    // post-wave-report dedup check + compose steps — MOVED whole (P2-S6), then split by #425
+    // (D-STRADDLE-SPLIT). The moved step 2 ("Resolve and read WAVE_REPORT_PATH", provider-neutral
+    // step text, D-NEUTRAL-STEP-MOVE) now sits in the reference BETWEEN the dedup check and step 3,
+    // where it was never part of this sample (it lived in the agent). So the sample is read in two
+    // pieces, the dedup line and the compose opener, and rejoined with the single newline the
+    // pre-split reference had between them.
+    [
+      singleLine(ref('tracker/github/post-wave-report.md'), '   - If found: skip — report `Skipped: wave report for {WAVE_ID} already posted`'),
+      between(ref('tracker/github/post-wave-report.md'), '3. Compose the comment body:', '   ```markdown'),
+    ].join('\n'),
     // Guard-5 dedup marker lines (baseline lines 366, 742, 921)
     // Use 5-space / 3-space prefix to target the template lines, not the search-step lines
     // that also reference these markers within the same operation section.

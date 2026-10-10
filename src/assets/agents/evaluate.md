@@ -28,9 +28,7 @@ You receive from orchestrator:
 
 **Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
 
-- **FEATURE_KNOWLEDGE** (optional): Pre-computed feature area context, used
-  only to understand what the request and acceptance criteria mean in this
-  feature area. Follow `devflow:apply-feature-knowledge`.
+- **FEATURE_KNOWLEDGE** (optional): Per KB, the Rules bullets and the KB path, with no heading index. Acceptance context only: use them to understand what the request and acceptance criteria mean in this feature area. Follow `devflow:apply-feature-knowledge`.
 
 ## Responsibilities
 

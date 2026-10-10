@@ -14,10 +14,10 @@
 // cannot silently remove safety-critical patterns.
 
 import { describe, it, expect } from 'vitest';
-import { loadFile, extractSection } from '../helpers';
+import { loadFile, extractSection, resolveAgentSource } from '../helpers';
 
 const content = loadFile('dist/commands/bug-analysis.md');
-const agentContent = loadFile('src/assets/agents/diagnose.md');
+const agentContent = resolveAgentSource('diagnose').content;
 
 // ---------------------------------------------------------------------------
 // Group 1: Phase ordering — Produces/Requires annotations
@@ -69,7 +69,20 @@ describe('bug-analysis.md — phase ordering and annotations', () => {
     expect(phase5).toContain('ANALYSIS_DIR');
     expect(phase5).toContain('STATIC_FINDINGS');
     expect(phase5).toContain('DECISIONS_CONTEXT');
-    expect(phase5).toContain('FEATURE_KNOWLEDGE');
+    // The word, not the prefix: FEATURE_KNOWLEDGE_RULES also contains the literal, and Diagnose takes the full form.
+    expect(phase5).toMatch(/\bFEATURE_KNOWLEDGE\b/);
+  });
+
+  it('Phase 3 produces both knowledge variables, and Phase 5 does not require the Rules-only one', () => {
+    const phase3 = extractSection(content, '### Phase 3:', '### Phase 4:');
+    const produces = phase3.split('\n').filter(l => l.startsWith('**Produces:**'));
+    expect(produces.length).toBeGreaterThan(0);
+    for (const line of produces) {
+      expect(line).toMatch(/\bFEATURE_KNOWLEDGE\b/);
+      expect(line).toContain('FEATURE_KNOWLEDGE_RULES');
+    }
+    const phase5 = extractSection(content, '### Phase 5:', '### Phase 6:');
+    expect(phase5).not.toContain('FEATURE_KNOWLEDGE_RULES');
   });
 
   it('Phase 7 declares Requires: BRANCH_INFO, ANALYSIS_DIR', () => {
@@ -183,9 +196,9 @@ describe('bug-analysis.md — Diagnose agent spawning', () => {
     expect(phase5).toContain('DECISIONS_CONTEXT');
   });
 
-  it('Phase 5 passes FEATURE_KNOWLEDGE to Diagnose agents', () => {
+  it('Phase 5 passes FEATURE_KNOWLEDGE to Diagnose agents (the full form, rules and heading index)', () => {
     const phase5 = extractSection(content, '### Phase 5:', '### Phase 6:');
-    expect(phase5).toContain('FEATURE_KNOWLEDGE');
+    expect(phase5).toContain('FEATURE_KNOWLEDGE: {FEATURE_KNOWLEDGE}');
   });
 
   it('Phase 5 passes PR_DESCRIPTION with containment markers', () => {

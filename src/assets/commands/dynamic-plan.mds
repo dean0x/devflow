@@ -3,13 +3,21 @@ description: Parallel wave planning — plan-challenge every ticket, produce acc
 argument-hint: "[tickets-dir | issue-list]"
 output-dir: dist/commands
 ---
-@import { authoring_preamble } from "./_partials/_preamble.mds"
+@import { authoring_preamble, authoring_decisions } from "./_partials/_preamble.mds"
 @import { docs_root } from "./_partials/_docs_root.mds"
 @import { agent_roster, agent_caveats } from "./_partials/_roster.mds"
 @import { acceptance_criteria_contract } from "./_partials/_plan_contract.mds"
 @import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
+@import "./_partials/_settings.mds" as settings
 {{authoring_preamble()}}
 
+<!-- learning:on -->
+### Settings line
+
+{{settings.settings_resolve()}}
+
+<!-- learning:end -->
+{{authoring_decisions()}}
 ---
 
 ## dynamic-plan — author and run a parallel planning + plan-challenge workflow
@@ -44,10 +52,12 @@ Before authoring, verify:
 
 Pass `{worktree}` to the workflow as its `root` argument.
 
+<!-- learning:on -->
 **1. Apply decisions context**
 
-Apply the `devflow:apply-decisions` algorithm to the DECISIONS_CONTEXT loaded per the preamble above: scan the index, Read relevant entries, note verbatim ADR/PF IDs to inject into Design agent and Evaluate agent prompts.
+Apply the `devflow:apply-decisions` algorithm to the DECISIONS_CONTEXT loaded by the decisions step above: scan the index, Read relevant entries, note verbatim ADR/PF IDs to inject into Design agent prompts.
 
+<!-- learning:end -->
 **2. Read the preference profile**
 
 Check whether `~/.devflow/preference-profile.md` exists:
@@ -112,7 +122,9 @@ export const meta = {
 // AskUserQuestion happens at the command boundary after this workflow returns — NOT here.
 
 const ticketSource = args.ticketSource || args[0] || "see task description";
+<!-- learning:on -->
 const DECISIONS_CONTEXT = args.decisionsContext || "";   // injected before authoring
+<!-- learning:end -->
 const PREFERENCE_PROFILE = args.preferenceProfile || "";  // injected before authoring
 const TP_CONTRACT = args.tpContract || "";  // the "Test-plan line (TP)" contract below — its paragraph and four bullets — passed verbatim as tpContract when invoking the workflow, never pasted into this script (it holds backticks)
 const slug = args.slug || "wave";
@@ -133,7 +145,9 @@ const plans = await phase("plan-parallel", () =>
   parallel((tickets || []).map(ticket => () =>
     agent(`Write an implementation plan for this ticket.
 Ticket: ${JSON.stringify(ticket)}
+<!-- learning:on -->
 Decisions context (apply devflow:apply-decisions; a plan file can be posted to the tracker, so state each decision in words, never by ID): ${DECISIONS_CONTEXT}
+<!-- learning:end -->
 The plan must cover: approach overview, affected files and modules, key design decisions, implementation sequence (what to build first), risks and mitigations, and any open questions you cannot resolve from the ticket alone.
 Write a thorough but tight plan — every section must earn its place for a Code agent who has no other context.
 Return: { ticketTitle, planMarkdown, openDecisions (array of genuine unknowns requiring user input) }.`, { agentType: "Design" })
@@ -149,7 +163,6 @@ const challenged = await phase("plan-challenge", () =>
 
 Plan under review: ${JSON.stringify(plan)}
 Ticket: ${JSON.stringify((tickets || [])[i])}
-Decisions context: ${DECISIONS_CONTEXT}
 
 Produce:
 1. List of improvements / gaps / edge cases / side-effects identified.
@@ -160,7 +173,7 @@ Produce:
    - its verification method is its method: a test committed to the suite is ci; a command run and read (a load test, a script) is local; a step performed and observed is manual;
    - the paths it exercises, from the plan's affected files, are its files: globs.
    Setup and expected outcome never go in a line: give them per TP in testScenarios.
-4. A list of genuine design decisions that require user input (not settled by the plan, the preference profile, or existing ADRs).
+4. A list of genuine design decisions that require user input (not settled by the plan or the preference profile).
 
 Test-plan line contract:
 ${TP_CONTRACT}
@@ -178,7 +191,9 @@ Return: { ticketTitle, improvements (array), acceptanceCriteria (array of number
 const crossCritic = await phase("cross-plan-critic", () =>
   agent(`Cross-plan conflict audit.
 All ticket plans + challenged criteria: ${JSON.stringify(challenged)}
+<!-- learning:on -->
 Decisions context: ${DECISIONS_CONTEXT}
+<!-- learning:end -->
 
 Audit:
 1. API conflicts: two tickets defining the same API differently (different signatures, return types, error codes).
@@ -186,7 +201,11 @@ Audit:
 3. Undeclared dependencies: ticket A's plan implicitly requires something ticket B provides, but no dependency is declared.
 4. Scope overlap: two tickets both claim ownership of the same module or behavior.
 
+<!-- learning:on -->
 For each conflict found: state which two tickets are involved, describe the conflict precisely, and propose a resolution aligned with the decisions ledger.
+<!-- learning:off -->
+For each conflict found: state which two tickets are involved, describe the conflict precisely, and propose a resolution.
+<!-- learning:end -->
 
 Return: { conflicts (array of {tickets, conflictDescription, proposedResolution}), planAmendments (array of {ticketTitle, amendment}) }.`, { agentType: "Design" })
 );
@@ -199,10 +218,9 @@ const resolved = await phase("preference-resolve", () =>
 Preference profile: ${PREFERENCE_PROFILE || "(none — no profile found)"}
 Open decisions from plan-challenge: ${JSON.stringify((challenged || []).flatMap(c => c.openDecisions || []))}
 Cross-plan conflicts needing resolution: ${JSON.stringify((crossCritic && crossCritic.conflicts) || [])}
-Decisions context (ADRs/PFs already settled): ${DECISIONS_CONTEXT}
 
 For each open decision:
-- If the preference profile or an existing ADR/PF settles it clearly: auto-resolve and note the rationale.
+- If the preference profile settles it clearly: auto-resolve and note the rationale.
 - If not settled: add to the DECISIONS-NEEDED list for the user.
 
 Return: { autoResolved (array of {decision, resolution, source}), decisionsNeeded (array of {decision, context, options}) }.`, { agentType: "Synthesize" })
@@ -224,14 +242,26 @@ For each ticket, write ${OUTDIR}/{ticket-slug}-plan.md containing:
 - ## Acceptance Criteria (numbered, positive + negative)
 - ## Test Plan — the challenger's testPlan lines, verbatim, one per line, and nothing else: no prose, no blank line between them, no setup or outcome
 - ## Test Scenarios — one line per TP, in TP order: TP-n: its setup, then its expected outcome, from testScenarios
+<!-- learning:on -->
 - ## Auto-Resolved Decisions (if any — list each as: decision → resolution → source, naming a recorded decision in words, never by ID)
+<!-- learning:off -->
+- ## Auto-Resolved Decisions (if any — list each as: decision → resolution → source)
+<!-- learning:end -->
 
 Then write ${OUTDIR}/DECISIONS-NEEDED.md:
+<!-- learning:on -->
 - ## Auto-Resolved Decisions — list each silently-resolved decision as: decision → resolution → source (preference profile / ADR-NNN), so auto-resolution is auditable and reversible. If none, write "None."
+<!-- learning:off -->
+- ## Auto-Resolved Decisions — list each silently-resolved decision as: decision → resolution → source (preference profile), so auto-resolution is auditable and reversible. If none, write "None."
+<!-- learning:end -->
 - ## Decisions Needed
 - One section per open decision: what the decision is, why it matters, what options exist.
 - Include cross-plan conflicts that were not auto-resolved.
+<!-- learning:on -->
 - If no decisions needed, write: "No open decisions — all settled by preference profile or existing ADRs."
+<!-- learning:off -->
+- If no decisions needed, write: "No open decisions — all settled by the preference profile."
+<!-- learning:end -->
 
 Return: { planPaths (array), decisionsNeededPath (string), decisionsNeededCount (number) }.`, { agentType: "Synthesize" })
 );

@@ -577,6 +577,34 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     upstreamDefault: 600000,
   },
   {
+    // D-AUTO-COMPACT-WINDOW-OPT-IN: opt-in and unset by default (undefined → manifest null →
+    // key never written). devflow writes CLAUDE_CODE_AUTO_COMPACT_WINDOW only when the user sets
+    // this flag. Init applies a seeded record without asking, which is why the default is neutral
+    // and `recommended` stays false: a smaller window compacts sooner, and a compaction
+    // mid-command is exactly what the SessionStart resume directive (D-COMPACT-RESUME-DIRECTIVE)
+    // recovers from, so the flag is not recommended until a forced mid-/implement /compact has
+    // been seen to resume at the phase after the last finished one (plan §9, a follow-up gate).
+    // The percent-based auto-compact override is a different variable that devflow deliberately
+    // never writes or names; tests/guards/no-autocompact-pct-override.test.ts keeps it out of src/.
+    // The env name was confirmed present in Claude Code 2.1.296, where it takes precedence over
+    // the in-app setting, and an in-app message names `auto` or 100k–1M (docs/reference/
+    // claude-code-flags-probe.md). No upstreamDefault: the default window and the grammar of the
+    // variable's own value were not observed, so the description states only devflow's own
+    // accepted range, 100000–1000000.
+    id: 'auto-compact-window',
+    label: 'Auto-compact window',
+    description: 'Context window size in tokens at which Claude Code auto-compacts',
+    hint: 'Sets the auto-compact window (100000-1000000); unset keeps the default',
+    blurb: 'auto-compact window size',
+    kind: 'number',
+    target: { type: 'env', key: 'CLAUDE_CODE_AUTO_COMPACT_WINDOW' },
+    recommended: false,
+    defaultValue: undefined,
+    min: 100000,      // devflow sanity bound
+    max: 1000000,     // devflow sanity bound
+    integer: true,
+  },
+  {
     // Writes as { command: value } per Claude Code spellcheck setting shape.
     id: 'spellcheck',
     label: 'Spellcheck command',

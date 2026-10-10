@@ -8,7 +8,7 @@ import { getInstallationPaths, getClaudeDirectory, getHomeDirectory, getManagedS
 import { getGitRoot } from '../../core/git.js';
 import { isSameLocation } from '../../core/same-location.js';
 import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, getAllSkillNames, getAllAgentNames, getAllCommandNames, parsePluginSelection, resolveFeatureRedirect, prefixSkillName, unprefixSkillName, skillsOf, FEATURE_OWNED_SKILLS, type PluginDefinition } from '../../core/plugins.js';
-import { readManifest } from '../../core/manifest.js';
+import { readManifest, removeManifestPlugins } from '../../core/manifest.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '../../core/orphan-sweep.js';
 import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
 import { removeAmbientHook } from './ambient.js';
@@ -30,6 +30,7 @@ import {
   TRACKER_PROVIDER_IDS,
   TRACKER_STAGED_PREFIX,
 } from '../../core/tracker.js';
+import { CLAUDE_MD_AUDIT_STAMP_FILE, CLAUDE_MD_AUDIT_STAMP_TMP_PREFIX } from '../../core/claude-md-audit.js';
 import { revertExternalAgents } from '../../core/agent-models.js';
 import type { Settings } from '../../targets/claude-code/hooks.js';
 import { detectShell, getProfilePath } from '../../core/safe-delete.js';
@@ -40,6 +41,7 @@ import { stripFlags } from '../../core/flags.js';
 import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-cleanup.js';
 import { getPackageRoot, isContainedIn } from '../../core/paths.js';
 import { firstSymbolicLink } from '../../core/linked-path.js';
+import { restampInstalledCommands } from '../../targets/claude-code/language-stamp.js';
 
 /**
  * Which install `uninstall` acts on: the machine-wide install (`user`), or a
@@ -724,6 +726,12 @@ export function installArtifactPaths(devflowDir: string): ReadonlyArray<InstallA
     ...TRACKER_ATTEMPTS_NAMES.map(name => ({ relPath: name })),
     { relPath: TRACKER_LEGACY_ATTEMPTS_FILE },
     { relPath: TRACKER_ENABLED_FILE },
+    // The CLAUDE.md import audit's stamp (D-AUDIT-STAMP): machine state the SessionStart
+    // hook and `devflow init` write, holding paths, existence flags and finding keys and no
+    // user-authored content. Its sibling temp file, `<stamp>.tmp.<pid>`, is a prefix family:
+    // a SIGKILL between the write and the rename leaves one behind.
+    { relPath: CLAUDE_MD_AUDIT_STAMP_FILE },
+    { relPath: CLAUDE_MD_AUDIT_STAMP_TMP_PREFIX, isPrefix: true },
     // The agent's scrubbed staging file, one per invocation under a mktemp name
     // it removes from a trap — a SIGKILL outruns the trap and leaves it behind.
     // A prefix, because the names exist only on disk. Content is a scrubbed copy
@@ -1041,6 +1049,40 @@ export async function runSelectivePhaseForScope(opts: {
   }
 
   await removeSelectedPlugins(claudeDir, selectedPlugins, verbose, installedPlugins, mayChange);
+
+  // D-LANGUAGE-FOCUS-STAMP: re-stamp the installed /code-review from the selection that REMAINS.
+  // A language plugin owns a skill and no command, so removing it deletes the skill while its
+  // name would stay on the stamped line, and /code-review would spawn a focus whose skill is gone.
+  // The remaining selection is the retained set the removal above used (installedPlugins minus the
+  // selected plugins, D-RETAIN-FROM-MANIFEST), so the stamp and the skills on disk cannot disagree.
+  // Narrowly scoped: only the stamped line of a command that is still installed is rewritten, and
+  // nothing else converges here. A damaged copy is a warning, never a failure.
+  {
+    const removed = new Set(selectedPlugins.map(sp => sp.name));
+    await restampInstalledCommands({
+      claudeDir,
+      effectivePlugins: installedPlugins.filter(plugin => !removed.has(plugin.name)),
+      warn: (msg) => p.log.warn(msg),
+      mayChange,
+    });
+  }
+
+  // D-UNINSTALL-DROPS-PLUGIN: the manifest is the install record `devflow init` seeds its plugin
+  // selection from (a re-init keeps the prior selection), so a plugin removed here but still listed
+  // would be installed again by the next plain init. Take the selected names off the list;
+  // knownPlugins and every other key stay.
+  // Behind the scope guard like every other write here. A failed write is a warning, never a failure.
+  {
+    const manifestPath = path.join(devflowDir, 'manifest.json');
+    if (await mayChange(manifestPath)) {
+      const recorded = await removeManifestPlugins(devflowDir, selectedPlugins.map(sp => sp.name));
+      if (!recorded.ok) {
+        p.log.warn(`Could not drop the plugin from manifest.json — a later devflow init would install it again: ${recorded.error}`);
+      } else if (verbose && recorded.removed.length > 0) {
+        p.log.success(`Removed ${recorded.removed.join(', ')} from manifest.json`);
+      }
+    }
+  }
 
   // Clean up ambient hook if ambient plugin is being removed
   if (selectedPlugins.some(sp => sp.name === 'devflow-ambient')) {

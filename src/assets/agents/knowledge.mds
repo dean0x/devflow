@@ -1,4 +1,7 @@
 ---
+output-dir: dist/agents
+---
+---
 name: Knowledge
 description: Structures codebase exploration into a feature knowledge base and registers it in the index cache
 model: sonnet
@@ -6,7 +9,9 @@ effort: medium
 skills:
   - devflow:feature-knowledge
   - devflow:apply-feature-knowledge
+<!-- learning:on -->
   - devflow:apply-decisions
+<!-- learning:end -->
   - devflow:worktree-support
 tools:
   - Read
@@ -25,7 +30,9 @@ tools:
 - **FEATURE_NAME** (required): Human-readable name (e.g., "CLI Command System")
 - **DIRECTORIES** (required): Directory prefixes defining the feature area scope
 - **FILES_CHANGED** (optional): Files changed in the workflow session that triggered write-back
+<!-- learning:on -->
 - **DECISIONS_CONTEXT** (optional): Compact ADR/PF index. `(none)` when absent.
+<!-- learning:end -->
 - **EXISTING_KB** (optional): Current KNOWLEDGE.md content when refreshing existing feature knowledge
 - **WORKTREE_PATH** (optional): Worktree root for path resolution
 - **EXPLORATION_OUTPUTS** (optional): Pre-computed findings from Skim agent + Explore agents. When provided, synthesize these instead of exploring from scratch. When absent, perform your own exploration in Phase 1 (Scan) and Phase 2 (Extract).
@@ -34,20 +41,42 @@ tools:
 
 1. **Resolve worktree path**: Use `devflow:worktree-support` to determine the working directory (WORKTREE_PATH or cwd)
 2. **Orient on feature area**: Read EXPLORATION_OUTPUTS or EXISTING_KB to understand the feature's architecture, patterns, and boundaries
-3. **Follow the feature-knowledge skill**: Execute the 4-phase process (Scan → Extract → Distill → Forge) from `devflow:feature-knowledge`
+3. **Follow the feature-knowledge skill**: Execute the 4-phase process (Scan → Extract → Distill → Forge) from `devflow:feature-knowledge`, keeping the leading `## Rules` section current: one-line `KB-AP-n` / `KB-INV-n` bullets whose IDs never change or get reused, with no volatile numbers (name the pinning test or constant instead)
+<!-- learning:on -->
 4. **State decisions in words**: If DECISIONS_CONTEXT is provided, state each relevant decision or pitfall in words in the section it governs — never its ADR/PF ID, one already in EXISTING_KB included. The "Related" section links only to other knowledge bases and files.
+<!-- learning:end -->
+<!-- learning:on -->
 5. **Handle refresh**: If EXISTING_KB is provided, update stale sections based on FILES_CHANGED while preserving any manually added content. Don't regenerate from scratch.
+<!-- learning:off -->
+4. **Handle refresh**: If EXISTING_KB is provided, update stale sections based on FILES_CHANGED while preserving any manually added content. Don't regenerate from scratch.
+<!-- learning:end -->
+<!-- learning:on -->
 6. **Write KNOWLEDGE.md directly**: Write to `{worktree}/.devflow/features/{FEATURE_SLUG}/KNOWLEDGE.md` (create directory if needed)
+<!-- learning:off -->
+5. **Write KNOWLEDGE.md directly**: Write to `{worktree}/.devflow/features/{FEATURE_SLUG}/KNOWLEDGE.md` (create directory if needed)
+<!-- learning:end -->
+<!-- learning:on -->
 7. **Update index.md directly**: Read-modify-write `{worktree}/.devflow/features/index.md`
+<!-- learning:off -->
+6. **Update index.md directly**: Read-modify-write `{worktree}/.devflow/features/index.md`
+<!-- learning:end -->
    - If slug already present: replace that line in-place
    - If absent or file missing: append (or create file)
    - Line format: `- **{slug}** — {areas} — {Use-when description}`
+<!-- learning:on -->
 8. **Commit the knowledge files**: Run git yourself via Bash to commit `index.md` + the `KNOWLEDGE.md` to the current worktree branch (see Commit Protocol). Commit only those two paths; never push.
+<!-- learning:off -->
+7. **Commit the knowledge files**: Run git yourself via Bash to commit `index.md` + the `KNOWLEDGE.md` to the current worktree branch (see Commit Protocol). Commit only those two paths; never push.
+<!-- learning:end -->
+<!-- learning:on -->
 9. **Report**: Output KB_PATH, KB_SLUG, and KB_COMMIT (see Output section)
+<!-- learning:off -->
+8. **Report**: Output KB_PATH, KB_SLUG, and KB_COMMIT (see Output section)
+<!-- learning:end -->
 
 ## Direct Write Protocol
 
-Write BOTH files atomically — no intermediate result files, no external scripts. Refresh an existing `KNOWLEDGE.md` or `index.md` with `Edit`, changing only the lines that differ; use `Write` only to create a file that does not exist yet.
+Write BOTH files atomically — no intermediate result files, no external scripts. Refresh an existing `KNOWLEDGE.md` or `index.md` with `Edit`, changing only the lines that differ and, in the KB, only the sections the new work touches (add or update Rules bullets for what changed, never renumber, and never rewrite untouched sections to meet the budget; a KB still above the ceiling is written as it stands and your final message says so); use `Write` only to create a file that does not exist yet.
 
 1. Ensure `{worktree}/.devflow/features/{slug}/` directory exists
 2. Create `KNOWLEDGE.md` with `Write`, or refresh the existing one with `Edit`
@@ -79,7 +108,9 @@ KB_PATH: {worktree}/.devflow/features/{slug}/KNOWLEDGE.md
 KB_SLUG: {slug}
 KB_NAME: {name}
 SECTIONS: [list of sections written]
+<!-- learning:on -->
 CROSS_REFERENCES: [ADR/PF IDs whose rule the knowledge base states in words, if any]
+<!-- learning:end -->
 KB_COMMIT: committed <sha> | skipped (no changes) | skipped (no branch) | skipped (detached HEAD) — uncommitted: <paths> | failed (<reason>)
 ```
 
@@ -89,5 +120,6 @@ Report cap: final message at most about 1,500 tokens; longer material goes to a 
 
 - **Only writes to `.devflow/features/` directory** — never modify source code
 - **Never delete existing feature knowledge** — only create new or refresh existing
-- **500-line cap** — if the knowledge base exceeds 500 lines, split into focused sub-knowledge bases (each gets its own index entry)
+- **Character budget** — target 30,000 characters, ceiling 40,000; index lines at most 300 characters, descriptions at most 220. Curate, never truncate: reword or consolidate, and split into focused sub-knowledge bases (each gets its own index entry) only when curation cannot bring a KB under the ceiling
+- **Legacy KBs** — a KB with no `## Rules` section is valid: add the section only when the new work touches the KB. Readers meanwhile take one to three entries from its Anti-Patterns or Gotchas, cited by section name, with path and heading index
 - **Commits only `.devflow/features/` paths** — stage and commit only `index.md` and the `KNOWLEDGE.md` you wrote (never `git add -A`, never touch other files); **never push, never force, never amend**. Run git via Bash yourself — no commit scripts. No external API calls.

@@ -14,6 +14,11 @@
  * second, unvalidated parser. The fail-closed line says `KNOWLEDGE=off`, so an
  * unresolvable line skips write-back.
  *
+ * The partial imports no settings partial (#426): its Step 1 takes the line the
+ * host's own settings block resolved above, keeps the `KNOWLEDGE=off` skip at the
+ * step, and carries no resolver call of its own. Each host carries that block once,
+ * before its first consumer, and this file holds the order for the write-back.
+ *
  * The shape an absence-based check needs: a NAMED collector, a non-vacuity
  * assertion over what it read, and known-bad probes driving the same collector
  * over the superseded wordings.
@@ -33,10 +38,10 @@ const STEP_2 = '**Step 2';
 
 /** The gate a compiled Step 1 must carry, each part labelled so a miss names itself. */
 const REQUIRED_GATES: ReadonlyArray<readonly [string, RegExp]> = [
-  ['the settings resolver for the checkout root', /node "\$HOME\/\.devflow\/scripts\/resolve-settings\.cjs" "\{root\}"/],
+  ['the settings line resolved above', /take the settings line resolved above for that root/],
   ['the root bound to the checkout', /`\{root\}` = `\{worktree\}`/],
   ['the KNOWLEDGE=off skip', /`KNOWLEDGE=off`, skip write-back entirely/],
-  ['the fail-closed line', new RegExp(`\`${SETTINGS_FAIL_CLOSED_LINE}\``)],
+  ['the fail-closed clause', /The fail-closed line says `KNOWLEDGE=off` too/],
 ];
 
 /** Wording a compiled Step 1 must NOT carry: a gate that reads a file for itself. */
@@ -44,6 +49,7 @@ const FORBIDDEN_GATES: ReadonlyArray<readonly [string, RegExp]> = [
   ['a direct manifest read', /\bread `~\/\.devflow\/manifest\.json`/i],
   ['a machine-field gate', /`features\.knowledge` is `false`/],
   ['a per-repo knowledge field gate', /`knowledge` field is `false`/],
+  ['a settings block of its own', /resolve-settings\.cjs/],
 ];
 
 /** Named collector: the gate problems in a compiled write-back Step 1. */
@@ -72,11 +78,24 @@ function step1Of(...lines: string[]): string {
 }
 
 const ALL_MISSING = [
-  'missing: the settings resolver for the checkout root',
+  'missing: the settings line resolved above',
   'missing: the root bound to the checkout',
   'missing: the KNOWLEDGE=off skip',
-  'missing: the fail-closed line',
+  'missing: the fail-closed clause',
 ];
+
+const RESOLVER_INVOCATION = 'node "$HOME/.devflow/scripts/resolve-settings.cjs" "{root}" 2>/dev/null; echo "exit=$?"';
+
+/** Named collector: write-back steps with no settings block above them, or with a second one. */
+function collectBlockOrderProblems(commandText: string): string[] {
+  const step = commandText.indexOf(STEP_HEADING);
+  const blocks = commandText.split(RESOLVER_INVOCATION).length - 1;
+  const first = commandText.indexOf(RESOLVER_INVOCATION);
+  return [
+    ...(blocks === 1 ? [] : [`${blocks} settings blocks`]),
+    ...(first !== -1 && first < step ? [] : ['no settings block before the write-back step']),
+  ];
+}
 
 describe('knowledge write-back gate takes KNOWLEDGE from the settings line', () => {
   it('reads a real corpus: the write-back step is compiled into the commands that import it', () => {
@@ -90,6 +109,32 @@ describe('knowledge write-back gate takes KNOWLEDGE from the settings line', () 
     for (const file of writebackCommands()) {
       expect(collectGateProblems(requireDistFile(file)), `${file} write-back gate`).toEqual([]);
     }
+  });
+
+  it('every host carries one settings block, above its write-back step', () => {
+    for (const file of writebackCommands()) {
+      const text = requireDistFile(file);
+      expect(collectBlockOrderProblems(text), `${file} settings block`).toEqual([]);
+      expect(text, `${file}: the block holds the fail-closed line`).toContain(`\`${SETTINGS_FAIL_CLOSED_LINE}\``);
+    }
+  });
+
+  it('known-bad probe: a write-back step with no block above it, and one with two, are reported', () => {
+    const line = RESOLVER_INVOCATION
+    expect(collectBlockOrderProblems(`${STEP_HEADING}\n${line}`)).toEqual(['no settings block before the write-back step'])
+    expect(collectBlockOrderProblems(`${line}\n${STEP_HEADING}\n${line}`)).toEqual(['2 settings blocks'])
+    expect(collectBlockOrderProblems(`${line}\n${STEP_HEADING}`)).toEqual([])
+  });
+
+  it('known-bad probe: a Step 1 that carries a resolver call of its own is reported', () => {
+    const own = step1Of(
+      '**Step 1 — Check the opt-out gate, with `{root}` = `{worktree}`:** take the settings line resolved above for that root.',
+      '',
+      RESOLVER_INVOCATION,
+      '',
+      'If the settings line says `KNOWLEDGE=off`, skip write-back entirely. The fail-closed line says `KNOWLEDGE=off` too.',
+    );
+    expect(collectGateProblems(own)).toEqual(['present: a settings block of its own']);
   });
 
   it('the fail-closed line the gate falls back to switches knowledge off', () => {

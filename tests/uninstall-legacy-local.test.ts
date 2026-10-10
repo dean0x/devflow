@@ -511,6 +511,41 @@ describe('a symbolic link in a legacy local install is never deleted or written 
     expect(warned().filter(line => line.includes(`${link} is a symbolic link`))).toHaveLength(1);
   });
 
+  it('a selective local uninstall rewrites no manifest.json through a linked .devflow (D-UNINSTALL-DROPS-PLUGIN)', async () => {
+    const link = await linkToOutside('.devflow');
+    const before = treeState(outside);
+    const implement = DEVFLOW_PLUGINS.filter(plugin => plugin.name === 'devflow-implement');
+    expect(implement).toHaveLength(1);
+    expect(JSON.parse(await fs.readFile(path.join(outside, 'manifest.json'), 'utf-8')).plugins, 'non-vacuity: the manifest lists the plugin').toContain('devflow-implement');
+
+    await runSelectivePhaseForScope({
+      claudeDir: path.join(repo, '.claude'),
+      devflowDir: path.join(repo, '.devflow'),
+      selectedPlugins: implement,
+      verbose: false,
+      scope: 'local',
+    });
+
+    expect(treeState(outside), 'the manifest the link leads to is not rewritten').toEqual(before);
+    expect(lstatSync(link).isSymbolicLink(), 'the link is left as it was').toBe(true);
+    expect(warned().filter(line => line.includes(`${link} is a symbolic link`)), 'the skip is reported once').toHaveLength(1);
+  });
+
+  it('a selective local uninstall over an unlinked .devflow drops the plugin from the repo manifest', async () => {
+    const implement = DEVFLOW_PLUGINS.filter(plugin => plugin.name === 'devflow-implement');
+
+    await runSelectivePhaseForScope({
+      claudeDir: path.join(repo, '.claude'),
+      devflowDir: path.join(repo, '.devflow'),
+      selectedPlugins: implement,
+      verbose: false,
+      scope: 'local',
+    });
+
+    const manifest = JSON.parse(await fs.readFile(path.join(repo, '.devflow', 'manifest.json'), 'utf-8')) as { plugins: string[] };
+    expect(manifest.plugins).toEqual([]);
+  });
+
   it.each([
     { rel: '.claude' },
     { rel: path.join('.claude', 'settings.json') },

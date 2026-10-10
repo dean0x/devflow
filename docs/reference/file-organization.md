@@ -23,8 +23,9 @@ devflow/
 │   │   ├── paths.ts                  # getPackageRoot + asset path helpers
 │   │   ├── assets.ts                 # skillsDir, agentsDir, rulesDir, scriptsDir, commandsDir,
 │   │   │                             #   compiledAgentsDir, agentSourceDirs (dist-first order owner)
-│   │   ├── flags.ts                  # Claude Code flag registry (30 flags)
+│   │   ├── flags.ts                  # Claude Code flag registry (31 flags)
 │   │   ├── fs-atomic.ts              # Atomic write helper (D34)
+│   │   ├── claude-md-audit.ts        # Typed seam onto scripts/claude-md-audit.cjs: roots, the one init note, the stamp write (lstat-checked)
 │   │   ├── manifest.ts               # Manifest read/write
 │   │   ├── migrations.ts             # Run-once migration registry (2.x entries only; first: canonicalise-agent-keys-v1)
 │   │   ├── git.ts                    # getGitRoot
@@ -52,23 +53,24 @@ devflow/
 │       │   └── ...
 │       ├── agents/                   # 17 agents — hand-authored .md, plus MDS generator hosts (.mds → dist/agents/)
 │       │   ├── git.mds                 # MDS generator host → dist/agents/git.md
+│       │   ├── code.mds                # MDS generator host → dist/agents/code.md (nine agents are hosts besides git)
 │       │   ├── synthesize.md
-│       │   ├── code.md
 │       │   └── ...
-│       ├── rules/                    # 13 rules (flat .md files)
+│       ├── rules/                    # 14 rules (flat .md files)
 │       │   ├── engineering.md
 │       │   ├── security.md
 │       │   └── ...
 │       ├── commands/                 # Command sources
 │       │   ├── *.mds                 # MDS command hosts (compiled to dist/commands/ by build:mds)
-│       │   ├── *.md                  # 1 static command file
 │       │   └── _partials/            # MDS partials (no output-dir:, never compiled directly)
 │       ├── mds/                      # MDS reference modules (compiled to dist/skills/git/references/ by build:mds)
 │       │   ├── tracker/_github.mds     # One file per GitHub tracker operation
 │       │   ├── tracker/_jira.mds       # One file per Jira tracker operation
 │       │   ├── tracker/_linear.mds     # One file per Linear tracker operation
 │       │   ├── tracker/_mcp.mds        # Provider-independent tool-call contract (emitted as tracker/_mcp.md)
+│       │   ├── tracker/_contract.mds   # Provider resolution and tracker input contract, read once by tracker spawns (emitted as tracker/_contract.md)
 │       │   ├── tracker/_common.mds     # Partial: lines the tracker modules share (no output-dir:, never compiled directly)
+│       │   ├── tracker/_steps.mds      # Partial: provider-neutral step text of the tracker operations (no output-dir:, never compiled directly)
 │       │   ├── git/_references.mds     # Cross-cutting documents the Git agent names
 │       │   └── git/_pr.mds             # One file per PR-host operation (provider-independent)
 │       └── scripts/                  # Installed verbatim to ~/.devflow/scripts/
@@ -79,6 +81,7 @@ devflow/
 │           ├── pr-evidence.cjs       # Pure core of test-plan evidence: grammars, markers, the state ladder
 │           ├── verify-evidence.cjs   # I/O half of test-plan evidence: check, render, verify, splice, readback
 │           ├── release-trace.cjs     # Git-only release trace: last release tag + per-commit trace map
+│           ├── claude-md-audit.cjs   # CLAUDE.md @path import audit (read-only): grammar, bounds, display text and stamp format; run by session-start-context and, through the facade, init
 │           ├── ci-wait.cjs           # Bounded CI wait for one pushed head: reads gh only, prints one status line; /implement and /resolve call it inline
 │           ├── lib/project-config.cjs # The one parser of .devflow/project.json and .devflow/config.json (installed beside its two callers)
 │           └── hooks/                # Capture + memory + learning + ambient hooks
@@ -177,14 +180,15 @@ Assets live once in `src/assets/` and install to the user's `~/.claude/` — no 
 | Agents (hand-authored) | `src/assets/agents/{name}.md` | `~/.claude/agents/devflow/{name}.md` | None — edit → init |
 | Agents (generator host) | `src/assets/agents/{name}.mds` → `dist/agents/{name}.md` | `~/.claude/agents/devflow/{name}.md` | `npm run build:mds` |
 | Rules | `src/assets/rules/{name}.md` | `~/.claude/rules/devflow/{name}.md` | None — edit → init |
-| Commands | `dist/commands/{name}.md` | `~/.claude/commands/devflow/{name}.md` | `npm run build:mds` |
+| Commands | `src/assets/commands/{name}.mds` → `dist/commands/{name}.md` | `~/.claude/commands/devflow/{name}.md` | `npm run build:mds` |
+| Learning-off variants | `dist/learning-off/{commands,agents}/{name}.md`, built only for a host or partial with a learning arm | `~/.claude/{commands,agents}/devflow/{name}.md`, in place of the file above, on a learning-off machine | `npm run build:mds` |
 | Skill references (generated) | `src/assets/mds/**/*.mds` → `dist/skills/git/references/**` | `~/.claude/skills/devflow:git/references/**` | `npm run build:mds` |
 | Scripts (root) | `src/assets/scripts/*.cjs`, `lib/`, `hud.sh` | `~/.devflow/scripts/` | None — edit → init |
 | Scripts (hooks) | `src/assets/scripts/hooks/` | `~/.devflow/scripts/hooks/` | None — edit → init |
 
 ### Packaging
 
-`npm pack` ships `dist/` (compiled JS, commands, compiled agents, and generated skill references) and `src/assets/` (skills, agents — hand-authored `.md` and `.mds` generator hosts alike — rules, scripts). No `plugins/` or `shared/` directories are included.
+`npm pack` ships `dist/` (compiled JS, commands, compiled agents, learning-off variants, and generated skill references) and `src/assets/` (skills, agents — hand-authored `.md` and `.mds` generator hosts alike — rules, scripts). No `plugins/` or `shared/` directories are included.
 
 ### Adding a Skill to a Plugin
 
@@ -201,9 +205,11 @@ Assets live once in `src/assets/` and install to the user's `~/.claude/` — no 
 
 ### Agents
 
-All 17 agents (`git`, `synthesize`, `skim`, `simplify`, `code`, `review`, `triage`, `evaluate`, `test`, `scrutinize`, `validate`, `design`, `knowledge`, `research`, `diagnose`, `learning`, `tracker`) are shared, and every source lives in `src/assets/agents/`. Sixteen are hand-authored `.md` files that install verbatim. `git` is an `.mds` generator host, compiled to `dist/agents/git.md` by `npm run build:mds`.
+All 17 agents (`git`, `synthesize`, `skim`, `simplify`, `code`, `review`, `triage`, `evaluate`, `test`, `scrutinize`, `validate`, `design`, `knowledge`, `research`, `diagnose`, `learning`, `tracker`) are shared, and every source lives in `src/assets/agents/`. Seven (`synthesize`, `simplify`, `evaluate`, `test`, `validate`, `learning`, `tracker`) are hand-authored `.md` files that install verbatim. The other ten (`git`, `code`, `design`, `diagnose`, `knowledge`, `research`, `review`, `scrutinize`, `triage`, `skim`) are `.mds` generator hosts, compiled to `dist/agents/{name}.md` by `npm run build:mds`.
 
 The installer resolves each declared agent over `agentSourceDirs()` in `src/core/assets.ts` — `dist/agents/`, then `src/assets/agents/` — and copies the first hit, so a compiled artifact supersedes a hand-authored file of the same name. When neither directory has the agent, the install throws naming both candidate paths and `npm run build:mds` rather than silently skipping it. `npm run build:cli` alone (TypeScript) does not produce installable agents; `npm run build` runs both steps.
+
+The learning switch (`features.learning` in `~/.devflow/manifest.json`) picks the variant. With learning off, the installer reads `dist/learning-off/{commands,agents}/` ahead of the normal order and leaves `devflow:apply-decisions` out. `devflow init` passes its settled value, and `devflow learning --enable/--disable` converges what is already installed: it rewrites only the commands and agents already on disk (a `--plugin` install gains nothing), compares bytes and writes atomically, installs or removes the skill, reapplies the `devflow agents` mapping, and skips with a "run `devflow init`" message when the manifest version differs from the running one. A failure only warns. A repository that narrows learning off changes nothing installed; the learning-on prompts gate that at run time.
 
 ## Settings
 
@@ -334,9 +340,13 @@ Skills are removed individually rather than by namespace directory, because `~/.
 
 ### Selective Uninstall (`devflow uninstall --plugin <name>`)
 
-1. Compute assets to remove via `computeAssetsToRemove` — skills and agents shared by remaining plugins are retained.
-2. Remove individual files for each asset (agents, commands, skills, rules) belonging to the selected plugins.
-3. Run `sweepDevflowNamespaces` for a registry-diff sweep across all three namespaces — catches any orphaned files whose names left the registry regardless of this uninstall run.
+1. Revert external-model (GPT) overrides in the installed agents' frontmatter via `revertExternalAgents`, while their files are still present.
+2. Compute assets to remove via `computeAssetsToRemove` — skills and agents shared by remaining plugins are retained.
+3. Remove individual files for each asset (agents, commands, skills, rules) belonging to the selected plugins.
+4. Run `sweepDevflowNamespaces` for a registry-diff sweep across all three namespaces — catches any orphaned files whose names left the registry regardless of this uninstall run.
+5. Re-stamp the installed `/code-review` command's language-focus line from the plugins that remain (`restampInstalledCommands`), so a removed language plugin's focus leaves the line with its skill.
+6. Drop the selected plugins from `manifest.plugins` via `removeManifestPlugins`, so the next `devflow init` does not reinstall them — `knownPlugins` and every other key stay.
+7. If `devflow-ambient` was selected, remove its hook from `settings.json`.
 
 ### Install Artifacts Removed on Uninstall
 

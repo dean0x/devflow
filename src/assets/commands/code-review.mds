@@ -7,6 +7,7 @@ output-dir: dist/commands
 @import { compliance_gate } from "./_partials/_compliance.mds"
 @import { evidence_policy } from "./_partials/_evidence_policy.mds"
 @import { publication_gate } from "./_partials/_publication.mds"
+@import "./_partials/_settings.mds" as settings
 # Code Review Command
 
 Run a comprehensive code review of the current branch by spawning parallel review agents, then synthesizing results into PR comments. Supports incremental reviews, timestamped report directories, and multi-worktree auto-discovery.
@@ -39,6 +40,8 @@ Run a comprehensive code review of the current branch by spawning parallel revie
 #### Step 0b: Resolve the compliance lens
 
 **Produces:** COMPLIANCE_ACTIVE, COMPLIANCE_FRAMEWORKS
+
+{{settings.settings_resolve()}}
 
 {{compliance_gate()}}
 Keep each worktree's values for every downstream phase of that worktree.
@@ -164,10 +167,48 @@ For each reviewable worktree, call:
 
 ### Phase 1: Analyze Changed Files
 
-**Produces:** REVIEW_FOCUS_LIST
-**Requires:** DIFF_RANGE, COMPLIANCE_ACTIVE (from Step 0b)
+**Produces:** REVIEW_FOCUS_LIST, DIFF_CLASS, DIFF_FILES
+**Requires:** DIFF_RANGE, REVIEW_DIR, COMPLIANCE_ACTIVE (from Step 0b)
 
-Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditional reviews.
+Per worktree, in order. Each `git` command here writes to a file and prints nothing.
+
+#### Step 1.1: Classify the diff
+
+**Produces:** DIFF_CLASS, CHANGED_PATHS, REVIEW_FOCUS_LIST (reduced classes)
+**Requires:** DIFF_RANGE, REVIEW_DIR
+
+List the changed paths into `{REVIEW_DIR}/paths.txt` and print only the line count (drop `-C "{WORKTREE_PATH}"` when there is no `WORKTREE_PATH`):
+
+```bash
+git -C "{WORKTREE_PATH}" diff --name-only --no-renames {DIFF_RANGE} > "{REVIEW_DIR}/paths.txt"
+wc -l < "{REVIEW_DIR}/paths.txt"
+```
+
+Read `paths.txt` once when the count is about 40 or fewer, and in ranges of about 40 lines (Read with offset and limit) when it is more. `--no-renames` lists a moved file under its old path and its new one, so a move cannot take a file out of its own class.
+
+Set `DIFF_CLASS` by these rules, in order; the first that decides wins:
+
+1. **Instruction and config paths are `code`.** Any changed path that is `CLAUDE.md`, `AGENTS.md`, under `.claude/` or `src/assets/`, a `*.mds` file, under a plugin's `agents/`, `skills/` or `commands/` directory, `.devflow/project.json`, `.devflow/conventions.md`, or a manifest or build file (`package.json`, `go.mod`, `Cargo.toml`, `pyproject.toml`, `requirements*.txt`, `CMakeLists.txt`). This rule runs first, so a diff made only of such files is `code` and never `docs-only`.
+2. **`docs-only`.** Every changed path matches `*.md`, `*.mdx`, `*.rst`, `*.txt`, `docs/**` or `CHANGELOG*`.
+3. **`tests-only`.** Every changed path matches `tests/**`, `**/__tests__/**`, `*.test.*`, `*.spec.*`, `*_test.go`, `test_*.py` or `*_test.py`.
+4. **`lockfile-only`.** Every changed path is `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `bun.lockb`, `Cargo.lock`, `go.sum`, `poetry.lock`, `uv.lock`, `Gemfile.lock` or `composer.lock`.
+5. **Mixed non-code.** Every changed path matches the docs, tests or lockfile patterns, but no single rule above holds (docs with tests, tests with a lockfile): `DIFF_CLASS` names each class involved.
+6. **Fail-safe is `code`.** A changed path that matches no class pattern makes the diff `code`, and so does an empty path list. A manifest change is `code` and never `lockfile-only`.
+
+Each reduced class runs only its focus set, every member reading `diff.patch`:
+
+- `docs-only`: documentation, consistency, security
+- `tests-only`: testing, reliability, consistency, security
+- `lockfile-only`: dependencies, security
+
+A mixed non-code diff runs the union of the sets of the classes it holds. Language and conditional triggers inside a reduced class are suppressed: they add no focus, and Step 1.2 applies to the `code` class only.
+
+#### Step 1.2: Choose the focuses
+
+**Produces:** REVIEW_FOCUS_LIST (code class)
+**Requires:** DIFF_CLASS, CHANGED_PATHS, COMPLIANCE_ACTIVE
+
+When `DIFF_CLASS` is `code`, read the file types from the paths in `paths.txt` to determine conditional reviews:
 
 | Condition | Adds Review |
 |-----------|-------------|
@@ -186,57 +227,104 @@ Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditio
 
 If `COMPLIANCE_ACTIVE` AND the diff touches regulated surface (data models, auth flows, logging/observability, payments, IaC, retention): add `compliance` to REVIEW_FOCUS_LIST for this worktree.
 
-**Language focus presence gate.** The eight language focuses — `typescript`, `react`, `accessibility`, `ui-design`, `go`, `java`, `python`, `rust` — ship with optional plugins, so their pattern skills are installed only when the user selected that plugin. Gate them by presence: for each language focus the table above would add, check whether `{claude_dir}/skills/devflow:{focus}/SKILL.md` exists, `{claude_dir}` being Claude Code's directory as the installer resolves it — `CLAUDE_CONFIG_DIR` when that is set to an absolute path, else `$HOME/.claude` (D-CLAUDE-DIR-PROMPTS). Run one read-only, silent check per candidate focus:
+**Language focus stamp.** The eight language focuses — `typescript`, `react`, `accessibility`, `ui-design`, `go`, `java`, `python`, `rust` — ship with optional plugins, and the installer stamps the ones installed on this machine onto this line, rewriting it on every install and on `uninstall --plugin`:
+
+Installed language focuses: (none)
+
+A language focus is spawned only when its file-type condition above fires AND its name appears in that stamped line. A focus missing from the line is never spawned, even when its trigger fires. The eight core focuses are unconditional and are never stamp-gated.
+
+#### Step 1.3: Write the diff files
+
+**Produces:** DIFF_FILES
+**Requires:** DIFF_RANGE, REVIEW_DIR, REVIEW_FOCUS_LIST
+
+Write `diff.patch` once per worktree, by redirect:
 
 ```bash
-d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; test -f "$d/skills/devflow:{focus}/SKILL.md"; echo "exit=$?"
+git -C "{WORKTREE_PATH}" diff --no-color --no-ext-diff --no-textconv {DIFF_RANGE} > "{REVIEW_DIR}/diff.patch"
 ```
 
-Only `exit=0` means the skill is installed. On any other result, do NOT add that focus to `REVIEW_FOCUS_LIST` and do NOT spawn a Review agent for it — the file-type condition alone never spawns a language focus. The eight core focuses are unconditional and are never presence-gated.
+It holds the whole diff of `DIFF_RANGE`. On a `code` diff, add one patch for each language focus in REVIEW_FOCUS_LIST, by the same command with quoted pathspecs from this table:
 
+```bash
+git -C "{WORKTREE_PATH}" diff --no-color --no-ext-diff --no-textconv {DIFF_RANGE} -- '<pathspec>' ... > "{REVIEW_DIR}/diff-{focus}.patch"
+```
+
+| Focus | Pathspecs |
+|-------|-----------|
+| typescript | `'*.ts' '*.tsx'` |
+| react, accessibility | `'*.tsx' '*.jsx'` |
+| ui-design | `'*.tsx' '*.jsx' '*.css' '*.scss'` |
+| go | `'*.go'` |
+| java | `'*.java'` |
+| python | `'*.py'` |
+| rust | `'*.rs'` |
+
+The core, database, dependencies, documentation and compliance focuses, and every reduced-class focus, read `diff.patch`. A language focus sees only its own extensions and reaches anything else through `DIFF_RANGE`. Set `DIFF_FILES` to the files written. They live in `REVIEW_DIR`, under the gitignored `.devflow/` tree, with `paths.txt`: never committed, posted or passed to the Git agent.
+
+<!-- learning:on -->
 ### Phase 1b: Load Decisions Index
+<!-- learning:off -->
+### Phase 1b: Load Context
+<!-- learning:end -->
 
-**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, COMPLIANCE_FRAMEWORKS (carried from Step 0b)
+<!-- learning:on -->
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, COMPLIANCE_FRAMEWORKS (carried from Step 0b)
+<!-- learning:off -->
+**Produces:** FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, COMPLIANCE_FRAMEWORKS (carried from Step 0b)
+<!-- learning:end -->
 
 {{decisions_load()}}
-
+<!-- learning:on -->
 This produces a compact index of active ADR/PF entries. Pass `DECISIONS_CONTEXT` to all Review agents. Review agents use `devflow:apply-decisions` to Read full entry bodies on demand.
 
+<!-- learning:end -->
 {{knowledge_load()}}
 
+<!-- learning:on -->
 Pass `FEATURE_KNOWLEDGE` to all Review agents alongside `DECISIONS_CONTEXT`.
+<!-- learning:off -->
+Pass `FEATURE_KNOWLEDGE` to all Review agents.
+<!-- learning:end -->
 
 ### Phase 2: Run Reviews (Parallel)
 
 **Produces:** REVIEW_FOCUS_OUTPUTS
-**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION, PRIOR_RESOLUTIONS, REVIEW_FOCUS_LIST
+<!-- learning:on -->
+**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION, PRIOR_RESOLUTIONS, REVIEW_FOCUS_LIST, DIFF_CLASS, DIFF_FILES
+<!-- learning:off -->
+**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, FEATURE_KNOWLEDGE, PR_DESCRIPTION, PRIOR_RESOLUTIONS, REVIEW_FOCUS_LIST, DIFF_CLASS, DIFF_FILES
+<!-- learning:end -->
 
-Spawn Review agents **in a single message**. Always run 8 core reviews; conditionally add more based on changed file types (max 20 per worktree):
+Spawn Review agents **in a single message**, for the focus set `DIFF_CLASS` selects (max 20 per worktree):
 
-| Focus | Always | Pattern Skill |
-|-------|--------|---------------|
-| security | ✓ | devflow:security |
-| architecture | ✓ | devflow:architecture |
-| performance | ✓ | devflow:performance |
-| complexity | ✓ | devflow:complexity |
-| consistency | ✓ | devflow:consistency |
-| regression | ✓ | devflow:regression |
-| testing | ✓ | devflow:testing |
-| reliability | ✓ | devflow:reliability |
-| typescript | presence-gated | devflow:typescript |
-| react | presence-gated | devflow:react |
-| accessibility | presence-gated | devflow:accessibility |
-| ui-design | presence-gated | devflow:ui-design |
-| go | presence-gated | devflow:go |
-| java | presence-gated | devflow:java |
-| python | presence-gated | devflow:python |
-| rust | presence-gated | devflow:rust |
-| database | conditional | devflow:database |
-| dependencies | conditional | devflow:dependencies |
-| documentation | conditional | devflow:documentation |
-| compliance | diff-driven | devflow:compliance |
+- `code`: the 8 core reviews on the full `diff.patch`, plus the language and conditional focuses Phase 1 added.
+- `docs-only`, `tests-only`, `lockfile-only`: only the reduced set Phase 1 names, each reading `diff.patch`; a mixed non-code diff runs the union. No language or conditional focus is spawned, whatever its trigger.
 
-Review agent count: 8 always-active, +1-12 diff-driven conditional (max 20 total per worktree).
+| Focus | Runs | Pattern Skill | DIFF_FILE |
+|-------|------|---------------|-----------|
+| security | ✓ | devflow:security | diff.patch |
+| architecture | ✓ | devflow:architecture | diff.patch |
+| performance | ✓ | devflow:performance | diff.patch |
+| complexity | ✓ | devflow:complexity | diff.patch |
+| consistency | ✓ | devflow:consistency | diff.patch |
+| regression | ✓ | devflow:regression | diff.patch |
+| testing | ✓ | devflow:testing | diff.patch |
+| reliability | ✓ | devflow:reliability | diff.patch |
+| typescript | stamp-gated | devflow:typescript | diff-typescript.patch |
+| react | stamp-gated | devflow:react | diff-react.patch |
+| accessibility | stamp-gated | devflow:accessibility | diff-accessibility.patch |
+| ui-design | stamp-gated | devflow:ui-design | diff-ui-design.patch |
+| go | stamp-gated | devflow:go | diff-go.patch |
+| java | stamp-gated | devflow:java | diff-java.patch |
+| python | stamp-gated | devflow:python | diff-python.patch |
+| rust | stamp-gated | devflow:rust | diff-rust.patch |
+| database | conditional | devflow:database | diff.patch |
+| dependencies | conditional | devflow:dependencies | diff.patch |
+| documentation | conditional | devflow:documentation | diff.patch |
+| compliance | diff-driven | devflow:compliance | diff.patch |
+
+Review agent count: `code` runs 8 core, +1-12 added by Phase 1 (max 20 total per worktree); a reduced class or a mix runs 2-6.
 
 Each Review agent invocation (all in one message, **NOT background**):
 ```
@@ -245,14 +333,19 @@ Agent(subagent_type="Review", run_in_background=false):
 Follow 6-step process from devflow:review-methodology.
 PR: #{pr_number}, Base: {base_branch}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
-DIFF_COMMAND: git -C {WORKTREE_PATH} diff {DIFF_RANGE}  (omit -C flag if no WORKTREE_PATH)
+DIFF_FILE: {diff_file}  (absolute: {REVIEW_DIR}/diff.patch, or {REVIEW_DIR}/diff-{focus}.patch for a language focus, per the table)
+DIFF_RANGE: {DIFF_RANGE}  (information only)
+<!-- learning:on -->
 DECISIONS_CONTEXT: {decisions_context}
+<!-- learning:end -->
 FEATURE_KNOWLEDGE: {feature_knowledge}
 PR_DESCRIPTION: <pr-description>{pr_description}</pr-description>
 PRIOR_RESOLUTIONS: <prior-resolution-summary>{prior_resolutions}</prior-resolution-summary>
 COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}  (compliance focus only)
 If PRIOR_RESOLUTIONS is not (none), follow Cross-Cycle Awareness in review.md.
+<!-- learning:on -->
 Follow devflow:apply-decisions to scan the index and Read full ADR/PF bodies on demand.
+<!-- learning:end -->
 Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE — feature-specific patterns and anti-patterns inform findings.
 IMPORTANT: Write report to {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/{focus}.md using Write tool"
 ```
@@ -325,13 +418,15 @@ In multi-worktree mode, report results per worktree.
 ├─ Per worktree (SEQUENTIAL — one worktree at a time):
 │  │
 │  ├─ Phase 1: Analyze changed files
-│  │  └─ Detect file types for conditional reviews
+│  │  ├─ Classify the diff (paths.txt → DIFF_CLASS)
+│  │  ├─ Choose the focuses (code class: file types + the language stamp)
+│  │  └─ Write diff.patch and diff-{focus}.patch, by redirect
 │  │
 │  ├─ Phase 2: Reviews (PARALLEL within worktree)
-│  │  ├─ Review agent: security
-│  │  ├─ Review agent: architecture, performance, complexity
-│  │  ├─ Review agent: consistency, regression, testing
-│  │  └─ Review agent: [conditional]
+│  │  ├─ code: Review agents security, architecture, performance, complexity,
+│  │  │        consistency, regression, testing, reliability (diff.patch)
+│  │  ├─ code: + language (diff-{focus}.patch) and conditional Review agents
+│  │  └─ docs-only / tests-only / lockfile-only: the reduced set (diff.patch)
 │  │
 │  ├─ Phase 3: Synthesis → Review Comment (SEQUENTIAL within worktree)
 │  │  ├─ Step 3a: Synthesize agent (mode: review, writes review-summary.md)
@@ -360,6 +455,14 @@ In multi-worktree mode, report results per worktree.
 | `--full` flag | Bypass incremental detection (Step 0d), still load PRIOR_RESOLUTIONS for cross-cycle awareness |
 | Parsing failure on resolution-summary.md | fp_ratio = 0, convergence tracking degraded (see Step 0e-ii) |
 | Concurrent sessions | Advisory only, each session computes independently |
+| Docs-only diff | `docs-only`: documentation, consistency, security on `diff.patch`; no language or conditional focus |
+| Tests-only diff | `tests-only`: testing, reliability, consistency, security on `diff.patch`; no language or conditional focus |
+| Lockfile-only diff | `lockfile-only`: dependencies, security on `diff.patch` |
+| Mixed non-code diff (docs with tests, tests with a lockfile) | The union of the matching sets, on `diff.patch` |
+| A path matching no class pattern, or an empty path list | `code` (fail-safe): the 8 core focuses on the full diff |
+| A file moved across classes | `--no-renames` lists the old and the new path, so a code path makes the diff `code` |
+| Path listing above about 40 lines | The count is printed; `paths.txt` is read in ranges of about 40 lines |
+| Language files changed, plugin not installed | The focus is absent from the stamped line: not spawned |
 | Public repo (`auto` mode) | Git agent probes visibility, posts counts-only STUB comment; full report stays local |
 | `reviewPublication: off` | Git agent skips posting the review comment (OFF) — except that, only when `EVIDENCE_POLICY` is `required`, Step 0f passes `stub` and a counts-only STUB comment posts |
 
@@ -370,9 +473,9 @@ In multi-worktree mode, report results per worktree.
 
 ## Principles
 
-1. **Orchestration only** - Command spawns agents, doesn't do git/review work itself
+1. **Orchestration only** - Command spawns agents, doesn't do git/review work itself. The exceptions are the read-only Phase 0 probes (`git worktree list`, `git -C ... branch --show-current`, `git -C ... cat-file -t`), the bounded Phase 1 path listing (a redirect into `paths.txt`, a `wc -l` count and ranged reads) and the redirect-only patch writes (`diff.patch`, `diff-{focus}.patch`). Redirect-only writes print nothing, so no diff content reaches this thread
 2. **Parallel, not background** - Multiple agents in one message, but `run_in_background=false` so phases complete before proceeding
-3. **Git agent for git work** - All git operations go through Git agent
+3. **Git agent for git work** - All git operations go through Git agent, except the exceptions named in Principle 1; redirect-only writes print nothing
 4. **Clear ownership** - Each agent owns its output completely
 5. **Honest reporting** - Display agent outputs directly
 6. **Incremental by default** - Only review new changes unless `--full` specified

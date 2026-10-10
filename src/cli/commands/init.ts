@@ -88,6 +88,15 @@ import {
   attributionSeedFrom,
 } from './attribution-prompts.js';
 import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
+import { convergeLearningVariants } from '../../targets/claude-code/learning-install.js';
+import {
+  auditAndRecordClaudeMd,
+  formatClaudeMdAuditNote,
+  formatClaudeMdAuditUnavailable,
+  type ClaudeMdAuditError,
+  type ClaudeMdAuditResult,
+} from '../../core/claude-md-audit.js';
+import type { Result } from '../../core/evidence-policy.js';
 import * as os from 'os';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
@@ -413,6 +422,30 @@ export function trackerOverrideMessage(provider: TrackerProvider): TrackerStepMe
     level: provider === DEFAULT_TRACKER_PROVIDER ? 'info' : 'success',
     text: `Tracker: ${formatTrackerSummary(provider)}`,
   };
+}
+
+/** What init prints for the CLAUDE.md import audit: a note naming what is flagged, a degraded line, or neither. */
+export interface ClaudeMdAuditStep {
+  readonly note: string | null;
+  readonly degraded: string | null;
+}
+
+/**
+ * The audit's printable outcome, the ONE function both init paths use.
+ *
+ * D-CLAUDE-MD-IMPORT-AUDIT, D-INIT-REAL-OUTCOME: the Recommended summary note prints
+ * before the install runs, and the Advanced path prints no end-of-wizard summary
+ * (D-TRACKER-CLI-SURFACE), so the audit cannot be a row of either. It is decided after
+ * the install, from the CLAUDE.md files as they are, and printed as one note by the single
+ * call site in `run`, whichever path got there: the lines are the script's own formatter's,
+ * the ones the SessionStart hook shows in its systemMessage. Nothing is printed when
+ * nothing is flagged; a failure is at most one degraded line and never changes the exit code.
+ *
+ * Pure — returns text, prints nothing.
+ */
+export function claudeMdAuditStep(outcome: Result<ClaudeMdAuditResult, ClaudeMdAuditError>): ClaudeMdAuditStep {
+  if (!outcome.ok) return { note: null, degraded: formatClaudeMdAuditUnavailable(outcome.error) };
+  return { note: formatClaudeMdAuditNote(outcome.value), degraded: null };
 }
 
 /** A message produced by an init lifecycle step. Emitted by the caller, never logged here. */
@@ -1869,6 +1902,10 @@ export const initCommand = new Command('init')
         rulesMap,
         isPartialInstall: !!options.plugin,
         spinner: s,
+        // The SETTLED switch, after the flag, the prompt and the seed have all had
+        // their say (D-LEARNING-VARIANT-INSTALL): the files installed here and the
+        // manifest written at the end of init cannot disagree about it.
+        learning: learningEnabled,
         // Non-fatal install notices with no other channel (skipped symlinks in the
         // generated reference tree, mode-normalisation failures) reach the user rather
         // than the void. Collected now, emitted after the spinner stops.
@@ -1878,6 +1915,32 @@ export const initCommand = new Command('init')
       s.stop('Installation failed');
       p.log.error(`${error}`);
       process.exit(1);
+    }
+
+    // D-LEARNING-VARIANT-INSTALL: converge the learning variants. The file copy above
+    // installed the variant of everything IT installed; on a `--plugin` install the
+    // other plugins' files, already on disk, may still be the other variant (this run
+    // may have flipped the switch), and the apply-decisions skill is removed here when
+    // the copy skipped it on a partial install. Rewrites only what is installed.
+    // Warn-not-abort: either mismatch is safe (an on variant is still gated at run
+    // time, an off variant loads no decisions). The agent mapping is reapplied below.
+    try {
+      const learningConverge = await convergeLearningVariants({
+        claudeDir,
+        devflowDir,
+        learning: learningEnabled,
+        plugins: effectivePlugins,
+        warn: (msg) => installWarnings.push(msg),
+      });
+      if (verbose && learningConverge.converged) {
+        p.log.info(
+          `Learning ${learningEnabled ? 'on' : 'off'} variants: ` +
+          `${learningConverge.commandsRewritten.length} command(s) and ${learningConverge.agentsRewritten.length} agent(s) ` +
+          `rewritten, ${learningConverge.unchanged} already current`,
+        );
+      }
+    } catch (err) {
+      installWarnings.push(`Learning variant convergence failed — ${err instanceof Error ? err.message : String(err)}`);
     }
 
     // Converge compliance artifacts (always converge, never short-circuit).
@@ -2599,6 +2662,19 @@ export const initCommand = new Command('init')
       agent: trackerLifecycle.agent,
     });
     logSummaryLines(trackerLines);
+
+    // CLAUDE.md import audit (D-CLAUDE-MD-IMPORT-AUDIT, D-AUDIT-STAMP): after the install, on
+    // both paths, through claudeMdAuditStep. Global roots always; the project's roots when init
+    // runs inside a git repository that is not HOME, at its toplevel. The stamp is written here,
+    // now that the machine root exists, so the first SessionStart repeats nothing printed below.
+    const auditStep = claudeMdAuditStep(await auditAndRecordClaudeMd({
+      claudeDir,
+      projectRoot: gitRoot,
+      home: homeDir,
+      devflowDir,
+    }));
+    if (auditStep.note !== null) p.note(auditStep.note, 'CLAUDE.md import audit');
+    if (auditStep.degraded !== null) p.log.warn(auditStep.degraded);
 
     // External model routing status line (Advanced path / explicit --proxy flag only)
     if (proxyEnabled) {

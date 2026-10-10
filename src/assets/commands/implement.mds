@@ -10,6 +10,7 @@ output-dir: dist/commands
 @import { test_plan_line } from "./_partials/_plan_contract.mds"
 @import { publication_gate } from "./_partials/_publication.mds"
 @import "./_partials/_compliance.mds" as compliance
+@import "./_partials/_settings.mds" as settings
 # Implement Command
 
 Orchestrate a single task through implementation by spawning specialized agents. The orchestrator only spawns agents and passes context - all work is done by agents.
@@ -57,7 +58,11 @@ If the user prompt does NOT match re-validation, proceed with the full pipeline 
 
 ### Phase 1: Setup
 
-**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION
+<!-- learning:on -->
+**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION
+<!-- learning:off -->
+**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION
+<!-- learning:end -->
 
 Record the current branch name as `BASE_BRANCH` - this will be the PR target.
 
@@ -167,13 +172,16 @@ node "$HOME/.devflow/scripts/verify-evidence.cjs" render --plan "{worktree}/.dev
 
 - `EVIDENCE_FILE` — `{worktree}/.devflow/docs/evidence-{branch_slug}.md`, its `## Evidence Exceptions` section now a byte copy of `PR_EXCEPTIONS` (absent when that is `(none)`).
 
+{{settings.settings_resolve()}}
+
 {{publication_gate()}}
 Phase 10b passes the resolved value to `update-pr-evidence`, which decides what each value means for the evidence comment. From the same line: {{compliance.compliance_frameworks()}} Pass it to every Code spawn.
 
 {{decisions_load()}}
+<!-- learning:on -->
+Pass `DECISIONS_CONTEXT` to Code agent (Phase 2) and Scrutinize agent (Phase 4).
 
-Pass to Code agent (Phase 2) and Scrutinize agent (Phase 4).
-
+<!-- learning:end -->
 {{knowledge_load()}}
 
 ### Phase 2: Implement
@@ -208,7 +216,9 @@ PATTERNS: {patterns from plan document or empty}
 CREATE_PR: true
 DOMAIN: {detected domain or 'fullstack'}
 FEATURE_KNOWLEDGE: {feature_knowledge}
+<!-- learning:on -->
 DECISIONS_CONTEXT: {decisions_context}
+<!-- learning:end -->
 COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
 ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
@@ -221,7 +231,7 @@ PR_TEST_PLAN_BLOCK: {PR_TEST_PLAN_BLOCK from Phase 1 verbatim, or (none)}"
 
 **SEQUENTIAL_CODE_AGENTS** (for HIGH/CRITICAL context risk):
 
-Spawn Code agents one at a time, passing handoff summaries between phases:
+Spawn Code agents one at a time. Each appends its own phase section to the handoff file, and the next reads only the section before it:
 
 **Phase 1 Code agent:**
 ```
@@ -235,7 +245,9 @@ PATTERNS: {patterns from plan document or empty}
 CREATE_PR: false
 DOMAIN: {phase 1 domain, e.g., 'backend'}
 FEATURE_KNOWLEDGE: {feature_knowledge}
+<!-- learning:on -->
 DECISIONS_CONTEXT: {decisions_context}
+<!-- learning:end -->
 COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
 ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
@@ -258,7 +270,9 @@ DOMAIN: {phase N domain, e.g., 'frontend'}
 PRIOR_PHASE_SUMMARY: {summary from previous Code agent}
 FILES_FROM_PRIOR_PHASE: {list of files created}
 FEATURE_KNOWLEDGE: {feature_knowledge}
+<!-- learning:on -->
 DECISIONS_CONTEXT: {decisions_context}
+<!-- learning:end -->
 COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
 ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
@@ -269,7 +283,7 @@ HANDOFF_REQUIRED: {true if not last phase}
 HANDOFF_FILE: {worktree}/.devflow/docs/handoff-{branch_slug}.md"
 ```
 
-**Handoff Protocol**: Each sequential Code agent receives the prior Code agent's implementation summary via PRIOR_PHASE_SUMMARY and FILES_FROM_PRIOR_PHASE. The Code agent's built-in branch orientation step handles git log scanning, file reading, and pattern discovery automatically. After each Code agent with HANDOFF_REQUIRED=true completes, write its phase summary to `{worktree}/.devflow/docs/handoff-{branch_slug}.md` using the Write tool (survives context compaction), keeping any `## Evidence Exceptions` section byte-identical. Delete `{worktree}/.devflow/docs/handoff-{branch_slug}.md` once the PR exists — after the final Code agent, which creates it, completes (cleanup).
+**Handoff Protocol**: Each sequential Code agent receives the prior Code agent's implementation summary via PRIOR_PHASE_SUMMARY and FILES_FROM_PRIOR_PHASE. The Code agent's built-in branch orientation step handles git log scanning, file reading, and pattern discovery automatically. Each Code agent with HANDOFF_REQUIRED=true appends its own `## Phase {N} Implementation Summary` section, at most 8,192 bytes, to `{worktree}/.devflow/docs/handoff-{branch_slug}.md` (survives context compaction), never rewriting an earlier section and keeping any `## Evidence Exceptions` section byte-identical; the next Code agent reads only the section of the phase immediately before its own through HANDOFF_FILE. The orchestrator writes no phase section. Delete `{worktree}/.devflow/docs/handoff-{branch_slug}.md` once the PR exists — after the final Code agent, which creates it, completes (cleanup).
 
 ---
 
@@ -288,7 +302,9 @@ PATTERNS: {patterns}
 CREATE_PR: false
 DOMAIN: {subtask 1 domain}
 FEATURE_KNOWLEDGE: {feature_knowledge}
+<!-- learning:on -->
 DECISIONS_CONTEXT: {decisions_context}
+<!-- learning:end -->
 COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
 ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
@@ -304,7 +320,9 @@ PATTERNS: {patterns}
 CREATE_PR: false
 DOMAIN: {subtask 2 domain}
 FEATURE_KNOWLEDGE: {feature_knowledge}
+<!-- learning:on -->
 DECISIONS_CONTEXT: {decisions_context}
+<!-- learning:end -->
 COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
 ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
@@ -344,8 +362,10 @@ After Simplify agent completes, spawn Scrutinize agent as the quality gate:
 Agent(subagent_type="Scrutinize"):
 "TASK_DESCRIPTION: {task description}
 FILES_CHANGED: {list of files from Code agent output}
+<!-- learning:on -->
 DECISIONS_CONTEXT: {decisions_context}
-FEATURE_KNOWLEDGE: {feature_knowledge}
+<!-- learning:end -->
+FEATURE_KNOWLEDGE: {feature_knowledge_rules}
 Evaluate 9 pillars, fix P0/P1 issues, report status"
 ```
 
@@ -356,7 +376,7 @@ Scrutinize agent reports `### Status: PASS | FIXED | BLOCKED`. **If BLOCKED:** r
 **Produces:** ALIGNMENT_RESULT
 **Requires:** FILES_CHANGED, EXECUTION_PLAN
 
-After Scrutinize agent passes, spawn Evaluate agent to validate alignment. Evaluate agent receives `FEATURE_KNOWLEDGE` as acceptance context only; pattern and anti-pattern judgments belong to Scrutinize agent:
+After Scrutinize agent passes, spawn Evaluate agent to validate alignment. Evaluate agent receives `FEATURE_KNOWLEDGE_RULES` as acceptance context only; pattern and anti-pattern judgments belong to Scrutinize agent:
 
 ```
 Agent(subagent_type="Evaluate"):
@@ -364,7 +384,7 @@ Agent(subagent_type="Evaluate"):
 EXECUTION_PLAN: {execution plan from Phase 1}
 FILES_CHANGED: {list of files from Code agent output}
 ACCEPTANCE_CRITERIA: {extracted criteria if available}
-FEATURE_KNOWLEDGE: {feature_knowledge}
+FEATURE_KNOWLEDGE: {feature_knowledge_rules}
 Validate alignment with request and plan. Report ALIGNED or MISALIGNED with details."
 ```
 
@@ -383,6 +403,9 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
    MISALIGNMENTS: {structured misalignments from Evaluate agent}
    SCOPE: Fix only the listed misalignments, no other changes
    CREATE_PR: false
+   <!-- learning:on -->
+   DECISIONS_CONTEXT: {decisions_context}
+   <!-- learning:end -->
    ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
    ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
    COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"
@@ -417,6 +440,9 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
    VALIDATION_FAILURES: {parsed failures from Validate agent}
    SCOPE: Fix only the listed failures, no other changes
    CREATE_PR: false
+   <!-- learning:on -->
+   DECISIONS_CONTEXT: {decisions_context}
+   <!-- learning:end -->
    ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
    ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
    COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"
@@ -471,6 +497,9 @@ After every Test agent run — PASS or FAIL, first run or retry — append its T
    QA_FAILURES: {structured failures from Test agent}
    SCOPE: Fix only the listed failures, no other changes
    CREATE_PR: false
+   <!-- learning:on -->
+   DECISIONS_CONTEXT: {decisions_context}
+   <!-- learning:end -->
    ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
    ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
    COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"
@@ -517,7 +546,11 @@ git push origin HEAD; echo "exit=$?"
 3. **If NO_PR or NO_CI** → skip: "No PR/CI configured, skipping CI validation." Proceed to Phase 10.
 4. **If PENDING** and fewer than 3 waits have run → wait again (step 1). After the third wait → report "CI still running — verify manually before merging" and proceed.
 5. **If INDETERMINATE** and fewer than 3 waits have run → wait again (step 1). After the third wait → report "CI status unknown — verify manually before merging" and proceed.
+<!-- learning:on -->
+6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Code")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_FRAMEWORKS`, `CI_FAILURES`, `DECISIONS_CONTEXT` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Code agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
+<!-- learning:off -->
 6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Code")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_FRAMEWORKS`, `CI_FAILURES` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Code agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
+<!-- learning:end -->
 7. **Budget**: at most 3 waits and 2 fixes in all. When one is spent, report the current status and proceed.
 <!-- /PATTERN: ci-status-gate -->
 

@@ -16,13 +16,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'fs'
-import * as path from 'path'
-
-import { requireDistFile, requireDistFiles } from '../helpers.js'
-
-const ROOT = path.resolve(import.meta.dirname, '..', '..')
-const KNOWLEDGE_AGENT = path.join(ROOT, 'src', 'assets', 'agents', 'knowledge.md')
+import { requireDistFile, requireDistFiles, resolveAgentSource } from '../helpers.js'
 
 /** The load instructions a spawn prompt must not give, each paired with the prompt site it would appear in. */
 const REDUNDANT_LOADS: ReadonlyArray<readonly [string, string]> = [
@@ -50,7 +44,7 @@ export function collectRedundantKnowledgeLoads(commandText: string): string[] {
 
 describe('the Knowledge agent preloads feature-knowledge (D-KNOWLEDGE-PRELOAD-ONCE)', () => {
   it('the agent lists the skill in its frontmatter and holds no Skill tool', () => {
-    const agent = readFileSync(KNOWLEDGE_AGENT, 'utf-8')
+    const agent = resolveAgentSource('knowledge').content
     expect(frontmatterList(agent, 'skills'), 'the skill must be preloaded for the load instruction to be redundant')
       .toContain('devflow:feature-knowledge')
     const tools = frontmatterList(agent, 'tools')

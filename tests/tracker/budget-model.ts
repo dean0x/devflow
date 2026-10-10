@@ -160,6 +160,37 @@ function providerRefRel(provider: string, op: string): string {
 /** The tool-call contract — a per-spawn cost for every MCP-backed provider, 0 elsewhere. */
 export const MCP_CONTRACT_REL = 'tracker/_mcp.md';
 
+/**
+ * D-TRACKER-CONTRACT-ON-DEMAND — the provider resolution and the tracker input
+ * contract, moved out of the always-loaded agent into one provider-independent
+ * file that a spawn reads once, only when it runs a tracker operation.
+ *
+ * A per-SPAWN term of every tracker row (GitHub, Jira, Linear), charged the way
+ * the tool-call contract is: through {@link contractTerm}, added once in
+ * {@link providerLoadedSet}. It is deliberately NOT part of
+ * {@link ownLoadForProvider}, of the PR-host row or of the per-operation PR-host
+ * cap. ensure-pr-ready is both a PR-host and a tracker operation, and its PR-host
+ * load already sits within a few characters of the lower-only per-op cap, so
+ * charging it the contract there would breach a ceiling that cannot be raised.
+ * Its full cost, contract included, is priced through the tracker rows, where it
+ * is already a candidate. The PR-host row therefore keeps measuring the `pr/` tree
+ * that PR-only operations load.
+ *
+ * Unlike the tool-call contract it is billed on EVERY provider, the GitHub path
+ * included: it is generated ungated and every install carries it.
+ */
+export const CONTRACT_REL = 'tracker/_contract.md';
+
+/** The per-spawn contract documents one provider's tracker spawn reads, in read order. */
+export function contractTermRels(provider: string): readonly string[] {
+  return MCP_BACKED_PROVIDERS.includes(provider) ? [CONTRACT_REL, MCP_CONTRACT_REL] : [CONTRACT_REL];
+}
+
+const CONTRACT_PATH = path.join(REFS_DIR, ...CONTRACT_REL.split('/'));
+/** The compiled tracker contract, measured at module scope so an unbuilt tree fails at load. */
+export const contractMd = measureRequired('dist/skills/git/references/tracker/_contract.md', CONTRACT_PATH);
+const CONTRACT_CONTENT = readFileSync(CONTRACT_PATH, 'utf-8');
+
 // ---------------------------------------------------------------------------
 // The compiled agent, sectioned by operation
 // ---------------------------------------------------------------------------
@@ -194,11 +225,11 @@ function referenceMentions(text: string): string[] {
  * derived by SCANNING the compiled agent, independently of the model below.
  *
  * Two sources:
- *   - the preamble's single templated load instruction, instantiated for this op
- *     (registered tracker ops only);
+ *   - the loading section's single templated load instruction, instantiated for this
+ *     op (registered tracker ops only);
  *   - any literal `references/<name>.md` named inside the op's own section.
  * A templated mention inside a section is skipped: it is a restatement of the
- * preamble's instruction, not a second file.
+ * loading section's instruction, not a second file.
  *
  * ONE HOP, and exactly one (#326). A `pr/` reference the op's own section names is
  * itself loaded text, and what IT names is loaded in the same spawn — so pricing
@@ -315,11 +346,13 @@ export const MODEL_CROSS_CUTTING_ON_DEMAND: readonly string[] = ['decision-marke
  * The cross-cutting references the always-loaded part names that ARE asserted —
  * the other half of the same declaration, kept beside it rather than folded in.
  *
- * `tracker/_mcp.md` is named from the preamble because it is read once per SPAWN
- * under every non-github provider, and its cost is already a summed term of the
- * per-provider rows (`providerLoadedSet`), billed 0 on the GitHub path by
- * construction. So it is exactly the case ON_DEMAND is not: not a glossary a
- * reader may consult, but a contract the spawn must have.
+ * `tracker/_mcp.md` and `tracker/_contract.md` are named from the retained
+ * `## Loading the mechanics` section because each is read once per SPAWN — the
+ * first under every non-github provider, the second under every provider — and
+ * their cost is already a summed term of the per-provider rows
+ * (`providerLoadedSet`, through `contractTerm`). So they are exactly the case
+ * ON_DEMAND is not: not a glossary a reader may consult, but a contract the spawn
+ * must have.
  *
  * Two lists rather than one, because the scope check and the printed table want
  * different answers. The scope check asks "does the model know the agent can name
@@ -327,7 +360,7 @@ export const MODEL_CROSS_CUTTING_ON_DEMAND: readonly string[] = ['decision-marke
  * the on-demand ones as mandatory?" and must see only the first — a contract
  * already inside the asserted gate would be counted twice there.
  */
-export const MODEL_CROSS_CUTTING_ASSERTED: readonly string[] = [MCP_CONTRACT_REL];
+export const MODEL_CROSS_CUTTING_ASSERTED: readonly string[] = [MCP_CONTRACT_REL, CONTRACT_REL];
 
 /**
  * The cross-cutting references the BUDGET MODEL attributes to each operation,
@@ -625,9 +658,19 @@ export function worstCaseProviderLoad(provider: string): OpMax {
   return maxOver(TRACKER_OPS, op => loadChars(summedForProvider(provider, op)));
 }
 
-/** The per-spawn tool-call contract: its size under an MCP-backed provider, 0 on every other path. */
+/**
+ * The per-spawn contract term: a SUM of the contract documents a tracker spawn
+ * reads once, whatever operation it runs (D-TRACKER-CONTRACT-ON-DEMAND).
+ *
+ *   - `tracker/_contract.md` — every provider, the GitHub path included;
+ *   - `tracker/_mcp.md` — the tool-call contract, only under an MCP-backed
+ *     provider, 0 on the GitHub path.
+ *
+ * Read by the tracker rows through {@link providerLoadedSet} and by no PR-host
+ * row: a PR-only spawn reads neither file.
+ */
 export function contractTerm(provider: string): number {
-  return MCP_BACKED_PROVIDERS.includes(provider) ? referenceChars(MCP_CONTRACT_REL) : 0;
+  return contractTermRels(provider).reduce((n, rel) => n + referenceChars(rel), 0);
 }
 
 /**
@@ -638,7 +681,7 @@ export function contractTerm(provider: string): number {
  * nothing besides:
  *
  *   the always-preloaded set
- *   + the per-spawn contract term (0 on the GitHub path)
+ *   + the per-spawn contract term (_contract.md, plus _mcp.md off the GitHub path)
  *   + max over TRACKER ops of chars(summedForProvider(provider, op))
  *
  * The rows used to add a fourth term, `max_op chars(tracker/{provider}/{op}.md)`, and
@@ -1030,13 +1073,14 @@ export const AGENT_ALWAYS_LOADED = 'agents/git.md';
 
 /**
  * Every body a Git spawn holds before it runs any operation: the agent above its
- * first `## Operation:` heading, the two preloaded skills, and the tool-call contract
- * an MCP-backed provider reads once per spawn.
+ * first `## Operation:` heading, the two preloaded skills, and the contract documents
+ * a tracker spawn reads once (`_contract.md` on every provider, the tool-call
+ * contract `_mcp.md` under an MCP-backed one).
  *
  * Held to a STRICTER rule than a per-op body — no hop at all. An op named here as a
  * load would be paid by every spawn, which no per-op row can express, so the only
  * mentions allowed are the `## Operations` dispatch table (the agent's index of
- * itself) and INFORMATIONAL_OP_MENTIONS rows. The project-key preamble line used to
+ * itself) and INFORMATIONAL_OP_MENTIONS rows. The project-key line, then in the agent's preamble, used to
  * send every spawn to the `learn-conventions` operation's UNTRUSTED-strings block, a
  * reference loaded only when .devflow/conventions.md is absent; it now states the rule
  * itself, and this is what keeps the pointer from coming back.
@@ -1055,8 +1099,10 @@ export function alwaysLoadedBodies(
       text: readFileSync(path.join(skillsDir(), 'worktree-support', 'SKILL.md'), 'utf-8'),
     },
   ];
-  const contract = readReference(MCP_CONTRACT_REL);
-  if (contract !== null) bodies.push({ file: MCP_CONTRACT_REL, text: contract });
+  for (const rel of [CONTRACT_REL, MCP_CONTRACT_REL]) {
+    const contract = readReference(rel);
+    if (contract !== null) bodies.push({ file: rel, text: contract });
+  }
   return bodies;
 }
 
@@ -1066,38 +1112,69 @@ export function dispatchRowOp(line: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// The preamble block
+// The contract block and the loading section
 // ---------------------------------------------------------------------------
 
-const PREAMBLE_START = '## Tracker provider resolution';
+/** Line 1 of the compiled `_contract.md`: its one unfenced level-2 title. */
+export const CONTRACT_TITLE = '## Tracker contract';
+/** The two sections the moved text sits under, in order. */
+export const CONTRACT_SECTIONS = ['### Tracker provider resolution', '### Tracker input contract'] as const;
+
+/**
+ * The tracker contract as it appears in the compiled `tracker/_contract.md` — the
+ * block `PREAMBLE_MAX_LINES` bounds, and the one the provider-selection checks
+ * parse the settings-line grammar, the static map and the fail-closed line from.
+ *
+ * Throws — never returns a sentinel — when the file does not open with its title
+ * or lacks either section, in order: a budget that silently measured an empty
+ * block would report 0 lines and pass.
+ */
+export function contractBlock(content: string = CONTRACT_CONTENT): string {
+  if (!content.startsWith(`${CONTRACT_TITLE}\n`)) {
+    throw new Error(
+      `${CONTRACT_REL} must open with '${CONTRACT_TITLE}' on line 1 — the contract is missing or was renamed`,
+    );
+  }
+  let at = 0;
+  for (const heading of CONTRACT_SECTIONS) {
+    const found = content.indexOf(`\n${heading}\n`, at);
+    if (found === -1) {
+      throw new Error(`'${heading}' not found, or out of order, in ${CONTRACT_REL}`);
+    }
+    at = found + 1;
+  }
+  return content.replace(/\n+$/, '');
+}
+
+const LOADING_START = '## Loading the mechanics';
 // P2-S5 cut 2 moved `## Publication gate (D10)` into references/publication-gate.md,
-// so the heading that now follows the preamble is the D11 section — the one
+// so the heading that now follows the loading section is the D11 section — the one
 // cross-cutting block §14.4 forbids ever moving, which makes it a stabler end
 // anchor than the one it replaces.
-const PREAMBLE_END = '## Comment-sink scrub (D11)';
+const LOADING_END = '## Comment-sink scrub (D11)';
 const D4_ANCHOR = '**Degradation contract (D4):**';
 
 /**
- * The provider-resolution preamble as it appears in the compiled agent.
- * Throws — never returns a sentinel — when the block is absent or misplaced: a
- * budget that silently measured an empty preamble would report 0 lines and pass.
+ * The retained loading section as it appears in the compiled agent: the PR-mechanics
+ * load rule, the merged step order and the one templated tracker load line.
+ * Throws when the section is absent or misplaced, for the reason above.
  */
-export function preambleBlock(content: string): string {
-  const start = content.indexOf(PREAMBLE_START);
-  const end = content.indexOf(PREAMBLE_END);
+export function loadingBlock(content: string = GIT_AGENT.content): string {
+  const start = content.indexOf(LOADING_START);
+  const end = content.indexOf(LOADING_END);
   const d4 = content.indexOf(D4_ANCHOR);
   if (start === -1) {
     throw new Error(
-      `preamble heading '${PREAMBLE_START}' not found in ${GIT_AGENT.path} — ` +
-      'the provider-resolution preamble is missing or was renamed (AC-2.5, P2-S3)',
+      `loading heading '${LOADING_START}' not found in ${GIT_AGENT.path} — ` +
+      'the retained loading section is missing or was renamed (D-TRACKER-CONTRACT-ON-DEMAND)',
     );
   }
-  if (end === -1) throw new Error(`'${PREAMBLE_END}' not found in ${GIT_AGENT.path}`);
+  if (end === -1) throw new Error(`'${LOADING_END}' not found in ${GIT_AGENT.path}`);
   if (d4 === -1) throw new Error(`'${D4_ANCHOR}' not found in ${GIT_AGENT.path}`);
   if (!(d4 < start && start < end)) {
     throw new Error(
-      'the preamble must sit between the Degradation contract (D4) block and ' +
-      `'${PREAMBLE_END}' — found D4@${d4}, preamble@${start}, gate@${end}`,
+      'the loading section must sit between the Degradation contract (D4) block and ' +
+      `'${LOADING_END}' — found D4@${d4}, loading@${start}, gate@${end}`,
     );
   }
   return content.slice(start, end).replace(/\n+$/, '');

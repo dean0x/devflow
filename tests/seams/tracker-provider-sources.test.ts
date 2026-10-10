@@ -2,7 +2,9 @@
  * Reader ↔ writer seam: every provider source the Git agent can resolve from must
  * be one some writer actually lifecycles.
  *
- * The READER is the Git agent's preamble. It resolves the provider from ONE
+ * The READER is the provider-resolution section of the tracker contract
+ * (`_contract.mds`, which left the always-loaded Git agent in
+ * D-TRACKER-CONTRACT-ON-DEMAND and which a tracker spawn reads once). It resolves the provider from ONE
  * source: the closed-vocabulary line `resolve-settings.cjs` prints, which folds
  * the team's committed `.devflow/project.json`, the personal `.devflow/config.json`
  * and the machine manifest (D-SETTINGS-LINE). The WRITER is session-start
@@ -30,7 +32,7 @@
  * prove against the script; this file asserts the prompt still says what the
  * refusal is, because that is where the user is told how to leave the state.
  *
- * Both sides are read from the shipped files — the agent host (a generated
+ * Both sides are read from the shipped files — the contract source (a generated
  * artifact tsc never sees) and the hook. Every collector is driven by a
  * known-bad sample in the same `it`, so no arm can pass because an extractor
  * silently stopped returning anything.
@@ -43,7 +45,8 @@ import * as path from 'path';
 import { scriptsDir } from '../../src/core/assets.js';
 import { ROOT } from '../helpers.js';
 
-const GIT_AGENT_HOST = path.join(ROOT, 'src', 'assets', 'agents', 'git.mds');
+const CONTRACT_HOST = path.join(ROOT, 'src', 'assets', 'mds', 'tracker', '_contract.mds');
+const CONTRACT_HEADING = '### Tracker provider resolution';
 const CONTEXT_HOOK = path.join(scriptsDir(), 'hooks', 'session-start-context');
 
 /** The canonical §14.2 reason a refused personal override resolves to. */
@@ -87,13 +90,23 @@ function sourcesNamedIn(text: string): string[] {
 // Named collectors — the reader
 // ---------------------------------------------------------------------------
 
-/** The Git agent's provider-resolution preamble, from its heading to the next `## `. */
+/**
+ * The provider-resolution section of the tracker contract, from its heading to the next
+ * column-0 heading. Returns '' when the heading is missing — which is why the
+ * liveness arm asks {@link collectMissingResolution} first, so an absent heading is a
+ * named defect and not a source set of `[]` that every later arm agrees with.
+ */
 export function resolutionPreamble(source: string): string {
-  const at = source.indexOf('## Tracker provider resolution');
+  const at = source.indexOf(CONTRACT_HEADING);
   if (at === -1) return '';
-  const rest = source.slice(at + 1);
-  const next = rest.search(/^## /m);
-  return next === -1 ? source.slice(at) : source.slice(at, at + 1 + next);
+  const from = at + CONTRACT_HEADING.length;
+  const next = source.slice(from).search(/^##{1,2} /m);
+  return next === -1 ? source.slice(at) : source.slice(at, from + next);
+}
+
+/** Named collector: the defect a missing heading is, so an empty section cannot pass vacuously. */
+export function collectMissingResolution(preamble: string): string[] {
+  return preamble === '' ? [`the tracker contract has no \`${CONTRACT_HEADING}\` section`] : [];
 }
 
 /**
@@ -167,11 +180,23 @@ export function collectUnlifecycledSources(reader: readonly string[], writer: re
 // ---------------------------------------------------------------------------
 
 describe('tracker provider sources: the reader admits no source the writer never lifecycles', () => {
-  const preamble = resolutionPreamble(readFileSync(GIT_AGENT_HOST, 'utf-8'));
+  const contractSource = readFileSync(CONTRACT_HOST, 'utf-8');
+  const preamble = resolutionPreamble(contractSource);
   const writer = collectWriterSources(section3(readFileSync(CONTEXT_HOOK, 'utf-8')));
 
+  it('a missing provider-resolution heading is a named defect, not a vacuous pass', () => {
+    expect(collectMissingResolution(preamble), 'the shipped contract has its section').toEqual([]);
+    const renamed = contractSource.replace(CONTRACT_HEADING, '### Tracker provider selection');
+    expect(renamed, 'the probe must change the source').not.toBe(contractSource);
+    expect(
+      collectMissingResolution(resolutionPreamble(renamed)),
+      'with the heading gone the section is empty, and the arms below would compare nothing with nothing',
+    ).toHaveLength(1);
+    expect(collectMissingResolution(resolutionPreamble('no heading here'))).toHaveLength(1);
+  });
+
   it('the preamble resolves from the settings line alone (collector is live)', () => {
-    expect(preamble, 'the Git agent host has no provider-resolution preamble').not.toBe('');
+    expect(collectMissingResolution(preamble), 'the tracker contract has no provider-resolution section').toEqual([]);
     expect(
       collectReaderSources(preamble),
       'the preamble must resolve the provider from resolve-settings.cjs and name no config file ' +
@@ -181,7 +206,7 @@ describe('tracker provider sources: the reader admits no source the writer never
     // Known-bad, same it: the pre-#393 two-rung order is classified source by
     // source, and text without a preamble heading is no preamble.
     const seeded = collectReaderSources(
-      '## Tracker provider resolution\n- (1) the `tracker` key in `.devflow/config.json`; ' +
+      '### Tracker provider resolution\n- (1) the `tracker` key in `.devflow/config.json`; ' +
         '(2) `~/.devflow/manifest.json` key `features.tracker.provider`; (3) `github`.\n',
     );
     expect(seeded).toEqual(['manifest', 'personal-file']);

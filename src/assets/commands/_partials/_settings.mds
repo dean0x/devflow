@@ -3,11 +3,19 @@ A partial: the one way a prompt learns the repository's settings (D-SETTINGS-LIN
 machine manifest for a value this line carries — `resolve-settings.cjs` folds all
 three, and `tests/guards/no-config-read.test.ts` holds every compiled prompt to it.
 
-Imported by `_publication.mds`, `_compliance.mds` and `_knowledge.mds` themselves,
-as ALIAS imports (a selective import deep-clones this module's scope into every
-define of the importer). A command that runs two of those gates carries the
-block twice; the text says "reuse a line this run already resolved for the same
-root", so the second copy costs bytes and never a second resolution.
+Each command host that has a consumer imports this file itself, as an ALIAS import
+(a selective import deep-clones this module's scope into every define of the
+importer), and expands `settings_resolve()` exactly once, immediately before the
+earliest of its consumers: its decisions load or gate, its compliance lens, its
+publication gate, its knowledge write-back Step 1, or a Skim spawn that takes
+`LEARNING`. The gate partials import nothing from here: their text refers to the
+settings line resolved above and keeps each gate's own condition inside its own step.
+
+The block stays a per-root procedure: "reusing a line this run already resolved for
+the same root". A consumer whose `{root}` may differ from the first-resolved root
+names that root and says its line is the one for that root, resolved by the block
+above when this run has not yet resolved it. The guard counts textual invocations,
+not runtime calls.
 
 The accepted shape below is `SETTINGS_LINE_RE` written out, and the fallback is
 `SETTINGS_FAIL_CLOSED_LINE`, both exported by `resolve-settings.cjs`;

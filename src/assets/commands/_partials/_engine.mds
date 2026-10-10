@@ -60,12 +60,20 @@ It returns `{"verdict": "PASS" | "FAIL", "rationale": "..."}`: FAIL when either 
 The standard implementation unit for one ticket. Run in order:
 
 ```
-Code(agentType:"Code", prompt: "OPERATION: implement" first line, then full task + plan + DECISIONS_CONTEXT + handoff if sequential)
+<!-- learning:on -->
+Code(agentType:"Code", prompt: "OPERATION: implement" first line, then full task + plan + DECISIONS_CONTEXT + COMPLIANCE_FRAMEWORKS + handoff if sequential)
+<!-- learning:off -->
+Code(agentType:"Code", prompt: "OPERATION: implement" first line, then full task + plan + COMPLIANCE_FRAMEWORKS + handoff if sequential)
+<!-- learning:end -->
   → gate1_postcode()
   → gate2_acceptance()   ← Gate 2 runs HERE — before the review pass, not after
 ```
 
+<!-- learning:on -->
 Every Code agent prompt opens with `OPERATION: <mode>` as its first line (`implement`, `issue-fix`, `validation-fix`, `alignment-fix` or `qa-fix`). It must include: task description, implementation plan (if one exists), relevant DECISIONS_CONTEXT (the index you loaded before authoring), the compliance lens (`COMPLIANCE_FRAMEWORKS` — every Code prompt carries it, fix prompts included), and any PRIOR_PHASE_SUMMARY / HANDOFF_FILE for sequential multi-phase tickets.
+<!-- learning:off -->
+Every Code agent prompt opens with `OPERATION: <mode>` as its first line (`implement`, `issue-fix`, `validation-fix`, `alignment-fix` or `qa-fix`). It must include: task description, implementation plan (if one exists), the compliance lens (`COMPLIANCE_FRAMEWORKS` — every Code prompt carries it, fix prompts included), and any PRIOR_PHASE_SUMMARY / HANDOFF_FILE for sequential multi-phase tickets.
+<!-- learning:end -->
 
 Gate 2 runs at implementation acceptance — this matches devflow's deliberate placement: "evaluation is part of implementation acceptance, not post-review" (§6.1).
 @end

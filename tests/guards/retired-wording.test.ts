@@ -86,8 +86,8 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
       'src/assets/', 'src/core/', 'src/cli/', 'src/targets/', 'src/hud/',
       'dist/', 'docs/', 'CLAUDE.md', 'README.md', 'CONTRIBUTING.md',
     ],
-    removedFrom: 'src/assets/commands/release.md',
-    justification: 'Untruthful claim deleted from release.md in A1 (AC-0.14)',
+    removedFrom: 'src/assets/commands/release.mds',
+    justification: 'Untruthful claim deleted from release.mds in A1 (AC-0.14)',
   },
   {
     literal: 'may pre-fetch',

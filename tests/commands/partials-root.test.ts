@@ -13,9 +13,10 @@
  * docs-root.test.ts holds the paths to it, and this file runs its command. Both used to read from cwd, so a session started in `packages/app`
  * loaded `(none)` and a write-back committed `packages/app/.devflow/features`.
  * The other decisions readers follow the same ledger: the dynamic commands'
- * authoring preamble calls `decisions_locate`, the static release.md carries a
- * word-for-word copy of it, and the Code agent's fallback resolves the main
- * worktree from the common git directory.
+ * `authoring_decisions` step (all four dynamic hosts, dynamic-profile included)
+ * and the release command both expand `decisions_locate`. No agent reads the
+ * index for itself any more (the Code agent's fallback is gone, #426), and
+ * every expansion sits behind the `decisions_gate` sentence.
  *
  * The rule is prose an LLM follows around ONE git command. The test extracts that
  * command from every compiled command that carries the loader, runs it verbatim
@@ -29,10 +30,10 @@ import { execSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { requireDistFile, requireDistFiles } from '../helpers.js';
+import { requireDistFile, requireDistFiles, resolveAgentSource } from '../helpers.js';
 
 const DECISIONS_HEADING = '### Load DECISIONS_CONTEXT';
-const PREAMBLE_DECISIONS_HEADING = '### DECISIONS_CONTEXT — obtain BEFORE authoring';
+const AUTHORING_DECISIONS_HEADING = '### DECISIONS_CONTEXT — obtain BEFORE authoring';
 const RELEASE_CONTEXT_HEADING = '### Phase 1b: Load Context';
 const KNOWLEDGE_HEADING = '### Load Feature Knowledge';
 const WRITEBACK_HEADING = '### Feature Knowledge Write-Back (Conditional)';
@@ -246,11 +247,11 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
   });
 
   it('the dynamic commands locate the main ledger by the same rule before authoring', () => {
-    const hosts = knowledgeHosts(PREAMBLE_DECISIONS_HEADING)
-    // Non-vacuity: every command that loads the authoring preamble.
+    const hosts = knowledgeHosts(AUTHORING_DECISIONS_HEADING)
+    // Non-vacuity: every command that expands authoring_decisions, once each.
     expect(hosts.sort()).toEqual(['dynamic-build.md', 'dynamic-plan.md', 'dynamic-profile.md', 'dynamic-tickets.md'])
     for (const file of hosts) {
-      const section = sectionOf(requireDistFile(file), PREAMBLE_DECISIONS_HEADING)
+      const section = sectionOf(requireDistFile(file), AUTHORING_DECISIONS_HEADING)
       expect(collectGitCommand(section), `${file}: the resolution command`).toBe(
         'git -C "{start}" rev-parse --path-format=absolute --show-toplevel --git-common-dir',
       )
@@ -260,39 +261,46 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
         expect(section, `${file}: ${arm}`).toContain(arm)
       }
     }
-    const command = collectGitCommand(sectionOf(requireDistFile(hosts[0]), PREAMBLE_DECISIONS_HEADING))
+    const command = collectGitCommand(sectionOf(requireDistFile(hosts[0]), AUTHORING_DECISIONS_HEADING))
     expect(ledgerFrom(runFromStart(command as string, wt), wt)).toBe(main)
   })
 
-  it('release.md carries the decisions locate rule word for word and reads the index from the ledger it names', () => {
-    // release.md is a static command and cannot import the partial, so its copy is
-    // pinned to the define body: an edit to one without the other goes red here.
+  it('release.md expands the decisions locate rule behind the learning gate and reads the index from the ledger it names', () => {
+    // release.mds imports the two defines, so the compiled section is the define bodies.
     const partial = fs.readFileSync(
       path.resolve(import.meta.dirname, '..', '..', 'src', 'assets', 'commands', '_partials', '_decisions.mds'),
       'utf-8',
     )
     const locate = /^@define decisions_locate\(\):\n([\s\S]*?)\n@end$/m.exec(partial)?.[1] ?? ''
     expect(locate, 'the locate define body').toContain('**The main worktree**')
+    const gate = /^@define decisions_gate\(\):\n([\s\S]*?)\n@end$/m.exec(partial)?.[1] ?? ''
+    expect(gate, 'the gate define body').toContain('`LEARNING=off`')
     const release = sectionOf(requireDistFile('release.md'), RELEASE_CONTEXT_HEADING)
     expect(release).toContain(locate)
-    expect(release).toContain('Read `{ledger}/.devflow/learning/index.md`.')
+    expect(release.indexOf(gate), 'the gate sentence comes first').toBeGreaterThan(-1)
+    expect(release.indexOf(gate), 'the gate precedes the locate call').toBeLessThan(release.indexOf(locate))
+    expect(release.indexOf(locate), 'the locate call precedes the index read')
+      .toBeLessThan(release.indexOf('Read `{ledger}/.devflow/learning/index.md`.'))
     expect(ledgerFrom(runFromStart(collectGitCommand(release) as string, wt), wt)).toBe(main)
   })
 
-  it('the Code agent fallback names the main worktree index from a linked worktree', () => {
-    const code = fs.readFileSync(
-      path.resolve(import.meta.dirname, '..', '..', 'src', 'assets', 'agents', 'code.md'),
+  it('release.mds copies none of the locate text: it expands the define', () => {
+    const source = fs.readFileSync(
+      path.resolve(import.meta.dirname, '..', '..', 'src', 'assets', 'commands', 'release.mds'),
       'utf-8',
     )
-    const command = /`(git rev-parse --path-format=absolute --git-common-dir)`; when it ends in `\/\.git` the index lives under its parent/
-      .exec(code)?.[1]
-    expect(command, 'the fallback command and its rule').toBeDefined()
-    for (const [label, start] of [['root', main], ['subdir', sub], ['worktree', wt]] as const) {
-      const out = spawnSync('bash', ['-c', `cd "$1" && ${command as string}`, '_', start], { encoding: 'utf-8' })
-      const common = out.stdout.trim()
-      expect(common.endsWith('/.git'), `${label}: ${common}`).toBe(true)
-      expect(fs.realpathSync(path.dirname(common)), label).toBe(main)
-    }
+    expect(source).toContain('{{decisions_locate()}}')
+    expect(source).not.toContain('The decisions ledger belongs to the repository')
+    expect(source).not.toContain('--path-format=absolute')
+  })
+
+  it('no agent source tells its agent to resolve the main-worktree ledger for itself, except Skim\'s TL;DR read', () => {
+    // The Code agent used to carry a fallback that located the index from the
+    // common git directory; it takes DECISIONS_CONTEXT or nothing.
+    const code = resolveAgentSource('code').content
+    expect(code).not.toContain('--git-common-dir')
+    expect(code).not.toContain('Otherwise read the decisions index')
+    expect(resolveAgentSource('skim').content, 'the one read left is a different file: the decisions TL;DR').toContain('--git-common-dir')
   })
 
   it('known-bad probe: reading from cwd misses the ledger from a subdirectory and a worktree', () => {

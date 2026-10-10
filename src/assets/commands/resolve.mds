@@ -7,6 +7,7 @@ output-dir: dist/commands
 @import { evidence_policy } from "./_partials/_evidence_policy.mds"
 @import { publication_gate } from "./_partials/_publication.mds"
 @import "./_partials/_compliance.mds" as compliance
+@import "./_partials/_settings.mds" as settings
 # Resolve Command
 
 Process issues from code review reports: triage every issue through the blast-radius disposition matrix, fix FIX_NOW items with Code agents, verify fixes with a Validate agent gate, and track FIX_SEPARATE/TECH_DEBT items as manage-debt tickets. Defaults to the latest timestamped review directory. Supports multi-worktree auto-discovery.
@@ -89,14 +90,25 @@ For each worktree:
 
 Set `TARGET_DIR` to the selected review or bug-analysis directory path, and `TARGET_DIR_REL` to the same directory relative to the worktree root (`.devflow/docs/reviews/…` or `.devflow/docs/bug-analysis/…`) — the only form of it that may reach a PR comment.
 
+<!-- learning:on -->
 #### Step 0d: Load Project Decisions
+<!-- learning:off -->
+#### Step 0d: Load Project Context
+<!-- learning:end -->
 
-**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, REVIEW_PUBLICATION, RESOLUTION_TS
+<!-- learning:on -->
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, REVIEW_PUBLICATION, RESOLUTION_TS
+<!-- learning:off -->
+**Produces:** FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, REVIEW_PUBLICATION, RESOLUTION_TS
+<!-- learning:end -->
+
+{{settings.settings_resolve()}}
 
 {{decisions_load()}}
-
+<!-- learning:on -->
 This produces a compact index of active ADR/PF entries written at render time — Deprecated/Superseded entries are already stripped. Pass `DECISIONS_CONTEXT` to the Triage agent in Phase 2 and to Code agents in Phase 4.
 
+<!-- learning:end -->
 {{knowledge_load()}}
 
 Pass `FEATURE_KNOWLEDGE` to the Triage agent in Phase 2.
@@ -159,7 +171,11 @@ Parse `THREAD_MAP` from Git agent output. If Git agent returns `TRACEABILITY: DE
 ### Phase 2: Global Triage
 
 **Produces:** TRIAGE_RESULTS
+<!-- learning:on -->
 **Requires:** ISSUES, DIFF_FILES, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION
+<!-- learning:off -->
+**Requires:** ISSUES, DIFF_FILES, FEATURE_KNOWLEDGE, PR_DESCRIPTION
+<!-- learning:end -->
 
 Spawn a single global Triage agent for ALL issues:
 
@@ -168,11 +184,15 @@ Agent(subagent_type="Triage"):
 "ISSUES: {all_issues}
 DIFF_FILES: {diff_files}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
+<!-- learning:on -->
 DECISIONS_CONTEXT: {decisions_context}
+<!-- learning:end -->
 FEATURE_KNOWLEDGE: {feature_knowledge}
 PR_DESCRIPTION: <pr-description>{pr_description}</pr-description>
 Triage every issue: collapse duplicates first, then apply the blast-radius disposition matrix to each group's primary. Assign exactly one verdict per issue.
+<!-- learning:on -->
 Follow devflow:apply-decisions to Read full ADR/PF bodies on demand.
+<!-- learning:end -->
 Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE."
 ```
 
@@ -185,8 +205,10 @@ Wait for Triage agent to complete before proceeding. Parse verdict ledger from T
 - **TECH_DEBT**: Architectural overhaul only — LAST RESORT
 - **DUPLICATE**: Collapsed duplicate issue — carries `duplicate_of: <primary-id>` referencing the non-DUPLICATE primary; inherits the primary's outcome
 
+<!-- learning:on -->
 Collect every decision and pitfall the Triage agent's Reasoning columns state, in its words — the resolution summary is posted, so it never carries an ADR/PF ID.
 
+<!-- learning:end -->
 **Triage agent completeness assertion:** Verify the parsed ledger against ISSUES before proceeding:
 1. Every issue `id` from ISSUES must appear in exactly one verdict bucket — none may vanish, none may appear in multiple buckets. DUPLICATE is a valid bucket; a valid DUPLICATE entry must name its `duplicate_of` primary (the `Duplicate Of` column of the ledger's DUPLICATE table) and that primary must be a non-DUPLICATE issue id. A missing `duplicate_of` or one that chains to another DUPLICATE is a **Triage agent failure** (retry-then-abort as below).
 2. If the Triage agent output is empty, contains a skill re-entrancy guard string (e.g., contains `already running`), or is missing any issue IDs from ISSUES: treat as a **Triage agent failure**:
@@ -210,7 +232,11 @@ Otherwise, batch FIX_NOW issues for Code agent execution. **DUPLICATE issues are
 ### Phase 4: Fix (Code agent × N)
 
 **Produces:** CODE_AGENT_RESULTS
+<!-- learning:on -->
 **Requires:** BATCHES, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
+<!-- learning:off -->
+**Requires:** BATCHES, FEATURE_KNOWLEDGE
+<!-- learning:end -->
 
 For each batch, spawn Code agent with `OPERATION: issue-fix` and `PUSH: false`:
 
@@ -223,7 +249,9 @@ SCOPE: {risk_tier_per_issue}
 PUSH: false
 CREATE_PR: false
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
+<!-- learning:on -->
 DECISIONS_CONTEXT: {decisions_context}
+<!-- learning:end -->
 FEATURE_KNOWLEDGE: {feature_knowledge}
 COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}
 Fix only the listed pre-classified FIX_NOW issues. Do not re-litigate dispositions.
@@ -298,6 +326,9 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
    PUSH: false
    CREATE_PR: false
    WORKTREE_PATH: {worktree_path}  (omit if cwd)
+   <!-- learning:on -->
+   DECISIONS_CONTEXT: {decisions_context}
+   <!-- learning:end -->
    COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"
    ```
    - Loop back to re-validate
@@ -346,7 +377,11 @@ Phase 7 has pushed already, so this is a no-op unless the head moved since. `exi
 3. **If NO_PR or NO_CI** → skip: "No PR/CI configured, skipping CI validation." Proceed to next phase.
 4. **If PENDING** and fewer than 3 waits have run → wait again (step 1). After the third wait → report "CI still running — verify manually before merging" and proceed.
 5. **If INDETERMINATE** and fewer than 3 waits have run → wait again (step 1). After the third wait → report "CI status unknown — verify manually before merging" and proceed.
+<!-- learning:on -->
+6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Code")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_FRAMEWORKS`, `CI_FAILURES`, `DECISIONS_CONTEXT` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Code agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
+<!-- learning:off -->
 6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Code")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_FRAMEWORKS`, `CI_FAILURES` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Code agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
+<!-- learning:end -->
 7. **Budget**: at most 3 waits and 2 fixes in all, per worktree. When one is spent, report the current status and proceed.
 <!-- /PATTERN: ci-status-gate -->
 
@@ -557,7 +592,11 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 │  ├─ Step 0a: git worktree list → filter resolvable
 │  ├─ Step 0b: Git agent (validate-branch) per worktree [parallel] ← + DIFF_FILES
 │  ├─ Step 0c: Target latest review directory per worktree
+<!-- learning:on -->
 │  └─ Step 0d: Load project decisions → DECISIONS_CONTEXT + EVIDENCE_POLICY + REVIEW_PUBLICATION
+<!-- learning:off -->
+│  └─ Step 0d: Load project context → EVIDENCE_POLICY + REVIEW_PUBLICATION
+<!-- learning:end -->
 │
 ├─ Phase 1: Parse issues from TARGET_DIR + extract confidence %
 │
@@ -651,12 +690,14 @@ Written in Phase 5 (Collect Results) to `{TARGET_DIR}/resolution-summary.md`:
 **Review**: {TARGET_DIR_REL}
 **Command**: /resolve
 
+<!-- learning:on -->
 ## Decisions Citations
 
 - {decision applied or pitfall avoided, stated in words — never its ID} — {batch-id}, {issue-id}
 
 (Omit section if no citations were made)
 
+<!-- learning:end -->
 ## Statistics
 | Metric | Value |
 |--------|-------|

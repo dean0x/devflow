@@ -175,6 +175,57 @@ describe('readMachineFeature / writeMachineFeature (I/O)', () => {
     expect('learning' in after.features).toBe(false);
   });
 
+  describe('a toggle to the value the manifest already records leaves it untouched (D-NOOP-TOGGLE)', () => {
+    // Compact, one-line JSON: a rewrite would re-indent it, so equal bytes prove no write happened.
+    const recorded = (features: Record<string, unknown>): string =>
+      JSON.stringify({ version: '1', plugins: ['p'], features, updatedAt: 'old' });
+
+    it.each([
+      ['memory', true], ['memory', false],
+      ['learning', true], ['learning', false],
+      ['knowledge', true], ['knowledge', false],
+    ] as const)('%s=%s: writeMachineFeature to the same value leaves the manifest byte-identical', async (feature, value) => {
+      const body = recorded({ ambient: true, [feature]: value });
+      await writeManifest(body);
+
+      expect(await writeMachineFeature(devflowDir, feature, value)).toEqual({ ok: true, value: undefined });
+
+      expect(await fs.readFile(manifestPath(), 'utf-8')).toBe(body);
+    });
+
+    it('a different value is still written, and refreshes updatedAt', async () => {
+      await writeManifest(recorded({ learning: true }));
+      await writeMachineFeature(devflowDir, 'learning', false);
+      const after = await readRaw();
+      expect(after.features.learning).toBe(false);
+      expect(after.updatedAt).not.toBe('old');
+    });
+
+    it('an absent key is not "already recorded": the explicit value is written', async () => {
+      await writeManifest(recorded({ ambient: true }));
+      await writeMachineFeature(devflowDir, 'learning', true);
+      expect((await readRaw()).features).toEqual({ ambient: true, learning: true });
+    });
+
+    it('a legacy key is not "already recorded" either: decisions:false then --disable writes learning:false', async () => {
+      await writeManifest(recorded({ decisions: false }));
+      await writeMachineFeature(devflowDir, 'learning', false);
+      expect((await readRaw()).features).toEqual({ decisions: false, learning: false });
+    });
+
+    it('a non-boolean value is not "already recorded": it is replaced by the boolean', async () => {
+      await writeManifest(recorded({ memory: 'true' }));
+      await writeMachineFeature(devflowDir, 'memory', true);
+      expect((await readRaw()).features).toEqual({ memory: true });
+    });
+
+    it('still refuses with not-installed when the manifest is not manifest-shaped, whatever the value', async () => {
+      await writeManifest('{ not json');
+      expect(await writeMachineFeature(devflowDir, 'learning', true)).toEqual({ ok: false, error: 'not-installed' });
+      expect(await writeMachineFeature(devflowDir, 'learning', false)).toEqual({ ok: false, error: 'not-installed' });
+    });
+  });
+
   it('refuses with not-installed when there is no manifest, and creates none', async () => {
     expect(await writeMachineFeature(devflowDir, 'learning', false)).toEqual({ ok: false, error: 'not-installed' });
     await expect(fs.access(manifestPath())).rejects.toThrow();

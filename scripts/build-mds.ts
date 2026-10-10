@@ -55,6 +55,14 @@
  * byte offset 0 verbatim (it is never interpolated), so block 1 survives
  * compilation unchanged and is removed from the compiled bytes.
  *
+ * Learning variants (D-LEARNING-VARIANTS, src/core/learning-variants.ts): after the
+ * strip, a command or agent body is split on its learning markers. The learning-on
+ * variant is written to the host's own path and, when the host carries an arm, the
+ * learning-off variant to dist/learning-off/{commands,agents}/{name}.md. The split
+ * runs on the compiled text, so it costs no compileFile call and nothing against
+ * the per-module compile-time guard. A reference module may carry no marker: its
+ * sections ship as written, so a marker there is refused.
+ *
  * Dest safety: `output-dir` must resolve to one of the three allowlisted
  * directories (src/core/mds-variants.ts). A typo, a backslash spelling, a
  * non-canonical spelling, or a path that escapes the repo root is refused rather
@@ -76,16 +84,19 @@
  * Atomic write: each output is written to a temp file then renamed into place, so
  * concurrent readers (e.g. parallel vitest workers) never observe a missing file.
  *
- * Prune: after a clean build, every `.md` in dist/agents/ that no host emitted is
- * deleted (pruneOrphanAgents), and the same sweep runs recursively over
- * dist/skills/git/references/ (pruneOrphanReferences). dist/agents/ is gitignored
- * and outranks src/assets/agents/ in both the installer's resolve and
- * loadShippedAgentDefaults's merge, so a file left there is installed in preference to
- * the audited source on every `devflow init`; the references tree is gitignored
- * too and is overlaid wholesale onto the installed skill, so a file left there
- * installs as if the build still produced it. The parity check in build.test.ts
- * catches the same orphan in CI, a commit later; this removes it on the machine
- * that ran the build.
+ * Prune: after a clean build, every `.md` in dist/commands/ and dist/agents/ that
+ * no host emitted is deleted (pruneOrphanCommands, pruneOrphanAgents), and the same
+ * sweep runs recursively over dist/skills/git/references/ (pruneOrphanReferences)
+ * and dist/learning-off/ (pruneOrphanLearningOff). Every sweep is keyed on the files
+ * this build actually wrote.
+ * dist/agents/ is gitignored and outranks src/assets/agents/ in both the
+ * installer's resolve and loadShippedAgentDefaults's merge, so a file left there is
+ * installed in preference to the audited source on every `devflow init`; the
+ * commands tree is installed wholesale, so a file left there installs as a command
+ * no source declares; the references tree is gitignored too and is overlaid
+ * wholesale onto the installed skill, so a file left there installs as if the build
+ * still produced it. The parity check in build.test.ts catches the same orphan in
+ * CI, a commit later; this removes it on the machine that ran the build.
  *
  * Usage: npm run build:mds
  */
@@ -100,6 +111,7 @@ import {
   expandVariants,
   splitVariantSections,
   AGENTS_OUTPUT_DIR,
+  COMMANDS_OUTPUT_DIR,
   SKILL_REFS_OUTPUT_DIR,
   resolveVariantModules,
   deferredReferenceModuleSources,
@@ -110,6 +122,14 @@ import {
   type VariantPair,
 } from "../src/core/mds-variants.js";
 import { MAX_REFERENCE_SWEEP_DEPTH } from "../src/core/reference-sweep.js";
+import {
+  LEARNING_OFF_OUTPUT_DIR,
+  containsLearningMarker,
+  describeLearningSplitError,
+  learningOffRelPath,
+  splitLearningVariants,
+  type LearningSplitError,
+} from "../src/core/learning-variants.js";
 
 // DEVFLOW_MDS_ROOT overrides the repo root for tests that need to operate on a
 // temporary directory instead of the real src/assets/commands/ tree.
@@ -155,6 +175,10 @@ interface CompileOutcome {
   source: string;
   dest: string;
   warnings: string[];
+  /** Absolute path of every file this host wrote, learning-off variant included. */
+  written: string[];
+  /** 1 when the host wrote a learning-off variant, else 0. */
+  learningOff: number;
 }
 
 function formatMdsError(err: unknown, sourcePath: string): string {
@@ -592,6 +616,13 @@ type HostPlan =
       readonly outAbs: string;
       /** The single file this host emits, resolved absolute. */
       readonly dest: string;
+      /**
+       * Where this host's learning-off variant lands if the body carries an arm,
+       * resolved absolute. Planned for every one-file host but NOT claimed in
+       * destsOf: it is written only after the split, and it sits in a tree of its
+       * own, so two hosts can collide on it only by colliding on `dest` first.
+       */
+      readonly learningOffDest: string;
     }
   | {
       readonly variant: "skill-refs";
@@ -651,7 +682,12 @@ function planSingleFile(
     throw outputNameRefusal(rel, declaredName, nameResult.error);
   }
 
-  return { variant, outAbs, dest: path.join(outAbs, `${nameResult.value}.md`) };
+  return {
+    variant,
+    outAbs,
+    dest: path.join(outAbs, `${nameResult.value}.md`),
+    learningOffDest: path.resolve(ROOT, ...learningOffRelPath(variant, `${nameResult.value}.md`).split("/")),
+  };
 }
 
 /**
@@ -745,6 +781,42 @@ function planHost(host: HostEntry): HostPlan {
   }
 }
 
+/**
+ * The text a learning-split refusal can be located by: the nearest content line
+ * above the marker it names.
+ *
+ * The line numbers in a LearningSplitError count the COMPILED body, because the
+ * split runs after the compile, and a marker that came from a partial has no line
+ * in the host at all. A quoted neighbour is what lets an author find the spot in
+ * either. Marker lines and blank lines are skipped, and the scan is bounded by the
+ * body's own length.
+ */
+function learningSplitNeighbour(body: string, error: LearningSplitError): string | null {
+  const at = "line" in error ? error.line : error.openedAt;
+  const lines = body.split("\n");
+  for (let i = Math.min(at, lines.length) - 2; i >= 0; i--) {
+    const text = lines[i].trim();
+    if (text !== "" && !containsLearningMarker(text)) return text.slice(0, 80);
+  }
+  return null;
+}
+
+/**
+ * Render a learning-split refusal as the error the build throws.
+ *
+ * The wording lives in describeLearningSplitError so the build and its tests share
+ * one text; this adds the host and a quoted neighbour (see learningSplitNeighbour),
+ * and returns the Error so main()'s aggregation keeps the single exit.
+ */
+function learningSplitRefusal(rel: string, error: LearningSplitError, body: string): Error {
+  const neighbour = learningSplitNeighbour(body, error);
+  const where = neighbour === null ? "" : ` (below "${neighbour}")`;
+  return new Error(
+    `${rel}: learning-variant split refused — ${describeLearningSplitError(error)}${where}. ` +
+    `Line numbers count the compiled output, not the source.`,
+  );
+}
+
 /** One file the build is about to write: where it goes and what it holds. */
 interface PlannedOutput {
   dest: string;
@@ -772,11 +844,28 @@ interface PlannedOutput {
  * in fact, and would need a non-null assertion to paper over the gap.
  */
 function materializeOutputs(host: HostEntry, plan: HostPlan, body: string): PlannedOutput[] {
+  const rel = path.relative(ROOT, host.file);
+
   if (plan.variant !== "skill-refs") {
-    return [{ dest: plan.dest, content: body }];
+    // D-LEARNING-VARIANTS: the learning-on variant is the artifact at the host's own
+    // path, so every existing reader of dist/ keeps working; the learning-off variant
+    // exists only for a host that has an arm.
+    const split = splitLearningVariants(body);
+    if (!split.ok) throw learningSplitRefusal(rel, split.error, body);
+    const outputs: PlannedOutput[] = [{ dest: plan.dest, content: split.value.on }];
+    if (split.value.hasArms) outputs.push({ dest: plan.learningOffDest, content: split.value.off });
+    return outputs;
   }
 
-  const rel = path.relative(ROOT, host.file);
+  // A reference module fans out into sections that ship as written, with no variant
+  // to select: a marker in one would reach the installed reference as text.
+  if (containsLearningMarker(body)) {
+    throw new Error(
+      `${rel}: a reference module may not carry learning-variant markers — its sections ship as ` +
+      `written, so a marker would reach the installed reference as text. Learning arms belong in a ` +
+      `command or agent host.`,
+    );
+  }
   const split = splitVariantSections(
     body,
     plan.outputs.map(({ dest, pair }) => ({ dest, op: pair.op })),
@@ -829,14 +918,17 @@ async function compileHost(host: HostEntry, plan: HostPlan): Promise<CompileOutc
     }
   }
 
-  const destLabel = outputs.length === 1
-    ? path.relative(ROOT, outputs[0].dest)
-    : `${path.relative(ROOT, outAbs)}/ (${outputs.length} file(s))`;
+  const learningOff = plan.variant !== "skill-refs" && outputs.length > 1 ? 1 : 0;
+  const destLabel = plan.variant === "skill-refs" && outputs.length > 1
+    ? `${path.relative(ROOT, outAbs)}/ (${outputs.length} file(s))`
+    : outputs.map(o => path.relative(ROOT, o.dest)).join(" + ");
 
   return {
     source: path.relative(ROOT, host.file),
     dest: destLabel,
     warnings: result.warnings,
+    written: outputs.map(o => o.dest),
+    learningOff,
   };
 }
 
@@ -851,10 +943,6 @@ async function compileHost(host: HostEntry, plan: HostPlan): Promise<CompileOutc
  * what it no longer produces; the CI parity guard catches the same orphan a
  * commit later, which is too late for a machine that only ever runs the build.
  *
- * Scoped to dist/agents/ deliberately. dist/commands/ additionally receives
- * hand-authored files copied verbatim (release.md, below), so "no host claims
- * it" does not mean "orphan" there.
- *
  * Only `.md` is considered: a concurrent build's `<dest>.<pid>.tmp` staging file
  * lives in this directory and deleting it would fail that build's rename.
  *
@@ -863,6 +951,22 @@ async function compileHost(host: HostEntry, plan: HostPlan): Promise<CompileOutc
  */
 function pruneOrphanAgents(claimed: ReadonlySet<string>): string[] {
   return pruneOrphans(path.resolve(ROOT, AGENTS_OUTPUT_DIR), claimed, false);
+}
+
+/**
+ * Delete every `.md` in dist/commands/ that no host in this build emits.
+ *
+ * D-RELEASE-MDS: every command is a compiled host, with no hand-authored file
+ * copied beside them, so "no host claims it" means orphan: a renamed host's old
+ * output, or a command dropped from the roster, would otherwise stay in dist/ and
+ * be installed as a command no source declares. Same hazard and same `.md`-only
+ * scope as pruneOrphanAgents.
+ *
+ * @param claimed - Absolute destination paths this build wrote.
+ * @returns Repo-relative paths removed.
+ */
+function pruneOrphanCommands(claimed: ReadonlySet<string>): string[] {
+  return pruneOrphans(path.resolve(ROOT, COMMANDS_OUTPUT_DIR), claimed, false);
 }
 
 /**
@@ -878,6 +982,19 @@ function pruneOrphanAgents(claimed: ReadonlySet<string>): string[] {
  */
 function pruneOrphanReferences(claimed: ReadonlySet<string>): string[] {
   return pruneOrphans(path.resolve(ROOT, SKILL_REFS_OUTPUT_DIR), claimed, true);
+}
+
+/**
+ * Delete every `.md` under dist/learning-off/ that this build did not write.
+ *
+ * The learning-off variant of a host exists only while the host carries an arm, so
+ * the set of files that should be here is known only from what the build wrote:
+ * a host that loses its last arm leaves its old variant behind, and a variant left
+ * there would be installed on a learning-off machine in place of the real prompt.
+ * Recursive, so a file parked under any other subdirectory of the tree goes too.
+ */
+function pruneOrphanLearningOff(written: ReadonlySet<string>): string[] {
+  return pruneOrphans(path.resolve(ROOT, LEARNING_OFF_OUTPUT_DIR), written, true);
 }
 
 /**
@@ -1056,35 +1173,24 @@ async function main(): Promise<void> {
   }
 
   // Every planned host was written (a refusal would have exited above), so the
-  // claimed set is complete and anything else in these trees is stale.
-  const claimedDests = new Set(planned.flatMap(p => destsOf(p.plan)));
-  for (const rel of pruneOrphanAgents(claimedDests)) {
+  // written set is complete and anything else in these trees is stale. Keyed on
+  // what was WRITTEN rather than what was planned: a learning-off variant is
+  // planned for every one-file host and written only for one with an arm.
+  const writtenDests = new Set(outcomes.flatMap(o => o.written));
+  for (const rel of pruneOrphanCommands(writtenDests)) {
+    console.log(`  pruned:   ${rel} (no command host)`);
+  }
+  for (const rel of pruneOrphanAgents(writtenDests)) {
     console.log(`  pruned:   ${rel} (no generator host)`);
   }
-  for (const rel of pruneOrphanReferences(claimedDests)) {
+  for (const rel of pruneOrphanReferences(writtenDests)) {
     console.log(`  pruned:   ${rel} (no reference module)`);
   }
-
-  // Copy 1 hand-authored command file verbatim into dist/commands/
-  const handAuthored = [
-    path.join(ROOT, 'src', 'assets', 'commands', 'release.md'),
-  ];
-  const commandsDest = path.join(ROOT, 'dist', 'commands');
-  fs.mkdirSync(commandsDest, { recursive: true });
-  for (const src of handAuthored) {
-    if (fs.existsSync(src)) {
-      const dest = path.join(commandsDest, path.basename(src));
-      const tmp = tempPathFor(dest);
-      fs.copyFileSync(src, tmp);
-      try {
-        fs.renameSync(tmp, dest);
-      } catch (e) {
-        fs.rmSync(tmp, { force: true });
-        throw e;
-      }
-      console.log(`  copied:  ${path.relative(ROOT, src)} → ${path.relative(ROOT, dest)}`);
-    }
+  for (const rel of pruneOrphanLearningOff(writtenDests)) {
+    console.log(`  pruned:   ${rel} (no learning arm)`);
   }
+  const learningOffCount = outcomes.reduce((n, o) => n + o.learningOff, 0);
+  console.log(`  ${learningOffCount} learning-off variant(s) written`);
 
   console.log("\nMDS commands build complete!");
 }

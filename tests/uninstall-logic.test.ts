@@ -8,6 +8,7 @@ import { isSameLocation } from '../src/core/same-location.js';
 import { DEVFLOW_PLUGINS, getAllAgentNames, parsePluginSelection, skillsOf, type PluginDefinition } from '../src/core/plugins.js';
 import { TRACKER_ATTEMPTS_NAMES, TRACKER_PROVIDER_IDS, TRACKER_STAGED_PREFIX } from '../src/core/tracker.js';
 import { modelCacheDir } from '../src/core/cache.js';
+import { CLAUDE_MD_AUDIT_STAMP_FILE, CLAUDE_MD_AUDIT_STAMP_TMP_PREFIX } from '../src/core/claude-md-audit.js';
 import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
 import { DEVFLOW_GITIGNORE_BLOCK, DEVFLOW_TRACKED_PATHS } from '../src/targets/claude-code/post-install.js';
 
@@ -681,6 +682,74 @@ describe('@D8: userContentPaths and installArtifactPaths are disjoint', () => {
     expect(intersect(['tracker.md', 'hud.json'], ['migrations.json', 'hud.json'])).toEqual(['hud.json']);
     expect(underPrefix(['tracker.md', 'tracker.md.jira.bak'], ['tracker.md.']))
       .toEqual(['tracker.md.jira.bak']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The CLAUDE.md import audit's stamp (D-AUDIT-STAMP, AC-434)
+// ---------------------------------------------------------------------------
+//
+// ~/.devflow/.claude-md-audit is machine state the SessionStart hook and `devflow init`
+// write. Uninstall removes it through installArtifactPaths, as it removes the tracker's
+// runtime files: on the artifacts-only passes too, since it holds no user-authored content.
+
+describe('installArtifactPaths: the audit stamp (AC-434)', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    // A mkdtemp root, never the developer's real ~/.devflow.
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-audit-stamp-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('lists the stamp as an exact entry and its temp file as a prefix family', () => {
+    const entries = installArtifactPaths(tmpDir);
+    const stamp = entries.find(e => e.relPath === CLAUDE_MD_AUDIT_STAMP_FILE);
+    expect(stamp, 'the stamp must be an install artifact').toBeDefined();
+    expect(stamp?.isPrefix).not.toBe(true);
+    const tmp = entries.find(e => e.relPath === CLAUDE_MD_AUDIT_STAMP_TMP_PREFIX);
+    expect(tmp?.isPrefix).toBe(true);
+    expect(CLAUDE_MD_AUDIT_STAMP_TMP_PREFIX.startsWith(CLAUDE_MD_AUDIT_STAMP_FILE)).toBe(true);
+  });
+
+  it('an artifacts-only removal takes the stamp and an orphaned temp file, and leaves a neighbouring user file', async () => {
+    const stamp = path.join(tmpDir, CLAUDE_MD_AUDIT_STAMP_FILE);
+    const orphan = path.join(tmpDir, `${CLAUDE_MD_AUDIT_STAMP_TMP_PREFIX}4242`);
+    const neighbour = path.join(tmpDir, `${CLAUDE_MD_AUDIT_STAMP_FILE}-notes`);
+    await fs.writeFile(stamp, 'V 1\nR /x\n', 'utf-8');
+    await fs.writeFile(orphan, 'V 1\n', 'utf-8');
+    await fs.writeFile(neighbour, 'mine\n', 'utf-8');
+    await expect(fs.access(stamp)).resolves.toBeUndefined();
+
+    await removeDevFlowInstallArtifacts(tmpDir, false);
+
+    await expect(fs.access(stamp)).rejects.toThrow();
+    await expect(fs.access(orphan)).rejects.toThrow();
+    await expect(fs.readFile(neighbour, 'utf-8')).resolves.toBe('mine\n');
+  });
+
+  it('a symlinked stamp is removed as a link: its target survives', async () => {
+    const target = path.join(tmpDir, 'elsewhere.txt');
+    await fs.writeFile(target, 'precious\n', 'utf-8');
+    await fs.symlink(target, path.join(tmpDir, CLAUDE_MD_AUDIT_STAMP_FILE));
+
+    await removeDevFlowInstallArtifacts(tmpDir, false);
+
+    await expect(fs.lstat(path.join(tmpDir, CLAUDE_MD_AUDIT_STAMP_FILE))).rejects.toThrow();
+    await expect(fs.readFile(target, 'utf-8')).resolves.toBe('precious\n');
+  });
+
+  it('the dry-run preview names the stamp it is about to remove', async () => {
+    await fs.writeFile(path.join(tmpDir, CLAUDE_MD_AUDIT_STAMP_FILE), 'V 1\n', 'utf-8');
+    const resolved = (await resolveInstallArtifactPaths(tmpDir)).map(e => e.relPath);
+    expect(resolved).toContain(CLAUDE_MD_AUDIT_STAMP_FILE);
+  });
+
+  it('removal with no stamp on disk is not an error', async () => {
+    await expect(removeDevFlowInstallArtifacts(tmpDir, false)).resolves.not.toThrow();
   });
 });
 
@@ -1737,6 +1806,68 @@ describe('runSelectivePhaseForScope (A8)', () => {
       selectedPlugins: [anyPlugin],
       verbose: false,
     })).resolves.not.toThrow();
+  });
+
+  describe('the manifest stops listing what was uninstalled (D-UNINSTALL-DROPS-PLUGIN)', () => {
+    const byName = (name: string) => DEVFLOW_PLUGINS.find(p => p.name === name)!;
+    const manifestPath = (): string => path.join(devflowDir, 'manifest.json');
+    const seedBody = (plugins: string[]): string => JSON.stringify({
+      version: '3.2.0',
+      plugins,
+      scope: 'user',
+      knownPlugins: ['devflow-core-skills', 'devflow-explore', 'devflow-plan'],
+      futureKey: 'kept',
+      features: { ambient: false, memory: false },
+      installedAt: 'then',
+      updatedAt: 'then',
+    });
+    const readPlugins = async (): Promise<unknown> =>
+      (JSON.parse(await fs.readFile(manifestPath(), 'utf-8')) as { plugins: unknown }).plugins;
+
+    it('removes the selected plugin from manifest.plugins and keeps the rest of the manifest', async () => {
+      await fs.writeFile(manifestPath(), seedBody(['devflow-core-skills', 'devflow-explore', 'devflow-plan']), 'utf-8');
+
+      await runSelectivePhaseForScope({ claudeDir, devflowDir, selectedPlugins: [byName('devflow-explore')], verbose: false });
+
+      const after = JSON.parse(await fs.readFile(manifestPath(), 'utf-8')) as Record<string, unknown>;
+      expect(after.plugins).toEqual(['devflow-core-skills', 'devflow-plan']);
+      expect(after.knownPlugins, 'the registry snapshot is not the selection').toEqual(['devflow-core-skills', 'devflow-explore', 'devflow-plan']);
+      expect(after.futureKey).toBe('kept');
+      expect(after.features).toEqual({ ambient: false, memory: false });
+    });
+
+    it('removes every selected plugin', async () => {
+      await fs.writeFile(manifestPath(), seedBody(['devflow-core-skills', 'devflow-explore', 'devflow-plan']), 'utf-8');
+
+      await runSelectivePhaseForScope({
+        claudeDir, devflowDir, selectedPlugins: [byName('devflow-explore'), byName('devflow-plan')], verbose: false,
+      });
+
+      expect(await readPlugins()).toEqual(['devflow-core-skills']);
+    });
+
+    it('leaves the manifest byte-identical when the plugin was not listed', async () => {
+      const body = seedBody(['devflow-core-skills', 'devflow-plan']);
+      await fs.writeFile(manifestPath(), body, 'utf-8');
+
+      await runSelectivePhaseForScope({ claudeDir, devflowDir, selectedPlugins: [byName('devflow-explore')], verbose: false });
+
+      expect(await fs.readFile(manifestPath(), 'utf-8')).toBe(body);
+    });
+
+    it('creates no manifest where there was none', async () => {
+      await runSelectivePhaseForScope({ claudeDir, devflowDir, selectedPlugins: [byName('devflow-explore')], verbose: false });
+
+      await expect(fs.access(manifestPath())).rejects.toThrow();
+    });
+
+    it('a later selective uninstall retains from the updated list, not the removed plugin', async () => {
+      await fs.writeFile(manifestPath(), seedBody(['devflow-core-skills', 'devflow-explore', 'devflow-plan']), 'utf-8');
+
+      await runSelectivePhaseForScope({ claudeDir, devflowDir, selectedPlugins: [byName('devflow-explore')], verbose: false });
+
+      expect((await resolveInstalledPlugins(devflowDir)).map(plugin => plugin.name)).toEqual(['devflow-core-skills', 'devflow-plan']);
+    });
   });
 });
 

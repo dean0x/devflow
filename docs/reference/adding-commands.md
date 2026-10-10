@@ -4,8 +4,7 @@
 
 1. Decide which plugin the command belongs to (or create a new plugin)
 2. Create the command source in `src/assets/commands/`:
-   - Use `.mds` for commands that import MDS partials (most commands)
-   - Use `.md` for simple static commands with no partials
+   - Use `.mds` for every command; a guard test fails on a static `.md` command source
 3. Follow this template:
 
 ```markdown

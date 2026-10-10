@@ -473,8 +473,11 @@ describe('non-vacuity: per-agent-type fence counts', () => {
     // #363). The six without are:
     //   - learn-conventions: internal — invoked by setup-task step 1b inside the Git
     //     agent itself, not by any command fence.
-    //   - check-ci-status: prose-only references in implement.md and resolve.md (the
-    //     Spawn description appears in text, not inside a parseable code fence).
+    //   - check-ci-status: no command spawns it. `ci-wait.cjs` replaced the Git CI re-spawn
+    //     and /resolve now reads CI through the script. The operation stays defined for two
+    //     readers that are not command fences: its Output `**Status**:` enum is the authority
+    //     `ci-wait.cjs` is pinned to (tests/evidence/merge-readiness.test.ts), and
+    //     check-merge-readiness step 3 loads its PR-host reference for the classification.
     //   - create-release, gather-release-evidence, backlink-shipped-issues,
     //     associate-release (#364): described only in the hand-authored release.md
     //     prose; the operation names appear in plain text, not in Agent(…) spawn

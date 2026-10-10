@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { readManifest, writeManifest, mergeManifestPlugins, resolvePluginList, detectUpgrade, syncManifestFeature, type ManifestData } from '../src/core/manifest.js';
+import { readManifest, writeManifest, mergeManifestPlugins, resolvePluginList, detectUpgrade, syncManifestFeature, withoutManifestPlugins, removeManifestPlugins, type ManifestData } from '../src/core/manifest.js';
 import { makeManifest } from './helpers.js';
 
 describe('readManifest', () => {
@@ -556,6 +556,131 @@ describe('mergeManifestPlugins', () => {
   it('returns existing plugins when new is empty', () => {
     const result = mergeManifestPlugins(['devflow-core-skills', 'devflow-debug'], []);
     expect(result).toEqual(['devflow-core-skills', 'devflow-debug']);
+  });
+});
+
+describe('withoutManifestPlugins (pure, D-UNINSTALL-DROPS-PLUGIN)', () => {
+  const NOW = '2026-10-10T00:00:00.000Z';
+  const raw = {
+    version: '3.2.0',
+    plugins: ['devflow-core-skills', 'devflow-explore', 'devflow-plan'],
+    scope: 'user',
+    knownPlugins: ['devflow-core-skills', 'devflow-explore', 'devflow-plan'],
+    futureKey: { keep: 1 },
+    features: { ambient: false, memory: true, tracker: { provider: 'jira' } },
+    installedAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+
+  it('drops the named plugins and refreshes updatedAt, carrying every other key verbatim', () => {
+    expect(withoutManifestPlugins(raw, ['devflow-explore'], NOW)).toEqual({
+      ...raw,
+      plugins: ['devflow-core-skills', 'devflow-plan'],
+      updatedAt: NOW,
+    });
+  });
+
+  it('leaves knownPlugins alone: a removed plugin stays known, so a re-init does not adopt it as new', () => {
+    const next = withoutManifestPlugins(raw, ['devflow-explore'], NOW) as { knownPlugins: string[] };
+    expect(next.knownPlugins).toEqual(raw.knownPlugins);
+  });
+
+  it('drops several at once and keeps the order of the rest', () => {
+    const next = withoutManifestPlugins(raw, ['devflow-plan', 'devflow-core-skills'], NOW) as { plugins: string[] };
+    expect(next.plugins).toEqual(['devflow-explore']);
+  });
+
+  it('is null when none of the names is listed (nothing to write)', () => {
+    expect(withoutManifestPlugins(raw, ['devflow-debug'], NOW)).toBeNull();
+    expect(withoutManifestPlugins(raw, [], NOW)).toBeNull();
+  });
+
+  it('is null for anything that is not a manifest-shaped object', () => {
+    for (const bad of [undefined, null, 42, 'x', [], {}, { plugins: 'devflow-explore' }, { plugins: null }]) {
+      expect(withoutManifestPlugins(bad, ['devflow-explore'], NOW)).toBeNull();
+    }
+  });
+
+  it('keeps entries it does not own: a non-string entry is neither matched nor dropped', () => {
+    const odd = { ...raw, plugins: ['devflow-explore', 7, null, 'devflow-plan'] };
+    expect((withoutManifestPlugins(odd, ['devflow-explore'], NOW) as { plugins: unknown[] }).plugins).toEqual([7, null, 'devflow-plan']);
+  });
+
+  it('never mutates its input', () => {
+    const snapshot = JSON.stringify(raw);
+    withoutManifestPlugins(raw, ['devflow-explore'], NOW);
+    expect(JSON.stringify(raw)).toBe(snapshot);
+  });
+});
+
+describe('removeManifestPlugins (I/O, D-UNINSTALL-DROPS-PLUGIN)', () => {
+  let tmpDir: string;
+  const manifestPath = (): string => path.join(tmpDir, 'manifest.json');
+  const seed = (extra: Record<string, unknown> = {}): string => JSON.stringify({
+    version: '3.2.0',
+    plugins: ['devflow-core-skills', 'devflow-explore'],
+    scope: 'user',
+    futureKey: ['a newer devflow wrote this'],
+    features: { ambient: false, memory: false },
+    installedAt: 'then',
+    updatedAt: 'then',
+    ...extra,
+  });
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-manifest-remove-'));
+  });
+
+  afterEach(async () => {
+    await fs.chmod(tmpDir, 0o700).catch(() => undefined);
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('rewrites the manifest without the plugin and keeps every key it does not model', async () => {
+    await fs.writeFile(manifestPath(), seed(), 'utf-8');
+
+    const result = await removeManifestPlugins(tmpDir, ['devflow-explore']);
+
+    expect(result).toEqual({ ok: true, removed: ['devflow-explore'] });
+    const onDisk = JSON.parse(await fs.readFile(manifestPath(), 'utf-8')) as Record<string, unknown>;
+    expect(onDisk.plugins).toEqual(['devflow-core-skills']);
+    expect(onDisk.futureKey, 'a key ManifestData does not model survives').toEqual(['a newer devflow wrote this']);
+    expect(onDisk.features).toEqual({ ambient: false, memory: false });
+    expect(onDisk.installedAt).toBe('then');
+    expect(onDisk.updatedAt).not.toBe('then');
+    expect((await fs.readFile(manifestPath(), 'utf-8')).endsWith('}\n'), 'the manifest writer\'s own format').toBe(true);
+    expect(await fs.readdir(tmpDir), 'no temp file is left behind').toEqual(['manifest.json']);
+  });
+
+  it('writes nothing when the plugin is not listed: the bytes are identical', async () => {
+    const body = seed();
+    await fs.writeFile(manifestPath(), body, 'utf-8');
+
+    expect(await removeManifestPlugins(tmpDir, ['devflow-plan'])).toEqual({ ok: true, removed: [] });
+
+    expect(await fs.readFile(manifestPath(), 'utf-8')).toBe(body);
+  });
+
+  it('is a quiet no-op without a usable manifest, and creates none', async () => {
+    expect(await removeManifestPlugins(tmpDir, ['devflow-explore'])).toEqual({ ok: true, removed: [] });
+    await expect(fs.access(manifestPath())).rejects.toThrow();
+
+    await fs.writeFile(manifestPath(), '{ not json', 'utf-8');
+    expect(await removeManifestPlugins(tmpDir, ['devflow-explore'])).toEqual({ ok: true, removed: [] });
+    expect(await fs.readFile(manifestPath(), 'utf-8')).toBe('{ not json');
+  });
+
+  it('reports a write failure as a value, leaving the manifest as it was', async () => {
+    if (process.getuid?.() === 0) return; // root ignores directory permissions
+    const body = seed();
+    await fs.writeFile(manifestPath(), body, 'utf-8');
+    await fs.chmod(tmpDir, 0o500);
+
+    const result = await removeManifestPlugins(tmpDir, ['devflow-explore']);
+
+    expect(result.ok).toBe(false);
+    await fs.chmod(tmpDir, 0o700);
+    expect(await fs.readFile(manifestPath(), 'utf-8')).toBe(body);
   });
 });
 

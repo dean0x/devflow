@@ -322,6 +322,7 @@ describe('installViaFileCopy rules report', () => {
       await fs.mkdir(path.join(localClaudeDir, 'rules', 'devflow'), { recursive: true });
 
       const report = await installViaFileCopy({
+        learning: true,
         plugins: [],
         claudeDir: localClaudeDir,
         devflowDir: localDevflowDir,
@@ -356,6 +357,7 @@ describe('installViaFileCopy rules report', () => {
       await fs.mkdir(path.join(localClaudeDir, 'rules', 'devflow'), { recursive: true });
 
       const report = await installViaFileCopy({
+        learning: true,
         plugins: [],
         claudeDir: localClaudeDir,
         devflowDir: localDevflowDir,
@@ -387,6 +389,7 @@ describe('installViaFileCopy rules report', () => {
       await fs.mkdir(path.join(localClaudeDir, 'rules', 'devflow'), { recursive: true });
 
       const report = await installViaFileCopy({
+        learning: true,
         plugins: [],
         claudeDir: localClaudeDir,
         devflowDir: localDevflowDir,
@@ -423,6 +426,7 @@ describe('installViaFileCopy rules report', () => {
 
       await expect(
         installViaFileCopy({
+          learning: true,
           plugins: [],
           claudeDir: localClaudeDir,
           devflowDir: localDevflowDir,
@@ -655,5 +659,100 @@ describe('seedRuleShadow', () => {
 
     const stat = await fs.stat(path.join(devflowDir, 'rules'));
     expect(stat.isDirectory()).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D-CONTEXT-ECONOMY-RULE (#427)
+// ---------------------------------------------------------------------------
+
+/**
+ * D-CONTEXT-ECONOMY-RULE: reading discipline is a core rule that reaches every session. Its body is
+ * about 400 characters (a hard ceiling of 450, because the rule is billed in every session), holds
+ * three directives, and names no search binary and no count flag, so the count directive stays
+ * tool-neutral. The core plugin registers it (src/core/plugins.ts carries the D-name at the
+ * registration), and every rule-count statement in the docs equals the number of rule files.
+ */
+const RULES_SRC = path.join(import.meta.dirname, '..', 'src', 'assets', 'rules');
+const CONTEXT_ECONOMY_PATH = path.join(RULES_SRC, 'context-economy.md');
+
+/** The three directives, one regex each, matched against the body. */
+const CONTEXT_ECONOMY_DIRECTIVES: ReadonlyArray<{ label: string; re: RegExp }> = [
+  { label: 'list a large file\'s headings, then read the ranges needed', re: /over about 40 KB: list its headings first, then read only the ranges you need/ },
+  { label: 'list or count matches before printing, and treat an error as refused, not zero', re: /list or count them[^\n]*confirm the search accepted the pattern[^\n]*refused, not zero/ },
+  { label: 'never print a large file whole', re: /Never print a large file whole/ },
+];
+
+/** Named collector: how a rule file departs from the context-economy design. */
+export function collectContextEconomyDefects(text: string): string[] {
+  const out: string[] = [];
+  const m = /^---\npaths: \[\]\n---\n/.exec(text);
+  if (!m) out.push('the frontmatter is not exactly `paths: []`');
+  const body = text.slice(m ? m[0].length : 0).trim();
+  if (body.length < 400 || body.length > 450) out.push(`the body is ${body.length} characters, expected 400 to 450`);
+  for (const { label, re } of CONTEXT_ECONOMY_DIRECTIVES) if (!re.test(body)) out.push(`missing directive: ${label}`);
+  if (/\b(?:grep|rg|ripgrep|ugrep|ack|wc)\b/i.test(body)) out.push('names a search or count binary');
+  if (/(?:^|\s)-[cl]\b/.test(body)) out.push('names a count flag');
+  return out;
+}
+
+describe('context-economy rule (D-CONTEXT-ECONOMY-RULE)', () => {
+  it('the rule file exists with empty-paths frontmatter, three directives and a body of 400 to 450 characters', async () => {
+    const text = await fs.readFile(CONTEXT_ECONOMY_PATH, 'utf-8');
+    expect(collectContextEconomyDefects(text)).toEqual([]);
+  });
+
+  it('the core plugin registers it, and the registry knows it as a valid rule name', () => {
+    const core = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-core-skills')!;
+    expect(core.rules).toContain('context-economy');
+    expect(buildRulesMap([core]).get('context-economy')).toBe('devflow-core-skills');
+    expect(getAllRuleNames()).toContain('context-economy');
+    expect(isValidRuleName('context-economy')).toBe(true);
+  });
+
+  it('installRuleFile installs it flat, frontmatter intact', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-context-economy-'));
+    try {
+      const target = path.join(tmp, 'rules', 'devflow');
+      await fs.mkdir(target, { recursive: true });
+      expect(await installRuleFile('context-economy', path.join(tmp, 'devflow'), target)).toBe('source');
+      const installed = await fs.readFile(path.join(target, 'context-economy.md'), 'utf-8');
+      expect(installed).toBe(await fs.readFile(CONTEXT_ECONOMY_PATH, 'utf-8'));
+      expect(installed.startsWith('---\npaths: []\n---\n')).toBe(true);
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('every rule-count statement in the docs equals the number of rule files', async () => {
+    const files = (await fs.readdir(RULES_SRC)).filter(f => f.endsWith('.md'));
+    expect(files.length, 'nothing counted').toBeGreaterThan(10);
+    const statements: Array<[string, RegExp]> = [
+      ['docs/reference/file-organization.md', /# (\d+) rules \(flat \.md files\)/],
+      ['CONTRIBUTING.md', /# (\d+) rules \(single source of truth, flat \.md files\)/],
+    ];
+    for (const [rel, re] of statements) {
+      const text = await fs.readFile(path.join(import.meta.dirname, '..', rel), 'utf-8');
+      const match = re.exec(text);
+      expect(match, `${rel}: no rule-count statement`).not.toBeNull();
+      expect(Number(match![1]), rel).toBe(files.length);
+    }
+  });
+
+  it('known-bad probe: a longer body, a moved paths line, a lost directive, a named binary and a count flag are each reported', async () => {
+    const real = await fs.readFile(CONTEXT_ECONOMY_PATH, 'utf-8');
+    expect(collectContextEconomyDefects(real)).toEqual([]);
+    expect(collectContextEconomyDefects(`${real}\n- ${'padding '.repeat(10)}`)).toEqual([
+      expect.stringMatching(/the body is \d+ characters, expected 400 to 450/),
+    ]);
+    expect(collectContextEconomyDefects(real.replace('paths: []', 'paths: ["**/*"]'))).toContain('the frontmatter is not exactly `paths: []`');
+    expect(collectContextEconomyDefects(real.replace('Never print a large file whole', 'Print what you like'))).toContain(
+      'missing directive: never print a large file whole',
+    );
+    expect(collectContextEconomyDefects(real.replace('list or count them', 'grep -c them'))).toEqual(
+      expect.arrayContaining(['names a search or count binary', 'names a count flag']),
+    );
+    expect(collectContextEconomyDefects(real.replace('list or count them', 'run wc on them'))).toContain('names a search or count binary');
+    expect(collectContextEconomyDefects('no frontmatter')).toContain('the frontmatter is not exactly `paths: []`');
   });
 });

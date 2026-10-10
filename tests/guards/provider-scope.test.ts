@@ -54,10 +54,14 @@ import {
   resolveVariantModules,
 } from '../../src/core/mds-variants.js';
 import { resolveAgentSource, splitFrontmatter, walkFiles, ROOT, type CorpusEntry } from '../helpers.js';
-import { SETTINGS_BLOCK_HOSTS } from '../fixtures/mds-manifest.js';
+import { SETTINGS_BLOCK_HOSTS, SETTINGS_BLOCK_HOSTS_LEARNING_OFF } from '../fixtures/mds-manifest.js';
+import { LEARNING_OFF_OUTPUT_DIR } from '../../src/core/learning-variants.js';
 
 const DIST_COMMANDS = path.join(ROOT, 'dist', 'commands');
 const DIST_SKILLS = path.join(ROOT, 'dist', 'skills');
+/** The learning-off variants of the commands and agents (D-LEARNING-VARIANTS): prompts an install lays down like any other. */
+const LEARNING_OFF_AGENTS = `${LEARNING_OFF_OUTPUT_DIR}/agents`;
+const LEARNING_OFF_COMMANDS = `${LEARNING_OFF_OUTPUT_DIR}/commands`;
 const REFS_DIR = compiledSkillRefsDir();
 
 // ---------------------------------------------------------------------------
@@ -73,6 +77,8 @@ interface ScanRoot {
 /** Label of the hand-authored agent tree. Composed, never spelled with its slash. */
 const SRC_AGENTS_LABEL = 'src/assets/agents';
 const GIT_HOST = `${SRC_AGENTS_LABEL}/git.mds`;
+/** The source of the tracker contract: the provider resolution, moved out of the Git agent. */
+const CONTRACT_HOST = 'src/assets/mds/tracker/_contract.mds';
 
 const PROVIDER_SCAN_ROOTS: readonly ScanRoot[] = [
   { label: SRC_AGENTS_LABEL, dir: agentsDir(ROOT), exts: ['.md', '.mds'] },
@@ -82,6 +88,8 @@ const PROVIDER_SCAN_ROOTS: readonly ScanRoot[] = [
   { label: 'dist/agents', dir: compiledAgentsDir(ROOT), exts: ['.md'] },
   { label: 'dist/commands', dir: DIST_COMMANDS, exts: ['.md'] },
   { label: 'dist/skills', dir: DIST_SKILLS, exts: ['.md'] },
+  { label: LEARNING_OFF_AGENTS, dir: path.join(ROOT, LEARNING_OFF_AGENTS), exts: ['.md'] },
+  { label: LEARNING_OFF_COMMANDS, dir: path.join(ROOT, LEARNING_OFF_COMMANDS), exts: ['.md'] },
 ];
 
 function scanCorpus(): CorpusEntry[] {
@@ -102,19 +110,24 @@ function scanCorpus(): CorpusEntry[] {
 // ---------------------------------------------------------------------------
 
 /**
- * `PROVIDER_MAP_ALLOWLIST` — the provider-resolution preamble, and nothing else.
+ * `PROVIDER_MAP_ALLOWLIST` — the provider resolution, and nothing else.
  *
  * P2-S3's rationale, restated so the allowlist is legible without the artifact:
  * a check on a provider token is only real at the one sink every caller passes
  * through, so there is exactly ONE convergence point where a provider token is
- * turned into a path. The preamble IS that point, and it can only be a
+ * turned into a path. The provider resolution IS that point, and it can only be a
  * convergence point if it enumerates the closed token set — a map with one row
  * would be a map that decides nothing. The three tokens therefore have to be
  * written here in Phase 2, and Phase 3 fills the two directories the map already
  * names rather than adding a second place where a provider is resolved.
  *
- * The allowlisted region is the block, not a line: the token set appears three
- * times inside it (the normalisation rule, the map rows, the input contract), and
+ * The resolution lived in the always-loaded Git agent until the Git agent split
+ * (D-TRACKER-CONTRACT-ON-DEMAND) moved it, whole, into `tracker/_contract.md`, which a
+ * spawn reads once when it runs a tracker operation. The region moved with it: the agent
+ * itself now names no provider and is held to that by the AC-3.12 scopes below.
+ *
+ * The allowlisted region is the block, not a line: the token set appears several
+ * times inside it (the map rows, the conventions-file path, the input contract), and
  * a line-scoped allowlist would have to enumerate them and go stale on any rewrap.
  */
 interface AllowlistedRegion {
@@ -142,11 +155,15 @@ interface AllowlistedRegion {
  */
 const ALLOWLISTED_PROVIDER_REGIONS: readonly AllowlistedRegion[] = [
   {
-    label: "the Git agent's provider-resolution preamble",
-    files: [GIT_HOST, 'dist/agents/git.md'],
-    /** The preamble's own bounds — the same two anchors byte-budget.test.ts uses. */
-    from: '## Tracker provider resolution',
-    to: '## Comment-sink scrub (D11)',
+    label: "the tracker contract's provider resolution and input contract",
+    files: [CONTRACT_HOST, 'dist/skills/git/references/tracker/_contract.md'],
+    /**
+     * The contract's own bounds: from the resolution heading to its last bullet, which names no
+     * provider. The block is the end of the file, so the closing anchor is the final bullet's
+     * opening rather than a following heading.
+     */
+    from: '### Tracker provider resolution',
+    to: '- **Issue refs render as',
     justification:
       'A provider check is only real at the one sink every caller passes through, so exactly ONE ' +
       'convergence point turns a provider token into a path, and a map with one row decides ' +
@@ -154,7 +171,7 @@ const ALLOWLISTED_PROVIDER_REGIONS: readonly AllowlistedRegion[] = [
   },
   {
     label: "the Code agent's PR-link paste gate",
-    files: [`${SRC_AGENTS_LABEL}/code.md`],
+    files: [`${SRC_AGENTS_LABEL}/code.mds`, 'dist/agents/code.md', `${LEARNING_OFF_AGENTS}/code.md`],
     from: '| Tracker grammar | `ISSUE_PR_LINK` must match |',
     to: 'This re-check is the only gate on that value',
     justification:
@@ -169,7 +186,10 @@ const ALLOWLISTED_PROVIDER_REGIONS: readonly AllowlistedRegion[] = [
   },
   {
     label: "the settings partial's accepted-line shape",
-    files: SETTINGS_BLOCK_HOSTS.flatMap(h => [`src/assets/commands/${h}.md`, `dist/commands/${h}.md`]),
+    files: [
+      ...SETTINGS_BLOCK_HOSTS.flatMap(h => [`src/assets/commands/${h}.md`, `dist/commands/${h}.md`]),
+      ...SETTINGS_BLOCK_HOSTS_LEARNING_OFF.map(h => `${LEARNING_OFF_COMMANDS}/${h}.md`),
+    ],
     from: 'one line of the form `TRACKER=<',
     to: ' — these fields, in this order, nothing else',
     justification:
@@ -542,18 +562,18 @@ describe('provider-scope: no Jira or Linear literal outside the provider map (§
 
   it('known-bad probe: the allowlist silences its own block and nothing beyond it', () => {
     const seeded: CorpusEntry = {
-      path: 'dist/agents/git.md',
+      path: 'dist/skills/git/references/tracker/_contract.md',
       content: [
-        'Before the preamble: nothing foreign here.',
+        'Before the resolution: nothing foreign here.',
         PROVIDER_MAP_ALLOWLIST.from,
         '| `jira` | `tracker/jira/` |',
         '| `linear` | `tracker/linear/` |',
         PROVIDER_MAP_ALLOWLIST.to,
-        'After the preamble, load the jira mechanics.',
+        'After the resolution, load the jira mechanics.',
       ].join('\n'),
     };
     expect(collectForeignProviderLiterals([seeded])).toEqual([
-      'dist/agents/git.md: "jira" — After the preamble, load the jira mechanics.',
+      'dist/skills/git/references/tracker/_contract.md: "jira" — After the resolution, load the jira mechanics.',
     ]);
   });
 });

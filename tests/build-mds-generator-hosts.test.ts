@@ -4,13 +4,13 @@
  * A *generator host* is a .mds file whose first frontmatter block exists only to
  * steer the build (`output-dir: dist/agents`) and whose SECOND frontmatter block
  * is the real artifact frontmatter. The build strips the whole first block for
- * these hosts, while the 13 command hosts keep the pre-existing key-only strip
+ * these hosts, while the 14 command hosts keep the pre-existing key-only strip
  * so their compiled bytes do not move.
  *
  * Scenario coverage:
  *   1. generator frontmatter whole-block strip — a dist/agents host compiles to
  *      dist/agents/<name>.md with block 2 surviving as body text.
- *   2. 13 command outputs byte-unchanged (key-only strip retained) — command
+ *   2. 14 command outputs byte-unchanged (key-only strip retained) — command
  *      outputs keep their frontmatter minus output-dir:, and the on-disk dist/
  *      tree is byte-for-byte what the committed src/ tree compiles to.
  *   3. dest allowlist negatives — dist/wrong-dir, dist/commands/, dist/../..
@@ -22,7 +22,7 @@
  *  10. a generator host must carry TWO frontmatter blocks
  *  11. the whole-repo walk is depth-bounded and fails loudly at the bound
  *  12. this file never spawns a build against the real repo root
- *  13. orphans in dist/agents/ are pruned, and only there
+ *  13. orphans in dist/commands/ and dist/agents/ are pruned
  *  14. orphans under dist/skills/git/references/ are pruned, recursively and
  *      across the whole tree — root included, not just tracker/**
  *
@@ -58,6 +58,8 @@ import {
   MDS_REFERENCE_MODULES,
   ALL_DISCOVERED_HOSTS,
   DIST_COMMAND_FILES,
+  LEARNING_OFF_FILES,
+  LEARNING_VARIANT_HOSTS,
 } from './fixtures/mds-manifest.js';
 import {
   MCP_BACKED_PROVIDER_SUBDIRS,
@@ -87,7 +89,7 @@ const SELF = import.meta.filename;
  */
 vi.setConfig({ testTimeout: 120_000 });
 
-/** The 13 basenames compiled from .mds hosts into dist/commands/. */
+/** The 14 basenames compiled from .mds hosts into dist/commands/. */
 const COMPILED_COMMANDS = MDS_COMMAND_HOSTS;
 
 /**
@@ -152,12 +154,13 @@ async function hashDistSubtree(
 
 /** Every build destination of a dist/ tree, hashed into one map. */
 async function hashDistTree(root: string): Promise<Map<string, string>> {
-  const [commands, agents, skills] = await Promise.all([
+  const [commands, agents, skills, learningOff] = await Promise.all([
     hashDistSubtree(root, 'commands'),
     hashDistSubtree(root, 'agents'),
     hashDistSubtree(root, 'skills'),
+    hashDistSubtree(root, 'learning-off'),
   ]);
-  return new Map([...commands, ...agents, ...skills]);
+  return new Map([...commands, ...agents, ...skills, ...learningOff]);
 }
 
 /**
@@ -171,8 +174,13 @@ const EXPECTED_REFERENCE_KEYS: readonly string[] = [
   ...VARIANT_MODULES
     .filter(mod => mod.kind === 'fanout')
     .flatMap(mod => mod.ops.map(op => `skills/git/references/${mod.subdir}/${op}.md`)),
-  // The gated contract document, keyed the same way. `ops` carries its single
+  // The UNGATED contract documents in the registry (the tracker contract,
+  // D-TRACKER-CONTRACT-ON-DEMAND), keyed the same way: `ops` carries the single
   // emitted basename, so the shape is the same as a provider row's.
+  ...VARIANT_MODULES
+    .filter(mod => mod.kind === 'contract')
+    .flatMap(mod => mod.ops.map(op => `skills/git/references/${mod.subdir}/${op}.md`)),
+  // The gated contract document, keyed the same way.
   ...MCP_CONTRACT_MODULE.ops.map(op => `skills/git/references/${MCP_CONTRACT_MODULE.subdir}/${op}.md`),
   ...GIT_CROSS_CUTTING_DOCS.map(doc => `skills/git/references/${doc}.md`),
 ];
@@ -358,10 +366,10 @@ describe('generator frontmatter whole-block strip', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 2. 13 command outputs byte-unchanged (key-only strip retained)
+// 2. 14 command outputs byte-unchanged (key-only strip retained)
 // ---------------------------------------------------------------------------
 
-describe('13 command outputs byte-unchanged (key-only strip retained)', () => {
+describe('14 command outputs byte-unchanged (key-only strip retained)', () => {
   /**
    * Named collector: for each compiled command output, the shape of its leading
    * frontmatter block. Used by both the main assertion and the known-bad probe.
@@ -388,7 +396,7 @@ describe('13 command outputs byte-unchanged (key-only strip retained)', () => {
     return COMPILED_COMMANDS.map(name => ({ name, text: requireDistFile(`${name}.md`) }));
   }
 
-  it('dist/commands/ holds all 13 compiled outputs (fail-loud when unbuilt)', () => {
+  it('dist/commands/ holds all 14 compiled outputs (fail-loud when unbuilt)', () => {
     const distFiles = requireDistFiles();
     expect(distFiles.length, 'dist/commands/ must not be empty').toBeGreaterThan(0);
     for (const name of COMPILED_COMMANDS) {
@@ -456,11 +464,18 @@ describe('13 command outputs byte-unchanged (key-only strip retained)', () => {
     for (const key of EXPECTED_REFERENCE_KEYS) {
       expect([...fresh.keys()], `${key} missing from the fresh build`).toContain(key);
     }
+    for (const file of LEARNING_OFF_FILES) {
+      expect([...fresh.keys()], `learning-off/${file} missing from the fresh build`)
+        .toContain(`learning-off/${file}`);
+    }
 
     const diff = diffDistTrees(fresh, onDisk);
     const remedy = 'run `npm run build:mds` — dist/ is out of sync with src/';
     expect(diff.compared, 'no file was byte-compared')
-      .toBe(DIST_COMMAND_FILES.length + MDS_GENERATOR_HOSTS.length + EXPECTED_REFERENCE_KEYS.length);
+      .toBe(
+        DIST_COMMAND_FILES.length + MDS_GENERATOR_HOSTS.length + EXPECTED_REFERENCE_KEYS.length +
+        LEARNING_OFF_FILES.length,
+      );
     expect(diff.missingOnDisk, `built from src/ but absent from dist/ — ${remedy}`).toEqual([]);
     expect(diff.orphanOnDisk, `present in dist/ but built by nothing — ${remedy}`).toEqual([]);
     expect(diff.differing, `dist/ bytes differ from a fresh build of src/ — ${remedy}`).toEqual([]);
@@ -774,10 +789,11 @@ describe('IGNORE_DIRS covers tests/ and coverage/', () => {
 // 6. printed host/partial counts agree with the manifest (AC-1.8)
 // ---------------------------------------------------------------------------
 //
-// The build prints two counts on every run:
+// The build prints these counts on every run:
 //
 //     {partialCount} partial(s) skipped (no output-dir:)
 //     {hosts.length} host(s) to compile:
+//     {learningOffCount} learning-off variant(s) written
 //
 // Until now nothing read them: `grep 'partial(s) skipped' tests/` returned zero
 // hits, so a discovery regression that silently dropped a host or reclassified a
@@ -791,10 +807,13 @@ describe('printed host/partial counts agree with the manifest (AC-1.8)', () => {
    * absent — a missing line must fail loudly, never parse as 0.
    * Called by the committed-tree assertion AND by the seeded-tree probe below.
    */
-  function parsePrintedCounts(output: string): { hosts: number; partials: number; deferred: number } {
+  function parsePrintedCounts(
+    output: string,
+  ): { hosts: number; partials: number; deferred: number; learningOff: number } {
     const hostMatch = /^\s*(\d+) host\(s\) to compile:/m.exec(output);
     const partialMatch = /^\s*(\d+) partial\(s\) skipped \(no output-dir:\)/m.exec(output);
     const deferredMatch = /^\s*(\d+) reference module\(s\) deferred \(generation gated\)/m.exec(output);
+    const learningOffMatch = /^\s*(\d+) learning-off variant\(s\) written/m.exec(output);
     if (!hostMatch) {
       throw new Error(`build output has no "N host(s) to compile:" line:\n${output}`);
     }
@@ -804,10 +823,14 @@ describe('printed host/partial counts agree with the manifest (AC-1.8)', () => {
     if (!deferredMatch) {
       throw new Error(`build output has no "N reference module(s) deferred" line:\n${output}`);
     }
+    if (!learningOffMatch) {
+      throw new Error(`build output has no "N learning-off variant(s) written" line:\n${output}`);
+    }
     return {
       hosts: Number(hostMatch[1]),
       partials: Number(partialMatch[1]),
       deferred: Number(deferredMatch[1]),
+      learningOff: Number(learningOffMatch[1]),
     };
   }
 
@@ -854,6 +877,14 @@ describe('printed host/partial counts agree with the manifest (AC-1.8)', () => {
       `build printed ${counts.deferred} deferred reference module(s); the manifest names ` +
       `${EXPECTED_DEFERRED} gated module(s) held back by this registry.`,
     ).toBe(EXPECTED_DEFERRED);
+    // The learning-off count is a roster, not a floor: it equals LEARNING_VARIANT_HOSTS
+    // at every step, zero included. The files themselves are held to the same roster
+    // by tests/learning/learning-variants-build.test.ts.
+    expect(
+      counts.learningOff,
+      `build printed ${counts.learningOff} learning-off variant(s); the manifest names ` +
+      `${LEARNING_VARIANT_HOSTS.length}. Update LEARNING_VARIANT_HOSTS if a host gained or lost an arm.`,
+    ).toBe(LEARNING_VARIANT_HOSTS.length);
     for (const source of deferredReferenceModuleSources()) {
       expect(
         run.combined,
@@ -1171,15 +1202,16 @@ describe('the whole-repo walk is depth-bounded', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 13. orphans in dist/agents/ are pruned
+// 13. orphans in dist/commands/ and dist/agents/ are pruned
 // ---------------------------------------------------------------------------
 //
 // dist/agents/ is gitignored and outranks src/assets/agents/ in both resolvers,
 // so a file left there — a renamed host's old output, a hand-dropped one —
 // silently supersedes the audited source on every `devflow init`. The build owns
 // that directory: after a clean plan, anything in it no generator host emits is
-// removed. Scoped to dist/agents/ only; dist/commands/ additionally receives
-// hand-authored copies (release.md) that no host claims.
+// removed. dist/commands/ is swept the same way (D-RELEASE-MDS): every command is
+// a compiled host, so no file there can be claimed by anything but a host and an
+// unclaimed one is an orphan.
 
 describe('orphans in dist/agents/ are pruned', () => {
   /** Write a file into `<fakeRoot>/dist/agents/`, creating the directory. */
@@ -1256,20 +1288,41 @@ describe('orphans in dist/agents/ are pruned', () => {
     });
   });
 
-  it('does not prune dist/commands/', async () => {
-    // Deliberate scope: dist/commands/ holds release.md, copied verbatim from a
-    // hand-authored source that is not a host, so "unclaimed" does not mean
-    // "orphan" there.
+  it('prunes an unclaimed dist/commands/*.md, keeps the claimed one and any non-.md entry', async () => {
+    // D-RELEASE-MDS: no hand-authored command remains to be copied into
+    // dist/commands/, so "no host claims it" now means orphan there.
     await withFakeRoot(async fakeRoot => {
       await writeCommandHost(fakeRoot, 'zz-healthy', 'description: ok\noutput-dir: dist/commands\n');
       const dir = path.join(fakeRoot, 'dist', 'commands');
       await fs.mkdir(dir, { recursive: true });
-      const unclaimed = path.join(dir, 'hand-authored.md');
-      await fs.writeFile(unclaimed, 'copied verbatim\n', 'utf-8');
+      const stale = path.join(dir, 'stale-command.md');
+      await fs.writeFile(stale, 'a renamed host\'s old output\n', 'utf-8');
+      // A concurrent build's staging file must survive: deleting it fails that build's rename.
+      const staging = path.join(dir, 'zz-healthy.md.99999.tmp');
+      await fs.writeFile(staging, 'staged\n', 'utf-8');
 
       const run = runBuild(fakeRoot);
       expect(run.status, run.combined).toBe(0);
-      expect(await readIfPresent(unclaimed), 'dist/commands/ is out of the prune\'s scope').not.toBeNull();
+      expect(await readIfPresent(stale), 'an unclaimed command artifact must not survive the build').toBeNull();
+      expect(await readIfPresent(path.join(dir, 'zz-healthy.md')), 'the claimed artifact must survive its own prune').not.toBeNull();
+      expect(await readIfPresent(staging), 'only .md artifacts are the build\'s to remove').not.toBeNull();
+      expect(prunedPaths(run.combined)).toEqual(['dist/commands/stale-command.md']);
+      expect(run.combined, 'the reason must be stated').toContain('(no command host)');
+    });
+  });
+
+  it('known-bad probe: a refused build prunes nothing in dist/commands/', async () => {
+    await withFakeRoot(async fakeRoot => {
+      await writeCommandHost(fakeRoot, 'zz-healthy', 'description: ok\noutput-dir: dist/commands\n');
+      await writeCommandHost(fakeRoot, '_neg-wrong-dir', 'description: neg\noutput-dir: dist/wrong-dir\n');
+      const dir = path.join(fakeRoot, 'dist', 'commands');
+      await fs.mkdir(dir, { recursive: true });
+      const stale = path.join(dir, 'stale-command.md');
+      await fs.writeFile(stale, 'old\n', 'utf-8');
+
+      const run = runBuild(fakeRoot);
+      expect(run.status, `expected exit 1.\n${run.combined}`).toBe(1);
+      expect(await readIfPresent(stale), 'a refused build must leave dist/commands/ as it found it').not.toBeNull();
       expect(prunedPaths(run.combined)).toEqual([]);
     });
   });

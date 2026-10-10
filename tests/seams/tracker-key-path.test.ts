@@ -204,6 +204,12 @@ describe('tracker sentinel: the TS writer and the shell reader agree on every pr
 // ---------------------------------------------------------------------------
 
 const GIT_AGENT_HOST = path.join(ROOT, 'src', 'assets', 'agents', 'git.mds');
+/**
+ * The prompt text that consumes the settings line: the tracker contract, which a tracker
+ * spawn reads once (D-TRACKER-CONTRACT-ON-DEMAND). The Git agent host keeps only the
+ * line that tells a spawn to read it.
+ */
+const CONTRACT_HOST = path.join(ROOT, 'src', 'assets', 'mds', 'tracker', '_contract.mds');
 
 /** The resolver the prompt consumes, and the parser it classifies the personal file with. */
 const SETTINGS_RESOLVER = path.join(scriptsDir(), 'resolve-settings.cjs');
@@ -233,17 +239,24 @@ function resolverVerdict(bytes: Buffer): 'absent' | 'valid' | 'invalid' {
 }
 
 describe('per-repo tracker key: the prompt consumes it through the settings line', () => {
-  const host = fs.readFileSync(GIT_AGENT_HOST, 'utf-8');
+  const host = fs.readFileSync(CONTRACT_HOST, 'utf-8');
+  const agentHost = fs.readFileSync(GIT_AGENT_HOST, 'utf-8');
 
   it('the prompt runs the resolver and never names the file', () => {
     expect(
       host,
-      'the Git agent prompt no longer runs resolve-settings.cjs — the per-repo key has no reader',
+      'the tracker contract no longer runs resolve-settings.cjs — the per-repo key has no reader',
     ).toContain(`node "$HOME/.devflow/scripts/${path.basename(SETTINGS_RESOLVER)}" "{root}"`);
     expect(
       collectPerRepoKeySites(host),
       'the prompt names .devflow/config.json — the resolver is its only reader (D-SETTINGS-LINE)',
     ).toEqual([]);
+    expect(
+      collectPerRepoKeySites(agentHost),
+      'the Git agent names .devflow/config.json — it names no settings reader of its own at all now',
+    ).toEqual([]);
+    expect(agentHost, 'and the agent no longer runs the resolver itself: the contract does')
+      .not.toContain(path.basename(SETTINGS_RESOLVER));
   });
 
   it('the prompt gives an invalid value its own DEGRADED reason', () => {

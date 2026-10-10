@@ -1955,6 +1955,7 @@ describe('installViaFileCopy cleanup (isPartialInstall)', () => {
 
   it('full install (isPartialInstall=false) removes stale commands and agents', async () => {
     await installViaFileCopy({
+      learning: true,
       plugins: [],
       claudeDir,
       devflowDir,
@@ -1973,6 +1974,7 @@ describe('installViaFileCopy cleanup (isPartialInstall)', () => {
     // 'stale' is absent from getAllCommandNames() and getAllAgentNames() — the
     // registry-diff sweep should remove it on every install shape, not just full installs.
     await installViaFileCopy({
+      learning: true,
       plugins: [],
       claudeDir,
       devflowDir,
@@ -2025,6 +2027,7 @@ describe('init LEGACY_SKILL_NAMES cleanup pass (init.ts:1149-1153)', () => {
 
     const devflowDir = path.join(tmpDir, 'devflow');
     await installViaFileCopy({
+      learning: true,
       plugins: [],
       claudeDir,
       devflowDir,
@@ -2049,6 +2052,7 @@ describe('init LEGACY_SKILL_NAMES cleanup pass (init.ts:1149-1153)', () => {
 
     const devflowDir = path.join(tmpDir, 'devflow');
     await installViaFileCopy({
+      learning: true,
       plugins: [],
       claudeDir,
       devflowDir,
@@ -2125,6 +2129,7 @@ describe('partial install registry-diff sweep correctness', () => {
 
     // --- Act ---
     await installViaFileCopy({
+      learning: true,
       plugins: [],          // no plugins selected — pure partial install
       claudeDir,
       devflowDir,
@@ -2477,11 +2482,12 @@ describe('buildRulesMap', () => {
   it('returns rules only from selected plugins', () => {
     const coreOnly = DEVFLOW_PLUGINS.filter(p => p.name === 'devflow-core-skills');
     const map = buildRulesMap(coreOnly);
-    expect(map.size).toBe(4);
+    expect(map.size).toBe(5);
     expect(map.get('security')).toBe('devflow-core-skills');
     expect(map.get('engineering')).toBe('devflow-core-skills');
     expect(map.get('quality')).toBe('devflow-core-skills');
     expect(map.get('reliability')).toBe('devflow-core-skills');
+    expect(map.get('context-economy')).toBe('devflow-core-skills');
   });
 
   it('includes optional plugin rules when selected', () => {

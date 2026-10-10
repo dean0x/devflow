@@ -15,10 +15,16 @@
  *       "expected-command-set guard"    — the dist/commands/*.md output set
  *   - tests/build-mds-generator-hosts.test.ts
  *       "printed host/partial counts…"  — the counts the build itself prints
- *       "13 command outputs byte-…"     — the dist/-vs-src/ byte compare is non-vacuous
+ *       "14 command outputs byte-…"     — the dist/-vs-src/ byte compare is non-vacuous
  *   - tests/packaging.test.ts
  *       Guard 6                         — the same output set, the generator hosts' compiled
- *                                         agents, and the shipped .mds sources, inside the tarball
+ *                                         agents, the learning-off variants and the shipped
+ *                                         .mds sources, inside the tarball
+ *   - tests/learning/learning-variants-build.test.ts
+ *       LEARNING_VARIANT_HOSTS          — the learning-off files on disk, both directions
+ *   - tests/learning/learning-variants-arms.test.ts
+ *       LEARNING_VARIANT_HOSTS          — the hosts whose compiled body carries an arm, both directions
+ *       SETTINGS_BLOCK_HOSTS_LEARNING_OFF — the commands that keep the settings block with learning off
  *   - tests/mds-variants.test.ts
  *       "validateOutputName"            — every basename the build owns is accepted by the name rule
  *   - tests/commands/settings-partial.test.ts
@@ -26,7 +32,7 @@
  *   - tests/guards/provider-scope.test.ts
  *       SETTINGS_BLOCK_HOSTS            — the files whose settings-line shape may name every provider
  *
- * Length floors (`>= 13` hosts, `>= 15` partials) are asserted alongside the set-equality in
+ * Length floors (`>= 14` hosts, `>= 15` partials) are asserted alongside the set-equality in
  * tests/build-mds.test.ts and registered in tests/fixtures/numeric-floors.json.
  * A floor never decreases; a manifest entry may only be added or renamed in step
  * with the file on disk.
@@ -53,10 +59,14 @@ export const DYNAMIC_COMMAND_HOSTS = [
   'dynamic-tickets',
 ] as const;
 
-/** All 13 command hosts compiled into dist/commands/. */
+/** The release command host (src/assets/commands/release.mds). */
+export const RELEASE_COMMAND_HOSTS = ['release'] as const;
+
+/** All 14 command hosts compiled into dist/commands/. */
 export const MDS_COMMAND_HOSTS = [
   ...KNOWLEDGE_COMMAND_HOSTS,
   ...DYNAMIC_COMMAND_HOSTS,
+  ...RELEASE_COMMAND_HOSTS,
 ] as const;
 
 /**
@@ -92,11 +102,14 @@ export const MDS_PARTIALS = [
  * source path — the same addressing as MDS_REFERENCE_MODULES, and for the same
  * reason: a basename is only unique inside one directory.
  *
- * One today. `_common.mds` holds the lines every tracker module writes
+ * Two today. `_common.mds` holds the lines every tracker module writes
  * identically, including the CLI provider's — the counterpart to `_mcp.mds`,
- * which owns what is shared only by the TOOL-CALL providers. It is a partial
- * because it declares no `output-dir:`: the build skips it and it reaches the
- * artifact only through the modules that import it.
+ * which owns what is shared only by the TOOL-CALL providers. `_steps.mds` holds the
+ * provider-neutral step text of the tracker operations that left the Git agent
+ * (D-NEUTRAL-STEP-MOVE), in a module of its own because the resolver's compile cost
+ * is exponential in a module's define count and `_common.mds` has no room left. Each
+ * is a partial because it declares no `output-dir:`: the build skips it and it
+ * reaches the artifact only through the modules that import it.
  *
  * This roster is what makes the partial discovery below a repo-wide walk rather
  * than a listing of one directory. A partial parked outside `_partials/` was
@@ -105,6 +118,7 @@ export const MDS_PARTIALS = [
  */
 export const MDS_REFERENCE_PARTIALS = [
   'src/assets/mds/tracker/_common.mds',
+  'src/assets/mds/tracker/_steps.mds',
 ] as const;
 
 /**
@@ -139,12 +153,9 @@ export const TRACKER_PARTIAL_ADOPTERS = [
  * The hosts that adopt `_partials/_evidence_policy.mds` (SDLC-evidence PR3b,
  * #362). Named as a set for the same reason as TRACKER_PARTIAL_ADOPTERS.
  *
- * These are the seven commands that act on the resolved evidence policy. Each
+ * These are the eight commands that act on the resolved evidence policy. Each
  * resolves it once per run through `evidence_policy()`, so the invocation and its
- * parse have one authority. release.md cannot import (it is hand-authored) and
- * carries the define's built text verbatim instead. It is not in this list, and
- * tests/evidence-policy/partial-wiring.test.ts holds it byte-identical to the
- * expansion.
+ * parse have one authority, and each imports the define rather than restating it.
  */
 export const EVIDENCE_POLICY_PARTIAL_ADOPTERS = [
   'bug-analysis',
@@ -153,20 +164,49 @@ export const EVIDENCE_POLICY_PARTIAL_ADOPTERS = [
   'dynamic-tickets',
   'implement',
   'plan',
+  'release',
   'resolve',
 ] as const;
 
 /**
- * The hosts whose compiled text carries the `_partials/_settings.mds` block (#392).
- * No host imports the partial: each inherits it through a gate partial that does
- * — `_compliance` (code-review, plan), `_publication` (code-review, dynamic-build,
- * implement, resolve) and `_knowledge`'s write-back (debug, explore, implement,
- * resolve, self-review). Named as a set for the same reason as the rosters above:
- * the provider-scope guard allowlists the block's closed provider set in exactly
- * these files, and tests/commands/settings-partial.test.ts holds the set to the
- * build.
+ * The hosts whose compiled text carries the `_partials/_settings.mds` block (#392,
+ * D-SETTINGS-LINE): all 14 command hosts, each expanding `settings_resolve()` exactly
+ * once, before the earliest of its consumers. The hosts import the partial themselves,
+ * as alias imports; no partial does. Named as a set for the same reason as the rosters
+ * above: the provider-scope guard allowlists the block's closed provider set in exactly
+ * these files, and tests/commands/settings-partial.test.ts holds the set to the build.
+ *
+ * The block count (14) and the learning-off count (8) are test-local constants beside
+ * their assertions, not manifest rows: a count held here would be a second place to
+ * keep in step with this set.
  */
 export const SETTINGS_BLOCK_HOSTS = [
+  'bug-analysis',
+  'code-review',
+  'debug',
+  'dynamic-build',
+  'dynamic-plan',
+  'dynamic-profile',
+  'dynamic-tickets',
+  'explore',
+  'implement',
+  'plan',
+  'release',
+  'research',
+  'resolve',
+  'self-review',
+] as const
+
+/**
+ * The hosts whose learning-OFF build still carries the settings block: the ones with
+ * a consumer other than learning (a compliance lens, a publication gate or a knowledge
+ * write-back). The other six of SETTINGS_BLOCK_HOSTS (bug-analysis, dynamic-plan,
+ * dynamic-profile, dynamic-tickets, release, research) only read the line for the
+ * decisions gate or a Skim spawn, so the block sits inside their learning-on arm.
+ * Named as a set; the learning-off count (8) is a test-local constant beside its
+ * assertion.
+ */
+export const SETTINGS_BLOCK_HOSTS_LEARNING_OFF = [
   'code-review',
   'debug',
   'dynamic-build',
@@ -179,10 +219,58 @@ export const SETTINGS_BLOCK_HOSTS = [
 
 /**
  * Generator hosts: .mds sources outside src/assets/commands/ that compile to a
- * destination other than dist/commands. Today exactly one — the Git agent,
- * src/assets/agents/git.mds → dist/agents/git.md.
+ * destination other than dist/commands. Ten today, all agents:
+ * src/assets/agents/{name}.mds → dist/agents/{name}.md. Git is the first; the other
+ * nine (the agents that declare learning input, plus Skim) are hosts so their
+ * learning arms can be built into the learning-off variant. The rest of the agents
+ * stay hand-authored, and an agent never has both an .md and an .mds source.
  */
-export const MDS_GENERATOR_HOSTS = ['git'] as const;
+export const MDS_GENERATOR_HOSTS = [
+  'code',
+  'design',
+  'diagnose',
+  'git',
+  'knowledge',
+  'research',
+  'review',
+  'scrutinize',
+  'skim',
+  'triage',
+] as const;
+
+/**
+ * The hosts whose compiled body carries a learning arm, and therefore have a
+ * learning-off variant: each is `<kind>/<name>`, the path under
+ * `dist/learning-off/` without its `.md`. Named as a set, not a count, for the
+ * same reason as every other roster here: a count stays green when one host
+ * loses its arm and another gains one in the same commit.
+ *
+ * All 14 command hosts (each loads decisions, or hands them on, behind an arm)
+ * and the nine agent hosts that declare `DECISIONS_CONTEXT` (eight) or take the
+ * `LEARNING` input (Skim). The Learning agent, `learning.md`, is hand-authored
+ * and runs only when learning is on, so it has no variant. The assertions over
+ * this set hold at every step: the printed variant count and the files under
+ * `dist/learning-off/` both equal it in both directions, the packed tarball
+ * carries exactly these files, and an arm added without a row (or a row left
+ * after its arm goes) turns one of them red.
+ */
+export const LEARNING_VARIANT_HOSTS: readonly string[] = [
+  ...MDS_COMMAND_HOSTS.map(h => `commands/${h}`),
+  ...[
+    'code',
+    'design',
+    'diagnose',
+    'knowledge',
+    'research',
+    'review',
+    'scrutinize',
+    'skim',
+    'triage',
+  ].map(h => `agents/${h}`),
+];
+
+/** The `dist/learning-off/`-relative file of every host in LEARNING_VARIANT_HOSTS. */
+export const LEARNING_OFF_FILES: readonly string[] = LEARNING_VARIANT_HOSTS.map(h => `${h}.md`);
 
 /**
  * Reference modules: .mds sources under src/assets/mds/ that the build COMPILES,
@@ -227,25 +315,17 @@ export const MDS_REFERENCE_MODULES = [
   'src/assets/mds/tracker/_jira.mds',
   'src/assets/mds/tracker/_linear.mds',
   'src/assets/mds/tracker/_mcp.mds',
+  'src/assets/mds/tracker/_contract.mds',
   'src/assets/mds/git/_pr.mds',
   'src/assets/mds/git/_references.mds',
 ] as const;
 
 /**
- * Hand-authored files copied verbatim into dist/commands/. release.md carries the
- * built `evidence_policy()` text verbatim instead of importing it, and is not
- * MDS-compiled; the divergence is permanent (SG-13).
+ * The 14 files that must exist in dist/commands/ after a build: one per command
+ * host. This is DIST_FILES — deployed-behaviour scope (§14.5). Every command is a
+ * compiled host, so no file here is copied rather than compiled.
  */
-export const HAND_AUTHORED_COMMAND_FILES = ['release.md'] as const;
-
-/**
- * The 14 files that must exist in dist/commands/ after a build: the 13 compiled
- * hosts plus release.md. This is DIST_FILES — deployed-behaviour scope (§14.5).
- */
-export const DIST_COMMAND_FILES: readonly string[] = [
-  ...MDS_COMMAND_HOSTS.map(h => `${h}.md`),
-  ...HAND_AUTHORED_COMMAND_FILES,
-];
+export const DIST_COMMAND_FILES: readonly string[] = MDS_COMMAND_HOSTS.map(h => `${h}.md`);
 
 /**
  * Every host basename that becomes an output FILENAME: command hosts + generator
