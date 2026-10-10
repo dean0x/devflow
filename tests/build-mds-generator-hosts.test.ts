@@ -174,8 +174,13 @@ const EXPECTED_REFERENCE_KEYS: readonly string[] = [
   ...VARIANT_MODULES
     .filter(mod => mod.kind === 'fanout')
     .flatMap(mod => mod.ops.map(op => `skills/git/references/${mod.subdir}/${op}.md`)),
-  // The gated contract document, keyed the same way. `ops` carries its single
+  // The UNGATED contract documents in the registry (the tracker contract,
+  // D-TRACKER-CONTRACT-ON-DEMAND), keyed the same way: `ops` carries the single
   // emitted basename, so the shape is the same as a provider row's.
+  ...VARIANT_MODULES
+    .filter(mod => mod.kind === 'contract')
+    .flatMap(mod => mod.ops.map(op => `skills/git/references/${mod.subdir}/${op}.md`)),
+  // The gated contract document, keyed the same way.
   ...MCP_CONTRACT_MODULE.ops.map(op => `skills/git/references/${MCP_CONTRACT_MODULE.subdir}/${op}.md`),
   ...GIT_CROSS_CUTTING_DOCS.map(doc => `skills/git/references/${doc}.md`),
 ];
