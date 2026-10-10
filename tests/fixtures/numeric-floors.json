@@ -382,11 +382,11 @@
     },
     {
       "id": "write-fence-allowlist-size",
-      "ceiling": 11,
-      "pattern": "allowlistSize(FENCE_ROWS)).toBeLessThanOrEqual(11)",
+      "ceiling": 12,
+      "pattern": "allowlistSize(FENCE_ROWS)).toBeLessThanOrEqual(12)",
       "occurrences": 1,
       "sourceFile": "tests/write-set-fence.test.ts",
-      "description": "Distinct allowlist entries across the write-set fence table — the machine-wide footprint the CLI toggles may write (audit appendix 09-tests.md strategy item 9). A new path a toggle writes must be added to a row, and this ceiling says so out loud; it may be LOWERED as the footprint shrinks, never raised."
+      "description": "Distinct allowlist entries across the write-set fence table — the machine-wide footprint the CLI toggles may write (audit appendix 09-tests.md strategy item 9). A new path a toggle writes must be added to a row, and this ceiling says so out loud; it may be LOWERED as the footprint shrinks, never raised. Raised once, from 11 to 12, by the maintainer's authorisation on 2026-10-10 for the learning-variant converge (#426): the roster derived from dist/learning-off plus the apply-decisions skill directory count as ONE declared entry (D-ALLOWLIST-COUNTING), because their members come from the build, not from hand edits. A second hand-written entry takes the count to 13 and fails this ceiling."
     },
     {
       "id": "charter-char-max",
