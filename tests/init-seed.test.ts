@@ -1211,7 +1211,7 @@ describe('resolveInitSeed — D-ADOPT-RESPECTS-USER (subagent-cache-5m)', () => 
     expect(resolveInitSeed(withFlags({ [FLAG]: null }), settingsWith('1h'), DEVFLOW_PLUGINS).flags[FLAG]).toBeNull();
   });
 
-  it('--reset overwrites: the emptied settings snapshot seeds the flag ON (ADR-014)', () => {
+  it('--reset overwrites: the emptied settings snapshot seeds the flag ON (a reset restores factory defaults)', () => {
     const { seedManifest, seedSettings } = resolveResetGatedInputs(
       true, withFlags({ tui: true }), null, settingsWith('1h'),
     );
