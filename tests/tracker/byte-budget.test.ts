@@ -141,10 +141,11 @@ import type {
  * fell again to min(previous ceiling, measurement + 80).
  *
  * The 80 ch is general headroom, not a reservation: no line of it is spoken for,
- * and an addition still funds itself with a cut. git.md growth lands in every
- * loaded-set row, so every row carries the same headroom: 98 ch today, the 80
- * plus the 18 ch that #411's removal of learning-ledger IDs cut from git.md
- * without lowering a ceiling. The ceilings remain regression alarms that are
+ * and an addition still funds itself with a cut. Each ceiling was set as
+ * min(its previous ceiling, measured actual + 80), so a row's headroom drifts away
+ * from 80 whenever its measurement moves without its ceiling, and the rows differ.
+ * git.md growth lands in every loaded-set row at once, so the row with the least
+ * headroom is the one that binds. The ceilings remain regression alarms that are
  * LOWERED, NEVER RAISED.
  */
 
@@ -297,9 +298,10 @@ const BUDGET_LOADED_SET_JIRA = 72_795;
  * #393 from a measured 75_573 (git.md -315 ch, the site rung +28 ch): 75_653. Re-derived by #423 from a measured 73_851 (the same
  * two preloaded-skill cuts as the GitHub row): 73_931. Re-derived by #425 to
  * 73_391, as the Jira row. The row measures 73_333 today, 58 ch under this ceiling. This is the
- * LARGEST of the four ceilings but not the binding one: a character added to git.md
- * is a character added to every row, and every row carries the same headroom. Re-run
- * this file for each row's current headroom.
+ * LARGEST of the four ceilings but not necessarily the binding one: a character added
+ * to git.md is a character added to every row, and the row with the least headroom
+ * binds. Each ceiling was set as min(its previous ceiling, measured actual + 80), so
+ * headroom differs per row. Re-run this file for each row's current headroom.
  *
  * WHY THIS ROW IS THE LARGEST OF THE THREE, recorded so the number is not read as
  * bloat: its worst spawn is the same chain the other rows price, and this provider's

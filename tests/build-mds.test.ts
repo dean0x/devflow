@@ -223,7 +223,7 @@ describe('MDS host discovery', () => {
     }
   });
 
-  it('commands/_partials/ holds exactly the manifest\'s 14 partials (both directions)', async () => {
+  it('commands/_partials/ holds exactly the manifest\'s partials (both directions)', async () => {
     const { partials } = await collectMdsNames(PARTIALS_DIR);
     expect(partials).toEqual([...MDS_PARTIALS].sort());
   });
@@ -258,7 +258,7 @@ describe('MDS host discovery', () => {
     return found.sort();
   }
 
-  it('src/ holds exactly the manifest\'s 15 partials, wherever they live (both directions)', async () => {
+  it('src/ holds exactly the manifest\'s partials, wherever they live (both directions)', async () => {
     const partials = await collectRepoPartials(path.join(ROOT, 'src'));
     expect(
       partials,
