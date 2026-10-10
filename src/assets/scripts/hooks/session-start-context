@@ -239,6 +239,7 @@ if [ "$LEARNING_ENABLED" = "true" ]; then
     # since the model would read the file the link names and pass that on.
     # Builtins only: no fork, save the log line of a refused index.
     _SC_INDEX="$LEARNING_DIR/index.md"; DECISIONS_INDEX_LINE=""
+    DECISIONS_PASS_RULE="Decisions (direct delegations only — workflow skills load their own): pass this index as DECISIONS_CONTEXT — its content, read once — to every agent that takes it."
     if [ -n "$DIRECTIVE_LEDGER_SAFE" ] && df_file_below "$LEDGER_ROOT" "$_SC_INDEX" && [ -s "$_SC_INDEX" ]; then
       _SC_IDX1=""; IFS= read -r _SC_IDX1 < "$_SC_INDEX" || true
       [ "$_SC_IDX1" != "(none)" ] && DECISIONS_INDEX_LINE="Index: $_SC_INDEX"
@@ -250,10 +251,19 @@ if [ "$LEARNING_ENABLED" = "true" ]; then
         DECISIONS_SECTION="${DECISIONS_SECTION}
 $(printf '%b' "$DECISIONS_TLDR")"
       fi
-      # The index line goes last.
+      # The index line goes last among the data lines, and the pass rule follows it.
+      # D-DECISIONS-CHARTER-HANDOFF: the rule that tells the main model to pass this
+      # index on as DECISIONS_CONTEXT lives here, not in the orchestrator charter. It
+      # is only useful with an index line to pass, so it is emitted only with one, and
+      # this block is already gated on the machine switch narrowed by the repository,
+      # so a learning-off machine or repo never sees it (the charter paid for it in
+      # every session, learning or not). It also reaches sessions with ambient off,
+      # which the charter never did. A static literal: no input is interpolated, so it
+      # needs no shape gate. The same text reaches the jq and the node envelope.
       if [ -n "$DECISIONS_INDEX_LINE" ]; then
         DECISIONS_SECTION="${DECISIONS_SECTION}
-${DECISIONS_INDEX_LINE}"
+${DECISIONS_INDEX_LINE}
+${DECISIONS_PASS_RULE}"
       fi
       if [ -n "$CONTEXT" ]; then
         CONTEXT="${CONTEXT}

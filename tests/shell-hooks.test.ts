@@ -780,6 +780,15 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
   const learningOf = (root: string) => path.join(root, '.devflow', 'learning');
   const indexOf = (root: string) => path.join(learningOf(root), 'index.md');
 
+  /**
+   * The pass rule the section ends with (D-DECISIONS-CHARTER-HANDOFF). It lived in the
+   * orchestrator charter until the section took it over, so it is written out here
+   * rather than read back from the hook: the pin is on what the model is TOLD.
+   */
+  const PASS_RULE =
+    'Decisions (direct delegations only — workflow skills load their own): ' +
+    'pass this index as DECISIONS_CONTEXT — its content, read once — to every agent that takes it.';
+
   /** The PROJECT DECISIONS section of the injected context, up to the blank line that ends it. */
   function decisionsSection(cwd: string): string {
     const { stdout, exitCode } = runHook(SESSION_CONTEXT, { cwd, source: 'startup' }, homeDir);
@@ -800,25 +809,27 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
     if (index !== undefined) fs.writeFileSync(indexOf(root), index);
   }
 
-  it('TP-17: in a linked worktree, PROJECT DECISIONS names the main checkout index, last', () => {
+  it('TP-17: in a linked worktree, PROJECT DECISIONS names the main checkout index, then the pass rule', () => {
     seedRendered(main, 'Decisions (1):\n  ADR-001  Main decision  [Accepted]\n');
 
     expect(decisionsSection(wt)).toBe(
-      `--- PROJECT DECISIONS (TL;DR) ---\n3 decisions\n2 pitfalls\nIndex: ${indexOf(main)}`,
+      `--- PROJECT DECISIONS (TL;DR) ---\n3 decisions\n2 pitfalls\nIndex: ${indexOf(main)}\n${PASS_RULE}`,
     );
   });
 
-  it('PROJECT DECISIONS carries the index line alone when no TL;DR is rendered', () => {
+  it('PROJECT DECISIONS carries the index line and the pass rule alone when no TL;DR is rendered', () => {
     fs.mkdirSync(learningOf(main), { recursive: true });
     fs.writeFileSync(indexOf(main), 'Pitfalls (1):\n  PF-001  Main pitfall  [Active]\n');
 
-    expect(decisionsSection(wt)).toBe(`--- PROJECT DECISIONS (TL;DR) ---\nIndex: ${indexOf(main)}`);
+    expect(decisionsSection(wt)).toBe(`--- PROJECT DECISIONS (TL;DR) ---\nIndex: ${indexOf(main)}\n${PASS_RULE}`);
   });
 
-  it('no index line when the index is missing', () => {
+  it('no index line when the index is missing, and no pass rule either: there is nothing to pass', () => {
     seedRendered(main);
 
-    expect(decisionsSection(wt)).toBe('--- PROJECT DECISIONS (TL;DR) ---\n3 decisions\n2 pitfalls');
+    const section = decisionsSection(wt);
+    expect(section).toBe('--- PROJECT DECISIONS (TL;DR) ---\n3 decisions\n2 pitfalls');
+    expect(section).not.toContain('DECISIONS_CONTEXT');
   });
 
   it('no index line when the index lists no entry — (none) — or is empty', () => {
@@ -849,12 +860,40 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
     expect(decisionsSection(admitted)).toContain(`Index: ${fs.realpathSync(indexOf(admitted))}`);
   });
 
-  it('the orchestrator charter passes the index this section names on as DECISIONS_CONTEXT', () => {
+  it('the pass rule lives in this section and not in the orchestrator charter (D-DECISIONS-CHARTER-HANDOFF)', () => {
     const charter = fs.readFileSync(path.join(HOOKS_DIR, 'assets', 'orchestrator-charter.md'), 'utf-8');
     const hook = fs.readFileSync(SESSION_CONTEXT, 'utf-8');
     expect(hook).toContain('--- PROJECT DECISIONS (TL;DR) ---');
     expect(hook).toContain('DECISIONS_INDEX_LINE="Index: $_SC_INDEX"');
-    expect(charter).toContain('pass the index named under PROJECT DECISIONS as DECISIONS_CONTEXT');
+    expect(hook).toContain(PASS_RULE);
+    // The charter is paid for in every ambient session, learning or not; the section is
+    // gated on the machine switch narrowed by the repository.
+    expect(charter).not.toContain('DECISIONS_CONTEXT');
+    expect(charter).not.toContain('PROJECT DECISIONS');
+  });
+
+  it('the rule is appended in the same branch as the Index line, so a section without an index never carries it', () => {
+    // The hook text orders the two: the rule is appended inside the same `if` that appends the index.
+    const hook = fs.readFileSync(SESSION_CONTEXT, 'utf-8');
+    const indexAt = hook.indexOf('${DECISIONS_INDEX_LINE}\n${DECISIONS_PASS_RULE}');
+    expect(indexAt).toBeGreaterThan(-1);
+    expect(hook.slice(Math.max(0, indexAt - 80), indexAt)).toContain('DECISIONS_SECTION="${DECISIONS_SECTION}');
+  });
+
+  describe.each([
+    { name: 'jq', prelude: '' },
+    { name: 'node fallback', prelude: '_HAS_JQ=false &&' },
+  ] as const)('the section reaches the model unchanged through the $name envelope', ({ name, prelude }) => {
+    const hasJq = spawnSync('jq', ['--version'], { encoding: 'utf8' }).status === 0;
+    it.skipIf(name === 'jq' && !hasJq)('em dashes and newlines in the pass rule survive json_session_output', () => {
+      const section = `--- PROJECT DECISIONS (TL;DR) ---\nIndex: /x/.devflow/learning/index.md\n${PASS_RULE}`;
+      const run = spawnSync('bash', [
+        '-c', `source "$1" && ${prelude} json_session_output "$2"`,
+        '_', path.join(HOOKS_DIR, 'json-parse'), section,
+      ], { encoding: 'utf8' });
+      expect(run.status).toBe(0);
+      expect(JSON.parse(run.stdout).hookSpecificOutput.additionalContext).toBe(section);
+    }, 60_000);
   });
 
   it('a main checkout that never ran devflow keeps the ledger in the worktree, and is not scaffolded', () => {
