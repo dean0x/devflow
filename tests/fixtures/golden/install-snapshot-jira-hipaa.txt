@@ -154,6 +154,7 @@ d .claude/skills/devflow:git/references/pr/
 - .claude/skills/devflow:git/references/publication-gate.md
 - .claude/skills/devflow:git/references/sources.md
 d .claude/skills/devflow:git/references/tracker/
+- .claude/skills/devflow:git/references/tracker/_contract.md
 - .claude/skills/devflow:git/references/tracker/_mcp.md
 d .claude/skills/devflow:git/references/tracker/github/
 - .claude/skills/devflow:git/references/tracker/github/associate-release.md
