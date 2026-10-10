@@ -626,13 +626,35 @@ function vendorCorpus(): CorpusEntry[] {
   return corpus;
 }
 
+/**
+ * `VENDOR_ALLOWLIST` (D-SCAN-IN-CODE): the one `mcp__` literal this scan admits is Scrutinize's
+ * `  - mcp__*` entry in its `disallowedTools` frontmatter, in the compiled agent and in its
+ * learning-off variant. The wildcard denies every MCP tool and names none, so it binds no
+ * contract to a transport; Simplify carries the same entry, but it is hand-authored and outside
+ * this scan. The exemption is one exact line in two named files: any other `mcp__` literal in
+ * those files, and the same line anywhere else (the Git agent included), is still reported.
+ * The prohibition above and this exemption are one authority: the 'still needed' arm below
+ * fails when a file no longer carries its line.
+ */
+const VENDOR_ALLOWLIST: { readonly files: readonly string[]; readonly line: string; readonly token: string } = {
+  files: ['dist/agents/scrutinize.md', `${LEARNING_OFF_AGENTS}/scrutinize.md`],
+  line: '- mcp__*',
+  token: 'mcp__ tool literal',
+};
+
+function isAllowedVendorLine(entryPath: string, token: VendorToken, line: string): boolean {
+  return token.name === VENDOR_ALLOWLIST.token
+    && VENDOR_ALLOWLIST.files.includes(entryPath)
+    && line.trim() === VENDOR_ALLOWLIST.line;
+}
+
 /** Named collector: vendor/transport literals in loadable prompt text. */
 export function collectVendorTokens(corpus: CorpusEntry[]): string[] {
   const violations: string[] = [];
   for (const entry of corpus) {
     for (const token of VENDOR_TOKENS) {
       for (const line of entry.content.split('\n')) {
-        if (token.pattern.test(line)) {
+        if (token.pattern.test(line) && !isAllowedVendorLine(entry.path, token, line)) {
           violations.push(`${entry.path}: ${token.name} — ${line.trim().slice(0, 90)}`);
         }
       }
@@ -657,6 +679,31 @@ describe('provider-scope: no vendor tool literal in loadable text (§14.5)', () 
     ).toContain(GIT_HOST);
     const violations = collectVendorTokens(corpus);
     expect(violations, `vendor/transport literals:\n  ${violations.join('\n  ')}`).toEqual([]);
+  });
+
+  it('every allowlisted vendor line is still needed: each file really carries it', () => {
+    const corpus = vendorCorpus();
+    for (const file of VENDOR_ALLOWLIST.files) {
+      const entry = corpus.find(e => e.path === file);
+      expect(entry, `${file} is not in the vendor scan`).toBeDefined();
+      expect(
+        (entry as CorpusEntry).content.split('\n').some(line => line.trim() === VENDOR_ALLOWLIST.line),
+        `${file} no longer carries "${VENDOR_ALLOWLIST.line}": delete it from VENDOR_ALLOWLIST`,
+      ).toBe(true);
+    }
+  });
+
+  it('known-bad probe: the allowlist admits one exact line in two files and nothing else', () => {
+    const [compiled, learningOff] = VENDOR_ALLOWLIST.files;
+    const entry = (path: string, content: string): CorpusEntry => ({ path, content });
+    expect(collectVendorTokens([entry(compiled, '  - mcp__*\n'), entry(learningOff, '  - mcp__*\n')])).toEqual([]);
+    // The same line anywhere else, and any other mcp__ literal in an allowlisted file, are reported.
+    expect(collectVendorTokens([entry('dist/agents/git.md', '  - mcp__*\n')]).length).toBe(1);
+    expect(collectVendorTokens([entry('dist/agents/code.md', '  - mcp__*\n')]).length).toBe(1);
+    expect(collectVendorTokens([entry(compiled, '  - mcp__tavily__tavily_search\n')]).length).toBe(1);
+    expect(collectVendorTokens([entry(compiled, 'Call mcp__* directly.\n')]).length).toBe(1);
+    // The other token is not silenced by it.
+    expect(collectVendorTokens([entry(compiled, 'Requires the MCP server.\n')]).length).toBe(1);
   });
 
   it('known-bad probe: both vendor tokens are reported by the same collector', () => {

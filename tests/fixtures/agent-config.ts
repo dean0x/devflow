@@ -82,16 +82,17 @@ export interface AgentConfigRow {
 
 /**
  * D-SHARED-DENYLIST: the orchestration and host-UI tools that no worker agent
- * needs. One list, spelled exactly, with no wildcard: the research behind this
- * table says a wildcard in `disallowedTools` removes MCP names, and the agents
- * that use it (Code, Research, Scrutinize, Simplify) keep their user-environment
- * MCP and web access, so every name is written out. A denied name the runtime
- * does not expose is assumed to be a no-op.
+ * needs. One list, spelled exactly, with no wildcard: a wildcard in
+ * `disallowedTools` removes MCP names, and the denylist agents that keep their
+ * user-environment MCP and web access (Code, Research and Git) must not lose
+ * them, so every name is written out. A denied name the runtime does not expose
+ * is assumed to be a no-op.
  *
  * Code and Research deny exactly this list. Scrutinize and Simplify deny it plus
- * `Skill`. `Artifact`, `ListAgents` and `ReportFindings` appear on the registry
- * observed while the table was drafted but not on the approved list, so they are
- * not here.
+ * `Skill`, and `mcp__*` as their own `extra` (D-SCAN-IN-CODE): the only wildcards
+ * a denylist may hold, which MCP_DENY_AGENTS names. `Artifact`, `ListAgents` and
+ * `ReportFindings` appear on the registry observed while the table was drafted
+ * but not on the approved list, so they are not here.
  */
 export const SHARED_DENYLIST: readonly string[] = [
   'Agent',
@@ -112,6 +113,14 @@ export const SHARED_DENYLIST: readonly string[] = [
   'PushNotification',
   'DesignSync',
 ];
+
+/**
+ * D-SCAN-IN-CODE: the code-scanning tool runs in the Code agent, once per changed file
+ * before its final commit, so the two agents that review Code's work deny every MCP tool
+ * instead of loading a scanner's tool set into each of their spawns. `mcp__*` is the one
+ * wildcard a denylist may hold, and only these two agents may hold it.
+ */
+export const MCP_DENY_AGENTS: readonly string[] = ['scrutinize', 'simplify'];
 
 /**
  * D-CORE-RULES-DIGEST: the core rules an agent that omits the rules keeps in its own body.
@@ -205,7 +214,7 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
   scrutinize: {
     model: 'opus',
     effort: 'medium',
-    policy: { kind: 'deny', extra: ['Skill'] },
+    policy: { kind: 'deny', extra: ['Skill', 'mcp__*'] },
     omitClaudeMd: false,
     skills: ['quality-gates', 'software-design', 'worktree-support', 'apply-decisions', 'apply-feature-knowledge'],
     digest: [],
@@ -213,7 +222,7 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
   simplify: {
     model: 'sonnet',
     effort: 'medium',
-    policy: { kind: 'deny', extra: ['Skill'] },
+    policy: { kind: 'deny', extra: ['Skill', 'mcp__*'] },
     omitClaudeMd: false,
     skills: ['software-design', 'worktree-support'],
     digest: [],

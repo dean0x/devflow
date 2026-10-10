@@ -26,6 +26,8 @@
  *                              omit CLAUDE.md and the rules, and why. The omit arm of the
  *                              row check below pins the frontmatter; the digest each omitting
  *                              body carries is held by tests/guards/core-rules-digest.test.ts.
+ *  - D-SCAN-IN-CODE            tests/fixtures/agent-config.ts (MCP_DENY_AGENTS) and the
+ *                              denylist arm below: Scrutinize and Simplify deny `mcp__*`.
  *  - D-GIT-ROW                 tests/fixtures/agent-config.ts (the git row).
  *  - D-STRUCTURED-RETURN-TOOL  the structured-return arm below.
  *
@@ -62,6 +64,7 @@ import {
   AGENT_CONFIG,
   DIAGNOSE_FOCUS_SKILLS,
   EXEMPT_AGENTS,
+  MCP_DENY_AGENTS,
   SHARED_DENYLIST,
   type AgentConfigRow,
 } from '../fixtures/agent-config.js';
@@ -208,14 +211,24 @@ function collectRowViolations(name: string, fm: AgentFrontmatter, row: AgentConf
   return out;
 }
 
-/** Every way the shared denylist, or a denylist agent's use of it, breaks the rules. */
+/**
+ * Every way the shared denylist, or a denylist agent's use of it, breaks the rules.
+ * D-SCAN-IN-CODE: the one wildcard a denylist may hold is `mcp__*`, on an agent named in
+ * MCP_DENY_AGENTS; every other wildcard, a named MCP tool, and any WebFetch or WebSearch deny
+ * is still reported, and an allowlist never holds a wildcard.
+ */
 function collectDenylistViolations(name: string, fm: AgentFrontmatter): string[] {
   const out: string[] = [];
-  const names = [...(fm.tools ?? []), ...(fm.disallowedTools ?? [])];
-  for (const tool of names) {
+  const mcpWildcardAllowed = MCP_DENY_AGENTS.includes(name);
+  const isAllowedWildcard = (tool: string): boolean => tool === 'mcp__*' && mcpWildcardAllowed;
+  for (const tool of fm.tools ?? []) {
     if (tool.includes('*')) out.push(`${name}.md: "${tool}" is a wildcard; spell every tool name out`);
   }
   for (const tool of fm.disallowedTools ?? []) {
+    if (tool.includes('*') && !isAllowedWildcard(tool)) {
+      out.push(`${name}.md: "${tool}" is a wildcard; spell every tool name out`);
+    }
+    if (isAllowedWildcard(tool)) continue;
     if (tool === 'WebFetch' || tool === 'WebSearch' || tool.startsWith('mcp__')) {
       out.push(`${name}.md: denies "${tool}"; a denylist agent keeps its MCP and web access`);
     }
@@ -567,16 +580,24 @@ describe('one shared denylist (D-SHARED-DENYLIST)', () => {
     for (const tool of SHARED_DENYLIST) expect(tool, tool).toMatch(/^[A-Z][A-Za-z]+$/);
   });
 
-  it('Code and Research deny exactly the list, and Scrutinize and Simplify deny it plus Skill', () => {
+  it('Code and Research deny exactly the list, and Scrutinize and Simplify deny it plus Skill and mcp__*', () => {
     for (const name of ['code', 'research']) {
       expect(sameSet(agent(name).fm.disallowedTools ?? [], SHARED_DENYLIST), name).toBe(true);
     }
     for (const name of ['scrutinize', 'simplify']) {
-      expect(sameSet(agent(name).fm.disallowedTools ?? [], [...SHARED_DENYLIST, 'Skill']), name).toBe(true);
+      expect(sameSet(agent(name).fm.disallowedTools ?? [], [...SHARED_DENYLIST, 'Skill', 'mcp__*']), name).toBe(true);
     }
   });
 
-  it('the two policies never mix, and no list holds a wildcard or denies MCP or web access', () => {
+  it('only the agents MCP_DENY_AGENTS names deny MCP, and they are exactly Scrutinize and Simplify (D-SCAN-IN-CODE)', () => {
+    expect([...MCP_DENY_AGENTS].sort()).toEqual(['scrutinize', 'simplify']);
+    for (const record of agents.values()) {
+      const denies = (record.fm.disallowedTools ?? []).some(tool => tool.startsWith('mcp__'));
+      expect(denies, record.name).toBe(MCP_DENY_AGENTS.includes(record.name));
+    }
+  });
+
+  it('the two policies never mix, and no list holds a wildcard, denies web access or denies a named MCP tool', () => {
     for (const record of agents.values()) {
       expect(record.fm.tools !== null && record.fm.disallowedTools !== null, `${record.name} mixes policies`).toBe(false);
       expect(collectDenylistViolations(record.name, record.fm), record.name).toEqual([]);
@@ -590,6 +611,22 @@ describe('one shared denylist (D-SHARED-DENYLIST)', () => {
     expect(collectDenylistViolations('x', { ...base, disallowedTools: ['mcp__claude-in-chrome__navigate'] })).toHaveLength(1);
     expect(collectDenylistViolations('x', { ...base, tools: ['Read', 'mcp__*'] })).toHaveLength(1);
     expect(collectDenylistViolations('x', base)).toEqual([]);
+  });
+
+  it('known-bad probes: mcp__* is allowed for Scrutinize and Simplify only, and nothing else widens (D-SCAN-IN-CODE)', () => {
+    const base = renderRow('scrutinize', AGENT_CONFIG.scrutinize);
+    expect(collectDenylistViolations('scrutinize', base)).toEqual([]);
+    expect(collectDenylistViolations('simplify', renderRow('simplify', AGENT_CONFIG.simplify))).toEqual([]);
+    // The same list on any other agent is reported (a wildcard, and a denied MCP name).
+    expect(collectDenylistViolations('code', base)).toHaveLength(2);
+    expect(collectDenylistViolations('git', base)).toHaveLength(2);
+    // A different wildcard, a named MCP tool and a web tool stay rejected on the permitted agents.
+    expect(collectDenylistViolations('scrutinize', { ...base, disallowedTools: ['Bash*'] })).toHaveLength(1);
+    expect(collectDenylistViolations('scrutinize', { ...base, disallowedTools: ['mcp__*', 'mcp__tavily__tavily_search'] })).toHaveLength(1);
+    expect(collectDenylistViolations('scrutinize', { ...base, disallowedTools: ['mcp__*', 'WebFetch'] })).toHaveLength(1);
+    expect(collectDenylistViolations('simplify', { ...base, disallowedTools: ['mcp__*', 'WebSearch'] })).toHaveLength(1);
+    // An allowlist never holds a wildcard, whoever the agent is.
+    expect(collectDenylistViolations('scrutinize', { ...base, disallowedTools: null, tools: ['Read', 'mcp__*'] })).toHaveLength(1);
   });
 });
 

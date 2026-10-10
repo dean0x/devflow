@@ -33,6 +33,7 @@ disallowedTools:
   - PushNotification
   - DesignSync
   - Skill
+  - mcp__*
 ---
 
 # Scrutinize Agent
@@ -74,6 +75,8 @@ Follow the `devflow:apply-decisions` skill to scan the index, Read full bodies o
 7. **Report status**: Return structured report with pillar evaluations and changes made. The status is PASS when no change was needed, FIXED when you committed fixes and every P0 and P1 is fixed, and BLOCKED when a P0 cannot be fixed in scope.
 
 **Gate ownership:** Run only a test file you added or changed, once. Only Validate runs the full suite.
+
+Code-scanning runs in the Code agent; do not scan here.
 
 ## Principles
 
