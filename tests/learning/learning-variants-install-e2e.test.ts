@@ -119,9 +119,11 @@ async function promptDigest(): Promise<Map<string, string>> {
   return digest;
 }
 
+const manifestFile = (): string => path.join(devflowDir(), 'manifest.json');
+
 /** The machine switch as the manifest records it. */
 async function manifestLearning(): Promise<boolean | undefined> {
-  const manifest = JSON.parse(await fs.readFile(path.join(devflowDir(), 'manifest.json'), 'utf-8')) as {
+  const manifest = JSON.parse(await fs.readFile(manifestFile(), 'utf-8')) as {
     features: { learning?: boolean };
   };
   return manifest.features.learning;
@@ -228,12 +230,31 @@ describe('devflow learning --enable/--disable converges the install (AC-140, AC-
   it('a toggle to the value already installed prints nothing about prompts and writes nothing', async () => {
     init('--recommended', '--no-learning');
     const tree = await installedTree();
+    const manifest = await fs.readFile(manifestFile());
 
     const again = okCli(os.tmpdir(), 'learning', '--disable');
 
     expect(again).not.toContain('Installed prompts');
     expect(await installedTree()).toEqual(tree);
     await expectAll('off');
+    expect((await fs.readFile(manifestFile())).equals(manifest), 'the manifest, updatedAt included, is byte-identical').toBe(true);
+  }, SCENARIO_TIMEOUT_MS);
+
+  it('--enable on an enabled machine and --disable on a disabled one leave manifest.json byte-identical (D-NOOP-TOGGLE)', async () => {
+    init('--recommended');
+    const enabledManifest = await fs.readFile(manifestFile());
+    expect(await manifestLearning(), 'non-vacuity: learning is recorded on').toBe(true);
+
+    okCli(os.tmpdir(), 'learning', '--enable');
+    expect((await fs.readFile(manifestFile())).equals(enabledManifest), 'enable over enabled').toBe(true);
+
+    okCli(os.tmpdir(), 'learning', '--disable');
+    expect(await manifestLearning(), 'a real toggle is still recorded').toBe(false);
+    const disabledManifest = await fs.readFile(manifestFile());
+    expect(disabledManifest.equals(enabledManifest), 'a real toggle changes the manifest').toBe(false);
+
+    okCli(os.tmpdir(), 'learning', '--disable');
+    expect((await fs.readFile(manifestFile())).equals(disabledManifest), 'disable over disabled').toBe(true);
   }, SCENARIO_TIMEOUT_MS);
 
   it('an agent model/effort override survives a toggle in both directions (AC-142)', async () => {
