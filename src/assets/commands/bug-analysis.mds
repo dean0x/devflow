@@ -188,8 +188,8 @@ If no tool produced findings: set `STATIC_FINDINGS` to `(none)`.
 
 #### Plan Artifact
 
-1. List `{worktree}/.devflow/docs/design/*.md` — sort descending by filename (timestamps are naturally sortable), scan the 10 most recent
-2. Read the most recent file if it exists
+1. List the design plans: `{worktree}/.devflow/docs/design/*.md` (a `/plan` artifact) and `{worktree}/.devflow/docs/design/*/*/*-plan.md` (a `/dynamic-plan` per-ticket plan). Sort by timestamp, newest first, and scan the 10 most recent. A `/plan` artifact's timestamp is the `YYYY-MM-DD_HHMM` before its `.md`; a per-ticket plan's is the name of its parent directory. Never sort by file name, which starts with an issue ID or a ticket slug. A per-ticket plan counts only when its `{ticket-slug}` (its file name without `-plan.md`) appears in the worktree's branch name
+2. Read the most recent file that carries an `## Acceptance Criteria` section
 3. Extract `## Acceptance Criteria` section → parse into table: `| ID | Criterion | Type | Testable Condition |`
 4. Set `PLAN_CONTEXT` to plan summary; `ACCEPTANCE_RULES` to the table
 5. If no plan files exist or section not found: `PLAN_CONTEXT=(none)`, `ACCEPTANCE_RULES=(none)`
