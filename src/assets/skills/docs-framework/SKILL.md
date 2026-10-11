@@ -118,25 +118,14 @@ TOPIC_SLUG=$(s=$(echo "$TOPIC" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9
 | Type | Pattern | Example |
 |------|---------|---------|
 | Special indexes | `UPPERCASE.md` | `WORKING-MEMORY.md`, `INDEX.md` |
-| Review reports | `{focus}.md` in the run directory | `2025-12-26_1430/security.md` |
-| Review summary | `review-summary.md` in the run directory | `2025-12-26_1430/review-summary.md` |
-| Resolution summary | `resolution-summary.md` in the run directory | `2025-12-26_1430/resolution-summary.md` |
-| Review head marker | `.last-review-head` | Plain text file with SHA |
+| Reports and summaries | `{focus}.md`, `review-summary.md`, `bug-analysis-summary.md`, `research-summary.md`, `static-findings.md`, `resolution-summary.md` in the run directory | `2025-12-26_1430/security.md` |
+| Head markers | `.last-review-head`, `.last-analysis-head` | Plain text file with SHA |
 | Status logs | `{timestamp}.md` | `2025-12-26_1430.md` |
 | Design documents | `{ISSUE_ID}-{topic-slug}.{timestamp}.md` | `42-jwt-auth.2026-04-07_1430.md` |
 | Design (several issues) | `multi-{topic-slug}.{timestamp}.md` | `multi-jwt-auth.2026-04-07_1430.md` |
 | Design (no issue) | `{topic-slug}.{timestamp}.md` | `jwt-auth.2026-04-07_1430.md` |
 | Per-ticket plan | `{ticket-slug}-plan.md` in `design/{slug}/{timestamp}/` | `design/wave/2026-04-07_1430/add-login-plan.md` |
-| Open decisions | `DECISIONS-NEEDED.md` beside the plans | `design/wave/2026-04-07_1430/DECISIONS-NEEDED.md` |
-| Research outputs | `{type}.md` in the run directory | `2025-12-26_1430/codebase.md` |
-| Research summary | `research-summary.md` in the run directory | `2025-12-26_1430/research-summary.md` |
-| Bug analysis reports | `{focus}.md` in the run directory | `2025-12-26_1430/security.md` |
-| Bug analysis summary | `bug-analysis-summary.md` in the run directory | `2025-12-26_1430/bug-analysis-summary.md` |
-| Static findings | `static-findings.md` in the run directory | `2025-12-26_1430/static-findings.md` |
-| Analysis head marker | `.last-analysis-head` | Plain text file with SHA |
-| Handoff | `handoff-{branch-slug}.md` | `handoff-feat-jwt-auth.md` |
-| Evidence | `evidence-{branch-slug}.md` | `evidence-feat-jwt-auth.md` |
-| Wave evidence | `evidence-wave-{slug}.md` | `evidence-wave-jwt-auth.md` |
+| Handoff, evidence | `handoff-{branch-slug}.md`, `evidence-{branch-slug}.md`, `evidence-wave-{slug}.md` | `evidence-feat-jwt-auth.md` |
 
 ---
 
@@ -157,27 +146,14 @@ ensure_docs_dir() { mkdir -p "$(get_docs_root)/.devflow/docs/$1"; }
 
 ## Agent Persistence Rules
 
-### Agents That Persist Artifacts
+### Who Writes What
 
-| Writer | Output Location | Behavior |
-|--------|-----------------|----------|
-| Review agent | `.devflow/docs/reviews/{branch-slug}/{timestamp}/{focus}.md` | Creates new in run directory |
-| Synthesize agent (review) | `.devflow/docs/reviews/{branch-slug}/{timestamp}/review-summary.md` | Creates new in run directory |
-| Resolve cmd | `.devflow/docs/reviews/{branch-slug}/{timestamp}/resolution-summary.md` | Written by /resolve orchestrator (Phase 5) |
-| Code-review cmd | `.devflow/docs/reviews/{branch-slug}/.last-review-head` | Overwrites with HEAD SHA |
-| Working Memory | `.devflow/memory/WORKING-MEMORY.md` | Overwrites (auto-maintained by Stop hook) |
-| Decisions | `.devflow/learning/decisions.md` | Rendered from `decisions-ledger.jsonl` (active ADR-NNN entries in full; inactive ones listed in its Inactive table) |
-| Pitfalls | `.devflow/learning/pitfalls.md` | Rendered from `decisions-ledger.jsonl` (active PF-NNN entries in full; inactive ones listed in its Inactive table) |
-| Plan cmd | `.devflow/docs/design/{ISSUE_ID}-{topic-slug}.{timestamp}.md` (or `multi-` / no-issue variant) | Creates new design artifact |
-| Research agent | `.devflow/docs/research/{topic-slug}/{timestamp}/{type}.md` | Creates new in run directory |
-| Synthesize agent (research) | `.devflow/docs/research/{topic-slug}/{timestamp}/research-summary.md` | Creates new in run directory, from `RESEARCH_BASE_DIR` |
-| Diagnose agent | `.devflow/docs/bug-analysis/{branch-slug}/{timestamp}/{focus}.md` | Creates new in run directory |
-| Synthesize agent (bug-analysis) | `.devflow/docs/bug-analysis/{branch-slug}/{timestamp}/bug-analysis-summary.md` | Creates new in run directory |
-| Bug-analysis cmd | `.devflow/docs/bug-analysis/{branch-slug}/.last-analysis-head` | Overwrites with HEAD SHA |
-| Dynamic-tickets workflow | `.devflow/docs/tickets/{slug}/{timestamp}/` | Ticket files and `tracking-issue.md` |
-| Dynamic-plan workflow | `.devflow/docs/design/{slug}/{timestamp}/` | Per-ticket plans and `DECISIONS-NEEDED.md` |
-| Dynamic-build cmd | `.devflow/docs/waves/{slug}/{timestamp}/wave-report.md`, `evidence-wave-{slug}.md` | Wave report; wave test plan, claims appended |
-| Implement cmd | `.devflow/docs/handoff-{branch-slug}.md`, `evidence-{branch-slug}.md` | Handoff sections appended by Code agents, deleted once the PR exists; evidence kept |
+- **Reviews**: the Review agents and the Synthesize agent (review mode) write into `reviews/{branch-slug}/{timestamp}/`; `/resolve` adds `resolution-summary.md` (Phase 5); `/code-review` overwrites `.last-review-head` with the HEAD SHA.
+- **Bug analysis**: the Diagnose agents and the Synthesize agent (bug-analysis mode) write into `bug-analysis/{branch-slug}/{timestamp}/`; `/bug-analysis` overwrites `.last-analysis-head` with the HEAD SHA.
+- **Research**: the Research agents write `{type}.md`, and the Synthesize agent (research mode) writes `research-summary.md` through `RESEARCH_BASE_DIR`, both into `research/{topic-slug}/{timestamp}/`.
+- **Design**: `/plan` writes the design document; `/dynamic-plan` writes `design/{slug}/{timestamp}/`, `/dynamic-tickets` `tickets/{slug}/{timestamp}/`, `/dynamic-build` `waves/{slug}/{timestamp}/` and `evidence-wave-{slug}.md`.
+- **Handoff and evidence**: `/implement` writes `evidence-{branch-slug}.md`, which stays after the PR, and the handoff file, to which each Code agent appends one phase section and which is deleted once the PR exists.
+- **Memory and learning**: the Stop hook overwrites `.devflow/memory/WORKING-MEMORY.md`; `decisions.md` and `pitfalls.md` are rendered from `decisions-ledger.jsonl` (active entries in full, inactive ones in an Inactive table).
 
 ### Agents That Don't Persist
 
