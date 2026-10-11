@@ -35,6 +35,7 @@ import {
   neutralValueOf,
   describeFlagKind,
   expectedInputFor,
+  respectUserOwnedSettings,
   type ClaudeCodeFlag,
   type FlagsRecord,
   type FlagsRecordValue,
@@ -47,7 +48,6 @@ import { sanitizeCell } from '../tui/cells.js';
 // --list/--status code paths; buildFlagRows and collectFlagRecord are pure.
 import { buildFlagRows, collectFlagRecord } from '../flags-view/state.js';
 import type { FlagsTuiResult } from '../flags-view/terminal.js';
-import { respectUserOwnedSettings } from './init-seed.js';
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 

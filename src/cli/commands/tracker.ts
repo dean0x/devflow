@@ -51,7 +51,11 @@ import { loadSettingsModule, personalConfigTrackedWarning, repoTrackerSelection,
 import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
 import { SKILL_REFS_SKILL_NAME, installedReferenceManifest } from '../../core/mds-variants.js';
 import { prefixSkillName } from '../../core/plugins.js';
-import { restampTrackerAgents, type RestampTrackerAgentsResult } from '../../targets/claude-code/tracker-servers.js';
+import {
+  TRACKER_STAMPED_AGENTS,
+  restampTrackerAgents,
+  type RestampTrackerAgentsResult,
+} from '../../targets/claude-code/tracker-servers.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -376,7 +380,7 @@ export async function runTrackerServers(opts: {
 
   const restamp = await io.restamp(claudeDir, servers, (message) => messages.push({ level: 'warn', text: message }));
   const done = restamp.rewritten.length + restamp.unchanged.length;
-  if (restamp.absent.length === 2 && restamp.failed.length === 0) {
+  if (restamp.absent.length === TRACKER_STAMPED_AGENTS.length && restamp.failed.length === 0) {
     messages.push({ level: 'info', text: 'No installed Git or Tracker agent to update — run devflow init' });
   } else if (restamp.rewritten.length > 0) {
     messages.push({ level: 'info', text: `Updated the installed ${restamp.rewritten.join(' and ')} agent${restamp.rewritten.length > 1 ? 's' : ''}` });

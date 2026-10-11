@@ -269,7 +269,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     //
     // Delete guard: only "5m" is deleted on disable or uninstall, so a user's own
     // "1h" stays (D-GUARD-SCALAR). Adoption: init seeds this flag OFF when a value
-    // that is not "5m" is already on disk (D-ADOPT-RESPECTS-USER, init-seed.ts).
+    // that is not "5m" is already on disk (D-ADOPT-RESPECTS-USER, respectUserOwnedSettings).
     id: 'subagent-cache-5m',
     label: 'Subagent 5-min cache',
     description: 'Write subagent prompt-cache entries with the 5-minute TTL; the main session keeps 1 hour',
@@ -1216,6 +1216,45 @@ export function settingHoldsUserValue(settingsJson: string, flagId: string): boo
   } catch {
     return false;
   }
+}
+
+/**
+ * D-ADOPT-RESPECTS-USER: seed a guarded setting flag OFF when adopting it ON would
+ * overwrite a value the user already owns.
+ *
+ * A flag the manifest does not record is adopted at its `defaultValue`. For a flag whose
+ * target is a settings.json key with a `settingDeleteGuard`, adopting ON writes its
+ * managed payload over whatever is on disk (the guard protects deletion, not writes).
+ * When the key already holds a value that is not the managed shape - a user's own `"1h"`
+ * under `subagentPromptCacheTtl` - that write would silently replace a deliberate choice.
+ * Such a flag is set `false` instead; with the record then claiming `false`, the converge
+ * pipeline neither writes nor deletes the user's value.
+ *
+ * Scope: only flags ABSENT from `manifestFlags` (or all of them on a fresh install, when
+ * it is null). A flag the manifest records keeps its value in `flags`, so an explicit
+ * enable still wins. `devflow init --reset` hands this an empty settings snapshot
+ * (resolveResetGatedInputs), so nothing is detected and the factory default stands. The rule is generic over guarded
+ * setting flags: no flag id is special-cased, and `settingHoldsUserValue` is the one place
+ * that decides "the disk holds something that is not ours". For a flag whose default is
+ * already OFF (suppress-attribution) it changes nothing.
+ *
+ * Two callers apply the same rule: the init seed, and the flags TUI's starting rows (an
+ * upgrade that has not run init yet would otherwise offer a Save that overwrites the value).
+ *
+ * Pure function - the settings snapshot is read by the caller and passed in.
+ */
+export function respectUserOwnedSettings(
+  flags: FlagsRecord,
+  manifestFlags: FlagsRecord | null,
+  settingsSnapshot: string,
+): FlagsRecord {
+  const result: FlagsRecord = { ...flags };
+  for (const flag of FLAG_REGISTRY) {
+    const adoptedAtDefault = manifestFlags === null || !(flag.id in manifestFlags);
+    if (!adoptedAtDefault) continue;
+    if (settingHoldsUserValue(settingsSnapshot, flag.id)) result[flag.id] = false;
+  }
+  return result;
 }
 
 /**
