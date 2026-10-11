@@ -404,8 +404,7 @@ export function stampAgentTools(
       return i === kept.length - 1 ? lead.trimEnd() : lead;
     })
     .join(',');
-  const stampedText = stamped.join(', ');
-  const inner = keptText === '' ? stampedText : stampedText === '' ? keptText : `${keptText}, ${stampedText}`;
+  const inner = [keptText, stamped.join(', ')].filter(text => text !== '').join(', ');
   const line = `tools: [${inner}]`;
 
   const newBody = fmBody.slice(0, match.index) + line + fmBody.slice(match.index + match[0].length);

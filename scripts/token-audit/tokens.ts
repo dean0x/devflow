@@ -15,15 +15,6 @@ export interface TokenCounts {
   readonly output: number;
 }
 
-export const ZERO_TOKENS: TokenCounts = Object.freeze({
-  input: 0,
-  cacheWrite5m: 0,
-  cacheWrite1h: 0,
-  cacheWriteUnknown: 0,
-  cacheRead: 0,
-  output: 0,
-});
-
 /** Cost-equivalent weights, in units of one base input token. */
 export const WEIGHTS = Object.freeze({
   input: 1,
@@ -115,15 +106,4 @@ export function inputSideCe(t: TokenCounts): number {
 
 export function costEquivalent(t: TokenCounts): number {
   return inputSideCe(t) + t.output * WEIGHTS.output;
-}
-
-export function addTokens(a: TokenCounts, b: TokenCounts): TokenCounts {
-  return {
-    input: a.input + b.input,
-    cacheWrite5m: a.cacheWrite5m + b.cacheWrite5m,
-    cacheWrite1h: a.cacheWrite1h + b.cacheWrite1h,
-    cacheWriteUnknown: a.cacheWriteUnknown + b.cacheWriteUnknown,
-    cacheRead: a.cacheRead + b.cacheRead,
-    output: a.output + b.output,
-  };
 }
