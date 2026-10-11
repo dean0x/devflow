@@ -156,9 +156,14 @@ export const DEFAULT_TRACKER_PROVIDER: TrackerProvider = 'github';
  * under another name is added with `devflow tracker --servers`. A wrong or missing name
  * does not fail silently: the agent finds no tool for the capability it needs and reports
  * `TRACEABILITY: DEGRADED (no tracker tool for {capability})`.
+ *
+ * The default leaves `github` out. Under the github provider the Git agent uses `gh` and
+ * never reads `_mcp.md`, so a stamped `github` server is never used by a tracker operation;
+ * under jira or linear, a connected GitHub server that also advertises issue creation would
+ * make the `_mcp.md` capability selection ambiguous, which is a degraded run. A user who
+ * wants it adds it with `devflow tracker --servers`.
  */
 export const TRACKER_MCP_SERVERS_DEFAULT: readonly string[] = Object.freeze([
-  'github',
   'atlassian',
   'jira',
   'claude_ai_Atlassian',

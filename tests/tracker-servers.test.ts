@@ -68,17 +68,18 @@ async function exists(p: string): Promise<boolean> {
 // ---------------------------------------------------------------------------
 
 describe('the default list', () => {
-  it('is the six names the maintainer chose, in order, one flat list for every provider', () => {
+  it('is the five names the maintainer chose, in order, one flat list for every provider and without github', () => {
     expect([...TRACKER_MCP_SERVERS_DEFAULT]).toEqual([
-      'github', 'atlassian', 'jira', 'claude_ai_Atlassian', 'linear', 'claude_ai_Linear',
+      'atlassian', 'jira', 'claude_ai_Atlassian', 'linear', 'claude_ai_Linear',
     ]);
+    expect(TRACKER_MCP_SERVERS_DEFAULT).not.toContain('github');
   });
 
   it('is frozen, valid against its own validator, and turns into whole-server entries', () => {
     expect(Object.isFrozen(TRACKER_MCP_SERVERS_DEFAULT)).toBe(true);
     expect(validateTrackerServers(TRACKER_MCP_SERVERS_DEFAULT)).toEqual({ ok: true, value: [...TRACKER_MCP_SERVERS_DEFAULT] });
     expect(DEFAULT_TOOLS).toEqual([
-      'mcp__github', 'mcp__atlassian', 'mcp__jira', 'mcp__claude_ai_Atlassian', 'mcp__linear', 'mcp__claude_ai_Linear',
+      'mcp__atlassian', 'mcp__jira', 'mcp__claude_ai_Atlassian', 'mcp__linear', 'mcp__claude_ai_Linear',
     ]);
   });
 });
@@ -638,7 +639,7 @@ describe('AC-401: install under each provider, then --servers (subprocess, temp 
     expect(toolsOf(await agent('git'))).toEqual([...GIT_CORE, ...DEFAULT_TOOLS]);
     expect(toolsOf(await agent('tracker'))).toEqual([...TRACKER_CORE, ...DEFAULT_TOOLS]);
     expect(await manifestTracker()).toEqual({ provider: 'linear' });
-    expect(cli(['tracker', '--status']).out).toMatch(/Servers:\s+github, atlassian.*\(default\)/);
+    expect(cli(['tracker', '--status']).out).toMatch(/Servers:\s+atlassian, jira.*\(default\)/);
   }, SPAWN_TIMEOUT_MS * 4);
 
   it('refuses a bad name before any I/O: exit 1, no agent or manifest change', async () => {
@@ -655,7 +656,7 @@ describe('AC-401: install under each provider, then --servers (subprocess, temp 
 
   it('--status names the default list as the default on a machine that never set one', async () => {
     expect(init('github').status).toBe(0);
-    expect(cli(['tracker', '--status']).out).toMatch(/Servers:\s+github, atlassian, jira, claude_ai_Atlassian, linear, claude_ai_Linear\s+\(default\)/);
+    expect(cli(['tracker', '--status']).out).toMatch(/Servers:\s+atlassian, jira, claude_ai_Atlassian, linear, claude_ai_Linear\s+\(default\)/);
   }, SPAWN_TIMEOUT_MS * 2);
 
   it('a hand-edited malformed servers value heals to the default with a warning, and --servers repairs it', async () => {
@@ -668,7 +669,7 @@ describe('AC-401: install under each provider, then --servers (subprocess, temp 
     const status = cli(['tracker', '--status']);
     expect(status.status, status.out).toBe(0);
     expect(status.out).toContain('not a valid list');
-    expect(status.out).toMatch(/Servers:\s+github, atlassian.*\(default\)/);
+    expect(status.out).toMatch(/Servers:\s+atlassian, jira.*\(default\)/);
 
     expect(cli(['tracker', '--servers', 'fine']).status).toBe(0);
     expect(await manifestTracker()).toEqual({ provider: 'jira', servers: ['fine'] });
