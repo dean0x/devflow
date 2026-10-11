@@ -143,10 +143,10 @@ describe('Guard 2 (reverse/orphan): every on-disk asset is claimed by a plugin',
   });
 
   it('every file in src/assets/rules/ is declared in DEVFLOW_PLUGINS', async () => {
-    // Union FEATURE_OWNED rules — compliance rule stays in src/assets/rules/ but is
-    // managed by the feature system, not any plugin (step 1.5 de-registration).
-    // Independent literal per EXCLUDED-as-oracle trap.
-    const referencedRules = new Set([...getAllRuleNames(), 'compliance']);
+    // Union FEATURE_OWNED rules — the compliance and behavior rules stay in src/assets/rules/
+    // but are managed by the feature system, not any plugin (step 1.5 de-registration).
+    // Independent literals per EXCLUDED-as-oracle trap.
+    const referencedRules = new Set([...getAllRuleNames(), 'compliance', 'behavior']);
     const ruleFiles = await fs.readdir(path.join(ASSETS_DIR, 'rules'));
 
     const orphans = ruleFiles

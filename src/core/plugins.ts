@@ -124,14 +124,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     // search matches before printing them. Its body stays near 400 characters (ceiling
     // 450) and names no search binary, since the rule is loaded into every session;
     // tests/rules.test.ts enforces the length, the directives and this registration.
-    // D-BEHAVIOR-RULE: how agents reply and act is a core rule, one bullet per
-    // behavior, because it must reach every session and every spawned agent with no
-    // activation step. The first behavior: write replies in ASD-STE100 Simplified
-    // Technical English, because the maintainer runs many sessions in parallel and
-    // loses track of each one. It covers replies only, never code, commands or quoted
-    // text. The body stays small because every session loads it; tests/rules.test.ts
-    // enforces the shape, the length and this registration.
-    rules: ['security', 'engineering', 'quality', 'reliability', 'context-economy', 'behavior'],
+    rules: ['security', 'engineering', 'quality', 'reliability', 'context-economy'],
   },
   {
     name: 'devflow-plan',
@@ -528,16 +521,26 @@ export const FEATURE_OWNED_SKILLS = ['compliance'] as const satisfies readonly s
 /**
  * Rules owned by the feature system — not any plugin in DEVFLOW_PLUGINS.
  * The compliance rule (src/assets/rules/compliance.md) is stamped and installed
- * by convergeComplianceArtifacts, not by the plugin installer.
+ * by convergeComplianceArtifacts, not by the plugin installer. The behavior rule
+ * (src/assets/rules/behavior.md) is installed and removed by convergeBehaviorRule.
+ *
+ * D-BEHAVIOR-OPT-IN: the behavior rule is OPT-IN and default off. How agents reply and
+ * act is a taste, so no install carries it until the user asks: `features.behavior` in
+ * the machine manifest (`devflow init --behavior`, `devflow behavior --enable`). That is
+ * why it sits here and in no plugin's `rules` array: a plugin's rules install for every
+ * install that selects the plugin, with no switch, and the core plugin is always
+ * selected. The rule is one bullet per behavior and stays small, because every session
+ * and every subagent that loads the rules pays for it; tests/rules.test.ts pins the
+ * shape, the length and this registration.
  *
  * Used by:
  *   - rules.ts: union into allRules for shadow/unshadow/list
- *   - tests: independent literal ['compliance'] (avoids EXCLUDED-as-oracle trap)
+ *   - tests: independent literal ['compliance', 'behavior'] (avoids EXCLUDED-as-oracle trap)
  *
  * D-FO-2: FEATURE_OWNED_RULES must be disjoint from getAllRuleNames()
  * (guarded by plugins.test.ts FEATURE_OWNED constants describe block).
  */
-export const FEATURE_OWNED_RULES = ['compliance'] as const satisfies readonly string[];
+export const FEATURE_OWNED_RULES = ['compliance', 'behavior'] as const satisfies readonly string[];
 
 /**
  * Skills a learning-off machine does not install.

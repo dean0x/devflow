@@ -43,6 +43,11 @@ export interface FeatureSeed {
   /** External model routing. Advanced-init only; never part of Recommended defaults. */
   proxy: boolean;
   /**
+   * Behavior rule switch (D-BEHAVIOR-OPT-IN) — seeded from the manifest, off by default:
+   * opt-in, never auto-enabled, and asked only in the Advanced wizard.
+   */
+  behavior: boolean;
+  /**
    * Compliance feature seed — seeded from the manifest (manifest-group, like proxy).
    * Default: {enabled:false, frameworks:[]} — compliance is opt-in, never auto-enabled.
    */
@@ -64,6 +69,7 @@ export const FEATURE_DEFAULTS: FeatureSeed = {
   learning: true,
   rules: true,
   proxy: false,
+  behavior: false,
   compliance: { enabled: false, frameworks: [] },
   tracker: { provider: DEFAULT_TRACKER_PROVIDER },
 };
@@ -95,6 +101,8 @@ export function resolveSeedFeatures(manifest: ManifestData | null): FeatureSeed 
   const hud = manifest?.features.hud ?? FEATURE_DEFAULTS.hud;
   const rules = manifest?.features.rules ?? FEATURE_DEFAULTS.rules;
   const proxy = manifest?.features.proxy ?? FEATURE_DEFAULTS.proxy;
+  // D-BEHAVIOR-OPT-IN: a manifest from before the switch has no key — it seeds the default (off).
+  const behavior = manifest?.features.behavior ?? FEATURE_DEFAULTS.behavior;
   // Return a fresh object so callers never hold a reference to FEATURE_DEFAULTS.compliance.
   // Without the spread, `manifest?.features.compliance ?? FEATURE_DEFAULTS.compliance` returns
   // the module-level default by reference — downstream mutation would corrupt it process-wide.
@@ -110,7 +118,7 @@ export function resolveSeedFeatures(manifest: ManifestData | null): FeatureSeed 
   const knowledge = manifest?.features.knowledge ?? FEATURE_DEFAULTS.knowledge;
   const learning = manifest?.features.learning ?? FEATURE_DEFAULTS.learning;
 
-  return { ambient, memory, hud, knowledge, learning, rules, proxy, compliance, tracker };
+  return { ambient, memory, hud, knowledge, learning, rules, proxy, behavior, compliance, tracker };
 }
 
 /**
@@ -407,6 +415,7 @@ export function applyCliToggles(
     learning: toggles.learning ?? base.learning,
     rules: toggles.rules ?? base.rules,
     proxy: toggles.proxy ?? base.proxy,
+    behavior: toggles.behavior ?? base.behavior,
     compliance: toggles.compliance ?? base.compliance,
     tracker: toggles.tracker ?? base.tracker,
   };

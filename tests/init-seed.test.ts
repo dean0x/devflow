@@ -83,6 +83,7 @@ describe('resolveSeedFeatures', () => {
       learning: false,
       rules: false,
       proxy: false,
+      behavior: false,
       compliance: { enabled: false, frameworks: [] },
       tracker: { provider: 'github' },
     });
@@ -416,6 +417,7 @@ describe('applyCliToggles', () => {
     learning: true,
     rules: true,
     proxy: false,
+    behavior: false,
     compliance: { enabled: false, frameworks: [] },
     tracker: { provider: 'github' },
   };
@@ -680,6 +682,53 @@ describe('proxy seeding', () => {
     });
     const seed = resolveInitSeed(manifest, '{}', DEVFLOW_PLUGINS);
     expect(seed.features.proxy).toBe(true);
+  });
+});
+
+// ── behavior seeding (resolveSeedFeatures + applyCliToggles) ──────────────────
+// D-BEHAVIOR-OPT-IN: an opt-in machine switch, manifest-gated like proxy, default off.
+
+describe('behavior seeding', () => {
+  it('FEATURE_DEFAULTS.behavior is false (opt-in, never auto-enabled)', () => {
+    expect(FEATURE_DEFAULTS.behavior).toBe(false);
+  });
+
+  it('fresh install (null manifest) and --reset → behavior defaults to false', () => {
+    expect(resolveSeedFeatures(null).behavior).toBe(false);
+  });
+
+  it('a manifest with no behavior key (every pre-behavior install) seeds false', () => {
+    expect(resolveSeedFeatures(makeManifest()).behavior).toBe(false);
+  });
+
+  it('a recorded true is re-seeded as true — a plain re-init keeps it', () => {
+    const manifest = makeManifest({ features: { ...makeManifest().features, behavior: true } });
+    expect(resolveSeedFeatures(manifest).behavior).toBe(true);
+  });
+
+  it('a recorded false is re-seeded as false', () => {
+    const manifest = makeManifest({ features: { ...makeManifest().features, behavior: false } });
+    expect(resolveSeedFeatures(manifest).behavior).toBe(false);
+  });
+
+  it('applyCliToggles: --behavior overrides a seeded false', () => {
+    const result = applyCliToggles({ ...FEATURE_DEFAULTS, behavior: false }, { behavior: true });
+    expect(result.behavior).toBe(true);
+    expect(result.proxy).toBe(FEATURE_DEFAULTS.proxy);
+  });
+
+  it('applyCliToggles: --no-behavior overrides a seeded true', () => {
+    expect(applyCliToggles({ ...FEATURE_DEFAULTS, behavior: true }, { behavior: false }).behavior).toBe(false);
+  });
+
+  it('applyCliToggles: no flag preserves the seeded value', () => {
+    expect(applyCliToggles({ ...FEATURE_DEFAULTS, behavior: true }, {}).behavior).toBe(true);
+    expect(applyCliToggles({ ...FEATURE_DEFAULTS, behavior: false }, {}).behavior).toBe(false);
+  });
+
+  it('resolveInitSeed: behavior is part of the features result', () => {
+    const manifest = makeManifest({ features: { ...makeManifest().features, behavior: true } });
+    expect(resolveInitSeed(manifest, '{}', DEVFLOW_PLUGINS).features.behavior).toBe(true);
   });
 });
 

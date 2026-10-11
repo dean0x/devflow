@@ -489,8 +489,8 @@ describe('FEATURE_OWNED constants', () => {
     expect(FEATURE_OWNED_SKILLS).toEqual(['compliance']);
   });
 
-  it('FEATURE_OWNED_RULES equals [compliance] — compliance rule is feature-owned, not plugin-owned', () => {
-    expect(FEATURE_OWNED_RULES).toEqual(['compliance']);
+  it('FEATURE_OWNED_RULES equals [compliance, behavior] — both rules are feature-owned, not plugin-owned', () => {
+    expect(FEATURE_OWNED_RULES).toEqual(['compliance', 'behavior']);
   });
 
   it('FEATURE_OWNED_SKILLS is disjoint from getAllSkillNames() — no double-ownership', () => {

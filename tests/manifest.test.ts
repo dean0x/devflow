@@ -80,7 +80,7 @@ describe('readManifest', () => {
       version: '1.4.0',
       plugins: ['devflow-core-skills', 'devflow-implement'],
       scope: 'user',
-      features: { ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true, flags: {}, proxy: false, compliance: { enabled: false, frameworks: [] }, tracker: { provider: 'github' } },
+      features: { ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true, flags: {}, proxy: false, behavior: false, compliance: { enabled: false, frameworks: [] }, tracker: { provider: 'github' } },
       installedAt: '2026-03-01T00:00:00.000Z',
       updatedAt: '2026-03-13T00:00:00.000Z',
     };

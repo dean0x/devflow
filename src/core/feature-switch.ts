@@ -35,6 +35,20 @@ import { writeFileAtomicExclusive } from './fs-atomic.js';
  */
 export type MachineFeature = 'memory' | 'learning' | 'knowledge';
 
+/**
+ * Machine switches that are OPT-IN: off until the user turns them on.
+ *
+ * D-BEHAVIOR-OPT-IN: `features.behavior` in `~/.devflow/manifest.json` is the machine
+ * switch for the behavior rule. It lives beside the {@link MachineFeature} switches and
+ * shares their one write point, but it reads the opposite way: the three switches above
+ * read an absent key as ON (every install predates them, and each gates a running
+ * feature), while this one reads an absent key as OFF (no install has the rule until
+ * `devflow init --behavior` or `devflow behavior --enable` asks for it). Only an
+ * explicit boolean `true` turns it on. A repository layer cannot widen it, and there is
+ * nothing to narrow: it gates a file on this machine, not a runtime feature.
+ */
+export type OptInMachineFeature = 'behavior';
+
 type Result<T, E> = { ok: true; value: T } | { ok: false; error: E };
 
 /** Why a machine-wide switch could not be written. */
@@ -115,7 +129,7 @@ export function isMachineFeatureOn(rawManifest: unknown, feature: MachineFeature
  */
 export function setMachineFeature(
   rawManifest: unknown,
-  feature: MachineFeature,
+  feature: MachineFeature | OptInMachineFeature,
   enabled: boolean,
   now: string,
 ): Record<string, unknown> | null {
@@ -134,7 +148,11 @@ export function setMachineFeature(
  * a legacy key all read as a state without being recorded as it, so writing the
  * explicit boolean is still a change.
  */
-function isMachineFeatureRecorded(rawManifest: unknown, feature: MachineFeature, enabled: boolean): boolean {
+function isMachineFeatureRecorded(
+  rawManifest: unknown,
+  feature: MachineFeature | OptInMachineFeature,
+  enabled: boolean,
+): boolean {
   return isJsonObject(rawManifest) && isJsonObject(rawManifest.features) && rawManifest.features[feature] === enabled;
 }
 
@@ -156,6 +174,28 @@ export async function readMachineFeature(devflowDir: string, feature: MachineFea
 }
 
 /**
+ * Whether a RAW parsed manifest has an opt-in `feature` switched on. Pure.
+ *
+ * D-BEHAVIOR-OPT-IN: only an explicit boolean `true` is on. A missing key, a
+ * non-boolean value, a manifest without a `features` record and anything that is not an
+ * object all read as OFF — fail-closed, the mirror of {@link isMachineFeatureOn}. Like
+ * that reader it is deliberately not built on readManifest(): a read-only status must
+ * not heal-write, and a manifest missing a required field is still a manifest here.
+ */
+export function isOptInFeatureOn(rawManifest: unknown, feature: OptInMachineFeature): boolean {
+  if (!isJsonObject(rawManifest) || !isJsonObject(rawManifest.features)) return false;
+  return rawManifest.features[feature] === true;
+}
+
+/**
+ * Read an opt-in machine switch from `<devflowDir>/manifest.json`. Read-only (no heal
+ * write); an absent, unreadable or malformed manifest reads as OFF.
+ */
+export async function readOptInFeature(devflowDir: string, feature: OptInMachineFeature): Promise<boolean> {
+  return isOptInFeatureOn(await readRawManifest(devflowDir), feature);
+}
+
+/**
  * Write the machine-wide switch to `<devflowDir>/manifest.json` (atomic
  * temp + rename). Refuses with `not-installed` when there is no manifest to
  * write into — a manifest is created by `devflow init`, never by a toggle,
@@ -164,12 +204,12 @@ export async function readMachineFeature(devflowDir: string, feature: MachineFea
  * D-NOOP-TOGGLE: a toggle to the value the manifest already records writes
  * nothing. The only bytes such a write could change are `updatedAt`, and that
  * field means "the manifest's content last changed", so a no-op must not move
- * it. This is the one write point of `devflow memory|learning|knowledge
- * --enable/--disable`, so the rule holds for all three at once.
+ * it. This is the one write point of `devflow memory|learning|knowledge|behavior
+ * --enable/--disable`, so the rule holds for all four at once.
  */
 export async function writeMachineFeature(
   devflowDir: string,
-  feature: MachineFeature,
+  feature: MachineFeature | OptInMachineFeature,
   enabled: boolean,
 ): Promise<Result<void, MachineFeatureWriteError>> {
   const raw = await readRawManifest(devflowDir);

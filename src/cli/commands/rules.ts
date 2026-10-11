@@ -9,6 +9,7 @@ import { readManifest, writeManifest } from '../../core/manifest.js';
 import { rulesDir } from '../../core/assets.js';
 import { installAllRules, validateRuleShadow, type RuleInstallOutcome, type RuleShadowState } from '../../targets/claude-code/installer.js';
 import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
+import { convergeBehaviorFromManifest } from '../../targets/claude-code/behavior-install.js';
 
 interface RulesOptions {
   enable?: boolean;
@@ -313,6 +314,23 @@ export async function runRulesEnable(claudeDir: string, devflowDir: string): Pro
     // Warn-not-abort — compliance convergence failure does not undo rules install
     p.log.warn(
       `Compliance rule convergence failed — rules installed but compliance rule may be stale: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  // D-BEHAVIOR-OPT-IN: the wipe above removed the opt-in behavior rule with the rest of
+  // the directory, so bring it back when its switch is on. Same rulesEnabledOverride
+  // reasoning as compliance: a failed install leaves no rules to add this one to.
+  try {
+    await convergeBehaviorFromManifest({
+      claudeDir,
+      devflowDir,
+      manifest,
+      warn: (msg) => p.log.warn(msg),
+      rulesEnabledOverride: !installFailed,
+    });
+  } catch (err) {
+    p.log.warn(
+      `Behavior rule convergence failed — rules installed but the behavior rule may be stale: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
 }

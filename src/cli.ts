@@ -20,6 +20,7 @@ import { safeDeleteCommand } from './cli/commands/safe-delete.js';
 import { proxyCommand } from './cli/commands/proxy.js';
 import { agentsCommand } from './cli/commands/agents.js';
 import { complianceCommand } from './cli/commands/compliance.js';
+import { behaviorCommand } from './cli/commands/behavior.js';
 import { trackerCommand } from './cli/commands/tracker.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -56,6 +57,7 @@ program.addCommand(safeDeleteCommand);
 program.addCommand(proxyCommand);
 program.addCommand(agentsCommand);
 program.addCommand(complianceCommand);
+program.addCommand(behaviorCommand);
 program.addCommand(trackerCommand);
 
 // Handle no command (bare `devflow`) or unknown subcommand.

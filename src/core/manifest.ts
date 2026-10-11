@@ -82,6 +82,16 @@ export interface ManifestData {
      */
     compliance: ComplianceFeatureState;
     /**
+     * Behavior rule switch (D-BEHAVIOR-OPT-IN): OPT-IN, default off. The feature-owned
+     * rule `rules/devflow/behavior.md` is installed only while this is true AND `rules`
+     * is true. Absent or malformed (anything but a boolean) in the manifest reads as
+     * false — unlike knowledge and learning, whose absent key reads as on.
+     *
+     * NEVER add `behavior` to the hard-null validation set below: every existing install
+     * lacks the key, and a manifest that fails validation reads as "no prior install".
+     */
+    behavior: boolean;
+    /**
      * Issue tracker provider selection (enum github|jira|linear, default github) and the
      * optional list of tracker tool servers the Git and Tracker agents may call.
      * Absent in pre-tracker manifests — readManifest self-heals to
@@ -163,6 +173,7 @@ function parseManifestFlags(
  * - features.knownFlags stripped from result (folded into FlagsRecord key-presence)
  * - features.proxy absent → false
  * - features.compliance absent/malformed → {enabled:false, frameworks:[]}
+ * - features.behavior absent → false; malformed → false, healed on disk (D-BEHAVIOR-OPT-IN)
  * - features.tracker absent/malformed → {provider:'github'}
  * - features.tracker.servers absent → the default list; invalid → the default list, reported
  *   through `opts.onWarning` when the caller supplies one (this reader has no output channel)
@@ -244,7 +255,10 @@ export async function readManifest(
       features.decisions !== undefined ||
       flagsWereLegacy ||
       features.knownFlags !== undefined ||
-      features.viewMode !== undefined;
+      features.viewMode !== undefined ||
+      // D-BEHAVIOR-OPT-IN: a malformed switch (present, not a boolean) is rewritten as
+      // the false it reads as; an absent one is not a defect and owes no write.
+      (features.behavior !== undefined && typeof features.behavior !== 'boolean');
 
     const SECURITY_MODES = ['none', 'user', 'managed'] as const;
 
@@ -275,6 +289,8 @@ export async function readManifest(
         proxy: typeof features.proxy === 'boolean' ? features.proxy : false,
         // Self-heal: absent/malformed compliance → {enabled:false, frameworks:[]}
         compliance: normalizeComplianceFeature(features.compliance),
+        // D-BEHAVIOR-OPT-IN: absent/malformed → false (opt-in; the inverse of knowledge/learning).
+        behavior: features.behavior === true,
         // Self-heal: absent/malformed/unknown tracker → {provider:'github'} (AC-3.21).
         // Deliberately NOT in the hard-null set above — see the field's doc comment.
         // Healing here is silent and emits no DEGRADED: that is the correct

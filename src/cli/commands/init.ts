@@ -64,6 +64,8 @@ import {
   runComplianceStep,
   buildClackCompliancePrompts,
 } from './compliance-prompts.js';
+import { shouldRunBehaviorStep, runBehaviorStep, buildClackBehaviorPrompts } from './behavior-prompts.js';
+import { convergeBehaviorFromManifest } from '../../targets/claude-code/behavior-install.js';
 import {
   applyTrackerSentinel,
   effectiveTrackerServers,
@@ -605,6 +607,11 @@ interface InitOptions {
   /** External model routing. Advanced-only; never part of Recommended defaults. */
   proxy?: boolean;
   /**
+   * Behavior rule switch (D-BEHAVIOR-OPT-IN). Opt-in, default off.
+   * true → --behavior, false → --no-behavior, undefined → not passed; the seed value is used.
+   */
+  behavior?: boolean;
+  /**
    * Compliance framework list (comma-separated IDs from parseFrameworkList).
    * string → --compliance <list> (enable with these frameworks)
    * false  → --no-compliance (disable compliance; frameworks remembered)
@@ -713,6 +720,7 @@ export function buildHudOnlyManifest(
     features: {
       ambient: false, memory: false, hud: true, knowledge: false,
       learning: false, rules: false, flags: {}, proxy: false,
+      behavior: false,
       compliance: { enabled: false, frameworks: [] },
       // The exported default, not a literal — the one constant every other
       // module reads, so a moved default moves here too.
@@ -825,6 +833,8 @@ export const initCommand = new Command('init')
   .option('--no-rules', 'Disable rules')
   .option('--proxy', 'Enable external model routing (GPT models via your OpenAI/Codex subscription)')
   .option('--no-proxy', 'Disable external model routing')
+  .option('--behavior', 'Enable the behavior rule (agents reply in ASD-STE100 Simplified Technical English; off by default)')
+  .option('--no-behavior', 'Disable the behavior rule')
   .option('--compliance <list>', 'Enable compliance with comma-separated framework IDs (e.g., gdpr,hipaa)')
   .option('--no-compliance', 'Disable compliance (removes the rule; the skill and framework references stay installed; frameworks remembered for re-enable)')
   .option('--tracker <id>', 'The machine\'s default issue tracker provider: github, jira, or linear')
@@ -1169,6 +1179,10 @@ export const initCommand = new Command('init')
     // Fresh installs → false (FEATURE_DEFAULTS.proxy). Re-inits → prior manifest value.
     // --reset → false (resolveResetGatedInputs null-seeds the manifest).
     let proxyEnabled = seed.features.proxy;
+    // behavior (D-BEHAVIOR-OPT-IN): opt-in, manifest-group like proxy. Fresh installs and --reset
+    // → false (FEATURE_DEFAULTS.behavior); re-inits and the Recommended path keep the prior
+    // manifest value; only --behavior/--no-behavior and the Advanced wizard change it.
+    let behaviorEnabled = seed.features.behavior;
     // compliance: manifest-group (like proxy); seed from prior manifest value.
     // CLI override applied below in both Recommended and Advanced paths.
     let complianceEnabled = seed.features.compliance.enabled;
@@ -1301,6 +1315,7 @@ export const initCommand = new Command('init')
         learning: options.learning,
         rules: options.rules,
         proxy: options.proxy,
+        behavior: options.behavior,
         compliance: cliComplianceOverride ?? wizardCompliance,
         // Precedence: cliOverride ?? wizardResult ?? seed (applyCliToggles supplies the seed arm).
         tracker: cliTrackerOverride ?? wizardTracker,
@@ -1312,6 +1327,7 @@ export const initCommand = new Command('init')
       learningEnabled = effectiveFeatures.learning;
       rulesEnabled = effectiveFeatures.rules;
       proxyEnabled = effectiveFeatures.proxy;
+      behaviorEnabled = effectiveFeatures.behavior;
       complianceEnabled = effectiveFeatures.compliance.enabled;
       complianceFrameworks = effectiveFeatures.compliance.frameworks;
       trackerProvider = effectiveFeatures.tracker.provider;
@@ -1358,6 +1374,7 @@ export const initCommand = new Command('init')
         `HUD:             ${hudEnabled ? 'enabled' : 'disabled'}`,
         `Knowledge bases: ${knowledgeEnabled ? 'enabled' : 'disabled'}`,
         `Ext model routing: ${proxyEnabled ? 'enabled' : 'disabled'}`,
+        `Behavior rule:   ${behaviorEnabled ? 'enabled' : 'disabled'}`,
         `Compliance:      ${complianceSummary}`,
         // Recommended emits no per-step outcome lines, so this summary row is the
         // tracker step's ONLY surface on this path — both surfaces or it is
@@ -1508,6 +1525,31 @@ export const initCommand = new Command('init')
           process.exit(0);
         }
         rulesEnabled = rulesChoice;
+      }
+
+      // Behavior rule (Advanced-only; opt-in, default OFF; D-BEHAVIOR-OPT-IN). Runs after the
+      // rules step because the rule installs only while rules are on, and the gate knows it.
+      // A skipped gate leaves the seeded value, which --behavior/--no-behavior replace.
+      if (shouldRunBehaviorStep({
+        isTTY: process.stdin.isTTY,
+        hasCliOverride: options.behavior !== undefined,
+        rulesEnabled,
+      })) {
+        const behaviorStep = await runBehaviorStep({
+          seed: behaviorEnabled,
+          prompts: buildClackBehaviorPrompts(),
+        });
+        if (behaviorStep.kind === 'cancelled') {
+          p.cancel('Installation cancelled.');
+          process.exit(0);
+        }
+        behaviorEnabled = behaviorStep.enabled;
+        for (const msg of behaviorStep.messages) {
+          if (msg.level === 'success') p.log.success(msg.text);
+          else p.log.info(msg.text);
+        }
+      } else if (options.behavior !== undefined) {
+        behaviorEnabled = options.behavior;
       }
 
       // External model routing (Advanced-only; default OFF; never part of Recommended)
@@ -1982,6 +2024,27 @@ export const initCommand = new Command('init')
         `Compliance artifact convergence failed — install succeeded but compliance artifacts may be stale: ` +
         `${err instanceof Error ? err.message : String(err)}`,
       );
+    }
+
+    // D-BEHAVIOR-OPT-IN: converge the behavior rule. The plugin installer never copies it (no
+    // plugin declares it) and a full install wiped rules/devflow/ above, so this is the one
+    // writer: it installs the file when the switch is on and rules are on, and removes it
+    // otherwise. Warn-not-abort, like the compliance convergence.
+    try {
+      await convergeBehaviorFromManifest({
+        claudeDir,
+        devflowDir,
+        manifest: { features: { behavior: behaviorEnabled, rules: rulesEnabled } },
+        warn: (msg) => p.log.warn(msg),
+      });
+    } catch (err) {
+      p.log.warn(
+        `Behavior rule convergence failed — install succeeded but the behavior rule may be stale: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    if (behaviorEnabled && !rulesEnabled) {
+      p.log.info('Behavior rule is on but rules are disabled, so it is not installed — run `devflow rules --enable`.');
     }
 
     // Clean up stale skills from previous installations
@@ -2613,6 +2676,10 @@ export const initCommand = new Command('init')
         security: securityMode,
         // Final resolved value — may be forced off by preflight failure.
         proxy: proxyEnabled,
+        // Resolved behavior switch (D-BEHAVIOR-OPT-IN) — seeded from the prior manifest,
+        // overridden by --behavior/--no-behavior and the Advanced wizard. The rule file was
+        // converged above to match it.
+        behavior: behaviorEnabled,
         // Resolved compliance state — seeded from prior manifest, overridden by CLI flags
         // and Advanced wizard selection. convergeComplianceArtifacts was called above.
         // normalizeFrameworks: dedup + filter unknowns before persisting.

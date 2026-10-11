@@ -1671,6 +1671,7 @@ export function makeManifest(overrides: Partial<ManifestData> = {}): ManifestDat
       learning: true,
       rules: true,
       proxy: false,
+      behavior: false,
       compliance: { enabled: false, frameworks: [] },
       tracker: { provider: DEFAULT_TRACKER_PROVIDER },
       flags: { tui: true, lsp: true, 'tool-search': true },

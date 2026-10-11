@@ -7,6 +7,7 @@ import {
   buildRulesMap,
   getAllRuleNames,
   DEVFLOW_PLUGINS,
+  FEATURE_OWNED_RULES,
   type PluginDefinition,
 } from '../src/core/plugins.js';
 import { installRuleFile, installAllRules, installViaFileCopy, validateRuleShadow, type Spinner } from '../src/targets/claude-code/installer.js';
@@ -762,8 +763,10 @@ describe('context-economy rule (D-CONTEXT-ECONOMY-RULE)', () => {
 // ---------------------------------------------------------------------------
 
 /**
- * D-BEHAVIOR-RULE: how agents reply and act is a core rule, not a skill, because it must reach
- * every session and every subagent that loads the rules, with no activation step. The rule is a
+ * D-BEHAVIOR-RULE: how agents reply and act is a rule, not a skill, because it must reach
+ * every session and every subagent that loads the rules, with no activation step. It is OPT-IN
+ * (D-BEHAVIOR-OPT-IN): feature-owned like the compliance rule, off by default, installed only
+ * while the install includes rules and `features.behavior` is on. The rule is a
  * title and a bullet list, one bullet per behavior, and no other prose. The first behavior is the
  * reply style: the maintainer runs many agent sessions in parallel and loses track of each one, so
  * every reply is written in ASD-STE100 Simplified Technical English. That bullet covers replies
@@ -811,11 +814,13 @@ describe('behavior rule (D-BEHAVIOR-RULE)', () => {
     expect(collectBehaviorDefects(text)).toEqual([]);
   });
 
-  it('the core plugin registers it, and the registry knows it as a valid rule name', () => {
-    const core = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-core-skills')!;
-    expect(core.rules).toContain('behavior');
-    expect(buildRulesMap([core]).get('behavior')).toBe('devflow-core-skills');
-    expect(getAllRuleNames()).toContain('behavior');
+  it('is feature-owned: no plugin declares it, so no install carries it unless the switch is on', () => {
+    expect(FEATURE_OWNED_RULES).toContain('behavior');
+    expect(getAllRuleNames()).not.toContain('behavior');
+    for (const plugin of DEVFLOW_PLUGINS) {
+      expect(plugin.rules, `${plugin.name} must not declare the opt-in behavior rule`).not.toContain('behavior');
+    }
+    expect(buildRulesMap(DEVFLOW_PLUGINS).has('behavior')).toBe(false);
     expect(isValidRuleName('behavior')).toBe(true);
   });
 
