@@ -43,6 +43,8 @@ import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { requireBuiltCli, sandboxEnv } from '../helpers.js';
+import { stampAgentTools } from '../../src/core/agent-frontmatter.js';
+import { TRACKER_MCP_SERVERS_DEFAULT, trackerServerTools } from '../../src/core/tracker.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 
@@ -301,12 +303,16 @@ describe('Clause (ii) file-residue: tarball install into scratch HOME → devflo
 
   // ── Step 9: the installed Git agent came from dist/agents/ (AC-1.9) ────────
 
-  it('the installed Git agent is byte-identical to dist/agents/git.md (AC-1.9)', async () => {
+  it('the installed Git agent is dist/agents/git.md plus the tracker-server stamp and nothing else (AC-1.9)', async () => {
     // The Git agent ships only as a compiled artifact now. The installer resolves
     // agents dist-first, but nothing observed that end to end: this compares the
     // file `devflow init` wrote under the scratch HOME against the compiled
     // artifact inside the installed tarball. A src-first installer, or a publish
     // built with `npm run build:cli` alone, fails here.
+    //
+    // The install appends the default tracker servers to the installed `tools:` line
+    // of the Git agent, so the two files differ by that stamp alone: removing it from
+    // the installed copy gives the compiled artifact back, byte for byte.
     const compiled = path.join(
       INSTALL_DIR, 'node_modules', 'devflow-kit', 'dist', 'agents', 'git.md',
     );
@@ -319,9 +325,17 @@ describe('Clause (ii) file-residue: tarball install into scratch HOME → devflo
       compiledContent.length,
       'compiled agent is empty — the guard would compare nothing',
     ).toBeGreaterThan(0);
+    // Non-vacuity: the installed copy wears the default stamp, so the comparison
+    // below is between two files that really did differ before the stamp came off.
+    const stampedTools = trackerServerTools(TRACKER_MCP_SERVERS_DEFAULT).map(t => `"${t}"`).join(', ');
+    expect(installedContent, 'the installed Git agent carries no tracker-server stamp').toContain(stampedTools);
+    expect(compiledContent, 'the compiled Git agent must carry no stamp').not.toContain(stampedTools);
+
+    const unstamped = stampAgentTools(installedContent, []);
+    expect(unstamped.ok, 'the installed Git agent has no stampable tools line').toBe(true);
     expect(
-      installedContent,
-      `The installed Git agent must be the compiled artifact.\n` +
+      unstamped.ok && unstamped.value.content,
+      `The installed Git agent must be the compiled artifact bar the tracker-server stamp.\n` +
       `  compiled: ${compiled}\n  installed: ${installed}\n` +
       `A mismatch means the installer resolved a source file instead, or the tarball\n` +
       `was built without \`npm run build:mds\`.`,
