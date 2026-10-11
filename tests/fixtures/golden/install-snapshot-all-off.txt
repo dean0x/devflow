@@ -1,6 +1,6 @@
 # install-snapshot golden — config: all-off (#388 AC-2, AC-3, AC-4)
 # Records TODAY's behaviour, bugs included: a later PR that changes a section says why in its fixture-only test(snapshot): commit.
-# argv: devflow init --no-ambient --no-memory --no-hud --no-knowledge --no-learning --no-rules --no-proxy --no-compliance --security user  (cwd <REPO>, HOME <HOME>, stdin not a TTY), run twice; then devflow uninstall
+# argv: devflow init --no-ambient --no-memory --no-hud --no-knowledge --no-learning --no-rules --no-proxy --no-behavior --no-compliance --security user  (cwd <REPO>, HOME <HOME>, stdin not a TTY), run twice; then devflow uninstall
 # Regenerate: npm run test:golden:update -- install-snapshot  (fixture-only test(snapshot): commit)
 # Normalised: sandbox paths (logical + realpath), ISO timestamps, the package version. Walk lines: d dir/, x executable, - file, l link.
 
@@ -520,6 +520,7 @@ d sub/
     },
     "security": "user",
     "proxy": false,
+    "behavior": false,
     "compliance": {
       "enabled": false,
       "frameworks": []
