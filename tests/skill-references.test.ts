@@ -1034,6 +1034,42 @@ describe('Cross-component runtime alignment', () => {
     expect(companionLineSkills(commands.get('release.md')!), 'release.md still loads its companion').toEqual(['git']);
   });
 
+  /**
+   * D-RELEASE-GIT-LOAD-LATE. `/release`'s main thread uses the `git` skill only for its own git writes,
+   * and the first of them is Phase 6 step 3, the release commit. Loading it in Phase 1 made `--dry-run`
+   * (which halts after Phase 4) and every turn of Phases 1-5 carry it for nothing, so the one companion
+   * line sits between steps 2 and 3 of Phase 6, and nothing before it runs a git command that writes.
+   */
+  function collectReleaseGitLoadDefects(text: string): string[] {
+    const out: string[] = [];
+    const phase6 = text.indexOf('### Phase 6: Execute Release');
+    const changelog = text.indexOf('2. **Changelog update**', phase6);
+    const commit = text.indexOf('3. **Release commit**', phase6);
+    if (phase6 === -1 || changelog === -1 || commit === -1) return ['Phase 6 steps 2 and 3 were not found'];
+    const lines = [...text.matchAll(/^\*\*Load Companion Skills\*\*.*$/gm)];
+    if (lines.length !== 1) out.push(`expected one companion line, found ${lines.length}`);
+    const at = lines[0]?.index ?? phase6;
+    if (lines.length === 1 && !(at > changelog && at < commit)) out.push('the load is not between steps 2 and 3 of Phase 6');
+    const writes = text.slice(0, at).match(/\bgit (?:commit|push|add|merge|rebase|reset|checkout|stash|tag(?! -l))\b/g) ?? [];
+    if (writes.length > 0) out.push(`a git write runs before the load: ${writes.join(', ')}`);
+    return out;
+  }
+
+  it('/release loads devflow:git between the changelog step and the release commit, with no git write before it', () => {
+    expect(collectReleaseGitLoadDefects(readIntentCommands().get('release.md')!)).toEqual([]);
+  });
+
+  it('known-bad probe: the Phase 1 load and a git write ahead of the load are reported', () => {
+    const release = readIntentCommands().get('release.md')!;
+    const line = release.match(/^\*\*Load Companion Skills\*\*.*$/m)![0];
+    const early = release.replace(line, '').replace('**Produces:** RELEASE_CONFIG, CONFIG_STATE', `${line}\n\n**Produces:** RELEASE_CONFIG, CONFIG_STATE`);
+    expect(collectReleaseGitLoadDefects(early)).toEqual(['the load is not between steps 2 and 3 of Phase 6']);
+    const writing = release.replace('Release commit** —', 'Release commit** — git commit then');
+    expect(collectReleaseGitLoadDefects(writing)).toEqual([]);
+    const lateWrite = release.replace('2. **Changelog update**', 'git add the files, then 2. **Changelog update**');
+    expect(collectReleaseGitLoadDefects(lateWrite)).toEqual(['a git write runs before the load: git add']);
+  });
+
   it('known-bad probe: the drift collector reports a lost row, a stray companion line and a missing one', () => {
     const catalog = parseCompanionCatalog(readCatalog());
     const commands = readIntentCommands();
