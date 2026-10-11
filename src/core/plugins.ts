@@ -189,7 +189,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Process and fix code review issues with blast-radius triage, Code agent fixes, and Validate agent verification',
     commands: ['/resolve'],
     agents: ['git', 'triage', 'code', 'simplify', 'validate', 'test', 'knowledge'],
-    skills: ['patterns', 'security', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge', 'apply-decisions'],
+    skills: ['patterns', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge', 'apply-decisions'],
     requires: [
       'architecture',
       'boundary-validation',
@@ -205,6 +205,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
       'regression',
       'reliability',
       'review-methodology',
+      'security',
       'software-design',
       'test-driven-development',
       'testing',
