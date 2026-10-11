@@ -756,3 +756,99 @@ describe('context-economy rule (D-CONTEXT-ECONOMY-RULE)', () => {
     expect(collectContextEconomyDefects('no frontmatter')).toContain('the frontmatter is not exactly `paths: []`');
   });
 });
+
+// ---------------------------------------------------------------------------
+// D-BEHAVIOR-RULE
+// ---------------------------------------------------------------------------
+
+/**
+ * D-BEHAVIOR-RULE: how agents reply and act is a core rule, not a skill, because it must reach
+ * every session and every subagent that loads the rules, with no activation step. The rule is a
+ * title and a bullet list, one bullet per behavior, and no other prose. The first behavior is the
+ * reply style: the maintainer runs many agent sessions in parallel and loses track of each one, so
+ * every reply is written in ASD-STE100 Simplified Technical English. That bullet covers replies
+ * only, and code, commands and quoted text keep their own form. The rule is billed in every
+ * session, so the body stays under a hard ceiling of 500 characters, and each sentence follows the
+ * 25-word limit the reply style sets for a description. A new behavior fits the ceiling or retires
+ * one; the ceiling does not rise.
+ */
+const BEHAVIOR_PATH = path.join(RULES_SRC, 'behavior.md');
+const BEHAVIOR_BODY_CEILING = 500;
+const BEHAVIOR_SENTENCE_WORDS = 25;
+
+/** The behaviors the rule holds, one regex each, matched against the body. */
+const BEHAVIOR_BULLETS: ReadonlyArray<{ label: string; re: RegExp }> = [
+  {
+    label: 'write replies in ASD-STE100 Simplified Technical English, with its style points and scope',
+    re: /^- Write replies in ASD-STE100 Simplified Technical English: short sentences, one idea each, common words, active voice, simple tenses\. Code, commands and quoted text keep their own form\.$/m,
+  },
+];
+
+/** Named collector: how a rule file departs from the behavior-rule design. */
+export function collectBehaviorDefects(text: string): string[] {
+  const out: string[] = [];
+  const m = /^---\npaths: \[\]\n---\n/.exec(text);
+  if (!m) out.push('the frontmatter is not exactly `paths: []`');
+  const body = text.slice(m ? m[0].length : 0).trim();
+  if (body.length > BEHAVIOR_BODY_CEILING) {
+    out.push(`the body is ${body.length} characters, over the ${BEHAVIOR_BODY_CEILING} ceiling`);
+  }
+  const lines = body.split('\n').filter(line => line.trim() !== '');
+  if (lines[0] !== '# Behavior') out.push('the first line is not the title `# Behavior`');
+  for (const line of lines.slice(1)) if (!line.startsWith('- ')) out.push(`a line is not a bullet: "${line}"`);
+  for (const { label, re } of BEHAVIOR_BULLETS) if (!re.test(body)) out.push(`missing behavior: ${label}`);
+  const sentences = lines.slice(1).flatMap(line => line.replace(/^-\s+/, '').split(/[.:]/)).map(s => s.trim()).filter(s => s.length > 0);
+  for (const sentence of sentences) {
+    const words = sentence.split(/\s+/).length;
+    if (words > BEHAVIOR_SENTENCE_WORDS) out.push(`a sentence has ${words} words, over ${BEHAVIOR_SENTENCE_WORDS}: "${sentence}"`);
+  }
+  return out;
+}
+
+describe('behavior rule (D-BEHAVIOR-RULE)', () => {
+  it('the rule file exists with empty-paths frontmatter, a title, only bullets, the reply behavior and a body under the ceiling', async () => {
+    const text = await fs.readFile(BEHAVIOR_PATH, 'utf-8');
+    expect(collectBehaviorDefects(text)).toEqual([]);
+  });
+
+  it('the core plugin registers it, and the registry knows it as a valid rule name', () => {
+    const core = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-core-skills')!;
+    expect(core.rules).toContain('behavior');
+    expect(buildRulesMap([core]).get('behavior')).toBe('devflow-core-skills');
+    expect(getAllRuleNames()).toContain('behavior');
+    expect(isValidRuleName('behavior')).toBe(true);
+  });
+
+  it('installRuleFile installs it flat, frontmatter intact', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-behavior-'));
+    try {
+      const target = path.join(tmp, 'rules', 'devflow');
+      await fs.mkdir(target, { recursive: true });
+      expect(await installRuleFile('behavior', path.join(tmp, 'devflow'), target)).toBe('source');
+      const installed = await fs.readFile(path.join(target, 'behavior.md'), 'utf-8');
+      expect(installed).toBe(await fs.readFile(BEHAVIOR_PATH, 'utf-8'));
+      expect(installed.startsWith('---\npaths: []\n---\n')).toBe(true);
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('known-bad probe: a longer body, a moved paths line, a lost behavior, a prose line and a long sentence are each reported', async () => {
+    const real = await fs.readFile(BEHAVIOR_PATH, 'utf-8');
+    expect(collectBehaviorDefects(real)).toEqual([]);
+    expect(collectBehaviorDefects(`${real}- ${'padding '.repeat(60)}\n`)).toEqual(
+      expect.arrayContaining([expect.stringMatching(/the body is \d+ characters, over the 500 ceiling/)]),
+    );
+    expect(collectBehaviorDefects(real.replace('paths: []', 'paths: ["**/*"]'))).toContain('the frontmatter is not exactly `paths: []`');
+    expect(collectBehaviorDefects(real.replace('active voice', 'any voice'))).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^missing behavior: write replies in ASD-STE100/)]),
+    );
+    expect(collectBehaviorDefects(`${real}\nSome prose.\n`)).toContain('a line is not a bullet: "Some prose."');
+    expect(collectBehaviorDefects(real.replace('# Behavior', '# Plain English'))).toContain('the first line is not the title `# Behavior`');
+    const longSentence = Array.from({ length: BEHAVIOR_SENTENCE_WORDS + 1 }, () => 'a').join(' ');
+    expect(collectBehaviorDefects(`${real}- ${longSentence}.\n`)).toEqual(
+      expect.arrayContaining([expect.stringMatching(new RegExp(`a sentence has ${BEHAVIOR_SENTENCE_WORDS + 1} words`))]),
+    );
+    expect(collectBehaviorDefects('no frontmatter')).toContain('the frontmatter is not exactly `paths: []`');
+  });
+});

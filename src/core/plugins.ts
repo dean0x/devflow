@@ -124,7 +124,14 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     // search matches before printing them. Its body stays near 400 characters (ceiling
     // 450) and names no search binary, since the rule is loaded into every session;
     // tests/rules.test.ts enforces the length, the directives and this registration.
-    rules: ['security', 'engineering', 'quality', 'reliability', 'context-economy'],
+    // D-BEHAVIOR-RULE: how agents reply and act is a core rule, one bullet per
+    // behavior, because it must reach every session and every spawned agent with no
+    // activation step. The first behavior: write replies in ASD-STE100 Simplified
+    // Technical English, because the maintainer runs many sessions in parallel and
+    // loses track of each one. It covers replies only, never code, commands or quoted
+    // text. The body stays small because every session loads it; tests/rules.test.ts
+    // enforces the shape, the length and this registration.
+    rules: ['security', 'engineering', 'quality', 'reliability', 'context-economy', 'behavior'],
   },
   {
     name: 'devflow-plan',
