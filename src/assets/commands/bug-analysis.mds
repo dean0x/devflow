@@ -30,7 +30,7 @@ Run a proactive bug analysis on the current branch by combining static analysis 
 {{docs_root()}}
 
 Render the test-plan block from `/implement`'s evidence file, and from nothing else:
-1. `branch_slug` is `git branch --show-current` with every `/` replaced by `-`.
+1. `branch_slug` is `git -C "{worktree}" branch --show-current` with every `/` replaced by `-`.
 2. Only when `branch_slug` matches `^[A-Za-z0-9._-]{1,200}$` and the file exists, run (the path double-quoted):
 
 ```bash

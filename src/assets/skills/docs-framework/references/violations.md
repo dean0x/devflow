@@ -15,7 +15,7 @@ Common violations of documentation conventions with detection patterns and fixes
 | Wrong case for indexes | `index.md` | `INDEX.md` | UPPERCASE for special indexes |
 | Files outside .docs | `docs/status.md` | `.devflow/docs/status/2025-01-05_1430.md` | Use `.devflow/docs/` root |
 | Missing INDEX.md | Status files without index | Create `INDEX.md` | Every directory needs index |
-| Special chars in slug | `oauth-2.0-auth` | `oauth-20-auth` | Strip non-alphanumeric except `-` |
+| Special chars in slug | `oauth-2.0-auth` | `oauth-2-0-auth` | Replace each non-alphanumeric run with one `-` |
 
 ---
 
@@ -90,8 +90,8 @@ BRANCH_SLUG=$(git branch --show-current | sed 's/\//-/g')
 BRANCH_SLUG=$(git branch --show-current)
 # Result: empty string -> broken path
 
-# RIGHT - with fallback
-BRANCH_SLUG=$(git branch --show-current 2>/dev/null | sed 's/\//-/g' || echo "standalone")
+# RIGHT - with fallback (the fallback goes before the sed: a pipeline's status is sed's)
+BRANCH_SLUG=$(b=$(git branch --show-current 2>/dev/null); echo "${b:-standalone}" | sed 's/\//-/g')
 # Result: (detached HEAD) -> standalone
 ```
 
@@ -106,8 +106,8 @@ BRANCH_SLUG=$(git branch --show-current 2>/dev/null | sed 's/\//-/g' || echo "st
 TOPIC="Bug: Can't login (v2.0)"
 SLUG="Bug:-Can't-login-(v2.0)"
 
-# RIGHT - stripped and normalized
-SLUG="bug-cant-login-v20"
+# RIGHT - special runs normalized to one dash
+SLUG="bug-can-t-login-v2-0"
 ```
 
 ### Not Truncating Long Names

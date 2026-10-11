@@ -106,8 +106,9 @@ const constraints = args.constraints || "";
 <!-- learning:on -->
 const DECISIONS_CONTEXT = args.decisionsContext || "";   // injected before authoring
 <!-- learning:end -->
-const slug = args.slug || initiative.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40);
-const ts = new Date().toISOString().slice(0,16).replace(/[-:T]/g, (c) => c === 'T' ? '_' : c === ':' ? '' : c);
+const slug = args.slug || initiative.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+/, '').slice(0, 50).replace(/-+$/, '') || 'untitled';
+const now = new Date(), two = (n) => String(n).padStart(2, '0');
+const ts = `${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())}_${two(now.getHours())}${two(now.getMinutes())}`;
 const ROOT = args.root;  // {worktree} from Pre-authoring setup: the checkout's toplevel, never cwd
 const OUTDIR = `${ROOT}/.devflow/docs/tickets/${slug}/${ts}`;
 
@@ -260,7 +261,7 @@ Tracking issue → `{worktree}/.devflow/docs/tickets/{slug}/{ts}/tracking-issue.
 
 `{worktree}` is the docs root resolved in Pre-authoring setup (it honours `WORKTREE_PATH` when provided).
 
-Timestamps follow the devflow `YYYY-MM-DD_HHMM` convention (date and time separated by an underscore, e.g. `2026-06-12_1148`). The `ts` variable in the workflow script generates this format.
+Timestamps follow the devflow `YYYY-MM-DD_HHMM` convention in local time (date and time separated by an underscore, e.g. `2026-06-12_1148`). The `ts` variable in the workflow script generates this format.
 
 ---
 
