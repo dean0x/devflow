@@ -24,6 +24,7 @@ Use `--recommended` or `--advanced` flags for non-interactive setup.
 | `--rules` / `--no-rules` | Enable/disable rules (default: on) |
 | `--hud` / `--no-hud` | Enable/disable HUD status line (default: on) |
 | `--proxy` / `--no-proxy` | Enable/disable external model routing — GPT models via OpenAI/Codex subscription (default: off; Advanced-only, requires Codex auth) |
+| `--behavior` / `--no-behavior` | Enable/disable the opt-in behavior rule — agents reply in ASD-STE100 Simplified Technical English (default: off; asked in the Advanced wizard only; a re-init keeps the recorded value) |
 | `--compliance <list>` / `--no-compliance` | Enable compliance with comma-separated framework IDs (e.g., `gdpr,hipaa`) / disable preserving frameworks (default: off; bypasses the wizard entirely when passed) |
 | `--tracker <id>` | The machine's default issue tracker provider: `github`, `jira`, or `linear` (default: `github`); a repository's `.devflow/project.json` can select its own. Suppresses the tracker wizard question on both init paths. There is no `--no-tracker` — `--tracker github` is the default |
 | `--hud-only` | Install only the HUD (no plugins, hooks, or extras) |
@@ -120,6 +121,18 @@ npx devflow-kit knowledge --status          # Show current status
 `memory --status`, `learning --status` and `knowledge --status` report the machine-wide switch. A repository can only narrow it: when the switch is on but the current directory's repository turns the feature off — under `features` in the committed `.devflow/project.json`, or in your personal `.devflow/config.json` — the output adds `Effective here: disabled (<file>)`, naming that file. When nothing narrows it, the line is absent and the output is unchanged. `knowledge --status` also prints `Effective here: disabled (<file> is unreadable)` when a repository file exists but is not a JSON object: commands then switch knowledge write-back off, while memory and learning capture carry on as the machine switch says. `--enable` turns a feature on in every project, and says so, but a repository can still opt out this way.
 
 When the current checkout's `.devflow/config.json` is tracked by git, `memory`, `learning`, `knowledge` and `tracker --status` also warn that devflow ignores it — the file holds personal settings, and a committed copy would let a branch set them for whoever checks it out — and print the fix: `git rm --cached .devflow/config.json`.
+
+## Behavior
+
+The behavior rule is opt-in and off by default. It asks agents to write replies in ASD-STE100 Simplified Technical English: short sentences, one idea each, common words, active voice, simple tenses. Code, commands and quoted text keep their own form.
+
+```bash
+npx devflow-kit behavior --enable           # Turn it on (installs the rule)
+npx devflow-kit behavior --disable          # Turn it off (removes the rule)
+npx devflow-kit behavior --status           # Show whether it is on and whether the file is installed
+```
+
+The rule is feature-owned (not plugin-scoped), like the compliance rule, and installs only while rules are enabled (`devflow rules --enable`). `--enable` and `--disable` write the machine switch `features.behavior` and update the installed file at once. `devflow init --behavior` / `--no-behavior` set the same switch: a plain re-init keeps it and `--reset` returns it to off. A shadow at `~/.devflow/rules/behavior.md` replaces the shipped text.
 
 ## Compliance
 
