@@ -25,6 +25,7 @@ import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import { stripVTControlCharacters } from 'util';
 
 import { requireBuiltCli } from './helpers.js';
 
@@ -190,8 +191,12 @@ describe('formatTrackerStatus', () => {
   });
 
   it('prints the servers in force on one line, marking the default and leaving a chosen list unmarked', () => {
+    // The "(default)" marker is dimmed whenever picocolors reports colour support
+    // (a TTY, or CI=true on a runner), so compare the text with the escapes removed.
     const line = (servers: { list: readonly string[]; isDefault: boolean }): string =>
-      formatTrackerStatus({ ...base, selection: null, servers }).split('\n').find(l => l.startsWith('Servers:')) ?? '';
+      stripVTControlCharacters(formatTrackerStatus({ ...base, selection: null, servers }))
+        .split('\n')
+        .find(l => l.startsWith('Servers:')) ?? '';
     expect(line({ list: TRACKER_MCP_SERVERS_DEFAULT, isDefault: true })).toBe(
       `Servers:     ${TRACKER_MCP_SERVERS_DEFAULT.join(', ')} (default)`,
     );
