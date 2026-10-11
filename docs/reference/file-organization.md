@@ -23,7 +23,7 @@ devflow/
 │   │   ├── paths.ts                  # getPackageRoot + asset path helpers
 │   │   ├── assets.ts                 # skillsDir, agentsDir, rulesDir, scriptsDir, commandsDir,
 │   │   │                             #   compiledAgentsDir, agentSourceDirs (dist-first order owner)
-│   │   ├── flags.ts                  # Claude Code flag registry (31 flags)
+│   │   ├── flags.ts                  # Claude Code flag registry (32 flags)
 │   │   ├── fs-atomic.ts              # Atomic write helper (D34)
 │   │   ├── claude-md-audit.ts        # Typed seam onto scripts/claude-md-audit.cjs: roots, the one init note, the stamp write (lstat-checked)
 │   │   ├── manifest.ts               # Manifest read/write
@@ -43,6 +43,8 @@ devflow/
 │   │   ├── hooks.ts                  # Hook registration helpers
 │   │   ├── post-install.ts           # Post-install setup
 │   │   ├── legacy.ts                 # Legacy hook cleanup
+│   │   ├── tracker-servers.ts        # Stamps configured tracker servers onto the installed Git/Tracker agents
+│   │   ├── agent-type-owner.ts       # Explore override: skips the install when the user owns an Explore agent
 │   │   └── templates/                # Settings and config templates
 │   └── assets/                       # SINGLE SOURCE OF TRUTH for all installable assets
 │       ├── skills/                   # 41 skills
@@ -51,7 +53,7 @@ devflow/
 │       │   │   └── references/
 │       │   ├── software-design/
 │       │   └── ...
-│       ├── agents/                   # 17 agents — hand-authored .md, plus MDS generator hosts (.mds → dist/agents/)
+│       ├── agents/                   # 18 agents — hand-authored .md, plus MDS generator hosts (.mds → dist/agents/)
 │       │   ├── git.mds                 # MDS generator host → dist/agents/git.md
 │       │   ├── code.mds                # MDS generator host → dist/agents/code.md (nine agents are hosts besides git)
 │       │   ├── synthesize.md
@@ -120,6 +122,7 @@ devflow/
 ├── scripts/                          # Dev tooling
 │   ├── build-mds.ts                  # MDS compiler: command hosts → dist/commands/*.md, agent generator hosts → dist/agents/*.md, reference modules → dist/skills/git/references/**
 │   ├── bump-version.ts               # Version bump script
+│   ├── token-audit/                  # `npm run audit:tokens`: token spend from local transcripts (not shipped)
 │   └── update-golden.ts              # Golden fixture regeneration (git-agent target; github-status-lines refuses without --unfreeze)
 ├── tests/                            # Test harness
 │   ├── helpers.ts                    # Shared helpers: resolveAgentSource, resolveAllAgents, extractOpSectionFromCorpus, gitAgentSinkCorpus, walkFiles, loadGolden, extractStatusLines, parseFences, isAgentBlock, requireDistFile/requireDistFiles
@@ -205,7 +208,7 @@ Assets live once in `src/assets/` and install to the user's `~/.claude/` — no 
 
 ### Agents
 
-All 17 agents (`git`, `synthesize`, `skim`, `simplify`, `code`, `review`, `triage`, `evaluate`, `test`, `scrutinize`, `validate`, `design`, `knowledge`, `research`, `diagnose`, `learning`, `tracker`) are shared, and every source lives in `src/assets/agents/`. Seven (`synthesize`, `simplify`, `evaluate`, `test`, `validate`, `learning`, `tracker`) are hand-authored `.md` files that install verbatim. The other ten (`git`, `code`, `design`, `diagnose`, `knowledge`, `research`, `review`, `scrutinize`, `triage`, `skim`) are `.mds` generator hosts, compiled to `dist/agents/{name}.md` by `npm run build:mds`.
+All 18 agents (`git`, `synthesize`, `skim`, `simplify`, `code`, `review`, `triage`, `evaluate`, `test`, `scrutinize`, `validate`, `design`, `knowledge`, `research`, `diagnose`, `learning`, `tracker`, `explore`) are shared, and every source lives in `src/assets/agents/`. Eight (`synthesize`, `simplify`, `evaluate`, `test`, `validate`, `learning`, `tracker`, `explore`) are hand-authored `.md` files that install verbatim. The other ten (`git`, `code`, `design`, `diagnose`, `knowledge`, `research`, `review`, `scrutinize`, `triage`, `skim`) are `.mds` generator hosts, compiled to `dist/agents/{name}.md` by `npm run build:mds`.
 
 The installer resolves each declared agent over `agentSourceDirs()` in `src/core/assets.ts` — `dist/agents/`, then `src/assets/agents/` — and copies the first hit, so a compiled artifact supersedes a hand-authored file of the same name. When neither directory has the agent, the install throws naming both candidate paths and `npm run build:mds` rather than silently skipping it. `npm run build:cli` alone (TypeScript) does not produce installable agents; `npm run build` runs both steps.
 

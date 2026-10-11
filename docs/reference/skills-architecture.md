@@ -13,9 +13,9 @@ Shared patterns used by multiple agents.
 | Skill | Purpose | Used By |
 |-------|---------|---------|
 | `software-design` | Engineering patterns (Result types, DI, immutability, workaround labeling) | Code, Scrutinize, Evaluate |
-| `review-methodology` | 6-step review process, 3-category issue classification | Review, Synthesize |
+| `review-methodology` | 6-step review process, 3-category issue classification | Review |
 | `quality-gates` | 9-pillar self-review framework | Scrutinize |
-| `docs-framework` | Documentation conventions (.devflow/docs/ structure, naming, templates) | Synthesize |
+| `docs-framework` | Documentation conventions (.devflow/docs/ structure, naming, templates) | /plan, /research (at their naming step) — the naming authority |
 | `git` | Git safety, atomic commits, PR descriptions, GitHub API patterns | Code, Git |
 | `patterns` | CRUD, API endpoints, events, config, logging | Code |
 | `qa` | Scenario-based acceptance testing methodology, evidence collection | Test |

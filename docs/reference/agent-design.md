@@ -45,10 +45,10 @@ tools: ["Bash", "Read"]
 
 When an agent only needs a subset of tools, prefer platform-enforced restriction over prompt instructions. An agent holds one tool policy, never both:
 
-- **Allowlist (`tools:`)** — the agent holds exactly the tools named. This is the default for an agent that needs no user-environment MCP or web access.
-- **Denylist (`disallowedTools:`)** — the agent keeps every tool except the ones named, MCP and web tools included. Use it where the agent must keep that access (Code, Research, Scrutinize, Simplify). Spell every name out: a wildcard in `disallowedTools` removes MCP names too.
+- **Allowlist (`tools:`)** — the agent holds exactly the tools named. This is the default for an agent that needs no user-environment MCP or web access. A whole-server entry `mcp__<server>` grants every tool that server exposes, deferred behind `ToolSearch`; an entry for a server that is not connected grants nothing and does not block launch. Git and Tracker list only built-in tools in source, and the installer appends one `mcp__<name>` per configured tracker server.
+- **Denylist (`disallowedTools:`)** — the agent keeps every tool except the ones named, MCP and web tools included. Use it where the agent must keep that access (Code, Research). Scrutinize and Simplify also deny `mcp__*`, which drops every MCP tool and keeps web access, so code scanning runs in Code alone. Spell every other name out: a wildcard removes every name it matches.
 
-Add a new key as a YAML block list, one name per line. Neither key is touched by `devflow agents --set` or by the reapply on `devflow init`, which rewrite only the `model:` and `effort:` lines.
+Add a new key as a YAML block list, one name per line. Neither key is touched by `devflow agents --set` or by the reapply on `devflow init`, which rewrite only the `model:` and `effort:` lines; the tracker-server stamp is the one installer edit to a `tools:` line.
 
 An allowlist silently constrains how an agent can act, so the body must not direct a tool its frontmatter removes. That covers a call, "the X tool", a skill load and a `ToolSearch` `select:` load, and also every verb: update, refresh, amend, append and patch imply `Edit`, and loading a skill implies `Skill`. `tests/guards/agent-config.test.ts` holds the shipped table and checks the body and each preloaded skill against it.
 
@@ -57,7 +57,7 @@ An agent that has Bash is given no Grep or Glob tool in Claude Code, even when i
 ## Effort and Project Context
 
 - `effort:` (`low`, `medium`, `high`, `xhigh` or `max`) is the agent's shipped reasoning effort, set on the line after `model:`. Lower effort on a mechanical agent is a deliberate saving. An agent with no `effort:` line follows the session.
-- `omitClaudeMd: true` stops Claude Code loading the user's, project's and local CLAUDE.md into the agent's context. Use it for an agent that does no project-aware judgment (Synthesize, Skim). Such an agent receives none of that text, so every rule it relies on has to be stated in its own body. Learning keeps its CLAUDE.md context: its Encoded-retirement check reads the rules in the root CLAUDE.md, and an A/B run showed that without them it stops retiring entries as Encoded.
+- `omitClaudeMd: true` keeps CLAUDE.md (user, project, local) and the rule files under `~/.claude/rules/` out of the agent's context. Twelve agents ship it: Validate, Git, Triage, Evaluate, Test, Research, Knowledge, Tracker, Learning, Skim, Synthesize, Explore. Each restates the core rules it works by under `## Core rules`, exactly its `CORE_RULES_DIGEST` row (`tests/fixtures/agent-config.ts`, held by `tests/guards/core-rules-digest.test.ts`). An agent that needs more reads it: Learning reads the root CLAUDE.md and the installed devflow rules before its first already-encoded comparison. Code, Scrutinize, Simplify, Review, Design and Diagnose keep CLAUDE.md.
 
 ## Length Guidelines
 
