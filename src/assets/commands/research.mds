@@ -65,14 +65,16 @@ Use `FEATURE_KNOWLEDGE` **locally** for research framing. Pass to each Research 
 
 **Produces:** RESEARCH_PLAN
 
+**Load `devflow:docs-framework`** — Load via Skill tool: `devflow:docs-framework`, here and not earlier, so a run that stops before this phase never pays for it. If it fails to load, continue with the rules below.
+
+Name the research directory by the skill's rules, once: `{topic-slug}` is its topic slug of the research question and `{YYYY-MM-DD_HHMM}` is the local time. When `{worktree}/.devflow/docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}` already exists (a same-minute collision), the timestamp takes seconds instead, `YYYY-MM-DD_HHMMSS`. Every path of this run uses that one directory.
+
 Analyze the research question to infer research types needed (min 2, max 5). For each type:
 - `RESEARCH_TYPE`: `codebase | external | market | competitor | technology`
 - `RESEARCH_QUESTION`: Focused sub-question for this type
 - `OUTPUT_PATH`: `{worktree}/.devflow/docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}/{type}.md`
 
 **Tool availability check**: If WebSearch/WebFetch are unavailable, restrict to `codebase` type only.
-
-Generate topic slug from the research question (kebab-case, lowercase, no articles).
 
 ### Phase 3: Orient (Conditional)
 
@@ -111,12 +113,17 @@ Each Research agent writes findings to disk at OUTPUT_PATH.
 **Produces:** RESEARCH_SUMMARY
 **Requires:** RESEARCH_OUTPUTS
 
-Spawn `Agent(subagent_type="Synthesize")` in `research` mode:
-- Reads Research agent outputs from RESEARCH_OUTPUTS paths
-- Merges findings with trust-aware aggregation
-- Writes `research-summary.md` to the same timestamped directory
+Spawn `Agent(subagent_type="Synthesize")` in `research` mode. It reads the Research agent outputs from the `RESEARCH_OUTPUTS` paths, merges them with trust-aware aggregation, and writes `research-summary.md` into `RESEARCH_BASE_DIR` — the one directory of this run, which only this spawn names:
 
-Output path: `{worktree}/.devflow/docs/research/{topic-slug}/{timestamp}/research-summary.md`
+```
+Agent(subagent_type="Synthesize", run_in_background=false):
+"Mode: research
+WORKTREE_PATH: {WORKTREE_PATH}  (omit if none was provided)
+RESEARCH_OUTPUTS: {the OUTPUT_PATH of every Research agent that wrote its file}
+RESEARCH_BASE_DIR: {worktree}/.devflow/docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}
+Merge findings with trust-aware aggregation.
+Output: {worktree}/.devflow/docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}/research-summary.md"
+```
 
 ### Phase 6: Present
 

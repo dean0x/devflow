@@ -76,3 +76,33 @@ The registry entry therefore records no `upstreamDefault`, and the flag stays un
 default and not recommended until a forced mid-`/implement` `/compact` has been checked.
 The variable that sets a percentage threshold instead is a different variable; devflow
 does not write or name it.
+
+## `subagent-cache-5m` — INCLUDED (boolean), setting confirmed
+
+**Probe date**: 2026-10-11  
+**Claude Code version**: 2.1.296
+
+`subagentPromptCacheTtl` is a settings key of the executable. The TTL of a subagent's
+prompt-cache writes resolves in this order, highest first:
+
+1. an environment variable that forces the 5-minute TTL;
+2. `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`;
+3. the `subagentPromptCacheTtl` setting;
+4. a per-agent `experimental.cacheTtl` in the agent's frontmatter;
+5. `ENABLE_PROMPT_CACHING_1H`.
+
+Measured in a sandboxed session with `ENABLE_PROMPT_CACHING_1H=true` and the setting at
+`"5m"`: subagent requests wrote 36,387 tokens of 5-minute cache and none at 1 hour, while
+the main session wrote 100% at 1 hour (35,209 tokens). The setting therefore moves subagents
+alone and leaves the 1-hour TTL of `prompt-caching-1h` on the main session.
+
+Also observed:
+
+- The 1-hour TTL is ignored while a subscription is in overage.
+- A Claude Code that predates the setting ignores the key, so subagents there follow
+  `ENABLE_PROMPT_CACHING_1H` as before.
+- An environment variable above the setting in that order outranks it, so the flag can be
+  on while subagents write at another TTL.
+
+The registry entry writes `"5m"` and deletes the key only while it holds `"5m"`. This is an
+observation, not a specification: re-probe when the precedence matters again.

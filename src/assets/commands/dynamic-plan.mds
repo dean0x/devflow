@@ -50,7 +50,7 @@ Before authoring, verify:
 
 {{docs_root()}}
 
-Pass `{worktree}` to the workflow as its `root` argument.
+Pass `{worktree}` to the workflow as its `root` argument, and its `slug` argument: the `{slug}` of the ticket directory (`tickets/{slug}/{ts}/`) when that is the ticket source, otherwise `wave`.
 
 <!-- learning:on -->
 **1. Apply decisions context**
@@ -128,7 +128,8 @@ const DECISIONS_CONTEXT = args.decisionsContext || "";   // injected before auth
 const PREFERENCE_PROFILE = args.preferenceProfile || "";  // injected before authoring
 const TP_CONTRACT = args.tpContract || "";  // the "Test-plan line (TP)" contract below — its paragraph and four bullets — passed verbatim as tpContract when invoking the workflow, never pasted into this script (it holds backticks)
 const slug = args.slug || "wave";
-const ts = new Date().toISOString().slice(0,16).replace(/[-:T]/g, (c) => c === 'T' ? '_' : c === ':' ? '' : c);
+const now = new Date(), two = (n) => String(n).padStart(2, '0');
+const ts = `${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())}_${two(now.getHours())}${two(now.getMinutes())}`;
 const ROOT = args.root;  // {worktree} from Pre-authoring setup: the checkout's toplevel, never cwd
 const OUTDIR = `${ROOT}/.devflow/docs/design/${slug}/${ts}`;
 
@@ -236,7 +237,7 @@ Auto-resolved decisions: ${JSON.stringify(resolved && resolved.autoResolved)}
 Decisions needed: ${JSON.stringify(resolved && resolved.decisionsNeeded)}
 Output directory: ${OUTDIR}
 
-For each ticket, write ${OUTDIR}/{ticket-slug}-plan.md containing:
+For each ticket, write ${OUTDIR}/{ticket-slug}-plan.md, {ticket-slug} being the ticket's file name without .md when it came from a ticket directory, otherwise the ticket title run through title.toLowerCase().replace(/[^a-z0-9]+/g, '-') with nothing trimmed, containing:
 - ## Implementation Plan
 - The plan body (incorporate cross-plan amendments)
 - ## Acceptance Criteria (numbered, positive + negative)

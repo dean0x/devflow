@@ -113,9 +113,18 @@ export type TrackerProvider = (typeof TRACKER_PROVIDERS)[number]['id'];
  * GitHub is the default and needs no inference, no background agent and no
  * conventions file — so `{enabled:false, provider:'jira'}` would be an
  * incoherent state the rest of the feature would have to keep interpreting.
+ *
+ * `servers` is the one other field: the tracker tool servers the Git and Tracker agents are
+ * allowed to call (D-TRACKER-SERVER-ALLOWLIST). ABSENT means {@link TRACKER_MCP_SERVERS_DEFAULT},
+ * so every manifest written before the field existed reads as the default, and
+ * `devflow tracker --servers default` removes the key rather than writing the default out.
+ * It is a machine setting like `provider`, orthogonal to it: one flat list serves every
+ * provider because every install carries every provider and a repository may select a
+ * provider other than the machine's.
  */
 export interface TrackerFeatureState {
   provider: TrackerProvider;
+  servers?: readonly string[];
 }
 
 /** Registry IDs in registry order. */
@@ -127,6 +136,54 @@ export const TRACKER_PROVIDER_IDS: readonly TrackerProvider[] =
  * Existing installs and every GitHub user land here, silently.
  */
 export const DEFAULT_TRACKER_PROVIDER: TrackerProvider = 'github';
+
+// ---------------------------------------------------------------------------
+// Tracker tool servers — the allowlist half of the Git and Tracker agents
+// ---------------------------------------------------------------------------
+
+/**
+ * D-TRACKER-SERVER-ALLOWLIST: the Git and Tracker agents hold a tool ALLOWLIST, and the
+ * tracker tool servers a user has connected differ per machine, so the shipped allowlist
+ * names no server (the agent sources stay vendor-neutral). The installer stamps one
+ * whole-server entry per name below onto the INSTALLED `tools:` line of those two agents
+ * (`stampAgentTools`, src/core/agent-frontmatter.ts), after the file is copied. Claude Code
+ * has no pattern form for an allowlist entry, so a server is granted by its name; a name
+ * that matches no connected server is inert (it grants nothing and blocks nothing).
+ *
+ * The default is one FLAT list, stamped whatever the provider: every install carries every
+ * provider, and a repository may select a provider other than the machine's, so a list
+ * keyed on the machine's provider would strand that repository. A server the user runs
+ * under another name is added with `devflow tracker --servers`. A wrong or missing name
+ * does not fail silently: the agent finds no tool for the capability it needs and reports
+ * `TRACEABILITY: DEGRADED (no tracker tool for {capability})`.
+ *
+ * The default leaves `github` out. Under the github provider the Git agent uses `gh` and
+ * never reads `_mcp.md`, so a stamped `github` server is never used by a tracker operation;
+ * under jira or linear, a connected GitHub server that also advertises issue creation would
+ * make the `_mcp.md` capability selection ambiguous, which is a degraded run. A user who
+ * wants it adds it with `devflow tracker --servers`.
+ */
+export const TRACKER_MCP_SERVERS_DEFAULT: readonly string[] = Object.freeze([
+  'atlassian',
+  'jira',
+  'claude_ai_Atlassian',
+  'linear',
+  'claude_ai_Linear',
+]);
+
+/** A server name as a user may configure it. Byte-exact, like a provider token. */
+export const TRACKER_SERVER_NAME_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** The most servers one list may hold; every entry lands in a prompt-adjacent frontmatter line. */
+export const TRACKER_SERVERS_MAX = 32;
+
+/** The reserved word that returns the setting to {@link TRACKER_MCP_SERVERS_DEFAULT}. */
+export const TRACKER_SERVERS_DEFAULT_WORD = 'default';
+
+/** What `devflow tracker --servers` asks for: the default list, or an explicit one. */
+export type TrackerServersSelection =
+  | { readonly kind: 'default' }
+  | { readonly kind: 'list'; readonly servers: readonly string[] };
 
 // ---------------------------------------------------------------------------
 // Artifact basenames — one spelling for every TypeScript reader
@@ -322,6 +379,75 @@ export function parseTrackerId(input: string): TrackerResult<TrackerProvider> {
 }
 
 /**
+ * Validate a list of tracker server names. The one rule set behind both the CLI argument
+ * and the manifest field.
+ *
+ * REJECT, NEVER REPAIR (as {@link parseTrackerId}): a name is accepted byte-exact against
+ * {@link TRACKER_SERVER_NAME_RE} and must not hold `__`, which is what separates a server
+ * from its tool in an entry such as `mcp__server__tool`. No trim, no case folding, no
+ * alias. Exact duplicates collapse to the first occurrence and the order is kept. The list
+ * is non-empty and holds at most {@link TRACKER_SERVERS_MAX} distinct names.
+ */
+export function validateTrackerServers(raw: readonly unknown[]): TrackerResult<readonly string[]> {
+  if (raw.length === 0) {
+    return { ok: false, error: 'No tracker servers given. Pass one or more server names, or "default".' };
+  }
+  const seen = new Set<string>();
+  for (const entry of raw) {
+    if (typeof entry !== 'string' || !TRACKER_SERVER_NAME_RE.test(entry)) {
+      return {
+        ok: false,
+        error: `Invalid tracker server name: "${describeTrackerValue(entry)}". ` +
+          'Names are 1-64 characters from A-Z, a-z, 0-9, "_" and "-".',
+      };
+    }
+    if (entry.includes('__')) {
+      return {
+        ok: false,
+        error: `Invalid tracker server name: "${describeTrackerValue(entry)}". ` +
+          'A name must not contain "__" (it separates a server from its tool).',
+      };
+    }
+    seen.add(entry);
+  }
+  if (seen.size > TRACKER_SERVERS_MAX) {
+    return { ok: false, error: `Too many tracker servers: ${seen.size} (at most ${TRACKER_SERVERS_MAX}).` };
+  }
+  return { ok: true, value: [...seen] };
+}
+
+/**
+ * Strict boundary parser for `devflow tracker --servers <list>`.
+ *
+ * `default` alone selects {@link TRACKER_MCP_SERVERS_DEFAULT}; anything else is a
+ * comma-separated list of names handed to {@link validateTrackerServers} unchanged. An
+ * empty argument, an empty item (`a,,b`, a trailing comma) and the reserved word inside a
+ * list are errors, never silently dropped.
+ */
+export function parseTrackerServers(input: string): TrackerResult<TrackerServersSelection> {
+  if (input === '') {
+    return { ok: false, error: 'Missing tracker servers. Pass a comma-separated list of names, or "default".' };
+  }
+  if (input === TRACKER_SERVERS_DEFAULT_WORD) return { ok: true, value: { kind: 'default' } };
+  const items = input.split(',');
+  if (items.includes(TRACKER_SERVERS_DEFAULT_WORD)) {
+    return { ok: false, error: `"${TRACKER_SERVERS_DEFAULT_WORD}" is reserved: pass it alone, not inside a list.` };
+  }
+  const validated = validateTrackerServers(items);
+  return validated.ok ? { ok: true, value: { kind: 'list', servers: validated.value } } : validated;
+}
+
+/** The servers in force for `state`: its own list, else the default. */
+export function effectiveTrackerServers(state: TrackerFeatureState): readonly string[] {
+  return state.servers ?? TRACKER_MCP_SERVERS_DEFAULT;
+}
+
+/** The whole-server allowlist entries for `servers`, in order: `github` becomes `mcp__github`. */
+export function trackerServerTools(servers: readonly string[]): string[] {
+  return servers.map(name => `mcp__${name}`);
+}
+
+/**
  * Tolerant sink normaliser for a raw `manifest.features.tracker` value.
  *
  * Absent, null, malformed, a bare string, or an unknown provider → the default
@@ -332,9 +458,14 @@ export function parseTrackerId(input: string): TrackerResult<TrackerProvider> {
  * D-TRACKER-SELF-HEAL [DR-26]: self-healing here is SILENT and emits no
  * DEGRADED — that is the correct self-heal behaviour, and it is a different
  * condition from a per-repo config value outside the domain (which does emit
- * `unknown tracker provider`). The two must not be conflated.
+ * `unknown tracker provider`). The two must not be conflated. The one exception is
+ * `servers` (see the body): a present but invalid list heals to the default AND reaches
+ * `onWarning` when a caller supplies one, because the user wrote that list on purpose.
  */
-export function normalizeTrackerFeature(raw: unknown): TrackerFeatureState {
+export function normalizeTrackerFeature(
+  raw: unknown,
+  onWarning?: (message: string) => void,
+): TrackerFeatureState {
   const DEFAULT: TrackerFeatureState = { provider: DEFAULT_TRACKER_PROVIDER };
 
   if (raw === null || raw === undefined || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -344,6 +475,18 @@ export function normalizeTrackerFeature(raw: unknown): TrackerFeatureState {
   const obj = raw as Record<string, unknown>;
   if (!isTrackerProvider(obj.provider)) return DEFAULT;
 
+  // `servers`: absent is the default, silently. A present value that is not a valid list is
+  // dropped WHOLE (never trimmed to its valid names) and reported through `onWarning`, which a
+  // caller with a terminal passes; the reader itself has no output channel. The state then
+  // reads as the default list, and the next `devflow tracker --servers` or `devflow init`
+  // writes the manifest without the bad value.
+  if (obj.servers === undefined) return { provider: obj.provider };
+  const servers = Array.isArray(obj.servers) ? validateTrackerServers(obj.servers) : undefined;
+  if (servers?.ok === true) return { provider: obj.provider, servers: servers.value };
+  onWarning?.(
+    `The manifest's tracker servers setting is not a valid list (${servers?.ok === false ? servers.error : 'not a list'}); ` +
+    'using the default. Run `devflow tracker --servers <names>` to set it, or `devflow tracker --servers default`.',
+  );
   return { provider: obj.provider };
 }
 

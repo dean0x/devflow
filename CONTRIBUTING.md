@@ -25,7 +25,7 @@ After setup, Devflow commands (`/code-review`, `/implement`, etc.) are available
 ```
 devflow/
 ├── src/assets/skills/   # 41 skills (single source of truth)
-├── src/assets/agents/   # 17 agents (single source of truth)
+├── src/assets/agents/   # 18 agents (single source of truth)
 ├── src/assets/rules/    # 14 rules (single source of truth, flat .md files)
 ├── src/assets/commands/ # Command sources (.mds hosts; partials in _partials/)
 ├── src/assets/scripts/hooks/  # Working Memory + ambient hooks
@@ -79,6 +79,7 @@ npm run test:watch    # Run tests in watch mode
 npm run build          # Full build (TypeScript + MDS compilation)
 npm run build:cli      # TypeScript compilation only — does not produce installable agents
 npm run build:mds      # Compile every .mds host: commands → dist/commands/, agents → dist/agents/
+npm run audit:tokens -- --project <cwd>   # Token spend by agent from local transcripts (dev only)
 ```
 
 ## Commit Conventions

@@ -868,8 +868,11 @@ describe('compliance skill orphan sweep — FEATURE_OWNED_SKILLS protection', ()
 describe('installViaFileCopy — dist-preferred agent resolution', () => {
   const spinner = { start: () => {}, stop: () => {}, message: () => {} };
 
-  /** A real registry agent name, so the orphan sweep keeps the installed file. */
-  const AGENT = 'git';
+  /**
+   * A real registry agent name, so the orphan sweep keeps the installed file. A generator-host
+   * agent that wears no tracker-server stamp, so the installed bytes are the source bytes.
+   */
+  const AGENT = 'triage';
 
   /**
    * Write an agent fixture derived from the real {AGENT} agent's frontmatter,

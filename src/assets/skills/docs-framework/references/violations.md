@@ -13,9 +13,9 @@ Common violations of documentation conventions with detection patterns and fixes
 | Unsanitized branch slug | `feature/auth` | `feature-auth` | Replace `/` with `-` |
 | Wrong case for artifacts | `Status-2025-01-05.md` | `2025-01-05_1430.md` | Use lowercase except special indexes |
 | Wrong case for indexes | `index.md` | `INDEX.md` | UPPERCASE for special indexes |
-| Files outside .docs | `docs/status.md` | `.devflow/docs/status/2025-01-05_1430.md` | Use `.devflow/docs/` root |
+| Files outside .docs | `docs/status.md` | `.devflow/docs/reviews/feat-auth/2025-01-05_1430/review-summary.md` | Use `.devflow/docs/` root |
 | Missing INDEX.md | Status files without index | Create `INDEX.md` | Every directory needs index |
-| Special chars in slug | `oauth-2.0-auth` | `oauth-20-auth` | Strip non-alphanumeric except `-` |
+| Special chars in slug | `oauth-2.0-auth` | `oauth-2-0-auth` | Replace each non-alphanumeric run with one `-` |
 
 ---
 
@@ -34,7 +34,7 @@ project/
 
 ```
 .devflow/docs/
-├── logs/                   # Should be status/
+├── logs/                   # Should be reviews/{branch-slug}/
 ├── reports/                # Should be reviews/{branch-slug}/
 └── notes.md                # Should be in appropriate subdir
 ```
@@ -90,8 +90,8 @@ BRANCH_SLUG=$(git branch --show-current | sed 's/\//-/g')
 BRANCH_SLUG=$(git branch --show-current)
 # Result: empty string -> broken path
 
-# RIGHT - with fallback
-BRANCH_SLUG=$(git branch --show-current 2>/dev/null | sed 's/\//-/g' || echo "standalone")
+# RIGHT - with fallback (the fallback goes before the sed: a pipeline's status is sed's)
+BRANCH_SLUG=$(b=$(git branch --show-current 2>/dev/null); echo "${b:-standalone}" | sed 's/\//-/g')
 # Result: (detached HEAD) -> standalone
 ```
 
@@ -106,8 +106,8 @@ BRANCH_SLUG=$(git branch --show-current 2>/dev/null | sed 's/\//-/g' || echo "st
 TOPIC="Bug: Can't login (v2.0)"
 SLUG="Bug:-Can't-login-(v2.0)"
 
-# RIGHT - stripped and normalized
-SLUG="bug-cant-login-v20"
+# RIGHT - special runs normalized to one dash
+SLUG="bug-can-t-login-v2-0"
 ```
 
 ### Not Truncating Long Names

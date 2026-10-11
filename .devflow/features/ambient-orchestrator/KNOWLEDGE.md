@@ -5,7 +5,7 @@ description: "Use when editing the orchestrator charter, the preamble or session
 category: architecture
 directories: [src/assets/scripts/hooks, src/assets/scripts/hooks/assets, src/assets/scripts/claude-md-audit.cjs, src/core/claude-md-audit.ts, src/core/flags.ts, src/cli/commands/ambient.ts, src/core/plugins.ts]
 created: 2026-07-04
-updated: 2026-10-10
+updated: 2026-10-11
 ---
 
 # Ambient Orchestrator (session-start hooks and charter)
@@ -28,7 +28,7 @@ updated: 2026-10-10
 - **KB-AP-14** Never re-register `session-start-classification`; enable and disable sweep it and the legacy commands rule unconditionally.
 - **KB-AP-15** Display of `systemMessage` on SessionStart was never observed live; if upstream discarded it, the audit would fail silently.
 - **KB-AP-16** A plan handoff sends the plan once, with no skill argument; with empty `COMMAND_INPUT` the orchestrator writes the one-line `TASK_DESCRIPTION` itself.
-- **KB-AP-17** The main thread loads no companion skills except `/release`'s `devflow:git`; `requires:` names only skills actually read.
+- **KB-AP-17** A main thread loads a companion skill only at the step that uses it, never up front: `/release` loads `devflow:git` before its release commit, `/plan` and `/research` load `devflow:docs-framework` at their doc-naming step, `/code-review` and `/resolve` load `devflow:worktree-support` only when more than one worktree is listed; `requires:` names only skills actually read.
 - **KB-AP-18** UserPromptSubmit may not fire for the auto-injected handoff prompt; the charter's fallback bullet covers it.
 - **KB-INV-1** Both ambient hooks are git-gated and share the `DEVFLOW_BG_UPDATER` guard, a bounded pure-bash git check and fail-open `exit 0`.
 - **KB-INV-2** Hook output is byte-fixed; the handoff directive equals `HANDOFF_TEMPLATE` byte for byte, with no dollar sign or unescaped backtick.
@@ -44,6 +44,7 @@ updated: 2026-10-10
 - **KB-INV-12** An audit failure shows nothing and records `E audit-failed`: an unchanged broken state starts no node, a changed root set retries.
 - **KB-INV-13** `json_session_output` with one argument or an empty message keeps every other caller's envelope byte for byte; a message goes in top-level `systemMessage`, beside `hookSpecificOutput`.
 - **KB-INV-14** `auto-compact-window` stays opt-in (`recommended: false`, no default, no `upstreamDefault`), set only through `--set`.
+- **KB-INV-15** The charter's routing ends with a roster-only fallback line (`Anything else: the closest roster agent, never general-purpose.`) that names no model.
 
 ## Overview
 
@@ -68,7 +69,7 @@ The handoff directive tells the model to invoke `devflow:implement` through the 
 A static file read at runtime by `session-start-orchestrator`. It holds:
 
 - the **never-mainline rule** (edits, builds, multi-file reads, codebase orientation and debug loops are delegated) with one bounded-inline exception in a single sentence: one git, gh or script command whose output stays under about 40 lines, never a diff, log or test run;
-- **routing by kind of work, not by model**: Explore (search, listing), Skim (orientation), Code (the prompt opens `OPERATION: <mode>`: `edit` for renames, moves and boilerplate, `issue-fix` for pre-classified review issues, else `implement`), Validate, Git, and Design, Research, Review or Triage (validates review issues against the blast-radius matrix); real-scale work matching a workflow invokes that full skill instead;
+- **routing by kind of work, not by model**: Explore (search, listing), Skim (orientation), Code (the prompt opens `OPERATION: <mode>`: `edit` for renames, moves and boilerplate, `issue-fix` for pre-classified review issues, else `implement`), Validate, Git, and Design, Research, Review or Triage (validates review issues against the blast-radius matrix); real-scale work matching a workflow invokes that full skill instead; and a last line sending anything else to the closest roster agent, never `general-purpose` (D-CHARTER-ROSTER-ONLY: an open-ended "delegate all of it" left the orchestrator improvising a type that inherits the session model and has no roster discipline; `tests/agent-name-guards.test.ts` pins the line and that routing names no model). `Explore` here is devflow's own agent (`src/assets/agents/explore.md`), which replaces the Claude Code built-in of that name (see `installer-shadowing`);
 - what **stays mainline**: conversation, decisions, routing, synthesis of agent reports, answers already in loaded context, one targeted Read to scope a delegation;
 - the **operating rules**: decompose mainline (subagents cannot spawn subagents); self-contained delegations (subagents see none of the conversation, so the prompt carries goal, constraints, session decisions, exact paths and the substance, not a pointer, of any conversation-derived deliverable); a final-report cap of about 1,500 tokens on every direct delegation; independent delegations in parallel, Git sequential; the Feature knowledge rule; and plan handoff.
 
@@ -189,7 +190,7 @@ The system can land in two kinds of partial state, both repaired by `--enable`.
 
 **KB-AP-16.** `/implement` binds its input once as `COMMAND_INPUT`. In the handoff case that is empty, so there is nothing to name the branch from and the Git agent sees none of the conversation; the orchestrator writes a one-line task description itself, from the plan's title or the conversation, and sends it as the `setup-task` `TASK_DESCRIPTION`.
 
-**KB-AP-17.** `/implement`, `/code-review`, `/debug` and `/plan` orchestrate and delegate, so their main threads load no skill; `/release`, whose main thread drives git, loads `devflow:git`. `docs/reference/skill-catalog.md` keeps all five intent rows, "(none)" included, held to the compiled commands both ways by `collectCompanionDrift` (`tests/skill-references.test.ts`), and the closure guard rejects an unread `requires:` entry in `DEVFLOW_PLUGINS`.
+**KB-AP-17.** The commands orchestrate and delegate, so a main-thread skill load is step-scoped and a run that stops earlier never pays for it. `/release`, whose main thread commits, loads `devflow:git` between Phase 6's changelog step and its release commit (D-RELEASE-GIT-LOAD-LATE: `--dry-run` halts after Phase 4 and steps 1-2 only write files; `collectReleaseGitLoadDefects` in `tests/skill-references.test.ts` holds the one companion line there with no git write before it). `/plan` and `/research` load `devflow:docs-framework` at the step that names the design artifact or research directory. `/code-review` and `/resolve` run `git worktree list` and load `devflow:worktree-support` plus its `references/discovery.md` only when it lists more than one worktree (D-WORKTREE-DISCOVERY-GATED, `tests/guards/worktree-support-split.test.ts`); with one, that worktree is the only candidate and the Git agent's pre-flight validates its branch. `/implement`, `/debug` and `/explore` load none. `docs/reference/skill-catalog.md` keeps a row for every intent, "(none)" included, held to the compiled commands both ways by `collectCompanionDrift` (`tests/skill-references.test.ts`), and the closure guard rejects an unread `requires:` entry in `DEVFLOW_PLUGINS`.
 
 ## Key Files
 

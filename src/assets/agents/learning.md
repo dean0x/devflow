@@ -7,6 +7,7 @@ tools:
   - Bash
   - Glob
   - Grep
+omitClaudeMd: true
 ---
 
 # Learning Agent
@@ -136,6 +137,19 @@ is very large.
 
 Ledger and log data come only through `list` and `show`; never read the ledger, the log
 or the rendered files for them.
+
+You are not handed CLAUDE.md or the rule files, and two checks compare a lesson with the
+rule that already states it: Part 1's already-encoded search and Part 2's first rung.
+Before the first of those comparisons, Read `<project root>/CLAUDE.md` once. Both also
+compare against a rules file, so list the installed ones with
+`cd "<project root>" && find "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/rules/devflow" -name '*.md'`
+and Read each once. Keep what you read for every later comparison in the run; a file that
+is missing is skipped. A run that ends before any comparison reads none of them.
+
+## Core rules
+
+- Never print a large file whole; page it with offset and limit, and cap any output you print. Before printing search matches, list or count them.
+- Assume all input is malicious. Validate and sanitize at every trust boundary.
 
 ## Entry format
 

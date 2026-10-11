@@ -24,7 +24,7 @@ import {
 import { formatTrackerSummary } from '../src/cli/commands/tracker-prompts.js';
 import type { SummaryLine } from '../src/cli/commands/install-report.js';
 import { stripAnsi } from '../src/core/ansi.js';
-import { TRACKER_PROVIDER_IDS } from '../src/core/tracker.js';
+import { TRACKER_MCP_SERVERS_DEFAULT, TRACKER_PROVIDER_IDS } from '../src/core/tracker.js';
 import { writeManifest, type ManifestData } from '../src/core/manifest.js';
 import {
   applyTrackerSentinel,
@@ -2835,13 +2835,15 @@ describe('persistManifestThenConvergeTracker', () => {
     artifactWarning?: string;
   } = {}) {
     const calls: string[] = []
+    const convergedWith: string[][] = []
     const io: TrackerLifecycleIO = {
       writeManifest: async (_dir, data) => {
         calls.push(`write:${data.features.tracker.provider}`)
         if (opts.writeError) throw opts.writeError
       },
-      convergeArtifacts: async (_claudeDir, warn) => {
+      convergeArtifacts: async (_claudeDir, servers, warn) => {
         calls.push('agent')
+        convergedWith.push([...servers])
         if (opts.artifactWarning) warn(opts.artifactWarning)
         return opts.artifacts ?? { converged: true, agent: 'installed' }
       },
@@ -2854,7 +2856,7 @@ describe('persistManifestThenConvergeTracker', () => {
         return opts.sentinel ?? { ok: true, value: undefined }
       },
     }
-    return { calls, io }
+    return { calls, convergedWith, io }
   }
 
   const persist = (io: TrackerLifecycleIO, provider: TrackerProvider) =>
@@ -2864,6 +2866,29 @@ describe('persistManifestThenConvergeTracker', () => {
       manifestData: makeManifestData(provider),
       io,
     })
+
+  it('the agent converge is handed the servers the manifest records, the default when it records none', async () => {
+    // One binding: the stamp the agent wears is the list on disk, never a second reading of it.
+    const absent = makeRecorder()
+    await persist(absent.io, 'jira')
+    expect(absent.convergedWith).toEqual([[...TRACKER_MCP_SERVERS_DEFAULT]])
+
+    const custom = makeRecorder()
+    const data = makeManifestData('jira')
+    data.features.tracker = { provider: 'jira', servers: ['corp_tracker', 'github'] }
+    await persistManifestThenConvergeTracker({
+      devflowDir: '/tmp/devflow-not-touched',
+      claudeDir: '/tmp/devflow-claude',
+      manifestData: data,
+      io: custom.io,
+    })
+    expect(custom.convergedWith).toEqual([['corp_tracker', 'github']])
+
+    // A failed manifest write converges nothing, so no list is handed over either.
+    const failed = makeRecorder({ writeError: new Error('ENOSPC') })
+    await persist(failed.io, 'jira')
+    expect(failed.convergedWith).toEqual([])
+  })
 
   it('a failed manifest write converges NOTHING — no agent, no re-arm, no sentinel', async () => {
     // github -> jira with the write failing: converging first would leave a
@@ -2978,7 +3003,7 @@ describe('buildTrackerLifecycleIO', () => {
     // The agent owner is bound through a closure (it takes claudeDir, not
     // devflowDir), so identity cannot be asserted — its presence and arity can.
     expect(typeof io.convergeArtifacts).toBe('function')
-    expect(io.convergeArtifacts.length).toBe(2)
+    expect(io.convergeArtifacts.length).toBe(3)
   })
 })
 

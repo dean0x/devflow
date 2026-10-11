@@ -7,60 +7,58 @@ allowed-tools: Read, Bash, Glob
 
 # Documentation Framework
 
-The canonical source for documentation conventions in Devflow. All agents that persist artifacts must follow these standards.
+The canonical source for what Devflow names under `.devflow/docs/`. A command that writes or looks up a doc path follows it, and the one place a command differs is stated here as an exception, never left implicit.
 
 ## Iron Law
 
 > **ALL ARTIFACTS FOLLOW NAMING CONVENTIONS**
 >
-> Timestamps are `YYYY-MM-DD_HHMM`. Branch slugs replace `/` with `-`. Topic slugs are
-> lowercase alphanumeric with dashes. No exceptions. Inconsistent naming breaks tooling,
-> searching, and automation. Follow the pattern or fix the pattern for everyone.
+> A run directory is `YYYY-MM-DD_HHMM` in local time; a second run in the same minute takes
+> seconds (`YYYY-MM-DD_HHMMSS`). Branch slugs replace `/` with `-`. Topic slugs are lowercase
+> alphanumeric with single dashes, at most 50 characters. The exceptions are the ones listed
+> under Naming Conventions, and no others. Inconsistent naming breaks tooling, searching, and
+> automation. Follow the pattern or fix the pattern for everyone.
 
 ---
 
 ## Directory Structure
 
-All generated documentation lives under `.devflow/docs/` in the project root:
+All generated documentation lives under `.devflow/docs/` at the checkout's toplevel:
 
 ```
 .devflow/docs/
-├── reviews/{branch-slug}/              # Code review reports per branch
-│   ├── .last-review-head              # HEAD SHA of last completed review (for incremental)
-│   ├── {timestamp}/                   # Timestamped review directory (YYYY-MM-DD_HHMM)
-│   │   ├── {focus}.md                 # Review agent report (e.g., security.md, architecture.md)
-│   │   ├── review-summary.md          # Synthesize agent output
-│   │   └── resolution-summary.md      # Written by /resolve (if run)
-│   └── {timestamp}/                   # Second review (incremental)
-│       ├── {focus}.md
-│       └── review-summary.md
-├── bug-analysis/{branch-slug}/          # Bug analysis reports per branch
-│   ├── .last-analysis-head            # HEAD SHA of last analysis (for incremental)
-│   └── {timestamp}/                   # Timestamped analysis directory (YYYY-MM-DD_HHMM)
-│       ├── {focus}.md                 # Analyzer report (e.g., security.md, functional.md)
+├── reviews/{branch-slug}/              # /code-review, per branch
+│   ├── .last-review-head              # HEAD SHA of the last completed review (incremental)
+│   └── {timestamp}/                   # one directory per review
+│       ├── {focus}.md                 # Review agent report (security.md, architecture.md, ...)
+│       ├── review-summary.md          # Synthesize agent output
+│       ├── resolution-summary.md      # /resolve
+│       ├── evidence.md                # /resolve: appended test-plan claims
+│       └── stale-plan.md              # /resolve: stale test-plan lines
+├── bug-analysis/{branch-slug}/         # /bug-analysis, per branch
+│   ├── .last-analysis-head            # HEAD SHA of the last analysis (incremental)
+│   └── {timestamp}/
+│       ├── {focus}.md                 # Diagnose agent report
 │       ├── static-findings.md         # Raw static analysis tool output
 │       ├── bug-analysis-summary.md    # Synthesize agent output
-│       └── resolution-summary.md      # Written by /resolve (if run)
-├── design/                             # Design artifacts from /plan
-│   └── {ISSUE_ID}-{topic-slug}.{timestamp}.md  # Design document
-├── tickets/{slug}/                     # Ticket sets from /dynamic-tickets
-│   └── {YYYY-MM-DD_HHMM}/             # Timestamped ticket directory
-│       ├── {ticket-slug}.md            # Individual ticket files
-│       └── tracking-issue.md           # Tracking issue body (GitHub sync)
-├── waves/{slug}/                       # Wave run reports from /dynamic-build
-│   └── {YYYY-MM-DD_HHMM}/             # Timestamped wave directory
-│       └── wave-report.md              # Wave run summary and status
-├── research/{topic-slug}/              # Research artifacts per topic
-│   └── {YYYY-MM-DD_HHMM}/             # Timestamped research directory
-│       ├── {type}.md                  # Research agent outputs (codebase.md, external.md, etc.)
-│       └── research-summary.md        # Synthesize agent output
-├── status/                             # Development logs
-│   ├── {timestamp}.md
-│   ├── compact/{timestamp}.md
-│   └── INDEX.md
-└── swarm/                              # Swarm operation state
-    ├── state.json
-    └── plans/
+│       └── resolution-summary.md      # /resolve (evidence.md and stale-plan.md as in reviews)
+├── research/{topic-slug}/{timestamp}/  # /research
+│   ├── {type}.md                      # Research agent output (codebase.md, external.md, ...)
+│   └── research-summary.md            # Synthesize agent output
+├── design/
+│   ├── {ISSUE_ID}-{topic-slug}.{timestamp}.md  # /plan, one issue
+│   ├── multi-{topic-slug}.{timestamp}.md       # /plan, several issues (frontmatter issue: pending)
+│   ├── {topic-slug}.{timestamp}.md             # /plan, no issue
+│   └── {slug}/{timestamp}/            # /dynamic-plan run
+│       ├── {ticket-slug}-plan.md      # one plan per ticket
+│       └── DECISIONS-NEEDED.md
+├── tickets/{slug}/{timestamp}/         # /dynamic-tickets
+│   ├── {ticket-slug}.md
+│   └── tracking-issue.md
+├── waves/{slug}/{timestamp}/wave-report.md   # /dynamic-build
+├── handoff-{branch-slug}.md            # Code agent phase handoff; deleted once the PR exists
+├── evidence-{branch-slug}.md           # /implement test plan and claims; stays after the PR
+└── evidence-wave-{slug}.md             # /dynamic-build wave test plan and claims
 
 .devflow/memory/
 ├── WORKING-MEMORY.md                   # Auto-maintained by Stop hook (overwritten)
@@ -71,47 +69,56 @@ All generated documentation lives under `.devflow/docs/` in the project root:
 └── pitfalls.md                         # Known pitfalls (PF-NNN format)
 ```
 
-`{ISSUE_ID}` in the `design/` path is the filesystem-safe issue identifier the Git agent emits as `- **Issue ID**:` under `### Handoff Values`.
+`{ISSUE_ID}` is the filesystem-safe issue identifier the Git agent emits as `- **Issue ID**:` under `### Handoff Values`. A multi-issue batch fetch returns none, which is why that variant is named `multi-`.
 
 ---
 
 ## Naming Conventions
 
 ### Timestamps
-Format: `YYYY-MM-DD_HHMM` (sortable, readable)
+
+`YYYY-MM-DD_HHMM`, local time (sortable, readable), computed once per run and reused for every path of that run:
 ```bash
 TIMESTAMP=$(date +%Y-%m-%d_%H%M)  # Example: 2025-12-26_1430
 ```
+- **Same-minute collision.** `/code-review`, `/bug-analysis` and `/research` create their run directory themselves: when it already exists, the second run appends seconds (`2025-12-26_143005`). It sorts after its minute, so newest-first listings stay correct.
+- **Workflow runs** (`tickets/`, `design/{slug}/`, `waves/`) are stamped in local time by the workflow that creates them and take no collision suffix: a second run in the same minute writes into the first's directory.
+- A design document's timestamp is the suffix before `.md`, so a listing sorts by that suffix, not by the leading `{ISSUE_ID}`.
 
 ### Branch Slugs
-Replace `/` with `-`, sanitize special characters:
+
+The branch name with every `/` replaced by `-`; case, dots and underscores are kept. A detached HEAD has no name and uses `standalone`:
 ```bash
-BRANCH_SLUG=$(git branch --show-current 2>/dev/null | sed 's/\//-/g' || echo "standalone")
+BRANCH_SLUG=$(b=$(git branch --show-current 2>/dev/null); echo "${b:-standalone}" | sed 's/\//-/g')
 ```
+A slug builds a path or reaches a shell only when it matches `^[A-Za-z0-9._-]{1,200}$`. Every command derives `{branch_slug}` (the underscore spelling in `handoff-*` and `evidence-*`) this way, from the branch the work is on.
 
 ### Topic Slugs
-Lowercase, dashes, alphanumeric only, max 50 chars:
+
+One rule for every topic and initiative `{slug}`: lowercase; each run of characters outside `a-z0-9` becomes one `-`; leading and trailing `-` are trimmed; at most 50 characters (trim again after the cut); `untitled` when nothing is left:
 ```bash
-TOPIC_SLUG=$(echo "$TOPIC" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^a-z0-9-]//g' | cut -c1-50)
+TOPIC_SLUG=$(s=$(echo "$TOPIC" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' | cut -c1-50 | sed -E 's/-+$//'); echo "${s:-untitled}")
 ```
+`/plan` and `/research` take `{topic-slug}` from it. `/dynamic-tickets` uses it for the initiative `{slug}`, and `/dynamic-plan` reuses the `{slug}` of the ticket set it plans (`wave` for any other source).
+
+### Exceptions
+
+- **`{ticket-slug}`** (`tickets/…/{ticket-slug}.md`, `design/…/{ticket-slug}-plan.md`): the ticket title lowercased with each run outside `a-z0-9` as one `-`, nothing trimmed and no length cap. `/dynamic-tickets` matches a ticket file by this name when it amends the ticket, so trimming would rename a file its own amend phase already wrote.
+- **Wave `{slug}`** (`waves/`, `evidence-wave-{slug}.md`): the part of the integration branch after `wave/`, at most 60 characters, not derived by the topic rule. It makes `evidence-wave-{slug}.md` the `evidence-{branch-slug}.md` of the branch `wave/{slug}`.
 
 ### File Naming Patterns
 
 | Type | Pattern | Example |
 |------|---------|---------|
 | Special indexes | `UPPERCASE.md` | `WORKING-MEMORY.md`, `INDEX.md` |
-| Review reports | `{focus}.md` in timestamped dir | `2025-12-26_1430/security.md` |
-| Review summary | `review-summary.md` in timestamped dir | `2025-12-26_1430/review-summary.md` |
-| Resolution summary | `resolution-summary.md` in timestamped dir | `2025-12-26_1430/resolution-summary.md` |
-| Review head marker | `.last-review-head` | Plain text file with SHA |
+| Reports and summaries | `{focus}.md`, `review-summary.md`, `bug-analysis-summary.md`, `research-summary.md`, `static-findings.md`, `resolution-summary.md` in the run directory | `2025-12-26_1430/security.md` |
+| Head markers | `.last-review-head`, `.last-analysis-head` | Plain text file with SHA |
 | Status logs | `{timestamp}.md` | `2025-12-26_1430.md` |
 | Design documents | `{ISSUE_ID}-{topic-slug}.{timestamp}.md` | `42-jwt-auth.2026-04-07_1430.md` |
-| Research outputs | `{type}.md` in timestamped dir | `2025-12-26_1430/codebase.md` |
-| Research summary | `research-summary.md` in timestamped dir | `2025-12-26_1430/research-summary.md` |
-| Bug analysis reports | `{focus}.md` in timestamped dir | `2025-12-26_1430/security.md` |
-| Bug analysis summary | `bug-analysis-summary.md` in timestamped dir | `2025-12-26_1430/bug-analysis-summary.md` |
-| Static findings | `static-findings.md` in timestamped dir | `2025-12-26_1430/static-findings.md` |
-| Analysis head marker | `.last-analysis-head` | Plain text file with SHA |
+| Design (several issues) | `multi-{topic-slug}.{timestamp}.md` | `multi-jwt-auth.2026-04-07_1430.md` |
+| Design (no issue) | `{topic-slug}.{timestamp}.md` | `jwt-auth.2026-04-07_1430.md` |
+| Per-ticket plan | `{ticket-slug}-plan.md` in `design/{slug}/{timestamp}/` | `design/wave/2026-04-07_1430/add-login-plan.md` |
+| Handoff, evidence | `handoff-{branch-slug}.md`, `evidence-{branch-slug}.md`, `evidence-wave-{slug}.md` | `evidence-feat-jwt-auth.md` |
 
 ---
 
@@ -121,8 +128,9 @@ Define these inline, in the Bash call that needs them, for consistent naming. `.
 
 ```bash
 get_timestamp() { date +%Y-%m-%d_%H%M; }
-get_branch_slug() { git branch --show-current 2>/dev/null | sed 's/\//-/g' || echo "standalone"; }
-get_topic_slug() { echo "$1" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^a-z0-9-]//g' | cut -c1-50; }
+get_run_stamp() { local t; t=$(get_timestamp); [ -e "$1/$t" ] && t=$(date +%Y-%m-%d_%H%M%S); echo "$t"; }  # $1: parent of the run directory
+get_branch_slug() { local b; b=$(git branch --show-current 2>/dev/null); echo "${b:-standalone}" | sed 's/\//-/g'; }
+get_topic_slug() { local s; s=$(echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' | cut -c1-50 | sed -E 's/-+$//'); echo "${s:-untitled}"; }
 get_docs_root() { git rev-parse --show-toplevel 2>/dev/null || pwd; }
 ensure_docs_dir() { mkdir -p "$(get_docs_root)/.devflow/docs/$1"; }
 ```
@@ -131,38 +139,29 @@ ensure_docs_dir() { mkdir -p "$(get_docs_root)/.devflow/docs/$1"; }
 
 ## Agent Persistence Rules
 
-### Agents That Persist Artifacts
+### Who Writes What
 
-| Agent | Output Location | Behavior |
-|-------|-----------------|----------|
-| Review agent | `.devflow/docs/reviews/{branch-slug}/{timestamp}/{focus}.md` | Creates new in timestamped dir |
-| Synthesize agent (review) | `.devflow/docs/reviews/{branch-slug}/{timestamp}/review-summary.md` | Creates new in timestamped dir |
-| Resolve cmd | `.devflow/docs/reviews/{branch-slug}/{timestamp}/resolution-summary.md` | Written by /resolve orchestrator (Phase 5) |
-| Code-review cmd | `.devflow/docs/reviews/{branch-slug}/.last-review-head` | Overwrites with HEAD SHA |
-| Working Memory | `.devflow/memory/WORKING-MEMORY.md` | Overwrites (auto-maintained by Stop hook) |
-| Decisions | `.devflow/learning/decisions.md` | Rendered from `decisions-ledger.jsonl` (active ADR-NNN entries in full; inactive ones listed in its Inactive table) |
-| Pitfalls | `.devflow/learning/pitfalls.md` | Rendered from `decisions-ledger.jsonl` (active PF-NNN entries in full; inactive ones listed in its Inactive table) |
-| Design agent (via /plan) | `.devflow/docs/design/{ISSUE_ID}-{topic-slug}.{timestamp}.md` | Creates new design artifact |
-| Research agent | `.devflow/docs/research/{topic-slug}/{timestamp}/{type}.md` | Creates new in timestamped dir |
-| Synthesize agent (research) | `.devflow/docs/research/{topic-slug}/{timestamp}/research-summary.md` | Creates new in timestamped dir |
-| Diagnose agent | `.devflow/docs/bug-analysis/{branch-slug}/{timestamp}/{focus}.md` | Creates new in timestamped dir |
-| Synthesize agent (bug-analysis) | `.devflow/docs/bug-analysis/{branch-slug}/{timestamp}/bug-analysis-summary.md` | Creates new in timestamped dir |
-| Bug-analysis cmd | `.devflow/docs/bug-analysis/{branch-slug}/.last-analysis-head` | Overwrites with HEAD SHA |
+- **Reviews**: the Review agents and the Synthesize agent (review mode) write into `reviews/{branch-slug}/{timestamp}/`; `/resolve` adds `resolution-summary.md` (Phase 5); `/code-review` overwrites `.last-review-head` with the HEAD SHA.
+- **Bug analysis**: the Diagnose agents and the Synthesize agent (bug-analysis mode) write into `bug-analysis/{branch-slug}/{timestamp}/`; `/bug-analysis` overwrites `.last-analysis-head` with the HEAD SHA.
+- **Research**: the Research agents write `{type}.md`, and the Synthesize agent (research mode) writes `research-summary.md` through `RESEARCH_BASE_DIR`, both into `research/{topic-slug}/{timestamp}/`.
+- **Design**: `/plan` writes the design document; `/dynamic-plan` writes `design/{slug}/{timestamp}/`, `/dynamic-tickets` `tickets/{slug}/{timestamp}/`, `/dynamic-build` `waves/{slug}/{timestamp}/` and `evidence-wave-{slug}.md`.
+- **Handoff and evidence**: `/implement` writes `evidence-{branch-slug}.md`, which stays after the PR, and the handoff file, to which each Code agent appends one phase section and which is deleted once the PR exists.
+- **Memory and learning**: the Stop hook overwrites `.devflow/memory/WORKING-MEMORY.md`; `decisions.md` and `pitfalls.md` are rendered from `decisions-ledger.jsonl` (active entries in full, inactive ones in an Inactive table).
 
 ### Agents That Don't Persist
 
 - Git (fetch-issue: read-only, post-review-summary: consolidated review comment only)
-- Code agent (commits to git, no .devflow/docs/ output)
+- Code agent (commits to git; its only file is the handoff section it appends when `HANDOFF_FILE` is given)
 
 ---
 
 ## Implementation Checklist
 
-When creating or modifying persisting agents:
+When creating or modifying persisting agents or commands:
 
-- [ ] Use standard timestamp format (`YYYY-MM-DD_HHMM`)
-- [ ] Sanitize branch names (replace `/` with `-`)
-- [ ] Sanitize topic names (lowercase, dashes, alphanumeric)
+- [ ] Use the run-directory timestamp (`YYYY-MM-DD_HHMM`, local time, seconds on a same-minute collision)
+- [ ] Derive the branch slug (replace `/` with `-`) and gate it before it builds a path
+- [ ] Derive topic slugs with the one rule (lowercase, single dashes, at most 50)
 - [ ] Create directory with `mkdir -p .devflow/docs/{subdir}`
 - [ ] Document output location in agent's final message
 - [ ] Follow special file naming (UPPERCASE for indexes)
@@ -174,12 +173,10 @@ When creating or modifying persisting agents:
 ## Integration
 
 This framework is used by:
-- **Review agents**: Creates review reports
-- **Bug analysis agents**: Creates bug analysis reports
+- **`/plan` and `/research`**: load it at the step that names the document, and build the path by its rules
+- **Commands that hand paths to agents** (`/code-review`, `/bug-analysis`, `/implement`, `/resolve`, the `/dynamic-*` commands): follow it, with the exceptions above
 - **Working Memory hooks**: Auto-maintains `.devflow/memory/WORKING-MEMORY.md`
 - **Learning agent**: background LLM agent (spawned via the session-start directive) promotes observations to ADRs/PFs via `assign-anchor`, which renders `decisions.md` / `pitfalls.md`
-
-All persisting agents should load this skill to ensure consistent documentation.
 
 ---
 

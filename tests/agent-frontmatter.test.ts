@@ -13,9 +13,13 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  rewriteAgentFrontmatter,
-  readFrontmatterModel,
+  carryStampedTools,
+  isWholeServerTool,
   readFrontmatterEffort,
+  readFrontmatterModel,
+  readStampedTools,
+  rewriteAgentFrontmatter,
+  stampAgentTools,
 } from '../src/core/agent-frontmatter.js';
 import { resolveAgentSource, resolveAllAgents } from './helpers.js';
 import { getAllAgentNames } from '../src/core/plugins.js';
@@ -532,5 +536,146 @@ describe('rewriteAgentFrontmatter — effort removal edge cases (REL-4/TS-2)', (
     expect(result.value.content).not.toMatch(/^effort:/m);
     // The intentional blank line inside the description value must be preserved
     expect(result.value.content).toContain('  line one\n\n  line two');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// stampAgentTools — whole-server entries on the inline tools line
+// ---------------------------------------------------------------------------
+
+describe('stampAgentTools', () => {
+  const source = [
+    '---',
+    'name: Git',
+    'description: seeded',
+    'model: haiku',
+    'effort: medium',
+    'tools: ["Bash", "Read", "Write", "ToolSearch"]',
+    'skills:',
+    '  - devflow:git',
+    'omitClaudeMd: true',
+    '---',
+    '',
+    '# Body',
+    'tools: ["Body", "Line"]',
+    '',
+  ].join('\n');
+
+  const stamp = (content: string, tools: string[]): string => {
+    const result = stampAgentTools(content, tools);
+    if (!result.ok) throw new Error(`stamp failed: ${result.error}`);
+    return result.value.content;
+  };
+
+  it('appends the whole-server entries to the tools line and changes nothing else', () => {
+    const out = stamp(source, ['mcp__github', 'mcp__claude_ai_Linear']);
+    expect(out).toBe(source.replace(
+      'tools: ["Bash", "Read", "Write", "ToolSearch"]',
+      'tools: ["Bash", "Read", "Write", "ToolSearch", "mcp__github", "mcp__claude_ai_Linear"]',
+    ));
+    expect(out).toContain('tools: ["Body", "Line"]');
+  });
+
+  it('is idempotent: stamping the same list again moves no byte and reports unchanged', () => {
+    const once = stamp(source, ['mcp__github', 'mcp__linear']);
+    const again = stampAgentTools(once, ['mcp__github', 'mcp__linear']);
+    expect(again.ok && again.value.content).toBe(once);
+    expect(again.ok && again.value.changed).toBe(false);
+  });
+
+  it('replaces the previous stamp instead of adding to it, and an empty list removes it', () => {
+    const first = stamp(source, ['mcp__github', 'mcp__linear']);
+    const second = stamp(first, ['mcp__x']);
+    expect(second).toBe(stamp(source, ['mcp__x']));
+    expect(second).not.toContain('mcp__github');
+    expect(stamp(second, [])).toBe(source);
+  });
+
+  it('keeps a non-whole-server mcp__ tool entry, which is a different kind of entry', () => {
+    const withTool = source.replace('"Bash"', '"Bash", "mcp__srv__some_tool"');
+    const out = stamp(withTool, ['mcp__github']);
+    expect(out).toContain('"mcp__srv__some_tool"');
+    expect(out).toContain('"mcp__github"');
+    expect(stamp(out, [])).toBe(withTool);
+  });
+
+  it('drops a duplicate entry in the list it is given', () => {
+    expect(stamp(source, ['mcp__a', 'mcp__a'])).toContain('"ToolSearch", "mcp__a"]');
+    expect(stamp(source, ['mcp__a', 'mcp__a']).match(/mcp__a/g)).toHaveLength(1);
+  });
+
+  it('preserves CRLF line endings byte for byte', () => {
+    const crlf = source.replace(/\n/g, '\r\n');
+    const out = stamp(crlf, ['mcp__github']);
+    expect(out).toBe(crlf.replace('"ToolSearch"]', '"ToolSearch", "mcp__github"]'));
+    expect(out.replace(/\r\n/g, '').includes('\n')).toBe(false);
+    expect(stamp(out, [])).toBe(crlf);
+  });
+
+  it('writes into an empty tools line', () => {
+    const empty = source.replace('tools: ["Bash", "Read", "Write", "ToolSearch"]', 'tools: []');
+    expect(stamp(empty, ['mcp__a', 'mcp__b'])).toContain('tools: ["mcp__a", "mcp__b"]');
+  });
+
+  it('rejects a free-text or malformed entry instead of repairing it', () => {
+    for (const bad of ['mcp__', 'mcp__a__b', 'mcp__a b', 'mcp__a"]\nmodel: x', 'Bash', 'mcp__' + 'x'.repeat(65), '', 'mcp__a,b']) {
+      const result = stampAgentTools(source, [bad]);
+      expect(result.ok, bad).toBe(false);
+      if (!result.ok) expect(result.error).toBe('invalid-tool');
+    }
+  });
+
+  it('refuses a file with no inline tools line, a block-list tools key or no frontmatter', () => {
+    const blockList = source.replace('tools: ["Bash", "Read", "Write", "ToolSearch"]', 'tools:\n  - Bash');
+    const noTools = source.replace(/tools: \[[^\n]*\]\n/, '');
+    expect(stampAgentTools(blockList, ['mcp__a'])).toEqual({ ok: false, error: 'no-tools-line' });
+    expect(stampAgentTools(noTools, ['mcp__a'])).toEqual({ ok: false, error: 'no-tools-line' });
+    expect(stampAgentTools('# no frontmatter\ntools: ["A"]\n', ['mcp__a'])).toEqual({ ok: false, error: 'no-frontmatter' });
+    expect(stampAgentTools('---\ntools: ["A"]\n', ['mcp__a'])).toEqual({ ok: false, error: 'unterminated-frontmatter' });
+  });
+
+  it('does not touch a tools: line in the body, and the rewriter keeps the stamp when it reapplies a mapping', () => {
+    const out = stamp(source, ['mcp__github']);
+    expect(out.split('\n').filter(line => line.startsWith('tools:'))).toHaveLength(2);
+    const rewritten = rewriteAgentFrontmatter(out, { model: 'sonnet', effort: 'high' });
+    expect(rewritten.ok && rewritten.value.content).toContain('tools: ["Bash", "Read", "Write", "ToolSearch", "mcp__github"]');
+  });
+});
+
+describe('isWholeServerTool', () => {
+  it('admits mcp__<server> and refuses a tool entry, a wildcard and a bad charset', () => {
+    for (const ok of ['mcp__github', 'mcp__claude_ai_Atlassian', 'mcp__a-b', 'mcp__' + 'x'.repeat(64)]) {
+      expect(isWholeServerTool(ok), ok).toBe(true);
+    }
+    for (const bad of ['mcp__', 'mcp__*', 'mcp__a__b', 'mcp__a.b', 'Bash', 'mcp_github', 'mcp__' + 'x'.repeat(65)]) {
+      expect(isWholeServerTool(bad), bad).toBe(false);
+    }
+  });
+});
+
+describe('readStampedTools and carryStampedTools', () => {
+  const installed = [
+    '---', 'name: Git', 'model: haiku', 'tools: ["Bash", "Read", "mcp__github", "mcp__linear"]', '---', '', 'variant A', '',
+  ].join('\n');
+  const variant = [
+    '---', 'name: Git', 'model: haiku', 'tools: ["Bash", "Read"]', '---', '', 'variant B', '',
+  ].join('\n');
+
+  it('reads the stamped entries in order', () => {
+    expect(readStampedTools(installed)).toEqual({ ok: true, value: ['mcp__github', 'mcp__linear'] });
+    expect(readStampedTools(variant)).toEqual({ ok: true, value: [] });
+    expect(readStampedTools('no frontmatter')).toEqual({ ok: false, error: 'no-frontmatter' });
+  });
+
+  it('carries the installed stamp onto a variant, so a variant switch keeps it and a repeat is byte-equal', () => {
+    const carried = carryStampedTools(variant, installed);
+    expect(carried).toBe(variant.replace('"Read"]', '"Read", "mcp__github", "mcp__linear"]'));
+    expect(carryStampedTools(carried, carried)).toBe(carried);
+  });
+
+  it('returns the source unchanged when there is nothing safe to carry', () => {
+    expect(carryStampedTools(variant, variant)).toBe(variant);
+    expect(carryStampedTools(variant, 'not an agent file')).toBe(variant);
+    expect(carryStampedTools('not an agent file', installed)).toBe('not an agent file');
   });
 });

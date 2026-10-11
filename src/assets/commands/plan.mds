@@ -159,7 +159,7 @@ Pass `FEATURE_KNOWLEDGE` to Explore and Design agents.
 **Produces:** EXPLORE_OUTPUTS
 **Requires:** SKIM_CONTEXT
 
-Spawn 4 Explore agents **in a single message**, each with Skim agent context and `FEATURE_KNOWLEDGE: {feature_knowledge}` (from Phase 2). Include the instruction: "The FEATURE_KNOWLEDGE is a baseline — VALIDATE, EXTEND, and CORRECT it. For anything it already covers, cite its KB IDs (`{slug} KB-AP-n`) instead of restating the text. Focus on areas the feature knowledge doesn't cover and changes since it was last updated." Ask each agent for a final report of at most about 1,500 tokens: findings with file:line references, not file dumps.
+Spawn 4 `Agent(subagent_type="Explore")` agents **in a single message**, each with Skim agent context and `FEATURE_KNOWLEDGE: {feature_knowledge}` (from Phase 2). Include the instruction: "The FEATURE_KNOWLEDGE is a baseline — VALIDATE, EXTEND, and CORRECT it. For anything it already covers, cite its KB IDs (`{slug} KB-AP-n`) instead of restating the text. Focus on areas the feature knowledge doesn't cover and changes since it was last updated." Ask each agent for a final report of at most about 1,500 tokens: findings with file:line references, not file dumps.
 
 | Focus | Thoroughness | Find |
 |-------|-------------|------|
@@ -300,7 +300,7 @@ User can:
 **Produces:** IMPL_EXPLORE_OUTPUTS
 **Requires:** SKIM_CONTEXT, ACCEPTED_SCOPE
 
-Spawn 4 Explore agents **in a single message**, each with Skim agent context + accepted scope. Ask each agent for a final report of at most about 1,500 tokens: findings with file:line references, not file dumps.
+Spawn 4 `Agent(subagent_type="Explore")` agents **in a single message**, each with Skim agent context + accepted scope. Ask each agent for a final report of at most about 1,500 tokens: findings with file:line references, not file dumps.
 
 | Focus | Thoroughness | Find |
 |-------|-------------|------|
@@ -419,8 +419,10 @@ User can:
 
 **Store design artifact:**
 
-**Pre-compute the artifact path** from the slug (it never changes after this):
-- If one issue: `{worktree}/.devflow/docs/design/{ISSUE_ID}-{topic-slug}.{YYYY-MM-DD_HHMM}.md` (the `docs-framework` skill's design-document pattern, e.g. `42-jwt-auth.2026-04-07_1430.md`)
+**Load `devflow:docs-framework`** — Load via Skill tool: `devflow:docs-framework`, here and not earlier, so a run that stops before this phase never pays for it. If it fails to load, continue with the paths below.
+
+**Pre-compute the artifact path** (it never changes after this) by the skill's rules: `{topic-slug}` is its topic slug of the feature title, the same value as the artifact's `slug:` frontmatter, and `{YYYY-MM-DD_HHMM}` is the local time, computed once:
+- If one issue: `{worktree}/.devflow/docs/design/{ISSUE_ID}-{topic-slug}.{YYYY-MM-DD_HHMM}.md` (e.g. `42-jwt-auth.2026-04-07_1430.md`)
 - If multi-issue: `{worktree}/.devflow/docs/design/multi-{topic-slug}.{YYYY-MM-DD_HHMM}.md`, frontmatter `issue: pending` — a batch fetch returns no issue ID to name it by
 - If no issue: `{worktree}/.devflow/docs/design/{topic-slug}.{YYYY-MM-DD_HHMM}.md`
 

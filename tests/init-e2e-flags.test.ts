@@ -626,6 +626,91 @@ describe('init e2e — suppress-attribution convergence (D27, production path)',
   }, SUBPROCESS_TIMEOUT_MS);
 });
 
+// ── subagent-cache-5m: default ON, never over a user's own value (AC-201, AC-203) ──
+
+describe('init e2e — subagent-cache-5m (D-SUBAGENT-CACHE-5M, D-ADOPT-RESPECTS-USER)', () => {
+  const KEY = 'subagentPromptCacheTtl';
+
+  async function initOver(
+    settings: Record<string, unknown>,
+    flags: Record<string, unknown> | null,
+    extraArgs: string[] = [],
+  ) {
+    await fs.writeFile(
+      path.join(tmpHome, '.claude', 'settings.json'),
+      JSON.stringify(settings, null, 2) + '\n',
+    );
+    if (flags !== null) {
+      await fs.writeFile(
+        path.join(tmpHome, '.devflow', 'manifest.json'),
+        JSON.stringify(manifestWithFlags(flags), null, 2) + '\n',
+      );
+    }
+    const result = runInit(tmpHome, extraArgs);
+    expect(result.status, `init failed:\nstdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(0);
+    // Non-vacuity gate: init swallows settings-pass failures with a warning and exits 0.
+    expect(result.stdout + result.stderr).not.toContain('Could not configure settings.json');
+    return {
+      settings: await readSettings(tmpHome),
+      flags: (await readManifest(tmpHome)).features.flags as Record<string, unknown>,
+    };
+  }
+
+  it('fresh init writes "5m" beside the 1h prompt-caching env var (AC-201)', async () => {
+    const out = await initOver({ env: { CUSTOM_USER_VAR: 'preserved' } }, null);
+
+    expect(out.settings[KEY]).toBe('5m');
+    const env = out.settings.env as Record<string, unknown>;
+    expect(env.ENABLE_PROMPT_CACHING_1H).toBe('true');
+    expect(env.CUSTOM_USER_VAR).toBe('preserved');
+    expect(out.flags['subagent-cache-5m']).toBe(true);
+    expect(out.flags['prompt-caching-1h']).toBe(true);
+  }, SUBPROCESS_TIMEOUT_MS);
+
+  it('re-init over a user "1h" keeps it and records the flag off (AC-203)', async () => {
+    // A manifest from before the flag existed: the id is absent, so init would adopt
+    // the default ON - and overwrite the user's value - without the seeding rule.
+    const out = await initOver({ [KEY]: '1h', env: { CUSTOM_USER_VAR: 'preserved' } }, { tui: true });
+
+    expect(out.settings[KEY]).toBe('1h');
+    expect(out.flags['subagent-cache-5m']).toBe(false);
+    // Non-vacuity: the settings pass ran over this file (managed 1h env var written).
+    expect((out.settings.env as Record<string, unknown>).ENABLE_PROMPT_CACHING_1H).toBe('true');
+  }, SUBPROCESS_TIMEOUT_MS);
+
+  it('a second init over the kept "1h" is stable (the off record sticks)', async () => {
+    await initOver({ [KEY]: '1h' }, { tui: true });
+    const again = runInit(tmpHome);
+    expect(again.status, `re-init failed:\n${again.stdout}\n${again.stderr}`).toBe(0);
+
+    expect((await readSettings(tmpHome))[KEY]).toBe('1h');
+    expect(((await readManifest(tmpHome)).features.flags as Record<string, unknown>)['subagent-cache-5m']).toBe(false);
+  }, SUBPROCESS_TIMEOUT_MS);
+
+  it('--reset overwrites a user "1h" with "5m" (factory reset, documented)', async () => {
+    const out = await initOver({ [KEY]: '1h' }, { tui: true }, ['--reset']);
+
+    expect(out.settings[KEY]).toBe('5m');
+    expect(out.flags['subagent-cache-5m']).toBe(true);
+  }, SUBPROCESS_TIMEOUT_MS);
+
+  it('a prior "5m" with the flag unrecorded is adopted ON and kept', async () => {
+    const out = await initOver({ [KEY]: '5m' }, { tui: true });
+
+    expect(out.settings[KEY]).toBe('5m');
+    expect(out.flags['subagent-cache-5m']).toBe(true);
+  }, SUBPROCESS_TIMEOUT_MS);
+
+  it('a recorded off flag deletes a devflow "5m" and keeps a user "1h"', async () => {
+    const dropsManaged = await initOver({ [KEY]: '5m' }, { 'subagent-cache-5m': false });
+    expect(dropsManaged.settings).not.toHaveProperty(KEY);
+    expect(dropsManaged.flags['subagent-cache-5m']).toBe(false);
+
+    const keepsUser = await initOver({ [KEY]: '1h' }, { 'subagent-cache-5m': false });
+    expect(keepsUser.settings[KEY]).toBe('1h');
+  }, SUBPROCESS_TIMEOUT_MS);
+});
+
 // ── One home: --scope retired, CLAUDE_CONFIG_DIR honoured, DEVFLOW_DIR ignored ──
 //
 // #389 (D-SCOPE-RETIRED, D-CLAUDE-CONFIG-DIR, D-ONE-HOME). Each init spawn is ~0.5 s;

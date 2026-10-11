@@ -19,11 +19,8 @@ Correct patterns for Devflow documentation artifacts with templates and helper f
 │   └── {timestamp}/                # Incremental review
 │       └── ...
 ├── design/                         # Implementation plans
-│   └── {topic-slug}.{timestamp}.md
-├── status/                         # Development logs
-│   ├── {timestamp}.md
-│   ├── compact/{timestamp}.md
-│   └── INDEX.md
+│   ├── {ISSUE_ID}-{topic-slug}.{timestamp}.md   # /plan (multi-{topic-slug} / {topic-slug} without an issue)
+│   └── {slug}/{timestamp}/         # /dynamic-plan: {ticket-slug}-plan.md, DECISIONS-NEEDED.md
 └── CATCH_UP.md                     # Latest summary (overwritten)
 ```
 
@@ -32,8 +29,6 @@ Correct patterns for Devflow documentation artifacts with templates and helper f
 **Minimal (new project):**
 ```
 .devflow/docs/
-├── status/
-│   └── INDEX.md
 └── CATCH_UP.md
 ```
 
@@ -51,9 +46,6 @@ Correct patterns for Devflow documentation artifacts with templates and helper f
 │       ├── regression.md
 │       ├── tests.md
 │       └── review-summary.md
-├── status/
-│   ├── 2025-01-05_1430.md
-│   └── INDEX.md
 └── CATCH_UP.md
 ```
 
@@ -71,8 +63,6 @@ Correct patterns for Devflow documentation artifacts with templates and helper f
 │       ├── security.md
 │       ├── ...
 │       └── review-summary.md
-├── status/
-│   └── INDEX.md
 └── CATCH_UP.md
 ```
 
@@ -89,7 +79,7 @@ Format: `YYYY-MM-DD_HHMM` (sortable, readable)
 TIMESTAMP=$(date +%Y-%m-%d_%H%M)
 # Output: 2025-01-05_1430
 
-# With seconds (only if needed for uniqueness)
+# With seconds (a run directory that already exists: a second run in the same minute)
 TIMESTAMP_SEC=$(date +%Y-%m-%d_%H%M%S)
 # Output: 2025-01-05_143025
 ```
@@ -99,7 +89,7 @@ TIMESTAMP_SEC=$(date +%Y-%m-%d_%H%M%S)
 Replace `/` with `-`, provide fallback for detached HEAD.
 
 ```bash
-BRANCH_SLUG=$(git branch --show-current 2>/dev/null | sed 's/\//-/g' || echo "standalone")
+BRANCH_SLUG=$(b=$(git branch --show-current 2>/dev/null); echo "${b:-standalone}" | sed 's/\//-/g')
 
 # Examples:
 # feature/auth          -> feature-auth
@@ -111,15 +101,15 @@ BRANCH_SLUG=$(git branch --show-current 2>/dev/null | sed 's/\//-/g' || echo "st
 
 ### Topic Slugs
 
-Lowercase, dashes, alphanumeric only, max 50 chars.
+Lowercase, each run of characters outside `a-z0-9` becomes one dash, no leading or trailing dash, max 50 chars, `untitled` when nothing is left.
 
 ```bash
-TOPIC_SLUG=$(echo "$TOPIC" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^a-z0-9-]//g' | cut -c1-50)
+TOPIC_SLUG=$(s=$(echo "$TOPIC" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' | cut -c1-50 | sed -E 's/-+$//'); echo "${s:-untitled}")
 
 # Examples:
 # "JWT Authentication"       -> jwt-authentication
 # "Fix User Login Bug"       -> fix-user-login-bug
-# "OAuth 2.0 Integration"    -> oauth-20-integration
+# "OAuth 2.0 Integration"    -> oauth-2-0-integration
 # "Database Migration v2"    -> database-migration-v2
 ```
 
@@ -171,12 +161,11 @@ get_branch_slug() {
 
 # Convert topic to slug format
 get_topic_slug() {
-    local topic="$1"
-    echo "$topic" | \
-        tr '[:upper:]' '[:lower:]' | \
-        tr ' ' '-' | \
-        sed 's/[^a-z0-9-]//g' | \
-        cut -c1-50
+    local slug
+    slug=$(echo "$1" | tr '[:upper:]' '[:lower:]' | \
+        sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' | \
+        cut -c1-50 | sed -E 's/-+$//')
+    echo "${slug:-untitled}"
 }
 
 # The checkout's toplevel, else the working directory outside git
@@ -351,11 +340,11 @@ get_branch_slug  # Returns: standalone
 
 ### Special Characters in Topics
 
-All special characters stripped:
+Every run of special characters becomes one dash:
 
 ```bash
 get_topic_slug "Bug: User can't login (v2.0)"
-# Returns: bug-user-cant-login-v20
+# Returns: bug-user-can-t-login-v2-0
 ```
 
 ### Long Topic Names

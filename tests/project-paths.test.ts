@@ -40,7 +40,6 @@ import {
   getReviewsDir,
   getDesignDir,
   getResearchDir,
-  getHandoffPath,
 } from '../src/core/project-paths.js';
 import * as tsPathsNs from '../src/core/project-paths.js';
 
@@ -155,10 +154,6 @@ describe('project-paths TypeScript module', () => {
     it('getResearchDir returns .devflow/docs/research/', () => {
       expect(getResearchDir(ROOT)).toBe('/some/project/.devflow/docs/research');
     });
-
-    it('getHandoffPath returns .devflow/docs/handoff-{branchSlug}.md', () => {
-      expect(getHandoffPath(ROOT, 'feat-my-feature')).toBe('/some/project/.devflow/docs/handoff-feat-my-feature.md');
-    });
   });
 
   describe('path normalisation', () => {
@@ -217,10 +212,6 @@ describe('CJS project-paths parity', () => {
       expect(cjs(ROOT)).toBe(ts(ROOT));
     });
   }
-
-  it('getHandoffPath — TypeScript and CJS agree', () => {
-    expect(cjsPaths.getHandoffPath(ROOT, 'feat-branch')).toBe(getHandoffPath(ROOT, 'feat-branch'));
-  });
 
   // TS/CJS parity: getLearningDir and getFeatureConfigPath return the correct paths
   it('getLearningDir returns .devflow/learning/ in both TS and CJS', () => {

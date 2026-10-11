@@ -1315,14 +1315,15 @@ describe('git agent — static content guards', () => {
     // scan was simultaneously too wide (operation payload) and unable to say so. The
     // real cross-cutting text is the header — D4, the loading section, D11, the
     // operations table, the marker legend all sit above the first operation — plus
-    // the three shared trailers, `## Output` (the report cap, #425) included (the
+    // the four shared trailers, `## Output` (the report cap, #425) and `## Core rules`
+    // (the digest of the core rules the agent keeps now that it omits the rule files) included (the
     // narrower corpus is reclassified here, not accommodated by loosening the assertion).
     expect(
       sections.map(s => s.label),
       'the cross-cutting slices changed shape: a new always-loaded `## ` section was added, or ' +
       'one of the two shared trailers was renamed. Name it here — an unnamed section is text ' +
       'every spawn loads that nothing scans (GAP-03)',
-    ).toEqual(['(header)', 'Output', 'Principles', 'Boundaries']);
+    ).toEqual(['(header)', 'Output', 'Principles', 'Core rules', 'Boundaries']);
     expect(
       collectProviderDetectors(sections),
       'provider detector(s) in always-loaded text. The invariant belongs here; the signal that ' +

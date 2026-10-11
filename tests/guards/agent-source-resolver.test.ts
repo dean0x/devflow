@@ -31,7 +31,7 @@ import { MAX_REFERENCE_SWEEP_DEPTH } from '../../src/core/reference-sweep.js'
 // Guard: resolveAllAgents ⊇ getAllAgentNames() (17 today)
 // ---------------------------------------------------------------------------
 
-describe('resolveAllAgents ⊇ getAllAgentNames() (17 agents, AC-0.7)', () => {
+describe('resolveAllAgents ⊇ getAllAgentNames() (18 agents, AC-0.7)', () => {
   it('resolveAllAgents() returns at least all plugin-declared agent names', () => {
     const resolved = [...resolveAllAgents().keys()]
     const declared = getAllAgentNames()
@@ -41,14 +41,14 @@ describe('resolveAllAgents ⊇ getAllAgentNames() (17 agents, AC-0.7)', () => {
     )
   })
 
-  it('resolved agent count is 17 (non-vacuous floor, GAP-07)', () => {
+  it('resolved agent count is 18 (non-vacuous floor, GAP-07)', () => {
     // If this fails, a new agent was added without updating the expected count.
     // Update the expected value AND ensure the new agent has a source file.
     const resolved = resolveAllAgents()
     expect(
       resolved.size,
-      `Expected 17 agents but found ${resolved.size} — update this test if an agent was added or removed`,
-    ).toBe(17)
+      `Expected 18 agents but found ${resolved.size} — update this test if an agent was added or removed`,
+    ).toBe(18)
   })
 
   it('every resolved agent has non-empty content', () => {

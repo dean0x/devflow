@@ -310,3 +310,135 @@ export function rewriteAgentFrontmatter(
 
   return Ok({ content: newContent, changed });
 }
+
+// ---------------------------------------------------------------------------
+// Stamped tool entries — a separate concern from rewriteAgentFrontmatter
+// ---------------------------------------------------------------------------
+
+/**
+ * Why stamping is NOT part of rewriteAgentFrontmatter: the rewriter manages the
+ * `model:` and `effort:` lines and nothing else (it never reads or writes `tools:`,
+ * `disallowedTools:`, `omitClaudeMd:` or `skills:`), so `devflow agents` and the proxy
+ * can reapply a mapping to any installed agent without ever touching its tool policy.
+ * The functions below are the one place a `tools:` line is edited after the build, and
+ * they edit one kind of entry only: a WHOLE-SERVER entry.
+ *
+ * D-WHOLE-SERVER-ENTRY: Claude Code's allowlist has no wildcard or pattern form for a
+ * connected tool server, so a server's tools are granted by naming the server:
+ * `mcp__<server>` grants every tool that server exposes. An entry that names a tool
+ * (`mcp__<server>__<tool>`) is a different thing and is never stamped, replaced or
+ * removed here, so the two kinds cannot be confused: the server name carries no double
+ * underscore, which is what separates it from its tool.
+ */
+
+export type StampToolsError = FrontmatterError | 'invalid-tool' | 'no-tools-line';
+
+const WHOLE_SERVER_PREFIX = 'mcp__';
+
+/** A server name as it appears in a whole-server entry: the charset Claude Code keeps, no `__`. */
+const WHOLE_SERVER_NAME_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+/**
+ * True when `tool` is a whole-server allowlist entry: `mcp__` and a server name of
+ * 1-64 characters from `[A-Za-z0-9_-]` with no `__` (D-WHOLE-SERVER-ENTRY).
+ */
+export function isWholeServerTool(tool: string): boolean {
+  if (!tool.startsWith(WHOLE_SERVER_PREFIX)) return false;
+  const name = tool.slice(WHOLE_SERVER_PREFIX.length);
+  return WHOLE_SERVER_NAME_RE.test(name) && !name.includes('__');
+}
+
+/** The single-line inline form `tools: ["A", "B"]`, within a frontmatter body. */
+const INLINE_TOOLS_RE = /^tools:[ \t]*\[([^\r\n]*)\][ \t]*(?=\r?$)/m;
+
+function toolItems(inner: string): string[] {
+  return inner.split(',').filter(item => item.trim() !== '');
+}
+
+function unquoteTool(item: string): string {
+  return item.trim().replace(/^(["'])(.*)\1$/, '$2');
+}
+
+/**
+ * Replace the whole-server entries of the first frontmatter block's inline `tools:` line
+ * with `extraTools`, and touch nothing else.
+ *
+ * Idempotent: stamping the same list twice yields the same bytes, and stamping a new list
+ * replaces the previous one rather than adding to it. Every other entry of the line keeps
+ * its original text, and every other byte of the file (other keys, the body, CRLF or LF)
+ * is untouched. An empty `extraTools` removes the stamp.
+ *
+ * Rejects, rather than repairs: an entry that is not a whole-server entry (`invalid-tool`;
+ * it would otherwise reach the frontmatter as free text), a file with no inline
+ * `tools: [...]` line (`no-tools-line`; a block-list `tools:` is not edited) and a file
+ * with no well-formed frontmatter.
+ *
+ * Pure function — no I/O.
+ */
+export function stampAgentTools(
+  content: string,
+  extraTools: readonly string[],
+): Result<RewriteResult, StampToolsError> {
+  for (const tool of extraTools) {
+    if (!isWholeServerTool(tool)) return Err('invalid-tool');
+  }
+
+  const parts = parseFrontmatter(content);
+  if (!parts.ok) return Err(parts.error);
+  const { fmBody, openDelim, closeDelim, afterClose, eol } = parts.value;
+
+  const match = INLINE_TOOLS_RE.exec(fmBody);
+  if (!match) return Err('no-tools-line');
+
+  const rawItems = toolItems(match[1]);
+  const kept = rawItems.filter(item => !isWholeServerTool(unquoteTool(item)));
+  const stamped = [...new Set(extraTools)].map(tool => `"${tool}"`);
+  // Nothing to remove and nothing to add: the line, whatever its spacing, is already right.
+  if (kept.length === rawItems.length && stamped.length === 0) return Ok({ content, changed: false });
+
+  // The kept entries keep their own text; only the edges lose the padding that no longer
+  // borders a neighbour, so the appended entries land after `, ` and the line stays one shape.
+  const keptText = kept
+    .map((item, i) => {
+      const lead = i === 0 ? item.trimStart() : item;
+      return i === kept.length - 1 ? lead.trimEnd() : lead;
+    })
+    .join(',');
+  const inner = [keptText, stamped.join(', ')].filter(text => text !== '').join(', ');
+  const line = `tools: [${inner}]`;
+
+  const newBody = fmBody.slice(0, match.index) + line + fmBody.slice(match.index + match[0].length);
+  const newContent = openDelim + newBody + eol + closeDelim + afterClose;
+  return Ok({ content: newContent, changed: newContent !== content });
+}
+
+/**
+ * The whole-server entries of the first frontmatter block's inline `tools:` line, in
+ * order. Ok([]) when the line carries none; an error when there is no line to read.
+ * Pure function — no I/O.
+ */
+export function readStampedTools(content: string): Result<string[], StampToolsError> {
+  const parts = parseFrontmatter(content);
+  if (!parts.ok) return Err(parts.error);
+  const match = INLINE_TOOLS_RE.exec(parts.value.fmBody);
+  if (!match) return Err('no-tools-line');
+  return Ok(toolItems(match[1]).map(unquoteTool).filter(isWholeServerTool));
+}
+
+/**
+ * The text a converge installs for an agent: the variant `source` wearing the whole-server
+ * entries the installed copy carries. The stamp is applied at install and by
+ * `devflow tracker --servers`, never by a converge, so a converge only CARRIES it. Without
+ * the carry, switching an agent between prompt variants would drop its stamp and compare
+ * unequal to the installed copy on every run.
+ *
+ * `source` is returned unchanged when there is nothing safe to carry: either side has no
+ * well-formed inline `tools:` line, or the installed copy carries no entries.
+ * Pure function — no I/O.
+ */
+export function carryStampedTools(source: string, installed: string): string {
+  const carried = readStampedTools(installed);
+  if (!carried.ok || carried.value.length === 0) return source;
+  const stamped = stampAgentTools(source, carried.value);
+  return stamped.ok ? stamped.value.content : source;
+}

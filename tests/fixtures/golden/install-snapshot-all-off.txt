@@ -20,6 +20,7 @@ d .claude/agents/devflow/
 - .claude/agents/devflow/design.md
 - .claude/agents/devflow/diagnose.md
 - .claude/agents/devflow/evaluate.md
+- .claude/agents/devflow/explore.md
 - .claude/agents/devflow/git.md
 - .claude/agents/devflow/knowledge.md
 - .claude/agents/devflow/learning.md
@@ -428,6 +429,7 @@ d sub/
     "ENABLE_PROMPT_CACHING_1H": "true",
     "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "40"
   },
+  "subagentPromptCacheTtl": "5m",
   "showTurnDuration": true,
   "showClearContextOnPlanAccept": true,
   "permissions": {
@@ -487,6 +489,7 @@ d sub/
       "tool-search": true,
       "lsp": true,
       "prompt-caching-1h": true,
+      "subagent-cache-5m": true,
       "show-turn-duration": true,
       "clear-context-on-plan": true,
       "disable-bundled-skills": false,

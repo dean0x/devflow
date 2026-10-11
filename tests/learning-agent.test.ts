@@ -95,10 +95,57 @@ describe('learning agent', () => {
       expect(parseYamlList(frontmatter, 'skills')).toEqual([]);
     });
 
-    // D-LEARNING-SHIPPED-ROW: the Encoded-retirement check reads the rules in the root
-    // CLAUDE.md, so Learning keeps that context.
-    it('keeps the project CLAUDE.md: its Encoded-retirement check reads the root CLAUDE.md', () => {
-      expect(frontmatter).not.toMatch(/^omitClaudeMd:/m);
+    // D-LEARNING-SHIPPED-ROW, D-OMIT-CLAUDEMD-SET: Learning no longer receives the project
+    // CLAUDE.md or the rule files, so the body reads what its Encoded check needs (below).
+    it('omits the project CLAUDE.md and the rules, as its row says', () => {
+      expect(row.omitClaudeMd).toBe(true);
+      expect(frontmatter).toMatch(/^omitClaudeMd: true$/m);
+    });
+  });
+
+  describe('explicit reads replace the omitted CLAUDE.md (D-LEARNING-SHIPPED-ROW)', () => {
+    const READ = 'Read `<project root>/CLAUDE.md` once';
+    const COMPARISONS = ['**Already encoded?**', '1. **Encoded**'] as const;
+
+    /** Named collector: the read is missing, or a comparison that needs it comes first. */
+    function collectReadPositionDefects(text: string): string[] {
+      const readAt = text.search(phrase(READ));
+      if (readAt === -1) return ['the CLAUDE.md read is missing'];
+      const out: string[] = [];
+      for (const marker of COMPARISONS) {
+        const at = text.indexOf(marker);
+        if (at === -1) out.push(`${marker} is missing`);
+        else if (at < readAt) out.push(`${marker} comes before the read`);
+      }
+      return out;
+    }
+
+    const inputs = (): string => sectionOf(content, '## Inputs', '## Core rules');
+
+    it('reads the root CLAUDE.md once per run, in Inputs, before the already-encoded check and the Encoded rung', () => {
+      expect(inputs()).toMatch(phrase(READ));
+      expect(collectReadPositionDefects(content)).toEqual([]);
+    });
+
+    it('also reads the installed rule files, because the Encoded check compares against a rules file', () => {
+      expect(inputs()).toMatch(phrase('rules/devflow'));
+      expect(inputs()).toMatch(phrase("-name '*.md'"));
+      expect(inputs()).toMatch(phrase('Read each once'));
+      expect(content).toMatch(phrase('a rules file'));
+    });
+
+    it('keeps what it read for every later comparison and skips a file that is missing', () => {
+      expect(inputs()).toMatch(phrase('Keep what you read for every later comparison'));
+      expect(inputs()).toMatch(phrase('a file that is missing is skipped'));
+    });
+
+    it('known-bad probes: a read after a comparison, and no read at all, are reported', () => {
+      expect(collectReadPositionDefects(`${COMPARISONS[0]} a\n${COMPARISONS[1]} b\n${READ}`)).toEqual([
+        `${COMPARISONS[0]} comes before the read`,
+        `${COMPARISONS[1]} comes before the read`,
+      ]);
+      expect(collectReadPositionDefects(`${COMPARISONS[0]} a\n${COMPARISONS[1]} b`)).toEqual(['the CLAUDE.md read is missing']);
+      expect(collectReadPositionDefects(`${READ}\n${COMPARISONS[0]} a\n${COMPARISONS[1]} b`)).toEqual([]);
     });
   });
 

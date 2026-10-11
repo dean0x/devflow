@@ -8,6 +8,7 @@ Routing (Agent tool) — pick the roster agent that fits the work:
 - Execution against a spec: Code (write code to a plan; open the prompt with `OPERATION: <mode>` — `edit` for mechanical changes (renames, moves, boilerplate), `issue-fix` for pre-classified review issues, else `implement`), Validate (build, typecheck, lint, test), Git (git/GitHub operations).
 - Analysis, design, research: Design, Research, Review, Triage (validate review issues against blast-radius matrix).
 - Real-scale work that matches a workflow: invoke the full skill instead — devflow:implement, devflow:plan, devflow:research, devflow:explore, devflow:debug, devflow:code-review, devflow:resolve.
+- Anything else: the closest roster agent, never general-purpose.
 
 Stays mainline (judgment work): conversation, decisions, routing, synthesizing agent reports, answers already in loaded context, one targeted Read to scope a delegation.
 

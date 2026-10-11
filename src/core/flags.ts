@@ -90,18 +90,26 @@ export interface EnvBooleanFlagDef extends BooleanFlagDefCommon {
   readonly settingDeleteGuard?: never;
 }
 
+/** What a setting-target boolean writes: a scalar or a plain object. */
+export type SettingPayload = string | boolean | Record<string, unknown>;
+
 /** A boolean flag targeting a top-level settings.json key. */
 export interface SettingBooleanFlagDef extends BooleanFlagDefCommon {
   readonly target: SettingFlagTarget;
   /** Setting targets may use strings, booleans, or plain objects. */
-  readonly onPayload: string | boolean | Record<string, unknown>;
+  readonly onPayload: SettingPayload;
   /**
    * D-ATTR-GUARD: when set, deletion of the target setting key is shape-guarded —
    * the key is only removed when its current value deep-equals this shape exactly.
    * Prevents erasing user-customized values (e.g. attribution with a real org name)
    * when the flag transitions to neutral.
+   *
+   * D-GUARD-SCALAR: the guard has the type of `onPayload`, so a flag that writes a
+   * scalar (`subagent-cache-5m` writes "5m") can guard that scalar the way an object
+   * payload guards its shape. The comparison stays in `settingValueHoldsManagedShape`,
+   * which deep-equals any JSON value; a scalar guard needs no second code path.
    */
-  readonly settingDeleteGuard?: Record<string, unknown>;
+  readonly settingDeleteGuard?: SettingPayload;
 }
 
 /**
@@ -232,6 +240,45 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     kind: 'boolean',
     target: { type: 'env', key: 'ENABLE_PROMPT_CACHING_1H' },
     onPayload: 'true',
+    recommended: true,
+    defaultValue: true,
+  },
+  {
+    // D-SUBAGENT-CACHE-5M: subagents write their prompt cache with the 5-minute TTL
+    // while the main session keeps the 1-hour TTL of `prompt-caching-1h` (untouched).
+    //
+    // Why: the wave-4 token audit (2026-10-10) found 99.998% of subagent cache writes
+    // are 1-hour writes, yet fewer than 0.1% of subagent requests idle longer than
+    // 5 minutes - a subagent finishes or is resumed long before a 5-minute entry
+    // lapses, so the 1-hour premium buys nothing. Modelled effect of 5m: -8.9% on
+    // subagent cache-equivalent cost, -7.7% on total.
+    //
+    // Mechanism (VENDOR BEHAVIOUR, probed 2026-10-11 on Claude Code 2.1.296 in a
+    // sandboxed session): with ENABLE_PROMPT_CACHING_1H=true and this setting at
+    // "5m", subagent requests wrote only ephemeral_5m cache (36,387 tokens, none at
+    // 1h) while the main session wrote 100% 1h (35,209). Precedence of the subagent
+    // TTL in the binary, highest first: an env var that forces 5m, env
+    // CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL, this setting, a per-agent frontmatter
+    // `experimental.cacheTtl`, ENABLE_PROMPT_CACHING_1H. The 1-hour TTL is ignored
+    // while a subscription is in overage. A Claude Code that predates the setting
+    // ignores the key, so subagents then follow ENABLE_PROMPT_CACHING_1H as before.
+    // Re-probe when the precedence matters again; this is an observation, not a spec.
+    //
+    // Rejected: per-agent `experimental.cacheTtl` - it would spread one policy over
+    // every agent file; one devflow-managed flag keeps the policy in one place.
+    //
+    // Delete guard: only "5m" is deleted on disable or uninstall, so a user's own
+    // "1h" stays (D-GUARD-SCALAR). Adoption: init seeds this flag OFF when a value
+    // that is not "5m" is already on disk (D-ADOPT-RESPECTS-USER, respectUserOwnedSettings).
+    id: 'subagent-cache-5m',
+    label: 'Subagent 5-min cache',
+    description: 'Write subagent prompt-cache entries with the 5-minute TTL; the main session keeps 1 hour',
+    hint: 'Subagents rarely idle past 5 min, so 5-min cache writes cost less',
+    blurb: '5-min cache TTL for subagents',
+    kind: 'boolean',
+    target: { type: 'setting', key: 'subagentPromptCacheTtl' },
+    onPayload: '5m',
+    settingDeleteGuard: '5m',
     recommended: true,
     defaultValue: true,
   },
@@ -1137,6 +1184,77 @@ export function settingHoldsManagedShape(settingsJson: string, flagId: string): 
   } catch {
     return false;
   }
+}
+
+/**
+ * D-ADOPT-RESPECTS-USER predicate: the mirror of `settingHoldsManagedShape`.
+ *
+ * Returns true when the settings.json string carries a value at the guarded flag's
+ * target key that is NOT the flag's managed shape - a value the user (or another
+ * tool) owns, which enabling the flag would overwrite. Presence is decided with
+ * `hasOwnProperty`, so an explicit `null` counts as a value; the shape decision is
+ * delegated to `settingValueHoldsManagedShape`, never compared here.
+ *
+ * Returns false when:
+ *   - settingsJson is malformed
+ *   - root is not a plain object
+ *   - flagId is not in the registry
+ *   - the flag has no settingDeleteGuard, or is not a setting-target boolean
+ *   - the key is absent
+ *   - the on-disk value holds the managed shape
+ */
+export function settingHoldsUserValue(settingsJson: string, flagId: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(settingsJson);
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+    const flag = FLAG_REGISTRY_MAP.get(flagId);
+    if (!flag || flag.kind !== 'boolean' || flag.target.type !== 'setting') return false;
+    if (flag.settingDeleteGuard === undefined) return false;
+    const root = parsed as Record<string, unknown>;
+    if (!Object.prototype.hasOwnProperty.call(root, flag.target.key)) return false;
+    return !settingValueHoldsManagedShape(flag, root[flag.target.key]);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * D-ADOPT-RESPECTS-USER: seed a guarded setting flag OFF when adopting it ON would
+ * overwrite a value the user already owns.
+ *
+ * A flag the manifest does not record is adopted at its `defaultValue`. For a flag whose
+ * target is a settings.json key with a `settingDeleteGuard`, adopting ON writes its
+ * managed payload over whatever is on disk (the guard protects deletion, not writes).
+ * When the key already holds a value that is not the managed shape - a user's own `"1h"`
+ * under `subagentPromptCacheTtl` - that write would silently replace a deliberate choice.
+ * Such a flag is set `false` instead; with the record then claiming `false`, the converge
+ * pipeline neither writes nor deletes the user's value.
+ *
+ * Scope: only flags ABSENT from `manifestFlags` (or all of them on a fresh install, when
+ * it is null). A flag the manifest records keeps its value in `flags`, so an explicit
+ * enable still wins. `devflow init --reset` hands this an empty settings snapshot
+ * (resolveResetGatedInputs), so nothing is detected and the factory default stands. The rule is generic over guarded
+ * setting flags: no flag id is special-cased, and `settingHoldsUserValue` is the one place
+ * that decides "the disk holds something that is not ours". For a flag whose default is
+ * already OFF (suppress-attribution) it changes nothing.
+ *
+ * Two callers apply the same rule: the init seed, and the flags TUI's starting rows (an
+ * upgrade that has not run init yet would otherwise offer a Save that overwrites the value).
+ *
+ * Pure function - the settings snapshot is read by the caller and passed in.
+ */
+export function respectUserOwnedSettings(
+  flags: FlagsRecord,
+  manifestFlags: FlagsRecord | null,
+  settingsSnapshot: string,
+): FlagsRecord {
+  const result: FlagsRecord = { ...flags };
+  for (const flag of FLAG_REGISTRY) {
+    const adoptedAtDefault = manifestFlags === null || !(flag.id in manifestFlags);
+    if (!adoptedAtDefault) continue;
+    if (settingHoldsUserValue(settingsSnapshot, flag.id)) result[flag.id] = false;
+  }
+  return result;
 }
 
 /**

@@ -20,6 +20,7 @@ import {
   stripFlags,
   convergeFlagsIntoSettings,
   settingHoldsManagedShape,
+  settingHoldsUserValue,
   isEnvBooleanFlag,
   // Kept verbatim
   VIEW_MODES,
@@ -208,6 +209,7 @@ describe('getDefaultFlagsRecord', () => {
     expect(record['tool-search']).toBe(true);
     expect(record['lsp']).toBe(true);
     expect(record['prompt-caching-1h']).toBe(true);
+    expect(record['subagent-cache-5m']).toBe(true);
     expect(record['show-turn-duration']).toBe(true);
     expect(record['clear-context-on-plan']).toBe(true);
 
@@ -1068,8 +1070,8 @@ describe('auto-compact-window flag', () => {
     expect(ids.indexOf('auto-compact-window')).toBeGreaterThan(lastBoolean);
   });
 
-  it('the registry holds 31 flags (docs/cli-reference.md and file-organization.md state the count)', () => {
-    expect(FLAG_REGISTRY).toHaveLength(31);
+  it('the registry holds 32 flags (docs/cli-reference.md and file-organization.md state the count)', () => {
+    expect(FLAG_REGISTRY).toHaveLength(32);
   });
 
   it('a set value is written to the settings env block as a decimal string', () => {
@@ -2339,5 +2341,157 @@ describe('convergeFlagsIntoSettings — D-ATTR-ADOPT: guarded boolean adoption',
     );
     const parsed = JSON.parse(settings) as Record<string, unknown>;
     expect(parsed['attribution'], 'claimed false still deletes the managed block').toBeUndefined();
+  });
+});
+
+// ─── subagent-cache-5m — scalar shape guard (D-GUARD-SCALAR, D-SUBAGENT-CACHE-5M) ──
+//
+// The flag writes the scalar "5m" to the top-level `subagentPromptCacheTtl` setting.
+// Its settingDeleteGuard is the same scalar, so disable/uninstall delete only a
+// value devflow could have written and leave a user's own "1h" alone.
+
+describe('subagent-cache-5m flag — scalar shape guard (D-GUARD-SCALAR)', () => {
+  const KEY = 'subagentPromptCacheTtl';
+  const settingsWith = (value: unknown): string => JSON.stringify({ [KEY]: value, model: 'opus' });
+
+  it('registry entry: setting target, scalar "5m" payload and guard, recommended and default ON', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'subagent-cache-5m')!;
+    expect(flag).toBeDefined();
+    expect(flag.kind).toBe('boolean');
+    expect(flag.target).toEqual({ type: 'setting', key: KEY });
+    expect(flag.recommended).toBe(true);
+    expect(flag.defaultValue).toBe(true);
+    if (flag.kind === 'boolean') {
+      expect(flag.onPayload).toBe('5m');
+      expect(flag.settingDeleteGuard).toBe('5m');
+    }
+  });
+
+  it('sits directly after prompt-caching-1h so the two cache rows read together', () => {
+    const ids = FLAG_REGISTRY.map(f => f.id);
+    expect(ids.indexOf('subagent-cache-5m')).toBe(ids.indexOf('prompt-caching-1h') + 1);
+  });
+
+  it('applyFlags with true writes "5m" next to the main-session 1h env var', () => {
+    const result = JSON.parse(applyFlags(JSON.stringify({}), {
+      'prompt-caching-1h': true,
+      'subagent-cache-5m': true,
+    }));
+    expect(result[KEY]).toBe('5m');
+    expect(result.env.ENABLE_PROMPT_CACHING_1H).toBe('true');
+  });
+
+  it('applyFlags with true OVERWRITES a user "1h" (the guard protects deletion, not writes)', () => {
+    const result = JSON.parse(applyFlags(settingsWith('1h'), { 'subagent-cache-5m': true }));
+    expect(result[KEY]).toBe('5m');
+  });
+
+  it('applyFlags with false deletes "5m"', () => {
+    const result = JSON.parse(applyFlags(settingsWith('5m'), { 'subagent-cache-5m': false }));
+    expect(result).not.toHaveProperty(KEY);
+    expect(result.model, 'unmanaged sibling survives → the file really was rewritten').toBe('opus');
+  });
+
+  it('applyFlags with null deletes "5m"', () => {
+    const result = JSON.parse(applyFlags(settingsWith('5m'), { 'subagent-cache-5m': null }));
+    expect(result).not.toHaveProperty(KEY);
+  });
+
+  it('applyFlags with false leaves a user "1h" in place', () => {
+    const result = JSON.parse(applyFlags(settingsWith('1h'), { 'subagent-cache-5m': false }));
+    expect(result[KEY]).toBe('1h');
+  });
+
+  it('stripFlags deletes "5m" and leaves a user "1h"', () => {
+    const stripped5m = JSON.parse(stripFlags(settingsWith('5m')));
+    expect(stripped5m).not.toHaveProperty(KEY);
+    expect(stripped5m.model).toBe('opus');
+
+    const stripped1h = JSON.parse(stripFlags(settingsWith('1h')));
+    expect(stripped1h[KEY]).toBe('1h');
+  });
+
+  it('stripFlags leaves a non-string value at the key alone', () => {
+    const stripped = JSON.parse(stripFlags(settingsWith({ main: '5m' })));
+    expect(stripped[KEY]).toEqual({ main: '5m' });
+  });
+});
+
+describe('subagent-cache-5m — managed-shape oracle on a scalar guard', () => {
+  const FLAG_ID = 'subagent-cache-5m';
+  const settingsWith = (value: unknown): string => JSON.stringify({ subagentPromptCacheTtl: value });
+
+  it('settingHoldsManagedShape is true only for "5m"', () => {
+    expect(settingHoldsManagedShape(settingsWith('5m'), FLAG_ID)).toBe(true);
+    expect(settingHoldsManagedShape(settingsWith('1h'), FLAG_ID)).toBe(false);
+    expect(settingHoldsManagedShape(settingsWith(null), FLAG_ID)).toBe(false);
+    expect(settingHoldsManagedShape(JSON.stringify({}), FLAG_ID)).toBe(false);
+  });
+
+  describe('settingHoldsUserValue (D-ADOPT-RESPECTS-USER predicate)', () => {
+    it('is true for a present value that is not the managed shape', () => {
+      expect(settingHoldsUserValue(settingsWith('1h'), FLAG_ID)).toBe(true);
+      expect(settingHoldsUserValue(settingsWith(''), FLAG_ID)).toBe(true);
+      expect(settingHoldsUserValue(settingsWith(null), FLAG_ID)).toBe(true);
+      expect(settingHoldsUserValue(settingsWith({ a: 1 }), FLAG_ID)).toBe(true);
+    });
+
+    it('is false for the managed shape, an absent key, malformed JSON and a non-object root', () => {
+      expect(settingHoldsUserValue(settingsWith('5m'), FLAG_ID)).toBe(false);
+      expect(settingHoldsUserValue(JSON.stringify({ other: '1h' }), FLAG_ID)).toBe(false);
+      expect(settingHoldsUserValue('not json', FLAG_ID)).toBe(false);
+      expect(settingHoldsUserValue('[]', FLAG_ID)).toBe(false);
+      expect(settingHoldsUserValue('null', FLAG_ID)).toBe(false);
+    });
+
+    it('is false for an unknown flag id and for flags with no delete guard', () => {
+      expect(settingHoldsUserValue(settingsWith('1h'), 'no-such-flag')).toBe(false);
+      // tui is a setting-target boolean with no settingDeleteGuard: no managed shape to compare.
+      expect(settingHoldsUserValue(JSON.stringify({ tui: 'classic' }), 'tui')).toBe(false);
+      // tool-search is an env flag: never shape-guarded.
+      expect(settingHoldsUserValue(JSON.stringify({ ENABLE_TOOL_SEARCH: 'x' }), 'tool-search')).toBe(false);
+    });
+
+    it('applies to the object-shaped guard of suppress-attribution too (generic over guarded flags)', () => {
+      expect(settingHoldsUserValue(JSON.stringify({ attribution: { commit: 'Acme', pr: 'Acme' } }), 'suppress-attribution')).toBe(true);
+      expect(settingHoldsUserValue(JSON.stringify({ attribution: { commit: '', pr: '' } }), 'suppress-attribution')).toBe(false);
+    });
+  });
+});
+
+describe('convergeFlagsIntoSettings — D-ATTR-ADOPT over a scalar guard (subagent-cache-5m)', () => {
+  const KEY = 'subagentPromptCacheTtl';
+  const converge = (settings: string, record: FlagsRecord, ownedRecord: FlagsRecord | null = null) =>
+    convergeFlagsIntoSettings(settings, record, { viewModeExplicit: false, ownedRecord });
+
+  it('a pre-existing "5m" the record does not claim is adopted and survives', () => {
+    const { settings, record } = converge(JSON.stringify({ [KEY]: '5m', model: 'opus' }), {});
+    expect(JSON.parse(settings)[KEY]).toBe('5m');
+    expect(record['subagent-cache-5m']).toBe(true);
+  });
+
+  it('a pre-existing user "1h" the record does not claim is neither adopted nor deleted', () => {
+    const { settings, record } = converge(JSON.stringify({ [KEY]: '1h', model: 'opus' }), {});
+    expect(JSON.parse(settings)[KEY]).toBe('1h');
+    expect(record['subagent-cache-5m']).toBeUndefined();
+  });
+
+  it('the init path: seeded false over a user "1h" the manifest never recorded → "1h" survives', () => {
+    // record = seed (flag false), ownedRecord = the prior manifest, which lacks the id.
+    const { settings, record } = converge(
+      JSON.stringify({ [KEY]: '1h', model: 'opus' }),
+      { 'subagent-cache-5m': false },
+      { tui: true },
+    );
+    expect(JSON.parse(settings)[KEY]).toBe('1h');
+    expect(record['subagent-cache-5m']).toBe(false);
+  });
+
+  it('a claimed false keeps a user "1h" and deletes a devflow "5m"', () => {
+    const claimed: FlagsRecord = { 'subagent-cache-5m': false };
+    const keepsUser = converge(JSON.stringify({ [KEY]: '1h' }), claimed, claimed);
+    expect(JSON.parse(keepsUser.settings)[KEY]).toBe('1h');
+    const dropsManaged = converge(JSON.stringify({ [KEY]: '5m' }), claimed, claimed);
+    expect(JSON.parse(dropsManaged.settings)).not.toHaveProperty(KEY);
   });
 });

@@ -25,6 +25,7 @@ disallowedTools:
   - PushNotification
   - DesignSync
   - Skill
+  - mcp__*
 ---
 
 # Simplify Agent
@@ -97,6 +98,8 @@ Your refinement process:
 You operate autonomously and proactively, refining code immediately after it's written or modified without requiring explicit requests. Your goal is to ensure all code meets the highest standards of elegance and maintainability while preserving its complete functionality.
 
 **Gate ownership:** Run no build, test or lint command. Reading files and git diffs is not verification. Only Validate runs the full suite.
+
+Code-scanning runs in the Code agent; do not scan here.
 
 ## Output
 

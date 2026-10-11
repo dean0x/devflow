@@ -403,6 +403,8 @@ const CODE_SPAWN_FLOORS: Readonly<Record<string, number>> = {
   'implement.md': 10,
   // the issue-fix and validation-fix fences + the CI-fix line
   'resolve.md': 3,
+  // the fix the user accepts in the Offer Fix phase
+  'debug.md': 1,
   // implement, validation-fix, alignment-fix, qa-fix, review-fix and final-validation-fix templates + the merge-conflict resolver sentence + the engine partial's pseudo-form
   'dynamic-build.md': 8,
 };
@@ -439,8 +441,8 @@ describe('TP-43 (AC-37): the compiled compliance lens loads only the ids the set
     expect(designFence?.[0]).toContain(SPAWN_KEY);
   });
 
-  it('/implement and /resolve pass the lens to their Code spawns without gating on it', () => {
-    for (const host of ['implement.md', 'resolve.md']) {
+  it('/implement, /resolve and /debug pass the lens to their Code spawns without gating on it', () => {
+    for (const host of ['implement.md', 'resolve.md', 'debug.md']) {
       const text = requireDistFile(host);
       expect(text, `${host}: the mapping sentence`).toContain(FRAMEWORKS_SENTENCE);
       expect(text, `${host}: a pass-through host never gates on the lens`).not.toContain('COMPLIANCE_ACTIVE');

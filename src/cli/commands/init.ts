@@ -66,6 +66,7 @@ import {
 } from './compliance-prompts.js';
 import {
   applyTrackerSentinel,
+  effectiveTrackerServers,
   parseTrackerId,
   rearmTrackerInference,
   DEFAULT_TRACKER_PROVIDER,
@@ -473,6 +474,7 @@ export interface TrackerLifecycleIO {
    */
   convergeArtifacts(
     claudeDir: string,
+    servers: readonly string[],
     warn: (msg: string) => void,
   ): Promise<ConvergeTrackerArtifactsResult>;
   rearmInference(devflowDir: string): Promise<TrackerResult<void>>;
@@ -483,7 +485,7 @@ export interface TrackerLifecycleIO {
 export function buildTrackerLifecycleIO(): TrackerLifecycleIO {
   return {
     writeManifest,
-    convergeArtifacts: (claudeDir, warn) => convergeTrackerArtifacts({ claudeDir, warn }),
+    convergeArtifacts: (claudeDir, servers, warn) => convergeTrackerArtifacts({ claudeDir, servers, warn }),
     rearmInference: rearmTrackerInference,
     applySentinel: applyTrackerSentinel,
   };
@@ -554,7 +556,11 @@ export async function persistManifestThenConvergeTracker(opts: {
   // The Tracker agent file — installed on every machine (D-INSTALL-ALL-PROVIDERS),
   // because a repository can select a provider the machine never did.
   const agentWarnings: string[] = [];
-  const artifacts = await io.convergeArtifacts(claudeDir, (msg) => agentWarnings.push(msg));
+  const artifacts = await io.convergeArtifacts(
+    claudeDir,
+    effectiveTrackerServers(manifestData.features.tracker),
+    (msg) => agentWarnings.push(msg),
+  );
   for (const text of agentWarnings) messages.push({ level: 'warn', text });
 
   // D-TRACKER-PARALLEL: the two owners touch disjoint files — the attempt
@@ -919,7 +925,7 @@ export const initCommand = new Command('init')
     // ── Hoisted reads: the prior state that seeds the prompts (InitSeed, Phase 4) ──
     let existingManifest: ManifestData | null = null;
     try {
-      existingManifest = await readManifest(devflowDir);
+      existingManifest = await readManifest(devflowDir, { onWarning: (message) => p.log.warn(message) });
     } catch { /* unreadable manifest — seeded as a fresh install */ }
     // D-INIT-NOT-HOME (same-location.ts): a repository rooted at HOME is no
     // project, so init treats it as no repository — no .devflow/config.json (that
@@ -1170,6 +1176,10 @@ export const initCommand = new Command('init')
     // tracker: manifest-group (like proxy and compliance); seed from prior manifest.
     // CLI override applied below in both Recommended and Advanced paths.
     let trackerProvider: TrackerProvider = seed.features.tracker.provider;
+    // The tracker tool servers (D-TRACKER-SERVER-ALLOWLIST) are set by `devflow tracker --servers`
+    // alone, so init carries the prior value through untouched: it stamps the installed agents
+    // with it and writes it back to the manifest. Absent stays absent (the default list).
+    const trackerServers = seed.features.tracker.servers;
     let enabledFlags: FlagsRecord = { ...seed.flags };
     // viewModeExplicit: true when --reset is passed; signals resolveFinalViewMode to let the
     // seed-time view-mode win over an externally-set value in settings.json.
@@ -1906,6 +1916,7 @@ export const initCommand = new Command('init')
         // their say (D-LEARNING-VARIANT-INSTALL): the files installed here and the
         // manifest written at the end of init cannot disagree about it.
         learning: learningEnabled,
+        trackerServers,
         // Non-fatal install notices with no other channel (skipped symlinks in the
         // generated reference tree, mode-normalisation failures) reach the user rather
         // than the void. Collected now, emitted after the spinner stops.
@@ -2609,7 +2620,7 @@ export const initCommand = new Command('init')
         // Resolved tracker selection. Already a validated TrackerProvider — it came
         // through parseTrackerId (CLI), the typed wizard select, or the seed, which
         // itself came through normalizeTrackerFeature on read.
-        tracker: { provider: trackerProvider },
+        tracker: { provider: trackerProvider, ...(trackerServers !== undefined ? { servers: trackerServers } : {}) },
       },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,

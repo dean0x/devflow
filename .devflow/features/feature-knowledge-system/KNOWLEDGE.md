@@ -12,7 +12,7 @@ directories:
   - tests/guards/feature-knowledge-delivery.test.ts
   - tests/guards/kb-shape.test.ts
 created: 2026-06-21
-updated: 2026-10-10
+updated: 2026-10-11
 ---
 
 # Feature Knowledge Base System
@@ -38,6 +38,8 @@ updated: 2026-10-10
 - **KB-AP-7** `index.md` is git-tracked and has no lock: two branches adding different slugs can conflict textually, so keep both lines; a concurrent clobber self-heals through the frontmatter fallback.
 - **KB-AP-8** A legacy KB with no `## Rules` is valid: readers take one to three entries from its Anti-Patterns or Gotchas, labelled by section name with no ID, and Rules are added only when new work touches the KB.
 - **KB-AP-9** `/research` Phase 7 (user-gated) deliberately has its own Knowledge-agent spawn block rather than `knowledge_writeback()`; do not fold it into the partial.
+- **KB-AP-10** Never preload `devflow:apply-feature-knowledge` on the Knowledge agent: it is never handed `FEATURE_KNOWLEDGE`, only `EXISTING_KB`, so the preload is billed on every spawn and read on none (`tests/guards/preload-cleanup.test.ts`).
+- **KB-INV-11** The Knowledge agent treats `EXISTING_KB` as a snapshot: its body says to keep an assertion only after checking it against current code and to trust the code on a mismatch. That replaces the verify-on-read step the dropped skill stated.
 
 ## Overview
 
@@ -61,7 +63,7 @@ This KB covers the knowledge side: load, write-back, delivery tiers, KB shape an
 |-----------|------|------|
 | MDS partial | `src/assets/commands/_partials/_knowledge.mds` | Defines and exports `knowledge_load` and `knowledge_writeback`. It imports nothing, not even `_settings.mds`: write-back Step 1 takes the settings line the host's own settings block resolved above (D-SETTINGS-LINE) |
 | Host commands | `src/assets/commands/{name}.mds` | The ten hosts that import the partial. Load: bug-analysis, code-review, implement, plan, release, research, resolve, self-review. Write-back: debug, explore, implement, resolve, self-review. The dynamic hosts are not knowledge-specific |
-| Author agent | `src/assets/agents/knowledge.mds` | Generator host (learning arms on its `DECISIONS_CONTEXT` input, its `apply-decisions` preload and its `CROSS_REFERENCES` line). Writes KNOWLEDGE.md and the index line directly; model sonnet |
+| Author agent | `src/assets/agents/knowledge.mds` | Generator host (learning arms on its `DECISIONS_CONTEXT` input, its `apply-decisions` preload and its `CROSS_REFERENCES` line). Writes KNOWLEDGE.md and the index line directly; model sonnet. Preloads `feature-knowledge` and `worktree-support` (plus `apply-decisions` in the learning-on build); ships `omitClaudeMd: true` with a short `## Core rules` digest (context economy, untrusted input, no secrets) held to its `AGENT_CONFIG` row by `tests/guards/core-rules-digest.test.ts` |
 | Author skill | `src/assets/skills/feature-knowledge/SKILL.md` | The four-phase authoring process, the Rules-first template and Worked Example, the Rules ID rules, the size budget, the refresh rule, the legacy-KB note and index registration (line and description caps) |
 | Consumption skill | `src/assets/skills/apply-feature-knowledge/SKILL.md` | `allowed-tools: Read, Bash`. A three-step algorithm over the delivered `Rules:` blocks: cite `{slug} KB-AP-n` (a legacy bullet as `{slug} {section}`), read a section on demand with Read `offset`/`limit` from the `Headings:` line or `command grep -n '^## '`, quote KB text only from a Read view |
 | CLI list | `src/cli/commands/knowledge/list.ts` | Reads `index.md`, falling back to a frontmatter glob; no external scripts |
@@ -121,6 +123,8 @@ This KB covers the knowledge side: load, write-back, delivery tiers, KB shape an
 
 **KB-AP-5, retired artifacts.** All knowledge I/O is direct file reads in the partial and direct writes by the agent, so `feature-knowledge.cjs` and the `.create-result.json` handoff pattern no longer exist. `index.json` (an object keyed by slug) is a retired artifact too: nothing reads, writes or migrates it (`tests/shell-hooks.test.ts` asserts the features directory is created without one), and `index.md` is the one-line-per-KB cache. The system silently ignores a `referencedFiles` field, since staleness detection is gone; existing KBs may still carry it, and new KBs omit it.
 
+**KB-AP-10 and KB-INV-11, the preload is gone, the rule stays.** `apply-feature-knowledge` serves agents that receive `FEATURE_KNOWLEDGE`; the Knowledge agent refreshes `EXISTING_KB` instead, so the skill taught it a delivery it never sees. Its verify-against-code step now lives in the agent's own orientation responsibility. `omitClaudeMd` drops the installed rules with CLAUDE.md, so the Core rules digest restates the three that this agent works by.
+
 **KB-INV-5, no load for investigators.** Passing `FEATURE_KNOWLEDGE` to `/explore` or `/debug` workers would anchor them on what past agents concluded; those workflows only write back.
 
 **KB-AP-1, the pre-block shapes.** `read KNOWLEDGE.md in full`, `Concatenate under slug headers` and the `{full KNOWLEDGE.md content}` placeholder are banned across the compiled commands, the release source, the charter and the consumer skill by the delivery guard.
@@ -142,7 +146,7 @@ This KB covers the knowledge side: load, write-back, delivery tiers, KB shape an
 - `src/assets/agents/knowledge.mds` — the Knowledge agent contract: dual write, no result file, the leading Rules section kept current, the refresh rule once in its Direct Write Protocol, the character budget and legacy-KB bullets under Boundaries, and a `Report cap:` line closing Output (the `KB_*` status block exempt and inline in full)
 - `src/assets/skills/feature-knowledge/SKILL.md`, `src/assets/skills/apply-feature-knowledge/SKILL.md` — the authoring and consumption contracts
 - `tests/guards/feature-knowledge-delivery.test.ts`, `tests/guards/kb-shape.test.ts` — the delivery guard (load elements, tier table, Produces lines, recipient Input lines, consumer skill, release) and the KB-shape guard (Rules first, IDs, budget, no truncation instruction, legacy and refresh rules), each arm a named collector with a known-bad probe
-- `tests/guards/handoff-sections.test.ts`, `tests/commands/knowledge-preload.test.ts`, `tests/commands/knowledge-writeback-gate.test.ts`, `tests/commands/knowledge-detached.test.ts`, `tests/guards/no-config-read.test.ts` — the remaining knowledge guards
+- `tests/guards/preload-cleanup.test.ts`, `tests/guards/handoff-sections.test.ts`, `tests/commands/knowledge-preload.test.ts`, `tests/commands/knowledge-writeback-gate.test.ts`, `tests/commands/knowledge-detached.test.ts`, `tests/guards/no-config-read.test.ts` — the remaining knowledge guards
 - `src/cli/commands/knowledge/list.ts`, `src/cli/commands/knowledge/toggle.ts` — the CLI
 
 ## Related

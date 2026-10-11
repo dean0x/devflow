@@ -28,7 +28,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
-    "test:golden:update": "npx tsx scripts/update-golden.ts"
+    "test:golden:update": "npx tsx scripts/update-golden.ts",
+    "audit:tokens": "tsx scripts/token-audit/index.ts"
   },
   "keywords": [
     "claude",

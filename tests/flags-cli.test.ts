@@ -1169,6 +1169,116 @@ describe('flags CLI — createFlagsCommand factory', () => {
     });
   });
 
+  // ─── bare TUI rows — a user-owned guarded setting starts OFF ──────────────────
+  //
+  // D-ADOPT-RESPECTS-USER at the TUI row-build site: the manifest does not yet
+  // record `subagent-cache-5m` (an upgrade before the first init) while
+  // settings.json holds the user's own `subagentPromptCacheTtl: "1h"`. Showing the
+  // registry default (ON) would make a bare Save write "5m" over the user's value.
+  // The mocked runFlagsTui captures the rows handleBare builds, then returns the
+  // result a human would produce, so the whole wiring runs for real.
+
+  describe('bare TUI rows — user-owned guarded setting starts OFF (D-ADOPT-RESPECTS-USER)', () => {
+    const CACHE_FLAG = 'subagent-cache-5m';
+    let origStdoutIsTTY: boolean | undefined;
+    let origStdinIsTTY: boolean | undefined;
+    let captured: ReadonlyArray<{ id: string; configuredValue: unknown }>;
+
+    beforeEach(() => {
+      captured = [];
+      origStdoutIsTTY = (process.stdout as { isTTY?: boolean }).isTTY;
+      origStdinIsTTY = (process.stdin as { isTTY?: boolean }).isTTY;
+      Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+      Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+    });
+
+    afterEach(() => {
+      Object.defineProperty(process.stdout, 'isTTY', { value: origStdoutIsTTY, configurable: true });
+      Object.defineProperty(process.stdin, 'isTTY', { value: origStdinIsTTY, configurable: true });
+      vi.unmock('../src/cli/flags-view/index.js');
+      vi.resetModules();
+    });
+
+    /**
+     * Run bare `devflow flags` against the given manifest record and settings.json
+     * content. The mocked TUI records the initial rows, then answers `action`
+     * (`save` returns those rows untouched, as pressing Enter without toggling would).
+     */
+    async function runBare(
+      manifestFlags: FlagsRecord,
+      settings: Record<string, unknown>,
+      action: 'save' | 'cancel',
+    ): Promise<void> {
+      await fs.writeFile(
+        path.join(tmpDevflowDir, 'manifest.json'),
+        makeManifestWithFlags(manifestFlags),
+        'utf-8',
+      );
+      await fs.writeFile(
+        path.join(tmpClaudeDir, 'settings.json'),
+        JSON.stringify(settings, null, 2) + '\n',
+        'utf-8',
+      );
+      vi.doMock('../src/cli/flags-view/index.js', () => ({
+        runFlagsTui: async (rows: ReadonlyArray<{ id: string; configuredValue: unknown }>) => {
+          captured = rows;
+          return { action, rows };
+        },
+      }));
+      vi.resetModules();
+      const { createFlagsCommand: freshFlagsCommand } = await import('../src/cli/commands/flags.js');
+      const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+      try {
+        await freshFlagsCommand().parseAsync([], { from: 'user' });
+      } finally {
+        stdoutSpy.mockRestore();
+      }
+    }
+
+    function cacheRowValue(): unknown {
+      const row = captured.find(r => r.id === CACHE_FLAG);
+      expect(row, `${CACHE_FLAG} row must exist`).toBeDefined();
+      return row?.configuredValue;
+    }
+
+    it('unrecorded flag + user "1h" → row OFF, and a bare save keeps the user value', async () => {
+      await runBare({}, { subagentPromptCacheTtl: '1h' }, 'save');
+
+      expect(cacheRowValue()).toBe(false);
+
+      const settings = parseSettings(await fs.readFile(path.join(tmpClaudeDir, 'settings.json'), 'utf-8'));
+      expect(settings.subagentPromptCacheTtl, "the user's own TTL must survive a save").toBe('1h');
+      const manifestFlags = parseFlagsRecord(await fs.readFile(path.join(tmpDevflowDir, 'manifest.json'), 'utf-8'));
+      expect(manifestFlags[CACHE_FLAG], 'the declined adoption is recorded as OFF').toBe(false);
+    });
+
+    it('unrecorded flag + user "1h" → cancel leaves settings.json byte-identical', async () => {
+      await runBare({}, { subagentPromptCacheTtl: '1h' }, 'cancel');
+
+      expect(cacheRowValue()).toBe(false);
+      expect(await fs.readFile(path.join(tmpClaudeDir, 'settings.json'), 'utf-8'))
+        .toBe(JSON.stringify({ subagentPromptCacheTtl: '1h' }, null, 2) + '\n');
+    });
+
+    it('recorded flag keeps its recorded value even when the disk holds a user value', async () => {
+      await runBare({ [CACHE_FLAG]: true }, { subagentPromptCacheTtl: '1h' }, 'cancel');
+
+      expect(cacheRowValue()).toBe(true);
+    });
+
+    it('unrecorded flag + the managed "5m" on disk → row stays ON', async () => {
+      await runBare({}, { subagentPromptCacheTtl: '5m' }, 'cancel');
+
+      expect(cacheRowValue()).toBe(true);
+    });
+
+    it('unrecorded flag + key absent → row shows the registry default (ON)', async () => {
+      await runBare({}, {}, 'cancel');
+
+      expect(cacheRowValue()).toBe(true);
+    });
+  });
+
   // ─── applyTuiResult seam — TUI→persist wiring (TEST-M5) ──────────────────────
   //
   // An interactive surface has no automated test until a human runs it

@@ -1,19 +1,19 @@
 # Skill Catalog
 
-Reference for companion skills loaded by commands. A command loads a companion only when its own main thread uses the skill. The orchestrating commands delegate their work to agents, which load the skills they need, so only RELEASE, whose main thread drives git, loads one before its first phase.
+Reference for companion skills loaded by commands. A command loads a companion only when its own main thread uses the skill. The orchestrating commands delegate their work to agents, which load the skills they need, so only RELEASE, whose main thread commits, loads one, just before its release commit. Others load a skill only at the step that needs it: PLAN and RESEARCH load docs-framework where they name a document, and REVIEW and RESOLVE load worktree-support only when more than one worktree is listed.
 
 ## Command Companion Skills
 
 | Intent | Command | Companions |
 |--------|---------|------------|
 | IMPLEMENT | /implement | (none) |
-| DEBUG | /debug | (none) |
-| PLAN | /plan | (none) |
-| REVIEW | /code-review | (none) |
+| DEBUG | /debug | (none) — the fix runs in the Code agent |
+| PLAN | /plan | (none) — docs-framework loads at the design-document naming step |
+| REVIEW | /code-review | (none) — worktree-support loads only with more than one worktree |
 | RELEASE | /release | `devflow:git` |
 | EXPLORE | /explore | (none) |
-| RESEARCH | /research | (none — agents load type-specific skills internally) |
-| RESOLVE | /resolve | (none) |
+| RESEARCH | /research | (none — agents load type-specific skills; docs-framework loads at the naming step) |
+| RESOLVE | /resolve | (none) — worktree-support loads only with more than one worktree |
 
 ## File-Type Conditional Skills
 

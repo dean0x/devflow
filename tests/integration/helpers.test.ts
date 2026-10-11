@@ -16,8 +16,8 @@ import { buildSubagentsPath } from './helpers.js';
 
 describe('buildSubagentsPath', () => {
   it('encodes forward slashes in cwd as hyphens and prepends a leading hyphen', () => {
-    // Path encoding must match what Claude Code uses for the project directory.
-    // The encoding: replace every '/' with '-', then ensure a leading '-'.
+    // Path encoding must match what Claude Code uses for the project directory
+    // (scripts/token-audit/discover.ts encodeProjectDir is the shared encoder).
     const result = buildSubagentsPath(
       '/home/user',
       '/Users/dean/Sandbox/devflow',
@@ -31,6 +31,13 @@ describe('buildSubagentsPath', () => {
   it('handles a single-segment cwd', () => {
     const result = buildSubagentsPath('/home/user', '/project', 'uuid-1234');
     expect(result).toBe('/home/user/.claude/projects/-project/uuid-1234/subagents');
+  });
+
+  it('maps every non-alphanumeric character of the cwd to a hyphen, dots included', () => {
+    // Claude Code names the project directory by replacing each character outside
+    // [A-Za-z0-9] with '-', so a worktree under a dot-directory keeps a double hyphen.
+    const result = buildSubagentsPath('/home/user', '/Users/dean/.claude/worktrees/feat_x.y', 'uuid-1234');
+    expect(result).toBe('/home/user/.claude/projects/-Users-dean--claude-worktrees-feat-x-y/uuid-1234/subagents');
   });
 
   it('uses the sessionId verbatim as the directory segment', () => {

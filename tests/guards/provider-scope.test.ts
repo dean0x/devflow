@@ -12,7 +12,9 @@
  *      — collectForeignProviderLiterals.
  *   2. No `mcp__` / vendor tool literal, and no user-facing "MCP", in anything a
  *      Git spawn can load — collectVendorTokens.
- *   3. The Git agent declares no `tools:` frontmatter key — collectFrontmatterKeys.
+ *   3. The Git agent's `tools:` allowlist covers every built-in tool its bodies direct and names no
+ *      tracker server (the install stamps those) — collectFrontmatterKeys, collectToolsEntries,
+ *      collectDirectedTools.
  *   4. `_mcp.md` is generated ONLY behind its registry gate (AC-2.7 re-scoped in
  *      3a-4, hazard H7) and is named from no generated GitHub mechanics file —
  *      collectOpsNamingContract for the second half, and INJECTED registries for
@@ -626,13 +628,35 @@ function vendorCorpus(): CorpusEntry[] {
   return corpus;
 }
 
+/**
+ * `VENDOR_ALLOWLIST` (D-SCAN-IN-CODE): the one `mcp__` literal this scan admits is Scrutinize's
+ * `  - mcp__*` entry in its `disallowedTools` frontmatter, in the compiled agent and in its
+ * learning-off variant. The wildcard denies every MCP tool and names none, so it binds no
+ * contract to a transport; Simplify carries the same entry, but it is hand-authored and outside
+ * this scan. The exemption is one exact line in two named files: any other `mcp__` literal in
+ * those files, and the same line anywhere else (the Git agent included), is still reported.
+ * The prohibition above and this exemption are one authority: the 'still needed' arm below
+ * fails when a file no longer carries its line.
+ */
+const VENDOR_ALLOWLIST: { readonly files: readonly string[]; readonly line: string; readonly token: string } = {
+  files: ['dist/agents/scrutinize.md', `${LEARNING_OFF_AGENTS}/scrutinize.md`],
+  line: '- mcp__*',
+  token: 'mcp__ tool literal',
+};
+
+function isAllowedVendorLine(entryPath: string, token: VendorToken, line: string): boolean {
+  return token.name === VENDOR_ALLOWLIST.token
+    && VENDOR_ALLOWLIST.files.includes(entryPath)
+    && line.trim() === VENDOR_ALLOWLIST.line;
+}
+
 /** Named collector: vendor/transport literals in loadable prompt text. */
 export function collectVendorTokens(corpus: CorpusEntry[]): string[] {
   const violations: string[] = [];
   for (const entry of corpus) {
     for (const token of VENDOR_TOKENS) {
       for (const line of entry.content.split('\n')) {
-        if (token.pattern.test(line)) {
+        if (token.pattern.test(line) && !isAllowedVendorLine(entry.path, token, line)) {
           violations.push(`${entry.path}: ${token.name} — ${line.trim().slice(0, 90)}`);
         }
       }
@@ -659,6 +683,31 @@ describe('provider-scope: no vendor tool literal in loadable text (§14.5)', () 
     expect(violations, `vendor/transport literals:\n  ${violations.join('\n  ')}`).toEqual([]);
   });
 
+  it('every allowlisted vendor line is still needed: each file really carries it', () => {
+    const corpus = vendorCorpus();
+    for (const file of VENDOR_ALLOWLIST.files) {
+      const entry = corpus.find(e => e.path === file);
+      expect(entry, `${file} is not in the vendor scan`).toBeDefined();
+      expect(
+        (entry as CorpusEntry).content.split('\n').some(line => line.trim() === VENDOR_ALLOWLIST.line),
+        `${file} no longer carries "${VENDOR_ALLOWLIST.line}": delete it from VENDOR_ALLOWLIST`,
+      ).toBe(true);
+    }
+  });
+
+  it('known-bad probe: the allowlist admits one exact line in two files and nothing else', () => {
+    const [compiled, learningOff] = VENDOR_ALLOWLIST.files;
+    const entry = (path: string, content: string): CorpusEntry => ({ path, content });
+    expect(collectVendorTokens([entry(compiled, '  - mcp__*\n'), entry(learningOff, '  - mcp__*\n')])).toEqual([]);
+    // The same line anywhere else, and any other mcp__ literal in an allowlisted file, are reported.
+    expect(collectVendorTokens([entry('dist/agents/git.md', '  - mcp__*\n')]).length).toBe(1);
+    expect(collectVendorTokens([entry('dist/agents/code.md', '  - mcp__*\n')]).length).toBe(1);
+    expect(collectVendorTokens([entry(compiled, '  - mcp__tavily__tavily_search\n')]).length).toBe(1);
+    expect(collectVendorTokens([entry(compiled, 'Call mcp__* directly.\n')]).length).toBe(1);
+    // The other token is not silenced by it.
+    expect(collectVendorTokens([entry(compiled, 'Requires the MCP server.\n')]).length).toBe(1);
+  });
+
   it('known-bad probe: both vendor tokens are reported by the same collector', () => {
     const seeded: CorpusEntry[] = [
       { path: 'dist/skills/git/references/tracker/github/seed.md', content: 'Call `mcp__tracker__create_issue`.\n' },
@@ -672,15 +721,15 @@ describe('provider-scope: no vendor tool literal in loadable text (§14.5)', () 
 });
 
 // ---------------------------------------------------------------------------
-// 3. The Git agent declares no `tools:` key
+// 3. The Git agent's `tools:` allowlist covers what its bodies direct
 // ---------------------------------------------------------------------------
 
 /**
  * Named collector: the top-level keys declared in a frontmatter block's inner text.
  *
- * Extracted from the assertion below so the guard and its known-bad probe share
- * one extractor. Inline, the negative `.not.toContain('tools')` was green whether
- * the key was truly absent or the extractor had stopped returning keys at all —
+ * Extracted from the assertions below so the guard and its known-bad probe share
+ * one extractor. Inline, a negative such as `.not.toContain('disallowedTools')` was green
+ * whether the key was truly absent or the extractor had stopped returning keys at all —
  * a regex typo would have read as a pass.
  *
  * Only column-0 keys count: an indented `tools:` is a nested value, not a
@@ -693,32 +742,124 @@ function collectFrontmatterKeys(inner: string): string[] {
     .filter((k): k is string => k !== undefined);
 }
 
-describe('provider-scope: the compiled Git agent declares no tools: key', () => {
-  it('git.md frontmatter carries no tools: allowlist', () => {
+/**
+ * Named collector: the entries of the column-0 `tools:` key, in either list form (an inline
+ * `["A", "B"]` or a YAML block list), or null when the key is absent.
+ */
+function collectToolsEntries(inner: string): string[] | null {
+  const lines = inner.split('\n');
+  const at = lines.findIndex(l => /^tools:/.test(l));
+  if (at === -1) return null;
+  const unquote = (item: string): string => item.trim().replace(/^(["'])(.*)\1$/, '$2');
+  const inline = /^tools:[ \t]*\[(.*)\][ \t]*$/.exec(lines[at]);
+  if (inline) return inline[1].split(',').map(unquote).filter(item => item !== '');
+  const entries: string[] = [];
+  for (const line of lines.slice(at + 1)) {
+    const item = /^\s+-\s+(.+?)\s*$/.exec(line);
+    if (!item) break;
+    entries.push(unquote(item[1]));
+  }
+  return entries;
+}
+
+/** The built-in tools a prompt can direct by name. Grep and Glob are here to be reported, never granted. */
+const DIRECTABLE_TOOLS: readonly string[] = [
+  'Read', 'Write', 'Edit', 'Grep', 'Glob', 'Skill', 'WebFetch', 'WebSearch', 'Monitor', 'Agent',
+];
+const DIRECTABLE_ALTERNATION = DIRECTABLE_TOOLS.join('|');
+/** `Name(` as a call, not a longer identifier or a path segment. */
+const CALL_SHAPE = new RegExp(`(?<![\\w.$/-])(${DIRECTABLE_ALTERNATION})\\(`, 'g');
+/** "the Name tool" or "your Name tool", with bold or backticks around the name. */
+const PHRASE_SHAPE = new RegExp(`\\b(?:the|your)\\s+[*\`]*(${DIRECTABLE_ALTERNATION})\\s+tool\\b`, 'g');
+/** A negation before the tool, in its own sentence, means the text forbids it. */
+const NEGATION_BEFORE = /\b(?:never|do not|don't|must not|cannot|can't|no)\b/i;
+
+/**
+ * Named collector: the built-in tools a text directs, in the two shapes a prompt uses to name
+ * one (a call, and "the X tool"). A sentence that negates BEFORE the tool ("never use the Edit
+ * tool") directs nothing; one that negates AFTER it ("use the Read tool, never `cat`") still does.
+ */
+function collectDirectedTools(text: string): string[] {
+  const found = new Set<string>();
+  for (const re of [CALL_SHAPE, PHRASE_SHAPE]) {
+    for (const m of text.matchAll(re)) {
+      const before = text.slice(0, m.index);
+      const sentenceStart = Math.max(before.lastIndexOf('\n'), before.search(/[.!?]\s[^.!?]*$/));
+      if (NEGATION_BEFORE.test(before.slice(Math.max(sentenceStart, 0)))) continue;
+      found.add(m[1]);
+    }
+  }
+  return [...found].sort();
+}
+
+/** What a Git spawn can be told: the compiled agent body, its two preloaded skills and the generated references. */
+function gitSpawnTexts(): CorpusEntry[] {
+  const git = resolveAgentSource('git');
+  const split = splitFrontmatter(git.content);
+  const texts: CorpusEntry[] = [{ path: git.path, content: split?.body ?? git.content }];
+  texts.push(...scanCorpus().filter(e => e.path.startsWith('dist/skills/git/')));
+  const worktreeSupport = path.join(skillsDir(), 'worktree-support', 'SKILL.md');
+  texts.push({ path: 'src/assets/skills/worktree-support/SKILL.md', content: readFileSync(worktreeSupport, 'utf-8') });
+  return texts;
+}
+
+/** Every directed tool the allowlist does not grant. */
+function collectUngrantedTools(directed: readonly string[], granted: readonly string[]): string[] {
+  return directed.filter(tool => !granted.includes(tool));
+}
+
+describe("provider-scope: the compiled Git agent's tools: allowlist (D-GIT-ROW)", () => {
+  const gitInner = (): string => {
     const git = resolveAgentSource('git');
     const split = splitFrontmatter(git.content);
     expect(split, `${git.path}: no frontmatter block at offset 0`).not.toBeNull();
-    const keys = collectFrontmatterKeys(split!.inner);
+    return split!.inner;
+  };
+
+  it('git.md declares a tools: allowlist and no denylist', () => {
+    const keys = collectFrontmatterKeys(gitInner());
     expect(keys.length, 'frontmatter parsed to no keys — the shape changed').toBeGreaterThan(0);
-    expect(
-      keys,
-      'a tools: allowlist on the Git agent is a silent constraint on HOW it can act: the ' +
-      'op bodies instruct Bash and Read, and a frontmatter allowlist that omits either fails at ' +
-      'runtime rather than at build time',
-    ).not.toContain('tools');
+    expect(keys).toContain('tools');
+    expect(keys, 'an allowlist agent never also denies').not.toContain('disallowedTools');
   });
 
-  it('known-bad probe: the same extractor reports a seeded tools: key', () => {
-    // Drives a synthetic frontmatter through the extractor the assertion uses.
-    // Without this, the negative above cannot distinguish "no tools: key" from
-    // "the extractor returns nothing".
-    const seeded = 'name: Git\ndescription: seeded probe\nmodel: haiku\ntools: Read, Bash\n';
-    expect(collectFrontmatterKeys(seeded)).toEqual(['name', 'description', 'model', 'tools']);
+  it('git.md names no tracker server: the install stamps them (D-TRACKER-SERVER-ALLOWLIST)', () => {
+    const entries = collectToolsEntries(gitInner());
+    expect(entries, 'git.md must carry a tools: list').not.toBeNull();
+    expect((entries ?? []).filter(entry => entry.startsWith('mcp__') || entry.includes('*'))).toEqual([]);
+  });
 
-    // And the shapes it must NOT mistake for a declaration: an indented key and a
-    // list item. A collector that reported these would fail the live guard for a
-    // frontmatter that declares no allowlist at all.
+  it('tools: covers every built-in tool the Git bodies and the references they load direct', () => {
+    const granted = collectToolsEntries(gitInner()) ?? [];
+    const texts = gitSpawnTexts();
+    expect(texts.some(t => t.path.startsWith('dist/skills/git/references/')), 'the generated references must be scanned').toBe(true);
+    const directed = [...new Set(texts.flatMap(t => collectDirectedTools(t.content)))].sort();
+    // Not vacuous: the extractor has to see the two tools the bodies really direct.
+    expect(directed, 'the extractor stopped seeing the tools the Git bodies direct').toEqual(expect.arrayContaining(['Read', 'Write']));
+    expect(
+      collectUngrantedTools(directed, granted),
+      'a Git body directs a tool its allowlist removes: the op fails at runtime, not at build time. ' +
+      'Grant the tool in git.mds and the git row, or change the body',
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: the extractor reports a seeded tools: key in both list forms, and ignores a nested one', () => {
+    expect(collectFrontmatterKeys('name: Git\nmodel: haiku\ntools: Read, Bash\n')).toEqual(['name', 'model', 'tools']);
     expect(collectFrontmatterKeys('skills:\n  - devflow:git\n  tools: Read\n')).toEqual(['skills']);
+    expect(collectToolsEntries('name: Git\ntools: ["Bash", "mcp__github"]\n')).toEqual(['Bash', 'mcp__github']);
+    expect(collectToolsEntries('name: Git\ntools:\n  - Bash\n  - Read\nomitClaudeMd: true\n')).toEqual(['Bash', 'Read']);
+    expect(collectToolsEntries('name: Git\nskills:\n  tools: ["Bash"]\n')).toBeNull();
+  });
+
+  it('known-bad probe: a directed tool the allowlist lacks is reported, a granted or negated one is not', () => {
+    const granted = ['Bash', 'Read', 'Write', 'ToolSearch'];
+    expect(collectDirectedTools('Patch the file with the Edit tool.')).toEqual(['Edit']);
+    expect(collectDirectedTools('Patch it: Edit(path, old, new).')).toEqual(['Edit']);
+    expect(collectDirectedTools('Open it with the **Read tool**, never `cat`.')).toEqual(['Read']);
+    expect(collectDirectedTools('Never use the Edit tool on this file.')).toEqual([]);
+    expect(collectDirectedTools('See src/Agent(1) and MyAgent(x).')).toEqual([]);
+    expect(collectUngrantedTools(collectDirectedTools('Search with the Grep tool, then the Write tool.'), granted)).toEqual(['Grep']);
+    expect(collectUngrantedTools(collectDirectedTools('Read it with the Read tool.'), granted)).toEqual([]);
   });
 });
 

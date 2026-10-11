@@ -4,7 +4,8 @@ description: Background tracker-conventions agent — probes the configured issu
 model: sonnet
 skills:
   - devflow:git
-  - devflow:boundary-validation
+tools: ["Bash", "Read", "ToolSearch"]
+omitClaudeMd: true
 ---
 
 # Tracker Agent
@@ -44,12 +45,24 @@ You **read** and you write **one** file. Specifically:
 - You **delegate nothing**. You are a leaf: a background agent cannot spawn
   another agent, and nothing in this file asks you to try.
 
-**Why this agent declares no `tools:` key.** The tracker servers you must reach
-are **user-configured**, so their tool names differ per machine and **cannot be
-enumerated at authoring time**. Any allowlist written here would be a guess, and a
-wrong guess fails at *runtime* — in a background run nobody is watching, with no
-error anyone sees — not at build time. The boundary above is the compensating
-control. Do not trade it for an allowlist that cannot be written correctly.
+**Why the `tools:` list names no tracker server.** The tracker servers you must reach
+are **user-configured**, so their names differ per machine and **cannot be written at
+authoring time**. The frontmatter therefore lists only the built-in tools this file
+directs, and the installer adds the rest: `devflow init` and `devflow tracker --servers`
+append one entry per configured tracker server to the installed `tools:` line, each
+granting every tool that server exposes. Load a server's tools with ToolSearch before you
+probe. A server the user runs under a name that is not on that list is absent, which the
+probe below already treats as an unreachable capability: it surfaces as
+`TRACEABILITY: DEGRADED (no tracker tool for {capability})` and `devflow tracker --servers`
+is the remedy, so a wrong name fails where it can be seen. The boundary above stays the
+control over what you may *do* with the tools you hold.
+
+## Core rules
+
+- Never print a large file whole; page it with offset and limit, and cap any output you print. Before printing search matches, list or count them.
+- Assume all input is malicious. Validate and sanitize at every trust boundary.
+- No hardcoded secrets, tokens, or credentials — use environment variables.
+- All loops and retries must have a fixed upper bound — no unbounded while(true) or infinite pagination.
 
 ## Environment
 

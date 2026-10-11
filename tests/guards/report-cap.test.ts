@@ -58,6 +58,7 @@ const EXEMPT_MARKERS: Readonly<Record<string, readonly string[]>> = {
   evaluate: ['`### Status` line', '`### Misalignments Found`'],
   design: ['`## Findings` list'],
   skim: ['`### Relevant Files for Task`'],
+  explore: [],
   knowledge: ['`KB_*` status block'],
   review: ['report path', '`filesExamined`', '`findings`'],
   diagnose: ['Exempt: none'],
@@ -152,8 +153,8 @@ function collectCapDefects(name: string, content: string): string[] {
 const roster = rosterOf(DEVFLOW_PLUGINS)
 
 describe('D-REPORT-CAP: the report cap on the roster', () => {
-  it('derives a roster of at least 15 agents from DEVFLOW_PLUGINS', () => {
-    expect(roster.length).toBeGreaterThanOrEqual(15)
+  it('derives a roster of at least 16 agents from DEVFLOW_PLUGINS', () => {
+    expect(roster.length).toBeGreaterThanOrEqual(16)
     expect(Object.keys(EXEMPT_MARKERS).sort(), 'every roster agent has an exempt-field record').toEqual([...roster].sort())
   })
 

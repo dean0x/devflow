@@ -45,8 +45,6 @@ Parse from `COMMAND_INPUT`:
 
 **Produces:** RELEASE_CONFIG, CONFIG_STATE (`learned` | `fresh`)
 
-**Load Companion Skills** — Load via Skill tool: `devflow:git`. If a skill fails to load, continue without it.
-
 **Continuation detection**: Check `.release/.progress.json`. If exists, an interrupted release is in progress. Offer user:
 - **Resume**: continue from last checkpoint (skip phases already completed)
 - **Restart**: clean start (delete `.release/.progress.json` and begin from Phase 1)
@@ -190,6 +188,9 @@ Confirm with user via AskUserQuestion before executing:
 Sequential execution with progress checkpoints:
 1. **Version bumps** — write new version to configured files
 2. **Changelog update** — move Unreleased section to versioned entry (if configured)
+
+**Load Companion Skills** (D-RELEASE-GIT-LOAD-LATE) — Load via Skill tool: `devflow:git`, here and not earlier: steps 1–2 only write files and `--dry-run` halts after Phase 4, so neither carries the skill. A resume that skips step 3 loads it before its next main-thread git write. If a skill fails to load, continue without it.
+
 3. **Release commit** — `chore(release): v{VERSION}` (conventional commit)
 4. **Tag and GitHub Release** — spawn `Agent(subagent_type="Git")` with `create-release` operation (the agent reads `.devflow/conventions.md` for tag format and release title conventions; compliance defaults when absent); only when `EVIDENCE_POLICY` is `required`, also pass `COMMIT_LIST` and `SHIPPED_ISSUES` from RELEASE_EVIDENCE, and `TRACEABILITY_EXCEPTIONS` when composed (Record, or the no-ask exempt rule), as inputs so the agent includes them in the release notes body.
 4b. **Back-link shipped issues** (only when `EVIDENCE_POLICY` is `required`) — spawn `Agent(subagent_type="Git")` with `backlink-shipped-issues` operation, passing `VERSION` and `SHIPPED_ISSUES`; posts a marker-deduped comment on each issue (bounds and throttle enforced by the operation); degrade gracefully (D4) on any API failure — never block the release

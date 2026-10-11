@@ -45,6 +45,10 @@ Devflow installs machine-wide, into the Claude Code directory and `~/.devflow`:
 
 `init`, the `ambient`, `memory` and `proxy` toggles, and `uninstall` add and remove only the hooks devflow wrote in `settings.json`. A hook is devflow's only when its command ends in `/scripts/hooks/run-hook <name>`, or in a form an older release wrote (such as `/scripts/hooks/session-start-memory.sh`). A hook of yours whose command merely mentions a devflow hook's name (`capture-turn`, `memory-worker`, `ensure-proxy`, ...) is never touched, and removing a devflow hook leaves the other hooks in its matcher group in place, in order.
 
+### Your Explore agent stays yours
+
+devflow ships an `Explore` agent that replaces Claude Code's built-in Explore in every session, plan mode included. Claude Code matches agents by exact name, so a lowercase `explore` is a different agent. If an agent file under your agents directory already defines `Explore`, `init` skips devflow's copy and warns. `uninstall` removes devflow's copy, and the built-in applies again.
+
 ## Plugin Management
 
 ```bash
@@ -145,10 +149,12 @@ Select which issue tracker devflow's traceability speaks to. `github` is the def
 npx devflow-kit tracker --status            # Show the provider, this repo's effective one and conventions; re-arms inference
 npx devflow-kit tracker --set jira          # Set the machine's default provider
 npx devflow-kit tracker --set github        # Back to the default (there is no --no-tracker)
+npx devflow-kit tracker --servers atlassian,linear  # Tracker servers the Git and Tracker agents may call
+npx devflow-kit tracker --servers default           # Back to the default list
 npx devflow-kit tracker                     # No flag: print usage and the valid provider IDs
 ```
 
-Valid provider IDs: `github`, `jira`, `linear`. The ID is matched **exactly** — `JIRA`, `jira ` and `jira-cloud` are rejected with an error rather than repaired, so a typo never silently selects a tracker you did not name. `--status` wins when both flags are passed.
+Valid provider IDs: `github`, `jira`, `linear`. The ID is matched **exactly** — `JIRA`, `jira ` and `jira-cloud` are rejected with an error rather than repaired, so a typo never silently selects a tracker you did not name. `--status` wins over `--set` and `--servers`; `--set` and `--servers` may be combined.
 
 The machine default is stored in `~/.devflow/manifest.json` under `features.tracker.provider`. A malformed value in that file is self-healed to `github` silently on read.
 
@@ -157,6 +163,8 @@ The machine default is stored in `~/.devflow/manifest.json` under `features.trac
 **Every install carries every provider.** All 48 generated reference files are installed under the `devflow:git` skill — every provider's mechanics, the tracker contract `references/tracker/_contract.md`, the tool-call contract `references/tracker/_mcp.md` and the PR-host mechanics — plus the Tracker agent. `devflow tracker --set <id>` therefore installs nothing: it writes the manifest, re-arms the attempt counters and writes the `~/.devflow/.tracker.enabled` sentinel (the provider's name; removed for `github`), in that order.
 
 `devflow tracker --status` prints the machine provider; an `Effective:` line when the current directory's repository selects one — `Effective:   jira (project)`; whether the effective provider's conventions file has been learned, and its path — `none` on GitHub, which learns no conventions; and a `Mechanics:` line — `installed (N file(s))`, `MISSING — run devflow init`, or `unreadable (<errno>)`. The three are different facts with different remedies: nothing installed is fixed by an install, a permissions problem is not.
+
+**Tracker servers.** The Git and Tracker agents hold a tool allowlist, and the installer appends one `mcp__<name>` entry per tracker server to their installed `tools:` line. The default list is `atlassian`, `jira`, `claude_ai_Atlassian`, `linear`, `claude_ai_Linear` (a claude.ai connector is `claude_ai_<Name>`); `github` is left out. `--servers` stores the list in `features.tracker.servers` and re-stamps the installed agents at once; `default` removes the key. Names match `^[A-Za-z0-9_-]{1,64}$`, may not contain `__`, and are capped at 32. A server under a name not on the list is unreachable and reports `TRACEABILITY: DEGRADED (no tracker tool for {capability})`. `--status` prints a `Servers:` line, and `devflow init --reset` returns the list to the default.
 
 ### When the wizard asks
 
@@ -182,13 +190,14 @@ Upgrading moves an existing `~/.devflow/tracker.md` to `~/.devflow/tracker/{prov
 
 ### The inference attempt cap
 
-Background inference is capped at **5** attempts per provider, counted in `~/.devflow/.tracker.{provider}.attempts`, so a permanently unreachable tracker cannot respawn a background agent at every session start forever — and one broken provider cannot use up another's attempts. Every `devflow init` run and both `devflow tracker` subcommands reset every provider's counter and give inference another five tries:
+Background inference is capped at **5** attempts per provider, counted in `~/.devflow/.tracker.{provider}.attempts`, so a permanently unreachable tracker cannot respawn a background agent at every session start forever — and one broken provider cannot use up another's attempts. Every `devflow init` run and `devflow tracker --set` and `--status` reset every provider's counter and give inference another five tries:
 
 | Command | Re-arms? |
 |---|---|
 | `devflow init` (any run, any path) | Yes |
 | `devflow tracker --set <id>` | Yes |
 | `devflow tracker --status` | Yes — asking why nothing is being learned is what hands back another five tries |
+| `devflow tracker --servers <names>` | No |
 
 Deleting a `~/.devflow/.tracker.{provider}.attempts` file by hand has the same effect for that provider.
 
@@ -294,7 +303,7 @@ npx devflow-kit flags --unset <ids>      # Reset flag(s) to neutral, comma-separ
 
 `--enable` and `--disable` accept boolean flags only. Non-boolean flags (enum, number, string) use `--set id=value`. Passing a non-boolean id to `--enable`/`--disable` prints an error and redirects to `--set`.
 
-All 31 flags by kind and devflow default:
+All 32 flags by kind and devflow default:
 
 | Flag ID | Kind | Target | Devflow Default |
 |---------|------|--------|-----------------|
@@ -302,6 +311,7 @@ All 31 flags by kind and devflow default:
 | `tool-search` | boolean | env `ENABLE_TOOL_SEARCH` | `true` |
 | `lsp` | boolean | env `ENABLE_LSP_TOOL` | `true` |
 | `prompt-caching-1h` | boolean | env `ENABLE_PROMPT_CACHING_1H` | `true` |
+| `subagent-cache-5m` | boolean | setting `subagentPromptCacheTtl` | `true`⁵ |
 | `show-turn-duration` | boolean | setting `showTurnDuration` | `true` |
 | `clear-context-on-plan` | boolean | setting `showClearContextOnPlanAccept` | `true` |
 | `disable-bundled-skills` | boolean | setting `disableBundledSkills` | `false` |
@@ -337,6 +347,8 @@ All 31 flags by kind and devflow default:
 ³ `bash-max-timeout-ms` raises the ceiling on a foreground Bash command's `timeout` (600000 ms upstream; accepted range 600000–7200000). Agents run builds and tests in the foreground under an explicit timeout and report BLOCKED when a run that cannot be split exceeds the ceiling; `devflow flags --set bash-max-timeout-ms=900000` is the remedy they name. Unsetting the flag deletes `BASH_MAX_TIMEOUT_MS`.
 
 ⁴ `auto-compact-window` is opt-in: devflow writes `CLAUDE_CODE_AUTO_COMPACT_WINDOW` only when you set it (accepted range 100000–1000000), `devflow init` never does, and unsetting the flag deletes the key. It is not recommended yet: a smaller window compacts sooner, and the resume directive that follows a compaction has not been checked against a forced mid-`/implement` compaction. devflow does not write or manage the percent-based auto-compact override.
+
+⁵ `subagent-cache-5m` writes `"5m"`, so subagents write 5-minute prompt-cache entries while the main session keeps the 1-hour TTL of `prompt-caching-1h`. Disabling or uninstalling deletes the key only when it holds `"5m"`. When the key already holds another value (say `"1h"`), `devflow init` and the flags TUI record the flag off and keep your value; `init --reset` writes `"5m"`.
 
 ## External Model Routing (Devflow Proxy)
 

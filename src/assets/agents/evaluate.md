@@ -1,7 +1,7 @@
 ---
 name: Evaluate
 description: Validates implementation aligns with original request and plan. Catches missed requirements, scope creep, and intent drift. Reports misalignments for Code agent to fix.
-model: opus
+model: sonnet
 effort: medium
 skills:
   - devflow:worktree-support
@@ -12,6 +12,7 @@ tools:
   - Glob
   - Bash
   - Write
+omitClaudeMd: true
 ---
 
 # Evaluate Agent
@@ -87,6 +88,11 @@ Return structured alignment status:
 ```
 
 Report cap: final message at most about 1,500 tokens; longer material goes to a unique `mktemp`-style temp file written with Write (your Bash is git read-only) and the message gives its path. Exempt, inline in full: the `### Status` line and the `### Misalignments Found` table.
+
+## Core rules
+
+- Never print a large file whole; page it with offset and limit, and cap any output you print. Before printing search matches, list or count them.
+- Assume all input is malicious. Validate and sanitize at every trust boundary.
 
 ## Boundaries
 

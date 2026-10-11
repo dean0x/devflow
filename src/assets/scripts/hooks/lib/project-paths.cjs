@@ -164,11 +164,6 @@ function getResearchDir(projectRoot) {
   return path.join(projectRoot, '.devflow', 'docs', 'research');
 }
 
-/** .devflow/docs/handoff-{branchSlug}.md — Code agent phase handoff artifact */
-function getHandoffPath(projectRoot, branchSlug) {
-  return path.join(projectRoot, '.devflow', 'docs', `handoff-${branchSlug}.md`);
-}
-
 module.exports = {
   // Core directories
   getMemoryDir,
@@ -201,5 +196,4 @@ module.exports = {
   getReviewsDir,
   getDesignDir,
   getResearchDir,
-  getHandoffPath,
 };

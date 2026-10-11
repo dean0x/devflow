@@ -557,11 +557,11 @@ describe('GAP-1: slug (form A) ↔ frontmatter name: (form B)', () => {
 
 describe('GAP-2: agentType: values in dist ↔ declared roster', () => {
   /**
-   * subagent_type="Explore" is a Claude Code built-in — not a devflow agent,
-   * not in the roster, must not be flagged, and must never be renamed.
+   * Explore is a devflow agent that overrides the Claude Code built-in of the same
+   * name (D-EXPLORE-OVERRIDE). The prose commands spawn it by type name and it is
+   * not a member of the dynamic roster, so a workflow `agentType` of Explore would
+   * be held against the roster like any other type: none is expected.
    */
-  const BUILTINS_NORMALIZED = new Set(['explore'])
-
   it('agentType values in dist match the _roster.mds roster exactly (fail-loud when dist absent)', () => {
     // FAIL-LOUD: requireDistFiles() throws when dist is absent — not a skip.
     const distFiles = requireDistFiles()
@@ -574,9 +574,7 @@ describe('GAP-2: agentType: values in dist ↔ declared roster', () => {
     for (const file of distFiles) {
       const content = readFileSync(path.join(DIST_COMMANDS_DIR, file), 'utf-8')
       for (const name of extractAgentTypes(content)) {
-        if (!BUILTINS_NORMALIZED.has(normalize(name))) {
-          agentTypesInDist.add(name)
-        }
+        agentTypesInDist.add(name)
       }
     }
 
@@ -625,11 +623,10 @@ describe('GAP-2: agentType: values in dist ↔ declared roster', () => {
      * slugs case-INSENSITIVELY, and GAP-1 ties slugs to form B — but nothing
      * enforced exact case on the literal itself. subagent_type="CODE" would
      * pass both while failing at spawn time. This closes that hole: every
-     * literal must byte-equal an actual frontmatter name: value (or a
-     * Claude Code built-in).
+     * literal must byte-equal an actual frontmatter name: value. Explore is
+     * one: devflow's explore.md ships `name: Explore`, so the built-in's name
+     * needs no exemption.
      */
-    const BUILTINS_EXACT = new Set(['Explore'])
-
     // Truth set: the real frontmatter name: values via the resolver, not a derived transform.
     const agents = resolveAllAgents()
     expect([...agents.keys()]).toEqual(expect.arrayContaining(getAllAgentNames()))
@@ -647,7 +644,7 @@ describe('GAP-2: agentType: values in dist ↔ declared roster', () => {
       for (const m of content.matchAll(re)) {
         matchCount++
         const name = m[1]
-        if (BUILTINS_EXACT.has(name) || formBNames.has(name)) continue
+        if (formBNames.has(name)) continue
         violations.push(
           `  ${displayPath}: subagent_type "${name}" does not byte-equal any agent frontmatter name:`,
         )
@@ -779,6 +776,27 @@ describe('GAP-3: orchestrator charter integrity', () => {
     const charter = readFileSync(CHARTER_PATH, 'utf-8')
     const violations = collectCharterContentViolations(charter)
     expect(violations, `Orchestrator charter content violations:\n  ${violations.join('\n  ')}`).toEqual([])
+  })
+
+  /**
+   * D-CHARTER-ROSTER-ONLY. The open-ended "delegate all of it" left the orchestrator
+   * to improvise a type for work no routing line covered, and it reached for
+   * general-purpose, which inherits the session model and has no roster discipline.
+   * The last routing line sends everything else to the closest roster agent. It names
+   * no model: dispatch is by kind of work, and tiers live in each agent's frontmatter.
+   */
+  it('routing ends with a roster-only fallback that names no model', () => {
+    const charter = readFileSync(CHARTER_PATH, 'utf-8')
+    const lines = charter.split('\n')
+    const routingStart = lines.findIndex(line => line.startsWith('Routing (Agent tool)'))
+    expect(routingStart).toBeGreaterThan(-1)
+    const routing: string[] = []
+    for (const line of lines.slice(routingStart + 1)) {
+      if (!line.startsWith('- ')) break
+      routing.push(line)
+    }
+    expect(routing[routing.length - 1]).toBe('- Anything else: the closest roster agent, never general-purpose.')
+    expect(routing.join('\n')).not.toMatch(/\b(?:opus|sonnet|haiku)\b/i)
   })
 
   it('known-bad probe: a charter without the bounds, without a report figure, without OPERATION on the Code line, or with "full plan" is reported', () => {

@@ -140,6 +140,13 @@ import type {
  * 28 ch each (the settings `SITE` ahead of `## Project`). Every git.md-carrying row
  * fell again to min(previous ceiling, measurement + 80).
  *
+ * #445 (part 2: the Git and Tracker tool allowlists) replaced the 17-name `disallowedTools` block of
+ * git.md with a one-line `tools:` allowlist, which took 251 ch out of dist/agents/git.md. Every
+ * git.md-carrying ceiling was lowered by exactly that cut, from 35_554, 62_433, 72_795, 73_391 and
+ * 47_961 to their present values. The digest commit before it had added a net 2 ch to git.md
+ * (35_474 to 35_476), so each measurement fell 249 ch rather than 251: BUDGET_GIT_MD, the GitHub row
+ * and the PR-host row now sit 78 ch under their ceilings (from 80), the Jira and Linear rows 56 ch (from 58).
+ *
  * The 80 ch is general headroom, not a reservation: no line of it is spoken for,
  * and an addition still funds itself with a cut. Each ceiling was set as
  * min(its previous ceiling, measured actual + 80), so a row's headroom drifts away
@@ -189,7 +196,7 @@ import type {
  * pattern in the same commit; that is the permitted direction for a ceiling, and the
  * manifest guard's probe still proves an INCREMENT would go red.
  */
-const BUDGET_GIT_MD = 35_554;
+const BUDGET_GIT_MD = 35_303;
 
 /**
  * Design-time derivation: the PRE-SPLIT capture of skills/git/SKILL.md, less the
@@ -243,7 +250,7 @@ const BUDGET_SKILL_MD = 6_445;
  * tests/fixtures/numeric-floors.json; lowering re-pins the value AND the pattern
  * in the same commit.
  */
-const BUDGET_LOADED_SET = 62_433;
+const BUDGET_LOADED_SET = 62_182;
 
 /**
  * THE JIRA-SCOPED loaded-set ceiling — a spawn under the Jira provider.
@@ -273,7 +280,7 @@ const BUDGET_LOADED_SET = 62_433;
  * addition to the contract or to a Jira mechanics file must fund itself with a cut
  * rather than reach for slack. Re-derived by #425 to 72_795, the same
  * git.md cut with `tracker/_contract.md` billed once per spawn beside the tool-call contract.
- * The row measures 72_737 today, 58 ch under this ceiling. Trimming
+ * The row measures 72_488 today, 56 ch under the 72_544 ceiling #445 left it. Trimming
  * `references/tracker/_mcp.md` is the honest first move: it is contract prose, it
  * is the single largest term this row adds over the GitHub one, and a pass over it
  * is cheaper than another ceiling.
@@ -281,7 +288,7 @@ const BUDGET_LOADED_SET = 62_433;
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-jira` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_JIRA = 72_795;
+const BUDGET_LOADED_SET_JIRA = 72_544;
 
 /**
  * THE LINEAR-SCOPED loaded-set ceiling — a spawn under the Linear provider.
@@ -297,7 +304,7 @@ const BUDGET_LOADED_SET_JIRA = 72_795;
  * ensure-traceable-issue) plus the 80 ch general headroom above: 75_940. Re-derived by
  * #393 from a measured 75_573 (git.md -315 ch, the site rung +28 ch): 75_653. Re-derived by #423 from a measured 73_851 (the same
  * two preloaded-skill cuts as the GitHub row): 73_931. Re-derived by #425 to
- * 73_391, as the Jira row. The row measures 73_333 today, 58 ch under this ceiling. This is the
+ * 73_391, as the Jira row. The row measures 73_084 today, 56 ch under the 73_140 ceiling #445 left it. This is the
  * LARGEST of the four ceilings but not necessarily the binding one: a character added
  * to git.md is a character added to every row, and the row with the least headroom
  * binds. Each ceiling was set as min(its previous ceiling, measured actual + 80), so
@@ -318,7 +325,7 @@ const BUDGET_LOADED_SET_JIRA = 72_795;
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-linear` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_LINEAR = 73_391;
+const BUDGET_LOADED_SET_LINEAR = 73_140;
 
 /**
  * THE PR-HOST loaded-set ceiling — the worst-case cost of a spawn that runs one of
@@ -364,7 +371,7 @@ const BUDGET_LOADED_SET_LINEAR = 73_391;
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-pr-host` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_PR_HOST = 47_961;
+const BUDGET_LOADED_SET_PR_HOST = 47_710;
 
 /**
  * THE PER-OP PR-HOST CAP — no single PR-host operation may load more than this,

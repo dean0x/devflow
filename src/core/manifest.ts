@@ -82,9 +82,11 @@ export interface ManifestData {
      */
     compliance: ComplianceFeatureState;
     /**
-     * Issue tracker provider selection (enum github|jira|linear, default github).
+     * Issue tracker provider selection (enum github|jira|linear, default github) and the
+     * optional list of tracker tool servers the Git and Tracker agents may call.
      * Absent in pre-tracker manifests — readManifest self-heals to
-     * {provider:'github'} via normalizeTrackerFeature.
+     * {provider:'github'} via normalizeTrackerFeature; an absent `servers` is the default
+     * list and an invalid one heals to it (D-TRACKER-SERVER-ALLOWLIST).
      *
      * NEVER add `tracker` to the hard-null validation set below: a pre-tracker
      * manifest — i.e. EVERY existing install — would then read as "no prior
@@ -162,11 +164,16 @@ function parseManifestFlags(
  * - features.proxy absent → false
  * - features.compliance absent/malformed → {enabled:false, frameworks:[]}
  * - features.tracker absent/malformed → {provider:'github'}
+ * - features.tracker.servers absent → the default list; invalid → the default list, reported
+ *   through `opts.onWarning` when the caller supplies one (this reader has no output channel)
  *
  * D39: heal-write failure returns the migrated in-memory manifest (not null).
  * The on-disk format remains unhealed; next read triggers another attempt.
  */
-export async function readManifest(devflowDir: string): Promise<ManifestData | null> {
+export async function readManifest(
+  devflowDir: string,
+  opts?: { readonly onWarning?: (message: string) => void },
+): Promise<ManifestData | null> {
   const manifestPath = path.join(devflowDir, 'manifest.json');
   try {
     const content = await fs.readFile(manifestPath, 'utf-8');
@@ -273,7 +280,7 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
         // Healing here is silent and emits no DEGRADED: that is the correct
         // self-heal behaviour, and a different condition from a per-repo config
         // value outside the domain (which does emit `unknown tracker provider`).
-        tracker: normalizeTrackerFeature(features.tracker),
+        tracker: normalizeTrackerFeature(features.tracker, opts?.onWarning),
       },
       installedAt: data.installedAt as string,
       updatedAt: data.updatedAt as string,

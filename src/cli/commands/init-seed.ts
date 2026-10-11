@@ -16,6 +16,7 @@
 import {
   resolveExistingViewMode,
   settingHoldsManagedShape,
+  respectUserOwnedSettings,
   FLAG_REGISTRY,
   defaultValueOf,
   readViewMode,
@@ -311,7 +312,9 @@ export function resolveInitSeed(
   // seedManifest?.features.flags may be absent at runtime on very old manifests not yet
   // healed — ?? null collapses to fresh-install behavior (all flags at registry defaults).
   const manifestFlags: FlagsRecord | null = seedManifest?.features.flags ?? null;
-  const flags = resolveSeedFlags(manifestFlags);
+  const flags = respectUserOwnedSettings(
+    resolveSeedFlags(manifestFlags), manifestFlags, settingsSnapshot,
+  );
 
   const manifestPlugins: string[] | null = seedManifest !== null ? seedManifest.plugins : null;
   const { workflowPlugins, languagePlugins } = resolveSeedPlugins(

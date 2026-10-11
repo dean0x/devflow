@@ -5,7 +5,7 @@ description: "Use when working on agent-models.json, frontmatter rewriting, dorm
 category: architecture
 directories: [src/core/external-models.ts, src/core/agent-models.ts, src/core/agent-state.ts, src/core/agent-frontmatter.ts, src/core/model-discovery.ts, src/core/cache.ts, src/cli/commands/agents.ts, src/cli/agents-view, src/cli/tui]
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-11
 ---
 
 # External Model Routing — Per-Agent Model Config, Agents TUI & Model Discovery
@@ -34,6 +34,7 @@ updated: 2026-10-10
 - **KB-INV-8** The TUI reducer and renderer are pure; `terminal.ts` is a thin adapter over the shared `runTui` driver, and its event loop is bounded by `MAX_KEYPRESSES`.
 - **KB-INV-9** The model cache path comes only from `modelCacheDir()`, entries are 0600 in a 0700 directory, and every envelope parse goes through `parseRawEnvelope`.
 - **KB-INV-10** `reapplyAgentMapping` degrades, never throws: bad entries, missing files and a registry gap become warnings and result buckets.
+- **KB-INV-11** The only post-build edit to a `tools:` line is `stampAgentTools`, kept apart from `rewriteAgentFrontmatter` (KB-AP-7), and it edits whole-server entries (`mcp__<server>`) alone: a tool-level entry (`mcp__<server>__<tool>`) is never stamped, replaced or removed, so `devflow agents` and the proxy reapply a mapping without touching tool policy.
 
 ## Overview
 
@@ -49,7 +50,7 @@ The mapping is **deviations-only**: an agent on its shipped defaults is omitted.
 
 ### Effort (D-SHIPPED-EFFORT)
 
-A mapping effort level wins; a mapping `inherit` is a stored value that yields no `effort:` line and does not fall back; an absent effort falls back to the shipped effort, so a reapply never strips an effort an agent ships. `inherit` is effort-only (`--model inherit` is a separate matter). Learning and Tracker ship no `effort:` line; every other agent ships one (Git ships a medium effort). An unconfigured agent runs at its shipped effort and its EFFORT cell reads `default (<effort>)`; one that ships none follows the session and reads plain `default`; `inherit` is the only stored value that makes an effort-shipping agent follow the session. The shipped table is `tests/fixtures/agent-config.ts` (Tracker is listed as exempt), and each row moves with the frontmatter line it describes.
+A mapping effort level wins; a mapping `inherit` is a stored value that yields no `effort:` line and does not fall back; an absent effort falls back to the shipped effort, so a reapply never strips an effort an agent ships. `inherit` is effort-only (`--model inherit` is a separate matter). Learning and Tracker ship no `effort:` line; every other agent ships one (Git ships a medium effort). An unconfigured agent runs at its shipped effort and its EFFORT cell reads `default (<effort>)`; one that ships none follows the session and reads plain `default`; `inherit` is the only stored value that makes an effort-shipping agent follow the session. The shipped table is `tests/fixtures/agent-config.ts` (Tracker has its own row, a deliberate constant pinned equal to the hook's `TRACKER_MODEL` literal and to `loadShippedAgentDefaults()['tracker'].model`; the exempt-agent map is gone), and each row moves with the frontmatter line it describes. Two rows changed tier or joined the roster: Evaluate ships sonnet (its Opus tier had no recorded rationale), and Explore is devflow's override of the Claude Code built-in of that name, sonnet at high effort with Read and Bash only. Because `Explore` is a registry agent, `devflow agents` can override it like any other; its install is skipped when a non-devflow agent already defines that exact name (installer-shadowing KB).
 
 ### Workers (D-WORKER-AGENTS)
 
@@ -114,6 +115,8 @@ A core leaf module (no CLI or adapter imports, imports only `external-models.ts`
 - **`RewriteResult.changed`** is a byte comparison (`newContent !== content`), not a semantic one.
 - **Charset gate**: the model name must pass `MODEL_NAME_RE` before the file is touched; an invalid name is the `invalid-model` error, which `reapplyAgentMapping` reports as an `invalidMapping`.
 - **Only `model:` and `effort:`** are rewritten (KB-AP-7); an agent holds an allowlist or a denylist, never both, and those ship from its source file.
+
+The tool-line half lives beside it, as separate pure functions (`D-WHOLE-SERVER-ENTRY`): `isWholeServerTool`, `stampAgentTools(content, extraTools)`, `readStampedTools` and `carryStampedTools(source, installed)`. Claude Code's allowlist has no pattern form for a connected tool server, so a server is granted by name (`mcp__<server>`, 1-64 characters from `[A-Za-z0-9_-]`, no `__`, which is what separates a server from its tool). `stampAgentTools` replaces the whole-server entries of the first block's inline `tools: [...]` line and touches no other byte; it is idempotent, and it rejects (never repairs) a non-whole-server entry (`invalid-tool`), a file with no inline `tools:` line (`no-tools-line`; a block list is not edited) and malformed frontmatter. `carryStampedTools` is the converge half, as `carryAgentOverrides` is for `model:` and `effort:`: a variant switch carries the installed copy's stamp so a repeat run compares equal. The callers (Git and Tracker only) are in the tracker-feature KB.
 - **D-EFR-1, surgical effort removal** (`effort: null`): removes the matched line plus exactly one adjacent EOL, with no global `\n{2,}` collapse. If effort is the last line it swallows the preceding EOL; mid-body it swallows the trailing one; first and only line, it clears the front-matter body to `''`.
 
 ## Agents TUI
@@ -168,7 +171,7 @@ A pure-reducer, pure-renderer, thin-shell split:
 
 - `src/core/external-models.ts` — `CLAUDE_MODEL_ALIASES`, `ClaudeModelAlias`, `isClaudeModelName()`, `isDormantExternalModel()` (leaf module)
 - `src/core/agent-state.ts` — `AgentState`, `AGENT_STATE_LABELS`, `classifyAgentState()`, `formatEffortDisplay()`
-- `src/core/agent-frontmatter.ts` — `rewriteAgentFrontmatter()`, `readFrontmatterModel()`, `readFrontmatterEffort()`, `isValidModelName()` / `MODEL_NAME_RE`
+- `src/core/agent-frontmatter.ts` — `rewriteAgentFrontmatter()`, `readFrontmatterModel()`, `readFrontmatterEffort()`, `isValidModelName()` / `MODEL_NAME_RE`, `stampAgentTools()` / `readStampedTools()` / `carryStampedTools()` / `isWholeServerTool()`
 - `src/core/agent-models.ts` — `EFFORT_LEVELS`, `StoredEffort` / `EFFORT_INHERIT`, `WORKER_AGENTS` / `isWorkerAgent()` / `validateWorkerValue()`, `agentOnlyMapping()`, `hasAgentMappingEntries()`, `LEGACY_AGENT_KEYS`, `canonicaliseAgentKeys()`, `parseAgentMappingEnvelope()`, `readAgentMapping()`, `saveAgentMapping()`, `resolveEffective()`, `loadShippedAgentDefaults()`, `carryAgentOverrides()`, `reapplyAgentMapping()`, `revertExternalAgents()`, `countExternalMappedAgents()`
 - `src/assets/scripts/hooks/background-memory-update` — the only runtime reader of `agents.memory`: validates each field, falls back to the `WORKER_AGENTS.memory` row, passes effort on the lean argv only
 - `src/core/model-discovery.ts` — `discoverExternalModels()`, `getExternalModelsCached()`, `parseModelsJson()`, exported test constants

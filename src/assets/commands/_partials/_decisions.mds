@@ -56,9 +56,9 @@ Attempt to read `{ledger}/.devflow/learning/index.md`.
 
 The index is one direct file read, written at render time by `render-decisions.cjs` alongside `decisions.md`/`pitfalls.md` — no `.cjs` script runs here, and the index's own footer names the files that hold each entry's full body.
 
-**Step 2 — Apply decisions using `devflow:apply-decisions`:**
+**Step 2 — Agents apply the decisions:**
 
-When `DECISIONS_CONTEXT` is not `(none)`, follow `devflow:apply-decisions` to scan the index, identify plausibly-relevant entries, Read full entry bodies on demand, and cite verbatim IDs in downstream agent prompts and reasoning.
+When `DECISIONS_CONTEXT` is not `(none)`, hand it only to the agents whose contract declares it. They follow `devflow:apply-decisions`: scan the index, identify plausibly-relevant entries, Read full entry bodies on demand, and cite verbatim IDs in their reasoning. A host that uses the index in its own thread says so in its own step.
 
 <!-- learning:end -->
 @end

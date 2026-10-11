@@ -75,6 +75,7 @@ import {
   commandSourceDirs,
   learningOffDir,
 } from '../../core/assets.js';
+import { carryStampedTools } from '../../core/agent-frontmatter.js';
 import { carryAgentOverrides, reapplyAgentMapping } from '../../core/agent-models.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import type { LearningVariantKind } from '../../core/learning-variants.js';
@@ -230,6 +231,12 @@ async function firstReadable(candidates: readonly string[]): Promise<{ file: str
  * stays the authority: it reads agent-models.json after the converge and the carry only agrees
  * with it (see carryAgentOverrides).
  *
+ * D-TRACKER-SERVER-ALLOWLIST, composition: the installed Git agent carries the tracker-server
+ * entries the install stamped onto its `tools:` line, and the variant source carries none.
+ * The stamp is carried the same way (carryStampedTools), so a variant switch keeps the list
+ * and a copy already holding the right variant and its stamp compares byte-equal. Install
+ * and `devflow tracker --servers` are the only writers of the list; a converge never changes it.
+ *
  * Pure.
  */
 function withInstalledState(
@@ -241,7 +248,8 @@ function withInstalledState(
 ): Buffer {
   if (kind === 'agents') {
     const sourceText = source.toString('utf-8');
-    const carried = carryAgentOverrides(sourceText, installed.toString('utf-8'));
+    const installedText = installed.toString('utf-8');
+    const carried = carryStampedTools(carryAgentOverrides(sourceText, installedText), installedText);
     return carried === sourceText ? source : Buffer.from(carried, 'utf-8');
   }
   return LANGUAGE_STAMPED_COMMANDS.includes(fileName.replace(/\.md$/, ''))

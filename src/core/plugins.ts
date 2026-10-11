@@ -130,28 +130,18 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-plan',
     description: 'Unified design planning with gap analysis and design review',
     commands: ['/plan'],
-    agents: ['git', 'skim', 'synthesize', 'design'],
+    agents: ['git', 'skim', 'synthesize', 'design', 'explore'],
     skills: ['gap-analysis', 'design-review', 'patterns', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
     // D-CHARTER-BOUNDED-INLINE: /plan's main thread orchestrates and loads no
     // companion skills, so `requires:` lists only skills this plugin's command,
     // agents and skills reference. `software-design` and `test-driven-development`
     // have no reader here; the closure guard's reverse arm rejects an unread entry.
+    // `docs-framework` is read: Phase 14 loads it at the step that names the
+    // design document (D-DOCS-NAMES-AUTHORITY).
     requires: [
       'apply-decisions',
-      'architecture',
-      'complexity',
-      'consistency',
-      'database',
-      'dependencies',
       'docs-framework',
-      'documentation',
       'git',
-      'performance',
-      'regression',
-      'reliability',
-      'review-methodology',
-      'security',
-      'testing',
     ],
     rules: [],
   },
@@ -193,7 +183,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     // no companion skills, so `requires:` lists only skills this plugin's command,
     // agents and skills reference. `quality-gates` and `software-design` have no
     // reader here; the closure guard's reverse arm rejects an unread entry.
-    requires: ['apply-decisions', 'docs-framework', 'git'],
+    requires: ['apply-decisions', 'git'],
     rules: [],
   },
   {
@@ -201,7 +191,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Process and fix code review issues with blast-radius triage, Code agent fixes, and Validate agent verification',
     commands: ['/resolve'],
     agents: ['git', 'triage', 'code', 'simplify', 'validate', 'test', 'knowledge'],
-    skills: ['patterns', 'security', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge', 'apply-decisions'],
+    skills: ['patterns', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge', 'apply-decisions'],
     requires: [
       'architecture',
       'boundary-validation',
@@ -217,6 +207,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
       'regression',
       'reliability',
       'review-methodology',
+      'security',
       'software-design',
       'test-driven-development',
       'testing',
@@ -227,16 +218,20 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-debug',
     description: 'Debugging workflows with competing hypothesis investigation via parallel subagents',
     commands: ['/debug'],
-    agents: ['git', 'synthesize', 'simplify', 'knowledge'],
+    agents: ['git', 'synthesize', 'simplify', 'knowledge', 'explore', 'code'],
     skills: ['git', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
+    // D-DEBUG-FIX-VIA-CODE: the fix is a Code spawn, and Code names boundary-validation, whose
+    // detection reference names security. security names review-methodology, which names the
+    // pattern skills below it, so the closure installs that chain whole.
     requires: [
       'apply-decisions',
       'architecture',
+      'boundary-validation',
       'complexity',
       'consistency',
       'database',
       'dependencies',
-      'docs-framework',
+      'dependency-research',
       'documentation',
       'patterns',
       'performance',
@@ -254,23 +249,12 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-explore',
     description: 'Codebase exploration with structured analysis and optional knowledge base creation',
     commands: ['/explore'],
-    agents: ['skim', 'synthesize', 'knowledge'],
+    // 'explore' is devflow's override of Claude Code's built-in Explore agent, spawned by
+    // type name (D-EXPLORE-OVERRIDE and D-EXPLORE-NO-CLOBBER, targets/claude-code/agent-type-owner.ts).
+    agents: ['skim', 'synthesize', 'knowledge', 'explore'],
     skills: ['worktree-support', 'apply-feature-knowledge', 'feature-knowledge'],
     requires: [
       'apply-decisions',
-      'architecture',
-      'complexity',
-      'consistency',
-      'database',
-      'dependencies',
-      'docs-framework',
-      'documentation',
-      'performance',
-      'regression',
-      'reliability',
-      'review-methodology',
-      'security',
-      'testing',
     ],
     rules: [],
   },
@@ -280,21 +264,11 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/research'],
     agents: ['research', 'skim', 'synthesize', 'knowledge'],
     skills: ['worktree-support', 'apply-feature-knowledge', 'feature-knowledge', 'research-codebase', 'research-external', 'research-market', 'research-competitor', 'research-technology'],
+    // `docs-framework` is read: Phase 2 loads it at the step that names the
+    // research directory (D-DOCS-NAMES-AUTHORITY).
     requires: [
       'apply-decisions',
-      'architecture',
-      'complexity',
-      'consistency',
-      'database',
-      'dependencies',
       'docs-framework',
-      'documentation',
-      'performance',
-      'regression',
-      'reliability',
-      'review-methodology',
-      'security',
-      'testing',
     ],
     rules: [],
   },
@@ -340,7 +314,6 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
       'architecture',
       'database',
       'dependencies',
-      'docs-framework',
       'documentation',
       'git',
       'performance',
@@ -353,7 +326,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-ambient',
     description: 'Orchestrator ambient mode — session charter, per-prompt reminder, plan handoff',
     commands: [],
-    agents: ['code', 'validate', 'simplify', 'scrutinize', 'evaluate', 'test', 'skim', 'review', 'git', 'synthesize', 'triage', 'design', 'knowledge', 'research', 'learning'],
+    agents: ['code', 'validate', 'simplify', 'scrutinize', 'evaluate', 'test', 'skim', 'review', 'git', 'synthesize', 'triage', 'design', 'knowledge', 'research', 'learning', 'explore'],
     skills: [
       'review-methodology',
       'security',
@@ -379,7 +352,6 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
       'apply-decisions',
       'boundary-validation',
       'dependency-research',
-      'docs-framework',
       'git',
       'quality-gates',
       'research-codebase',

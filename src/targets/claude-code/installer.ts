@@ -9,6 +9,10 @@ import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '
 import { generatedReferenceManifest, installedReferenceManifest, PR_HOST_DESTINATION_ROOT, SKILL_REFS_SKILL_NAME, TRACKER_DESTINATION_ROOT } from '../../core/mds-variants.js';
 import { sweepOrphanedReferences, MAX_REFERENCE_SWEEP_DEPTH } from '../../core/reference-sweep.js';
 import { TRACKER_AGENT_NAME } from './tracker-install.js';
+import { isTrackerStampedAgent } from './tracker-servers.js';
+import { stampAgentTools } from '../../core/agent-frontmatter.js';
+import { TRACKER_MCP_SERVERS_DEFAULT, trackerServerTools } from '../../core/tracker.js';
+import { BUILTIN_OVERRIDE_AGENTS, findForeignAgentOwner } from './agent-type-owner.js';
 import { restampInstalledCommands } from './language-stamp.js';
 
 // ---------------------------------------------------------------------------
@@ -1703,11 +1707,86 @@ export interface FileCopyOptions {
    */
   agentSourceDirs?: AgentSourceDirs;
   /**
+   * The tracker tool servers stamped onto the installed Git agent's `tools:` line as it is
+   * written (D-TRACKER-SERVER-ALLOWLIST; the Tracker agent is stamped by its own converge).
+   * `devflow init` passes the manifest's setting; absent means the default list, the same
+   * meaning an absent manifest field has.
+   */
+  trackerServers?: readonly string[];
+  /**
    * Receives non-fatal install notices that have no other reporting channel — today the
    * reference overlay's skipped symlinks and mode-normalisation failures. Defaults to a
    * no-op so callers with no logger are unaffected; `devflow init` passes its own.
    */
   warn?: (msg: string) => void;
+}
+
+/**
+ * Install one agent that carries the tracker-server stamp: the shipped source with
+ * `servers` appended to its `tools:` line, written in one step so no copy of it ever sits on
+ * disk unstamped (D-TRACKER-SERVER-ALLOWLIST, src/targets/claude-code/tracker-servers.ts).
+ *
+ * A source that cannot take the stamp is installed as shipped and reported: an install must
+ * not die on a stamp, and the unstamped agent then reaches no tracker server, which
+ * `devflow tracker --servers` or a re-run of `devflow init` repairs.
+ */
+async function writeStampedAgent(
+  srcFile: string,
+  target: string,
+  servers: readonly string[],
+  warn: (msg: string) => void,
+): Promise<void> {
+  const source = await fs.readFile(srcFile, 'utf-8');
+  const stamped = stampAgentTools(source, trackerServerTools(servers));
+  if (!stamped.ok) {
+    warn(`tracker servers: ${path.basename(target)} could not be stamped (${stamped.error}); installed without tracker servers`);
+    await fs.copyFile(srcFile, target);
+    return;
+  }
+  await fs.writeFile(target, stamped.value.content);
+}
+
+/**
+ * D-EXPLORE-NO-CLOBBER, install half: true when `agentName` takes over a built-in
+ * agent type (Explore) and the user already owns an agent of that type under
+ * `{claudeDir}/agents`, so devflow's copy must not be installed.
+ *
+ * The user's file is only ever read. A copy of devflow's own left by an earlier install
+ * is removed from `agentsTarget`, since two user-level agents of one type fall back to
+ * file load order and the stale one could win. Every outcome that is not a conflict
+ * installs: an unreadable agents directory warns and installs rather than withholding
+ * the override on a guess. Warn-not-throw, so it never aborts an install.
+ */
+async function skipsForUserOwnedType(
+  agentName: string,
+  claudeDir: string,
+  agentsTarget: string,
+  warn: (msg: string) => void,
+): Promise<boolean> {
+  const agentType = BUILTIN_OVERRIDE_AGENTS.get(agentName);
+  if (agentType === undefined) return false;
+
+  const scan = await findForeignAgentOwner({
+    agentsRoot: path.join(claudeDir, 'agents'),
+    ownDir: agentsTarget,
+    agentType,
+  });
+  if (!scan.ok) {
+    warn(`Could not check ${scan.error.dir} for an existing ${agentType} agent (${scan.error.reason}); installing devflow's ${agentType} agent`);
+    return false;
+  }
+  if (scan.value === undefined) return false;
+
+  try {
+    await fs.rm(path.join(agentsTarget, mdFileName(agentName)), { force: true });
+  } catch (err) {
+    warn(`Could not remove devflow's earlier ${agentType} agent — ${String(err)}`);
+  }
+  warn(
+    `Skipped devflow's ${agentType} agent: ${scan.value} already defines ${agentType}, and Claude Code keys agents by name. ` +
+    `That file is left untouched; delete or rename it and re-run \`devflow init\` to use devflow's.`,
+  );
+  return true;
 }
 
 /**
@@ -1857,6 +1936,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     isPartialInstall,
     spinner,
     learning,
+    trackerServers = TRACKER_MCP_SERVERS_DEFAULT,
     warn = () => { /* no-op: callers without a logger still get the full InstallReport */ },
   } = options;
 
@@ -2090,6 +2170,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   if (allAgentNames.size > 0) {
     await fs.mkdir(agentsTarget, { recursive: true });
     for (const agentName of allAgentNames) {
+      if (await skipsForUserOwnedType(agentName, claudeDir, agentsTarget, warn)) continue;
       const candidates = agentDirs.map(dir => path.join(dir, mdFileName(agentName)));
       const srcFile = await firstExisting(candidates);
       if (srcFile === undefined) {
@@ -2099,7 +2180,12 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
           `ensure the agent file exists in src/assets/agents/ (searched: ${candidates.join(', ')}).`,
         );
       }
-      await fs.copyFile(srcFile, path.join(agentsTarget, mdFileName(agentName)));
+      const agentTarget = path.join(agentsTarget, mdFileName(agentName));
+      if (isTrackerStampedAgent(agentName)) {
+        await writeStampedAgent(srcFile, agentTarget, trackerServers, warn);
+      } else {
+        await fs.copyFile(srcFile, agentTarget);
+      }
     }
   }
 

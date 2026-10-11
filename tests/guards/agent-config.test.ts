@@ -1,6 +1,6 @@
 /**
- * agent-config — the shipped model, effort, tool policy and preload of sixteen
- * agents, and the rule that no agent body directs a tool its frontmatter removes.
+ * agent-config — the shipped model, effort, tool policy and preload of every registered
+ * agent, and the rule that no agent body directs a tool its frontmatter removes.
  *
  * Decisions recorded here. Each is a D-series note at the code that carries it;
  * the ones that live in a markdown body, which cannot hold JSDoc, are named here.
@@ -22,7 +22,20 @@
  *                              Step 1 to load the row's skills with the Skill tool,
  *                              continuing with the methodology if a load fails.
  *  - D-LEARNING-SHIPPED-ROW    tests/fixtures/agent-config.ts (the learning row).
- *  - D-GIT-ROW                 tests/fixtures/agent-config.ts (the git row).
+ *  - D-OMIT-CLAUDEMD-SET       tests/fixtures/agent-config.ts (the header): which agents
+ *                              omit CLAUDE.md and the rules, and why. The omit arm of the
+ *                              row check below pins the frontmatter; the digest each omitting
+ *                              body carries is held by tests/guards/core-rules-digest.test.ts.
+ *  - D-SCAN-IN-CODE            tests/fixtures/agent-config.ts (MCP_DENY_AGENTS) and the
+ *                              denylist arm below: Scrutinize and Simplify deny `mcp__*`.
+ *  - D-GIT-ROW                 tests/fixtures/agent-config.ts (the git row): an allowlist of
+ *                              the tools its bodies direct, with no tracker server named.
+ *  - D-TRACKER-ROW             tests/fixtures/agent-config.ts (the tracker row) and the
+ *                              Tracker arm below: the row's model equals the hook's literal.
+ *  - D-TRACKER-SERVER-ALLOWLIST src/core/tracker.ts (TRACKER_MCP_SERVERS_DEFAULT): the tracker
+ *                              servers are stamped onto the INSTALLED tools line of Git and
+ *                              Tracker, so the shipped lists tested here name none;
+ *                              tests/tracker-servers.test.ts holds the stamped half.
  *  - D-STRUCTURED-RETURN-TOOL  the structured-return arm below.
  *
  * Body-level decisions, pinned by the phrases they carry:
@@ -54,10 +67,11 @@ import * as path from 'path';
 
 import { getAllAgentNames } from '../../src/core/plugins.js';
 import { ROOT, resolveAgentSource, splitFrontmatter, walkFiles } from '../helpers.js';
+import { loadShippedAgentDefaults } from '../../src/core/agent-models.js';
 import {
   AGENT_CONFIG,
   DIAGNOSE_FOCUS_SKILLS,
-  EXEMPT_AGENTS,
+  MCP_DENY_AGENTS,
   SHARED_DENYLIST,
   type AgentConfigRow,
 } from '../fixtures/agent-config.js';
@@ -204,14 +218,24 @@ function collectRowViolations(name: string, fm: AgentFrontmatter, row: AgentConf
   return out;
 }
 
-/** Every way the shared denylist, or a denylist agent's use of it, breaks the rules. */
+/**
+ * Every way the shared denylist, or a denylist agent's use of it, breaks the rules.
+ * D-SCAN-IN-CODE: the one wildcard a denylist may hold is `mcp__*`, on an agent named in
+ * MCP_DENY_AGENTS; every other wildcard, a named MCP tool, and any WebFetch or WebSearch deny
+ * is still reported, and an allowlist never holds a wildcard.
+ */
 function collectDenylistViolations(name: string, fm: AgentFrontmatter): string[] {
   const out: string[] = [];
-  const names = [...(fm.tools ?? []), ...(fm.disallowedTools ?? [])];
-  for (const tool of names) {
+  const mcpWildcardAllowed = MCP_DENY_AGENTS.includes(name);
+  const isAllowedWildcard = (tool: string): boolean => tool === 'mcp__*' && mcpWildcardAllowed;
+  for (const tool of fm.tools ?? []) {
     if (tool.includes('*')) out.push(`${name}.md: "${tool}" is a wildcard; spell every tool name out`);
   }
   for (const tool of fm.disallowedTools ?? []) {
+    if (tool.includes('*') && !isAllowedWildcard(tool)) {
+      out.push(`${name}.md: "${tool}" is a wildcard; spell every tool name out`);
+    }
+    if (isAllowedWildcard(tool)) continue;
     if (tool === 'WebFetch' || tool === 'WebSearch' || tool.startsWith('mcp__')) {
       out.push(`${name}.md: denies "${tool}"; a denylist agent keeps its MCP and web access`);
     }
@@ -219,25 +243,14 @@ function collectDenylistViolations(name: string, fm: AgentFrontmatter): string[]
   return out;
 }
 
-/** Registered agents and table rows that do not line up, and exemptions without a reason. */
-function collectCompletenessViolations(
-  registered: readonly string[],
-  table: readonly string[],
-  exempt: Readonly<Record<string, string>>,
-): string[] {
+/** Registered agents and table rows that do not line up. Every registered agent has a row. */
+function collectCompletenessViolations(registered: readonly string[], table: readonly string[]): string[] {
   const out: string[] = [];
   for (const name of registered) {
-    if (!table.includes(name) && !Object.hasOwn(exempt, name)) {
-      out.push(`${name}: registered, but in neither AGENT_CONFIG nor EXEMPT_AGENTS`);
-    }
+    if (!table.includes(name)) out.push(`${name}: registered, but has no row in AGENT_CONFIG`);
   }
   for (const name of table) {
     if (!registered.includes(name)) out.push(`${name}: has a row but is not a registered agent`);
-    if (Object.hasOwn(exempt, name)) out.push(`${name}: is both in AGENT_CONFIG and exempt`);
-  }
-  for (const [name, reason] of Object.entries(exempt)) {
-    if (!registered.includes(name)) out.push(`${name}: exempt but not a registered agent`);
-    if (reason.trim() === '') out.push(`${name}: exempt with no recorded reason`);
   }
   return out;
 }
@@ -504,8 +517,11 @@ describe('the table: every agent ships its row (D-AGENT-CONFIG-TABLE)', () => {
       ['a denylist on an allowlist agent', 'triage', fm => { fm.disallowedTools = ['Agent']; }],
       ['an allowlist on a denylist agent', 'code', fm => { fm.tools = ['Read']; }],
       ['omitClaudeMd turned off', 'skim', fm => { fm.omitClaudeMd = null; }],
-      ['omitClaudeMd turned on', 'triage', fm => { fm.omitClaudeMd = 'true'; }],
-      ['omitClaudeMd turned on for Learning, which keeps CLAUDE.md', 'learning', fm => { fm.omitClaudeMd = 'true'; }],
+      ['omitClaudeMd turned off for Triage', 'triage', fm => { fm.omitClaudeMd = null; }],
+      ['omitClaudeMd turned off for Learning', 'learning', fm => { fm.omitClaudeMd = null; }],
+      ['omitClaudeMd turned on for Code, which keeps CLAUDE.md', 'code', fm => { fm.omitClaudeMd = 'true'; }],
+      ['omitClaudeMd turned on for Scrutinize, which keeps CLAUDE.md', 'scrutinize', fm => { fm.omitClaudeMd = 'true'; }],
+      ['omitClaudeMd turned on for Simplify, which keeps CLAUDE.md', 'simplify', fm => { fm.omitClaudeMd = 'true'; }],
       ['a trimmed preload restored', 'validate', fm => { fm.skills = [...(fm.skills ?? []), 'devflow:testing']; }],
       ['a skills key where the row has none', 'learning', fm => { fm.skills = ['devflow:apply-decisions']; }],
       ['an unknown key', 'research', fm => { fm.keys = [...fm.keys, 'disallowedtools']; }],
@@ -530,26 +546,57 @@ describe('the table: every agent ships its row (D-AGENT-CONFIG-TABLE)', () => {
   });
 });
 
-describe('completeness: every registered agent has a row or a reason', () => {
-  it('lines the registry up with the table and the exemptions', () => {
-    expect(collectCompletenessViolations(getAllAgentNames(), AGENT_NAMES, EXEMPT_AGENTS)).toEqual([]);
+describe('completeness: every registered agent has a row', () => {
+  it('lines the registry up with the table', () => {
+    expect(collectCompletenessViolations(getAllAgentNames(), AGENT_NAMES)).toEqual([]);
   });
 
-  it('records a reason for each exemption', () => {
-    expect(Object.keys(EXEMPT_AGENTS).sort()).toEqual(['tracker']);
-    for (const reason of Object.values(EXEMPT_AGENTS)) expect(reason.trim().length).toBeGreaterThan(0);
-  });
-
-  it('known-bad probes: an unlisted agent, a stale row and an unexplained exemption are reported', () => {
-    expect(collectCompletenessViolations(['code', 'newagent'], ['code'], {})).toEqual([
-      'newagent: registered, but in neither AGENT_CONFIG nor EXEMPT_AGENTS',
+  it('known-bad probes: an unlisted agent and a stale row are reported', () => {
+    expect(collectCompletenessViolations(['code', 'newagent'], ['code'])).toEqual([
+      'newagent: registered, but has no row in AGENT_CONFIG',
     ]);
-    expect(collectCompletenessViolations(['code'], ['code', 'gone'], {})).toEqual([
+    expect(collectCompletenessViolations(['code'], ['code', 'gone'])).toEqual([
       'gone: has a row but is not a registered agent',
     ]);
-    expect(collectCompletenessViolations(['code', 'git'], ['code'], { git: ' ' })).toEqual([
-      'git: exempt with no recorded reason',
-    ]);
+  });
+});
+
+describe('Git and Tracker hold vendor-neutral allowlists (D-GIT-ROW, D-TRACKER-ROW, D-TRACKER-SERVER-ALLOWLIST)', () => {
+  it('both are allowlist agents, and the shipped list names no tool server and no wildcard', () => {
+    for (const name of ['git', 'tracker']) {
+      const tools = agent(name).fm.tools;
+      expect(tools, `${name}.md must hold a tools: allowlist`).not.toBeNull();
+      expect(agent(name).fm.disallowedTools, `${name}.md must not also deny`).toBeNull();
+      expect((tools ?? []).filter(tool => tool.startsWith('mcp__') || tool.includes('*')), name).toEqual([]);
+    }
+  });
+
+  it('both grant ToolSearch, which loads a connected server\'s deferred tool schemas', () => {
+    for (const name of ['git', 'tracker']) expect(agent(name).fm.tools, name).toContain('ToolSearch');
+  });
+
+  it('neither holds Grep or Glob, which Claude Code never offers to an agent that has Bash', () => {
+    for (const name of ['git', 'tracker']) {
+      expect(agent(name).fm.tools, name).toContain('Bash');
+      expect(agent(name).fm.tools, name).not.toContain('Grep');
+      expect(agent(name).fm.tools, name).not.toContain('Glob');
+    }
+  });
+
+  it('the Tracker row\'s model equals the hook\'s literal and the shipped default (D-TRACKER-ROW)', async () => {
+    const hook = readFileSync(path.join(ROOT, 'src', 'assets', 'scripts', 'hooks', 'session-start-context'), 'utf-8');
+    expect(hook).toContain(`TRACKER_MODEL="${AGENT_CONFIG.tracker.model}"`);
+    const defaults = await loadShippedAgentDefaults();
+    expect(defaults.tracker?.model).toBe(AGENT_CONFIG.tracker.model);
+  });
+
+  it('known-bad probe: a seeded server entry, a wildcard and a denylist are all reported by the row check', () => {
+    const row = AGENT_CONFIG.git;
+    const withServer = renderRow('git', row, fm => { fm.tools = [...(fm.tools ?? []), 'mcp__github']; });
+    expect(collectRowViolations('git', withServer, row).length).toBeGreaterThan(0);
+    const denying = renderRow('git', row, fm => { fm.disallowedTools = ['Agent']; });
+    expect(collectRowViolations('git', denying, row).length).toBeGreaterThan(0);
+    expect(collectDenylistViolations('git', { ...withServer, tools: ['Bash', 'mcp__*'] })).toHaveLength(1);
   });
 });
 
@@ -560,16 +607,24 @@ describe('one shared denylist (D-SHARED-DENYLIST)', () => {
     for (const tool of SHARED_DENYLIST) expect(tool, tool).toMatch(/^[A-Z][A-Za-z]+$/);
   });
 
-  it('Code and Research deny exactly the list, and Scrutinize and Simplify deny it plus Skill', () => {
+  it('Code and Research deny exactly the list, and Scrutinize and Simplify deny it plus Skill and mcp__*', () => {
     for (const name of ['code', 'research']) {
       expect(sameSet(agent(name).fm.disallowedTools ?? [], SHARED_DENYLIST), name).toBe(true);
     }
     for (const name of ['scrutinize', 'simplify']) {
-      expect(sameSet(agent(name).fm.disallowedTools ?? [], [...SHARED_DENYLIST, 'Skill']), name).toBe(true);
+      expect(sameSet(agent(name).fm.disallowedTools ?? [], [...SHARED_DENYLIST, 'Skill', 'mcp__*']), name).toBe(true);
     }
   });
 
-  it('the two policies never mix, and no list holds a wildcard or denies MCP or web access', () => {
+  it('only the agents MCP_DENY_AGENTS names deny MCP, and they are exactly Scrutinize and Simplify (D-SCAN-IN-CODE)', () => {
+    expect([...MCP_DENY_AGENTS].sort()).toEqual(['scrutinize', 'simplify']);
+    for (const record of agents.values()) {
+      const denies = (record.fm.disallowedTools ?? []).some(tool => tool.startsWith('mcp__'));
+      expect(denies, record.name).toBe(MCP_DENY_AGENTS.includes(record.name));
+    }
+  });
+
+  it('the two policies never mix, and no list holds a wildcard, denies web access or denies a named MCP tool', () => {
     for (const record of agents.values()) {
       expect(record.fm.tools !== null && record.fm.disallowedTools !== null, `${record.name} mixes policies`).toBe(false);
       expect(collectDenylistViolations(record.name, record.fm), record.name).toEqual([]);
@@ -583,6 +638,22 @@ describe('one shared denylist (D-SHARED-DENYLIST)', () => {
     expect(collectDenylistViolations('x', { ...base, disallowedTools: ['mcp__claude-in-chrome__navigate'] })).toHaveLength(1);
     expect(collectDenylistViolations('x', { ...base, tools: ['Read', 'mcp__*'] })).toHaveLength(1);
     expect(collectDenylistViolations('x', base)).toEqual([]);
+  });
+
+  it('known-bad probes: mcp__* is allowed for Scrutinize and Simplify only, and nothing else widens (D-SCAN-IN-CODE)', () => {
+    const base = renderRow('scrutinize', AGENT_CONFIG.scrutinize);
+    expect(collectDenylistViolations('scrutinize', base)).toEqual([]);
+    expect(collectDenylistViolations('simplify', renderRow('simplify', AGENT_CONFIG.simplify))).toEqual([]);
+    // The same list on any other agent is reported (a wildcard, and a denied MCP name).
+    expect(collectDenylistViolations('code', base)).toHaveLength(2);
+    expect(collectDenylistViolations('git', base)).toHaveLength(2);
+    // A different wildcard, a named MCP tool and a web tool stay rejected on the permitted agents.
+    expect(collectDenylistViolations('scrutinize', { ...base, disallowedTools: ['Bash*'] })).toHaveLength(1);
+    expect(collectDenylistViolations('scrutinize', { ...base, disallowedTools: ['mcp__*', 'mcp__tavily__tavily_search'] })).toHaveLength(1);
+    expect(collectDenylistViolations('scrutinize', { ...base, disallowedTools: ['mcp__*', 'WebFetch'] })).toHaveLength(1);
+    expect(collectDenylistViolations('simplify', { ...base, disallowedTools: ['mcp__*', 'WebSearch'] })).toHaveLength(1);
+    // An allowlist never holds a wildcard, whoever the agent is.
+    expect(collectDenylistViolations('scrutinize', { ...base, disallowedTools: null, tools: ['Read', 'mcp__*'] })).toHaveLength(1);
   });
 });
 
