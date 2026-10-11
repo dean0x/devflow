@@ -376,3 +376,49 @@ describe('handoff-* and evidence-* files are spelled one way wherever they are w
     expect(readFileSync(path.join(SCRIPT_DIR, 'verify-evidence.cjs'), 'utf-8')).toContain('--evidence <file>')
   })
 })
+
+// ---------------------------------------------------------------------------
+// Run directories, and the topic slug /plan and /research take from the skill
+// ---------------------------------------------------------------------------
+
+/** The commands that create their own timestamped run directory, and so meet a same-minute second run. */
+const RUN_DIRECTORY_COMMANDS = ['code-review.md', 'bug-analysis.md', 'research.md'] as const
+
+/** Named collector: the run-directory commands that do not say what to do when the directory exists. */
+export function collectCollisionDefects(read: (file: string) => string): string[] {
+  return RUN_DIRECTORY_COMMANDS
+    .filter(file => !(/same-minute/.test(read(file)) && read(file).includes('`YYYY-MM-DD_HHMMSS`')))
+    .map(file => `${file}: does not append seconds on a same-minute collision`)
+}
+
+describe('a same-minute second run takes seconds, in the skill and in every command that creates the directory', () => {
+  it('/code-review, /bug-analysis and /research each state it', () => {
+    expect(collectCollisionDefects(requireDistFile)).toEqual([])
+  })
+
+  it('the skill says which three commands do, and what the suffix is', () => {
+    expect(SKILL).toContain('`/code-review`, `/bug-analysis` and `/research` create their run directory themselves')
+    expect(SKILL).toContain('appends seconds (`2025-12-26_143005`)')
+  })
+
+  it('known-bad probe: /research without the rule is reported', () => {
+    const probe = (file: string): string => file === 'research.md'
+      ? requireDistFile(file).replace('a same-minute collision', 'a repeat').replace('`YYYY-MM-DD_HHMMSS`', 'seconds')
+      : requireDistFile(file)
+    expect(collectCollisionDefects(probe)).toEqual(['research.md: does not append seconds on a same-minute collision'])
+  })
+})
+
+describe('/plan and /research build their paths from the skill\'s topic slug', () => {
+  it('/plan names the slug as the artifact\'s slug: value', () => {
+    expect(requireDistFile('plan.md')).toContain(
+      "`{topic-slug}` is its topic slug of the feature title, the same value as the artifact's `slug:` frontmatter")
+  })
+
+  it('/research takes the slug of the research question from the skill, not from a loose rule of its own', () => {
+    const research = requireDistFile('research.md')
+    expect(research).toContain('`{topic-slug}` is its topic slug of the research question')
+    expect(research).not.toContain('no articles')
+    expect(research).not.toContain('{timestamp}')
+  })
+})

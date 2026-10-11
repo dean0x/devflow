@@ -136,6 +136,8 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     // companion skills, so `requires:` lists only skills this plugin's command,
     // agents and skills reference. `software-design` and `test-driven-development`
     // have no reader here; the closure guard's reverse arm rejects an unread entry.
+    // `docs-framework` is read: Phase 14 loads it at the step that names the
+    // design document (D-DOCS-NAMES-AUTHORITY).
     requires: [
       'apply-decisions',
       'docs-framework',
@@ -262,8 +264,11 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/research'],
     agents: ['research', 'skim', 'synthesize', 'knowledge'],
     skills: ['worktree-support', 'apply-feature-knowledge', 'feature-knowledge', 'research-codebase', 'research-external', 'research-market', 'research-competitor', 'research-technology'],
+    // `docs-framework` is read: Phase 2 loads it at the step that names the
+    // research directory (D-DOCS-NAMES-AUTHORITY).
     requires: [
       'apply-decisions',
+      'docs-framework',
     ],
     rules: [],
   },

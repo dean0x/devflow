@@ -419,8 +419,10 @@ User can:
 
 **Store design artifact:**
 
-**Pre-compute the artifact path** from the slug (it never changes after this):
-- If one issue: `{worktree}/.devflow/docs/design/{ISSUE_ID}-{topic-slug}.{YYYY-MM-DD_HHMM}.md` (the `devflow:docs-framework` skill's design-document pattern, e.g. `42-jwt-auth.2026-04-07_1430.md`)
+**Load `devflow:docs-framework`** — Load via Skill tool: `devflow:docs-framework`, here and not earlier, so a run that stops before this phase never pays for it. If it fails to load, continue with the paths below.
+
+**Pre-compute the artifact path** (it never changes after this) by the skill's rules: `{topic-slug}` is its topic slug of the feature title, the same value as the artifact's `slug:` frontmatter, and `{YYYY-MM-DD_HHMM}` is the local time, computed once:
+- If one issue: `{worktree}/.devflow/docs/design/{ISSUE_ID}-{topic-slug}.{YYYY-MM-DD_HHMM}.md` (e.g. `42-jwt-auth.2026-04-07_1430.md`)
 - If multi-issue: `{worktree}/.devflow/docs/design/multi-{topic-slug}.{YYYY-MM-DD_HHMM}.md`, frontmatter `issue: pending` — a batch fetch returns no issue ID to name it by
 - If no issue: `{worktree}/.devflow/docs/design/{topic-slug}.{YYYY-MM-DD_HHMM}.md`
 

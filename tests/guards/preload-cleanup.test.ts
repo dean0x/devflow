@@ -9,7 +9,8 @@
  *   - Tracker holds its input rules in its Core rules, so it drops `boundary-validation`;
  *   - Synthesize reads no skill: the three review categories sit in its review mode as a table
  *     (`review-methodology` is gone), and its callers pass every output path (`docs-framework` is gone,
- *     with `/dynamic-tickets` stating the ticket slug rule itself);
+ *     with `/dynamic-tickets` stating the ticket slug rule itself, and `/plan` and `/research`
+ *     loading the skill on the main thread where they name a document);
  *   - Triage drops `security` for D-TRIAGE-SECURITY-INLINE: the security-finding definition and the
  *     never-quote-a-live-secret rule, inline in about 400 bytes.
  *
@@ -19,7 +20,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { parseFrontmatterSkills, requireDistFile, resolveAgentSource, resolveLearningOffSource } from '../helpers.js'
+import { parseFrontmatterSkills, requireDistFile, requireDistFiles, resolveAgentSource, resolveLearningOffSource } from '../helpers.js'
 
 /** Skills each agent no longer preloads, in unprefixed form. */
 const DROPPED: ReadonlyArray<readonly [string, string]> = [
@@ -180,11 +181,40 @@ describe('/dynamic-tickets states its ticket slug rule itself (D-PRELOAD-CLEANUP
   })
 })
 
-describe('/plan cites docs-framework by its installed name (D-PRELOAD-CLEANUP)', () => {
-  it('the design-document path line names devflow:docs-framework exactly once', () => {
+describe('/plan and /research load docs-framework where they name a document (D-DOCS-NAMES-AUTHORITY)', () => {
+  /** The lines of a compiled command that name the skill. */
+  const loadLines = (text: string): string[] => text.split('\n').filter(line => line.includes('devflow:docs-framework'))
+
+  it('/plan loads it once, in Phase 14 and before the design-document path is built', () => {
     const text = requireDistFile('plan.md')
-    const hits = text.split('\n').filter(line => line.includes('devflow:docs-framework'))
+    const hits = loadLines(text)
     expect(hits).toHaveLength(1)
-    expect(hits[0]).toContain('design-document pattern')
+    expect(hits[0]).toContain('Load via Skill tool: `devflow:docs-framework`')
+    const phase = text.indexOf('#### Phase 14: Output')
+    const load = text.indexOf(hits[0])
+    const path = text.indexOf('**Pre-compute the artifact path**')
+    expect(phase, 'Phase 14 was not found').toBeGreaterThan(-1)
+    expect(load, 'the load comes after the Phase 14 heading').toBeGreaterThan(phase)
+    expect(path, 'the path is built after the load').toBeGreaterThan(load)
+  })
+
+  it('/research loads it once, in Phase 2 and before the first output path is named', () => {
+    const text = requireDistFile('research.md')
+    const hits = loadLines(text)
+    expect(hits).toHaveLength(1)
+    expect(hits[0]).toContain('Load via Skill tool: `devflow:docs-framework`')
+    const phase = text.indexOf('### Phase 2: Requirements')
+    const load = text.indexOf(hits[0])
+    const output = text.indexOf('- `OUTPUT_PATH`:')
+    expect(phase, 'Phase 2 was not found').toBeGreaterThan(-1)
+    expect(load, 'the load comes after the Phase 2 heading').toBeGreaterThan(phase)
+    expect(output, 'the first output path comes after the load').toBeGreaterThan(load)
+  })
+
+  it('no other command and no agent names the skill: every other writer is handed its paths', () => {
+    for (const file of requireDistFiles()) {
+      if (file === 'plan.md' || file === 'research.md') continue
+      expect(loadLines(requireDistFile(file)), file).toEqual([])
+    }
   })
 })
