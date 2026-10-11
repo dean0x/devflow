@@ -145,7 +145,6 @@ d .claude/skills/devflow:git/references/
 d .claude/skills/devflow:git/references/pr/
 - .claude/skills/devflow:git/references/pr/check-ci-status.md
 - .claude/skills/devflow:git/references/pr/check-merge-readiness.md
-- .claude/skills/devflow:git/references/pr/ensure-pr-ready.md
 - .claude/skills/devflow:git/references/pr/fetch-review-threads.md
 - .claude/skills/devflow:git/references/pr/post-resolution-summary.md
 - .claude/skills/devflow:git/references/pr/post-review-summary.md
