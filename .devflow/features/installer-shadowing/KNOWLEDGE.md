@@ -5,7 +5,7 @@ description: "Use when changing installViaFileCopy, InstallReport, installAllRul
 category: architecture
 directories: [src/targets/claude-code/installer.ts, src/targets/claude-code/legacy.ts, src/cli/commands/rules.ts, src/cli/commands/skills.ts, src/core/plugins.ts, src/core/assets.ts, src/core/paths.ts, src/core/orphan-sweep.ts]
 created: 2026-07-13
-updated: 2026-10-10
+updated: 2026-10-11
 ---
 
 # Installer & Skill/Rule Shadowing
@@ -25,6 +25,7 @@ updated: 2026-10-10
 - **KB-AP-11** Never install from an unbuilt tree: compiled commands and generator-host agents are absent and the install throws. Run `npm run build` or `npm run build:mds` first.
 - **KB-AP-12** Synthetic `PluginDefinition` literals in tests need `requires: []`: omission fails at runtime (`plugin.requires is not iterable`), never at typecheck.
 - **KB-AP-13** A live `devflow init` in a test or agent run sets `HOME=<tmp>` explicitly; never touch the real `~/.claude`.
+- **KB-AP-14** Never stamp tracker servers into a shipped agent source, and never write an installed Git or Tracker copy without the stamp: `installViaFileCopy` stamps Git as it writes it, and every converge either stamps or carries the installed stamp (tracker-feature KB).
 - **KB-INV-1** An invalid or missing shadow warns and installs the shipped source; init never exits non-zero for a shadow.
 - **KB-INV-2** Every source path comes from an accessor in `src/core/assets.ts`; `getPackageRoot()` throws when `package.json` is absent at the resolved root.
 - **KB-INV-3** `agentSourceDirs()` and `commandSourceDirs()` return directories most-preferred first and every consumer takes the list as given; `tests/guards/agent-source-precedence.test.ts` pins it.
@@ -32,6 +33,7 @@ updated: 2026-10-10
 - **KB-INV-5** Skills install for the closure `skills ∪ requires` of the effective selection, and the removal set is computed from `effectivePlugins`; `tests/guards/requires-closure.test.ts` guards the closure in both directions.
 - **KB-INV-6** Shadow dirs are unprefixed (`~/.devflow/skills/{name}/`), installed skills are `devflow:`-prefixed, and `~/.devflow/skills|rules` are user-owned.
 - **KB-INV-7** Per-item failure isolation: a failed rule copy, sweep removal or overlay unit warns or is reported and the rest proceeds.
+- **KB-INV-8** The install never overwrites a user's own agent of a built-in type: devflow's `Explore` is skipped, with a warning, when any other file under the agents directory defines the exact name `Explore`; matching is byte-exact (`explore` is a different agent), the user's file is only ever read, and an unreadable agents directory installs rather than withholds.
 
 ## Overview
 
@@ -131,6 +133,14 @@ Results fold into `InstallReport.sweptOrphans` (`SweptOrphan[]`, each `{ kind, n
 
 `init.ts` iterates `skippedShadows` and warns per entry via an exhaustive switch on `ShadowSkipReason` with a `never` guard; an invalid shadow never makes init exit non-zero. The report carries nothing from the learning converge: that run's warnings go to init's `installWarnings`.
 
+### Agent Install: the Explore Override and the Tracker-server Stamp
+
+Two things happen in the per-agent copy loop of `installViaFileCopy` beyond a plain `copyFile`.
+
+**Explore override (`D-EXPLORE-OVERRIDE`, `D-EXPLORE-NO-CLOBBER`; `src/targets/claude-code/agent-type-owner.ts`).** Devflow ships an agent whose frontmatter `name:` is `Explore`, the type of the Claude Code built-in. Claude Code merges its agent sources into one map keyed by the exact `name:` string (a later source replaces an earlier one), so a user-level agent of that name replaces the built-in machine-wide, plan mode included; uninstalling restores the built-in. Two user-level agents of one type fall back to file load order, so `skipsForUserOwnedType` asks `findForeignAgentOwner` first: `BUILTIN_OVERRIDE_AGENTS` maps the registry name (`explore`) to the type it takes over, and the scan reads only a bounded head of each `.md` under the agents directory (bounded depth and entry count, sorted order, symlinks never followed, devflow's own directory skipped). A hit skips devflow's copy, removes any earlier devflow copy so a stale one cannot win, and warns with the path and the remedy; every other outcome installs. `parseAgentType` reads only the top-level `name:` key and errs toward installing. The merge order was verified by reading one Claude Code release's binary, so re-verify on an upgrade.
+
+**Tracker-server stamp (`D-TRACKER-SERVER-ALLOWLIST`; `src/targets/claude-code/tracker-servers.ts`).** `isTrackerStampedAgent` (Git and Tracker) routes the copy through `writeStampedAgent`, which writes the source with `stampAgentTools(source, trackerServerTools(servers))` applied in one step, so no unstamped copy of it ever sits on disk. `FileCopyOptions.trackerServers` carries the manifest's list (absent means the default). A source that cannot take the stamp is installed as shipped with a warning: an install must not die on a stamp. The other write paths and the list itself belong to the tracker-feature KB.
+
 ### Shadow States, Validation and Rule Install
 
 - `SkillShadowState = 'valid' | 'missing-skill-md' | 'none'`; `RuleShadowState = 'valid' | 'empty-shadow-file' | 'not-a-file' | 'none'`. Both are exported from `installer.ts` and imported by `skills.ts` and `rules.ts` for the exhaustive `buildSkillShadowTag` / `buildRuleShadowTag` display switches (with `never` guards).
@@ -224,6 +234,7 @@ Skills are plugin-scoped, as rules already were. Each `PluginDefinition` carries
 
 - `src/core/orphan-sweep.ts` — `sweepOrphanedAssets`, `SweepResult`, `mdFileName` / `mdEntryName`; shared by installer and uninstall; per-item isolation on readdir and rm
 - `src/targets/claude-code/installer.ts` — `installViaFileCopy`, `installAllRules`, `installRuleFile`, `composeScripts`, `validateSkillShadow`, `validateRuleShadow`, `InstallReport`, `SweptAssetKind`, `SweepFailure`, `ShadowSkip`, `RuleInstallOutcome`, `SkillShadowState`, `RuleShadowState`, `copyDirectory`, `chmodRecursive`, `firstExisting`, `FileCopyOptions` (`learning` REQUIRED, `effectivePlugins`, `agentSourceDirs`, `warn`), `resolveSkillSource`; the overlay, learning and stamp pieces are covered by their own KBs
+- `src/targets/claude-code/agent-type-owner.ts` — `BUILTIN_OVERRIDE_AGENTS`, `parseAgentType`, `findForeignAgentOwner`, the scan bounds; `src/targets/claude-code/tracker-servers.ts` — `TRACKER_STAMPED_AGENTS`, `isTrackerStampedAgent`, `restampTrackerAgents`; `tests/installer/explore-no-clobber.test.ts`, `tests/explore-agent.test.ts`, `tests/tracker-servers.test.ts` — their pins
 - `src/core/assets.ts` — every accessor in the table above; the dist-first agent order and the learning-aware command/agent source order live here
 - `src/core/paths.ts` — `getPackageRoot()` (hard `package.json` assertion), `isContainedIn`
 - `src/targets/claude-code/legacy.ts` — `LEGACY_SKILL_NAMES` and its component lists

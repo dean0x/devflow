@@ -15,7 +15,7 @@ directories:
   - src/core/queue-drain.ts
   - src/hud/components/learning-counts.ts
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-11
 ---
 
 # Learning Agent, Queue Claim, Directives and CLI
@@ -26,7 +26,7 @@ updated: 2026-10-10
 - **KB-INV-2** `CLAIM_STALE_SECS` (store) and `PROCESSING_STALE_SECS` (hook) are two literals held equal by the lockstep test in `tests/decisions/learning-claim.test.ts`; the hook's check is advisory, the op decides under the lock. The Tracker's `TRACKER_PROCESSING_STALE_SECS` is separate on purpose.
 - **KB-INV-3** Every `LEARNING_OPS` op first sends the claim heartbeat (`touchClaim`); a new learning op must join `LEARNING_OPS` and `LEARNING_OP_RUNS` in `tests/decisions/learning-claim.test.ts`.
 - **KB-INV-4** The Learning agent writes only through `json-helper.cjs` ops (no Write or Edit tool); `release-claim` is its final act, and it never recreates anything once its inputs vanish.
-- **KB-INV-5** The Learning agent is hook-spawned, never named by a command; its shipped tier (model, no `effort:` line, no preload, CLAUDE.md kept) is one row in `tests/fixtures/agent-config.ts`, edited together with the `model:` line and `DEFAULTS.model` in `learning-tuning-config.ts`.
+- **KB-INV-5** The Learning agent is hook-spawned, never named by a command; its shipped tier (model, no `effort:` line, no preload, `omitClaudeMd: true` with explicit reads in its place) is one row in `tests/fixtures/agent-config.ts`, edited together with the `model:` line and `DEFAULTS.model` in `learning-tuning-config.ts`.
 - **KB-INV-6** The directive's model resolves by precedence (project `learning.json`, the `devflow agents` Learning mapping, global `learning.json`, none); the two `learning.json` values pass the `opus|sonnet|haiku` allowlist, and the mapping never emits `model=`.
 - **KB-INV-7** `$LEDGER_ROOT` enters a directive only when `DIRECTIVE_LEDGER_SAFE` admits it; a refused root with pending work emits the fixed `LEARNING PAUSED` notice, which interpolates nothing.
 - **KB-INV-8** The `devflow learning` CLI reaches ledger state only through the store loaded by `loadLearningStore()`; a store function it calls needs the interface entry, the `LEARNING_STORE_SURFACE` entry and the fixtures' `LearningStoreApi`.
@@ -41,6 +41,7 @@ updated: 2026-10-10
 - **KB-AP-7** Seeding a `session-start-context` test without a temp `$HOME`: a real manifest with learning off would silently gate the test.
 - **KB-AP-8** Assuming the learning switch gates the tracker-setup directive: it does not.
 - **KB-AP-9** Recreating a claim, owner file or learning tree once it has vanished mid-run: the agent stops writing and goes to Finishing.
+- **KB-AP-10** Removing the Learning agent's explicit CLAUDE.md and rule-file reads while `omitClaudeMd` stays true: its Encoded check then compares against nothing and silently stops retiring entries as Encoded; the reads sit in Inputs, before the first already-encoded comparison.
 
 ## Overview
 
@@ -61,7 +62,7 @@ The queue is claimed and released only by the `claim-queue` and `release-claim` 
 
 ## The Learning agent
 
-`src/assets/agents/learning.md`: `model: opus` with no `effort:` line (it follows the session), tools listed Read, Bash, Glob, Grep (no Write, no Edit; the Grep and Glob entries are inert because the agent holds Bash, so it searches with `git grep -P` and `find`), no preloaded skill (its body never reads one), and the CLAUDE.md context kept (the frontmatter has no `omitClaudeMd:` line): its Encoded check reads the rules stated there, and without that context the agent stopped retiring entries as Encoded (an A/B over frozen batches also showed a cheaper sonnet candidate falling short of the capture bar). Hook-spawned, never named by a command. `tests/guards/agent-config.test.ts` pins the row against the shared table in `tests/fixtures/agent-config.ts`, and `tests/decisions/config.test.ts` holds the default model in `learning-tuning-config.ts` equal to it (D-LEARNING-SHIPPED-ROW). Iron Law: assign-anchor owns numbering, render owns the `.md`, never hand-edit. One run, in order:
+`src/assets/agents/learning.md`: `model: opus` with no `effort:` line (it follows the session), tools listed Read, Bash, Glob, Grep (no Write, no Edit; the Grep and Glob entries are inert because the agent holds Bash, so it searches with `git grep -P` and `find`), no preloaded skill (its body never reads one), and `omitClaudeMd: true`, so Claude Code hands it neither the project CLAUDE.md nor `~/.claude/rules/**`. Its Encoded check compares a lesson with the rule that already states it, and an A/B over frozen batches showed that without that context the agent stopped retiring entries as Encoded (it also showed a cheaper sonnet candidate falling short of the capture bar). The Inputs section therefore directs it to Read `<project root>/CLAUDE.md` once and to list and Read each installed devflow rule file once (`find` over `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/rules/devflow`), before the first of the two comparisons (Part 1's already-encoded search and Part 2's first rung), keep what it read for the rest of the run, skip a missing file, and read nothing when the run ends before any comparison. A short `## Core rules` digest (context economy, untrusted input) restates the two rules it works by. `tests/learning-agent.test.ts` holds the read and its position before both comparison markers, with known-bad probes. Hook-spawned, never named by a command. `tests/guards/agent-config.test.ts` pins the row against the shared table in `tests/fixtures/agent-config.ts`, and `tests/decisions/config.test.ts` holds the default model in `learning-tuning-config.ts` equal to it (D-LEARNING-SHIPPED-ROW). Iron Law: assign-anchor owns numbering, render owns the `.md`, never hand-edit. One run, in order:
 
 - **Step 0.** `claim-queue`: `claimed <token>` (keep it for the final release), `claimed <token> takeover` (the stale run may have stored part of the batch, so do not reinforce an observation that already states a turn), `busy` (exit silently), `none` (report "no pending decisions work"), non-zero exit (stop, report stderr).
 - **Part 1, capture.** Read the claimed turns (all, or only the latest dialog-worthy ones when huge; the prompt states the window). Abstain by default: a decision is a real fork with rationale, a pitfall a non-obvious transferable failure; one incident yields an ADR or a PF, never both; if `git grep -P` or `find` finds a test, guard, CLAUDE.md, rule or prompt that already states it, record nothing.
@@ -144,7 +145,7 @@ A thin router (status, list, show, configure, reset, clear, restore, enable, dis
 | `src/core/learning-tuning-config.ts` | Tuning merge; `DEFAULTS.model` held equal to the Learning row |
 | `tests/decisions/learning-claim.test.ts` · `learning-store.test.ts` · `tests/learning-agent.test.ts` | Claim, store and prompt pins (including the staleness lockstep) |
 | `tests/decisions/cli-subcommands.test.ts` | The CLI's subcommands and link rules |
-| `tests/guards/agent-config.test.ts` · `tests/fixtures/agent-config.ts` | The shipped agent table (Learning's row: opus, no effort line, no preload, CLAUDE.md kept) |
+| `tests/guards/agent-config.test.ts` · `tests/fixtures/agent-config.ts` | The shipped agent table (Learning's row: opus, no effort line, no preload, `omitClaudeMd` true with the explicit CLAUDE.md and rules reads) |
 | `tests/seams/tracker-key-path.test.ts` · `tracker-claim-staleness.test.ts` | Tracker key-path parity and the shared claim-staleness bound |
 
 ## Related

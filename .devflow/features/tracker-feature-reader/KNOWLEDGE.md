@@ -5,7 +5,7 @@ description: "Use when editing tracker/_contract.mds or _mcp.mds, redact-secrets
 category: architecture
 directories: [src/assets/agents/git.mds, src/assets/mds/tracker/_contract.mds, src/assets/mds/tracker/_mcp.mds, src/assets/mds/tracker/_steps.mds, src/assets/scripts/redact-secrets.cjs, src/core/mds-variants.ts, tests/tracker, tests/guards/mcp-sink-bypass.test.ts, tests/guards/no-config-read.test.ts, tests/guards/provider-scope.test.ts]
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-11
 ---
 
 # Tracker Feature: reader side
@@ -138,7 +138,7 @@ Every *measured* figure is a row the shape table in `tests/tracker/byte-budget.t
 - `src/assets/mds/tracker/_contract.mds`: the provider-independent reader half compiled to `tracker/_contract.md`: `## Tracker contract` > `### Tracker provider resolution` (settings line, `TRACKER_WARN` reasons, the static map, the remote rule, the project-key chain, neutral values, the `- **Tracker**:` rendering rule) and `### Tracker input contract` (conventions-file reading, the `provider:` mismatch guard, consumed sections, sink-side shape gates, `{ISSUE_REF}` rendering)
 - `src/assets/mds/tracker/_mcp.mds`: the tool-call contract: the capability table, no-HTTP-fallback, scrub-before-render, the `SCRUB:`/`SECRET-EXPOSED` echo, the `<bytes>` verification refusal
 - `src/assets/mds/tracker/_steps.mds`: the provider-neutral step text imported as `steps` by the three provider modules; its header records what stayed in the agent and why it is not `_common.mds`
-- `src/assets/agents/git.mds`: `## Loading the mechanics` (the `**PR mechanics:**` load rule, the merged step order, the one tracker bullet), the `**Mechanics:**` / `**PR mechanics:**` pointers per operation (the latter a fixed literal naming `references/pr/{op}.md`), the Output templates (issue slots `{ISSUE_REF}`); it names no provider and runs no resolver; frontmatter `model: haiku`, `effort: medium`, the shared denylist
+- `src/assets/agents/git.mds`: `## Loading the mechanics` (the `**PR mechanics:**` load rule, the merged step order, the one tracker bullet), the `**Mechanics:**` / `**PR mechanics:**` pointers per operation (the latter a fixed literal naming `references/pr/{op}.md`), the Output templates (issue slots `{ISSUE_REF}`); it names no provider and runs no resolver; frontmatter `model: haiku`, `effort: medium`, a `tools:` allowlist (Bash, Read, Write, ToolSearch; the installer stamps the tracker servers on, see `tracker-feature`) and `omitClaudeMd: true`
 - `src/assets/mds/git/_pr.mds`: generates `references/pr/{op}.md` for `PR_HOST_OPS`; installed under every provider because PRs, PR reviews and PR checks stay on GitHub
 - `src/assets/scripts/redact-secrets.cjs`: `--emit`, `NONCE_HEX_CHARS`, `D11_FAIL_REASONS`, `FRAMING_IN_BODY_RE`, exit code 5, `parseArgs` / `scrubTwice` / `frameEmit` / `runFileMode` / `runEmitMode`
 - `src/core/mds-variants.ts`: `VARIANT_MODULES` (provider rows and the last, ungated `kind: 'contract'` row), `MCP_BACKED_PROVIDER_SUBDIRS`, `MCP_CONTRACT_MODULE`, `mcpContractIsGenerated`, `resolveVariantModules`, `GATED_REFERENCE_MODULE_SOURCES`, `deferredReferenceModuleSources`, `validateContractOutputName`, `VARIANT_SECTION_MARKER_RE`

@@ -5,7 +5,7 @@ description: "Use when changing the tracker wizard step, devflow tracker (--set/
 category: component-patterns
 directories: [src/core/tracker.ts, src/cli/commands/tracker-prompts.ts, src/cli/commands/tracker.ts, src/targets/claude-code/tracker-install.ts, src/core/feature-config.ts, src/core/manifest.ts, src/cli/commands/init.ts]
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-11
 ---
 
 # Tracker Selection Wiring in Init & CLI
@@ -61,7 +61,7 @@ Mirrors `devflow compliance` (`D-TRACKER-PAIR`): the action handles `--status` a
 
 ## Tracker Agent Install (`tracker-install.ts`)
 
-`convergeTrackerArtifacts({claudeDir, warn, agentSourceDirs?})` owns one artifact: `~/.claude/agents/devflow/tracker.md`, installed on EVERY machine (`D-INSTALL-ALL-PROVIDERS`: a repository's `project.json` can select jira on a github machine, so the agent the session-start directive names must be spawnable everywhere; it is inert until that directive fires, which happens only for a provider with no learned conventions). It copies from the first existing of `agentSourceDirs()` unless the installed file is already byte-identical, returning `{ converged, agent: 'installed' | 'unchanged' }` — `unchanged` keeps a steady-state re-init quiet, and a truncated or hand-edited file differs, so it self-heals. A non-absolute `claudeDir` is refused through the result, not thrown. The reference tree is NOT here: it converges through the installer's one overlay call.
+`convergeTrackerArtifacts({claudeDir, servers?, warn, agentSourceDirs?})` owns one artifact: `~/.claude/agents/devflow/tracker.md`, installed on EVERY machine (`D-INSTALL-ALL-PROVIDERS`: a repository's `project.json` can select jira on a github machine, so the agent the session-start directive names must be spawnable everywhere; it is inert until that directive fires, which happens only for a provider with no learned conventions). It takes the first existing of `agentSourceDirs()`, applies the tracker-server stamp (`stampAgentTools` over `servers`, absent meaning the default list; `D-TRACKER-SERVER-ALLOWLIST`) and writes the result unless the installed file already equals that STAMPED text (against the bare source it would differ on every run), returning `{ converged, agent: 'installed' | 'unchanged' }` — `unchanged` keeps a steady-state re-init quiet, and a truncated or hand-edited file differs, so it self-heals. A non-absolute `claudeDir` is refused through the result, not thrown. The reference tree is NOT here: it converges through the installer's one overlay call.
 
 **Declared but skipped:** the Tracker agent stays in `devflow-core-skills.agents` but the generic agent copy loop skips it. `TRACKER_AGENT_NAME` (exported from `tracker-install.ts`, the one authority on the name) is what that loop skips and what the full-install pre-clean keeps around; being declared keeps the registry-keyed agent sweep from treating it as an orphan and keeps the agent-roster floor true without a `FEATURE_OWNED_AGENTS` set.
 

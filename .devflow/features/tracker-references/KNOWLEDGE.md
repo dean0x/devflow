@@ -5,7 +5,7 @@ description: "Use when editing git.mds, tracker or PR-host reference modules, th
 category: architecture
 directories: [src/assets/agents/git.mds, src/assets/mds/tracker, src/assets/mds/git, src/core/mds-variants.ts, src/core/reference-sweep.ts, src/targets/claude-code/installer.ts, src/assets/commands/_partials/_tracker.mds, src/assets/skills/git, src/assets/skills/review-methodology, tests/tracker, tests/installer, tests/guards/capability-hoist.test.ts, tests/guards/provider-scope.test.ts, tests/guards/requires-closure.test.ts, tests/guards/report-cap.test.ts, tests/fixtures/agent-config.ts]
 created: 2026-09-14
-updated: 2026-10-10
+updated: 2026-10-11
 ---
 
 # Tracker References
@@ -113,7 +113,7 @@ Runtime order in a Git spawn: the agent, with its `## Loading the mechanics` →
 
 - **KB-INV-3, KB-AP-5** The single-naming-line assertion is about the TRACKER pointer only: exactly one line in `dist/agents/git.md` may name a `references/tracker/{provider}/` path composed from the provider token. The `**PR mechanics:**` pointer is excluded because widening the rule to it would conflate "one convergence point for a composed path" (the single-sink requirement) with "one pointer vocabulary total".
 - **KB-AP-8** Since `@mdscript/mds` 0.4.4 a single-brace placeholder such as `DEGRADED ({reason})` is literal text everywhere — prose, inline code and every fence — and only `{{…}}` interpolates, so moved text needs no re-escaping. The hazard that remains is text carried from a 0.2.0-era source or doc: a `\{…\}` escape now ships its backslash and a single-brace `{helper()}` call ships as literal text, both with a clean build (the backslash-leak and lost-expansion guards in `tests/build-mds.test.ts` catch them).
-- **The Git agent's frontmatter is table-driven** (`D-GIT-ROW`). `model: haiku`, `effort: medium` and the shared `disallowedTools` list (`SHARED_DENYLIST` in `tests/fixtures/agent-config.ts`) are the `git` row of `AGENT_CONFIG` (`policy: { kind: 'deny', extra: [] }`, skills `git` and `worktree-support`). It is a denylist, not an allowlist, so the tracker MCP tools configured in the user's environment stay callable — an allowlist would strip them from every Jira or Linear spawn. Model and effort stay overridable through `devflow agents`. Git left both old exemptions with this row: `EXEMPT_AGENTS` is `{tracker}` only (its model pinned equal to the hook that spawns it), and Git joined the report-cap roster (`report-cap-roster-count`), so the agent ends in `## Output`, whose report cap and exempt-line list sit outside every operation's extent.
+- **The Git agent's frontmatter is table-driven** (`D-GIT-ROW`). `model: haiku`, `effort: medium`, a `tools:` allowlist of Bash, Read, Write and ToolSearch, and `omitClaudeMd: true` are the `git` row of `AGENT_CONFIG` in `tests/fixtures/agent-config.ts` (skills `git` and `worktree-support`; the exact tool names and the digest lines its body carries are the row's `policy` and `digest`). It is an allowlist: the earlier denylist kept the user's tracker tool servers callable, and the allowlist replaces it because the installer stamps one whole-server entry per configured server onto the INSTALLED `tools:` line (`D-TRACKER-SERVER-ALLOWLIST`), so the shipped source names no server and the row pins that vendor-neutral half. Model and effort stay overridable through `devflow agents`. Git joined the report-cap roster (`report-cap-roster-count`), so the agent ends in `## Output`, whose report cap and exempt-line list sit outside every operation's extent.
 - **The review-methodology skill holds no posting recipe.** Its former inline PR-comment function is a pointer to the Git agent's `post-review-summary` operation, where D10 and D11 already live.
 - **`SKILL.md`'s Extended References table** carries a row only for the generated per-op tracker mechanics (`references/tracker/{provider}/{op}.md`). It gains none for the flat cross-cutting documents or `pr/`: each is named from the agent at its point of use, and a row would cost per-spawn characters in the one file preloaded on every Git spawn for documentation that exists elsewhere (`tests/guards/extended-references.test.ts` holds every row's path real, with one justified exception prefix for the generated `references/tracker/`).
 - **`references/github-api.md`** states its D4 STOP-and-report rule exactly once and fails closed on a malformed rate probe; its size is pinned by equality (`GITHUB_API_MD_CHARS`, byte-budget KB).
@@ -130,7 +130,7 @@ Runtime order in a Git spawn: the agent, with its `## Loading the mechanics` →
 - `src/assets/agents/code.mds` — `ISSUE_PR_LINK` shape re-check and the Branch token's producer-line quote (Responsibility 7)
 - `src/assets/skills/review-methodology/references/patterns.md`, `violations.md` — no posting recipe
 - `tests/seams/pr-link-handoff.test.ts`, `tests/tracker/reference-reachability.test.ts` — Branch token pins; loading-section and parity arms (guards KB)
-- `tests/fixtures/agent-config.ts`, `tests/guards/report-cap.test.ts` — `AGENT_CONFIG.git`, `SHARED_DENYLIST`, `EXEMPT_AGENTS`; Git's report-cap roster membership
+- `tests/fixtures/agent-config.ts`, `tests/guards/report-cap.test.ts` — `AGENT_CONFIG.git`, `CORE_RULES_DIGEST`; Git's report-cap roster membership
 
 ## Related
 

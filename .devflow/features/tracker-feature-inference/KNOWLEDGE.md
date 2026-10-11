@@ -5,7 +5,7 @@ description: "Use when editing src/assets/agents/tracker.md, session-start-conte
 category: architecture
 directories: [src/assets/agents/tracker.md, src/assets/scripts/hooks/session-start-context, src/targets/claude-code/tracker-install.ts, tests/tracker-agent.test.ts, tests/shell-hooks-tracker.test.ts, tests/seams/tracker-claim-staleness.test.ts, tests/config-disable-guards.test.ts]
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-11
 ---
 
 # Tracker Feature: inference
@@ -14,12 +14,12 @@ updated: 2026-10-10
 
 - **KB-AP-1** Never write a defaults-only or partial conventions file "to make progress": the file's existence is the "setup done" signal, so a partial file permanently suppresses the retry that would have produced a correct one.
 - **KB-AP-2** Never name a provider or the transport acronym in the Tracker agent, or re-derive a provider in its prompt: the validated token arrives in the spawn directive and a second derivation is a second convergence point.
-- **KB-AP-3** Never give the Tracker agent a `tools:` allowlist: tracker server tool names are user-configured per machine, so any list is a guess that fails at runtime in an unwatched background run.
+- **KB-AP-3** Never write a tracker server into the Tracker agent's shipped `tools:` list: server names are user-configured per machine, so a list written at authoring time is a guess that fails at runtime in an unwatched background run. The installer stamps the configured servers onto the installed line instead.
 - **KB-AP-4** Never re-point the conventions-file write at `--emit`: a file sink has the shell `&&` chain; `tests/tracker-agent.test.ts` asserts the agent never contains `--emit` so the two reasons cannot collapse.
 - **KB-AP-5** Never turn the write into a pipeline, leave a chain link unchecked, or unlink-and-retry on `EEXIST`: the winner's content is the answer.
 - **KB-AP-6** Never spend or write the attempt counter from the agent: only the hook writes its value; the agent only deletes it after a successful write.
 - **KB-AP-7** Never admit a provider with a negative test (`!= github`) in the hook: the sentinel is user-writable and the resolver line is not hook-composed, so use the positive allowlist before any interpolation.
-- **KB-AP-8** Never add a `_roster.mds` row or a registry exemption for `tracker`: it is hook-spawned only and passes the reverse spawn check structurally.
+- **KB-AP-8** Never add a `_roster.mds` row for `tracker`, or an exemption from the registry guards: it is hook-spawned only and passes the reverse spawn check structurally.
 - **KB-AP-9** Never write the retired agent name's noun ("valid" plus "ator") in a shipped asset: `agent-name-guards` sweeps `src/assets/**` with maximal recall; say "shape gate".
 - **KB-AP-10** Never run a hook test against the real `$HOME`: a developer's configured provider changes the output; every invocation carries a seeded temp `HOME`.
 - **KB-AP-11** Never trim the agent's mandated rationale to hit a size; if a guard pin trips, pin a stable literal, not a reflow-fragile phrase.
@@ -42,9 +42,9 @@ This facet covers the two halves of conventions inference: the **session-start h
 
 ## The Tracker agent: `src/assets/agents/tracker.md`
 
-`name: Tracker` (byte-exact), registry key `tracker`, `model: sonnet` (pinned equal to `loadShippedAgentDefaults()['tracker'].model`), preloaded skills `devflow:git` and `devflow:boundary-validation`, and **no `tools:` key**. It is the one agent in `EXEMPT_AGENTS` (`tests/fixtures/agent-config.ts`: a deliberate constant, since it declares no tool list and its model is pinned equal to the hook that spawns it); every other agent has an `AGENT_CONFIG` row (the Git agent's being haiku, medium effort and the shared denylist with no extras).
+`name: Tracker` (byte-exact), registry key `tracker`, `model: sonnet` (pinned equal to `loadShippedAgentDefaults()['tracker'].model`), the single preloaded skill `devflow:git` (the `boundary-validation` preload is gone: its content reaches the agent through the Core rules digest), `omitClaudeMd: true`, and a `tools:` allowlist of `Bash`, `Read` and `ToolSearch` (`Bash` for the claim, the history sampling and the one scrub-gated write chain; `Read` for the file it opens; `ToolSearch` to load a tracker server's deferred tool schemas). It has no `Write`: its one file is written by that Bash chain, and a Write tool would be a second way to write outside it. Every agent, Tracker included, has an `AGENT_CONFIG` row in `tests/fixtures/agent-config.ts` (the exempt-agent map is gone): Tracker's row is `D-TRACKER-ROW`, a deliberate constant whose model is pinned equal to the hook's `TRACKER_MODEL` and to `loadShippedAgentDefaults()['tracker'].model`, with no effort line. The body carries a `## Core rules` digest (context economy, untrusted input, no secrets, bounded loops), because `omitClaudeMd` also drops the installed rules; `tests/guards/core-rules-digest.test.ts` holds the lines to the row's `digest`.
 
-**Why no `tools:` key**, stated in the agent itself so it cannot be "tidied" into an allowlist: the tracker servers it must reach are user-configured, so their tool names differ per machine. A wrong allowlist fails at *runtime*, in a background run nobody watches. An explicit `## Read-only boundary` section is the compensating control, pinned in `tests/tracker-agent.test.ts`: it writes one content path, runs no git command in the write path and no write-side git or forge command anywhere, issues no network request of its own (tracker reads go through tracker tools only, never a hand-built request, a substituted CLI or a credential read from the environment) and delegates nothing.
+**The `tools:` list names no tracker server** (EC-69, restated), stated in the agent itself so it cannot be "completed" with a guess: the servers it must reach are user-configured, so their names differ per machine. The installer appends one whole-server entry per configured server to the INSTALLED `tools:` line (`D-TRACKER-SERVER-ALLOWLIST`; `devflow init` and `devflow tracker --servers`, see the hub KB), and the agent loads a server's tools with `ToolSearch` before it probes. A name that matches no connected server is an unreachable capability, which the probe already treats as `TRACEABILITY: DEGRADED (no tracker tool for {capability})`, with `devflow tracker --servers` as the remedy, so a wrong name fails where it can be seen. An allowlist says which tools the agent holds, never what it may do with them, so the explicit `## Read-only boundary` section stays the control, pinned in `tests/tracker-agent.test.ts`: it writes one content path, runs no git command in the write path and no write-side git or forge command anywhere, issues no network request of its own (tracker reads go through tracker tools only, never a hand-built request, a substituted CLI or a credential read from the environment) and delegates nothing.
 
 **Hook-spawned only.** It has no `_roster.mds` row and no command spawns it. `tracker` sits in the `devflow-core-skills` plugin, whose empty `commands: []` makes `registry-integrity`'s reverse spawn check skip it (`if (spawned.size === 0) continue`): a **structural** pass, not an exemption (rationale as a comment at the code site plus an assertion). A roster row would fail set-equality against `dist/commands/` `agentType` values, and the roster resolver *throws* on a name it cannot read.
 
@@ -139,7 +139,7 @@ Then the POSITIVE allowlist, then **skip when `tracker/$P.md` already exists**, 
 - `tests/seams/tracker-claim-staleness.test.ts`: the agent-to-shell claim-staleness seam
 - `tests/seams/tracker-key-path.test.ts`: `collectAdmittedProviders` and the sentinel seam
 - `tests/helpers.ts`: `TRACKER_SCHEMA_SECTIONS`, `TRACKER_SCHEMA_FRONTMATTER_KEYS`, `TRACKER_TEMPLATE_FENCE_TAG`, `collectTrackerTemplate`, `collectTrackerTemplateHeadings`, `collectTrackerSchemaRows`
-- `tests/fixtures/agent-config.ts`: `EXEMPT_AGENTS`, `AGENT_CONFIG`
+- `tests/fixtures/agent-config.ts`: `AGENT_CONFIG` (the `tracker` row), `CORE_RULES_DIGEST`; `tests/guards/core-rules-digest.test.ts`, `tests/guards/agent-config.test.ts`: the digest and the vendor-neutral allowlist pins; `src/targets/claude-code/tracker-install.ts`: converge writes the stamped text
 - `tests/fixtures/numeric-floors.json`: the `tracker-section-max-chars` ceiling
 - `tests/config-disable-guards.test.ts`: hook invocations under a seeded temp `HOME`
 - `docs/reference/platform-assumptions.md`: the claim-file liveness assumption, the `source` domain, the Read tool's `~/` expansion, the denied-equals-absent capability behaviour
