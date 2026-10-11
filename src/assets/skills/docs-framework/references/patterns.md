@@ -21,10 +21,6 @@ Correct patterns for Devflow documentation artifacts with templates and helper f
 ├── design/                         # Implementation plans
 │   ├── {ISSUE_ID}-{topic-slug}.{timestamp}.md   # /plan (multi-{topic-slug} / {topic-slug} without an issue)
 │   └── {slug}/{timestamp}/         # /dynamic-plan: {ticket-slug}-plan.md, DECISIONS-NEEDED.md
-├── status/                         # Development logs
-│   ├── {timestamp}.md
-│   ├── compact/{timestamp}.md
-│   └── INDEX.md
 └── CATCH_UP.md                     # Latest summary (overwritten)
 ```
 
@@ -33,8 +29,6 @@ Correct patterns for Devflow documentation artifacts with templates and helper f
 **Minimal (new project):**
 ```
 .devflow/docs/
-├── status/
-│   └── INDEX.md
 └── CATCH_UP.md
 ```
 
@@ -52,9 +46,6 @@ Correct patterns for Devflow documentation artifacts with templates and helper f
 │       ├── regression.md
 │       ├── tests.md
 │       └── review-summary.md
-├── status/
-│   ├── 2025-01-05_1430.md
-│   └── INDEX.md
 └── CATCH_UP.md
 ```
 
@@ -72,8 +63,6 @@ Correct patterns for Devflow documentation artifacts with templates and helper f
 │       ├── security.md
 │       ├── ...
 │       └── review-summary.md
-├── status/
-│   └── INDEX.md
 └── CATCH_UP.md
 ```
 

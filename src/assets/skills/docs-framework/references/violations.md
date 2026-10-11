@@ -13,7 +13,7 @@ Common violations of documentation conventions with detection patterns and fixes
 | Unsanitized branch slug | `feature/auth` | `feature-auth` | Replace `/` with `-` |
 | Wrong case for artifacts | `Status-2025-01-05.md` | `2025-01-05_1430.md` | Use lowercase except special indexes |
 | Wrong case for indexes | `index.md` | `INDEX.md` | UPPERCASE for special indexes |
-| Files outside .docs | `docs/status.md` | `.devflow/docs/status/2025-01-05_1430.md` | Use `.devflow/docs/` root |
+| Files outside .docs | `docs/status.md` | `.devflow/docs/reviews/feat-auth/2025-01-05_1430/review-summary.md` | Use `.devflow/docs/` root |
 | Missing INDEX.md | Status files without index | Create `INDEX.md` | Every directory needs index |
 | Special chars in slug | `oauth-2.0-auth` | `oauth-2-0-auth` | Replace each non-alphanumeric run with one `-` |
 
@@ -34,7 +34,7 @@ project/
 
 ```
 .devflow/docs/
-├── logs/                   # Should be status/
+├── logs/                   # Should be reviews/{branch-slug}/
 ├── reports/                # Should be reviews/{branch-slug}/
 └── notes.md                # Should be in appropriate subdir
 ```

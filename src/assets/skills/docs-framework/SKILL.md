@@ -58,14 +58,7 @@ All generated documentation lives under `.devflow/docs/` at the checkout's tople
 ├── waves/{slug}/{timestamp}/wave-report.md   # /dynamic-build
 ├── handoff-{branch-slug}.md            # Code agent phase handoff; deleted once the PR exists
 ├── evidence-{branch-slug}.md           # /implement test plan and claims; stays after the PR
-├── evidence-wave-{slug}.md             # /dynamic-build wave test plan and claims
-├── status/                             # Development logs
-│   ├── {timestamp}.md
-│   ├── compact/{timestamp}.md
-│   └── INDEX.md
-└── swarm/                              # Swarm operation state
-    ├── state.json
-    └── plans/
+└── evidence-wave-{slug}.md             # /dynamic-build wave test plan and claims
 
 .devflow/memory/
 ├── WORKING-MEMORY.md                   # Auto-maintained by Stop hook (overwritten)
