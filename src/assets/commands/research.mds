@@ -113,12 +113,17 @@ Each Research agent writes findings to disk at OUTPUT_PATH.
 **Produces:** RESEARCH_SUMMARY
 **Requires:** RESEARCH_OUTPUTS
 
-Spawn `Agent(subagent_type="Synthesize")` in `research` mode:
-- Reads Research agent outputs from RESEARCH_OUTPUTS paths
-- Merges findings with trust-aware aggregation
-- Writes `research-summary.md` to the same timestamped directory
+Spawn `Agent(subagent_type="Synthesize")` in `research` mode. It reads the Research agent outputs from the `RESEARCH_OUTPUTS` paths, merges them with trust-aware aggregation, and writes `research-summary.md` into `RESEARCH_BASE_DIR` — the one directory of this run, which only this spawn names:
 
-Output path: `{worktree}/.devflow/docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}/research-summary.md`
+```
+Agent(subagent_type="Synthesize", run_in_background=false):
+"Mode: research
+WORKTREE_PATH: {WORKTREE_PATH}  (omit if none was provided)
+RESEARCH_OUTPUTS: {the OUTPUT_PATH of every Research agent that wrote its file}
+RESEARCH_BASE_DIR: {worktree}/.devflow/docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}
+Merge findings with trust-aware aggregation.
+Output: {worktree}/.devflow/docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}/research-summary.md"
+```
 
 ### Phase 6: Present
 
