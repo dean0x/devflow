@@ -29,15 +29,16 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import * as path from 'path'
 
-import { ROOT, requireDistFile, resolveAgentSource } from '../helpers.js'
+import { ROOT, gitOperationReferenceCorpus, requireDistFile } from '../helpers.js'
 
 const release = (): string => requireDistFile('release.md')
-const gitMd = (): string => resolveAgentSource('git').content
+/** The Git operations' text: each operation's one reference (GitHub), joined (D-OP-ONE-REF). */
+const gitMd = (): string => gitOperationReferenceCorpus().map(entry => entry.content).join('\n')
 
-/** git.md's section for one operation, from its heading to the next operation's. */
+/** An operation's section of the joined references, from its heading to the next operation's. */
 function opSection(git: string, op: string): string {
   const start = git.indexOf(`## Operation: ${op}`)
-  if (start === -1) throw new Error(`git.md: no ${op} operation`)
+  if (start === -1) throw new Error(`the Git operation references: no ${op} operation`)
   const next = git.indexOf('\n## Operation:', start + 1)
   return next === -1 ? git.slice(start) : git.slice(start, next)
 }

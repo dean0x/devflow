@@ -45,16 +45,17 @@ import * as path from 'path';
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js';
 import {
-  PR_HOST_OPS,
+  GIT_OPERATIONS,
   TRACKER_GITHUB_OPS,
+  VARIANT_MODULES,
   generatedReferenceManifest,
+  operationReferenceRel,
 } from '../../src/core/mds-variants.js';
 import {
   ROOT,
   collectUnfencedH2,
   extractOpSectionFromCorpus,
   gitAgentSinkCorpus,
-  prHostRel,
 } from '../helpers.js';
 
 // ---------------------------------------------------------------------------
@@ -91,24 +92,22 @@ function readGeneratedReferences(dir: string = compiledSkillRefsDir()): Generate
   });
 }
 
-/** Per-op reference relPath for a tracker operation. */
-function trackerOpRelPath(op: string): string {
-  return `tracker/github/${op}.md`;
-}
-
 /**
- * Every per-op reference the anchor rule ranges over, as `(op, relPath)` pairs.
+ * Every per-op reference the anchor and contract-first rules range over, as `(op, relPath)` pairs.
  *
- * Tracker ops UNION PR-host ops, because the rule is about the FILE SHAPE every
- * union-mode extraction depends on, and a `pr/` file is extracted exactly the way
- * a `tracker/{provider}/` one is. Iterating only the tracker roster would leave
- * eight generated files whose line 1 nothing checks — and a displaced anchor there
- * silently truncates every D10, D11 and numeric-bound guard that now reads them.
+ * EVERY Git operation (tracker, PR-host and the doc-backed one), under every registered provider
+ * for a tracker operation, because the rules are about the FILE SHAPE every union-mode extraction
+ * depends on, and a `pr/` file is extracted exactly the way a `tracker/{provider}/` one is. A
+ * displaced anchor, or steps ahead of the contract, silently changes what every D10, D11 and
+ * numeric-bound guard that reads the file sees.
  */
-const PER_OP_REFERENCES: readonly { readonly op: string; readonly relPath: string }[] = [
-  ...TRACKER_GITHUB_OPS.map(op => ({ op, relPath: trackerOpRelPath(op) })),
-  ...PR_HOST_OPS.map(op => ({ op, relPath: prHostRel(op) })),
-];
+const PER_OP_REFERENCES: readonly { readonly op: string; readonly relPath: string }[] = GIT_OPERATIONS.flatMap(op =>
+  (TRACKER_GITHUB_OPS as readonly string[]).includes(op)
+    ? VARIANT_MODULES
+        .filter(mod => mod.subdir.startsWith('tracker/'))
+        .map(mod => ({ op, relPath: operationReferenceRel(op, mod.subdir.slice('tracker/'.length)) ?? '' }))
+    : [{ op, relPath: operationReferenceRel(op, 'github') ?? '' }],
+);
 
 /**
  * How many column-0 `## ` lines the live generated tree must carry INSIDE a fence.
@@ -285,6 +284,114 @@ describe('generated references carry no unfenced `## ` below their own heading',
       'invisible while the bytes stay on disk and containment stays green. Demote the ' +
       'heading to `###`; if it is issue/PR body text that must render as a level-2 heading on the ' +
       'tracker, put it inside a code fence where it belongs.',
+    ).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2b. Contract first — every operation reference opens with its contract (AC-105)
+// ---------------------------------------------------------------------------
+//
+// D-OP-MOVABLE. A reference is the operation's WHOLE text: its contract (description,
+// `**Input:**`, degradation notes, the `**Output:**` template) and then its steps. The order is the
+// property: it keeps the contract where callers and guards read it, and it is what lets a later
+// change swap an operation's steps for a script without touching the promise those steps keep.
+// "Steps" begin at the first unfenced `###` heading — `### Process`, or a provider's `### Setup` /
+// `### Provider signals` that precede it — and every one of them must come after the Output
+// template's closing fence.
+
+/** The line index (0-based) of the first unfenced `### ` heading, or -1. */
+function firstUnfencedH3(lines: readonly string[]): number {
+  let fenced = false;
+  for (const [i, line] of lines.entries()) {
+    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
+    else if (!fenced && line.startsWith('### ')) return i;
+  }
+  return -1;
+}
+
+/** The line index (0-based) of the closing fence of the first fenced block after `from`, or -1. */
+function closingFenceAfter(lines: readonly string[], from: number): number {
+  let opened = false;
+  for (let i = from; i < lines.length; i++) {
+    if (/^(```|~~~)/.test(lines[i])) {
+      if (opened) return i;
+      opened = true;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Named collector: references whose contract does not come first.
+ *
+ * A reference is contract-first when `**Input:**` precedes `**Output:**`, the Output template's
+ * fence closes, and the first unfenced `###` heading (the steps) comes after it. Returns
+ * `{relPath}: {defect}` strings.
+ */
+export function collectContractFirstDefects(refs: readonly GeneratedReference[]): string[] {
+  const defects: string[] = [];
+  for (const ref of refs) {
+    const lines = ref.content.split('\n');
+    const input = lines.findIndex(line => line.startsWith('**Input:**'));
+    const output = lines.findIndex(line => line.startsWith('**Output:**'));
+    if (input === -1) defects.push(`${ref.relPath}: no **Input:** line`);
+    if (output === -1) defects.push(`${ref.relPath}: no **Output:** template`);
+    if (input === -1 || output === -1) continue;
+    if (input > output) defects.push(`${ref.relPath}: **Output:** (line ${output + 1}) precedes **Input:** (line ${input + 1})`);
+    const close = closingFenceAfter(lines, output);
+    if (close === -1) defects.push(`${ref.relPath}: the **Output:** template has no closing fence`);
+    const steps = firstUnfencedH3(lines);
+    if (steps === -1) defects.push(`${ref.relPath}: no steps heading (### …) at all`);
+    else if (close !== -1 && steps < close) {
+      defects.push(`${ref.relPath}: steps begin at line ${steps + 1}, before the Output template closes at line ${close + 1}`);
+    }
+  }
+  return defects;
+}
+
+describe('every operation reference opens with its contract, then its steps (AC-105, D-OP-MOVABLE)', () => {
+  const refs = readGeneratedReferences();
+  const perOp = PER_OP_REFERENCES.map(({ relPath }) => {
+    const ref = refs.find(r => r.relPath === relPath);
+    expect(ref, `${relPath} is missing from the manifest`).toBeDefined();
+    return ref!;
+  });
+
+  it('the contract block comes first in every operation reference, under every provider', () => {
+    expect(perOp.length, 'the scan ranges over nothing').toBeGreaterThanOrEqual(GIT_OPERATIONS.length);
+    expect(
+      collectContractFirstDefects(perOp),
+      'an operation reference puts steps ahead of (or in the middle of) its contract. The contract is ' +
+      'written once in `_ops*.mds` and called right after the anchor; provider mechanics follow it',
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: steps ahead of the Output template, and a reference with no contract, are reported', () => {
+    const contract = '## Operation: probe-op\n\nA probe.\n\n**Input:** `X`\n\n**Output:**\n```markdown\n## Probe\n```\n';
+    expect(
+      collectContractFirstDefects([{ relPath: 'tracker/github/probe-op.md', content: `${contract}\n### Process\n\n1. Do it.\n` }]),
+      'a well-formed reference is silent — or the arm proves only that the collector reports everything',
+    ).toEqual([]);
+    expect(
+      collectContractFirstDefects([{
+        relPath: 'tracker/github/probe-op.md',
+        content: '## Operation: probe-op\n\n**Input:** `X`\n\n### Process\n\n1. Do it.\n\n**Output:**\n```markdown\n## Probe\n```\n',
+      }]),
+    ).toEqual(['tracker/github/probe-op.md: steps begin at line 5, before the Output template closes at line 12']);
+    expect(
+      collectContractFirstDefects([{ relPath: 'tracker/github/probe-op.md', content: '## Operation: probe-op\n\n### Process\n\n1. Do it.\n' }]),
+    ).toEqual([
+      'tracker/github/probe-op.md: no **Input:** line',
+      'tracker/github/probe-op.md: no **Output:** template',
+    ]);
+    // A `###` inside the Output template's fence is payload, not the start of the steps.
+    expect(
+      collectContractFirstDefects([{
+        relPath: 'tracker/github/probe-op.md',
+        content: '## Operation: probe-op\n\n**Input:** `X`\n\n**Output:**\n```markdown\n### Status: READY\n```\n\n### Process\n\n1. Do it.\n',
+      }]),
+      'a fenced `###` must not be read as the start of the steps',
     ).toEqual([]);
   });
 });

@@ -50,6 +50,7 @@ import {
   ROOT,
   collectPerItemFetchVerbs,
   resolveAgentSource,
+  withoutHostSteps,
 } from './helpers.js';
 
 // ---------------------------------------------------------------------------
@@ -120,7 +121,10 @@ function readGithubApiReference(): string {
 
 /** The whole generated tree of one provider, concatenated. */
 function providerTree(provider: Provider): string {
-  return TRACKER_OPS.map(op => readGenerated(`${provider.subdir}/${op}.md`)).join('\n');
+  // Without the host steps: `create-release` states GitHub's 60000-character release-notes cap, and
+  // `ensure-pr-ready` states GitHub pull-request mechanics, under every tracker because the release
+  // and the pull request are GitHub's whatever the tracker is (see `withoutHostSteps`).
+  return TRACKER_OPS.map(op => withoutHostSteps(readGenerated(`${provider.subdir}/${op}.md`))).join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -379,6 +383,10 @@ describe('provider literals: the provider-neutral contract names no release mark
       { label: 'agents/git.md', text: git.content },
       { label: 'tracker/_mcp.md', text: readGenerated('tracker/_mcp.md') },
       { label: 'src/assets/mds/tracker/_mcp.mds', text: readSource('src/assets/mds/tracker/_mcp.mds') },
+      // The operation contracts and inline steps every provider's reference expands (D-OP-CONTRACT-ONCE)
+      // are provider-neutral by construction: a marker named here would be named under all three.
+      { label: 'src/assets/mds/git/_ops.mds', text: readSource('src/assets/mds/git/_ops.mds') },
+      { label: 'src/assets/mds/git/_ops_steps.mds', text: readSource('src/assets/mds/git/_ops_steps.mds') },
     ];
   }
 
@@ -390,13 +398,13 @@ describe('provider literals: the provider-neutral contract names no release mark
     }
   });
 
-  it('git.md and the tool-call contract name neither marker', () => {
+  it('git.md, the tool-call contract and the shared operation text name neither marker', () => {
     const corpus = neutralCorpus();
     expect(corpus.every(entry => entry.text.length > 0), 'an empty neutral file clears this vacuously').toBe(true);
     expect(
       corpus.map(entry => entry.text).join('\n'),
       'the corpus must hold the op whose marker this is about, or the arm reads the wrong files',
-    ).toContain('## Operation: associate-release');
+    ).toContain('@define associate_release_contract():');
     const leaks = corpus.flatMap(entry => collectNeutralMarkerLeaks(entry.label, entry.text));
     expect(
       leaks,
@@ -1174,7 +1182,7 @@ describe('the comment-body cap renders one value at every emitted site', () => {
     for (const { provider, declared } of owners) {
       const corpus = TRACKER_OPS.map(op => ({
         label: `${provider.subdir}/${op}.md`,
-        text: readGenerated(`${provider.subdir}/${op}.md`),
+        text: withoutHostSteps(readGenerated(`${provider.subdir}/${op}.md`)),
       }));
       const sites = collectCapSites(corpus);
       // Count-aware: the claim is about every site, so a tree with one site would

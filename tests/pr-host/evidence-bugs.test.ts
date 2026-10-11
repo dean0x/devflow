@@ -17,6 +17,7 @@ import { readFileSync } from 'fs'
 import * as path from 'path'
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
+import { operationReferenceRel } from '../../src/core/mds-variants.js'
 import {
   collectOrderViolations,
   extractOpSectionFromCorpus,
@@ -27,7 +28,6 @@ import {
   prHostRel,
   requireDistFile,
   requireDistFiles,
-  resolveAgentSource,
   ROOT,
   type CorpusEntry,
   type OrderRule,
@@ -37,7 +37,11 @@ import {
 // Shared readers — every guard below reads BUILT artifacts
 // ---------------------------------------------------------------------------
 
-const GIT_AGENT = resolveAgentSource('git')
+/**
+ * ensure-pr-ready's one reference under GitHub (D-OP-ONE-REF): a tracker operation, one file per
+ * provider, each holding the PR skeleton written once beside that provider's step 4b.
+ */
+const PR_READY_REL = operationReferenceRel('ensure-pr-ready', 'github') ?? ''
 
 /** A generated `devflow:git` reference, by its references-root-relative path. */
 function requireRef(rel: string): string {
@@ -50,16 +54,14 @@ function requireRef(rel: string): string {
 }
 
 /**
- * `git.md` plus the PR-host references and nothing else — the two halves of every
- * PR-host operation (its contract in the agent, its mechanics under `pr/`).
- * Asserted to hold both halves, so a guard over it cannot pass over one alone.
+ * The PR-host references and nothing else — each one the whole of its operation (contract
+ * and mechanics), since the agent body carries no operation. Asserted non-empty, so a guard
+ * over it cannot pass over nothing.
  */
 function prHostCorpus(): CorpusEntry[] {
-  const corpus = gitAgentSinkCorpus().filter(
-    entry => entry.path === GIT_AGENT.path || isPrHostEntryPath(entry.path),
-  )
-  if (!corpus.some(e => e.path === GIT_AGENT.path) || !corpus.some(e => isPrHostEntryPath(e.path))) {
-    throw new Error('prHostCorpus: git.md or the pr/ references are missing — run `npm run build`')
+  const corpus = gitAgentSinkCorpus().filter(entry => isPrHostEntryPath(entry.path))
+  if (corpus.length === 0) {
+    throw new Error('prHostCorpus: the pr/ references are missing — run `npm run build`')
   }
   return corpus
 }
@@ -441,18 +443,15 @@ function soleLine(text: string, prefix: string): string | null {
 
 /** The six sites that name a publication status: two Outputs, two probes, two reports. */
 function labelSites(files: {
-  gitMd: string
   prReview: string
   prResolution: string
   resolve: string
   codeReview: string
 }): LabelSite[] {
-  const gitCorpus: CorpusEntry[] = [{ path: 'git.md', content: files.gitMd }]
-  const output = (op: string): string | null =>
-    soleLine(extractOpSectionFromCorpus(gitCorpus, op, { mode: 'sole' }).content, '**Publication**:')
+  // Each summary op's Output template is the contract block of its own reference, ahead of its steps.
   return [
-    { label: 'git.md post-review-summary Output', line: output('post-review-summary') },
-    { label: 'git.md post-resolution-summary Output', line: output('post-resolution-summary') },
+    { label: 'pr/post-review-summary.md Output', line: soleLine(files.prReview, '**Publication**:') },
+    { label: 'pr/post-resolution-summary.md Output', line: soleLine(files.prResolution, '**Publication**:') },
     { label: 'pr/post-review-summary.md step 3', line: soleLine(files.prReview, '3. ') },
     { label: 'pr/post-resolution-summary.md step 3', line: soleLine(files.prResolution, '3. ') },
     { label: '/resolve Phase 10 Evidence Posts', line: soleLine(evidencePostsBlock(files.resolve) ?? '', '- Publication:') },
@@ -472,7 +471,6 @@ export function collectMissingUndeterminable(sites: readonly LabelSite[]): strin
 
 function shippedLabelFiles() {
   return {
-    gitMd: GIT_AGENT.content,
     prReview: requireRef(prHostRel('post-review-summary')),
     prResolution: requireRef(prHostRel('post-resolution-summary')),
     resolve: requireDistFile('resolve.md'),
@@ -918,13 +916,13 @@ export function collectMissingForkPreflight(files: ForkFiles): string[] {
     FORK_PUSH_ACCESS,
     FORK_REASON,
   ])
-  need('pr/ensure-pr-ready.md step 3', soleLine(files.ensurePrReady, '3. ') ?? '', [
+  need(`${PR_READY_REL} step 3`, soleLine(files.ensurePrReady, '3. ') ?? '', [
     'isCrossRepository',
     'maintainerCanModify',
     FORK_PUSH_REFUSED,
     FORK_REASON,
   ])
-  out.push(...collectOrderViolations('pr/ensure-pr-ready.md', files.ensurePrReady, [
+  out.push(...collectOrderViolations(PR_READY_REL, files.ensurePrReady, [
     { label: 'the push is tried before a refusal is classified', before: 'push with `-u` flag', after: FORK_PUSH_REFUSED },
     { label: 'only a refused push degrades', before: FORK_PUSH_REFUSED, after: FORK_REASON },
   ]))
@@ -941,7 +939,7 @@ export function collectMissingForkPreflight(files: ForkFiles): string[] {
 function shippedForkFiles(): ForkFiles {
   return {
     validateBranch: requireRef(prHostRel('validate-branch')),
-    ensurePrReady: requireRef(prHostRel('ensure-pr-ready')),
+    ensurePrReady: requireRef(PR_READY_REL),
     resolve: requireDistFile('resolve.md'),
   }
 }
@@ -985,9 +983,9 @@ describe('a fork PR without maintainer edits degrades instead of failing a push 
     }
     expect(collectMissingForkPreflight(wounded)).toEqual([
       `pr/validate-branch.md: missing ${FORK_PUSH_ACCESS}`,
-      `pr/ensure-pr-ready.md step 3: missing ${FORK_PUSH_REFUSED}`,
-      `pr/ensure-pr-ready.md: [the push is tried before a refusal is classified] after anchor absent: "${FORK_PUSH_REFUSED}"`,
-      `pr/ensure-pr-ready.md: [only a refused push degrades] before anchor absent: "${FORK_PUSH_REFUSED}"`,
+      `${PR_READY_REL} step 3: missing ${FORK_PUSH_REFUSED}`,
+      `${PR_READY_REL}: [the push is tried before a refusal is classified] after anchor absent: "${FORK_PUSH_REFUSED}"`,
+      `${PR_READY_REL}: [only a refused push degrades] before anchor absent: "${FORK_PUSH_REFUSED}"`,
     ])
   })
 

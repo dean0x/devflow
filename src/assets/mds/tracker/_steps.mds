@@ -23,15 +23,16 @@ own cost almost nothing, because nothing imports them but the three providers an
 they capture only one another. A define that wants hoisting but would be the 18th
 in `_common.mds` belongs here or in a new partial, never there.
 
-What did NOT move, and why, so an omission is not read as an oversight:
-the create-release steps (they carry `gh release create`, which the
-forbidden-transport guards of the tool-call providers ban, and they hold
-create-release in the remote-I/O detection set); backlink-shipped-issues' step 0 and its loop bound
-(associate-release runs the same step 0, and a loop line ahead of a provider's
-hoisted identity lookup would break the capability-hoist guard); the GraphQL
-null-alias rule of fetch-issues-batch; and the learn-conventions pointer sentence
-(a literal reference path the byte budget scans the agent's own operation section
-for).
+What is NOT here, and why, so an omission is not read as an oversight: the inline
+steps that sit at a numbered position among a provider's own steps live in
+`_ops_steps.mds` with the operation contracts (D-OP-ONE-REF). They are the
+create-release release-host steps (they carry `gh release create`, a host shape the
+transport guards of the tool-call providers allow in that one operation only);
+backlink-shipped-issues' step 0 and its loop bound (associate-release runs the same
+step 0, and a loop line ahead of a provider's hoisted identity lookup would break
+the capability-hoist guard, so each provider places the loop where it belongs); and
+the GraphQL null-alias rule of fetch-issues-batch. The learn-conventions pointer
+sentence is part of setup-task's contract block in `_ops.mds`.
 
 GATES LIVE IN THE STEP TEXT. `branch_create_steps` opens its commit step with its
 own condition on the conventions result, and `release_evidence_gate_step` states

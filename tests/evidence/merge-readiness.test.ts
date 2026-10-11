@@ -51,7 +51,7 @@ import * as path from 'path'
 import { createRequire } from 'module'
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
-import { extractOpSectionFromCorpus, prHostRel, requireDistFile, resolveAgentSource } from '../helpers.js'
+import { extractOpSectionFromCorpus, gitOperationReferenceCorpus, prHostRel, requireDistFile } from '../helpers.js'
 import { CI_WAIT_SCRIPT, PR_EVIDENCE_SCRIPT } from './seam.js'
 
 /** Transcribed from pr-evidence.cjs's JSDoc — only the EVIDENCE line grammar. */
@@ -93,10 +93,9 @@ function requirePrRef(op: string): string {
   }
 }
 
-/** An op's own section of the compiled agent — 'sole': git.md is the one contract authority. */
+/** An op's own section — 'sole': its one reference is the contract authority (D-OP-ONE-REF). */
 function contractSection(op: string): string {
-  const git = resolveAgentSource('git')
-  return extractOpSectionFromCorpus([{ path: git.path, content: git.content }], op, { mode: 'sole' }).content
+  return extractOpSectionFromCorpus(gitOperationReferenceCorpus(), op, { mode: 'sole' }).content
 }
 
 /** The `**Status**:` enum an op's Output template declares. */

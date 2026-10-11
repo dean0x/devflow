@@ -96,6 +96,9 @@ interface DispositionRow {
 
 const PROVIDERS = ['github', 'jira', 'linear'] as const
 const setupTask = (p: string): string => `skills/git/references/tracker/${p}/setup-task.md`
+const ensurePrReady = (p: string): string => `skills/git/references/tracker/${p}/ensure-pr-ready.md`
+/** A PR-host operation's one reference. The Git agent body carries no operation (D-OP-ONE-REF). */
+const prHostRef = (op: string): string => `skills/git/references/pr/${op}.md`
 
 const DISPOSITION: readonly DispositionRow[] = [
   {
@@ -120,9 +123,11 @@ const DISPOSITION: readonly DispositionRow[] = [
     inputs: ['APPLY_CONVENTIONS'],
     on: 'retitle to the recorded convention',
     off: 'no retitle',
+    // ensure-pr-ready is a tracker operation: one reference per provider, each holding the PR
+    // skeleton (written once) and its contract, so every provider's copy is a site.
     sites: [
-      { file: 'skills/git/references/pr/ensure-pr-ready.md', anchor: '4c. ', phrase: gate('APPLY_CONVENTIONS') },
-      { file: 'agents/git.md', after: '## Operation: ensure-pr-ready', anchor: '**Input:**', phrase: declared('APPLY_CONVENTIONS') },
+      ...PROVIDERS.map(p => ({ file: ensurePrReady(p), anchor: '4c. ', phrase: gate('APPLY_CONVENTIONS') })),
+      ...PROVIDERS.map(p => ({ file: ensurePrReady(p), after: '## Operation: ensure-pr-ready', anchor: '**Input:**', phrase: declared('APPLY_CONVENTIONS') })),
     ],
   },
   {
@@ -131,14 +136,12 @@ const DISPOSITION: readonly DispositionRow[] = [
     inputs: ['ISSUE_REQUIRED', 'APPLY_CONVENTIONS'],
     on: 'passed by every caller',
     off: 'passed by every caller',
-    sites: [
-      {
-        file: 'agents/git.md',
-        after: '## Operation: setup-task',
-        anchor: '- `ISSUE_REQUIRED`, `APPLY_CONVENTIONS`:',
-        phrase: `${declared('ISSUE_REQUIRED')}, ${declared('APPLY_CONVENTIONS')}`,
-      },
-    ],
+    sites: PROVIDERS.map(p => ({
+      file: setupTask(p),
+      after: '## Operation: setup-task',
+      anchor: '- `ISSUE_REQUIRED`, `APPLY_CONVENTIONS`:',
+      phrase: `${declared('ISSUE_REQUIRED')}, ${declared('APPLY_CONVENTIONS')}`,
+    })),
   },
   {
     row: 5,
@@ -239,7 +242,7 @@ const DISPOSITION: readonly DispositionRow[] = [
       { file: 'commands/resolve.md', after: '### Phase 9c:', anchor: 'Run this phase only when', phrase: gate('REQUIRE_NON_AUTHOR_APPROVAL') },
       { file: 'commands/resolve.md', after: '### Phase 9c:', anchor: 'REQUIRE_NON_AUTHOR_APPROVAL: {', phrase: 'REQUIRE_NON_AUTHOR_APPROVAL: {REQUIRE_NON_AUTHOR_APPROVAL}' },
       { file: 'commands/resolve.md', after: '## Edge Cases', anchor: '| `REQUIRE_NON_AUTHOR_APPROVAL` is `false` |', phrase: '`REQUIRE_NON_AUTHOR_APPROVAL` is `false`' },
-      { file: 'agents/git.md', after: '## Operation: check-merge-readiness', anchor: '**Input:**', phrase: '`REQUIRE_NON_AUTHOR_APPROVAL`' },
+      { file: prHostRef('check-merge-readiness'), after: '## Operation: check-merge-readiness', anchor: '**Input:**', phrase: '`REQUIRE_NON_AUTHOR_APPROVAL`' },
       { file: 'skills/git/references/pr/check-merge-readiness.md', anchor: '- `NOT_READY (no non-author approval)` —', phrase: gate('REQUIRE_NON_AUTHOR_APPROVAL') },
       { file: 'skills/git/references/pr/check-merge-readiness.md', anchor: '- `READY` — only when all hold', phrase: '`REQUIRE_NON_AUTHOR_APPROVAL` is `false`' },
     ],
@@ -287,10 +290,10 @@ const DISPOSITION: readonly DispositionRow[] = [
       { file: 'commands/code-review.md', after: '## Edge Cases', anchor: '| `reviewPublication: off` |', phrase: policyGate },
       { file: 'commands/resolve.md', after: '## Edge Cases', anchor: '| `reviewPublication: off` |', phrase: policyGate },
       { file: 'skills/git/references/publication-gate.md', anchor: '   - `stub` (never unrecognised)', phrase: 'report `STUB (evidence policy)`' },
-      { file: 'agents/git.md', after: '## Operation: post-review-summary', anchor: '**Input:**', phrase: '| `off` | `stub`;' },
-      { file: 'agents/git.md', after: '## Operation: post-review-summary', anchor: '**Publication**:', phrase: '| STUB (evidence policy)' },
-      { file: 'agents/git.md', after: '## Operation: post-resolution-summary', anchor: '**Input:**', phrase: '| `off` | `stub`;' },
-      { file: 'agents/git.md', after: '## Operation: post-resolution-summary', anchor: '**Publication**:', phrase: '| STUB (evidence policy)' },
+      { file: prHostRef('post-review-summary'), after: '## Operation: post-review-summary', anchor: '**Input:**', phrase: '| `off` | `stub`;' },
+      { file: prHostRef('post-review-summary'), after: '## Operation: post-review-summary', anchor: '**Publication**:', phrase: '| STUB (evidence policy)' },
+      { file: prHostRef('post-resolution-summary'), after: '## Operation: post-resolution-summary', anchor: '**Input:**', phrase: '| `off` | `stub`;' },
+      { file: prHostRef('post-resolution-summary'), after: '## Operation: post-resolution-summary', anchor: '**Publication**:', phrase: '| STUB (evidence policy)' },
     ],
   },
   {
@@ -488,9 +491,16 @@ describe('evidence-policy disposition: the table and the tree agree, both ways (
     expect(files).toContain('skills/git/references/tracker/github/setup-task.md')
     expect(files).toContain('commands/implement.md')
     expect(files.filter(f => f.startsWith('commands/')).length, 'every compiled command').toBe(requireDistFiles().length)
-    for (const prefix of ['agents/', 'skills/git/references/', 'commands/']) {
+    // The agent body carries no operation, so its Input declarations (the first gated lines
+    // under `agents/`) moved into the references with the operations; a gate name found under
+    // `agents/` would be a gate the operations' own references do not state.
+    for (const prefix of ['skills/git/references/', 'commands/']) {
       expect(gated.some(g => g.file.startsWith(prefix)), `no gated line found under ${prefix}`).toBe(true)
     }
+    expect(
+      gated.filter(g => g.file.startsWith('agents/')).map(g => `${g.file}:${g.index}`),
+      'the Git agent body names a gate: an operation\'s gate belongs in that operation\'s reference',
+    ).toEqual([])
     expect(exempt.size, 'the resolution text the exemption names is empty').toBeGreaterThanOrEqual(4)
   })
 

@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync, copyFileSync } from 'fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync, copyFileSync } from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 import {
@@ -26,6 +26,7 @@ import {
 } from '../helpers.js'
 import { getAllAgentNames } from '../../src/core/plugins.js'
 import { MAX_REFERENCE_SWEEP_DEPTH } from '../../src/core/reference-sweep.js'
+import { compiledSkillRefsDir } from '../../src/core/assets.js'
 
 // ---------------------------------------------------------------------------
 // Guard: resolveAllAgents ⊇ getAllAgentNames() (17 today)
@@ -322,7 +323,7 @@ describe('extractOpSectionFromCorpus: `## ` boundaries are fence-aware', () => {
 describe('statusLineRefReader: undeclared paths are refused', () => {
   // A REAL generated reference that the list does not declare — so the refusal
   // is proven to be about DECLARATION, not about the file being absent.
-  const UNDECLARED = 'tracker/github/fetch-issue.md'
+  const UNDECLARED = 'tracker/github/associate-release.md'
 
   it('RED: reading a real-but-undeclared reference throws naming the list', () => {
     const reader = statusLineRefReader()
@@ -368,12 +369,9 @@ describe('gitAgentSinkCorpus: references/ is walked recursively (Phase 2 prep)',
     mkdirSync(srcAgentsDir, { recursive: true })
     copyFileSync(resolveAgentSource('git').path, path.join(srcAgentsDir, 'git.md'))
 
-    // Build probe-op section from the first real operation section in git.md:
-    // slice the section and rename the heading to probe-op.
-    const realGitContent = resolveAgentSource('git').content
-    const firstOpStart = realGitContent.indexOf('\n## Operation:')
-    const nextOpStart = realGitContent.indexOf('\n## Operation:', firstOpStart + 1)
-    const realSection = realGitContent.slice(firstOpStart + 1, nextOpStart === -1 ? undefined : nextOpStart)
+    // Build probe-op section from a real operation reference (the agent body carries no
+    // operation): read validate-branch's reference and rename the heading to probe-op.
+    const realSection = readFileSync(path.join(compiledSkillRefsDir(), 'pr', 'validate-branch.md'), 'utf-8')
     const probeSection = realSection.replace(/^## Operation: \S+/m, '## Operation: probe-op')
 
     // Flat reference file (currently served by Phase 0 flat readdirSync)

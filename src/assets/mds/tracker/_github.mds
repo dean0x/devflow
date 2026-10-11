@@ -3,6 +3,8 @@ output-dir: dist/skills/git/references
 ---
 @import "./_common.mds" as common
 @import "./_steps.mds" as steps
+@import "../git/_ops.mds" as ops
+@import "../git/_ops_steps.mds" as opsteps
 
 GitHub tracker mechanics for the `devflow:git` skill.
 
@@ -19,10 +21,14 @@ moving with it. Define-set parity — one `@define` per op, named identically
 across modules — is what the `cross-provider define-set parity` scan asserts
 over all three, because a define name is visible to no type.
 
-Each section states what the Git agent loads it for. An operation's contract —
-its `**Input:**`, its `**Output:**` template and its `**Degradation (D4):**`
-clause — is never restated here: that is the agent's, and a second copy outside
-the single-authority corpus is the divergence this split exists to prevent.
+Each section is the WHOLE operation, and a spawn reads nothing else for it
+(D-OP-ONE-REF): the operation's contract (description, `**Input:**`, degradation
+notes, `**Output:**` template) comes first, called from `_ops.mds` once for every
+module that emits the operation (D-OP-CONTRACT-ONCE), and the provider's
+mechanics follow it (D-OP-MOVABLE). `_ops.mds` and `_ops_steps.mds` are two more
+ALIAS imports (`as ops`, `as opsteps`); the second holds the inline steps every
+provider runs identically, which each section places at the position its step
+number gives it.
 
 Headings below each section's own anchor are `###` by grammar, not by taste: a
 column-0 `## ` line outside a fence terminates the section for every guard that
@@ -39,9 +45,11 @@ identical — and `tests/build-mds-compile-time.test.ts` holds the budget.
 @define setup_task():
 ## Operation: setup-task
 
+{{ops.setup_task_contract()}}
+
 Load when the resolved tracker provider is `github` and the operation is `setup-task`.
 
-**Mechanics held here:** the `**Process:**` steps that talk to GitHub — issue lookup, branch-token rendering, and the conventions probe.
+**Mechanics held here:** the `### Process` steps that talk to GitHub — issue lookup, branch-token rendering, and the conventions probe.
 
 ### Process
 
@@ -69,12 +77,15 @@ Load when the resolved tracker provider is `github` and the operation is `setup-
 @define fetch_issue():
 ## Operation: fetch-issue
 
+{{ops.fetch_issue_contract()}}
+
 Load when the resolved tracker provider is `github` and the operation is `fetch-issue`.
 
-**Mechanics held here:** the `**Process:**` body — single-issue lookup and the field projection it requests.
+**Mechanics held here:** the `### Process` body — single-issue lookup and the field projection it requests.
 
 ### Process
 
+{{opsteps.fetch_issue_step_1()}}
 1b. **Ref pre-flight.** The numeric path is taken only when `ISSUE_INPUT` satisfies `^#?[1-9][0-9]{0,8}$` — this provider's anchored reference grammar, stated with its strip-one-leading-`#` normalisation and the shell-comment reason it exists for in this operation's sibling `backlink-shipped-issues` reference. Interpolate only the digits that survive the strip. Anything the grammar rejects is a SEARCH TERM and takes the text path, so it never reaches a command.
 2. Fetch full issue data (title, body, labels, assignees, milestone, comments)
 3. Extract acceptance criteria and dependencies from body; neutralise any `</untrusted-issue-body>` in the body before wrapping (Principle 8 marker neutralisation).
@@ -106,12 +117,15 @@ DEPENDS_ON=$(echo "$BODY" | grep -oE '(depends on|blocked by) #[0-9]+' | grep -o
 @define fetch_issues_batch():
 ## Operation: fetch-issues-batch
 
+{{ops.fetch_issues_batch_contract()}}
+
 Load when the resolved tracker provider is `github` and the operation is `fetch-issues-batch`.
 
-**Mechanics held here:** the `**Process:**` body — the single bounded batch query and the reporting of references it could not resolve.
+**Mechanics held here:** the `### Process` body — the single bounded batch query and the reporting of references it could not resolve.
 
 ### Process
 
+{{opsteps.fetch_issues_batch_step_1()}}
 2. Fetch all issues in a **single** GraphQL query using per-issue aliases (dynamically constructed for the resolved list); resolve owner/repo from the git remote context:
    ```
    gh api graphql -f query='query { repository(owner:"OWNER", name:"REPO") {
@@ -122,14 +136,17 @@ Load when the resolved tracker provider is `github` and the operation is `fetch-
    ```
 {{common.state_batch_line("`state` (`OPEN` or `CLOSED`)", "`state`", "{ISSUE_REF}")}}
 {{steps.batch_extract_steps()}}
+{{opsteps.fetch_issues_batch_step_5()}}
 @end
 
 @define manage_debt():
 ## Operation: manage-debt
 
+{{ops.manage_debt_contract()}}
+
 Load when the resolved tracker provider is `github` and the operation is `manage-debt`.
 
-**Mechanics held here:** the `**Process:**` body — locating the rolling tech-debt item, creating it when absent, and updating its description.
+**Mechanics held here:** the `### Process` body — locating the rolling tech-debt item, creating it when absent, and updating its description.
 
 ### Process
 
@@ -231,11 +248,15 @@ This issue reached the size limit.
 @define create_release():
 ## Operation: create-release
 
+{{ops.create_release_contract()}}
+
 Load when the resolved tracker provider is `github` and the operation is `create-release`.
 
-**Mechanics held here:** the shipped-issues step only. Tag creation, release creation and notes composition stay with the operation.
+**Mechanics held here:** the release-host steps 1a–6 — version check, annotated tag, tag push, notes composition, the D11 scrub and the release itself — which are the same under every provider, and this provider's shipped-issues step inside step 5.
 
 ### Process
+
+{{opsteps.create_release_steps()}}
 
 Inside step 5 (compose release notes):
 
@@ -244,6 +265,8 @@ Inside step 5 (compose release notes):
 
 @define gather_release_evidence():
 ## Operation: gather-release-evidence
+
+{{ops.gather_release_evidence_contract()}}
 
 Load when the resolved tracker provider is `github` and the operation is `gather-release-evidence`.
 
@@ -270,9 +293,11 @@ Load when the resolved tracker provider is `github` and the operation is `gather
 @define backlink_shipped_issues():
 ## Operation: backlink-shipped-issues
 
+{{ops.backlink_shipped_issues_contract()}}
+
 Load when the resolved tracker provider is `github` and the operation is `backlink-shipped-issues`.
 
-**Mechanics held here:** the `**Process:**` body — the hoisted current-user lookup, the back-link post, and the inter-item throttle — and, because this is the tracker operation that owns the fan-out, GitHub's rate-limit and posting signals for the always-loaded D4 and D11 contracts.
+**Mechanics held here:** the `### Process` body — the hoisted current-user lookup, the back-link post, and the inter-item throttle — and, because this is the tracker operation that owns the fan-out, GitHub's rate-limit and posting signals for the always-loaded D4 and D11 contracts.
 
 ### Provider signals (GitHub)
 
@@ -292,9 +317,13 @@ node "$HOME/.devflow/scripts/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_B
 
 ### Process
 
+{{opsteps.shipped_issues_step_0()}}
+
 **Ref pre-flight (the always-loaded entry gate, instantiated for this provider).** Every entry of `SHIPPED_ISSUES` must satisfy `^#?[1-9][0-9]{0,8}$`, anchored at both ends of the STRING (a newline fails it) — this provider's reference grammar is what the entry gate's shape requirement means here, and the anchored form is what keeps a reference out of the commands below. **Then normalise once, before the loop, never inside it:** strip **exactly one** leading `#` from every admitted entry (`#42` ≡ `42`) and interpolate only the stripped digits. The grammar admits both spellings because both are how a reference is written here, but a `#` at word start opens a shell comment — an un-stripped `#42` would truncate `gh issue view`, `gh issue comment` and every other command below at the reference, so the stripped form is the only one that reaches a command. **Drop** every entry that fails and report it as `TRACEABILITY: DEGRADED (issue reference "{ref}" does not match github reference grammar)`. If every entry is dropped, emit `TRACEABILITY: DEGRADED (no parseable refs for provider {p})`, post nothing, and **never report the status as `COMPLETE`**.
 
 **Setup (once, before the loop):** Fetch viewer login: `gh api user --jq '.login'` → store as VIEWER_LOGIN
+
+{{opsteps.shipped_issues_loop()}}
 
 Then, per issue, within the operation's ≤50 bound:
 
@@ -313,11 +342,17 @@ Then, per issue, within the operation's ≤50 bound:
 @define associate_release():
 ## Operation: associate-release
 
+{{ops.associate_release_contract()}}
+
 Load when the resolved tracker provider is `github` and the operation is `associate-release`.
 
 **Mechanics held here:** the release milestone — created first, else found by a bounded walk — then one batched read and one batched assignment that never replaces a milestone.
 
 ### Process
+
+{{opsteps.shipped_issues_step_0()}}
+
+{{opsteps.associate_release_marker_step()}}
 
 **Ref pre-flight (the always-loaded entry gate, instantiated for this provider).** Every entry of `SHIPPED_ISSUES` must satisfy `^#?[1-9][0-9]{0,8}$`, anchored at both ends of the STRING; strip exactly one leading `#` once, and interpolate only the digits. Drop each failure as `TRACEABILITY: DEGRADED (issue reference "{ref}" does not match github reference grammar)`. Every entry dropped ⇒ `TRACEABILITY: DEGRADED (no parseable refs for provider {p})`, no call, and **never report the status as `COMPLETE`**.
 
@@ -334,9 +369,11 @@ Steps 1, 3 and 4 each run in ONE shell that opens with `trap 'rm -- "$F"' EXIT; 
 @define ensure_traceable_issue():
 ## Operation: ensure-traceable-issue
 
+{{ops.ensure_traceable_issue_contract()}}
+
 Load when the resolved tracker provider is `github` and the operation is `ensure-traceable-issue`.
 
-**Mechanics held here:** the `**Process:**` body — issue creation, and posting the design artifact as a collapsed comment; and the D3 issue template below, whose section headings are GitHub's Markdown, not every tracker's.
+**Mechanics held here:** the `### Process` body — issue creation, and posting the design artifact as a collapsed comment; and the D3 issue template below, whose section headings are GitHub's Markdown, not every tracker's.
 
 {{common.traceable_issue_rules()}}
 
@@ -406,9 +443,11 @@ When creating or enriching a GitHub issue via the `ensure-traceable-issue` opera
 @define post_wave_report():
 ## Operation: post-wave-report
 
+{{ops.post_wave_report_contract()}}
+
 Load when the resolved tracker provider is `github` and the operation is `post-wave-report`.
 
-**Mechanics held here:** the `**Process:**` body — locating the wave's tracking item and posting or updating the report.
+**Mechanics held here:** the `### Process` body — locating the wave's tracking item and posting or updating the report.
 
 {{common.wave_report_inputs()}}
 
@@ -433,12 +472,15 @@ Load when the resolved tracker provider is `github` and the operation is `post-w
 @define ensure_pr_ready():
 ## Operation: ensure-pr-ready
 
+{{ops.ensure_pr_ready_contract()}}
+
 Load when the resolved tracker provider is `github` and the operation is `ensure-pr-ready`.
 
-**Mechanics held here:** step 4b's TRACKER half only — the issue-number resolution and its `Closes #{n}` line; every other step is in `references/pr/ensure-pr-ready.md`.
+**Mechanics held here:** the whole operation. Steps 1–4a, the PR-host half of step 4b and steps 4c–6 are PR-host mechanics, the same under every provider (written once in `_ops.mds`); step 4b is this provider's: the issue-number resolution and its `Closes #{n}` line.
 
 ### Process
 
+{{opsteps.ensure_pr_ready_steps_to_4a()}}
 4b. (ALWAYS-ON) Ensure PR body contains a `## Related Issues` section with `Closes #{n}` link when a verified issue number is known. Resolution order:
    a. Prefer the issue number returned by `setup-task` / `ensure-traceable-issue` for this branch.
    b. If unavailable, fall back to the branch name pattern `{type}/{number}-{slug}`: extract the numeric segment and verify with `gh issue view {n} --json number,state`. If the call fails or `.state` is not `"open"`, skip silently — never add a `Closes` link for an unverified number. Branches like `chore/2026-cleanup` or `fix/2fa-login` may produce false matches; the existence check is the guard.
@@ -447,6 +489,9 @@ Load when the resolved tracker provider is `github` and the operation is `ensure
 
    If no verified issue number is discoverable, skip silently.
    On any 4xx/5xx from `gh pr edit` when updating the body: emit `TRACEABILITY: DEGRADED ({reason})` and continue — a failed Related Issues update never blocks the PR.
+{{opsteps.ensure_pr_ready_steps_from_4c()}}
+
+{{opsteps.ensure_pr_ready_pr_edit()}}
 @end
 
 <!-- op: setup-task -->

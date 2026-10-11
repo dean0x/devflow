@@ -61,7 +61,6 @@ import {
   OP_MENTION_RE,
   PRELOADED,
   REFS_DIR,
-  SECTIONS,
   TRACKER_PROVIDER_IDS,
   alwaysLoadedBodies,
   collectOpMentions,
@@ -80,7 +79,7 @@ import {
   nameableFrom,
   nameableFromProvider,
   ownLoadForProvider,
-  prHostOpLoad,
+  opLoadRows,
   providerLoadedSet,
   readReferenceFromDisk,
   referenceChars,
@@ -91,6 +90,7 @@ import {
   summedForProvider,
   trackerRefRel,
   worstCaseNonTrackerLoad,
+  worstCaseOpLoad,
   worstCasePrHostLoad,
   worstCaseProviderLoad,
   worstCaseReferenceLoad,
@@ -177,6 +177,14 @@ import type {
  * section with its report cap and the frontmatter effort and denylist were paid for out of
  * that cut.
  *
+ * Re-derived by #451 (D-OP-ONE-REF, D-OP-CONTRACT-ONCE) from a measured 10_823, which is the
+ * ceiling itself: the plan sets this one at the measured value and no more. Every operation's
+ * Input, degradation notes, Output template and steps left the agent for the one reference
+ * that operation loads; what remains is the Input contract with D4, the loading table, the
+ * D11 scrub, the operations routing table, the generic `## Output` and the shared Principles,
+ * Core rules and Boundaries. The next content addition to git.mds, #448's ensure-pr-ready
+ * routing row included, must fund itself with a cut elsewhere in git.mds.
+ *
  * THE RULE: this ceiling is a REGRESSION ALARM, and it is RE-DERIVED ONLY DOWNWARD —
  * lowered after a pass that actually cut the artifact, never raised to fit one that
  * grew. A budget that rises to meet the artifact is a description, not a budget
@@ -196,7 +204,7 @@ import type {
  * pattern in the same commit; that is the permitted direction for a ceiling, and the
  * manifest guard's probe still proves an INCREMENT would go red.
  */
-const BUDGET_GIT_MD = 35_303;
+const BUDGET_GIT_MD = 10_823;
 
 /**
  * Design-time derivation: the PRE-SPLIT capture of skills/git/SKILL.md, less the
@@ -246,11 +254,19 @@ const BUDGET_SKILL_MD = 6_445;
  * now rides in the worst op's own reference (setup-task), so the row fell by the difference.
  * The next addition to the agent or to a github mechanics file must fund itself with a cut.
  *
+ * Re-derived by #451 from a measured 41_451: git.md fell by 24_402 ch because every operation's
+ * contract and steps moved into the reference that operation loads (D-OP-ONE-REF), and the
+ * worst op (setup-task) now carries its own contract, so the row fell by the difference. The
+ * ceiling is that measurement plus 5_000 ch of room for #448, which moves PR creation from the
+ * Code agent into the Git agent's ensure-pr-ready reference (its paste gates are about 4–5 KB).
+ * The room is #448's alone: it measures its real growth and tightens this ceiling to it; the
+ * ceiling is never raised.
+ *
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set` in
  * tests/fixtures/numeric-floors.json; lowering re-pins the value AND the pattern
  * in the same commit.
  */
-const BUDGET_LOADED_SET = 62_182;
+const BUDGET_LOADED_SET = 46_451;
 
 /**
  * THE JIRA-SCOPED loaded-set ceiling — a spawn under the Jira provider.
@@ -280,6 +296,9 @@ const BUDGET_LOADED_SET = 62_182;
  * addition to the contract or to a Jira mechanics file must fund itself with a cut
  * rather than reach for slack. Re-derived by #425 to 72_795, the same
  * git.md cut with `tracker/_contract.md` billed once per spawn beside the tool-call contract.
+ * Re-derived by #451 from a measured 51_835 (the same git.md cut as the GitHub row, with the
+ * worst op's contract now inside its own reference) plus 5_000 ch of room for #448, which
+ * tightens it to the real growth.
  * The row measures 72_488 today, 56 ch under the 72_544 ceiling #445 left it. Trimming
  * `references/tracker/_mcp.md` is the honest first move: it is contract prose, it
  * is the single largest term this row adds over the GitHub one, and a pass over it
@@ -288,7 +307,7 @@ const BUDGET_LOADED_SET = 62_182;
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-jira` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_JIRA = 72_544;
+const BUDGET_LOADED_SET_JIRA = 56_835;
 
 /**
  * THE LINEAR-SCOPED loaded-set ceiling — a spawn under the Linear provider.
@@ -304,7 +323,8 @@ const BUDGET_LOADED_SET_JIRA = 72_544;
  * ensure-traceable-issue) plus the 80 ch general headroom above: 75_940. Re-derived by
  * #393 from a measured 75_573 (git.md -315 ch, the site rung +28 ch): 75_653. Re-derived by #423 from a measured 73_851 (the same
  * two preloaded-skill cuts as the GitHub row): 73_931. Re-derived by #425 to
- * 73_391, as the Jira row. The row measures 73_084 today, 56 ch under the 73_140 ceiling #445 left it. This is the
+ * 73_391, as the Jira row. Re-derived by #451 from a measured 52_431 plus 5_000 ch of room for #448,
+ * which tightens it to the real growth. This is the
  * LARGEST of the four ceilings but not necessarily the binding one: a character added
  * to git.md is a character added to every row, and the row with the least headroom
  * binds. Each ceiling was set as min(its previous ceiling, measured actual + 80), so
@@ -325,11 +345,11 @@ const BUDGET_LOADED_SET_JIRA = 72_544;
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-linear` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_LINEAR = 73_140;
+const BUDGET_LOADED_SET_LINEAR = 57_431;
 
 /**
  * THE PR-HOST loaded-set ceiling — the worst-case cost of a spawn that runs one of
- * the nine operations whose mechanics live under `references/pr/`.
+ * the eight operations whose references live under `references/pr/`.
  *
  * ITS OWN ROW, for the reason each provider has one (D-LOADED-SET-PER-PROVIDER).
  * `references/pr/` is installed under EVERY tracker, because pull requests, PR
@@ -368,33 +388,42 @@ const BUDGET_LOADED_SET_LINEAR = 73_140;
  * contract is billed to no PR-host row (D-TRACKER-CONTRACT-ON-DEMAND), so the per-op cap below is
  * unchanged.
  *
+ * Re-derived by #451 from a measured 24_706: the same git.md cut, and each `pr/{op}.md` now carries
+ * its own contract, which the worst op (`post-review-summary` with the publication gate) pays for.
+ * `ensure-pr-ready` left this tree — it is a tracker operation with one reference per provider — so
+ * the row ranges over eight operations. The ceiling is the measurement plus 5_000 ch of room for #448,
+ * which tightens it to its real growth; it is never raised.
+ *
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-pr-host` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_PR_HOST = 47_710;
+const BUDGET_LOADED_SET_PR_HOST = 29_706;
 
 /**
- * THE PER-OP PR-HOST CAP — no single PR-host operation may load more than this,
- * `pr/{op}.md` plus every reference its load instructions can name (AC-8, #363).
+ * THE PER-OPERATION LOAD CAP (D-OP-LOAD-CAP) — no single Git operation may load more
+ * than this: its one reference (contract and mechanics, one file since D-OP-ONE-REF)
+ * plus every reference that reference can name in the same spawn, every in-spawn hop
+ * priced, less the written exclusion — measured under every registered provider.
  *
- * It is what keeps the PR-host row honest while the SDLC-evidence series adds
- * operations to it: that row prices only its WORST op, so an op that grew past
- * today's worst (`post-review-summary`: its PR-host body plus
- * references/publication-gate.md, 4_540) would move the row by its own growth ON
- * TOP of any git.md growth — spending the row's headroom twice. Held at the
- * current worst, the row moves by exactly what git.md moves. #365 added the
- * caller-block paste to ensure-pr-ready under this cap: 4_401 -> 4_443, funded by
- * condensing that op's own pr/ and github 4b text.
+ * It replaces the PR-host cap this file carried (`pr-host-max-op-load`, 4_540 ch). That
+ * cap existed because a PR-host op's contract sat in the always-loaded agent and only its
+ * steps in `pr/{op}.md`, so the row priced one op's mechanics and git.md's growth together.
+ * The contract is inside the reference now, an operation's load is the whole of what it
+ * costs, and the alarm ranges over all twenty operations rather than the PR-host ones that happened
+ * to have a `pr/` file.
  *
- * Derived from that measured 4_540 and nothing else: a cap re-derived to fit the op
- * that exceeded it is no cap. An op over it is condensed first (§2 of the #363
- * design). Written exclusions are excluded here exactly as the row excludes them —
- * the per-op measure is `prHostOpLoad`, the one the row's maximum reads.
+ * Derived from the measured worst operation — `linear/setup-task`, whose step 1c hops into
+ * ensure-traceable-issue under ISSUE_REQUIRED and which names learn-conventions.md — which
+ * the printed table below records as 19_909 ch, plus 5_000 ch of room for #448 (PR creation
+ * moves from the Code agent into the Git agent's ensure-pr-ready reference: its paste gates
+ * are about 4–5 KB). #448 measures its own growth and tightens this cap; it never raises it. A
+ * cap re-derived to fit the operation that exceeded it is no cap: an operation over it is
+ * condensed first.
  *
- * MAY BE LOWERED, NEVER RAISED. Registered as `pr-host-max-op-load` in
+ * MAY BE LOWERED, NEVER RAISED. Registered as `git-op-load-max` in
  * tests/fixtures/numeric-floors.json.
  */
-const PR_HOST_MAX_OP_LOAD = 4_540;
+const GIT_OP_LOAD_MAX = 24_909;
 
 /**
  * Every MCP-backed provider and the ceiling that prices it.
@@ -576,7 +605,7 @@ describe('byte budget: four-shape table (recorded)', () => {
         // The PR-host path — the shape the three tracker rows deliberately do not
         // describe, since references/pr/ is installed under every provider and costs
         // the same bytes on each. Gated by BUDGET_LOADED_SET_PR_HOST.
-        shape: '2c. PR-host spawn (the nine pr/ ops — same cost under every tracker)',
+        shape: '2c. PR-host spawn (the eight pr/ ops — same cost under every tracker)',
         chars: PRELOADED + worstCasePrHostLoad().value,
       },
       {
@@ -910,30 +939,38 @@ describe('byte budget: component and loaded-set pins (AC-2.5)', () => {
     ).toBeLessThanOrEqual(BUDGET_LOADED_SET_PR_HOST);
   });
 
-  it(`no PR-host op loads more than PR_HOST_MAX_OP_LOAD (${PR_HOST_MAX_OP_LOAD} ch, AC-8)`, () => {
-    const loads = PR_HOST_OPS.map(op => ({ op, load: prHostOpLoad(op) }));
+  it(`no Git operation loads more than GIT_OP_LOAD_MAX (${GIT_OP_LOAD_MAX} ch, D-OP-LOAD-CAP)`, () => {
+    const loads = opLoadRows();
     // Printed: the per-op figures are what a reviewer checks the cap against.
-    console.table(loads);
+    console.table(loads.sort((a, b) => b.load - a.load).slice(0, 12));
+    expect(
+      loads.length,
+      'the cap ranges over every operation under every provider',
+    ).toBe(ALL_OPS.length * TRACKER_PROVIDER_IDS.length);
     expect(
       loads.filter(l => l.load === 0).map(l => l.op),
-      'a PR-host op measured 0 — its reference is unbuilt and the cap would pass on nothing. Run ' +
+      'an operation measured 0 — its reference is unbuilt and the cap would pass on nothing. Run ' +
       '`npm run build`.',
     ).toEqual([]);
     expect(
-      collectOverOpCap(loads, PR_HOST_MAX_OP_LOAD),
-      `PR-host op(s) over the per-op cap. The PR-host row prices only its worst op, so one that ` +
-      `grows past today's worst moves the row by its own growth on top of git.md's. Condense the ` +
-      `op's pr/ mechanics — do NOT raise PR_HOST_MAX_OP_LOAD.`,
+      worstCaseOpLoad().value,
+      'the worst-case helper and the per-row collector must agree on the maximum',
+    ).toBe(Math.max(...loads.map(l => l.load)));
+    expect(
+      collectOverOpCap(loads, GIT_OP_LOAD_MAX),
+      `operation(s) over the per-op cap. A character added to an operation's reference is paid by ` +
+      `every spawn of that operation, on top of the preloaded set. Condense the operation's ` +
+      `reference — do NOT raise GIT_OP_LOAD_MAX.`,
     ).toEqual([]);
   });
 
   it('known-bad probe: the per-op cap collector reports an op one character over, and only it', () => {
     expect(
       collectOverOpCap(
-        [{ op: 'seed-under', load: PR_HOST_MAX_OP_LOAD }, { op: 'seed-over', load: PR_HOST_MAX_OP_LOAD + 1 }],
-        PR_HOST_MAX_OP_LOAD,
+        [{ op: 'seed-under', load: GIT_OP_LOAD_MAX }, { op: 'seed-over', load: GIT_OP_LOAD_MAX + 1 }],
+        GIT_OP_LOAD_MAX,
       ),
-    ).toEqual([`seed-over: ${PR_HOST_MAX_OP_LOAD + 1} ch (cap ${PR_HOST_MAX_OP_LOAD})`]);
+    ).toEqual([`seed-over: ${GIT_OP_LOAD_MAX + 1} ch (cap ${GIT_OP_LOAD_MAX})`]);
   });
 
   it('the written exclusion is load-bearing — charging it would take the PR-host row over', () => {
@@ -1218,7 +1255,7 @@ describe('byte budget: formula file-set ↔ nameable file-set (both directions)'
   });
 
   it('the check is non-vacuous: enough ops, and a non-empty file set on both sides', () => {
-    expect(ALL_OPS.length, 'no operation sections found in the compiled agent').toBeGreaterThanOrEqual(
+    expect(ALL_OPS.length, 'no operation in the registry roster').toBeGreaterThanOrEqual(
       MIN_VARIANT_PAIRS,
     );
     const summedTotal = ALL_OPS.reduce((n, op) => n + summedFor(op).size, 0);
@@ -1255,33 +1292,30 @@ describe('byte budget: formula file-set ↔ nameable file-set (both directions)'
       .toBeGreaterThan(0);
   });
 
-  it('known-bad probe: the cross-cutting scope is scanned live, in the right half of the file', () => {
-    // Two failure modes, one probe. (a) A name seeded into the always-loaded part
-    // is seen — so the empty-difference assertions above are not green because the
-    // slice was empty. (b) A name seeded AFTER the first op heading is NOT seen —
-    // so the slice is really the always-loaded half and not the whole file, which
-    // would silently absorb every op-scoped name into the cross-cutting term.
-    const opAt = GIT_AGENT.content.search(/^## Operation: /m);
-    expect(opAt, 'the compiled agent must have an op heading for this probe').toBeGreaterThan(0);
-
-    const seededAbove =
-      GIT_AGENT.content.slice(0, opAt) +
-      'See the `devflow:git` skill\'s `references/smuggled.md`.\n\n' +
-      GIT_AGENT.content.slice(opAt);
+  it('known-bad probe: the cross-cutting scope is scanned live, and a routing-table row is not part of it', () => {
+    // Two failure modes, one probe. (a) A name seeded into the agent's prose is
+    // seen — so the empty-difference assertions above are not green because the
+    // slice was empty. (b) A name on a ROUTING-TABLE row is NOT seen: the table names
+    // each operation's own reference, which the model prices per operation, and a
+    // scope that absorbed those rows would turn every op-scoped path into a
+    // cross-cutting name — one scan wearing two names.
+    const seededProse =
+      GIT_AGENT.content +
+      '\nSee the `devflow:git` skill\'s `references/smuggled.md`.\n';
     expect(
       collectMissingFrom(
         '(always-loaded)',
-        nameableCrossCutting(seededAbove),
+        nameableCrossCutting(seededProse),
         new Set([...MODEL_CROSS_CUTTING_ON_DEMAND, ...MODEL_CROSS_CUTTING_ASSERTED]),
       ),
-      'a reference newly named in the always-loaded part must be reported as unmodelled',
+      'a reference newly named in the agent body must be reported as unmodelled',
     ).toEqual(['(always-loaded) → smuggled.md']);
 
-    const seededBelow = `${GIT_AGENT.content}\n\nSee \`references/smuggled.md\`.\n`;
+    const seededRow = `${GIT_AGENT.content}\n| \`check-ci-status\` | \`references/smuggled.md\` |\n`;
     expect(
-      nameableCrossCutting(seededBelow).has('smuggled.md'),
-      'a name below the first op heading must NOT land in the cross-cutting scope — otherwise ' +
-      'the two scopes are one scan wearing two names',
+      nameableCrossCutting(seededRow).has('smuggled.md'),
+      'a name on a routing-table row must NOT land in the cross-cutting scope — it is an ' +
+      'operation\'s own reference, priced per operation',
     ).toBe(false);
   });
 
@@ -1297,52 +1331,55 @@ describe('byte budget: formula file-set ↔ nameable file-set (both directions)'
     expect(collectMissingFrom('setup-task', summed, nameable)).toEqual([]);
   });
 
-  it('the ONE hop into a pr/ body is live — github-api.md reaches fetch-review-threads only through it', () => {
-    // nameableFrom's PR-host hop, asserted where it bites rather than in prose.
-    // `fetch-review-threads` step 1 — the only place the operation names
-    // github-api.md — lives in references/pr/fetch-review-threads.md. Without the
-    // hop the model sums a file the scan cannot see the op name, and direction 1
-    // goes red for a reason that is not a regression.
+  it('github-api.md reaches fetch-review-threads through the operation\'s own reference, and the agent does not name it', () => {
+    // Where the name bites, asserted rather than described. `fetch-review-threads` step 1 —
+    // the only place the operation names github-api.md — is in the operation's own reference
+    // (references/pr/fetch-review-threads.md). The agent body must NOT name it for this
+    // operation: a name there bills every spawn for a file one operation reads.
     expect(
-      SECTIONS.get('fetch-review-threads') ?? '',
-      'this arm only means something while git.md itself does NOT name github-api.md for this op ' +
-      '— if the mention came back, the hop is no longer what makes direction 1 pass',
+      GIT_AGENT.content,
+      'the agent must not name github-api.md — the reference, not the agent, is the route under test',
     ).not.toContain('references/github-api.md');
     expect(
       [...nameableFrom('fetch-review-threads')],
-      'github-api.md must be reachable through the pr/ reference the op names',
+      'github-api.md must be reachable through the reference the op loads',
     ).toContain('github-api.md');
+    expect(
+      [...nameableFrom('fetch-review-threads', () => null)],
+      'with the reference unread, github-api.md must drop out — otherwise something other than the ' +
+      'operation\'s own reference names it',
+    ).not.toContain('github-api.md');
   });
 
-  it('the same hop is the ONLY route trust-rule.md has to fetch-review-threads (#363)', () => {
+  it('trust-rule.md reaches fetch-review-threads only through the operation\'s own reference (#363)', () => {
     // The trust rule is named from step 2 of references/pr/fetch-review-threads.md
     // and from no line of the agent — a name in git.md would bill every spawn for a
-    // rule one operation reads. So it reaches the op through the hop alone, and a
-    // reader that sees no pr/ body must lose it.
+    // rule one operation reads. So it reaches the op through that reference alone, and
+    // a reader that sees no reference must lose it.
     expect(
-      SECTIONS.get('fetch-review-threads') ?? '',
-      'git.md must not name trust-rule.md — the hop, not the agent, is the route under test',
+      GIT_AGENT.content,
+      'git.md must not name trust-rule.md — the operation\'s reference, not the agent, is the route under test',
     ).not.toContain('references/trust-rule.md');
     expect([...nameableFrom('fetch-review-threads')]).toContain('trust-rule.md');
     expect(
       [...nameableFrom('fetch-review-threads', () => null)],
-      'with the pr/ body unread, trust-rule.md must drop out — otherwise something other than the ' +
-      'hop names it, and direction 1 is green for a reason this arm does not describe',
+      'with the reference unread, trust-rule.md must drop out — otherwise something other than ' +
+      'the operation\'s own reference names it, and direction 1 is green for a reason this arm does not describe',
     ).not.toContain('trust-rule.md');
   });
 
-  it('known-bad probe: a file named only inside a pr/ body is reported by direction 2', () => {
-    // Seeds the hop's own reader rather than writing into dist/, which other test
+  it('known-bad probe: a file named only inside an operation\'s reference is reported by direction 2', () => {
+    // Seeds the reference reader rather than writing into dist/, which other test
     // files read in parallel, and drives the SAME collector both live directions
-    // call. Without this, the hop could stop resolving and every direction-2
+    // call. Without this, the scan could stop resolving and every direction-2
     // assertion would stay green — an absence check over a corpus nobody perturbs.
     const op = 'post-review-summary';
     const seededNameable = nameableFrom(op, rel =>
       rel === prHostRel(op) ? 'Then read `references/smuggled.md` for the rest.\n' : null);
     expect(
       collectMissingFrom(op, seededNameable, summedFor(op)),
-      'a reference named only inside the PR-host body must be reported as unmodelled — otherwise ' +
-      'the hop is declared and never taken',
+      'a reference named only inside the operation\'s own reference must be reported as unmodelled — ' +
+      'otherwise the scan is declared and never run',
     ).toEqual([`${op} → smuggled.md`]);
   });
 });
@@ -1663,13 +1700,17 @@ describe('byte budget: body-hop closure (D-BODY-HOP-CLOSURE)', () => {
     for (const provider of TRACKER_PROVIDER_IDS) {
       const setupRel = `tracker/${provider}/setup-task.md`;
       const closure = LIVE.find(c => c.provider === provider && c.op === 'setup-task')!.closure;
-      const hop = closure.hops.find(m => m.file === setupRel && m.target === 'ensure-traceable-issue');
-      expect(hop, `${provider}: setup-task no longer hops to ensure-traceable-issue`).toBeDefined();
+      // setup-task names ensure-traceable-issue in its contract (the PLAN_ARTIFACT_PATH input) as well
+      // as in step 1c; both are priced by the same transitive row, and the chain under test is the
+      // step's.
+      const hops = closure.hops.filter(m => m.file === setupRel && m.target === 'ensure-traceable-issue');
+      expect(hops.length, `${provider}: setup-task no longer hops to ensure-traceable-issue`).toBeGreaterThan(0);
+      const setupBody = readReferenceFromDisk(setupRel) ?? '';
       expect(
-        stepHeaderOf(readReferenceFromDisk(setupRel) ?? '', hop!.line),
+        hops.map(hop => stepHeaderOf(setupBody, hop.line) ?? '').filter(header => header.includes('`ISSUE_REQUIRED` is `true`')),
         `${provider}: the hop must sit in the ISSUE_REQUIRED-gated step, or the chain is not the ` +
         'one the required policy drives',
-      ).toContain('`ISSUE_REQUIRED` is `true`');
+      ).not.toEqual([]);
       expect([...summedForProvider(provider, 'setup-task')].sort()).toEqual(
         ['learn-conventions.md', `tracker/${provider}/ensure-traceable-issue.md`, setupRel].sort(),
       );
@@ -1686,7 +1727,9 @@ describe('byte budget: body-hop closure (D-BODY-HOP-CLOSURE)', () => {
     ).toEqual([]);
     // The dispatch-table exemption, checked both ways: it names exactly the operations the
     // agent declares, so it cannot become a place an extra pointer hides.
-    expect([...scanAlwaysLoaded(ALWAYS).dispatch].sort()).toEqual([...ALL_OPS].sort());
+    // A SET: an operation is named by both routing tables (`## Operations` and the loading table), and by
+    // path as well as by name on a loading-table row — the claim is which operations, not how often.
+    expect([...new Set(scanAlwaysLoaded(ALWAYS).dispatch)].sort()).toEqual([...ALL_OPS].sort());
   });
 
   it('every INFORMATIONAL_OP_MENTIONS row is consulted by a live scan', () => {
@@ -1915,29 +1958,33 @@ describe('byte budget: written exclusions', () => {
     ).toContain('## Comment-sink scrub (D11)');
   });
 
-  it('the two summary ops are PR-host, never tracker, and keep their D10 naming line in the agent (SG-8)', () => {
-    // SG-8 as shipped: the two summary ops' step order lives in
-    // references/pr/{op}.md under the condition SG-8 imposes — each guard reading
-    // it carries a known-bad probe, and the D10/D11 controls stay answerable from
-    // the agent.
+  it('the two summary ops are PR-host, never tracker, and name the publication gate from their own reference (SG-8)', () => {
+    // SG-8 as shipped: the two summary ops' step order lives in references/pr/{op}.md
+    // under the condition SG-8 imposes — each guard reading it carries a known-bad
+    // probe, and the D10/D11 controls stay answerable from the operation's own text.
     //
     // The END STATE, asserted rather than the prohibition it replaced:
-    //   1. the op is still a section of the agent (its contract did not move);
-    //   2. it still names the publication gate from git.md — [DR-20](i) reads
-    //      git.md ALONE, so an op that stopped naming it there would take the
-    //      scope property with it;
+    //   1. the op is a section of its own PR-host reference (contract and steps are one file);
+    //   2. that reference names the publication gate, and the agent body does not —
+    //      [DR-20](i) reads the references that name it, so an op that stopped naming it
+    //      would take the scope property with it, and a name in the always-loaded body would
+    //      bill every spawn for a gate two operations read;
     //   3. it is a PR-host op, not a tracker op — these two are never generated
     //      per provider, which is the half of the original exclusion that was
     //      always about correctness rather than size;
-    //   4. the PR-host reference it names is real and non-empty, so "the step
-    //      order moved" names a file that exists rather than nothing.
+    //   4. the reference is real and non-empty.
     for (const op of ['post-review-summary', 'post-resolution-summary']) {
-      expect(SECTIONS.has(op), `${op} must still be a section of the agent`).toBe(true);
+      const reference = readReferenceFromDisk(prHostRel(op)) ?? '';
+      expect(reference.startsWith(`## Operation: ${op}\n`), `${op} must open its own PR-host reference`).toBe(true);
       expect(
-        SECTIONS.get(op) ?? '',
-        `${op} must still name references/publication-gate.md from git.md — [DR-20](i) reads the ` +
-        'agent alone, and the D10 scope property lives or dies there',
+        reference,
+        `${op} must name references/publication-gate.md from its own reference — [DR-20](i) reads the ` +
+        'references that name the gate, and the D10 scope property lives or dies there',
       ).toContain('references/publication-gate.md');
+      expect(
+        GIT_AGENT.content,
+        'the agent body must not name the gate — it is read by two operations, not by every spawn',
+      ).not.toContain('references/publication-gate.md');
       expect(
         (TRACKER_GITHUB_OPS as readonly string[]).includes(op),
         `${op} must not be a generated tracker reference (SG-8 written exclusion)`,

@@ -65,8 +65,8 @@ import {
   collectMissingMechanicsClaims,
   collectSiteRungProblems,
   collectPerItemFetchVerbs,
-  extractOpSectionFromCorpus,
-  resolveAgentSource,
+  hostStepLines,
+  withoutHostSteps,
   type ProviderCorpus,
   type ProviderRefVocabulary,
 } from '../helpers.js';
@@ -775,7 +775,7 @@ describe('linear module: tool calls only — no HTTP, no CLI, no credential read
   it('no generated Linear reference constructs a request or names a credential', () => {
     const offenders: string[] = [];
     for (const op of TRACKER_OPS) {
-      for (const site of collectForbiddenTransports(readGenerated(linearRel(op)))) {
+      for (const site of collectForbiddenTransports(withoutHostSteps(readGenerated(linearRel(op))))) {
         offenders.push(`${linearRel(op)}:${site}`);
       }
     }
@@ -810,26 +810,30 @@ describe('linear module: tool calls only — no HTTP, no CLI, no credential read
     expect(FORBIDDEN_TRANSPORTS.length, 'the transport table is empty').toBeGreaterThan(0);
   });
 
-  it('AC-507: create-release steps 1a-6 stay inline in the agent, and step 6 moved into the shared steps would turn this guard red', () => {
-    // The release-host steps carry `gh release create`, so they cannot join the provider-neutral
-    // step text that every provider's reference expands (D-NEUTRAL-STEP-MOVE): this guard would
-    // report it in the generated reference. They stay in git.md, which is also what keeps
-    // create-release in the remote-I/O detection set.
-    const agent = resolveAgentSource('git');
-    const section = extractOpSectionFromCorpus(
-      [{ path: agent.path, content: agent.content }], 'create-release', { mode: 'sole' },
-    ).content;
-    for (const label of ['1a', '1b', '2', '3', '4', '5', '6']) {
-      expect(section, `create-release step ${label} must stay in the agent`).toMatch(new RegExp(`^${label}\\. `, 'm'));
-    }
-    const step6 = section.split('\n').find(l => /^6\. /.test(l)) ?? '';
-    expect(step6, 'step 6 creates the release').toContain('gh release create');
+  it('AC-507: the release-host steps carry `gh release create`, the guard exempts exactly their lines, and the Linear half stays clean', () => {
+    // `create-release` cuts a GitHub release under every tracker, so its host steps 1a-6 are written
+    // once in `_ops_steps.mds` and expanded into every provider's reference. They carry
+    // `gh release create`, which this guard bans in a tracker's own mechanics, so the guard reads
+    // the reference WITHOUT those lines (`withoutHostSteps`): the exemption is by exact line from
+    // the same source the build expands, never by operation name or by pattern.
     const reference = readGenerated(linearRel('create-release'));
-    expect(collectForbiddenTransports(reference), 'the shipped reference is clean').toEqual([]);
+    for (const label of ['1a', '1b', '2', '3', '4', '5', '6']) {
+      expect(reference, `create-release step ${label} must be in the Linear reference`).toMatch(new RegExp(`^${label}\\. `, 'm'));
+    }
+    const step6 = hostStepLines().find(l => /^6\. /.test(l)) ?? '';
+    expect(step6, 'step 6 creates the release').toContain('gh release create');
+    expect(reference, 'step 6 is expanded into this provider\'s reference').toContain(step6);
     expect(
-      collectForbiddenTransports(`${reference}\n${step6}`).length,
-      'step 6 expanded into this provider\'s reference would be reported as a forbidden transport',
+      collectForbiddenTransports(reference).length,
+      'unexempted, the host step is a forbidden transport — the exemption is what makes the guard pass',
     ).toBeGreaterThan(0);
+    expect(collectForbiddenTransports(withoutHostSteps(reference)), 'the Linear half is clean').toEqual([]);
+    // The exemption names lines, not operations: a CLI transport smuggled into the tracker half of the
+    // SAME reference is a line the host set does not contain, and is still reported.
+    expect(
+      collectForbiddenTransports(withoutHostSteps(`${reference}\n   - gh issue comment 12 --body-file "$DEVFLOW_BODY"`)),
+      'a tracker-side CLI call in a host-composed reference must still be reported',
+    ).toHaveLength(1);
   });
 });
 

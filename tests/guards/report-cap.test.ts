@@ -184,21 +184,22 @@ describe('D-REPORT-CAP: the report cap on the roster', () => {
     expect(template.split('\n')[2], 'the line follows the output placeholder').toMatch(/^Report cap: /)
   })
 
-  it('git\'s Output section sits outside every operation\'s extent and ends in the cap line', () => {
+  it('git\'s Output section follows the operations table, precedes Principles, and ends in the cap line', () => {
     const git = resolveAgentSource('git').content
     const headings = collectUnfencedH2(git).map(h => h.text)
     const at = headings.indexOf('## Output')
     expect(at, 'git.md has an unfenced `## Output` heading').toBeGreaterThan(-1)
-    const ops = headings.filter(h => h.startsWith('## Operation: '))
-    expect(ops.length).toBeGreaterThan(0)
-    expect(headings.indexOf(ops[ops.length - 1]), 'after every operation').toBeLessThan(at)
+    // The agent body declares no operation (D-OP-ONE-REF): each operation's Output template is
+    // in its own reference, and this section is the generic return that caps them all.
+    expect(headings.filter(h => h.startsWith('## Operation: ')), 'no operation section in the agent body').toEqual([])
+    expect(headings.indexOf('## Operations'), 'after the operations table').toBeLessThan(at)
     expect(headings[at + 1], 'before Principles').toBe('## Principles')
     expect(collectCapDefects('git', git)).toEqual([])
   })
 
   it('git: check-ci-status stays defined, and its Status line is exempt as the ci-wait enum, not as a field a command reads', () => {
     const git = resolveAgentSource('git').content
-    expect(git, 'the operation is still defined').toContain('## Operation: check-ci-status')
+    expect(git, 'the operation is still routed').toMatch(/^\| `check-ci-status` \|/m)
     const capLine = git.split('\n').find(l => l.startsWith('Report cap:')) ?? ''
     expect(
       capLine,

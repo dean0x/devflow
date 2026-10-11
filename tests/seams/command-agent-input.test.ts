@@ -11,7 +11,8 @@
  *
  * Three directions:
  *   1. Forward  — every KEY: passed in a Git fence is declared in that op's
- *                 **Input:** line in git.md (the single contract authority).
+ *                 **Input:** line in the operation's reference (the single
+ *                 contract authority: the Git agent body carries no operation).
  *   2. Reverse  — every non-optional **Input:** identifier is passed by at
  *                 least one caller fence.
  *   3. Producer — every value named in issue_capture_contract() has a
@@ -43,8 +44,9 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import { readFileSync, readdirSync } from 'fs'
 import * as path from 'path'
+import { GIT_OPERATIONS } from '../../src/core/mds-variants.js'
 import {
-  resolveAgentSource,
+  gitOperationReferenceCorpus,
   extractOpSectionFromCorpus,
   parseFences,
   isAgentBlock,
@@ -296,8 +298,8 @@ function parseInputIdentifiers(section: string): { required: string[]; optional:
 
 let distFiles: string[]
 let corpusEntries: CorpusEntry[]
-let opSectionMap: Map<string, string>   // op → section text from git.md sole corpus
-let gitCorpus: CorpusEntry[]            // sole corpus (git.md only, for Direction 1)
+let opSectionMap: Map<string, string>   // op → section text from the operation-reference sole corpus
+let gitCorpus: CorpusEntry[]            // sole corpus (one reference per operation, for Direction 1)
 
 // All keys passed by any Git fence, keyed by op name.
 let keysPassedByOp: Map<string, Set<string>>
@@ -318,19 +320,20 @@ beforeAll(() => {
     content: readFileSync(path.join(DIST_COMMANDS_DIR, f), 'utf-8'),
   }))
 
-  const git = resolveAgentSource('git')
-  // git.md ALONE, deliberately. Since Phase 2 the generated
-  // dist/skills/git/references/tracker/github/{op}.md files also open with a
+  // One reference per operation, GitHub provider, deliberately. Each operation's
+  // `**Input:**` contract a command fence must satisfy is the first block of the one
+  // reference that operation loads (D-OP-ONE-REF). The generated
+  // dist/skills/git/references/tracker/{provider}/{op}.md files all open with the same
   // `## Operation: X` anchor, so a sink-wide corpus would make every lookup below
-  // match twice and 'sole' would throw. That is the right behaviour and this is the
-  // right corpus: git.md declares the **Input:** contract a command fence must
-  // satisfy; a reference carries mechanics. Unioning providers would let a key
-  // declared by one provider satisfy the forward check (DR-18).
-  gitCorpus = [{ path: git.path, content: git.content }]
+  // match more than once and 'sole' would throw. That is the right behaviour and this
+  // is the right corpus: unioning providers would let a key declared by one provider
+  // satisfy the forward check (DR-18), and the contract is one write in `_ops.mds`
+  // so the three providers' copies cannot differ.
+  gitCorpus = gitOperationReferenceCorpus()
 
-  // Build op→section map once [DR-24]: sole corpus (git.md), all declared ops.
+  // Build op→section map once [DR-24]: sole corpus, every Git operation.
   opSectionMap = new Map()
-  const opNames = [...git.content.matchAll(/^## Operation: (\S+)/gm)].map(m => m[1])
+  const opNames: readonly string[] = GIT_OPERATIONS
   for (const op of opNames) {
     const { content } = extractOpSectionFromCorpus(gitCorpus, op, { mode: 'sole' })
     opSectionMap.set(op, content)
@@ -734,7 +737,7 @@ describe('reverse: every required **Input:** value is passed by at least one cal
 // here while plan.mds / dynamic-plan.mds batch flows captured three values from
 // it. That is GAP-15's shape, one seam over: a consumer with no producer.
 //
-// The corpus is git.md (via gitCorpus built in beforeAll), NOT DIST_FILES.
+// The corpus is the operation references (via gitCorpus built in beforeAll), NOT DIST_FILES.
 // Searching DIST_FILES found only plan.md's own capture line — the consumer —
 // and mistook it for the producer. That vacuity hid the fact that ISSUE_ID and
 // ISSUE_URL had no producer at all (removed from plan capture list in c7bff85).
@@ -769,7 +772,7 @@ function collectMissingProducers(gitContent: string): string[] {
     for (const op of producerOps) {
       if (!(slices.get(op) ?? '').includes(producerPattern)) {
         missing.push(
-          `${label} → ${op}: pattern "${producerPattern}" not found in git.md ${op} Output`,
+          `${label} → ${op}: pattern "${producerPattern}" not found in the ${op} reference Output`,
         )
       }
     }
@@ -777,10 +780,19 @@ function collectMissingProducers(gitContent: string): string[] {
   return missing
 }
 
-describe('third direction: every issue_capture_contract() value has a producer in git.md', () => {
-  it('every contract entry has a greppable producer in EACH op the partial names (git.md sole corpus)', () => {
-    const gitContent = gitCorpus[0]?.content ?? ''
-    expect(gitContent.length, 'git.md corpus must be non-empty (non-vacuity)').toBeGreaterThan(0)
+/**
+ * The operation references joined into one body. Each reference opens at its own
+ * `## Operation:` anchor, so the slice of an operation in the joined text is exactly the
+ * file that operation loads and `collectMissingProducers` reads it as it read git.md.
+ */
+function contractText(): string {
+  return gitCorpus.map(entry => entry.content).join('\n')
+}
+
+describe('third direction: every issue_capture_contract() value has a producer in the operation references', () => {
+  it('every contract entry has a greppable producer in EACH op the partial names (operation-reference sole corpus)', () => {
+    const gitContent = contractText()
+    expect(gitContent.length, 'the operation-reference corpus must be non-empty (non-vacuity)').toBeGreaterThan(0)
     // Every named producer op must be a real section, or its slice is '' and the
     // pairs that reference it would all report for the wrong reason.
     for (const op of ISSUE_PRODUCER_OPS) {
@@ -803,7 +815,7 @@ describe('third direction: every issue_capture_contract() value has a producer i
     // omits the block is what stops someone "fixing" the per-op check by pasting
     // a single-issue Handoff block into a many-issue Output template, where no
     // one PR link line or branch token has a well-defined value.
-    const gitContent = gitCorpus[0]?.content ?? ''
+    const gitContent = contractText()
     const start = gitContent.indexOf('## Operation: fetch-issues-batch')
     expect(start, 'fetch-issues-batch section must exist').toBeGreaterThan(-1)
     const next = gitContent.indexOf('\n## Operation: ', start + 1)
@@ -837,8 +849,8 @@ describe('third direction: every issue_capture_contract() value has a producer i
     // of the live body and driving the REAL collector over it, so a collector that
     // stopped reporting takes this red too — and so the probe tracks the
     // live text rather than a snapshot that can only go stale.
-    const gitContent = gitCorpus[0]?.content ?? ''
-    expect(gitContent.length, 'git.md corpus must be non-empty (non-vacuity)').toBeGreaterThan(1000)
+    const gitContent = contractText()
+    expect(gitContent.length, 'the operation-reference corpus must be non-empty (non-vacuity)').toBeGreaterThan(1000)
     const handoffPatterns = ['- **Issue ID**:', '- **PR link line**:', '- **Branch token**:']
     const stripped = gitContent
       .split('\n')
@@ -856,12 +868,12 @@ describe('third direction: every issue_capture_contract() value has a producer i
       'once their lines are gone — the other three contract entries have producers elsewhere in ' +
       'the section, so a probe that reported every pair would prove nothing',
     ).toEqual([
-      'ISSUE_BRANCH_TOKEN → fetch-issue: pattern "- **Branch token**:" not found in git.md fetch-issue Output',
-      'ISSUE_BRANCH_TOKEN → setup-task: pattern "- **Branch token**:" not found in git.md setup-task Output',
-      'ISSUE_ID → fetch-issue: pattern "- **Issue ID**:" not found in git.md fetch-issue Output',
-      'ISSUE_ID → setup-task: pattern "- **Issue ID**:" not found in git.md setup-task Output',
-      'ISSUE_PR_LINK → fetch-issue: pattern "- **PR link line**:" not found in git.md fetch-issue Output',
-      'ISSUE_PR_LINK → setup-task: pattern "- **PR link line**:" not found in git.md setup-task Output',
+      'ISSUE_BRANCH_TOKEN → fetch-issue: pattern "- **Branch token**:" not found in the fetch-issue reference Output',
+      'ISSUE_BRANCH_TOKEN → setup-task: pattern "- **Branch token**:" not found in the setup-task reference Output',
+      'ISSUE_ID → fetch-issue: pattern "- **Issue ID**:" not found in the fetch-issue reference Output',
+      'ISSUE_ID → setup-task: pattern "- **Issue ID**:" not found in the setup-task reference Output',
+      'ISSUE_PR_LINK → fetch-issue: pattern "- **PR link line**:" not found in the fetch-issue reference Output',
+      'ISSUE_PR_LINK → setup-task: pattern "- **PR link line**:" not found in the setup-task reference Output',
     ])
   })
 
@@ -870,7 +882,7 @@ describe('third direction: every issue_capture_contract() value has a producer i
     // fetch-issue only, in a COPY of the live corpus, and the collector must name
     // that op — while setup-task, which still emits it, stays silent. Under the
     // old join this seed was invisible: setup-task's copy satisfied the search.
-    const gitContent = gitCorpus[0]?.content ?? ''
+    const gitContent = contractText()
     const start = gitContent.indexOf('## Operation: fetch-issue\n')
     expect(start, 'fetch-issue section must exist for the probe').toBeGreaterThan(-1)
     const next = gitContent.indexOf('\n## Operation: ', start + 1)
@@ -885,7 +897,7 @@ describe('third direction: every issue_capture_contract() value has a producer i
       collectMissingProducers(seeded),
       'the collector must report the one op that lost the line, and only that op',
     ).toEqual([
-      'ISSUE_PR_LINK → fetch-issue: pattern "- **PR link line**:" not found in git.md fetch-issue Output',
+      'ISSUE_PR_LINK → fetch-issue: pattern "- **PR link line**:" not found in the fetch-issue reference Output',
     ])
   })
 

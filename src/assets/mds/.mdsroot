@@ -1,0 +1,4 @@
+MDS project-root marker. The reference modules under tracker/ and git/ import the operation
+partials across those two directories (../git/_ops.mds), and the resolver refuses an import
+that leaves the project root. The root is the nearest ancestor holding .git or .mdsroot, so
+this file pins it to src/assets/mds/ in a checkout, a tarball and a copied test tree alike.

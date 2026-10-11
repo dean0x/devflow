@@ -33,16 +33,19 @@ import { compiledSkillRefsDir } from '../../src/core/assets.js';
 import {
   TRACKER_GITHUB_OPS,
   GIT_CROSS_CUTTING_DOCS,
+  GIT_OPERATIONS,
   MIN_VARIANT_PAIRS,
   PR_HOST_DESTINATION_ROOT,
   PR_HOST_OPS,
   VARIANT_MODULES,
   expandVariants,
   generatedReferenceManifest,
+  operationReferenceRel,
 } from '../../src/core/mds-variants.js';
 import {
   collectTrackerNamingLines,
   extractOpSectionFromCorpus,
+  gitOperationReferenceCorpus,
   prHostRel,
   resolveAgentSource,
   walkFiles,
@@ -188,23 +191,20 @@ describe('gather-release-evidence: batch-first, never one call per commit [DR-17
     ).toEqual([]);
   });
 
-  it('the D4 item-degradation clause stays with the operation in git.md', () => {
+  it('the D4 item-degradation clause is in the operation\'s contract block, ahead of its steps', () => {
     // The batch-first form introduces new remote failure modes (a batch call that
     // 4xx's where 100 individual calls previously item-degraded per D4), so the
-    // clause that says "degrade the item, continue" must remain in the
-    // always-loaded file.
-    const git = resolveAgentSource('git');
-    const start = git.content.indexOf('## Operation: gather-release-evidence');
-    expect(start, 'gather-release-evidence must still be an operation of the agent').toBeGreaterThan(-1);
-    const next = git.content.indexOf('\n## Operation:', start + 1);
-    const section = next === -1 ? git.content.slice(start) : git.content.slice(start, next);
-    expect(section, 'gather-release-evidence: **Degradation (D4):** clause missing').toContain(
-      '**Degradation (D4):**',
-    );
+    // clause that says "degrade the item, continue" must be readable from the one
+    // reference the operation loads, and in its contract block rather than among
+    // the steps it governs (D-OP-MOVABLE).
+    const section = extractOpSectionFromCorpus(gitOperationReferenceCorpus(), 'gather-release-evidence', { mode: 'sole' }).content;
+    const clause = section.indexOf('**Degradation (D4):**');
+    expect(clause, 'gather-release-evidence: **Degradation (D4):** clause missing').toBeGreaterThan(-1);
     expect(
       section,
-      'gather-release-evidence: the per-item degrade rule must stay in git.md',
+      'gather-release-evidence: the per-item degrade rule must stay in its contract block',
     ).toContain('for any GitHub signal that could not be fetched');
+    expect(clause, 'the clause precedes the steps').toBeLessThan(section.indexOf('\n### Process'));
   });
 });
 
@@ -314,10 +314,14 @@ function collectContractNamers(): string[] {
     .map(file => path.relative(REFS_DIR, file).split(path.sep).join('/'));
 }
 
-/** The loading section's two rules that a PR-only spawn needs and the contract cannot load for it. */
+/**
+ * The loading section's rules that a PR-only spawn needs and the contract cannot load for it:
+ * the one-reference rule, and the table that names the reference of every operation whose
+ * reference is not a provider file (D-OP-ONE-REF).
+ */
 const PLACED_IN_THE_AGENT = [
-  { label: 'the PR-mechanics load rule', marker: '- **PR mechanics:**' },
-  { label: 'the merged step order', marker: '- **Merged step order:**' },
+  { label: 'the one-reference rule', marker: 'Each operation has ONE reference' },
+  { label: 'the reference table', marker: '| Operation | Reference |' },
 ] as const;
 
 /**
@@ -325,16 +329,14 @@ const PLACED_IN_THE_AGENT = [
  *
  * AC-524. A PR-only spawn never reads the tracker contract, and the contract cannot
  * instruct a spawn to load itself, so a rule moved into it would reach tracker spawns
- * only: a PR-host operation would lose its load rule, and a two-reference operation its
- * step order. Each rule must therefore be in the agent's `## Loading the mechanics`
- * section — the always-loaded part, before the first operation — and in the contract
- * not at all.
+ * only: a PR-host operation would lose its load rule and its path. Each rule must
+ * therefore be in the agent's `## Loading the mechanics` section — the always-loaded
+ * part, ahead of the next heading — and in the contract not at all.
  */
 function collectLoadingPlacementDefects(agentContent: string, contractContent: string): string[] {
-  const firstOp = agentContent.search(/^## Operation: /m);
-  const alwaysLoaded = firstOp === -1 ? agentContent : agentContent.slice(0, firstOp);
-  const heading = alwaysLoaded.indexOf('## Loading the mechanics');
-  const section = heading === -1 ? '' : alwaysLoaded.slice(heading);
+  const heading = agentContent.indexOf('## Loading the mechanics');
+  const end = heading === -1 ? -1 : agentContent.indexOf('\n## ', heading + 1);
+  const section = heading === -1 ? '' : agentContent.slice(heading, end === -1 ? undefined : end);
   const defects: string[] = [];
   for (const { label, marker } of PLACED_IN_THE_AGENT) {
     if (!section.includes(marker)) defects.push(`${label} is not in the agent's always-loaded Loading section`);
@@ -546,7 +548,7 @@ describe('generated references: every reference is reachable from the agent (AC-
     ).toEqual([]);
   });
 
-  it('AC-524: the PR-mechanics load rule and the merged step order sit in the agent, never in the tracker contract', () => {
+  it('AC-524: the one-reference rule and the reference table sit in the agent, never in the tracker contract', () => {
     const contract = requireFile('tracker contract', path.join(REFS_DIR, ...TRACKER_CONTRACT_REL.split('/')));
     expect(
       collectLoadingPlacementDefects(agent.content, contract),
@@ -555,7 +557,7 @@ describe('generated references: every reference is reachable from the agent (AC-
     ).toEqual([]);
   });
 
-  it('known-bad probe: a loading rule moved into the tracker contract, or below the first operation, is reported', () => {
+  it('known-bad probe: a loading rule moved into the tracker contract, or below the Loading section, is reported', () => {
     const contract = requireFile('tracker contract', path.join(REFS_DIR, ...TRACKER_CONTRACT_REL.split('/')));
     for (const { label, marker } of PLACED_IN_THE_AGENT) {
       const line = agent.content.split('\n').find(l => l.startsWith(marker));
@@ -572,10 +574,10 @@ describe('generated references: every reference is reachable from the agent (AC-
         `${label} appears in the tracker contract`,
       ]);
 
-      // Moved below the first operation: only the spawns that load that operation read it.
+      // Moved below the Loading section: a line further down is not in the section a spawn reads for loading.
       expect(
         collectLoadingPlacementDefects(`${withoutRule}\n${line}\n`, contract),
-        `${label} appended after the operations is not in the always-loaded part`,
+        `${label} appended after the Loading section is not in the loading rules`,
       ).toEqual([`${label} is not in the agent's always-loaded Loading section`]);
 
       // Left where it is, with the contract untouched: silent.
@@ -653,14 +655,16 @@ describe('generated references: every reference is reachable from the agent (AC-
     expect(generatedReferenceManifest().filter(rel => !reachable.has(rel))).toEqual([target]);
   });
 
-  it('known-bad probe: trust-rule.md is reachable only through the pr/ hop', () => {
-    // Its one naming site is references/pr/fetch-review-threads.md step 2, not the
-    // agent. Take the hop's reader away and the SAME collector must lose it — and
-    // only it — or the named arm reaches the document some other way and the hop
-    // is declared and never taken.
-    expect(collectLiteralReferenceNames(agent.content).has('trust-rule.md'), 'the agent must not name it').toBe(false);
+  it('known-bad probe: the cross-cutting documents a pr/ reference names are reachable only through the pr/ hop', () => {
+    // publication-gate.md is named from the two summary operations' references and trust-rule.md from
+    // fetch-review-threads' step 2, never from the agent (D10's scope property keeps the gate out of the
+    // always-loaded body). Take the hop's reader away and the SAME collector must lose exactly those two —
+    // or the named arm reaches them some other way and the hop is declared and never taken.
+    for (const doc of ['publication-gate.md', 'trust-rule.md']) {
+      expect(collectLiteralReferenceNames(agent.content).has(doc), `the agent must not name ${doc}`).toBe(false);
+    }
     const unhopped = reachableSetFrom(agent.content, () => null);
-    expect(generatedReferenceManifest().filter(rel => !unhopped.has(rel))).toEqual(['trust-rule.md']);
+    expect(generatedReferenceManifest().filter(rel => !unhopped.has(rel))).toEqual(['publication-gate.md', 'trust-rule.md']);
   });
 
   // ── The PR-host tree: parity, and its own reachability direction (#326) ────
@@ -786,49 +790,6 @@ function collectUnloadedDeferrals(body: string): string[] {
     .filter(op => !((PR_HOST_OPS as readonly string[]).includes(op) && named.has(prHostRel(op))));
 }
 
-/** Column-0 step labels (`1.`, `4b.`) in a body — the numbers the merged-order rule sequences. */
-function stepLabels(body: string): string[] {
-  return [...body.matchAll(/^(\d+[a-z]?)\.\s/gm)].map(m => m[1]);
-}
-
-/**
- * Named collector: step labels supplied by more than one file loaded for the same op.
- *
- * The agent's merge rule executes every loaded file's steps as ONE list in numeric
- * order. It interleaves; it has no rule for two files that both supply `4b.`, so a
- * shared label reads as either one step or the same step twice (a double
- * scrub-then-edit). Every label must therefore have exactly one owning file.
- */
-function collectSharedStepLabels(files: ReadonlyArray<{ path: string; body: string }>): string[] {
-  const owners = new Map<string, string[]>();
-  for (const { path: rel, body } of files) {
-    for (const label of new Set(stepLabels(body))) {
-      owners.set(label, [...(owners.get(label) ?? []), rel]);
-    }
-  }
-  return [...owners]
-    .filter(([, paths]) => paths.length > 1)
-    .map(([label, paths]) => `${label}. in ${paths.join(' and ')}`);
-}
-
-/** The files one spawn of a PR-host op loads under one provider, agent section included. */
-function loadedStepFiles(
-  agentContent: string,
-  op: string,
-  providerSubdir: string,
-): Array<{ path: string; body: string }> {
-  const files = [
-    { path: 'git.md', body: extractOpSectionFromCorpus([{ path: 'git.md', content: agentContent }], op, { mode: 'sole' }).content },
-    { path: prHostRel(op), body: prHostFiles().get(op) ?? '' },
-  ];
-  const mod = VARIANT_MODULES.find(m => m.subdir === providerSubdir);
-  if (mod !== undefined && mod.ops.includes(op)) {
-    const rel = `${providerSubdir}/${op}.md`;
-    files.push({ path: rel, body: requireFile('provider reference', path.join(REFS_DIR, rel)) });
-  }
-  return files;
-}
-
 const PROVIDER_SUBDIRS = VARIANT_MODULES
   .map(mod => mod.subdir)
   .filter(subdir => subdir.startsWith('tracker/'));
@@ -860,27 +821,76 @@ describe('PR-host references: the merged step list is executable from what one s
     expect(collectUnloadedDeferrals(loaded)).toEqual([]);
   });
 
-  it('no step label is supplied by two files loaded for the same op, under any provider', () => {
-    const offenders = PROVIDER_SUBDIRS.flatMap(subdir =>
-      PR_HOST_OPS.flatMap(op =>
-        collectSharedStepLabels(loadedStepFiles(agent.content, op, subdir)).map(hit => `${op} (${subdir}): ${hit}`)));
+  it('AC-102: every operation loads exactly one operation reference, under any provider', () => {
+    // The agent routes by a table (PR-host and doc-backed operations, each a literal path) and by one
+    // templated line (tracker operations, whose file is selected by the resolved provider). The path
+    // the agent's own text yields for an operation must be the registry's single reference for it.
+    const named = new Map<string, string>();
+    for (const line of agent.content.split('\n')) {
+      const row = /^\| `([a-z][a-z0-9-]*)` \| `references\/([A-Za-z0-9._/-]+\.md)` \|$/.exec(line);
+      if (row !== null) named.set(row[1], row[2]);
+    }
+    const offenders: string[] = [];
+    for (const op of GIT_OPERATIONS) {
+      for (const subdir of PROVIDER_SUBDIRS) {
+        const provider = subdir.slice('tracker/'.length);
+        const expected = operationReferenceRel(op, provider);
+        const viaTable = named.get(op);
+        const viaTemplate = (TRACKER_GITHUB_OPS as readonly string[]).includes(op)
+          ? LOAD_INSTRUCTION_TEMPLATE.replace('{provider}', provider).replace('{op}', op).replace('references/', '')
+          : undefined;
+        const routed = [viaTable, viaTemplate].filter((rel): rel is string => rel !== undefined);
+        if (routed.length !== 1) offenders.push(`${op} (${provider}): routed ${routed.length} way(s), expected exactly one`);
+        else if (routed[0] !== expected) offenders.push(`${op} (${provider}): the agent routes to ${routed[0]}, the registry says ${expected}`);
+        else if (!existsSync(path.join(REFS_DIR, ...routed[0].split('/')))) offenders.push(`${op} (${provider}): ${routed[0]} is not emitted`);
+      }
+    }
     expect(
       offenders,
-      'two loaded files supply the same step label — the merge rule has no collision clause, so the ' +
-      'step reads as one step or as the same step twice:\n  ' + offenders.join('\n  '),
+      'an operation reaches no reference, two references, or a reference other than the registry\'s:\n  ' + offenders.join('\n  '),
     ).toEqual([]);
+    expect(named.size, 'the table names one reference per non-tracker operation').toBe(
+      GIT_OPERATIONS.length - TRACKER_GITHUB_OPS.length,
+    );
   });
 
-  it('the label rule is non-vacuous: some op loads three files, and the providers are all ranged', () => {
-    expect(PROVIDER_SUBDIRS.length, 'no provider module registered').toBeGreaterThan(0);
-    const threeFileOps = PR_HOST_OPS.filter(op => loadedStepFiles(agent.content, op, PROVIDER_SUBDIRS[0]).length === 3);
-    expect(threeFileOps, 'no PR-host op is also a tracker op — the collision the rule guards cannot occur').not.toEqual([]);
+  it('AC-102: each operation reference declares its own operation once and no other', () => {
+    // ensure-pr-ready is the case that had two references (a PR half and a provider half): it is now one
+    // file per provider, so neither a pr/ copy nor a second anchor may exist.
+    expect(
+      (PR_HOST_OPS as readonly string[]).includes('ensure-pr-ready'),
+      'ensure-pr-ready is a tracker operation; a PR-host entry for it would be a second reference',
+    ).toBe(false);
+    const offenders: string[] = [];
+    for (const op of GIT_OPERATIONS) {
+      for (const subdir of PROVIDER_SUBDIRS) {
+        const rel = operationReferenceRel(op, subdir.slice('tracker/'.length)) ?? '';
+        const body = requireFile('operation reference', path.join(REFS_DIR, ...rel.split('/')));
+        const anchors = [...body.matchAll(/^## Operation: (\S+)$/gm)].map(m => m[1]);
+        if (anchors.length !== 1 || anchors[0] !== op) offenders.push(`${rel}: anchors [${anchors.join(', ')}], expected [${op}]`);
+      }
+    }
+    expect(offenders, offenders.join('\n')).toEqual([]);
   });
 
-  it('known-bad probe: one label in two files is reported, disjoint labels are not', () => {
-    const pr = { path: 'pr/x.md', body: '1. a\n4b. b\n' };
-    expect(collectSharedStepLabels([pr, { path: 'tracker/github/x.md', body: '4b. c\n' }]))
-      .toEqual(['4b. in pr/x.md and tracker/github/x.md']);
-    expect(collectSharedStepLabels([pr, { path: 'tracker/github/x.md', body: '4c. c\n' }])).toEqual([]);
+  it('AC-101: the agent body carries routing and shared rules only — no operation Input, Output template or section', () => {
+    const lines = agent.content.split('\n');
+    const stray = lines
+      .map((line, i) => ({ line, i }))
+      .filter(({ line }) => /^## Operation: /.test(line) || line.startsWith('**Input:**') || line.startsWith('**Output:**'))
+      .map(({ line, i }) => `${i + 1}: ${line.slice(0, 60)}`);
+    expect(stray, 'operation text in the agent body — it belongs in the operation\'s one reference').toEqual([]);
+  });
+
+  it('known-bad probe: an agent that routes an operation two ways, or to a file the registry does not name, is reported', () => {
+    const op = 'check-ci-status';
+    const row = agent.content.split('\n').find(l => l.startsWith(`| \`${op}\` | \`references/`)) ?? '';
+    expect(row, 'the shipped table has a row for the probe operation').not.toBe('');
+    const misrouted = row.replace(`${PR_HOST_DESTINATION_ROOT}/${op}.md`, `${PR_HOST_DESTINATION_ROOT}/validate-branch.md`);
+    expect(misrouted, 'the seed must land').not.toBe(row);
+    // The same extraction the live arm uses, over the seeded row.
+    const parsed = /^\| `([a-z][a-z0-9-]*)` \| `references\/([A-Za-z0-9._/-]+\.md)` \|$/.exec(misrouted);
+    expect(parsed?.[2], 'the extraction reads the seeded path').toBe(`${PR_HOST_DESTINATION_ROOT}/validate-branch.md`);
+    expect(parsed?.[2]).not.toBe(operationReferenceRel(op, 'github'));
   });
 });

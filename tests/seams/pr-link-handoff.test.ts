@@ -1,7 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest'
 import * as fs from 'fs'
 import * as path from 'path'
-import { buildCommittedTree, cleanupCommittedTree, requireDistFile, resolveAgentSource, walkFiles } from '../helpers.js'
+import { buildCommittedTree, cleanupCommittedTree, gitOperationReferenceCorpus, requireDistFile, resolveAgentSource, walkFiles } from '../helpers.js'
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
 
 /** The generated `devflow:git` reference tree — the providers' own mechanics. */
@@ -23,13 +23,17 @@ const REFS_DIR = compiledSkillRefsDir()
 //
 // Read targets are resolved through resolveAgentSource (never a literal
 // src/assets/agents/ path — AC-0.7): git.md is compiled from an MDS generator
-// host, code.md is hand-authored, and the resolver knows the difference.
+// host, code.md is hand-authored, and the resolver knows the difference. The Git
+// producer is read from the operation references — the Git agent body carries no
+// operation (D-OP-ONE-REF), so `### Handoff Values` is in the setup-task and
+// fetch-issue references the producing spawn loads.
 //
 // Header doctrine and framing copied from tests/resolve/duplicate-verdict.test.ts:4-15
 // (the repo's original two-sided producer/consumer test).
 // -------------------------------------------------------------------------
 
-const GIT = resolveAgentSource('git').content
+/** The operations' producer text: each operation's one reference (GitHub), joined. */
+const GIT = gitOperationReferenceCorpus().map(entry => entry.content).join('\n')
 const CODE = resolveAgentSource('code').content
 
 afterAll(cleanupCommittedTree)
@@ -72,7 +76,7 @@ function collectBranchTokenDefects(git: string): string[] {
   return out
 }
 
-describe('git.md — ### Handoff Values producer block', () => {
+describe('Git operation references — ### Handoff Values producer block', () => {
   it('is non-vacuous', () => {
     expect(GIT.length).toBeGreaterThan(10000)
   })
@@ -82,7 +86,7 @@ describe('git.md — ### Handoff Values producer block', () => {
     for (const line of PRODUCER_LINES) {
       expect(
         GIT,
-        `git.md must emit ${line} — the Code agent reads it by this exact label, not by prose`,
+        `the setup-task and fetch-issue references must emit ${line} — the Code agent reads it by this exact label, not by prose`,
       ).toContain(line)
     }
   })
@@ -410,10 +414,10 @@ describe('code.md — the paste gate, one row per tracker grammar', () => {
   })
 })
 
-describe('handoff seam — git.md producer ↔ code.md consumer', () => {
+describe('handoff seam — Git operation producer ↔ code.md consumer', () => {
   it('both sides spell the two pasted labels identically', () => {
     for (const label of ['- **PR link line**:', '- **Branch token**:']) {
-      expect(GIT, `git.md must produce ${label}`).toContain(label)
+      expect(GIT, `the Git operation references must produce ${label}`).toContain(label)
       expect(CODE, `code.md must consume ${label}`).toContain(label)
     }
   })
@@ -427,7 +431,7 @@ describe('handoff seam — git.md producer ↔ code.md consumer', () => {
       CODE,
       'the input description must tie ISSUE_NUMBER to the producer that supplies it',
     ).toContain('- **Issue ID**: {ISSUE_ID}')
-    expect(GIT, 'git.md must produce that exact line').toContain('- **Issue ID**: {ISSUE_ID}')
+    expect(GIT, 'the Git operation references must produce that exact line').toContain('- **Issue ID**: {ISSUE_ID}')
   })
 })
 

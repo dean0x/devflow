@@ -214,13 +214,20 @@ describe('MDS reference modules compile well under the define-capture cliff', ()
       /^@import \{ [^}]+ \} from "\.\/_mcp\.mds"$/m,
     );
 
-    const trackerDir = path.join(ROOT, 'src', 'assets', 'mds', 'tracker');
-    for (const entry of await fs.readdir(trackerDir)) {
-      if (entry.endsWith('.mds')) {
-        await fs.copyFile(path.join(trackerDir, entry), path.join(tmpDir, entry));
+    // The probe mirrors the shipped layout: the provider modules import the operation partials
+    // across `tracker/` and `git/`, and the project root marker is what lets that import stay
+    // inside the root.
+    for (const sub of ['tracker', 'git']) {
+      const srcDir = path.join(ROOT, 'src', 'assets', 'mds', sub);
+      await fs.mkdir(path.join(tmpDir, sub), { recursive: true });
+      for (const entry of await fs.readdir(srcDir)) {
+        if (entry.endsWith('.mds')) {
+          await fs.copyFile(path.join(srcDir, entry), path.join(tmpDir, sub, entry));
+        }
       }
     }
-    const probePath = path.join(tmpDir, '_jira.mds');
+    await fs.copyFile(path.join(ROOT, 'src', 'assets', 'mds', '.mdsroot'), path.join(tmpDir, '.mdsroot'));
+    const probePath = path.join(tmpDir, 'tracker', '_jira.mds');
     await fs.writeFile(probePath, selective, 'utf8');
 
     const alias = await timeCompile(shippedRel);

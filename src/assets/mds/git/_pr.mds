@@ -1,6 +1,8 @@
 ---
 output-dir: dist/skills/git/references
 ---
+@import "./_ops_pr.mds" as props
+
 PR-host mechanics for the `devflow:git` skill.
 
 One section per PR/review operation. The build emits each section as its own file
@@ -18,19 +20,23 @@ every other provider's users read their PR mechanics as their tracker's. This
 directory is installed under every provider, unconditionally, and the agent names
 each file by a fixed literal path — it composes nothing from the provider token.
 
-An operation's contract — its `**Input:**`, its `**Output:**` template and its
-`**Degradation (D4):**` clause — is never restated here: that is the agent's, and
-a second copy outside the single-authority corpus is the divergence this split
-exists to prevent. Three further controls also stay in the agent by rule, not by
-omission:
+Each section is the WHOLE operation, and a spawn reads nothing else for it
+(D-OP-ONE-REF). Its contract — description, `**Input:**`, degradation notes and
+`**Output:**` template — comes first, called from `_ops_pr.mds` (D-OP-CONTRACT-ONCE),
+and its steps follow (D-OP-MOVABLE). The operation's own obligations sit in that
+one file, so they are readable from the operation's section alone:
 
 - the two summary operations' sentence naming `references/publication-gate.md`
-  (D10's scope property [DR-20](i) is asserted over `git.md` alone);
-- `post-resolution-summary`'s op-local non-reproduction clause (Principle 8's
-  containment obligation must be readable from the operation's OWN section);
-- `resolve-review-threads`' step 3, the D9 gate application (the D9 predicate has
-  one authority, and `references/decision-markers.md` is where the reference tree
-  states it).
+  (D10's scope property [DR-20](i) is asserted over the references that name it);
+- `post-resolution-summary`'s non-reproduction clause (Principle 8's containment
+  obligation, readable from the operation's OWN section);
+- `resolve-review-threads`' step 3, the D9 gate application, between steps 2 and 4
+  (the D9 predicate has one authority, and `references/decision-markers.md` is where
+  the reference tree states it).
+
+`ensure-pr-ready` is not here. It is a tracker operation as well, so its one
+reference per provider holds the PR skeleton (`_ops_steps.mds`) and the provider's step 4b
+together; see `tracker/_github.mds`, `_jira.mds` and `_linear.mds`.
 
 Headings below each section's own anchor are `###` by grammar, not by taste: a
 column-0 `## ` line outside a fence terminates the section for every guard that
@@ -39,35 +45,14 @@ invisible while the bytes stay on disk. The `## ` lines inside the two
 summary operations' compose fences are indented payload and stay exactly as they
 were authored.
 
-@define ensure_pr_ready():
-## Operation: ensure-pr-ready
-
-Load for `ensure-pr-ready` under every tracker provider.
-
-**PR mechanics held here:** every step but step 4b's tracker half, which is the provider reference's.
-
-### Process
-
-1. Verify on feature branch (not main/master/develop/integration/trunk/release/*/staging/production) - error if not
-2. Check for uncommitted changes - if any, create atomic commit using `devflow:git` patterns
-3. Check if branch pushed to remote - if not, push with `-u` flag. If that push is refused and the branch's open PR is cross-repository with maintainer edits off (`gh pr view --json isCrossRepository,maintainerCanModify`), emit `TRACEABILITY: DEGRADED (cannot push to fork)` and go to 4a (4a–4c edit only the PR).
-4a. Check if PR exists - if not, create PR using guidance from (in priority order): (a) `PR_DESCRIPTION_GUIDANCE` if given and not `(none)`, (b) generated from branch context. Compose the PR body via the `devflow:git` template to `$DEVFLOW_BODY_RAW` (a D11 sink: it publishes at repo visibility), then append the caller blocks. Apply the Comment-sink scrub (D11) — a failed one posts neither block; on success: `gh pr create … --body-file "$DEVFLOW_BODY"`.
-   - **Caller blocks**, in order: `PR_WAVE_BLOCK` (`check wave`), then `PR_TEST_PLAN_BLOCK` (`check block`), each when given and not `(none)`. Write it byte for byte to a fresh `mktemp` file with the Write tool, never via a shell string, and run `node "$HOME/.devflow/scripts/verify-evidence.cjs" check <wave|block> <file>; echo "exit=$?"`. Only `exit=0` admits it, verbatim; else omit it, never repaired or partly pasted, and emit `TRACEABILITY: DEGRADED (wave block does not match its grammar)` or `TRACEABILITY: DEGRADED (test-plan block does not match its grammar)` with steps 4b/4c's lines. An admitted wave block is the body's only `## Related Issues`: skip 4b.
-4c. Retitle, only when `APPLY_CONVENTIONS` is `true`: if the PR title breaks the convention in the PR Titles section of `.devflow/conventions.md`, retitle it; skip silently when that file is absent. Two rules, because the title derives from third-party PR titles:
-   - **Validate before use.** Skip the retitle (leave the PR title as-is, no error) if the composed title contains any of `` $ ` \ " ' ; | & < > `` or a newline.
-   - **Pass as argv, never as command text.** Bind it to a shell variable and pass that variable: `gh pr edit {PR_NUMBER} --title "$DEVFLOW_PR_TITLE"`. Never interpolate it: `$(...)`, backticks and `${...}` all expand inside double quotes.
-
-   On any 4xx/5xx from `gh pr edit`: emit `TRACEABILITY: DEGRADED ({reason})` and continue — a failed retitle never blocks the PR.
-5. Get base branch from PR
-6. Derive branch-slug (replace `/` with `-`)
-
-### Step 4b's PR-host half
-
-The provider reference's step 4b publishes its section only through this: find the open PR with `gh pr list --head {branch} --state open --limit 1`; compose the existing body plus the `## Related Issues` section to `$DEVFLOW_BODY_RAW` — the existing body is third-party-editable, so never interpolate it into a command string; apply the Comment-sink scrub (D11); on success: `gh pr edit {PR_NUMBER} --body-file "$DEVFLOW_BODY"`.
-@end
+`_ops_pr.mds` is an ALIAS import (`as props`), as in the provider modules: a selective
+import deep-copies each named function into every `@define` here, and
+`tests/build-mds-compile-time.test.ts` holds the budget.
 
 @define validate_branch():
 ## Operation: validate-branch
+
+{{props.validate_branch_contract()}}
 
 Load for `validate-branch` under every tracker provider.
 
@@ -89,6 +74,8 @@ Load for `validate-branch` under every tracker provider.
 
 @define post_review_summary():
 ## Operation: post-review-summary
+
+{{props.post_review_summary_contract()}}
 
 Load for `post-review-summary` under every tracker provider.
 
@@ -135,6 +122,8 @@ Load for `post-review-summary` under every tracker provider.
 @define check_ci_status():
 ## Operation: check-ci-status
 
+{{props.check_ci_status_contract()}}
+
 Load for `check-ci-status` under every tracker provider.
 
 **PR mechanics held here:** the PR-number discovery fallback, the checks fetch over `bucket`, and the priority-ordered classification whose last arm is `INDETERMINATE`.
@@ -151,6 +140,8 @@ Load for `check-ci-status` under every tracker provider.
 
 @define fetch_review_threads():
 ## Operation: fetch-review-threads
+
+{{props.fetch_review_threads_contract()}}
 
 Load for `fetch-review-threads` under every tracker provider.
 
@@ -177,9 +168,11 @@ Load for `fetch-review-threads` under every tracker provider.
 @define resolve_review_threads():
 ## Operation: resolve-review-threads
 
+{{props.resolve_review_threads_contract()}}
+
 Load for `resolve-review-threads` under every tracker provider.
 
-**PR mechanics held here:** the verdict definitions, the rate-limit pre-read, the bounded per-thread loop, the four verdict reply templates, the scrub-then-reply mutation and the inter-operation throttle. Step 3 — applying the D9 gate — stays in the agent and interleaves here by number.
+**PR mechanics held here:** the verdict definitions, the rate-limit pre-read, the bounded per-thread loop, the four verdict reply templates, the scrub-then-reply mutation and the inter-operation throttle, with step 3 — applying the D9 gate — between steps 2 and 4.
 
 ### Verdicts
 
@@ -189,7 +182,7 @@ Each `THREAD_MAP` entry carries one verdict:
 - `BY_DESIGN` — intentional; requires a recorded decision, stated in words, or code citation as evidence
 - `ESCALATED` — requires human review
 
-(The resolution gate these verdicts feed — D9 — is stated in the agent's own section.)
+(The resolution gate these verdicts feed — D9 — is stated above, in this operation's contract.)
 
 ### Process
 
@@ -207,13 +200,14 @@ unexplained unresolved threads.
    - **ESCALATED**: `This thread has been escalated for human review and recorded in the resolution summary.`
    - Reply bodies MUST NOT contain verbatim content from the external thread body — cite only internal evidence (commit SHAs, file:line from this codebase)
 2. Write reply to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) — non-zero exit → DEGRADED for that thread, continue per D4. Post reply via `addPullRequestReviewThreadReply` GraphQL mutation with `-F body=@"$DEVFLOW_BODY"` (file-ref form).
-
-   (Step 3, the D9 gate, is stated in the agent's own section.)
+3. Apply the D9 gate above: resolve via `resolveReviewThread` if VERIFICATION_STATUS == PASS AND verdict FIXED AND commit_sha non-empty; all other cases → reply-only, leave unresolved.
 4. Wait 1s between operations
 @end
 
 @define post_resolution_summary():
 ## Operation: post-resolution-summary
+
+{{props.post_resolution_summary_contract()}}
 
 Load for `post-resolution-summary` under every tracker provider.
 
@@ -258,6 +252,8 @@ Load for `post-resolution-summary` under every tracker provider.
 @define check_merge_readiness():
 ## Operation: check-merge-readiness
 
+{{props.check_merge_readiness_contract()}}
+
 Load for `check-merge-readiness` under every tracker provider.
 
 **PR mechanics held here:** the report-only rule, the unresolved-thread count with its >100 approximation note, the review-decision fetch, the CI-status reuse, the test-plan evidence read and the first-match-wins ladder whose READY arm is a positive conjunction.
@@ -289,6 +285,8 @@ Never take action on the PR — report READY or NOT_READY, always with the speci
 @define update_pr_evidence():
 ## Operation: update-pr-evidence
 
+{{props.update_pr_evidence_contract()}}
+
 Load for `update-pr-evidence` under every tracker provider.
 
 **PR mechanics held here:** the evidence script run, the compare-and-swap body edit and the append-only evidence comment. The script owns every marker, grammar and state rule; nothing here restates one.
@@ -302,9 +300,6 @@ Run steps 1–4 as ONE Bash invocation from `WORKTREE_PATH` (else cwd) — the t
 3. **Read back** after an edit: `node "$V/verify-evidence.cjs" readback --pr {PR_NUMBER} --expect "$DEVFLOW_BODY"`; anything but `READBACK ok` → `TRACEABILITY: DEGRADED (body read-back mismatch)`, else `EDITED`. GitHub has no conditional body edit: a human edit landing between the last re-read and `gh pr edit` is overwritten (it stays in the PR's edit history), and the read-back proves only that these bytes landed.
 4. **Comment.** `posted:yes` → `SKIPPED`; `posted:n/a` → `OFF`. Otherwise apply the Comment-sink scrub (D11): `node "$V/redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY" && gh pr comment {PR_NUMBER} --body-file "$DEVFLOW_BODY"` → `POSTED`. Never edit or delete an evidence comment. On 5xx retry once; still 5xx → `DEGRADED ({reason})`.
 @end
-
-<!-- op: ensure-pr-ready -->
-{{ensure_pr_ready()}}
 
 <!-- op: validate-branch -->
 {{validate_branch()}}

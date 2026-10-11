@@ -7,7 +7,7 @@ import { DEFAULT_TRACKER_PROVIDER } from '../src/core/tracker.js'
 import { getAllAgentNames } from '../src/core/plugins.js'
 import { agentSourceDirs, compiledSkillRefsDir } from '../src/core/assets.js'
 import { MAX_REFERENCE_SWEEP_DEPTH } from '../src/core/reference-sweep.js'
-import { PR_HOST_DESTINATION_ROOT } from '../src/core/mds-variants.js'
+import { GIT_OPERATIONS, PR_HOST_DESTINATION_ROOT, operationReferenceRel } from '../src/core/mds-variants.js'
 import { learningOffRelPath, type LearningVariantKind } from '../src/core/learning-variants.js'
 import { assertTempHome } from './setup/home-isolation.js'
 
@@ -865,6 +865,93 @@ export function isPrHostEntryPath(entryPath: string, op?: string): boolean {
     : posix.endsWith(`/references/${prHostRel(op)}`)
 }
 
+// ── Operation references (D-OP-ONE-REF) ──────────────────────────────────────
+//
+// Every Git operation loads exactly one operation reference, and the agent body
+// carries no operation text. A guard that used to read "the operation's section in
+// git.md" now reads "the operation's section in its one reference": the contract
+// (Input, degradation notes, Output template) and the steps are in the same file.
+// The corpus below is that set — one entry per operation, GitHub-provider by default
+// — so a 'sole' lookup on it is a single-authority lookup (`gitAgentSinkCorpus()` is
+// the union, with all three providers).
+
+/**
+ * The corpus of every Git operation's single reference for one provider.
+ *
+ * One entry per operation in `GIT_OPERATIONS`, in roster order. Each entry's section
+ * for its own operation is found by `extractOpSectionFromCorpus(..., { mode: 'sole' })`
+ * without a conflict, because no two entries share an operation anchor.
+ *
+ * Fail-loud on an absent file: a corpus that quietly dropped an operation would let
+ * every guard built on it pass over ground it never read.
+ *
+ * @param provider - Tracker provider whose references stand for the tracker operations.
+ * @param root - Repository root to resolve paths against (default: ROOT).
+ */
+export function gitOperationReferenceCorpus(provider = 'github', root = ROOT): CorpusEntry[] {
+  const refsDir = compiledSkillRefsDir(root)
+  return GIT_OPERATIONS.map(op => {
+    const rel = operationReferenceRel(op, provider)
+    if (rel === null) throw new Error(`gitOperationReferenceCorpus: no reference path for "${op}"`)
+    const abs = path.join(refsDir, ...rel.split('/'))
+    try {
+      return { path: abs, content: readFileSync(abs, 'utf-8') }
+    } catch {
+      throw new Error(
+        `gitOperationReferenceCorpus: the reference for "${op}" is absent at ${abs}\n` +
+        '  Run `npm run build` first — the operation references are generated artifacts',
+      )
+    }
+  })
+}
+
+// ── Host steps inside a tracker operation's reference ─────────────────────────
+//
+// Two tracker operations are also GitHub-host operations: `create-release` cuts a GitHub
+// release and `ensure-pr-ready` opens a GitHub pull request, whatever issue tracker the
+// repository uses. Their host steps are written once in `_ops_steps.mds` and expanded into
+// every provider's reference for the operation (D-OP-ONE-REF), so the Jira and Linear
+// references carry `gh release` and `gh pr` text — a host fact, not tracker transport.
+//
+// The provider guards that police the tracker half of a reference (no CLI transport, no
+// foreign cap literal) therefore read it WITHOUT those steps. The exemption is by exact
+// line, read from the same source the build expands, so it covers the host steps and nothing
+// else: a tracker step that smuggles `gh issue` in is still a line the exemption does not name.
+
+/** The `_ops_steps.mds` defines that carry GitHub-host text, not tracker text. */
+export const HOST_STEP_DEFINES = [
+  'create_release_steps',
+  'ensure_pr_ready_steps_to_4a',
+  'ensure_pr_ready_steps_from_4c',
+  'ensure_pr_ready_pr_edit',
+] as const
+
+/** The non-blank lines of the host-step defines, exactly as the build emits them. */
+export function hostStepLines(): string[] {
+  const source = readFileSync(path.join(ROOT, 'src', 'assets', 'mds', 'git', '_ops_steps.mds'), 'utf-8')
+  const lines: string[] = []
+  for (const name of HOST_STEP_DEFINES) {
+    const open = `@define ${name}():\n`
+    const start = source.indexOf(open)
+    const end = source.indexOf('\n@end', start)
+    if (start === -1 || end === -1) throw new Error(`_ops_steps.mds: no \`@define ${name}()\` block`)
+    lines.push(...source.slice(start + open.length, end).split('\n').filter(line => line.trim() !== ''))
+  }
+  return lines
+}
+
+/**
+ * A generated reference with the host steps removed, line for line.
+ *
+ * It does not know which operation it was handed: it removes whichever host lines are present
+ * and leaves every other line, blank lines included. A reference with no host step comes back
+ * unchanged.
+ */
+export function withoutHostSteps(generated: string): string {
+  const host = new Set(hostStepLines())
+  return generated.split('\n').filter(line => !host.has(line)).join('\n')
+}
+
 // ── Tracker reference-naming collector ───────────────────────────────────────
 //
 // One collector for the AC-2.5/AC-2.7 single-naming-line claim, shared by the
@@ -1332,11 +1419,17 @@ export const STATUS_LINE_REFERENCE_FILES = [
   'pr/post-resolution-summary.md',
   'pr/post-review-summary.md',
   'pr/resolve-review-threads.md',
+  'pr/validate-branch.md',
   'tracker/github/backlink-shipped-issues.md',
+  'tracker/github/create-release.md',
+  'tracker/github/ensure-pr-ready.md',
   'tracker/github/ensure-traceable-issue.md',
+  'tracker/github/fetch-issue.md',
+  'tracker/github/fetch-issues-batch.md',
   'tracker/github/gather-release-evidence.md',
   'tracker/github/manage-debt.md',
   'tracker/github/post-wave-report.md',
+  'tracker/github/setup-task.md',
 ] as const
 
 /** A path `STATUS_LINE_REFERENCE_FILES` declares — derived, never re-spelled. */
@@ -1428,12 +1521,6 @@ export function extractStatusLines(gitContent?: string): string {
   const dynamicBuild = readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'dynamic-build.mds'), 'utf-8')
   const resolveMds = readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'resolve.mds'), 'utf-8')
 
-  // One-entry corpus for `gitOp` below. The label is what a 'sole' conflict would
-  // name, and a one-entry corpus cannot conflict — but the extractor's contract
-  // takes a path and a caller-supplied baseline body has none on disk, so the
-  // file's own name is the honest label.
-  const gitCorpus: CorpusEntry[] = [{ path: 'git.md', content: git }]
-
   // Sampling runs through the module-level reader so the closed list's refusal
   // arm is probed against this exact code rather than a copy (see
   // `statusLineRefReader`).
@@ -1441,27 +1528,27 @@ export function extractStatusLines(gitContent?: string): string {
   const ref = (relPath: string): string => refs.read(relPath)
 
   /**
-   * Extract the named operation section from git.md.
+   * Extract the named operation section from that operation's one reference.
+   *
+   * The agent body declares no operation (D-OP-ONE-REF): an operation's Input,
+   * degradation notes, Output template and steps are one file, the reference the
+   * agent's loading table names, and the GitHub provider's copy is the sample.
+   * It is read through the closed-list reader, so every operation sampled here is a
+   * declared `STATUS_LINE_REFERENCE_FILES` entry and an undeclared one is refused.
    *
    * Routed through the harness's one section extractor, so the boundary is the
    * shared rule — line-bounded at the start, cut at the next UNFENCED column-0
    * `## ` (D-FENCE-AWARE-BOUNDARY). A `## ` line inside an Output
-   * template's fence is payload, which is what the hand-rolled slice this
-   * replaces used a `\n## Operation:` terminator to approximate: that terminator
-   * stopped only at a SIBLING operation, so the last operation's section ran past
-   * end of file into the shared `## Principles` trailer, and every operation's
-   * section silently carried any non-operation heading that followed it. That is
-   * the construct Guard 10 was rewritten to escape (667c497) — a region wider
-   * than the operation it claims to be — and every `between`/`singleLine` below
-   * inherited it from here. The defect class: a slicing rule that pins layout
-   * instead of the semantics the fixture is supposed to sample.
+   * template's fence is payload, so a section carries its whole Output template.
    *
-   * 'sole' [DR-18]: git.md is the single authority for the sections sampled
+   * 'sole' [DR-18]: the reference is the single authority for the section sampled
    * here. A second corpus file carrying the anchor would mean this call was
    * pointed at the wrong corpus, and the throw is how that is reported.
    */
   function gitOp(opName: string): string {
-    return extractOpSectionFromCorpus(gitCorpus, opName, { mode: 'sole' }).content
+    const rel = operationReferenceRel(opName, 'github')
+    if (rel === null) throw new Error(`extractStatusLines: "${opName}" is not a Git operation`)
+    return extractOpSectionFromCorpus([{ path: rel, content: ref(rel) }], opName, { mode: 'sole' }).content
   }
 
   /**
@@ -1519,12 +1606,12 @@ export function extractStatusLines(gitContent?: string): string {
     // to the provider reference; the D4 clause they degrade into stayed in git.md,
     // and both halves are still sampled.
     between(ref('tracker/github/manage-debt.md'), '3. Extract items to add:', '7. Return the backlog issue number for Tracked field backfill in resolution-summary.md'),
-    between(gitOp('manage-debt'), '**Process:**', '`Tracked` stays `(pending — TRACEABILITY: DEGRADED ({reason}))` in resolution-summary.md.'),
+    singleLine(gitOp('manage-debt'), '**Degradation (D4):** `gh` unauthenticated or absent, or GitHub API error'),
     // check-ci-status input + process (baseline lines 441-451) — STRADDLES, split
     // per D-STRADDLE-SPLIT: the `**Input:**` line and the `**Process:**` label are
     // in the agent, the six steps in the PR-host reference.
     // Leading blank preserved on the first half, trailing on the second.
-    '\n' + between(gitOp('check-ci-status'), '**Input:** `PR_NUMBER`', '**Process:**'),
+    '\n' + singleLine(gitOp('check-ci-status'), '**Input:** `PR_NUMBER`'),
     between(ref('pr/check-ci-status.md'), '1. If `PR_NUMBER` not provided', '6. List failing/pending checks with names') + '\n',
     // create-release process steps (baseline lines 479-485)
     between(gitOp('create-release'), '1b. Conventions: if `.devflow/conventions.md` exists', '…and {n} more commits` line (D4 degrade if enrichment fails)'),
@@ -1536,7 +1623,9 @@ export function extractStatusLines(gitContent?: string): string {
     // holds the four steps, and the `**Output:**` label stayed. Each moved step is one line, read
     // by its own anchor and rejoined in step order, so the sample is byte-identical to the
     // pre-split text: pointer, blank, the four steps with no blank between them, blank, label.
-    between(gitOp('gather-release-evidence'), '**Input:** `WORKTREE_PATH` (optional)', "**Mechanics:** load this operation's provider reference."),
+    singleLine(gitOp('gather-release-evidence'), '**Input:** `WORKTREE_PATH` (optional)'),
+    '',
+    singleLine(gitOp('gather-release-evidence'), '**Degradation (D4):** `gh` unauthenticated or remote unreachable'),
     '',
     [
       singleLine(ref('tracker/github/gather-release-evidence.md'), '1. Find last tag: `git describe'),

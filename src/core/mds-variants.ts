@@ -361,32 +361,38 @@ export const TRACKER_OPS = [
 export const TRACKER_GITHUB_OPS = TRACKER_OPS;
 
 /**
- * The 9 PR/review operations whose mechanics are generated once, for every
+ * The 8 PR/review operations whose references are generated once, for every
  * provider, under `pr/`.
  *
  * A PR-HOST roster, not a tracker roster, and the distinction is the whole
  * reason this list exists separately from {@link TRACKER_OPS}: pull requests, PR
  * reviews and PR checks stay on GitHub under every issue-tracker provider, so
- * these steps are the SAME file whatever `TRACKER_PROVIDER` resolves to. Filing
- * them under `tracker/github/` would make a jira user's PR mechanics read as
- * their tracker's, and fanning them across the three provider directories would
- * ship three identical trees.
+ * these operations are the SAME file whatever `TRACKER_PROVIDER` resolves to.
+ * Filing them under `tracker/github/` would make a jira user's PR mechanics read
+ * as their tracker's, and fanning them across the three provider directories
+ * would ship three identical trees.
  *
- * `ensure-pr-ready` is a member of BOTH rosters by design, and the two halves do
- * not overlap: the PR skeleton (branch/commit/push, create, retitle, and step
- * 4b's open-PR lookup and body edit) is a PR-host fact and lives here; step 4b
- * itself — the issue-number lookup and the link line it renders — is a tracker
- * fact and lives in `tracker/{provider}/ensure-pr-ready.md`. The operation
- * carries one pointer to each.
+ * D-OP-ONE-REF. Each file is the WHOLE operation: its contract (description,
+ * `**Input:**`, degradation notes, `**Output:**` template, written once in
+ * `src/assets/mds/git/_ops.mds`) and then its steps. The operation loads this one
+ * file and no other operation reference.
  *
- * 9 entries, one above {@link MIN_VARIANT_PAIRS}, which is a floor and not a
+ * `ensure-pr-ready` is deliberately NOT a member. It is a tracker operation: step
+ * 4b, the issue-number lookup and the link line it renders, is a tracker fact and
+ * differs per provider, so the operation is one file per provider under
+ * `tracker/{provider}/ensure-pr-ready.md`. That file carries the PR skeleton
+ * (branch/commit/push, create, retitle, and step 4b's open-PR lookup and body edit)
+ * as well, written once in `_ops.mds` and expanded into all three, so the PR-host
+ * half is the same bytes under every provider and the operation still loads one
+ * file.
+ *
+ * 8 entries, exactly {@link MIN_VARIANT_PAIRS}, which is a floor and not a
  * target: a shorter roster makes every parity assertion over it vacuous (GAP-42)
- * and `expandVariants` refuses the build, so the roster can grow
- * but never drop below 8. `update-pr-evidence` (#363) is the ninth — it edits the
- * PR body and comments on the PR, both GitHub whatever the tracker is.
+ * and `expandVariants` refuses the build, so the roster can grow but never drop
+ * below 8. `update-pr-evidence` (#363) is the newest member: it edits the PR body
+ * and comments on the PR, both GitHub whatever the tracker is.
  */
 export const PR_HOST_OPS = [
-  'ensure-pr-ready',
   'validate-branch',
   'post-review-summary',
   'check-ci-status',
@@ -499,6 +505,44 @@ export const GIT_CROSS_CUTTING_DOCS = [
 ] as const;
 
 /**
+ * The Git operations whose one operation reference is a cross-cutting document
+ * rather than a per-op file in `pr/` or `tracker/{provider}/` (D-OP-ONE-REF).
+ *
+ * `learn-conventions` is the only one: it has no PR-host half and no provider half,
+ * so its reference is the named document {@link GIT_CROSS_CUTTING_DOCS} already emits
+ * at the references root. Its contract is compiled into that document like every
+ * other operation's (D-OP-CONTRACT-ONCE).
+ */
+export const DOC_BACKED_OPS = ['learn-conventions'] as const satisfies readonly (typeof GIT_CROSS_CUTTING_DOCS)[number][];
+
+/**
+ * Every operation the Git agent routes, derived from the three rosters that emit its
+ * reference — never retyped. Each one loads exactly one operation reference
+ * ({@link operationReferenceRel}).
+ */
+export const GIT_OPERATIONS = [...PR_HOST_OPS, ...TRACKER_OPS, ...DOC_BACKED_OPS] as const;
+
+/**
+ * The skill-relative path (under `references/`) of the one reference an operation
+ * loads, or `null` for a name that is not a Git operation.
+ *
+ * D-OP-ONE-REF. A PR-host operation is `pr/{op}.md`, the same file under every
+ * provider; a tracker operation is `tracker/{provider}/{op}.md` for the resolved
+ * provider; a doc-backed operation is its named document. The Git agent's
+ * `## Loading the mechanics` table states these paths in prose, and
+ * `tests/tracker/reference-reachability.test.ts` holds the table to this function.
+ *
+ * Total and pure: an unknown operation is `null`, never a throw. `ensure-pr-ready` is
+ * a tracker operation, so it resolves per provider even though its PR half is shared.
+ */
+export function operationReferenceRel(op: string, provider: string): string | null {
+  if ((TRACKER_OPS as readonly string[]).includes(op)) return `${TRACKER_DESTINATION_ROOT}/${provider}/${op}.md`;
+  if ((PR_HOST_OPS as readonly string[]).includes(op)) return `${PR_HOST_DESTINATION_ROOT}/${op}.md`;
+  if ((DOC_BACKED_OPS as readonly string[]).includes(op)) return `${op}.md`;
+  return null;
+}
+
+/**
  * Every reference module the build knows about — a closed registry, read the
  * same way ALLOWED_OUTPUT_DIRS is read.
  *
@@ -522,9 +566,9 @@ export const GIT_CROSS_CUTTING_DOCS = [
  * that used to sit in the always-loaded Git agent, where every spawn paid for
  * them although most spawns run a PR-host operation that never touches the
  * issue tracker. A spawn now reads the file once, only when it runs a tracker
- * operation, before its first tracker step. The agent's retained
- * `## Loading the mechanics` section is the one line that names it; it keeps
- * the PR-mechanics load rule and the merged step order, which a PR-only spawn
+ * operation, before its first tracker step. The agent's `## Loading the mechanics`
+ * section is the one line that names it; it keeps the one-reference rule and the
+ * table naming every non-tracker operation's reference, which a PR-only spawn
  * needs and which this file cannot instruct a spawn to load. It is ungated for
  * the reason the registry's other provider-independent files are: every install
  * carries every provider, GitHub included, so no registered provider is the
@@ -533,11 +577,9 @@ export const GIT_CROSS_CUTTING_DOCS = [
  * The budget clause: the file is a per-SPAWN term of each tracker row (GitHub,
  * Jira, Linear), charged the way the tool-call contract is (`contractTerm` in
  * tests/tracker/budget-model.ts) and added in `providerLoadedSet`. It is not part
- * of `ownLoadForProvider`, of the PR-host row or of the per-operation PR-host
- * cap. ensure-pr-ready is both a PR-host and a tracker operation, so charging it
- * the contract there would put it over a lower-only cap; its full cost,
- * contract included, is priced through the tracker rows, where it is already a
- * candidate.
+ * of `ownLoadForProvider`, of the PR-host row or of the per-operation load cap
+ * (D-OP-LOAD-CAP): the cap prices one operation's own reference, which is the same
+ * whichever tracker row it is read through.
  */
 export const VARIANT_MODULES = [
   {
