@@ -142,8 +142,10 @@ import type {
  *
  * #445 (part 2: the Git and Tracker tool allowlists) replaced the 17-name `disallowedTools` block of
  * git.md with a one-line `tools:` allowlist, which took 251 ch out of dist/agents/git.md. Every
- * git.md-carrying row fell by exactly that cut, so each keeps the headroom it had: the ceilings
- * moved from 35_554, 62_433, 72_795, 73_391 and 47_961 to their present values.
+ * git.md-carrying ceiling was lowered by exactly that cut, from 35_554, 62_433, 72_795, 73_391 and
+ * 47_961 to their present values. The digest commit before it had added a net 2 ch to git.md
+ * (35_474 to 35_476), so each measurement fell 249 ch rather than 251: BUDGET_GIT_MD, the GitHub row
+ * and the PR-host row now sit 78 ch under their ceilings (from 80), the Jira and Linear rows 56 ch (from 58).
  *
  * The 80 ch is general headroom, not a reservation: no line of it is spoken for,
  * and an addition still funds itself with a cut. Each ceiling was set as
@@ -278,7 +280,7 @@ const BUDGET_LOADED_SET = 62_182;
  * addition to the contract or to a Jira mechanics file must fund itself with a cut
  * rather than reach for slack. Re-derived by #425 to 72_795, the same
  * git.md cut with `tracker/_contract.md` billed once per spawn beside the tool-call contract.
- * The row measures 72_737 today, 58 ch under this ceiling. Trimming
+ * The row measures 72_488 today, 56 ch under the 72_544 ceiling #445 left it. Trimming
  * `references/tracker/_mcp.md` is the honest first move: it is contract prose, it
  * is the single largest term this row adds over the GitHub one, and a pass over it
  * is cheaper than another ceiling.
@@ -302,7 +304,7 @@ const BUDGET_LOADED_SET_JIRA = 72_544;
  * ensure-traceable-issue) plus the 80 ch general headroom above: 75_940. Re-derived by
  * #393 from a measured 75_573 (git.md -315 ch, the site rung +28 ch): 75_653. Re-derived by #423 from a measured 73_851 (the same
  * two preloaded-skill cuts as the GitHub row): 73_931. Re-derived by #425 to
- * 73_391, as the Jira row. The row measures 73_333 today, 58 ch under this ceiling. This is the
+ * 73_391, as the Jira row. The row measures 73_084 today, 56 ch under the 73_140 ceiling #445 left it. This is the
  * LARGEST of the four ceilings but not necessarily the binding one: a character added
  * to git.md is a character added to every row, and the row with the least headroom
  * binds. Each ceiling was set as min(its previous ceiling, measured actual + 80), so
