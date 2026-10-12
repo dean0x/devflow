@@ -7,7 +7,7 @@ directories:
   - src/assets/scripts/release-trace.cjs
   - src/assets/commands/release.mds
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-12
 ---
 
 # Release Evidence & Trace Map
@@ -35,7 +35,7 @@ updated: 2026-10-10
 
 ## Overview
 
-Release traceability turns "what shipped since the last release" into a closed-vocabulary trace map and a commit and issue list. Three pieces cooperate: the `/release` command (`src/assets/commands/release.mds`) decides whether evidence is gathered and what to do with gaps; the Git agent's `gather-release-evidence` and `create-release` operations (contract in `git.mds`, tracker mechanics generated per provider); and `src/assets/scripts/release-trace.cjs`, the git-only classifier both shell out to. Semantics of the surrounding ops (D4, D11, bounds) live in `.devflow/features/compliance-feature-traceability/KNOWLEDGE.md`; the compliance lens and evidence floor live in `.devflow/features/compliance-feature/KNOWLEDGE.md`.
+Release traceability turns "what shipped since the last release" into a closed-vocabulary trace map and a commit and issue list. Three pieces cooperate: the `/release` command (`src/assets/commands/release.mds`) decides whether evidence is gathered and what to do with gaps; the Git agent's `gather-release-evidence` and `create-release` operations (each one generated reference per provider under `tracker/{provider}/`: the contract from `src/assets/mds/git/_ops.mds`, then its steps); and `src/assets/scripts/release-trace.cjs`, the git-only classifier both shell out to. Semantics of the surrounding ops (D4, D11, bounds) live in `.devflow/features/compliance-feature-traceability/KNOWLEDGE.md`; the compliance lens and evidence floor live in `.devflow/features/compliance-feature/KNOWLEDGE.md`.
 
 ## Release Evidence Flow
 
@@ -59,7 +59,7 @@ Usage: `release-trace.cjs last-tag` (prints exactly `LAST_TAG <tag>` or `LAST_TA
 
 ## create-release
 
-Step 1a validates the version format (semver X.Y.Z, fail loudly). Step 1b reads the `## Version Names` and `## Version PR Titles` sections of `.devflow/conventions.md` when present, for the annotated tag format and release title (defaults when absent: tag and title `v{VERSION}`); it stays inline in `git.md`, since only the `## Shipped Issues` enrichment bullet moved to the generated reference. Re-learn conventions by deleting the file.
+Step 1a validates the version format (semver X.Y.Z, fail loudly). Step 1b reads the `## Version Names` and `## Version PR Titles` sections of `.devflow/conventions.md` when present, for the annotated tag format and release title (defaults when absent: tag and title `v{VERSION}`); steps 1a-6 live in `tracker/{provider}/create-release.md`, written once (`create_release_steps` in `src/assets/mds/git/_ops_steps.mds`) and expanded into every provider's file, and each provider adds only its `## Shipped Issues` enrichment bullet inside step 5. Re-learn conventions by deleting the file.
 
 Step 5 composes the notes body: `CHANGELOG_CONTENT` first, then an optional `## Commits` section (first 100 entries, with a final `...and {n} more commits` line when truncated), then `TRACEABILITY_EXCEPTIONS` verbatim last. The 60000-character cap degrades in two stages, in order: drop `## Commits` and note `Commit list omitted (release notes size limit)`; if still over, cut only `CHANGELOG_CONTENT` **at a line boundary**, ending `...truncated`. A mid-line cut could split a markdown fence or table row and corrupt the rendered release. Step 6 writes the notes to `$DEVFLOW_NOTES_RAW`, applies the D11 scrub to the notes pair (a non-zero exit fails the release loudly: notes with unredacted secrets must not be published), then re-applies step 5's cap, written at step 6 itself beside the scrub call rather than left implicit, before `gh release create {tag} --notes-file "$DEVFLOW_NOTES"`.
 
@@ -89,7 +89,8 @@ Step 5 composes the notes body: `CHANGELOG_CONTENT` first, then an optional `## 
 - `src/assets/scripts/release-trace.cjs` - the pure git-history classifier: `classify`, `messageBody` (D-TRACE-REVERT-BODY), `findReference` (D-TRACE-FULL-MESSAGE), `MESSAGE_LOG_FLAGS`, `LIMITS`
 - `src/assets/mds/tracker/_common.mds` - `last_release_tag_step`, `trace_map_step`, shared by every provider's generated gather reference
 - `src/assets/mds/tracker/_github.mds` - GitHub's gather mechanics (listing, local mapping, fallback)
-- `src/assets/agents/git.mds` - `gather-release-evidence`, `create-release`, `backlink-shipped-issues`, `associate-release` contracts
+- `src/assets/mds/git/_ops.mds` - the `gather-release-evidence`, `create-release`, `backlink-shipped-issues` and `associate-release` contracts; `_ops_steps.mds` holds `create-release` steps 1a-6 (`create_release_steps`)
+- `src/assets/agents/git.mds` - the shared D4 block and D11 scrub these operations follow, and the loading table
 - `src/assets/commands/release.mds` - Phases 1c, 4, 5, 6 and the traceability exceptions block
 - `tests/evidence/release-trace-parity.test.ts` - pins the script and the mechanics step in agreement on `%B`
 - `tests/git-agent.test.ts` - the per-op caps and bounds
