@@ -232,13 +232,15 @@ function collectMissingFragmentWarnings(
  *
  * Every framework reference is installed on every machine
  * (D-COMPLIANCE-INSTALL-ALWAYS), so file presence no longer says which
- * frameworks apply. The caller hands the agent `COMPLIANCE_FRAMEWORKS` — the
- * `COMPLIANCE` field of the settings line, which folds this machine's selection
- * with the repository's `.devflow/project.json` — and those ids alone are in force.
+ * frameworks apply. The command names the ids in the agent's prompt
+ * (D-COMPLIANCE-INJECT: the compliance directive) — the `COMPLIANCE` field of the
+ * settings line, which folds this machine's selection with the repository's
+ * `.devflow/project.json` — and those ids alone are in force. No agent takes a
+ * named lens input, so the stamp names the prompt, not a variable.
  */
 const RUNTIME_SELECTION_LINES: readonly string[] = [
   'Every `references/{id}.md` is installed, so presence decides nothing: the ids you were given',
-  "(`COMPLIANCE_FRAMEWORKS`, this machine's plus the repository's) are the frameworks in force.",
+  "(named in your prompt; this machine's plus the repository's) are the frameworks in force.",
   'Load `references/{id}.md` for each given id and no other; `none` means generic controls only.',
   'Apply generic controls always.',
   '',

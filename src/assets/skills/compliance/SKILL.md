@@ -105,7 +105,7 @@ ${DEVFLOW_COMPLIANCE_MAPPING}
 
 ## Checklist
 
-- [ ] Frameworks in force are the ids given (`COMPLIANCE_FRAMEWORKS`); their controls applied
+- [ ] Frameworks in force are the ids your prompt names; their controls applied
 - [ ] No PII/PHI/payment data in logs, errors, or analytics events
 - [ ] Regulated data encrypted in transit (TLS 1.2+) and at rest
 - [ ] Every regulated mutation has an append-only audit entry (actor, purpose, timestamp)

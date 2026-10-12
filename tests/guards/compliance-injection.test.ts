@@ -168,6 +168,18 @@ const readSkillFile = (rel: string): string | null => {
 const codeSites = (): CodeSpawnSite[] => requireDistFiles().flatMap(f => collectCodeSpawnSites(f, requireDistFile(f)))
 const spawnHosts = (): Array<readonly [string, string]> => Object.keys(CODE_SPAWN_FLOORS).map(f => [f, requireDistFile(f)] as const)
 
+/**
+ * The learning-off variant of a compiled command (D-LEARNING-VARIANTS): a learning-off machine installs it in
+ * place of `dist/commands/<file>`, and its learning-off arms are text the learning-on sweep never reads.
+ */
+const learningOffCommand = (file: string): string => {
+  const text = resolveLearningOffSource('commands', file.replace(/\.md$/, ''))
+  if (text === null) throw new Error(`dist/learning-off/commands/${file} is absent — run \`npm run build\` first`)
+  return text
+}
+const offSpawnHosts = (): Array<readonly [string, string]> =>
+  Object.keys(CODE_SPAWN_FLOORS).map(f => [f, learningOffCommand(f)] as const)
+
 // ── AC-308 ───────────────────────────────────────────────────────────────────────────────────────────
 
 describe('AC-308: no Code-family body carries the compliance skill; each spawn site injects the directive behind the lens', () => {
@@ -194,8 +206,36 @@ describe('AC-308: no Code-family body carries the compliance skill; each spawn s
   })
 
   it('a pass-through host never gates its own flow on the lens (the directive is its only use of it)', () => {
-    for (const [host, text] of spawnHosts()) {
+    for (const [host, text] of [...spawnHosts(), ...offSpawnHosts()]) {
       expect(text, `${host}: a pass-through host never gates on COMPLIANCE_ACTIVE`).not.toContain('COMPLIANCE_ACTIVE')
+    }
+  })
+
+  it('the learning-off variants pass the directive at every site and set it behind the lens, like the learning-on ones', () => {
+    const hosts = offSpawnHosts()
+    const sites = hosts.flatMap(([f, t]) => collectCodeSpawnSites(f, t))
+    for (const [host, floor] of Object.entries(CODE_SPAWN_FLOORS)) {
+      const n = sites.filter(s => s.file === host).length
+      expect(n, `${host} (learning off): ${n} Code-family spawn site(s), floor ${floor}`).toBeGreaterThanOrEqual(floor)
+    }
+    expect(collectUndirectedSites(sites)).toEqual([])
+    expect(collectRawLensSites(sites)).toEqual([])
+    expect(collectUngatedHosts(hosts)).toEqual([])
+  })
+
+  it('known-bad probe: a learning-off-only arm that drops the directive or keeps the raw lens is reported', () => {
+    // Each anchor lives in a learning-off arm alone, so only the learning-off sweep can see it change.
+    const probes: Array<[string, string, string]> = [
+      ['implement.md', '`COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES` and `PUSH: false`', '`COMPLIANCE_FRAMEWORKS`, `CI_FAILURES` and `PUSH: false`'],
+      ['dynamic-build.md', 'plan + COMPLIANCE_DIRECTIVE + handoff', 'plan + COMPLIANCE_FRAMEWORKS + handoff'],
+    ]
+    for (const [host, anchor, stale] of probes) {
+      expect(requireDistFile(host), `${host}: the anchor must be learning-off only`).not.toContain(anchor)
+      const real = learningOffCommand(host)
+      expect(real, `${host}: the learning-off anchor must exist`).toContain(anchor)
+      const seeded = collectCodeSpawnSites(host, real.replace(anchor, stale))
+      expect(collectUndirectedSites(seeded), `${host}: the stale arm drops the directive`).toHaveLength(1)
+      expect(collectRawLensSites(seeded), `${host}: the stale arm hands over the raw lens`).toHaveLength(1)
     }
   })
 
@@ -299,9 +339,11 @@ describe('AC-309: no Review or Design body or preload carries compliance-only te
     }
   })
 
-  it('the /code-review Review spawn and the /plan Design spawn each inject the compliance focus directive', () => {
+  it('the /code-review Review spawn and the /plan Design spawn each inject the compliance focus directive, learning on or off', () => {
     expect(collectFocusSpawnDefects('code-review.md', requireDistFile('code-review.md'), 'Review')).toEqual([])
     expect(collectFocusSpawnDefects('plan.md', requireDistFile('plan.md'), 'Design')).toEqual([])
+    expect(collectFocusSpawnDefects('code-review.md', learningOffCommand('code-review.md'), 'Review'), 'learning off').toEqual([])
+    expect(collectFocusSpawnDefects('plan.md', learningOffCommand('plan.md'), 'Design'), 'learning off').toEqual([])
   })
 
   it('gap-analysis keeps its Iron Law and six sections in the preload; the compliance patterns live in a reference', () => {
@@ -323,6 +365,10 @@ describe('AC-309: no Review or Design body or preload carries compliance-only te
       .toEqual(['plan.md: the Design spawn does not name the gap-analysis compliance reference'])
     expect(collectFocusSpawnDefects('plan.md', seed(plan, ACTIVE_SENTENCE, ''), 'Design'))
       .toEqual(['plan.md: does not gate the focus on COMPLIANCE_ACTIVE'])
+    expect(collectFocusSpawnDefects('code-review.md', seed(review, 'For this compliance focus, invoke Skill(skill="devflow:compliance")', 'For this compliance focus, invoke the skill'), 'Review'))
+      .toEqual(['code-review.md: does not render the focus directive line'])
+    expect(collectFocusSpawnDefects('plan.md', seed(plan, '`COMPLIANCE_FOCUS_DIRECTIVE` is this one line', '`COMPLIANCE_FOCUS_DIRECTIVE` is a line'), 'Design'))
+      .toEqual(['plan.md: does not set COMPLIANCE_FOCUS_DIRECTIVE'])
     expect(collectFocusSpawnDefects('plan.md', 'no fence here', 'Design')).toEqual(['plan.md: no Design compliance-capable spawn fence found'])
   })
 

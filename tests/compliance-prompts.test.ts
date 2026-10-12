@@ -462,10 +462,23 @@ describe('TP-43 (AC-37): the compiled compliance lens loads only the ids the set
   it('a compliance-off machine\'s skill (neutral stamp) sends a hipaa lens to references/hipaa.md alone', () => {
     const { content } = composeComplianceSkill(src('src/assets/skills/compliance/SKILL.md'), [], new Map());
     expect(content).toContain('The machine declares no framework.');
-    expect(content).toContain('(`COMPLIANCE_FRAMEWORKS`, this machine\'s plus the repository\'s) are the frameworks in force.');
+    expect(content).toContain('(named in your prompt; this machine\'s plus the repository\'s) are the frameworks in force.');
     expect(content).toContain('Load `references/{id}.md` for each given id and no other; `none` means generic controls only.');
     // No framework is named by the neutral stamp, so nothing but the given ids points anywhere.
     for (const fw of COMPLIANCE_FRAMEWORKS) expect(content).not.toContain(`references/${fw.id}.md`);
+  });
+
+  it('the installed skill names no lens input: the ids reach an agent only in its prompt (D-COMPLIANCE-INJECT)', () => {
+    // The rule's `${DEVFLOW_COMPLIANCE_FRAMEWORKS}` stamp token is a different name; the word boundary keeps it out.
+    const LENS_INPUT = /\bCOMPLIANCE_FRAMEWORKS\b/;
+    expect(LENS_INPUT.test('the ids given (`COMPLIANCE_FRAMEWORKS`)'), 'known-bad: a named lens input is caught').toBe(true);
+    expect(LENS_INPUT.test('${DEVFLOW_COMPLIANCE_FRAMEWORKS}'), 'the rule stamp token is not a lens input').toBe(false);
+    const source = src('src/assets/skills/compliance/SKILL.md');
+    for (const ids of [[], ['hipaa'], ['gdpr', 'soc2']]) {
+      const { content } = composeComplianceSkill(source, ids, new Map());
+      expect(content.length, 'the composed skill is empty — the check would pass vacuously').toBeGreaterThan(2_000);
+      expect(content, `stamp [${ids.join(',')}]`).not.toMatch(LENS_INPUT);
+    }
   });
 
   it('no compiled command, agent or skill lets installed files choose the frameworks', () => {

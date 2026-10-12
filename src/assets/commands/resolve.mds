@@ -122,7 +122,7 @@ Resolve this per worktree — unlike the evidence policy above, the settings lin
 
 {{compliance.compliance_inject()}}
 
-Pass `COMPLIANCE_DIRECTIVE` to every Code and Code-fix spawn, on a line of its own.
+Set it per worktree, from that worktree's lens, and pass that worktree's `COMPLIANCE_DIRECTIVE` to each of its Code and Code-fix spawns, on a line of its own.
 
 **Mint `RESOLUTION_TS` once per run:** `date -u +%Y-%m-%dT%H:%M:%SZ`. Every worktree reuses it — the resolution comment's dedup marker is searched per PR, so one run key keeps a retry of this run deduplicated while the next /resolve on the same PR posts. Phase 5 writes it as the summary's `**Date**:` and Phase 9b-2 passes it, so the local file and the posted marker agree.
 
