@@ -30,9 +30,11 @@ Learned by `/release` on 2026-08-23 from: `package.json`, `.github/workflows/rel
 4. Local build + test via Validate agent (`npm run build`, `npm test`) — on a busy machine
    (load average ~9–12) the 3.1.0 run timed out in compliance-e2e, model-discovery,
    redact-secrets and eager-memory-refresh, each green alone. The release job rebuilds and
-   reruns the full suite before it commits, tags or publishes anything, so a timeout-only
-   local failure is non-blocking only for files that CI ran green at the release commit;
-   any other local failure blocks
+   reruns the full suite before it commits, tags or publishes anything, so a local failure
+   is non-blocking when CI ran green at the release commit AND the file passes an isolated
+   re-run. Load also causes non-timeout failures: the redact-secrets 2 s timing check,
+   the eager-memory-refresh probe-pid ENOENT and the model-discovery live-probe asserts
+   (3.5.0). queue-append and shell-hooks also time out under load
 5. `gh` authenticated (needed to dispatch the workflow)
 6. No pre-existing `## [{VERSION}]` header below a non-empty `[Unreleased]` — stale
    aborted-bump residue ships old notes (bump-version.ts fails loudly on this since 2.0.1)
@@ -90,3 +92,5 @@ with extracted notes → restore `[Unreleased]`.
   shipped issue and adds them to a `vX.Y.Z` milestone
 - Shipped Issues: only closing keywords (close/fix/resolve and their forms) ship an issue;
   `Refs #N` does not
+- Commits pushed straight to main with no PR show as `untraced` in the trace map and need
+  a self-attested exception (3.5.0: 4 behavior-rule commits + a PR that closes no issue)
