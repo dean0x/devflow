@@ -5,7 +5,7 @@ output-dir: dist/commands
 @import { knowledge_load } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
 @import { docs_root } from "./_partials/_docs_root.mds"
-@import { compliance_gate } from "./_partials/_compliance.mds"
+@import { compliance_gate, compliance_focus_inject } from "./_partials/_compliance.mds"
 @import { evidence_policy } from "./_partials/_evidence_policy.mds"
 @import { test_plan_line } from "./_partials/_plan_contract.mds"
 @import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
@@ -223,8 +223,10 @@ Each Design agent receives:
 <!-- learning:on -->
 - `DECISIONS_CONTEXT` (index from Phase 2)
 <!-- learning:end -->
-- `COMPLIANCE_FRAMEWORKS` (compliance focus only)
+- `COMPLIANCE_FOCUS_DIRECTIVE` (compliance focus only)
 - Multi-issue: all issue bodies
+
+{{compliance_focus_inject()}}
 
 ```
 Agent(subagent_type="Design"):
@@ -234,7 +236,8 @@ Focus: {completeness|architecture|security|performance|compliance|consistency|de
 DECISIONS_CONTEXT: {decisions_context}
 <!-- learning:end -->
 FEATURE_KNOWLEDGE: {feature_knowledge}
-COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}  (compliance focus only)
+{COMPLIANCE_FOCUS_DIRECTIVE}  (compliance focus only)
+Resolve `${CLAUDE_CONFIG_DIR:-$HOME/.claude}` in Bash, then Read `<that directory>/skills/devflow:gap-analysis/references/compliance.md` with the Read tool and apply it as your focus patterns.  (compliance focus only)
 Artifacts:
   Feature/Issues: {feature description or issue bodies}
   Exploration synthesis: {Phase 4 output}

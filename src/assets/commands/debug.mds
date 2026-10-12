@@ -46,7 +46,11 @@ $ARGUMENTS
 <!-- learning:end -->
 {{settings.settings_resolve()}}
 
-From the same line: {{compliance.compliance_frameworks()}} Phase 7 passes it to the Code agent that implements the fix.
+From the same line: {{compliance.compliance_frameworks()}}
+
+{{compliance.compliance_inject()}}
+
+Phase 7 passes `COMPLIANCE_DIRECTIVE` to the Code agent that implements the fix, on a line of its own.
 
 {{decisions_load()}}
 <!-- learning:on -->
@@ -211,7 +215,7 @@ Ask user via AskUserQuestion: "Want me to implement this fix?"
   DECISIONS_CONTEXT: {decisions_context}
   <!-- learning:end -->
   FEATURE_KNOWLEDGE: (none)
-  COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"
+  {COMPLIANCE_DIRECTIVE}"
   ```
 
 - **NO** → Done. Report stands as documentation.

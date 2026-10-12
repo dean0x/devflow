@@ -254,7 +254,7 @@ describe('rule 1: every Code spawn site passes the key', () => {
   }
 
   it('known-bad probe: a fenced Code spawn without the key is reported', () => {
-    const found = probe('implement.md', '   DECISIONS_CONTEXT: {decisions_context}\n   COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"\n   ```\n   - Loop back to Phase 5', '   COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"\n   ```\n   - Loop back to Phase 5')
+    const found = probe('implement.md', '   DECISIONS_CONTEXT: {decisions_context}\n   {COMPLIANCE_DIRECTIVE}"\n   ```\n   - Loop back to Phase 5', '   {COMPLIANCE_DIRECTIVE}"\n   ```\n   - Loop back to Phase 5')
     expect(found).toHaveLength(1)
     expect(found[0]).toMatch(/^implement\.md:\d+$/)
   })
@@ -265,7 +265,7 @@ describe('rule 1: every Code spawn site passes the key', () => {
   })
 
   it('known-bad probe: the engine pseudo Code call without the key is reported', () => {
-    const found = probe('dynamic-build.md', 'plan + DECISIONS_CONTEXT + COMPLIANCE_FRAMEWORKS', 'plan + COMPLIANCE_FRAMEWORKS')
+    const found = probe('dynamic-build.md', 'plan + DECISIONS_CONTEXT + COMPLIANCE_DIRECTIVE', 'plan + COMPLIANCE_DIRECTIVE')
     expect(found).toHaveLength(1)
   })
 
@@ -275,7 +275,7 @@ describe('rule 1: every Code spawn site passes the key', () => {
   })
 
   it('known-bad probe: the merge-conflict resolver sentence without the key is reported', () => {
-    const found = probe('dynamic-build.md', ' and carries `COMPLIANCE_FRAMEWORKS` and `DECISIONS_CONTEXT`,', ' and carries `COMPLIANCE_FRAMEWORKS`,')
+    const found = probe('dynamic-build.md', ' and carries `COMPLIANCE_DIRECTIVE` (when it is not empty) and `DECISIONS_CONTEXT`,', ' and carries `COMPLIANCE_DIRECTIVE` (when it is not empty),')
     expect(found).toHaveLength(1)
   })
 

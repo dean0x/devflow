@@ -3,6 +3,14 @@ A partial: the compliance-lens gate. D-SETTINGS-LINE: it imports nothing from
 its consumers, and the lens is set from the line resolved there for the
 worktree's root.
 
+D-COMPLIANCE-INJECT: the compliance instruction reaches an agent only through a spawn
+prompt, and only when the resolved lens is on. No Code, Code-fix, Review or Design body names
+the compliance skill, so a lens-off spawn pays nothing for it. `compliance_directive()` is the
+one home of the directive text; `compliance_inject()` is how a pass-through host sets it.
+An install-time variant keyed on the machine switch would be wrong: the lens is the union of
+the machine, the default branch and the worktree (D-LENS-UNION), so a repository can turn it
+on when the machine switch is off.
+
 @define compliance_frameworks():
 `COMPLIANCE_FRAMEWORKS` is the settings line's `COMPLIANCE` with `generic` written `none`: `off`, `none`, or the framework ids the machine and this repository declare.
 @end
@@ -19,6 +27,34 @@ worktree's root.
 `COMPLIANCE_ACTIVE` is `true` unless `COMPLIANCE_FRAMEWORKS` is `off`.
 @end
 
+@define compliance_load(ids):
+invoke Skill(skill="devflow:compliance") and load references/{id}.md only for the ids in {{ids}} (none: generic controls only); never fabricate guidance for a framework you were not given.
+@end
+
+@define compliance_directive(ids):
+When the task touches regulated surface (data models, auth flows, logging/observability, payments, IaC, retention), {{compliance_load(ids)}}
+@end
+
+@define compliance_focus_directive(ids):
+For this compliance focus, {{compliance_load(ids)}}
+@end
+
+@define compliance_inject():
+**Set the compliance directive** from `COMPLIANCE_FRAMEWORKS`. `COMPLIANCE_DIRECTIVE` is empty when `COMPLIANCE_FRAMEWORKS` is `off`: a spawn line that holds only `{COMPLIANCE_DIRECTIVE}` is then left out, so a lens-off spawn carries nothing about compliance. Otherwise `COMPLIANCE_DIRECTIVE` is this one line, with `<ids>` replaced by the value of `COMPLIANCE_FRAMEWORKS`:
+
+> {{compliance_directive("<ids>")}}
+@end
+
+@define compliance_focus_inject():
+**Set the compliance focus directive** from `COMPLIANCE_FRAMEWORKS`. `COMPLIANCE_FOCUS_DIRECTIVE` is this one line, with `<ids>` replaced by the value of `COMPLIANCE_FRAMEWORKS`; only the compliance focus's spawn carries it:
+
+> {{compliance_focus_directive("<ids>")}}
+@end
+
 @export compliance_frameworks
 @export compliance_lens
 @export compliance_gate
+@export compliance_directive
+@export compliance_focus_directive
+@export compliance_inject
+@export compliance_focus_inject

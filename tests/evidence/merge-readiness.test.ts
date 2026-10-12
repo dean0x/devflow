@@ -354,7 +354,7 @@ function collectGateBlockDefects(block: string): string[] {
   need('the block spawns Code, which runs no CI fix', !block.includes('Agent(subagent_type="Code")'))
   const failing = block.split('\n').find(l => l.includes('**If FAILING**')) ?? ''
   need('the Code spawn is not in the FAILING arm', codeSpawns.length === 1 && codeSpawns[0] === failing)
-  need('the FAILING arm does not carry `PUSH: false`', failing.includes('`PUSH: false`') && failing.includes('with `COMPLIANCE_FRAMEWORKS`, `CI_FAILURES`'))
+  need('the FAILING arm does not carry `PUSH: false`', failing.includes('`PUSH: false`') && failing.includes('with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES`'))
   need('the FAILING arm does not state its fix budget at its step', failing.includes('fewer than 2 fixes have run'))
   need('the FAILING arm does not push after a fix', failing.includes('After a fix, push with the command above'))
   need('the FAILING arm has no DEGRADED push arm', failing.includes('`TRACEABILITY: DEGRADED (ci push failed)`'))

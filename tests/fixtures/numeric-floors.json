@@ -446,19 +446,19 @@
     },
     {
       "id": "code-body-max",
-      "ceiling": 11700,
-      "pattern": "const CODE_BODY_MAX_BYTES = 11_700",
+      "ceiling": 11155,
+      "pattern": "const CODE_BODY_MAX_BYTES = 11_155",
       "occurrences": 1,
       "sourceFile": "tests/guards/code-operation.test.ts",
-      "description": "D-CODE-VARIANTS and D-PR-BY-GIT: the compiled Code agent body, dist/agents/code.md, in bytes. It was 24,851 while one Code agent held all seven modes and also opened the PR; the Git agent's ensure-pr-ready reference owns the PR text (16,449), and the three variants split the modes, so Code keeps implement and issue-fix and measures 11,680. The guard also holds the body free of every PR-opening phrase and keeps commit-and-push and the security scan (D-SCAN-IN-CODE). May be lowered, never raised: a later addition funds itself with a cut."
+      "description": "D-CODE-VARIANTS and D-PR-BY-GIT: the compiled Code agent body, dist/agents/code.md, in bytes. It was 24,851 while one Code agent held all seven modes and also opened the PR; the Git agent's ensure-pr-ready reference owns the PR text (16,449), and the three variants split the modes, so Code keeps implement and issue-fix and measures 11,155 after D-COMPLIANCE-INJECT moved the compliance step and input (525) out of the body into the command's directive. The guard also holds the body free of every PR-opening phrase and keeps commit-and-push and the security scan (D-SCAN-IN-CODE). May be lowered, never raised: a later addition funds itself with a cut."
     },
     {
       "id": "code-fix-body-max",
-      "ceiling": 9200,
-      "pattern": "const CODE_FIX_BODY_MAX_BYTES = 9_200",
+      "ceiling": 8634,
+      "pattern": "const CODE_FIX_BODY_MAX_BYTES = 8_634",
       "occurrences": 1,
       "sourceFile": "tests/guards/code-operation.test.ts",
-      "description": "D-CODE-VARIANTS: the compiled Code-fix agent body, dist/agents/code-fix.md, in bytes. It carries the four gate-failure fix modes (validation-fix, alignment-fix, qa-fix, ci-fix), the compliance step, the commit step with the security scan and the shared Running commands, Principles, Output and Boundaries text, and measures 9,159. The guard also holds the body free of every PR-opening phrase. May be lowered, never raised: a later addition funds itself with a cut."
+      "description": "D-CODE-VARIANTS: the compiled Code-fix agent body, dist/agents/code-fix.md, in bytes. It carries the four gate-failure fix modes (validation-fix, alignment-fix, qa-fix, ci-fix), the commit step with the security scan and the shared Running commands, Principles, Output and Boundaries text, and measures 8,634 (D-COMPLIANCE-INJECT moved the compliance step and input, 525, out of the body into the command's directive). The guard also holds the body free of every PR-opening phrase. May be lowered, never raised: a later addition funds itself with a cut."
     },
     {
       "id": "code-edit-body-max",

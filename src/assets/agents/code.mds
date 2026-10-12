@@ -57,7 +57,6 @@ You receive from orchestrator:
 - **ISSUES** (when OPERATION: issue-fix): Pre-classified issues from Triage agent with disposition FIX_NOW; do not re-litigate
 - **SCOPE** (when OPERATION: issue-fix): Blast-radius scope hint (Standard | Careful) per issue from Triage agent
 - **FEATURE_KNOWLEDGE** (optional): Per KB, the Rules bullets most relevant to the task (anti-patterns, gotchas, invariants), the KB path and a heading index; sections are read on demand
-- **COMPLIANCE_FRAMEWORKS** (optional): the compliance lens — `off`, `none` (generic controls) or framework ids. Absent means `off`.
 
 **Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
 
@@ -78,18 +77,16 @@ You receive from orchestrator:
 {{code.decisions_orient()}}
    - If `HANDOFF_FILE` is provided, read only the `## Phase {N} Implementation Summary` section of the phase immediately before yours — list its `##` headings with `command grep -n '^## ' "$HANDOFF_FILE"`, then Read that range with `offset` and `limit` — never the whole file. Cross-reference against actual code — code is authoritative, handoff is supplementary.
 
-2. {{code.compliance()}}
+2. **Implement the plan**: Work through execution steps systematically, creating and modifying files. Follow existing patterns. Type everything. Use Result types if codebase uses them.
 
-3. **Implement the plan**: Work through execution steps systematically, creating and modifying files. Follow existing patterns. Type everything. Use Result types if codebase uses them.
+3. **Write tests**: Add tests for new functionality. Cover happy path, error cases, and edge cases. Follow existing test patterns.
 
-4. **Write tests**: Add tests for new functionality. Cover happy path, error cases, and edge cases. Follow existing test patterns.
-
-5. **Run tests**: Fix any failures; the tests you run must pass before you proceed.
+4. **Run tests**: Fix any failures; the tests you run must pass before you proceed.
    **Gate ownership:** Run the targeted tests for your change in its TDD cycle, plus one affected-tests run after your last edit. In a fix mode, compile and run the named failing or regression tests. Never the full suite. Batch fixes: one build check per batch, not per edit. Only Validate runs the full suite.
 
-6. {{code.commit_push()}}
+5. {{code.commit_push()}}
 
-7. **Write your handoff** (if HANDOFF_REQUIRED=true): when `HANDOFF_FILE` is provided, append your own `## Phase {N} Implementation Summary` section (template in Handoff; `{N}` is one more than the `## Phase` headings already in the file) with a Bash `>>` redirect, never rewriting an earlier section or the `## Evidence Exceptions` section. Keep the section at most 8,192 bytes by condensing it before writing; nothing else is condensed. Then end your report with the same section.
+6. **Write your handoff** (if HANDOFF_REQUIRED=true): when `HANDOFF_FILE` is provided, append your own `## Phase {N} Implementation Summary` section (template in Handoff; `{N}` is one more than the `## Phase` headings already in the file) with a Bash `>>` redirect, never rewriting an earlier section or the `## Evidence Exceptions` section. Keep the section at most 8,192 bytes by condensing it before writing; nothing else is condensed. Then end your report with the same section.
 
 ## Mode: issue-fix
 

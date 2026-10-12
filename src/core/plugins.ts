@@ -584,8 +584,8 @@ export function omitLearningGatedSkills<V>(
  * user may deliberately not have. The referencing prompts are written to
  * proceed without it: `/code-review` spawns a language focus only when the
  * installer stamped it into the command (D-LANGUAGE-FOCUS-STAMP,
- * {@link installedLanguageFocuses}), and the Review and Code agents continue
- * when the Skill invocation fails. Putting them in a `requires` would reinstate
+ * {@link installedLanguageFocuses}), and the Review agent continues when the
+ * Skill invocation fails. Putting them in a `requires` would reinstate
  * the universal install for exactly the eight skills the selection prompt
  * exists to let a user decline (AC-25).
  *

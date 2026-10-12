@@ -258,7 +258,7 @@ describe('known-bad probes: each shape of untagged or misrouted spawn is reporte
   it('(c) a prose spawn sentence with no OPERATION', () => {
     const defects = collectOperationDefects(seeded(
       'dynamic-build.md',
-      ' whose prompt opens with `OPERATION: implement` and carries `COMPLIANCE_FRAMEWORKS` and `DECISIONS_CONTEXT`, with FULL intent context:',
+      ' whose prompt opens with `OPERATION: implement` and carries `COMPLIANCE_DIRECTIVE` (when it is not empty) and `DECISIONS_CONTEXT`, with FULL intent context:',
       ' with FULL intent context:',
     ))
     expect(defects).toHaveLength(1)
@@ -268,8 +268,8 @@ describe('known-bad probes: each shape of untagged or misrouted spawn is reporte
   it('(c) the CI-fix prose spawn without its mode', () => {
     const defects = collectOperationDefects(seeded(
       'resolve.md',
-      ' whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_FRAMEWORKS`',
-      ' with `COMPLIANCE_FRAMEWORKS`',
+      ' whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE`',
+      ' with `COMPLIANCE_DIRECTIVE`',
     ))
     expect(defects).toHaveLength(1)
     expect(defects[0]).toMatch(/^resolve\.md:\d+: the spawn sentence names no OPERATION: <mode>$/)
@@ -366,10 +366,10 @@ describe('each variant states the mode contract it owns (D-CODE-OPERATION-MODES,
 // `code-edit-body-max`: lowered by a pass that cut the artifact, never raised to fit one that grew.
 
 /** The compiled Code agent body, in bytes. Registered as `code-body-max`; lowered, never raised. */
-const CODE_BODY_MAX_BYTES = 11_700
+const CODE_BODY_MAX_BYTES = 11_155
 
 /** The compiled Code-fix agent body, in bytes. Registered as `code-fix-body-max`; lowered, never raised. */
-const CODE_FIX_BODY_MAX_BYTES = 9_200
+const CODE_FIX_BODY_MAX_BYTES = 8_634
 
 /** The compiled Code-edit agent body, in bytes. Registered as `code-edit-body-max`; lowered, never raised. */
 const CODE_EDIT_BODY_MAX_BYTES = 6_550
@@ -417,8 +417,10 @@ describe('no Code variant opens a PR and each body stays under its ceiling (D-PR
   it('known-bad probe: a PR phrase, a lost commit rule and an oversize body are each reported', () => {
     const real = body('Code-fix')
     expect(collectCodeBodyDefects(real, BODY_CEILINGS['Code-fix']), 'the real body is clean, so each seed fails for its own reason').toEqual([])
-    expect(collectCodeBodyDefects(`${real}\nCREATE_PR: true\n`, BODY_CEILINGS['Code-fix'])).toEqual(['the Code body names "CREATE_PR"'])
-    expect(collectCodeBodyDefects(real.replace('**Commit and push**', '**Commit**'), BODY_CEILINGS['Code-fix']))
+    // The ceiling is the measured size, so a seed that adds text needs headroom to fail for its own reason alone.
+    const roomy = BODY_CEILINGS['Code-fix'] + 1_000
+    expect(collectCodeBodyDefects(`${real}\nCREATE_PR: true\n`, roomy)).toEqual(['the Code body names "CREATE_PR"'])
+    expect(collectCodeBodyDefects(real.replace('**Commit and push**', '**Commit**'), roomy))
       .toEqual(['the Code body lost "**Commit and push**"'])
     const bytes = Buffer.byteLength(real)
     expect(collectCodeBodyDefects(real, bytes - 1)).toEqual([`the Code body is ${bytes} bytes, ceiling ${bytes - 1}`])

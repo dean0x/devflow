@@ -4,7 +4,7 @@ output-dir: dist/commands
 ---
 @import { knowledge_load } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
-@import { compliance_gate } from "./_partials/_compliance.mds"
+@import { compliance_gate, compliance_focus_inject } from "./_partials/_compliance.mds"
 @import { evidence_policy } from "./_partials/_evidence_policy.mds"
 @import { publication_gate } from "./_partials/_publication.mds"
 @import "./_partials/_settings.mds" as settings
@@ -327,6 +327,8 @@ Spawn Review agents **in a single message**, for the focus set `DIFF_CLASS` sele
 
 Review agent count: `code` runs 8 core, +1-12 added by Phase 1 (max 20 total per worktree); a reduced class or a mix runs 2-6.
 
+{{compliance_focus_inject()}}
+
 Each Review agent invocation (all in one message, **NOT background**):
 ```
 Agent(subagent_type="Review", run_in_background=false):
@@ -342,7 +344,7 @@ DECISIONS_CONTEXT: {decisions_context}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 PR_DESCRIPTION: <pr-description>{pr_description}</pr-description>
 PRIOR_RESOLUTIONS: <prior-resolution-summary>{prior_resolutions}</prior-resolution-summary>
-COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}  (compliance focus only)
+{COMPLIANCE_FOCUS_DIRECTIVE}  (compliance focus only)
 If PRIOR_RESOLUTIONS is not (none), follow Cross-Cycle Awareness in review.md.
 <!-- learning:on -->
 Follow devflow:apply-decisions to scan the index and Read full ADR/PF bodies on demand.

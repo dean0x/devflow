@@ -6,9 +6,10 @@
  * alignment-fix, qa-fix, ci-fix) and Code-edit (edit). This file holds what the three must share and what
  * none of them may carry, read from the COMPILED prompts a session loads, in both learning variants:
  *
- *   AC-305  No variant has a Step 0 table, a `DOMAIN` input or a runtime skill-load instruction. The
- *           compliance skill's conditional load is the one `Skill(...)` call a variant may keep: the
- *           compliance lens (`COMPLIANCE_FRAMEWORKS`) gates it, not the language or the mode.
+ *   AC-305  No variant has a Step 0 table, a `DOMAIN` input or a runtime skill-load instruction, so no
+ *           variant carries a `Skill(...)` call at all (D-COMPLIANCE-INJECT: the compliance skill's load
+ *           reaches a spawn through the command's directive, never through a variant body; the guard in
+ *           compliance-injection.test.ts holds that side).
  *   AC-306  Every variant keeps the security-scan block and, with learning on, `apply-decisions` (preload,
  *           input and the instruction to state a decision in words). Only Code preloads
  *           `apply-feature-knowledge` and takes `FEATURE_KNOWLEDGE`: only the implement and issue-fix
@@ -37,9 +38,6 @@ import {
 } from '../helpers.js'
 import { LEARNING_OFF_FILES, MDS_GENERATOR_HOSTS, LEARNING_VARIANT_HOSTS } from '../fixtures/mds-manifest.js'
 
-/** The one skill a variant may load at run time. */
-const ALLOWED_RUNTIME_SKILL = 'devflow:compliance'
-
 const SCAN_OPENER = '**Security scan (conditional):**'
 const SCAN_CONDITION = 'Only when this session offers a code-scanning tool.'
 const SCAN_UNAVAILABLE = 'report `Security scan: unavailable`'
@@ -62,9 +60,7 @@ export function collectRuntimeSkillDefects(text: string): string[] {
   if (/^\|\s*Mode\s*\|.*devflow:/m.test(text)) out.push('has a mode-by-skill table')
   if (/\bDOMAIN\b/.test(text)) out.push('names DOMAIN')
   if (/Domain hint|[Ll]oad domain skills/.test(text)) out.push('has a domain-skill section')
-  for (const m of text.matchAll(/Skill\(skill="([^"]*)"\)/g)) {
-    if (m[1] !== ALLOWED_RUNTIME_SKILL) out.push(`loads ${m[1]} at run time`)
-  }
+  for (const m of text.matchAll(/Skill\(skill="([^"]*)"\)/g)) out.push(`loads ${m[1]} at run time`)
   if (/Load one with `Skill\(/.test(text)) out.push('tells the agent to load a mode skill')
   return out
 }
@@ -113,7 +109,7 @@ export function collectSharedKeepDefects(text: string, variant: Variant, takesKn
 
 describe('no Code variant carries a Step 0 table, a DOMAIN input or a runtime skill load (AC-305, D-NO-RUNTIME-SKILLS)', () => {
   for (const variant of ['on', 'off'] as const) {
-    it(`each learning-${variant} variant is free of all three, and keeps only the compliance load`, () => {
+    it(`each learning-${variant} variant is free of all three`, () => {
       for (const agentType of CODE_AGENT_TYPES) {
         const text = compiled(agentType, variant)
         expect(text.length, `${agentType}: the body is empty — the guard would pass vacuously`).toBeGreaterThan(4_000)
@@ -122,11 +118,13 @@ describe('no Code variant carries a Step 0 table, a DOMAIN input or a runtime sk
     })
   }
 
-  it('the compliance load is the one Skill(...) call that stays, in Code and Code-fix', () => {
-    const calls = (agentType: string): string[] => [...compiled(agentType, 'on').matchAll(/Skill\(skill="([^"]*)"\)/g)].map(m => m[1])
-    expect(calls('Code')).toEqual([ALLOWED_RUNTIME_SKILL])
-    expect(calls('Code-fix')).toEqual([ALLOWED_RUNTIME_SKILL])
-    expect(calls('Code-edit'), 'a mechanical edit adds no behaviour, so it takes no compliance lens').toEqual([])
+  it('no variant carries a Skill(...) call, the compliance load included', () => {
+    for (const variant of ['on', 'off'] as const) {
+      for (const agentType of CODE_AGENT_TYPES) {
+        const calls = [...compiled(agentType, variant).matchAll(/Skill\(skill="([^"]*)"\)/g)].map(m => m[1])
+        expect(calls, `${agentType} (learning ${variant})`).toEqual([])
+      }
+    }
   })
 
   it('no Code-family spawn in a compiled command passes DOMAIN', () => {
@@ -136,7 +134,7 @@ describe('no Code variant carries a Step 0 table, a DOMAIN input or a runtime sk
     expect(collectDomainSpawnDefects(commands)).toEqual([])
   })
 
-  it('known-bad probe: a Step 0 section, a mode table, DOMAIN, a domain-skill list and a stray Skill load are each reported', () => {
+  it('known-bad probe: a Step 0 section, a mode table, DOMAIN, a domain-skill list and a stray Skill load, compliance included, are each reported', () => {
     const real = compiled('Code', 'on')
     expect(collectRuntimeSkillDefects(real), 'the real body is clean, so each seed fails for its own reason').toEqual([])
     expect(collectRuntimeSkillDefects(`${real}\n## Step 0: Mode Skills\n`)).toEqual(['has a "## Step 0" section'])
@@ -144,6 +142,7 @@ describe('no Code variant carries a Step 0 table, a DOMAIN input or a runtime sk
     expect(collectRuntimeSkillDefects(`${real}\n- **DOMAIN**: \`backend\`\n`)).toEqual(['names DOMAIN'])
     expect(collectRuntimeSkillDefects(`${real}\n2. **Load domain skills**: x\n`)).toEqual(['has a domain-skill section'])
     expect(collectRuntimeSkillDefects(`${real}\n- \`backend\`: \`Skill(skill="devflow:typescript")\`\n`)).toEqual(['loads devflow:typescript at run time'])
+    expect(collectRuntimeSkillDefects(`${real}\n2. Invoke \`Skill(skill="devflow:compliance")\`.\n`)).toEqual(['loads devflow:compliance at run time'])
     expect(collectRuntimeSkillDefects(`${real}\nLoad one with \`Skill(skill="devflow:<name>")\` when it holds.\n`))
       .toEqual(['loads devflow:<name> at run time', 'tells the agent to load a mode skill'])
   })

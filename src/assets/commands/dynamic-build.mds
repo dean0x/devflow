@@ -67,7 +67,7 @@ Author the resolved `ISSUE_REQUIRED` and `APPLY_CONVENTIONS` into the workflow s
 
 {{compliance.compliance_lens()}}
 
-Pass it as `complianceFrameworks` when invoking the workflow; the engine hands it to every Code and Code-fix agent.
+Pass it as `complianceFrameworks` when invoking the workflow; the engine builds `COMPLIANCE_DIRECTIVE` from it and hands that to every Code and Code-fix agent.
 
 **0c. Resolve the docs root**
 
@@ -165,6 +165,7 @@ const ISSUE_INPUT = args.issueInput || args.issueNumber || "(none)";  // this ti
 const ISSUE_REQUIRED = String(args.issueRequired) === "false" ? "false" : "true";  // Pre-authoring step 0; only an explicit false turns it off — absent or unrecognised fails closed, like the resolver
 const APPLY_CONVENTIONS = String(args.applyConventions) === "false" ? "false" : "true";
 const COMPLIANCE_FRAMEWORKS = /^(?:off|none|[a-z][a-z0-9-]{0,15}(?:,[a-z][a-z0-9-]{0,15}){0,7})$/.test(String(args.complianceFrameworks)) ? String(args.complianceFrameworks) : "off";  // Pre-authoring step 0b; any other shape is no lens
+const COMPLIANCE_DIRECTIVE = COMPLIANCE_FRAMEWORKS === "off" ? "" : `When the task touches regulated surface (data models, auth flows, logging/observability, payments, IaC, retention), invoke Skill(skill="devflow:compliance") and load references/{id}.md only for the ids in ${COMPLIANCE_FRAMEWORKS} (none: generic controls only); never fabricate guidance for a framework you were not given.`;  // D-COMPLIANCE-INJECT: empty when the lens is off, so a Code or Code-fix spawn then carries nothing about compliance; otherwise the one line _compliance.mds renders as compliance_directive(), with the validated ids in place of <ids>
 
 // Phase 1: Git setup — declare the operation; the agent owns the process, the branch name included
 const setup = await phase("setup", () =>
@@ -209,7 +210,7 @@ Relevant architectural decisions (apply devflow:apply-decisions algorithm):
 ${DECISIONS_CONTEXT}
 
 <!-- learning:end -->
-COMPLIANCE_FRAMEWORKS: ${COMPLIANCE_FRAMEWORKS}
+${COMPLIANCE_DIRECTIVE}
 
 When you build or run tests to verify your work, follow your Running commands block.
 
@@ -246,7 +247,7 @@ ${failureDetails}
 <!-- learning:on -->
 DECISIONS_CONTEXT: ${DECISIONS_CONTEXT}
 <!-- learning:end -->
-COMPLIANCE_FRAMEWORKS: ${COMPLIANCE_FRAMEWORKS}
+${COMPLIANCE_DIRECTIVE}
 Commit fixes with conventional-commit message.`, { agentType: "Code-fix" });
       const recheck = await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH} after fix attempt ${attempt} (follow your Running commands block).
 Return: {"verdict": "PASS" | "FAIL", "details": "..."}`, { agentType: "Validate" });
@@ -289,7 +290,7 @@ ${evaluation?.rationale || "see the Evaluate agent's report"}
 <!-- learning:on -->
 DECISIONS_CONTEXT: ${DECISIONS_CONTEXT}
 <!-- learning:end -->
-COMPLIANCE_FRAMEWORKS: ${COMPLIANCE_FRAMEWORKS}
+${COMPLIANCE_DIRECTIVE}
 Self-verify your fix compiles, following your Running commands block. Commit fixes.`, { agentType: "Code-fix" });
       evalVerdict = "FAIL-FIXED";  // issues found, fixes applied, not re-evaluated by design
     }
@@ -311,7 +312,7 @@ ${testResult.failures}
 <!-- learning:on -->
 DECISIONS_CONTEXT: ${DECISIONS_CONTEXT}
 <!-- learning:end -->
-COMPLIANCE_FRAMEWORKS: ${COMPLIANCE_FRAMEWORKS}
+${COMPLIANCE_DIRECTIVE}
 Self-verify your fix compiles and the scenarios pass, following your Running commands block. Commit fixes.`, { agentType: "Code-fix" });
       testVerdict = "FAIL-FIXED";  // issues found, fixes applied, not re-evaluated by design
     }
@@ -431,7 +432,7 @@ PUSH: false
 <!-- learning:on -->
 DECISIONS_CONTEXT: ${DECISIONS_CONTEXT}
 <!-- learning:end -->
-COMPLIANCE_FRAMEWORKS: ${COMPLIANCE_FRAMEWORKS}
+${COMPLIANCE_DIRECTIVE}
 Fix all findings in this batch. Self-verify your fix compiles, following your Running commands block. Commit with conventional-commit message.
 Return: {"status": "fixed"|"blocked", "commitShas": ["<sha>"], "unresolved": ["<description of any finding that could not be fixed>"]}`, { agentType: "Code" });
       chunkResults.push({ chunk, result: r });
@@ -492,7 +493,7 @@ ${failureDetails}
 <!-- learning:on -->
 DECISIONS_CONTEXT: ${DECISIONS_CONTEXT}
 <!-- learning:end -->
-COMPLIANCE_FRAMEWORKS: ${COMPLIANCE_FRAMEWORKS}
+${COMPLIANCE_DIRECTIVE}
 Self-verify your fix compiles. Commit fixes with conventional-commit message.`, { agentType: "Code-fix" });
       const recheck = await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH} (final gate, after fix attempt ${attempt}; follow your Running commands block).
 Return: {"verdict": "PASS" | "FAIL", "details": "..."}`, { agentType: "Validate" });

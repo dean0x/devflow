@@ -10,8 +10,11 @@ security-scan block lives in `commit_push()`, so every variant keeps it, and the
 commands block lives in `tail()`, so the three carry one byte-identical copy.
 
 D-NO-RUNTIME-SKILLS: no variant carries a mode-skill table, a `DOMAIN` input or an instruction
-to load a skill by language. The one conditional load that stays is the compliance skill in
-`compliance()`, which the compliance lens (`COMPLIANCE_FRAMEWORKS`) gates, not the task's language.
+to load a skill by language.
+
+D-COMPLIANCE-INJECT: no variant names the compliance skill or takes a compliance input. The command
+injects the compliance directive into a spawn prompt only when the resolved lens is on, so a
+lens-off spawn pays nothing for it (the directive's home is `commands/_partials/_compliance.mds`).
 
 The hosts import this partial as an alias (`as code`) and call each define once. A learning arm
 inside a define is split by the build like an arm in a host: the markers sit on lines of their own.
@@ -30,10 +33,6 @@ inside a define is split by the build like an arm in a host: the markers sit on 
 <!-- learning:on -->
    - If `DECISIONS_CONTEXT` is provided, follow `devflow:apply-decisions` on it. An absent key or `(none)` means no decisions context. State every decision or pitfall you apply in words in code, comments, tests and commit messages, never by its ID.
 <!-- learning:end -->
-@end
-
-@define compliance():
-**Compliance skill (conditional):** When `COMPLIANCE_FRAMEWORKS` is not `off` AND the task touches regulated surface (data models, auth flows, logging/observability, payments, IaC, retention), invoke `Skill(skill="devflow:compliance")` and load `references/{id}.md` only for the ids it lists (`none`: generic controls only); never fabricate guidance for a framework you were not given.
 @end
 
 @define commit_push():
@@ -106,6 +105,5 @@ Report cap: final message at most about 1,500 tokens; longer material goes to a 
 
 @export input_core
 @export decisions_orient
-@export compliance
 @export commit_push
 @export tail

@@ -176,7 +176,11 @@ node "$HOME/.devflow/scripts/verify-evidence.cjs" render --plan "{worktree}/.dev
 {{settings.settings_resolve()}}
 
 {{publication_gate()}}
-Phase 11 passes the resolved value to `update-pr-evidence`, which decides what each value means for the evidence comment. From the same line: {{compliance.compliance_frameworks()}} Pass it to every Code spawn.
+Phase 11 passes the resolved value to `update-pr-evidence`, which decides what each value means for the evidence comment. From the same line: {{compliance.compliance_frameworks()}}
+
+{{compliance.compliance_inject()}}
+
+Pass `COMPLIANCE_DIRECTIVE` to every Code and Code-fix spawn, on a line of its own.
 
 {{decisions_load()}}
 <!-- learning:on -->
@@ -218,7 +222,7 @@ FEATURE_KNOWLEDGE: {feature_knowledge}
 <!-- learning:on -->
 DECISIONS_CONTEXT: {decisions_context}
 <!-- learning:end -->
-COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"
+{COMPLIANCE_DIRECTIVE}"
 ```
 
 ---
@@ -240,7 +244,7 @@ FEATURE_KNOWLEDGE: {feature_knowledge}
 <!-- learning:on -->
 DECISIONS_CONTEXT: {decisions_context}
 <!-- learning:end -->
-COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}
+{COMPLIANCE_DIRECTIVE}
 HANDOFF_REQUIRED: true
 HANDOFF_FILE: {worktree}/.devflow/docs/handoff-{branch_slug}.md"
 ```
@@ -260,7 +264,7 @@ FEATURE_KNOWLEDGE: {feature_knowledge}
 <!-- learning:on -->
 DECISIONS_CONTEXT: {decisions_context}
 <!-- learning:end -->
-COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}
+{COMPLIANCE_DIRECTIVE}
 HANDOFF_REQUIRED: {true if not last phase}
 HANDOFF_FILE: {worktree}/.devflow/docs/handoff-{branch_slug}.md"
 ```
@@ -285,7 +289,7 @@ FEATURE_KNOWLEDGE: {feature_knowledge}
 <!-- learning:on -->
 DECISIONS_CONTEXT: {decisions_context}
 <!-- learning:end -->
-COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"
+{COMPLIANCE_DIRECTIVE}"
 
 Agent(subagent_type="Code"):  # Code agent 2 (same message)
 "OPERATION: implement
@@ -298,7 +302,7 @@ FEATURE_KNOWLEDGE: {feature_knowledge}
 <!-- learning:on -->
 DECISIONS_CONTEXT: {decisions_context}
 <!-- learning:end -->
-COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"
+{COMPLIANCE_DIRECTIVE}"
 ```
 
 **Independence criteria** (all must be true for PARALLEL_CODE_AGENTS):
@@ -377,7 +381,7 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
    <!-- learning:on -->
    DECISIONS_CONTEXT: {decisions_context}
    <!-- learning:end -->
-   COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"
+   {COMPLIANCE_DIRECTIVE}"
    ```
    - Loop back to Phase 5 (re-check alignment). The fix is not validated here: the Phase 6 run covers it.
 4. If `alignment_fix_count > 2`: Report misalignments to user for decision
@@ -411,7 +415,7 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
    <!-- learning:on -->
    DECISIONS_CONTEXT: {decisions_context}
    <!-- learning:end -->
-   COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"
+   {COMPLIANCE_DIRECTIVE}"
    ```
    - Loop back to Phase 6 (re-validate at the new HEAD, full scope)
 4. If `validation_retry_count > 2`: Report failures to user and halt
@@ -465,7 +469,7 @@ After every Test agent run — PASS or FAIL, first run or retry — append its T
    <!-- learning:on -->
    DECISIONS_CONTEXT: {decisions_context}
    <!-- learning:end -->
-   COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"
+   {COMPLIANCE_DIRECTIVE}"
    ```
    - Loop back to Phase 7 (re-run Test agent). The fix is not validated here: Phase 8 covers it.
 4. If `qa_retry_count > 2`: Report QA failures to user for decision. The run stops at the report (Phase 12), so Phases 8 to 11 do not run.
@@ -535,9 +539,9 @@ git push origin HEAD; echo "exit=$?"
 4. **If PENDING** and fewer than 3 waits have run → wait again (step 1). After the third wait → report "CI still running — verify manually before merging" and proceed.
 5. **If INDETERMINATE** and fewer than 3 waits have run → wait again (step 1). After the third wait → report "CI status unknown — verify manually before merging" and proceed.
 <!-- learning:on -->
-6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Code-fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_FRAMEWORKS`, `CI_FAILURES`, `DECISIONS_CONTEXT` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Code-fix agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
+6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Code-fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES`, `DECISIONS_CONTEXT` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Code-fix agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
 <!-- learning:off -->
-6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Code-fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_FRAMEWORKS`, `CI_FAILURES` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Code-fix agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
+6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Code-fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Code-fix agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
 <!-- learning:end -->
 7. **Budget**: at most 3 waits and 2 fixes in all. When one is spent, report the current status and proceed.
 <!-- /PATTERN: ci-status-gate -->

@@ -49,7 +49,6 @@ You are an autonomous repair specialist working on a feature branch. A quality g
 You receive from orchestrator:
 {{code.input_core()}}
 - **OPERATION**: `validation-fix` | `alignment-fix` | `qa-fix` | `ci-fix` — selects operating mode (see below); there is no default, and every spawn passes it as the first prompt line. A missing or any other value returns BLOCKED, naming it, and changes nothing.
-- **COMPLIANCE_FRAMEWORKS** (optional): the compliance lens — `off`, `none` (generic controls) or framework ids. Absent means `off`.
 
 **Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
 
@@ -61,14 +60,12 @@ You receive from orchestrator:
    - Read the files the listed failures name, to understand the interfaces, types, naming conventions, error handling, and testing patterns around them
 {{code.decisions_orient()}}
 
-2. {{code.compliance()}}
+2. **Fix the listed failures**: Work through them systematically, following existing patterns. Type everything. Use Result types if codebase uses them. Change nothing the failures do not require.
 
-3. **Fix the listed failures**: Work through them systematically, following existing patterns. Type everything. Use Result types if codebase uses them. Change nothing the failures do not require.
-
-4. **Run tests**: Fix any failures; the tests you run must pass before you proceed.
+3. **Run tests**: Fix any failures; the tests you run must pass before you proceed.
    **Gate ownership:** Compile and run the named failing or regression tests. Never the full suite. Batch fixes: one build check per batch, not per edit. Only Validate runs the full suite.
 
-5. {{code.commit_push()}}
+4. {{code.commit_push()}}
 
 ## Mode: validation-fix
 
