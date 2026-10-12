@@ -89,13 +89,12 @@ Synthesize outputs from 3 Plan agents (implementation, testing, execution strate
 
 **Execution Strategy Decision:**
 
-Analyze 3 axes to determine strategy:
+Analyze 2 axes to determine strategy:
 
 | Axis | Signals | Impact |
 |------|---------|--------|
 | **Artifact Independence** | Shared contracts? Integration points? Cross-file dependencies? | If coupled → SINGLE_CODE_AGENT |
 | **Context Capacity** | File count, module breadth, pattern complexity | HIGH/CRITICAL → SEQUENTIAL_CODE_AGENTS |
-| **Domain Specialization** | Tech stack detected (backend, frontend, tests) | Determines DOMAIN hints |
 
 **Context Risk Levels:**
 - **LOW**: <10 files, single module → SINGLE_CODE_AGENT

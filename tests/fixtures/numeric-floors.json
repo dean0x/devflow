@@ -76,11 +76,11 @@
     },
     {
       "id": "agent-roster-count",
-      "floor": 18,
-      "pattern": "toBe(18)",
+      "floor": 20,
+      "pattern": "toBe(20)",
       "occurrences": 1,
       "sourceFile": "tests/guards/agent-source-resolver.test.ts",
-      "description": "resolveAllAgents() size — every DEVFLOW_PLUGINS agent resolves through the shared resolver (AC-0.7, GAP-07). 18 includes the hook-spawned Tracker agent, which is declared in devflow-core-skills.agents and filtered at install time rather than held outside the roster, and Explore, devflow's override of the Claude Code built-in. A floor may only rise."
+      "description": "resolveAllAgents() size — every DEVFLOW_PLUGINS agent resolves through the shared resolver (AC-0.7, GAP-07). 20 includes the hook-spawned Tracker agent, which is declared in devflow-core-skills.agents and filtered at install time rather than held outside the roster, Explore, devflow's override of the Claude Code built-in, and the Code-fix and Code-edit variants of the Code agent (D-CODE-VARIANTS). A floor may only rise."
     },
     {
       "id": "seam-op-section-map",
@@ -204,11 +204,11 @@
     },
     {
       "id": "requires-closure-token-floor",
-      "floor": 44,
-      "pattern": "REF_TOKEN_FLOOR = 44",
+      "floor": 41,
+      "pattern": "REF_TOKEN_FLOOR = 41",
       "occurrences": 1,
       "sourceFile": "tests/guards/requires-closure.test.ts",
-      "description": "Distinct devflow: skill references across the widened closure corpus (dist/commands + agent sources + skill bodies incl. references/). Non-vacuity floor for the bidirectional requires: guard — a scanner that stopped matching would make both arms pass over an empty corpus. Measured 2026-09-19: 200 files, 297 sites, 44 distinct."
+      "description": "Distinct devflow: skill references across the widened closure corpus (dist/commands + agent sources + skill bodies incl. references/). Non-vacuity floor for the bidirectional requires: guard — a scanner that stopped matching would make both arms pass over an empty corpus. Measured 2026-09-19: 200 files, 297 sites, 44 distinct. It fell to 41 when the Code variants took the Step 0 table and the language skill list out of the Code prompt (D-NO-RUNTIME-SKILLS): the three references only that text held (boundary-validation, dependency-research, patterns) left the corpus with it, the one count a deliberate deletion of the old runtime skill loading lowers."
     },
     {
       "id": "installed-reference-count-github",
@@ -260,27 +260,27 @@
     },
     {
       "id": "spawn-no-model-agent-type-floor",
-      "floor": 16,
-      "pattern": "const SPAWNED_AGENT_TYPE_FLOOR = 16",
+      "floor": 17,
+      "pattern": "const SPAWNED_AGENT_TYPE_FLOOR = 17",
       "occurrences": 1,
       "sourceFile": "tests/guards/spawn-no-hardcoded-model.test.ts",
-      "description": "Distinct agent types the no-hardcoded-model guard (D-SPAWN-NO-MODEL) must read out of Agent( argument lists across src/assets/{commands,agents,skills,mds} and dist/{commands,agents}. Measured 16 when the guard was added. A parser that stops finding spawns, or stops reading their arguments, would pass the model scan vacuously, so the count is its liveness proof. It counts types, not sites: consolidating or dropping a spawn lowers the site count but not the type count, which falls only when no prompt spawns an agent at all. Floors rise, never fall."
+      "description": "Distinct agent types the no-hardcoded-model guard (D-SPAWN-NO-MODEL) must read out of Agent( argument lists across src/assets/{commands,agents,skills,mds} and dist/{commands,agents}. Measured 16 when the guard was added; the Code-fix spawns raised it to 17 (Code-edit is spawned only by the orchestrator charter, which the scan does not read). A parser that stops finding spawns, or stops reading their arguments, would pass the model scan vacuously, so the count is its liveness proof. It counts types, not sites: consolidating or dropping a spawn lowers the site count but not the type count, which falls only when no prompt spawns an agent at all. Floors rise, never fall."
     },
     {
       "id": "gate-ownership-body-count",
-      "floor": 6,
-      "pattern": "GATE_BODIES.length).toBeGreaterThanOrEqual(6)",
+      "floor": 8,
+      "pattern": "GATE_BODIES.length).toBeGreaterThanOrEqual(8)",
       "occurrences": 1,
       "sourceFile": "tests/guards/gate-ownership.test.ts",
-      "description": "Agent bodies that carry a pinned `**Gate ownership:**` row (D-GATE-OWNERSHIP): Code, Simplify, Evaluate, Scrutinize, Test and Validate. The guard pins each row's text, so a row cannot be dropped or reworded quietly; this floor stops the table shrinking behind it. Floors rise, never fall."
+      "description": "Agent bodies that carry a pinned `**Gate ownership:**` row (D-GATE-OWNERSHIP): Code, Code-fix, Code-edit, Simplify, Evaluate, Scrutinize, Test and Validate. The guard pins each row's text, so a row cannot be dropped or reworded quietly; this floor stops the table shrinking behind it. Floors rise, never fall."
     },
     {
       "id": "report-cap-roster-count",
-      "floor": 16,
-      "pattern": "roster.length).toBeGreaterThanOrEqual(16)",
+      "floor": 18,
+      "pattern": "roster.length).toBeGreaterThanOrEqual(18)",
       "occurrences": 1,
       "sourceFile": "tests/guards/report-cap.test.ts",
-      "description": "Roster agents that carry a `Report cap:` line (D-REPORT-CAP): the union of the plugin `agents` arrays, less `learning` and `tracker` (hook-spawned). The guard derives the roster rather than listing it and requires an exempt-field record for each member; this floor stops the derivation quietly returning fewer agents. The Git agent split (#425) removed the `git` exclusion and raised it from 14 to 15; the Explore override raised it to 16. Floors rise, never fall."
+      "description": "Roster agents that carry a `Report cap:` line (D-REPORT-CAP): the union of the plugin `agents` arrays, less `learning` and `tracker` (hook-spawned). The guard derives the roster rather than listing it and requires an exempt-field record for each member; this floor stops the derivation quietly returning fewer agents. The Git agent split (#425) removed the `git` exclusion and raised it from 14 to 15; the Explore override raised it to 16; the Code-fix and Code-edit variants raised it to 18. Floors rise, never fall."
     },
     {
       "id": "running-commands-site-count",
@@ -422,19 +422,51 @@
     },
     {
       "id": "code-preload-max-bytes",
-      "ceiling": 25646,
-      "pattern": "const CODE_PRELOAD_MAX_BYTES = 25_646;",
+      "ceiling": 25514,
+      "pattern": "const CODE_PRELOAD_MAX_BYTES = 25_514",
       "occurrences": 1,
       "sourceFile": "tests/guards/code-preload.test.ts",
-      "description": "Total bytes of the six SKILL.md files in Code's frontmatter preload (git, testing, test-driven-development, worktree-support, apply-feature-knowledge, apply-decisions) (D-CODE-PRELOAD-CAP). The ten-file preload was 53,450 bytes; the four mode skills moved to the on-demand Step 0 table and the three helper skills were cut, which measured 26,377. The review pass then restored two testing triggers and two apply-decisions clauses (+72) and trimmed test-driven-development semantically (-883), and rewording its test-setup row and example added 12, so the six measure 25,578 and the ceiling is that plus 68 bytes of headroom. git, testing and test-driven-development are fixed terms here, so growth in any of the six pays for itself inside the six. May be LOWERED, never raised: a preload ceiling raised to fit what the six grew into is a description of their size, and Code is billed on it at every spawn."
+      "description": "Total bytes of the six SKILL.md files in Code's frontmatter preload (git, testing, test-driven-development, worktree-support, apply-feature-knowledge, apply-decisions) (D-CODE-PRELOAD-CAP, D-CODE-PRELOADS). The ten-file preload was 53,450 bytes; the four mode skills left the preload and then left the agent altogether (D-NO-RUNTIME-SKILLS), and the set measures 25,514 today, which is the ceiling. Code keeps test-driven-development and apply-feature-knowledge because only its modes write tests first and only its spawns pass FEATURE_KNOWLEDGE; Code-fix and Code-edit hold their own ceilings below. git, testing and test-driven-development are fixed terms here, so growth in any of the six pays for itself inside the six. May be LOWERED, never raised: a preload ceiling raised to fit what the six grew into is a description of their size, and Code is billed on it at every spawn."
+    },
+    {
+      "id": "code-fix-preload-max-bytes",
+      "ceiling": 14875,
+      "pattern": "const CODE_FIX_PRELOAD_MAX_BYTES = 14_875",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/code-preload.test.ts",
+      "description": "D-CODE-PRELOADS: total bytes of the four SKILL.md files in Code-fix's frontmatter preload (git, testing, worktree-support, apply-decisions). A gate-failure fix compiles and runs the named tests; it is not a test-first build, and no fix spawn passes FEATURE_KNOWLEDGE, so test-driven-development and apply-feature-knowledge stay with Code. The set measures 14,875, which is the ceiling. May be LOWERED, never raised: Code-fix is billed on it at every spawn."
+    },
+    {
+      "id": "code-edit-preload-max-bytes",
+      "ceiling": 10202,
+      "pattern": "const CODE_EDIT_PRELOAD_MAX_BYTES = 10_202",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/code-preload.test.ts",
+      "description": "D-CODE-PRELOADS: total bytes of the three SKILL.md files in Code-edit's frontmatter preload (git, worktree-support, apply-decisions). A mechanical edit adds no behaviour and no tests, so it loads no test skill. The set measures 10,202, which is the ceiling. May be LOWERED, never raised: Code-edit is billed on it at every spawn."
     },
     {
       "id": "code-body-max",
-      "ceiling": 16500,
-      "pattern": "const CODE_BODY_MAX_BYTES = 16_500",
+      "ceiling": 11700,
+      "pattern": "const CODE_BODY_MAX_BYTES = 11_700",
       "occurrences": 1,
       "sourceFile": "tests/guards/code-operation.test.ts",
-      "description": "D-PR-BY-GIT (#448): the compiled Code agent body, dist/agents/code.md, in bytes. It was 24,851 while the Code agent also opened the PR (Responsibility 7 and its paste gates, the pr-create mode, the PR inputs); the Git agent's ensure-pr-ready reference owns that text now, and the body measures 16,449. The guard also holds the body free of every PR-opening phrase and keeps commit-and-push and the security scan (D-SCAN-IN-CODE). May be lowered, never raised: a later addition funds itself with a cut."
+      "description": "D-CODE-VARIANTS and D-PR-BY-GIT: the compiled Code agent body, dist/agents/code.md, in bytes. It was 24,851 while one Code agent held all seven modes and also opened the PR; the Git agent's ensure-pr-ready reference owns the PR text (16,449), and the three variants split the modes, so Code keeps implement and issue-fix and measures 11,680. The guard also holds the body free of every PR-opening phrase and keeps commit-and-push and the security scan (D-SCAN-IN-CODE). May be lowered, never raised: a later addition funds itself with a cut."
+    },
+    {
+      "id": "code-fix-body-max",
+      "ceiling": 9200,
+      "pattern": "const CODE_FIX_BODY_MAX_BYTES = 9_200",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/code-operation.test.ts",
+      "description": "D-CODE-VARIANTS: the compiled Code-fix agent body, dist/agents/code-fix.md, in bytes. It carries the four gate-failure fix modes (validation-fix, alignment-fix, qa-fix, ci-fix), the compliance step, the commit step with the security scan and the shared Running commands, Principles, Output and Boundaries text, and measures 9,159. The guard also holds the body free of every PR-opening phrase. May be lowered, never raised: a later addition funds itself with a cut."
+    },
+    {
+      "id": "code-edit-body-max",
+      "ceiling": 6550,
+      "pattern": "const CODE_EDIT_BODY_MAX_BYTES = 6_550",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/code-operation.test.ts",
+      "description": "D-CODE-VARIANTS: the compiled Code-edit agent body, dist/agents/code-edit.md, in bytes. It carries the one edit mode, the commit step with the security scan and the shared Running commands, Principles, Output and Boundaries text, and measures 6,508. The guard also holds the body free of every PR-opening phrase. May be lowered, never raised: a later addition funds itself with a cut."
     }
   ]
 }

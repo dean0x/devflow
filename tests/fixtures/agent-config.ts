@@ -211,6 +211,28 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     skills: null,
     digest: [],
   },
+  /**
+   * D-VARIANT-SLUGS: Code-fix and Code-edit are their own `devflow agents` slugs, shipped with
+   * Code's model, effort and tool policy. A user override of `code` does not reach them, because the
+   * installed frontmatter of each variant is the authority for its own tier. Their preloads are held
+   * by tests/guards/code-preload.test.ts, which is why `skills` is not pinned here.
+   */
+  'code-fix': {
+    model: 'sonnet',
+    effort: 'high',
+    policy: { kind: 'deny', extra: [] },
+    omitClaudeMd: false,
+    skills: null,
+    digest: [],
+  },
+  'code-edit': {
+    model: 'sonnet',
+    effort: 'high',
+    policy: { kind: 'deny', extra: [] },
+    omitClaudeMd: false,
+    skills: null,
+    digest: [],
+  },
   scrutinize: {
     model: 'opus',
     effort: 'medium',

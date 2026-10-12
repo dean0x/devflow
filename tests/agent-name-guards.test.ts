@@ -480,7 +480,7 @@ function parseRosterFromSource(): Map<string, string> {
   const content = readFileSync(ROSTER_SRC, 'utf-8')
   const roster = new Map<string, string>()
   for (const line of content.split('\n')) {
-    const m = line.match(/^\|\s*(\w+)\s*\|\s*(haiku|sonnet|opus)\s*\|/)
+    const m = line.match(/^\|\s*([\w-]+)\s*\|\s*(haiku|sonnet|opus)\s*\|/)
     if (m) roster.set(m[1], m[2])
   }
   return roster
@@ -494,7 +494,7 @@ function parseRosterFromDist(): Map<string, string> {
   const content = requireDistFile('dynamic-build.md')
   const roster = new Map<string, string>()
   for (const line of content.split('\n')) {
-    const m = line.match(/^\|\s*(\w+)\s*\|\s*(haiku|sonnet|opus)\s*\|/)
+    const m = line.match(/^\|\s*([\w-]+)\s*\|\s*(haiku|sonnet|opus)\s*\|/)
     if (m) roster.set(m[1], m[2])
   }
   return roster
@@ -754,8 +754,22 @@ describe('GAP-3: orchestrator charter integrity', () => {
     const codeLines = charter.split('\n').filter(line => /^- Execution against a spec:/.test(line))
     if (codeLines.length !== 1) {
       violations.push(`expected exactly one Code routing line ("- Execution against a spec:"), found ${codeLines.length}`)
-    } else if (!codeLines[0].includes('OPERATION:')) {
-      violations.push('the Code routing line does not tell a direct Code delegation to open with OPERATION: <mode>')
+    } else {
+      const line = codeLines[0]
+      if (!line.includes('`OPERATION: <mode>`')) {
+        violations.push('the Code routing line does not tell a direct Code delegation to open with OPERATION: <mode>')
+      }
+      // D-CODE-VARIANTS (AC-303): a mechanical edit goes to Code-edit, and Code keeps implement and issue-fix.
+      const editAt = line.indexOf('Code-edit')
+      if (editAt === -1 || !/^Code-edit \([^)]*`OPERATION: edit`/.test(line.slice(editAt))) {
+        violations.push('the Code routing line does not route `OPERATION: edit` to Code-edit')
+      }
+      if (/`edit`|OPERATION: edit/.test(editAt === -1 ? line : line.slice(0, editAt))) {
+        violations.push('the Code routing line still routes edit to Code')
+      }
+      if (!/`issue-fix`/.test(line) || !/else `implement`/.test(line)) {
+        violations.push('the Code routing line does not keep issue-fix and implement on Code')
+      }
     }
 
     const handoffLines = charter.split('\n').filter(line => line.includes(HANDOFF_PREFIX))
@@ -819,6 +833,16 @@ describe('GAP-3: orchestrator charter integrity', () => {
     expect(collectCharterContentViolations(noOperation)).toContain(
       'the Code routing line does not tell a direct Code delegation to open with OPERATION: <mode>',
     )
+
+    // D-CODE-VARIANTS: the edit route must name the Code-edit variant, and Code must not keep it.
+    const noEditVariant = charter.replace('Code-edit (', 'Code (')
+    expect(noEditVariant, 'the seed must land').not.toBe(charter)
+    expect(collectCharterContentViolations(noEditVariant)).toContain(
+      'the Code routing line does not route `OPERATION: edit` to Code-edit',
+    )
+    const editOnCode = charter.replace('— `issue-fix` for', '— `edit` for mechanical changes, `issue-fix` for')
+    expect(editOnCode, 'the seed must land').not.toBe(charter)
+    expect(collectCharterContentViolations(editOnCode)).toContain('the Code routing line still routes edit to Code')
 
     const fullPlan = charter.replace(HANDOFF_PREFIX, `${HANDOFF_PREFIX} pass the full plan as skill input,`)
     expect(fullPlan, 'the seed must land').not.toBe(charter)

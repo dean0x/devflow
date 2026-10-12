@@ -214,7 +214,6 @@ TASK_DESCRIPTION: {description}
 BASE_BRANCH: {base branch}
 EXECUTION_PLAN: {full plan from setup context}
 PATTERNS: {patterns from plan document or empty}
-DOMAIN: {detected domain or 'fullstack'}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 <!-- learning:on -->
 DECISIONS_CONTEXT: {decisions_context}
@@ -237,7 +236,6 @@ TASK_DESCRIPTION: {phase 1 description}
 BASE_BRANCH: {base branch}
 EXECUTION_PLAN: {phase 1 steps}
 PATTERNS: {patterns from plan document or empty}
-DOMAIN: {phase 1 domain, e.g., 'backend'}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 <!-- learning:on -->
 DECISIONS_CONTEXT: {decisions_context}
@@ -256,7 +254,6 @@ TASK_DESCRIPTION: {phase N description}
 BASE_BRANCH: {base branch}
 EXECUTION_PLAN: {phase N steps}
 PATTERNS: {patterns from plan document or empty}
-DOMAIN: {phase N domain, e.g., 'frontend'}
 PRIOR_PHASE_SUMMARY: {summary from previous Code agent}
 FILES_FROM_PRIOR_PHASE: {list of files created}
 FEATURE_KNOWLEDGE: {feature_knowledge}
@@ -284,7 +281,6 @@ TASK_DESCRIPTION: {independent subtask 1}
 BASE_BRANCH: {base branch}
 EXECUTION_PLAN: {subtask 1 steps}
 PATTERNS: {patterns}
-DOMAIN: {subtask 1 domain}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 <!-- learning:on -->
 DECISIONS_CONTEXT: {decisions_context}
@@ -298,7 +294,6 @@ TASK_DESCRIPTION: {independent subtask 2}
 BASE_BRANCH: {base branch}
 EXECUTION_PLAN: {subtask 2 steps}
 PATTERNS: {patterns}
-DOMAIN: {subtask 2 domain}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 <!-- learning:on -->
 DECISIONS_CONTEXT: {decisions_context}
@@ -371,9 +366,9 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
 1. Extract misalignment details from Evaluate agent output
 2. Increment `alignment_fix_count`
 3. If `alignment_fix_count <= 2`:
-   - Spawn Code agent to fix misalignments:
+   - Spawn Code-fix agent to fix misalignments:
    ```
-   Agent(subagent_type="Code"):
+   Agent(subagent_type="Code-fix"):
    "OPERATION: alignment-fix
    TASK_ID: {task-id}
    TASK_DESCRIPTION: Fix alignment issues
@@ -405,9 +400,9 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
 1. Extract failure details from Validate agent output
 2. Increment `validation_retry_count`
 3. If `validation_retry_count <= 2`:
-   - Spawn Code agent with fix context:
+   - Spawn Code-fix agent with fix context:
    ```
-   Agent(subagent_type="Code"):
+   Agent(subagent_type="Code-fix"):
    "OPERATION: validation-fix
    TASK_ID: {task-id}
    TASK_DESCRIPTION: Fix validation failures
@@ -459,9 +454,9 @@ After every Test agent run — PASS or FAIL, first run or retry — append its T
 1. Extract failure details from Test agent output
 2. Increment `qa_retry_count`
 3. If `qa_retry_count <= 2`:
-   - Spawn Code agent to fix QA failures:
+   - Spawn Code-fix agent to fix QA failures:
    ```
-   Agent(subagent_type="Code"):
+   Agent(subagent_type="Code-fix"):
    "OPERATION: qa-fix
    TASK_ID: {task-id}
    TASK_DESCRIPTION: Fix QA test failures
@@ -540,9 +535,9 @@ git push origin HEAD; echo "exit=$?"
 4. **If PENDING** and fewer than 3 waits have run → wait again (step 1). After the third wait → report "CI still running — verify manually before merging" and proceed.
 5. **If INDETERMINATE** and fewer than 3 waits have run → wait again (step 1). After the third wait → report "CI status unknown — verify manually before merging" and proceed.
 <!-- learning:on -->
-6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Code")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_FRAMEWORKS`, `CI_FAILURES`, `DECISIONS_CONTEXT` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Code agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
+6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Code-fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_FRAMEWORKS`, `CI_FAILURES`, `DECISIONS_CONTEXT` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Code-fix agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
 <!-- learning:off -->
-6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Code")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_FRAMEWORKS`, `CI_FAILURES` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Code agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
+6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Code-fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_FRAMEWORKS`, `CI_FAILURES` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Code-fix agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
 <!-- learning:end -->
 7. **Budget**: at most 3 waits and 2 fixes in all. When one is spent, report the current status and proceed.
 <!-- /PATTERN: ci-status-gate -->
@@ -617,16 +612,16 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 │
 ├─ Phase 5: Alignment Check
 │  └─ Evaluate agent (validates alignment - reports only, no fixes)
-│  └─ If MISALIGNED: Code agent fix loop (max 2 iterations) → re-check alignment
+│  └─ If MISALIGNED: Code-fix agent loop (max 2 iterations) → re-check alignment
 │
 ├─ Phase 6: Validate (the one full-suite slot)
 │  └─ Validate agent (build, typecheck, lint, test over the branch diff)
-│  └─ If FAIL: Code agent fix loop (max 2 retries) → re-validate at the new HEAD
+│  └─ If FAIL: Code-fix agent loop (max 2 retries) → re-validate at the new HEAD
 │  └─ If PASS: record VALIDATED_HEAD, gate:validate claim → evidence file
 │
 ├─ Phase 7: QA Testing
 │  └─ Test agent (scenario-based acceptance tests, TEST_PLAN) → one claim per TP row → evidence file
-│  └─ If FAIL: Code agent fix loop (max 2 retries) → re-test
+│  └─ If FAIL: Code-fix agent loop (max 2 retries) → re-test
 │
 ├─ Phase 8: Re-Validate (only if a qa-fix committed)
 │  └─ Validate agent (changed-only over VALIDATED_HEAD..HEAD) → gate:validate claim
@@ -635,7 +630,7 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 │  └─ Git agent (operation: ensure-pr-ready) - commits nothing (COMMIT_UNCOMMITTED: false), pushes, opens the PR with the pasted link line, exceptions and test-plan block, D11-scrubbed body
 │
 ├─ Phase 10: CI Status Gate (every strategy)
-│  └─ Push the branch, then ci-wait.cjs (inline, one wait ≤ 570 s) → Code agent on FAILING (3 waits + 2 fixes)
+│  └─ Push the branch, then ci-wait.cjs (inline, one wait ≤ 570 s) → Code-fix agent on FAILING (3 waits + 2 fixes)
 │
 ├─ Phase 11: Evidence (every strategy, once the PR exists)
 │  └─ Push the branch (never force; a failure is DEGRADED, not a stop)
@@ -658,7 +653,7 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 7. **Simplification pass** - Code refined for clarity before PR
 8. **Strict delegation** - Never perform agent work in main session. "Spawn X" means call Agent tool with X, not do X's work yourself
 9. **Validate agent owns validation** - Never run `npm test`, `npm run build`, or similar in main session; always delegate to Validate agent
-10. **Code agent owns fixes** - Never implement fixes in main session; spawn Code agent for validation failures and alignment fixes
+10. **Code-fix agent owns fixes** - Never implement fixes in main session; spawn Code-fix agent for validation failures and alignment fixes
 11. **Loop limits** - Max 2 validation retries, max 2 alignment fix iterations, max 2 QA retries before escalating to user; the CI gate allows at most 3 waits and 2 fixes
 12. **CI awareness** - CI status is checked before merge under every strategy, once Phase 9 has opened the PR; test-plan evidence (Phase 11) is recorded under every strategy once the PR exists
 

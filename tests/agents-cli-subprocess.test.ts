@@ -18,7 +18,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { readFrontmatterEffort, readFrontmatterModel } from '../src/core/agent-frontmatter.js';
-import { getAllAgentNames } from '../src/core/plugins.js';
+import { DEVFLOW_PLUGINS, getAllAgentNames } from '../src/core/plugins.js';
 import { requireBuiltCli, resolveAgentSource, sandboxEnv } from './helpers.js';
 
 const CLI = requireBuiltCli();
@@ -135,7 +135,15 @@ describe('devflow agents and init (built CLI, temp HOME)', () => {
       expect(bareRun.status, bareRun.stdout + bareRun.stderr).toBe(0);
       expect(mappedRun.status, mappedRun.stdout + mappedRun.stderr).toBe(0);
 
-      for (const name of getAllAgentNames()) {
+      // D-AMBIENT-FOLLOWS-SWITCH: init runs with --no-ambient here, so an agent only the ambient plugin
+      // declares (Code-edit, which the orchestrator charter routes mechanical edits to) is not installed.
+      const ambientOnly = getAllAgentNames().filter(name => !DEVFLOW_PLUGINS.some(p => p.name !== 'devflow-ambient' && p.agents.includes(name)));
+      expect(ambientOnly, 'the agents only ambient mode installs').toEqual(['code-edit']);
+      for (const name of ambientOnly) {
+        await expect(fs.access(path.join(installedAgentsDir(bare), `${name}.md`)), `${name} is not installed without ambient mode`).rejects.toThrow();
+      }
+
+      for (const name of getAllAgentNames().filter(n => !ambientOnly.includes(n))) {
         const installed = await fs.readFile(path.join(installedAgentsDir(bare), `${name}.md`), 'utf-8');
         const source = resolveAgentSource(name).content;
         const model = readFrontmatterModel(installed);

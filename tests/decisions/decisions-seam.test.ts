@@ -18,7 +18,8 @@
  * listing it among its inputs); this file does not type it. Spawn sites come from
  * `collectCodeSpawnSites` in tests/helpers.ts, the one collector the OPERATION guard
  * and the compliance-lens test read, so the three count the same sites. It takes the
- * agent type as a parameter; the Code calls keep their results.
+ * agent type as a parameter and, with none, reads the whole Code family (Code, Code-fix and
+ * Code-edit: D-CODE-VARIANTS), so a fix spawn moved to Code-fix keeps the rule 1 check.
  *
  * Rule 3 reads unfenced prose only: a fenced payload is a spawn, and rules 1 and 2
  * read it. Sentences that cannot name a declared receiver by construction — a
@@ -43,7 +44,10 @@ import {
 
 const CONTEXT_TOKEN = 'DECISIONS_CONTEXT'
 
-/** Code spawn sites the three hosts carry today (implement 10, resolve 3, dynamic-build 8). Floor: may only rise. */
+/**
+ * Code-family spawn sites (Code, Code-fix and Code-edit, D-CODE-VARIANTS) the four hosts carry today
+ * (implement 9, resolve 3, debug 1, dynamic-build 8). Floor: may only rise.
+ */
 const CODE_SITE_FLOOR = 21
 
 /** Decisions-loading hosts: all 14 command hosts load the index behind the gate. */
@@ -73,12 +77,15 @@ function collectKnownTypes(commands: ReadonlyArray<readonly [string, string]>): 
     if (name !== undefined) known.add(name)
   }
   for (const [, text] of commands) {
-    for (const m of text.matchAll(/(?:subagent_type="|agentType: ?")([A-Z][A-Za-z]+)"/g)) known.add(m[1])
+    for (const m of text.matchAll(SPAWNED_TYPE)) known.add(m[1])
     // A built-in phase can be named in prose alone ("Spawn 3 Plan agents").
     for (const m of text.matchAll(/\b[Ss]pawn (?:[\w-]+ )?(?:[\w-]+ )?([A-Z][A-Za-z]+) agents?\b/g)) known.add(m[1])
   }
   return known
 }
+
+/** A spawned agent type in `subagent_type="…"` or `agentType: "…"`; a Code variant's hyphen joins its two words. */
+const SPAWNED_TYPE = /(?:subagent_type="|agentType: ?")([A-Z][A-Za-z]*(?:-[a-z]+)?)"/g
 
 const compiled = (): Array<readonly [string, string]> => requireDistFiles().map(f => [f, requireDistFile(f)] as const)
 
@@ -86,13 +93,13 @@ const compiled = (): Array<readonly [string, string]> => requireDistFiles().map(
 
 /** Named collector: the agent types a command text spawns, by any of the four spellings. */
 function spawnedTypes(text: string): string[] {
-  return [...new Set([...text.matchAll(/(?:subagent_type="|agentType: ?")([A-Z][A-Za-z]+)"/g)].map(m => m[1]))]
+  return [...new Set([...text.matchAll(SPAWNED_TYPE)].map(m => m[1]))]
 }
 
 /** Named collector: Code spawn sites that do not pass the key (rule 1). */
 function collectKeylessCodeSites(commands: ReadonlyArray<readonly [string, string]>): string[] {
   return commands.flatMap(([file, text]) =>
-    collectCodeSpawnSites(file, text, 'Code')
+    collectCodeSpawnSites(file, text)
       .filter(s => !s.payload.includes(CONTEXT_TOKEN))
       .map(s => `${file}:${s.line}`),
   )
@@ -200,10 +207,10 @@ function collectGateOrderDefects(host: string, text: string): string[] {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('the declared set is computed from the agent sources', () => {
-  it('is the eight agents that list DECISIONS_CONTEXT among their inputs', () => {
+  it('is the ten agents that list DECISIONS_CONTEXT among their inputs, the three Code variants among them', () => {
     const declared = collectDeclaredTypes()
     expect([...declared].sort()).toEqual(
-      ['Code', 'Design', 'Diagnose', 'Knowledge', 'Research', 'Review', 'Scrutinize', 'Triage'],
+      ['Code', 'Code-edit', 'Code-fix', 'Design', 'Diagnose', 'Knowledge', 'Research', 'Review', 'Scrutinize', 'Triage'],
     )
   })
 
@@ -217,7 +224,7 @@ describe('the declared set is computed from the agent sources', () => {
 
 describe('rule 1: every Code spawn site passes the key', () => {
   it('finds the Code sites in the compiled commands (non-vacuous)', () => {
-    const total = compiled().reduce((n, [file, text]) => n + collectCodeSpawnSites(file, text, 'Code').length, 0)
+    const total = compiled().reduce((n, [file, text]) => n + collectCodeSpawnSites(file, text).length, 0)
     expect(total, 'Code spawn sites found').toBeGreaterThanOrEqual(CODE_SITE_FLOOR)
   })
 

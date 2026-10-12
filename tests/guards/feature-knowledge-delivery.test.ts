@@ -195,7 +195,7 @@ export interface FkSite {
 }
 
 const FK_INPUT = /`?FEATURE_KNOWLEDGE`?:\s*`?\{([A-Za-z_]+)\}`?/g
-const AGENT_BEFORE = /subagent_type="([A-Za-z]+)"|Spawn \d+ ([A-Z][a-z]+) agents/g
+const AGENT_BEFORE = /subagent_type="([A-Za-z]+(?:-[a-z]+)?)"|Spawn \d+ ([A-Z][a-z]+) agents/g
 
 /** Named collector: every `FEATURE_KNOWLEDGE: {variable}` input in a body, with the agent it is spawned for. */
 export function collectFkSites(text: string): FkSite[] {
@@ -227,7 +227,12 @@ export const TIER_TABLE: Readonly<Record<string, readonly FkSite[]>> = {
   'self-review': [{ agent: 'Scrutinize', variable: RULES }],
 }
 
-const NO_TAKER = ['Validate', 'Git', 'Test']
+/**
+ * The agents that take no FEATURE_KNOWLEDGE. Code-fix and Code-edit join them (D-CODE-PRELOADS): only
+ * the implement and issue-fix spawns pass the input, and those run on Code, so only Code preloads
+ * `apply-feature-knowledge` and declares the input.
+ */
+const NO_TAKER = ['Validate', 'Git', 'Test', 'Code-fix', 'Code-edit']
 
 /** Named collector: the sites of a command that differ from the table, and any Validate, Git or Test site. */
 export function collectTierDefects(file: string, text: string, expected: readonly FkSite[]): string[] {
@@ -272,6 +277,11 @@ describe('each spawn names the variable of its recipient tier (D-KB-DELIVERY-TIE
     const defects = collectTierDefects('implement', validate, expected)
     expect(defects.some(d => d.includes('a Validate spawn passes FEATURE_KNOWLEDGE'))).toBe(true)
     expect(collectTierDefects('release', 'Agent(subagent_type="Git"):\n"FEATURE_KNOWLEDGE: {feature_knowledge}"', []).some(d => d.includes('a Git spawn passes'))).toBe(true)
+
+    // D-CODE-PRELOADS: a fix spawn that gained the input is attributed to Code-fix, not to the Code spawn before it.
+    const fixWithKnowledge = implement.replace('"OPERATION: alignment-fix\n', '"OPERATION: alignment-fix\nFEATURE_KNOWLEDGE: {feature_knowledge}\n')
+    expect(fixWithKnowledge, 'the seed must land').not.toBe(implement)
+    expect(collectTierDefects('implement', fixWithKnowledge, expected).some(d => d.includes('a Code-fix spawn passes FEATURE_KNOWLEDGE'))).toBe(true)
   })
 
   it('the site collector reads the three spawn shapes: a fenced block, a list item and inline prose', () => {
@@ -411,8 +421,8 @@ describe('each recipient is told the form it receives (D-KB-DELIVERY-TIERS)', ()
 // ---------------------------------------------------------------------------
 
 describe('Validate, Git and Test take no input, and explore, debug and the hooks never load (D-KB-DELIVERY-TIERS)', () => {
-  it('validate, git and test declare no FEATURE_KNOWLEDGE input', () => {
-    for (const agent of ['validate', 'git', 'test']) {
+  it('validate, git, test, code-fix and code-edit declare no FEATURE_KNOWLEDGE input; only code does', () => {
+    for (const agent of ['validate', 'git', 'test', 'code-fix', 'code-edit']) {
       const body = resolveAgentSource(agent).content
       expect(body.length, `${agent}: nothing read`).toBeGreaterThan(1000)
       expect(body, agent).not.toContain('FEATURE_KNOWLEDGE')

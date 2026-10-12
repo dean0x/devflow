@@ -47,6 +47,7 @@ import { tmpdir } from 'os'
 import * as path from 'path'
 
 import {
+  CODE_AGENT_TYPES,
   collectOrderViolations,
   ensurePrReadyReference,
   isAgentBlock,
@@ -396,6 +397,8 @@ describe('AC-9: /plan keeps a checked `## Test Plan` section', () => {
 // ---------------------------------------------------------------------------
 
 const CODE_SPAWN = 'Agent(subagent_type="Code")'
+/** Every spawn of the Code family (D-CODE-VARIANTS): Code, Code-fix and Code-edit. */
+const CODE_FAMILY_SPAWNS = CODE_AGENT_TYPES.map(type => `Agent(subagent_type="${type}")`)
 const TICKET_ASK = '**Ticket link, only when `ISSUE_REQUIRED` is `true`:**'
 const RECORD = '**Record the exception at once**'
 const TEST_PLAN_STEP = '**Test plan.** Before any Code spawn'
@@ -422,8 +425,10 @@ function collectCodeSpawnsBefore(content: string, anchor: string): string[] {
   const at = content.indexOf(anchor)
   if (at === -1) return [`the anchor is absent: "${anchor}"`]
   const out: string[] = []
-  for (let i = content.indexOf(CODE_SPAWN); i !== -1; i = content.indexOf(CODE_SPAWN, i + CODE_SPAWN.length)) {
-    if (i < at) out.push(`a Code spawn at offset ${i} opens before "${anchor}" (offset ${at})`)
+  for (const spawn of CODE_FAMILY_SPAWNS) {
+    for (let i = content.indexOf(spawn); i !== -1; i = content.indexOf(spawn, i + spawn.length)) {
+      if (i < at) out.push(`a Code spawn at offset ${i} opens before "${anchor}" (offset ${at})`)
+    }
   }
   return out
 }
@@ -527,7 +532,7 @@ function collectTestPlanForwarding(content: string): { opening: number; violatio
   const violations: string[] = []
   parseFences(content).forEach((fence, i) => {
     const lines = fence.split('\n').map(l => l.replace(/"$/, ''))
-    if (isAgentBlock(fence, 'Code') && lines.some(l => l.startsWith('PR_TEST_PLAN_BLOCK:'))) {
+    if (CODE_AGENT_TYPES.some(type => isAgentBlock(fence, type)) && lines.some(l => l.startsWith('PR_TEST_PLAN_BLOCK:'))) {
       violations.push(`fence ${i + 1}: a Code spawn carries PR_TEST_PLAN_BLOCK`)
     }
     if (!isAgentBlock(fence, 'Git') || !fence.includes('OPERATION: ensure-pr-ready')) return

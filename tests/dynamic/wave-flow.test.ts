@@ -48,7 +48,7 @@ import * as os from 'os'
 import * as path from 'path'
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
-import { ROOT, parseFences, requireDistFile } from '../helpers.js'
+import { CODE_AGENT_TYPES, ROOT, parseFences, requireDistFile } from '../helpers.js'
 import { PR_EVIDENCE_SCRIPT, VERIFY_EVIDENCE_SCRIPT } from '../evidence/seam.js'
 
 const BUILT = requireDistFile('dynamic-build.md')
@@ -241,7 +241,7 @@ function stubAgent(world: World, spawns: Spawn[]): Agent {
       return { status: blocked ? 'BLOCKED' : 'PASS' }
     }
     if (opts.agentType === 'Evaluate') return world.evaluateFail?.includes(currentRef) ? { verdict: 'FAIL', rationale: 'criterion 2 is not met' } : { verdict: 'PASS', rationale: 'ok' }
-    if (opts.agentType === 'Code') return { status: 'fixed', commitShas: ['abc1234'], unresolved: [] }
+    if (CODE_AGENT_TYPES.includes(opts.agentType)) return { status: 'fixed', commitShas: ['abc1234'], unresolved: [] }
     return { verdict: 'PASS' }
   }
 }
@@ -352,7 +352,7 @@ export async function collectEngineHandoffViolations(body: string | null): Promi
   const out: string[] = []
   const setups = spawns.filter(s => s.prompt.startsWith('OPERATION: setup-task'))
   if (setups.length !== 1 || !setups[0].prompt.split('\n').includes('ISSUE_INPUT: #42')) out.push('setup-task: it does not receive the ticket\'s own reference as ISSUE_INPUT')
-  const codes = spawns.filter(s => s.agentType === 'Code')
+  const codes = spawns.filter(s => CODE_AGENT_TYPES.includes(s.agentType))
   if (codes.length < 2) out.push(`code: expected the implement and the Test-fix Code spawns, got ${codes.length}`)
   for (const c of codes) {
     const keys = c.prompt.split('\n').filter(l => /^(?:ISSUE_NUMBER|ISSUE_PR_LINK|PR_EXCEPTIONS):/.test(l))
@@ -1469,12 +1469,12 @@ describe('#421 AC-16: Gate 1 runs Simplify, Scrutinize, Validate in both passes'
     expect(seq.lastIndexOf('Validate'), 'Gate 1 #2 follows the review pass').toBeGreaterThan(seq.lastIndexOf('Review'))
   })
 
-  it('Validate runs even when Scrutinize changed nothing, and re-runs once after each Code fix', async () => {
+  it('Validate runs even when Scrutinize changed nothing, and re-runs once after each Code-fix fix', async () => {
     const spawns: Spawn[] = []
     await runEngine(SINGLE!, ENGINE_ARGS, stubAgent({ tickets: { '#7': OWN }, gate1Red: ['#7'] }, spawns))
     const seq = types(spawns)
-    // Simplify, Scrutinize, then Validate, Code, Validate, Code, Validate: the re-run follows each fix.
-    expect(seq.slice(seq.indexOf('Simplify'), seq.indexOf('Simplify') + 7)).toEqual(['Simplify', 'Scrutinize', 'Validate', 'Code', 'Validate', 'Code', 'Validate'])
+    // Simplify, Scrutinize, then Validate, Code-fix, Validate, Code-fix, Validate: the re-run follows each fix.
+    expect(seq.slice(seq.indexOf('Simplify'), seq.indexOf('Simplify') + 7)).toEqual(['Simplify', 'Scrutinize', 'Validate', 'Code-fix', 'Validate', 'Code-fix', 'Validate'])
   })
 
   it('no Validate spawn names a model, and every Gate 1 Validate prompt pins the verdict return', async () => {
@@ -1603,7 +1603,7 @@ describe('#421 AC-19: Gate 2 issues one Evaluate spawn whose prompt names both c
     const result = await runEngine(SINGLE!, { ...ENGINE_ARGS, plan: 'the plan' }, stubAgent({ tickets: { '#7': OWN }, evaluateFail: ['#7'] }, spawns))
     expect((result.gate2 as { evaluateVerdict: string }).evaluateVerdict).toBe('FAIL-FIXED')
     expect(result.verdict).toBe('UNVERIFIED')
-    const fix = spawns.find(s => s.agentType === 'Code' && s.prompt.startsWith('OPERATION: alignment-fix\nFix the alignment issues'))
+    const fix = spawns.find(s => s.agentType === 'Code-fix' && s.prompt.startsWith('OPERATION: alignment-fix\nFix the alignment issues'))
     expect(fix?.prompt).toContain('criterion 2 is not met')
     expect(spawns.filter(s => s.agentType === 'Evaluate'), 'no re-evaluation by design').toHaveLength(1)
   })

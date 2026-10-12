@@ -424,8 +424,24 @@ function collectForbiddenConstructs(
  * not frontmatter), and `@import`/`@define` inside a compiled AGENT host — the
  * Git agent is prose, and a directive there would mean its body had become a
  * template.
+ *
+ * D-CODE-VARIANTS narrows `@import` once more, for three named hosts and one line: the Code
+ * variants share their text through `_partials/_code.mds`, so each of `code`, `code-fix` and
+ * `code-edit` carries exactly `CODE_PARTIAL_IMPORT` and nothing else. Every other host, and any
+ * other directive in those three, stays forbidden. `@define` stays forbidden in every host: the
+ * defines live in the partial.
  */
 const LEGALISED_IN_PHASE2: readonly string[] = ['expandVariants(', '(module, op)']
+
+/** D-CODE-VARIANTS: the only agent hosts that import a partial, and the one line each carries. */
+const CODE_VARIANT_HOSTS: readonly string[] = ['code', 'code-fix', 'code-edit']
+const CODE_PARTIAL_IMPORT = '@import "./_partials/_code.mds" as code'
+
+/** The content the fence scans: a Code variant host loses its one permitted import line, no other line. */
+function scannedContent(name: string, content: string): string {
+  const isVariant = CODE_VARIANT_HOSTS.includes(name.replace(/\.mds$/, ''))
+  return isVariant ? content.replace(`${CODE_PARTIAL_IMPORT}\n`, '') : content
+}
 
 const FORBIDDEN_CONSTRUCTS: ReadonlyArray<ForbiddenConstruct> = [
   // A conditional directive, not the letters 'if' after an '@'.
@@ -448,7 +464,7 @@ describe('AC-1.2 (Phase-2 scope fence): no conditionals or provider-templated fi
     const hosts = agentSourceNames(agentsDir(), '.mds')
     const corpus = hosts.map(name => ({
       name: `${name}.mds`,
-      content: readFileSync(path.join(agentsDir(), `${name}.mds`), 'utf-8'),
+      content: scannedContent(name, readFileSync(path.join(agentsDir(), `${name}.mds`), 'utf-8')),
     }))
     for (const rel of [
       path.join('src', 'core', 'mds-variants.ts'),
@@ -474,6 +490,26 @@ describe('AC-1.2 (Phase-2 scope fence): no conditionals or provider-templated fi
       `Conditional arms and provider-templated file naming are out of scope in every phase;\n` +
       `the generated tree is tracker/{provider}/{op}.md, driven by a typed registry.`,
     ).toHaveLength(0)
+  })
+
+  it('each Code variant host carries the one permitted import and no other directive (D-CODE-VARIANTS)', () => {
+    for (const name of CODE_VARIANT_HOSTS) {
+      const raw = readFileSync(path.join(agentsDir(), `${name}.mds`), 'utf-8')
+      expect(raw.split('\n').filter(l => l.startsWith('@import')), `${name}.mds imports`).toEqual([CODE_PARTIAL_IMPORT])
+      expect(collectForbiddenConstructs([{ name: `${name}.mds`, content: scannedContent(name, raw) }], FORBIDDEN_CONSTRUCTS)).toEqual([])
+    }
+  })
+
+  it('known-bad probe: a second import in a Code host and the Code import in another host are each reported', () => {
+    const raw = readFileSync(path.join(agentsDir(), 'code.mds'), 'utf-8')
+    const second = `${raw.replace(`${CODE_PARTIAL_IMPORT}\n`, `${CODE_PARTIAL_IMPORT}\n@import "./_partials/_tracker.mds"\n`)}`
+    expect(second, 'the seed must land').not.toBe(raw)
+    expect(collectForbiddenConstructs([{ name: 'code.mds', content: scannedContent('code', second) }], FORBIDDEN_CONSTRUCTS))
+      .toEqual(["code.mds: contains '@import'"])
+    expect(collectForbiddenConstructs([{ name: 'git.mds', content: scannedContent('git', `${CODE_PARTIAL_IMPORT}\n`) }], FORBIDDEN_CONSTRUCTS))
+      .toEqual(["git.mds: contains '@import'"])
+    expect(collectForbiddenConstructs([{ name: 'code-fix.mds', content: scannedContent('code-fix', '@define tail():\n') }], FORBIDDEN_CONSTRUCTS))
+      .toEqual(["code-fix.mds: contains '@define'"])
   })
 
   it('known-bad probe: each forbidden construct is detected by the same collector', () => {

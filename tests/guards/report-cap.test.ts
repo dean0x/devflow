@@ -51,6 +51,9 @@ const OUTPUT_HEADING: Readonly<Record<string, string>> = { research: '## Output 
  */
 const EXEMPT_MARKERS: Readonly<Record<string, readonly string[]>> = {
   code: ['`## Verification` block', '`commitShas`', '`unresolved`'],
+  // D-CODE-VARIANTS: the variants share Code's Output section from one partial, so they name the same exempt fields.
+  'code-fix': ['`## Verification` block', '`commitShas`', '`unresolved`'],
+  'code-edit': ['`## Verification` block', '`commitShas`', '`unresolved`'],
   validate: ['`HEAD:` line', '| Command | Status | Exit | Duration |', '30 lines per failing command'],
   test: ['### Test Plan Evidence', '| ID | TP | Type |', '### Evidence Log'],
   scrutinize: ['`### Status` line', '`status` return field'],
@@ -153,8 +156,8 @@ function collectCapDefects(name: string, content: string): string[] {
 const roster = rosterOf(DEVFLOW_PLUGINS)
 
 describe('D-REPORT-CAP: the report cap on the roster', () => {
-  it('derives a roster of at least 16 agents from DEVFLOW_PLUGINS', () => {
-    expect(roster.length).toBeGreaterThanOrEqual(16)
+  it('derives a roster of at least 18 agents from DEVFLOW_PLUGINS', () => {
+    expect(roster.length).toBeGreaterThanOrEqual(18)
     expect(Object.keys(EXEMPT_MARKERS).sort(), 'every roster agent has an exempt-field record').toEqual([...roster].sort())
   })
 

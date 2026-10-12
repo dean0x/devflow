@@ -372,27 +372,45 @@ export function resolveAllAgents(root: string = ROOT): Map<string, AgentSource> 
 }
 
 /**
- * The seven operating modes of the Code agent (`OPERATION`), `implement` being the default when
- * absent. One list for the code.md Step 0 table (tests/guards/code-preload.test.ts) and for the
- * spawn-site guard (tests/guards/code-operation.test.ts).
+ * D-CODE-VARIANTS: the seven operating modes of the Code family (`OPERATION`), by the agent type that
+ * runs each. Code takes `implement` (the default when absent) and `issue-fix`; Code-fix takes the four
+ * gate-failure fixes and has no default; Code-edit takes `edit`. One map for the spawn-site guard
+ * (tests/guards/code-operation.test.ts), the preload guard (tests/guards/code-preload.test.ts) and the
+ * variant-shape guard (tests/guards/code-variants.test.ts), so the three cannot disagree about which
+ * variant owns a mode. A key is the agent's `name:` (`capitalizeFirst` of its slug), the string a spawn
+ * names in `subagent_type` and `agentType`.
  */
-export const CODE_OPERATIONS: readonly string[] = [
-  'implement', 'issue-fix', 'validation-fix', 'alignment-fix', 'qa-fix', 'ci-fix', 'edit',
-]
+export const CODE_OPERATIONS: Readonly<Record<string, readonly string[]>> = {
+  'Code': ['implement', 'issue-fix'],
+  'Code-fix': ['validation-fix', 'alignment-fix', 'qa-fix', 'ci-fix'],
+  'Code-edit': ['edit'],
+}
+
+/** The agent types of the Code family, in the order CODE_OPERATIONS lists them. */
+export const CODE_AGENT_TYPES: readonly string[] = Object.keys(CODE_OPERATIONS)
+
+/** Every mode the Code family runs, across the three variants. */
+export const CODE_MODES: readonly string[] = Object.values(CODE_OPERATIONS).flat()
+
+/** The slug (`devflow agents` key and file basename) of a Code-family agent type: `Code-fix` is `code-fix`. */
+export const codeSlugOf = (agentType: string): string => agentType.toLowerCase()
 
 export interface CodeSpawnSite {
   readonly file: string
   /** 1-based line the spawn starts on. */
   readonly line: number
   readonly payload: string
+  /** The agent type the site spawns. */
+  readonly agentType: string
 }
 
 /**
  * Named collector: every spawn site of one agent type in a compiled command — the ONE collector,
  * shared by the compliance-lens test (tests/compliance-prompts.test.ts), the OPERATION guard
  * (tests/guards/code-operation.test.ts) and the decisions seam guard (tests/decisions/decisions-seam.test.ts),
- * so the three cannot disagree about what a spawn is. `agentType` defaults to Code, which is what the first
- * two read; the seam guard asks for every declared type (D-DECISIONS-DECLARED-ONLY). Five shapes, as the
+ * so the three cannot disagree about what a spawn is. `agentType` defaults to the whole Code family (Code,
+ * Code-fix and Code-edit: D-CODE-VARIANTS), which is what the first two read; the seam guard asks for every
+ * declared type (D-DECISIONS-DECLARED-ONLY). Five shapes, as the
  * command layer writes them: a fenced spawn (`Agent(subagent_type="<T>"):` then a quoted payload up to its
  * closing quote, indented or not; one fence may hold two spawns), a one-line prose spawn (Spawn
  * `Agent(subagent_type="<T>")` …), a prose sentence that begins "Spawn a <T> agent" (the merge-conflict
@@ -401,9 +419,10 @@ export interface CodeSpawnSite {
  * (`<T>(agentType:"<T>", …)`). The preamble's `agent("your prompt here", …)` usage example is not a
  * template literal, so it is not a site.
  */
-export function collectCodeSpawnSites(file: string, text: string, agentType: string = 'Code'): CodeSpawnSite[] {
-  // The type is spliced into the patterns below, so it must be a bare type name.
-  if (!/^[A-Z][A-Za-z]{0,30}$/.test(agentType)) throw new Error(`collectCodeSpawnSites: "${agentType}" is not an agent type name`)
+export function collectCodeSpawnSites(file: string, text: string, agentType?: string): CodeSpawnSite[] {
+  if (agentType === undefined) return CODE_AGENT_TYPES.flatMap(type => collectCodeSpawnSites(file, text, type))
+  // The type is spliced into the patterns below, so it must be a bare type name (a hyphen joins its words).
+  if (!/^[A-Z][A-Za-z]{0,30}(?:-[a-z]{1,30})?$/.test(agentType)) throw new Error(`collectCodeSpawnSites: "${agentType}" is not an agent type name`)
   const MAX_SITES = 64
   const T = agentType
   const SHAPES = [
@@ -417,6 +436,7 @@ export function collectCodeSpawnSites(file: string, text: string, agentType: str
     file,
     line: text.slice(0, m.index).split('\n').length,
     payload: m[0],
+    agentType: T,
   })))
   if (sites.length > MAX_SITES) throw new Error(`${file}: more than ${MAX_SITES} ${T} spawn sites — bound exceeded`)
   return sites

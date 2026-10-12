@@ -348,8 +348,10 @@ function collectGateBlockDefects(block: string): string[] {
   const timeout = Number(/`timeout: (\d+)`/.exec(calls[0] ?? '')?.[1])
   need('the ci-wait call carries a Bash timeout above 570000 and at most 600000', timeout > BASH_TIMEOUT_FLOOR_MS && timeout <= BASH_TIMEOUT_CEILING_MS)
   need('the call is bound to the head with `--head "$HEAD_SHA"`', (calls[0] ?? '').includes('--head "$HEAD_SHA"') && (calls[0] ?? '').includes('HEAD_SHA=$(git rev-parse HEAD)'))
-  const codeSpawns = block.split('\n').filter(l => l.includes('Agent(subagent_type="Code")'))
-  need(`expected one Code spawn, found ${codeSpawns.length}`, codeSpawns.length === 1)
+  // D-CODE-VARIANTS: the CI fix is a gate-failure fix, so it runs on Code-fix and never on Code.
+  const codeSpawns = block.split('\n').filter(l => l.includes('Agent(subagent_type="Code-fix")'))
+  need(`expected one Code-fix spawn, found ${codeSpawns.length}`, codeSpawns.length === 1)
+  need('the block spawns Code, which runs no CI fix', !block.includes('Agent(subagent_type="Code")'))
   const failing = block.split('\n').find(l => l.includes('**If FAILING**')) ?? ''
   need('the Code spawn is not in the FAILING arm', codeSpawns.length === 1 && codeSpawns[0] === failing)
   need('the FAILING arm does not carry `PUSH: false`', failing.includes('`PUSH: false`') && failing.includes('with `COMPLIANCE_FRAMEWORKS`, `CI_FAILURES`'))
@@ -394,8 +396,14 @@ describe('#421 AC-6/7: the gate blocks wait through ci-wait, spawn Code only on 
     expect(collectGateBlockDefects(short)).toEqual(['the ci-wait call carries a Bash timeout above 570000 and at most 600000'])
     const over = block.replace('`timeout: 600000`', '`timeout: 900000`')
     expect(collectGateBlockDefects(over)).toEqual(['the ci-wait call carries a Bash timeout above 570000 and at most 600000'])
-    const stray = block.replace('5. **If INDETERMINATE**', '5. Spawn `Agent(subagent_type="Code")` on any status. **If INDETERMINATE**')
-    expect(collectGateBlockDefects(stray)).toEqual(expect.arrayContaining(['expected one Code spawn, found 2']))
+    const stray = block.replace('5. **If INDETERMINATE**', '5. Spawn `Agent(subagent_type="Code-fix")` on any status. **If INDETERMINATE**')
+    expect(collectGateBlockDefects(stray)).toEqual(expect.arrayContaining(['expected one Code-fix spawn, found 2']))
+    const onCode = block.replace('Agent(subagent_type="Code-fix")', 'Agent(subagent_type="Code")')
+    expect(onCode, 'the seed must land').not.toBe(block)
+    expect(collectGateBlockDefects(onCode)).toEqual(expect.arrayContaining([
+      'expected one Code-fix spawn, found 0',
+      'the block spawns Code, which runs no CI fix',
+    ]))
     expect(collectGateBlockDefects(block.replace('fewer than 2 fixes have run', 'any number of fixes'))).toEqual(['the FAILING arm does not state its fix budget at its step'])
   })
 })

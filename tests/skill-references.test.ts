@@ -1097,26 +1097,6 @@ describe('Cross-component runtime alignment', () => {
       'REVIEW: the Companions cell lists no skill and does not read "(none)"',
     ]);
   });
-
-  it('code.md domain skill paths cover all language/ecosystem skills', () => {
-    const codeContent = resolveAgentSource('code').content;
-
-    // Language skills that should be loadable as domain skills via Skill tool invocations
-    const languageSkills = ['typescript', 'react', 'go', 'java', 'python', 'rust'];
-    // Related skills that should be available for domain loading
-    const domainSkills = ['boundary-validation', 'accessibility', 'ui-design', 'testing'];
-
-    for (const skill of [...languageSkills, ...domainSkills]) {
-      // Skill tool invocations: Skill(skill="devflow:X") or skill="devflow:X" or devflow:X
-      const hasSkillRef =
-        codeContent.includes(`devflow:${skill}`) ||
-        codeContent.includes(`skill="devflow:${skill}"`);
-      expect(
-        hasSkillRef,
-        `code.md domain skill section should reference 'devflow:${skill}'`,
-      ).toBe(true);
-    }
-  });
 });
 
 // ---------------------------------------------------------------------------

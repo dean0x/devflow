@@ -36,8 +36,8 @@ const BLOCK_HEADING = '## Running commands'
 /** The block's byte target. validate.md's retired section was 1,488 bytes. */
 const BLOCK_MAX_BYTES = 1400
 
-/** The three bodies that carry the block. */
-const CARRIERS = ['code', 'validate', 'test'] as const
+/** The five bodies that carry the block: the three Code variants share it from one partial (D-CODE-VARIANTS). */
+const CARRIERS = ['code', 'code-fix', 'code-edit', 'validate', 'test'] as const
 
 /**
  * The normative elements, one marker each. A marker is a literal the block must
@@ -188,7 +188,7 @@ const dynamicBuildSource = (): string =>
   readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'dynamic-build.mds'), 'utf-8')
 
 describe('D-FOREGROUND-RUN: the Running commands block', () => {
-  it('Code, Validate and Test each carry exactly one block, byte-identical, within the byte target', () => {
+  it('Code, Code-fix, Code-edit, Validate and Test each carry exactly one block, byte-identical, within the byte target', () => {
     expect(collectParityDefects(carriers())).toEqual([])
   })
 

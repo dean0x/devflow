@@ -397,7 +397,7 @@ function collectPresenceSelection(file: string, content: string): string[] {
     PRESENCE.some(re => re.test(line)) ? [`${file}:${i + 1}: ${line.trim().slice(0, 100)}`] : []);
 }
 
-/** Compiled commands that spawn Code agents, and the spawn sites each carries today. Floors: may only rise. */
+/** Compiled commands that spawn Code-family agents (Code and Code-fix), and the spawn sites each carries today. Floors: may only rise. */
 const CODE_SPAWN_FLOORS: Readonly<Record<string, number>> = {
   // 8 fences (single, sequential ×2, parallel ×2, validation/alignment/qa-fix) + the CI-fix line
   'implement.md': 9,
@@ -505,7 +505,11 @@ describe('TP-43 (AC-37): the compiled compliance lens loads only the ids the set
     expect(resolveAgentSource('review').content).toContain('- **COMPLIANCE_FRAMEWORKS** (compliance focus)');
     expect(resolveAgentSource('review').content).toContain('Load `references/{id}.md` only for these ids.');
     expect(resolveAgentSource('design').content).toContain('Load `references/{id}.md` only for these ids.');
-    expect(resolveAgentSource('code').content).toContain('load `references/{id}.md` only for the ids it lists');
+    // D-CODE-VARIANTS: Code and Code-fix take the lens; Code-edit adds no behaviour, so it takes none.
+    for (const slug of ['code', 'code-fix']) {
+      expect(resolveAgentSource(slug).content, slug).toContain('load `references/{id}.md` only for the ids it lists');
+    }
+    expect(resolveAgentSource('code-edit').content).not.toContain('COMPLIANCE_FRAMEWORKS');
     expect(src('src/assets/skills/gap-analysis/SKILL.md')).toContain('`references/{id}.md` only for the ids in `COMPLIANCE_FRAMEWORKS`');
   });
 

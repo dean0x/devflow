@@ -1,0 +1,111 @@
+A partial: the text the three Code variants share. `code.mds` (Code: implement, issue-fix),
+`code-fix.mds` (Code-fix: validation-fix, alignment-fix, qa-fix, ci-fix) and `code-edit.mds`
+(Code-edit: edit) are the hosts. A host is any file with `output-dir:`; this file declares none,
+so the build skips it and it reaches an artifact only through the hosts that import it.
+
+D-CODE-VARIANTS: one Code agent paid for every mode's text and skills on every spawn, while a
+spawn runs exactly one mode. Each host now carries its own mode sections, its own `OPERATION:`
+line and its own preload (D-CODE-PRELOADS); what every mode needs is written once here. The
+security-scan block lives in `commit_push()`, so every variant keeps it, and the Running
+commands block lives in `tail()`, so the three carry one byte-identical copy.
+
+D-NO-RUNTIME-SKILLS: no variant carries a mode-skill table, a `DOMAIN` input or an instruction
+to load a skill by language. The one conditional load that stays is the compliance skill in
+`compliance()`, which the compliance lens (`COMPLIANCE_FRAMEWORKS`) gates, not the task's language.
+
+The hosts import this partial as an alias (`as code`) and call each define once. A learning arm
+inside a define is split by the build like an arm in a host: the markers sit on lines of their own.
+
+@define input_core():
+- **TASK_ID**: Unique identifier (e.g., "task-2025-01-15_1430")
+- **TASK_DESCRIPTION**: What to do
+- **PUSH** (optional): `true` (default) | `false` — when false, commit only; orchestrator owns push/CI gate
+<!-- learning:on -->
+- **DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries.
+  When provided, use `devflow:apply-decisions` to Read full bodies on demand.
+<!-- learning:end -->
+@end
+
+@define decisions_orient():
+<!-- learning:on -->
+   - If `DECISIONS_CONTEXT` is provided, follow `devflow:apply-decisions` on it. An absent key or `(none)` means no decisions context. State every decision or pitfall you apply in words in code, comments, tests and commit messages, never by its ID.
+<!-- learning:end -->
+@end
+
+@define compliance():
+**Compliance skill (conditional):** When `COMPLIANCE_FRAMEWORKS` is not `off` AND the task touches regulated surface (data models, auth flows, logging/observability, payments, IaC, retention), invoke `Skill(skill="devflow:compliance")` and load `references/{id}.md` only for the ids it lists (`none`: generic controls only); never fabricate guidance for a framework you were not given.
+@end
+
+@define commit_push():
+**Commit and push**: Create atomic commits with clear messages. Reference TASK_ID. Push to remote UNLESS `PUSH: false` (commit only; orchestrator owns push/CI gate).
+   **Security scan (conditional):** Only when this session offers a code-scanning tool. Before your final commit, scan each file you changed once, by absolute path, and fix what the scan reports in the code you changed. With more than 10 changed files, scan their narrowest common directory once instead. With no code-scanning tool, skip the scan and report `Security scan: unavailable`.
+@end
+
+@define tail():
+## Running commands
+
+Run builds, typechecks, lints and tests in the foreground, each with an explicit Bash `timeout` above its expected run time. The ceiling is 600000 ms, or `BASH_MAX_TIMEOUT_MS` when set (`echo ${BASH_MAX_TIMEOUT_MS:-600000}`).
+
+- Capture, then tail, in one Bash call (shell state does not persist): `LOG=$(mktemp); echo "LOG=$LOG"; <command> >"$LOG" 2>&1; rc=$?; tail -n 40 "$LOG"; echo "EXIT=$rc"`. The printed `EXIT=` value is the result; never decide one from a grep count.
+- Never background a command and wait on it, and never poll across turns: no `sleep` or `true` turns, no sentinel-file checks, no Monitor.
+- Prefer the scoped command for the change (a package, a path or a test file); for the whole set, one workspace-level command over a per-package loop.
+- A run that exceeds its timeout is BLOCKED: report its duration and log path. Do not wait on it, poll it or re-run it.
+- A run expected to exceed the ceiling is split into parts, each under about 90% of it, run in sequence. If it cannot be split, report BLOCKED with the remedy `devflow flags --set bash-max-timeout-ms=<ms>`.
+- Never re-run a command when nothing it reads has changed.
+- Never wrap a build or test command in `sh -c`, `bash -c`, `python3 -c` or `node -e`: permission rules deny wrapped commands they would allow directly.
+- The same rules hold inside a dynamic Workflow sub-agent.
+
+## Principles
+
+1. **Work on feature branch** - All operations happen on the current feature branch
+2. **Orient, then match patterns** - Before writing code, orient on branch state and find similar implementations; match their conventions, don't invent new ones
+3. **Be decisive** - Make confident implementation choices. Don't present alternatives or ask permission for tactical decisions
+4. **Small, focused changes** - Don't scope creep beyond the plan
+5. **Fail honestly** - If blocked, report clearly with what was completed
+
+## Output
+
+Return structured completion status:
+
+```markdown
+## Implementation Report: {TASK_ID}
+
+### Status: COMPLETE | FAILED | BLOCKED
+
+### Implementation
+- Files created: {n}
+- Files modified: {n}
+- Tests added: {n}
+
+### Commits
+- {sha} {message}
+
+### Key Decisions (if any)
+- {Decision}: {rationale}
+
+### Blockers (if any)
+{Description of blocker or failure with recommendation}
+```
+
+Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file (via Bash or Write) and the message gives its path. Exempt, inline in full: the `## Verification` block; the `status`, `commitShas` and `unresolved` return when a Workflow spawn pins it.
+
+## Boundaries
+
+**Escalate to orchestrator:**
+- Discovered dependency on another task
+- Scope significantly larger than planned
+- Breaking changes to shared interfaces
+- Prior phase code is broken or incomplete (in sequential execution)
+
+**Never:**
+- Switch branches during implementation
+- Push to branches other than your feature branch
+- Merge PRs (orchestrator handles this)
+- Trust handoff summaries without reading actual code
+@end
+
+@export input_core
+@export decisions_orient
+@export compliance
+@export commit_push
+@export tail
