@@ -356,6 +356,24 @@ function exceptionsTemplate(text: string): string[] {
   return lines.slice(start, end === -1 ? lines.length : end)
 }
 
+const EXEMPT_LINE = 'Exempt (not attested):'
+
+/**
+ * Named collector: what keeps the `Exempt` line from rendering as a lazy
+ * continuation of the last bullet. Markdown folds a paragraph line that follows a
+ * list item with no blank line between them into that item.
+ */
+export function collectLazyExemptLine(text: string): string[] {
+  const template = exceptionsTemplate(text)
+  const exempt = template.findIndex(l => l.startsWith(EXEMPT_LINE))
+  if (exempt === -1) return ['the template has no Exempt line']
+  const found: string[] = []
+  if (template[exempt - 1] !== '') found.push('no blank line before the Exempt line')
+  if (!template[exempt - 2]?.startsWith('- ')) found.push('the line before the blank line is not a bullet')
+  if (!text.includes('A blank line separates the last bullet from the `Exempt` line')) found.push('the prose does not state the blank-line rule')
+  return found
+}
+
 describe('AC-8: `## Traceability exceptions` — rendering, persistence and sink', () => {
   it('the three rendering bullets are copied byte-identically (the adopter proves the as-written model)', () => {
     const bullets = renderingBullets()
@@ -367,7 +385,7 @@ describe('AC-8: `## Traceability exceptions` — rendering, persistence and sink
   it('the block has two closed kinds, four coverage causes, the exempt line and no subject', () => {
     const template = exceptionsTemplate(release())
     expect(template[0]).toBe('## Traceability exceptions')
-    expect(template.slice(1).map(l => l.match(/^- `([a-z]+)`/)?.[1] ?? l.split(' ')[0])).toEqual(['untraced', 'coverage', 'Exempt'])
+    expect(template.slice(1).filter(l => l !== '').map(l => l.match(/^- `([a-z]+)`/)?.[1] ?? l.split(' ')[0])).toEqual(['untraced', 'coverage', 'Exempt'])
     expect(template[1]).toBe('- `untraced` <sha12> (<author>) self-attested by @<login> at <utc>: <reason>')
     const causes = template[2].match(/<([a-z|-]+)>/)?.[1].split('|')
     expect(causes).toEqual(['bound-hit', 'trace-unavailable', 'gather-indeterminate', 'untraced-beyond-list'])
@@ -375,6 +393,20 @@ describe('AC-8: `## Traceability exceptions` — rendering, persistence and sink
     for (const cause of causes!) expect(mapping, `${cause} must be mapped`).toContain(`\`${cause}\``)
     expect(release()).toContain('no commit subject is ever written into it')
     expect(template.join('\n')).not.toMatch(/<subject>/)
+  })
+
+  it('a blank line sets the Exempt line apart from the last bullet, so it renders as its own paragraph', () => {
+    expect(collectLazyExemptLine(release())).toEqual([])
+  })
+
+  it('known-bad probe: a template with the Exempt line against the last bullet, or no stated rule, is reported', () => {
+    const text = release()
+    const glued = text.replace(`\n\n${EXEMPT_LINE}`, `\n${EXEMPT_LINE}`)
+    expect(glued, 'the seed must land').not.toBe(text)
+    expect(collectLazyExemptLine(glued)).toEqual(['no blank line before the Exempt line'])
+    const unstated = text.replace('A blank line separates the last bullet from the `Exempt` line', 'The Exempt line follows')
+    expect(unstated, 'the seed must land').not.toBe(text)
+    expect(collectLazyExemptLine(unstated)).toEqual(['the prose does not state the blank-line rule'])
   })
 
   it('it is checkpointed, and passed to create-release as TRACEABILITY_EXCEPTIONS whenever either rule composes it', () => {
