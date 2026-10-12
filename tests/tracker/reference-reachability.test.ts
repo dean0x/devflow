@@ -50,6 +50,7 @@ import {
   resolveAgentSource,
   walkFiles,
 } from '../helpers.js';
+import { MODEL_TRANSITIVE_REFS } from './budget-model.js';
 import { MIN_REFERENCE_CHARS } from './reference-floor.js';
 
 // ---------------------------------------------------------------------------
@@ -324,6 +325,35 @@ const PLACED_IN_THE_AGENT = [
   { label: 'the reference table', marker: '| Operation | Reference |' },
 ] as const;
 
+/** The agent's `## Loading the mechanics` section, up to the next heading; empty when absent. */
+function loadingSectionOf(agentContent: string): string {
+  const heading = agentContent.indexOf('## Loading the mechanics');
+  const end = heading === -1 ? -1 : agentContent.indexOf('\n## ', heading + 1);
+  return heading === -1 ? '' : agentContent.slice(heading, end === -1 ? undefined : end);
+}
+
+/**
+ * The hop rule (D-BODY-HOP-CLOSURE in tests/tracker/budget-model.ts).
+ *
+ * A step may run another operation (setup-task step 1c runs ensure-traceable-issue) or follow
+ * a section of another operation's reference (backlink-shipped-issues' provider signals), and
+ * the budget model prices those loads as part of the spawn. The always-loaded rule must allow
+ * them: a flat "read no other operation's reference" sets the loading rule against the step,
+ * and a spawn that obeys the rule runs the hopped-to operation without its template, dedup or
+ * scrub.
+ */
+const HOP_RULE =
+  "Read another operation's reference only when a step tells you to run that operation or to follow its reference.";
+
+/** Named collector: hop-rule defects in the agent's always-loaded Loading section. */
+function collectHopRuleDefects(agentContent: string): string[] {
+  const section = loadingSectionOf(agentContent);
+  const defects: string[] = [];
+  if (!section.includes(HOP_RULE)) defects.push("the Loading section does not allow a step's hop to another operation's reference");
+  if (/\bno other operation's reference\b/i.test(section)) defects.push("the Loading section forbids every other operation's reference");
+  return defects;
+}
+
 /**
  * Named collector: where the two always-loaded loading rules sit.
  *
@@ -334,9 +364,7 @@ const PLACED_IN_THE_AGENT = [
  * part, ahead of the next heading — and in the contract not at all.
  */
 function collectLoadingPlacementDefects(agentContent: string, contractContent: string): string[] {
-  const heading = agentContent.indexOf('## Loading the mechanics');
-  const end = heading === -1 ? -1 : agentContent.indexOf('\n## ', heading + 1);
-  const section = heading === -1 ? '' : agentContent.slice(heading, end === -1 ? undefined : end);
+  const section = loadingSectionOf(agentContent);
   const defects: string[] = [];
   for (const { label, marker } of PLACED_IN_THE_AGENT) {
     if (!section.includes(marker)) defects.push(`${label} is not in the agent's always-loaded Loading section`);
@@ -583,6 +611,21 @@ describe('generated references: every reference is reachable from the agent (AC-
       // Left where it is, with the contract untouched: silent.
       expect(collectLoadingPlacementDefects(agent.content, contract)).toEqual([]);
     }
+  });
+
+  it('the hop rule: the Loading section allows the in-spawn hops the budget model prices', () => {
+    const hops = Object.values(MODEL_TRANSITIVE_REFS).flatMap(rows => Object.values(rows).flat());
+    expect(hops.length, 'MODEL_TRANSITIVE_REFS lists no hop, so the rule would guard nothing').toBeGreaterThan(0);
+    expect(collectHopRuleDefects(agent.content)).toEqual([]);
+  });
+
+  it('known-bad probe: a Loading section that forbids every other reference is reported', () => {
+    const forbidding = agent.content.replace(HOP_RULE, "Read no other operation's reference.");
+    expect(forbidding, 'the probe must change the agent copy').not.toBe(agent.content);
+    expect(collectHopRuleDefects(forbidding)).toEqual([
+      "the Loading section does not allow a step's hop to another operation's reference",
+      "the Loading section forbids every other operation's reference",
+    ]);
   });
 
   it('AC-519: neither the agent nor the tracker contract carries a stop or DEGRADED rule for a missing contract', () => {

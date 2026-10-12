@@ -396,8 +396,7 @@ function phase2ProducesLine(implement: string): string | null {
  *
  * Each timing site must say `every strategy`, and none may skip a strategy: a line that holds a
  * `skip` clause beside a strategy name binds the phase to the others. Phase 2 must not produce
- * a PR_URL, and no line anywhere may pair SEQUENTIAL with "not yet created" — the contradiction
- * the CI gate used to carry.
+ * a PR_URL, and no line anywhere may pair SEQUENTIAL with "not yet created".
  */
 export function collectPrTimingContradictions(implement: string): string[] {
   const out: string[] = []

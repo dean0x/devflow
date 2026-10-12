@@ -151,7 +151,6 @@ describe('generated reference manifest (bidirectional registry doctrine)', () =>
 
   it('covers both unit shapes — a nested provider directory and the flat cross-cutting set', () => {
     const manifest = generatedReferenceManifest();
-    // Floor 48 -> 47 with #451 (pr/ensure-pr-ready.md is no longer emitted); accepted by the user 2026-10-12.
     expect(
       manifest.length,
       'a manifest short enough to enumerate by hand makes every convergence assertion vacuous',
@@ -581,7 +580,6 @@ describe('converge-not-merge staged swap (GAP-24)', () => {
     await overlayGeneratedReferences({ referencesTarget: target, sourceRoot, manifest });
 
     const files = (await walkTree(target)).filter(p => !p.endsWith('/'));
-    // Floor 48 -> 47 with #451; accepted by the user 2026-10-12 (see generated-reference-manifest-size).
     expect(files.length, 'no files installed — the mode assertion would be vacuous').toBeGreaterThanOrEqual(47);
     for (const rel of files) {
       const stat = await fs.stat(abs(target, rel));

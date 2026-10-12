@@ -547,7 +547,7 @@ git push origin HEAD; echo "exit=$?"
 **Produces:** EVIDENCE_RESULT
 **Requires:** PR_NUMBER, EVIDENCE_FILE, REVIEW_PUBLICATION
 
-Run once, after Phase 10, under every strategy: the PR exists by now, opened in Phase 9. Skip it only when Phase 9 stopped the run. The CI gate ran under every strategy, so a `ci` TP reads `INDETERMINATE` only when that gate could not tell.
+Run once, after Phase 10, under every strategy: the PR exists by now, opened in Phase 9. The re-validation path has no CI gate and runs this phase straight after Phase 9. Skip it only when Phase 9 stopped the run. A `ci` TP reads `INDETERMINATE` only when the CI gate could not tell or did not run.
 
 **Push first.** Every claim is keyed to the HEAD an agent reported, and a Scrutinize or fix agent may have committed without pushing; a claim whose SHA is not in the PR reads `UNVERIFIED`. So push the branch once before the spawn — never force, and no retry:
 

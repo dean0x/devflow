@@ -986,8 +986,6 @@ describe('validateContractOutputName — the narrow underscore allowance', () =>
  * apart (installed-reference-count-github, installed-reference-count-provider),
  * which rose from 24 and 36 to meet here.
  */
-// 48 before #451, which dropped references/pr/ensure-pr-ready.md (one file per provider holds that
-// operation now); lowered with the user's acceptance on 2026-10-12 — see the manifest entries.
 const INSTALLED_REFS = 47;
 
 describe('installedReferenceManifest — every provider, whatever the machine selected', () => {

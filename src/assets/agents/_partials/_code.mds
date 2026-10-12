@@ -3,8 +3,8 @@ A partial: the text the three Code variants share. `code.mds` (Code: implement, 
 (Code-edit: edit) are the hosts. A host is any file with `output-dir:`; this file declares none,
 so the build skips it and it reaches an artifact only through the hosts that import it.
 
-D-CODE-VARIANTS: one Code agent paid for every mode's text and skills on every spawn, while a
-spawn runs exactly one mode. Each host now carries its own mode sections, its own `OPERATION:`
+D-CODE-VARIANTS: a spawn runs exactly one mode, so one agent for every mode would pay for every
+mode's text and skills on every spawn. Each host carries its own mode sections, its own `OPERATION:`
 line and its own preload (D-CODE-PRELOADS); what every mode needs is written once here. The
 security-scan block lives in `commit_push()`, so every variant keeps it, and the Running
 commands block lives in `tail()`, so the three carry one byte-identical copy.
