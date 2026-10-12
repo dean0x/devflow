@@ -12,12 +12,12 @@ Shared patterns used by multiple agents.
 
 | Skill | Purpose | Used By |
 |-------|---------|---------|
-| `software-design` | Engineering patterns (Result types, DI, immutability, workaround labeling) | Code, Scrutinize, Evaluate |
+| `software-design` | Engineering patterns (Result types, DI, immutability, workaround labeling) | Scrutinize, Simplify |
 | `review-methodology` | 6-step review process, 3-category issue classification | Review |
 | `quality-gates` | 9-pillar self-review framework | Scrutinize |
 | `docs-framework` | Documentation conventions (.devflow/docs/ structure, naming, templates) | /plan, /research (at their naming step) — the naming authority |
 | `git` | Git safety, atomic commits, PR descriptions, GitHub API patterns | Code, Git |
-| `patterns` | CRUD, API endpoints, events, config, logging | Code |
+| `patterns` | CRUD, API endpoints, events, config, logging | None; a model may invoke it by description |
 | `qa` | Scenario-based acceptance testing methodology, evidence collection | Test |
 
 ### Tier 1b: Pattern Skills
@@ -44,10 +44,10 @@ Listed in Claude Code's skill catalog. May auto-invoke based on description matc
 
 | Skill | Purpose | Agent Refs |
 |-------|---------|------------|
-| `boundary-validation` | Boundary validation enforcement | Code |
+| `boundary-validation` | Boundary validation enforcement | None; a model may invoke it by description |
 | `gap-analysis` | Gap analysis for design plans — missing flows, edge cases, failure modes | Design |
 | `design-review` | Design review patterns — architectural feasibility, tradeoffs, alternatives | Design |
-| `dependency-research` | Research-before-building enforcement | Code |
+| `dependency-research` | Research-before-building enforcement | None; a model may invoke it by description |
 | `test-driven-development` | RED-GREEN-REFACTOR cycle enforcement | Code |
 
 #### Research Skills (Agent-Loaded)
@@ -83,7 +83,7 @@ Skills activate through three guaranteed mechanisms:
 
 1. **Agent frontmatter `skills:` field** — When an agent runs, all skills listed in its frontmatter are loaded into context. This is the primary activation path.
 2. **Review dynamic read** — The Review agent reads the pattern skill file for its assigned focus area from a lookup table (e.g., `focus=testing` → `testing/SKILL.md`).
-3. **On-demand Skill-tool load** — An agent loads a skill with `Skill(skill="devflow:<name>")` at the step whose written condition holds, and that skill is not in its `skills:` list. Code's "Step 0: Mode Skills" table does this for `software-design`, `patterns`, `boundary-validation` and `dependency-research`: each cell states a hard condition judged from the spawn's own inputs, and a cell reading `never` loads nothing. A skill loaded this way costs nothing on a spawn that does not need it, so a skill only some operating modes use belongs here, not in the preload.
+3. **Directive in the spawn prompt** — A command adds a line to a spawn prompt that tells the agent to load a skill with `Skill(skill="devflow:<name>")`, and only when the line's condition holds. Compliance works this way: when the resolved compliance lens is on (a repository can turn it on while the machine switch is off), the command adds the directive to the Code, Code-fix, Review and Design spawns. With the lens off the spawn carries nothing about compliance. No agent body names the compliance skill, and no Code variant carries a mode-skill table or picks a skill by language or mode. The Design compliance focus reads `gap-analysis/references/compliance.md` by explicit path.
 
 Skills with `user-invocable: false` also appear in Claude Code's skill catalog with their description. Claude MAY auto-invoke them based on description matching, but this is not guaranteed and should not be relied upon as the sole activation path.
 
@@ -110,7 +110,7 @@ skills:
 ---
 ```
 
-All six listed skills are loaded when the Code agent is spawned. The four mode skills (`software-design`, `patterns`, `boundary-validation`, `dependency-research`) are not listed: Code loads them on demand from its Step 0 table, by the operating mode named on the first line of the spawn prompt. `tests/guards/code-preload.test.ts` holds the six-skill set and a byte ceiling on it.
+All six listed skills are loaded when the Code agent is spawned. Code ships as three variants built from one shared partial, and each variant fixes its preload at compile time: Code (`implement`, `issue-fix`) preloads the six above; Code-fix (the four gate-failure fix modes) preloads `git`, `testing`, `worktree-support` and `apply-decisions`; Code-edit (`edit`) preloads `git`, `worktree-support` and `apply-decisions`. No variant chooses a skill at run time. `software-design`, `patterns`, `boundary-validation` and `dependency-research` stay available for a model to invoke by their descriptions. `tests/guards/code-preload.test.ts` holds each variant's skill set and a byte ceiling on it.
 
 ## Skill File Template
 
@@ -218,7 +218,7 @@ src/assets/skills/skill-name/
 
 **Target metrics**: SKILL.md ~120-150 lines, code examples 15-25% of content, ~5KB token cost per activation.
 
-**Generated references.** A skill's `references/` directory can also receive files the build emits. `devflow:git` is the one skill that does: `npm run build:mds` compiles the `.mds` reference modules in `src/assets/mds/` into `dist/skills/git/references/**`, and `devflow init` overlays that tree onto the installed skill directory. Generated files are never written into `src/`, and the overlay converges rather than merges — a file under `references/tracker/**` or `references/pr/**` that the build manifest does not name is removed on the next install, so a shadowed skill cannot substitute its own mechanics. `references/pr/` (the nine PR-host operation bodies) converges the same way `references/tracker/` does. Every install carries the whole manifest — every provider's `references/tracker/**` and `references/pr/**` — whatever the machine's provider, because a repository can select any provider. Four cross-cutting documents — `decision-markers.md`, `learn-conventions.md`, `publication-gate.md` and `trust-rule.md` — are generated into the references root under every provider too. That root is overlaid but never pruned: hand-authored files beside the generated ones (`github-api.md`, `patterns.md`, …) are never touched, and a retired cross-cutting document keeps its installed copy until the skill directory is replaced.
+**Generated references.** A skill's `references/` directory can also receive files the build emits. `devflow:git` is the one skill that does: `npm run build:mds` compiles the `.mds` reference modules in `src/assets/mds/` into `dist/skills/git/references/**`, and `devflow init` overlays that tree onto the installed skill directory. Generated files are never written into `src/`, and the overlay converges rather than merges — a file under `references/tracker/**` or `references/pr/**` that the build manifest does not name is removed on the next install, so a shadowed skill cannot substitute its own mechanics. `references/pr/` (the eight PR-host operation bodies) converges the same way `references/tracker/` does. A Git spawn loads exactly one operation reference: `tracker/{provider}/{op}.md`, `pr/{op}.md` or, for `learn-conventions`, the named document in the references root. Each holds the operation's contract and its mechanics. Every install carries the whole manifest — every provider's `references/tracker/**` and `references/pr/**` — whatever the machine's provider, because a repository can select any provider. Four cross-cutting documents — `decision-markers.md`, `learn-conventions.md`, `publication-gate.md` and `trust-rule.md` — are generated into the references root under every provider too. That root is overlaid but never pruned: hand-authored files beside the generated ones (`github-api.md`, `patterns.md`, …) are never touched, and a retired cross-cutting document keeps its installed copy until the skill directory is replaced.
 
 ## Glob Pattern Activation Schema
 

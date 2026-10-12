@@ -57,7 +57,7 @@ An agent that has Bash is given no Grep or Glob tool in Claude Code, even when i
 ## Effort and Project Context
 
 - `effort:` (`low`, `medium`, `high`, `xhigh` or `max`) is the agent's shipped reasoning effort, set on the line after `model:`. Lower effort on a mechanical agent is a deliberate saving. An agent with no `effort:` line follows the session.
-- `omitClaudeMd: true` keeps CLAUDE.md (user, project, local) and the rule files under `~/.claude/rules/` out of the agent's context. Twelve agents ship it: Validate, Git, Triage, Evaluate, Test, Research, Knowledge, Tracker, Learning, Skim, Synthesize, Explore. Each restates the core rules it works by under `## Core rules`, exactly its `CORE_RULES_DIGEST` row (`tests/fixtures/agent-config.ts`, held by `tests/guards/core-rules-digest.test.ts`). An agent that needs more reads it: Learning reads the root CLAUDE.md and the installed devflow rules before its first already-encoded comparison. Code, Scrutinize, Simplify, Review, Design and Diagnose keep CLAUDE.md.
+- `omitClaudeMd: true` keeps CLAUDE.md (user, project, local) and the rule files under `~/.claude/rules/` out of the agent's context. Twelve agents ship it: Validate, Git, Triage, Evaluate, Test, Research, Knowledge, Tracker, Learning, Skim, Synthesize, Explore. Each restates the core rules it works by under `## Core rules`, exactly its `CORE_RULES_DIGEST` row (`tests/fixtures/agent-config.ts`, held by `tests/guards/core-rules-digest.test.ts`). An agent that needs more reads it: Learning reads the root CLAUDE.md and the installed devflow rules before its first already-encoded comparison. Code, Code-fix, Code-edit, Scrutinize, Simplify, Review, Design and Diagnose keep CLAUDE.md.
 
 ## Length Guidelines
 
