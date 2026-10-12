@@ -137,6 +137,7 @@ d .claude/skills/devflow:gap-analysis/
 - .claude/skills/devflow:gap-analysis/SKILL.md
 d .claude/skills/devflow:gap-analysis/references/
 - .claude/skills/devflow:gap-analysis/references/check-layers.md
+- .claude/skills/devflow:gap-analysis/references/compliance.md
 d .claude/skills/devflow:git/
 - .claude/skills/devflow:git/SKILL.md
 d .claude/skills/devflow:git/references/
