@@ -208,7 +208,7 @@
       "pattern": "REF_TOKEN_FLOOR = 41",
       "occurrences": 1,
       "sourceFile": "tests/guards/requires-closure.test.ts",
-      "description": "Distinct devflow: skill references across the widened closure corpus (dist/commands + agent sources + skill bodies incl. references/). Non-vacuity floor for the bidirectional requires: guard — a scanner that stopped matching would make both arms pass over an empty corpus. Measured 2026-09-19: 200 files, 297 sites, 44 distinct. It fell to 41 when the Code variants took the Step 0 table and the language skill list out of the Code prompt (D-NO-RUNTIME-SKILLS): the three references only that text held (boundary-validation, dependency-research, patterns) left the corpus with it, the one count a deliberate deletion of the old runtime skill loading lowers."
+      "description": "Distinct devflow: skill references across the widened closure corpus (dist/commands + agent sources + skill bodies incl. references/). Non-vacuity floor for the bidirectional requires: guard — a scanner that stopped matching would make both arms pass over an empty corpus. Measured 2026-09-19: 200 files, 297 sites, 44 distinct. LOWERED 44 -> 41 by #449 (a deliberate exception to \"a floor may only rise\"): the Code variants took the Step 0 table and the DOMAIN input out of the Code prompt (D-NO-RUNTIME-SKILLS), and the three skill names boundary-validation, dependency-research and patterns appeared only in that deleted Step 0 and DOMAIN text of the Code agent, so they left the corpus with it and no other reference was removed. Old value 44; accepted by the user 2026-10-12."
     },
     {
       "id": "installed-reference-count-github",

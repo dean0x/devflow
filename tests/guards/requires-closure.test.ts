@@ -51,10 +51,13 @@ const AGENT_DIRS = [path.join(ROOT, 'dist', 'agents'), path.join(ROOT, 'src', 'a
 /**
  * Every distinct reference the corpus must clear, over the widened corpus.
  * Non-vacuity: a scanner that stopped matching would drop to zero and this
- * floor is what notices. Measured 2026-09-19 over 200 files / 297 sites at 44;
- * the Code variants (D-CODE-VARIANTS) took the Step 0 table and the language
- * skill list out of the corpus (D-NO-RUNTIME-SKILLS), and the three raw
- * references only that text held went with it, so the corpus measures 41.
+ * floor is what notices. Measured 2026-09-19 over 200 files / 297 sites at 44.
+ * LOWERED 44 -> 41 by #449 (a deliberate exception to "a floor may only rise"):
+ * the Code variants (D-CODE-VARIANTS) took the Step 0 table and the DOMAIN input
+ * out of the Code prompt (D-NO-RUNTIME-SKILLS), and the three skill names
+ * boundary-validation, dependency-research and patterns appeared only in that
+ * deleted Step 0 and DOMAIN text, so they left the corpus with it. Old value 44;
+ * accepted by the user 2026-10-12.
  */
 const REF_TOKEN_FLOOR = 41;
 
