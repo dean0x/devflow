@@ -340,9 +340,8 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
   //
   // This entry is a CLASSIFIER, not a spelling: the rule is about the
   // qualification in front of the literal, which no substring test can see. Its
-  // last site — the github-gated fallback in /implement's PR step — went with
-  // #359, which moved the parallel PR into a Code `pr-create` spawn: no command
-  // renders a link line now. A gated occurrence is still admitted by the pattern
+  // last site — the github-gated fallback in /implement's PR step — is gone: no
+  // command renders a link line now. A gated occurrence is still admitted by the pattern
   // rather than excluded by a hand-written filter, so the guard needs no second
   // list to keep in sync with this one.
   // -------------------------------------------------------------------------

@@ -177,13 +177,12 @@ import type {
  * section with its report cap and the frontmatter effort and denylist were paid for out of
  * that cut.
  *
- * Re-derived by #451 (D-OP-ONE-REF, D-OP-CONTRACT-ONCE) from a measured 10_823, which is the
- * ceiling itself: the plan sets this one at the measured value and no more. Every operation's
- * Input, degradation notes, Output template and steps left the agent for the one reference
- * that operation loads; what remains is the Input contract with D4, the loading table, the
- * D11 scrub, the operations routing table, the generic `## Output` and the shared Principles,
- * Core rules and Boundaries. The next content addition to git.mds, #448's ensure-pr-ready
- * routing row included, must fund itself with a cut elsewhere in git.mds.
+ * Re-derived by #451 (D-OP-ONE-REF, D-OP-CONTRACT-ONCE) from a measured 10_743 plus the 80
+ * general headroom, giving 10_823. Every operation's Input, degradation notes, Output template
+ * and steps are in the one reference that operation loads; the agent holds the Input contract
+ * with D4, the loading table, the D11 scrub, the operations routing table, the generic
+ * `## Output` and the shared Principles, Core rules and Boundaries. The next content addition
+ * to git.mds must fund itself with a cut elsewhere in git.mds.
  *
  * THE RULE: this ceiling is a REGRESSION ALARM, and it is RE-DERIVED ONLY DOWNWARD —
  * lowered after a pass that actually cut the artifact, never raised to fit one that

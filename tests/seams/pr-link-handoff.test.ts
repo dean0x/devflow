@@ -18,9 +18,8 @@ const REFS_DIR = compiledSkillRefsDir()
 // drop one side and leave the other looking healthy.
 //
 // The consumer is the Git agent's ensure-pr-ready reference, which opens the PR
-// under every strategy (D-PR-BY-GIT, #448): the paste gates that the Code agent's
-// Responsibility 7 held moved there byte for byte. The failure mode a one-sided
-// guard misses is unchanged: a guard that only checks the producers stays green
+// under every strategy (D-PR-BY-GIT, #448) and holds the paste gates. The failure
+// mode a one-sided guard misses: a guard that only checks the producers stays green
 // when the consumer stops pasting the block, and a guard that only checks the
 // consumer stays green when the producers stop emitting it. Either way the PR
 // body silently loses its issue link — the exact defect, restored.
@@ -662,10 +661,8 @@ describe('ISSUE_PR_LINK reaches the PR-opening Git spawn (D-LINK-FLOOR)', () => 
 // strategy (D-PR-BY-GIT, #448): a plan that says "the Git agent opens the PR" is a claim
 // about the command, so the command is read here.
 //
-// The Code `pr-create` spawn for PARALLEL, the Code agent's `CREATE_PR: true` for
-// SINGLE and SEQUENTIAL, and the Code agent's Responsibility 7 are gone. Phase 9
-// owns the body: it sits after the gates and before the CI gate, outside every
-// strategy branch, so no strategy can end with commits and no PR.
+// Phase 9 owns the body: it sits after the gates and before the CI gate, outside
+// every strategy branch, so no strategy can end with commits and no PR.
 // -------------------------------------------------------------------------
 
 const PHASE9 = '### Phase 9: Open PR'
