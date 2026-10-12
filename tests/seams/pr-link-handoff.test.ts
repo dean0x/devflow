@@ -2,9 +2,8 @@ import { describe, it, expect, afterAll } from 'vitest'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
-import { buildCommittedTree, cleanupCommittedTree, collectCodeSpawnSites, collectOrderViolations, gitOperationReferenceCorpus, requireDistFile, walkFiles } from '../helpers.js'
+import { buildCommittedTree, cleanupCommittedTree, collectCodeSpawnSites, collectOrderViolations, ensurePrReadyReference, gitOperationReferenceCorpus, requireDistFile, walkFiles } from '../helpers.js'
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
-import { operationReferenceRel } from '../../src/core/mds-variants.js'
 
 /** The generated `devflow:git` reference tree — the providers' own mechanics. */
 const REFS_DIR = compiledSkillRefsDir()
@@ -39,18 +38,8 @@ const REFS_DIR = compiledSkillRefsDir()
 /** The operations' producer text: each operation's one reference (GitHub), joined. */
 const GIT = gitOperationReferenceCorpus().map(entry => entry.content).join('\n')
 
-/** ensure-pr-ready's one reference under a provider — fail-loud when dist is absent. */
-function prReadyRef(provider = 'github'): string {
-  const rel = operationReferenceRel('ensure-pr-ready', provider) ?? ''
-  try {
-    return fs.readFileSync(path.join(REFS_DIR, ...rel.split('/')), 'utf-8')
-  } catch {
-    throw new Error(`${rel} is absent — run \`npm run build\` first`)
-  }
-}
-
 /** The PR-opening consumer of the handoff values (D-PR-BY-GIT): ensure-pr-ready's reference, GitHub copy. */
-const PR_READY = prReadyRef()
+const PR_READY = ensurePrReadyReference()
 
 afterAll(cleanupCommittedTree)
 
@@ -792,12 +781,12 @@ describe('ensure-pr-ready opens the PR (D-LINK-VERBATIM, D-COMMIT-EXPLICIT, D-PR
 
   it('every provider carries the PR-opening rules', () => {
     for (const provider of ['github', 'jira', 'linear']) {
-      expect(collectPrOpenDefects(prReadyRef(provider)), provider).toEqual([])
+      expect(collectPrOpenDefects(ensurePrReadyReference(provider)), provider).toEqual([])
     }
   })
 
   it('known-bad probes: each lost rule is reported by name', () => {
-    const real = prReadyRef()
+    const real = ensurePrReadyReference()
     const seeds: ReadonlyArray<{ from: string; to: string; expected: string }> = [
       { from: ' A given `ISSUE_PR_LINK` is already decided in step 4a: skip the resolution below.', to: '', expected: 'step 4b skips its resolution for a given link' },
       { from: '`COMMIT_UNCOMMITTED` is `true` when absent', to: '`COMMIT_UNCOMMITTED` is `false` when absent', expected: 'COMMIT_UNCOMMITTED defaults to true' },

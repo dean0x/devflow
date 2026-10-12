@@ -911,9 +911,9 @@ export function isPrHostEntryPath(entryPath: string, op?: string): boolean {
 // ── Operation references (D-OP-ONE-REF) ──────────────────────────────────────
 //
 // Every Git operation loads exactly one operation reference, and the agent body
-// carries no operation text. A guard that used to read "the operation's section in
-// git.md" now reads "the operation's section in its one reference": the contract
-// (Input, degradation notes, Output template) and the steps are in the same file.
+// carries no operation text. A guard reads "the operation's section in its one
+// reference": the contract (Input, degradation notes, Output template) and the steps
+// are in the same file.
 // The corpus below is that set — one entry per operation, GitHub-provider by default
 // — so a 'sole' lookup on it is a single-authority lookup (`gitAgentSinkCorpus()` is
 // the union, with all three providers).
@@ -950,7 +950,7 @@ export function gitOperationReferenceCorpus(provider = 'github', root = ROOT): C
 
 /**
  * The compiled `ensure-pr-ready` reference under one provider: the operation that opens the PR
- * (D-PR-BY-GIT), holding the paste gates the Code agent's Responsibility 7 once held.
+ * (D-PR-BY-GIT), holding the paste gates.
  *
  * The PR skeleton is one write expanded into three provider files, so the GitHub copy stands
  * for it in the single-valued guards. Fail-loud on an absent file.
@@ -1745,9 +1745,9 @@ export function extractStatusLines(gitContent?: string): string {
     singleLine(ref('pr/post-resolution-summary.md'), '     <!-- devflow:resolution-summary'),
     // …the third moved with post-wave-report's compose step.
     singleLine(ref('tracker/github/post-wave-report.md'), '   <!-- devflow:wave-report'),
-    // PR-body guidance table and D11 scrub directive (baseline lines 93, 95, 99). They moved from the
-    // Code agent to ensure-pr-ready step 4a with the PR (D-PR-BY-GIT) and are sampled from its one
-    // reference, byte for byte (D-FROZEN-REPOINT).
+    // PR-body guidance table and D11 scrub directive (baseline lines 93, 95, 99). They live in
+    // ensure-pr-ready step 4a (D-PR-BY-GIT) and are sampled from its one reference, byte for byte
+    // (D-FROZEN-REPOINT).
     singleLine(gitOp('ensure-pr-ready'), '| Related Issues (ISSUE_NUMBER provided) |'),
     singleLine(gitOp('ensure-pr-ready'), 'When `ISSUE_NUMBER` is provided, always include'),
     singleLine(gitOp('ensure-pr-ready'), '**D11 scrub (PR body is a GitHub-visible sink):**'),

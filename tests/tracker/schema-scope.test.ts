@@ -940,7 +940,7 @@ const HOST_COMPOSED_REASONS: readonly string[] = [
   'cannot push to fork',
   'wave block does not match its grammar',
   'test-plan block does not match its grammar',
-  // The paste gates that moved from the Code agent with the PR (D-PR-BY-GIT): the link line and the evidence
+  // The paste gates of the PR ensure-pr-ready opens (D-PR-BY-GIT): the link line and the evidence
   // exceptions are shape-checked at the paste, and a mismatch degrades the PR, never the verdict.
   'issue reference "{ref}" does not match any tracker reference grammar',
   'evidence exception does not match its grammar',

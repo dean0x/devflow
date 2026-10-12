@@ -454,7 +454,7 @@ describe('no status-line anchor sits inside an arm, and no off arm repeats one (
       .map(m => ({ target: (m[1] === "gitOp('ensure-pr-ready')" ? 'prReady' : m[1]) as 'prReady' | 'dynamicBuild' | 'resolveMds', anchor: m[2].replace(/\\'/g, "'") }))
   }
 
-  // The three PR-body lines moved from the Code agent to ensure-pr-ready's PR skeleton (D-PR-BY-GIT). That
+  // The three PR-body lines live in ensure-pr-ready's PR skeleton (D-PR-BY-GIT). That
   // skeleton is a reference partial, which carries no learning arms and has no learning-off variant.
   const SOURCE_OF = {
     prReady: 'src/assets/mds/git/_ops_steps.mds',

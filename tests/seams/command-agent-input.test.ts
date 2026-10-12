@@ -664,8 +664,8 @@ describe('forward: every KEY: passed is declared in **Input:**', () => {
     }
   })
 
-  // D-PR-BY-GIT (#448): ensure-pr-ready opens /implement's PR, so the inputs the Code agent's Responsibility 7
-  // used to read are the operation's inputs now, and the Phase 9 spawn is the one caller that passes them all.
+  // D-PR-BY-GIT (#448): ensure-pr-ready opens /implement's PR, so the PR-opening inputs are the operation's
+  // inputs, and the Phase 9 spawn is the one caller that passes them all.
   /** The inputs #448 added to ensure-pr-ready. */
   const PR_OPEN_INPUTS = ['BASE_BRANCH', 'TASK_ID', 'ISSUE_NUMBER', 'ISSUE_PR_LINK', 'PR_EXCEPTIONS', 'COMMIT_UNCOMMITTED'] as const
   /** What /implement's Phase 9 spawn passes: the six, and the three the operation already took. */

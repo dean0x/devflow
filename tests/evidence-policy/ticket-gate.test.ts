@@ -85,11 +85,6 @@ function implementMd(): string {
   return requireDistFile('implement.md')
 }
 
-/** ensure-pr-ready's one reference (GitHub copy): the Git operation that opens the PR and owns the paste gates. */
-function prReadyMd(): string {
-  return ensurePrReadyReference()
-}
-
 /** A define's body as written — under MDS 0.4 a body with no `{{…}}` compiles to itself. */
 function defineBody(name: string): string {
   const lines = readFileSync(PARTIAL_PATH, 'utf-8').split('\n')
@@ -310,7 +305,7 @@ describe('AC-10: PR_EXCEPTIONS reaches the Git spawn that opens the PR', () => {
   })
 
   it('ensure-pr-ready declares PR_EXCEPTIONS as an optional input', () => {
-    const input = prReadyMd().split('\n').find(l => l.startsWith('**Input:**'))
+    const input = ensurePrReadyReference().split('\n').find(l => l.startsWith('**Input:**'))
     expect(input, 'the ensure-pr-ready Input line').toBeDefined()
     expect(input).toContain('`PR_EXCEPTIONS` (optional)')
   })
@@ -490,7 +485,7 @@ describe('AC-11: the exception grammar — define 2 and ensure-pr-ready\'s gate 
   })
 
   it('ensure-pr-ready\'s anchored paste gate decides every table row as the table says', () => {
-    const gate = codeGate(prReadyMd())
+    const gate = codeGate(ensurePrReadyReference())
     expect(gate.source.startsWith('^') && gate.source.endsWith('$'), 'the gate must anchor both ends').toBe(true)
     expect(collectGrammarMisses(gate)).toEqual([])
   })
@@ -501,7 +496,7 @@ describe('AC-11: the exception grammar — define 2 and ensure-pr-ready\'s gate 
     expect(collectGrammarMisses(widened).some(m => m.startsWith('kind `ticket-links`'))).toBe(true)
     const narrowed = compileExceptionTemplate({ ...spec, kinds: spec.kinds.filter(k => k !== 'test-plan') })
     expect(collectGrammarMisses(narrowed).some(m => m.startsWith('kind `test-plan`'))).toBe(true)
-    const unanchored = new RegExp(codeGate(prReadyMd()).source.slice(0, -1))
+    const unanchored = new RegExp(codeGate(ensurePrReadyReference()).source.slice(0, -1))
     expect(collectGrammarMisses(unanchored).some(m => m.startsWith('trailing text on a second line'))).toBe(true)
     const leaky = compileExceptionTemplate({ ...spec, removed: spec.removed.filter(c => c !== '#') })
     expect(collectGrammarMisses(leaky).some(m => m.startsWith('an issue reference'))).toBe(true)
@@ -560,7 +555,7 @@ function collectInadmissibleRenders(
 describe('AC-11: every line the rendering rules can produce passes ensure-pr-ready\'s gate', () => {
   it('hostile raw reasons render to admissible, inert lines; a blank reason renders to none', () => {
     const spec = exceptionSpec()
-    const gate = codeGate(prReadyMd())
+    const gate = codeGate(ensurePrReadyReference())
     expect(RAW_REASONS.length).toBeGreaterThanOrEqual(5)
     expect(collectInadmissibleRenders(spec, gate, RAW_REASONS)).toEqual([])
     expect(renderReason('   \n\t  ', spec), 'a blank reason is no reason').toBe('')
@@ -577,7 +572,7 @@ describe('AC-11: every line the rendering rules can produce passes ensure-pr-rea
 
   it('known-bad probe: a render rule that forgot a character leaks it and is refused', () => {
     const spec = exceptionSpec()
-    const gate = codeGate(prReadyMd())
+    const gate = codeGate(ensurePrReadyReference())
     const forgetful = { ...spec, removed: spec.removed.filter(c => c !== '@') }
     const found = collectInadmissibleRenders(forgetful, gate, ['approved by @lead'], spec.removed)
     expect(found.some(f => f.startsWith('refused:'))).toBe(true)
@@ -622,17 +617,17 @@ function collectPasteParagraphDefects(code: string): string[] {
 
 describe('ensure-pr-ready: the PR_EXCEPTIONS paste gate', () => {
   it('sits between the link gate and the D11 scrub, and leaves the frozen anchors unique', () => {
-    const code = prReadyMd()
+    const code = ensurePrReadyReference()
     expect(collectOrderViolations('ensure-pr-ready.md', code, PASTE_ORDER)).toEqual([])
     for (const anchor of FROZEN_ANCHORS) expect(code.split(anchor).length - 1, anchor).toBe(1)
   })
 
   it('states the heading pin, the whole-line match, the absent case and the refusal', () => {
-    expect(collectPasteParagraphDefects(prReadyMd())).toEqual([])
+    expect(collectPasteParagraphDefects(ensurePrReadyReference())).toEqual([])
   })
 
   it('known-bad probe: a paragraph that repairs a mismatch is reported', () => {
-    const code = prReadyMd()
+    const code = ensurePrReadyReference()
     const seeded = code.replace('paste none of it and do not repair it', 'repair it and paste it')
     expect(seeded, 'the seed must land').not.toBe(code)
     expect(collectPasteParagraphDefects(seeded)).toEqual(['a mismatch may be repaired or partly pasted'])

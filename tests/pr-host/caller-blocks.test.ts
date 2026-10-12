@@ -27,14 +27,13 @@
 
 import { describe, it, expect, afterAll } from 'vitest'
 import { createRequire } from 'module'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import * as path from 'path'
 
-import { compiledSkillRefsDir } from '../../src/core/assets.js'
 import { TRACKER_PROVIDERS } from '../../src/core/tracker.js'
 import { operationReferenceRel } from '../../src/core/mds-variants.js'
-import { collectOrderViolations, type OrderRule } from '../helpers.js'
+import { collectOrderViolations, ensurePrReadyReference, type OrderRule } from '../helpers.js'
 import { VERIFY_EVIDENCE_SCRIPT } from '../evidence/seam.js'
 
 /** Transcribed from the script's JSDoc — only what this suite calls. */
@@ -45,23 +44,6 @@ const VE = createRequire(import.meta.url)(VERIFY_EVIDENCE_SCRIPT) as VerifyEvide
 
 const SCRATCH = mkdtempSync(path.join(tmpdir(), 'devflow-caller-blocks-'))
 afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }))
-
-/**
- * ensure-pr-ready's one reference under a provider — fail-loud when dist is absent.
- *
- * The operation is a tracker operation (D-OP-ONE-REF): each provider's file holds the PR
- * skeleton, written once in `_ops_steps.mds`, beside that provider's step 4b. The GitHub file
- * stands for the PR half in the single-valued arms, and the provider arm below holds all three.
- */
-function prReadyRef(provider = 'github'): string {
-  const rel = operationReferenceRel('ensure-pr-ready', provider) ?? ''
-  const file = path.join(compiledSkillRefsDir(), ...rel.split('/'))
-  try {
-    return readFileSync(file, 'utf-8')
-  } catch {
-    throw new Error(`${rel} is absent — run \`npm run build\` first`)
-  }
-}
 
 /** The reference path the order rules and messages name. */
 const PR_READY_REL = operationReferenceRel('ensure-pr-ready', 'github') ?? ''
@@ -125,13 +107,13 @@ export function collectGateSubcommands(ref: string): string[] {
 
 describe('ensure-pr-ready 4a: the caller blocks are pasted only behind their checks (AC-4)', () => {
   it('the reference states the order, the gate, the refusal, the 4b skip and the scrub exclusion', () => {
-    const ref = prReadyRef()
+    const ref = ensurePrReadyReference()
     expect(ref.length, 'the PR-host reference is empty').toBeGreaterThan(0)
     expect(collectCallerBlockDefects(ref)).toEqual([])
   })
 
   it('known-bad probes: a reversed order, a lost gate, a repair, a kept 4b, an unscrubbed paste', () => {
-    const ref = prReadyRef()
+    const ref = ensurePrReadyReference()
     const seeds: ReadonlyArray<{ label: string; from: string; to: string; expected: string }> = [
       {
         label: 'reversed',
@@ -190,12 +172,12 @@ describe('ensure-pr-ready 4a: the caller blocks are pasted only behind their che
   it('the reference states the same caller-block rule under every provider', () => {
     // The PR skeleton is one write expanded into three files; each provider's copy must carry it.
     for (const provider of TRACKER_PROVIDERS.map(p => p.id)) {
-      expect(collectCallerBlockDefects(prReadyRef(provider)), provider).toEqual([])
+      expect(collectCallerBlockDefects(ensurePrReadyReference(provider)), provider).toEqual([])
     }
   })
 
   it('the ensure-pr-ready reference declares both blocks as optional inputs', () => {
-    const ref = prReadyRef()
+    const ref = ensurePrReadyReference()
     const section = ref.slice(ref.indexOf('## Operation: ensure-pr-ready'))
     const input = section.split('\n').find(l => l.startsWith('**Input:**')) ?? ''
     expect(input, 'the ensure-pr-ready Input line').not.toBe('')
@@ -263,7 +245,7 @@ export function collectGateMisroutes(subs: readonly string[]): string[] {
 
 describe('ensure-pr-ready 4a: the named gate routes to the real script (AC-4)', () => {
   it('the reference names exactly `check wave` and `check block`, and each admits its block and refuses (none)', () => {
-    const subs = collectGateSubcommands(prReadyRef())
+    const subs = collectGateSubcommands(ensurePrReadyReference())
     expect(subs).toEqual(['wave', 'block'])
     expect(collectGateMisroutes(subs)).toEqual([])
   })
@@ -275,7 +257,7 @@ describe('ensure-pr-ready 4a: the named gate routes to the real script (AC-4)', 
   })
 
   it('known-bad probe: a reference naming a subcommand the script does not route is reported', () => {
-    const wounded = prReadyRef().replace('check <wave|block> <file>', 'check <waves|block> <file>')
+    const wounded = ensurePrReadyReference().replace('check <wave|block> <file>', 'check <waves|block> <file>')
     const subs = collectGateSubcommands(wounded)
     expect(subs).toEqual(['waves', 'block'])
     expect(collectGateMisroutes(subs)).toEqual([

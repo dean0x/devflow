@@ -255,9 +255,7 @@ export function nameableFrom(
     referenceMentions(text).filter(rel => !rel.includes('{'));
 
   // The operation's own reference IS the body the spawn reads, so a literal `references/…` name
-  // inside it is a name the spawn can load in the same spawn. (It used to take two reads — the
-  // agent's op section, then ONE hop into the `pr/` body it named — because the contract and the
-  // mechanics were separate files; now they are one.)
+  // inside it is a name the spawn can load in the same spawn.
   const body = readReference(own);
   if (body !== null) {
     for (const rel of literalMentions(body)) nameable.add(rel);
@@ -592,10 +590,9 @@ export const LOADED_SET_WRITTEN_EXCLUSIONS: readonly string[] = ['github-api.md'
  * `max over every operation, under every provider, of its one-spawn load` — the largest single
  * operation the Git agent can be asked to run, measured as the references it loads.
  *
- * D-OP-LOAD-CAP. It generalises the PR-host cap this file used to carry: the contract and the
- * mechanics of an operation are one reference now, so "the largest operation" is a question about
- * every operation, tracker and PR-host alike, and the per-operation alarm
- * (`git-op-load-max` in numeric-floors.json) ranges over all of them. The preloaded set and the
+ * D-OP-LOAD-CAP. The contract and the mechanics of an operation are one reference, so "the largest
+ * operation" is a question about every operation, tracker and PR-host alike, and the per-operation
+ * alarm (`git-op-load-max` in numeric-floors.json) ranges over all of them. The preloaded set and the
  * per-spawn contract term are NOT in it — they are the same for every operation and have rows of
  * their own — and `exclusions` is the loaded-set rows' written exclusion, so the cap and the
  * rows can never price the same operation two ways.
@@ -865,7 +862,7 @@ export const INFORMATIONAL_OP_MENTIONS: readonly InformationalOpMention[] = [
     why: 'Names which earlier operation produced the issue reference the caller already holds; ' +
       'it reads that Output value and runs none of the producing operation\'s steps.',
   }))),
-  // ensure-pr-ready's handoff paste gate (moved from the Code agent, D-PR-BY-GIT) names the two producers.
+  // ensure-pr-ready's handoff paste gate (D-PR-BY-GIT) names the two producers.
   ...TRACKER_PROVIDERS.flatMap(({ id }) => ['setup-task', 'fetch-issue'].map(target => ({
     file: `tracker/${id}/ensure-pr-ready.md`,
     target,

@@ -95,18 +95,13 @@ function runOnText(sub: readonly string[], text: string, name: string): { code: 
   return VE.main(['node', 'verify-evidence.cjs', ...sub, file], { stderr: () => {} })
 }
 
-/** ensure-pr-ready's one reference (GitHub copy): the Git operation that opens the PR and owns the paste gates. */
-function prReadyMd(): string {
-  return ensurePrReadyReference()
-}
-
 // ---------------------------------------------------------------------------
 // ensure-pr-ready — the PR_TEST_PLAN_BLOCK paste gate (AC-10)
 // ---------------------------------------------------------------------------
 //
-// The paste gate moved from the Code agent's Responsibility 7 to ensure-pr-ready step 4a with the PR
-// (D-PR-BY-GIT), and its second copy went: one `check block` serves the test-plan block and the wave
-// block, so the rule is one bullet, "Caller blocks", read here beside the exception gate and the scrub.
+// The paste gate lives in ensure-pr-ready step 4a, beside the PR it opens (D-PR-BY-GIT). One
+// `check block` serves the test-plan block and the wave block, so the rule is one bullet, "Caller
+// blocks", read here beside the exception gate and the scrub.
 
 const CALLER_BLOCKS = '   - **Caller blocks**'
 const EXCEPTIONS_PASTE = '**Pasting `PR_EXCEPTIONS`.**'
@@ -153,18 +148,18 @@ function collectTestPlanPasteDefects(ref: string): string[] {
 
 describe('AC-10: ensure-pr-ready pastes PR_TEST_PLAN_BLOCK only through `check block`', () => {
   it('the bullet sits before the exception gate and the D11 scrub; the frozen anchors stay unique', () => {
-    const ref = prReadyMd()
+    const ref = ensurePrReadyReference()
     expect(collectOrderViolations('ensure-pr-ready.md', ref, PASTE_ORDER)).toEqual([])
     for (const anchor of FROZEN_ANCHORS) expect(ref.split(anchor).length - 1, anchor).toBe(1)
     expect(callerBlocksParagraph(ref) ?? '', 'the bullet must not spell a frozen anchor').not.toMatch(/ISSUE_NUMBER|D11 scrub \(/)
   })
 
   it('the bullet states the gate, the placement, the refusal and the absent case', () => {
-    expect(collectTestPlanPasteDefects(prReadyMd())).toEqual([])
+    expect(collectTestPlanPasteDefects(ensurePrReadyReference())).toEqual([])
   })
 
   it('known-bad probes: a repairing bullet, a lost gate, a second check and a missing bullet are reported', () => {
-    const ref = prReadyMd()
+    const ref = ensurePrReadyReference()
     const repairs = ref.replace('never repaired or partly pasted', 'repaired, then pasted')
     expect(repairs, 'the seed must land').not.toBe(ref)
     expect(collectTestPlanPasteDefects(repairs)).toEqual(['a mismatch is omitted, never repaired or partly pasted'])
@@ -176,7 +171,7 @@ describe('AC-10: ensure-pr-ready pastes PR_TEST_PLAN_BLOCK only through `check b
   })
 
   it('ensure-pr-ready declares PR_TEST_PLAN_BLOCK as an optional input, and the Code agent declares none of the PR inputs', () => {
-    const input = prReadyMd().split('\n').find(l => l.startsWith('**Input:**')) ?? ''
+    const input = ensurePrReadyReference().split('\n').find(l => l.startsWith('**Input:**')) ?? ''
     expect(input).toContain('`PR_TEST_PLAN_BLOCK` (optional)')
     const code = resolveAgentSource('code').content
     expect(code).not.toContain('PR_TEST_PLAN_BLOCK')
