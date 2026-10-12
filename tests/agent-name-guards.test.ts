@@ -28,7 +28,7 @@ import { existsSync, readFileSync, readdirSync, type Dirent } from 'fs'
 import * as path from 'path'
 import { getAllAgentNames } from '../src/core/plugins.js'
 import { LEGACY_AGENT_KEYS, canonicaliseAgentKeys } from '../src/core/agent-models.js'
-import { requireDistFiles, requireDistFile, resolveAgentSource, resolveAllAgents } from './helpers.js'
+import { collectValidAgentTypes, requireDistFiles, requireDistFile, resolveAgentSource, resolveAllAgents } from './helpers.js'
 
 const ROOT = path.resolve(import.meta.dirname, '..')
 const ASSETS_DIR = path.join(ROOT, 'src', 'assets')
@@ -473,6 +473,29 @@ function extractAgentTypes(content: string): Set<string> {
 }
 
 /**
+ * Named collector: how a compiled dynamic host's "Valid `agentType` values" sentence (the preamble's
+ * closed list) differs from the types the host spawns and from the roster. A type the host spawns but the
+ * sentence omits tells the main model that its own script is invalid, so the three disagree; a listed
+ * type the roster lacks (or the reverse) is a name no spawn or no registry entry stands behind.
+ */
+function collectValidListDefects(host: string, text: string, roster: ReadonlySet<string>): string[] {
+  const listed = collectValidAgentTypes(text)
+  if (listed === null) return [`${host}: no "Valid \`agentType\` values" sentence`]
+  const listedSet = new Set(listed)
+  const out: string[] = []
+  for (const type of extractAgentTypes(text)) {
+    if (!listedSet.has(type)) out.push(`${host}: spawns "${type}", which the valid-agentType sentence does not list`)
+  }
+  for (const type of listed) {
+    if (!roster.has(type)) out.push(`${host}: lists "${type}", which the roster does not`)
+  }
+  for (const type of roster) {
+    if (!listedSet.has(type)) out.push(`${host}: omits "${type}", which the roster lists`)
+  }
+  return out
+}
+
+/**
  * Parse the "| AgentName | tier | … |" roster table from _roster.mds source.
  * Returns name → model tier.
  */
@@ -615,6 +638,50 @@ describe('GAP-2: agentType: values in dist ↔ declared roster', () => {
       inDistNotInRoster,
       `agentType values in dist/commands/ not in _roster.mds — update the roster or fix the command:\n  ${inDistNotInRoster.join('\n  ')}`,
     ).toHaveLength(0)
+  })
+
+  /** The four dynamic hosts (build, plan, profile, tickets): each carries the preamble's valid-agentType sentence. */
+  const DYNAMIC_HOST_COUNT = 4
+
+  it("each dynamic host's valid-agentType sentence lists the roster and every type the host spawns", () => {
+    const hosts = requireDistFiles().filter(f => f.startsWith('dynamic-'))
+    expect(hosts, 'dynamic hosts in dist/commands').toHaveLength(DYNAMIC_HOST_COUNT)
+    const roster = new Set(parseRosterFromSource().keys())
+    expect(roster.size, '_roster.mds table is empty — parse failure?').toBeGreaterThan(0)
+
+    // Non-vacuity: every host yields a list, and the hosts together spawn at least one type to hold it to.
+    const texts = hosts.map(h => [h, requireDistFile(h)] as const)
+    for (const [host, text] of texts) {
+      expect(collectValidAgentTypes(text)?.length ?? 0, `${host}: types in the valid-agentType sentence`).toBeGreaterThan(0)
+    }
+    const spawned = new Set(texts.flatMap(([, text]) => [...extractAgentTypes(text)]))
+    expect(spawned.size, 'agentType values the dynamic hosts spawn').toBeGreaterThan(0)
+
+    expect(texts.flatMap(([host, text]) => collectValidListDefects(host, text, roster))).toEqual([])
+  })
+
+  it('known-bad probes: a dropped spawned type, an invented type and a missing sentence are each reported', () => {
+    const host = 'dynamic-build.md'
+    const text = requireDistFile(host)
+    const roster = new Set(parseRosterFromSource().keys())
+    const line = text.split('\n').find(l => l.startsWith('Valid `agentType` values: ')) ?? ''
+    expect(line, 'the valid-agentType sentence').not.toBe('')
+    const listed = collectValidAgentTypes(text) ?? []
+    const withList = (types: readonly string[]): string => text.replace(line, `Valid \`agentType\` values: ${types.join(', ')}.`)
+
+    // Control: the real host passes, so the probes below are not red for an unrelated reason.
+    expect(collectValidListDefects(host, text, roster)).toEqual([])
+
+    expect(collectValidListDefects(host, withList(listed.filter(t => t !== 'Code-fix')), roster)).toEqual([
+      `${host}: spawns "Code-fix", which the valid-agentType sentence does not list`,
+      `${host}: omits "Code-fix", which the roster lists`,
+    ])
+    expect(collectValidListDefects(host, withList([...listed, 'Fixer']), roster)).toEqual([
+      `${host}: lists "Fixer", which the roster does not`,
+    ])
+    expect(collectValidListDefects(host, text.replace(line, ''), roster)).toEqual([
+      `${host}: no "Valid \`agentType\` values" sentence`,
+    ])
   })
 
   it('subagent_type literals in dist and hook scripts exactly match a live form-B name (case-sensitive)', () => {

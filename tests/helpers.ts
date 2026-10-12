@@ -466,6 +466,17 @@ export function collectCodeSpawnSites(file: string, text: string, agentType?: st
 }
 
 /**
+ * Named collector: the agent types the workflow preamble lists as valid for `agent()` calls — the one
+ * sentence "Valid `agentType` values: A, B, C." that every dynamic host carries. Returns null when the
+ * text holds no such sentence, so a caller can tell a missing list from an empty one. The hyphen of a Code
+ * variant joins its two words.
+ */
+export function collectValidAgentTypes(text: string): string[] | null {
+  const m = /^Valid `agentType` values: ([A-Z][A-Za-z]*(?:-[a-z]+)?(?:, [A-Z][A-Za-z]*(?:-[a-z]+)?){0,63})\.$/m.exec(text)
+  return m === null ? null : m[1].split(', ')
+}
+
+/**
  * Parse an agent's frontmatter `skills:` block-list (`- devflow:<name>` items) into the
  * unprefixed names. The one reader of an agent's preload: the re-entrancy guard in
  * skill-references.test.ts and the Code preload guard in tests/guards/code-preload.test.ts

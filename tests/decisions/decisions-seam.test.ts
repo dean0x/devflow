@@ -37,6 +37,7 @@ import { describe, it, expect } from 'vitest'
 import {
   collectCodeSpawnSites,
   collectUnfencedLines,
+  collectValidAgentTypes,
   requireDistFile,
   requireDistFiles,
   resolveAllAgents,
@@ -164,6 +165,24 @@ function receiverPhrase(sentence: string): string {
 /** The agent types a phrase names, whole words, in order of appearance. */
 function namedTypes(phrase: string, known: ReadonlySet<string>): string[] {
   return [...phrase.matchAll(/\b[A-Z][A-Za-z]+\b/g)].map(m => m[0]).filter(w => known.has(w))
+}
+
+/**
+ * Named collector: the valid agent types that declare the key but are missing from the receivers of a host's
+ * authoring-step inject sentence. A declared type the host can spawn and hand the key to, yet the sentence does
+ * not name, is told it gets none ("every other agent type gets no decisions context").
+ */
+function collectUnnamedReceivers(host: string, text: string, declared: ReadonlySet<string>): string[] {
+  const valid = collectValidAgentTypes(text)
+  if (valid === null) return [`${host}: no valid-agentType sentence`]
+  const inject = text.split('\n').find(l => l.includes('Then inject the relevant DECISIONS_CONTEXT')) ?? ''
+  if (inject === '') return [`${host}: no inject sentence`]
+  const phrase = receiverPhrase(inject.slice(inject.indexOf('Then inject')))
+  const receivers = phrase.slice(0, phrase.indexOf(' agents'))
+  return valid
+    .filter(type => declared.has(type))
+    .filter(type => !new RegExp(`(?<![\\w-])${type}(?![\\w-])`).test(receivers))
+    .map(type => `${host}: the inject sentence omits ${type}, which is valid and declares the key`)
 }
 
 /** Named collector: give-away sentences that name no receiver or an undeclared one, and are not classified. */
@@ -423,6 +442,26 @@ describe('the authoring step names declared receivers only (AC-125)', () => {
     const note = requireDistFile('dynamic-plan.md').split('\n').find(l => l.includes('note verbatim ADR/PF IDs to inject into')) ?? ''
     expect(note).toContain('into Design agent prompts.')
     expect(note).not.toContain('Evaluate')
+  })
+
+  it('the inject sentence names every valid agent type that declares the key, the Code-fix variant included', () => {
+    const declared = collectDeclaredTypes()
+    const hosts = ['dynamic-build.md', 'dynamic-plan.md', 'dynamic-profile.md', 'dynamic-tickets.md']
+    // Non-vacuity: the valid-and-declared types are read, and the Code-family variant a workflow spawns is among them.
+    const reachable = (collectValidAgentTypes(requireDistFile(hosts[0])) ?? []).filter(t => declared.has(t))
+    expect(reachable.length, 'valid agent types that declare the key').toBeGreaterThanOrEqual(2)
+    expect(reachable).toContain('Code-fix')
+    for (const host of hosts) expect(collectUnnamedReceivers(host, requireDistFile(host), declared), host).toEqual([])
+  })
+
+  it('known-bad probe: an inject sentence that drops Code-fix is reported', () => {
+    const declared = collectDeclaredTypes()
+    const text = requireDistFile('dynamic-build.md')
+    const dropped = text.replace('the Code, Code-fix, Design,', 'the Code, Design,')
+    expect(dropped, 'the sentence names Code-fix beside Code').not.toBe(text)
+    expect(collectUnnamedReceivers('dynamic-build.md', dropped, declared)).toEqual([
+      'dynamic-build.md: the inject sentence omits Code-fix, which is valid and declares the key',
+    ])
   })
 })
 
