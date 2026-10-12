@@ -313,7 +313,8 @@ describe('capability-hoist: no capability probe runs inside a loop [DR-11]', () 
     // references) + 8 PR-host references, measured on this branch. The agent's own twenty
     // `**Process:**` blocks and the PR-host ensure-pr-ready block left with the operation text
     // they labelled (D-OP-ONE-REF): their steps are the `### Process` blocks counted here.
-    // Registered as `capability-hoist-block-floor`; the literal is spelled here so a decrement
+    // Was 63 before #451; lowered to 42 with the user's acceptance on 2026-10-12 (the manifest entry
+    // records why). Registered as `capability-hoist-block-floor`; the literal is spelled here so a decrement
     // is visible at the assertion, not only in the manifest.
     expect(
       blocks.length,

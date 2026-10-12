@@ -663,6 +663,7 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
     ).toBeGreaterThan(0);
 
     const manifest = generatedReferenceManifest();
+    // Floor 48 -> 47 with #451 (pr/ensure-pr-ready.md is no longer emitted); accepted by the user 2026-10-12.
     expect(
       manifest.length,
       'a manifest short enough to enumerate by hand makes this assertion vacuous',
