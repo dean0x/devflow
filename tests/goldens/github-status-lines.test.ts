@@ -26,8 +26,8 @@
  * github-status-lines.txt is frozen, and the --unfreeze refusal guard below
  * protects that fixture only. Overriding the freeze takes an explicit, dated user
  * authorisation naming the exact bytes it permits, and each such authorisation is
- * spent by the single commit that uses it. Eight have been granted and all
- * eight are spent:
+ * spent by the single commit that uses it. Nine have been granted and all
+ * nine are spent:
  *
  *   2026-09-14  e4876e0  the extractor retarget after the mechanics split
  *   2026-09-15  c0b9860  the two `**Mechanics:**` pointer lines, at fixture
@@ -66,6 +66,22 @@
  *                        longer lists ledger IDs, so the resolve-review-threads
  *                        reply rule lost `, ADR IDs` — 9 bytes, nothing else;
  *                        the other 248 lines are byte-identical
+ *   2026-10-12  (#451; user)  the ninth re-capture, granted for the ten lines
+ *                        below and spent on all ten, deletions only: the Git
+ *                        agent no longer carries operation sections, so the
+ *                        `**Process:**` labels and the `**Mechanics:** load
+ *                        this operation's provider reference.` pointers the
+ *                        manage-debt, check-ci-status and gather-release-
+ *                        evidence samples read have no successor — each
+ *                        operation's contract and steps are one reference
+ *                        (D-OP-ONE-REF) and the pointer would point at itself.
+ *                        Fixture lines 132-135 (manage-debt: Process, blank,
+ *                        Mechanics, blank), 139-140 (check-ci-status: blank,
+ *                        Process) and 158-161 (gather-release-evidence: Process,
+ *                        blank, Mechanics and one blank — which of the two
+ *                        adjacent blanks a diff names is alignment; the
+ *                        resulting bytes are the same). Nothing was added; the
+ *                        other 239 lines are byte-identical.
  *
  * THE AUTHORISATION IS SPENT. Any further change to this fixture requires a new
  * explicit authorisation; none is outstanding.
@@ -162,8 +178,8 @@ export const TOTAL_CHARS = 18_690
 export const TOTAL_LINES = 386
 
 // Fixture invariants — these ARE bytes (Buffer.byteLength), not JS .length
-export const FIXTURE_BYTES = 18_383
-export const FIXTURE_NEWLINES = 249
+export const FIXTURE_BYTES = 18_225
+export const FIXTURE_NEWLINES = 239
 
 describe('golden: github-status-lines frozen fixture (AC-0.9)', () => {
   it('extractStatusLines() is byte-equal to the golden fixture', () => {

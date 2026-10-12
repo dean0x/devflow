@@ -129,15 +129,9 @@ Each issue in the batch is wrapped individually in its own `<untrusted-issue-bod
 5. Remove items that have been fixed (verify in codebase)
 6. Compose updated issue body to `$DEVFLOW_BODY_RAW`; apply the Comment-sink scrub (D11) and post via `gh issue edit {number} --body-file "$DEVFLOW_BODY"`
 7. Return the backlog issue number for Tracked field backfill in resolution-summary.md
-**Process:**
-
-**Mechanics:** load this operation's provider reference.
-
 **Degradation (D4):** `gh` unauthenticated or absent, or GitHub API error → `TRACEABILITY: DEGRADED ({reason})`; warn in output; return without updating the backlog. Caller records the failure; `Tracked` stays `(pending — TRACEABILITY: DEGRADED ({reason}))` in resolution-summary.md.
 
 **Input:** `PR_NUMBER` (optional), `WORKTREE_PATH` (optional)
-
-**Process:**
 1. If `PR_NUMBER` not provided, discover it: `gh pr view --json number --jq '.number' 2>/dev/null`
 2. If no PR found → output status `NO_PR`, stop
 3. Fetch checks: `gh pr checks {number} --json name,state,bucket; echo "exit=$?"` — exit 0, or 8 (checks pending), is a result; any other exit is a failure
@@ -155,10 +149,6 @@ Each issue in the batch is wrapped individually in its own `<untrusted-issue-bod
 **Input:** `WORKTREE_PATH` (optional)
 
 **Degradation (D4):** `gh` unauthenticated or remote unreachable → collect git-only signals (commit list from local history); emit `TRACEABILITY: DEGRADED ({reason})` for any GitHub signal that could not be fetched; continue — never abort the caller's workflow.
-
-**Process:**
-
-**Mechanics:** load this operation's provider reference.
 
 1. Find last tag: `git describe --tags --abbrev=0 2>/dev/null`. If no tags exist, use the initial commit (`git rev-list --max-parents=0 HEAD`).
 2. Collect commit list: `git log {last_tag}..HEAD --oneline` — take the first ≤100 entries; if more exist, append a final `…and {n} more commits` note to signal truncation.
