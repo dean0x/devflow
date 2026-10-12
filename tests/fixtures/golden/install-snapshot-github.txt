@@ -16,6 +16,8 @@ d sub/
 d .claude/
 d .claude/agents/
 d .claude/agents/devflow/
+- .claude/agents/devflow/code-edit.md
+- .claude/agents/devflow/code-fix.md
 - .claude/agents/devflow/code.md
 - .claude/agents/devflow/design.md
 - .claude/agents/devflow/diagnose.md
