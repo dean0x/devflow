@@ -33,7 +33,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import * as path from 'path'
-import { ROOT, collectUnfencedH2, resolveAgentSource, walkFiles } from '../helpers.js'
+import { ROOT, collectUnfencedH2, readAgentReference, resolveAgentSource, walkFiles } from '../helpers.js'
 import { DEVFLOW_PLUGINS } from '../../src/core/plugins.js'
 
 /** Agents outside the roster, with the reason each is out. */
@@ -174,11 +174,15 @@ describe('D-REPORT-CAP: the report cap on the roster', () => {
     for (const name of roster) expect(collectCapDefects(name, resolveAgentSource(name).content)).toEqual([])
   })
 
-  it('synthesize.md has an Output heading before Principles, and its per-mode templates stay where they are', () => {
+  it('synthesize.md has an Output heading before Principles, and its mode templates live in their references (D-MODE-BY-PATH)', () => {
     const headings = collectUnfencedH2(resolveAgentSource('synthesize').content).map(h => h.text)
     expect(headings.indexOf('## Output')).toBeGreaterThan(-1)
     expect(headings.indexOf('## Output')).toBe(headings.indexOf('## Principles') - 1)
-    expect(headings.indexOf('## Mode: Exploration')).toBeLessThan(headings.indexOf('## Output'))
+    expect(headings.filter(h => h.startsWith('## Mode: ')), 'no mode section stays in the body').toEqual([])
+    expect(
+      collectUnfencedH2(readAgentReference('synthesize/exploration.md')).map(h => h.text),
+      'the exploration template starts the exploration reference',
+    ).toEqual(['## Mode: Exploration'])
   })
 
   it('the Output template in agent-design.md carries the same line', () => {

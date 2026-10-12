@@ -20,6 +20,7 @@ import * as path from 'path';
 import * as os from 'os';
 
 import { makeV2LogRow, requireLearningStore, runJsonHelper } from './learning-fixtures.js';
+import { readAgentReference } from '../helpers.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(import.meta.url);
@@ -103,7 +104,8 @@ describe('Learning agent curation contract (AC-C3)', () => {
   let agentContent: string;
 
   beforeAll(() => {
-    agentContent = fs.readFileSync(AGENT_PATH, 'utf8');
+    // D-MAINTAIN-ON-DUE: Part 2's ladder lives in learning/maintain.md; a run with a due entry sees both, body first.
+    agentContent = `${fs.readFileSync(AGENT_PATH, 'utf8')}\n${readAgentReference('learning/maintain.md')}`;
   });
 
   it('Iron Law says assign-anchor owns numbering, render owns the .md, never hand-edit', () => {
@@ -396,7 +398,8 @@ describe('AC-F9: rotation step wired into curation (contract check)', () => {
   let agentContent: string;
 
   beforeAll(() => {
-    agentContent = fs.readFileSync(AGENT_PATH, 'utf8');
+    // D-MAINTAIN-ON-DUE: Part 2's ladder lives in learning/maintain.md; a run with a due entry sees both, body first.
+    agentContent = `${fs.readFileSync(AGENT_PATH, 'utf8')}\n${readAgentReference('learning/maintain.md')}`;
   });
 
   it('agent runs rotate-observations before selecting curation retire/merge candidates', () => {

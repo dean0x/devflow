@@ -85,7 +85,7 @@ Ask each explorer for a final report of at most about 1,500 tokens: findings wit
 **Produces:** MERGED_FINDINGS
 **Requires:** EXPLORE_OUTPUT
 
-Spawn `Agent(subagent_type="Synthesize")` in `exploration` mode with combined findings:
+Spawn `Agent(subagent_type="Synthesize")` with the prompt line `Mode: exploration` first, then the combined findings:
 
 - Merge overlapping discoveries from parallel explorers
 - Resolve any contradictions between explorer findings

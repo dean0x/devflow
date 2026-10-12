@@ -372,6 +372,29 @@ export function resolveAllAgents(root: string = ROOT): Map<string, AgentSource> 
 }
 
 /**
+ * D-AGENT-REFS: the reference-only skill whose files hold text one agent mode needs and the others do
+ * not. Synthesize reads `synthesize/{mode}.md` (D-MODE-BY-PATH) and Learning reads
+ * `learning/maintain.md` (D-MAINTAIN-ON-DUE), each by explicit path; nothing preloads the skill.
+ */
+export const AGENT_REFERENCES_SKILL = 'agent-references'
+
+/** The six Synthesize modes, in the order the agent's routing table lists them. */
+export const SYNTHESIZE_MODES: readonly string[] = ['exploration', 'planning', 'review', 'bug-analysis', 'design', 'research']
+
+/** The agent-references file at `rel` (e.g. `synthesize/review.md`), as a source path. */
+export function agentReferencePath(rel: string, root: string = ROOT): string {
+  return path.join(root, 'src', 'assets', 'skills', AGENT_REFERENCES_SKILL, 'references', rel)
+}
+
+/**
+ * Read one agent-references file. Throws when it is absent: a guard that reads a reference the agent
+ * routes to must fail on a missing file, never fall back to an empty string.
+ */
+export function readAgentReference(rel: string, root: string = ROOT): string {
+  return readFileSync(agentReferencePath(rel, root), 'utf-8')
+}
+
+/**
  * D-CODE-VARIANTS: the seven operating modes of the Code family (`OPERATION`), by the agent type that
  * runs each. Code takes `implement` (the default when absent) and `issue-fix`; Code-fix takes the four
  * gate-failure fixes and has no default; Code-edit takes `edit`. One map for the spawn-site guard

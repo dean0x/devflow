@@ -103,7 +103,14 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
      * dist/commands/, and a hook-spawned agent appears in none of them.
      */
     agents: ['learning', 'tracker'],
-    skills: ['apply-decisions', 'apply-feature-knowledge', 'software-design', 'docs-framework', 'git', 'boundary-validation', 'test-driven-development', 'testing', 'dependency-research'],
+    /**
+     * D-AGENT-REFS: `agent-references` is a reference-only skill. It holds the Synthesize mode
+     * templates and the Learning maintain step, which those two agents read by explicit path, so
+     * it sits here (core-skills is always installed) and no other plugin lists or requires it.
+     * It is never preloaded: tests/guards/agent-references.test.ts holds that, and the one
+     * exception to the repo-wide ban on `disable-model-invocation` names this skill alone.
+     */
+    skills: ['apply-decisions', 'apply-feature-knowledge', 'software-design', 'docs-framework', 'git', 'boundary-validation', 'test-driven-development', 'testing', 'dependency-research', 'agent-references'],
     requires: [
       'architecture',
       'complexity',
