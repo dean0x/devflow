@@ -38,7 +38,7 @@ export const PROXY_LOG_TAIL_BYTES = 1_048_576;
  * XDG_CONFIG_HOME (user-config lookup, reached only on an implicit config load —
  * see D-EFR-6 in model-discovery.ts). CI is read only by `init`; CODEX_HOME and
  * CLAUDE_CONFIG_DIR only by the Codex ingress, `init` and the Codex doctor, none of
- * which devflow enables or invokes. Verified by whole-dist grep of the 0.5.0
+ * which devflow enables or invokes. Verified by whole-dist grep of the 0.6.0
  * package. An allowlist is the correct shape: 61 inherited vars → 6.
  *
  * HOME is retained: the runtime's loadConfig resolves ~ paths via homedir().

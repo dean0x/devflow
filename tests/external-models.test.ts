@@ -20,7 +20,7 @@ import {
 } from '../src/core/external-models.js';
 
 // Literal GPT model IDs — independent of the deleted hardcoded registry.
-// Canonical registry ids that still route by exact id under subswitch@0.5.0
+// Canonical registry ids that still route by exact id under subswitch@0.6.0
 // (gpt-5.5 is retired from discovery but remains exact-id routable).
 // End-state only — no compatibility imports from deleted exports.
 const KNOWN_GPT_IDS = ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5'];

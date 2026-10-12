@@ -42,7 +42,7 @@ function makeAgentFrontmatter(model: string): string {
 /**
  * Known GPT model IDs — literal list so this test file does not depend on the
  * hardcoded registry in external-models.ts (which is deleted in Commit 9).
- * Canonical registry ids that still route by exact id under subswitch@0.5.0
+ * Canonical registry ids that still route by exact id under subswitch@0.6.0
  * (gpt-5.5 is retired from discovery but remains exact-id routable).
  * End-state only — no externalModelIds() import.
  */

@@ -129,7 +129,7 @@ export async function writeProxyState(
  * Top-level keys devflow carries into the routing config. Unknown top-level keys
  * cause a hard relay startup error — never emit them.
  *
- * @D-EFR-4 Subswitch 0.5.0 routing config contract:
+ * @D-EFR-4 Subswitch 0.6.0 routing config contract:
  *   FileConfigSchema is a z.strictObject with exactly 6 accepted top-level keys:
  *   port, logLevel, anthropic, providers, limits, codexIngress. Unknown keys cause a
  *   hard startup error — the relay refuses to start. anthropic and limits are
