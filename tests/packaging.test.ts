@@ -46,7 +46,7 @@ const ROOT = path.resolve(import.meta.dirname, '..');
  * Expected exact-pinned version of the routing runtime.
  * Hoisted so the next bump is a one-line change.
  */
-const SUBSWITCH_VERSION = '0.5.0';
+const SUBSWITCH_VERSION = '0.6.0';
 
 /**
  * Expected exact-pinned version of the MDS compiler.

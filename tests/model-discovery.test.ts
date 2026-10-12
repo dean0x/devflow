@@ -775,7 +775,7 @@ describe('T1: Real-binary — discoverExternalModels with live runtime', () => {
 
     const result = await discoverExternalModels(cacheDir, logPath);
 
-    // subswitch models --json (0.5.0) is a static registry dump: no auth, no relay,
+    // subswitch models --json (0.6.0) is a static registry dump: no auth, no relay,
     // no config file required (verified: exit 0, configFileFound:false; the runtime's
     // user-level config is isolated by D-EFR-6, covered by T13). The per-test
     // cacheDir is freshly created (beforeEach), so no cache hit is possible — source
@@ -792,7 +792,7 @@ describe('T1: Real-binary — discoverExternalModels with live runtime', () => {
     for (const name of result.selectableNames) {
       expect(result.aliasToId.has(name)).toBe(true);
     }
-    // 0.5.0 lists gpt-5.5 with retired:true, routable:false — never offered.
+    // 0.6.0 lists gpt-5.5 with retired:true, routable:false — never offered.
     expect(result.selectableNames).not.toContain('gpt-5.5');
   }, 10_000); // 10s timeout for live spawn
 });
