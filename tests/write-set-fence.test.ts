@@ -60,6 +60,7 @@ import { proxyCommand } from '../src/cli/commands/proxy.js'
 import { agentsCommand } from '../src/cli/commands/agents.js'
 import { complianceCommand } from '../src/cli/commands/compliance.js'
 import { trackerCommand } from '../src/cli/commands/tracker.js'
+import { behaviorCommand } from '../src/cli/commands/behavior.js'
 
 const CLI = requireBuiltCli()
 
@@ -246,6 +247,12 @@ export const FENCE_ROWS: readonly FenceRow[] = [
   { args: ['compliance', '--disable'], allow: [MANIFEST, COMPLIANCE_RULE, COMPLIANCE_SKILL], mustWrite: true, label: 'after --enable' },
   { args: ['compliance', '--status'], allow: NONE, mustWrite: false },
 
+  // The one rule file the converge writes (rules/devflow/behavior.md) sits under RULES_DIR; the entry already
+  // counts once, so the allowlist footprint (write-fence-allowlist-size) does not move.
+  { args: ['behavior', '--enable'], allow: [MANIFEST, RULES_DIR], mustWrite: true },
+  { args: ['behavior', '--disable'], allow: [MANIFEST, RULES_DIR], mustWrite: true },
+  { args: ['behavior', '--status'], allow: NONE, mustWrite: false },
+
   // Already installed by init's `--security user`: re-enabling may restamp the manifest only.
   { args: ['security', '--enable', '--user'], allow: [SETTINGS, MANIFEST], mustWrite: false },
   // From no deny list: enabling installs it in the user settings and records `user`.
@@ -298,7 +305,7 @@ export const UNFENCED_ACTIONS: Readonly<Record<string, string>> = {
 const COMMANDS: readonly Command[] = [
   initCommand, uninstallCommand, ambientCommand, memoryCommand, skillsCommand, hudCommand, flagsCommand,
   knowledgeCommand, learningCommand, rulesCommand, debugCommand, securityCommand, safeDeleteCommand,
-  proxyCommand, agentsCommand, complianceCommand, trackerCommand,
+  proxyCommand, agentsCommand, complianceCommand, trackerCommand, behaviorCommand,
 ]
 
 /** The options that make a command a toggle. */
