@@ -14,7 +14,7 @@ directories:
   - tests/fixtures/numeric-floors.json
   - tests/guards/code-review-diff-gating.test.ts
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-12
 ---
 
 # Dynamic Workflow Engine Compiled Output and Pins
@@ -52,8 +52,8 @@ Read `tests/fixtures/mds-manifest.ts` for the canonical rosters; every count is 
 | Constant | The set it counts | Why it differs from the others |
 |---|---|---|
 | `COMMAND_HOSTS` (`MDS_COMMAND_HOSTS`) | Command hosts under `src/assets/commands/`: the knowledge hosts, the four dynamic hosts and `release`, compiled into `dist/commands/` | Excludes the generator hosts (`src/assets/agents/*.mds`) and the reference modules |
-| `MDS_PARTIALS` | Partials in `src/assets/commands/_partials/` (flat) | Not the whole partial roster: `ALL_MDS_PARTIALS` adds `src/assets/mds/tracker/_common.mds` and `_steps.mds`, the two partials outside `_partials/`. It is the number the build prints as `"N partial(s) skipped (no output-dir:)"`; floors rise with the roster, never fall |
-| `ALL_DISCOVERED_HOSTS` | Every `output-dir:`-declaring source the build discovers: the command hosts, the generator hosts (`MDS_GENERATOR_HOSTS`: the agents `code`, `design`, `diagnose`, `git`, `knowledge`, `research`, `review`, `scrutinize`, `skim`, `triage`) and the reference modules (`MDS_REFERENCE_MODULES`: `tracker/_github.mds`, `_jira.mds`, `_linear.mds`, `_mcp.mds`, `_contract.mds`, `git/_pr.mds`, `git/_references.mds` under `src/assets/mds/`) | The number the build prints as `"N host(s) to compile:"`. The reference-module host kind is owned by `feature-knowledge-system` |
+| `MDS_PARTIALS` | Partials in `src/assets/commands/_partials/` (flat) | Not the whole partial roster: `ALL_MDS_PARTIALS` adds `MDS_REFERENCE_PARTIALS`, the partials outside `_partials/` (the tracker `_common.mds` and `_steps.mds`, the Git `_ops.mds`, `_ops_pr.mds` and `_ops_steps.mds`, and the Code variants' shared `src/assets/agents/_partials/_code.mds`). It is the number the build prints as `"N partial(s) skipped (no output-dir:)"`; floors rise with the roster, never fall |
+| `ALL_DISCOVERED_HOSTS` | Every `output-dir:`-declaring source the build discovers: the command hosts, the generator hosts (`MDS_GENERATOR_HOSTS`: the agents `code`, `code-edit`, `code-fix`, `design`, `diagnose`, `git`, `knowledge`, `research`, `review`, `scrutinize`, `skim`, `triage`) and the reference modules (`MDS_REFERENCE_MODULES`: `tracker/_github.mds`, `_jira.mds`, `_linear.mds`, `_mcp.mds`, `_contract.mds`, `git/_pr.mds`, `git/_references.mds` under `src/assets/mds/`) | The number the build prints as `"N host(s) to compile:"`. The reference-module host kind is owned by `feature-knowledge-system` |
 | `ALL_MDS_HOSTS` | The command hosts plus the generator hosts: every host whose basename becomes an output filename | Reference modules are excluded: their filenames come from an operation registry (`src/core/mds-variants.ts`), and `_github` would not even pass `validateOutputName` |
 | `DIST_COMMAND_FILES` (`DIST_FILES`) | The compiled command outputs, one per command host | Every command is a compiled host, so no file in `dist/commands/` is copied rather than compiled |
 
@@ -110,7 +110,7 @@ The operation owns its marker format. A caller that restates the literal is a se
 
 - `tests/build-mds.test.ts`: doctrine-literal pinning (sections for single-pass review, post-wave-report, `--dry-run` removal, gh-issue scope, `_tracker.mds` adoption, marker ownership).
 - `tests/fixtures/mds-manifest.ts`: the shared name manifest: `MDS_COMMAND_HOSTS`, `MDS_GENERATOR_HOSTS`, `MDS_PARTIALS`, `MDS_REFERENCE_PARTIALS`, `ALL_MDS_PARTIALS`, `MDS_REFERENCE_MODULES`, `LEARNING_VARIANT_HOSTS`, `DIST_COMMAND_FILES`, `ALL_MDS_HOSTS`, `ALL_DISCOVERED_HOSTS`.
-- `tests/fixtures/numeric-floors.json`: the ratchet manifest (`partial-count`, `dist-host-count`, `dist-files-count`, `arguments-once-max`, `gate-ownership-body-count`, `running-commands-site-count`, `issue-pr-link-forwarding-sites`); floors raise, ceilings lower.
+- `tests/fixtures/numeric-floors.json`: the ratchet manifest (`partial-count`, `dist-host-count`, `dist-files-count`, `arguments-once-max`, `gate-ownership-body-count`, `running-commands-site-count`, `issue-pr-link-pr-open-sites`); floors raise, ceilings lower.
 - `tests/guards/code-review-diff-gating.test.ts`: beside `/code-review`'s diff-class gating, the block that holds the engine, wave and dynamic-build sources free of any gating token.
 - `scripts/build-mds.ts`: the unified MDS compiler for all three host kinds (command hosts to `dist/commands/`, generator hosts to `dist/agents/`, reference modules to `dist/skills/git/references/`).
 - `src/core/mds-variants.ts`: the operation registries that name reference-module output files.

@@ -49,13 +49,16 @@ import {
   TRACKER_GITHUB_OPS,
   VARIANT_MODULES,
 } from '../../src/core/mds-variants.js';
+import { TRACKER_PROVIDERS } from '../../src/core/tracker.js';
 import {
   ROOT,
   TRACKER_SCHEMA_SECTIONS,
   collectTrackerSchemaRows,
   collectTrackerTemplate,
   collectTrackerTemplateHeadings,
+  extractOpSectionFromCorpus,
   gitAgentSinkCorpus,
+  gitOperationReferenceCorpus,
   isPrHostEntryPath,
   prHostRel,
   resolveAgentSource,
@@ -367,32 +370,30 @@ describe('AC-3.16: the tracker configuration file has exactly ONE reader', () =>
       .toMatch(/^\| `github` \| `tracker\/github\/` \| none \|$/m);
   });
 
-  it('no operation section of the agent reads it — enumerated over all 10 tracker ops', () => {
-    // Enumerated by NAME, not scanned as one blob: the claim is per-op, and a
-    // whole-file scan would be satisfied by the preamble's own legitimate mention.
-    const opStarts = [...GIT_MD.matchAll(/^## Operation: (\S+)$/gm)].map(m => ({
-      op: m[1], index: m.index!,
-    }));
+  it('no operation section reads it — enumerated over every Git operation, and the agent body does not either', () => {
+    // Enumerated by NAME, one operation reference at a time, not scanned as one blob: the claim
+    // is per-op, and a whole-corpus scan would be satisfied by the contract's own legitimate
+    // mention. The agent body declares no operation (D-OP-ONE-REF), so each operation's section
+    // is the file it loads, and the body itself is held to the same absence.
+    const refs = gitOperationReferenceCorpus();
     expect(
-      opStarts.length,
-      'no `## Operation:` headings found — the per-op enumeration below is vacuous',
+      refs.length,
+      'no operation reference found — the per-op enumeration below is vacuous',
     ).toBeGreaterThanOrEqual(TRACKER_GITHUB_OPS.length);
 
-    const offenders: string[] = [];
-    for (const [i, start] of opStarts.entries()) {
-      const end = i + 1 < opStarts.length ? opStarts[i + 1].index : GIT_MD.length;
-      const section = GIT_MD.slice(start.index, end);
-      offenders.push(...collectTrackerFileReaders([{ path: `git.md#${start.op}`, content: section }]));
-    }
+    const offenders = refs.flatMap(entry => collectTrackerFileReaders([entry]));
+    offenders.push(...collectTrackerFileReaders([{ path: GIT_AGENT.path, content: GIT_MD }]));
     expect(
       offenders,
       `an operation section reads the tracker configuration file. It is resolved ONCE per spawn in ` +
-      `the preamble and passed down; a second read is a second authority on the same values, and ` +
+      `the tracker contract and passed down; a second read is a second authority on the same values, and ` +
       `they can disagree within one run (§14.3):\n  ${offenders.join('\n  ')}`,
     ).toEqual([]);
+    const enumerated = refs.map(entry => extractOpSectionFromCorpus([entry], path.basename(entry.path, '.md'), { mode: 'sole' }).content);
+    expect(enumerated.every(section => section.startsWith('## Operation: ')), 'every entry is an operation section').toBe(true);
     for (const op of TRACKER_GITHUB_OPS) {
       expect(
-        opStarts.map(s => s.op),
+        refs.map(entry => path.basename(entry.path, '.md')),
         `${op} must be an enumerated section, or the sweep silently skipped it`,
       ).toContain(op);
     }
@@ -871,10 +872,11 @@ const GITHUB_ONLY_REASONS: readonly string[] = [
  * a reader who greps only the rule finds a violation the arm silently permits.
  *
  * Each entry is a github-op status literal that predates §14.2 and whose scope the
- * canonical table does not claim: the rate-limit backoff, the no-PR branch of the
- * review-comment ops, and the release version parse. The two summary operations'
- * 5xx retry ceilings are emitted from the PR-host references and live in
- * PR_HOST_LEGACY_REASONS below.
+ * canonical table does not claim: the rate-limit backoff, the one reason the agent
+ * body's own degradation contract spells. Every operation's own reasons are emitted
+ * from its reference (D-OP-ONE-REF): the no-PR branch of the review-comment ops and
+ * the two summary operations' 5xx retry ceilings live in PR_HOST_LEGACY_REASONS
+ * below, and the release version parse in SHIPPED_ISSUES_LEGACY_REASONS.
  * The arm below asserts every entry is genuinely emitted, so this cannot become a
  * dumping ground — an entry parked here that nothing emits goes red, exactly as it
  * does for GITHUB_ONLY_REASONS.
@@ -884,8 +886,6 @@ const GITHUB_ONLY_REASONS: readonly string[] = [
  */
 const GIT_AGENT_LEGACY_REASONS: readonly string[] = [
   'rate limited',
-  'no PR',
-  'malformed version',
 ];
 
 /**
@@ -911,7 +911,43 @@ const GIT_AGENT_LEGACY_REASONS: readonly string[] = [
 const PR_HOST_LEGACY_REASONS: readonly string[] = [
   '5xx on post-review-summary',
   '5xx on post-resolution-summary',
+  // The no-PR branch of the review-comment operations: their degradation notes are the contract
+  // block of their own PR-host reference.
+  'no PR',
 ];
+
+/**
+ * The release version parse, a pre-§14.2 literal like the two scoped registries above, scoped to
+ * the two operations that validate their inputs with the shared step 0 (`shipped_issues_step_0`
+ * in `_ops_steps.mds`): `backlink-shipped-issues` and `associate-release`, under every provider.
+ * Scoped by PATH, so the same wording in any other provider reference is reported.
+ */
+const SHIPPED_ISSUES_LEGACY_REASONS: readonly string[] = [
+  'malformed version',
+];
+
+/** The references that carry the shared shipped-issues step 0, under every tracker provider. */
+const SHIPPED_ISSUES_REFERENCE_PATH = /[\\/]tracker[\\/][a-z]+[\\/](?:backlink-shipped-issues|associate-release)\.md$/;
+
+/**
+ * LIVE PR-host reasons that `ensure-pr-ready` states in its PR skeleton, which every provider's
+ * reference for the operation carries beside its own step 4b (D-OP-ONE-REF). The skeleton is
+ * written once in `_ops_steps.mds`; the reasons belong to the PR host (no tracker is involved),
+ * so they are excused in `tracker/{provider}/ensure-pr-ready.md` and reported in every other
+ * provider reference.
+ */
+const HOST_COMPOSED_REASONS: readonly string[] = [
+  'cannot push to fork',
+  'wave block does not match its grammar',
+  'test-plan block does not match its grammar',
+  // The paste gates of the PR ensure-pr-ready opens (D-PR-BY-GIT): the link line and the evidence
+  // exceptions are shape-checked at the paste, and a mismatch degrades the PR, never the verdict.
+  'issue reference "{ref}" does not match any tracker reference grammar',
+  'evidence exception does not match its grammar',
+];
+
+/** The one provider reference that composes the PR skeleton, under every tracker provider. */
+const HOST_COMPOSED_REFERENCE_PATH = /[\\/]tracker[\\/][a-z]+[\\/]ensure-pr-ready\.md$/;
 
 /**
  * LIVE DEGRADED reasons whose only emitters are the PR-host references — the
@@ -935,13 +971,6 @@ const PR_HOST_REASONS: readonly string[] = [
   'evidence unavailable',
   'concurrent edit',
   'body read-back mismatch',
-  // #365 (PR6): ensure-pr-ready step 4a's two caller-block gates. A block the
-  // caller passed failed its `verify-evidence.cjs check wave` / `check block`,
-  // so 4a omits it rather than repairing it. The PR host creates the PR either
-  // way — no tracker is involved. The second spelling is code.md
-  // Responsibility 7's, so one refusal reads the same from both PR creators.
-  'wave block does not match its grammar',
-  'test-plan block does not match its grammar',
 ];
 
 /**
@@ -1062,6 +1091,8 @@ export function collectUnregisteredReasons(corpus: readonly CorpusEntry[]): stri
       if (entry.path === GIT_AGENT.path && GIT_AGENT_LEGACY_REASONS.includes(reason)) continue;
       if (isPrHostEntryPath(entry.path) && PR_HOST_LEGACY_REASONS.includes(reason)) continue;
       if (isPrHostEntryPath(entry.path) && PR_HOST_REASONS.includes(reason)) continue;
+      if (SHIPPED_ISSUES_REFERENCE_PATH.test(entry.path) && SHIPPED_ISSUES_LEGACY_REASONS.includes(reason)) continue;
+      if (HOST_COMPOSED_REFERENCE_PATH.test(entry.path) && HOST_COMPOSED_REASONS.includes(reason)) continue;
       unregistered.push(`${entry.path}: "${reason}"`);
     }
   }
@@ -1335,7 +1366,7 @@ describe('[DR-04] DEGRADED literal registry: reverse direction', () => {
     // which is what keeps the two registries two rather than one with a longer list.
     // Named by value, and required to be agent-only: a literal on both lists would
     // be excused in pr/ by the PR-host exemption and prove nothing about this one.
-    const AGENT_ONLY_REASON = 'malformed version';
+    const AGENT_ONLY_REASON = 'rate limited';
     expect(GIT_AGENT_LEGACY_REASONS).toContain(AGENT_ONLY_REASON);
     expect(PR_HOST_LEGACY_REASONS).not.toContain(AGENT_ONLY_REASON);
     const crossed: CorpusEntry = {
@@ -1375,6 +1406,40 @@ describe('[DR-04] DEGRADED literal registry: reverse direction', () => {
       content: `emit \`TRACEABILITY: DEGRADED (${misspelled})\``,
     };
     expect(collectUnregisteredReasons([seeded])).toEqual([`${seeded.path}: "${misspelled}"`]);
+  });
+
+  it('every shipped-issues and host-composed exemption is really emitted, and really scoped to its reference', () => {
+    // The third and fourth scoped registries, asserted the way the first two are: nothing parked,
+    // nothing excused outside the reference that emits it.
+    const corpus = gitAgentSinkCorpus();
+    for (const [label, scope, reasons] of [
+      ['shipped-issues', SHIPPED_ISSUES_REFERENCE_PATH, SHIPPED_ISSUES_LEGACY_REASONS],
+      ['host-composed', HOST_COMPOSED_REFERENCE_PATH, HOST_COMPOSED_REASONS],
+    ] as const) {
+      const carriers = corpus.filter(entry => scope.test(entry.path));
+      expect(carriers.length, `${label}: no scoped reference is in the corpus — run \`npm run build\``).toBeGreaterThan(0);
+      expect(
+        new Set(carriers.map(entry => path.basename(path.dirname(entry.path)))),
+        `${label}: the scoped references must cover every registered tracker provider`,
+      ).toEqual(new Set(TRACKER_PROVIDERS.map(provider => provider.id)));
+      for (const carrier of carriers) {
+        const emitted = new Set(collectDegradedReasons(carrier.content));
+        expect(
+          reasons.filter(reason => !emitted.has(reason)),
+          `${label}: ${carrier.path} no longer emits a registered reason — delete the entry, an ` +
+          'exemption for a reason nothing writes is a hole held open for nothing',
+        ).toEqual([]);
+      }
+      // Scope probe: the registered spelling in an unrelated provider reference IS reported.
+      const foreign: CorpusEntry = {
+        path: 'dist/skills/git/references/tracker/jira/setup-task.md',
+        content: `emit \`TRACEABILITY: DEGRADED (${reasons[0]})\``,
+      };
+      expect(
+        collectUnregisteredReasons([foreign]),
+        `${label}: the exemption must not excuse a provider reference that does not carry the step`,
+      ).toEqual([`${foreign.path}: "${reasons[0]}"`]);
+    }
   });
 
   it('known-bad probe: a new unregistered reason in the agent file is reported', () => {
@@ -1554,16 +1619,18 @@ describe('the reader block states the non-github rendering rule (AC-3.11, §14.1
     // the discrimination the sweep needed: the PR slots are correct as `#` under
     // every provider, because pull requests stay on the PR host, and a rewrite that
     // swept them along would render a PR reference no host resolves.
+    // The Output templates are the contract blocks of the operation references (D-OP-ONE-REF).
+    const templates = gitOperationReferenceCorpus().map(entry => entry.content).join('\n');
     for (const slot of ['- **Issue**: {ISSUE_REF}', '- **Number**: {ISSUE_REF}', '## Issue {ISSUE_REF']) {
-      expect(GIT_MD, `the Output templates must carry ${JSON.stringify(slot)}`).toContain(slot);
+      expect(templates, `the Output templates must carry ${JSON.stringify(slot)}`).toContain(slot);
     }
     expect(
-      GIT_MD,
+      templates,
       'the PR slots keep their `#` — sweeping them into the issue-token rule would render a pull ' +
       'request reference no host resolves',
     ).toContain('- **PR**: #{number}');
     expect(
-      GIT_MD.includes('- **Issue**: #{number}'),
+      templates.includes('- **Issue**: #{number}'),
       'no issue slot may still spell the bare `#` rendering — that is the defect the token replaces',
     ).toBe(false);
   });

@@ -27,12 +27,13 @@
 
 import { describe, it, expect, afterAll } from 'vitest'
 import { createRequire } from 'module'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import * as path from 'path'
 
-import { compiledSkillRefsDir } from '../../src/core/assets.js'
-import { collectOrderViolations, prHostRel, resolveAgentSource, type OrderRule } from '../helpers.js'
+import { TRACKER_PROVIDERS } from '../../src/core/tracker.js'
+import { operationReferenceRel } from '../../src/core/mds-variants.js'
+import { collectOrderViolations, ensurePrReadyReference, type OrderRule } from '../helpers.js'
 import { VERIFY_EVIDENCE_SCRIPT } from '../evidence/seam.js'
 
 /** Transcribed from the script's JSDoc — only what this suite calls. */
@@ -44,15 +45,8 @@ const VE = createRequire(import.meta.url)(VERIFY_EVIDENCE_SCRIPT) as VerifyEvide
 const SCRATCH = mkdtempSync(path.join(tmpdir(), 'devflow-caller-blocks-'))
 afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }))
 
-/** The built PR-host reference for ensure-pr-ready — fail-loud when dist is absent. */
-function prReadyRef(): string {
-  const file = path.join(compiledSkillRefsDir(), ...prHostRel('ensure-pr-ready').split('/'))
-  try {
-    return readFileSync(file, 'utf-8')
-  } catch {
-    throw new Error(`${prHostRel('ensure-pr-ready')} is absent — run \`npm run build\` first`)
-  }
-}
+/** The reference path the order rules and messages name. */
+const PR_READY_REL = operationReferenceRel('ensure-pr-ready', 'github') ?? ''
 
 // ---------------------------------------------------------------------------
 // The rule, as the reference states it
@@ -101,7 +95,7 @@ export function collectCallerBlockDefects(ref: string): string[] {
   need('an admitted wave block skips step 4b',
     line.includes('An admitted wave block is the body\'s only `## Related Issues`: skip 4b.'))
   need('a failed scrub posts neither block', step4a.includes(`${SCRUB} — a failed one posts neither block`))
-  out.push(...collectOrderViolations('pr/ensure-pr-ready.md', ref, REF_ORDER))
+  out.push(...collectOrderViolations(PR_READY_REL, ref, REF_ORDER))
   return out
 }
 
@@ -113,13 +107,13 @@ export function collectGateSubcommands(ref: string): string[] {
 
 describe('ensure-pr-ready 4a: the caller blocks are pasted only behind their checks (AC-4)', () => {
   it('the reference states the order, the gate, the refusal, the 4b skip and the scrub exclusion', () => {
-    const ref = prReadyRef()
+    const ref = ensurePrReadyReference()
     expect(ref.length, 'the PR-host reference is empty').toBeGreaterThan(0)
     expect(collectCallerBlockDefects(ref)).toEqual([])
   })
 
   it('known-bad probes: a reversed order, a lost gate, a repair, a kept 4b, an unscrubbed paste', () => {
-    const ref = prReadyRef()
+    const ref = ensurePrReadyReference()
     const seeds: ReadonlyArray<{ label: string; from: string; to: string; expected: string }> = [
       {
         label: 'reversed',
@@ -168,16 +162,23 @@ describe('ensure-pr-ready 4a: the caller blocks are pasted only behind their che
     expect(late, 'late-append: the seed must land').not.toBe(ref)
     expect(collectCallerBlockDefects(late)).toEqual([
       'a failed scrub posts neither block',
-      `pr/ensure-pr-ready.md: [the blocks join the body before the D11 scrub] "${APPEND}" does not precede "${SCRUB}"`,
+      `${PR_READY_REL}: [the blocks join the body before the D11 scrub] "${APPEND}" does not precede "${SCRUB}"`,
     ])
     // A rule that left step 4a is no rule at all.
     expect(collectCallerBlockDefects(ref.replace(CALLER_BLOCKS, '   - **Blocks**')))
       .toEqual(['no single caller-blocks rule under step 4a'])
   })
 
-  it('git.md declares both blocks as optional ensure-pr-ready inputs', () => {
-    const git = resolveAgentSource('git').content
-    const section = git.slice(git.indexOf('## Operation: ensure-pr-ready'))
+  it('the reference states the same caller-block rule under every provider', () => {
+    // The PR skeleton is one write expanded into three files; each provider's copy must carry it.
+    for (const provider of TRACKER_PROVIDERS.map(p => p.id)) {
+      expect(collectCallerBlockDefects(ensurePrReadyReference(provider)), provider).toEqual([])
+    }
+  })
+
+  it('the ensure-pr-ready reference declares both blocks as optional inputs', () => {
+    const ref = ensurePrReadyReference()
+    const section = ref.slice(ref.indexOf('## Operation: ensure-pr-ready'))
     const input = section.split('\n').find(l => l.startsWith('**Input:**')) ?? ''
     expect(input, 'the ensure-pr-ready Input line').not.toBe('')
     expect(input).toContain('`PR_TEST_PLAN_BLOCK` (optional)')
@@ -244,7 +245,7 @@ export function collectGateMisroutes(subs: readonly string[]): string[] {
 
 describe('ensure-pr-ready 4a: the named gate routes to the real script (AC-4)', () => {
   it('the reference names exactly `check wave` and `check block`, and each admits its block and refuses (none)', () => {
-    const subs = collectGateSubcommands(prReadyRef())
+    const subs = collectGateSubcommands(ensurePrReadyReference())
     expect(subs).toEqual(['wave', 'block'])
     expect(collectGateMisroutes(subs)).toEqual([])
   })
@@ -256,7 +257,7 @@ describe('ensure-pr-ready 4a: the named gate routes to the real script (AC-4)', 
   })
 
   it('known-bad probe: a reference naming a subcommand the script does not route is reported', () => {
-    const wounded = prReadyRef().replace('check <wave|block> <file>', 'check <waves|block> <file>')
+    const wounded = ensurePrReadyReference().replace('check <wave|block> <file>', 'check <waves|block> <file>')
     const subs = collectGateSubcommands(wounded)
     expect(subs).toEqual(['waves', 'block'])
     expect(collectGateMisroutes(subs)).toEqual([

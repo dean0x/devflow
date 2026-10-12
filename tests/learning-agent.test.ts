@@ -5,6 +5,7 @@ import { createRequire } from 'module';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { AGENT_CONFIG } from './fixtures/agent-config.js';
+import { readAgentReference } from './helpers.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -67,10 +68,17 @@ function inOrder(parts: readonly string[], flags = ''): RegExp {
 describe('learning agent', () => {
   let content: string;
   let frontmatter: string;
+  // D-MAINTAIN-ON-DUE: the ladder, the claim-due output format and the close-out batch live in
+  // learning/maintain.md, which a run reads only after claim-due hands out an entry. `prompt` is
+  // the text a run with a due entry sees, in the order it sees it.
+  let maintain: string;
+  let prompt: string;
 
   beforeAll(async () => {
     content = await fs.readFile(AGENT_PATH, 'utf-8');
     frontmatter = parseFrontmatter(content);
+    maintain = readAgentReference('learning/maintain.md');
+    prompt = `${content}\n${maintain}`;
   });
 
   describe('frontmatter', () => {
@@ -124,14 +132,14 @@ describe('learning agent', () => {
 
     it('reads the root CLAUDE.md once per run, in Inputs, before the already-encoded check and the Encoded rung', () => {
       expect(inputs()).toMatch(phrase(READ));
-      expect(collectReadPositionDefects(content)).toEqual([]);
+      expect(collectReadPositionDefects(prompt)).toEqual([]);
     });
 
     it('also reads the installed rule files, because the Encoded check compares against a rules file', () => {
       expect(inputs()).toMatch(phrase('rules/devflow'));
       expect(inputs()).toMatch(phrase("-name '*.md'"));
       expect(inputs()).toMatch(phrase('Read each once'));
-      expect(content).toMatch(phrase('a rules file'));
+      expect(prompt).toMatch(phrase('a rules file'));
     });
 
     it('keeps what it read for every later comparison and skips a file that is missing', () => {
@@ -174,7 +182,7 @@ describe('learning agent', () => {
     it('heartbeats with touch -c at the Part 1 → Part 2 boundary and after each maintained entry', () => {
       expect(content).toContain('touch -c .devflow/learning/.pending-turns.processing');
       expect(content).toMatch(inOrder(['Heartbeat', 'Part 1 → Part 2 boundary']));
-      expect(sectionOf(content, '## Part 2', '## Finishing')).toMatch(phrase('After each maintained entry, refresh the claim'));
+      expect(maintain).toMatch(phrase('After each maintained entry, refresh the claim'));
     });
 
     it('stops on vanished inputs and never recreates them', () => {
@@ -203,7 +211,7 @@ describe('learning agent', () => {
         'claim-queue', 'release-claim', 'put-observation', 'assign-anchor', 'retire-anchor',
         'refresh-anchor', 'rotate-observations', 'claim-due',
       ]) {
-        expect(content, op).toMatch(new RegExp(`json-helper\\.cjs" ${op}\\b`));
+        expect(prompt, op).toMatch(new RegExp(`json-helper\\.cjs" ${op}\\b`));
       }
       for (const op of ['`list`', '`show <anchor|obs_id>`', '`restore-anchor <anchor>`']) {
         expect(content, op).toContain(op);
@@ -225,7 +233,7 @@ describe('learning agent', () => {
         '`rotated <N> observations`',
         '`ref <origin/HEAD|HEAD> <sha12>`', '`ref none`', '`<anchor> <reason> <bytes>`', '`due none`',
       ]) {
-        expect(content, form).toContain(form);
+        expect(prompt, form).toContain(form);
       }
     });
 
@@ -264,22 +272,22 @@ describe('learning agent', () => {
       const store = fsSync.readFileSync(LEARNING_STORE, 'utf-8');
       for (const reason of ['duplicate-obs-id', 'ledger-without-log', 'scope-matches-nothing', 'legacy-v1', 'verify-age']) {
         expect(store, `the store produces ${reason}`).toContain(`'${reason}'`);
-        expect(content, `the prompt names ${reason}`).toContain(`\`${reason}\``);
+        expect(maintain, `the maintain step names ${reason}`).toContain(`\`${reason}\``);
       }
     });
 
     it('sends text to an op only as one JSON object on stdin, through a quoted heredoc', () => {
       expect(content).toMatch(phrase('Text goes on stdin, never on the command line'));
       expect(content).toContain("put-observation --create <<'EOF'");
-      expect(content).toContain("retire-anchor <anchor> Encoded <<'EOF'");
+      expect(maintain).toContain("retire-anchor <anchor> Encoded <<'EOF'");
     });
 
     it('gives each retire status its stdin shape', () => {
-      expect(content).toContain('{"reason": "<why, one line, 1 to 120 characters>"}');
-      expect(content).toContain('{"by": "<anchor>"}');
-      expect(content).toMatch(/\{"at": "<path from the repository root>", "quote": "[^"]+"\}/);
-      expect(content).toContain('RETIRE BY STATUS');
-      expect(content).toContain('never hand-edit the .md');
+      expect(maintain).toContain('{"reason": "<why, one line, 1 to 120 characters>"}');
+      expect(maintain).toContain('{"by": "<anchor>"}');
+      expect(maintain).toMatch(/\{"at": "<path from the repository root>", "quote": "[^"]+"\}/);
+      expect(maintain).toContain('RETIRE BY STATUS');
+      expect(maintain).toContain('never hand-edit the .md');
     });
 
     it('tells the agent a refused input lists every problem at once, but a value with a bad shape reports only that', () => {
@@ -368,15 +376,65 @@ describe('learning agent', () => {
 
   describe('maintenance ladder', () => {
     it('rotates first, then takes the work list from claim-due once', () => {
-      const maintain = sectionOf(content, '## Part 2', '## Finishing');
-      const rotate = maintain.indexOf('json-helper.cjs" rotate-observations');
-      const due = maintain.indexOf('json-helper.cjs" claim-due');
+      const part2 = sectionOf(content, '## Part 2', '## Finishing');
+      const rotate = part2.indexOf('json-helper.cjs" rotate-observations');
+      const due = part2.indexOf('json-helper.cjs" claim-due');
       expect(rotate).toBeGreaterThan(-1);
       expect(due).toBeGreaterThan(rotate);
     });
 
+    // AC-403, D-MAINTAIN-ON-DUE: the body asks claim-due, ends Part 2 on `due none`, and only
+    // otherwise reads the maintain step, so a run with nothing due never pays for the ladder.
+    describe('maintenance runs only when entries are due (AC-403)', () => {
+      const MAINTAIN_PATH_TEXT = 'skills/devflow:agent-references/references/learning/maintain.md';
+
+      /** Named collector: the Part 2 stub's order or content defects. */
+      function collectStubDefects(body: string): string[] {
+        const part2 = sectionOf(body, '## Part 2', '## Finishing');
+        if (part2 === '') return ['no Part 2 section'];
+        const out: string[] = [];
+        const due = part2.indexOf('json-helper.cjs" claim-due');
+        const none = part2.indexOf('`due none` ends Part 2');
+        const read = part2.indexOf(MAINTAIN_PATH_TEXT);
+        if (due === -1) out.push('the claim-due call is missing');
+        if (none === -1) out.push('the "`due none` ends Part 2" line is missing');
+        if (read === -1) out.push('the maintain reference path is missing');
+        if (due !== -1 && none !== -1 && none < due) out.push('`due none` comes before claim-due');
+        if (none !== -1 && read !== -1 && read < none) out.push('the reference is read before `due none` ends Part 2');
+        if (!/\bRead\b/.test(part2.slice(Math.max(none, 0)))) out.push('the stub does not tell the agent to Read the reference');
+        if (/\*\*LLM judgment — the maintenance ladder/.test(part2)) out.push('the ladder is still in the body');
+        return out;
+      }
+
+      it('claim-due, then `due none` ends Part 2, then the reference is read', () => {
+        expect(collectStubDefects(content)).toEqual([]);
+      });
+
+      it('the maintain step is not in the body and is in the reference', () => {
+        expect(content).not.toContain('RETIRE BY STATUS');
+        expect(content).not.toContain('1. **Encoded**');
+        expect(maintain).toContain('1. **Encoded**');
+        expect(maintain).toContain('RETIRE BY STATUS');
+      });
+
+      it('resolves the config directory the way the rule-file listing does', () => {
+        expect(content).toContain('${CLAUDE_CONFIG_DIR:-$HOME/.claude}');
+        expect(content).toContain(MAINTAIN_PATH_TEXT);
+      });
+
+      it('known-bad probes: a reference read before `due none`, a ladder left in the body and a missing call are each reported', () => {
+        const part2 = (inner: string): string => `## Part 2\n${inner}\n## Finishing\n`;
+        const ok = '`json-helper.cjs" claim-due`\n`due none` ends Part 2. Otherwise Read ' + MAINTAIN_PATH_TEXT + '\n';
+        expect(collectStubDefects(part2(ok))).toEqual([]);
+        expect(collectStubDefects(part2('Read ' + MAINTAIN_PATH_TEXT + '\n`json-helper.cjs" claim-due`\n`due none` ends Part 2.\n'))).toContain(
+          'the reference is read before `due none` ends Part 2',
+        );
+        expect(collectStubDefects(part2(ok + '**LLM judgment — the maintenance ladder.**\n'))).toEqual(['the ladder is still in the body']);
+        expect(collectStubDefects(part2('`due none` ends Part 2. Read ' + MAINTAIN_PATH_TEXT + '\n'))).toEqual(['the claim-due call is missing']);
+      });
+    });
+
     it('takes the first matching rung, in order: Encoded, no longer true, duplicate, one-off, Keep', () => {
-      const maintain = sectionOf(content, '## Part 2', '## Finishing');
       const rungs = ['1. **Encoded**', '2. **No longer true', '3. **Duplicate**', '4. **One-off**', '5. **Keep**']
         .map(rung => maintain.indexOf(rung));
       expect(rungs.every(i => i > -1), `every rung stated: ${rungs.join(', ')}`).toBe(true);
@@ -384,20 +442,17 @@ describe('learning agent', () => {
     });
 
     it('holds Encoded to the strict bar and lets plumbing check the quote', () => {
-      const maintain = sectionOf(content, '## Part 2', '## Finishing');
       expect(maintain).toMatch(phrase('a test or guard that fails on a new violation anywhere in'));
       expect(maintain).toMatch(phrase('One JSDoc line does not count'));
       expect(maintain).toMatch(phrase('checks the quote in the file as committed at the verify ref'));
     });
 
     it('gives each entry exactly one final action, keeping it when unsure', () => {
-      const maintain = sectionOf(content, '## Part 2', '## Finishing');
       expect(maintain).toMatch(phrase('Exactly one final action per entry'));
       expect(maintain).toMatch(phrase('when unsure, Keep', 'i'));
     });
 
     it('closes with one batched refresh-anchor --verified of the kept entries', () => {
-      const maintain = sectionOf(content, '## Part 2', '## Finishing');
       expect(maintain).toContain('json-helper.cjs" refresh-anchor <anchor> [<anchor>...] --verified');
       expect(maintain).toMatch(phrase('a v1 entry refuses the whole batch'));
     });
@@ -405,36 +460,36 @@ describe('learning agent', () => {
 
   describe('retired rules stay out', () => {
     it('carries no curation cap, protection window or refresh cap', () => {
-      expect(content).not.toMatch(phrase('≤5 curation changes'));
-      expect(content).not.toMatch(phrase('stop after 5 changes'));
-      expect(content).not.toMatch(phrase('7-day protection window'));
-      expect(content).not.toMatch(phrase('at most 10 anchors'));
+      expect(prompt).not.toMatch(phrase('≤5 curation changes'));
+      expect(prompt).not.toMatch(phrase('stop after 5 changes'));
+      expect(prompt).not.toMatch(phrase('7-day protection window'));
+      expect(prompt).not.toMatch(phrase('at most 10 anchors'));
     });
 
     it('carries no confidence gate and no v1 observation fields', () => {
-      expect(content).not.toMatch(/confidence\s*[>=]+\s*0\.\d+/);
-      expect(content).not.toMatch(/low-confidence/i);
-      expect(content).not.toContain('"confidence"');
-      expect(content).not.toContain('quality_ok');
-      expect(content).not.toContain('cat >> .devflow/learning/decisions-log.jsonl');
+      expect(prompt).not.toMatch(/confidence\s*[>=]+\s*0\.\d+/);
+      expect(prompt).not.toMatch(/low-confidence/i);
+      expect(prompt).not.toContain('"confidence"');
+      expect(prompt).not.toContain('quality_ok');
+      expect(prompt).not.toContain('cat >> .devflow/learning/decisions-log.jsonl');
     });
 
     it('carries no usage grounding, citation re-pointing or collision stop', () => {
-      expect(content).not.toContain('.decisions-usage.json');
-      expect(content).not.toMatch(phrase('Citation preservation', 'i'));
-      expect(content).not.toContain('next-anchor');
-      expect(content).not.toContain('--allow-collision');
-      expect(content).not.toMatch(phrase('git grep -nE'));
-      expect(content).not.toMatch(phrase('STOP rule'));
+      expect(prompt).not.toContain('.decisions-usage.json');
+      expect(prompt).not.toMatch(phrase('Citation preservation', 'i'));
+      expect(prompt).not.toContain('next-anchor');
+      expect(prompt).not.toContain('--allow-collision');
+      expect(prompt).not.toMatch(phrase('git grep -nE'));
+      expect(prompt).not.toMatch(phrase('STOP rule'));
     });
 
     it('names no ledger entry by number', () => {
-      expect(content).not.toMatch(/\b(?:ADR|PF)-\d{3}\b/);
+      expect(prompt).not.toMatch(/\b(?:ADR|PF)-\d{3}\b/);
     });
 
     it('does not reference worker-era scripts or stamps', () => {
       for (const retired of ['count-active', 'staleness.cjs', 'merge-observation', '.last-dream-ok', 'last-run-summary']) {
-        expect(content, retired).not.toContain(retired);
+        expect(prompt, retired).not.toContain(retired);
       }
     });
   });

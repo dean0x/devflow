@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { loadFile, extractSection, computeFpRatio, resolveAgentSource } from '../helpers'
+import { loadFile, extractSection, computeFpRatio, readAgentReference, resolveAgentSource } from '../helpers'
 
 // -------------------------------------------------------------------------
 // Group 1: review.md — convergence inputs
@@ -119,27 +119,28 @@ describe('code-review.md — convergence gate', () => {
 // Group 4: synthesize.md — convergence status
 // -------------------------------------------------------------------------
 
-describe('synthesize.md — convergence status', () => {
-  const content = loadFile('src/assets/agents/synthesize.md')
+describe('synthesize review mode — convergence status', () => {
+  // D-MODE-BY-PATH: the review template lives in the review mode reference, not the agent body.
+  const content = readAgentReference('synthesize/review.md')
 
   it('review mode mentions convergence or Convergence Status', () => {
-    const reviewMode = extractSection(content, '## Mode: Review', '## Principles')
+    const reviewMode = extractSection(content, '## Mode: Review', null)
     expect(reviewMode).toMatch(/[Cc]onvergence/)
   })
 
   it('output template includes Convergence Status section', () => {
-    const reviewMode = extractSection(content, '## Mode: Review', '## Principles')
+    const reviewMode = extractSection(content, '## Mode: Review', null)
     expect(reviewMode).toContain('## Convergence Status')
   })
 
   it('Convergence Status includes cycle number and FP ratio fields', () => {
-    const reviewMode = extractSection(content, '## Mode: Review', '## Principles')
+    const reviewMode = extractSection(content, '## Mode: Review', null)
     expect(reviewMode).toMatch(/cycle.number|cycle_number|Cycle/i)
     expect(reviewMode).toMatch(/FP.*[Rr]atio|fp_ratio/)
   })
 
   it('documents conditional merge note for high FP ratio', () => {
-    const reviewMode = extractSection(content, '## Mode: Review', '## Principles')
+    const reviewMode = extractSection(content, '## Mode: Review', null)
     expect(reviewMode).toMatch(/[Ff]alse.positive.*ratio|FP ratio/)
     expect(reviewMode).toMatch(/manual|merge/i)
   })
@@ -152,7 +153,7 @@ describe('synthesize.md — convergence status', () => {
 describe('Cross-cutting convergence consistency', () => {
   const reviewAgent = resolveAgentSource('review').content
   const codeReview = loadFile('dist/commands/code-review.md')
-  const synthesizeAgent = loadFile('src/assets/agents/synthesize.md')
+  const synthesizeAgent = readAgentReference('synthesize/review.md')
 
   it('code-review command surface contains PRIOR_RESOLUTIONS', () => {
     expect(codeReview).toContain('PRIOR_RESOLUTIONS')

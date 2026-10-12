@@ -468,11 +468,11 @@ async function runGate2(
   const phase = async (_name: string, fn: () => Promise<unknown>): Promise<unknown> => fn()
   const parallel = async (thunks: Array<() => Promise<unknown>>): Promise<unknown[]> => Promise.all(thunks.map(t => t()))
   const run = new AsyncFunction(
-    'phase', 'agent', 'parallel', 'BRANCH', 'PLAN', 'CRITERIA', 'TEST_PLAN', 'ISSUE_NUMBER', 'ISSUE_PR_LINK', 'COMPLIANCE_FRAMEWORKS', 'DECISIONS_CONTEXT',
+    'phase', 'agent', 'parallel', 'BRANCH', 'PLAN', 'CRITERIA', 'TEST_PLAN', 'ISSUE_NUMBER', 'ISSUE_PR_LINK', 'COMPLIANCE_DIRECTIVE', 'DECISIONS_CONTEXT',
     `${statement}\nreturn gate2;`,
   )
   const gate2 = (await run(
-    phase, agent, parallel, 'ticket/p3', inputs.plan, inputs.criteria, inputs.testPlan, '(none)', '(none)', 'off', '(none)',
+    phase, agent, parallel, 'ticket/p3', inputs.plan, inputs.criteria, inputs.testPlan, '(none)', '(none)', '', '(none)',
   )) as Gate2Result
   return { gate2, spawns }
 }
@@ -534,9 +534,9 @@ const ROUTING_TABLE: readonly RoutingCase[] = [
     inputs: { plan: null, criteria: null, testPlan: TEST_PLAN_FIXTURE },
     testVerdict: 'FAIL',
     check: ({ gate2, spawns }) =>
-      gate2.testVerdict === 'FAIL-FIXED' && spawns.some(s => s.agentType === 'Code')
+      gate2.testVerdict === 'FAIL-FIXED' && spawns.some(s => s.agentType === 'Code-fix')
         ? null
-        : `expected FAIL-FIXED after a Code fix, got ${gate2.testVerdict}`,
+        : `expected FAIL-FIXED after a Code-fix fix, got ${gate2.testVerdict}`,
   },
 ]
 

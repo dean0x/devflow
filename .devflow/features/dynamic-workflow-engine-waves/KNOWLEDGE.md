@@ -10,7 +10,7 @@ directories:
   - dist/commands
   - tests/dynamic
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-12
 ---
 
 # Dynamic Workflow Engine Waves and Wave PR
@@ -94,7 +94,7 @@ WAVE mode only (step 2 after the workflow returns). Before authoring, the main m
 ## Related
 
 - `.devflow/features/dynamic-workflow-engine/KNOWLEDGE.md`: the single-ticket engine each wave ticket runs, the concurrency doctrine and the review pass.
-- `.devflow/features/dynamic-workflow-engine-contracts/KNOWLEDGE.md`: `{ISSUE_REF}` and `Depends on:` vocabulary, `ISSUE_PR_LINK` forwarding, the declared-receivers decisions step.
+- `.devflow/features/dynamic-workflow-engine-contracts/KNOWLEDGE.md`: `{ISSUE_REF}` and `Depends on:` vocabulary, `ISSUE_PR_LINK` capture and its route into the wave block, the declared-receivers decisions step.
 - `.devflow/features/dynamic-workflow-engine-pins/KNOWLEDGE.md`: the post-wave-report pins and the dedup-marker ownership guard.
 - `.devflow/features/tracker-references/KNOWLEDGE.md`: the `fetch-issues-batch` mechanics, the untrusted-body wrapper and `NOT_FOUND` rendering.
 - `.devflow/features/resolve-pipeline/KNOWLEDGE.md`: the sibling Code-fix pipeline with the same evidence plumbing.

@@ -11,6 +11,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { createRequire } from 'module';
 import * as path from 'path';
 import { makeV2LedgerRow, makeV2LogRow, requireLearningStore } from './learning-fixtures.js';
+import { readAgentReference } from '../helpers.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(import.meta.url);
@@ -1131,7 +1132,8 @@ describe('Learning agent creation-bar contract', () => {
 
   let agentContent: string;
   beforeAll(() => {
-    agentContent = fs.readFileSync(AGENT_PATH, 'utf8');
+    // D-MAINTAIN-ON-DUE: Part 2's ladder lives in learning/maintain.md; a run with a due entry sees both, body first.
+    agentContent = `${fs.readFileSync(AGENT_PATH, 'utf8')}\n${readAgentReference('learning/maintain.md')}`;
   });
 
   it('contains abstain-by-default stance', () => {

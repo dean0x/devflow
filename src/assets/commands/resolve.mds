@@ -120,6 +120,10 @@ Reuse this result for every worktree.
 {{publication_gate()}}
 Resolve this per worktree — unlike the evidence policy above, the settings line is per worktree root. From the same line: {{compliance.compliance_frameworks()}}
 
+{{compliance.compliance_inject()}}
+
+Set it per worktree, from that worktree's lens, and pass that worktree's `COMPLIANCE_DIRECTIVE` to each of its Code and Code-fix spawns, on a line of its own.
+
 **Mint `RESOLUTION_TS` once per run:** `date -u +%Y-%m-%dT%H:%M:%SZ`. Every worktree reuses it — the resolution comment's dedup marker is searched per PR, so one run key keeps a retry of this run deduplicated while the next /resolve on the same PR posts. Phase 5 writes it as the summary's `**Date**:` and Phase 9b-2 passes it, so the local file and the posted marker agree.
 
 ### Phase 1: Parse Issues
@@ -248,13 +252,12 @@ TASK_ID: resolve-{batch-id}
 ISSUES: {fix_now_issues_in_batch}
 SCOPE: {risk_tier_per_issue}
 PUSH: false
-CREATE_PR: false
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 <!-- learning:on -->
 DECISIONS_CONTEXT: {decisions_context}
 <!-- learning:end -->
 FEATURE_KNOWLEDGE: {feature_knowledge}
-COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}
+{COMPLIANCE_DIRECTIVE}
 Fix only the listed pre-classified FIX_NOW issues. Do not re-litigate dispositions.
 Same-file issues → one commit. Include ## Verification block in report.
 Regression fix without failing-then-passing regression test → BLOCKED."
@@ -317,20 +320,19 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
 1. Extract failure details from Validate agent output
 2. Increment `validation_retry_count`
 3. If `validation_retry_count <= 2`:
-   - Spawn Code agent with fix context:
+   - Spawn Code-fix agent with fix context:
    ```
-   Agent(subagent_type="Code"):
+   Agent(subagent_type="Code-fix"):
    "OPERATION: validation-fix
    TASK_ID: resolve-{batch-id}-valfix-{count}
    VALIDATION_FAILURES: {parsed failures from Validate agent}
    SCOPE: Fix only the listed failures, no other changes
    PUSH: false
-   CREATE_PR: false
    WORKTREE_PATH: {worktree_path}  (omit if cwd)
    <!-- learning:on -->
    DECISIONS_CONTEXT: {decisions_context}
    <!-- learning:end -->
-   COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"
+   {COMPLIANCE_DIRECTIVE}"
    ```
    - Loop back to re-validate
 4. If `validation_retry_count > 2`: set VERIFICATION_STATUS = FAILED and exit the validation loop — record a blocking callout in the `## Verification` section (never a silent pass).
@@ -340,7 +342,7 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
 Record `## Verification` outcome in resolution-summary.md (runs unconditionally after the validation loop exits):
 - Rewrite the `## Verification` section with | Command | Result | table + `Final gate: PASS | FAILED after N attempts`
 
-Push all commits to remote once (Code agents and validation-fix Code agents ran with PUSH: false — runs whether the gate PASSED or FAILED, so the branch is always visible before Phase 9 or CI runs):
+Push all commits to remote once (Code and Code-fix agents ran with PUSH: false — runs whether the gate PASSED or FAILED, so the branch is always visible before Phase 9 or CI runs):
 ```bash
 git -C {worktree} push
 ```
@@ -379,9 +381,9 @@ Phase 7 has pushed already, so this is a no-op unless the head moved since. `exi
 4. **If PENDING** and fewer than 3 waits have run → wait again (step 1). After the third wait → report "CI still running — verify manually before merging" and proceed.
 5. **If INDETERMINATE** and fewer than 3 waits have run → wait again (step 1). After the third wait → report "CI status unknown — verify manually before merging" and proceed.
 <!-- learning:on -->
-6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Code")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_FRAMEWORKS`, `CI_FAILURES`, `DECISIONS_CONTEXT` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Code agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
+6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Code-fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES`, `DECISIONS_CONTEXT` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Code-fix agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
 <!-- learning:off -->
-6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Code")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_FRAMEWORKS`, `CI_FAILURES` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Code agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
+6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Code-fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Code-fix agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
 <!-- learning:end -->
 7. **Budget**: at most 3 waits and 2 fixes in all, per worktree. When one is spent, report the current status and proceed.
 <!-- /PATTERN: ci-status-gate -->
@@ -617,10 +619,10 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 │
 ├─ Phase 6: Simplify [Simplify agent]
 │
-├─ Phase 7: Verification Gate [Validate agent, haiku] + push + Code agent validation-fix loop ≤2
+├─ Phase 7: Verification Gate [Validate agent, haiku] + push + Code-fix agent validation-fix loop ≤2
 │
 ├─ Phase 8: CI Status Gate (conditional — skipped if no fixes or verification FAILED)
-│  └─ push, then ci-wait.cjs (inline, one wait ≤ 570 s) → Code agent on FAILING (3 waits + 2 fixes per worktree)
+│  └─ push, then ci-wait.cjs (inline, one wait ≤ 570 s) → Code-fix agent on FAILING (3 waits + 2 fixes per worktree)
 │
 ├─ Phase 9: Git agent (manage-debt) — FIX_SEPARATE + TECH_DEBT → backfill Tracked={ISSUE_REF} (or TRACEABILITY: DEGRADED on failure)
 │  SEQUENTIAL across worktrees

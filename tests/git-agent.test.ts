@@ -20,23 +20,27 @@ import { getAllAgentNames } from '../src/core/plugins.js';
 import {
   TRACKER_GITHUB_OPS,
   GIT_CROSS_CUTTING_DOCS,
+  GIT_OPERATIONS,
   PR_HOST_DESTINATION_ROOT,
+  PR_HOST_OPS,
   VARIANT_MODULES,
+  operationReferenceRel,
 } from '../src/core/mds-variants.js';
-import { ROOT, resolveAgentSource, resolveAllAgents, gitAgentSinkCorpus, extractOpSectionFromCorpus, collectUnfencedH2, loadFile, requireDistFile, walkFiles, isPrHostEntryPath, type CorpusEntry } from './helpers.js';
+import { ROOT, resolveAgentSource, resolveAllAgents, gitAgentSinkCorpus, gitOperationReferenceCorpus, extractOpSectionFromCorpus, collectUnfencedH2, loadFile, requireDistFile, walkFiles, isPrHostEntryPath, type CorpusEntry } from './helpers.js';
 
 /**
- * How many corpus files declare a `## Operation:` section for a TRACKER op:
- * git.md itself, plus one generated mechanics file per registered provider.
+ * How many corpus files declare a `## Operation:` section for a TRACKER op: one
+ * generated reference per registered provider. The agent body declares none
+ * (D-OP-ONE-REF).
  *
  * Derived from the registry rather than typed, because the number moves with a
  * provider and not with anything a reader of this file would think to check. A
  * literal here was correct while GitHub was the only provider and became wrong
- * the moment a second one registered — with a message ("expected exactly 2")
+ * the moment a second one registered — with a message ("expected exactly 1")
  * that reads as a regression in the extractor rather than as a new provider.
  */
 const TRACKER_OP_DECLARING_FILES =
-  1 + VARIANT_MODULES.filter(mod => mod.subdir.startsWith('tracker/')).length;
+  VARIANT_MODULES.filter(mod => mod.subdir.startsWith('tracker/')).length;
 
 // Dist-preferred resolver — Phase 1 needs zero test edits here when git.md → git.mds
 const GIT_AGENT_SOURCE = resolveAgentSource('git');
@@ -50,6 +54,21 @@ const GIT_AGENT_PATH = GIT_AGENT_SOURCE.path;
  */
 function extractOpSection(corpus: CorpusEntry[], opName: string, mode: 'union' | 'sole'): string {
   return extractOpSectionFromCorpus(corpus, opName, { mode }).content;
+}
+
+/**
+ * The op's section when some corpus file declares it, `''` when none does.
+ *
+ * For the known-bad probes that drop a tree: an op whose only declaring file was
+ * dropped has no section at all, which is exactly the answer those probes want to
+ * read, and `extractOpSection` would throw instead of answering.
+ */
+function extractOpSectionOrEmpty(corpus: CorpusEntry[], opName: string): string {
+  try {
+    return extractOpSection(corpus, opName, 'union');
+  } catch {
+    return '';
+  }
 }
 
 // ── Corpus memos ────────────────────────────────────────────────────────────
@@ -80,27 +99,26 @@ function cachedSinkCorpus(): CorpusEntry[] {
 }
 
 /**
- * `git.md` plus the PR-host references, and NOTHING else.
+ * Every operation's single reference for the GitHub provider, and NOTHING else.
  *
  * The corpus for a DETECTION guard — one where the corpus decides WHICH ops are
  * the subject, not merely whether a fixed op can reach a literal. AC-0.6b's
  * remote-I/O sweep is that shape, and the cost is not theoretical: over the full
- * sink corpus `setup-task` is detected as remote-I/O through its PROVIDER
- * mechanics, silently changing the subject of a guard about the agent's own
- * degradation contract. A detection guard must therefore see git.md plus the
- * PR-host half of those operations and no further — widening it to
- * `gitAgentSinkCorpus()` is a blanket widening rather than a classification.
+ * sink corpus an op that is remote-I/O under ONE provider is detected through that
+ * provider's mechanics, silently changing the subject of a guard about the
+ * operations themselves. A detection guard must therefore see each operation once,
+ * in the file the agent tells it to read — widening it to `gitAgentSinkCorpus()`
+ * is a blanket widening rather than a classification.
  *
  * The literal-presence guards in this file read the full union on purpose: their
  * op set is fixed by the caller, the corpus only answers whether that op can
  * reach the text, and each is held non-vacuous by `sinkCorpusWithoutPrHost()`.
  */
-function gitPlusPrHostCorpus(): CorpusEntry[] {
-  return cachedSinkCorpus().filter(
-    entry =>
-      entry.path === GIT_AGENT_PATH || isPrHostEntryPath(entry.path),
-  );
+function operationReferencesCorpus(): CorpusEntry[] {
+  return (opReferencesMemo ??= gitOperationReferenceCorpus());
 }
+
+let opReferencesMemo: CorpusEntry[] | undefined;
 
 /**
  * A copy of the sink corpus with one PR-host file's content replaced by `transform`.
@@ -568,9 +586,10 @@ const PROVIDER_DETECTORS: readonly ProviderDetector[] = [
 
 /**
  * Named collector: the CROSS-CUTTING slices of the agent — everything outside a
- * `## Operation:` section. That is the text every spawn loads whatever provider it
- * resolved: the D4 block, the tracker preamble, the D11 section, the operations
- * table, the marker legend, `## Principles` and `## Boundaries`.
+ * `## Operation:` section. The agent body declares no operation (D-OP-ONE-REF), so
+ * that is the whole file: the text every spawn loads whatever provider it resolved —
+ * the D4 block, the loading table, the D11 section, the operations table, the marker
+ * legend, `## Output`, `## Principles`, `## Core rules` and `## Boundaries`.
  *
  * The section starts come from `collectUnfencedH2` rather than a raw
  * `/^## (.+)$/gm` split. A `## ` line inside an operation's fenced Output template
@@ -585,7 +604,18 @@ function collectCrossCuttingSections(text: string): Array<{ label: string; body:
   const sections: Array<{ label: string; body: string }> = [];
   const starts = collectUnfencedH2(text).map(h => ({ heading: h.text.slice(3), index: h.index }));
   const firstOp = starts.findIndex(s => s.heading.startsWith('Operation: '));
-  const head = firstOp === -1 ? text : text.slice(0, starts[firstOp].index);
+  if (firstOp === -1) {
+    // An agent that declares no operation (D-OP-ONE-REF) is cross-cutting from end to end:
+    // the text before its first `## ` heading is the header and every section after it is
+    // named on its own, so a new always-loaded section cannot hide inside a longer slice.
+    sections.push({ label: '(header)', body: text.slice(0, starts[0]?.index ?? text.length) });
+    starts.forEach((start, i) => {
+      const end = i + 1 < starts.length ? starts[i + 1].index : text.length;
+      sections.push({ label: start.heading, body: text.slice(start.index, end) });
+    });
+    return sections;
+  }
+  const head = text.slice(0, starts[firstOp].index);
   sections.push({ label: '(header)', body: head });
   for (let i = 0; i < starts.length; i++) {
     if (starts[i].heading.startsWith('Operation: ')) continue;
@@ -786,7 +816,7 @@ const PROVIDER_SETUP_TASK_PATH = /[\\/]tracker[\\/][a-z]+[\\/]setup-task\.md$/;
  *       (D-NEUTRAL-STEP-MOVE), so it is read per provider reference from the sink corpus — mode
  *       'union' at the call site, each provider's section checked on its own so one provider
  *       losing the step cannot hide behind the others. The Output trailer that names
- *       `CONVENTIONS_COMMIT` stays in git.md and is still read in 'sole' mode.
+ *       `CONVENTIONS_COMMIT` is in the operation's contract block and is read in 'sole' mode.
  *   (b) learn-conventions contains NO `commit --only` — the commit has moved to setup-task step 4b
  *       (end state only; the old **Commit (non-blocking):** block must not reappear).
  *   (c) fetch-issues-batch reports `NOT_FOUND ({refs})` and strips #-prefixed refs before parsing.
@@ -794,20 +824,17 @@ const PROVIDER_SETUP_TASK_PATH = /[\\/]tracker[\\/][a-z]+[\\/]setup-task\.md$/;
  *
  * Two corpora, because the four arms ask two different questions (DR-18):
  *
- *   contractCorpus — git.md ALONE. Arms (a), (c) and (d) read the operation's
- *     CONTRACT (its Input/Process/Output declaration), and git.md is the single
- *     authority for that. Since Phase 2 the generated references under
- *     dist/skills/git/references/tracker/github/ also carry a `## Operation: X`
- *     anchor, so a sink-wide corpus makes every one of these lookups match twice
- *     and 'sole' throws by design — the reference is MECHANICS, not a second
- *     contract. Repointing here is the GAP-21 "guard classes move with the text"
- *     rule applied in the other direction: the text these three arms pin never
- *     moved, so their corpus must not widen.
+ *   contractCorpus — the operation references, one file per operation for the GitHub
+ *     provider. Arms (a), (c) and (d) read the operation's Input/Output declaration and
+ *     its inline steps, which are in the one reference a spawn reads to run it
+ *     (D-OP-ONE-REF). Every provider's reference carries a `## Operation: X` anchor, so
+ *     a sink-wide corpus makes each of these lookups match more than once and 'sole'
+ *     throws by design; the contract corpus keeps one file per operation.
  *
- *   sinkCorpus — git.md ∪ the generated references. Arm (b) is a NEGATIVE check
+ *   sinkCorpus — git.md ∪ every generated reference. Arm (b) is a NEGATIVE check
  *     ("no commit --only anywhere in learn-conventions"), and a negative check
- *     narrowed to git.md would go blind the moment the learn-conventions body
- *     moves into a reference. It stays wide on purpose.
+ *     narrowed to one file would go blind the moment the text moves. It stays wide on
+ *     purpose.
  *
  * Missing op = violation, never a silent pass.
  */
@@ -837,8 +864,8 @@ function collectConventionsCommitPlacementViolations(
   }
 
   // ── (a) setup-task ─────────────────────────────────────────────────────────
-  // The Output trailer names the skip reasons and stays in git.md: sole mode, git.md is the
-  // single authority for the contract.
+  // The Output trailer names the skip reasons and is part of the contract block: sole mode,
+  // the operation's one reference is the single authority for the contract.
   const setupTask = getSection(contractCorpus, 'setup-task', 'sole');
   if (setupTask !== null && !setupTask.includes('CONVENTIONS_COMMIT: skipped (no branch)')) {
     violations.push(
@@ -907,7 +934,7 @@ function collectConventionsCommitPlacementViolations(
   }
 
   // ── (c) fetch-issues-batch ─────────────────────────────────────────────────
-  // sole mode: git.md is the single authority.
+  // sole mode: the operation's one reference is the single authority.
   const fetchBatch = getSection(contractCorpus, 'fetch-issues-batch', 'sole');
   if (fetchBatch !== null) {
     if (!fetchBatch.includes('NOT_FOUND ({refs})')) {
@@ -925,7 +952,7 @@ function collectConventionsCommitPlacementViolations(
   }
 
   // ── (d) fetch-issue ────────────────────────────────────────────────────────
-  // sole mode: git.md is the single authority.
+  // sole mode: the operation's one reference is the single authority.
   const fetchIssue = getSection(contractCorpus, 'fetch-issue', 'sole');
   if (fetchIssue !== null) {
     if (!fetchIssue.includes('Strip a leading `#`')) {
@@ -940,13 +967,17 @@ function collectConventionsCommitPlacementViolations(
 }
 
 describe('git agent — static content guards', () => {
-  // Single-file corpus for operations that have exactly one authority file
+  // `content` is the agent body (shared rules, loading table, D11); `soleCorpus` is the
+  // operation references for the GitHub provider — one file per operation, the file the
+  // agent tells a spawn to read (D-OP-ONE-REF). An operation's Input, degradation notes,
+  // Output template and steps are in that one file, so a 'sole' lookup in it is the
+  // single-authority lookup for the operation.
   let content: string;
   let soleCorpus: CorpusEntry[];
 
   beforeAll(() => {
     content = GIT_AGENT_SOURCE.content;
-    soleCorpus = [{ path: GIT_AGENT_PATH, content }];
+    soleCorpus = operationReferencesCorpus();
   });
 
   // ── Guard 0: Non-vacuousness ────────────────────────────────────────────────
@@ -991,12 +1022,22 @@ describe('git agent — static content guards', () => {
 
   for (const op of REQUIRED_OPS) {
     it(`operation section exists: ## Operation: ${op}`, () => {
+      // Throws when the operation's one reference carries no such anchor.
       expect(
-        content,
-        `git.md is missing "## Operation: ${op}" — silent removal breaks the traceability contract`,
+        extractOpSection(soleCorpus, op, 'sole'),
+        `${op}'s reference is missing "## Operation: ${op}" — silent removal breaks the traceability contract`,
       ).toContain(`## Operation: ${op}`);
     });
   }
+
+  it('the agent body declares no operation section (AC-101)', () => {
+    // The operation text lives in the references. A `## Operation:` heading in git.md
+    // would be a second copy of an operation every spawn pays for.
+    expect(
+      collectOpNames(content),
+      'the Git agent body holds an operation section — an operation belongs in its one reference',
+    ).toEqual([]);
+  });
 
   // ── Guard 2: Load-bearing numeric bounds ────────────────────────────────────
 
@@ -1012,12 +1053,13 @@ describe('git agent — static content guards', () => {
   });
 
   it('post-review-summary: 60000-char cap known-bad probe — dropping the PR-host tree loses it', () => {
-    // The union read above is only honest if the literal is gone from
-    // the narrower corpus. If this ever passes, the cap came back to git.md
-    // and the guard should be re-classified 'sole', not left widened.
+    // The union read above is only honest if the operation is gone from the
+    // narrower corpus. If this ever finds a section, the operation (and its cap)
+    // came back outside the PR-host reference — git.md or a second tree — and the
+    // guard should be re-classified 'sole', not left widened.
     expect(
-      extractOpSection(sinkCorpusWithoutPrHost(), 'post-review-summary', 'union'),
-      'the 60000 cap must live ONLY in the PR-host reference — a second copy in git.md is a ' +
+      extractOpSectionOrEmpty(sinkCorpusWithoutPrHost(), 'post-review-summary'),
+      'the 60000 cap must live ONLY in the PR-host reference — a second copy anywhere else is a ' +
       'second authority on the same bound',
     ).not.toContain('60000');
   });
@@ -1034,7 +1076,7 @@ describe('git agent — static content guards', () => {
 
   it('post-resolution-summary: 60000-char cap known-bad probe — dropping the PR-host tree loses it', () => {
     expect(
-      extractOpSection(sinkCorpusWithoutPrHost(), 'post-resolution-summary', 'union'),
+      extractOpSectionOrEmpty(sinkCorpusWithoutPrHost(), 'post-resolution-summary'),
       'the 60000 cap must live ONLY in the PR-host reference',
     ).not.toContain('60000');
   });
@@ -1087,12 +1129,12 @@ describe('git agent — static content guards', () => {
 
   it('resolve-review-threads: ≤50 bound known-bad probe — the loop text is in the PR-host tree', () => {
     // Dropping the PR-host tree must lose the loop's statement of the bound, or
-    // the live arm above could be met by a copy in git.md. The Output enum is
+    // the live arm above could be met by a copy elsewhere. The Output enum is
     // allowed to keep the `≤50` token; the loop sentence is not.
     expect(
-      extractOpSection(sinkCorpusWithoutPrHost(), 'resolve-review-threads', 'union'),
-      'the bounded-loop statement must live in the PR-host reference — if git.md still carries ' +
-      'it, re-classify this guard rather than leaving it widened',
+      extractOpSectionOrEmpty(sinkCorpusWithoutPrHost(), 'resolve-review-threads'),
+      'the bounded-loop statement must live in the PR-host reference — if another file still ' +
+      'carries it, re-classify this guard rather than leaving it widened',
     ).not.toContain('sequentially, ≤50, 1s between operations');
   });
 
@@ -1170,10 +1212,10 @@ describe('git agent — static content guards', () => {
   });
 
   it('fetch-review-threads: ≤2-page bound known-bad probe — the cursor trap is in the PR-host tree', () => {
-    const withoutPrHost = extractOpSection(sinkCorpusWithoutPrHost(), 'fetch-review-threads', 'union');
+    const withoutPrHost = extractOpSectionOrEmpty(sinkCorpusWithoutPrHost(), 'fetch-review-threads');
     expect(
       withoutPrHost,
-      'the step-1 bound must live with the step, in the PR-host reference — a copy in git.md would ' +
+      'the step-1 bound must live with the step, in the PR-host reference — a copy elsewhere would ' +
       'meet the live arm without it',
     ).not.toMatch(/bounds: ≤2 pages of 50/);
     expect(
@@ -1313,17 +1355,28 @@ describe('git agent — static content guards', () => {
     // "sections" of which 18 were fenced Output-template headings from inside
     // operation bodies — a count cannot tell an honest corpus from that one, and the
     // scan was simultaneously too wide (operation payload) and unable to say so. The
-    // real cross-cutting text is the header — D4, the loading section, D11, the
-    // operations table, the marker legend all sit above the first operation — plus
-    // the four shared trailers, `## Output` (the report cap, #425) and `## Core rules`
-    // (the digest of the core rules the agent keeps now that it omits the rule files) included (the
-    // narrower corpus is reclassified here, not accommodated by loosening the assertion).
+    // agent body declares no operation (D-OP-ONE-REF), so every one of its sections is
+    // cross-cutting and each is named: the input contract with D4, the loading table, D11,
+    // the operations table with the marker legend, `## Output` (the report cap, #425),
+    // `## Principles`, `## Core rules` (the digest of the core rules the agent keeps now
+    // that it omits the rule files) and `## Boundaries` (the narrower corpus is
+    // reclassified here, not accommodated by loosening the assertion).
     expect(
       sections.map(s => s.label),
       'the cross-cutting slices changed shape: a new always-loaded `## ` section was added, or ' +
-      'one of the two shared trailers was renamed. Name it here — an unnamed section is text ' +
+      'one was renamed. Name it here — an unnamed section is text ' +
       'every spawn loads that nothing scans (GAP-03)',
-    ).toEqual(['(header)', 'Output', 'Principles', 'Core rules', 'Boundaries']);
+    ).toEqual([
+      '(header)',
+      'Input',
+      'Loading the mechanics',
+      'Comment-sink scrub (D11)',
+      'Operations',
+      'Output',
+      'Principles',
+      'Core rules',
+      'Boundaries',
+    ]);
     expect(
       collectProviderDetectors(sections),
       'provider detector(s) in always-loaded text. The invariant belongs here; the signal that ' +
@@ -1540,17 +1593,18 @@ describe('git agent — static content guards', () => {
     ).toContain('devflow:resolution-summary ts:');
   });
 
-  it('dedup marker FORM known-bad probe — both marker literals left git.md with their steps', () => {
-    // The non-vacuity probe for the pair above. Neither marker may survive in git.md:
-    // an op that restates its own dedup marker in the contract is the GAP-20 shape
-    // (two authorities on one idempotency key).
+  it('dedup marker FORM known-bad probe — both marker literals live only in their PR-host reference', () => {
+    // The non-vacuity probe for the pair above. Neither marker may survive outside
+    // its PR-host reference — in the agent body or in a second tree: an op that
+    // restates its own dedup marker elsewhere is the GAP-20 shape (two authorities
+    // on one idempotency key).
     const narrowed = sinkCorpusWithoutPrHost();
     expect(
-      extractOpSection(narrowed, 'post-review-summary', 'union'),
+      extractOpSectionOrEmpty(narrowed, 'post-review-summary'),
       'devflow:review-summary must live only in the PR-host mechanics',
     ).not.toMatch(/devflow:review-summary cycle:/);
     expect(
-      extractOpSection(narrowed, 'post-resolution-summary', 'union'),
+      extractOpSectionOrEmpty(narrowed, 'post-resolution-summary'),
       'devflow:resolution-summary must live only in the PR-host mechanics',
     ).not.toContain('devflow:resolution-summary ts:');
   });
@@ -1711,11 +1765,13 @@ describe('git agent — static content guards', () => {
     }
   });
 
-  it('D10: publication output enum line is present in git.md', () => {
-    expect(
-      content,
-      'D10: missing publication output enum line — removing it breaks the caller\'s ability to parse publication status',
-    ).toContain('**Publication**: FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config)');
+  it('D10: publication output enum line is present in both summary ops\' references', () => {
+    for (const op of D10_SUMMARY_OPS) {
+      expect(
+        extractOpSection(soleCorpus, op, 'sole'),
+        `D10: ${op} is missing the publication output enum line — removing it breaks the caller\'s ability to parse publication status`,
+      ).toContain('**Publication**: FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config)');
+    }
   });
 
   // ── [DR-20] the D10 scope guard's successor pair ───────────────────────────
@@ -1744,21 +1800,31 @@ describe('git agent — static content guards', () => {
   // references — which is why the set below names files and no op inside git.md.
 
   it('D10 [DR-20](i): references/publication-gate.md is named from EXACTLY the two summary ops', () => {
-    const opNames = collectOpNames(content);
+    // Every operation's one reference, joined: each starts at its own `## Operation:` anchor,
+    // so an op's slice is the whole file that op loads.
+    const operationText = operationReferencesCorpus().map(e => e.content).join('\n');
+    const opNames = collectOpNames(operationText);
     expect(
       opNames.length,
       `corpus is only ${opNames.length} ops — expected > 2 for a non-vacuous scope check`,
     ).toBeGreaterThan(2);
     expect(
-      collectOpsNamingReference(content, 'publication-gate.md').sort(),
+      collectOpsNamingReference(operationText, 'publication-gate.md').sort(),
       'D10 scope violation: the publication gate must be loaded by the two summary ops and by ' +
       'no other operation — any other op naming it is an op that probes repo visibility',
     ).toEqual(['post-resolution-summary', 'post-review-summary']);
+    // …and the always-loaded body names it nowhere: a name there bills every spawn for a
+    // gate two operations read.
+    expect(
+      content,
+      'git.md names references/publication-gate.md — the gate is named from the two summary ' +
+      'operations\' references only',
+    ).not.toContain('references/publication-gate.md');
   });
 
   it('D10 [DR-20](i) known-bad probe: a seeded third op naming the gate is detected', () => {
     const seeded =
-      `${content}\n## Operation: post-fake-summary\n\nSee \`references/publication-gate.md\`.\n`;
+      `${operationReferencesCorpus().map(e => e.content).join('\n')}\n## Operation: post-fake-summary\n\nSee \`references/publication-gate.md\`.\n`;
     expect(
       collectOpsNamingReference(seeded, 'publication-gate.md').sort(),
       'the collector must see a third naming op — otherwise the exact-set assertion is inert',
@@ -1860,7 +1926,7 @@ describe('git agent — static content guards', () => {
     // (Phase 2+); unioning ensures the floor never silently drops below 9 [DR-18, AC-0.8].
     // 8 → 9 with #363's update-pr-evidence (the PR-body edit and the evidence comment).
     const sinkCorpus = cachedSinkCorpus();
-    const opNames = (content.match(/## Operation: (\S+)/g) ?? []).map(m => m.replace('## Operation: ', ''));
+    const opNames: readonly string[] = GIT_OPERATIONS;
 
     const postingOps: string[] = [];
     const postingOpsWithoutD11: string[] = [];
@@ -1888,7 +1954,7 @@ describe('git agent — static content guards', () => {
     // Sink corpus = git.md ∪ dist/skills/git/references/*.md (ENOENT-tolerant on dist).
     // Mode 'union' — same rationale as forward guard [DR-18].
     const sinkCorpus = cachedSinkCorpus();
-    const opNames = (content.match(/## Operation: (\S+)/g) ?? []).map(m => m.replace('## Operation: ', ''));
+    const opNames: readonly string[] = GIT_OPERATIONS;
     expect(
       opNames.length,
       `reverse guard is vacuous: found ${opNames.length} ops (expected > 0)`,
@@ -1909,38 +1975,39 @@ describe('git agent — static content guards', () => {
     ).toHaveLength(0);
   });
 
-  it('D11 known-bad probe: dropping the PR-host tree narrows the posting set from 9 to 4 (SG-8 non-vacuity)', () => {
+  it('D11 known-bad probe: dropping the PR-host tree narrows the posting set from 9 to 5 (SG-8 non-vacuity)', () => {
     // SG-8's proof obligation, and the one thing the floor of 9 above cannot show
     // on its own: the forward guard is green whichever file carries a posting
     // op's sink, so green alone never establishes that the union corpus is what
-    // carries five of those nine. This drives the SAME predicate over the
+    // carries four of those nine. This drives the SAME predicate over the
     // narrowed corpus and pins the number that only the widening supplies.
     //
-    // Five of the nine vanish entirely — post-review-summary,
-    // post-resolution-summary, resolve-review-threads, ensure-pr-ready and
-    // update-pr-evidence post only from `pr/`. ensure-pr-ready is a member of BOTH rosters, but both of its
-    // PR-body writes are PR-host mechanics: step 4a's create and step 4b's
-    // PR-host half (the scrub-then-edit). Its tracker reference only resolves the
-    // issue and renders the link line. The four tracker-side posters
-    // (backlink-shipped-issues, ensure-traceable-issue, manage-debt,
-    // post-wave-report) post from `tracker/{provider}/`.
+    // Four of the nine vanish entirely — post-review-summary,
+    // post-resolution-summary, resolve-review-threads and update-pr-evidence post
+    // only from `pr/`. The five tracker-side posters stay: backlink-shipped-issues,
+    // ensure-traceable-issue, manage-debt and post-wave-report post from
+    // `tracker/{provider}/`, and so does ensure-pr-ready — a tracker operation whose
+    // per-provider reference carries the PR skeleton too, so both of its PR-body
+    // writes (step 4a's create and step 4b's scrub-then-edit) sit beside its
+    // tracker half.
     const EXPECTED_WITHOUT_PR_HOST = [
       'manage-debt',
       'backlink-shipped-issues',
       'ensure-traceable-issue',
       'post-wave-report',
+      'ensure-pr-ready',
     ];
     const narrowed = sinkCorpusWithoutPrHost();
-    const opNames = collectOpNames(content);
+    const opNames: readonly string[] = GIT_OPERATIONS;
     const postingOps = opNames.filter(op =>
-      isPostingSection(extractOpSection(narrowed, op, 'union')),
+      isPostingSection(extractOpSectionOrEmpty(narrowed, op)),
     );
     // A NAMED set, not a count: a count of 5 is equally satisfied by losing
     // `ensure-pr-ready` and gaining an unrelated op, which would be a real
     // regression reported as agreement (the `scanned > 0` anti-pattern, one level up).
     expect(
       [...postingOps].sort(),
-      `without references/${PR_HOST_DESTINATION_ROOT}/ the posting set must fall from 9 to exactly these 4 ` +
+      `without references/${PR_HOST_DESTINATION_ROOT}/ the posting set must fall from 9 to exactly these 5 ` +
       'ops — a set that does not move proves the union corpus was never load-bearing',
     ).toEqual([...EXPECTED_WITHOUT_PR_HOST].sort());
   });
@@ -2167,8 +2234,8 @@ describe('git agent — static content guards', () => {
 
   it('D11: ensure-pr-ready scrubs the PR body it creates (gh pr create is a publication sink)', () => {
     // Mode 'union' [DR-18]: step 4a — which states both the scrub and the
-    // `--body-file` create it gates — is PR-host mechanics and lives in
-    // references/pr/ensure-pr-ready.md.
+    // `--body-file` create it gates — is PR-host mechanics written once and
+    // expanded into every provider's ensure-pr-ready reference.
     const sec = extractOpSection(cachedSinkCorpus(), 'ensure-pr-ready', 'union');
     // extractOpSection throws when the anchor is absent — sec.length is always > 0 here (not a guard).
     expect(
@@ -2181,14 +2248,19 @@ describe('git agent — static content guards', () => {
     ).toContain('Comment-sink scrub (D11)');
   });
 
-  it('D11: ensure-pr-ready known-bad probe — the create sink is in the PR-host tree', () => {
+  it('D11: ensure-pr-ready known-bad probe — the create sink is in the tracker trees', () => {
     // Non-vacuity for the widening above. The probe asks for the CREATE call
-    // specifically: `pr/ensure-pr-ready.md` holds two scrubbed writes (4a's create
-    // and 4b's edit), and asking for "Comment-sink scrub (D11)" would not say which
-    // one the narrowed corpus lost.
+    // specifically: each ensure-pr-ready reference holds two scrubbed writes (4a's
+    // create and 4b's edit), and asking for "Comment-sink scrub (D11)" would not say
+    // which one the narrowed corpus lost. ensure-pr-ready is a tracker operation, so
+    // dropping the PR-host tree must NOT lose it, and dropping the tracker trees must.
     expect(
       extractOpSection(sinkCorpusWithoutPrHost(), 'ensure-pr-ready', 'union'),
-      'step 4a\'s `gh pr create` sink must live in the PR-host reference',
+      'ensure-pr-ready is a tracker operation: the PR-host tree is not where its create sink lives',
+    ).toContain('gh pr create … --body-file "$DEVFLOW_BODY"');
+    expect(
+      extractOpSectionOrEmpty(sinkCorpusWithout('tracker/'), 'ensure-pr-ready'),
+      'step 4a\'s `gh pr create` sink must live in the per-provider ensure-pr-ready references only',
     ).not.toContain('gh pr create … --body-file "$DEVFLOW_BODY"');
   });
 
@@ -2317,29 +2389,29 @@ describe('git agent — static content guards', () => {
 
   // ── Guard 8: D9 caller guard (AC-0.5) ──────────────────────────────────────
 
-  it('D9: resolve.mds and dist/commands/resolve.md carry the D9 rule literal from git.md (AC-0.5)', () => {
+  it('D9: resolve.mds and dist/commands/resolve.md carry the D9 rule literal from the reference (AC-0.5)', () => {
     // The seam test deliberately ignores D9: lines (DECISION_ANNOTATION_KEYS), so this
     // guard is the only cross-file pin for the D9 caller-contract.
-    // Authoritative source: resolve-review-threads op section ~git.md:681 (NOT the
-    // operations-table row near line 96, which has different casing and backtick-quoted terms).
+    // Authoritative source: the resolve-review-threads reference's D9 paragraph (NOT the
+    // operations-table row in git.md, which has different casing and backtick-quoted terms).
     const sec = extractOpSection(soleCorpus, 'resolve-review-threads', 'sole');
-    // Unique fragment: line 681 uses 'ONLY' (uppercase) and 'verdict == FIXED' (with ==),
-    // whereas line 96 uses 'only' (lowercase) and 'verdict `FIXED`' (backtick-quoted, no ==).
+    // Unique fragment: the reference uses 'ONLY' (uppercase) and 'verdict == FIXED' (with ==),
+    // whereas the table row uses 'only' (lowercase) and 'verdict `FIXED`' (backtick-quoted, no ==).
     const D9_RULE_FRAGMENT = 'ONLY when VERIFICATION_STATUS == PASS AND verdict == FIXED AND commit_sha non-empty';
     expect(
       sec,
-      'git.md resolve-review-threads section must contain the authoritative D9 rule fragment',
+      'the resolve-review-threads reference must contain the authoritative D9 rule fragment',
     ).toContain(D9_RULE_FRAGMENT);
     // RED proof: any string lacking this exact fragment would fail the assertions below.
     const resolveMds = loadFile('src/assets/commands/resolve.mds');
     expect(
       resolveMds,
-      'resolve.mds must carry the D9 rule fragment from git.md (seam test ignores D9: lines)',
+      'resolve.mds must carry the D9 rule fragment from the resolve-review-threads reference (seam test ignores D9: lines)',
     ).toContain(D9_RULE_FRAGMENT);
     const resolveDist = requireDistFile('resolve.md');
     expect(
       resolveDist,
-      'dist/commands/resolve.md must carry the D9 rule fragment from git.md',
+      'dist/commands/resolve.md must carry the D9 rule fragment from the resolve-review-threads reference',
     ).toContain(D9_RULE_FRAGMENT);
   });
 
@@ -2363,20 +2435,18 @@ describe('git agent — static content guards', () => {
     // D4 scope: all ops that call gh CLI or a remote tracker (posting, mutation, or read-only fetch).
     // G1 added D4 to fetch-issue (~:268) and fetch-issues-batch (~:314) — both fetch remotely via gh.
     // Two corpora, one per question, and the split is the point:
-    //   DETECTION reads git.md ∪ the PR-host references — these ops' `gh` calls
-    //     live in references/pr/, and a 'sole' read silently narrows the
-    //     remote-I/O set from 15 to 14 (post-resolution-summary's `gh` indicators
-    //     are all in its PR-host body) while staying green on a smaller subject.
-    //     Widened to exactly the PR-host half and no further: over the
-    //     FULL sink corpus `setup-task` would be detected through its provider
-    //     mechanics, which is a different guard about a different file.
-    //   D4 EVIDENCE stays 'sole' — the degradation contract is the agent's, and a
-    //     clause in a loadable reference is a clause a spawn can decline to load.
-    //     git.md alone must answer for it.
+    //   DETECTION reads each op's single reference for the GitHub provider — the
+    //     file the agent tells a spawn to read, which carries both the contract and
+    //     the steps. Not the full sink corpus: over it an op is detected as
+    //     remote-I/O through ANY provider's mechanics, a different guard about
+    //     different files.
+    //   D4 EVIDENCE is 'sole' over the same references — each op's degradation notes
+    //     are in the reference the spawn reads to run it (D-OP-ONE-REF), and the
+    //     generic D4 contract that governs every op stays in git.md.
     const remoteOps: string[] = [];
     const missingD4: string[] = [];
     for (const op of REQUIRED_OPS) {
-      const sec = extractOpSection(gitPlusPrHostCorpus(), op, 'union');
+      const sec = extractOpSection(operationReferencesCorpus(), op, 'sole');
       // Remote I/O indicators: body-file posting, git push, explicit gh subcommands
       // that write state, plus read-only API calls (gh api, gh issue view/list, GraphQL,
       // and backtick-quoted `gh` which appears in D4 lines of fetch-issue/fetch-issues-batch).
@@ -2415,8 +2485,8 @@ describe('git agent — static content guards', () => {
     ).toContain('fetch-issues-batch');
     expect(
       remoteOps,
-      'create-release must stay detected as remote-I/O: its steps carry `gh release create` and stay inline ' +
-      'in git.md (D-NEUTRAL-STEP-MOVE keeps them out of the shared step text)',
+      'create-release must stay detected as remote-I/O: its steps carry `gh release create`, which ' +
+      'every provider\'s create-release reference holds beside the provider\'s shipped-issues step',
     ).toContain('create-release');
     expect(
       remoteOps.length,
@@ -2507,7 +2577,7 @@ describe('git agent — static content guards', () => {
     extractOpSection(corpus, op, 'union');
 
   it('containment (AC-0.10): ops rendering remote-sourced fields wrap them in containment tags (op-scoped)', () => {
-    const opNames = collectOpNames(content);
+    const opNames: readonly string[] = GIT_OPERATIONS;
     /** An operation's own section — cut at the next unfenced `## `, never a shared trailer. */
     const opSection = (op: string) => extractOpSection(soleCorpus, op, 'sole');
 
@@ -2536,27 +2606,13 @@ describe('git agent — static content guards', () => {
     // These three ops pre-existed on main; the assertion existed there too — its non-vacuity
     // is proved by the named-set: removing <external-thread> from any listed op fails toContain.
     const EXPECTED_EXTERNAL_THREAD_OPS = ['fetch-review-threads', 'post-resolution-summary', 'post-wave-report'];
-    // post-wave-report's non-reproduction reminder is provider-neutral step text that moved out of
-    // git.md into the provider references (D-NEUTRAL-STEP-MOVE), so its literal is read in mode
-    // 'union' — named here at the call site — and the others in 'sole'. Principle 8 in git.md still
-    // names post-wave-report, and the probe below proves the union read is load-bearing.
-    const MOVED_EXTERNAL_THREAD_OPS: readonly string[] = ['post-wave-report'];
+    // Every op's non-reproduction reminder is in its own reference (D-OP-ONE-REF), so all three
+    // are read in 'sole' mode. post-wave-report's reminder is provider-neutral step text that
+    // each provider's reference carries; the GitHub reference stands for them here and the
+    // per-provider read is the moved-obligations arm at the end of this file.
     const opsWithExternalThread = opNames.filter(
-      op => (MOVED_EXTERNAL_THREAD_OPS.includes(op)
-        ? extractOpSection(cachedSinkCorpus(), op, 'union')
-        : opSection(op)
-      ).includes('<external-thread>'),
+      op => opSection(op).includes('<external-thread>'),
     );
-    for (const moved of MOVED_EXTERNAL_THREAD_OPS) {
-      expect(
-        opSection(moved),
-        `${moved}: the literal came back to git.md — re-classify it 'sole' and drop it from MOVED_EXTERNAL_THREAD_OPS`,
-      ).not.toContain('<external-thread>');
-      expect(
-        extractOpSection(sinkCorpusWithoutPrHost(), moved, 'union'),
-        `${moved}: the union read must still see the literal in the provider references`,
-      ).toContain('<external-thread>');
-    }
     for (const expectedOp of EXPECTED_EXTERNAL_THREAD_OPS) {
       expect(
         opsWithExternalThread,
@@ -2570,18 +2626,16 @@ describe('git agent — static content guards', () => {
 
     // Negative arm: summary/reply ops must not interpolate remote body placeholders.
     //
-    // Mode 'union' [DR-18]: each of these ops spans two files — the contract in
-    // git.md and the compose template in its generated reference (references/pr/
-    // for the two review-summary ops, the provider mechanics for post-wave-report)
-    // — and a placeholder is most likely to appear in a compose template. A
-    // negative check narrowed to git.md goes blind exactly where the risk is (the
-    // same reasoning that keeps `learn-conventions`' negative arm on the sink corpus).
+    // Mode 'union' [DR-18]: each of these ops is read over every file that declares it
+    // — references/pr/ for the two review-summary ops, each provider's mechanics for
+    // post-wave-report — and a placeholder is most likely to appear in a compose
+    // template. A negative check narrowed to one provider goes blind exactly where the
+    // risk is (the same reasoning that keeps `learn-conventions`' negative arm on the
+    // sink corpus).
     //
-    // In-scope witness: every compose template states the 60000-char cap, and no
-    // one of these ops' git.md sections does (the two summary ops' cap is held out
-    // of git.md by the probes beside their cap guards). A surface without `60000`
-    // is not reading the compose half, and the absence check below would be green
-    // over the wrong text.
+    // In-scope witness: every compose template states the 60000-char cap, and the
+    // contract block does not. A surface without `60000` is not reading the compose
+    // half, and the absence check below would be green over the wrong text.
     const SUMMARY_OPS = ['post-review-summary', 'post-resolution-summary', 'post-wave-report'];
     for (const op of SUMMARY_OPS) {
       const surface = summaryComposeSurface(cachedSinkCorpus(), op);
@@ -2612,7 +2666,7 @@ describe('git agent — static content guards', () => {
     expect(
       REMOTE_PLACEHOLDER_RE.test(summaryComposeSurface(seeded, 'post-review-summary')),
       'a remote placeholder seeded in the PR-host compose template must be detected — otherwise ' +
-      'the negative arm is only reading the half that stayed in git.md',
+      'the negative arm is only reading the contract half of the reference',
     ).toBe(true);
   });
 
@@ -2659,8 +2713,8 @@ describe('git agent — static content guards', () => {
     ).not.toContain('## Operation: fetch-issues-batch');
     expect(
       matchCount,
-      `expected exactly ${TRACKER_OP_DECLARING_FILES} \`fetch-issue\` sections (git.md plus one ` +
-      `generated mechanics file per registered provider); one more than that is the prefix match ` +
+      `expected exactly ${TRACKER_OP_DECLARING_FILES} \`fetch-issue\` sections (one ` +
+      `generated reference per registered provider); one more than that is the prefix match ` +
       `on fetch-issues-batch.md returning`,
     ).toBe(TRACKER_OP_DECLARING_FILES);
     // Control: the longer name still resolves on its own, so the bound did not go too far.
@@ -2734,8 +2788,9 @@ describe('git agent — static content guards', () => {
   // Named collector + known-bad probe (H10): proves detection is live.
 
   it('conventions-commit placement and batch NOT_FOUND rule: live corpus has no violations', () => {
-    // contract corpus: git.md only (mode 'sole'); sink corpus: git.md ∪ references — arm (a) reads
-    // each provider's setup-task reference in mode 'union', arm (b) is a negative check.
+    // contract corpus: the operation references (mode 'sole'); sink corpus: git.md ∪ every
+    // reference — arm (a) reads each provider's setup-task reference in mode 'union', arm (b)
+    // is a negative check.
     const violations = collectConventionsCommitPlacementViolations(soleCorpus, cachedSinkCorpus());
     expect(
       violations,
@@ -2749,12 +2804,14 @@ describe('git agent — static content guards', () => {
       providerRefs.map(entry => path.basename(path.dirname(entry.path))).sort(),
       'one setup-task reference per registered tracker provider',
     ).toEqual(['github', 'jira', 'linear']);
-    // Known-bad: with the moved files taken out of the corpus the same collector reports the steps
-    // as unverifiable — if this ever passes, the 4b steps came back to git.md and arm (a) should
-    // be re-classified 'sole'.
-    expect(extractOpSection(soleCorpus, 'setup-task', 'sole'), 'git.md no longer holds step 4b').not.toMatch(/^\s*4b\./m);
+    // Known-bad: with the provider references taken out of the corpus the same collector reports
+    // the steps as unverifiable — if this ever passes, the 4b steps came back to the agent body.
+    expect(content, 'git.md holds no step 4b').not.toMatch(/^\s*4b\./m);
+    const withoutProviderSetupRefs = cachedSinkCorpus().filter(
+      entry => !PROVIDER_SETUP_TASK_PATH.test(entry.path),
+    );
     expect(
-      collectConventionsCommitPlacementViolations(soleCorpus, soleCorpus)
+      collectConventionsCommitPlacementViolations(soleCorpus, withoutProviderSetupRefs)
         .filter(v => v.startsWith('setup-task:')),
       'a corpus without the provider references must be reported, not skipped',
     ).toHaveLength(1);
@@ -2766,37 +2823,41 @@ describe('git agent — static content guards', () => {
     // collector as the live guard.
     //
     // Mutation 1: remove setup-task's 4b step block from the GitHub provider's reference, where the
-    //   step now lives (D-NEUTRAL-STEP-MOVE). Only that provider is mutated: the other two stay
+    //   step lives (D-NEUTRAL-STEP-MOVE). Only that provider is mutated: the other two stay
     //   intact, which is what proves each reference is read on its own.
     // Mutation 2: replace learn-conventions' **Commit boundary:** one-liner with an old-style
     //   **Commit (non-blocking):** block containing commit --only, reproducing the pre-ae62d0a shape.
-    const realContent = resolveAgentSource('git').content;
-
-    // Mutation 2 first: it edits git.md.
     const commitBoundaryAnchor = '\n**Commit boundary:**';
-    const cbIdx = realContent.indexOf(commitBoundaryAnchor);
-    if (cbIdx === -1) throw new Error('probe: "**Commit boundary:**" not found in git.md');
-    const cbLineEnd = realContent.indexOf('\n', cbIdx + 1);
     const oldStyleBlock =
       '\n**Commit (non-blocking):** Run only if learn-conventions returned `**Status**: WRITTEN`.\n' +
       '```bash\n' +
       'git commit --only -m "docs(devflow): record project conventions" -- .devflow/conventions.md\n' +
       '```\n';
-    const mutatedGit =
-      realContent.slice(0, cbIdx) + oldStyleBlock + (cbLineEnd === -1 ? '' : realContent.slice(cbLineEnd));
-
-    // Mutation 1: delete the 4b block from the GitHub setup-task reference.
-    const syntheticSink: CorpusEntry[] = cachedSinkCorpus().map(entry => {
-      if (entry.path === GIT_AGENT_PATH) return { path: entry.path, content: mutatedGit };
-      if (!PROVIDER_SETUP_TASK_PATH.test(entry.path) || path.basename(path.dirname(entry.path)) !== 'github') return entry;
-      const step4bStart = entry.content.indexOf('\n4b. ');
-      const step5Start = entry.content.indexOf('\n5. Return setup summary', step4bStart);
+    const mutateLearnConventions = (entryContent: string): string => {
+      const cbIdx = entryContent.indexOf(commitBoundaryAnchor);
+      if (cbIdx === -1) throw new Error('probe: "**Commit boundary:**" not found in the learn-conventions reference');
+      const cbLineEnd = entryContent.indexOf('\n', cbIdx + 1);
+      return entryContent.slice(0, cbIdx) + oldStyleBlock + (cbLineEnd === -1 ? '' : entryContent.slice(cbLineEnd));
+    };
+    const deleteStep4b = (entryContent: string): string => {
+      const step4bStart = entryContent.indexOf('\n4b. ');
+      const step5Start = entryContent.indexOf('\n5. Return setup summary', step4bStart);
       if (step4bStart === -1 || step5Start === -1) {
         throw new Error('probe: could not locate 4b./5. boundaries in the github setup-task reference for mutation');
       }
-      return { path: entry.path, content: entry.content.slice(0, step4bStart) + entry.content.slice(step5Start) };
+      return entryContent.slice(0, step4bStart) + entryContent.slice(step5Start);
+    };
+    const mutate = (corpus: CorpusEntry[]): CorpusEntry[] => corpus.map(entry => {
+      if (path.basename(entry.path) === 'learn-conventions.md') {
+        return { path: entry.path, content: mutateLearnConventions(entry.content) };
+      }
+      if (PROVIDER_SETUP_TASK_PATH.test(entry.path) && path.basename(path.dirname(entry.path)) === 'github') {
+        return { path: entry.path, content: deleteStep4b(entry.content) };
+      }
+      return entry;
     });
-    const syntheticContract: CorpusEntry[] = [{ path: GIT_AGENT_PATH, content: mutatedGit }];
+    const syntheticSink: CorpusEntry[] = mutate(cachedSinkCorpus());
+    const syntheticContract: CorpusEntry[] = mutate(soleCorpus);
     const violations = collectConventionsCommitPlacementViolations(syntheticContract, syntheticSink);
 
     expect(
@@ -2855,13 +2916,25 @@ export const GIT_OPERATION_ROSTER: readonly string[] = [
   'update-pr-evidence',
 ];
 
-/** Named collector: the `## Operation:` names an agent source declares, in file order. */
+/**
+ * Named collector: the operation names the agent's `## Operations` routing table lists,
+ * in table order — the first backticked cell of each row under that heading.
+ */
 export function collectOperationNames(content: string): string[] {
-  return [...content.matchAll(/^## Operation: (\S+)/gm)].map(m => m[1]);
+  const start = content.search(/^## Operations\s*$/m);
+  if (start === -1) return [];
+  const rest = content.slice(start).split('\n').slice(1);
+  const names: string[] = [];
+  for (const line of rest) {
+    if (/^## /.test(line)) break;
+    const row = /^\|\s*`([a-z][a-z0-9-]*)`\s*\|/.exec(line);
+    if (row !== null) names.push(row[1]);
+  }
+  return names;
 }
 
 describe('git agent: the operation roster is unchanged (registry Guard 6)', () => {
-  it('the compiled agent declares exactly the registered operation names, in order', () => {
+  it('the compiled agent routes exactly the registered operation names, in order', () => {
     const names = collectOperationNames(resolveAgentSource('git').content);
     expect(
       names,
@@ -2870,9 +2943,19 @@ describe('git agent: the operation roster is unchanged (registry Guard 6)', () =
     ).toEqual(GIT_OPERATION_ROSTER);
   });
 
+  it('the routed roster is the registry\'s roster: every routed operation has exactly one reference', () => {
+    expect(
+      [...GIT_OPERATION_ROSTER].sort(),
+      'the agent routes an operation the build emits no reference for, or the reverse',
+    ).toEqual([...GIT_OPERATIONS].sort());
+    for (const op of GIT_OPERATION_ROSTER) {
+      expect(operationReferenceRel(op, 'github'), `${op} has no reference path`).not.toBeNull();
+    }
+  });
+
   it('the roster check is non-vacuous, and the collector sees a seeded change', () => {
     expect(GIT_OPERATION_ROSTER.length, 'the named set is empty').toBe(20);
-    const seeded = '## Operation: setup-task\nbody\n\n## Operation: renamed-op\nbody\n';
+    const seeded = '## Operations\n\n| Operation | Purpose |\n|---|---|\n| `setup-task` | a |\n| `renamed-op` | b |\n\n## Output\n\n| `later-op` | c |\n';
     expect(collectOperationNames(seeded)).toEqual(['setup-task', 'renamed-op']);
   });
 });
@@ -2887,10 +2970,11 @@ describe('git agent: the operation roster is unchanged (registry Guard 6)', () =
 // reader who lands on the reference rather than the agent acts on the wrong one.
 //
 // The corpus is the REFERENCE tree — the documents the agent loads — not the
-// agent prompt itself. The Git agent is the authority: it states the gate as a
-// table, as a sentence, and as the step that applies it, and those three are one
-// document's internal business. What the tree must not do is repeat the
-// predicate, because a reference has no way to know when the agent's copy moves.
+// agent prompt itself. Two documents state the predicate and each for its own job:
+// the marker registry DEFINES D9, and the resolve-review-threads reference APPLIES
+// it — as a sentence in its contract and as the step that uses it, one document's
+// internal business. What the rest of the tree must not do is repeat the
+// predicate, because a reference has no way to know when the authority moves.
 // ---------------------------------------------------------------------------
 
 /**
@@ -2938,14 +3022,18 @@ describe('git agent: the D9 resolve condition is stated once in the reference tr
     ).toBeGreaterThan(5);
   });
 
-  it('exactly one reference states it, and it is the marker registry that DEFINES D9', () => {
+  it('exactly two references state it: the marker registry that DEFINES D9 and the operation that APPLIES it', () => {
     expect(
       collectResolveConditionStatements(corpus),
-      'the resolve condition is stated in more than one reference, or in none. The marker ' +
-      'registry defines D9 and the Git agent applies it; every other document names the gate ' +
-      'and defers. A second statement is free to disagree with the first, and one already did — ' +
-      'github-api.md admitted FALSE_POSITIVE and BY_DESIGN as resolvable, which D9 forbids',
-    ).toEqual(['dist/skills/git/references/decision-markers.md']);
+      'the resolve condition is stated in a reference other than these two, or in neither. The ' +
+      'marker registry defines D9 and the resolve-review-threads reference applies it; every other ' +
+      'document names the gate and defers. A further statement is free to disagree with the first, ' +
+      'and one already did — github-api.md admitted FALSE_POSITIVE and BY_DESIGN as resolvable, ' +
+      'which D9 forbids',
+    ).toEqual([
+      'dist/skills/git/references/decision-markers.md',
+      'dist/skills/git/references/pr/resolve-review-threads.md',
+    ]);
   });
 
   it('the deferring reference names the gate instead of restating it', () => {
@@ -3024,6 +3112,43 @@ const MOVED_OBLIGATIONS: readonly MovedObligation[] = [
 ];
 
 /**
+ * The contract partial that holds an operation's contract define, relative to the repo root.
+ * PR-host contracts are in `_ops_pr.mds`, every other operation's in `_ops.mds`.
+ */
+function contractSourceFor(op: string): string {
+  return (PR_HOST_OPS as readonly string[]).includes(op)
+    ? 'src/assets/mds/git/_ops_pr.mds'
+    : 'src/assets/mds/git/_ops.mds';
+}
+
+/** The trees (relative to the references root) that must each carry an operation's reference. */
+function treesFor(op: string): readonly string[] {
+  if ((PR_HOST_OPS as readonly string[]).includes(op)) return PR_HOST_TREE;
+  if ((TRACKER_GITHUB_OPS as readonly string[]).includes(op)) return TRACKER_PROVIDER_TREES;
+  return [''];
+}
+
+/**
+ * One obligation per operation: the `**Input:**` line of its contract define, read from the
+ * partial that writes it once. The line exists only in the contract block, so finding it in a
+ * reference's section for the op proves the contract reached that reference.
+ */
+const CONTRACT_OBLIGATIONS: readonly MovedObligation[] = GIT_OPERATIONS.map(op => {
+  const source = readFileSync(path.join(ROOT, contractSourceFor(op)), 'utf-8');
+  const define = `@define ${op.replace(/-/g, '_')}_contract():`;
+  const at = source.indexOf(define);
+  if (at === -1) throw new Error(`${contractSourceFor(op)} has no ${define}`);
+  const body = source.slice(at + define.length, source.indexOf('\n@end', at));
+  const lines = body.split('\n');
+  const at2 = lines.findIndex(line => line.startsWith('**Input:**'));
+  if (at2 === -1) throw new Error(`${op}'s contract define has no **Input:** line`);
+  // A bare `**Input:**` label (setup-task's parameter list) also occurs in the agent body's
+  // own prose, so the literal carries its first list line too.
+  const input = lines[at2].trim() === '**Input:**' ? `${lines[at2]}\n${lines[at2 + 1]}` : lines[at2];
+  return { op, literal: input, trees: treesFor(op) };
+});
+
+/**
  * Named collector: every (tree, obligation) pair whose reference does not carry
  * the moved text inside the op's own section — fence-aware, so text stranded
  * below a stray unfenced `## ` would be reported rather than counted.
@@ -3048,7 +3173,6 @@ function collectUnreachedObligations(
 }
 
 describe('git agent: text moved out of the always-loaded agent still reaches its spawn (#358)', () => {
-  const gitOnly: CorpusEntry[] = [{ path: GIT_AGENT_PATH, content: GIT_AGENT_SOURCE.content }];
 
   it('the obligation set and the tree set are non-empty', () => {
     expect(MOVED_OBLIGATIONS.length, 'no moved obligation is registered').toBeGreaterThan(0);
@@ -3068,9 +3192,25 @@ describe('git agent: text moved out of the always-loaded agent still reaches its
 
   it('every moved obligation left git.md — one home, not two', () => {
     const stillInAgent = MOVED_OBLIGATIONS
-      .filter(({ op, literal }) => extractOpSection(gitOnly, op, 'sole').includes(literal))
+      .filter(({ literal }) => GIT_AGENT_SOURCE.content.includes(literal))
       .map(({ op, literal }) => `${op}: ${literal}`);
     expect(stillInAgent, 'moved text is still stated in git.md as well').toEqual([]);
+  });
+
+  it('every operation\'s contract is in its own reference, in every tree that must carry it (AC-101, AC-102)', () => {
+    // One obligation per operation, derived from the contract source rather than retyped: the
+    // operation's `**Input:**` line, which exists only in the contract block. A spawn that reads
+    // its one reference must find its Input there under every provider.
+    const missing = collectUnreachedObligations(cachedSinkCorpus(), CONTRACT_OBLIGATIONS);
+    expect(
+      CONTRACT_OBLIGATIONS.map(o => o.op).sort(),
+      'every Git operation must be covered by a contract obligation',
+    ).toEqual([...GIT_OPERATIONS].sort());
+    expect(missing, 'an operation\'s contract is missing from a reference it loads').toEqual([]);
+    expect(
+      CONTRACT_OBLIGATIONS.filter(({ literal }) => GIT_AGENT_SOURCE.content.includes(literal)).map(o => o.op),
+      'a contract is still stated in the agent body — one home, not two',
+    ).toEqual([]);
   });
 
   it('known-bad probe: dropping a tree reports every obligation that tree carries', () => {

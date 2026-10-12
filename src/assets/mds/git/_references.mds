@@ -1,6 +1,8 @@
 ---
 output-dir: dist/skills/git/references
 ---
+@import "./_ops.mds" as ops
+
 Cross-cutting references for the `devflow:git` skill — provider-independent, so
 they land at the root of `references/` rather than under a per-provider directory.
 
@@ -40,10 +42,11 @@ understand a label, and nothing breaks if that read is deferred.
 @define learn_conventions():
 ## Operation: learn-conventions
 
+{{ops.learn_conventions_contract()}}
+
 The bounded scan, the heuristics and the file template for `learn-conventions`.
-Loaded ONLY when `.devflow/conventions.md` is absent — the operation returns
-`Status: ALREADY_EXISTS` without reading this file when the conventions file is
-already written, and never overwrites it.
+When `.devflow/conventions.md` already exists the operation returns
+`Status: ALREADY_EXISTS` at step 1 and never overwrites it.
 
 ### Process
 

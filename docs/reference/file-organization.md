@@ -47,15 +47,16 @@ devflow/
 │   │   ├── agent-type-owner.ts       # Explore override: skips the install when the user owns an Explore agent
 │   │   └── templates/                # Settings and config templates
 │   └── assets/                       # SINGLE SOURCE OF TRUTH for all installable assets
-│       ├── skills/                   # 41 skills
+│       ├── skills/                   # 42 skills
 │       │   ├── git/
 │       │   │   ├── SKILL.md
 │       │   │   └── references/
 │       │   ├── software-design/
 │       │   └── ...
-│       ├── agents/                   # 18 agents — hand-authored .md, plus MDS generator hosts (.mds → dist/agents/)
+│       ├── agents/                   # 20 agents — hand-authored .md, plus MDS generator hosts (.mds → dist/agents/)
 │       │   ├── git.mds                 # MDS generator host → dist/agents/git.md
-│       │   ├── code.mds                # MDS generator host → dist/agents/code.md (nine agents are hosts besides git)
+│       │   ├── code.mds                # MDS generator host → dist/agents/code.md (eleven agents are hosts besides git; code-fix.mds and code-edit.mds are the other Code variants)
+│       │   ├── _partials/_code.mds     # Partial the three Code hosts import (no output-dir:, never compiled directly)
 │       │   ├── synthesize.md
 │       │   └── ...
 │       ├── rules/                    # 15 rules (flat .md files)
@@ -74,7 +75,11 @@ devflow/
 │       │   ├── tracker/_common.mds     # Partial: lines the tracker modules share (no output-dir:, never compiled directly)
 │       │   ├── tracker/_steps.mds      # Partial: provider-neutral step text of the tracker operations (no output-dir:, never compiled directly)
 │       │   ├── git/_references.mds     # Cross-cutting documents the Git agent names
-│       │   └── git/_pr.mds             # One file per PR-host operation (provider-independent)
+│       │   ├── git/_pr.mds             # One file per PR-host operation (provider-independent)
+│       │   ├── git/_ops.mds            # Partial: the contracts of the tracker operations and learn-conventions, written once (no output-dir:, never compiled directly)
+│       │   ├── git/_ops_pr.mds         # Partial: the contracts of the PR-host operations (no output-dir:, never compiled directly)
+│       │   ├── git/_ops_steps.mds      # Partial: the steps the tracker operations run under every provider (no output-dir:, never compiled directly)
+│       │   └── .mdsroot                # Pins the MDS project root to src/assets/mds/, so the tracker and git modules can import each other's partials
 │       └── scripts/                  # Installed verbatim to ~/.devflow/scripts/
 │           ├── hud.sh                # HUD status-line entry script
 │           ├── redact-secrets.cjs    # D11 secret scrubber for every posted body and notes file
@@ -208,7 +213,7 @@ Assets live once in `src/assets/` and install to the user's `~/.claude/` — no 
 
 ### Agents
 
-All 18 agents (`git`, `synthesize`, `skim`, `simplify`, `code`, `review`, `triage`, `evaluate`, `test`, `scrutinize`, `validate`, `design`, `knowledge`, `research`, `diagnose`, `learning`, `tracker`, `explore`) are shared, and every source lives in `src/assets/agents/`. Eight (`synthesize`, `simplify`, `evaluate`, `test`, `validate`, `learning`, `tracker`, `explore`) are hand-authored `.md` files that install verbatim. The other ten (`git`, `code`, `design`, `diagnose`, `knowledge`, `research`, `review`, `scrutinize`, `triage`, `skim`) are `.mds` generator hosts, compiled to `dist/agents/{name}.md` by `npm run build:mds`.
+All 20 agents (`git`, `synthesize`, `skim`, `simplify`, `code`, `code-fix`, `code-edit`, `review`, `triage`, `evaluate`, `test`, `scrutinize`, `validate`, `design`, `knowledge`, `research`, `diagnose`, `learning`, `tracker`, `explore`) are shared, and every source lives in `src/assets/agents/`. Eight (`synthesize`, `simplify`, `evaluate`, `test`, `validate`, `learning`, `tracker`, `explore`) are hand-authored `.md` files that install verbatim. The other twelve (`git`, `code`, `code-fix`, `code-edit`, `design`, `diagnose`, `knowledge`, `research`, `review`, `scrutinize`, `triage`, `skim`) are `.mds` generator hosts, compiled to `dist/agents/{name}.md` by `npm run build:mds`. The three Code hosts import the partial `_partials/_code.mds`, which declares no `output-dir:` and is never compiled directly.
 
 The installer resolves each declared agent over `agentSourceDirs()` in `src/core/assets.ts` — `dist/agents/`, then `src/assets/agents/` — and copies the first hit, so a compiled artifact supersedes a hand-authored file of the same name. When neither directory has the agent, the install throws naming both candidate paths and `npm run build:mds` rather than silently skipping it. `npm run build:cli` alone (TypeScript) does not produce installable agents; `npm run build` runs both steps.
 

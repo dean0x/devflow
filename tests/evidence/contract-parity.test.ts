@@ -22,7 +22,7 @@
  * pre-narrowing scenario class.
  *
  * The exception grammar is held three ways: `evidence_exception()`'s kind list,
- * code.md's paste gate and the script's EXCEPTION_KINDS / EXCEPTION_LINE_RE name
+ * ensure-pr-ready's paste gate and the script's EXCEPTION_KINDS / EXCEPTION_LINE_RE name
  * the same kinds in the same order, and the gate IS EXCEPTION_LINE_RE's source.
  *
  * The script's grammar is required, never transcribed: a hand-copied pattern is a
@@ -41,7 +41,7 @@ import { createRequire } from 'module'
 import { readFileSync } from 'fs'
 import * as path from 'path'
 
-import { ROOT, requireDistFile, resolveAgentSource, walkFiles } from '../helpers.js'
+import { ROOT, ensurePrReadyReference, requireDistFile, walkFiles } from '../helpers.js'
 import { PR_EVIDENCE_SCRIPT } from './seam.js'
 
 /** Transcribed from the script's JSDoc — only what this suite reads. */
@@ -608,17 +608,17 @@ describe('AC-2: the States, Methods and precedence equal the exports', () => {
 })
 
 // ---------------------------------------------------------------------------
-// EXCEPTION_LINE_RE ↔ code.md's paste gate ↔ the partial's kind set
+// EXCEPTION_LINE_RE ↔ ensure-pr-ready's paste gate ↔ the partial's kind set
 // ---------------------------------------------------------------------------
 
 const EVIDENCE_POLICY_PARTIAL = path.join(ROOT, 'src', 'assets', 'commands', '_partials', '_evidence_policy.mds')
 
-/** code.md's paste gate: the anchored pattern in the fence under its PR_EXCEPTIONS paragraph. */
+/** ensure-pr-ready's paste gate: the anchored pattern in the fence under its PR_EXCEPTIONS paragraph. */
 function codeGateSource(code: string): string {
   const at = code.indexOf('**Pasting `PR_EXCEPTIONS`.**')
-  if (at === -1) throw new Error('code.md has no PR_EXCEPTIONS paste paragraph')
+  if (at === -1) throw new Error('ensure-pr-ready has no PR_EXCEPTIONS paste paragraph')
   const fence = /```\n\s*(\^[^\n]+\$)\n\s*```/.exec(code.slice(at))
-  if (fence === null) throw new Error('code.md: no anchored pattern fence under the PR_EXCEPTIONS paragraph')
+  if (fence === null) throw new Error('ensure-pr-ready: no anchored pattern fence under the PR_EXCEPTIONS paragraph')
   return fence[1]
 }
 
@@ -646,7 +646,7 @@ function partialKinds(source: string = readFileSync(EVIDENCE_POLICY_PARTIAL, 'ut
 
 /**
  * Named collector: where the three statements of the exception grammar disagree —
- * the partial that renders a line, code.md's gate that pastes it, and the script
+ * the partial that renders a line, ensure-pr-ready's gate that pastes it, and the script
  * (EXCEPTION_KINDS and EXCEPTION_LINE_RE) that parses it back out of a PR. The gate
  * and the script regex must be the SAME source, so a line one admits the other
  * can never refuse, and all three kind lists must be equal, in order.
@@ -658,20 +658,20 @@ function collectExceptionGrammarDisagreements(input: {
   kinds: readonly string[]
 }): string[] {
   const out: string[] = []
-  if (input.script !== input.gate) out.push('EXCEPTION_LINE_RE is not code.md\'s paste gate byte for byte')
+  if (input.script !== input.gate) out.push('EXCEPTION_LINE_RE is not ensure-pr-ready\'s paste gate byte for byte')
   const gateKinds = splitKinds(input.gate).kinds
   const scriptKinds = splitKinds(input.script).kinds
   const want = input.kinds.join('|')
   if (input.partial.join('|') !== want) out.push(`the partial renders [${input.partial.join(', ')}], EXCEPTION_KINDS is [${input.kinds.join(', ')}]`)
-  if (gateKinds.join('|') !== want) out.push(`code.md's gate admits [${gateKinds.join(', ')}], EXCEPTION_KINDS is [${input.kinds.join(', ')}]`)
+  if (gateKinds.join('|') !== want) out.push(`ensure-pr-ready's gate admits [${gateKinds.join(', ')}], EXCEPTION_KINDS is [${input.kinds.join(', ')}]`)
   if (scriptKinds.join('|') !== want) out.push(`EXCEPTION_LINE_RE admits [${scriptKinds.join(', ')}], EXCEPTION_KINDS is [${input.kinds.join(', ')}]`)
   return out
 }
 
-describe('the exception grammar: the partial, code.md\'s gate and the script agree three ways', () => {
+describe('the exception grammar: the partial, ensure-pr-ready\'s gate and the script agree three ways', () => {
   const live = () => ({
     partial: partialKinds(),
-    gate: codeGateSource(resolveAgentSource('code').content),
+    gate: codeGateSource(ensurePrReadyReference()),
     script: PE.EXCEPTION_LINE_RE.source,
     kinds: PE.EXCEPTION_KINDS,
   })
@@ -689,15 +689,15 @@ describe('the exception grammar: the partial, code.md\'s gate and the script agr
     const narrowedGate = now.gate.replace('(ticket-link|test-plan)', 'ticket-link')
     expect(narrowedGate, 'the seed must land').not.toBe(now.gate)
     expect(collectExceptionGrammarDisagreements({ ...now, gate: narrowedGate })).toEqual([
-      'EXCEPTION_LINE_RE is not code.md\'s paste gate byte for byte',
-      'code.md\'s gate admits [ticket-link], EXCEPTION_KINDS is [ticket-link, test-plan]',
+      'EXCEPTION_LINE_RE is not ensure-pr-ready\'s paste gate byte for byte',
+      'ensure-pr-ready\'s gate admits [ticket-link], EXCEPTION_KINDS is [ticket-link, test-plan]',
     ])
     const seededPartial = readFileSync(EVIDENCE_POLICY_PARTIAL, 'utf-8').replace('`ticket-link` or `test-plan`', '`ticket-link`, `test-plan` or `waiver`')
     expect(partialKinds(seededPartial)).toEqual(['ticket-link', 'test-plan', 'waiver'])
     expect(collectExceptionGrammarDisagreements({ ...now, partial: partialKinds(seededPartial) })).toHaveLength(1)
     const drifted = now.script.replace('{0,199}', '{0,299}')
     expect(collectExceptionGrammarDisagreements({ ...now, script: drifted })).toEqual([
-      'EXCEPTION_LINE_RE is not code.md\'s paste gate byte for byte',
+      'EXCEPTION_LINE_RE is not ensure-pr-ready\'s paste gate byte for byte',
     ])
   })
 })

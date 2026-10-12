@@ -48,7 +48,7 @@ import * as os from 'os'
 import * as path from 'path'
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
-import { ROOT, parseFences, requireDistFile } from '../helpers.js'
+import { CODE_AGENT_TYPES, ROOT, parseFences, requireDistFile } from '../helpers.js'
 import { PR_EVIDENCE_SCRIPT, VERIFY_EVIDENCE_SCRIPT } from '../evidence/seam.js'
 
 const BUILT = requireDistFile('dynamic-build.md')
@@ -241,7 +241,7 @@ function stubAgent(world: World, spawns: Spawn[]): Agent {
       return { status: blocked ? 'BLOCKED' : 'PASS' }
     }
     if (opts.agentType === 'Evaluate') return world.evaluateFail?.includes(currentRef) ? { verdict: 'FAIL', rationale: 'criterion 2 is not met' } : { verdict: 'PASS', rationale: 'ok' }
-    if (opts.agentType === 'Code') return { status: 'fixed', commitShas: ['abc1234'], unresolved: [] }
+    if (CODE_AGENT_TYPES.includes(opts.agentType)) return { status: 'fixed', commitShas: ['abc1234'], unresolved: [] }
     return { verdict: 'PASS' }
   }
 }
@@ -338,10 +338,11 @@ const TP_12 = '- [ ] TP-1 (AC-1) the login form rejects an empty password — me
 const TP_13 = '- [ ] TP-1 (AC-1) the audit log records each failed login — method:ci'
 
 /**
- * Named collector: where the executed SINGLE engine hands a Code agent anything
- * but the values setup-task captured. The input token (`#42`) and the captured
- * Issue ID (`42`) differ on purpose: an engine that forwards its input instead of
- * its capture is then visible.
+ * Named collector: where the executed SINGLE engine mishandles what setup-task captured. No Code
+ * agent opens a PR (D-PR-BY-GIT), so a Code spawn carries none of the PR keys; the captured
+ * Issue ID and link line reach only the engine result, which the wave reads for its PR block.
+ * The input token (`#42`) and the captured Issue ID (`42`) differ on purpose: an engine that
+ * forwards its input instead of its capture is then visible in that result.
  */
 export async function collectEngineHandoffViolations(body: string | null): Promise<string[]> {
   if (body === null) return ['the SINGLE engine body was not found']
@@ -351,12 +352,12 @@ export async function collectEngineHandoffViolations(body: string | null): Promi
   const out: string[] = []
   const setups = spawns.filter(s => s.prompt.startsWith('OPERATION: setup-task'))
   if (setups.length !== 1 || !setups[0].prompt.split('\n').includes('ISSUE_INPUT: #42')) out.push('setup-task: it does not receive the ticket\'s own reference as ISSUE_INPUT')
-  const codes = spawns.filter(s => s.agentType === 'Code')
+  const codes = spawns.filter(s => CODE_AGENT_TYPES.includes(s.agentType))
   if (codes.length < 2) out.push(`code: expected the implement and the Test-fix Code spawns, got ${codes.length}`)
   for (const c of codes) {
-    const lines = c.prompt.split('\n')
-    if (!lines.includes('ISSUE_NUMBER: 42') || !lines.includes('ISSUE_PR_LINK: Closes #42')) {
-      out.push(`code: a Code spawn carries ${lines.filter(l => l.startsWith('ISSUE_')).join(' / ')}, not the captured Issue ID and link line`)
+    const keys = c.prompt.split('\n').filter(l => /^(?:ISSUE_NUMBER|ISSUE_PR_LINK|PR_EXCEPTIONS):/.test(l))
+    if (keys.length > 0) {
+      out.push(`code: a Code spawn carries ${keys.join(' / ')}, though no Code agent opens a PR`)
       break
     }
   }
@@ -399,8 +400,8 @@ const TWO_TICKETS: World = {
 }
 const TWO_PLANS = { '#12': { criteria: '1. rejects', testPlan: TP_12 }, '#13': { criteria: '1. records', testPlan: TP_13 } }
 
-describe('AC-10: each ticket gets its own reference; its Code agents get what setup-task captured', () => {
-  it('the SINGLE engine hands setup-task the input and its Code agents only the captured values', async () => {
+describe('AC-10: each ticket gets its own reference; its captured values reach the result, never a Code agent', () => {
+  it('the SINGLE engine hands setup-task the input, keeps the captured values in its result and gives its Code agents none of the PR keys', async () => {
     expect(await collectEngineHandoffViolations(SINGLE)).toEqual([])
   })
 
@@ -447,10 +448,20 @@ describe('AC-10: each ticket gets its own reference; its Code agents get what se
   it('known-bad probe: an engine that forwards its input token, not its capture, is reported', async () => {
     const forwarded = seedOnce(SINGLE!, CAPTURE_LINE, 'const ISSUE_NUMBER = ISSUE_INPUT;')
     expect(await collectEngineHandoffViolations(forwarded)).toEqual([
-      expect.stringMatching(/^code: a Code spawn carries ISSUE_NUMBER: #42/),
       'result: the engine result does not carry the captured issueId and issuePrLink',
     ])
     expect(await collectEngineHandoffViolations(null)).toHaveLength(1)
+  })
+
+  it('known-bad probe: an engine that hands a Code agent the captured link is reported', async () => {
+    const leaking = seedOnce(
+      SINGLE!,
+      'After implementing, commit your changes with a conventional-commit message and report:',
+      'ISSUE_PR_LINK: ${ISSUE_PR_LINK}\nAfter implementing, commit your changes with a conventional-commit message and report:',
+    )
+    expect(await collectEngineHandoffViolations(leaking)).toEqual([
+      'code: a Code spawn carries ISSUE_PR_LINK: Closes #42, though no Code agent opens a PR',
+    ])
   })
 })
 
@@ -1458,12 +1469,12 @@ describe('#421 AC-16: Gate 1 runs Simplify, Scrutinize, Validate in both passes'
     expect(seq.lastIndexOf('Validate'), 'Gate 1 #2 follows the review pass').toBeGreaterThan(seq.lastIndexOf('Review'))
   })
 
-  it('Validate runs even when Scrutinize changed nothing, and re-runs once after each Code fix', async () => {
+  it('Validate runs even when Scrutinize changed nothing, and re-runs once after each Code-fix fix', async () => {
     const spawns: Spawn[] = []
     await runEngine(SINGLE!, ENGINE_ARGS, stubAgent({ tickets: { '#7': OWN }, gate1Red: ['#7'] }, spawns))
     const seq = types(spawns)
-    // Simplify, Scrutinize, then Validate, Code, Validate, Code, Validate: the re-run follows each fix.
-    expect(seq.slice(seq.indexOf('Simplify'), seq.indexOf('Simplify') + 7)).toEqual(['Simplify', 'Scrutinize', 'Validate', 'Code', 'Validate', 'Code', 'Validate'])
+    // Simplify, Scrutinize, then Validate, Code-fix, Validate, Code-fix, Validate: the re-run follows each fix.
+    expect(seq.slice(seq.indexOf('Simplify'), seq.indexOf('Simplify') + 7)).toEqual(['Simplify', 'Scrutinize', 'Validate', 'Code-fix', 'Validate', 'Code-fix', 'Validate'])
   })
 
   it('no Validate spawn names a model, and every Gate 1 Validate prompt pins the verdict return', async () => {
@@ -1592,7 +1603,7 @@ describe('#421 AC-19: Gate 2 issues one Evaluate spawn whose prompt names both c
     const result = await runEngine(SINGLE!, { ...ENGINE_ARGS, plan: 'the plan' }, stubAgent({ tickets: { '#7': OWN }, evaluateFail: ['#7'] }, spawns))
     expect((result.gate2 as { evaluateVerdict: string }).evaluateVerdict).toBe('FAIL-FIXED')
     expect(result.verdict).toBe('UNVERIFIED')
-    const fix = spawns.find(s => s.agentType === 'Code' && s.prompt.startsWith('OPERATION: alignment-fix\nFix the alignment issues'))
+    const fix = spawns.find(s => s.agentType === 'Code-fix' && s.prompt.startsWith('OPERATION: alignment-fix\nFix the alignment issues'))
     expect(fix?.prompt).toContain('criterion 2 is not met')
     expect(spawns.filter(s => s.agentType === 'Evaluate'), 'no re-evaluation by design').toHaveLength(1)
   })

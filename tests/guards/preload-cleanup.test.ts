@@ -20,7 +20,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { parseFrontmatterSkills, requireDistFile, requireDistFiles, resolveAgentSource, resolveLearningOffSource } from '../helpers.js'
+import { parseFrontmatterSkills, readAgentReference, requireDistFile, requireDistFiles, resolveAgentSource, resolveLearningOffSource } from '../helpers.js'
 
 /** Skills each agent no longer preloads, in unprefixed form. */
 const DROPPED: ReadonlyArray<readonly [string, string]> = [
@@ -140,13 +140,16 @@ describe('Triage states the security rule inline (D-TRIAGE-SECURITY-INLINE, AC-5
   })
 })
 
+/** What a Synthesize review spawn reads: the agent body, then the review mode's reference (D-MODE-BY-PATH). */
+const synthesizeReviewText = (): string => `${resolveAgentSource('synthesize').content}\n${readAgentReference('synthesize/review.md')}`
+
 describe('Synthesize carries the review categories inline (D-PRELOAD-CLEANUP)', () => {
   it('the review mode holds the three-row table and names neither skill it dropped', () => {
-    expect(collectSynthesizeCategoryDefects(resolveAgentSource('synthesize').content)).toEqual([])
+    expect(collectSynthesizeCategoryDefects(synthesizeReviewText())).toEqual([])
   })
 
   it('known-bad probe: a lost row and a restored skill name are each reported', () => {
-    const real = resolveAgentSource('synthesize').content
+    const real = synthesizeReviewText()
     expect(collectSynthesizeCategoryDefects(real)).toEqual([])
     const lostRow = real.replace(/^\| \*\*Should-Fix\*\* \(2\) \|.*$/m, '')
     expect(lostRow, 'the seed must land').not.toBe(real)

@@ -3,7 +3,7 @@
  *
  * The full test suite has one owner. Before, any agent that "ran the tests" ran
  * whatever the project's test command was, so a single ticket paid for the whole
- * suite from Code, Scrutinize, Test and Validate in turn. Each of the six agent
+ * suite from Code, Scrutinize, Test and Validate in turn. Each of the eight agent
  * bodies now carries one `**Gate ownership:**` line that says which checks that
  * agent runs, and Validate runs the full suite once per HEAD and is the only
  * agent that does.
@@ -33,12 +33,17 @@ import * as path from 'path'
 const LABEL = '**Gate ownership:**'
 const ONLY_VALIDATE = 'Only Validate runs the full suite.'
 
-/** The six bodies that carry a gate row. */
+/** The eight bodies that carry a gate row: the three Code variants (D-CODE-VARIANTS) and five reviewing or gating agents. */
 const GATE_ROWS: Readonly<Record<string, string>> = {
   code:
     'Run the targeted tests for your change in its TDD cycle, plus one affected-tests run after your last edit. ' +
     'In a fix mode, compile and run the named failing or regression tests. Never the full suite. ' +
     'Batch fixes: one build check per batch, not per edit.',
+  // Each variant states the part of Code's row that its modes use.
+  'code-fix':
+    'Compile and run the named failing or regression tests. Never the full suite. ' +
+    'Batch fixes: one build check per batch, not per edit.',
+  'code-edit': 'Run the tests of the touched modules once. Never the full suite.',
   simplify: 'Run no build, test or lint command. Reading files and git diffs is not verification.',
   evaluate: 'Run no build, test or lint command. Git read commands only.',
   scrutinize: 'Run only a test file you added or changed, once.',
@@ -112,11 +117,11 @@ const tddSkill = (): string =>
   readFileSync(path.join(ROOT, 'src', 'assets', 'skills', 'test-driven-development', 'SKILL.md'), 'utf-8')
 
 describe('D-GATE-OWNERSHIP: who runs which check', () => {
-  it('there are six gate bodies, one per gate row', () => {
-    expect(GATE_BODIES.length).toBeGreaterThanOrEqual(6)
+  it('there are eight gate bodies, one per gate row', () => {
+    expect(GATE_BODIES.length).toBeGreaterThanOrEqual(8)
   })
 
-  it('each of the six bodies carries exactly its pinned gate row', () => {
+  it('each of the eight bodies carries exactly its pinned gate row', () => {
     for (const name of GATE_BODIES) expect(collectRowDefects(name, body(name))).toEqual([])
   })
 

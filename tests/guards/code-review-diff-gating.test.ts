@@ -28,7 +28,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import * as path from 'path'
 
-import { ROOT, requireDistFile, requireDistFiles, resolveAgentSource, resolveLearningOffSource } from '../helpers.js'
+import { ROOT, readAgentReference, requireDistFile, requireDistFiles, resolveAgentSource, resolveLearningOffSource } from '../helpers.js'
 
 const CORE = ['security', 'architecture', 'performance', 'complexity', 'consistency', 'regression', 'testing', 'reliability'] as const
 const LANGUAGE = ['typescript', 'react', 'accessibility', 'ui-design', 'go', 'java', 'python', 'rust'] as const
@@ -556,7 +556,7 @@ describe('Phase 1 writes the diff files once, by redirect (AC-307, AC-321)', () 
   })
 
   it('the Synthesize and resolve review globs are *.md, so they match neither paths.txt nor a patch', () => {
-    const synthesize = resolveAgentSource('synthesize').content
+    const synthesize = readAgentReference('synthesize/review.md')
     expect(synthesize).toContain('${REVIEW_BASE_DIR}/*.md')
     const resolve = readFileSync(path.join(ROOT, 'src/assets/commands/resolve.mds'), 'utf-8')
     expect(resolve).toContain('{TARGET_DIR}/*.md')

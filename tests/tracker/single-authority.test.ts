@@ -659,6 +659,14 @@ function collectKeyAlphabets(text: string): string[] {
   )];
 }
 
+/** A reference with ensure-pr-ready's PR-link paste gate cut out: from its table header to the paragraph after the checks. */
+function withoutPasteGate(text: string): string {
+  const from = text.indexOf('| Tracker grammar | `ISSUE_PR_LINK` must match |');
+  if (from === -1) return text;
+  const to = text.indexOf('This re-check is the only gate on that value', from);
+  return to === -1 ? text.slice(0, from) : text.slice(0, from) + text.slice(to);
+}
+
 describe('the project-key alphabet has one authority, quoted identically by all three readers', () => {
   const repoRoot = path.resolve(import.meta.dirname, '../..');
   const agentDir = path.join(repoRoot, 'src', 'assets', 'agents');
@@ -700,10 +708,13 @@ describe('the project-key alphabet has one authority, quoted identically by all 
       // key (no underscore, and a one-character key is legal), so the claim is that
       // a provider whose grammar admits underscores uses THE shared segment — never
       // that every provider's grammar is one string.
-      const bearing = files.filter(f => requireFile('generated reference', f).includes('[A-Z0-9_]'));
+      // ensure-pr-ready's PR-link paste gate is a sink check over every provider's grammar, so it spells the
+      // other providers' alphabets on purpose; the claim is about the provider's OWN mechanics, outside it.
+      const own = (file: string): string => withoutPasteGate(requireFile('generated reference', file));
+      const bearing = files.filter(f => own(f).includes('[A-Z0-9_]'));
       if (bearing.length === 0) continue;
       for (const file of bearing) {
-        if (!requireFile('generated reference', file).includes(keySegment)) {
+        if (!own(file).includes(keySegment)) {
           missing.push(path.relative(REFS_DIR, file).split(path.sep).join('/'));
         }
       }
@@ -713,6 +724,13 @@ describe('the project-key alphabet has one authority, quoted identically by all 
       'provider mechanics spell an underscore-bearing key alphabet that is not the shared one:\n  ' +
       missing.join('\n  '),
     ).toEqual([]);
+  });
+
+  it('known-bad probe: the paste-gate exclusion cuts only the gate, so an alphabet outside it is still seen', () => {
+    const gate = '| Tracker grammar | `ISSUE_PR_LINK` must match |\n| `jira` | `^Refs [A-Z][A-Z0-9_]{1,9}-1$` |\nThis re-check is the only gate on that value';
+    expect(withoutPasteGate(gate), 'the gate is cut').not.toContain('[A-Z0-9_]');
+    expect(withoutPasteGate(`${gate}\nstray [A-Z0-9_] here`), 'a stray alphabet after the gate is kept').toContain('[A-Z0-9_]');
+    expect(withoutPasteGate('no gate [A-Z0-9_]'), 'text without the gate is unchanged').toContain('[A-Z0-9_]');
   });
 
   it('known-bad probe: a divergent alphabet is reported by the same collector', () => {

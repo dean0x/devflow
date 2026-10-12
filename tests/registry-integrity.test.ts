@@ -408,11 +408,11 @@ describe('Guard 5 (build-gated): spawned agents ↔ plugin agent declarations', 
 
 // ---------------------------------------------------------------------------
 // Guard 6: Build-gated operation contract — OPERATION: values in Git-agent
-//   spawn blocks ↔ ## Operation: headings in git.md
+//   spawn blocks ↔ the `## Operations` routing table in git.md
 //
 // Forward:  every OPERATION: X inside a Git-agent spawn block in a compiled
-//           command is declared as `## Operation: X` in git.md.
-// Reverse:  every `## Operation: X` in git.md is referenced by name in at
+//           command is routed by the `## Operations` table in git.md.
+// Reverse:  every operation the table routes is referenced by name in at
 //           least one compiled command, OR is listed in INTERNAL_OPS.
 //
 // INTERNAL_OPS: operations that are invoked by other git.md operations rather
@@ -420,7 +420,7 @@ describe('Guard 5 (build-gated): spawned agents ↔ plugin agent declarations', 
 // explaining why it is exempt from the reverse caller check.
 // ---------------------------------------------------------------------------
 
-describe('Guard 6 (build-gated): OPERATION: values ↔ git.md ## Operation: declarations', () => {
+describe('Guard 6 (build-gated): OPERATION: values ↔ git.md ## Operations routing table', () => {
   const distCommandsDir = path.join(ROOT, 'dist', 'commands');
   // Dist-preferred resolver — zero test edits needed in Phase 1 when git.md → git.mds (AC-0.7)
   const gitAgentPath = resolveAgentSource('git').path;
@@ -451,14 +451,19 @@ describe('Guard 6 (build-gated): OPERATION: values ↔ git.md ## Operation: decl
     ).toBe(true);
 
     // --- Parse declared operations from git.md ---
+    // The agent body routes operations through its `## Operations` table (each operation's
+    // text lives in its own reference), so a declaration is a first-cell row under that heading.
     const gitContent = await fs.readFile(gitAgentPath, 'utf-8');
     const declaredOps = new Set<string>();
-    for (const m of gitContent.matchAll(/^## Operation: (\S+)/gm)) {
-      declaredOps.add(m[1]);
+    const operationsAt = gitContent.search(/^## Operations\s*$/m);
+    for (const line of operationsAt === -1 ? [] : gitContent.slice(operationsAt).split('\n').slice(1)) {
+      if (/^## /.test(line)) break;
+      const row = /^\|\s*`([a-z][a-z0-9-]*)`\s*\|/.exec(line);
+      if (row !== null) declaredOps.add(row[1]);
     }
     expect(
       declaredOps.size,
-      'git.md must declare at least one ## Operation: heading — is the file empty or renamed?',
+      'git.md must route at least one operation in its ## Operations table — is the file empty or renamed?',
     ).toBeGreaterThan(0);
 
     // --- Scan compiled commands ---
@@ -502,7 +507,7 @@ describe('Guard 6 (build-gated): OPERATION: values ↔ git.md ## Operation: decl
           calledOpsInGitBlocks.add(opName);
           if (!declaredOps.has(opName)) {
             violations.push(
-              `${file}: Git-agent spawn calls OPERATION: ${opName} but git.md has no ## Operation: ${opName} heading`,
+              `${file}: Git-agent spawn calls OPERATION: ${opName} but git.md's ## Operations table has no row for ${opName}`,
             );
           }
         }
@@ -514,7 +519,7 @@ describe('Guard 6 (build-gated): OPERATION: values ↔ git.md ## Operation: decl
     for (const op of declaredOps) {
       if (!opNameFoundInAnyFile.get(op) && !INTERNAL_OPS.has(op)) {
         violations.push(
-          `git.md declares ## Operation: ${op} but no compiled command references it ` +
+          `git.md's ## Operations table routes ${op} but no compiled command references it ` +
           `(add to INTERNAL_OPS if this op is invoked internally by another git.md operation)`,
         );
       }

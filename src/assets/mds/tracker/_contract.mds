@@ -7,9 +7,10 @@ ONE section, emitted as `tracker/_contract.md` — at the `tracker/` root, besid
 the provider directories rather than inside one, because every rule here is the
 same for every provider. The leading underscore says it is not a provider. It is
 the moved body of the agent's former `## Tracker provider resolution` and
-`## Tracker input contract` sections, less the two rules that stay in the agent:
-the PR-mechanics load rule and the merged step order. A PR-only spawn needs both
-and never reads this file, and this file cannot instruct a spawn to load itself.
+`## Tracker input contract` sections, less the loading rules that stay in the agent:
+the one-reference rule and the table naming every non-tracker operation's reference.
+A PR-only spawn needs both and never reads this file, and this file cannot instruct
+a spawn to load itself.
 
 D-TRACKER-CONTRACT-ON-DEMAND. A spawn reads this file once, only when it runs a
 tracker operation, before its first tracker step. The ONE line that names it is

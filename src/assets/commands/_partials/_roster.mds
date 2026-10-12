@@ -5,7 +5,8 @@ The following agentType values are valid. Model tiers are shown for reference �
 
 | agentType | Model tier | Role |
 |-----------|-----------|------|
-| Code | sonnet | Writes all code and all fixes — the ONLY agent that writes code |
+| Code | sonnet | Implements the plan and fixes review findings — the Code family is the ONLY one that writes code |
+| Code-fix | sonnet | Fixes the listed validation, alignment and QA failures — part of the Code family |
 | Validate | haiku | Build / typecheck / lint / test — fast correctness gate |
 | Simplify | sonnet | Reduces complexity, removes duplication, improves readability |
 | Scrutinize | opus | 9-pillar self-review — deep structural analysis |
@@ -21,7 +22,7 @@ The following agentType values are valid. Model tiers are shown for reference �
 @define agent_caveats():
 ### Agent caveats
 
-- **A Code agent writes every fix** — no other agent type writes code. Finding-verification uses adversarial Review agent-style passes (§6.3 of design doc). Risk-assessment and tech-debt routing live in the post-code pipeline + escalation doctrine.
+- **The Code family writes every fix** — Code for review findings, Code-fix for gate failures; no other agent type writes code. Finding-verification uses adversarial Review agent-style passes (§6.3 of design doc). Risk-assessment and tech-debt routing live in the post-code pipeline + escalation doctrine.
 - **Always omit `opts.model` with `agentType`.** Each agent honors its own frontmatter model tier; overriding it defeats the per-agent specialization.
 - **Review agents are focus-parameterized.** Each focus is a SEPARATE `agent()` call with `agentType: "Review"` and the focus baked into the prompt. Do NOT batch multiple focuses into one Review agent call — that defeats parallel specialization.
 - **Do not depend on agents enumerating their own skills.** Skills are loaded (spike F5 confirmed) but self-reporting is imperfect. Write agent prompts that give the agent full context directly.

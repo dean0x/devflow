@@ -33,7 +33,8 @@ you: /implement (hand it the plan)
   Simplify · Scrutinize  cleanup pass, then 9-pillar quality gate
   Evaluate               implementation matches the original request ✓
   Validate               build ✓ typecheck ✓ lint ✓ tests ✓
-  Test                   5/5 QA scenarios pass → PR opened
+  Test                   5/5 QA scenarios pass
+  Git                    PR opened → CI green ✓
 
 you: /code-review
 
@@ -53,7 +54,7 @@ This is the **orchestrated flow** — you stay in the loop between every step. W
 
 **Ambient orchestration.** Your main session becomes the tech lead: a charter injected at session start turns it into an orchestrator that delegates work to specialized agents and keeps judgment mainline, with one bounded inline exception for a single short git, gh or script command. Plan-mode handoffs auto-run `/implement`. Init and forget.
 
-**A staffed agent roster.** 18 specialized agents with explicit model assignments — Opus for analysis, Sonnet for execution, Haiku for I/O. Reassign any agent's model with `devflow agents`, including GPT models through external model routing (`devflow proxy`).
+**A staffed agent roster.** 20 specialized agents with explicit model assignments — Opus for analysis, Sonnet for execution, Haiku for I/O. Reassign any agent's model with `devflow agents`, including GPT models through external model routing (`devflow proxy`).
 
 **Up to 20 parallel Review agents.** Security, architecture, performance, complexity, consistency, regression, testing, and more. Each produces findings with severity, confidence scoring, and concrete fixes. Conditional Review agents activate when relevant (TypeScript for `.ts` files, database for schema changes, compliance when regulated surface detected in the diff). Every finding gets validated and resolved automatically.
 
@@ -67,7 +68,7 @@ This is the **orchestrated flow** — you stay in the loop between every step. W
 
 **Plain-English replies, opt-in.** Off by default. `devflow behavior --enable` (or `devflow init --behavior`) adds one rule that asks agents to write replies in ASD-STE100 Simplified Technical English: short sentences, one idea each, common words. `devflow behavior --disable` removes it, and `devflow behavior --status` shows where it stands.
 
-**41 skills** (40 plugin-owned + 1 feature-owned compliance skill, installed on every machine). Skills install for the plugins you selected plus whatever those plugins declare they use, so the default plugin set installs 32 of the 40 and a Go project never gets the React skill. Most are grounded in expert material — backed by peer-reviewed papers, canonical books, and industry standards: security (OWASP, Shostack), architecture (Parnas, Evans, Fowler), performance (Brendan Gregg), testing (Beck, Meszaros), design (Wlaschin, Hickey), compliance (GDPR, HIPAA, PCI DSS, SOC 2, ISO 27001, SOX, NIST SSDF, OWASP ASVS), 200+ sources total.
+**42 skills** (41 plugin-owned + 1 feature-owned compliance skill, installed on every machine). Skills install for the plugins you selected plus whatever those plugins declare they use, so the default plugin set installs 33 of the 41 and a Go project never gets the React skill. Most are grounded in expert material — backed by peer-reviewed papers, canonical books, and industry standards: security (OWASP, Shostack), architecture (Parnas, Evans, Fowler), performance (Brendan Gregg), testing (Beck, Meszaros), design (Wlaschin, Hickey), compliance (GDPR, HIPAA, PCI DSS, SOC 2, ISO 27001, SOX, NIST SSDF, OWASP ASVS), 200+ sources total.
 
 **Skill shadowing.** Override any built-in skill with your own version. Drop a file into `~/.devflow/skills/{name}/` and the installer uses yours instead of the default — same activation, your rules. A shadow for a skill outside your plugin selection stays where it is: not installed, never deleted, and live again the moment you select that plugin.
 

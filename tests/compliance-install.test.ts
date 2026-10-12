@@ -160,7 +160,9 @@ describe('install every reference (D-COMPLIANCE-INSTALL-ALWAYS)', () => {
       claudeDir, devflowDir, enabled: true, frameworks: ['gdpr'], rulesEnabled: false, warn: vi.fn(),
     });
     const skill = await installedSkillMd();
-    expect(skill).toContain('(`COMPLIANCE_FRAMEWORKS`');
+    // D-COMPLIANCE-INJECT: the ids reach an agent in its prompt, never as a named lens input.
+    expect(skill).toContain('(named in your prompt;');
+    expect(skill).not.toMatch(/\bCOMPLIANCE_FRAMEWORKS\b/);
     expect(skill).toContain('Load `references/{id}.md` for each given id and no other');
     // Presence is no longer a selection signal — the old instruction must be gone.
     expect(skill).not.toMatch(/presence in the installed skill directory is the authoritative/i);

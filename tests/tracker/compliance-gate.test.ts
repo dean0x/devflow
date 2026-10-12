@@ -353,7 +353,7 @@ const CLASS_PROBES: ReadonlyArray<{ readonly cls: string; readonly sentinel: str
   },
   {
     cls: 'PR-host reference',
-    sentinel: 'skills/git/references/pr/ensure-pr-ready.md',
+    sentinel: 'skills/git/references/pr/check-merge-readiness.md',
     seeds: [
       '4c. (Compliance-gated — skip if `COMPLIANCE` is absent or `(none)`) Read `.devflow/conventions.md` PR Titles section.',
     ],

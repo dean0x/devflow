@@ -3,9 +3,9 @@
  *
  * SDLC-evidence PR4 (#363), phase P3 — the `update-pr-evidence` PR-host operation.
  *
- *   AC-5  the op's contract lives in git.md (Input, D4, Output) and its mechanics
- *         in `references/pr/update-pr-evidence.md`; it loads no publication gate
- *         and runs no visibility probe.
+ *   AC-5  the op's contract (Input, D4, Output) and its mechanics are one file,
+ *         `references/pr/update-pr-evidence.md`, contract first (D-OP-ONE-REF); it
+ *         loads no publication gate and runs no visibility probe.
  *   AC-6  the mechanics DRIVE the evidence scripts rather than restating them: the
  *         body edit is one `&&` chain behind the block scrub and the script's
  *         compare-and-swap splice, the comment is one `&&` chain behind the
@@ -23,7 +23,7 @@ import { readFileSync } from 'fs'
 import * as path from 'path'
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
-import { extractOpSectionFromCorpus, prHostRel, resolveAgentSource } from '../helpers.js'
+import { extractOpSectionFromCorpus, gitOperationReferenceCorpus, prHostRel } from '../helpers.js'
 import { PR_EVIDENCE_SCRIPT } from './seam.js'
 
 interface EvidenceFields {
@@ -60,10 +60,20 @@ function requirePrBody(): string {
   }
 }
 
-/** The op's own section of the compiled agent — 'sole': git.md is the one contract authority [DR-18]. */
+/**
+ * The steps of the reference: everything from its `### Process` heading on. The contract block ahead
+ * of it carries a fenced Output template, and the backtick-span scans below pair backticks across
+ * the whole text they are given, so a fence in front of the steps would shift every pairing after it.
+ */
+function mechanicsOf(reference: string): string {
+  const at = reference.indexOf('\n### Process')
+  if (at === -1) throw new Error(`${prHostRel(OP)} has no ### Process heading — the contract block is not followed by steps`)
+  return reference.slice(at + 1)
+}
+
+/** The op's own section — 'sole': its one reference is the contract authority [DR-18]. */
 function contractSection(): string {
-  const git = resolveAgentSource('git')
-  return extractOpSectionFromCorpus([{ path: git.path, content: git.content }], OP, { mode: 'sole' }).content
+  return extractOpSectionFromCorpus(gitOperationReferenceCorpus(), OP, { mode: 'sole' }).content
 }
 
 // ---------------------------------------------------------------------------
@@ -347,10 +357,11 @@ export function collectMechanicsDefects(prBody: string): string[] {
 }
 
 describe('AC-6: the mechanics drive the evidence scripts', () => {
-  const prBody = requirePrBody()
+  const reference = requirePrBody()
+  const prBody = mechanicsOf(reference)
 
   it('the reference is the built one, opening with its own anchor', () => {
-    expect(prBody.startsWith(`## Operation: ${OP}\n`)).toBe(true)
+    expect(reference.startsWith(`## Operation: ${OP}\n`)).toBe(true)
     expect(spansInvoking(prBody, 'verify-evidence.cjs"').length, 'verify, splice and readback').toBeGreaterThanOrEqual(3)
   })
 
@@ -396,12 +407,11 @@ describe('AC-6: the mechanics drive the evidence scripts', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 3. The contract in git.md, and its statuses ↔ the mechanics
+// 3. The contract in the reference, and its statuses ↔ the mechanics
 // ---------------------------------------------------------------------------
 
 const INPUT_LINE =
   '**Input:** `PR_NUMBER`, `REVIEW_PUBLICATION`, `EVIDENCE_FILE` (optional), `WORKTREE_PATH` (optional)'
-const POINTER_LINE = `**PR mechanics:** load \`references/${prHostRel(OP)}\`.`
 
 /** The status tokens an Output line enumerates after `**<label>**:`, DEGRADED excluded. */
 function outputStatuses(section: string, label: string): string[] {
@@ -410,13 +420,12 @@ function outputStatuses(section: string, label: string): string[] {
   return m[1].split('|').map(s => s.trim()).filter(s => s !== '' && !s.startsWith('DEGRADED'))
 }
 
-/** Named collector: contract lines missing from git.md, and Output statuses the mechanics never report (or vice versa). */
+/** Named collector: contract lines missing from the reference, and Output statuses the mechanics never report (or vice versa). */
 export function collectContractDefects(section: string, prBody: string): string[] {
   const out: string[] = []
   const inputs = section.split('\n').filter(l => l.startsWith('**Input:**'))
   if (inputs.length !== 1 || inputs[0] !== INPUT_LINE) out.push(`Input line is not ${JSON.stringify(INPUT_LINE)}`)
-  if (!section.includes('**Degradation (D4):**')) out.push('no **Degradation (D4):** clause in the agent section')
-  if (!section.includes(POINTER_LINE)) out.push(`no pointer ${JSON.stringify(POINTER_LINE)}`)
+  if (!section.includes('**Degradation (D4):**')) out.push('no **Degradation (D4):** clause in the contract block')
   if (!section.includes('{the script\'s EVIDENCE line}')) out.push('Output does not return the script\'s EVIDENCE line')
   const reported = new Set([...prBody.matchAll(/→ `([A-Z]+)`|\(else `([A-Z]+)`\)|else `([A-Z]+)`/g)].map(m => m[1] ?? m[2] ?? m[3]))
   for (const label of ['Body', 'Comment']) {
@@ -429,7 +438,7 @@ export function collectContractDefects(section: string, prBody: string): string[
   return out
 }
 
-describe('AC-5: the contract is the agent\'s, and its statuses are the mechanics\'', () => {
+describe('AC-5: the contract opens the reference, and its statuses are the mechanics\'', () => {
   const section = contractSection()
   const prBody = requirePrBody()
 

@@ -28,7 +28,7 @@ import { readFileSync } from 'fs'
 import * as path from 'path'
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
-import { ROOT, requireDistFile, resolveAgentSource, walkFiles } from '../helpers.js'
+import { ROOT, extractOpSectionFromCorpus, gitOperationReferenceCorpus, requireDistFile, resolveAgentSource, walkFiles } from '../helpers.js'
 
 const REFS_DIR = compiledSkillRefsDir()
 const PROVIDERS = ['github', 'jira', 'linear'] as const
@@ -234,13 +234,9 @@ export function fallbackCoversUnmappedMarkers(line: string): boolean {
 const GATHER_STATUS_LINE =
   '### Status: READY | PARTIAL ({n} DEGRADED) | TRUNCATED ({n} not processed) | DEGRADED ({reason}) | INDETERMINATE ({reason})'
 
-/** git.md's `gather-release-evidence` section, from its heading to the next operation's. */
+/** The GitHub `gather-release-evidence` reference's section: its contract, then its steps. */
 function gatherSection(): string {
-  const git = resolveAgentSource('git').content
-  const start = git.indexOf('## Operation: gather-release-evidence')
-  if (start === -1) throw new Error('git.md: no gather-release-evidence operation')
-  const next = git.indexOf('\n## Operation:', start + 1)
-  return next === -1 ? git.slice(start) : git.slice(start, next)
+  return extractOpSectionFromCorpus(gitOperationReferenceCorpus(), 'gather-release-evidence', { mode: 'sole' }).content
 }
 
 describe('G1: the GitHub merged-PR listing', () => {
@@ -273,14 +269,17 @@ describe('G1: the GitHub merged-PR listing', () => {
     expect(fallbacks[0]).toContain('THROTTLED ({n} not processed)')
   })
 
-  it('the agent declares the five-value status and the trace map, and the reference reads the flagged-empty case', () => {
+  it('the reference declares the five-value status and the trace map first, and reads the flagged-empty case in its steps', () => {
     const section = gatherSection()
     expect(section).toContain(GATHER_STATUS_LINE)
     expect(section).toContain('### TRACE_MAP\n{the trace script\'s lines, verbatim}')
-    // Step 5 (the candidate gate, with its flagged-empty case) is provider-neutral step text that
-    // left the agent for the reference the operation loads (D-NEUTRAL-STEP-MOVE).
-    expect(section, 'step 5 is no longer in the always-loaded agent').not.toContain('unless the Mechanics flag merged PRs they could not resolve')
-    expect(text).toContain('unless the Mechanics flag merged PRs they could not resolve')
+    // Step 5 (the candidate gate, with its flagged-empty case) is provider-neutral step text written
+    // once and expanded into the reference the operation loads (D-NEUTRAL-STEP-MOVE), after the
+    // contract block that declares the status domain (D-OP-MOVABLE).
+    const flaggedEmpty = 'unless the Mechanics flag merged PRs they could not resolve'
+    expect(section, 'step 5 is in the operation\'s own reference').toContain(flaggedEmpty)
+    expect(section.indexOf(GATHER_STATUS_LINE), 'the contract precedes the steps').toBeLessThan(section.indexOf(flaggedEmpty))
+    expect(text).toContain(flaggedEmpty)
   })
 
   it('the fallback also resolves a range `(#N)` that no listed PR maps (the G1 residual)', () => {
@@ -572,7 +571,7 @@ describe('#364/#365: `--limit` on every `gh pr list` in the agent, the reference
       'commands/release.md',
       'skills/git/references/learn-conventions.md',
       'skills/git/references/tracker/github/gather-release-evidence.md',
-      'skills/git/references/pr/ensure-pr-ready.md',
+      'skills/git/references/tracker/github/ensure-pr-ready.md',
       'src/assets/skills/git/SKILL.md',
       'src/assets/skills/git/references/patterns.md',
     ]) {
@@ -605,8 +604,8 @@ describe('#364/#365: `--limit` on every `gh pr list` in the agent, the reference
     expect(collectUnboundedInvocations(seeded)).toEqual([UNBOUNDED_PATTERNS_LOOKUP])
   })
 
-  it('known-bad probe: the pre-#365 open-PR lookup in pr/ensure-pr-ready.md is reported', () => {
-    const prReady = corpus.find(c => c.file === 'skills/git/references/pr/ensure-pr-ready.md')!.content
+  it('known-bad probe: the pre-#365 open-PR lookup in the ensure-pr-ready reference is reported', () => {
+    const prReady = corpus.find(c => c.file === 'skills/git/references/tracker/github/ensure-pr-ready.md')!.content
     const seeded = prReady.replace('--state open --limit 1', '--state open')
     expect(seeded, 'the seed must land on the shipped lookup').not.toBe(prReady)
     expect(collectUnboundedInvocations(seeded)).toEqual(['gh pr list --head {branch} --state open'])

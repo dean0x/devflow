@@ -33,7 +33,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import * as path from 'path'
-import { ROOT, collectUnfencedH2, resolveAgentSource, walkFiles } from '../helpers.js'
+import { ROOT, collectUnfencedH2, readAgentReference, resolveAgentSource, walkFiles } from '../helpers.js'
 import { DEVFLOW_PLUGINS } from '../../src/core/plugins.js'
 
 /** Agents outside the roster, with the reason each is out. */
@@ -51,6 +51,9 @@ const OUTPUT_HEADING: Readonly<Record<string, string>> = { research: '## Output 
  */
 const EXEMPT_MARKERS: Readonly<Record<string, readonly string[]>> = {
   code: ['`## Verification` block', '`commitShas`', '`unresolved`'],
+  // D-CODE-VARIANTS: the variants share Code's Output section from one partial, so they name the same exempt fields.
+  'code-fix': ['`## Verification` block', '`commitShas`', '`unresolved`'],
+  'code-edit': ['`## Verification` block', '`commitShas`', '`unresolved`'],
   validate: ['`HEAD:` line', '| Command | Status | Exit | Duration |', '30 lines per failing command'],
   test: ['### Test Plan Evidence', '| ID | TP | Type |', '### Evidence Log'],
   scrutinize: ['`### Status` line', '`status` return field'],
@@ -153,8 +156,8 @@ function collectCapDefects(name: string, content: string): string[] {
 const roster = rosterOf(DEVFLOW_PLUGINS)
 
 describe('D-REPORT-CAP: the report cap on the roster', () => {
-  it('derives a roster of at least 16 agents from DEVFLOW_PLUGINS', () => {
-    expect(roster.length).toBeGreaterThanOrEqual(16)
+  it('derives a roster of at least 18 agents from DEVFLOW_PLUGINS', () => {
+    expect(roster.length).toBeGreaterThanOrEqual(18)
     expect(Object.keys(EXEMPT_MARKERS).sort(), 'every roster agent has an exempt-field record').toEqual([...roster].sort())
   })
 
@@ -171,11 +174,15 @@ describe('D-REPORT-CAP: the report cap on the roster', () => {
     for (const name of roster) expect(collectCapDefects(name, resolveAgentSource(name).content)).toEqual([])
   })
 
-  it('synthesize.md has an Output heading before Principles, and its per-mode templates stay where they are', () => {
+  it('synthesize.md has an Output heading before Principles, and its mode templates live in their references (D-MODE-BY-PATH)', () => {
     const headings = collectUnfencedH2(resolveAgentSource('synthesize').content).map(h => h.text)
     expect(headings.indexOf('## Output')).toBeGreaterThan(-1)
     expect(headings.indexOf('## Output')).toBe(headings.indexOf('## Principles') - 1)
-    expect(headings.indexOf('## Mode: Exploration')).toBeLessThan(headings.indexOf('## Output'))
+    expect(headings.filter(h => h.startsWith('## Mode: ')), 'no mode section stays in the body').toEqual([])
+    expect(
+      collectUnfencedH2(readAgentReference('synthesize/exploration.md')).map(h => h.text),
+      'the exploration template starts the exploration reference',
+    ).toEqual(['## Mode: Exploration'])
   })
 
   it('the Output template in agent-design.md carries the same line', () => {
@@ -184,21 +191,22 @@ describe('D-REPORT-CAP: the report cap on the roster', () => {
     expect(template.split('\n')[2], 'the line follows the output placeholder').toMatch(/^Report cap: /)
   })
 
-  it('git\'s Output section sits outside every operation\'s extent and ends in the cap line', () => {
+  it('git\'s Output section follows the operations table, precedes Principles, and ends in the cap line', () => {
     const git = resolveAgentSource('git').content
     const headings = collectUnfencedH2(git).map(h => h.text)
     const at = headings.indexOf('## Output')
     expect(at, 'git.md has an unfenced `## Output` heading').toBeGreaterThan(-1)
-    const ops = headings.filter(h => h.startsWith('## Operation: '))
-    expect(ops.length).toBeGreaterThan(0)
-    expect(headings.indexOf(ops[ops.length - 1]), 'after every operation').toBeLessThan(at)
+    // The agent body declares no operation (D-OP-ONE-REF): each operation's Output template is
+    // in its own reference, and this section is the generic return that caps them all.
+    expect(headings.filter(h => h.startsWith('## Operation: ')), 'no operation section in the agent body').toEqual([])
+    expect(headings.indexOf('## Operations'), 'after the operations table').toBeLessThan(at)
     expect(headings[at + 1], 'before Principles').toBe('## Principles')
     expect(collectCapDefects('git', git)).toEqual([])
   })
 
   it('git: check-ci-status stays defined, and its Status line is exempt as the ci-wait enum, not as a field a command reads', () => {
     const git = resolveAgentSource('git').content
-    expect(git, 'the operation is still defined').toContain('## Operation: check-ci-status')
+    expect(git, 'the operation is still routed').toMatch(/^\| `check-ci-status` \|/m)
     const capLine = git.split('\n').find(l => l.startsWith('Report cap:')) ?? ''
     expect(
       capLine,

@@ -7,16 +7,16 @@
  *   AC-10  /implement asks — record an exception, or stop — after the setup-task
  *          capture and before any Code spawn. An approved exception is written to
  *          the handoff file at once, kept byte-identical across later writes, and
- *          forwarded as `PR_EXCEPTIONS` to every Code spawn that can create the PR,
- *          where code.md's anchored gate re-checks it before pasting.
+ *          forwarded as `PR_EXCEPTIONS` to the Git spawn that opens the PR (Phase 9),
+ *          where ensure-pr-ready's anchored gate re-checks it before pasting.
  *   AC-11  The exception grammar (`evidence_exception()`, define 2 of
  *          `_evidence_policy.mds`) compiles to a line regex that agrees with
- *          code.md's paste gate over a table of valid and hostile lines, and every
+ *          ensure-pr-ready's paste gate over a table of valid and hostile lines, and every
  *          line the rendering rules can produce passes that gate.
  *
  * #363 (SDLC-evidence PR4) widened the closed kind set from `ticket-link` to
  * `ticket-link` or `test-plan` — /implement's test-plan ask records the second —
- * in the partial, code.md's gate and pr-evidence.cjs's EXCEPTION_LINE_RE at once.
+ * in the partial, ensure-pr-ready's gate and pr-evidence.cjs's EXCEPTION_LINE_RE at once.
  * The grammar table holds both kinds valid and their near-misses invalid; the
  * three-way parity itself is held by tests/evidence/contract-parity.test.ts.
  *
@@ -26,13 +26,13 @@
  *
  * Every guard has a named collector, a non-empty-corpus assertion and a known-bad
  * probe run through the same collector. The grammar is read out of the
- * partial and out of code.md and EXECUTED, never re-typed here: a hand-copied
+ * partial and out of ensure-pr-ready and EXECUTED, never re-typed here: a hand-copied
  * pattern is a second authority that agrees with the first only until one of them
  * is edited.
  *
  * NOT covered: whether a model renders the reason exactly as the rules say (the
  * closure arm proves the RULES only ever produce admissible lines, not that an
- * orchestrator follows them — code.md's gate is what catches a line that drifted),
+ * orchestrator follows them — ensure-pr-ready's gate is what catches a line that drifted),
  * and a closing keyword whose target GitHub parses without a `/` or `#` (none is
  * known: a same-repo `#N`, a cross-repo `owner/repo#N` and a full issue URL each
  * need one of the two, and both are removed).
@@ -49,7 +49,7 @@ import {
   isAgentBlock,
   parseFences,
   requireDistFile,
-  resolveAgentSource,
+  ensurePrReadyReference,
   walkFiles,
   type OrderRule,
 } from '../helpers.js'
@@ -83,10 +83,6 @@ const CODE_SPAWN = 'Agent(subagent_type="Code")'
 
 function implementMd(): string {
   return requireDistFile('implement.md')
-}
-
-function codeMd(): string {
-  return resolveAgentSource('code').content
 }
 
 /** A define's body as written — under MDS 0.4 a body with no `{{…}}` compiles to itself. */
@@ -269,35 +265,35 @@ describe('AC-10: the exception survives in the handoff file until the PR exists'
 })
 
 // ---------------------------------------------------------------------------
-// AC-10 — every PR-creating Code spawn forwards PR_EXCEPTIONS
+// AC-10 — the PR-opening Git spawn forwards PR_EXCEPTIONS (D-PR-BY-GIT)
 // ---------------------------------------------------------------------------
 
-/** The value every forwarding line carries: the handoff section verbatim, or `(none)`. */
+/** The value the forwarding line carries: the handoff section verbatim, or `(none)`. */
 const FORWARD_LINE =
   'PR_EXCEPTIONS: {the ## Evidence Exceptions section of {worktree}/.devflow/docs/handoff-{branch_slug}.md verbatim, or (none)}'
 
 /**
- * Named collector: Code spawns that can create the PR (`CREATE_PR: true`, or the
- * sequential `CREATE_PR: {true if last …}`) and do not forward `PR_EXCEPTIONS`.
- * Returns the violations and how many PR-creating spawns were read.
+ * Named collector: ensure-pr-ready spawns that do not forward `PR_EXCEPTIONS`.
+ * Returns the violations and how many PR-opening spawns were read. The Code agent opens
+ * no PR, so the key reaches only this spawn; that no Code spawn carries it is pinned in
+ * tests/seams/pr-link-handoff.test.ts.
  */
-function collectUnforwardedExceptions(content: string): { creating: number; violations: string[] } {
-  let creating = 0
+function collectUnforwardedExceptions(content: string): { opening: number; violations: string[] } {
+  let opening = 0
   const violations: string[] = []
   parseFences(content).forEach((fence, i) => {
-    if (!isAgentBlock(fence, 'Code')) return
-    if (!/^\s*"?CREATE_PR: (?:true\b|\{true if last)/m.test(fence)) return
-    creating++
+    if (!isAgentBlock(fence, 'Git') || !fence.includes('OPERATION: ensure-pr-ready')) return
+    opening++
     const lines = fence.split('\n').map(l => l.replace(/"$/, ''))
-    if (!lines.includes(FORWARD_LINE)) violations.push(`fence ${i + 1}: a PR-creating Code spawn without "${FORWARD_LINE}"`)
+    if (!lines.includes(FORWARD_LINE)) violations.push(`fence ${i + 1}: the PR-opening Git spawn without "${FORWARD_LINE}"`)
   })
-  return { creating, violations }
+  return { opening, violations }
 }
 
-describe('AC-10: PR_EXCEPTIONS reaches every Code spawn that can create the PR', () => {
-  it('SINGLE, SEQUENTIAL Phase 2+ and PARALLEL pr-create all forward the handoff section', () => {
-    const { creating, violations } = collectUnforwardedExceptions(implementMd())
-    expect(creating, 'fewer PR-creating Code spawns than SINGLE + SEQUENTIAL + pr-create').toBeGreaterThanOrEqual(3)
+describe('AC-10: PR_EXCEPTIONS reaches the Git spawn that opens the PR', () => {
+  it('/implement\'s one ensure-pr-ready spawn forwards the handoff section, under every strategy', () => {
+    const { opening, violations } = collectUnforwardedExceptions(implementMd())
+    expect(opening, 'exactly one PR-opening Git spawn: Phase 9, outside the strategy branches').toBe(1)
     expect(violations).toEqual([])
   })
 
@@ -308,18 +304,15 @@ describe('AC-10: PR_EXCEPTIONS reaches every Code spawn that can create the PR',
     expect(collectUnforwardedExceptions(seeded).violations).toHaveLength(1)
   })
 
-  it('code.md declares PR_EXCEPTIONS as an input and as a pr-create input', () => {
-    const code = codeMd()
-    expect(code).toContain('- **PR_EXCEPTIONS** (optional):')
-    const mode = code.slice(code.indexOf('## Mode: pr-create'))
-    const inputs = mode.split('\n').find(l => l.startsWith('**Inputs:**'))
-    expect(inputs, 'the pr-create Inputs line').toBeDefined()
-    expect(inputs).toContain('`PR_EXCEPTIONS`')
+  it('ensure-pr-ready declares PR_EXCEPTIONS as an optional input', () => {
+    const input = ensurePrReadyReference().split('\n').find(l => l.startsWith('**Input:**'))
+    expect(input, 'the ensure-pr-ready Input line').toBeDefined()
+    expect(input).toContain('`PR_EXCEPTIONS` (optional)')
   })
 })
 
 // ---------------------------------------------------------------------------
-// AC-11 — the exception grammar, read from the partial and from code.md, executed
+// AC-11 — the exception grammar, read from the partial and from ensure-pr-ready, executed
 // ---------------------------------------------------------------------------
 
 /** What define 2 states about each placeholder, parsed out of its bullets. */
@@ -420,12 +413,12 @@ function compileExceptionTemplate(spec: ExceptionSpec): RegExp {
   return new RegExp(`^${out}$`)
 }
 
-/** code.md's paste gate: the first line of the fence under its PR_EXCEPTIONS paragraph. */
+/** ensure-pr-ready's paste gate: the first line of the fence under its PR_EXCEPTIONS paragraph. */
 function codeGate(code: string): RegExp {
   const at = code.indexOf('**Pasting `PR_EXCEPTIONS`.**')
-  if (at === -1) throw new Error('code.md has no PR_EXCEPTIONS paste paragraph')
+  if (at === -1) throw new Error('ensure-pr-ready has no PR_EXCEPTIONS paste paragraph')
   const fence = /```\n\s*(\^[^\n]+\$)\n\s*```/.exec(code.slice(at))
-  if (fence === null) throw new Error('code.md: no anchored pattern fence under the PR_EXCEPTIONS paragraph')
+  if (fence === null) throw new Error('ensure-pr-ready: no anchored pattern fence under the PR_EXCEPTIONS paragraph')
   return new RegExp(fence[1])
 }
 
@@ -474,7 +467,7 @@ function collectGrammarMisses(gate: RegExp, rows = GRAMMAR_TABLE): string[] {
 /** Define 2, parsed on use — a parse failure fails the arm that needed it, not the whole file. */
 const exceptionSpec = (): ExceptionSpec => parseExceptionSpec(defineBody(DEFINE))
 
-describe('AC-11: the exception grammar — define 2 and code.md\'s gate agree, and both refuse the hostile rows', () => {
+describe('AC-11: the exception grammar — define 2 and ensure-pr-ready\'s gate agree, and both refuse the hostile rows', () => {
   it('define 2 parses into the documented rules', () => {
     const spec = exceptionSpec()
     expect(spec.kinds, 'the kind set is closed: ticket-link (#362) and test-plan (#363)').toEqual(['ticket-link', 'test-plan'])
@@ -491,8 +484,8 @@ describe('AC-11: the exception grammar — define 2 and code.md\'s gate agree, a
     expect(collectGrammarMisses(compileExceptionTemplate(exceptionSpec()))).toEqual([])
   })
 
-  it('code.md\'s anchored paste gate decides every table row as the table says', () => {
-    const gate = codeGate(codeMd())
+  it('ensure-pr-ready\'s anchored paste gate decides every table row as the table says', () => {
+    const gate = codeGate(ensurePrReadyReference())
     expect(gate.source.startsWith('^') && gate.source.endsWith('$'), 'the gate must anchor both ends').toBe(true)
     expect(collectGrammarMisses(gate)).toEqual([])
   })
@@ -503,7 +496,7 @@ describe('AC-11: the exception grammar — define 2 and code.md\'s gate agree, a
     expect(collectGrammarMisses(widened).some(m => m.startsWith('kind `ticket-links`'))).toBe(true)
     const narrowed = compileExceptionTemplate({ ...spec, kinds: spec.kinds.filter(k => k !== 'test-plan') })
     expect(collectGrammarMisses(narrowed).some(m => m.startsWith('kind `test-plan`'))).toBe(true)
-    const unanchored = new RegExp(codeGate(codeMd()).source.slice(0, -1))
+    const unanchored = new RegExp(codeGate(ensurePrReadyReference()).source.slice(0, -1))
     expect(collectGrammarMisses(unanchored).some(m => m.startsWith('trailing text on a second line'))).toBe(true)
     const leaky = compileExceptionTemplate({ ...spec, removed: spec.removed.filter(c => c !== '#') })
     expect(collectGrammarMisses(leaky).some(m => m.startsWith('an issue reference'))).toBe(true)
@@ -537,7 +530,7 @@ const RAW_REASONS: readonly string[] = [
 ]
 
 /**
- * Named collector: rendered lines code.md's gate refuses, or that still carry a
+ * Named collector: rendered lines ensure-pr-ready's gate refuses, or that still carry a
  * character the grammar forbids. `forbidden` is passed separately from the render
  * rules so a probe can render with a forgetful rule set and still see the leak.
  */
@@ -559,10 +552,10 @@ function collectInadmissibleRenders(
   return out
 }
 
-describe('AC-11: every line the rendering rules can produce passes code.md\'s gate', () => {
+describe('AC-11: every line the rendering rules can produce passes ensure-pr-ready\'s gate', () => {
   it('hostile raw reasons render to admissible, inert lines; a blank reason renders to none', () => {
     const spec = exceptionSpec()
-    const gate = codeGate(codeMd())
+    const gate = codeGate(ensurePrReadyReference())
     expect(RAW_REASONS.length).toBeGreaterThanOrEqual(5)
     expect(collectInadmissibleRenders(spec, gate, RAW_REASONS)).toEqual([])
     expect(renderReason('   \n\t  ', spec), 'a blank reason is no reason').toBe('')
@@ -579,7 +572,7 @@ describe('AC-11: every line the rendering rules can produce passes code.md\'s ga
 
   it('known-bad probe: a render rule that forgot a character leaks it and is refused', () => {
     const spec = exceptionSpec()
-    const gate = codeGate(codeMd())
+    const gate = codeGate(ensurePrReadyReference())
     const forgetful = { ...spec, removed: spec.removed.filter(c => c !== '@') }
     const found = collectInadmissibleRenders(forgetful, gate, ['approved by @lead'], spec.removed)
     expect(found.some(f => f.startsWith('refused:'))).toBe(true)
@@ -588,30 +581,30 @@ describe('AC-11: every line the rendering rules can produce passes code.md\'s ga
 })
 
 // ---------------------------------------------------------------------------
-// code.md — the paste paragraph sits inside Responsibility 7, before the scrub
+// ensure-pr-ready — the paste paragraph sits in step 4a, before the D11 scrub
 // ---------------------------------------------------------------------------
 
 /**
- * The three code.md lines the frozen github-status-lines fixture samples by
+ * The three ensure-pr-ready lines the frozen github-status-lines fixture samples by
  * first match. The paste paragraph must not duplicate them, or a sampler could
  * pick up the new text.
  */
-const FROZEN_CODE_ANCHORS = [
+const FROZEN_ANCHORS = [
   '| Related Issues (ISSUE_NUMBER provided) |',
   'When `ISSUE_NUMBER` is provided, always include',
   '**D11 scrub (PR body is a GitHub-visible sink):**',
 ] as const
 
-const CODE_ORDER: readonly OrderRule[] = [
+const PASTE_ORDER: readonly OrderRule[] = [
   { label: 'the exception gate follows the link gate', before: 'This re-check is the only gate on that value', after: '**Pasting `PR_EXCEPTIONS`.**' },
-  { label: 'the exception gate precedes the D11 scrub', before: '**Pasting `PR_EXCEPTIONS`.**', after: FROZEN_CODE_ANCHORS[2] },
+  { label: 'the exception gate precedes the D11 scrub', before: '**Pasting `PR_EXCEPTIONS`.**', after: FROZEN_ANCHORS[2] },
 ]
 
-/** Named collector: what code.md's PR_EXCEPTIONS paragraph fails to state. */
+/** Named collector: what ensure-pr-ready's PR_EXCEPTIONS paragraph fails to state. */
 function collectPasteParagraphDefects(code: string): string[] {
   const at = code.indexOf('**Pasting `PR_EXCEPTIONS`.**')
   if (at === -1) return ['no PR_EXCEPTIONS paste paragraph']
-  const para = code.slice(at, code.indexOf(FROZEN_CODE_ANCHORS[2], at))
+  const para = code.slice(at, code.indexOf(FROZEN_ANCHORS[2], at))
   const out: string[] = []
   if (!para.includes('first line must be exactly `## Evidence Exceptions`')) out.push('the heading is not pinned')
   if (!para.includes('as the WHOLE line')) out.push('the pattern is not a whole-line match')
@@ -622,19 +615,19 @@ function collectPasteParagraphDefects(code: string): string[] {
   return out
 }
 
-describe('code.md: the PR_EXCEPTIONS paste gate', () => {
+describe('ensure-pr-ready: the PR_EXCEPTIONS paste gate', () => {
   it('sits between the link gate and the D11 scrub, and leaves the frozen anchors unique', () => {
-    const code = codeMd()
-    expect(collectOrderViolations('code.md', code, CODE_ORDER)).toEqual([])
-    for (const anchor of FROZEN_CODE_ANCHORS) expect(code.split(anchor).length - 1, anchor).toBe(1)
+    const code = ensurePrReadyReference()
+    expect(collectOrderViolations('ensure-pr-ready.md', code, PASTE_ORDER)).toEqual([])
+    for (const anchor of FROZEN_ANCHORS) expect(code.split(anchor).length - 1, anchor).toBe(1)
   })
 
   it('states the heading pin, the whole-line match, the absent case and the refusal', () => {
-    expect(collectPasteParagraphDefects(codeMd())).toEqual([])
+    expect(collectPasteParagraphDefects(ensurePrReadyReference())).toEqual([])
   })
 
   it('known-bad probe: a paragraph that repairs a mismatch is reported', () => {
-    const code = codeMd()
+    const code = ensurePrReadyReference()
     const seeded = code.replace('paste none of it and do not repair it', 'repair it and paste it')
     expect(seeded, 'the seed must land').not.toBe(code)
     expect(collectPasteParagraphDefects(seeded)).toEqual(['a mismatch may be repaired or partly pasted'])

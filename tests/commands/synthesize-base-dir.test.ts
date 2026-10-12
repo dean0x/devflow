@@ -8,11 +8,14 @@
  * (`ANALYSIS_BASE_DIR`) were already passed. This guard holds all three: the command's Synthesize
  * spawn for the mode carries the field, the agent writes through the same field, and in `/research`
  * the field names the directory its Research agents write their outputs into.
+ *
+ * D-MODE-BY-PATH: each mode's process lives in `synthesize/{mode}.md` of the agent-references skill,
+ * so "the agent writes through the field" is read from that mode's reference.
  */
 
 import { describe, it, expect } from 'vitest'
 
-import { isAgentBlock, parseFences, requireDistFile, resolveAgentSource } from '../helpers.js'
+import { isAgentBlock, parseFences, readAgentReference, requireDistFile } from '../helpers.js'
 
 interface ModeRow {
   readonly mode: string
@@ -31,38 +34,39 @@ function synthesizeSpawn(command: string, mode: string): string | undefined {
   return parseFences(command).find(f => isAgentBlock(f, 'Synthesize') && new RegExp(`^"?Mode: ${mode}\\b`, 'm').test(f))
 }
 
-/** Named collector: the modes whose spawn does not pass the field, or whose agent does not write through it. */
+/** Named collector: the modes whose spawn does not pass the field, or whose reference does not write through it. */
 export function collectBaseDirDefects(
   rows: readonly ModeRow[],
   readCommand: (file: string) => string,
-  agent: string,
+  readMode: (mode: string) => string,
 ): string[] {
   const out: string[] = []
   for (const { mode, command, field } of rows) {
     const spawn = synthesizeSpawn(readCommand(command), mode)
     if (spawn === undefined) out.push(`${command}: no Synthesize spawn in ${mode} mode`)
     else if (!new RegExp(`^${field}: \\S`, 'm').test(spawn)) out.push(`${command}: the ${mode} spawn does not pass ${field}`)
-    if (!agent.includes('mkdir -p ${' + field + '}')) out.push(`synthesize: the ${mode} mode does not write through ${field}`)
+    if (!readMode(mode).includes('mkdir -p ${' + field + '}')) out.push(`synthesize: the ${mode} mode does not write through ${field}`)
   }
   return out
 }
 
-describe('each Synthesize spawn passes the directory its mode writes through', () => {
-  const agent = resolveAgentSource('synthesize').content
+const modeReference = (mode: string): string => readAgentReference(`synthesize/${mode}.md`)
 
+describe('each Synthesize spawn passes the directory its mode writes through', () => {
   it('review, bug-analysis and research all do', () => {
-    expect(collectBaseDirDefects(MODES, requireDistFile, agent)).toEqual([])
+    expect(collectBaseDirDefects(MODES, requireDistFile, modeReference)).toEqual([])
   })
 
   it('known-bad probe: /research without RESEARCH_BASE_DIR is reported', () => {
     const probe = (file: string): string => file === 'research.md'
       ? requireDistFile(file).replace(/^RESEARCH_BASE_DIR: .*\n/m, '')
       : requireDistFile(file)
-    expect(collectBaseDirDefects(MODES, probe, agent)).toEqual(['research.md: the research spawn does not pass RESEARCH_BASE_DIR'])
+    expect(collectBaseDirDefects(MODES, probe, modeReference)).toEqual(['research.md: the research spawn does not pass RESEARCH_BASE_DIR'])
   })
 
   it('known-bad probe: an agent that writes through another name is reported', () => {
-    expect(collectBaseDirDefects(MODES, requireDistFile, agent.replaceAll('${RESEARCH_BASE_DIR}', '${SUMMARY_DIR}'))).toEqual([
+    const renamed = (mode: string): string => modeReference(mode).replaceAll('${RESEARCH_BASE_DIR}', '${SUMMARY_DIR}')
+    expect(collectBaseDirDefects(MODES, requireDistFile, renamed)).toEqual([
       'synthesize: the research mode does not write through RESEARCH_BASE_DIR',
     ])
   })
@@ -82,6 +86,6 @@ describe('/research: RESEARCH_BASE_DIR is the directory the Research agents writ
 
   it('the spawn passes the Research agents\' output paths, which the agent reads', () => {
     expect(synthesizeSpawn(research, 'research')).toMatch(/^RESEARCH_OUTPUTS: \S/m)
-    expect(resolveAgentSource('synthesize').content).toContain('RESEARCH_OUTPUTS')
+    expect(modeReference('research')).toContain('RESEARCH_OUTPUTS')
   })
 })

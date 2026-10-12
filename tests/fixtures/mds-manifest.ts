@@ -102,14 +102,19 @@ export const MDS_PARTIALS = [
  * source path — the same addressing as MDS_REFERENCE_MODULES, and for the same
  * reason: a basename is only unique inside one directory.
  *
- * Two today. `_common.mds` holds the lines every tracker module writes
+ * Six today. `_common.mds` holds the lines every tracker module writes
  * identically, including the CLI provider's — the counterpart to `_mcp.mds`,
  * which owns what is shared only by the TOOL-CALL providers. `_steps.mds` holds the
  * provider-neutral step text of the tracker operations that left the Git agent
  * (D-NEUTRAL-STEP-MOVE), in a module of its own because the resolver's compile cost
- * is exponential in a module's define count and `_common.mds` has no room left. Each
- * is a partial because it declares no `output-dir:`: the build skips it and it
- * reaches the artifact only through the modules that import it.
+ * is exponential in a module's define count and `_common.mds` has no room left.
+ * `_ops.mds`, `_ops_pr.mds` and `_ops_steps.mds` hold every Git operation's contract
+ * and inline steps, written once (D-OP-CONTRACT-ONCE) and split three ways by
+ * importer for the same compile-cost reason. `agents/_partials/_code.mds` holds the text the
+ * three Code variants share (D-CODE-VARIANTS), imported by the `code`, `code-fix` and
+ * `code-edit` agent hosts. Each is a partial because it declares no
+ * `output-dir:`: the build skips it and it reaches the artifact only through the
+ * modules that import it.
  *
  * This roster is what makes the partial discovery below a repo-wide walk rather
  * than a listing of one directory. A partial parked outside `_partials/` was
@@ -119,6 +124,10 @@ export const MDS_PARTIALS = [
 export const MDS_REFERENCE_PARTIALS = [
   'src/assets/mds/tracker/_common.mds',
   'src/assets/mds/tracker/_steps.mds',
+  'src/assets/mds/git/_ops.mds',
+  'src/assets/mds/git/_ops_pr.mds',
+  'src/assets/mds/git/_ops_steps.mds',
+  'src/assets/agents/_partials/_code.mds',
 ] as const;
 
 /**
@@ -219,14 +228,18 @@ export const SETTINGS_BLOCK_HOSTS_LEARNING_OFF = [
 
 /**
  * Generator hosts: .mds sources outside src/assets/commands/ that compile to a
- * destination other than dist/commands. Ten today, all agents:
+ * destination other than dist/commands. Twelve today, all agents:
  * src/assets/agents/{name}.mds → dist/agents/{name}.md. Git is the first; the other
- * nine (the agents that declare learning input, plus Skim) are hosts so their
- * learning arms can be built into the learning-off variant. The rest of the agents
- * stay hand-authored, and an agent never has both an .md and an .mds source.
+ * eleven (the agents that declare learning input, plus Skim) are hosts so their
+ * learning arms can be built into the learning-off variant. Code is three hosts
+ * (D-CODE-VARIANTS): `code`, `code-fix` and `code-edit`, which share
+ * `src/assets/agents/_partials/_code.mds`. The rest of the agents stay hand-authored,
+ * and an agent never has both an .md and an .mds source.
  */
 export const MDS_GENERATOR_HOSTS = [
   'code',
+  'code-edit',
+  'code-fix',
   'design',
   'diagnose',
   'git',
@@ -246,8 +259,8 @@ export const MDS_GENERATOR_HOSTS = [
  * loses its arm and another gains one in the same commit.
  *
  * All 14 command hosts (each loads decisions, or hands them on, behind an arm)
- * and the nine agent hosts that declare `DECISIONS_CONTEXT` (eight) or take the
- * `LEARNING` input (Skim). The Learning agent, `learning.md`, is hand-authored
+ * and the eleven agent hosts that declare `DECISIONS_CONTEXT` (ten, the three Code
+ * variants among them) or take the `LEARNING` input (Skim). The Learning agent, `learning.md`, is hand-authored
  * and runs only when learning is on, so it has no variant. The assertions over
  * this set hold at every step: the printed variant count and the files under
  * `dist/learning-off/` both equal it in both directions, the packed tarball
@@ -258,6 +271,8 @@ export const LEARNING_VARIANT_HOSTS: readonly string[] = [
   ...MDS_COMMAND_HOSTS.map(h => `commands/${h}`),
   ...[
     'code',
+    'code-edit',
+    'code-fix',
     'design',
     'diagnose',
     'knowledge',

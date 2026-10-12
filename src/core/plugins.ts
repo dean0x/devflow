@@ -103,7 +103,14 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
      * dist/commands/, and a hook-spawned agent appears in none of them.
      */
     agents: ['learning', 'tracker'],
-    skills: ['apply-decisions', 'apply-feature-knowledge', 'software-design', 'docs-framework', 'git', 'boundary-validation', 'test-driven-development', 'testing', 'dependency-research'],
+    /**
+     * D-AGENT-REFS: `agent-references` is a reference-only skill. It holds the Synthesize mode
+     * templates and the Learning maintain step, which those two agents read by explicit path, so
+     * it sits here (core-skills is always installed) and no other plugin lists or requires it.
+     * It is never preloaded: tests/guards/agent-references.test.ts holds that, and the one
+     * exception to the repo-wide ban on `disable-model-invocation` names this skill alone.
+     */
+    skills: ['apply-decisions', 'apply-feature-knowledge', 'software-design', 'docs-framework', 'git', 'boundary-validation', 'test-driven-development', 'testing', 'dependency-research', 'agent-references'],
     requires: [
       'architecture',
       'complexity',
@@ -149,17 +156,15 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-implement',
     description: 'Complete task implementation workflow - accepts plan documents, issues, or task descriptions',
     commands: ['/implement'],
-    agents: ['git', 'code', 'simplify', 'scrutinize', 'evaluate', 'test', 'validate', 'knowledge'],
+    agents: ['git', 'code', 'code-fix', 'simplify', 'scrutinize', 'evaluate', 'test', 'validate', 'knowledge'],
     skills: ['patterns', 'qa', 'quality-gates', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
     requires: [
       'apply-decisions',
       'architecture',
-      'boundary-validation',
       'complexity',
       'consistency',
       'database',
       'dependencies',
-      'dependency-research',
       'documentation',
       'git',
       'performance',
@@ -190,16 +195,14 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-resolve',
     description: 'Process and fix code review issues with blast-radius triage, Code agent fixes, and Validate agent verification',
     commands: ['/resolve'],
-    agents: ['git', 'triage', 'code', 'simplify', 'validate', 'test', 'knowledge'],
+    agents: ['git', 'triage', 'code', 'code-fix', 'simplify', 'validate', 'test', 'knowledge'],
     skills: ['patterns', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge', 'apply-decisions'],
     requires: [
       'architecture',
-      'boundary-validation',
       'complexity',
       'consistency',
       'database',
       'dependencies',
-      'dependency-research',
       'documentation',
       'git',
       'performance',
@@ -220,20 +223,17 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/debug'],
     agents: ['git', 'synthesize', 'simplify', 'knowledge', 'explore', 'code'],
     skills: ['git', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
-    // D-DEBUG-FIX-VIA-CODE: the fix is a Code spawn, and Code names boundary-validation, whose
-    // detection reference names security. security names review-methodology, which names the
-    // pattern skills below it, so the closure installs that chain whole.
+    // D-DEBUG-FIX-VIA-CODE: the fix is a Code spawn. Code loads no skill by language or mode
+    // (D-NO-RUNTIME-SKILLS), so `requires:` lists only the skills this command, its agents and the
+    // skills they preload reference; the closure guard rejects an entry nothing reads.
     requires: [
       'apply-decisions',
       'architecture',
-      'boundary-validation',
       'complexity',
       'consistency',
       'database',
       'dependencies',
-      'dependency-research',
       'documentation',
-      'patterns',
       'performance',
       'regression',
       'reliability',
@@ -326,7 +326,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-ambient',
     description: 'Orchestrator ambient mode — session charter, per-prompt reminder, plan handoff',
     commands: [],
-    agents: ['code', 'validate', 'simplify', 'scrutinize', 'evaluate', 'test', 'skim', 'review', 'git', 'synthesize', 'triage', 'design', 'knowledge', 'research', 'learning', 'explore'],
+    agents: ['code', 'code-edit', 'validate', 'simplify', 'scrutinize', 'evaluate', 'test', 'skim', 'review', 'git', 'synthesize', 'triage', 'design', 'knowledge', 'research', 'learning', 'explore'],
     skills: [
       'review-methodology',
       'security',
@@ -350,8 +350,6 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     ],
     requires: [
       'apply-decisions',
-      'boundary-validation',
-      'dependency-research',
       'git',
       'quality-gates',
       'research-codebase',
@@ -369,22 +367,19 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Dynamic workflow recipes - dependency-aware tickets→plan→build delivery pipeline',
     // Commands compiled from commands/*.mds at build time (build:mds).
     commands: ['/dynamic-tickets', '/dynamic-plan', '/dynamic-build', '/dynamic-profile'],
-    agents: ['code', 'validate', 'simplify', 'scrutinize', 'evaluate', 'test', 'review', 'git', 'synthesize', 'knowledge', 'design'],
+    agents: ['code', 'code-fix', 'validate', 'simplify', 'scrutinize', 'evaluate', 'test', 'review', 'git', 'synthesize', 'knowledge', 'design'],
     skills: ['apply-decisions', 'apply-feature-knowledge', 'worktree-support', 'docs-framework'],
     requires: [
       'architecture',
-      'boundary-validation',
       'complexity',
       'consistency',
       'database',
       'dependencies',
-      'dependency-research',
       'design-review',
       'documentation',
       'feature-knowledge',
       'gap-analysis',
       'git',
-      'patterns',
       'performance',
       'qa',
       'quality-gates',
@@ -589,8 +584,8 @@ export function omitLearningGatedSkills<V>(
  * user may deliberately not have. The referencing prompts are written to
  * proceed without it: `/code-review` spawns a language focus only when the
  * installer stamped it into the command (D-LANGUAGE-FOCUS-STAMP,
- * {@link installedLanguageFocuses}), and the Review and Code agents continue
- * when the Skill invocation fails. Putting them in a `requires` would reinstate
+ * {@link installedLanguageFocuses}), and the Review agent continues when the
+ * Skill invocation fails. Putting them in a `requires` would reinstate
  * the universal install for exactly the eight skills the selection prompt
  * exists to let a user decline (AC-25).
  *

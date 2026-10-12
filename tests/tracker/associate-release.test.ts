@@ -2,8 +2,8 @@
  * `associate-release` (#364, PR5) — each shipped issue is added to the release's
  * tracker marker, and no marker an issue already holds is ever replaced.
  *
- * The contract lives in `dist/agents/git.md` and names no marker: it says "the
- * release's tracker marker". Each provider reference says what that is and how it
+ * The contract is the first block of each provider's reference and names no marker: it
+ * says "the release's tracker marker". Each provider reference says what that is and how it
  * is written, and the three differ in the one way that decides the whole design:
  *
  *   - GitHub's milestone is SINGLE-valued, so "never replace" means an item that
@@ -38,7 +38,7 @@ import * as path from 'path';
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js';
 import { TRACKER_OPS } from '../../src/core/mds-variants.js';
-import { extractOpSectionFromCorpus, resolveAgentSource } from '../helpers.js';
+import { extractOpSectionFromCorpus, gitOperationReferenceCorpus } from '../helpers.js';
 
 const OP = 'associate-release';
 
@@ -55,9 +55,17 @@ function readReference(provider: ProviderToken): string {
   return readFileSync(abs, 'utf-8');
 }
 
+/** The operation's whole reference section (GitHub), contract and steps. */
+function referenceSection(): string {
+  return extractOpSectionFromCorpus(gitOperationReferenceCorpus(), OP, { mode: 'sole' }).content;
+}
+
+/** The contract block: everything ahead of the steps' `### Process` heading (D-OP-MOVABLE). */
 function contractSection(): string {
-  const git = resolveAgentSource('git');
-  return extractOpSectionFromCorpus([{ path: git.path, content: git.content }], OP, { mode: 'sole' }).content;
+  const section = referenceSection();
+  const steps = section.indexOf('\n### Process');
+  if (steps === -1) throw new Error(`${OP}: the reference has no ### Process heading — the contract is not followed by steps`);
+  return section.slice(0, steps);
 }
 
 /** The built tool-call contract, which every Jira and Linear spawn loads. */
@@ -405,19 +413,22 @@ describe('associate-release: registered for every provider (AC-10)', () => {
   }
 });
 
-describe('associate-release: the contract in git.md', () => {
+describe('associate-release: the contract block of the reference', () => {
   const section = contractSection();
 
-  it('declares its inputs, its degradation and its mechanics pointer', () => {
+  it('declares its inputs and its degradation, ahead of the steps', () => {
     expect(section).toContain('**Input:** `SHIPPED_ISSUES`, `VERSION`, `WORKTREE_PATH` (optional)');
     expect(section).toContain('**Degradation (D4):** as `backlink-shipped-issues`');
-    expect(section).toContain('**Mechanics:** load this operation\'s provider reference.');
   });
 
   it('resolves the marker once, bounds the items at ≤50 and never reports COMPLETE over zero', () => {
-    expect(section).toContain('resolve the marker once, before the first ≤50 entries');
-    expect(section).toContain('`TRUNCATED ({n} not processed)`');
-    expect(section).toContain('never `COMPLETE` over zero processed');
+    // The rule is a step of the operation (it validates the inputs and resolves the marker before any
+    // item), so it is read from the whole reference, which states it without pointing at another operation.
+    const whole = referenceSection();
+    expect(whole).toContain('resolve the marker once, before the first ≤50 entries');
+    expect(whole).toContain('`TRUNCATED ({n} not processed)`');
+    expect(whole).toContain('never `COMPLETE` over zero processed');
+    expect(whole, 'the input validation is stated here, not left to backlink-shipped-issues').toContain('0. Validate inputs before any remote call');
   });
 
   it('its Output reports the marker, the four counts and the four-value status', () => {

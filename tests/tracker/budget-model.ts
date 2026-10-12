@@ -25,11 +25,13 @@ import * as path from 'path';
 
 import { skillsDir, compiledSkillRefsDir } from '../../src/core/assets.js';
 import {
+  GIT_OPERATIONS,
   MCP_BACKED_PROVIDER_SUBDIRS,
   PR_HOST_OPS,
   TRACKER_GITHUB_OPS,
   TRACKER_OPS,
   VARIANT_MODULES,
+  operationReferenceRel,
 } from '../../src/core/mds-variants.js';
 import { TRACKER_PROVIDERS } from '../../src/core/tracker.js';
 import { prHostRel, resolveAgentSource } from '../helpers.js';
@@ -192,26 +194,27 @@ export const contractMd = measureRequired('dist/skills/git/references/tracker/_c
 const CONTRACT_CONTENT = readFileSync(CONTRACT_PATH, 'utf-8');
 
 // ---------------------------------------------------------------------------
-// The compiled agent, sectioned by operation
+// The operations — one reference each, not sections of the agent
 // ---------------------------------------------------------------------------
+//
+// D-OP-ONE-REF. The compiled agent declares no operation: it holds the shared rules and a
+// routing table, and each operation's contract and steps are the one reference the table names.
+// The roster of operations is therefore the registry's, not a scan of the agent for
+// `## Operation:` headings (which finds none).
 
-const OP_HEADING_RE = /^## Operation: (\S+)/gm;
+/** Every Git operation the agent routes, from the registry — never scanned out of the agent. */
+export const ALL_OPS: readonly string[] = [...GIT_OPERATIONS];
 
-/** Every `## Operation:` section in the compiled agent, keyed by op name. */
-function opSections(content: string): Map<string, string> {
-  const sections = new Map<string, string>();
-  const starts: Array<{ op: string; index: number }> = [];
-  for (const match of content.matchAll(OP_HEADING_RE)) {
-    starts.push({ op: match[1], index: match.index! });
-  }
-  for (let i = 0; i < starts.length; i++) {
-    const end = i + 1 < starts.length ? starts[i + 1].index : content.length;
-    sections.set(starts[i].op, content.slice(starts[i].index, end));
-  }
-  return sections;
+/**
+ * The reference an operation loads on the GitHub path, relative to `references/`.
+ * `operationReferenceRel` is the one owner of the grammar; a name it does not know is a defect
+ * in the caller, so this throws rather than returning a path nothing loads.
+ */
+export function ownReferenceRel(op: string): string {
+  const rel = operationReferenceRel(op, 'github');
+  if (rel === null) throw new Error(`budget-model: "${op}" is not a Git operation`);
+  return rel;
 }
-
-export const SECTIONS = opSections(GIT_AGENT.content);
 
 /** Skill-relative `references/…` names literally mentioned in a slice of text. */
 const REFERENCE_MENTION_RE = /references\/([A-Za-z0-9._/{}-]+\.md)/g;
@@ -222,59 +225,51 @@ function referenceMentions(text: string): string[] {
 
 /**
  * The reference files an operation's load instructions can name in ONE spawn —
- * derived by SCANNING the compiled agent, independently of the model below.
+ * derived by SCANNING the operation's own reference, independently of the model below.
  *
  * Two sources:
- *   - the loading section's single templated load instruction, instantiated for this
- *     op (registered tracker ops only);
- *   - any literal `references/<name>.md` named inside the op's own section.
- * A templated mention inside a section is skipped: it is a restatement of the
- * loading section's instruction, not a second file.
+ *   - the operation's own reference (the table in the agent's loading section, or for a
+ *     tracker operation the templated provider path, instantiated for this op);
+ *   - any literal `references/<name>.md` named inside that reference.
+ * A templated mention is skipped: it is a restatement of the loading section's instruction,
+ * not a second file.
  *
- * ONE HOP, and exactly one (#326). A `pr/` reference the op's own section names is
- * itself loaded text, and what IT names is loaded in the same spawn — so pricing
- * the reference without pricing what it pulls in would under-count exactly as the
- * pre-[DR-12] formula did. `fetch-review-threads` is the case that forces it: its
- * only `github-api.md` mention left git.md with step 1, so with no hop the model
- * sums a file the scan can no longer see an op name.
- *
- * The hop does not recurse and must not: the term this feeds is a per-spawn cost,
- * a fixed point over an unbounded chain is not a budget anyone could read, and a
- * cycle in the reference graph would not terminate. Depth is therefore a constant
- * here, not a parameter — if a `pr/` file ever needs a reference two hops deep,
- * that is a modelling decision to take deliberately, not a loop bound to raise.
+ * ONE READ, since the contract and the steps share a file (D-OP-ONE-REF). What a reference
+ * names is loaded in the same spawn: `fetch-review-threads` names `github-api.md` and
+ * `trust-rule.md`, the two summary operations name `publication-gate.md`,
+ * `check-merge-readiness` names `check-ci-status`'s `pr/` file. The scan does not recurse
+ * into a named file and must not: the term this feeds is a per-spawn cost, a fixed point over
+ * an unbounded chain is not a budget anyone could read, and a cycle in the reference graph
+ * would not terminate. Depth is therefore a constant here, not a parameter — if a file named
+ * from an operation's reference ever needs a reference of its own named, that is a modelling
+ * decision to take deliberately, not a loop bound to raise.
  */
 export function nameableFrom(
   op: string,
   readReference: (rel: string) => string | null = readReferenceFromDisk,
 ): Set<string> {
   const nameable = new Set<string>();
-  if ((TRACKER_GITHUB_OPS as readonly string[]).includes(op)) {
-    nameable.add(trackerRefRel(op));
-  }
+  const own = ownReferenceRel(op);
+  nameable.add(own);
   const literalMentions = (text: string): string[] =>
     referenceMentions(text).filter(rel => !rel.includes('{'));
 
-  for (const rel of literalMentions(SECTIONS.get(op) ?? '')) {
-    nameable.add(rel);
-  }
-  if (isPrHostOp(op)) {
-    const prRef = prHostRel(op);
-    const body = nameable.has(prRef) ? readReference(prRef) : null;
-    if (body !== null) {
-      for (const rel of literalMentions(body)) nameable.add(rel);
-    }
+  // The operation's own reference IS the body the spawn reads, so a literal `references/…` name
+  // inside it is a name the spawn can load in the same spawn.
+  const body = readReference(own);
+  if (body !== null) {
+    for (const rel of literalMentions(body)) nameable.add(rel);
   }
   return nameable;
 }
 
 /**
- * The hop's default reader — and the seam its known-bad probe drives.
+ * The default reference reader — and the seam the known-bad probes drive.
  *
- * Injected rather than read inline so the probe can seed a `pr/` body that names
+ * Injected rather than read inline so a probe can seed an operation reference that names
  * a file nothing models, WITHOUT writing into `dist/` mid-suite: vitest runs
  * other files in parallel workers against those exact paths. An absence
- * check over a corpus nobody can perturb is green whether or not the hop runs,
+ * check over a corpus nobody can perturb is green whether or not the scan runs,
  * which is precisely what the probe has to rule out. Exported so the
  * closure scan's seeded-reader probes can wrap it and perturb one body in memory.
  */
@@ -299,16 +294,19 @@ export function readReferenceFromDisk(rel: string): string | null {
 // Folding them together would attribute a cross-cutting document to whichever op
 // happened to sort first.
 
-/** The always-loaded part of the compiled agent: everything before the first `## Operation:`. */
+/**
+ * The always-loaded part of the compiled agent: all of it, less the routing-table rows.
+ *
+ * The agent body declares no operation (D-OP-ONE-REF), so it is cross-cutting from end to end.
+ * A routing-table row (`| \`op\` | \`references/…\` |`) names an operation's own reference — the
+ * model accounts for that file per operation (`ownLoadForProvider`), and the row is held to the
+ * registry by the reachability suite — so it is dispatch, not a cross-cutting name.
+ */
 function crossCuttingSlice(content: string): string {
-  const first = content.search(/^## Operation: /m);
-  if (first === -1) {
-    throw new Error(
-      'no `## Operation:` heading in the compiled agent — the cross-cutting slice would be the ' +
-      'whole file and every op-scoped name would read as cross-cutting',
-    );
-  }
-  return content.slice(0, first);
+  return content
+    .split('\n')
+    .filter(line => dispatchRowOp(line) === null)
+    .join('\n');
 }
 
 /** Named collector: the literal `references/…` names the always-loaded part spells out. */
@@ -510,8 +508,6 @@ export function summedForProvider(
   return summed;
 }
 
-export const ALL_OPS = [...SECTIONS.keys()];
-
 /** The characters of a file set, less any written exclusion. */
 function loadChars(rels: Iterable<string>, exclusions: readonly string[] = []): number {
   return [...rels]
@@ -589,6 +585,40 @@ export function worstCaseNonTrackerLoad(): OpMax {
  * never become a place a reference grows unwatched.
  */
 export const LOADED_SET_WRITTEN_EXCLUSIONS: readonly string[] = ['github-api.md'];
+
+/**
+ * `max over every operation, under every provider, of its one-spawn load` — the largest single
+ * operation the Git agent can be asked to run, measured as the references it loads.
+ *
+ * D-OP-LOAD-CAP. The contract and the mechanics of an operation are one reference, so "the largest
+ * operation" is a question about every operation, tracker and PR-host alike, and the per-operation
+ * alarm (`git-op-load-max` in numeric-floors.json) ranges over all of them. The preloaded set and the
+ * per-spawn contract term are NOT in it — they are the same for every operation and have rows of
+ * their own — and `exclusions` is the loaded-set rows' written exclusion, so the cap and the
+ * rows can never price the same operation two ways.
+ *
+ * `op` is reported as `{provider}/{op}` because a tracker operation's load differs per provider.
+ */
+export function worstCaseOpLoad(
+  exclusions: readonly string[] = LOADED_SET_WRITTEN_EXCLUSIONS,
+): OpMax {
+  let best: OpMax = { op: '(none)', value: 0 };
+  for (const provider of TRACKER_PROVIDER_IDS) {
+    for (const op of ALL_OPS) {
+      const value = loadChars(summedForProvider(provider, op), exclusions);
+      if (value > best.value) best = { op: `${provider}/${op}`, value };
+    }
+  }
+  return best;
+}
+
+/** Every operation's one-spawn load under every provider, as `{provider}/{op}` rows — for the cap's collector. */
+export function opLoadRows(
+  exclusions: readonly string[] = LOADED_SET_WRITTEN_EXCLUSIONS,
+): Array<{ op: string; load: number }> {
+  return TRACKER_PROVIDER_IDS.flatMap(provider =>
+    ALL_OPS.map(op => ({ op: `${provider}/${op}`, load: loadChars(summedForProvider(provider, op), exclusions) })));
+}
 
 /**
  * `max over PR_HOST_OPS of ( sum of every reference that op can name in one spawn )`
@@ -832,6 +862,15 @@ export const INFORMATIONAL_OP_MENTIONS: readonly InformationalOpMention[] = [
     why: 'Names which earlier operation produced the issue reference the caller already holds; ' +
       'it reads that Output value and runs none of the producing operation\'s steps.',
   }))),
+  // ensure-pr-ready's handoff paste gate (D-PR-BY-GIT) names the two producers.
+  ...TRACKER_PROVIDERS.flatMap(({ id }) => ['setup-task', 'fetch-issue'].map(target => ({
+    file: `tracker/${id}/ensure-pr-ready.md`,
+    target,
+    anchor: 'The `setup-task` and `fetch-issue` Output blocks end with a `### Handoff Values` block',
+    why: 'Says which operations produce the Handoff Values block the pasted ISSUE_PR_LINK came from; ' +
+      'this operation receives that value as an input and shape-checks it, and runs none of the ' +
+      'producing operation\'s steps.',
+  }))),
   ...['jira', 'linear'].map(id => ({
     file: `tracker/${id}/ensure-pr-ready.md`,
     target: 'gather-release-evidence',
@@ -869,6 +908,22 @@ export const INFORMATIONAL_OP_MENTIONS: readonly InformationalOpMention[] = [
     anchor: '`ensure-pr-ready` renders the PR link line explicitly',
     why: 'Explains why the server\'s branch auto-link is not relied on: a later operation writes ' +
       'the PR link line in its own spawn, and setup-task runs none of its steps.',
+  },
+  // gather-release-evidence names the operation that consumes what it returns.
+  ...TRACKER_PROVIDERS.map(({ id }) => ({
+    file: `tracker/${id}/gather-release-evidence.md`,
+    target: 'create-release',
+    anchor: 'Called before `create-release` to supply',
+    why: 'Names the CONSUMER of this operation\'s output (COMMIT_LIST and SHIPPED_ISSUES); this ' +
+      'operation produces them and runs none of create-release\'s steps.',
+  })),
+  // learn-conventions names the caller that commits the file it writes.
+  {
+    file: 'learn-conventions.md',
+    target: 'setup-task',
+    anchor: '`setup-task` step 4b commits the file',
+    why: 'Names the CALLER that commits the conventions file after this operation writes it; this ' +
+      'operation writes the file and stops, and none of setup-task\'s steps belong to its spawn.',
   },
   // PR-host bodies name their neighbours in the review loop.
   {
@@ -929,6 +984,33 @@ export const INFORMATIONAL_OP_MENTIONS: readonly InformationalOpMention[] = [
     anchor: '**Rate backpressure for batch ops** (`resolve-review-threads` and `backlink-shipped-issues`)',
     why: 'Scope of the always-loaded D4 backpressure rule — the two batch operations it governs; ' +
       'the rule itself is written on the same line, so no mechanics load follows.',
+  })),
+  // The agent body is always-loaded from end to end (it declares no operation, D-OP-ONE-REF), so the
+  // generic `## Output` cap and the Principles that name the operations they govern are scanned too.
+  ...['check-ci-status', 'manage-debt', 'validate-branch', 'ensure-pr-ready'].map(target => ({
+    file: 'agents/git.md',
+    target,
+    anchor: target === 'check-ci-status'
+      ? 'check-ci-status\'s `**Status**:` being the enum'
+      : target === 'manage-debt'
+        ? 'manage-debt\'s issue reference'
+        : 'the validate-branch and ensure-pr-ready fields',
+    why: 'Names which operations\' return fields the report cap keeps inline because callers parse ' +
+      'them; it states a rule about the returned message and tells the spawn to run nothing.',
+  })),
+  ...['post-review-summary', 'post-resolution-summary'].map(target => ({
+    file: 'agents/git.md',
+    target,
+    anchor: 'only the summary ops (`post-review-summary`, `post-resolution-summary`)',
+    why: 'Scope of Principle 5\'s footer rule — the two summary operations that append it; the rule is ' +
+      'written on the same line, so no operation\'s mechanics are needed to apply it.',
+  })),
+  ...['post-review-summary', 'post-resolution-summary', 'post-wave-report', 'backlink-shipped-issues'].map(target => ({
+    file: 'agents/git.md',
+    target,
+    anchor: 'no comment-posting op (e.g. `post-review-summary`, `post-resolution-summary`, `post-wave-report`, `backlink-shipped-issues`)',
+    why: 'Scope of Principle 8\'s no-reproduction rule — the posting operations it governs; the rule ' +
+      'itself is written on the same line, so no operation\'s mechanics are needed to apply it.',
   })),
   {
     file: 'skills/git/SKILL.md',
@@ -1072,15 +1154,15 @@ export interface AlwaysLoadedBody {
 export const AGENT_ALWAYS_LOADED = 'agents/git.md';
 
 /**
- * Every body a Git spawn holds before it runs any operation: the agent above its
- * first `## Operation:` heading, the two preloaded skills, and the contract documents
+ * Every body a Git spawn holds before it runs any operation: the whole agent (it declares
+ * no operation, D-OP-ONE-REF), the two preloaded skills, and the contract documents
  * a tracker spawn reads once (`_contract.md` on every provider, the tool-call
  * contract `_mcp.md` under an MCP-backed one).
  *
  * Held to a STRICTER rule than a per-op body — no hop at all. An op named here as a
  * load would be paid by every spawn, which no per-op row can express, so the only
- * mentions allowed are the `## Operations` dispatch table (the agent's index of
- * itself) and INFORMATIONAL_OP_MENTIONS rows. The project-key line, then in the agent's preamble, used to
+ * mentions allowed are the two routing tables (`## Operations` and the loading table — the
+ * agent's index of itself) and INFORMATIONAL_OP_MENTIONS rows. The project-key line, then in the agent's preamble, used to
  * send every spawn to the `learn-conventions` operation's UNTRUSTED-strings block, a
  * reference loaded only when .devflow/conventions.md is absent; it now states the rule
  * itself, and this is what keeps the pointer from coming back.
@@ -1092,7 +1174,7 @@ export function alwaysLoadedBodies(
   readReference: (rel: string) => string | null = readReferenceFromDisk,
 ): AlwaysLoadedBody[] {
   const bodies: AlwaysLoadedBody[] = [
-    { file: AGENT_ALWAYS_LOADED, text: crossCuttingSlice(content) },
+    { file: AGENT_ALWAYS_LOADED, text: content },
     { file: 'skills/git/SKILL.md', text: readFileSync(path.join(skillsDir(), 'git', 'SKILL.md'), 'utf-8') },
     {
       file: 'skills/worktree-support/SKILL.md',
@@ -1155,8 +1237,8 @@ const LOADING_END = '## Comment-sink scrub (D11)';
 const D4_ANCHOR = '**Degradation contract (D4):**';
 
 /**
- * The retained loading section as it appears in the compiled agent: the PR-mechanics
- * load rule, the merged step order and the one templated tracker load line.
+ * The loading section as it appears in the compiled agent: the one-reference rule, the table
+ * that gives each non-tracker operation its reference, and the one templated tracker load line.
  * Throws when the section is absent or misplaced, for the reason above.
  */
 export function loadingBlock(content: string = GIT_AGENT.content): string {

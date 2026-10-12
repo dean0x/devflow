@@ -7,7 +7,7 @@
  *  - D-SCAN-IN-CODE   tests/fixtures/agent-config.ts (MCP_DENY_AGENTS) holds the tool half:
  *                     Scrutinize and Simplify deny `mcp__*`, so neither can reach a scanner.
  *                     This file holds the body half, in the COMPILED prompts a session loads:
- *                       - Code carries one `Security scan (conditional)` block that scans only
+ *                       - Each Code variant (Code, Code-fix, Code-edit) carries one `Security scan (conditional)` block that scans only
  *                         when the session offers a code-scanning tool, scans each changed file
  *                         once by absolute path before the final commit, scans the narrowest
  *                         common directory once when more than 10 files changed, and reports
@@ -35,7 +35,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { resolveAgentSource, resolveLearningOffSource, splitFrontmatter } from '../helpers.js';
+import { CODE_AGENT_TYPES, codeSlugOf, resolveAgentSource, resolveLearningOffSource, splitFrontmatter } from '../helpers.js';
 
 // ---------------------------------------------------------------------------
 // The pinned text
@@ -155,12 +155,17 @@ describe('Code carries one conditional, vendor-neutral scan block (D-SCAN-IN-COD
     expect(resolveAgentSource('code').origin).toBe('dist');
   });
 
-  it('the learning-on prompt holds the block', () => {
-    expect(collectScanBlockDefects(agentBody('code'))).toEqual([]);
+  // D-CODE-VARIANTS: the block lives in the shared partial's commit step, so every variant keeps it (AC-306).
+  it('the learning-on prompt of each Code variant holds the block', () => {
+    for (const agentType of CODE_AGENT_TYPES) {
+      expect(collectScanBlockDefects(agentBody(codeSlugOf(agentType))), agentType).toEqual([]);
+    }
   });
 
-  it('the learning-off prompt holds the same block', () => {
-    expect(collectScanBlockDefects(learningOffBody('code'))).toEqual([]);
+  it('the learning-off prompt of each Code variant holds the same block', () => {
+    for (const agentType of CODE_AGENT_TYPES) {
+      expect(collectScanBlockDefects(learningOffBody(codeSlugOf(agentType))), agentType).toEqual([]);
+    }
   });
 
   describe('known-bad probes: one mutation makes the collector report', () => {

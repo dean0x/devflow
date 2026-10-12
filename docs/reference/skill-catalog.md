@@ -17,7 +17,7 @@ Reference for companion skills loaded by commands. A command loads a companion o
 
 ## File-Type Conditional Skills
 
-Commands and Code agents load language/framework skills based on files touched:
+Review agents load language/framework skills for the files in the diff:
 
 | Pattern | Skill |
 |---------|-------|
@@ -28,7 +28,6 @@ Commands and Code agents load language/framework skills based on files touched:
 | .py | devflow:python |
 | .rs | devflow:rust |
 | CSS/UI/styling | devflow:ui-design |
-| Forms/API/input | devflow:boundary-validation |
 | Auth/crypto/secrets | devflow:security |
 
 ## Agent-Internal Skills
@@ -46,4 +45,5 @@ These skills are installed whenever a selected plugin owns or requires them, and
 - devflow:accessibility — WCAG compliance, ARIA roles, keyboard navigation
 - devflow:performance — N+1 queries, memory leaks, caching opportunities
 - devflow:qa — Scenario-based acceptance testing, evidence collection
-- devflow:compliance — Regulatory code-level controls: GDPR, HIPAA, PCI DSS, SOC 2, ISO 27001, SOX; used by Review agent (compliance focus, diff-driven), Design agent (gap-analysis compliance focus), and Code agent (when handed `COMPLIANCE_FRAMEWORKS` other than `off` and regulated surface detected); feature-owned, not plugin-scoped, installed on every machine with all six framework references — the lens runs from the settings line's `COMPLIANCE` (the machine's ids plus the repository's `project.json` ids), and an agent loads `references/{id}.md` only for the ids it is given. SKILL.md and the rule are dynamically composed at install time from per-framework fragment files (`frameworks/{id}/fragment.md` within the compliance skill source); each framework also has a `frameworks/{id}/reference.md` in source, installed as `references/{id}.md` in the skill directory. The source `references/` directory holds only the two always-present files (`detection.md` and `sources.md`); per-framework reference files live under `frameworks/` in source. Installed SKILL.md is stamped with the machine's selected frameworks only (a neutral stamp when compliance is off); `devflow skills shadow compliance` seeds from the shipped template so a later `--set` still stamps it. Shadow SKILL.md without composition tokens bypasses composition (C1 passthrough); flagged in `devflow compliance --status`.
+- devflow:agent-references — Synthesize's per-mode templates and Learning's maintenance procedure; read by explicit path, never preloaded
+- devflow:compliance — Regulatory code-level controls: GDPR, HIPAA, PCI DSS, SOC 2, ISO 27001, SOX; used by Review agent (compliance focus, diff-driven) and Design agent (compliance focus, which reads `gap-analysis/references/compliance.md` by explicit path), and by Code and Code-fix agents (when the command's compliance directive is in their prompt, which happens only while the lens is on); feature-owned, not plugin-scoped, installed on every machine with all six framework references — the lens runs from the settings line's `COMPLIANCE` (the machine's ids plus the repository's `project.json` ids), and an agent loads `references/{id}.md` only for the ids its prompt names. SKILL.md and the rule are dynamically composed at install time from per-framework fragment files (`frameworks/{id}/fragment.md` within the compliance skill source); each framework also has a `frameworks/{id}/reference.md` in source, installed as `references/{id}.md` in the skill directory. The source `references/` directory holds only the two always-present files (`detection.md` and `sources.md`); per-framework reference files live under `frameworks/` in source. Installed SKILL.md is stamped with the machine's selected frameworks only (a neutral stamp when compliance is off); `devflow skills shadow compliance` seeds from the shipped template so a later `--set` still stamps it. Shadow SKILL.md without composition tokens bypasses composition (C1 passthrough); flagged in `devflow compliance --status`.

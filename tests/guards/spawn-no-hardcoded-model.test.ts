@@ -79,7 +79,7 @@ const SCANNED_EXTENSIONS = ['.md', '.mds']
  * lists across SCANNED_ROOTS, as measured when the guard was added. It only rises
  * (tests/fixtures/numeric-floors.json).
  */
-const SPAWNED_AGENT_TYPE_FLOOR = 16
+const SPAWNED_AGENT_TYPE_FLOOR = 17
 
 /** The agent type an `Agent(` spawn names: `subagent_type="X"` or `subagent_type: "X"`. */
 const SUBAGENT_TYPE = /\bsubagent_type\s*[=:]\s*["']([A-Za-z][\w-]*)["']/

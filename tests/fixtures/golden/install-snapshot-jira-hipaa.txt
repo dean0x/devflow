@@ -16,6 +16,8 @@ d sub/
 d .claude/
 d .claude/agents/
 d .claude/agents/devflow/
+- .claude/agents/devflow/code-edit.md
+- .claude/agents/devflow/code-fix.md
 - .claude/agents/devflow/code.md
 - .claude/agents/devflow/design.md
 - .claude/agents/devflow/diagnose.md
@@ -56,6 +58,18 @@ d .claude/rules/devflow/
 - .claude/rules/devflow/security.md
 - .claude/settings.json
 d .claude/skills/
+d .claude/skills/devflow:agent-references/
+- .claude/skills/devflow:agent-references/SKILL.md
+d .claude/skills/devflow:agent-references/references/
+d .claude/skills/devflow:agent-references/references/learning/
+- .claude/skills/devflow:agent-references/references/learning/maintain.md
+d .claude/skills/devflow:agent-references/references/synthesize/
+- .claude/skills/devflow:agent-references/references/synthesize/bug-analysis.md
+- .claude/skills/devflow:agent-references/references/synthesize/design.md
+- .claude/skills/devflow:agent-references/references/synthesize/exploration.md
+- .claude/skills/devflow:agent-references/references/synthesize/planning.md
+- .claude/skills/devflow:agent-references/references/synthesize/research.md
+- .claude/skills/devflow:agent-references/references/synthesize/review.md
 d .claude/skills/devflow:apply-decisions/
 - .claude/skills/devflow:apply-decisions/SKILL.md
 d .claude/skills/devflow:apply-feature-knowledge/
@@ -134,6 +148,7 @@ d .claude/skills/devflow:gap-analysis/
 - .claude/skills/devflow:gap-analysis/SKILL.md
 d .claude/skills/devflow:gap-analysis/references/
 - .claude/skills/devflow:gap-analysis/references/check-layers.md
+- .claude/skills/devflow:gap-analysis/references/compliance.md
 d .claude/skills/devflow:git/
 - .claude/skills/devflow:git/SKILL.md
 d .claude/skills/devflow:git/references/
@@ -145,7 +160,6 @@ d .claude/skills/devflow:git/references/
 d .claude/skills/devflow:git/references/pr/
 - .claude/skills/devflow:git/references/pr/check-ci-status.md
 - .claude/skills/devflow:git/references/pr/check-merge-readiness.md
-- .claude/skills/devflow:git/references/pr/ensure-pr-ready.md
 - .claude/skills/devflow:git/references/pr/fetch-review-threads.md
 - .claude/skills/devflow:git/references/pr/post-resolution-summary.md
 - .claude/skills/devflow:git/references/pr/post-review-summary.md

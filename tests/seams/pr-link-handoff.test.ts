@@ -1,36 +1,44 @@
 import { describe, it, expect, afterAll } from 'vitest'
 import * as fs from 'fs'
+import * as os from 'os'
 import * as path from 'path'
-import { buildCommittedTree, cleanupCommittedTree, requireDistFile, resolveAgentSource, walkFiles } from '../helpers.js'
+import { buildCommittedTree, cleanupCommittedTree, collectCodeSpawnSites, collectOrderViolations, ensurePrReadyReference, gitOperationReferenceCorpus, requireDistFile, walkFiles } from '../helpers.js'
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
 
 /** The generated `devflow:git` reference tree — the providers' own mechanics. */
 const REFS_DIR = compiledSkillRefsDir()
 
 // -------------------------------------------------------------------------
-// `### Handoff Values` — Git agent producer ↔ Code agent consumer (P2-S10, GAP-15).
+// `### Handoff Values` — Git agent producer ↔ ensure-pr-ready consumer (P2-S10, GAP-15; D-PR-BY-GIT, #448).
 //
 // GAP-15 found `ISSUE_PR_LINK` and `ISSUE_BRANCH_TOKEN` consumed with no
-// producer anywhere: the Code agent's ALWAYS-ON `Closes #{n}` rule had nothing
-// to paste, and failed silently on the GitHub path too. T2b added the producers
-// to setup-task and fetch-issue; this file pins both ends of that seam so a
-// later edit cannot drop one side and leave the other looking healthy.
+// producer anywhere: the ALWAYS-ON `Closes #{n}` rule had nothing to paste, and
+// failed silently on the GitHub path too. T2b added the producers to setup-task
+// and fetch-issue; this file pins both ends of that seam so a later edit cannot
+// drop one side and leave the other looking healthy.
 //
-// The failure mode a one-sided guard misses: a guard that only checks git.md
-// stays green when code.md stops consuming the block, and a guard that only
-// checks code.md stays green when git.md stops emitting it. Either way the PR
+// The consumer is the Git agent's ensure-pr-ready reference, which opens the PR
+// under every strategy (D-PR-BY-GIT, #448) and holds the paste gates. The failure
+// mode a one-sided guard misses: a guard that only checks the producers stays green
+// when the consumer stops pasting the block, and a guard that only checks the
+// consumer stays green when the producers stop emitting it. Either way the PR
 // body silently loses its issue link — the exact defect, restored.
 //
-// Read targets are resolved through resolveAgentSource (never a literal
-// src/assets/agents/ path — AC-0.7): git.md is compiled from an MDS generator
-// host, code.md is hand-authored, and the resolver knows the difference.
+// Both ends are Git operation references (D-OP-ONE-REF): the producer text is the
+// setup-task and fetch-issue references, the consumer text is the ensure-pr-ready
+// reference. The consumer's PR skeleton is one write expanded into three provider
+// files, so the GitHub copy stands for it in the single-valued arms and the
+// all-providers arm below holds the other two.
 //
 // Header doctrine and framing copied from tests/resolve/duplicate-verdict.test.ts:4-15
 // (the repo's original two-sided producer/consumer test).
 // -------------------------------------------------------------------------
 
-const GIT = resolveAgentSource('git').content
-const CODE = resolveAgentSource('code').content
+/** The operations' producer text: each operation's one reference (GitHub), joined. */
+const GIT = gitOperationReferenceCorpus().map(entry => entry.content).join('\n')
+
+/** The PR-opening consumer of the handoff values (D-PR-BY-GIT): ensure-pr-ready's reference, GitHub copy. */
+const PR_READY = ensurePrReadyReference()
 
 afterAll(cleanupCommittedTree)
 
@@ -72,7 +80,7 @@ function collectBranchTokenDefects(git: string): string[] {
   return out
 }
 
-describe('git.md — ### Handoff Values producer block', () => {
+describe('Git operation references — ### Handoff Values producer block', () => {
   it('is non-vacuous', () => {
     expect(GIT.length).toBeGreaterThan(10000)
   })
@@ -82,7 +90,7 @@ describe('git.md — ### Handoff Values producer block', () => {
     for (const line of PRODUCER_LINES) {
       expect(
         GIT,
-        `git.md must emit ${line} — the Code agent reads it by this exact label, not by prose`,
+        `the setup-task and fetch-issue references must emit ${line} — the ensure-pr-ready consumer reads it by this exact label, not by prose`,
       ).toContain(line)
     }
   })
@@ -104,7 +112,7 @@ describe('git.md — ### Handoff Values producer block', () => {
 
   it('emits the block from both issue-returning operations, not just one', () => {
     // setup-task and fetch-issue are separate entry points into /implement.
-    // A block on only one of them makes the Code agent's paste rule depend on
+    // A block on only one of them makes the consumer's paste rule depend on
     // which command the user ran.
     const count = GIT.split('### Handoff Values').length - 1
     expect(
@@ -114,36 +122,36 @@ describe('git.md — ### Handoff Values producer block', () => {
   })
 })
 
-describe('code.md — ### Handoff Values consumer', () => {
+describe('ensure-pr-ready — ### Handoff Values consumer', () => {
   it('is non-vacuous', () => {
-    expect(CODE.length).toBeGreaterThan(5000)
+    expect(PR_READY.length).toBeGreaterThan(5000)
   })
 
   it('names the PR-link producer by its producer label', () => {
     expect(
-      CODE,
+      PR_READY,
       'the consumer must name `- **PR link line**:` — naming only the variable would not survive a producer relabel',
     ).toContain('- **PR link line**:')
     expect(
-      CODE,
+      PR_READY,
       'the consumer must name `- **Branch token**:` for the same reason',
     ).toContain('- **Branch token**:')
   })
 
   it('re-checks the shape before pasting, and degrades instead of coercing', () => {
     expect(
-      CODE,
+      PR_READY,
       'the PR body is a GitHub-visible sink; a returned value is still attacker-influenceable at the paste site',
     ).toContain('^Closes #[1-9][0-9]{0,8}$')
     expect(
-      CODE,
+      PR_READY,
       'a malformed ref must emit a DEGRADED reason, never be silently repaired or dropped',
     ).toContain('does not match any tracker reference grammar')
   })
 
   it('re-checks BEFORE it pastes — order, not mere presence', () => {
-    const recheck = CODE.indexOf('after re-checking its shape against the tracker reference grammars')
-    const degraded = CODE.indexOf('does not match any tracker reference grammar')
+    const recheck = PR_READY.indexOf('after re-checking its shape against the tracker reference grammars')
+    const degraded = PR_READY.indexOf('does not match any tracker reference grammar')
     expect(recheck, 'the re-check instruction must exist').toBeGreaterThan(-1)
     expect(
       recheck,
@@ -161,12 +169,13 @@ describe('code.md — ### Handoff Values consumer', () => {
 // providers, and the PR body silently recomposed a github-shaped link from a
 // number that is not a github issue.
 //
-// It then became one arm per RESOLVED provider — but the Code agent is never
-// told the provider (#359, G3): the command layer holds no provider knowledge
-// and forwards the Git agent's rendered line verbatim. So the gate is a
+// It then became one arm per RESOLVED provider — but the paste happens in a
+// later spawn than the one that rendered the line (#359, G3): the command layer
+// holds no provider knowledge and forwards the rendered line verbatim, so the
+// consumer does not re-derive the provider from it. So the gate is a
 // provider-free UNION: a value is pasted when it matches any one row. That is a
-// sink check on the line's shape; the Git agent, which did resolve the
-// provider, is what chose the grammar.
+// sink check on the line's shape; setup-task or fetch-issue, which did resolve
+// the provider, is what chose the grammar.
 //
 // The arms are read OUT of the prompt and RUN here rather than re-typed. A
 // hand-copied grammar in a test is a second authority that agrees with the first
@@ -175,7 +184,7 @@ describe('code.md — ### Handoff Values consumer', () => {
 // meant — is invisible to a reader and obvious to anything that executes it.
 // -------------------------------------------------------------------------
 
-/** The providers whose `ISSUE_PR_LINK` the Code agent may be handed. Named, not discovered. */
+/** The providers whose `ISSUE_PR_LINK` ensure-pr-ready may be handed. Named, not discovered. */
 const PASTE_PROVIDERS = ['github', 'jira', 'linear'] as const
 
 /**
@@ -227,9 +236,9 @@ const PASTE_PAYLOADS: ReadonlyArray<{ label: string; value: string; accepts: rea
     value: `Refs A${'B'.repeat(10)}-${'1'.repeat(57)}`, accepts: [] },
 ]
 
-describe('code.md — the paste gate, one row per tracker grammar', () => {
+describe('ensure-pr-ready — the paste gate, one row per tracker grammar', () => {
   it('states an anchored arm for every provider, and no arm for anything else', () => {
-    const arms = collectPasteArms(CODE)
+    const arms = collectPasteArms(PR_READY)
     expect(
       [...arms.keys()].sort(),
       'the paste gate must name every provider the Git agent can render a line for — an absent ' +
@@ -242,7 +251,7 @@ describe('code.md — the paste gate, one row per tracker grammar', () => {
   })
 
   it('every arm, EXECUTED against every payload, accepts exactly what it should', () => {
-    const arms = collectPasteArms(CODE)
+    const arms = collectPasteArms(PR_READY)
     const wrong: string[] = []
     for (const { label, value, accepts } of PASTE_PAYLOADS) {
       for (const provider of PASTE_PROVIDERS) {
@@ -270,48 +279,48 @@ describe('code.md — the paste gate, one row per tracker grammar', () => {
     // refusal has to be written down as well as anchored; and an anchored
     // pattern bounds the SHAPE of a line, never its length.
     expect(
-      CODE,
+      PR_READY,
       'a value carrying a newline must be refused in words — a `$` that some engines read as ' +
       'end-of-line would admit everything after the first line into the PR body as free text',
     ).toMatch(/reject(?:s|ed)?[\s\S]{0,120}?(newline|multi-line)/i)
-    expect(CODE, 'the arms must carry an explicit length bound').toMatch(/60 characters/)
+    expect(PR_READY, 'the arms must carry an explicit length bound').toMatch(/60 characters/)
   })
 
   it('(none) is not a mismatch, and is never recomposed from a bare number', () => {
     expect(
-      CODE,
+      PR_READY,
       '`(none)` means no line was captured, which is the documented absent case — degrading over ' +
       'it would report a malformed value every time a task has no issue',
     ).toMatch(/`\(none\)`[\s\S]{0,200}?not a mismatch/i)
     expect(
-      CODE,
-      'with no rendered line the section keeps its heading and carries no reference — the Code ' +
-      'agent does not know the provider, so any line it composed would be a guess',
+      PR_READY,
+      'with no rendered line the section keeps its heading and carries no reference — a bare ' +
+      'number names a different issue under each provider, so any line composed from it would be a guess',
     ).toContain('never compose one from `ISSUE_NUMBER`')
     expect(
-      CODE,
+      PR_READY,
       'a bare issue number names a different issue under each provider, and the canonical reason ' +
       'for that is already registered — reuse it, never a new spelling',
     ).toContain('TRACEABILITY: DEGRADED (ambiguous issue reference)')
   })
 
-  it('names no provider in the mismatch reason — the agent is never told one', () => {
+  it('names no provider in the mismatch reason — the gate is a union over every row', () => {
     expect(
-      CODE,
-      'the Code agent receives no provider, so a reason that named one would name a guess; the ' +
+      PR_READY,
+      'the gate decides no provider, so a reason that named one would name a guess; the ' +
       'union gate\'s honest report is that the line matched none of the grammars',
     ).toContain('does not match any tracker reference grammar')
-    expect(CODE).not.toContain('does not match {provider} reference grammar')
-    expect(CODE).not.toContain('does not match github reference grammar')
+    expect(PR_READY).not.toContain('does not match {provider} reference grammar')
+    expect(PR_READY).not.toContain('does not match github reference grammar')
   })
 
   it('never asks the agent to read a provider it is not given', () => {
     // The retired instruction. With no provider in the spawn, "the arm for the
     // provider that was RESOLVED" has nothing to resolve against, and an agent
     // told to find one improvises it.
-    expect(CODE).not.toMatch(/provider that was RESOLVED/i)
-    expect(CODE).not.toContain('| Resolved provider |')
-    expect(CODE, 'the gate is stated as a sink check').toContain('This is a sink check, not a provider check')
+    expect(PR_READY).not.toMatch(/provider that was RESOLVED/i)
+    expect(PR_READY).not.toContain('| Resolved provider |')
+    expect(PR_READY, 'the gate is stated as a sink check').toContain('This is a sink check, not a provider check')
   })
 
   it('known-bad probe: the arm collector reports a missing anchor and a missing row', () => {
@@ -332,10 +341,9 @@ describe('code.md — the paste gate, one row per tracker grammar', () => {
   // -----------------------------------------------------------------------
   // The arms are a FOURTH reader of each provider's reference grammar.
   //
-  // The Code agent sits outside the Git spawn surface and loads no provider
-  // mechanics file it could defer to, so a per-provider sink check has to
-  // enumerate the closed set once, inside the gate — that is what keeps it a
-  // sink check rather than a second convergence point. What it must
+  // The gate reads no provider's mechanics file to defer to, so a per-provider
+  // sink check has to enumerate the closed set once, inside the gate — that is
+  // what keeps it a sink check rather than a second convergence point. What it must
   // not become is a second AUTHORITY: the shape a `KEY-N` reference takes is
   // stated by each provider's own mechanics, and the project-key alphabet
   // already has an explicit one-authority claim over three readers
@@ -371,7 +379,7 @@ describe('code.md — the paste gate, one row per tracker grammar', () => {
   }
 
   it('each non-github arm is its provider\'s own reference grammar, prefixed by the rendered verb', () => {
-    const arms = collectPasteArms(CODE)
+    const arms = collectPasteArms(PR_READY)
     for (const provider of PASTE_PROVIDERS.filter(p => p !== 'github')) {
       const grammars = collectProviderRefGrammars(provider)
       expect(
@@ -410,42 +418,46 @@ describe('code.md — the paste gate, one row per tracker grammar', () => {
   })
 })
 
-describe('handoff seam — git.md producer ↔ code.md consumer', () => {
+describe('handoff seam — setup-task and fetch-issue producers ↔ ensure-pr-ready consumer', () => {
   it('both sides spell the two pasted labels identically', () => {
     for (const label of ['- **PR link line**:', '- **Branch token**:']) {
-      expect(GIT, `git.md must produce ${label}`).toContain(label)
-      expect(CODE, `code.md must consume ${label}`).toContain(label)
+      expect(GIT, `the Git operation references must produce ${label}`).toContain(label)
+      expect(PR_READY, `ensure-pr-ready must consume ${label}`).toContain(label)
     }
   })
 
   it('ISSUE_NUMBER is kept as the spawn key, with its value tied to the ISSUE_ID producer', () => {
-    // §14.5: ISSUE_NUMBER (singular) is KEPT at every Code-spawn site; only its
-    // VALUE becomes provider-canonical. A rename here would silently break all
-    // 14 spawn sites, none of which this file can see.
-    expect(CODE, 'the spawn key name must not be renamed').toContain('**ISSUE_NUMBER** (optional)')
+    // §14.5: ISSUE_NUMBER (singular) is the spawn key; only its VALUE became
+    // provider-canonical. A rename here would silently break the PR-opening spawn,
+    // which this file reads below.
+    const input = PR_READY.split('\n').find(l => l.startsWith('**Input:**')) ?? ''
+    expect(input, 'the spawn key name must not be renamed').toContain('`ISSUE_NUMBER` (optional)')
     expect(
-      CODE,
+      PR_READY,
       'the input description must tie ISSUE_NUMBER to the producer that supplies it',
     ).toContain('- **Issue ID**: {ISSUE_ID}')
-    expect(GIT, 'git.md must produce that exact line').toContain('- **Issue ID**: {ISSUE_ID}')
+    expect(GIT, 'the Git operation references must produce that exact line').toContain('- **Issue ID**: {ISSUE_ID}')
   })
 })
 
 // -------------------------------------------------------------------------
-// The forwarding leg (GAP-15, second half).
+// The forwarding leg (GAP-15, second half), after D-PR-BY-GIT (#448).
 //
-// The producer↔consumer pair above proves git.md emits the PR link line and
-// code.md knows how to paste it. It says nothing about the wire BETWEEN them.
-// GAP-15's residue was exactly that gap: `issue_capture_contract()` captured
-// ISSUE_PR_LINK at the command layer, code.md consumed it, and not one Code
-// spawn fence forwarded it — the value was captured and dropped, and every
-// PR body silently fell back to composing the link itself.
+// The producer↔consumer pair above proves setup-task and fetch-issue emit the PR
+// link line and ensure-pr-ready knows how to paste it. It says nothing about the
+// wire BETWEEN them. GAP-15's residue was exactly that gap: `issue_capture_contract()`
+// captured ISSUE_PR_LINK at the command layer, the consumer knew how to paste it,
+// and not one spawn fence forwarded it — the value was captured and dropped, and
+// every PR body silently fell back to composing the link itself.
 //
-// ISSUE_NUMBER stays the spawn key (§14.5); ISSUE_PR_LINK is its SIBLING. So
-// the invariant is relational, not a count of one key: every spawn payload
-// that carries ISSUE_NUMBER must carry ISSUE_PR_LINK too. A fence that gains
-// ISSUE_NUMBER without the sibling goes red, which is the drift that actually
-// happens — a ninth fence copied from an older one.
+// The Code agent opens no PR, so it takes none of the PR keys: no Code spawn
+// forwards ISSUE_NUMBER, ISSUE_PR_LINK or PR_EXCEPTIONS (an exact-0 guard). The one
+// consumer is the PR-opening Git spawn, so the relation that replaced "every
+// ISSUE_NUMBER payload also carries ISSUE_PR_LINK" is: a workflow that captures
+// ISSUE_PR_LINK forwards it to its PR-opening Git spawn (D-LINK-FLOOR). A workflow
+// opens its PR in one of two ways, both named below: /implement passes the link
+// itself, /dynamic-build composes a wave block from each ticket's captured
+// `issuePrLink` and passes that.
 //
 // Corpus discipline: the assertion is about DEPLOYED text, so it reads
 // dist/. It gets dist/ from buildCommittedTree() — a build of a COPY of the
@@ -453,188 +465,341 @@ describe('handoff seam — git.md producer ↔ code.md consumer', () => {
 // from a test writer, which other parallel workers are concurrently reading.
 // -------------------------------------------------------------------------
 
-/** The deployed commands that spawn Code agents with an issue key. Named, not discovered. */
-const FORWARDING_COMMANDS: readonly string[] = ['implement.md', 'dynamic-build.md']
-
-/**
- * §14.5 pinned 14 Code-spawn sites: 8 in implement, 6 in dynamic-build. #359 adds
- * the 15th — /implement's parallel-strategy `pr-create` spawn, which replaced the
- * orchestrator creating the unified PR itself (unscrubbed, and rendering its own
- * link line): 9 in implement, 6 in dynamic-build.
- */
-const MIN_FORWARDING_SITES = 15
-
 interface SpawnPayload {
   readonly file: string
-  /** 1-based line of the ISSUE_NUMBER: key. */
+  /** 1-based line of the key the collector matched. */
   readonly line: number
   /** The contiguous non-blank run of lines the key sits in — one spawn payload. */
   readonly block: string
 }
 
+/** The keys only the PR-opening Git spawn takes. A Code spawn carrying one is a PR input with no PR to open. */
+const PR_ONLY_KEYS = ['ISSUE_NUMBER', 'ISSUE_PR_LINK', 'PR_EXCEPTIONS'] as const
+
 /**
- * Named collector: every spawn payload carrying an `ISSUE_NUMBER:` key.
+ * Named collector: the Code spawn sites that carry a PR-only key as a prompt line.
  *
- * A payload is the contiguous run of non-blank lines around the key — the unit a
- * spawn fence hands to one agent. Blank-line bounded rather than fence-bounded so
- * the one collector reads both shapes the command layer uses: the markdown
- * `Agent(subagent_type="Code")` fences in implement.md and the JS
- * `agent(\`…\`, { agentType: "Code" })` template literals in dynamic-build.md.
- *
- * Bounded: a corpus with more sites than MAX_SITES is a corpus this scan no
- * longer understands, and is reported rather than silently truncated.
+ * A key is a prompt line when it opens a line (after indent and an optional quote or
+ * `${…}` template context is irrelevant: the key sits at the line start in both fence
+ * shapes the command layer uses). Rendered as `file:line KEY` for the failure message.
  */
-function collectIssueSpawnPayloads(file: string, source: string): SpawnPayload[] {
-  const MAX_SITES = 64
-  const KEY = 'ISSUE_NUMBER:'
-  const lines = source.split('\n')
-  const payloads: SpawnPayload[] = []
-
-  for (let i = 0; i < lines.length; i++) {
-    if (!lines[i].includes(KEY)) continue
-    let start = i
-    while (start > 0 && lines[start - 1].trim() !== '') start--
-    let end = i
-    while (end < lines.length - 1 && lines[end + 1].trim() !== '') end++
-    if (payloads.length >= MAX_SITES) {
-      throw new Error(`${file}: more than ${MAX_SITES} ${KEY} sites — bound exceeded, scan aborted`)
-    }
-    payloads.push({ file, line: i + 1, block: lines.slice(start, end + 1).join('\n') })
-  }
-  return payloads
+function collectCodePrKeyLeaks(file: string, source: string): string[] {
+  const keyAtLineStart = new RegExp(`^[ \\t]*"?(${PR_ONLY_KEYS.join('|')}): `, 'm')
+  return collectCodeSpawnSites(file, source).flatMap(site => {
+    const lines = site.payload.split('\n')
+    return lines.flatMap((l, i) => {
+      const m = keyAtLineStart.exec(l)
+      return m === null ? [] : [`${file}:${site.line + i} ${m[1]}`]
+    })
+  })
 }
 
-/** The payloads that carry ISSUE_NUMBER but not its sibling — rendered for the failure message. */
-function collectUnforwardedSites(payloads: readonly SpawnPayload[]): string[] {
-  return payloads
-    .filter(p => !p.block.includes('ISSUE_PR_LINK:'))
-    .map(p => `${p.file}:${p.line}`)
+/** Every deployed command, as `[name, text]`, from the committed-tree build. */
+async function deployedCommands(): Promise<Array<readonly [string, string]>> {
+  const { run, root } = await buildCommittedTree()
+  expect(run.status, `the committed-tree build must succeed.\n${run.combined}`).toBe(0)
+  const names = fs.readdirSync(path.join(root, 'dist', 'commands')).filter(f => f.endsWith('.md'))
+  expect(names.length, 'no compiled command — the corpus is empty').toBeGreaterThan(10)
+  return names.map(name => [name, requireDistFile(name, root)] as const)
 }
 
-describe('ISSUE_PR_LINK forwarding — every Code spawn site carries the sibling key', () => {
-  it('the named command set forwards it at every ISSUE_NUMBER site', async () => {
-    const { run, root } = await buildCommittedTree()
-    expect(run.status, `the committed-tree build must succeed.\n${run.combined}`).toBe(0)
-
-    const payloads = FORWARDING_COMMANDS.flatMap(name =>
-      collectIssueSpawnPayloads(name, requireDistFile(name, root)),
-    )
-
-    // Non-vacuity, both directions: the floor, and every named file contributing.
-    expect(
-      payloads.length,
-      `only ${payloads.length} spawn site(s) found, floor ${MIN_FORWARDING_SITES} — a collector ` +
-      'that reached fewer files than it names would pass by scanning nothing',
-    ).toBeGreaterThanOrEqual(MIN_FORWARDING_SITES)
-    for (const name of FORWARDING_COMMANDS) {
-      expect(
-        payloads.some(p => p.file === name),
-        `${name} contributed no spawn site — the named set and the corpus disagree`,
-      ).toBe(true)
+describe('no Code spawn forwards a PR input (AC-204, D-PR-BY-GIT)', () => {
+  it('ISSUE_NUMBER, ISSUE_PR_LINK and PR_EXCEPTIONS reach no Code spawn in any deployed command — exact 0', async () => {
+    const commands = await deployedCommands()
+    // Non-vacuity: the three hosts that spawn Code each contribute spawn sites the scan really read.
+    const sitesByHost = (host: string): number => {
+      const text = commands.find(([name]) => name === host)?.[1] ?? ''
+      return collectCodeSpawnSites(host, text).length
     }
-
+    for (const [host, floor] of [['implement.md', 9], ['dynamic-build.md', 8], ['resolve.md', 3]] as const) {
+      expect(sitesByHost(host), `${host}: the collector stopped reading Code spawns`).toBeGreaterThanOrEqual(floor)
+    }
     expect(
-      collectUnforwardedSites(payloads),
-      'Code spawn site(s) carrying ISSUE_NUMBER without ISSUE_PR_LINK. The command layer ' +
-      'captures the rendered PR link line via issue_capture_contract(); a fence that omits it ' +
-      'drops the value on the floor and the PR body silently recomposes the link (GAP-15):\n  ' +
-      collectUnforwardedSites(payloads).join('\n  '),
+      commands.flatMap(([name, text]) => collectCodePrKeyLeaks(name, text)),
+      'a Code spawn carries a key only the PR-opening Git spawn takes — Code opens no PR, so the key is dead weight in its prompt',
     ).toEqual([])
-  }, 20_000) // pays for the memoised committed-tree build: ~3.7s alone, headroom for suite contention.
+  }, 20_000)
 
-  it('known-bad probe: a fence that loses the sibling key is reported by the same collector', async () => {
-    const { root } = await buildCommittedTree()
-    const real = requireDistFile('implement.md', root)
+  it('known-bad probe: a PR key seeded into a real Code spawn is reported by the same collector', async () => {
+    const commands = await deployedCommands()
+    const implement = commands.find(([name]) => name === 'implement.md')?.[1] ?? ''
+    expect(collectCodePrKeyLeaks('implement.md', implement), 'the real text is clean, so the seed fails for its own reason').toEqual([])
+    for (const key of PR_ONLY_KEYS) {
+      const seeded = implement.replace('OPERATION: alignment-fix\n', `OPERATION: alignment-fix\n   ${key}: seeded\n`)
+      expect(seeded, `${key}: the seed must land`).not.toBe(implement)
+      const leaks = collectCodePrKeyLeaks('implement.md', seeded)
+      expect(leaks, key).toHaveLength(1)
+      expect(leaks[0]).toMatch(new RegExp(`^implement\\.md:\\d+ ${key}$`))
+    }
+    // …and a Git spawn carrying the same key is not a Code spawn: Phase 9 passes all three.
+    expect(implement).toContain('OPERATION: ensure-pr-ready')
+  }, 20_000)
+})
 
-    // GREEN half: the real deployed text has no unforwarded site.
-    expect(collectUnforwardedSites(collectIssueSpawnPayloads('implement.md', real))).toEqual([])
+describe('src/assets names neither CREATE_PR nor the retired pr-create mode (AC-204)', () => {
+  /** Named collector: source files under `root` whose text holds either retired spelling. */
+  function collectRetiredPrMode(root: string): string[] {
+    return walkFiles(root, () => true, 8)
+      .filter(file => /CREATE_PR|pr-create/.test(fs.readFileSync(file, 'utf-8')))
+      .map(file => path.relative(root, file))
+  }
 
-    // RED half: drop the sibling from exactly ONE fence — the drift this guard
-    // exists for — and prove the SAME collector names that site.
-    const seeded = real.replace(/^.*ISSUE_PR_LINK:.*\n/m, '')
-    expect(seeded, 'the seed must actually remove a line').not.toBe(real)
-    const seededViolations = collectUnforwardedSites(collectIssueSpawnPayloads('implement.md', seeded))
-    expect(
-      seededViolations.length,
-      'removing one ISSUE_PR_LINK line must leave exactly one site unforwarded — if the ' +
-      'collector reports zero it is not reading the payload it claims to read',
-    ).toBe(1)
+  it('is clean across every shipped source', () => {
+    const root = path.join(path.resolve(import.meta.dirname, '..', '..'), 'src', 'assets')
+    expect(walkFiles(root, () => true, 8).length, 'the scan read no file').toBeGreaterThan(100)
+    expect(collectRetiredPrMode(root)).toEqual([])
   })
 
-  it('code.md declares the sibling key as an input, next to the spawn key it accompanies', () => {
-    expect(
-      CODE,
-      'a forwarded key the agent does not declare is a key the agent may ignore',
-    ).toContain('**ISSUE_PR_LINK** (optional)')
-    expect(
-      CODE,
-      'the declaration must name the (none) fallback, or an unset value has no defined behaviour',
-    ).toContain('the section then carries its heading and no reference')
-    const numberAt = CODE.indexOf('**ISSUE_NUMBER** (optional)')
-    const linkAt = CODE.indexOf('**ISSUE_PR_LINK** (optional)')
-    expect(
-      linkAt,
-      'the sibling must be declared after the spawn key it accompanies, not in a distant section',
-    ).toBeGreaterThan(numberAt)
+  it('known-bad probe: a source holding either spelling is reported', () => {
+    const scratch = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'pr-retired-'))
+    try {
+      fs.writeFileSync(path.join(scratch, 'a.md'), 'CREATE_PR: true\n')
+      fs.writeFileSync(path.join(scratch, 'b.md'), 'OPERATION: pr-create\n')
+      fs.writeFileSync(path.join(scratch, 'c.md'), 'OPERATION: ensure-pr-ready\n')
+      expect(collectRetiredPrMode(scratch).sort()).toEqual(['a.md', 'b.md'])
+    } finally {
+      fs.rmSync(scratch, { recursive: true, force: true })
+    }
   })
 })
 
 // -------------------------------------------------------------------------
-// /implement's parallel path opens its PR through a Code `pr-create` spawn (#359, G3).
+// D-LINK-FLOOR: a workflow that captures ISSUE_PR_LINK forwards it to its
+// PR-opening Git spawn.
 //
-// The orchestrator used to run `gh pr create` itself for PARALLEL_CODE_AGENTS: the
-// body skipped the D11 scrub every Code-created PR gets, and the command layer
-// rendered its own link line — a second rendering site with no provider to render
-// it against. Both went when the step became a Code spawn whose Responsibility 7
-// owns the body, the paste gate and the scrub. This block pins that the spawn
-// exists, carries everything Responsibility 7 reads, and lands on a declared mode.
+// "Captures" is read off the deployed text: the command names ISSUE_PR_LINK (the
+// issue-capture contract, or the engine's per-ticket binding). "Opens a PR" is an
+// `OPERATION: ensure-pr-ready` spawn. A command that does both must carry the link
+// into that spawn — the key itself, or, for the wave, the wave block composed from
+// the captured links. The named set is cross-checked against discovery both ways,
+// so a new capturing PR-opener goes red here until it joins the set.
 // -------------------------------------------------------------------------
 
-/** Named collector: the Code spawn payloads that run `OPERATION: pr-create`. */
-function collectPrCreateSpawns(source: string): SpawnPayload[] {
-  return collectIssueSpawnPayloads('implement.md', source).filter(p => p.block.includes('OPERATION: pr-create'))
+/** Each capturing PR-opening command, and the spawn key through which it forwards the captured link. */
+const LINK_FORWARDERS: Readonly<Record<string, string>> = {
+  'implement.md': 'ISSUE_PR_LINK:',
+  'dynamic-build.md': 'PR_WAVE_BLOCK:',
 }
 
-/** The keys Responsibility 7 reads, every one of which the pr-create spawn must carry. */
-const PR_CREATE_KEYS = [
-  'Agent(subagent_type="Code")',
-  'CREATE_PR: true',
+/**
+ * The count of PR-opening Git spawns that pass `ISSUE_PR_LINK:` itself — the floor
+ * `issue-pr-link-pr-open-sites`. One: /implement's Phase 9. The wave composes its
+ * links into PR_WAVE_BLOCK, which is the other named route and is not counted here.
+ */
+const MIN_PR_OPEN_SITES = 1
+
+/** Named collector: disagreements between the named forwarders and discovery over a command corpus. */
+function collectForwarderDrift(
+  corpus: ReadonlyArray<{ readonly name: string; readonly content: string }>,
+  named: readonly string[],
+): string[] {
+  const discovered = corpus
+    .filter(c => c.content.includes(ENSURE_PR_READY_OP) && c.content.includes('ISSUE_PR_LINK'))
+    .map(c => c.name)
+  return [
+    ...discovered.filter(n => !named.includes(n)).map(n => `${n}: captures ISSUE_PR_LINK and opens a PR but is not a named forwarder`),
+    ...named.filter(n => !discovered.includes(n)).map(n => `${n}: named forwarder no longer captures ISSUE_PR_LINK and opens a PR`),
+  ]
+}
+
+/** Named collector: PR-opening spawns of a forwarder that lack the key it forwards through. */
+function collectUnforwardedPrOpens(file: string, source: string): string[] {
+  const key = LINK_FORWARDERS[file]
+  if (key === undefined) return [`${file}: not a named forwarder`]
+  return collectEnsurePrReadySpawns(file, source)
+    .filter(p => !p.block.includes(key))
+    .map(p => `${p.file}:${p.line}: the PR-opening spawn does not pass ${key}`)
+}
+
+describe('ISSUE_PR_LINK reaches the PR-opening Git spawn (D-LINK-FLOOR)', () => {
+  it('every capturing workflow forwards the link into its ensure-pr-ready spawn, and the named set is exactly that set', async () => {
+    const commands = await deployedCommands()
+    const corpus = commands.map(([name, content]) => ({ name, content }))
+    expect(collectForwarderDrift(corpus, Object.keys(LINK_FORWARDERS))).toEqual([])
+    for (const [name, content] of commands.filter(([n]) => n in LINK_FORWARDERS)) {
+      expect(collectEnsurePrReadySpawns(name, content).length, `${name}: no PR-opening spawn to forward into`).toBeGreaterThan(0)
+      expect(collectUnforwardedPrOpens(name, content), name).toEqual([])
+    }
+  }, 20_000)
+
+  it('the floor: at least issue-pr-link-pr-open-sites PR-opening spawns pass ISSUE_PR_LINK: itself', async () => {
+    const commands = await deployedCommands()
+    const sites = commands.flatMap(([name, content]) => collectEnsurePrReadySpawns(name, content))
+      .filter(p => p.block.includes('ISSUE_PR_LINK:'))
+    expect(sites.length, 'the collector found fewer PR-opening spawns than the floor').toBeGreaterThanOrEqual(MIN_PR_OPEN_SITES)
+    expect(sites.map(p => p.file), 'only /implement passes the link itself').toEqual(['implement.md'])
+  }, 20_000)
+
+  it('known-bad probes: a dropped key, an unnamed capturer and a vanished forwarder are each reported', async () => {
+    const commands = await deployedCommands()
+    const corpus = commands.map(([name, content]) => ({ name, content }))
+    const implement = commands.find(([n]) => n === 'implement.md')?.[1] ?? ''
+    const wave = commands.find(([n]) => n === 'dynamic-build.md')?.[1] ?? ''
+
+    const dropped = implement.replace(/^ISSUE_PR_LINK: .*\n/m, '')
+    expect(dropped, 'the drop seed must land').not.toBe(implement)
+    expect(collectUnforwardedPrOpens('implement.md', dropped)).toHaveLength(1)
+
+    const waveDropped = wave.replace(/^ *PR_WAVE_BLOCK: .*\n/m, '')
+    expect(waveDropped, 'the wave drop seed must land').not.toBe(wave)
+    expect(collectUnforwardedPrOpens('dynamic-build.md', waveDropped)).toHaveLength(1)
+
+    // A review host that begins to capture the link and open a PR without naming itself.
+    const seeded = corpus.map(c => c.name === 'code-review.md' ? { ...c, content: `${c.content}\nISSUE_PR_LINK: {captured}\n` } : c)
+    expect(collectForwarderDrift(seeded, Object.keys(LINK_FORWARDERS)))
+      .toEqual(['code-review.md: captures ISSUE_PR_LINK and opens a PR but is not a named forwarder'])
+
+    // A named forwarder that stopped capturing the link.
+    const lost = corpus.map(c => c.name === 'implement.md' ? { ...c, content: c.content.split('ISSUE_PR_LINK').join('LINK') } : c)
+    expect(collectForwarderDrift(lost, Object.keys(LINK_FORWARDERS)))
+      .toEqual(['implement.md: named forwarder no longer captures ISSUE_PR_LINK and opens a PR'])
+  }, 20_000)
+})
+
+// -------------------------------------------------------------------------
+// /implement opens its PR through ONE Git ensure-pr-ready spawn, under every
+// strategy (D-PR-BY-GIT, #448): a plan that says "the Git agent opens the PR" is a claim
+// about the command, so the command is read here.
+//
+// Phase 9 owns the body: it sits after the gates and before the CI gate, outside
+// every strategy branch, so no strategy can end with commits and no PR.
+// -------------------------------------------------------------------------
+
+const PHASE9 = '### Phase 9: Open PR'
+
+/** Every key the Phase 9 spawn must carry: each ensure-pr-ready input /implement has a value for. */
+const PHASE9_KEYS = [
+  'Agent(subagent_type="Git")',
+  'OPERATION: ensure-pr-ready',
+  'WORKTREE_PATH: {worktree}',
   'BASE_BRANCH:',
-  'PR_DESCRIPTION_GUIDANCE:',
+  'TASK_ID:',
   'ISSUE_NUMBER:',
   'ISSUE_PR_LINK:',
-  'PR_EXCEPTIONS:', // #362: /implement's recorded evidence exception, pasted by Responsibility 7
-  'PR_TEST_PLAN_BLOCK:', // #363: /implement's rendered test-plan block, pasted behind `check block`
+  'PR_EXCEPTIONS:', // #362: /implement's recorded evidence exception, pasted behind its shape gate
+  'PR_TEST_PLAN_BLOCK: {PR_TEST_PLAN_BLOCK verbatim, or (none)}', // #363: pasted behind `check block`
+  'PR_DESCRIPTION_GUIDANCE:', // D-PR-BODY-FROM-HANDOFF: the Code agents' reports are the body's material
+  'APPLY_CONVENTIONS:',
+  'COMMIT_UNCOMMITTED: false', // D-COMMIT-EXPLICIT
 ] as const
 
-describe('/implement parallel PR — a Code pr-create spawn, never the orchestrator', () => {
-  it('Phase 10 spawns exactly one pr-create Code agent carrying every Responsibility-7 input', async () => {
+/** The phase order the PR opening relies on: gates, then Phase 9, then the CI gate, evidence, report. */
+const PHASE9_ORDER = [
+  { label: 'Phase 9 follows the re-validate phase', before: '### Phase 8: Re-Validate', after: PHASE9 },
+  { label: 'the CI gate follows Phase 9', before: PHASE9, after: '### Phase 10: CI Status Gate' },
+  { label: 'evidence follows the CI gate', before: '### Phase 10: CI Status Gate', after: '### Phase 11: Evidence' },
+  { label: 'the report follows evidence', before: '### Phase 11: Evidence', after: '### Phase 12: Report' },
+] as const
+
+/** Named collector: what /implement's PR opening lacks — exactly one Git spawn, in Phase 9, outside the strategies. */
+function collectPhase9Defects(source: string): string[] {
+  const out: string[] = []
+  const spawns = collectEnsurePrReadySpawns('implement.md', source)
+  if (spawns.length !== 1) return [`expected one ensure-pr-ready spawn, found ${spawns.length}`]
+  for (const key of PHASE9_KEYS) {
+    if (!spawns[0].block.includes(key)) out.push(`the spawn does not pass ${key}`)
+  }
+  out.push(...collectOrderViolations('implement.md', source, PHASE9_ORDER))
+  const start = source.indexOf(PHASE9)
+  const end = source.indexOf('### Phase 10: CI Status Gate')
+  if (start === -1 || end === -1 || end < start) return [...out, 'no Phase 9 section before the CI gate']
+  const phase = source.slice(start, end)
+  if (!phase.includes('OPERATION: ensure-pr-ready')) out.push('the spawn is not inside Phase 9')
+  if (!phase.includes('under every strategy')) out.push('Phase 9 does not run under every strategy')
+  if (/\*\*(SINGLE|SEQUENTIAL|PARALLEL)_CODE_AGENTS?\*\*/.test(phase)) out.push('Phase 9 sits inside a strategy branch')
+  if (/Agent\(subagent_type="Code"\)/.test(phase)) out.push('Phase 9 spawns a Code agent')
+  return out
+}
+
+describe('/implement Phase 9 — one Git ensure-pr-ready spawn, outside every strategy (AC-201, AC-202)', () => {
+  it('opens the PR once, with every PR input, after the gates and before the CI gate', async () => {
     const { root } = await buildCommittedTree()
     const implement = requireDistFile('implement.md', root)
-    const spawns = collectPrCreateSpawns(implement)
-    expect(spawns, 'one pr-create spawn — the parallel path must not create the PR itself').toHaveLength(1)
-    for (const key of PR_CREATE_KEYS) {
-      expect(spawns[0].block, `the pr-create spawn must pass ${key}`).toContain(key)
-    }
+    expect(implement.length, 'the deployed command is empty').toBeGreaterThan(10_000)
+    expect(collectPhase9Defects(implement)).toEqual([])
     expect(implement, 'the retired orchestrator-run PR creation').not.toContain('run `gh pr create`')
   }, 20_000)
 
-  it('code.md declares the mode and routes it through Responsibility 7 and its D11 scrub', () => {
-    expect(CODE).toMatch(/\*\*OPERATION\*\* \(optional\):[^\n]*`pr-create`/)
-    const mode = CODE.slice(CODE.indexOf('## Mode: pr-create'))
-    expect(mode.startsWith('## Mode: pr-create'), 'the mode section must exist').toBe(true)
-    const body = mode.slice(0, mode.indexOf('\n## ', 1))
-    expect(body).toContain('Responsibility 7')
-    expect(body).toContain('D11 scrub')
-    expect(body).toContain('Make no code changes')
-  })
-
-  it('known-bad probe: a Phase 10 that lost its spawn is reported', async () => {
+  it('known-bad probes: a lost spawn, a dropped key, a strategy-bound phase and a Code spawn are reported', async () => {
     const { root } = await buildCommittedTree()
     const real = requireDistFile('implement.md', root)
-    const seeded = real.replace('OPERATION: pr-create', 'OPERATION: implement')
-    expect(seeded, 'the seed must actually change the text').not.toBe(real)
-    expect(collectPrCreateSpawns(seeded)).toHaveLength(0)
+
+    const lost = real.replace('OPERATION: ensure-pr-ready', 'OPERATION: validate-branch')
+    expect(lost, 'the lost-spawn seed must land').not.toBe(real)
+    expect(collectPhase9Defects(lost)).toEqual(['expected one ensure-pr-ready spawn, found 0'])
+
+    for (const key of ['COMMIT_UNCOMMITTED: false', 'ISSUE_PR_LINK:', 'PR_EXCEPTIONS:']) {
+      const dropped = real.replace(new RegExp(`^${key}.*\\n`, 'm'), '')
+      expect(dropped, `${key}: the drop seed must land`).not.toBe(real)
+      expect(collectPhase9Defects(dropped), key).toContain(`the spawn does not pass ${key}`)
+    }
+
+    const bound = real.replace(PHASE9, `${PHASE9}\n\n**SINGLE_CODE_AGENT**: only`)
+    expect(collectPhase9Defects(bound)).toContain('Phase 9 sits inside a strategy branch')
+
+    const coded = real.replace(PHASE9, `${PHASE9}\n\nAgent(subagent_type="Code")`)
+    expect(collectPhase9Defects(coded)).toContain('Phase 9 spawns a Code agent')
+
+    // A Phase 9 emptied of its spawn is reported, and so is the CI gate running before the PR exists.
+    const emptied = real.replace(PHASE9, '### Phase 9 later').replace('### Phase 10: CI Status Gate', `${PHASE9}\n\n### Phase 10: CI Status Gate`)
+    expect(collectPhase9Defects(emptied)).toContain('the spawn is not inside Phase 9')
+    const reordered = real.replace(PHASE9, '@@swap@@').replace('### Phase 10: CI Status Gate', PHASE9).replace('@@swap@@', '### Phase 10: CI Status Gate')
+    expect(reordered, 'the reorder seed must land').not.toBe(real)
+    const reorderedDefects = collectPhase9Defects(reordered)
+    expect(reorderedDefects).toContain('no Phase 9 section before the CI gate')
+    expect(reorderedDefects.some(d => d.includes('[the CI gate follows Phase 9]'))).toBe(true)
+  }, 20_000)
+})
+
+describe('ensure-pr-ready opens the PR (D-LINK-VERBATIM, D-COMMIT-EXPLICIT, D-PR-EXISTS)', () => {
+  /** The six inputs #448 added to the operation, all optional. */
+  const NEW_INPUTS = ['BASE_BRANCH', 'TASK_ID', 'ISSUE_NUMBER', 'ISSUE_PR_LINK', 'PR_EXCEPTIONS', 'COMMIT_UNCOMMITTED'] as const
+
+  /** Named collector: what one provider's ensure-pr-ready reference lacks of the PR-opening rules. */
+  function collectPrOpenDefects(ref: string): string[] {
+    const out: string[] = []
+    const need = (what: string, ok: boolean): void => { if (!ok) out.push(what) }
+    const input = ref.split('\n').find(l => l.startsWith('**Input:**')) ?? ''
+    for (const key of NEW_INPUTS) need(`the Input line does not declare ${key} as optional`, input.includes(`\`${key}\` (optional)`))
+    need('a given link is final, pasted without step 4b resolving',
+      ref.includes("**A given `ISSUE_PR_LINK` is final.**") && ref.includes('step 4b does not resolve a number'))
+    need('step 4b skips its resolution for a given link', /4b\. \(ALWAYS-ON\)[^\n]*A given `ISSUE_PR_LINK` is already decided in step 4a: skip the resolution/.test(ref))
+    need('COMMIT_UNCOMMITTED defaults to true', ref.includes('`COMMIT_UNCOMMITTED` is `true` when absent'))
+    need('false commits nothing and lists the stray files', ref.includes('When it is `false`, commit nothing') && ref.includes('list each uncommitted path under `### Uncommitted files`'))
+    need('false opens the PR from HEAD', ref.includes('step 4a opens the PR from HEAD'))
+    need('the Output template carries the uncommitted-files section', ref.includes('### Uncommitted files\n{only when `COMMIT_UNCOMMITTED` is `false`'))
+    need('a failed scrub still creates the PR with a minimal body', ref.includes('**On scrubber failure** (non-zero exit or script missing): still create the PR — PR existence is the deliverable'))
+    need('the degraded line is the redaction one', ref.includes('plus the literal line `TRACEABILITY: DEGRADED (redaction unavailable)`'))
+    need('the raw body is never posted', ref.includes('Never post `$DEVFLOW_BODY_RAW`.'))
+    need('the base is passed as argv from a shell variable', ref.includes('`--base "$BASE_BRANCH"`') && ref.includes('pass that variable as argv, never interpolated'))
+    need('exactly one test-plan check', ref.split('check block').length - 1 === 1)
+    return out
+  }
+
+  it('every provider carries the PR-opening rules', () => {
+    for (const provider of ['github', 'jira', 'linear']) {
+      expect(collectPrOpenDefects(ensurePrReadyReference(provider)), provider).toEqual([])
+    }
+  })
+
+  it('known-bad probes: each lost rule is reported by name', () => {
+    const real = ensurePrReadyReference()
+    const seeds: ReadonlyArray<{ from: string; to: string; expected: string }> = [
+      { from: ' A given `ISSUE_PR_LINK` is already decided in step 4a: skip the resolution below.', to: '', expected: 'step 4b skips its resolution for a given link' },
+      { from: '`COMMIT_UNCOMMITTED` is `true` when absent', to: '`COMMIT_UNCOMMITTED` is `false` when absent', expected: 'COMMIT_UNCOMMITTED defaults to true' },
+      { from: 'When it is `false`, commit nothing', to: 'When it is `false`, commit anyway', expected: 'false commits nothing and lists the stray files' },
+      { from: '**On scrubber failure** (non-zero exit or script missing): still create the PR — PR existence is the deliverable', to: '**On scrubber failure** (non-zero exit or script missing): create no PR', expected: 'a failed scrub still creates the PR with a minimal body' },
+      { from: 'plus the literal line `TRACEABILITY: DEGRADED (redaction unavailable)`', to: 'plus a warning', expected: 'the degraded line is the redaction one' },
+      { from: 'pass that variable as argv, never interpolated', to: 'interpolate it', expected: 'the base is passed as argv from a shell variable' },
+      { from: '`ISSUE_PR_LINK` (optional), ', to: '', expected: 'the Input line does not declare ISSUE_PR_LINK as optional' },
+    ]
+    for (const seed of seeds) {
+      const wounded = real.replace(seed.from, seed.to)
+      expect(wounded, `${seed.expected}: the seed must land`).not.toBe(real)
+      expect(collectPrOpenDefects(wounded), seed.expected).toContain(seed.expected)
+    }
+    // A second test-plan check is the duplicate the merge exists to prevent.
+    expect(collectPrOpenDefects(`${real}\nrun check block again`)).toContain('exactly one test-plan check')
   })
 })
 
@@ -661,8 +826,11 @@ const REVIEW_CALLERS: readonly string[] = ['code-review.md', 'bug-analysis.md']
 /** The wave host: it renders the test-plan block from the wave evidence file, and passes the wave block. */
 const WAVE_CALLER = 'dynamic-build.md'
 
+/** The pipeline host: its Phase 9 opens the PR and passes /implement's own PR_TEST_PLAN_BLOCK, rendered in Phase 1. */
+const IMPLEMENT_CALLER = 'implement.md'
+
 /** The deployed commands that spawn ensure-pr-ready. Named, and cross-checked against discovery. */
-const ENSURE_PR_READY_CALLERS: readonly string[] = [...REVIEW_CALLERS, WAVE_CALLER]
+const ENSURE_PR_READY_CALLERS: readonly string[] = [...REVIEW_CALLERS, WAVE_CALLER, IMPLEMENT_CALLER]
 
 const ENSURE_PR_READY_OP = 'OPERATION: ensure-pr-ready'
 
@@ -809,8 +977,12 @@ describe('PR_TEST_PLAN_BLOCK forwarding — every ensure-pr-ready spawn carries 
       'resolve.md: spawns ensure-pr-ready but is not a named caller',
       'bug-analysis.md: named caller spawns no ensure-pr-ready',
     ])
-    // …and the wave caller dropped from the named set is the drift this arm first caught (#365 P3).
-    expect(collectCallerDrift(corpus, REVIEW_CALLERS)).toEqual([`${WAVE_CALLER}: spawns ensure-pr-ready but is not a named caller`])
+    // …and the wave caller dropped from the named set is the drift this arm first caught (#365 P3),
+    // /implement's Phase 9 (#448) the one after it.
+    expect(collectCallerDrift(corpus, REVIEW_CALLERS)).toEqual([
+      `${WAVE_CALLER}: spawns ensure-pr-ready but is not a named caller`,
+      `${IMPLEMENT_CALLER}: spawns ensure-pr-ready but is not a named caller`,
+    ])
   }, 20_000) // pays for the memoised committed-tree build.
 
   it('every ensure-pr-ready spawn passes PR_TEST_PLAN_BLOCK', async () => {

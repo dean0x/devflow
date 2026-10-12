@@ -35,10 +35,9 @@ Executes a single task through the complete development lifecycle. Accepts plan 
 5. **Validation** — One full build, typecheck, lint, and test run over the branch diff, after the code is final
 6. **QA Testing** — Test executes scenario-based acceptance tests and records one claim per TP line
 7. **Re-validation** — Only if QA fixes committed: a changed-only Validate over what they changed
-8. **CI Gate** — Push, then wait for CI on the pushed head and fix failures (skipped when Code agents ran in parallel)
-9. **Evidence** — Push, then refresh the PR's test-plan block and post its evidence comment
-
-Creates a PR when complete; its body carries the test-plan block and any `## Evidence Exceptions`.
+8. **Open PR** — The Git agent opens the PR after the quality gates; its body carries the test-plan block and any `## Evidence Exceptions`
+9. **CI Gate** — Push, then wait for CI on the pushed head and fix failures
+10. **Evidence** — Push, then refresh the PR's test-plan block and post its evidence comment
 
 ```
 /implement .devflow/docs/design/42-jwt-auth.2026-04-07_1430.md  # From plan document

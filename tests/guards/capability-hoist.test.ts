@@ -294,32 +294,30 @@ describe('capability-hoist: no capability probe runs inside a loop [DR-11]', () 
       'opener changed spelling; the guard would pass without reading anything',
     ).toBeGreaterThan(0);
 
-    // BOTH corpora must contribute, asserted by provenance rather than by a total.
-    // A count alone cannot say this: git.md declares 18 operations by itself, so any
-    // floor at or below 18 is met with the generated tree entirely absent — the guard
-    // would then claim to scan both while scanning one.
+    // Provenance, asserted rather than implied. The agent body declares no operation
+    // (D-OP-ONE-REF), so every process block is in the generated tree: a block that came
+    // from dist/agents/git.md would be operation text outside the reference the spawn reads.
     const fromReferences = blocks.filter(b => b.file.includes(`${path.sep}references${path.sep}`));
     const fromAgent = blocks.filter(b => !b.file.includes(`${path.sep}references${path.sep}`));
     expect(
-      fromAgent.length,
-      'no process block came from dist/agents/git.md — the agent half of the corpus is missing',
-    ).toBeGreaterThan(0);
+      fromAgent.map(b => b.file),
+      'a process block came from dist/agents/git.md — an operation\'s steps belong in its reference',
+    ).toEqual([]);
     expect(
       fromReferences.length,
       'no process block came from dist/skills/git/references/ — the generated tree is absent or ' +
-      'unreadable, and the guard is scanning only the agent. Run `npm run build`.',
+      'unreadable, and the guard would pass without reading anything. Run `npm run build`.',
     ).toBeGreaterThan(0);
 
-    // 63 = 20 from git.md + 43 from the generated tree (three providers × eleven
-    // per-op references, learn-conventions.md and the nine PR-host references),
-    // measured on this branch (#363 added update-pr-evidence's pair; #364 added
-    // associate-release's four). Registered as `capability-hoist-block-floor`; the
-    // literal is spelled here so a decrement is visible at the assertion, not only
-    // in the manifest.
+    // 42 = learn-conventions.md + 33 provider blocks (three providers × eleven per-op
+    // references) + 8 PR-host references. The agent body holds no `**Process:**` block: every
+    // operation's steps are the `### Process` block of its one reference (D-OP-ONE-REF).
+    // Registered as `capability-hoist-block-floor`; the literal is spelled here so a decrement
+    // is visible at the assertion, not only in the manifest.
     expect(
       blocks.length,
-      'too few process blocks to be scanning both git.md and the generated references',
-    ).toBeGreaterThanOrEqual(63);
+      'too few process blocks to be scanning the generated references',
+    ).toBeGreaterThanOrEqual(42);
 
     expect(LOOP_MARKERS.length, 'LOOP_MARKERS must be non-empty').toBeGreaterThan(0);
     expect(PROBE_MARKERS.length, 'PROBE_MARKERS must be non-empty').toBeGreaterThan(0);

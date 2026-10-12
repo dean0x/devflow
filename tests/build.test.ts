@@ -88,7 +88,11 @@ describe('no orphaned declarations', () => {
   });
 
   it('all agents in src/assets/agents/ are referenced by at least one plugin', async () => {
-    const agentFiles = await fs.readdir(path.join(ASSETS_DIR, 'agents'));
+    // `_partials/` holds the MDS partials the generator hosts import (D-CODE-VARIANTS); a partial
+    // declares no output-dir:, so it is never an agent and no plugin lists it.
+    const agentFiles = (await fs.readdir(path.join(ASSETS_DIR, 'agents'), { withFileTypes: true }))
+      .filter(entry => !(entry.isDirectory() && entry.name === '_partials'))
+      .map(entry => entry.name);
     const referencedAgents = new Set(getAllAgentNames());
 
     for (const file of agentFiles) {

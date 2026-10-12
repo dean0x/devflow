@@ -1,16 +1,14 @@
 /**
  * D-DECISIONS-DECLARED-ONLY (#426) — `DECISIONS_CONTEXT` goes only to the agent
- * types whose contract declares it, and every Code spawn carries it, bar one: the
- * `OPERATION: pr-create` spawn, which loads no mode skill and only opens the PR.
+ * types whose contract declares it, and every Code spawn carries it. The Code agent
+ * opens no PR (D-PR-BY-GIT), so no spawn is exempt.
  *
  * The index is the largest single input a command can hand an agent, and the Code
  * agent no longer reads it for itself, so the seam between a command and the agents
  * it spawns is where decisions reach an agent or do not. This guard reads the
  * compiled commands (`dist/commands/*.md`) and holds that seam to three rules:
  *
- *   1. every Code spawn site passes the key, except the pr-create spawn, which
- *      must not (the exemption is matched by the `OPERATION: pr-create` literal
- *      and pinned in both directions);
+ *   1. every Code spawn site passes the key, with no exemption by operation;
  *   2. a spawn site that passes the key names a declared type;
  *   3. every prose sentence that gives `DECISIONS_CONTEXT` away — it holds the word
  *      "pass" or "inject" — names its receiver, and every receiver it names is
@@ -20,7 +18,8 @@
  * listing it among its inputs); this file does not type it. Spawn sites come from
  * `collectCodeSpawnSites` in tests/helpers.ts, the one collector the OPERATION guard
  * and the compliance-lens test read, so the three count the same sites. It takes the
- * agent type as a parameter; the Code calls keep their results.
+ * agent type as a parameter and, with none, reads the whole Code family (Code, Code-fix and
+ * Code-edit: D-CODE-VARIANTS), so a fix spawn moved to Code-fix keeps the rule 1 check.
  *
  * Rule 3 reads unfenced prose only: a fenced payload is a spawn, and rules 1 and 2
  * read it. Sentences that cannot name a declared receiver by construction — a
@@ -38,6 +37,7 @@ import { describe, it, expect } from 'vitest'
 import {
   collectCodeSpawnSites,
   collectUnfencedLines,
+  collectValidAgentTypes,
   requireDistFile,
   requireDistFiles,
   resolveAllAgents,
@@ -45,7 +45,10 @@ import {
 
 const CONTEXT_TOKEN = 'DECISIONS_CONTEXT'
 
-/** Code spawn sites the three hosts carry today (implement 10, resolve 3, dynamic-build 8). Floor: may only rise. */
+/**
+ * Code-family spawn sites (Code, Code-fix and Code-edit, D-CODE-VARIANTS) the four hosts carry today
+ * (implement 9, resolve 3, debug 1, dynamic-build 8). Floor: may only rise.
+ */
 const CODE_SITE_FLOOR = 21
 
 /** Decisions-loading hosts: all 14 command hosts load the index behind the gate. */
@@ -75,12 +78,15 @@ function collectKnownTypes(commands: ReadonlyArray<readonly [string, string]>): 
     if (name !== undefined) known.add(name)
   }
   for (const [, text] of commands) {
-    for (const m of text.matchAll(/(?:subagent_type="|agentType: ?")([A-Z][A-Za-z]+)"/g)) known.add(m[1])
+    for (const m of text.matchAll(SPAWNED_TYPE)) known.add(m[1])
     // A built-in phase can be named in prose alone ("Spawn 3 Plan agents").
     for (const m of text.matchAll(/\b[Ss]pawn (?:[\w-]+ )?(?:[\w-]+ )?([A-Z][A-Za-z]+) agents?\b/g)) known.add(m[1])
   }
   return known
 }
+
+/** A spawned agent type in `subagent_type="…"` or `agentType: "…"`; a Code variant's hyphen joins its two words. */
+const SPAWNED_TYPE = /(?:subagent_type="|agentType: ?")([A-Z][A-Za-z]*(?:-[a-z]+)?)"/g
 
 const compiled = (): Array<readonly [string, string]> => requireDistFiles().map(f => [f, requireDistFile(f)] as const)
 
@@ -88,27 +94,15 @@ const compiled = (): Array<readonly [string, string]> => requireDistFiles().map(
 
 /** Named collector: the agent types a command text spawns, by any of the four spellings. */
 function spawnedTypes(text: string): string[] {
-  return [...new Set([...text.matchAll(/(?:subagent_type="|agentType: ?")([A-Z][A-Za-z]+)"/g)].map(m => m[1]))]
+  return [...new Set([...text.matchAll(SPAWNED_TYPE)].map(m => m[1]))]
 }
 
-/** The one Code spawn that takes no index: pr-create loads no mode skill and only opens the PR, so the index is pure cost there. */
-const KEYLESS_OPERATION = 'OPERATION: pr-create'
-
-/** Named collector: Code spawn sites that do not pass the key and are not the exempt pr-create spawn (rule 1). */
+/** Named collector: Code spawn sites that do not pass the key (rule 1). */
 function collectKeylessCodeSites(commands: ReadonlyArray<readonly [string, string]>): string[] {
   return commands.flatMap(([file, text]) =>
-    collectCodeSpawnSites(file, text, 'Code')
-      .filter(s => !s.payload.includes(CONTEXT_TOKEN) && !s.payload.includes(KEYLESS_OPERATION))
+    collectCodeSpawnSites(file, text)
+      .filter(s => !s.payload.includes(CONTEXT_TOKEN))
       .map(s => `${file}:${s.line}`),
-  )
-}
-
-/** Named collector: pr-create Code spawn sites, the exempt ones (rule 1's exemption). */
-function collectPrCreateSites(commands: ReadonlyArray<readonly [string, string]>): Array<{ site: string; keyed: boolean }> {
-  return commands.flatMap(([file, text]) =>
-    collectCodeSpawnSites(file, text, 'Code')
-      .filter(s => s.payload.includes(KEYLESS_OPERATION))
-      .map(s => ({ site: `${file}:${s.line}`, keyed: s.payload.includes(CONTEXT_TOKEN) })),
   )
 }
 
@@ -173,6 +167,24 @@ function namedTypes(phrase: string, known: ReadonlySet<string>): string[] {
   return [...phrase.matchAll(/\b[A-Z][A-Za-z]+\b/g)].map(m => m[0]).filter(w => known.has(w))
 }
 
+/**
+ * Named collector: the valid agent types that declare the key but are missing from the receivers of a host's
+ * authoring-step inject sentence. A declared type the host can spawn and hand the key to, yet the sentence does
+ * not name, is told it gets none ("every other agent type gets no decisions context").
+ */
+function collectUnnamedReceivers(host: string, text: string, declared: ReadonlySet<string>): string[] {
+  const valid = collectValidAgentTypes(text)
+  if (valid === null) return [`${host}: no valid-agentType sentence`]
+  const inject = text.split('\n').find(l => l.includes('Then inject the relevant DECISIONS_CONTEXT')) ?? ''
+  if (inject === '') return [`${host}: no inject sentence`]
+  const phrase = receiverPhrase(inject.slice(inject.indexOf('Then inject')))
+  const receivers = phrase.slice(0, phrase.indexOf(' agents'))
+  return valid
+    .filter(type => declared.has(type))
+    .filter(type => !new RegExp(`(?<![\\w-])${type}(?![\\w-])`).test(receivers))
+    .map(type => `${host}: the inject sentence omits ${type}, which is valid and declares the key`)
+}
+
 /** Named collector: give-away sentences that name no receiver or an undeclared one, and are not classified. */
 function collectBadSentences(
   file: string,
@@ -214,10 +226,10 @@ function collectGateOrderDefects(host: string, text: string): string[] {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('the declared set is computed from the agent sources', () => {
-  it('is the eight agents that list DECISIONS_CONTEXT among their inputs', () => {
+  it('is the ten agents that list DECISIONS_CONTEXT among their inputs, the three Code variants among them', () => {
     const declared = collectDeclaredTypes()
     expect([...declared].sort()).toEqual(
-      ['Code', 'Design', 'Diagnose', 'Knowledge', 'Research', 'Review', 'Scrutinize', 'Triage'],
+      ['Code', 'Code-edit', 'Code-fix', 'Design', 'Diagnose', 'Knowledge', 'Research', 'Review', 'Scrutinize', 'Triage'],
     )
   })
 
@@ -229,37 +241,22 @@ describe('the declared set is computed from the agent sources', () => {
   })
 })
 
-describe('rule 1: every Code spawn site passes the key, bar the pr-create spawn', () => {
+describe('rule 1: every Code spawn site passes the key', () => {
   it('finds the Code sites in the compiled commands (non-vacuous)', () => {
-    const total = compiled().reduce((n, [file, text]) => n + collectCodeSpawnSites(file, text, 'Code').length, 0)
+    const total = compiled().reduce((n, [file, text]) => n + collectCodeSpawnSites(file, text).length, 0)
     expect(total, 'Code spawn sites found').toBeGreaterThanOrEqual(CODE_SITE_FLOOR)
   })
 
-  it('every site but the pr-create spawn carries DECISIONS_CONTEXT, in each of the four syntaxes plus the engine pseudo-form', () => {
+  it('every site carries DECISIONS_CONTEXT, in each of the four syntaxes plus the engine pseudo-form', () => {
     expect(collectKeylessCodeSites(compiled())).toEqual([])
   })
 
-  it('the pr-create spawn is exempt: exactly one exists, in implement.md, and it carries no key', () => {
-    const sites = collectPrCreateSites(compiled())
-    expect(sites, 'pr-create Code spawn sites').toHaveLength(1)
-    expect(sites[0].site).toMatch(/^implement\.md:\d+$/)
-    expect(sites.filter(s => s.keyed), 'pr-create spawns that carry the key').toEqual([])
-  })
-
-  it('known-bad probe: a pr-create spawn that carries the key is reported', () => {
+  it('known-bad probe: no operation is exempt, so a keyless spawn that names the retired pr-create mode is reported', () => {
     const host = 'implement.md'
     const real = requireDistFile(host)
-    const from = 'TASK_DESCRIPTION: Create the unified PR for the parallel implementation\n'
+    const from = '"OPERATION: alignment-fix\n   TASK_ID: {task-id}\n   TASK_DESCRIPTION: Fix alignment issues\n   MISALIGNMENTS: {structured misalignments from Evaluate agent}\n   SCOPE: Fix only the listed misalignments, no other changes\n   DECISIONS_CONTEXT: {decisions_context}\n'
     expect(real, `the seed anchor must exist in ${host}`).toContain(from)
-    const seeded = real.replace(from, `${from}DECISIONS_CONTEXT: {decisions_context}\n`)
-    expect(seeded, 'the seed must change the text').not.toBe(real)
-    expect(collectPrCreateSites([[host, seeded]]).filter(s => s.keyed)).toHaveLength(1)
-  })
-
-  it('known-bad probe: the exemption is the OPERATION literal, so a keyless spawn that is not pr-create is reported', () => {
-    const host = 'implement.md'
-    const real = requireDistFile(host)
-    const seeded = real.replace(KEYLESS_OPERATION, 'OPERATION: implement')
+    const seeded = real.replace(from, '"OPERATION: pr-create\n   TASK_ID: {task-id}\n   TASK_DESCRIPTION: Fix alignment issues\n')
     expect(seeded, 'the seed must change the text').not.toBe(real)
     const found = collectKeylessCodeSites([[host, seeded]])
     expect(found).toHaveLength(1)
@@ -276,7 +273,7 @@ describe('rule 1: every Code spawn site passes the key, bar the pr-create spawn'
   }
 
   it('known-bad probe: a fenced Code spawn without the key is reported', () => {
-    const found = probe('implement.md', '   CREATE_PR: false\n   DECISIONS_CONTEXT: {decisions_context}\n   ISSUE_NUMBER', '   CREATE_PR: false\n   ISSUE_NUMBER')
+    const found = probe('implement.md', '   DECISIONS_CONTEXT: {decisions_context}\n   {COMPLIANCE_DIRECTIVE}"\n   ```\n   - Loop back to Phase 5', '   {COMPLIANCE_DIRECTIVE}"\n   ```\n   - Loop back to Phase 5')
     expect(found).toHaveLength(1)
     expect(found[0]).toMatch(/^implement\.md:\d+$/)
   })
@@ -287,7 +284,7 @@ describe('rule 1: every Code spawn site passes the key, bar the pr-create spawn'
   })
 
   it('known-bad probe: the engine pseudo Code call without the key is reported', () => {
-    const found = probe('dynamic-build.md', 'plan + DECISIONS_CONTEXT + COMPLIANCE_FRAMEWORKS', 'plan + COMPLIANCE_FRAMEWORKS')
+    const found = probe('dynamic-build.md', 'plan + DECISIONS_CONTEXT + COMPLIANCE_DIRECTIVE', 'plan + COMPLIANCE_DIRECTIVE')
     expect(found).toHaveLength(1)
   })
 
@@ -297,7 +294,7 @@ describe('rule 1: every Code spawn site passes the key, bar the pr-create spawn'
   })
 
   it('known-bad probe: the merge-conflict resolver sentence without the key is reported', () => {
-    const found = probe('dynamic-build.md', ' and carries `COMPLIANCE_FRAMEWORKS` and `DECISIONS_CONTEXT`,', ' and carries `COMPLIANCE_FRAMEWORKS`,')
+    const found = probe('dynamic-build.md', ' and carries `COMPLIANCE_DIRECTIVE` (when it is not empty) and `DECISIONS_CONTEXT`,', ' and carries `COMPLIANCE_DIRECTIVE` (when it is not empty),')
     expect(found).toHaveLength(1)
   })
 
@@ -445,6 +442,26 @@ describe('the authoring step names declared receivers only (AC-125)', () => {
     const note = requireDistFile('dynamic-plan.md').split('\n').find(l => l.includes('note verbatim ADR/PF IDs to inject into')) ?? ''
     expect(note).toContain('into Design agent prompts.')
     expect(note).not.toContain('Evaluate')
+  })
+
+  it('the inject sentence names every valid agent type that declares the key, the Code-fix variant included', () => {
+    const declared = collectDeclaredTypes()
+    const hosts = ['dynamic-build.md', 'dynamic-plan.md', 'dynamic-profile.md', 'dynamic-tickets.md']
+    // Non-vacuity: the valid-and-declared types are read, and the Code-family variant a workflow spawns is among them.
+    const reachable = (collectValidAgentTypes(requireDistFile(hosts[0])) ?? []).filter(t => declared.has(t))
+    expect(reachable.length, 'valid agent types that declare the key').toBeGreaterThanOrEqual(2)
+    expect(reachable).toContain('Code-fix')
+    for (const host of hosts) expect(collectUnnamedReceivers(host, requireDistFile(host), declared), host).toEqual([])
+  })
+
+  it('known-bad probe: an inject sentence that drops Code-fix is reported', () => {
+    const declared = collectDeclaredTypes()
+    const text = requireDistFile('dynamic-build.md')
+    const dropped = text.replace('the Code, Code-fix, Design,', 'the Code, Design,')
+    expect(dropped, 'the sentence names Code-fix beside Code').not.toBe(text)
+    expect(collectUnnamedReceivers('dynamic-build.md', dropped, declared)).toEqual([
+      'dynamic-build.md: the inject sentence omits Code-fix, which is valid and declares the key',
+    ])
   })
 })
 

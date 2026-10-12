@@ -4,10 +4,10 @@
  * SDLC-evidence PR4 (#363), phase P4: how the test plan travels from /implement to
  * the PR.
  *
- *   AC-10  code.md pastes `PR_TEST_PLAN_BLOCK` only after
- *          `verify-evidence.cjs check block` admits it. The paragraph sits inside
- *          Responsibility 7 after the PR_EXCEPTIONS gate and before the D11 scrub,
- *          leaves the frozen fixture's three code.md anchors unique, and states the
+ *   AC-10  ensure-pr-ready pastes `PR_TEST_PLAN_BLOCK` only after
+ *          `verify-evidence.cjs check block` admits it. The caller-blocks bullet sits in
+ *          step 4a before the PR_EXCEPTIONS gate and the D11 scrub,
+ *          leaves the frozen fixture's three ensure-pr-ready anchors unique, and states the
  *          gate, the refusal and the absent case. The gate it names is EXECUTED here
  *          (in-process, `main()` — `check` makes no subprocess call): it admits what
  *          `render --plan` prints and refuses every hostile block in the table.
@@ -20,10 +20,10 @@
  *          Code spawn — and, only under a `required` policy, asks about a missing
  *          one: record a `test-plan` exception, or stop with BLOCKED (no test plan)
  *          and the project-file remedy. `standard` never asks.
- *   AC-10  Every Code spawn that can create the PR forwards PR_TEST_PLAN_BLOCK.
+ *   AC-10  The Phase 9 Git spawn that opens the PR forwards PR_TEST_PLAN_BLOCK; no Code spawn takes it.
  *   AC-11  The Phase 7 Test spawn passes TEST_PLAN. Phase 6/8 PASSes and every
  *          Phase 7 run append claims whose shapes CLAIM_LINE_RE admits, and Phase
- *          10b — after Phase 10, one spawn for all three strategies — runs
+ *          11 — after Phase 10, one spawn for all three strategies — runs
  *          update-pr-evidence with the REVIEW_PUBLICATION Phase 1 resolved through
  *          the publication partial (its third importer, after the policy resolves).
  *   AC-9   /plan's artifact carries a `## Test Plan` section (required section
@@ -47,7 +47,9 @@ import { tmpdir } from 'os'
 import * as path from 'path'
 
 import {
+  CODE_AGENT_TYPES,
   collectOrderViolations,
+  ensurePrReadyReference,
   isAgentBlock,
   parseFences,
   requireDistFile,
@@ -93,94 +95,92 @@ function runOnText(sub: readonly string[], text: string, name: string): { code: 
   return VE.main(['node', 'verify-evidence.cjs', ...sub, file], { stderr: () => {} })
 }
 
-function codeMd(): string {
-  return resolveAgentSource('code').content
-}
-
 // ---------------------------------------------------------------------------
-// code.md — the PR_TEST_PLAN_BLOCK paste gate (AC-10)
+// ensure-pr-ready — the PR_TEST_PLAN_BLOCK paste gate (AC-10)
 // ---------------------------------------------------------------------------
+//
+// The paste gate lives in ensure-pr-ready step 4a, beside the PR it opens (D-PR-BY-GIT). One
+// `check block` serves the test-plan block and the wave block, so the rule is one bullet, "Caller
+// blocks", read here beside the exception gate and the scrub.
 
-const TEST_PLAN_PASTE = '**Pasting `PR_TEST_PLAN_BLOCK`.**'
+const CALLER_BLOCKS = '   - **Caller blocks**'
 const EXCEPTIONS_PASTE = '**Pasting `PR_EXCEPTIONS`.**'
 
 /**
- * The three code.md lines the frozen github-status-lines fixture samples by first
- * match. The new paragraph must not repeat them, or a sampler could pick it up.
+ * The three ensure-pr-ready lines the frozen github-status-lines fixture samples by first
+ * match. The caller-blocks bullet must not repeat them, or a sampler could pick it up.
  */
-const FROZEN_CODE_ANCHORS = [
+const FROZEN_ANCHORS = [
   '| Related Issues (ISSUE_NUMBER provided) |',
   'When `ISSUE_NUMBER` is provided, always include',
   '**D11 scrub (PR body is a GitHub-visible sink):**',
 ] as const
 
-const CODE_ORDER: readonly OrderRule[] = [
-  { label: 'the test-plan gate follows the exception gate', before: EXCEPTIONS_PASTE, after: TEST_PLAN_PASTE },
-  { label: 'the test-plan gate precedes the D11 scrub', before: TEST_PLAN_PASTE, after: FROZEN_CODE_ANCHORS[2] },
+const PASTE_ORDER: readonly OrderRule[] = [
+  { label: 'the caller blocks precede the exception gate', before: CALLER_BLOCKS, after: EXCEPTIONS_PASTE },
+  { label: 'the caller blocks precede the D11 scrub', before: CALLER_BLOCKS, after: FROZEN_ANCHORS[2] },
 ]
 
-/** The paragraph: from its label to the next Responsibility-7 paragraph. */
-function testPlanParagraph(code: string): string | null {
-  const at = code.indexOf(TEST_PLAN_PASTE)
-  if (at === -1) return null
-  const end = code.indexOf('\n\n', at)
-  return code.slice(at, end === -1 ? code.length : end)
+/** The caller-blocks bullet — one line — or null. */
+function callerBlocksParagraph(ref: string): string | null {
+  const hits = ref.split('\n').filter(l => l.startsWith(CALLER_BLOCKS))
+  return hits.length === 1 ? hits[0] : null
 }
 
-/** Named collector: what code.md's PR_TEST_PLAN_BLOCK paragraph fails to state. */
-function collectTestPlanPasteDefects(code: string): string[] {
-  const para = testPlanParagraph(code)
-  if (para === null) return ['no PR_TEST_PLAN_BLOCK paste paragraph']
+/** Named collector: what ensure-pr-ready's PR_TEST_PLAN_BLOCK rule fails to state. */
+function collectTestPlanPasteDefects(ref: string): string[] {
+  const para = callerBlocksParagraph(ref)
+  if (para === null) return ['no single caller-blocks paste paragraph']
+  const step4a = ref.split('\n').find(l => l.startsWith('4a. Check if PR exists')) ?? ''
   const out: string[] = []
   const need = (what: string, ok: boolean): void => { if (!ok) out.push(what) }
-  need('the value is saved with the Write tool, not a shell string', para.includes('with the Write tool') && para.includes('never through an interpolated shell string'))
-  need('the gate is `verify-evidence.cjs check block`', /verify-evidence\.cjs" check block <that file>; echo "exit=\$\?"/.test(para))
-  need('only `exit=0` admits the value', para.includes('only `exit=0` admits the value'))
-  need('it is pasted before any exceptions section', para.includes('before any `## Evidence Exceptions` section'))
-  need('it is scrubbed with the body', para.includes('scrubbed with the body'))
-  need('a mismatch is omitted, never repaired or partly pasted', para.includes('never repair or partly paste it'))
+  need('the value is saved with the Write tool, not a shell string', para.includes('with the Write tool') && para.includes('never via a shell string'))
+  need('the gate is `verify-evidence.cjs check block`', para.includes('`PR_TEST_PLAN_BLOCK` (`check block`)') && /verify-evidence\.cjs" check <wave\|block> <file>; echo "exit=\$\?"/.test(para))
+  need('only `exit=0` admits the value', para.includes('Only `exit=0` admits it, verbatim'))
+  need('it is scrubbed with the body', step4a.includes('then append the caller blocks. Apply the Comment-sink scrub (D11)'))
+  need('a mismatch is omitted, never repaired or partly pasted', para.includes('never repaired or partly pasted'))
   need('the DEGRADED reason', para.includes('`TRACEABILITY: DEGRADED (test-plan block does not match its grammar)`'))
-  need('`(none)` is the documented absent case', /`\(none\)`, or absent, is \*\*not a mismatch\*\*/.test(para))
-  need('the scrubber-failure body never carries it', para.includes('minimal body below never carries the block'))
+  need('`(none)` is the documented absent case', para.includes('each when given and not `(none)`'))
+  need('the scrubber-failure body never carries it', step4a.includes('a failed one posts neither block'))
+  need('there is exactly one test-plan check', ref.split('check block').length - 1 === 1)
   return out
 }
 
-describe('AC-10: code.md pastes PR_TEST_PLAN_BLOCK only through `check block`', () => {
-  it('the paragraph sits after the exception gate and before the D11 scrub; the frozen anchors stay unique', () => {
-    const code = codeMd()
-    expect(collectOrderViolations('code.md', code, CODE_ORDER)).toEqual([])
-    for (const anchor of FROZEN_CODE_ANCHORS) expect(code.split(anchor).length - 1, anchor).toBe(1)
-    expect(testPlanParagraph(code) ?? '', 'the paragraph must not spell a frozen anchor').not.toMatch(/ISSUE_NUMBER|D11 scrub \(/)
+describe('AC-10: ensure-pr-ready pastes PR_TEST_PLAN_BLOCK only through `check block`', () => {
+  it('the bullet sits before the exception gate and the D11 scrub; the frozen anchors stay unique', () => {
+    const ref = ensurePrReadyReference()
+    expect(collectOrderViolations('ensure-pr-ready.md', ref, PASTE_ORDER)).toEqual([])
+    for (const anchor of FROZEN_ANCHORS) expect(ref.split(anchor).length - 1, anchor).toBe(1)
+    expect(callerBlocksParagraph(ref) ?? '', 'the bullet must not spell a frozen anchor').not.toMatch(/ISSUE_NUMBER|D11 scrub \(/)
   })
 
-  it('the paragraph states the gate, the placement, the refusal and the absent case', () => {
-    expect(collectTestPlanPasteDefects(codeMd())).toEqual([])
+  it('the bullet states the gate, the placement, the refusal and the absent case', () => {
+    expect(collectTestPlanPasteDefects(ensurePrReadyReference())).toEqual([])
   })
 
-  it('known-bad probes: a repairing paragraph, a lost gate and a missing paragraph are reported', () => {
-    const code = codeMd()
-    const repairs = code.replace('never repair or partly paste it', 'repair it and paste it')
-    expect(repairs, 'the seed must land').not.toBe(code)
+  it('known-bad probes: a repairing bullet, a lost gate, a second check and a missing bullet are reported', () => {
+    const ref = ensurePrReadyReference()
+    const repairs = ref.replace('never repaired or partly pasted', 'repaired, then pasted')
+    expect(repairs, 'the seed must land').not.toBe(ref)
     expect(collectTestPlanPasteDefects(repairs)).toEqual(['a mismatch is omitted, never repaired or partly pasted'])
-    const ungated = code.replace(' check block <that file>', ' render --plan <that file>')
-    expect(ungated, 'the seed must land').not.toBe(code)
+    const ungated = ref.replace(' check <wave|block> <file>', ' render --plan <file>')
+    expect(ungated, 'the seed must land').not.toBe(ref)
     expect(collectTestPlanPasteDefects(ungated)).toEqual(['the gate is `verify-evidence.cjs check block`'])
-    expect(collectTestPlanPasteDefects(code.replace(TEST_PLAN_PASTE, '**Pasting the block.**'))).toEqual(['no PR_TEST_PLAN_BLOCK paste paragraph'])
+    expect(collectTestPlanPasteDefects(`${ref}\nthen run check block again`)).toEqual(['there is exactly one test-plan check'])
+    expect(collectTestPlanPasteDefects(ref.replace(CALLER_BLOCKS, '   - **Blocks**'))).toEqual(['no single caller-blocks paste paragraph'])
   })
 
-  it('code.md declares the input, and pr-create takes it and names its gate', () => {
-    const code = codeMd()
-    const inputs = code.slice(code.indexOf('## Input Context'), code.indexOf('## Responsibilities'))
-    expect(inputs).toContain('- **PR_TEST_PLAN_BLOCK** (optional):')
-    const mode = code.slice(code.indexOf('## Mode: pr-create'))
-    const lines = mode.split('\n')
-    expect(lines.find(l => l.startsWith('**Inputs:**'))).toContain('`PR_TEST_PLAN_BLOCK`')
-    expect(lines.find(l => l.startsWith('2. Run Responsibility 7 only'))).toContain('`PR_TEST_PLAN_BLOCK` paste gates')
+  it('ensure-pr-ready declares PR_TEST_PLAN_BLOCK as an optional input, and the Code agent declares none of the PR inputs', () => {
+    const input = ensurePrReadyReference().split('\n').find(l => l.startsWith('**Input:**')) ?? ''
+    expect(input).toContain('`PR_TEST_PLAN_BLOCK` (optional)')
+    const code = resolveAgentSource('code').content
+    expect(code).not.toContain('PR_TEST_PLAN_BLOCK')
+    expect(code).not.toContain('pr-create')
   })
 })
 
 // ---------------------------------------------------------------------------
-// The gate code.md names — executed
+// The gate ensure-pr-ready names — executed
 // ---------------------------------------------------------------------------
 
 const EM = '—'
@@ -392,6 +392,8 @@ describe('AC-9: /plan keeps a checked `## Test Plan` section', () => {
 // ---------------------------------------------------------------------------
 
 const CODE_SPAWN = 'Agent(subagent_type="Code")'
+/** Every spawn of the Code family (D-CODE-VARIANTS): Code, Code-fix and Code-edit. */
+const CODE_FAMILY_SPAWNS = CODE_AGENT_TYPES.map(type => `Agent(subagent_type="${type}")`)
 const TICKET_ASK = '**Ticket link, only when `ISSUE_REQUIRED` is `true`:**'
 const RECORD = '**Record the exception at once**'
 const TEST_PLAN_STEP = '**Test plan.** Before any Code spawn'
@@ -418,8 +420,10 @@ function collectCodeSpawnsBefore(content: string, anchor: string): string[] {
   const at = content.indexOf(anchor)
   if (at === -1) return [`the anchor is absent: "${anchor}"`]
   const out: string[] = []
-  for (let i = content.indexOf(CODE_SPAWN); i !== -1; i = content.indexOf(CODE_SPAWN, i + CODE_SPAWN.length)) {
-    if (i < at) out.push(`a Code spawn at offset ${i} opens before "${anchor}" (offset ${at})`)
+  for (const spawn of CODE_FAMILY_SPAWNS) {
+    for (let i = content.indexOf(spawn); i !== -1; i = content.indexOf(spawn, i + spawn.length)) {
+      if (i < at) out.push(`a Code spawn at offset ${i} opens before "${anchor}" (offset ${at})`)
+    }
   }
   return out
 }
@@ -494,7 +498,7 @@ describe('AC-9: a missing test plan asks only under `required`, and a stop names
   it('under `standard` the missing plan is reported and never asked about', () => {
     const lines = implementMd().split('\n').filter(l => l.startsWith(STANDARD_LINE))
     expect(lines).toHaveLength(1)
-    expect(lines[0]).toContain('Phase 11 report')
+    expect(lines[0]).toContain('Phase 12 report')
     expect(lines[0]).not.toContain('AskUserQuestion')
   })
 
@@ -511,38 +515,43 @@ describe('AC-9: a missing test plan asks only under `required`, and a stop names
 // /implement spawns — PR_TEST_PLAN_BLOCK (AC-10) and TEST_PLAN (AC-11)
 // ---------------------------------------------------------------------------
 
-const FORWARD_LINE = 'PR_TEST_PLAN_BLOCK: {PR_TEST_PLAN_BLOCK from Phase 1 verbatim, or (none)}'
+const FORWARD_LINE = 'PR_TEST_PLAN_BLOCK: {PR_TEST_PLAN_BLOCK verbatim, or (none)}'
 
 /**
- * Named collector: Code spawns that can create the PR (`CREATE_PR: true`, or the
- * sequential `CREATE_PR: {true if last …}`) and do not forward the block. Returns
- * the violations and how many PR-creating spawns were read.
+ * Named collector: ensure-pr-ready spawns that do not forward the block, and Code spawns that do
+ * (the Code agent opens no PR, so a block in its prompt is dead weight). Returns the violations and
+ * how many PR-opening spawns were read.
  */
-function collectUnforwardedTestPlan(content: string): { creating: number; violations: string[] } {
-  let creating = 0
+function collectTestPlanForwarding(content: string): { opening: number; violations: string[] } {
+  let opening = 0
   const violations: string[] = []
   parseFences(content).forEach((fence, i) => {
-    if (!isAgentBlock(fence, 'Code')) return
-    if (!/^\s*"?CREATE_PR: (?:true\b|\{true if last)/m.test(fence)) return
-    creating++
     const lines = fence.split('\n').map(l => l.replace(/"$/, ''))
-    if (!lines.includes(FORWARD_LINE)) violations.push(`fence ${i + 1}: a PR-creating Code spawn without "${FORWARD_LINE}"`)
+    if (CODE_AGENT_TYPES.some(type => isAgentBlock(fence, type)) && lines.some(l => l.startsWith('PR_TEST_PLAN_BLOCK:'))) {
+      violations.push(`fence ${i + 1}: a Code spawn carries PR_TEST_PLAN_BLOCK`)
+    }
+    if (!isAgentBlock(fence, 'Git') || !fence.includes('OPERATION: ensure-pr-ready')) return
+    opening++
+    if (!lines.includes(FORWARD_LINE)) violations.push(`fence ${i + 1}: the PR-opening Git spawn without "${FORWARD_LINE}"`)
   })
-  return { creating, violations }
+  return { opening, violations }
 }
 
 describe('AC-10/AC-11: the spawns carry the test plan', () => {
-  it('SINGLE, SEQUENTIAL Phase 2+ and PARALLEL pr-create forward PR_TEST_PLAN_BLOCK', () => {
-    const { creating, violations } = collectUnforwardedTestPlan(implementMd())
-    expect(creating, 'fewer PR-creating Code spawns than SINGLE + SEQUENTIAL + pr-create').toBeGreaterThanOrEqual(3)
+  it('the one PR-opening Git spawn forwards PR_TEST_PLAN_BLOCK, and no Code spawn does', () => {
+    const { opening, violations } = collectTestPlanForwarding(implementMd())
+    expect(opening, 'exactly one PR-opening Git spawn: Phase 9, under every strategy').toBe(1)
     expect(violations).toEqual([])
   })
 
-  it('known-bad probe: a spawn that lost the key is reported', () => {
+  it('known-bad probes: a spawn that lost the key and a Code spawn that gained it are reported', () => {
     const md = implementMd()
-    const seeded = md.replace(`\n${FORWARD_LINE}`, '')
-    expect(seeded, 'the seed must land').not.toBe(md)
-    expect(collectUnforwardedTestPlan(seeded).violations).toHaveLength(1)
+    const dropped = md.replace(`\n${FORWARD_LINE}`, '')
+    expect(dropped, 'the drop seed must land').not.toBe(md)
+    expect(collectTestPlanForwarding(dropped).violations).toHaveLength(1)
+    const gained = md.replace('"OPERATION: alignment-fix\n', '"OPERATION: alignment-fix\nPR_TEST_PLAN_BLOCK: x\n')
+    expect(gained, 'the gain seed must land').not.toBe(md)
+    expect(collectTestPlanForwarding(gained).violations).toEqual([expect.stringContaining('a Code spawn carries PR_TEST_PLAN_BLOCK')])
   })
 
   it('the Phase 7 Test spawn passes TEST_PLAN from the evidence file', () => {
@@ -617,7 +626,7 @@ describe('AC-11: /implement appends claims the evidence script can read', () => 
 })
 
 // ---------------------------------------------------------------------------
-// /implement — REVIEW_PUBLICATION and Phase 10b (AC-11)
+// /implement — REVIEW_PUBLICATION and Phase 11 (AC-11)
 // ---------------------------------------------------------------------------
 
 const PUBLICATION_IMPORT = './_partials/_publication.mds'
@@ -628,26 +637,26 @@ function collectPublicationImporters(sources: ReadonlyArray<{ name: string; cont
   return sources.filter(s => importLine.test(s.content)).map(s => s.name).sort()
 }
 
-const PHASE10B = '### Phase 10b: Evidence'
+const PHASE11 = '### Phase 11: Evidence'
 const EVIDENCE_SPAWN = '"OPERATION: update-pr-evidence'
 
-/** The one push /implement runs itself: claims keyed to a local HEAD must be in the PR before 10b reads them. */
+/** The push before the evidence spawn: claims keyed to a local HEAD must be in the PR before Phase 11 reads them. */
 const EVIDENCE_PUSH = 'git push origin HEAD; echo "exit=$?"'
 
-/** The Phase 10b push, made unique: Phase 9's preamble spells the same command, followed by "the gate". */
+/** The Phase 11 push, made unique: Phase 10's preamble spells the same command, followed by "the gate". */
 const EVIDENCE_PUSH_ANCHOR = `${EVIDENCE_PUSH}\n\`\`\`\n\n\`exit=0\` continues to the spawn`
 
-const PHASE10B_ORDER: readonly OrderRule[] = [
+const PHASE11_ORDER: readonly OrderRule[] = [
   { label: 'the policy resolves before the publication partial reads it', before: 'resolve-evidence-policy.cjs', after: '**Evidence stub:**' },
   { label: 'REVIEW_PUBLICATION resolves in Phase 1', before: '**Evidence stub:**', after: '### Phase 2: Implement' },
-  { label: 'Phase 10b follows Phase 10', before: '### Phase 10: Create PR', after: PHASE10B },
-  { label: 'the push sits in Phase 10b', before: PHASE10B, after: EVIDENCE_PUSH_ANCHOR },
+  { label: 'Phase 11 follows the CI gate', before: '### Phase 10: CI Status Gate', after: PHASE11 },
+  { label: 'the push sits in Phase 11', before: PHASE11, after: EVIDENCE_PUSH_ANCHOR },
   { label: 'the push precedes the evidence spawn', before: EVIDENCE_PUSH_ANCHOR, after: EVIDENCE_SPAWN },
-  { label: 'the evidence spawn sits in Phase 10b', before: PHASE10B, after: EVIDENCE_SPAWN },
-  { label: 'Phase 11 follows the evidence spawn', before: EVIDENCE_SPAWN, after: '### Phase 11: Report' },
+  { label: 'the evidence spawn sits in Phase 11', before: PHASE11, after: EVIDENCE_SPAWN },
+  { label: 'the report follows the evidence spawn', before: EVIDENCE_SPAWN, after: '### Phase 12: Report' },
 ]
 
-/** Named collector: what the Phase 10b spawn lacks — exactly one, carrying the op's Input keys. */
+/** Named collector: what the Phase 11 spawn lacks — exactly one, carrying the op's Input keys. */
 function collectEvidenceSpawnDefects(content: string): string[] {
   const spawns = parseFences(content).filter(f => isAgentBlock(f, 'Git') && f.includes(EVIDENCE_SPAWN))
   if (spawns.length !== 1) return [`expected one update-pr-evidence spawn, found ${spawns.length}`]
@@ -659,26 +668,26 @@ function collectEvidenceSpawnDefects(content: string): string[] {
   if (!spawns[0].includes('EVIDENCE_FILE: .devflow/docs/evidence-{branch_slug}.md')) out.push('EVIDENCE_FILE is not the evidence file')
   // Repo-relative by the op's shape gate (no space admitted), so it travels with the root it is relative to (D-DOCS-ROOT).
   if (!spawns[0].includes('WORKTREE_PATH: {worktree}')) out.push('EVIDENCE_FILE travels without the WORKTREE_PATH it is relative to')
-  const phase = content.slice(content.indexOf(PHASE10B), content.indexOf('### Phase 11: Report'))
-  if (!phase.includes('under every strategy')) out.push('Phase 10b does not run under every strategy')
-  if (!phase.includes('It never blocks')) out.push('Phase 10b may block')
+  const phase = content.slice(content.indexOf(PHASE11), content.indexOf('### Phase 12: Report'))
+  if (!phase.includes('under every strategy')) out.push('Phase 11 does not run under every strategy')
+  if (!phase.includes('It never blocks')) out.push('Phase 11 may block')
   return out
 }
 
 /**
- * Named collector: what Phase 10b's push lacks. It is the command's only push: one
+ * Named collector: what Phase 11's push lacks. It is the command's only push: one
  * bash fence, never forced, never retried, and a failure is a DEGRADED line rather
  * than a stop — the evidence spawn still runs, and an unpushed claim reads
  * UNVERIFIED rather than blocking the PR.
  */
 function collectEvidencePushDefects(content: string): string[] {
-  const at = content.indexOf(PHASE10B)
-  const end = content.indexOf('### Phase 11: Report')
-  if (at === -1 || end === -1) return ['no Phase 10b section']
+  const at = content.indexOf(PHASE11)
+  const end = content.indexOf('### Phase 12: Report')
+  if (at === -1 || end === -1) return ['no Phase 11 section']
   const phase = content.slice(at, end)
   const out: string[] = []
   const pushes = parseFences(phase).filter(f => /\bgit\b[^\n]*\bpush\b/.test(f))
-  if (pushes.length !== 1) out.push(`expected one push fence in Phase 10b, found ${pushes.length}`)
+  if (pushes.length !== 1) out.push(`expected one push fence in Phase 11, found ${pushes.length}`)
   if (pushes.some(f => !f.includes(EVIDENCE_PUSH))) out.push('the push is not the stated command')
   if (pushes.some(f => /(^|\s)(--force(-with-lease)?\b|-f\b|\+\S)/.test(f))) out.push('the push may force')
   if (!phase.includes('never force, and no retry')) out.push('the push does not say never force, no retry')
@@ -687,44 +696,44 @@ function collectEvidencePushDefects(content: string): string[] {
   return out
 }
 
-describe('0b: Phase 10b pushes the branch before the evidence spawn', () => {
+describe('0b: Phase 11 pushes the branch before the evidence spawn', () => {
   it('one unforced push precedes the spawn, and its failure is DEGRADED, never a stop', () => {
     const md = implementMd()
-    // Per phase: the Phase 9 preamble pushes once for the CI gate, Phase 10b once for the evidence spawn.
-    const phase10b = md.slice(md.indexOf(PHASE10B), md.indexOf('### Phase 11: Report'))
-    expect(phase10b.split(EVIDENCE_PUSH).length - 1, 'the Phase 10b push is the corpus').toBe(1)
-    expect(md.split(EVIDENCE_PUSH).length - 1, 'the push command appears in Phase 9 and Phase 10b only').toBe(2)
+    // Per phase: the Phase 10 preamble pushes once for the CI gate, Phase 11 once for the evidence spawn.
+    const phase11 = md.slice(md.indexOf(PHASE11), md.indexOf('### Phase 12: Report'))
+    expect(phase11.split(EVIDENCE_PUSH).length - 1, 'the Phase 11 push is the corpus').toBe(1)
+    expect(md.split(EVIDENCE_PUSH).length - 1, 'the push command appears in Phase 10 and Phase 11 only').toBe(2)
     expect(collectEvidencePushDefects(md)).toEqual([])
-    expect(collectOrderViolations('implement.md', md, PHASE10B_ORDER)).toEqual([])
+    expect(collectOrderViolations('implement.md', md, PHASE11_ORDER)).toEqual([])
   })
 
   it('the Report surfaces the push\'s DEGRADED line and the diagram shows the push', () => {
     const md = implementMd()
-    expect(md).toContain('or Phase 10b\'s push recorded one, surface them verbatim')
+    expect(md).toContain('or Phase 10\'s push or Phase 11\'s push recorded one, surface them verbatim')
     expect(md).toContain('Push the branch (never force; a failure is DEGRADED, not a stop)')
   })
 
   it('known-bad probes: a push after the spawn, a forced push, a lost push and a blocking failure are reported', () => {
     const md = implementMd()
-    const phase = md.slice(md.indexOf(PHASE10B), md.indexOf('### Phase 11: Report'))
+    const phase = md.slice(md.indexOf(PHASE11), md.indexOf('### Phase 12: Report'))
     const pushFence = '```bash\n' + EVIDENCE_PUSH + '\n```\n\n'
     expect(phase.includes(pushFence), 'the push fence moved').toBe(true)
     const lastFence = md.lastIndexOf(pushFence)
-    expect(lastFence, 'the Phase 10b push fence is the last one').toBeGreaterThan(md.indexOf(PHASE10B))
-    const late = (md.slice(0, lastFence) + md.slice(lastFence + pushFence.length)).replace('### Phase 11: Report', pushFence + '### Phase 11: Report')
-    expect(collectOrderViolations('implement.md', late, PHASE10B_ORDER).some(v => v.includes('the push precedes the evidence spawn'))).toBe(true)
-    const reseed = (to: string): string => md.slice(0, md.indexOf(PHASE10B)) + md.slice(md.indexOf(PHASE10B)).replace(EVIDENCE_PUSH, to)
+    expect(lastFence, 'the Phase 11 push fence is the last one').toBeGreaterThan(md.indexOf(PHASE11))
+    const late = (md.slice(0, lastFence) + md.slice(lastFence + pushFence.length)).replace('### Phase 12: Report', pushFence + '### Phase 12: Report')
+    expect(collectOrderViolations('implement.md', late, PHASE11_ORDER).some(v => v.includes('the push precedes the evidence spawn'))).toBe(true)
+    const reseed = (to: string): string => md.slice(0, md.indexOf(PHASE11)) + md.slice(md.indexOf(PHASE11)).replace(EVIDENCE_PUSH, to)
     expect(collectEvidencePushDefects(reseed('git push --force origin HEAD; echo "exit=$?"'))).toEqual([
       'the push is not the stated command',
       'the push may force',
     ])
     expect(collectEvidencePushDefects(reseed('git push origin +HEAD; echo "exit=$?"'))).toContain('the push may force')
-    expect(collectEvidencePushDefects(md.slice(0, lastFence) + md.slice(lastFence + pushFence.length))).toEqual(['expected one push fence in Phase 10b, found 0'])
+    expect(collectEvidencePushDefects(md.slice(0, lastFence) + md.slice(lastFence + pushFence.length))).toEqual(['expected one push fence in Phase 11, found 0'])
     expect(collectEvidencePushDefects(md.replace('spawn anyway', 'stop'))).toEqual(['a failed push may block the evidence spawn'])
   })
 })
 
-describe('AC-11: Phase 10b runs update-pr-evidence once, after Phase 10, for every strategy', () => {
+describe('AC-11: Phase 11 runs update-pr-evidence once, after Phase 10, for every strategy', () => {
   it('the publication partial has four importers, /implement among them', () => {
     const sources = walkFiles(path.join(ROOT, 'src'), f => f.endsWith('.mds')).map(f => ({
       name: path.basename(f, '.mds'),
@@ -737,18 +746,18 @@ describe('AC-11: Phase 10b runs update-pr-evidence once, after Phase 10, for eve
 
   it('the order holds and the spawn carries the op\'s Input keys', () => {
     const md = implementMd()
-    expect(collectOrderViolations('implement.md', md, PHASE10B_ORDER)).toEqual([])
+    expect(collectOrderViolations('implement.md', md, PHASE11_ORDER)).toEqual([])
     expect(collectEvidenceSpawnDefects(md)).toEqual([])
   })
 
   it('the re-validation path, the Report and Principle 12 name the evidence step', () => {
     const lines = implementMd().split('\n')
-    expect(lines.find(l => l.startsWith('5. **Proceed to Phase 10**'))).toContain('**Phase 10b** (Evidence)')
-    expect(lines.find(l => l.startsWith('Show the test plan\'s evidence from Phase 10b'))).toContain('never inferred')
-    expect(lines.find(l => l.startsWith('12. **CI awareness**'))).toContain('test-plan evidence (Phase 10b) is recorded under every strategy')
+    expect(lines.find(l => l.startsWith('5. **Proceed to Phase 9**'))).toContain('**Phase 11** (Evidence)')
+    expect(lines.find(l => l.startsWith('Show the test plan\'s evidence from Phase 11'))).toContain('never inferred')
+    expect(lines.find(l => l.startsWith('12. **CI awareness**'))).toContain('test-plan evidence (Phase 11) is recorded under every strategy')
   })
 
-  it('known-bad probes: a lost spawn, a dropped key, a spawn before Phase 10 and a stray importer are reported', () => {
+  it('known-bad probes: a lost spawn, a dropped key, a spawn before the CI gate and a stray importer are reported', () => {
     const md = implementMd()
     expect(collectEvidenceSpawnDefects(md.replace(EVIDENCE_SPAWN, '"OPERATION: check-ci-status'))).toEqual([
       'expected one update-pr-evidence spawn, found 0',
@@ -756,8 +765,8 @@ describe('AC-11: Phase 10b runs update-pr-evidence once, after Phase 10, for eve
     expect(collectEvidenceSpawnDefects(md.replace('\nREVIEW_PUBLICATION: {REVIEW_PUBLICATION resolved in Phase 1, or auto}', ''))).toEqual([
       'the spawn does not pass REVIEW_PUBLICATION',
     ])
-    const early = md.replace('### Phase 10: Create PR', '### Phase 10 later').replace('### Phase 11: Report', '### Phase 10: Create PR\n\n### Phase 11: Report')
-    expect(collectOrderViolations('implement.md', early, PHASE10B_ORDER).some(v => v.includes('Phase 10b follows Phase 10'))).toBe(true)
+    const early = md.replace('### Phase 10: CI Status Gate', '### Phase 10 later').replace('### Phase 12: Report', '### Phase 10: CI Status Gate\n\n### Phase 12: Report')
+    expect(collectOrderViolations('implement.md', early, PHASE11_ORDER).some(v => v.includes('Phase 11 follows the CI gate'))).toBe(true)
     expect(collectPublicationImporters([
       { name: 'implement', content: `@import { publication_gate } from "${PUBLICATION_IMPORT}"` },
       { name: 'stray', content: `@import "${PUBLICATION_IMPORT}" as pub` },
@@ -777,7 +786,7 @@ describe('AC-11: Phase 10b runs update-pr-evidence once, after Phase 10, for eve
 //                   only commit after the full run, so only it earns Phase 8. No loop
 //                   spawns a Validate of its own and nothing re-validates on a
 //                   Scrutinize FIXED status.
-// D-CI-WAIT-INLINE  Phase 9 pushes first, with its own command outside the gate block,
+// D-CI-WAIT-INLINE  Phase 10 pushes first, with its own command outside the gate block,
 //                   then waits through ci-wait.cjs. A failed push records
 //                   `TRACEABILITY: DEGRADED (ci push failed)` and waits for nothing.
 //
@@ -804,10 +813,10 @@ const H = {
   p6: '### Phase 6: Validate',
   p7: '### Phase 7: QA Testing',
   p8: '### Phase 8: Re-Validate (only if a qa-fix committed)',
-  p9: '### Phase 9: CI Status Gate',
-  p10: '### Phase 10: Create PR',
-  p10b: '### Phase 10b: Evidence',
-  p11: '### Phase 11: Report',
+  p9: '### Phase 9: Open PR',
+  p10: '### Phase 10: CI Status Gate',
+  p11: '### Phase 11: Evidence',
+  p12: '### Phase 12: Report',
 } as const
 
 const SPAWN = (type: string): string => `Agent(subagent_type="${type}")`
@@ -821,9 +830,10 @@ const GATE_ORDER: readonly OrderRule[] = [
   { label: 'the full Validate follows Evaluate', before: SPAWN('Evaluate'), after: 'VALIDATION_SCOPE: full' },
   { label: 'Test follows the full Validate', before: 'VALIDATION_SCOPE: full', after: SPAWN('Test') },
   { label: 'the changed-only Validate follows Test', before: SPAWN('Test'), after: 'VALIDATION_SCOPE: changed-only' },
-  { label: 'the CI gate follows the changed-only Validate', before: 'VALIDATION_SCOPE: changed-only', after: H.p9 },
-  { label: 'the CI wait follows the CI gate heading', before: H.p9, after: CI_WAIT_CALL },
-  { label: 'the PR step follows the CI gate', before: CI_WAIT_CALL, after: H.p10 },
+  { label: 'the PR opens after the changed-only Validate', before: 'VALIDATION_SCOPE: changed-only', after: H.p9 },
+  { label: 'the CI gate follows the PR opening', before: H.p9, after: H.p10 },
+  { label: 'the CI wait follows the CI gate heading', before: H.p10, after: CI_WAIT_CALL },
+  { label: 'the evidence step follows the CI wait', before: CI_WAIT_CALL, after: H.p11 },
 ]
 
 /** Named collector: the phase headings, in order, with the names the tests pin. */
@@ -888,7 +898,7 @@ describe('#421 AC-2: one full-scope Validate, and exactly two claim sites', () =
     const second = md.replace('VALIDATION_SCOPE: changed-only', 'VALIDATION_SCOPE: full')
     expect(second, 'the seed must land').not.toBe(md)
     expect(collectValidateOnceDefects(second)).toContain('expected one full-scope Validate spawn, found 2')
-    const third = md.replace('### Phase 9: CI Status Gate', '**If PASS:** append a `gate:validate` claim again.\n\n### Phase 9: CI Status Gate')
+    const third = md.replace('### Phase 9: Open PR', '**If PASS:** append a `gate:validate` claim again.\n\n### Phase 9: Open PR')
     expect(collectValidateOnceDefects(third)).toContain('expected two gate:validate claim lines, found 3')
     expect(collectValidateOnceDefects(md.replace('record the result as `VALIDATED_HEAD`', 'remember it'))).toEqual(['Phase 6 does not record VALIDATED_HEAD'])
   })
@@ -971,44 +981,44 @@ describe('#421 AC-4: Phase 8 states its condition, its scope and its FAIL arm in
   })
 })
 
-/** The push, as Phase 9's preamble spells it; the Phase 10b push spells the same command. */
+/** The push, as Phase 10's preamble spells it; the Phase 11 push spells the same command. */
 const CI_PUSH = EVIDENCE_PUSH
 
-/** Named collector: what Phase 9's push lacks — placement, no force, an exit check, a DEGRADED arm that waits for nothing. */
+/** Named collector: what Phase 10's push lacks — placement, no force, an exit check, a DEGRADED arm that waits for nothing. */
 function collectCiPushDefects(md: string): string[] {
-  const section = phaseSection(md, H.p9)
-  if (section === null) return ['no Phase 9 section']
+  const section = phaseSection(md, H.p10)
+  if (section === null) return ['no Phase 10 section']
   const out: string[] = []
   const pushAt = section.indexOf(CI_PUSH)
   const waitAt = section.indexOf(CI_WAIT_CALL)
-  if (pushAt === -1) out.push('Phase 9 has no push')
-  if (waitAt === -1) out.push('Phase 9 has no ci-wait call')
+  if (pushAt === -1) out.push('Phase 10 has no push')
+  if (waitAt === -1) out.push('Phase 10 has no ci-wait call')
   if (pushAt !== -1 && waitAt !== -1 && pushAt > waitAt) out.push('the push does not precede the first ci-wait call')
-  if (section.split(CI_PUSH).length - 1 !== 1) out.push('Phase 9 does not spell its push exactly once')
+  if (section.split(CI_PUSH).length - 1 !== 1) out.push('Phase 10 does not spell its push exactly once')
   const pushes = parseFences(section).filter(f => /\bgit\b[^\n]*\bpush\b/.test(f))
-  if (pushes.length !== 1) out.push(`expected one push fence in Phase 9, found ${pushes.length}`)
+  if (pushes.length !== 1) out.push(`expected one push fence in Phase 10, found ${pushes.length}`)
   if (pushes.some(f => /(^|\s)(--force(-with-lease)?\b|-f\b|\+\S)/.test(f))) out.push('the push may force')
   if (!section.includes('never force, and no retry')) out.push('the push does not say never force, no retry')
   if (!section.includes('`TRACEABILITY: DEGRADED (ci push failed)`')) out.push('a failed push names no DEGRADED reason')
-  if (!section.includes('proceeds to Phase 10 without waiting')) out.push('a failed push may still wait')
+  if (!section.includes('proceeds to Phase 11 without waiting')) out.push('a failed push may still wait')
   return out
 }
 
-describe('#421 AC-5: Phase 9 pushes first, unforced and checked, and a failed push waits for nothing', () => {
+describe('#421 AC-5: Phase 10 pushes first, unforced and checked, and a failed push waits for nothing', () => {
   it('the push precedes the first ci-wait call and carries its DEGRADED arm', () => {
     expect(collectCiPushDefects(implementMd())).toEqual([])
   })
 
   it('known-bad probes: a push after the wait, a forced push, a lost push and a waiting failure are reported', () => {
     const md = implementMd()
-    const section = phaseSection(md, H.p9)!
+    const section = phaseSection(md, H.p10)!
     const pushFence = '```bash\n' + CI_PUSH + '\n```\n\n'
-    expect(section.includes(pushFence), 'the Phase 9 push fence moved').toBe(true)
+    expect(section.includes(pushFence), 'the Phase 10 push fence moved').toBe(true)
     const swapped = md.replace(pushFence, '').replace('<!-- /PATTERN: ci-status-gate -->', `${pushFence}<!-- /PATTERN: ci-status-gate -->`)
     expect(collectCiPushDefects(swapped)).toContain('the push does not precede the first ci-wait call')
-    expect(collectCiPushDefects(md.replace(pushFence, '```bash\ngit push --force origin HEAD; echo "exit=$?"\n```\n\n'))).toEqual(['Phase 9 has no push', 'Phase 9 does not spell its push exactly once', 'the push may force'])
-    expect(collectCiPushDefects(md.replace(pushFence, ''))).toContain('Phase 9 has no push')
-    expect(collectCiPushDefects(md.replace('proceeds to Phase 10 without waiting', 'waits anyway'))).toEqual(['a failed push may still wait'])
+    expect(collectCiPushDefects(md.replace(pushFence, '```bash\ngit push --force origin HEAD; echo "exit=$?"\n```\n\n'))).toEqual(['Phase 10 has no push', 'Phase 10 does not spell its push exactly once', 'the push may force'])
+    expect(collectCiPushDefects(md.replace(pushFence, ''))).toContain('Phase 10 has no push')
+    expect(collectCiPushDefects(md.replace('proceeds to Phase 11 without waiting', 'waits anyway'))).toEqual(['a failed push may still wait'])
   })
 })
 
@@ -1048,7 +1058,7 @@ function collectPointerDefects(md: string): string[] {
   need('the continuation path names no order', md.includes('**Run Phases 3-8** — Simplify, Self-Review, Alignment, the one full Validate, QA Testing and the conditional Re-Validate'))
   need('the diagram lacks the Phase 6 Validate', md.includes('├─ Phase 6: Validate (the one full-suite slot)'))
   need('the diagram lacks the Phase 8 Re-Validate', md.includes('├─ Phase 8: Re-Validate (only if a qa-fix committed)'))
-  need('Principle 1 does not name the Phase 9 push and the ci-wait call', /\*\*Orchestration only\*\*[^\n]*Phase 9[^\n]*push[^\n]*ci-wait call/.test(md))
+  need('Principle 1 does not name the Phase 10 push and the ci-wait call', /\*\*Orchestration only\*\*[^\n]*Phase 10[^\n]*push[^\n]*ci-wait call/.test(md))
   need('Principle 11 does not carry the CI gate budget', /\*\*Loop limits\*\*[^\n]*at most 3 waits and 2 fixes/.test(md))
   return out
 }

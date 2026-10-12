@@ -186,8 +186,9 @@ const TEST_TOOLS: readonly string[] = [
  * tests/agent-name-guards.test.ts.
  *
  * Departures from the plan's tool table, each decided:
- *  - Design gains `Skill`: the gap-analysis skill tells the compliance focus to
- *    load the compliance skill before analysing, and that load needs the tool.
+ *  - Design gains `Skill`: the /plan compliance-focus spawn tells the agent to
+ *    load the compliance skill before analysing (D-COMPLIANCE-INJECT), and that
+ *    load needs the tool.
  *  - Design, Review and Synthesize gain `StructuredOutput`
  *    (D-STRUCTURED-RETURN-TOOL).
  *  - Evaluate gains `Write`: its report cap sends longer material to a temp file
@@ -204,6 +205,28 @@ const TEST_TOOLS: readonly string[] = [
  */
 export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
   code: {
+    model: 'sonnet',
+    effort: 'high',
+    policy: { kind: 'deny', extra: [] },
+    omitClaudeMd: false,
+    skills: null,
+    digest: [],
+  },
+  /**
+   * D-VARIANT-SLUGS: Code-fix and Code-edit are their own `devflow agents` slugs, shipped with
+   * Code's model, effort and tool policy. A user override of `code` does not reach them, because the
+   * installed frontmatter of each variant is the authority for its own tier. Their preloads are held
+   * by tests/guards/code-preload.test.ts, which is why `skills` is not pinned here.
+   */
+  'code-fix': {
+    model: 'sonnet',
+    effort: 'high',
+    policy: { kind: 'deny', extra: [] },
+    omitClaudeMd: false,
+    skills: null,
+    digest: [],
+  },
+  'code-edit': {
     model: 'sonnet',
     effort: 'high',
     policy: { kind: 'deny', extra: [] },
