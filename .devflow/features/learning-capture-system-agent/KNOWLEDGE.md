@@ -5,6 +5,7 @@ description: "Use when changing the Learning agent, the queue claim and heartbea
 category: architecture
 directories:
   - src/assets/agents/learning.md
+  - src/assets/skills/agent-references/references/learning
   - src/assets/agents/tracker.md
   - src/assets/scripts/hooks/session-start-context
   - src/cli/commands/learning.ts
@@ -15,7 +16,7 @@ directories:
   - src/core/queue-drain.ts
   - src/hud/components/learning-counts.ts
 created: 2026-10-10
-updated: 2026-10-11
+updated: 2026-10-12
 ---
 
 # Learning Agent, Queue Claim, Directives and CLI
@@ -32,6 +33,7 @@ updated: 2026-10-11
 - **KB-INV-8** The `devflow learning` CLI reaches ledger state only through the store loaded by `loadLearningStore()`; a store function it calls needs the interface entry, the `LEARNING_STORE_SURFACE` entry and the fixtures' `LearningStoreApi`.
 - **KB-INV-9** `--clear` drops exactly the log rows no ledger row carries (`clearUnreferenced`); `--reset` empties the directory under the lock, sparing only the lock directory; both confirm on a TTY before the lock.
 - **KB-INV-10** `src/core/observations.ts` imports nothing, so the HUD import closure does not grow; its status lists are held equal to the store's by a parity test.
+- **KB-INV-11** The Part 2 ladder, the `claim-due` output format and the close-out batch live in `agent-references` `references/learning/maintain.md`, which the Learning agent Reads by explicit path only after `claim-due` hands out an entry; the body keeps `rotate-observations`, the `claim-due` call and the `due none` end, and stays under `learning-body-max`.
 - **KB-AP-1** Claiming the queue with `mv`, or hand-editing the claim or owner file: a check-then-`mv` claim lets two runs claim at once and clobber a batch.
 - **KB-AP-2** Quoting plumbing numbers (claim staleness, the claim-due batch size) in the Learning prompt: they live in plumbing and a prose copy drifts.
 - **KB-AP-3** Skipping the model allowlist in `session-start-context`: `learning.json` is user-controlled.
@@ -42,6 +44,7 @@ updated: 2026-10-11
 - **KB-AP-8** Assuming the learning switch gates the tracker-setup directive: it does not.
 - **KB-AP-9** Recreating a claim, owner file or learning tree once it has vanished mid-run: the agent stops writing and goes to Finishing.
 - **KB-AP-10** Removing the Learning agent's explicit CLAUDE.md and rule-file reads while `omitClaudeMd` stays true: its Encoded check then compares against nothing and silently stops retiring entries as Encoded; the reads sit in Inputs, before the first already-encoded comparison.
+- **KB-AP-11** Preloading `devflow:agent-references` into the Learning agent, or moving `rotate-observations` into `maintain.md`: a preload hands every spawn the whole reference, and rotation must still run when nothing is due.
 
 ## Overview
 
@@ -62,24 +65,26 @@ The queue is claimed and released only by the `claim-queue` and `release-claim` 
 
 ## The Learning agent
 
-`src/assets/agents/learning.md`: `model: opus` with no `effort:` line (it follows the session), tools listed Read, Bash, Glob, Grep (no Write, no Edit; the Grep and Glob entries are inert because the agent holds Bash, so it searches with `git grep -P` and `find`), no preloaded skill (its body never reads one), and `omitClaudeMd: true`, so Claude Code hands it neither the project CLAUDE.md nor `~/.claude/rules/**`. Its Encoded check compares a lesson with the rule that already states it, and an A/B over frozen batches showed that without that context the agent stopped retiring entries as Encoded (it also showed a cheaper sonnet candidate falling short of the capture bar). The Inputs section therefore directs it to Read `<project root>/CLAUDE.md` once and to list and Read each installed devflow rule file once (`find` over `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/rules/devflow`), before the first of the two comparisons (Part 1's already-encoded search and Part 2's first rung), keep what it read for the rest of the run, skip a missing file, and read nothing when the run ends before any comparison. A short `## Core rules` digest (context economy, untrusted input) restates the two rules it works by. `tests/learning-agent.test.ts` holds the read and its position before both comparison markers, with known-bad probes. Hook-spawned, never named by a command. `tests/guards/agent-config.test.ts` pins the row against the shared table in `tests/fixtures/agent-config.ts`, and `tests/decisions/config.test.ts` holds the default model in `learning-tuning-config.ts` equal to it (D-LEARNING-SHIPPED-ROW). Iron Law: assign-anchor owns numbering, render owns the `.md`, never hand-edit. One run, in order:
+`src/assets/agents/learning.md`: `model: opus` with no `effort:` line (it follows the session), tools listed Read, Bash, Glob, Grep (no Write, no Edit; the Grep and Glob entries are inert because the agent holds Bash, so it searches with `git grep -P` and `find`), no preloaded skill (the one reference it reads, `maintain.md`, comes in by an explicit Read after `claim-due`, never by a preload), and `omitClaudeMd: true`, so Claude Code hands it neither the project CLAUDE.md nor `~/.claude/rules/**`. Its Encoded check compares a lesson with the rule that already states it, and an A/B over frozen batches showed that without that context the agent stopped retiring entries as Encoded (it also showed a cheaper sonnet candidate falling short of the capture bar). The Inputs section therefore directs it to Read `<project root>/CLAUDE.md` once and to list and Read each installed devflow rule file once (`find` over `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/rules/devflow`), before the first of the two comparisons (Part 1's already-encoded search and the Encoded rung, which sits in `maintain.md`), keep what it read for the rest of the run, skip a missing file, and read nothing when the run ends before any comparison. A short `## Core rules` digest (context economy, untrusted input) restates the two rules it works by. `tests/learning-agent.test.ts` holds the read and its position before both comparison markers, over the body followed by `maintain.md` (the text a run with a due entry sees, in reading order), with known-bad probes. Hook-spawned, never named by a command. `tests/guards/agent-config.test.ts` pins the row against the shared table in `tests/fixtures/agent-config.ts`, and `tests/decisions/config.test.ts` holds the default model in `learning-tuning-config.ts` equal to it (D-LEARNING-SHIPPED-ROW). Iron Law: assign-anchor owns numbering, render owns the `.md`, never hand-edit. One run, in order:
 
 - **Step 0.** `claim-queue`: `claimed <token>` (keep it for the final release), `claimed <token> takeover` (the stale run may have stored part of the batch, so do not reinforce an observation that already states a turn), `busy` (exit silently), `none` (report "no pending decisions work"), non-zero exit (stop, report stderr).
 - **Part 1, capture.** Read the claimed turns (all, or only the latest dialog-worthy ones when huge; the prompt states the window). Abstain by default: a decision is a real fork with rationale, a pitfall a non-obvious transferable failure; one incident yields an ADR or a PF, never both; if `git grep -P` or `find` finds a test, guard, CLAUDE.md, rule or prompt that already states it, record nothing.
   - Run `list` once and `show` candidates. An active entry or stored observation covers it: `--reinforce` (or `--update` with the whole content when the turns sharpen it); a Superseded one: act on its successor; any other inactive entry: `restore-anchor`, then `--update`, never a new entry; else `--create`.
   - Promote with `assign-anchor` once it recurs or is clearly significant; an unpromoted observation waits, then rotates after `ROTATE_AGE_DAYS` idle days.
-  - A status change the turns report is checked at the verify ref (`git show <ref>:<path>`, never `git grep` or the working tree) before acting.
-- **Part 2, maintain.** `rotate-observations`, then `claim-due` once (its ref line is the verify ref; `due none` ends; `ref none` leaves every due entry). Per due entry `show`; a `ledger-without-log` entry first gets `put-observation --create` under its id. Then the first matching rung, exactly one final action, Keep when unsure:
+  - A status change the turns report is checked at the verify ref (`git show <ref>:<path>`, never `git grep` or the working tree) before acting; the agent then acts as the matching rung and Reads `maintain.md` first when it has not.
+- **Part 2, maintain.** The body keeps `rotate-observations` (it runs whether or not anything is due) and `claim-due` once; `due none` ends Part 2. Any other output lists due entries, and the agent resolves `${CLAUDE_CONFIG_DIR:-$HOME/.claude}` in Bash, Reads `<dir>/skills/devflow:agent-references/references/learning/maintain.md` by that explicit path and follows it. `maintain.md` holds the `claim-due` output format (its first line is the verify ref; `ref none` leaves every due entry), the per-entry handling and the close-out. Per due entry `show`; a `ledger-without-log` entry first gets `put-observation --create` under its id. Then the first matching rung, exactly one final action, Keep when unsure:
   1. **Encoded**, by a strict bar: a test or guard that fails on any new violation in scope, or the rule stated in CLAUDE.md, a rules file or a prompt loaded for that scope. A refused quote means Keep.
   2. No longer true at the ref: rewrite the scope, or Retired.
   3. Duplicate: absorb into the survivor with `--update`, then Superseded.
   4. One-off: Retired.
   5. Keep, rewriting only when legacy-v1, wrong or vague (read a v1 entry's `ledger-only-content` flags first).
-  - Close with one `refresh-anchor … --verified` batch of the kept entries (active v2 only; if refused, drop the named anchors and run once more).
+  - `maintain.md` also carries the retire-by-status stdin shapes and closes with one `refresh-anchor … --verified` batch of the kept entries (active v2 only; if refused, drop the named anchors and run once more).
 - **Heartbeat and vanished inputs.** Every op refreshes the claim; at the Part 1 to Part 2 boundary and after each maintained entry the agent runs `touch -c <claim> && test -f <claim>` (the `test -f` fails once the claim is gone). If that fails, or an op answers `no .devflow/learning/ under …`, stop writing, go to Finishing, never recreate anything.
 - **Finishing.** `release-claim <token>` is the FINAL act (`not-owner`, `gone` or a no-learning-dir refusal is noted in the summary); never delete, move or rewrite the claim or owner file. End with a 1 to 3 line summary, the run's only visibility surface.
 
-The prompt carries the entry format with a good and a bad example and quotes every op's stdout form. It states no plumbing numbers (claim staleness, the claim-due batch size): they live in plumbing and a prose copy drifts. Only the rotation and verify-age days stay, pinned by a test (`tests/learning-agent.test.ts`).
+The body carries the entry format with a good and a bad example and quotes the ops' stdout forms (the `claim-due` form is in `maintain.md`). Neither file states plumbing numbers (claim staleness, the claim-due batch size): they live in plumbing and a prose copy drifts. Only the rotation and verify-age days stay; the rotation window is pinned over the body plus `maintain.md` by `tests/decisions/learning-curation.test.ts`.
+
+**The reference skill (`agent-references`).** `src/assets/skills/agent-references/` is reference-only: `user-invocable: false` and `disable-model-invocation: true`, never named in an agent's `skills:` list or a plugin `requires`, and registered in `devflow-core-skills` (always installed). It holds `references/learning/maintain.md` for this agent and `references/synthesize/{mode}.md` for Synthesize. The agent body is held under the `learning-body-max` ceiling in `tests/fixtures/numeric-floors.json` (lowered, never raised), asserted in `tests/guards/agent-references.test.ts`; the flags and the no-preload rule are held in `tests/guards/skill-description-caps.test.ts`. Learning stays on Opus and keeps its explicit CLAUDE.md and rule reads in the body's Inputs, ahead of both comparisons.
 
 ## session-start-context directives
 
@@ -134,6 +139,7 @@ A thin router (status, list, show, configure, reset, clear, restore, enable, dis
 | File | Purpose |
 |------|---------|
 | `src/assets/agents/learning.md` · `tracker.md` | The two hook-spawned agents |
+| `src/assets/skills/agent-references/references/learning/maintain.md` | Part 2's ladder, the `claim-due` output format and the close-out batch; read by explicit path once `claim-due` hands out an entry (the skill's `SKILL.md` names the owner of each file) |
 | `src/assets/scripts/hooks/session-start-context` | Sections 1 to 6; Sections 2 to 6 are recorded here |
 | `src/cli/commands/learning.ts` | `devflow learning`; `--enable/--disable` converge the installed prompts through `applyLearningToggle` |
 | `src/core/learning-store.ts` | Typed seam onto the store (D-LEARNING-STORE-SEAM) |
@@ -143,7 +149,8 @@ A thin router (status, list, show, configure, reset, clear, restore, enable, dis
 | `src/core/ledger-root.ts` | `getLedgerRoot`, the twin of `DF_LEDGER_ROOT` |
 | `src/hud/components/learning-counts.ts` | HUD counts (D309); `readBoundedLedger` and `LEDGER_MAX_BYTES` |
 | `src/core/learning-tuning-config.ts` | Tuning merge; `DEFAULTS.model` held equal to the Learning row |
-| `tests/decisions/learning-claim.test.ts` · `learning-store.test.ts` · `tests/learning-agent.test.ts` | Claim, store and prompt pins (including the staleness lockstep) |
+| `tests/decisions/learning-claim.test.ts` · `learning-store.test.ts` · `tests/learning-agent.test.ts` | Claim, store and prompt pins (including the staleness lockstep); the prompt pins read the body followed by `maintain.md` |
+| `tests/guards/agent-references.test.ts` · `tests/guards/skill-description-caps.test.ts` | The `learning-body-max` ceiling and the ladder's place in `maintain.md`; the reference skill's flags and the no-preload rule |
 | `tests/decisions/cli-subcommands.test.ts` | The CLI's subcommands and link rules |
 | `tests/guards/agent-config.test.ts` · `tests/fixtures/agent-config.ts` | The shipped agent table (Learning's row: opus, no effort line, no preload, `omitClaudeMd` true with the explicit CLAUDE.md and rules reads) |
 | `tests/seams/tracker-key-path.test.ts` · `tracker-claim-staleness.test.ts` | Tracker key-path parity and the shared claim-staleness bound |
