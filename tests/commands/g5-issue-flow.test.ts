@@ -10,10 +10,11 @@
  * spawns, then patches that one line in place; /implement reads the frontmatter
  * first and forwards a non-`pending` value as the setup-task `ISSUE_INPUT`.
  *
- * PR timing: Phase 9 skipped the CI gate for SEQUENTIAL because the PR was "not
- * yet created", while Phase 2 has the last sequential Code agent create it. The
- * resolution: SINGLE and SEQUENTIAL run the gate (their PR exists from Phase 2);
- * PARALLEL skips it (its unified PR is created in Phase 10).
+ * PR timing: the CI gate skipped SEQUENTIAL because the PR was "not yet created",
+ * while Phase 2 had the last sequential Code agent create it; #360 made SINGLE and
+ * SEQUENTIAL run the gate and PARALLEL skip it. Since D-PR-BY-GIT (#448) Phase 9
+ * opens the PR in one Git spawn under every strategy and Phase 10 gates its CI
+ * under every strategy, so the section pins that no site binds either to a strategy.
  *
  * Every guard has the three parts an absence-based check needs: a NAMED
  * collector, an assertion that the text it read is the text it claims to read,
@@ -346,13 +347,17 @@ describe('/implement reads the plan frontmatter before setup-task and treats `pe
 })
 
 // ---------------------------------------------------------------------------
-// 3. /implement PR timing — SINGLE and SEQUENTIAL run the CI gate (§3.10, AC-10)
+// 3. /implement PR timing — Phase 9 opens the PR, Phase 10 gates its CI, under every strategy
 // ---------------------------------------------------------------------------
+//
+// Before D-PR-BY-GIT the Phase 2 Code agent created the PR for SINGLE and SEQUENTIAL and a
+// Phase 10 Code spawn created it for PARALLEL, so the CI gate ran for two strategies and skipped
+// the third ("PR not yet created"). Phase 9 now opens the PR in one Git spawn outside every
+// strategy branch and Phase 10 gates its CI, so no site may bind either phase to a strategy.
 
-const RUN_STRATEGIES = ['SINGLE', 'SEQUENTIAL'] as const
-const SKIP_STRATEGY = 'PARALLEL'
+const STRATEGIES = ['SINGLE', 'SEQUENTIAL', 'PARALLEL'] as const
 
-/** One statement of which strategies Phase 9 runs for. */
+/** One statement of which strategies a phase runs for. */
 interface TimingSite {
   readonly label: string
   readonly find: (implement: string) => string | null
@@ -365,61 +370,49 @@ function soleLine(text: string | null, match: (line: string) => boolean): string
   return hits.length === 1 ? hits[0] : null
 }
 
-/** The three places that say which strategies Phase 9 gates. */
-const GATE_SITES: readonly TimingSite[] = [
+/** The places that say which strategies Phases 9 and 10 run for. */
+const TIMING_SITES: readonly TimingSite[] = [
   {
-    label: 'Phase 9 gate sentence',
-    find: md => soleLine(sliceBetween(md, '### Phase 9: CI Status Gate', '\n### '), l => l.startsWith('Strategy-conditional:')),
+    label: 'Phase 9 sentence',
+    find: md => soleLine(sliceBetween(md, '### Phase 9: Open PR', '\n### '), l => l.startsWith('Run once, after the gates,')),
+  },
+  {
+    label: 'Phase 10 sentence',
+    find: md => soleLine(sliceBetween(md, '### Phase 10: CI Status Gate', '\n### '), l => l.startsWith('Run under every strategy')),
   },
   { label: 'Architecture Phase 9', find: md => soleLine(md, l => l.includes('├─ Phase 9:')) },
+  { label: 'Architecture Phase 10', find: md => soleLine(md, l => l.includes('├─ Phase 10:')) },
   { label: 'Principle 12', find: md => soleLine(md, l => l.startsWith('12. **CI awareness**')) },
 ]
 
-/** Phase 10's SEQUENTIAL sentence: it must state the PR already exists. */
-function phase10SequentialLine(implement: string): string | null {
-  return soleLine(sliceBetween(implement, '### Phase 10: Create PR', '\n### '), l => l.startsWith('**For SEQUENTIAL_CODE_AGENTS'))
-}
-
-/** Phase 2's `**Produces:**` line — where PR_URL must come from for Phase 9 to require it. */
+/** Phase 2's `**Produces:**` line — it produces no PR, because no Code agent opens one. */
 function phase2ProducesLine(implement: string): string | null {
   return soleLine(sliceBetween(implement, '### Phase 2: Implement', '\n### '), l => l.startsWith('**Produces:**'))
 }
 
 /**
- * Named collector: every statement of /implement's PR timing that contradicts
- * the resolution (SINGLE + SEQUENTIAL run Phase 9, PARALLEL skips it).
+ * Named collector: every statement of /implement's PR timing that contradicts the resolution
+ * (Phase 9 opens the PR and Phase 10 gates its CI, under every strategy).
  *
- * Each gate site is split at its first `skip`: the run set is what precedes it,
- * the skip set what follows. A site with no `skip` clause has an empty skip set,
- * so an unqualified "SINGLE only" is reported for leaving PARALLEL unstated.
- * Beyond the three gate sites: Phase 10 must say the SEQUENTIAL PR already
- * exists, Phase 2 must produce the PR_URL Phase 9 requires, and no line anywhere
- * may pair SEQUENTIAL with "not yet created" — the contradiction itself.
+ * Each timing site must say `every strategy`, and none may skip a strategy: a line that holds a
+ * `skip` clause beside a strategy name binds the phase to the others. Phase 2 must not produce
+ * a PR_URL, and no line anywhere may pair SEQUENTIAL with "not yet created" — the contradiction
+ * the CI gate used to carry.
  */
 export function collectPrTimingContradictions(implement: string): string[] {
   const out: string[] = []
-  for (const site of GATE_SITES) {
+  for (const site of TIMING_SITES) {
     const line = site.find(implement)
     if (line === null) {
       out.push(`${site.label}: site not found (expected exactly one line)`)
       continue
     }
-    const skipAt = line.search(/\bskip/i)
-    const runSet = skipAt === -1 ? line : line.slice(0, skipAt)
-    const skipSet = skipAt === -1 ? '' : line.slice(skipAt)
-    for (const strategy of RUN_STRATEGIES) {
-      if (!runSet.includes(strategy)) out.push(`${site.label}: ${strategy} is not in the run set`)
-      if (skipSet.includes(strategy)) out.push(`${site.label}: ${strategy} is in the skip set`)
-    }
-    if (runSet.includes(SKIP_STRATEGY)) out.push(`${site.label}: ${SKIP_STRATEGY} is in the run set`)
-    if (!skipSet.includes(SKIP_STRATEGY)) out.push(`${site.label}: ${SKIP_STRATEGY} is not in the skip set`)
+    if (!line.includes('every strategy')) out.push(`${site.label}: does not say every strategy`)
+    if (/\bskip/i.test(line) && STRATEGIES.some(strategy => line.includes(strategy))) out.push(`${site.label}: skips a strategy`)
   }
-  const phase10 = phase10SequentialLine(implement)
-  if (phase10 === null) out.push('Phase 10 SEQUENTIAL sentence: site not found (expected exactly one line)')
-  else if (!phase10.includes('already exists')) out.push('Phase 10 SEQUENTIAL sentence: does not say the PR already exists')
   const produces = phase2ProducesLine(implement)
   if (produces === null) out.push('Phase 2 Produces: site not found (expected exactly one line)')
-  else if (!/\bPR_URL\b/.test(produces)) out.push('Phase 2 Produces: does not produce PR_URL, which Phase 9 requires')
+  else if (/\bPR_(?:URL|NUMBER)\b/.test(produces)) out.push('Phase 2 Produces: produces a PR, which no Code agent opens')
   for (const line of implement.split('\n')) {
     if (/sequential/i.test(line) && /not yet created/i.test(line)) {
       out.push(`a line pairs SEQUENTIAL with "not yet created": "${line.trim()}"`)
@@ -428,27 +421,27 @@ export function collectPrTimingContradictions(implement: string): string[] {
   return out
 }
 
-/** The `d09da34` line at each PR-timing site, quoted verbatim (built). */
-const D09DA34_TIMING: Readonly<Record<string, string>> = {
-  'Phase 9 gate sentence':
-    'Strategy-conditional: run for **SINGLE_CODE_AGENT** (PR exists from Phase 2), skip for ' +
-    '**SEQUENTIAL_CODE_AGENTS** / **PARALLEL_CODE_AGENTS** (PR not yet created).',
-  'Architecture Phase 9': '├─ Phase 9: CI Status Gate (SINGLE_CODE_AGENT only)',
-  'Principle 12': '12. **CI awareness** - CI status is checked before merge for SINGLE_CODE_AGENT strategy',
-  'Phase 10 SEQUENTIAL sentence':
-    '**For SEQUENTIAL_CODE_AGENTS or PARALLEL_CODE_AGENTS**: The last sequential Code agent (with ' +
-    'CREATE_PR: true) handles PR creation. For parallel Code agents, spawn one Code agent to create the unified PR:',
-  'Phase 2 Produces': '**Produces:** CODE_AGENT_OUTPUT, FILES_CHANGED',
+/** The pre-#448 line at each PR-timing site, quoted verbatim from the CI gate and PR phases it replaced. */
+const PRE_PR_BY_GIT_TIMING: Readonly<Record<string, string>> = {
+  'Phase 9 sentence': 'Run once, after the gates, for **PARALLEL_CODE_AGENTS** only; skip for the others.',
+  'Phase 10 sentence':
+    'Strategy-conditional: run when the PR already exists — **SINGLE_CODE_AGENT** and **SEQUENTIAL_CODE_AGENTS** ' +
+    '(the Phase 2 Code agent creates it); skip for **PARALLEL_CODE_AGENTS** (its unified PR is created in Phase 10).',
+  'Architecture Phase 9': '├─ Phase 9: Open PR (PARALLEL_CODE_AGENTS only)',
+  'Architecture Phase 10': '├─ Phase 10: CI Status Gate (SINGLE_CODE_AGENT + SEQUENTIAL_CODE_AGENTS; skipped for PARALLEL_CODE_AGENTS)',
+  'Principle 12':
+    '12. **CI awareness** - CI status is checked before merge for SINGLE_CODE_AGENT and SEQUENTIAL_CODE_AGENTS, whose PR exists from ' +
+    'Phase 2; skipped for PARALLEL_CODE_AGENTS, whose PR is created in Phase 10',
+  'Phase 2 Produces': '**Produces:** CODE_AGENT_OUTPUT, FILES_CHANGED, PR_URL',
 }
 
 /** Each site's finder, keyed by the label its violations carry. */
 const TIMING_FINDERS: Readonly<Record<string, (implement: string) => string | null>> = {
-  ...Object.fromEntries(GATE_SITES.map(site => [site.label, site.find])),
-  'Phase 10 SEQUENTIAL sentence': phase10SequentialLine,
+  ...Object.fromEntries(TIMING_SITES.map(site => [site.label, site.find])),
   'Phase 2 Produces': phase2ProducesLine,
 }
 
-describe('/implement PR timing — SINGLE and SEQUENTIAL gate CI, PARALLEL skips (§3.10, AC-10)', () => {
+describe('/implement PR timing — Phase 9 opens the PR and Phase 10 gates its CI, under every strategy (D-PR-BY-GIT)', () => {
   it('every site agrees with the resolution, and nothing pairs SEQUENTIAL with "not yet created"', () => {
     const implement = requireDistFile('implement.md')
     // Non-vacuity: every site resolves to exactly one line of the shipped file.
@@ -458,11 +451,11 @@ describe('/implement PR timing — SINGLE and SEQUENTIAL gate CI, PARALLEL skips
     expect(collectPrTimingContradictions(implement)).toEqual([])
   })
 
-  it('known-bad probe: each site, reverted alone to its d09da34 line, is reported by name', () => {
+  it('known-bad probe: each site, reverted alone to its pre-#448 line, is reported by name', () => {
     const implement = requireDistFile('implement.md')
     // Probe cardinality matches arm cardinality: one probe per site the live arm reads.
-    expect(Object.keys(D09DA34_TIMING).sort()).toEqual(Object.keys(TIMING_FINDERS).sort())
-    for (const [label, historical] of Object.entries(D09DA34_TIMING)) {
+    expect(Object.keys(PRE_PR_BY_GIT_TIMING).sort()).toEqual(Object.keys(TIMING_FINDERS).sort())
+    for (const [label, historical] of Object.entries(PRE_PR_BY_GIT_TIMING)) {
       const current = TIMING_FINDERS[label](implement)
       expect(current, `${label} not found`).not.toBeNull()
       const violations = collectPrTimingContradictions(replaceWholeLine(implement, current as string, historical))
@@ -474,8 +467,11 @@ describe('/implement PR timing — SINGLE and SEQUENTIAL gate CI, PARALLEL skips
     }
   })
 
-  it('known-bad probe: the d09da34 Phase 9 sentence is also the SEQUENTIAL/"not yet created" contradiction', () => {
-    const violations = collectPrTimingContradictions(D09DA34_TIMING['Phase 9 gate sentence'])
+  it('known-bad probe: the pre-#448 gate sentence with its "not yet created" clause is the SEQUENTIAL contradiction', () => {
+    const violations = collectPrTimingContradictions(
+      'Strategy-conditional: run for **SINGLE_CODE_AGENT** (PR exists from Phase 2), skip for ' +
+      '**SEQUENTIAL_CODE_AGENTS** / **PARALLEL_CODE_AGENTS** (PR not yet created).',
+    )
     expect(violations.some(v => v.includes('pairs SEQUENTIAL with "not yet created"'))).toBe(true)
   })
 })

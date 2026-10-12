@@ -200,11 +200,11 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     contexts: ['reviewer_confidence'],
   },
   {
-    path: 'src/assets/agents/code.mds',
+    path: 'src/assets/mds/git/_ops_steps.mds',
     name: 'Reviewer',
     reason:
       'CONTRACT: "Reviewer Focus Areas" — protected PR description contract heading ' +
-      '(plan.mds emits; code.md maps the PR table to it); 5 sites, 3 files',
+      '(plan.mds emits; ensure-pr-ready step 4a maps the PR table to it); 5 sites, 3 files',
     contexts: ['Reviewer Focus Areas'],
   },
   {

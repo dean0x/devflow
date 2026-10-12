@@ -20,7 +20,7 @@
 
 import { describe, it, expect } from 'vitest'
 
-import { requireDistFile, resolveAgentSource } from '../helpers.js'
+import { ensurePrReadyReference, requireDistFile, resolveAgentSource } from '../helpers.js'
 
 const SECTION_HEADING = '## Phase {N} Implementation Summary'
 const DYNAMIC_HOSTS = ['dynamic-build', 'dynamic-plan', 'dynamic-profile', 'dynamic-tickets'] as const
@@ -157,10 +157,13 @@ describe('no rule rewrites an earlier section or the Evidence Exceptions section
     ]
     expect(texts.every(([, t]) => t.length > 300)).toBe(true)
     expect(texts.flatMap(([label, t]) => collectRewriteAllowances(label, t))).toEqual([])
-    // The orchestrator still records the exception first, and PR_EXCEPTIONS still forwards verbatim.
+    // The orchestrator still records the exception first, and PR_EXCEPTIONS still forwards verbatim — to the
+    // Git spawn that opens the PR (D-PR-BY-GIT), whose reference declares the input; the Code agent takes none.
     expect(implement).toContain('**Record the exception at once**, before any Code spawn')
     expect(implement).toMatch(/PR_EXCEPTIONS: \{the ## Evidence Exceptions section of \{worktree\}\/\.devflow\/docs\/handoff-\{branch_slug\}\.md verbatim, or \(none\)\}/)
-    expect(code).toContain('- **PR_EXCEPTIONS** (optional): the pre-rendered `## Evidence Exceptions` section')
+    expect(code).not.toContain('PR_EXCEPTIONS')
+    const prReadyInput = ensurePrReadyReference().split('\n').find(l => l.startsWith('**Input:**')) ?? ''
+    expect(prReadyInput).toContain('`PR_EXCEPTIONS` (optional)')
   })
 
   it('known-bad probe: a restored orchestrator write, a rewrite allowance and a lost clause are each reported', () => {

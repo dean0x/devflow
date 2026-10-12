@@ -481,7 +481,8 @@ Load when the resolved tracker provider is `github` and the operation is `ensure
 ### Process
 
 {{opsteps.ensure_pr_ready_steps_to_4a()}}
-4b. (ALWAYS-ON) Ensure PR body contains a `## Related Issues` section with `Closes #{n}` link when a verified issue number is known. Resolution order:
+
+4b. (ALWAYS-ON) Ensure PR body contains a `## Related Issues` section with `Closes #{n}` link when a verified issue number is known. A given `ISSUE_PR_LINK` is already decided in step 4a: skip the resolution below. Resolution order:
    a. Prefer the issue number returned by `setup-task` / `ensure-traceable-issue` for this branch.
    b. If unavailable, fall back to the branch name pattern `{type}/{number}-{slug}`: extract the numeric segment and verify with `gh issue view {n} --json number,state`. If the call fails or `.state` is not `"open"`, skip silently — never add a `Closes` link for an unverified number. Branches like `chore/2026-cleanup` or `fix/2fa-login` may produce false matches; the existence check is the guard.
 

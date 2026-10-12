@@ -256,17 +256,16 @@ const BUDGET_SKILL_MD = 6_445;
  *
  * Re-derived by #451 from a measured 41_451: git.md fell by 24_402 ch because every operation's
  * contract and steps moved into the reference that operation loads (D-OP-ONE-REF), and the
- * worst op (setup-task) now carries its own contract, so the row fell by the difference. The
- * ceiling is that measurement plus 5_000 ch of room for #448, which moves PR creation from the
- * Code agent into the Git agent's ensure-pr-ready reference (its paste gates are about 4–5 KB).
- * The room is #448's alone: it measures its real growth and tightens this ceiling to it; the
- * ceiling is never raised.
+ * worst op (setup-task) now carries its own contract, so the row fell by the difference.
+ * Re-derived by #448 from a measured 41_449 plus the 80 ch general headroom: 41_529. PR creation
+ * moved from the Code agent into the Git agent's ensure-pr-ready reference (D-PR-BY-GIT), which
+ * grew by its paste gates (about 6 KB) but stays under the worst op, so the row did not move.
  *
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set` in
  * tests/fixtures/numeric-floors.json; lowering re-pins the value AND the pattern
  * in the same commit.
  */
-const BUDGET_LOADED_SET = 46_451;
+const BUDGET_LOADED_SET = 41_529;
 
 /**
  * THE JIRA-SCOPED loaded-set ceiling — a spawn under the Jira provider.
@@ -297,8 +296,9 @@ const BUDGET_LOADED_SET = 46_451;
  * rather than reach for slack. Re-derived by #425 to 72_795, the same
  * git.md cut with `tracker/_contract.md` billed once per spawn beside the tool-call contract.
  * Re-derived by #451 from a measured 51_835 (the same git.md cut as the GitHub row, with the
- * worst op's contract now inside its own reference) plus 5_000 ch of room for #448, which
- * tightens it to the real growth.
+ * worst op's contract now inside its own reference). Re-derived by #448 from a measured 51_833
+ * plus the 80 ch general headroom: 51_913. The PR-opening paste gates grew ensure-pr-ready, which
+ * stays under the worst op.
  * The row measures 72_488 today, 56 ch under the 72_544 ceiling #445 left it. Trimming
  * `references/tracker/_mcp.md` is the honest first move: it is contract prose, it
  * is the single largest term this row adds over the GitHub one, and a pass over it
@@ -307,7 +307,7 @@ const BUDGET_LOADED_SET = 46_451;
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-jira` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_JIRA = 56_835;
+const BUDGET_LOADED_SET_JIRA = 51_913;
 
 /**
  * THE LINEAR-SCOPED loaded-set ceiling — a spawn under the Linear provider.
@@ -323,8 +323,8 @@ const BUDGET_LOADED_SET_JIRA = 56_835;
  * ensure-traceable-issue) plus the 80 ch general headroom above: 75_940. Re-derived by
  * #393 from a measured 75_573 (git.md -315 ch, the site rung +28 ch): 75_653. Re-derived by #423 from a measured 73_851 (the same
  * two preloaded-skill cuts as the GitHub row): 73_931. Re-derived by #425 to
- * 73_391, as the Jira row. Re-derived by #451 from a measured 52_431 plus 5_000 ch of room for #448,
- * which tightens it to the real growth. This is the
+ * 73_391, as the Jira row. Re-derived by #451 from a measured 52_431. Re-derived by #448 from a
+ * measured 52_429 plus the 80 ch general headroom: 52_509. This is the
  * LARGEST of the four ceilings but not necessarily the binding one: a character added
  * to git.md is a character added to every row, and the row with the least headroom
  * binds. Each ceiling was set as min(its previous ceiling, measured actual + 80), so
@@ -345,7 +345,7 @@ const BUDGET_LOADED_SET_JIRA = 56_835;
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-linear` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_LINEAR = 57_431;
+const BUDGET_LOADED_SET_LINEAR = 52_509;
 
 /**
  * THE PR-HOST loaded-set ceiling — the worst-case cost of a spawn that runs one of
@@ -391,13 +391,13 @@ const BUDGET_LOADED_SET_LINEAR = 57_431;
  * Re-derived by #451 from a measured 24_706: the same git.md cut, and each `pr/{op}.md` now carries
  * its own contract, which the worst op (`post-review-summary` with the publication gate) pays for.
  * `ensure-pr-ready` left this tree — it is a tracker operation with one reference per provider — so
- * the row ranges over eight operations. The ceiling is the measurement plus 5_000 ch of room for #448,
- * which tightens it to its real growth; it is never raised.
+ * the row ranges over eight operations and #448's paste gates, which landed in ensure-pr-ready, do
+ * not reach it. Re-derived by #448 as that measurement plus the 80 ch general headroom: 24_786.
  *
  * MAY BE LOWERED, NEVER RAISED. Registered as `budget-loaded-set-pr-host` in
  * tests/fixtures/numeric-floors.json.
  */
-const BUDGET_LOADED_SET_PR_HOST = 29_706;
+const BUDGET_LOADED_SET_PR_HOST = 24_786;
 
 /**
  * THE PER-OPERATION LOAD CAP (D-OP-LOAD-CAP) — no single Git operation may load more
@@ -414,16 +414,16 @@ const BUDGET_LOADED_SET_PR_HOST = 29_706;
  *
  * Derived from the measured worst operation — `linear/setup-task`, whose step 1c hops into
  * ensure-traceable-issue under ISSUE_REQUIRED and which names learn-conventions.md — which
- * the printed table below records as 19_909 ch, plus 5_000 ch of room for #448 (PR creation
- * moves from the Code agent into the Git agent's ensure-pr-ready reference: its paste gates
- * are about 4–5 KB). #448 measures its own growth and tightens this cap; it never raises it. A
- * cap re-derived to fit the operation that exceeded it is no cap: an operation over it is
- * condensed first.
+ * the printed table below records as 19_907 ch, plus the 80 ch general headroom: 19_987.
+ * #448 moved PR creation from the Code agent into the Git agent's ensure-pr-ready reference
+ * (D-PR-BY-GIT), which now loads 14_106 ch under Linear, its worst provider, so the worst
+ * operation did not change. A cap re-derived to fit the operation that exceeded it is no cap:
+ * an operation over it is condensed first.
  *
  * MAY BE LOWERED, NEVER RAISED. Registered as `git-op-load-max` in
  * tests/fixtures/numeric-floors.json.
  */
-const GIT_OP_LOAD_MAX = 24_909;
+const GIT_OP_LOAD_MAX = 19_987;
 
 /**
  * Every MCP-backed provider and the ceiling that prices it.

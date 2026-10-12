@@ -248,7 +248,6 @@ TASK_ID: resolve-{batch-id}
 ISSUES: {fix_now_issues_in_batch}
 SCOPE: {risk_tier_per_issue}
 PUSH: false
-CREATE_PR: false
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 <!-- learning:on -->
 DECISIONS_CONTEXT: {decisions_context}
@@ -325,7 +324,6 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
    VALIDATION_FAILURES: {parsed failures from Validate agent}
    SCOPE: Fix only the listed failures, no other changes
    PUSH: false
-   CREATE_PR: false
    WORKTREE_PATH: {worktree_path}  (omit if cwd)
    <!-- learning:on -->
    DECISIONS_CONTEXT: {decisions_context}

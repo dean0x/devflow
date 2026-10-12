@@ -29,9 +29,9 @@
  *          row, a second such line and one that is not first are all `orphan`.
  *
  * The parity arms pin the exports to the shipped text that governs them: every
- * line code.md's R7 paste gate admits (each ticket's captured ISSUE_PR_LINK) is a
+ * line ensure-pr-ready's link paste gate admits (each ticket's captured ISSUE_PR_LINK) is a
  * related line, and so is its Closes→Refs swap, and nothing else; the heading is
- * the PR body section code.md emits; the merged verdicts are exactly what the
+ * the PR body section ensure-pr-ready emits; the merged verdicts are exactly what the
  * built wave skeleton's merge condition merges, over every engine verdict the
  * engine schema declares (read from the built text, never listed here); every
  * Gate 2 value the built SINGLE skeleton produces is a table value; and the
@@ -49,7 +49,7 @@ import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 
-import { parseFences, requireDistFile, resolveAgentSource } from '../helpers.js'
+import { ensurePrReadyReference, parseFences, requireDistFile } from '../helpers.js'
 import { scopedEnv } from '../evidence-policy/scripted-shim.js'
 import { PR_EVIDENCE_SCRIPT, VERIFY_EVIDENCE_SCRIPT } from './seam.js'
 
@@ -653,7 +653,7 @@ describe('check wave through the real process (tmp HOME, non-repo cwd)', { timeo
 // Parity — the exports against the shipped text that governs them
 // ---------------------------------------------------------------------------
 
-/** code.md's R7 paste gate: provider → the whole-line pattern `ISSUE_PR_LINK` must match. */
+/** ensure-pr-ready's link paste gate: provider → the whole-line pattern `ISSUE_PR_LINK` must match. */
 function collectR7Grammars(code: string): Map<string, RegExp> {
   const out = new Map<string, RegExp>()
   const at = code.indexOf('**Pasting the handoff values.**')
@@ -677,8 +677,8 @@ function relatedCorpus(): string[] {
 
 /**
  * Named collector: the corpus lines on which a related-line grammar disagrees with
- * code.md's R7 gate. A line must be admitted exactly when R7 admits it (a merged
- * ticket's captured ISSUE_PR_LINK) or when R7 admits its Refs→Closes swap (an
+ * ensure-pr-ready's paste gate. A line must be admitted exactly when it admits it (a merged
+ * ticket's captured ISSUE_PR_LINK) or when it admits its Refs→Closes swap (an
  * unmerged GitHub ticket's line with `Closes ` replaced by `Refs `).
  */
 function collectRelatedLineDisagreements(candidate: RegExp, gates: ReadonlyMap<string, RegExp>, corpus: readonly string[]): string[] {
@@ -689,11 +689,11 @@ function collectRelatedLineDisagreements(candidate: RegExp, gates: ReadonlyMap<s
   })
 }
 
-describe('parity: RELATED_LINE_RE admits exactly code.md\'s R7 lines and their Closes→Refs swap', () => {
-  const code = resolveAgentSource('code').content
+describe('parity: RELATED_LINE_RE admits exactly ensure-pr-ready\'s link lines and their Closes→Refs swap', () => {
+  const code = ensurePrReadyReference()
   const gates = collectR7Grammars(code)
 
-  it('R7\'s three tracker grammars are found', () => {
+  it('the gate\'s three tracker grammars are found', () => {
     expect([...gates.keys()].sort()).toEqual(['github', 'jira', 'linear'])
   })
 
@@ -721,12 +721,12 @@ describe('parity: RELATED_LINE_RE admits exactly code.md\'s R7 lines and their C
     expect(d).toContain('"Refs #42": grammar refuses it')
   })
 
-  it('known-bad probe: R7 losing its Linear row is reported (the collector reads the gate, not a copy)', () => {
+  it('known-bad probe: the gate losing its Linear row is reported (the collector reads the gate, not a copy)', () => {
     const narrowed = new Map([...gates].filter(([k]) => k !== 'linear'))
     expect(collectRelatedLineDisagreements(PE.RELATED_LINE_RE, narrowed, relatedCorpus())).toContain('"Refs A-1": grammar admits it')
   })
 
-  it('the first heading is the PR body section R7 fills', () => {
+  it('the first heading is the PR body section the gate fills', () => {
     expect(code).toContain(`include a \`${PE.WAVE_HEADINGS[0]}\` section in the PR body`)
   })
 })

@@ -399,8 +399,8 @@ function collectPresenceSelection(file: string, content: string): string[] {
 
 /** Compiled commands that spawn Code agents, and the spawn sites each carries today. Floors: may only rise. */
 const CODE_SPAWN_FLOORS: Readonly<Record<string, number>> = {
-  // 9 fences (single, sequential ×2, parallel ×2, validation/alignment/qa-fix, pr-create) + the CI-fix line
-  'implement.md': 10,
+  // 8 fences (single, sequential ×2, parallel ×2, validation/alignment/qa-fix) + the CI-fix line
+  'implement.md': 9,
   // the issue-fix and validation-fix fences + the CI-fix line
   'resolve.md': 3,
   // the fix the user accepts in the Offer Fix phase
@@ -449,7 +449,7 @@ describe('TP-43 (AC-37): the compiled compliance lens loads only the ids the set
     }
   });
 
-  it('every compiled Code spawn — implementing, fix-phase, CI-fix and pr-create — carries the lens', () => {
+  it('every compiled Code spawn — implementing, fix-phase and CI-fix — carries the lens', () => {
     // Before install-all a fix-phase Code agent found the lens by checking whether the
     // compliance skill was installed; with every install carrying it, the resolved ids
     // are the only signal, and a spawn without them runs with the lens `off`.

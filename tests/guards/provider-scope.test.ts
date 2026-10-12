@@ -142,6 +142,12 @@ interface AllowlistedRegion {
   readonly to: string;
   /** Why a closed token set has to be written HERE and nowhere else. */
   readonly justification: string;
+  /**
+   * The tokens the region must be the ONLY place its files name. Absent means every foreign token.
+   * A provider's own reference names its own provider outside the region (the token it owns), so
+   * its row confines only the other.
+   */
+  readonly confines?: readonly string[];
 }
 
 /**
@@ -155,6 +161,19 @@ interface AllowlistedRegion {
  * file belongs to a provider, this one says a bounded region inside a
  * provider-neutral file may name all of them.
  */
+/** The bounds of the PR-link paste gate: from its table header to the start of the paragraph after the checks. */
+const PASTE_GATE_FROM = '| Tracker grammar | `ISSUE_PR_LINK` must match |';
+const PASTE_GATE_TO = 'This re-check is the only gate on that value';
+const PASTE_GATE_JUSTIFICATION =
+  'The PR body is a GitHub-visible sink and ensure-pr-ready is the last hand the rendered link ' +
+  'line passes through — no operation checks its shape before returning it. The gate is a ' +
+  'union of the tracker grammars and cannot be written without naming the rows it admits: the ' +
+  'line was rendered by an earlier spawn, so this one does not re-derive the provider from it. ' +
+  'So the closed set is enumerated once, inside the gate, and a value is pasted when it matches ' +
+  'any one row — the gate never resolves a provider, which is what keeps this a sink check and ' +
+  'not a second convergence point. The PR skeleton is one write expanded into three provider ' +
+  'files, so each copy carries the block.';
+
 const ALLOWLISTED_PROVIDER_REGIONS: readonly AllowlistedRegion[] = [
   {
     label: "the tracker contract's provider resolution and input contract",
@@ -172,19 +191,27 @@ const ALLOWLISTED_PROVIDER_REGIONS: readonly AllowlistedRegion[] = [
       'nothing — the closed set has to be written where the resolution happens.',
   },
   {
-    label: "the Code agent's PR-link paste gate",
-    files: [`${SRC_AGENTS_LABEL}/code.mds`, 'dist/agents/code.md', `${LEARNING_OFF_AGENTS}/code.md`],
-    from: '| Tracker grammar | `ISSUE_PR_LINK` must match |',
-    to: 'This re-check is the only gate on that value',
-    justification:
-      'The PR body is a GitHub-visible sink and the Code agent is the last hand the rendered link ' +
-      'line passes through — no operation checks its shape before returning it. The gate is a ' +
-      'union of the tracker grammars and cannot be written without naming the rows it admits, and ' +
-      'the Code agent loads no provider mechanics file it could defer to: it is outside the Git ' +
-      'spawn surface entirely, and it is never told the provider (#359). So the closed set is ' +
-      'enumerated once, inside the gate, and a value is pasted when it matches any one row — the ' +
-      'agent never resolves a provider, which is what keeps this a sink check and not a second ' +
-      'convergence point.',
+    label: "ensure-pr-ready's PR-link paste gate",
+    files: ['src/assets/mds/git/_ops_steps.mds', 'dist/skills/git/references/tracker/github/ensure-pr-ready.md'],
+    from: PASTE_GATE_FROM,
+    to: PASTE_GATE_TO,
+    justification: PASTE_GATE_JUSTIFICATION,
+  },
+  {
+    label: "ensure-pr-ready's PR-link paste gate (the Jira copy)",
+    files: ['dist/skills/git/references/tracker/jira/ensure-pr-ready.md'],
+    from: PASTE_GATE_FROM,
+    to: PASTE_GATE_TO,
+    justification: PASTE_GATE_JUSTIFICATION,
+    confines: ['linear'],
+  },
+  {
+    label: "ensure-pr-ready's PR-link paste gate (the Linear copy)",
+    files: ['dist/skills/git/references/tracker/linear/ensure-pr-ready.md'],
+    from: PASTE_GATE_FROM,
+    to: PASTE_GATE_TO,
+    justification: PASTE_GATE_JUSTIFICATION,
+    confines: ['jira'],
   },
   {
     label: "the settings partial's accepted-line shape",
@@ -413,7 +440,7 @@ describe('provider-scope: no Jira or Linear literal outside the provider map (§
           stripped.length,
           `${file}: ${region.label} was not found — its anchors changed`,
         ).toBeLessThan(whole.length);
-        for (const token of FOREIGN_PROVIDER_TOKENS) {
+        for (const token of FOREIGN_PROVIDER_TOKENS.filter(t => region.confines?.includes(t.name) ?? true)) {
           expect(
             token.pattern.test(whole) && !token.pattern.test(stripped),
             `${file}: "${token.name}" is no longer confined to ${region.label} — either it moved ` +

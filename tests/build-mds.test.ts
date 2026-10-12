@@ -1468,8 +1468,9 @@ describe('compiled dynamic commands: --dry-run removal (C7)', () => {
 //     (D-COMPLIANCE-INSTALL-ALWAYS, D-COMPLIANCE-REPO-LENS)
 //   - no compiled dist command carries a COMPLIANCE: key (the AC-32 successor):
 //     the Git ops take ISSUE_REQUIRED / APPLY_CONVENTIONS instead
-//   - implement.md passes each mechanism input exactly once, in its Git setup-task
-//     spawn
+//   - implement.md passes ISSUE_REQUIRED once, in its Git setup-task spawn, and
+//     APPLY_CONVENTIONS twice, once in that spawn and once in its Phase 9 Git
+//     ensure-pr-ready spawn (the Git agent opens the PR, so it retitles by convention)
 //   - every mechanism-input key line in every dist command sits in a Git-agent
 //     call — never a Code agent, including inside a multi-agent recipe fence
 //   - no compiled dist/commands/*.md contains COMPLIANCE_ENABLED, devflow-compliance
@@ -1547,20 +1548,25 @@ describe('compliance wiring in compiled host commands (review lens) + mechanism 
     }
   });
 
-  it('implement.md passes each mechanism input exactly once, in its Git setup-task spawn (AC-32 successor)', async () => {
+  it('implement.md passes ISSUE_REQUIRED once in its Git setup-task spawn and APPLY_CONVENTIONS in that spawn and the ensure-pr-ready spawn (AC-32 successor)', async () => {
     const content = await fs.readFile(path.join(BUILT_COMMANDS, 'implement.md'), 'utf-8');
     expect(content, 'implement.md must contain ISSUE_NUMBER (issue-first threading, Phase E)').toContain('ISSUE_NUMBER');
     expect(content, 'implement.md must not contain COMPLIANCE_ENABLED').not.toContain('COMPLIANCE_ENABLED');
-    for (const key of ['ISSUE_REQUIRED', 'APPLY_CONVENTIONS'] as const) {
-      const lines = content.split('\n').filter(l => l === `${key}: {${key}}`);
-      expect(lines, `implement.md must pass \`${key}: {${key}}\` exactly once`).toHaveLength(1);
-    }
-    const setupFence = [...content.matchAll(/```[^\n]*\n[\s\S]*?```/g)]
+    const gitFence = (operation: string): string | undefined => [...content.matchAll(/```[^\n]*\n[\s\S]*?```/g)]
       .map(m => m[0])
-      .find(f => f.includes('Agent(subagent_type="Git")') && f.includes('OPERATION: setup-task'));
+      .find(f => f.includes('Agent(subagent_type="Git")') && f.includes(`OPERATION: ${operation}`));
+    for (const [key, times] of [['ISSUE_REQUIRED', 1], ['APPLY_CONVENTIONS', 2]] as const) {
+      const lines = content.split('\n').filter(l => l === `${key}: {${key}}`);
+      expect(lines, `implement.md must pass \`${key}: {${key}}\` exactly ${times} time(s)`).toHaveLength(times);
+    }
+    const setupFence = gitFence('setup-task');
     expect(setupFence, 'implement.md has no Git setup-task spawn fence').toBeDefined();
     expect(setupFence).toContain('ISSUE_REQUIRED: {ISSUE_REQUIRED}');
     expect(setupFence).toContain('APPLY_CONVENTIONS: {APPLY_CONVENTIONS}');
+    const prFence = gitFence('ensure-pr-ready');
+    expect(prFence, 'implement.md has no Git ensure-pr-ready spawn fence').toBeDefined();
+    expect(prFence).toContain('APPLY_CONVENTIONS: {APPLY_CONVENTIONS}');
+    expect(prFence, 'ISSUE_REQUIRED gates only the ticket-link ask in setup-task').not.toContain('ISSUE_REQUIRED');
   });
 
   it('no compiled dist/commands/*.md passes COMPLIANCE:, or contains COMPLIANCE_ENABLED, devflow-compliance, or comment-pr', async () => {

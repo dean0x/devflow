@@ -865,6 +865,15 @@ export const INFORMATIONAL_OP_MENTIONS: readonly InformationalOpMention[] = [
     why: 'Names which earlier operation produced the issue reference the caller already holds; ' +
       'it reads that Output value and runs none of the producing operation\'s steps.',
   }))),
+  // ensure-pr-ready's handoff paste gate (moved from the Code agent, D-PR-BY-GIT) names the two producers.
+  ...TRACKER_PROVIDERS.flatMap(({ id }) => ['setup-task', 'fetch-issue'].map(target => ({
+    file: `tracker/${id}/ensure-pr-ready.md`,
+    target,
+    anchor: 'The `setup-task` and `fetch-issue` Output blocks end with a `### Handoff Values` block',
+    why: 'Says which operations produce the Handoff Values block the pasted ISSUE_PR_LINK came from; ' +
+      'this operation receives that value as an input and shape-checks it, and runs none of the ' +
+      'producing operation\'s steps.',
+  }))),
   ...['jira', 'linear'].map(id => ({
     file: `tracker/${id}/ensure-pr-ready.md`,
     target: 'gather-release-evidence',

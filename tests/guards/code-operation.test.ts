@@ -1,7 +1,7 @@
 /**
  * D-CODE-OPERATION-MODES — every Code spawn names its operating mode on its first prompt line.
  *
- * The Code agent works in one of eight modes, and its Step 0 table loads skills by mode. A spawn
+ * The Code agent works in one of seven modes, and its Step 0 table loads skills by mode. A spawn
  * that leaves the mode out falls back to `implement`, the loosest protocol, with no regression-test
  * rule and every mode skill judged against a plan that is not there. So the mode is not optional in
  * practice: each Code spawn in the compiled commands opens its prompt with `OPERATION: <mode>`, the
@@ -12,8 +12,8 @@
  * collector in tests/helpers.ts that the compliance-lens test also uses. It fails loudly when dist is
  * absent. Per shape:
  *   - a fenced payload or a workflow template literal: the first non-empty prompt line is
- *     `OPERATION: <one of the eight>`;
- *   - a prose spawn sentence: the sentence contains `OPERATION: <one of the eight>`.
+ *     `OPERATION: <one of the seven>`;
+ *   - a prose spawn sentence: the sentence contains `OPERATION: <one of the seven>`.
  * A mode on a later line does not count, because a reader skimming the first line must see it. Per-host
  * counts meet the floors below, which are test-local constants and not manifest rows: a floor on a
  * spawn count that later work legitimately lowers would block that work, because manifest floors never
@@ -38,7 +38,7 @@ const PREAMBLE_PATH = path.join(ROOT, 'src', 'assets', 'commands', '_partials', 
 
 /** Compiled commands that spawn Code, and the spawn sites each carries today. Floors: may only rise. */
 const OPERATION_FLOORS: Readonly<Record<string, number>> = {
-  'implement.md': 10,
+  'implement.md': 9,
   'resolve.md': 3,
   'debug.md': 1,
   'dynamic-build.md': 8,
@@ -86,7 +86,6 @@ const MODE_PINS: ReadonlyArray<readonly [string, string, string]> = [
   ['implement.md', 'Fix alignment issues', 'alignment-fix'],
   ['implement.md', 'Fix validation failures', 'validation-fix'],
   ['implement.md', 'Fix QA test failures', 'qa-fix'],
-  ['implement.md', 'Create the unified PR for the parallel implementation', 'pr-create'],
   ['implement.md', '`CI_FAILURES`', 'ci-fix'],
   ['resolve.md', 'ISSUES: {fix_now_issues_in_batch}', 'issue-fix'],
   ['resolve.md', 'VALIDATION_FAILURES: {parsed failures from Validate agent}', 'validation-fix'],
@@ -113,7 +112,7 @@ export function collectPinDefects(commands: ReadonlyArray<readonly [string, stri
   return out
 }
 
-/** Named collector: how code.md's mode contract falls short of the eight. */
+/** Named collector: how code.md's mode contract falls short of the seven. */
 export function collectModeContractDefects(codeText: string): string[] {
   const out: string[] = []
   const line = codeText.split('\n').find(l => l.startsWith('- **OPERATION**')) ?? ''
@@ -148,7 +147,7 @@ describe('every compiled Code spawn opens with its OPERATION (D-CODE-OPERATION-M
       .toEqual(Object.keys(OPERATION_FLOORS).sort())
   })
 
-  it('each spawn names one of the eight modes on its first prompt line (or in its sentence)', () => {
+  it('each spawn names one of the seven modes on its first prompt line (or in its sentence)', () => {
     expect(collectOperationDefects(compiled())).toEqual([])
   })
 
@@ -220,10 +219,16 @@ describe('known-bad probes: each shape of untagged spawn is reported (D-CODE-OPE
     expect(defects[0]).toMatch(/^resolve\.md:\d+: the spawn sentence names no OPERATION: <mode>$/)
   })
 
-  it('(d) an OPERATION value outside the eight', () => {
+  it('(d) an OPERATION value outside the seven', () => {
     const defects = collectOperationDefects(seeded('implement.md', '"OPERATION: qa-fix\n', '"OPERATION: qa-patch\n'))
     expect(defects).toHaveLength(1)
     expect(defects[0]).toMatch(/^implement\.md:\d+: OPERATION: qa-patch is not one of implement, issue-fix,/)
+  })
+
+  it('(e) the PR-opening mode is not a Code mode: a Code spawn naming it is reported (D-PR-BY-GIT)', () => {
+    const defects = collectOperationDefects(seeded('implement.md', '"OPERATION: qa-fix\n', '"OPERATION: pr-create\n'))
+    expect(defects).toHaveLength(1)
+    expect(defects[0]).toMatch(/^implement\.md:\d+: OPERATION: pr-create is not one of implement, issue-fix,/)
   })
 
   it('a pinned spawn naming another mode, and a pin whose anchor vanished, are each reported', () => {
@@ -234,8 +239,8 @@ describe('known-bad probes: each shape of untagged spawn is reported (D-CODE-OPE
   })
 })
 
-describe('code.md states the eight-mode contract (D-CODE-OPERATION-MODES)', () => {
-  it('the OPERATION line lists exactly the eight values, and ci-fix and edit have Inputs, Protocol and Return', () => {
+describe('code.md states the seven-mode contract (D-CODE-OPERATION-MODES)', () => {
+  it('the OPERATION line lists exactly the seven values, and ci-fix and edit have Inputs, Protocol and Return', () => {
     expect(collectModeContractDefects(resolveAgentSource('code').content)).toEqual([])
   })
 
@@ -250,5 +255,53 @@ describe('code.md states the eight-mode contract (D-CODE-OPERATION-MODES)', () =
     const lostProtocol = real.replace(/(## Mode: edit[\s\S]*?)\*\*Protocol:\*\*/, '$1**Steps:**')
     expect(lostProtocol, 'the seed must land').not.toBe(real)
     expect(collectModeContractDefects(lostProtocol)).toEqual(['## Mode: edit has no **Protocol:**'])
+  })
+})
+
+// ── The Code agent opens no PR (D-PR-BY-GIT, AC-203) ────────────────────────────────────────────────
+//
+// The Git agent's ensure-pr-ready opens the PR under every strategy, so the Code body carries no PR text:
+// no input, no paste gate, no D11 PR-body paragraph, no mode. What it keeps is the commit and push of
+// Responsibility 6 and the security-scan block (D-SCAN-IN-CODE). The compiled body is held under
+// CODE_BODY_MAX_BYTES, registered as `code-body-max` in tests/fixtures/numeric-floors.json: lowered by
+// a pass that cut the artifact, never raised to fit one that grew.
+
+/** The compiled Code agent body, in bytes. Registered as `code-body-max`; lowered, never raised. */
+const CODE_BODY_MAX_BYTES = 16_500
+
+/** Phrases that belong to opening a PR, none of which the Code body may carry. */
+const PR_ONLY_PHRASES: readonly string[] = [
+  'CREATE_PR', 'pr-create', 'ISSUE_PR_LINK', 'ISSUE_NUMBER', 'PR_EXCEPTIONS', 'PR_TEST_PLAN_BLOCK',
+  'PR_DESCRIPTION_GUIDANCE', '## Related Issues', 'D11 scrub', 'gh pr create', 'Create PR', 'PR (if created)',
+]
+
+/** Named collector: how a Code body falls short of "opens no PR, and stays under its size ceiling". */
+export function collectCodeBodyDefects(body: string, ceiling: number): string[] {
+  const out: string[] = []
+  for (const phrase of PR_ONLY_PHRASES) if (body.includes(phrase)) out.push(`the Code body names "${phrase}"`)
+  const bytes = Buffer.byteLength(body)
+  if (bytes > ceiling) out.push(`the Code body is ${bytes} bytes, ceiling ${ceiling}`)
+  for (const kept of ['**Commit and push**', '**Security scan (conditional):**']) {
+    if (!body.includes(kept)) out.push(`the Code body lost "${kept}"`)
+  }
+  return out
+}
+
+describe('the Code agent opens no PR and its body stays under code-body-max (D-PR-BY-GIT)', () => {
+  const body = (): string => resolveAgentSource('code').content
+
+  it('the compiled body names no PR-opening text, keeps commit-and-push and the scan, and fits the ceiling', () => {
+    expect(Buffer.byteLength(body()), 'the body is empty — the guard would pass vacuously').toBeGreaterThan(10_000)
+    expect(collectCodeBodyDefects(body(), CODE_BODY_MAX_BYTES)).toEqual([])
+  })
+
+  it('known-bad probe: a PR phrase, a lost commit rule and an oversize body are each reported', () => {
+    const real = body()
+    expect(collectCodeBodyDefects(real, CODE_BODY_MAX_BYTES), 'the real body is clean, so each seed fails for its own reason').toEqual([])
+    expect(collectCodeBodyDefects(`${real}\nCREATE_PR: true\n`, CODE_BODY_MAX_BYTES)).toEqual(['the Code body names "CREATE_PR"'])
+    expect(collectCodeBodyDefects(real.replace('**Commit and push**', '**Commit**'), CODE_BODY_MAX_BYTES))
+      .toEqual(['the Code body lost "**Commit and push**"'])
+    const bytes = Buffer.byteLength(real)
+    expect(collectCodeBodyDefects(real, bytes - 1)).toEqual([`the Code body is ${bytes} bytes, ceiling ${bytes - 1}`])
   })
 })

@@ -207,7 +207,6 @@ Ask user via AskUserQuestion: "Want me to implement this fix?"
   TASK_DESCRIPTION: Implement the fix for this root cause: {bug description}
   EXECUTION_PLAN: {Root Cause, Key Findings and Recommended Fix from Phase 6, with their file:line references}
   PUSH: false
-  CREATE_PR: false
   <!-- learning:on -->
   DECISIONS_CONTEXT: {decisions_context}
   <!-- learning:end -->

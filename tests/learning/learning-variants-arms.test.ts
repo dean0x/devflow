@@ -448,14 +448,16 @@ describe('settings blocks per variant (AC-138)', () => {
 
 describe('no status-line anchor sits inside an arm, and no off arm repeats one (AC-153)', () => {
   /** The anchors the status-line sampler reads from a source file, taken from the sampler itself. */
-  function collectSamplerAnchors(): Array<{ target: 'code' | 'dynamicBuild' | 'resolveMds'; anchor: string }> {
+  function collectSamplerAnchors(): Array<{ target: 'prReady' | 'dynamicBuild' | 'resolveMds'; anchor: string }> {
     const helpers = readFileSync(path.join(ROOT, 'tests/helpers.ts'), 'utf-8')
-    return [...helpers.matchAll(/singleLine\((code|dynamicBuild|resolveMds), '((?:[^'\\]|\\.)*)'\)/g)]
-      .map(m => ({ target: m[1] as 'code' | 'dynamicBuild' | 'resolveMds', anchor: m[2].replace(/\\'/g, "'") }))
+    return [...helpers.matchAll(/singleLine\((gitOp\('ensure-pr-ready'\)|dynamicBuild|resolveMds), '((?:[^'\\]|\\.)*)'\)/g)]
+      .map(m => ({ target: (m[1] === "gitOp('ensure-pr-ready')" ? 'prReady' : m[1]) as 'prReady' | 'dynamicBuild' | 'resolveMds', anchor: m[2].replace(/\\'/g, "'") }))
   }
 
+  // The three PR-body lines moved from the Code agent to ensure-pr-ready's PR skeleton (D-PR-BY-GIT). That
+  // skeleton is a reference partial, which carries no learning arms and has no learning-off variant.
   const SOURCE_OF = {
-    code: 'src/assets/agents/code.mds',
+    prReady: 'src/assets/mds/git/_ops_steps.mds',
     dynamicBuild: 'src/assets/commands/dynamic-build.mds',
     resolveMds: 'src/assets/commands/resolve.mds',
   } as const
@@ -480,9 +482,9 @@ describe('no status-line anchor sits inside an arm, and no off arm repeats one (
 
   const read = (rel: string): string => readFileSync(path.join(ROOT, rel), 'utf-8')
 
-  it('the sampler reads 11 source anchors: 3 from code, 2 from dynamic-build and 6 from resolve', () => {
+  it('the sampler reads 11 source anchors: 3 from the ensure-pr-ready skeleton, 2 from dynamic-build and 6 from resolve', () => {
     const anchors = collectSamplerAnchors()
-    expect(anchors.filter(a => a.target === 'code')).toHaveLength(3)
+    expect(anchors.filter(a => a.target === 'prReady')).toHaveLength(3)
     expect(anchors.filter(a => a.target === 'dynamicBuild')).toHaveLength(2)
     expect(anchors.filter(a => a.target === 'resolveMds')).toHaveLength(6)
   })
@@ -493,20 +495,20 @@ describe('no status-line anchor sits inside an arm, and no off arm repeats one (
 
   it('no learning-off file repeats an anchor line, so the sampler reading the on variant meets each once', () => {
     for (const { target, anchor } of collectSamplerAnchors()) {
-      const off = target === 'code'
-        ? resolveLearningOffSource('agents', 'code')
-        : resolveLearningOffSource('commands', target === 'dynamicBuild' ? 'dynamic-build' : 'resolve')
+      if (target === 'prReady') continue // a reference has no learning-off variant
+      const off = resolveLearningOffSource('commands', target === 'dynamicBuild' ? 'dynamic-build' : 'resolve')
       const copies = (off ?? '').split('\n').filter(l => l.includes(anchor)).length
       expect(copies, `"${anchor.slice(0, 50)}" in the learning-off build`).toBeLessThanOrEqual(1)
     }
   })
 
   it('known-bad probes: an anchor inside an arm, a repeated anchor and a vanished anchor are reported', () => {
-    const anchors = [{ target: 'code' as const, anchor: 'ANCHOR LINE' }]
+    const anchors = [{ target: 'prReady' as const, anchor: 'ANCHOR LINE' }]
     const at = (body: string): string[] => collectAnchorDefects(anchors, () => body)
+    const src = 'src/assets/mds/git/_ops_steps.mds'
     expect(at('a\nANCHOR LINE\nb')).toEqual([])
-    expect(at('a\n<!-- learning:on -->\nANCHOR LINE\n<!-- learning:end -->\nb')).toEqual(['src/assets/agents/code.mds: "ANCHOR LINE" sits inside a learning:on arm'])
-    expect(at('ANCHOR LINE\nANCHOR LINE')).toEqual(['src/assets/agents/code.mds: "ANCHOR LINE" appears 2 times, expected once'])
-    expect(at('nothing')).toEqual(['src/assets/agents/code.mds: "ANCHOR LINE" appears 0 times, expected once'])
+    expect(at('a\n<!-- learning:on -->\nANCHOR LINE\n<!-- learning:end -->\nb')).toEqual([`${src}: "ANCHOR LINE" sits inside a learning:on arm`])
+    expect(at('ANCHOR LINE\nANCHOR LINE')).toEqual([`${src}: "ANCHOR LINE" appears 2 times, expected once`])
+    expect(at('nothing')).toEqual([`${src}: "ANCHOR LINE" appears 0 times, expected once`])
   })
 })

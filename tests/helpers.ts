@@ -372,12 +372,12 @@ export function resolveAllAgents(root: string = ROOT): Map<string, AgentSource> 
 }
 
 /**
- * The eight operating modes of the Code agent (`OPERATION`), `implement` being the default when
+ * The seven operating modes of the Code agent (`OPERATION`), `implement` being the default when
  * absent. One list for the code.md Step 0 table (tests/guards/code-preload.test.ts) and for the
  * spawn-site guard (tests/guards/code-operation.test.ts).
  */
 export const CODE_OPERATIONS: readonly string[] = [
-  'implement', 'issue-fix', 'validation-fix', 'alignment-fix', 'qa-fix', 'pr-create', 'ci-fix', 'edit',
+  'implement', 'issue-fix', 'validation-fix', 'alignment-fix', 'qa-fix', 'ci-fix', 'edit',
 ]
 
 export interface CodeSpawnSite {
@@ -903,6 +903,27 @@ export function gitOperationReferenceCorpus(provider = 'github', root = ROOT): C
       )
     }
   })
+}
+
+/**
+ * The compiled `ensure-pr-ready` reference under one provider: the operation that opens the PR
+ * (D-PR-BY-GIT), holding the paste gates the Code agent's Responsibility 7 once held.
+ *
+ * The PR skeleton is one write expanded into three provider files, so the GitHub copy stands
+ * for it in the single-valued guards. Fail-loud on an absent file.
+ *
+ * @param provider - Tracker provider whose copy to read.
+ * @param root - Repository root to resolve paths against (default: ROOT).
+ */
+export function ensurePrReadyReference(provider = 'github', root = ROOT): string {
+  const rel = operationReferenceRel('ensure-pr-ready', provider)
+  if (rel === null) throw new Error('ensurePrReadyReference: ensure-pr-ready has no reference path')
+  const abs = path.join(compiledSkillRefsDir(root), ...rel.split('/'))
+  try {
+    return readFileSync(abs, 'utf-8')
+  } catch {
+    throw new Error(`ensurePrReadyReference: ${abs} is absent\n  Run \`npm run build\` first — the references are generated artifacts`)
+  }
 }
 
 // ── Host steps inside a tracker operation's reference ─────────────────────────
@@ -1517,7 +1538,6 @@ export function statusLineRefReader(): StatusLineRefReader {
  */
 export function extractStatusLines(gitContent?: string): string {
   const git = gitContent ?? resolveAgentSource('git').content
-  const code = resolveAgentSource('code').content
   const dynamicBuild = readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'dynamic-build.mds'), 'utf-8')
   const resolveMds = readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'resolve.mds'), 'utf-8')
 
@@ -1682,10 +1702,12 @@ export function extractStatusLines(gitContent?: string): string {
     singleLine(ref('pr/post-resolution-summary.md'), '     <!-- devflow:resolution-summary'),
     // …the third moved with post-wave-report's compose step.
     singleLine(ref('tracker/github/post-wave-report.md'), '   <!-- devflow:wave-report'),
-    // code.md: PR-body guidance table and D11 scrub directive (lines 93, 95, 99)
-    singleLine(code, '| Related Issues (ISSUE_NUMBER provided) |'),
-    singleLine(code, 'When `ISSUE_NUMBER` is provided, always include'),
-    singleLine(code, '**D11 scrub (PR body is a GitHub-visible sink):**'),
+    // PR-body guidance table and D11 scrub directive (baseline lines 93, 95, 99). They moved from the
+    // Code agent to ensure-pr-ready step 4a with the PR (D-PR-BY-GIT) and are sampled from its one
+    // reference, byte for byte (D-FROZEN-REPOINT).
+    singleLine(gitOp('ensure-pr-ready'), '| Related Issues (ISSUE_NUMBER provided) |'),
+    singleLine(gitOp('ensure-pr-ready'), 'When `ISSUE_NUMBER` is provided, always include'),
+    singleLine(gitOp('ensure-pr-ready'), '**D11 scrub (PR body is a GitHub-visible sink):**'),
     // dynamic-build.mds: wave-report dedup and DEGRADED rules (lines 522, 524).
     // The old anchor ("deduplicates via marker `<!-- devflow:wave-report …`") no
     // longer exists: P2-S12 removed the caller-restated marker literal, because the

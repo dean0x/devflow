@@ -180,11 +180,12 @@ const DISPOSITION: readonly DispositionRow[] = [
   },
   {
     row: 7,
-    subject: '/code-review, /bug-analysis PR creation (ensure-pr-ready)',
+    subject: '/implement Phase 9, /code-review and /bug-analysis PR creation (ensure-pr-ready)',
     inputs: ['APPLY_CONVENTIONS'],
     on: 'create as today; retitle per the recorded convention',
     off: 'create as today',
     sites: [
+      { file: 'commands/implement.md', after: '### Phase 9: Open PR', anchor: fenceKey('APPLY_CONVENTIONS'), phrase: fenceKey('APPLY_CONVENTIONS') },
       { file: 'commands/code-review.md', anchor: fenceKey('APPLY_CONVENTIONS'), phrase: fenceKey('APPLY_CONVENTIONS') },
       { file: 'commands/bug-analysis.md', anchor: fenceKey('APPLY_CONVENTIONS'), phrase: fenceKey('APPLY_CONVENTIONS') },
     ],
@@ -691,7 +692,9 @@ describe('orchestrator decisions (2026-09-25): no ticket gate outside /implement
 
   it('/code-review and /bug-analysis create the PR as today under both policies', () => {
     const row7 = DISPOSITION.find(r => r.row === 7)!
-    expect(row7.sites.map(s => s.file).sort()).toEqual([...REVIEW_HOSTS].sort())
+    // Row 7 governs every ensure-pr-ready caller's APPLY_CONVENTIONS pass: the two review hosts and, since the Git
+    // agent opens /implement's PR too (D-PR-BY-GIT), its Phase 9. /implement's ticket gate is row 5, in Phase 1.
+    expect(row7.sites.map(s => s.file).sort()).toEqual([...REVIEW_HOSTS, 'commands/implement.md'].sort())
     expect(row7.on.startsWith('create as today'), 'row 7 on').toBe(true)
     expect(row7.off, 'row 7 off').toBe('create as today')
     expect(collectReviewTicketGates(gated), 'a ticket gate in a review host').toEqual([])

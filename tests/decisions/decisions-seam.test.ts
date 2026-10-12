@@ -1,16 +1,14 @@
 /**
  * D-DECISIONS-DECLARED-ONLY (#426) — `DECISIONS_CONTEXT` goes only to the agent
- * types whose contract declares it, and every Code spawn carries it, bar one: the
- * `OPERATION: pr-create` spawn, which loads no mode skill and only opens the PR.
+ * types whose contract declares it, and every Code spawn carries it. The Code agent
+ * opens no PR (D-PR-BY-GIT), so no spawn is exempt.
  *
  * The index is the largest single input a command can hand an agent, and the Code
  * agent no longer reads it for itself, so the seam between a command and the agents
  * it spawns is where decisions reach an agent or do not. This guard reads the
  * compiled commands (`dist/commands/*.md`) and holds that seam to three rules:
  *
- *   1. every Code spawn site passes the key, except the pr-create spawn, which
- *      must not (the exemption is matched by the `OPERATION: pr-create` literal
- *      and pinned in both directions);
+ *   1. every Code spawn site passes the key, with no exemption by operation;
  *   2. a spawn site that passes the key names a declared type;
  *   3. every prose sentence that gives `DECISIONS_CONTEXT` away — it holds the word
  *      "pass" or "inject" — names its receiver, and every receiver it names is
@@ -91,24 +89,12 @@ function spawnedTypes(text: string): string[] {
   return [...new Set([...text.matchAll(/(?:subagent_type="|agentType: ?")([A-Z][A-Za-z]+)"/g)].map(m => m[1]))]
 }
 
-/** The one Code spawn that takes no index: pr-create loads no mode skill and only opens the PR, so the index is pure cost there. */
-const KEYLESS_OPERATION = 'OPERATION: pr-create'
-
-/** Named collector: Code spawn sites that do not pass the key and are not the exempt pr-create spawn (rule 1). */
+/** Named collector: Code spawn sites that do not pass the key (rule 1). */
 function collectKeylessCodeSites(commands: ReadonlyArray<readonly [string, string]>): string[] {
   return commands.flatMap(([file, text]) =>
     collectCodeSpawnSites(file, text, 'Code')
-      .filter(s => !s.payload.includes(CONTEXT_TOKEN) && !s.payload.includes(KEYLESS_OPERATION))
+      .filter(s => !s.payload.includes(CONTEXT_TOKEN))
       .map(s => `${file}:${s.line}`),
-  )
-}
-
-/** Named collector: pr-create Code spawn sites, the exempt ones (rule 1's exemption). */
-function collectPrCreateSites(commands: ReadonlyArray<readonly [string, string]>): Array<{ site: string; keyed: boolean }> {
-  return commands.flatMap(([file, text]) =>
-    collectCodeSpawnSites(file, text, 'Code')
-      .filter(s => s.payload.includes(KEYLESS_OPERATION))
-      .map(s => ({ site: `${file}:${s.line}`, keyed: s.payload.includes(CONTEXT_TOKEN) })),
   )
 }
 
@@ -229,37 +215,22 @@ describe('the declared set is computed from the agent sources', () => {
   })
 })
 
-describe('rule 1: every Code spawn site passes the key, bar the pr-create spawn', () => {
+describe('rule 1: every Code spawn site passes the key', () => {
   it('finds the Code sites in the compiled commands (non-vacuous)', () => {
     const total = compiled().reduce((n, [file, text]) => n + collectCodeSpawnSites(file, text, 'Code').length, 0)
     expect(total, 'Code spawn sites found').toBeGreaterThanOrEqual(CODE_SITE_FLOOR)
   })
 
-  it('every site but the pr-create spawn carries DECISIONS_CONTEXT, in each of the four syntaxes plus the engine pseudo-form', () => {
+  it('every site carries DECISIONS_CONTEXT, in each of the four syntaxes plus the engine pseudo-form', () => {
     expect(collectKeylessCodeSites(compiled())).toEqual([])
   })
 
-  it('the pr-create spawn is exempt: exactly one exists, in implement.md, and it carries no key', () => {
-    const sites = collectPrCreateSites(compiled())
-    expect(sites, 'pr-create Code spawn sites').toHaveLength(1)
-    expect(sites[0].site).toMatch(/^implement\.md:\d+$/)
-    expect(sites.filter(s => s.keyed), 'pr-create spawns that carry the key').toEqual([])
-  })
-
-  it('known-bad probe: a pr-create spawn that carries the key is reported', () => {
+  it('known-bad probe: no operation is exempt, so a keyless spawn that names the retired pr-create mode is reported', () => {
     const host = 'implement.md'
     const real = requireDistFile(host)
-    const from = 'TASK_DESCRIPTION: Create the unified PR for the parallel implementation\n'
+    const from = '"OPERATION: alignment-fix\n   TASK_ID: {task-id}\n   TASK_DESCRIPTION: Fix alignment issues\n   MISALIGNMENTS: {structured misalignments from Evaluate agent}\n   SCOPE: Fix only the listed misalignments, no other changes\n   DECISIONS_CONTEXT: {decisions_context}\n'
     expect(real, `the seed anchor must exist in ${host}`).toContain(from)
-    const seeded = real.replace(from, `${from}DECISIONS_CONTEXT: {decisions_context}\n`)
-    expect(seeded, 'the seed must change the text').not.toBe(real)
-    expect(collectPrCreateSites([[host, seeded]]).filter(s => s.keyed)).toHaveLength(1)
-  })
-
-  it('known-bad probe: the exemption is the OPERATION literal, so a keyless spawn that is not pr-create is reported', () => {
-    const host = 'implement.md'
-    const real = requireDistFile(host)
-    const seeded = real.replace(KEYLESS_OPERATION, 'OPERATION: implement')
+    const seeded = real.replace(from, '"OPERATION: pr-create\n   TASK_ID: {task-id}\n   TASK_DESCRIPTION: Fix alignment issues\n')
     expect(seeded, 'the seed must change the text').not.toBe(real)
     const found = collectKeylessCodeSites([[host, seeded]])
     expect(found).toHaveLength(1)
@@ -276,7 +247,7 @@ describe('rule 1: every Code spawn site passes the key, bar the pr-create spawn'
   }
 
   it('known-bad probe: a fenced Code spawn without the key is reported', () => {
-    const found = probe('implement.md', '   CREATE_PR: false\n   DECISIONS_CONTEXT: {decisions_context}\n   ISSUE_NUMBER', '   CREATE_PR: false\n   ISSUE_NUMBER')
+    const found = probe('implement.md', '   DECISIONS_CONTEXT: {decisions_context}\n   COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"\n   ```\n   - Loop back to Phase 5', '   COMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}"\n   ```\n   - Loop back to Phase 5')
     expect(found).toHaveLength(1)
     expect(found[0]).toMatch(/^implement\.md:\d+$/)
   })

@@ -664,6 +664,48 @@ describe('forward: every KEY: passed is declared in **Input:**', () => {
     }
   })
 
+  // D-PR-BY-GIT (#448): ensure-pr-ready opens /implement's PR, so the inputs the Code agent's Responsibility 7
+  // used to read are the operation's inputs now, and the Phase 9 spawn is the one caller that passes them all.
+  /** The inputs #448 added to ensure-pr-ready. */
+  const PR_OPEN_INPUTS = ['BASE_BRANCH', 'TASK_ID', 'ISSUE_NUMBER', 'ISSUE_PR_LINK', 'PR_EXCEPTIONS', 'COMMIT_UNCOMMITTED'] as const
+  /** What /implement's Phase 9 spawn passes: the six, and the three the operation already took. */
+  const PHASE9_PASSES = [...PR_OPEN_INPUTS, 'PR_DESCRIPTION_GUIDANCE', 'PR_TEST_PLAN_BLOCK', 'APPLY_CONVENTIONS'] as const
+
+  /** Named collector: the wanted keys a harvested spawn does not pass. */
+  function collectUnpassedInputs(keys: ReadonlySet<string>, wanted: readonly string[]): string[] {
+    return wanted.filter(key => !keys.has(key)).map(key => `the spawn does not pass ${key}`)
+  }
+
+  /** The harvest of /implement's ensure-pr-ready fence, attributed to that one file (keysPassedByOp is the union over callers). */
+  function implementPrOpenHarvest(): ReturnType<typeof harvestFence>[] {
+    const implement = corpusEntries.find(e => path.basename(e.path) === 'implement.md')?.content ?? ''
+    return parseFences(implement)
+      .filter(f => isAgentBlock(f, 'Git'))
+      .map(f => harvestFence(f))
+      .filter(h => h?.op === 'ensure-pr-ready')
+  }
+
+  it('ensure-pr-ready declares the PR-opening inputs as optional, and /implement\'s one Phase 9 spawn passes every input it has a value for', () => {
+    const { required, optional } = parseInputIdentifiers(requireOpSection('ensure-pr-ready'))
+    for (const key of PR_OPEN_INPUTS) expect(optional, `${key} must be a declared optional input`).toContain(key)
+    expect(required, 'the new inputs are optional: review hosts open PRs without them').not.toEqual(expect.arrayContaining([...PR_OPEN_INPUTS]))
+    const harvested = implementPrOpenHarvest()
+    expect(harvested, 'exactly one ensure-pr-ready spawn in /implement').toHaveLength(1)
+    expect(collectUnpassedInputs(harvested[0]!.keys, PHASE9_PASSES)).toEqual([])
+    expect(forwardViolationsFor(requireOpSection('ensure-pr-ready'), harvested[0]!.keys), 'every key the spawn passes is declared').toEqual([])
+  })
+
+  it('known-bad probes: a spawn that drops a new input and one that passes an undeclared key are reported', () => {
+    const implement = corpusEntries.find(e => path.basename(e.path) === 'implement.md')?.content ?? ''
+    const fence = parseFences(implement).find(f => isAgentBlock(f, 'Git') && f.includes('OPERATION: ensure-pr-ready'))
+    expect(fence, 'the real Phase 9 fence').toBeDefined()
+    const dropped = fence!.replace('COMMIT_UNCOMMITTED: false\n', '')
+    expect(dropped, 'the drop seed must land').not.toBe(fence)
+    expect(collectUnpassedInputs(harvestFence(dropped)!.keys, PHASE9_PASSES)).toEqual(['the spawn does not pass COMMIT_UNCOMMITTED'])
+    const extra = fence!.replace('COMMIT_UNCOMMITTED: false\n', 'COMMIT_UNCOMMITTED: false\nCREATE_PR: true\n')
+    expect(forwardViolationsFor(requireOpSection('ensure-pr-ready'), harvestFence(extra)!.keys)).toEqual(['CREATE_PR'])
+  })
+
   it('process-only key: a key mentioned only in **Process:** but not in **Input:** is a violation', () => {
     // The OLD predicate (section.includes(`\`KEY\``)) checked the WHOLE section, so a key
     // appearing in **Process:** (e.g. "`PROCESS_ONLY_KEY`") would pass — no violation reported.

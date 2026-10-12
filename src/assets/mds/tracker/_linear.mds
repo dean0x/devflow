@@ -453,7 +453,8 @@ Load when the resolved tracker provider is `linear` and the operation is `ensure
 ### Process
 
 {{opsteps.ensure_pr_ready_steps_to_4a()}}
-4b. (ALWAYS-ON) Ensure the PR body contains a `## Related Issues` section naming the verified issue when one is known. Resolution order:
+
+4b. (ALWAYS-ON) Ensure the PR body contains a `## Related Issues` section naming the verified issue when one is known. A given `ISSUE_PR_LINK` is already decided in step 4a: skip the resolution and the rendering below. Resolution order:
    a. Prefer the issue reference returned by `setup-task` / `ensure-traceable-issue` for this branch — it was verified at creation time.
    b. Otherwise fall back to the branch name pattern `{type}/{REF}-{slug}`: {{common.ref_preflight_branch("that, after ASCII-upper normalisation, satisfies `^[A-Z][A-Z0-9]{0,9}-[1-9][0-9]{0,8}$`")}}
    c. The *fetch by key* capability absent or denied ⇒ `TRACEABILITY: DEGRADED (no tracker tool for fetch by key)` and skip the section; the PR is never blocked on it.
