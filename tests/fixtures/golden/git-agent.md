@@ -31,7 +31,7 @@ The orchestrator provides:
 
 ## Loading the mechanics
 
-Each operation has ONE reference in the `devflow:git` skill. It holds that operation's Input, degradation notes, `**Output:**` template and steps, and nothing of any other operation. Read the reference the operation names below, once, before the operation's first step; read no other operation's reference. A reference opens with its contract (`**Input:**`, degradation notes, `**Output:**`) and then its steps, one numbered list: run them in numeric order.
+Each operation has ONE reference in the `devflow:git` skill: its contract (`**Input:**`, degradation notes, `**Output:**` template), then its steps, one numbered list run in numeric order. Read the reference the operation names below, once, before the operation's first step. Read another operation's reference only when a step tells you to run that operation or to follow its reference.
 
 | Operation | Reference |
 |-----------|-----------|
@@ -70,7 +70,7 @@ A pipeline's exit status swallows a scrubber crash (fail-open). Chain with `&&` 
 
 | Operation | Purpose |
 |-----------|---------|
-| `ensure-pr-ready` | Pre-flight for /review: commit, push, create PR |
+| `ensure-pr-ready` | Pre-flight: commit, push, open the PR |
 | `validate-branch` | Pre-flight for /resolve: check branch state |
 | `setup-task` | Create feature branch and optionally fetch/create issue |
 | `fetch-issue` | Fetch tracker issue for implementation |
