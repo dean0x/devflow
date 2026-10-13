@@ -152,12 +152,26 @@ const NOT_A_REPO: ScriptedCall = { tool: 'git', args: ARGV.toplevel, exit: 128, 
 // The resolver's other local reads, written out independently of the script.
 /**
  * D-PERSONAL-UNTRACKED (#487): is anything git tracks reachable at the path the
- * personal file is opened at — the file in any letter case, or `.devflow` itself
- * as a symlink, gitlink or file? One call; any listed entry means tracked.
+ * personal file is opened at — the file in any spelling a case-folding file
+ * system opens for it, or `.devflow` itself as a symlink, gitlink or file? One
+ * call; any listed entry means tracked. APFS folds U+FB02 to "fl", U+FB01 to "fi"
+ * and U+017F to "s", which git's ASCII-only `icase` does not.
  */
+const FL = '\u{FB02}';
+const FI = '\u{FB01}';
+const LONG_S = '\u{17F}';
 const ARGV_TRACKED = [
   '-c', 'core.fsmonitor=false', 'ls-files', '-z', '--',
-  ':(icase,literal).devflow/config.json', ':(icase,glob)[.]devflow',
+  ':(icase,literal).devflow/config.json',
+  `:(icase,literal).devflow/con${FI}g.json`,
+  `:(icase,literal).devflow/config.j${LONG_S}on`,
+  `:(icase,literal).devflow/con${FI}g.j${LONG_S}on`,
+  `:(icase,literal).dev${FL}ow/config.json`,
+  `:(icase,literal).dev${FL}ow/con${FI}g.json`,
+  `:(icase,literal).dev${FL}ow/config.j${LONG_S}on`,
+  `:(icase,literal).dev${FL}ow/con${FI}g.j${LONG_S}on`,
+  ':(icase,glob)[.]devflow',
+  `:(icase,glob)[.]dev${FL}ow`,
 ];
 /** D-LENS-UNION: the default branch this clone recorded for origin. */
 const ARGV_ORIGIN_HEAD = ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'];
@@ -693,14 +707,23 @@ describe('D-PERSONAL-UNTRACKED: a tracked .devflow/config.json is ignored, with 
   describe('#487: committed content reaching the personal path by another layout', { timeout: 60_000 }, () => {
     const FULL = '{"reviewPublication":"full"}\n';
 
-    /** Whether `dir` folds `A` and `a` into one name (APFS and NTFS by default; ext4 does not). */
-    function foldsCase(dir: string): boolean {
-      const probe = path.join(dir, 'CaseProbe');
+    /** Whether the file system under `dir` opens the name `written` when asked for `asked`. */
+    function opensAs(dir: string, written: string, asked: string): boolean {
+      const probe = path.join(dir, written);
       fs.writeFileSync(probe, '');
       try {
-        return fs.existsSync(path.join(dir, 'caseprobe'));
+        return fs.existsSync(path.join(dir, asked));
       } finally {
         fs.rmSync(probe, { force: true });
+      }
+    }
+    /** Whether a probe directory under the system temp folder passes `check`. */
+    function probeTmp(check: (dir: string) => boolean): boolean {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-case-probe-'));
+      try {
+        return check(dir);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
       }
     }
     /**
@@ -710,16 +733,12 @@ describe('D-PERSONAL-UNTRACKED: a tracked .devflow/config.json is ignored, with 
      * system and the state a case-sensitive one reaches when a branch commits a
      * variant beside the user's own file. The `checkout` rows commit the variant
      * on disk too, so they need a file system where `config.json` opens
-     * `CONFIG.json` and are skipped elsewhere (Linux CI) rather than passing empty.
+     * `CONFIG.json` (APFS and NTFS by default; ext4 does not) — or, for the
+     * Unicode rows, `config.jſon` (APFS) — and are skipped elsewhere (Linux CI)
+     * rather than passing empty.
      */
-    const CASE_FOLDING_FS = (() => {
-      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-case-probe-'));
-      try {
-        return foldsCase(dir);
-      } finally {
-        fs.rmSync(dir, { recursive: true, force: true });
-      }
-    })();
+    const CASE_FOLDING_FS = probeTmp(dir => opensAs(dir, 'CaseProbe', 'caseprobe'));
+    const UNICODE_FOLDING_FS = probeTmp(dir => opensAs(dir, `j${LONG_S}on`, 'json'));
 
     function freshRepo(label: string): string {
       const repo = fs.mkdtempSync(path.join(tmp, `real-${label}-`));
@@ -817,6 +836,35 @@ describe('D-PERSONAL-UNTRACKED: a tracked .devflow/config.json is ignored, with 
       const repo = freshRepo('dir-case-link');
       writeAt(repo, 'vendor/df/config.json', FULL);
       indexOnly(repo, '120000', '.DEVFLOW', 'vendor/df');
+      fs.symlinkSync(path.join('vendor', 'df'), path.join(repo, '.devflow'));
+      expectPersonalIgnored(repo);
+    });
+
+    // git's `icase` folds ASCII only; APFS also folds U+017F, U+FB01 and U+FB02.
+    it.each([
+      [`.devflow/config.j${LONG_S}on`],
+      [`.devflow/con${FI}g.json`],
+      [`.dev${FL}ow/config.json`],
+      [`.DEV${FL}OW/CON${FI}G.J${LONG_S}ON`],
+    ])('layout 2u/3u (index-only, every file system): the index names the Unicode-folded spelling %s beside the opened config.json', (rel) => {
+      const repo = freshRepo('unicode-fold-index');
+      writeAt(repo, '.devflow/config.json', FULL);
+      indexOnly(repo, '100644', rel, FULL);
+      expectPersonalIgnored(repo);
+    });
+
+    it.runIf(UNICODE_FOLDING_FS)('layout 2u/3u (checkout, Unicode-folding file system only): a committed .devﬂow/conﬁg.jſon opens as .devflow/config.json', () => {
+      const repo = freshRepo('unicode-fold-checkout');
+      const rel = `.dev${FL}ow/con${FI}g.j${LONG_S}on`;
+      writeAt(repo, rel, FULL);
+      commitAll(repo, [rel]);
+      expectPersonalIgnored(repo);
+    });
+
+    it('layout 3u (index-only): a committed .devﬂow symlink reaches the opened path through the link', () => {
+      const repo = freshRepo('unicode-fold-link');
+      writeAt(repo, 'vendor/df/config.json', FULL);
+      indexOnly(repo, '120000', `.dev${FL}ow`, 'vendor/df');
       fs.symlinkSync(path.join('vendor', 'df'), path.join(repo, '.devflow'));
       expectPersonalIgnored(repo);
     });

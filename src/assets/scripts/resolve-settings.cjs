@@ -195,10 +195,24 @@ const BLOB_MAX_BUFFER = MAX_CONFIG_BYTES + 1;
 /** The personal file, repository-relative, in git's spelling. */
 const PERSONAL_REL = '.devflow/config.json';
 /**
- * The two pathspecs of the tracking check (D-PERSONAL-UNTRACKED), both matched
- * without regard to letter case, whatever the file system or `core.ignorecase`:
- *   - the personal file itself, so a committed `.devflow/CONFIG.json` or
- *     `.DEVFLOW/config.json` counts where the file system folds case and opens it
+ * The spellings a case-folding file system opens as `.devflow` and `config.json`
+ * beyond ASCII letter case. git's `icase` folds ASCII letters only, but APFS (the
+ * macOS default) compares names by full Unicode case folding, so it also opens
+ * `.devﬂow` (U+FB02 folds to "fl"), `conﬁg.json` (U+FB01 folds to "fi") and
+ * `config.jſon` (U+017F folds to "s") at the personal path. A probe of every code
+ * point on APFS finds no other one that folds into these names and none that it
+ * ignores. The code is written with escapes, so each code point is named.
+ */
+const DEVFLOW_SPELLINGS = Object.freeze(['.devflow', '.dev\u{FB02}ow']);
+const CONFIG_SPELLINGS = Object.freeze(['config.json', 'con\u{FB01}g.json', 'config.j\u{17F}on', 'con\u{FB01}g.j\u{17F}on']);
+/**
+ * The pathspecs of the tracking check (D-PERSONAL-UNTRACKED), each matched
+ * without regard to ASCII letter case, whatever the file system or
+ * `core.ignorecase`, and each spelled every way DEVFLOW_SPELLINGS and
+ * CONFIG_SPELLINGS list:
+ *   - the personal file itself, so a committed `.devflow/CONFIG.json`,
+ *     `.DEVFLOW/config.json` or `.devflow/config.jſon` counts where the file
+ *     system folds the name and opens it
  *   - an index entry named `.devflow` ITSELF, which git records only for a symlink,
  *     a gitlink (submodule) or a plain file, never for a directory: the character
  *     class keeps `glob` from matching as a leading directory, so the many files
@@ -206,7 +220,10 @@ const PERSONAL_REL = '.devflow/config.json';
  *     carries committed content to the path the personal file is opened at.
  * An untracked `.devflow` link is the user's own setup and is not named here.
  */
-const PERSONAL_TRACKING_PATHSPECS = Object.freeze([':(icase,literal)' + PERSONAL_REL, ':(icase,glob)[.]devflow']);
+const PERSONAL_TRACKING_PATHSPECS = Object.freeze([
+  ...DEVFLOW_SPELLINGS.flatMap(dir => CONFIG_SPELLINGS.map(file => ':(icase,literal)' + dir + '/' + file)),
+  ...DEVFLOW_SPELLINGS.map(dir => ':(icase,glob)[.]' + dir.slice(1)),
+]);
 /** The team file, repository-relative, in git's spelling. */
 const PROJECT_REL = '.devflow/project.json';
 
@@ -692,11 +709,12 @@ function gitToplevel(exec, dir) {
  * The question is whether COMMITTED content can reach the path the personal file
  * is opened at, `<root>/.devflow/config.json`. The OS follows a symlinked
  * `.devflow`, resolves a submodule's checkout there, and on a case-folding file
- * system opens `CONFIG.json` or `.DEVFLOW/config.json` for it, so the answer is
- * not only "is this exact path in the index". One `git ls-files -z` over
- * PERSONAL_TRACKING_PATHSPECS asks all of it at once — no further git call: any
- * output is a tracked entry that reaches the path (the file in any letter case,
- * or `.devflow` itself as a symlink, gitlink or file). It reads the index without
+ * system opens `CONFIG.json`, `.DEVFLOW/config.json` or `config.jſon` for it, so
+ * the answer is not only "is this exact path in the index". One `git ls-files -z`
+ * over PERSONAL_TRACKING_PATHSPECS asks all of it at once — no further git call:
+ * any output is a tracked entry that reaches the path (the file in any spelling
+ * the file system folds to it, or `.devflow` itself as a symlink, gitlink or
+ * file). It reads the index without
  * refreshing or writing it. Reading the index runs a configured `core.fsmonitor`
  * hook — an arbitrary command from the repository's config, and on macOS the
  * builtin daemon's start-up — so the call turns it off for itself
