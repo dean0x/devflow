@@ -1,6 +1,6 @@
 ---
 feature: installer-shadowing-learning-variants
-name: Install & Language-focus Stamp, learning-aware
+name: Learning-aware Install & Language-focus Stamp
 description: "Use when changing learning-off variants, convergeLearningVariants, applyLearningToggle, the apply-decisions skill gate or the /code-review language-focus stamp. Keywords: learning-off, converge, stamp."
 category: architecture
 directories: [src/targets/claude-code/learning-install.ts, src/targets/claude-code/language-stamp.ts, src/cli/commands/learning.ts, src/targets/claude-code/installer.ts, src/core/assets.ts]
@@ -8,7 +8,7 @@ created: 2026-10-10
 updated: 2026-10-13
 ---
 
-# Install & Language-focus Stamp, Learning-aware
+# Learning-aware Install & Language-focus Stamp
 
 ## Rules
 

@@ -1,6 +1,6 @@
 ---
 feature: learning-capture-system
-name: Capture system for learning
+name: Learning capture system
 description: "Use when changing the capture hooks, memory/learning queues, machine feature switches or ledger root, or choosing which learning KB to read. Keywords: capture-prompt, queue-append, manifest.json, DF_LEDGER_ROOT."
 category: architecture
 directories:

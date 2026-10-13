@@ -1,6 +1,6 @@
 ---
 feature: learning-capture-system-store
-name: Store, ops and rendering of the learning ledger
+name: Learning store, ops and rendering
 description: "Use when changing learning-store.cjs, a json-helper learning op, the observation or ledger schema, the one lock, or rendered decisions.md, pitfalls.md and index.md. Keywords: put-observation, assign-anchor."
 category: architecture
 directories:
