@@ -32,8 +32,8 @@ const USAGE = `Usage: npm run audit:tokens -- (--project <cwd> | --dir <path>) [
   --dir <path>          transcript directory to read directly
   --exclude <id>        drop a main session by exact id (repeatable)
   --session <id>        keep only this main session (and its subagents)
-  --since <date>        keep requests at or after this ISO date or timestamp (date-only is UTC)
-  --until <date>        keep requests before this ISO timestamp; a date-only value includes that day
+  --since <date>        keep requests and tool calls at or after this ISO date or timestamp (date-only is UTC)
+  --until <date>        keep requests and tool calls before this ISO timestamp; a date-only value includes that day
   --agent-type <type>   keep only subagents of this type (main sessions are unaffected)
   --json                print the report as JSON
   --help                print this help
