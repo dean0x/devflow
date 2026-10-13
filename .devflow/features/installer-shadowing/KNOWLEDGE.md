@@ -5,7 +5,7 @@ description: "Use when changing installViaFileCopy, InstallReport, installAllRul
 category: architecture
 directories: [src/targets/claude-code/installer.ts, src/targets/claude-code/legacy.ts, src/cli/commands/rules.ts, src/cli/commands/skills.ts, src/core/plugins.ts, src/core/assets.ts, src/core/paths.ts, src/core/orphan-sweep.ts]
 created: 2026-07-13
-updated: 2026-10-11
+updated: 2026-10-13
 ---
 
 # Installer & Skill/Rule Shadowing
@@ -34,6 +34,7 @@ updated: 2026-10-11
 - **KB-INV-6** Shadow dirs are unprefixed (`~/.devflow/skills/{name}/`), installed skills are `devflow:`-prefixed, and `~/.devflow/skills|rules` are user-owned.
 - **KB-INV-7** Per-item failure isolation: a failed rule copy, sweep removal or overlay unit warns or is reported and the rest proceeds.
 - **KB-INV-8** The install never overwrites a user's own agent of a built-in type: devflow's `Explore` is skipped, with a warning, when any other file under the agents directory defines the exact name `Explore`; matching is byte-exact (`explore` is a different agent), the user's file is only ever read, and an unreadable agents directory installs rather than withholds.
+- **KB-INV-9** The agent registry-diff sweep runs BEFORE the commands-and-agents copy; a partial install whose sweep removed a file widens the copy to `effectivePlugins` and rebuilds the agents map for it, and an ordinary partial init that removes nothing writes only the selected plugins (`tests/agent-rename-orphan-sweep.test.ts`).
 
 ## Overview
 
@@ -98,7 +99,7 @@ All four asset types **throw** when a declared source is absent; registered asse
 | Skill | `src/assets/skills/{name}/` | `stat` not a directory |
 | Rule | `src/assets/rules/{name}.md` | `fs.access` fails |
 
-Agents resolve **dist-first with a src fallback**: `installViaFileCopy` walks `options.agentSourceDirs ?? agentSourceDirs(undefined, learning)` through the module-level `firstExisting(candidates)` helper and installs the first `{name}.md` that `fs.access` accepts, so a generator host's compiled artifact wins and hand-authored agents install unchanged. An injected `options.agentSourceDirs` wins as given and is not made learning-aware. Commands resolve the same way over `commandSourceDirs(learning)`. When no candidate exists the install throws, naming the learning-ON compiled path (`options.agentSourceDirs?.[0] ?? agentSourceDirs()[0]` for an agent, `commandSourceDirs(true)[0]` for a command) rather than the first candidate searched: a learning-off file exists only for a host with an arm, so naming it would point at a path that never existed for most hosts. An agent error lists every location searched and leads with `npm run build:mds`; for a generator-host agent the `src` path does not and never will exist.
+Agents resolve **dist-first with a src fallback**: `installCommandsAndAgents` (the copy `installViaFileCopy` delegates to) walks `options.agentSourceDirs ?? agentSourceDirs(undefined, learning)` through the module-level `firstExisting(candidates)` helper and installs the first `{name}.md` that `fs.access` accepts, so a generator host's compiled artifact wins and hand-authored agents install unchanged. An injected `options.agentSourceDirs` wins as given and is not made learning-aware. Commands resolve the same way over `commandSourceDirs(learning)`. When no candidate exists the install throws, naming the learning-ON compiled path (`options.agentSourceDirs?.[0] ?? agentSourceDirs()[0]` for an agent, `commandSourceDirs(true)[0]` for a command) rather than the first candidate searched: a learning-off file exists only for a host with an arm, so naming it would point at a path that never existed for most hosts. An agent error lists every location searched and leads with `npm run build:mds`; for a generator-host agent the `src` path does not and never will exist.
 
 **The ordering convention has one owner.** Both production consumers take `agentSourceDirs()` as-is: the installer resolves first-hit-wins, and `loadShippedAgentDefaults` (`src/core/agent-models.ts`) merges first-wins over the same order; neither re-spells the pair or reverses it. The `learning` argument is the installer's and the converge's alone: `loadShippedAgentDefaults` and the test harness keep the learning-on default, because the shipped model and effort are identical in both variants. Order is invisible to the type system (a least-preferred-first list still typechecks and silently inverts the answer), so `tests/guards/agent-source-precedence.test.ts` pins that both consumers, fed the same list, resolve every registry agent out of the same tree, with a reversed-list known-bad probe.
 
@@ -116,9 +117,11 @@ Shadow paths stay tolerant (warn and install source). The hard-error policy appl
 `installViaFileCopy` runs three ungated registry-diff sweeps through it, on every install shape including `--plugin` partial installs:
 - **Skills**: `~/.claude/skills/` loses any `devflow:*` directory whose bare name is absent from `getAllSkillNames()`. Bare (pre-namespace) dirs are not touched; the frozen `LEGACY_SKILLS_*` lists in `legacy.ts` own them. Shadow dirs (`~/.devflow/skills/`) are keyed by bare registry name and unaffected.
 - **Commands**: `~/.claude/commands/devflow/` loses any `.md` whose command name is absent from `getAllCommandNames()`.
-- **Agents**: `~/.claude/agents/devflow/` loses any `.md` whose agent name is absent from `getAllAgentNames()`. Agents have no legacy name list; this sweep is their whole orphan cleanup.
+- **Agents**: `~/.claude/agents/devflow/` loses any `.md` whose agent name is absent from `getAllAgentNames()`. Agents have no legacy name list; this sweep is their whole orphan cleanup, and it runs before the copy (below).
 
-All three `knownNames` sets span ALL plugins, so assets from unselected plugins survive a partial run and only assets absent from the registry go. Separately, `installViaFileCopy` performs a **full directory wipe** of `commands/devflow/`, `agents/devflow/` and `rules/devflow/` before reinstalling on full (non-partial) installs.
+All three `knownNames` sets span ALL plugins, so assets from unselected plugins survive a partial run and only assets absent from the registry go. **Retired-agent widening.** The commands-and-agents copy is the shared `installCommandsAndAgents` (commands and agents of the plugins it is given and nothing else: no sweep, stamp or skills; the selective uninstall calls it too, see the uninstall KB). A removed agent file means an older release is installed, and that release's commands for the plugins that stay still spawn the retired name. So when `isPartialInstall` and the agent sweep removed a file, the copy widens from the selected plugins to `effectivePlugins` (the manifest's plugins plus the selected ones) and the agents map is rebuilt with `buildAssetMaps` for that set. An ordinary partial init removes nothing and so rewrites only what the user selected.
+
+Separately, `installViaFileCopy` performs a **full directory wipe** of `commands/devflow/`, `agents/devflow/` and `rules/devflow/` before reinstalling on full (non-partial) installs.
 
 Results fold into `InstallReport.sweptOrphans` (`SweptOrphan[]`, each `{ kind, name }`) and `InstallReport.sweepFailures` (per-item failures with the kind) through the `recordSweep(report, kind, sweep)` helper, which every sweep call site uses, the reference prune included. `SweptAssetKind` has four values (`'skill' | 'command' | 'agent' | 'reference'`); `formatSweepSummary`'s `"{kind} {name}"` format disambiguates all four.
 
@@ -135,7 +138,7 @@ Results fold into `InstallReport.sweptOrphans` (`SweptOrphan[]`, each `{ kind, n
 
 ### Agent Install: the Explore Override and the Tracker-server Stamp
 
-Two things happen in the per-agent copy loop of `installViaFileCopy` beyond a plain `copyFile`.
+Two things happen in the per-agent copy loop of `installCommandsAndAgents` beyond a plain `copyFile`.
 
 **Explore override (`D-EXPLORE-OVERRIDE`, `D-EXPLORE-NO-CLOBBER`; `src/targets/claude-code/agent-type-owner.ts`).** Devflow ships an agent whose frontmatter `name:` is `Explore`, the type of the Claude Code built-in. Claude Code merges its agent sources into one map keyed by the exact `name:` string (a later source replaces an earlier one), so a user-level agent of that name replaces the built-in machine-wide, plan mode included; uninstalling restores the built-in. Two user-level agents of one type fall back to file load order, so `skipsForUserOwnedType` asks `findForeignAgentOwner` first: `BUILTIN_OVERRIDE_AGENTS` maps the registry name (`explore`) to the type it takes over, and the scan reads only a bounded head of each `.md` under the agents directory (bounded depth and entry count, sorted order, symlinks never followed, devflow's own directory skipped). A hit skips devflow's copy, removes any earlier devflow copy so a stale one cannot win, and warns with the path and the remedy; every other outcome installs. `parseAgentType` reads only the top-level `name:` key and errs toward installing. The merge order was verified by reading one Claude Code release's binary, so re-verify on an upgrade.
 
@@ -233,7 +236,7 @@ Skills are plugin-scoped, as rules already were. Each `PluginDefinition` carries
 ## Key Files
 
 - `src/core/orphan-sweep.ts` — `sweepOrphanedAssets`, `SweepResult`, `mdFileName` / `mdEntryName`; shared by installer and uninstall; per-item isolation on readdir and rm
-- `src/targets/claude-code/installer.ts` — `installViaFileCopy`, `installAllRules`, `installRuleFile`, `composeScripts`, `validateSkillShadow`, `validateRuleShadow`, `InstallReport`, `SweptAssetKind`, `SweepFailure`, `ShadowSkip`, `RuleInstallOutcome`, `SkillShadowState`, `RuleShadowState`, `copyDirectory`, `chmodRecursive`, `firstExisting`, `FileCopyOptions` (`learning` REQUIRED, `effectivePlugins`, `agentSourceDirs`, `warn`), `resolveSkillSource`; the overlay, learning and stamp pieces are covered by their own KBs
+- `src/targets/claude-code/installer.ts` — `installViaFileCopy`, `installCommandsAndAgents` (`CommandsAndAgentsOptions`), `installAllRules`, `installRuleFile`, `composeScripts`, `validateSkillShadow`, `validateRuleShadow`, `InstallReport`, `SweptAssetKind`, `SweepFailure`, `ShadowSkip`, `RuleInstallOutcome`, `SkillShadowState`, `RuleShadowState`, `copyDirectory`, `chmodRecursive`, `firstExisting`, `FileCopyOptions` (`learning` REQUIRED, `effectivePlugins`, `agentSourceDirs`, `warn`), `resolveSkillSource`; the overlay, learning and stamp pieces are covered by their own KBs
 - `src/targets/claude-code/agent-type-owner.ts` — `BUILTIN_OVERRIDE_AGENTS`, `parseAgentType`, `findForeignAgentOwner`, the scan bounds; `src/targets/claude-code/tracker-servers.ts` — `TRACKER_STAMPED_AGENTS`, `isTrackerStampedAgent`, `restampTrackerAgents`; `tests/installer/explore-no-clobber.test.ts`, `tests/explore-agent.test.ts`, `tests/tracker-servers.test.ts` — their pins
 - `src/core/assets.ts` — every accessor in the table above; the dist-first agent order and the learning-aware command/agent source order live here
 - `src/core/paths.ts` — `getPackageRoot()` (hard `package.json` assertion), `isContainedIn`
