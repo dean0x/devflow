@@ -528,62 +528,6 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     contexts: ['Simplify code structure by:'],
   },
   {
-    path: 'src/assets/commands/dynamic-build.mds',
-    name: 'Simplify',
-    reason:
-      'CONCEPT: the verb that opens the Polish spawn prompt; the agentType beside it is Polish',
-    contexts: ['Simplify and reduce complexity of recent changes'],
-  },
-  {
-    path: 'dist/commands/dynamic-build.md',
-    name: 'Simplify',
-    reason:
-      'CONCEPT: compiled output of dynamic-build.mds; the verb that opens the Polish spawn prompt',
-    contexts: ['Simplify and reduce complexity of recent changes'],
-  },
-  {
-    path: 'src/assets/commands/implement.mds',
-    name: 'Simplify',
-    reason:
-      'CONCEPT: the verb that opens the Polish spawn prompt; the subagent_type above it is Polish',
-    contexts: ['Simplify recently implemented code'],
-  },
-  {
-    path: 'dist/commands/implement.md',
-    name: 'Simplify',
-    reason:
-      'CONCEPT: compiled output of implement.mds; the verb that opens the Polish spawn prompt',
-    contexts: ['Simplify recently implemented code'],
-  },
-  {
-    path: 'src/assets/commands/resolve.mds',
-    name: 'Simplify',
-    reason:
-      'CONCEPT: the verb that opens the Polish spawn prompt; the subagent_type above it is Polish',
-    contexts: ['Simplify and refine the fixes'],
-  },
-  {
-    path: 'dist/commands/resolve.md',
-    name: 'Simplify',
-    reason:
-      'CONCEPT: compiled output of resolve.mds; the verb that opens the Polish spawn prompt',
-    contexts: ['Simplify and refine the fixes'],
-  },
-  {
-    path: 'src/assets/commands/self-review.mds',
-    name: 'Simplify',
-    reason:
-      'CONCEPT: the verb that opens the Polish spawn prompt; the subagent_type above it is Polish',
-    contexts: ['Simplify and refine the code'],
-  },
-  {
-    path: 'dist/commands/self-review.md',
-    name: 'Simplify',
-    reason:
-      'CONCEPT: compiled output of self-review.mds; the verb that opens the Polish spawn prompt',
-    contexts: ['Simplify and refine the code'],
-  },
-  {
     path: 'src/assets/skills/test-driven-development/SKILL.md',
     name: 'Simplify',
     reason:

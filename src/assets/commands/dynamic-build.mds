@@ -223,7 +223,7 @@ After implementing, commit your changes with a conventional-commit message and r
 // Phase 3: Gate 1 #1 — post-code pipeline: Polish agent → Harden agent → Validate agent.
 // Validate runs last and unconditionally, so its one full run covers every commit the pass made (see gate1_postcode()).
 const gate1 = await phase("gate1", async () => {
-  await agent(`Simplify and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Polish" });
+  await agent(`Polish and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Polish" });
 
   const harden = await agent(`9-pillar self-review of recent changes on branch ${BRANCH}. Fix P0/P1 issues and commit the fixes.
 Return: {"status": "PASS" | "FIXED" | "BLOCKED"}`, { agentType: "Harden" });
@@ -472,7 +472,7 @@ Return: {"status": "fixed"|"blocked", "commitShas": ["<sha>"], "unresolved": ["<
 // Runs ONCE, after the review pass. Inside the pass the Code agent self-verified its own fixes;
 // this is the build gate before the branch is handed back. See gate1_postcode() cadence.
 const gate1Final = await phase("gate1-final", async () => {
-  await agent(`Simplify and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Polish" });
+  await agent(`Polish and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Polish" });
 
   const harden = await agent(`9-pillar self-review of recent changes on branch ${BRANCH}. Fix P0/P1 issues and commit the fixes.
 Return: {"status": "PASS" | "FIXED" | "BLOCKED"}`, { agentType: "Harden" });

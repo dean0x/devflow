@@ -59,7 +59,7 @@ Spawn Polish agent to refine code for clarity and consistency:
 Agent(subagent_type="Polish", run_in_background=false):
 "TASK_DESCRIPTION: {task_description}
 FILES_CHANGED: {files_changed}
-Simplify and refine the code for clarity and consistency while preserving functionality.
+Polish and refine the code for clarity and consistency while preserving functionality.
 Commit any improvements with a conventional-commit message."
 
 **Wait for completion.** Polish agent commits changes directly.

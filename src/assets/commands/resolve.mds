@@ -294,7 +294,7 @@ Agent(subagent_type="Polish", run_in_background=false):
 "TASK_DESCRIPTION: Issue resolution fixes
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 FILES_CHANGED: {list of files modified by Code agents}
-Simplify and refine the fixes for clarity and consistency
+Polish and refine the fixes for clarity and consistency
 Commit any improvements with a conventional-commit message."
 ```
 

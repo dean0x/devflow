@@ -304,7 +304,7 @@ After the Code agent completes, spawn Polish agent to polish the code. The Phase
 
 ```
 Agent(subagent_type="Polish"):
-"Simplify recently implemented code
+"Polish recently implemented code
 Task: {task description}
 FILES_CHANGED: {list of files from Code agent output}
 Focus on code modified by Code agent, apply project standards, enhance clarity
