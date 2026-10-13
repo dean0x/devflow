@@ -561,6 +561,19 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
       'CONTRACT: documents the same fallback to the pre-rename agents.learning.model entry',
     contexts: ['agents.learning.model'],
   },
+
+  // -----------------------------------------------------------------------
+  // Scrutinize — DATA_FIELD (field data recorded under the name the agent carried before the
+  // rename; a new reference elsewhere stays a violation)
+  // -----------------------------------------------------------------------
+  {
+    path: 'docs/reference/platform-assumptions.md',
+    name: 'Scrutinize',
+    reason:
+      'DATA_FIELD: the stall investigation counts agent types from transcripts dated 2026-10-01 to ' +
+      '2026-10-07, which logged Harden as Scrutinize; not an agent spawn reference',
+    contexts: ['(logged as Scrutinize)'],
+  },
 ]
 
 // ---------------------------------------------------------------------------

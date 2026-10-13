@@ -99,7 +99,7 @@ Signature: a task notification with status `failed` whose summary reads `Agent "
 | Model and effort | Opus 5.5 in 14 events and Sonnet 5 in 1; `xhigh` effort in 14 and `max` in 1 |
 | Context size at the kill | median 219k tokens, range 86k–339k (under 100k: 2; 100–200k: 5; 200–300k: 6; 300–500k: 2; 500k or more: 0) |
 | Last tool result | median 1.7 KB, maximum 20.8 KB (under 1 KB: 7; 1–10 KB: 6; 10–50 KB: 2; 50 KB or more: 0); the last tool was Bash in 11 events and Read in 4 |
-| Agent type | Code 11, Harden 4 |
+| Agent type | Code 11, Harden (logged as Scrutinize) 4 |
 | By Claude Code version | 14 events on 2.1.281 (8 of 998 agents), 1 on 2.1.285 (1 of 127), none in about 1,500 agents on every other version |
 | By model and effort | Opus 5.5 at `xhigh` 7 of 446 agents, Opus 5.5 at `max` 1 of 73, Sonnet 5 at `xhigh` 1 of 401, Opus 5 at `xhigh` 0 of 464, every `high` combination 0 of 1,033 |
 | Silent but survived | of 156,616 sub-agent model waits, 313 lasted 150 s or more and survived (median 271 s), 138 lasted 300 s or more and 93 lasted 600 s or more; 270 of the 313 began with a thinking block, which suggests streamed thinking counts as progress; the rate of waits over 150 s falls as context grows |
