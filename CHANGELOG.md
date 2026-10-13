@@ -62,9 +62,13 @@ Use `Polish` for a judgment pass that makes code cleaner and keeps its behaviour
   prints a note. It does not update the hooks, the scripts or `settings.json`. Run a full
   `devflow init` to update them. Until you do, the hook from 3.5.0 can name an agent that no
   longer exists.
-- The uninstall writes nothing in these cases: there is no manifest, the manifest lists no
-  plugins, a linked folder blocks the write, or the write fails. It then prints a warning that
-  tells you to run `devflow init`.
+- If there is no readable `~/.devflow/manifest.json`, or the manifest lists no plugins, the
+  uninstall writes nothing. It prints a warning that tells you to run `devflow init`.
+- If the install is a legacy project-local install (`<repo>/.claude`), the uninstall writes
+  nothing. It prints a warning. The warning tells you to remove that install in full with
+  `devflow uninstall --scope local`.
+- If the write fails, the uninstall stops at the first file that fails. The files that it wrote
+  before the failure stay written. It prints a warning that tells you to run `devflow init`.
 
 **What you must migrate by hand:**
 - Your own prompts, commands, agents or `CLAUDE.md` that name an old agent, for example
