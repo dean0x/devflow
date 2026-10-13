@@ -218,7 +218,7 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
    * installed frontmatter of each variant is the authority for its own tier. Their preloads are held
    * by tests/guards/code-preload.test.ts, which is why `skills` is not pinned here.
    */
-  'fix': {
+  fix: {
     model: 'sonnet',
     effort: 'high',
     policy: { kind: 'deny', extra: [] },
@@ -226,7 +226,7 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     skills: null,
     digest: [],
   },
-  'refactor': {
+  refactor: {
     model: 'sonnet',
     effort: 'high',
     policy: { kind: 'deny', extra: [] },

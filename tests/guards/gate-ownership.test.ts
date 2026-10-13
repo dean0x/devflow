@@ -40,10 +40,10 @@ const GATE_ROWS: Readonly<Record<string, string>> = {
     'In a fix mode, compile and run the named failing or regression tests. Never the full suite. ' +
     'Batch fixes: one build check per batch, not per edit.',
   // Each variant states the part of Code's row that its modes use.
-  'fix':
+  fix:
     'Compile and run the named failing or regression tests. Never the full suite. ' +
     'Batch fixes: one build check per batch, not per edit.',
-  'refactor': 'Run the tests of the touched modules once. Never the full suite.',
+  refactor: 'Run the tests of the touched modules once. Never the full suite.',
   polish: 'Run no build, test or lint command. Reading files and git diffs is not verification.',
   evaluate: 'Run no build, test or lint command. Git read commands only.',
   harden: 'Run only a test file you added or changed, once.',
