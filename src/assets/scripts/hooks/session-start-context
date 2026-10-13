@@ -374,7 +374,9 @@ ${LEARNING_PAUSED_SECTION}"
     # The hook is bash and never runs the TypeScript key canonicalisation
     # (readAgentMapping), so a hand-edited or not yet migrated file can still name the
     # agent `learning`. Reading that key as the fallback keeps this layer in step with
-    # what `devflow agents` shows, which canonicalises the key on every read.
+    # what `devflow agents` shows, which canonicalises the key on every read. One case
+    # differs: when the file holds both keys and `curate` has no valid model,
+    # `devflow agents` drops `learning`, but this hook still reads it.
     #
     # Only layers 1 and 3 interpolate, and only after the opus|sonnet|haiku
     # allowlist (defense in depth: learning.json is user/config-controlled, and a

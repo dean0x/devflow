@@ -116,6 +116,19 @@ describe('canonicaliseAgentKeys with two legacy names for one agent', () => {
       expect(out.didMutate).toBe(true);
     }
   });
+
+  it.each(PAIRS)('%s, %s and the live %s: the live key beats both legacy names', (older, newer, target) => {
+    const out = canonicaliseAgentKeys({
+      [older]: { model: 'haiku' },
+      [newer]: { model: 'opus' },
+      [target]: { model: 'sonnet' },
+    });
+
+    expect(out.agents).toEqual({ [target]: { model: 'sonnet' } });
+    expect([...out.dropped].sort()).toEqual([older, newer].sort());
+    expect(out.renamed).toEqual([]);
+    expect(out.didMutate).toBe(true);
+  });
 });
 
 describe(`${V2} migration`, () => {
