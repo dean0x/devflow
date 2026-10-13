@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **`/release` no longer folds the `Exempt (not attested)` line into the last traceability bullet.** The `## Traceability exceptions` block put that line directly under the last `-` bullet, so Markdown rendered it inside that bullet (seen in the v3.5.0 release notes). The template now holds a blank line between them, and the command states the rule so a composed block always carries it.
+- **The HUD status line exits promptly.** The 2-second overall timeout timer is now cleared when a render finishes, so each status-line render takes about 0.3 s instead of about 2.1 s. A render that times out still prints nothing.
 
 ---
 
