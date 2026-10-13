@@ -386,7 +386,15 @@
       "pattern": "const TRACKER_BLOCK_MAX_CHARS = 3500;",
       "occurrences": 1,
       "sourceFile": "tests/docs/claude-md-tracker-section.test.ts",
-      "description": "Max characters of the CLAUDE.md Tracker block — every consecutive bold-lead paragraph whose lead begins with Tracker, plus the blank lines between them. CLAUDE.md is loaded into every session in this repository, so the block length is a recurring per-session cost, and it is the paragraph run most likely to absorb every new tracker detail: a paragraph that grows a sentence per change has no natural stopping point. Measured 3,458 at the pin, headroom 42. May be LOWERED after a pass that cuts the text, never raised: a cap raised to fit whatever the block grew into is not a cap."
+      "description": "Max characters of the Tracker block in docs/reference/architecture.md — every consecutive bold-lead paragraph whose lead begins with Tracker, plus the blank lines between them. The block moved out of CLAUDE.md byte-identical; the claude-md-max-chars ceiling now holds the per-session cost, and this one holds the block as the paragraph run most likely to absorb every new tracker detail: a paragraph that grows a sentence per change has no natural stopping point. Measured 3,458 at the pin, headroom 42. May be LOWERED after a pass that cuts the text, never raised: a cap raised to fit whatever the block grew into is not a cap."
+    },
+    {
+      "id": "claude-md-max-chars",
+      "ceiling": 13150,
+      "pattern": "const CLAUDE_MD_MAX_CHARS = 13150;",
+      "occurrences": 1,
+      "sourceFile": "tests/docs/claude-md-tracker-section.test.ts",
+      "description": "Max characters of CLAUDE.md. CLAUDE.md is loaded into every session in this repository, so its length is a recurring per-session cost. The Architecture Overview keeps only its binding invariant lines there; the descriptions live in docs/reference/architecture.md. Measured 13,150 at the pin, headroom 0. May be LOWERED after a pass that cuts the text, never raised: a cap raised to fit whatever the file grew into is not a cap."
     },
     {
       "id": "write-fence-allowlist-size",

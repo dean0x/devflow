@@ -401,8 +401,8 @@ describe('Format 3b: Shadow path references', () => {
   it('all ~/.devflow/skills/NAME/ paths in docs are canonical', () => {
     const canonicalSkills = new Set(getAllSkillNames());
 
-    // Check README.md and CLAUDE.md — the files known to reference shadow paths
-    for (const file of ['README.md', 'CLAUDE.md']) {
+    // Check README.md, CLAUDE.md and architecture.md — the files known to reference shadow paths
+    for (const file of ['README.md', 'CLAUDE.md', 'docs/reference/architecture.md']) {
       const content = readFileSync(path.join(ROOT, file), 'utf-8');
       const refs = extractShadowPaths(content).filter(r => !isPlaceholder(r));
 
