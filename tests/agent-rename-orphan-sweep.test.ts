@@ -10,6 +10,11 @@
  * It also holds the line the sweep must not cross: a user's own `~/.claude/agents/simplify.md`
  * lives outside the devflow namespace and survives every path byte for byte.
  *
+ * Last, it proves a partial install and a partial uninstall on an older release's install leave
+ * every plugin that stays installed with all of its agents and the current commands. Removing the
+ * retired agent files alone is not enough: that release's commands still name them, and the
+ * agents that replace them are not on disk until something writes them.
+ *
  * Every spawn runs the built CLI under a temp HOME from `sandboxEnv`, which refuses a real home.
  * Requires a build: `npm run build` first.
  */
@@ -20,6 +25,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { requireBuiltCli, sandboxEnv } from './helpers.js';
+import { DEVFLOW_PLUGINS, type PluginDefinition } from '../src/core/plugins.js';
 
 const CLI = requireBuiltCli();
 const SPAWN_TIMEOUT_MS = 120_000;
@@ -136,5 +142,101 @@ describe('the six renamed agents leave no orphan agent file (#466)', () => {
     expect(run.status, run.out).toBe(0);
     await expect(fs.stat(agentsDir()), 'the devflow agents directory').rejects.toMatchObject({ code: 'ENOENT' });
     await expectUserAgentUntouched();
+  }, 2 * SPAWN_TIMEOUT_MS);
+
+  // -------------------------------------------------------------------------
+  // The plugins that stay installed keep their agents (#466)
+  // -------------------------------------------------------------------------
+
+  const commandsDir = (): string => path.join(home, '.claude', 'commands', 'devflow');
+  const OLD_COMMAND_TEXT = '# command text from the older release\n';
+
+  /** The plugins the install record lists, as the registry defines them. */
+  async function recordedPlugins(): Promise<PluginDefinition[]> {
+    const manifest = JSON.parse(await fs.readFile(path.join(home, '.devflow', 'manifest.json'), 'utf-8')) as { plugins: string[] };
+    return DEVFLOW_PLUGINS.filter(plugin => manifest.plugins.includes(plugin.name));
+  }
+
+  /** Every agent file a plugin declares, except the one `devflow init` converges on its own. */
+  const agentFilesOf = (plugin: { agents: readonly string[] }): string[] =>
+    plugin.agents.filter(agent => agent !== 'tracker').map(agent => `${agent}.md`);
+
+  /** Every command file the plugins declare. */
+  const commandFilesOf = (plugins: readonly { commands: readonly string[] }[]): string[] =>
+    plugins.flatMap(plugin => plugin.commands.map(command => `${command.replace(/^\//, '')}.md`));
+
+  /**
+   * Turn a fresh install of `plugins` into what the older release left: the six old agent files in
+   * place of the six new ones, and the older text in every command.
+   */
+  async function installOlderRelease(plugins: string): Promise<void> {
+    const run = cli('init', `--plugin=${plugins}`, ...OFF);
+    expect(run.status, run.out).toBe(0);
+    for (const slug of NEW_SLUGS) await fs.rm(path.join(agentsDir(), `${slug}.md`), { force: true });
+    await seedOldAgents();
+    for (const file of await fs.readdir(commandsDir())) {
+      await fs.writeFile(path.join(commandsDir(), file), OLD_COMMAND_TEXT, 'utf-8');
+    }
+  }
+
+  async function expectEveryRemainingPluginWhole(): Promise<void> {
+    const remaining = await recordedPlugins();
+    expect(remaining.length, 'plugins the install record still lists').toBeGreaterThan(0);
+    const agents = await fs.readdir(agentsDir());
+    for (const plugin of remaining) {
+      expect(agents, `agents of ${plugin.name}`).toEqual(expect.arrayContaining(agentFilesOf(plugin)));
+    }
+    for (const file of commandFilesOf(remaining)) {
+      const text = await fs.readFile(path.join(commandsDir(), file), 'utf-8');
+      expect(text, `${file} is the current command, not the older release's`).not.toBe(OLD_COMMAND_TEXT);
+    }
+    expect(await leftOver(), 'old agent files').toEqual([]);
+    await expectUserAgentUntouched();
+  }
+
+  it('a partial init on an older release\'s install leaves every installed plugin with its agents and commands', async () => {
+    await installOlderRelease('implement,bug-analysis,code-review');
+
+    const run = cli('init', '--plugin=code-review', ...OFF);
+
+    expect(run.status, run.out).toBe(0);
+    const names = (await recordedPlugins()).map(plugin => plugin.name);
+    expect(names, 'the install record keeps all three').toEqual(
+      expect.arrayContaining(['devflow-implement', 'devflow-bug-analysis', 'devflow-code-review']),
+    );
+    await expectEveryRemainingPluginWhole();
+    // The two plugins this run did not name need these two agents, which only the widened copy writes.
+    expect(await fs.readdir(agentsDir())).toEqual(expect.arrayContaining(['fix.md', 'debug.md']));
+  }, 2 * SPAWN_TIMEOUT_MS);
+
+  it('a partial uninstall on an older release\'s install leaves every remaining plugin with its agents and commands', async () => {
+    await installOlderRelease('implement,bug-analysis,self-review');
+
+    const run = cli('uninstall', '--plugin=bug-analysis');
+
+    expect(run.status, run.out).toBe(0);
+    const names = (await recordedPlugins()).map(plugin => plugin.name);
+    expect(names, 'the install record keeps the plugins that stay').toEqual(
+      expect.arrayContaining(['devflow-implement', 'devflow-self-review']),
+    );
+    expect(names, 'the install record drops the removed plugin').not.toContain('devflow-bug-analysis');
+    await expectEveryRemainingPluginWhole();
+    expect(await fs.readdir(agentsDir())).toEqual(expect.arrayContaining(['fix.md', 'polish.md', 'harden.md']));
+    await expect(fs.stat(path.join(commandsDir(), 'bug-analysis.md')), 'the removed plugin\'s command').rejects.toMatchObject({ code: 'ENOENT' });
+    expect(run.out, 'the notice that points at a full init for hooks and scripts').toContain('to update the hooks and scripts');
+  }, 3 * SPAWN_TIMEOUT_MS);
+
+  it('a partial init with no retired agent file leaves the other plugins\' files alone', async () => {
+    const installRun = cli('init', '--plugin=implement,code-review', ...OFF);
+    expect(installRun.status, installRun.out).toBe(0);
+    // polish belongs to implement, which this run does not name, and has no learning variant that
+    // an install would converge back.
+    const polishAgent = path.join(agentsDir(), 'polish.md');
+    await fs.writeFile(polishAgent, '# my edit\n', 'utf-8');
+
+    const run = cli('init', '--plugin=code-review', ...OFF);
+
+    expect(run.status, run.out).toBe(0);
+    expect(await fs.readFile(polishAgent, 'utf-8'), 'an agent of a plugin this run did not name').toBe('# my edit\n');
   }, 2 * SPAWN_TIMEOUT_MS);
 });
