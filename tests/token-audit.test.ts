@@ -1968,7 +1968,7 @@ const AFTER_WINDOW = [
 
 const WIN_TRANSCRIPT = [WIN_PROMPT, ...BEFORE_WINDOW, ...IN_WINDOW, ...AFTER_WINDOW];
 
-describe('AC-109 the date window bounds every tool-call signal (D-AUDIT-WINDOW)', () => {
+describe('D-AUDIT-WINDOW the date window bounds every tool-call signal', () => {
   it('counts every signal family from the entries inside the window only', async () => {
     const parsed = await parseTranscriptLines(WIN_TRANSCRIPT, LIMITS, WIN);
     // Reads w1 w2 w3 w4: w2 repeats w1 exactly; a path read only before the window is new inside it.

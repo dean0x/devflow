@@ -34,6 +34,10 @@ import * as path from 'path';
 const ROOT = path.resolve(import.meta.dirname, '../..');
 
 /**
+ * D-CLAUDE-MD-RULES-ONLY: CLAUDE.md holds only binding invariant lines (one per
+ * rule) and a plain-path pointer. The descriptions behind those lines live in
+ * docs/reference/architecture.md, moved verbatim. This ceiling holds the size.
+ *
  * Max characters of CLAUDE.md. Measured at the pin with no headroom; may be
  * LOWERED after a pass that cuts the text, never raised — a cap raised to fit
  * whatever the file grew into is not a cap.
