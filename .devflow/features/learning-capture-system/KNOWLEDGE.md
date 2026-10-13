@@ -19,7 +19,7 @@ directories:
   - src/core/observations.ts
   - src/core/feature-switch.ts
   - src/core/feature-config.ts
-  - src/core/learning-tuning-config.ts
+  - src/core/curate-tuning-config.ts
   - src/core/learning-queue-cleanup.ts
   - src/core/linked-path.ts
   - src/core/queue-drain.ts
@@ -205,7 +205,7 @@ Every loop and read has a bound, each a named constant: in the store `E4_MAX_SKI
 | `src/assets/scripts/hooks/resolve-project-root` · `git-marker` · `ensure-devflow-init` | Roots, git-only gate, scaffolding that refuses a linked `.devflow`; `git-marker` also holds the link helpers (links KB) |
 | `src/assets/scripts/hooks/session-start-context` | Sections 1 to 6 (agent and delivery KBs) |
 | `src/assets/scripts/hooks/log-paths` · `src/core/hook-log-dirs.ts` | Log folder cap |
-| `src/core/feature-switch.ts` · `feature-config.ts` · `learning-tuning-config.ts` | Switch predicate and I/O, per-repo config, tuning merge |
+| `src/core/feature-switch.ts` · `feature-config.ts` · `curate-tuning-config.ts` | Switch predicate and I/O, per-repo config, tuning merge |
 | `src/cli/commands/memory.ts` · `knowledge/toggle.ts` · `init.ts` | Memory and knowledge toggles, init drains and `--hud-only` |
 | `src/targets/claude-code/hooks.ts` | `devflowHookOwner`, `removeHooks`, `ensureHook` |
 | `src/core/project-paths.ts` · `src/core/ledger-root.ts` | Path single source; `getLedgerRoot`, the twin of `DF_LEDGER_ROOT` |
