@@ -62,8 +62,8 @@ Use `Polish` for a judgment pass that makes code cleaner and keeps its behaviour
   prints a note. It does not update the hooks, the scripts or `settings.json`. Run a full
   `devflow init` to update them. Until you do, the hook from 3.5.0 can name an agent that no
   longer exists.
-- If there is no readable `~/.devflow/manifest.json`, or the manifest lists no plugins, the
-  uninstall writes nothing. It prints a warning that tells you to run `devflow init`.
+- If there is no readable `~/.devflow/manifest.json`, or the manifest lists no plugin that Devflow
+  knows, the uninstall writes nothing. It prints a warning that tells you to run `devflow init`.
 - If the install is a legacy project-local install (`<repo>/.claude`), the uninstall writes
   nothing. It prints a warning. The warning tells you to remove that install in full with
   `devflow uninstall --scope local`.
