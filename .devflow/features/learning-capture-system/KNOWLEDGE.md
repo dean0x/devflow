@@ -35,7 +35,7 @@ updated: 2026-10-13
 
 - **KB-INV-1** Ledger IDs (the ADR and PF numbers) stay on the machine: anything committed, pushed or posted states a rule in words, never by its number; `tests/guards/no-ledger-citations.test.ts` enforces the committed half.
 - **KB-INV-2** Plumbing never judges: hooks capture and trigger, the Curate agent decides what is a decision, a pitfall or still true, and plumbing validates, numbers, locks, projects and renders.
-- **KB-INV-3** Content identifiers keep their "decisions" names (`decisions-*.jsonl`, `DECISIONS_CONTEXT`, `decisions_load()`, `render-decisions.cjs`) while the directory is `learning/`, the switch `features.learning` and the agent `Learning`; never "fix" the mismatch.
+- **KB-INV-3** Content identifiers keep their "decisions" names (`decisions-*.jsonl`, `DECISIONS_CONTEXT`, `decisions_load()`, `render-decisions.cjs`) while the directory is `learning/`, the switch `features.learning` and the agent `Curate`; never "fix" the mismatch.
 - **KB-INV-4** `features.memory|learning|knowledge` in `~/.devflow/manifest.json` is the MACHINE switch; a repository can only turn a feature OFF, by a literal `false` in `project.json` or `config.json` `features.<name>`, and the retired top-level keys (`RETIRED_CONFIG_KEYS`) never narrow.
 - **KB-INV-5** Only an explicit boolean `false` switches a feature off (an absent manifest, `features` object or key, or a non-boolean, reads ON), by `isMachineFeatureOn` and `queue_read_gates` alike; neither is built on `readManifest()`.
 - **KB-INV-6** A feature reads its current key when boolean, else its legacy key (`learning` from `decisions`, `knowledge` from `kb`) when boolean, else ON; `queue_read_gates` mirrors this for learning only.
@@ -89,7 +89,7 @@ This hub holds what they share: the data files and the naming boundary, the mach
 | `.pending-turns.jsonl`, `.pending-turns.processing`, `.pending-turns.owner` | the queue, the claimed batch, its owner's token |
 | `learning.json` | agent tuning `{model, debug}`; the project file overrides `~/.devflow/learning.json`, and for the model a `devflow agents` Curate mapping outranks the global file (see the agent KB) |
 
-Content identifiers keep their "decisions" names although the system is "learning": `decisions-*.jsonl`, `decisions_status`, `DECISIONS_CONTEXT`, `decisions_load()`, `render-decisions.cjs`, `decisions-format.cjs`, ADR/PF numbers. The directory is `learning/`, the switch `features.learning`, the agent `Learning`. Do not "fix" the mismatch.
+Content identifiers keep their "decisions" names although the system is "learning": `decisions-*.jsonl`, `decisions_status`, `DECISIONS_CONTEXT`, `decisions_load()`, `render-decisions.cjs`, `decisions-format.cjs`, ADR/PF numbers. The directory is `learning/`, the switch `features.learning`, the agent `Curate`. Do not "fix" the mismatch.
 
 ### Feature switches: machine switch, repository narrows (D-FEATURES-NARROW-ONLY)
 
