@@ -124,8 +124,10 @@ const DEADLINE_MS = 90000;
  * D-PUBLISH-BOUNDS: `publish` runs `verify` under the deadline above, then its writes
  * under a deadline of their own and a gh budget of their own. The writes are at most
  * seven calls: two body reads (the compare-and-swap), a body edit and one retry, one
- * read-back, a comment and one retry. The caller's Bash timeout covers both
- * deadlines (90 s + 60 s) with room for node's startup.
+ * read-back, a comment and one retry. A scrub is bounded by its own timeout, not by
+ * the deadline, so one that starts just before the writes' deadline can end up to
+ * REDACT_TIMEOUT_MS after it. The worst case is 90 s + 60 s + 20 s; the caller's
+ * 180 s Bash timeout covers it with room for node's startup.
  */
 const PUBLISH_DEADLINE_MS = 60000;
 const PUBLISH_GH_CALLS = 8;

@@ -1,6 +1,6 @@
 # Implement: evidence asks
 
-Read by `/implement` Phase 1 (D-CMD-REF-HAND). "Above" means the Phase 1 text before the step that sent you here.
+Read by `/implement` Phase 1 (D-CMD-REF-HAND). "The grammar below", "the exception grammar above" and "the record above" name sections of this file. Any other "above" means the Phase 1 text before the step that sent you here.
 
 ## Ticket link ask
 
