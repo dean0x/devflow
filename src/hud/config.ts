@@ -20,6 +20,7 @@ export const HUD_COMPONENTS: readonly ComponentId[] = [
   'versionBadge',
   'sessionCost',
   'usageQuota',
+  'codexQuota',
   'todoProgress',
   'configCounts',
   'learningCounts',

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The HUD shows your Codex usage limits.** A new `codexQuota` segment sits on line 2 next to the Claude quota, for example `Codex 5h ███░░░░░ 40% (1h 2m) · 7d █░░░░░░░ 12% (3d 4h)`. It reads the newest rate-limit record that Codex writes to `~/.codex/sessions`, so it opens no credential file and makes no network call. A window is identified by its length, so a weekly-only plan and a 5h + 7d plan both label correctly. A window past its reset time shows 0%, and a red `limited` marker shows while Codex reports a reached limit. The segment is hidden when there is no recent Codex session, so users without Codex see no change.
+
 ### Fixed
 
 - **`/release` no longer folds the `Exempt (not attested)` line into the last traceability bullet.** The `## Traceability exceptions` block put that line directly under the last `-` bullet, so Markdown rendered it inside that bullet (seen in the v3.5.0 release notes). The template now holds a blank line between them, and the command states the rule so a composed block always carries it.

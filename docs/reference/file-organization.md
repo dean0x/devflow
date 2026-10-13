@@ -291,11 +291,11 @@ An entry's content changes only by re-projection from its log row (D-LOG-CONTENT
 
 ## HUD (Heads-Up Display)
 
-The HUD (`dist/hud/index.js`) is a configurable TypeScript status line. The fixed component list is defined in `HUD_COMPONENTS` in `src/hud/config.ts` and includes: directory, git branch, git ahead/behind, diff stats, release info, worktree count, model, context usage, version badge, session cost, usage quota, todo progress, config counts, and learning counts.
+The HUD (`dist/hud/index.js`) is a configurable TypeScript status line. The fixed component list is defined in `HUD_COMPONENTS` in `src/hud/config.ts` and includes: directory, git branch, git ahead/behind, diff stats, release info, worktree count, model, context usage, version badge, session cost, usage quota, Codex quota, todo progress, config counts, and learning counts.
 
 Configuration: `~/.devflow/hud.json` (`{ enabled, detail }`). Manage via `devflow hud --status | --enable | --disable | --detail | --no-detail`.
 
-Data source: `context_window.current_usage` from Claude Code's JSON stdin. Git data gathered with 1s per-command timeout. Overall 2s timeout with graceful degradation.
+Data source: `context_window.current_usage` and `rate_limits` from Claude Code's JSON stdin. The Codex quota segment reads the newest rate-limit record in `~/.codex/sessions` (local logs only: no credential file, no network) and is hidden when Codex has no recent session. Git data gathered with 1s per-command timeout. Overall 2s timeout with graceful degradation.
 
 ## Namespace Ownership and Orphan Sweep
 

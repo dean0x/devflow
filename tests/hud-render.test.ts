@@ -40,6 +40,7 @@ function makeCtx(
     },
     transcript: null,
     usage: null,
+    codexUsage: null,
     configCounts: null,
     learningCounts: null,
     costHistory: null,
@@ -89,6 +90,30 @@ describe('render', () => {
     const raw = stripAnsi(output);
     expect(raw).toContain('5h');
     expect(raw).toContain('30%');
+  });
+
+  it('puts Codex quota on the capacity line right after the Claude quota', async () => {
+    const ctx = makeCtx({
+      usage: { fiveHourPercent: 30, sevenDayPercent: null, fiveHourResetsAt: null, sevenDayResetsAt: null },
+      codexUsage: {
+        windows: [{ minutes: 10080, usedPercent: 12, resetsAt: Math.floor(Date.now() / 1000) + 86400 + 30 }],
+        limitReached: null,
+      },
+      transcript: { tools: [], agents: [], todos: { completed: 1, total: 2 }, skills: [] },
+    });
+    const output = await render(ctx);
+    const lines = output.split('\n').map((l) => stripAnsi(l));
+
+    expect(lines).toHaveLength(3);
+    const capacityLine = lines.find((l) => l.includes('Context'));
+    expect(capacityLine).toMatch(/5h .{8} 30% \u00B7 Codex 7d .{8} 12% \(1d\) \u00B7 1\/2 todos$/);
+  });
+
+  it('omits the Codex segment when there is no Codex data', async () => {
+    const ctx = makeCtx({
+      usage: { fiveHourPercent: 30, sevenDayPercent: null, fiveHourResetsAt: null, sevenDayResetsAt: null },
+    });
+    expect(stripAnsi(await render(ctx))).not.toContain('Codex');
   });
 
   it('renders todos at the end of the capacity line', async () => {
@@ -207,7 +232,11 @@ describe('config', () => {
     expect(resolveComponents(config)).toEqual(['versionBadge']);
   });
 
-  it('HUD_COMPONENTS has 14 components (sessionDuration retained but omitted from defaults)', () => {
-    expect(HUD_COMPONENTS).toHaveLength(14);
+  it('HUD_COMPONENTS has 15 components (sessionDuration retained but omitted from defaults)', () => {
+    expect(HUD_COMPONENTS).toHaveLength(15);
+  });
+
+  it('HUD_COMPONENTS lists codexQuota right after usageQuota', () => {
+    expect(HUD_COMPONENTS.indexOf('codexQuota')).toBe(HUD_COMPONENTS.indexOf('usageQuota') + 1);
   });
 });

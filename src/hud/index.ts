@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { readStdin } from './stdin.js';
 import { loadConfig, resolveComponents } from './config.js';
 import { gatherGitStatus } from './git.js';
+import { codexSessionsDir, gatherCodexUsage } from './codex-usage.js';
 import { parseTranscript } from './transcript.js';
 import { persistSessionCost, aggregateCosts } from './cost-history.js';
 import { gatherConfigCounts } from './components/config-counts.js';
@@ -72,7 +73,8 @@ async function run(): Promise<string> {
   const components = new Set(resolved);
   const cwd = stdin.cwd || process.cwd();
   // D-ONE-HOME: always $HOME/.devflow — no environment variable relocates it.
-  const devflowDir = path.join(process.env.HOME || homedir(), '.devflow');
+  const home = process.env.HOME || homedir();
+  const devflowDir = path.join(home, '.devflow');
 
   // Determine what data to gather based on enabled components
   const needsGit =
@@ -86,16 +88,18 @@ async function run(): Promise<string> {
     components.has('configCounts');
   const needsConfigCounts = components.has('configCounts');
   const needsLearningCounts = components.has('learningCounts');
+  const needsCodexUsage = components.has('codexQuota');
   const needsSessionCost = components.has('sessionCost');
 
   // Parallel data gathering — only fetch what's needed. The learning counts
   // ride here because resolving the ledger root is one git call.
-  const [git, transcript, learningCountsData] = await Promise.all([
+  const [git, transcript, learningCountsData, codexUsage] = await Promise.all([
     needsGit ? gatherGitStatus(cwd) : Promise.resolve(null),
     needsTranscript && stdin.transcript_path
       ? parseTranscript(stdin.transcript_path)
       : Promise.resolve(null),
     needsLearningCounts ? gatherLedgerLearningCounts(cwd) : Promise.resolve(null),
+    needsCodexUsage ? gatherCodexUsage(devflowDir, codexSessionsDir(home)) : Promise.resolve(null),
   ]);
 
   // Extract usage quota from stdin rate_limits (replaces OAuth fetch)
@@ -135,6 +139,7 @@ async function run(): Promise<string> {
     git,
     transcript,
     usage,
+    codexUsage,
     configCounts: configCountsData,
     learningCounts: learningCountsData,
     costHistory,

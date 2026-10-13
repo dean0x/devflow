@@ -342,8 +342,10 @@ x .devflow/scripts/hooks/session-start-memory
 x .devflow/scripts/hooks/session-start-orchestrator
 d .devflow/scripts/hud/
 x .devflow/scripts/hud.sh
+- .devflow/scripts/hud/codex-usage.js
 - .devflow/scripts/hud/colors.js
 d .devflow/scripts/hud/components/
+- .devflow/scripts/hud/components/codex-quota.js
 - .devflow/scripts/hud/components/config-counts.js
 - .devflow/scripts/hud/components/context-usage.js
 - .devflow/scripts/hud/components/diff-stats.js

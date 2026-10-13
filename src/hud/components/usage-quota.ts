@@ -58,7 +58,7 @@ export function formatCountdown(resetsAtEpoch: number): string {
 }
 
 /** Render a single quota window: "5h ████░░░░ 45% (2h 15m)" */
-function renderQuotaWindow(
+export function renderQuotaWindow(
   label: string,
   percent: number,
   resetsAt: number | null,

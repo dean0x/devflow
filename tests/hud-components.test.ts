@@ -10,6 +10,7 @@ import model from '../src/hud/components/model.js';
 import contextUsage from '../src/hud/components/context-usage.js';
 import sessionDuration from '../src/hud/components/session-duration.js';
 import usageQuota, { formatCountdown } from '../src/hud/components/usage-quota.js';
+import codexQuota from '../src/hud/components/codex-quota.js';
 import todoProgress from '../src/hud/components/todo-progress.js';
 import sessionCost from '../src/hud/components/session-cost.js';
 import releaseInfo from '../src/hud/components/release-info.js';
@@ -23,6 +24,7 @@ function makeCtx(overrides: Partial<GatherContext> = {}): GatherContext {
     git: null,
     transcript: null,
     usage: null,
+    codexUsage: null,
     configCounts: null,
     decisionsCounts: null,
     costHistory: null,
@@ -464,6 +466,119 @@ describe('usageQuota component', () => {
     const result = await usageQuota(ctx);
     expect(result).not.toBeNull();
     expect(result!.raw).not.toContain('(');
+  });
+});
+
+describe('codexQuota component', () => {
+  const nowSec = (): number => Math.floor(Date.now() / 1000);
+  // 30 extra seconds keep each countdown off a minute boundary.
+  const sixDays21HoursFromNow = (): number => nowSec() + 6 * 86400 + 21 * 3600 + 30;
+
+  it('shows the weekly window alone on a plan with no 5h window', async () => {
+    const ctx = makeCtx({
+      codexUsage: {
+        windows: [{ minutes: 10080, usedPercent: 2, resetsAt: sixDays21HoursFromNow() }],
+        limitReached: null,
+      },
+    });
+    const result = await codexQuota(ctx);
+    expect(result).not.toBeNull();
+    expect(result!.raw).toBe(`Codex 7d ${'\u2591'.repeat(8)} 2% (6d 21h)`);
+  });
+
+  it('shows 5h and 7d in usage-quota style, joined by a middle dot', async () => {
+    const ctx = makeCtx({
+      codexUsage: {
+        windows: [
+          { minutes: 300, usedPercent: 40, resetsAt: nowSec() + 3600 + 2 * 60 + 30 },
+          { minutes: 10080, usedPercent: 12, resetsAt: nowSec() + 3 * 86400 + 4 * 3600 + 30 },
+        ],
+        limitReached: null,
+      },
+    });
+    const result = await codexQuota(ctx);
+    expect(result).not.toBeNull();
+    expect(stripAnsi(result!.text)).toBe(result!.raw);
+    expect(result!.raw).toMatch(/^Codex 5h .{8} 40% \(1h 2m\) \u00B7 7d .{8} 12% \(3d 4h\)$/);
+  });
+
+  it('labels an unrecognised window length generically', async () => {
+    const ctx = makeCtx({
+      codexUsage: {
+        windows: [
+          { minutes: 180, usedPercent: 10, resetsAt: nowSec() + 600 },
+          { minutes: 43200, usedPercent: 20, resetsAt: nowSec() + 86400 },
+          { minutes: 45, usedPercent: 30, resetsAt: nowSec() + 600 },
+        ],
+        limitReached: null,
+      },
+    });
+    const result = await codexQuota(ctx);
+    expect(result!.raw).toContain('3h ');
+    expect(result!.raw).toContain('30d ');
+    expect(result!.raw).toContain('45m ');
+  });
+
+  it('renders a window whose reset time has passed as 0% with no countdown', async () => {
+    const ctx = makeCtx({
+      codexUsage: {
+        windows: [{ minutes: 10080, usedPercent: 88, resetsAt: nowSec() - 60 }],
+        limitReached: null,
+      },
+    });
+    const result = await codexQuota(ctx);
+    expect(result).not.toBeNull();
+    expect(result!.raw).toContain(' 0%');
+    expect(result!.raw).not.toContain('88%');
+    expect(result!.raw).not.toContain('(');
+  });
+
+  it('resets only the window that has passed its reset time', async () => {
+    const ctx = makeCtx({
+      codexUsage: {
+        windows: [
+          { minutes: 300, usedPercent: 90, resetsAt: nowSec() - 5 },
+          { minutes: 10080, usedPercent: 12, resetsAt: nowSec() + 86400 + 30 },
+        ],
+        limitReached: null,
+      },
+    });
+    const raw = (await codexQuota(ctx))!.raw;
+    expect(raw).toContain('5h ');
+    expect(raw).toContain(' 0% \u00B7 7d ');
+    expect(raw).toContain('12% (1d)');
+  });
+
+  it('appends a red limited marker when a limit is reached', async () => {
+    const ctx = makeCtx({
+      codexUsage: {
+        windows: [{ minutes: 10080, usedPercent: 100, resetsAt: nowSec() + 86400 }],
+        limitReached: 'rate_limit_reached',
+      },
+    });
+    const result = await codexQuota(ctx);
+    expect(result!.raw.endsWith(' limited')).toBe(true);
+    expect(result!.text).toContain('\x1b[31mlimited');
+  });
+
+  it('shows no limited marker once every window has reset', async () => {
+    const ctx = makeCtx({
+      codexUsage: {
+        windows: [{ minutes: 10080, usedPercent: 100, resetsAt: nowSec() - 60 }],
+        limitReached: 'rate_limit_reached',
+      },
+    });
+    const result = await codexQuota(ctx);
+    expect(result!.raw).not.toContain('limited');
+  });
+
+  it('returns null when there is no Codex data', async () => {
+    expect(await codexQuota(makeCtx())).toBeNull();
+  });
+
+  it('returns null when the data holds no window', async () => {
+    const ctx = makeCtx({ codexUsage: { windows: [], limitReached: null } });
+    expect(await codexQuota(ctx)).toBeNull();
   });
 });
 
