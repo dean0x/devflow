@@ -1175,3 +1175,264 @@ describe('transcripts are untrusted', () => {
     expect(/[\u0000-\u0008\u000b-\u001f\u007f]/.test(md)).toBe(false);
   });
 });
+
+// ── Wave-4C signals: parser (D-AUDIT-READS, D-AUDIT-DECISIONS-SIGNAL, D-AUDIT-BASH-CLASS) ──
+//
+// Entry shapes sampled from real subagent transcripts: an assistant chunk carries
+// `message.id`, `message.stop_reason`, `message.content` blocks and a top-level `requestId`;
+// a tool result is a `user` entry with `toolUseResult` and a `tool_result` block; a
+// coordinator message is a `user` entry with string content or an `attachment` entry.
+
+/** One assistant chunk with a stop_reason, as Claude Code writes it. */
+function turnLine(opts: {
+  id: string;
+  ts?: string;
+  content?: unknown[];
+  stop?: string | null;
+  usage?: Record<string, unknown>;
+}): string {
+  return JSON.stringify({
+    type: 'assistant',
+    requestId: `req_${opts.id}`,
+    timestamp: opts.ts ?? '2026-09-01T10:00:00.000Z',
+    message: {
+      id: opts.id,
+      model: 'claude-opus-4-5',
+      role: 'assistant',
+      content: opts.content ?? [],
+      stop_reason: opts.stop ?? null,
+      usage: opts.usage ?? { input_tokens: 1 },
+    },
+  });
+}
+
+function use(id: string, name: string, input: Record<string, unknown>): Record<string, unknown> {
+  return { type: 'tool_use', id, name, input };
+}
+
+/** A user entry with string content: the spawn prompt, or a coordinator message. */
+function promptLine(text: string, extra: Record<string, unknown> = {}): string {
+  return JSON.stringify({ type: 'user', timestamp: '2026-09-01T10:00:00.000Z', message: { role: 'user', content: text }, ...extra });
+}
+
+/** A tool result: a `user` entry with `toolUseResult` and a `tool_result` block. */
+function resultLine(toolUseId: string, content: unknown): string {
+  return JSON.stringify({
+    type: 'user',
+    timestamp: '2026-09-01T10:00:00.000Z',
+    toolUseResult: { stdout: 'redacted', stderr: '', interrupted: false },
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content, is_error: false }] },
+  });
+}
+
+function attachmentLine(): string {
+  return JSON.stringify({ type: 'attachment', attachment: { type: 'deferred_tools_delta', addedNames: ['redacted'] } });
+}
+
+async function signalsOf(lines: readonly string[], limits: Partial<typeof DEFAULT_LIMITS> = {}) {
+  const parsed = await parseTranscriptLines(lines, { ...LIMITS, ...limits });
+  return parsed;
+}
+
+describe('AC-104 resumed flag (parser side of D-AUDIT-MISS-CAUSE)', () => {
+  it('marks a request resumed when a coordinator message follows an end_turn', async () => {
+    const parsed = await signalsOf([
+      turnLine({ id: 'm1', stop: 'end_turn' }),
+      promptLine('The coordinator sent a message while you were working: carry on'),
+      turnLine({ id: 'm2', stop: 'tool_use', content: [use('t1', 'Bash', { command: 'ls' })] }),
+      resultLine('t1', 'ok'),
+      turnLine({ id: 'm3', stop: 'end_turn' }),
+      attachmentLine(),
+      turnLine({ id: 'm4', stop: 'end_turn' }),
+      resultLine('t9', 'unrelated array-content user entry'),
+      turnLine({ id: 'm5' }),
+    ]);
+    // m1 first; m2 after end_turn + string user; m3 after a tool_use; m4 after end_turn + attachment;
+    // m5 after end_turn + an array-content user entry (not a resume).
+    expect(parsed.requests.map(r => r.resumed === true)).toEqual([false, true, false, true, false]);
+  });
+});
+
+describe('AC-103 reads and re-reads (D-AUDIT-READS)', () => {
+  it('counts re-reads per path, exact repeats and ranged reads', async () => {
+    const read = (n: number, input: Record<string, unknown>): string =>
+      turnLine({ id: `r${n}`, content: [use(`tr${n}`, 'Read', input)] });
+    const parsed = await signalsOf([
+      read(1, { file_path: '/w/a.ts' }), //                          new
+      read(2, { file_path: '/w/a.ts', offset: 5, limit: 20 }), //     re-read, ranged
+      read(3, { file_path: '/w/b.ts' }), //                          new
+      read(4, { file_path: '/w/a.ts' }), //                          re-read, exact (matches #1)
+      read(5, { file_path: '/w/a.ts', offset: 5, limit: 20 }), //     re-read, exact (matches #2), ranged
+      read(6, { file_path: '/w/c.ts', limit: 50 }), //                new, ranged
+      read(7, { offset: 1 }), //                                     no path: not a Read call we can track
+    ]);
+    expect(parsed.signals.reads).toEqual({ calls: 6, rereads: 3, exactRereads: 2, ranged: 3 });
+    expect(parsed.stats.pathsCapHit).toBe(false);
+  });
+
+  it('counts a path read in another transcript as new, because the repeat is per spawn', async () => {
+    const one = [turnLine({ id: 'a', content: [use('t1', 'Read', { file_path: '/w/shared.ts' })] })];
+    const first = await signalsOf(one);
+    const second = await signalsOf([turnLine({ id: 'b', content: [use('t2', 'Read', { file_path: '/w/shared.ts' })] })]);
+    expect(first.signals.reads.rereads + second.signals.reads.rereads).toBe(0);
+  });
+
+  it('counts a tool_use id once even when its chunk repeats', async () => {
+    const twice = turnLine({ id: 'm', content: [use('t1', 'Read', { file_path: '/w/a.ts' })] });
+    const parsed = await signalsOf([twice, twice]);
+    expect(parsed.signals.reads).toEqual({ calls: 1, rereads: 0, exactRereads: 0, ranged: 0 });
+  });
+
+  it('counts ledger reads: the index and the decisions or pitfalls bodies', async () => {
+    const read = (n: number, file: string): string => turnLine({ id: `l${n}`, content: [use(`tl${n}`, 'Read', { file_path: file })] });
+    const parsed = await signalsOf([
+      read(1, '/w/.devflow/learning/index.md'),
+      read(2, '/w/.devflow/learning/pitfalls.md'),
+      read(3, '/w/.devflow/learning/decisions.md'),
+      read(4, '/w/src/index.md'), //            not the ledger
+      read(5, '/w/learning/index.md'), //        not under .devflow
+      read(6, '.devflow/learning/index.md'), //   a relative ledger path
+    ]);
+    expect(parsed.signals.ledgerReads).toEqual({ index: 2, bodies: 2 });
+  });
+
+  it('reports the read-path cap and keeps counting calls past it', async () => {
+    const read = (n: number, file: string): string => turnLine({ id: `c${n}`, content: [use(`tc${n}`, 'Read', { file_path: file })] });
+    const lines = [read(1, '/w/p1'), read(2, '/w/p2'), read(3, '/w/p3'), read(4, '/w/p1'), read(5, '/w/p3')];
+    const capped = await signalsOf(lines, { maxReadPaths: 2 });
+    // p1 and p2 are tracked; p3 is not, so neither p3 read can be told apart as a repeat.
+    expect(capped.signals.reads).toEqual({ calls: 5, rereads: 1, exactRereads: 1, ranged: 0 });
+    expect(capped.stats.pathsCapHit).toBe(true);
+    const roomy = await signalsOf(lines, { maxReadPaths: 3 });
+    expect(roomy.signals.reads.rereads).toBe(2);
+    expect(roomy.stats.pathsCapHit).toBe(false);
+  });
+});
+
+describe('AC-105 citations (D-AUDIT-READS)', () => {
+  const cited = [
+    turnLine({ id: 'c1', content: [{ type: 'text', text: 'applies ADR-007 and PF-012; ADR-007 again' }] }),
+    turnLine({ id: 'c2', content: [{ type: 'text', text: 'avoids PF-4321, not PF-12345 nor ADR-7 nor xADR-100' }] }),
+    promptLine('the user quotes PF-999'),
+    turnLine({ id: 'c3', content: [use('tc', 'Bash', { command: 'echo ADR-555' })] }),
+  ];
+
+  it('counts ADR/PF ids in assistant text only: total and distinct', async () => {
+    const parsed = await signalsOf(cited);
+    expect(parsed.signals.citations).toEqual({ total: 4, distinct: 3 });
+    expect(parsed.stats.citationIdsCapHit).toBe(false);
+  });
+
+  it('reports the citation-id cap and keeps counting the total', async () => {
+    const parsed = await signalsOf(cited, { maxCitationIds: 2 });
+    expect(parsed.signals.citations).toEqual({ total: 4, distinct: 2 });
+    expect(parsed.stats.citationIdsCapHit).toBe(true);
+  });
+});
+
+describe('AC-105 DECISIONS_CONTEXT shape and bytes (D-AUDIT-DECISIONS-SIGNAL)', () => {
+  const header = 'DECISIONS_CONTEXT: (slice: 2 of 105 entries — full index: /w/.devflow/learning/index.md)';
+  const entries = ['  PF-004  Key turn detection on the entry type  —  src/hud/transcript.ts', '  ADR-007  Workflows read a pre-rendered index  —  src/assets/commands/**'];
+  const footer = 'ADR-NNN entries live in /w/.devflow/learning/decisions.md';
+
+  async function decisionsOf(prompt: string) {
+    return (await signalsOf([promptLine(prompt)])).signals.decisionsContext;
+  }
+
+  it('reads a slice: the marker, the index lines, and the block in UTF-8 bytes up to the next field', async () => {
+    const block = [header, ...entries, footer].join('\n');
+    const found = await decisionsOf(`OPERATION: implement\n${block}\nHANDOFF_REQUIRED: true\n`);
+    // The block stops before HANDOFF_REQUIRED. It is 293 characters; its 3 em dashes weigh 3 bytes each in UTF-8,
+    // which makes 293 + 3 * 2 = 299 bytes.
+    expect(found).toEqual({ bytes: 299, indexLines: 2, shape: 'slice' });
+  });
+
+  it('reads a pointer: a ledger path and no index lines', async () => {
+    const line = 'DECISIONS_CONTEXT: read /w/.devflow/learning/index.md (the rendered ADR/PF index)';
+    const found = await decisionsOf(`OPERATION: issue-fix\n${line}\nHANDOFF_REQUIRED: false`);
+    expect(found).toEqual({ bytes: 81, indexLines: 0, shape: 'pointer' });
+  });
+
+  it('reads none: an absent field, "(none)", a mid-line mention and a bare field list', async () => {
+    const none = { bytes: 0, indexLines: 0, shape: 'none' };
+    expect(await decisionsOf('OPERATION: implement\nTASK_ID: t1')).toEqual(none);
+    expect(await decisionsOf('DECISIONS_CONTEXT: (none)\nTASK_ID: t1')).toEqual(none);
+    expect(await decisionsOf('see DECISIONS_CONTEXT in the doc')).toEqual(none);
+    // A bare field list carries no index line and no ledger path: nothing was passed.
+    expect(await decisionsOf('DECISIONS_CONTEXT (the active ADR/PF index), PR_DESCRIPTION (the PR body)')).toEqual(none);
+  });
+
+  it('calls 30 index lines the full index and 29 without a marker a slice', async () => {
+    const lines = (n: number): string => Array.from({ length: n }, (_, i) => `  PF-${String(100 + i)}  title ${i}  —  area`).join('\n');
+    expect((await decisionsOf(`DECISIONS_CONTEXT:\n${lines(30)}`)).shape).toBe('full');
+    expect((await decisionsOf(`DECISIONS_CONTEXT:\n${lines(29)}`)).shape).toBe('slice');
+    expect((await decisionsOf(`DECISIONS_CONTEXT:\n${lines(30)}`)).indexLines).toBe(30);
+  });
+
+  it('caps the block at 65,536 characters', async () => {
+    const found = await decisionsOf(`DECISIONS_CONTEXT: read /w/.devflow/learning/index.md\n${'x'.repeat(70_000)}`);
+    expect(found.bytes).toBe(65_536);
+  });
+
+  it('takes the prompt from the first real user entry only', async () => {
+    const parsed = await signalsOf([
+      promptLine('skill text', { isMeta: true }),
+      resultLine('t1', 'DECISIONS_CONTEXT: (none)'),
+      promptLine('OPERATION: qa-fix\nDECISIONS_CONTEXT: read /w/.devflow/learning/index.md'),
+      promptLine('OPERATION: implement\nDECISIONS_CONTEXT: (none)'),
+    ]);
+    expect(parsed.signals.operation).toBe('qa-fix');
+    expect(parsed.signals.decisionsContext.shape).toBe('pointer');
+  });
+
+  it('reads OPERATION from the first line only', async () => {
+    expect((await signalsOf([promptLine('OPERATION: issue-fix\nTASK_ID: x')])).signals.operation).toBe('issue-fix');
+    expect((await signalsOf([promptLine('TASK_ID: x\nOPERATION: implement')])).signals.operation).toBeNull();
+    expect((await signalsOf([promptLine('OPERATION: <b>x|y</b>')])).signals.operation).toBeNull();
+  });
+});
+
+describe('AC-107 Bash result classes and files written (D-AUDIT-BASH-CLASS)', () => {
+  it('classes each command by its strongest tool and sums result bytes per class', async () => {
+    const bash = (n: number, command: string, content: unknown): string[] => [
+      turnLine({ id: `b${n}`, content: [use(`tb${n}`, 'Bash', { command })] }),
+      resultLine(`tb${n}`, content),
+    ];
+    const parsed = await signalsOf([
+      ...bash(1, 'cd /w && npx vitest run tests/x.test.ts --reporter=dot', 'a'.repeat(100)),
+      ...bash(2, 'LOG=$(mktemp); npm run build >"$LOG" 2>&1; tail -n 40 "$LOG"', 'b'.repeat(50)),
+      ...bash(3, 'git log --oneline | head -5', 'c'.repeat(30)),
+      ...bash(4, 'command grep -n foo src | head -3', 'd'.repeat(20)),
+      ...bash(5, 'cat a.txt | sed -n 1,5p', 'e'.repeat(10)),
+      ...bash(6, 'ls -la', 'é'.repeat(3) + 'f'), // 3 two-byte chars + 1 byte = 7 bytes
+      ...bash(7, 'git commit -m "$(cat <<\'EOF\'\nfeat: x\nEOF\n)"', 'g'.repeat(5)),
+      ...bash(8, 'echo "npm test"', 'h'.repeat(3)),
+      ...bash(9, 'tsc --noEmit | grep error', [
+        { type: 'text', text: 'i'.repeat(25) },
+        { type: 'text', text: 'j'.repeat(15) },
+      ]),
+      resultLine('tb_unknown', 'z'.repeat(999)), // answers no Bash call: ignored
+    ]);
+    expect(parsed.signals.bashCalls).toEqual({ 'test/build': 3, git: 2, 'grep/find': 1, 'cat/sed/head': 1, other: 2 });
+    expect(parsed.signals.bashResultBytes).toEqual({ 'test/build': 190, git: 35, 'grep/find': 20, 'cat/sed/head': 10, other: 10 });
+    // Of the three test/build runs, only the vitest one carries a quiet flag (--reporter=dot).
+    expect(parsed.signals.quietTestRuns).toBe(1);
+  });
+
+  it('counts files written by Edit and Write: calls and distinct paths', async () => {
+    const parsed = await signalsOf([
+      turnLine({ id: 'w1', content: [use('e1', 'Edit', { file_path: '/w/a.ts', old_string: 'x', new_string: 'y' })] }),
+      turnLine({ id: 'w2', content: [use('e2', 'Edit', { file_path: '/w/a.ts', old_string: 'y', new_string: 'z' })] }),
+      turnLine({ id: 'w3', content: [use('e3', 'Write', { file_path: '/w/b.ts', content: 'redacted' })] }),
+      turnLine({ id: 'w4', content: [use('e4', 'Edit', { old_string: 'x' })] }), // no path: ignored
+    ]);
+    expect(parsed.signals.filesWritten).toEqual({ calls: 3, distinct: 2 });
+  });
+
+  it('shares the path-set cap with reads', async () => {
+    const write = (n: number, file: string): string => turnLine({ id: `p${n}`, content: [use(`tp${n}`, 'Write', { file_path: file })] });
+    const parsed = await signalsOf([write(1, '/w/a'), write(2, '/w/b'), write(3, '/w/c')], { maxReadPaths: 2 });
+    expect(parsed.signals.filesWritten).toEqual({ calls: 3, distinct: 2 });
+    expect(parsed.stats.pathsCapHit).toBe(true);
+  });
+});

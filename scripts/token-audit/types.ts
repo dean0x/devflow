@@ -27,6 +27,14 @@ export interface Limits {
   readonly maxSkillNames: number;
   /** Distinct unpriced model names listed on the unpriced line. */
   readonly maxUnpricedModels: number;
+  /**
+   * Distinct file paths tracked per transcript for re-read and files-written counting (D-AUDIT-READS).
+   * The read-path set and the written-path set each hold this many; a path past it still counts as a
+   * call but cannot be recognised as a repeat.
+   */
+  readonly maxReadPaths: number;
+  /** Distinct ADR/PF ids tracked per transcript for the citation count (D-AUDIT-READS). */
+  readonly maxCitationIds: number;
 }
 
 export const DEFAULT_LIMITS: Limits = Object.freeze({
@@ -36,6 +44,8 @@ export const DEFAULT_LIMITS: Limits = Object.freeze({
   maxFileBytes: 536_870_912,
   maxSkillNames: 500,
   maxUnpricedModels: 20,
+  maxReadPaths: 4_096,
+  maxCitationIds: 512,
 });
 
 export type CapKind = keyof Limits;
