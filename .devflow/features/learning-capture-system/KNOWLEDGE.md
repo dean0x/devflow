@@ -1,11 +1,11 @@
 ---
 feature: learning-capture-system
-name: Learning capture system
+name: Capture system for learning
 description: "Use when changing the capture hooks, memory/learning queues, machine feature switches or ledger root, or choosing which learning KB to read. Keywords: capture-prompt, queue-append, manifest.json, DF_LEDGER_ROOT."
 category: architecture
 directories:
   - src/assets/scripts/hooks
-  - src/assets/agents/learning.md
+  - src/assets/agents/curate.md
   - src/assets/agents/tracker.md
   - src/assets/agents/skim.mds
   - src/assets/commands/_partials/_decisions.mds
@@ -26,7 +26,7 @@ directories:
   - src/core/project-paths.ts
   - src/hud/components/learning-counts.ts
 created: 2026-07-15
-updated: 2026-10-10
+updated: 2026-10-13
 ---
 
 # Learning Capture System
@@ -34,7 +34,7 @@ updated: 2026-10-10
 ## Rules
 
 - **KB-INV-1** Ledger IDs (the ADR and PF numbers) stay on the machine: anything committed, pushed or posted states a rule in words, never by its number; `tests/guards/no-ledger-citations.test.ts` enforces the committed half.
-- **KB-INV-2** Plumbing never judges: hooks capture and trigger, the Learning agent decides what is a decision, a pitfall or still true, and plumbing validates, numbers, locks, projects and renders.
+- **KB-INV-2** Plumbing never judges: hooks capture and trigger, the Curate agent decides what is a decision, a pitfall or still true, and plumbing validates, numbers, locks, projects and renders.
 - **KB-INV-3** Content identifiers keep their "decisions" names (`decisions-*.jsonl`, `DECISIONS_CONTEXT`, `decisions_load()`, `render-decisions.cjs`) while the directory is `learning/`, the switch `features.learning` and the agent `Learning`; never "fix" the mismatch.
 - **KB-INV-4** `features.memory|learning|knowledge` in `~/.devflow/manifest.json` is the MACHINE switch; a repository can only turn a feature OFF, by a literal `false` in `project.json` or `config.json` `features.<name>`, and the retired top-level keys (`RETIRED_CONFIG_KEYS`) never narrow.
 - **KB-INV-5** Only an explicit boolean `false` switches a feature off (an absent manifest, `features` object or key, or a non-boolean, reads ON), by `isMachineFeatureOn` and `queue_read_gates` alike; neither is built on `readManifest()`.
@@ -56,7 +56,7 @@ updated: 2026-10-10
 
 ## Overview
 
-Three always-on hooks capture conversation turns into two independently gated JSONL queues, and two processors drain them. The **memory queue** (`.devflow/memory/.pending-turns.jsonl`) is drained by the detached `background-memory-update` worker, started by `memory-worker` on a throttle. The **learning queue** (`.devflow/learning/.pending-turns.jsonl`) is drained by the **Learning agent**, a background subagent that `session-start-context` tells the main model to spawn whenever turns are pending. Scripts capture and trigger only. The agent makes every judgment (is this a decision or a pitfall, is that entry still true); plumbing does the rest: validate, number, lock, project, render.
+Three always-on hooks capture conversation turns into two independently gated JSONL queues, and two processors drain them. The **memory queue** (`.devflow/memory/.pending-turns.jsonl`) is drained by the detached `background-memory-update` worker, started by `memory-worker` on a throttle. The **learning queue** (`.devflow/learning/.pending-turns.jsonl`) is drained by the **Curate agent**, a background subagent that `session-start-context` tells the main model to spawn whenever turns are pending. Scripts capture and trigger only. The agent makes every judgment (is this a decision or a pitfall, is that entry still true); plumbing does the rest: validate, number, lock, project, render.
 
 **Ledger IDs stay on the machine.** The ledger is gitignored and numbered per machine, so an ADR or PF number resolves on no other clone and numbers get reused. Anything committed, pushed or posted (code, docs, this KB, commit messages, PR text) states the rule in words; IDs live only in a session's reasoning, handoffs and reports. An observation's title, rule and why may not name an entry either (the op refuses).
 
@@ -65,7 +65,7 @@ This area is large, so it is split into a hub (this file) and five focused KBs:
 | KB | Read it for |
 |---|---|
 | `.devflow/features/learning-capture-system-store/KNOWLEDGE.md` | The store module as single schema authority: observations and ledger rows, validation, the `json-helper` learning ops, the one lock, rendering of `decisions.md`, `pitfalls.md` and `index.md` |
-| `.devflow/features/learning-capture-system-agent/KNOWLEDGE.md` | The Learning agent, the owned queue claim and heartbeat, the `session-start-context` directives (maintenance, tracker setup), the `devflow learning` CLI, the TS seam and HUD counts |
+| `.devflow/features/learning-capture-system-agent/KNOWLEDGE.md` | The Curate agent, the owned queue claim and heartbeat, the `session-start-context` directives (maintenance, tracker setup), the `devflow learning` CLI, the TS seam and HUD counts |
 | `.devflow/features/learning-capture-system-delivery/KNOWLEDGE.md` | How decisions reach agents (`DECISIONS_CONTEXT`, the defines, the pass rule), the learning-on and learning-off prompt variants and the converge |
 | `.devflow/features/learning-capture-system-links/KNOWLEDGE.md` | The rule that nothing writes, renames or reads through a symbolic link under a project's `.devflow/`, and the safe-create and mode rules |
 | `.devflow/features/learning-capture-system-memory-worker/KNOWLEDGE.md` | The memory worker, its model, effort and argv, the pre-compact backup and the jq-less JSON fallback |
@@ -87,7 +87,7 @@ This hub holds what they share: the data files and the naming boundary, the mach
 | `decisions.md`, `pitfalls.md`, `index.md` | generated from the ledger, never hand-edited |
 | `.decisions.lock/` | the one learning lock |
 | `.pending-turns.jsonl`, `.pending-turns.processing`, `.pending-turns.owner` | the queue, the claimed batch, its owner's token |
-| `learning.json` | agent tuning `{model, debug}`; the project file overrides `~/.devflow/learning.json`, and for the model a `devflow agents` Learning mapping outranks the global file (see the agent KB) |
+| `learning.json` | agent tuning `{model, debug}`; the project file overrides `~/.devflow/learning.json`, and for the model a `devflow agents` Curate mapping outranks the global file (see the agent KB) |
 
 Content identifiers keep their "decisions" names although the system is "learning": `decisions-*.jsonl`, `decisions_status`, `DECISIONS_CONTEXT`, `decisions_load()`, `render-decisions.cjs`, `decisions-format.cjs`, ADR/PF numbers. The directory is `learning/`, the switch `features.learning`, the agent `Learning`. Do not "fix" the mismatch.
 
@@ -128,7 +128,7 @@ All three hooks (`capture-prompt`, `capture-turn`, `capture-question`) source `q
 | Feature on/off | `~/.devflow/manifest.json` | `{features: {memory, learning, knowledge, …}}` |
 | Team narrowing and facts | `.devflow/project.json` (committed, never devflow-written) | `{version, evidence, compliance, tracker, reviewPublication, features}`; `reviewPublication` only lowers |
 | Personal per-repo facts | `.devflow/config.json` | `{reviewPublication, tracker?, features?}` |
-| Agent tuning | `.devflow/learning/learning.json`, then (for the model only) the `devflow agents` Learning mapping in `~/.devflow/agent-models.json`, then `~/.devflow/learning.json` | `{model, debug}` |
+| Agent tuning | `.devflow/learning/learning.json`, then (for the model only) the `devflow agents` Curate mapping in `~/.devflow/agent-models.json`, then `~/.devflow/learning.json` | `{model, debug}` |
 
 ### Hook ownership, init and logs
 
@@ -140,7 +140,7 @@ All three hooks (`capture-prompt`, `capture-turn`, `capture-question`) source `q
 
 - **git**: `ls-files` (scope matching, the cited-number scan), `rev-parse` (roots, verify ref), `cat-file blob` (the Encoded quote); the store makes its calls through its `git()` wrapper, whose body prepends the fsmonitor override; the agent reads files at the ref with `git show`.
 - **Install**: the store, renderer, formatter, `mkdir-lock`, `safe-path` and `json-helper` install under `~/.devflow/scripts/hooks/` (the install goldens list each), and `core/observations.js` rides with the HUD. A prompt that names an op needs that op in the installed copy. The learning-off variants ride in the package under `dist/learning-off/` and are what a learning-off machine installs in place of the on files; the `devflow:apply-decisions` skill installs on a learning-on machine only.
-- **Claude Code**: SessionStart `additionalContext` carries Sections 1 to 5 (Section 6 is a top-level `systemMessage`); the Learning and Tracker agents are spawned from directives, never from commands; hooks of one event run in parallel.
+- **Claude Code**: SessionStart `additionalContext` carries Sections 1 to 5 (Section 6 is a top-level `systemMessage`); the Curate and Tracker agents are spawned from directives, never from commands; hooks of one event run in parallel.
 - **Docs**: `docs/reference/hooks.md` (the Learning pipeline), `docs/reference/file-organization.md` (the data-file table and ops), `docs/cli-reference.md` (the `devflow learning` flags) describe this area.
 
 ## Constraints
@@ -219,5 +219,5 @@ Every loop and read has a bound, each a named constant: in the store `E4_MAX_SKI
 - `.devflow/features/tracker-feature/KNOWLEDGE.md`: provider selection, the Tracker agent's schema and the Git agent's reader side for the tracker-setup section.
 - `.devflow/features/installer-shadowing/KNOWLEDGE.md`: managed config writes, queue drains at init, the install goldens that list the store, and the carve-out block and its TS twin.
 - `.devflow/features/test-harness/KNOWLEDGE.md`: guards on this area (`no-ledger-citations`, `no-fsmonitor-index-read`, `retired-wording`), the install snapshots and the write-set fence.
-- `.devflow/features/external-model-routing/KNOWLEDGE.md`: the `agents.memory` entry's shape and worker domain, the `devflow agents` writer, and the per-agent frontmatter rewrite that the Learning mapping rides on.
+- `.devflow/features/external-model-routing/KNOWLEDGE.md`: the `agents.memory` entry's shape and worker domain, the `devflow agents` writer, and the per-agent frontmatter rewrite that the Curate mapping rides on.
 - `docs/reference/hooks.md`, `docs/reference/file-organization.md`, `docs/cli-reference.md`: the Learning pipeline, the data-file table, the learning-off variants and the `devflow learning` flags.

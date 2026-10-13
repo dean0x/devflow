@@ -5,7 +5,7 @@ description: "Use when working on agent-models.json, frontmatter rewriting, dorm
 category: architecture
 directories: [src/core/external-models.ts, src/core/agent-models.ts, src/core/agent-state.ts, src/core/agent-frontmatter.ts, src/core/model-discovery.ts, src/core/cache.ts, src/cli/commands/agents.ts, src/cli/agents-view, src/cli/tui]
 created: 2026-10-10
-updated: 2026-10-11
+updated: 2026-10-13
 ---
 
 # External Model Routing — Per-Agent Model Config, Agents TUI & Model Discovery
@@ -64,7 +64,7 @@ Claude Code ranks a model passed at an Agent spawn above the agent's frontmatter
 
 ### Reading and canonicalising the mapping
 
-- **`readAgentMapping`** routes through `parseAgentMappingEnvelope`, so it and the `canonicalise-agent-keys-v1` migration share BOM and whitespace tolerance and JSON-error handling. It validates per entry: a model failing `isValidModelName` is dropped with a warning (a bad entry must not poison an agent on every reapply), an effort that is not a level (or `inherit`, for agents only) is dropped with a warning, and worker keys are held to `validateWorkerValue`. When the envelope warns "non-object agents field" (for example `agents: []`) it returns `Ok({ version: 1, agents: {} })` for backward compatibility; the migration treats the same case as a tolerated warn. It applies `canonicaliseAgentKeys` inline on every read, covering every call site.
+- **`readAgentMapping`** routes through `parseAgentMappingEnvelope`, so it and the `canonicalise-agent-keys-v1` and `-v2` migrations share BOM and whitespace tolerance and JSON-error handling. It validates per entry: a model failing `isValidModelName` is dropped with a warning (a bad entry must not poison an agent on every reapply), an effort that is not a level (or `inherit`, for agents only) is dropped with a warning, and worker keys are held to `validateWorkerValue`. When the envelope warns "non-object agents field" (for example `agents: []`) it returns `Ok({ version: 1, agents: {} })` for backward compatibility; the migration treats the same case as a tolerated warn. It applies `canonicaliseAgentKeys` inline on every read, covering every call site.
 - **`parseAgentMappingEnvelope(filePath)`** (exported discriminated parser) returns `{ kind: 'skip' }` (file absent, empty or BOM-only, or `agents` absent: caller no-ops), `{ kind: 'warn', message }` (I/O error, invalid JSON, non-object structure: caller records the message) or `{ kind: 'ok', envelope, rawAgents }`.
 - **`LEGACY_AGENT_KEYS`** is a `Readonly<Record<string, string>>` built via `Object.assign(Object.create(null))`, always accessed with `Object.hasOwn` (KB-AP-9).
 - **`canonicaliseAgentKeys<T>`** is generic over the entry value type and returns `{ agents, didMutate, renamed, dropped, guardDropped }`: `renamed` (legacy keys renamed), `dropped` (legacy key dropped on canonical-key collision, new value wins), `guardDropped` (old or new key was `__proto__`). Callers persist iff `didMutate`; a second call on a migrated map mutates nothing.
@@ -187,6 +187,6 @@ A pure-reducer, pure-renderer, thin-shell split:
 
 - `.devflow/features/external-model-routing/KNOWLEDGE.md` — hub: proxy lifecycle, `isProxyEnabled()` as the dormancy authority, init ordering (preflight before reapply), settings teardown
 - `.devflow/features/external-model-routing-hook/KNOWLEDGE.md` — the relay spawn environment that discovery's `scrubChildEnv()` shares
-- `.devflow/features/learning-capture-system-memory-worker/KNOWLEDGE.md` — the memory worker's side of `agents.memory`: the version probe, the lean and legacy `claude -p` argv, the staged-file precondition, and the Learning directive's model precedence over the `devflow agents` Learning mapping
+- `.devflow/features/learning-capture-system-memory-worker/KNOWLEDGE.md` — the memory worker's side of `agents.memory`: the version probe, the lean and legacy `claude -p` argv, the staged-file precondition, and the Learning directive's model precedence over the `devflow agents` Curate mapping
 - `.devflow/features/installer-shadowing/KNOWLEDGE.md` — `resolveSeedFeatures` and uninstall artifact cleanup
 - `src/core/` and `src/cli/` — state I/O and pure logic in core, CLI orchestration in cli; `agent-state.ts` is a core leaf so the classifier keeps one responsibility

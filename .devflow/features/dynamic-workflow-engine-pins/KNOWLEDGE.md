@@ -14,7 +14,7 @@ directories:
   - tests/fixtures/numeric-floors.json
   - tests/guards/code-review-diff-gating.test.ts
 created: 2026-10-10
-updated: 2026-10-12
+updated: 2026-10-13
 ---
 
 # Dynamic Workflow Engine Compiled Output and Pins
@@ -24,7 +24,7 @@ updated: 2026-10-12
 - **KB-INV-1** Five rosters count five different sets, never conflated: `MDS_COMMAND_HOSTS`, `MDS_PARTIALS`, `ALL_MDS_PARTIALS`, `ALL_DISCOVERED_HOSTS`, `ALL_MDS_HOSTS` (plus `DIST_COMMAND_FILES`, the same roster as the command hosts seen from the output side). Derive every count from `tests/fixtures/mds-manifest.ts`; never pin a bare literal.
 - **KB-INV-2** Compilation-scope guards use `COMMAND_HOSTS` or `ALL_DISCOVERED_HOSTS`; deployed-behaviour guards (gh-issue scope, compliance gate, retired wording, marker-literal ownership) use `DIST_FILES`.
 - **KB-INV-3** The suite reads compiled `dist/commands/dynamic-build.md` for exact doctrine strings; changing a doctrine literal in a partial breaks its pin by design, so change doctrine and pin together.
-- **KB-INV-4** Simplify and Scrutinize are each spawned exactly twice in dynamic-build (Gate 1 #1 and Gate 1 #2 only), and the review pass appears once: the single-pass literals are present and the delta-review, cycle-loop and `maxCycles`-style tokens are absent.
+- **KB-INV-4** Polish and Harden are each spawned exactly twice in dynamic-build (Gate 1 #1 and Gate 1 #2 only), and the review pass appears once: the single-pass literals are present and the delta-review, cycle-loop and `maxCycles`-style tokens are absent.
 - **KB-INV-5** `/dynamic-build` is outside `/code-review`'s diff-class work: `_engine.mds`, `dynamic-build.mds`, `_wave.mds` and the compiled command carry no `DIFF_FILE`, `DIFF_CLASS`, `diff*.patch` name, docs-only, tests-only or lockfile-only reduced set, installed-language stamp or `stamp-gated` row.
 - **KB-INV-6** `--dry-run` appears in compiled dynamic-profile only, never in dynamic-build, dynamic-plan or dynamic-tickets.
 - **KB-INV-7** No compiled command contains a `<!-- devflow:` marker literal: the Git-agent operation owns its marker format, and a caller says only that the Git agent deduplicates via its own marker.
@@ -53,7 +53,7 @@ Read `tests/fixtures/mds-manifest.ts` for the canonical rosters; every count is 
 |---|---|---|
 | `COMMAND_HOSTS` (`MDS_COMMAND_HOSTS`) | Command hosts under `src/assets/commands/`: the knowledge hosts, the four dynamic hosts and `release`, compiled into `dist/commands/` | Excludes the generator hosts (`src/assets/agents/*.mds`) and the reference modules |
 | `MDS_PARTIALS` | Partials in `src/assets/commands/_partials/` (flat) | Not the whole partial roster: `ALL_MDS_PARTIALS` adds `MDS_REFERENCE_PARTIALS`, the partials outside `_partials/` (the tracker `_common.mds` and `_steps.mds`, the Git `_ops.mds`, `_ops_pr.mds` and `_ops_steps.mds`, and the Code variants' shared `src/assets/agents/_partials/_code.mds`). It is the number the build prints as `"N partial(s) skipped (no output-dir:)"`; floors rise with the roster, never fall |
-| `ALL_DISCOVERED_HOSTS` | Every `output-dir:`-declaring source the build discovers: the command hosts, the generator hosts (`MDS_GENERATOR_HOSTS`: the agents `code`, `code-edit`, `code-fix`, `design`, `diagnose`, `git`, `knowledge`, `research`, `review`, `scrutinize`, `skim`, `triage`) and the reference modules (`MDS_REFERENCE_MODULES`: `tracker/_github.mds`, `_jira.mds`, `_linear.mds`, `_mcp.mds`, `_contract.mds`, `git/_pr.mds`, `git/_references.mds` under `src/assets/mds/`) | The number the build prints as `"N host(s) to compile:"`. The reference-module host kind is owned by `feature-knowledge-system` |
+| `ALL_DISCOVERED_HOSTS` | Every `output-dir:`-declaring source the build discovers: the command hosts, the generator hosts (`MDS_GENERATOR_HOSTS`: the agents `code`, `debug`, `design`, `fix`, `git`, `harden`, `knowledge`, `refactor`, `research`, `review`, `skim`, `triage`) and the reference modules (`MDS_REFERENCE_MODULES`: `tracker/_github.mds`, `_jira.mds`, `_linear.mds`, `_mcp.mds`, `_contract.mds`, `git/_pr.mds`, `git/_references.mds` under `src/assets/mds/`) | The number the build prints as `"N host(s) to compile:"`. The reference-module host kind is owned by `feature-knowledge-system` |
 | `ALL_MDS_HOSTS` | The command hosts plus the generator hosts: every host whose basename becomes an output filename | Reference modules are excluded: their filenames come from an operation registry (`src/core/mds-variants.ts`), and `_github` would not even pass `validateOutputName` |
 | `DIST_COMMAND_FILES` (`DIST_FILES`) | The compiled command outputs, one per command host | Every command is a compiled host, so no file in `dist/commands/` is copied rather than compiled |
 
@@ -63,7 +63,7 @@ Read `tests/fixtures/mds-manifest.ts` for the canonical rosters; every count is 
 
 `tests/build-mds.test.ts` reads the compiled `dist/commands/dynamic-build.md` and greps exact doctrine strings:
 
-- `agentType: "Simplify"` and `agentType: "Scrutinize"` each spawned exactly twice (Gate 1 #1 and Gate 1 #2 only).
+- `agentType: "Polish"` and `agentType: "Harden"` each spawned exactly twice (Gate 1 #1 and Gate 1 #2 only).
 - **Single-pass review.** Present: `The review pass runs exactly ONCE`, `The pass runs exactly ONCE`, `Never author additional cycles or a delta re-review of fix commits` (engine invariant 7, unique), `Budget scales roster and verification votes, NEVER the number of passes` (review_pass prose, unique). Absent: `DELTA REVIEW`, `reviewBaseSha`, `preFixSha`, `maxCycles`, `cyclesRun`, `fixedInCycle`, `allCoverageGaps`, `for (let cycle` (skeleton guard), `review_loop`, `/review[- ]loop/i`.
 - Also present: `reviewed: true`, `coverageGaps.length === 0`, `FAIL-FIXED`, `ALWAYS ready`, `Cheapest-sufficient validation`, `One build gate per phase`, `Never wrap a build or test command in`, `never poll across turns`, `Gate 1 #2`, `gate1-final`, and `No unauthorized tracker or remote side-effects` (engine invariant 6, neutralised from GitHub-bound wording; a grep guard over the compiled dynamic hosts is non-vacuous against the old literal).
 - **Post-wave-report block.** `OPERATION: post-wave-report`, `TRACKING_ISSUE:`, `WAVE_REPORT_PATH: .devflow/docs/waves/`, `WAVE_ID:`, `WORKTREE_PATH:`, `skip this step entirely in SINGLE mode`, `TRACEABILITY: DEGRADED (no tracking issue for this run)`. The wave-report marker literal is deliberately not pinned caller-side (see below).

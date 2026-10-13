@@ -5,7 +5,7 @@ description: "Use when adding a guard, seam or golden test, changing the agent-s
 category: conventions
 directories: [tests/helpers.ts, tests/git-agent.test.ts, tests/seams, tests/goldens, tests/guards, tests/fixtures, scripts/update-golden.ts, tests/integration, tests/tracker, tests/dynamic, tests/installer, tests/evidence, tests/provider-literals.test.ts, tests/tracker-agent.test.ts, tests/commands, tests/install-bound-input.test.ts, tests/learning, tests/decisions]
 created: 2026-09-06
-updated: 2026-10-12
+updated: 2026-10-13
 ---
 
 # Test Harness
@@ -61,7 +61,7 @@ The setup file's pure half, `tests/setup/home-isolation.ts` (`REDIRECT_ENV_VARS`
 
 Dist-preferred, src-fallback resolver. `resolveAgentSource(name, root?)` reads its directory order from `agentSourceDirs(root)` (the one owner of the dist-first policy, `src/core/assets.ts`): compiled `dist/agents/<name>.md` first, the hand-authored source tree second, and a throw with a build hint naming both resolved paths when neither exists. `agentSourceDirs(root, learning = true)` takes a second parameter that puts `dist/learning-off/agents` first for a learning-off install; the harness never passes it. It reads the learning-on file through `resolveAgentSource` and a learning-off variant through `resolveLearningOffSource(kind, name, root?)`, which returns `null` for a host with no arm. `resolveAllAgents(root?)` covers every agent in `getAllAgentNames()` (the hook-spawned Tracker agent included), pinned by `agent-roster-count` in `numeric-floors.json`.
 
-The canonical anti-pattern has a name: `scanned > 0` over the agent corpus (GAP-07). Most agents survive that assertion while coverage of one silently disappears. Use the completeness assertion `expect([...agents.keys()]).toEqual(expect.arrayContaining(getAllAgentNames()))` and pin the expected count (`agent-roster-count` in `numeric-floors.json`, which rises when an agent joins the registry: devflow's Explore override and the Code-fix and Code-edit variants each raised it). The shipped frontmatter of every registered agent is one row of `AGENT_CONFIG` in `tests/fixtures/agent-config.ts`, with no exempt-agent map; a new agent must be given a row.
+The canonical anti-pattern has a name: `scanned > 0` over the agent corpus (GAP-07). Most agents survive that assertion while coverage of one silently disappears. Use the completeness assertion `expect([...agents.keys()]).toEqual(expect.arrayContaining(getAllAgentNames()))` and pin the expected count (`agent-roster-count` in `numeric-floors.json`, which rises when an agent joins the registry: devflow's Explore override and the Fix and Refactor variants each raised it). The shipped frontmatter of every registered agent is one row of `AGENT_CONFIG` in `tests/fixtures/agent-config.ts`, with no exempt-agent map; a new agent must be given a row.
 
 Text an agent mode reads from the `agent-references` skill (Synthesize's `synthesize/{mode}.md`, Learning's `learning/maintain.md`) is read with `readAgentReference(rel)` (path from `agentReferencePath(rel)`), which throws on an absent file; `SYNTHESIZE_MODES` names the six Synthesize modes. A guard about what a mode's spawn sees reads the agent body plus that reference, never the body alone.
 

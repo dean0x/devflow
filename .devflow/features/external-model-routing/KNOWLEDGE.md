@@ -5,7 +5,7 @@ description: "Use when working on the proxy lifecycle (enable, disable, status, 
 category: architecture
 directories: [src/core/proxy-state.ts, src/core/codex-auth-inspect.ts, src/cli/commands/proxy.ts]
 created: 2026-07-24
-updated: 2026-10-10
+updated: 2026-10-13
 ---
 
 # External Model Routing & Per-Agent Model Config
@@ -186,7 +186,7 @@ There is no override-confirm prompt: the merge is purely additive (Devflow entri
 ## Gotchas
 
 - **KB-AP-8** — `resolveProxyBin()` uses `createRequire(import.meta.url)`, the ESM-safe way to resolve CommonJS package paths; `require.resolve('subswitch/package.json')` finds the package relative to devflow's own `node_modules`, not the user's project.
-- **KB-AP-9** — Reap stub relays with `afterEach`/`onTestFinished`, SIGTERM then SIGKILL, and confirm death with `process.kill(pid, 0)`. The incident: orphaned stub relays accumulated over weeks and produced spurious failures in memory-pipeline and capture-hook tests that were repeatedly misdiagnosed as product defects.
+- **KB-AP-9** — Reap stub relays with `afterEach`/`onTestFinished`, SIGTERM then SIGKILL, and confirm death with `process.kill(pid, 0)`. The incident: orphaned stub relays accumulated over weeks and produced spurious failures in memory-pipeline and capture-hook tests that were repeatedly mistaken for product defects.
 - Non-fatal everywhere: artifact removal in uninstall and disable, `writeFileAtomicExclusive`'s chmod, and the hook's binPath re-resolution never abort their command.
 
 ## Key Files

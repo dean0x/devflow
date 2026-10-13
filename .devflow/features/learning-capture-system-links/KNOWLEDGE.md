@@ -10,7 +10,7 @@ directories:
   - src/targets/claude-code/post-install.ts
   - src/hud/components/learning-counts.ts
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-13
 ---
 
 # Symbolic-Link and Safe-Create Rules Under .devflow
@@ -70,7 +70,7 @@ Three kinds of read do follow a link: the hooks' bounded pre-reads of `project.j
 ## Gotchas
 
 - **KB-AP-4**: `noclobber` is not a link check (see Exclusive create).
-- **A linked `.devflow`, or its `memory` or `learning` folder, gets no capture, on purpose.** `ensure-devflow-init` returns non-zero for a linked `.devflow` (the capture hooks then exit 0), `queue_append_row` skips a queue below a linked folder, the memory hooks skip the memory folder, and the learning ops refuse the learning tree (`claim-queue` included, so the Learning agent stops at Step 0 with the refusal on stderr). The hooks log each skip once under `~/.devflow/logs/<cwd-slug>/`; the ops answer on stderr.
+- **A linked `.devflow`, or its `memory` or `learning` folder, gets no capture, on purpose.** `ensure-devflow-init` returns non-zero for a linked `.devflow` (the capture hooks then exit 0), `queue_append_row` skips a queue below a linked folder, the memory hooks skip the memory folder, and the learning ops refuse the learning tree (`claim-queue` included, so the Curate agent stops at Step 0 with the refusal on stderr). The hooks log each skip once under `~/.devflow/logs/<cwd-slug>/`; the ops answer on stderr.
 - **KB-AP-3: reads through a linked folder are by design.** The read-only paths (`list`, `show`, `render --check`, `devflow learning --status|--list|--show`) and the HUD refuse a linked file (a linked log, ledger, archive or history file reads as missing, and a linked ledger shows no counts) but still read through a linked `.devflow` or `.devflow/learning` folder; only the writers refuse the folder. The hooks differ: they refuse a file below a linked folder as well.
 - **KB-AP-7: `df_no_symlink_below` answers 1 for a call it cannot vouch for, and the log line then still names a link.** Each queue is checked against the root it lies below, memory against `$PROJECT_ROOT` and learning against `$LEDGER_ROOT`, which differ in a linked worktree. A queue handed the wrong root, or a path with an empty, `.` or `..` part or more than the part bound, is refused as "not below its root" with the same `Queue skipped: a symbolic link sits on the path to ...` line, so a capture that goes missing is not always a link.
 - **KB-INV-11**: a helper that ends on a failed test under `set -e` kills the hook silently (see `set -e` discipline).

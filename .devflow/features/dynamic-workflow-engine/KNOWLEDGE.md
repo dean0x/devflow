@@ -17,15 +17,15 @@ directories:
   - dist/commands
   - tests/dynamic
 created: 2026-07-07
-updated: 2026-10-12
+updated: 2026-10-13
 ---
 
 # Dynamic Workflow Engine
 
 ## Rules
 
-- **KB-INV-1** Only the Code family writes code: every implementation, review fix, Gate 2 fix, validation fix and merge-conflict resolution is a Code or Code-fix spawn whose prompt opens with `OPERATION: <mode>`; Code takes `implement` and `issue-fix`, Code-fix takes `validation-fix`, `alignment-fix` and `qa-fix`.
-- **KB-INV-2** Gate 1 runs Simplify, then Scrutinize, then Validate (last, unconditional), at exactly two points per ticket: after the implement bundle and as the final gate after the review pass. Never inside the pass or after individual fixes; no code merges before it.
+- **KB-INV-1** Only the Code family writes code: every implementation, review fix, Gate 2 fix, validation fix and merge-conflict resolution is a Code or Fix spawn whose prompt opens with `OPERATION: <mode>`; Code takes `implement` and `issue-fix`, Fix takes `validation-fix`, `alignment-fix` and `qa-fix`.
+- **KB-INV-2** Gate 1 runs Polish, then Harden, then Validate (last, unconditional), at exactly two points per ticket: after the implement bundle and as the final gate after the review pass. Never inside the pass or after individual fixes; no code merges before it.
 - **KB-INV-3** Gate 2 (one Evaluate agent with two lenses, plus Test) fires once, at implementation acceptance before the review pass. A failure is fix-and-continue, recorded `FAIL-FIXED` and never re-evaluated; a ticket carrying `FAIL-FIXED` reports UNVERIFIED, never PASS.
 - **KB-INV-4** The review pass runs exactly once per ticket over the full branch diff, with no base SHA and no delta re-review. Budget scales roster size and verification votes, never the number of passes.
 - **KB-INV-5** Findings are adversarially verified (majority survives) before any fix. A chunk is FIXED only when `status === "fixed"`, `commitShas` is non-empty and `unresolved` is empty; otherwise the whole chunk stays in `survivingFindings`.
@@ -37,7 +37,7 @@ updated: 2026-10-12
 - **KB-INV-11** A workflow cannot pause: every `AskUserQuestion` happens at the command boundary after the workflow returns.
 - **KB-INV-12** No deterministic feature code in the script body (no parsers, schedulers, topological sorts, dependency-graph helpers or confidence formulas): issue reading, dependency reasoning and scheduling are LLM judgment (the Iron Rule).
 - **KB-INV-13** A ticket works on the branch its `setup-task` created and reported, verbatim in every phase and the merge. The engine mints no name; a missing branch stops the ticket (`branch-missing`).
-- **KB-INV-14** Only the Validate agent runs the full test suite, once per HEAD; Code runs its affected tests, Simplify and Evaluate run no build, test or lint command.
+- **KB-INV-14** Only the Validate agent runs the full test suite, once per HEAD; Code runs its affected tests, Polish and Evaluate run no build, test or lint command.
 - **KB-INV-15** Builds and tests run in the foreground under an explicit Bash `timeout`; never background and poll. A prompt names "your Running commands block", never copies it.
 - **KB-AP-1** A dead Review agent (null, thrown, guard string or `reviewed !== true`) is a coverage gap that blocks PASS, never a clean pass; `filter(Boolean)` is crash-safety only.
 - **KB-AP-2** One `agent()` call per Review focus, spawned in staggered chunks: never batch focuses into one call or fire the whole roster at once (429 batch death).
@@ -95,13 +95,13 @@ Partials declare no `output-dir:`; hosts declare it as the last frontmatter key 
 
 ### The single-ticket engine (dynamic-build, SINGLE mode)
 
-Pre-authoring step 0 resolves the evidence policy and authors `issueRequired` and `applyConventions` into the script (only an explicit "false" turns either off; absent or unrecognised fails closed), and step 0b authors `complianceFrameworks` (any value outside the framework-list grammar means no lens). The script derives `COMPLIANCE_DIRECTIVE` from it, empty when the lens is off, and every Code and Code-fix prompt carries it (no agent takes a compliance input). `meta.phases` is `setup, implement, gate1, gate2, review, gate1-final, report`.
+Pre-authoring step 0 resolves the evidence policy and authors `issueRequired` and `applyConventions` into the script (only an explicit "false" turns either off; absent or unrecognised fails closed), and step 0b authors `complianceFrameworks` (any value outside the framework-list grammar means no lens). The script derives `COMPLIANCE_DIRECTIVE` from it, empty when the lens is off, and every Code and Fix prompt carries it (no agent takes a compliance input). `meta.phases` is `setup, implement, gate1, gate2, review, gate1-final, report`.
 
 ```
 setup (Git setup-task: branch, issueId, prLinkLine)
   -> stops, in order: ticket-link-missing, branch-missing
   -> implement (Code: task + plan + DECISIONS_CONTEXT + COMPLIANCE_DIRECTIVE)
-  -> gate1 #1  (Simplify -> Scrutinize -> Validate; Validate FAIL -> Code-fix validation-fix, up to 2, each re-validated)
+  -> gate1 #1  (Polish -> Harden -> Validate; Validate FAIL -> Fix validation-fix, up to 2, each re-validated)
   -> gate2     (Evaluate + Test, ONCE, before review; fix-and-continue -> FAIL-FIXED)
   -> review    (single pass)
   -> gate1-final #2 (same sequence, after all fixes)
@@ -110,13 +110,13 @@ setup (Git setup-task: branch, issueId, prLinkLine)
 
 **Setup.** `OPERATION: setup-task` returns `branch`, `issueId` and `prLinkLine` under its `Return:` JSON contract. `BRANCH` is `setup.branch` as reported, never a name the workflow synthesizes. `ISSUE_NUMBER` is the Issue ID only when it matches `ISSUE_ID_SHAPE` (a bare number or a KEY-number; anything else, "none" included, is no capture, so the stop fails closed), and `ISSUE_PR_LINK` is `prLinkLine` or `"(none)"`; neither reaches a Code spawn (Code opens no PR), and the link rides only on the ticket's result as `issuePrLink` for the wave PR's related line. Two `ESCALATED` stops sit before implement: `ticket-link-missing` (issues required but no Issue ID captured; the workflow cannot ask, so it never records an exception) then `branch-missing` (the branch is absent or `(none)`; a correctness stop, not a shape gate on the name).
 
-**Gate 1** is order-load-bearing: Simplify, then Scrutinize, then Validate. Scrutinize returns `PASS | FIXED | BLOCKED`; BLOCKED, or a missing or unrecognised status counted as BLOCKED, stops the pass as `scrutiny-blocked` and Validate does not run on code Scrutinize could not accept. Validate runs last and unconditionally, one full run over the HEAD the two left, so it covers their commits whether or not Scrutinize changed code. A FAIL gets up to two Code-fix `validation-fix` attempts, each followed by a Validate re-run, and the loop carries each recheck's latest failure details into the next attempt (`failureDetails = recheck?.details || failureDetails`) in both Gate 1 #1 and Gate 1 #2; still failing means `validation-exhausted`. Gate 1 holds no Evaluate or Test agent. A Gate 1 #1 escalation returns `ESCALATED` before Gate 2, so Gate 2 and the review pass never run on a broken or unfinished build; a Gate 1 #2 escalation lands in the final result's escalations. Depth scales to change size and budget. Gate 1 runs exactly twice per ticket and never inside the review pass, where fix Code agents self-verify their own builds.
+**Gate 1** is order-load-bearing: Polish, then Harden, then Validate. Harden returns `PASS | FIXED | BLOCKED`; BLOCKED, or a missing or unrecognised status counted as BLOCKED, stops the pass as `scrutiny-blocked` and Validate does not run on code Harden could not accept. Validate runs last and unconditionally, one full run over the HEAD the two left, so it covers their commits whether or not Harden changed code. A FAIL gets up to two Fix `validation-fix` attempts, each followed by a Validate re-run, and the loop carries each recheck's latest failure details into the next attempt (`failureDetails = recheck?.details || failureDetails`) in both Gate 1 #1 and Gate 1 #2; still failing means `validation-exhausted`. Gate 1 holds no Evaluate or Test agent. A Gate 1 #1 escalation returns `ESCALATED` before Gate 2, so Gate 2 and the review pass never run on a broken or unfinished build; a Gate 1 #2 escalation lands in the final result's escalations. Depth scales to change size and budget. Gate 1 runs exactly twice per ticket and never inside the review pass, where fix Code agents self-verify their own builds.
 
-**Gate 2** fires once at implementation acceptance, not after review fixes. One Evaluate agent carries two lenses in one spawn (acceptance criteria including the negative ones; scope and intent drift), so a ticket pays for one spawn and one read of the plan; a wave ticket runs the same skeleton. If no plan exists Evaluate is silently skipped; with no acceptance criteria and no test plan Test is silently skipped, and the build proceeds Gate-1-only (never refuse to build, never fabricate criteria). A failure is fix-and-continue: a Code-fix agent (`alignment-fix`) applies the demanded fixes and self-verifies, the verdict becomes `FAIL-FIXED` (issues found, fixes applied, not re-evaluated by design), and the ticket reports UNVERIFIED rather than PASS.
+**Gate 2** fires once at implementation acceptance, not after review fixes. One Evaluate agent carries two lenses in one spawn (acceptance criteria including the negative ones; scope and intent drift), so a ticket pays for one spawn and one read of the plan; a wave ticket runs the same skeleton. If no plan exists Evaluate is silently skipped; with no acceptance criteria and no test plan Test is silently skipped, and the build proceeds Gate-1-only (never refuse to build, never fabricate criteria). A failure is fix-and-continue: a Fix agent (`alignment-fix`) applies the demanded fixes and self-verifies, the verdict becomes `FAIL-FIXED` (issues found, fixes applied, not re-evaluated by design), and the ticket reports UNVERIFIED rather than PASS.
 
 **Verdict.** PASS needs no surviving findings, no coverage gaps, Gate 1 #2 not escalated and no `FAIL-FIXED` Gate 2 verdict. A clean ticket whose only blemish is `FAIL-FIXED` is UNVERIFIED; anything else is PARTIAL (a Gate 1 #2 escalation among it, listed in the result's escalations). The pre-implement stops and a Gate 1 #1 escalation return the verdict ESCALATED. In a wave, PASS and UNVERIFIED merge and every other value quarantines (`tests/dynamic/wave-flow.test.ts` holds that each verdict the engine schema declares has exactly one wave arm).
 
-**Gate ownership.** The full suite has one owner. Each gate agent body (the three Code variants, Simplify, Evaluate, Scrutinize, Test, Validate) carries one `**Gate ownership:**` row naming the checks that agent runs: Code its targeted tests in the TDD cycle plus one affected-tests run after its last edit, Code-fix only the named failing or regression tests (one build check per batch), Code-edit the tests of the touched modules once, Simplify and Evaluate no build, test or lint command, Scrutinize only a test file it added or changed, Test its scenario commands, Validate the whole suite. `tests/guards/gate-ownership.test.ts` pins each row (floor `gate-ownership-body-count`).
+**Gate ownership.** The full suite has one owner. Each gate agent body (the three Code variants, Polish, Evaluate, Harden, Test, Validate) carries one `**Gate ownership:**` row naming the checks that agent runs: Code its targeted tests in the TDD cycle plus one affected-tests run after its last edit, Fix only the named failing or regression tests (one build check per batch), Refactor the tests of the touched modules once, Polish and Evaluate no build, test or lint command, Harden only a test file it added or changed, Test its scenario commands, Validate the whole suite. `tests/guards/gate-ownership.test.ts` pins each row (floor `gate-ownership-body-count`).
 
 ### Review pass
 
@@ -153,10 +153,10 @@ Every `agent()` call uses `agentType` and never `opts.model`: the agent's frontm
 | agentType | Tier | Role |
 |---|---|---|
 | Code | sonnet | Implements the plan and fixes review findings (`implement`, `issue-fix`) |
-| Code-fix | sonnet | Fixes listed validation, alignment and QA failures (`validation-fix`, `alignment-fix`, `qa-fix`); with Code it is the Code family, the only writers of code |
+| Fix | sonnet | Fixes listed validation, alignment and QA failures (`validation-fix`, `alignment-fix`, `qa-fix`); with Code it is the Code family, the only writers of code |
 | Validate | haiku | Build / typecheck / lint / test |
-| Simplify | sonnet | Reduce complexity, remove duplication |
-| Scrutinize | opus | 9-pillar self-review |
+| Polish | sonnet | Clarity pass on changed code (naming, structure, duplication); behaviour kept |
+| Harden | opus | 9-pillar self-review |
 | Evaluate | sonnet | Plan-fidelity alignment |
 | Test | sonnet | Scenario-based acceptance tests |
 | Review | opus | Focus-parameterized review, one `agent()` per focus |
@@ -189,7 +189,7 @@ The script body has only `agent()`, `parallel()`, `pipeline()`, `phase()`, `log(
 
 ### KB-INV-15: build execution doctrine, the shared `## Running commands` block
 
-The Code variants (one copy, from `tail()` in the shared `src/assets/agents/_partials/_code.mds`), Validate and Test agent bodies each carry one byte-identical `## Running commands` block; `tests/guards/running-commands-parity.test.ts` holds it (exactly one block per body within its `BLOCK_MAX_BYTES` target, every normative element present, `build_execution_doctrine()` in `_engine.mds` rendering the same text). The dynamic-build prompt sites that run builds or tests (the Code implementation prompt, the Gate 1 Validate prompts and their re-checks, the Code-fix repairs after Gate 2, the review-batch fix, the Test prompt, the post-merge Validate) each name "your Running commands block" exactly once in source and compiled command (floor `running-commands-site-count`), because a Workflow `agent()` spawn with an `agentType` loads that agent's body as its standing instruction. The doctrine:
+The Code variants (one copy, from `tail()` in the shared `src/assets/agents/_partials/_code.mds`), Validate and Test agent bodies each carry one byte-identical `## Running commands` block; `tests/guards/running-commands-parity.test.ts` holds it (exactly one block per body within its `BLOCK_MAX_BYTES` target, every normative element present, `build_execution_doctrine()` in `_engine.mds` rendering the same text). The dynamic-build prompt sites that run builds or tests (the Code implementation prompt, the Gate 1 Validate prompts and their re-checks, the Fix repairs after Gate 2, the review-batch fix, the Test prompt, the post-merge Validate) each name "your Running commands block" exactly once in source and compiled command (floor `running-commands-site-count`), because a Workflow `agent()` spawn with an `agentType` loads that agent's body as its standing instruction. The doctrine:
 
 1. Foreground, each with an explicit Bash `timeout` above its expected run time. The ceiling is 600000 ms, or `BASH_MAX_TIMEOUT_MS` when set (`echo ${BASH_MAX_TIMEOUT_MS:-600000}`); `devflow flags --set bash-max-timeout-ms=<ms>` (unset by default) raises it.
 2. Capture then tail in ONE Bash call (shell state does not persist), echoing the log path first: `LOG=$(mktemp); echo "LOG=$LOG"; <command> >"$LOG" 2>&1; rc=$?; tail -n 40 "$LOG"; echo "EXIT=$rc"`. The printed `EXIT=` value is the result, never a grep count.
@@ -227,7 +227,7 @@ Each ticket's `setup-task` spawn creates the branch and reports it under its `##
 - `src/assets/commands/_partials/_plan_contract.mds`: acceptance criteria and test plan shape shared by dynamic-plan and dynamic-build Gate 2.
 - `src/assets/commands/_partials/_factory.mds` and `_ticket_template.mds`: the ticket-factory stages and the canonical ticket body.
 - `src/assets/commands/dynamic-build.mds`: the build command with inline SINGLE and WAVE workflow scripts; `dist/commands/dynamic-build.md` is the compiled artifact the suite pins.
-- `src/assets/agents/code.mds`, `code-fix.mds`, `code-edit.mds` (generator hosts importing the shared `_partials/_code.mds`, compiled to `dist/agents/`), `validate.md`, `test.md`: each carries the `## Running commands` block and its `**Gate ownership:**` row.
+- `src/assets/agents/code.mds`, `fix.mds`, `refactor.mds` (generator hosts importing the shared `_partials/_code.mds`, compiled to `dist/agents/`), `validate.md`, `test.md`: each carries the `## Running commands` block and its `**Gate ownership:**` row.
 - `tests/dynamic/wave-flow.test.ts`: executes the shipped SINGLE script with stub agents (branch binding, both ESCALATED stops, verdict arms).
 - `tests/guards/running-commands-parity.test.ts`, `tests/guards/gate-ownership.test.ts`, `tests/guards/spawn-no-hardcoded-model.test.ts`: the block, the gate rows and the no-`model=` rule.
 
@@ -239,6 +239,6 @@ Each ticket's `setup-task` spawn creates the branch and reports it under its `##
 - `.devflow/features/feature-knowledge-system/KNOWLEDGE.md`: the MDS build pipeline (`scripts/build-mds.ts`), the knowledge host commands and the reference-module host kind that share compilation infrastructure with the dynamic commands.
 - `.devflow/features/tracker-references/KNOWLEDGE.md`: the tracker/git reference-module split and the Git agent's provider-resolution preamble.
 - `.devflow/features/test-harness/KNOWLEDGE.md`: the guard shape (named collector, seeded probe, ratchet manifest) and the known full-suite-load timeouts.
-- `.devflow/features/resolve-pipeline/KNOWLEDGE.md`: `/resolve` also spawns the Code family (Code-fix for gate failures) under the same every-Code-spawn rule.
+- `.devflow/features/resolve-pipeline/KNOWLEDGE.md`: `/resolve` also spawns the Code family (Fix for gate failures) under the same every-Code-spawn rule.
 - `.devflow/features/installer-shadowing/KNOWLEDGE.md`: installing the learning variant for the machine's learning switch.
 - `docs/reference/platform-assumptions.md`: the dated platform facts the foreground doctrine rests on (stall watchdog threshold, timed-out foreground calls, `sleep` refusal, spawn body loading).

@@ -1,6 +1,6 @@
 ---
 feature: learning-capture-system-store
-name: Learning store, ops and rendering
+name: Store, ops and rendering of the learning ledger
 description: "Use when changing learning-store.cjs, a json-helper learning op, the observation or ledger schema, the one lock, or rendered decisions.md, pitfalls.md and index.md. Keywords: put-observation, assign-anchor."
 category: architecture
 directories:
@@ -11,7 +11,7 @@ directories:
   - src/core/learning-store.ts
   - src/core/observations.ts
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-13
 ---
 
 # Learning Store, Ops and Rendering
@@ -44,7 +44,7 @@ updated: 2026-10-10
 
 ## Overview
 
-The store is **the single schema authority** for the learning ledger. An *observation* (title, rule, why, scope, provenance) is stored once in the log. A *ledger row* projects it under an ADR/PF number and adds what is about the entry rather than in it. `decisions.md`, `pitfalls.md` and `index.md` are generated from the ledger. Files are rewritten in place under one lock; history, quarantine and a one-time backup protect what a rewrite replaces. This KB covers the store module, the `json-helper.cjs` ops, the lock and the renderer; the hooks and switches are in the hub (`learning-capture-system`), the Learning agent, the owned queue claim, the CLI and the HUD in `learning-capture-system-agent`, and the symbolic-link rules in `learning-capture-system-links`.
+The store is **the single schema authority** for the learning ledger. An *observation* (title, rule, why, scope, provenance) is stored once in the log. A *ledger row* projects it under an ADR/PF number and adds what is about the entry rather than in it. `decisions.md`, `pitfalls.md` and `index.md` are generated from the ledger. Files are rewritten in place under one lock; history, quarantine and a one-time backup protect what a rewrite replaces. This KB covers the store module, the `json-helper.cjs` ops, the lock and the renderer; the hooks and switches are in the hub (`learning-capture-system`), the Curate agent, the owned queue claim, the CLI and the HUD in `learning-capture-system-agent`, and the symbolic-link rules in `learning-capture-system-links`.
 
 ## The learning store
 
@@ -191,7 +191,7 @@ Every loop and read has a bound, each a named constant: `E4_MAX_SKIPS`, `CITED_S
 ## Related
 
 - `.devflow/features/learning-capture-system/KNOWLEDGE.md`: the hub: data files, feature switches, roots, the capture hooks and the table of D-series names.
-- `.devflow/features/learning-capture-system-agent/KNOWLEDGE.md`: the Learning agent that drives these ops, the owned queue claim and heartbeat, `devflow learning`, the TypeScript seam and the HUD.
+- `.devflow/features/learning-capture-system-agent/KNOWLEDGE.md`: the Curate agent that drives these ops, the owned queue claim and heartbeat, `devflow learning`, the TypeScript seam and the HUD.
 - `.devflow/features/learning-capture-system-links/KNOWLEDGE.md`: how the store refuses to write or read through a symbolic link (`linkedLearningFolder`, `readTextUnlinked`).
 - `.devflow/features/learning-capture-system-memory-worker/KNOWLEDGE.md`: the generic jq-less ops that share `json-helper.cjs`.
 - `.devflow/features/test-harness/KNOWLEDGE.md`: the guards on this area (`no-ledger-citations`, `no-fsmonitor-index-read`).
