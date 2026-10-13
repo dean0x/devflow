@@ -1,6 +1,6 @@
 ---
 name: Polish
-description: Simplifies and refines code for clarity, consistency, and maintainability while preserving all functionality. Focuses on recently modified code unless instructed otherwise.
+description: "Judgment-based clarity pass on recently changed code: improves naming, structure and consistency and keeps all behaviour. Use for 'make this code cleaner'. For a given mechanical change (rename, move, boilerplate) use Refactor."
 model: sonnet
 effort: medium
 skills:
