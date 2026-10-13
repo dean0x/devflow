@@ -1027,7 +1027,8 @@ export async function runDryRunPhase(opts: {
  * at the first failure: files it wrote before then stay, and the warning names the same
  * remedy. Never throws: an uninstall must finish.
  * Agent model lines are reverted again after the copy, as the selective phase does before
- * its removal, so a freshly written agent carries no external-model line.
+ * its removal, so a freshly written agent carries no external-model line. Like the
+ * selective phase, it prints the warnings of that revert only with `verbose`.
  */
 export async function refreshRetainedCommandsAndAgents(opts: {
   claudeDir: string;
@@ -1036,10 +1037,13 @@ export async function refreshRetainedCommandsAndAgents(opts: {
   retiredAgents: readonly string[];
   /** The scope the directories belong to (default `user`). */
   scope?: UninstallScope;
+  /** Whether to print the warnings of the agent model revert, as the selective phase does. */
+  verbose?: boolean;
   mayChange?: ChangeGuard;
 }): Promise<void> {
   const { claudeDir, devflowDir, retained, retiredAgents } = opts;
   const scope = opts.scope ?? 'user';
+  const verbose = opts.verbose ?? false;
   const mayChange = opts.mayChange ?? changeAnything;
   const agentsDir = path.join(claudeDir, 'agents', 'devflow');
   const commandsDir = path.join(claudeDir, 'commands', 'devflow');
@@ -1078,7 +1082,7 @@ export async function refreshRetainedCommandsAndAgents(opts: {
   }
 
   try {
-    await revertExternalAgents({ installDir: agentsDir, devflowDir, onWarning: (msg) => p.log.warn(msg) });
+    await revertExternalAgents({ installDir: agentsDir, devflowDir, onWarning: (msg) => { if (verbose) p.log.warn(msg); } });
   } catch { /* the revert is best effort, as in the selective phase */ }
 
   p.log.info(`${retired} Devflow wrote the current commands and agents of the plugins that stay installed. Run \`devflow init\` to update the hooks and scripts.`);
@@ -1145,6 +1149,7 @@ export async function runSelectivePhaseForScope(opts: {
       retained: installedPlugins.filter(plugin => !removed.has(plugin.name)),
       retiredAgents: sweeps.agents.removed,
       scope,
+      verbose,
       mayChange,
     });
   }

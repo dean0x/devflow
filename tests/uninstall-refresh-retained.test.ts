@@ -20,7 +20,7 @@ import { promises as fs, lstatSync } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as p from '@clack/prompts';
-import { resolveInstalledPlugins, runSelectivePhaseForScope } from '../src/cli/commands/uninstall.js';
+import { refreshRetainedCommandsAndAgents, resolveInstalledPlugins, runSelectivePhaseForScope } from '../src/cli/commands/uninstall.js';
 import { DEVFLOW_PLUGINS, type PluginDefinition } from '../src/core/plugins.js';
 
 /** The agent file an older release left, which starts the rewrite. */
@@ -111,5 +111,86 @@ describe('a selective uninstall in a legacy local install writes no command thro
     expect(notice[0], 'the remedy for a legacy local install').toContain('`devflow uninstall --scope local`');
     expect(notice[0], 'a legacy local install can not be updated with init').not.toContain('devflow init');
     expect(lines(info).filter(line => line.includes('wrote the current commands')), 'no success note').toEqual([]);
+  });
+});
+
+describe('the rewrite after a selective uninstall in the user scope', () => {
+  let home: string;
+  let warn: ReturnType<typeof vi.spyOn>;
+  let info: ReturnType<typeof vi.spyOn>;
+
+  const claudeDir = (): string => path.join(home, '.claude');
+  const devflowDir = (): string => path.join(home, '.devflow');
+  const commandsDir = (): string => path.join(claudeDir(), 'commands', 'devflow');
+  const agentsDir = (): string => path.join(claudeDir(), 'agents', 'devflow');
+  const commandFile = (): string => path.join(commandsDir(), 'implement.md');
+
+  beforeEach(async () => {
+    home = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-refresh-home-')));
+    warn = vi.spyOn(p.log, 'warn').mockImplementation(() => undefined);
+    info = vi.spyOn(p.log, 'info').mockImplementation(() => undefined);
+    await fs.mkdir(commandsDir(), { recursive: true });
+    await fs.writeFile(commandFile(), OLD_COMMAND_TEXT, 'utf-8');
+  });
+
+  afterEach(async () => {
+    await fs.rm(home, { recursive: true, force: true });
+  });
+
+  const lines = (spy: ReturnType<typeof vi.spyOn>): string[] => spy.mock.calls.map(call => String(call[0]));
+
+  async function writeManifest(plugins: string[]): Promise<void> {
+    await fs.mkdir(devflowDir(), { recursive: true });
+    await fs.writeFile(path.join(devflowDir(), 'manifest.json'), JSON.stringify({
+      version: '3.5.0',
+      plugins,
+      scope: 'user',
+      features: { ambient: false, memory: false },
+      installedAt: 'x',
+      updatedAt: 'x',
+    }), 'utf-8');
+  }
+
+  function refresh(extra: Partial<Parameters<typeof refreshRetainedCommandsAndAgents>[0]> = {}): Promise<void> {
+    return refreshRetainedCommandsAndAgents({
+      claudeDir: claudeDir(),
+      devflowDir: devflowDir(),
+      retained: [pluginNamed('devflow-implement')],
+      retiredAgents: [RETIRED_AGENT],
+      ...extra,
+    });
+  }
+
+  /** The agent model revert warns with this text when agent-models.json holds invalid JSON. */
+  const BROKEN_MAPPING_WARNING = 'failed to read mapping';
+
+  it('writes the current commands and agents of the plugins that stay, and prints one note', async () => {
+    await writeManifest(['devflow-implement']);
+
+    await refresh();
+
+    expect(await fs.readFile(commandFile(), 'utf-8'), 'the command of a plugin that stays').not.toBe(OLD_COMMAND_TEXT);
+    expect(await fs.readdir(agentsDir()), 'the agents of that plugin').toEqual(expect.arrayContaining(['fix.md', 'polish.md']));
+    expect(lines(info).filter(line => line.includes('wrote the current commands and agents')), 'the note').toHaveLength(1);
+    expect(lines(warn)).toEqual([]);
+  });
+
+  it('prints no model-mapping warning from the revert when verbose is off', async () => {
+    await writeManifest(['devflow-implement']);
+    await fs.writeFile(path.join(devflowDir(), 'agent-models.json'), '{ not json', 'utf-8');
+
+    await refresh();
+
+    expect(await fs.readFile(commandFile(), 'utf-8'), 'non-vacuity: the rewrite ran').not.toBe(OLD_COMMAND_TEXT);
+    expect(lines(warn).filter(line => line.includes(BROKEN_MAPPING_WARNING))).toEqual([]);
+  });
+
+  it('prints the model-mapping warning from the revert when verbose is on', async () => {
+    await writeManifest(['devflow-implement']);
+    await fs.writeFile(path.join(devflowDir(), 'agent-models.json'), '{ not json', 'utf-8');
+
+    await refresh({ verbose: true });
+
+    expect(lines(warn).filter(line => line.includes(BROKEN_MAPPING_WARNING))).not.toEqual([]);
   });
 });
