@@ -740,10 +740,13 @@ describe('0b: Phase 11 pushes the branch before the evidence call', () => {
     expect(collectOrderViolations('implement.md', md, PHASE11_ORDER)).toEqual([])
   })
 
-  it('the Report surfaces the push\'s DEGRADED line and the diagram shows the push', () => {
+  it('the Report surfaces the push\'s DEGRADED line and Phase 11 says the push never forces and never stops the run', () => {
     const md = implementMd()
     expect(md).toContain('or Phase 10\'s push, Phase 11\'s push or Phase 11\'s script output carried one, surface them verbatim')
-    expect(md).toContain('Push the branch (never force; a failure is DEGRADED, not a stop)')
+    // The diagram's sub-bullet restated this paragraph and was cut; the Phase 11 body is the one statement.
+    const phase = md.slice(md.indexOf(PHASE11), md.indexOf('### Phase 12: Report'))
+    expect(phase).toContain('push the branch once before the script — never force, and no retry')
+    expect(phase).toContain('does not block: record `TRACEABILITY: DEGRADED (evidence push failed)`')
   })
 
   it('known-bad probes: a push after the spawn, a forced push, a lost push and a blocking failure are reported', () => {
@@ -783,11 +786,11 @@ describe('AC-11: Phase 11 runs the evidence script once, after Phase 10, for eve
     expect(collectEvidenceRunDefects(md)).toEqual([])
   })
 
-  it('the re-validation path, the Report and Principle 12 name the evidence step', () => {
+  it('the re-validation path, the Report and the CI-awareness principle name the evidence step', () => {
     const lines = implementMd().split('\n')
     expect(revalidateReference().split('\n').find(l => l.startsWith('5. **Proceed to Phase 9**'))).toContain('**Phase 11** (Evidence)')
     expect(lines.find(l => l.startsWith('Show the test plan\'s evidence from Phase 11'))).toContain('never inferred')
-    expect(lines.find(l => l.startsWith('12. **CI awareness**'))).toContain('test-plan evidence (Phase 11) is recorded under every strategy')
+    expect(lines.find(l => /^\d+\. \*\*CI awareness\*\*/.test(l))).toContain('test-plan evidence (Phase 11) is recorded under every strategy')
   })
 
   it('known-bad probes: a lost call, a dropped flag, a Git spawn put back, a call before the CI gate and a stray importer are reported', () => {
@@ -1097,8 +1100,8 @@ function collectPointerDefects(md: string, revalidate: string = revalidateRefere
   need('the continuation path names no order', revalidate.includes('**Run Phases 3-8** — Simplify, Self-Review, Alignment, the one full Validate, QA Testing and the conditional Re-Validate'))
   need('the diagram lacks the Phase 6 Validate', md.includes('├─ Phase 6: Validate (the one full-suite slot)'))
   need('the diagram lacks the Phase 8 Re-Validate', md.includes('├─ Phase 8: Re-Validate (only if a qa-fix committed)'))
-  need('Principle 1 does not name the Phase 10 push and the ci-wait call', /\*\*Orchestration only\*\*[^\n]*Phase 10[^\n]*push[^\n]*ci-wait call/.test(md))
-  need('Principle 11 does not carry the CI gate budget', /\*\*Loop limits\*\*[^\n]*at most 3 waits and 2 fixes/.test(md))
+  need('the Orchestration-only principle does not name the Phase 10 push and the ci-wait call', /\*\*Orchestration only\*\*[^\n]*Phase 10[^\n]*push[^\n]*ci-wait call/.test(md))
+  need('the Loop-limits principle does not carry the CI gate budget', /\*\*Loop limits\*\*[^\n]*at most 3 waits and 2 fixes/.test(md))
   return out
 }
 
@@ -1115,6 +1118,6 @@ describe('#421 AC-26: the cross-references match the new phase numbers', () => {
       'a retired pointer remains: "Phase 3 or Phase 6 PASS"',
       'Phase 1 does not point Scrutinize at Phase 4',
     ]))
-    expect(collectPointerDefects(md.replace('the CI gate allows at most 3 waits and 2 fixes', 'the CI gate polls ten times'))).toEqual(['Principle 11 does not carry the CI gate budget'])
+    expect(collectPointerDefects(md.replace('the CI gate allows at most 3 waits and 2 fixes', 'the CI gate polls ten times'))).toEqual(['the Loop-limits principle does not carry the CI gate budget'])
   })
 })

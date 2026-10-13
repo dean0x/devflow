@@ -382,7 +382,7 @@ const TIMING_SITES: readonly TimingSite[] = [
   },
   { label: 'Architecture Phase 9', find: md => soleLine(md, l => l.includes('├─ Phase 9:')) },
   { label: 'Architecture Phase 10', find: md => soleLine(md, l => l.includes('├─ Phase 10:')) },
-  { label: 'Principle 12', find: md => soleLine(md, l => l.startsWith('12. **CI awareness**')) },
+  { label: 'CI-awareness principle', find: md => soleLine(md, l => /^\d+\. \*\*CI awareness\*\*/.test(l)) },
 ]
 
 /** Phase 2's `**Produces:**` line — it produces no PR, because no Code agent opens one. */
@@ -428,7 +428,7 @@ const PRE_PR_BY_GIT_TIMING: Readonly<Record<string, string>> = {
     '(the Phase 2 Code agent creates it); skip for **PARALLEL_CODE_AGENTS** (its unified PR is created in Phase 10).',
   'Architecture Phase 9': '├─ Phase 9: Open PR (PARALLEL_CODE_AGENTS only)',
   'Architecture Phase 10': '├─ Phase 10: CI Status Gate (SINGLE_CODE_AGENT + SEQUENTIAL_CODE_AGENTS; skipped for PARALLEL_CODE_AGENTS)',
-  'Principle 12':
+  'CI-awareness principle':
     '12. **CI awareness** - CI status is checked before merge for SINGLE_CODE_AGENT and SEQUENTIAL_CODE_AGENTS, whose PR exists from ' +
     'Phase 2; skipped for PARALLEL_CODE_AGENTS, whose PR is created in Phase 10',
   'Phase 2 Produces': '**Produces:** CODE_AGENT_OUTPUT, FILES_CHANGED, PR_URL',
