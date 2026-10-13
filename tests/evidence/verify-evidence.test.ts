@@ -212,6 +212,7 @@ describe('module surface', () => {
     expect(Object.isFrozen(VE)).toBe(true)
     expect(Object.keys(VE).sort()).toEqual([
       'CAPS', 'EXIT_CODES', 'PR_FIELDS', 'main', 'settleOutcome',
+      'BODY_STATUSES', 'COMMENT_STATUSES', 'readinessVerdict', 'renderPublishBlock', 'parsePublishBlock', 'renderReadinessBlock', 'parseReadinessBlock',
     ].sort())
   })
 
@@ -2099,10 +2100,10 @@ describe('source guards (verify-evidence.cjs)', () => {
     expect(collectShellSpawns(probe).length).toBeGreaterThanOrEqual(2)
   })
 
-  it('every subprocess goes through gh() or git() — the only places the caps and the deadline are counted', () => {
+  it('every subprocess goes through gh(), git() or scrub() — gh and git count the caps and the deadline; scrub is the one D11 file-sink call', () => {
     const sites = collectRunCallSites(SOURCE)
-    expect(sites.length, 'the corpus must hold the two wrappers').toBeGreaterThanOrEqual(2)
-    expect([...new Set(sites)].sort()).toEqual(['gh', 'git'])
+    expect(sites.length, 'the corpus must hold the three wrappers').toBeGreaterThanOrEqual(3)
+    expect([...new Set(sites)].sort()).toEqual(['gh', 'git', 'scrub'])
     const probe = `${SOURCE}\nfunction sneaky(io) {\n  return runCall(io, 'gh', ['api', 'x'], 1, 1);\n}\n`
     expect(new Set(collectRunCallSites(probe))).toContain('sneaky')
   })
@@ -2130,7 +2131,10 @@ describe('source guards (verify-evidence.cjs)', () => {
 
   it('requires only node built-ins and its sibling, by __dirname', () => {
     const requires = [...SOURCE.matchAll(/\brequire\(((?:[^()]|\([^()]*\))*)\)/g)].map(m => m[1])
-    expect(requires).toEqual(["'fs'", "'path'", "'crypto'", "'child_process'", "path.join(__dirname, 'pr-evidence.cjs')"])
+    expect(requires).toEqual([
+      "'fs'", "'path'", "'os'", "'crypto'", "'child_process'",
+      "path.join(__dirname, 'pr-evidence.cjs')", "path.join(__dirname, 'ci-wait.cjs')",
+    ])
   })
 
   it('writes stdout once, at the boundary, and never calls process.exit', () => {
@@ -2149,6 +2153,8 @@ describe('source guards (verify-evidence.cjs)', () => {
       'D-VERIFY-STDOUT', 'D-VERIFY-IO', 'D-VERIFY-CAPS', 'D-VERIFY-DEADLINE', 'D-VERIFY-THROTTLE', 'D-VERIFY-VIEWER',
       'D-VERIFY-RECORD', 'D-VERIFY-APPROVAL', 'D-VERIFY-BASE-FETCH', 'D-VERIFY-IN-PR', 'D-VERIFY-HTML-URL',
       'D-VERIFY-VERIFYING-SHA', 'D-VERIFY-PUBLICATION', 'D-VERIFY-CAS',
+      'D-OP-SCRIPT-POINTER', 'D-OP-BLOCK-GATE', 'D-PUBLISH-BOUNDS', 'D-PUBLISH-SCRUB-GATE',
+      'D-READINESS-LADDER', 'D-READINESS-THREADS', 'D-READINESS-CLASSIFIER',
     ]) {
       expect(SOURCE, `${marker} missing`).toContain(marker)
     }

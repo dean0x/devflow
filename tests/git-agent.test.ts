@@ -1919,12 +1919,15 @@ describe('git agent — static content guards', () => {
   const isPostingSection = (sec: string): boolean =>
     sec.includes('--body-file') || sec.includes('-F body=@');
 
-  it('D11: every posting op (--body-file or -F body=@) references D11 (forward guard, ≥9 ops)', () => {
-    // Non-vacuous: assert ≥ 9 posting ops exist AND each one references D11
+  it('D11: every posting op (--body-file or -F body=@) references D11 (forward guard, ≥8 ops)', () => {
+    // Non-vacuous: assert ≥ 8 posting ops exist AND each one references D11
     // Sink corpus = git.md ∪ dist/skills/git/references/*.md (ENOENT-tolerant on dist).
     // Mode 'union' — a posting op's D11 reference may live in a moved mechanics file
-    // (Phase 2+); unioning ensures the floor never silently drops below 9 [DR-18, AC-0.8].
-    // 8 → 9 with #363's update-pr-evidence (the PR-body edit and the evidence comment).
+    // (Phase 2+); unioning ensures the floor never silently drops below 8 [DR-18, AC-0.8].
+    // 8 → 9 with #363's update-pr-evidence (the PR-body edit and the evidence comment);
+    // 9 → 8 with #455, which moved that op's two posts into verify-evidence.cjs publish — its
+    // reference points at the script and holds no --body-file, and the scrub-before-post check
+    // runs against the script in tests/evidence/update-pr-evidence.test.ts.
     const sinkCorpus = cachedSinkCorpus();
     const opNames: readonly string[] = GIT_OPERATIONS;
 
@@ -1941,8 +1944,8 @@ describe('git agent — static content guards', () => {
 
     expect(
       postingOps.length,
-      `D11 forward guard: expected ≥ 9 posting ops, found ${postingOps.length}: [${postingOps.join(', ')}]`,
-    ).toBeGreaterThanOrEqual(9);
+      `D11 forward guard: expected ≥ 8 posting ops, found ${postingOps.length}: [${postingOps.join(', ')}]`,
+    ).toBeGreaterThanOrEqual(8);
     expect(
       postingOpsWithoutD11,
       `D11 forward guard: posting ops missing Comment-sink scrub (D11) named reference: [${postingOpsWithoutD11.join(', ')}]`,
@@ -1975,16 +1978,15 @@ describe('git agent — static content guards', () => {
     ).toHaveLength(0);
   });
 
-  it('D11 known-bad probe: dropping the PR-host tree narrows the posting set from 9 to 5 (SG-8 non-vacuity)', () => {
-    // SG-8's proof obligation, and the one thing the floor of 9 above cannot show
+  it('D11 known-bad probe: dropping the PR-host tree narrows the posting set from 8 to 5 (SG-8 non-vacuity)', () => {
+    // SG-8's proof obligation, and the one thing the floor of 8 above cannot show
     // on its own: the forward guard is green whichever file carries a posting
     // op's sink, so green alone never establishes that the union corpus is what
-    // carries four of those nine. This drives the SAME predicate over the
+    // carries three of those eight. This drives the SAME predicate over the
     // narrowed corpus and pins the number that only the widening supplies.
     //
-    // Four of the nine vanish entirely — post-review-summary,
-    // post-resolution-summary, resolve-review-threads and update-pr-evidence post
-    // only from `pr/`. The five tracker-side posters stay: backlink-shipped-issues,
+    // Three of the eight vanish entirely — post-review-summary,
+    // post-resolution-summary and resolve-review-threads post only from `pr/`. The five tracker-side posters stay: backlink-shipped-issues,
     // ensure-traceable-issue, manage-debt and post-wave-report post from
     // `tracker/{provider}/`, and so does ensure-pr-ready — a tracker operation whose
     // per-provider reference carries the PR skeleton too, so both of its PR-body
@@ -2007,7 +2009,7 @@ describe('git agent — static content guards', () => {
     // regression reported as agreement (the `scanned > 0` anti-pattern, one level up).
     expect(
       [...postingOps].sort(),
-      `without references/${PR_HOST_DESTINATION_ROOT}/ the posting set must fall from 9 to exactly these 5 ` +
+      `without references/${PR_HOST_DESTINATION_ROOT}/ the posting set must fall from 8 to exactly these 5 ` +
       'ops — a set that does not move proves the union corpus was never load-bearing',
     ).toEqual([...EXPECTED_WITHOUT_PR_HOST].sort());
   });

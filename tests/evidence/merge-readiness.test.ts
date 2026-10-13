@@ -36,6 +36,11 @@
  *          obeyed reliably only where its step states it; VERIFIED-CI and
  *          ATTESTED-LOCAL are reported apart.
  *
+ * #455  The ladder is also an implementation now: `verify-evidence.cjs readiness`
+ *       applies it. The script's exported verdict is held to the same model over the
+ *       same fact domain, arm for arm, so the prose, the model and the script cannot
+ *       part (the script itself runs under a gh fake in merge-readiness-script.test.ts).
+ *
  * Every guard has a named collector, a non-empty-corpus assertion and a known-bad
  * probe run through the same collector; the probes are the 660edc1 text.
  *
@@ -52,7 +57,7 @@ import { createRequire } from 'module'
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
 import { extractOpSectionFromCorpus, gitOperationReferenceCorpus, prHostRel, requireDistFile } from '../helpers.js'
-import { CI_WAIT_SCRIPT, PR_EVIDENCE_SCRIPT } from './seam.js'
+import { CI_WAIT_SCRIPT, PR_EVIDENCE_SCRIPT, VERIFY_EVIDENCE_SCRIPT } from './seam.js'
 
 /** Transcribed from pr-evidence.cjs's JSDoc — only the EVIDENCE line grammar. */
 interface EvidenceGrammar {
@@ -67,6 +72,21 @@ interface CiWaitApi {
   classifyChecks(checks: ReadonlyArray<{ name: string; bucket: string }>): { status: string }
 }
 const CW = createRequire(import.meta.url)(CI_WAIT_SCRIPT) as CiWaitApi
+
+/** Transcribed from verify-evidence.cjs's JSDoc — only the ladder the readiness run applies. */
+interface ScriptFacts {
+  readonly unresolved: number
+  readonly approximate: boolean
+  readonly decision: string | null
+  readonly ci: string
+  readonly failing: string
+  readonly evidence: { total: number; verifiedCi: number; attestedLocal: number; testPlanException: boolean; approval: string } | null
+  readonly require: string
+}
+interface ReadinessApi {
+  readinessVerdict(facts: ScriptFacts): { status: 'READY' | 'NOT_READY'; reason: string | null }
+}
+const VE = createRequire(import.meta.url)(VERIFY_EVIDENCE_SCRIPT) as ReadinessApi
 
 /** `gh pr checks --help`, gh 2.88.1: the JSON FIELDS section. */
 const GH_PR_CHECKS_FIELDS: readonly string[] = [
@@ -695,5 +715,74 @@ describe('AC-14: check-merge-readiness reads the evidence at head and is READY o
     const contract = contractSection(MR)
     expect(contract).toContain('**Input:** `PR_NUMBER`, `REQUIRE_NON_AUTHOR_APPROVAL`, `WORKTREE_PATH` (optional)')
     expect(contract).toContain('- Test plan: {v}/{t} (VERIFIED-CI {n}, ATTESTED-LOCAL {n}) | unavailable · non-author approval: {yes | no | not required}')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #455 — the script's ladder is the model's, arm for arm
+// ---------------------------------------------------------------------------
+
+/** A verdict function under test: the facts in, the model's arm label out. */
+type ArmLabeller = (facts: Facts) => string
+
+/** The script's verdict as the model's label: numbers and check names back to their placeholders. */
+function scriptArm(f: Facts, verdict: (s: ScriptFacts) => { status: string; reason: string | null } = s => VE.readinessVerdict(s)): string {
+  const v = verdict({
+    unresolved: f.unresolved,
+    approximate: f.approximate,
+    decision: f.decision,
+    ci: f.ci,
+    failing: 'unit,e2e',
+    evidence: f.evidence === null ? null : {
+      total: f.evidence.total, verifiedCi: f.evidence.verified, attestedLocal: 0,
+      testPlanException: f.evidence.testPlanException, approval: f.evidence.approval,
+    },
+    require: f.require,
+  })
+  if (v.reason === null) return v.status
+  const reason = v.reason
+    .replace(/^unresolved threads: >?[0-9]+$/, 'unresolved threads: {n}')
+    .replace(/^CI failing: .+$/, 'CI failing: {checks}')
+    .replace(/^test plan: [0-9]+\/[0-9]+ verified$/, 'test plan: {v}/{t} verified')
+  return `${v.status} (${reason})`
+}
+
+/**
+ * Named collector: the facts on which an implementation picks another arm than the
+ * model. The domain is the one AC-14 runs over — every thread state, decision, CI
+ * status, evidence (known or not), approval and policy input.
+ */
+function collectArmDisagreements(label: ArmLabeller, domain: readonly Facts[]): string[] {
+  const out: string[] = []
+  for (const f of domain) {
+    const want = LADDER.find(a => a.when(f))?.label
+    const got = label(f)
+    if (want !== got) out.push(`${JSON.stringify(f)}: model ${want}, script ${got}`)
+    if (out.length >= 5) break
+  }
+  return out
+}
+
+describe('#455: verify-evidence.cjs readiness applies the ladder the model states', () => {
+  it('agrees with the model on every fact combination, every arm included', () => {
+    const domain = factDomain()
+    expect(domain.length, 'the fact domain is empty').toBeGreaterThan(5000)
+    expect(collectArmDisagreements(f => scriptArm(f), domain)).toEqual([])
+    const reached = new Set(domain.map(f => scriptArm(f)))
+    expect(reached.size, 'every arm of the ladder is reachable through the script').toBe(LADDER.length)
+  })
+
+  it('known-bad probes: a script that lets an approximate count read READY, trusts an unrecognised decision or drops the non-author gate is reported', () => {
+    const lenient = (f: Facts): string => scriptArm(f, s => VE.readinessVerdict({ ...s, approximate: false }))
+    expect(collectArmDisagreements(lenient, factDomain()).length).toBeGreaterThan(0)
+    const trusting = (f: Facts): string => scriptArm(f, s => VE.readinessVerdict({ ...s, decision: s.decision === 'UNRECOGNISED' ? 'APPROVED' : s.decision }))
+    expect(collectArmDisagreements(trusting, factDomain()).length).toBeGreaterThan(0)
+    const ungated = (f: Facts): string => scriptArm(f, s => VE.readinessVerdict({ ...s, require: 'false' }))
+    expect(collectArmDisagreements(ungated, factDomain()).length).toBeGreaterThan(0)
+  })
+
+  it('the script\'s CI classification is ci-wait\'s own: the module the parity test above checks', () => {
+    expect(readFileSync(VERIFY_EVIDENCE_SCRIPT, 'utf-8')).toContain('CW.classifyChecks(checks)')
+    expect(typeof CW.classifyChecks).toBe('function')
   })
 })

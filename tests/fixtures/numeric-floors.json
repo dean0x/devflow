@@ -68,11 +68,11 @@
     },
     {
       "id": "d11-posting-ops",
-      "floor": 9,
-      "pattern": "toBeGreaterThanOrEqual(9)",
+      "floor": 8,
+      "pattern": "toBeGreaterThanOrEqual(8)",
       "occurrences": 1,
       "sourceFile": "tests/git-agent.test.ts",
-      "description": "D11 forward guard: posting ops (--body-file / -F body=@) that must reference Comment-sink scrub (D11), counted over the sink corpus gitAgentSinkCorpus() returns -- the resolved Git agent UNIONED with dist/skills/git/references/*.md, sliced in extractOpSection mode 'union' [DR-18]. The union is load-bearing: posting mechanics live in the generated references, so a git.md-only count would drop below the floor for reasons that are not a regression. 9 since #363 (PR4) added update-pr-evidence, which edits the PR body and posts the evidence comment from its PR-host reference."
+      "description": "D11 forward guard: posting ops (--body-file / -F body=@) that must reference Comment-sink scrub (D11), counted over the sink corpus gitAgentSinkCorpus() returns -- the resolved Git agent UNIONED with dist/skills/git/references/*.md, sliced in extractOpSection mode 'union' [DR-18]. The union is load-bearing: posting mechanics live in the generated references, so a git.md-only count would drop below the floor for reasons that are not a regression. 9 since #363 (PR4) added update-pr-evidence, which edits the PR body and posts the evidence comment from its PR-host reference. LOWERED 9 -> 8 by #455 (a deliberate exception to \"a floor may only rise\"): /implement, /resolve and /dynamic-build run update-pr-evidence through verify-evidence.cjs instead of a Git spawn; the operation stays defined and routes to the same script, so its reference no longer carries the --body-file posts the script makes, and the scrub-before-post check runs against the script in tests/evidence/update-pr-evidence.test.ts. Old value 9; accepted by the user 2026-10-13."
     },
     {
       "id": "agent-roster-count",

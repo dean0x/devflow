@@ -1,30 +1,37 @@
 /**
  * tests/evidence/update-pr-evidence.test.ts
  *
- * SDLC-evidence PR4 (#363), phase P3 — the `update-pr-evidence` PR-host operation.
+ * SDLC-evidence PR4 (#363), phase P3, and #455 — the `update-pr-evidence` PR-host
+ * operation.
  *
  *   AC-5  the op's contract (Input, D4, Output) and its mechanics are one file,
  *         `references/pr/update-pr-evidence.md`, contract first (D-OP-ONE-REF); it
  *         loads no publication gate and runs no visibility probe.
- *   AC-6  the mechanics DRIVE the evidence scripts rather than restating them: the
- *         body edit is one `&&` chain behind the block scrub and the script's
- *         compare-and-swap splice, the comment is one `&&` chain behind the
- *         Comment-sink scrub (D11), and the op reads the PR only through the script.
- *         The `EVIDENCE` template the mechanics parse accepts and rejects exactly
- *         what `EVIDENCE_LINE_RE` does, over a differential table.
+ *   AC-6  the mechanics POINT at the script rather than restate it (#455,
+ *         D-OP-SCRIPT-POINTER): one `verify-evidence.cjs publish` run, whose stdout
+ *         is the op's whole answer. The reference holds no gh call, no
+ *         `--body-file`, no scrubber chain and no marker. The `EVIDENCE` template
+ *         the mechanics parse accepts and rejects exactly what `EVIDENCE_LINE_RE`
+ *         does, over a differential table.
+ *   AC-203 the script itself, run for real under a `gh` fake on PATH: it prints the
+ *         exact `## PR Evidence` block in every scenario, scrubs before it posts,
+ *         and makes no gh write after a failed scrub (the check that used to be a
+ *         shell chain in the reference now lives here, where it can be executed).
  *
  * Every guard has a named collector, a non-empty-corpus assertion and a known-bad
- * probe through the same collector. Every reader reads BUILT artifacts.
+ * probe. Every reader reads BUILT artifacts.
  */
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterAll } from 'vitest'
 import { createRequire } from 'module'
+import * as fs from 'fs'
 import { readFileSync } from 'fs'
 import * as path from 'path'
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
 import { extractOpSectionFromCorpus, gitOperationReferenceCorpus, prHostRel } from '../helpers.js'
-import { PR_EVIDENCE_SCRIPT } from './seam.js'
+import { cleanShimRoots, runScript, SHIM_HEAD, SHIM_PR, type Redact, type ScriptRun, type ShimCall, type ShimScenario } from './pr-shim.js'
+import { PR_EVIDENCE_SCRIPT, VERIFY_EVIDENCE_SCRIPT, CI_WAIT_SCRIPT } from './seam.js'
 
 interface EvidenceFields {
   pr: number
@@ -263,52 +270,34 @@ describe('AC-6: the EVIDENCE template accepts and rejects exactly what EVIDENCE_
   })
 })
 
+
 // ---------------------------------------------------------------------------
-// 2. The mechanics drive the scripts, and never restate them
+// 2. The mechanics point at the script, and never restate it (#455)
 // ---------------------------------------------------------------------------
+
+/** Only what this suite reads from verify-evidence.cjs. */
+interface PartLike {
+  readonly status: string
+  readonly reason: string | null
+}
+interface VerifyApi {
+  readonly BODY_STATUSES: readonly string[]
+  readonly COMMENT_STATUSES: readonly string[]
+  main(argv: readonly string[], deps?: object): { code: number; stdout: string }
+  settleOutcome(outcome: unknown): { code: number; stdout: string }
+  parsePublishBlock(text: string): { evidenceLine: string; body: PartLike; comment: PartLike } | null
+  renderPublishBlock(evidenceLine: string, body: PartLike, comment: PartLike): string
+}
+
+const VE = createRequire(import.meta.url)(VERIFY_EVIDENCE_SCRIPT) as VerifyApi
 
 /**
  * Every backticked span that INVOKES `cmd` — with an argument after it. A bare
- * mention (the residual-race sentence names `gh pr edit`) is prose, not a sink.
+ * mention is prose, not a call.
  */
 function spansInvoking(text: string, cmd: string): string[] {
   return [...text.matchAll(/`([^`]+)`/g)].map(m => m[1]).filter(span => span.includes(`${cmd} `))
 }
-
-/** A chain's commands, in order, when it is `&&`-joined only (no `;`, `|` or `||`). Null otherwise. */
-function andChain(span: string): string[] | null {
-  if (/;|\|/.test(span)) return null
-  return span.split(' && ').map(part => part.trim())
-}
-
-interface ChainRule {
-  readonly label: string
-  /** The sink the chain ends in. */
-  readonly sink: string
-  /** Each command in the chain, in order, as the substring it must contain. */
-  readonly steps: readonly string[]
-}
-
-/** The two sinks this op writes, and the gates each must sit behind. */
-const CHAIN_RULES: readonly ChainRule[] = [
-  {
-    label: 'body edit',
-    sink: 'gh pr edit',
-    steps: [
-      'redact-secrets.cjs" "$DEVFLOW_NOTES_RAW" "$DEVFLOW_NOTES"',
-      'verify-evidence.cjs" splice --pr {PR_NUMBER} --state "$S" --block "$DEVFLOW_NOTES" --out "$DEVFLOW_BODY"',
-      'gh pr edit {PR_NUMBER} --body-file "$DEVFLOW_BODY"',
-    ],
-  },
-  {
-    label: 'evidence comment',
-    sink: 'gh pr comment',
-    steps: [
-      'redact-secrets.cjs" "$DEVFLOW_BODY_RAW" "$DEVFLOW_BODY"',
-      'gh pr comment {PR_NUMBER} --body-file "$DEVFLOW_BODY"',
-    ],
-  },
-]
 
 /** Text the script owns, which the mechanics must never spell (a second grammar authority). */
 function restatedGrammar(): string[] {
@@ -316,98 +305,98 @@ function restatedGrammar(): string[] {
   return ['<!-- devflow:', '<!-- /devflow:', ...markers, ' — method:', ' out:', 'status:self-attested']
 }
 
-/** Named collector: every way the mechanics stop driving the scripts or bypass a gate. */
+/**
+ * What the mechanics must say, each with the wording that carries it. The script does
+ * the work, so the reference is the pointer plus the rules a reader of the run needs.
+ */
+const REQUIRED_RULES: ReadonlyArray<readonly [label: string, text: string]> = [
+  ['stdout-only', "Print the script's stdout and nothing else"],
+  ['exit-2 line', 'On exit 2 it is `TRACEABILITY: DEGRADED (evidence unavailable)`'],
+  ['failed run', 'Any other exit, or empty stdout, is a failed run'],
+  ['evidence-file path gate', 'only a value matching `^[A-Za-z0-9._/-]{1,255}$` reaches the shell'],
+  ['bash timeout', 'Set the Bash `timeout` to 180000'],
+  ['unscrubbed never posted', 'a body the script cannot scrub is never posted'],
+  ['concurrent-edit reason', '`DEGRADED (concurrent edit)`'],
+  ['read-back reason', '`DEGRADED (body read-back mismatch)`'],
+]
+
+/** What gh, the scrubber and the work files are called in: none of it belongs in the reference. */
+const SCRIPT_OWNED_LITERALS: readonly string[] = [
+  'gh pr edit', 'gh pr comment', 'gh pr view', 'gh repo view', '--body-file', 'redact-secrets', '$DEVFLOW_', 'mktemp',
+  'splice --pr', 'readback --pr', 'verify --pr',
+]
+
+/** Named collector: every way the mechanics stop pointing at the script or take a step back from it. */
 export function collectMechanicsDefects(prBody: string): string[] {
   const out: string[] = []
-  for (const rule of CHAIN_RULES) {
-    const spans = spansInvoking(prBody, rule.sink)
-    if (spans.length !== 1) {
-      out.push(`${rule.label}: ${spans.length} spans invoke ${rule.sink}, expected 1`)
-      continue
-    }
-    const chain = andChain(spans[0])
-    if (chain === null || chain.length !== rule.steps.length || !rule.steps.every((step, i) => chain[i].includes(step))) {
-      out.push(`${rule.label}: not one \`&&\` chain of ${rule.steps.length} gated steps ending in ${rule.sink}`)
-    }
+  const runs = spansInvoking(prBody, 'verify-evidence.cjs"')
+  if (runs.length !== 1 || !runs[0].includes('publish --pr {PR_NUMBER}')) {
+    out.push(`expected exactly one \`verify-evidence.cjs" publish --pr {PR_NUMBER}\` run, found ${runs.length}`)
   }
-  for (const sub of ['verify --pr {PR_NUMBER}', 'readback --pr {PR_NUMBER} --expect "$DEVFLOW_BODY"']) {
-    if (!prBody.includes(`verify-evidence.cjs" ${sub}`)) out.push(`does not run \`verify-evidence.cjs ${sub}\``)
+  for (const text of SCRIPT_OWNED_LITERALS) {
+    if (prBody.includes(text)) out.push(`names ${JSON.stringify(text)} — the script owns it`)
   }
-  if (!prBody.includes('apply the Comment-sink scrub (D11)')) out.push('does not name the Comment-sink scrub (D11)')
-  if (/gh pr view [^`]/.test(prBody)) out.push('reads the PR itself with `gh pr view` — only the script may')
   for (const text of restatedGrammar()) {
     if (prBody.includes(text)) out.push(`restates script-owned text ${JSON.stringify(text)}`)
   }
-  for (const text of ['publication-gate.md', 'gh repo view', '`full` → ']) {
+  for (const text of ['publication-gate.md', '`full` → ']) {
     if (prBody.includes(text)) out.push(`decides publication itself (${text}) — the script decides the comment's form`)
   }
-  for (const [label, text] of [
-    ['one invocation', 'Run steps 1–4 as ONE Bash invocation'],
-    ['CAS conflict', '`SPLICE conflict`'],
-    ['read-back gate', 'anything but `READBACK ok`'],
-    ['append-only', 'Never edit or delete an evidence comment'],
-    ['residual race', 'GitHub has no conditional body edit'],
-    ['state cleanup', 'rmdir -- "$S"'],
-    ['empty-state guard', '[ -n "$S" ] && { rm -- "$S/base" "$S/base.sha256"; rmdir -- "$S"; }'],
-    ['evidence-file path gate', 'only a value matching `^[A-Za-z0-9._/-]{1,255}$` reaches the shell'],
-  ] as const) {
+  for (const [label, text] of REQUIRED_RULES) {
     if (!prBody.includes(text)) out.push(`does not state the ${label} rule`)
   }
   return out
 }
 
-describe('AC-6: the mechanics drive the evidence scripts', () => {
+describe('AC-6: the mechanics point at the script and restate nothing', () => {
   const reference = requirePrBody()
   const prBody = mechanicsOf(reference)
 
-  it('the reference is the built one, opening with its own anchor', () => {
+  it('the reference is the built one, opening with its own anchor, and holds its steps', () => {
     expect(reference.startsWith(`## Operation: ${OP}\n`)).toBe(true)
-    expect(spansInvoking(prBody, 'verify-evidence.cjs"').length, 'verify, splice and readback').toBeGreaterThanOrEqual(3)
+    expect(spansInvoking(prBody, 'verify-evidence.cjs"').length, 'the publish run').toBe(1)
+    expect(prBody.length, 'the Process block is empty').toBeGreaterThan(500)
   })
 
-  it('every sink sits behind its gates, and nothing the script owns is restated', () => {
+  it('names the run, the stdout rule and the DEGRADED forms, and nothing the script owns', () => {
     expect(collectMechanicsDefects(prBody)).toEqual([])
   })
 
-  it('known-bad probe: a body edit that runs after a failed splice is reported', () => {
-    const seeded = prBody.replace('--out "$DEVFLOW_BODY" && gh pr edit', '--out "$DEVFLOW_BODY"; gh pr edit')
-    expect(seeded, 'the seed must land').not.toBe(prBody)
+  it('known-bad probe: a gh call, a body file and a scrubber chain put back are each reported', () => {
+    const seeded = `${prBody}\nThen \`gh pr edit {PR_NUMBER} --body-file "$DEVFLOW_BODY"\` after \`node redact-secrets.cjs a b\`.\n`
     expect(collectMechanicsDefects(seeded)).toEqual([
-      'body edit: not one `&&` chain of 3 gated steps ending in gh pr edit',
+      'names "gh pr edit" — the script owns it',
+      'names "--body-file" — the script owns it',
+      'names "redact-secrets" — the script owns it',
+      'names "$DEVFLOW_" — the script owns it',
     ])
   })
 
-  it('known-bad probe: a comment posted from the unscrubbed file is reported', () => {
-    const seeded = prBody.replace('gh pr comment {PR_NUMBER} --body-file "$DEVFLOW_BODY"', 'gh pr comment {PR_NUMBER} --body-file "$DEVFLOW_BODY_RAW"')
-    expect(seeded, 'the seed must land').not.toBe(prBody)
-    expect(collectMechanicsDefects(seeded)).toEqual([
-      'evidence comment: not one `&&` chain of 2 gated steps ending in gh pr comment',
-    ])
-  })
-
-  it('known-bad probe: a cleanup that runs on an empty $S, and an ungated evidence path, are reported', () => {
-    const unguarded = prBody.replace('[ -n "$S" ] && { rm -- "$S/base" "$S/base.sha256"; rmdir -- "$S"; }', 'rm -- "$S/base" "$S/base.sha256"; rmdir -- "$S"')
-    expect(unguarded, 'the seed must land').not.toBe(prBody)
-    expect(collectMechanicsDefects(unguarded)).toEqual(['does not state the empty-state guard rule'])
+  it('known-bad probe: a second run, a dropped stdout rule and an ungated evidence path are reported', () => {
+    const twice = `${prBody}\nThen run \`node "$HOME/.devflow/scripts/verify-evidence.cjs" publish --pr {PR_NUMBER}\` again.\n`
+    expect(collectMechanicsDefects(twice)).toEqual(['expected exactly one `verify-evidence.cjs" publish --pr {PR_NUMBER}` run, found 2'])
+    const quiet = prBody.replace("Print the script's stdout and nothing else", 'Print what you like')
+    expect(quiet, 'the seed must land').not.toBe(prBody)
+    expect(collectMechanicsDefects(quiet)).toEqual(['does not state the stdout-only rule'])
     const ungated = prBody.replace(' — only a value matching `^[A-Za-z0-9._/-]{1,255}$` reaches the shell', '')
     expect(ungated, 'the seed must land').not.toBe(prBody)
     expect(collectMechanicsDefects(ungated)).toEqual(['does not state the evidence-file path gate rule'])
   })
 
-  it('known-bad probe: a marker literal, an own PR read and a visibility probe are each reported', () => {
+  it('known-bad probe: a marker literal, a verify run of its own and a visibility probe are each reported', () => {
     const block = String(PE.MARKERS.BLOCK_START)
-    const seeded = `${prBody}\nFind ${block} in \`gh pr view {PR_NUMBER} --json body\`, then \`gh repo view --json visibility\`.\n`
+    const seeded = `${prBody}\nFind ${block} with \`node verify-evidence.cjs verify --pr 7\`, then \`gh repo view --json visibility\`.\n`
     expect(collectMechanicsDefects(seeded)).toEqual([
-      'reads the PR itself with `gh pr view` — only the script may',
+      'names "gh repo view" — the script owns it',
+      'names "verify --pr" — the script owns it',
       'restates script-owned text "<!-- devflow:"',
       `restates script-owned text ${JSON.stringify(block)}`,
-      'decides publication itself (gh repo view) — the script decides the comment\'s form',
     ])
   })
 })
 
 // ---------------------------------------------------------------------------
-// 3. The contract in the reference, and its statuses ↔ the mechanics
+// 3. The contract in the reference, and its statuses ↔ the script's vocabulary
 // ---------------------------------------------------------------------------
 
 const INPUT_LINE =
@@ -420,27 +409,29 @@ function outputStatuses(section: string, label: string): string[] {
   return m[1].split('|').map(s => s.trim()).filter(s => s !== '' && !s.startsWith('DEGRADED'))
 }
 
-/** Named collector: contract lines missing from the reference, and Output statuses the mechanics never report (or vice versa). */
-export function collectContractDefects(section: string, prBody: string): string[] {
+/**
+ * Named collector: contract lines missing from the reference, and Output statuses the
+ * script never prints (or prints and the contract never lists). The script's
+ * vocabulary is the authority; the contract is held to it both ways.
+ */
+export function collectContractDefects(section: string): string[] {
   const out: string[] = []
   const inputs = section.split('\n').filter(l => l.startsWith('**Input:**'))
   if (inputs.length !== 1 || inputs[0] !== INPUT_LINE) out.push(`Input line is not ${JSON.stringify(INPUT_LINE)}`)
   if (!section.includes('**Degradation (D4):**')) out.push('no **Degradation (D4):** clause in the contract block')
   if (!section.includes('{the script\'s EVIDENCE line}')) out.push('Output does not return the script\'s EVIDENCE line')
-  const reported = new Set([...prBody.matchAll(/→ `([A-Z]+)`|\(else `([A-Z]+)`\)|else `([A-Z]+)`/g)].map(m => m[1] ?? m[2] ?? m[3]))
-  for (const label of ['Body', 'Comment']) {
-    const statuses = outputStatuses(section, label)
-    if (statuses.length === 0) out.push(`Output has no **${label}** statuses`)
-    for (const status of statuses) {
-      if (!reported.has(status) && !prBody.includes(`\`${status}\``)) out.push(`**${label}**: ${status} is never reported by the mechanics`)
-    }
+  const vocabulary: ReadonlyArray<readonly [string, readonly string[]]> = [['Body', VE.BODY_STATUSES], ['Comment', VE.COMMENT_STATUSES]]
+  for (const [label, printed] of vocabulary) {
+    const listed = outputStatuses(section, label)
+    if (listed.length === 0) out.push(`Output has no **${label}** statuses`)
+    for (const status of printed) if (!listed.includes(status)) out.push(`**${label}**: the script prints ${status}, the contract does not list it`)
+    for (const status of listed) if (!printed.includes(status)) out.push(`**${label}**: ${status} is listed but the script never prints it`)
   }
   return out
 }
 
-describe('AC-5: the contract opens the reference, and its statuses are the mechanics\'', () => {
+describe('AC-5: the contract opens the reference, and its statuses are the script\'s', () => {
   const section = contractSection()
-  const prBody = requirePrBody()
 
   it('the section is the op\'s own, and names neither the publication gate nor a visibility probe', () => {
     expect(section.startsWith(`## Operation: ${OP}\n`)).toBe(true)
@@ -449,17 +440,330 @@ describe('AC-5: the contract opens the reference, and its statuses are the mecha
     expect(section, 'PR_EXCEPTIONS reaches the op through the evidence file, never as an input').not.toContain('PR_EXCEPTIONS')
   })
 
-  it('carries its contract lines, and every Output status is one the mechanics report', () => {
-    expect(collectContractDefects(section, prBody)).toEqual([])
+  it('carries its contract lines, and its Output statuses are exactly the script\'s', () => {
+    expect(VE.BODY_STATUSES.length, 'the script prints no body status').toBeGreaterThan(0)
+    expect(collectContractDefects(section)).toEqual([])
   })
 
-  it('known-bad probe: an Input the design keeps out, and a status nothing reports, are reported', () => {
+  it('known-bad probe: an Input the design keeps out, a status nothing prints and a status the contract lacks are reported', () => {
     const seeded = section
       .replace(INPUT_LINE, `${INPUT_LINE}, \`PR_EXCEPTIONS\``)
-      .replace('POSTED | SKIPPED | OFF', 'POSTED | SKIPPED | OFF | QUEUED')
-    expect(collectContractDefects(seeded, prBody)).toEqual([
+      .replace('POSTED | SKIPPED | OFF', 'POSTED | OFF | QUEUED')
+    expect(collectContractDefects(seeded)).toEqual([
       `Input line is not ${JSON.stringify(INPUT_LINE)}`,
-      '**Comment**: QUEUED is never reported by the mechanics',
+      '**Comment**: the script prints SKIPPED, the contract does not list it',
+      '**Comment**: QUEUED is listed but the script never prints it',
     ])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 4. The script, run for real under a gh fake (AC-203)
+// ---------------------------------------------------------------------------
+
+/** Each test spawns node a dozen times (the script, the scrubber, the gh fake): generous under a loaded full-suite run. */
+const SPAWN_BUDGET = { timeout: 120_000 } as const
+const EM = '—'
+/** A string the scrubber must remove: an AWS access key shape. */
+const SECRET = 'AKIAIOSFODNN7EXAMPLE'
+
+const tpLine = (n: number, scenario: string): string => `- [ ] TP-${n} (AC-1) ${scenario} ${EM} method:manual`
+const evidenceFile = (tps: readonly string[]): string => `# Evidence\n\n## Test Plan\n${tps.join('\n')}\n\n## Claims\n`
+
+interface RunOptions {
+  readonly scenario?: ShimScenario
+  readonly redact?: Redact
+  readonly tps?: readonly string[]
+  readonly args?: readonly string[]
+  /** Rewrites the script's source before it runs (a known-bad probe). */
+  readonly mutate?: (source: string) => string
+}
+
+afterAll(cleanShimRoots)
+
+/** Lay out one scenario and run `publish` once (or `runs` times over the same fake PR). */
+function runPublish(options: RunOptions = {}, runs = 1): ScriptRun[] {
+  return runScript({
+    scenario: options.scenario,
+    redact: options.redact,
+    mutate: options.mutate,
+    args: options.args ?? ['publish', '--pr', String(SHIM_PR), '--evidence', 'evidence.md'],
+    files: { 'evidence.md': evidenceFile(options.tps ?? [tpLine(1, 'Logs in with a valid password'), tpLine(2, 'Rejects a wrong password')]) },
+  }, runs)
+}
+
+/** The one run of a scenario. */
+function runOnce(options: RunOptions = {}): ScriptRun {
+  return runPublish(options, 1)[0]
+}
+
+const verbs = (calls: readonly ShimCall[]): string[] => calls.map(c => c.args.slice(0, 2).join(' '))
+const STATUS_RE = /^\*\*Body\*\*: (.+) · \*\*Comment\*\*: (.+)$/m
+
+describe('AC-203: publish prints the exact block, scrubs before it posts, and writes only behind a good scrub', () => {
+  it('1. a plan with nothing posted yet: the block is edited in, read back, and the comment is posted', SPAWN_BUDGET, () => {
+    const r = runOnce()
+    expect(r.code, r.stderr).toBe(0)
+    const block = VE.parsePublishBlock(r.stdout)
+    expect(block, r.stdout).not.toBeNull()
+    expect(block?.body.status).toBe('EDITED')
+    expect(block?.comment.status).toBe('POSTED')
+    expect(r.stdout.split('\n')[0]).toBe('## PR Evidence')
+    expect(r.stdout.split('\n')[1]).toMatch(/^EVIDENCE pr:7 head:c{40} total:2 /)
+    expect(r.stdout, 'no TRACEABILITY line on a clean run').not.toContain('TRACEABILITY')
+    expect(verbs(r.writes)).toEqual(['pr edit', 'pr comment'])
+    // The PR's own text survives the splice; the block sits beside it.
+    expect(r.pr.body).toContain('Adds the thing.')
+    expect(r.pr.body).toContain('TP-1')
+    expect(r.pr.comments).toHaveLength(1)
+    expect(r.pr.comments[0].body).toContain(`head:${SHIM_HEAD}`)
+  })
+
+  it('2. a second run over the same PR changes and posts nothing (body:same, posted:yes)', SPAWN_BUDGET, () => {
+    const [first, second] = runPublish({}, 2)
+    expect(first.writes).toHaveLength(2)
+    expect(second.code, second.stderr).toBe(0)
+    const block = VE.parsePublishBlock(second.stdout)
+    expect(block?.body.status).toBe('UNCHANGED')
+    expect(block?.comment.status).toBe('SKIPPED')
+    expect(second.writes, 'an unchanged PR gets no gh write').toEqual([])
+    expect(second.stdout).toContain(' posted:yes body:same')
+  })
+
+  it('3. a secret in the plan reaches neither the PR body nor the comment (D11)', SPAWN_BUDGET, () => {
+    const r = runOnce({ tps: [tpLine(1, `Rotates the key ${SECRET} on login`)] })
+    expect(r.code, r.stderr).toBe(0)
+    expect(VE.parsePublishBlock(r.stdout)?.body.status).toBe('EDITED')
+    expect(r.writes).toHaveLength(2)
+    for (const w of r.writes) expect(w.file ?? '', verbs([w])[0]).not.toContain(SECRET)
+    expect(r.pr.body).not.toContain(SECRET)
+    expect(r.pr.comments[0].body).not.toContain(SECRET)
+    expect(r.writes.every(w => (w.file ?? '').length > 0), 'a write with an empty file proves nothing').toBe(true)
+  })
+
+  it('4. publication off posts no comment and says OFF', SPAWN_BUDGET, () => {
+    const r = runOnce({ args: ['publish', '--pr', '7', '--evidence', 'evidence.md', '--publication', 'off'] })
+    expect(r.code, r.stderr).toBe(0)
+    const block = VE.parsePublishBlock(r.stdout)
+    expect(block?.body.status).toBe('EDITED')
+    expect(block?.comment.status).toBe('OFF')
+    expect(verbs(r.writes)).toEqual(['pr edit'])
+  })
+
+  it('5. a body edited under the run is a concurrent edit: SKIPPED, no edit, a TRACEABILITY line, the comment still posts', SPAWN_BUDGET, () => {
+    const original = 'Adds the thing.\n\n## Summary\nA summary.\n'
+    const r = runOnce({ scenario: { body: original, bodies: [original, `${original}\nEdited once.\n`, `${original}\nEdited twice.\n`] } })
+    expect(r.code, r.stderr).toBe(0)
+    const block = VE.parsePublishBlock(r.stdout)
+    expect(block?.body.status).toBe('SKIPPED')
+    expect(block?.comment.status).toBe('POSTED')
+    expect(r.stdout).toContain('TRACEABILITY: DEGRADED (concurrent edit)')
+    expect(verbs(r.writes), 'no gh pr edit after a conflict').toEqual(['pr comment'])
+  })
+
+  it('6. a scrubber that exits 1: no gh write at all, both halves DEGRADED (redaction unavailable)', SPAWN_BUDGET, () => {
+    const r = runOnce({ redact: 'fails' })
+    expect(r.code, r.stderr).toBe(0)
+    const block = VE.parsePublishBlock(r.stdout)
+    expect(block?.body).toEqual({ status: 'DEGRADED', reason: 'redaction unavailable' })
+    expect(block?.comment).toEqual({ status: 'DEGRADED', reason: 'redaction unavailable' })
+    expect(r.writes, 'gh never runs after a failed redact').toEqual([])
+    expect(r.stdout.match(/TRACEABILITY: DEGRADED \(redaction unavailable\)/g)).toHaveLength(1)
+    expect(r.pr.body, 'the PR is untouched').toBe('Adds the thing.\n\n## Summary\nA summary.\n')
+    expect(r.pr.comments).toEqual([])
+  })
+
+  it('7. a scrubber that is not there is the same: no gh write', SPAWN_BUDGET, () => {
+    const r = runOnce({ redact: 'missing' })
+    expect(r.code, r.stderr).toBe(0)
+    expect(VE.parsePublishBlock(r.stdout)?.body.reason).toBe('redaction unavailable')
+    expect(r.writes).toEqual([])
+  })
+
+  it('8. one 5xx on the body edit is retried once and then succeeds', SPAWN_BUDGET, () => {
+    const r = runOnce({ scenario: { failures: [{ match: ['pr', 'edit'], times: 1, stderr: 'gh: Bad Gateway (HTTP 502)\n' }] } })
+    expect(r.code, r.stderr).toBe(0)
+    expect(VE.parsePublishBlock(r.stdout)?.body.status).toBe('EDITED')
+    expect(verbs(r.calls.filter(c => c.args[1] === 'edit'))).toEqual(['pr edit', 'pr edit'])
+  })
+
+  it('9. two 5xx on the body edit stop at two calls: DEGRADED, and the comment is still tried', SPAWN_BUDGET, () => {
+    const r = runOnce({ scenario: { failures: [{ match: ['pr', 'edit'], times: 5, stderr: 'gh: Bad Gateway (HTTP 502)\n' }] } })
+    expect(r.code, r.stderr).toBe(0)
+    const block = VE.parsePublishBlock(r.stdout)
+    expect(block?.body).toEqual({ status: 'DEGRADED', reason: '5xx on update-pr-evidence' })
+    expect(block?.comment.status).toBe('POSTED')
+    expect(r.calls.filter(c => c.args[1] === 'edit')).toHaveLength(2)
+    expect(r.stdout).toContain('TRACEABILITY: DEGRADED (5xx on update-pr-evidence)')
+  })
+
+  it('10. a body that does not read back as written is DEGRADED (body read-back mismatch)', SPAWN_BUDGET, () => {
+    const r = runOnce({ scenario: { editStores: 'Somebody else rewrote the body.\n' } })
+    expect(r.code, r.stderr).toBe(0)
+    expect(VE.parsePublishBlock(r.stdout)?.body).toEqual({ status: 'DEGRADED', reason: 'body read-back mismatch' })
+    expect(r.stdout).toContain('TRACEABILITY: DEGRADED (body read-back mismatch)')
+  })
+
+  it('11. two 5xx on the comment stop at two calls: DEGRADED, the body stays EDITED', SPAWN_BUDGET, () => {
+    const r = runOnce({ scenario: { failures: [{ match: ['pr', 'comment'], times: 5, stderr: 'gh: Service Unavailable (HTTP 503)\n' }] } })
+    expect(r.code, r.stderr).toBe(0)
+    const block = VE.parsePublishBlock(r.stdout)
+    expect(block?.body.status).toBe('EDITED')
+    expect(block?.comment).toEqual({ status: 'DEGRADED', reason: '5xx on update-pr-evidence' })
+    expect(r.calls.filter(c => c.args[1] === 'comment')).toHaveLength(2)
+  })
+
+  it('12. a 4xx is not retried', SPAWN_BUDGET, () => {
+    const r = runOnce({ scenario: { failures: [{ match: ['pr', 'comment'], times: 5, stderr: 'gh: Forbidden (HTTP 403)\n' }] } })
+    expect(VE.parsePublishBlock(r.stdout)?.comment).toEqual({ status: 'DEGRADED', reason: 'gh pr comment failed' })
+    expect(r.calls.filter(c => c.args[1] === 'comment')).toHaveLength(1)
+  })
+
+  it('13. a PR gh cannot read: exit 2, the one DEGRADED line, no write', SPAWN_BUDGET, () => {
+    const r = runOnce({ scenario: { noPr: true } })
+    expect(r.code).toBe(2)
+    expect(r.stdout).toBe('TRACEABILITY: DEGRADED (evidence unavailable)\n')
+    expect(r.writes).toEqual([])
+  })
+
+  it('14. a bad flag is a usage error: exit 1, stdout empty, gh never called', SPAWN_BUDGET, () => {
+    for (const args of [
+      ['publish', '--pr', '7', '--publication', 'bogus'],
+      ['publish', '--pr', '07'],
+      ['publish', '--pr', '7', '--evidence', 'a b.md'],
+      ['publish', '--pr', '7', '--evidence', '$(id).md'],
+      ['publish'],
+    ]) {
+      const r = runOnce({ args })
+      expect(r.code, args.join(' ')).toBe(1)
+      expect(r.stdout, args.join(' ')).toBe('')
+      expect(r.calls, args.join(' ')).toEqual([])
+    }
+  })
+
+  it('15. every run bounds its gh writes and cleans its work directory', SPAWN_BUDGET, () => {
+    const worst = runOnce({
+      scenario: {
+        failures: [
+          { match: ['pr', 'edit'], times: 9, stderr: 'gh: Bad Gateway (HTTP 502)\n' },
+          { match: ['pr', 'comment'], times: 9, stderr: 'gh: Bad Gateway (HTTP 502)\n' },
+        ],
+      },
+    })
+    const afterVerify = worst.calls.slice(1)
+    expect(afterVerify.length, 'the writes stage makes at most 8 gh calls').toBeLessThanOrEqual(8)
+    expect(afterVerify.length, 'the worst case still exercises the stage').toBeGreaterThanOrEqual(5)
+    for (const r of [worst, runOnce(), runOnce({ redact: 'fails' }), runOnce({ scenario: { noPr: true } })]) {
+      expect(r.leftovers, 'the private work directory is removed').toEqual([])
+    }
+  })
+
+  it('16. a scrubber that wrote its output and then failed is still not posted from; cut the gates and it is', SPAWN_BUDGET, () => {
+    const held = runOnce({ redact: 'half' })
+    expect(held.code, held.stderr).toBe(0)
+    expect(held.writes, 'the output file exists, but the exit code decides').toEqual([])
+    expect(VE.parsePublishBlock(held.stdout)?.comment.reason).toBe('redaction unavailable')
+
+    const bodyGate = "if (!scrub(io, files.notesRaw, files.notes)) return degradedPart('redaction unavailable');"
+    const commentGate = "if (!scrub(io, files.commentRaw, files.comment)) return degradedPart('redaction unavailable');"
+    const cut = runOnce({
+      redact: 'half',
+      mutate: source => {
+        expect(source, 'both gate lines must exist to be cut').toContain(bodyGate)
+        expect(source).toContain(commentGate)
+        // The call stays and only its exit-code gate goes: the scrubber's output file exists, as it does after a real crash.
+        return source
+          .replace(bodyGate, 'scrub(io, files.notesRaw, files.notes);')
+          .replace(commentGate, 'scrub(io, files.commentRaw, files.comment);')
+      },
+    })
+    expect(verbs(cut.writes), 'with the gates cut the half-scrubbed files ARE posted: the guard above can go red').toEqual(['pr edit', 'pr comment'])
+  })
+})
+
+describe('the boundary prints a publish block only when it parses back to itself (D-OP-BLOCK-GATE)', () => {
+  const evidenceLine = PE.formatEvidenceLine({
+    pr: 7, head: SHIM_HEAD, total: 1,
+    counts: { 'VERIFIED-CI': 0, 'ATTESTED-LOCAL': 0, UNVERIFIED: 1, STALE: 0, FAILED: 0, INDETERMINATE: 0 },
+    stale: [], exceptions: [], approval: 'unchecked', key: '0123456789ab', posted: 'no', body: 'changed',
+  })
+  const good = VE.renderPublishBlock(
+    evidenceLine.ok ? evidenceLine.value : '',
+    { status: 'EDITED', reason: null },
+    { status: 'POSTED', reason: null },
+  )
+
+  it('accepts a rendered block and refuses a tampered one', () => {
+    expect(evidenceLine.ok).toBe(true)
+    expect(VE.settleOutcome({ code: 0, stdout: good })).toEqual({ code: 0, stdout: good })
+    const refused = { code: 4, stdout: '' }
+    for (const bad of [
+      good.replace('EDITED', 'edited'),
+      good.replace('## PR Evidence', '## PR evidence'),
+      `${good}extra line\n`,
+      `${good}TRACEABILITY: DEGRADED (made up)\n`,
+      good.replace('**Body**:', '**Body** :'),
+      good.replace('\n**Body**', '\n\n**Body**'),
+      good.slice(0, -1),
+    ]) {
+      expect(VE.settleOutcome({ code: 0, stdout: bad }), JSON.stringify(bad)).toEqual(refused)
+    }
+    expect(VE.settleOutcome({ code: 2, stdout: good }), 'a block with exit 2').toEqual(refused)
+    expect(VE.settleOutcome({ code: 0, stdout: 'TRACEABILITY: DEGRADED (evidence unavailable)\n' }), 'the degraded line with exit 0').toEqual(refused)
+    expect(VE.settleOutcome({ code: 2, stdout: 'TRACEABILITY: DEGRADED (evidence unavailable)\n' })).toEqual({ code: 2, stdout: 'TRACEABILITY: DEGRADED (evidence unavailable)\n' })
+  })
+
+  it('a degraded half earns its TRACEABILITY line, and only that line', () => {
+    const degraded = VE.renderPublishBlock(
+      evidenceLine.ok ? evidenceLine.value : '',
+      { status: 'SKIPPED', reason: null },
+      { status: 'DEGRADED', reason: 'redaction unavailable' },
+    )
+    expect(degraded.split('\n').slice(3)).toEqual([
+      'TRACEABILITY: DEGRADED (concurrent edit)',
+      'TRACEABILITY: DEGRADED (redaction unavailable)',
+      '',
+    ])
+    expect(VE.parsePublishBlock(degraded)).not.toBeNull()
+    expect(VE.parsePublishBlock(degraded.replace('(concurrent edit)', '(something else)'))).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 5. Source order: no gh write is reachable before the scrub that gates it
+// ---------------------------------------------------------------------------
+
+/** Named collector: the gh write calls in the script that are not preceded, in their function, by a scrub. */
+export function collectUngatedWrites(source: string): string[] {
+  const out: string[] = []
+  const fns = [...source.matchAll(/^function (\w+)\([^)]*\) \{\n([\s\S]*?)\n\}\n/gm)]
+  for (const m of fns) {
+    const body = m[2]
+    const write = /ghWrite\(io, \['pr', '(edit|comment)'/.exec(body)
+    if (write === null) continue
+    const scrub = body.indexOf('scrub(io,')
+    if (scrub === -1 || scrub > write.index) out.push(`${m[1]}: gh pr ${write[1]} without a scrub before it`)
+  }
+  return out
+}
+
+describe('the script\'s source: each gh write follows its scrub', () => {
+  const source = fs.readFileSync(VERIFY_EVIDENCE_SCRIPT, 'utf-8')
+
+  it('publishBody and publishComment scrub before they write', () => {
+    expect(source.match(/ghWrite\(io, \['pr', '(?:edit|comment)'/g), 'the corpus must hold both writes').toHaveLength(2)
+    expect(collectUngatedWrites(source)).toEqual([])
+  })
+
+  it('known-bad probe: a write with the scrub moved after it is reported', () => {
+    const seeded = source.replace(
+      "  if (!scrub(io, files.commentRaw, files.comment)) return degradedPart('redaction unavailable');\n", '')
+    expect(seeded, 'the seed must land').not.toBe(source)
+    expect(collectUngatedWrites(seeded)).toEqual(['publishComment: gh pr comment without a scrub before it'])
+  })
+
+  it('the ci-wait script is the one the readiness classifier shares', () => {
+    expect(fs.existsSync(CI_WAIT_SCRIPT)).toBe(true)
+    expect(source).toContain("require(path.join(__dirname, 'ci-wait.cjs'))")
   })
 })
