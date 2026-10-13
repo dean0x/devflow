@@ -1016,9 +1016,16 @@ export async function runDryRunPhase(opts: {
  * ({@link installCommandsAndAgents}). It does not touch the hooks, the scripts or
  * settings.json, so the notice tells the user to run `devflow init` for those.
  *
- * Skipped, with a warning that names the same remedy, when the manifest records no
- * plugins (the retained set would be a guess), when a folder is behind a link
- * (D-CLI-NO-SYMLINK), or when the copy fails. Never throws: an uninstall must finish.
+ * Never runs in a legacy local scope (D-CLI-NO-SYMLINK): a repository can commit a command
+ * file as a symbolic link, and the copy writes through it. The folder guard below does not
+ * check files. `devflow init` can not update a legacy local install either, so the warning
+ * tells the user to remove it in full.
+ *
+ * Skipped, with a warning, when the manifest is missing or records no plugins (the
+ * retained set would be a guess), or when a folder is behind a link the caller's guard
+ * refuses. Those warnings name `devflow init` as the remedy. When the copy fails, it stops
+ * at the first failure: files it wrote before then stay, and the warning names the same
+ * remedy. Never throws: an uninstall must finish.
  * Agent model lines are reverted again after the copy, as the selective phase does before
  * its removal, so a freshly written agent carries no external-model line.
  */
@@ -1027,9 +1034,12 @@ export async function refreshRetainedCommandsAndAgents(opts: {
   devflowDir: string;
   retained: PluginDefinition[];
   retiredAgents: readonly string[];
+  /** The scope the directories belong to (default `user`). */
+  scope?: UninstallScope;
   mayChange?: ChangeGuard;
 }): Promise<void> {
   const { claudeDir, devflowDir, retained, retiredAgents } = opts;
+  const scope = opts.scope ?? 'user';
   const mayChange = opts.mayChange ?? changeAnything;
   const agentsDir = path.join(claudeDir, 'agents', 'devflow');
   const commandsDir = path.join(claudeDir, 'commands', 'devflow');
@@ -1037,6 +1047,11 @@ export async function refreshRetainedCommandsAndAgents(opts: {
   const remedy = 'Run `devflow init` to update the commands, agents, hooks and scripts of the plugins that stay installed.';
 
   if (retained.length === 0) return;
+
+  if (scope === 'local') {
+    p.log.warn(`${retired} Devflow does not rewrite files in a legacy local install, so the remaining commands can still name the removed agents. Remove the legacy local install in full with \`devflow uninstall --scope local\`.`);
+    return;
+  }
 
   const manifest = await readManifest(devflowDir).catch(() => null);
   if (manifest === null || manifest.plugins.length === 0) {
@@ -1129,6 +1144,7 @@ export async function runSelectivePhaseForScope(opts: {
       devflowDir,
       retained: installedPlugins.filter(plugin => !removed.has(plugin.name)),
       retiredAgents: sweeps.agents.removed,
+      scope,
       mayChange,
     });
   }
