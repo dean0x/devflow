@@ -7,11 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### BREAKING CHANGES — Agent rename (6 agents)
+### Upgrade notes — Agent rename (6 agents)
 
-**This release is version 4.0.0, a major release.** It renames six agents, and a prompt that
-names an old agent does not work. Earlier releases (2.1.0 and 2.5.0) shipped breaking changes as
-minor versions. Do not release this change as a minor or a patch version.
+This change releases as a minor version (3.6.0). It renames six agents, and a prompt that names
+an old agent does not work. Read the steps below that you must do by hand.
 
 Six agents have new names that state their job ([#466](https://github.com/dean0x/devflow/issues/466)).
 The agent `code` keeps its name. The learning feature keeps its names too: `devflow learning`,
