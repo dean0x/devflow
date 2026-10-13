@@ -4629,7 +4629,7 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
 // =============================================================================
 //
 // Sections 1 and 2 read the learning folder's files into the session context
-// (the TL;DR lines and the learning model), name the index the model is told to
+// (the TL;DR lines and the Curate model), name the index the model is told to
 // read and pass on to the agents it delegates to, and send the Curate agent to
 // the queue when it holds turns. A repository can commit any of these, or the
 // folder itself, as a symbolic link to a file elsewhere on the machine, so a file

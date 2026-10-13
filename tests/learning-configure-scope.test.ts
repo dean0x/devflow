@@ -1,6 +1,6 @@
 /**
  * `devflow learning --configure` offers a project and a global scope for the
- * Learning model. D-LEARNING-MODEL-PRECEDENCE puts a `devflow agents` Curate
+ * Curate model. D-LEARNING-MODEL-PRECEDENCE puts a `devflow agents` Curate
  * mapping between the project file and the global file, so choosing Global does
  * nothing for a user who has such a mapping. The hint has to say so, or the
  * Global option is silently ineffective for them.

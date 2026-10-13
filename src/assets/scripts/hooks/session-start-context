@@ -63,7 +63,7 @@ INPUT=$(cat)
 # Re-entrancy guard — before hook-bootstrap to minimize background session
 # overhead. The memory worker's own claude -p session fires SessionStart hooks;
 # without this guard the nested session would re-inject its own context (and
-# receive a Learning spawn directive it must never act on).
+# receive a Curate spawn directive it must never act on).
 if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then dbg "EXIT: bg_updater"; exit 0; fi
 
 # JSON parsing (jq with node fallback) — silently no-op if neither available
@@ -570,11 +570,11 @@ if [ -n "$TRACKER_PROVIDER" ] && [ ! -f "$TRACKER_CONVENTIONS" ]; then
   # spends another's attempts; the claim file stays global — one Tracker agent
   # runs at a time on a machine, whichever provider it is learning.
   TRACKER_ATTEMPTS_MAX=5
-  # Its OWN literal, deliberately NOT shared with Learning's 900 above: one
+  # Its OWN literal, deliberately NOT shared with Curate's 900 above: one
   # shared constant would make a change to either feature silently reclassify the
   # other's live runs as crashed. 600s is longer than the memory worker's 300s
   # lock (a Tracker run does more — a capability probe plus bounded git scans)
-  # and shorter than Learning's 900s (no multi-part curation phase). Too long
+  # and shorter than Curate's 900s (no multi-part curation phase). Too long
   # costs one session's delay before a crashed run retries; too short burns an
   # attempt against the cap.
   TRACKER_PROCESSING_STALE_SECS=600
