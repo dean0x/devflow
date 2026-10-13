@@ -284,7 +284,7 @@ Use the template from the Output Artifact section below.
 
 ### Phase 6: Polish
 
-**Produces:** SIMPLIFICATION_RESULT
+**Produces:** POLISH_RESULT
 **Requires:** CODE_AGENT_RESULTS
 
 If any fixes were made, spawn Polish agent to refine the changed code:

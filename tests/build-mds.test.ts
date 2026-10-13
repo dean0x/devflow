@@ -1151,8 +1151,8 @@ describe('compiled dynamic-build.md: Gate 1 order (D-VALIDATE-ONCE)', () => {
     expect(compiled).toContain('before Polish agent + Harden agent + Validate agent (in that order');
   });
 
-  it('the escalation type list carries scrutiny-blocked', () => {
-    expect(compiled).toMatch(/"type": "merge-conflict \| gate2-fail \| validation-exhausted \| scrutiny-blocked \|/);
+  it('the escalation type list carries harden-blocked', () => {
+    expect(compiled).toMatch(/"type": "merge-conflict \| gate2-fail \| validation-exhausted \| harden-blocked \|/);
   });
 
   it('known-bad probes: the order before #421 and a surviving codeChanged branch are reported', () => {
@@ -1160,7 +1160,7 @@ describe('compiled dynamic-build.md: Gate 1 order (D-VALIDATE-ONCE)', () => {
       .replace('  const validation = await agent(`Run build, typecheck, lint, and tests on branch ${BRANCH}.\nFollow', '  const earlyValidation = await agent(`Run build, typecheck, lint, and tests on branch ${BRANCH}.\nFollow');
     expect(swapped, 'the seed must land').not.toBe(compiled);
     expect(collectGate1OrderViolations(swapped)).toEqual(['Gate 1 #1: the first Validate is not an unconditional statement of the pass']);
-    const branching = compiled.replace('  await agent(`Simplify and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Polish" });', '  if (scrutiny.codeChanged) { await agent(`x`, { agentType: "Validate" }); }\n  await agent(`Simplify and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Polish" });');
+    const branching = compiled.replace('  await agent(`Simplify and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Polish" });', '  if (harden.codeChanged) { await agent(`x`, { agentType: "Validate" }); }\n  await agent(`Simplify and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Polish" });');
     expect(collectGate1OrderViolations(branching).some(v => v.includes('Gate 1 #1'))).toBe(true);
     expect(collectGate1OrderViolations('no passes here')).toEqual(['Gate 1 #1: the pass was not found', 'Gate 1 #2: the pass was not found']);
   });

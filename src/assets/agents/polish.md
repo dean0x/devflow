@@ -106,7 +106,7 @@ Code-scanning runs in the Code agent; do not scan here.
 Return structured completion status:
 
 ```markdown
-## Simplification Report
+## Polish Report
 
 ### Changes Applied
 - {file}: {description of simplification}

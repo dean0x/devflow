@@ -131,7 +131,7 @@ function collectEngineDefects(engine: string, block: string): string[] {
 /**
  * The dynamic-build prompt sites that name the block, each anchored by its own
  * quoted text: the Code implementation prompt, both Gate 1 Validate prompts and
- * the Validate re-run after a Gate 1 fix in each pass, both Code fix prompts after
+ * the Validate re-run after a Gate 1 fix in each pass, both Fix prompts after
  * Gate 2, the review-batch fix prompt, the Test prompt and the post-merge Validate.
  * A site names "your Running commands block" and never copies the block, because
  * a sub-agent spawned with an agentType loads its body as its standing

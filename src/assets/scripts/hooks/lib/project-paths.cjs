@@ -57,7 +57,7 @@ function getLearningPendingTurnsPath(projectRoot) {
   return path.join(projectRoot, '.devflow', 'learning', '.pending-turns.jsonl');
 }
 
-/** .devflow/learning/.pending-turns.processing — the claimed batch a Learning run holds while it processes it */
+/** .devflow/learning/.pending-turns.processing — the claimed batch a Curate run holds while it processes it */
 function getLearningPendingTurnsProcessingPath(projectRoot) {
   return path.join(projectRoot, '.devflow', 'learning', '.pending-turns.processing');
 }

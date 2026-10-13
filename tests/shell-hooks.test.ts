@@ -4305,7 +4305,7 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
     });
 
     // The hook is bash and never runs the TypeScript key canonicalisation, so a mapping
-    // file written before the Curate agent became Curate still names the agent `learning`.
+    // file written before the agent was renamed to Curate still names the agent `learning`.
     describe('the pre-rename agents.learning key', () => {
       it('counts as the mapping layer when agents.curate is absent: it outranks the global file and omits model=', () => {
         setMapping({ learning: { model: 'opus' } });

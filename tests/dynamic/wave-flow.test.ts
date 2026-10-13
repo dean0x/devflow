@@ -149,18 +149,18 @@ interface World {
   readonly refuseMerge?: readonly string[]
   /** Tickets whose red merge Git will not undo (`undone: false`). */
   readonly refuseUndo?: readonly string[]
-  /** Tickets whose Gate 1 Validate never passes: the pass is exhausted after two Code fixes. */
+  /** Tickets whose Gate 1 Validate never passes: the pass is exhausted after two Fix spawns. */
   readonly gate1Red?: readonly string[]
   /** Tickets whose Harden agent returns BLOCKED, in Gate 1 #1. */
-  readonly scrutinyBlocked?: readonly string[]
+  readonly hardenBlocked?: readonly string[]
   /** Tickets whose Harden agent returns BLOCKED only in the final Gate 1 (#2). */
-  readonly scrutinyBlockedFinal?: readonly string[]
+  readonly hardenBlockedFinal?: readonly string[]
   /**
    * Raw returns for a ticket's Harden spawns, in order: the first answers Gate 1 #1, the
    * second the final Gate 1. A spawn past the list answers PASS. This is how a Harden
    * that returns no status, or one the skeleton does not know, is scripted.
    */
-  readonly scrutinyReturns?: Readonly<Record<string, readonly unknown[]>>
+  readonly hardenReturns?: Readonly<Record<string, readonly unknown[]>>
   /** Tickets whose merge Git reports without a usable mergeSha. */
   readonly badMergeSha?: readonly string[]
   /** Tickets whose Evaluate agent answers FAIL. */
@@ -236,9 +236,9 @@ function stubAgent(world: World, spawns: Spawn[]): Agent {
     if (opts.agentType === 'Harden') {
       const nth = (hardened.get(currentRef) ?? 0) + 1
       hardened.set(currentRef, nth)
-      const scripted = world.scrutinyReturns?.[currentRef]
+      const scripted = world.hardenReturns?.[currentRef]
       if (scripted !== undefined && nth <= scripted.length) return scripted[nth - 1]
-      const blocked = world.scrutinyBlocked?.includes(currentRef) || (nth === 2 && world.scrutinyBlockedFinal?.includes(currentRef))
+      const blocked = world.hardenBlocked?.includes(currentRef) || (nth === 2 && world.hardenBlockedFinal?.includes(currentRef))
       return { status: blocked ? 'BLOCKED' : 'PASS' }
     }
     if (opts.agentType === 'Evaluate') return world.evaluateFail?.includes(currentRef) ? { verdict: 'FAIL', rationale: 'criterion 2 is not met' } : { verdict: 'PASS', rationale: 'ok' }
@@ -1424,7 +1424,7 @@ describe('AC-8: the frozen dynamic-build anchors stay first, above every new ste
 //                        Validate runs last and unconditionally.
 // D-GATE1-ESCALATION     After Gate 1 #1, an exhausted Validate or a BLOCKED Harden
 //                        returns ESCALATED with one escalation (`validation-exhausted` or
-//                        `scrutiny-blocked`) before Gate 2 and the review pass spawn
+//                        `harden-blocked`) before Gate 2 and the review pass spawn
 //                        anything. At Gate 1 #2 the same stops are ESCALATED phase results
 //                        and the run reports PARTIAL.
 // D-LENS-MERGE           A ticket with a plan gets exactly one Evaluate spawn whose prompt
@@ -1515,10 +1515,10 @@ describe('#421 AC-18: a Gate 1 #1 stop returns ESCALATED with one escalation bef
     expect(await collectGate1StopViolations(SINGLE, { tickets: { '#7': OWN }, gate1Red: ['#7'] }, 'validation-exhausted')).toEqual([])
   })
 
-  it('Harden BLOCKED: scrutiny-blocked, and Validate never runs on it', async () => {
+  it('Harden BLOCKED: harden-blocked, and Validate never runs on it', async () => {
     const spawns: Spawn[] = []
-    const world: World = { tickets: { '#7': OWN }, scrutinyBlocked: ['#7'] }
-    expect(await collectGate1StopViolations(SINGLE, world, 'scrutiny-blocked')).toEqual([])
+    const world: World = { tickets: { '#7': OWN }, hardenBlocked: ['#7'] }
+    expect(await collectGate1StopViolations(SINGLE, world, 'harden-blocked')).toEqual([])
     await runEngine(SINGLE!, ENGINE_ARGS, stubAgent(world, spawns))
     expect(spawns.some(s => s.agentType === 'Validate')).toBe(false)
   })
@@ -1527,26 +1527,26 @@ describe('#421 AC-18: a Gate 1 #1 stop returns ESCALATED with one escalation bef
     ['no return at all', undefined],
     ['a return with no status field', {}],
     ['a status the skeleton does not know', { status: 'DONE' }],
-  ])('Harden returning %s counts as BLOCKED: scrutiny-blocked, and Validate never runs on it', async (_label, scrutinyReturn) => {
+  ])('Harden returning %s counts as BLOCKED: harden-blocked, and Validate never runs on it', async (_label, hardenReturn) => {
     const spawns: Spawn[] = []
-    const world: World = { tickets: { '#7': OWN }, scrutinyReturns: { '#7': [scrutinyReturn] } }
-    expect(await collectGate1StopViolations(SINGLE, world, 'scrutiny-blocked')).toEqual([])
+    const world: World = { tickets: { '#7': OWN }, hardenReturns: { '#7': [hardenReturn] } }
+    expect(await collectGate1StopViolations(SINGLE, world, 'harden-blocked')).toEqual([])
     await runEngine(SINGLE!, ENGINE_ARGS, stubAgent(world, spawns))
     expect(spawns.some(s => s.agentType === 'Validate')).toBe(false)
   })
 
   it('known-bad probe: a Gate 1 #1 that only stops on an explicit BLOCKED carries a status-less Harden on to Validate', async () => {
-    const stopsOnBlockedOnly = SINGLE!.replace('if (!["PASS", "FIXED"].includes(scrutiny?.status)) {', 'if (scrutiny?.status === "BLOCKED") {')
+    const stopsOnBlockedOnly = SINGLE!.replace('if (!["PASS", "FIXED"].includes(harden?.status)) {', 'if (harden?.status === "BLOCKED") {')
     expect(stopsOnBlockedOnly, 'the seed must land').not.toBe(SINGLE)
-    const world: World = { tickets: { '#7': OWN }, scrutinyReturns: { '#7': [undefined] } }
-    const defects = await collectGate1StopViolations(stopsOnBlockedOnly, world, 'scrutiny-blocked')
+    const world: World = { tickets: { '#7': OWN }, hardenReturns: { '#7': [undefined] } }
+    const defects = await collectGate1StopViolations(stopsOnBlockedOnly, world, 'harden-blocked')
     expect(defects.length).toBeGreaterThan(0)
     expect(defects.some(d => d.includes('not ESCALATED') || d.includes('ran on a stopped ticket'))).toBe(true)
   })
 
-  it('the schema lists scrutiny-blocked among the escalation types', () => {
+  it('the schema lists harden-blocked among the escalation types', () => {
     const line = BUILT.split('\n').find(l => /^\s*"type": "merge-conflict \|/.test(l)) ?? ''
-    expect(line).toContain('| scrutiny-blocked |')
+    expect(line).toContain('| harden-blocked |')
   })
 
   it('known-bad probe: an engine that carries on after a stop (the pre-#421 skeleton) is reported', async () => {
@@ -1560,20 +1560,20 @@ describe('#421 AC-18: a Gate 1 #1 stop returns ESCALATED with one escalation bef
     expect(defects.some(d => d.includes('ran on a stopped ticket'))).toBe(true)
   })
 
-  it('Gate 1 #2 BLOCKED: the run reports PARTIAL with a scrutiny-blocked escalation, after the review pass', async () => {
+  it('Gate 1 #2 BLOCKED: the run reports PARTIAL with a harden-blocked escalation, after the review pass', async () => {
     const spawns: Spawn[] = []
-    const result = await runEngine(SINGLE!, ENGINE_ARGS, stubAgent({ tickets: { '#7': OWN }, scrutinyBlockedFinal: ['#7'] }, spawns))
+    const result = await runEngine(SINGLE!, ENGINE_ARGS, stubAgent({ tickets: { '#7': OWN }, hardenBlockedFinal: ['#7'] }, spawns))
     expect(result.verdict).toBe('PARTIAL')
-    expect(result.escalations?.map(e => e.type)).toEqual(['scrutiny-blocked'])
+    expect(result.escalations?.map(e => e.type)).toEqual(['harden-blocked'])
     expect(types(spawns).filter(t => t === 'Validate'), 'the final Validate does not run on a BLOCKED Harden').toHaveLength(1)
   })
 
-  it('Gate 1 #2 with a status-less Harden: the run reports PARTIAL with a scrutiny-blocked escalation, and the final Validate does not run', async () => {
+  it('Gate 1 #2 with a status-less Harden: the run reports PARTIAL with a harden-blocked escalation, and the final Validate does not run', async () => {
     const spawns: Spawn[] = []
-    const world: World = { tickets: { '#7': OWN }, scrutinyReturns: { '#7': [{ status: 'PASS' }, undefined] } }
+    const world: World = { tickets: { '#7': OWN }, hardenReturns: { '#7': [{ status: 'PASS' }, undefined] } }
     const result = await runEngine(SINGLE!, ENGINE_ARGS, stubAgent(world, spawns))
     expect(result.verdict).toBe('PARTIAL')
-    expect(result.escalations?.map(e => e.type)).toEqual(['scrutiny-blocked'])
+    expect(result.escalations?.map(e => e.type)).toEqual(['harden-blocked'])
     expect(types(spawns).filter(t => t === 'Validate'), 'the final Validate does not run on a status-less Harden').toHaveLength(1)
   })
 

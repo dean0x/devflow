@@ -225,11 +225,11 @@ After implementing, commit your changes with a conventional-commit message and r
 const gate1 = await phase("gate1", async () => {
   await agent(`Simplify and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Polish" });
 
-  const scrutiny = await agent(`9-pillar self-review of recent changes on branch ${BRANCH}. Fix P0/P1 issues and commit the fixes.
+  const harden = await agent(`9-pillar self-review of recent changes on branch ${BRANCH}. Fix P0/P1 issues and commit the fixes.
 Return: {"status": "PASS" | "FIXED" | "BLOCKED"}`, { agentType: "Harden" });
   // Anything but an explicit PASS or FIXED is a stop: a Harden that returned no status, or one this skeleton does not know, has not accepted the code.
-  if (!["PASS", "FIXED"].includes(scrutiny?.status)) {
-    return { verdict: "ESCALATED", type: "scrutiny-blocked", reason: scrutiny?.status === "BLOCKED" ? "Harden agent returned BLOCKED: a P0 issue cannot be fixed in scope" : "Harden agent returned no recognised status: counted as BLOCKED" };
+  if (!["PASS", "FIXED"].includes(harden?.status)) {
+    return { verdict: "ESCALATED", type: "harden-blocked", reason: harden?.status === "BLOCKED" ? "Harden agent returned BLOCKED: a P0 issue cannot be fixed in scope" : "Harden agent returned no recognised status: counted as BLOCKED" };
   }
 
   const validation = await agent(`Run build, typecheck, lint, and tests on branch ${BRANCH}.
@@ -474,10 +474,10 @@ Return: {"status": "fixed"|"blocked", "commitShas": ["<sha>"], "unresolved": ["<
 const gate1Final = await phase("gate1-final", async () => {
   await agent(`Simplify and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Polish" });
 
-  const scrutiny = await agent(`9-pillar self-review of recent changes on branch ${BRANCH}. Fix P0/P1 issues and commit the fixes.
+  const harden = await agent(`9-pillar self-review of recent changes on branch ${BRANCH}. Fix P0/P1 issues and commit the fixes.
 Return: {"status": "PASS" | "FIXED" | "BLOCKED"}`, { agentType: "Harden" });
-  if (!["PASS", "FIXED"].includes(scrutiny?.status)) {
-    return { verdict: "ESCALATED", type: "scrutiny-blocked", reason: scrutiny?.status === "BLOCKED" ? "Final Gate 1 Harden agent returned BLOCKED: a P0 issue cannot be fixed in scope" : "Final Gate 1 Harden agent returned no recognised status: counted as BLOCKED" };
+  if (!["PASS", "FIXED"].includes(harden?.status)) {
+    return { verdict: "ESCALATED", type: "harden-blocked", reason: harden?.status === "BLOCKED" ? "Final Gate 1 Harden agent returned BLOCKED: a P0 issue cannot be fixed in scope" : "Final Gate 1 Harden agent returned no recognised status: counted as BLOCKED" };
   }
 
   const validation = await agent(`Run build, typecheck, lint, and tests on branch ${BRANCH} (final gate after all fixing).

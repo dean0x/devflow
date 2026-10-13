@@ -5,7 +5,7 @@ ORDER IS LOAD-BEARING. Run exactly in this sequence:
 
 1. **Polish agent** — reduce complexity, remove duplication
 2. **Harden agent** — 9-pillar self-review (deep structural analysis); returns `{"status": "PASS" | "FIXED" | "BLOCKED"}`
-   - BLOCKED (a P0 issue cannot be fixed in scope), or a missing or unrecognised status, which counts as BLOCKED → stop the pass and escalate as `scrutiny-blocked`; Validate does not run on code Harden could not accept
+   - BLOCKED (a P0 issue cannot be fixed in scope), or a missing or unrecognised status, which counts as BLOCKED → stop the pass and escalate as `harden-blocked`; Validate does not run on code Harden could not accept
 3. **Validate agent** — build / typecheck / lint / test; returns `{"verdict": "PASS" | "FAIL", "details": "..."}`. It runs LAST and UNCONDITIONALLY: one full run over the HEAD that Polish and Harden left, so it covers their commits whether or not Harden changed code
    - Build/test commands follow `build_execution_doctrine()`: the Validate agent's Running commands block, foreground under an explicit Bash timeout.
    - FAIL → Fix agent fix (max 2 retries), each followed by a Validate agent re-run
@@ -199,7 +199,7 @@ Each ticket engine run returns a structured result. The Synthesize agent or the 
   },
   "escalations": [
     {
-      "type": "merge-conflict | gate2-fail | validation-exhausted | scrutiny-blocked | ambiguous-resolution | review-coverage-incomplete | dependency-blocked | engine-crash | ticket-link-missing | branch-missing",
+      "type": "merge-conflict | gate2-fail | validation-exhausted | harden-blocked | ambiguous-resolution | review-coverage-incomplete | dependency-blocked | engine-crash | ticket-link-missing | branch-missing",
       "description": "string"
     }
   ],
