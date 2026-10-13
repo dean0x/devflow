@@ -67,8 +67,9 @@ Use `Polish` for a judgment pass that makes code cleaner and keeps its behaviour
 - If the install is a legacy project-local install (`<repo>/.claude`), the uninstall writes
   nothing. It prints a warning. The warning tells you to remove that install in full with
   `devflow uninstall --scope local`.
-- If the write fails, the uninstall stops at the first file that fails. The files that it wrote
-  before the failure stay written. It prints a warning that tells you to run `devflow init`.
+- If the write fails, the rewrite stops at the first file that fails. The files that it wrote
+  before the failure stay written. The uninstall still finishes and prints a warning that tells
+  you to run `devflow init`.
 
 **What you must migrate by hand:**
 - Your own prompts, commands, agents or `CLAUDE.md` that name an old agent, for example
