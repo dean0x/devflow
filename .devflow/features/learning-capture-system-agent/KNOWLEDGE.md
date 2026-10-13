@@ -16,7 +16,7 @@ directories:
   - src/core/queue-drain.ts
   - src/hud/components/learning-counts.ts
 created: 2026-10-10
-updated: 2026-10-12
+updated: 2026-10-13
 ---
 
 # Learning Agent, Queue Claim, Directives and CLI
@@ -84,11 +84,11 @@ The queue is claimed and released only by the `claim-queue` and `release-claim` 
 
 The body carries the entry format with a good and a bad example and quotes the ops' stdout forms (the `claim-due` form is in `maintain.md`). Neither file states plumbing numbers (claim staleness, the claim-due batch size): they live in plumbing and a prose copy drifts. Only the rotation and verify-age days stay; the rotation window is pinned over the body plus `maintain.md` by `tests/decisions/learning-curation.test.ts`.
 
-**The reference skill (`agent-references`).** `src/assets/skills/agent-references/` is reference-only: `user-invocable: false` and `disable-model-invocation: true`, never named in an agent's `skills:` list or a plugin `requires`, and registered in `devflow-core-skills` (always installed). It holds `references/learning/maintain.md` for this agent and `references/synthesize/{mode}.md` for Synthesize. The agent body is held under the `learning-body-max` ceiling in `tests/fixtures/numeric-floors.json` (lowered, never raised), asserted in `tests/guards/agent-references.test.ts`; the flags and the no-preload rule are held in `tests/guards/skill-description-caps.test.ts`. Learning stays on Opus and keeps its explicit CLAUDE.md and rule reads in the body's Inputs, ahead of both comparisons.
+**The reference skill (`agent-references`).** `src/assets/skills/agent-references/` is reference-only: `user-invocable: false` and `disable-model-invocation: true`, never named in an agent's `skills:` list or a plugin `requires`, and registered in `devflow-core-skills` (always installed). It holds `references/learning/maintain.md` for this agent, `references/synthesize/{mode}.md` for Synthesize and `references/commands/{name}.md` for the rare branches a command moves out of its own text (D-CMD-REF-HAND), which that command Reads by explicit path when its condition holds. The agent body is held under the `learning-body-max` ceiling in `tests/fixtures/numeric-floors.json` (lowered, never raised), asserted in `tests/guards/agent-references.test.ts`; the flags and the no-preload rule are held in `tests/guards/skill-description-caps.test.ts`. Learning stays on Opus and keeps its explicit CLAUDE.md and rule reads in the body's Inputs, ahead of both comparisons.
 
 ## session-start-context directives
 
-The hook assembles `additionalContext` from numbered sections. Section 1 (the decisions TL;DR, the Index line and the pass rule) belongs to the decisions delivery route and is in `learning-capture-system-delivery`. The rest:
+The hook assembles `additionalContext` from numbered sections. Section 1 (the decisions TL;DR, the Index line and the pass rule, which tells the model to hand each agent a slice of the index) belongs to the decisions delivery route and is in `learning-capture-system-delivery`. The rest:
 
 - **Carve-out** (before Section 1): the hook sources `ensure-root-gitignore` (the `.devflow/` carve-out) unless `df_no_symlink_below` finds `.devflow` a symbolic link (the marker would land in the folder the link names); the skip is logged once through `log()` and context injection goes on. `hook-log-init` is sourced before the carve-out, so `ensure-root-gitignore`'s own skips (a linked root `.gitignore`, a legacy copy it could not write, a linked marker) reach the log too: with memory and learning both off, this is the only hook that reaches the carve-out.
 - **Section 2** emits `--- LEARNING MAINTENANCE ---` when the queue is non-empty or `.pending-turns.processing` is stale (at least `PROCESSING_STALE_SECS`); a fresh claim suppresses it. The queue, the batch and the project `learning.json` are read through `df_file_below "$LEDGER_ROOT"`, so one a link leads to counts as absent: a linked queue or stale batch sends no agent to it, and a linked `learning.json` does not choose the model. The check is advisory: a spawn that loses the race exits on `busy`. `$LEDGER_ROOT` is embedded only when `DIRECTIVE_LEDGER_SAFE` (positive shape `^[A-Za-z0-9/._+-]+$`, `+` for Claude Code's `feat+x` worktrees) admits it; a refused root with pending work emits the fixed `--- LEARNING PAUSED ---` notice, which interpolates nothing. The spawn is `subagent_type="Learning"`, `run_in_background: true`, prompt "Process the pending learning queue per your agent instructions. Project root: $LEDGER_ROOT".

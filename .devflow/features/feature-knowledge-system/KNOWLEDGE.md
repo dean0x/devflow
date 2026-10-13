@@ -12,7 +12,7 @@ directories:
   - tests/guards/feature-knowledge-delivery.test.ts
   - tests/guards/kb-shape.test.ts
 created: 2026-06-21
-updated: 2026-10-11
+updated: 2026-10-13
 ---
 
 # Feature Knowledge Base System
@@ -40,6 +40,8 @@ updated: 2026-10-11
 - **KB-AP-9** `/research` Phase 7 (user-gated) deliberately has its own Knowledge-agent spawn block rather than `knowledge_writeback()`; do not fold it into the partial.
 - **KB-AP-10** Never preload `devflow:apply-feature-knowledge` on the Knowledge agent: it is never handed `FEATURE_KNOWLEDGE`, only `EXISTING_KB`, so the preload is billed on every spawn and read on none (`tests/guards/preload-cleanup.test.ts`).
 - **KB-INV-11** The Knowledge agent treats `EXISTING_KB` as a snapshot: its body says to keep an assertion only after checking it against current code and to trust the code on a mismatch. That replaces the verify-on-read step the dropped skill stated.
+- **KB-INV-12** The write-back spawn passes `DECISIONS_CONTEXT` as the slice for the written directories (else `(none)`), in the learning-on build only, never the whole index (`tests/decisions/decisions-slice.test.ts`).
+- **KB-AP-11** Never restate in the write-back spawn what the Knowledge agent's own body holds (the index read-modify-write, the two direct writes, the commit): the spawn names only what the caller knows, and a copy lands in every host and drifts.
 
 ## Overview
 
@@ -94,7 +96,7 @@ This KB covers the knowledge side: load, write-back, delivery tiers, KB shape an
 
 1. **Gate.** Take the settings line the host's settings block resolved for `{worktree}` (the hosts in `SETTINGS_BLOCK_HOSTS` expand `_partials/_settings.mds` `settings_resolve()` once, imported by the host itself as an alias, and the `SETTINGS_BLOCK_HOSTS_LEARNING_OFF` subset keeps it with learning off; the partial resolves the line with the block only if the run has not yet). `KNOWLEDGE=off` skips entirely. The line ANDs the machine switch with both repo files (D-FEATURES-NARROW-ONLY), and its fail-closed form says `KNOWLEDGE=off`, so an unresolvable line skips write-back. The gate reads no file itself (`tests/guards/no-config-read.test.ts`, `tests/commands/knowledge-writeback-gate.test.ts`).
 2. **Check scope.** Proceed only if the workflow changed a documented area or surfaced durable cross-cutting knowledge (patterns, anti-patterns, integration points, gotchas not visible from one file).
-3. **Spawn** `Agent(subagent_type="Knowledge")` with WORKTREE_PATH, FEATURE_SLUG, FEATURE_NAME, DIRECTORIES, FILES_CHANGED and, in the learning-on build only, DECISIONS_CONTEXT; the partial passes none of the agent's optional EXISTING_KB or EXPLORATION_OUTPUTS inputs. The prompt also states the index line's caps ("reword a longer one, never cut it"). It never tells the agent to load `devflow:feature-knowledge`: the agent lists it (with `apply-feature-knowledge`, `worktree-support` and, learning-on only, `apply-decisions`) in `skills:`, so the body is injected into every spawn. `tests/commands/knowledge-preload.test.ts` holds the preload, the absent Skill tool and the absence of the instruction in the write-back partial and `/research`.
+3. **Spawn** `Agent(subagent_type="Knowledge")` with WORKTREE_PATH, FEATURE_SLUG, FEATURE_NAME, DIRECTORIES, FILES_CHANGED and, in the learning-on build only, DECISIONS_CONTEXT (the slice for these directories, else `(none)`); the partial passes none of the agent's optional EXISTING_KB or EXPLORATION_OUTPUTS inputs. The prompt names what only the caller knows (the root, slug, directories, files, the two paths, and the index line format with its caps, "reword a longer one, never cut it") and ends by pointing the agent at its Commit Protocol: how the agent writes the index, writes the two files directly and commits them is held by its own body (D-CMD-CONDENSE). It never tells the agent to load `devflow:feature-knowledge`: the agent lists it (with `apply-feature-knowledge`, `worktree-support` and, learning-on only, `apply-decisions`) in `skills:`, so the body is injected into every spawn. `tests/commands/knowledge-preload.test.ts` holds the preload, the absent Skill tool and the absence of the instruction in the write-back partial and `/research`.
 4. **Agent writes** `.devflow/features/{slug}/KNOWLEDGE.md`, then read-modify-writes `index.md` (replace the slug's line or append; create the file if absent), in the line format `- **{slug}** — {areas} — {Use-when description}`. There is no result file and no handoff artifact.
 5. **Commit, or surface why not.** The agent commits the two paths to the current branch. On a detached HEAD it never commits (the commit would be unreachable once HEAD moves) and reports `KB_COMMIT: skipped (detached HEAD) — uncommitted: <paths>`; `knowledge_writeback` Step 4 makes the workflow name those paths in its final report (D-DETACHED-HEAD; `tests/commands/knowledge-detached.test.ts`). A failed Knowledge agent never changes the workflow outcome.
 
@@ -104,7 +106,7 @@ This KB covers the knowledge side: load, write-back, delivery tiers, KB shape an
 
 **Write-back conditionality.** The call site is always present in the compiled command, but the settings-line gate and the changed-area or cross-cutting condition mean the agent spawns only when useful.
 
-**DECISIONS_CONTEXT injection.** `knowledge_writeback` passes `DECISIONS_CONTEXT` so the agent can state each relevant decision or pitfall in words in the section it governs, never by ledger ID. That line, the agent's input, its `apply-decisions` preload and its `CROSS_REFERENCES` output line all sit inside learning arms, so a learning-off prompt carries none of them.
+**DECISIONS_CONTEXT injection.** `knowledge_writeback` passes `DECISIONS_CONTEXT` as the slice of the decisions index for the written directories (the orchestrator cuts it, per the slice rule in `learning-capture-system-delivery`), so the agent can state each relevant decision or pitfall in words in the section it governs, never by ledger ID. That line, the agent's input, its `apply-decisions` preload and its `CROSS_REFERENCES` output line all sit inside learning arms, so a learning-off prompt carries none of them.
 
 **/research bespoke block.** `/research` loads with `knowledge_load` but its Phase 7 offers creation through its own spawn (checks the index, asks the user, then spawns the Knowledge agent) because the write-back list omits research. The block is the research workflow's equivalent of `knowledge_writeback`.
 
@@ -127,6 +129,8 @@ This KB covers the knowledge side: load, write-back, delivery tiers, KB shape an
 
 **KB-INV-5, no load for investigators.** Passing `FEATURE_KNOWLEDGE` to `/explore` or `/debug` workers would anchor them on what past agents concluded; those workflows only write back.
 
+**KB-AP-11, the condensed spawn.** A cut in `_knowledge.mds` lands in every host, so the partial names for each cut the place that keeps its text: the Knowledge agent's body holds the index and two-file writes (Responsibilities 6-8, Direct Write Protocol) and its commit (Commit Protocol), which is why the spawn only points at the Commit Protocol. Putting the steps back into the spawn duplicates them in every host.
+
 **KB-AP-1, the pre-block shapes.** `read KNOWLEDGE.md in full`, `Concatenate under slug headers` and the `{full KNOWLEDGE.md content}` placeholder are banned across the compiled commands, the release source, the charter and the consumer skill by the delivery guard.
 
 ## Gotchas
@@ -146,13 +150,14 @@ This KB covers the knowledge side: load, write-back, delivery tiers, KB shape an
 - `src/assets/agents/knowledge.mds` — the Knowledge agent contract: dual write, no result file, the leading Rules section kept current, the refresh rule once in its Direct Write Protocol, the character budget and legacy-KB bullets under Boundaries, and a `Report cap:` line closing Output (the `KB_*` status block exempt and inline in full)
 - `src/assets/skills/feature-knowledge/SKILL.md`, `src/assets/skills/apply-feature-knowledge/SKILL.md` — the authoring and consumption contracts
 - `tests/guards/feature-knowledge-delivery.test.ts`, `tests/guards/kb-shape.test.ts` — the delivery guard (load elements, tier table, Produces lines, recipient Input lines, consumer skill, release) and the KB-shape guard (Rules first, IDs, budget, no truncation instruction, legacy and refresh rules), each arm a named collector with a known-bad probe
-- `tests/guards/preload-cleanup.test.ts`, `tests/guards/handoff-sections.test.ts`, `tests/commands/knowledge-preload.test.ts`, `tests/commands/knowledge-writeback-gate.test.ts`, `tests/commands/knowledge-detached.test.ts`, `tests/guards/no-config-read.test.ts` — the remaining knowledge guards
+- `tests/guards/preload-cleanup.test.ts`, `tests/guards/handoff-sections.test.ts`, `tests/commands/knowledge-preload.test.ts`, `tests/commands/knowledge-writeback-gate.test.ts`, `tests/commands/knowledge-detached.test.ts`, `tests/guards/no-config-read.test.ts`, `tests/decisions/decisions-slice.test.ts` — the remaining knowledge guards (the last holds the Knowledge spawn's slice line)
 - `src/cli/commands/knowledge/list.ts`, `src/cli/commands/knowledge/toggle.ts` — the CLI
 
 ## Related
 
 - `.devflow/features/feature-knowledge-system-mds-build/KNOWLEDGE.md` — the compiler pipeline for the command hosts, agent hosts and reference modules, including learning-on/off variants and the prune
 - `.devflow/features/feature-knowledge-system-reference-modules/KNOWLEDGE.md` — the reference-module registry, generation gate and manifests
+- `.devflow/features/learning-capture-system-delivery/KNOWLEDGE.md` — the decisions slice that the write-back spawn passes as `DECISIONS_CONTEXT`
 - `.devflow/features/ambient-orchestrator/KNOWLEDGE.md` — the orchestrator charter, whose Feature knowledge bullet hands a direct delegation the same Rules block by hand
 - `.devflow/features/dynamic-workflow-engine/KNOWLEDGE.md` — the command-host side: what the compiled workflow commands must say
 - `.devflow/features/installer-shadowing/KNOWLEDGE.md` — how the installer and the learning toggle consume `dist/learning-off/`
