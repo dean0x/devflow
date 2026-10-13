@@ -581,7 +581,8 @@ describe('D-PERSONAL-UNTRACKED: a tracked .devflow/config.json is ignored, with 
     const answer = (call: ScriptedCall): string => {
       writeRepoFile('config.json', '{"reviewPublication":"full"}');
       const layers = SETTINGS.readRepoLayers(root, { exec: scriptedExec([call]).exec });
-      return layers.personalTracked ? 'tracked' : (layers.personal as { kind: string }).kind === 'invalid' ? 'unknown' : 'untracked';
+      if (layers.personalTracked) return 'tracked';
+      return (layers.personal as { kind: string }).kind === 'invalid' ? 'unknown' : 'untracked';
     };
 
     it('is a single git call with the fsmonitor override and bounded case-insensitive pathspecs, made only when config.json exists', () => {
