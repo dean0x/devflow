@@ -53,6 +53,7 @@ import {
   ensurePrReadyReference,
   isAgentBlock,
   parseFences,
+  readAgentReference,
   requireDistFile,
   resolveAgentSource,
   ROOT,
@@ -406,6 +407,16 @@ function implementMd(): string {
   return requireDistFile('implement.md')
 }
 
+/** D-CMD-REF-HAND: the ticket-link and missing-test-plan steps /implement reads on demand. */
+function evidenceAsksReference(): string {
+  return readAgentReference('commands/implement-evidence-asks.md')
+}
+
+/** D-CMD-REF-HAND: the re-validation continuation path /implement reads on demand. */
+function revalidateReference(): string {
+  return readAgentReference('commands/implement-revalidate.md')
+}
+
 /** The order Phase 1 keeps, invocation to first Code spawn. Every anchor is unique in the built file. */
 const PHASE1_ORDER: readonly OrderRule[] = [
   { label: 'the policy resolves before setup-task', before: 'resolve-evidence-policy.cjs', after: 'OPERATION: setup-task' },
@@ -453,7 +464,7 @@ describe('AC-9: /implement writes and checks the test plan before any Code spawn
   })
 })
 
-/** The missing-plan ask: from its gate to the blank line after its last option. */
+/** The missing-plan ask: from its gate to the blank line after its last option. Read from the evidence-asks reference. */
 function missingAskBlock(content: string): string | null {
   const start = content.indexOf(MISSING_ASK)
   if (start === -1) return null
@@ -485,11 +496,21 @@ function collectMissingAskDefects(block: string | null): string[] {
 
 describe('AC-9: a missing test plan asks only under `required`, and a stop names its remedy', () => {
   it('the ask states every part of the contract', () => {
-    expect(collectMissingAskDefects(missingAskBlock(implementMd()))).toEqual([])
+    expect(collectMissingAskDefects(missingAskBlock(evidenceAsksReference()))).toEqual([])
+  })
+
+  it('the command keeps the ask\'s gate and sends the run to the reference, once, by explicit path', () => {
+    const md = implementMd()
+    const gates = md.split('\n').filter(l => l.startsWith(MISSING_ASK))
+    expect(gates, 'exactly one gate line in the command').toHaveLength(1)
+    expect(gates[0]).toContain('evidence-asks reference')
+    expect(gates[0]).toContain('before any Code spawn')
+    expect(gates[0], 'the ask itself lives in the reference').not.toContain('AskUserQuestion')
+    expect(md.split('skills/devflow:agent-references/references/commands/implement-evidence-asks.md').length - 1, 'one explicit read path').toBe(1)
   })
 
   it('the remedy quotes the canonical standard project file, and it parses', () => {
-    const block = missingAskBlock(implementMd())!
+    const block = missingAskBlock(evidenceAsksReference())!
     const literal = /`(\{"version":1,[^`]*\})`/.exec(block)?.[1]
     expect(literal, 'the remedy must quote the project file').toBeDefined()
     expect(`${literal}\n`).toBe(SETTINGS.serializeProjectSuggestion({ evidence: 'standard' }))
@@ -504,7 +525,7 @@ describe('AC-9: a missing test plan asks only under `required`, and a stop names
   })
 
   it('known-bad probes: a third option, a lost BLOCKED report and a missing block are reported', () => {
-    const block = missingAskBlock(implementMd())!
+    const block = missingAskBlock(evidenceAsksReference())!
     const third = block.replace('- **Stop** — ', '- **Skip the plan** — carry on.\n- **Stop** — ')
     expect(collectMissingAskDefects(third).some(d => d.startsWith('exactly the two options'))).toBe(true)
     expect(collectMissingAskDefects(block.replace('`BLOCKED (no test plan)`', 'an error'))).toEqual(['the BLOCKED report'])
@@ -764,7 +785,7 @@ describe('AC-11: Phase 11 runs the evidence script once, after Phase 10, for eve
 
   it('the re-validation path, the Report and Principle 12 name the evidence step', () => {
     const lines = implementMd().split('\n')
-    expect(lines.find(l => l.startsWith('5. **Proceed to Phase 9**'))).toContain('**Phase 11** (Evidence)')
+    expect(revalidateReference().split('\n').find(l => l.startsWith('5. **Proceed to Phase 9**'))).toContain('**Phase 11** (Evidence)')
     expect(lines.find(l => l.startsWith('Show the test plan\'s evidence from Phase 11'))).toContain('never inferred')
     expect(lines.find(l => l.startsWith('12. **CI awareness**'))).toContain('test-plan evidence (Phase 11) is recorded under every strategy')
   })
@@ -1066,14 +1087,14 @@ describe('#421: Phase 6 hands Validate the branch diff, not the Code agent\'s li
 const RETIRED_POINTERS = ['Scrutinize agent (Phase 5)', 'Phase 3 or Phase 6 PASS', 'Phase 3\'s **Evidence claims**', 'after every Phase 8 run'] as const
 
 /** Named collector: cross-references that still use the numbers before #421, and the new ones that are absent. */
-function collectPointerDefects(md: string): string[] {
+function collectPointerDefects(md: string, revalidate: string = revalidateReference()): string[] {
   const out = RETIRED_POINTERS.filter(p => md.includes(p)).map(p => `a retired pointer remains: "${p}"`)
   const need = (what: string, ok: boolean): void => { if (!ok) out.push(what) }
   need('Phase 1 does not point Scrutinize at Phase 4', md.includes('Scrutinize agent (Phase 4)'))
   need('the Evidence-claims definition does not name Phase 6 and Phase 8', md.includes('`gate:validate` — after a Phase 6 or Phase 8 PASS.'))
   need('the TP claims are not tied to Phase 7', md.includes('`TP-<n>` — after every Phase 7 run'))
   need('the Test spawn does not point at Phase 6\'s claims', md.includes('append its TP claims (Phase 6\'s **Evidence claims**)'))
-  need('the continuation path names no order', md.includes('**Run Phases 3-8** — Simplify, Self-Review, Alignment, the one full Validate, QA Testing and the conditional Re-Validate'))
+  need('the continuation path names no order', revalidate.includes('**Run Phases 3-8** — Simplify, Self-Review, Alignment, the one full Validate, QA Testing and the conditional Re-Validate'))
   need('the diagram lacks the Phase 6 Validate', md.includes('├─ Phase 6: Validate (the one full-suite slot)'))
   need('the diagram lacks the Phase 8 Re-Validate', md.includes('├─ Phase 8: Re-Validate (only if a qa-fix committed)'))
   need('Principle 1 does not name the Phase 10 push and the ci-wait call', /\*\*Orchestration only\*\*[^\n]*Phase 10[^\n]*push[^\n]*ci-wait call/.test(md))

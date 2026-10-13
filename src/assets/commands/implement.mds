@@ -5,7 +5,7 @@ output-dir: dist/commands
 @import { knowledge_load, knowledge_writeback } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
 @import { docs_root } from "./_partials/_docs_root.mds"
-@import { evidence_policy, evidence_exception } from "./_partials/_evidence_policy.mds"
+@import { evidence_policy } from "./_partials/_evidence_policy.mds"
 @import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
 @import { test_plan_line } from "./_partials/_plan_contract.mds"
 @import { publication_gate } from "./_partials/_publication.mds"
@@ -46,15 +46,7 @@ $ARGUMENTS
 
 ### Re-validation Continuation Path
 
-When the user explicitly asks to re-validate, re-check, or re-run quality gates after making their own changes:
-
-1. **Branch safety check**: If on a protected branch (main, master, develop, etc.), run Phase 1 to create/switch to a work branch. If already on a work branch, skip Phase 1.
-2. **Skip Phase 2** — no Code agent needed, user already made changes.
-3. **Detect FILES_CHANGED**: `git diff --name-only {base_branch}...HEAD`
-4. **Run Phases 3-8** — Simplify, Self-Review, Alignment, the one full Validate, QA Testing and the conditional Re-Validate, on the detected changes.
-5. **Proceed to Phase 9** (Open PR), **Phase 11** (Evidence) and **Phase 12** (Report).
-
-If the user prompt does NOT match re-validation, proceed with the full pipeline below.
+When the user explicitly asks to re-validate, re-check, or re-run quality gates after making their own changes, resolve `${CLAUDE_CONFIG_DIR:-$HOME/.claude}` in Bash, Read `<that directory>/skills/devflow:agent-references/references/commands/implement-revalidate.md` with the Read tool and follow it. Otherwise proceed with the full pipeline below.
 
 ### Phase 1: Setup
 
@@ -135,13 +127,7 @@ visible, a silently discarded request is not.
 
 {{issue_capture_contract()}}
 
-**Ticket link, only when `ISSUE_REQUIRED` is `true`:** when the capture above holds no `ISSUE_PR_LINK` (absent, or `(none)`), ask with AskUserQuestion before any Code spawn — "No tracker issue is linked to this task. Record a self-attested exception, or stop?" — offering exactly these two options:
-- **Record an exception** — the user gives the reason as free text. Render it with the grammar below, as kind `ticket-link`; when the rendered reason is empty, ask for it once more, and stop as below if it is empty again.
-- **Stop** — report `BLOCKED (no ticket link)`, name the branch setup-task created (`TASK_ID`) and `BASE_BRANCH` so it can be reused or removed, and give the remedy: create or link the tracker issue and re-run `/implement` with its reference, or — for a team that does not want ticket links — commit `.devflow/project.json` as `{"version":1,"evidence":"standard"}` on the default branch; a machine with compliance enabled still resolves `required` whatever that file says. Spawn nothing further.
-
-{{evidence_exception()}}
-
-**Record the exception at once**, before any Code spawn: write the rendered section as the `## Evidence Exceptions` section of `{worktree}/.devflow/docs/handoff-{branch_slug}.md`, creating the file if absent, and set `PR_EXCEPTIONS` to that section. The file is its one home until the PR exists: every later write to the file keeps the section byte-identical, the Phase 9 Git spawn passes it verbatim as `PR_EXCEPTIONS`, and the file is deleted only once the PR exists — after Phase 9, under every strategy. With no exception recorded, `PR_EXCEPTIONS` is `(none)`.
+**Ticket link, only when `ISSUE_REQUIRED` is `true`:** when the capture above holds no `ISSUE_PR_LINK` (absent, or `(none)`), resolve `${CLAUDE_CONFIG_DIR:-$HOME/.claude}` in Bash, Read `<that directory>/skills/devflow:agent-references/references/commands/implement-evidence-asks.md` with the Read tool (once per run), then run its ticket link ask and **Record the exception at once** as it directs, before any Code spawn. `PR_EXCEPTIONS` is `(none)` until an exception is recorded.
 
 **Test plan.** Before any Code spawn, give the task a test plan in the evidence file `{worktree}/.devflow/docs/evidence-{branch_slug}.md` (`EVIDENCE_FILE`) — unlike the handoff file, it stays after the PR exists. It holds up to three sections, in this order and nothing else: `## Test Plan`; `## Evidence Exceptions`, a byte copy of `PR_EXCEPTIONS` present only while that is not `(none)`; and `## Claims`, always last, so every claim is appended at the end of the file. Create the file if absent; if it exists, replace its `## Test Plan` and `## Evidence Exceptions` sections and keep `## Claims` byte-identical.
 
@@ -157,9 +143,7 @@ node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp "{worktree}/.devflow/
 
 `exit=0` passes. On any other result, rewrite the section once — the script names the failing line and its code on stderr — and check again. Still failing, or no line to write, means the test plan is **missing**: drop the `## Test Plan` section from the file.
 
-**Missing test plan, only when `EVIDENCE_POLICY` is `required`:** when the check above leaves the test plan missing, ask with AskUserQuestion before any Code spawn — "No test plan could be written for this task. Record a self-attested exception, or stop?" — offering exactly these two options:
-- **Record an exception** — the user gives the reason as free text. Render it with the exception grammar above, as kind `test-plan`; when the rendered reason is empty, ask for it once more, and stop as below if it is empty again. Add the rendered line to the `## Evidence Exceptions` section of `{worktree}/.devflow/docs/handoff-{branch_slug}.md` — after any `ticket-link` line, creating the section and the file when absent — and set `PR_EXCEPTIONS` to that section, under the same rules as the record above.
-- **Stop** — report `BLOCKED (no test plan)`, name `TASK_ID` and `BASE_BRANCH` so the branch can be reused or removed, and give the remedy: state the acceptance criteria in the task, the issue or a `/plan` document (its `## Test Plan` section is copied) and re-run `/implement`, or — for a team that does not want test plans enforced — commit `.devflow/project.json` as `{"version":1,"evidence":"standard"}` on the default branch; a machine with compliance enabled still resolves `required` whatever that file says. Spawn nothing further.
+**Missing test plan, only when `EVIDENCE_POLICY` is `required`:** when the check above leaves the test plan missing, Read the evidence-asks reference as in the ticket link step (when this run has not) and run its missing test plan ask before any Code spawn.
 
 When `EVIDENCE_POLICY` is `standard`, a missing test plan is never asked about: carry `Test plan: missing` to the Phase 12 report.
 

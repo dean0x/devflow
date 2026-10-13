@@ -9,14 +9,15 @@
  *          the handoff file at once, kept byte-identical across later writes, and
  *          forwarded as `PR_EXCEPTIONS` to the Git spawn that opens the PR (Phase 9),
  *          where ensure-pr-ready's anchored gate re-checks it before pasting.
- *   AC-11  The exception grammar (`evidence_exception()`, define 2 of
- *          `_evidence_policy.mds`) compiles to a line regex that agrees with
+ *   AC-11  The exception grammar (the `## Exception grammar` section of the
+ *          hand-authored `commands/implement-evidence-asks.md` reference,
+ *          D-CMD-REF-HAND) compiles to a line regex that agrees with
  *          ensure-pr-ready's paste gate over a table of valid and hostile lines, and every
  *          line the rendering rules can produce passes that gate.
  *
  * #363 (SDLC-evidence PR4) widened the closed kind set from `ticket-link` to
  * `ticket-link` or `test-plan` — /implement's test-plan ask records the second —
- * in the partial, ensure-pr-ready's gate and pr-evidence.cjs's EXCEPTION_LINE_RE at once.
+ * in the reference, ensure-pr-ready's gate and pr-evidence.cjs's EXCEPTION_LINE_RE at once.
  * The grammar table holds both kinds valid and their near-misses invalid; the
  * three-way parity itself is held by tests/evidence/contract-parity.test.ts.
  *
@@ -26,7 +27,7 @@
  *
  * Every guard has a named collector, a non-empty-corpus assertion and a known-bad
  * probe run through the same collector. The grammar is read out of the
- * partial and out of ensure-pr-ready and EXECUTED, never re-typed here: a hand-copied
+ * reference and out of ensure-pr-ready and EXECUTED, never re-typed here: a hand-copied
  * pattern is a second authority that agrees with the first only until one of them
  * is edited.
  *
@@ -49,13 +50,16 @@ import {
   isAgentBlock,
   parseFences,
   requireDistFile,
+  commandReferenceSections,
   ensurePrReadyReference,
+  readAgentReference,
   walkFiles,
   type OrderRule,
 } from '../helpers.js'
 import { PROJECT_CONFIG_LIB, SETTINGS_SCRIPT } from './scripted-shim.js'
 
-const PARTIAL_PATH = path.join(ROOT, 'src', 'assets', 'commands', '_partials', '_evidence_policy.mds')
+/** D-CMD-REF-HAND: the steps /implement reads on demand (the ticket ask, the grammar, the record, the missing-plan ask). */
+const ASKS_REFERENCE = 'commands/implement-evidence-asks.md'
 const DEFINE = 'evidence_exception'
 
 /** Transcribed from the settings resolver's JSDoc: the project.json serializer the CLI prints from. */
@@ -85,13 +89,21 @@ function implementMd(): string {
   return requireDistFile('implement.md')
 }
 
-/** A define's body as written — under MDS 0.4 a body with no `{{…}}` compiles to itself. */
-function defineBody(name: string): string {
-  const lines = readFileSync(PARTIAL_PATH, 'utf-8').split('\n')
-  const start = lines.indexOf(`@define ${name}():`)
-  const end = lines.indexOf('@end', start + 1)
-  if (start === -1 || end === -1) throw new Error(`${PARTIAL_PATH}: no \`@define ${name}():\` … \`@end\` block`)
-  return lines.slice(start + 1, end).join('\n')
+/** The evidence-asks reference, whole. */
+function evidenceAsks(): string {
+  return readAgentReference(ASKS_REFERENCE)
+}
+
+/** The body of one `## <heading>` section of the reference. Throws when absent. */
+function referenceSection(heading: string, text: string = evidenceAsks()): string {
+  const found = commandReferenceSections(text).find(sec => sec.heading === heading)
+  if (found === undefined) throw new Error(`${ASKS_REFERENCE}: no \`## ${heading}\` section`)
+  return found.body
+}
+
+/** The exception grammar: the body the retired `evidence_exception()` define held. */
+function exceptionGrammar(): string {
+  return referenceSection('Exception grammar')
 }
 
 // ---------------------------------------------------------------------------
@@ -195,11 +207,11 @@ function collectAskDefects(block: string | null): string[] {
 
 describe('AC-10: the ask offers an exception or a stop, and a stop names its remedy', () => {
   it('the ask block states every part of the contract', () => {
-    expect(collectAskDefects(askBlock(implementMd()))).toEqual([])
+    expect(collectAskDefects(askBlock(evidenceAsks()))).toEqual([])
   })
 
   it('the project-file remedy is the canonical standard evidence, and it parses', () => {
-    const block = askBlock(implementMd())!
+    const block = askBlock(evidenceAsks())!
     const literal = /`(\{"version":1,[^`]*\})`/.exec(block)?.[1]
     expect(literal, 'the remedy must quote the project file').toBeDefined()
     expect(`${literal}\n`).toBe(SETTINGS.serializeProjectSuggestion({ evidence: 'standard' }))
@@ -207,7 +219,7 @@ describe('AC-10: the ask offers an exception or a stop, and a stop names its rem
   })
 
   it('known-bad probes: a third option, a missing stop report and a missing block are reported', () => {
-    const block = askBlock(implementMd())!
+    const block = askBlock(evidenceAsks())!
     const third = block.replace('- **Stop** — ', '- **Type a ticket** — give the reference.\n- **Stop** — ')
     expect(collectAskDefects(third).some(d => d.startsWith('exactly the two options'))).toBe(true)
     expect(collectAskDefects(block.replace('`BLOCKED (no ticket link)`', 'an error'))).toEqual(['the BLOCKED report'])
@@ -220,14 +232,19 @@ describe('AC-10: the ask offers an exception or a stop, and a stop names its rem
 // ---------------------------------------------------------------------------
 
 /**
- * Named collector: the persistence clauses implement.md is missing. The section
- * must be written at once, survive every later write byte-identically, and the
- * file may only be deleted once the PR exists — a cleanup before the PR-creating
- * spawn would drop the exception on the floor.
+ * Named collector: the persistence clauses implement.md and its evidence-asks
+ * reference are missing. The section must be written at once, survive every
+ * later write byte-identically, and the file may only be deleted once the PR
+ * exists — a cleanup before the PR-creating spawn would drop the exception on the
+ * floor. The record paragraph is the reference's; the Handoff Protocol is the
+ * command's.
+ *
+ * @param content - the built implement.md
+ * @param asks - the evidence-asks reference
  */
-function collectHandoffPersistenceGaps(content: string): string[] {
+function collectHandoffPersistenceGaps(content: string, asks: string): string[] {
   const out: string[] = []
-  const record = askBlock(content) ?? ''
+  const record = askBlock(asks) ?? ''
   const protocol = content.split('\n').find(l => l.startsWith('**Handoff Protocol**')) ?? ''
   const handoff = '`{worktree}/.devflow/docs/handoff-{branch_slug}.md`'
   if (!record.includes(`section of ${handoff}`)) out.push('record: the section is not written to the handoff file')
@@ -251,13 +268,13 @@ const HANDOFF_PROTOCOL_825077E =
 
 describe('AC-10: the exception survives in the handoff file until the PR exists', () => {
   it('the record paragraph and the Handoff Protocol state every persistence clause', () => {
-    expect(collectHandoffPersistenceGaps(implementMd())).toEqual([])
+    expect(collectHandoffPersistenceGaps(implementMd(), evidenceAsks())).toEqual([])
   })
 
   it('known-bad probe: the 825077e Handoff Protocol is reported', () => {
     const md = implementMd()
     const current = md.split('\n').find(l => l.startsWith('**Handoff Protocol**'))!
-    expect(collectHandoffPersistenceGaps(md.replace(current, HANDOFF_PROTOCOL_825077E))).toEqual([
+    expect(collectHandoffPersistenceGaps(md.replace(current, HANDOFF_PROTOCOL_825077E), evidenceAsks())).toEqual([
       'Handoff Protocol: a phase-summary write may drop the section',
       'Handoff Protocol: cleanup is not tied to the PR existing',
     ])
@@ -312,10 +329,10 @@ describe('AC-10: PR_EXCEPTIONS reaches the Git spawn that opens the PR', () => {
 })
 
 // ---------------------------------------------------------------------------
-// AC-11 — the exception grammar, read from the partial and from ensure-pr-ready, executed
+// AC-11 — the exception grammar, read from the reference and from ensure-pr-ready, executed
 // ---------------------------------------------------------------------------
 
-/** What define 2 states about each placeholder, parsed out of its bullets. */
+/** What the exception grammar states about each placeholder, parsed out of its bullets. */
 interface ExceptionSpec {
   readonly template: string
   readonly kinds: readonly string[]
@@ -332,23 +349,23 @@ function codeSpans(text: string): string[] {
 }
 
 /**
- * The bullet of define 2 that describes one placeholder. Read only BELOW the
+ * The bullet of the exception grammar that describes one placeholder. Read only BELOW the
  * template fence: the template line itself also opens with "- `<kind>`".
  */
 function bullet(body: string, head: string): string {
   const fenceEnd = body.indexOf('```', body.indexOf('```markdown') + 3)
   const rules = fenceEnd === -1 ? '' : body.slice(fenceEnd + 3)
   const line = rules.split('\n').find(l => l.startsWith(`- \`${head}\``))
-  if (line === undefined) throw new Error(`define ${DEFINE}: no bullet for ${head}`)
+  if (line === undefined) throw new Error(`exception grammar: no bullet for ${head}`)
   return line
 }
 
-/** Parse define 2 into its template and placeholder rules. Throws on a shape it cannot read. */
+/** Parse the exception grammar into its template and placeholder rules. Throws on a shape it cannot read. */
 function parseExceptionSpec(body: string): ExceptionSpec {
   const fence = /```markdown\n([\s\S]*?)```/.exec(body)
-  if (fence === null) throw new Error(`define ${DEFINE}: no \`\`\`markdown template fence`)
+  if (fence === null) throw new Error(`exception grammar: no \`\`\`markdown template fence`)
   const [heading, template] = fence[1].split('\n')
-  if (heading !== '## Evidence Exceptions') throw new Error(`define ${DEFINE}: template heading is "${heading}"`)
+  if (heading !== '## Evidence Exceptions') throw new Error(`exception grammar: template heading is "${heading}"`)
 
   const kind = bullet(body, '<kind>')
   const kinds = codeSpans(kind.slice(kind.indexOf(' is one of '), kind.indexOf(' — ')))
@@ -356,16 +373,16 @@ function parseExceptionSpec(body: string): ExceptionSpec {
   const login = bullet(body, '@<login>')
   const pattern = codeSpans(login).find(c => c.startsWith('^') && c.endsWith('$'))
   const fallback = /it is `([^`]+)` instead/.exec(login)?.[1]
-  if (pattern === undefined || fallback === undefined) throw new Error(`define ${DEFINE}: unreadable login rule`)
+  if (pattern === undefined || fallback === undefined) throw new Error(`exception grammar: unreadable login rule`)
 
   const utc = codeSpans(bullet(body, '<utc>')).find(c => c.startsWith('date -u +'))
-  if (utc === undefined) throw new Error(`define ${DEFINE}: unreadable utc rule`)
+  if (utc === undefined) throw new Error(`exception grammar: unreadable utc rule`)
 
   const reason = bullet(body, '<reason>')
   const removedAt = reason.indexOf('remove every ')
   const removed = codeSpans(reason.slice(removedAt, reason.indexOf(', collapse', removedAt)))
   const max = /keep the first (\d+) characters/.exec(reason)?.[1]
-  if (removedAt === -1 || removed.length === 0 || max === undefined) throw new Error(`define ${DEFINE}: unreadable reason rule`)
+  if (removedAt === -1 || removed.length === 0 || max === undefined) throw new Error(`exception grammar: unreadable reason rule`)
 
   return {
     template,
@@ -394,7 +411,7 @@ function strftimeRe(format: string): string {
     conv !== undefined ? `[0-9]{${widths[conv]}}` : escapeRe(lit!))
 }
 
-/** Compile define 2's template into a whole-line RegExp. */
+/** Compile the grammar's template into a whole-line RegExp. */
 function compileExceptionTemplate(spec: ExceptionSpec): RegExp {
   const cls = `[${reasonChars(spec).map(escapeRe).join('')}]`
   const withSpace = `[ ${reasonChars(spec).map(escapeRe).join('')}]`
@@ -465,10 +482,10 @@ function collectGrammarMisses(gate: RegExp, rows = GRAMMAR_TABLE): string[] {
 }
 
 /** Define 2, parsed on use — a parse failure fails the arm that needed it, not the whole file. */
-const exceptionSpec = (): ExceptionSpec => parseExceptionSpec(defineBody(DEFINE))
+const exceptionSpec = (): ExceptionSpec => parseExceptionSpec(exceptionGrammar())
 
-describe('AC-11: the exception grammar — define 2 and ensure-pr-ready\'s gate agree, and both refuse the hostile rows', () => {
-  it('define 2 parses into the documented rules', () => {
+describe('AC-11: the exception grammar — the reference and ensure-pr-ready\'s gate agree, and both refuse the hostile rows', () => {
+  it('the grammar parses into the documented rules', () => {
     const spec = exceptionSpec()
     expect(spec.kinds, 'the kind set is closed: ticket-link (#362) and test-plan (#363)').toEqual(['ticket-link', 'test-plan'])
     expect(spec.login).toBe('[A-Za-z0-9][A-Za-z0-9-]{0,38}')
@@ -478,7 +495,7 @@ describe('AC-11: the exception grammar — define 2 and ensure-pr-ready\'s gate 
     for (const c of ['<', '>', '`', '[', ']', '\\', '/', '#', '@', '&', '$']) expect(spec.removed, `removes ${c}`).toContain(c)
   })
 
-  it('the template compiled from define 2 decides every table row as the table says', () => {
+  it('the template compiled from the grammar decides every table row as the table says', () => {
     expect(GRAMMAR_TABLE.filter(r => r.valid).length).toBeGreaterThanOrEqual(3)
     expect(GRAMMAR_TABLE.filter(r => !r.valid).length).toBeGreaterThanOrEqual(15)
     expect(collectGrammarMisses(compileExceptionTemplate(exceptionSpec()))).toEqual([])
@@ -505,14 +522,14 @@ describe('AC-11: the exception grammar — define 2 and ensure-pr-ready\'s gate 
   })
 })
 
-/** Render a raw reason by define 2's rules. */
+/** Render a raw reason by the grammar's rules. */
 function renderReason(raw: string, spec: ExceptionSpec): string {
   const printable = [...raw].map(c => (c >= ' ' && c <= '~' ? c : ' ')).join('')
   const stripped = [...printable].filter(c => !spec.removed.includes(c)).join('')
   return stripped.replace(/ {2,}/g, ' ').trim().slice(0, spec.reasonMax).trim()
 }
 
-/** Render the requester by define 2's rules. */
+/** Render the requester by the grammar's rules. */
 function renderLogin(output: string, spec: ExceptionSpec): string {
   return new RegExp(`^${spec.login}$`).test(output) ? `@${output}` : spec.loginFallback
 }
@@ -635,32 +652,36 @@ describe('ensure-pr-ready: the PR_EXCEPTIONS paste gate', () => {
 })
 
 // ---------------------------------------------------------------------------
-// define 2 is /implement's alone in #362
+// the grammar is a hand-authored reference, not a define (D-CMD-REF-HAND)
 // ---------------------------------------------------------------------------
 
-/** Named collector: the src .mds files that import or call `evidence_exception`. */
+/** Named collector: the src .mds files that import or call `evidence_exception`, or declare it. */
 function collectExceptionUsers(sources: ReadonlyArray<{ name: string; content: string }>): string[] {
   return sources
-    .filter(s => s.name !== '_evidence_policy')
-    .filter(s => /^@import\b[^\n]*\bevidence_exception\b/m.test(s.content) || s.content.includes(`{{${DEFINE}()}}`))
+    .filter(s => /^@import\b[^\n]*\bevidence_exception\b/m.test(s.content)
+      || s.content.includes(`{{${DEFINE}()}}`)
+      || s.content.includes(`@define ${DEFINE}(`))
     .map(s => s.name)
     .sort()
 }
 
-describe('the exception grammar has one caller in #362: /implement', () => {
-  it('only implement.mds imports and calls evidence_exception()', () => {
+describe('the exception grammar is a reference /implement reads on demand, not a define', () => {
+  it('no .mds file declares, imports or calls evidence_exception(), and implement.mds reads the reference by path', () => {
     const sources = walkFiles(path.join(ROOT, 'src'), f => f.endsWith('.mds')).map(f => ({
       name: path.basename(f, '.mds'),
       content: readFileSync(f, 'utf-8'),
     }))
     expect(sources.length, 'the src/ .mds walk found nothing').toBeGreaterThanOrEqual(20)
-    expect(collectExceptionUsers(sources)).toEqual(['implement'])
+    expect(collectExceptionUsers(sources)).toEqual([])
+    const implement = sources.find(s => s.name === 'implement')!
+    expect(implement.content).toContain('skills/devflow:agent-references/references/commands/implement-evidence-asks.md')
   })
 
-  it('known-bad probe: a second caller is reported', () => {
+  it('known-bad probes: a caller, an importer and a re-declared define are each reported', () => {
     expect(collectExceptionUsers([
       { name: 'implement', content: `{{${DEFINE}()}}` },
       { name: 'code-review', content: `@import { ${DEFINE} } from "./_partials/_evidence_policy.mds"` },
-    ])).toEqual(['code-review', 'implement'])
+      { name: '_evidence_policy', content: `@define ${DEFINE}():` },
+    ])).toEqual(['_evidence_policy', 'code-review', 'implement'])
   })
 })

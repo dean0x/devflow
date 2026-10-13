@@ -105,8 +105,10 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     agents: ['learning', 'tracker'],
     /**
      * D-AGENT-REFS: `agent-references` is a reference-only skill. It holds the Synthesize mode
-     * templates and the Learning maintain step, which those two agents read by explicit path, so
-     * it sits here (core-skills is always installed) and no other plugin lists or requires it.
+     * templates and the Learning maintain step, which those two agents read by explicit path, and
+     * the command branches that D-CMD-REF-HAND moves out of a command (`references/commands/`),
+     * which a command reads by explicit path, so it sits here (core-skills is always installed)
+     * and no other plugin lists or requires it.
      * It is never preloaded: tests/guards/agent-references.test.ts holds that, and the one
      * exception to the repo-wide ban on `disable-model-invocation` names this skill alone.
      */

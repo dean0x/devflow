@@ -394,6 +394,30 @@ export function readAgentReference(rel: string, root: string = ROOT): string {
   return readFileSync(agentReferencePath(rel, root), 'utf-8')
 }
 
+/** One `## <heading>` section of a hand-authored command reference, its body without the leading and trailing blank lines. */
+export interface CommandReferenceSection {
+  readonly heading: string
+  readonly body: string
+}
+
+/**
+ * D-CMD-REF-HAND: split a command reference (`references/commands/*.md` of the agent-references skill) into its
+ * `## <heading>` sections. A `## ` line inside a code fence is text, not a heading: the exception grammar's
+ * template fence holds `## Evidence Exceptions`, and a plain split on `\n## ` would cut the section there and
+ * read everything below it as empty (the relocation hazard of a moved block whose destination reads headings).
+ */
+export function commandReferenceSections(text: string): CommandReferenceSection[] {
+  const out: Array<{ heading: string; lines: string[] }> = []
+  let inFence = false
+  for (const line of text.split('\n')) {
+    if (/^```/.test(line)) inFence = !inFence
+    const heading = !inFence && line.startsWith('## ') ? line.slice(3) : null
+    if (heading !== null) out.push({ heading, lines: [] })
+    else if (out.length > 0) out[out.length - 1].lines.push(line)
+  }
+  return out.map(({ heading, lines }) => ({ heading, body: lines.join('\n').replace(/^\n+/, '').replace(/\n+$/, '') }))
+}
+
 /**
  * D-CODE-VARIANTS: the seven operating modes of the Code family (`OPERATION`), by the agent type that
  * runs each. Code takes `implement` (the default when absent) and `issue-fix`; Code-fix takes the four

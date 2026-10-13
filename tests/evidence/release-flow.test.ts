@@ -12,7 +12,7 @@
  *         (a gate that reaches its permissive verdict by exhaustion fails
  *         open). A `--dry-run` never asks and leaves no checkpoint to resume;
  *         a real release shows the untraced and exempt commits before it asks.
- *   AC-8  `## Traceability exceptions` renders with `evidence_exception()`'s
+ *   AC-8  `## Traceability exceptions` renders with the evidence-asks reference's
  *         login, time and reason rules copied BYTE-IDENTICALLY (release imports
  *         only `evidence_policy()`, so these rules are kept by hand); it is
  *         persisted in the checkpoint; create-release
@@ -26,10 +26,8 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'fs'
-import * as path from 'path'
 
-import { ROOT, gitOperationReferenceCorpus, requireDistFile } from '../helpers.js'
+import { commandReferenceSections, gitOperationReferenceCorpus, readAgentReference, requireDistFile } from '../helpers.js'
 
 const release = (): string => requireDistFile('release.md')
 /** The Git operations' text: each operation's one reference (GitHub), joined (D-OP-ONE-REF). */
@@ -311,15 +309,14 @@ describe('AC-7: a real release shows the untraced and exempt commits before it a
 // AC-8 — the exceptions block, its rendering rules and its sink
 // ---------------------------------------------------------------------------
 
-const PARTIAL_SOURCE = path.join(ROOT, 'src', 'assets', 'commands', '_partials', '_evidence_policy.mds')
+/** D-CMD-REF-HAND: the hand-authored reference /implement reads; its `## Exception grammar` section is the rendering authority. */
+const GRAMMAR_REFERENCE = 'commands/implement-evidence-asks.md'
 
-/** The three rendering bullets of `evidence_exception()`, as written (they compile to themselves under MDS 0.4). */
+/** The three rendering bullets of the evidence-asks reference's exception grammar, as written. */
 function renderingBullets(): string[] {
-  const lines = readFileSync(PARTIAL_SOURCE, 'utf-8').split('\n')
-  const start = lines.indexOf('@define evidence_exception():')
-  const end = lines.indexOf('@end', start + 1)
-  if (start === -1 || end === -1) throw new Error('_evidence_policy.mds: no evidence_exception() define')
-  return lines.slice(start + 1, end)
+  const grammar = commandReferenceSections(readAgentReference(GRAMMAR_REFERENCE)).find(sec => sec.heading === 'Exception grammar')
+  if (grammar === undefined) throw new Error(`${GRAMMAR_REFERENCE}: no \`## Exception grammar\` section`)
+  return grammar.body.split('\n')
     .filter(l => l.startsWith('- `@<login>`') || l.startsWith('- `<utc>`') || l.startsWith('- `<reason>`'))
 }
 
@@ -375,11 +372,15 @@ export function collectLazyExemptLine(text: string): string[] {
 }
 
 describe('AC-8: `## Traceability exceptions` — rendering, persistence and sink', () => {
-  it('the three rendering bullets are copied byte-identically (the adopter proves the as-written model)', () => {
+  it('the three rendering bullets are copied byte-identically from the reference into release.md', () => {
     const bullets = renderingBullets()
     expect(bullets, 'the login, time and reason bullets').toHaveLength(3)
-    expect(collectRenderingDrift(requireDistFile('implement.md'), bullets), 'the compiled adopter').toEqual([])
+    expect(collectRenderingDrift(readAgentReference(GRAMMAR_REFERENCE), bullets), 'the reference holds each once').toEqual([])
     expect(collectRenderingDrift(release(), bullets), 'release.md, hand-kept').toEqual([])
+    expect(
+      collectRenderingDrift(requireDistFile('implement.md'), bullets).length,
+      'the compiled /implement holds none: the grammar is read on demand, not inlined',
+    ).toBe(bullets.length)
   })
 
   it('the block has two closed kinds, four coverage causes, the exempt line and no subject', () => {
