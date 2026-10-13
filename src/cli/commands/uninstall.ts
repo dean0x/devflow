@@ -587,7 +587,7 @@ export function userContentPaths(devflowDir: string): ReadonlyArray<UserContentE
       const name = `${TRACKER_LEGACY_CONVENTIONS_FILE}.${id}.bak`;
       return { relPath: name, label: `${name} (previous issue tracker conventions)` };
     }),
-    // learning.json — global learning agent tuning config
+    // learning.json — global curate agent tuning config
     { relPath: 'learning.json', label: 'learning.json' },
     // hud.json — user HUD enable/disable preference and display config
     { relPath: 'hud.json', label: 'hud.json (HUD configuration)' },

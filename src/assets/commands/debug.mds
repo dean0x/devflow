@@ -202,7 +202,7 @@ Produce the final report:
 
 Ask user via AskUserQuestion: "Want me to implement this fix?"
 
-- **YES** → implement the fix through the Code agent, never in this thread, then spawn `Agent(subagent_type="Simplify")` on the changed files. /debug loads no feature knowledge, so the fix gets none:
+- **YES** → implement the fix through the Code agent, never in this thread, then spawn `Agent(subagent_type="Polish")` on the changed files. /debug loads no feature knowledge, so the fix gets none:
 
   ```
   Agent(subagent_type="Code"):
@@ -249,7 +249,7 @@ Ask user via AskUserQuestion: "Want me to implement this fix?"
 ├─ Phase 6: Root cause report with confidence level
 │
 ├─ Phase 7: Offer Fix
-│  └─ AskUserQuestion → Code agent (fix) + Simplify agent, or done
+│  └─ AskUserQuestion → Code agent (fix) + Polish agent, or done
 │
 └─ Feature Knowledge Write-Back (Conditional)
    └─ Knowledge agent (if investigation surfaced durable cross-cutting knowledge)

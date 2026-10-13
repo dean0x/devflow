@@ -37,7 +37,7 @@ const BLOCK_HEADING = '## Running commands'
 const BLOCK_MAX_BYTES = 1400
 
 /** The five bodies that carry the block: the three Code variants share it from one partial (D-CODE-VARIANTS). */
-const CARRIERS = ['code', 'code-fix', 'code-edit', 'validate', 'test'] as const
+const CARRIERS = ['code', 'fix', 'refactor', 'validate', 'test'] as const
 
 /**
  * The normative elements, one marker each. A marker is a literal the block must
@@ -188,7 +188,7 @@ const dynamicBuildSource = (): string =>
   readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'dynamic-build.mds'), 'utf-8')
 
 describe('D-FOREGROUND-RUN: the Running commands block', () => {
-  it('Code, Code-fix, Code-edit, Validate and Test each carry exactly one block, byte-identical, within the byte target', () => {
+  it('Code, Fix, Refactor, Validate and Test each carry exactly one block, byte-identical, within the byte target', () => {
     expect(collectParityDefects(carriers())).toEqual([])
   })
 

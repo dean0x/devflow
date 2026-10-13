@@ -3,12 +3,12 @@
 
 ORDER IS LOAD-BEARING. Run exactly in this sequence:
 
-1. **Simplify agent** — reduce complexity, remove duplication
-2. **Scrutinize agent** — 9-pillar self-review (deep structural analysis); returns `{"status": "PASS" | "FIXED" | "BLOCKED"}`
-   - BLOCKED (a P0 issue cannot be fixed in scope), or a missing or unrecognised status, which counts as BLOCKED → stop the pass and escalate as `scrutiny-blocked`; Validate does not run on code Scrutinize could not accept
-3. **Validate agent** — build / typecheck / lint / test; returns `{"verdict": "PASS" | "FAIL", "details": "..."}`. It runs LAST and UNCONDITIONALLY: one full run over the HEAD that Simplify and Scrutinize left, so it covers their commits whether or not Scrutinize changed code
+1. **Polish agent** — reduce complexity, remove duplication
+2. **Harden agent** — 9-pillar self-review (deep structural analysis); returns `{"status": "PASS" | "FIXED" | "BLOCKED"}`
+   - BLOCKED (a P0 issue cannot be fixed in scope), or a missing or unrecognised status, which counts as BLOCKED → stop the pass and escalate as `scrutiny-blocked`; Validate does not run on code Harden could not accept
+3. **Validate agent** — build / typecheck / lint / test; returns `{"verdict": "PASS" | "FAIL", "details": "..."}`. It runs LAST and UNCONDITIONALLY: one full run over the HEAD that Polish and Harden left, so it covers their commits whether or not Harden changed code
    - Build/test commands follow `build_execution_doctrine()`: the Validate agent's Running commands block, foreground under an explicit Bash timeout.
-   - FAIL → Code-fix agent fix (max 2 retries), each followed by a Validate agent re-run
+   - FAIL → Fix agent fix (max 2 retries), each followed by a Validate agent re-run
    - If still FAIL after 2 retries → escalate as `validation-exhausted` (do not loop endlessly)
 
 **Gate 1 contains NO Evaluate agent and NO Test agent.** Those are Gate 2 only.
@@ -16,8 +16,8 @@ ORDER IS LOAD-BEARING. Run exactly in this sequence:
 Depth scales to change size + budget: a trivial one-line fix warrants a lighter pass; a multi-file refactor warrants the full depth.
 
 **Cadence — Gate 1 runs at exactly TWO points per ticket:**
-1. **Gate 1 #1** — immediately after the initial Code agent implementation (inside `implement_bundle()`). An escalated result — Validate exhausted, or Scrutinize BLOCKED — returns early: the ticket's engine returns `ESCALATED` with one escalation, and Gate 2 and the review pass never run on a broken or unfinished build.
-2. **Gate 1 #2** — the FINAL gate, after ALL Gate-2 fixes AND the entire review pass have completed. Scrutinize BLOCKED here is `ESCALATED` as well.
+1. **Gate 1 #1** — immediately after the initial Code agent implementation (inside `implement_bundle()`). An escalated result — Validate exhausted, or Harden BLOCKED — returns early: the ticket's engine returns `ESCALATED` with one escalation, and Gate 2 and the review pass never run on a broken or unfinished build.
+2. **Gate 1 #2** — the FINAL gate, after ALL Gate-2 fixes AND the entire review pass have completed. Harden BLOCKED here is `ESCALATED` as well.
 
 It does NOT run inside the review pass, nor after each individual Gate-2 / review / QA fix. At those points the fixing Code agent self-verifies its OWN build compiles (see `review_pass()` and the Code agent's Running commands block). The final Gate 1 #2 is the invariant that all written code passes before merge.
 @end
@@ -31,11 +31,11 @@ Gate 2 inputs are produced by `/devflow:dynamic-plan`'s plan-challenge step — 
 
 **Evaluate agent** (only if a plan exists):
 - Run `evaluator_panel()` — see that block for the one spawn and the two lenses it names
-- If the Evaluate agent returns FAIL (either lens failed): fix-and-continue — the demanded fixes are applied by a Code-fix agent that self-verifies its own build (batched per the review-pass batching doctrine if numerous). The recorded verdict becomes `FAIL-FIXED` (issues found, fixes applied, not re-evaluated by design); Gate 2 then proceeds. In SINGLE mode the run reports it as `UNVERIFIED`, never PASS.
+- If the Evaluate agent returns FAIL (either lens failed): fix-and-continue — the demanded fixes are applied by a Fix agent that self-verifies its own build (batched per the review-pass batching doctrine if numerous). The recorded verdict becomes `FAIL-FIXED` (issues found, fixes applied, not re-evaluated by design); Gate 2 then proceeds. In SINGLE mode the run reports it as `UNVERIFIED`, never PASS.
 
 **Test agent** (only if acceptance criteria or a test plan exist):
 - Scenario-based acceptance tests covering functionality, API contracts, performance
-- FAIL → fix-and-continue — a Code-fix agent applies the demanded fixes and self-verifies its own build. The recorded verdict becomes `FAIL-FIXED`; Gate 2 then proceeds. In SINGLE mode the run reports it as `UNVERIFIED`, never PASS.
+- FAIL → fix-and-continue — a Fix agent applies the demanded fixes and self-verifies its own build. The recorded verdict becomes `FAIL-FIXED`; Gate 2 then proceeds. In SINGLE mode the run reports it as `UNVERIFIED`, never PASS.
 
 **When Gate 2 inputs are absent:**
 - No plan → skip the Evaluate agent silently (note in output: "Gate 2 Evaluate agent skipped — no plan available")
@@ -70,9 +70,9 @@ Code(agentType:"Code", prompt: "OPERATION: implement" first line, then full task
 ```
 
 <!-- learning:on -->
-Every Code-family agent prompt opens with `OPERATION: <mode>` as its first line: `implement` and `issue-fix` go to `agentType:"Code"`, `validation-fix`, `alignment-fix` and `qa-fix` go to `agentType:"Code-fix"`. It must include: task description, implementation plan (if one exists), relevant DECISIONS_CONTEXT (the index you loaded before authoring), the compliance directive (`COMPLIANCE_DIRECTIVE` — every Code prompt carries it when it is not empty, fix prompts included), and any PRIOR_PHASE_SUMMARY / HANDOFF_FILE for sequential multi-phase tickets.
+Every Code-family agent prompt opens with `OPERATION: <mode>` as its first line: `implement` and `issue-fix` go to `agentType:"Code"`, `validation-fix`, `alignment-fix` and `qa-fix` go to `agentType:"Fix"`. It must include: task description, implementation plan (if one exists), relevant DECISIONS_CONTEXT (the index you loaded before authoring), the compliance directive (`COMPLIANCE_DIRECTIVE` — every Code prompt carries it when it is not empty, fix prompts included), and any PRIOR_PHASE_SUMMARY / HANDOFF_FILE for sequential multi-phase tickets.
 <!-- learning:off -->
-Every Code-family agent prompt opens with `OPERATION: <mode>` as its first line: `implement` and `issue-fix` go to `agentType:"Code"`, `validation-fix`, `alignment-fix` and `qa-fix` go to `agentType:"Code-fix"`. It must include: task description, implementation plan (if one exists), the compliance directive (`COMPLIANCE_DIRECTIVE` — every Code prompt carries it when it is not empty, fix prompts included), and any PRIOR_PHASE_SUMMARY / HANDOFF_FILE for sequential multi-phase tickets.
+Every Code-family agent prompt opens with `OPERATION: <mode>` as its first line: `implement` and `issue-fix` go to `agentType:"Code"`, `validation-fix`, `alignment-fix` and `qa-fix` go to `agentType:"Fix"`. It must include: task description, implementation plan (if one exists), the compliance directive (`COMPLIANCE_DIRECTIVE` — every Code prompt carries it when it is not empty, fix prompts included), and any PRIOR_PHASE_SUMMARY / HANDOFF_FILE for sequential multi-phase tickets.
 <!-- learning:end -->
 
 Gate 2 runs at implementation acceptance — this matches devflow's deliberate placement: "evaluation is part of implementation acceptance, not post-review" (§6.1).
@@ -120,7 +120,7 @@ Majority-survives: a finding needs >50% of verification lenses to confirm it. St
 
 If no surviving findings: return early (no fixes needed). Any coverageGaps are carried in the return — they block a PASS verdict downstream, not the early exit.
 
-If survivors remain: batch the confirmed findings for fixing: group findings by file — one file per set of sub-batches, chunked at max 5 findings per sub-batch; never mix two files in one batch. A finding with no `file` field is its own singleton batch. Sub-batches for the SAME file run sequentially (never two Code agents editing the same file concurrently — same-file edits in `parallel()` cause index contention and lost fixes); sub-batches for DISTINCT files run via `parallel()` in staggered chunks of ~5, same pacing bar as the Review spawn path (different code areas — safe per concurrency doctrine). Each Code agent's prompt pins a return contract: `{"status": "fixed"|"blocked", "commitShas": [...], "unresolved": [...]}` — a chunk is FIXED only when `result.status === "fixed"` AND `commitShas` is non-empty AND `result.unresolved` is empty; never decide disposition from status alone. A non-empty `unresolved` list means the agent named work it could not complete — carry the whole chunk into `survivingFindings` rather than guessing which findings the strings map to. `survivingFindings` = findings NOT addressed: fix Code agent dead/failed/blocked/deferred OR committed but left work named in `unresolved`. The fixing Code agent **self-verifies its own fix builds** (build/typecheck per the Code agent's Running commands block, once over its whole batch). Do **NOT** run Gate 1 or Gate 2 inside the pass (no Validate agent, no Simplify agent, no Scrutinize agent, no Evaluate agent, no Test agent). The engine runs ONE final Gate 1 after the pass exits — see the `gate1_postcode()` cadence (Gate 1 #2).
+If survivors remain: batch the confirmed findings for fixing: group findings by file — one file per set of sub-batches, chunked at max 5 findings per sub-batch; never mix two files in one batch. A finding with no `file` field is its own singleton batch. Sub-batches for the SAME file run sequentially (never two Code agents editing the same file concurrently — same-file edits in `parallel()` cause index contention and lost fixes); sub-batches for DISTINCT files run via `parallel()` in staggered chunks of ~5, same pacing bar as the Review spawn path (different code areas — safe per concurrency doctrine). Each Code agent's prompt pins a return contract: `{"status": "fixed"|"blocked", "commitShas": [...], "unresolved": [...]}` — a chunk is FIXED only when `result.status === "fixed"` AND `commitShas` is non-empty AND `result.unresolved` is empty; never decide disposition from status alone. A non-empty `unresolved` list means the agent named work it could not complete — carry the whole chunk into `survivingFindings` rather than guessing which findings the strings map to. `survivingFindings` = findings NOT addressed: fix Code agent dead/failed/blocked/deferred OR committed but left work named in `unresolved`. The fixing Code agent **self-verifies its own fix builds** (build/typecheck per the Code agent's Running commands block, once over its whole batch). Do **NOT** run Gate 1 or Gate 2 inside the pass (no Validate agent, no Polish agent, no Harden agent, no Evaluate agent, no Test agent). The engine runs ONE final Gate 1 after the pass exits — see the `gate1_postcode()` cadence (Gate 1 #2).
 @end
 
 @define concurrency_doctrine():
@@ -215,9 +215,9 @@ Each ticket engine run returns a structured result. The Synthesize agent or the 
 @define engine_invariants():
 ### Engine invariants (non-negotiable)
 
-1. **Code is written ONLY by the Code family (Code, Code-fix).** No other agent type writes code — not Review agent, not Evaluate agent.
+1. **Code is written ONLY by the Code family (Code, Fix).** No other agent type writes code — not Review agent, not Evaluate agent.
 2. **Findings are verified before any fix is written.** The adversarial verification step is not optional; unverified findings are not passed to the Code agent.
-3. **All written code passes Gate 1.** No code merge, commit, or handoff before Simplify agent + Scrutinize agent + Validate agent (in that order — Validate last, so its one run covers the commits of the two before it).
+3. **All written code passes Gate 1.** No code merge, commit, or handoff before Polish agent + Harden agent + Validate agent (in that order — Validate last, so its one run covers the commits of the two before it).
 4. **Gate 2 runs once, at implementation acceptance.** It does not re-run after review-fixes.
 5. **NEVER auto-merge to main or master.** All merges target the integration branch. The user merges to main themselves.
 6. **No unauthorized tracker or remote side-effects.** Sub-agents NEVER create issues/PRs on the tracker, comment on them, or push beyond the ticket-authorized branch unless the ticket, plan, or user explicitly authorizes that exact action. This applies to whatever tracker is resolved, not to one vendor. Proposed follow-ups go in the run report.

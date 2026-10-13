@@ -459,14 +459,14 @@ describe('optional plugin flag', () => {
   it('devflow-bug-analysis declares correct agents, skills, and command', () => {
     const bugAnalysis = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-bug-analysis');
     expect(bugAnalysis, 'devflow-bug-analysis should exist in registry').toBeDefined();
-    // Core orchestration agents: git (pre-flight), diagnose (semantic analysis), synthesize (reporting)
+    // Core orchestration agents: git (pre-flight), debug (semantic analysis), synthesize (reporting)
     expect(bugAnalysis!.agents).toContain('git');
-    expect(bugAnalysis!.agents).toContain('diagnose');
+    expect(bugAnalysis!.agents).toContain('debug');
     expect(bugAnalysis!.agents).toContain('synthesize');
     // Skills: worktree-support for discovery, apply-feature-knowledge for context
     expect(bugAnalysis!.skills).toContain('worktree-support');
     expect(bugAnalysis!.skills).toContain('apply-feature-knowledge');
-    // Skills added in batch-2: apply-decisions + the 5 diagnose-agent category skills
+    // Skills added in batch-2: apply-decisions + the 5 debug-agent category skills
     expect(bugAnalysis!.skills).toContain('apply-decisions');
     expect(bugAnalysis!.skills).toContain('security');
     expect(bugAnalysis!.skills).toContain('reliability');
@@ -542,12 +542,12 @@ describe('DELETED_PLUGIN_NAMES consistency', () => {
 });
 
 describe('agent registry membership', () => {
-  it("learning is in devflow-core-skills and devflow-ambient agents (not dream)", () => {
+  it("curate is in devflow-core-skills and devflow-ambient agents (not dream)", () => {
     const coreSkills = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-core-skills');
     const ambient = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-ambient');
-    expect(coreSkills?.agents).toContain('learning');
+    expect(coreSkills?.agents).toContain('curate');
     expect(coreSkills?.agents).not.toContain('dream');
-    expect(ambient?.agents).toContain('learning');
+    expect(ambient?.agents).toContain('curate');
     expect(ambient?.agents).not.toContain('dream');
   });
 });

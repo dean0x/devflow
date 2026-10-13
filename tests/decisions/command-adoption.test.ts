@@ -92,7 +92,7 @@ describe('Consumer agents — devflow:apply-decisions in skills frontmatter', ()
   const agents: Array<[string, string]> = [
     ['triage.md', 'triage'],
     ['design.md', 'design'],
-    ['scrutinize.md', 'scrutinize'],
+    ['harden.md', 'harden'],
     ['review.md', 'review'],
   ]
 
@@ -107,8 +107,8 @@ describe('Consumer agents — devflow:apply-decisions in skills frontmatter', ()
     })
   }
 
-  it('simplify.md does NOT reference devflow:apply-decisions (code-shape role, not quality gate)', () => {
-    const content = loadFile('src/assets/agents/simplify.md')
+  it('polish.md does NOT reference devflow:apply-decisions (code-shape role, not quality gate)', () => {
+    const content = loadFile('src/assets/agents/polish.md')
     const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/m)
     expect(frontmatterMatch).toBeTruthy()
     const frontmatter = frontmatterMatch![1]
@@ -127,7 +127,7 @@ describe('DECISIONS_CONTEXT input declaration — canonical form', () => {
   const consumerAgents: Array<[string, string]> = [
     ['triage.md', 'triage'],
     ['design.md', 'design'],
-    ['scrutinize.md', 'scrutinize'],
+    ['harden.md', 'harden'],
     ['review.md', 'review'],
   ]
 

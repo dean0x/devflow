@@ -13,8 +13,8 @@
  *
  * `FEATURE_KNOWLEDGE` carries the blocks; `FEATURE_KNOWLEDGE_RULES` is the same blocks without the
  * `Headings:` line. A spawn line keeps the input name `FEATURE_KNOWLEDGE:` and names the variable of
- * its recipient's tier: Rules + index for Review, Triage, Design, Code, Diagnose, Research and
- * Explore, Rules only for Evaluate and Scrutinize, and nothing for Validate, Git and Test. A KB with
+ * its recipient's tier: Rules + index for Review, Triage, Design, Code, Debug, Research and
+ * Explore, Rules only for Evaluate and Harden, and nothing for Validate, Git and Test. A KB with
  * no `## Rules` section (a legacy KB) delivers one to three Anti-Patterns or Gotchas entries under a
  * `Rules ({section name}):` label (D-KB-LEGACY-FALLBACK).
  *
@@ -214,25 +214,25 @@ const RULES = 'feature_knowledge_rules'
 
 /** The tier table: every spawn that passes the input, per compiled command. */
 export const TIER_TABLE: Readonly<Record<string, readonly FkSite[]>> = {
-  'bug-analysis': [{ agent: 'Diagnose', variable: RICH }],
+  'bug-analysis': [{ agent: 'Debug', variable: RICH }],
   'code-review': [{ agent: 'Review', variable: RICH }],
   implement: [
     { agent: 'Code', variable: RICH }, { agent: 'Code', variable: RICH }, { agent: 'Code', variable: RICH },
     { agent: 'Code', variable: RICH }, { agent: 'Code', variable: RICH },
-    { agent: 'Scrutinize', variable: RULES }, { agent: 'Evaluate', variable: RULES },
+    { agent: 'Harden', variable: RULES }, { agent: 'Evaluate', variable: RULES },
   ],
   plan: [{ agent: 'Explore', variable: RICH }, { agent: 'Design', variable: RICH }],
   research: [{ agent: 'Research', variable: RICH }],
   resolve: [{ agent: 'Triage', variable: RICH }, { agent: 'Code', variable: RICH }],
-  'self-review': [{ agent: 'Scrutinize', variable: RULES }],
+  'self-review': [{ agent: 'Harden', variable: RULES }],
 }
 
 /**
- * The agents that take no FEATURE_KNOWLEDGE. Code-fix and Code-edit join them (D-CODE-PRELOADS): only
+ * The agents that take no FEATURE_KNOWLEDGE. Fix and Refactor join them (D-CODE-PRELOADS): only
  * the implement and issue-fix spawns pass the input, and those run on Code, so only Code preloads
  * `apply-feature-knowledge` and declares the input.
  */
-const NO_TAKER = ['Validate', 'Git', 'Test', 'Code-fix', 'Code-edit']
+const NO_TAKER = ['Validate', 'Git', 'Test', 'Fix', 'Refactor']
 
 /** Named collector: the sites of a command that differ from the table, and any Validate, Git or Test site. */
 export function collectTierDefects(file: string, text: string, expected: readonly FkSite[]): string[] {
@@ -278,10 +278,10 @@ describe('each spawn names the variable of its recipient tier (D-KB-DELIVERY-TIE
     expect(defects.some(d => d.includes('a Validate spawn passes FEATURE_KNOWLEDGE'))).toBe(true)
     expect(collectTierDefects('release', 'Agent(subagent_type="Git"):\n"FEATURE_KNOWLEDGE: {feature_knowledge}"', []).some(d => d.includes('a Git spawn passes'))).toBe(true)
 
-    // D-CODE-PRELOADS: a fix spawn that gained the input is attributed to Code-fix, not to the Code spawn before it.
+    // D-CODE-PRELOADS: a fix spawn that gained the input is attributed to Fix, not to the Code spawn before it.
     const fixWithKnowledge = implement.replace('"OPERATION: alignment-fix\n', '"OPERATION: alignment-fix\nFEATURE_KNOWLEDGE: {feature_knowledge}\n')
     expect(fixWithKnowledge, 'the seed must land').not.toBe(implement)
-    expect(collectTierDefects('implement', fixWithKnowledge, expected).some(d => d.includes('a Code-fix spawn passes FEATURE_KNOWLEDGE'))).toBe(true)
+    expect(collectTierDefects('implement', fixWithKnowledge, expected).some(d => d.includes('a Fix spawn passes FEATURE_KNOWLEDGE'))).toBe(true)
   })
 
   it('the site collector reads the three spawn shapes: a fenced block, a list item and inline prose', () => {
@@ -345,8 +345,8 @@ export function inputBullet(body: string): string | null {
   return out.join(' ').replace(/\s+/g, ' ')
 }
 
-const RICH_AGENTS = ['code', 'review', 'triage', 'design', 'diagnose', 'research'] as const
-const RULES_AGENTS = ['evaluate', 'scrutinize'] as const
+const RICH_AGENTS = ['code', 'review', 'triage', 'design', 'debug', 'research'] as const
+const RULES_AGENTS = ['evaluate', 'harden'] as const
 
 /** Named collector: how an Input bullet differs from the form its tier receives. */
 export function collectFormDefects(agent: string, bullet: string | null, tier: 'rich' | 'rules'): string[] {
@@ -377,13 +377,13 @@ describe('each recipient is told the form it receives (D-KB-DELIVERY-TIERS)', ()
     expect(defects).toEqual([])
   })
 
-  it('the evaluate form line holds none of the words the duty-ownership guard reserves for scrutinize (AC-228)', () => {
+  it('the evaluate form line holds none of the words the duty-ownership guard reserves for harden (AC-228)', () => {
     const bullet = inputBullet(resolveAgentSource('evaluate').content) ?? ''
     expect(bullet.length, 'nothing read').toBeGreaterThan(100)
     expect(bullet).not.toMatch(/anti-patterns?\b|\bstubs?\b|\bwir(?:ed|ing)\b|\bpatterns?\b/i)
   })
 
-  it('the quality-gates line describes the Rules-only form Scrutinize receives', () => {
+  it('the quality-gates line describes the Rules-only form Harden receives', () => {
     const skill = read('src/assets/skills/quality-gates/SKILL.md')
     const line = skill.split('\n').find(l => l.startsWith('If `FEATURE_KNOWLEDGE` is provided')) ?? ''
     expect(line, 'the line moved').not.toBe('')
@@ -406,9 +406,9 @@ describe('each recipient is told the form it receives (D-KB-DELIVERY-TIERS)', ()
     expect(collectFormDefects('code', '- **FEATURE_KNOWLEDGE** (optional): Pre-computed feature area context', 'rich')).toEqual([
       'code: does not say Rules bullets', 'code: does not name the KB path', 'code: does not say it receives a heading index', 'code: still describes the whole-KB form',
     ])
-    const scrutinize = inputBullet(resolveAgentSource('scrutinize').content)
-    expect(collectFormDefects('scrutinize', scrutinize, 'rules')).toEqual([])
-    expect(collectFormDefects('scrutinize', (scrutinize ?? '').replace('no heading index', 'a heading index'), 'rules')).toEqual(['scrutinize: does not say there is no heading index'])
+    const harden = inputBullet(resolveAgentSource('harden').content)
+    expect(collectFormDefects('harden', harden, 'rules')).toEqual([])
+    expect(collectFormDefects('harden', (harden ?? '').replace('no heading index', 'a heading index'), 'rules')).toEqual(['harden: does not say there is no heading index'])
     const evaluate = inputBullet(resolveAgentSource('evaluate').content)
     expect(collectFormDefects('evaluate', evaluate, 'rules')).toEqual([])
     expect(collectFormDefects('evaluate', `${evaluate} Check the anti-pattern.`, 'rules')).toEqual(['evaluate: the form line uses the word pattern'])
@@ -421,8 +421,8 @@ describe('each recipient is told the form it receives (D-KB-DELIVERY-TIERS)', ()
 // ---------------------------------------------------------------------------
 
 describe('Validate, Git and Test take no input, and explore, debug and the hooks never load (D-KB-DELIVERY-TIERS)', () => {
-  it('validate, git, test, code-fix and code-edit declare no FEATURE_KNOWLEDGE input; only code does', () => {
-    for (const agent of ['validate', 'git', 'test', 'code-fix', 'code-edit']) {
+  it('validate, git, test, fix and refactor declare no FEATURE_KNOWLEDGE input; only code does', () => {
+    for (const agent of ['validate', 'git', 'test', 'fix', 'refactor']) {
       const body = resolveAgentSource(agent).content
       expect(body.length, `${agent}: nothing read`).toBeGreaterThan(1000)
       expect(body, agent).not.toContain('FEATURE_KNOWLEDGE')

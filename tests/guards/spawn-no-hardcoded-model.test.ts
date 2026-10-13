@@ -316,7 +316,7 @@ describe('spawn-no-hardcoded-model guard: seeded probes', () => {
     },
     {
       name: 'a spawn that mixes argument styles',
-      content: 'Agent(subagent_type="Learning", model="opus", run_in_background: true, prompt: "go")\n',
+      content: 'Agent(subagent_type="Curate", model="opus", run_in_background: true, prompt: "go")\n',
       form: 'Agent',
     },
     {

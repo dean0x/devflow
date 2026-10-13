@@ -1442,14 +1442,14 @@ describe('AC-107 Bash result classes and files written (D-AUDIT-BASH-CLASS)', ()
 //
 // Fixture map (tests/fixtures/token-audit/signals/, one session, 12 requests):
 //   main      /devflow:implement given a plan document (`x.md`); two Code spawns launched in one
-//             assistant message (siblings) and, ten minutes later, one Code-fix spawn.
+//             assistant message (siblings) and, ten minutes later, one Fix spawn.
 //   asig01    Code    4 requests, ctx 3002 3503 3904 3925, OPERATION implement, a 2-line slice of the
 //                     decisions index (299 B), Reads shared.ts twice and index.md, Edit a.ts, Write b.ts,
 //                     one quiet vitest run (100 B back), cites ADR-007 x2 and PF-004.
 //   asig02    Code    4 requests, ctx 3002 3103 3101 3112, OPERATION implement, DECISIONS_CONTEXT (none),
 //                     Reads shared.ts once, ends its turn at 09:00:15 and is resumed at 09:00:30: its next
 //                     request (15 s later) is a cache miss of 3100 tokens; one `git status` (40 B back).
-//   asig03    Code-fix 2 requests, ctx 2502 2533, OPERATION validation-fix, a pointer to index.md (81 B),
+//   asig03    Fix     2 requests, ctx 2502 2533, OPERATION validation-fix, a pointer to index.md (81 B),
 //                     Reads index.md and pitfalls.md (offset 10, limit 25), cites PF-012; its first request
 //                     read 2000 cached tokens.
 
@@ -1499,7 +1499,7 @@ describe('AC-101 peak context and turn spread (D-AUDIT-PEAK-CTX)', () => {
     const code = subagentsOnly(spawns).agentTypes.find(a => a.agentType === 'Code');
     expect(code).toMatchObject({ spawns: 11, turns: 66, medianTurns: 6, p90Turns: 10, medianPeakContext: 6000, p90PeakContext: 10000, maxPeakContext: 11000 });
 
-    // Over the fixture: Code peaks at 3925 (asig01) and 3112 (asig02); the Code-fix transcript (read as Fix) at 2533.
+    // Over the fixture: Code peaks at 3925 (asig01) and 3112 (asig02); the Fix transcript at 2533.
     const report = await audit({ dir: SIGNALS_DIR });
     const byType = Object.fromEntries(report.agentTypes.map(a => [a.agentType, a]));
     expect(byType['Code']).toMatchObject({ spawns: 2, turns: 8, medianTurns: 4, p90Turns: 4, medianPeakContext: 3925, p90PeakContext: 3925, maxPeakContext: 3925 });
@@ -1568,7 +1568,7 @@ describe('AC-102 first turn, siblings and staggered spawns (D-AUDIT-FIRST-TURN)'
     const byType = Object.fromEntries(report.agentTypes.map(a => [a.agentType, a]));
     expect(byType['Code']).toMatchObject({ siblingSpawns: 2, firstTurnSpawns: 2, firstTurnCacheHitShare: 0, staticPrefixEstimate: 0 });
     expect(byType['Code']?.staggered.spawns).toBe(0);
-    // The Code-fix spawn (read as Fix) came alone; its first request read 2000 of its 2502 context tokens (2000 / 2502).
+    // The Fix spawn came alone; its first request read 2000 of its 2502 context tokens (2000 / 2502).
     expect(byType['Fix']).toMatchObject({ siblingSpawns: 0, firstTurnCacheHitShare: 1, medianFirstTurnReadRatio: 0.799361, medianFirstTurnCacheRead: 2000, staticPrefixEstimate: 2000 });
   });
 });
@@ -1727,14 +1727,14 @@ describe('AC-106 run distribution (D-AUDIT-RUN-DIST)', () => {
     expect(type('Validate')).toMatchObject({ runsWithType: 1, spawns: { median: 0, p90: 1 } });
   });
 
-  it('splits /implement runs by plan document and Code-fix spawns by OPERATION', () => {
+  it('splits /implement runs by plan document and Fix spawns by OPERATION', () => {
     const row = build([session]).workflows.distribution[0];
     // Run 1 has the plan document. Runs 2 and 3 have [2, 0] spawns: sorted [0 2], median index round(0.5) = 1 -> 2, p90 -> 2.
     expect(row?.byPlan).toEqual([
       { planDocument: true, runs: 1, spawns: { median: 3, p90: 3 }, ce: { median: 2600, p90: 2600 } },
       { planDocument: false, runs: 2, spawns: { median: 2, p90: 2 }, ce: { median: 2400, p90: 2400 } },
     ]);
-    expect(row?.codeFixByOperation).toEqual([{ operation: 'validation-fix', totalSpawns: 1, runsWithOperation: 1, spawns: { median: 0, p90: 1 } }]);
+    expect(row?.fixByOperation).toEqual([{ operation: 'validation-fix', totalSpawns: 1, runsWithOperation: 1, spawns: { median: 0, p90: 1 } }]);
   });
 
   it('takes the plan document from a Skill call too, and only for /implement', () => {
@@ -1760,7 +1760,7 @@ describe('AC-106 run distribution (D-AUDIT-RUN-DIST)', () => {
     const row = report.workflows.distribution[0];
     expect(row).toMatchObject({ workflow: 'devflow:implement', runs: 1, spawns: { median: 3, p90: 3 }, ce: { median: 16_922, p90: 16_922 } });
     expect(row?.byPlan).toMatchObject([{ planDocument: true, runs: 1 }, { planDocument: false, runs: 0 }]);
-    expect(row?.codeFixByOperation).toMatchObject([{ operation: 'validation-fix', totalSpawns: 1 }]);
+    expect(row?.fixByOperation).toMatchObject([{ operation: 'validation-fix', totalSpawns: 1 }]);
     expect(row?.byType.map(t => [t.agentType, t.totalSpawns])).toEqual([['Code', 2], ['Fix', 1]]);
   });
 });
@@ -1791,7 +1791,7 @@ describe('AC-107 Bash result classes and files written (D-AUDIT-BASH-CLASS)', ()
       codeSpawn('s3', 3, 40),
       codeSpawn('s4', 12, 100),
       codeSpawn('s5', 45, 200),
-      codeSpawn('fix', 99, 5, {}, 'Code-fix'), //                 not a Code spawn
+      codeSpawn('fix', 99, 5, {}, 'Fix'), //                      not a Code spawn
       codeSpawn('other', 99, 5, { operation: 'issue-fix' }), //  not the implement operation
     ]);
     // Six spawns: files [0 1 3 3 12 45] -> median index round(2.5) = 3 -> 3, p90 index round(4.5) = 5 -> 45;
@@ -2115,7 +2115,7 @@ describe('historical agent names count as the agent they became', () => {
     expect(types).toEqual(['Code', 'Explore', 'Validate', 'general-purpose', 'unknown']);
   });
 
-  it('puts a Code-fix transcript of the fixture under Fix, and --agent-type matches either spelling', async () => {
+  it('puts the Fix transcript of the fixture under Fix, and --agent-type matches either spelling', async () => {
     const all = await audit({ dir: SIGNALS_DIR });
     expect(all.agentTypes.map(a => a.agentType)).toContain('Fix');
     expect(all.agentTypes.map(a => a.agentType)).not.toContain('Code-fix');

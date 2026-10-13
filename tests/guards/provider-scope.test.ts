@@ -656,17 +656,17 @@ function vendorCorpus(): CorpusEntry[] {
 }
 
 /**
- * `VENDOR_ALLOWLIST` (D-SCAN-IN-CODE): the one `mcp__` literal this scan admits is Scrutinize's
+ * `VENDOR_ALLOWLIST` (D-SCAN-IN-CODE): the one `mcp__` literal this scan admits is Harden's
  * `  - mcp__*` entry in its `disallowedTools` frontmatter, in the compiled agent and in its
  * learning-off variant. The wildcard denies every MCP tool and names none, so it binds no
- * contract to a transport; Simplify carries the same entry, but it is hand-authored and outside
+ * contract to a transport; Polish carries the same entry, but it is hand-authored and outside
  * this scan. The exemption is one exact line in two named files: any other `mcp__` literal in
  * those files, and the same line anywhere else (the Git agent included), is still reported.
  * The prohibition above and this exemption are one authority: the 'still needed' arm below
  * fails when a file no longer carries its line.
  */
 const VENDOR_ALLOWLIST: { readonly files: readonly string[]; readonly line: string; readonly token: string } = {
-  files: ['dist/agents/scrutinize.md', `${LEARNING_OFF_AGENTS}/scrutinize.md`],
+  files: ['dist/agents/harden.md', `${LEARNING_OFF_AGENTS}/harden.md`],
   line: '- mcp__*',
   token: 'mcp__ tool literal',
 };

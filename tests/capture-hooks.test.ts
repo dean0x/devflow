@@ -325,10 +325,10 @@ describe('capture-question', () => {
     tool_input: {
       questions: [
         {
-          question: 'How should I handle the Phase 5 Scrutinize review?',
-          header: 'Scrutinize',
+          question: 'How should I handle the Phase 5 Harden review?',
+          header: 'Harden',
           multiSelect: false,
-          options: [{ label: 'Re-run, inert probes only' }, { label: 'Skip Scrutinize entirely' }],
+          options: [{ label: 'Re-run, inert probes only' }, { label: 'Skip Harden entirely' }],
         },
         {
           question: 'Going forward, how do you want me to handle subagents?',
@@ -341,7 +341,7 @@ describe('capture-question', () => {
     tool_response: {
       questions: [],
       answers: {
-        'How should I handle the Phase 5 Scrutinize review?': 'Re-run, inert probes only',
+        'How should I handle the Phase 5 Harden review?': 'Re-run, inert probes only',
         'Going forward, how do you want me to handle subagents?': 'Flag before running',
       },
       annotations: {},
@@ -367,7 +367,7 @@ describe('capture-question', () => {
     expect(learning).toHaveLength(2);
     expect(mem[0]).toMatchObject({
       role: 'qa',
-      content: 'Q: How should I handle the Phase 5 Scrutinize review?\nA: Re-run, inert probes only',
+      content: 'Q: How should I handle the Phase 5 Harden review?\nA: Re-run, inert probes only',
     });
     expect(mem[1]).toMatchObject({
       role: 'qa',

@@ -47,7 +47,7 @@ function makeState(
       ? (stateOverrides.modelCycle as readonly string[])
       : buildModelCycle(catalog);
   const rows = stateOverrides.rows ?? [
-    makeRow({ name: 'diagnose', shippedDefault: 'opus' }),
+    makeRow({ name: 'debug', shippedDefault: 'opus' }),
     makeRow({ name: 'code', shippedDefault: 'sonnet' }),
     makeRow({ name: 'design', shippedDefault: 'opus' }),
   ];
@@ -119,11 +119,11 @@ describe('renderFrame — structure', () => {
     const lines = renderStripped(makeState());
     const text = lines.join('\n');
     // Fix 4: formatAgentName title-cases each hyphen-separated segment
-    expect(text).toContain('Diagnose');
+    expect(text).toContain('Debug');
     expect(text).toContain('Code');
     expect(text).toContain('Design');
     // Original lowercase names must NOT appear (they are transformed)
-    expect(text).not.toContain('diagnose');
+    expect(text).not.toContain('debug');
   });
 });
 
@@ -142,7 +142,7 @@ describe('cursor row marker', () => {
 
   it('non-cursor rows do not have ❯', () => {
     const lines = renderStripped(makeState({ cursor: 1 }));
-    const nonCursorWithMarker = lines.filter(l => l.includes('❯') && l.includes('Diagnose'));
+    const nonCursorWithMarker = lines.filter(l => l.includes('❯') && l.includes('Debug'));
     expect(nonCursorWithMarker).toHaveLength(0);
   });
 });
@@ -256,7 +256,7 @@ describe('active field brackets ‹ ›', () => {
     const state = makeState({ cursor: 1 });
     const lines = renderStripped(state);
     const nonCursorLines = lines.filter(
-      l => (l.includes('Diagnose') || l.includes('Design')) && !l.includes('❯')
+      l => (l.includes('Debug') || l.includes('Design')) && !l.includes('❯')
     );
     expect(nonCursorLines.length).toBeGreaterThan(0);
     for (const line of nonCursorLines) {
@@ -531,7 +531,7 @@ describe('viewportHeight ownership', () => {
     const rows = [
       makeRow({ name: 'code', shippedDefault: 'sonnet' }),
       makeRow({ name: 'design', shippedDefault: 'opus' }),
-      makeRow({ name: 'diagnose', shippedDefault: 'opus' }),
+      makeRow({ name: 'debug', shippedDefault: 'opus' }),
       makeRow({ name: 'skim', shippedDefault: 'haiku' }),
       makeRow({ name: 'git', shippedDefault: 'haiku' }),
     ];
@@ -972,7 +972,7 @@ describe('T13: formatAgentName (Fix 4)', () => {
   it('title-cases each hyphen-separated segment', () => {
     // Single-segment names: first letter capitalized
     expect(formatAgentName('code')).toBe('Code');
-    expect(formatAgentName('diagnose')).toBe('Diagnose');
+    expect(formatAgentName('debug')).toBe('Debug');
     // Multi-segment (orphan agent-models.json keys can be arbitrary strings):
     // each segment is capitalized independently
     expect(formatAgentName('two-part')).toBe('Two-Part');
@@ -990,7 +990,7 @@ describe('T13: formatAgentName (Fix 4)', () => {
   it('TUI renders agent names with capital first letter', () => {
     const state = makeState({
       rows: [
-        makeRow({ name: 'diagnose', shippedDefault: 'opus' }),
+        makeRow({ name: 'debug', shippedDefault: 'opus' }),
         makeRow({ name: 'code', shippedDefault: 'sonnet' }),
       ],
       cursor: 0,
@@ -998,10 +998,10 @@ describe('T13: formatAgentName (Fix 4)', () => {
     const lines = renderStripped(state);
     const text = lines.join('\n');
     // TUI must show hyphen-aware title-cased names
-    expect(text).toContain('Diagnose');
+    expect(text).toContain('Debug');
     expect(text).toContain('Code');
     // Lowercase originals must NOT appear — they are transformed
-    expect(text).not.toContain('\ndiagnose');
+    expect(text).not.toContain('\ndebug');
     expect(text).not.toContain('\ncode');
   });
 
@@ -1123,7 +1123,7 @@ describe('EFFORT cell — shipped effort and inherit', () => {
     const state = makeState({
       rows: [
         makeRow({ name: 'code', shippedEffort: 'medium' }),
-        makeRow({ name: 'scrutinize', shippedEffort: 'xhigh', dormantModel: 'gpt-5.5' }),
+        makeRow({ name: 'harden', shippedEffort: 'xhigh', dormantModel: 'gpt-5.5' }),
       ],
       cursor: 0,
       activeField: 'effort',

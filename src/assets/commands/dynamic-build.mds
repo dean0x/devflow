@@ -67,7 +67,7 @@ Author the resolved `ISSUE_REQUIRED` and `APPLY_CONVENTIONS` into the workflow s
 
 {{compliance.compliance_lens()}}
 
-Pass it as `complianceFrameworks` when invoking the workflow; the engine builds `COMPLIANCE_DIRECTIVE` from it and hands that to every Code and Code-fix agent.
+Pass it as `complianceFrameworks` when invoking the workflow; the engine builds `COMPLIANCE_DIRECTIVE` from it and hands that to every Code and Fix agent.
 
 **0c. Resolve the docs root**
 
@@ -165,7 +165,7 @@ const ISSUE_INPUT = args.issueInput || args.issueNumber || "(none)";  // this ti
 const ISSUE_REQUIRED = String(args.issueRequired) === "false" ? "false" : "true";  // Pre-authoring step 0; only an explicit false turns it off — absent or unrecognised fails closed, like the resolver
 const APPLY_CONVENTIONS = String(args.applyConventions) === "false" ? "false" : "true";
 const COMPLIANCE_FRAMEWORKS = /^(?:off|none|[a-z][a-z0-9-]{0,15}(?:,[a-z][a-z0-9-]{0,15}){0,7})$/.test(String(args.complianceFrameworks)) ? String(args.complianceFrameworks) : "off";  // Pre-authoring step 0b; any other shape is no lens
-const COMPLIANCE_DIRECTIVE = COMPLIANCE_FRAMEWORKS === "off" ? "" : `When the task touches regulated surface (data models, auth flows, logging/observability, payments, IaC, retention), invoke Skill(skill="devflow:compliance") and load references/{id}.md only for the ids in ${COMPLIANCE_FRAMEWORKS} (none: generic controls only); never fabricate guidance for a framework you were not given.`;  // D-COMPLIANCE-INJECT: empty when the lens is off, so a Code or Code-fix spawn then carries nothing about compliance; otherwise the one line _compliance.mds renders as compliance_directive(), with the validated ids in place of <ids>
+const COMPLIANCE_DIRECTIVE = COMPLIANCE_FRAMEWORKS === "off" ? "" : `When the task touches regulated surface (data models, auth flows, logging/observability, payments, IaC, retention), invoke Skill(skill="devflow:compliance") and load references/{id}.md only for the ids in ${COMPLIANCE_FRAMEWORKS} (none: generic controls only); never fabricate guidance for a framework you were not given.`;  // D-COMPLIANCE-INJECT: empty when the lens is off, so a Code or Fix spawn then carries nothing about compliance; otherwise the one line _compliance.mds renders as compliance_directive(), with the validated ids in place of <ids>
 
 // Phase 1: Git setup — declare the operation; the agent owns the process, the branch name included
 const setup = await phase("setup", () =>
@@ -220,16 +220,16 @@ After implementing, commit your changes with a conventional-commit message and r
 - Any open questions or blockers`, { agentType: "Code" })
 );
 
-// Phase 3: Gate 1 #1 — post-code pipeline: Simplify agent → Scrutinize agent → Validate agent.
+// Phase 3: Gate 1 #1 — post-code pipeline: Polish agent → Harden agent → Validate agent.
 // Validate runs last and unconditionally, so its one full run covers every commit the pass made (see gate1_postcode()).
 const gate1 = await phase("gate1", async () => {
-  await agent(`Simplify and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Simplify" });
+  await agent(`Simplify and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Polish" });
 
   const scrutiny = await agent(`9-pillar self-review of recent changes on branch ${BRANCH}. Fix P0/P1 issues and commit the fixes.
-Return: {"status": "PASS" | "FIXED" | "BLOCKED"}`, { agentType: "Scrutinize" });
-  // Anything but an explicit PASS or FIXED is a stop: a Scrutinize that returned no status, or one this skeleton does not know, has not accepted the code.
+Return: {"status": "PASS" | "FIXED" | "BLOCKED"}`, { agentType: "Harden" });
+  // Anything but an explicit PASS or FIXED is a stop: a Harden that returned no status, or one this skeleton does not know, has not accepted the code.
   if (!["PASS", "FIXED"].includes(scrutiny?.status)) {
-    return { verdict: "ESCALATED", type: "scrutiny-blocked", reason: scrutiny?.status === "BLOCKED" ? "Scrutinize agent returned BLOCKED: a P0 issue cannot be fixed in scope" : "Scrutinize agent returned no recognised status: counted as BLOCKED" };
+    return { verdict: "ESCALATED", type: "scrutiny-blocked", reason: scrutiny?.status === "BLOCKED" ? "Harden agent returned BLOCKED: a P0 issue cannot be fixed in scope" : "Harden agent returned no recognised status: counted as BLOCKED" };
   }
 
   const validation = await agent(`Run build, typecheck, lint, and tests on branch ${BRANCH}.
@@ -248,7 +248,7 @@ ${failureDetails}
 DECISIONS_CONTEXT: ${DECISIONS_CONTEXT}
 <!-- learning:end -->
 ${COMPLIANCE_DIRECTIVE}
-Commit fixes with conventional-commit message.`, { agentType: "Code-fix" });
+Commit fixes with conventional-commit message.`, { agentType: "Fix" });
       const recheck = await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH} after fix attempt ${attempt} (follow your Running commands block).
 Return: {"verdict": "PASS" | "FAIL", "details": "..."}`, { agentType: "Validate" });
       if (recheck?.verdict === "PASS") break;
@@ -260,7 +260,7 @@ Return: {"verdict": "PASS" | "FAIL", "details": "..."}`, { agentType: "Validate"
   return { verdict: "PASS" };
 });
 
-// Gate 1 #1 stop, before Gate 2: an exhausted Validate or a BLOCKED Scrutinize leaves a broken or unfinished build,
+// Gate 1 #1 stop, before Gate 2: an exhausted Validate or a BLOCKED Harden leaves a broken or unfinished build,
 // so Gate 2 and the review pass never run on it — a correctness stop, like the ticket-link and branch stops.
 if (gate1.verdict === "ESCALATED") {
   return { ticket: TICKET, branch: BRANCH, verdict: "ESCALATED", issueId: ISSUE_NUMBER, issuePrLink: ISSUE_PR_LINK, escalations: [{ type: gate1.type, description: gate1.reason }] };
@@ -291,7 +291,7 @@ ${evaluation?.rationale || "see the Evaluate agent's report"}
 DECISIONS_CONTEXT: ${DECISIONS_CONTEXT}
 <!-- learning:end -->
 ${COMPLIANCE_DIRECTIVE}
-Self-verify your fix compiles, following your Running commands block. Commit fixes.`, { agentType: "Code-fix" });
+Self-verify your fix compiles, following your Running commands block. Commit fixes.`, { agentType: "Fix" });
       evalVerdict = "FAIL-FIXED";  // issues found, fixes applied, not re-evaluated by design
     }
   }
@@ -313,7 +313,7 @@ ${testResult.failures}
 DECISIONS_CONTEXT: ${DECISIONS_CONTEXT}
 <!-- learning:end -->
 ${COMPLIANCE_DIRECTIVE}
-Self-verify your fix compiles and the scenarios pass, following your Running commands block. Commit fixes.`, { agentType: "Code-fix" });
+Self-verify your fix compiles and the scenarios pass, following your Running commands block. Commit fixes.`, { agentType: "Fix" });
       testVerdict = "FAIL-FIXED";  // issues found, fixes applied, not re-evaluated by design
     }
   }
@@ -468,16 +468,16 @@ Return: {"status": "fixed"|"blocked", "commitShas": ["<sha>"], "unresolved": ["<
   return { survivingFindings: notAddressed, fixedFindings, coverageGaps };
 });
 
-// Phase 5.5: Gate 1 #2 — FINAL post-fix gate (Simplify agent → Scrutinize agent → full Validate agent, Validate last and unconditional).
+// Phase 5.5: Gate 1 #2 — FINAL post-fix gate (Polish agent → Harden agent → full Validate agent, Validate last and unconditional).
 // Runs ONCE, after the review pass. Inside the pass the Code agent self-verified its own fixes;
 // this is the build gate before the branch is handed back. See gate1_postcode() cadence.
 const gate1Final = await phase("gate1-final", async () => {
-  await agent(`Simplify and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Simplify" });
+  await agent(`Simplify and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Polish" });
 
   const scrutiny = await agent(`9-pillar self-review of recent changes on branch ${BRANCH}. Fix P0/P1 issues and commit the fixes.
-Return: {"status": "PASS" | "FIXED" | "BLOCKED"}`, { agentType: "Scrutinize" });
+Return: {"status": "PASS" | "FIXED" | "BLOCKED"}`, { agentType: "Harden" });
   if (!["PASS", "FIXED"].includes(scrutiny?.status)) {
-    return { verdict: "ESCALATED", type: "scrutiny-blocked", reason: scrutiny?.status === "BLOCKED" ? "Final Gate 1 Scrutinize agent returned BLOCKED: a P0 issue cannot be fixed in scope" : "Final Gate 1 Scrutinize agent returned no recognised status: counted as BLOCKED" };
+    return { verdict: "ESCALATED", type: "scrutiny-blocked", reason: scrutiny?.status === "BLOCKED" ? "Final Gate 1 Harden agent returned BLOCKED: a P0 issue cannot be fixed in scope" : "Final Gate 1 Harden agent returned no recognised status: counted as BLOCKED" };
   }
 
   const validation = await agent(`Run build, typecheck, lint, and tests on branch ${BRANCH} (final gate after all fixing).
@@ -494,7 +494,7 @@ ${failureDetails}
 DECISIONS_CONTEXT: ${DECISIONS_CONTEXT}
 <!-- learning:end -->
 ${COMPLIANCE_DIRECTIVE}
-Self-verify your fix compiles. Commit fixes with conventional-commit message.`, { agentType: "Code-fix" });
+Self-verify your fix compiles. Commit fixes with conventional-commit message.`, { agentType: "Fix" });
       const recheck = await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH} (final gate, after fix attempt ${attempt}; follow your Running commands block).
 Return: {"verdict": "PASS" | "FAIL", "details": "..."}`, { agentType: "Validate" });
       if (recheck?.verdict === "PASS") break;

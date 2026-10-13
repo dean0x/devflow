@@ -222,11 +222,11 @@ describe('the set of omitting agents is derived from the rows', () => {
     }
   });
 
-  it('is the twelve agents D-OMIT-CLAUDEMD-SET names, and never Code, Scrutinize or Simplify', () => {
+  it('is the twelve agents D-OMIT-CLAUDEMD-SET names, and never Code, Harden or Polish', () => {
     expect([...OMIT_CLAUDE_MD_DIGESTS.keys()].sort()).toEqual(
-      ['evaluate', 'explore', 'git', 'knowledge', 'learning', 'research', 'skim', 'synthesize', 'test', 'tracker', 'triage', 'validate'],
+      ['curate', 'evaluate', 'explore', 'git', 'knowledge', 'research', 'skim', 'synthesize', 'test', 'tracker', 'triage', 'validate'],
     );
-    for (const name of ['code', 'scrutinize', 'simplify']) expect(OMIT_CLAUDE_MD_DIGESTS.has(name), name).toBe(false);
+    for (const name of ['code', 'harden', 'polish']) expect(OMIT_CLAUDE_MD_DIGESTS.has(name), name).toBe(false);
   });
 
   it('known-bad probe: a new omitting row joins the set without any list being edited', () => {

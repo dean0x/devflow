@@ -5,7 +5,7 @@
 //   1. Phase ordering — all 7 phases present in correct order with Produces/Requires annotations
 //   2. Incremental detection — .last-analysis-head read/write semantics documented
 //   3. Static tool invocation — xargs, timeout, mktemp patterns for safety
-//   4. Diagnose agent spawning — parallel spawn in a single message, required inputs
+//   4. Debug agent spawning — parallel spawn in a single message, required inputs
 //   5. Synthesize agent — mode: bug-analysis output path
 //   6. Resolve compatibility — /resolve suggestion on blocking bugs
 //   7. Exclusion list — static-findings.md and bug-analysis-summary.md excluded from issue extraction
@@ -17,7 +17,7 @@ import { describe, it, expect } from 'vitest';
 import { loadFile, extractSection, resolveAgentSource } from '../helpers';
 
 const content = loadFile('dist/commands/bug-analysis.md');
-const agentContent = resolveAgentSource('diagnose').content;
+const agentContent = resolveAgentSource('debug').content;
 
 // ---------------------------------------------------------------------------
 // Group 1: Phase ordering — Produces/Requires annotations
@@ -69,7 +69,7 @@ describe('bug-analysis.md — phase ordering and annotations', () => {
     expect(phase5).toContain('ANALYSIS_DIR');
     expect(phase5).toContain('STATIC_FINDINGS');
     expect(phase5).toContain('DECISIONS_CONTEXT');
-    // The word, not the prefix: FEATURE_KNOWLEDGE_RULES also contains the literal, and Diagnose takes the full form.
+    // The word, not the prefix: FEATURE_KNOWLEDGE_RULES also contains the literal, and Debug takes the full form.
     expect(phase5).toMatch(/\bFEATURE_KNOWLEDGE\b/);
   });
 
@@ -174,11 +174,11 @@ describe('bug-analysis.md — static analysis safety patterns', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Group 4: Diagnose agent spawning
+// Group 4: Debug agent spawning
 // ---------------------------------------------------------------------------
 
-describe('bug-analysis.md — Diagnose agent spawning', () => {
-  it('Phase 5 spawns Diagnose agents in a single message (parallel, not background)', () => {
+describe('bug-analysis.md — Debug agent spawning', () => {
+  it('Phase 5 spawns Debug agents in a single message (parallel, not background)', () => {
     const phase5 = extractSection(content, '### Phase 5:', '### Phase 6:');
     expect(phase5).toMatch(/single message/i);
     expect(phase5).toMatch(/run_in_background=false/);
@@ -191,12 +191,12 @@ describe('bug-analysis.md — Diagnose agent spawning', () => {
     expect(phase5).toContain('(none)');
   });
 
-  it('Phase 5 passes DECISIONS_CONTEXT to Diagnose agents', () => {
+  it('Phase 5 passes DECISIONS_CONTEXT to Debug agents', () => {
     const phase5 = extractSection(content, '### Phase 5:', '### Phase 6:');
     expect(phase5).toContain('DECISIONS_CONTEXT');
   });
 
-  it('Phase 5 passes FEATURE_KNOWLEDGE to Diagnose agents (the full form, rules and heading index)', () => {
+  it('Phase 5 passes FEATURE_KNOWLEDGE to Debug agents (the full form, rules and heading index)', () => {
     const phase5 = extractSection(content, '### Phase 5:', '### Phase 6:');
     expect(phase5).toContain('FEATURE_KNOWLEDGE: {FEATURE_KNOWLEDGE}');
   });
@@ -265,10 +265,10 @@ describe('bug-analysis.md — resolve compatibility', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Group 7: diagnose.md — output format section headers
+// Group 7: debug.md — output format section headers
 // ---------------------------------------------------------------------------
 
-describe('diagnose.md — output format section headers', () => {
+describe('debug.md — output format section headers', () => {
   it('output template contains "Issues in Your Changes (BLOCKING)" section header', () => {
     expect(agentContent).toContain('## Issues in Your Changes (BLOCKING)');
   });
@@ -305,10 +305,10 @@ describe('diagnose.md — output format section headers', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Group 8: diagnose.md — frontmatter skill declarations
+// Group 8: debug.md — frontmatter skill declarations
 // ---------------------------------------------------------------------------
 
-describe('diagnose.md — pattern skills load on demand', () => {
+describe('debug.md — pattern skills load on demand', () => {
   const frontmatter = agentContent.slice(0, agentContent.indexOf('\n---\n', 1) + 1);
   const body = agentContent.slice(agentContent.indexOf('\n---\n', 1) + 5);
   const focusAreas = extractSection(body, '## Focus Areas', '## Apply Decisions');

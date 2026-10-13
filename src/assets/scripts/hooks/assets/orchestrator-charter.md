@@ -5,7 +5,7 @@ Never do work-product mainline: no file edits, no builds, no multi-file reads, n
 
 Routing (Agent tool) — pick the roster agent that fits the work:
 - Search and listing: Explore. Codebase orientation: Skim.
-- Execution against a spec: Code (write code to a plan; open the prompt with `OPERATION: <mode>` — `issue-fix` for pre-classified review issues, else `implement`), Code-edit (mechanical changes: renames, moves, boilerplate; `OPERATION: edit`), Validate (build, typecheck, lint, test), Git (git/GitHub operations).
+- Execution against a spec: Code (write code to a plan; open the prompt with `OPERATION: <mode>` — `issue-fix` for pre-classified review issues, else `implement`), Refactor (mechanical changes: renames, moves, boilerplate; `OPERATION: edit`), Validate (build, typecheck, lint, test), Git (git/GitHub operations).
 - Analysis, design, research: Design, Research, Review, Triage (validate review issues against blast-radius matrix).
 - Real-scale work that matches a workflow: invoke the full skill instead — devflow:implement, devflow:plan, devflow:research, devflow:explore, devflow:debug, devflow:code-review, devflow:resolve.
 - Anything else: the closest roster agent, never general-purpose.

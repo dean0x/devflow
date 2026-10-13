@@ -81,7 +81,7 @@ export function getPitfallsFilePath(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'learning', 'pitfalls.md');
 }
 
-/** .devflow/learning/learning.json — project-level learning agent tuning config */
+/** .devflow/learning/learning.json — project-level curate agent tuning config */
 export function getLearningTuningConfigPath(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'learning', 'learning.json');
 }

@@ -451,7 +451,7 @@ describe('TP-43 (AC-37): the compiled compliance lens loads only the ids the set
       expect(requireDistFile(host), `${host}: the directive's load rule`).toContain(LOAD_RULE);
     }
     expect(requireDistFile('dynamic-build.md')).toContain('load references/{id}.md only for the ids in ${COMPLIANCE_FRAMEWORKS} (none: generic controls only)');
-    for (const slug of ['code', 'code-fix', 'code-edit', 'review', 'design']) {
+    for (const slug of ['code', 'fix', 'refactor', 'review', 'design']) {
       expect(resolveAgentSource(slug).content, `${slug}: the body carries no lens input`).not.toContain('COMPLIANCE_FRAMEWORKS');
     }
     expect(src('src/assets/skills/gap-analysis/references/compliance.md')).toContain(

@@ -129,13 +129,13 @@ describe('computeAssetsToRemove: the retained set comes from what is INSTALLED',
   });
 
   it('removes agents unique to selected plugins', () => {
-    // devflow-bug-analysis has agent 'diagnose' which is unique to it
+    // devflow-bug-analysis has agent 'debug' which is unique to it
     const bugAnalysisPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-bug-analysis')!;
     // Non-empty assertion: guard against vacuous pass if the plugin is accidentally deleted
     expect(bugAnalysisPlugin).toBeDefined();
     expect(bugAnalysisPlugin.agents.length).toBeGreaterThan(0);
     const { agents } = computeAssetsToRemove([bugAnalysisPlugin], DEVFLOW_PLUGINS);
-    expect(agents).toContain('diagnose');
+    expect(agents).toContain('debug');
   });
 
   it('retains agents shared with remaining plugins', () => {
@@ -1776,15 +1776,15 @@ describe('runSelectivePhaseForScope (A8)', () => {
   });
 
   it('(A8) removes agent files for the selected plugin', async () => {
-    // devflow-bug-analysis owns the 'diagnose' agent — unique to that plugin
+    // devflow-bug-analysis owns the 'debug' agent — unique to that plugin
     const bugPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-bug-analysis')!;
     expect(bugPlugin).toBeDefined();
-    const agentName = 'diagnose'; // unique to devflow-bug-analysis
+    const agentName = 'debug'; // unique to devflow-bug-analysis
     expect(bugPlugin.agents).toContain(agentName);
 
     const agentsDir = path.join(claudeDir, 'agents', 'devflow');
     await fs.mkdir(agentsDir, { recursive: true });
-    await fs.writeFile(path.join(agentsDir, `${agentName}.md`), '# diagnose', 'utf-8');
+    await fs.writeFile(path.join(agentsDir, `${agentName}.md`), '# debug', 'utf-8');
 
     await runSelectivePhaseForScope({
       claudeDir,
@@ -1793,7 +1793,7 @@ describe('runSelectivePhaseForScope (A8)', () => {
       verbose: false,
     });
 
-    // diagnose.md must be removed (it is unique to devflow-bug-analysis)
+    // debug.md must be removed (it is unique to devflow-bug-analysis)
     await expect(fs.access(path.join(agentsDir, `${agentName}.md`))).rejects.toThrow();
   });
 

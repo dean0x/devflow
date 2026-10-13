@@ -87,14 +87,27 @@ const RETIRED_AGENT_FORM_B: readonly string[] = [
   'Evaluator',    // → Evaluate
   'Researcher',   // → Research
   'Reviewer',     // → Review
-  'Scrutinizer',  // → Scrutinize
-  'Simplifier',   // → Simplify
+  'Scrutinizer',  // → Harden
+  'Simplifier',   // → Polish
   'Skimmer',      // → Skim
   'Synthesizer',  // → Synthesize
   'Tester',       // → Test
   'Triager',      // → Triage
   'Validator',    // → Validate
-  'BugAnalyzer',  // → Diagnose
+  'BugAnalyzer',  // → Debug
+  // six agents renamed to state their job (#466). Learning is also the name of the
+  // learning feature, so only the agent-specific spellings of it are retired.
+  'Code-fix',     // → Fix
+  'Code-edit',    // → Refactor
+  'Scrutinize',   // → Harden
+  'Simplify',     // → Polish
+  'Diagnose',     // → Debug
+  'Learning agent',                // → Curate agent
+  'name: Learning',                // → name: Curate
+  'subagent_type="Learning"',      // → subagent_type="Curate"
+  'agents/learning',               // → agents/curate
+  'references/learning',           // → references/curate
+  'learning\\.md',                 // → curate.md
 ]
 
 // ---------------------------------------------------------------------------
@@ -383,6 +396,115 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
       'not a Form-B spawn key',
     contexts: ['evaluator_panel'],
   },
+
+  // -----------------------------------------------------------------------
+  // Simplify / Diagnose — CONCEPT (the verbs, not the agents renamed to Polish and Debug)
+  // -----------------------------------------------------------------------
+  {
+    path: 'src/assets/agents/polish.md',
+    name: 'Simplify',
+    reason:
+      'CONCEPT: the verb in the Polish agent\'s own instruction list; not an agent spawn reference',
+    contexts: ['to simplify and improve code', 'Simplify code structure by:'],
+  },
+  {
+    path: 'src/assets/commands/dynamic-build.mds',
+    name: 'Simplify',
+    reason:
+      'CONCEPT: the verb that opens the Polish spawn prompt; the agentType beside it is Polish',
+    contexts: ['Simplify and reduce complexity of recent changes'],
+  },
+  {
+    path: 'dist/commands/dynamic-build.md',
+    name: 'Simplify',
+    reason:
+      'CONCEPT: compiled output of dynamic-build.mds; the verb that opens the Polish spawn prompt',
+    contexts: ['Simplify and reduce complexity of recent changes'],
+  },
+  {
+    path: 'src/assets/commands/implement.mds',
+    name: 'Simplify',
+    reason:
+      'CONCEPT: the verb that opens the Polish spawn prompt; the subagent_type above it is Polish',
+    contexts: ['Simplify recently implemented code'],
+  },
+  {
+    path: 'dist/commands/implement.md',
+    name: 'Simplify',
+    reason:
+      'CONCEPT: compiled output of implement.mds; the verb that opens the Polish spawn prompt',
+    contexts: ['Simplify recently implemented code'],
+  },
+  {
+    path: 'src/assets/commands/resolve.mds',
+    name: 'Simplify',
+    reason:
+      'CONCEPT: the verb that opens the Polish spawn prompt; the subagent_type above it is Polish',
+    contexts: ['Simplify and refine the fixes'],
+  },
+  {
+    path: 'dist/commands/resolve.md',
+    name: 'Simplify',
+    reason:
+      'CONCEPT: compiled output of resolve.mds; the verb that opens the Polish spawn prompt',
+    contexts: ['Simplify and refine the fixes'],
+  },
+  {
+    path: 'src/assets/commands/self-review.mds',
+    name: 'Simplify',
+    reason:
+      'CONCEPT: the verb that opens the Polish spawn prompt; the subagent_type above it is Polish',
+    contexts: ['Simplify and refine the code'],
+  },
+  {
+    path: 'dist/commands/self-review.md',
+    name: 'Simplify',
+    reason:
+      'CONCEPT: compiled output of self-review.mds; the verb that opens the Polish spawn prompt',
+    contexts: ['Simplify and refine the code'],
+  },
+  {
+    path: 'src/assets/rules/quality.md',
+    name: 'Simplify',
+    reason:
+      'CONCEPT: the verb in a code-quality rule; no agent reference',
+    contexts: ['simplify first'],
+  },
+  {
+    path: 'src/assets/skills/complexity/references/patterns.md',
+    name: 'Simplify',
+    reason:
+      'CONCEPT: the verb in a code comment of a pattern example; no agent reference',
+    contexts: ['and simplify'],
+  },
+  {
+    path: 'src/assets/skills/git/references/patterns.md',
+    name: 'Simplify',
+    reason:
+      'CONCEPT: the verb in a sample commit message; no agent reference',
+    contexts: ['simplify string helper functions'],
+  },
+  {
+    path: 'src/assets/skills/test-driven-development/SKILL.md',
+    name: 'Simplify',
+    reason:
+      'CONCEPT: the verb in the refactor step and in a rationalization row; no agent reference',
+    contexts: ['rename, simplify, apply DRY', 'Simplify the interface first'],
+  },
+  {
+    path: 'src/assets/skills/rust/references/violations.md',
+    name: 'Diagnose',
+    reason:
+      'CONCEPT: the verb in a violation example; no agent reference',
+    contexts: ['help diagnose the problem'],
+  },
+  {
+    path: 'docs/reference/platform-assumptions.md',
+    name: 'Diagnose',
+    reason:
+      'CONCEPT: the verb in the page intro; no agent reference',
+    contexts: ['hard-to-diagnose failures'],
+  },
 ]
 
 // ---------------------------------------------------------------------------
@@ -533,7 +655,7 @@ describe('GAP-1: slug (form A) ↔ frontmatter name: (form B)', () => {
    * capitalizeFirst(slug) — coder → Coder, designer → Designer.
    *
    * The exception map handles the one case where form B diverges from the
-   * default: diagnose → Diagnose (capitalizeFirst, no hyphens in slug).
+   * default: debug → Debug (capitalizeFirst, no hyphens in slug).
    * That entry exits when the agent is renamed in phase 4.
    */
   it('every agent frontmatter name: matches its slug or the exception map', () => {
@@ -672,9 +794,9 @@ describe('GAP-2: agentType: values in dist ↔ declared roster', () => {
     // Control: the real host passes, so the probes below are not red for an unrelated reason.
     expect(collectValidListDefects(host, text, roster)).toEqual([])
 
-    expect(collectValidListDefects(host, withList(listed.filter(t => t !== 'Code-fix')), roster)).toEqual([
-      `${host}: spawns "Code-fix", which the valid-agentType sentence does not list`,
-      `${host}: omits "Code-fix", which the roster lists`,
+    expect(collectValidListDefects(host, withList(listed.filter(t => t !== 'Fix')), roster)).toEqual([
+      `${host}: spawns "Fix", which the valid-agentType sentence does not list`,
+      `${host}: omits "Fix", which the roster lists`,
     ])
     expect(collectValidListDefects(host, withList([...listed, 'Fixer']), roster)).toEqual([
       `${host}: lists "Fixer", which the roster does not`,
@@ -728,7 +850,7 @@ describe('GAP-2: agentType: values in dist ↔ declared roster', () => {
       )
     }
 
-    // Non-vacuity: dist currently carries ~66 spawn sites + the Learning hook
+    // Non-vacuity: dist currently carries ~66 spawn sites + the Curate hook
     // directive. Far fewer scanned means the regex or the corpus broke.
     expect(
       matchCount,
@@ -826,10 +948,10 @@ describe('GAP-3: orchestrator charter integrity', () => {
       if (!line.includes('`OPERATION: <mode>`')) {
         violations.push('the Code routing line does not tell a direct Code delegation to open with OPERATION: <mode>')
       }
-      // D-CODE-VARIANTS (AC-303): a mechanical edit goes to Code-edit, and Code keeps implement and issue-fix.
-      const editAt = line.indexOf('Code-edit')
-      if (editAt === -1 || !/^Code-edit \([^)]*`OPERATION: edit`/.test(line.slice(editAt))) {
-        violations.push('the Code routing line does not route `OPERATION: edit` to Code-edit')
+      // D-CODE-VARIANTS (AC-303): a mechanical edit goes to Refactor, and Code keeps implement and issue-fix.
+      const editAt = line.indexOf('Refactor')
+      if (editAt === -1 || !/^Refactor \([^)]*`OPERATION: edit`/.test(line.slice(editAt))) {
+        violations.push('the Code routing line does not route `OPERATION: edit` to Refactor')
       }
       if (/`edit`|OPERATION: edit/.test(editAt === -1 ? line : line.slice(0, editAt))) {
         violations.push('the Code routing line still routes edit to Code')
@@ -901,11 +1023,11 @@ describe('GAP-3: orchestrator charter integrity', () => {
       'the Code routing line does not tell a direct Code delegation to open with OPERATION: <mode>',
     )
 
-    // D-CODE-VARIANTS: the edit route must name the Code-edit variant, and Code must not keep it.
-    const noEditVariant = charter.replace('Code-edit (', 'Code (')
+    // D-CODE-VARIANTS: the edit route must name the Refactor variant, and Code must not keep it.
+    const noEditVariant = charter.replace('Refactor (', 'Code (')
     expect(noEditVariant, 'the seed must land').not.toBe(charter)
     expect(collectCharterContentViolations(noEditVariant)).toContain(
-      'the Code routing line does not route `OPERATION: edit` to Code-edit',
+      'the Code routing line does not route `OPERATION: edit` to Refactor',
     )
     const editOnCode = charter.replace('— `issue-fix` for', '— `edit` for mechanical changes, `issue-fix` for')
     expect(editOnCode, 'the seed must land').not.toBe(charter)

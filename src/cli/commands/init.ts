@@ -1031,7 +1031,7 @@ export const initCommand = new Command('init')
         'devflow-explore': 'codebase exploration + knowledge bases',
         'devflow-research': 'multi-type research with synthesis',
         'devflow-release': 'adaptive release with learned config',
-        'devflow-self-review': 'Simplify agent + Scrutinize agent',
+        'devflow-self-review': 'Polish agent + Harden agent',
         'devflow-bug-analysis': 'proactive bug finding, post-pipeline',
         'devflow-typescript': 'TypeScript patterns',
         'devflow-react': 'React patterns',
@@ -2322,7 +2322,7 @@ export const initCommand = new Command('init')
 
       // Memory hooks — Stop (memory-worker), SessionStart (session-start-memory),
       // PreCompact — through the same transform `devflow memory --enable/--disable`
-      // uses (D-FEATURES-NARROW-ONLY). Learning agent (spawned via
+      // uses (D-FEATURES-NARROW-ONLY). Curate agent (spawned via
       // session-start-context directive) handles decision/pitfall detection.
       // Knowledge is handled in-command via write-through (knowledge_writeback MDS partial).
       content = convergeMemoryHooks(content, memoryEnabled, devflowDir);
@@ -2338,7 +2338,7 @@ export const initCommand = new Command('init')
 
       // Legacy dream-worker hook cleanup — strip any stale spawn-dream-worker entry
       // left in settings.json by a prior install (session-start-context now spawns
-      // the Learning agent via directive).
+      // the Curate agent via directive).
       content = removeDreamHook(content);
 
       // Strip Devflow-managed teammateMode ("auto"). User-set values (e.g. "tmux") are preserved.

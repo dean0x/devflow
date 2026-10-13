@@ -5,7 +5,7 @@
  * `decisions_load` (src/assets/commands/_partials/_decisions.mds) reads the
  * learning index from the MAIN worktree's ledger, else the checkout's toplevel,
  * else the start directory — the rule the learning hooks apply
- * (D-LEDGER-MAIN-WORKTREE), so a command reads the index the Learning agent
+ * (D-LEDGER-MAIN-WORKTREE), so a command reads the index the Curate agent
  * writes. `knowledge_load`/`knowledge_writeback` (_knowledge.mds) resolve the
  * checkout's toplevel, else the start directory: knowledge bases are committed
  * per branch. `docs_root` (_docs_root.mds, D-DOCS-ROOT) applies the knowledge rule

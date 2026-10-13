@@ -7,17 +7,17 @@
  *   - tests/guards/agent-config.test.ts  pins every row against the agent's
  *     frontmatter, and holds the denylist, the preload sets and the tool/body
  *     arm to it;
- *   - tests/learning-agent.test.ts       pins the Learning row;
+ *   - tests/curate-agent.test.ts       pins the Curate row;
  *   - tests/decisions/config.test.ts     pins the tuning module's default model
- *     to the Learning row.
+ *     to the Curate row.
  *
  * One table instead of one copy per file is what lets a shipped tier change be
  * an edit to a row, with the frontmatter line it describes, and nothing else.
  *
  * D-OMIT-CLAUDEMD-SET: twelve agents ship `omitClaudeMd: true`: Validate, Git, Triage,
- * Evaluate, Test, Research, Knowledge, Tracker, Learning, Skim, Synthesize and Explore.
- * Code, Scrutinize and Simplify keep CLAUDE.md, because they write or rewrite code to the
- * project's conventions; Review, Design and Diagnose are not in the set. A live probe (Claude Code 2.1.296) found that the flag drops BOTH the CLAUDE.md files and
+ * Evaluate, Test, Research, Knowledge, Tracker, Curate, Skim, Synthesize and Explore.
+ * Code, Harden and Polish keep CLAUDE.md, because they write or rewrite code to the
+ * project's conventions; Review, Design and Debug are not in the set. A live probe (Claude Code 2.1.296) found that the flag drops BOTH the CLAUDE.md files and
  * `~/.claude/rules/**`, where devflow installs its rules (`~/.claude/rules/devflow/*.md`):
  * an agent without the flag carries an `instructions` attachment of CLAUDE.md plus the rule
  * files, an agent with it carries none. That attachment is about 7K tokens per spawn in this
@@ -25,7 +25,7 @@
  * agents the rules, and the in-body CORE_RULES_DIGEST replaces them: each omitting agent
  * body carries exactly the digest lines its row declares, and
  * tests/guards/core-rules-digest.test.ts holds the bodies to the rows. An agent whose body
- * needs more of CLAUDE.md than the digest states reads it itself (Learning does).
+ * needs more of CLAUDE.md than the digest states reads it itself (Curate does).
  */
 
 import type { EffortLevel } from '../../src/core/agent-models.js';
@@ -88,7 +88,7 @@ export interface AgentConfigRow {
  * allowlist and reach their tracker servers through whole-server entries the installer
  * stamps (D-GIT-ROW, D-TRACKER-ROW).
  *
- * Code and Research deny exactly this list. Scrutinize and Simplify deny it plus
+ * Code and Research deny exactly this list. Harden and Polish deny it plus
  * `Skill`, and `mcp__*` as their own `extra` (D-SCAN-IN-CODE): the only wildcards
  * a denylist may hold, which MCP_DENY_AGENTS names. `Artifact`, `ListAgents` and
  * `ReportFindings` appear on the registry observed while the table was drafted
@@ -120,7 +120,7 @@ export const SHARED_DENYLIST: readonly string[] = [
  * instead of loading a scanner's tool set into each of their spawns. `mcp__*` is the one
  * wildcard a denylist may hold, and only these two agents may hold it.
  */
-export const MCP_DENY_AGENTS: readonly string[] = ['scrutinize', 'simplify'];
+export const MCP_DENY_AGENTS: readonly string[] = ['harden', 'polish'];
 
 /**
  * D-CORE-RULES-DIGEST: the core rules an agent that omits the rules keeps in its own body.
@@ -200,8 +200,8 @@ const TEST_TOOLS: readonly string[] = [
  *
  * D-PRELOAD-TRIM: the preloads that left, because the agent's body never reads
  * the skill: `testing` from Validate and Test, `software-design` from Evaluate,
- * the five pattern skills from Diagnose (now loaded on demand, see
- * DIAGNOSE_FOCUS_SKILLS) and `apply-decisions` from Learning.
+ * the five pattern skills from Debug (now loaded on demand, see
+ * DEBUG_FOCUS_SKILLS) and `apply-decisions` from Curate.
  */
 export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
   code: {
@@ -213,12 +213,12 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     digest: [],
   },
   /**
-   * D-VARIANT-SLUGS: Code-fix and Code-edit are their own `devflow agents` slugs, shipped with
+   * D-VARIANT-SLUGS: Fix and Refactor are their own `devflow agents` slugs, shipped with
    * Code's model, effort and tool policy. A user override of `code` does not reach them, because the
    * installed frontmatter of each variant is the authority for its own tier. Their preloads are held
    * by tests/guards/code-preload.test.ts, which is why `skills` is not pinned here.
    */
-  'code-fix': {
+  'fix': {
     model: 'sonnet',
     effort: 'high',
     policy: { kind: 'deny', extra: [] },
@@ -226,7 +226,7 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     skills: null,
     digest: [],
   },
-  'code-edit': {
+  'refactor': {
     model: 'sonnet',
     effort: 'high',
     policy: { kind: 'deny', extra: [] },
@@ -234,7 +234,7 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     skills: null,
     digest: [],
   },
-  scrutinize: {
+  harden: {
     model: 'opus',
     effort: 'medium',
     policy: { kind: 'deny', extra: ['Skill', 'mcp__*'] },
@@ -242,7 +242,7 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     skills: ['quality-gates', 'software-design', 'worktree-support', 'apply-decisions', 'apply-feature-knowledge'],
     digest: [],
   },
-  simplify: {
+  polish: {
     model: 'sonnet',
     effort: 'medium',
     policy: { kind: 'deny', extra: ['Skill', 'mcp__*'] },
@@ -305,7 +305,7 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     skills: ['worktree-support', 'apply-decisions', 'gap-analysis', 'design-review', 'apply-feature-knowledge'],
     digest: [],
   },
-  diagnose: {
+  debug: {
     model: 'opus',
     effort: 'medium',
     policy: { kind: 'allow', tools: ['Read', 'Grep', 'Glob', 'Bash', 'Write', 'Skill'] },
@@ -330,23 +330,23 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     digest: ['context-economy', 'untrusted-input', 'no-secrets'],
   },
   /**
-   * D-LEARNING-SHIPPED-ROW: Learning keeps the model and the absent effort that main ships,
+   * D-LEARNING-SHIPPED-ROW: Curate keeps the model and the absent effort that main ships,
    * and omits CLAUDE.md and the rules. An A/B run over frozen batches decided the tier: the
    * cheaper candidate (sonnet at high effort) fell clearly short of the capture bar, and the
    * opus-at-medium fallback came in just under it. Series 2's other changes stay: no preload
    * and the same Read/Bash/Glob/Grep tools.
    *
-   * The same A/B showed that without the injected CLAUDE.md context Learning stops retiring
+   * The same A/B showed that without the injected CLAUDE.md context Curate stops retiring
    * entries as Encoded, because its Encoded check compares a lesson against the rule that
-   * already states it. The explicit Read replaces that context: Learning reads the root
+   * already states it. The explicit Read replaces that context: Curate reads the root
    * CLAUDE.md and the installed rule files itself, once per run, before its first
-   * already-encoded comparison (the Inputs section of learning.md; tests/learning-agent.test.ts
+   * already-encoded comparison (the Inputs section of curate.md; tests/curate-agent.test.ts
    * holds the step and its position). A change of tier is an edit to this row and to the
-   * `model:` and `effort:` lines of learning.md, and the default model in
+   * `model:` and `effort:` lines of curate.md, and the default model in
    * src/core/learning-tuning-config.ts, which tests/decisions/config.test.ts holds equal to
    * this row.
    */
-  learning: {
+  curate: {
     model: 'opus',
     effort: null,
     policy: { kind: 'allow', tools: ['Read', 'Bash', 'Glob', 'Grep'] },
@@ -464,12 +464,12 @@ export function deriveOmitDigests(
 export const OMIT_CLAUDE_MD_DIGESTS: ReadonlyMap<string, readonly DigestKey[]> = deriveOmitDigests(AGENT_CONFIG);
 
 /**
- * D-DIAGNOSE-FOCUS-SKILLS: the pattern skills the Diagnose agent loads on demand
+ * D-DIAGNOSE-FOCUS-SKILLS: the pattern skills the Debug agent loads on demand
  * for each focus, now that none is preloaded. The mapping is the agent's Focus
  * Areas table, held literally. `complexity` is mapped to `functional` because
  * it would otherwise load under no focus.
  */
-export const DIAGNOSE_FOCUS_SKILLS: Readonly<Record<string, readonly string[]>> = {
+export const DEBUG_FOCUS_SKILLS: Readonly<Record<string, readonly string[]>> = {
   security: ['security'],
   functional: ['regression', 'reliability', 'complexity'],
   integration: ['regression', 'consistency'],

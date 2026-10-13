@@ -19,7 +19,7 @@
  *                 block's grammar line, which names the LEARNING field of the line the
  *                 resolver prints: SETTINGS_LINE_RE is pinned and the field does not
  *                 move, so the 8 off hosts that keep the block keep that line;
- *   completeness  every artifact that holds a token has an off counterpart, the Learning
+ *   completeness  every artifact that holds a token has an off counterpart, the Curate
  *                 agent excepted (it runs only when learning is on);
  *   frontmatter   an off agent's frontmatter is its on frontmatter minus the preload line;
  *   settings      14 hosts carry the settings block when learning is on, 8 when it is off;
@@ -341,7 +341,7 @@ describe('completeness: every artifact that holds a token has an off counterpart
   }
 
   /** The one artifact that is allowed to hold learning text and have no variant: it runs only when learning is on. */
-  const EXEMPT = 'agents/learning.md'
+  const EXEMPT = 'agents/curate.md'
 
   function collectMissingCounterparts(artifacts: ReadonlyArray<{ rel: string; text: string }>, hasOff: (rel: string) => boolean): string[] {
     return artifacts
@@ -352,7 +352,7 @@ describe('completeness: every artifact that holds a token has an off counterpart
   it('every artifact with a token outside the settings grammar has a file under dist/learning-off', () => {
     const artifacts = collectArtifacts()
     expect(artifacts.length, 'artifacts scanned').toBeGreaterThanOrEqual(25)
-    expect(artifacts.map(a => a.rel), 'the Learning agent is among them, so the exemption is exercised').toContain(EXEMPT)
+    expect(artifacts.map(a => a.rel), 'the Curate agent is among them, so the exemption is exercised').toContain(EXEMPT)
     expect(collectMissingCounterparts(artifacts, rel => existsSync(path.join(OFF_DIR, rel)))).toEqual([])
   })
 
@@ -361,7 +361,7 @@ describe('completeness: every artifact that holds a token has an off counterpart
     for (const a of artifacts) expect(existsSync(path.join(OFF_DIR, a.rel)), a.rel).toBe(true)
   })
 
-  it('known-bad probes: an artifact with a token and no variant is reported, and the Learning agent is not', () => {
+  it('known-bad probes: an artifact with a token and no variant is reported, and the Curate agent is not', () => {
     const probe = [
       { rel: 'agents/triage.md', text: 'Use DECISIONS_CONTEXT.' },
       { rel: EXEMPT, text: 'Reads learning/decisions.md.' },
@@ -373,7 +373,7 @@ describe('completeness: every artifact that holds a token has an off counterpart
 })
 
 describe('an off agent\'s frontmatter is its on frontmatter minus the preload line (AC-131)', () => {
-  const AGENTS_WITH_PRELOAD = ['code', 'design', 'diagnose', 'knowledge', 'research', 'review', 'scrutinize', 'triage'] as const
+  const AGENTS_WITH_PRELOAD = ['code', 'design', 'debug', 'knowledge', 'research', 'review', 'harden', 'triage'] as const
 
   /** Named collector: how an off frontmatter differs from the on frontmatter beyond the preload line. */
   function collectFrontmatterDefects(name: string, on: string, off: string): string[] {

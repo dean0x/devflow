@@ -354,16 +354,16 @@ describe('resolveEffective', () => {
     });
   });
 
-  // D-LEARNING-MODEL-PRECEDENCE: the session-start hook lets a Learning mapping
+  // D-LEARNING-MODEL-PRECEDENCE: the session-start hook lets a Curate mapping
   // decide the spawn's model by omitting model=, so the installed frontmatter is
   // what runs. With the proxy off an external mapping model is dormant, and the
-  // frontmatter the reapply writes must be the shipped Learning model.
-  it('learning: a dormant external mapping resolves to the shipped Learning model while the proxy is off', () => {
-    const mapping = makeMapping({ learning: { model: 'gpt-5.5' } });
-    const shipped = { learning: { model: 'opus' } };
+  // frontmatter the reapply writes must be the shipped Curate model.
+  it('curate: a dormant external mapping resolves to the shipped Curate model while the proxy is off', () => {
+    const mapping = makeMapping({ curate: { model: 'gpt-5.5' } });
+    const shipped = { curate: { model: 'opus' } };
 
-    expect(resolveEffective('learning', mapping, shipped, false).model).toBe('opus');
-    expect(resolveEffective('learning', mapping, shipped, true).model).toBe('gpt-5.5');
+    expect(resolveEffective('curate', mapping, shipped, false).model).toBe('opus');
+    expect(resolveEffective('curate', mapping, shipped, true).model).toBe('gpt-5.5');
   });
 });
 

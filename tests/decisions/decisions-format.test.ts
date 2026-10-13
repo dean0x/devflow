@@ -1119,21 +1119,21 @@ describe('json-helper.cjs assign-anchor renders through decisions-format', () =>
 });
 
 // ---------------------------------------------------------------------------
-// Learning agent content-presence assertions (AC-F1, AC-F2)
+// Curate agent content-presence assertions (AC-F1, AC-F2)
 // ---------------------------------------------------------------------------
-// These lightweight checks verify that the Learning agent instructions
-// (src/assets/agents/learning.md) contain the required creation-bar elements. They do
+// These lightweight checks verify that the Curate agent instructions
+// (src/assets/agents/curate.md) contain the required creation-bar elements. They do
 // not test LLM judgment — that is validated by the Test agent via scenarios.
 // They lock the prose contract so the agent cannot accidentally regress on the
 // key phrases.
 
-describe('Learning agent creation-bar contract', () => {
-  const AGENT_PATH = path.join(ROOT, 'src/assets/agents/learning.md');
+describe('Curate agent creation-bar contract', () => {
+  const AGENT_PATH = path.join(ROOT, 'src/assets/agents/curate.md');
 
   let agentContent: string;
   beforeAll(() => {
-    // D-MAINTAIN-ON-DUE: Part 2's ladder lives in learning/maintain.md; a run with a due entry sees both, body first.
-    agentContent = `${fs.readFileSync(AGENT_PATH, 'utf8')}\n${readAgentReference('learning/maintain.md')}`;
+    // D-MAINTAIN-ON-DUE: Part 2's ladder lives in curate/maintain.md; a run with a due entry sees both, body first.
+    agentContent = `${fs.readFileSync(AGENT_PATH, 'utf8')}\n${readAgentReference('curate/maintain.md')}`;
   });
 
   it('contains abstain-by-default stance', () => {

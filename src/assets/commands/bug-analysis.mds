@@ -217,11 +217,11 @@ Determine which focus analyzers to run using `CHANGED_FILES` (already computed i
 **Requires:** DIFF_RANGE, ANALYSIS_DIR, ACTIVE_FOCUSES, STATIC_FINDINGS, ACCEPTANCE_RULES, PLAN_CONTEXT, FEATURE_KNOWLEDGE
 <!-- learning:end -->
 
-Spawn ALL active Diagnose agents **in a single message** (parallel, NOT background):
+Spawn ALL active Debug agents **in a single message** (parallel, NOT background):
 
 For each active focus, spawn:
 ```
-Agent(subagent_type="Diagnose", run_in_background=false):
+Agent(subagent_type="Debug", run_in_background=false):
 "Analyze focusing on {focus}.
 FOCUS: {focus}
 DIFF_COMMAND: git diff {DIFF_RANGE}
@@ -325,10 +325,10 @@ Run `/resolve` to process and fix these findings.
 │  └─ Detect active focuses (security + functional always; integration + usability conditional)
 │
 ├─ Phase 5: Bug Analysis (PARALLEL)
-│  ├─ Diagnose agent: security (+ STATIC_FINDINGS)
-│  ├─ Diagnose agent: functional
-│  ├─ Diagnose agent: integration (conditional)
-│  └─ Diagnose agent: usability (conditional)
+│  ├─ Debug agent: security (+ STATIC_FINDINGS)
+│  ├─ Debug agent: functional
+│  ├─ Debug agent: integration (conditional)
+│  └─ Debug agent: usability (conditional)
 │
 ├─ Phase 6: Synthesis
 │  └─ Synthesize agent (mode: bug-analysis)
@@ -365,7 +365,7 @@ Run `/resolve` after `/bug-analysis` to fix identified bugs. `/resolve` automati
 2. **Parallel, not background** — Analyzers spawn in one message with `run_in_background=false`
 3. **Static + semantic** — Two complementary tracks, each validates the other
 4. **Incremental by default** — Only analyze new changes unless `--full` specified
-5. **Verify before reporting** — Diagnose agents self-verify every finding
+5. **Verify before reporting** — Debug agents self-verify every finding
 6. **Honest reporting** — Display risk level and counts directly from synthesis
 
 ## Phase Completion Checklist

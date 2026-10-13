@@ -8,7 +8,7 @@
  * The reported bug: `devflow init --no-learning` printed "Learning: disabled"
  * while every OTHER repo — one holding a stale `learning: true` an earlier init
  * wrote, one with no config, a non-git cwd — kept capturing and spawning the
- * Learning agent, because the runtime gates read the per-repo config. Those
+ * Curate agent, because the runtime gates read the per-repo config. Those
  * per-repo keys are now retired: a stale value decides nothing either way, and
  * init's next config write drops it.
  *

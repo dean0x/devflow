@@ -4,7 +4,7 @@ import { getDevFlowDirectory } from '../targets/claude-code/claude-paths.js';
 import { getLearningTuningConfigPath } from './project-paths.js';
 
 /**
- * Closed set of valid model aliases for the Learning agent.
+ * Closed set of valid model aliases for the Curate agent.
  * Any on-disk value outside this set is silently ignored — parse-don't-validate.
  */
 export type LearningModelAlias = 'opus' | 'sonnet' | 'haiku';
@@ -16,27 +16,27 @@ function isValidModel(value: unknown): value is LearningModelAlias {
 }
 
 /**
- * Merged learning agent tuning configuration from global and project-level config files.
+ * Merged curate agent tuning configuration from global and project-level config files.
  *
- * The Learning agent has no daily-run cap or throttle: session-start-context emits
+ * The Curate agent has no daily-run cap or throttle: session-start-context emits
  * its spawn directive only when the learning queue is non-empty (or a stale
  * .processing batch exists), so queue emptiness is the natural gate.
  * session-start-context reads these config files directly (same project →
  * global → default precedence) when resolving the model for the directive.
  */
 export interface LearningTuningConfig {
-  /** Model alias for the Learning agent. Closed domain: 'opus' | 'sonnet' | 'haiku'. Default: the shipped Learning model (DEFAULTS). */
+  /** Model alias for the Curate agent. Closed domain: 'opus' | 'sonnet' | 'haiku'. Default: the shipped Curate model (DEFAULTS). */
   model: LearningModelAlias;
   /** Emit verbose logs when true. Default: false */
   debug: boolean;
 }
 
 /**
- * D-LEARNING-SHIPPED-ROW: the default model is the model the Learning agent ships
- * with, the `model:` line of src/assets/agents/learning.md. With no layer
+ * D-LEARNING-SHIPPED-ROW: the default model is the model the Curate agent ships
+ * with, the `model:` line of src/assets/agents/curate.md. With no layer
  * configuring a model, the spawn directive names none and that line decides, so a
  * different default here would describe a run that never happens.
- * tests/decisions/config.test.ts holds this value equal to the Learning row of the
+ * tests/decisions/config.test.ts holds this value equal to the Curate row of the
  * agent-config table, which a change of the shipped tier edits with the frontmatter.
  */
 const DEFAULTS: LearningTuningConfig = {
@@ -91,7 +91,7 @@ function readConfigFile(filePath: string): string | null {
 }
 
 /**
- * Load and merge learning agent tuning configuration.
+ * Load and merge curate agent tuning configuration.
  *
  * Priority (highest wins): project config → global config → defaults.
  *

@@ -4305,7 +4305,7 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
     });
 
     // The hook is bash and never runs the TypeScript key canonicalisation, so a mapping
-    // file written before the Learning agent became Curate still names the agent `learning`.
+    // file written before the Curate agent became Curate still names the agent `learning`.
     describe('the pre-rename agents.learning key', () => {
       it('counts as the mapping layer when agents.curate is absent: it outranks the global file and omits model=', () => {
         setMapping({ learning: { model: 'opus' } });
@@ -4630,7 +4630,7 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
 //
 // Sections 1 and 2 read the learning folder's files into the session context
 // (the TL;DR lines and the learning model), name the index the model is told to
-// read and pass on to the agents it delegates to, and send the Learning agent to
+// read and pass on to the agents it delegates to, and send the Curate agent to
 // the queue when it holds turns. A repository can commit any of these, or the
 // folder itself, as a symbolic link to a file elsewhere on the machine, so a file
 // a link leads to is treated as absent and each refusal is logged once. MARKER is
@@ -4714,7 +4714,7 @@ describe('session-start-context never reads through a symbolic link under .devfl
     expect(refusals(), 'the refusal is logged once').toHaveLength(1);
   });
 
-  it('a linked learning.json does not choose the Learning agent\'s model', () => {
+  it('a linked learning.json does not choose the Curate agent\'s model', () => {
     fs.writeFileSync(path.join(learningDir, '.pending-turns.jsonl'), '{"role":"user","content":"we chose X over Y","ts":1}\n');
     linkOutside('learning.json', JSON.stringify({ model: 'haiku' }));
 
@@ -4728,7 +4728,7 @@ describe('session-start-context never reads through a symbolic link under .devfl
     expect(refusals(), 'the refusal is logged once').toHaveLength(1);
   });
 
-  it('a linked queue sends no Learning agent to it', () => {
+  it('a linked queue sends no Curate agent to it', () => {
     linkOutside('.pending-turns.jsonl', `{"role":"user","content":"${MARKER}","ts":1}\n`);
 
     const linked = run();
@@ -4742,7 +4742,7 @@ describe('session-start-context never reads through a symbolic link under .devfl
     expect(contextOf(run().stdout)).toContain('--- LEARNING MAINTENANCE ---');
   });
 
-  it('a linked stale batch sends no Learning agent to it', () => {
+  it('a linked stale batch sends no Curate agent to it', () => {
     const batch = path.join(learningDir, '.pending-turns.processing');
     linkOutside('.pending-turns.processing', `{"role":"user","content":"${MARKER}","ts":1}\n`);
     // The age check reads the link's own mtime (`stat` without -L), so the link is
