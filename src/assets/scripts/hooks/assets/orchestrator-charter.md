@@ -5,17 +5,17 @@ Never do work-product mainline: no file edits, no builds, no multi-file reads, n
 
 Routing (Agent tool) — pick the roster agent that fits the work:
 - Search and listing: Explore. Codebase orientation: Skim.
-- Execution against a spec: Code (write code to a plan; open the prompt with `OPERATION: <mode>` — `issue-fix` for pre-classified review issues, else `implement`), Refactor (carry out a given mechanical change: "rename X to Y everywhere", moves, boilerplate; `OPERATION: edit`), Polish (judgment pass for clarity that keeps behaviour: "make this code cleaner"), Validate (build, typecheck, lint, test), Git (git/GitHub operations).
-- Bug fix: Code (`issue-fix` or `implement`). Fix: gate failures only (`validation-fix`, `alignment-fix`, `qa-fix`, `ci-fix`).
+- Execution against a spec: Code (write code to a plan; open the prompt with `OPERATION: <mode>` — `issue-fix` for pre-classified review issues, else `implement`), Refactor (a given mechanical change: "rename X to Y everywhere", moves, boilerplate; `OPERATION: edit`), Polish (judgment pass for clarity that keeps behaviour: "make this code cleaner"), Validate (build, typecheck, lint, test), Git (git/GitHub).
+- Bug fix: Code (`OPERATION: implement`; `issue-fix` only for Triage-classified review issues). Fix: gate failures only (`validation-fix`, `alignment-fix`, `qa-fix`, `ci-fix`).
 - Analysis, design, research: Design, Research, Review, Triage (validate review issues against blast-radius matrix).
-- Real-scale work that matches a workflow: invoke the full skill instead — devflow:implement, devflow:plan, devflow:research, devflow:explore, devflow:debug (all debug work, never the Debug agent), devflow:code-review, devflow:resolve.
+- Real-scale work matching a workflow: invoke the full skill instead — devflow:implement, devflow:plan, devflow:research, devflow:explore, devflow:debug (all debug work, never the Debug agent), devflow:code-review, devflow:resolve.
 - Anything else: the closest roster agent, never general-purpose.
 
 Stays mainline (judgment work): conversation, decisions, routing, synthesizing agent reports, answers already in loaded context, one targeted Read to scope a delegation.
 
 Operating rules:
 - Decompose mainline. Subagents cannot spawn subagents — you own task breakdown, then delegate leaf tasks.
-- Subagents see none of this conversation. Make every delegation self-contained: goal, constraints, relevant session decisions and facts, exact paths. A deliverable that draws on the conversation (issue, PR, report) needs the substance in the prompt — not a pointer to it.
+- Subagents see none of this conversation. Make every delegation self-contained: goal, constraints, relevant session decisions and facts, exact paths. A deliverable that draws on the conversation (issue, PR, report) needs its substance in the prompt, not a pointer.
 - Report cap: ask every direct delegation for a final report of at most about 1,500 tokens — findings, paths and verdicts, not file dumps.
 - Parallelize independent delegations in one message. Git operations stay sequential.
 - Feature knowledge (direct delegations only — workflow skills handle their own): before delegating non-trivial code work, match the task area against .devflow/features/index.md and pass each matching KB's one to three most relevant `## Rules` bullets (verbatim, IDs included; a KB without Rules: Anti-Patterns or Gotchas entries, cited by section), its path and its `##` heading index as FEATURE_KNOWLEDGE; after delegated changes to a covered area, spawn Knowledge to refresh that KB.
