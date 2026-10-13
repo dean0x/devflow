@@ -223,6 +223,8 @@ function capsFor(stream: ParsedStream, where: string, limits: Limits): CapNotice
   const caps: CapNotice[] = [];
   if (stream.stats.linesCapHit) caps.push({ kind: 'maxLines', limit: limits.maxLines, where });
   if (stream.stats.oversizeLines > 0) caps.push({ kind: 'maxLineChars', limit: limits.maxLineChars, where });
+  if (stream.stats.pathsCapHit) caps.push({ kind: 'maxReadPaths', limit: limits.maxReadPaths, where });
+  if (stream.stats.citationIdsCapHit) caps.push({ kind: 'maxCitationIds', limit: limits.maxCitationIds, where });
   return caps;
 }
 
@@ -247,7 +249,7 @@ async function loadSession(files: SessionFiles, opts: AuditOptions): Promise<Loa
       segments = buildSegments(files.sessionId, stream.commands, stream.skillCalls);
       spawns = stream.spawns;
       workflowRuns = stream.workflowRuns;
-      main = { requests: stream.requests, segments, skillCalls: stream.skillCalls };
+      main = { requests: stream.requests, segments, skillCalls: stream.skillCalls, commands: stream.commands };
       skipped = addSkips(skipped, streamSkips(stream));
       caps.push(...capsFor(stream, `${sanitizeText(files.sessionId)}.jsonl`, limits));
       lines += stream.stats.lines;
@@ -301,6 +303,20 @@ async function loadSession(files: SessionFiles, opts: AuditOptions): Promise<Loa
     })),
     workflowRuns,
   );
+  // D-AUDIT-FIRST-TURN: a spawn is a sibling when another tool_use of the same parent message
+  // launched a spawn too. Nested spawns live in their parent subagent's transcript, so every
+  // stream of the session contributes its spawns.
+  const messageOfUse = new Map<string, string>();
+  const spawnsPerMessage = new Map<string, number>();
+  for (const spawn of [...spawns, ...loaded.flatMap(l => l.stream.spawns)]) {
+    if (spawn.messageId === undefined || messageOfUse.has(spawn.toolUseId)) continue;
+    messageOfUse.set(spawn.toolUseId, spawn.messageId);
+    spawnsPerMessage.set(spawn.messageId, (spawnsPerMessage.get(spawn.messageId) ?? 0) + 1);
+  }
+  const isSibling = (toolUseId: string | null): boolean => {
+    const message = toolUseId === null ? undefined : messageOfUse.get(toolUseId);
+    return message !== undefined && (spawnsPerMessage.get(message) ?? 0) > 1;
+  };
   const subagents: SubagentData[] = [];
   for (const l of loaded) {
     const segment = links.get(l.agentId);
@@ -310,6 +326,8 @@ async function loadSession(files: SessionFiles, opts: AuditOptions): Promise<Loa
       agentType: l.meta.agentType ?? 'unknown',
       segment,
       requests: l.stream.requests,
+      signals: l.stream.signals,
+      sibling: isSibling(l.meta.toolUseId),
     });
   }
 
