@@ -697,14 +697,8 @@ const STAGGER_WINDOW_MS = 300_000;
  *                     first turns that read more than the prefix plus 1,000 tokens.
  */
 function staggeredSpawns(records: readonly SpawnRecord[]): ReadonlySet<SpawnRecord> {
-  const lanes = new Map<string, SpawnRecord[]>();
-  for (const record of records) {
-    if (record.startMs === null || record.endMs === null) continue;
-    const key = `${record.session}\0${record.agentType}`;
-    const lane = lanes.get(key) ?? [];
-    lane.push(record);
-    lanes.set(key, lane);
-  }
+  const timed = records.filter(record => record.startMs !== null && record.endMs !== null);
+  const lanes = groupBy(timed, record => `${record.session}\0${record.agentType}`);
   const staggered = new Set<SpawnRecord>();
   for (const lane of lanes.values()) {
     lane.sort((a, b) => (a.startMs ?? 0) - (b.startMs ?? 0));
@@ -754,20 +748,26 @@ function sum(values: readonly number[]): number {
   return values.reduce((a, b) => a + b, 0);
 }
 
+function groupBy<T>(items: readonly T[], key: (item: T) => string): Map<string, T[]> {
+  const groups = new Map<string, T[]>();
+  for (const item of items) {
+    const k = key(item);
+    const group = groups.get(k);
+    if (group === undefined) groups.set(k, [item]);
+    else group.push(item);
+  }
+  return groups;
+}
+
 function withSignals(records: readonly SpawnRecord[]): ReadonlyArray<{ readonly record: SpawnRecord; readonly signals: ParsedSignals }> {
   return records.flatMap(record => (record.signals === null ? [] : [{ record, signals: record.signals }]));
 }
 
 /** D-AUDIT-READS: re-read, ranged and ledger-read counts per agent type, from the parser's per-spawn counts. */
 function readRows(records: readonly SpawnRecord[]): ReadRow[] {
-  const groups = new Map<string, ParsedSignals[]>();
-  for (const { record, signals } of withSignals(records)) {
-    const list = groups.get(record.agentType) ?? [];
-    list.push(signals);
-    groups.set(record.agentType, list);
-  }
-  return [...groups.entries()]
-    .map(([agentType, list]) => {
+  return [...groupBy(withSignals(records), x => x.record.agentType).entries()]
+    .map(([agentType, entries]) => {
+      const list = entries.map(x => x.signals);
       const calls = sum(list.map(x => x.reads.calls));
       const rereads = sum(list.map(x => x.reads.rereads));
       const ranged = sum(list.map(x => x.reads.ranged));
@@ -889,12 +889,6 @@ const PLAN_DOCUMENT_RE = /^\S+\.md$/i;
  * the run. Only `/implement` rows carry the split.
  */
 function distributionRows(runs: readonly RunAcc[]): WorkflowDistributionRow[] {
-  const byWorkflow = new Map<string, RunAcc[]>();
-  for (const run of runs) {
-    const list = byWorkflow.get(run.workflow) ?? [];
-    list.push(run);
-    byWorkflow.set(run.workflow, list);
-  }
   const spawnStat = (values: readonly number[]): DistStat => ({ median: quantile(values, 0.5), p90: quantile(values, 0.9) });
   const ceStat = (values: readonly number[]): DistStat => ({
     median: Math.round(quantile(values, 0.5)),
@@ -902,7 +896,7 @@ function distributionRows(runs: readonly RunAcc[]): WorkflowDistributionRow[] {
   });
   const runCe = (run: RunAcc): number => run.mainCe + run.subCe;
 
-  return [...byWorkflow.entries()]
+  return [...groupBy(runs, run => run.workflow).entries()]
     .map(([workflow, list]): WorkflowDistributionRow => {
       const types = new Set(list.flatMap(run => [...run.types.keys()]));
       const operations = new Set(list.flatMap(run => [...run.codeFix.keys()]));
@@ -1214,12 +1208,7 @@ export function buildReport(input: ReportInput): Result<AuditReport, AuditError>
 
   // Agent types and spawn bins.
   const staggered = staggeredSpawns(records);
-  const recordsByType = new Map<string, SpawnRecord[]>();
-  for (const record of records) {
-    const list = recordsByType.get(record.agentType) ?? [];
-    list.push(record);
-    recordsByType.set(record.agentType, list);
-  }
+  const recordsByType = groupBy(records, record => record.agentType);
   const typeRows: AgentTypeRow[] = [...types.entries()]
     .map(([agentType, t]) => {
       const group = recordsByType.get(agentType) ?? [];

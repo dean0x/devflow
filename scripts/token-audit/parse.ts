@@ -733,6 +733,7 @@ export async function parseTranscriptLines(
     previous = request;
   }
 
+  const capHits = signals.capHits();
   return {
     requests,
     spawns,
@@ -747,8 +748,8 @@ export async function parseTranscriptLines(
       syntheticDropped,
       chunksCollapsed,
       linesCapHit,
-      pathsCapHit: signals.capHits().paths,
-      citationIdsCapHit: signals.capHits().citationIds,
+      pathsCapHit: capHits.paths,
+      citationIdsCapHit: capHits.citationIds,
     },
   };
 }

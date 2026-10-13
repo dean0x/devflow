@@ -1878,10 +1878,10 @@ function scrub(io, input, output) {
 
 /**
  * @param {CallResult} r
- * @returns {boolean}
+ * @returns {boolean}  true when the call failed with an HTTP 5xx answer
  */
 function isServerError(r) {
-  return answered(r) && /HTTP 5[0-9]{2}\b/.test(r.stderr);
+  return !r.ok && answered(r) && /HTTP 5[0-9]{2}\b/.test(r.stderr);
 }
 
 /**
@@ -1894,8 +1894,8 @@ function isServerError(r) {
  */
 function ghWrite(io, args) {
   let r = gh(io, args, LINE_MAX_BUFFER);
-  if (!r.ok && isServerError(r)) r = gh(io, args, LINE_MAX_BUFFER);
-  return { ok: r.ok, serverError: !r.ok && isServerError(r) };
+  if (isServerError(r)) r = gh(io, args, LINE_MAX_BUFFER);
+  return { ok: r.ok, serverError: isServerError(r) };
 }
 
 /**
@@ -2305,12 +2305,13 @@ function readinessDegraded(pr, reason, known) {
  * @returns {Outcome}
  */
 function runReadiness(io, args, deps) {
+  const unreadApproval = approvalText(args.requireNonAuthor, null);
   const decision = readDecision(io, args.pr);
-  if (!decision.ok) return readinessDegraded(args.pr, decision.reason, { approval: approvalText(args.requireNonAuthor, null) });
+  if (!decision.ok) return readinessDegraded(args.pr, decision.reason, { approval: unreadApproval });
   const decisionText = decision.value === null ? 'none' : decision.value === 'UNRECOGNISED' ? 'unrecognised' : decision.value;
   const threads = readThreads(io, args.pr);
   if (!threads.ok) {
-    return readinessDegraded(args.pr, threads.reason, { decision: decisionText, approval: approvalText(args.requireNonAuthor, null) });
+    return readinessDegraded(args.pr, threads.reason, { decision: decisionText, approval: unreadApproval });
   }
   const ci = readCi(io, args.pr);
   const fields = readEvidence(io, args.pr, deps);
