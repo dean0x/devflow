@@ -101,7 +101,9 @@ When a ticket requires multiple sequential Code agent phases, each Code agent ap
 
 Before you author the workflow script, read `{ledger}/.devflow/learning/index.md`. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
 
-The script body cannot perform this read — you (the main model) do it before authoring. Then inject the relevant DECISIONS_CONTEXT into the prompts of the Code, Code-fix, Design, Knowledge, Review and Scrutinize agents, using the `devflow:apply-decisions` consumption algorithm (scan index → Read relevant entries → cite verbatim IDs in agent prompts). Those are the agent types above whose contract declares it; every other agent type gets no decisions context.
+The script body cannot perform this read — you (the main model) do it before authoring. Then inject the relevant DECISIONS_CONTEXT into the prompts of the Code, Code-fix, Design, Knowledge, Review and Scrutinize agents, which follow `devflow:apply-decisions`. Those are the agent types above whose contract declares it; every other agent type gets no decisions context.
+
+{{decisions.decisions_slice()}} The script carries one `DECISIONS_CONTEXT` for every agent, so cut it once, over the whole run.
 
 <!-- learning:end -->
 @end

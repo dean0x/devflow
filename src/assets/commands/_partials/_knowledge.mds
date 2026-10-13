@@ -96,7 +96,7 @@ FEATURE_NAME: {human-readable name}
 DIRECTORIES: {list of primary directories touched by this workflow}
 FILES_CHANGED: {list of files changed}
 <!-- learning:on -->
-DECISIONS_CONTEXT: {DECISIONS_CONTEXT if available, else (none)}
+DECISIONS_CONTEXT: {the slice for these directories, else (none)}
 <!-- learning:end -->
 
 Write the knowledge base to:

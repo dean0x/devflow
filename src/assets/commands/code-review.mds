@@ -277,7 +277,7 @@ The core, database, dependencies, documentation and compliance focuses, and ever
 
 {{decisions_load()}}
 <!-- learning:on -->
-This produces a compact index of active ADR/PF entries. Pass `DECISIONS_CONTEXT` to all Review agents. Review agents use `devflow:apply-decisions` to Read full entry bodies on demand.
+This produces a compact index of active ADR/PF entries. Pass `DECISIONS_CONTEXT` to all Review agents as one shared slice, cut over the diff's files. Review agents use `devflow:apply-decisions` to Read full entry bodies on demand.
 
 <!-- learning:end -->
 {{knowledge_load()}}

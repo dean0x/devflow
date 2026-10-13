@@ -143,7 +143,7 @@ Return codebase context for requirements analysis."
 
 {{decisions_load()}}
 <!-- learning:on -->
-This produces a compact index of active ADR/PF entries. Pass the Skim agent context to all subsequent agents. Pass `DECISIONS_CONTEXT` to the Design agents of the gap-analysis phase — prior decisions constrain design, known pitfalls inform gap analysis. Design agents use `devflow:apply-decisions` to Read full entry bodies on demand.
+This produces a compact index of active ADR/PF entries. Pass the Skim agent context to all subsequent agents. Pass `DECISIONS_CONTEXT` to the Design agents of the gap-analysis phase as one shared slice — prior decisions constrain design, known pitfalls inform gap analysis. Design agents use `devflow:apply-decisions` to Read full entry bodies on demand.
 
 <!-- learning:end -->
 {{knowledge_load()}}
