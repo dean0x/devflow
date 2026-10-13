@@ -198,7 +198,7 @@ describe('AC-15: /resolve re-verifies STALE TPs once and refreshes the evidence 
     expect(collectReadinessDefects(resolveMd())).toEqual([])
   })
 
-  it('the report, the diagram, the edge cases and Principle 10 name the refresh', () => {
+  it('the report, the diagram, the edge cases and the Traceability-aware principle name the refresh', () => {
     const md = resolveMd()
     expect(md).toContain('- Test-plan re-verification: {Test plan: n stale, m re-verified | SKIPPED (head unchanged) | DEGRADED (reason)}')
     expect(md).toContain('│  └─ Step 9b-3: verify-evidence.cjs publish (inline, no Git spawn) — only when the head moved')
