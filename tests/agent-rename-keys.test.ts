@@ -81,14 +81,13 @@ describe('readAgentMapping canonicalises the six renamed agents', () => {
   });
 
   it.each(SIX_RENAMES)('the new key wins when a file holds both %s and %s', async (oldKey, newKey) => {
-    const warnings: string[] = [];
     await fs.writeFile(
       path.join(dir, 'agent-models.json'),
       JSON.stringify({ version: 1, agents: { [oldKey]: { model: 'opus' }, [newKey]: { model: 'haiku' } } }),
       'utf-8',
     );
 
-    const result = await readAgentMapping(dir, { onWarning: m => warnings.push(m) });
+    const result = await readAgentMapping(dir);
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;

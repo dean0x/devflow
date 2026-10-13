@@ -766,9 +766,8 @@ describe('GAP-1: slug (form A) ↔ frontmatter name: (form B)', () => {
    * For agents NOT in SLUG_TO_NAME_EXCEPTIONS, the default expected name is
    * capitalizeFirst(slug) — coder → Coder, designer → Designer.
    *
-   * The exception map handles the one case where form B diverges from the
-   * default: debug → Debug (capitalizeFirst, no hyphens in slug).
-   * That entry exits when the agent is renamed in phase 4.
+   * The exception map holds the cases where form B diverges from the default.
+   * It is empty: every agent's name: is capitalizeFirst(slug).
    */
   it('every agent frontmatter name: matches its slug or the exception map', () => {
     const agents = resolveAllAgents()
@@ -1164,9 +1163,7 @@ describe('GAP-3: orchestrator charter integrity', () => {
     expect(violations.some(v => v.startsWith('no single sentence holds all of'))).toBe(true)
   })
 
-  it('charter contains no retired agent names (vacuous when RETIRED_AGENT_FORM_B is empty)', () => {
-    if (RETIRED_AGENT_FORM_B.length === 0) return // vacuously green in phase 1
-
+  it('charter contains no retired agent names', () => {
     const charter = readFileSync(CHARTER_PATH, 'utf-8')
     // The charter has no allowlist: any retired spelling in it is a defect.
     const violations = collectRetiredNameViolations('orchestrator-charter.md', charter, RETIRED_AGENT_FORM_B, [])
@@ -1266,8 +1263,6 @@ describe('GAP-5: no retired agent names in any shipped artifact (fail-loud when 
   })
 
   it('no retired form B names appear in any shipped artifact (vacuous when list is empty)', () => {
-    if (RETIRED_AGENT_FORM_B.length === 0) return // vacuously green in phase 1
-
     // Fail-loud: requireDistFiles() throws if dist is absent
     const distFiles = requireDistFiles()
     const assetsFiles = collectFiles(ASSETS_DIR, ['.md', '.mds'])
