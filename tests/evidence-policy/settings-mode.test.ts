@@ -150,16 +150,21 @@ const TOPLEVEL = (dir: string): ScriptedCall => ({ tool: 'git', args: ARGV.tople
 const NOT_A_REPO: ScriptedCall = { tool: 'git', args: ARGV.toplevel, exit: 128, stderr: 'fatal: not a git repository\n' };
 
 // The resolver's other local reads, written out independently of the script.
-/** D-PERSONAL-UNTRACKED: is .devflow/config.json in the index? */
-const ARGV_TRACKED = ['-c', 'core.fsmonitor=false', 'ls-files', '--error-unmatch', '--', '.devflow/config.json'];
+/**
+ * D-PERSONAL-UNTRACKED (#487): is anything git tracks reachable at the path the
+ * personal file is opened at — the file in any letter case, or `.devflow` itself
+ * as a symlink, gitlink or file? One call; any listed entry means tracked.
+ */
+const ARGV_TRACKED = [
+  '-c', 'core.fsmonitor=false', 'ls-files', '-z', '--',
+  ':(icase,literal).devflow/config.json', ':(icase,glob)[.]devflow',
+];
 /** D-LENS-UNION: the default branch this clone recorded for origin. */
 const ARGV_ORIGIN_HEAD = ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'];
 
-const TRACKED: ScriptedCall = { tool: 'git', args: ARGV_TRACKED, stdout: '.devflow/config.json\n' };
-const UNTRACKED: ScriptedCall = {
-  tool: 'git', args: ARGV_TRACKED, exit: 1,
-  stderr: "error: pathspec '.devflow/config.json' did not match any file(s) known to git\n",
-};
+const TRACKED: ScriptedCall = { tool: 'git', args: ARGV_TRACKED, stdout: '.devflow/config.json\0' };
+/** Exit 0 and nothing listed: no index entry reaches the path. */
+const UNTRACKED: ScriptedCall = { tool: 'git', args: ARGV_TRACKED };
 const ORIGIN_HEAD_UNSET: ScriptedCall = { tool: 'git', args: ARGV_ORIGIN_HEAD, exit: 1 };
 const ORIGIN_HEAD = (branch: string): ScriptedCall => ({ tool: 'git', args: ARGV_ORIGIN_HEAD, stdout: `refs/remotes/origin/${branch}\n` });
 /** The default branch's tracking copy of project.json: its bytes, or absent at that ref. */
@@ -572,6 +577,48 @@ describe('D-PERSONAL-UNTRACKED: a tracked .devflow/config.json is ignored, with 
     expect(s.reviewPublication).toBe('off');
   });
 
+  describe('the tracking check (#487): one bounded git read, answered from what it lists', () => {
+    const answer = (call: ScriptedCall): string => {
+      writeRepoFile('config.json', '{"reviewPublication":"full"}');
+      const layers = SETTINGS.readRepoLayers(root, { exec: scriptedExec([call]).exec });
+      return layers.personalTracked ? 'tracked' : (layers.personal as { kind: string }).kind === 'invalid' ? 'unknown' : 'untracked';
+    };
+
+    it('is a single git call with the fsmonitor override and bounded case-insensitive pathspecs, made only when config.json exists', () => {
+      writeRepoFile('config.json', '{}');
+      const { exec, recorded } = scriptedExec([UNTRACKED]);
+      SETTINGS.readRepoLayers(root, { exec });
+      expect(recorded.map(c => [c.file, ...c.args])).toEqual([['git', ...ARGV_TRACKED]]);
+      const opts = recorded[0].opts;
+      expect(opts.timeout).toBe(5000);
+      expect(opts.maxBuffer).toBe(4096);
+      expect(opts.shell).toBe(false);
+    });
+
+    it.each([
+      ['a file entry in any letter case', '.devflow/CONFIG.json\0'],
+      ['a directory-case variant', '.DEVFLOW/config.json\0'],
+      ['an entry named .devflow itself (symlink, gitlink or file)', '.devflow\0'],
+      ['several entries at once', '.DEVFLOW\0.devflow/Config.json\0'],
+    ])('lists %s => tracked', (_name, stdout) => {
+      expect(answer({ tool: 'git', args: ARGV_TRACKED, stdout })).toBe('tracked');
+    });
+
+    it('lists nothing (exit 0) => untracked', () => {
+      expect(answer(UNTRACKED)).toBe('untracked');
+    });
+
+    it('answers non-zero (outside a repository, 128) => untracked, as before: there is nothing to track', () => {
+      expect(answer({ tool: 'git', args: ARGV_TRACKED, exit: 128, stderr: 'fatal: not a git repository\n' })).toBe('untracked');
+    });
+
+    it('a listing past the bound overflows, is unanswered, and fails closed rather than reading the file', () => {
+      const flood = '.devflow/CONFIG.json\0'.repeat(300);
+      expect(Buffer.byteLength(flood)).toBeGreaterThan(4096);
+      expect(answer({ tool: 'git', args: ARGV_TRACKED, stdout: flood })).toBe('unknown');
+    });
+  });
+
   it('main(): the line resolves auto and stderr tells the user to untrack the file', () => {
     const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     writeRepoFile('config.json', '{"reviewPublication":"full"}');
@@ -636,6 +683,150 @@ describe('D-PERSONAL-UNTRACKED: a tracked .devflow/config.json is ignored, with 
       // Known-bad probe: the same index read without the override runs the hook.
       realGit(repo, home, ['ls-files', '--error-unmatch', '--', '.devflow/config.json']);
       expect(fs.existsSync(marker)).toBe(true);
+    });
+  });
+
+  // #487: committed bytes must never reach the personal layer, whatever layout
+  // carries them to the path the resolver opens. The control rows come first:
+  // the hardening must not turn a user's own file into a tracked one.
+  describe('#487: committed content reaching the personal path by another layout', { timeout: 60_000 }, () => {
+    const FULL = '{"reviewPublication":"full"}\n';
+
+    /** Whether `dir` folds `A` and `a` into one name (APFS and NTFS by default; ext4 does not). */
+    function foldsCase(dir: string): boolean {
+      const probe = path.join(dir, 'CaseProbe');
+      fs.writeFileSync(probe, '');
+      try {
+        return fs.existsSync(path.join(dir, 'caseprobe'));
+      } finally {
+        fs.rmSync(probe, { force: true });
+      }
+    }
+    /**
+     * Which arm runs where. The `index-only` rows hold on EVERY file system: the
+     * file the resolver opens sits at the exact-case path and the index names the
+     * case variant, which is the state a checkout makes on a case-insensitive file
+     * system and the state a case-sensitive one reaches when a branch commits a
+     * variant beside the user's own file. The `checkout` rows commit the variant
+     * on disk too, so they need a file system where `config.json` opens
+     * `CONFIG.json` and are skipped elsewhere (Linux CI) rather than passing empty.
+     */
+    const CASE_FOLDING_FS = (() => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-case-probe-'));
+      try {
+        return foldsCase(dir);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    })();
+
+    function freshRepo(label: string): string {
+      const repo = fs.mkdtempSync(path.join(tmp, `real-${label}-`));
+      realGit(repo, home, ['init', '-q', '-b', 'main']);
+      return repo;
+    }
+    function writeAt(repo: string, rel: string, body: string): void {
+      fs.mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true });
+      fs.writeFileSync(path.join(repo, rel), body);
+    }
+    /** Index `rel` with `mode` and the blob of `body`, leaving the working tree alone. */
+    function indexOnly(repo: string, mode: string, rel: string, body: string): void {
+      const scratch = path.join(tmp, `blob-${path.basename(repo)}`);
+      fs.writeFileSync(scratch, body);
+      const sha = realGit(repo, home, ['hash-object', '-w', '--', scratch]).trim();
+      realGit(repo, home, ['update-index', '--add', '--cacheinfo', `${mode},${sha},${rel}`]);
+    }
+    function commitAll(repo: string, paths: readonly string[]): void {
+      realGit(repo, home, ['add', '-f', '--', ...paths]);
+      realGit(repo, home, ['commit', '-q', '-m', 'commit the layout']);
+    }
+    /** The personal layer counts as absent: the ceiling holds, the warning prints, the hooks' seam agrees. */
+    function expectPersonalIgnored(repo: string): void {
+      const run = runResolver({ home, args: [repo], script: SETTINGS_SCRIPT });
+      expect(run.status, run.stderr).toBe(0);
+      expect(fieldOf(run.stdout.trim(), 'REVIEW_PUBLICATION')).toBe('auto');
+      expect(run.stderr).toContain('.devflow/config.json is tracked by git');
+      const layers = SETTINGS.readRepoLayers(repo);
+      expect(layers.personalTracked).toBe(true);
+      expect(layers.personal).toEqual({ kind: 'absent' });
+    }
+    function expectPersonalApplies(repo: string): void {
+      const run = runResolver({ home, args: [repo], script: SETTINGS_SCRIPT });
+      expect(run.status, run.stderr).toBe(0);
+      expect(fieldOf(run.stdout.trim(), 'REVIEW_PUBLICATION')).toBe('full');
+      expect(run.stderr).toBe('');
+      expect(SETTINGS.readRepoLayers(repo).personalTracked).toBe(false);
+    }
+
+    it('control: an untracked config.json beside a tracked project.json and tracked siblings still applies', () => {
+      const repo = freshRepo('control');
+      writeAt(repo, '.devflow/project.json', '{}\n');
+      writeAt(repo, '.devflow/features/a/KNOWLEDGE.md', '# a\n');
+      writeAt(repo, '.devflow/conventions.md', '# c\n');
+      commitAll(repo, ['.devflow/project.json', '.devflow/features/a/KNOWLEDGE.md', '.devflow/conventions.md']);
+      writeAt(repo, '.devflow/config.json', FULL);
+      expectPersonalApplies(repo);
+    });
+
+    it('control: an untracked .devflow symlink to a private directory still applies (only a tracked link is refused)', () => {
+      const repo = freshRepo('private-link');
+      const privateDir = fs.mkdtempSync(path.join(tmp, 'private-df-'));
+      fs.writeFileSync(path.join(privateDir, 'config.json'), FULL);
+      fs.symlinkSync(privateDir, path.join(repo, '.devflow'));
+      expectPersonalApplies(repo);
+    });
+
+    it('layout 1: .devflow is a committed symlink to a committed directory', () => {
+      const repo = freshRepo('link');
+      writeAt(repo, 'vendor/df/config.json', FULL);
+      fs.symlinkSync(path.join('vendor', 'df'), path.join(repo, '.devflow'));
+      commitAll(repo, ['.devflow', 'vendor/df/config.json']);
+      expectPersonalIgnored(repo);
+    });
+
+    it('layout 2 (index-only, every file system): the index names .devflow/CONFIG.json beside the opened config.json', () => {
+      const repo = freshRepo('file-case-index');
+      writeAt(repo, '.devflow/config.json', FULL);
+      indexOnly(repo, '100644', '.devflow/CONFIG.json', FULL);
+      expectPersonalIgnored(repo);
+    });
+
+    it.runIf(CASE_FOLDING_FS)('layout 2 (checkout, case-folding file system only): a committed .devflow/CONFIG.json opens as config.json', () => {
+      const repo = freshRepo('file-case-checkout');
+      writeAt(repo, '.devflow/CONFIG.json', FULL);
+      commitAll(repo, ['.devflow/CONFIG.json']);
+      expectPersonalIgnored(repo);
+    });
+
+    it('layout 3 (index-only, every file system): the index names .DEVFLOW/config.json beside the opened config.json', () => {
+      const repo = freshRepo('dir-case-index');
+      writeAt(repo, '.devflow/config.json', FULL);
+      indexOnly(repo, '100644', '.DEVFLOW/config.json', FULL);
+      expectPersonalIgnored(repo);
+    });
+
+    it.runIf(CASE_FOLDING_FS)('layout 3 (checkout, case-folding file system only): a committed .DEVFLOW/config.json opens as .devflow/config.json', () => {
+      const repo = freshRepo('dir-case-checkout');
+      writeAt(repo, '.DEVFLOW/config.json', FULL);
+      commitAll(repo, ['.DEVFLOW/config.json']);
+      expectPersonalIgnored(repo);
+    });
+
+    it('layout 3b (index-only): a committed .DEVFLOW symlink reaches the opened path through the link', () => {
+      const repo = freshRepo('dir-case-link');
+      writeAt(repo, 'vendor/df/config.json', FULL);
+      indexOnly(repo, '120000', '.DEVFLOW', 'vendor/df');
+      fs.symlinkSync(path.join('vendor', 'df'), path.join(repo, '.devflow'));
+      expectPersonalIgnored(repo);
+    });
+
+    it('layout 4: .devflow is a git submodule (gitlink) whose checkout holds config.json', () => {
+      const repo = freshRepo('gitlink');
+      // A gitlink names a commit of another repository; git does not need that object here.
+      realGit(repo, home, ['update-index', '--add', '--cacheinfo', '160000,0123456789abcdef0123456789abcdef01234567,.devflow']);
+      writeAt(repo, '.devflow/config.json', FULL);
+      writeAt(repo, '.devflow/.git', 'gitdir: ../.git/modules/devflow\n');
+      expectPersonalIgnored(repo);
     });
   });
 });

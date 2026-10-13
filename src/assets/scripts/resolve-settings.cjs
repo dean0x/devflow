@@ -21,8 +21,11 @@
 // D-SETTINGS-LOCAL-ONLY: local git subprocesses only, and never gh, never the
 // network, never a git command that refreshes the index. At most four, in order:
 //   git rev-parse --show-toplevel                         always
-//   git -c core.fsmonitor=false ls-files --error-unmatch -- .devflow/config.json
-//                                                         only when config.json exists
+//   git -c core.fsmonitor=false ls-files -z -- <PERSONAL_TRACKING_PATHSPECS>
+//                                                         only when config.json exists;
+//                                                         ONE call answers every layout
+//                                                         in which git tracks the path
+//                                                         the personal file is opened at
 //   git symbolic-ref --quiet refs/remotes/origin/HEAD     in a repository
 //   git cat-file blob refs/remotes/origin/<D>:.devflow/project.json
 //                                                         only when origin/HEAD names D
@@ -176,7 +179,11 @@ const SETTINGS_FAIL_CLOSED_LINE =
 
 /** Bound on each local git call. */
 const GIT_TIMEOUT_MS = 5000;
-/** rev-parse, ls-files and symbolic-ref print one short line. */
+/**
+ * rev-parse and symbolic-ref print one short line. The tracking check's ls-files
+ * prints nothing, or the few index entries its two pathspecs name; a listing past
+ * this bound overflows (ENOBUFS), which reads as unanswered and fails closed.
+ */
 const LINE_MAX_BUFFER = 4096;
 /**
  * The tracking-copy read: one byte past the parser's bound, so an oversize blob
@@ -187,6 +194,19 @@ const BLOB_MAX_BUFFER = MAX_CONFIG_BYTES + 1;
 
 /** The personal file, repository-relative, in git's spelling. */
 const PERSONAL_REL = '.devflow/config.json';
+/**
+ * The two pathspecs of the tracking check (D-PERSONAL-UNTRACKED), both matched
+ * without regard to letter case, whatever the file system or `core.ignorecase`:
+ *   - the personal file itself, so a committed `.devflow/CONFIG.json` or
+ *     `.DEVFLOW/config.json` counts where the file system folds case and opens it
+ *   - an index entry named `.devflow` ITSELF, which git records only for a symlink,
+ *     a gitlink (submodule) or a plain file, never for a directory: the character
+ *     class keeps `glob` from matching as a leading directory, so the many files
+ *     under a normal `.devflow/` are not listed. A tracked link or submodule
+ *     carries committed content to the path the personal file is opened at.
+ * An untracked `.devflow` link is the user's own setup and is not named here.
+ */
+const PERSONAL_TRACKING_PATHSPECS = Object.freeze([':(icase,literal)' + PERSONAL_REL, ':(icase,glob)[.]devflow']);
 /** The team file, repository-relative, in git's spelling. */
 const PROJECT_REL = '.devflow/project.json';
 
@@ -667,26 +687,36 @@ function gitToplevel(exec, dir) {
  * not personal: a contributor's branch that commits one (`git add -f`) would
  * otherwise lift a maintainer's local run of that branch past the publication
  * ceiling. A tracked copy is ignored entirely, exactly as if absent, and main()
- * tells the user to untrack it. The check is `git ls-files --error-unmatch`,
- * which reads the index without refreshing or writing it. Reading the index
- * runs a configured `core.fsmonitor` hook — an arbitrary command from the
- * repository's config, and on macOS the builtin daemon's start-up — so the
- * call turns it off for itself (`-c core.fsmonitor=false`, D-NO-FSMONITOR):
- * this resolver runs from session hooks and must stay a pure read.
- *   tracked    exit 0
- *   untracked  any other answered exit (1: no such index entry; outside a
+ * tells the user to untrack it.
+ *
+ * The question is whether COMMITTED content can reach the path the personal file
+ * is opened at, `<root>/.devflow/config.json`. The OS follows a symlinked
+ * `.devflow`, resolves a submodule's checkout there, and on a case-folding file
+ * system opens `CONFIG.json` or `.DEVFLOW/config.json` for it, so the answer is
+ * not only "is this exact path in the index". One `git ls-files -z` over
+ * PERSONAL_TRACKING_PATHSPECS asks all of it at once — no further git call: any
+ * output is a tracked entry that reaches the path (the file in any letter case,
+ * or `.devflow` itself as a symlink, gitlink or file). It reads the index without
+ * refreshing or writing it. Reading the index runs a configured `core.fsmonitor`
+ * hook — an arbitrary command from the repository's config, and on macOS the
+ * builtin daemon's start-up — so the call turns it off for itself
+ * (`-c core.fsmonitor=false`, D-NO-FSMONITOR): this resolver runs from session
+ * hooks and must stay a pure read.
+ *   tracked    exit 0 with at least one entry listed
+ *   untracked  exit 0 with nothing listed, or any other answered exit (outside a
  *              repository git answers 128, and there is nothing to track)
- *   unknown    git did not answer — whether the file is personal cannot be
- *              known, so it is unreadable and its keys fail closed
+ *   unknown    git did not answer, or its listing overflowed LINE_MAX_BUFFER —
+ *              whether the file is personal cannot be known, so it is unreadable
+ *              and its keys fail closed
  *
  * @param {ExecFn} exec
  * @param {string} root
  * @returns {'tracked' | 'untracked' | 'unknown'}
  */
 function personalTracking(exec, root) {
-  const res = runGit(exec, root, ['-c', 'core.fsmonitor=false', 'ls-files', '--error-unmatch', '--', PERSONAL_REL], LINE_MAX_BUFFER);
+  const res = runGit(exec, root, ['-c', 'core.fsmonitor=false', 'ls-files', '-z', '--', ...PERSONAL_TRACKING_PATHSPECS], LINE_MAX_BUFFER);
   if (!res.answered) return 'unknown';
-  return res.ok ? 'tracked' : 'untracked';
+  return res.ok && res.stdout.length > 0 ? 'tracked' : 'untracked';
 }
 
 /**

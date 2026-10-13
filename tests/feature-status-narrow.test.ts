@@ -133,6 +133,21 @@ describe('--status warns about a tracked .devflow/config.json (D-PERSONAL-UNTRAC
     expect(out).not.toMatch(EFFECTIVE);
   }, 120_000);
 
+  it('a committed .devflow symlink to a committed directory is named the same way, and narrows nothing (#487)', () => {
+    seedManifest({});
+    const repo = fs.mkdtempSync(path.join(tmpRoot, 'repo-'));
+    execFileSync('git', ['init', '-q'], { cwd: repo, stdio: 'ignore' });
+    fs.mkdirSync(path.join(repo, 'vendor', 'df'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'vendor', 'df', 'config.json'), '{"features":{"memory":false}}');
+    fs.symlinkSync(path.join('vendor', 'df'), path.join(repo, '.devflow'));
+    execFileSync('git', ['add', '-f', '.devflow', 'vendor/df/config.json'], { cwd: repo, stdio: 'ignore' });
+
+    const out = status('memory', repo);
+
+    expect(out).toContain('.devflow/config.json is tracked by git, so devflow ignores it');
+    expect(out).not.toMatch(EFFECTIVE);
+  }, 120_000);
+
   it('an untracked config.json gets no warning', () => {
     seedManifest({});
     expect(status('memory', makeRepo({ personal: '{"features":{"memory":false}}' }))).not.toContain('tracked by git');
