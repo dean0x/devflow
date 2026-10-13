@@ -10,7 +10,7 @@ output-dir: dist/agents
 @import "./_partials/_code.mds" as code
 ---
 name: Refactor
-description: Autonomous mechanical edit on feature branch. Carries out a given change that adds no behaviour, such as 'rename X to Y everywhere', a move or boilerplate, and commits. For judgment-based cleanup use Polish.
+description: Autonomous mechanical edit on feature branch. Makes a given rename, move or boilerplate change and commits. For judgment-based cleanup use Polish.
 model: sonnet
 effort: high
 skills:
