@@ -92,6 +92,28 @@ export function addSkips(a: SkipCounts, b: Partial<SkipCounts>): SkipCounts {
   };
 }
 
+/** Date window in epoch ms; `untilMs` is exclusive. A null bound is open. */
+export interface TimeWindow {
+  readonly sinceMs: number | null;
+  readonly untilMs: number | null;
+}
+
+/** The window with both bounds open: every entry is inside it, dated or not. */
+export const OPEN_WINDOW: TimeWindow = Object.freeze({ sinceMs: null, untilMs: null });
+
+/**
+ * The one window test, shared by the report (requests, skill loads) and the parser (tool-call
+ * signals, D-AUDIT-WINDOW): `sinceMs` is inclusive, `untilMs` is exclusive, and an undated entry is
+ * outside any window that has a bound.
+ */
+export function inWindow(timestampMs: number | null, window: TimeWindow): boolean {
+  if (window.sinceMs === null && window.untilMs === null) return true;
+  if (timestampMs === null) return false;
+  if (window.sinceMs !== null && timestampMs < window.sinceMs) return false;
+  if (window.untilMs !== null && timestampMs >= window.untilMs) return false;
+  return true;
+}
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

@@ -12,8 +12,8 @@ import { describeError, openRegularFile } from './fs-safe.js';
 import type { OpenError } from './fs-safe.js';
 import { normalizeUsage } from './tokens.js';
 import type { TokenCounts } from './tokens.js';
-import { DEFAULT_LIMITS, MAX_PATH_CHARS, WORKFLOW_RUN_ID_RE, isRecord, sanitizeText } from './types.js';
-import type { Limits, Result } from './types.js';
+import { DEFAULT_LIMITS, MAX_PATH_CHARS, OPEN_WINDOW, WORKFLOW_RUN_ID_RE, inWindow, isRecord, sanitizeText } from './types.js';
+import type { Limits, Result, TimeWindow } from './types.js';
 
 /** One deduplicated API request. */
 export interface AuditRequest {
@@ -107,7 +107,10 @@ export interface DecisionsSignal {
   readonly shape: DecisionsShape;
 }
 
-/** Per-transcript counts the wave-4C analysis reads. All of them are counts, never content. */
+/**
+ * Per-transcript counts the wave-4C analysis reads. All of them are counts, never content. Every
+ * tool-call count covers the entries inside the date window only (D-AUDIT-WINDOW).
+ */
 export interface ParsedSignals {
   /** The `OPERATION:` value on the first line of the first user prompt; null when absent. */
   readonly operation: string | null;
@@ -524,10 +527,24 @@ function answeredWorkflowUse(content: unknown, pendingUses: ReadonlyMap<string, 
  * D-AUDIT-UNTRUSTED: every line is parsed defensively. A malformed line is skipped and
  * counted, a line over `maxLineChars` is skipped and counted, and the read stops at
  * `maxLines` with `linesCapHit` set. Unknown fields are ignored.
+ *
+ * D-AUDIT-WINDOW: the date window bounds the tool-call signals as it bounds token usage. A
+ * transcript is read whole, since a spawn that began before `--since` or runs past `--until` is
+ * one file, but each `tool_use`, `tool_result` and assistant text block counts only when its own
+ * entry's timestamp is inside `window`, by the test the request filter uses (`inWindow`: `--since`
+ * inclusive, `--until` exclusive, an undated entry outside a bounded window). An entry outside
+ * the window is not seen at all: its path joins no read or written set, its Bash call waits for
+ * no result, so a read of a file that was first read before the window is new inside it, and the
+ * answer to a call from before the window adds no bytes. A tool_use id is judged once, at the
+ * entry that wrote it first. The spawn prompt is no tool call: `operation` and `decisionsContext`
+ * describe the spawn and are kept wherever the prompt falls. `spawns`, `workflowRuns`, `skillCalls`
+ * and `commands` are the links between transcripts and are not windowed here; the report windows
+ * the skill loads. With no `window` every entry is inside.
  */
 export async function parseTranscriptLines(
   lines: AsyncIterable<string> | Iterable<string>,
   limits: ParseLimits,
+  window: TimeWindow = OPEN_WINDOW,
 ): Promise<ParsedStream> {
   const signals = createSignalCollector({
     maxReadPaths: limits.maxReadPaths ?? DEFAULT_LIMITS.maxReadPaths,
@@ -601,7 +618,7 @@ export async function parseTranscriptLines(
           }
         }
       }
-      if (isRecord(message)) signals.toolResults(message['content']);
+      if (isRecord(message) && inWindow(timestampMs, window)) signals.toolResults(message['content']);
       const result = entry['toolUseResult'];
       if (isRecord(result) && isRecord(message)) {
         const runId = result['runId'];
@@ -630,10 +647,11 @@ export async function parseTranscriptLines(
     const content = message['content'];
     if (Array.isArray(content)) {
       const messageId = typeof message['id'] === 'string' ? message['id'].slice(0, MAX_NAME_CHARS) : '';
+      const counted = inWindow(timestampMs, window);
       for (const block of content) {
         if (!isRecord(block)) continue;
         if (block['type'] === 'text') {
-          if (typeof block['text'] === 'string') signals.text(block['text']);
+          if (counted && typeof block['text'] === 'string') signals.text(block['text']);
           continue;
         }
         if (block['type'] !== 'tool_use') continue;
@@ -644,7 +662,7 @@ export async function parseTranscriptLines(
         }
         const name = block['name'];
         const input = isRecord(block['input']) ? block['input'] : {};
-        signals.toolUse(name, id, input);
+        if (counted) signals.toolUse(name, id, input);
         if ((name === 'Agent' || name === 'Task') && id !== '') {
           const type = input['subagent_type'];
           spawns.push({
@@ -737,11 +755,13 @@ export async function parseTranscriptLines(
 
 /**
  * Parse one transcript file. The file is opened symlink-refusing and size-bounded
- * (D-AUDIT-UNTRUSTED); every failure comes back as a `ParseError`.
+ * (D-AUDIT-UNTRUSTED); every failure comes back as a `ParseError`. `window` bounds the tool-call
+ * signals (D-AUDIT-WINDOW).
  */
 export async function parseTranscriptFile(
   path: string,
   limits: ParseLimits & Pick<Limits, 'maxFileBytes'>,
+  window: TimeWindow = OPEN_WINDOW,
 ): Promise<Result<ParsedStream, ParseError>> {
   const opened = await openRegularFile(path, limits.maxFileBytes);
   if (!opened.ok) return opened;
@@ -749,7 +769,7 @@ export async function parseTranscriptFile(
   const stream = handle.createReadStream({ encoding: 'utf8' });
   const reader = createInterface({ input: stream, crlfDelay: Infinity });
   try {
-    return { ok: true, value: await parseTranscriptLines(reader, limits) };
+    return { ok: true, value: await parseTranscriptLines(reader, limits, window) };
   } catch (err) {
     return { ok: false, error: { kind: 'io', path, detail: describeError(err) } };
   } finally {

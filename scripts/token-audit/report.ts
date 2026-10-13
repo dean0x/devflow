@@ -18,8 +18,12 @@ import {
   modelFamily,
 } from './tokens.js';
 import type { ModelFamily, TokenCounts } from './tokens.js';
-import { MAX_PATH_CHARS, mdCell, sanitizeText } from './types.js';
-import type { AuditError, CapNotice, Limits, Result, SkipCounts } from './types.js';
+import { MAX_PATH_CHARS, inWindow, mdCell, sanitizeText } from './types.js';
+import type { AuditError, CapNotice, Limits, Result, SkipCounts, TimeWindow } from './types.js';
+
+// The window and its test live in types.ts so the parser applies the same one (D-AUDIT-WINDOW).
+export { inWindow };
+export type { TimeWindow };
 
 // ── Input ────────────────────────────────────────────────────────────────────
 
@@ -44,12 +48,6 @@ export interface SessionData {
     readonly commands?: readonly CommandMention[];
   } | null;
   readonly subagents: readonly SubagentData[];
-}
-
-/** Date window in epoch ms; `untilMs` is exclusive. A null bound is open. */
-export interface TimeWindow {
-  readonly sinceMs: number | null;
-  readonly untilMs: number | null;
 }
 
 export interface ReportScope {
@@ -435,14 +433,6 @@ export function gapBin(gapMs: number | null): string {
     if (gapMs < bin.belowMs) return bin.label;
   }
   return GAP_BINS[GAP_BINS.length - 1]?.label ?? UNKNOWN_GAP;
-}
-
-export function inWindow(timestampMs: number | null, window: TimeWindow): boolean {
-  if (window.sinceMs === null && window.untilMs === null) return true;
-  if (timestampMs === null) return false;
-  if (window.sinceMs !== null && timestampMs < window.sinceMs) return false;
-  if (window.untilMs !== null && timestampMs >= window.untilMs) return false;
-  return true;
 }
 
 function quantile(values: readonly number[], p: number): number {

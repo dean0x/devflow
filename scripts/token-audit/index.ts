@@ -20,10 +20,10 @@ import type { SessionFiles, SubagentMeta } from './discover.js';
 import { parseTranscriptFile } from './parse.js';
 import type { ParsedStream } from './parse.js';
 import { buildReport, renderJson, renderMarkdown } from './report.js';
-import type { AuditReport, SessionData, SubagentData, TimeWindow } from './report.js';
+import type { AuditReport, SessionData, SubagentData } from './report.js';
 import { buildSegments, linkSubagents } from './segment.js';
 import { DEFAULT_LIMITS, MAX_PATH_CHARS, NO_SKIPS, addSkips, exitCodeFor, sanitizeText } from './types.js';
-import type { AuditError, CapNotice, Limits, Result, SkipCounts } from './types.js';
+import type { AuditError, CapNotice, Limits, Result, SkipCounts, TimeWindow } from './types.js';
 
 const USAGE = `Usage: npm run audit:tokens -- (--project <cwd> | --dir <path>) [options]
 
@@ -228,7 +228,7 @@ function capsFor(stream: ParsedStream, where: string, limits: Limits): CapNotice
   return caps;
 }
 
-async function loadSession(files: SessionFiles, opts: AuditOptions): Promise<LoadedSession> {
+async function loadSession(files: SessionFiles, opts: AuditOptions, window: TimeWindow): Promise<LoadedSession> {
   const limits = opts.limits;
   let skipped = NO_SKIPS;
   const caps: CapNotice[] = [];
@@ -242,7 +242,7 @@ async function loadSession(files: SessionFiles, opts: AuditOptions): Promise<Loa
   let workflowRuns: ParsedStream['workflowRuns'] = [];
   let segments = buildSegments(files.sessionId, [], []);
   if (files.mainPath !== null) {
-    const parsed = await parseTranscriptFile(files.mainPath, limits);
+    const parsed = await parseTranscriptFile(files.mainPath, limits, window);
     if (parsed.ok) {
       const stream = parsed.value;
       mainTranscripts = 1;
@@ -275,7 +275,7 @@ async function loadSession(files: SessionFiles, opts: AuditOptions): Promise<Loa
     const meta = metaRead.ok ? metaRead.value : { agentType: null, toolUseId: null, parentAgentId: null };
     const type = meta.agentType ?? 'unknown';
     if (opts.agentType !== null && type !== opts.agentType) continue;
-    const parsed = await parseTranscriptFile(file.path, limits);
+    const parsed = await parseTranscriptFile(file.path, limits, window);
     if (!parsed.ok) {
       skipped = addSkips(skipped, { unreadableFiles: 1, symlinks: parsed.error.kind === 'symlink' ? 1 : 0 });
       if (parsed.error.kind === 'too-large') {
@@ -369,7 +369,7 @@ export async function runAudit(opts: AuditOptions): Promise<Result<AuditReport, 
   let mainTranscripts = 0;
   let subagentTranscripts = 0;
   for (const files of sessions) {
-    const loaded = await loadSession(files, opts);
+    const loaded = await loadSession(files, opts, window.value);
     data.push(loaded.data);
     skipped = addSkips(skipped, loaded.skipped);
     caps.push(...loaded.caps);

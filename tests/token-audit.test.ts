@@ -1883,3 +1883,199 @@ describe('AC-108 every new section prints', () => {
     expect(renderJson(report).match(/\d+\.\d{7,}/g)).toBeNull();
   });
 });
+
+// ── Wave-4C signals: the date window bounds the tool-call signals (D-AUDIT-WINDOW) ──
+//
+// One Code spawn whose tool calls fall before --since, inside the window and after --until. The
+// window is [10:10:00.000, 10:20:00.000): --since is inclusive, --until is exclusive, the same
+// convention the request filter uses. A tool_use, a tool_result and an assistant text block each
+// count by the timestamp of their own entry. Every number below is hand-counted from the three
+// phases, not read back from the parser.
+
+const WIN_SINCE = '2026-09-01T10:10:00.000Z';
+const WIN_UNTIL = '2026-09-01T10:20:00.000Z';
+const WIN = { sinceMs: Date.parse(WIN_SINCE), untilMs: Date.parse(WIN_UNTIL) };
+
+const stampAt = (clock: string): string => `2026-09-01T${clock}Z`;
+
+/** One tool call as its own assistant entry (and so its own API request). */
+function callAt(clock: string, id: string, name: string, input: Record<string, unknown>): string {
+  return turnLine({ id: `m_${id}`, ts: stampAt(clock), content: [use(id, name, input)] });
+}
+
+function wordsAt(clock: string, id: string, text: string): string {
+  return turnLine({ id: `m_${id}`, ts: stampAt(clock), content: [{ type: 'text', text }] });
+}
+
+/** The tool_result for `toolUseId`, `bytes` long, in a user entry stamped `clock`. */
+function answerAt(clock: string, toolUseId: string, bytes: number): string {
+  return JSON.stringify({
+    type: 'user',
+    timestamp: stampAt(clock),
+    toolUseResult: { stdout: 'redacted', stderr: '', interrupted: false },
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: 'r'.repeat(bytes), is_error: false }] },
+  });
+}
+
+const WIN_PROMPT = promptLine(
+  'OPERATION: implement\nDECISIONS_CONTEXT (slice: 2 of 105 entries):\n  ADR-001  one\n  PF-001  two\nHANDOFF_REQUIRED: false',
+);
+
+const BEFORE_WINDOW = [
+  callAt('10:05:00.000', 'b1', 'Read', { file_path: '/w/a.ts' }),
+  callAt('10:05:10.000', 'b2', 'Read', { file_path: '/w/.devflow/learning/index.md' }),
+  callAt('10:05:20.000', 'b3', 'Bash', { command: 'npx vitest run --reporter=dot' }),
+  answerAt('10:05:21.000', 'b3', 100),
+  callAt('10:05:30.000', 'b4', 'Edit', { file_path: '/w/old.ts' }),
+  callAt('10:05:35.000', 'b5', 'Write', { file_path: '/w/old2.ts' }),
+  wordsAt('10:05:40.000', 'b6', 'applies ADR-001 and PF-001'),
+  callAt('10:09:59.000', 'b7', 'Bash', { command: 'git status' }),
+];
+
+const IN_WINDOW = [
+  callAt('10:10:00.000', 'w1', 'Read', { file_path: '/w/a.ts', offset: 1, limit: 10 }), //     exactly --since: inside
+  answerAt('10:10:30.000', 'b7', 7), //                                                         answers a call from before the window
+  callAt('10:12:00.000', 'w2', 'Read', { file_path: '/w/a.ts', offset: 1, limit: 10 }),
+  callAt('10:13:00.000', 'w3', 'Read', { file_path: '/w/.devflow/learning/pitfalls.md' }),
+  callAt('10:13:30.000', 'w4', 'Read', { file_path: '/w/.devflow/learning/index.md' }),
+  callAt('10:14:00.000', 'w5', 'Bash', { command: 'git status' }),
+  answerAt('10:14:01.000', 'w5', 40),
+  callAt('10:15:00.000', 'w6', 'Bash', { command: 'npm test' }),
+  answerAt('10:15:05.000', 'w6', 70),
+  callAt('10:16:00.000', 'w7', 'Bash', { command: 'npx vitest run --reporter=dot' }),
+  answerAt('10:16:05.000', 'w7', 30),
+  callAt('10:17:00.000', 'w8', 'Bash', { command: 'grep -rn foo src' }),
+  answerAt('10:17:02.000', 'w8', 20),
+  callAt('10:17:30.000', 'w9', 'Edit', { file_path: '/w/new.ts' }),
+  callAt('10:17:40.000', 'w10', 'Write', { file_path: '/w/new.ts' }),
+  wordsAt('10:18:00.000', 'w11', 'applies ADR-007 and PF-012; ADR-007 again'),
+  callAt('10:19:59.000', 'w12', 'Bash', { command: 'ls' }),
+];
+
+const AFTER_WINDOW = [
+  callAt('10:20:00.000', 'a1', 'Read', { file_path: '/w/z.ts' }), //                            exactly --until: outside
+  answerAt('10:20:01.000', 'w12', 9), //                                                        answers a call from inside the window
+  callAt('10:25:00.000', 'a2', 'Bash', { command: 'npm run build -- --silent' }),
+  answerAt('10:25:05.000', 'a2', 500),
+  callAt('10:25:10.000', 'a3', 'Bash', { command: 'git log --oneline' }),
+  answerAt('10:25:12.000', 'a3', 60),
+  callAt('10:25:20.000', 'a4', 'Edit', { file_path: '/w/after.ts' }),
+  callAt('10:25:25.000', 'a5', 'Write', { file_path: '/w/after2.ts' }),
+  callAt('10:25:30.000', 'a6', 'Read', { file_path: '/w/a.ts', offset: 1, limit: 10 }),
+  callAt('10:25:35.000', 'a7', 'Read', { file_path: '/w/.devflow/learning/index.md' }),
+  wordsAt('10:25:40.000', 'a8', 'avoids PF-999 and ADR-007'),
+];
+
+const WIN_TRANSCRIPT = [WIN_PROMPT, ...BEFORE_WINDOW, ...IN_WINDOW, ...AFTER_WINDOW];
+
+describe('AC-109 the date window bounds every tool-call signal (D-AUDIT-WINDOW)', () => {
+  it('counts every signal family from the entries inside the window only', async () => {
+    const parsed = await parseTranscriptLines(WIN_TRANSCRIPT, LIMITS, WIN);
+    // Reads w1 w2 w3 w4: w2 repeats w1 exactly; a path read only before the window is new inside it.
+    expect(parsed.signals.reads).toEqual({ calls: 4, rereads: 1, exactRereads: 1, ranged: 2 });
+    expect(parsed.signals.ledgerReads).toEqual({ index: 1, bodies: 1 });
+    // Assistant text w11: ADR-007 twice and PF-012.
+    expect(parsed.signals.citations).toEqual({ total: 3, distinct: 2 });
+    // w5 git, w6 + w7 test/build (w7 quiet), w8 grep/find, w12 other.
+    expect(parsed.signals.bashCalls).toEqual({ 'test/build': 2, git: 1, 'grep/find': 1, 'cat/sed/head': 0, other: 1 });
+    expect(parsed.signals.quietTestRuns).toBe(1);
+    // Results answered inside the window: 70 + 30, 40, 20. The ls answer (10:20:01) is outside, and so is the
+    // answer to the call made before --since.
+    expect(parsed.signals.bashResultBytes).toEqual({ 'test/build': 100, git: 40, 'grep/find': 20, 'cat/sed/head': 0, other: 0 });
+    // Edit then Write of new.ts.
+    expect(parsed.signals.filesWritten).toEqual({ calls: 2, distinct: 1 });
+  });
+
+  it('keeps what the spawn prompt says about the spawn, wherever the prompt falls', async () => {
+    const parsed = await parseTranscriptLines(WIN_TRANSCRIPT, LIMITS, WIN);
+    // The prompt is stamped 10:00, before --since: it describes the spawn, not activity in the window.
+    expect(parsed.signals.operation).toBe('implement');
+    expect(parsed.signals.decisionsContext).toMatchObject({ shape: 'slice', indexLines: 2 });
+  });
+
+  it('sees every entry when no window is given, which is what the windowed counts are cut from', async () => {
+    const parsed = await parseTranscriptLines(WIN_TRANSCRIPT, LIMITS);
+    expect(parsed.signals.reads).toEqual({ calls: 9, rereads: 5, exactRereads: 4, ranged: 3 });
+    expect(parsed.signals.ledgerReads).toEqual({ index: 3, bodies: 1 });
+    expect(parsed.signals.citations).toEqual({ total: 7, distinct: 5 });
+    expect(parsed.signals.bashCalls).toEqual({ 'test/build': 4, git: 3, 'grep/find': 1, 'cat/sed/head': 0, other: 1 });
+    expect(parsed.signals.quietTestRuns).toBe(3);
+    expect(parsed.signals.bashResultBytes).toEqual({ 'test/build': 700, git: 107, 'grep/find': 20, 'cat/sed/head': 0, other: 9 });
+    expect(parsed.signals.filesWritten).toEqual({ calls: 6, distinct: 5 });
+  });
+
+  it('counts an entry stamped exactly --since and drops one stamped exactly --until', async () => {
+    const read = (clock: string, id: string): string => callAt(clock, id, 'Read', { file_path: `/w/${id}.ts` });
+    const parsed = await parseTranscriptLines(
+      [
+        read('10:09:59.999', 'early'), //  1 ms before --since
+        read('10:10:00.000', 'first'), //  --since itself
+        read('10:19:59.999', 'last'), //   1 ms before --until
+        read('10:20:00.000', 'late'), //   --until itself
+      ],
+      LIMITS,
+      WIN,
+    );
+    expect(parsed.signals.reads.calls).toBe(2);
+  });
+
+  it('drops an undated entry from a bounded window and keeps it when the window is open', async () => {
+    const undated = JSON.stringify({
+      ...JSON.parse(callAt('10:15:00.000', 'u1', 'Edit', { file_path: '/w/u.ts' })),
+      timestamp: undefined,
+    });
+    const dated = callAt('10:15:00.000', 'd1', 'Edit', { file_path: '/w/d.ts' });
+    const bounded = await parseTranscriptLines([undated, dated], LIMITS, WIN);
+    expect(bounded.signals.filesWritten).toEqual({ calls: 1, distinct: 1 });
+    const open = await parseTranscriptLines([undated, dated], LIMITS);
+    expect(open.signals.filesWritten).toEqual({ calls: 2, distinct: 2 });
+  });
+
+  it('judges a tool_use that is written twice by its first sighting', async () => {
+    const early = callAt('10:05:00.000', 'dup', 'Edit', { file_path: '/w/dup.ts' });
+    const replayed = callAt('10:15:00.000', 'dup', 'Edit', { file_path: '/w/dup.ts' });
+    const inside = callAt('10:12:00.000', 'once', 'Edit', { file_path: '/w/once.ts' });
+    const replayedLate = callAt('10:30:00.000', 'once', 'Edit', { file_path: '/w/once.ts' });
+    const parsed = await parseTranscriptLines([early, replayed, inside, replayedLate], LIMITS, WIN);
+    expect(parsed.signals.filesWritten).toEqual({ calls: 1, distinct: 1 });
+  });
+
+  it('reaches the report: a spawn that keeps working after --until leaves the window figures alone', async () => {
+    const dir = await freshDir();
+    const session = '5a1f0000-0000-4000-8000-000000000009';
+    const subagents = path.join(dir, session, 'subagents');
+    await mkdir(subagents, { recursive: true });
+    await writeFile(
+      path.join(dir, `${session}.jsonl`),
+      [
+        JSON.stringify({ type: 'user', timestamp: stampAt('10:00:00.000'), message: { role: 'user', content: '<command-name>/devflow:implement</command-name>' } }),
+        callAt('10:00:05.000', 'toolu_win', 'Agent', { subagent_type: 'Code', description: 'redacted' }),
+      ].join('\n') + '\n',
+    );
+    await writeFile(path.join(subagents, 'agent-win01.meta.json'), JSON.stringify({ agentType: 'Code', toolUseId: 'toolu_win', spawnDepth: 1 }));
+    const transcript = path.join(subagents, 'agent-win01.jsonl');
+
+    await writeFile(transcript, [WIN_PROMPT, ...BEFORE_WINDOW, ...IN_WINDOW].join('\n') + '\n');
+    const whileRunning = await audit({ dir, since: WIN_SINCE, until: WIN_UNTIL });
+    await writeFile(transcript, WIN_TRANSCRIPT.join('\n') + '\n');
+    const afterwards = await audit({ dir, since: WIN_SINCE, until: WIN_UNTIL });
+
+    const signalTables = (r: AuditReport) => ({ reads: r.reads, decisions: r.decisions, bash: r.bash, filesWritten: r.filesWritten, totals: r.totals });
+    expect(signalTables(afterwards)).toEqual(signalTables(whileRunning));
+
+    expect(afterwards.reads).toEqual([
+      { agentType: 'Code', spawns: 1, readCalls: 4, rereads: 1, rereadShare: 0.25, exactRereads: 1, ranged: 2, rangedShare: 0.5, indexReads: 1, bodyReads: 1 },
+    ]);
+    expect(afterwards.bash).toEqual([
+      { class: 'test/build', calls: 2, resultBytes: 100, shareOfBytes: 0.625, bytesPerCall: 50, quietCalls: 1 },
+      { class: 'git', calls: 1, resultBytes: 40, shareOfBytes: 0.25, bytesPerCall: 40, quietCalls: null },
+      { class: 'grep/find', calls: 1, resultBytes: 20, shareOfBytes: 0.125, bytesPerCall: 20, quietCalls: null },
+      { class: 'cat/sed/head', calls: 0, resultBytes: 0, shareOfBytes: 0, bytesPerCall: 0, quietCalls: null },
+      { class: 'other', calls: 1, resultBytes: 0, shareOfBytes: 0, bytesPerCall: 0, quietCalls: null },
+    ]);
+    expect(afterwards.filesWritten).toMatchObject({ spawns: 1, medianFiles: 1, maxFiles: 1 });
+    expect(afterwards.decisions.find(d => d.shape === 'slice')).toMatchObject({
+      spawns: 1, citingSpawns: 1, totalDistinctCitations: 2, indexSelfReadSpawns: 1, bodySelfReadSpawns: 1,
+    });
+  });
+});
