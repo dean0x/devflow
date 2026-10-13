@@ -499,7 +499,7 @@ COMMIT_UNCOMMITTED: false
 Open the pull request for this branch and return the pre-flight summary."
 ```
 
-`COMMIT_UNCOMMITTED: false` keeps the Git agent from committing a stray file: the Code, Polish, Harden and fix agents commit their own work. Capture the `- **PR**: #{number}` line of its `### Branch` as `PR_NUMBER`, its `### Uncommitted files` list and its `TRACEABILITY: DEGRADED ({reason})` lines for the Phase 12 report. If it returns `### Status: BLOCKED` or no PR number, report its reason to the user and stop at the report (Phase 12); Phases 10 and 11 do not run.
+`COMMIT_UNCOMMITTED: false` keeps the Git agent from committing a stray file: the Code, Polish, Harden and Fix agents commit their own work. Capture the `- **PR**: #{number}` line of its `### Branch` as `PR_NUMBER`, its `### Uncommitted files` list and its `TRACEABILITY: DEGRADED ({reason})` lines for the Phase 12 report. If it returns `### Status: BLOCKED` or no PR number, report its reason to the user and stop at the report (Phase 12); Phases 10 and 11 do not run.
 
 ### Phase 10: CI Status Gate
 
@@ -508,7 +508,7 @@ Open the pull request for this branch and return the pre-flight summary."
 
 Run under every strategy: Phase 9 opened the PR.
 
-**Push first, outside the gate block.** The gate reads CI for the pushed head, and the Polish, Harden and fix commits reach the PR only by a push. Push once — never force, and no retry:
+**Push first, outside the gate block.** The gate reads CI for the pushed head, and the Polish, Harden and Fix commits reach the PR only by a push. Push once — never force, and no retry:
 
 ```bash
 git push origin HEAD; echo "exit=$?"
@@ -537,7 +537,7 @@ git push origin HEAD; echo "exit=$?"
 
 Run once, after Phase 10, under every strategy: the PR exists by now, opened in Phase 9. The re-validation path has no CI gate and runs this phase straight after Phase 9. Skip it only when Phase 9 stopped the run. A `ci` TP reads `INDETERMINATE` only when the CI gate could not tell or did not run.
 
-**Push first.** Every claim is keyed to the HEAD an agent reported, and a Harden or fix agent may have committed without pushing; a claim whose SHA is not in the PR reads `UNVERIFIED`. So push the branch once before the script — never force, and no retry:
+**Push first.** Every claim is keyed to the HEAD an agent reported, and a Harden or Fix agent may have committed without pushing; a claim whose SHA is not in the PR reads `UNVERIFIED`. So push the branch once before the script — never force, and no retry:
 
 ```bash
 git push origin HEAD; echo "exit=$?"
