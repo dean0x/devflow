@@ -9,8 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### BREAKING CHANGES — Agent rename (6 agents)
 
+**This release is version 4.0.0, a major release.** It renames six agents, and a prompt that
+names an old agent does not work. Earlier releases (2.1.0 and 2.5.0) shipped breaking changes as
+minor versions. Do not release this change as a minor or a patch version.
+
 Six agents have new names that state their job ([#466](https://github.com/dean0x/devflow/issues/466)).
-`code` keeps its name. The learning feature keeps its names too: `devflow learning`,
+The agent `code` keeps its name. The learning feature keeps its names too: `devflow learning`,
 `features.learning`, `.devflow/learning/` and the learning ops do not change.
 
 | Old slug     | New slug   | Old `name:`  | New `name:` |
@@ -28,27 +32,53 @@ Use `Polish` for a judgment pass that makes code cleaner and keeps its behaviour
 
 **What devflow migrates automatically:**
 - Keys in `~/.devflow/agent-models.json`. The one-time migration `canonicalise-agent-keys-v2`
-  runs on the first `devflow init` after this upgrade. Every read of the file also maps an old
-  key to its new slug, and the new key wins when both exist. `devflow agents --set <old slug>`
-  writes the new slug and tells you so.
-- Installed agent files. `devflow init` and `devflow uninstall` remove the six old files from
-  `~/.claude/agents/devflow/` (the orphan sweep) and install the new ones. A file of your own
-  in `~/.claude/agents/` is never touched.
-- The session-start hook reads `agents.curate.model`, then an older `agents.learning.model`,
-  and spawns `Curate`.
+  runs on the first `devflow init` after this upgrade. Each read of the file also maps an old key
+  to its new slug. If the old key and the new key both exist, the new key wins.
+  `devflow agents --set <old slug>` writes the new slug and tells you.
+- The session-start hook reads `agents.curate.model`, then an older `agents.learning.model`, and
+  spawns `Curate`. `devflow init` updates the hook.
 - `token-audit` counts old transcripts under the new names, so a past `Code-fix` spawn counts as
   `Fix`. Its JSON report key `codeFixByOperation` is now `fixByOperation`.
+
+**What `devflow init` and `devflow uninstall` do to agent files:**
+- A full `devflow init` removes the six old files from `~/.claude/agents/devflow/` and installs
+  the new ones. It removes every other file in that folder that devflow does not own.
+- A partial `devflow init --plugin=<name>` and a selective `devflow uninstall --plugin=<name>`
+  run the orphan sweep. The sweep deletes every `.md` file in `~/.claude/agents/devflow/` whose
+  name is not a devflow agent. This includes the six old files.
+- Do not keep your own agent files in `~/.claude/agents/devflow/`, because devflow deletes them.
+  A file of your own directly in `~/.claude/agents/` is never touched. This is also true when it
+  has the name of an old devflow agent, for example `~/.claude/agents/simplify.md`.
+
+**Partial install and partial uninstall on a 3.5.0 install:**
+- The commands of the plugins that stay installed name the old agents until something rewrites
+  them. The sweep removes the old agent files, and the new agent files are not on disk until
+  something writes them. For this reason both commands now repair the plugins that stay installed.
+- `devflow init --plugin=<name>`: the sweep can delete an old agent file. If it does, the install
+  writes the commands and the agents of every plugin in `~/.devflow/manifest.json`. It does not
+  write only the plugin you name. If the sweep deletes nothing, the install writes only the plugin
+  you name, as before.
+- `devflow uninstall --plugin=<name>`: the sweep can delete an old agent file. If it does, the
+  uninstall writes the current commands and agents of the plugins that stay installed. It also
+  prints a note. It does not update the hooks, the scripts or `settings.json`. Run a full
+  `devflow init` to update them. Until you do, the hook from 3.5.0 can name an agent that no
+  longer exists.
+- The uninstall writes nothing in these cases: there is no manifest, the manifest lists no
+  plugins, a linked folder blocks the write, or the write fails. It then prints a warning that
+  tells you to run `devflow init`.
 
 **What you must migrate by hand:**
 - Your own prompts, commands, agents or `CLAUDE.md` that name an old agent, for example
   `subagent_type: "Simplify"` or `subagent_type: "Code-edit"`. Devflow cannot edit files it does
   not own. Change them to the new name, for example `subagent_type: "Polish"`.
-- Open Claude Code sessions. Their orchestrator charter still names `Code-edit`. Restart them
-  after `devflow init`.
+- Open Claude Code sessions. Restart each one after `devflow init`. An open session loaded its
+  agent types when it started, so it does not know `Fix`, `Refactor`, `Harden`, `Polish`, `Debug`
+  or `Curate`. `devflow init` also removes the files of the old agents. The orchestrator charter
+  of an open session still names `Code-edit`.
 
 **Downgrade warning:** if you downgrade to 3.5.0, it does not know the new keys. Your per-agent
-model overrides saved as `fix`, `refactor`, `harden`, `polish`, `debug` or `curate` stop applying
-without a message. Check them with `devflow agents --list`.
+model overrides that you saved as `fix`, `refactor`, `harden`, `polish`, `debug` or `curate` do
+not apply, and 3.5.0 gives no message. Check them with `devflow agents --list`.
 
 ### Added
 
