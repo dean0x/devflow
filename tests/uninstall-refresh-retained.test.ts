@@ -212,6 +212,25 @@ describe('the rewrite after a selective uninstall in the user scope', () => {
     expect(await expectSkippedWithOneWarning()).toContain('The manifest lists no plugins');
   });
 
+  it('writes nothing and says no listed plugin is a known plugin when the manifest names only unknown plugins', async () => {
+    // resolveInstalledPlugins falls back to the whole registry for such a manifest, so the retained
+    // set would hold plugins that were never installed.
+    await writeManifest(['devflow-not-a-plugin', 'devflow-removed-from-the-registry']);
+
+    await refresh({ retained: DEVFLOW_PLUGINS });
+
+    expect(await expectSkippedWithOneWarning()).toContain('The manifest lists no known plugin');
+  });
+
+  it('still writes the plugins that stay when the manifest names one unknown plugin and one known plugin', async () => {
+    await writeManifest(['devflow-not-a-plugin', 'devflow-implement']);
+
+    await refresh();
+
+    expect(await fs.readFile(commandFile(), 'utf-8'), 'the command of a plugin that stays').not.toBe(OLD_COMMAND_TEXT);
+    expect(lines(warn)).toEqual([]);
+  });
+
   it('writes nothing through a linked folder that the guard refuses', async () => {
     await writeManifest(['devflow-implement']);
     await fs.writeFile(path.join(outside, 'implement.md'), OLD_COMMAND_TEXT, 'utf-8');
