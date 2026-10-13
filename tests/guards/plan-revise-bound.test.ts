@@ -141,7 +141,9 @@ for (const kind of ['learning-on', 'learning-off'] as const) {
     const build = builds().find(b => b.label === kind)!
 
     it('reads a real diagram', () => {
-      expect(diagram(build.content).split('\n').length, 'the diagram is short').toBeGreaterThan(40)
+      // Non-vacuity: the phase lines of 6 blocks and 14 phases, not an empty slice. The sub-bullets that restated
+      // the focus tables of Phases 3, 5, 8 and 10 were cut (#456), so the floor is the phase index alone.
+      expect(diagram(build.content).split('\n').length, 'the diagram is short').toBeGreaterThan(25)
     })
 
     it('shows the Phase 1 and Phase 14 Git spawns and the Revise ≤ 2 loop under Gate 2', () => {

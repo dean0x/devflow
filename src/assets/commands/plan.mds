@@ -554,63 +554,30 @@ Display completion summary:
 <!-- learning:off -->
 │  ├─ Phase 2: Orient
 <!-- learning:end -->
-<!-- learning:on -->
-│  │  ├─ Skim agent (codebase context)
-│  │  └─ Read index.md → DECISIONS_CONTEXT
-<!-- learning:off -->
-│  │  └─ Skim agent (codebase context)
-<!-- learning:end -->
 │  ├─ Phase 3: Explore Requirements (PARALLEL)
-│  │  ├─ Explore: User perspective
-│  │  ├─ Explore: Similar features
-│  │  ├─ Explore: Constraints
-│  │  └─ Explore: Failure modes
 │  └─ Phase 4: Synthesize Exploration
-│     └─ Synthesize agent (mode: exploration)
 │
 ├─ Block 2: Gap Analysis
 │  ├─ Phase 5: Gap Analysis (PARALLEL)
-│  │  ├─ Design agent: completeness
-│  │  ├─ Design agent: architecture
-│  │  ├─ Design agent: security
-│  │  ├─ Design agent: performance
-│  │  ├─ Design agent: compliance (only when COMPLIANCE_ACTIVE)
-│  │  ├─ Design agent: consistency (multi-issue only)
-│  │  └─ Design agent: dependencies (multi-issue only)
 │  └─ Phase 6: Synthesize Gap Analysis
-│     └─ Synthesize agent (mode: design)
 │
 ├─ Block 3: Scope Approval
 │  └─ Phase 7: GATE 1 - Validate Scope + Gaps ⛔ MANDATORY
-│     └─ AskUserQuestion: Confirm scope and gap resolutions
 │
 ├─ Block 4: Implementation Design
 │  ├─ Phase 8: Explore Implementation (PARALLEL)
-│  │  ├─ Explore: Architecture
-│  │  ├─ Explore: Integration
-│  │  ├─ Explore: Reusable code
-│  │  └─ Explore: Edge cases
 │  ├─ Phase 9: Synthesize Implementation Exploration
-│  │  └─ Synthesize agent (mode: exploration)
 │  ├─ Phase 10: Plan Implementation (PARALLEL)
-│  │  ├─ Plan: Implementation steps
-│  │  ├─ Plan: Testing strategy
-│  │  └─ Plan: Execution strategy
 │  └─ Phase 11: Synthesize Planning
-│     └─ Synthesize agent (mode: planning)
 │
 ├─ Block 5: Design Review + Approval
 │  ├─ Phase 12: Design Review
-│  │  └─ Design agent (mode: design-review)
 │  └─ Phase 13: GATE 2 - Confirm Plan + Design Review ⛔ MANDATORY
-│     ├─ AskUserQuestion: Accept / Revise / Cancel
 │     └─ Revise ≤ 2 → back to Phase 10; after 2: Accept / Cancel / Restart /plan
 │
 ├─ Block 6: Output
 │  └─ Phase 14: Output
-│     ├─ Store design artifact ({worktree}/.devflow/docs/design/)
-│     ├─ Git agent (ensure-traceable-issue) - create or enrich tracker issue (optional)
-│     └─ Report summary + next step
+│     └─ Git agent (ensure-traceable-issue) - create or enrich tracker issue (optional)
 │
 ```
 

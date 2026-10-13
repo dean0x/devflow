@@ -202,7 +202,6 @@ const DISPOSITION: readonly DispositionRow[] = [
       { file: 'commands/plan.md', anchor: '**Single-issue**: Spawn 4 Design agents', phrase: '5 when COMPLIANCE_ACTIVE' },
       { file: 'commands/plan.md', anchor: '| compliance | Regulatory gaps', phrase: 'only when COMPLIANCE_ACTIVE' },
       { file: 'commands/plan.md', anchor: '**Multi-issue**: Spawn 6 Design agents', phrase: '7 when COMPLIANCE_ACTIVE' },
-      { file: 'commands/plan.md', anchor: 'Design agent: compliance (', phrase: 'only when COMPLIANCE_ACTIVE' },
     ],
   },
   {
