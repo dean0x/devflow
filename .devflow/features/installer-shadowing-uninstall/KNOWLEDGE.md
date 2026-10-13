@@ -103,7 +103,6 @@ Every stripper `runCleanupPhase` calls on `settings.json` (`removeAmbientHook`, 
 - **KB-AP-6** Per-item failure isolation can mask systematic TypeErrors: the proxy-artifact removal depends on `artifact.isDir === true` (strict equality), because `recursive: artifact.isDir` passes `undefined` for entries with no `isDir`.
 - **KB-INV-1** `migrations.json` is an artifact, so migrations re-run cleanly on reinstall; a failed `canonicalise-agent-keys-v1` write is not retried by the runner (init-seed KB).
 - **`revertExternalAgents` on the selective path reverts ALL agents**, not only those being removed; the surviving agents lose GPT frontmatter until the next `devflow init`.
-- **Selective uninstall does not rewrite `manifest.json`**, so `manifest.plugins` still lists a removed plugin and a later `init --plugin=X` or full re-init reinstalls it consistently with disk.
 - **An explicit `--scope local` in a HOME-rooted repository exits 1** by design; auto-detection finds only `user`.
 
 ## Key Files
