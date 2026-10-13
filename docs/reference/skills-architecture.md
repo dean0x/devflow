@@ -12,9 +12,9 @@ Shared patterns used by multiple agents.
 
 | Skill | Purpose | Used By |
 |-------|---------|---------|
-| `software-design` | Engineering patterns (Result types, DI, immutability, workaround labeling) | Scrutinize, Simplify |
+| `software-design` | Engineering patterns (Result types, DI, immutability, workaround labeling) | Harden, Polish |
 | `review-methodology` | 6-step review process, 3-category issue classification | Review |
-| `quality-gates` | 9-pillar self-review framework | Scrutinize |
+| `quality-gates` | 9-pillar self-review framework | Harden |
 | `docs-framework` | Documentation conventions (.devflow/docs/ structure, naming, templates) | /plan, /research (at their naming step) — the naming authority |
 | `git` | Git safety, atomic commits, PR descriptions, GitHub API patterns | Code, Git |
 | `patterns` | CRUD, API endpoints, events, config, logging | None; a model may invoke it by description |
@@ -83,7 +83,7 @@ Skills activate through three guaranteed mechanisms:
 
 1. **Agent frontmatter `skills:` field** — When an agent runs, all skills listed in its frontmatter are loaded into context. This is the primary activation path.
 2. **Review dynamic read** — The Review agent reads the pattern skill file for its assigned focus area from a lookup table (e.g., `focus=testing` → `testing/SKILL.md`).
-3. **Directive in the spawn prompt** — A command adds a line to a spawn prompt that tells the agent to load a skill with `Skill(skill="devflow:<name>")`, and only when the line's condition holds. Compliance works this way: when the resolved compliance lens is on (a repository can turn it on while the machine switch is off), the command adds the directive to the Code, Code-fix, Review and Design spawns. With the lens off the spawn carries nothing about compliance. No agent body names the compliance skill, and no Code variant carries a mode-skill table or picks a skill by language or mode. The Design compliance focus reads `gap-analysis/references/compliance.md` by explicit path.
+3. **Directive in the spawn prompt** — A command adds a line to a spawn prompt that tells the agent to load a skill with `Skill(skill="devflow:<name>")`, and only when the line's condition holds. Compliance works this way: when the resolved compliance lens is on (a repository can turn it on while the machine switch is off), the command adds the directive to the Code, Fix, Review and Design spawns. With the lens off the spawn carries nothing about compliance. No agent body names the compliance skill, and no Code variant carries a mode-skill table or picks a skill by language or mode. The Design compliance focus reads `gap-analysis/references/compliance.md` by explicit path.
 
 Skills with `user-invocable: false` also appear in Claude Code's skill catalog with their description. Claude MAY auto-invoke them based on description matching, but this is not guaranteed and should not be relied upon as the sole activation path.
 
@@ -110,7 +110,7 @@ skills:
 ---
 ```
 
-All six listed skills are loaded when the Code agent is spawned. Code ships as three variants built from one shared partial, and each variant fixes its preload at compile time: Code (`implement`, `issue-fix`) preloads the six above; Code-fix (the four gate-failure fix modes) preloads `git`, `testing`, `worktree-support` and `apply-decisions`; Code-edit (`edit`) preloads `git`, `worktree-support` and `apply-decisions`. No variant chooses a skill at run time. `software-design`, `patterns`, `boundary-validation` and `dependency-research` stay available for a model to invoke by their descriptions. `tests/guards/code-preload.test.ts` holds each variant's skill set and a byte ceiling on it.
+All six listed skills are loaded when the Code agent is spawned. Code ships as three variants built from one shared partial, and each variant fixes its preload at compile time: Code (`implement`, `issue-fix`) preloads the six above; Fix (the four gate-failure fix modes) preloads `git`, `testing`, `worktree-support` and `apply-decisions`; Refactor (`edit`) preloads `git`, `worktree-support` and `apply-decisions`. No variant chooses a skill at run time. `software-design`, `patterns`, `boundary-validation` and `dependency-research` stay available for a model to invoke by their descriptions. `tests/guards/code-preload.test.ts` holds each variant's skill set and a byte ceiling on it.
 
 ## Skill File Template
 

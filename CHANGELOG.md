@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### BREAKING CHANGES — Agent rename (6 agents)
+
+Six agents have new names that state their job ([#466](https://github.com/dean0x/devflow/issues/466)).
+`code` keeps its name. The learning feature keeps its names too: `devflow learning`,
+`features.learning`, `.devflow/learning/` and the learning ops do not change.
+
+| Old slug     | New slug   | Old `name:`  | New `name:` |
+|--------------|------------|--------------|-------------|
+| `code-fix`   | `fix`      | `Code-fix`   | `Fix`       |
+| `code-edit`  | `refactor` | `Code-edit`  | `Refactor`  |
+| `scrutinize` | `harden`   | `Scrutinize` | `Harden`    |
+| `simplify`   | `polish`   | `Simplify`   | `Polish`    |
+| `diagnose`   | `debug`    | `Diagnose`   | `Debug`     |
+| `learning`   | `curate`   | `Learning`   | `Curate`    |
+
+The `/debug` command does not change. `Debug` is the agent that `/bug-analysis` spawns.
+Use `Refactor` for a given mechanical change, such as "rename X to Y everywhere".
+Use `Polish` for a judgment pass that makes code cleaner and keeps its behaviour.
+
+**What devflow migrates automatically:**
+- Keys in `~/.devflow/agent-models.json`. The one-time migration `canonicalise-agent-keys-v2`
+  runs on the first `devflow init` after this upgrade. Every read of the file also maps an old
+  key to its new slug, and the new key wins when both exist. `devflow agents --set <old slug>`
+  writes the new slug and tells you so.
+- Installed agent files. `devflow init` and `devflow uninstall` remove the six old files from
+  `~/.claude/agents/devflow/` (the orphan sweep) and install the new ones. A file of your own
+  in `~/.claude/agents/` is never touched.
+- The session-start hook reads `agents.curate.model`, then an older `agents.learning.model`,
+  and spawns `Curate`.
+- `token-audit` counts old transcripts under the new names, so a past `Code-fix` spawn counts as
+  `Fix`. Its JSON report key `codeFixByOperation` is now `fixByOperation`.
+
+**What you must migrate by hand:**
+- Your own prompts, commands, agents or `CLAUDE.md` that name an old agent, for example
+  `subagent_type: "Simplify"` or `subagent_type: "Code-edit"`. Devflow cannot edit files it does
+  not own. Change them to the new name, for example `subagent_type: "Polish"`.
+- Open Claude Code sessions. Their orchestrator charter still names `Code-edit`. Restart them
+  after `devflow init`.
+
+**Downgrade warning:** if you downgrade to 3.5.0, it does not know the new keys. Your per-agent
+model overrides saved as `fix`, `refactor`, `harden`, `polish`, `debug` or `curate` stop applying
+without a message. Check them with `devflow agents --list`.
+
 ### Added
 
 - **The HUD shows your Codex usage limits.** A new `codexQuota` segment sits on line 2 next to the Claude quota, for example `Codex 5h ███░░░░░ 40% (1h 2m) · 7d █░░░░░░░ 12% (3d 4h)`. It reads the newest rate-limit record that Codex writes to `~/.codex/sessions`, so it opens no credential file and makes no network call. A window is identified by its length, so a weekly-only plan and a 5h + 7d plan both label correctly. A window past its reset time shows 0%, and a red `limited` marker shows while Codex reports a reached limit. The segment is hidden when there is no recent Codex session, so users without Codex see no change.
