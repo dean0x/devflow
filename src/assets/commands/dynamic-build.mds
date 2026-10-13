@@ -253,7 +253,7 @@ Commit fixes with conventional-commit message.`, { agentType: "Fix" });
 Return: {"verdict": "PASS" | "FAIL", "details": "..."}`, { agentType: "Validate" });
       if (recheck?.verdict === "PASS") break;
       failureDetails = recheck?.details || failureDetails;
-      if (attempt === 2) return { verdict: "ESCALATED", type: "validation-exhausted", reason: "Validation exhausted after 2 Code agent fix attempts" };
+      if (attempt === 2) return { verdict: "ESCALATED", type: "validation-exhausted", reason: "Validation exhausted after 2 Fix agent attempts" };
     }
   }
 
@@ -499,7 +499,7 @@ Self-verify your fix compiles. Commit fixes with conventional-commit message.`, 
 Return: {"verdict": "PASS" | "FAIL", "details": "..."}`, { agentType: "Validate" });
       if (recheck?.verdict === "PASS") break;
       failureDetails = recheck?.details || failureDetails;
-      if (attempt === 2) return { verdict: "ESCALATED", type: "validation-exhausted", reason: "Final Gate 1 validation exhausted after 2 Code agent fix attempts" };
+      if (attempt === 2) return { verdict: "ESCALATED", type: "validation-exhausted", reason: "Final Gate 1 validation exhausted after 2 Fix agent attempts" };
     }
   }
 

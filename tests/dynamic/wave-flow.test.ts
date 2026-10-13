@@ -1581,7 +1581,7 @@ describe('#421 AC-18: a Gate 1 #1 stop returns ESCALATED with one escalation bef
     const world: World = { order: ['#51', '#52'], tickets: { '#51': { issueId: '51', prLinkLine: 'Closes #51' }, '#52': { issueId: '52', prLinkLine: 'Closes #52' } }, gate1Red: ['#51'] }
     const run = await runWave(WAVE!, SINGLE!, world, {}, 'true')
     expect(run.tickets.map(t => [t.ticket, t.verdict, t.merged])).toEqual([['#51', 'ESCALATED', false], ['#52', 'PASS', true]])
-    expect(run.quarantined).toEqual([{ ticket: '#51', reason: 'Validation exhausted after 2 Code agent fix attempts' }])
+    expect(run.quarantined).toEqual([{ ticket: '#51', reason: 'Validation exhausted after 2 Fix agent attempts' }])
     expect(run.spawns.filter(s => s.prompt.startsWith('Merge ')).map(s => s.prompt.split(' ')[1])).toEqual(['feat/52-work'])
   })
 })
