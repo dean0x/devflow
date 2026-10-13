@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **The HUD shows your Codex usage limits.** A new `codexQuota` segment sits on line 2 next to the Claude quota, for example `Codex 5h ███░░░░░ 40% (1h 2m) · 7d █░░░░░░░ 12% (3d 4h)`. It reads the newest rate-limit record that Codex writes to `~/.codex/sessions`, so it opens no credential file and makes no network call. A window is identified by its length, so a weekly-only plan and a 5h + 7d plan both label correctly. A window past its reset time shows 0%, and a red `limited` marker shows while Codex reports a reached limit. The segment is hidden when there is no recent Codex session, so users without Codex see no change.
 
+### Changed
+
+- **`/plan` bounds Revise at 2 rounds** ([#455](https://github.com/dean0x/devflow/issues/455)). Each revision spawns five agents (Plan ×3, Synthesize, Design). After the second revision, Gate 2 offers Accept, Cancel or "Restart /plan with these constraints". The first-pass fan-out does not change.
+- **The PR evidence refresh and the merge-readiness check run as a script, not as a Git agent spawn** ([#455](https://github.com/dean0x/devflow/issues/455)). `/implement`, `/resolve` and `/dynamic-build` run `verify-evidence.cjs publish` from the main session, and `/resolve` runs `verify-evidence.cjs readiness`. The `update-pr-evidence` and `check-merge-readiness` operations stay defined and run the same script. The refresh never blocks, and the readiness check only reports.
+- **Agents get a scoped slice of the decisions index** ([#454](https://github.com/dean0x/devflow/issues/454)). On a direct delegation the main session passes only the index lines that match the agent's task, a `(slice: N of M entries — full index: <path>)` marker and the index footer. Sibling agents over one diff share one slice. When the main session is not sure, it includes the entry.
+- **Command bodies are smaller and have size ceilings** ([#456](https://github.com/dean0x/devflow/issues/456)). Rare `/implement` branches (the ticket-link ask, the missing-test-plan ask, the evidence exception and the re-validation path) move to reference files that the command reads by explicit path. `/implement`, `/resolve`, `/plan` and `/code-review` are shorter. A test holds a size ceiling for each of the 14 compiled commands, learning-on and learning-off.
+
 ### Fixed
 
 - **`/release` no longer folds the `Exempt (not attested)` line into the last traceability bullet.** The `## Traceability exceptions` block put that line directly under the last `-` bullet, so Markdown rendered it inside that bullet (seen in the v3.5.0 release notes). The template now holds a blank line between them, and the command states the rule so a composed block always carries it.
