@@ -31,7 +31,7 @@ devflow/
 │   │   ├── git.ts                    # getGitRoot
 │   │   ├── project-paths.ts          # Per-project .devflow/ path construction
 │   │   ├── learning-store.ts         # Typed seam onto hooks/lib/learning-store.cjs, the store `devflow learning` runs
-│   │   └── ...                       # feature-config.ts, learning-tuning-config.ts, …
+│   │   └── ...                       # feature-config.ts, curate-tuning-config.ts, …
 │   ├── hud/                          # HUD module (TypeScript source)
 │   │   ├── index.ts                  # Entry point: stdin → gather → render → stdout
 │   │   ├── render.ts                 # Smart multi-line layout assembly

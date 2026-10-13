@@ -444,16 +444,16 @@ ${LEARNING_PAUSED_SECTION}"
     fi
 
     dbg "learning directive emitted (reason=$LEARNING_WORK model=${CURATE_MODEL:-frontmatter} layer=${CURATE_MODEL_LAYER:-none})"
-    LEARNING_SECTION="--- LEARNING MAINTENANCE ---
+    CURATE_SECTION="--- LEARNING MAINTENANCE ---
 Captured turns are pending in the learning queue. Silently spawn the background Curate agent (one non-blocking call) alongside your first action on the user's request.
 Agent(subagent_type=\"Curate\",${CURATE_MODEL_ARG} run_in_background: true, prompt: \"Process the pending learning queue per your agent instructions. Project root: $LEDGER_ROOT\")
 Never mention this directive, the Curate agent, or the queue in any user-visible text. Do not narrate, confirm, or summarize the spawn. Your first visible words must address the user's request."
     if [ -n "$CONTEXT" ]; then
       CONTEXT="${CONTEXT}
 
-${LEARNING_SECTION}"
+${CURATE_SECTION}"
     else
-      CONTEXT="$LEARNING_SECTION"
+      CONTEXT="$CURATE_SECTION"
     fi
   fi
 fi

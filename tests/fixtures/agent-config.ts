@@ -343,7 +343,7 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
    * already-encoded comparison (the Inputs section of curate.md; tests/curate-agent.test.ts
    * holds the step and its position). A change of tier is an edit to this row and to the
    * `model:` and `effort:` lines of curate.md, and the default model in
-   * src/core/learning-tuning-config.ts, which tests/decisions/config.test.ts holds equal to
+   * src/core/curate-tuning-config.ts, which tests/decisions/config.test.ts holds equal to
    * this row.
    */
   curate: {

@@ -22,7 +22,7 @@ import * as os from 'os';
 // Mocks — all set up before any imports from the module under test.
 // ---------------------------------------------------------------------------
 
-vi.mock('../../src/core/learning-tuning-config.js', () => ({
+vi.mock('../../src/core/curate-tuning-config.js', () => ({
   loadCurateTuningConfig: vi.fn(() => ({
     model: 'opus',
     debug: false,

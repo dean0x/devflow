@@ -6,7 +6,7 @@ import {
   loadCurateTuningConfig,
   applyCurateTuningConfigLayer,
   type CurateTuningConfig,
-} from '../../src/core/learning-tuning-config.js';
+} from '../../src/core/curate-tuning-config.js';
 import { AGENT_CONFIG } from '../fixtures/agent-config.js';
 
 // ---------------------------------------------------------------------------

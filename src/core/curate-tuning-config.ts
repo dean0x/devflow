@@ -83,7 +83,7 @@ function readConfigFile(filePath: string): string | null {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
       // Warn but don't crash — callers fall back to defaults.
       console.warn(
-        `[learning-tuning-config] warning: could not read ${filePath}: ${(err as Error).message}`,
+        `[curate-tuning-config] warning: could not read ${filePath}: ${(err as Error).message}`,
       );
     }
     return null;
