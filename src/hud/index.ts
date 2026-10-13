@@ -48,15 +48,20 @@ function extractUsageFromStdin(stdin: StdinData): UsageData | null {
 }
 
 async function main(): Promise<void> {
-  const timeoutPromise = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error('timeout')), OVERALL_TIMEOUT),
-  );
+  let timer: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('timeout')), OVERALL_TIMEOUT);
+  });
 
   try {
     const result = await Promise.race([run(), timeoutPromise]);
     process.stdout.write(result);
   } catch {
     // Timeout or error — output nothing (graceful degradation)
+  } finally {
+    // A live timer would keep node running for the rest of the budget after the
+    // line is printed, delaying every status-line render by about 2 s.
+    clearTimeout(timer);
   }
 }
 
