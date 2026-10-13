@@ -20,7 +20,7 @@ import { promises as fs, lstatSync } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as p from '@clack/prompts';
-import { refreshRetainedCommandsAndAgents, resolveInstalledPlugins, runSelectivePhaseForScope } from '../src/cli/commands/uninstall.js';
+import { refreshRetainedCommandsAndAgents, resolveInstalledPlugins, runSelectivePhaseForScope, type ChangeGuard } from '../src/cli/commands/uninstall.js';
 import { DEVFLOW_PLUGINS, type PluginDefinition } from '../src/core/plugins.js';
 
 /** The agent file an older release left, which starts the rewrite. */
@@ -116,6 +116,7 @@ describe('a selective uninstall in a legacy local install writes no command thro
 
 describe('the rewrite after a selective uninstall in the user scope', () => {
   let home: string;
+  let outside: string;
   let warn: ReturnType<typeof vi.spyOn>;
   let info: ReturnType<typeof vi.spyOn>;
 
@@ -127,6 +128,7 @@ describe('the rewrite after a selective uninstall in the user scope', () => {
 
   beforeEach(async () => {
     home = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-refresh-home-')));
+    outside = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-refresh-outside-')));
     warn = vi.spyOn(p.log, 'warn').mockImplementation(() => undefined);
     info = vi.spyOn(p.log, 'info').mockImplementation(() => undefined);
     await fs.mkdir(commandsDir(), { recursive: true });
@@ -135,6 +137,7 @@ describe('the rewrite after a selective uninstall in the user scope', () => {
 
   afterEach(async () => {
     await fs.rm(home, { recursive: true, force: true });
+    await fs.rm(outside, { recursive: true, force: true });
   });
 
   const lines = (spy: ReturnType<typeof vi.spyOn>): string[] => spy.mock.calls.map(call => String(call[0]));
@@ -173,6 +176,80 @@ describe('the rewrite after a selective uninstall in the user scope', () => {
     expect(await fs.readdir(agentsDir()), 'the agents of that plugin').toEqual(expect.arrayContaining(['fix.md', 'polish.md']));
     expect(lines(info).filter(line => line.includes('wrote the current commands and agents')), 'the note').toHaveLength(1);
     expect(lines(warn)).toEqual([]);
+  });
+
+  /** The rewrite did not run: the command is as it was, no agent was written, and one warning names the remedy. */
+  async function expectSkippedWithOneWarning(): Promise<string> {
+    expect(await fs.readFile(commandFile(), 'utf-8'), 'the command of a plugin that stays').toBe(OLD_COMMAND_TEXT);
+    await expect(fs.stat(agentsDir()), 'the agents directory').rejects.toMatchObject({ code: 'ENOENT' });
+    expect(lines(info).filter(line => line.includes('wrote the current commands')), 'no success note').toEqual([]);
+    const warned = lines(warn).filter(line => line.includes(RETIRED_AGENT));
+    expect(warned, 'one warning names the removed agent file').toHaveLength(1);
+    expect(warned[0], 'the remedy').toContain('`devflow init`');
+    return warned[0];
+  }
+
+  it('writes nothing and says there is no readable manifest when the manifest is missing', async () => {
+    await refresh();
+
+    expect(await expectSkippedWithOneWarning()).toContain('There is no readable manifest');
+  });
+
+  it('says the same when the manifest is not valid JSON', async () => {
+    await fs.mkdir(devflowDir(), { recursive: true });
+    await fs.writeFile(path.join(devflowDir(), 'manifest.json'), '{ not json', 'utf-8');
+
+    await refresh();
+
+    expect(await expectSkippedWithOneWarning()).toContain('There is no readable manifest');
+  });
+
+  it('writes nothing and says the manifest lists no plugins when it lists none', async () => {
+    await writeManifest([]);
+
+    await refresh();
+
+    expect(await expectSkippedWithOneWarning()).toContain('The manifest lists no plugins');
+  });
+
+  it('writes nothing through a linked folder that the guard refuses', async () => {
+    await writeManifest(['devflow-implement']);
+    await fs.writeFile(path.join(outside, 'implement.md'), OLD_COMMAND_TEXT, 'utf-8');
+    await fs.rm(commandsDir(), { recursive: true });
+    await fs.symlink(outside, commandsDir());
+    const refuseLinks: ChangeGuard = async target => fs.lstat(target).then(stat => !stat.isSymbolicLink(), () => true);
+
+    await refresh({ mayChange: refuseLinks });
+
+    expect(await fs.readFile(path.join(outside, 'implement.md'), 'utf-8'), 'the file the link leads to').toBe(OLD_COMMAND_TEXT);
+    expect(lstatSync(commandsDir()).isSymbolicLink(), 'the link is left as it was').toBe(true);
+    await expect(fs.stat(agentsDir()), 'the agents directory').rejects.toMatchObject({ code: 'ENOENT' });
+    const warned = lines(warn).filter(line => line.includes(RETIRED_AGENT));
+    expect(warned, 'one warning names the removed agent file').toHaveLength(1);
+    expect(warned[0]).toContain('A linked folder blocks the rewrite');
+    expect(warned[0], 'the remedy').toContain('`devflow init`');
+    expect(lines(info).filter(line => line.includes('wrote the current commands')), 'no success note').toEqual([]);
+  });
+
+  it('stops at the first failed copy: earlier files stay written, later ones are not, and one warning names the remedy', async () => {
+    await writeManifest(['devflow-implement']);
+    const second = path.join(commandsDir(), 'bug-analysis.md');
+    await fs.writeFile(second, OLD_COMMAND_TEXT, 'utf-8');
+    // The copy runs file by file. The first command has a source, the second has none, so it throws there.
+    const implement = pluginNamed('devflow-implement');
+    const broken: PluginDefinition = { ...implement, commands: ['/implement', '/command-without-a-source', '/bug-analysis'] };
+
+    await refresh({ retained: [broken] });
+
+    expect(await fs.readFile(commandFile(), 'utf-8'), 'the file before the failure').not.toBe(OLD_COMMAND_TEXT);
+    expect(await fs.readFile(second, 'utf-8'), 'the file after the failure').toBe(OLD_COMMAND_TEXT);
+    await expect(fs.stat(agentsDir()), 'the agents are copied after the commands').rejects.toMatchObject({ code: 'ENOENT' });
+    const warned = lines(warn).filter(line => line.includes(RETIRED_AGENT));
+    expect(warned, 'one warning names the removed agent file').toHaveLength(1);
+    expect(warned[0]).toContain('could not write the current commands and agents');
+    expect(warned[0]).toContain('command-without-a-source');
+    expect(warned[0], 'the remedy').toContain('`devflow init`');
+    expect(lines(info).filter(line => line.includes('wrote the current commands')), 'no success note').toEqual([]);
   });
 
   it('prints no model-mapping warning from the revert when verbose is off', async () => {

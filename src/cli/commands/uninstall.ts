@@ -1021,7 +1021,7 @@ export async function runDryRunPhase(opts: {
  * check files. `devflow init` can not update a legacy local install either, so the warning
  * tells the user to remove it in full.
  *
- * Skipped, with a warning, when the manifest is missing or records no plugins (the
+ * Skipped, with a warning, when there is no readable manifest or it lists no plugins (the
  * retained set would be a guess), or when a folder is behind a link the caller's guard
  * refuses. Those warnings name `devflow init` as the remedy. When the copy fails, it stops
  * at the first failure: files it wrote before then stay, and the warning names the same
@@ -1057,9 +1057,14 @@ export async function refreshRetainedCommandsAndAgents(opts: {
     return;
   }
 
+  // readManifest returns null for a missing file and for one it can not parse or validate.
   const manifest = await readManifest(devflowDir).catch(() => null);
-  if (manifest === null || manifest.plugins.length === 0) {
-    p.log.warn(`${retired} The manifest records no plugins, so Devflow did not rewrite the remaining files. ${remedy}`);
+  if (manifest === null) {
+    p.log.warn(`${retired} There is no readable manifest, so Devflow did not rewrite the remaining files. ${remedy}`);
+    return;
+  }
+  if (manifest.plugins.length === 0) {
+    p.log.warn(`${retired} The manifest lists no plugins, so Devflow did not rewrite the remaining files. ${remedy}`);
     return;
   }
   if (!(await mayChange(agentsDir)) || !(await mayChange(commandsDir))) {
