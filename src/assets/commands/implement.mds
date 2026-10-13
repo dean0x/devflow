@@ -176,7 +176,7 @@ node "$HOME/.devflow/scripts/verify-evidence.cjs" render --plan "{worktree}/.dev
 {{settings.settings_resolve()}}
 
 {{publication_gate()}}
-Phase 11 passes the resolved value to `update-pr-evidence`, which decides what each value means for the evidence comment. From the same line: {{compliance.compliance_frameworks()}}
+Phase 11 passes the resolved value to the evidence script (`publish`), which decides what each value means for the evidence comment. From the same line: {{compliance.compliance_frameworks()}}
 
 {{compliance.compliance_inject()}}
 
@@ -553,25 +553,21 @@ git push origin HEAD; echo "exit=$?"
 
 Run once, after Phase 10, under every strategy: the PR exists by now, opened in Phase 9. The re-validation path has no CI gate and runs this phase straight after Phase 9. Skip it only when Phase 9 stopped the run. A `ci` TP reads `INDETERMINATE` only when the CI gate could not tell or did not run.
 
-**Push first.** Every claim is keyed to the HEAD an agent reported, and a Scrutinize or fix agent may have committed without pushing; a claim whose SHA is not in the PR reads `UNVERIFIED`. So push the branch once before the spawn — never force, and no retry:
+**Push first.** Every claim is keyed to the HEAD an agent reported, and a Scrutinize or fix agent may have committed without pushing; a claim whose SHA is not in the PR reads `UNVERIFIED`. So push the branch once before the script — never force, and no retry:
 
 ```bash
 git push origin HEAD; echo "exit=$?"
 ```
 
-`exit=0` continues to the spawn. Any other result, a rejected non-fast-forward push included, does not block: record `TRACEABILITY: DEGRADED (evidence push failed)` for the Phase 12 report and spawn anyway.
+`exit=0` continues to the script. Any other result, a rejected non-fast-forward push included, does not block: record `TRACEABILITY: DEGRADED (evidence push failed)` for the Phase 12 report and run the script anyway.
 
-```
-Agent(subagent_type="Git"):
-"OPERATION: update-pr-evidence
-PR_NUMBER: {PR_NUMBER}
-EVIDENCE_FILE: .devflow/docs/evidence-{branch_slug}.md
-REVIEW_PUBLICATION: {REVIEW_PUBLICATION resolved in Phase 1, or auto}
-WORKTREE_PATH: {worktree}
-Update the PR's test-plan block and post its evidence comment."
+**Then refresh, inline.** The refresh is plumbing, so no Git agent runs it: `verify-evidence.cjs publish` is the whole `update-pr-evidence` operation — verify, the scrubbed block edit with its read-back, the scrubbed evidence comment — in one call. Use the Bash tool with `timeout: 180000`:
+
+```bash
+cd "{worktree}" && node "$HOME/.devflow/scripts/verify-evidence.cjs" publish --pr {PR_NUMBER} --evidence ".devflow/docs/evidence-{branch_slug}.md" --publication {REVIEW_PUBLICATION resolved in Phase 1, or auto}; echo "exit=$?"
 ```
 
-Omit the `EVIDENCE_FILE` line when that file does not exist. Capture the op's `## PR Evidence` block — its `EVIDENCE` line and its `**Body**:` / `**Comment**:` line — as `EVIDENCE_RESULT`, or its `TRACEABILITY: DEGRADED ({reason})` line. It never blocks: whatever it returns, continue to Phase 12.
+Drop the `--evidence` pair when that file does not exist or its path does not match `^[A-Za-z0-9._/-]{1,255}$`. `{PR_NUMBER}` is digits only, and the publication value is `auto`, `full`, `off` or `stub`. Capture its stdout as `EVIDENCE_RESULT`: the `## PR Evidence` block — its `EVIDENCE` line and its `**Body**:` / `**Comment**:` line — and any `TRACEABILITY: DEGRADED ({reason})` lines after it (exit 0), or the one line `TRACEABILITY: DEGRADED (evidence unavailable)` (exit 2). Empty stdout or any other exit is `TRACEABILITY: DEGRADED (evidence unavailable)`. It never blocks: whatever it returns, continue to Phase 12.
 
 ### Phase 12: Report
 
@@ -581,7 +577,7 @@ Display completion summary with phase status, PR info, and next steps.
 
 Show the test plan's evidence from Phase 11: `Test plan: {VERIFIED-CI + ATTESTED-LOCAL}/{total} verified (VERIFIED-CI {n}, ATTESTED-LOCAL {n})`, read from the `EVIDENCE` line and never inferred, then its `**Body**:` / `**Comment**:` line verbatim. Without an `EVIDENCE` line, show `Test plan: evidence unavailable`; with no test plan, `Test plan: missing`.
 
-If any Git agent output emitted `TRACEABILITY: DEGRADED ({reason})` lines during the run, or Phase 10's push or Phase 11's push recorded one, surface them verbatim in the report under a `### Traceability` subsection so the user can act on them.
+If any Git agent output emitted `TRACEABILITY: DEGRADED ({reason})` lines during the run, or Phase 10's push, Phase 11's push or Phase 11's script output carried one, surface them verbatim in the report under a `### Traceability` subsection so the user can act on them.
 
 If Phase 9 listed uncommitted files, show them as a `### Uncommitted files` subsection: the user commits them or discards them.
 
@@ -638,7 +634,7 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 │
 ├─ Phase 11: Evidence (every strategy, once the PR exists)
 │  └─ Push the branch (never force; a failure is DEGRADED, not a stop)
-│  └─ Git agent (update-pr-evidence) - test-plan block + evidence comment; never blocks
+│  └─ verify-evidence.cjs publish (inline, no Git spawn) - test-plan block + evidence comment; never blocks
 │
 ├─ Phase 12: Report
 │
@@ -648,7 +644,7 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 
 ## Principles
 
-1. **Orchestration only** - Command spawns agents, never does work itself; the inline calls are the bounded plumbing the charter allows: the Phase 10 and Phase 11 pushes, the Phase 10 ci-wait call and the evidence script checks
+1. **Orchestration only** - Command spawns agents, never does work itself; the inline calls are the bounded plumbing the charter allows: the Phase 10 and Phase 11 pushes, the Phase 10 ci-wait call, the Phase 11 evidence publish call and the evidence script checks
 2. **Plan-first** - Plan documents from `/plan` skip exploration/planning overhead entirely
 3. **Coherence-first** - Single Code agent produces more consistent code (default ~80% of tasks)
 4. **Agent ownership** - Each agent owns its output completely

@@ -92,11 +92,11 @@
     },
     {
       "id": "seam-ops-with-callers",
-      "floor": 14,
-      "pattern": "toBeGreaterThanOrEqual(14)",
+      "floor": 12,
+      "pattern": "toBeGreaterThanOrEqual(12)",
       "occurrences": 1,
       "sourceFile": "tests/seams/command-agent-input.test.ts",
-      "description": "Operations with at least one live caller fence. Directions 1 and 2 iterate this map; if it empties, both pass vacuously (the defect this floor exists to make loud). 14 since #363 (PR4): /implement's Phase 10b spawn gave update-pr-evidence its caller fence."
+      "description": "Operations with at least one live caller fence. Directions 1 and 2 iterate this map; if it empties, both pass vacuously (the defect this floor exists to make loud). 14 since #363 (PR4): /implement's Phase 10b spawn gave update-pr-evidence its caller fence. LOWERED 14 -> 12 by #455 (deliberate exception): /implement, /resolve and /dynamic-build run update-pr-evidence, and /resolve runs check-merge-readiness, through verify-evidence.cjs instead of a Git spawn; both operations stay defined and route to the same script. Old value 14; accepted by the user 2026-10-13."
     },
     {
       "id": "issue-capture-contract-size",

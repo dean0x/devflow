@@ -795,19 +795,13 @@ git -C "{integration worktree root}" push origin HEAD; echo "exit=$?"
 
 {{pub.publication_gate()}}
 
-   Then spawn:
+   Then run the script inline — it is the whole `update-pr-evidence` operation, with no Git agent spawn — through the Bash tool with `timeout: 180000`:
 
-```
-Agent(subagent_type="Git"):
-"OPERATION: update-pr-evidence
-PR_NUMBER: {n}
-EVIDENCE_FILE: .devflow/docs/evidence-wave-{slug}.md
-REVIEW_PUBLICATION: {REVIEW_PUBLICATION resolved above, or auto}
-WORKTREE_PATH: {integration worktree root}
-Update the wave PR's test-plan block and post its evidence comment."
+```bash
+cd "{integration worktree root}" && node "$HOME/.devflow/scripts/verify-evidence.cjs" publish --pr {n} --evidence ".devflow/docs/evidence-wave-{slug}.md" --publication {REVIEW_PUBLICATION resolved above, or auto}; echo "exit=$?"
 ```
 
-   `update-pr-evidence` decides what each publication value means for the evidence comment. Report its `## PR Evidence` block — its `EVIDENCE` line and its `**Body**:` / `**Comment**:` line — or its `TRACEABILITY: DEGRADED ({reason})` line; a spawn that returns neither ⇒ `TRACEABILITY: DEGRADED (evidence refresh failed)`. Whatever it returns, the run ends here.
+   `{n}` is the number admitted above, and the publication value is `auto`, `full`, `off` or `stub`. `publish` decides what each publication value means for the evidence comment. Report its `## PR Evidence` block — its `EVIDENCE` line and its `**Body**:` / `**Comment**:` line — with any `TRACEABILITY: DEGRADED ({reason})` lines after it, or its `TRACEABILITY: DEGRADED (evidence unavailable)` line; empty stdout or any other exit ⇒ `TRACEABILITY: DEGRADED (evidence refresh failed)`. Whatever it returns, the run ends here.
 
 ---
 

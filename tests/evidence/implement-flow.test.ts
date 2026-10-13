@@ -23,8 +23,9 @@
  *   AC-10  The Phase 9 Git spawn that opens the PR forwards PR_TEST_PLAN_BLOCK; no Code spawn takes it.
  *   AC-11  The Phase 7 Test spawn passes TEST_PLAN. Phase 6/8 PASSes and every
  *          Phase 7 run append claims whose shapes CLAIM_LINE_RE admits, and Phase
- *          11 — after Phase 10, one spawn for all three strategies — runs
- *          update-pr-evidence with the REVIEW_PUBLICATION Phase 1 resolved through
+ *          11 — after Phase 10, one call for all three strategies — runs
+ *          `verify-evidence.cjs publish` (the whole update-pr-evidence operation, #455:
+ *          inline, no Git spawn) with the REVIEW_PUBLICATION Phase 1 resolved through
  *          the publication partial (its third importer, after the policy resolves).
  *   AC-9   /plan's artifact carries a `## Test Plan` section (required section
  *          13): Gate 2 shows the TP lines in the imported TP-line contract, and
@@ -638,46 +639,57 @@ function collectPublicationImporters(sources: ReadonlyArray<{ name: string; cont
 }
 
 const PHASE11 = '### Phase 11: Evidence'
+/** The Phase 11 call (#455): the script runs inline; no Git agent is spawned for it. */
+const EVIDENCE_RUN = 'verify-evidence.cjs" publish --pr {PR_NUMBER}'
 const EVIDENCE_SPAWN = '"OPERATION: update-pr-evidence'
 
-/** The push before the evidence spawn: claims keyed to a local HEAD must be in the PR before Phase 11 reads them. */
+/** The push before the evidence call: claims keyed to a local HEAD must be in the PR before Phase 11 reads them. */
 const EVIDENCE_PUSH = 'git push origin HEAD; echo "exit=$?"'
 
 /** The Phase 11 push, made unique: Phase 10's preamble spells the same command, followed by "the gate". */
-const EVIDENCE_PUSH_ANCHOR = `${EVIDENCE_PUSH}\n\`\`\`\n\n\`exit=0\` continues to the spawn`
+const EVIDENCE_PUSH_ANCHOR = `${EVIDENCE_PUSH}\n\`\`\`\n\n\`exit=0\` continues to the script`
 
 const PHASE11_ORDER: readonly OrderRule[] = [
   { label: 'the policy resolves before the publication partial reads it', before: 'resolve-evidence-policy.cjs', after: '**Evidence stub:**' },
   { label: 'REVIEW_PUBLICATION resolves in Phase 1', before: '**Evidence stub:**', after: '### Phase 2: Implement' },
   { label: 'Phase 11 follows the CI gate', before: '### Phase 10: CI Status Gate', after: PHASE11 },
   { label: 'the push sits in Phase 11', before: PHASE11, after: EVIDENCE_PUSH_ANCHOR },
-  { label: 'the push precedes the evidence spawn', before: EVIDENCE_PUSH_ANCHOR, after: EVIDENCE_SPAWN },
-  { label: 'the evidence spawn sits in Phase 11', before: PHASE11, after: EVIDENCE_SPAWN },
-  { label: 'the report follows the evidence spawn', before: EVIDENCE_SPAWN, after: '### Phase 12: Report' },
+  { label: 'the push precedes the evidence call', before: EVIDENCE_PUSH_ANCHOR, after: EVIDENCE_RUN },
+  { label: 'the evidence call sits in Phase 11', before: PHASE11, after: EVIDENCE_RUN },
+  { label: 'the report follows the evidence call', before: EVIDENCE_RUN, after: '### Phase 12: Report' },
 ]
 
-/** Named collector: what the Phase 11 spawn lacks — exactly one, carrying the op's Input keys. */
-function collectEvidenceSpawnDefects(content: string): string[] {
-  const spawns = parseFences(content).filter(f => isAgentBlock(f, 'Git') && f.includes(EVIDENCE_SPAWN))
-  if (spawns.length !== 1) return [`expected one update-pr-evidence spawn, found ${spawns.length}`]
-  const keys = spawns[0].split('\n').map(l => /^\s*"?([A-Z_]+): /.exec(l)?.[1]).filter((k): k is string => k !== undefined)
+/**
+ * Named collector: what Phase 11's evidence call lacks — exactly one inline script call
+ * from the worktree carrying the op's Input as flags, and no Git spawn for the op.
+ */
+function collectEvidenceRunDefects(content: string): string[] {
+  const at = content.indexOf(PHASE11)
+  const end = content.indexOf('### Phase 12: Report')
+  if (at === -1 || end === -1) return ['no Phase 11 section']
+  const phase = content.slice(at, end)
   const out: string[] = []
-  for (const key of ['OPERATION', 'PR_NUMBER', 'EVIDENCE_FILE', 'REVIEW_PUBLICATION']) {
-    if (!keys.includes(key)) out.push(`the spawn does not pass ${key}`)
-  }
-  if (!spawns[0].includes('EVIDENCE_FILE: .devflow/docs/evidence-{branch_slug}.md')) out.push('EVIDENCE_FILE is not the evidence file')
-  // Repo-relative by the op's shape gate (no space admitted), so it travels with the root it is relative to (D-DOCS-ROOT).
-  if (!spawns[0].includes('WORKTREE_PATH: {worktree}')) out.push('EVIDENCE_FILE travels without the WORKTREE_PATH it is relative to')
-  const phase = content.slice(content.indexOf(PHASE11), content.indexOf('### Phase 12: Report'))
+  const runs = parseFences(phase).filter(f => f.includes(EVIDENCE_RUN))
+  if (runs.length !== 1) return [`expected one evidence script call in Phase 11, found ${runs.length}`]
+  if (!runs[0].startsWith('```bash\n')) out.push('the call is not a bash fence')
+  if (!runs[0].includes('cd "{worktree}" && node "$HOME/.devflow/scripts/verify-evidence.cjs" publish')) out.push('the call does not run from the worktree')
+  // Repo-relative by the op's shape gate (no space admitted); it resolves under the cd the same line makes (D-DOCS-ROOT).
+  if (!runs[0].includes('--evidence ".devflow/docs/evidence-{branch_slug}.md"')) out.push('--evidence is not the evidence file')
+  if (!runs[0].includes('--publication {REVIEW_PUBLICATION resolved in Phase 1, or auto}')) out.push('the call does not pass REVIEW_PUBLICATION')
+  const spawns = parseFences(content).filter(f => isAgentBlock(f, 'Git') && f.includes(EVIDENCE_SPAWN))
+  if (spawns.length !== 0) out.push(`a Git agent is still spawned for update-pr-evidence (${spawns.length})`)
   if (!phase.includes('under every strategy')) out.push('Phase 11 does not run under every strategy')
   if (!phase.includes('It never blocks')) out.push('Phase 11 may block')
+  if (!phase.includes('Use the Bash tool with `timeout: 180000`')) out.push('the call carries no Bash timeout above the script\'s two deadlines')
+  if (!phase.includes('path does not match `^[A-Za-z0-9._/-]{1,255}$`')) out.push('the evidence path reaches the shell ungated')
+  if (!phase.includes('`TRACEABILITY: DEGRADED (evidence unavailable)`')) out.push('a failed run names no DEGRADED reason')
   return out
 }
 
 /**
  * Named collector: what Phase 11's push lacks. It is the command's only push: one
  * bash fence, never forced, never retried, and a failure is a DEGRADED line rather
- * than a stop — the evidence spawn still runs, and an unpushed claim reads
+ * than a stop — the evidence call still runs, and an unpushed claim reads
  * UNVERIFIED rather than blocking the PR.
  */
 function collectEvidencePushDefects(content: string): string[] {
@@ -692,14 +704,14 @@ function collectEvidencePushDefects(content: string): string[] {
   if (pushes.some(f => /(^|\s)(--force(-with-lease)?\b|-f\b|\+\S)/.test(f))) out.push('the push may force')
   if (!phase.includes('never force, and no retry')) out.push('the push does not say never force, no retry')
   if (!phase.includes('`TRACEABILITY: DEGRADED (evidence push failed)`')) out.push('a failed push names no DEGRADED reason')
-  if (!phase.includes('does not block') || !phase.includes('spawn anyway')) out.push('a failed push may block the evidence spawn')
+  if (!phase.includes('does not block') || !phase.includes('run the script anyway')) out.push('a failed push may block the evidence call')
   return out
 }
 
-describe('0b: Phase 11 pushes the branch before the evidence spawn', () => {
-  it('one unforced push precedes the spawn, and its failure is DEGRADED, never a stop', () => {
+describe('0b: Phase 11 pushes the branch before the evidence call', () => {
+  it('one unforced push precedes the call, and its failure is DEGRADED, never a stop', () => {
     const md = implementMd()
-    // Per phase: the Phase 10 preamble pushes once for the CI gate, Phase 11 once for the evidence spawn.
+    // Per phase: the Phase 10 preamble pushes once for the CI gate, Phase 11 once for the evidence call.
     const phase11 = md.slice(md.indexOf(PHASE11), md.indexOf('### Phase 12: Report'))
     expect(phase11.split(EVIDENCE_PUSH).length - 1, 'the Phase 11 push is the corpus').toBe(1)
     expect(md.split(EVIDENCE_PUSH).length - 1, 'the push command appears in Phase 10 and Phase 11 only').toBe(2)
@@ -709,7 +721,7 @@ describe('0b: Phase 11 pushes the branch before the evidence spawn', () => {
 
   it('the Report surfaces the push\'s DEGRADED line and the diagram shows the push', () => {
     const md = implementMd()
-    expect(md).toContain('or Phase 10\'s push or Phase 11\'s push recorded one, surface them verbatim')
+    expect(md).toContain('or Phase 10\'s push, Phase 11\'s push or Phase 11\'s script output carried one, surface them verbatim')
     expect(md).toContain('Push the branch (never force; a failure is DEGRADED, not a stop)')
   })
 
@@ -721,7 +733,7 @@ describe('0b: Phase 11 pushes the branch before the evidence spawn', () => {
     const lastFence = md.lastIndexOf(pushFence)
     expect(lastFence, 'the Phase 11 push fence is the last one').toBeGreaterThan(md.indexOf(PHASE11))
     const late = (md.slice(0, lastFence) + md.slice(lastFence + pushFence.length)).replace('### Phase 12: Report', pushFence + '### Phase 12: Report')
-    expect(collectOrderViolations('implement.md', late, PHASE11_ORDER).some(v => v.includes('the push precedes the evidence spawn'))).toBe(true)
+    expect(collectOrderViolations('implement.md', late, PHASE11_ORDER).some(v => v.includes('the push precedes the evidence call'))).toBe(true)
     const reseed = (to: string): string => md.slice(0, md.indexOf(PHASE11)) + md.slice(md.indexOf(PHASE11)).replace(EVIDENCE_PUSH, to)
     expect(collectEvidencePushDefects(reseed('git push --force origin HEAD; echo "exit=$?"'))).toEqual([
       'the push is not the stated command',
@@ -729,11 +741,11 @@ describe('0b: Phase 11 pushes the branch before the evidence spawn', () => {
     ])
     expect(collectEvidencePushDefects(reseed('git push origin +HEAD; echo "exit=$?"'))).toContain('the push may force')
     expect(collectEvidencePushDefects(md.slice(0, lastFence) + md.slice(lastFence + pushFence.length))).toEqual(['expected one push fence in Phase 11, found 0'])
-    expect(collectEvidencePushDefects(md.replace('spawn anyway', 'stop'))).toEqual(['a failed push may block the evidence spawn'])
+    expect(collectEvidencePushDefects(md.replace('run the script anyway', 'stop'))).toEqual(['a failed push may block the evidence call'])
   })
 })
 
-describe('AC-11: Phase 11 runs update-pr-evidence once, after Phase 10, for every strategy', () => {
+describe('AC-11: Phase 11 runs the evidence script once, after Phase 10, for every strategy', () => {
   it('the publication partial has four importers, /implement among them', () => {
     const sources = walkFiles(path.join(ROOT, 'src'), f => f.endsWith('.mds')).map(f => ({
       name: path.basename(f, '.mds'),
@@ -744,10 +756,10 @@ describe('AC-11: Phase 11 runs update-pr-evidence once, after Phase 10, for ever
     expect(collectPublicationImporters(sources)).toEqual(['code-review', 'dynamic-build', 'implement', 'resolve'])
   })
 
-  it('the order holds and the spawn carries the op\'s Input keys', () => {
+  it('the order holds and the call carries the op\'s Input as flags', () => {
     const md = implementMd()
     expect(collectOrderViolations('implement.md', md, PHASE11_ORDER)).toEqual([])
-    expect(collectEvidenceSpawnDefects(md)).toEqual([])
+    expect(collectEvidenceRunDefects(md)).toEqual([])
   })
 
   it('the re-validation path, the Report and Principle 12 name the evidence step', () => {
@@ -757,13 +769,19 @@ describe('AC-11: Phase 11 runs update-pr-evidence once, after Phase 10, for ever
     expect(lines.find(l => l.startsWith('12. **CI awareness**'))).toContain('test-plan evidence (Phase 11) is recorded under every strategy')
   })
 
-  it('known-bad probes: a lost spawn, a dropped key, a spawn before the CI gate and a stray importer are reported', () => {
+  it('known-bad probes: a lost call, a dropped flag, a Git spawn put back, a call before the CI gate and a stray importer are reported', () => {
     const md = implementMd()
-    expect(collectEvidenceSpawnDefects(md.replace(EVIDENCE_SPAWN, '"OPERATION: check-ci-status'))).toEqual([
-      'expected one update-pr-evidence spawn, found 0',
+    expect(collectEvidenceRunDefects(md.replace(EVIDENCE_RUN, 'verify-evidence.cjs" check tp'))).toEqual([
+      'expected one evidence script call in Phase 11, found 0',
     ])
-    expect(collectEvidenceSpawnDefects(md.replace('\nREVIEW_PUBLICATION: {REVIEW_PUBLICATION resolved in Phase 1, or auto}', ''))).toEqual([
-      'the spawn does not pass REVIEW_PUBLICATION',
+    expect(collectEvidenceRunDefects(md.replace(' --publication {REVIEW_PUBLICATION resolved in Phase 1, or auto}', ''))).toEqual([
+      'the call does not pass REVIEW_PUBLICATION',
+    ])
+    expect(collectEvidenceRunDefects(md.replace('cd "{worktree}" && ', ''))).toEqual(['the call does not run from the worktree'])
+    const back = md.replace('### Phase 12: Report', '```\nAgent(subagent_type="Git"):\n"OPERATION: update-pr-evidence\nPR_NUMBER: {PR_NUMBER}"\n```\n\n### Phase 12: Report')
+    expect(collectEvidenceRunDefects(back)).toEqual(['a Git agent is still spawned for update-pr-evidence (1)'])
+    expect(collectEvidenceRunDefects(md.replace('Use the Bash tool with `timeout: 180000`', 'Use the Bash tool'))).toEqual([
+      'the call carries no Bash timeout above the script\'s two deadlines',
     ])
     const early = md.replace('### Phase 10: CI Status Gate', '### Phase 10 later').replace('### Phase 12: Report', '### Phase 10: CI Status Gate\n\n### Phase 12: Report')
     expect(collectOrderViolations('implement.md', early, PHASE11_ORDER).some(v => v.includes('Phase 11 follows the CI gate'))).toBe(true)
