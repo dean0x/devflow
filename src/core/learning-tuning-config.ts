@@ -1,17 +1,17 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { getDevFlowDirectory } from '../targets/claude-code/claude-paths.js';
-import { getLearningTuningConfigPath } from './project-paths.js';
+import { getCurateTuningConfigPath } from './project-paths.js';
 
 /**
  * Closed set of valid model aliases for the Curate agent.
  * Any on-disk value outside this set is silently ignored — parse-don't-validate.
  */
-export type LearningModelAlias = 'opus' | 'sonnet' | 'haiku';
+export type CurateModelAlias = 'opus' | 'sonnet' | 'haiku';
 
 const VALID_MODELS = new Set<string>(['opus', 'sonnet', 'haiku']);
 
-function isValidModel(value: unknown): value is LearningModelAlias {
+function isValidModel(value: unknown): value is CurateModelAlias {
   return typeof value === 'string' && VALID_MODELS.has(value);
 }
 
@@ -24,9 +24,9 @@ function isValidModel(value: unknown): value is LearningModelAlias {
  * session-start-context reads these config files directly (same project →
  * global → default precedence) when resolving the model for the directive.
  */
-export interface LearningTuningConfig {
+export interface CurateTuningConfig {
   /** Model alias for the Curate agent. Closed domain: 'opus' | 'sonnet' | 'haiku'. Default: the shipped Curate model (DEFAULTS). */
-  model: LearningModelAlias;
+  model: CurateModelAlias;
   /** Emit verbose logs when true. Default: false */
   debug: boolean;
 }
@@ -39,21 +39,21 @@ export interface LearningTuningConfig {
  * tests/decisions/config.test.ts holds this value equal to the Curate row of the
  * agent-config table, which a change of the shipped tier edits with the frontmatter.
  */
-const DEFAULTS: LearningTuningConfig = {
+const DEFAULTS: CurateTuningConfig = {
   model: 'opus',
   debug: false,
 };
 
 /**
- * Apply a single JSON config layer onto a LearningTuningConfig, returning a new object.
+ * Apply a single JSON config layer onto a CurateTuningConfig, returning a new object.
  * Skips fields with wrong types. Swallows parse errors — callers see defaults.
  * Unknown fields (e.g. an old config still on disk with extra knobs) are
  * silently ignored, not an error.
  */
-export function applyLearningTuningConfigLayer(
-  config: LearningTuningConfig,
+export function applyCurateTuningConfigLayer(
+  config: CurateTuningConfig,
   json: string,
-): LearningTuningConfig {
+): CurateTuningConfig {
   try {
     const parsed: unknown = JSON.parse(json);
     // Object-shape guard mirrors coerceConfig in feature-config.ts: a JSON
@@ -63,7 +63,7 @@ export function applyLearningTuningConfigLayer(
     }
     const raw = parsed as Record<string, unknown>;
     return {
-      // Only accept a model value that belongs to the closed LearningModelAlias domain.
+      // Only accept a model value that belongs to the closed CurateModelAlias domain.
       model: isValidModel(raw.model) ? raw.model : config.model,
       debug: typeof raw.debug === 'boolean' ? raw.debug : config.debug,
     };
@@ -102,20 +102,20 @@ function readConfigFile(filePath: string): string | null {
  *
  * Invalid JSON in either file is silently ignored and treated as absent.
  */
-export function loadLearningTuningConfig(ledgerRoot: string): LearningTuningConfig {
+export function loadCurateTuningConfig(ledgerRoot: string): CurateTuningConfig {
   const globalConfigPath = path.join(getDevFlowDirectory(), 'learning.json');
-  const projectConfigPath = getLearningTuningConfigPath(ledgerRoot);
+  const projectConfigPath = getCurateTuningConfigPath(ledgerRoot);
 
-  let config: LearningTuningConfig = { ...DEFAULTS };
+  let config: CurateTuningConfig = { ...DEFAULTS };
 
   const globalJson = readConfigFile(globalConfigPath);
   if (globalJson !== null) {
-    config = applyLearningTuningConfigLayer(config, globalJson);
+    config = applyCurateTuningConfigLayer(config, globalJson);
   }
 
   const projectJson = readConfigFile(projectConfigPath);
   if (projectJson !== null) {
-    config = applyLearningTuningConfigLayer(config, projectJson);
+    config = applyCurateTuningConfigLayer(config, projectJson);
   }
 
   return config;

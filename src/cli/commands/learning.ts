@@ -5,7 +5,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import {
   getLearningDir,
-  getLearningTuningConfigPath,
+  getCurateTuningConfigPath,
 } from '../../core/project-paths.js';
 import { loadShippedAgentDefaults } from '../../core/agent-models.js';
 import { readMachineFeature, writeMachineFeature } from '../../core/feature-switch.js';
@@ -306,7 +306,7 @@ export const CONFIGURE_SCOPE_OPTIONS = [
 ] as const;
 
 /** The models `devflow learning --configure` offers, each with what it is good for. */
-const LEARNING_MODEL_CHOICES = [
+const CURATE_MODEL_CHOICES = [
   { value: 'opus', label: 'Opus', note: 'highest quality for detection + curation judgment' },
   { value: 'sonnet', label: 'Sonnet', note: 'good balance of quality and speed' },
   { value: 'haiku', label: 'Haiku', note: 'fastest, lowest cost' },
@@ -319,10 +319,10 @@ const LEARNING_MODEL_CHOICES = [
  * it and this list never has to be edited. A shipped model outside the three offered
  * (or none) recommends nothing.
  */
-export function learningModelOptions(
+export function curateModelOptions(
   shippedModel: string | undefined,
 ): Array<{ value: string; label: string; hint: string }> {
-  return LEARNING_MODEL_CHOICES.map(choice => ({
+  return CURATE_MODEL_CHOICES.map(choice => ({
     value: choice.value,
     label: choice.label,
     hint: choice.value === shippedModel
@@ -337,7 +337,7 @@ async function handleConfigure(): Promise<void> {
   const shippedModel = (await loadShippedAgentDefaults()).curate?.model;
   const model = await p.select({
     message: 'Model for decision detection',
-    options: learningModelOptions(shippedModel),
+    options: curateModelOptions(shippedModel),
   });
   if (p.isCancel(model)) {
     p.cancel('Configuration cancelled.');
@@ -380,7 +380,7 @@ async function handleConfigure(): Promise<void> {
     // main checkout in a linked worktree; the current directory outside git.
     const projectRoot = (await getLedgerRoot()) ?? process.cwd();
     const learningDir = getLearningDir(projectRoot);
-    const projectConfigPath = getLearningTuningConfigPath(projectRoot);
+    const projectConfigPath = getCurateTuningConfigPath(projectRoot);
     // D-CLI-NO-SYMLINK (core/linked-path.ts): nothing is written through a .devflow,
     // a learning folder or a learning.json that is a symbolic link.
     const linked = await firstSymbolicLink([path.dirname(learningDir), learningDir, projectConfigPath]);

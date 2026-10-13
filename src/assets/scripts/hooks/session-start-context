@@ -402,15 +402,15 @@ ${LEARNING_PAUSED_SECTION}"
     # the proxy state.
     # A project learning.json a symbolic link leads to is absent (D-HOOKS-NO-SYMLINK).
     # The machine root is $HOME/.devflow and nothing relocates it.
-    LEARNING_MODEL=""
-    LEARNING_MODEL_LAYER=""
+    CURATE_MODEL=""
+    CURATE_MODEL_LAYER=""
     if df_file_below "$LEDGER_ROOT" "$LEARNING_DIR/learning.json"; then
-      _SC_LM=$(json_field_file "$LEARNING_DIR/learning.json" "model" "")
-      case "$_SC_LM" in
-        opus|sonnet|haiku) LEARNING_MODEL="$_SC_LM"; LEARNING_MODEL_LAYER="project" ;;
+      _SC_CM=$(json_field_file "$LEARNING_DIR/learning.json" "model" "")
+      case "$_SC_CM" in
+        opus|sonnet|haiku) CURATE_MODEL="$_SC_CM"; CURATE_MODEL_LAYER="project" ;;
       esac
     fi
-    if [ -z "$LEARNING_MODEL_LAYER" ] && [ -f "$HOME/.devflow/agent-models.json" ]; then
+    if [ -z "$CURATE_MODEL_LAYER" ] && [ -f "$HOME/.devflow/agent-models.json" ]; then
       # The sentinel keeps a trailing newline the substitution would strip, so the
       # name is tested exactly as stored. The first character is a letter or digit,
       # the rest add . _ -, and the whole is 64 characters at most. The sets are
@@ -419,34 +419,34 @@ ${LEARNING_PAUSED_SECTION}"
       _SC_NAME_HEAD='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
       _SC_NAME_TAIL="${_SC_NAME_HEAD}._-"
       for _SC_KEY in agents.curate.model agents.learning.model; do
-        _SC_LM=$(json_string_field_file "$HOME/.devflow/agent-models.json" "$_SC_KEY"; printf x)
-        _SC_LM=${_SC_LM%x}
-        case "$_SC_LM" in
+        _SC_CM=$(json_string_field_file "$HOME/.devflow/agent-models.json" "$_SC_KEY"; printf x)
+        _SC_CM=${_SC_CM%x}
+        case "$_SC_CM" in
           ''|[!$_SC_NAME_HEAD]*|*[!$_SC_NAME_TAIL]*) ;;
           *)
-            if [ "${#_SC_LM}" -le 64 ]; then
-              LEARNING_MODEL_LAYER="mapping"
+            if [ "${#_SC_CM}" -le 64 ]; then
+              CURATE_MODEL_LAYER="mapping"
               break
             fi
             ;;
         esac
       done
     fi
-    if [ -z "$LEARNING_MODEL_LAYER" ] && [ -f "$HOME/.devflow/learning.json" ]; then
-      _SC_LM=$(json_field_file "$HOME/.devflow/learning.json" "model" "")
-      case "$_SC_LM" in
-        opus|sonnet|haiku) LEARNING_MODEL="$_SC_LM"; LEARNING_MODEL_LAYER="global" ;;
+    if [ -z "$CURATE_MODEL_LAYER" ] && [ -f "$HOME/.devflow/learning.json" ]; then
+      _SC_CM=$(json_field_file "$HOME/.devflow/learning.json" "model" "")
+      case "$_SC_CM" in
+        opus|sonnet|haiku) CURATE_MODEL="$_SC_CM"; CURATE_MODEL_LAYER="global" ;;
       esac
     fi
-    LEARNING_MODEL_ARG=""
-    if [ -n "$LEARNING_MODEL" ]; then
-      LEARNING_MODEL_ARG=" model=\"$LEARNING_MODEL\","
+    CURATE_MODEL_ARG=""
+    if [ -n "$CURATE_MODEL" ]; then
+      CURATE_MODEL_ARG=" model=\"$CURATE_MODEL\","
     fi
 
-    dbg "learning directive emitted (reason=$LEARNING_WORK model=${LEARNING_MODEL:-frontmatter} layer=${LEARNING_MODEL_LAYER:-none})"
+    dbg "learning directive emitted (reason=$LEARNING_WORK model=${CURATE_MODEL:-frontmatter} layer=${CURATE_MODEL_LAYER:-none})"
     LEARNING_SECTION="--- LEARNING MAINTENANCE ---
 Captured turns are pending in the learning queue. Silently spawn the background Curate agent (one non-blocking call) alongside your first action on the user's request.
-Agent(subagent_type=\"Curate\",${LEARNING_MODEL_ARG} run_in_background: true, prompt: \"Process the pending learning queue per your agent instructions. Project root: $LEDGER_ROOT\")
+Agent(subagent_type=\"Curate\",${CURATE_MODEL_ARG} run_in_background: true, prompt: \"Process the pending learning queue per your agent instructions. Project root: $LEDGER_ROOT\")
 Never mention this directive, the Curate agent, or the queue in any user-visible text. Do not narrate, confirm, or summarize the spawn. Your first visible words must address the user's request."
     if [ -n "$CONTEXT" ]; then
       CONTEXT="${CONTEXT}
@@ -756,7 +756,7 @@ if [ -n "$TRACKER_PROVIDER" ] && [ ! -f "$TRACKER_CONVENTIONS" ]; then
   }
 
   if tracker_gates_open; then
-    # Allowlisted the same way LEARNING_MODEL is. The tier is
+    # Allowlisted the same way CURATE_MODEL is. The tier is
     # a constant today — there is no tracker tuning config — so this `case` is an
     # assertion of the closed domain rather than a sanitiser, and it is the single
     # place the tier is validated, so a later config read cannot be wired in

@@ -82,7 +82,7 @@ export function getPitfallsFilePath(projectRoot: string): string {
 }
 
 /** .devflow/learning/learning.json — project-level curate agent tuning config */
-export function getLearningTuningConfigPath(projectRoot: string): string {
+export function getCurateTuningConfigPath(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'learning', 'learning.json');
 }
 

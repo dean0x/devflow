@@ -23,7 +23,7 @@ import * as os from 'os';
 // ---------------------------------------------------------------------------
 
 vi.mock('../../src/core/learning-tuning-config.js', () => ({
-  loadLearningTuningConfig: vi.fn(() => ({
+  loadCurateTuningConfig: vi.fn(() => ({
     model: 'opus',
     debug: false,
   })),

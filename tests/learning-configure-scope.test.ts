@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { CONFIGURE_SCOPE_OPTIONS, learningModelOptions } from '../src/cli/commands/learning.js';
+import { CONFIGURE_SCOPE_OPTIONS, curateModelOptions } from '../src/cli/commands/learning.js';
 import { AGENT_CONFIG } from './fixtures/agent-config.js';
 
 describe('devflow learning --configure scope options', () => {
@@ -44,10 +44,10 @@ describe('devflow learning --configure scope options', () => {
  */
 describe('devflow learning --configure model options', () => {
   const recommended = (shipped: string | undefined): string[] =>
-    learningModelOptions(shipped).filter(o => o.hint.startsWith('Recommended')).map(o => o.value);
+    curateModelOptions(shipped).filter(o => o.hint.startsWith('Recommended')).map(o => o.value);
 
   it('offers opus, sonnet and haiku, in that order', () => {
-    expect(learningModelOptions('opus').map(o => o.value)).toEqual(['opus', 'sonnet', 'haiku']);
+    expect(curateModelOptions('opus').map(o => o.value)).toEqual(['opus', 'sonnet', 'haiku']);
   });
 
   it('recommends exactly the shipped model, whichever of the three it is', () => {
@@ -66,7 +66,7 @@ describe('devflow learning --configure model options', () => {
   });
 
   it('keeps the wording an unrecommended option has always had', () => {
-    const hints = Object.fromEntries(learningModelOptions('opus').map(o => [o.value, o.hint]));
+    const hints = Object.fromEntries(curateModelOptions('opus').map(o => [o.value, o.hint]));
     expect(hints).toEqual({
       opus: 'Recommended — highest quality for detection + curation judgment',
       sonnet: 'Good balance of quality and speed',
