@@ -183,17 +183,27 @@ export function validateWorkerValue(field: 'model' | 'effort', value: string): R
 // ---------------------------------------------------------------------------
 
 /**
- * Maps old agent keys (form A slugs) to their canonical replacement keys.
+ * Maps every retired agent key to the live slug that replaces it. Two renames feed it:
  *
- * 13 agents renamed from noun form (coder, reviewer, …) to action-verb form
- * (code, review, …). The canonicalise-agent-keys-v1 migration in migrations.ts
- * calls canonicaliseAgentKeys() to rewrite ~/.devflow/agent-models.json on the
- * user's first init after upgrading.
+ *   - The 2.0.0 action-verb rename (coder, reviewer, …) and the 1.x names that rename
+ *     retired (scrutinizer, simplifier, bug-analyzer).
+ *   - The rename of six agents to the names that state their job (code-fix, code-edit,
+ *     scrutinize, simplify, diagnose, learning).
+ *
+ * SINGLE HOP: every value is a live slug and no value is itself a key. A 1.x name
+ * therefore points straight at its final slug (scrutinizer → harden, never
+ * scrutinizer → scrutinize → harden), so one pass of canonicaliseAgentKeys() lands
+ * every key. The two canonicalise-agent-keys migrations in migrations.ts call it to
+ * rewrite ~/.devflow/agent-models.json; readAgentMapping() calls it on every read.
  *
  * PROTOTYPE SAFETY: Object.create(null) prevents prototype-pollution.
  * Every lookup MUST use Object.hasOwn — never key in LEGACY_AGENT_KEYS or
  * direct bracket access. `--set constructor` would otherwise return a function
  * that flows into path.join (the object-literal lookup on argv trap).
+ *
+ * ORDER: entries are declared oldest first. canonicaliseAgentKeys() reads that order
+ * when two keys meet at one slug (scrutinizer and scrutinize both mean harden): the
+ * entry declared later is the more recent name and wins.
  *
  * DORMANCY: entries here are stored whether or not the key rename has been
  * applied to the file yet. canonicaliseAgentKeys() is idempotent, so
@@ -203,20 +213,30 @@ export function validateWorkerValue(field: 'model' | 'effort', value: string): R
 export const LEGACY_AGENT_KEYS: Readonly<Record<string, string>> = Object.assign(
   Object.create(null) as Record<string, string>,
   {
-    // Phase 4 — agent-action-verbs rename (old slug → new slug)
+    // 1.x names (noun form), retargeted to the live slug of their final rename.
+    'scrutinizer':  'harden',
+    'simplifier':   'polish',
+    'bug-analyzer': 'debug',
+
+    // 2.0.0 action-verb rename (old slug → new slug).
     'coder':        'code',
     'designer':     'design',
     'evaluator':    'evaluate',
     'researcher':   'research',
     'reviewer':     'review',
-    'scrutinizer':  'scrutinize',
-    'simplifier':   'simplify',
     'skimmer':      'skim',
     'synthesizer':  'synthesize',
     'tester':       'test',
     'triager':      'triage',
     'validator':    'validate',
-    'bug-analyzer': 'diagnose',
+
+    // Rename of six agents to the names that state their job.
+    'code-fix':     'fix',
+    'code-edit':    'refactor',
+    'scrutinize':   'harden',
+    'simplify':     'polish',
+    'diagnose':     'debug',
+    'learning':     'curate',
   },
 );
 
@@ -228,6 +248,10 @@ export const LEGACY_AGENT_KEYS: Readonly<Record<string, string>> = Object.assign
  *   - If the new key IS already present (collision): new wins, old dropped, one warning.
  *
  * Collision detection is against the ORIGINAL map so results are order-independent.
+ *
+ * Two legacy keys that name one agent (scrutinizer and scrutinize both mean harden) meet
+ * at one slug. The key declared later in LEGACY_AGENT_KEYS, the more recent name, wins;
+ * the other is dropped. The pick reads the declaration order, never the file order.
  *
  * The function is pure and idempotent: calling it twice on the same input
  * produces the same result as calling it once (idempotent under concurrent execution).
@@ -258,6 +282,19 @@ export function canonicaliseAgentKeys<T>(
 
   // Snapshot the original keys for collision detection (order-independent result).
   const originalKeys = new Set(Object.keys(rawAgents));
+
+  // When several legacy keys in the file name one agent, the one declared latest in
+  // LEGACY_AGENT_KEYS is the one that is renamed; the others are dropped below.
+  const declared = Object.keys(LEGACY_AGENT_KEYS);
+  const winnerByTarget = new Map<string, string>();
+  for (const oldKey of originalKeys) {
+    if (oldKey === '__proto__' || !Object.hasOwn(LEGACY_AGENT_KEYS, oldKey)) continue;
+    const target = LEGACY_AGENT_KEYS[oldKey] as string;
+    const held = winnerByTarget.get(target);
+    if (held === undefined || declared.indexOf(oldKey) > declared.indexOf(held)) {
+      winnerByTarget.set(target, oldKey);
+    }
+  }
 
   const result: Record<string, T> = { ...rawAgents };
   let didMutate = false;
@@ -290,8 +327,9 @@ export function canonicaliseAgentKeys<T>(
       continue;
     }
 
-    if (originalKeys.has(newKey)) {
-      // Collision: new (canonical) key already present → new wins, old dropped.
+    if (originalKeys.has(newKey) || winnerByTarget.get(newKey) !== oldKey) {
+      // Collision: new (canonical) key already present, or a more recent legacy key
+      // names the same agent → that value wins, old dropped.
       // Warning is surfaced by the caller's structured dropped-block (e.g. migrations.ts)
       // to avoid printing the same collision twice in two different vocabularies (F8).
       dropped.push(oldKey);

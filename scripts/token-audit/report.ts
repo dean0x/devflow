@@ -3,6 +3,7 @@
  * sessions in, an `AuditReport` out. `renderMarkdown` and `renderJson` turn it into text.
  */
 
+import { LEGACY_AGENT_KEYS } from '../../src/core/agent-models.js';
 import { BASH_CLASSES, DECISIONS_SHAPES } from './parse.js';
 import type { AuditRequest, BashClass, CommandMention, DecisionsShape, ParsedSignals, SkillCall } from './parse.js';
 import { segmentAt } from './segment.js';
@@ -24,6 +25,20 @@ import type { AuditError, CapNotice, Limits, Result, SkipCounts, TimeWindow } fr
 // The window and its test live in types.ts so the parser applies the same one (D-AUDIT-WINDOW).
 export { inWindow };
 export type { TimeWindow };
+
+/**
+ * A transcript names a spawn as the agent was spelled the day it ran and the audit never rewrites
+ * history, so the type is canonicalised on the way in: a spawn of the agent that was Code-fix then
+ * is a Fix spawn now, and a window that spans a rename reads as one row. The slug is looked up
+ * through LEGACY_AGENT_KEYS, which keeps the old names that have a new one; any other type
+ * (Code, general-purpose, unknown) is returned as it came.
+ */
+export function canonicalAgentType(agentType: string): string {
+  const slug = agentType.toLowerCase();
+  if (!Object.hasOwn(LEGACY_AGENT_KEYS, slug)) return agentType;
+  const canonical = LEGACY_AGENT_KEYS[slug] as string;
+  return canonical.charAt(0).toUpperCase() + canonical.slice(1);
+}
 
 // ── Input ────────────────────────────────────────────────────────────────────
 
@@ -875,7 +890,7 @@ function filesWrittenReport(records: readonly SpawnRecord[]): FilesWrittenReport
 }
 
 const IMPLEMENT_RUN = 'devflow:implement';
-const CODE_FIX_AGENT = 'Code-fix';
+const CODE_FIX_AGENT = 'Fix';
 const UNKNOWN_OPERATION = 'unknown';
 const PLAN_DOCUMENT_RE = /^\S+\.md$/i;
 
@@ -1099,7 +1114,8 @@ export function buildReport(input: ReportInput): Result<AuditReport, AuditError>
       }
     }
 
-    for (const agent of session.subagents) {
+    for (const spawned of session.subagents) {
+      const agent: SubagentData = { ...spawned, agentType: canonicalAgentType(spawned.agentType) };
       const requests = agent.requests.filter(r => countWindow(r.timestampMs));
       const first = requests[0];
       if (first === undefined) {

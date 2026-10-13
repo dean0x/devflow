@@ -1197,7 +1197,9 @@ describe('GAP-5: no retired agent names in any shipped artifact (fail-loud when 
 // ---------------------------------------------------------------------------
 
 /**
- * The action-verb rename map exactly as it must ship.
+ * The rename map exactly as it must ship: the 2.0.0 action-verb rename, the 1.x names
+ * retargeted to their final slug, and the rename of six agents (code-fix, code-edit, scrutinize,
+ * simplify, diagnose, learning).
  *
  * WHY THIS IS PINNED HERE AND NOT IN agent-models.test.ts: the
  * `canonicaliseAgentKeys` suite in that file deletes every key from the
@@ -1211,19 +1213,28 @@ describe('GAP-5: no retired agent names in any shipped artifact (fail-loud when 
  * These guards read the map as shipped and never mutate it.
  */
 const EXPECTED_LEGACY_AGENT_KEYS: Readonly<Record<string, string>> = Object.freeze({
+  // 1.x names, single hop to the final slug
+  'scrutinizer': 'harden',
+  'simplifier': 'polish',
+  'bug-analyzer': 'debug',
+  // 2.0.0 action-verb rename
   'coder': 'code',
   'designer': 'design',
   'evaluator': 'evaluate',
   'researcher': 'research',
   'reviewer': 'review',
-  'scrutinizer': 'scrutinize',
-  'simplifier': 'simplify',
   'skimmer': 'skim',
   'synthesizer': 'synthesize',
   'tester': 'test',
   'triager': 'triage',
   'validator': 'validate',
-  'bug-analyzer': 'diagnose',
+  // rename of six agents
+  'code-fix': 'fix',
+  'code-edit': 'refactor',
+  'scrutinize': 'harden',
+  'simplify': 'polish',
+  'diagnose': 'debug',
+  'learning': 'curate',
 })
 
 describe('GAP-6: shipped LEGACY_AGENT_KEYS integrity', () => {
@@ -1233,7 +1244,7 @@ describe('GAP-6: shipped LEGACY_AGENT_KEYS integrity', () => {
     expect(Object.keys(LEGACY_AGENT_KEYS).length).toBeGreaterThan(0)
   })
 
-  it('pins the exact 13 old→new pairs', () => {
+  it('pins the exact 19 old→new pairs', () => {
     // Sorted plain-object comparison: catches additions, removals, and retargets.
     const actual = Object.fromEntries(
       Object.keys(LEGACY_AGENT_KEYS).sort().map(k => [k, LEGACY_AGENT_KEYS[k]]),
@@ -1242,7 +1253,7 @@ describe('GAP-6: shipped LEGACY_AGENT_KEYS integrity', () => {
       Object.keys(EXPECTED_LEGACY_AGENT_KEYS).sort().map(k => [k, EXPECTED_LEGACY_AGENT_KEYS[k]]),
     )
     expect(actual).toEqual(expected)
-    expect(Object.keys(LEGACY_AGENT_KEYS)).toHaveLength(13)
+    expect(Object.keys(LEGACY_AGENT_KEYS)).toHaveLength(19)
   })
 
   it('no legacy key collides with a live registry agent', () => {
@@ -1283,7 +1294,7 @@ describe('GAP-6: shipped LEGACY_AGENT_KEYS integrity', () => {
 
   it('applies the real shipped map end-to-end (non-synthetic)', () => {
     // The only test in the suite that runs canonicaliseAgentKeys against the
-    // genuine 13 mappings rather than an injected 'old-coder' → 'coder' stub.
+    // genuine 19 mappings rather than an injected 'old-coder' → 'coder' stub.
     const input = Object.fromEntries(
       Object.keys(EXPECTED_LEGACY_AGENT_KEYS).map(k => [k, { model: 'opus' }]),
     )
@@ -1294,7 +1305,9 @@ describe('GAP-6: shipped LEGACY_AGENT_KEYS integrity', () => {
       expect(Object.hasOwn(agents, newKey), `'${newKey}' should exist after migration`).toBe(true)
       expect(agents[newKey]).toEqual({ model: 'opus' })
     }
-    expect(Object.keys(agents)).toHaveLength(13)
+    // 19 old keys land on 16 slugs: scrutinizer/scrutinize, simplifier/simplify and
+    // bug-analyzer/diagnose each meet at one.
+    expect(Object.keys(agents)).toHaveLength(16)
   })
 })
 

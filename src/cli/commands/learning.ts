@@ -334,7 +334,7 @@ export function learningModelOptions(
 async function handleConfigure(): Promise<void> {
   p.intro(color.bgCyan(color.black(' Learning Configuration ')));
 
-  const shippedModel = (await loadShippedAgentDefaults()).learning?.model;
+  const shippedModel = (await loadShippedAgentDefaults()).curate?.model;
   const model = await p.select({
     message: 'Model for decision detection',
     options: learningModelOptions(shippedModel),

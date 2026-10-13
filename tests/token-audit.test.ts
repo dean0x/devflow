@@ -1499,11 +1499,11 @@ describe('AC-101 peak context and turn spread (D-AUDIT-PEAK-CTX)', () => {
     const code = subagentsOnly(spawns).agentTypes.find(a => a.agentType === 'Code');
     expect(code).toMatchObject({ spawns: 11, turns: 66, medianTurns: 6, p90Turns: 10, medianPeakContext: 6000, p90PeakContext: 10000, maxPeakContext: 11000 });
 
-    // Over the fixture: Code peaks at 3925 (asig01) and 3112 (asig02); Code-fix at 2533.
+    // Over the fixture: Code peaks at 3925 (asig01) and 3112 (asig02); the Code-fix transcript (read as Fix) at 2533.
     const report = await audit({ dir: SIGNALS_DIR });
     const byType = Object.fromEntries(report.agentTypes.map(a => [a.agentType, a]));
     expect(byType['Code']).toMatchObject({ spawns: 2, turns: 8, medianTurns: 4, p90Turns: 4, medianPeakContext: 3925, p90PeakContext: 3925, maxPeakContext: 3925 });
-    expect(byType['Code-fix']).toMatchObject({ spawns: 1, turns: 2, p90Turns: 2, medianPeakContext: 2533, p90PeakContext: 2533, maxPeakContext: 2533 });
+    expect(byType['Fix']).toMatchObject({ spawns: 1, turns: 2, p90Turns: 2, medianPeakContext: 2533, p90PeakContext: 2533, maxPeakContext: 2533 });
   });
 });
 
@@ -1568,8 +1568,8 @@ describe('AC-102 first turn, siblings and staggered spawns (D-AUDIT-FIRST-TURN)'
     const byType = Object.fromEntries(report.agentTypes.map(a => [a.agentType, a]));
     expect(byType['Code']).toMatchObject({ siblingSpawns: 2, firstTurnSpawns: 2, firstTurnCacheHitShare: 0, staticPrefixEstimate: 0 });
     expect(byType['Code']?.staggered.spawns).toBe(0);
-    // The Code-fix spawn came alone; its first request read 2000 of its 2502 context tokens (2000 / 2502).
-    expect(byType['Code-fix']).toMatchObject({ siblingSpawns: 0, firstTurnCacheHitShare: 1, medianFirstTurnReadRatio: 0.799361, medianFirstTurnCacheRead: 2000, staticPrefixEstimate: 2000 });
+    // The Code-fix spawn (read as Fix) came alone; its first request read 2000 of its 2502 context tokens (2000 / 2502).
+    expect(byType['Fix']).toMatchObject({ siblingSpawns: 0, firstTurnCacheHitShare: 1, medianFirstTurnReadRatio: 0.799361, medianFirstTurnCacheRead: 2000, staticPrefixEstimate: 2000 });
   });
 });
 
@@ -1580,7 +1580,7 @@ describe('AC-103 re-reads, ranged reads and the path cap (D-AUDIT-READS)', () =>
     // asig03 read pitfalls.md with an offset and a limit: 1 ranged read in 2.
     expect(report.reads).toEqual([
       { agentType: 'Code', spawns: 2, readCalls: 4, rereads: 1, rereadShare: 0.25, exactRereads: 1, ranged: 0, rangedShare: 0, indexReads: 1, bodyReads: 0 },
-      { agentType: 'Code-fix', spawns: 1, readCalls: 2, rereads: 0, rereadShare: 0, exactRereads: 0, ranged: 1, rangedShare: 0.5, indexReads: 1, bodyReads: 1 },
+      { agentType: 'Fix', spawns: 1, readCalls: 2, rereads: 0, rereadShare: 0, exactRereads: 0, ranged: 1, rangedShare: 0.5, indexReads: 1, bodyReads: 1 },
     ]);
   });
 
@@ -1721,9 +1721,9 @@ describe('AC-106 run distribution (D-AUDIT-RUN-DIST)', () => {
     // ce per run: 100 + 1000 + 1000 + 500 = 2600, 100 + 2000 + 300 = 2400, 100: median 2400, p90 2600.
     expect(row).toMatchObject({ runs: 3, spawns: { median: 2, p90: 3 }, ce: { median: 2400, p90: 2600 } });
     const type = (name: string) => row?.byType.find(t => t.agentType === name);
-    // Code per run [2, 1, 0] and Code-fix [1, 0, 0]: the third run counts as a zero for both.
+    // Code per run [2, 1, 0] and Fix (spawned as Code-fix) [1, 0, 0]: the third run counts as a zero for both.
     expect(type('Code')).toEqual({ agentType: 'Code', totalSpawns: 3, runsWithType: 2, spawns: { median: 1, p90: 2 }, ce: { median: 2000, p90: 2000 } });
-    expect(type('Code-fix')).toEqual({ agentType: 'Code-fix', totalSpawns: 1, runsWithType: 1, spawns: { median: 0, p90: 1 }, ce: { median: 0, p90: 500 } });
+    expect(type('Fix')).toEqual({ agentType: 'Fix', totalSpawns: 1, runsWithType: 1, spawns: { median: 0, p90: 1 }, ce: { median: 0, p90: 500 } });
     expect(type('Validate')).toMatchObject({ runsWithType: 1, spawns: { median: 0, p90: 1 } });
   });
 
@@ -1761,7 +1761,7 @@ describe('AC-106 run distribution (D-AUDIT-RUN-DIST)', () => {
     expect(row).toMatchObject({ workflow: 'devflow:implement', runs: 1, spawns: { median: 3, p90: 3 }, ce: { median: 16_922, p90: 16_922 } });
     expect(row?.byPlan).toMatchObject([{ planDocument: true, runs: 1 }, { planDocument: false, runs: 0 }]);
     expect(row?.codeFixByOperation).toMatchObject([{ operation: 'validation-fix', totalSpawns: 1 }]);
-    expect(row?.byType.map(t => [t.agentType, t.totalSpawns])).toEqual([['Code', 2], ['Code-fix', 1]]);
+    expect(row?.byType.map(t => [t.agentType, t.totalSpawns])).toEqual([['Code', 2], ['Fix', 1]]);
   });
 });
 
@@ -1830,7 +1830,7 @@ describe('AC-108 every new section prints', () => {
     expect(md).toContain('## Peak context and first turn per agent type');
     expect(md.indexOf('## Per agent type')).toBeLessThan(md.indexOf('## Peak context and first turn per agent type'));
     expect(md).toContain('| Code | 2 | 4 | 3,925 | 3,925 | 3,925 | 0.0% of 2 |');
-    expect(md).toContain('| Code-fix | 1 | 2 | 2,533 | 2,533 | 2,533 | 100.0% of 1 | 79.9% | 2,000 | 2,000 | 0 | 0 |');
+    expect(md).toContain('| Fix | 1 | 2 | 2,533 | 2,533 | 2,533 | 100.0% of 1 | 79.9% | 2,000 | 2,000 | 0 | 0 |');
   });
 
   it('prints the reads section', () => {
@@ -1862,7 +1862,7 @@ describe('AC-108 every new section prints', () => {
   it('prints the run distribution section', () => {
     expect(md).toContain('## Run distribution per workflow');
     expect(md).toContain('| devflow:implement | 1 | 3 / 3 | 0.02M / 0.02M |');
-    expect(md).toContain('| Code-fix | 1 | 1 of 1 | 1 / 1 | 0.00M / 0.00M |');
+    expect(md).toContain('| Fix | 1 | 1 of 1 | 1 / 1 | 0.00M / 0.00M |');
     expect(md).toContain('| a plan document | 1 | 3 / 3 |');
     expect(md).toContain('| validation-fix | 1 | 1 of 1 | 1 / 1 |');
   });
@@ -2077,5 +2077,52 @@ describe('D-AUDIT-WINDOW the date window bounds every tool-call signal', () => {
     expect(afterwards.decisions.find(d => d.shape === 'slice')).toMatchObject({
       spawns: 1, citingSpawns: 1, totalDistinctCitations: 2, indexSelfReadSpawns: 1, bodySelfReadSpawns: 1,
     });
+  });
+});
+
+describe('historical agent names count as the agent they became', () => {
+  // Transcripts keep the spelling of the day, and the audit never rewrites them. A spawn of the
+  // agent that was Code-fix then is Fix now, so a window that spans the rename reads as one row.
+  const spawn = (id: string, agentType: string): Spawn => spawnOf(id, agentType, [request(0, { input: 100 })]);
+
+  it.each([
+    ['Code-fix', 'Fix'],
+    ['Code-edit', 'Refactor'],
+    ['Scrutinize', 'Harden'],
+    ['Simplify', 'Polish'],
+    ['Diagnose', 'Debug'],
+    ['Learning', 'Curate'],
+    ['Scrutinizer', 'Harden'],
+    ['Simplifier', 'Polish'],
+    ['Bug-analyzer', 'Debug'],
+  ])('a %s spawn is reported as %s', (before, after) => {
+    const types = subagentsOnly([spawn('a1', before)]).agentTypes.map(a => a.agentType);
+
+    expect(types).toEqual([after]);
+  });
+
+  it('adds the spawns of the old and the new name into one row', () => {
+    const report = subagentsOnly([spawn('a1', 'Code-fix'), spawn('a2', 'Code-fix'), spawn('a3', 'Fix')]);
+
+    expect(report.agentTypes.map(a => [a.agentType, a.spawns])).toEqual([['Fix', 3]]);
+  });
+
+  it('leaves names that are not retired alone', () => {
+    const types = subagentsOnly(['Code', 'Validate', 'general-purpose', 'unknown', 'Explore'].map((t, i) => spawn(`a${i}`, t)))
+      .agentTypes.map(a => a.agentType)
+      .sort();
+
+    expect(types).toEqual(['Code', 'Explore', 'Validate', 'general-purpose', 'unknown']);
+  });
+
+  it('puts a Code-fix transcript of the fixture under Fix, and --agent-type matches either spelling', async () => {
+    const all = await audit({ dir: SIGNALS_DIR });
+    expect(all.agentTypes.map(a => a.agentType)).toContain('Fix');
+    expect(all.agentTypes.map(a => a.agentType)).not.toContain('Code-fix');
+
+    for (const filter of ['Fix', 'Code-fix']) {
+      const filtered = await audit({ dir: SIGNALS_DIR, agentType: filter });
+      expect(filtered.agentTypes.map(a => [a.agentType, a.spawns]), `--agent-type ${filter}`).toEqual([['Fix', 1]]);
+    }
   });
 });

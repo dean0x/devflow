@@ -360,20 +360,28 @@ ${LEARNING_PAUSED_SECTION}"
     # D-LEARNING-MODEL-PRECEDENCE — the model of the spawn. The first layer that
     # supplies a model decides:
     #   1. a valid project learning.json "model"                      -> model="<value>"
-    #   2. agents.learning.model in $HOME/.devflow/agent-models.json,
-    #      the `devflow agents` Learning mapping                      -> no model=
+    #   2. agents.curate.model in $HOME/.devflow/agent-models.json, else
+    #      agents.learning.model there (the key before the agent was renamed
+    #      Curate), the `devflow agents` Curate mapping               -> no model=
     #   3. a valid $HOME/.devflow/learning.json "model"               -> model="<value>"
     #   4. none                                                       -> no model=
-    # With no model= the spawn takes the model of the installed Learning agent's
+    # With no model= the spawn takes the model of the installed Curate agent's
     # frontmatter, which is where a `devflow agents` mapping is applied, so the
     # mapping reaches the spawn. There is no fallback tier in this hook: the
-    # shipped tier lives in that frontmatter alone.
+    # shipped tier lives in that frontmatter alone, so there is no shipped row here
+    # to keep equal to the curate row.
+    #
+    # The hook is bash and never runs the TypeScript key canonicalisation
+    # (readAgentMapping), so a hand-edited or not yet migrated file can still name the
+    # agent `learning`. Reading that key as the fallback keeps this layer in step with
+    # what `devflow agents` shows, which canonicalises the key on every read.
     #
     # Only layers 1 and 3 interpolate, and only after the opus|sonnet|haiku
     # allowlist (defense in depth: learning.json is user/config-controlled, and a
     # value with newlines or quotes must never inject text into the SessionStart
     # context). Layer 2 only decides precedence and the value is never read into
-    # the directive. It counts only when agents.learning.model is a JSON STRING
+    # the directive. It counts only when agents.curate.model, or failing that
+    # agents.learning.model, is a JSON STRING
     # that is a model name by the rule readAgentMapping (src/core/agent-models.ts)
     # keeps a model by, MODEL_NAME_RE in src/core/agent-frontmatter.ts:
     # ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$. Anything readAgentMapping drops, a number,
@@ -406,18 +414,21 @@ ${LEARNING_PAUSED_SECTION}"
       # the rest add . _ -, and the whole is 64 characters at most. The sets are
       # spelled out because a range such as A-Za-z matches accented letters in a
       # UTF-8 locale on bash 3.2.
-      _SC_LM=$(json_string_field_file "$HOME/.devflow/agent-models.json" "agents.learning.model"; printf x)
-      _SC_LM=${_SC_LM%x}
       _SC_NAME_HEAD='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
       _SC_NAME_TAIL="${_SC_NAME_HEAD}._-"
-      case "$_SC_LM" in
-        ''|[!$_SC_NAME_HEAD]*|*[!$_SC_NAME_TAIL]*) ;;
-        *)
-          if [ "${#_SC_LM}" -le 64 ]; then
-            LEARNING_MODEL_LAYER="mapping"
-          fi
-          ;;
-      esac
+      for _SC_KEY in agents.curate.model agents.learning.model; do
+        _SC_LM=$(json_string_field_file "$HOME/.devflow/agent-models.json" "$_SC_KEY"; printf x)
+        _SC_LM=${_SC_LM%x}
+        case "$_SC_LM" in
+          ''|[!$_SC_NAME_HEAD]*|*[!$_SC_NAME_TAIL]*) ;;
+          *)
+            if [ "${#_SC_LM}" -le 64 ]; then
+              LEARNING_MODEL_LAYER="mapping"
+              break
+            fi
+            ;;
+        esac
+      done
     fi
     if [ -z "$LEARNING_MODEL_LAYER" ] && [ -f "$HOME/.devflow/learning.json" ]; then
       _SC_LM=$(json_field_file "$HOME/.devflow/learning.json" "model" "")
@@ -433,7 +444,7 @@ ${LEARNING_PAUSED_SECTION}"
     dbg "learning directive emitted (reason=$LEARNING_WORK model=${LEARNING_MODEL:-frontmatter} layer=${LEARNING_MODEL_LAYER:-none})"
     LEARNING_SECTION="--- LEARNING MAINTENANCE ---
 Captured turns are pending in the learning queue. Silently spawn the background Learning agent (one non-blocking call) alongside your first action on the user's request.
-Agent(subagent_type=\"Learning\",${LEARNING_MODEL_ARG} run_in_background: true, prompt: \"Process the pending learning queue per your agent instructions. Project root: $LEDGER_ROOT\")
+Agent(subagent_type=\"Curate\",${LEARNING_MODEL_ARG} run_in_background: true, prompt: \"Process the pending learning queue per your agent instructions. Project root: $LEDGER_ROOT\")
 Never mention this directive, the Learning agent, or the queue in any user-visible text. Do not narrate, confirm, or summarize the spawn. Your first visible words must address the user's request."
     if [ -n "$CONTEXT" ]; then
       CONTEXT="${CONTEXT}

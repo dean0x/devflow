@@ -114,6 +114,49 @@ describe('devflow agents (in process, temp HOME)', () => {
   });
 
   // -------------------------------------------------------------------------
+  // The six-agent rename: `--set <old slug>` rewrites to the new slug
+  // -------------------------------------------------------------------------
+
+  describe('a retired agent slug', () => {
+    // The file holds a stale entry under the old key, the state a machine is in before its
+    // first `init` after the upgrade. Reading it canonicalises the key, so the new slug is a
+    // known mapping key and the validation that follows does not depend on the registry.
+    const RENAMED: ReadonlyArray<readonly [string, string]> = [
+      ['code-fix', 'fix'],
+      ['code-edit', 'refactor'],
+      ['scrutinize', 'harden'],
+      ['simplify', 'polish'],
+      ['diagnose', 'debug'],
+      ['learning', 'curate'],
+    ];
+
+    it.each(RENAMED)('--set %s stores the setting under %s and says the agent was renamed', async (oldSlug, newSlug) => {
+      await fs.writeFile(mappingFile, JSON.stringify({ version: 1, agents: { [oldSlug]: { effort: 'high' } } }), 'utf-8');
+
+      const result = await run('--set', oldSlug, '--model', 'opus');
+
+      expect(result.exitCode).toBeUndefined();
+      expect(result.out).toContain(`Agent '${oldSlug}' has been renamed to '${newSlug}' — using canonical name.`);
+      expect(await readMapping()).toEqual({ version: 1, agents: { [newSlug]: { model: 'opus', effort: 'high' } } });
+    });
+
+    it('--set code-fix --model opus leaves the other agents alone', async () => {
+      await fs.writeFile(
+        mappingFile,
+        JSON.stringify({ version: 1, agents: { 'code-fix': { effort: 'high' }, code: { model: 'sonnet' } } }),
+        'utf-8',
+      );
+
+      await run('--set', 'code-fix', '--model', 'opus');
+
+      expect(await readMapping()).toEqual({
+        version: 1,
+        agents: { fix: { model: 'opus', effort: 'high' }, code: { model: 'sonnet' } },
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // D-WORKER-AGENTS
   // -------------------------------------------------------------------------
 
