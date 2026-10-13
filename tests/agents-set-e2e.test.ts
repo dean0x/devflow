@@ -140,6 +140,14 @@ describe('devflow agents (in process, temp HOME)', () => {
       expect(await readMapping()).toEqual({ version: 1, agents: { [newSlug]: { model: 'opus', effort: 'high' } } });
     });
 
+    it.each(RENAMED)('--set %s on a machine with no mapping file stores the setting under %s', async (oldSlug, newSlug) => {
+      const result = await run('--set', oldSlug, '--model', 'opus');
+
+      expect(result.exitCode).toBeUndefined();
+      expect(result.out).toContain(`Agent '${oldSlug}' has been renamed to '${newSlug}' — using canonical name.`);
+      expect(await readMapping()).toEqual({ version: 1, agents: { [newSlug]: { model: 'opus' } } });
+    });
+
     it('--set code-fix --model opus leaves the other agents alone', async () => {
       await fs.writeFile(
         mappingFile,
