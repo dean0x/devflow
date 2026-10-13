@@ -270,7 +270,7 @@ if [ "$LEARNING_ENABLED" = "true" ]; then
     # since the model would read the file the link names and pass that on.
     # Builtins only: no fork, save the log line of a refused index.
     _SC_INDEX="$LEARNING_DIR/index.md"; DECISIONS_INDEX_LINE=""
-    DECISIONS_PASS_RULE="Decisions (direct delegations only — workflow skills load their own): pass this index as DECISIONS_CONTEXT — its content, read once — to every agent that takes it."
+    DECISIONS_PASS_RULE="Decisions (direct delegations only — workflow skills load their own): read this index once, then pass each agent that takes DECISIONS_CONTEXT the index lines that touch its work, verbatim, behind a (slice: N of M entries — full index: this index's path) line and with the footer."
     if [ -n "$DIRECTIVE_LEDGER_SAFE" ] && df_file_below "$LEDGER_ROOT" "$_SC_INDEX" && [ -s "$_SC_INDEX" ]; then
       _SC_IDX1=""; IFS= read -r _SC_IDX1 < "$_SC_INDEX" || true
       [ "$_SC_IDX1" != "(none)" ] && DECISIONS_INDEX_LINE="Index: $_SC_INDEX"

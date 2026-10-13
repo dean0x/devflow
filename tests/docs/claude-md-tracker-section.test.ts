@@ -1,17 +1,21 @@
 /**
- * CLAUDE.md docs guard — the Tracker block and the skill-installation heading.
+ * Architecture docs guard — CLAUDE.md size, the Tracker block and the
+ * skill-installation heading.
  *
  * CLAUDE.md is loaded into every session in this repository, so its length is a
- * recurring cost and its vocabulary is what a contributor learns first. Two
- * properties are mechanized here because both drift silently:
+ * recurring cost. The Architecture Overview descriptions live in
+ * `docs/reference/architecture.md`, which no session loads up front; CLAUDE.md
+ * keeps the binding invariant lines. Three properties are mechanized here
+ * because all of them drift silently:
  *
- *   1. The Tracker block stays within a character cap. It is the paragraph run
- *      most likely to absorb every new tracker detail, and a paragraph that
- *      grows a sentence per change has no natural stopping point.
- *   2. The Tracker block names no INTERNAL identifier. `ADR-NNN`, `PF-NNN`,
+ *   1. CLAUDE.md stays within a character cap.
+ *   2. The Tracker block in architecture.md stays within a character cap. It is
+ *      the paragraph run most likely to absorb every new tracker detail, and a
+ *      paragraph that grows a sentence per change has no natural stopping point.
+ *   3. The Tracker block names no INTERNAL identifier. `ADR-NNN`, `PF-NNN`,
  *      `DR-10`, `OD-15` and `§14.2` address entries in the learning ledger, in
  *      a design artifact or in a phase brief — none of which a reader of
- *      CLAUDE.md has open. A citation that cannot be followed is decoration,
+ *      the doc has open. A citation that cannot be followed is decoration,
  *      and a mis-numbered one is worse than none.
  *
  * Plus the end-state naming check: skills install for the SELECTED plugins and
@@ -30,7 +34,18 @@ import * as path from 'path';
 const ROOT = path.resolve(import.meta.dirname, '../..');
 
 /**
- * Max characters of the CLAUDE.md Tracker block (all its paragraphs plus the
+ * D-CLAUDE-MD-RULES-ONLY: CLAUDE.md holds only binding invariant lines (one per
+ * rule) and a plain-path pointer. The descriptions behind those lines live in
+ * docs/reference/architecture.md, moved verbatim. This ceiling holds the size.
+ *
+ * Max characters of CLAUDE.md. Measured at the pin with no headroom; may be
+ * LOWERED after a pass that cuts the text, never raised — a cap raised to fit
+ * whatever the file grew into is not a cap.
+ */
+const CLAUDE_MD_MAX_CHARS = 13150;
+
+/**
+ * Max characters of the Tracker block in docs/reference/architecture.md (all its paragraphs plus the
  * blank lines between them). Measured at the pin well under this value; may be
  * LOWERED after a pass that cuts the text, never raised — a cap raised to fit
  * whatever the block grew into is not a cap.
@@ -75,22 +90,35 @@ function collectInternalIds(text: string): string[] {
 }
 
 const CLAUDE_MD = readFileSync(path.join(ROOT, 'CLAUDE.md'), 'utf8');
+const ARCHITECTURE_MD = readFileSync(path.join(ROOT, 'docs/reference/architecture.md'), 'utf8');
 
-describe('CLAUDE.md: the Tracker block', () => {
+describe('CLAUDE.md: size', () => {
+  it(`is at most ${CLAUDE_MD_MAX_CHARS} characters`, () => {
+    expect(CLAUDE_MD.length).toBeLessThanOrEqual(CLAUDE_MD_MAX_CHARS);
+  });
+
+  it('keeps the invariant list and points at the architecture doc by plain path', () => {
+    expect(CLAUDE_MD).toContain('Invariants:');
+    expect(CLAUDE_MD).toContain('`docs/reference/architecture.md`');
+    expect(CLAUDE_MD).not.toMatch(/(^|\s)@docs\/reference\/architecture\.md/m);
+  });
+});
+
+describe('architecture.md: the Tracker block', () => {
   it('is present and carries the end-state paragraph run', () => {
-    const block = collectTrackerBlock(CLAUDE_MD);
+    const block = collectTrackerBlock(ARCHITECTURE_MD);
     expect(block.length).toBeGreaterThan(0);
     const paragraphs = block.split('\n').filter(line => /^\*\*Tracker\b/.test(line));
     expect(paragraphs.length).toBeGreaterThanOrEqual(TRACKER_BLOCK_MIN_PARAGRAPHS);
   });
 
   it(`is at most ${TRACKER_BLOCK_MAX_CHARS} characters`, () => {
-    const block = collectTrackerBlock(CLAUDE_MD);
+    const block = collectTrackerBlock(ARCHITECTURE_MD);
     expect(block.length).toBeLessThanOrEqual(TRACKER_BLOCK_MAX_CHARS);
   });
 
   it('names no internal identifier', () => {
-    expect(collectInternalIds(collectTrackerBlock(CLAUDE_MD))).toEqual([]);
+    expect(collectInternalIds(collectTrackerBlock(ARCHITECTURE_MD))).toEqual([]);
   });
 
   it('collectTrackerBlock and collectInternalIds are live (known-bad probes)', () => {
@@ -114,12 +142,13 @@ describe('CLAUDE.md: the Tracker block', () => {
   });
 });
 
-describe('CLAUDE.md: skill installation is described as selection-scoped', () => {
+describe('architecture.md: skill installation is described as selection-scoped', () => {
   it('carries the Selection-scoped Skill Installation paragraph', () => {
-    expect(CLAUDE_MD).toContain('**Selection-scoped Skill Installation**');
+    expect(ARCHITECTURE_MD).toContain('**Selection-scoped Skill Installation**');
   });
 
   it('does not describe skill installation as universal', () => {
     expect(CLAUDE_MD).not.toContain('Universal Skill Installation');
+    expect(ARCHITECTURE_MD).not.toContain('Universal Skill Installation');
   });
 });

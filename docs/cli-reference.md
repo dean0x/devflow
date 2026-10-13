@@ -243,6 +243,8 @@ npx devflow-kit hud --detail         # Show tool/agent descriptions
 npx devflow-kit hud --no-detail      # Hide tool/agent descriptions
 ```
 
+The HUD also shows your OpenAI Codex usage limits (the weekly window, plus the 5-hour window when your plan has one) next to the Claude quota. It reads them from Codex's own session logs under `~/.codex/sessions`, makes no network call, and shows nothing when you do not use Codex.
+
 A `statusLine` is devflow's only when its command ends in `/.devflow/scripts/hud.sh` (or the older `/.devflow/scripts/statusline.sh`). Any other `statusLine` is yours: `init`, `init --no-hud`, `hud --disable` and `uninstall` leave it alone, and `hud --enable` asks before replacing it.
 
 ## Security (Deny List)

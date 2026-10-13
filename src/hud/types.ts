@@ -31,6 +31,7 @@ export type ComponentId =
   | 'versionBadge'
   | 'sessionDuration'
   | 'usageQuota'
+  | 'codexQuota'
   | 'todoProgress'
   | 'configCounts'
   | 'learningCounts'
@@ -97,6 +98,28 @@ export interface UsageData {
 }
 
 /**
+ * One Codex rate-limit window, identified by its length (D-CODEX-WINDOW-BY-MINUTES).
+ */
+export interface CodexWindow {
+  /** Window length in minutes: 300 is the 5h window, 10080 the weekly one. */
+  minutes: number;
+  /** Clamped to 0-100. */
+  usedPercent: number;
+  /** Epoch seconds. */
+  resetsAt: number;
+}
+
+/**
+ * Codex usage limits read from the newest rate-limit record in Codex's session
+ * logs. Windows are ordered by ascending length.
+ */
+export interface CodexUsage {
+  windows: readonly CodexWindow[];
+  /** Codex's rate_limit_reached_type when a limit is hit, else null. */
+  limitReached: string | null;
+}
+
+/**
  * Aggregated cost across sessions for weekly/monthly tracking.
  */
 export interface CostAggregation {
@@ -130,6 +153,7 @@ export interface GatherContext {
   git: GitStatus | null;
   transcript: TranscriptData | null;
   usage: UsageData | null;
+  codexUsage: CodexUsage | null;
   configCounts: ConfigCountsData | null;
   learningCounts: LearningCountsData | null;
   costHistory: CostAggregation | null;

@@ -15,9 +15,11 @@
 //        [--state <dir>] [--block-out <file>] [--comment-out <file>] [--stale-out <file>] [--approval]
 //   node verify-evidence.cjs splice --pr <n> --state <dir> --block <file> --out <file>
 //   node verify-evidence.cjs readback --pr <n> --expect <file>
+//   node verify-evidence.cjs publish --pr <n> [--publication auto|full|off|stub] [--evidence <file>]
+//   node verify-evidence.cjs readiness --pr <n> [--require-non-author-approval true|false]
 //
-// stdout (D-VERIFY-STDOUT) is empty or exactly one of these, each a closed-vocabulary
-// line (the render block's TP lines come from the caller's own plan file):
+// stdout (D-VERIFY-STDOUT) is empty or exactly one of these shapes, each closed-vocabulary
+// (the render block's TP lines come from the caller's own plan file):
 //   check     nothing — the exit code is the answer; the diagnostic is on stderr
 //   render    the creation block: markers, `## Test Plan`, every TP unticked
 //   verify    EVIDENCE pr:<n> head:<sha> total:<n> VERIFIED-CI:<n> ATTESTED-LOCAL:<n>
@@ -26,6 +28,13 @@
 //             posted:<yes|no|n/a> body:<same|changed>          (one line; wrapped here)
 //   splice    SPLICE ok|resplice (exit 0) or SPLICE conflict|malformed|oversize (exit 5)
 //   readback  READBACK ok (exit 0) or READBACK mismatch (exit 5)
+//   publish   the `## PR Evidence` block — the heading, the EVIDENCE line, one
+//             `**Body**: … · **Comment**: …` line — then one `TRACEABILITY: DEGRADED
+//             (<reason>)` line per degraded part (exit 0), or the one line
+//             `TRACEABILITY: DEGRADED (evidence unavailable)` (exit 2)
+//   readiness the `## Merge Readiness` block (exit 0), or the same block with
+//             `**Status**: DEGRADED (<reason>)` and one `TRACEABILITY: DEGRADED
+//             (<reason>)` line after it (exit 2)
 // No byte of a PR body, a comment, a review or a gh/git answer is ever printed: the
 // boundary re-checks every stdout line against these shapes before writing it.
 //
@@ -34,7 +43,10 @@
 //   1  usage error — stdout entirely empty, usage on stderr
 //   2  input unusable — a file could not be read (missing, not a regular file,
 //      oversize, not UTF-8), the evidence file or the state directory is
-//      malformed, or the PR body's test-plan block cannot serve as the plan
+//      malformed, or the PR body's test-plan block cannot serve as the plan.
+//      For `publish` and `readiness` (D-OP-SCRIPT-POINTER) it is the DEGRADED
+//      result: the operation could not read what it needs, and the stdout above
+//      says so
 //   3  output write failed — no stdout line is printed
 //   4  remote or internal failure before any verdict — `gh pr view` failed or
 //      answered something unusable, or an unexpected internal error
@@ -58,10 +70,15 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const crypto = require('crypto');
 const childProcess = require('child_process');
 
 const PE = require(path.join(__dirname, 'pr-evidence.cjs'));
+// D-READINESS-CLASSIFIER: the CI classification is ci-wait's own, so the two scripts
+// cannot disagree. Its main is guarded by `require.main === module`: requiring it
+// starts nothing.
+const CW = require(path.join(__dirname, 'ci-wait.cjs'));
 
 // ---------------------------------------------------------------------------
 // Closed vocabularies and bounds
@@ -103,6 +120,28 @@ const CAPS = Object.freeze({
  */
 const DEADLINE_MS = 90000;
 
+/**
+ * D-PUBLISH-BOUNDS: `publish` runs `verify` under the deadline above, then its writes
+ * under a deadline of their own and a gh budget of their own. The writes are at most
+ * seven calls: two body reads (the compare-and-swap), a body edit and one retry, one
+ * read-back, a comment and one retry. A scrub is bounded by its own timeout, not by
+ * the deadline, so one that starts just before the writes' deadline can end up to
+ * REDACT_TIMEOUT_MS after it. The worst case is 90 s + 60 s + 20 s; the caller's
+ * 180 s Bash timeout covers it with room for node's startup.
+ */
+const PUBLISH_DEADLINE_MS = 60000;
+const PUBLISH_GH_CALLS = 8;
+/** The scrubber is a short local script; a longer run is a failed one. */
+const REDACT_TIMEOUT_MS = 20000;
+/** A comment is re-measured after the scrub (redaction can grow it); GitHub rejects 65,536. */
+const COMMENT_POST_MAX_CHARS = PE.LIMITS.BODY_CHARS;
+/** The scrubber, a sibling of this script under ~/.devflow/scripts/. */
+const REDACT_SCRIPT = path.join(__dirname, 'redact-secrets.cjs');
+/** What a `publish` `--evidence` value may spell: the relative paths the commands build. */
+const EVIDENCE_PATH_RE = /^[A-Za-z0-9._/-]{1,255}$/;
+/** The `--publication` values a caller may pass (REVIEW_PUBLICATION, resolved). */
+const PUBLICATION_VALUES = Object.freeze(['auto', 'full', 'off', 'stub']);
+
 const GH_TIMEOUT_MS = 20000;
 const GIT_FETCH_TIMEOUT_MS = 60000;
 const GIT_LOCAL_TIMEOUT_MS = 20000;
@@ -112,6 +151,9 @@ const PR_VIEW_MAX_BUFFER = 64 * 1024 * 1024;
 const RUN_LIST_MAX_BUFFER = 1024 * 1024;
 const RUN_VIEW_MAX_BUFFER = 65536;
 const LINE_MAX_BUFFER = 4096;
+/** `gh pr checks` and the thread-count GraphQL answer: a thousand rows of names fit. */
+const READINESS_MAX_BUFFER = 4 * 1024 * 1024;
+const READINESS_MAX_CHECKS = 1000;
 /** 5,000 paths of 4,096 bytes overflow this; an overflow reads as an unresolved diff. */
 const DIFF_MAX_BUFFER = 16 * 1024 * 1024;
 const FETCH_MAX_BUFFER = 1024 * 1024;
@@ -145,6 +187,8 @@ const USAGE = [
   '            [--state <dir>] [--block-out <file>] [--comment-out <file>] [--stale-out <file>] [--approval]',
   '       node verify-evidence.cjs splice --pr <n> --state <dir> --block <file> --out <file>',
   '       node verify-evidence.cjs readback --pr <n> --expect <file>',
+  '       node verify-evidence.cjs publish --pr <n> [--publication auto|full|off|stub] [--evidence <file>]',
+  '       node verify-evidence.cjs readiness --pr <n> [--require-non-author-approval true|false]',
 ].join('\n');
 
 // ---------------------------------------------------------------------------
@@ -164,10 +208,12 @@ const USAGE = [
  * @typedef {{ ghCalls: number, runViews: number, throttled: boolean }} Budget
  *
  * @typedef {{ exec: ExecFn, env: NodeJS.ProcessEnv, cwd: string, now: () => number,
- *   deadline: number, budget: Budget, notes: Set<string>, stderr: (text: string) => void }} Io
+ *   deadline: number, budget: Budget, notes: Set<string>, stderr: (text: string) => void,
+ *   ghCap?: number }} Io
  *   The imperative shell's one context: every call goes through it, so every
  *   bound is counted in one place. `notes` holds closed tokens for the stderr
- *   summary, never input bytes.
+ *   summary, never input bytes. `ghCap` replaces CAPS.GH_CALLS for a stage that
+ *   carries a budget of its own (`publish`'s writes).
  *
  * @typedef {{ login: string, association: string, body: string, viewerDidAuthor: boolean }} PrComment
  * @typedef {{ login: string, association: string, state: string }} PrReview
@@ -194,7 +240,9 @@ const USAGE = [
  *   | { kind: 'verify', pr: number, publication: string, evidence: string | null, state: string | null,
  *       blockOut: string | null, commentOut: string | null, staleOut: string | null, approval: boolean }
  *   | { kind: 'splice', pr: number, state: string, block: string, out: string }
- *   | { kind: 'readback', pr: number, expect: string }} ParsedArgs
+ *   | { kind: 'readback', pr: number, expect: string }
+ *   | { kind: 'publish', pr: number, publication: string, evidence: string | null }
+ *   | { kind: 'readiness', pr: number, requireNonAuthor: 'true' | 'false' | 'unrecognised' }} ParsedArgs
  */
 
 /** @type {ParsedArgs} */
@@ -298,6 +346,25 @@ function parseArgs(argv) {
     const pr = f === null ? null : parsePr(flagValue(f, '--pr'));
     const expect = f === null ? null : flagValue(f, '--expect');
     return pr === null || expect === null ? USAGE_ARGS : { kind: 'readback', pr, expect };
+  }
+  if (sub === 'publish') {
+    const f = parseFlags(tail, { '--pr': 'value', '--publication': 'value', '--evidence': 'value' });
+    const pr = f === null ? null : parsePr(flagValue(f, '--pr'));
+    if (f === null || pr === null) return USAGE_ARGS;
+    const publication = flagValue(f, '--publication') || '';
+    const evidence = flagValue(f, '--evidence');
+    if (publication !== '' && !PUBLICATION_VALUES.includes(publication)) return USAGE_ARGS;
+    if (evidence !== null && !EVIDENCE_PATH_RE.test(evidence)) return USAGE_ARGS;
+    return { kind: 'publish', pr, publication, evidence };
+  }
+  if (sub === 'readiness') {
+    const f = parseFlags(tail, { '--pr': 'value', '--require-non-author-approval': 'value' });
+    const pr = f === null ? null : parsePr(flagValue(f, '--pr'));
+    if (f === null || pr === null) return USAGE_ARGS;
+    const needed = flagValue(f, '--require-non-author-approval');
+    if (needed !== null && needed !== 'true' && needed !== 'false') return USAGE_ARGS;
+    // An absent flag is the ladder's "unrecognised": it can never read READY.
+    return { kind: 'readiness', pr, requireNonAuthor: needed === null ? 'unrecognised' : needed };
   }
   return USAGE_ARGS;
 }
@@ -503,7 +570,8 @@ function remaining(io) {
  */
 function gh(io, args, maxBuffer) {
   if (io.budget.throttled) { io.notes.add('throttled'); return refusedCall('throttled'); }
-  if (io.budget.ghCalls >= CAPS.GH_CALLS) { io.notes.add('gh-call-cap'); return refusedCall('cap'); }
+  const cap = typeof io.ghCap === 'number' ? io.ghCap : CAPS.GH_CALLS;
+  if (io.budget.ghCalls >= cap) { io.notes.add('gh-call-cap'); return refusedCall('cap'); }
   const left = remaining(io);
   if (left === 0) { io.notes.add('deadline'); return refusedCall('deadline'); }
   io.budget.ghCalls++;
@@ -1661,6 +1729,629 @@ function runRender(io, args) {
 }
 
 // ---------------------------------------------------------------------------
+// The two scripted operations (D-OP-SCRIPT-POINTER)
+// ---------------------------------------------------------------------------
+//
+// `update-pr-evidence` and `check-merge-readiness` stay defined Git operations, so a
+// direct delegation still works, but each one's steps are "run this script and print
+// its stdout": the two did only plumbing, and a Git spawn paid a model's turns for it.
+// A command now runs `publish` or `readiness` through its own Bash tool. Both answer
+// in one closed-vocabulary block, re-parsed and re-rendered at the boundary
+// (D-OP-BLOCK-GATE), so a gh answer, a PR body or a check name never reaches stdout
+// except as a sanitized token.
+
+/**
+ * A DEGRADED reason on stdout: lower-case words, digits, spaces and hyphens. Every
+ * reason this file prints is a fixed phrase; the shape is the boundary's re-check.
+ */
+const REASON_RE = /^[a-z0-9][a-z0-9 -]{0,59}$/;
+
+/** What a `publish` result prints when it could not run at all (exit 2). */
+const EVIDENCE_UNAVAILABLE_LINE = 'TRACEABILITY: DEGRADED (evidence unavailable)';
+
+/**
+ * @typedef {{ status: string, reason: string | null }} Part
+ *   One half of the `publish` answer: a closed status, or `DEGRADED` with its reason.
+ */
+
+const BODY_STATUSES = Object.freeze(['EDITED', 'UNCHANGED', 'SKIPPED']);
+const COMMENT_STATUSES = Object.freeze(['POSTED', 'SKIPPED', 'OFF']);
+
+/**
+ * @param {string} status
+ * @returns {Part}
+ */
+function okPart(status) {
+  return Object.freeze({ status, reason: null });
+}
+
+/**
+ * @param {string} reason  a fixed phrase from this file
+ * @returns {Part}
+ */
+function degradedPart(reason) {
+  return Object.freeze({ status: 'DEGRADED', reason });
+}
+
+/**
+ * @param {Part} part
+ * @returns {string}
+ */
+function partText(part) {
+  return part.status === 'DEGRADED' ? 'DEGRADED (' + part.reason + ')' : part.status;
+}
+
+/**
+ * The reasons that earn a TRACEABILITY line, in print order and without repeats: a
+ * degraded half names its reason, and a body edit skipped for a concurrent edit names
+ * that (D4: the operation never blocks, and says what it could not do).
+ *
+ * @param {Part} body
+ * @param {Part} comment
+ * @returns {string[]}
+ */
+function traceReasons(body, comment) {
+  /** @type {string[]} */
+  const out = [];
+  const add = reason => { if (reason !== null && !out.includes(reason)) out.push(reason); };
+  add(body.status === 'DEGRADED' ? body.reason : body.status === 'SKIPPED' ? 'concurrent edit' : null);
+  add(comment.status === 'DEGRADED' ? comment.reason : null);
+  return out;
+}
+
+/**
+ * The `## PR Evidence` block of the update-pr-evidence contract, then its TRACEABILITY
+ * lines.
+ *
+ * @param {string} evidenceLine
+ * @param {Part} body
+ * @param {Part} comment
+ * @returns {string}
+ */
+function renderPublishBlock(evidenceLine, body, comment) {
+  const lines = [
+    '## PR Evidence',
+    evidenceLine,
+    '**Body**: ' + partText(body) + ' · **Comment**: ' + partText(comment),
+    ...traceReasons(body, comment).map(r => 'TRACEABILITY: DEGRADED (' + r + ')'),
+  ];
+  return lines.join('\n') + '\n';
+}
+
+const PUBLISH_PARTS_RE = /^\*\*Body\*\*: (?<body>[A-Z]+|DEGRADED \([a-z0-9][a-z0-9 -]{0,59}\)) · \*\*Comment\*\*: (?<comment>[A-Z]+|DEGRADED \([a-z0-9][a-z0-9 -]{0,59}\))$/;
+
+/**
+ * @param {string} text
+ * @param {readonly string[]} statuses
+ * @returns {Part | null}
+ */
+function parsePart(text, statuses) {
+  if (statuses.includes(text)) return okPart(text);
+  const m = /^DEGRADED \((.+)\)$/.exec(text);
+  return m !== null && REASON_RE.test(m[1]) ? degradedPart(m[1]) : null;
+}
+
+/**
+ * D-OP-BLOCK-GATE: read a `publish` block back into its parts, or null when it is not
+ * exactly what renderPublishBlock prints. The boundary prints a block only when this
+ * accepts it.
+ *
+ * @param {string} text  the whole stdout, its final newline included
+ * @returns {{ evidenceLine: string, body: Part, comment: Part } | null}
+ */
+function parsePublishBlock(text) {
+  if (typeof text !== 'string' || !text.endsWith('\n') || text.length > 8192) return null;
+  const lines = text.slice(0, -1).split('\n');
+  if (lines.length < 3 || lines.length > 5 || lines[0] !== '## PR Evidence') return null;
+  if (!PE.parseEvidenceLine(lines[1]).ok) return null;
+  const m = PUBLISH_PARTS_RE.exec(lines[2]);
+  if (m === null || m.groups === undefined) return null;
+  const body = parsePart(m.groups.body, BODY_STATUSES);
+  const comment = parsePart(m.groups.comment, COMMENT_STATUSES);
+  if (body === null || comment === null) return null;
+  return renderPublishBlock(lines[1], body, comment) === text ? { evidenceLine: lines[1], body, comment } : null;
+}
+
+/**
+ * A `publish` that could not run: the one line, exit 2, and the reason on stderr.
+ *
+ * @param {Io} io
+ * @param {string} reason  a fixed phrase from this file, for stderr
+ * @returns {Outcome}
+ */
+function evidenceUnavailable(io, reason) {
+  io.stderr('verify-evidence: publish: ' + reason + '\n');
+  return { code: EXIT_CODES.INPUT_UNUSABLE, stdout: EVIDENCE_UNAVAILABLE_LINE + '\n' };
+}
+
+/**
+ * D-PUBLISH-SCRUB-GATE: the D11 scrub of a file bound for a PR, the file sink. True
+ * only when the scrubber ran and exited 0; a missing script, a crash, a timeout and a
+ * non-zero exit are all "do not post". The caller posts nothing after a false.
+ *
+ * @param {Io} io
+ * @param {string} input
+ * @param {string} output
+ * @returns {boolean}
+ */
+function scrub(io, input, output) {
+  return runCall(io, process.execPath, [REDACT_SCRIPT, input, output], REDACT_TIMEOUT_MS, LINE_MAX_BUFFER).ok;
+}
+
+/**
+ * @param {CallResult} r
+ * @returns {boolean}  true when the call failed with an HTTP 5xx answer
+ */
+function isServerError(r) {
+  return !r.ok && answered(r) && /HTTP 5[0-9]{2}\b/.test(r.stderr);
+}
+
+/**
+ * One gh write with the retry the operation allows: a 5xx answer is tried once more,
+ * never a second time, and nothing else is retried.
+ *
+ * @param {Io} io
+ * @param {readonly string[]} args
+ * @returns {{ ok: boolean, serverError: boolean }}
+ */
+function ghWrite(io, args) {
+  let r = gh(io, args, LINE_MAX_BUFFER);
+  if (isServerError(r)) r = gh(io, args, LINE_MAX_BUFFER);
+  return { ok: r.ok, serverError: isServerError(r) };
+}
+
+/**
+ * The context for the writes: a gh budget and a deadline of their own, the same
+ * notes. The throttle flag carries over, so a rate limit that verify hit stops the
+ * writes too.
+ *
+ * @param {Io} io
+ * @returns {Io}
+ */
+function writeStageIo(io) {
+  return Object.assign({}, io, {
+    deadline: io.now() + PUBLISH_DEADLINE_MS,
+    budget: { ghCalls: 0, runViews: 0, throttled: io.budget.throttled },
+    ghCap: PUBLISH_GH_CALLS,
+  });
+}
+
+/**
+ * The body half of update-pr-evidence: scrub the composed block, splice it into the
+ * body (the compare-and-swap), edit, read back. Each step runs only when the one
+ * before it succeeded, so `gh pr edit` never runs after a failed scrub or a refused
+ * splice.
+ *
+ * @param {Io} io  the write-stage context
+ * @param {number} pr
+ * @param {{ body: string }} fields  the EVIDENCE line's fields
+ * @param {{ state: string, notesRaw: string, notes: string, body: string }} files
+ * @returns {Part}
+ */
+function publishBody(io, pr, fields, files) {
+  if (fields.body !== 'changed') return okPart('UNCHANGED');
+  if (!scrub(io, files.notesRaw, files.notes)) return degradedPart('redaction unavailable');
+  const spliced = runSplice(io, { kind: 'splice', pr, state: files.state, block: files.notes, out: files.body });
+  const token = SPLICE_LINE_RE.exec(stripOneNewline(spliced.stdout));
+  if (token === null || token.groups === undefined) return degradedPart('splice unavailable');
+  const outcome = token.groups.outcome;
+  if (outcome === 'conflict') return okPart('SKIPPED');
+  if (outcome !== 'ok' && outcome !== 'resplice') return degradedPart('splice ' + outcome);
+  const edit = ghWrite(io, ['pr', 'edit', String(pr), '--body-file', files.body]);
+  if (!edit.ok) return degradedPart(edit.serverError ? '5xx on update-pr-evidence' : 'gh pr edit failed');
+  const back = runReadback(io, { kind: 'readback', pr, expect: files.body });
+  return back.code === EXIT_CODES.OK && back.stdout === 'READBACK ok\n' ? okPart('EDITED') : degradedPart('body read-back mismatch');
+}
+
+/**
+ * The comment half: the append-only evidence comment, scrubbed (D11) and re-measured
+ * after the scrub, posted once. An already-posted comment is never touched.
+ *
+ * @param {Io} io  the write-stage context
+ * @param {number} pr
+ * @param {{ posted: string }} fields  the EVIDENCE line's fields
+ * @param {{ commentRaw: string, comment: string }} files
+ * @returns {Part}
+ */
+function publishComment(io, pr, fields, files) {
+  if (fields.posted === 'yes') return okPart('SKIPPED');
+  if (fields.posted === 'n/a') return okPart('OFF');
+  if (!scrub(io, files.commentRaw, files.comment)) return degradedPart('redaction unavailable');
+  const text = readTextFile(files.comment);
+  if (text === null || text === '') return degradedPart('redaction unavailable');
+  if (text.length > COMMENT_POST_MAX_CHARS) return degradedPart('comment over size cap');
+  const post = ghWrite(io, ['pr', 'comment', String(pr), '--body-file', files.comment]);
+  if (post.ok) return okPart('POSTED');
+  return degradedPart(post.serverError ? '5xx on update-pr-evidence' : 'gh pr comment failed');
+}
+
+/**
+ * The whole update-pr-evidence operation, in the order the operation always had:
+ * verify; only on `body:changed` scrub, splice, `gh pr edit`, read back; only on
+ * `posted:no` scrub and `gh pr comment`. The work files live in one private directory
+ * this call makes and removes.
+ *
+ * @param {Io} io
+ * @param {Extract<ParsedArgs, { kind: 'publish' }>} args
+ * @param {MainDeps} deps
+ * @returns {Outcome}
+ */
+function runPublish(io, args, deps) {
+  /** @type {string} */
+  let dir;
+  try {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-evidence-'));
+  } catch (_) {
+    return evidenceUnavailable(io, 'the work directory could not be made');
+  }
+  try {
+    const file = name => path.join(dir, name);
+    const state = file('state');
+    try {
+      fs.mkdirSync(state, { mode: 0o700 });
+    } catch (_) {
+      return evidenceUnavailable(io, 'the state directory could not be made');
+    }
+    const files = {
+      state,
+      notesRaw: file('notes.raw'),
+      notes: file('notes'),
+      body: file('body'),
+      commentRaw: file('comment.raw'),
+      comment: file('comment'),
+    };
+    const verified = runVerify(io, {
+      kind: 'verify', pr: args.pr, publication: args.publication, evidence: args.evidence, state,
+      blockOut: files.notesRaw, commentOut: files.commentRaw, staleOut: null, approval: false,
+    }, deps);
+    if (verified.code !== EXIT_CODES.OK) return evidenceUnavailable(io, 'verify did not answer');
+    const line = stripOneNewline(verified.stdout);
+    const parsed = PE.parseEvidenceLine(line);
+    if (!parsed.ok || parsed.value.pr !== args.pr) return evidenceUnavailable(io, 'verify answered something else');
+
+    const stage = writeStageIo(io);
+    const body = publishBody(stage, args.pr, parsed.value, files);
+    const comment = publishComment(stage, args.pr, parsed.value, files);
+    return { code: EXIT_CODES.OK, stdout: renderPublishBlock(line, body, comment) };
+  } finally {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* the OS clears its temp directory */ }
+  }
+}
+
+// --- readiness ----------------------------------------------------------------
+
+/**
+ * @typedef {{ total: number, verifiedCi: number, attestedLocal: number,
+ *   testPlanException: boolean, approval: string }} EvidenceFacts
+ *   What the ladder reads of the EVIDENCE line. Null means the evidence is unknown.
+ *
+ * @typedef {{ unresolved: number, approximate: boolean, decision: string | null,
+ *   ci: string, failing: string, evidence: EvidenceFacts | null, require: string }} ReadinessFacts
+ *   `decision` is APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED, null, or UNRECOGNISED;
+ *   `failing` is ci-wait's formatted failing-check names; `require` is `true`, `false`
+ *   or `unrecognised`.
+ */
+
+/**
+ * D-READINESS-LADDER: check-merge-readiness step 5, first matching rule wins. READY is
+ * a positive conjunction and the last arm is `status unknown`, so an input no arm
+ * names can never read READY. tests/evidence/merge-readiness.test.ts holds this to
+ * the reference's prose arms (same labels, same order) and to a model over the whole
+ * fact domain.
+ *
+ * @param {ReadinessFacts} f
+ * @returns {{ status: 'READY' | 'NOT_READY', reason: string | null }}
+ */
+function readinessVerdict(f) {
+  /** @param {string} reason */
+  const notReady = reason => ({ status: /** @type {const} */ ('NOT_READY'), reason });
+  const ev = f.evidence;
+  if (f.unresolved > 0) return notReady('unresolved threads: ' + (f.approximate ? '>' : '') + f.unresolved);
+  if (f.decision === 'CHANGES_REQUESTED') return notReady('changes requested');
+  if (f.ci === 'FAILING') return notReady('CI failing: ' + f.failing);
+  if (f.ci === 'PENDING') return notReady('CI pending');
+  if (f.decision === 'REVIEW_REQUIRED' || f.decision === null) return notReady('no approving review');
+  if (ev === null) return notReady('test-plan evidence unavailable');
+  if (f.require === 'true' && ev.approval !== 'yes') return notReady('no non-author approval');
+  const verified = ev.verifiedCi + ev.attestedLocal;
+  if (ev.total === 0 && !ev.testPlanException) return notReady('no test-plan evidence');
+  if (verified < ev.total) return notReady('test plan: ' + verified + '/' + ev.total + ' verified');
+  const planHolds = (ev.total >= 1 && verified === ev.total) || (ev.total === 0 && ev.testPlanException);
+  const ready = f.unresolved === 0 && !f.approximate && f.decision === 'APPROVED'
+    && (f.ci === 'PASSING' || f.ci === 'NO_CI') && (ev.approval === 'yes' || f.require === 'false') && planHolds;
+  return ready ? { status: 'READY', reason: null } : notReady('status unknown');
+}
+
+/**
+ * @typedef {{ pr: number, status: 'READY' | 'NOT_READY' | 'DEGRADED', reason: string | null,
+ *   threads: string, decision: string, ci: string, plan: string, approval: string }} ReadinessBlock
+ *   Every field after `reason` is the text of one Details line's value.
+ */
+
+/**
+ * The `## Merge Readiness` block of the check-merge-readiness contract. A DEGRADED
+ * block ends with its TRACEABILITY line.
+ *
+ * @param {ReadinessBlock} b
+ * @returns {string}
+ */
+function renderReadinessBlock(b) {
+  const status = b.status === 'READY' ? 'READY' : b.status + ' (' + b.reason + ')';
+  const lines = [
+    '## Merge Readiness',
+    '**PR**: #' + b.pr,
+    '**Status**: ' + status,
+    '',
+    '### Details',
+    '- Unresolved threads: ' + b.threads,
+    '- Review decision: ' + b.decision,
+    '- CI status: ' + b.ci,
+    '- Test plan: ' + b.plan + ' · non-author approval: ' + b.approval,
+  ];
+  if (b.status === 'DEGRADED') lines.push('TRACEABILITY: DEGRADED (' + b.reason + ')');
+  return lines.join('\n') + '\n';
+}
+
+/** A NOT_READY reason: the ladder's fixed phrases, with numbers and sanitized check names. */
+const NOT_READY_REASON_RE = /^(?:unresolved threads: >?[0-9]{1,4}|changes requested|CI failing: [A-Za-z0-9 ._()/:+,-]{1,200}|CI pending|no approving review|test-plan evidence unavailable|no non-author approval|no test-plan evidence|test plan: [0-9]{1,3}\/[0-9]{1,3} verified|status unknown)$/;
+const READINESS_THREADS_RE = /^(?:[0-9]{1,4}|>[0-9]{1,4} \(count approximate — PR has more than 100 threads\)|unavailable)$/;
+const READINESS_DECISIONS = Object.freeze(['APPROVED', 'CHANGES_REQUESTED', 'REVIEW_REQUIRED', 'none', 'unrecognised', 'unavailable']);
+const READINESS_CI = Object.freeze(['PASSING', 'FAILING', 'PENDING', 'NO_CI', 'NO_PR', 'INDETERMINATE', 'unavailable']);
+const READINESS_PLAN_RE = /^(?:[0-9]{1,3}\/[0-9]{1,3} \(VERIFIED-CI [0-9]{1,3}, ATTESTED-LOCAL [0-9]{1,3}\)|unavailable)$/;
+const READINESS_APPROVALS = Object.freeze(['yes', 'no', 'not required']);
+
+/**
+ * D-OP-BLOCK-GATE: read a `## Merge Readiness` block back into its fields, or null
+ * when it is not exactly what renderReadinessBlock prints.
+ *
+ * @param {string} text  the whole stdout, its final newline included
+ * @returns {ReadinessBlock | null}
+ */
+function parseReadinessBlock(text) {
+  if (typeof text !== 'string' || !text.endsWith('\n') || text.length > 4096) return null;
+  const lines = text.slice(0, -1).split('\n');
+  if (lines.length !== 9 && lines.length !== 10) return null;
+  const pr = /^\*\*PR\*\*: #([1-9][0-9]{0,9})$/.exec(lines[1]);
+  const status = /^\*\*Status\*\*: (READY|(NOT_READY|DEGRADED) \((.+)\))$/.exec(lines[2]);
+  const threads = /^- Unresolved threads: (.+)$/.exec(lines[5]);
+  const decision = /^- Review decision: (.+)$/.exec(lines[6]);
+  const ci = /^- CI status: (.+)$/.exec(lines[7]);
+  const plan = /^- Test plan: (.+) · non-author approval: (.+)$/.exec(lines[8]);
+  if (pr === null || status === null || threads === null || decision === null || ci === null || plan === null) return null;
+  const kind = status[1] === 'READY' ? 'READY' : status[2];
+  const reason = kind === 'READY' ? null : status[3];
+  if (kind === 'NOT_READY' && !NOT_READY_REASON_RE.test(reason)) return null;
+  if (kind === 'DEGRADED' && !REASON_RE.test(reason)) return null;
+  if (!READINESS_THREADS_RE.test(threads[1]) || !READINESS_DECISIONS.includes(decision[1])) return null;
+  if (!READINESS_CI.includes(ci[1]) || !READINESS_PLAN_RE.test(plan[1]) || !READINESS_APPROVALS.includes(plan[2])) return null;
+  /** @type {ReadinessBlock} */
+  const block = {
+    pr: Number(pr[1]), status: /** @type {ReadinessBlock['status']} */ (kind), reason,
+    threads: threads[1], decision: decision[1], ci: ci[1], plan: plan[1], approval: plan[2],
+  };
+  return renderReadinessBlock(block) === text ? block : null;
+}
+
+/**
+ * A read of the PR: its value, or the fixed reason it could not be read.
+ *
+ * @template T
+ * @typedef {{ ok: true, value: T } | { ok: false, reason: string }} Read
+ */
+
+/**
+ * @param {CallResult} r  a failed call
+ * @returns {string}
+ */
+function readFailure(r) {
+  if (r.refused === 'throttled') return 'rate limited';
+  if (r.refused !== null) return 'gh budget spent';
+  return /Could not resolve to a PullRequest/.test(r.stderr) ? 'no pr' : 'gh unavailable';
+}
+
+/**
+ * @param {unknown} text
+ * @returns {unknown | null}  the parsed JSON, or null
+ */
+function parseJsonOrNull(text) {
+  try {
+    return JSON.parse(String(text));
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * The PR's review decision. `gh pr view` answers `""` or null when no rule asks for a
+ * review; a string outside the three documented values reads UNRECOGNISED, and the
+ * ladder never lets that reach READY.
+ *
+ * @param {Io} io
+ * @param {number} pr
+ * @returns {Read<string | null>}
+ */
+function readDecision(io, pr) {
+  const r = gh(io, ['pr', 'view', String(pr), '--json', 'reviewDecision'], LINE_MAX_BUFFER);
+  if (!r.ok) return { ok: false, reason: readFailure(r) };
+  const value = obj(parseJsonOrNull(r.stdout.toString('utf8'))).reviewDecision;
+  if (value === null || value === '') return { ok: true, value: null };
+  if (typeof value !== 'string') return { ok: false, reason: 'review decision unreadable' };
+  return { ok: true, value: ['APPROVED', 'CHANGES_REQUESTED', 'REVIEW_REQUIRED'].includes(value) ? value : 'UNRECOGNISED' };
+}
+
+/**
+ * D-READINESS-THREADS: the unresolved review threads among the first 100, with
+ * `totalCount` deciding whether that count is approximate. The query is a constant;
+ * the repository and the number are variables, never text in the query. A node whose
+ * `isResolved` is not a boolean makes the whole read unreadable, since a thread that
+ * cannot be told resolved must not read as resolved.
+ */
+const THREADS_QUERY = 'query($owner: String!, $repo: String!, $pr: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $pr) { reviewThreads(first: 100) { totalCount nodes { isResolved } } } } }';
+const THREADS_PAGE = 100;
+
+/**
+ * @param {Io} io
+ * @param {number} pr
+ * @returns {Read<{ unresolved: number, approximate: boolean }>}
+ */
+function readThreads(io, pr) {
+  const r = gh(io, [
+    'api', 'graphql', '-F', 'owner={owner}', '-F', 'repo={repo}', '-F', 'pr=' + pr, '-f', 'query=' + THREADS_QUERY,
+  ], READINESS_MAX_BUFFER);
+  if (!r.ok) return { ok: false, reason: readFailure(r) };
+  const data = obj(obj(obj(obj(parseJsonOrNull(r.stdout.toString('utf8'))).data).repository).pullRequest);
+  const threads = obj(data.reviewThreads);
+  const nodes = threads.nodes;
+  const total = threads.totalCount;
+  if (!Array.isArray(nodes) || nodes.length > THREADS_PAGE || !Number.isInteger(total) || total < nodes.length) {
+    return { ok: false, reason: 'review threads unreadable' };
+  }
+  let unresolved = 0;
+  for (const node of nodes) {
+    const resolved = obj(node).isResolved;
+    if (typeof resolved !== 'boolean') return { ok: false, reason: 'review threads unreadable' };
+    if (!resolved) unresolved++;
+  }
+  return { ok: true, value: { unresolved, approximate: total > THREADS_PAGE } };
+}
+
+/**
+ * D-READINESS-CLASSIFIER: the CI status, by check-ci-status's fetch (exit 0 or 8 is a
+ * result; "no checks reported" or `[]` is NO_CI; any other failure is INDETERMINATE)
+ * and ci-wait's classifier over `bucket`. Failing names are sanitized and bounded by
+ * ci-wait's own formatter.
+ *
+ * @param {Io} io
+ * @param {number} pr
+ * @returns {{ status: string, failing: string }}
+ */
+function readCi(io, pr) {
+  const r = gh(io, ['pr', 'checks', String(pr), '--json', 'name,state,bucket'], READINESS_MAX_BUFFER);
+  const indeterminate = { status: 'INDETERMINATE', failing: '-' };
+  if (!answered(r)) return indeterminate;
+  if (r.status !== 0 && r.status !== 8) {
+    if (/Could not resolve to a PullRequest/.test(r.stderr)) return { status: 'NO_PR', failing: '-' };
+    return /no checks reported/i.test(r.stderr) ? { status: 'NO_CI', failing: '-' } : indeterminate;
+  }
+  const rows = parseJsonOrNull(r.stdout.toString('utf8'));
+  if (!Array.isArray(rows) || rows.length > READINESS_MAX_CHECKS) return indeterminate;
+  if (rows.length === 0) return { status: 'NO_CI', failing: '-' };
+  const checks = [];
+  for (const row of rows) {
+    const x = obj(row);
+    if (typeof x.name !== 'string' || typeof x.bucket !== 'string') return indeterminate;
+    checks.push({ name: x.name, bucket: x.bucket });
+  }
+  const c = CW.classifyChecks(checks);
+  return { status: c.status, failing: CW.formatNames(c.failing) };
+}
+
+/**
+ * The test-plan evidence at the head, by `verify --approval`: known only on exit 0
+ * with one EVIDENCE line for this PR (the old step 4's rule).
+ *
+ * @param {Io} io
+ * @param {number} pr
+ * @param {MainDeps} deps
+ * @returns {any | null}  the parsed EVIDENCE fields, or null when the evidence is unknown
+ */
+function readEvidence(io, pr, deps) {
+  const verified = runVerify(io, {
+    kind: 'verify', pr, publication: '', evidence: null, state: null,
+    blockOut: null, commentOut: null, staleOut: null, approval: true,
+  }, deps);
+  if (verified.code !== EXIT_CODES.OK) return null;
+  const parsed = PE.parseEvidenceLine(stripOneNewline(verified.stdout));
+  return parsed.ok && parsed.value.pr === pr ? parsed.value : null;
+}
+
+/**
+ * @param {string} require  `true`, `false` or `unrecognised`
+ * @param {EvidenceFacts | null} evidence
+ * @returns {string}
+ */
+function approvalText(require, evidence) {
+  if (require === 'false') return 'not required';
+  return evidence !== null && evidence.approval === 'yes' ? 'yes' : 'no';
+}
+
+/**
+ * A readiness answer that could not be reached: a DEGRADED block (exit 2) whose Details
+ * say `unavailable` for what was never read.
+ *
+ * @param {number} pr
+ * @param {string} reason
+ * @param {Partial<ReadinessBlock>} known
+ * @returns {Outcome}
+ */
+function readinessDegraded(pr, reason, known) {
+  return {
+    code: EXIT_CODES.INPUT_UNUSABLE,
+    stdout: renderReadinessBlock({
+      pr, status: 'DEGRADED', reason,
+      threads: known.threads || 'unavailable', decision: known.decision || 'unavailable',
+      ci: known.ci || 'unavailable', plan: 'unavailable', approval: known.approval || 'no',
+    }),
+  };
+}
+
+/**
+ * The whole check-merge-readiness operation. Report-only: it reads, classifies and
+ * prints; it never acts on the PR. A PR it cannot read, or a review decision or thread
+ * count it cannot establish, is DEGRADED; an unreadable CI status or unknown evidence
+ * is an input to the ladder, which never lets either reach READY.
+ *
+ * @param {Io} io
+ * @param {Extract<ParsedArgs, { kind: 'readiness' }>} args
+ * @param {MainDeps} deps
+ * @returns {Outcome}
+ */
+function runReadiness(io, args, deps) {
+  const unreadApproval = approvalText(args.requireNonAuthor, null);
+  const decision = readDecision(io, args.pr);
+  if (!decision.ok) return readinessDegraded(args.pr, decision.reason, { approval: unreadApproval });
+  const decisionText = decision.value === null ? 'none' : decision.value === 'UNRECOGNISED' ? 'unrecognised' : decision.value;
+  const threads = readThreads(io, args.pr);
+  if (!threads.ok) {
+    return readinessDegraded(args.pr, threads.reason, { decision: decisionText, approval: unreadApproval });
+  }
+  const ci = readCi(io, args.pr);
+  const fields = readEvidence(io, args.pr, deps);
+  /** @type {EvidenceFacts | null} */
+  const evidence = fields === null ? null : {
+    total: fields.total,
+    verifiedCi: fields.counts['VERIFIED-CI'],
+    attestedLocal: fields.counts['ATTESTED-LOCAL'],
+    testPlanException: fields.exceptions.includes('test-plan'),
+    approval: fields.approval,
+  };
+  const verdict = readinessVerdict({
+    unresolved: threads.value.unresolved,
+    approximate: threads.value.approximate,
+    decision: decision.value,
+    ci: ci.status,
+    failing: ci.failing,
+    evidence,
+    require: args.requireNonAuthor,
+  });
+  const block = {
+    pr: args.pr,
+    status: verdict.status,
+    reason: verdict.reason,
+    threads: threads.value.approximate
+      ? '>' + threads.value.unresolved + ' (count approximate — PR has more than 100 threads)'
+      : String(threads.value.unresolved),
+    decision: decisionText,
+    ci: ci.status,
+    plan: evidence === null ? 'unavailable'
+      : (evidence.verifiedCi + evidence.attestedLocal) + '/' + evidence.total
+        + ' (VERIFIED-CI ' + evidence.verifiedCi + ', ATTESTED-LOCAL ' + evidence.attestedLocal + ')',
+    approval: approvalText(args.requireNonAuthor, evidence),
+  };
+  return { code: EXIT_CODES.OK, stdout: renderReadinessBlock(block) };
+}
+
+// ---------------------------------------------------------------------------
 // main — returns {code, stdout}; never calls process.exit
 // ---------------------------------------------------------------------------
 
@@ -1736,10 +2427,17 @@ function main(argv, deps) {
     else if (args.kind === 'render') outcome = runRender(io, args);
     else if (args.kind === 'verify') outcome = runVerify(io, args, d);
     else if (args.kind === 'splice') outcome = runSplice(io, args);
+    else if (args.kind === 'publish') outcome = runPublish(io, args, d);
+    else if (args.kind === 'readiness') outcome = runReadiness(io, args, d);
     else outcome = runReadback(io, args);
   } catch (err) {
-    // An injected exec that throws, or a broken invariant (rev): no verdict.
-    outcome = refuse(io, EXIT_CODES.REMOTE_FAILURE, 'internal error (' + errorLabel(err) + ')');
+    // An injected exec that throws, or a broken invariant (rev): no verdict. The two
+    // scripted operations still answer in their own DEGRADED form, since a caller
+    // prints whatever they print.
+    const label = 'internal error (' + errorLabel(err) + ')';
+    if (args.kind === 'publish') outcome = evidenceUnavailable(io, label);
+    else if (args.kind === 'readiness') outcome = readinessDegraded(args.pr, 'internal error', {});
+    else outcome = refuse(io, EXIT_CODES.REMOTE_FAILURE, label);
   }
   if (io.notes.size > 0) io.stderr('verify-evidence: notes: ' + [...io.notes].sort().join(',') + '\n');
   return outcome;
@@ -1772,6 +2470,18 @@ function settleOutcome(outcome) {
   if (!Object.values(EXIT_CODES).includes(o.code)) return failed;
   if (o.code === EXIT_CODES.USAGE || o.stdout === '') return { code: o.code, stdout: '' };
   if (!o.stdout.endsWith('\n')) return failed;
+  const pass = { code: o.code, stdout: o.stdout };
+  // The two scripted operations (D-OP-BLOCK-GATE): a block prints only when it parses
+  // back to exactly itself.
+  if (o.stdout.startsWith('## PR Evidence\n')) {
+    return o.code === EXIT_CODES.OK && parsePublishBlock(o.stdout) !== null ? pass : failed;
+  }
+  if (o.stdout === EVIDENCE_UNAVAILABLE_LINE + '\n') return o.code === EXIT_CODES.INPUT_UNUSABLE ? pass : failed;
+  if (o.stdout.startsWith('## Merge Readiness\n')) {
+    const block = parseReadinessBlock(o.stdout);
+    if (block === null) return failed;
+    return o.code === (block.status === 'DEGRADED' ? EXIT_CODES.INPUT_UNUSABLE : EXIT_CODES.OK) ? pass : failed;
+  }
   const text = o.stdout.slice(0, -1);
   const splice = SPLICE_LINE_RE.exec(text);
   if (splice !== null && splice.groups !== undefined) {
@@ -1819,4 +2529,11 @@ module.exports = Object.freeze({
   PR_FIELDS,
   main,
   settleOutcome,
+  BODY_STATUSES,
+  COMMENT_STATUSES,
+  readinessVerdict,
+  renderPublishBlock,
+  parsePublishBlock,
+  renderReadinessBlock,
+  parseReadinessBlock,
 });

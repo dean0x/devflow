@@ -5,7 +5,7 @@ output-dir: dist/commands
 @import { knowledge_load, knowledge_writeback } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
 @import { docs_root } from "./_partials/_docs_root.mds"
-@import { evidence_policy, evidence_exception } from "./_partials/_evidence_policy.mds"
+@import { evidence_policy } from "./_partials/_evidence_policy.mds"
 @import { issue_ref_grammar, issue_capture_contract } from "./_partials/_tracker.mds"
 @import { test_plan_line } from "./_partials/_plan_contract.mds"
 @import { publication_gate } from "./_partials/_publication.mds"
@@ -46,15 +46,7 @@ $ARGUMENTS
 
 ### Re-validation Continuation Path
 
-When the user explicitly asks to re-validate, re-check, or re-run quality gates after making their own changes:
-
-1. **Branch safety check**: If on a protected branch (main, master, develop, etc.), run Phase 1 to create/switch to a work branch. If already on a work branch, skip Phase 1.
-2. **Skip Phase 2** — no Code agent needed, user already made changes.
-3. **Detect FILES_CHANGED**: `git diff --name-only {base_branch}...HEAD`
-4. **Run Phases 3-8** — Simplify, Self-Review, Alignment, the one full Validate, QA Testing and the conditional Re-Validate, on the detected changes.
-5. **Proceed to Phase 9** (Open PR), **Phase 11** (Evidence) and **Phase 12** (Report).
-
-If the user prompt does NOT match re-validation, proceed with the full pipeline below.
+When the user explicitly asks to re-validate, re-check, or re-run quality gates after making their own changes, resolve `${CLAUDE_CONFIG_DIR:-$HOME/.claude}` in Bash, Read `<that directory>/skills/devflow:agent-references/references/commands/implement-revalidate.md` with the Read tool and follow it. Otherwise proceed with the full pipeline below.
 
 ### Phase 1: Setup
 
@@ -135,13 +127,7 @@ visible, a silently discarded request is not.
 
 {{issue_capture_contract()}}
 
-**Ticket link, only when `ISSUE_REQUIRED` is `true`:** when the capture above holds no `ISSUE_PR_LINK` (absent, or `(none)`), ask with AskUserQuestion before any Code spawn — "No tracker issue is linked to this task. Record a self-attested exception, or stop?" — offering exactly these two options:
-- **Record an exception** — the user gives the reason as free text. Render it with the grammar below, as kind `ticket-link`; when the rendered reason is empty, ask for it once more, and stop as below if it is empty again.
-- **Stop** — report `BLOCKED (no ticket link)`, name the branch setup-task created (`TASK_ID`) and `BASE_BRANCH` so it can be reused or removed, and give the remedy: create or link the tracker issue and re-run `/implement` with its reference, or — for a team that does not want ticket links — commit `.devflow/project.json` as `{"version":1,"evidence":"standard"}` on the default branch; a machine with compliance enabled still resolves `required` whatever that file says. Spawn nothing further.
-
-{{evidence_exception()}}
-
-**Record the exception at once**, before any Code spawn: write the rendered section as the `## Evidence Exceptions` section of `{worktree}/.devflow/docs/handoff-{branch_slug}.md`, creating the file if absent, and set `PR_EXCEPTIONS` to that section. The file is its one home until the PR exists: every later write to the file keeps the section byte-identical, the Phase 9 Git spawn passes it verbatim as `PR_EXCEPTIONS`, and the file is deleted only once the PR exists — after Phase 9, under every strategy. With no exception recorded, `PR_EXCEPTIONS` is `(none)`.
+**Ticket link, only when `ISSUE_REQUIRED` is `true`:** when the capture above holds no `ISSUE_PR_LINK` (absent, or `(none)`), resolve `${CLAUDE_CONFIG_DIR:-$HOME/.claude}` in Bash, Read `<that directory>/skills/devflow:agent-references/references/commands/implement-evidence-asks.md` with the Read tool (once per run), then run its ticket link ask and **Record the exception at once** as it directs, before any Code spawn. `PR_EXCEPTIONS` is `(none)` until an exception is recorded.
 
 **Test plan.** Before any Code spawn, give the task a test plan in the evidence file `{worktree}/.devflow/docs/evidence-{branch_slug}.md` (`EVIDENCE_FILE`) — unlike the handoff file, it stays after the PR exists. It holds up to three sections, in this order and nothing else: `## Test Plan`; `## Evidence Exceptions`, a byte copy of `PR_EXCEPTIONS` present only while that is not `(none)`; and `## Claims`, always last, so every claim is appended at the end of the file. Create the file if absent; if it exists, replace its `## Test Plan` and `## Evidence Exceptions` sections and keep `## Claims` byte-identical.
 
@@ -157,9 +143,7 @@ node "$HOME/.devflow/scripts/verify-evidence.cjs" check tp "{worktree}/.devflow/
 
 `exit=0` passes. On any other result, rewrite the section once — the script names the failing line and its code on stderr — and check again. Still failing, or no line to write, means the test plan is **missing**: drop the `## Test Plan` section from the file.
 
-**Missing test plan, only when `EVIDENCE_POLICY` is `required`:** when the check above leaves the test plan missing, ask with AskUserQuestion before any Code spawn — "No test plan could be written for this task. Record a self-attested exception, or stop?" — offering exactly these two options:
-- **Record an exception** — the user gives the reason as free text. Render it with the exception grammar above, as kind `test-plan`; when the rendered reason is empty, ask for it once more, and stop as below if it is empty again. Add the rendered line to the `## Evidence Exceptions` section of `{worktree}/.devflow/docs/handoff-{branch_slug}.md` — after any `ticket-link` line, creating the section and the file when absent — and set `PR_EXCEPTIONS` to that section, under the same rules as the record above.
-- **Stop** — report `BLOCKED (no test plan)`, name `TASK_ID` and `BASE_BRANCH` so the branch can be reused or removed, and give the remedy: state the acceptance criteria in the task, the issue or a `/plan` document (its `## Test Plan` section is copied) and re-run `/implement`, or — for a team that does not want test plans enforced — commit `.devflow/project.json` as `{"version":1,"evidence":"standard"}` on the default branch; a machine with compliance enabled still resolves `required` whatever that file says. Spawn nothing further.
+**Missing test plan, only when `EVIDENCE_POLICY` is `required`:** when the check above leaves the test plan missing, Read the evidence-asks reference as in the ticket link step (when this run has not) and run its missing test plan ask before any Code spawn.
 
 When `EVIDENCE_POLICY` is `standard`, a missing test plan is never asked about: carry `Test plan: missing` to the Phase 12 report.
 
@@ -176,7 +160,7 @@ node "$HOME/.devflow/scripts/verify-evidence.cjs" render --plan "{worktree}/.dev
 {{settings.settings_resolve()}}
 
 {{publication_gate()}}
-Phase 11 passes the resolved value to `update-pr-evidence`, which decides what each value means for the evidence comment. From the same line: {{compliance.compliance_frameworks()}}
+Phase 11 passes the resolved value to the evidence script (`publish`), which decides what each value means for the evidence comment. From the same line: {{compliance.compliance_frameworks()}}
 
 {{compliance.compliance_inject()}}
 
@@ -553,25 +537,21 @@ git push origin HEAD; echo "exit=$?"
 
 Run once, after Phase 10, under every strategy: the PR exists by now, opened in Phase 9. The re-validation path has no CI gate and runs this phase straight after Phase 9. Skip it only when Phase 9 stopped the run. A `ci` TP reads `INDETERMINATE` only when the CI gate could not tell or did not run.
 
-**Push first.** Every claim is keyed to the HEAD an agent reported, and a Scrutinize or fix agent may have committed without pushing; a claim whose SHA is not in the PR reads `UNVERIFIED`. So push the branch once before the spawn — never force, and no retry:
+**Push first.** Every claim is keyed to the HEAD an agent reported, and a Scrutinize or fix agent may have committed without pushing; a claim whose SHA is not in the PR reads `UNVERIFIED`. So push the branch once before the script — never force, and no retry:
 
 ```bash
 git push origin HEAD; echo "exit=$?"
 ```
 
-`exit=0` continues to the spawn. Any other result, a rejected non-fast-forward push included, does not block: record `TRACEABILITY: DEGRADED (evidence push failed)` for the Phase 12 report and spawn anyway.
+`exit=0` continues to the script. Any other result, a rejected non-fast-forward push included, does not block: record `TRACEABILITY: DEGRADED (evidence push failed)` for the Phase 12 report and run the script anyway.
 
-```
-Agent(subagent_type="Git"):
-"OPERATION: update-pr-evidence
-PR_NUMBER: {PR_NUMBER}
-EVIDENCE_FILE: .devflow/docs/evidence-{branch_slug}.md
-REVIEW_PUBLICATION: {REVIEW_PUBLICATION resolved in Phase 1, or auto}
-WORKTREE_PATH: {worktree}
-Update the PR's test-plan block and post its evidence comment."
+**Then refresh, inline.** The refresh is plumbing, so no Git agent runs it: `verify-evidence.cjs publish` is the whole `update-pr-evidence` operation — verify, the scrubbed block edit with its read-back, the scrubbed evidence comment — in one call. Use the Bash tool with `timeout: 180000`:
+
+```bash
+cd "{worktree}" && node "$HOME/.devflow/scripts/verify-evidence.cjs" publish --pr {PR_NUMBER} --evidence ".devflow/docs/evidence-{branch_slug}.md" --publication {REVIEW_PUBLICATION resolved in Phase 1, or auto}; echo "exit=$?"
 ```
 
-Omit the `EVIDENCE_FILE` line when that file does not exist. Capture the op's `## PR Evidence` block — its `EVIDENCE` line and its `**Body**:` / `**Comment**:` line — as `EVIDENCE_RESULT`, or its `TRACEABILITY: DEGRADED ({reason})` line. It never blocks: whatever it returns, continue to Phase 12.
+Drop the `--evidence` pair when that file does not exist or its path does not match `^[A-Za-z0-9._/-]{1,255}$`. `{PR_NUMBER}` is digits only, and the publication value is `auto`, `full`, `off` or `stub`. Capture its stdout as `EVIDENCE_RESULT`: the `## PR Evidence` block — its `EVIDENCE` line and its `**Body**:` / `**Comment**:` line — and any `TRACEABILITY: DEGRADED ({reason})` lines after it (exit 0), or the one line `TRACEABILITY: DEGRADED (evidence unavailable)` (exit 2). Empty stdout or any other exit is `TRACEABILITY: DEGRADED (evidence unavailable)`. It never blocks: whatever it returns, continue to Phase 12.
 
 ### Phase 12: Report
 
@@ -581,7 +561,7 @@ Display completion summary with phase status, PR info, and next steps.
 
 Show the test plan's evidence from Phase 11: `Test plan: {VERIFIED-CI + ATTESTED-LOCAL}/{total} verified (VERIFIED-CI {n}, ATTESTED-LOCAL {n})`, read from the `EVIDENCE` line and never inferred, then its `**Body**:` / `**Comment**:` line verbatim. Without an `EVIDENCE` line, show `Test plan: evidence unavailable`; with no test plan, `Test plan: missing`.
 
-If any Git agent output emitted `TRACEABILITY: DEGRADED ({reason})` lines during the run, or Phase 10's push or Phase 11's push recorded one, surface them verbatim in the report under a `### Traceability` subsection so the user can act on them.
+If any Git agent output emitted `TRACEABILITY: DEGRADED ({reason})` lines during the run, or Phase 10's push, Phase 11's push or Phase 11's script output carried one, surface them verbatim in the report under a `### Traceability` subsection so the user can act on them.
 
 If Phase 9 listed uncommitted files, show them as a `### Uncommitted files` subsection: the user commits them or discards them.
 
@@ -598,68 +578,31 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 │  └─ Branch safety → skip Phase 2 → detect FILES_CHANGED → Phases 3-8 → Phase 9, 11, 12
 │
 ├─ Phase 1: Setup
-│  └─ Plan document parsing (if .md path provided) - extracts execution plan, strategy, frontmatter issue
-│  └─ Git agent (operation: setup-task) - creates feature branch, fetches issue
-│  └─ Ticket-link ask (no linked ticket, issue required) - record a self-attested exception or stop
-│  └─ Test plan (evidence file) - copy or author TP lines, check them, render the PR block; missing under a required policy: record a test-plan exception or stop
-│
 ├─ Phase 2: Implement (3-strategy framework)
-│  ├─ SINGLE_CODE_AGENT (80%): One Code agent, full plan
-│  ├─ SEQUENTIAL_CODE_AGENTS (15%): N Code agents with handoff summaries
-│  └─ PARALLEL_CODE_AGENTS (5%): N Code agents in single message (rare)
-│
 ├─ Phase 3: Simplify
-│  └─ Simplify agent (refines code clarity and consistency)
-│
 ├─ Phase 4: Self-Review
-│  └─ Scrutinize agent (quality gate, fixes P0/P1; status PASS | FIXED | BLOCKED)
-│
 ├─ Phase 5: Alignment Check
-│  └─ Evaluate agent (validates alignment - reports only, no fixes)
-│  └─ If MISALIGNED: Code-fix agent loop (max 2 iterations) → re-check alignment
-│
 ├─ Phase 6: Validate (the one full-suite slot)
-│  └─ Validate agent (build, typecheck, lint, test over the branch diff)
-│  └─ If FAIL: Code-fix agent loop (max 2 retries) → re-validate at the new HEAD
-│  └─ If PASS: record VALIDATED_HEAD, gate:validate claim → evidence file
-│
 ├─ Phase 7: QA Testing
-│  └─ Test agent (scenario-based acceptance tests, TEST_PLAN) → one claim per TP row → evidence file
-│  └─ If FAIL: Code-fix agent loop (max 2 retries) → re-test
-│
 ├─ Phase 8: Re-Validate (only if a qa-fix committed)
-│  └─ Validate agent (changed-only over VALIDATED_HEAD..HEAD) → gate:validate claim
-│
 ├─ Phase 9: Open PR (every strategy, outside the strategy branches)
-│  └─ Git agent (operation: ensure-pr-ready) - commits nothing (COMMIT_UNCOMMITTED: false), pushes, opens the PR with the pasted link line, exceptions and test-plan block, D11-scrubbed body
-│
 ├─ Phase 10: CI Status Gate (every strategy)
-│  └─ Push the branch, then ci-wait.cjs (inline, one wait ≤ 570 s) → Code-fix agent on FAILING (3 waits + 2 fixes)
-│
 ├─ Phase 11: Evidence (every strategy, once the PR exists)
-│  └─ Push the branch (never force; a failure is DEGRADED, not a stop)
-│  └─ Git agent (update-pr-evidence) - test-plan block + evidence comment; never blocks
-│
 ├─ Phase 12: Report
 │
 └─ Feature Knowledge Write-Back (Conditional)
-   └─ Knowledge agent (if documented area changed AND knowledge enabled)
 ```
 
 ## Principles
 
-1. **Orchestration only** - Command spawns agents, never does work itself; the inline calls are the bounded plumbing the charter allows: the Phase 10 and Phase 11 pushes, the Phase 10 ci-wait call and the evidence script checks
-2. **Plan-first** - Plan documents from `/plan` skip exploration/planning overhead entirely
-3. **Coherence-first** - Single Code agent produces more consistent code (default ~80% of tasks)
-4. **Agent ownership** - Each agent owns its output completely
-5. **Clean handoffs** - Each phase passes structured data to next; sequential Code agents pass implementation summaries
-6. **Honest reporting** - Display agent outputs directly
-7. **Simplification pass** - Code refined for clarity before PR
-8. **Strict delegation** - Never perform agent work in main session. "Spawn X" means call Agent tool with X, not do X's work yourself
-9. **Validate agent owns validation** - Never run `npm test`, `npm run build`, or similar in main session; always delegate to Validate agent
-10. **Code-fix agent owns fixes** - Never implement fixes in main session; spawn Code-fix agent for validation failures and alignment fixes
-11. **Loop limits** - Max 2 validation retries, max 2 alignment fix iterations, max 2 QA retries before escalating to user; the CI gate allows at most 3 waits and 2 fixes
-12. **CI awareness** - CI status is checked before merge under every strategy, once Phase 9 has opened the PR; test-plan evidence (Phase 11) is recorded under every strategy once the PR exists
+1. **Orchestration only** - Command spawns agents, never does work itself; the inline calls are the bounded plumbing the charter allows: the Phase 10 and Phase 11 pushes, the Phase 10 ci-wait call, the Phase 11 evidence publish call and the evidence script checks
+2. **Agent ownership** - Each agent owns its output completely
+3. **Honest reporting** - Display agent outputs directly
+4. **Strict delegation** - Never perform agent work in main session. "Spawn X" means call Agent tool with X, not do X's work yourself
+5. **Validate agent owns validation** - Never run `npm test`, `npm run build`, or similar in main session; always delegate to Validate agent
+6. **Code-fix agent owns fixes** - Never implement fixes in main session; spawn Code-fix agent for validation failures and alignment fixes
+7. **Loop limits** - Max 2 validation retries, max 2 alignment fix iterations, max 2 QA retries before escalating to user; the CI gate allows at most 3 waits and 2 fixes
+8. **CI awareness** - CI status is checked before merge under every strategy, once Phase 9 has opened the PR; test-plan evidence (Phase 11) is recorded under every strategy once the PR exists
 
 ## Error Handling
 

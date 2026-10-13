@@ -3,6 +3,15 @@ imports nothing from `_settings.mds`. Write-back Step 1 takes `KNOWLEDGE` from t
 settings line the host's settings block resolved above, and keeps the
 `KNOWLEDGE=off` skip inside its own step.
 
+D-CMD-CONDENSE (#456): a cut here lands in every host, so each one names the line
+that keeps its text in the same context. Load's closing summary restated Steps 1-4,
+which each name their read, and Step 2's closing sentence restated Step 3's fallback
+fields. The Knowledge spawn names what only the caller knows (root, slug, directories,
+files, the two paths, the index line format and its caps); how the agent writes the
+index, writes the two files directly and commits them is held by its own body
+(knowledge.mds steps 6-8, Direct Write Protocol, Commit Protocol), so the spawn no
+longer restates it.
+
 @define knowledge_load():
 ### Load Feature Knowledge
 
@@ -26,7 +35,7 @@ If `index.md` exists and contains at least one entry line, use it for relevance 
 
 **Step 2 — Fallback: glob frontmatter (if `index.md` is absent or empty):**
 
-Glob `{worktree}/.devflow/features/*/KNOWLEDGE.md`. For each file found, read only its YAML frontmatter block (between the opening and closing `---` delimiters). The frontmatter fields `name`, `description`, and `directories` are the authoritative relevance surface — `index.md` is only a cache.
+Glob `{worktree}/.devflow/features/*/KNOWLEDGE.md`. For each file found, read only its YAML frontmatter block (between the opening and closing `---` delimiters).
 
 **Step 3 — Pick relevant KBs:**
 
@@ -57,7 +66,7 @@ Headings: L5 Rules · L40 Overview · L62 Anti-Patterns · L118 Key Files
 
 A KB with no Rules section labels its entries `Rules ({section name}):` and gives them no ID. `FEATURE_KNOWLEDGE` is these blocks; `FEATURE_KNOWLEDGE_RULES` is the same blocks without the `Headings:` line. Both come from this one selection, and each spawn names the variable its recipient takes. If no KBs exist, no KBs are relevant, or `.devflow/features/` is absent, set both to `(none)`.
 
-**One git call, then direct reads — no `.cjs` script.** After resolving `{worktree}`, this step is 1 index read (or N frontmatter reads on fallback), plus one heading listing and one Rules read per selected KB, bounded by KB count.
+**One git call, then direct reads — no `.cjs` script.**
 @end
 
 @export knowledge_load
@@ -96,22 +105,18 @@ FEATURE_NAME: {human-readable name}
 DIRECTORIES: {list of primary directories touched by this workflow}
 FILES_CHANGED: {list of files changed}
 <!-- learning:on -->
-DECISIONS_CONTEXT: {DECISIONS_CONTEXT if available, else (none)}
+DECISIONS_CONTEXT: {the slice for these directories, else (none)}
 <!-- learning:end -->
 
 Write the knowledge base to:
   {worktree}/.devflow/features/{slug}/KNOWLEDGE.md
 
-Then update the index cache by performing a read-modify-write on:
+Then update the index cache:
   {worktree}/.devflow/features/index.md
 
 Index line format: `- **{slug}** — {areas} — {Use-when description}` — at most 300 characters, the description at most 220; reword a longer one, never cut it.
 
-If the line for this slug already exists in index.md, replace it. If it does not exist, append it. If index.md does not exist, create it with just this line.
-
-The frontmatter in KNOWLEDGE.md is the source of truth — index.md is only a cache. Write the two files directly — no intermediate result JSON files, no external scripts.
-
-After writing, commit the two files to the current worktree branch yourself by running git via your Bash tool (do not use a script). Stage ONLY .devflow/features/index.md and .devflow/features/{slug}/KNOWLEDGE.md, then commit just those paths with a docs(knowledge): message. Do NOT push, do NOT force, do NOT stage anything else. Follow your Commit Protocol — it is non-blocking, so if any git step fails, report KB_COMMIT and finish normally."
+Then commit the two files as your Commit Protocol directs."
 ```
 
 **Step 4 — Surface an uncommitted knowledge base:**

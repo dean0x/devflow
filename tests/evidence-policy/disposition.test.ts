@@ -202,7 +202,6 @@ const DISPOSITION: readonly DispositionRow[] = [
       { file: 'commands/plan.md', anchor: '**Single-issue**: Spawn 4 Design agents', phrase: '5 when COMPLIANCE_ACTIVE' },
       { file: 'commands/plan.md', anchor: '| compliance | Regulatory gaps', phrase: 'only when COMPLIANCE_ACTIVE' },
       { file: 'commands/plan.md', anchor: '**Multi-issue**: Spawn 6 Design agents', phrase: '7 when COMPLIANCE_ACTIVE' },
-      { file: 'commands/plan.md', anchor: 'Design agent: compliance (', phrase: 'only when COMPLIANCE_ACTIVE' },
     ],
   },
   {
@@ -230,7 +229,8 @@ const DISPOSITION: readonly DispositionRow[] = [
     ],
   },
   {
-    // Caller side (#362): /resolve runs Phase 9c only under the input. Op side
+    // Caller side (#362): /resolve runs Phase 9c only under the input, and (#455) passes it to the
+    // readiness script as the literal flag `--require-non-author-approval true`. Op side
     // (#363 PR4): check-merge-readiness takes the input and gates the non-author
     // approval at its own arm (a gate is obeyed reliably only where its step states
     // it) — READY needs a trusted non-author's approval unless the input is `false`.
@@ -241,7 +241,7 @@ const DISPOSITION: readonly DispositionRow[] = [
     off: 'skip; report SKIPPED',
     sites: [
       { file: 'commands/resolve.md', after: '### Phase 9c:', anchor: 'Run this phase only when', phrase: gate('REQUIRE_NON_AUTHOR_APPROVAL') },
-      { file: 'commands/resolve.md', after: '### Phase 9c:', anchor: 'REQUIRE_NON_AUTHOR_APPROVAL: {', phrase: 'REQUIRE_NON_AUTHOR_APPROVAL: {REQUIRE_NON_AUTHOR_APPROVAL}' },
+      { file: 'commands/resolve.md', after: '### Phase 9c:', anchor: 'Pass `--require-non-author-approval true`:', phrase: '`REQUIRE_NON_AUTHOR_APPROVAL` is `true` here' },
       { file: 'commands/resolve.md', after: '## Edge Cases', anchor: '| `REQUIRE_NON_AUTHOR_APPROVAL` is `false` |', phrase: '`REQUIRE_NON_AUTHOR_APPROVAL` is `false`' },
       { file: prHostRef('check-merge-readiness'), after: '## Operation: check-merge-readiness', anchor: '**Input:**', phrase: '`REQUIRE_NON_AUTHOR_APPROVAL`' },
       { file: 'skills/git/references/pr/check-merge-readiness.md', anchor: '- `NOT_READY (no non-author approval)` —', phrase: gate('REQUIRE_NON_AUTHOR_APPROVAL') },
@@ -593,8 +593,9 @@ describe('evidence-policy disposition: the table and the tree agree, both ways (
  * Row 13's caller side, held beyond its sites: the `off` → `stub` turn is stated
  * ONCE — in the publication partial, expanded into its four hosts — and the two
  * review hosts can report the label it produces; /implement (#363) and
- * /dynamic-build's wave PR (#376) hand the value to update-pr-evidence, whose
- * comment has no publication label. A host that restated the rule would be a
+ * /dynamic-build's wave PR (#376) hand the value to the update-pr-evidence
+ * operation — since #455 as `verify-evidence.cjs publish --publication …`, run
+ * inline — whose comment has no publication label. A host that restated the rule would be a
  * second authority free to drift from the partial; an Edge Cases row may describe
  * the outcome, but never carries the rule sentence itself.
  *
@@ -642,23 +643,33 @@ describe('row 13 caller side: the publication stub is one rule, reported by the 
     expect(REVIEW_HOSTS.every(h => (PUBLICATION_HOSTS as readonly string[]).includes(h))).toBe(true)
   })
 
-  it('/implement passes the resolved value to update-pr-evidence, its one consumer', () => {
+  /** The one line of a host that hands the resolved value to the publish script, and the bash fence it sits in. */
+  function publishCall(content: string): { line: string; fence: string } {
+    const lines = content.split('\n').filter(l => /\bpublish --pr \{[A-Za-z_]+\}.* --publication \{REVIEW_PUBLICATION /.test(l))
+    expect(lines, 'exactly one publish call passes the publication value').toHaveLength(1)
+    const at = content.indexOf(lines[0])
+    const open = content.lastIndexOf('```bash', at)
+    return { line: lines[0], fence: content.slice(open, content.indexOf('```', at) + 3) }
+  }
+
+  it('/implement passes the resolved value to the publish script, its one consumer', () => {
     const implement = corpus.find(f => f.file === 'commands/implement.md')!.content
-    const keyLines = implement.split('\n').filter(l => /^\s*"?REVIEW_PUBLICATION: /.test(l))
-    expect(keyLines).toEqual(['REVIEW_PUBLICATION: {REVIEW_PUBLICATION resolved in Phase 1, or auto}'])
-    const spawn = implement.slice(implement.lastIndexOf('Agent(subagent_type="Git")', implement.indexOf(keyLines[0])))
-    expect(spawn.slice(0, spawn.indexOf('```'))).toContain('OPERATION: update-pr-evidence')
+    const call = publishCall(implement)
+    expect(call.line).toContain('--publication {REVIEW_PUBLICATION resolved in Phase 1, or auto}')
+    expect(call.fence).toContain('verify-evidence.cjs" publish')
+    expect(implement.split('\n').filter(l => /^\s*"?REVIEW_PUBLICATION: /.test(l)), 'no spawn block carries the key any more').toEqual([])
+    expect(implement).not.toContain('OPERATION: update-pr-evidence')
   })
 
-  it('/dynamic-build step 7 passes the resolved value to update-pr-evidence, its one consumer there', () => {
+  it('/dynamic-build step 7 passes the resolved value to the publish script, its one consumer there', () => {
     const build = corpus.find(f => f.file === 'commands/dynamic-build.md')!.content
-    const keyLines = build.split('\n').filter(l => /^\s*"?REVIEW_PUBLICATION: /.test(l))
-    expect(keyLines).toEqual(['REVIEW_PUBLICATION: {REVIEW_PUBLICATION resolved above, or auto}'])
-    const spawn = build.slice(build.lastIndexOf('Agent(subagent_type="Git")', build.indexOf(keyLines[0])))
-    expect(spawn.slice(0, spawn.indexOf('```'))).toContain('OPERATION: update-pr-evidence')
-    // Resolved before the spawn that reads it, in the same step.
+    const call = publishCall(build)
+    expect(call.line).toContain('--publication {REVIEW_PUBLICATION resolved above, or auto}')
+    expect(call.fence).toContain('verify-evidence.cjs" publish')
+    expect(build).not.toContain('OPERATION: update-pr-evidence')
+    // Resolved before the call that reads it, in the same step.
     expect(build.indexOf(PUBLICATION_STUB_RULE)).toBeGreaterThan(build.indexOf('7. **Wave PR evidence**'))
-    expect(build.indexOf(PUBLICATION_STUB_RULE)).toBeLessThan(build.indexOf(keyLines[0]))
+    expect(build.indexOf(PUBLICATION_STUB_RULE)).toBeLessThan(build.indexOf(call.line))
   })
 
   it('known-bad probe: a fifth host restating the rule is reported', () => {

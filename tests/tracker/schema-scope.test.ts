@@ -971,6 +971,10 @@ const PR_HOST_REASONS: readonly string[] = [
   'evidence unavailable',
   'concurrent edit',
   'body read-back mismatch',
+  // #455: check-merge-readiness runs as verify-evidence.cjs readiness. The script prints
+  // its own DEGRADED reasons; this one is the operation's own, for a run that returned
+  // no block at all (an empty stdout, or an exit the script does not use).
+  'readiness unavailable',
 ];
 
 /**

@@ -5,7 +5,7 @@ description: "Use when editing the orchestrator charter, the preamble or session
 category: architecture
 directories: [src/assets/scripts/hooks, src/assets/scripts/hooks/assets, src/assets/scripts/claude-md-audit.cjs, src/core/claude-md-audit.ts, src/core/flags.ts, src/cli/commands/ambient.ts, src/core/plugins.ts]
 created: 2026-07-04
-updated: 2026-10-12
+updated: 2026-10-13
 ---
 
 # Ambient Orchestrator (session-start hooks and charter)
@@ -30,6 +30,7 @@ updated: 2026-10-12
 - **KB-AP-16** A plan handoff sends the plan once, with no skill argument; with empty `COMMAND_INPUT` the orchestrator writes the one-line `TASK_DESCRIPTION` itself.
 - **KB-AP-17** A main thread loads a companion skill only at the step that uses it, never up front: `/release` loads `devflow:git` before its release commit, `/plan` and `/research` load `devflow:docs-framework` at their doc-naming step, `/code-review` and `/resolve` load `devflow:worktree-support` only when more than one worktree is listed; `requires:` names only skills actually read.
 - **KB-AP-18** UserPromptSubmit may not fire for the auto-injected handoff prompt; the charter's fallback bullet covers it.
+- **KB-AP-19** Never `@`-import `docs/reference/architecture.md` from this repo's CLAUDE.md: an import loads the file into every thread at launch and the audit flags it; keep the plain-path pointer (`tests/docs/claude-md-tracker-section.test.ts` fails on the import).
 - **KB-INV-1** Both ambient hooks are git-gated and share the `DEVFLOW_BG_UPDATER` guard, a bounded pure-bash git check and fail-open `exit 0`.
 - **KB-INV-2** Hook output is byte-fixed; the handoff directive equals `HANDOFF_TEMPLATE` byte for byte, with no dollar sign or unescaped backtick.
 - **KB-INV-3** The prefix `Implement the following plan:` stays literal in both `preamble` and the charter; change both together.
@@ -50,7 +51,7 @@ updated: 2026-10-12
 
 Ambient mode turns the main Claude Code session into an orchestrator that coordinates sub-agents instead of doing work directly, with one bounded inline exception. Two hooks sit under one `devflow ambient --enable/--disable` toggle: `session-start-orchestrator` (SessionStart) injects a static charter as `additionalContext`, and `preamble` (UserPromptSubmit) reinforces the contract per prompt and handles the plan-handoff fast-path. The design is a charter injected once, with no per-prompt heavyweight detection. Both hooks are presence-gated (git repositories only) and share the `DEVFLOW_BG_UPDATER` guard, a bounded pure-bash git check and fail-open `exit 0`.
 
-Three more pieces share the hook directory but not the toggle. `session-start-context` (SessionStart, always-on) carries the rule that hands the decisions index to delegations (Section 1), a compaction resume directive (Section 5) and the CLAUDE.md import audit (Section 6). `src/core/claude-md-audit.ts` is the CLI's typed seam onto the same audit script. The opt-in `auto-compact-window` flag in `src/core/flags.ts` is the one knob devflow offers over when Claude Code compacts, the event the resume directive recovers from.
+Three more pieces share the hook directory but not the toggle. `session-start-context` (SessionStart, always-on) carries the rule that hands decisions-index slices to delegations (Section 1), a compaction resume directive (Section 5) and the CLAUDE.md import audit (Section 6). `src/core/claude-md-audit.ts` is the CLI's typed seam onto the same audit script. The opt-in `auto-compact-window` flag in `src/core/flags.ts` is the one knob devflow offers over when Claude Code compacts, the event the resume directive recovers from.
 
 ## Component Architecture
 
@@ -89,7 +90,7 @@ Registered unconditionally by `addContextHook` (`src/cli/commands/context.ts`), 
 
 **`source` is parsed per section.** One top-level `json_extract_cwd_field "source"` returns `cwd` and `source` (`startup|resume|clear|compact`) in a single subprocess, so Section 5 costs no fork. Sections 3 and 4 still read `source` with `json_field` and gate on `startup|clear` (a resume or compact never spawns the Tracker agent or prints the legacy notice); Section 5 gates on `compact`; Section 6 ignores `source`.
 
-**Decisions pass rule (D-DECISIONS-CHARTER-HANDOFF).** The `--- PROJECT DECISIONS (TL;DR) ---` block ends with the `Index:` line and, directly after it, the static `DECISIONS_PASS_RULE`: for direct delegations only (workflow skills load their own), pass the index as `DECISIONS_CONTEXT`, its content read once, to every agent that takes it. It sits inside the same `if` as the `Index:` line (shape-gated ledger root; a non-empty regular file that is not `(none)`, no symlink on its path), and the block is gated on the learning switch: a learning-off machine or repo never pays for the rule, an ambient-off session still gets it. The text is identical through the jq and node envelopes.
+**Decisions pass rule (D-DECISIONS-CHARTER-HANDOFF).** The `--- PROJECT DECISIONS (TL;DR) ---` block ends with the `Index:` line and, directly after it, the static `DECISIONS_PASS_RULE`: for direct delegations only (workflow skills load their own), read the index once, then pass each agent that takes `DECISIONS_CONTEXT` the index lines that touch its work, verbatim, behind a `(slice: N of M entries — full index: <path>)` line and with the footer (D-DECISIONS-SLICE; the `PASS_RULE` literal in `tests/shell-hooks.test.ts` pins the sentence). It sits inside the same `if` as the `Index:` line (shape-gated ledger root; a non-empty regular file that is not `(none)`, no symlink on its path), and the block is gated on the learning switch: a learning-off machine or repo never pays for the rule, an ambient-off session still gets it. The text is identical through the jq and node envelopes.
 
 **Section 5, compaction resume directive (D-COMPACT-RESUME-DIRECTIVE).** After a compaction nothing tells the model to re-read the devflow command it was running (Claude Code is believed to re-inject a long command only in part; unverified here). On a `compact` start one fixed line is appended to `CONTEXT`, never sent as a `systemMessage`:
 
@@ -97,7 +98,7 @@ Registered unconditionally by `addContextHook` (`src/cli/commands/context.ts`), 
 
 The ceiling is `compact-directive-max-chars` in `tests/fixtures/numeric-floors.json`, via `COMPACT_DIRECTIVE_MAX_CHARS` in `tests/session-start-compact.test.ts`, which also holds the five elements: if-clause with an ignore clause, command file by rule, headings then the phase in progress, input from the summary, resume after the last finished phase. The line is re-sent on every compaction for every user, so lower the ceiling after a pass that cuts the text and never raise it. It is a single-quoted constant (`$CLAUDE_CONFIG_DIR` reaches the model as text), names both `COMMAND_INPUT` and `ARGUMENTS` because only some commands bind `COMMAND_INPUT`, and is emitted on every compact in every project, leaving "was a command running?" to the model. On the same compact `session-start-orchestrator` re-injects the charter.
 
-**Section 6, CLAUDE.md import audit (D-CLAUDE-MD-IMPORT-AUDIT, D-AUDIT-STAMP).** A CLAUDE.md `@path` import loads its file into every thread at launch. Section 6 tells the user once, in a top-level `systemMessage`, never in `additionalContext`, so the model pays nothing.
+**Section 6, CLAUDE.md import audit (D-CLAUDE-MD-IMPORT-AUDIT, D-AUDIT-STAMP).** A CLAUDE.md `@path` import loads its file into every thread at launch. Section 6 tells the user once, in a top-level `systemMessage`, never in `additionalContext`, so the model pays nothing. Only `@` imports count; a plain-path mention loads nothing and is never audited, which is how this repository's CLAUDE.md points at `docs/reference/architecture.md` (D-CLAUDE-MD-RULES-ONLY, KB-AP-19): an `@` import of that file would be a file finding, its size being over `FILE_THRESHOLD_BYTES`.
 
 - **Roots and findings.** `CLAUDE.md` in the Claude config directory (`$CLAUDE_CONFIG_DIR` when absolute, else `~/.claude`) always; with `PROJECT_OK` also the project's `CLAUDE.md`, `.claude/CLAUDE.md` and `CLAUDE.local.md`. A file finding is an import over `FILE_THRESHOLD_BYTES`; a chain finding is a root whose chain totals over `CHAIN_THRESHOLD_BYTES` ("at least" when the caps stopped the walk).
 - **The stamp** `~/.devflow/.claude-md-audit` (format specified in `claude-md-audit.cjs`) holds rows `V 1`, `R <root>` (the gated root set), `P <flag> <path>` (each examined path: 0 absent, 1 regular file, 2 exists but not regular), `K <key>` (a finding already shown, capped by `MAX_KEYS`) and `E <reason>`.
@@ -209,6 +210,7 @@ The system can land in two kinds of partial state, both repaired by `--enable`.
 ## Related
 
 - Feature knowledge: `learning-capture-system` — the memory worker fires UserPromptSubmit and SessionStart hooks too, with the `DEVFLOW_BG_UPDATER` guard as the coupling point; also covers `session-start-context` Sections 1–4 and the decisions index the pass rule points at
+- Feature knowledge: `learning-capture-system-delivery` — how `DECISIONS_CONTEXT` reaches agents, including the slice rule the pass rule restates
 - Feature knowledge: `tracker-feature` — Section 3 of `session-start-context`, the tracker setup directive that gates on `startup|clear`
 - Feature knowledge: `dynamic-workflow-engine` — the bind-once `COMMAND_INPUT` convention that makes a no-argument plan handoff safe, and the guards that hold it
 - Feature knowledge: `feature-knowledge-system` — how the entries the charter's Feature knowledge rule passes (Rules bullets, heading index) are written and consumed

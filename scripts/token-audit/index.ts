@@ -20,10 +20,10 @@ import type { SessionFiles, SubagentMeta } from './discover.js';
 import { parseTranscriptFile } from './parse.js';
 import type { ParsedStream } from './parse.js';
 import { buildReport, renderJson, renderMarkdown } from './report.js';
-import type { AuditReport, SessionData, SubagentData, TimeWindow } from './report.js';
+import type { AuditReport, SessionData, SubagentData } from './report.js';
 import { buildSegments, linkSubagents } from './segment.js';
 import { DEFAULT_LIMITS, MAX_PATH_CHARS, NO_SKIPS, addSkips, exitCodeFor, sanitizeText } from './types.js';
-import type { AuditError, CapNotice, Limits, Result, SkipCounts } from './types.js';
+import type { AuditError, CapNotice, Limits, Result, SkipCounts, TimeWindow } from './types.js';
 
 const USAGE = `Usage: npm run audit:tokens -- (--project <cwd> | --dir <path>) [options]
 
@@ -32,8 +32,8 @@ const USAGE = `Usage: npm run audit:tokens -- (--project <cwd> | --dir <path>) [
   --dir <path>          transcript directory to read directly
   --exclude <id>        drop a main session by exact id (repeatable)
   --session <id>        keep only this main session (and its subagents)
-  --since <date>        keep requests at or after this ISO date or timestamp (date-only is UTC)
-  --until <date>        keep requests before this ISO timestamp; a date-only value includes that day
+  --since <date>        keep requests and tool calls at or after this ISO date or timestamp (date-only is UTC)
+  --until <date>        keep requests and tool calls before this ISO timestamp; a date-only value includes that day
   --agent-type <type>   keep only subagents of this type (main sessions are unaffected)
   --json                print the report as JSON
   --help                print this help
@@ -223,10 +223,12 @@ function capsFor(stream: ParsedStream, where: string, limits: Limits): CapNotice
   const caps: CapNotice[] = [];
   if (stream.stats.linesCapHit) caps.push({ kind: 'maxLines', limit: limits.maxLines, where });
   if (stream.stats.oversizeLines > 0) caps.push({ kind: 'maxLineChars', limit: limits.maxLineChars, where });
+  if (stream.stats.pathsCapHit) caps.push({ kind: 'maxReadPaths', limit: limits.maxReadPaths, where });
+  if (stream.stats.citationIdsCapHit) caps.push({ kind: 'maxCitationIds', limit: limits.maxCitationIds, where });
   return caps;
 }
 
-async function loadSession(files: SessionFiles, opts: AuditOptions): Promise<LoadedSession> {
+async function loadSession(files: SessionFiles, opts: AuditOptions, window: TimeWindow): Promise<LoadedSession> {
   const limits = opts.limits;
   let skipped = NO_SKIPS;
   const caps: CapNotice[] = [];
@@ -240,14 +242,14 @@ async function loadSession(files: SessionFiles, opts: AuditOptions): Promise<Loa
   let workflowRuns: ParsedStream['workflowRuns'] = [];
   let segments = buildSegments(files.sessionId, [], []);
   if (files.mainPath !== null) {
-    const parsed = await parseTranscriptFile(files.mainPath, limits);
+    const parsed = await parseTranscriptFile(files.mainPath, limits, window);
     if (parsed.ok) {
       const stream = parsed.value;
       mainTranscripts = 1;
       segments = buildSegments(files.sessionId, stream.commands, stream.skillCalls);
       spawns = stream.spawns;
       workflowRuns = stream.workflowRuns;
-      main = { requests: stream.requests, segments, skillCalls: stream.skillCalls };
+      main = { requests: stream.requests, segments, skillCalls: stream.skillCalls, commands: stream.commands };
       skipped = addSkips(skipped, streamSkips(stream));
       caps.push(...capsFor(stream, `${sanitizeText(files.sessionId)}.jsonl`, limits));
       lines += stream.stats.lines;
@@ -273,7 +275,7 @@ async function loadSession(files: SessionFiles, opts: AuditOptions): Promise<Loa
     const meta = metaRead.ok ? metaRead.value : { agentType: null, toolUseId: null, parentAgentId: null };
     const type = meta.agentType ?? 'unknown';
     if (opts.agentType !== null && type !== opts.agentType) continue;
-    const parsed = await parseTranscriptFile(file.path, limits);
+    const parsed = await parseTranscriptFile(file.path, limits, window);
     if (!parsed.ok) {
       skipped = addSkips(skipped, { unreadableFiles: 1, symlinks: parsed.error.kind === 'symlink' ? 1 : 0 });
       if (parsed.error.kind === 'too-large') {
@@ -301,6 +303,20 @@ async function loadSession(files: SessionFiles, opts: AuditOptions): Promise<Loa
     })),
     workflowRuns,
   );
+  // D-AUDIT-FIRST-TURN: a spawn is a sibling when another tool_use of the same parent message
+  // launched a spawn too. Nested spawns live in their parent subagent's transcript, so every
+  // stream of the session contributes its spawns.
+  const messageOfUse = new Map<string, string>();
+  const spawnsPerMessage = new Map<string, number>();
+  for (const spawn of [...spawns, ...loaded.flatMap(l => l.stream.spawns)]) {
+    if (spawn.messageId === undefined || messageOfUse.has(spawn.toolUseId)) continue;
+    messageOfUse.set(spawn.toolUseId, spawn.messageId);
+    spawnsPerMessage.set(spawn.messageId, (spawnsPerMessage.get(spawn.messageId) ?? 0) + 1);
+  }
+  const isSibling = (toolUseId: string | null): boolean => {
+    const message = toolUseId === null ? undefined : messageOfUse.get(toolUseId);
+    return message !== undefined && (spawnsPerMessage.get(message) ?? 0) > 1;
+  };
   const subagents: SubagentData[] = [];
   for (const l of loaded) {
     const segment = links.get(l.agentId);
@@ -310,6 +326,8 @@ async function loadSession(files: SessionFiles, opts: AuditOptions): Promise<Loa
       agentType: l.meta.agentType ?? 'unknown',
       segment,
       requests: l.stream.requests,
+      signals: l.stream.signals,
+      sibling: isSibling(l.meta.toolUseId),
     });
   }
 
@@ -351,7 +369,7 @@ export async function runAudit(opts: AuditOptions): Promise<Result<AuditReport, 
   let mainTranscripts = 0;
   let subagentTranscripts = 0;
   for (const files of sessions) {
-    const loaded = await loadSession(files, opts);
+    const loaded = await loadSession(files, opts, window.value);
     data.push(loaded.data);
     skipped = addSkips(skipped, loaded.skipped);
     caps.push(...loaded.caps);

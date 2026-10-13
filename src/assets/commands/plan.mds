@@ -143,7 +143,7 @@ Return codebase context for requirements analysis."
 
 {{decisions_load()}}
 <!-- learning:on -->
-This produces a compact index of active ADR/PF entries. Pass the Skim agent context to all subsequent agents. Pass `DECISIONS_CONTEXT` to the Design agents of the gap-analysis phase — prior decisions constrain design, known pitfalls inform gap analysis. Design agents use `devflow:apply-decisions` to Read full entry bodies on demand.
+This produces a compact index of active ADR/PF entries. Pass the Skim agent context to all subsequent agents. Pass `DECISIONS_CONTEXT` to the Design agents of the gap-analysis phase as one shared slice — prior decisions constrain design, known pitfalls inform gap analysis. Design agents use `devflow:apply-decisions` to Read full entry bodies on demand.
 
 <!-- learning:end -->
 {{knowledge_load()}}
@@ -406,8 +406,9 @@ Use AskUserQuestion to present:
 
 User can:
 - **Accept** — proceed to output phases
-- **Revise** — re-run phases 10-12 with new constraints (loop back, no limit on revisions)
+- **Revise** — when fewer than 2 revisions have run, re-run phases 10-12 with new constraints. Budget: at most 2 revisions, counted over the whole run
 - **Cancel** — stop gracefully, no artifact written
+- **Restart /plan with these constraints** — offered in place of Revise once 2 revisions have run: stop gracefully, write no artifact, and print the constraints given so far for a fresh `/plan` run
 
 **MANDATORY**: Do not write design artifact until Gate 2 is confirmed.
 
@@ -546,68 +547,37 @@ Display completion summary:
 │
 ├─ Block 1: Requirements Discovery
 │  ├─ Phase 1: GATE 0 - Requirements Discovery ⛔ MANDATORY
+│  │  ├─ Git agent (fetch-issue / fetch-issues-batch) - issue mode only
 │  │  └─ AskUserQuestion: Validate interpretation
 <!-- learning:on -->
 │  ├─ Phase 2: Orient + Load Decisions
 <!-- learning:off -->
 │  ├─ Phase 2: Orient
 <!-- learning:end -->
-<!-- learning:on -->
-│  │  ├─ Skim agent (codebase context)
-│  │  └─ Read index.md → DECISIONS_CONTEXT
-<!-- learning:off -->
-│  │  └─ Skim agent (codebase context)
-<!-- learning:end -->
 │  ├─ Phase 3: Explore Requirements (PARALLEL)
-│  │  ├─ Explore: User perspective
-│  │  ├─ Explore: Similar features
-│  │  ├─ Explore: Constraints
-│  │  └─ Explore: Failure modes
 │  └─ Phase 4: Synthesize Exploration
-│     └─ Synthesize agent (mode: exploration)
 │
 ├─ Block 2: Gap Analysis
 │  ├─ Phase 5: Gap Analysis (PARALLEL)
-│  │  ├─ Design agent: completeness
-│  │  ├─ Design agent: architecture
-│  │  ├─ Design agent: security
-│  │  ├─ Design agent: performance
-│  │  ├─ Design agent: compliance (only when COMPLIANCE_ACTIVE)
-│  │  ├─ Design agent: consistency (multi-issue only)
-│  │  └─ Design agent: dependencies (multi-issue only)
 │  └─ Phase 6: Synthesize Gap Analysis
-│     └─ Synthesize agent (mode: design)
 │
 ├─ Block 3: Scope Approval
 │  └─ Phase 7: GATE 1 - Validate Scope + Gaps ⛔ MANDATORY
-│     └─ AskUserQuestion: Confirm scope and gap resolutions
 │
 ├─ Block 4: Implementation Design
 │  ├─ Phase 8: Explore Implementation (PARALLEL)
-│  │  ├─ Explore: Architecture
-│  │  ├─ Explore: Integration
-│  │  ├─ Explore: Reusable code
-│  │  └─ Explore: Edge cases
 │  ├─ Phase 9: Synthesize Implementation Exploration
-│  │  └─ Synthesize agent (mode: exploration)
 │  ├─ Phase 10: Plan Implementation (PARALLEL)
-│  │  ├─ Plan: Implementation steps
-│  │  ├─ Plan: Testing strategy
-│  │  └─ Plan: Execution strategy
 │  └─ Phase 11: Synthesize Planning
-│     └─ Synthesize agent (mode: planning)
 │
 ├─ Block 5: Design Review + Approval
 │  ├─ Phase 12: Design Review
-│  │  └─ Design agent (mode: design-review)
 │  └─ Phase 13: GATE 2 - Confirm Plan + Design Review ⛔ MANDATORY
-│     └─ AskUserQuestion: Final plan approval
+│     └─ Revise ≤ 2 → back to Phase 10; after 2: Accept / Cancel / Restart /plan
 │
 ├─ Block 6: Output
 │  └─ Phase 14: Output
-│     ├─ Store design artifact ({worktree}/.devflow/docs/design/)
-│     ├─ Create tracker issue (optional)
-│     └─ Report summary + next step
+│     └─ Git agent (ensure-traceable-issue) - create or enrich tracker issue (optional)
 │
 ```
 
@@ -624,6 +594,6 @@ Display completion summary:
 ## Error Handling
 
 - If any agent fails, report the phase, agent type, and error
-- If user selects "Revise" at Gate 2, loop back to Phase 10 with user's constraints
+- If user selects "Revise" at Gate 2 and fewer than 2 revisions have run, loop back to Phase 10 with user's constraints; after the second revision Gate 2 offers Accept, Cancel or "Restart /plan with these constraints" only
 - If user selects "Cancel" at any gate, stop gracefully without writing artifact
 - If `{worktree}/.devflow/docs/design/` does not exist, create it in Phase 14

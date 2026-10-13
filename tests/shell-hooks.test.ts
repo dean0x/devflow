@@ -873,7 +873,8 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
    */
   const PASS_RULE =
     'Decisions (direct delegations only — workflow skills load their own): ' +
-    'pass this index as DECISIONS_CONTEXT — its content, read once — to every agent that takes it.';
+    'read this index once, then pass each agent that takes DECISIONS_CONTEXT the index lines that touch its work, ' +
+    "verbatim, behind a (slice: N of M entries — full index: this index's path) line and with the footer.";
 
   /** The PROJECT DECISIONS section of the injected context, up to the blank line that ends it. */
   function decisionsSection(cwd: string): string {

@@ -5,7 +5,7 @@ description: "Use when editing git.mds or any tracker/PR-host reference and a ce
 category: architecture
 directories: [tests/tracker/byte-budget.test.ts, tests/tracker/budget-model.ts, tests/fixtures/numeric-floors.json, src/assets/agents/git.mds, src/assets/skills/git]
 created: 2026-10-10
-updated: 2026-10-12
+updated: 2026-10-13
 ---
 
 # Tracker References: Byte Budget and Loaded-Set Model
@@ -102,7 +102,7 @@ Printed, not asserted pass/fail; it records the shape decision so it is not re-a
 
 ## Gotchas
 
-- **KB-INV-8** The reference-hop model has two tables and confusing them mis-prices a hop. `MODEL_CROSS_CUTTING_REFS` prices a mention a `references/…` LITERAL already names (`setup-task`'s `learn-conventions.md` mention, `check-merge-readiness`'s `pr/check-ci-status.md` mention), seen through `nameableFrom()`'s literal-mention pass. `MODEL_TRANSITIVE_REFS` prices a hop NO literal names, seen through the closure's `collectOpMentions()` pass. A hop priced in the wrong table, or both, fails the bidirectional check rather than passing silently.
+- **KB-INV-8** The reference-hop model has two tables and confusing them mis-prices a hop. `MODEL_CROSS_CUTTING_REFS` prices a mention a `references/…` LITERAL already names (`setup-task`'s `learn-conventions.md` mention, `check-merge-readiness`'s `pr/check-ci-status.md` mention), seen through `nameableFrom()`'s literal-mention pass. `MODEL_TRANSITIVE_REFS` prices a hop NO literal names, seen through the closure's `collectOpMentions()` pass. A hop priced in the wrong table, or both, fails the bidirectional check rather than passing silently. A price follows the reference text, not the runtime path: `check-merge-readiness` still names `pr/check-ci-status.md` ("load it and apply them") beside its `readiness` script call, so a spawn is charged both files although the script classifies CI itself (`ci-wait.cjs`'s `classifyChecks`).
 - **KB-INV-2** Not every git.md-carrying row sits at exactly +80: a derivation comment records the measurement at its last re-derivation, and a tool-call row can hold with smaller room. Read each row's own derivation comment in `byte-budget.test.ts` before quoting its headroom.
 - **KB-INV-9** The project-key rule is stated inside `_contract.md` so that no always-loaded text hops into `learn-conventions`; P9 holds this.
 - **`BUDGET_SKILL_MD` gates the whole `SKILL.md`**, the one file preloaded on every Git spawn, so any addition spends real per-spawn characters; that is why its Extended References table gains no rows for documents named elsewhere (hub KB).

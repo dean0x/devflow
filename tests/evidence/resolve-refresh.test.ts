@@ -14,10 +14,11 @@
  *           `<untrusted-test-plan>` (they came from the PR body), and is never
  *           re-spawned on its result. Its rows become claims whose shape the claim
  *           grammar (CLAIM_LINE_RE) admits.
- *   9b-3    D2-A: a separate, conditional update-pr-evidence spawn — never folded
- *           into 9b-2, whose op would then load two mechanics files — gated on the
- *           head having moved, passing the publication mode 9b-2 resolved.
- *   9c      check-merge-readiness receives REQUIRE_NON_AUTHOR_APPROVAL.
+ *   9b-3    D2-A: a separate, conditional refresh — never folded into 9b-2 — gated on
+ *           the head having moved, passing the publication mode 9b-2 resolved. Since
+ *           #455 it is one inline `verify-evidence.cjs publish` call, not a Git spawn.
+ *   9c      check-merge-readiness runs as `verify-evidence.cjs readiness` (#455,
+ *           inline, report-only) and receives REQUIRE_NON_AUTHOR_APPROVAL as a flag.
  *   Fixture The six resolve.mds lines the frozen status-lines fixture samples by
  *           first match stay unique, so none of the new text can shadow them.
  *
@@ -49,7 +50,10 @@ const TEST_SPAWN = 'Agent(subagent_type="Test"):\n"TEST_PLAN: <untrusted-test-pl
 const CLAIM_TEMPLATE = '- TP-<n> <PASS|FAIL|SKIP> sha:<head> by:test exit:<0-255>'
 const VERIFICATION_RECORD = 'Record `Test plan: {n} stale, {m} re-verified` under `## Verification`'
 const SUMMARY_SPAWN = '"OPERATION: post-resolution-summary'
+/** The 9b-3 call (#455): the script runs inline; no Git agent is spawned for it. */
+const EVIDENCE_RUN = 'verify-evidence.cjs" publish --pr {pr_number}'
 const EVIDENCE_SPAWN = '"OPERATION: update-pr-evidence'
+const READINESS_RUN = 'verify-evidence.cjs" readiness --pr {pr_number} --require-non-author-approval true'
 
 const RESOLVE_ORDER: readonly OrderRule[] = [
   { label: '9b-0 opens Phase 9b', before: '### Phase 9b:', after: STEP0 },
@@ -60,7 +64,8 @@ const RESOLVE_ORDER: readonly OrderRule[] = [
   { label: 'the script detects STALE before any Test spawn', before: STALE_VERIFY, after: TEST_SPAWN },
   { label: 'claims are appended after the Test spawn', before: TEST_SPAWN, after: CLAIM_TEMPLATE },
   { label: 'the Verification record precedes the 9b-2 post', before: VERIFICATION_RECORD, after: SUMMARY_SPAWN },
-  { label: 'the refresh spawn sits in 9b-3', before: STEP3, after: EVIDENCE_SPAWN },
+  { label: 'the refresh call sits in 9b-3', before: STEP3, after: EVIDENCE_RUN },
+  { label: 'the readiness call sits in Phase 9c', before: PHASE9C, after: READINESS_RUN },
 ]
 
 function resolveMd(): string {
@@ -102,20 +107,48 @@ function collectStaleReverifyDefects(md: string): string[] {
   return out
 }
 
-/** Named collector: what Step 9b-3 lacks — the head-moved gate, one refresh spawn, 9b-2's publication mode. */
+/**
+ * Named collector: what Step 9b-3 lacks — the head-moved gate, one inline refresh call
+ * (no Git spawn) from the worktree with 9b-2's publication mode, the shell gates on the
+ * values it composes, and a Bash timeout above the script's two deadlines.
+ */
 function collectRefreshDefects(md: string): string[] {
   const step = stepText(md, STEP3, PHASE9C)
   if (step === '') return ['no Step 9b-3']
   const out: string[] = []
   if (!step.includes('Run this step only when Step 9b-0 ran — the head moved')) out.push('9b-3 is not gated on the head having moved')
-  const refresh = parseFences(md).filter(f => isAgentBlock(f, 'Git') && f.includes(EVIDENCE_SPAWN))
-  if (refresh.length !== 1) out.push(`expected one update-pr-evidence spawn in /resolve, found ${refresh.length}`)
-  if (!parseFences(step).some(f => f.includes(EVIDENCE_SPAWN))) out.push('the refresh spawn is not in 9b-3')
+  const spawns = parseFences(md).filter(f => isAgentBlock(f, 'Git') && f.includes(EVIDENCE_SPAWN))
+  if (spawns.length !== 0) out.push(`a Git agent is still spawned for update-pr-evidence in /resolve (${spawns.length})`)
+  const runs = parseFences(md).filter(f => f.includes(EVIDENCE_RUN))
+  if (runs.length !== 1) out.push(`expected one publish call in /resolve, found ${runs.length}`)
+  if (!parseFences(step).some(f => f.includes(EVIDENCE_RUN))) out.push('the refresh call is not in 9b-3')
+  if (!runs.every(f => f.includes('cd {worktree} && node "$HOME/.devflow/scripts/verify-evidence.cjs" publish'))) out.push('the refresh call does not run from the worktree')
+  if (!runs.every(f => f.includes('--evidence "{TARGET_DIR_REL}/evidence.md"'))) out.push('the refresh call does not pass the evidence file')
   const summary = parseFences(md).find(f => f.includes(SUMMARY_SPAWN)) ?? ''
   if (summary.includes('update-pr-evidence')) out.push('the refresh is folded into the 9b-2 spawn')
-  if (!step.includes('REVIEW_PUBLICATION: {9b-2\'s publication mode}')) out.push('9b-3 does not pass 9b-2\'s publication mode')
+  if (!step.includes('--publication {9b-2\'s publication mode}')) out.push('9b-3 does not pass 9b-2\'s publication mode')
   if (!step.includes('`FULL…` → `full`, `STUB…` → `stub`, `OFF…` → `off`')) out.push('9b-2\'s mode is not mapped onto the op\'s values')
+  if (!step.includes('`TARGET_DIR_REL` matches `^[A-Za-z0-9._/-]+$`')) out.push('the branch-derived TARGET_DIR_REL reaches the shell unchecked')
+  if (!step.includes('through the Bash tool with `timeout: 180000`')) out.push('the call carries no Bash timeout above the script\'s two deadlines')
+  if (!step.includes('`TRACEABILITY: DEGRADED (evidence unavailable)`')) out.push('a failed run names no DEGRADED reason')
   if (!step.includes('It never blocks.')) out.push('9b-3 may block')
+  return out
+}
+
+/** Named collector: what Phase 9c lacks — one inline readiness call, no Git spawn, the policy flag, report-only. */
+function collectReadinessDefects(md: string): string[] {
+  const phase = stepText(md, PHASE9C, '### Phase 10: Report')
+  if (phase === '') return ['no Phase 9c']
+  const out: string[] = []
+  const spawns = parseFences(md).filter(f => isAgentBlock(f, 'Git') && f.includes('"OPERATION: check-merge-readiness'))
+  if (spawns.length !== 0) out.push(`a Git agent is still spawned for check-merge-readiness (${spawns.length})`)
+  const runs = parseFences(phase).filter(f => f.includes(READINESS_RUN))
+  if (runs.length !== 1) return [...out, `expected one readiness call in Phase 9c, found ${runs.length}`]
+  if (!runs[0].includes('cd {worktree} && node "$HOME/.devflow/scripts/verify-evidence.cjs" readiness')) out.push('the readiness call does not run from the worktree')
+  if (!phase.includes('Run this phase only when `REQUIRE_NON_AUTHOR_APPROVAL` is `true`')) out.push('9c is not gated on REQUIRE_NON_AUTHOR_APPROVAL')
+  if (!phase.includes('through the Bash tool with `timeout: 180000`')) out.push('the call carries no Bash timeout above the script\'s deadline')
+  if (!phase.includes('Never block on this result — report-only.')) out.push('9c may block')
+  if (!phase.includes('`TRACEABILITY: DEGRADED (readiness unavailable)`')) out.push('a failed run names no DEGRADED reason')
   return out
 }
 
@@ -145,7 +178,7 @@ describe('AC-15: /resolve re-verifies STALE TPs once and refreshes the evidence 
     expect(collectStaleReverifyDefects(md)).toEqual([])
   })
 
-  it('9b-3 is one conditional refresh spawn with 9b-2\'s publication mode (D2-A)', () => {
+  it('9b-3 is one conditional inline refresh call with 9b-2\'s publication mode (D2-A)', () => {
     expect(collectRefreshDefects(resolveMd())).toEqual([])
   })
 
@@ -161,16 +194,15 @@ describe('AC-15: /resolve re-verifies STALE TPs once and refreshes the evidence 
     expect(md).toContain('The line ends at `by:test` when the row\'s Exit is not a number from 0 to 255')
   })
 
-  it('9c passes REQUIRE_NON_AUTHOR_APPROVAL to check-merge-readiness', () => {
-    const spawn = parseFences(resolveMd()).find(f => isAgentBlock(f, 'Git') && f.includes('"OPERATION: check-merge-readiness'))
-    expect(spawn).toBeDefined()
-    expect(spawn).toContain('REQUIRE_NON_AUTHOR_APPROVAL: {REQUIRE_NON_AUTHOR_APPROVAL}')
+  it('9c is one inline readiness call that passes the policy flag, report-only', () => {
+    expect(collectReadinessDefects(resolveMd())).toEqual([])
   })
 
-  it('the report, the diagram, the edge cases and Principle 10 name the refresh', () => {
+  it('the report, the diagram, the edge cases and the Traceability-aware principle name the refresh', () => {
     const md = resolveMd()
     expect(md).toContain('- Test-plan re-verification: {Test plan: n stale, m re-verified | SKIPPED (head unchanged) | DEGRADED (reason)}')
-    expect(md).toContain('│  └─ Step 9b-3: Git agent (update-pr-evidence) — only when the head moved')
+    expect(md).toContain('│  └─ Step 9b-3: verify-evidence.cjs publish (inline, no Git spawn) — only when the head moved')
+    expect(md).toContain('├─ Phase 9c: verify-evidence.cjs readiness (inline, no Git spawn) — non-author approval required, report-only')
     expect(md).toContain('the head did not move, so 9b-0 and 9b-3 are skipped |')
     expect(md).toContain('| The PR has no trusted evidence record |')
     expect(md).toContain('| A CI run behind a claim has expired (~90 days) |')
@@ -196,6 +228,14 @@ describe('AC-15: /resolve re-verifies STALE TPs once and refreshes the evidence 
     expect(collectStaleReverifyDefects(md.replace(STEP1, `${gitDetect}\n${STEP1}`))).toContain('9b-0 spawns a Git agent; STALE detection is the script\'s')
     expect(collectRefreshDefects(md.replace('Run this step only when Step 9b-0 ran — the head moved', 'Run this step always'))).toEqual(['9b-3 is not gated on the head having moved'])
     expect(collectRefreshDefects(md.replace(`${SUMMARY_SPAWN}\n`, `${SUMMARY_SPAWN}\nALSO: update-pr-evidence\n`))).toContain('the refresh is folded into the 9b-2 spawn')
+    expect(collectRefreshDefects(md.replace(STEP1, `${gitDetect}\n${STEP1}`))).toEqual(['a Git agent is still spawned for update-pr-evidence in /resolve (1)'])
+    expect(collectRefreshDefects(md.replace(' --publication {9b-2\'s publication mode}', ''))).toEqual(['9b-3 does not pass 9b-2\'s publication mode'])
+    const refreshStep = stepText(md, STEP3, PHASE9C)
+    expect(collectRefreshDefects(md.replace(refreshStep, refreshStep.replace('`TARGET_DIR_REL` matches `^[A-Za-z0-9._/-]+$`', '`TARGET_DIR_REL` is set')))).toEqual(['the branch-derived TARGET_DIR_REL reaches the shell unchecked'])
+    expect(collectReadinessDefects(md.replace(READINESS_RUN, 'verify-evidence.cjs" readiness --pr {pr_number}'))).toEqual(['expected one readiness call in Phase 9c, found 0'])
+    const readSpawn = '```\nAgent(subagent_type="Git"):\n"OPERATION: check-merge-readiness\nPR_NUMBER: {pr_number}"\n```\n'
+    expect(collectReadinessDefects(md.replace('### Phase 10: Report', `${readSpawn}\n### Phase 10: Report`))).toEqual(['a Git agent is still spawned for check-merge-readiness (1)'])
+    expect(collectReadinessDefects(md.replace('Never block on this result — report-only.', 'Block on this result.'))).toEqual(['9c may block'])
     const source = readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'resolve.mds'), 'utf-8')
     expect(collectShadowedAnchors(source.replace(STEP0, `${FIXTURE_ANCHORS[4]} (copied)\n\n${STEP0}`))).toEqual([FIXTURE_ANCHORS[4]])
   })

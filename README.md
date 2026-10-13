@@ -80,7 +80,7 @@ This is the **orchestrated flow** — you stay in the loop between every step. W
 
 **Everything is composable.** 21 plugins (12 core + 9 optional). Install only what you need.
 
-**HUD.** A persistent status line updates on every prompt — project, branch, diff stats, context usage, model, cost with weekly/monthly totals, quota reset timers, and configuration counts at a glance.
+**HUD.** A persistent status line updates on every prompt — project, branch, diff stats, context usage, model, cost with weekly/monthly totals, quota reset timers (Claude and Codex), and configuration counts at a glance.
 
 ```
 ~/devflow · main · +2 -1 · v2.0.0+3

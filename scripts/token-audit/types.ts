@@ -27,6 +27,14 @@ export interface Limits {
   readonly maxSkillNames: number;
   /** Distinct unpriced model names listed on the unpriced line. */
   readonly maxUnpricedModels: number;
+  /**
+   * Distinct file paths tracked per transcript for re-read and files-written counting (D-AUDIT-READS).
+   * The read-path set and the written-path set each hold this many; a path past it still counts as a
+   * call but cannot be recognised as a repeat.
+   */
+  readonly maxReadPaths: number;
+  /** Distinct ADR/PF ids tracked per transcript for the citation count (D-AUDIT-READS). */
+  readonly maxCitationIds: number;
 }
 
 export const DEFAULT_LIMITS: Limits = Object.freeze({
@@ -36,6 +44,8 @@ export const DEFAULT_LIMITS: Limits = Object.freeze({
   maxFileBytes: 536_870_912,
   maxSkillNames: 500,
   maxUnpricedModels: 20,
+  maxReadPaths: 4_096,
+  maxCitationIds: 512,
 });
 
 export type CapKind = keyof Limits;
@@ -80,6 +90,28 @@ export function addSkips(a: SkipCounts, b: Partial<SkipCounts>): SkipCounts {
     malformedLines: a.malformedLines + (b.malformedLines ?? 0),
     oversizeLines: a.oversizeLines + (b.oversizeLines ?? 0),
   };
+}
+
+/** Date window in epoch ms; `untilMs` is exclusive. A null bound is open. */
+export interface TimeWindow {
+  readonly sinceMs: number | null;
+  readonly untilMs: number | null;
+}
+
+/** The window with both bounds open: every entry is inside it, dated or not. */
+export const OPEN_WINDOW: TimeWindow = Object.freeze({ sinceMs: null, untilMs: null });
+
+/**
+ * The one window test, shared by the report (requests, skill loads) and the parser (tool-call
+ * signals, D-AUDIT-WINDOW): `sinceMs` is inclusive, `untilMs` is exclusive, and an undated entry is
+ * outside any window that has a bound.
+ */
+export function inWindow(timestampMs: number | null, window: TimeWindow): boolean {
+  if (window.sinceMs === null && window.untilMs === null) return true;
+  if (timestampMs === null) return false;
+  if (window.sinceMs !== null && timestampMs < window.sinceMs) return false;
+  if (window.untilMs !== null && timestampMs >= window.untilMs) return false;
+  return true;
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {

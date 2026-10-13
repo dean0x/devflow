@@ -21,7 +21,7 @@
  * `collectHostileScenarioAdmissions` over a hostile corpus, whose probe is the
  * pre-narrowing scenario class.
  *
- * The exception grammar is held three ways: `evidence_exception()`'s kind list,
+ * The exception grammar is held three ways: the kind list of the evidence-asks reference's `## Exception grammar` section (D-CMD-REF-HAND),
  * ensure-pr-ready's paste gate and the script's EXCEPTION_KINDS / EXCEPTION_LINE_RE name
  * the same kinds in the same order, and the gate IS EXCEPTION_LINE_RE's source.
  *
@@ -41,7 +41,7 @@ import { createRequire } from 'module'
 import { readFileSync } from 'fs'
 import * as path from 'path'
 
-import { ROOT, ensurePrReadyReference, requireDistFile, walkFiles } from '../helpers.js'
+import { ROOT, commandReferenceSections, ensurePrReadyReference, readAgentReference, requireDistFile, walkFiles } from '../helpers.js'
 import { PR_EVIDENCE_SCRIPT } from './seam.js'
 
 /** Transcribed from the script's JSDoc — only what this suite reads. */
@@ -608,10 +608,11 @@ describe('AC-2: the States, Methods and precedence equal the exports', () => {
 })
 
 // ---------------------------------------------------------------------------
-// EXCEPTION_LINE_RE ↔ ensure-pr-ready's paste gate ↔ the partial's kind set
+// EXCEPTION_LINE_RE ↔ ensure-pr-ready's paste gate ↔ the reference's kind set
 // ---------------------------------------------------------------------------
 
-const EVIDENCE_POLICY_PARTIAL = path.join(ROOT, 'src', 'assets', 'commands', '_partials', '_evidence_policy.mds')
+/** The hand-authored reference /implement reads for its ticket-link and test-plan asks. */
+const EXCEPTION_REFERENCE = 'commands/implement-evidence-asks.md'
 
 /** ensure-pr-ready's paste gate: the anchored pattern in the fence under its PR_EXCEPTIONS paragraph. */
 function codeGateSource(code: string): string {
@@ -631,13 +632,13 @@ function splitKinds(source: string): { kinds: string[]; rest: string } {
 }
 
 /**
- * The kinds `evidence_exception()` (define 2 of `_evidence_policy.mds`) renders:
- * the code spans of its `<kind>` bullet between "is one of" and the first " — ".
- * Read below the template fence, whose own line also opens with "- `<kind>`".
+ * The kinds the reference's `## Exception grammar` section renders: the code spans of its
+ * `<kind>` bullet between "is one of" and the first " — ". Read below the template
+ * fence, whose own line also opens with "- `<kind>`".
  */
-function partialKinds(source: string = readFileSync(EVIDENCE_POLICY_PARTIAL, 'utf-8')): string[] {
-  const body = defineBody(source, 'evidence_exception')
-  if (body === null) throw new Error(`${EVIDENCE_POLICY_PARTIAL}: no \`@define evidence_exception():\` block`)
+function referenceKinds(source: string = readAgentReference(EXCEPTION_REFERENCE)): string[] {
+  const body = commandReferenceSections(source).find(sec => sec.heading === 'Exception grammar')?.body
+  if (body === undefined) throw new Error(`${EXCEPTION_REFERENCE}: no \`## Exception grammar\` section`)
   const rules = body.slice(body.indexOf('```', body.indexOf('```markdown') + 3) + 3)
   const bulletLine = rules.split('\n').find(l => l.startsWith('- `<kind>`'))
   if (bulletLine === undefined) return []
@@ -646,13 +647,13 @@ function partialKinds(source: string = readFileSync(EVIDENCE_POLICY_PARTIAL, 'ut
 
 /**
  * Named collector: where the three statements of the exception grammar disagree —
- * the partial that renders a line, ensure-pr-ready's gate that pastes it, and the script
+ * the reference that renders a line, ensure-pr-ready's gate that pastes it, and the script
  * (EXCEPTION_KINDS and EXCEPTION_LINE_RE) that parses it back out of a PR. The gate
  * and the script regex must be the SAME source, so a line one admits the other
  * can never refuse, and all three kind lists must be equal, in order.
  */
 function collectExceptionGrammarDisagreements(input: {
-  partial: readonly string[]
+  reference: readonly string[]
   gate: string
   script: string
   kinds: readonly string[]
@@ -662,29 +663,29 @@ function collectExceptionGrammarDisagreements(input: {
   const gateKinds = splitKinds(input.gate).kinds
   const scriptKinds = splitKinds(input.script).kinds
   const want = input.kinds.join('|')
-  if (input.partial.join('|') !== want) out.push(`the partial renders [${input.partial.join(', ')}], EXCEPTION_KINDS is [${input.kinds.join(', ')}]`)
+  if (input.reference.join('|') !== want) out.push(`the reference renders [${input.reference.join(', ')}], EXCEPTION_KINDS is [${input.kinds.join(', ')}]`)
   if (gateKinds.join('|') !== want) out.push(`ensure-pr-ready's gate admits [${gateKinds.join(', ')}], EXCEPTION_KINDS is [${input.kinds.join(', ')}]`)
   if (scriptKinds.join('|') !== want) out.push(`EXCEPTION_LINE_RE admits [${scriptKinds.join(', ')}], EXCEPTION_KINDS is [${input.kinds.join(', ')}]`)
   return out
 }
 
-describe('the exception grammar: the partial, ensure-pr-ready\'s gate and the script agree three ways', () => {
+describe('the exception grammar: the reference, ensure-pr-ready\'s gate and the script agree three ways', () => {
   const live = () => ({
-    partial: partialKinds(),
+    reference: referenceKinds(),
     gate: codeGateSource(ensurePrReadyReference()),
     script: PE.EXCEPTION_LINE_RE.source,
     kinds: PE.EXCEPTION_KINDS,
   })
 
-  it('the partial, the gate and the script name the same kinds, and the gate is EXCEPTION_LINE_RE', () => {
+  it('the reference, the gate and the script name the same kinds, and the gate is EXCEPTION_LINE_RE', () => {
     const now = live()
-    expect(now.partial.length, 'no kind parsed out of the partial — the collector is blind').toBeGreaterThanOrEqual(2)
+    expect(now.reference.length, 'no kind parsed out of the reference — the collector is blind').toBeGreaterThanOrEqual(2)
     expect(now.kinds).toEqual(['ticket-link', 'test-plan'])
     expect(collectExceptionGrammarDisagreements(now)).toEqual([])
     expect(PE.EXCEPTION_LINE_RE.flags).toBe('')
   })
 
-  it('known-bad probes: a narrowed gate, a partial with a third kind and a drifted reason bound are each reported', () => {
+  it('known-bad probes: a narrowed gate, a reference with a third kind and a drifted reason bound are each reported', () => {
     const now = live()
     const narrowedGate = now.gate.replace('(ticket-link|test-plan)', 'ticket-link')
     expect(narrowedGate, 'the seed must land').not.toBe(now.gate)
@@ -692,9 +693,9 @@ describe('the exception grammar: the partial, ensure-pr-ready\'s gate and the sc
       'EXCEPTION_LINE_RE is not ensure-pr-ready\'s paste gate byte for byte',
       'ensure-pr-ready\'s gate admits [ticket-link], EXCEPTION_KINDS is [ticket-link, test-plan]',
     ])
-    const seededPartial = readFileSync(EVIDENCE_POLICY_PARTIAL, 'utf-8').replace('`ticket-link` or `test-plan`', '`ticket-link`, `test-plan` or `waiver`')
-    expect(partialKinds(seededPartial)).toEqual(['ticket-link', 'test-plan', 'waiver'])
-    expect(collectExceptionGrammarDisagreements({ ...now, partial: partialKinds(seededPartial) })).toHaveLength(1)
+    const seededReference = readAgentReference(EXCEPTION_REFERENCE).replace('`ticket-link` or `test-plan`', '`ticket-link`, `test-plan` or `waiver`')
+    expect(referenceKinds(seededReference)).toEqual(['ticket-link', 'test-plan', 'waiver'])
+    expect(collectExceptionGrammarDisagreements({ ...now, reference: referenceKinds(seededReference) })).toHaveLength(1)
     const drifted = now.script.replace('{0,199}', '{0,299}')
     expect(collectExceptionGrammarDisagreements({ ...now, script: drifted })).toEqual([
       'EXCEPTION_LINE_RE is not ensure-pr-ready\'s paste gate byte for byte',

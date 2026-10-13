@@ -27,8 +27,9 @@
  *          `Refs` line, and `check wave` admits it.
  *   W1     (#376) after the wave PR opens, step 7 runs one Test agent on the
  *          integration worktree, appends `/implement`'s TP claims to the wave
- *          evidence file, pushes (never forced) and refreshes the PR through
- *          `update-pr-evidence` — never blocking.
+ *          evidence file, pushes (never forced) and refreshes the PR by running
+ *          `verify-evidence.cjs publish` inline (#455: the update-pr-evidence
+ *          operation as a script, no Git spawn) — never blocking.
  *
  * The engine and the wave loop are checked by EXECUTING the shipped skeletons —
  * the SINGLE workflow script and the wave round loop, both read from the built
@@ -1253,7 +1254,7 @@ const F4_LINE = 'Do NOT ask questions mid-workflow'
 const MAINTENANCE = '### Maintenance note'
 /** /implement's TP claim — the one grammar every claim appender writes. */
 const TP_CLAIM_TEMPLATE = '- TP-<n> <PASS|FAIL|SKIP> sha:<head> by:test exit:<0-255>'
-/** The wave evidence file, repo-relative, as step 3(b) writes it and step 7 hands it to update-pr-evidence. */
+/** The wave evidence file, repo-relative, as step 3(b) writes it and step 7 hands it to `publish` (#455: inline, no Git spawn). */
 const WAVE_EVIDENCE_FILE = '.devflow/docs/evidence-wave-{slug}.md'
 
 /** Built step 7, from its lead to the maintenance note, or null. */
@@ -1273,6 +1274,7 @@ export function collectWaveEvidenceStepDefects(built: string): string[] {
   const fences = parseFences(step)
   const tests = fences.filter(f => f.includes('Agent(subagent_type="Test")'))
   const gits = fences.filter(f => f.includes('Agent(subagent_type="Git")'))
+  const runs = fences.filter(f => f.includes('verify-evidence.cjs" publish'))
   const f4 = offsetsOf(built, F4_LINE)
   need('placement: after step 6 and its F4 line, so step 6 keeps its one fence',
     f4.length === 1 && built.indexOf(STEP7) > f4[0] && built.indexOf(STEP7) > built.indexOf(STEP6))
@@ -1291,14 +1293,15 @@ export function collectWaveEvidenceStepDefects(built: string): string[] {
   need('the push: once, never forced, and a failure does not stop the refresh',
     step.includes('push origin HEAD; echo "exit=$?"') && !/--force|\+HEAD|push -f\b/.test(step)
     && step.includes('`TRACEABILITY: DEGRADED (evidence push failed)` and refresh anyway'))
-  need('the refresh: one update-pr-evidence spawn with the PR number, the repo-relative file, the publication value and the worktree',
-    gits.length === 1 && gits[0].includes('"OPERATION: update-pr-evidence\n') && gits[0].includes('\nPR_NUMBER: {n}\n')
-    && gits[0].includes(`\nEVIDENCE_FILE: ${WAVE_EVIDENCE_FILE}\n`) && /\nREVIEW_PUBLICATION: \{[^}\n]+\}\n/.test(gits[0])
-    && gits[0].includes('\nWORKTREE_PATH: {integration worktree root}\n'))
+  need('the refresh: one inline publish call from the integration worktree with the PR number, the repo-relative file and the publication value, and no Git spawn for it',
+    runs.length === 1 && gits.length === 0
+    && runs[0].includes('cd "{integration worktree root}" && node "$HOME/.devflow/scripts/verify-evidence.cjs" publish --pr {n} ')
+    && runs[0].includes(` --evidence "${WAVE_EVIDENCE_FILE}"`) && /--publication \{[^}\n]+\}/.test(runs[0])
+    && step.includes('through the Bash tool with `timeout: 180000`'))
   need('the publication value: resolved in this step, by the partial',
     step.includes('**Resolve `REVIEW_PUBLICATION` per worktree:**') && step.includes('**Evidence stub:**'))
   need('never blocks: a refresh that returns nothing degrades', step.includes('`TRACEABILITY: DEGRADED (evidence refresh failed)`'))
-  need('no policy in a spawn: the partial reads it command-side', fences.every(f => !f.includes('EVIDENCE_POLICY')))
+  need('no policy in a call: the partial reads it command-side', fences.every(f => !f.includes('EVIDENCE_POLICY')))
   return out
 }
 
@@ -1311,10 +1314,10 @@ const STEP7_SEEDS: ReadonlyArray<readonly [site: string, from: string, to: strin
   ['the Test spawn', 'Agent(subagent_type="Test")', 'Agent(subagent_type="Validate")'],
   ['the claims', TP_CLAIM_TEMPLATE, '- TP-<n> <outcome> sha:<head> by:test'],
   ['the push', 'push origin HEAD; echo', 'push --force origin HEAD; echo'],
-  ['the refresh', `EVIDENCE_FILE: ${WAVE_EVIDENCE_FILE}\n`, ''],
+  ['the refresh', ` --evidence "${WAVE_EVIDENCE_FILE}"`, ''],
   ['the publication value', '**Resolve `REVIEW_PUBLICATION` per worktree:**', 'Resolve it somehow:'],
   ['never blocks', '`TRACEABILITY: DEGRADED (evidence refresh failed)`', 'the run stops'],
-  ['no policy in a spawn', 'WORKTREE_PATH: {integration worktree root}\nUpdate', 'WORKTREE_PATH: {integration worktree root}\nEVIDENCE_POLICY: {EVIDENCE_POLICY}\nUpdate'],
+  ['no policy in a call', '--publication {REVIEW_PUBLICATION resolved above, or auto};', '--publication {REVIEW_PUBLICATION resolved above, or auto} --policy {EVIDENCE_POLICY};'],
 ]
 
 describe('W1: after the wave PR opens, step 7 claims its test plan and refreshes its evidence', () => {
@@ -1327,7 +1330,7 @@ describe('W1: after the wave PR opens, step 7 claims its test plan and refreshes
     expect(collectWaveEvidenceStepDefects('no step 7'), 'a missing step is one defect').toHaveLength(1)
     expect(STEP7_SEEDS.map(s => s[0])).toEqual([
       'placement', 'gate', 'the PR number', 'no wave test plan', 'the Test spawn', 'the claims',
-      'the push', 'the refresh', 'the publication value', 'never blocks', 'no policy in a spawn',
+      'the push', 'the refresh', 'the publication value', 'never blocks', 'no policy in a call',
     ])
   })
 
@@ -1341,7 +1344,8 @@ describe('W1: after the wave PR opens, step 7 claims its test plan and refreshes
 
   it('step 6 keeps its one spawn fence: step 7 sits past the F4 line', () => {
     expect(waveSpawn(BUILT), 'step 6\'s ensure-pr-ready fence').not.toBeNull()
-    expect(offsetsOf(BUILT, 'OPERATION: update-pr-evidence'), 'one refresh spawn').toHaveLength(1)
+    expect(offsetsOf(BUILT, 'OPERATION: update-pr-evidence'), 'no refresh spawn: the script runs inline').toHaveLength(0)
+    expect(offsetsOf(BUILT, 'verify-evidence.cjs" publish'), 'one refresh call').toHaveLength(1)
   })
 
   it('the claim line is /implement\'s TP claim, byte for byte', () => {

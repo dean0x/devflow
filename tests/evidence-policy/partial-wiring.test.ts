@@ -82,12 +82,12 @@ const PARTIAL_IMPORT = './_partials/_evidence_policy.mds'
 const DEFINE = 'evidence_policy'
 
 /**
- * Every define the partial may hold: the resolution, and `evidence_exception`, the
- * exception grammar (design §3.14, held by ticket-gate.test.ts). A define this list
- * does not model would expand into every host that imports it with nothing here to
- * notice.
+ * Every define the partial may hold: the resolution alone. The exception grammar is
+ * a hand-authored reference /implement reads on demand (D-CMD-REF-HAND, held by
+ * ticket-gate.test.ts), not a define. A define this list does not model would expand
+ * into every host that imports it with nothing here to notice.
  */
-const KNOWN_DEFINES: readonly string[] = [DEFINE, 'evidence_exception']
+const KNOWN_DEFINES: readonly string[] = [DEFINE]
 
 /** Compile cost is exponential in the define count, so the partial stays at ≤2. */
 const MAX_DEFINES = 2

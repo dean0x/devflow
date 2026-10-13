@@ -14,12 +14,14 @@ allowed-tools: Read, Bash
 > Cite only IDs that appear verbatim in DECISIONS_CONTEXT. If an ADR/PF ID is not
 > in the index, do not cite it. If an entry looks relevant but you haven't Read its
 > full body, do not cite it. Fabricated citations are worse than no citations.
+>
+> DECISIONS_CONTEXT may be a slice; read the full index at the named path only when your work leaves the slice's scope.
 
 ## 5-Step Algorithm
 
 ### Step 1: Scan the index
 
-One line per active entry: its ID (`ADR-NNN` or `PF-NNN`), a title, then a status tag and/or, after `—`, its area or scope. The footer names the decisions and pitfalls files.
+One line per active entry: its ID (`ADR-NNN` or `PF-NNN`), a title, then a status tag and/or, after `—`, its area or scope. A slice leads with `(slice: N of M entries — full index: <path>)`.
 
 ### Step 2: Identify plausibly-relevant entries
 
@@ -27,13 +29,13 @@ Pick entries whose title, area or scope overlaps the files you touch (a matching
 
 ### Step 3: Read the full body
 
-Find the entry's heading line in the file the footer names, then Read only that section:
+Find the entry's heading in the file the footer names:
 
 ```bash
 command grep -nF '## ADR-NNN:' "{worktree-from-footer}/.devflow/learning/decisions.md"
 ```
 
-For a pitfall use `## PF-NNN:` and `pitfalls.md`. Read with `offset` at the printed line and a `limit` of about 25, stopping at the next `## `. The footer is the single source of truth for paths; the ledger is git-ignored, so only a shell search finds the line. A `verified` date is when the entry was last confirmed true; none means unconfirmed. Cite only after reading the body and confirming it applies.
+For a pitfall use `## PF-NNN:` and `pitfalls.md`. Read with `offset` at the printed line and a `limit` of about 25, stopping at the next `## `. The footer is the single source of truth for paths; the ledger is git-ignored, so search by shell. A `verified` date is the last confirmation; none means unconfirmed.
 
 ### Step 4: Cite inline — in-session handoffs only
 
@@ -43,7 +45,7 @@ Anything committed, pushed or posted states the rule in words, never its ID (cod
 
 ### Step 5: Use verbatim IDs only
 
-Cite only IDs in `DECISIONS_CONTEXT`; never guess or rebuild one. When nothing clearly applies, cite nothing.
+Cite only IDs in the index; never guess or rebuild one. When nothing clearly applies, cite nothing.
 
 ## Skip Guard
 

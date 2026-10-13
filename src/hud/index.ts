@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { readStdin } from './stdin.js';
 import { loadConfig, resolveComponents } from './config.js';
 import { gatherGitStatus } from './git.js';
+import { codexSessionsDir, gatherCodexUsage } from './codex-usage.js';
 import { parseTranscript } from './transcript.js';
 import { persistSessionCost, aggregateCosts } from './cost-history.js';
 import { gatherConfigCounts } from './components/config-counts.js';
@@ -47,15 +48,20 @@ function extractUsageFromStdin(stdin: StdinData): UsageData | null {
 }
 
 async function main(): Promise<void> {
-  const timeoutPromise = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error('timeout')), OVERALL_TIMEOUT),
-  );
+  let timer: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('timeout')), OVERALL_TIMEOUT);
+  });
 
   try {
     const result = await Promise.race([run(), timeoutPromise]);
     process.stdout.write(result);
   } catch {
     // Timeout or error — output nothing (graceful degradation)
+  } finally {
+    // A live timer would keep node running for the rest of the budget after the
+    // line is printed, delaying every status-line render by about 2 s.
+    clearTimeout(timer);
   }
 }
 
@@ -72,7 +78,8 @@ async function run(): Promise<string> {
   const components = new Set(resolved);
   const cwd = stdin.cwd || process.cwd();
   // D-ONE-HOME: always $HOME/.devflow — no environment variable relocates it.
-  const devflowDir = path.join(process.env.HOME || homedir(), '.devflow');
+  const home = process.env.HOME || homedir();
+  const devflowDir = path.join(home, '.devflow');
 
   // Determine what data to gather based on enabled components
   const needsGit =
@@ -86,16 +93,18 @@ async function run(): Promise<string> {
     components.has('configCounts');
   const needsConfigCounts = components.has('configCounts');
   const needsLearningCounts = components.has('learningCounts');
+  const needsCodexUsage = components.has('codexQuota');
   const needsSessionCost = components.has('sessionCost');
 
   // Parallel data gathering — only fetch what's needed. The learning counts
   // ride here because resolving the ledger root is one git call.
-  const [git, transcript, learningCountsData] = await Promise.all([
+  const [git, transcript, learningCountsData, codexUsage] = await Promise.all([
     needsGit ? gatherGitStatus(cwd) : Promise.resolve(null),
     needsTranscript && stdin.transcript_path
       ? parseTranscript(stdin.transcript_path)
       : Promise.resolve(null),
     needsLearningCounts ? gatherLedgerLearningCounts(cwd) : Promise.resolve(null),
+    needsCodexUsage ? gatherCodexUsage(devflowDir, codexSessionsDir(home)) : Promise.resolve(null),
   ]);
 
   // Extract usage quota from stdin rate_limits (replaces OAuth fetch)
@@ -135,6 +144,7 @@ async function run(): Promise<string> {
     git,
     transcript,
     usage,
+    codexUsage,
     configCounts: configCountsData,
     learningCounts: learningCountsData,
     costHistory,

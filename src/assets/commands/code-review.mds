@@ -277,7 +277,7 @@ The core, database, dependencies, documentation and compliance focuses, and ever
 
 {{decisions_load()}}
 <!-- learning:on -->
-This produces a compact index of active ADR/PF entries. Pass `DECISIONS_CONTEXT` to all Review agents. Review agents use `devflow:apply-decisions` to Read full entry bodies on demand.
+This produces a compact index of active ADR/PF entries. Pass `DECISIONS_CONTEXT` to all Review agents as one shared slice, cut over the diff's files. Review agents use `devflow:apply-decisions` to Read full entry bodies on demand.
 
 <!-- learning:end -->
 {{knowledge_load()}}
@@ -442,21 +442,8 @@ In multi-worktree mode, report results per worktree.
 
 | Case | Handling |
 |------|----------|
-| No new commits since last review | Skip review, report: "No new commits since last review. Use --full for a full re-review." |
-| Rebase invalidates `.last-review-head` SHA | `git cat-file -t` check fails → fallback to full diff |
-| Same-minute review collision | `mkdir` fails → retry with seconds appended (`YYYY-MM-DD_HHMMSS`) |
-| Worktree in detached HEAD | Filtered out (no branch name → not reviewable) |
-| Worktree mid-rebase or mid-merge | Filtered out by status check |
-| Two worktrees on same branch | Deduplicate by branch — review once, use first worktree's path |
-| Worktree on protected branch | Filtered out (not reviewable) |
-| Worktree pre-flight fails | Report failure, continue with other worktrees |
 | `--full` in multi-worktree mode | Applies to all worktrees (global modifier) |
-| Many worktrees (5+) | Report count and proceed — user manages their worktree count |
 | Review comment already posted | Git agent matches its own marker on the `{cycle, timestamp}` pair → skip silently (D7); a re-review in the same cycle (different timestamp) posts its own comment. The marker's format belongs to the operation; this caller passes the pair and never restates the literal |
-| First review (no prior resolution) | PRIOR_RESOLUTIONS=(none), no convergence check |
-| fp_ratio denominator = 0 | fp_ratio = 0, no warning |
-| `--full` flag | Bypass incremental detection (Step 0d), still load PRIOR_RESOLUTIONS for cross-cycle awareness |
-| Parsing failure on resolution-summary.md | fp_ratio = 0, convergence tracking degraded (see Step 0e-ii) |
 | Concurrent sessions | Advisory only, each session computes independently |
 | Docs-only diff | `docs-only`: documentation, consistency, security on `diff.patch`; no language or conditional focus |
 | Tests-only diff | `tests-only`: testing, reliability, consistency, security on `diff.patch`; no language or conditional focus |

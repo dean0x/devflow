@@ -494,19 +494,13 @@ Capture the Git agent's `**Publication**:` and `**Status**:` lines as `PR_COMMEN
 
 **Step 9b-3: Refresh the test-plan evidence**
 
-Run this step only when Step 9b-0 ran — the head moved — and its `EVIDENCE` line did not read `total:0` with `exceptions:none` (nothing to record); otherwise record `EVIDENCE_REFRESH` as `SKIPPED ({reason})`. Spawn Git agent:
+Run this step only when Step 9b-0 ran — the head moved — and its `EVIDENCE` line did not read `total:0` with `exceptions:none` (nothing to record); otherwise record `EVIDENCE_REFRESH` as `SKIPPED ({reason})`. Run the script inline — it is the whole `update-pr-evidence` operation, with no Git agent spawn — through the Bash tool with `timeout: 180000`:
 
-```
-Agent(subagent_type="Git"):
-"OPERATION: update-pr-evidence
-PR_NUMBER: {pr_number}
-EVIDENCE_FILE: {TARGET_DIR_REL}/evidence.md
-REVIEW_PUBLICATION: {9b-2's publication mode}
-WORKTREE_PATH: {worktree_path}  (omit if cwd)
-Refresh the PR's test-plan block and post its evidence comment."
+```bash
+cd {worktree} && node "$HOME/.devflow/scripts/verify-evidence.cjs" publish --pr {pr_number} --evidence "{TARGET_DIR_REL}/evidence.md" --publication {9b-2's publication mode}; echo "exit=$?"
 ```
 
-Omit the `EVIDENCE_FILE` line when Step 9b-0 appended no claim. `REVIEW_PUBLICATION` is the mode 9b-2 reported on its `**Publication**:` line — `FULL…` → `full`, `STUB…` → `stub`, `OFF…` → `off` — else `{REVIEW_PUBLICATION}` as resolved in Step 0d. Capture its `EVIDENCE` line and its `**Body**:` / `**Comment**:` line, or its `TRACEABILITY: DEGRADED ({reason})` line, as `EVIDENCE_REFRESH`. It never blocks.
+Drop the `--evidence` pair when Step 9b-0 appended no claim. Run it only when `TARGET_DIR_REL` matches `^[A-Za-z0-9._/-]+$` — it carries the branch name, which a fork author picks — and `{pr_number}` is digits only; treat any other value as a failed run. The publication value is the mode 9b-2 reported on its `**Publication**:` line — `FULL…` → `full`, `STUB…` → `stub`, `OFF…` → `off` — else `{REVIEW_PUBLICATION}` as resolved in Step 0d. Capture its stdout as `EVIDENCE_REFRESH`: the `## PR Evidence` block's `EVIDENCE` line and its `**Body**:` / `**Comment**:` line, with any `TRACEABILITY: DEGRADED ({reason})` lines after them (exit 0), or the one line `TRACEABILITY: DEGRADED (evidence unavailable)` (exit 2). Empty stdout or any other exit is `TRACEABILITY: DEGRADED (evidence unavailable)`. It never blocks.
 
 ### Phase 9c: Merge Readiness (Report-only)
 
@@ -515,19 +509,17 @@ Omit the `EVIDENCE_FILE` line when Step 9b-0 appended no claim. `REVIEW_PUBLICAT
 
 Run this phase only when `REQUIRE_NON_AUTHOR_APPROVAL` is `true`; otherwise skip it and report it as SKIPPED.
 
-Spawn Git agent:
+Run the script inline — it is the whole `check-merge-readiness` operation, with no Git agent spawn — through the Bash tool with `timeout: 180000`:
 
+```bash
+cd {worktree} && node "$HOME/.devflow/scripts/verify-evidence.cjs" readiness --pr {pr_number} --require-non-author-approval true; echo "exit=$?"
 ```
-Agent(subagent_type="Git"):
-"OPERATION: check-merge-readiness
-PR_NUMBER: {pr_number}
-REQUIRE_NON_AUTHOR_APPROVAL: {REQUIRE_NON_AUTHOR_APPROVAL}
-WORKTREE_PATH: {worktree_path}  (omit if cwd)"
-```
+
+Pass `--require-non-author-approval true`: `REQUIRE_NON_AUTHOR_APPROVAL` is `true` here, or this phase would not run. `{pr_number}` is digits only. Its stdout is the `## Merge Readiness` block (exit 0), or the same block with `**Status**: DEGRADED ({reason})` and a `TRACEABILITY: DEGRADED ({reason})` line after it (exit 2); empty stdout or any other exit is `TRACEABILITY: DEGRADED (readiness unavailable)`.
 
 Include merge readiness verdict (READY / NOT_READY / DEGRADED) and its `- Test plan:` detail line in Phase 10 report. Never block on this result — report-only.
 
-If Git agent returns `TRACEABILITY: DEGRADED`: warn, proceed to Phase 10.
+If the script prints a `TRACEABILITY: DEGRADED` line: warn, proceed to Phase 10.
 
 ### Phase 10: Report
 
@@ -592,48 +584,24 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 /resolve (orchestrator - spawns agents only)
 │
 ├─ Phase 0: Worktree Discovery & Pre-flight
-│  ├─ Step 0a: git worktree list → filter resolvable
-│  ├─ Step 0b: Git agent (validate-branch) per worktree [parallel] ← + DIFF_FILES
-│  ├─ Step 0c: Target latest review directory per worktree
-<!-- learning:on -->
-│  └─ Step 0d: Load project decisions → DECISIONS_CONTEXT + EVIDENCE_POLICY + REVIEW_PUBLICATION
-<!-- learning:off -->
-│  └─ Step 0d: Load project context → EVIDENCE_POLICY + REVIEW_PUBLICATION
-<!-- learning:end -->
-│
 ├─ Phase 1: Parse issues from TARGET_DIR + extract confidence %
-│
 ├─ Phase 1b: Fetch external threads (evidence policy required)
-│  └─ Git agent (fetch-review-threads) → THREAD_MAP
-│
 ├─ Phase 2: Global Triage [Triage agent, opus, single agent]
-│  └─ ALL issues → verdict ledger by disposition (incl. DUPLICATE with duplicate_of)
-│
 ├─ Phase 3: Batch FIX_NOW issues (skip if empty; DUPLICATE issues never dispatched)
-│  └─ same-file sequential, distinct-file parallel, max 5/batch
-│
 ├─ Phase 4: Fix [Code agent × N, OPERATION: issue-fix, PUSH: false]
-│  └─ Returns Verification block per batch
-│
 ├─ Phase 5: Write resolution-summary.md (compaction safety; Tracked = "(pending)" or "(pending — TRACEABILITY: DEGRADED)" if manage-debt degrades)
-│
 ├─ Phase 6: Simplify [Simplify agent]
-│
 ├─ Phase 7: Verification Gate [Validate agent, haiku] + push + Code-fix agent validation-fix loop ≤2
-│
 ├─ Phase 8: CI Status Gate (conditional — skipped if no fixes or verification FAILED)
-│  └─ push, then ci-wait.cjs (inline, one wait ≤ 570 s) → Code-fix agent on FAILING (3 waits + 2 fixes per worktree)
-│
 ├─ Phase 9: Git agent (manage-debt) — FIX_SEPARATE + TECH_DEBT → backfill Tracked={ISSUE_REF} (or TRACEABILITY: DEGRADED on failure)
-│  SEQUENTIAL across worktrees
 │
 ├─ Phase 9b: Thread resolution + resolution comment
 │  ├─ Step 9b-0: verify-evidence.cjs --stale-out → ≤1 Test agent on the stale TPs (wrapped) — only after this run's push
 │  ├─ Step 9b-1: Git agent (resolve-review-threads) — evidence policy required
 │  ├─ Step 9b-2: Git agent (post-resolution-summary, REVIEW_PUBLICATION) — always-on
-│  └─ Step 9b-3: Git agent (update-pr-evidence) — only when the head moved
+│  └─ Step 9b-3: verify-evidence.cjs publish (inline, no Git spawn) — only when the head moved
 │
-├─ Phase 9c: Git agent (check-merge-readiness) — non-author approval required, report-only
+├─ Phase 9c: verify-evidence.cjs readiness (inline, no Git spawn) — non-author approval required, report-only
 │
 └─ Phase 10: Display results (resolution-summary.md written in Phase 5)
 ```
@@ -647,21 +615,11 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 | Fix attempt fails | Revert changes, mark BLOCKED, continue others |
 | Issue dependencies | Sequential chain, skip dependents if predecessor blocked |
 | No actionable issues | Report "No issues to resolve" |
-| Incomplete review directory (no review-summary.md) | Skip — resolve only targets complete reviews |
 | Latest review already resolved | Check bug-analysis fallback (Step 0c-5b); if also absent, skip worktree and suggest `/code-review` or `/bug-analysis` |
-| Legacy flat layout (no subdirectories) | Read flat *.md files directly (backwards compatible) |
 | `--review {timestamp}` in multi-worktree mode | Not supported — use `--path` + `--review` to target specific worktree + review |
-| Worktree pre-flight fails | Report failure, continue with other worktrees |
-| Empty FIX_NOW list | Skip Phases 3-4/6-8; still write full summary + run manage-debt if FIX_SEPARATE/TECH_DEBT exist |
-| ESCALATED security issues | Surfaced in ## Escalations + display callout; never routed to manage-debt |
-| DUPLICATE verdict without duplicate_of, or chained to another DUPLICATE | Treated as Triage failure — same retry-then-abort as a vanished id |
-| DUPLICATE issues in THREAD_MAP | Map ext-{N} to primary's verdict/verification status for thread reply |
-| Verification Gate FAILED after 2 attempts | Recorded as FAILED in ## Verification + blocking callout; CI gate skipped; proceed to Phase 9 (manage-debt) then Phase 10 (display) |
 | gh/GitHub absent | manage-debt degrades (`TRACEABILITY: DEGRADED ({reason})`); Tracked stays `(pending — TRACEABILITY: DEGRADED ({reason}))` — recorded, not dropped |
 | `EVIDENCE_POLICY` is `standard` | Phases 1b and 9b-step-1 are skipped; post-resolution-summary (Phase 9b step 2) still runs if a PR is known |
 | `REQUIRE_NON_AUTHOR_APPROVAL` is `false` | Phase 9c is skipped and reported as SKIPPED |
-| THREAD_MAP empty or DEGRADED | Phase 9b-1 skipped; resolution comment (Phase 9b-2) still posted if PR known |
-| No PR exists for post-resolution-summary | Git agent returns TRACEABILITY: DEGRADED; resolution-summary.md already on disk — not a blocker |
 | Public repo (`auto` mode) | Git agent probes visibility, posts counts-only STUB comment; full resolution report stays local |
 | `reviewPublication: off` | Git agent skips posting the resolution comment (OFF) — except that, only when `EVIDENCE_POLICY` is `required`, Step 0d passes `stub` and a counts-only STUB comment posts |
 | Fork PR this run cannot push to (no maintainer edits, no push access of its own) | validate-branch emits `TRACEABILITY: DEGRADED (cannot push to fork)` → `fork_no_push`: Phase 7 skips the push, Phase 8 is skipped, 9b-1 records FIXED threads as DEGRADED instead of citing unpushed commits; 9b-2 still posts the resolution comment; the head did not move, so 9b-0 and 9b-3 are skipped |
@@ -672,14 +630,8 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 
 1. **Orchestration only** - Command spawns agents, doesn't do git/resolve work itself
 2. **No agent grades its own homework** - Triage agent validates, Code agents fix, Validate agent verifies
-3. **Global triage first** - Single Triage agent sees all issues for cross-issue consistency; no issue may vanish
-4. **Git agent for git work** - All git operations go through Git agent
-5. **Parallel execution** - Distinct-file Code agent batches run in parallel; same-file batches sequential
-6. **Honest reporting** - Verification failure is recorded and displayed, never silenced
-7. **Complete tracking** - Every issue gets exactly one verdict in the ledger
-8. **Latest review by default** - Only process the most recent complete review
-9. **Auto-discover worktrees** - One command handles all resolvable branches
-10. **Traceability-aware** - Policy-gated ops (thread fetch/resolve, merge readiness) are skipped cleanly when the evidence policy does not ask for them; resolution comment (Phase 9b-2) is always-on; test-plan evidence is re-verified (≤1 Test agent) and refreshed only when this run moved the head (Steps 9b-0, 9b-3)
+3. **Git agent for git work** - All git operations go through Git agent; the CI wait, the evidence refresh and the merge-readiness check are inline scripts (plumbing, no model work)
+4. **Traceability-aware** - Policy-gated ops (thread fetch/resolve, merge readiness) are skipped cleanly when the evidence policy does not ask for them; resolution comment (Phase 9b-2) is always-on; test-plan evidence is re-verified (≤1 Test agent) and refreshed only when this run moved the head (Steps 9b-0, 9b-3)
 
 ## Output Artifact
 
