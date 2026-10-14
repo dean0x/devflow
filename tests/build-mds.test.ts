@@ -1251,6 +1251,104 @@ describe('dynamic-build: the post-merge Validate belongs to the workflow, and a 
 });
 
 // ---------------------------------------------------------------------------
+// 10c. dynamic-build.md: the wave merge arm stays flat and lives in one helper (#486 F6)
+//
+// The merge, the post-merge Validate and the undo were seven levels deep in the
+// per-ticket loop, and the depth hid the undo defect. Both guards have a named
+// collector and a seeded known-bad probe; each test asserts the corpus it read.
+// ---------------------------------------------------------------------------
+
+const WAVE_WHILE = 'while (remainingTickets.length > 0';
+const MERGE_HELPER = 'const mergeValidateUndo = async (ticketId, engineResult) => {';
+/** The deepest a per-ticket loop line may sit below the `while`, in block levels. */
+const MAX_LOOP_LEVELS = 5;
+
+/** The wave loop's lines: from the `while` line to the closing brace at column 0, or null unless the `while` occurs once. */
+function waveLoopLines(text: string): string[] | null {
+  const lines = text.split('\n');
+  const start = lines.findIndex(l => l.startsWith(WAVE_WHILE));
+  if (start === -1 || lines.filter(l => l.startsWith(WAVE_WHILE)).length !== 1) return null;
+  const end = lines.findIndex((l, i) => i > start && l === '}');
+  return end === -1 ? null : lines.slice(start, end + 1);
+}
+
+/** Named collector: loop lines more than MAX_LOOP_LEVELS block levels below the `while` (the fence indents two spaces a level). */
+function collectLoopDepthDefects(text: string): string[] {
+  const loop = waveLoopLines(text);
+  if (loop === null) return ['no wave loop'];
+  const out: string[] = [];
+  for (const line of loop) {
+    const levels = (line.length - line.trimStart().length) / 2;
+    if (line.trim() !== '' && levels > MAX_LOOP_LEVELS) out.push(`a loop line sits ${levels} levels below the while: ${line.trim().slice(0, 50)}`);
+  }
+  return out;
+}
+
+/**
+ * Named collector: where the merge helper is missing, misplaced, reaches the loop's state, or the
+ * loop no longer calls it once right after the engine verdict check.
+ */
+function collectMergeHelperDefects(text: string): string[] {
+  const at = text.indexOf(MERGE_HELPER);
+  if (at === -1 || text.indexOf(MERGE_HELPER, at + 1) !== -1) return ['the merge helper is not declared exactly once'];
+  const end = text.indexOf('\n};\n', at);
+  const loopAt = text.indexOf(WAVE_WHILE);
+  if (end === -1 || loopAt === -1) return ['the merge helper or the wave loop has no end'];
+  const out: string[] = [];
+  const shaAt = text.indexOf('const MERGE_SHA = ');
+  if (!(shaAt !== -1 && shaAt < at && end < loopAt)) out.push('the helper does not sit below MERGE_SHA and above the loop');
+  const body = text.slice(at, end);
+  for (const name of ['waveState', 'results', 'remainingTickets', 'WAVE_TICKETS', 'rowOf', 'reAskedThisDeadlock']) {
+    if (new RegExp(`\\b${name}\\b`).test(body)) out.push(`the helper reaches the loop's ${name}`);
+  }
+  if ((body.match(/agentType: "(\w+)"/g) ?? []).join(',') !== 'agentType: "Git",agentType: "Validate",agentType: "Git"') out.push('the helper does not spawn Git, Validate and Git, in that order');
+  if ((text.match(/if \(post\?\.verdict === "PASS"\) \{/g) ?? []).length !== 1) out.push('the PASS check does not appear exactly once');
+  const loop = text.slice(loopAt);
+  if ((loop.match(/await mergeValidateUndo\(ticketId, engineResult\)/g) ?? []).length !== 1) out.push('the loop does not call the helper exactly once');
+  const afterEngine = loop.slice(loop.lastIndexOf('await runSingleTicketEngine(')).split('\n').slice(1).map(l => l.trim()).filter(l => l !== '' && !l.startsWith('//') && !l.startsWith('<!--'));
+  if (!(afterEngine[0] ?? '').startsWith('if (["PASS", "UNVERIFIED"].includes(')) out.push('the verdict check is not the first statement after the engine call');
+  return out;
+}
+
+describe('dynamic-build: the wave merge arm stays flat and lives in one helper (#486 F6)', () => {
+  let compiled: string;
+  let source: string;
+  beforeAll(async () => {
+    compiled = await fs.readFile(path.join(BUILT_COMMANDS, 'dynamic-build.md'), 'utf-8');
+    source = readFileSync(path.join(COMMANDS_DIR, 'dynamic-build.mds'), 'utf-8');
+  });
+
+  it('no per-ticket loop line sits more than five block levels below the while', () => {
+    expect(waveLoopLines(compiled)?.length ?? 0, 'the compiled loop was not read').toBeGreaterThan(30);
+    expect(waveLoopLines(source)?.length ?? 0, 'the source loop was not read').toBeGreaterThan(30);
+    expect(collectLoopDepthDefects(compiled)).toEqual([]);
+    expect(collectLoopDepthDefects(source)).toEqual([]);
+  });
+
+  it('the merge, the post-merge Validate and the undo sit in one helper that takes only the ticket and its engine result', () => {
+    expect(collectMergeHelperDefects(compiled)).toEqual([]);
+    expect(collectMergeHelperDefects(source)).toEqual([]);
+  });
+
+  it('known-bad probes: a seven-level arm, a helper that reaches loop state and a helper that is missing are each reported', () => {
+    const deep = compiled.replace('        if (halted !== null) waveState.halted = halted;', '        if (halted !== null) {\n          if (kept) {\n            if (reason) {\n              waveState.halted = halted;\n            }\n          }\n        }');
+    expect(deep, 'the seed must land').not.toBe(compiled);
+    expect(collectLoopDepthDefects(deep)).toContain('a loop line sits 7 levels below the while: waveState.halted = halted;');
+    expect(collectLoopDepthDefects('nothing')).toEqual(['no wave loop']);
+    const reaching = compiled.replace('  const treeEqual = ', '  waveState.round++;\n  const treeEqual = ');
+    expect(reaching, 'the seed must land').not.toBe(compiled);
+    expect(collectMergeHelperDefects(reaching)).toEqual(["the helper reaches the loop's waveState"]);
+    const twice = compiled.replace('  const undo = await agent(', '  if (post?.verdict === "PASS") {\n    return done(true, "");\n  }\n  const undo = await agent(');
+    expect(twice, 'the seed must land').not.toBe(compiled);
+    expect(collectMergeHelperDefects(twice)).toEqual(['the PASS check does not appear exactly once']);
+    expect(collectMergeHelperDefects(compiled.replace(MERGE_HELPER, 'const mergeValidateUndo2 = async (ticketId, engineResult) => {'))).toEqual(['the merge helper is not declared exactly once']);
+    const earlyCall = compiled.replace('      // PASS and UNVERIFIED merge', '      void engineResult;\n      // PASS and UNVERIFIED merge');
+    expect(earlyCall, 'the seed must land').not.toBe(compiled);
+    expect(collectMergeHelperDefects(earlyCall)).toEqual(['the verdict check is not the first statement after the engine call']);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 11. knowledge outputs contain no feature-knowledge.cjs references (ported)
 // ---------------------------------------------------------------------------
 

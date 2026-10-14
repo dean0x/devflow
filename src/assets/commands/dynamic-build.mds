@@ -580,7 +580,6 @@ The wave workflow uses the same phases as SINGLE but wraps them in a wave loop. 
 Wave skeleton — compact reference (see `wave_loop()` doctrine for full semantics):
 
 ```js
-// Wave round loop: Design agent reader → per-ticket try/catch → cascade quarantine via next reader
 // runSingleTicketEngine(args) is the SINGLE skeleton above as a function of its OWN args: the wave's
 // args.issueNumber (the tracking issue, Pre-authoring step 5) is never in its scope.
 const WAVE_TICKETS = [...remainingTickets];  // the pre-fetch's refs, in input order — the wave block's row order
@@ -589,6 +588,32 @@ const results = {};  // ticketId → its row of the workflow's return; a ticket 
 const rowOf = (ticketId, r, merged, treeEqual = null) => ({ ticket: ticketId, ran: true, verdict: r?.verdict || r?.overallVerdict || null, merged, treeEqual, issuePrLink: r?.issuePrLink || "(none)", evaluateVerdict: r?.gate2?.evaluateVerdict, testVerdict: r?.gate2?.testVerdict, surviving: r?.survivingFindings?.length, coverageComplete: r?.reviewCoverage?.complete });
 const MAX_ROUNDS = Math.max(10, remainingTickets.length * 2 + 5);  // heuristic; always finite
 const MERGE_SHA = /^[0-9a-f]{40}$/;  // a SHA as git prints it: the only Git-reported value that reaches a later prompt
+// One ticket's merge, post-merge Validate and undo (D-WAVE-MERGE-VALIDATE: Git validates nothing).
+const mergeValidateUndo = async (ticketId, engineResult) => {
+  const merge = await agent(`Merge ${engineResult.branch} to ${INTEGRATION_BRANCH} locally. Include ticket ID ${ticketId} in the merge commit message. Do not push, and run no build or test.
+Check out ${INTEGRATION_BRANCH}, run git rev-parse ${INTEGRATION_BRANCH} as baseSha, then run git merge --no-ff ${engineResult.branch}. On a conflict, run git merge --abort; if the abort fails, return merged true with no mergeSha.
+Return: {"merged": true, "mergeSha": "<40-hex merge commit>", "treeEqual": <true when mergeSha^{tree} equals the tree of ${engineResult.branch}'s head>, "baseSha": "<40-hex integration HEAD before the merge>"} — or {"merged": false, "reason": "<why>"} when no merge is kept.`, { agentType: "Git" });
+  const treeEqual = merge?.merged === true && typeof merge.treeEqual === "boolean" ? merge.treeEqual : null;
+  const done = (kept, reason, halted = null) => ({ kept, reason, halted, treeEqual });
+  if (merge?.merged !== true) return done(false, merge?.reason || "merge failed");
+  const badSha = ![merge.mergeSha, merge.baseSha].every(v => MERGE_SHA.test(String(v)));
+  if (badSha || merge.mergeSha === merge.baseSha) {
+    // No usable SHA, or no commit added: stop taking merges. Fixed reasons; no rejected value is copied.
+    const reason = badSha ? "merge reported without a 40-hex mergeSha or baseSha; the integration branch may hold an unvalidated merge" : "merge added no commit, so the wave stopped: an unchanged HEAD cannot be checked. Check that the ticket branch holds its commits, then run the wave again.";
+    return done(false, reason, { ticket: ticketId, mergeSha: null, baseSha: null, reason });
+  }
+  const post = await agent(`Run build, typecheck, lint, and tests on ${INTEGRATION_BRANCH} after merging ${engineResult.branch} (merge commit ${merge.mergeSha}).
+Follow your Running commands block for every build and test command.
+Return: {"verdict": "PASS" | "FAIL", "details": "..."}`, { agentType: "Validate" });
+  if (post?.verdict === "PASS") {
+    return done(true, "");
+  }
+  const undo = await agent(`Undo the merge ${merge.mergeSha} on ${INTEGRATION_BRANCH}, only when no remote branch contains ${merge.mergeSha} and the HEAD of ${INTEGRATION_BRANCH} still equals ${merge.mergeSha}. On the integration branch run exactly this one command and no other that changes a branch or a remote: git reset --keep ${merge.mergeSha}^1
+Return: {"undone": true} — or {"undone": false, "reason": "<why>"} when you did not undo it.`, { agentType: "Git" });
+  if (undo?.undone === true) return done(false, "post-merge build red; merge undone");
+  const reason = `post-merge build red; merge not undone (${undo?.reason || "no reason given"})`;
+  return done(false, reason, { ticket: ticketId, mergeSha: merge.mergeSha, reason });
+};
 const waveState = { quarantined: [], round: 0, halted: null };
 let reAskedThisDeadlock = false;  // re-ask guard: re-ask once on empty ready-set, then escalate
 while (remainingTickets.length > 0 && waveState.round < MAX_ROUNDS && waveState.halted === null) {
@@ -614,7 +639,7 @@ Return: {"ready": [...ticket-ids], "blocked": [{"ticket": "id", "namedBlocker": 
     reAskedThisDeadlock = true;      // re-ask once with vacuous-truth rule quoted verbatim
     continue;
   }
-  reAskedThisDeadlock = false;  // reset on a non-empty ready set
+  reAskedThisDeadlock = false;
 
   for (const ticketId of ready) {
     try {
@@ -626,44 +651,16 @@ Return: {"ready": [...ticket-ids], "blocked": [{"ticket": "id", "namedBlocker": 
 <!-- learning:end -->
       // PASS and UNVERIFIED merge (verdict, or overallVerdict as the SINGLE alias); PARTIAL, FAIL, ESCALATED (the ticket-link and branch stops included) or no verdict quarantine.
       if (["PASS", "UNVERIFIED"].includes(engineResult.verdict || engineResult.overallVerdict)) {
-        // Git merges locally and validates nothing: the workflow owns the post-merge Validate (D-WAVE-MERGE-VALIDATE).
-        const merge = await agent(`Merge ${engineResult.branch} to ${INTEGRATION_BRANCH} locally. Include ticket ID ${ticketId} in the merge commit message. Do not push, and run no build or test.
-Check out ${INTEGRATION_BRANCH}, run git rev-parse ${INTEGRATION_BRANCH} as baseSha, then run git merge --no-ff ${engineResult.branch}. On a conflict, run git merge --abort; if the abort fails, return merged true with no mergeSha.
-Return: {"merged": true, "mergeSha": "<40-hex merge commit>", "treeEqual": <true when mergeSha^{tree} equals the tree of ${engineResult.branch}'s head>, "baseSha": "<40-hex integration HEAD before the merge>"} — or {"merged": false, "reason": "<why>"} when no merge is kept.`, { agentType: "Git" });
-        let kept = false;
-        let reason = merge?.reason || "merge failed";
-        const badSha = ![merge?.mergeSha, merge?.baseSha].every(v => MERGE_SHA.test(String(v)));
-        if (merge?.merged === true && (badSha || merge.mergeSha === merge.baseSha)) {
-          // No SHA to validate or undo by, or no commit added: stop taking merges. Fixed reasons; no rejected value is copied.
-          waveState.halted = { ticket: ticketId, mergeSha: null, baseSha: null, reason: badSha ? "merge reported without a 40-hex mergeSha or baseSha; the integration branch may hold an unvalidated merge" : "merge added no commit, so the wave stopped: an unchanged HEAD cannot be checked. Check that the ticket branch holds its commits, then run the wave again." };
-          reason = waveState.halted.reason;
-        } else if (merge?.merged === true) {
-          // Kept only when this Validate returns PASS; it always runs (treeEqual is recorded only).
-          const post = await agent(`Run build, typecheck, lint, and tests on ${INTEGRATION_BRANCH} after merging ${engineResult.branch} (merge commit ${merge.mergeSha}).
-Follow your Running commands block for every build and test command.
-Return: {"verdict": "PASS" | "FAIL", "details": "..."}`, { agentType: "Validate" });
-          if (post?.verdict === "PASS") {
-            kept = true;
-          } else {
-            const undo = await agent(`Undo the merge ${merge.mergeSha} on ${INTEGRATION_BRANCH}, only when no remote branch contains ${merge.mergeSha} and the HEAD of ${INTEGRATION_BRANCH} still equals ${merge.mergeSha}. On the integration branch run exactly this one command and no other that changes a branch or a remote: git reset --keep ${merge.mergeSha}^1
-Return: {"undone": true} — or {"undone": false, "reason": "<why>"} when you did not undo it.`, { agentType: "Git" });
-            if (undo?.undone === true) {
-              reason = "post-merge build red; merge undone";
-            } else {
-              // A red merge left in place would poison every later ticket: halt and name the red HEAD.
-              reason = `post-merge build red; merge not undone (${undo?.reason || "no reason given"})`;
-              waveState.halted = { ticket: ticketId, mergeSha: merge.mergeSha, reason };
-            }
-          }
-        }
-        results[ticketId] = rowOf(ticketId, engineResult, kept, merge?.merged === true && typeof merge.treeEqual === "boolean" ? merge.treeEqual : null);
+        const { kept, reason, halted, treeEqual } = await mergeValidateUndo(ticketId, engineResult);
+        if (halted !== null) waveState.halted = halted;
+        results[ticketId] = rowOf(ticketId, engineResult, kept, treeEqual);
         if (!kept) waveState.quarantined.push({ ticket: ticketId, reason });
       } else {
         results[ticketId] = rowOf(ticketId, engineResult, false);
         waveState.quarantined.push({ ticket: ticketId, reason: engineResult.escalations?.[0]?.description || "engine fail/escalated" });
       }
     } catch (err) {
-      // One ticket's crash/stall never kills the wave — quarantine it; cascade propagates to dependents via the next reader round
+      // Quarantine the ticket: the cascade reaches its dependents via the next reader round
       results[ticketId] = rowOf(ticketId, null, false);
       waveState.quarantined.push({ ticket: ticketId, reason: `engine crash: ${String(err)}` });
     }
