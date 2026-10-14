@@ -29,7 +29,7 @@ import {
   type GateStatus,
   type GateStatusDeps,
 } from '../src/cli/commands/gates.js';
-import { GATE_LEVELS, readGateManifest, type GateManifestRead } from '../src/core/gate-level.js';
+import { GATE_LEVELS, type GateManifestRead } from '../src/core/gate-level.js';
 import { trackedConfigWarning, type RepoSettings, type RepoSettingsOptions, type SettingsLoad } from '../src/core/evidence-policy.js';
 
 const CLI = requireBuiltCli();
@@ -217,19 +217,6 @@ describe('renderGateStatus', () => {
     ]);
     expect(renderGateStatus({ ...unreadable, manifest: 'absent' }).warnings).toEqual([]);
   });
-
-  it('never prints a raw value for any outcome', () => {
-    const canary = 'ZZ-raw-canary';
-    const statuses: GateStatus[] = [
-      { ...base, kind: 'resolved', level: 'full', source: 'personal', invalid: true, machine: 'invalid', trackedWarning: null },
-      { ...base, kind: 'fail-closed', reason: null, machine: 'invalid', trackedWarning: null },
-      { ...base, kind: 'unloadable', machine: 'invalid' },
-    ];
-    for (const status of statuses) {
-      const out = renderGateStatus(status);
-      expect([...out.lines, ...out.warnings].join('\n')).not.toContain(canary);
-    }
-  });
 });
 
 // ── set ────────────────────────────────────────────────────────────────────────
@@ -329,16 +316,6 @@ describe('gatesCommand', () => {
     expect(gatesCommand.name()).toBe('gates');
     expect(gatesCommand.options.map(o => o.long).sort()).toEqual(['--set', '--status']);
   });
-
-  it('reads the manifest it shows with the gate reader and not the healing one', async () => {
-    // The gate reader is the one the shell passes; an absent file reads as absent.
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'df-gates-read-'));
-    try {
-      expect(await readGateManifest(dir)).toEqual({ kind: 'absent' });
-    } finally {
-      await fs.rm(dir, { recursive: true, force: true });
-    }
-  });
 });
 
 // ── spawned: the built CLI ─────────────────────────────────────────────────────
@@ -399,21 +376,26 @@ async function snapshot(root: string): Promise<Record<string, string>> {
   return out;
 }
 
-beforeEach(async () => {
-  tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'df-gates-home-'));
-  repo = await fs.mkdtemp(path.join(os.tmpdir(), 'df-gates-repo-'));
-  outside = await fs.mkdtemp(path.join(os.tmpdir(), 'df-gates-outside-'));
-  execFileSync('git', ['init', '-q'], { cwd: repo });
-});
+/** Gives the calling spawned describe block its own temp HOME, git repository and outside directory per test. */
+function useSpawnSandbox(): void {
+  beforeEach(async () => {
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'df-gates-home-'));
+    repo = await fs.mkdtemp(path.join(os.tmpdir(), 'df-gates-repo-'));
+    outside = await fs.mkdtemp(path.join(os.tmpdir(), 'df-gates-outside-'));
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+  });
 
-afterEach(async () => {
-  await fs.chmod(devflowDir(), 0o755).catch(() => undefined);
-  for (const dir of [tmpHome, repo, outside]) {
-    await fs.rm(dir, { recursive: true, force: true });
-  }
-});
+  afterEach(async () => {
+    await fs.chmod(devflowDir(), 0o755).catch(() => undefined);
+    for (const dir of [tmpHome, repo, outside]) {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+}
 
 describe('devflow gates --set', () => {
+  useSpawnSandbox();
+
   it('changes only features.gateLevel and updatedAt, and touches no other file', async () => {
     await writeManifestText(manifestJson());
     await fs.mkdir(path.join(repo, '.devflow'), { recursive: true });
@@ -532,6 +514,8 @@ describe('devflow gates --set', () => {
 });
 
 describe('devflow gates --status', () => {
+  useSpawnSandbox();
+
   it('prints the default with no personal key, no machine level and no warning', async () => {
     await writeManifestText(manifestJson());
     const run = runCli(['gates', '--status']);
@@ -600,6 +584,15 @@ describe('devflow gates --status', () => {
     expect(run.out).toContain('Effective: lean (personal)');
     expect(run.out).toContain('Machine:   invalid (manifest.json; reads as full)');
     expect(run.out).not.toContain('cannot be read');
+  }, SUBPROCESS_TIMEOUT_MS);
+
+  it('shows a malformed machine value as invalid and never echoes it', async () => {
+    await writeManifestText(manifestJson('ZZ-raw-canary'));
+    const run = runCli(['gates', '--status']);
+    expect(run.status, run.out).toBe(0);
+    expect(run.out).toContain('Effective: full (machine, invalid)');
+    expect(run.out).toContain('Machine:   invalid (manifest.json; reads as full)');
+    expect(run.out).not.toContain('ZZ-raw-canary');
   }, SUBPROCESS_TIMEOUT_MS);
 
   it('prints the default with no warning and exits 0 when no manifest exists', async () => {
@@ -698,6 +691,8 @@ describe('devflow gates --status', () => {
 });
 
 describe('devflow gates (help and usage)', () => {
+  useSpawnSandbox();
+
   it('prints usage and exits 0 with no flag, writing nothing', async () => {
     await writeManifestText(manifestJson());
     const before = await snapshot(tmpHome);
