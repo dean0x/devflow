@@ -73,6 +73,16 @@ afterEach(() => {
   for (const ctx of made.splice(0)) disposeSpawnContext(ctx);
 });
 
+/** The message `run` throws, or the empty string when it does not throw. */
+function thrownMessage(run: () => void): string {
+  try {
+    run();
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  return '';
+}
+
 /** One git call in `cwd`, under the sandboxed env of the context (never the real global config). */
 function git(ctx: SpawnContext, cwd: string, ...args: string[]): { status: number | null; stdout: string } {
   const result = spawnSync('git', ['-c', 'core.fsmonitor=false', ...args], {
@@ -235,15 +245,6 @@ describe('disposeSpawnContext', () => {
     ['a sibling that shares the temp-root prefix', () => `${realTmp}-evil-${randomUUID()}`],
     ['a path that climbs out of the temp root', () => absent(path.join(realTmp, '..'))],
   ];
-
-  function thrownMessage(run: () => void): string {
-    try {
-      run();
-    } catch (error) {
-      return error instanceof Error ? error.message : String(error);
-    }
-    return '';
-  }
 
   it('removes both directories of a real context', () => {
     const ctx = createSpawnContext();
@@ -574,14 +575,7 @@ describe('the checkout status check', () => {
     const ctx = track(createSpawnContext());
     const reader = statusSequence('', '?? .claudeignore\n M .gitignore\n');
 
-    const message = (() => {
-      try {
-        installDevflow(ctx, fakeInstall(ctx), reader);
-        return '';
-      } catch (error) {
-        return error instanceof Error ? error.message : String(error);
-      }
-    })();
+    const message = thrownMessage(() => installDevflow(ctx, fakeInstall(ctx), reader));
 
     expect(message).toContain('added   ?? .claudeignore');
     expect(message).toContain('added    M .gitignore');
