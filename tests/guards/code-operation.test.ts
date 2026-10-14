@@ -366,13 +366,13 @@ describe('each variant states the mode contract it owns (D-CODE-OPERATION-MODES,
 // `refactor-body-max`: lowered by a pass that cut the artifact, never raised to fit one that grew.
 
 /** The compiled Code agent body, in bytes. Registered as `code-body-max`; lowered, never raised. */
-const CODE_BODY_MAX_BYTES = 10_740
+const CODE_BODY_MAX_BYTES = 10_737
 
 /** The compiled Fix agent body, in bytes. Registered as `fix-body-max`; lowered, never raised. */
-const FIX_BODY_MAX_BYTES = 8_507
+const FIX_BODY_MAX_BYTES = 8_504
 
 /** The compiled Refactor agent body, in bytes. Registered as `refactor-body-max`; lowered, never raised. */
-const REFACTOR_BODY_MAX_BYTES = 6_415
+const REFACTOR_BODY_MAX_BYTES = 6_412
 
 const BODY_CEILINGS: Readonly<Record<string, number>> = {
   'Code': CODE_BODY_MAX_BYTES,

@@ -56,7 +56,7 @@ Run builds, typechecks, lints and tests in the foreground, each with an explicit
 
 ## Principles
 
-1. **Read once** — Never re-read an unchanged file. For a file over 400 lines, or a second look, `grep -n` first, then Read only that range (`offset`, `limit`).
+1. **Read once** - Never re-read an unchanged file. For a file over 400 lines, or a second look, `grep -n` first, then Read only that range (`offset`, `limit`)
 2. **Small, focused changes** - Don't scope creep beyond the plan
 3. **Fail honestly** - If blocked, report clearly with what was completed
 
