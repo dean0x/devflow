@@ -131,7 +131,7 @@ export interface ParsedSignals {
   readonly bashResultBytes: Readonly<Record<BashClass, number>>;
   /** test/build runs whose command carries a quiet flag (`--reporter=dot`, `--silent`, `--pretty false` ...). */
   readonly quietTestRuns: number;
-  /** Edit and Write calls; `distinct` is the number of different paths they named. */
+  /** Writes by Edit, Write, MultiEdit, NotebookEdit and Bash (see `bashWrittenPaths`); `distinct` is the number of different paths they named. */
   readonly filesWritten: { readonly calls: number; readonly distinct: number };
 }
 
@@ -206,6 +206,21 @@ const SEARCH_TOOLS: ReadonlySet<string> = new Set(['grep', 'egrep', 'fgrep', 'ug
 const READ_TOOLS: ReadonlySet<string> = new Set(['cat', 'sed', 'head', 'tail', 'less', 'more', 'nl', 'bat', 'awk']);
 const PACKAGE_MANAGERS: ReadonlySet<string> = new Set(['npm', 'pnpm', 'yarn', 'bun']);
 const PACKAGE_RUNNERS: ReadonlySet<string> = new Set(['npx', 'bunx', 'pnpx']);
+const MAX_BASH_WRITES = 64;
+const MAX_HEREDOCS = 16;
+const MAX_HEREDOCS_PER_LINE = 4;
+const HEREDOC_RE = /(?<!<)<<(-?)[ \t]*(?:'([^'\n]{1,64})'|"([^"\n]{1,64})"|\\?([A-Za-z_][A-Za-z0-9_]{0,63}))/g;
+const PYTHON_HEADER_RE = /(?:^|[\s;&|(`/])python[0-9.]*(?=\s|$)/;
+const PYTHON_OPEN_WRITE_RE = /\bopen\(\s*(['"])([^'"\\\n]{1,512})\1\s*,\s*(['"])[wa][bt+]*\3/g;
+const IN_PLACE_RE = /^(?:-[A-Za-z]*i|--in-place(?:=|$))/;
+const FD_NUMBER_RE = /^[0-9]+$/;
+const BLANK_RE = /^\s$/;
+const TEST_CLOSE_FOLLOW_RE = /^[\s;&|)]$/;
+/**
+ * Write detection also reads past `if`, `elif`, `while`, `until` and `{`, so `if cp a b; then` counts
+ * as a write. `classifyBash` leaves them out of PREFIX_WORDS: skipping them there would change its classes.
+ */
+const WRITE_PREFIX_WORDS: ReadonlySet<string> = new Set([...PREFIX_WORDS, 'if', 'elif', 'while', 'until', '{']);
 const QUIET_FLAG_RE =
   /--reporter[= ](?:dot|min|basic|silent)\b|--silent\b|--quiet\b|--pretty[= ]false\b|(?:^|\s)-q(?:\s|$)|--loglevel[= ](?:silent|error|warn)\b/;
 
@@ -287,6 +302,388 @@ export function isQuietTestRun(command: string): boolean {
   return QUIET_FLAG_RE.test(command.slice(0, MAX_BASH_COMMAND_CHARS));
 }
 
+interface Word {
+  readonly value: string;
+  /** The word holds a `$` expansion or a backtick outside single quotes: its value is not a known path. */
+  readonly dynamic: boolean;
+}
+
+type BashToken =
+  | { readonly kind: 'sep' }
+  | { readonly kind: 'in' }
+  | { readonly kind: 'out'; readonly dup: boolean }
+  | { readonly kind: 'word'; readonly word: Word };
+
+interface HeredocSplit {
+  /** The command with every heredoc body removed. */
+  readonly code: string;
+  /** The body of each heredoc whose command line runs python. */
+  readonly pythonBodies: readonly string[];
+}
+
+function heredocEnd(lines: readonly string[], from: number, delimiter: string, stripTabs: boolean): number {
+  for (let i = from; i < lines.length; i += 1) {
+    const line = lines[i] ?? '';
+    if ((stripTabs ? line.replace(/^\t+/, '') : line) === delimiter) return i;
+  }
+  return -1;
+}
+
+/** A `<<` with no closing line after it is text, not a heredoc, so a stray `<<` cannot hide the rest of the command. */
+function splitHeredocs(text: string): HeredocSplit {
+  const lines = text.split('\n', MAX_BASH_COMMAND_CHARS);
+  const code: string[] = [];
+  const pythonBodies: string[] = [];
+  let heredocs = 0;
+  let at = 0;
+  while (at < lines.length) {
+    const line = lines[at] ?? '';
+    at += 1;
+    code.push(line);
+    let onLine = 0;
+    for (const mark of line.matchAll(HEREDOC_RE)) {
+      if (heredocs >= MAX_HEREDOCS || onLine >= MAX_HEREDOCS_PER_LINE) break;
+      onLine += 1;
+      const end = heredocEnd(lines, at, mark[2] ?? mark[3] ?? mark[4] ?? '', mark[1] === '-');
+      if (end < 0) continue;
+      if (PYTHON_HEADER_RE.test(line)) pythonBodies.push(lines.slice(at, end).join('\n'));
+      at = end + 1;
+      heredocs += 1;
+    }
+  }
+  return { code: code.join('\n'), pythonBodies };
+}
+
+/** The scan steps that all zone scans of one `lexBash` call may still spend. */
+interface ZoneBudget {
+  left: number;
+}
+
+/** Zone scan steps per character of text. An unclosed zone scans to the end, so the budget is what keeps `lexBash` linear. */
+export const ZONE_STEPS_PER_CHAR = 4;
+
+/** Takes one scan step from the budget. False when none is left, which ends the scan: the zone is text. */
+function takeStep(budget: ZoneBudget): boolean {
+  if (budget.left <= 0) return false;
+  budget.left -= 1;
+  return true;
+}
+
+/** The index of the `))` that closes an arithmetic `((` whose body starts at `from`, or -1 when the text there is nested subshells. */
+function arithmeticEnd(text: string, from: number, budget: ZoneBudget): number {
+  let depth = 0;
+  for (let i = from; i < text.length && takeStep(budget); i += 1) {
+    const c = text[i];
+    if (c === '(') depth += 1;
+    else if (c === ')') {
+      if (depth === 0) return text[i + 1] === ')' ? i + 1 : -1;
+      depth -= 1;
+    }
+  }
+  return -1;
+}
+
+/** The index of the `]]` word that closes a `[[` test whose body starts at `from`, or -1 when none does. Quoted text and escapes are skipped. */
+function testExpressionEnd(text: string, from: number, budget: ZoneBudget): number {
+  let quote = '';
+  for (let i = from; i < text.length && takeStep(budget); i += 1) {
+    const c = text[i];
+    if (quote !== '') {
+      if (c === '\\' && quote === '"') i += 1;
+      else if (c === quote) quote = '';
+    } else if (c === '\\') {
+      i += 1;
+    } else if (c === "'" || c === '"') {
+      quote = c;
+    } else if (c === ']' && text[i + 1] === ']' && BLANK_RE.test(text[i - 1] ?? '')) {
+      const after = text[i + 2];
+      if (after === undefined || TEST_CLOSE_FOLLOW_RE.test(after)) return i + 1;
+    }
+  }
+  return -1;
+}
+
+/**
+ * The index of the last character of the `$(( ))`, `(( ))` or `[[ ]]` zone that starts at `at`, or -1
+ * when none starts there, the zone has no closer or the budget runs out. A `>` or `<` in such a zone
+ * compares values, so it is no redirect. An unclosed zone is text, so a stray `[[` cannot hide the
+ * rest of the command. `((` and `[[` open a zone only at the start of a word.
+ */
+function zoneEnd(text: string, at: number, wordOpen: boolean, budget: ZoneBudget): number {
+  if (text.startsWith('$((', at)) return arithmeticEnd(text, at + 3, budget);
+  if (wordOpen) return -1;
+  if (text.startsWith('((', at)) return arithmeticEnd(text, at + 2, budget);
+  if (text.startsWith('[[', at) && BLANK_RE.test(text[at + 2] ?? '')) return testExpressionEnd(text, at + 3, budget);
+  return -1;
+}
+
+/**
+ * Splits shell text into words, separators and redirect operators. Quotes group text and are
+ * dropped, so a `>` inside them is part of a word. A `[[ ]]` or `(( ))` zone becomes one separator
+ * and a `$(( ))` zone becomes a dynamic word, so a comparison `>` inside them is no redirect. Every
+ * branch moves forward, and all zone scans share one budget of `ZONE_STEPS_PER_CHAR` steps per
+ * character, so the work is linear in the text length. Once the budget is spent, a zone is text.
+ */
+export function lexBash(text: string, budget: ZoneBudget = { left: ZONE_STEPS_PER_CHAR * text.length }): BashToken[] {
+  const tokens: BashToken[] = [];
+  let value = '';
+  let dynamic = false;
+  let open = false;
+  const flush = (): void => {
+    if (open) tokens.push({ kind: 'word', word: { value, dynamic } });
+    value = '';
+    dynamic = false;
+    open = false;
+  };
+  /** An fd number glued to a redirect (`2>file`) belongs to the operator, not to the arguments. */
+  const dropFdNumber = (): void => {
+    if (open && FD_NUMBER_RE.test(value)) {
+      value = '';
+      open = false;
+    } else flush();
+  };
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text[i] ?? '';
+    const zone = c === '$' || c === '(' || c === '[' ? zoneEnd(text, i, open, budget) : -1;
+    if (zone >= 0) {
+      if (c === '$') {
+        open = true;
+        dynamic = true;
+      } else {
+        flush();
+        tokens.push({ kind: 'sep' });
+      }
+      i = zone;
+    } else if (c === ' ' || c === '\t' || c === '\r') flush();
+    else if (c === '\n' || c === ';' || c === '(' || c === ')' || c === '`' || c === '|') {
+      flush();
+      tokens.push({ kind: 'sep' });
+    } else if (c === '#' && !open) {
+      const newline = text.indexOf('\n', i);
+      i = newline < 0 ? text.length : newline - 1;
+    } else if (c === '&') {
+      flush();
+      if (text[i + 1] === '>') {
+        i += text[i + 2] === '>' ? 2 : 1;
+        tokens.push({ kind: 'out', dup: false });
+      } else tokens.push({ kind: 'sep' });
+    } else if (c === '>') {
+      dropFdNumber();
+      const next = text[i + 1];
+      if (next === '>' || next === '|') i += 1;
+      const dup = next === '&';
+      if (dup) i += 1;
+      tokens.push({ kind: 'out', dup });
+    } else if (c === '<') {
+      dropFdNumber();
+      while (text[i + 1] === '<') i += 1;
+      if (text[i + 1] === '&') i += 1;
+      tokens.push({ kind: 'in' });
+    } else if (c === "'") {
+      open = true;
+      const close = text.indexOf("'", i + 1);
+      const end = close < 0 ? text.length : close;
+      value += text.slice(i + 1, end);
+      i = end;
+    } else if (c === '"') {
+      open = true;
+      let j = i + 1;
+      for (; j < text.length && text[j] !== '"'; j += 1) {
+        const inner = text[j] ?? '';
+        if (inner === '\\' && j + 1 < text.length) {
+          j += 1;
+          value += text[j] ?? '';
+        } else {
+          if (inner === '$' || inner === '`') dynamic = true;
+          value += inner;
+        }
+      }
+      i = j;
+    } else if (c === '\\') {
+      const next = text[i + 1];
+      if (next !== undefined && next !== '\n') {
+        open = true;
+        value += next;
+      }
+      if (next !== undefined) i += 1;
+    } else {
+      open = true;
+      if (c === '$') dynamic = true;
+      value += c;
+    }
+  }
+  flush();
+  return tokens;
+}
+
+function literalPath(word: Word | undefined): string | null {
+  if (word === undefined || word.dynamic || word.value === '' || word.value.startsWith('/dev/')) return null;
+  return word.value;
+}
+
+function trimSlashes(path: string): string {
+  let end = path.length;
+  while (end > 1 && path[end - 1] === '/') end -= 1;
+  return path.slice(0, end);
+}
+
+function baseName(path: string): string {
+  const trimmed = trimSlashes(path);
+  return trimmed.slice(trimmed.lastIndexOf('/') + 1);
+}
+
+function within(dir: string, source: string): string {
+  const base = trimSlashes(dir);
+  return `${base.endsWith('/') ? base : `${base}/`}${baseName(source)}`;
+}
+
+function teeWrites(args: readonly Word[]): string[] {
+  return args.flatMap(word => (word.value.startsWith('-') ? [] : (literalPath(word) ?? [])));
+}
+
+/** `sed -i` writes the files after the script; a script given with `-e` or `-f` leaves every positional a file. */
+function sedWrites(args: readonly Word[]): string[] {
+  if (!args.some(word => IN_PLACE_RE.test(word.value))) return [];
+  const positional: Word[] = [];
+  let hasScript = false;
+  let skip = false;
+  for (let i = 0; i < args.length; i += 1) {
+    const word = args[i];
+    if (word === undefined) continue;
+    if (skip) {
+      skip = false;
+    } else if (word.value.startsWith('-') && word.value.length > 1) {
+      if (word.value === '-e' || word.value === '-f' || word.value === '--expression' || word.value === '--file') {
+        hasScript = true;
+        skip = true;
+      } else if (word.value.startsWith('--expression=') || word.value.startsWith('--file=')) {
+        hasScript = true;
+      } else if (word.value === '-i' && args[i + 1]?.value === '' && args[i + 1]?.dynamic === false) {
+        skip = true; // BSD sed: the empty word is the backup suffix
+      }
+    } else positional.push(word);
+  }
+  const files = hasScript ? positional : positional.slice(1);
+  return files.flatMap(word => literalPath(word) ?? []);
+}
+
+/** `cp` and `mv` write the last operand, or `dir/name` for each source when the last operand is a directory. */
+function copyWrites(args: readonly Word[]): string[] {
+  const positional: Word[] = [];
+  let targetDir: Word | undefined;
+  let skip = false;
+  for (let i = 0; i < args.length; i += 1) {
+    const word = args[i];
+    if (word === undefined) continue;
+    if (skip) {
+      skip = false;
+      targetDir = word;
+    } else if (word.value === '-t' || word.value === '--target-directory') {
+      skip = true;
+    } else if (word.value.startsWith('--target-directory=')) {
+      targetDir = { value: word.value.slice('--target-directory='.length), dynamic: word.dynamic };
+    } else if (!word.value.startsWith('-') || word.value === '-') {
+      positional.push(word);
+    }
+  }
+  const sourceNames = (sources: readonly Word[]): string[] => sources.flatMap(word => literalPath(word) ?? []);
+  if (targetDir !== undefined) {
+    const dir = literalPath(targetDir);
+    return dir === null ? [] : sourceNames(positional).map(source => within(dir, source));
+  }
+  const dest = positional[positional.length - 1];
+  const destPath = positional.length < 2 ? null : literalPath(dest);
+  if (destPath === null) return [];
+  const sources = positional.slice(0, -1);
+  if (sources.length === 1 && !destPath.endsWith('/')) return [destPath];
+  return sourceNames(sources).map(source => within(destPath, source));
+}
+
+function commandWrites(words: readonly Word[]): string[] {
+  let at = 0;
+  while (at < words.length) {
+    const value = words[at]?.value ?? '';
+    if (!ENV_ASSIGN_RE.test(value) && !WRITE_PREFIX_WORDS.has(value)) break;
+    at += 1;
+  }
+  const head = words[at];
+  if (head === undefined) return [];
+  const args = words.slice(at + 1);
+  switch (head.value.slice(head.value.lastIndexOf('/') + 1)) {
+    case 'tee':
+      return teeWrites(args);
+    case 'sed':
+      return sedWrites(args);
+    case 'cp':
+    case 'mv':
+      return copyWrites(args);
+    default:
+      return [];
+  }
+}
+
+function pythonWrites(bodies: readonly string[]): string[] {
+  const paths: string[] = [];
+  for (const body of bodies) {
+    for (const found of body.matchAll(PYTHON_OPEN_WRITE_RE)) {
+      const path = found[2] ?? '';
+      if (path !== '' && !path.startsWith('/dev/')) paths.push(path);
+    }
+  }
+  return paths;
+}
+
+/**
+ * The files a Bash command writes, one entry per write (a path written twice appears twice), at most 64.
+ * Like `classifyBash` it reads the text lexically and can be fooled by unusual shell. It finds:
+ *   - `>` and `>>` targets (also `2>`, `&>`, `>|`), `tee [-a] path`, `sed -i` files and `cp`/`mv`
+ *     destinations (`cat > path <<EOF` is a `>` target);
+ *   - `open('x', 'w')` and `open('x', 'a')` inside a heredoc that feeds python, the one pattern read
+ *     from a heredoc body.
+ * It skips the body of every other heredoc, and a `>` inside quotes, a comment or a `[[ ]]`, `(( ))`
+ * or `$(( ))` zone, where it compares values. It reads past `if`, `while`, `{` and the like. It never counts
+ * `/dev/...` targets, `>&` fd redirects (`2>&1`) or a target with a `$` expansion (`"$LOG"`,
+ * `${OUT}`, `$(mktemp)`), which is how a `mktemp` path reaches a redirect. A path stays as written,
+ * not resolved against the working directory, so `a.ts` here and `/w/a.ts` from Edit count as two
+ * distinct paths. The text is cut at 8,192
+ * characters, at 16 heredocs and at 64 writes, and every loop is bounded by those. The zone scans
+ * share a step budget that is linear in the text length.
+ */
+export function bashWrittenPaths(command: string): string[] {
+  const { code, pythonBodies } = splitHeredocs(command.slice(0, MAX_BASH_COMMAND_CHARS));
+  const written: string[] = [];
+  const add = (paths: readonly string[]): void => {
+    for (const path of paths) {
+      if (written.length < MAX_BASH_WRITES) written.push(path);
+    }
+  };
+  const tokens = lexBash(code);
+  let segment: Word[] = [];
+  const endSegment = (): void => {
+    add(commandWrites(segment));
+    segment = [];
+  };
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    if (token === undefined) continue;
+    if (token.kind === 'sep') {
+      endSegment();
+    } else if (token.kind === 'word') {
+      segment.push(token.word);
+    } else {
+      // A redirect operator takes the next word as its operand, so that word is not an argument.
+      const operand = tokens[i + 1];
+      if (operand?.kind !== 'word') continue;
+      i += 1;
+      const target = token.kind === 'out' && !token.dup ? literalPath(operand.word) : null;
+      if (target !== null) add([target]);
+    }
+  }
+  endSegment();
+  add(pythonWrites(pythonBodies));
+  return written;
+}
+
 function ledgerKind(path: string): 'index' | 'bodies' | null {
   const rooted = path.startsWith('/') ? path : `/${path}`;
   if (rooted.endsWith('/.devflow/learning/index.md')) return 'index';
@@ -342,7 +739,7 @@ interface SignalCollector {
   prompt(text: string): void;
   /** Assistant text: ADR/PF citations. */
   text(value: string): void;
-  /** A deduplicated tool_use: Read, Edit, Write and Bash. */
+  /** A deduplicated tool_use: Read, Edit, Write, MultiEdit, NotebookEdit and Bash. */
   toolUse(name: unknown, id: string, input: Record<string, unknown>): void;
   /** A user entry's content: Bash results. */
   toolResults(content: unknown): void;
@@ -389,15 +786,15 @@ function createSignalCollector(caps: { readonly maxReadPaths: number; readonly m
     if (set.size < caps.maxReadPaths) set.add(key);
     else pathsCapHit = true;
   };
-  const pathOf = (input: Record<string, unknown>): string | null => {
-    const path = input['file_path'];
-    if (typeof path !== 'string' || path === '') return null;
-    return path.length > MAX_PATH_CHARS ? path.slice(0, MAX_PATH_CHARS) : path;
+  const clip = (path: string): string => (path.length > MAX_PATH_CHARS ? path.slice(0, MAX_PATH_CHARS) : path);
+  const pathOf = (input: Record<string, unknown>, key: string): string | null => {
+    const path = input[key];
+    return typeof path === 'string' && path !== '' ? clip(path) : null;
   };
   const rangePart = (value: unknown): string => (typeof value === 'number' ? String(value) : '');
 
   const read = (input: Record<string, unknown>): void => {
-    const path = pathOf(input);
+    const path = pathOf(input, 'file_path');
     if (path === null) return;
     readCalls += 1;
     if (typeof input['offset'] === 'number' || typeof input['limit'] === 'number') ranged += 1;
@@ -413,11 +810,14 @@ function createSignalCollector(caps: { readonly maxReadPaths: number; readonly m
     track(readRanges, range);
   };
 
-  const write = (input: Record<string, unknown>): void => {
-    const path = pathOf(input);
-    if (path === null) return;
+  const recordWrite = (path: string): void => {
     writeCalls += 1;
-    track(writtenPaths, path);
+    track(writtenPaths, clip(path));
+  };
+
+  const write = (input: Record<string, unknown>, key: string): void => {
+    const path = pathOf(input, key);
+    if (path !== null) recordWrite(path);
   };
 
   const bash = (id: string, input: Record<string, unknown>): void => {
@@ -425,6 +825,7 @@ function createSignalCollector(caps: { readonly maxReadPaths: number; readonly m
     if (typeof command !== 'string') return;
     const found = classifyBash(command);
     bashCalls[found] += 1;
+    for (const path of bashWrittenPaths(command)) recordWrite(path);
     if (found === 'test/build' && isQuietTestRun(command)) quietTestRuns += 1;
     if (id === '') return;
     if (pendingBash.size >= MAX_PENDING_BASH) {
@@ -454,7 +855,8 @@ function createSignalCollector(caps: { readonly maxReadPaths: number; readonly m
     },
     toolUse(name, id, input) {
       if (name === 'Read') read(input);
-      else if (name === 'Edit' || name === 'Write') write(input);
+      else if (name === 'Edit' || name === 'Write' || name === 'MultiEdit') write(input, 'file_path');
+      else if (name === 'NotebookEdit') write(input, 'notebook_path');
       else if (name === 'Bash') bash(id, input);
     },
     toolResults(content) {

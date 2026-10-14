@@ -42,6 +42,7 @@
  */
 
 import { describe, it, expect, afterAll } from 'vitest'
+import { execFileSync } from 'child_process'
 import { createRequire } from 'module'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
@@ -60,7 +61,7 @@ import {
   walkFiles,
   type OrderRule,
 } from '../helpers.js'
-import { PROJECT_CONFIG_LIB, SETTINGS_SCRIPT } from '../evidence-policy/scripted-shim.js'
+import { PROJECT_CONFIG_LIB, SETTINGS_SCRIPT, scopedEnv } from '../evidence-policy/scripted-shim.js'
 import { PR_EVIDENCE_SCRIPT, VERIFY_EVIDENCE_SCRIPT } from './seam.js'
 
 /** Transcribed from the script's JSDoc — only what this suite calls. */
@@ -1003,7 +1004,7 @@ function collectPhase8Defects(md: string): string[] {
   const out: string[] = []
   const need = (what: string, ok: boolean): void => { if (!ok) out.push(what) }
   need('the condition (only if a qa-fix committed)', text.includes('only if a qa-fix committed (`git rev-parse HEAD` differs from `VALIDATED_HEAD`)'))
-  need('the scope (changed files since VALIDATED_HEAD)', text.includes('`git diff --name-only VALIDATED_HEAD..HEAD`') && text.includes('VALIDATION_SCOPE: changed-only'))
+  need('the scope (changed files since VALIDATED_HEAD)', text.includes('`git diff --name-only --diff-filter=d VALIDATED_HEAD..HEAD`') && text.includes('VALIDATION_SCOPE: changed-only'))
   need('the FAIL arm (report and halt)', /\*\*If FAIL:\*\* Report the failures to user and halt\./.test(text))
   need('the PASS arm appends the second claim', text.includes('**If PASS:** append a `gate:validate` claim'))
   return out
@@ -1017,7 +1018,7 @@ describe('#421 AC-4: Phase 8 states its condition, its scope and its FAIL arm in
   it('known-bad probes: each lost statement is reported by name', () => {
     const md = implementMd()
     expect(collectPhase8Defects(md.replace('only if a qa-fix committed (`git rev-parse HEAD` differs from `VALIDATED_HEAD`)', 'always'))).toEqual(['the condition (only if a qa-fix committed)'])
-    expect(collectPhase8Defects(md.replace('`git diff --name-only VALIDATED_HEAD..HEAD`', 'the Code agent\'s list'))).toEqual(['the scope (changed files since VALIDATED_HEAD)'])
+    expect(collectPhase8Defects(md.replace('`git diff --name-only --diff-filter=d VALIDATED_HEAD..HEAD`', 'the Code agent\'s list'))).toEqual(['the scope (changed files since VALIDATED_HEAD)'])
     expect(collectPhase8Defects(md.replace('**If FAIL:** Report the failures to user and halt.', '**If FAIL:** carry on.'))).toEqual(['the FAIL arm (report and halt)'])
     expect(collectPhase8Defects(md.replace(H.p8, '### Phase 8 gone'))).toEqual(['no Phase 8 section'])
   })
@@ -1064,25 +1065,175 @@ describe('#421 AC-5: Phase 10 pushes first, unforced and checked, and a failed p
   })
 })
 
-/** Named collector: what Phase 6's Validate spawn lacks for its file list. */
+/** What every spawn after Phase 2 names as FILES_CHANGED; Phase 3 defines `{branch_diff}` once. */
+const BRANCH_DIFF = 'FILES_CHANGED: {branch_diff}'
+/** `--diff-filter=d` drops deleted paths: Harden and Evaluate read every path the list names. */
+const BRANCH_DIFF_COMMAND = '`{branch_diff}` is the output of `git diff --name-only --diff-filter=d {BASE_BRANCH}...HEAD`, run again at each spawn.'
+const CODE_AGENT_LIST = '{list of files from Code agent output}'
+
+/** The spawns that take the branch diff: [phase heading, label, agent type, a line only that spawn carries]. */
+const BRANCH_DIFF_SPAWNS: ReadonlyArray<readonly [string, string, string, string]> = [
+  [H.p3, 'Phase 3 Polish', 'Polish', 'FILES_CHANGED:'],
+  [H.p4, 'Phase 4 Harden', 'Harden', 'FILES_CHANGED:'],
+  [H.p5, 'Phase 5 Evaluate', 'Evaluate', 'FILES_CHANGED:'],
+  [H.p6, 'Phase 6 Validate', 'Validate', 'VALIDATION_SCOPE: full'],
+  [H.p7, 'Phase 7 Test', 'Test', 'FILES_CHANGED:'],
+]
+
+/** Named collector: the spawns whose file list is not the branch diff, because the Code agent's own list names only the last phase of a sequential run. */
 function collectFilesChangedDefects(md: string): string[] {
-  const section = phaseSection(md, H.p6)
-  if (section === null) return ['no Phase 6 section']
-  const spawn = parseFences(section).find(f => isAgentBlock(f, 'Validate') && f.includes('VALIDATION_SCOPE: full'))
-  if (spawn === undefined) return ['Phase 6 has no full Validate spawn']
-  return spawn.includes('FILES_CHANGED: {output of `git diff --name-only {base}...HEAD`}') ? [] : ['the Validate spawn takes the Code agent\'s file list, which misses the Polish, Harden and fix commits']
+  const out = BRANCH_DIFF_SPAWNS.flatMap(([heading, label, type, marker]) => {
+    const section = phaseSection(md, heading)
+    if (section === null) return [`no ${label} section`]
+    const spawn = parseFences(section).find(f => isAgentBlock(f, type) && f.includes(marker))
+    if (spawn === undefined) return [`${label} has no spawn`]
+    const requires = section.split('\n').find(l => l.startsWith('**Requires:**')) ?? ''
+    const declared = !/\bBASE_BRANCH\b/.test(requires)
+      ? [`${label} Requires does not name BASE_BRANCH`]
+      : /\bFILES_CHANGED\b/.test(requires) ? [`${label} Requires still names the Code agent's FILES_CHANGED`] : []
+    return [...(spawn.includes(BRANCH_DIFF) ? [] : [`the ${label} spawn takes the Code agent's file list, not the branch diff`]), ...declared]
+  })
+  const defined = md.indexOf(BRANCH_DIFF_COMMAND)
+  if (defined === -1) out.push('the branch diff is not defined with git diff --name-only --diff-filter=d {BASE_BRANCH}...HEAD')
+  else if (md.indexOf(BRANCH_DIFF) !== -1 && md.indexOf(BRANCH_DIFF) < defined) out.push('the branch diff is used before it is defined')
+  const unfiltered = (md.match(/git diff --name-only (?!--diff-filter=d )/g) ?? []).length
+  if (unfiltered > 0) out.push(`${unfiltered} git diff --name-only site(s) list deleted paths: no --diff-filter=d`)
+  return md.includes(CODE_AGENT_LIST) ? [...out, 'a spawn still takes the Code agent\'s file list'] : out
 }
 
-describe('#421: Phase 6 hands Validate the branch diff, not the Code agent\'s list', () => {
-  it('FILES_CHANGED is `git diff --name-only {base}...HEAD`', () => {
+describe('#421, #452: every spawn after Phase 2 gets the branch diff, not the Code agent\'s list', () => {
+  it('FILES_CHANGED is the one `git diff --name-only --diff-filter=d {BASE_BRANCH}...HEAD` at Polish, Harden, Evaluate, Validate and Test', () => {
+    expect(BRANCH_DIFF_SPAWNS.length, 'the site table is empty, so this guard proves nothing').toBe(5)
     expect(collectFilesChangedDefects(implementMd())).toEqual([])
   })
 
-  it('known-bad probe: the Code agent\'s list is reported', () => {
+  it('known-bad probe: the Code agent\'s list is reported at Validate', () => {
     const md = implementMd()
-    const old = md.replace('FILES_CHANGED: {output of `git diff --name-only {base}...HEAD`}\nVALIDATION_SCOPE: full', 'FILES_CHANGED: {list of files from Code agent output}\nVALIDATION_SCOPE: full')
+    const old = md.replace(`${BRANCH_DIFF}\nVALIDATION_SCOPE: full`, `FILES_CHANGED: ${CODE_AGENT_LIST}\nVALIDATION_SCOPE: full`)
     expect(old, 'the seed must land').not.toBe(md)
-    expect(collectFilesChangedDefects(old)).toHaveLength(1)
+    expect(collectFilesChangedDefects(old)).toEqual(["the Phase 6 Validate spawn takes the Code agent's file list, not the branch diff", "a spawn still takes the Code agent's file list"])
+  })
+
+  it.each(BRANCH_DIFF_SPAWNS.filter(([, , type]) => type !== 'Validate').map(([heading, label]) => [label, heading] as const))('known-bad probe: the Code agent\'s list is reported at %s', (label, heading) => {
+    const md = implementMd()
+    const section = phaseSection(md, heading)!
+    const old = md.replace(section, section.replace(BRANCH_DIFF, `FILES_CHANGED: ${CODE_AGENT_LIST}`))
+    expect(old, 'the seed must land').not.toBe(md)
+    expect(collectFilesChangedDefects(old)).toEqual([`the ${label} spawn takes the Code agent's file list, not the branch diff`, "a spawn still takes the Code agent's file list"])
+  })
+
+  it('known-bad probe: a lost site is reported', () => {
+    const md = implementMd()
+    const section = phaseSection(md, H.p3)!
+    expect(collectFilesChangedDefects(md.replace(section, section.replace(/```[\s\S]*```/, '')))).toEqual(['Phase 3 Polish has no spawn'])
+  })
+
+  it.each(BRANCH_DIFF_SPAWNS.map(([heading, label]) => [label, heading] as const))('known-bad probe: a Requires line that names the Code agent\'s FILES_CHANGED, not BASE_BRANCH, is reported at %s', (label, heading) => {
+    const md = implementMd()
+    const section = phaseSection(md, heading)!
+    const requires = section.split('\n').find(l => l.startsWith('**Requires:**'))!
+    const old = md.replace(section, section.replace(requires, requires.replace(/\bBASE_BRANCH\b/, 'FILES_CHANGED')))
+    expect(old, 'the seed must land').not.toBe(md)
+    expect(collectFilesChangedDefects(old)).toEqual([`${label} Requires does not name BASE_BRANCH`])
+  })
+
+  it.each(BRANCH_DIFF_SPAWNS.map(([heading, label]) => [label, heading] as const))('known-bad probe: a Requires line that names both BASE_BRANCH and the Code agent\'s FILES_CHANGED is reported at %s', (label, heading) => {
+    const md = implementMd()
+    const section = phaseSection(md, heading)!
+    const requires = section.split('\n').find(l => l.startsWith('**Requires:**'))!
+    const old = md.replace(section, () => section.replace(requires, () => `${requires}, FILES_CHANGED`))
+    expect(old, 'the seed must land').not.toBe(md)
+    expect(collectFilesChangedDefects(old)).toEqual([`${label} Requires still names the Code agent's FILES_CHANGED`])
+  })
+
+  it('known-bad probes: a branch diff defined late, one that lists deleted paths and one lost are each reported', () => {
+    const md = implementMd()
+    expect(collectFilesChangedDefects(md.replace(BRANCH_DIFF_COMMAND, 'x') + `\n${BRANCH_DIFF_COMMAND}\n`)).toEqual(['the branch diff is used before it is defined'])
+    const unfiltered = md.replace('--diff-filter=d VALIDATED_HEAD..HEAD', 'VALIDATED_HEAD..HEAD')
+    expect(unfiltered, 'the seed must land').not.toBe(md)
+    expect(collectFilesChangedDefects(unfiltered)).toEqual(['1 git diff --name-only site(s) list deleted paths: no --diff-filter=d'])
+    expect(collectFilesChangedDefects(md.replace(BRANCH_DIFF_COMMAND, '`{branch_diff}` is the output of `git diff --name-only {BASE_BRANCH}...HEAD`, run again at each spawn.'))).toEqual([
+      'the branch diff is not defined with git diff --name-only --diff-filter=d {BASE_BRANCH}...HEAD',
+      '1 git diff --name-only site(s) list deleted paths: no --diff-filter=d',
+    ])
+  })
+})
+
+/** The one pattern a base ref must match before it reaches a shell line. */
+const BASE_BRANCH_PATTERN = '^[A-Za-z0-9._/+@,#-]{1,200}$'
+/** A branch name that `git check-ref-format --branch` accepts and a shell would run. */
+const HOSTILE_BASE = 'a$(touch$IFS/tmp/x)|sh;b'
+/** How the re-validation step hands the guarded value on: Phases 3-7 run this from `BASE_BRANCH`. */
+const REVALIDATE_BRANCH_DIFF = 'Phases 3-7 run `{branch_diff}`'
+
+/** Named collector: where the base ref reaches a shell `git diff` with no check, in Setup and in the re-validation path that can skip Setup. */
+function collectBaseBranchGuardDefects(md: string, revalidate: string = revalidateReference()): string[] {
+  const out: string[] = []
+  const guarded = (line: string | undefined): boolean => line !== undefined && line.includes(`\`${BASE_BRANCH_PATTERN}\``) && /stop the run/i.test(line)
+  const record = md.split('\n').find(l => l.startsWith('Record the current branch name as `BASE_BRANCH`'))
+  if (!guarded(record)) out.push(`Phase 1 records BASE_BRANCH without stopping the run unless it matches \`${BASE_BRANCH_PATTERN}\``)
+  else if (md.indexOf(record!) > md.indexOf('OPERATION: setup-task')) out.push('the BASE_BRANCH guard comes after the setup-task spawn')
+  const rerecord = revalidate.split('\n').find(l => l.startsWith('3. **Record BASE_BRANCH**'))
+  if (!guarded(rerecord)) out.push(`the re-validation path records BASE_BRANCH without stopping the run unless it matches \`${BASE_BRANCH_PATTERN}\``)
+  else if (!rerecord!.includes(REVALIDATE_BRANCH_DIFF)) out.push('the re-validation path does not say that Phases 3-7 run {branch_diff} from BASE_BRANCH')
+  else if (rerecord!.indexOf(BASE_BRANCH_PATTERN) > rerecord!.indexOf(REVALIDATE_BRANCH_DIFF)) out.push('the re-validation guard comes after the branch diff')
+  else if (!rerecord!.includes('baseRefName')) out.push('the re-validation path does not say where BASE_BRANCH comes from when Phase 1 is skipped')
+  return out
+}
+
+describe('#452: BASE_BRANCH is checked before it reaches a shell line', () => {
+  it('Setup and the re-validation path stop the run on a base ref outside the pattern', () => {
+    expect(collectBaseBranchGuardDefects(implementMd())).toEqual([])
+  })
+
+  it('the pattern admits git-valid ASCII branch names up to 200 characters and refuses the rest, a name git accepts and a shell would run included', () => {
+    const gitAccepts = (name: string): void => {
+      expect(() => execFileSync('git', ['check-ref-format', '--branch', name], { cwd: SCRATCH, env: scopedEnv(SCRATCH), stdio: 'pipe' }), `git no longer accepts ${name}, so it proves nothing`).not.toThrow()
+    }
+    const re = new RegExp(BASE_BRANCH_PATTERN)
+    const admitted = ['main', 'feat/452-token-diet-wave-c2', 'release/1.2.3', 'feat+x', 'user@feat', 'fix/#12', 'a,b']
+    for (const ok of admitted) { gitAccepts(ok); expect(re.test(ok), ok).toBe(true) }
+    expect(re.test('x'.repeat(200)), 'the 200-character bound is inclusive').toBe(true)
+    // Git accepts these too; the pattern is narrower than git on purpose, and the stop line says so.
+    for (const refused of [HOSTILE_BASE, 'café']) { gitAccepts(refused); expect(re.test(refused), refused).toBe(false) }
+    for (const bad of ['a;b', 'a b', 'a`id`', '$(id)', 'a|b', '', 'x'.repeat(201)]) expect(re.test(bad), bad).toBe(false)
+  })
+
+  it('both stop lines tell the user which characters are allowed', () => {
+    const allowed = 'ASCII letters, digits and `._/+@,#-`, at most 200'
+    const record = implementMd().split('\n').find(l => l.startsWith('Record the current branch name as `BASE_BRANCH`'))!
+    const rerecord = revalidateReference().split('\n').find(l => l.startsWith('3. **Record BASE_BRANCH**'))!
+    for (const [where, line] of [['Phase 1', record], ['the re-validation path', rerecord]] as const) {
+      expect(line, `${where} gives the stop no reason`).toContain(allowed)
+    }
+  })
+
+  it('known-bad probes: a lost guard, a widened pattern, a late guard and an unguarded re-validation are each reported', () => {
+    const md = implementMd()
+    const record = md.split('\n').find(l => l.startsWith('Record the current branch name as `BASE_BRANCH`'))!
+    const unguarded = md.replace(record, 'Record the current branch name as `BASE_BRANCH`.')
+    expect(unguarded, 'the seed must land').not.toBe(md)
+    const lost = `Phase 1 records BASE_BRANCH without stopping the run unless it matches \`${BASE_BRANCH_PATTERN}\``
+    expect(collectBaseBranchGuardDefects(unguarded)).toEqual([lost])
+    const widened = md.replace(record, () => record.replace('{1,200}', '+'))
+    expect(widened, 'the seed must land').not.toBe(md)
+    expect(collectBaseBranchGuardDefects(widened)).toEqual([lost])
+    expect(collectBaseBranchGuardDefects(md.replace(record, '').replace('OPERATION: setup-task', () => `OPERATION: setup-task\n${record}`))).toEqual(['the BASE_BRANCH guard comes after the setup-task spawn'])
+
+    const reval = revalidateReference()
+    const rerecord = reval.split('\n').find(l => l.startsWith('3. **Record BASE_BRANCH**'))!
+    const lostReval = `the re-validation path records BASE_BRANCH without stopping the run unless it matches \`${BASE_BRANCH_PATTERN}\``
+    const lateGuard = rerecord.replace(BASE_BRANCH_PATTERN, 'x').replace(' Phases 3-7 run `{branch_diff}` from it.', () => ` Phases 3-7 run \`{branch_diff}\` from it unless it fails the pattern \`${BASE_BRANCH_PATTERN}\`; stop the run.`)
+    expect(lateGuard, 'the seed must land').not.toBe(rerecord)
+    expect(collectBaseBranchGuardDefects(md, reval.replace(rerecord, () => rerecord.replace(BASE_BRANCH_PATTERN, 'x')))).toEqual([lostReval])
+    expect(collectBaseBranchGuardDefects(md, reval.replace(rerecord, () => lateGuard))).toEqual(['the re-validation guard comes after the branch diff'])
+    const unsaid = rerecord.replace(REVALIDATE_BRANCH_DIFF, 'Phases 3-7 run it')
+    expect(unsaid, 'the seed must land').not.toBe(rerecord)
+    expect(collectBaseBranchGuardDefects(md, reval.replace(rerecord, () => unsaid))).toEqual(['the re-validation path does not say that Phases 3-7 run {branch_diff} from BASE_BRANCH'])
+    const sourceless = rerecord.replaceAll('baseRefName', 'x')
+    expect(sourceless, 'the seed must land').not.toBe(rerecord)
+    expect(collectBaseBranchGuardDefects(md, reval.replace(rerecord, () => sourceless))).toEqual(['the re-validation path does not say where BASE_BRANCH comes from when Phase 1 is skipped'])
+    expect(collectBaseBranchGuardDefects(md, reval.replace(rerecord, ''))).toEqual([lostReval])
   })
 })
 

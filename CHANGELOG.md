@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`/implement` splits long plans into sequential Code phases; a run with no plan stays single** ([#452](https://github.com/dean0x/devflow/issues/452)).
+- **Code agents read large files once, by range, and cap printed output** ([#452](https://github.com/dean0x/devflow/issues/452)).
+- **Polish, Harden, Evaluate and Test get the full branch diff as `FILES_CHANGED`** ([#452](https://github.com/dean0x/devflow/issues/452)).
+- **`/implement` stops when the base branch name has a character outside ASCII letters, digits and `._/+@,#-`, or is longer than 200** ([#452](https://github.com/dean0x/devflow/issues/452)). The check also covers the re-validation path. It keeps a hostile branch name out of the shell line that builds the branch diff. Git accepts some refused names, such as `café`. For them, `/implement` stops and tells the user which characters are allowed.
+- **The token audit counts files written through Bash** ([#442](https://github.com/dean0x/devflow/issues/442)).
+
 ### Fixed
 
 - **A tracked `.devflow/config.json` no longer applies as personal config** ([#489](https://github.com/dean0x/devflow/pull/489)). devflow ignores it and shows a warning.
