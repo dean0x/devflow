@@ -99,6 +99,9 @@ const MAX_MS = 570_000
 // A virtual world: gh as a function of the call and the time, a clock that moves
 // ---------------------------------------------------------------------------
 
+/** How long a fake gh call takes when its reply names no `took`. */
+const DEFAULT_CALL_MS = 1000
+
 /** What the fake gh does with one call. `took` is the call's duration; `hang` runs out its timeout. */
 interface Reply { status?: number | null; stdout?: string; stderr?: string; error?: { code: string }; took?: number; hang?: boolean }
 type Kind = 'view' | 'checks'
@@ -129,7 +132,7 @@ class World {
     if (this.elapsed + timeout > MAX_MS + 1) this.violations.push(`a gh call at ${this.elapsed} ms was given ${timeout} ms, past ${MAX_MS}`)
     const kind: Kind = args[1] === 'view' ? 'view' : 'checks'
     const reply = this.script({ kind, nth: this.counts[kind]++, elapsed: this.elapsed })
-    const took = reply.hang === true ? timeout : Math.min(reply.took ?? 1000, timeout)
+    const took = reply.hang === true ? timeout : Math.min(reply.took ?? DEFAULT_CALL_MS, timeout)
     if (this.moves) this.t += took
     if (reply.hang === true) return { status: null, error: { code: 'ETIMEDOUT' } }
     if (reply.error !== undefined) return { status: null, error: reply.error }
@@ -472,7 +475,8 @@ describe('the settle windows: a head mismatch and an empty check list each keep 
     const checks = r.world.of('checks')
     expect(views[4].elapsedBefore - views[0].elapsedBefore).toBe(80_000)
     expect(statusOf(r.line)).toBe('NO_CI')
-    const firstEmptyAt = checks[0].elapsedBefore + 1000
+    // The empty reply names no `took`, so the first empty result lands one default call after its call began.
+    const firstEmptyAt = checks[0].elapsedBefore + DEFAULT_CALL_MS
     expect(r.world.elapsed - firstEmptyAt).toBeGreaterThanOrEqual(SETTLE_MS)
     expect(checks, 'the fifth empty result is still inside the window').toHaveLength(6)
   })

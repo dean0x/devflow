@@ -151,6 +151,8 @@ interface World {
   readonly refuseUndo?: readonly string[]
   /** Tickets whose undo Git reports as done (`undone: true`) with a head that is not the recorded pre-merge SHA. */
   readonly undoWrongHead?: readonly string[]
+  /** A raw return for a ticket's undo, sent as it is: how an undo that reports done with no head, or with a head that is not hex, is scripted. */
+  readonly undoReturns?: Readonly<Record<string, unknown>>
   /** Tickets whose Gate 1 Validate never passes: the pass is exhausted after two Fix spawns. */
   readonly gate1Red?: readonly string[]
   /** Tickets whose Harden agent returns BLOCKED, in Gate 1 #1. */
@@ -238,6 +240,7 @@ function stubAgent(world: World, spawns: Spawn[]): Agent {
       const sha = /^Undo the merge ([0-9a-f]{40}) on /.exec(prompt)?.[1] ?? ''
       const ticket = mergedBy.get(sha) ?? ''
       if (world.refuseUndo?.includes(ticket)) return { undone: false, reason: 'integration HEAD moved' }
+      if (world.undoReturns !== undefined && ticket in world.undoReturns) return world.undoReturns[ticket]
       // A reset that took effect leaves the integration head on the recorded pre-merge SHA.
       return { undone: true, head: world.undoWrongHead?.includes(ticket) ? sha : baseShaOf(ticket) }
     }
@@ -1819,6 +1822,30 @@ describe('#421 AC-22: a refused undo halts the wave and names the red integratio
     expect(run.quarantined.find(q => q.ticket === '#32')?.reason, 'the quarantine reason is the same fixed text').toBe(run.halted?.reason)
     expect(run.tickets.find(t => t.ticket === '#32')?.merged).toBe(false)
     expect(run.tickets.find(t => t.ticket === '#33')?.ran, 'no further merge after the halt').toBe(false)
+  })
+
+  const malformedUndoReplies: ReadonlyArray<readonly [string, unknown]> = [
+    ['no head', { undone: true }],
+    ['a head that is not hex', { undone: true, head: 'z'.repeat(40) }],
+  ]
+
+  it.each(malformedUndoReplies)('an undo that reports done with %s is a refused undo and halts the wave', async (_name, reply) => {
+    const run = await runWave(WAVE!, SINGLE!, { ...world, refuseUndo: [], undoReturns: { '#32': reply } }, {}, 'true')
+    const [undo] = gitSpawns(run.spawns, 'Undo the merge ')
+    const sha = /^Undo the merge ([0-9a-f]{40}) on /.exec(undo.prompt)![1]
+    expect(run.halted).toMatchObject({ ticket: '#32', mergeSha: sha, baseSha: baseShaOf('#32'), kind: 'red' })
+    expect(run.halted?.reason).toBe('post-merge build red; merge not undone (undo reported a head other than the recorded pre-merge SHA)')
+    expect(run.tickets.find(t => t.ticket === '#32')?.merged).toBe(false)
+    expect(run.tickets.find(t => t.ticket === '#33')?.ran, 'no further merge after the halt').toBe(false)
+  })
+
+  it('known-bad probe: a wave that reads a missing head, or any 40-character head, as the recorded SHA lets those replies pass', async () => {
+    const missingOk = seedOnce(WAVE!, ' && undo.head === merge.baseSha', ' && (undo.head ?? merge.baseSha) === merge.baseSha')
+    const noHead = await runWave(missingOk, SINGLE!, { ...world, refuseUndo: [], undoReturns: { '#32': { undone: true } } }, {}, 'true')
+    expect(noHead.halted, 'the seed lets a reply with no head pass').toBeNull()
+    const anyLength = seedOnce(WAVE!, ' && undo.head === merge.baseSha', ' && String(undo.head).length === 40')
+    const notHex = await runWave(anyLength, SINGLE!, { ...world, refuseUndo: [], undoReturns: { '#32': { undone: true, head: 'z'.repeat(40) } } }, {}, 'true')
+    expect(notHex.halted, 'the seed lets a head that is not hex pass').toBeNull()
   })
 
   it('known-bad probe: a wave that trusts undone: true without the head check lets a wrong head pass', async () => {

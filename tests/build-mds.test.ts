@@ -1205,7 +1205,9 @@ function collectMergeDefects(text: string): string[] {
   if (!prompt.includes('git merge --no-ff ${engineResult.branch}')) out.push('the merge is not pinned to git merge --no-ff');
   if (!prompt.includes('run git rev-parse ${INTEGRATION_BRANCH} as baseSha')) out.push('the merge does not record the integration head as baseSha');
   if (!prompt.includes('If the merge stops for any reason, run git merge --abort')) out.push('the merge does not abort when it stops for any reason');
-  if (prompt.indexOf('as baseSha') > prompt.indexOf('git merge --no-ff')) out.push('the merge records baseSha after the merge');
+  const recordAt = prompt.indexOf('as baseSha');
+  const mergeAt = prompt.indexOf('git merge --no-ff');
+  if (recordAt !== -1 && mergeAt !== -1 && recordAt > mergeAt) out.push('the merge records baseSha after the merge');
   return out;
 }
 
@@ -1263,13 +1265,16 @@ describe('dynamic-build: the post-merge Validate belongs to the workflow, and a 
     expect(collectMergeDefects(sources['dynamic-build.mds'])).toEqual([]);
   });
 
-  it('known-bad probes: a plain merge, a missing baseSha record and a merge that aborts only on a conflict or never are each reported', () => {
+  it('known-bad probes: a plain merge, a missing baseSha record, a baseSha recorded after the merge and a merge that aborts only on a conflict or never are each reported', () => {
     const plain = compiled.replace('git merge --no-ff ${engineResult.branch}', 'git merge ${engineResult.branch}');
     expect(plain, 'the seed must land').not.toBe(compiled);
-    expect(collectMergeDefects(plain)).toEqual(['the merge is not pinned to git merge --no-ff', 'the merge records baseSha after the merge']);
+    expect(collectMergeDefects(plain)).toEqual(['the merge is not pinned to git merge --no-ff']);
     const unrecorded = compiled.replace('run git rev-parse ${INTEGRATION_BRANCH} as baseSha', 'note the head');
     expect(unrecorded, 'the seed must land').not.toBe(compiled);
     expect(collectMergeDefects(unrecorded)).toContain('the merge does not record the integration head as baseSha');
+    const lateRecord = compiled.replace('run git rev-parse ${INTEGRATION_BRANCH} as baseSha, then run git merge --no-ff ${engineResult.branch}', 'run git merge --no-ff ${engineResult.branch}, then run git rev-parse ${INTEGRATION_BRANCH} as baseSha');
+    expect(lateRecord, 'the seed must land').not.toBe(compiled);
+    expect(collectMergeDefects(lateRecord)).toEqual(['the merge records baseSha after the merge']);
     const nothing = compiled.replace('git merge --abort', 'git status');
     expect(nothing, 'the seed must land').not.toBe(compiled);
     expect(collectMergeDefects(nothing)).toEqual(['the merge does not abort when it stops for any reason']);

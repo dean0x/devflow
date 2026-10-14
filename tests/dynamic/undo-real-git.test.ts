@@ -31,6 +31,8 @@ const BUILT = requireDistFile('dynamic-build.md')
 const INTEGRATION = 'wave/undo-real-git'
 const TICKET_BRANCH = 'feat/undo-real-git-work'
 const GIT_BUDGET_MS = 20_000
+/** One test builds a repository and runs about 25 git processes, each allowed GIT_BUDGET_MS, so the test budget sits above one call's. */
+const TEST_TIMEOUT_MS = 60_000
 const FORTY_HEX = /^[0-9a-f]{40}$/
 
 /** The values the compiled prompts name as placeholders. */
@@ -207,7 +209,7 @@ function valuesOf(ticket: Ticket, mergeSha: string): Values {
   return { integration: INTEGRATION, branch: TICKET_BRANCH, mergeSha, baseSha: ticket.baseSha }
 }
 
-describe('dynamic-build: the merge and the undo of a red merge restore the pre-merge head in real git (#486, finding 1)', () => {
+describe('dynamic-build: the merge and the undo of a red merge restore the pre-merge head in real git (#486, finding 1)', { timeout: TEST_TIMEOUT_MS }, () => {
   it('a two-commit ticket that could fast-forward is merged with a merge commit and undone to the recorded pre-merge head, with both ticket commits unreachable', () => {
     const ticket = newTicketRepo()
     recordBase(ticket)
@@ -240,7 +242,7 @@ describe('dynamic-build: the merge and the undo of a red merge restore the pre-m
     expect(fs.existsSync(path.join(ticket.repo, '.git', 'MERGE_HEAD')), 'the abort clears the merge state').toBe(false)
     expect(git(ticket.repo, ['rev-parse', 'HEAD']), 'the integration head is the recorded pre-merge head').toBe(ticket.baseSha)
     expect(git(ticket.repo, ['status', '--porcelain'])).toBe('')
-  }, GIT_BUDGET_MS)
+  })
 
   it('a true fast-forward is refused, not half undone: the first-parent check stops it and the branch keeps the merge head', () => {
     const ticket = newTicketRepo()
@@ -253,7 +255,7 @@ describe('dynamic-build: the merge and the undo of a red merge restore the pre-m
     const result = applyShippedUndo(ticket, valuesOf(ticket, mergeSha))
 
     expect(result.undone).toBe(false)
-    expect(result.reason).toContain('printed another value')
+    expect(result.reason, 'the first-parent check is the one that refuses, not the symbolic-ref or branch-head check').toBe('git rev-parse ${merge.mergeSha}^1 printed another value')
     expect(git(ticket.repo, ['rev-parse', 'HEAD']), 'HEAD stays on the merge head and never stops on the ticket\'s earlier commit').toBe(mergeSha)
     expect(git(ticket.repo, ['status', '--porcelain'])).toBe('')
   })
