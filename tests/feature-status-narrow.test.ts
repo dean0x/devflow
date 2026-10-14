@@ -134,7 +134,7 @@ describe('--status warns about a tracked .devflow/config.json (D-PERSONAL-UNTRAC
     expect(out).not.toMatch(EFFECTIVE);
   }, 120_000);
 
-  it('a committed .devflow symlink to a committed directory is named the same way, and narrows nothing (#487)', () => {
+  it('a staged .devflow symlink to a staged directory is named the same way, and narrows nothing (#487)', () => {
     seedManifest({});
     const repo = fs.mkdtempSync(path.join(tmpRoot, 'repo-'));
     execFileSync('git', ['init', '-q'], { cwd: repo, stdio: 'ignore' });
