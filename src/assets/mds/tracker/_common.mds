@@ -98,10 +98,6 @@ A **bare number** ⇒ `TRACEABILITY: DEGRADED (ambiguous issue reference)` — u
 {{normalise}}Every entry of `SHIPPED_ISSUES` must satisfy {{grammar}}, anchored at both ends of the STRING (a newline fails it){{forms}} — this provider's grammar is what the entry gate's shape requirement means here, and the anchored form is what keeps a ref out of a query or a command. **Drop** every entry that fails and report it as `TRACEABILITY: DEGRADED (issue reference "{ref}" does not match {{provider}} reference grammar)`.
 @end
 
-@define ref_preflight_branch(match_phrase):
-extract the segment {{match_phrase}} and verify it with the *fetch by key* capability. If the call fails, or the issue is not open, **skip silently** — never render a link for an unverified reference. A branch name can carry a token that merely looks like one, and the existence check is the guard.
-@end
-
 @define traceable_issue_rules():
 **D3 issue template sections:** `## Initial Request`, `## Product Requirements`, `## Implementation Plan`. `TASK_DESCRIPTION`, `INITIAL_REQUEST`, `REQUIREMENTS` and `LABELS` are caller-supplied and untrusted — never interpolate them into a command string.
 @end
@@ -145,7 +141,6 @@ extract the segment {{match_phrase}} and verify it with the *fetch by key* capab
 @export ref_preflight_single
 @export ref_preflight_list
 @export ref_preflight_entry
-@export ref_preflight_branch
 @export traceable_issue_rules
 @export wave_report_inputs
 @export conventions_step

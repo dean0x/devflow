@@ -2,7 +2,7 @@ import { describe, it, expect, afterAll } from 'vitest'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
-import { buildCommittedTree, cleanupCommittedTree, collectCodeSpawnSites, collectOrderViolations, ensurePrReadyReference, gitOperationReferenceCorpus, requireDistFile, walkFiles } from '../helpers.js'
+import { ROOT, buildCommittedTree, cleanupCommittedTree, collectCodeSpawnSites, collectOrderViolations, ensurePrReadyReference, gitOperationReferenceCorpus, requireDistFile, walkFiles } from '../helpers.js'
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
 
 /** The generated `devflow:git` reference tree — the providers' own mechanics. */
@@ -430,8 +430,8 @@ describe('ensure-pr-ready — the paste gate, one row per tracker grammar', () =
 //
 // The paragraphs are read from the compiled GitHub reference. Step 4a is written
 // once in `_ops_steps.mds` and expanded into every provider's reference, so the
-// GitHub copy stands for it; step 4b is each provider's own, and only GitHub's is
-// read here.
+// GitHub copy stands for it; step 4b is each provider's own, so the second describe
+// reads all three.
 // -------------------------------------------------------------------------
 
 /** The blank-line-bounded paragraph of `ref` that opens with `lead`; '' when none does. */
@@ -446,12 +446,16 @@ function step4bOf(ref: string): string {
   return start === -1 || end === -1 ? '' : ref.slice(start, end)
 }
 
-/** Named collector: how a step 4b block composes a closing line itself instead of rendering the setup-task one. */
+/**
+ * Named collector: how a step 4b block composes a closing line itself instead of rendering the setup-task one.
+ * Jira and Linear keep one lettered line after the setup-task option: the fetch-by-key degradation. It resolves
+ * nothing, so it is the one lettered line this collector admits.
+ */
 function collectStep4bComposition(block: string): string[] {
   const out: string[] = []
   const has = (what: string, found: boolean): void => { if (found) out.push(what) }
   has('a branch-name fallback', /branch name pattern/.test(block))
-  has('a second resolution option', /^\s+b\. /m.test(block))
+  has('a second resolution option', /^\s+[b-z]\. (?!The \*fetch by key\* capability absent or denied)/m.test(block))
   has('a number verified with the tracker CLI', /gh issue view/.test(block))
   has('a line built from a verified issue number', /verified issue number/.test(block))
   if (!/Never compose a line from a bare issue number/.test(block)) out.push('no ban on composing from a bare number')
@@ -525,6 +529,50 @@ describe('ensure-pr-ready — a supplied ISSUE_PR_LINK is final and step 4b comp
       'no pass through step 4a\'s shape check',
     ])
     expect(step4bOf('no step four-b here'), 'an absent block reads as empty, never as a pass').toBe('')
+  })
+})
+
+describe('ensure-pr-ready — no provider\'s step 4b composes a closing line from a bare number or a branch name (F3b)', () => {
+  const BRANCH_DERIVED = [
+    ['the branch-name pattern', /\{type\}\/\{[A-Za-z]+\}-\{slug\}/],
+    ['the extract-and-verify instruction', /extract the segment/],
+    ['the look-alike token warning', /merely looks like one/],
+  ] as const
+
+  /** Named collector: the branch-derived resolution text a provider's step 4b still carries. */
+  function collectBranchDerivedText(block: string): string[] {
+    return BRANCH_DERIVED.filter(([, pattern]) => pattern.test(block)).map(([what]) => what)
+  }
+
+  it.each(PASTE_PROVIDERS)('%s: step 4b renders only the setup-task line and composes nothing', provider => {
+    const block = step4bOf(ensurePrReadyReference(provider))
+    expect(block, `the ${provider} step 4b block`).not.toBe('')
+    expect(collectStep4bComposition(block), `${provider} step 4b composes a line itself`).toEqual([])
+    expect(collectBranchDerivedText(block), `${provider} step 4b still derives a reference from the branch name`).toEqual([])
+    expect(block, 'the pinned guard: a given link is decided in step 4a').toContain('A given `ISSUE_PR_LINK` is already decided in step 4a: skip the resolution')
+    expect(block, 'the pinned guard: the section is published through the PR-host half').toContain('Publish the section through step 4b\'s PR-host half.')
+  })
+
+  it('no tracker source calls the branch-name define, and the define is gone', () => {
+    const trackerDir = path.join(ROOT, 'src', 'assets', 'mds', 'tracker')
+    const sources = walkFiles(trackerDir, f => f.endsWith('.mds'))
+    expect(sources.length, 'non-vacuous: the tracker sources are found').toBeGreaterThan(3)
+    const callers = sources.filter(f => fs.readFileSync(f, 'utf-8').includes('ref_preflight_branch')).map(f => path.relative(ROOT, f))
+    expect(callers, 'the branch-name define, its export and its callers are removed').toEqual([])
+  })
+
+  it('known-bad probes: a seeded branch fallback in each provider is reported by name', () => {
+    for (const provider of PASTE_PROVIDERS) {
+      const block = step4bOf(ensurePrReadyReference(provider))
+      expect(collectBranchDerivedText(block), `${provider}: the real block is clean, so the seed fails for its own reason`).toEqual([])
+      const seeded = `${block}\n   b. Otherwise fall back to the branch name pattern \`{type}/{KEY}-{slug}\`: extract the segment and verify it. A branch name can carry a token that merely looks like one.`
+      expect(collectBranchDerivedText(seeded), provider).toEqual([
+        'the branch-name pattern',
+        'the extract-and-verify instruction',
+        'the look-alike token warning',
+      ])
+      expect(collectStep4bComposition(seeded), provider).toEqual(['a branch-name fallback', 'a second resolution option'])
+    }
   })
 })
 
