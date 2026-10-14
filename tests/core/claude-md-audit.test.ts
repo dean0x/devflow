@@ -447,6 +447,13 @@ describe('claude-md-audit', () => {
   // ── Bounds (AC-418) ──────────────────────────────────────────────────────────
 
   describe('FIFOs, devices and size bounds', () => {
+    it('pins the byte and path limits by value, so a changed limit fails here', () => {
+      expect(A.MAX_BYTES_READ).toBe(1_048_576);
+      expect(A.SCAN_BYTES).toBe(65_536);
+      expect(A.SKIP_FILE_BYTES).toBe(4 * 1024 * 1024);
+      expect(A.MAX_PATHS_PER_ROOT).toBe(64);
+    });
+
     const FIFO_TEST_MS = 20_000;
 
     const mkfifo = (p: string): void => {
@@ -495,7 +502,7 @@ describe('claude-md-audit', () => {
       write('late.md', filler(10001));
       const r = run();
       expect(fileFindings(r).map(f => path.basename(f.path))).toEqual(['huge.md']);
-      expect(r.bytesRead).toBe(fs.statSync(path.join(project, 'CLAUDE.md')).size + A.SCAN_BYTES);
+      expect(r.bytesRead).toBe(fs.statSync(path.join(project, 'CLAUDE.md')).size + 65_536);
     });
 
     it('a 2 MB import is still sized in full', () => {
@@ -510,8 +517,55 @@ describe('claude-md-audit', () => {
       for (const n of names) write(n, filler(100_000));
       const r = run();
       expect(r.bytesRead).toBeLessThanOrEqual(A.MAX_BYTES_READ);
-      expect(r.bytesRead).toBe(A.MAX_BYTES_READ);
+      expect(r.bytesRead).toBe(1_048_576);
       expect(r.truncated).toBe(true);
+    });
+
+    it('a root whose scans the byte budget cuts short is truncated, and its chain line says "at least"', () => {
+      const names = Array.from({ length: 40 }, (_, i) => `big${i}.md`);
+      write('CLAUDE.md', names.map(n => `@${n}`).join(' ') + '\n');
+      for (const n of names) write(n, filler(100_000));
+      const r = run();
+      expect(r.roots[0].truncated).toBe(true);
+      expect(chainFindings(r)).toHaveLength(1);
+      expect(chainFindings(r)[0]).toMatchObject({ truncated: true });
+      expect(r.lines.find(l => /through its imports/.test(l))).toMatch(/loads at least [\d,]+ bytes/);
+    });
+
+    it('a second root meets the spent budget: it reads nothing and is marked truncated', () => {
+      const names = Array.from({ length: 40 }, (_, i) => `big${i}.md`);
+      write('one/CLAUDE.md', names.map(n => `@${n}`).join(' ') + '\n');
+      for (const n of names) write(`one/${n}`, filler(100_000));
+      write('two/CLAUDE.md', `@part.md\n${filler(500)}`);
+      write('two/part.md', filler(500));
+      const r = A.audit({ roots: [path.join(project, 'one', 'CLAUDE.md'), path.join(project, 'two', 'CLAUDE.md')], home });
+      expect(r.bytesRead).toBe(1_048_576);
+      expect(r.roots[1].truncated).toBe(true);
+      expect(r.roots[1].total).toBe(fs.statSync(path.join(project, 'two', 'CLAUDE.md')).size);
+      expect(r.examined.map(e => path.basename(e.path))).not.toContain('part.md');
+    });
+
+    it('scans that use exactly the whole byte budget are not truncated', () => {
+      // The root and sixteen imports: fifteen of 65,536 bytes and one that fills the budget to the byte.
+      const names = Array.from({ length: 16 }, (_, i) => `exact${i}.md`);
+      const rootText = names.map(n => `@${n}`).join(' ') + '\n';
+      write('CLAUDE.md', rootText);
+      names.forEach((n, i) => write(n, filler(i < 15 ? 65_536 : 65_536 - Buffer.byteLength(rootText))));
+      const r = run();
+      expect(r.bytesRead).toBe(1_048_576);
+      expect(r.truncated).toBe(false);
+      expect(r.roots[0].truncated).toBe(false);
+      expect(chainFindings(r)[0]).toMatchObject({ truncated: false });
+    });
+
+    it('an empty import is counted and read as nothing, with no truncation', () => {
+      write('CLAUDE.md', '@empty.md\n');
+      write('empty.md', '');
+      const r = run();
+      expect(r.filesExamined).toBe(2);
+      expect(r.roots[0].total).toBe(fs.statSync(path.join(project, 'CLAUDE.md')).size);
+      expect(r.bytesRead).toBe(fs.statSync(path.join(project, 'CLAUDE.md')).size);
+      expect(r.truncated).toBe(false);
     });
 
     it('the byte budget is shared by the roots of one run', () => {
@@ -528,10 +582,24 @@ describe('claude-md-audit', () => {
       const names = Array.from({ length: 70 }, (_, i) => `missing${i}.md`);
       write('CLAUDE.md', names.map(n => `@${n}`).join(' ') + '\n');
       const r = run();
-      expect(r.pathsExamined).toBe(A.MAX_PATHS_PER_ROOT);
+      expect(r.pathsExamined).toBe(64);
       expect(r.examined).toHaveLength(64);
       expect(r.roots[0].truncated).toBe(true);
       expect(r.truncated).toBe(true);
+    });
+
+    it('exactly 64 examined paths is not truncated, and a 65th is', () => {
+      const missing = (count: number): string[] => Array.from({ length: count }, (_, i) => `missing${i}.md`);
+      // The root is one path, so 63 imports make 64.
+      write('CLAUDE.md', missing(63).map(n => `@${n}`).join(' ') + '\n');
+      const atLimit = run();
+      expect(atLimit.pathsExamined).toBe(64);
+      expect(atLimit.roots[0].truncated).toBe(false);
+      expect(atLimit.truncated).toBe(false);
+      write('CLAUDE.md', missing(64).map(n => `@${n}`).join(' ') + '\n');
+      const overLimit = run();
+      expect(overLimit.pathsExamined).toBe(64);
+      expect(overLimit.roots[0].truncated).toBe(true);
     });
 
     it('a truncated chain total is shown as "at least"', () => {
@@ -553,6 +621,16 @@ describe('claude-md-audit', () => {
       expect(r.findings).toEqual([]);
       expect(r.examined.map(e => path.basename(e.path))).not.toContain('after.md');
       expect(r.roots[0].total).toBe(fs.statSync(path.join(project, 'CLAUDE.md')).size);
+    });
+
+    it('a file of exactly 4 MiB is counted: the skip applies only over the limit', () => {
+      write('CLAUDE.md', '@edge.md\n');
+      const edge = path.join(project, 'edge.md');
+      fs.writeFileSync(edge, '');
+      fs.truncateSync(edge, 4 * 1024 * 1024);
+      const r = run();
+      expect(fileFindings(r)).toMatchObject([{ size: 4_194_304 }]);
+      expect(r.roots[0].total).toBe(fs.statSync(path.join(project, 'CLAUDE.md')).size + 4_194_304);
     });
   });
 
