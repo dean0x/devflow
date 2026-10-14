@@ -8,7 +8,7 @@
  * states the fallback: after a failing quiet run, re-run only the failing test with verbose output,
  * never the suite. That sentence is the stated exception to the never-re-run rule in the shared
  * `## Running commands` block, so it sits outside the block, which this change leaves byte-identical
- * in the Code, Validate and Test agents (`tests/guards/running-commands-parity.test.ts` owns the
+ * in the Code, Fix, Refactor, Validate and Test agents (`tests/guards/running-commands-parity.test.ts` owns the
  * bytes; the arm here asserts the quiet form never entered it).
  *
  * The five language rules (`typescript`, `python`, `go`, `java`, `rust`) each gain exactly one
@@ -90,8 +90,8 @@ describe('the Validation Order table has a Quiet form column and a fallback sent
     expect(collectTableDefects(body)).toEqual([])
   })
 
-  it('the Running commands block holds none of it, so its bytes stay shared with Code and Test', () => {
-    for (const agent of ['code', 'validate', 'test']) {
+  it('the Running commands block holds none of it, so its bytes stay shared with Code, Fix, Refactor and Test', () => {
+    for (const agent of ['code', 'fix', 'refactor', 'validate', 'test']) {
       const body = resolveAgentSource(agent).content
       expect(collectBlockIntrusions(body), agent).toEqual([])
     }

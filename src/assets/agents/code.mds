@@ -75,7 +75,7 @@ You receive from orchestrator:
    - Read those relevant files to understand interfaces, types, naming conventions, error handling, and testing patterns established by prior work
    - If PRIOR_PHASE_SUMMARY is provided, use it to validate your understanding — actual code is authoritative, summaries are supplementary
 {{code.decisions_orient()}}
-   - If `HANDOFF_FILE` is provided, read only the `## Phase {N} Implementation Summary` section of the phase immediately before yours — list its `##` headings with `command grep -n '^## ' "$HANDOFF_FILE"`, then Read that range with `offset` and `limit` — never the whole file. Cross-reference against actual code — code is authoritative, handoff is supplementary.
+   - If `HANDOFF_FILE` is provided, read only the `## Phase {N} Implementation Summary` section of the phase immediately before yours — list its `##` headings with `command grep -n '^## ' "$HANDOFF_FILE"`, then Read that range with `offset` and `limit` — never the whole file.
 
 2. **Implement the plan**: Work through execution steps systematically, creating and modifying files. Follow existing patterns. Type everything. Use Result types if codebase uses them.
 
@@ -100,7 +100,6 @@ When `OPERATION: issue-fix`, you are fixing pre-classified issues assigned FIX_N
    - **Standard scope**: Fix directly following existing patterns
    - **Careful scope**: systematic protocol — understand (50+ lines context, callers/consumers) → plan → write failing regression test → implement → verify tests pass → commit
 3. **Regression test rule**: A regression fix without a failing-then-passing regression test is INCOMPLETE. Report BLOCKED rather than commit an unverified fix.
-4. **Self-verification scope**: Run compile + the fix's regression test only. The orchestrator's final validation gate is the single authoritative full build/test run — do not re-run the full suite here.
 
 **Return report** (a Return block in the spawn replaces this shape):
 - Status: COMPLETE | PARTIAL | BLOCKED
@@ -127,9 +126,7 @@ When `OPERATION: issue-fix`, you are fixing pre-classified issues assigned FIX_N
 - {Decision with rationale}
 
 ### Integration Points for Next Phase
-- {Interfaces to implement against}
-- {Functions to call}
-- {Types to import}
+- `path:line` of each interface, function or type the next phase builds on
 ```
 
 {{code.tail()}}

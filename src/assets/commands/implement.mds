@@ -56,7 +56,7 @@ When the user explicitly asks to re-validate, re-check, or re-run quality gates 
 **Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION
 <!-- learning:end -->
 
-Record the current branch name as `BASE_BRANCH` - this will be the PR target.
+Record the current branch name as `BASE_BRANCH`. Stop the run unless it matches `^[A-Za-z0-9._/+@,#-]{1,200}$`, telling the user it allows only ASCII letters, digits and `._/+@,#-`, at most 200.
 
 {{docs_root()}}
 
@@ -114,10 +114,8 @@ The two tests this command does make are its own under every provider:
   `setup-task` fetches whatever it is handed — so the command would derive a
   branch from a failed lookup and drop the request on the floor.
 
-The cost of the count gate is a one-word task description (`/implement refactor`)
-reaching `setup-task` as an issue reference, where it fails the lookup and is
-reported. That is the direction the failure has to fall: an unfetched issue is
-visible, a silently discarded request is not.
+A one-word task description (`/implement refactor`) fails the issue lookup and is
+reported: an unfetched issue is visible, a silently discarded request is not.
 
 **Capture from Git agent output** (used throughout flow):
 - `TASK_ID`: The branch name created by Git agent (use as TASK_ID for rest of flow)
@@ -181,14 +179,14 @@ Pass `DECISIONS_CONTEXT` to Code agent (Phase 2) and Harden agent (Phase 4).
 Based on Setup context (plan document, issue body, or conversation context), use the three-strategy framework:
 
 **Strategy Selection**:
-- If plan document provided: use `execution-strategy` from frontmatter (default: SINGLE_CODE_AGENT if absent)
-- Otherwise: default to SINGLE_CODE_AGENT unless task description signals high complexity
+- If plan document provided: use `execution-strategy` from frontmatter (if absent, use the table below)
+- Otherwise: SINGLE_CODE_AGENT, because there is no Subtask Breakdown to split
 
-| Strategy | When | Frequency |
-|----------|------|-----------|
-| **SINGLE_CODE_AGENT** | Default. Coherent A→Z implementation | ~80% |
-| **SEQUENTIAL_CODE_AGENTS** | Context overflow risk, layered dependencies | ~15% |
-| **PARALLEL_CODE_AGENTS** | True artifact independence (rare) | ~5% |
+| Strategy | When |
+|----------|------|
+| **SINGLE_CODE_AGENT** | Default. Coherent A→Z implementation |
+| **SEQUENTIAL_CODE_AGENTS** | The plan writes >= 10 files or has >= 7 steps |
+| **PARALLEL_CODE_AGENTS** | True artifact independence (rare) |
 
 ---
 
@@ -211,7 +209,7 @@ DECISIONS_CONTEXT: {decisions_context}
 
 ---
 
-**SEQUENTIAL_CODE_AGENTS** (for HIGH/CRITICAL context risk):
+**SEQUENTIAL_CODE_AGENTS** (>= 10 files or >= 7 steps):
 
 Spawn Code agents one at a time. Each appends its own phase section to the handoff file, and the next reads only the section before it:
 
@@ -298,15 +296,15 @@ DECISIONS_CONTEXT: {decisions_context}
 ### Phase 3: Polish
 
 **Produces:** POLISH_OUTPUT
-**Requires:** FILES_CHANGED
+**Requires:** BASE_BRANCH
 
-After the Code agent completes, spawn Polish agent to polish the code. The Phase 6 Validate covers its commits.
+After the Code agent completes, spawn Polish agent to polish the code. The Phase 6 Validate covers its commits. `{branch_diff}` is the output of `git diff --name-only --diff-filter=d {BASE_BRANCH}...HEAD`, run again at each spawn.
 
 ```
 Agent(subagent_type="Polish"):
 "Polish recently implemented code
 Task: {task description}
-FILES_CHANGED: {list of files from Code agent output}
+FILES_CHANGED: {branch_diff}
 Focus on code modified by Code agent, apply project standards, enhance clarity
 Commit any improvements with a conventional-commit message."
 ```
@@ -314,14 +312,14 @@ Commit any improvements with a conventional-commit message."
 ### Phase 4: Self-Review
 
 **Produces:** HARDEN_OUTPUT
-**Requires:** FILES_CHANGED
+**Requires:** BASE_BRANCH
 
 After Polish agent completes, spawn Harden agent as the quality gate:
 
 ```
 Agent(subagent_type="Harden"):
 "TASK_DESCRIPTION: {task description}
-FILES_CHANGED: {list of files from Code agent output}
+FILES_CHANGED: {branch_diff}
 <!-- learning:on -->
 DECISIONS_CONTEXT: {decisions_context}
 <!-- learning:end -->
@@ -334,7 +332,7 @@ Harden agent reports `### Status: PASS | FIXED | BLOCKED`. **If BLOCKED:** repor
 ### Phase 5: Alignment Check
 
 **Produces:** ALIGNMENT_RESULT
-**Requires:** FILES_CHANGED, EXECUTION_PLAN
+**Requires:** BASE_BRANCH, EXECUTION_PLAN
 
 After Harden agent passes, spawn Evaluate agent to validate alignment. Evaluate agent receives `FEATURE_KNOWLEDGE_RULES` as acceptance context only; pattern and anti-pattern judgments belong to Harden agent:
 
@@ -342,7 +340,7 @@ After Harden agent passes, spawn Evaluate agent to validate alignment. Evaluate 
 Agent(subagent_type="Evaluate"):
 "ORIGINAL_REQUEST: {task description or issue content}
 EXECUTION_PLAN: {execution plan from Phase 1}
-FILES_CHANGED: {list of files from Code agent output}
+FILES_CHANGED: {branch_diff}
 ACCEPTANCE_CRITERIA: {extracted criteria if available}
 FEATURE_KNOWLEDGE: {feature_knowledge_rules}
 Validate alignment with request and plan. Report ALIGNED or MISALIGNED with details."
@@ -375,11 +373,11 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
 **Produces:** VALIDATION_RESULT, VALIDATED_HEAD
 **Requires:** BASE_BRANCH
 
-Validate takes the one full-suite slot, after every commit it must cover: Code, Polish, Harden and the alignment fixes. After Evaluate agent passes, spawn Validate agent. `FILES_CHANGED` is the branch diff, because the Code agent's own list misses the Polish, Harden and fix commits (`{base}` is `BASE_BRANCH`):
+Validate takes the one full-suite slot, after every commit it must cover: Code, Polish, Harden and the alignment fixes. After Evaluate agent passes, spawn Validate agent. `FILES_CHANGED` is the branch diff:
 
 ```
 Agent(subagent_type="Validate"):
-"FILES_CHANGED: {output of `git diff --name-only {base}...HEAD`}
+"FILES_CHANGED: {branch_diff}
 VALIDATION_SCOPE: full
 Run build, typecheck, lint, test. Report pass/fail with failure details."
 ```
@@ -420,7 +418,7 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
 ### Phase 7: QA Testing
 
 **Produces:** QA_RESULT
-**Requires:** FILES_CHANGED, EXECUTION_PLAN, TEST_PLAN, VALIDATED_HEAD
+**Requires:** BASE_BRANCH, EXECUTION_PLAN, TEST_PLAN, VALIDATED_HEAD
 
 After Phase 6 passes, spawn Test agent for scenario-based acceptance testing:
 
@@ -428,7 +426,7 @@ After Phase 6 passes, spawn Test agent for scenario-based acceptance testing:
 Agent(subagent_type="Test"):
 "ORIGINAL_REQUEST: {task description or issue content}
 EXECUTION_PLAN: {execution plan from Phase 1}
-FILES_CHANGED: {list of files from Code agent output}
+FILES_CHANGED: {branch_diff}
 ACCEPTANCE_CRITERIA: {extracted criteria if available}
 TEST_PLAN: {the TP lines of the evidence file's ## Test Plan section, or (none)}
 Design and execute scenario-based acceptance tests. Report PASS or FAIL with evidence."
@@ -467,7 +465,7 @@ Run this phase only if a qa-fix committed (`git rev-parse HEAD` differs from `VA
 
 ```
 Agent(subagent_type="Validate"):
-"FILES_CHANGED: {output of `git diff --name-only VALIDATED_HEAD..HEAD`}
+"FILES_CHANGED: {output of `git diff --name-only --diff-filter=d VALIDATED_HEAD..HEAD`}
 VALIDATION_SCOPE: changed-only
 Verify the qa-fix commits did not break anything."
 ```
@@ -575,7 +573,7 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 /implement (orchestrator - spawns agents only)
 │
 ├─ Re-validation Path (when user says "re-validate"/"re-check"/"re-run gates")
-│  └─ Branch safety → skip Phase 2 → detect FILES_CHANGED → Phases 3-8 → Phase 9, 11, 12
+│  └─ Branch safety → skip Phase 2 → record BASE_BRANCH → Phases 3-8 → Phase 9, 11, 12
 │
 ├─ Phase 1: Setup
 ├─ Phase 2: Implement (3-strategy framework)
