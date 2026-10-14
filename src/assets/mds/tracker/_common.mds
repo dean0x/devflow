@@ -20,7 +20,7 @@ what the other holds:
 EACH DEFINE STATES ITS OWN AUDIENCE, because this module's are not all the same.
 `state_batch_line`, `traceable_issue_rules`, `wave_report_inputs`,
 `conventions_step`, `branch_detection_step`, `closing_keyword_rule`,
-`last_release_tag_step`, `trace_map_step` and `handoff_values` are every
+`last_release_tag_step`, `trace_map_step`, `handoff_values` and `pr_link_resolution` are every
 provider's, the CLI one included. `traceable_issue_rules` and `wave_report_inputs` are text moved out of
 the always-loaded agent — the `ensure-traceable-issue` D3 section list and
 untrusted-input rule, and the `post-wave-report` input definitions (its
@@ -54,19 +54,23 @@ happen before the run (GitHub writes the SHAs step 4 traced; a keyed provider
 names its key). `handoff_values` renders the canonical
 `### Handoff Values` forms per provider, which the contract block's Output template
 (`_ops.mds`) leaves as placeholders.
+`pr_link_resolution` is `ensure-pr-ready`'s step 4b after its first sentence, written once so the
+three providers take the link line from the same source and refuse it in the same words. The
+first sentence stays in each provider module, because it names that provider's line and because
+the module tests read a provider's steps from its own source. The optional note is the provider's own.
 
-The five ref pre-flight defines are the
+The four ref pre-flight defines (`bare_number_rule` and the three heads below) are the
 TOOL-CALL providers' only, and they are here rather than in `_mcp.mds` — where
 their subject would put them — for a measured reason recorded at that module:
 compiling `_jira.mds` against `_mcp.mds` doubles in cost per define added there
-and stops finishing at twelve, while the same five defines cost 1.2 s here. An
+and stops finishing at twelve, while the same defines cost under 1.2 s here. An
 audience is a comment; a build that does not finish is not.
 
-THE REF PRE-FLIGHT HEAD IS FOUR DEFINES, NOT ONE TAKING A MODE. The four differ
+THE REF PRE-FLIGHT HEAD IS THREE DEFINES, NOT ONE TAKING A MODE. The three differ
 by what is being gated — one reference a caller named, a list, the always-loaded
-entry gate, a segment of a branch name — while the grammar, the normalisation
+entry gate — while the grammar, the normalisation
 step and the alternation warning arrive as arguments, so a provider needing none
-of them pays for none of them. Four rather than one because `@if` is
+of them pays for none of them. Three rather than one because `@if` is
 BLOCK-structured: its expansion ends the line, and every one of the fourteen call
 sites is a fragment in the middle of a markdown list item, so a mode parameter
 would break the list the sites live in.
@@ -128,6 +132,15 @@ A **bare number** ⇒ `TRACEABILITY: DEGRADED (ambiguous issue reference)` — u
 **Handoff Values:** `Issue ID` = {{id_form}}; `PR link line` = `{{link_form}}`.
 @end
 
+@define pr_link_resolution(note = ""):
+A given `ISSUE_PR_LINK` is already decided in step 4a: skip the resolution below. Resolution: the only source is the `PR link line` of the `### Handoff Values` block that `setup-task` or `fetch-issue` returned for this branch. Publish it only if it passes step 4a's shape check. A line that fails the check is refused as step 4a refuses it, not repaired: emit `TRACEABILITY: DEGRADED (issue reference "{ref}" does not match any tracker reference grammar)` and publish nothing. This step composes no line itself. Never compose a line from a bare issue number or a branch name.{{note}}
+
+   Publish the section through step 4b's PR-host half.
+
+   If no such line exists, skip silently.
+   A failure while updating the PR body emits `TRACEABILITY: DEGRADED ({reason})` and continues — a failed Related Issues update never blocks the PR.
+@end
+
 @define last_release_tag_step():
 1a. **Last release tag.** Step 1's `git describe` can return a non-release marker tag. From `WORKTREE_PATH` (else cwd), run `node "$HOME/.devflow/scripts/release-trace.cjs" last-tag`: `LAST_TAG <tag>` ⇒ that tag is `{last_tag}`; `LAST_TAG none` ⇒ step 1's initial-commit rule; anything else ⇒ keep step 1's tag and report status `INDETERMINATE (last release tag unresolved)`.
 @end
@@ -147,5 +160,6 @@ A **bare number** ⇒ `TRACEABILITY: DEGRADED (ambiguous issue reference)` — u
 @export branch_detection_step
 @export closing_keyword_rule
 @export handoff_values
+@export pr_link_resolution
 @export last_release_tag_step
 @export trace_map_step

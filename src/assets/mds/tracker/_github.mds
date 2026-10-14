@@ -476,18 +476,13 @@ Load when the resolved tracker provider is `github` and the operation is `post-w
 
 Load when the resolved tracker provider is `github` and the operation is `ensure-pr-ready`.
 
-**Mechanics held here:** the whole operation. Steps 1–4a, the PR-host half of step 4b and steps 4c–6 are PR-host mechanics, the same under every provider (written once in `_ops.mds`); step 4b is this provider's: its `Closes #{n}` line.
+**Mechanics held here:** the whole operation. Steps 1–4a, the PR-host half of step 4b and steps 4c–6 are PR-host mechanics, the same under every provider (written once in `_ops.mds`); step 4b takes its link line and refuses it the same way under every provider; the line itself, `Closes #{n}`, is this provider's.
 
 ### Process
 
 {{opsteps.ensure_pr_ready_steps_to_4a()}}
 
-4b. (ALWAYS-ON) Ensure PR body contains a `## Related Issues` section with the `Closes #{n}` line of this branch's issue. A given `ISSUE_PR_LINK` is already decided in step 4a: skip the resolution below. Resolution: render only the `PR link line` returned by `setup-task` / `ensure-traceable-issue` for this branch, and only if it passes step 4a's shape check. Never compose a line from a bare issue number or a branch name.
-
-   Publish the section through step 4b's PR-host half.
-
-   If no such line exists, skip silently.
-   On any 4xx/5xx from `gh pr edit` when updating the body: emit `TRACEABILITY: DEGRADED ({reason})` and continue — a failed Related Issues update never blocks the PR.
+4b. (ALWAYS-ON) Ensure the PR body contains a `## Related Issues` section with the `Closes #{n}` line of this branch's issue. {{common.pr_link_resolution()}}
 {{opsteps.ensure_pr_ready_steps_from_4c()}}
 
 {{opsteps.ensure_pr_ready_pr_edit()}}

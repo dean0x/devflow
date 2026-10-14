@@ -446,20 +446,32 @@ function step4bOf(ref: string): string {
   return start === -1 || end === -1 ? '' : ref.slice(start, end)
 }
 
+/** Step 4a's refusal line, which step 4b repeats word for word when the Handoff Values line fails the same check. */
+const STEP_4A_REFUSAL = 'TRACEABILITY: DEGRADED (issue reference "{ref}" does not match any tracker reference grammar)'
+
 /**
- * Named collector: how a step 4b block composes a closing line itself instead of rendering the setup-task one.
- * Jira and Linear keep one lettered line after the setup-task option: the fetch-by-key degradation. It resolves
- * nothing, so it is the one lettered line this collector admits.
+ * Named collector: how a step 4b block composes a closing line itself instead of taking the Handoff Values one,
+ * or departs from the one form all three providers share. Step 4b is a single source with no lettered option,
+ * no order, no fetch-by-key gate (it makes no tracker call) and no discoverability condition.
  */
 function collectStep4bComposition(block: string): string[] {
   const out: string[] = []
   const has = (what: string, found: boolean): void => { if (found) out.push(what) }
   has('a branch-name fallback', /branch name pattern/.test(block))
-  has('a second resolution option', /^\s+[b-z]\. (?!The \*fetch by key\* capability absent or denied)/m.test(block))
+  has('a lettered resolution option', /^\s+[a-z]\. /m.test(block))
+  has('a resolution order', /Resolution order/.test(block))
+  has('a fetch-by-key gate', /fetch by key/.test(block))
+  has('a discoverability condition', /discoverable/.test(block))
+  has('a producer that returns no Handoff Values block', /ensure-traceable-issue/.test(block))
   has('a number verified with the tracker CLI', /gh issue view/.test(block))
   has('a line built from a verified issue number', /verified issue number/.test(block))
   if (!/Never compose a line from a bare issue number/.test(block)) out.push('no ban on composing from a bare number')
   if (!block.includes('step 4a\'s shape check')) out.push('no pass through step 4a\'s shape check')
+  if (!(block.includes('`setup-task`') && block.includes('`fetch-issue`') && block.includes('### Handoff Values'))) {
+    out.push('no Handoff Values source naming setup-task and fetch-issue')
+  }
+  if (!block.includes(STEP_4A_REFUSAL)) out.push('no refusal outcome in step 4a\'s words')
+  if (!block.includes('This step composes no line itself.')) out.push('no statement that step 4b composes no line')
   return out
 }
 
@@ -493,7 +505,7 @@ describe('ensure-pr-ready — a supplied ISSUE_PR_LINK is final and step 4b comp
     const block = step4bOf(PR_READY)
     expect(
       collectStep4bComposition(block),
-      'step 4b renders only the setup-task line, through the step 4a shape check — it composes no line itself',
+      'step 4b takes only the Handoff Values line, through the step 4a shape check — it composes no line itself',
     ).toEqual([])
     expect(block, 'the pinned guard: a given link is decided in step 4a').toContain('A given `ISSUE_PR_LINK` is already decided in step 4a: skip the resolution below.')
     expect(block, 'the pinned guard: the section is published through the PR-host half').toContain('Publish the section through step 4b\'s PR-host half.')
@@ -520,14 +532,30 @@ describe('ensure-pr-ready — a supplied ISSUE_PR_LINK is final and step 4b comp
     const seeded = `${block}\n   b. If unavailable, fall back to the branch name pattern \`{type}/{number}-{slug}\` and verify with \`gh issue view {n}\`, a verified issue number.`
     expect(collectStep4bComposition(seeded)).toEqual([
       'a branch-name fallback',
-      'a second resolution option',
+      'a lettered resolution option',
       'a number verified with the tracker CLI',
       'a line built from a verified issue number',
     ])
     expect(collectStep4bComposition('4b. Render the line.')).toEqual([
       'no ban on composing from a bare number',
       'no pass through step 4a\'s shape check',
+      'no Handoff Values source naming setup-task and fetch-issue',
+      'no refusal outcome in step 4a\'s words',
+      'no statement that step 4b composes no line',
     ])
+    const leftovers: ReadonlyArray<{ seed: string; reports: string }> = [
+      { seed: '   Resolution order:', reports: 'a resolution order' },
+      { seed: '   The *fetch by key* capability absent or denied ⇒ `TRACEABILITY: DEGRADED (no tracker tool for fetch by key)` and skip the section.', reports: 'a fetch-by-key gate' },
+      { seed: '   If no verified issue key is discoverable, skip silently.', reports: 'a discoverability condition' },
+      { seed: '   The line is the one `ensure-traceable-issue` returned.', reports: 'a producer that returns no Handoff Values block' },
+    ]
+    for (const { seed, reports } of leftovers) {
+      expect(collectStep4bComposition(`${block}\n${seed}`), `the seed ${JSON.stringify(seed)} must be reported by name`).toEqual([reports])
+    }
+    expect(
+      collectStep4bComposition(block.replace(STEP_4A_REFUSAL, 'TRACEABILITY: DEGRADED (no line)')),
+      'a step 4b that words its refusal differently from step 4a is reported',
+    ).toEqual(['no refusal outcome in step 4a\'s words'])
     expect(step4bOf('no step four-b here'), 'an absent block reads as empty, never as a pass').toBe('')
   })
 })
@@ -544,13 +572,30 @@ describe('ensure-pr-ready — no provider\'s step 4b composes a closing line fro
     return BRANCH_DERIVED.filter(([, pattern]) => pattern.test(block)).map(([what]) => what)
   }
 
-  it.each(PASTE_PROVIDERS)('%s: step 4b renders only the setup-task line and composes nothing', provider => {
+  it.each(PASTE_PROVIDERS)('%s: step 4b takes only the Handoff Values line and composes nothing', provider => {
     const block = step4bOf(ensurePrReadyReference(provider))
     expect(block, `the ${provider} step 4b block`).not.toBe('')
-    expect(collectStep4bComposition(block), `${provider} step 4b composes a line itself`).toEqual([])
+    expect(collectStep4bComposition(block), `${provider} step 4b composes a line itself or departs from the shared form`).toEqual([])
     expect(collectBranchDerivedText(block), `${provider} step 4b still derives a reference from the branch name`).toEqual([])
-    expect(block, 'the pinned guard: a given link is decided in step 4a').toContain('A given `ISSUE_PR_LINK` is already decided in step 4a: skip the resolution')
+    expect(block, 'the pinned guard: a given link is decided in step 4a').toContain('A given `ISSUE_PR_LINK` is already decided in step 4a: skip the resolution below.')
     expect(block, 'the pinned guard: the section is published through the PR-host half').toContain('Publish the section through step 4b\'s PR-host half.')
+  })
+
+  it('the three providers state one step 4b: the shared sentences are the same bytes in each', () => {
+    const SHARED_SENTENCES = [
+      'A given `ISSUE_PR_LINK` is already decided in step 4a: skip the resolution below.',
+      'the only source is the `PR link line` of the `### Handoff Values` block that `setup-task` or `fetch-issue` returned for this branch.',
+      'Publish it only if it passes step 4a\'s shape check.',
+      `A line that fails the check is refused as step 4a refuses it, not repaired: emit \`${STEP_4A_REFUSAL}\` and publish nothing.`,
+      'This step composes no line itself. Never compose a line from a bare issue number or a branch name.',
+      'If no such line exists, skip silently.',
+    ]
+    for (const provider of PASTE_PROVIDERS) {
+      const block = step4bOf(ensurePrReadyReference(provider))
+      for (const sentence of SHARED_SENTENCES) {
+        expect(block, `${provider} step 4b must carry the shared sentence: ${sentence}`).toContain(sentence)
+      }
+    }
   })
 
   it('no tracker source calls the branch-name define, and the define is gone', () => {
@@ -571,7 +616,7 @@ describe('ensure-pr-ready — no provider\'s step 4b composes a closing line fro
         'the extract-and-verify instruction',
         'the look-alike token warning',
       ])
-      expect(collectStep4bComposition(seeded), provider).toEqual(['a branch-name fallback', 'a second resolution option'])
+      expect(collectStep4bComposition(seeded), provider).toEqual(['a branch-name fallback', 'a lettered resolution option'])
     }
   })
 })
