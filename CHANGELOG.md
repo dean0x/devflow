@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **A tracked `.devflow/config.json` no longer applies as personal config** ([#489](https://github.com/dean0x/devflow/pull/489)). devflow ignores it and shows a warning.
-- **`/dynamic-build` wave merges are safer, and a supplied PR link line is used as given** ([#486](https://github.com/dean0x/devflow/issues/486)). A wave merge uses `git merge --no-ff` and records the pre-merge SHA. The wave halts when the merge SHA is not valid. A failed merge is undone by a reset to the recorded SHA. A PR gets no closing reference from a bare number or the branch name.
+- **`/dynamic-build` wave merges are safer, and a supplied PR link line is used as given** ([#486](https://github.com/dean0x/devflow/issues/486)). A wave merge uses `git merge --no-ff` and records the pre-merge SHA. The ticket branch name is checked before the merge, and a refused name quarantines that ticket. The wave halts when the merge SHA is not valid. A ticket whose branch adds no commit stops the wave before the post-merge build, and no wave PR opens. A merge whose post-merge build fails is undone by a reset to the recorded SHA. The run summary names why the wave halted. A PR gets no closing reference from a bare number or the branch name.
 
 ---
 
