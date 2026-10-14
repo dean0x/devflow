@@ -49,7 +49,7 @@ describe('the level registry', () => {
 
 describe('parseGateLevel', () => {
   it.each(['full', 'standard', 'lean'])('accepts %s', word => {
-    expect(parseGateLevel(word)).toEqual({ ok: true, level: word });
+    expect(parseGateLevel(word)).toEqual({ ok: true, value: word });
   });
 
   const REJECTED: ReadonlyArray<readonly [string, unknown]> = [
@@ -71,17 +71,17 @@ describe('parseGateLevel', () => {
     const r = parseGateLevel(value);
     expect(r.ok).toBe(false);
     if (r.ok) return;
-    for (const level of GATE_LEVELS) expect(r.message).toContain(level);
+    for (const level of GATE_LEVELS) expect(r.error).toContain(level);
   });
 
   it('echoes an offending string without its control bytes, and never a non-string value', () => {
     const control = parseGateLevel('le\u001b[31man\u0000');
     expect(control.ok).toBe(false);
     // eslint-disable-next-line no-control-regex
-    if (!control.ok) expect(control.message).not.toMatch(/[\u0000-\u001f\u007f]/);
+    if (!control.ok) expect(control.error).not.toMatch(/[\u0000-\u001f\u007f]/);
     const object = parseGateLevel({ toString: () => 'lean' });
     expect(object.ok).toBe(false);
-    if (!object.ok) expect(object.message).toContain('<object>');
+    if (!object.ok) expect(object.error).toContain('<object>');
   });
 });
 
@@ -235,9 +235,13 @@ describe('the file-system functions', () => {
       expect(await readGateManifest(dir)).toEqual({ kind: 'corrupt' });
     });
 
-    it('strips a leading BOM, as the resolver library does', async () => {
-      await write(Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(JSON.stringify(validManifest()))]));
-      expect((await readGateManifest(dir)).kind).toBe('object');
+    it('reads a file with a leading BOM as rejected, keeping its level, because readManifest() cannot parse it', async () => {
+      const manifest = validManifest({ gateLevel: 'lean' });
+      await write(Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(JSON.stringify(manifest))]));
+      const read = await readGateManifest(dir);
+      expect(read).toEqual({ kind: 'rejected', raw: manifest });
+      expect(machineGateLevel('raw' in read ? read.raw : null)).toBe('lean');
+      expect(await readManifest(dir)).toBeNull();
     });
 
     it('never throws when the file system refuses', async () => {
@@ -349,6 +353,26 @@ describe('the file-system functions', () => {
       await write(body);
       expect(await writeMachineGateLevel(dir, 'lean', tick)).toEqual({ kind: 'unreadable', path: manifestPath });
       expect(await fs.readFile(manifestPath, 'utf-8')).toBe(body);
+    });
+
+    it.each<readonly [string, unknown]>([
+      ['a capitalised level', 'Lean'],
+      ['an empty string', ''],
+      ['undefined', undefined],
+      ['a number', 1],
+      ['an object', { toString: () => 'lean' }],
+    ])('refuses %s with invalid-level, before any I/O, and never throws', async (_label, level) => {
+      const body = JSON.stringify(validManifest({ gateLevel: 'full' }));
+      await write(body);
+      const clock = vi.fn(tick);
+      expect(await writeMachineGateLevel(dir, level as never, clock)).toEqual({ kind: 'invalid-level' });
+      expect(clock).not.toHaveBeenCalled();
+      expect(await fs.readFile(manifestPath, 'utf-8')).toBe(body);
+    });
+
+    it('refuses an invalid level even where no manifest exists, and creates none', async () => {
+      expect(await writeMachineGateLevel(dir, 'minimal' as never, tick)).toEqual({ kind: 'invalid-level' });
+      await expect(fs.stat(manifestPath)).rejects.toThrow();
     });
 
     it('returns write-failed with the path and an error code, without throwing', async () => {

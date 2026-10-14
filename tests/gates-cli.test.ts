@@ -29,7 +29,7 @@ import {
   type GateStatus,
   type GateStatusDeps,
 } from '../src/cli/commands/gates.js';
-import { readGateManifest, type GateManifestRead } from '../src/core/gate-level.js';
+import { GATE_LEVELS, readGateManifest, type GateManifestRead } from '../src/core/gate-level.js';
 import { trackedConfigWarning, type RepoSettings, type RepoSettingsOptions, type SettingsLoad } from '../src/core/evidence-policy.js';
 
 const CLI = requireBuiltCli();
@@ -264,6 +264,16 @@ describe('describeGateWrite', () => {
     expect(out.message).toContain(file);
     expect(out.message).toContain('EACCES');
   });
+
+  it('names every valid level and echoes a bad one only in sanitized form, for an invalid level', () => {
+    const out = describeGateWrite({ kind: 'invalid-level' }, 'le\u001b[31man' as never, file);
+    expect(out.kind).toBe('error');
+    expect(out.exitCode).toBe(1);
+    expect(out.message).toContain('nothing changed');
+    for (const level of GATE_LEVELS) expect(out.message).toContain(level);
+    // eslint-disable-next-line no-control-regex
+    expect(out.message).not.toMatch(/[\u0000-\u001f\u007f]/);
+  });
 });
 
 describe('runGatesSet over a scratch devflow directory', () => {
@@ -292,6 +302,15 @@ describe('runGatesSet over a scratch devflow directory', () => {
   it('refuses without a manifest and creates none', async () => {
     expect(await runGatesSet(dir, 'lean')).toMatchObject({ kind: 'error', exitCode: 1 });
     await expect(fs.access(manifestFile())).rejects.toThrow();
+  });
+
+  it('refuses a level that is not one of the three words and leaves the manifest alone', async () => {
+    const body = JSON.stringify(makeManifest(), null, 2) + '\n';
+    await fs.writeFile(manifestFile(), body);
+    const out = await runGatesSet(dir, 'Lean' as never, () => NOW);
+    expect(out).toMatchObject({ kind: 'error', exitCode: 1 });
+    expect(out.message).toContain('nothing changed');
+    expect(await fs.readFile(manifestFile(), 'utf-8')).toBe(body);
   });
 
   it('refuses a corrupt manifest and leaves its bytes alone', async () => {
@@ -632,12 +651,12 @@ describe('devflow gates --status', () => {
     expect(run.out).toContain('devflow init will replace this file');
   }, SUBPROCESS_TIMEOUT_MS);
 
-  it('reads a manifest with a leading byte-order mark without a warning', async () => {
-    await writeManifestText('﻿' + manifestJson('lean'));
+  it('warns for a manifest with a leading byte-order mark, which the manifest reader rejects, and keeps its stored level', async () => {
+    await writeManifestText('\ufeff' + manifestJson('lean'));
     const run = runCli(['gates', '--status']);
     expect(run.status, run.out).toBe(0);
     expect(run.out).toContain('Effective lean (machine)');
-    expect(run.out).not.toContain('cannot be read');
+    expect(run.out).toContain('devflow init will replace this file');
   }, SUBPROCESS_TIMEOUT_MS);
 
   it('wins over --set, exits 0 and writes nothing, even over a manifest the manifest reader would heal', async () => {

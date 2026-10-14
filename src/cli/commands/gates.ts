@@ -34,6 +34,7 @@ import {
   type GateManifestRead,
   type GateWriteResult,
 } from '../../core/gate-level.js';
+import { describeEchoedValue } from '../../core/echo-value.js';
 import {
   loadSettingsModule,
   settingsSourceFile,
@@ -290,6 +291,12 @@ export function describeGateWrite(result: GateWriteResult, level: GateLevel, man
         message: `Could not write the manifest at ${result.path} (${result.reason}); nothing changed.`,
         exitCode: 1,
       };
+    case 'invalid-level':
+      return {
+        kind: 'error',
+        message: `Unknown gate level: "${describeEchoedValue(level)}"; nothing changed. Valid levels: ${VALID_LEVELS}`,
+        exitCode: 1,
+      };
     default: {
       const exhaustive: never = result;
       return exhaustive;
@@ -378,11 +385,11 @@ export const gatesCommand = new Command('gates')
     // Validate the typed level before any I/O: a bad word is rejected, never repaired.
     const parsed = parseGateLevel(options.set);
     if (!parsed.ok) {
-      p.log.error(parsed.message);
+      p.log.error(parsed.error);
       process.exitCode = 1;
       return;
     }
-    const outcome = await runGatesSet(devflowDir, parsed.level);
+    const outcome = await runGatesSet(devflowDir, parsed.value);
     printOutcome(outcome);
     process.exitCode = outcome.exitCode;
   });

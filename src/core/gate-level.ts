@@ -2,7 +2,7 @@ import { promises as fs, constants as fsConstants } from 'fs';
 import * as path from 'path';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
 import { hasRequiredManifestFields } from './manifest.js';
-import { describeTrackerValue } from './tracker.js';
+import { describeEchoedValue } from './echo-value.js';
 
 /**
  * The gate level: how much checking a command applies. One of three words, from
@@ -38,8 +38,8 @@ export const MAX_MANIFEST_BYTES = 1048576;
 const VALID_LEVELS_LIST = GATE_LEVELS.join(', ');
 
 export type GateLevelParse =
-  | { readonly ok: true; readonly level: GateLevel }
-  | { readonly ok: false; readonly message: string };
+  | { readonly ok: true; readonly value: GateLevel }
+  | { readonly ok: false; readonly error: string };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -55,16 +55,16 @@ function isGateLevel(value: unknown): value is GateLevel {
  * REJECT, NEVER REPAIR: membership is byte-exact. No trim, no case folding, no
  * alias. `Lean` and `lean ` are errors, not `lean`. The message names every valid
  * level and echoes the offending value only in the sanitized form of
- * {@link describeTrackerValue}.
+ * {@link describeEchoedValue}.
  */
 export function parseGateLevel(value: unknown): GateLevelParse {
-  if (isGateLevel(value)) return { ok: true, level: value };
+  if (isGateLevel(value)) return { ok: true, value };
   if (value === undefined || value === '') {
-    return { ok: false, message: `Missing gate level. Valid levels: ${VALID_LEVELS_LIST}` };
+    return { ok: false, error: `Missing gate level. Valid levels: ${VALID_LEVELS_LIST}` };
   }
   return {
     ok: false,
-    message: `Unknown gate level: "${describeTrackerValue(value)}". Valid levels: ${VALID_LEVELS_LIST}`,
+    error: `Unknown gate level: "${describeEchoedValue(value)}". Valid levels: ${VALID_LEVELS_LIST}`,
   };
 }
 
@@ -121,7 +121,9 @@ export function setMachineGateLevel(
  *              level or `features` value that is not a plain object
  *   rejected   a plain object with a plain `features` object that
  *              readManifest() would still reject, because a required field is
- *              missing or mistyped (the fault lies in another key)
+ *              missing or mistyped (the fault lies in another key) or because
+ *              the file starts with a byte-order mark, which readManifest()
+ *              cannot parse
  *   object     a plain object readManifest() would accept
  */
 export type GateManifestRead =
@@ -131,6 +133,10 @@ export type GateManifestRead =
 
 const ABSENT: GateManifestRead = Object.freeze({ kind: 'absent' });
 const CORRUPT: GateManifestRead = Object.freeze({ kind: 'corrupt' });
+
+function startsWithBom(bytes: Uint8Array): boolean {
+  return bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf;
+}
 
 /** Bytes of the manifest, or why not: one bounded read of a regular file, followed through links. */
 async function readManifestBytes(manifestPath: string): Promise<Buffer | 'absent' | 'corrupt'> {
@@ -176,7 +182,9 @@ async function readManifestBytes(manifestPath: string): Promise<Buffer | 'absent
  * It follows the resolver library's rules, so the CLI and a prompt see the same
  * file: the path is followed through links, a missing path is absent, and every
  * other failure is corrupt. Bytes decode as UTF-8 with a fatal error, which also
- * strips a leading BOM, and then parse as JSON.
+ * strips a leading BOM, and then parse as JSON, so the level is read past a BOM
+ * as it is in the resolver. A file with a BOM is still `rejected`, because
+ * readManifest() parses the text as read and refuses it.
  */
 export async function readGateManifest(devflowDir: string): Promise<GateManifestRead> {
   const bytes = await readManifestBytes(path.join(devflowDir, 'manifest.json'));
@@ -189,7 +197,8 @@ export async function readGateManifest(devflowDir: string): Promise<GateManifest
     return CORRUPT;
   }
   if (!isPlainObject(parsed) || !isPlainObject(parsed.features)) return CORRUPT;
-  return { kind: hasRequiredManifestFields(parsed) ? 'object' : 'rejected', raw: parsed };
+  const readable = !startsWithBom(bytes) && hasRequiredManifestFields(parsed);
+  return { kind: readable ? 'object' : 'rejected', raw: parsed };
 }
 
 /** What {@link writeMachineGateLevel} did. */
@@ -203,12 +212,16 @@ export type GateWriteResult =
   /** A manifest exists and cannot be read as an object with a `features` object; nothing was written. */
   | { readonly kind: 'unreadable'; readonly path: string }
   /** The write failed; `reason` is the error code only. */
-  | { readonly kind: 'write-failed'; readonly path: string; readonly reason: string };
+  | { readonly kind: 'write-failed'; readonly path: string; readonly reason: string }
+  /** `level` is not one of the three words (a caller bypassed the type); nothing was read or written. */
+  | { readonly kind: 'invalid-level' };
 
 /**
  * Write the machine default to `<devflowDir>/manifest.json` (atomic temp +
- * rename). Never throws. Refuses with `not-installed` when there is no manifest
- * to write into — a manifest is created by `devflow init`, never by this write.
+ * rename). Never throws. Refuses with `invalid-level`, before any I/O, a level
+ * that is not one of the three words, because the type is no check at run time.
+ * Refuses with `not-installed` when there is no manifest to write into — a
+ * manifest is created by `devflow init`, never by this write.
  *
  * Only `features.gateLevel` and `updatedAt` change. A write to the level the
  * manifest already records changes nothing, `updatedAt` included, because that
@@ -223,6 +236,7 @@ export async function writeMachineGateLevel(
   level: GateLevel,
   now: () => string,
 ): Promise<GateWriteResult> {
+  if (!isGateLevel(level)) return { kind: 'invalid-level' };
   const manifestPath = path.join(devflowDir, 'manifest.json');
   const read = await readGateManifest(devflowDir);
   if (read.kind === 'absent') return { kind: 'not-installed' };
