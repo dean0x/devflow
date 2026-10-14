@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A tracked `.devflow/config.json` no longer applies as personal config** ([#489](https://github.com/dean0x/devflow/pull/489)). devflow ignores it and shows a warning.
+
 ---
 
 ## [3.6.0] - 2026-10-14

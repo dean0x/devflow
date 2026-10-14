@@ -281,6 +281,9 @@ export function createFakeBin(base: string, tools: readonly Tool[] = ['gh', 'git
     const script = [
       '#!/bin/bash',
       `T="\${${TABLE_ENV}:?scripted-shim: ${TABLE_ENV} is not set}"`,
+      // The C locale makes `%q` write every byte past ASCII as an octal escape in
+      // one `$'…'` word, the same on bash 3.2 (macOS) and bash 5 (Linux).
+      'LC_ALL=C',
       `LINE=$(printf '%q ' ${tool} "$@")`,
       `printf '%s\\n' "$LINE" >> "$T/argv.log"`,
       'KEY="$*"',
@@ -386,11 +389,49 @@ export function buildScriptedShim(bin: FakeBin, base: string, calls: readonly Sc
   };
 }
 
+/** Strict UTF-8: a `$'…'` word whose bytes are not valid UTF-8 is refused. */
+const UTF8_STRICT = new TextDecoder('utf-8', { fatal: true });
+
 /**
- * Decode one `printf '%q '` line back into argv. Handles the two forms bash emits
- * for the resolver's argv — backslash escapes and quoted segments (`''` for an
- * empty argument). `$'…'` (control characters) is refused: the resolver never puts
- * file or remote bytes into argv, so meeting one means something is badly wrong.
+ * Decode the `$'…'` word that starts at `line[start]` (the `$`). The fake logs in
+ * the C locale, so bash writes every byte past ASCII as an octal escape (`\357`),
+ * a quote or backslash as `\'` or `\\`, and printable ASCII as itself. The bytes
+ * must be valid UTF-8 with no control character: the resolver puts fixed spellings
+ * such as `config.jſon` into argv, but never file or remote bytes, so a control
+ * character still means something is badly wrong.
+ */
+function decodeAnsiCWord(line: string, start: number): { text: string; next: number } {
+  const bytes: number[] = [];
+  for (let i = start + 2; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === "'") {
+      if (bytes.some(b => b < 0x20 || b === 0x7f)) break;
+      return { text: UTF8_STRICT.decode(Uint8Array.from(bytes)), next: i };
+    }
+    if (ch !== '\\') {
+      const code = ch.charCodeAt(0);
+      if (code < 0x20 || code > 0x7e) break;
+      bytes.push(code);
+      continue;
+    }
+    const octal = /^[0-7]{1,3}/.exec(line.slice(i + 1, i + 4));
+    if (octal) {
+      bytes.push(parseInt(octal[0], 8));
+      i += octal[0].length;
+    } else if (line[i + 1] === "'" || line[i + 1] === '\\') {
+      bytes.push(line.charCodeAt(i + 1));
+      i++;
+    } else {
+      break;
+    }
+  }
+  throw new Error(`scripted-shim: control-character or malformed $'…' argv in the log: ${line}`);
+}
+
+/**
+ * Decode one `printf '%q '` line back into argv. Handles the three forms bash emits
+ * for the resolver's argv — backslash escapes, quoted segments (`''` for an empty
+ * argument) and `$'…'` words for bytes past ASCII (decodeAnsiCWord).
  */
 export function decodeQuotedArgv(line: string): string[] {
   const out: string[] = [];
@@ -403,7 +444,10 @@ export function decodeQuotedArgv(line: string): string[] {
       i++;
       inToken = true;
     } else if (ch === '$' && line[i + 1] === "'") {
-      throw new Error(`scripted-shim: control-character argv in the log: ${line}`);
+      const word = decodeAnsiCWord(line, i);
+      cur += word.text;
+      i = word.next;
+      inToken = true;
     } else if (ch === "'") {
       const end = line.indexOf("'", i + 1);
       if (end === -1) throw new Error(`scripted-shim: unterminated quote in the log: ${line}`);

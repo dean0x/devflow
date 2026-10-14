@@ -120,7 +120,7 @@ npx devflow-kit knowledge --status          # Show current status
 
 `memory --status`, `learning --status` and `knowledge --status` report the machine-wide switch. A repository can only narrow it: when the switch is on but the current directory's repository turns the feature off — under `features` in the committed `.devflow/project.json`, or in your personal `.devflow/config.json` — the output adds `Effective here: disabled (<file>)`, naming that file. When nothing narrows it, the line is absent and the output is unchanged. `knowledge --status` also prints `Effective here: disabled (<file> is unreadable)` when a repository file exists but is not a JSON object: commands then switch knowledge write-back off, while memory and learning capture carry on as the machine switch says. `--enable` turns a feature on in every project, and says so, but a repository can still opt out this way.
 
-When the current checkout's `.devflow/config.json` is tracked by git, `memory`, `learning`, `knowledge` and `tracker --status` also warn that devflow ignores it — the file holds personal settings, and a committed copy would let a branch set them for whoever checks it out — and print the fix: `git rm --cached .devflow/config.json`.
+When the current checkout's `.devflow/config.json` is tracked by git, `memory`, `learning`, `knowledge` and `tracker --status` also warn that devflow ignores it — the file holds personal settings, and a committed copy would let a branch set them for whoever checks it out — and say how to fix it: untrack the tracked entry with `git rm --cached`, then check or delete the file, because untracking leaves the committed bytes on disk as your personal file. The warning never prints the entry names.
 
 ## Behavior
 
