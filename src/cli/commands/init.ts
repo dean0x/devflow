@@ -91,7 +91,7 @@ import {
   attributionSeedFrom,
 } from './attribution-prompts.js';
 import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
-import { convergeLearningVariants } from '../../targets/claude-code/learning-install.js';
+import { convergeLearningVariants, installedVersionMatches, readRunningVersion } from '../../targets/claude-code/learning-install.js';
 import {
   auditAndRecordClaudeMd,
   formatClaudeMdAuditNote,
@@ -731,6 +731,22 @@ export function buildHudOnlyManifest(
   };
 }
 
+/**
+ * The line `init --hud-only` prints when the version the manifest records is not the
+ * running version, or null when there is nothing to say. Pure.
+ *
+ * `--hud-only` refreshes the scripts under ~/.devflow and leaves the installed
+ * commands and agents alone, so after an upgrade or a downgrade the prompts and the
+ * scripts they call can disagree until a full init. The window is accepted; this
+ * line names it, in either direction, and ends with the remedy. A machine with no
+ * readable manifest records no version, so there is nothing to compare.
+ */
+export function formatHudOnlySkew(recordedVersion: string | null, runningVersion: string | null): string | null {
+  if (recordedVersion === null || installedVersionMatches(recordedVersion, runningVersion)) return null;
+  return `The installed prompts come from devflow ${recordedVersion} and this CLI is ${runningVersion ?? 'of unknown version'}. ` +
+    '--hud-only refreshed only the scripts, so run `devflow init` to update the prompts.';
+}
+
 /** What `init` does with the retired `--scope` value it was given. */
 export type RetiredScopeDecision =
   | { kind: 'proceed' }
@@ -925,6 +941,9 @@ export const initCommand = new Command('init')
           buildHudOnlyManifest(existingHudManifest, version, new Date().toISOString()),
         );
       } catch { /* non-fatal */ }
+
+      const hudOnlySkew = formatHudOnlySkew(existingHudManifest?.version ?? null, await readRunningVersion());
+      if (hudOnlySkew !== null) p.log.warn(hudOnlySkew);
 
       p.log.success('HUD installed');
       p.log.info(`Configure later: ${color.cyan('devflow hud --status')}`);

@@ -412,6 +412,11 @@ async function editManifestFeatures(remove: string[], set: Record<string, unknow
   );
 }
 
+async function editManifestVersion(version: string): Promise<void> {
+  const manifest = JSON.parse(await readManifestRaw()) as Record<string, unknown>;
+  await fs.writeFile(path.join(devflowDir(), 'manifest.json'), JSON.stringify({ ...manifest, version }, null, 2), 'utf-8');
+}
+
 describe('older manifests agree with the runtime gates', () => {
   it('a manifest without learning/knowledge keys: a plain re-init keeps both enabled (D-FEATURES-ABSENT-ON)', async () => {
     runInit(repoA, '--recommended');
@@ -478,6 +483,42 @@ describe('init --hud-only over a full install (D-HUD-ONLY-PRESERVE)', () => {
     // With learning a machine-wide switch, a HUD install must not disable it.
     await seedLearningQueue(repoB);
     expect(sessionContext(repoB)).toContain('--- LEARNING MAINTENANCE ---');
+  }, MULTI_RUN_TIMEOUT_MS);
+
+  it('prints one skew line when the recorded version differs from the running one, in either direction', async () => {
+    const running = (JSON.parse(readFileSync(path.join(import.meta.dirname, '..', 'package.json'), 'utf-8')) as { version: string }).version;
+    runInit(repoA, '--recommended');
+    for (const recorded of ['0.0.1', '999.0.0']) {
+      await editManifestVersion(recorded);
+      const out = runInit(repoA, '--hud-only');
+      const lines = out.split('\n').filter((line) => line.includes('--hud-only refreshed only the scripts'));
+      expect(lines, `expected one skew line for recorded ${recorded}`).toHaveLength(1);
+      expect(lines[0]).toContain(`devflow ${recorded}`);
+      expect(lines[0]).toContain(`CLI is ${running}`);
+      expect(lines[0]).toContain('run `devflow init` to update the prompts.');
+      // --hud-only reinstalls no plugin, so the recorded version stays as it was.
+      expect((JSON.parse(await readManifestRaw()) as { version: string }).version).toBe(recorded);
+    }
+  }, MULTI_RUN_TIMEOUT_MS);
+
+  it('prints no skew line when the recorded version matches the running one', async () => {
+    runInit(repoA, '--recommended');
+    expect(runInit(repoA, '--hud-only')).not.toContain('--hud-only refreshed only the scripts');
+  }, MULTI_RUN_TIMEOUT_MS);
+
+  it('prints no skew line over a fresh machine', () => {
+    expect(runInit(repoA, '--hud-only')).not.toContain('--hud-only refreshed only the scripts');
+  }, MULTI_RUN_TIMEOUT_MS);
+
+  it('keeps a stored gate level, null included', async () => {
+    runInit(repoA, '--recommended');
+    for (const value of ['lean', 'Lean', null]) {
+      await editManifestFeatures([], { gateLevel: value });
+      runInit(repoA, '--hud-only');
+      const features = await readManifestFeatures();
+      expect(Object.hasOwn(features, 'gateLevel'), `expected ${JSON.stringify(value)} to be kept`).toBe(true);
+      expect(features.gateLevel).toBe(value);
+    }
   }, MULTI_RUN_TIMEOUT_MS);
 
   it('a fresh --hud-only install still records only the HUD', async () => {
