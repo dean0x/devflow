@@ -1204,7 +1204,7 @@ function collectMergeDefects(text: string): string[] {
   const out: string[] = [];
   if (!prompt.includes('git merge --no-ff ${engineResult.branch}')) out.push('the merge is not pinned to git merge --no-ff');
   if (!prompt.includes('run git rev-parse ${INTEGRATION_BRANCH} as baseSha')) out.push('the merge does not record the integration head as baseSha');
-  if (!prompt.includes('git merge --abort')) out.push('the merge does not abort on a conflict');
+  if (!prompt.includes('If the merge stops for any reason, run git merge --abort')) out.push('the merge does not abort when it stops for any reason');
   if (prompt.indexOf('as baseSha') > prompt.indexOf('git merge --no-ff')) out.push('the merge records baseSha after the merge');
   return out;
 }
@@ -1258,12 +1258,12 @@ describe('dynamic-build: the post-merge Validate belongs to the workflow, and a 
     expect(collectUndoDefects('nothing')).toEqual(['no undo spawn']);
   });
 
-  it('the merge records baseSha, then runs git merge --no-ff, and aborts on a conflict', () => {
+  it('the merge records baseSha, then runs git merge --no-ff, and aborts when it stops for any reason', () => {
     expect(collectMergeDefects(compiled)).toEqual([]);
     expect(collectMergeDefects(sources['dynamic-build.mds'])).toEqual([]);
   });
 
-  it('known-bad probes: a plain merge, a missing baseSha record and a merge that never aborts are each reported', () => {
+  it('known-bad probes: a plain merge, a missing baseSha record and a merge that aborts only on a conflict or never are each reported', () => {
     const plain = compiled.replace('git merge --no-ff ${engineResult.branch}', 'git merge ${engineResult.branch}');
     expect(plain, 'the seed must land').not.toBe(compiled);
     expect(collectMergeDefects(plain)).toEqual(['the merge is not pinned to git merge --no-ff', 'the merge records baseSha after the merge']);
@@ -1272,7 +1272,10 @@ describe('dynamic-build: the post-merge Validate belongs to the workflow, and a 
     expect(collectMergeDefects(unrecorded)).toContain('the merge does not record the integration head as baseSha');
     const nothing = compiled.replace('git merge --abort', 'git status');
     expect(nothing, 'the seed must land').not.toBe(compiled);
-    expect(collectMergeDefects(nothing)).toEqual(['the merge does not abort on a conflict']);
+    expect(collectMergeDefects(nothing)).toEqual(['the merge does not abort when it stops for any reason']);
+    const conflictOnly = compiled.replace('If the merge stops for any reason, run git merge --abort', 'On a conflict, run git merge --abort');
+    expect(conflictOnly, 'the seed must land').not.toBe(compiled);
+    expect(collectMergeDefects(conflictOnly)).toEqual(['the merge does not abort when it stops for any reason']);
     expect(collectMergeDefects('nothing')).toEqual(['no merge spawn']);
   });
 
@@ -1291,9 +1294,14 @@ describe('dynamic-build: the post-merge Validate belongs to the workflow, and a 
     expect(collectGitValidateRequests(oldStep)).toEqual(['a doctrine line asks for a Validate: 5. After any resolution: Validate agent (build + test) immediately']);
   });
 
-  it('the wave doctrine says the post-merge Validate always runs and treeEqual is recorded only', () => {
-    expect(compiled).toContain('It always runs');
+  it('the wave doctrine says the post-merge Validate always runs, unless a bad or unchanged SHA halts the wave first, and treeEqual is recorded only', () => {
+    expect(compiled).toContain('It always runs, except when the wave halts first on a merge with a bad or unchanged SHA');
     expect(compiled).toContain('a true value never skips the Validate');
+  });
+
+  it('the wave doctrine names the merge helper as the place of the undo spawn', () => {
+    expect(compiled).toContain('The undo spawn in `mergeValidateUndo` states its gates and exact git lines');
+    expect(compiled).not.toContain('The undo spawn in the wave loop');
   });
 });
 
@@ -1357,6 +1365,30 @@ function collectMergeHelperDefects(text: string): string[] {
   return out;
 }
 
+/** The repo's ref allowlist, as implement.mds states it for BASE_BRANCH. */
+const REF_ALLOWLIST_CLASS = '[A-Za-z0-9._/+@,#-]{1,200}';
+
+/**
+ * Named collector: where the helper lets a Git-reported ticket branch into a git line unchecked.
+ * The check must be the repo's ref allowlist, refuse a leading dash and any double dot, and run
+ * in the helper before the merge spawn.
+ */
+function collectBranchCheckDefects(text: string): string[] {
+  const at = text.indexOf(MERGE_HELPER);
+  const end = at === -1 ? -1 : text.indexOf('\n};\n', at);
+  if (at === -1 || end === -1) return ['no merge helper'];
+  const out: string[] = [];
+  const shape = /const BRANCH_NAME = (\/.*\/);/.exec(text.slice(0, at))?.[1] ?? '';
+  if (!shape.includes(REF_ALLOWLIST_CLASS)) out.push('BRANCH_NAME is not the repo ref allowlist');
+  if (!shape.includes('(?!-)')) out.push('BRANCH_NAME does not refuse a leading dash');
+  if (!shape.includes('(?!.*\\.\\.)')) out.push('BRANCH_NAME does not refuse a double dot');
+  const body = text.slice(at, end);
+  const checkAt = body.indexOf('BRANCH_NAME.test(String(engineResult.branch))');
+  const mergeAt = body.indexOf('agent(`Merge ');
+  if (checkAt === -1 || mergeAt === -1 || checkAt > mergeAt) out.push('the helper does not check the branch before the merge spawn');
+  return out;
+}
+
 describe('dynamic-build: the wave merge arm stays flat and lives in one helper (#486, finding 6)', () => {
   let compiled: string;
   let source: string;
@@ -1375,6 +1407,26 @@ describe('dynamic-build: the wave merge arm stays flat and lives in one helper (
   it('the merge, the post-merge Validate and the undo sit in one helper that takes only the ticket and its engine result', () => {
     expect(collectMergeHelperDefects(compiled)).toEqual([]);
     expect(collectMergeHelperDefects(source)).toEqual([]);
+  });
+
+  it('the helper checks the ticket branch against the repo ref allowlist before the merge spawn, and implement states the same allowlist', async () => {
+    expect(collectBranchCheckDefects(compiled)).toEqual([]);
+    expect(collectBranchCheckDefects(source)).toEqual([]);
+    const implement = await fs.readFile(path.join(BUILT_COMMANDS, 'implement.md'), 'utf-8');
+    expect(implement, 'implement no longer states the allowlist the wave copies').toContain(REF_ALLOWLIST_CLASS);
+  });
+
+  it('known-bad probes: a missing check, a late check and a loose allowlist are each reported', () => {
+    const unchecked = compiled.replace('BRANCH_NAME.test(String(engineResult.branch))', 'true');
+    expect(unchecked, 'the seed must land').not.toBe(compiled);
+    expect(collectBranchCheckDefects(unchecked)).toEqual(['the helper does not check the branch before the merge spawn']);
+    const loose = compiled.replace('(?!-)', '');
+    expect(loose, 'the seed must land').not.toBe(compiled);
+    expect(collectBranchCheckDefects(loose)).toEqual(['BRANCH_NAME does not refuse a leading dash']);
+    const dots = compiled.replace('(?!.*\\.\\.)', '');
+    expect(dots, 'the seed must land').not.toBe(compiled);
+    expect(collectBranchCheckDefects(dots)).toEqual(['BRANCH_NAME does not refuse a double dot']);
+    expect(collectBranchCheckDefects('nothing')).toEqual(['no merge helper']);
   });
 
   it('known-bad probes: a seven-level arm, a helper that reaches loop state and a helper that is missing are each reported', () => {

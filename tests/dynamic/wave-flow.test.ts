@@ -295,7 +295,7 @@ interface EngineRun {
 interface WaveRun {
   readonly tickets: readonly WaveRow[]
   readonly quarantined: ReadonlyArray<{ ticket: string; reason: string }>
-  readonly halted: { ticket: string; mergeSha: string | null; baseSha?: string | null; reason: string } | null
+  readonly halted: { ticket: string; mergeSha: string | null; baseSha?: string | null; reason: string; kind?: string } | null
   readonly spawns: readonly Spawn[]
   readonly engines: readonly EngineRun[]
 }
@@ -1064,6 +1064,8 @@ export function collectWavePrStepDefects(built: string): string[] {
   need('wave-only: step 3 runs in WAVE mode only', step3.includes('(WAVE mode only — skip this step entirely in SINGLE mode)'))
   need('branch gate: only wave/<slug> opens a wave PR', step3.includes(BRANCH_GATE))
   need('not a wave branch: any other head degrades', step3.includes('Any other name: record `TRACEABILITY: DEGRADED (not a wave branch)` and go to step 4 with no wave PR'))
+  need('halted: a fixed text per kind, and no other halted field is shown', ['`red` (', '`bad-sha` (', '`unchanged` ('].every(k => step3.includes(k))
+    && step3.includes('`<text>` is fixed by `kind`, and no other `halted` field is shown.'))
   need('nothing merged: no wave PR', step3.includes('**Nothing merged** (no entry has `merged: true`): record `Wave PR: skipped (nothing merged)`'))
   need('required plan: a gap blocks, with no exception', step3.includes('**Required plan** — only when `EVIDENCE_POLICY` is `required`: a merged ticket with no usable test plan ⇒ `Wave PR: BLOCKED (no test plan for T<k>, …)`')
     && step3.includes('no exception is offered here'))
@@ -1084,6 +1086,7 @@ const STEP_SEEDS: ReadonlyArray<readonly [site: string, from: string, to: string
   ['wave-only', '(WAVE mode only — skip this step entirely in SINGLE mode). The workflow returned', '(in either mode). The workflow returned'],
   ['branch gate', BRANCH_GATE, 'Any name opens a wave PR'],
   ['not a wave branch', 'Any other name: record `TRACEABILITY: DEGRADED (not a wave branch)`', 'Any other name: record nothing'],
+  ['halted', '`<text>` is fixed by `kind`, and no other `halted` field is shown.', '`<text>` is `halted.reason`.'],
   ['nothing merged', '`Wave PR: skipped (nothing merged)`', '`Wave PR: opened anyway`'],
   ['required plan', 'no exception is offered here', 'a self-attested exception is offered here'],
   ['the ask', 'It has exactly two options: open it, or don\'t.', 'It has three options: open it, open a draft, or don\'t.'],
@@ -1102,7 +1105,7 @@ describe('AC-13: the wave PR opens only on wave/<slug>, with a merged ticket and
     const sites = collectWavePrStepDefects('no steps').length
     expect(sites, 'a missing step set is one defect').toBe(1)
     expect(STEP_SEEDS.map(s => s[0])).toEqual([
-      'wave-only', 'branch gate', 'not a wave branch', 'nothing merged', 'required plan',
+      'wave-only', 'branch gate', 'not a wave branch', 'halted', 'nothing merged', 'required plan',
       'the ask', 'headless', 'the spawn', 'no policy in the fence', 'one spawn',
     ])
   })
@@ -1729,6 +1732,66 @@ describe('#421 AC-22: a red post-merge Validate is undone, never left kept', () 
   })
 })
 
+describe('S1: the ticket branch is checked in code before the merge, and a name outside the allowlist is quarantined', () => {
+  const BRANCH_REFUSED = 'ticket branch name refused: not a plain git ref name'
+  const worldOf = (branch: string): World => ({
+    order: ['#41', '#42'],
+    tickets: { '#41': { branch, issueId: '41', prLinkLine: 'Closes #41' }, '#42': { issueId: '42', prLinkLine: 'Closes #42' } },
+  })
+  /** The spawns that carry the branch into a git line: the merge, the post-merge Validate and the undo. */
+  const mergeSpawns = (spawns: readonly Spawn[]): Spawn[] => spawns.filter(s => s.prompt.startsWith('Merge ') || s.prompt.includes('(merge commit ') || s.prompt.startsWith('Undo the merge '))
+
+  const refused: ReadonlyArray<readonly [string, string]> = [
+    ['a command substitution', 'feat/$(x)'],
+    ['a leading dash, which git reads as an option', '-x'],
+    ['a double dot', 'feat/a..b'],
+    ['a space', 'feat/a b'],
+    ['a semicolon', 'feat/a;x'],
+    ['a backtick', 'feat/`x`'],
+    ['a newline', 'feat/a\nb'],
+    ['a name of 201 characters', 'f'.repeat(201)],
+  ]
+
+  it.each(refused)('%s: the ticket is quarantined with a fixed reason, no merge is asked for it, and the value reaches no merge, Validate or undo prompt', async (_name, branch) => {
+    const run = await runWave(WAVE!, SINGLE!, worldOf(branch), {}, 'true')
+    expect(run.quarantined.find(q => q.ticket === '#41')?.reason).toBe(BRANCH_REFUSED)
+    expect(run.tickets.find(t => t.ticket === '#41')).toMatchObject({ ran: true, merged: false })
+    expect(run.halted, 'a refused name quarantines the ticket; it does not halt the wave').toBeNull()
+    expect(gitSpawns(run.spawns, 'Merge ').map(s => s.prompt.split(' ')[1]), 'only #42 is merged').toEqual(['feat/42-work'])
+    expect(run.spawns.filter(s => s.agentType === 'Validate' && s.prompt.includes('(merge commit ')), 'only #42 is validated').toHaveLength(1)
+    expect(gitSpawns(run.spawns, 'Undo the merge ')).toHaveLength(0)
+    expect(mergeSpawns(run.spawns).some(s => s.prompt.includes(branch)), 'the refused name is copied into no merge-time prompt').toBe(false)
+    expect(run.quarantined.some(q => q.reason.includes(branch)), 'and into no reason').toBe(false)
+    expect(run.tickets.find(t => t.ticket === '#42')).toMatchObject({ merged: true })
+  })
+
+  const accepted: ReadonlyArray<readonly [string, string]> = [
+    ['every allowed punctuation mark', 'feat/a.b_c+d@e,f#g-h'],
+    ['a single dot inside a name', 'user/Feat_7.v2'],
+    ['a name of exactly 200 characters', 'f'.repeat(200)],
+  ]
+
+  it.each(accepted)('%s is merged as reported', async (_name, branch) => {
+    const run = await runWave(WAVE!, SINGLE!, worldOf(branch), {}, 'true')
+    expect(gitSpawns(run.spawns, 'Merge ').map(s => s.prompt.split(' ')[1])).toEqual([branch, 'feat/42-work'])
+    expect(run.tickets.find(t => t.ticket === '#41')).toMatchObject({ merged: true })
+  })
+
+  it('known-bad probe: a wave without the branch check puts a command substitution into the merge line', async () => {
+    const unchecked = seedOnce(WAVE!, '!BRANCH_NAME.test(String(engineResult.branch))', 'false')
+    const run = await runWave(unchecked, SINGLE!, worldOf('feat/$(x)'), {}, 'true')
+    expect(gitSpawns(run.spawns, 'Merge ').map(s => s.prompt.split(' ')[1]), 'the seed lets the name reach the merge').toContain('feat/$(x)')
+  })
+
+  it('known-bad probe: an allowlist without the leading-dash and double-dot guards lets both names through', async () => {
+    const loose = seedOnce(WAVE!, '/^(?!-)(?!.*\\.\\.)[A-Za-z0-9', '/^[A-Za-z0-9')
+    for (const branch of ['-x', 'feat/a..b']) {
+      const run = await runWave(loose, SINGLE!, worldOf(branch), {}, 'true')
+      expect(gitSpawns(run.spawns, 'Merge ').map(s => s.prompt.split(' ')[1]), `the seed lets ${branch} through`).toContain(branch)
+    }
+  })
+})
+
 describe('#421 AC-22: a refused undo halts the wave and names the red integration HEAD', () => {
   const world: World = {
     order: ['#31', '#32', '#33'],
@@ -1740,7 +1803,7 @@ describe('#421 AC-22: a refused undo halts the wave and names the red integratio
   it('executed: no further merge or round, the row is not merged, and halted carries the merge commit', async () => {
     const run = await runWave(WAVE!, SINGLE!, world, {}, 'true')
     const sha = createHash('sha1').update('merge:#32').digest('hex')
-    expect(run.halted).toMatchObject({ ticket: '#32', mergeSha: sha, baseSha: baseShaOf('#32') })
+    expect(run.halted).toMatchObject({ ticket: '#32', mergeSha: sha, baseSha: baseShaOf('#32'), kind: 'red' })
     expect(run.halted?.reason).toContain('post-merge build red; merge not undone')
     expect(run.tickets.map(t => [t.ticket, t.merged, t.ran])).toEqual([['#31', true, true], ['#32', false, true], ['#33', false, false]])
     expect(gitSpawns(run.spawns, 'Merge ').map(s => s.prompt.split(' ')[1]), 'no merge after the halt').toEqual(['feat/31-work', 'feat/32-work'])
@@ -1751,8 +1814,9 @@ describe('#421 AC-22: a refused undo halts the wave and names the red integratio
   it('an undo that reports done with a head other than the recorded pre-merge SHA halts like a refused undo', async () => {
     const run = await runWave(WAVE!, SINGLE!, { ...world, refuseUndo: [], undoWrongHead: ['#32'] }, {}, 'true')
     const sha = createHash('sha1').update('merge:#32').digest('hex')
-    expect(run.halted).toMatchObject({ ticket: '#32', mergeSha: sha, baseSha: baseShaOf('#32') })
-    expect(run.halted?.reason).toContain('post-merge build red; merge not undone')
+    expect(run.halted).toMatchObject({ ticket: '#32', mergeSha: sha, baseSha: baseShaOf('#32'), kind: 'red' })
+    expect(run.halted?.reason).toBe('post-merge build red; merge not undone (undo reported a head other than the recorded pre-merge SHA)')
+    expect(run.quarantined.find(q => q.ticket === '#32')?.reason, 'the quarantine reason is the same fixed text').toBe(run.halted?.reason)
     expect(run.tickets.find(t => t.ticket === '#32')?.merged).toBe(false)
     expect(run.tickets.find(t => t.ticket === '#33')?.ran, 'no further merge after the halt').toBe(false)
   })
@@ -1765,15 +1829,15 @@ describe('#421 AC-22: a refused undo halts the wave and names the red integratio
 
   const BAD_SHA_REASON = 'merge reported without a 40-hex mergeSha or baseSha; the integration branch may hold an unvalidated merge'
   const UNCHANGED_REASON = 'merge added no commit, so the wave stopped: an unchanged HEAD cannot be checked. Check that the ticket branch holds its commits, then run the wave again.'
-  const unusableMerges: ReadonlyArray<readonly [string, Partial<World>, string]> = [
-    ['a merge reported with no mergeSha (a failed abort)', { badMergeSha: ['#32'] }, BAD_SHA_REASON],
-    ['a merge reported with a baseSha that is not 40-hex', { badBaseSha: ['#32'] }, BAD_SHA_REASON],
-    ['a merge whose baseSha equals its mergeSha', { sameSha: ['#32'] }, UNCHANGED_REASON],
+  const unusableMerges: ReadonlyArray<readonly [string, Partial<World>, string, string]> = [
+    ['a merge reported with no mergeSha (a failed abort)', { badMergeSha: ['#32'] }, BAD_SHA_REASON, 'bad-sha'],
+    ['a merge reported with a baseSha that is not 40-hex', { badBaseSha: ['#32'] }, BAD_SHA_REASON, 'bad-sha'],
+    ['a merge whose baseSha equals its mergeSha', { sameSha: ['#32'] }, UNCHANGED_REASON, 'unchanged'],
   ]
 
-  it.each(unusableMerges)('%s halts the wave with a fixed reason and null SHA fields, and spawns neither Validate nor undo', async (_name, scripted, reason) => {
+  it.each(unusableMerges)('%s halts the wave with a fixed reason, a fixed kind and null SHA fields, and spawns neither Validate nor undo', async (_name, scripted, reason, kind) => {
     const run = await runWave(WAVE!, SINGLE!, { ...world, failMerge: [], refuseUndo: [], ...scripted }, {}, 'true')
-    expect(run.halted).toEqual({ ticket: '#32', mergeSha: null, baseSha: null, reason })
+    expect(run.halted).toEqual({ ticket: '#32', mergeSha: null, baseSha: null, reason, kind })
     expect(run.quarantined.find(q => q.ticket === '#32')?.reason).toBe(reason)
     expect(run.tickets.find(t => t.ticket === '#32')?.merged).toBe(false)
     expect(gitSpawns(run.spawns, 'Undo the merge ')).toHaveLength(0)
@@ -1787,11 +1851,11 @@ describe('#421 AC-22: a refused undo halts the wave and names the red integratio
     expect(run.spawns.some(s => s.prompt.includes('not-a-sha'))).toBe(false)
   })
 
-  it('the merge prompt checks out the integration branch, records its head as baseSha, merges with --no-ff and aborts on a conflict', async () => {
+  it('the merge prompt checks out the integration branch, records its head as baseSha, merges with --no-ff and aborts when the merge stops for any reason', async () => {
     const run = await runWave(WAVE!, SINGLE!, { ...world, failMerge: [], refuseUndo: [] }, {}, 'true')
     const [merge] = gitSpawns(run.spawns, 'Merge ')
     expect(merge.prompt).toContain(`Check out ${INTEGRATION}, run git rev-parse ${INTEGRATION} as baseSha, then run git merge --no-ff feat/31-work.`)
-    expect(merge.prompt).toContain('On a conflict, run git merge --abort; if the abort fails, return merged true with no mergeSha.')
+    expect(merge.prompt).toContain('If the merge stops for any reason, run git merge --abort; if the abort fails, return merged true with no mergeSha.')
     expect(merge.prompt.indexOf('"baseSha"'), 'baseSha is the last field of the merged return').toBeGreaterThan(merge.prompt.indexOf('"treeEqual"'))
   })
 

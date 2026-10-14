@@ -77,12 +77,13 @@ function argsOf(template: Template, v: Values): string[] {
   return words.slice(1)
 }
 
-/** The shipped merge prompt's two commands: the one that records baseSha and the merge itself. */
-function shippedMerge(text: string): { readonly recordBase: Template; readonly merge: Template } {
+/** The shipped merge prompt's three commands: the one that records baseSha, the merge itself and the abort for a merge that stops. */
+function shippedMerge(text: string): { readonly recordBase: Template; readonly merge: Template; readonly abort: Template } {
   const prompt = gitPromptStartingWith(text, 'agent(`Merge ${engineResult.branch}')
   return {
     recordBase: required(prompt, /run (git rev-parse \$\{INTEGRATION_BRANCH\}) as baseSha/, 'baseSha command'),
     merge: required(prompt, /(git merge --no-ff \$\{engineResult\.branch\})/, 'git merge --no-ff line'),
+    abort: required(prompt, /If the merge stops for any reason, run (git merge --abort)/, 'abort line for any stop'),
   }
 }
 
@@ -221,6 +222,25 @@ describe('dynamic-build: the merge and the undo of a red merge restore the pre-m
     for (const sha of ticket.ticketShas) expect(reachableFromHead(ticket.repo, sha), `ticket commit ${sha.slice(0, 7)} is still on the integration branch`).toBe(false)
     expect(git(ticket.repo, ['status', '--porcelain'])).toBe('')
   })
+
+  it('a merge that a commit hook refuses is not a conflict: git keeps the merge state, and the abort the prompt names for any stop clears it', () => {
+    const ticket = newTicketRepo()
+    recordBase(ticket)
+    const hook = path.join(ticket.repo, '.git', 'hooks', 'pre-merge-commit')
+    fs.writeFileSync(hook, '#!/bin/sh\nexit 1\n', { mode: 0o755 })
+    const v = valuesOf(ticket, '')
+
+    const refused = run(ticket.repo, argsOf(shippedMerge(BUILT).merge, v))
+
+    expect(refused.status, 'the hook stops the merge').not.toBe(0)
+    expect(fs.existsSync(path.join(ticket.repo, '.git', 'MERGE_HEAD')), 'the refused merge leaves MERGE_HEAD, which fails every later merge').toBe(true)
+
+    git(ticket.repo, argsOf(shippedMerge(BUILT).abort, v))
+
+    expect(fs.existsSync(path.join(ticket.repo, '.git', 'MERGE_HEAD')), 'the abort clears the merge state').toBe(false)
+    expect(git(ticket.repo, ['rev-parse', 'HEAD']), 'the integration head is the recorded pre-merge head').toBe(ticket.baseSha)
+    expect(git(ticket.repo, ['status', '--porcelain'])).toBe('')
+  }, GIT_BUDGET_MS)
 
   it('a true fast-forward is refused, not half undone: the first-parent check stops it and the branch keeps the merge head', () => {
     const ticket = newTicketRepo()
