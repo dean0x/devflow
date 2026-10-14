@@ -1479,6 +1479,36 @@ describe('gate level feature field', () => {
     expect(stored.gateLevel).toBe('Lean');
   });
 
+  it('never rewrites a file whose only oddity is a malformed gateLevel', async () => {
+    const file = path.join(tmpDir, 'manifest.json');
+    const past = new Date('2020-01-01T00:00:00.000Z');
+    const MALFORMED: Array<[label: string, value: unknown]> = [
+      ['a capitalised word', 'Lean'],
+      ['a trailing space', 'lean '],
+      ['an empty string', ''],
+      ['null', null],
+      ['false', false],
+      ['zero', 0],
+      ['an object', { level: 'lean' }],
+    ];
+    for (const [label, value] of MALFORMED) {
+      // writeManifest leaves no other defect to heal, so the level is the file's only oddity.
+      await writeManifest(tmpDir, makeManifest({ features: { ...makeManifest().features, gateLevel: value } }));
+      await fs.utimes(file, past, past);
+      const bytes = await fs.readFile(file, 'utf-8');
+
+      expect(await readManifest(tmpDir), `expected ${label} to parse non-null`).not.toBeNull();
+
+      expect(await fs.readFile(file, 'utf-8'), `${label} changed the file bytes`).toBe(bytes);
+      expect((await fs.stat(file)).mtimeMs, `${label} touched the file`).toBe(past.getTime());
+    }
+    // Non-vacuity: the same check sees a heal write when another defect owes one.
+    await writeRaw(withFeatures({ kb: true, gateLevel: 'Lean' }));
+    await fs.utimes(file, past, past);
+    await readManifest(tmpDir);
+    expect((await fs.stat(file)).mtimeMs).not.toBe(past.getTime());
+  });
+
   it('an absent key is not written by a heal write', async () => {
     await writeRaw(withFeatures({ kb: true }));
     await readManifest(tmpDir);
