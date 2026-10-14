@@ -127,9 +127,27 @@ describe('--status warns about a tracked .devflow/config.json (D-PERSONAL-UNTRAC
 
     const out = status(feature, repo);
 
-    expect(out).toContain('.devflow/config.json is tracked by git, so devflow ignores it');
-    expect(out).toContain('git rm --cached .devflow/config.json');
+    expect(out).toContain('Git tracks an entry at or under .devflow/config.json, so devflow ignores that file.');
+    expect(out).toContain('Untrack it with: git rm --cached <entry>.');
+    expect(out).toContain('Untracking leaves the committed bytes on disk as your personal file.');
     // Ignored means absent: its features:false narrows nothing.
+    expect(out).not.toMatch(EFFECTIVE);
+  }, 120_000);
+
+  it('a staged .devflow symlink to a staged directory is named the same way, and narrows nothing (#487)', () => {
+    seedManifest({});
+    const repo = fs.mkdtempSync(path.join(tmpRoot, 'repo-'));
+    execFileSync('git', ['init', '-q'], { cwd: repo, stdio: 'ignore' });
+    fs.mkdirSync(path.join(repo, 'vendor', 'df'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'vendor', 'df', 'config.json'), '{"features":{"memory":false}}');
+    fs.symlinkSync(path.join('vendor', 'df'), path.join(repo, '.devflow'));
+    execFileSync('git', ['add', '-f', '.devflow', 'vendor/df/config.json'], { cwd: repo, stdio: 'ignore' });
+
+    const out = status('memory', repo);
+
+    expect(out).toContain('Git tracks an entry at or under .devflow/config.json, so devflow ignores that file.');
+    // The index entry names are committed bytes: the warning must not print them.
+    expect(out).not.toContain('vendor/df');
     expect(out).not.toMatch(EFFECTIVE);
   }, 120_000);
 
