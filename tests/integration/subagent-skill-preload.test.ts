@@ -1,8 +1,17 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {
+  BEFORE_ALL_TIMEOUT_MS,
+  createSpawnContext,
+  describeSpawnContext,
+  disposeSpawnContext,
+  installDevflow,
   isClaudeAvailable,
+  liveSkipReason,
+  pickCredential,
+  printLiveSkip,
   runClaudeAndWait,
   getSubagentPreloadResult,
+  type SpawnContext,
 } from './helpers.js';
 
 /**
@@ -34,9 +43,14 @@ const MAX_SPAWN_ATTEMPTS = 2;
  * at least one transcript contains the expected skills, avoiding a race where
  * Claude spawns auxiliary subagents whose transcript appears alongside the target.
  */
-async function spawnAgentAndGetAllPreloads(agentType: string, prompt: string): Promise<string[][]> {
+async function spawnAgentAndGetAllPreloads(
+  ctx: SpawnContext,
+  agentType: string,
+  prompt: string,
+): Promise<string[][]> {
   for (let attempt = 1; attempt <= MAX_SPAWN_ATTEMPTS; attempt++) {
     const result = await runClaudeAndWait(
+      ctx,
       // Explicit imperative so haiku cannot answer the task itself.
       `You MUST call the Agent tool exactly once with subagent_type="${agentType}" and the prompt below. ` +
       `Do not answer the task yourself. After the agent returns, reply with the single word DONE.\n\n` +
@@ -44,7 +58,7 @@ async function spawnAgentAndGetAllPreloads(agentType: string, prompt: string): P
       { timeout: 60000, model: 'haiku', allowedTools: 'Agent' },
     );
 
-    const preloadResult = getSubagentPreloadResult(result.sessionId);
+    const preloadResult = getSubagentPreloadResult(ctx, result.sessionId);
 
     if (preloadResult.kind === 'no-session-dir') {
       if (attempt < MAX_SPAWN_ATTEMPTS) {
@@ -85,16 +99,39 @@ async function spawnAgentAndGetAllPreloads(agentType: string, prompt: string): P
  * into the subagent context at spawn time (visible as <command-name> tags
  * in subagent transcripts).
  *
- * Requirements:
- * - `claude` CLI installed and authenticated
- * - Devflow skills and agents installed (`devflow init`)
+ * Every session runs in a temp HOME and a temp git repository, with devflow installed into
+ * that HOME by `beforeAll`, the permission mode `dontAsk`, and the Agent tool as the only
+ * allowed tool (see `createSpawnContext`). It never touches the developer's own ~/.claude
+ * or this checkout.
  *
- * Run: npm run test:integration (not part of `npm test`)
+ * Requirements:
+ * - `claude` CLI installed
+ * - CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY set (a temp HOME cannot use the stored login);
+ *   without one the file skips and prints why
+ * - A built CLI (`npm run build`)
+ *
+ * Run: DEVFLOW_INTEGRATION_ALL=1 npx vitest run --config vitest.integration.config.ts \
+ *        tests/integration/subagent-skill-preload.test.ts
  */
-describe.skipIf(!isClaudeAvailable())('subagent skill preload', () => {
+const credential = pickCredential(process.env);
+const skipReason = liveSkipReason(credential, isClaudeAvailable());
+printLiveSkip('subagent-skill-preload', skipReason);
+
+describe.skipIf(skipReason !== null)('subagent skill preload', () => {
+  let ctx: SpawnContext;
+
+  beforeAll(() => {
+    ctx = createSpawnContext(credential);
+    console.log(describeSpawnContext(ctx));
+    installDevflow(ctx);
+  }, BEFORE_ALL_TIMEOUT_MS);
+
+  afterAll(() => {
+    if (ctx !== undefined) disposeSpawnContext(ctx);
+  });
 
   it('Polish agent preloads software-design and worktree-support', async () => {
-    const allPreloads = await spawnAgentAndGetAllPreloads('Polish', 'reply with one line only — do not create, modify, or delete any file, do not run git: function add(a, b) { return a + b; }');
+    const allPreloads = await spawnAgentAndGetAllPreloads(ctx, 'Polish', 'reply with one line only — do not create, modify, or delete any file, do not run git: function add(a, b) { return a + b; }');
     const expected = ['software-design', 'worktree-support'];
     expect(
       allPreloads.some((p) => expected.every((s) => p.includes(s))),
@@ -106,7 +143,7 @@ describe.skipIf(!isClaudeAvailable())('subagent skill preload', () => {
   }, 90000);
 
   it('Harden agent preloads quality-gates, software-design, worktree-support, apply-decisions', async () => {
-    const allPreloads = await spawnAgentAndGetAllPreloads('Harden', 'reply with one line only — do not create, modify, or delete any file, do not run git: const x = 1;');
+    const allPreloads = await spawnAgentAndGetAllPreloads(ctx, 'Harden', 'reply with one line only — do not create, modify, or delete any file, do not run git: const x = 1;');
     const expected = ['quality-gates', 'software-design', 'worktree-support', 'apply-decisions'];
     expect(
       allPreloads.some((p) => expected.every((s) => p.includes(s))),
@@ -115,7 +152,7 @@ describe.skipIf(!isClaudeAvailable())('subagent skill preload', () => {
   }, 90000);
 
   it('Review agent preloads review-methodology, worktree-support, apply-decisions', async () => {
-    const allPreloads = await spawnAgentAndGetAllPreloads('Review', 'reply with one line only — do not create, modify, or delete any file, do not run git: const y = 2;');
+    const allPreloads = await spawnAgentAndGetAllPreloads(ctx, 'Review', 'reply with one line only — do not create, modify, or delete any file, do not run git: const y = 2;');
     const expected = ['review-methodology', 'worktree-support', 'apply-decisions'];
     expect(
       allPreloads.some((p) => expected.every((s) => p.includes(s))),
@@ -133,7 +170,7 @@ describe.skipIf(!isClaudeAvailable())('subagent skill preload', () => {
   }, 90000);
 
   it('Design agent preloads worktree-support, apply-decisions, gap-analysis, design-review', async () => {
-    const allPreloads = await spawnAgentAndGetAllPreloads('Design', 'reply with one line only — do not create, modify, or delete any file, do not run git: Add a cache layer.');
+    const allPreloads = await spawnAgentAndGetAllPreloads(ctx, 'Design', 'reply with one line only — do not create, modify, or delete any file, do not run git: Add a cache layer.');
     const expected = ['worktree-support', 'apply-decisions', 'gap-analysis', 'design-review'];
     expect(
       allPreloads.some((p) => expected.every((s) => p.includes(s))),
@@ -142,7 +179,7 @@ describe.skipIf(!isClaudeAvailable())('subagent skill preload', () => {
   }, 90000);
 
   it('Git agent preloads git and worktree-support', async () => {
-    const allPreloads = await spawnAgentAndGetAllPreloads('Git', 'Report the current branch name only. Do not run any git command that writes (no commit, add, checkout, push, stash, tag, reset).');
+    const allPreloads = await spawnAgentAndGetAllPreloads(ctx, 'Git', 'Report the current branch name only. Do not run any git command that writes (no commit, add, checkout, push, stash, tag, reset).');
     const expected = ['git', 'worktree-support'];
     expect(
       allPreloads.some((p) => expected.every((s) => p.includes(s))),
@@ -151,7 +188,7 @@ describe.skipIf(!isClaudeAvailable())('subagent skill preload', () => {
   }, 90000);
 
   it('Research agent preloads worktree-support, apply-decisions, apply-feature-knowledge', async () => {
-    const allPreloads = await spawnAgentAndGetAllPreloads('Research', 'reply with one line only naming one testing framework — do not create, modify, or delete any file, do not run git');
+    const allPreloads = await spawnAgentAndGetAllPreloads(ctx, 'Research', 'reply with one line only naming one testing framework — do not create, modify, or delete any file, do not run git');
     const expected = ['worktree-support', 'apply-decisions', 'apply-feature-knowledge'];
     expect(
       allPreloads.some((p) => expected.every((s) => p.includes(s))),
@@ -174,7 +211,7 @@ describe.skipIf(!isClaudeAvailable())('subagent skill preload', () => {
     expected: readonly string[],
     trimmed: readonly string[] = [],
   ): Promise<void> {
-    const allPreloads = await spawnAgentAndGetAllPreloads(agentType, prompt);
+    const allPreloads = await spawnAgentAndGetAllPreloads(ctx, agentType, prompt);
     const match = allPreloads.find((p) => expected.every((s) => p.includes(s)));
     expect(match, `No transcript contains ${expected.join(', ')}. Found: ${JSON.stringify(allPreloads)}`).toBeDefined();
     for (const skill of trimmed) {

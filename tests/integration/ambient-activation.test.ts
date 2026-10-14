@@ -1,9 +1,18 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {
+  BEFORE_ALL_TIMEOUT_MS,
+  createSpawnContext,
+  describeSpawnContext,
+  disposeSpawnContext,
+  installDevflow,
   isClaudeAvailable,
+  liveSkipReason,
+  pickCredential,
+  printLiveSkip,
   runClaudeStreaming,
   hasSkillInvocations,
   hasRequiredSkills,
+  type SpawnContext,
 } from './helpers.js';
 import { HANDOFF_TEMPLATE, REMINDER_TEMPLATE } from '../fixtures/ambient-templates.js';
 
@@ -14,13 +23,34 @@ import { HANDOFF_TEMPLATE, REMINDER_TEMPLATE } from '../fixtures/ambient-templat
  * (Claude Code's native plan-mode handoff prefix) and injects a directive to invoke
  * devflow:implement.
  *
+ * The session runs in a temp HOME and a temp git repository, with devflow installed into
+ * that HOME by `beforeAll` and the permission mode `dontAsk` (see `createSpawnContext`).
+ * It never touches the developer's own ~/.claude or this checkout.
+ *
  * Requirements:
- * - `claude` CLI installed and authenticated
- * - Devflow installed (`devflow init`)
+ * - `claude` CLI installed
+ * - CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY set (a temp HOME cannot use the stored login);
+ *   without one the file skips and prints why
+ * - A built CLI (`npm run build`)
  *
  * Run: npm run test:integration (not part of `npm test` — each test is an API call)
  */
-describe.skipIf(!isClaudeAvailable())('devflow ambient plan handoff', () => {
+const credential = pickCredential(process.env);
+const skipReason = liveSkipReason(credential, isClaudeAvailable());
+printLiveSkip('ambient-activation', skipReason);
+
+describe.skipIf(skipReason !== null)('devflow ambient plan handoff', () => {
+  let ctx: SpawnContext;
+
+  beforeAll(() => {
+    ctx = createSpawnContext(credential);
+    console.log(describeSpawnContext(ctx));
+    installDevflow(ctx);
+  }, BEFORE_ALL_TIMEOUT_MS);
+
+  afterAll(() => {
+    if (ctx !== undefined) disposeSpawnContext(ctx);
+  });
 
   it('plan handoff prompt — `Implement the following plan:` prefix triggers implement skill', async () => {
     const planPrompt = [
@@ -33,7 +63,7 @@ describe.skipIf(!isClaudeAvailable())('devflow ambient plan handoff', () => {
       '3. Write tests',
     ].join('\n');
 
-    const result = await runClaudeStreaming(planPrompt, {
+    const result = await runClaudeStreaming(ctx, planPrompt, {
       timeout: 30000,
       systemPrompt: HANDOFF_TEMPLATE,
     });
@@ -42,7 +72,7 @@ describe.skipIf(!isClaudeAvailable())('devflow ambient plan handoff', () => {
   });
 
   it('normal prompt — orchestrator reminder does not trigger a skill invocation', async () => {
-    const result = await runClaudeStreaming('what does the config module do?', {
+    const result = await runClaudeStreaming(ctx, 'what does the config module do?', {
       timeout: 20000,
       // A normal prompt gets the 2-line orchestrator reminder — it must steer toward
       // delegation without auto-invoking any devflow workflow skill.
