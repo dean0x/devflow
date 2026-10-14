@@ -13,7 +13,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { spawnSync } from 'child_process';
 import { randomUUID } from 'crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { ROOT, requireBuiltCli, sandboxEnv } from './helpers.js';
@@ -31,12 +31,15 @@ import {
   describeSpawnContext,
   disposeSpawnContext,
   getSubagentPreloadResult,
+  initWrittenStatus,
   installDevflow,
   liveSkipReason,
   pickCredential,
   runClaudeAndWait,
   runClaudeStreaming,
   sandboxGit,
+  statusChange,
+  type CheckoutStatusReader,
   type Credential,
   type GitRunner,
   type InitRunner,
@@ -81,7 +84,7 @@ function git(ctx: SpawnContext, cwd: string, ...args: string[]): { status: numbe
   return { status: result.status, stdout: result.stdout };
 }
 
-/** The checkout's `git status --porcelain --ignored`, for a before-and-after comparison. */
+/** The checkout's whole `git status --porcelain --ignored`; callers narrow it to the paths init writes. */
 function checkoutStatus(ctx: SpawnContext): string {
   return git(ctx, ROOT, 'status', '--porcelain', '--ignored').stdout;
 }
@@ -113,9 +116,24 @@ function readProbe(ctx: SpawnContext): Probe {
   return JSON.parse(readFileSync(path.join(ctx.home, 'probe.json'), 'utf-8')) as Probe;
 }
 
-/** Names of the `devflow-live-*` entries in the OS temp dir, to prove a failed setup leaves none. */
-function liveTempEntries(): string[] {
-  return readdirSync(os.tmpdir()).filter((name) => name.startsWith('devflow-live-'));
+interface GitCall {
+  cwd: string;
+  home: string;
+  /** True when the working directory existed as the call began. */
+  existed: boolean;
+}
+
+/**
+ * Wraps `inner` so each call records its working directory and HOME. A cleanup test asserts on
+ * these exact paths, never on a listing of the shared OS temp dir that other runs also write to.
+ */
+function recordingGit(inner: GitRunner): { runner: GitRunner; calls: GitCall[] } {
+  const calls: GitCall[] = [];
+  const runner: GitRunner = (args, cwd, env) => {
+    calls.push({ cwd, home: env['HOME'] ?? '', existed: existsSync(cwd) });
+    return inner(args, cwd, env);
+  };
+  return { runner, calls };
 }
 
 describe('createSpawnContext', () => {
@@ -175,29 +193,92 @@ describe('createSpawnContext', () => {
   }, SUBPROCESS_TIMEOUT_MS);
 
   it('removes both directories when a setup step fails', () => {
-    const before = liveTempEntries();
-    const seen: Array<{ cwd: string; home: string | undefined }> = [];
-    const failing: GitRunner = (_args, cwd, env) => {
-      seen.push({ cwd, home: env['HOME'] });
+    const { runner, calls } = recordingGit(() => {
       throw new Error('git failed on purpose');
-    };
+    });
 
-    expect(() => createSpawnContext(null, failing)).toThrow('git failed on purpose');
+    expect(() => createSpawnContext(null, runner)).toThrow('git failed on purpose');
 
-    expect(seen).toHaveLength(1);
-    expect(existsSync(seen[0].cwd)).toBe(false);
-    expect(seen[0].home !== undefined && existsSync(seen[0].home)).toBe(false);
-    expect(liveTempEntries()).toEqual(before);
+    expect(calls).toHaveLength(1);
+    const [call] = calls;
+    expect(call.existed, 'the working directory was made before the step failed').toBe(true);
+    expect(call.home).not.toBe('');
+    expect(existsSync(call.cwd)).toBe(false);
+    expect(existsSync(call.home)).toBe(false);
   }, SUBPROCESS_TIMEOUT_MS);
 
   it('refuses a repository that has a remote, and removes both directories', () => {
-    const before = liveTempEntries();
-    const withRemote: GitRunner = (args, cwd, env) => (args[0] === 'remote' ? 'origin\n' : sandboxGit(args, cwd, env));
+    const { runner, calls } = recordingGit((args, cwd, env) =>
+      args[0] === 'remote' ? 'origin\n' : sandboxGit(args, cwd, env),
+    );
 
-    expect(() => createSpawnContext(null, withRemote)).toThrow(/remote/);
+    expect(() => createSpawnContext(null, runner)).toThrow(/remote/);
 
-    expect(liveTempEntries()).toEqual(before);
+    expect(calls.length).toBeGreaterThan(1);
+    const { cwd, home } = calls[0];
+    expect(calls.every((call) => call.cwd === cwd && call.home === home)).toBe(true);
+    expect(calls[0].existed, 'the working directory was made before the remote was refused').toBe(true);
+    expect(home).not.toBe('');
+    expect(existsSync(cwd)).toBe(false);
+    expect(existsSync(home)).toBe(false);
   }, SUBPROCESS_TIMEOUT_MS);
+});
+
+describe('disposeSpawnContext', () => {
+  const realTmp = realpathSync(os.tmpdir());
+  // Every refused path below is a random name that does not exist. A guard that went missing
+  // would then remove nothing real: `rmSync` with `force` does nothing for an absent path.
+  const absent = (parent: string): string => path.join(parent, `devflow-dispose-probe-${randomUUID()}`);
+
+  const REFUSED: ReadonlyArray<readonly [string, () => string]> = [
+    ['a path outside the temp root', () => absent(path.parse(realTmp).root)],
+    ['a sibling that shares the temp-root prefix', () => `${realTmp}-evil-${randomUUID()}`],
+    ['a path that climbs out of the temp root', () => absent(path.join(realTmp, '..'))],
+  ];
+
+  function thrownMessage(run: () => void): string {
+    try {
+      run();
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+    return '';
+  }
+
+  it('removes both directories of a real context', () => {
+    const ctx = createSpawnContext();
+
+    expect(() => disposeSpawnContext(ctx)).not.toThrow();
+
+    expect(existsSync(ctx.cwd)).toBe(false);
+    expect(existsSync(ctx.home)).toBe(false);
+  }, SUBPROCESS_TIMEOUT_MS);
+
+  it.each(REFUSED.flatMap(([label, make]) => [[label, 'cwd', make] as const, [label, 'home', make] as const]))(
+    'refuses %s in the %s slot, and still removes the other directory',
+    (_label, slot, make) => {
+      const ctx = track(createSpawnContext());
+      const bad = make();
+      const dirs = slot === 'cwd' ? { cwd: bad, home: ctx.home } : { cwd: ctx.cwd, home: bad };
+      const survivor = slot === 'cwd' ? ctx.home : ctx.cwd;
+
+      const message = thrownMessage(() => disposeSpawnContext(dirs));
+
+      expect(message).toContain(`refusing to touch ${bad}:`);
+      expect(existsSync(survivor), 'the directory next to the refused one was left behind').toBe(false);
+    },
+    SUBPROCESS_TIMEOUT_MS,
+  );
+
+  it('throws the first error when both directories are refused', () => {
+    const first = absent(path.parse(realTmp).root);
+    const second = `${realTmp}-evil-${randomUUID()}`;
+
+    const message = thrownMessage(() => disposeSpawnContext({ cwd: first, home: second }));
+
+    expect(message).toContain(`refusing to touch ${first}:`);
+    expect(message).not.toContain(second);
+  });
 });
 
 describe('pickCredential', () => {
@@ -236,9 +317,16 @@ describe('liveSkipReason', () => {
     expect(liveSkipReason(FAKE_OAUTH, false)).toContain('claude');
   });
 
-  it('does not skip when claude and a credential are present, and never prints the value', () => {
+  it('does not skip when claude and a credential are present', () => {
     expect(liveSkipReason(FAKE_OAUTH, true)).toBeNull();
-    expect(liveSkipReason(null, true)).not.toContain(FAKE_OAUTH.value);
+  });
+
+  it('never prints the credential value in a skip reason that was given one', () => {
+    // The one path that takes a credential and still returns text: claude is missing.
+    const reason = liveSkipReason(FAKE_OAUTH, false);
+
+    expect(reason).not.toBeNull();
+    expect(reason).not.toContain(FAKE_OAUTH.value);
   });
 });
 
@@ -375,11 +463,13 @@ describe('installDevflow', () => {
         timeout: opts.timeout,
       });
     };
-    const statusBefore = checkoutStatus(ctx);
+    const statusBefore = initWrittenStatus(checkoutStatus(ctx));
 
     installDevflow(ctx, recording);
 
-    expect(checkoutStatus(ctx)).toBe(statusBefore);
+    // Only the paths init writes are compared: other writers in the checkout (hooks, other
+    // workers, an editor) must not fail this run. A failure prints the differing lines.
+    expect(statusChange(statusBefore, initWrittenStatus(checkoutStatus(ctx)))).toEqual([]);
     expect(calls).toHaveLength(1);
     const [call] = calls;
     expect(call.credentialKeys).toEqual([]);
@@ -423,6 +513,85 @@ describe('installDevflow', () => {
     const emptyInstall: InitRunner = () => ({ status: 0, stdout: '', stderr: '' });
 
     expect(() => installDevflow(ctx, emptyInstall)).toThrow(/validate\.md/);
+  }, SUBPROCESS_TIMEOUT_MS);
+});
+
+describe('the checkout status check', () => {
+  /** An install that passes every check except the checkout comparison. */
+  function fakeInstall(ctx: SpawnContext): InitRunner {
+    return () => {
+      const agents = path.join(ctx.home, '.claude', 'agents', 'devflow');
+      mkdirSync(agents, { recursive: true });
+      for (const file of ['validate.md', 'test.md']) writeFileSync(path.join(agents, file), '# agent\n');
+      return { status: 0, stdout: '', stderr: '' };
+    };
+  }
+
+  /** A reader that returns each text in turn: the first before the install, the second after. */
+  function statusSequence(...texts: string[]): CheckoutStatusReader {
+    let at = 0;
+    return () => texts[Math.min(at++, texts.length - 1)];
+  }
+
+  describe('initWrittenStatus', () => {
+    it('keeps the lines that name a path init writes', () => {
+      const porcelain = [
+        ' M .gitignore',
+        '?? .claudeignore',
+        '!! .devflow/',
+        '?? .devflow/config.json',
+        '?? .claude/settings.json',
+        'R  old.md -> .memory/notes.md',
+        '?? .docs/',
+      ].join('\n');
+
+      expect(initWrittenStatus(`${porcelain}\n`)).toEqual(porcelain.split('\n'));
+    });
+
+    it('drops the lines that name any other path, and look-alikes of the written ones', () => {
+      const porcelain = [
+        ' M src/core/plugins.ts',
+        '?? scratch.txt',
+        '!! node_modules/',
+        '?? .devflowx',
+        '?? .gitignore-copy',
+        '?? docs/.claudeignore',
+        '',
+      ].join('\n');
+
+      expect(initWrittenStatus(porcelain)).toEqual([]);
+    });
+  });
+
+  describe('statusChange', () => {
+    it('names each added and each removed line, and nothing when the lines match', () => {
+      expect(statusChange(['?? a', ' M b'], ['?? a', ' M b'])).toEqual([]);
+      expect(statusChange(['?? a', ' M b'], ['?? a', '?? c'])).toEqual(['removed  M b', 'added   ?? c']);
+    });
+  });
+
+  it('fails, and prints the differing lines, when a path init writes changed in the checkout', () => {
+    const ctx = track(createSpawnContext());
+    const reader = statusSequence('', '?? .claudeignore\n M .gitignore\n');
+
+    const message = (() => {
+      try {
+        installDevflow(ctx, fakeInstall(ctx), reader);
+        return '';
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    })();
+
+    expect(message).toContain('added   ?? .claudeignore');
+    expect(message).toContain('added    M .gitignore');
+  }, SUBPROCESS_TIMEOUT_MS);
+
+  it('does not fail on a change outside the paths init writes', () => {
+    const ctx = track(createSpawnContext());
+    const reader = statusSequence('', ' M src/core/plugins.ts\n?? scratch.txt\n');
+
+    expect(() => installDevflow(ctx, fakeInstall(ctx), reader)).not.toThrow();
   }, SUBPROCESS_TIMEOUT_MS);
 });
 

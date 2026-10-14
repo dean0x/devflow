@@ -13,9 +13,15 @@
  * What it asserts
  * ---------------
  * 1. Every call to `spawn`, `spawnSync`, `execFile` or `execFileSync` under
- *    `tests/` whose first argument is the literal `claude` passes an options
- *    object literal that has both an `env` and a `cwd` key, and carries neither
- *    the skip-permissions flag nor `bypassPermissions` in its text.
+ *    `tests/` whose first argument is the literal `claude`, and every call to
+ *    `exec` or `execSync` whose first argument is a string or template that runs
+ *    `claude` as a command (at its start, behind assignments or `command`, `env`,
+ *    `exec`, `nohup` and `time`, or after `&&`, `||`, `;`, `|`, `(` or `$(` on the
+ *    same line), passes an options object literal that has both an `env` and a
+ *    `cwd` key, and carries neither the skip-permissions flag nor
+ *    `bypassPermissions` in its text. One shell string is exempt: the exact
+ *    `claude --version` availability probe in tests/integration/helpers.ts, which
+ *    starts no session. `claude --version && claude -p …` is not that probe.
  * 2. Every call of those four whose first argument is `process.execPath` or the
  *    literal `node` — in these files always the built CLI — in a file under
  *    `tests/integration/` or in `tests/integration-spawn-context.test.ts` passes
@@ -28,10 +34,13 @@
  * What a green run does NOT prove
  * -------------------------------
  * - Calls are matched by their literal first argument. A binary named by a
- *   variable (`spawn(CLAUDE_BIN, …)`), a wrapper (`execa`, a local `runClaude`),
- *   `fork` and a shell string (`execSync('claude …')`, which includes the
- *   `claude --version` availability probe that starts no session) are not
- *   matches.
+ *   variable (`spawn(CLAUDE_BIN, …)`), a wrapper (`execa`, a local `runClaude`,
+ *   `promisify(exec)`), a renamed import and `fork` are not matches. Neither is a
+ *   shell string whose command is built at run time (`exec(cmd)`,
+ *   `` exec(`${bin} -p hi`) ``), one that reaches `claude` through a nested shell
+ *   (`sh -c 'claude …'`, `spawn('sh', ['-c', …])`), or one whose `claude` sits on
+ *   a later line of a template. The shell form is matched on the name alone, so a
+ *   regular expression's `.exec('claude …')` is reported too: that fails closed.
  * - `env` and `cwd` are checked as keys of the options object literal in the
  *   call, not for what they point to: `env: process.env` or `cwd: ROOT` passes.
  *   Options held in a variable or spread (`...base`) report both keys missing,
@@ -87,15 +96,34 @@ const MAX_CALL_CHARS = 4000;
 /** Most spawn sites one file may hold before the scan stops. */
 const MAX_SITES_PER_FILE = 64;
 
-type SpawnKind = 'claude' | 'node';
+type SpawnKind = 'claude' | 'claude-shell' | 'node';
 
 const CLAUDE_SPAWN = /\b(?:spawn|spawnSync|execFile|execFileSync)\s*\(\s*(['"`])claude\1/g;
+/**
+ * `exec` or `execSync` whose first argument is a string or template that runs `claude` as a
+ * command: at the start of the string, or after `&&`, `||`, `;`, `|`, `(` or `$(` on the same
+ * line. Assignments and the launchers `command`, `env`, `exec`, `nohup` and `time` may sit in
+ * front of the name. `claude-code`, `claude.md` and `~/.claude` are not the program.
+ */
+const CLAUDE_SHELL_SPAWN =
+  /\b(?:exec|execSync)\s*\(\s*(['"`])(?:(?:(?!\1)[^\n])*?(?:&&|\|\||[;|(]|\$\())?\s*(?:(?:[A-Za-z_]\w*=\S*|command|env|exec|nohup|time)\s+)*claude(?![\w./-])/g;
 const NODE_SPAWN = /\b(?:spawn|spawnSync|execFile|execFileSync)\s*\(\s*(?:process\.execPath\b|(['"`])node\1)/g;
+
+/**
+ * The one shell string that may name `claude` without `env` and `cwd`: the availability probe,
+ * which asks for the version and starts no session. It is matched by file and by the exact text
+ * of the first argument, so `claude --version && claude -p hi` is not exempt.
+ */
+const SHELL_EXEMPTIONS: ReadonlyArray<{ path: string; call: RegExp }> = [
+  { path: HELPERS, call: /^\(\s*(['"`])claude --version\1\s*[,)]/ },
+];
 
 interface SpawnSite {
   path: string;
   line: number;
   kind: SpawnKind;
+  /** True for a shell-string call that {@link SHELL_EXEMPTIONS} names. */
+  exempt: boolean;
   /** Index of the call's opening parenthesis in the file. */
   start: number;
   /** The call text, from its opening parenthesis through the matching one. */
@@ -105,6 +133,12 @@ interface SpawnSite {
   /** False when no matching parenthesis was found within the bound. */
   readable: boolean;
 }
+
+const LABELS: Readonly<Record<SpawnKind, string>> = {
+  claude: 'claude spawn',
+  'claude-shell': 'claude shell command',
+  node: 'node child',
+};
 
 interface SpawnViolation {
   path: string;
@@ -240,16 +274,17 @@ function optionKeys(maskedCall: string): string[] {
 }
 
 /**
- * Every claude spawn in the corpus, and every node child in a file `nodeScope`
- * accepts. Pure — the live arms and the seeded probes run this same function.
+ * Every claude spawn in the corpus (argument-list form and shell-string form), and every
+ * node child in a file `nodeScope` accepts. Pure — the live arms and the seeded probes run
+ * this same function.
  */
 function collectSpawnSites(corpus: readonly CorpusEntry[], nodeScope: (file: string) => boolean = inNodeScope): SpawnSite[] {
   const sites: SpawnSite[] = [];
   for (const entry of corpus) {
     const masked = maskLiterals(entry.content);
     const openers: ReadonlyArray<[SpawnKind, RegExp]> = nodeScope(entry.path)
-      ? [['claude', CLAUDE_SPAWN], ['node', NODE_SPAWN]]
-      : [['claude', CLAUDE_SPAWN]];
+      ? [['claude', CLAUDE_SPAWN], ['claude-shell', CLAUDE_SHELL_SPAWN], ['node', NODE_SPAWN]]
+      : [['claude', CLAUDE_SPAWN], ['claude-shell', CLAUDE_SHELL_SPAWN]];
     let inFile = 0;
     for (const [kind, opener] of openers) {
       for (const match of entry.content.matchAll(opener)) {
@@ -264,12 +299,14 @@ function collectSpawnSites(corpus: readonly CorpusEntry[], nodeScope: (file: str
         const end = matchingParen(masked, start);
         const readable = end !== -1;
         const stop = readable ? end + 1 : Math.min(entry.content.length, start + 200);
+        const call = entry.content.slice(start, stop);
         sites.push({
           path: entry.path,
           line: lineAt(entry.content, at),
           kind,
+          exempt: kind === 'claude-shell' && SHELL_EXEMPTIONS.some(e => e.path === entry.path && e.call.test(call)),
           start,
-          call: entry.content.slice(start, stop),
+          call,
           keys: readable ? optionKeys(masked.slice(start, stop)) : [],
           readable,
         });
@@ -287,7 +324,8 @@ function collectSpawnSites(corpus: readonly CorpusEntry[], nodeScope: (file: str
 function findSpawnViolations(corpus: readonly CorpusEntry[], nodeScope: (file: string) => boolean = inNodeScope): SpawnViolation[] {
   const found: SpawnViolation[] = [];
   for (const site of collectSpawnSites(corpus, nodeScope)) {
-    const label = site.kind === 'claude' ? 'claude spawn' : 'node child';
+    if (site.exempt) continue;
+    const label = LABELS[site.kind];
     if (!site.readable) {
       found.push({ path: site.path, line: site.line, what: `${label} is not readable within ${MAX_CALL_CHARS} characters` });
       continue;
@@ -297,7 +335,7 @@ function findSpawnViolations(corpus: readonly CorpusEntry[], nodeScope: (file: s
         found.push({ path: site.path, line: site.line, what: `${label} passes no \`${key}\`` });
       }
     }
-    if (site.kind === 'claude') {
+    if (site.kind !== 'node') {
       for (const word of REFUSED_WORDS) {
         if (site.call.includes(word.needle)) {
           found.push({ path: site.path, line: site.line, what: `${label} carries ${word.name}` });
@@ -344,6 +382,8 @@ describe('no test starts claude or the built CLI unsandboxed (#486)', () => {
     const claudeSites = sites.filter(site => site.kind === 'claude');
     expect(claudeSites.length).toBeGreaterThanOrEqual(2);
     expect(claudeSites.filter(site => site.path === HELPERS).length).toBeGreaterThanOrEqual(2);
+    // The shell-string collector reaches the corpus: it finds the availability probe.
+    expect(sites.filter(site => site.kind === 'claude-shell').map(site => site.path)).toContain(HELPERS);
     const nodePaths = new Set(sites.filter(site => site.kind === 'node').map(site => site.path));
     expect(nodePaths.has(HELPERS)).toBe(true);
     expect(nodePaths.has(SPAWN_CONTEXT_TEST)).toBe(true);
@@ -416,6 +456,72 @@ describe('integration-spawn guard: seeded probes', () => {
       what: [`claude spawn is not readable within ${MAX_CALL_CHARS} characters`],
     },
     {
+      name: 'a shell-string execSync of claude with no options',
+      path: OTHER_FILE,
+      content: "execSync('claude -p \"hi\"');",
+      what: ['claude shell command passes no `env`', 'claude shell command passes no `cwd`'],
+    },
+    {
+      name: 'a shell-string exec of claude with only a callback',
+      path: OTHER_FILE,
+      content: 'exec("claude -p hi", done);',
+      what: ['claude shell command passes no `env`', 'claude shell command passes no `cwd`'],
+    },
+    {
+      name: 'a shell-string execSync of claude without env',
+      path: OTHER_FILE,
+      content: "execSync('claude -p hi', { cwd: dir });",
+      what: ['claude shell command passes no `env`'],
+    },
+    {
+      name: 'a template-literal execSync of claude without cwd',
+      path: OTHER_FILE,
+      content: 'execSync(`claude -p hi`, { env });',
+      what: ['claude shell command passes no `cwd`'],
+    },
+    {
+      name: 'a shell string that starts claude after a separator',
+      path: OTHER_FILE,
+      content: "execSync('cd /tmp && claude -p hi', { stdio: 'pipe' });",
+      what: ['claude shell command passes no `env`', 'claude shell command passes no `cwd`'],
+    },
+    {
+      name: 'a shell string that starts claude behind an assignment',
+      path: OTHER_FILE,
+      content: "execSync('FOO=1 claude -p hi');",
+      what: ['claude shell command passes no `env`', 'claude shell command passes no `cwd`'],
+    },
+    {
+      name: 'a member-call execSync of claude',
+      path: OTHER_FILE,
+      content: "cp.execSync('claude -p hi', { cwd: dir });",
+      what: ['claude shell command passes no `env`'],
+    },
+    {
+      name: 'the skip-permissions flag in a shell string',
+      path: OTHER_FILE,
+      content: `execSync('claude -p ${SKIP_FLAG}', { cwd: dir, env });`,
+      what: ['claude shell command carries the skip-permissions flag'],
+    },
+    {
+      name: 'a regular expression exec of a string that starts with claude (fails closed, as the header says)',
+      path: OTHER_FILE,
+      content: "const m = /claude/.exec('claude -p hi');",
+      what: ['claude shell command passes no `env`', 'claude shell command passes no `cwd`'],
+    },
+    {
+      name: 'the availability probe outside the helper file',
+      path: OTHER_FILE,
+      content: "execSync('claude --version', { stdio: 'pipe' });",
+      what: ['claude shell command passes no `env`', 'claude shell command passes no `cwd`'],
+    },
+    {
+      name: 'a session started behind the availability probe in the helper file',
+      path: HELPERS,
+      content: "execSync('claude --version && claude -p hi', { stdio: 'pipe' });",
+      what: ['claude shell command passes no `env`', 'claude shell command passes no `cwd`'],
+    },
+    {
       name: 'a node child without env in an integration file',
       path: INTEGRATION_FILE,
       content: "spawnSync(process.execPath, [CLI, 'init'], { cwd: dir });",
@@ -465,19 +571,40 @@ describe('integration-spawn guard: seeded probes', () => {
       { path: OTHER_FILE, content: "const proc = spawn('claude', buildPreloadArgs(prompt, { model, allowedTools }), { cwd, env });" },
       { path: INTEGRATION_FILE, content: "spawnSync(process.execPath, [opts.cliPath, 'init'], {\n  cwd: opts.cwd,\n  encoding: 'utf-8',\n  env,\n});" },
       { path: OTHER_FILE, content: "execFile('claude', ['-p', 'hi'], { cwd: dir, env: sandbox }, done);" },
+      { path: OTHER_FILE, content: "execSync('claude -p hi', { cwd: ctx.cwd, env: ctx.env, encoding: 'utf-8' });" },
+      { path: OTHER_FILE, content: 'exec(`cd ${dir} && claude -p hi`, { env: ctx.env, cwd: ctx.cwd }, done);' },
     ];
     expect(findSpawnViolations(clean)).toEqual([]);
   });
 
-  it('does not report prose, shell strings, fake-claude shims, or a node child outside the scope', () => {
+  it('does not report prose, other shell strings, fake-claude shims, or a node child outside the scope', () => {
     const clean: CorpusEntry[] = [
       { path: OTHER_FILE, content: "// spawn('claude', args) would be wrong here\nit(\"spawn('claude', args)\", () => {});" },
-      { path: OTHER_FILE, content: "execSync('claude --version', { stdio: 'pipe' });" },
+      { path: OTHER_FILE, content: "// execSync('claude -p hi') would be wrong here\nit(\"execSync('claude -p hi')\", () => {});" },
+      { path: OTHER_FILE, content: "execSync('which claude', { stdio: 'pipe' });" },
+      { path: OTHER_FILE, content: "execSync('ls ~/.claude && cat claude.md', { stdio: 'pipe' });" },
+      { path: OTHER_FILE, content: "execSync('claude-code --help', { stdio: 'pipe' });" },
+      { path: OTHER_FILE, content: "execSync('git commit -m \"claude: fix\"', { cwd: dir, env });" },
       { path: OTHER_FILE, content: "const bin = path.join(shimDir, 'claude');\nexpect(resolveOnPath('claude', p)).toBe(bin);" },
       { path: OTHER_FILE, content: "spawnSync(process.execPath, [CLI, 'init'], { timeout: 1 });" },
       { path: OTHER_FILE, content: "spawn(CLAUDE_BIN, args, {});" },
     ];
     expect(findSpawnViolations(clean)).toEqual([]);
+  });
+
+  it('exempts only the exact availability probe in the helper file', () => {
+    const probe: CorpusEntry = { path: HELPERS, content: "execSync('claude --version', { stdio: 'pipe', timeout: 5000 });" };
+    expect(findSpawnViolations([probe])).toEqual([]);
+    expect(collectSpawnSites([probe]).map(site => [site.kind, site.exempt])).toEqual([['claude-shell', true]]);
+    // The same text in any other file is a shell-string spawn like the rest.
+    const elsewhere = collectSpawnSites([{ path: OTHER_FILE, content: probe.content }]);
+    expect(elsewhere.map(site => [site.kind, site.exempt])).toEqual([['claude-shell', false]]);
+  });
+
+  it('keeps the availability-probe exemption live: the real helper file still holds exactly that call', () => {
+    const exempt = collectSpawnSites(corpus).filter(site => site.exempt);
+    expect(exempt.map(site => `${site.path}:${site.kind}`)).toEqual([`${HELPERS}:claude-shell`]);
+    expect(exempt[0]!.call).toMatch(/^\(\s*(['"`])claude --version\1\s*[,)]/);
   });
 
   it('does not report the eager-memory argv literals: they are not a spawn and not under tests/integration', () => {
@@ -510,7 +637,7 @@ describe('integration-spawn guard: seeded probes', () => {
   it('turns red when a real spawn site loses env or cwd', () => {
     // Mutate each real site of the real corpus, one key at a time. The probe loops
     // over the whole set the live arm ranges over, not one member of it.
-    const sites = collectSpawnSites(corpus);
+    const sites = collectSpawnSites(corpus).filter(site => !site.exempt);
     expect(sites.length, 'the mutation loop has no site to range over').toBeGreaterThanOrEqual(2);
     for (const site of sites) {
       for (const key of REQUIRED_OPTION_KEYS) {

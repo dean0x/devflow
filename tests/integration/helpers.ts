@@ -252,9 +252,39 @@ const spawnInit: InitRunner = (args, opts) => {
   return { status: result.status, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
 };
 
-/** The checkout's `git status --porcelain --ignored`, to compare before and after an install. */
-function checkoutStatus(env: NodeJS.ProcessEnv): string {
-  return sandboxGit(['status', '--porcelain', '--ignored'], ROOT, env);
+/** Reads the checkout's `git status --porcelain --ignored`. Injected so the comparison can be tested. */
+export type CheckoutStatusReader = (env: NodeJS.ProcessEnv) => string;
+
+const checkoutStatus: CheckoutStatusReader = (env) => sandboxGit(['status', '--porcelain', '--ignored'], ROOT, env);
+
+/**
+ * The top-level paths `devflow init` could create or change in the repository it starts in:
+ * the root ignore files, the project config and docs, and the legacy project directories its
+ * migrations and its memory drain touch. Only these are compared before and after an install,
+ * so another writer in the checkout (a hook, a worker, an editor) cannot fail a live run.
+ */
+export const INIT_WRITTEN_PATHS: readonly string[] = ['.devflow', '.claudeignore', '.gitignore', '.claude', '.memory', '.docs'];
+
+function namesInitWrittenPath(file: string): boolean {
+  return INIT_WRITTEN_PATHS.some((entry) => file === entry || file.startsWith(`${entry}/`));
+}
+
+/**
+ * The lines of `git status --porcelain` output that name a path init writes. A rename line
+ * (`R  old -> new`) counts when either side does.
+ */
+export function initWrittenStatus(porcelain: string): string[] {
+  return porcelain.split('\n').filter((line) => line.length > 3 && line.slice(3).split(' -> ').some(namesInitWrittenPath));
+}
+
+/** The lines that differ between two status listings, each marked `removed` or `added`. */
+export function statusChange(before: readonly string[], after: readonly string[]): string[] {
+  const was = new Set(before);
+  const is = new Set(after);
+  return [
+    ...before.filter((line) => !is.has(line)).map((line) => `removed ${line}`),
+    ...after.filter((line) => !was.has(line)).map((line) => `added   ${line}`),
+  ];
 }
 
 const TAIL_CHARS = 600;
@@ -266,14 +296,19 @@ const tail = (text: string): string => text.slice(Math.max(0, text.length - TAIL
  * `init` runs in a second new temp directory that is not a repository: it drains the memory
  * and learning queues of the repository it starts in, and the checkout must stay untouched.
  * The child env carries no credential. After the install the call checks that the Validate
- * and Test agent files exist, that the checkout's status is unchanged, and that settings.json
- * holds no memory hook and no capture hook. `init` registers the capture bundle on every
- * install (each script gates itself on the machine switches, which are off here), so the
- * bundle is removed from the temp settings before that check. Throws on any failure.
+ * and Test agent files exist, that no path init writes ({@link INIT_WRITTEN_PATHS}) changed in
+ * the checkout, and that settings.json holds no memory hook and no capture hook. `init`
+ * registers the capture bundle on every install (each script gates itself on the machine
+ * switches, which are off here), so the bundle is removed from the temp settings before that
+ * check. Throws on any failure; a checkout change names the differing status lines.
  */
-export function installDevflow(ctx: Pick<SpawnContext, 'home'>, run: InitRunner = spawnInit): void {
+export function installDevflow(
+  ctx: Pick<SpawnContext, 'home'>,
+  run: InitRunner = spawnInit,
+  readStatus: CheckoutStatusReader = checkoutStatus,
+): void {
   const env = sandboxEnv(ctx.home);
-  const statusBefore = checkoutStatus(env);
+  const statusBefore = initWrittenStatus(readStatus(env));
 
   const initCwd = realpathSync(mkdtempSync(path.join(os.tmpdir(), `${LIVE_PREFIX}init-`)));
   try {
@@ -299,7 +334,10 @@ export function installDevflow(ctx: Pick<SpawnContext, 'home'>, run: InitRunner 
   if (countMemoryHooks(settings) !== 0) throw new Error('settings.json holds a memory hook');
   if (countCaptureHooks(settings) !== 0) throw new Error('settings.json holds a capture hook');
 
-  if (checkoutStatus(env) !== statusBefore) throw new Error('the checkout status changed during the devflow install');
+  const changed = statusChange(statusBefore, initWrittenStatus(readStatus(env)));
+  if (changed.length > 0) {
+    throw new Error(`the checkout changed in a path devflow init writes, during the devflow install:\n${changed.join('\n')}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
