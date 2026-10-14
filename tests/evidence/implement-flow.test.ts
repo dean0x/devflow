@@ -61,7 +61,7 @@ import {
   walkFiles,
   type OrderRule,
 } from '../helpers.js'
-import { PROJECT_CONFIG_LIB, SETTINGS_SCRIPT } from '../evidence-policy/scripted-shim.js'
+import { PROJECT_CONFIG_LIB, SETTINGS_SCRIPT, scopedEnv } from '../evidence-policy/scripted-shim.js'
 import { PR_EVIDENCE_SCRIPT, VERIFY_EVIDENCE_SCRIPT } from './seam.js'
 
 /** Transcribed from the script's JSDoc — only what this suite calls. */
@@ -1174,7 +1174,7 @@ describe('#452: BASE_BRANCH is checked before it reaches a shell line', () => {
   })
 
   it('the pattern admits real branch names and refuses one that git accepts and a shell would run', () => {
-    expect(() => execFileSync('git', ['check-ref-format', '--branch', HOSTILE_BASE], { stdio: 'pipe' }), 'git no longer accepts the probe name, so it proves nothing').not.toThrow()
+    expect(() => execFileSync('git', ['check-ref-format', '--branch', HOSTILE_BASE], { cwd: SCRATCH, env: scopedEnv(SCRATCH), stdio: 'pipe' }), 'git no longer accepts the probe name, so it proves nothing').not.toThrow()
     const re = new RegExp(BASE_BRANCH_PATTERN)
     for (const ok of ['main', 'feat/452-token-diet-wave-c2', 'release/1.2.3', 'x'.repeat(200)]) expect(re.test(ok), ok).toBe(true)
     for (const bad of [HOSTILE_BASE, 'a;b', 'a b', 'a`id`', '$(id)', 'a|b', '', 'x'.repeat(201)]) expect(re.test(bad), bad).toBe(false)
