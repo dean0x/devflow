@@ -588,12 +588,12 @@ const results = {};  // ticketId → its row of the workflow's return
 const rowOf = (ticketId, r, merged, treeEqual = null) => ({ ticket: ticketId, ran: true, verdict: r?.verdict || r?.overallVerdict || null, merged, treeEqual, issuePrLink: r?.issuePrLink || "(none)", evaluateVerdict: r?.gate2?.evaluateVerdict, testVerdict: r?.gate2?.testVerdict, surviving: r?.survivingFindings?.length, coverageComplete: r?.reviewCoverage?.complete });
 const MAX_ROUNDS = Math.max(10, remainingTickets.length * 2 + 5);  // heuristic; always finite
 const MERGE_SHA = /^[0-9a-f]{40}$/;  // a SHA as git prints it; with the checked branch, the only Git-reported values that reach a merge, Validate or undo prompt
-const BRANCH_NAME = /^(?!-)(?!.*\.\.)[A-Za-z0-9._/+@,#-]{1,200}$/;  // implement's ref allowlist; no leading - or ..: the Git-reported branch enters a literal git line
+const BRANCH_NAME = /^(?![-#]|(?:@|(?:FETCH_|ORIG_|MERGE_)?HEAD)$)(?!.*\.\.)[A-Za-z0-9._/+@,#-]{1,200}$/;  // implement's ref allowlist; no leading - or #, no revision name, no ..: the name enters git lines
 // One ticket's merge, post-merge Validate and undo (D-WAVE-MERGE-VALIDATE: Git validates nothing).
 const mergeValidateUndo = async (ticketId, engineResult) => {
-  if (!BRANCH_NAME.test(String(engineResult.branch))) return { kept: false, reason: "ticket branch name refused: not a plain git ref name", halted: null, treeEqual: null };
+  if (typeof engineResult.branch !== "string" || !BRANCH_NAME.test(engineResult.branch)) return { kept: false, reason: "ticket branch name refused: not a plain git ref name", halted: null, treeEqual: null };
   const merge = await agent(`Merge ${engineResult.branch} to ${INTEGRATION_BRANCH} locally. Include ticket ID ${ticketId} in the merge commit message. Do not push, and run no build or test.
-Check out ${INTEGRATION_BRANCH}, run git rev-parse ${INTEGRATION_BRANCH} as baseSha, then run git merge --no-ff ${engineResult.branch}. If the merge stops for any reason, run git merge --abort; if the abort fails, return merged true with no mergeSha.
+Check out ${INTEGRATION_BRANCH}, run git rev-parse ${INTEGRATION_BRANCH} as baseSha, run git rev-parse --verify --quiet refs/heads/${engineResult.branch} (on a non-zero exit return merged false, reason "no such local branch"), then run git merge --no-ff refs/heads/${engineResult.branch}. If the merge stops after it began (git rev-parse -q --verify MERGE_HEAD succeeds), run git merge --abort; if that abort fails, return merged true with no mergeSha. A merge that did not begin returns merged false with the reason.
 Return: {"merged": true, "mergeSha": "<40-hex merge commit>", "treeEqual": <true when mergeSha^{tree} equals the tree of ${engineResult.branch}'s head>, "baseSha": "<40-hex integration HEAD before the merge>"} — or {"merged": false, "reason": "<why>"} when no merge is kept.`, { agentType: "Git" });
   const treeEqual = merge?.merged === true && typeof merge.treeEqual === "boolean" ? merge.treeEqual : null;
   const done = (kept, reason, halted = null) => ({ kept, reason, halted, treeEqual });

@@ -16,6 +16,11 @@
  * the integration head first, and the undo resets to that recorded head only
  * after three read-only checks agree.
  *
+ * A second defect sits in the abort: a merge that never began (a name that is no
+ * local branch, a tag, a SHA) leaves no MERGE_HEAD, so `git merge --abort` exits 128.
+ * The shipped prompt aborts only a merge that began, and merges `refs/heads/<name>`
+ * after checking that ref exists, so a tag or a SHA never merges.
+ *
  * Every spawn passes cwd and the sandboxed environment (D-TEST-HOME-ISOLATION).
  */
 
@@ -79,13 +84,15 @@ function argsOf(template: Template, v: Values): string[] {
   return words.slice(1)
 }
 
-/** The shipped merge prompt's three commands: the one that records baseSha, the merge itself and the abort for a merge that stops. */
-function shippedMerge(text: string): { readonly recordBase: Template; readonly merge: Template; readonly abort: Template } {
+/** The shipped merge prompt's commands: record baseSha, check the branch, merge, check that a merge began and abort it. */
+function shippedMerge(text: string): { readonly recordBase: Template; readonly verifyBranch: Template; readonly merge: Template; readonly mergeBegan: Template; readonly abort: Template } {
   const prompt = gitPromptStartingWith(text, 'agent(`Merge ${engineResult.branch}')
   return {
     recordBase: required(prompt, /run (git rev-parse \$\{INTEGRATION_BRANCH\}) as baseSha/, 'baseSha command'),
-    merge: required(prompt, /(git merge --no-ff \$\{engineResult\.branch\})/, 'git merge --no-ff line'),
-    abort: required(prompt, /If the merge stops for any reason, run (git merge --abort)/, 'abort line for any stop'),
+    verifyBranch: required(prompt, /run (git rev-parse --verify --quiet refs\/heads\/\$\{engineResult\.branch\})/, 'local branch check'),
+    merge: required(prompt, /(git merge --no-ff refs\/heads\/\$\{engineResult\.branch\})/, 'git merge --no-ff refs/heads line'),
+    mergeBegan: required(prompt, /If the merge stops after it began \((git rev-parse -q --verify MERGE_HEAD) succeeds\)/, 'merge-in-progress check'),
+    abort: required(prompt, /If the merge stops after it began \([^)]*\), run (git merge --abort)/, 'abort line for a merge that began'),
   }
 }
 
@@ -225,7 +232,7 @@ describe('dynamic-build: the merge and the undo of a red merge restore the pre-m
     expect(git(ticket.repo, ['status', '--porcelain'])).toBe('')
   })
 
-  it('a merge that a commit hook refuses is not a conflict: git keeps the merge state, and the abort the prompt names for any stop clears it', () => {
+  it('a merge that a commit hook refuses has begun: the shipped check finds MERGE_HEAD, and the abort clears it', () => {
     const ticket = newTicketRepo()
     recordBase(ticket)
     const hook = path.join(ticket.repo, '.git', 'hooks', 'pre-merge-commit')
@@ -236,12 +243,52 @@ describe('dynamic-build: the merge and the undo of a red merge restore the pre-m
 
     expect(refused.status, 'the hook stops the merge').not.toBe(0)
     expect(fs.existsSync(path.join(ticket.repo, '.git', 'MERGE_HEAD')), 'the refused merge leaves MERGE_HEAD, which fails every later merge').toBe(true)
+    expect(run(ticket.repo, argsOf(shippedMerge(BUILT).mergeBegan, v)).status, 'the shipped check says the merge began').toBe(0)
 
     git(ticket.repo, argsOf(shippedMerge(BUILT).abort, v))
 
     expect(fs.existsSync(path.join(ticket.repo, '.git', 'MERGE_HEAD')), 'the abort clears the merge state').toBe(false)
     expect(git(ticket.repo, ['rev-parse', 'HEAD']), 'the integration head is the recorded pre-merge head').toBe(ticket.baseSha)
     expect(git(ticket.repo, ['status', '--porcelain'])).toBe('')
+  })
+
+  it('a merge of a missing branch never begins: no MERGE_HEAD, the shipped check says so, an abort would exit non-zero, and HEAD stays on the recorded head', () => {
+    const ticket = newTicketRepo()
+    recordBase(ticket)
+    const v: Values = { ...valuesOf(ticket, ''), branch: 'feat/no-such-branch' }
+
+    expect(run(ticket.repo, argsOf(shippedMerge(BUILT).verifyBranch, v)).status, 'the shipped branch check refuses a missing name').not.toBe(0)
+    const refused = run(ticket.repo, argsOf(shippedMerge(BUILT).merge, v))
+
+    expect(refused.status, 'git cannot merge a ref that does not exist').not.toBe(0)
+    expect(fs.existsSync(path.join(ticket.repo, '.git', 'MERGE_HEAD')), 'a merge that did not begin leaves no MERGE_HEAD').toBe(false)
+    expect(run(ticket.repo, argsOf(shippedMerge(BUILT).mergeBegan, v)).status, 'the shipped check says no merge began, so the prompt runs no abort').not.toBe(0)
+    expect(run(ticket.repo, argsOf(shippedMerge(BUILT).abort, v)).status, 'an abort here would fail, and the old rule turned that into a wave halt').not.toBe(0)
+    expect(git(ticket.repo, ['rev-parse', 'HEAD']), 'the integration head is the recorded pre-merge head').toBe(ticket.baseSha)
+    expect(git(ticket.repo, ['status', '--porcelain'])).toBe('')
+  })
+
+  it('only a local branch passes the shipped check and merges: a tag name and a commit SHA do not, though git merges both when they are named bare', () => {
+    const ticket = newTicketRepo()
+    recordBase(ticket)
+    const tagName = 'release-probe'
+    git(ticket.repo, ['tag', tagName, ticket.ticketShas[1]])
+    const asShipped = (branch: string): Values => ({ ...valuesOf(ticket, ''), branch })
+    const notBranches = [tagName, ticket.ticketShas[1]]
+
+    for (const name of notBranches) {
+      expect(run(ticket.repo, ['merge', '--no-ff', '-q', '-m', 'bare merge', name]).status, `control: bare ${name.slice(0, 12)} merges`).toBe(0)
+      expect(git(ticket.repo, ['rev-parse', 'HEAD']), 'control: HEAD moved').not.toBe(ticket.baseSha)
+      git(ticket.repo, ['reset', '-q', '--hard', ticket.baseSha])
+    }
+
+    expect(run(ticket.repo, argsOf(shippedMerge(BUILT).verifyBranch, asShipped(TICKET_BRANCH))).status, 'a local branch passes').toBe(0)
+    for (const name of notBranches) {
+      expect(run(ticket.repo, argsOf(shippedMerge(BUILT).verifyBranch, asShipped(name))).status, `${name.slice(0, 12)} fails the shipped branch check`).not.toBe(0)
+      expect(run(ticket.repo, argsOf(shippedMerge(BUILT).merge, asShipped(name))).status, `${name.slice(0, 12)} is not merged through refs/heads/`).not.toBe(0)
+      expect(git(ticket.repo, ['rev-parse', 'HEAD']), 'HEAD stays on the recorded head').toBe(ticket.baseSha)
+      expect(fs.existsSync(path.join(ticket.repo, '.git', 'MERGE_HEAD'))).toBe(false)
+    }
   })
 
   it('a true fast-forward is refused, not half undone: the first-parent check stops it and the branch keeps the merge head', () => {
