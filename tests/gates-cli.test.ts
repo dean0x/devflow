@@ -123,6 +123,19 @@ describe('gatherGateStatus', () => {
     expect(status).toMatchObject({ kind: 'fail-closed', reason: null, machine: null });
   });
 
+  it('takes the TypeScript reader\'s machine value when the resolver failed closed without reading the manifest', async () => {
+    const r = stubResolver(() => settings({ ok: false, gateLevel: 'full', gateLevelSource: null, unreadable: null, gateLevelMachine: null }));
+    const status = await gatherGateStatus(deps({ loadSettings: r.load, readManifest: async () => objectManifest('lean') }));
+    expect(status).toMatchObject({ kind: 'fail-closed', reason: null, machine: 'lean' });
+  });
+
+  it('keeps the resolver\'s machine value when it named an unreadable file and the manifest records none', async () => {
+    const r = stubResolver(() => settings({ ok: false, gateLevel: 'full', gateLevelSource: null, unreadable: 'personal', gateLevelMachine: null }));
+    const status = await gatherGateStatus(deps({ loadSettings: r.load, readManifest: async () => objectManifest() }));
+    expect(status).toMatchObject({ kind: 'fail-closed', machine: null });
+    expect(renderGateStatus(status).lines).toContain('Machine none');
+  });
+
   it('reports the TypeScript reader\'s machine value when the resolver cannot be loaded', async () => {
     const load = (): SettingsLoad => ({ ok: false, error: { kind: 'not-found', path: '/x/resolve-settings.cjs' } });
     const status = await gatherGateStatus(deps({ loadSettings: load, readManifest: async () => objectManifest('lean') }));
@@ -182,7 +195,7 @@ describe('renderGateStatus', () => {
     const named: GateStatus = { ...base, kind: 'fail-closed', reason: '.devflow/project.json is unreadable', machine: 'lean', trackedWarning: null };
     expect(renderGateStatus(named).lines).toEqual(['Effective full (fail-closed: .devflow/project.json is unreadable)', 'Machine lean']);
     const unnamed: GateStatus = { ...base, kind: 'fail-closed', reason: null, machine: null, trackedWarning: null };
-    expect(renderGateStatus(unnamed).lines).toEqual(['Effective full (fail-closed: reason unknown)', 'Machine unknown']);
+    expect(renderGateStatus(unnamed).lines).toEqual(['Effective full (fail-closed: reason unknown)', 'Machine none']);
   });
 
   it('prints an unknown effective level when the resolver did not load', () => {

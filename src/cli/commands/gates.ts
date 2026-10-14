@@ -91,7 +91,8 @@ type MachineValue = GateLevel | 'invalid' | null;
  *   resolved     the resolver decided: the level, the layer that decided it, whether
  *                that layer holds a malformed value, and the machine's own reading
  *   fail-closed  the resolver failed closed: `full`, with a reason or none, and
- *                no deciding layer; a null machine value means it was not read
+ *                no deciding layer; the machine value is the resolver's when it
+ *                named an unreadable file, else the TypeScript reader's
  *   unloadable   the resolver could not be loaded, so the level that applies is
  *                unknown; the machine value is the TypeScript reader's
  */
@@ -164,16 +165,20 @@ export async function gatherGateStatus(deps: GateStatusDeps): Promise<GateStatus
   const read = await deps.readManifest(deps.devflowDir);
   const base: GateStatusBase = { manifest: manifestState(read), manifestPath };
 
+  // The TypeScript reader's machine value, for a result that carries none of its own.
+  const stored = read.kind === 'object' || read.kind === 'rejected' ? machineGateLevel(read.raw) : null;
   const loaded = deps.loadSettings();
   const settings = loaded.ok ? resolveOnce(loaded.value, deps.dir) : null;
   if (settings === null) {
-    const stored = read.kind === 'object' || read.kind === 'rejected' ? machineGateLevel(read.raw) : null;
     return { ...base, kind: 'unloadable', machine: stored };
   }
 
   const trackedWarning = trackedConfigWarning(settings);
   if (!settings.ok || settings.gateLevelSource === null) {
-    return { ...base, kind: 'fail-closed', reason: failClosedReason(settings), machine: settings.gateLevelMachine, trackedWarning };
+    // Only a result that names an unreadable file carries the manifest's value; a
+    // fail-closed result without one (git did not answer) never read the manifest.
+    const machine = settings.unreadable !== null ? settings.gateLevelMachine : stored;
+    return { ...base, kind: 'fail-closed', reason: failClosedReason(settings), machine, trackedWarning };
   }
   return {
     ...base,
@@ -195,10 +200,10 @@ export interface GateStatusRender {
   readonly warnings: readonly string[];
 }
 
-/** The machine line: `none` when the TypeScript or the resolver read it and found nothing, `unknown` when it was not read. */
-function machineLine(machine: MachineValue, notRead: boolean): string {
+/** The machine line: `none` when the manifest records no level or cannot be read (its own warning says which). */
+function machineLine(machine: MachineValue): string {
   if (machine === 'invalid') return `Machine ${MACHINE_INVALID_LINE}`;
-  if (machine === null) return `Machine ${notRead ? 'unknown' : 'none'}`;
+  if (machine === null) return 'Machine none';
   return `Machine ${machine}`;
 }
 
@@ -219,7 +224,7 @@ export function renderGateStatus(status: GateStatus): GateStatusRender {
   switch (status.kind) {
     case 'resolved': {
       lines.push(`Effective ${status.level} (${status.source}${status.invalid ? ', invalid' : ''})`);
-      lines.push(machineLine(status.machine, false));
+      lines.push(machineLine(status.machine));
       if (status.invalid && status.source === 'personal') {
         warnings.push(
           `gateLevel in ${settingsSourceFile('personal')} is not one of ${VALID_LEVELS}, so ${status.level} is in effect. ` +
@@ -231,13 +236,13 @@ export function renderGateStatus(status: GateStatus): GateStatusRender {
     }
     case 'fail-closed': {
       lines.push(`Effective full (fail-closed: ${status.reason ?? 'reason unknown'})`);
-      lines.push(machineLine(status.machine, true));
+      lines.push(machineLine(status.machine));
       if (status.trackedWarning !== null) warnings.push(status.trackedWarning);
       break;
     }
     case 'unloadable': {
       lines.push('Effective level unknown');
-      lines.push(machineLine(status.machine, false));
+      lines.push(machineLine(status.machine));
       warnings.push('The settings resolver could not be loaded, so the level that applies is unknown.');
       break;
     }
