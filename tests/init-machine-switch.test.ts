@@ -126,6 +126,15 @@ describe('formatHudOnlySkew', () => {
     expect(message).toContain('of unknown version');
     expect(message).toContain('`devflow init`');
   });
+
+  it('prints a recorded version with its control characters replaced', () => {
+    // The manifest check on `version` is only that it is truthy, so a hand-edited
+    // file can put terminal escapes and a newline in it. The escapes are written
+    // as source escapes: tests/guards/no-control-bytes.test.ts forbids raw bytes.
+    const message = formatHudOnlySkew('3.2.0\u001b[31m\u0007\n', '3.3.0');
+    expect(message).toContain('devflow 3.2.0?[31m??');
+    expect([...(message ?? '')].some((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f)).toBe(false);
+  });
 });
 
 describe('drainDisabledFeatureQueues (D-INIT-DRAIN-AFTER-SWITCH)', () => {

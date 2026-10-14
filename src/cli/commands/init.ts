@@ -9,6 +9,7 @@ import { getGitRoot } from '../../core/git.js';
 import { isSameLocation, withoutHomeRoots } from '../../core/same-location.js';
 import { pruneHookLogDirs, MAX_HOOK_LOG_DIRS, type LogDirPruneReport } from '../../core/hook-log-dirs.js';
 import { getLedgerRoot } from '../../core/ledger-root.js';
+import { describeEchoedValue } from '../../core/echo-value.js';
 import { installViaFileCopy, composeScripts, type InstallReport } from '../../targets/claude-code/installer.js';
 import { formatOverlaySummary, formatSkillScopeSummary, formatTrackerAssetSummary, isPluginListUnchanged, type SummaryLine } from './install-report.js';
 import { convergeTrackerArtifacts, type ConvergeTrackerArtifactsResult, type TrackerAgentState } from '../../targets/claude-code/tracker-install.js';
@@ -739,11 +740,12 @@ export function buildHudOnlyManifest(
  * commands and agents alone, so after an upgrade or a downgrade the prompts and the
  * scripts they call can disagree until a full init. The window is accepted; this
  * line names it, in either direction, and ends with the remedy. A machine with no
- * readable manifest records no version, so there is nothing to compare.
+ * readable manifest records no version, so there is nothing to compare. The recorded
+ * version is hand-editable file content, so it prints through `describeEchoedValue`.
  */
 export function formatHudOnlySkew(recordedVersion: string | null, runningVersion: string | null): string | null {
   if (recordedVersion === null || installedVersionMatches(recordedVersion, runningVersion)) return null;
-  return `The installed prompts come from devflow ${recordedVersion} and this CLI is ${runningVersion ?? 'of unknown version'}. ` +
+  return `The installed prompts come from devflow ${describeEchoedValue(recordedVersion)} and this CLI is ${runningVersion ?? 'of unknown version'}. ` +
     '--hud-only refreshed only the scripts, so run `devflow init` to update the prompts.';
 }
 
