@@ -94,10 +94,10 @@ not apply, and 3.5.0 gives no message. Check them with `devflow agents --list`.
 - **The PR evidence refresh and the merge-readiness check run as a script, not as a Git agent spawn** ([#455](https://github.com/dean0x/devflow/issues/455)). `/implement`, `/resolve` and `/dynamic-build` run `verify-evidence.cjs publish` from the main session, and `/resolve` runs `verify-evidence.cjs readiness`. The `update-pr-evidence` and `check-merge-readiness` operations stay defined and run the same script. The refresh never blocks, and the readiness check only reports.
 - **Agents get a scoped slice of the decisions index** ([#454](https://github.com/dean0x/devflow/issues/454)). On a direct delegation the main session passes only the index lines that match the agent's task, a `(slice: N of M entries — full index: <path>)` marker and the index footer. Sibling agents over one diff share one slice. When the main session is not sure, it includes the entry.
 - **Command bodies are smaller and have size ceilings** ([#456](https://github.com/dean0x/devflow/issues/456)). Rare `/implement` branches (the ticket-link ask, the missing-test-plan ask, the evidence exception and the re-validation path) move to reference files that the command reads by explicit path. `/implement`, `/resolve`, `/plan` and `/code-review` are shorter. A test holds a size ceiling for each of the 14 compiled commands, learning-on and learning-off.
-- /implement splits long plans into sequential Code phases; a run with no plan stays single.
-- Code agents read large files once, by range, and cap printed output.
-- Polish, Harden, Evaluate and Test get the full branch diff as FILES_CHANGED.
-- The token audit counts files written through Bash.
+- **`/implement` splits long plans into sequential Code phases; a run with no plan stays single** ([#452](https://github.com/dean0x/devflow/issues/452)).
+- **Code agents read large files once, by range, and cap printed output** ([#452](https://github.com/dean0x/devflow/issues/452)).
+- **Polish, Harden, Evaluate and Test get the full branch diff as `FILES_CHANGED`** ([#452](https://github.com/dean0x/devflow/issues/452)).
+- **The token audit counts files written through Bash** ([#442](https://github.com/dean0x/devflow/issues/442)).
 
 ### Fixed
 
