@@ -9,6 +9,7 @@ import { getGitRoot } from '../../core/git.js';
 import { isSameLocation, withoutHomeRoots } from '../../core/same-location.js';
 import { pruneHookLogDirs, MAX_HOOK_LOG_DIRS, type LogDirPruneReport } from '../../core/hook-log-dirs.js';
 import { getLedgerRoot } from '../../core/ledger-root.js';
+import { describeEchoedValue } from '../../core/echo-value.js';
 import { installViaFileCopy, composeScripts, type InstallReport } from '../../targets/claude-code/installer.js';
 import { formatOverlaySummary, formatSkillScopeSummary, formatTrackerAssetSummary, isPluginListUnchanged, type SummaryLine } from './install-report.js';
 import { convergeTrackerArtifacts, type ConvergeTrackerArtifactsResult, type TrackerAgentState } from '../../targets/claude-code/tracker-install.js';
@@ -91,7 +92,7 @@ import {
   attributionSeedFrom,
 } from './attribution-prompts.js';
 import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
-import { convergeLearningVariants } from '../../targets/claude-code/learning-install.js';
+import { convergeLearningVariants, installedVersionMatches, readRunningVersion } from '../../targets/claude-code/learning-install.js';
 import {
   auditAndRecordClaudeMd,
   formatClaudeMdAuditNote,
@@ -731,6 +732,23 @@ export function buildHudOnlyManifest(
   };
 }
 
+/**
+ * The line `init --hud-only` prints when the version the manifest records is not the
+ * running version, or null when there is nothing to say. Pure.
+ *
+ * `--hud-only` refreshes the scripts under ~/.devflow and leaves the installed
+ * commands and agents alone, so after an upgrade or a downgrade the prompts and the
+ * scripts they call can disagree until a full init. The window is accepted; this
+ * line names it, in either direction, and ends with the remedy. A machine with no
+ * readable manifest records no version, so there is nothing to compare. The recorded
+ * version is hand-editable file content, so it prints through `describeEchoedValue`.
+ */
+export function formatHudOnlySkew(recordedVersion: string | null, runningVersion: string | null): string | null {
+  if (recordedVersion === null || installedVersionMatches(recordedVersion, runningVersion)) return null;
+  return `The installed prompts come from devflow ${describeEchoedValue(recordedVersion)} and this CLI is ${runningVersion ?? 'of unknown version'}. ` +
+    '--hud-only refreshed only the scripts, so run `devflow init` to update the prompts.';
+}
+
 /** What `init` does with the retired `--scope` value it was given. */
 export type RetiredScopeDecision =
   | { kind: 'proceed' }
@@ -925,6 +943,9 @@ export const initCommand = new Command('init')
           buildHudOnlyManifest(existingHudManifest, version, new Date().toISOString()),
         );
       } catch { /* non-fatal */ }
+
+      const hudOnlySkew = formatHudOnlySkew(existingHudManifest?.version ?? null, await readRunningVersion());
+      if (hudOnlySkew !== null) p.log.warn(hudOnlySkew);
 
       p.log.success('HUD installed');
       p.log.info(`Configure later: ${color.cyan('devflow hud --status')}`);
@@ -1194,6 +1215,11 @@ export const initCommand = new Command('init')
     // alone, so init carries the prior value through untouched: it stamps the installed agents
     // with it and writes it back to the manifest. Absent stays absent (the default list).
     const trackerServers = seed.features.tracker.servers;
+    // The machine gate level (features.gateLevel) is set by `devflow gates --set` alone, so init
+    // carries the prior value through raw: no default, no narrowing, a stored `null` kept. The
+    // seed holds `undefined` only for an absent key or a --reset seed, and the full manifest
+    // write below then leaves the key out.
+    const gateLevel = seed.features.gateLevel;
     let enabledFlags: FlagsRecord = { ...seed.flags };
     // viewModeExplicit: true when --reset is passed; signals resolveFinalViewMode to let the
     // seed-time view-mode win over an externally-set value in settings.json.
@@ -2688,6 +2714,8 @@ export const initCommand = new Command('init')
         // through parseTrackerId (CLI), the typed wizard select, or the seed, which
         // itself came through normalizeTrackerFeature on read.
         tracker: { provider: trackerProvider, ...(trackerServers !== undefined ? { servers: trackerServers } : {}) },
+        // The prior machine gate level, raw (see where `gateLevel` is read above).
+        ...(gateLevel !== undefined ? { gateLevel } : {}),
       },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,

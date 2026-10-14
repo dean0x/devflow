@@ -2086,7 +2086,7 @@ function resolveProviderAsSpecified(output: string, map: ReadonlyMap<string, str
 
 /** A well-formed settings line naming `provider`, with every other field valid. */
 function settingsLine(provider: string, rest = 'TRACKER_SOURCE=project TRACKER_WARN=none SITE=none KEY=none'): string {
-  return `TRACKER=${provider} ${rest} REVIEW_PUBLICATION=auto COMPLIANCE=off MEMORY=on LEARNING=on KNOWLEDGE=on`;
+  return `TRACKER=${provider} ${rest} REVIEW_PUBLICATION=auto COMPLIANCE=off MEMORY=on LEARNING=on KNOWLEDGE=on GATE_LEVEL=standard`;
 }
 
 describe('contract: provider selection from the settings line (one convergence point)', () => {

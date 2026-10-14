@@ -46,6 +46,11 @@ export type TrackerConfigOverride =
  * it is carried verbatim by every managed write, like the `tracker` override. The
  * old top-level per-repo keys are retired ({@link RETIRED_CONFIG_KEYS}) — no
  * gate reads them, and the next managed write drops them from the file.
+ *
+ * A hand-written top-level `gateLevel` is the personal gate level. It is not a
+ * switch, so narrow-only does not apply: it may raise the machine's level as well
+ * as lower it. resolve-settings.cjs reads it, nothing in this module interprets it,
+ * no command writes it, and every managed write carries it verbatim, like `features`.
  */
 export interface FeatureConfig {
   reviewPublication: ReviewPublication;

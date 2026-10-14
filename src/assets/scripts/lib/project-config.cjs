@@ -21,7 +21,9 @@
 // bad value never takes its neighbours down with it (AC-26). What a malformed
 // value MEANS is the consumer's decision, made once in each caller's fold:
 // evidence ⇒ required, compliance ⇒ generic, tracker ⇒ TRACKER_WARN=invalid,
-// reviewPublication ⇒ off, a feature switch ⇒ not narrowed.
+// reviewPublication ⇒ off, a feature switch ⇒ not narrowed. The personal file
+// alone also carries `gateLevel` ("full|standard|lean"); it is a level, not a
+// switch, so it may raise or lower what the machine records.
 //
 // Whole-file rule: that per-key classification applies only INSIDE a file that
 // reads as a JSON object. A file that exists but does not — empty, unparseable,
@@ -60,6 +62,12 @@ const POLICIES = Object.freeze(['required', 'standard']);
 
 /** Every review-publication value, in ascending order: off < auto < full. */
 const PUBLICATIONS = Object.freeze(['off', 'auto', 'full']);
+
+/**
+ * Every gate level, strictest first — transcribed from GATE_LEVELS in
+ * src/core/gate-level.ts and pinned to it by a parity test.
+ */
+const GATE_LEVELS = Object.freeze(['full', 'standard', 'lean']);
 
 /**
  * The registered tracker providers — transcribed from TRACKER_PROVIDERS in
@@ -101,7 +109,7 @@ const SAFE_REF_RE = /^(?![A-Za-z0-9._/-]{0,254}\.\.)[A-Za-z0-9][A-Za-z0-9._/-]{0
 /** The ref namespace of origin's remote-tracking branches, as `git symbolic-ref` prints it. */
 const ORIGIN_TRACKING_PREFIX = 'refs/remotes/origin/';
 
-/** Largest machine manifest read, in bytes. */
+/** Largest machine manifest read, in bytes — pinned to MAX_MANIFEST_BYTES in src/core/gate-level.ts by a parity test. */
 const MAX_MANIFEST_BYTES = 1048576;
 
 /** Deepest nesting the duplicate-key scan follows; deeper is invalid. */
@@ -136,9 +144,12 @@ const MAX_JSON_DEPTH = 32;
  *   tracker: Field<string>,
  *   reviewPublication: Field<'off' | 'auto' | 'full'>,
  *   features: Field<FeatureFields>,
+ *   gateLevel: Field<'full' | 'standard' | 'lean'>,
  * }} PersonalConfig
  *   The personal file's `tracker` is the per-repo provider override: a provider
  *   id string (an empty string reads as absent, as parseTrackerOverride does).
+ *   Its `gateLevel` is one of the three level words; every other value,
+ *   including an empty string and a duplicated key, is malformed.
  *
  * @typedef {{ kind: 'absent' } | { kind: 'refused' } | { kind: 'ok', bytes: Buffer }} BoundedRead
  */
@@ -585,8 +596,8 @@ function parseProjectBytes(buf) {
 
 /**
  * Classify the personal `.devflow/config.json` bytes with the same rules. Only
- * the keys a personal file may carry are read: `reviewPublication`, `features`
- * and the `tracker` override. The retired top-level switches (`memory`,
+ * the keys a personal file may carry are read: `reviewPublication`, `features`,
+ * the `tracker` override and `gateLevel`. The retired top-level switches (`memory`,
  * `learning`, `knowledge`, `decisions`) are never read — `features` is a new
  * namespace, so a stale `learning: false` left from the per-repo-install era
  * cannot come back to life. Never throws.
@@ -607,13 +618,17 @@ function parsePersonalBytes(buf) {
     tracker,
     reviewPublication: fieldOf(obj, duplicates, [], 'reviewPublication', oneOf(PUBLICATIONS)),
     features: featuresField(obj, duplicates),
+    // No exception for an empty string, unlike `tracker`: "" is not a level.
+    gateLevel: fieldOf(obj, duplicates, [], 'gateLevel', oneOf(GATE_LEVELS)),
   });
 }
 
 module.exports = Object.freeze({
   MAX_CONFIG_BYTES,
+  MAX_MANIFEST_BYTES,
   POLICIES,
   PUBLICATIONS,
+  GATE_LEVELS,
   TRACKER_PROVIDER_IDS,
   COMPLIANCE_IDS,
   FEATURE_SWITCHES,

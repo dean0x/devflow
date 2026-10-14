@@ -2,8 +2,8 @@
 // src/assets/scripts/resolve-settings.cjs
 //
 // Resolves the per-repository SETTINGS a prompt or the CLI acts on — tracker,
-// review publication, compliance lens and the three feature switches — from
-// LOCAL layers, and prints them on ONE closed-vocabulary line. Installed as a
+// review publication, compliance lens, the three feature switches and the gate
+// level — from LOCAL layers, and prints them on ONE closed-vocabulary line. Installed as a
 // top-level sibling of resolve-evidence-policy.cjs under ~/.devflow/scripts/,
 // sharing its parser (lib/project-config.cjs).
 //
@@ -14,9 +14,12 @@
 //   default   refs/remotes/origin/<D>:.devflow/project.json
 //                                               the default branch's tracking copy —
 //                                               its compliance ids only (D-LENS-UNION)
-//   personal  <toplevel>/.devflow/config.json   untracked, narrow-only — a copy git
-//                                               tracks is ignored (D-PERSONAL-UNTRACKED)
-//   machine   ~/.devflow/manifest.json          the machine-wide install
+//   personal  <toplevel>/.devflow/config.json   untracked — a copy git tracks is
+//                                               ignored (D-PERSONAL-UNTRACKED). It
+//                                               only narrows the feature switches;
+//                                               its `gateLevel` may raise or lower
+//   machine   ~/.devflow/manifest.json          the machine-wide install, and its
+//                                               `features.gateLevel` default
 //
 // D-SETTINGS-LOCAL-ONLY: local git subprocesses only, and never gh, never the
 // network, never a git command that refreshes the index. At most four, in order:
@@ -40,11 +43,20 @@
 // for more than `auto`. The tracker (provider, site, key) is taken as the
 // branch states it. It WRITES NOTHING: each layer it folds is changed only by its owner.
 //
+// GATE_LEVEL is a level, not a switch, so narrow-only does not apply to it: the
+// personal `gateLevel` wins over the machine's `features.gateLevel`, which wins
+// over `standard`, and either may raise or lower the level. A present value that
+// is not full, standard or lean is malformed. That field alone reads `full`, the
+// other fields read as if the key were absent, and stderr names the layer (never
+// the value). A malformed personal value never falls through to the machine
+// value. The level comes from these two keys only — never from a task, a diff or
+// project.json.
+//
 // stdout is exactly one line plus "\n", or empty (D-SETTINGS-LINE):
 //   TRACKER=<github|jira|linear> TRACKER_SOURCE=<project|personal|machine|default>
 //   TRACKER_WARN=<none|mismatch|invalid> SITE=<url|none> KEY=<KEY|none>
 //   REVIEW_PUBLICATION=<off|auto|full> COMPLIANCE=<off|generic|id,…>
-//   MEMORY=<on|off> LEARNING=<on|off> KNOWLEDGE=<on|off>
+//   MEMORY=<on|off> LEARNING=<on|off> KNOWLEDGE=<on|off> GATE_LEVEL=<full|standard|lean>
 // (one line on stdout; wrapped here for reading). Every value is a closed token
 // or a SITE/KEY that passed its shape gate, so no other byte of a config file can
 // reach stdout. Whole-file rule: a project.json or config.json that EXISTS but
@@ -83,6 +95,7 @@ const projectConfig = require('./lib/project-config.cjs');
 
 const {
   PUBLICATIONS,
+  GATE_LEVELS,
   TRACKER_PROVIDER_IDS,
   COMPLIANCE_IDS,
   FEATURE_SWITCHES,
@@ -99,6 +112,8 @@ const {
 /** @typedef {'project' | 'personal' | 'machine' | 'default'} TrackerSource */
 /** @typedef {'none' | 'mismatch' | 'invalid'} TrackerWarn */
 /** @typedef {'off' | 'auto' | 'full'} Publication */
+/** @typedef {'full' | 'standard' | 'lean'} GateLevel */
+/** @typedef {'personal' | 'machine' | 'default'} GateLevelSource */
 /** @typedef {'memory' | 'learning' | 'knowledge'} FeatureSwitch */
 /** @typedef {'machine' | 'project' | 'personal'} SwitchSource */
 
@@ -147,6 +162,9 @@ const EXIT_CODES = Object.freeze({
  * with no other lens anywhere is exactly SETTINGS_FAIL_CLOSED_LINE, and an
  * unreadable machine manifest reads as no lens. Individually malformed keys
  * inside a readable object keep their per-key readings (AC-26).
+ *
+ * GATE_LEVEL is the last field, a closed group of the three level words: nothing
+ * broader than `full|standard|lean` can follow KNOWLEDGE.
  */
 const SETTINGS_LINE_RE = new RegExp(
   '^TRACKER=(?<tracker>' + TRACKER_PROVIDER_IDS.join('|') + ')'
@@ -157,7 +175,8 @@ const SETTINGS_LINE_RE = new RegExp(
   + ' REVIEW_PUBLICATION=(?<publication>' + PUBLICATIONS.join('|') + ')'
   + ' COMPLIANCE=(?<compliance>off|generic|(?:' + COMPLIANCE_IDS.join('|') + ')(?:,(?:'
   + COMPLIANCE_IDS.join('|') + ')){0,' + String(COMPLIANCE_IDS.length - 1) + '})'
-  + ' MEMORY=(?<memory>on|off) LEARNING=(?<learning>on|off) KNOWLEDGE=(?<knowledge>on|off)$',
+  + ' MEMORY=(?<memory>on|off) LEARNING=(?<learning>on|off) KNOWLEDGE=(?<knowledge>on|off)'
+  + ' GATE_LEVEL=(?<gateLevel>' + GATE_LEVELS.join('|') + ')$',
 );
 
 /**
@@ -172,10 +191,12 @@ const SETTINGS_LINE_RE = new RegExp(
  *   MEMORY/LEARNING=on       the machine switch is the one that turns them off;
  *                            hooks never consume this line (their gate folds an
  *                            unreadable file as narrowing nothing)
+ *   GATE_LEVEL=full          the most checking applies: a resolver that cannot read
+ *                            its inputs never lowers the level
  */
 const SETTINGS_FAIL_CLOSED_LINE =
   'TRACKER=github TRACKER_SOURCE=default TRACKER_WARN=invalid SITE=none KEY=none '
-  + 'REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=on LEARNING=on KNOWLEDGE=off';
+  + 'REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=on LEARNING=on KNOWLEDGE=off GATE_LEVEL=full';
 
 /** Bound on each local git call. */
 const GIT_TIMEOUT_MS = 5000;
@@ -249,6 +270,10 @@ const PROJECT_REL = '.devflow/project.json';
  *   reviewPublication: Publication,
  *   compliance: { enabled: boolean, frameworks: readonly string[] },
  *   switches: { memory: SwitchState, learning: SwitchState, knowledge: SwitchState },
+ *   gateLevel: GateLevel,
+ *   gateLevelSource: GateLevelSource | null,
+ *   gateLevelInvalid: boolean,
+ *   gateLevelMachine: GateLevel | 'invalid' | null,
  *   repoCompliance: readonly string[] | null,
  *   defaultBranchCompliance: readonly string[] | null,
  *   personalTracked: boolean,
@@ -258,6 +283,14 @@ const PROJECT_REL = '.devflow/project.json';
  *   ok              false only for a fail-closed resolution — the whole-file
  *                   rule's included, which still carries every readable lens
  *   compliance      enabled with no frameworks is `generic`
+ *   gateLevelSource the layer that decided the level. null only for a whole-line
+ *                   fail-closed result (`ok` false), which has no deciding layer
+ *   gateLevelInvalid the deciding layer holds a malformed level, so `gateLevel` is
+ *                   `full`; the raw value is never carried
+ *   gateLevelMachine the machine layer's own reading, whoever decided: a level,
+ *                   `invalid` for a present malformed value, or null for none
+ *                   recorded. On a result that never read the manifest (git did not
+ *                   answer, or an internal error) null means not read
  *   repoCompliance  the worktree project.json's ids, or null when it declares
  *                   none (a malformed declaration reads as [] — generic)
  *   defaultBranchCompliance  the default branch's tracking copy's ids, the same
@@ -311,6 +344,10 @@ const FAIL_CLOSED_SETTINGS = Object.freeze({
     learning: Object.freeze({ on: true, source: /** @type {SwitchSource} */ ('machine') }),
     knowledge: Object.freeze({ on: false, source: /** @type {SwitchSource} */ ('machine') }),
   }),
+  gateLevel: /** @type {GateLevel} */ ('full'),
+  gateLevelSource: null,
+  gateLevelInvalid: false,
+  gateLevelMachine: null,
   repoCompliance: null,
   defaultBranchCompliance: null,
   personalTracked: false,
@@ -382,6 +419,23 @@ function machineCompliance(manifest) {
   if (!isPlainObject(raw) || typeof raw.enabled !== 'boolean' || !Array.isArray(raw.frameworks)) return null;
   if (!raw.frameworks.every((/** @type {unknown} */ f) => typeof f === 'string')) return null;
   return raw.enabled ? projectConfig.normalizeComplianceIds(raw.frameworks) : null;
+}
+
+/**
+ * src/core/gate-level.ts machineGateLevel exactly, and total: null when no level
+ * is recorded (not an object, `features` not an object, or no own `gateLevel`
+ * key), `invalid` when the key is present and is not one of the three words,
+ * else the level. The learning-capture hook folds a manifest of any shape, so
+ * this must never throw.
+ *
+ * @param {unknown} manifest
+ * @returns {GateLevel | 'invalid' | null}
+ */
+function machineGateLevel(manifest) {
+  if (!isPlainObject(manifest) || !isPlainObject(manifest.features)) return null;
+  if (!Object.prototype.hasOwnProperty.call(manifest.features, 'gateLevel')) return null;
+  const value = manifest.features.gateLevel;
+  return GATE_LEVELS.includes(value) ? /** @type {GateLevel} */ (value) : 'invalid';
 }
 
 // ---------------------------------------------------------------------------
@@ -590,6 +644,42 @@ function foldSwitch(project, personal, manifest, feature) {
 }
 
 /**
+ * The gate level, from two keys and nothing else:
+ *   1. a valid personal `gateLevel` wins (source `personal`);
+ *   2. a malformed personal `gateLevel` is `full` (source `personal`, invalid) and
+ *      never falls through to the machine value — a typo must not hand the choice
+ *      to a layer the user did not mean;
+ *   3. else a valid machine `features.gateLevel` (source `machine`);
+ *   4. else a malformed machine value is `full` (source `machine`, invalid);
+ *   5. else `standard` (source `default`).
+ * Either layer may raise or lower the level: it is not a switch, and narrow-only
+ * does not apply to it. An unreadable personal file reads as malformed, so a
+ * caller that folds it directly never sees the machine value win over it. The
+ * machine layer's own reading is carried whichever layer decided.
+ *
+ * @param {any} personal
+ * @param {unknown} manifest
+ * @returns {Pick<Settings, 'gateLevel' | 'gateLevelSource' | 'gateLevelInvalid' | 'gateLevelMachine'>}
+ */
+function foldGateLevel(personal, manifest) {
+  const machine = machineGateLevel(manifest);
+  const own = fieldIn(personal, 'gateLevel', 'malformed');
+  if (own.kind === 'valid') {
+    return { gateLevel: own.value, gateLevelSource: 'personal', gateLevelInvalid: false, gateLevelMachine: machine };
+  }
+  if (own.kind === 'malformed') {
+    return { gateLevel: 'full', gateLevelSource: 'personal', gateLevelInvalid: true, gateLevelMachine: machine };
+  }
+  if (machine === 'invalid') {
+    return { gateLevel: 'full', gateLevelSource: 'machine', gateLevelInvalid: true, gateLevelMachine: machine };
+  }
+  if (machine !== null) {
+    return { gateLevel: machine, gateLevelSource: 'machine', gateLevelInvalid: false, gateLevelMachine: machine };
+  }
+  return { gateLevel: 'standard', gateLevelSource: 'default', gateLevelInvalid: false, gateLevelMachine: null };
+}
+
+/**
  * The whole-file rule's resolution (D-SETTINGS-LINE): the fail-closed values,
  * naming the layer whose file could not be read, except the compliance lens —
  * a broken file affects only the keys it owns, so the lens stays the fold of
@@ -607,6 +697,8 @@ function unreadableSettings(layer, inputs) {
   const lens = foldCompliance(inputs.project, inputs.manifest, defaultBranch);
   return Object.freeze({
     ...FAIL_CLOSED_SETTINGS,
+    // The level stays `full` with no deciding layer, but a readable manifest still shows its own value.
+    gateLevelMachine: machineGateLevel(inputs.manifest),
     compliance: lens.compliance,
     repoCompliance: layer === 'project' ? null : lens.repoCompliance,
     defaultBranchCompliance: lens.defaultBranchCompliance,
@@ -635,6 +727,7 @@ function foldSettings(inputs) {
       learning: foldSwitch(project, personal, manifest, 'learning'),
       knowledge: foldSwitch(project, personal, manifest, 'knowledge'),
     }),
+    ...foldGateLevel(personal, manifest),
     repoCompliance: lens.repoCompliance,
     defaultBranchCompliance: lens.defaultBranchCompliance,
     personalTracked: inputs.personalTracked === true,
@@ -911,7 +1004,8 @@ function formatSettingsLine(s) {
     + ' COMPLIANCE=' + complianceToken(s.compliance)
     + ' MEMORY=' + onOff(s.switches.memory)
     + ' LEARNING=' + onOff(s.switches.learning)
-    + ' KNOWLEDGE=' + onOff(s.switches.knowledge);
+    + ' KNOWLEDGE=' + onOff(s.switches.knowledge)
+    + ' GATE_LEVEL=' + s.gateLevel;
 }
 
 /**
@@ -1059,6 +1153,12 @@ function main(argv, deps) {
       + ' Untrack it with: git rm --cached <entry>. Then check the file contents, or delete the file.'
       + ' Untracking leaves the committed bytes on disk as your personal file.\n');
   }
+  if (settings.gateLevelInvalid) {
+    // The layer and the field state only: a raw config value never reaches a terminal.
+    process.stderr.write('resolve-settings: warning: gateLevel in '
+      + (settings.gateLevelSource === 'personal' ? PERSONAL_REL : '~/.devflow/manifest.json')
+      + ' is not one of ' + GATE_LEVELS.join(', ') + ' — GATE_LEVEL=full applies\n');
+  }
   if (settings.unreadable !== null) {
     process.stderr.write('resolve-settings: ' + (settings.unreadable === 'project' ? PROJECT_REL : PERSONAL_REL)
       + ' exists but could not be read (not a JSON object, or git could not say whether it is tracked)'
@@ -1110,6 +1210,8 @@ module.exports = Object.freeze({
   SETTINGS_LINE_RE,
   SETTINGS_FAIL_CLOSED_LINE,
   parseArgs,
+  machineGateLevel,
+  foldGateLevel,
   foldSettings,
   readRepoLayers,
   resolveSettings,

@@ -862,6 +862,16 @@ describe('capture hooks read the machine-wide memory and learning switches only'
   const learningQueue = () => path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl');
   const memoryQueue = () => path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl');
 
+  /**
+   * Manifests of a shape no writer produces. Each holds a `\u` escape, which sends
+   * the gate's fast path to the full parse, so the resolver's fold sees the shape.
+   */
+  const ODD_MANIFESTS: ReadonlyArray<readonly [string, string]> = [
+    ['a manifest that is an array', '["\\u0041"]'],
+    ['features set to a string', '{"features":"\\u0041"}'],
+    ['an object-valued gateLevel', '{"features":{"gateLevel":{"level":"\\u0041"}}}'],
+  ];
+
   const HOOKS: ReadonlyArray<readonly [string, string, () => object, number]> = [
     ['capture-prompt', CAPTURE_PROMPT, () => ({ cwd: projectDir, prompt: 'we chose X over Y' }), 1],
     ['capture-turn', CAPTURE_TURN, () => ({ cwd: projectDir, session_id: 's', last_assistant_message: 'done' }), 1],
@@ -946,6 +956,24 @@ describe('capture hooks read the machine-wide memory and learning switches only'
       expect(readJsonl(memoryQueue())).toHaveLength(rows);
       expect(readJsonl(learningQueue())).toHaveLength(rows);
     });
+
+    // The gate folds the repository's files and the manifest through the settings
+    // resolver, whose fold now also computes the gate level. It must stay total for
+    // the odd manifest shapes below: a repository file that narrows memory forces that
+    // fold, so memory stays off (the fold ran, not the manifest-only fallback) and
+    // learning keeps capturing.
+    for (const [label, manifestText] of ODD_MANIFESTS) {
+      it(`${name}: ${label} → the repository still narrows memory and learning keeps capturing`, () => {
+        writeRepoFile(projectDir, 'config.json', '{"features":{"memory":false}}');
+        fs.mkdirSync(path.join(homeDir, '.devflow'), { recursive: true });
+        fs.writeFileSync(path.join(homeDir, '.devflow', 'manifest.json'), manifestText);
+
+        const { exitCode } = runHook(hook, input(), homeDir, ENV);
+        expect(exitCode).toBe(0);
+        expect(fs.existsSync(memoryQueue())).toBe(false);
+        expect(readJsonl(learningQueue())).toHaveLength(rows);
+      });
+    }
   }
 
   it('the manifest is read from $HOME/.devflow; an exported DEVFLOW_DIR is ignored and stays empty (D-ONE-HOME, AC-10)', () => {

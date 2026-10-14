@@ -31,6 +31,8 @@ import { promises as fs } from 'fs';
 import type { FileHandle } from 'fs/promises';
 import * as path from 'path';
 
+import { describeEchoedValue as describeTrackerValue } from './echo-value.js';
+
 // ---------------------------------------------------------------------------
 // Result type (local; matches the codebase per-module pattern)
 // ---------------------------------------------------------------------------
@@ -289,9 +291,6 @@ export const TRACKER_ATTEMPTS_MAX = 5;
 const REGISTRY_SET: ReadonlySet<string> = new Set<string>(TRACKER_PROVIDER_IDS);
 const VALID_IDS_LIST = TRACKER_PROVIDER_IDS.join(', ');
 
-/** Longest rejected value echoed back to the terminal, in CODE POINTS. */
-const MAX_ECHOED_VALUE = 40;
-
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
@@ -318,37 +317,11 @@ export function isTrackerProvider(value: unknown): value is TrackerProvider {
 }
 
 /**
- * Render an untrusted provider token for a terminal message.
- *
- * Rejected values are echoed so the user can see what they typed, so they are
- * third-party input at a display sink: control characters (terminal escapes,
- * BEL, newlines) are replaced and the value is truncated. Used by
- * `parseTrackerId`'s error text and by `devflow tracker --status`.
- *
- * Takes `unknown`, and a non-string renders as its TYPE: the module's
- * never-throws contract has to hold for what reaches this sink, not
- * only for what the signature says does — `devflow tracker --status` reads
- * a conventions file's hand-editable frontmatter, and a caller-side guard is one edit
- * from being gone. Naming the type also keeps the render total, where `String()`
- * would hand control to a caller-supplied `toString` — itself both a throw path
- * and an echo path this function exists to close.
+ * Render an untrusted provider token for a terminal message. Used by
+ * `parseTrackerId`'s error text and by `devflow tracker --status`. The sanitizer
+ * itself lives in `echo-value.ts`; this is its tracker-facing name.
  */
-export function describeTrackerValue(raw: unknown): string {
-  if (typeof raw !== 'string') return `<${raw === null ? 'null' : typeof raw}>`;
-  // The class is written with ESCAPES, never literal control bytes. A raw NUL
-  // makes grep classify this whole file as binary — it prints "Binary file
-  // matches" and skips the lines — so every grep-based sweep over src/core/
-  // silently stops covering tracker.ts while still exiting 0. Pinned by
-  // tests/guards/no-control-bytes.test.ts.
-  // eslint-disable-next-line no-control-regex
-  const stripped = raw.replace(/[\x00-\x1f\x7f]/g, '?');
-  // Cut by CODE POINT. `slice` cuts UTF-16 code units, so a cut landing inside an
-  // astral character (emoji, CJK ext-B) emits the lone surrogate half of it.
-  const points = [...stripped];
-  return points.length > MAX_ECHOED_VALUE
-    ? `${points.slice(0, MAX_ECHOED_VALUE).join('')}…`
-    : stripped;
-}
+export { describeTrackerValue };
 
 /**
  * Strict boundary parser for a provider token (`--tracker <id>`,

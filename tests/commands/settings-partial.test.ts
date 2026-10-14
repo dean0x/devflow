@@ -227,7 +227,7 @@ describe('the accepted line is SETTINGS_LINE_RE written out', () => {
   const body = defineBody(source(PARTIAL), 'settings_resolve')
 
   it('the template names the script\'s fields, in order, with the same closed value sets', () => {
-    expect(scriptFields(), 'no fields parsed from SETTINGS_LINE_RE — the comparison is vacuous').toHaveLength(10)
+    expect(scriptFields(), 'no fields parsed from SETTINGS_LINE_RE — the comparison is vacuous').toHaveLength(11)
     expect(collectGrammarDrift(template(body))).toEqual([])
   })
 
@@ -251,6 +251,13 @@ describe('the accepted line is SETTINGS_LINE_RE written out', () => {
     expect(SETTINGS.SETTINGS_LINE_RE.test(SETTINGS.SETTINGS_FAIL_CLOSED_LINE)).toBe(true)
   })
 
+  it('the level is the last field, with the three levels as its closed set', () => {
+    const fields = templateFields(template(body))
+    expect(fields.at(-1)).toEqual({ key: 'GATE_LEVEL', values: ['full', 'standard', 'lean'] })
+    expect(scriptFields().at(-1)).toEqual({ key: 'GATE_LEVEL', group: 'gateLevel' })
+    expect(groupSource('gateLevel')).toBe('full|standard|lean')
+  })
+
   it('known-bad probes: a dropped field, a reordered field and a narrowed value set are reported', () => {
     const t = template(body)
     expect(collectGrammarDrift(t.replace(' LEARNING=<on|off>', ''))).toHaveLength(1)
@@ -258,6 +265,76 @@ describe('the accepted line is SETTINGS_LINE_RE written out', () => {
     expect(collectGrammarDrift(t.replace('TRACKER_WARN=<none|mismatch|invalid>', 'TRACKER_WARN=<none|invalid>'))).toEqual([
       'TRACKER_WARN: <none|invalid> vs (none|mismatch|invalid)',
     ])
+  })
+
+  it('known-bad probes: a dropped, narrowed, widened or misplaced level is reported', () => {
+    const t = template(body)
+    expect(collectGrammarDrift(t.replace(' GATE_LEVEL=<full|standard|lean>', ''))).toHaveLength(1)
+    expect(collectGrammarDrift(t.replace('GATE_LEVEL=<full|standard|lean>', 'GATE_LEVEL=<full|lean>'))).toEqual([
+      'GATE_LEVEL: <full|lean> vs (full|standard|lean)',
+    ])
+    expect(collectGrammarDrift(t.replace('GATE_LEVEL=<full|standard|lean>', 'GATE_LEVEL=<full|standard|lean|minimal>'))).toEqual([
+      'GATE_LEVEL: <full|standard|lean|minimal> vs (full|standard|lean)',
+    ])
+    expect(collectGrammarDrift(t.replace('GATE_LEVEL=<full|standard|lean>', 'GATE_LEVEL=<level>'))).toEqual([
+      'GATE_LEVEL: <level> vs (full|standard|lean)',
+    ])
+    expect(collectGrammarDrift(t.replace(' GATE_LEVEL=<full|standard|lean>', '').replace('TRACKER=<', 'GATE_LEVEL=<full|standard|lean> TRACKER=<'))).toHaveLength(1)
+  })
+})
+
+/** The four clauses that keep a prompt strict about which output it accepts, in the order the sentence states them. */
+const ACCEPT_CLAUSES: ReadonlyArray<readonly [string, string]> = [
+  ['exactly two lines', 'only when it is exactly two lines'],
+  ['exit=0 last', '`exit=0` last'],
+  ['fields in order, nothing else', 'these fields, in this order, nothing else'],
+  [
+    'anything else falls back',
+    '**Anything else** (a non-zero exit, no line, extra text, or a missing, reordered or unlisted field or value) ⇒ use',
+  ],
+]
+
+/** The paragraph of the define body that states which output is accepted. */
+function acceptParagraph(body: string): string {
+  const paragraphs = body.split('\n\n').filter(p => p.startsWith('Accept the output only when'))
+  if (paragraphs.length !== 1) throw new Error(`expected one accept paragraph, found ${paragraphs.length}`)
+  return paragraphs[0]
+}
+
+/** Named collector: the accept clauses a paragraph lacks, or states out of order. */
+function collectAcceptClauseDefects(paragraph: string): string[] {
+  const defects: string[] = []
+  let from = 0
+  for (const [label, text] of ACCEPT_CLAUSES) {
+    const at = paragraph.indexOf(text, from)
+    if (at === -1) defects.push(`${label}: ${paragraph.includes(text) ? 'out of order' : 'missing'}`)
+    else from = at + text.length
+  }
+  if (!paragraph.endsWith('instead.')) defects.push('the fallback is not the final clause')
+  return defects
+}
+
+describe('the accept rule keeps its four strict clauses', () => {
+  const paragraph = acceptParagraph(defineBody(source(PARTIAL), 'settings_resolve'))
+
+  it('states exactly two lines, exit=0 last, the fields in order and a fallback for anything else', () => {
+    expect(collectAcceptClauseDefects(paragraph)).toEqual([])
+  })
+
+  it('the define body names no config path and ends on the one-sentence source rule', () => {
+    const body = defineBody(source(PARTIAL), 'settings_resolve')
+    expect(body).not.toMatch(/project\.json|config\.json|manifest/)
+    expect(body.endsWith('\n\nThe accepted line is the only source of these values.')).toBe(true)
+  })
+
+  it('known-bad probes: a dropped, reworded or reordered clause is reported', () => {
+    expect(collectAcceptClauseDefects(paragraph.replace('it is exactly two lines', 'it is a line'))).toEqual(['exactly two lines: missing'])
+    expect(collectAcceptClauseDefects(paragraph.replace('`exit=0` last', '`exit=0` first'))).toEqual(['exit=0 last: missing'])
+    expect(collectAcceptClauseDefects(paragraph.replace(', nothing else', ''))).toEqual(['fields in order, nothing else: missing'])
+    expect(collectAcceptClauseDefects(paragraph.replace('**Anything else**', 'Else'))).toEqual(['anything else falls back: missing'])
+    const reordered = `${ACCEPT_CLAUSES.map(([, text]) => text).reverse().join(' ')} instead.`
+    expect(collectAcceptClauseDefects(reordered).some(d => d.endsWith('out of order'))).toBe(true)
+    expect(collectAcceptClauseDefects(paragraph.replace(/ instead\.$/, ' instead. And more.'))).toEqual(['the fallback is not the final clause'])
   })
 })
 

@@ -420,6 +420,8 @@ describe('applyCliToggles', () => {
     behavior: false,
     compliance: { enabled: false, frameworks: [] },
     tracker: { provider: 'github' },
+    // A concrete level, so the strict comparison below sees the key carried.
+    gateLevel: 'lean',
   };
 
   it('empty toggles → base unchanged', () => {
@@ -910,6 +912,72 @@ describe('tracker seeding', () => {
   it('resolveInitSeed: tracker included in the features result', () => {
     const seed = resolveInitSeed(makeTrackerManifest({ provider: 'linear' }), '{}', DEVFLOW_PLUGINS);
     expect(seed.features.tracker).toEqual({ provider: 'linear' });
+  });
+});
+
+// ── gate level seeding ──────────────────────────────────────────────────────────
+//
+// The seed copies the machine gate level from the manifest exactly as stored, with no
+// default operator: a stored `null`, `false`, zero or empty string must reach the full
+// manifest write unchanged. The value is `undefined` only when the manifest holds no key,
+// is absent, or the seed is a --reset seed.
+
+describe('gate level seeding', () => {
+  function makeGateManifest(gateLevel?: unknown): ManifestData {
+    const base = makeManifest().features;
+    return makeManifest({ features: gateLevel === undefined ? base : { ...base, gateLevel } });
+  }
+
+  it('FEATURE_DEFAULTS.gateLevel is undefined (the registry has no default level)', () => {
+    expect(FEATURE_DEFAULTS.gateLevel).toBeUndefined();
+  });
+
+  it('a null manifest seeds no value', () => {
+    expect(resolveSeedFeatures(null).gateLevel).toBeUndefined();
+  });
+
+  it('a manifest with no key seeds no value', () => {
+    const seed = resolveSeedFeatures(makeGateManifest());
+    expect(seed.gateLevel).toBeUndefined();
+  });
+
+  it('seeds every stored value as it is, malformed and falsy ones included', () => {
+    const STORED: unknown[] = ['full', 'standard', 'lean', 'Lean', 'lean ', '', null, false, 0, 5, { level: 'lean' }];
+    for (const value of STORED) {
+      const seed = resolveSeedFeatures(makeGateManifest(value));
+      expect(seed.gateLevel, `expected ${JSON.stringify(value)} to be seeded as stored`).toStrictEqual(value);
+    }
+  });
+
+  it('resolveInitSeed carries the value into the features result', () => {
+    const seed = resolveInitSeed(makeGateManifest('lean'), '{}', DEVFLOW_PLUGINS);
+    expect(seed.features.gateLevel).toBe('lean');
+  });
+
+  it('--reset (null seedManifest) seeds no value', () => {
+    const { seedManifest } = resolveResetGatedInputs(true, makeGateManifest('full'), null, '{}');
+    const seed = resolveInitSeed(seedManifest, '', DEVFLOW_PLUGINS);
+    expect(seed.features.gateLevel).toBeUndefined();
+  });
+
+  it('--no-reset keeps the stored value', () => {
+    const { seedManifest } = resolveResetGatedInputs(false, makeGateManifest('lean'), null, '{}');
+    const seed = resolveInitSeed(seedManifest, '', DEVFLOW_PLUGINS);
+    expect(seed.features.gateLevel).toBe('lean');
+  });
+
+  it('applyCliToggles keeps the seed value when no toggle names it', () => {
+    for (const value of ['lean', 'Lean', null, false, 0, '', undefined]) {
+      const seed: FeatureSeed = { ...FEATURE_DEFAULTS, gateLevel: value };
+      expect(applyCliToggles(seed, {}).gateLevel, `expected ${JSON.stringify(value)} to be kept`).toStrictEqual(value);
+    }
+  });
+
+  it('applyCliToggles keeps the seed value while it applies other toggles', () => {
+    const seed: FeatureSeed = { ...FEATURE_DEFAULTS, gateLevel: 'full' };
+    const result = applyCliToggles(seed, { hud: false, tracker: { provider: 'jira' } });
+    expect(result.hud).toBe(false);
+    expect(result.gateLevel).toBe('full');
   });
 });
 
