@@ -90,11 +90,12 @@ const CE_EXPANSION = 'cost-equivalent (ce)'
 /**
  * What asks for the whole test suite: a bare `npm test` or `npm run test` (one with a test file after it
  * names files, so it is not one), or the words "full suite" and its kin. `npm run test:unit` and the like
- * name a script, not the suite, so they are not matched.
+ * name a script, not the suite, so they are not matched. Both carry the `g` flag: a line is read for every
+ * match, not only the first, and `matchAll` copies the regex, so no `lastIndex` leaks between lines.
  */
 const FULL_SUITE_REQUESTS: readonly RegExp[] = [
-  /\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test(?![:\w-])(?!\s+(?:--\s+)?[\w./-]*\.(?:test|spec)\.)/,
-  /\b(?:full|whole|entire|complete)\s+(?:test\s+)?suite\b/i,
+  /\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test(?![:\w-])(?!\s+(?:--\s+)?[\w./-]*\.(?:test|spec)\.)/g,
+  /\b(?:full|whole|entire|complete)\s+(?:test\s+)?suite\b/gi,
 ]
 /** A ban is not a request: a negator earlier in the same clause ("never run the full suite") clears the match. */
 const BAN_WORDS = /\b(?:never|not|no|without|except|instead of)\b|n't/i
@@ -258,9 +259,12 @@ export function collectFullSuiteBriefDefects(file: string, command: string): str
   for (const site of collectCodeSpawnSites(file, command)) {
     site.payload.split('\n').forEach((text, i) => {
       for (const request of FULL_SUITE_REQUESTS) {
-        const hit = request.exec(text)
-        if (hit === null || BAN_WORDS.test(CLAUSE_TAIL.exec(text.slice(0, hit.index))?.[0] ?? '')) continue
-        out.push(`${file}:${site.line + i} ${site.agentType} spawn asks for the full suite: "${hit[0]}"`)
+        // Every match on the line is judged on its own clause: a ban before one request does not clear a later one.
+        // Each step moves past a non-empty match, so the loop ends within the line.
+        for (const hit of text.matchAll(request)) {
+          if (BAN_WORDS.test(CLAUSE_TAIL.exec(text.slice(0, hit.index))?.[0] ?? '')) continue
+          out.push(`${file}:${site.line + i} ${site.agentType} spawn asks for the full suite: "${hit[0]}"`)
+        }
       }
     })
   }
@@ -536,6 +540,24 @@ describe('the /implement and /resolve spawn prompts never ask a Code-family agen
     const proseDefects = collectFullSuiteBriefDefects('implement.md', prose)
     expect(proseDefects, 'a one-line prose spawn is read too').toHaveLength(1)
     expect(proseDefects[0]).toContain('Fix spawn asks for the full suite: "full suite"')
+  })
+
+  it('known-bad probe: a request that follows a ban on the same line is still reported, once per request', () => {
+    const resolve = requireDistFile('resolve.md')
+    expect(collectFullSuiteBriefDefects('resolve.md', resolve)).toEqual([])
+
+    const seeded = resolve.replace(
+      'Include ## Verification block in report.',
+      'Include ## Verification block in report. Do not run npm test per file; run npm test once at the end.',
+    )
+    expect(seeded, 'the seed must land').not.toBe(resolve)
+    const defects = collectFullSuiteBriefDefects('resolve.md', seeded)
+    expect(defects, 'the banned first request is cleared, the second is read').toHaveLength(1)
+    expect(defects[0]).toContain('Code spawn asks for the full suite: "npm test"')
+
+    const banOnly = resolve.replace('Include ## Verification block in report.', 'Include ## Verification block in report. Do not run npm test per file; never run npm test at the end.')
+    expect(banOnly, 'the seed must land').not.toBe(resolve)
+    expect(collectFullSuiteBriefDefects('resolve.md', banOnly), 'two bans on one line leave no defect').toEqual([])
   })
 
   it('known-bad probe: a Validate spawn, a ban, a named test file, a script name and text outside any spawn are each left alone', () => {
