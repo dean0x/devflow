@@ -233,6 +233,50 @@ describe('loadSettingsModule — the package copy of resolve-settings.cjs, shape
 });
 
 // ---------------------------------------------------------------------------
+// RepoSettings is the fold's output, key for key
+// ---------------------------------------------------------------------------
+
+/** Named collector: the property names of one exported interface in a TypeScript source. */
+export function collectInterfaceKeys(source: string, name: string): string[] {
+  const open = source.indexOf(`export interface ${name} {`);
+  if (open === -1) throw new Error(`no exported interface ${name}`);
+  const close = source.indexOf('\n}\n', open);
+  const body = source.slice(open, close === -1 ? source.length : close);
+  return [...body.matchAll(/^ {2}readonly (\w+)[?]?:/gm)].map(m => m[1]);
+}
+
+describe('RepoSettings mirrors the settings fold (every key, every gate field)', () => {
+  const GATE_FIELDS = ['gateLevel', 'gateLevelInvalid', 'gateLevelMachine', 'gateLevelSource'];
+  const raw = NODE_REQUIRE(SETTINGS_SCRIPT) as {
+    foldSettings(i: { project: unknown; personal: unknown; manifest: unknown; retiredPolicyFile: boolean }): Record<string, unknown>;
+    resolveSettings(o: { dir: string }, d: { exec: () => never }): Record<string, unknown>;
+  };
+  const mirror = collectInterfaceKeys(fs.readFileSync(path.join(ROOT, 'src/core/evidence-policy.ts'), 'utf-8'), 'RepoSettings');
+
+  it('the interface names the four gate fields', () => {
+    for (const field of GATE_FIELDS) expect(mirror, field).toContain(field);
+  });
+
+  it('a folded result has exactly the interface keys', () => {
+    const folded = raw.foldSettings({ project: { kind: 'absent' }, personal: { kind: 'absent' }, manifest: undefined, retiredPolicyFile: false });
+    expect(Object.keys(folded).sort()).toEqual([...mirror].sort());
+  });
+
+  it('the fail-closed result has exactly the interface keys, with the level full and no deciding layer', () => {
+    const failed = raw.resolveSettings({ dir: tmp }, { exec: () => { throw new Error('no git'); } });
+    expect(Object.keys(failed).sort()).toEqual([...mirror].sort());
+    expect(failed).toMatchObject({ ok: false, gateLevel: 'full', gateLevelSource: null, gateLevelInvalid: false, gateLevelMachine: null });
+  });
+
+  it('known-bad probe: a key missing from the interface is reported by the comparison', () => {
+    const withoutGate = collectInterfaceKeys(
+      'export interface X {\n  readonly a: string;\n  readonly b?: number;\n}\n', 'X');
+    expect(withoutGate).toEqual(['a', 'b']);
+    expect(() => collectInterfaceKeys('', 'X')).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // The settings layer on --status (narrowedSwitchLabel, repoComplianceStatusLines)
 // ---------------------------------------------------------------------------
 

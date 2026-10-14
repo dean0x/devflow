@@ -227,7 +227,7 @@ describe('the accepted line is SETTINGS_LINE_RE written out', () => {
   const body = defineBody(source(PARTIAL), 'settings_resolve')
 
   it('the template names the script\'s fields, in order, with the same closed value sets', () => {
-    expect(scriptFields(), 'no fields parsed from SETTINGS_LINE_RE — the comparison is vacuous').toHaveLength(10)
+    expect(scriptFields(), 'no fields parsed from SETTINGS_LINE_RE — the comparison is vacuous').toHaveLength(11)
     expect(collectGrammarDrift(template(body))).toEqual([])
   })
 
@@ -251,6 +251,13 @@ describe('the accepted line is SETTINGS_LINE_RE written out', () => {
     expect(SETTINGS.SETTINGS_LINE_RE.test(SETTINGS.SETTINGS_FAIL_CLOSED_LINE)).toBe(true)
   })
 
+  it('the level is the last field, with the three levels as its closed set', () => {
+    const fields = templateFields(template(body))
+    expect(fields.at(-1)).toEqual({ key: 'GATE_LEVEL', values: ['full', 'standard', 'lean'] })
+    expect(scriptFields().at(-1)).toEqual({ key: 'GATE_LEVEL', group: 'gateLevel' })
+    expect(groupSource('gateLevel')).toBe('full|standard|lean')
+  })
+
   it('known-bad probes: a dropped field, a reordered field and a narrowed value set are reported', () => {
     const t = template(body)
     expect(collectGrammarDrift(t.replace(' LEARNING=<on|off>', ''))).toHaveLength(1)
@@ -258,6 +265,21 @@ describe('the accepted line is SETTINGS_LINE_RE written out', () => {
     expect(collectGrammarDrift(t.replace('TRACKER_WARN=<none|mismatch|invalid>', 'TRACKER_WARN=<none|invalid>'))).toEqual([
       'TRACKER_WARN: <none|invalid> vs (none|mismatch|invalid)',
     ])
+  })
+
+  it('known-bad probes: a dropped, narrowed, widened or misplaced level is reported', () => {
+    const t = template(body)
+    expect(collectGrammarDrift(t.replace(' GATE_LEVEL=<full|standard|lean>', ''))).toHaveLength(1)
+    expect(collectGrammarDrift(t.replace('GATE_LEVEL=<full|standard|lean>', 'GATE_LEVEL=<full|lean>'))).toEqual([
+      'GATE_LEVEL: <full|lean> vs (full|standard|lean)',
+    ])
+    expect(collectGrammarDrift(t.replace('GATE_LEVEL=<full|standard|lean>', 'GATE_LEVEL=<full|standard|lean|minimal>'))).toEqual([
+      'GATE_LEVEL: <full|standard|lean|minimal> vs (full|standard|lean)',
+    ])
+    expect(collectGrammarDrift(t.replace('GATE_LEVEL=<full|standard|lean>', 'GATE_LEVEL=<level>'))).toEqual([
+      'GATE_LEVEL: <level> vs (full|standard|lean)',
+    ])
+    expect(collectGrammarDrift(t.replace(' GATE_LEVEL=<full|standard|lean>', '').replace('TRACKER=<', 'GATE_LEVEL=<full|standard|lean> TRACKER=<'))).toHaveLength(1)
   })
 })
 

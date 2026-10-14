@@ -36,6 +36,7 @@
 import { createRequire } from 'module';
 import { join } from 'path';
 import { scriptsDir } from './assets.js';
+import type { GateLevel } from './gate-level.js';
 
 // ── Transcribed shapes (resolve-evidence-policy.cjs JSDoc) ─────────────────────
 
@@ -116,6 +117,9 @@ export type SettingsTrackerWarn = 'none' | 'mismatch' | 'invalid';
 /** `SwitchSource` typedef — the layer that decided a feature switch. */
 export type SettingsSwitchSource = 'machine' | 'project' | 'personal';
 
+/** `GateLevelSource` typedef — the layer that decided the gate level. */
+export type SettingsGateLevelSource = 'personal' | 'machine' | 'default';
+
 /** `SwitchState` typedef. */
 export interface SettingsSwitchState {
   readonly on: boolean;
@@ -139,6 +143,21 @@ export interface RepoSettings {
     readonly learning: SettingsSwitchState;
     readonly knowledge: SettingsSwitchState;
   };
+  /** The gate level that applies. `full` for a fail-closed result or a malformed deciding value. */
+  readonly gateLevel: GateLevel;
+  /**
+   * The layer that decided `gateLevel`. Null only for a whole-line fail-closed
+   * result (`ok` false), which has no deciding layer.
+   */
+  readonly gateLevelSource: SettingsGateLevelSource | null;
+  /** The deciding layer holds a malformed level, so `gateLevel` is `full`. The raw value is never carried. */
+  readonly gateLevelInvalid: boolean;
+  /**
+   * The machine layer's own reading, whichever layer decided: a level, `invalid`
+   * for a present malformed value, or null for none recorded. On a result that
+   * never read the manifest (`ok` false and `unreadable` null), null means not read.
+   */
+  readonly gateLevelMachine: GateLevel | 'invalid' | null;
   /** The worktree project.json's own ids, or null when it declares none. */
   readonly repoCompliance: readonly string[] | null;
   /**
