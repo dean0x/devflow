@@ -103,6 +103,18 @@ export interface ManifestData {
      * install" and lose the user's seeded state on the next re-init.
      */
     tracker: TrackerFeatureState;
+    /**
+     * The machine default gate level, exactly as stored. Typed `unknown` on purpose:
+     * this reader never narrows it, because a typo must stay on disk and read as the
+     * strictest level rather than heal to the default. Only the total fold in the
+     * settings resolver (`foldGateLevel`) and `src/core/gate-level.ts` read its
+     * meaning. Optional: {@link readManifest} carries the key only when the stored
+     * file has it, and carries a stored `null` as `null`. An absent key stays absent.
+     *
+     * NEVER add `gateLevel` to the hard-null validation set or the heal set: every
+     * existing install lacks the key, and a heal would lower a stored value.
+     */
+    gateLevel?: unknown;
   };
   installedAt: string;
   updatedAt: string;
@@ -163,6 +175,30 @@ function parseManifestFlags(
 }
 
 /**
+ * Whether a parsed manifest object carries every field {@link readManifest}
+ * requires: a version, a plugin list, a `features` object with boolean `ambient`
+ * and `memory`, and string `installedAt` and `updatedAt`. Pure. A manifest that
+ * fails it reads as "no prior install".
+ *
+ * Exported so a raw reader can tell a manifest this reader rejects from one it
+ * accepts without calling it: readManifest heal-writes, and a read-only status
+ * must not.
+ */
+export function hasRequiredManifestFields(data: Record<string, unknown>): boolean {
+  const features = data.features as Record<string, unknown> | undefined;
+  return !(
+    !data.version ||
+    !Array.isArray(data.plugins) ||
+    typeof features !== 'object' ||
+    features === null ||
+    typeof features.ambient !== 'boolean' ||
+    typeof features.memory !== 'boolean' ||
+    typeof data.installedAt !== 'string' ||
+    typeof data.updatedAt !== 'string'
+  );
+}
+
+/**
  * Read and parse the manifest file. Returns null if missing or corrupt.
  *
  * Self-heals the following on-disk inconsistencies:
@@ -189,19 +225,8 @@ export async function readManifest(
   try {
     const content = await fs.readFile(manifestPath, 'utf-8');
     const data = JSON.parse(content) as Record<string, unknown>;
-    const features = data.features as Record<string, unknown> | undefined;
-    if (
-      !data.version ||
-      !Array.isArray(data.plugins) ||
-      typeof features !== 'object' ||
-      features === null ||
-      typeof features.ambient !== 'boolean' ||
-      typeof features.memory !== 'boolean' ||
-      typeof data.installedAt !== 'string' ||
-      typeof data.updatedAt !== 'string'
-    ) {
-      return null;
-    }
+    if (!hasRequiredManifestFields(data)) return null;
+    const features = data.features as Record<string, unknown>;
 
     // D-FEATURES-ABSENT-ON (a sub-decision of D-FEATURES-NARROW-ONLY,
     // src/core/feature-switch.ts): knowledge and learning are machine-wide
@@ -297,6 +322,9 @@ export async function readManifest(
         // self-heal behaviour, and a different condition from a per-repo config
         // value outside the domain (which does emit `unknown tracker provider`).
         tracker: normalizeTrackerFeature(features.tracker, opts?.onWarning),
+        // The machine gate level, raw (see the field's doc comment): kept when the
+        // key is present, a stored `null` included, and left out when it is absent.
+        ...(Object.hasOwn(features, 'gateLevel') ? { gateLevel: features.gateLevel } : {}),
       },
       installedAt: data.installedAt as string,
       updatedAt: data.updatedAt as string,

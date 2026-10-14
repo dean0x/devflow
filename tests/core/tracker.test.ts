@@ -59,6 +59,7 @@ import {
   migrateLegacyTrackerConventions,
   type TrackerProvider,
 } from '../../src/core/tracker.js';
+import { describeEchoedValue } from '../../src/core/echo-value.js';
 
 const REPO_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -333,6 +334,10 @@ function hasLoneSurrogate(value: string): boolean {
 }
 
 describe('describeTrackerValue', () => {
+  it('is the shared sanitizer under its tracker name', () => {
+    expect(describeTrackerValue).toBe(describeEchoedValue);
+  });
+
   it('replaces control characters and truncates long values', () => {
     expect(describeTrackerValue('jira[0m')).not.toContain('');
     expect(describeTrackerValue('a'.repeat(120)).length).toBeLessThanOrEqual(41);

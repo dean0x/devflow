@@ -8,7 +8,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { readFileSync, promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { buildHudOnlyManifest, drainDisabledFeatureQueues, type DisabledQueueDrainIO } from '../src/cli/commands/init.js';
+import { buildHudOnlyManifest, drainDisabledFeatureQueues, formatHudOnlySkew, type DisabledQueueDrainIO } from '../src/cli/commands/init.js';
+import { installedVersionMatches } from '../src/targets/claude-code/learning-install.js';
 import type { ManifestData } from '../src/core/manifest.js';
 
 const NOW = '2026-09-26T00:00:00.000Z';
@@ -60,6 +61,79 @@ describe('buildHudOnlyManifest', () => {
     });
     expect(result.features.tracker.provider).toBe('github');
     expect(result.features.compliance).toEqual({ enabled: false, frameworks: [] });
+  });
+});
+
+describe('buildHudOnlyManifest keeps the machine gate level', () => {
+  it.each([
+    ['a valid level', 'lean'],
+    ['a malformed level', 'Lean'],
+    ['null', null],
+  ])('over a prior install keeps a stored %s as it is', (_label, value) => {
+    const prior = fullInstall();
+    prior.features.gateLevel = value;
+    const result = buildHudOnlyManifest(prior, '9.9.9', NOW);
+    expect(Object.hasOwn(result.features, 'gateLevel')).toBe(true);
+    expect(result.features.gateLevel).toBe(value);
+  });
+
+  it('over a prior install with no key writes none', () => {
+    const result = buildHudOnlyManifest(fullInstall(), '9.9.9', NOW);
+    expect(Object.hasOwn(result.features, 'gateLevel')).toBe(false);
+  });
+
+  it('a fresh record holds no key', () => {
+    const result = buildHudOnlyManifest(null, '9.9.9', NOW);
+    expect(Object.hasOwn(result.features, 'gateLevel')).toBe(false);
+  });
+});
+
+describe('installedVersionMatches', () => {
+  it('is true only when the recorded and running versions are equal', () => {
+    expect(installedVersionMatches('3.3.0', '3.3.0')).toBe(true);
+    expect(installedVersionMatches('3.2.0', '3.3.0')).toBe(false);
+    expect(installedVersionMatches('3.4.0', '3.3.0')).toBe(false);
+  });
+
+  it('known-bad probe: an unknown running version is a difference, never a match', () => {
+    expect(installedVersionMatches('3.3.0', null)).toBe(false);
+  });
+});
+
+describe('formatHudOnlySkew', () => {
+  it('says nothing when the versions agree', () => {
+    expect(formatHudOnlySkew('3.3.0', '3.3.0')).toBeNull();
+  });
+
+  it('says nothing when no version is recorded (a fresh install, an unreadable manifest)', () => {
+    expect(formatHudOnlySkew(null, '3.3.0')).toBeNull();
+    expect(formatHudOnlySkew(null, null)).toBeNull();
+  });
+
+  it.each([
+    ['an older recorded version', '3.2.0', '3.3.0'],
+    ['a newer recorded version', '3.4.0', '3.3.0'],
+  ])('names both versions and ends with the remedy for %s', (_label, recorded, running) => {
+    const message = formatHudOnlySkew(recorded, running);
+    expect(message).toContain(`devflow ${recorded}`);
+    expect(message).toContain(`CLI is ${running}`);
+    expect(message?.endsWith('run `devflow init` to update the prompts.')).toBe(true);
+  });
+
+  it('an unknown running version is a difference and says so', () => {
+    const message = formatHudOnlySkew('3.3.0', null);
+    expect(message).toContain('devflow 3.3.0');
+    expect(message).toContain('of unknown version');
+    expect(message).toContain('`devflow init`');
+  });
+
+  it('prints a recorded version with its control characters replaced', () => {
+    // The manifest check on `version` is only that it is truthy, so a hand-edited
+    // file can put terminal escapes and a newline in it. The escapes are written
+    // as source escapes: tests/guards/no-control-bytes.test.ts forbids raw bytes.
+    const message = formatHudOnlySkew('3.2.0\u001b[31m\u0007\n', '3.3.0');
+    expect(message).toContain('devflow 3.2.0?[31m??');
+    expect([...(message ?? '')].some((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f)).toBe(false);
   });
 });
 

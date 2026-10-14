@@ -77,6 +77,7 @@ import {
 } from '../../core/assets.js';
 import { carryStampedTools } from '../../core/agent-frontmatter.js';
 import { carryAgentOverrides, reapplyAgentMapping } from '../../core/agent-models.js';
+import { describeEchoedValue } from '../../core/echo-value.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
 import type { LearningVariantKind } from '../../core/learning-variants.js';
 import { readManifest } from '../../core/manifest.js';
@@ -524,13 +525,25 @@ export type LearningToggleOutcome =
   | { kind: 'converged'; result: ConvergeLearningVariantsResult; agentMappingReapplied: boolean };
 
 /**
+ * Whether the version the manifest records is the version of the running package.
+ * Pure. An unknown running version (null) never matches: the installed files are then
+ * not known to be the ones this package would write. Both callers, the learning
+ * toggle and `init --hud-only`, ask this one question.
+ */
+export function installedVersionMatches(installedVersion: string, runningVersion: string | null): boolean {
+  return runningVersion !== null && installedVersion === runningVersion;
+}
+
+/**
  * The version-skew check, apart from the I/O so it is provable by itself: null when
- * the installed prompts and this package agree, else the message to print.
+ * the installed prompts and this package agree, else the message to print. The
+ * installed version is hand-editable file content, so it prints through
+ * `describeEchoedValue`.
  */
 export function learningToggleSkew(installedVersion: string, runningVersion: string | null, learning: boolean): string | null {
-  if (runningVersion !== null && installedVersion === runningVersion) return null;
+  if (installedVersionMatches(installedVersion, runningVersion)) return null;
   return (
-    `The installed prompts come from devflow ${installedVersion} and this CLI is ${runningVersion ?? 'of unknown version'}, ` +
+    `The installed prompts come from devflow ${describeEchoedValue(installedVersion)} and this CLI is ${runningVersion ?? 'of unknown version'}, ` +
     `so the learning-${learning ? 'on' : 'off'} variants were not applied. Run \`devflow init\` to apply them.`
   );
 }

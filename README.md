@@ -200,7 +200,9 @@ A repository can commit `.devflow/project.json` to settle team-wide choices. Eve
 
 Each key is checked on its own, so one bad value never disables the rest: a bad `evidence` resolves to `required`, a bad `reviewPublication` to `off`, a bad `compliance` list to the generic lens. A `project.json` or `config.json` that exists but is not a JSON object is never read as absent: the settings fail closed (publication off, knowledge write-back off, the tracker reported as invalid). The compliance lens is the exception, because it only adds scrutiny: it keeps every framework a readable layer declares, and an unreadable `project.json` counts as the generic lens. Memory and learning capture fail open instead: the hooks read an unreadable file as narrowing nothing, so capture runs as your machine's switch says.
 
-`config.json` is personal, so it must not be committed. A `config.json` that git tracks is ignored as if it were absent — otherwise a branch could commit `"reviewPublication":"full"` for whoever reviews it — and `devflow tracker|memory|learning|knowledge --status` say so, with the fix: untrack the tracked entry with `git rm --cached`, then check or delete the file, because untracking leaves the committed bytes on disk as your personal file. Commands never read the file themselves — one local resolver folds it with your `config.json` and the machine settings, without touching the network.
+`config.json` is personal, so it must not be committed. A `config.json` that git tracks is ignored as if it were absent — otherwise a branch could commit `"reviewPublication":"full"` for whoever reviews it — and `devflow tracker|memory|learning|knowledge|gates --status` say so, with the fix: untrack the tracked entry with `git rm --cached`, then check or delete the file, because untracking leaves the committed bytes on disk as your personal file. Commands never read the file themselves — one local resolver folds it with your `config.json` and the machine settings, without touching the network.
+
+**Gate level.** The gate level (`full`, `standard` or `lean`) is not a narrow-only switch: your personal `.devflow/config.json` may carry a top-level `"gateLevel"` key that raises or lowers the machine default, `devflow gates --set <level>` sets the machine default in `~/.devflow/manifest.json`, and `standard` applies when neither is set. A `gateLevel` in `project.json` is ignored, and no command writes the personal key. A malformed value reads as `full`. The level has no effect until issues #473, #474 and #480 read it. After updating, run `devflow init`. See the [CLI reference](https://github.com/dean0x/devflow/blob/main/docs/cli-reference.md#gate-level).
 
 ## Evidence policy
 
@@ -286,6 +288,8 @@ npx devflow-kit compliance --status     # Show compliance state and this repo's 
 npx devflow-kit tracker --set jira       # Pick the machine's default tracker (github | jira | linear)
 npx devflow-kit tracker --status         # Show provider, this repo's effective one, learned conventions, mechanics
 npx devflow-kit tracker --servers default # Tracker servers the agents may call (comma-separated names, or default)
+npx devflow-kit gates --set lean         # Set the machine's default gate level (full | standard | lean)
+npx devflow-kit gates --status          # Show the gate level in effect here and which layer decided it
 npx devflow-kit rules --status          # Show installed rules
 npx devflow-kit security --status       # Show / manage the security deny list
 npx devflow-kit safe-delete --enable    # Install rm -> trash safe-delete

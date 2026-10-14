@@ -29,7 +29,9 @@ import * as path from 'path';
 
 import { COMPLIANCE_FRAMEWORKS, normalizeComplianceFeature, normalizeFrameworks } from '../../src/core/compliance.js';
 import { isMachineFeatureOn, type MachineFeature } from '../../src/core/feature-switch.js';
+import { machineGateLevel } from '../../src/core/gate-level.js';
 import { normalizeTrackerFeature } from '../../src/core/tracker.js';
+import { GATE_LEVEL_TABLE, MALFORMED_MACHINE_VALUES, MALFORMED_PERSONAL_VALUES } from '../fixtures/gate-level-table.js';
 import { MANIFEST_ON, SETTINGS_SWITCH_TABLE } from '../fixtures/settings-switch-table.js';
 import {
   ARGV,
@@ -68,6 +70,10 @@ interface Settings {
   readonly reviewPublication: 'off' | 'auto' | 'full';
   readonly compliance: { readonly enabled: boolean; readonly frameworks: readonly string[] };
   readonly switches: { readonly memory: SwitchState; readonly learning: SwitchState; readonly knowledge: SwitchState };
+  readonly gateLevel: 'full' | 'standard' | 'lean';
+  readonly gateLevelSource: 'personal' | 'machine' | 'default' | null;
+  readonly gateLevelInvalid: boolean;
+  readonly gateLevelMachine: 'full' | 'standard' | 'lean' | 'invalid' | null;
   readonly repoCompliance: readonly string[] | null;
   readonly defaultBranchCompliance: readonly string[] | null;
   readonly personalTracked: boolean;
@@ -87,6 +93,7 @@ interface SettingsModule {
   readonly EXIT_CODES: Readonly<Record<string, number>>;
   readonly SETTINGS_LINE_RE: RegExp;
   readonly SETTINGS_FAIL_CLOSED_LINE: string;
+  machineGateLevel(manifest: unknown): 'full' | 'standard' | 'lean' | 'invalid' | null;
   foldSettings(inputs: { project: unknown; personal: unknown; manifest: unknown; retiredPolicyFile: boolean }): Settings;
   readRepoLayers(root: string, deps?: { exec?: ExecFn; rootConfirmed?: boolean }): RepoLayers;
   resolveSettings(opts: { dir: string; manifest?: unknown }, deps?: { exec?: ExecFn }): Settings;
@@ -99,6 +106,7 @@ interface SettingsModule {
 interface LibModule {
   parseProjectBytes(buf: unknown): { kind: string; evidence?: unknown; compliance?: unknown };
   parsePersonalBytes(buf: unknown): { kind: string };
+  GATE_LEVELS: readonly string[];
 }
 
 const NODE_REQUIRE = createRequire(import.meta.url);
@@ -107,11 +115,11 @@ const LIB = NODE_REQUIRE(PROJECT_CONFIG_LIB) as LibModule;
 
 const FAIL_CLOSED =
   'TRACKER=github TRACKER_SOURCE=default TRACKER_WARN=invalid SITE=none KEY=none '
-  + 'REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=on LEARNING=on KNOWLEDGE=off';
+  + 'REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=on LEARNING=on KNOWLEDGE=off GATE_LEVEL=full';
 
 const DEFAULT_LINE =
   'TRACKER=github TRACKER_SOURCE=default TRACKER_WARN=none SITE=none KEY=none '
-  + 'REVIEW_PUBLICATION=auto COMPLIANCE=off MEMORY=on LEARNING=on KNOWLEDGE=on';
+  + 'REVIEW_PUBLICATION=auto COMPLIANCE=off MEMORY=on LEARNING=on KNOWLEDGE=on GATE_LEVEL=standard';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -261,16 +269,20 @@ describe('module surface and SETTINGS_LINE_RE', () => {
       + ' SITE=(?<site>none|https:\\/\\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9-]+)+)'
       + ' KEY=(?<key>none|[A-Z][A-Z0-9_]{1,9}) REVIEW_PUBLICATION=(?<publication>off|auto|full)'
       + ` COMPLIANCE=(?<compliance>off|generic|(?:${IDS})(?:,(?:${IDS})){0,5})`
-      + ' MEMORY=(?<memory>on|off) LEARNING=(?<learning>on|off) KNOWLEDGE=(?<knowledge>on|off)$',
+      + ' MEMORY=(?<memory>on|off) LEARNING=(?<learning>on|off) KNOWLEDGE=(?<knowledge>on|off)'
+      + ' GATE_LEVEL=(?<gateLevel>full|standard|lean)$',
     );
     expect(SETTINGS.SETTINGS_LINE_RE.flags).toBe('');
   });
 
   const GOOD = 'TRACKER=jira TRACKER_SOURCE=project TRACKER_WARN=none SITE=https://acme.atlassian.net KEY=ACME '
-    + 'REVIEW_PUBLICATION=full COMPLIANCE=gdpr,hipaa MEMORY=on LEARNING=off KNOWLEDGE=on';
+    + 'REVIEW_PUBLICATION=full COMPLIANCE=gdpr,hipaa MEMORY=on LEARNING=off KNOWLEDGE=on GATE_LEVEL=lean';
 
-  it('accepts a full line, and every compliance id alone', () => {
+  it('accepts a full line, every compliance id alone and each of the three levels', () => {
     expect(GOOD).toMatch(SETTINGS.SETTINGS_LINE_RE);
+    for (const level of ['full', 'standard', 'lean']) {
+      expect(GOOD.replace('GATE_LEVEL=lean', `GATE_LEVEL=${level}`)).toMatch(SETTINGS.SETTINGS_LINE_RE);
+    }
     for (const fw of COMPLIANCE_FRAMEWORKS) {
       expect(DEFAULT_LINE.replace('COMPLIANCE=off', `COMPLIANCE=${fw.id}`)).toMatch(SETTINGS.SETTINGS_LINE_RE);
     }
@@ -291,6 +303,14 @@ describe('module surface and SETTINGS_LINE_RE', () => {
     ['a switch spelled true', GOOD.replace('MEMORY=on', 'MEMORY=true')],
     ['reordered fields', GOOD.replace('MEMORY=on LEARNING=off', 'LEARNING=off MEMORY=on')],
     ['a missing field', GOOD.replace(' KNOWLEDGE=on', '')],
+    ['a missing level', GOOD.replace(' GATE_LEVEL=lean', '')],
+    ['a capitalised level', GOOD.replace('GATE_LEVEL=lean', 'GATE_LEVEL=Lean')],
+    ['an unknown level', GOOD.replace('GATE_LEVEL=lean', 'GATE_LEVEL=minimal')],
+    ['an empty level', GOOD.replace('GATE_LEVEL=lean', 'GATE_LEVEL=')],
+    ['a level with a trailing run', GOOD.replace('GATE_LEVEL=lean', 'GATE_LEVEL=lean2')],
+    ['a level with a trailing field', `${GOOD} EXTRA=1`],
+    ['the level before the switches', GOOD.replace('MEMORY=on LEARNING=off KNOWLEDGE=on GATE_LEVEL=lean', 'GATE_LEVEL=lean MEMORY=on LEARNING=off KNOWLEDGE=on')],
+    ['a level group left open', GOOD.replace('GATE_LEVEL=lean', 'GATE_LEVEL=lean full')],
   ])('rejects %s', (_label, line) => {
     expect(line).not.toMatch(SETTINGS.SETTINGS_LINE_RE);
   });
@@ -402,7 +422,7 @@ describe('TP-32 (AC-28): settings mode is local — one grammar line, local git 
     }));
     const r = run([TOPLEVEL(root), ORIGIN_HEAD_UNSET]);
     expect(r.stdout).toBe('TRACKER=jira TRACKER_SOURCE=project TRACKER_WARN=none SITE=https://acme.atlassian.net KEY=ACME '
-      + 'REVIEW_PUBLICATION=off COMPLIANCE=hipaa MEMORY=on LEARNING=off KNOWLEDGE=on\n');
+      + 'REVIEW_PUBLICATION=off COMPLIANCE=hipaa MEMORY=on LEARNING=off KNOWLEDGE=on GATE_LEVEL=standard\n');
   });
 
   it('TP-37 (AC-32): a github machine whose project.json selects jira resolves jira from the project', () => {
@@ -423,7 +443,7 @@ describe('TP-32 (AC-28): settings mode is local — one grammar line, local git 
     }));
     const r = run([TOPLEVEL(root), ORIGIN_HEAD_UNSET]);
     expect(r.stdout).toBe('TRACKER=linear TRACKER_SOURCE=machine TRACKER_WARN=none SITE=none KEY=none '
-      + 'REVIEW_PUBLICATION=auto COMPLIANCE=soc2 MEMORY=off LEARNING=on KNOWLEDGE=on\n');
+      + 'REVIEW_PUBLICATION=auto COMPLIANCE=soc2 MEMORY=off LEARNING=on KNOWLEDGE=on GATE_LEVEL=standard\n');
   });
 
   it('exit arms: usage prints nothing; an unusable dir and an unanswering git print the fail-closed line', () => {
@@ -1063,6 +1083,267 @@ describe('TP-49: the shared switch fixture table (tests/fixtures/settings-switch
 });
 
 // ---------------------------------------------------------------------------
+// GATE_LEVEL — the gate level field: personal, then machine, then standard
+// ---------------------------------------------------------------------------
+
+describe('GATE_LEVEL: personal config.json, then the machine manifest, then standard', { timeout: 30_000 }, () => {
+  const absent = (): unknown => LIB.parsePersonalBytes(null);
+  const personalOf = (text: string | null): unknown => LIB.parsePersonalBytes(text === null ? null : Buffer.from(text, 'utf8'));
+  const gateFields = (s: Settings) => ({
+    gateLevel: s.gateLevel,
+    gateLevelSource: s.gateLevelSource,
+    gateLevelInvalid: s.gateLevelInvalid,
+    gateLevelMachine: s.gateLevelMachine,
+  });
+  const withoutLevel = (line: string): string => line.replace(/ GATE_LEVEL=\S+$/, '');
+  const MACHINE_LEAN = { features: { ...MANIFEST_ON.features, gateLevel: 'lean' } };
+
+  function runReal(calls: readonly ScriptedCall[]) {
+    const shim = buildScriptedShim(fakeBin, tmp, calls);
+    return runResolver({ home, args: [root], shim, script: SETTINGS_SCRIPT });
+  }
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('the CommonJS level list is the three words, in order', () => {
+    expect([...LIB.GATE_LEVELS]).toEqual(['full', 'standard', 'lean']);
+  });
+
+  describe('the fold table (tests/fixtures/gate-level-table.ts)', () => {
+    it('is non-empty and covers every outcome', () => {
+      expect(GATE_LEVEL_TABLE.length).toBeGreaterThanOrEqual(30);
+      for (const source of ['personal', 'machine', 'default'] as const) {
+        expect(GATE_LEVEL_TABLE.some(r => r.expect.gateLevelSource === source), source).toBe(true);
+      }
+      expect(GATE_LEVEL_TABLE.some(r => r.expect.gateLevelInvalid)).toBe(true);
+    });
+
+    it.each(GATE_LEVEL_TABLE.map(r => [r.name, r] as const))('foldSettings: %s', (_name, row) => {
+      const s = SETTINGS.foldSettings({
+        project: LIB.parseProjectBytes(null), personal: personalOf(row.personal), manifest: row.manifest, retiredPolicyFile: false,
+      });
+      expect(s.ok).toBe(true);
+      expect(gateFields(s)).toEqual(row.expect);
+      const line = SETTINGS.formatSettingsLine(s);
+      expect(line).toMatch(SETTINGS.SETTINGS_LINE_RE);
+      expect(line.endsWith(` GATE_LEVEL=${row.expect.gateLevel}`)).toBe(true);
+      expect(SETTINGS.isCoherentSettingsLine(line)).toBe(true);
+    });
+
+    it.each(GATE_LEVEL_TABLE.map(r => [r.name, r] as const))('resolveSettings over the file: %s', (_name, row) => {
+      const s = settingsFor({ personal: row.personal ?? undefined }, row.manifest === undefined ? {} : row.manifest);
+      expect(s.ok).toBe(true);
+      expect(gateFields(s)).toEqual(row.expect);
+    });
+
+    it.each(GATE_LEVEL_TABLE.map(r => [r.name, r] as const))('the TypeScript machine reader agrees: %s', (_name, row) => {
+      expect(machineGateLevel(row.manifest)).toBe(row.expect.gateLevelMachine);
+      expect(SETTINGS.machineGateLevel(row.manifest)).toBe(row.expect.gateLevelMachine);
+    });
+  });
+
+  it('a malformed personal level changes no other field: the line equals the one with the key absent', () => {
+    const base = '"reviewPublication":"full","features":{"learning":false},"tracker":"github"';
+    const manifest = { features: { ...MANIFEST_ON.features, gateLevel: 'lean' } };
+    const without = lineFor({ personal: `{${base}}` }, manifest);
+    expect(without.endsWith(' GATE_LEVEL=lean')).toBe(true);
+    for (const [label, value] of MALFORMED_PERSONAL_VALUES) {
+      const line = lineFor({ personal: `{${base},"gateLevel":${value}}` }, manifest);
+      expect(line.endsWith(' GATE_LEVEL=full'), label).toBe(true);
+      expect(withoutLevel(line), label).toBe(withoutLevel(without));
+    }
+    const dup = lineFor({ personal: `{${base},"gateLevel":"lean","gateLevel":"lean"}` }, manifest);
+    expect(dup.endsWith(' GATE_LEVEL=full')).toBe(true);
+    expect(withoutLevel(dup)).toBe(withoutLevel(without));
+  });
+
+  it('a malformed machine level changes no other field', () => {
+    const clean = lineFor({}, MANIFEST_ON);
+    for (const [label, value] of MALFORMED_MACHINE_VALUES) {
+      const line = lineFor({}, { features: { ...MANIFEST_ON.features, gateLevel: value } });
+      expect(line.endsWith(' GATE_LEVEL=full'), label).toBe(true);
+      expect(withoutLevel(line), label).toBe(withoutLevel(clean));
+    }
+  });
+
+  describe('the whole-line fail-closed result', () => {
+    it.each([
+      ['an unreadable project.json', { project: '{' }],
+      ['an unreadable config.json', { personal: '{' }],
+      ['a config.json that is a JSON array', { personal: '[]' }],
+    ])('%s: level full, no deciding layer, and a readable manifest still shows its own level', (_label, files) => {
+      const s = settingsFor(files, MACHINE_LEAN);
+      expect(s.ok).toBe(false);
+      expect(gateFields(s)).toEqual({ gateLevel: 'full', gateLevelSource: null, gateLevelInvalid: false, gateLevelMachine: 'lean' });
+      expect(SETTINGS.formatSettingsLine(s).endsWith(' GATE_LEVEL=full')).toBe(true);
+    });
+
+    it('an unreadable file with a malformed machine value shows the machine invalid marker', () => {
+      const s = settingsFor({ project: '{' }, { features: { ...MANIFEST_ON.features, gateLevel: 'Lean' } });
+      expect(gateFields(s)).toEqual({ gateLevel: 'full', gateLevelSource: null, gateLevelInvalid: false, gateLevelMachine: 'invalid' });
+    });
+
+    it('an unreadable file with no manifest level reads none', () => {
+      expect(settingsFor({ personal: '{' }, MANIFEST_ON).gateLevelMachine).toBeNull();
+    });
+
+    it('git that does not answer, or a throwing exec, never read the manifest: the machine field is null', () => {
+      const unanswered = SETTINGS.resolveSettings({ dir: root, manifest: MACHINE_LEAN }, {
+        exec: scriptedExec([{ tool: 'git', args: ARGV.toplevel, error: { code: 'ENOENT' } }]).exec,
+      });
+      expect(unanswered.ok).toBe(false);
+      expect(gateFields(unanswered)).toEqual({ gateLevel: 'full', gateLevelSource: null, gateLevelInvalid: false, gateLevelMachine: null });
+      const thrown = SETTINGS.resolveSettings({ dir: root, manifest: MACHINE_LEAN }, { exec: () => { throw new Error('boom'); } });
+      expect(gateFields(thrown)).toEqual({ gateLevel: 'full', gateLevelSource: null, gateLevelInvalid: false, gateLevelMachine: null });
+    });
+  });
+
+  describe('totality over any manifest', () => {
+    it.each([
+      ['null', null],
+      ['an array', []],
+      ['a string', 'lean'],
+      ['features set to a string', { features: 'lean' }],
+      ['features set to an array', { features: ['lean'] }],
+      ['an object-valued gateLevel', { features: { gateLevel: { level: 'lean' } } }],
+      ['an array-valued gateLevel', { features: { gateLevel: ['lean'] } }],
+    ])('foldSettings returns a coherent line and does not throw for %s', (_label, manifest) => {
+      const s = SETTINGS.foldSettings({ project: LIB.parseProjectBytes(null), personal: absent(), manifest, retiredPolicyFile: false });
+      expect(SETTINGS.isCoherentSettingsLine(SETTINGS.formatSettingsLine(s))).toBe(true);
+    });
+  });
+
+  describe('a git-tracked config.json counts as absent', () => {
+    it('falls to the machine value, and stderr tells the user to untrack the file', () => {
+      const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      vi.stubEnv('HOME', home);
+      // The machine level is neither the tracked file's `full` nor the fail-closed `full`, so only a fall to the machine layer reads lean.
+      fs.writeFileSync(path.join(home, '.devflow', 'manifest.json'), JSON.stringify({ features: { gateLevel: 'lean' } }));
+      writeRepoFile('config.json', '{"gateLevel":"full"}');
+      const out = SETTINGS.main(['node', SETTINGS_SCRIPT, root], { exec: scriptedExec([TOPLEVEL(root), TRACKED, ORIGIN_HEAD_UNSET]).exec });
+      expect(out.code).toBe(0);
+      expect(out.line.endsWith(' GATE_LEVEL=lean')).toBe(true);
+      expect(stderr.mock.calls.map(c => String(c[0])).join('')).toContain('Git tracks an entry at or under .devflow/config.json');
+    });
+
+    it('falls to standard when the machine records nothing', () => {
+      vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      vi.stubEnv('HOME', home);
+      writeRepoFile('config.json', '{"gateLevel":"lean"}');
+      const out = SETTINGS.main(['node', SETTINGS_SCRIPT, root], { exec: scriptedExec([TOPLEVEL(root), TRACKED, ORIGIN_HEAD_UNSET]).exec });
+      expect(out.line.endsWith(' GATE_LEVEL=standard')).toBe(true);
+    });
+  });
+
+  describe('the level comes from the personal and machine keys only', () => {
+    it('a gateLevel in project.json is ignored', () => {
+      expect(gateFields(settingsFor({ project: '{"gateLevel":"lean"}' }))).toEqual({
+        gateLevel: 'standard', gateLevelSource: 'default', gateLevelInvalid: false, gateLevelMachine: null,
+      });
+      expect(settingsFor({ project: '{"gateLevel":"lean"}' }, MACHINE_LEAN).gateLevelSource).toBe('machine');
+    });
+
+    it.each([
+      ['evidence required', '{"evidence":"required"}'],
+      ['a jira tracker', '{"tracker":{"provider":"jira","site":"https://acme.atlassian.net","key":"ACME"}}'],
+      ['compliance hipaa', '{"compliance":["hipaa"]}'],
+      ['a team publication ceiling', '{"reviewPublication":"off"}'],
+      ['a narrowed switch', '{"features":{"memory":false,"learning":false,"knowledge":false}}'],
+    ])('varying the project file (%s) never changes the level', (_label, project) => {
+      for (const manifest of [MANIFEST_ON, MACHINE_LEAN]) {
+        const base = settingsFor({}, manifest);
+        expect(gateFields(settingsFor({ project }, manifest))).toEqual(gateFields(base));
+      }
+    });
+  });
+
+  describe('main(): stderr names the layer and the field state, never the value', () => {
+    const SECRET = 'Lean-SECRET-9f3a';
+
+    function stderrOf(files: { personal?: string }, machineLevel?: unknown): { text: string; line: string } {
+      const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      vi.stubEnv('HOME', home);
+      if (machineLevel !== undefined) {
+        fs.writeFileSync(path.join(home, '.devflow', 'manifest.json'), JSON.stringify({ features: { gateLevel: machineLevel } }));
+      }
+      if (files.personal !== undefined) writeRepoFile('config.json', files.personal);
+      const calls = files.personal === undefined ? [TOPLEVEL(root), ORIGIN_HEAD_UNSET] : [TOPLEVEL(root), UNTRACKED, ORIGIN_HEAD_UNSET];
+      const out = SETTINGS.main(['node', SETTINGS_SCRIPT, root], { exec: scriptedExec(calls).exec });
+      expect(out.code).toBe(0);
+      return { text: stderr.mock.calls.map(c => String(c[0])).join(''), line: out.line };
+    }
+
+    it('a malformed personal level names config.json and says full applies', () => {
+      const { text, line } = stderrOf({ personal: `{"gateLevel":"${SECRET}"}` }, 'lean');
+      expect(line.endsWith(' GATE_LEVEL=full')).toBe(true);
+      expect(text).toContain('.devflow/config.json');
+      expect(text).toContain('GATE_LEVEL=full applies');
+      expect(text).not.toContain(SECRET);
+    });
+
+    it('a malformed machine level names manifest.json and says full applies', () => {
+      const { text, line } = stderrOf({}, SECRET);
+      expect(line.endsWith(' GATE_LEVEL=full')).toBe(true);
+      expect(text).toContain('~/.devflow/manifest.json');
+      expect(text).toContain('GATE_LEVEL=full applies');
+      expect(text).not.toContain(SECRET);
+    });
+
+    it('a malformed machine level hidden behind a valid personal level prints nothing', () => {
+      const { text, line } = stderrOf({ personal: '{"gateLevel":"lean"}' }, SECRET);
+      expect(line.endsWith(' GATE_LEVEL=lean')).toBe(true);
+      expect(text).toBe('');
+    });
+
+    it.each(['full', 'standard', 'lean'])('a valid personal %s level prints nothing on stderr', level => {
+      expect(stderrOf({ personal: `{"gateLevel":"${level}"}` }).text).toBe('');
+    });
+
+    it.each(['full', 'standard', 'lean'])('a valid machine %s level prints nothing on stderr', level => {
+      expect(stderrOf({}, level).text).toBe('');
+    });
+  });
+
+  describe('the real script', () => {
+    it('prints GATE_LEVEL=standard with no personal key and no manifest', () => {
+      const r = runReal([TOPLEVEL(root), ORIGIN_HEAD_UNSET]);
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stdout).toBe(`${DEFAULT_LINE}\n`);
+    });
+
+    it('prints the personal level over the machine level', () => {
+      fs.writeFileSync(path.join(home, '.devflow', 'manifest.json'), JSON.stringify({ features: { gateLevel: 'full' } }));
+      writeRepoFile('config.json', '{"gateLevel":"lean"}');
+      const r = runReal([TOPLEVEL(root), UNTRACKED, ORIGIN_HEAD_UNSET]);
+      expect(r.status, r.stderr).toBe(0);
+      expect(fieldOf(r.stdout.trim(), 'GATE_LEVEL')).toBe('lean');
+    });
+
+    it('prints the machine level when the personal file has no key', () => {
+      fs.writeFileSync(path.join(home, '.devflow', 'manifest.json'), JSON.stringify({ features: { gateLevel: 'lean' } }));
+      const r = runReal([TOPLEVEL(root), ORIGIN_HEAD_UNSET]);
+      expect(fieldOf(r.stdout.trim(), 'GATE_LEVEL')).toBe('lean');
+    });
+
+    it('prints full for a malformed personal level and names config.json on stderr', () => {
+      writeRepoFile('config.json', '{"gateLevel":"Lean"}');
+      const r = runReal([TOPLEVEL(root), UNTRACKED, ORIGIN_HEAD_UNSET]);
+      expect(r.status, r.stderr).toBe(0);
+      expect(fieldOf(r.stdout.trim(), 'GATE_LEVEL')).toBe('full');
+      expect(r.stderr).toContain('.devflow/config.json');
+    });
+
+    it('prints the fail-closed line, ending full, when the directory is unusable', () => {
+      const r = runResolver({ home, args: [path.join(tmp, 'missing')], script: SETTINGS_SCRIPT });
+      expect(r.stdout).toBe(`${FAIL_CLOSED}\n`);
+      expect(fieldOf(r.stdout.trim(), 'GATE_LEVEL')).toBe('full');
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // TP-31 (AC-27) — compliance: machine ∪ worktree
 // ---------------------------------------------------------------------------
 
@@ -1224,7 +1505,7 @@ describe('TP-30 (AC-26): a malformed evidence leaves tracker and features in the
       project: '{"evidence":"required","evidence":"standard","tracker":{"provider":"jira","key":"ACME"},"features":{"learning":false}}',
     });
     expect(line).toBe('TRACKER=jira TRACKER_SOURCE=project TRACKER_WARN=none SITE=none KEY=ACME '
-      + 'REVIEW_PUBLICATION=auto COMPLIANCE=off MEMORY=on LEARNING=off KNOWLEDGE=on');
+      + 'REVIEW_PUBLICATION=auto COMPLIANCE=off MEMORY=on LEARNING=off KNOWLEDGE=on GATE_LEVEL=standard');
   });
 });
 
@@ -1344,7 +1625,7 @@ describe('whole-file rule: an unreadable project.json or config.json fails its o
     expect(s.ok).toBe(true);
     expect(s.unreadable).toBeNull();
     expect(SETTINGS.formatSettingsLine(s)).toBe('TRACKER=github TRACKER_SOURCE=default TRACKER_WARN=invalid SITE=none '
-      + 'KEY=none REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=on LEARNING=on KNOWLEDGE=on');
+      + 'KEY=none REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=on LEARNING=on KNOWLEDGE=on GATE_LEVEL=standard');
     expect(settingsFor({}).unreadable).toBeNull();
   });
 

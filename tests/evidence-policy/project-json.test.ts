@@ -22,6 +22,7 @@ import * as path from 'path';
 
 import { COMPLIANCE_FRAMEWORKS, normalizeFrameworks } from '../../src/core/compliance.js';
 import { TRACKER_PROVIDER_IDS } from '../../src/core/tracker.js';
+import { GATE_LEVELS, MAX_MANIFEST_BYTES } from '../../src/core/gate-level.js';
 import {
   ARGV,
   PROJECT_CONFIG_LIB,
@@ -77,12 +78,15 @@ type PersonalConfig =
     readonly tracker: Field<string>;
     readonly reviewPublication: Field<'off' | 'auto' | 'full'>;
     readonly features: Field<FeatureFields>;
+    readonly gateLevel: Field<'full' | 'standard' | 'lean'>;
   };
 
 interface ProjectConfigModule {
   readonly MAX_CONFIG_BYTES: number;
+  readonly MAX_MANIFEST_BYTES: number;
   readonly POLICIES: readonly string[];
   readonly PUBLICATIONS: readonly string[];
+  readonly GATE_LEVELS: readonly string[];
   readonly TRACKER_PROVIDER_IDS: readonly string[];
   readonly COMPLIANCE_IDS: readonly string[];
   readonly FEATURE_SWITCHES: readonly string[];
@@ -147,6 +151,14 @@ describe('lib/project-config.cjs — parity with the TypeScript registries', () 
     expect([...LIB.TRACKER_PROVIDER_IDS]).toEqual([...TRACKER_PROVIDER_IDS]);
   });
 
+  it('GATE_LEVELS is the gate-level registry, in order', () => {
+    expect([...LIB.GATE_LEVELS]).toEqual([...GATE_LEVELS]);
+  });
+
+  it('MAX_MANIFEST_BYTES is the gate-level module\'s manifest bound', () => {
+    expect(LIB.MAX_MANIFEST_BYTES).toBe(MAX_MANIFEST_BYTES);
+  });
+
   const FRAMEWORK_ROWS: ReadonlyArray<readonly string[]> = [
     [],
     ['gdpr'],
@@ -176,7 +188,7 @@ describe('lib/project-config.cjs — parity with the TypeScript registries', () 
   it('bounds every config file at 4096 bytes, and freezes its registries', () => {
     expect(LIB.MAX_CONFIG_BYTES).toBe(4096);
     expect(Object.isFrozen(LIB)).toBe(true);
-    for (const registry of [LIB.POLICIES, LIB.PUBLICATIONS, LIB.TRACKER_PROVIDER_IDS, LIB.COMPLIANCE_IDS, LIB.FEATURE_SWITCHES]) {
+    for (const registry of [LIB.POLICIES, LIB.PUBLICATIONS, LIB.GATE_LEVELS, LIB.TRACKER_PROVIDER_IDS, LIB.COMPLIANCE_IDS, LIB.FEATURE_SWITCHES]) {
       expect(Object.isFrozen(registry)).toBe(true);
     }
   });
@@ -416,7 +428,35 @@ describe('parsePersonalBytes — the personal .devflow/config.json', () => {
   it('never reads the retired top-level switches — features is a new namespace', () => {
     const r = personal('{"memory":false,"learning":false,"knowledge":false,"decisions":false,"autoCommit":true}');
     expect(r.features).toEqual(ABSENT);
-    expect(Object.keys(r).sort()).toEqual(['features', 'kind', 'reviewPublication', 'tracker']);
+    expect(Object.keys(r).sort()).toEqual(['features', 'gateLevel', 'kind', 'reviewPublication', 'tracker']);
+  });
+
+  it('reads gateLevel as valid only for the three exact words', () => {
+    for (const level of GATE_LEVELS) {
+      expect(personal(`{"gateLevel":"${level}"}`).gateLevel, level).toEqual(valid(level));
+    }
+    expect(personal('{}').gateLevel).toEqual(ABSENT);
+  });
+
+  it('reads every other gateLevel as malformed, the empty string and a duplicated key included', () => {
+    const rows = ['"Lean"', '"LEAN"', '"lean "', '" lean"', '"lean\\n"', '""', 'null', '1', 'true', 'false', '["lean"]', '{"level":"lean"}', '"minimal"'];
+    for (const bad of rows) {
+      expect(personal(`{"gateLevel":${bad}}`).gateLevel, bad).toEqual(MALFORMED);
+    }
+    expect(personal('{"gateLevel":"lean","gateLevel":"full"}').gateLevel).toEqual(MALFORMED);
+    expect(personal('{"gateLevel":"lean","gateLevel":"lean"}').gateLevel).toEqual(MALFORMED);
+  });
+
+  it('keeps a malformed gateLevel from touching its neighbours', () => {
+    const r = personal('{"gateLevel":"Lean","reviewPublication":"full","tracker":"jira"}');
+    expect(r.gateLevel).toEqual(MALFORMED);
+    expect(r.reviewPublication).toEqual(valid('full'));
+    expect(r.tracker).toEqual(valid('jira'));
+  });
+
+  it('does not read gateLevel from the team file', () => {
+    const r = parsed('{"gateLevel":"lean"}') as Record<string, unknown>;
+    expect(r.gateLevel).toBeUndefined();
   });
 
   it('does not read team keys (evidence, compliance) from a personal file', () => {

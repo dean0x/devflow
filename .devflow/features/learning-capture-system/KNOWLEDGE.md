@@ -44,7 +44,7 @@ updated: 2026-10-13
 - **KB-INV-9** A queue row is JSONL built by `jq` or `node JSON.stringify`, never string concatenation; the append is lock-free by design and only overflow truncation takes the queue lock.
 - **KB-INV-10** A hook is devflow's only when its command ENDS in `/scripts/hooks/run-hook <marker>` (`devflowHookOwner`); earlier endings live in `LEGACY_HOOK_SUFFIXES`, are removed on each converge and are never counted as current.
 - **KB-INV-11** `drainDisabledFeatureQueues` drains only AFTER the manifest write lands, and `--hud-only` re-init keeps every recorded manifest value and changes only `features.hud`.
-- **KB-INV-12** `.devflow/config.json` keeps one non-boolean field, `tracker`, read by `parseTrackerOverride` (TS) and `resolve-settings.cjs` (`parsePersonalBytes`), which must agree (`tests/seams/tracker-key-path.test.ts`).
+- **KB-INV-12** `.devflow/config.json` holds three non-boolean fields, `reviewPublication` (`off`, `auto` or `full`), `tracker` and `gateLevel`. `tracker` is read by `parseTrackerOverride` (TS) and `resolve-settings.cjs` (`parsePersonalBytes`), which must agree (`tests/seams/tracker-key-path.test.ts`). `gateLevel` is the personal gate level, read by the resolver alone and written by no command: it is not a switch, so it may raise the machine level as well as lower it. A `gateLevel` in `project.json` is ignored.
 - **KB-INV-13** Every loop and read in this area has a bound, each a named constant (see Constraints), and the shell cap on hook log folders is pinned equal to the TS `MAX_HOOK_LOG_DIRS`.
 - **KB-INV-14** `writeMachineFeature` (`src/core/feature-switch.ts`, `D-NOOP-TOGGLE`) skips the write when the stored boolean already equals the request, so a no-op `devflow memory|learning|knowledge --enable/--disable` leaves `manifest.json` byte-identical and `updatedAt` unmoved; it is the one write point of all three.
 - **KB-AP-1** Reading feature flags with two separate calls: `queue_read_gates` is one fork. Never read or write top-level `.devflow/config.json` keys for on/off state, omit `<root>` from a `queue_read_gates` call, or resolve the manifest from the project root (the gate then fails open).
@@ -102,7 +102,7 @@ Content identifiers keep their "decisions" names although the system is "learnin
 
 Rules: **D-GATES-FAST-PATH**: each repository file gets a bounded builtin read (`read -r -d '' -n`, one byte past the limit so a cut-short read shows); a cut-short read (NUL, or over the limit) is invalid and narrows nothing; text with no `\u` and no `"features"…{…"memory|learning"…false` sequence cannot narrow, so zero forks. Otherwise exactly ONE `node` fork runs `resolve-settings.cjs`'s `readRepoLayers` + `foldSettings`, so every file rule (symlink, size, BOM, UTF-8, duplicate keys) is the parser's. **D-FEATURES-ABSENT-ON**: only an explicit boolean `false` switches off; an absent manifest, `features` object or key, or a non-boolean, reads ON. `isMachineFeatureOn(rawManifest, feature)` is the pure predicate and `queue_read_gates` applies the identical rule; neither is built on `readManifest()`, which returns null for a manifest missing required fields and heals writes back to disk. **Legacy keys**: a feature reads its current key when boolean, else its legacy key (`learning` from `decisions`, `knowledge` from `kb`) when boolean, else ON; `queue_read_gates` mirrors it for learning only. `writeMachineFeature` writes ONLY `features.<feature>` and `updatedAt` and answers `{ok:false, error:'not-installed'}` when no manifest exists.
 
-`.devflow/config.json` keeps one non-boolean field, `tracker` (the per-repo provider override), read by `parseTrackerOverride` (TS) and `resolve-settings.cjs` (`parsePersonalBytes`); both must agree (`tests/seams/tracker-key-path.test.ts`). Never consume `config.tracker` raw.
+`.devflow/config.json` holds three non-boolean fields: `reviewPublication` (`off`, `auto` or `full`), `tracker` and `gateLevel`. `tracker` (the per-repo provider override) is read by `parseTrackerOverride` (TS) and `resolve-settings.cjs` (`parsePersonalBytes`); both must agree (`tests/seams/tracker-key-path.test.ts`). Never consume `config.tracker` raw. `gateLevel` (the personal gate level) is read by the resolver alone, through `parsePersonalBytes`: the narrow-only rule covers the memory, learning and knowledge switches and does not cover it, so it may raise the machine's `features.gateLevel` as well as lower it. No command writes it, `mergeManagedConfig` carries it verbatim, and a `gateLevel` in `project.json` is ignored.
 
 ### Roots and gates (D-HOOKS-GIT-ONLY, D-LEDGER-MAIN-WORKTREE)
 
@@ -127,7 +127,7 @@ All three hooks (`capture-prompt`, `capture-turn`, `capture-question`) source `q
 |---|---|---|
 | Feature on/off | `~/.devflow/manifest.json` | `{features: {memory, learning, knowledge, …}}` |
 | Team narrowing and facts | `.devflow/project.json` (committed, never devflow-written) | `{version, evidence, compliance, tracker, reviewPublication, features}`; `reviewPublication` only lowers |
-| Personal per-repo facts | `.devflow/config.json` | `{reviewPublication, tracker?, features?}` |
+| Personal per-repo facts | `.devflow/config.json` | `{reviewPublication, tracker?, gateLevel?, features?}` |
 | Agent tuning | `.devflow/learning/learning.json`, then (for the model only) the `devflow agents` Curate mapping in `~/.devflow/agent-models.json`, then `~/.devflow/learning.json` | `{model, debug}` |
 
 ### Hook ownership, init and logs
@@ -206,6 +206,7 @@ Every loop and read has a bound, each a named constant: in the store `E4_MAX_SKI
 | `src/assets/scripts/hooks/session-start-context` | Sections 1 to 6 (agent and delivery KBs) |
 | `src/assets/scripts/hooks/log-paths` · `src/core/hook-log-dirs.ts` | Log folder cap |
 | `src/core/feature-switch.ts` · `feature-config.ts` · `curate-tuning-config.ts` | Switch predicate and I/O, per-repo config, tuning merge |
+| `src/core/gate-level.ts` · `src/cli/commands/gates.ts` | The gate level: closed set, raw manifest reader and writer, `devflow gates` |
 | `src/cli/commands/memory.ts` · `knowledge/toggle.ts` · `init.ts` | Memory and knowledge toggles, init drains and `--hud-only` |
 | `src/targets/claude-code/hooks.ts` | `devflowHookOwner`, `removeHooks`, `ensureHook` |
 | `src/core/project-paths.ts` · `src/core/ledger-root.ts` | Path single source; `getLedgerRoot`, the twin of `DF_LEDGER_ROOT` |

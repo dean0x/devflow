@@ -61,6 +61,7 @@ import { agentsCommand } from '../src/cli/commands/agents.js'
 import { complianceCommand } from '../src/cli/commands/compliance.js'
 import { trackerCommand } from '../src/cli/commands/tracker.js'
 import { behaviorCommand } from '../src/cli/commands/behavior.js'
+import { gatesCommand } from '../src/cli/commands/gates.js'
 
 const CLI = requireBuiltCli()
 
@@ -81,6 +82,8 @@ export interface FenceRow {
   readonly seed?: (sb: Sandbox) => void
   /** Names the row apart from another row with the same args. */
   readonly label?: string
+  /** The exit status the row expects; 0 when absent. A rejected `--set` value exits 1. */
+  readonly exitCode?: number
 }
 
 const SETTINGS = '<HOME>/.claude/settings.json'
@@ -176,6 +179,13 @@ function rewriteHomeJson(sb: Sandbox, rel: string, edit: (json: Record<string, u
   const json = JSON.parse(readFileSync(abs, 'utf-8')) as Record<string, unknown>
   edit(json)
   writeFileSync(abs, `${JSON.stringify(json, null, 2)}\n`)
+}
+
+/** The stored machine gate level a repeat `gates --set lean` finds, so the row does not depend on the row before it. */
+const seedGateLevelLean = (sb: Sandbox): void => {
+  rewriteHomeJson(sb, '.devflow/manifest.json', manifest => {
+    (manifest.features as Record<string, unknown>).gateLevel = 'lean'
+  })
 }
 
 /**
@@ -280,6 +290,19 @@ export const FENCE_ROWS: readonly FenceRow[] = [
 
   { args: ['proxy', '--status'], allow: NONE, mustWrite: false },
   { args: ['safe-delete', '--status'], allow: NONE, mustWrite: false },
+
+  // The machine gate level is written by `gates --set` alone, and only in the manifest. No command removes the key
+  // but `init --reset`, so these rows come last and leave the stored `lean` in place for no row to depend on.
+  { args: ['gates', '--set', 'lean'], allow: [MANIFEST], mustWrite: true },
+  { args: ['gates', '--set', 'lean'], allow: NONE, mustWrite: false, seed: seedGateLevelLean, label: 'repeat' },
+  // A rejected level writes nothing and exits 1.
+  { args: ['gates', '--set', 'Lean'], allow: NONE, mustWrite: false, exitCode: 1, label: 'wrong case' },
+  { args: ['gates', '--set', 'lean '], allow: NONE, mustWrite: false, exitCode: 1, label: 'trailing space' },
+  { args: ['gates', '--set', ''], allow: NONE, mustWrite: false, exitCode: 1, label: 'empty value' },
+  { args: ['gates', '--set'], allow: NONE, mustWrite: false, exitCode: 1, label: 'no value' },
+  { args: ['gates', '--status', '--set', 'full'], allow: NONE, mustWrite: false, label: 'status wins' },
+  { args: ['gates', '--status'], allow: NONE, mustWrite: false },
+  { args: ['gates'], allow: NONE, mustWrite: false, label: 'usage' },
 ]
 
 /** Top-level commands with no row, and where their writes are held instead. */
@@ -305,7 +328,7 @@ export const UNFENCED_ACTIONS: Readonly<Record<string, string>> = {
 const COMMANDS: readonly Command[] = [
   initCommand, uninstallCommand, ambientCommand, memoryCommand, skillsCommand, hudCommand, flagsCommand,
   knowledgeCommand, learningCommand, rulesCommand, debugCommand, securityCommand, safeDeleteCommand,
-  proxyCommand, agentsCommand, complianceCommand, trackerCommand, behaviorCommand,
+  proxyCommand, agentsCommand, complianceCommand, trackerCommand, behaviorCommand, gatesCommand,
 ]
 
 /** The options that make a command a toggle. */
@@ -486,8 +509,8 @@ describe('write-set fence coverage', () => {
   })
 
   it('the table and its footprint stay registered in numeric-floors.json', () => {
-    expect(FENCE_ROWS.length).toBeGreaterThanOrEqual(56)
-    expect(new Set(FENCE_ROWS.map(row => row.args[0])).size).toBeGreaterThanOrEqual(15)
+    expect(FENCE_ROWS.length).toBeGreaterThanOrEqual(65)
+    expect(new Set(FENCE_ROWS.map(row => row.args[0])).size).toBeGreaterThanOrEqual(16)
     expect(allowlistSize(FENCE_ROWS)).toBeLessThanOrEqual(12)
   })
 
@@ -528,7 +551,7 @@ describe('write-set fence: every toggle writes only inside its allowlist', () =>
       row.seed?.(s)
       const before = readTree(s.root, excludeGit, true)
       const run = runCli(s, row.args)
-      expect(run.status, run.output).toBe(0)
+      expect(run.status, run.output).toBe(row.exitCode ?? 0)
       const { added, modified, removed } = diffTree(before, readTree(s.root, excludeGit, true))
       const changed = [...added, ...modified, ...removed].map(fencePath)
       expect(fenceViolations(changed, row.allow), `${rowName(row)} wrote outside its allowlist`).toEqual([])

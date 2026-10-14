@@ -58,6 +58,15 @@ export interface FeatureSeed {
    * every existing install and every GitHub user is unaffected.
    */
   tracker: TrackerFeatureState;
+  /**
+   * The machine gate level, exactly as the manifest stores it: a valid level, a
+   * malformed value or `null`. Required, so the compiler forces every seed site to
+   * name it. It is `undefined` only when the manifest holds no key, there is no
+   * manifest, or the seed is a --reset seed. Init never defaults, narrows or asks
+   * about it: `devflow gates --set` is its only writer, and the full manifest write
+   * puts back whatever the seed holds.
+   */
+  gateLevel: unknown;
 }
 
 /** Registry defaults — all features enabled except proxy (advanced-only, off by default). */
@@ -72,6 +81,7 @@ export const FEATURE_DEFAULTS: FeatureSeed = {
   behavior: false,
   compliance: { enabled: false, frameworks: [] },
   tracker: { provider: DEFAULT_TRACKER_PROVIDER },
+  gateLevel: undefined,
 };
 
 /** The complete initial state passed from the hoisted-reads block to init prompts. */
@@ -117,8 +127,12 @@ export function resolveSeedFeatures(manifest: ManifestData | null): FeatureSeed 
   const memory = manifest?.features.memory ?? FEATURE_DEFAULTS.memory;
   const knowledge = manifest?.features.knowledge ?? FEATURE_DEFAULTS.knowledge;
   const learning = manifest?.features.learning ?? FEATURE_DEFAULTS.learning;
+  // The raw stored level, with no default operator: `??` would turn a stored `null`
+  // into the default, and init would then write the default over a value the
+  // fold reads as the strictest level.
+  const gateLevel = manifest?.features.gateLevel;
 
-  return { ambient, memory, hud, knowledge, learning, rules, proxy, behavior, compliance, tracker };
+  return { ambient, memory, hud, knowledge, learning, rules, proxy, behavior, compliance, tracker, gateLevel };
 }
 
 /**
@@ -418,5 +432,8 @@ export function applyCliToggles(
     behavior: toggles.behavior ?? base.behavior,
     compliance: toggles.compliance ?? base.compliance,
     tracker: toggles.tracker ?? base.tracker,
+    // No command-line flag names the gate level, so the seed's raw value passes
+    // through. Only `undefined` means "not specified": `null` is a value, not a gap.
+    gateLevel: toggles.gateLevel !== undefined ? toggles.gateLevel : base.gateLevel,
   };
 }
