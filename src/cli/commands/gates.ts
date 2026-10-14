@@ -339,7 +339,7 @@ export const gatesCommand = new Command('gates')
     `\nGate levels:\n${levelsHelp()}\n\n` +
     `The default is ${DEFAULT_GATE_LEVEL}. --set writes only the machine default. A personal .devflow/config.json ` +
     '"gateLevel" overrides it in one repository; no command writes that key.\n' +
-    `${GATE_LEVEL_NO_EFFECT}`,
+    GATE_LEVEL_NO_EFFECT,
   )
   .action(async (options: GatesOptions) => {
     const devflowDir = getDevFlowDirectory();
@@ -361,7 +361,7 @@ export const gatesCommand = new Command('gates')
       const status = await gatherGateStatus({
         devflowDir,
         dir: process.cwd(),
-        loadSettings: () => loadSettingsModule(),
+        loadSettings: loadSettingsModule,
         readManifest: readGateManifest,
       });
       const rendered = renderGateStatus(status);
