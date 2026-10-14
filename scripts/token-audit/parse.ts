@@ -216,7 +216,10 @@ const IN_PLACE_RE = /^(?:-[A-Za-z]*i|--in-place(?:=|$))/;
 const FD_NUMBER_RE = /^[0-9]+$/;
 const BLANK_RE = /^\s$/;
 const TEST_CLOSE_FOLLOW_RE = /^[\s;&|)]$/;
-// Write detection also reads past `if`, `elif`, `while`, `until` and `{`, so `if cp a b; then` counts as a write. `classifyBash` leaves them out of PREFIX_WORDS on purpose: skipping them there would change its classes.
+/**
+ * Write detection also reads past `if`, `elif`, `while`, `until` and `{`, so `if cp a b; then` counts
+ * as a write. `classifyBash` leaves them out of PREFIX_WORDS: skipping them there would change its classes.
+ */
 const WRITE_PREFIX_WORDS: ReadonlySet<string> = new Set([...PREFIX_WORDS, 'if', 'elif', 'while', 'until', '{']);
 const QUIET_FLAG_RE =
   /--reporter[= ](?:dot|min|basic|silent)\b|--silent\b|--quiet\b|--pretty[= ]false\b|(?:^|\s)-q(?:\s|$)|--loglevel[= ](?:silent|error|warn)\b/;
@@ -351,10 +354,25 @@ function splitHeredocs(text: string): HeredocSplit {
   return { code: code.join('\n'), pythonBodies };
 }
 
+/** The scan steps that all zone scans of one `lexBash` call may still spend. */
+interface ZoneBudget {
+  left: number;
+}
+
+/** Zone scan steps per character of text. An unclosed zone scans to the end, so the budget is what keeps `lexBash` linear. */
+export const ZONE_STEPS_PER_CHAR = 4;
+
+/** Takes one scan step from the budget. False when none is left, which ends the scan: the zone is text. */
+function takeStep(budget: ZoneBudget): boolean {
+  if (budget.left <= 0) return false;
+  budget.left -= 1;
+  return true;
+}
+
 /** The index of the `))` that closes an arithmetic `((` whose body starts at `from`, or -1 when the text there is nested subshells. */
-function arithmeticEnd(text: string, from: number): number {
+function arithmeticEnd(text: string, from: number, budget: ZoneBudget): number {
   let depth = 0;
-  for (let i = from; i < text.length; i += 1) {
+  for (let i = from; i < text.length && takeStep(budget); i += 1) {
     const c = text[i];
     if (c === '(') depth += 1;
     else if (c === ')') {
@@ -366,20 +384,17 @@ function arithmeticEnd(text: string, from: number): number {
 }
 
 /** The index of the `]]` word that closes a `[[` test whose body starts at `from`, or -1 when none does. Quoted text and escapes are skipped. */
-function testExpressionEnd(text: string, from: number): number {
-  for (let i = from; i < text.length; i += 1) {
+function testExpressionEnd(text: string, from: number, budget: ZoneBudget): number {
+  let quote = '';
+  for (let i = from; i < text.length && takeStep(budget); i += 1) {
     const c = text[i];
-    if (c === '\\') {
+    if (quote !== '') {
+      if (c === '\\' && quote === '"') i += 1;
+      else if (c === quote) quote = '';
+    } else if (c === '\\') {
       i += 1;
-    } else if (c === "'") {
-      const close = text.indexOf("'", i + 1);
-      if (close < 0) return -1;
-      i = close;
-    } else if (c === '"') {
-      let j = i + 1;
-      while (j < text.length && text[j] !== '"') j += text[j] === '\\' ? 2 : 1;
-      if (j >= text.length) return -1;
-      i = j;
+    } else if (c === "'" || c === '"') {
+      quote = c;
     } else if (c === ']' && text[i + 1] === ']' && BLANK_RE.test(text[i - 1] ?? '')) {
       const after = text[i + 2];
       if (after === undefined || TEST_CLOSE_FOLLOW_RE.test(after)) return i + 1;
@@ -390,15 +405,15 @@ function testExpressionEnd(text: string, from: number): number {
 
 /**
  * The index of the last character of the `$(( ))`, `(( ))` or `[[ ]]` zone that starts at `at`, or -1
- * when none starts there or the zone has no closer. A `>` or `<` in such a zone compares values, so
- * it is no redirect. An unclosed zone is text, so a stray `[[` cannot hide the rest of the command.
- * `((` and `[[` open a zone only at the start of a word.
+ * when none starts there, the zone has no closer or the budget runs out. A `>` or `<` in such a zone
+ * compares values, so it is no redirect. An unclosed zone is text, so a stray `[[` cannot hide the
+ * rest of the command. `((` and `[[` open a zone only at the start of a word.
  */
-function zoneEnd(text: string, at: number, wordOpen: boolean): number {
-  if (text.startsWith('$((', at)) return arithmeticEnd(text, at + 3);
+function zoneEnd(text: string, at: number, wordOpen: boolean, budget: ZoneBudget): number {
+  if (text.startsWith('$((', at)) return arithmeticEnd(text, at + 3, budget);
   if (wordOpen) return -1;
-  if (text.startsWith('((', at)) return arithmeticEnd(text, at + 2);
-  if (text.startsWith('[[', at) && BLANK_RE.test(text[at + 2] ?? '')) return testExpressionEnd(text, at + 3);
+  if (text.startsWith('((', at)) return arithmeticEnd(text, at + 2, budget);
+  if (text.startsWith('[[', at) && BLANK_RE.test(text[at + 2] ?? '')) return testExpressionEnd(text, at + 3, budget);
   return -1;
 }
 
@@ -406,9 +421,10 @@ function zoneEnd(text: string, at: number, wordOpen: boolean): number {
  * Splits shell text into words, separators and redirect operators. Quotes group text and are
  * dropped, so a `>` inside them is part of a word. A `[[ ]]` or `(( ))` zone becomes one separator
  * and a `$(( ))` zone becomes a dynamic word, so a comparison `>` inside them is no redirect. Every
- * branch moves forward, so the loop is bounded by the text length.
+ * branch moves forward, and all zone scans share one budget of `ZONE_STEPS_PER_CHAR` steps per
+ * character, so the work is linear in the text length. Once the budget is spent, a zone is text.
  */
-function lexBash(text: string): BashToken[] {
+export function lexBash(text: string, budget: ZoneBudget = { left: ZONE_STEPS_PER_CHAR * text.length }): BashToken[] {
   const tokens: BashToken[] = [];
   let value = '';
   let dynamic = false;
@@ -428,7 +444,7 @@ function lexBash(text: string): BashToken[] {
   };
   for (let i = 0; i < text.length; i += 1) {
     const c = text[i] ?? '';
-    const zone = c === '$' || c === '(' || c === '[' ? zoneEnd(text, i, open) : -1;
+    const zone = c === '$' || c === '(' || c === '[' ? zoneEnd(text, i, open, budget) : -1;
     if (zone >= 0) {
       if (c === '$') {
         open = true;
@@ -630,7 +646,8 @@ function pythonWrites(bodies: readonly string[]): string[] {
  * `${OUT}`, `$(mktemp)`), which is how a `mktemp` path reaches a redirect. A path stays as written,
  * not resolved against the working directory, so `a.ts` here and `/w/a.ts` from Edit count as two
  * distinct paths. The text is cut at 8,192
- * characters, at 16 heredocs and at 64 writes, and every loop is bounded by those.
+ * characters, at 16 heredocs and at 64 writes, and every loop is bounded by those. The zone scans
+ * share a step budget that is linear in the text length.
  */
 export function bashWrittenPaths(command: string): string[] {
   const { code, pythonBodies } = splitHeredocs(command.slice(0, MAX_BASH_COMMAND_CHARS));

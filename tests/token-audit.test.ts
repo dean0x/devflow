@@ -31,7 +31,7 @@ import {
 import type { SubagentFile } from '../scripts/token-audit/discover.js';
 import { parseCliArgs, parseWindow, runAudit, runCli } from '../scripts/token-audit/index.js';
 import type { AuditOptions } from '../scripts/token-audit/index.js';
-import { bashWrittenPaths, parseTranscriptFile, parseTranscriptLines } from '../scripts/token-audit/parse.js';
+import { ZONE_STEPS_PER_CHAR, bashWrittenPaths, lexBash, parseTranscriptFile, parseTranscriptLines } from '../scripts/token-audit/parse.js';
 import type { AuditRequest } from '../scripts/token-audit/parse.js';
 import { buildReport, gapBin, inWindow, renderJson, renderMarkdown } from '../scripts/token-audit/report.js';
 import type { AuditReport, ReportInput, SessionData } from '../scripts/token-audit/report.js';
@@ -1556,9 +1556,21 @@ describe('AC-107 Bash result classes and files written (D-AUDIT-BASH-CLASS)', ()
       expect(bashWrittenPaths('while (( n > 0 )); do echo x >> log.txt; done')).toEqual(['log.txt']);
     });
 
-    it('reads a quoted ]] inside [[ ]] as text', () => {
-      expect(bashWrittenPaths('[[ "$a" > "b ]] c" ]]')).toEqual([]);
-      expect(bashWrittenPaths('[[ $x == "]]" ]] && echo hi > out.txt')).toEqual(['out.txt']);
+    it('reads a quoted or escaped ]] inside [[ ]] as text', () => {
+      expect(bashWrittenPaths('[[ "$a" == "x ]] y" ]] && echo hi > out.txt')).toEqual(['out.txt']); // double quotes
+      expect(bashWrittenPaths("[[ $a == 'x ]] y' ]] && echo hi > out.txt")).toEqual(['out.txt']); // single quotes
+      expect(bashWrittenPaths('[[ $a == \\" ]] && echo hi > out.txt && [[ " ]]')).toEqual(['out.txt']); // escaped quote
+      expect(bashWrittenPaths('[[ $a == "x\\" ]] y" ]] && echo hi > out.txt')).toEqual(['out.txt']); // escape inside quotes
+    });
+
+    it('closes a [[ zone only at a ]] word that follows a blank and ends the word', () => {
+      expect(bashWrittenPaths('[[ x]] > 5 ]]')).toEqual([]); // ]] must follow a blank
+      expect(bashWrittenPaths('[[ $x == ]]x > 5 ]]')).toEqual([]); // ]] must end a word
+    });
+
+    it('opens a [[ zone only at the start of a word and before a blank', () => {
+      expect(bashWrittenPaths('echo a[[ b > c.txt ]]')).toEqual(['c.txt']); // [[ inside a word is text
+      expect(bashWrittenPaths('echo [[x > out.txt ]]')).toEqual(['out.txt']); // [[ needs a blank after it
     });
 
     it('treats an unclosed [[ or (( as text, so it cannot hide a later write', () => {
@@ -1602,6 +1614,24 @@ describe('AC-107 Bash result classes and files written (D-AUDIT-BASH-CLASS)', ()
       expect(bashWrittenPaths(`${'<<A '.repeat(2000)}\nA\n`).length).toBe(0);
       expect(bashWrittenPaths(`${'(('.repeat(4000)} > f.txt`)).toEqual(['f.txt']); // unclosed zones are text
       expect(bashWrittenPaths(`${'[[ '.repeat(2700)} > f.txt`)).toEqual(['f.txt']);
+      expect(bashWrittenPaths(`${'$(('.repeat(2700)} > f.txt`)).toEqual(['f.txt']);
+    });
+
+    it('lets all zone scans of one command spend at most a fixed multiple of its length', () => {
+      for (const [opener, count] of [['(', 8192], ['$((', 2730], ['[[ ', 2730]] as const) {
+        for (const size of [count / 2, count]) {
+          const text = opener.repeat(size);
+          const budget = { left: ZONE_STEPS_PER_CHAR * text.length };
+          lexBash(text, budget);
+          expect(budget.left, `${opener} x ${size}`).toBe(0); // the unclosed scans spent it all, and no more
+        }
+      }
+    });
+
+    it('reads a zone as text once the scan budget is spent', () => {
+      const kinds = (left: number): string[] => lexBash('[[ a > b ]]', { left }).map((token) => token.kind);
+      expect(kinds(100)).not.toContain('out');
+      expect(kinds(0)).toContain('out');
     });
 
     it('hides the bodies of the first 16 heredocs and reads the 17th as text', () => {
