@@ -823,6 +823,17 @@ function collectUnboundedLoops(source: string): string[] {
   return [...codeLines(source).join('\n').matchAll(/while\s*\(\s*(?:true|1)\s*\)|for\s*\(\s*;\s*;\s*\)/g)].map(m => m[0])
 }
 
+/** The settle comparisons in code lines, and the clock each settle() call inside waitForCi is given. */
+function collectSettleSites(source: string): { comparisons: number; windows: string[] } {
+  const code = codeLines(source).join('\n')
+  const start = code.indexOf('async function waitForCi(')
+  const wait = start < 0 ? '' : code.slice(start, code.indexOf('\n}\n', start))
+  return {
+    comparisons: [...code.matchAll(/>=\s*settleMs\b/g)].length,
+    windows: [...wait.matchAll(/\bsettle\(\s*(\w+)\s*,/g)].map(m => m[1]),
+  }
+}
+
 describe('source guards (ci-wait.cjs)', () => {
   it('no shell, no exec, no literal sleep, one production spawnSync', () => {
     expect(SOURCE.length).toBeGreaterThan(1000)
@@ -858,6 +869,21 @@ describe('source guards (ci-wait.cjs)', () => {
     ]) {
       expect(SOURCE, `${marker} missing`).toContain(marker)
     }
+  })
+
+  it('the settle comparison appears once, in the helper, and each window calls the helper once on its own clock', () => {
+    const sites = collectSettleSites(SOURCE)
+    expect(sites.comparisons).toBe(1)
+    expect(sites.windows).toEqual(['firstMismatchAt', 'firstEmptyAt'])
+    const probe = [
+      'async function waitForCi(i) {',
+      '  settle(firstMismatchAt, 1, 2); settle(firstMismatchAt, 1, 2);',
+      '}',
+      'function settle(f, n, s) { return n - f >= settleMs }',
+      'const z = 1 >= settleMs',
+      '',
+    ].join('\n')
+    expect(collectSettleSites(probe)).toEqual({ comparisons: 2, windows: ['firstMismatchAt', 'firstMismatchAt'] })
   })
 
   it('pins the ratchet constant exactly once, as the manifest spells it', () => {
