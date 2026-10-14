@@ -348,20 +348,70 @@ function readStampFile(stampPath) {
 // ── The walk ───────────────────────────────────────────────────────────────────
 
 /**
+ * Scan the head of the file at `p` for imports. It reads at most SCAN_BYTES and no
+ * more than `remaining`, the bytes the run may still read, and it changes nothing
+ * outside itself. `cut` is true when the run's byte budget shortens the scan, so
+ * imports may be missed.
+ *
+ * @param {string} p
+ * @param {number} size  the file's size in bytes
+ * @param {number} remaining
+ * @returns {{ tokens: string[], bytes: number, cut: boolean }}
+ */
+function scanImports(p, size, remaining) {
+  const cut = remaining < Math.min(size, SCAN_BYTES);
+  const want = Math.min(size, SCAN_BYTES, remaining);
+  if (want <= 0) return { tokens: [], bytes: 0, cut };
+  const head = readHead(p, want);
+  if (head === null) return { tokens: [], bytes: 0, cut };
+  return { tokens: extractImports(head.text), bytes: head.bytes, cut };
+}
+
+/**
+ * The figures of one root from its `members`, which are in the order the walk reached
+ * them, breadth-first: whether the root exists, its size, the chain total, the largest
+ * file and the findings. The largest file is the first of the biggest, so a tie goes to
+ * the shorter route. It is pure.
+ *
+ * @param {string} rootPath
+ * @param {{ path: string, size: number, mtime: number, hop: number }[]} members
+ * @param {boolean} truncated  whether the walk was cut short
+ */
+function summarizeMembers(rootPath, members, truncated) {
+  let total = 0;
+  let largest = null;
+  let exists = false;
+  let size = 0;
+  let mtime = 0;
+  const findings = [];
+  for (const m of members) {
+    total += m.size;
+    if (m.hop === 0) {
+      exists = true;
+      size = m.size;
+      mtime = m.mtime;
+    }
+    if (largest === null || m.size > largest.size) largest = { path: m.path, size: m.size };
+    if (m.hop >= 1 && m.size > FILE_THRESHOLD_BYTES) {
+      findings.push({ kind: 'file', path: m.path, size: m.size, mtime: m.mtime, hop: m.hop });
+    }
+  }
+  if (total > CHAIN_THRESHOLD_BYTES && largest !== null) {
+    findings.push({ kind: 'chain', path: rootPath, total, mtime, largest, truncated });
+  }
+  return { exists, size, total, largest, findings };
+}
+
+/**
  * Walk one root's import chain breadth-first, so a file reached by two routes is
- * judged at its shortest hop count.
+ * judged at its shortest hop count. This is the only function that changes the run's
+ * context `ctx`.
  */
 function walkRoot(rootPath, ctx) {
   const examined = new Map();
   const seenReal = new Set();
   const members = [];
-  const fileFindings = [];
-  let total = 0;
-  let largest = null;
   let truncated = false;
-  let exists = false;
-  let rootSize = 0;
-  let rootMtime = 0;
   const queue = [{ p: rootPath, hop: 0 }];
   const queued = new Set([rootPath]);
 
@@ -389,32 +439,16 @@ function walkRoot(rootPath, ctx) {
     seenReal.add(real);
     ctx.counted.add(real);
 
-    const mtime = Math.floor(st.mtimeMs / 1000);
-    total += st.size;
-    members.push({ path: p, size: st.size, mtime, hop });
-    if (hop === 0) {
-      exists = true;
-      rootSize = st.size;
-      rootMtime = mtime;
-    }
-    if (largest === null || st.size > largest.size) largest = { path: p, size: st.size };
-    if (hop >= 1 && st.size > FILE_THRESHOLD_BYTES) {
-      fileFindings.push({ kind: 'file', path: p, size: st.size, mtime, hop });
-    }
+    members.push({ path: p, size: st.size, mtime: Math.floor(st.mtimeMs / 1000), hop });
     if (hop >= MAX_HOPS) continue;
 
-    const remaining = MAX_BYTES_READ - ctx.bytesRead;
-    const want = Math.min(st.size, SCAN_BYTES, remaining);
-    if (remaining < Math.min(st.size, SCAN_BYTES)) {
-      // The run's byte budget cuts this scan short: imports may be missed, so the total is a lower bound.
+    const scan = scanImports(p, st.size, MAX_BYTES_READ - ctx.bytesRead);
+    if (scan.cut) {
       truncated = true;
       ctx.truncated = true;
     }
-    if (want <= 0) continue;
-    const head = readHead(p, want);
-    if (head === null) continue;
-    ctx.bytesRead += head.bytes;
-    for (const token of extractImports(head.text)) {
+    ctx.bytesRead += scan.bytes;
+    for (const token of scan.tokens) {
       const next = resolveImport(token, p, ctx.home);
       if (examined.has(next) || queued.has(next)) continue;
       queued.add(next);
@@ -422,28 +456,9 @@ function walkRoot(rootPath, ctx) {
     }
   }
 
-  const findings = [...fileFindings];
-  if (total > CHAIN_THRESHOLD_BYTES && largest !== null) {
-    findings.push({
-      kind: 'chain',
-      path: rootPath,
-      total,
-      mtime: rootMtime,
-      largest,
-      truncated,
-    });
-  }
-  return {
-    path: rootPath,
-    exists,
-    size: rootSize,
-    total,
-    largest,
-    truncated,
-    members,
-    examined: [...examined.entries()].map(([p, flag]) => ({ path: p, flag })),
-    findings,
-  };
+  const { exists, size, total, largest, findings } = summarizeMembers(rootPath, members, truncated);
+  const examinedList = [...examined.entries()].map(([p, flag]) => ({ path: p, flag }));
+  return { path: rootPath, exists, size, total, largest, truncated, examined: examinedList, findings };
 }
 
 // ── Findings: keys and display ─────────────────────────────────────────────────
@@ -546,7 +561,7 @@ function audit(input) {
   const stamp = renderStamp({ roots: input.roots, examined, keys });
   return {
     ok: true,
-    roots: roots.map(({ members: _members, examined: _examined, findings: _findings, ...rest }) => rest),
+    roots: roots.map(({ examined: _examined, findings: _findings, ...rest }) => rest),
     findings,
     examined,
     filesExamined: ctx.counted.size,

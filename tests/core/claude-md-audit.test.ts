@@ -634,6 +634,57 @@ describe('claude-md-audit', () => {
     });
   });
 
+  // ── Walk structure (source guard) ────────────────────────────────────────────
+
+  describe('walkRoot structure', () => {
+    const SOURCE = fs.readFileSync(SCRIPT, 'utf8');
+    const MAX_WALK_LINES = 60;
+
+    /** The 1-based first and last line of `function name(`, which closes at the next `}` in column 0; null when absent. */
+    const functionRange = (source: string, name: string): { first: number; last: number } | null => {
+      const lines = source.split('\n');
+      const first = lines.findIndex(l => l.startsWith(`function ${name}(`));
+      if (first < 0) return null;
+      const close = lines.findIndex((l, i) => i > first && l === '}');
+      return close < 0 ? null : { first: first + 1, last: close + 1 };
+    };
+
+    /** The 1-based lines that write the run's context: an assignment to a `ctx.` member, or a mutating call on one. */
+    const contextWrites = (source: string): number[] =>
+      source.split('\n').flatMap((line, i) => {
+        if (/^\s*(\*|\/\/|\/\*)/.test(line)) return [];
+        const writes = /\bctx\.[A-Za-z_.]*\s*(?:[-+*/|&]?=(?!=)|\+\+|--)|\bctx\.[A-Za-z_.]*\.(?:add|set|push|delete|clear)\(/.test(line);
+        return writes ? [i + 1] : [];
+      });
+
+    it('walkRoot is at most 60 lines', () => {
+      const walk = functionRange(SOURCE, 'walkRoot');
+      expect(walk).not.toBeNull();
+      expect(walk!.last - walk!.first + 1).toBeLessThanOrEqual(MAX_WALK_LINES);
+      const probe = `function walkRoot(a, ctx) {\n${'  work();\n'.repeat(MAX_WALK_LINES)}}\n`;
+      const long = functionRange(probe, 'walkRoot')!;
+      expect(long.last - long.first + 1).toBeGreaterThan(MAX_WALK_LINES);
+    });
+
+    it('only walkRoot writes the context', () => {
+      const walk = functionRange(SOURCE, 'walkRoot')!;
+      const writes = contextWrites(SOURCE);
+      const inside = writes.filter(n => n >= walk.first && n <= walk.last);
+      expect(inside.length, 'the walk does write the context').toBeGreaterThan(0);
+      expect(writes.filter(n => n < walk.first || n > walk.last)).toEqual([]);
+      const probe = 'function walkRoot(a, ctx) {\n  ctx.bytesRead += 1;\n}\nfunction other(ctx) {\n  ctx.counted.add(x);\n  ctx.truncated = true;\n  if (ctx.truncated === false) return ctx.home;\n}\n';
+      const probeWalk = functionRange(probe, 'walkRoot')!;
+      expect(contextWrites(probe).filter(n => n < probeWalk.first || n > probeWalk.last)).toEqual([5, 6]);
+    });
+
+    it('audit() has no members list to drop, and a root in the result carries exactly its own figures', () => {
+      expect(SOURCE).not.toMatch(/members:\s*_members/);
+      write('CLAUDE.md', '@a.md\n');
+      write('a.md', filler(10));
+      expect(Object.keys(run().roots[0])).toEqual(['path', 'exists', 'size', 'total', 'largest', 'truncated']);
+    });
+  });
+
   // ── Read-only (AC-419) ───────────────────────────────────────────────────────
 
   describe('the audit writes nothing (AC-419)', () => {
