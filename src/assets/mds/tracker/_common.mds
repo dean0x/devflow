@@ -57,7 +57,9 @@ names its key). `handoff_values` renders the canonical
 `pr_link_resolution` is `ensure-pr-ready`'s step 4b after its first sentence, written once so the
 three providers take the link line from the same source and refuse it in the same words. The
 first sentence stays in each provider module, because it names that provider's line and because
-the module tests read a provider's steps from its own source. The optional note is the provider's own.
+the module tests read a provider's steps from its own source. The optional note is the provider's own and
+covers closing effects only: the step renders nothing, because the Handoff Values line reaches it
+already rendered.
 
 The four ref pre-flight defines (`bare_number_rule` and the three heads below) are the
 TOOL-CALL providers' only, and they are here rather than in `_mcp.mds` — where

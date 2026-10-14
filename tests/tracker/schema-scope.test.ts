@@ -1757,13 +1757,15 @@ export function collectMissingWriterGate(validator: string): string[] {
 describe('the read site carries the `## Reference Rendering` gate it names (security-02)', () => {
   const RENDERING_SECTION = '`## Reference Rendering`';
 
-  it('non-vacuity: the render sites are the two token-substituting ops, per tool-call provider', () => {
+  it('non-vacuity: the one render site is the token-substituting op, per tool-call provider', () => {
     const sites = renderSiteReferences().map(e => e.path).sort();
-    // Named, not counted: a count is satisfied by any four files, and the claim is
-    // about WHICH operations interpolate the token. Derived from the registry's
+    // Named, not counted: a count is satisfied by any two files, and the claim is
+    // about WHICH operation interpolates the token. Derived from the registry's
     // provider list so a provider registered later joins by construction.
+    // `ensure-pr-ready` is not a render site: its step 4b publishes the Handoff Values
+    // line as given and renders nothing, so it carries neither the gate nor a discard record.
     const expected = (MCP_BACKED_PROVIDER_SUBDIRS as readonly string[])
-      .flatMap(subdir => [`${subdir}/create-release.md`, `${subdir}/ensure-pr-ready.md`])
+      .map(subdir => `${subdir}/create-release.md`)
       .map(rel => rel.split('/').join(path.sep))
       .sort();
     expect(expected.length, 'no tool-call provider is registered').toBeGreaterThan(0);
@@ -1771,7 +1773,8 @@ describe('the read site carries the `## Reference Rendering` gate it names (secu
       sites,
       'the set of references that record a `### Substitutions` discard changed. An operation ' +
       'that renders the token without recording a discard is the silent half of this gate; one ' +
-      'that dropped out of the set is a render site nothing below reads',
+      'that dropped out of the set is a render site nothing below reads; `ensure-pr-ready` ' +
+      'joining it means step 4b renders again, which the shared step 4b forbids',
     ).toEqual(expected);
   });
 

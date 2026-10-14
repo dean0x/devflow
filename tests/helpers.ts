@@ -2049,12 +2049,14 @@ export const TOOL_CALL_MECHANICS_CLAIMS: readonly ProviderMechanicsClaim[] = [
       'an inferred type is a value the tracker never enumerated, so the create call fails at the ' +
       'far end or, worse, succeeds against a type that means something else in that project',
   },
-  // §14.3's discarded-token rule, as THREE token rows over the two operations
-  // that render a reference — see the token-vs-sentence note above the table.
+  // §14.3's discarded-token rule, as THREE token rows over the one operation
+  // that renders a reference — see the token-vs-sentence note above the table.
+  // `ensure-pr-ready` is not one: its step 4b publishes the Handoff Values line as
+  // given and renders nothing, so it owes neither the default nor the record.
   {
     label: 'the fallback renders the reference itself',
     criterion: '§14.3',
-    ops: ['ensure-pr-ready', 'create-release'],
+    ops: ['create-release'],
     pattern: v => new RegExp(`[Rr]ender the ${v.refNoun}\\b`),
     why:
       'the DEFAULT half. Without it a discarded token leaves the operation with no instruction for ' +
@@ -2063,7 +2065,7 @@ export const TOOL_CALL_MECHANICS_CLAIMS: readonly ProviderMechanicsClaim[] = [
   {
     label: 'the fallback reference goes on its own line',
     criterion: '§14.3',
-    ops: ['ensure-pr-ready', 'create-release'],
+    ops: ['create-release'],
     pattern: () => /on its own line/,
     why:
       'the documented shape of that default. A reference folded into surrounding prose is a ' +
@@ -2073,7 +2075,7 @@ export const TOOL_CALL_MECHANICS_CLAIMS: readonly ProviderMechanicsClaim[] = [
   {
     label: 'the discard is recorded under `### Substitutions`',
     criterion: '§14.3',
-    ops: ['ensure-pr-ready', 'create-release'],
+    ops: ['create-release'],
     pattern: () => /[Rr]ecord the discard under `### Substitutions`/,
     why:
       'the RECORD half — both halves or neither. A default with no record is a silent substitution: ' +

@@ -448,18 +448,14 @@ Load when the resolved tracker provider is `linear` and the operation is `post-w
 
 Load when the resolved tracker provider is `linear` and the operation is `ensure-pr-ready`.
 
-**Mechanics held here:** the whole operation. Steps 1–4a, the PR-host half of step 4b and steps 4c–6 are PR-host mechanics, the same under every provider (written once in `_ops.mds`): devflow deliberately keeps pull requests on their existing host while the tracker is this one, so nothing about the PR surface is provider-dependent. Step 4b takes its link line and refuses it the same way under every provider; only its note on rendering a reference is this provider's.
+**Mechanics held here:** the whole operation. Steps 1–4a, the PR-host half of step 4b and steps 4c–6 are PR-host mechanics, the same under every provider (written once in `_ops.mds`): devflow deliberately keeps pull requests on their existing host while the tracker is this one, so nothing about the PR surface is provider-dependent. Step 4b takes its link line and refuses it the same way under every provider; only its note on closing effects is this provider's.
 
 ### Process
 
 {{opsteps.ensure_pr_ready_steps_to_4a()}}
 
-4b. (ALWAYS-ON) Ensure the PR body contains a `## Related Issues` section with the `Refs {REF}-{n}` line of this branch's issue. {{common.pr_link_resolution(" `## Reference Rendering` names the form of the line's token; the check above still decides what is published. **This provider's magic words are the SERVER's behaviour, not a capability this operation controls.** A reference rendered in a PR body may or may not transition or close the issue depending on how the workspace is configured, and on how the PR host and the tracker are connected — so the rendered text **never claims an effect**: closing is a `## Transitions` matter, and `gather-release-evidence` reports the absence of a closing-reference capability as `TRACEABILITY: DEGRADED (unsupported by linear)`. Promising an effect that may not happen is worse than rendering a plain reference that always does. `## Reference Rendering` absent, or its token discarded by the gate below ⇒ render the reference as the documented default below, on its own line under the section heading, and record the discard under `### Substitutions`.")}}
+4b. (ALWAYS-ON) Ensure the PR body contains a `## Related Issues` section with the `{{pr_link_default()}}` line of this branch's issue. {{common.pr_link_resolution(" **This provider's magic words are the SERVER's behaviour, not a capability this operation controls.** A reference rendered in a PR body may or may not transition or close the issue depending on how the workspace is configured, and on how the PR host and the tracker are connected — so the rendered text **never claims an effect**: closing is a `## Transitions` matter, and `gather-release-evidence` reports the absence of a closing-reference capability as `TRACEABILITY: DEGRADED (unsupported by linear)`. Promising an effect that may not happen is worse than rendering a plain reference that always does.")}}
 {{opsteps.ensure_pr_ready_steps_from_4c()}}
-
-{{mcp.reference_rendering_gate()}}
-
-**This provider's documented default is `{{pr_link_default()}}`.** It is stated here because it is a provider fact, and the gate above is what routes to it: a section that is absent, a file that is absent and a token the gate discarded all render this, and none of them is a degradation.
 
 {{opsteps.ensure_pr_ready_pr_edit()}}
 @end
