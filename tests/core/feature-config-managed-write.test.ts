@@ -111,6 +111,25 @@ describe('mergeManagedConfig: the managed keys come from init, every other key f
     expect(merged).toEqual({ ...MANAGED, features });
   });
 
+  it.each([
+    ['a valid level', 'lean'],
+    ['a malformed level', 'Lean'],
+    ['null', null],
+    ['an empty string', ''],
+  ])('carries a hand-written personal `gateLevel` that is %s verbatim — it is not a managed key', (_label, value) => {
+    const merged = mergeManagedConfig({ reviewPublication: 'full', gateLevel: value }, MANAGED);
+
+    expect(Object.prototype.hasOwnProperty.call(merged, 'gateLevel')).toBe(true);
+    expect(merged.gateLevel).toBe(value);
+    expect(merged.reviewPublication).toBe(MANAGED.reviewPublication);
+  });
+
+  it('never manufactures a `gateLevel` key the file does not hold', () => {
+    const merged = mergeManagedConfig({ reviewPublication: 'full' }, MANAGED);
+
+    expect(Object.prototype.hasOwnProperty.call(merged, 'gateLevel')).toBe(false);
+  });
+
   it('drops the retired keys devflow itself once wrote — the old per-repo feature switches included', () => {
     const merged = mergeManagedConfig({ ...RETIRED, teamNote: 'kept' }, MANAGED);
 
@@ -166,6 +185,21 @@ describe('writeManagedConfig: the read-modify-write through the file', () => {
     await writeManagedConfig(tmpDir, MANAGED);
 
     expect(readRaw()).toEqual({ ...body, ...MANAGED });
+  });
+
+  it.each([
+    ['a valid level', 'full'],
+    ['a malformed level', 'Lean'],
+    ['null', null],
+  ])('★ keeps a hand-written personal `gateLevel` that is %s on disk through the managed write', async (_label, value) => {
+    const body = { reviewPublication: 'full', gateLevel: value, tracker: 'jira' };
+    seedConfig(JSON.stringify(body));
+
+    await writeManagedConfig(tmpDir, MANAGED);
+
+    const stored = readRaw();
+    expect(Object.prototype.hasOwnProperty.call(stored, 'gateLevel')).toBe(true);
+    expect(stored).toEqual({ ...body, ...MANAGED });
   });
 
   it('★ drops a stale per-repo feature switch an earlier init or toggle wrote', async () => {

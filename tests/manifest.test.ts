@@ -1400,6 +1400,118 @@ describe('tracker feature field', () => {
   });
 });
 
+// ── gate level: the raw machine value survives every read and write ───────────
+//
+// `features.gateLevel` is the machine default level. readManifest never narrows it:
+// a present value (a valid level, a malformed one, `null`) is carried as written,
+// and an absent key stays absent. Only the total fold in the settings resolver
+// reads it. A rebuilt record that dropped the key would lower a stored `full`
+// to the default with no message.
+
+describe('gate level feature field', () => {
+  let tmpDir: string;
+
+  const baseFeatures = {
+    ambient: true, memory: true, hud: false, knowledge: false,
+    learning: false, rules: true, flags: [], proxy: false,
+  };
+
+  const withFeatures = (extra: Record<string, unknown>) => ({
+    version: '2.0.0',
+    plugins: ['devflow-core-skills'],
+    scope: 'user',
+    features: { ...baseFeatures, ...extra },
+    installedAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  });
+
+  const writeRaw = (body: unknown) =>
+    fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(body), 'utf-8');
+
+  const storedFeatures = async (): Promise<Record<string, unknown>> =>
+    (JSON.parse(await fs.readFile(path.join(tmpDir, 'manifest.json'), 'utf-8')) as { features: Record<string, unknown> }).features;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-manifest-gate-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('carries every present value as written, malformed and null ones included', async () => {
+    const PRESENT: Array<[label: string, value: unknown]> = [
+      ['full', 'full'],
+      ['standard', 'standard'],
+      ['lean', 'lean'],
+      ['a capitalised word', 'Lean'],
+      ['a trailing space', 'lean '],
+      ['an empty string', ''],
+      ['null', null],
+      ['false', false],
+      ['zero', 0],
+      ['a number', 5],
+      ['an object', { level: 'lean' }],
+    ];
+    for (const [label, value] of PRESENT) {
+      await writeRaw(withFeatures({ gateLevel: value }));
+      const result = await readManifest(tmpDir);
+      expect(result, `expected ${label} to parse non-null`).not.toBeNull();
+      expect(Object.hasOwn(result!.features, 'gateLevel'), `expected ${label} to be present`).toBe(true);
+      expect(result!.features.gateLevel, `expected ${label} to be carried`).toEqual(value);
+    }
+  });
+
+  it('an absent key stays absent', async () => {
+    await writeRaw(withFeatures({}));
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(Object.hasOwn(result!.features, 'gateLevel')).toBe(false);
+  });
+
+  it('a malformed value is not healed when another defect owes a heal write', async () => {
+    // features.kb is a legacy key, so this read heal-writes the file.
+    await writeRaw(withFeatures({ kb: true, gateLevel: 'Lean' }));
+    const result = await readManifest(tmpDir);
+    expect(result!.features.gateLevel).toBe('Lean');
+    const stored = await storedFeatures();
+    expect(stored.kb).toBeUndefined();
+    expect(stored.gateLevel).toBe('Lean');
+  });
+
+  it('an absent key is not written by a heal write', async () => {
+    await writeRaw(withFeatures({ kb: true }));
+    await readManifest(tmpDir);
+    const stored = await storedFeatures();
+    expect(stored.kb).toBeUndefined();
+    expect(Object.hasOwn(stored, 'gateLevel')).toBe(false);
+  });
+
+  it('round-trips through writeManifest and readManifest, null included', async () => {
+    for (const value of ['lean', 'Lean', null]) {
+      const data: ManifestData = makeManifest({
+        features: { ...makeManifest().features, gateLevel: value },
+      });
+      await writeManifest(tmpDir, data);
+      expect((await storedFeatures()).gateLevel).toBe(value);
+      expect((await readManifest(tmpDir))!.features.gateLevel).toBe(value);
+    }
+  });
+
+  it('syncManifestFeature on another key keeps the stored value', async () => {
+    await writeRaw(withFeatures({ gateLevel: 'Lean' }));
+    await syncManifestFeature(tmpDir, 'hud', true);
+    const stored = await storedFeatures();
+    expect(stored.hud).toBe(true);
+    expect(stored.gateLevel).toBe('Lean');
+  });
+
+  it('a manifest the reader rejects is still rejected, whatever the level', async () => {
+    await writeRaw({ ...withFeatures({ gateLevel: 'lean' }), plugins: 'not-a-list' });
+    expect(await readManifest(tmpDir)).toBeNull();
+  });
+});
+
 // ── Phase 2: FlagsRecord heal round-trip guards ───────────────────────────────
 
 describe('FlagsRecord heal round-trip (Phase 2)', () => {

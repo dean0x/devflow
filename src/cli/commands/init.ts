@@ -1194,6 +1194,11 @@ export const initCommand = new Command('init')
     // alone, so init carries the prior value through untouched: it stamps the installed agents
     // with it and writes it back to the manifest. Absent stays absent (the default list).
     const trackerServers = seed.features.tracker.servers;
+    // The machine gate level (features.gateLevel) is set by `devflow gates --set` alone, so init
+    // carries the prior value through raw: no default, no narrowing, a stored `null` kept. The
+    // seed holds `undefined` only for an absent key or a --reset seed, and the full manifest
+    // write below then leaves the key out.
+    const gateLevel = seed.features.gateLevel;
     let enabledFlags: FlagsRecord = { ...seed.flags };
     // viewModeExplicit: true when --reset is passed; signals resolveFinalViewMode to let the
     // seed-time view-mode win over an externally-set value in settings.json.
@@ -2688,6 +2693,8 @@ export const initCommand = new Command('init')
         // through parseTrackerId (CLI), the typed wizard select, or the seed, which
         // itself came through normalizeTrackerFeature on read.
         tracker: { provider: trackerProvider, ...(trackerServers !== undefined ? { servers: trackerServers } : {}) },
+        // The prior machine gate level, raw (see where `gateLevel` is read above).
+        ...(gateLevel !== undefined ? { gateLevel } : {}),
       },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,

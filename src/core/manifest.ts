@@ -103,6 +103,18 @@ export interface ManifestData {
      * install" and lose the user's seeded state on the next re-init.
      */
     tracker: TrackerFeatureState;
+    /**
+     * The machine default gate level, exactly as stored. Typed `unknown` on purpose:
+     * this reader never narrows it, because a typo must stay on disk and read as the
+     * strictest level rather than heal to the default. Only the total fold in the
+     * settings resolver (`foldGateLevel`) and `src/core/gate-level.ts` read its
+     * meaning. Optional: {@link readManifest} carries the key only when the stored
+     * file has it, and carries a stored `null` as `null`. An absent key stays absent.
+     *
+     * NEVER add `gateLevel` to the hard-null validation set or the heal set: every
+     * existing install lacks the key, and a heal would lower a stored value.
+     */
+    gateLevel?: unknown;
   };
   installedAt: string;
   updatedAt: string;
@@ -310,6 +322,9 @@ export async function readManifest(
         // self-heal behaviour, and a different condition from a per-repo config
         // value outside the domain (which does emit `unknown tracker provider`).
         tracker: normalizeTrackerFeature(features.tracker, opts?.onWarning),
+        // The machine gate level, raw (see the field's doc comment): kept when the
+        // key is present, a stored `null` included, and left out when it is absent.
+        ...(Object.hasOwn(features, 'gateLevel') ? { gateLevel: features.gateLevel } : {}),
       },
       installedAt: data.installedAt as string,
       updatedAt: data.updatedAt as string,
