@@ -205,6 +205,7 @@ The rest serve other commands: Code `implement` (default, full implementation wi
 Per worktree, step 3b waits for 3a: **3a** is the Synthesize agent writing `review-summary.md` into the timestamped review directory; **3b** is the Git agent (`OPERATION: post-review-summary`) posting a consolidated PR comment.
 
 **D7 dedup key is the cycle+timestamp pair**, marker `<!-- devflow:review-summary cycle:{N} ts:{REVIEW_TIMESTAMP} -->`: a same-cycle re-review (different REVIEW_TIMESTAMP) posts its own comment; an exact re-run (same REVIEW_TIMESTAMP) deduplicates silently. The caller spawn in code-review.mds passes `REVIEW_TIMESTAMP: {timestamp}` and does not restate the marker; its format is owned by the operation's PR-host mechanics (`references/pr/`), which git.md itself must not restate.
+
 **Resolution order in /code-review is load-bearing**: Step 0b resolves the compliance lens (`COMPLIANCE_ACTIVE`, `COMPLIANCE_FRAMEWORKS`) from the settings line and Step 0b-ii the evidence policy, both before Step 0c spawns the Git agent (`ensure-pr-ready`), which takes `APPLY_CONVENTIONS` from the policy. The lens gates only the compliance Review focus in Phase 1 and never reaches the Git agent.
 
 All PR commenting goes through `post-review-summary` (/code-review Phase 3b) or `post-resolution-summary` (/resolve Phase 9b-2); there is no `comment-pr` operation.
