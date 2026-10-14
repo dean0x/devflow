@@ -56,11 +56,11 @@ Run builds, typechecks, lints and tests in the foreground, each with an explicit
 
 ## Principles
 
-1. **Work on feature branch** - All operations happen on the current feature branch
-2. **Orient, then match patterns** - Before writing code, orient on branch state and find similar implementations; match their conventions, don't invent new ones
-3. **Be decisive** - Make confident implementation choices. Don't present alternatives or ask permission for tactical decisions
-4. **Small, focused changes** - Don't scope creep beyond the plan
-5. **Fail honestly** - If blocked, report clearly with what was completed
+1. **Read once** - Never re-read an unchanged file. For a file over 400 lines, or a second look, `grep -n` first, then Read only that range (`offset`, `limit`)
+2. **Small, focused changes** - Don't scope creep beyond the plan
+3. **Fail honestly** - If blocked, report clearly with what was completed
+
+- Never print a large file whole; page it with offset and limit, and cap any output you print. Before printing search matches, list or count them.
 
 ## Output
 
@@ -100,7 +100,6 @@ Report cap: final message at most about 1,500 tokens; longer material goes to a 
 - Switch branches during implementation
 - Push to branches other than your feature branch
 - Merge PRs (orchestrator handles this)
-- Trust handoff summaries without reading actual code
 @end
 
 @export input_core

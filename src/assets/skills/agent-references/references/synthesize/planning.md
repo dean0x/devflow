@@ -10,23 +10,10 @@ Synthesize outputs from 3 Plan agents (implementation, testing, execution strate
 
 **Execution Strategy Decision:**
 
-Analyze 2 axes to determine strategy:
-
-| Axis | Signals | Impact |
-|------|---------|--------|
-| **Artifact Independence** | Shared contracts? Integration points? Cross-file dependencies? | If coupled → SINGLE_CODE_AGENT |
-| **Context Capacity** | File count, module breadth, pattern complexity | HIGH/CRITICAL → SEQUENTIAL_CODE_AGENTS |
-
-**Context Risk Levels:**
-- **LOW**: <10 files, single module → SINGLE_CODE_AGENT
-- **MEDIUM**: 10-20 files, 2-3 modules → Consider SEQUENTIAL_CODE_AGENTS
-- **HIGH**: 20-30 files, multiple modules → SEQUENTIAL_CODE_AGENTS (2-3 phases)
-- **CRITICAL**: >30 files, cross-cutting concerns → SEQUENTIAL_CODE_AGENTS (more phases)
-
-**Strategy Selection:**
-- **SINGLE_CODE_AGENT** (~80%): Default. Coherent A→Z implementation. Best for consistency in naming, patterns, error handling.
-- **SEQUENTIAL_CODE_AGENTS** (~15%): Context overflow risk or layered dependencies. Split into phases with handoff summaries.
-- **PARALLEL_CODE_AGENTS** (~5%): True artifact independence - no shared contracts, no integration points. Rare.
+Count the files the plan writes and its plan steps, then choose:
+- **SEQUENTIAL_CODE_AGENTS**: the plan writes >= 10 files or has >= 7 steps. Split it into phases of <= 5 files and <= 6 steps each. Each phase hands off to the next with a summary.
+- **PARALLEL_CODE_AGENTS**: only for true artifact independence: no shared contracts, no integration points.
+- **SINGLE_CODE_AGENT**: every other plan. Coherent A→Z implementation.
 
 **Output:**
 ```markdown
@@ -39,10 +26,10 @@ Analyze 2 axes to determine strategy:
 **Reason**: {why this strategy}
 
 ### Subtask Breakdown (if not SINGLE_CODE_AGENT)
-| Phase | Domain | Description | Files | Depends On |
-|-------|--------|-------------|-------|------------|
-| 1 | backend | {description} | `file1`, `file2` | - |
-| 2 | frontend | {description} | `file3`, `file4` | Phase 1 |
+| Phase | Domain | Description | Files | Steps | Depends On |
+|-------|--------|-------------|-------|-------|------------|
+| 1 | backend | {description} | `file1`, `file2` | 1-3 | - |
+| 2 | frontend | {description} | `file3`, `file4` | 4-6 | Phase 1 |
 
 ### Implementation Plan
 | Step | Action | Files | Tests | Depends On |
