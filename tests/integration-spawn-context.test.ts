@@ -13,7 +13,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { spawnSync } from 'child_process';
 import { randomUUID } from 'crypto';
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { ROOT, requireBuiltCli, sandboxEnv } from './helpers.js';
@@ -240,10 +240,30 @@ describe('disposeSpawnContext', () => {
   // would then remove nothing real: `rmSync` with `force` does nothing for an absent path.
   const absent = (parent: string): string => path.join(parent, `devflow-dispose-probe-${randomUUID()}`);
 
+  // A link the symlink row makes. The guard refuses it, so nothing removes it: the test does.
+  const links: string[] = [];
+  afterEach(() => {
+    for (const link of links.splice(0)) rmSync(link, { force: true });
+  });
+
+  /**
+   * A link whose own name lies under the temp root and whose target does not: the parent of the
+   * temp root. A guard that does not resolve links reads the name and lets the path through.
+   * `rmSync` does not follow a link, so a missing guard removes only the link.
+   */
+  function linkOutsideTempRoot(): string {
+    const link = absent(realTmp);
+    symlinkSync(path.dirname(realTmp), link);
+    links.push(link);
+    return link;
+  }
+
   const REFUSED: ReadonlyArray<readonly [string, () => string]> = [
     ['a path outside the temp root', () => absent(path.parse(realTmp).root)],
     ['a sibling that shares the temp-root prefix', () => `${realTmp}-evil-${randomUUID()}`],
-    ['a path that climbs out of the temp root', () => absent(path.join(realTmp, '..'))],
+    // Built as text: `path.join` would fold the `..` away before the guard saw it.
+    ['a path that climbs out of the temp root', () => `${realTmp}${path.sep}..${path.sep}devflow-dispose-probe-${randomUUID()}`],
+    ['a link under the temp root that points outside it', linkOutsideTempRoot],
   ];
 
   it('removes both directories of a real context', () => {
