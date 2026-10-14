@@ -2,15 +2,15 @@
  * code-read-economy — the Code, Fix and Refactor agents read a file once, keep command output small,
  * and a long plan splits into sequential phases (#452).
  *
- * Decisions recorded here:
+ * Decisions recorded here (the last three are the #453 cache-hygiene outcomes):
  *
  *  - D-SEQ-SPLIT        A plan that writes 10 or more files, or has 7 or more steps, runs as
  *                       SEQUENTIAL_CODE_AGENTS; each phase has at most 5 files and at most 6 steps.
  *                       Every other plan is one Code agent, and a run with no plan document is always
  *                       one Code agent because it has no Subtask Breakdown to split. Evidence (R-452a):
- *                       the Code bin of 100 or more turns is 59.9% of Code ce, and the p90 peak context
- *                       is 394,630. The unmeasured percent labels and the word "Consider" are gone from
- *                       the planning reference.
+ *                       the Code bin of 100 or more turns is 59.9% of Code cost-equivalent (ce), and the
+ *                       p90 peak context is 394,630. The unmeasured percent labels and the word
+ *                       "Consider" are gone from the planning reference.
  *  - D-CODE-READ-ONCE   A Code-family agent never re-reads an unchanged file. For a file over 400 lines,
  *                       or for a second look, it greps with line numbers first and reads only that
  *                       range. Evidence (R-452d): the re-read share is 31.6%, and that share is a floor.
@@ -19,6 +19,21 @@
  *                       before printing them. Evidence (R-452c): grep and find are 37.9% and cat, sed
  *                       and head are 37.8%, a tie for the top class, so one line covers both. The line
  *                       is the text in `validate.md`, so there is one wording across the agents.
+ *  - D-NO-TURN-END-WAIT No Monitor denial and no new body line. Evidence (R-453a = A): 0 non-TTL
+ *                       cache-miss ce in 45.10M subagent ce (0.0%), and no agent type had 2 or more
+ *                       events across 1,756 subagent requests.
+ *  - D-SPAWN-ORDER-NO-CACHE
+ *                       The spawn field order does not change. Evidence (R-453b = B): the staggered
+ *                       Code first turn read 18,889 tokens, equal to the static prefix (n = 1), and 5
+ *                       of 5 wave-A staggered first turns read the modal 24,534. The cache matches
+ *                       whole blocks, so a field reorder buys nothing. R-453c: no probe.
+ *  - D-CODE-FULL-SUITE-BRIEF
+ *                       No product lever; a brief gives Code named test files only. Evidence: 3 Code
+ *                       spawns ran the full test suite in the foreground for 337 to 431 s, past the
+ *                       5-minute cache TTL. That is about 1.35M ce, 6.4% of Code ce. 2 of the 3 came
+ *                       from a hand-written orchestrator brief that asked for the full suite. The
+ *                       /implement and /resolve spawn prompts never ask for it. The Code bodies
+ *                       already ban the full suite, and Validate owns it.
  *
  * The bodies sit outside the shared `## Running commands` block: `running-commands-parity.test.ts`
  * owns that block's bytes, and nothing here may enter it. Each arm runs through a named collector, and
@@ -32,6 +47,8 @@
  *   audit's and this file only holds them still.
  * - The split rule is checked as wording in the planning reference and the compiled `/implement`. The
  *   planner that counts files and steps is a model, so no test proves a given plan splits correctly.
+ * - The three #453 records add no product lever, so they have no text in any body. The test holds only
+ *   that this header names each record with one key number; the numbers come from the audit.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -39,6 +56,7 @@ import { describe, it, expect } from 'vitest'
 import { CORE_RULES_DIGEST } from '../fixtures/agent-config.js'
 import {
   collectUnfencedH2,
+  loadFile,
   readAgentReference,
   requireDistFile,
   resolveAgentSource,
@@ -53,6 +71,14 @@ const READ_ONCE_MARKER = '**Read once**'
 const READ_ONCE_FRAGMENTS = ['Never re-read an unchanged file', '`grep -n`', '`offset`', '`limit`'] as const
 const SPLIT_FRAGMENTS = ['>= 10 files', '>= 7 steps', '<= 5 files', '<= 6 steps'] as const
 const TRIGGER_FRAGMENTS = ['>= 10 files', '>= 7 steps'] as const
+
+/** The #453 records this header must name, each with one key number of its evidence. */
+const CACHE_HYGIENE_RECORDS: ReadonlyArray<readonly [string, string]> = [
+  ['D-NO-TURN-END-WAIT', '0.0%'],
+  ['D-SPAWN-ORDER-NO-CACHE', '18,889'],
+  ['D-CODE-FULL-SUITE-BRIEF', '6.4%'],
+]
+const CE_EXPANSION = 'cost-equivalent (ce)'
 
 // ---------------------------------------------------------------------------
 // The corpus
@@ -170,6 +196,53 @@ export function collectNoPlanDefects(command: string): string[] {
     if (!rows[0].includes(fragment)) out.push(`the SEQUENTIAL_CODE_AGENTS strategy row does not state "${fragment}"`)
   }
   if (lines.some(l => /\| Frequency \|/.test(l))) out.push('the strategy table still has a Frequency column')
+  return out
+}
+
+/** This file's own header comment: everything before the first end of a block comment. */
+function ownHeader(): string {
+  const source = loadFile('tests/guards/code-read-economy.test.ts')
+  const end = source.indexOf('*/')
+  if (end === -1) throw new Error('code-read-economy.test.ts has no header comment')
+  return source.slice(0, end)
+}
+
+/** Header list entries by record name. An entry is its bullet line plus the lines up to the next bullet or blank line. */
+function headerEntries(header: string): Map<string, string[]> {
+  const entries = new Map<string, string[]>()
+  let name: string | null = null
+  let lines: string[] = []
+  const flush = (): void => {
+    if (name !== null) entries.set(name, [...(entries.get(name) ?? []), lines.join('\n')])
+    name = null
+    lines = []
+  }
+  for (const line of header.split('\n')) {
+    const bullet = /^ \*  - (D-[A-Z0-9-]+)/.exec(line)
+    if (bullet !== null) {
+      flush()
+      name = bullet[1]
+    } else if (/^ \*\s*$/.test(line)) {
+      flush()
+    }
+    if (name !== null) lines.push(line)
+  }
+  flush()
+  return entries
+}
+
+/** Named collector (#453 records): how a header differs from "each record named once, with its key number, and ce spelled out first". */
+export function collectRecordDefects(header: string, records: ReadonlyArray<readonly [string, string]>): string[] {
+  const out: string[] = []
+  const entries = headerEntries(header)
+  for (const [name, number] of records) {
+    const found = entries.get(name) ?? []
+    if (found.length !== 1) out.push(`${found.length} header entries for ${name}, expected 1`)
+    else if (!found[0].includes(number)) out.push(`${name} does not state "${number}"`)
+  }
+  const spelled = offsetsOf(header, CE_EXPANSION)
+  if (spelled.length !== 1) out.push(`${spelled.length} places spell out "${CE_EXPANSION}", expected 1`)
+  else if (header.search(/\bce\b/) < spelled[0]) out.push('the header uses "ce" before it spells it out')
   return out
 }
 
@@ -326,5 +399,34 @@ describe('a long plan splits into sequential phases and a run with no plan is on
       '0 no-plan SINGLE_CODE_AGENT rule lines, expected 1',
       '0 SEQUENTIAL_CODE_AGENTS strategy rows, expected 1',
     ])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The #453 cache-hygiene records
+// ---------------------------------------------------------------------------
+
+describe('the #453 cache-hygiene outcomes are recorded in this header (D-NO-TURN-END-WAIT, D-SPAWN-ORDER-NO-CACHE, D-CODE-FULL-SUITE-BRIEF)', () => {
+  it('the header names all three records, each with a key number, and spells out ce before it uses it', () => {
+    const header = ownHeader()
+    expect(header, 'not the header comment').toContain('Decisions recorded here')
+    expect(collectRecordDefects(header, CACHE_HYGIENE_RECORDS)).toEqual([])
+
+    const renamed = header.replace('- D-SPAWN-ORDER-NO-CACHE', '- D-SPAWN-ORDER')
+    expect(renamed, 'the seed must land').not.toBe(header)
+    expect(collectRecordDefects(renamed, CACHE_HYGIENE_RECORDS)).toEqual(['0 header entries for D-SPAWN-ORDER-NO-CACHE, expected 1'])
+
+    const noNumber = header.replace('18,889', '18,000')
+    expect(noNumber, 'the seed must land').not.toBe(header)
+    expect(collectRecordDefects(noNumber, CACHE_HYGIENE_RECORDS)).toEqual(['D-SPAWN-ORDER-NO-CACHE does not state "18,889"'])
+
+    const duplicate = `${header}\n *  - D-NO-TURN-END-WAIT 0.0% again\n`
+    expect(collectRecordDefects(duplicate, CACHE_HYGIENE_RECORDS)).toEqual(['2 header entries for D-NO-TURN-END-WAIT, expected 1'])
+
+    const unspelled = header.replace(CE_EXPANSION, 'cost-equivalent')
+    expect(unspelled, 'the seed must land').not.toBe(header)
+    expect(collectRecordDefects(unspelled, CACHE_HYGIENE_RECORDS)).toEqual([`0 places spell out "${CE_EXPANSION}", expected 1`])
+
+    expect(collectRecordDefects(`ce ${header}`, CACHE_HYGIENE_RECORDS)).toEqual(['the header uses "ce" before it spells it out'])
   })
 })
