@@ -1137,6 +1137,15 @@ describe('#421, #452: every spawn after Phase 2 gets the branch diff, not the Co
     expect(collectFilesChangedDefects(old)).toEqual([`${label} Requires does not name BASE_BRANCH`])
   })
 
+  it.each(BRANCH_DIFF_SPAWNS.map(([heading, label]) => [label, heading] as const))('known-bad probe: a Requires line that names both BASE_BRANCH and the Code agent\'s FILES_CHANGED is reported at %s', (label, heading) => {
+    const md = implementMd()
+    const section = phaseSection(md, heading)!
+    const requires = section.split('\n').find(l => l.startsWith('**Requires:**'))!
+    const old = md.replace(section, () => section.replace(requires, () => `${requires}, FILES_CHANGED`))
+    expect(old, 'the seed must land').not.toBe(md)
+    expect(collectFilesChangedDefects(old)).toEqual([`${label} Requires still names the Code agent's FILES_CHANGED`])
+  })
+
   it('known-bad probes: a branch diff defined late, one that lists deleted paths and one lost are each reported', () => {
     const md = implementMd()
     expect(collectFilesChangedDefects(md.replace(BRANCH_DIFF_COMMAND, 'x') + `\n${BRANCH_DIFF_COMMAND}\n`)).toEqual(['the branch diff is used before it is defined'])
@@ -1151,9 +1160,11 @@ describe('#421, #452: every spawn after Phase 2 gets the branch diff, not the Co
 })
 
 /** The one pattern a base ref must match before it reaches a shell line. */
-const BASE_BRANCH_PATTERN = '^[A-Za-z0-9._/-]{1,200}$'
+const BASE_BRANCH_PATTERN = '^[A-Za-z0-9._/+@,#-]{1,200}$'
 /** A branch name that `git check-ref-format --branch` accepts and a shell would run. */
 const HOSTILE_BASE = 'a$(touch$IFS/tmp/x)|sh;b'
+/** How the re-validation step hands the guarded value on: Phases 3-7 run this from `BASE_BRANCH`. */
+const REVALIDATE_BRANCH_DIFF = 'Phases 3-7 run `{branch_diff}`'
 
 /** Named collector: where the base ref reaches a shell `git diff` with no check, in Setup and in the re-validation path that can skip Setup. */
 function collectBaseBranchGuardDefects(md: string, revalidate: string = revalidateReference()): string[] {
@@ -1162,9 +1173,11 @@ function collectBaseBranchGuardDefects(md: string, revalidate: string = revalida
   const record = md.split('\n').find(l => l.startsWith('Record the current branch name as `BASE_BRANCH`'))
   if (!guarded(record)) out.push(`Phase 1 records BASE_BRANCH without stopping the run unless it matches \`${BASE_BRANCH_PATTERN}\``)
   else if (md.indexOf(record!) > md.indexOf('OPERATION: setup-task')) out.push('the BASE_BRANCH guard comes after the setup-task spawn')
-  const detect = revalidate.split('\n').find(l => l.startsWith('3. **Detect FILES_CHANGED**'))
-  if (!guarded(detect)) out.push(`the re-validation path runs git diff without stopping the run unless the base ref matches \`${BASE_BRANCH_PATTERN}\``)
-  else if (detect!.indexOf(BASE_BRANCH_PATTERN) > detect!.indexOf('git diff')) out.push('the re-validation guard comes after its git diff')
+  const rerecord = revalidate.split('\n').find(l => l.startsWith('3. **Record BASE_BRANCH**'))
+  if (!guarded(rerecord)) out.push(`the re-validation path records BASE_BRANCH without stopping the run unless it matches \`${BASE_BRANCH_PATTERN}\``)
+  else if (!rerecord!.includes(REVALIDATE_BRANCH_DIFF)) out.push('the re-validation path does not say that Phases 3-7 run {branch_diff} from BASE_BRANCH')
+  else if (rerecord!.indexOf(BASE_BRANCH_PATTERN) > rerecord!.indexOf(REVALIDATE_BRANCH_DIFF)) out.push('the re-validation guard comes after the branch diff')
+  else if (!rerecord!.includes('baseRefName')) out.push('the re-validation path does not say where BASE_BRANCH comes from when Phase 1 is skipped')
   return out
 }
 
@@ -1173,11 +1186,26 @@ describe('#452: BASE_BRANCH is checked before it reaches a shell line', () => {
     expect(collectBaseBranchGuardDefects(implementMd())).toEqual([])
   })
 
-  it('the pattern admits real branch names and refuses one that git accepts and a shell would run', () => {
-    expect(() => execFileSync('git', ['check-ref-format', '--branch', HOSTILE_BASE], { cwd: SCRATCH, env: scopedEnv(SCRATCH), stdio: 'pipe' }), 'git no longer accepts the probe name, so it proves nothing').not.toThrow()
+  it('the pattern admits git-valid ASCII branch names up to 200 characters and refuses the rest, a name git accepts and a shell would run included', () => {
+    const gitAccepts = (name: string): void => {
+      expect(() => execFileSync('git', ['check-ref-format', '--branch', name], { cwd: SCRATCH, env: scopedEnv(SCRATCH), stdio: 'pipe' }), `git no longer accepts ${name}, so it proves nothing`).not.toThrow()
+    }
     const re = new RegExp(BASE_BRANCH_PATTERN)
-    for (const ok of ['main', 'feat/452-token-diet-wave-c2', 'release/1.2.3', 'x'.repeat(200)]) expect(re.test(ok), ok).toBe(true)
-    for (const bad of [HOSTILE_BASE, 'a;b', 'a b', 'a`id`', '$(id)', 'a|b', '', 'x'.repeat(201)]) expect(re.test(bad), bad).toBe(false)
+    const admitted = ['main', 'feat/452-token-diet-wave-c2', 'release/1.2.3', 'feat+x', 'user@feat', 'fix/#12', 'a,b']
+    for (const ok of admitted) { gitAccepts(ok); expect(re.test(ok), ok).toBe(true) }
+    expect(re.test('x'.repeat(200)), 'the 200-character bound is inclusive').toBe(true)
+    // Git accepts these too; the pattern is narrower than git on purpose, and the stop line says so.
+    for (const refused of [HOSTILE_BASE, 'café']) { gitAccepts(refused); expect(re.test(refused), refused).toBe(false) }
+    for (const bad of ['a;b', 'a b', 'a`id`', '$(id)', 'a|b', '', 'x'.repeat(201)]) expect(re.test(bad), bad).toBe(false)
+  })
+
+  it('both stop lines tell the user which characters are allowed', () => {
+    const allowed = 'ASCII letters, digits and `._/+@,#-`, at most 200'
+    const record = implementMd().split('\n').find(l => l.startsWith('Record the current branch name as `BASE_BRANCH`'))!
+    const rerecord = revalidateReference().split('\n').find(l => l.startsWith('3. **Record BASE_BRANCH**'))!
+    for (const [where, line] of [['Phase 1', record], ['the re-validation path', rerecord]] as const) {
+      expect(line, `${where} gives the stop no reason`).toContain(allowed)
+    }
   })
 
   it('known-bad probes: a lost guard, a widened pattern, a late guard and an unguarded re-validation are each reported', () => {
@@ -1193,10 +1221,19 @@ describe('#452: BASE_BRANCH is checked before it reaches a shell line', () => {
     expect(collectBaseBranchGuardDefects(md.replace(record, '').replace('OPERATION: setup-task', () => `OPERATION: setup-task\n${record}`))).toEqual(['the BASE_BRANCH guard comes after the setup-task spawn'])
 
     const reval = revalidateReference()
-    const detect = reval.split('\n').find(l => l.startsWith('3. **Detect FILES_CHANGED**'))!
-    const lostReval = `the re-validation path runs git diff without stopping the run unless the base ref matches \`${BASE_BRANCH_PATTERN}\``
-    expect(collectBaseBranchGuardDefects(md, reval.replace(detect, '3. **Detect FILES_CHANGED**: `git diff --name-only --diff-filter=d {base_branch}...HEAD`'))).toEqual([lostReval])
-    expect(collectBaseBranchGuardDefects(md, reval.replace(detect, () => '3. **Detect FILES_CHANGED**: `git diff --name-only --diff-filter=d {base_branch}...HEAD` unless it fails the pattern `' + BASE_BRANCH_PATTERN + '`; stop the run'))).toEqual(['the re-validation guard comes after its git diff'])
+    const rerecord = reval.split('\n').find(l => l.startsWith('3. **Record BASE_BRANCH**'))!
+    const lostReval = `the re-validation path records BASE_BRANCH without stopping the run unless it matches \`${BASE_BRANCH_PATTERN}\``
+    const lateGuard = rerecord.replace(BASE_BRANCH_PATTERN, 'x').replace(' Phases 3-7 run `{branch_diff}` from it.', () => ` Phases 3-7 run \`{branch_diff}\` from it unless it fails the pattern \`${BASE_BRANCH_PATTERN}\`; stop the run.`)
+    expect(lateGuard, 'the seed must land').not.toBe(rerecord)
+    expect(collectBaseBranchGuardDefects(md, reval.replace(rerecord, () => rerecord.replace(BASE_BRANCH_PATTERN, 'x')))).toEqual([lostReval])
+    expect(collectBaseBranchGuardDefects(md, reval.replace(rerecord, () => lateGuard))).toEqual(['the re-validation guard comes after the branch diff'])
+    const unsaid = rerecord.replace(REVALIDATE_BRANCH_DIFF, 'Phases 3-7 run it')
+    expect(unsaid, 'the seed must land').not.toBe(rerecord)
+    expect(collectBaseBranchGuardDefects(md, reval.replace(rerecord, () => unsaid))).toEqual(['the re-validation path does not say that Phases 3-7 run {branch_diff} from BASE_BRANCH'])
+    const sourceless = rerecord.replaceAll('baseRefName', 'x')
+    expect(sourceless, 'the seed must land').not.toBe(rerecord)
+    expect(collectBaseBranchGuardDefects(md, reval.replace(rerecord, () => sourceless))).toEqual(['the re-validation path does not say where BASE_BRANCH comes from when Phase 1 is skipped'])
+    expect(collectBaseBranchGuardDefects(md, reval.replace(rerecord, ''))).toEqual([lostReval])
   })
 })
 

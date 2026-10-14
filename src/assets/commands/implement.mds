@@ -56,7 +56,7 @@ When the user explicitly asks to re-validate, re-check, or re-run quality gates 
 **Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION
 <!-- learning:end -->
 
-Record the current branch name as `BASE_BRANCH`. Stop the run unless it matches `^[A-Za-z0-9._/-]{1,200}$`.
+Record the current branch name as `BASE_BRANCH`. Stop the run unless it matches `^[A-Za-z0-9._/+@,#-]{1,200}$`, telling the user it allows only ASCII letters, digits and `._/+@,#-`, at most 200.
 
 {{docs_root()}}
 
@@ -114,10 +114,8 @@ The two tests this command does make are its own under every provider:
   `setup-task` fetches whatever it is handed — so the command would derive a
   branch from a failed lookup and drop the request on the floor.
 
-The cost of the count gate is a one-word task description (`/implement refactor`)
-reaching `setup-task` as an issue reference, where it fails the lookup and is
-reported. That is the direction the failure has to fall: an unfetched issue is
-visible, a silently discarded request is not.
+A one-word task description (`/implement refactor`) fails the issue lookup and is
+reported: an unfetched issue is visible, a silently discarded request is not.
 
 **Capture from Git agent output** (used throughout flow):
 - `TASK_ID`: The branch name created by Git agent (use as TASK_ID for rest of flow)
@@ -575,7 +573,7 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 /implement (orchestrator - spawns agents only)
 │
 ├─ Re-validation Path (when user says "re-validate"/"re-check"/"re-run gates")
-│  └─ Branch safety → skip Phase 2 → detect FILES_CHANGED → Phases 3-8 → Phase 9, 11, 12
+│  └─ Branch safety → skip Phase 2 → record BASE_BRANCH → Phases 3-8 → Phase 9, 11, 12
 │
 ├─ Phase 1: Setup
 ├─ Phase 2: Implement (3-strategy framework)
