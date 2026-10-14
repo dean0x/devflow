@@ -457,12 +457,7 @@ function within(dir: string, source: string): string {
 }
 
 function teeWrites(args: readonly Word[]): string[] {
-  const paths: string[] = [];
-  for (const word of args) {
-    const path = word.value.startsWith('-') ? null : literalPath(word);
-    if (path !== null) paths.push(path);
-  }
-  return paths;
+  return args.flatMap(word => (word.value.startsWith('-') ? [] : (literalPath(word) ?? [])));
 }
 
 /** `sed -i` writes the files after the script; a script given with `-e` or `-f` leaves every positional a file. */
