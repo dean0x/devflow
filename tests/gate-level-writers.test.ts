@@ -9,6 +9,9 @@
  * value and compares the raw bytes of the key afterwards. Three stored values
  * cover the cases that differ: a valid level, a capitalised one the fold reads as
  * `full`, and a JSON `null`. `init --reset` is the one writer that removes the key.
+ * After each chain one spawn of the installed settings resolver checks the level the
+ * prompts read, and a hand-written personal `gateLevel` in `.devflow/config.json` is
+ * checked to survive the reset.
  *
  * Every spawn gets its env from `sandboxEnv(tmpHome)`, so HOME is a temp dir and
  * no real install is touched. Requires a build (`npm run build`).
@@ -45,6 +48,22 @@ function runCli(...args: string[]): { status: number | null; out: string } {
   return { status: result.status, out: `${result.stdout ?? ''}${result.stderr ?? ''}` };
 }
 
+/** The `GATE_LEVEL` the installed settings resolver prints for the repository, as a prompt reads it. */
+function settingsGateLevel(): string {
+  const script = path.join(devflowDir(), 'scripts', 'resolve-settings.cjs');
+  const result = spawnSync('node', [script, repo], {
+    encoding: 'utf-8',
+    timeout: SUBPROCESS_TIMEOUT_MS,
+    cwd: repo,
+    env: sandboxEnv(tmpHome),
+  });
+  if (result.error) throw result.error;
+  expect(result.status, `resolve-settings failed:\n${result.stderr}`).toBe(0);
+  const level = /\sGATE_LEVEL=(\w+)$/.exec((result.stdout ?? '').trim())?.[1];
+  expect(level, `no GATE_LEVEL at the end of the settings line:\n${result.stdout}`).toBeDefined();
+  return level as string;
+}
+
 interface RawManifest {
   updatedAt: string;
   features: Record<string, unknown>;
@@ -64,11 +83,14 @@ async function storeGateLevel(value: unknown): Promise<void> {
   );
 }
 
-/** The stored values to carry. `lean` is valid; `Lean` and `null` the fold reads as `full`. */
-const STORED: ReadonlyArray<{ label: string; value: unknown }> = [
-  { label: 'a valid level', value: 'lean' },
-  { label: 'a capitalised level the fold reads as full', value: 'Lean' },
-  { label: 'a JSON null', value: null },
+/**
+ * The stored values to carry, with the level the settings line shows for each.
+ * `lean` is valid; `Lean` and `null` are malformed, and a malformed level folds to `full`.
+ */
+const STORED: ReadonlyArray<{ label: string; value: unknown; level: string }> = [
+  { label: 'a valid level', value: 'lean', level: 'lean' },
+  { label: 'a capitalised level the fold reads as full', value: 'Lean', level: 'full' },
+  { label: 'a JSON null', value: null, level: 'full' },
 ];
 
 /** Each writer, in an order where no step undoes the next one's precondition. */
@@ -99,7 +121,7 @@ afterEach(async () => {
   }
 });
 
-describe.each(STORED)('a stored gate level of $label', ({ value }) => {
+describe.each(STORED)('a stored gate level of $label', ({ value, level }) => {
   it('survives every manifest writer, byte for byte, and init --reset removes it', async () => {
     const setup = runCli('init', '--recommended');
     expect(setup.status, `setup init failed:\n${setup.out}`).toBe(0);
@@ -116,11 +138,35 @@ describe.each(STORED)('a stored gate level of $label', ({ value }) => {
       expect(Object.hasOwn(after.features, 'gateLevel'), `${writer.name} dropped the key`).toBe(true);
       expect(after.features.gateLevel, `${writer.name} changed the stored value`).toStrictEqual(value);
     }
+    // After the whole chain the settings line still shows the level the stored value folds to.
+    expect(settingsGateLevel(), 'the settings line after the writer chain').toBe(level);
 
     const reset = runCli('init', '--reset', '--recommended');
     expect(reset.status, `init --reset failed:\n${reset.out}`).toBe(0);
     const afterReset = await readRaw();
     expect(Object.hasOwn(afterReset.features, 'gateLevel'), 'init --reset kept the key').toBe(false);
+    expect(settingsGateLevel(), 'the settings line after init --reset').toBe('standard');
+  }, WRITER_TABLE_TIMEOUT_MS);
+});
+
+describe('a hand-written personal gate level', () => {
+  it('survives init --reset byte for byte and still decides the level', async () => {
+    const setup = runCli('init', '--recommended');
+    expect(setup.status, `setup init failed:\n${setup.out}`).toBe(0);
+    await storeGateLevel('full');
+    const personal = path.join(repo, '.devflow', 'config.json');
+    // init owns `reviewPublication` and carries every other key, so the file starts with init's own key already set.
+    const bytes = JSON.stringify({ gateLevel: 'lean', reviewPublication: 'auto' }, null, 2) + '\n';
+    await fs.mkdir(path.dirname(personal), { recursive: true });
+    await fs.writeFile(personal, bytes, 'utf-8');
+    // Non-vacuity: the personal level decides over the machine's stored full.
+    expect(settingsGateLevel(), 'the settings line before init --reset').toBe('lean');
+
+    const reset = runCli('init', '--reset', '--recommended');
+    expect(reset.status, `init --reset failed:\n${reset.out}`).toBe(0);
+    expect(Object.hasOwn((await readRaw()).features, 'gateLevel'), 'init --reset kept the machine key').toBe(false);
+    expect(await fs.readFile(personal, 'utf-8'), 'init --reset changed config.json').toBe(bytes);
+    expect(settingsGateLevel(), 'the settings line after init --reset').toBe('lean');
   }, WRITER_TABLE_TIMEOUT_MS);
 });
 
