@@ -588,7 +588,7 @@ const results = {};  // ticketId → its row of the workflow's return; a ticket 
 // A row from an engine result: the fields step 3 after the workflow renders
 const rowOf = (ticketId, r, merged, treeEqual = null) => ({ ticket: ticketId, ran: true, verdict: r?.verdict || r?.overallVerdict || null, merged, treeEqual, issuePrLink: r?.issuePrLink || "(none)", evaluateVerdict: r?.gate2?.evaluateVerdict, testVerdict: r?.gate2?.testVerdict, surviving: r?.survivingFindings?.length, coverageComplete: r?.reviewCoverage?.complete });
 const MAX_ROUNDS = Math.max(10, remainingTickets.length * 2 + 5);  // heuristic; always finite
-const MERGE_SHA = /^[0-9a-f]{40}$/;  // a merge commit as git prints it: the only Git-reported value that reaches a later prompt
+const MERGE_SHA = /^[0-9a-f]{40}$/;  // a SHA as git prints it: the only Git-reported value that reaches a later prompt
 const waveState = { quarantined: [], round: 0, halted: null };
 let reAskedThisDeadlock = false;  // re-ask guard: re-ask once on empty ready-set, then escalate
 while (remainingTickets.length > 0 && waveState.round < MAX_ROUNDS && waveState.halted === null) {
@@ -618,27 +618,27 @@ Return: {"ready": [...ticket-ids], "blocked": [{"ticket": "id", "namedBlocker": 
 
   for (const ticketId of ready) {
     try {
-      // ticketId is the ISSUE_REF the pre-fetch heading printed — this ticket's OWN reference: the engine's `ticket` (its TICKET)
-      // and its setup-task ISSUE_INPUT; the engine returns the branch that setup-task created, merged below; plans[ticketId] is its own plan, criteria and checked testPlan (Pre-authoring step 4)
+      // ticketId is this ticket's OWN ISSUE_REF from the pre-fetch heading: the engine's `ticket` and its setup-task ISSUE_INPUT; the engine returns the branch setup-task created, merged below; plans[ticketId] is its own plan (Pre-authoring step 4)
 <!-- learning:on -->
       const engineResult = await runSingleTicketEngine({ ticket: ticketId, baseBranch: INTEGRATION_BRANCH, ...(plans[ticketId] || {}), decisionsContext: DECISIONS_CONTEXT, issueRequired: ISSUE_REQUIRED, applyConventions: APPLY_CONVENTIONS, complianceFrameworks: COMPLIANCE_FRAMEWORKS, issueInput: ticketId });
 <!-- learning:off -->
       const engineResult = await runSingleTicketEngine({ ticket: ticketId, baseBranch: INTEGRATION_BRANCH, ...(plans[ticketId] || {}), issueRequired: ISSUE_REQUIRED, applyConventions: APPLY_CONVENTIONS, complianceFrameworks: COMPLIANCE_FRAMEWORKS, issueInput: ticketId });
 <!-- learning:end -->
-      // Check both verdict (engine_output_schema) and overallVerdict (SINGLE skeleton alias).
-      // PASS and UNVERIFIED merge; PARTIAL, FAIL, ESCALATED (the ticket-link and branch stops included) or no verdict quarantine.
+      // PASS and UNVERIFIED merge (verdict, or overallVerdict as the SINGLE alias); PARTIAL, FAIL, ESCALATED (the ticket-link and branch stops included) or no verdict quarantine.
       if (["PASS", "UNVERIFIED"].includes(engineResult.verdict || engineResult.overallVerdict)) {
         // Git merges locally and validates nothing: the workflow owns the post-merge Validate (D-WAVE-MERGE-VALIDATE).
         const merge = await agent(`Merge ${engineResult.branch} to ${INTEGRATION_BRANCH} locally. Include ticket ID ${ticketId} in the merge commit message. Do not push, and run no build or test.
-Return: {"merged": true, "mergeSha": "<40-hex merge commit>", "treeEqual": <true when mergeSha^{tree} equals the tree of ${engineResult.branch}'s head>} — or {"merged": false, "reason": "<why>"} when no merge is kept.`, { agentType: "Git" });
+Check out ${INTEGRATION_BRANCH}, run git rev-parse ${INTEGRATION_BRANCH} as baseSha, then run git merge --no-ff ${engineResult.branch}. On a conflict, run git merge --abort; if the abort fails, return merged true with no mergeSha.
+Return: {"merged": true, "mergeSha": "<40-hex merge commit>", "treeEqual": <true when mergeSha^{tree} equals the tree of ${engineResult.branch}'s head>, "baseSha": "<40-hex integration HEAD before the merge>"} — or {"merged": false, "reason": "<why>"} when no merge is kept.`, { agentType: "Git" });
         let kept = false;
         let reason = merge?.reason || "merge failed";
-        if (merge?.merged === true && !MERGE_SHA.test(String(merge.mergeSha))) {
-          // A merge may sit on the integration branch with no SHA to validate or undo it by: stop taking merges.
-          waveState.halted = { ticket: ticketId, mergeSha: null, reason: "merge reported without a 40-hex mergeSha; the integration branch may hold an unvalidated merge" };
+        const badSha = ![merge?.mergeSha, merge?.baseSha].every(v => MERGE_SHA.test(String(v)));
+        if (merge?.merged === true && (badSha || merge.mergeSha === merge.baseSha)) {
+          // No SHA to validate or undo by, or no commit added: stop taking merges. Fixed reasons; no rejected value is copied.
+          waveState.halted = { ticket: ticketId, mergeSha: null, baseSha: null, reason: badSha ? "merge reported without a 40-hex mergeSha or baseSha; the integration branch may hold an unvalidated merge" : "merge added no commit, so the wave stopped: an unchanged HEAD cannot be checked. Check that the ticket branch holds its commits, then run the wave again." };
           reason = waveState.halted.reason;
         } else if (merge?.merged === true) {
-          // A merge counts as kept only when this Validate returns PASS. It always runs: treeEqual is recorded, never a reason to skip.
+          // Kept only when this Validate returns PASS; it always runs (treeEqual is recorded only).
           const post = await agent(`Run build, typecheck, lint, and tests on ${INTEGRATION_BRANCH} after merging ${engineResult.branch} (merge commit ${merge.mergeSha}).
 Follow your Running commands block for every build and test command.
 Return: {"verdict": "PASS" | "FAIL", "details": "..."}`, { agentType: "Validate" });
@@ -650,7 +650,7 @@ Return: {"undone": true} — or {"undone": false, "reason": "<why>"} when you di
             if (undo?.undone === true) {
               reason = "post-merge build red; merge undone";
             } else {
-              // A merge that stays red would poison every later ticket: stop taking merges and rounds, and name the red HEAD.
+              // A red merge left in place would poison every later ticket: halt and name the red HEAD.
               reason = `post-merge build red; merge not undone (${undo?.reason || "no reason given"})`;
               waveState.halted = { ticket: ticketId, mergeSha: merge.mergeSha, reason };
             }

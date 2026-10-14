@@ -84,7 +84,7 @@ Two parallel sibling tickets can produce real git conflicts. The resolution is *
 
 **Resolution procedure:**
 
-1. Git agent detects the conflict and reports the conflicting files + sections
+1. Git aborts the merge and reports the conflicting files + sections
 <!-- learning:on -->
 2. Spawn a Code agent whose prompt opens with `OPERATION: implement` and carries `COMPLIANCE_DIRECTIVE` (when it is not empty) and `DECISIONS_CONTEXT`, with FULL intent context:
 <!-- learning:off -->

@@ -163,6 +163,10 @@ interface World {
   readonly hardenReturns?: Readonly<Record<string, readonly unknown[]>>
   /** Tickets whose merge Git reports without a usable mergeSha. */
   readonly badMergeSha?: readonly string[]
+  /** Tickets whose merge Git reports with a valid mergeSha but a baseSha that is not a 40-hex SHA. */
+  readonly badBaseSha?: readonly string[]
+  /** Tickets whose merge Git reports a baseSha equal to the mergeSha: the merge added no commit. */
+  readonly sameSha?: readonly string[]
   /** Tickets whose Evaluate agent answers FAIL. */
   readonly evaluateFail?: readonly string[]
   /** Ready IDs the reader adds that are not in the remaining set — an invented or injected ticket. */
@@ -219,7 +223,9 @@ function stubAgent(world: World, spawns: Spawn[]): Agent {
       if (world.badMergeSha?.includes(id)) return { merged: true }
       const mergeSha = createHash('sha1').update(`merge:${id}`).digest('hex')
       mergedBy.set(mergeSha, id)
-      return { merged: true, mergeSha, treeEqual: true }
+      if (world.badBaseSha?.includes(id)) return { merged: true, mergeSha, treeEqual: true, baseSha: 'not-a-sha' }
+      const baseSha = world.sameSha?.includes(id) ? mergeSha : createHash('sha1').update(`base:${id}`).digest('hex')
+      return { merged: true, mergeSha, treeEqual: true, baseSha }
     }
     if (opts.agentType === 'Git' && prompt.startsWith('Undo the merge ')) {
       const sha = /^Undo the merge ([0-9a-f]{40}) on /.exec(prompt)?.[1] ?? ''
@@ -279,7 +285,7 @@ interface EngineRun {
 interface WaveRun {
   readonly tickets: readonly WaveRow[]
   readonly quarantined: ReadonlyArray<{ ticket: string; reason: string }>
-  readonly halted: { ticket: string; mergeSha: string | null; reason: string } | null
+  readonly halted: { ticket: string; mergeSha: string | null; baseSha?: string | null; reason: string } | null
   readonly spawns: readonly Spawn[]
   readonly engines: readonly EngineRun[]
 }
@@ -1723,12 +1729,36 @@ describe('#421 AC-22: a refused undo halts the wave and names the red integratio
     expect(run.spawns.filter(s => s.agentType === 'Design'), 'no further round').toHaveLength(1)
   })
 
-  it('a merge reported with no usable SHA halts the wave too, and spawns neither Validate nor undo', async () => {
-    const run = await runWave(WAVE!, SINGLE!, { ...world, failMerge: [], refuseUndo: [], badMergeSha: ['#32'] }, {}, 'true')
-    expect(run.halted).toMatchObject({ ticket: '#32', mergeSha: null })
+  const BAD_SHA_REASON = 'merge reported without a 40-hex mergeSha or baseSha; the integration branch may hold an unvalidated merge'
+  const UNCHANGED_REASON = 'merge added no commit, so the wave stopped: an unchanged HEAD cannot be checked. Check that the ticket branch holds its commits, then run the wave again.'
+  const unusableMerges: ReadonlyArray<readonly [string, Partial<World>, string]> = [
+    ['a merge reported with no mergeSha (a failed abort)', { badMergeSha: ['#32'] }, BAD_SHA_REASON],
+    ['a merge reported with a baseSha that is not 40-hex', { badBaseSha: ['#32'] }, BAD_SHA_REASON],
+    ['a merge whose baseSha equals its mergeSha', { sameSha: ['#32'] }, UNCHANGED_REASON],
+  ]
+
+  it.each(unusableMerges)('%s halts the wave with a fixed reason and null SHA fields, and spawns neither Validate nor undo', async (_name, scripted, reason) => {
+    const run = await runWave(WAVE!, SINGLE!, { ...world, failMerge: [], refuseUndo: [], ...scripted }, {}, 'true')
+    expect(run.halted).toEqual({ ticket: '#32', mergeSha: null, baseSha: null, reason })
+    expect(run.quarantined.find(q => q.ticket === '#32')?.reason).toBe(reason)
+    expect(run.tickets.find(t => t.ticket === '#32')?.merged).toBe(false)
     expect(gitSpawns(run.spawns, 'Undo the merge ')).toHaveLength(0)
     expect(run.spawns.filter(s => s.agentType === 'Validate' && s.prompt.includes('(merge commit ')), 'only #31\'s merge is validated').toHaveLength(1)
     expect(run.tickets.find(t => t.ticket === '#33')?.ran).toBe(false)
+  })
+
+  it('a rejected SHA value never reaches the halt reason or the Validate prompt', async () => {
+    const run = await runWave(WAVE!, SINGLE!, { ...world, failMerge: [], refuseUndo: [], badBaseSha: ['#32'] }, {}, 'true')
+    expect(JSON.stringify(run.halted)).not.toContain('not-a-sha')
+    expect(run.spawns.some(s => s.prompt.includes('not-a-sha'))).toBe(false)
+  })
+
+  it('the merge prompt checks out the integration branch, records its head as baseSha, merges with --no-ff and aborts on a conflict', async () => {
+    const run = await runWave(WAVE!, SINGLE!, { ...world, failMerge: [], refuseUndo: [] }, {}, 'true')
+    const [merge] = gitSpawns(run.spawns, 'Merge ')
+    expect(merge.prompt).toContain(`Check out ${INTEGRATION}, run git rev-parse ${INTEGRATION} as baseSha, then run git merge --no-ff feat/31-work.`)
+    expect(merge.prompt).toContain('On a conflict, run git merge --abort; if the abort fails, return merged true with no mergeSha.')
+    expect(merge.prompt.indexOf('"baseSha"'), 'baseSha is the last field of the merged return').toBeGreaterThan(merge.prompt.indexOf('"treeEqual"'))
   })
 
   it('known-bad probe: a wave that ignores the refusal keeps taking merges', async () => {
