@@ -452,11 +452,14 @@ const STEP_4A_REFUSAL = 'TRACEABILITY: DEGRADED (issue reference "{ref}" does no
 /**
  * Named collector: how a step 4b block composes a closing line itself instead of taking the Handoff Values one,
  * or departs from the one form all three providers share. Step 4b is a single source with no lettered option,
- * no order, no fetch-by-key gate (it makes no tracker call) and no discoverability condition.
+ * no order, no fetch-by-key gate (it makes no tracker call) and no discoverability condition. It renders
+ * nothing either: the Handoff Values line reaches it already rendered, so a provider note that renders a
+ * key, or names `## Reference Rendering`, tells the step to publish a line the shared text forbids.
  */
 function collectStep4bComposition(block: string): string[] {
   const out: string[] = []
   const has = (what: string, found: boolean): void => { if (found) out.push(what) }
+  has('a rendering fallback', /render the (key|reference)|`## Reference Rendering`/.test(block))
   has('a branch-name fallback', /branch name pattern/.test(block))
   has('a lettered resolution option', /^\s+[a-z]\. /m.test(block))
   has('a resolution order', /Resolution order/.test(block))
@@ -548,9 +551,14 @@ describe('ensure-pr-ready — a supplied ISSUE_PR_LINK is final and step 4b comp
       { seed: '   The *fetch by key* capability absent or denied ⇒ `TRACEABILITY: DEGRADED (no tracker tool for fetch by key)` and skip the section.', reports: 'a fetch-by-key gate' },
       { seed: '   If no verified issue key is discoverable, skip silently.', reports: 'a discoverability condition' },
       { seed: '   The line is the one `ensure-traceable-issue` returned.', reports: 'a producer that returns no Handoff Values block' },
+      { seed: '   `## Reference Rendering` absent, or its token discarded by the gate below ⇒ render the key as the documented default below, on its own line under the section heading, and record the discard under `### Substitutions`.', reports: 'a rendering fallback' },
+      { seed: '   Absent or discarded ⇒ render the reference as the documented default below, on its own line under the section heading.', reports: 'a rendering fallback' },
+      { seed: '   `## Reference Rendering` names the form of the line\'s token; the check above still decides what is published.', reports: 'a rendering fallback' },
     ]
     for (const { seed, reports } of leftovers) {
-      expect(collectStep4bComposition(`${block}\n${seed}`), `the seed ${JSON.stringify(seed)} must be reported by name`).toEqual([reports])
+      const seeded = `${block}\n${seed}`
+      expect(seeded, 'the seed must land').not.toBe(block)
+      expect(collectStep4bComposition(seeded), `the seed ${JSON.stringify(seed)} must be reported by name`).toEqual([reports])
     }
     expect(
       collectStep4bComposition(block.replace(STEP_4A_REFUSAL, 'TRACEABILITY: DEGRADED (no line)')),
