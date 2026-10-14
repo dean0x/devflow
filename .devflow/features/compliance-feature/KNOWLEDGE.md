@@ -21,7 +21,7 @@ directories:
   - src/assets/commands/debug.mds
   - src/assets/skills/gap-analysis/references/compliance.md
 created: 2026-08-20
-updated: 2026-10-14
+updated: 2026-10-15
 ---
 
 # Compliance Feature & SDLC Traceability
@@ -193,7 +193,7 @@ Two independent things sit on `manifest.features.compliance` and must not be con
 
 **KB-AP-10: the oracle trap.** Tests asserting the `FEATURE_OWNED_*` exclusions use the independent literal `['compliance']` (`tests/plugins.test.ts`).
 
-**KB-AP-12: two gate shapes, deliberately.** `/code-review`'s language focuses are gated by the install-time stamp line `Installed language focuses: <list>`, which the installer rewrites on every install and on `uninstall --plugin` (D-LANGUAGE-FOCUS-STAMP, held by `tests/guards/claude-dir.test.ts`). The command says: "A language focus is spawned only when its file-type condition above fires AND its name appears in that stamped line." The command probes no directory at run time, because those skills install only with their optional plugin and the stamp records which ones the machine has. The compliance lens is never gated on a file's presence, because every machine has its skill. The language-focus gate reads the machine install, never anything per repository.
+**KB-AP-12: two gate shapes, deliberately.** `/code-review`'s language focuses are gated by the install-time stamp line `Installed language focuses: <list>`, which the installer rewrites on every install and on `uninstall --plugin` (D-LANGUAGE-FOCUS-STAMP, held by `tests/guards/claude-dir.test.ts`). The same guard holds D-CLAUDE-DIR-PROMPTS: no prompt reads a path under the home Claude directory outside the `CLAUDE_CONFIG_DIR` rule, and `/code-review` names no Claude directory. The command says: "A language focus is spawned only when its file-type condition above fires AND its name appears in that stamped line." The command probes no directory at run time, because those skills install only with their optional plugin and the stamp records which ones the machine has. The compliance lens is never gated on a file's presence, because every machine has its skill. The language-focus gate reads the machine install, never anything per repository.
 
 ## Key Files
 
