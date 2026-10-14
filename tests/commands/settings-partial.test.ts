@@ -261,6 +261,55 @@ describe('the accepted line is SETTINGS_LINE_RE written out', () => {
   })
 })
 
+/** The four clauses that keep a prompt strict about which output it accepts, in the order the sentence states them. */
+const ACCEPT_CLAUSES: ReadonlyArray<readonly [string, string]> = [
+  ['exactly two lines', 'only when it is exactly two lines'],
+  ['exit=0 last', '`exit=0` last'],
+  ['fields in order, nothing else', 'these fields, in this order, nothing else'],
+  [
+    'anything else falls back',
+    '**Anything else** (a non-zero exit, no line, extra text, or a missing, reordered or unlisted field or value) ⇒ use',
+  ],
+]
+
+/** The paragraph of the define body that states which output is accepted. */
+function acceptParagraph(body: string): string {
+  const paragraphs = body.split('\n\n').filter(p => p.startsWith('Accept the output only when'))
+  if (paragraphs.length !== 1) throw new Error(`expected one accept paragraph, found ${paragraphs.length}`)
+  return paragraphs[0]
+}
+
+/** Named collector: the accept clauses a paragraph lacks, or states out of order. */
+function collectAcceptClauseDefects(paragraph: string): string[] {
+  const defects: string[] = []
+  let from = 0
+  for (const [label, text] of ACCEPT_CLAUSES) {
+    const at = paragraph.indexOf(text, from)
+    if (at === -1) defects.push(`${label}: ${paragraph.includes(text) ? 'out of order' : 'missing'}`)
+    else from = at + text.length
+  }
+  if (!paragraph.endsWith('instead.')) defects.push('the fallback is not the final clause')
+  return defects
+}
+
+describe('the accept rule keeps its four strict clauses', () => {
+  const paragraph = acceptParagraph(defineBody(source(PARTIAL), 'settings_resolve'))
+
+  it('states exactly two lines, exit=0 last, the fields in order and a fallback for anything else', () => {
+    expect(collectAcceptClauseDefects(paragraph)).toEqual([])
+  })
+
+  it('known-bad probes: a dropped, reworded or reordered clause is reported', () => {
+    expect(collectAcceptClauseDefects(paragraph.replace('it is exactly two lines', 'it is a line'))).toEqual(['exactly two lines: missing'])
+    expect(collectAcceptClauseDefects(paragraph.replace('`exit=0` last', '`exit=0` first'))).toEqual(['exit=0 last: missing'])
+    expect(collectAcceptClauseDefects(paragraph.replace(', nothing else', ''))).toEqual(['fields in order, nothing else: missing'])
+    expect(collectAcceptClauseDefects(paragraph.replace('**Anything else**', 'Else'))).toEqual(['anything else falls back: missing'])
+    const reordered = `${ACCEPT_CLAUSES.map(([, text]) => text).reverse().join(' ')} instead.`
+    expect(collectAcceptClauseDefects(reordered).some(d => d.endsWith('out of order'))).toBe(true)
+    expect(collectAcceptClauseDefects(paragraph.replace(/ instead\.$/, ' instead. And more.'))).toEqual(['the fallback is not the final clause'])
+  })
+})
+
 describe('the learning gate keeps its rationale out of the expanded prompt', () => {
   const DECISIONS = 'src/assets/commands/_partials/_decisions.mds'
 
