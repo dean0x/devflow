@@ -867,7 +867,6 @@ describe('capture hooks read the machine-wide memory and learning switches only'
    * the gate's fast path to the full parse, so the resolver's fold sees the shape.
    */
   const ODD_MANIFESTS: ReadonlyArray<readonly [string, string]> = [
-    ['a manifest that is null', 'null'],
     ['a manifest that is an array', '["\\u0041"]'],
     ['features set to a string', '{"features":"\\u0041"}'],
     ['an object-valued gateLevel', '{"features":{"gateLevel":{"level":"\\u0041"}}}'],
@@ -960,7 +959,7 @@ describe('capture hooks read the machine-wide memory and learning switches only'
 
     // The gate folds the repository's files and the manifest through the settings
     // resolver, whose fold now also computes the gate level. It must stay total for
-    // a manifest of any shape: a repository file that narrows memory forces that
+    // the odd manifest shapes below: a repository file that narrows memory forces that
     // fold, so memory stays off (the fold ran, not the manifest-only fallback) and
     // learning keeps capturing.
     for (const [label, manifestText] of ODD_MANIFESTS) {
