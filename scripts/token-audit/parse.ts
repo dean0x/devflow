@@ -214,7 +214,10 @@ const PYTHON_HEADER_RE = /(?:^|[\s;&|(`/])python[0-9.]*(?=\s|$)/;
 const PYTHON_OPEN_WRITE_RE = /\bopen\(\s*(['"])([^'"\\\n]{1,512})\1\s*,\s*(['"])[wa][bt+]*\3/g;
 const IN_PLACE_RE = /^(?:-[A-Za-z]*i|--in-place(?:=|$))/;
 const FD_NUMBER_RE = /^[0-9]+$/;
-const WRITE_PREFIX_WORDS: ReadonlySet<string> = new Set([...PREFIX_WORDS, 'if', 'elif', 'while', 'until']);
+const BLANK_RE = /^\s$/;
+const TEST_CLOSE_FOLLOW_RE = /^[\s;&|)]$/;
+// Write detection also reads past `if`, `elif`, `while`, `until` and `{`, so `if cp a b; then` counts as a write. `classifyBash` leaves them out of PREFIX_WORDS on purpose: skipping them there would change its classes.
+const WRITE_PREFIX_WORDS: ReadonlySet<string> = new Set([...PREFIX_WORDS, 'if', 'elif', 'while', 'until', '{']);
 const QUIET_FLAG_RE =
   /--reporter[= ](?:dot|min|basic|silent)\b|--silent\b|--quiet\b|--pretty[= ]false\b|(?:^|\s)-q(?:\s|$)|--loglevel[= ](?:silent|error|warn)\b/;
 
@@ -348,10 +351,62 @@ function splitHeredocs(text: string): HeredocSplit {
   return { code: code.join('\n'), pythonBodies };
 }
 
+/** The index of the `))` that closes an arithmetic `((` whose body starts at `from`, or -1 when the text there is nested subshells. */
+function arithmeticEnd(text: string, from: number): number {
+  let depth = 0;
+  for (let i = from; i < text.length; i += 1) {
+    const c = text[i];
+    if (c === '(') depth += 1;
+    else if (c === ')') {
+      if (depth === 0) return text[i + 1] === ')' ? i + 1 : -1;
+      depth -= 1;
+    }
+  }
+  return -1;
+}
+
+/** The index of the `]]` word that closes a `[[` test whose body starts at `from`, or -1 when none does. Quoted text and escapes are skipped. */
+function testExpressionEnd(text: string, from: number): number {
+  for (let i = from; i < text.length; i += 1) {
+    const c = text[i];
+    if (c === '\\') {
+      i += 1;
+    } else if (c === "'") {
+      const close = text.indexOf("'", i + 1);
+      if (close < 0) return -1;
+      i = close;
+    } else if (c === '"') {
+      let j = i + 1;
+      while (j < text.length && text[j] !== '"') j += text[j] === '\\' ? 2 : 1;
+      if (j >= text.length) return -1;
+      i = j;
+    } else if (c === ']' && text[i + 1] === ']' && BLANK_RE.test(text[i - 1] ?? '')) {
+      const after = text[i + 2];
+      if (after === undefined || TEST_CLOSE_FOLLOW_RE.test(after)) return i + 1;
+    }
+  }
+  return -1;
+}
+
+/**
+ * The index of the last character of the `$(( ))`, `(( ))` or `[[ ]]` zone that starts at `at`, or -1
+ * when none starts there or the zone has no closer. A `>` or `<` in such a zone compares values, so
+ * it is no redirect. An unclosed zone is text, so a stray `[[` cannot hide the rest of the command.
+ * `((` and `[[` open a zone only at the start of a word.
+ */
+function zoneEnd(text: string, at: number, wordOpen: boolean): number {
+  if (text.startsWith('$((', at)) return arithmeticEnd(text, at + 3);
+  if (wordOpen) return -1;
+  if (text.startsWith('((', at)) return arithmeticEnd(text, at + 2);
+  if (text.startsWith('[[', at) && BLANK_RE.test(text[at + 2] ?? '')) return testExpressionEnd(text, at + 3);
+  return -1;
+}
+
 /**
  * Splits shell text into words, separators and redirect operators. Quotes group text and are
- * dropped, so a `>` inside them is part of a word. Every branch moves forward, so the loop is
- * bounded by the text length.
+ * dropped, so a `>` inside them is part of a word. A `[[ ]]` or `(( ))` zone becomes one separator
+ * and a `$(( ))` zone becomes a dynamic word, so a comparison `>` inside them is no redirect. Every
+ * branch moves forward, so the loop is bounded by the text length.
  */
 function lexBash(text: string): BashToken[] {
   const tokens: BashToken[] = [];
@@ -373,7 +428,17 @@ function lexBash(text: string): BashToken[] {
   };
   for (let i = 0; i < text.length; i += 1) {
     const c = text[i] ?? '';
-    if (c === ' ' || c === '\t' || c === '\r') flush();
+    const zone = c === '$' || c === '(' || c === '[' ? zoneEnd(text, i, open) : -1;
+    if (zone >= 0) {
+      if (c === '$') {
+        open = true;
+        dynamic = true;
+      } else {
+        flush();
+        tokens.push({ kind: 'sep' });
+      }
+      i = zone;
+    } else if (c === ' ' || c === '\t' || c === '\r') flush();
     else if (c === '\n' || c === ';' || c === '(' || c === ')' || c === '`' || c === '|') {
       flush();
       tokens.push({ kind: 'sep' });
@@ -559,7 +624,8 @@ function pythonWrites(bodies: readonly string[]): string[] {
  *     destinations (`cat > path <<EOF` is a `>` target);
  *   - `open('x', 'w')` and `open('x', 'a')` inside a heredoc that feeds python, the one pattern read
  *     from a heredoc body.
- * It skips the body of every other heredoc, and a `>` inside quotes or a comment. It never counts
+ * It skips the body of every other heredoc, and a `>` inside quotes, a comment or a `[[ ]]`, `(( ))`
+ * or `$(( ))` zone, where it compares values. It reads past `if`, `while`, `{` and the like. It never counts
  * `/dev/...` targets, `>&` fd redirects (`2>&1`) or a target with a `$` expansion (`"$LOG"`,
  * `${OUT}`, `$(mktemp)`), which is how a `mktemp` path reaches a redirect. A path stays as written,
  * not resolved against the working directory, so `a.ts` here and `/w/a.ts` from Edit count as two

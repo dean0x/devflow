@@ -1541,6 +1541,38 @@ describe('AC-107 Bash result classes and files written (D-AUDIT-BASH-CLASS)', ()
       expect(bashWrittenPaths('echo ok # redirect > nowhere.txt')).toEqual([]);
     });
 
+    it('does not count a comparison > inside [[ ]], (( )) or $(( ))', () => {
+      expect(bashWrittenPaths('[[ $x > 5 ]]')).toEqual([]);
+      expect(bashWrittenPaths('(( n > 10 ))')).toEqual([]);
+      expect(bashWrittenPaths('echo $(( n > 10 ))')).toEqual([]);
+      expect(bashWrittenPaths('(( (a + b) > 3 )) && cp x y')).toEqual(['y']);
+      expect(bashWrittenPaths('for ((i = 0; i < 3; i++)); do echo $((i > 1)); done')).toEqual([]);
+      expect(bashWrittenPaths('cmd > $((n > 3))')).toEqual([]);
+    });
+
+    it('still counts a write that follows a test expression', () => {
+      expect(bashWrittenPaths('if [[ "$a" > "$b" ]]; then echo hi > out.txt; fi')).toEqual(['out.txt']);
+      expect(bashWrittenPaths('[[ $x > 5 ]] && echo y > a.txt || echo n >> b.txt')).toEqual(['a.txt', 'b.txt']);
+      expect(bashWrittenPaths('while (( n > 0 )); do echo x >> log.txt; done')).toEqual(['log.txt']);
+    });
+
+    it('reads a quoted ]] inside [[ ]] as text', () => {
+      expect(bashWrittenPaths('[[ "$a" > "b ]] c" ]]')).toEqual([]);
+      expect(bashWrittenPaths('[[ $x == "]]" ]] && echo hi > out.txt')).toEqual(['out.txt']);
+    });
+
+    it('treats an unclosed [[ or (( as text, so it cannot hide a later write', () => {
+      expect(bashWrittenPaths('echo [[ x > out.txt')).toEqual(['out.txt']);
+      expect(bashWrittenPaths('((cmd > f.txt); other)')).toEqual(['f.txt']);
+      expect(bashWrittenPaths('echo "[[" > a.txt; echo "]]" > b.txt')).toEqual(['a.txt', 'b.txt']);
+    });
+
+    it('reads a write inside a brace group', () => {
+      expect(bashWrittenPaths('{ cp a b; }')).toEqual(['b']);
+      expect(bashWrittenPaths('{ tee out.log; } < in.txt')).toEqual(['out.log']);
+      expect(bashWrittenPaths('cd /w && { mv x y; }')).toEqual(['y']);
+    });
+
     it('does not count a > in a commit-message heredoc, even with quotes in the body', () => {
       const commit = ['git commit -m "$(cat <<\'EOF\'', 'fix(x): a -> b', '', 'Say "hi" > there and don\'t break "', 'EOF', ')"', ''].join('\n');
       expect(bashWrittenPaths(commit)).toEqual([]);
@@ -1564,11 +1596,19 @@ describe('AC-107 Bash result classes and files written (D-AUDIT-BASH-CLASS)', ()
     it('stays bounded on large and hostile input', () => {
       const many = Array.from({ length: 500 }, (_, i) => `echo x > f${i}.txt`).join('; ');
       const found = bashWrittenPaths(many);
-      expect(found.length).toBeGreaterThan(0);
-      expect(found.length).toBeLessThanOrEqual(64);
-      expect(bashWrittenPaths(`cat <<EOF\n${'> x\n'.repeat(5000)}`).length).toBeLessThanOrEqual(64);
+      expect(found.length).toBe(64);
+      expect(bashWrittenPaths(`cat <<EOF\n${'> x\n'.repeat(5000)}`).length).toBe(64);
       expect(bashWrittenPaths('"'.repeat(20000) + ' > f.txt')).toEqual([]);
       expect(bashWrittenPaths(`${'<<A '.repeat(2000)}\nA\n`).length).toBe(0);
+      expect(bashWrittenPaths(`${'(('.repeat(4000)} > f.txt`)).toEqual(['f.txt']); // unclosed zones are text
+      expect(bashWrittenPaths(`${'[[ '.repeat(2700)} > f.txt`)).toEqual(['f.txt']);
+    });
+
+    it('hides the bodies of the first 16 heredocs and reads the 17th as text', () => {
+      const heredoc = (n: number): string => `cat <<E${n}\n> body${n}.txt\nE${n}`;
+      const run = (count: number): string => Array.from({ length: count }, (_, n) => heredoc(n)).join('\n');
+      expect(bashWrittenPaths(run(16))).toEqual([]);
+      expect(bashWrittenPaths(run(17))).toEqual(['body16.txt']);
     });
   });
 
