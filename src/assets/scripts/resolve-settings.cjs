@@ -21,7 +21,7 @@
 // D-SETTINGS-LOCAL-ONLY: local git subprocesses only, and never gh, never the
 // network, never a git command that refreshes the index. At most four, in order:
 //   git rev-parse --show-toplevel                         always
-//   git -c core.fsmonitor=false ls-files -z -- <PERSONAL_TRACKING_PATHSPECS>
+//   git --no-literal-pathspecs -c core.fsmonitor=false ls-files -z -- <PERSONAL_TRACKING_PATHSPECS>
 //                                                         only when config.json exists;
 //                                                         ONE call answers every layout
 //                                                         in which git tracks the path
@@ -219,6 +219,9 @@ const CONFIG_SPELLINGS = Object.freeze(['config.json', 'con\u{FB01}g.json', 'con
  *     under a normal `.devflow/` are not listed. A tracked link or submodule
  *     carries committed content to the path the personal file is opened at.
  * An untracked `.devflow` link is the user's own setup and is not named here.
+ * The index check cannot see where such a link points: one that leads to tracked
+ * content (the same repository, or a linked worktree's link to the main
+ * checkout's `.devflow`) is read through, as every read of a linked folder is.
  */
 const PERSONAL_TRACKING_PATHSPECS = Object.freeze([
   ...DEVFLOW_SPELLINGS.flatMap(dir => CONFIG_SPELLINGS.map(file => ':(icase,literal)' + dir + '/' + file)),
@@ -720,21 +723,31 @@ function gitToplevel(exec, dir) {
  * builtin daemon's start-up — so the call turns it off for itself
  * (`-c core.fsmonitor=false`, D-NO-FSMONITOR): this resolver runs from session
  * hooks and must stay a pure read.
- *   tracked    exit 0 with at least one entry listed
- *   untracked  exit 0 with nothing listed, or any other answered exit (outside a
- *              repository git answers 128, and there is nothing to track)
- *   unknown    git did not answer, or its listing overflowed LINE_MAX_BUFFER —
- *              whether the file is personal cannot be known, so it is unreadable
- *              and its keys fail closed
+ *   tracked    at least one entry listed, whatever the exit status
+ *   untracked  exit 0 with nothing listed; and, unless `rootConfirmed`, any other
+ *              answered exit (outside a repository git answers 128, and there is
+ *              nothing to track)
+ *   unknown    git did not answer, or its listing overflowed LINE_MAX_BUFFER; and,
+ *              with `rootConfirmed`, an answered non-zero exit with nothing listed —
+ *              inside a repository the call has no reason to fail except a git that
+ *              cannot read its index. Whether the file is personal cannot be known,
+ *              so it is unreadable and its keys fail closed
+ * `--no-literal-pathspecs` leads the argv: an inherited GIT_LITERAL_PATHSPECS=1
+ * would read every pathspec as a plain path, magic included, list nothing and
+ * read as untracked.
  *
  * @param {ExecFn} exec
  * @param {string} root
+ * @param {boolean} rootConfirmed  git has already named `root` as a repository's top level
  * @returns {'tracked' | 'untracked' | 'unknown'}
  */
-function personalTracking(exec, root) {
-  const res = runGit(exec, root, ['-c', 'core.fsmonitor=false', 'ls-files', '-z', '--', ...PERSONAL_TRACKING_PATHSPECS], LINE_MAX_BUFFER);
+function personalTracking(exec, root, rootConfirmed) {
+  const res = runGit(exec, root,
+    ['--no-literal-pathspecs', '-c', 'core.fsmonitor=false', 'ls-files', '-z', '--', ...PERSONAL_TRACKING_PATHSPECS], LINE_MAX_BUFFER);
   if (!res.answered) return 'unknown';
-  return res.ok && res.stdout.length > 0 ? 'tracked' : 'untracked';
+  if (res.stdout.length > 0) return 'tracked';
+  if (res.ok) return 'untracked';
+  return rootConfirmed ? 'unknown' : 'untracked';
 }
 
 /**
@@ -775,10 +788,13 @@ function existsNoFollow(filePath) {
  * cannot disagree about a symlink, a size, a BOM, a duplicated key — or a
  * config.json git tracks (D-PERSONAL-UNTRACKED), which is absent to both. Its only
  * subprocess is that tracking check, made only when config.json exists; never
- * throws on a missing or unreadable file.
+ * throws on a missing or unreadable file. `deps.rootConfirmed` is for a caller
+ * that has already had git name `root`: the tracking check then reads a git that
+ * answers non-zero as unknown. The hooks do not pass it, and a root outside any
+ * repository reads as untracked.
  *
  * @param {string} root
- * @param {{ exec?: ExecFn }} [deps]
+ * @param {{ exec?: ExecFn, rootConfirmed?: boolean }} [deps]
  * @returns {RepoLayers}
  */
 function readRepoLayers(root, deps) {
@@ -786,7 +802,7 @@ function readRepoLayers(root, deps) {
   const devflow = path.join(root, '.devflow');
   const project = readConfigFile(path.join(devflow, 'project.json'), projectConfig.parseProjectBytes);
   const personalPath = path.join(devflow, 'config.json');
-  const tracking = existsNoFollow(personalPath) ? personalTracking(exec, root) : 'untracked';
+  const tracking = existsNoFollow(personalPath) ? personalTracking(exec, root, Boolean(deps && deps.rootConfirmed)) : 'untracked';
   const personal = tracking === 'tracked' ? projectConfig.parsePersonalBytes(null)
     : tracking === 'unknown' ? Object.freeze({ kind: 'invalid' })
       : readConfigFile(personalPath, projectConfig.parsePersonalBytes);
@@ -844,7 +860,7 @@ function resolveSettings(opts, deps) {
       const none = projectConfig.parseProjectBytes(null);
       return foldSettings({ project: none, personal: none, manifest, retiredPolicyFile: false });
     }
-    const layers = readRepoLayers(toplevel.root, { exec });
+    const layers = readRepoLayers(toplevel.root, { exec, rootConfirmed: true });
     /** @type {SettingsInputs} */
     const inputs = {
       project: layers.project,

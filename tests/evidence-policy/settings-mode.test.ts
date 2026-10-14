@@ -88,7 +88,7 @@ interface SettingsModule {
   readonly SETTINGS_LINE_RE: RegExp;
   readonly SETTINGS_FAIL_CLOSED_LINE: string;
   foldSettings(inputs: { project: unknown; personal: unknown; manifest: unknown; retiredPolicyFile: boolean }): Settings;
-  readRepoLayers(root: string, deps?: { exec?: ExecFn }): RepoLayers;
+  readRepoLayers(root: string, deps?: { exec?: ExecFn; rootConfirmed?: boolean }): RepoLayers;
   resolveSettings(opts: { dir: string; manifest?: unknown }, deps?: { exec?: ExecFn }): Settings;
   formatSettingsLine(s: Settings): string;
   isCoherentSettingsLine(line: unknown): boolean;
@@ -155,13 +155,15 @@ const NOT_A_REPO: ScriptedCall = { tool: 'git', args: ARGV.toplevel, exit: 128, 
  * personal file is opened at — the file in any spelling a case-folding file
  * system opens for it, or `.devflow` itself as a symlink, gitlink or file? One
  * call; any listed entry means tracked. APFS folds U+FB02 to "fl", U+FB01 to "fi"
- * and U+017F to "s", which git's ASCII-only `icase` does not.
+ * and U+017F to "s", which git's ASCII-only `icase` does not. The call leads with
+ * `--no-literal-pathspecs` so an inherited GIT_LITERAL_PATHSPECS=1 cannot turn the
+ * magic pathspecs into plain paths.
  */
 const FL = '\u{FB02}';
 const FI = '\u{FB01}';
 const LONG_S = '\u{17F}';
 const ARGV_TRACKED = [
-  '-c', 'core.fsmonitor=false', 'ls-files', '-z', '--',
+  '--no-literal-pathspecs', '-c', 'core.fsmonitor=false', 'ls-files', '-z', '--',
   ':(icase,literal).devflow/config.json',
   `:(icase,literal).devflow/con${FI}g.json`,
   `:(icase,literal).devflow/config.j${LONG_S}on`,
@@ -214,7 +216,7 @@ function settingsFor(files: { project?: string; personal?: string }, manifest: u
   const repo = dir ?? fs.mkdtempSync(path.join(tmp, 'repo-'));
   if (files.project !== undefined) writeRepoFile('project.json', files.project, repo);
   if (files.personal !== undefined) writeRepoFile('config.json', files.personal, repo);
-  return SETTINGS.resolveSettings({ dir: repo, manifest }, { exec: scriptedExec([TOPLEVEL(repo)]).exec });
+  return SETTINGS.resolveSettings({ dir: repo, manifest }, { exec: scriptedExec([TOPLEVEL(repo), UNTRACKED]).exec });
 }
 
 function lineFor(files: { project?: string; personal?: string }, manifest: unknown = MANIFEST_ON): string {
@@ -456,7 +458,7 @@ describe('fail-closed in-process', () => {
   it('main(): an injected hostile formatter is refused with exit 5', () => {
     vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     const out = SETTINGS.main(['node', SETTINGS_SCRIPT, root], {
-      exec: scriptedExec([TOPLEVEL(root)]).exec,
+      exec: scriptedExec([TOPLEVEL(root), UNTRACKED]).exec,
       formatLine: () => `${DEFAULT_LINE}\nTRACKER=jira`,
     });
     expect(out).toEqual({ code: 5, line: FAIL_CLOSED });
@@ -591,15 +593,29 @@ describe('D-PERSONAL-UNTRACKED: a tracked .devflow/config.json is ignored, with 
     expect(s.reviewPublication).toBe('off');
   });
 
+  it('a tracking check that answers non-zero inside the confirmed repository fails the personal fields closed', () => {
+    const s = resolveWith({ personal: '{"reviewPublication":"full"}' },
+      { tool: 'git', args: ARGV_TRACKED, exit: 128, stderr: 'fatal: index file corrupt\n' });
+    expect(s.unreadable).toBe('personal');
+    expect(s.reviewPublication).toBe('off');
+  });
+
   describe('the tracking check (#487): one bounded git read, answered from what it lists', () => {
-    const answer = (call: ScriptedCall): string => {
+    /**
+     * What the check reads `call` as, through the hooks' seam (the default) or with
+     * the root already confirmed as resolveSettings has it. The check must be made
+     * exactly once, as scripted.
+     */
+    const answer = (call: ScriptedCall, rootConfirmed = false): string => {
       writeRepoFile('config.json', '{"reviewPublication":"full"}');
-      const layers = SETTINGS.readRepoLayers(root, { exec: scriptedExec([call]).exec });
+      const { exec, recorded } = scriptedExec([call]);
+      const layers = SETTINGS.readRepoLayers(root, { exec, rootConfirmed });
+      expect(recorded.map(c => [c.file, ...c.args])).toEqual([['git', ...ARGV_TRACKED]]);
       if (layers.personalTracked) return 'tracked';
       return (layers.personal as { kind: string }).kind === 'invalid' ? 'unknown' : 'untracked';
     };
 
-    it('is a single git call with the fsmonitor override and bounded case-insensitive pathspecs, made only when config.json exists', () => {
+    it('is a single git call with literal pathspecs off, the fsmonitor override and bounded case-insensitive pathspecs, made only when config.json exists', () => {
       writeRepoFile('config.json', '{}');
       const { exec, recorded } = scriptedExec([UNTRACKED]);
       SETTINGS.readRepoLayers(root, { exec });
@@ -623,14 +639,26 @@ describe('D-PERSONAL-UNTRACKED: a tracked .devflow/config.json is ignored, with 
       expect(answer(UNTRACKED)).toBe('untracked');
     });
 
-    it('answers non-zero (outside a repository, 128) => untracked, as before: there is nothing to track', () => {
+    it('answers non-zero with a root the caller did not confirm (the hooks, outside a repository, 128) => untracked: there is nothing to track', () => {
       expect(answer({ tool: 'git', args: ARGV_TRACKED, exit: 128, stderr: 'fatal: not a git repository\n' })).toBe('untracked');
     });
 
-    it('a listing past the bound overflows, is unanswered, and fails closed rather than reading the file', () => {
+    it('answers non-zero with the root confirmed as a repository (git cannot read its index) => unknown, so the keys fail closed', () => {
+      expect(answer({ tool: 'git', args: ARGV_TRACKED, exit: 128, stderr: 'fatal: index file corrupt\n' }, true)).toBe('unknown');
+    });
+
+    it.each([false, true])('lists an entry yet exits non-zero (rootConfirmed %s) => tracked: a listed entry is tracked whatever the exit', (rootConfirmed) => {
+      expect(answer({ tool: 'git', args: ARGV_TRACKED, exit: 1, stdout: '.devflow/config.json\0' }, rootConfirmed)).toBe('tracked');
+    });
+
+    it.each([false, true])('lists nothing and exits 0 (rootConfirmed %s) => untracked', (rootConfirmed) => {
+      expect(answer(UNTRACKED, rootConfirmed)).toBe('untracked');
+    });
+
+    it.each([false, true])('a listing past the bound overflows, is unanswered, and fails closed rather than reading the file (rootConfirmed %s)', (rootConfirmed) => {
       const flood = '.devflow/CONFIG.json\0'.repeat(300);
       expect(Buffer.byteLength(flood)).toBeGreaterThan(4096);
-      expect(answer({ tool: 'git', args: ARGV_TRACKED, stdout: flood })).toBe('unknown');
+      expect(answer({ tool: 'git', args: ARGV_TRACKED, stdout: flood }, rootConfirmed)).toBe('unknown');
     });
   });
 
@@ -760,22 +788,31 @@ describe('D-PERSONAL-UNTRACKED: a tracked .devflow/config.json is ignored, with 
       realGit(repo, home, ['add', '-f', '--', ...paths]);
       realGit(repo, home, ['commit', '-q', '-m', 'commit the layout']);
     }
+    /** The hooks' seam, read in this process with `env` set for the one call. */
+    function layersUnder(repo: string, env: Readonly<Record<string, string>>): RepoLayers {
+      for (const [name, value] of Object.entries(env)) vi.stubEnv(name, value);
+      try {
+        return SETTINGS.readRepoLayers(repo);
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    }
     /** The personal layer counts as absent: the ceiling holds, the warning prints, the hooks' seam agrees. */
-    function expectPersonalIgnored(repo: string): void {
-      const run = runResolver({ home, args: [repo], script: SETTINGS_SCRIPT });
+    function expectPersonalIgnored(repo: string, env: Readonly<Record<string, string>> = {}): void {
+      const run = runResolver({ home, args: [repo], script: SETTINGS_SCRIPT, extraEnv: env });
       expect(run.status, run.stderr).toBe(0);
       expect(fieldOf(run.stdout.trim(), 'REVIEW_PUBLICATION')).toBe('auto');
       expect(run.stderr).toContain('.devflow/config.json is tracked by git');
-      const layers = SETTINGS.readRepoLayers(repo);
+      const layers = layersUnder(repo, env);
       expect(layers.personalTracked).toBe(true);
       expect(layers.personal).toEqual({ kind: 'absent' });
     }
-    function expectPersonalApplies(repo: string): void {
-      const run = runResolver({ home, args: [repo], script: SETTINGS_SCRIPT });
+    function expectPersonalApplies(repo: string, env: Readonly<Record<string, string>> = {}): void {
+      const run = runResolver({ home, args: [repo], script: SETTINGS_SCRIPT, extraEnv: env });
       expect(run.status, run.stderr).toBe(0);
       expect(fieldOf(run.stdout.trim(), 'REVIEW_PUBLICATION')).toBe('full');
       expect(run.stderr).toBe('');
-      expect(SETTINGS.readRepoLayers(repo).personalTracked).toBe(false);
+      expect(layersUnder(repo, env).personalTracked).toBe(false);
     }
 
     it('control: an untracked config.json beside a tracked project.json and tracked siblings still applies', () => {
@@ -841,12 +878,14 @@ describe('D-PERSONAL-UNTRACKED: a tracked .devflow/config.json is ignored, with 
     });
 
     // git's `icase` folds ASCII only; APFS also folds U+017F, U+FB01 and U+FB02.
-    it.each([
-      [`.devflow/config.j${LONG_S}on`],
-      [`.devflow/con${FI}g.json`],
-      [`.dev${FL}ow/config.json`],
-      [`.DEV${FL}OW/CON${FI}G.J${LONG_S}ON`],
-    ])('layout 2u/3u (index-only, every file system): the index names the Unicode-folded spelling %s beside the opened config.json', (rel) => {
+    // Every directory x file spelling the check lists, each also in ASCII capitals
+    // (not toUpperCase: it turns U+017F into "S" and U+FB01 into "FI"). The plain
+    // .devflow/config.json is the opened path itself, not a variant.
+    const FOLDED_SPELLINGS = ['.devflow', `.dev${FL}ow`]
+      .flatMap(dir => ['config.json', `con${FI}g.json`, `config.j${LONG_S}on`, `con${FI}g.j${LONG_S}on`].map(file => `${dir}/${file}`))
+      .flatMap(rel => [rel, rel.replace(/[a-z]/g, c => c.toUpperCase())])
+      .filter(rel => rel !== '.devflow/config.json');
+    it.each(FOLDED_SPELLINGS)('layout 2u/3u (index-only, every file system): the index names the Unicode-folded spelling %s beside the opened config.json', (rel) => {
       const repo = freshRepo('unicode-fold-index');
       writeAt(repo, '.devflow/config.json', FULL);
       indexOnly(repo, '100644', rel, FULL);
@@ -867,6 +906,44 @@ describe('D-PERSONAL-UNTRACKED: a tracked .devflow/config.json is ignored, with 
       indexOnly(repo, '120000', `.dev${FL}ow`, 'vendor/df');
       fs.symlinkSync(path.join('vendor', 'df'), path.join(repo, '.devflow'));
       expectPersonalIgnored(repo);
+    });
+
+    // An inherited GIT_LITERAL_PATHSPECS=1 makes git read every pathspec as a plain
+    // path, magic prefix included. The check pins its own pathspec mode, so the
+    // parent's environment cannot turn "tracked" into an empty listing.
+    describe('GIT_LITERAL_PATHSPECS=1 inherited from the caller', () => {
+      const LITERAL = { GIT_LITERAL_PATHSPECS: '1' };
+
+      it('control: an untracked config.json still applies', () => {
+        const repo = freshRepo('literal-control');
+        writeAt(repo, '.devflow/config.json', FULL);
+        expectPersonalApplies(repo, LITERAL);
+      });
+
+      it('exact path: a committed .devflow/config.json is still tracked', () => {
+        const repo = freshRepo('literal-exact');
+        writeAt(repo, '.devflow/config.json', FULL);
+        commitAll(repo, ['.devflow/config.json']);
+        expectPersonalIgnored(repo, LITERAL);
+      });
+
+      it('link: a committed .devflow symlink is still tracked', () => {
+        const repo = freshRepo('literal-link');
+        writeAt(repo, 'vendor/df/config.json', FULL);
+        fs.symlinkSync(path.join('vendor', 'df'), path.join(repo, '.devflow'));
+        commitAll(repo, ['.devflow', 'vendor/df/config.json']);
+        expectPersonalIgnored(repo, LITERAL);
+      });
+    });
+
+    it('a repository whose index git cannot read fails the personal layer closed instead of reading the file', () => {
+      const repo = freshRepo('corrupt-index');
+      writeAt(repo, '.devflow/config.json', FULL);
+      commitAll(repo, ['.devflow/config.json']);
+      fs.writeFileSync(path.join(repo, '.git', 'index'), 'not an index');
+      const run = runResolver({ home, args: [repo], script: SETTINGS_SCRIPT });
+      expect(run.status, run.stderr).toBe(0);
+      expect(fieldOf(run.stdout.trim(), 'REVIEW_PUBLICATION')).toBe('off');
     });
 
     it('layout 4: .devflow is a git submodule (gitlink) whose checkout holds config.json', () => {
@@ -1027,7 +1104,7 @@ describe('D-LENS-UNION: the default branch\'s compliance ids stay in the lens', 
   function lensFor(project: string | undefined, defaultBranch: readonly ScriptedCall[], manifest: unknown = OFF): Settings {
     const repo = fs.mkdtempSync(path.join(tmp, 'lens-'));
     if (project !== undefined) writeRepoFile('project.json', project, repo);
-    return SETTINGS.resolveSettings({ dir: repo, manifest }, { exec: scriptedExec([TOPLEVEL(repo), ...defaultBranch]).exec });
+    return SETTINGS.resolveSettings({ dir: repo, manifest }, { exec: scriptedExec([TOPLEVEL(repo), UNTRACKED, ...defaultBranch]).exec });
   }
   const onMain = (body: string | null): ScriptedCall[] => [ORIGIN_HEAD('main'), TRACKING_PROJECT('main', body)];
 
@@ -1071,7 +1148,7 @@ describe('D-LENS-UNION: the default branch\'s compliance ids stay in the lens', 
 
   it('the tracking copy is read at the branch origin/HEAD names, with a bounded buffer', () => {
     const repo = fs.mkdtempSync(path.join(tmp, 'lens-'));
-    const { exec, recorded } = scriptedExec([TOPLEVEL(repo), ORIGIN_HEAD('trunk'), TRACKING_PROJECT('trunk', '{"compliance":["sox"]}')]);
+    const { exec, recorded } = scriptedExec([TOPLEVEL(repo), UNTRACKED, ORIGIN_HEAD('trunk'), TRACKING_PROJECT('trunk', '{"compliance":["sox"]}')]);
     const s = SETTINGS.resolveSettings({ dir: repo, manifest: OFF }, { exec });
     expect(complianceTokenOf(s)).toBe('sox');
     const blobCall = recorded.find(c => c.args[0] === 'cat-file');
@@ -1226,7 +1303,7 @@ describe('whole-file rule: an unreadable project.json or config.json fails its o
     writeRepoFile('project.json', '{"compliance":["gdpr"]}', repo);
     writeRepoFile('config.json', '{"reviewPublication":', repo);
     const s = SETTINGS.resolveSettings({ dir: repo, manifest: COMPLIANCE_OFF_MACHINE }, {
-      exec: scriptedExec([TOPLEVEL(repo), ORIGIN_HEAD('main'), TRACKING_PROJECT('main', '{"compliance":["hipaa"]}')]).exec,
+      exec: scriptedExec([TOPLEVEL(repo), UNTRACKED, ORIGIN_HEAD('main'), TRACKING_PROJECT('main', '{"compliance":["hipaa"]}')]).exec,
     });
     expect(s.unreadable).toBe('personal');
     expect(SETTINGS.formatSettingsLine(s)).toBe(failClosedWith('gdpr,hipaa'));
@@ -1236,7 +1313,7 @@ describe('whole-file rule: an unreadable project.json or config.json fails its o
     const repo = fs.mkdtempSync(path.join(tmp, 'repo-'));
     writeRepoFile('project.json', '{ this is not json', repo);
     const s = SETTINGS.resolveSettings({ dir: repo, manifest: COMPLIANCE_OFF_MACHINE }, {
-      exec: scriptedExec([TOPLEVEL(repo), ORIGIN_HEAD('main'), TRACKING_PROJECT('main', '{"compliance":["hipaa"]}')]).exec,
+      exec: scriptedExec([TOPLEVEL(repo), UNTRACKED, ORIGIN_HEAD('main'), TRACKING_PROJECT('main', '{"compliance":["hipaa"]}')]).exec,
     });
     expect(s.unreadable).toBe('project');
     expect(s.repoCompliance).toBeNull();
@@ -1276,7 +1353,7 @@ describe('whole-file rule: an unreadable project.json or config.json fails its o
     const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     try {
       writeRepoFile('project.json', '{ this is not json');
-      const out = SETTINGS.main(['node', SETTINGS_SCRIPT, root], { exec: scriptedExec([TOPLEVEL(root)]).exec });
+      const out = SETTINGS.main(['node', SETTINGS_SCRIPT, root], { exec: scriptedExec([TOPLEVEL(root), UNTRACKED]).exec });
       expect(out).toEqual({ code: SETTINGS.EXIT_CODES.RESOLVED, line: failClosedWith('hipaa') });
       expect(out.code).toBe(0);
       expect(stderr.mock.calls.map(c => String(c[0])).join('')).toContain('.devflow/project.json');
@@ -1289,7 +1366,7 @@ describe('whole-file rule: an unreadable project.json or config.json fails its o
     vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     writeRepoFile('project.json', '{ this is not json');
     const out = SETTINGS.main(['node', SETTINGS_SCRIPT, root], {
-      exec: scriptedExec([TOPLEVEL(root)]).exec,
+      exec: scriptedExec([TOPLEVEL(root), UNTRACKED]).exec,
       formatLine: () => `${FAIL_CLOSED}\nTRACKER=jira`,
     });
     expect(out).toEqual({ code: 5, line: FAIL_CLOSED });
