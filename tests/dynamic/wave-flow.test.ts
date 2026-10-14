@@ -149,6 +149,8 @@ interface World {
   readonly refuseMerge?: readonly string[]
   /** Tickets whose red merge Git will not undo (`undone: false`). */
   readonly refuseUndo?: readonly string[]
+  /** Tickets whose undo Git reports as done (`undone: true`) with a head that is not the recorded pre-merge SHA. */
+  readonly undoWrongHead?: readonly string[]
   /** Tickets whose Gate 1 Validate never passes: the pass is exhausted after two Fix spawns. */
   readonly gate1Red?: readonly string[]
   /** Tickets whose Harden agent returns BLOCKED, in Gate 1 #1. */
@@ -180,6 +182,11 @@ interface World {
  */
 function createdBranch(ref: string): string {
   return `feat/${ref.replace(/[^A-Za-z0-9]/g, '').toLowerCase()}-work`
+}
+
+/** The integration head a stub Git records as baseSha before merging `ticket`. */
+function baseShaOf(ticket: string): string {
+  return createHash('sha1').update(`base:${ticket}`).digest('hex')
 }
 
 /** The `- **Branch name**:` a stub setup-task reports for `ref`: its script's, else createdBranch's; undefined ⇒ none. */
@@ -224,12 +231,15 @@ function stubAgent(world: World, spawns: Spawn[]): Agent {
       const mergeSha = createHash('sha1').update(`merge:${id}`).digest('hex')
       mergedBy.set(mergeSha, id)
       if (world.badBaseSha?.includes(id)) return { merged: true, mergeSha, treeEqual: true, baseSha: 'not-a-sha' }
-      const baseSha = world.sameSha?.includes(id) ? mergeSha : createHash('sha1').update(`base:${id}`).digest('hex')
+      const baseSha = world.sameSha?.includes(id) ? mergeSha : baseShaOf(id)
       return { merged: true, mergeSha, treeEqual: true, baseSha }
     }
     if (opts.agentType === 'Git' && prompt.startsWith('Undo the merge ')) {
       const sha = /^Undo the merge ([0-9a-f]{40}) on /.exec(prompt)?.[1] ?? ''
-      return world.refuseUndo?.includes(mergedBy.get(sha) ?? '') ? { undone: false, reason: 'integration HEAD moved' } : { undone: true }
+      const ticket = mergedBy.get(sha) ?? ''
+      if (world.refuseUndo?.includes(ticket)) return { undone: false, reason: 'integration HEAD moved' }
+      // A reset that took effect leaves the integration head on the recorded pre-merge SHA.
+      return { undone: true, head: world.undoWrongHead?.includes(ticket) ? sha : baseShaOf(ticket) }
     }
     if (opts.agentType === 'Validate' && prompt.includes('(merge commit ')) {
       // The workflow's post-merge Validate: red for a failMerge ticket, keyed by the merge commit it names.
@@ -1437,8 +1447,9 @@ describe('AC-8: the frozen dynamic-build anchors stay first, above every new ste
 //                        names both checks; a wave ticket runs the same skeleton.
 // D-WAVE-MERGE-VALIDATE  Git merges locally and validates nothing. The workflow spawns the
 //                        Validate after every kept merge; a merge counts as kept only on
-//                        PASS. On FAIL the workflow spawns the undo (`reset --keep`, never
-//                        `--hard`, never a push). A refused undo halts the wave.
+//                        PASS. On FAIL the workflow spawns the undo (`reset --keep` to the
+//                        recorded pre-merge SHA, never `--hard`, never a push). An undo that
+//                        is refused, or ends on another head, halts the wave.
 //
 // The skeletons are EXECUTED with stub agents, so a wording pin cannot stay green over a
 // loop that merges a red build. Each absence guard has a named collector, a non-empty
@@ -1684,17 +1695,25 @@ describe('#421 AC-22: a red post-merge Validate is undone, never left kept', () 
     expect(await collectRedMergeViolations(WAVE)).toEqual([])
   })
 
-  it('the undo prompt names the merge commit, reset --keep and the guards, and no --hard and no push', async () => {
+  it('the undo prompt runs its read-only checks, then reset --keep on the recorded pre-merge SHA, and no caret reset, no --hard and no push', async () => {
     const world: World = { order: ['#22'], tickets: { '#22': { issueId: '22', prLinkLine: 'Closes #22' } }, failMerge: ['#22'] }
     const run = await runWave(WAVE!, SINGLE!, world, {}, 'true')
     const [undo] = gitSpawns(run.spawns, 'Undo the merge ')
     const sha = /\(merge commit ([0-9a-f]{40})\)/.exec(run.spawns.find(s => s.agentType === 'Validate' && s.prompt.includes('(merge commit '))!.prompt)![1]
-    expect(undo.prompt).toContain(`git reset --keep ${sha}^1`)
+    const base = baseShaOf('#22')
     expect(undo.prompt).toContain(`no remote branch contains ${sha}`)
-    expect(undo.prompt).toContain(`the HEAD of ${INTEGRATION} still equals ${sha}`)
+    const checks = [
+      `git symbolic-ref --short HEAD must print ${INTEGRATION}`,
+      `git rev-parse refs/heads/${INTEGRATION} must print ${sha}`,
+      `git rev-parse ${sha}^1 must print ${base}`,
+    ].map(c => undo.prompt.indexOf(c))
+    expect(checks.every(at => at !== -1), 'all three read-only checks are named').toBe(true)
+    expect(checks, 'the checks run in order').toEqual([...checks].sort((a, b) => a - b))
+    expect(undo.prompt.indexOf(`git reset --keep ${base}`), 'the reset follows the checks').toBeGreaterThan(checks[2])
+    expect(undo.prompt).not.toContain(`reset --keep ${sha}`)
     expect(undo.prompt).not.toMatch(/--hard/)
     expect(undo.prompt).not.toMatch(/\bpush\b/i)
-    expect(undo.prompt).toContain('{"undone": true}')
+    expect(undo.prompt).toContain(`{"undone": true, "head": "<40-hex from git rev-parse refs/heads/${INTEGRATION}>"}`)
   })
 
   it('known-bad probe: a wave that never asks for the undo is reported by the same collector', async () => {
@@ -1721,12 +1740,27 @@ describe('#421 AC-22: a refused undo halts the wave and names the red integratio
   it('executed: no further merge or round, the row is not merged, and halted carries the merge commit', async () => {
     const run = await runWave(WAVE!, SINGLE!, world, {}, 'true')
     const sha = createHash('sha1').update('merge:#32').digest('hex')
-    expect(run.halted).toMatchObject({ ticket: '#32', mergeSha: sha })
+    expect(run.halted).toMatchObject({ ticket: '#32', mergeSha: sha, baseSha: baseShaOf('#32') })
     expect(run.halted?.reason).toContain('post-merge build red; merge not undone')
     expect(run.tickets.map(t => [t.ticket, t.merged, t.ran])).toEqual([['#31', true, true], ['#32', false, true], ['#33', false, false]])
     expect(gitSpawns(run.spawns, 'Merge ').map(s => s.prompt.split(' ')[1]), 'no merge after the halt').toEqual(['feat/31-work', 'feat/32-work'])
     expect(run.engines.map(e => e.args.ticket), 'the third ticket never started').toEqual(['#31', '#32'])
     expect(run.spawns.filter(s => s.agentType === 'Design'), 'no further round').toHaveLength(1)
+  })
+
+  it('an undo that reports done with a head other than the recorded pre-merge SHA halts like a refused undo', async () => {
+    const run = await runWave(WAVE!, SINGLE!, { ...world, refuseUndo: [], undoWrongHead: ['#32'] }, {}, 'true')
+    const sha = createHash('sha1').update('merge:#32').digest('hex')
+    expect(run.halted).toMatchObject({ ticket: '#32', mergeSha: sha, baseSha: baseShaOf('#32') })
+    expect(run.halted?.reason).toContain('post-merge build red; merge not undone')
+    expect(run.tickets.find(t => t.ticket === '#32')?.merged).toBe(false)
+    expect(run.tickets.find(t => t.ticket === '#33')?.ran, 'no further merge after the halt').toBe(false)
+  })
+
+  it('known-bad probe: a wave that trusts undone: true without the head check lets a wrong head pass', async () => {
+    const trusting = seedOnce(WAVE!, ' && undo.head === merge.baseSha', '')
+    const run = await runWave(trusting, SINGLE!, { ...world, refuseUndo: [], undoWrongHead: ['#32'] }, {}, 'true')
+    expect(run.halted, 'the seed removes the halt the head check raises').toBeNull()
   })
 
   const BAD_SHA_REASON = 'merge reported without a 40-hex mergeSha or baseSha; the integration branch may hold an unvalidated merge'

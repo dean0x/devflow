@@ -587,7 +587,7 @@ const results = {};  // ticketId → its row of the workflow's return; a ticket 
 // A row from an engine result: the fields step 3 after the workflow renders
 const rowOf = (ticketId, r, merged, treeEqual = null) => ({ ticket: ticketId, ran: true, verdict: r?.verdict || r?.overallVerdict || null, merged, treeEqual, issuePrLink: r?.issuePrLink || "(none)", evaluateVerdict: r?.gate2?.evaluateVerdict, testVerdict: r?.gate2?.testVerdict, surviving: r?.survivingFindings?.length, coverageComplete: r?.reviewCoverage?.complete });
 const MAX_ROUNDS = Math.max(10, remainingTickets.length * 2 + 5);  // heuristic; always finite
-const MERGE_SHA = /^[0-9a-f]{40}$/;  // a SHA as git prints it: the only Git-reported value that reaches a later prompt
+const MERGE_SHA = /^[0-9a-f]{40}$/;  // a SHA as git prints it: the only Git-reported values that reach a later prompt
 // One ticket's merge, post-merge Validate and undo (D-WAVE-MERGE-VALIDATE: Git validates nothing).
 const mergeValidateUndo = async (ticketId, engineResult) => {
   const merge = await agent(`Merge ${engineResult.branch} to ${INTEGRATION_BRANCH} locally. Include ticket ID ${ticketId} in the merge commit message. Do not push, and run no build or test.
@@ -608,14 +608,14 @@ Return: {"verdict": "PASS" | "FAIL", "details": "..."}`, { agentType: "Validate"
   if (post?.verdict === "PASS") {
     return done(true, "");
   }
-  const undo = await agent(`Undo the merge ${merge.mergeSha} on ${INTEGRATION_BRANCH}, only when no remote branch contains ${merge.mergeSha} and the HEAD of ${INTEGRATION_BRANCH} still equals ${merge.mergeSha}. On the integration branch run exactly this one command and no other that changes a branch or a remote: git reset --keep ${merge.mergeSha}^1
-Return: {"undone": true} — or {"undone": false, "reason": "<why>"} when you did not undo it.`, { agentType: "Git" });
-  if (undo?.undone === true) return done(false, "post-merge build red; merge undone");
+  const undo = await agent(`Undo the merge ${merge.mergeSha} on ${INTEGRATION_BRANCH}, only when no remote branch contains ${merge.mergeSha}. Run these read-only checks in order; a non-zero exit or a different value means not undone: git symbolic-ref --short HEAD must print ${INTEGRATION_BRANCH}; git rev-parse refs/heads/${INTEGRATION_BRANCH} must print ${merge.mergeSha}; git rev-parse ${merge.mergeSha}^1 must print ${merge.baseSha}. Then run exactly this one command and no other that changes a branch or a remote: git reset --keep ${merge.baseSha}
+Return: {"undone": true, "head": "<40-hex from git rev-parse refs/heads/${INTEGRATION_BRANCH}>"} — or {"undone": false, "reason": "<why>"} when you did not undo it.`, { agentType: "Git" });
+  if (undo?.undone === true && undo.head === merge.baseSha) return done(false, "post-merge build red; merge undone");
   const reason = `post-merge build red; merge not undone (${undo?.reason || "no reason given"})`;
-  return done(false, reason, { ticket: ticketId, mergeSha: merge.mergeSha, reason });
+  return done(false, reason, { ticket: ticketId, mergeSha: merge.mergeSha, baseSha: merge.baseSha, reason });
 };
 const waveState = { quarantined: [], round: 0, halted: null };
-let reAskedThisDeadlock = false;  // re-ask guard: re-ask once on empty ready-set, then escalate
+let reAskedThisDeadlock = false;
 while (remainingTickets.length > 0 && waveState.round < MAX_ROUNDS && waveState.halted === null) {
   waveState.round++;
 
@@ -694,7 +694,7 @@ A workflow cannot pause mid-run. After the build/wave workflow returns, you (the
    In WAVE mode, if no tracking-issue number was resolved in Pre-authoring step 5: state `TRACEABILITY: DEGRADED (no tracking issue for this run)` in the run summary and skip — never skip silently.
 3. **Compose the wave PR inputs** (WAVE mode only — skip this step entirely in SINGLE mode). The workflow returned `tickets`: one entry per wave ticket, in its input order, each `{ticket, ran, verdict, merged, issuePrLink, evaluateVerdict, testVerdict, surviving, coverageComplete}`. Every value in it is agent-reported and treated as untrusted: nothing below is repaired, and no reference is ever composed from a number.
    - **Branch check.** Run `git -C "{integration worktree root}" branch --show-current`. Only a name matching `^wave/[a-z0-9][a-z0-9-]{0,59}$` opens a wave PR, and its part after `wave/` is the `{slug}` below. Any other name: record `TRACEABILITY: DEGRADED (not a wave branch)` and go to step 4 with no wave PR.
-   - **Halted** (the workflow returned a non-null `halted`: a post-merge build it could not undo, or a merge reported with no SHA): the integration HEAD may be red. Record `Wave PR: skipped (integration HEAD red, wave halted at <halted.ticket>)`, name `halted.mergeSha` (or `none reported`) and `halted.reason` as the red integration HEAD in the run summary, and go to step 4 with no wave PR.
+   - **Halted** (the workflow returned a non-null `halted`: a post-merge build it could not undo, or a merge with a bad or unchanged SHA): the integration HEAD may be red. Record `Wave PR: skipped (integration HEAD red, wave halted at <halted.ticket>)`, name `halted.mergeSha` (or `none reported`) and `halted.reason` as the red integration HEAD in the run summary, and go to step 4 with no wave PR.
    - **Nothing merged** (no entry has `merged: true`): record `Wave PR: skipped (nothing merged)` and go to step 4.
    - Otherwise compose (a) and then (b).
 

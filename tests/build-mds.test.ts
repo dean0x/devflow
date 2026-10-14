@@ -1178,12 +1178,34 @@ function collectUndoDefects(text: string): string[] {
   const prompt = undoPrompt(text);
   if (prompt === null) return ['no undo spawn'];
   const out: string[] = [];
-  if (!prompt.includes('git reset --keep ${merge.mergeSha}^1')) out.push('the undo does not run reset --keep on the merge commit\'s first parent');
+  if (!prompt.includes('git reset --keep ${merge.baseSha}')) out.push('the undo does not run reset --keep on the recorded pre-merge SHA');
+  if (/git reset --keep \$\{merge\.mergeSha\}/.test(prompt)) out.push('the undo resets to the merge commit or its first parent');
   if (/reset\s+--hard|--hard/.test(prompt)) out.push('the undo names a hard reset');
   if (/\bpush\b/i.test(prompt)) out.push('the undo names a push');
   if (!prompt.includes('only when no remote branch contains ${merge.mergeSha}')) out.push('the undo is not gated on no remote branch containing the merge');
-  if (!prompt.includes('the HEAD of ${INTEGRATION_BRANCH} still equals ${merge.mergeSha}')) out.push('the undo is not gated on the integration HEAD still being the merge');
-  if (!prompt.includes('{"undone": true}') || !prompt.includes('{"undone": false, "reason":')) out.push('the undo does not pin both return shapes');
+  for (const check of ['git symbolic-ref --short HEAD', 'git rev-parse refs/heads/${INTEGRATION_BRANCH}', 'git rev-parse ${merge.mergeSha}^1']) {
+    if (!prompt.includes(check)) out.push(`the undo does not run the read-only check ${check}`);
+  }
+  if (!prompt.includes('{"undone": true, "head": "<40-hex from git rev-parse refs/heads/${INTEGRATION_BRANCH}>"}') || !prompt.includes('{"undone": false, "reason":')) out.push('the undo does not pin both return shapes');
+  return out;
+}
+
+/** The merge spawn's prompt template: from its lead to the Git spawn options. */
+function mergePrompt(text: string): string | null {
+  const at = text.indexOf('agent(`Merge ${engineResult.branch}');
+  const end = text.indexOf('{ agentType: "Git" }', at);
+  return at === -1 || end === -1 ? null : text.slice(at, end);
+}
+
+/** Named collector: what the merge instruction lacks. Its git lines are the ones the real-git test runs. */
+function collectMergeDefects(text: string): string[] {
+  const prompt = mergePrompt(text);
+  if (prompt === null) return ['no merge spawn'];
+  const out: string[] = [];
+  if (!prompt.includes('git merge --no-ff ${engineResult.branch}')) out.push('the merge is not pinned to git merge --no-ff');
+  if (!prompt.includes('run git rev-parse ${INTEGRATION_BRANCH} as baseSha')) out.push('the merge does not record the integration head as baseSha');
+  if (!prompt.includes('git merge --abort')) out.push('the merge does not abort on a conflict');
+  if (prompt.indexOf('as baseSha') > prompt.indexOf('git merge --no-ff')) out.push('the merge records baseSha after the merge');
   return out;
 }
 
@@ -1215,18 +1237,43 @@ describe('dynamic-build: the post-merge Validate belongs to the workflow, and a 
     };
   });
 
-  it('the undo names reset --keep on the first parent, its two gates and both returns, and no hard reset and no push', () => {
+  it('the undo runs three read-only checks, reset --keep on the recorded pre-merge SHA, the remote gate and both returns, and no caret reset, no hard reset and no push', () => {
     expect(collectUndoDefects(compiled)).toEqual([]);
     expect(collectUndoDefects(sources['dynamic-build.mds'])).toEqual([]);
   });
 
   it('known-bad probes: a hard reset, a push and a missing gate are each reported', () => {
-    const hard = compiled.replace('git reset --keep ${merge.mergeSha}^1', 'git reset --hard ${merge.mergeSha}^1');
-    expect(collectUndoDefects(hard)).toEqual(expect.arrayContaining(['the undo does not run reset --keep on the merge commit\'s first parent', 'the undo names a hard reset']));
+    const hard = compiled.replace('git reset --keep ${merge.baseSha}', 'git reset --hard ${merge.baseSha}');
+    expect(hard, 'the seed must land').not.toBe(compiled);
+    expect(collectUndoDefects(hard)).toEqual(expect.arrayContaining(['the undo does not run reset --keep on the recorded pre-merge SHA', 'the undo names a hard reset']));
+    const caret = compiled.replace('git reset --keep ${merge.baseSha}', 'git reset --keep ${merge.mergeSha}^1');
+    expect(caret, 'the seed must land').not.toBe(compiled);
+    expect(collectUndoDefects(caret)).toEqual(['the undo does not run reset --keep on the recorded pre-merge SHA', 'the undo resets to the merge commit or its first parent']);
+    const unchecked = compiled.replace('git rev-parse ${merge.mergeSha}^1 must print', 'git log -1 must print');
+    expect(unchecked, 'the seed must land').not.toBe(compiled);
+    expect(collectUndoDefects(unchecked)).toEqual(['the undo does not run the read-only check git rev-parse ${merge.mergeSha}^1']);
     const pushing = compiled.replace('and no other that changes a branch or a remote', 'then push the branch');
     expect(collectUndoDefects(pushing)).toEqual(['the undo names a push']);
     expect(collectUndoDefects(compiled.replace('only when no remote branch contains ${merge.mergeSha}', 'whether or not a branch contains ${merge.mergeSha}'))).toEqual(['the undo is not gated on no remote branch containing the merge']);
     expect(collectUndoDefects('nothing')).toEqual(['no undo spawn']);
+  });
+
+  it('the merge records baseSha, then runs git merge --no-ff, and aborts on a conflict', () => {
+    expect(collectMergeDefects(compiled)).toEqual([]);
+    expect(collectMergeDefects(sources['dynamic-build.mds'])).toEqual([]);
+  });
+
+  it('known-bad probes: a plain merge, a missing baseSha record and a merge that never aborts are each reported', () => {
+    const plain = compiled.replace('git merge --no-ff ${engineResult.branch}', 'git merge ${engineResult.branch}');
+    expect(plain, 'the seed must land').not.toBe(compiled);
+    expect(collectMergeDefects(plain)).toEqual(['the merge is not pinned to git merge --no-ff', 'the merge records baseSha after the merge']);
+    const unrecorded = compiled.replace('run git rev-parse ${INTEGRATION_BRANCH} as baseSha', 'note the head');
+    expect(unrecorded, 'the seed must land').not.toBe(compiled);
+    expect(collectMergeDefects(unrecorded)).toContain('the merge does not record the integration head as baseSha');
+    const nothing = compiled.replace('git merge --abort', 'git status');
+    expect(nothing, 'the seed must land').not.toBe(compiled);
+    expect(collectMergeDefects(nothing)).toEqual(['the merge does not abort on a conflict']);
+    expect(collectMergeDefects('nothing')).toEqual(['no merge spawn']);
   });
 
   it('no Git prompt and no doctrine line in dynamic-build, _wave or _engine asks Git to run Validate', () => {
