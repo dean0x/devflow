@@ -299,6 +299,12 @@ describe('the accept rule keeps its four strict clauses', () => {
     expect(collectAcceptClauseDefects(paragraph)).toEqual([])
   })
 
+  it('the define body names no config path and ends on the one-sentence source rule', () => {
+    const body = defineBody(source(PARTIAL), 'settings_resolve')
+    expect(body).not.toMatch(/project\.json|config\.json|manifest/)
+    expect(body.endsWith('\n\nThe accepted line is the only source of these values.')).toBe(true)
+  })
+
   it('known-bad probes: a dropped, reworded or reordered clause is reported', () => {
     expect(collectAcceptClauseDefects(paragraph.replace('it is exactly two lines', 'it is a line'))).toEqual(['exactly two lines: missing'])
     expect(collectAcceptClauseDefects(paragraph.replace('`exit=0` last', '`exit=0` first'))).toEqual(['exit=0 last: missing'])

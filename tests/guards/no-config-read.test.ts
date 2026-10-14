@@ -24,8 +24,8 @@
  *   redirect  input redirection from the path: "< .devflow/project.json", and
  *             the `$(<file)` read.
  *
- * Deliberately NOT verbs: `source` and `type`, which prompts use as nouns ("the
- * only source of these values") beside the paths far more than as commands.
+ * Deliberately NOT verbs: `source` and `type`, which prompts use as nouns far
+ * more than as commands ("the only source of these values", beside a path).
  *
  * The unit is a line, with backslash-continued shell lines joined first, because
  * prompts write a paragraph or a list item as one line and an instruction often
@@ -36,7 +36,7 @@
  * WHAT IS NOT A READ, and why the matcher passes it:
  *   - a third-person description — "the script alone folds …", "the resolver
  *     reads …": `reads`/`folds` are not imperative forms, so a prompt may say who
- *     reads the file (the settings partial documents its sources this way);
+ *     reads the file;
  *   - a negated instruction — "never read", "do not open", "without reading":
  *     NEGATION_BEFORE_VERB, checked in the few characters before the verb;
  *   - a location or ownership mention — a table row, a gitignore carve-out line,
@@ -494,7 +494,7 @@ describe('no compiled prompt reads .devflow/project.json or .devflow/config.json
 
   it('negative controls: mentions that are not reads are not reported', () => {
     const controls = [
-      // The settings partial documents its sources in the third person.
+      // A third-person description of where the values come from.
       'The accepted line is the only source of these values: the script alone folds the committed `.devflow/project.json`, the personal `.devflow/config.json` and the machine manifest.',
       'The resolver reads `.devflow/project.json` and the personal `.devflow/config.json`.',
       // Negated instructions.
