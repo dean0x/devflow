@@ -1064,25 +1064,55 @@ describe('#421 AC-5: Phase 10 pushes first, unforced and checked, and a failed p
   })
 })
 
-/** Named collector: what Phase 6's Validate spawn lacks for its file list. */
+const BRANCH_DIFF = 'FILES_CHANGED: {output of `git diff --name-only {base}...HEAD`}'
+const CODE_AGENT_LIST = '{list of files from Code agent output}'
+
+/** The spawns that take the branch diff: [phase heading, label, agent type, a line only that spawn carries]. */
+const BRANCH_DIFF_SPAWNS: ReadonlyArray<readonly [string, string, string, string]> = [
+  [H.p3, 'Phase 3 Polish', 'Polish', 'FILES_CHANGED:'],
+  [H.p4, 'Phase 4 Harden', 'Harden', 'FILES_CHANGED:'],
+  [H.p5, 'Phase 5 Evaluate', 'Evaluate', 'FILES_CHANGED:'],
+  [H.p6, 'Phase 6 Validate', 'Validate', 'VALIDATION_SCOPE: full'],
+  [H.p7, 'Phase 7 Test', 'Test', 'FILES_CHANGED:'],
+]
+
+/** Named collector: the spawns whose file list is not the branch diff, because the Code agent's own list names only the last phase of a sequential run. */
 function collectFilesChangedDefects(md: string): string[] {
-  const section = phaseSection(md, H.p6)
-  if (section === null) return ['no Phase 6 section']
-  const spawn = parseFences(section).find(f => isAgentBlock(f, 'Validate') && f.includes('VALIDATION_SCOPE: full'))
-  if (spawn === undefined) return ['Phase 6 has no full Validate spawn']
-  return spawn.includes('FILES_CHANGED: {output of `git diff --name-only {base}...HEAD`}') ? [] : ['the Validate spawn takes the Code agent\'s file list, which misses the Polish, Harden and fix commits']
+  const out = BRANCH_DIFF_SPAWNS.flatMap(([heading, label, type, marker]) => {
+    const section = phaseSection(md, heading)
+    if (section === null) return [`no ${label} section`]
+    const spawn = parseFences(section).find(f => isAgentBlock(f, type) && f.includes(marker))
+    if (spawn === undefined) return [`${label} has no spawn`]
+    return spawn.includes(BRANCH_DIFF) ? [] : [`the ${label} spawn takes the Code agent's file list, not the branch diff`]
+  })
+  return md.includes(CODE_AGENT_LIST) ? [...out, 'a spawn still takes the Code agent\'s file list'] : out
 }
 
-describe('#421: Phase 6 hands Validate the branch diff, not the Code agent\'s list', () => {
-  it('FILES_CHANGED is `git diff --name-only {base}...HEAD`', () => {
+describe('#421, #452: every spawn after Phase 2 gets the branch diff, not the Code agent\'s list', () => {
+  it('FILES_CHANGED is `git diff --name-only {base}...HEAD` at Polish, Harden, Evaluate, Validate and Test', () => {
+    expect(BRANCH_DIFF_SPAWNS.length, 'the site table is empty, so this guard proves nothing').toBe(5)
     expect(collectFilesChangedDefects(implementMd())).toEqual([])
   })
 
-  it('known-bad probe: the Code agent\'s list is reported', () => {
+  it('known-bad probe: the Code agent\'s list is reported at Validate', () => {
     const md = implementMd()
-    const old = md.replace('FILES_CHANGED: {output of `git diff --name-only {base}...HEAD`}\nVALIDATION_SCOPE: full', 'FILES_CHANGED: {list of files from Code agent output}\nVALIDATION_SCOPE: full')
+    const old = md.replace(`${BRANCH_DIFF}\nVALIDATION_SCOPE: full`, `FILES_CHANGED: ${CODE_AGENT_LIST}\nVALIDATION_SCOPE: full`)
     expect(old, 'the seed must land').not.toBe(md)
-    expect(collectFilesChangedDefects(old)).toHaveLength(1)
+    expect(collectFilesChangedDefects(old)).toEqual(["the Phase 6 Validate spawn takes the Code agent's file list, not the branch diff", "a spawn still takes the Code agent's file list"])
+  })
+
+  it.each(BRANCH_DIFF_SPAWNS.filter(([, , type]) => type !== 'Validate').map(([heading, label]) => [label, heading] as const))('known-bad probe: the Code agent\'s list is reported at %s', (label, heading) => {
+    const md = implementMd()
+    const section = phaseSection(md, heading)!
+    const old = md.replace(section, section.replace(BRANCH_DIFF, `FILES_CHANGED: ${CODE_AGENT_LIST}`))
+    expect(old, 'the seed must land').not.toBe(md)
+    expect(collectFilesChangedDefects(old)).toEqual([`the ${label} spawn takes the Code agent's file list, not the branch diff`, "a spawn still takes the Code agent's file list"])
+  })
+
+  it('known-bad probe: a lost site is reported', () => {
+    const md = implementMd()
+    const section = phaseSection(md, H.p3)!
+    expect(collectFilesChangedDefects(md.replace(section, section.replace(/```[\s\S]*```/, '')))).toEqual(['Phase 3 Polish has no spawn'])
   })
 })
 

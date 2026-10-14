@@ -182,13 +182,13 @@ Based on Setup context (plan document, issue body, or conversation context), use
 
 **Strategy Selection**:
 - If plan document provided: use `execution-strategy` from frontmatter (default: SINGLE_CODE_AGENT if absent)
-- Otherwise: default to SINGLE_CODE_AGENT unless task description signals high complexity
+- Otherwise: SINGLE_CODE_AGENT, because there is no Subtask Breakdown to split
 
-| Strategy | When | Frequency |
-|----------|------|-----------|
-| **SINGLE_CODE_AGENT** | Default. Coherent A→Z implementation | ~80% |
-| **SEQUENTIAL_CODE_AGENTS** | Context overflow risk, layered dependencies | ~15% |
-| **PARALLEL_CODE_AGENTS** | True artifact independence (rare) | ~5% |
+| Strategy | When |
+|----------|------|
+| **SINGLE_CODE_AGENT** | Default. Coherent A→Z implementation |
+| **SEQUENTIAL_CODE_AGENTS** | The plan writes >= 10 files or has >= 7 steps |
+| **PARALLEL_CODE_AGENTS** | True artifact independence (rare) |
 
 ---
 
@@ -211,7 +211,7 @@ DECISIONS_CONTEXT: {decisions_context}
 
 ---
 
-**SEQUENTIAL_CODE_AGENTS** (for HIGH/CRITICAL context risk):
+**SEQUENTIAL_CODE_AGENTS** (>= 10 files or >= 7 steps):
 
 Spawn Code agents one at a time. Each appends its own phase section to the handoff file, and the next reads only the section before it:
 
@@ -306,7 +306,7 @@ After the Code agent completes, spawn Polish agent to polish the code. The Phase
 Agent(subagent_type="Polish"):
 "Polish recently implemented code
 Task: {task description}
-FILES_CHANGED: {list of files from Code agent output}
+FILES_CHANGED: {output of `git diff --name-only {base}...HEAD`}
 Focus on code modified by Code agent, apply project standards, enhance clarity
 Commit any improvements with a conventional-commit message."
 ```
@@ -321,7 +321,7 @@ After Polish agent completes, spawn Harden agent as the quality gate:
 ```
 Agent(subagent_type="Harden"):
 "TASK_DESCRIPTION: {task description}
-FILES_CHANGED: {list of files from Code agent output}
+FILES_CHANGED: {output of `git diff --name-only {base}...HEAD`}
 <!-- learning:on -->
 DECISIONS_CONTEXT: {decisions_context}
 <!-- learning:end -->
@@ -342,7 +342,7 @@ After Harden agent passes, spawn Evaluate agent to validate alignment. Evaluate 
 Agent(subagent_type="Evaluate"):
 "ORIGINAL_REQUEST: {task description or issue content}
 EXECUTION_PLAN: {execution plan from Phase 1}
-FILES_CHANGED: {list of files from Code agent output}
+FILES_CHANGED: {output of `git diff --name-only {base}...HEAD`}
 ACCEPTANCE_CRITERIA: {extracted criteria if available}
 FEATURE_KNOWLEDGE: {feature_knowledge_rules}
 Validate alignment with request and plan. Report ALIGNED or MISALIGNED with details."
@@ -428,7 +428,7 @@ After Phase 6 passes, spawn Test agent for scenario-based acceptance testing:
 Agent(subagent_type="Test"):
 "ORIGINAL_REQUEST: {task description or issue content}
 EXECUTION_PLAN: {execution plan from Phase 1}
-FILES_CHANGED: {list of files from Code agent output}
+FILES_CHANGED: {output of `git diff --name-only {base}...HEAD`}
 ACCEPTANCE_CRITERIA: {extracted criteria if available}
 TEST_PLAN: {the TP lines of the evidence file's ## Test Plan section, or (none)}
 Design and execute scenario-based acceptance tests. Report PASS or FAIL with evidence."
