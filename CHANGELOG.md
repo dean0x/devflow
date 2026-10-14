@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A gate level on the settings line, and the `devflow gates` command** ([#472](https://github.com/dean0x/devflow/issues/472)). The settings line ends with `GATE_LEVEL=<full|standard|lean>`. The level comes from a personal `gateLevel` key in `.devflow/config.json`, then from the machine default `features.gateLevel` in `~/.devflow/manifest.json`, then from `standard`. The personal key may raise or lower the level. It is not a narrow-only switch, a `gateLevel` in `project.json` is ignored, and no command writes the personal key. A malformed value reads as `full`. `devflow gates --set <level>` writes the machine default and nothing else. `devflow gates --status` shows the level in effect, the layer that decided it and the machine default. The level has no effect yet: no command reads it until [#473](https://github.com/dean0x/devflow/issues/473), [#474](https://github.com/dean0x/devflow/issues/474) and [#480](https://github.com/dean0x/devflow/issues/480) do. **Run `devflow init` after you update.** `devflow init --hud-only` and a plugin-only update refresh the resolver script but not the installed prompts, so until a full `devflow init` every installed command falls back to its fail-closed settings value. There is no team floor: a repository that declares compliance can run a lower personal level.
+- **`devflow init --hud-only` prints a line when the installed prompts come from another devflow version** ([#472](https://github.com/dean0x/devflow/issues/472)). It tells you to run `devflow init`.
+- **Known limits of the gate level** ([#472](https://github.com/dean0x/devflow/issues/472)). A corrupt manifest, or one over 1 MiB, reads as the `standard` level, and `devflow gates --status` warns that `devflow init` will replace the file. `devflow init` still overwrites a corrupt or rejected manifest, and the stored level is lost with it. Two commands that write the manifest at the same moment can lose one update.
+
 ### Changed
 
 - **`/implement` splits long plans into sequential Code phases; a run with no plan stays single** ([#452](https://github.com/dean0x/devflow/issues/452)).

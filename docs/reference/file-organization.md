@@ -14,7 +14,7 @@ devflow/
 │   │   │                             #   uninstall.ts, safe-delete.ts, security.ts, debug.ts,
 │   │   │                             #   capture.ts, legacy-hooks.ts, compliance.ts,
 │   │   │                             #   compliance-prompts.ts, attribution-prompts.ts,
-│   │   │                             #   prompt-io.ts, proxy.ts, agents.ts, knowledge/
+│   │   │                             #   prompt-io.ts, proxy.ts, agents.ts, gates.ts, knowledge/
 │   │   ├── tui/                      # Generic TUI shell — runTui<S,A> driver, normalizeKey, cell helpers
 │   │   ├── flags-view/               # Claude Code flags editor TUI — standalone `devflow flags` command, inline screen mode (state.ts, render.ts, terminal.ts, index.ts)
 │   │   └── agents-view/              # Per-agent model config TUI (state.ts, render.ts, terminal.ts)
@@ -86,7 +86,7 @@ devflow/
 │           ├── hud.sh                # HUD status-line entry script
 │           ├── redact-secrets.cjs    # D11 secret scrubber for every posted body and notes file
 │           ├── resolve-evidence-policy.cjs # Resolves EVIDENCE_POLICY from .devflow/project.json `evidence` (a retired .devflow/policy.json counts by presence only: required); writes nothing
-│           ├── resolve-settings.cjs  # Local settings resolver: folds project.json, config.json and the machine manifest into one settings line; no network, writes nothing
+│           ├── resolve-settings.cjs  # Local settings resolver: folds project.json, config.json and the machine manifest into one settings line, the gate level included; no network, writes nothing
 │           ├── pr-evidence.cjs       # Pure core of test-plan evidence: grammars, markers, the state ladder
 │           ├── verify-evidence.cjs   # I/O half of test-plan evidence: check, render, verify, splice, readback
 │           ├── release-trace.cjs     # Git-only release trace: last release tag + per-commit trace map

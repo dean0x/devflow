@@ -120,7 +120,7 @@ npx devflow-kit knowledge --status          # Show current status
 
 `memory --status`, `learning --status` and `knowledge --status` report the machine-wide switch. A repository can only narrow it: when the switch is on but the current directory's repository turns the feature off — under `features` in the committed `.devflow/project.json`, or in your personal `.devflow/config.json` — the output adds `Effective here: disabled (<file>)`, naming that file. When nothing narrows it, the line is absent and the output is unchanged. `knowledge --status` also prints `Effective here: disabled (<file> is unreadable)` when a repository file exists but is not a JSON object: commands then switch knowledge write-back off, while memory and learning capture carry on as the machine switch says. `--enable` turns a feature on in every project, and says so, but a repository can still opt out this way.
 
-When the current checkout's `.devflow/config.json` is tracked by git, `memory`, `learning`, `knowledge` and `tracker --status` also warn that devflow ignores it — the file holds personal settings, and a committed copy would let a branch set them for whoever checks it out — and say how to fix it: untrack the tracked entry with `git rm --cached`, then check or delete the file, because untracking leaves the committed bytes on disk as your personal file. The warning never prints the entry names.
+When the current checkout's `.devflow/config.json` is tracked by git, `memory`, `learning`, `knowledge`, `tracker --status` and `gates --status` also warn that devflow ignores it — the file holds personal settings, and a committed copy would let a branch set them for whoever checks it out — and say how to fix it: untrack the tracked entry with `git rm --cached`, then check or delete the file, because untracking leaves the committed bytes on disk as your personal file. The warning never prints the entry names.
 
 ## Behavior
 
@@ -222,6 +222,70 @@ Two facts behind Linear traceability are **inherited rather than measured**, and
 - **A duplicate back-link is possible.** On a stock Linear workspace devflow cannot ask the tracker which account it is, so it cannot tell its own comments from anyone else's — the lowest rung of its dedup ladder, rank 4. It therefore **posts with a warning** rather than staying silent: every run emits `TRACEABILITY: DEGRADED (dedup unavailable — duplicate possible)`, and each comment carries a first-line marker plus the devflow project URL so a later run can recognise it. A missing release back-link is worse than a second one you were told about.
 
 Both are tracked in [issue #343](https://github.com/dean0x/devflow/issues/343), which names the two files the borrowed values live in so a measurement lands in one change.
+
+## Gate Level
+
+The gate level is one of three words that say how much checking a command applies. Every command reads it from the one local settings line, as `GATE_LEVEL=<full|standard|lean>`, never from a file.
+
+| Level | Meaning |
+|---|---|
+| `full` | The most checking. Any value that is not one of the three levels also reads as `full`. |
+| `standard` | The default when no level is set. |
+| `lean` | The least checking. |
+
+**No effect yet.** The level changes no prompt and no command until issues #473, #474 and #480 read it. Until then, setting it only records the choice.
+
+```bash
+npx devflow-kit gates --status      # The level in effect here, which layer decided it, and the machine default
+npx devflow-kit gates --set lean    # Set the machine default: full, standard or lean
+npx devflow-kit gates               # No flag: print usage and the valid levels
+```
+
+**Precedence.** The level in effect comes from the first of these that holds a value:
+
+1. A top-level `gateLevel` key in your personal `.devflow/config.json`.
+2. The machine default, `features.gateLevel` in `~/.devflow/manifest.json`.
+3. `standard`.
+
+**Raise or lower.** The memory, learning and knowledge switches are narrow-only: a repository file can turn them off but never on. The gate level is not a switch. Your personal `gateLevel` may raise the level above the machine default as well as lower it. The committed `.devflow/project.json` has no `gateLevel`: a key of that name there is ignored, and there is no team floor, so a repository that declares compliance can still run a lower personal level.
+
+**Who writes what.** `gates --set` writes the machine default and nothing else: it changes only `features.gateLevel` and `updatedAt` in the manifest, never `project.json` or `config.json`, and it installs nothing and re-arms nothing. A repeat prints `Gate level: <level> (unchanged)` and writes nothing. No command writes the personal key. Set it by hand in the repository's `.devflow/config.json`, which is personal, so keep it out of git:
+
+```json
+{"gateLevel":"lean"}
+```
+
+The machine default sits in `~/.devflow/manifest.json` as `features.gateLevel`; `gates --set` writes it, and a hand edit has the same effect:
+
+```json
+{"features":{"gateLevel":"lean"}}
+```
+
+The level is matched **exactly**. `--set` rejects `Lean`, `lean ` with a trailing space, an empty value and a missing value with exit 1, and names the valid levels. It exits 1, with nothing written, when there is no manifest (run `devflow init`), when the manifest is corrupt (a message names the path and says nothing changed) and when the directory cannot be written.
+
+**Invalid values.** A `gateLevel` that is not exactly `full`, `standard` or `lean` is malformed, and this includes `Lean`, a trailing space, an empty string, `null`, a number and a duplicated key. A malformed level reads as `full` and is never repaired:
+
+- A malformed personal value does not fall through to the machine default. Only the level becomes `full`; every other setting reads as if the key were absent.
+- A malformed machine value reads as `full` and stays in the manifest as written. Unrelated commands keep it.
+- A personal `config.json` or a `project.json` that cannot be read, or a git check that fails, fails the whole settings line closed, and the level is `full`.
+- A corrupt manifest and one over 1 MiB read as no machine default, so the level is `standard`. A manifest that is valid JSON but lacks a field devflow requires keeps its stored level.
+
+**A tracked `config.json`.** A `config.json` that git tracks is ignored as if it were absent, so its `gateLevel` does not apply, and `gates --status` warns with the fix (see the memory, learning and knowledge section above).
+
+**`--status`.** It resolves the settings once, writes nothing, and always exits 0:
+
+```text
+Effective lean (personal)
+Machine full
+```
+
+The first line is the level in effect and the layer that decided it (`default`, `machine` or `personal`). `, invalid` follows the layer when it holds a malformed value, and the warning names `config.json` and says that `full` is in effect; the bad value is never printed. A fail-closed result prints `Effective full (fail-closed: <reason>)`, or `reason unknown`, with no layer. The second line is the machine default: a level, `none`, `unknown` when it could not be read, or `invalid (manifest.json; reads as full)`. If the settings resolver cannot load, the first line reads `Effective level unknown`.
+
+If the manifest is corrupt, over 1 MiB, or valid JSON that devflow rejects, `--status` warns that `devflow init` will replace the file, and the machine default in it is lost with the rest. A plain `devflow init` over a manifest that devflow reads keeps the level.
+
+**Reset, update and uninstall.** `devflow init --reset` removes the machine default, so the level reads `standard` again unless a personal level is set; a personal key in `config.json` survives the reset. A plain `devflow init`, `devflow init --hud-only` and every command that writes the manifest keep the stored value as it is. A full `devflow uninstall` removes the manifest, and the machine default with it; `devflow uninstall --plugin` keeps it. Your personal key lives in the repository's `.devflow/config.json`, which uninstall removes only if you accept the offer to remove that repository's `.devflow/`.
+
+**After an update, run `devflow init`.** The settings line gained the `GATE_LEVEL` field, and the installed command prompts must carry the matching pattern. `devflow init --hud-only` and a plugin-only update refresh the resolver script but not those prompts, so until a full `devflow init` every installed command that reads the settings line falls back to its fail-closed value. `devflow init --hud-only` prints one line when the installed prompts come from a different devflow version than the running CLI.
 
 ## Rules
 
