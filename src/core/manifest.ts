@@ -163,6 +163,30 @@ function parseManifestFlags(
 }
 
 /**
+ * Whether a parsed manifest object carries every field {@link readManifest}
+ * requires: a version, a plugin list, a `features` object with boolean `ambient`
+ * and `memory`, and string `installedAt` and `updatedAt`. Pure. A manifest that
+ * fails it reads as "no prior install".
+ *
+ * Exported so a raw reader can tell a manifest this reader rejects from one it
+ * accepts without calling it: readManifest heal-writes, and a read-only status
+ * must not.
+ */
+export function hasRequiredManifestFields(data: Record<string, unknown>): boolean {
+  const features = data.features as Record<string, unknown> | undefined;
+  return !(
+    !data.version ||
+    !Array.isArray(data.plugins) ||
+    typeof features !== 'object' ||
+    features === null ||
+    typeof features.ambient !== 'boolean' ||
+    typeof features.memory !== 'boolean' ||
+    typeof data.installedAt !== 'string' ||
+    typeof data.updatedAt !== 'string'
+  );
+}
+
+/**
  * Read and parse the manifest file. Returns null if missing or corrupt.
  *
  * Self-heals the following on-disk inconsistencies:
@@ -189,19 +213,8 @@ export async function readManifest(
   try {
     const content = await fs.readFile(manifestPath, 'utf-8');
     const data = JSON.parse(content) as Record<string, unknown>;
-    const features = data.features as Record<string, unknown> | undefined;
-    if (
-      !data.version ||
-      !Array.isArray(data.plugins) ||
-      typeof features !== 'object' ||
-      features === null ||
-      typeof features.ambient !== 'boolean' ||
-      typeof features.memory !== 'boolean' ||
-      typeof data.installedAt !== 'string' ||
-      typeof data.updatedAt !== 'string'
-    ) {
-      return null;
-    }
+    if (!hasRequiredManifestFields(data)) return null;
+    const features = data.features as Record<string, unknown>;
 
     // D-FEATURES-ABSENT-ON (a sub-decision of D-FEATURES-NARROW-ONLY,
     // src/core/feature-switch.ts): knowledge and learning are machine-wide
