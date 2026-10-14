@@ -1219,11 +1219,12 @@ describe('GATE_LEVEL: personal config.json, then the machine manifest, then stan
     it('falls to the machine value, and stderr tells the user to untrack the file', () => {
       const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
       vi.stubEnv('HOME', home);
-      fs.writeFileSync(path.join(home, '.devflow', 'manifest.json'), JSON.stringify({ features: { gateLevel: 'full' } }));
-      writeRepoFile('config.json', '{"gateLevel":"lean"}');
+      // The machine level is neither the tracked file's `full` nor the fail-closed `full`, so only a fall to the machine layer reads lean.
+      fs.writeFileSync(path.join(home, '.devflow', 'manifest.json'), JSON.stringify({ features: { gateLevel: 'lean' } }));
+      writeRepoFile('config.json', '{"gateLevel":"full"}');
       const out = SETTINGS.main(['node', SETTINGS_SCRIPT, root], { exec: scriptedExec([TOPLEVEL(root), TRACKED, ORIGIN_HEAD_UNSET]).exec });
       expect(out.code).toBe(0);
-      expect(out.line.endsWith(' GATE_LEVEL=full')).toBe(true);
+      expect(out.line.endsWith(' GATE_LEVEL=lean')).toBe(true);
       expect(stderr.mock.calls.map(c => String(c[0])).join('')).toContain('Git tracks an entry at or under .devflow/config.json');
     });
 
