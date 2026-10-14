@@ -13,15 +13,26 @@
  * What it asserts
  * ---------------
  * 1. Every call to `spawn`, `spawnSync`, `execFile` or `execFileSync` under
- *    `tests/` whose first argument is the literal `claude`, and every call to
- *    `exec` or `execSync` whose first argument is a string or template that runs
- *    `claude` as a command (at its start, behind assignments or `command`, `env`,
- *    `exec`, `nohup` and `time`, or after `&&`, `||`, `;`, `|`, `(` or `$(` on the
- *    same line), passes an options object literal that has both an `env` and a
- *    `cwd` key, and carries neither the skip-permissions flag nor
- *    `bypassPermissions` in its text. One shell string is exempt: the exact
- *    `claude --version` availability probe in tests/integration/helpers.ts, which
- *    starts no session. `claude --version && claude -p …` is not that probe.
+ *    `tests/` whose first argument is the literal `claude` (bare, or behind a
+ *    path: `/usr/local/bin/claude`, `./node_modules/.bin/claude`,
+ *    `~/.local/bin/claude`), and every call to `exec`, `execSync` or one of those
+ *    four whose first argument is a string or template that runs `claude` as a
+ *    command, passes an options object literal that has both an `env` and a `cwd`
+ *    key, and carries neither the skip-permissions flag nor `bypassPermissions` in
+ *    its text. A string runs `claude` as a command when the name, bare or behind a
+ *    path and with or without quotes, sits:
+ *    - at its start, or after `&&`, `&`, `||`, `|`, `;`, `(`, `$(`, a backtick or a
+ *      `{` followed by a space, on the same line; and
+ *    - behind any of these, each followed by whitespace: an assignment (`FOO=1`,
+ *      `FOO="a b"`), the launchers `command`, `exec`, `nohup`, `time`, `npx`,
+ *      `sudo`, `nice`, `xargs` and `env` (with flags that take no value, as in
+ *      `env -i`), `timeout <seconds>`, and the shell keywords `!`, `if`, `elif`,
+ *      `then`, `else`, `do`, `while` and `until`.
+ *    For `spawn`, `spawnSync`, `execFile` and `execFileSync` the name must be
+ *    followed by a space (`spawn('claude -p hi', { shell: true })`); the bare
+ *    literal is the first sentence of this rule. One shell string is exempt: the
+ *    exact `claude --version` availability probe in tests/integration/helpers.ts,
+ *    which starts no session. `claude --version && claude -p …` is not that probe.
  * 2. Every call of those four whose first argument is `process.execPath` or the
  *    literal `node` — in these files always the built CLI — in a file under
  *    `tests/integration/` or in `tests/integration-spawn-context.test.ts` passes
@@ -41,6 +52,15 @@
  *   (`sh -c 'claude …'`, `spawn('sh', ['-c', …])`), or one whose `claude` sits on
  *   a later line of a template. The shell form is matched on the name alone, so a
  *   regular expression's `.exec('claude …')` is reported too: that fails closed.
+ * - Inside a shell string, rule 1 reads only the forms it lists. These stay out:
+ *   - a launcher it does not name (`setsid`, `caffeinate`), and an option of a
+ *     named launcher that takes a separate value (`sudo -u root claude`,
+ *     `xargs -n 1 claude`, `timeout -k 5 60 claude`, `env -u NAME claude`);
+ *   - a binary named by a shell variable or a substitution (`$CLAUDE_BIN -p hi`,
+ *     `$(which claude) -p hi`) and a Windows name (`claude.cmd`, `claude.exe`);
+ *   - a launcher given as the program with `claude` in the argument array
+ *     (`spawn('npx', ['claude', …])`, `spawnSync('sudo', ['claude', …])`).
+ *   The probes in the "does not match" rows of the seeded probes show each one.
  * - `env` and `cwd` are checked as keys of the options object literal in the
  *   call, not for what they point to: `env: process.env` or `cwd: ROOT` passes.
  *   Options held in a variable or spread (`...base`) report both keys missing,
@@ -98,15 +118,63 @@ const MAX_SITES_PER_FILE = 64;
 
 type SpawnKind = 'claude' | 'claude-shell' | 'node';
 
-const CLAUDE_SPAWN = /\b(?:spawn|spawnSync|execFile|execFileSync)\s*\(\s*(['"`])claude\1/g;
+/** A path in front of a program name: `/usr/local/bin/`, `./node_modules/.bin/`, `~/.local/bin/`, `${home}/bin/`. */
+const PATH_PREFIX = String.raw`(?:[\w.~$/{}-]*\/)?`;
+
+/** `spawn`, `spawnSync`, `execFile` or `execFileSync` whose first argument is exactly `claude`, bare or behind a path. */
+const CLAUDE_SPAWN = new RegExp(
+  String.raw`\b(?:spawn|spawnSync|execFile|execFileSync)\s*\(\s*(['"` + '`' + String.raw`])${PATH_PREFIX}claude\1`,
+  'g',
+);
+
+// The command-string arms. Every piece is a non-capturing group: `\1` is the opening quote of
+// the string, and the lazy prefix may not run past it.
+
 /**
- * `exec` or `execSync` whose first argument is a string or template that runs `claude` as a
- * command: at the start of the string, or after `&&`, `||`, `;`, `|`, `(` or `$(` on the same
- * line. Assignments and the launchers `command`, `env`, `exec`, `nohup` and `time` may sit in
- * front of the name. `claude-code`, `claude.md` and `~/.claude` are not the program.
+ * What ends one command and starts the next on the same line: `&&`, `&`, `||`, `|`, `;`, `(`
+ * (so `$(` too), a backtick (escaped inside a template), and `{` when a space follows. A bare
+ * `{` is not one, so a template placeholder such as `${claude}` is not read as a command.
  */
-const CLAUDE_SHELL_SPAWN =
-  /\b(?:exec|execSync)\s*\(\s*(['"`])(?:(?:(?!\1)[^\n])*?(?:&&|\|\||[;|(]|\$\())?\s*(?:(?:[A-Za-z_]\w*=\S*|command|env|exec|nohup|time)\s+)*claude(?![\w./-])/g;
+const SEPARATOR = String.raw`&&?|\|\|?|;|\(|\{(?=\s)|\\?` + '`';
+
+/**
+ * What may sit between a separator and the program, each followed by whitespace: an assignment
+ * (`FOO=1`, `FOO="a b"`), the launchers `command`, `exec`, `nohup`, `time`, `npx`, `sudo`,
+ * `nice`, `xargs` and `env` (each with flags that take no value: `env -i`, `sudo -E`),
+ * `timeout <seconds>`, and the shell keywords that open a command (`!`, `then`, `do`, ...).
+ */
+const LAUNCHER = [
+  String.raw`[A-Za-z_]\w*=(?:\\?"[^"]*\\?"|\\?'[^']*\\?'|\S*)`,
+  String.raw`(?:command|exec|nohup|time|npx|sudo|nice|xargs|env)(?:\s+-\S+)*`,
+  String.raw`timeout(?:\s+-\S+)*\s+\d\S*`,
+  String.raw`!|if|elif|then|else|do|while|until`,
+].join('|');
+
+/** The program: `claude`, bare or behind a path, with or without quotes around it (`'claude'`). */
+const PROGRAM = String.raw`(?:\\?["'])?${PATH_PREFIX}claude(?:\\?["'])?`;
+
+/**
+ * A call to one of `callNames` whose first argument is a string or template that runs `claude`
+ * as a command: at the start of the string, or after a separator on the same line, behind any
+ * launchers. `programEnd` says what may follow the name. `claude-code`, `claude.md` and
+ * `~/.claude` are not the program.
+ */
+function commandStringCall(callNames: string, programEnd: string): RegExp {
+  return new RegExp(
+    String.raw`\b(?:${callNames})\s*\(\s*(['"` +
+      '`' +
+      String.raw`])(?:(?:(?!\1)[^\n])*?(?:${SEPARATOR}))?\s*(?:(?:${LAUNCHER})\s+)*${PROGRAM}${programEnd}`,
+    'g',
+  );
+}
+
+/** `exec` or `execSync`: a shell string, with `claude` followed by anything but a name character. */
+const CLAUDE_SHELL_SPAWN = commandStringCall('exec|execSync', String.raw`(?![\w./=-])`);
+/**
+ * The argument-list calls given a command string (`spawn('claude -p hi', { shell: true })`).
+ * `claude` must be followed by whitespace: the bare literal `'claude'` is {@link CLAUDE_SPAWN}.
+ */
+const CLAUDE_COMMAND_ARG_SPAWN = commandStringCall('spawn|spawnSync|execFile|execFileSync', String.raw`(?=\s)`);
 const NODE_SPAWN = /\b(?:spawn|spawnSync|execFile|execFileSync)\s*\(\s*(?:process\.execPath\b|(['"`])node\1)/g;
 
 /**
@@ -282,15 +350,22 @@ function collectSpawnSites(corpus: readonly CorpusEntry[], nodeScope: (file: str
   const sites: SpawnSite[] = [];
   for (const entry of corpus) {
     const masked = maskLiterals(entry.content);
-    const openers: ReadonlyArray<[SpawnKind, RegExp]> = nodeScope(entry.path)
-      ? [['claude', CLAUDE_SPAWN], ['claude-shell', CLAUDE_SHELL_SPAWN], ['node', NODE_SPAWN]]
-      : [['claude', CLAUDE_SPAWN], ['claude-shell', CLAUDE_SHELL_SPAWN]];
+    const claudeOpeners: ReadonlyArray<[SpawnKind, RegExp]> = [
+      ['claude', CLAUDE_SPAWN],
+      ['claude-shell', CLAUDE_SHELL_SPAWN],
+      ['claude-shell', CLAUDE_COMMAND_ARG_SPAWN],
+    ];
+    const openers: ReadonlyArray<[SpawnKind, RegExp]> = nodeScope(entry.path) ? [...claudeOpeners, ['node', NODE_SPAWN]] : claudeOpeners;
     let inFile = 0;
+    // A call that two openers both match is one site.
+    const seen = new Set<number>();
     for (const [kind, opener] of openers) {
       for (const match of entry.content.matchAll(opener)) {
         const at = match.index ?? 0;
         // An opener inside a string or a comment is prose, not a call.
         if (masked.charAt(at) !== entry.content.charAt(at)) continue;
+        if (seen.has(at)) continue;
+        seen.add(at);
         inFile += 1;
         if (inFile > MAX_SITES_PER_FILE) {
           throw new Error(`${entry.path}: more than ${MAX_SITES_PER_FILE} spawn sites — bound exceeded, scan aborted`);
@@ -560,6 +635,74 @@ describe('integration-spawn guard: seeded probes', () => {
     });
   }
 
+  // One row per form of the command-string arms. Each call passes no options, so each is
+  // reported once for `env` and once for `cwd`, as a shell command.
+  const NO_OPTIONS = ['claude shell command passes no `env`', 'claude shell command passes no `cwd`'];
+  const COMMAND_FORMS: ReadonlyArray<readonly [string, string]> = [
+    ['a path-qualified binary (absolute)', "execSync('/usr/local/bin/claude -p hi');"],
+    ['a path-qualified binary (relative)', "execSync('./node_modules/.bin/claude -p hi');"],
+    ['a path-qualified binary (home)', "execSync('~/.local/bin/claude -p hi');"],
+    ['a path-qualified binary after a separator', "execSync('cd /tmp && /opt/homebrew/bin/claude -p hi');"],
+    ['a quoted path-qualified binary', "execSync('\"/usr/local/bin/claude\" -p hi');"],
+    ['a path-qualified binary behind a template placeholder', 'execSync(`${home}/.local/bin/claude -p hi`);'],
+    ['npx', "execSync('npx claude -p hi');"],
+    ['npx with a flag', "execSync('npx -y claude -p hi');"],
+    ['sudo', "execSync('sudo claude -p hi');"],
+    ['sudo with a flag', "execSync('sudo -E claude -p hi');"],
+    ['xargs after a pipe', "execSync('echo hi | xargs claude -p');"],
+    ['timeout with a duration', "execSync('timeout 60 claude -p hi');"],
+    ['nice', "execSync('nice claude -p hi');"],
+    ['env with a flag', "execSync('env -i claude -p hi');"],
+    ['env with a flag and an assignment', "execSync('env -i FOO=1 claude -p hi');"],
+    ['an assignment with a quoted value', "execSync('FOO=\"a b\" claude -p hi');"],
+    ['a launcher behind a launcher', "execSync('sudo -E timeout 60 npx claude -p hi');"],
+    ['a single & separator', "execSync('sleep 1 & claude -p hi');"],
+    ['a backtick command', "execSync('echo `claude -p hi`');"],
+    ['an escaped backtick command in a template', 'execSync(`echo \\`claude -p hi\\``);'],
+    ['a brace group', "execSync('{ claude -p hi; }');"],
+    ['a negation', "execSync('! claude -p hi');"],
+    ['a command after then', "execSync('if true; then claude -p hi; fi');"],
+    ['a command after do', "execSync('while true; do claude -p hi; done');"],
+    ['a single-quoted program name', 'execSync("\'claude\' -p hi");'],
+    ['a double-quoted program name', "execSync('\"claude\" -p hi');"],
+    ['spawn given a command string', "spawn('claude -p hi', { shell: true });"],
+    ['spawnSync given a command string', 'spawnSync("claude -p hi", { shell: true });'],
+    ['execFile given a command string', "execFile('claude -p hi', { shell: true }, done);"],
+    ['execFileSync given a command string behind a launcher', "execFileSync('npx claude -p hi', { shell: true });"],
+    ['spawn given a path-qualified command string', "spawn('/usr/local/bin/claude -p hi', { shell: true });"],
+  ];
+  for (const [name, content] of COMMAND_FORMS) {
+    it(`reports ${name} as a claude command`, () => {
+      const found = findSpawnViolations([{ path: OTHER_FILE, content }]);
+      expect(found.map(f => f.what)).toEqual(NO_OPTIONS);
+    });
+  }
+
+  const PATH_LITERALS: ReadonlyArray<{ name: string; content: string; what: string[] }> = [
+    { name: 'spawn of an absolute path without env', content: "spawn('/opt/homebrew/bin/claude', args, { cwd: dir });", what: ['claude spawn passes no `env`'] },
+    { name: 'execFileSync of a relative path without cwd', content: "execFileSync('./node_modules/.bin/claude', ['-p', 'hi'], { env });", what: ['claude spawn passes no `cwd`'] },
+    { name: 'spawnSync of a home path with no options', content: "spawnSync('~/.local/bin/claude', ['--version']);", what: ['claude spawn passes no `env`', 'claude spawn passes no `cwd`'] },
+  ];
+  for (const probe of PATH_LITERALS) {
+    it(`reports ${probe.name}`, () => {
+      expect(findSpawnViolations([{ path: OTHER_FILE, content: probe.content }]).map(f => f.what)).toEqual(probe.what);
+    });
+  }
+
+  it('reports the skip flag and a missing key in a command string given to spawn', () => {
+    const content = `spawn('claude -p ${SKIP_FLAG}', { shell: true, cwd: dir });`;
+    expect(findSpawnViolations([{ path: OTHER_FILE, content }]).map(f => f.what)).toEqual([
+      'claude shell command passes no `env`',
+      'claude shell command carries the skip-permissions flag',
+    ]);
+  });
+
+  it('counts one command-string call once, even when two arms read it', () => {
+    // The closing quote of 'claude' is followed by a space, so both argument-list arms match.
+    const sites = collectSpawnSites([{ path: OTHER_FILE, content: "spawn('claude' , args, { cwd: dir, env });" }]);
+    expect(sites.map(site => site.kind)).toEqual(['claude']);
+  });
+
   it('names the line the spawn starts on', () => {
     const found = findSpawnViolations([{ path: OTHER_FILE, content: "// header\n\nconst proc = spawn('claude', args, {\n  cwd: dir,\n});" }]);
     expect(found.map(f => f.line)).toEqual([3]);
@@ -573,6 +716,10 @@ describe('integration-spawn guard: seeded probes', () => {
       { path: OTHER_FILE, content: "execFile('claude', ['-p', 'hi'], { cwd: dir, env: sandbox }, done);" },
       { path: OTHER_FILE, content: "execSync('claude -p hi', { cwd: ctx.cwd, env: ctx.env, encoding: 'utf-8' });" },
       { path: OTHER_FILE, content: 'exec(`cd ${dir} && claude -p hi`, { env: ctx.env, cwd: ctx.cwd }, done);' },
+      { path: OTHER_FILE, content: "execSync('/usr/local/bin/claude -p hi', { cwd: ctx.cwd, env: ctx.env });" },
+      { path: OTHER_FILE, content: "execSync('timeout 60 npx claude -p hi', { cwd: ctx.cwd, env: ctx.env });" },
+      { path: OTHER_FILE, content: "spawn('claude -p hi', { shell: true, cwd: ctx.cwd, env: ctx.env });" },
+      { path: OTHER_FILE, content: "execFileSync('/opt/homebrew/bin/claude', ['-p', 'hi'], { cwd: ctx.cwd, env: ctx.env });" },
     ];
     expect(findSpawnViolations(clean)).toEqual([]);
   });
@@ -588,9 +735,43 @@ describe('integration-spawn guard: seeded probes', () => {
       { path: OTHER_FILE, content: "const bin = path.join(shimDir, 'claude');\nexpect(resolveOnPath('claude', p)).toBe(bin);" },
       { path: OTHER_FILE, content: "spawnSync(process.execPath, [CLI, 'init'], { timeout: 1 });" },
       { path: OTHER_FILE, content: "spawn(CLAUDE_BIN, args, {});" },
+      { path: OTHER_FILE, content: 'execSync(`echo ${claude} done`);' },
+      { path: OTHER_FILE, content: "execSync('curl http://localhost/?a=1&claude=2');" },
+      { path: OTHER_FILE, content: "execSync('git log --grep claude');" },
+      { path: OTHER_FILE, content: "execSync('ls /usr/local/bin/claude-code');" },
     ];
     expect(findSpawnViolations(clean)).toEqual([]);
   });
+
+  // The forms the header lists under "What a green run does NOT prove". Each is a real limit of
+  // the rule, shown here so a reader sees it as written down and a later widening shows up as a
+  // change to this table.
+  const NOT_MATCHED: ReadonlyArray<readonly [string, string]> = [
+    ['a launcher option with a separate value (sudo -u)', "execSync('sudo -u root claude -p hi');"],
+    ['a launcher option with a separate value (xargs -n)', "execSync('echo hi | xargs -n 1 claude');"],
+    ['a launcher option with a separate value (timeout -k)', "execSync('timeout -k 5 60 claude -p hi');"],
+    ['a launcher option with a separate value (env -u)', "execSync('env -u NAME claude -p hi');"],
+    ['a launcher the rule does not name (setsid)', "execSync('setsid claude -p hi');"],
+    ['a launcher the rule does not name (caffeinate)', "execSync('caffeinate claude -p hi');"],
+    ['a launcher given as the program, with claude in the argument array', "spawn('npx', ['claude', '-p', 'hi'], {});"],
+    ['sudo given as the program, with claude in the argument array', "spawnSync('sudo', ['claude', '-p', 'hi']);"],
+    ['a binary named by a shell variable', "execSync('$CLAUDE_BIN -p hi');"],
+    ['a binary named by a command substitution', "execSync('$(which claude) -p hi');"],
+    ['a Windows name (claude.cmd)', "execSync('claude.cmd -p hi');"],
+    ['a Windows name (claude.exe)', "execSync('claude.exe -p hi');"],
+    ['a nested shell in a command string', "execSync('sh -c \"claude -p hi\"');"],
+    ['a nested shell in an argument array', "spawn('sh', ['-c', 'claude -p hi'], {});"],
+    ['a command string built at run time', 'exec(cmd);'],
+    ['a template whose command is a placeholder', 'exec(`${bin} -p hi`);'],
+    ['claude on a later line of a template', 'execSync(`echo hi\nclaude -p hi`);'],
+    ['a wrapper function', "execa('claude', ['-p', 'hi']);"],
+    ['a binary named by a variable', 'spawn(CLAUDE_BIN, args, {});'],
+  ];
+  for (const [name, content] of NOT_MATCHED) {
+    it(`does not match ${name}`, () => {
+      expect(collectSpawnSites([{ path: OTHER_FILE, content }])).toEqual([]);
+    });
+  }
 
   it('exempts only the exact availability probe in the helper file', () => {
     const probe: CorpusEntry = { path: HELPERS, content: "execSync('claude --version', { stdio: 'pipe', timeout: 5000 });" };
