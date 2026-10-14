@@ -550,15 +550,26 @@ export function repoComplianceStatusLines(loaded: SettingsLoad, opts: RepoSettin
  * tracked by git, or null (D-PERSONAL-UNTRACKED). The resolver ignores such a file
  * and says so on stderr, but prompts run it with stderr discarded, so a status
  * command is where the user sees why their personal settings have no effect.
+ *
+ * Takes the ONE resolved result, so a caller that already holds it adds no second
+ * resolve (each resolve forks git).
  */
-export function personalConfigTrackedWarning(loaded: SettingsLoad, opts: RepoSettingsOptions): string | null {
-  if (!loaded.ok) return null;
-  if (!loaded.value.resolveSettings(opts).personalTracked) return null;
+export function trackedConfigWarning(settings: Pick<RepoSettings, 'personalTracked'>): string | null {
+  if (!settings.personalTracked) return null;
   const file = settingsSourceFile('personal');
   return `Git tracks an entry at or under ${file}, so devflow ignores that file. It holds personal settings. ` +
     'Find the entry in the output of: git ls-files. Untrack it with: git rm --cached <entry>. ' +
     'Then check the file contents, or delete the file. ' +
     'Untracking leaves the committed bytes on disk as your personal file.';
+}
+
+/**
+ * {@link trackedConfigWarning} for a caller that holds the loaded module and not a
+ * resolved result: it resolves once and returns null when the module is unusable.
+ */
+export function personalConfigTrackedWarning(loaded: SettingsLoad, opts: RepoSettingsOptions): string | null {
+  if (!loaded.ok) return null;
+  return trackedConfigWarning(loaded.value.resolveSettings(opts));
 }
 
 /** The policies the hint maps, in the order it prints them. */
