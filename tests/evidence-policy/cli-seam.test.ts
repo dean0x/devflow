@@ -336,8 +336,9 @@ describe('the --status helpers over the settings layer (D-FEATURES-NARROW-ONLY)'
     expect(personalConfigTrackedWarning(stub(BASE), { dir: tmp })).toBeNull();
     expect(personalConfigTrackedWarning({ ok: false, error: { kind: 'not-found', path: '/x' } }, { dir: tmp })).toBeNull();
     const warning = personalConfigTrackedWarning(stub({ ...BASE, personalTracked: true }), { dir: tmp });
-    expect(warning).toContain('.devflow/config.json is tracked by git');
-    expect(warning).toContain('git rm --cached .devflow/config.json');
+    expect(warning).toContain('Git tracks an entry at or under .devflow/config.json, so devflow ignores that file.');
+    expect(warning).toContain('Untrack it with: git rm --cached <entry>.');
+    expect(warning).toContain('Untracking leaves the committed bytes on disk as your personal file.');
   });
 
   it('passes the caller\'s dir straight through', () => {

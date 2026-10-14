@@ -536,8 +536,10 @@ export function personalConfigTrackedWarning(loaded: SettingsLoad, opts: RepoSet
   if (!loaded.ok) return null;
   if (!loaded.value.resolveSettings(opts).personalTracked) return null;
   const file = settingsSourceFile('personal');
-  return `${file} is tracked by git, so devflow ignores it — it holds personal settings. ` +
-    `Untrack it with: git rm --cached ${file}`;
+  return `Git tracks an entry at or under ${file}, so devflow ignores that file. It holds personal settings. ` +
+    'Find the entry in the output of: git ls-files. Untrack it with: git rm --cached <entry>. ' +
+    'Then check the file contents, or delete the file. ' +
+    'Untracking leaves the committed bytes on disk as your personal file.';
 }
 
 /** The policies the hint maps, in the order it prints them. */

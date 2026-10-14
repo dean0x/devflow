@@ -671,8 +671,9 @@ describe('D-PERSONAL-UNTRACKED: a tracked .devflow/config.json is ignored, with 
     expect(out.code).toBe(0);
     expect(fieldOf(out.line, 'REVIEW_PUBLICATION')).toBe('auto');
     const text = stderr.mock.calls.map(c => String(c[0])).join('');
-    expect(text).toContain('.devflow/config.json is tracked by git');
-    expect(text).toContain('git rm --cached .devflow/config.json');
+    expect(text).toContain('Git tracks an entry at or under .devflow/config.json, so devflow ignores that file.');
+    expect(text).toContain('Untrack it with: git rm --cached <entry>.');
+    expect(text).toContain('Untracking leaves the committed bytes on disk as your personal file.');
   });
 
   it('main(): an untracked config.json prints no warning', () => {
@@ -697,7 +698,7 @@ describe('D-PERSONAL-UNTRACKED: a tracked .devflow/config.json is ignored, with 
       const tracked = runResolver({ home, args: [repo], script: SETTINGS_SCRIPT });
       expect(tracked.status, tracked.stderr).toBe(0);
       expect(fieldOf(tracked.stdout.trim(), 'REVIEW_PUBLICATION')).toBe('auto');
-      expect(tracked.stderr).toContain('git rm --cached .devflow/config.json');
+      expect(tracked.stderr).toContain('Untrack it with: git rm --cached <entry>.');
 
       // Untracked (the remedy the warning names), the same bytes are personal again.
       realGit(repo, home, ['rm', '-q', '--cached', '.devflow/config.json']);
@@ -802,7 +803,7 @@ describe('D-PERSONAL-UNTRACKED: a tracked .devflow/config.json is ignored, with 
       const run = runResolver({ home, args: [repo], script: SETTINGS_SCRIPT, extraEnv: env });
       expect(run.status, run.stderr).toBe(0);
       expect(fieldOf(run.stdout.trim(), 'REVIEW_PUBLICATION')).toBe('auto');
-      expect(run.stderr).toContain('.devflow/config.json is tracked by git');
+      expect(run.stderr).toContain('Git tracks an entry at or under .devflow/config.json, so devflow ignores that file.');
       const layers = layersUnder(repo, env);
       expect(layers.personalTracked).toBe(true);
       expect(layers.personal).toEqual({ kind: 'absent' });

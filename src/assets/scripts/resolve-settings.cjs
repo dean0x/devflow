@@ -1054,8 +1054,10 @@ function main(argv, deps) {
   }
   const settings = resolveSettings({ dir: args.dir }, { exec: d.exec });
   if (settings.personalTracked) {
-    process.stderr.write('resolve-settings: warning: ' + PERSONAL_REL + ' is tracked by git, so it is ignored'
-      + ' — it holds personal settings; untrack it with: git rm --cached ' + PERSONAL_REL + '\n');
+    process.stderr.write('resolve-settings: warning: Git tracks an entry at or under ' + PERSONAL_REL
+      + ', so devflow ignores that file. It holds personal settings. Find the entry in the output of: git ls-files.'
+      + ' Untrack it with: git rm --cached <entry>. Then check the file contents, or delete the file.'
+      + ' Untracking leaves the committed bytes on disk as your personal file.\n');
   }
   if (settings.unreadable !== null) {
     process.stderr.write('resolve-settings: ' + (settings.unreadable === 'project' ? PROJECT_REL : PERSONAL_REL)

@@ -127,8 +127,9 @@ describe('--status warns about a tracked .devflow/config.json (D-PERSONAL-UNTRAC
 
     const out = status(feature, repo);
 
-    expect(out).toContain('.devflow/config.json is tracked by git, so devflow ignores it');
-    expect(out).toContain('git rm --cached .devflow/config.json');
+    expect(out).toContain('Git tracks an entry at or under .devflow/config.json, so devflow ignores that file.');
+    expect(out).toContain('Untrack it with: git rm --cached <entry>.');
+    expect(out).toContain('Untracking leaves the committed bytes on disk as your personal file.');
     // Ignored means absent: its features:false narrows nothing.
     expect(out).not.toMatch(EFFECTIVE);
   }, 120_000);
@@ -144,7 +145,9 @@ describe('--status warns about a tracked .devflow/config.json (D-PERSONAL-UNTRAC
 
     const out = status('memory', repo);
 
-    expect(out).toContain('.devflow/config.json is tracked by git, so devflow ignores it');
+    expect(out).toContain('Git tracks an entry at or under .devflow/config.json, so devflow ignores that file.');
+    // The index entry names are committed bytes: the warning must not print them.
+    expect(out).not.toContain('vendor/df');
     expect(out).not.toMatch(EFFECTIVE);
   }, 120_000);
 
