@@ -32,7 +32,8 @@
  *                       spawns ran the full test suite in the foreground for 337 to 431 s, past the
  *                       5-minute cache TTL. That is about 1.35M ce, 6.4% of Code ce. 2 of the 3 came
  *                       from a hand-written orchestrator brief that asked for the full suite. The
- *                       /implement and /resolve spawn prompts never ask for it. The Code bodies
+ *                       /implement and /resolve spawn prompts never ask a Code-family agent for it,
+ *                       and a collector over the compiled prompts holds that. The Code bodies
  *                       already ban the full suite, and Validate owns it.
  *
  * The bodies sit outside the shared `## Running commands` block: `running-commands-parity.test.ts`
@@ -47,14 +48,19 @@
  *   audit's and this file only holds them still.
  * - The split rule is checked as wording in the planning reference and the compiled `/implement`. The
  *   planner that counts files and steps is a model, so no test proves a given plan splits correctly.
- * - The three #453 records add no product lever, so they have no text in any body. The test holds only
- *   that this header names each record with one key number; the numbers come from the audit.
+ * - The three #453 records add no product lever, so they have no text in any body. The test holds that
+ *   this header names each record with one key number (the numbers come from the audit), and that no
+ *   Code, Fix or Refactor spawn prompt in the compiled `/implement` and `/resolve` asks for the full
+ *   suite. A hand-written brief reaches no command file, and that is how 2 of the 3 runs started.
  */
 
 import { describe, it, expect } from 'vitest'
 
 import { CORE_RULES_DIGEST } from '../fixtures/agent-config.js'
 import {
+  CODE_AGENT_TYPES,
+  codeSlugOf,
+  collectCodeSpawnSites,
   collectUnfencedH2,
   loadFile,
   readAgentReference,
@@ -64,7 +70,8 @@ import {
 } from '../helpers.js'
 
 const BLOCK_HEADING = '## Running commands'
-const AGENTS = ['code', 'fix', 'refactor'] as const
+/** The Code family's slugs, from the one roster in `tests/helpers.ts`, so a fourth variant joins the corpus. */
+const AGENTS: readonly string[] = CODE_AGENT_TYPES.map(codeSlugOf)
 const MIN_BODY_BYTES = 3000
 
 const READ_ONCE_MARKER = '**Read once**'
@@ -79,6 +86,20 @@ const CACHE_HYGIENE_RECORDS: ReadonlyArray<readonly [string, string]> = [
   ['D-CODE-FULL-SUITE-BRIEF', '6.4%'],
 ]
 const CE_EXPANSION = 'cost-equivalent (ce)'
+
+/**
+ * What asks for the whole test suite: a bare `npm test` or `npm run test` (one with a test file after it
+ * names files, so it is not one), or the words "full suite" and its kin. `npm run test:unit` and the like
+ * name a script, not the suite, so they are not matched.
+ */
+const FULL_SUITE_REQUESTS: readonly RegExp[] = [
+  /\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test(?![:\w-])(?!\s+(?:--\s+)?[\w./-]*\.(?:test|spec)\.)/,
+  /\b(?:full|whole|entire|complete)\s+(?:test\s+)?suite\b/i,
+]
+/** A ban is not a request: a negator earlier in the same clause ("never run the full suite") clears the match. */
+const BAN_WORDS = /\b(?:never|not|no|without|except|instead of)\b|n't/i
+/** The text after the last clause break: a comma, a semicolon, a colon or a full stop. */
+const CLAUSE_TAIL = /[^.;:,]*$/
 
 // ---------------------------------------------------------------------------
 // The corpus
@@ -109,9 +130,21 @@ function codeFamilyBodies(): Body[] {
 function sharedOutputLine(): string {
   const line = CORE_RULES_DIGEST['context-economy'].line
   const validate = resolveAgentSource('validate').content
-  const bullets = validate.split(`\n- ${line}\n`).length - 1
+  const bullets = bulletOffsets(validate, line).length
   if (bullets !== 1) throw new Error(`validate.md carries the shared output line ${bullets} times, expected 1`)
   return line
+}
+
+/** The compiled /implement and /resolve, learning on and off: four commands, each read or the run fails. */
+function spawningCommands(): Body[] {
+  const out: Body[] = []
+  for (const name of ['implement', 'resolve']) {
+    out.push({ label: `${name} (learning on)`, content: requireDistFile(`${name}.md`) })
+    const off = resolveLearningOffSource('commands', name)
+    if (off === null) throw new Error(`dist/learning-off/commands/${name}.md is absent, run \`npm run build:mds\` first`)
+    out.push({ label: `${name} (learning off)`, content: off })
+  }
+  return out
 }
 
 // ---------------------------------------------------------------------------
@@ -130,6 +163,17 @@ function runningBlock(body: string): { readonly start: number; readonly end: num
 function offsetsOf(body: string, needle: string): number[] {
   const out: number[] = []
   for (let at = body.indexOf(needle); at !== -1; at = body.indexOf(needle, at + needle.length)) out.push(at)
+  return out
+}
+
+/** Offsets of every line that is exactly the bullet `- ${line}`; a line with text before or after it does not count. */
+function bulletOffsets(body: string, line: string): number[] {
+  const out: number[] = []
+  let at = 0
+  for (const text of body.split('\n')) {
+    if (text === `- ${line}`) out.push(at)
+    at += text.length + 1
+  }
   return out
 }
 
@@ -156,11 +200,11 @@ export function collectReadOnceDefects(body: string): string[] {
   return out
 }
 
-/** Named collector (D-CODE-QUIET): how a body's copy of the shared output line differs from "once, outside the block". */
+/** Named collector (D-CODE-QUIET): how a body's copy of the shared output line differs from "once, as a whole bullet, outside the block". */
 export function collectOutputLineDefects(body: string, line: string): string[] {
   const block = runningBlock(body)
   if (block === null) return ['no Running commands block']
-  const found = offsetsOf(body, line)
+  const found = bulletOffsets(body, line)
   if (found.length !== 1) return [`${found.length} shared output lines, expected 1`]
   return found[0] >= block.start && found[0] < block.end ? ['the shared output line sits inside the Running commands block'] : []
 }
@@ -199,6 +243,27 @@ export function collectNoPlanDefects(command: string): string[] {
   const planned = lines.find(l => l.startsWith('- If plan document provided'))
   if (planned === undefined) out.push('no plan-document strategy line')
   else if (/SINGLE_CODE_AGENT/.test(planned) || !planned.includes('table below')) out.push('a plan without execution-strategy does not take the strategy table')
+  return out
+}
+
+/**
+ * Named collector (D-CODE-FULL-SUITE-BRIEF): how a compiled command's Code-family spawn prompts differ from
+ * "never ask for the full suite". Code, Fix and Refactor spawns only: a Validate spawn owns the full suite
+ * and may ask for it. A spawn prompt that asks a Code-family agent for the suite beats the agent's body rule,
+ * and the bodies are guarded elsewhere, so this reads the prompts. Each defect names the file, the line, the
+ * agent type and the matched words.
+ */
+export function collectFullSuiteBriefDefects(file: string, command: string): string[] {
+  const out: string[] = []
+  for (const site of collectCodeSpawnSites(file, command)) {
+    site.payload.split('\n').forEach((text, i) => {
+      for (const request of FULL_SUITE_REQUESTS) {
+        const hit = request.exec(text)
+        if (hit === null || BAN_WORDS.test(CLAUSE_TAIL.exec(text.slice(0, hit.index))?.[0] ?? '')) continue
+        out.push(`${file}:${site.line + i} ${site.agentType} spawn asks for the full suite: "${hit[0]}"`)
+      }
+    })
+  }
   return out
 }
 
@@ -327,6 +392,14 @@ describe('Code, Fix and Refactor read a file once and cap their output, in both 
     expect(reworded, 'the seed must land').not.toBe(body)
     expect(collectOutputLineDefects(reworded, shared)).toEqual(['0 shared output lines, expected 1'])
 
+    const trailing = body.replace(`- ${shared}\n`, `- ${shared} Also read each file twice.\n`)
+    expect(trailing, 'the seed must land').not.toBe(body)
+    expect(collectOutputLineDefects(trailing, shared), 'text after the line is not the whole line').toEqual(['0 shared output lines, expected 1'])
+
+    const leading = body.replace(`- ${shared}\n`, `- Note: ${shared}\n`)
+    expect(leading, 'the seed must land').not.toBe(body)
+    expect(collectOutputLineDefects(leading, shared), 'text before the line is not the whole line').toEqual(['0 shared output lines, expected 1'])
+
     expect(collectOutputLineDefects('no block here', shared)).toEqual(['no Running commands block'])
   })
 })
@@ -407,6 +480,84 @@ describe('a long plan splits into sequential phases and a run with no plan is on
       '0 SEQUENTIAL_CODE_AGENTS strategy rows, expected 1',
       'no plan-document strategy line',
     ])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The spawn prompts and the full suite
+// ---------------------------------------------------------------------------
+
+describe('the /implement and /resolve spawn prompts never ask a Code-family agent for the full suite, in both builds (D-CODE-FULL-SUITE-BRIEF)', () => {
+  it('reads four compiled commands, each with Code and Fix spawns', () => {
+    const commands = spawningCommands()
+    expect(commands.map(c => c.label)).toEqual([
+      'implement (learning on)', 'implement (learning off)',
+      'resolve (learning on)', 'resolve (learning off)',
+    ])
+    for (const { label, content } of commands) {
+      expect(content.length, `${label}: nothing read`).toBeGreaterThan(MIN_BODY_BYTES)
+      const types = collectCodeSpawnSites(label, content).map(site => site.agentType)
+      expect(types, `${label}: no Code or Fix spawn read`).toEqual(expect.arrayContaining(['Code', 'Fix']))
+    }
+  })
+
+  it('no Code, Fix or Refactor spawn prompt asks for the full suite', () => {
+    for (const { label, content } of spawningCommands()) {
+      expect(collectFullSuiteBriefDefects(label, content), label).toEqual([])
+    }
+  })
+
+  it('known-bad probe: a bare npm test, a bare npm run test and the words "full test suite" or "full suite" are each reported', () => {
+    const resolve = requireDistFile('resolve.md')
+    const implement = requireDistFile('implement.md')
+    expect(collectFullSuiteBriefDefects('resolve.md', resolve)).toEqual([])
+    expect(collectFullSuiteBriefDefects('implement.md', implement)).toEqual([])
+
+    const code = resolve.replace('Include ## Verification block in report.', 'Include ## Verification block in report. Run npm test first.')
+    expect(code, 'the seed must land').not.toBe(resolve)
+    const codeDefects = collectFullSuiteBriefDefects('resolve.md', code)
+    expect(codeDefects).toHaveLength(1)
+    expect(codeDefects[0]).toContain('Code spawn asks for the full suite: "npm test"')
+
+    const fix = resolve.replace('SCOPE: Fix only the listed failures, no other changes\n   PUSH: false', 'SCOPE: Fix only the listed failures, no other changes; run npm run test\n   PUSH: false')
+    expect(fix, 'the seed must land').not.toBe(resolve)
+    const fixDefects = collectFullSuiteBriefDefects('resolve.md', fix)
+    expect(fixDefects, 'an earlier "no" in another clause is not a ban').toHaveLength(1)
+    expect(fixDefects[0]).toContain('Fix spawn asks for the full suite: "npm run test"')
+
+    const words = implement.replace('EXECUTION_PLAN: {full plan from setup context}', 'EXECUTION_PLAN: {full plan from setup context}\nVerify with the full test suite.')
+    expect(words, 'the seed must land').not.toBe(implement)
+    const wordsDefects = collectFullSuiteBriefDefects('implement.md', words)
+    expect(wordsDefects).toHaveLength(1)
+    expect(wordsDefects[0]).toContain('Code spawn asks for the full suite: "full test suite"')
+
+    const prose = implement.replace('whose prompt opens with `OPERATION: ci-fix`', 'whose prompt opens with `OPERATION: ci-fix` and tells it to run the full suite')
+    expect(prose, 'the seed must land').not.toBe(implement)
+    const proseDefects = collectFullSuiteBriefDefects('implement.md', prose)
+    expect(proseDefects, 'a one-line prose spawn is read too').toHaveLength(1)
+    expect(proseDefects[0]).toContain('Fix spawn asks for the full suite: "full suite"')
+  })
+
+  it('known-bad probe: a Validate spawn, a ban, a named test file, a script name and text outside any spawn are each left alone', () => {
+    const resolve = requireDistFile('resolve.md')
+    const implement = requireDistFile('implement.md')
+
+    const validate = implement.replace('Run build, typecheck, lint, test. Report pass/fail with failure details.', 'Run npm test, the full suite, then report pass/fail with failure details.')
+    expect(validate, 'the seed must land').not.toBe(implement)
+    expect(collectFullSuiteBriefDefects('implement.md', validate), 'Validate owns the full suite').toEqual([])
+
+    for (const allowed of [
+      'Never run the full suite.',
+      'Do not run npm test.',
+      'Run npm test -- tests/guards/a.test.ts only.',
+      'Run npm run test:unit only.',
+    ]) {
+      const brief = resolve.replace('Include ## Verification block in report.', `Include ## Verification block in report. ${allowed}`)
+      expect(brief, 'the seed must land').not.toBe(resolve)
+      expect(collectFullSuiteBriefDefects('resolve.md', brief), allowed).toEqual([])
+    }
+
+    expect(collectFullSuiteBriefDefects('x.md', 'Run npm test, the full suite.\n'), 'text outside any spawn').toEqual([])
   })
 })
 

@@ -30,7 +30,7 @@ import { readFileSync, readdirSync } from 'fs';
 import * as path from 'path';
 
 import { getAllAgentNames } from '../../src/core/plugins.js';
-import { ROOT, resolveAgentSource, splitFrontmatter } from '../helpers.js';
+import { CODE_AGENT_TYPES, ROOT, codeSlugOf, resolveAgentSource, splitFrontmatter } from '../helpers.js';
 import {
   AGENT_CONFIG,
   CORE_RULES_DIGEST,
@@ -46,16 +46,16 @@ const HEADING = '## Core rules';
 const DIGEST_KEYS = Object.keys(CORE_RULES_DIGEST) as DigestKey[];
 /** One short line: a digest line longer than this is a paragraph, and every spawn pays for it. */
 const MAX_LINE_CHARS = 160;
+/** The Code family's slugs, from the one roster in `tests/helpers.ts`. */
+const CODE_FAMILY_SLUGS: readonly string[] = CODE_AGENT_TYPES.map(codeSlugOf);
 /**
  * D-CODE-QUIET (the R-452c outcome): the Code-family bodies (Code, Fix, Refactor) keep CLAUDE.md,
  * so their rows declare no digest. They still carry the context-economy line verbatim as one
  * shared output line, so that one line is allowed in those bodies and no other digest line is.
  */
-const CODE_FAMILY_SHARED_OUTPUT_LINE: ReadonlyMap<string, readonly DigestKey[]> = new Map([
-  ['code', ['context-economy']],
-  ['fix', ['context-economy']],
-  ['refactor', ['context-economy']],
-]);
+const CODE_FAMILY_SHARED_OUTPUT_LINE: ReadonlyMap<string, readonly DigestKey[]> = new Map(
+  CODE_FAMILY_SLUGS.map((slug): [string, readonly DigestKey[]] => [slug, ['context-economy']]),
+);
 const allowedFor = (name: string): readonly DigestKey[] => CODE_FAMILY_SHARED_OUTPUT_LINE.get(name) ?? [];
 
 // ---------------------------------------------------------------------------
@@ -319,7 +319,7 @@ describe('every body carries exactly its declared digest lines', () => {
     it('allows the shared output line in the Code-family bodies and only there', () => {
       const line = CORE_RULES_DIGEST['context-economy'].line;
       const prose = `# Agent\n\n${line}\n`;
-      for (const name of ['code', 'fix', 'refactor']) {
+      for (const name of CODE_FAMILY_SLUGS) {
         expect(allowedFor(name), name).toEqual(['context-economy']);
         expect(collectBodyDefects(prose, [], allowedFor(name)), name).toEqual([]);
       }
