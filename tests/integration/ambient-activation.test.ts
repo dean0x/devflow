@@ -33,7 +33,9 @@ import { HANDOFF_TEMPLATE, REMINDER_TEMPLATE } from '../fixtures/ambient-templat
  *   without one the file skips and prints why
  * - A built CLI (`npm run build`)
  *
- * Run: npm run test:integration (not part of `npm test` — each test is an API call)
+ * Run: DEVFLOW_INTEGRATION_ALL=1 npx vitest run --config vitest.integration.config.ts \
+ *        tests/integration/ambient-activation.test.ts
+ * (not part of `npm test` or a plain `npm run test:integration` — each test is an API call)
  */
 const credential = pickCredential(process.env);
 const skipReason = liveSkipReason(credential, isClaudeAvailable());

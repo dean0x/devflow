@@ -1298,7 +1298,7 @@ describe('dynamic-build: the post-merge Validate belongs to the workflow, and a 
 });
 
 // ---------------------------------------------------------------------------
-// 10c. dynamic-build.md: the wave merge arm stays flat and lives in one helper (#486 F6)
+// 10c. dynamic-build.md: the wave merge arm stays flat and lives in one helper (#486, finding 6)
 //
 // The merge, the post-merge Validate and the undo were seven levels deep in the
 // per-ticket loop, and the depth hid the undo defect. Both guards have a named
@@ -1357,7 +1357,7 @@ function collectMergeHelperDefects(text: string): string[] {
   return out;
 }
 
-describe('dynamic-build: the wave merge arm stays flat and lives in one helper (#486 F6)', () => {
+describe('dynamic-build: the wave merge arm stays flat and lives in one helper (#486, finding 6)', () => {
   let compiled: string;
   let source: string;
   beforeAll(async () => {

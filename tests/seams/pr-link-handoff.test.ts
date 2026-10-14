@@ -419,7 +419,7 @@ describe('ensure-pr-ready — the paste gate, one row per tracker grammar', () =
 })
 
 // -------------------------------------------------------------------------
-// A supplied ISSUE_PR_LINK is final (F3a, #459).
+// A supplied ISSUE_PR_LINK is final (#486, finding 3, from #459).
 //
 // Step 4a decides the closing line of a PR it is handed one for, and a supplied
 // value — `(none)` included — is its whole answer: step 4b runs only for an ABSENT
@@ -463,7 +463,7 @@ function collectStep4bComposition(block: string): string[] {
   return out
 }
 
-describe('ensure-pr-ready — a supplied ISSUE_PR_LINK is final and step 4b composes nothing (F3a)', () => {
+describe('ensure-pr-ready — a supplied ISSUE_PR_LINK is final and step 4b composes nothing (#486, finding 3)', () => {
   const FINAL = paragraphStartingWith(PR_READY, '**A given `ISSUE_PR_LINK` is final.**')
   const NONE = paragraphStartingWith(PR_READY, '`(none)`')
 
@@ -532,7 +532,7 @@ describe('ensure-pr-ready — a supplied ISSUE_PR_LINK is final and step 4b comp
   })
 })
 
-describe('ensure-pr-ready — no provider\'s step 4b composes a closing line from a bare number or a branch name (F3b)', () => {
+describe('ensure-pr-ready — no provider\'s step 4b composes a closing line from a bare number or a branch name (#486, finding 3)', () => {
   const BRANCH_DERIVED = [
     ['the branch-name pattern', /\{type\}\/\{[A-Za-z]+\}-\{slug\}/],
     ['the extract-and-verify instruction', /extract the segment/],

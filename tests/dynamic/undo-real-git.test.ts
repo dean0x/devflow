@@ -1,7 +1,7 @@
 /**
  * tests/dynamic/undo-real-git.test.ts
  *
- * #486 F1 — the wave's merge and the undo of a red merge, run against real git.
+ * #486, finding 1 — the wave's merge and the undo of a red merge, run against real git.
  *
  * The merge and the undo are lines the Git agent runs. A stub agent cannot show
  * what those lines do to a branch, so this test builds a repository, runs the
@@ -206,7 +206,7 @@ function valuesOf(ticket: Ticket, mergeSha: string): Values {
   return { integration: INTEGRATION, branch: TICKET_BRANCH, mergeSha, baseSha: ticket.baseSha }
 }
 
-describe('dynamic-build: the merge and the undo of a red merge restore the pre-merge head in real git (#486 F1)', () => {
+describe('dynamic-build: the merge and the undo of a red merge restore the pre-merge head in real git (#486, finding 1)', () => {
   it('a two-commit ticket that could fast-forward is merged with a merge commit and undone to the recorded pre-merge head, with both ticket commits unreachable', () => {
     const ticket = newTicketRepo()
     recordBase(ticket)
@@ -228,7 +228,7 @@ describe('dynamic-build: the merge and the undo of a red merge restore the pre-m
     git(ticket.repo, ['merge', '--ff-only', TICKET_BRANCH])
     const mergeSha = git(ticket.repo, ['rev-parse', 'HEAD'])
     expect(mergeSha, 'a fast-forward ends on the ticket head').toBe(ticket.ticketShas[1])
-    expect(git(ticket.repo, ['rev-parse', `${mergeSha}^1`]), 'the caret target is the ticket\'s own earlier commit, the F1 shape').toBe(ticket.ticketShas[0])
+    expect(git(ticket.repo, ['rev-parse', `${mergeSha}^1`]), 'the caret target is the ticket\'s own earlier commit, the shape of finding 1').toBe(ticket.ticketShas[0])
 
     const result = applyShippedUndo(ticket, valuesOf(ticket, mergeSha))
 
