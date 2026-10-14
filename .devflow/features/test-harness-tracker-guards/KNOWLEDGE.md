@@ -5,7 +5,7 @@ description: "Use when reclassifying a git-agent.test.ts guard between 'sole' an
 category: conventions
 directories: [tests/git-agent.test.ts, tests/seams, tests/tracker, tests/dynamic, tests/installer, tests/evidence, tests/provider-literals.test.ts, tests/tracker-agent.test.ts, tests/tracker-install.test.ts, tests/scoped-install-e2e.test.ts]
 created: 2026-10-10
-updated: 2026-10-12
+updated: 2026-10-14
 ---
 
 # Test Harness - Git-Agent Guard Modes, Command-Agent Seam, Tracker and PR-Host Guards
@@ -83,7 +83,7 @@ The seam test pins the command-to-agent input contract. It checks three directio
 2. **Reverse**: every non-optional `**Input:**` identifier for an op that has at least one caller fence is passed by at least one caller.
 3. **Producer, PER OPERATION**: every entry in `ISSUE_CAPTURE_CONTRACT` names one or more `producerOps`, and `collectMissingProducers()` checks each `(label, op)` pair independently.
 
-**Ops with callers vs. without.** Most Git operations have a live caller fence in `dist/commands/` (`update-pr-evidence` joined via `/implement`'s Phase 10b spawn); the reverse-direction floor is `seam-ops-with-callers` and the op-to-section map floor is `seam-op-section-map`. The ops without a caller fence: `learn-conventions` (invoked internally by setup-task, not by any command fence); `check-ci-status` (no command spawns it, because `ci-wait.cjs` replaced the Git CI re-spawn, and the op stays defined as the authority for the `**Status**:` enum `ci-wait.cjs` is pinned to and for check-merge-readiness step 3); and `create-release`, `gather-release-evidence`, `backlink-shipped-issues` and `associate-release`, all named only in the `release` command's prose, never in an `Agent(...)` spawn fence.
+**Ops with callers vs. without.** Most Git operations have a live caller fence in `dist/commands/`; the reverse-direction floor is `seam-ops-with-callers` and the op-to-section map floor is `seam-op-section-map` (both in `numeric-floors.json`). The ops without a caller fence: `learn-conventions` (invoked internally by setup-task, not by any command fence); `update-pr-evidence` and `check-merge-readiness` (run by `verify-evidence.cjs`, with no Git spawn); `check-ci-status` (no command spawns it, because `ci-wait.cjs` replaced the Git CI re-spawn, and the op stays defined as the authority for the `**Status**:` enum `ci-wait.cjs` is pinned to and for check-merge-readiness step 3); and `create-release`, `gather-release-evidence`, `backlink-shipped-issues` and `associate-release`, all named only in the `release` command's prose, never in an `Agent(...)` spawn fence.
 
 **`ISSUE_CAPTURE_CONTRACT` keys.** `ISSUE_CONTENT`, `ACCEPTANCE_CRITERIA`, `ISSUE_REF`, plus the three `### Handoff Values` keys `ISSUE_ID`, `ISSUE_PR_LINK` and `ISSUE_BRANCH_TOKEN`. `issue-capture-contract-size` counts KEYS; the check itself ranges over `(key, op)` PAIRS.
 

@@ -21,7 +21,7 @@ directories:
   - src/assets/commands/debug.mds
   - src/assets/skills/gap-analysis/references/compliance.md
 created: 2026-08-20
-updated: 2026-10-13
+updated: 2026-10-14
 ---
 
 # Compliance Feature & SDLC Traceability
@@ -39,7 +39,7 @@ updated: 2026-10-13
 - **KB-AP-9** Never skip the evidence-policy floor on a compliance-enabled machine with zero frameworks: `complianceDefault()` checks only `enabled`.
 - **KB-AP-10** Never import `FEATURE_OWNED_SKILLS` / `FEATURE_OWNED_RULES` into the test that asserts them: use the independent literal `['compliance']`, or the test verifies the constant against itself.
 - **KB-AP-11** A token-free skill shadow passes through byte-identical (C1) and loses every per-framework section; `--status` flags it `[shadowed, composition skipped]`. A skill shadow replaces SKILL.md only: references and fragments always come from canonical source.
-- **KB-AP-12** Never align the compliance lens with the language-focus gate: a language focus is presence-gated on its installed skill, the lens never is.
+- **KB-AP-12** Never align the compliance lens with the language-focus gate: a language focus is gated by the install-time stamp line `Installed language focuses: <list>`, and the lens is never gated on a file's presence.
 - **KB-AP-13** Never parse `policy.json`: where `project.json` has no `evidence`, the file's mere presence resolves `required` (`invalid-file`), and a guard keeps the retired parser out of `src/`.
 - **KB-AP-14** Never hand an agent the raw lens: `COMPLIANCE_FRAMEWORKS: off` is text the model reads, not a gate, so a spawn carries the directive instead, which is empty when the lens is `off`.
 - **KB-INV-1** Compliance is a feature, not a plugin: skill and rule are owned by `FEATURE_OWNED_SKILLS` / `FEATURE_OWNED_RULES`, disjoint from plugin-owned names; `devflow-compliance` lives only in `DELETED_PLUGIN_NAMES`.
@@ -193,7 +193,7 @@ Two independent things sit on `manifest.features.compliance` and must not be con
 
 **KB-AP-10: the oracle trap.** Tests asserting the `FEATURE_OWNED_*` exclusions use the independent literal `['compliance']` (`tests/plugins.test.ts`).
 
-**KB-AP-12: two gate shapes, deliberately.** `/code-review`'s language focuses stay presence-gated on `{claude_dir}/skills/devflow:{focus}/SKILL.md`, `{claude_dir}` being Claude Code's directory as the installer resolves it (`CLAUDE_CONFIG_DIR` when absolute, else `$HOME/.claude`; D-CLAUDE-DIR-PROMPTS, held by `tests/guards/claude-dir.test.ts`), because those skills install only with their optional plugin. The compliance lens is never presence-gated because every machine has its skill. The language-focus check reads the machine install, never anything per repository.
+**KB-AP-12: two gate shapes, deliberately.** `/code-review`'s language focuses are gated by the install-time stamp line `Installed language focuses: <list>`, which the installer rewrites on every install and on `uninstall --plugin` (D-LANGUAGE-FOCUS-STAMP, held by `tests/guards/claude-dir.test.ts`). The command says: "A language focus is spawned only when its file-type condition above fires AND its name appears in that stamped line." The command probes no directory at run time, because those skills install only with their optional plugin and the stamp records which ones the machine has. The compliance lens is never gated on a file's presence, because every machine has its skill. The language-focus gate reads the machine install, never anything per repository.
 
 ## Key Files
 
