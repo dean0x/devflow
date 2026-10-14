@@ -46,6 +46,17 @@ const HEADING = '## Core rules';
 const DIGEST_KEYS = Object.keys(CORE_RULES_DIGEST) as DigestKey[];
 /** One short line: a digest line longer than this is a paragraph, and every spawn pays for it. */
 const MAX_LINE_CHARS = 160;
+/**
+ * D-CODE-QUIET (the R-452c outcome): the Code-family bodies (Code, Fix, Refactor) keep CLAUDE.md,
+ * so their rows declare no digest. They still carry the context-economy line verbatim as one
+ * shared output line, so that one line is allowed in those bodies and no other digest line is.
+ */
+const CODE_FAMILY_SHARED_OUTPUT_LINE: ReadonlyMap<string, readonly DigestKey[]> = new Map([
+  ['code', ['context-economy']],
+  ['fix', ['context-economy']],
+  ['refactor', ['context-economy']],
+]);
+const allowedFor = (name: string): readonly DigestKey[] => CODE_FAMILY_SHARED_OUTPUT_LINE.get(name) ?? [];
 
 // ---------------------------------------------------------------------------
 // Named collectors
@@ -59,8 +70,9 @@ function bulletsFor(declared: readonly DigestKey[]): string[] {
 /**
  * Every way a body departs from its declared digest: a missing, reworded, extra, reordered or
  * undeclared line, a heading that is not there once, or a bullet under it that is not a digest line.
+ * A line in `allowed` may appear without a declaration (a named, recorded exception); it is never required.
  */
-function collectBodyDefects(body: string, declared: readonly DigestKey[]): string[] {
+function collectBodyDefects(body: string, declared: readonly DigestKey[], allowed: readonly DigestKey[] = []): string[] {
   const out: string[] = [];
   const lines = body.split('\n');
   const headingAt = lines.map((line, i) => (line === HEADING ? i : -1)).filter(i => i !== -1);
@@ -84,7 +96,7 @@ function collectBodyDefects(body: string, declared: readonly DigestKey[]): strin
 
   for (const key of DIGEST_KEYS) {
     const present = body.includes(CORE_RULES_DIGEST[key].line);
-    if (present && !declared.includes(key)) out.push(`carries the undeclared digest line "${key}"`);
+    if (present && !declared.includes(key) && !allowed.includes(key)) out.push(`carries the undeclared digest line "${key}"`);
     if (!present && declared.includes(key)) out.push(`lacks the declared digest line "${key}"`);
   }
   return out;
@@ -261,7 +273,7 @@ describe('every body carries exactly its declared digest lines', () => {
   for (const name of REGISTERED) {
     const declared = OMIT_CLAUDE_MD_DIGESTS.get(name) ?? [];
     it(`${name}.md carries ${declared.length === 0 ? 'no digest line' : declared.join(', ')}`, () => {
-      expect(collectBodyDefects((texts.get(name) as AgentText).body, declared)).toEqual([]);
+      expect(collectBodyDefects((texts.get(name) as AgentText).body, declared, allowedFor(name))).toEqual([]);
     });
   }
 
@@ -302,6 +314,26 @@ describe('every body carries exactly its declared digest lines', () => {
       expect(collectBodyDefects(body.replace(HEADING, '## Rules'), declared).join('\n')).toContain('0 times');
       expect(collectBodyDefects(`${body}\n${block}\n`, declared).join('\n')).toContain('2 times');
       expect(collectBodyDefects(body, []).join('\n')).toContain('heading it does not declare');
+    });
+
+    it('allows the shared output line in the Code-family bodies and only there', () => {
+      const line = CORE_RULES_DIGEST['context-economy'].line;
+      const prose = `# Agent\n\n${line}\n`;
+      for (const name of ['code', 'fix', 'refactor']) {
+        expect(allowedFor(name), name).toEqual(['context-economy']);
+        expect(collectBodyDefects(prose, [], allowedFor(name)), name).toEqual([]);
+      }
+    });
+
+    it('reports the shared output line on an agent that keeps CLAUDE.md and is not in the Code family', () => {
+      const prose = `# Agent\n\n${CORE_RULES_DIGEST['context-economy'].line}\n`;
+      expect(allowedFor('polish')).toEqual([]);
+      expect(collectBodyDefects(prose, [], allowedFor('polish')).join('\n')).toContain('undeclared digest line "context-economy"');
+    });
+
+    it('reports a different undeclared digest line in a Code-family body', () => {
+      const prose = `# Agent\n\n${CORE_RULES_DIGEST['context-economy'].line}\n\n${CORE_RULES_DIGEST['no-secrets'].line}\n`;
+      expect(collectBodyDefects(prose, [], allowedFor('code')).join('\n')).toContain('undeclared digest line "no-secrets"');
     });
 
     it('reports a block with no blank line under the heading', () => {
