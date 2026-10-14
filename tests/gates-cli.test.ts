@@ -133,7 +133,7 @@ describe('gatherGateStatus', () => {
     const r = stubResolver(() => settings({ ok: false, gateLevel: 'full', gateLevelSource: null, unreadable: 'personal', gateLevelMachine: null }));
     const status = await gatherGateStatus(deps({ loadSettings: r.load, readManifest: async () => objectManifest() }));
     expect(status).toMatchObject({ kind: 'fail-closed', machine: null });
-    expect(renderGateStatus(status).lines).toContain('Machine none');
+    expect(renderGateStatus(status).lines).toContain('Machine:   none');
   });
 
   it('reports the TypeScript reader\'s machine value when the resolver cannot be loaded', async () => {
@@ -167,18 +167,18 @@ const base = { manifest: 'readable', manifestPath: MANIFEST_PATH } as const;
 describe('renderGateStatus', () => {
   it('prints the level and its source with the machine value', () => {
     const status: GateStatus = { ...base, kind: 'resolved', level: 'lean', source: 'personal', invalid: false, machine: null, trackedWarning: null };
-    expect(renderGateStatus(status)).toEqual({ lines: ['Effective lean (personal)', 'Machine none'], warnings: [] });
+    expect(renderGateStatus(status)).toEqual({ lines: ['Effective: lean (personal)', 'Machine:   none'], warnings: [] });
   });
 
   it('prints a machine level as the source when it decides', () => {
     const status: GateStatus = { ...base, kind: 'resolved', level: 'lean', source: 'machine', invalid: false, machine: 'lean', trackedWarning: null };
-    expect(renderGateStatus(status).lines).toEqual(['Effective lean (machine)', 'Machine lean']);
+    expect(renderGateStatus(status).lines).toEqual(['Effective: lean (machine)', 'Machine:   lean']);
   });
 
   it('marks a malformed personal value invalid, names config.json and says full is in effect', () => {
     const status: GateStatus = { ...base, kind: 'resolved', level: 'full', source: 'personal', invalid: true, machine: 'lean', trackedWarning: null };
     const out = renderGateStatus(status);
-    expect(out.lines[0]).toBe('Effective full (personal, invalid)');
+    expect(out.lines[0]).toBe('Effective: full (personal, invalid)');
     expect(out.warnings).toHaveLength(1);
     expect(out.warnings[0]).toContain('.devflow/config.json');
     expect(out.warnings[0]).toContain('full is in effect');
@@ -187,21 +187,21 @@ describe('renderGateStatus', () => {
   it('shows a malformed machine value as invalid whichever layer decides', () => {
     const status: GateStatus = { ...base, kind: 'resolved', level: 'lean', source: 'personal', invalid: false, machine: 'invalid', trackedWarning: null };
     const out = renderGateStatus(status);
-    expect(out.lines).toEqual(['Effective lean (personal)', 'Machine invalid (manifest.json; reads as full)']);
+    expect(out.lines).toEqual(['Effective: lean (personal)', 'Machine:   invalid (manifest.json; reads as full)']);
     expect(out.warnings).toEqual([]);
   });
 
   it('prints the fail-closed level with its reason, and with reason unknown when there is none', () => {
     const named: GateStatus = { ...base, kind: 'fail-closed', reason: '.devflow/project.json is unreadable', machine: 'lean', trackedWarning: null };
-    expect(renderGateStatus(named).lines).toEqual(['Effective full (fail-closed: .devflow/project.json is unreadable)', 'Machine lean']);
+    expect(renderGateStatus(named).lines).toEqual(['Effective: full (fail-closed: .devflow/project.json is unreadable)', 'Machine:   lean']);
     const unnamed: GateStatus = { ...base, kind: 'fail-closed', reason: null, machine: null, trackedWarning: null };
-    expect(renderGateStatus(unnamed).lines).toEqual(['Effective full (fail-closed: reason unknown)', 'Machine none']);
+    expect(renderGateStatus(unnamed).lines).toEqual(['Effective: full (fail-closed: reason unknown)', 'Machine:   none']);
   });
 
   it('prints an unknown effective level when the resolver did not load', () => {
     const status: GateStatus = { ...base, kind: 'unloadable', machine: 'lean' };
     const out = renderGateStatus(status);
-    expect(out.lines).toEqual(['Effective level unknown', 'Machine lean']);
+    expect(out.lines).toEqual(['Effective: level unknown', 'Machine:   lean']);
     expect(out.warnings).toHaveLength(1);
   });
 
@@ -503,13 +503,13 @@ describe('devflow gates --set', () => {
     expect(await snapshot(tmpHome)).toEqual(before);
   }, SUBPROCESS_TIMEOUT_MS);
 
-  it('rejects --set with no value with exit 1 and shows the levels in the help after the error', async () => {
+  it('rejects --set with no value with exit 1, reports the missing argument and writes nothing', async () => {
     await writeManifestText(manifestJson());
     const before = await snapshot(tmpHome);
     const run = runCli(['gates', '--set']);
     expect(run.status, run.out).toBe(1);
     expect(run.out).toContain('argument missing');
-    for (const level of ['full', 'standard', 'lean']) expect(run.out).toContain(level);
+    expect(run.out).not.toContain('Gate levels:');
     expect(await snapshot(tmpHome)).toEqual(before);
   }, SUBPROCESS_TIMEOUT_MS);
 
@@ -536,8 +536,8 @@ describe('devflow gates --status', () => {
     await writeManifestText(manifestJson());
     const run = runCli(['gates', '--status']);
     expect(run.status, run.out).toBe(0);
-    expect(run.out).toContain('Effective standard (default)');
-    expect(run.out).toContain('Machine none');
+    expect(run.out).toContain('Effective: standard (default)');
+    expect(run.out).toContain('Machine:   none');
     expect(run.out).not.toContain('cannot be read');
   }, SUBPROCESS_TIMEOUT_MS);
 
@@ -545,20 +545,20 @@ describe('devflow gates --status', () => {
     await writePersonal('{"gateLevel":"lean"}\n');
     await writeManifestText(manifestJson());
     const none = runCli(['gates', '--status']);
-    expect(none.out).toContain('Effective lean (personal)');
-    expect(none.out).toContain('Machine none');
+    expect(none.out).toContain('Effective: lean (personal)');
+    expect(none.out).toContain('Machine:   none');
     await writeManifestText(manifestJson('full'));
     const full = runCli(['gates', '--status']);
-    expect(full.out).toContain('Effective lean (personal)');
-    expect(full.out).toContain('Machine full');
+    expect(full.out).toContain('Effective: lean (personal)');
+    expect(full.out).toContain('Machine:   full');
   }, SUBPROCESS_TIMEOUT_MS);
 
   it('shows the machine level as the source when no personal key exists', async () => {
     await writeManifestText(manifestJson('lean'));
     const run = runCli(['gates', '--status']);
     expect(run.status, run.out).toBe(0);
-    expect(run.out).toContain('Effective lean (machine)');
-    expect(run.out).toContain('Machine lean');
+    expect(run.out).toContain('Effective: lean (machine)');
+    expect(run.out).toContain('Machine:   lean');
   }, SUBPROCESS_TIMEOUT_MS);
 
   it('warns about a git-tracked config.json and treats its level as absent', async () => {
@@ -568,7 +568,7 @@ describe('devflow gates --status', () => {
     const run = runCli(['gates', '--status']);
     expect(run.status, run.out).toBe(0);
     expect(run.out).toContain('git rm --cached');
-    expect(run.out).toContain('Effective standard (default)');
+    expect(run.out).toContain('Effective: standard (default)');
     expect(run.out).not.toContain('(personal)');
   }, SUBPROCESS_TIMEOUT_MS);
 
@@ -577,7 +577,7 @@ describe('devflow gates --status', () => {
     await writeManifestText(manifestJson('lean'));
     const run = runCli(['gates', '--status']);
     expect(run.status, run.out).toBe(0);
-    expect(run.out).toContain('Effective full (personal, invalid)');
+    expect(run.out).toContain('Effective: full (personal, invalid)');
     expect(run.out).toContain('.devflow/config.json');
     expect(run.out).toContain('full is in effect');
     expect(run.out).not.toContain('ZZ-raw-canary');
@@ -588,8 +588,8 @@ describe('devflow gates --status', () => {
     await writeManifestText(manifestJson('lean'));
     const run = runCli(['gates', '--status']);
     expect(run.status, run.out).toBe(0);
-    expect(run.out).toContain('Effective full (fail-closed: .devflow/config.json is unreadable)');
-    expect(run.out).toContain('Machine lean');
+    expect(run.out).toContain('Effective: full (fail-closed: .devflow/config.json is unreadable)');
+    expect(run.out).toContain('Machine:   lean');
   }, SUBPROCESS_TIMEOUT_MS);
 
   it('shows a malformed machine value as invalid behind a valid personal level, with no manifest warning', async () => {
@@ -597,16 +597,16 @@ describe('devflow gates --status', () => {
     await writeManifestText(manifestJson('Lean'));
     const run = runCli(['gates', '--status']);
     expect(run.status, run.out).toBe(0);
-    expect(run.out).toContain('Effective lean (personal)');
-    expect(run.out).toContain('Machine invalid (manifest.json; reads as full)');
+    expect(run.out).toContain('Effective: lean (personal)');
+    expect(run.out).toContain('Machine:   invalid (manifest.json; reads as full)');
     expect(run.out).not.toContain('cannot be read');
   }, SUBPROCESS_TIMEOUT_MS);
 
   it('prints the default with no warning and exits 0 when no manifest exists', async () => {
     const run = runCli(['gates', '--status']);
     expect(run.status, run.out).toBe(0);
-    expect(run.out).toContain('Effective standard (default)');
-    expect(run.out).toContain('Machine none');
+    expect(run.out).toContain('Effective: standard (default)');
+    expect(run.out).toContain('Machine:   none');
     expect(run.out).not.toContain('cannot be read');
   }, SUBPROCESS_TIMEOUT_MS);
 
@@ -614,7 +614,7 @@ describe('devflow gates --status', () => {
     await writeManifestText(manifestJson('lean'));
     const run = runCli(['gates', '--status'], outside);
     expect(run.status, run.out).toBe(0);
-    expect(run.out).toContain('Effective lean (machine)');
+    expect(run.out).toContain('Effective: lean (machine)');
     expect(run.out).not.toContain('cannot be read');
   }, SUBPROCESS_TIMEOUT_MS);
 
@@ -622,7 +622,7 @@ describe('devflow gates --status', () => {
     await writeManifestText('{not json');
     const run = runCli(['gates', '--status']);
     expect(run.status, run.out).toBe(0);
-    expect(run.out).toContain('Effective standard (default)');
+    expect(run.out).toContain('Effective: standard (default)');
     expect(run.out).toContain(`Manifest at ${manifestPath()} cannot be read as a manifest; devflow init will replace this file.`);
   }, SUBPROCESS_TIMEOUT_MS);
 
@@ -630,7 +630,7 @@ describe('devflow gates --status', () => {
     await fs.mkdir(manifestPath(), { recursive: true });
     const run = runCli(['gates', '--status']);
     expect(run.status, run.out).toBe(0);
-    expect(run.out).toContain('Effective standard (default)');
+    expect(run.out).toContain('Effective: standard (default)');
     expect(run.out).toContain('devflow init will replace this file');
   }, SUBPROCESS_TIMEOUT_MS);
 
@@ -639,7 +639,7 @@ describe('devflow gates --status', () => {
     await writeManifestText(JSON.stringify({ ...m, pad: 'x'.repeat(1_100_000) }));
     const run = runCli(['gates', '--status']);
     expect(run.status, run.out).toBe(0);
-    expect(run.out).toContain('Effective standard (default)');
+    expect(run.out).toContain('Effective: standard (default)');
     expect(run.out).toContain('devflow init will replace this file');
   }, SUBPROCESS_TIMEOUT_MS);
 
@@ -647,7 +647,7 @@ describe('devflow gates --status', () => {
     await writeManifestText('{"features":{"gateLevel":"lean"}}\n');
     const run = runCli(['gates', '--status']);
     expect(run.status, run.out).toBe(0);
-    expect(run.out).toContain('Effective lean (machine)');
+    expect(run.out).toContain('Effective: lean (machine)');
     expect(run.out).toContain('devflow init will replace this file');
   }, SUBPROCESS_TIMEOUT_MS);
 
@@ -655,7 +655,7 @@ describe('devflow gates --status', () => {
     await writeManifestText('\ufeff' + manifestJson('lean'));
     const run = runCli(['gates', '--status']);
     expect(run.status, run.out).toBe(0);
-    expect(run.out).toContain('Effective lean (machine)');
+    expect(run.out).toContain('Effective: lean (machine)');
     expect(run.out).toContain('devflow init will replace this file');
   }, SUBPROCESS_TIMEOUT_MS);
 
@@ -669,8 +669,21 @@ describe('devflow gates --status', () => {
     const before = await snapshot(tmpHome);
     const run = runCli(['gates', '--status', '--set', 'lean']);
     expect(run.status, run.out).toBe(0);
-    expect(run.out).toContain('Effective standard (default)');
+    expect(run.out).toContain('Effective: standard (default)');
     expect(run.out).not.toContain('Gate level: lean');
+    expect(await snapshot(tmpHome)).toEqual(before);
+  }, SUBPROCESS_TIMEOUT_MS);
+
+  it.each([
+    ['a wrong-case level', 'Lean'],
+    ['an empty value', ''],
+  ])('exits 1 for %s given to --set, even beside --status, and writes nothing', async (_label, value) => {
+    await writeManifestText(manifestJson('lean'));
+    const before = await snapshot(tmpHome);
+    const run = runCli(['gates', '--status', '--set', value]);
+    expect(run.status, run.out).toBe(1);
+    expect(run.out).toContain('Valid levels: full, standard, lean');
+    expect(run.out).not.toContain('Effective:');
     expect(await snapshot(tmpHome)).toEqual(before);
   }, SUBPROCESS_TIMEOUT_MS);
 
@@ -702,6 +715,7 @@ describe('devflow gates (help and usage)', () => {
     expect(run.out).toMatch(/standard\s+the default/);
     expect(run.out).toMatch(/lean\s+the least checking/);
     expect(run.out).toContain('no effect until issues #473, #474 and #480 read it');
+    expect(run.out).toContain('Set the machine\'s default gate level: full, standard, or lean');
   }, SUBPROCESS_TIMEOUT_MS);
 
   it('is listed in the top-level help', () => {

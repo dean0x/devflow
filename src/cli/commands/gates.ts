@@ -65,6 +65,7 @@ export const GATE_LEVEL_NO_EFFECT =
 const MACHINE_MANIFEST_NAME = 'manifest.json';
 const MACHINE_INVALID_LINE = `invalid (${MACHINE_MANIFEST_NAME}; reads as full)`;
 const VALID_LEVELS = GATE_LEVELS.join(', ');
+const VALID_LEVELS_OR = `${GATE_LEVELS.slice(0, -1).join(', ')}, or ${GATE_LEVELS[GATE_LEVELS.length - 1]}`;
 
 // ── Status: gather ─────────────────────────────────────────────────────────────
 
@@ -159,7 +160,10 @@ function failClosedReason(settings: RepoSettings): string | null {
  * The settings resolve ONCE, and that one result feeds the level, the machine value
  * and the tracked-config warning. The manifest is read with the gate reader, never
  * with `readManifest()`, which heal-writes and returns null for a manifest it
- * rejects: a read-only status must do neither.
+ * rejects: a read-only status must do neither. The manifest is read twice, once by
+ * the gate reader here and once by the resolver; a write between the two reads can
+ * mix two versions, which is acceptable because the result is display only and no
+ * action follows it.
  */
 export async function gatherGateStatus(deps: GateStatusDeps): Promise<GateStatus> {
   const manifestPath = path.join(deps.devflowDir, MACHINE_MANIFEST_NAME);
@@ -203,9 +207,9 @@ export interface GateStatusRender {
 
 /** The machine line: `none` when the manifest records no level or cannot be read (its own warning says which). */
 function machineLine(machine: MachineValue): string {
-  if (machine === 'invalid') return `Machine ${MACHINE_INVALID_LINE}`;
-  if (machine === null) return 'Machine none';
-  return `Machine ${machine}`;
+  if (machine === 'invalid') return `Machine:   ${MACHINE_INVALID_LINE}`;
+  if (machine === null) return 'Machine:   none';
+  return `Machine:   ${machine}`;
 }
 
 function manifestWarning(status: GateStatus): string | null {
@@ -224,7 +228,7 @@ export function renderGateStatus(status: GateStatus): GateStatusRender {
   const lines: string[] = [];
   switch (status.kind) {
     case 'resolved': {
-      lines.push(`Effective ${status.level} (${status.source}${status.invalid ? ', invalid' : ''})`);
+      lines.push(`Effective: ${status.level} (${status.source}${status.invalid ? ', invalid' : ''})`);
       lines.push(machineLine(status.machine));
       if (status.invalid && status.source === 'personal') {
         warnings.push(
@@ -236,13 +240,13 @@ export function renderGateStatus(status: GateStatus): GateStatusRender {
       break;
     }
     case 'fail-closed': {
-      lines.push(`Effective full (fail-closed: ${status.reason ?? 'reason unknown'})`);
+      lines.push(`Effective: full (fail-closed: ${status.reason ?? 'reason unknown'})`);
       lines.push(machineLine(status.machine));
       if (status.trackedWarning !== null) warnings.push(status.trackedWarning);
       break;
     }
     case 'unloadable': {
-      lines.push('Effective level unknown');
+      lines.push('Effective: level unknown');
       lines.push(machineLine(status.machine));
       warnings.push('The settings resolver could not be loaded, so the level that applies is unknown.');
       break;
@@ -344,8 +348,7 @@ function levelsHelp(): string {
 export const gatesCommand = new Command('gates')
   .description('Show or set the machine\'s default gate level')
   .option('--status', 'Show the gate level in effect here, which layer decided it, and the machine default')
-  .option('--set <level>', `Set the machine default gate level: ${VALID_LEVELS}`)
-  .showHelpAfterError()
+  .option('--set <level>', `Set the machine's default gate level: ${VALID_LEVELS_OR}`)
   .addHelpText(
     'after',
     `\nGate levels:\n${levelsHelp()}\n\n` +
@@ -368,8 +371,18 @@ export const gatesCommand = new Command('gates')
       return;
     }
 
-    // --status wins when both flags are passed, mirroring `devflow tracker`.
-    if (options.status) {
+    // Validate --set before any I/O, even beside --status: a bad word is rejected,
+    // never repaired, and exits 1 as it does in `devflow tracker` and `devflow compliance`.
+    const parsed = options.set === undefined ? undefined : parseGateLevel(options.set);
+    if (parsed !== undefined && !parsed.ok) {
+      p.log.error(parsed.error);
+      process.exitCode = 1;
+      return;
+    }
+
+    // --status wins over a valid --set and writes nothing, mirroring `devflow tracker`.
+    // With neither flag the usage printed above, so no --set here means --status alone.
+    if (options.status || parsed === undefined) {
       const status = await gatherGateStatus({
         devflowDir,
         dir: process.cwd(),
@@ -377,18 +390,11 @@ export const gatesCommand = new Command('gates')
         readManifest: readGateManifest,
       });
       const rendered = renderGateStatus(status);
-      p.note(rendered.lines.join('\n'), 'Gate Level');
+      p.note(rendered.lines.join('\n'), 'Gate Level Status');
       for (const warning of rendered.warnings) p.log.warn(warning);
       return;
     }
 
-    // Validate the typed level before any I/O: a bad word is rejected, never repaired.
-    const parsed = parseGateLevel(options.set);
-    if (!parsed.ok) {
-      p.log.error(parsed.error);
-      process.exitCode = 1;
-      return;
-    }
     const outcome = await runGatesSet(devflowDir, parsed.value);
     printOutcome(outcome);
     process.exitCode = outcome.exitCode;

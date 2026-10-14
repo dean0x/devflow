@@ -272,14 +272,14 @@ The level is matched **exactly**. `--set` rejects `Lean`, `lean ` with a trailin
 
 **A tracked `config.json`.** A `config.json` that git tracks is ignored as if it were absent, so its `gateLevel` does not apply, and `gates --status` warns with the fix (see the memory, learning and knowledge section above).
 
-**`--status`.** It resolves the settings once, writes nothing, and always exits 0:
+**`--status`.** It resolves the settings once, writes nothing, and exits 0. Beside a valid `--set` it still only shows the status. Beside an invalid `--set` it prints the error and exits 1, as `tracker` and `compliance` do:
 
 ```text
-Effective lean (personal)
-Machine full
+Effective: lean (personal)
+Machine:   full
 ```
 
-The first line is the level in effect and the layer that decided it (`default`, `machine` or `personal`). `, invalid` follows the layer when it holds a malformed value, and the warning names `config.json` and says that `full` is in effect; the bad value is never printed. A fail-closed result prints `Effective full (fail-closed: <reason>)`, or `reason unknown`, with no layer. The second line is the machine default: a level, `none` when the manifest records no level or cannot be read, or `invalid (manifest.json; reads as full)`. If the settings resolver cannot load, the first line reads `Effective level unknown`.
+The output is titled `Gate Level Status`. The `Effective:` line is the level in effect and the layer that decided it (`default`, `machine` or `personal`). `, invalid` follows the layer when it holds a malformed value, and the warning names `config.json` and says that `full` is in effect; the bad value is never printed. A fail-closed result prints `Effective: full (fail-closed: <reason>)`, or `reason unknown`, with no layer. The `Machine:` line is the machine default: a level, `none` when the manifest records no level or cannot be read, or `invalid (manifest.json; reads as full)`. If the settings resolver cannot load, the first line reads `Effective: level unknown`.
 
 If the manifest is corrupt, over 1 MiB, or valid JSON that devflow rejects, `--status` warns that `devflow init` will replace the file, and the machine default in it is lost with the rest. A plain `devflow init` over a manifest that devflow reads keeps the level.
 
