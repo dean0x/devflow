@@ -294,7 +294,7 @@ describe('ensure-pr-ready — the paste gate, one row per tracker grammar', () =
     ).toMatch(/`\(none\)`[\s\S]{0,200}?not a mismatch/i)
     expect(
       PR_READY,
-      'with no rendered line the section keeps its heading and carries no reference — a bare ' +
+      'with no rendered line the section carries no reference — a bare ' +
       'number names a different issue under each provider, so any line composed from it would be a guess',
     ).toContain('never compose one from `ISSUE_NUMBER`')
     expect(
@@ -418,6 +418,116 @@ describe('ensure-pr-ready — the paste gate, one row per tracker grammar', () =
   })
 })
 
+// -------------------------------------------------------------------------
+// A supplied ISSUE_PR_LINK is final (F3a, #459).
+//
+// Step 4a decides the closing line of a PR it is handed one for, and a supplied
+// value — `(none)` included — is its whole answer: step 4b runs only for an ABSENT
+// key. Before this, `(none)` fell through to step 4b, and GitHub's step 4b composed
+// a `Closes #{n}` line from a bare number or from the branch name: the same digits
+// name a different issue under each provider, so the PR could close the wrong
+// issue, or carry two `## Related Issues` headings (4a's empty one and 4b's).
+//
+// The paragraphs are read from the compiled GitHub reference. Step 4a is written
+// once in `_ops_steps.mds` and expanded into every provider's reference, so the
+// GitHub copy stands for it; step 4b is each provider's own, and only GitHub's is
+// read here.
+// -------------------------------------------------------------------------
+
+/** The blank-line-bounded paragraph of `ref` that opens with `lead`; '' when none does. */
+function paragraphStartingWith(ref: string, lead: string): string {
+  return ref.split(/\n[ \t]*\n/).find(p => p.trimStart().startsWith(lead)) ?? ''
+}
+
+/** A reference's step 4b, from its heading to step 4c; '' when either bound is absent. */
+function step4bOf(ref: string): string {
+  const start = ref.indexOf('\n4b. (ALWAYS-ON)')
+  const end = ref.indexOf('\n4c. ', start)
+  return start === -1 || end === -1 ? '' : ref.slice(start, end)
+}
+
+/** Named collector: how a step 4b block composes a closing line itself instead of rendering the setup-task one. */
+function collectStep4bComposition(block: string): string[] {
+  const out: string[] = []
+  const has = (what: string, found: boolean): void => { if (found) out.push(what) }
+  has('a branch-name fallback', /branch name pattern/.test(block))
+  has('a second resolution option', /^\s+b\. /m.test(block))
+  has('a number verified with the tracker CLI', /gh issue view/.test(block))
+  has('a line built from a verified issue number', /verified issue number/.test(block))
+  if (!/Never compose a line from a bare issue number/.test(block)) out.push('no ban on composing from a bare number')
+  if (!block.includes('step 4a\'s shape check')) out.push('no pass through step 4a\'s shape check')
+  return out
+}
+
+describe('ensure-pr-ready — a supplied ISSUE_PR_LINK is final and step 4b composes nothing (F3a)', () => {
+  const FINAL = paragraphStartingWith(PR_READY, '**A given `ISSUE_PR_LINK` is final.**')
+  const NONE = paragraphStartingWith(PR_READY, '`(none)`')
+
+  it('is non-vacuous: the paragraphs and the step 4b block are found', () => {
+    expect(FINAL, 'the final-link paragraph').not.toBe('')
+    expect(NONE, 'the (none) paragraph').not.toBe('')
+    expect(step4bOf(PR_READY), 'the GitHub step 4b block').not.toBe('')
+  })
+
+  it('(a) a supplied (none) is final: it gives no reference and never reaches step 4b', () => {
+    expect(FINAL, 'a supplied value is final, `(none)` included').toMatch(/When it is given, `\(none\)` included,/)
+    expect(FINAL, '`(none)` no longer leaves the answer to step 4b').not.toMatch(/`\(none\)` or absent leaves the answer to step 4b/)
+    expect(FINAL, 'the old condition excluded `(none)`').not.toContain('given and not `(none)`')
+    expect(FINAL, 'only an absent key reaches step 4b').toContain('Only an absent `ISSUE_PR_LINK` goes to step 4b')
+    expect(FINAL, 'an admitted wave block is the section\'s only writer').toContain('no admitted wave block exists')
+    expect(NONE, 'an absent block is no longer a `(none)` case — only a supplied value is read here').not.toContain('absent `### Handoff Values` block')
+  })
+
+  it('(b) the degraded line shows when ISSUE_NUMBER is set and no line is admitted', () => {
+    expect(
+      FINAL,
+      'a set ISSUE_NUMBER with no admitted line is reported under the registered reason, not left silent',
+    ).toMatch(/When `ISSUE_NUMBER` is set and no line is admitted,[^.]*`TRACEABILITY: DEGRADED \(ambiguous issue reference\)`/)
+  })
+
+  it('(c) GitHub step 4b has no bare-number composition and no branch-name option', () => {
+    const block = step4bOf(PR_READY)
+    expect(
+      collectStep4bComposition(block),
+      'step 4b renders only the setup-task line, through the step 4a shape check — it composes no line itself',
+    ).toEqual([])
+    expect(block, 'the pinned guard: a given link is decided in step 4a').toContain('A given `ISSUE_PR_LINK` is already decided in step 4a: skip the resolution below.')
+    expect(block, 'the pinned guard: the section is published through the PR-host half').toContain('Publish the section through step 4b\'s PR-host half.')
+  })
+
+  it('(d) none for both keys gives no Related Issues heading, and an empty heading needs ISSUE_NUMBER', () => {
+    expect(
+      NONE,
+      'an unconditional empty heading is what put a heading on issue-less PRs',
+    ).not.toContain('emit the `## Related Issues` heading with no reference')
+    expect(
+      FINAL,
+      'with ISSUE_NUMBER `(none)` and no line, the PR body carries no heading',
+    ).toMatch(/when it is `\(none\)`, write no heading/)
+    expect(
+      FINAL,
+      'the empty heading belongs to a set ISSUE_NUMBER',
+    ).toMatch(/When `ISSUE_NUMBER` is set and no line is admitted, emit the heading with no reference/)
+  })
+
+  it('known-bad probes: a branch fallback, a second option and a composing step 4b are each reported', () => {
+    const block = step4bOf(PR_READY)
+    expect(collectStep4bComposition(block), 'the real block is clean, so each seed fails for its own reason').toEqual([])
+    const seeded = `${block}\n   b. If unavailable, fall back to the branch name pattern \`{type}/{number}-{slug}\` and verify with \`gh issue view {n}\`, a verified issue number.`
+    expect(collectStep4bComposition(seeded)).toEqual([
+      'a branch-name fallback',
+      'a second resolution option',
+      'a number verified with the tracker CLI',
+      'a line built from a verified issue number',
+    ])
+    expect(collectStep4bComposition('4b. Render the line.')).toEqual([
+      'no ban on composing from a bare number',
+      'no pass through step 4a\'s shape check',
+    ])
+    expect(step4bOf('no step four-b here'), 'an absent block reads as empty, never as a pass').toBe('')
+  })
+})
+
 describe('handoff seam — setup-task and fetch-issue producers ↔ ensure-pr-ready consumer', () => {
   it('both sides spell the two pasted labels identically', () => {
     for (const label of ['- **PR link line**:', '- **Branch token**:']) {
@@ -452,9 +562,10 @@ describe('handoff seam — setup-task and fetch-issue producers ↔ ensure-pr-re
 //
 // The Code agent opens no PR, so it takes none of the PR keys: no Code spawn
 // forwards ISSUE_NUMBER, ISSUE_PR_LINK or PR_EXCEPTIONS (an exact-0 guard). The one
-// consumer is the PR-opening Git spawn, so the relation that replaced "every
-// ISSUE_NUMBER payload also carries ISSUE_PR_LINK" is: a workflow that captures
-// ISSUE_PR_LINK forwards it to its PR-opening Git spawn (D-LINK-FLOOR). A workflow
+// consumer is the PR-opening Git spawn, so the relation over its fences is: a workflow
+// that captures ISSUE_PR_LINK forwards it to its PR-opening Git spawn (D-LINK-FLOOR),
+// and every such fence that passes ISSUE_NUMBER passes ISSUE_PR_LINK beside it, so step
+// 4b (which runs only for an absent link) never meets a set issue. A workflow
 // opens its PR in one of two ways, both named below: /implement passes the link
 // itself, /dynamic-build composes a wave block from each ticket's captured
 // `issuePrLink` and passes that.
@@ -611,6 +722,24 @@ function collectUnforwardedPrOpens(file: string, source: string): string[] {
     .map(p => `${p.file}:${p.line}: the PR-opening spawn does not pass ${key}`)
 }
 
+/** A spawn payload line that passes `key`: the key opens the line, after indent and an optional quote. */
+function passesKey(block: string, key: string): boolean {
+  return new RegExp(`^[ \\t]*"?${key}: `, 'm').test(block)
+}
+
+/**
+ * Named collector: PR-opening spawns that pass ISSUE_NUMBER but not ISSUE_PR_LINK.
+ *
+ * Step 4b runs only for an ABSENT ISSUE_PR_LINK. A spawn that sets ISSUE_NUMBER and omits the
+ * link would send a set issue to step 4b, whose heading step 4a has already written. Keeping the
+ * two keys together is what lets step 4a's final rule leave step 4b nothing to compose.
+ */
+function collectIssueNumberWithoutLink(payloads: readonly SpawnPayload[]): string[] {
+  return payloads
+    .filter(p => passesKey(p.block, 'ISSUE_NUMBER') && !passesKey(p.block, 'ISSUE_PR_LINK'))
+    .map(p => `${p.file}:${p.line}: the PR-opening spawn passes ISSUE_NUMBER without ISSUE_PR_LINK`)
+}
+
 describe('ISSUE_PR_LINK reaches the PR-opening Git spawn (D-LINK-FLOOR)', () => {
   it('every capturing workflow forwards the link into its ensure-pr-ready spawn, and the named set is exactly that set', async () => {
     const commands = await deployedCommands()
@@ -620,6 +749,24 @@ describe('ISSUE_PR_LINK reaches the PR-opening Git spawn (D-LINK-FLOOR)', () => 
       expect(collectEnsurePrReadySpawns(name, content).length, `${name}: no PR-opening spawn to forward into`).toBeGreaterThan(0)
       expect(collectUnforwardedPrOpens(name, content), name).toEqual([])
     }
+  }, 20_000)
+
+  it('(e) every ensure-pr-ready fence that passes ISSUE_NUMBER also passes ISSUE_PR_LINK, and one such fence exists', async () => {
+    // A characterization, not a RED case: it holds on the base this fix starts from.
+    const commands = await deployedCommands()
+    const payloads = commands.flatMap(([name, content]) => collectEnsurePrReadySpawns(name, content))
+    const withNumber = payloads.filter(p => passesKey(p.block, 'ISSUE_NUMBER'))
+    expect(withNumber.length, 'no fence passes ISSUE_NUMBER, so the relation below holds over nothing').toBeGreaterThan(0)
+    expect(collectIssueNumberWithoutLink(payloads)).toEqual([])
+  }, 20_000)
+
+  it('known-bad probe: a fence that passes ISSUE_NUMBER and drops ISSUE_PR_LINK is reported', async () => {
+    const commands = await deployedCommands()
+    const implement = commands.find(([n]) => n === 'implement.md')?.[1] ?? ''
+    expect(collectIssueNumberWithoutLink(collectEnsurePrReadySpawns('implement.md', implement)), 'the real fence is clean').toEqual([])
+    const dropped = implement.replace(/^ISSUE_PR_LINK: .*\n/m, '')
+    expect(dropped, 'the drop seed must land').not.toBe(implement)
+    expect(collectIssueNumberWithoutLink(collectEnsurePrReadySpawns('implement.md', dropped))).toHaveLength(1)
   }, 20_000)
 
   it('the floor: at least issue-pr-link-pr-open-sites PR-opening spawns pass ISSUE_PR_LINK: itself', async () => {
@@ -763,6 +910,8 @@ describe('ensure-pr-ready opens the PR (D-LINK-VERBATIM, D-COMMIT-EXPLICIT, D-PR
     for (const key of NEW_INPUTS) need(`the Input line does not declare ${key} as optional`, input.includes(`\`${key}\` (optional)`))
     need('a given link is final, pasted without step 4b resolving',
       ref.includes("**A given `ISSUE_PR_LINK` is final.**") && ref.includes('step 4b does not resolve a number'))
+    need('a given none is final too, and only an absent link reaches step 4b',
+      ref.includes('When it is given, `(none)` included,') && ref.includes('Only an absent `ISSUE_PR_LINK` goes to step 4b'))
     need('step 4b skips its resolution for a given link', /4b\. \(ALWAYS-ON\)[^\n]*A given `ISSUE_PR_LINK` is already decided in step 4a: skip the resolution/.test(ref))
     need('COMMIT_UNCOMMITTED defaults to true', ref.includes('`COMMIT_UNCOMMITTED` is `true` when absent'))
     need('false commits nothing and lists the stray files', ref.includes('When it is `false`, commit nothing') && ref.includes('list each uncommitted path under `### Uncommitted files`'))
@@ -786,6 +935,7 @@ describe('ensure-pr-ready opens the PR (D-LINK-VERBATIM, D-COMMIT-EXPLICIT, D-PR
     const real = ensurePrReadyReference()
     const seeds: ReadonlyArray<{ from: string; to: string; expected: string }> = [
       { from: ' A given `ISSUE_PR_LINK` is already decided in step 4a: skip the resolution below.', to: '', expected: 'step 4b skips its resolution for a given link' },
+      { from: 'Only an absent `ISSUE_PR_LINK` goes to step 4b', to: 'An absent or `(none)` `ISSUE_PR_LINK` goes to step 4b', expected: 'a given none is final too, and only an absent link reaches step 4b' },
       { from: '`COMMIT_UNCOMMITTED` is `true` when absent', to: '`COMMIT_UNCOMMITTED` is `false` when absent', expected: 'COMMIT_UNCOMMITTED defaults to true' },
       { from: 'When it is `false`, commit nothing', to: 'When it is `false`, commit anyway', expected: 'false commits nothing and lists the stray files' },
       { from: '**On scrubber failure** (non-zero exit or script missing): still create the PR — PR existence is the deliverable', to: '**On scrubber failure** (non-zero exit or script missing): create no PR', expected: 'a failed scrub still creates the PR with a minimal body' },
