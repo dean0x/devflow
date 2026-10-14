@@ -30,7 +30,7 @@ you: /implement (hand it the plan)
 
   Git                    branch feat/42-rate-limit-upload
   Code                   implements the plan — your learned decisions, pitfalls, and feature knowledge preloaded
-  Simplify · Scrutinize  cleanup pass, then 9-pillar quality gate
+  Polish · Harden        cleanup pass, then 9-pillar quality gate
   Evaluate               implementation matches the original request ✓
   Validate               build ✓ typecheck ✓ lint ✓ tests ✓
   Test                   5/5 QA scenarios pass
@@ -76,7 +76,7 @@ This is the **orchestrated flow** — you stay in the loop between every step. W
 
 **Your issue tracker, not just GitHub.** Pick the tracker your team actually uses — GitHub, Jira, or Linear — at `devflow init`, with `devflow init --tracker <id>`, or later with `devflow tracker --set <id>`; that sets your machine's default. A repository can select its own in `.devflow/project.json`, and devflow follows it there automatically — one machine can work on a Jira repository and a GitHub one side by side. Every install carries every provider's mechanics (48 generated reference files, the tool-call contract among them) and the background agent, because pull requests stay on GitHub whatever your tracker and any repository may pick any provider. On a non-GitHub tracker that agent learns your conventions once per provider (project key, issue types, required fields, workflow transitions, how a reference renders) and writes them to `~/.devflow/tracker/{provider}.md`, so traceability speaks your tracker's vocabulary instead of assuming `#123`. Each provider's conventions are learned from the first repository that uses it. Those files are yours: hand-editable, kept across an uninstall, and refused rather than silently trusted if one no longer names its own provider. The Git and Tracker agents reach a tracker only through the servers you allow (Atlassian, Jira and Linear by default); `devflow tracker --servers` names others. **GitHub is the default** and needs no configuration: no background run and no conventions file.
 
-**Full lifecycle.** Beyond the core flow: `/explore` maps a codebase into knowledge bases, `/research` runs multi-type research with trust-aware synthesis, `/debug` investigates with competing hypotheses in parallel, `/bug-analysis` hunts bugs before review, `/self-review` runs Simplify + Scrutinize quality passes, and `/release` ships with learned configuration.
+**Full lifecycle.** Beyond the core flow: `/explore` maps a codebase into knowledge bases, `/research` runs multi-type research with trust-aware synthesis, `/debug` investigates with competing hypotheses in parallel, `/bug-analysis` hunts bugs before review, `/self-review` runs Polish + Harden quality passes, and `/release` ships with learned configuration.
 
 **Everything is composable.** 21 plugins (12 core + 9 optional). Install only what you need.
 
@@ -166,7 +166,7 @@ To keep the knowledge bases or conventions local, add `.devflow/features/` or `.
 | `/research` | Multi-type research with trust-aware synthesis |
 | `/plan` | Full design pipeline: explore → gap analysis → design → PR-ready plan document |
 | `/implement` | Execute plan: accepts plan documents from `/plan`, issues, or task descriptions → PR |
-| `/self-review` | Simplify + Scrutinize quality pass |
+| `/self-review` | Polish + Harden quality pass |
 | `/code-review` | Multi-perspective parallel code review |
 | `/resolve` | Validate and fix all review issues |
 | `/debug` | Competing hypothesis investigation |

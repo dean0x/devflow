@@ -30,7 +30,7 @@ Executes a single task through the complete development lifecycle. Accepts plan 
 
 1. **Setup** — Auto-create feature branch, parse plan document or fetch issue, and write the task's test plan (copied from the plan, or one TP line per stated acceptance criterion) to `.devflow/docs/evidence-{branch-slug}.md`. Under a `required` evidence policy, a missing ticket link or test plan is recorded as a self-attested exception or stops the run, before any code is written
 2. **Implementation** — Write code on the feature branch
-3. **Refinement** — Simplify (code clarity) + Scrutinize (9-pillar quality; reports PASS, FIXED or BLOCKED)
+3. **Refinement** — Polish (code clarity) + Harden (9-pillar quality; reports PASS, FIXED or BLOCKED)
 4. **Alignment** — Evaluate verifies implementation matches the original request
 5. **Validation** — One full build, typecheck, lint, and test run over the branch diff, after the code is final
 6. **QA Testing** — Test executes scenario-based acceptance tests and records one claim per TP line
@@ -104,7 +104,7 @@ Investigates bugs using competing hypotheses:
 2. **Parallel Investigation** — Each hypothesis investigated independently by separate agents
 3. **Evidence Evaluation** — Hypotheses ranked by supporting evidence
 4. **Root Cause** — Best-supported explanation with fix recommendation
-5. **Offer Fix** — On approval, a Code agent implements the fix and Simplify refines the changed files
+5. **Offer Fix** — On approval, a Code agent implements the fix and Polish refines the changed files
 
 ```
 /debug "login fails after session timeout"
@@ -115,8 +115,8 @@ Investigates bugs using competing hypotheses:
 
 Self-review workflow that runs two sequential quality passes:
 
-1. **Simplify** — Code clarity, reuse opportunities, efficiency
-2. **Scrutinize** — 9-pillar quality evaluation (correctness, security, performance, etc.)
+1. **Polish** — Code clarity, reuse opportunities, efficiency
+2. **Harden** — 9-pillar quality evaluation (correctness, security, performance, etc.)
 
 ```
 /self-review                 # Review recent changes
@@ -173,7 +173,7 @@ Proactive bug finding with static and semantic analysis. Runs specialized analyz
 
 1. **Pre-flight** — The Git agent commits, pushes and opens the PR if none exists (retitled to the learned naming conventions under a `required` evidence policy); no ticket is required
 2. **Static Analysis** — Detect incremental analysis via `.last-analysis-head`, then run the available tools: Semgrep and Snyk in parallel, CodeQL when `--full` is set or they found HIGH/CRITICAL issues
-3. **Semantic Analysis** — Parallel Diagnose agents examine the diff: security and functional always, integration when two or more directories changed, usability when UI files changed
+3. **Semantic Analysis** — Parallel Debug agents examine the diff: security and functional always, integration when two or more directories changed, usability when UI files changed
 4. **Synthesize** — Combine static and semantic findings into actionable report
 5. **Report** — Write findings to `.devflow/docs/bug-analysis/`
 

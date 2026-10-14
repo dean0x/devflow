@@ -476,7 +476,7 @@ describe('a learning tree reached through a symbolic link (D-NO-LINKED-TREE)', {
 
   const refusal = (op: string, link: string): string => `${op}: ${link} is a symbolic link, not a directory; nothing was changed`;
 
-  /** Every learning op that writes, as the Learning agent runs it. */
+  /** Every learning op that writes, as the Curate agent runs it. */
   const WRITER_RUNS: ReadonlyArray<{ args: readonly string[]; input?: string }> = [
     {
       args: ['put-observation', '--create'],

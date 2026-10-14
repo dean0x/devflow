@@ -7,6 +7,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes — Agent rename (6 agents)
+
+This change releases as a minor version (3.6.0). It renames six agents, and a prompt that names
+an old agent does not work. Read the steps below that you must do by hand.
+
+Six agents have new names that state their job ([#466](https://github.com/dean0x/devflow/issues/466)).
+The agent `code` keeps its name. The learning feature keeps its names too: `devflow learning`,
+`features.learning`, `.devflow/learning/` and the learning ops do not change.
+
+| Old slug     | New slug   | Old `name:`  | New `name:` |
+|--------------|------------|--------------|-------------|
+| `code-fix`   | `fix`      | `Code-fix`   | `Fix`       |
+| `code-edit`  | `refactor` | `Code-edit`  | `Refactor`  |
+| `scrutinize` | `harden`   | `Scrutinize` | `Harden`    |
+| `simplify`   | `polish`   | `Simplify`   | `Polish`    |
+| `diagnose`   | `debug`    | `Diagnose`   | `Debug`     |
+| `learning`   | `curate`   | `Learning`   | `Curate`    |
+
+The `/debug` command does not change. `Debug` is the agent that `/bug-analysis` spawns.
+Use `Refactor` for a given mechanical change, such as "rename X to Y everywhere".
+Use `Polish` for a judgment pass that makes code cleaner and keeps its behaviour.
+
+**What devflow migrates automatically:**
+- Keys in `~/.devflow/agent-models.json`. The one-time migration `canonicalise-agent-keys-v2`
+  runs on the first `devflow init` after this upgrade. Each read of the file also maps an old key
+  to its new slug. If the old key and the new key both exist, the new key wins.
+  `devflow agents --set <old slug>` writes the new slug and tells you.
+- The session-start hook reads `agents.curate.model`, then an older `agents.learning.model`, and
+  spawns `Curate`. `devflow init` updates the hook.
+- `token-audit` counts old transcripts under the new names, so a past `Code-fix` spawn counts as
+  `Fix`. Its JSON report key `codeFixByOperation` is now `fixByOperation`.
+
+**What `devflow init` and `devflow uninstall` do to agent files:**
+- A full `devflow init` removes the six old files from `~/.claude/agents/devflow/` and installs
+  the new ones. It removes every other file in that folder that devflow does not own.
+- A partial `devflow init --plugin=<name>` and a selective `devflow uninstall --plugin=<name>`
+  run the orphan sweep. The sweep deletes every `.md` file in `~/.claude/agents/devflow/` whose
+  name is not a devflow agent. This includes the six old files.
+- Do not keep your own agent files in `~/.claude/agents/devflow/`, because devflow deletes them.
+  A file of your own directly in `~/.claude/agents/` is never touched. This is also true when it
+  has the name of an old devflow agent, for example `~/.claude/agents/simplify.md`.
+
+**Partial install and partial uninstall on a 3.5.0 install:**
+- The commands of the plugins that stay installed name the old agents until something rewrites
+  them. The sweep removes the old agent files, and the new agent files are not on disk until
+  something writes them. For this reason both commands now repair the plugins that stay installed.
+- `devflow init --plugin=<name>`: the sweep can delete an old agent file. If it does, the install
+  writes the commands and the agents of every plugin in `~/.devflow/manifest.json`. It does not
+  write only the plugin you name. If the sweep deletes nothing, the install writes only the plugin
+  you name, as before.
+- `devflow uninstall --plugin=<name>`: the sweep can delete an old agent file. If it does, the
+  uninstall writes the current commands and agents of the plugins that stay installed. It also
+  prints a note. It does not update the hooks, the scripts or `settings.json`. Run a full
+  `devflow init` to update them. Until you do, the hook from 3.5.0 can name an agent that no
+  longer exists.
+- If there is no readable `~/.devflow/manifest.json`, or the manifest lists no plugin that Devflow
+  knows, the uninstall writes nothing. It prints a warning that tells you to run `devflow init`.
+- If the install is a legacy project-local install (`<repo>/.claude`), the uninstall writes
+  nothing. It prints a warning. The warning tells you to remove that install in full with
+  `devflow uninstall --scope local`.
+- If the write fails, the rewrite stops at the first file that fails. The files that it wrote
+  before the failure stay written. The uninstall still finishes and prints a warning that tells
+  you to run `devflow init`.
+
+**What you must migrate by hand:**
+- Your own prompts, commands, agents or `CLAUDE.md` that name an old agent, for example
+  `subagent_type: "Simplify"` or `subagent_type: "Code-edit"`. Devflow cannot edit files it does
+  not own. Change them to the new name, for example `subagent_type: "Polish"`.
+- Open Claude Code sessions. Restart each one after `devflow init`. An open session loaded its
+  agent types when it started, so it does not know `Fix`, `Refactor`, `Harden`, `Polish`, `Debug`
+  or `Curate`. `devflow init` also removes the files of the old agents. The orchestrator charter
+  of an open session still names `Code-edit`.
+
+**Downgrade warning:** if you downgrade to 3.5.0, it does not know the new keys. Your per-agent
+model overrides that you saved as `fix`, `refactor`, `harden`, `polish`, `debug` or `curate` do
+not apply, and 3.5.0 gives no message. Check them with `devflow agents --list`.
+
 ### Added
 
 - **The HUD shows your Codex usage limits.** A new `codexQuota` segment sits on line 2 next to the Claude quota, for example `Codex 5h ███░░░░░ 40% (1h 2m) · 7d █░░░░░░░ 12% (3d 4h)`. It reads the newest rate-limit record that Codex writes to `~/.codex/sessions`, so it opens no credential file and makes no network call. A window is identified by its length, so a weekly-only plan and a 5h + 7d plan both label correctly. A window past its reset time shows 0%, and a red `limited` marker shows while Codex reports a reached limit. The segment is hidden when there is no recent Codex session, so users without Codex see no change.

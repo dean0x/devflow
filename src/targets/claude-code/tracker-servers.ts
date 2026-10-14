@@ -10,7 +10,7 @@
  * and `devflow tracker --servers` changes it. Decided here:
  *
  *   - Stamped agents: Git and Tracker, the two that call tracker tools. Code and Research keep a
- *     denylist and so every tool server; Scrutinize and Simplify deny them all.
+ *     denylist and so every tool server; Harden and Polish deny them all.
  *   - Where the stamp is written. Every path that writes an installed copy of either agent either
  *     stamps it or carries the stamp it finds:
  *       1. `installViaFileCopy` stamps Git as it writes it (full install and `--plugin` alike);

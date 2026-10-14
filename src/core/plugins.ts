@@ -88,7 +88,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
      *
      * Guard 5 reverse (registry-integrity.test.ts, "declared agents are spawned")
      * skips a plugin whose commands spawn nothing — `if (spawned.size === 0)
-     * continue` — and this plugin ships no commands at all. So `learning` and
+     * continue` — and this plugin ships no commands at all. So `curate` and
      * `tracker`, which are spawned by a SessionStart directive rather than by any
      * command, satisfy the reverse check STRUCTURALLY.
      *
@@ -102,10 +102,10 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
      * set-equal, both directions, against the `agentType` values present in
      * dist/commands/, and a hook-spawned agent appears in none of them.
      */
-    agents: ['learning', 'tracker'],
+    agents: ['curate', 'tracker'],
     /**
      * D-AGENT-REFS: `agent-references` is a reference-only skill. It holds the Synthesize mode
-     * templates and the Learning maintain step, which those two agents read by explicit path, and
+     * templates and the Curate maintain step, which those two agents read by explicit path, and
      * the command branches that D-CMD-REF-HAND moves out of a command (`references/commands/`),
      * which a command reads by explicit path, so it sits here (core-skills is always installed)
      * and no other plugin lists or requires it.
@@ -158,7 +158,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-implement',
     description: 'Complete task implementation workflow - accepts plan documents, issues, or task descriptions',
     commands: ['/implement'],
-    agents: ['git', 'code', 'code-fix', 'simplify', 'scrutinize', 'evaluate', 'test', 'validate', 'knowledge'],
+    agents: ['git', 'code', 'fix', 'polish', 'harden', 'evaluate', 'test', 'validate', 'knowledge'],
     skills: ['patterns', 'qa', 'quality-gates', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
     requires: [
       'apply-decisions',
@@ -197,7 +197,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-resolve',
     description: 'Process and fix code review issues with blast-radius triage, Code agent fixes, and Validate agent verification',
     commands: ['/resolve'],
-    agents: ['git', 'triage', 'code', 'code-fix', 'simplify', 'validate', 'test', 'knowledge'],
+    agents: ['git', 'triage', 'code', 'fix', 'polish', 'validate', 'test', 'knowledge'],
     skills: ['patterns', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge', 'apply-decisions'],
     requires: [
       'architecture',
@@ -223,7 +223,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-debug',
     description: 'Debugging workflows with competing hypothesis investigation via parallel subagents',
     commands: ['/debug'],
-    agents: ['git', 'synthesize', 'simplify', 'knowledge', 'explore', 'code'],
+    agents: ['git', 'synthesize', 'polish', 'knowledge', 'explore', 'code'],
     skills: ['git', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
     // D-DEBUG-FIX-VIA-CODE: the fix is a Code spawn. Code loads no skill by language or mode
     // (D-NO-RUNTIME-SKILLS), so `requires:` lists only the skills this command, its agents and the
@@ -288,9 +288,9 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
   },
   {
     name: 'devflow-self-review',
-    description: 'Self-review workflow: Simplify agent + Scrutinize agent for code quality',
+    description: 'Self-review workflow: Polish agent + Harden agent for code quality',
     commands: ['/self-review'],
-    agents: ['simplify', 'scrutinize', 'validate', 'knowledge'],
+    agents: ['polish', 'harden', 'validate', 'knowledge'],
     skills: ['quality-gates', 'software-design', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
     // D-PRELOAD-TRIM: no agent, command or skill in this plugin's corpus names
     // `testing` (Validate preloads only `worktree-support`), so it is not required here.
@@ -301,7 +301,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-bug-analysis',
     description: 'Proactive bug finding with static and semantic analysis',
     commands: ['/bug-analysis'],
-    agents: ['git', 'diagnose', 'synthesize'],
+    agents: ['git', 'debug', 'synthesize'],
     skills: [
       'apply-decisions',
       'apply-feature-knowledge',
@@ -328,7 +328,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-ambient',
     description: 'Orchestrator ambient mode — session charter, per-prompt reminder, plan handoff',
     commands: [],
-    agents: ['code', 'code-edit', 'validate', 'simplify', 'scrutinize', 'evaluate', 'test', 'skim', 'review', 'git', 'synthesize', 'triage', 'design', 'knowledge', 'research', 'learning', 'explore'],
+    agents: ['code', 'refactor', 'validate', 'polish', 'harden', 'evaluate', 'test', 'skim', 'review', 'git', 'synthesize', 'triage', 'design', 'knowledge', 'research', 'curate', 'explore'],
     skills: [
       'review-methodology',
       'security',
@@ -369,7 +369,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Dynamic workflow recipes - dependency-aware tickets→plan→build delivery pipeline',
     // Commands compiled from commands/*.mds at build time (build:mds).
     commands: ['/dynamic-tickets', '/dynamic-plan', '/dynamic-build', '/dynamic-profile'],
-    agents: ['code', 'code-fix', 'validate', 'simplify', 'scrutinize', 'evaluate', 'test', 'review', 'git', 'synthesize', 'knowledge', 'design'],
+    agents: ['code', 'fix', 'validate', 'polish', 'harden', 'evaluate', 'test', 'review', 'git', 'synthesize', 'knowledge', 'design'],
     skills: ['apply-decisions', 'apply-feature-knowledge', 'worktree-support', 'docs-framework'],
     requires: [
       'architecture',

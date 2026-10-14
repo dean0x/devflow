@@ -4,7 +4,7 @@ its consumers, and the lens is set from the line resolved there for the
 worktree's root.
 
 D-COMPLIANCE-INJECT: the compliance instruction reaches an agent only through a spawn
-prompt, and only when the resolved lens is on. No Code, Code-fix, Review or Design body names
+prompt, and only when the resolved lens is on. No Code, Fix, Review or Design body names
 the compliance skill, so a lens-off spawn pays nothing for it. `compliance_directive()` is the
 one home of the directive text; `compliance_inject()` is how a pass-through host sets it.
 An install-time variant keyed on the machine switch would be wrong: the lens is the union of

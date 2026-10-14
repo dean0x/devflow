@@ -25,7 +25,7 @@ import {
   getLearningClaimOwnerPath,
   getDecisionsFilePath,
   getPitfallsFilePath,
-  getLearningTuningConfigPath,
+  getCurateTuningConfigPath,
   getDecisionsLedgerPath,
   getDecisionsLogPath,
   getDecisionsArchivePath,
@@ -99,8 +99,8 @@ describe('project-paths TypeScript module', () => {
       expect(getPitfallsFilePath(ROOT)).toBe('/some/project/.devflow/learning/pitfalls.md');
     });
 
-    it('getLearningTuningConfigPath returns .devflow/learning/learning.json', () => {
-      expect(getLearningTuningConfigPath(ROOT)).toBe('/some/project/.devflow/learning/learning.json');
+    it('getCurateTuningConfigPath returns .devflow/learning/learning.json', () => {
+      expect(getCurateTuningConfigPath(ROOT)).toBe('/some/project/.devflow/learning/learning.json');
     });
 
     it('getDecisionsLogPath returns .devflow/learning/decisions-log.jsonl', () => {
@@ -190,7 +190,7 @@ describe('CJS project-paths parity', () => {
     { name: 'getLearningClaimOwnerPath', ts: getLearningClaimOwnerPath, cjs: cjsPaths.getLearningClaimOwnerPath },
     { name: 'getDecisionsFilePath', ts: getDecisionsFilePath, cjs: cjsPaths.getDecisionsFilePath },
     { name: 'getPitfallsFilePath', ts: getPitfallsFilePath, cjs: cjsPaths.getPitfallsFilePath },
-    { name: 'getLearningTuningConfigPath', ts: getLearningTuningConfigPath, cjs: cjsPaths.getLearningTuningConfigPath },
+    { name: 'getCurateTuningConfigPath', ts: getCurateTuningConfigPath, cjs: cjsPaths.getCurateTuningConfigPath },
     { name: 'getDecisionsLedgerPath', ts: getDecisionsLedgerPath, cjs: cjsPaths.getDecisionsLedgerPath },
     { name: 'getDecisionsLogPath', ts: getDecisionsLogPath, cjs: cjsPaths.getDecisionsLogPath },
     { name: 'getDecisionsArchivePath', ts: getDecisionsArchivePath, cjs: cjsPaths.getDecisionsArchivePath },

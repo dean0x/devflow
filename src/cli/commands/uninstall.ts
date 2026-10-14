@@ -7,7 +7,7 @@ import color from 'picocolors';
 import { getInstallationPaths, getClaudeDirectory, getHomeDirectory, getManagedSettingsPath } from '../../targets/claude-code/claude-paths.js';
 import { getGitRoot } from '../../core/git.js';
 import { isSameLocation } from '../../core/same-location.js';
-import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, getAllSkillNames, getAllAgentNames, getAllCommandNames, parsePluginSelection, resolveFeatureRedirect, prefixSkillName, unprefixSkillName, skillsOf, FEATURE_OWNED_SKILLS, type PluginDefinition } from '../../core/plugins.js';
+import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, buildAssetMaps, getAllSkillNames, getAllAgentNames, getAllCommandNames, parsePluginSelection, resolveFeatureRedirect, prefixSkillName, unprefixSkillName, skillsOf, FEATURE_OWNED_SKILLS, type PluginDefinition } from '../../core/plugins.js';
 import { readManifest, removeManifestPlugins } from '../../core/manifest.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '../../core/orphan-sweep.js';
 import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
@@ -21,6 +21,7 @@ import { applyProxyTeardownToSettings } from './proxy.js';
 import { readProxyState, proxyJsonExists } from '../../core/proxy-state.js';
 import { hudCacheDir } from '../../core/cache.js';
 import {
+  effectiveTrackerServers,
   TRACKER_ATTEMPTS_NAMES,
   TRACKER_CLAIM_FILE,
   TRACKER_CONVENTIONS_DIR,
@@ -42,6 +43,7 @@ import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-clean
 import { getPackageRoot, isContainedIn } from '../../core/paths.js';
 import { firstSymbolicLink } from '../../core/linked-path.js';
 import { restampInstalledCommands } from '../../targets/claude-code/language-stamp.js';
+import { installCommandsAndAgents } from '../../targets/claude-code/installer.js';
 
 /**
  * Which install `uninstall` acts on: the machine-wide install (`user`), or a
@@ -587,7 +589,7 @@ export function userContentPaths(devflowDir: string): ReadonlyArray<UserContentE
       const name = `${TRACKER_LEGACY_CONVENTIONS_FILE}.${id}.bak`;
       return { relPath: name, label: `${name} (previous issue tracker conventions)` };
     }),
-    // learning.json — global learning agent tuning config
+    // learning.json — global curate agent tuning config
     { relPath: 'learning.json', label: 'learning.json' },
     // hud.json — user HUD enable/disable preference and display config
     { relPath: 'hud.json', label: 'hud.json (HUD configuration)' },
@@ -1002,6 +1004,102 @@ export async function runDryRunPhase(opts: {
 }
 
 /**
+ * After a selective uninstall removed a retired agent file, write the current commands
+ * and agents of the plugins that stay installed.
+ *
+ * A retired agent file only exists on a machine that ran an older release. That
+ * release's commands, for the plugins that stay, still spawn the retired name, and the
+ * agents that replaced it are not installed. Removing the file without this step would
+ * leave those plugins unable to spawn their agents until the next full `devflow init`.
+ *
+ * Writes only commands and agents, through the same copy path `devflow init` uses
+ * ({@link installCommandsAndAgents}). It does not touch the hooks, the scripts or
+ * settings.json, so the notice tells the user to run `devflow init` for those.
+ *
+ * Never runs in a legacy local scope (D-CLI-NO-SYMLINK): a repository can commit a command
+ * file as a symbolic link, and the copy writes through it. The folder guard below does not
+ * check files. `devflow init` can not update a legacy local install either, so the warning
+ * tells the user to remove it in full.
+ *
+ * Skipped, with a warning, when there is no readable manifest or it lists no known plugin (the
+ * retained set would be a guess), or when a folder is behind a link the caller's guard
+ * refuses. Those warnings name `devflow init` as the remedy. When the copy fails, it stops
+ * at the first failure: files it wrote before then stay, and the warning names the same
+ * remedy. Never throws: an uninstall must finish.
+ * Agent model lines are reverted again after the copy, as the selective phase does before
+ * its removal, so a freshly written agent carries no external-model line. Like the
+ * selective phase, it prints the warnings of that revert only with `verbose`.
+ */
+export async function refreshRetainedCommandsAndAgents(opts: {
+  claudeDir: string;
+  devflowDir: string;
+  retained: PluginDefinition[];
+  retiredAgents: readonly string[];
+  /** The scope the directories belong to (default `user`). */
+  scope?: UninstallScope;
+  /** Whether to print the warnings of the agent model revert, as the selective phase does. */
+  verbose?: boolean;
+  mayChange?: ChangeGuard;
+}): Promise<void> {
+  const { claudeDir, devflowDir, retained, retiredAgents } = opts;
+  const scope = opts.scope ?? 'user';
+  const verbose = opts.verbose ?? false;
+  const mayChange = opts.mayChange ?? changeAnything;
+  const agentsDir = path.join(claudeDir, 'agents', 'devflow');
+  const commandsDir = path.join(claudeDir, 'commands', 'devflow');
+  const retired = `Removed the agent file(s) of an older Devflow release: ${retiredAgents.join(', ')}.`;
+  const remedy = 'Run `devflow init` to update the commands, agents, hooks and scripts of the plugins that stay installed.';
+
+  if (retained.length === 0) return;
+
+  if (scope === 'local') {
+    p.log.warn(`${retired} Devflow does not rewrite files in a legacy local install, so the remaining commands can still name the removed agents. Remove the legacy local install in full with \`devflow uninstall --scope local\`.`);
+    return;
+  }
+
+  // readManifest returns null for a missing file and for one it can not parse or validate.
+  const manifest = await readManifest(devflowDir).catch(() => null);
+  if (manifest === null) {
+    p.log.warn(`${retired} There is no readable manifest, so Devflow did not rewrite the remaining files. ${remedy}`);
+    return;
+  }
+  if (manifest.plugins.length === 0) {
+    p.log.warn(`${retired} The manifest lists no plugins, so Devflow did not rewrite the remaining files. ${remedy}`);
+    return;
+  }
+  // resolveInstalledPlugins falls back to the whole registry when no manifest name resolves, so
+  // the retained set would hold plugins that were never installed.
+  if (!manifest.plugins.some(name => DEVFLOW_PLUGINS.some(plugin => plugin.name === name))) {
+    p.log.warn(`${retired} The manifest lists no known plugin, so Devflow did not rewrite the remaining files. ${remedy}`);
+    return;
+  }
+  if (!(await mayChange(agentsDir)) || !(await mayChange(commandsDir))) {
+    p.log.warn(`${retired} A linked folder blocks the rewrite. ${remedy}`);
+    return;
+  }
+
+  try {
+    await installCommandsAndAgents({
+      plugins: retained,
+      agentsMap: buildAssetMaps(retained).agentsMap,
+      claudeDir,
+      learning: manifest.features.learning,
+      trackerServers: effectiveTrackerServers(manifest.features.tracker),
+      warn: (msg) => p.log.warn(msg),
+    });
+  } catch (err) {
+    p.log.warn(`${retired} Devflow could not write the current commands and agents (${err instanceof Error ? err.message : String(err)}). ${remedy}`);
+    return;
+  }
+
+  try {
+    await revertExternalAgents({ installDir: agentsDir, devflowDir, onWarning: (msg) => { if (verbose) p.log.warn(msg); } });
+  } catch { /* the revert is best effort, as in the selective phase */ }
+
+  p.log.info(`${retired} Devflow wrote the current commands and agents of the plugins that stay installed. Run \`devflow init\` to update the hooks and scripts.`);
+}
+
+/**
  * SELECTIVE PHASE (per scope): revert agent model overrides, remove the
  * selected plugins' assets, and clean up the ambient hook if the ambient
  * plugin is being removed.
@@ -1048,7 +1146,24 @@ export async function runSelectivePhaseForScope(opts: {
     } catch { /* agents dir absent or revert failed — non-fatal */ }
   }
 
-  await removeSelectedPlugins(claudeDir, selectedPlugins, verbose, installedPlugins, mayChange);
+  const sweeps = await removeSelectedPlugins(claudeDir, selectedPlugins, verbose, installedPlugins, mayChange);
+
+  // A retired agent file means the install is from an older release, and the commands of the
+  // plugins that stay installed still spawn the name that was just removed. Write their
+  // current commands and agents so the install stays whole. Runs before the language stamp
+  // below, which then restamps the command this wrote.
+  if (sweeps.agents.removed.length > 0) {
+    const removed = new Set(selectedPlugins.map(sp => sp.name));
+    await refreshRetainedCommandsAndAgents({
+      claudeDir,
+      devflowDir,
+      retained: installedPlugins.filter(plugin => !removed.has(plugin.name)),
+      retiredAgents: sweeps.agents.removed,
+      scope,
+      verbose,
+      mayChange,
+    });
+  }
 
   // D-LANGUAGE-FOCUS-STAMP: re-stamp the installed /code-review from the selection that REMAINS.
   // A language plugin owns a skill and no command, so removing it deletes the skill while its
@@ -1795,6 +1910,13 @@ export async function removeAllDevFlow(
   await sweepDevflowNamespaces(claudeDir, verbose, mayChange);
 }
 
+/** What {@link sweepDevflowNamespaces} did in each namespace. */
+export interface NamespaceSweeps {
+  agents: SweepResult;
+  commands: SweepResult;
+  skills: SweepResult;
+}
+
 /**
  * Registry-diff sweep of all Devflow-owned namespaces in `claudeDir`:
  *   - agents/devflow/   — entries absent from getAllAgentNames()
@@ -1815,12 +1937,15 @@ export async function removeAllDevFlow(
  * A folder `mayChange` refuses is not swept at all (D-CLI-NO-SYMLINK,
  * legacyLocalChangeGuard). An entry in a swept folder that is itself a link is
  * only unlinked: `fs.rm` never follows the link it is given.
+ *
+ * Returns what each sweep removed and failed to remove, so a caller can tell that
+ * a retired agent was removed (see {@link refreshRetainedCommandsAndAgents}).
  */
 export async function sweepDevflowNamespaces(
   claudeDir: string,
   verbose: boolean,
   mayChange: ChangeGuard = changeAnything,
-): Promise<void> {
+): Promise<NamespaceSweeps> {
   const agentsDir = path.join(claudeDir, 'agents', 'devflow');
   const commandsDir = path.join(claudeDir, 'commands', 'devflow');
   const skillsDir = path.join(claudeDir, 'skills');
@@ -1863,6 +1988,8 @@ export async function sweepDevflowNamespaces(
       p.log.warn(`Could not remove orphaned ${kind} "${failure.name}" (${reason}) — remove it manually`);
     }
   }
+
+  return { agents: agentsSweep, commands: commandsSweep, skills: skillsSweep };
 }
 
 /**
@@ -1873,6 +2000,8 @@ export async function sweepDevflowNamespaces(
  * For skills: only remove skills that are NOT used by any remaining plugin.
  * Each removal passes `mayChange` first, which skips one a symbolic link would
  * redirect in a legacy local install (D-CLI-NO-SYMLINK, legacyLocalChangeGuard).
+ *
+ * Returns what the closing registry-diff sweep removed.
  */
 export async function removeSelectedPlugins(
   claudeDir: string,
@@ -1880,7 +2009,7 @@ export async function removeSelectedPlugins(
   verbose: boolean,
   installedPlugins: PluginDefinition[] = DEVFLOW_PLUGINS,
   mayChange: ChangeGuard = changeAnything,
-): Promise<void> {
+): Promise<NamespaceSweeps> {
   const { skills, agents, commands, rules } = computeAssetsToRemove(plugins, installedPlugins);
 
   const commandsDir = path.join(claudeDir, 'commands', 'devflow');
@@ -1945,5 +2074,5 @@ export async function removeSelectedPlugins(
   // Removes any orphaned files whose names left the registry (retired, renamed,
   // or deleted from all plugins). Spans ALL plugins so assets belonging to
   // non-selected plugins are never swept.
-  await sweepDevflowNamespaces(claudeDir, verbose, mayChange);
+  return sweepDevflowNamespaces(claudeDir, verbose, mayChange);
 }

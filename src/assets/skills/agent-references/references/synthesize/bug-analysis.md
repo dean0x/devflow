@@ -1,6 +1,6 @@
 ## Mode: Bug Analysis
 
-Synthesize outputs from multiple Diagnose agents into a single actionable bug report.
+Synthesize outputs from multiple Debug agents into a single actionable bug report.
 
 **Input:**
 - **ANALYSIS_BASE_DIR**: Timestamped directory containing `{focus}.md` files and `static-findings.md`

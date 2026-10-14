@@ -90,22 +90,22 @@ function readDecisionsMd(dir: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Learning agent content-presence assertions (AC-C3)
+// Curate agent content-presence assertions (AC-C3)
 //
-// The Learning agent (src/assets/agents/learning.md) is the sole decisions processor:
+// The Curate agent (src/assets/agents/curate.md) is the sole decisions processor:
 // it claims the queue through claim-queue, reads the claimed turns directly,
 // reads the ledger and the log only through list and show, and writes only
 // through the learning ops. These describe pins hold the curation contract
 // strings in place — the same Iron-Law contract the ledger ops enforce at runtime.
 // ---------------------------------------------------------------------------
 
-describe('Learning agent curation contract (AC-C3)', () => {
-  const AGENT_PATH = path.join(ROOT, 'src/assets/agents/learning.md');
+describe('Curate agent curation contract (AC-C3)', () => {
+  const AGENT_PATH = path.join(ROOT, 'src/assets/agents/curate.md');
   let agentContent: string;
 
   beforeAll(() => {
-    // D-MAINTAIN-ON-DUE: Part 2's ladder lives in learning/maintain.md; a run with a due entry sees both, body first.
-    agentContent = `${fs.readFileSync(AGENT_PATH, 'utf8')}\n${readAgentReference('learning/maintain.md')}`;
+    // D-MAINTAIN-ON-DUE: Part 2's ladder lives in curate/maintain.md; a run with a due entry sees both, body first.
+    agentContent = `${fs.readFileSync(AGENT_PATH, 'utf8')}\n${readAgentReference('curate/maintain.md')}`;
   });
 
   it('Iron Law says assign-anchor owns numbering, render owns the .md, never hand-edit', () => {
@@ -388,18 +388,18 @@ describe('AC-F6: a retired entry is recoverable — restore-anchor renders it ag
 });
 
 // ---------------------------------------------------------------------------
-// AC-F9: rotation step — Learning agent contract
+// AC-F9: rotation step — Curate agent contract
 // Already tested at the op level in ledger-ops.test.ts; here we verify
 // the agent instructions wire it correctly (contract-level check).
 // ---------------------------------------------------------------------------
 
 describe('AC-F9: rotation step wired into curation (contract check)', () => {
-  const AGENT_PATH = path.join(ROOT, 'src/assets/agents/learning.md');
+  const AGENT_PATH = path.join(ROOT, 'src/assets/agents/curate.md');
   let agentContent: string;
 
   beforeAll(() => {
-    // D-MAINTAIN-ON-DUE: Part 2's ladder lives in learning/maintain.md; a run with a due entry sees both, body first.
-    agentContent = `${fs.readFileSync(AGENT_PATH, 'utf8')}\n${readAgentReference('learning/maintain.md')}`;
+    // D-MAINTAIN-ON-DUE: Part 2's ladder lives in curate/maintain.md; a run with a due entry sees both, body first.
+    agentContent = `${fs.readFileSync(AGENT_PATH, 'utf8')}\n${readAgentReference('curate/maintain.md')}`;
   });
 
   it('agent runs rotate-observations before selecting curation retire/merge candidates', () => {

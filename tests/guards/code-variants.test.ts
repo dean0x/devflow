@@ -2,8 +2,8 @@
  * D-CODE-VARIANTS and D-NO-RUNTIME-SKILLS — the shape of the three Code variants (AC-305, AC-306, AC-307).
  *
  * One Code agent paid for every mode's text and skills on every spawn. Three hosts now share one partial
- * (`src/assets/agents/_partials/_code.mds`): Code (implement, issue-fix), Code-fix (validation-fix,
- * alignment-fix, qa-fix, ci-fix) and Code-edit (edit). This file holds what the three must share and what
+ * (`src/assets/agents/_partials/_code.mds`): Code (implement, issue-fix), Fix (validation-fix,
+ * alignment-fix, qa-fix, ci-fix) and Refactor (edit). This file holds what the three must share and what
  * none of them may carry, read from the COMPILED prompts a session loads, in both learning variants:
  *
  *   AC-305  No variant has a Step 0 table, a `DOMAIN` input or a runtime skill-load instruction, so no
@@ -155,7 +155,7 @@ describe('no Code variant carries a Step 0 table, a DOMAIN input or a runtime sk
     expect(collectDomainSpawnDefects([['implement.md', code]])).toHaveLength(1)
     const fix = real.replace('"OPERATION: alignment-fix\n', '"OPERATION: alignment-fix\n   DOMAIN: backend\n')
     expect(fix, 'the seed must land').not.toBe(real)
-    expect(collectDomainSpawnDefects([['implement.md', fix]])).toEqual([expect.stringContaining('a Code-fix spawn passes DOMAIN')])
+    expect(collectDomainSpawnDefects([['implement.md', fix]])).toEqual([expect.stringContaining('a Fix spawn passes DOMAIN')])
   })
 })
 
@@ -169,7 +169,7 @@ describe('every Code variant keeps the scan and apply-decisions; only Code takes
   }
 
   it('known-bad probe: a lost scan block, a lost decisions preload and a stray knowledge input are each reported', () => {
-    const fix = compiled('Code-fix', 'on')
+    const fix = compiled('Fix', 'on')
     expect(collectSharedKeepDefects(fix, 'on', false), 'the real body is clean, so each seed fails for its own reason').toEqual([])
     const noScan = fix.replace(SCAN_OPENER, '**Scan:**')
     expect(noScan, 'the seed must land').not.toBe(fix)
@@ -192,7 +192,7 @@ describe('every Code variant keeps the scan and apply-decisions; only Code takes
     expect(lost, 'the seed must land').not.toBe(code)
     expect(collectSharedKeepDefects(lost, 'on', true)).toEqual(['does not preload apply-feature-knowledge'])
     // Learning off: a decisions token that survives the arm is reported.
-    const off = compiled('Code-edit', 'off')
+    const off = compiled('Refactor', 'off')
     expect(collectSharedKeepDefects(off, 'off', false)).toEqual([])
     expect(collectSharedKeepDefects(`${off}\nDECISIONS_CONTEXT: x\n`, 'off', false)).toEqual(['names DECISIONS_CONTEXT under learning off'])
   })

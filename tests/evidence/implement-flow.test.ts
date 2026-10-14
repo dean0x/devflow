@@ -394,7 +394,7 @@ describe('AC-9: /plan keeps a checked `## Test Plan` section', () => {
 // ---------------------------------------------------------------------------
 
 const CODE_SPAWN = 'Agent(subagent_type="Code")'
-/** Every spawn of the Code family (D-CODE-VARIANTS): Code, Code-fix and Code-edit. */
+/** Every spawn of the Code family (D-CODE-VARIANTS): Code, Fix and Refactor. */
 const CODE_FAMILY_SPAWNS = CODE_AGENT_TYPES.map(type => `Agent(subagent_type="${type}")`)
 const TICKET_ASK = '**Ticket link, only when `ISSUE_REQUIRED` is `true`:**'
 const RECORD = '**Record the exception at once**'
@@ -822,12 +822,12 @@ describe('AC-11: Phase 11 runs the evidence script once, after Phase 10, for eve
 // ---------------------------------------------------------------------------
 //
 // D-VALIDATE-ONCE   Validate takes the one full-suite slot, after every commit it must
-//                   cover (Code, Simplify, Scrutinize, the alignment fixes): the order
-//                   is Code, Simplify, Scrutinize, Evaluate, Validate (full), Test, the
+//                   cover (Code, Polish, Harden, the alignment fixes): the order
+//                   is Code, Polish, Harden, Evaluate, Validate (full), Test, the
 //                   conditional changed-only Validate, push, CI gate. A qa-fix is the
 //                   only commit after the full run, so only it earns Phase 8. No loop
 //                   spawns a Validate of its own and nothing re-validates on a
-//                   Scrutinize FIXED status.
+//                   Harden FIXED status.
 // D-CI-WAIT-INLINE  Phase 10 pushes first, with its own command outside the gate block,
 //                   then waits through ci-wait.cjs. A failed push records
 //                   `TRACEABILITY: DEGRADED (ci push failed)` and waits for nothing.
@@ -849,7 +849,7 @@ function phaseSection(md: string, heading: string): string | null {
 const H = {
   p1: '### Phase 1: Setup',
   p2: '### Phase 2: Implement',
-  p3: '### Phase 3: Simplify',
+  p3: '### Phase 3: Polish',
   p4: '### Phase 4: Self-Review',
   p5: '### Phase 5: Alignment Check',
   p6: '### Phase 6: Validate',
@@ -866,9 +866,9 @@ const CI_WAIT_CALL = 'node "$HOME/.devflow/scripts/ci-wait.cjs" --pr {PR_NUMBER}
 
 /** The post-code order D-VALIDATE-ONCE fixes, one anchor per step; each is unique in the built file. */
 const GATE_ORDER: readonly OrderRule[] = [
-  { label: 'Simplify follows implementation', before: H.p2, after: SPAWN('Simplify') },
-  { label: 'Scrutinize follows Simplify', before: SPAWN('Simplify'), after: SPAWN('Scrutinize') },
-  { label: 'Evaluate follows Scrutinize', before: SPAWN('Scrutinize'), after: SPAWN('Evaluate') },
+  { label: 'Polish follows implementation', before: H.p2, after: SPAWN('Polish') },
+  { label: 'Harden follows Polish', before: SPAWN('Polish'), after: SPAWN('Harden') },
+  { label: 'Evaluate follows Harden', before: SPAWN('Harden'), after: SPAWN('Evaluate') },
   { label: 'the full Validate follows Evaluate', before: SPAWN('Evaluate'), after: 'VALIDATION_SCOPE: full' },
   { label: 'Test follows the full Validate', before: 'VALIDATION_SCOPE: full', after: SPAWN('Test') },
   { label: 'the changed-only Validate follows Test', before: SPAWN('Test'), after: 'VALIDATION_SCOPE: changed-only' },
@@ -888,16 +888,16 @@ function collectPhaseHeadingDefects(md: string): string[] {
   return out
 }
 
-describe('#421 AC-1: the gates run Code, Simplify, Scrutinize, Evaluate, Validate, Test, the conditional Validate, push, CI', () => {
+describe('#421 AC-1: the gates run Code, Polish, Harden, Evaluate, Validate, Test, the conditional Validate, push, CI', () => {
   it('every post-code step follows the one before it, and the phase headings hold their order', () => {
     const md = implementMd()
     expect(collectOrderViolations('implement.md', md, GATE_ORDER)).toEqual([])
     expect(collectPhaseHeadingDefects(md)).toEqual([])
   })
 
-  it('known-bad probe: a Validate before Simplify (the order before #421) is reported', () => {
+  it('known-bad probe: a Validate before Polish (the order before #421) is reported', () => {
     const md = implementMd()
-    const early = md.replace('VALIDATION_SCOPE: full', 'VALIDATION_SCOPE: other').replace(SPAWN('Simplify'), `VALIDATION_SCOPE: full\n${SPAWN('Simplify')}`)
+    const early = md.replace('VALIDATION_SCOPE: full', 'VALIDATION_SCOPE: other').replace(SPAWN('Polish'), `VALIDATION_SCOPE: full\n${SPAWN('Polish')}`)
     expect(early, 'the seed must land').not.toBe(md)
     const violations = collectOrderViolations('implement.md', early, GATE_ORDER)
     expect(violations.some(v => v.includes('the full Validate follows Evaluate'))).toBe(true)
@@ -950,8 +950,8 @@ describe('#421 AC-2: one full-scope Validate, and exactly two claim sites', () =
 const VALIDATE_FREE_PHASES = [H.p3, H.p4, H.p5, H.p7] as const
 
 /**
- * Named collector: Validate spawns inside the Simplify, Scrutinize, alignment and QA
- * phases, and any sentence that re-validates because Scrutinize reported FIXED. The
+ * Named collector: Validate spawns inside the Polish, Harden, alignment and QA
+ * phases, and any sentence that re-validates because Harden reported FIXED. The
  * Phase 6 run covers all of them; the Phase 8 run covers a qa-fix.
  */
 function collectLoopValidateDefects(md: string): string[] {
@@ -971,8 +971,8 @@ function collectLoopValidateDefects(md: string): string[] {
   return out
 }
 
-describe('#421 AC-3: no Validate inside the alignment loop, the QA loop or on a Scrutinize FIXED status', () => {
-  it('the Simplify, Scrutinize, alignment and QA phases spawn no Validate', () => {
+describe('#421 AC-3: no Validate inside the alignment loop, the QA loop or on a Harden FIXED status', () => {
+  it('the Polish, Harden, alignment and QA phases spawn no Validate', () => {
     const md = implementMd()
     for (const heading of VALIDATE_FREE_PHASES) expect(parseFences(phaseSection(md, heading) ?? '').length, `${heading}: no fence read`).toBeGreaterThan(0)
     expect(collectLoopValidateDefects(md)).toEqual([])
@@ -989,8 +989,8 @@ describe('#421 AC-3: no Validate inside the alignment loop, the QA loop or on a 
     expect(collectLoopValidateDefects(qa)).toEqual([`${H.p7}: 1 Validate spawn(s) inside the phase`])
     const fixed = md.replace('starts no Validate of its own', 'spawns the Validate agent')
     expect(collectLoopValidateDefects(fixed)).toContain('Phase 4 does not say a FIXED status starts no Validate')
-    const refire = md.replace('After Simplify agent completes, spawn Scrutinize agent', 'After Simplify agent completes, spawn Scrutinize agent')
-      .replace('**If PASS or FIXED:** continue to Phase 5.', `If Scrutinize agent made changes (status: FIXED), spawn Validate agent:\n${validate}\n**If PASS or FIXED:** continue to Phase 5.`)
+    const refire = md.replace('After Polish agent completes, spawn Harden agent', 'After Polish agent completes, spawn Harden agent')
+      .replace('**If PASS or FIXED:** continue to Phase 5.', `If Harden agent made changes (status: FIXED), spawn Validate agent:\n${validate}\n**If PASS or FIXED:** continue to Phase 5.`)
     expect(refire, 'the seed must land').not.toBe(md)
     expect(collectLoopValidateDefects(refire).some(d => d.includes('Validate spawn(s) inside the phase'))).toBe(true)
   })
@@ -1070,7 +1070,7 @@ function collectFilesChangedDefects(md: string): string[] {
   if (section === null) return ['no Phase 6 section']
   const spawn = parseFences(section).find(f => isAgentBlock(f, 'Validate') && f.includes('VALIDATION_SCOPE: full'))
   if (spawn === undefined) return ['Phase 6 has no full Validate spawn']
-  return spawn.includes('FILES_CHANGED: {output of `git diff --name-only {base}...HEAD`}') ? [] : ['the Validate spawn takes the Code agent\'s file list, which misses the Simplify, Scrutinize and fix commits']
+  return spawn.includes('FILES_CHANGED: {output of `git diff --name-only {base}...HEAD`}') ? [] : ['the Validate spawn takes the Code agent\'s file list, which misses the Polish, Harden and fix commits']
 }
 
 describe('#421: Phase 6 hands Validate the branch diff, not the Code agent\'s list', () => {
@@ -1087,17 +1087,17 @@ describe('#421: Phase 6 hands Validate the branch diff, not the Code agent\'s li
 })
 
 /** The pointers the renumbering retires, and the ones that replace them. */
-const RETIRED_POINTERS = ['Scrutinize agent (Phase 5)', 'Phase 3 or Phase 6 PASS', 'Phase 3\'s **Evidence claims**', 'after every Phase 8 run'] as const
+const RETIRED_POINTERS = ['Harden agent (Phase 5)', 'Phase 3 or Phase 6 PASS', 'Phase 3\'s **Evidence claims**', 'after every Phase 8 run'] as const
 
 /** Named collector: cross-references that still use the numbers before #421, and the new ones that are absent. */
 function collectPointerDefects(md: string, revalidate: string = revalidateReference()): string[] {
   const out = RETIRED_POINTERS.filter(p => md.includes(p)).map(p => `a retired pointer remains: "${p}"`)
   const need = (what: string, ok: boolean): void => { if (!ok) out.push(what) }
-  need('Phase 1 does not point Scrutinize at Phase 4', md.includes('Scrutinize agent (Phase 4)'))
+  need('Phase 1 does not point Harden at Phase 4', md.includes('Harden agent (Phase 4)'))
   need('the Evidence-claims definition does not name Phase 6 and Phase 8', md.includes('`gate:validate` — after a Phase 6 or Phase 8 PASS.'))
   need('the TP claims are not tied to Phase 7', md.includes('`TP-<n>` — after every Phase 7 run'))
   need('the Test spawn does not point at Phase 6\'s claims', md.includes('append its TP claims (Phase 6\'s **Evidence claims**)'))
-  need('the continuation path names no order', revalidate.includes('**Run Phases 3-8** — Simplify, Self-Review, Alignment, the one full Validate, QA Testing and the conditional Re-Validate'))
+  need('the continuation path names no order', revalidate.includes('**Run Phases 3-8** — Polish, Self-Review, Alignment, the one full Validate, QA Testing and the conditional Re-Validate'))
   need('the diagram lacks the Phase 6 Validate', md.includes('├─ Phase 6: Validate (the one full-suite slot)'))
   need('the diagram lacks the Phase 8 Re-Validate', md.includes('├─ Phase 8: Re-Validate (only if a qa-fix committed)'))
   need('the Orchestration-only principle does not name the Phase 10 push and the ci-wait call', /\*\*Orchestration only\*\*[^\n]*Phase 10[^\n]*push[^\n]*ci-wait call/.test(md))
@@ -1112,11 +1112,11 @@ describe('#421 AC-26: the cross-references match the new phase numbers', () => {
 
   it('known-bad probes: the old pointers and a lost principle clause are each reported', () => {
     const md = implementMd()
-    const old = md.replace('Scrutinize agent (Phase 4)', 'Scrutinize agent (Phase 5)').replace('after a Phase 6 or Phase 8 PASS', 'after a Phase 3 or Phase 6 PASS')
+    const old = md.replace('Harden agent (Phase 4)', 'Harden agent (Phase 5)').replace('after a Phase 6 or Phase 8 PASS', 'after a Phase 3 or Phase 6 PASS')
     expect(collectPointerDefects(old)).toEqual(expect.arrayContaining([
-      'a retired pointer remains: "Scrutinize agent (Phase 5)"',
+      'a retired pointer remains: "Harden agent (Phase 5)"',
       'a retired pointer remains: "Phase 3 or Phase 6 PASS"',
-      'Phase 1 does not point Scrutinize at Phase 4',
+      'Phase 1 does not point Harden at Phase 4',
     ]))
     expect(collectPointerDefects(md.replace('the CI gate allows at most 3 waits and 2 fixes', 'the CI gate polls ten times'))).toEqual(['the Loop-limits principle does not carry the CI gate budget'])
   })

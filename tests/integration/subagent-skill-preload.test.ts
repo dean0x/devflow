@@ -93,20 +93,20 @@ async function spawnAgentAndGetAllPreloads(agentType: string, prompt: string): P
  */
 describe.skipIf(!isClaudeAvailable())('subagent skill preload', () => {
 
-  it('Simplify agent preloads software-design and worktree-support', async () => {
-    const allPreloads = await spawnAgentAndGetAllPreloads('Simplify', 'reply with one line only — do not create, modify, or delete any file, do not run git: function add(a, b) { return a + b; }');
+  it('Polish agent preloads software-design and worktree-support', async () => {
+    const allPreloads = await spawnAgentAndGetAllPreloads('Polish', 'reply with one line only — do not create, modify, or delete any file, do not run git: function add(a, b) { return a + b; }');
     const expected = ['software-design', 'worktree-support'];
     expect(
       allPreloads.some((p) => expected.every((s) => p.includes(s))),
       `No transcript contains ${expected.join(', ')}. Found: ${JSON.stringify(allPreloads)}`,
     ).toBe(true);
-    // Simplify agent must NOT have apply-decisions (PR #182 explicit assertion)
-    const simplifyTranscript = allPreloads.find((p) => expected.every((s) => p.includes(s)))!;
-    expect(simplifyTranscript).not.toContain('apply-decisions');
+    // Polish agent must NOT have apply-decisions (PR #182 explicit assertion)
+    const polishTranscript = allPreloads.find((p) => expected.every((s) => p.includes(s)))!;
+    expect(polishTranscript).not.toContain('apply-decisions');
   }, 90000);
 
-  it('Scrutinize agent preloads quality-gates, software-design, worktree-support, apply-decisions', async () => {
-    const allPreloads = await spawnAgentAndGetAllPreloads('Scrutinize', 'reply with one line only — do not create, modify, or delete any file, do not run git: const x = 1;');
+  it('Harden agent preloads quality-gates, software-design, worktree-support, apply-decisions', async () => {
+    const allPreloads = await spawnAgentAndGetAllPreloads('Harden', 'reply with one line only — do not create, modify, or delete any file, do not run git: const x = 1;');
     const expected = ['quality-gates', 'software-design', 'worktree-support', 'apply-decisions'];
     expect(
       allPreloads.some((p) => expected.every((s) => p.includes(s))),
@@ -162,7 +162,7 @@ describe.skipIf(!isClaudeAvailable())('subagent skill preload', () => {
   // Agents whose tool policy removes the Skill tool, or that carry an allowlist, still get
   // their `skills:` list injected at spawn time: preload does not go through the tool. Each
   // case asserts the retained set, and that a trimmed skill (D-PRELOAD-TRIM) is no longer
-  // loaded. Learning has no case: it preloads nothing, and its spawn would claim a real queue.
+  // loaded. Curate has no case: it preloads nothing, and its spawn would claim a real queue.
 
   /**
    * Spawn `agentType`, find the transcript that holds every expected skill, and check that
@@ -235,9 +235,9 @@ describe.skipIf(!isClaudeAvailable())('subagent skill preload', () => {
     );
   }, 90000);
 
-  it('Diagnose agent preloads worktree-support, apply-decisions, apply-feature-knowledge, and none of the five pattern skills', async () => {
+  it('Debug agent preloads worktree-support, apply-decisions, apply-feature-knowledge, and none of the five pattern skills', async () => {
     await expectRetainedPreloads(
-      'Diagnose',
+      'Debug',
       'reply with one line only — do not create, modify, or delete any file, do not run git, do not write a report: FOCUS security, nothing to analyse.',
       ['worktree-support', 'apply-decisions', 'apply-feature-knowledge'],
       ['security', 'reliability', 'regression', 'consistency', 'complexity'],

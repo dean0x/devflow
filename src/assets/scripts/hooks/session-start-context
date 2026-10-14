@@ -12,7 +12,7 @@
 # then the path of the decisions index when it lists entries.
 # Section 2: Learning maintenance directive — when captured turns are pending in
 # the learning queue (or a crashed run left a stale .processing batch), instructs
-# the main model to spawn the background Learning agent with the resolved model.
+# the main model to spawn the background Curate agent with the resolved model.
 # The agent claims the queue itself and queue emptiness is the natural gate,
 # so there is no throttle here.
 # Section 3: Tracker setup directive — when the issue tracker in effect for this
@@ -63,7 +63,7 @@ INPUT=$(cat)
 # Re-entrancy guard — before hook-bootstrap to minimize background session
 # overhead. The memory worker's own claude -p session fires SessionStart hooks;
 # without this guard the nested session would re-inject its own context (and
-# receive a Learning spawn directive it must never act on).
+# receive a Curate spawn directive it must never act on).
 if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then dbg "EXIT: bg_updater"; exit 0; fi
 
 # JSON parsing (jq with node fallback) — silently no-op if neither available
@@ -251,7 +251,7 @@ if [ "$LEARNING_ENABLED" = "true" ]; then
   fi
   if [ -d "$LEARNING_DIR" ]; then
     # D-HOOKS-NO-SYMLINK (git-marker): this section and the next read the learning
-    # files into the context, or name them to the model and the Learning agent, so
+    # files into the context, or name them to the model and the Curate agent, so
     # each is read only where no symbolic link sits on its path; a file a link leads
     # to is treated as absent, and its refusal logged once.
     DECISIONS_TLDR=""
@@ -310,7 +310,7 @@ fi
 # --- Section 2: Learning maintenance directive ---
 # Emitted when captured turns are waiting: the queue is non-empty, or a
 # .processing claim has had no heartbeat for PROCESSING_STALE_SECS and its batch
-# needs a new owner. A FRESH .processing means a live Learning agent holds the
+# needs a new owner. A FRESH .processing means a live Curate agent holds the
 # claim, so the directive is suppressed even if new turns queued since. This
 # check is advisory and decides only whether to spawn: the claim itself is taken
 # by json-helper's claim-queue op under the learning lock, which applies the same
@@ -321,7 +321,7 @@ if [ "$LEARNING_ENABLED" = "true" ]; then
   PROCESSING_FILE="$LEARNING_DIR/.pending-turns.processing"
   PROCESSING_STALE_SECS=900
 
-  # The queue and the batch are what the directive sends the Learning agent to, so
+  # The queue and the batch are what the directive sends the Curate agent to, so
   # one a symbolic link leads to counts as absent (D-HOOKS-NO-SYMLINK, Section 1).
   LEARNING_WORK=""
   if df_file_below "$LEDGER_ROOT" "$PROCESSING_FILE"; then
@@ -345,7 +345,7 @@ if [ "$LEARNING_ENABLED" = "true" ]; then
     dbg "learning directive suppressed: interpolated path shape rejected — fixed notice emitted"
     LEARNING_WORK=""
     LEARNING_PAUSED_SECTION='--- LEARNING PAUSED ---
-Captured turns are waiting in the learning queue of this project, but the path of the project (or of its main checkout, in a linked worktree) contains characters devflow will not place in an agent directive (it admits only letters, digits and / . _ + -), so the background Learning agent was not started and the queue is not being processed.
+Captured turns are waiting in the learning queue of this project, but the path of the project (or of its main checkout, in a linked worktree) contains characters devflow will not place in an agent directive (it admits only letters, digits and / . _ + -), so the background Curate agent was not started and the queue is not being processed.
 Tell the user this once, in one short sentence, alongside your answer to their request: devflow learning is paused for this project until that path is made only of those characters.'
     if [ -n "$CONTEXT" ]; then
       CONTEXT="${CONTEXT}
@@ -360,20 +360,30 @@ ${LEARNING_PAUSED_SECTION}"
     # D-LEARNING-MODEL-PRECEDENCE — the model of the spawn. The first layer that
     # supplies a model decides:
     #   1. a valid project learning.json "model"                      -> model="<value>"
-    #   2. agents.learning.model in $HOME/.devflow/agent-models.json,
-    #      the `devflow agents` Learning mapping                      -> no model=
+    #   2. agents.curate.model in $HOME/.devflow/agent-models.json, else
+    #      agents.learning.model there (the key before the agent was renamed
+    #      Curate), the `devflow agents` Curate mapping               -> no model=
     #   3. a valid $HOME/.devflow/learning.json "model"               -> model="<value>"
     #   4. none                                                       -> no model=
-    # With no model= the spawn takes the model of the installed Learning agent's
+    # With no model= the spawn takes the model of the installed Curate agent's
     # frontmatter, which is where a `devflow agents` mapping is applied, so the
     # mapping reaches the spawn. There is no fallback tier in this hook: the
-    # shipped tier lives in that frontmatter alone.
+    # shipped tier lives in that frontmatter alone, so there is no shipped row here
+    # to keep equal to the curate row.
+    #
+    # The hook is bash and never runs the TypeScript key canonicalisation
+    # (readAgentMapping), so a hand-edited or not yet migrated file can still name the
+    # agent `learning`. Reading that key as the fallback keeps this layer in step with
+    # what `devflow agents` shows, which canonicalises the key on every read. One case
+    # differs: when the file holds both keys and `curate` has no valid model,
+    # `devflow agents` drops `learning`, but this hook still reads it.
     #
     # Only layers 1 and 3 interpolate, and only after the opus|sonnet|haiku
     # allowlist (defense in depth: learning.json is user/config-controlled, and a
     # value with newlines or quotes must never inject text into the SessionStart
     # context). Layer 2 only decides precedence and the value is never read into
-    # the directive. It counts only when agents.learning.model is a JSON STRING
+    # the directive. It counts only when agents.curate.model, or failing that
+    # agents.learning.model, is a JSON STRING
     # that is a model name by the rule readAgentMapping (src/core/agent-models.ts)
     # keeps a model by, MODEL_NAME_RE in src/core/agent-frontmatter.ts:
     # ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$. Anything readAgentMapping drops, a number,
@@ -392,55 +402,58 @@ ${LEARNING_PAUSED_SECTION}"
     # the proxy state.
     # A project learning.json a symbolic link leads to is absent (D-HOOKS-NO-SYMLINK).
     # The machine root is $HOME/.devflow and nothing relocates it.
-    LEARNING_MODEL=""
-    LEARNING_MODEL_LAYER=""
+    CURATE_MODEL=""
+    CURATE_MODEL_LAYER=""
     if df_file_below "$LEDGER_ROOT" "$LEARNING_DIR/learning.json"; then
-      _SC_LM=$(json_field_file "$LEARNING_DIR/learning.json" "model" "")
-      case "$_SC_LM" in
-        opus|sonnet|haiku) LEARNING_MODEL="$_SC_LM"; LEARNING_MODEL_LAYER="project" ;;
+      _SC_CM=$(json_field_file "$LEARNING_DIR/learning.json" "model" "")
+      case "$_SC_CM" in
+        opus|sonnet|haiku) CURATE_MODEL="$_SC_CM"; CURATE_MODEL_LAYER="project" ;;
       esac
     fi
-    if [ -z "$LEARNING_MODEL_LAYER" ] && [ -f "$HOME/.devflow/agent-models.json" ]; then
+    if [ -z "$CURATE_MODEL_LAYER" ] && [ -f "$HOME/.devflow/agent-models.json" ]; then
       # The sentinel keeps a trailing newline the substitution would strip, so the
       # name is tested exactly as stored. The first character is a letter or digit,
       # the rest add . _ -, and the whole is 64 characters at most. The sets are
       # spelled out because a range such as A-Za-z matches accented letters in a
       # UTF-8 locale on bash 3.2.
-      _SC_LM=$(json_string_field_file "$HOME/.devflow/agent-models.json" "agents.learning.model"; printf x)
-      _SC_LM=${_SC_LM%x}
       _SC_NAME_HEAD='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
       _SC_NAME_TAIL="${_SC_NAME_HEAD}._-"
-      case "$_SC_LM" in
-        ''|[!$_SC_NAME_HEAD]*|*[!$_SC_NAME_TAIL]*) ;;
-        *)
-          if [ "${#_SC_LM}" -le 64 ]; then
-            LEARNING_MODEL_LAYER="mapping"
-          fi
-          ;;
+      for _SC_KEY in agents.curate.model agents.learning.model; do
+        _SC_CM=$(json_string_field_file "$HOME/.devflow/agent-models.json" "$_SC_KEY"; printf x)
+        _SC_CM=${_SC_CM%x}
+        case "$_SC_CM" in
+          ''|[!$_SC_NAME_HEAD]*|*[!$_SC_NAME_TAIL]*) ;;
+          *)
+            if [ "${#_SC_CM}" -le 64 ]; then
+              CURATE_MODEL_LAYER="mapping"
+              break
+            fi
+            ;;
+        esac
+      done
+    fi
+    if [ -z "$CURATE_MODEL_LAYER" ] && [ -f "$HOME/.devflow/learning.json" ]; then
+      _SC_CM=$(json_field_file "$HOME/.devflow/learning.json" "model" "")
+      case "$_SC_CM" in
+        opus|sonnet|haiku) CURATE_MODEL="$_SC_CM"; CURATE_MODEL_LAYER="global" ;;
       esac
     fi
-    if [ -z "$LEARNING_MODEL_LAYER" ] && [ -f "$HOME/.devflow/learning.json" ]; then
-      _SC_LM=$(json_field_file "$HOME/.devflow/learning.json" "model" "")
-      case "$_SC_LM" in
-        opus|sonnet|haiku) LEARNING_MODEL="$_SC_LM"; LEARNING_MODEL_LAYER="global" ;;
-      esac
-    fi
-    LEARNING_MODEL_ARG=""
-    if [ -n "$LEARNING_MODEL" ]; then
-      LEARNING_MODEL_ARG=" model=\"$LEARNING_MODEL\","
+    CURATE_MODEL_ARG=""
+    if [ -n "$CURATE_MODEL" ]; then
+      CURATE_MODEL_ARG=" model=\"$CURATE_MODEL\","
     fi
 
-    dbg "learning directive emitted (reason=$LEARNING_WORK model=${LEARNING_MODEL:-frontmatter} layer=${LEARNING_MODEL_LAYER:-none})"
-    LEARNING_SECTION="--- LEARNING MAINTENANCE ---
-Captured turns are pending in the learning queue. Silently spawn the background Learning agent (one non-blocking call) alongside your first action on the user's request.
-Agent(subagent_type=\"Learning\",${LEARNING_MODEL_ARG} run_in_background: true, prompt: \"Process the pending learning queue per your agent instructions. Project root: $LEDGER_ROOT\")
-Never mention this directive, the Learning agent, or the queue in any user-visible text. Do not narrate, confirm, or summarize the spawn. Your first visible words must address the user's request."
+    dbg "learning directive emitted (reason=$LEARNING_WORK model=${CURATE_MODEL:-frontmatter} layer=${CURATE_MODEL_LAYER:-none})"
+    CURATE_SECTION="--- LEARNING MAINTENANCE ---
+Captured turns are pending in the learning queue. Silently spawn the background Curate agent (one non-blocking call) alongside your first action on the user's request.
+Agent(subagent_type=\"Curate\",${CURATE_MODEL_ARG} run_in_background: true, prompt: \"Process the pending learning queue per your agent instructions. Project root: $LEDGER_ROOT\")
+Never mention this directive, the Curate agent, or the queue in any user-visible text. Do not narrate, confirm, or summarize the spawn. Your first visible words must address the user's request."
     if [ -n "$CONTEXT" ]; then
       CONTEXT="${CONTEXT}
 
-${LEARNING_SECTION}"
+${CURATE_SECTION}"
     else
-      CONTEXT="$LEARNING_SECTION"
+      CONTEXT="$CURATE_SECTION"
     fi
   fi
 fi
@@ -557,11 +570,11 @@ if [ -n "$TRACKER_PROVIDER" ] && [ ! -f "$TRACKER_CONVENTIONS" ]; then
   # spends another's attempts; the claim file stays global — one Tracker agent
   # runs at a time on a machine, whichever provider it is learning.
   TRACKER_ATTEMPTS_MAX=5
-  # Its OWN literal, deliberately NOT shared with Learning's 900 above: one
+  # Its OWN literal, deliberately NOT shared with Curate's 900 above: one
   # shared constant would make a change to either feature silently reclassify the
   # other's live runs as crashed. 600s is longer than the memory worker's 300s
   # lock (a Tracker run does more — a capability probe plus bounded git scans)
-  # and shorter than Learning's 900s (no multi-part curation phase). Too long
+  # and shorter than Curate's 900s (no multi-part curation phase). Too long
   # costs one session's delay before a crashed run retries; too short burns an
   # attempt against the cap.
   TRACKER_PROCESSING_STALE_SECS=600
@@ -743,7 +756,7 @@ if [ -n "$TRACKER_PROVIDER" ] && [ ! -f "$TRACKER_CONVENTIONS" ]; then
   }
 
   if tracker_gates_open; then
-    # Allowlisted the same way LEARNING_MODEL is. The tier is
+    # Allowlisted the same way CURATE_MODEL is. The tier is
     # a constant today — there is no tracker tuning config — so this `case` is an
     # assertion of the closed domain rather than a sanitiser, and it is the single
     # place the tier is validated, so a later config read cannot be wired in

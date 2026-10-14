@@ -1,5 +1,5 @@
 ---
-description: Self-review workflow - Simplify agent (code clarity) then Scrutinize agent (9-pillar quality gate)
+description: Self-review workflow - Polish agent (code clarity) then Harden agent (9-pillar quality gate)
 output-dir: dist/commands
 ---
 @import { knowledge_load, knowledge_writeback } from "./_partials/_knowledge.mds"
@@ -7,7 +7,7 @@ output-dir: dist/commands
 @import "./_partials/_settings.mds" as settings
 # Self-Review Command
 
-Run Simplify agent and Scrutinize agent sequentially on changed files for post-implementation quality refinement.
+Run Polish agent and Harden agent sequentially on changed files for post-implementation quality refinement.
 
 ## Usage
 
@@ -30,18 +30,18 @@ Detect changed files and build context:
 2. Else run `git diff --name-only HEAD` + `git diff --name-only --cached` to get staged + unstaged
 3. If no changes found, report "No changes to review" and exit
 4. Build TASK_DESCRIPTION from recent commit messages or branch name
-5. Record `HEAD_BEFORE` (`git rev-parse HEAD`) now, before Simplify runs — Phase 3 compares against it
+5. Record `HEAD_BEFORE` (`git rev-parse HEAD`) now, before Polish runs — Phase 3 compares against it
 
 {{settings.settings_resolve()}}
 
 {{decisions_load()}}
 <!-- learning:on -->
-Pass `DECISIONS_CONTEXT` to Scrutinize agent — the compact index lists active ADR/PF entries; Scrutinize agent uses `devflow:apply-decisions` to Read full entry bodies on demand. Known pitfalls help identify reintroduced issues, prior decisions help validate architectural consistency. (Simplify agent does not consume decisions — it operates at code-shape level and Scrutinize agent runs after to catch any architectural drift.)
+Pass `DECISIONS_CONTEXT` to Harden agent — the compact index lists active ADR/PF entries; Harden agent uses `devflow:apply-decisions` to Read full entry bodies on demand. Known pitfalls help identify reintroduced issues, prior decisions help validate architectural consistency. (Polish agent does not consume decisions — it operates at code-shape level and Harden agent runs after to catch any architectural drift.)
 
 <!-- learning:end -->
 {{knowledge_load()}}
 
-Pass `FEATURE_KNOWLEDGE_RULES` to Scrutinize agent.
+Pass `FEATURE_KNOWLEDGE_RULES` to Harden agent.
 
 <!-- learning:on -->
 **Extract:** FILES_CHANGED (list), TASK_DESCRIPTION (string), DECISIONS_CONTEXT (string, optional), FEATURE_KNOWLEDGE (string, optional), FEATURE_KNOWLEDGE_RULES (string, optional), HEAD_BEFORE (40-hex SHA)
@@ -49,33 +49,33 @@ Pass `FEATURE_KNOWLEDGE_RULES` to Scrutinize agent.
 **Extract:** FILES_CHANGED (list), TASK_DESCRIPTION (string), FEATURE_KNOWLEDGE (string, optional), FEATURE_KNOWLEDGE_RULES (string, optional), HEAD_BEFORE (40-hex SHA)
 <!-- learning:end -->
 
-### Phase 1: Simplify agent (Code Refinement)
+### Phase 1: Polish agent (Code Refinement)
 
-**Produces:** SIMPLIFY_COMMITS
+**Produces:** POLISH_COMMITS
 **Requires:** FILES_CHANGED, TASK_DESCRIPTION
 
-Spawn Simplify agent to refine code for clarity and consistency:
+Spawn Polish agent to refine code for clarity and consistency:
 
-Agent(subagent_type="Simplify", run_in_background=false):
+Agent(subagent_type="Polish", run_in_background=false):
 "TASK_DESCRIPTION: {task_description}
 FILES_CHANGED: {files_changed}
-Simplify and refine the code for clarity and consistency while preserving functionality.
+Polish and refine the code for clarity and consistency while preserving functionality.
 Commit any improvements with a conventional-commit message."
 
-**Wait for completion.** Simplify agent commits changes directly.
+**Wait for completion.** Polish agent commits changes directly.
 
-### Phase 2: Scrutinize agent (9-Pillar Quality Gate)
+### Phase 2: Harden agent (9-Pillar Quality Gate)
 
-**Produces:** SCRUTINIZE_STATUS
+**Produces:** HARDEN_STATUS
 <!-- learning:on -->
 **Requires:** FILES_CHANGED, TASK_DESCRIPTION, DECISIONS_CONTEXT
 <!-- learning:off -->
 **Requires:** FILES_CHANGED, TASK_DESCRIPTION
 <!-- learning:end -->
 
-Spawn Scrutinize agent for quality evaluation and fixing:
+Spawn Harden agent for quality evaluation and fixing:
 
-Agent(subagent_type="Scrutinize", run_in_background=false):
+Agent(subagent_type="Harden", run_in_background=false):
 "TASK_DESCRIPTION: {task_description}
 FILES_CHANGED: {files_changed}
 <!-- learning:on -->
@@ -93,11 +93,11 @@ Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE. Skip if (none)."
 ### Phase 3: Conditional Validation
 
 **Produces:** VALIDATION_RESULT
-**Requires:** HEAD_BEFORE, SCRUTINIZE_STATUS
+**Requires:** HEAD_BEFORE, HARDEN_STATUS
 
 If STATUS is BLOCKED, skip this phase: the report (Phase 4) names the blocker.
 
-Run this phase only if HEAD moved — `git rev-parse HEAD` differs from `HEAD_BEFORE`, meaning Simplify or Scrutinize committed (Simplify alone counts, whatever Scrutinize's STATUS is). Otherwise skip it. Its scope is changed-only over what the two agents changed:
+Run this phase only if HEAD moved — `git rev-parse HEAD` differs from `HEAD_BEFORE`, meaning Polish or Harden committed (Polish alone counts, whatever Harden's STATUS is). Otherwise skip it. Its scope is changed-only over what the two agents changed:
 
 Agent(subagent_type="Validate", run_in_background=false):
 "FILES_CHANGED: {output of `git diff --name-only HEAD_BEFORE..HEAD`}
@@ -109,7 +109,7 @@ Run build, typecheck, lint, test on modified files"
 
 ### Phase 4: Report
 
-**Requires:** SCRUTINIZE_STATUS, VALIDATION_RESULT
+**Requires:** HARDEN_STATUS, VALIDATION_RESULT
 
 Display summary:
 
@@ -118,10 +118,10 @@ Display summary:
 **Files Reviewed**: {n}
 **Status**: {PASS|FIXED|BLOCKED}
 
-### Simplify agent
+### Polish agent
 - {n} files refined for clarity
 
-### Scrutinize agent (9-Pillar Evaluation)
+### Harden agent (9-Pillar Evaluation)
 | Pillar | Status |
 |--------|--------|
 | Design | {status} |
@@ -154,14 +154,14 @@ Display summary:
 │  └─ Record HEAD_BEFORE
 <!-- learning:end -->
 │
-├─ Phase 1: Simplify agent
+├─ Phase 1: Polish agent
 │  └─ Code refinement (commits directly)
 │
-├─ Phase 2: Scrutinize agent
+├─ Phase 2: Harden agent
 │  └─ 9-pillar quality gate (may fix and commit)
 │
 ├─ Phase 3: Validate agent (conditional)
-│  └─ If HEAD moved since HEAD_BEFORE (Simplify or Scrutinize committed), changed-only Validate over HEAD_BEFORE..HEAD
+│  └─ If HEAD moved since HEAD_BEFORE (Polish or Harden committed), changed-only Validate over HEAD_BEFORE..HEAD
 │
 └─ Phase 4: Report
    └─ Display summary with pillar status
@@ -171,15 +171,15 @@ Display summary:
 | Case | Handling |
 |------|----------|
 | No changes | Report "No changes to review" and exit |
-| Simplify agent finds nothing | Normal, continue to Scrutinize agent |
-| Scrutinize agent BLOCKED | Report blocking issue, halt workflow |
+| Polish agent finds nothing | Normal, continue to Harden agent |
+| Harden agent BLOCKED | Report blocking issue, halt workflow |
 | Validation fails | Report failures, halt (don't create broken state) |
 | Not in git repo | Report error, suggest running in git repo |
 
 ## Principles
 
 1. **Orchestration only** - Command spawns agents, doesn't do the work
-2. **Sequential execution** - Simplify agent must complete before Scrutinize agent
-3. **Validation gate** - If Simplify agent or Scrutinize agent committed, the changes must pass validation
+2. **Sequential execution** - Polish agent must complete before Harden agent
+3. **Validation gate** - If Polish agent or Harden agent committed, the changes must pass validation
 4. **Honest reporting** - Display actual agent outputs
 5. **Fail fast** - Stop on BLOCKED or validation failure

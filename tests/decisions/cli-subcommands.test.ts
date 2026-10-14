@@ -22,8 +22,8 @@ import * as os from 'os';
 // Mocks — all set up before any imports from the module under test.
 // ---------------------------------------------------------------------------
 
-vi.mock('../../src/core/learning-tuning-config.js', () => ({
-  loadLearningTuningConfig: vi.fn(() => ({
+vi.mock('../../src/core/curate-tuning-config.js', () => ({
+  loadCurateTuningConfig: vi.fn(() => ({
     model: 'opus',
     debug: false,
   })),
@@ -657,7 +657,7 @@ describe('learning --reset', { timeout: 30_000 }, () => {
 
 // ---------------------------------------------------------------------------
 // --disable switches learning off machine-wide (D-FEATURES-NARROW-ONLY) and
-// drains the current project's learning queue — a mid-run Learning agent whose
+// drains the current project's learning queue — a mid-run Curate agent whose
 // claimed batch vanishes stops, which is the desired outcome of disabling.
 // ---------------------------------------------------------------------------
 

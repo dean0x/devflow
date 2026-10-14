@@ -38,7 +38,7 @@ All generated documentation lives under `.devflow/docs/` at the checkout's tople
 ├── bug-analysis/{branch-slug}/         # /bug-analysis, per branch
 │   ├── .last-analysis-head            # HEAD SHA of the last analysis (incremental)
 │   └── {timestamp}/
-│       ├── {focus}.md                 # Diagnose agent report
+│       ├── {focus}.md                 # Debug agent report
 │       ├── static-findings.md         # Raw static analysis tool output
 │       ├── bug-analysis-summary.md    # Synthesize agent output
 │       └── resolution-summary.md      # /resolve (evidence.md and stale-plan.md as in reviews)
@@ -142,7 +142,7 @@ ensure_docs_dir() { mkdir -p "$(get_docs_root)/.devflow/docs/$1"; }
 ### Who Writes What
 
 - **Reviews**: the Review agents and the Synthesize agent (review mode) write into `reviews/{branch-slug}/{timestamp}/`; `/resolve` adds `resolution-summary.md` (Phase 5); `/code-review` overwrites `.last-review-head` with the HEAD SHA.
-- **Bug analysis**: the Diagnose agents and the Synthesize agent (bug-analysis mode) write into `bug-analysis/{branch-slug}/{timestamp}/`; `/bug-analysis` overwrites `.last-analysis-head` with the HEAD SHA.
+- **Bug analysis**: the Debug agents and the Synthesize agent (bug-analysis mode) write into `bug-analysis/{branch-slug}/{timestamp}/`; `/bug-analysis` overwrites `.last-analysis-head` with the HEAD SHA.
 - **Research**: the Research agents write `{type}.md`, and the Synthesize agent (research mode) writes `research-summary.md` through `RESEARCH_BASE_DIR`, both into `research/{topic-slug}/{timestamp}/`.
 - **Design**: `/plan` writes the design document; `/dynamic-plan` writes `design/{slug}/{timestamp}/`, `/dynamic-tickets` `tickets/{slug}/{timestamp}/`, `/dynamic-build` `waves/{slug}/{timestamp}/` and `evidence-wave-{slug}.md`.
 - **Handoff and evidence**: `/implement` writes `evidence-{branch-slug}.md`, which stays after the PR, and the handoff file, to which each Code agent appends one phase section and which is deleted once the PR exists.
@@ -176,7 +176,7 @@ This framework is used by:
 - **`/plan` and `/research`**: load it at the step that names the document, and build the path by its rules
 - **Commands that hand paths to agents** (`/code-review`, `/bug-analysis`, `/implement`, `/resolve`, the `/dynamic-*` commands): follow it, with the exceptions above
 - **Working Memory hooks**: Auto-maintains `.devflow/memory/WORKING-MEMORY.md`
-- **Learning agent**: background LLM agent (spawned via the session-start directive) promotes observations to ADRs/PFs via `assign-anchor`, which renders `decisions.md` / `pitfalls.md`
+- **Curate agent**: background LLM agent (spawned via the session-start directive) promotes observations to ADRs/PFs via `assign-anchor`, which renders `decisions.md` / `pitfalls.md`
 
 ---
 

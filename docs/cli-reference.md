@@ -19,7 +19,7 @@ Use `--recommended` or `--advanced` flags for non-interactive setup.
 | `--plugin <names>` | Comma-separated plugin names (e.g., `implement,code-review`) |
 | `--ambient` / `--no-ambient` | Enable/disable ambient mode — orchestrator charter + plan handoff (default: on) |
 | `--memory` / `--no-memory` | Enable/disable working memory (default: on) |
-| `--learning` / `--no-learning` | Enable/disable learning agent (default: on); with learning off, init installs the learning-off prompts and not `devflow:apply-decisions` |
+| `--learning` / `--no-learning` | Enable/disable learning (default: on); with learning off, init installs the learning-off prompts and not `devflow:apply-decisions` |
 | `--knowledge` / `--no-knowledge` | Enable/disable feature knowledge (default: on) |
 | `--rules` / `--no-rules` | Enable/disable rules (default: on) |
 | `--hud` / `--no-hud` | Enable/disable HUD status line (default: on) |
@@ -69,7 +69,7 @@ npx devflow-kit init --plugin=implement,code-review  # Install multiple
 | `devflow-explore` | Core | Codebase exploration with knowledge base creation |
 | `devflow-research` | Core | Multi-type research with trust-aware synthesis |
 | `devflow-release` | Core | Adaptive release with learned configuration |
-| `devflow-self-review` | Core | Simplify + Scrutinize |
+| `devflow-self-review` | Core | Polish + Harden |
 | `devflow-bug-analysis` | Core | Proactive bug finding with static and semantic analysis |
 | `devflow-ambient` | Core | Ambient mode (orchestrator charter + plan handoff) |
 | `devflow-core-skills` | Core | Auto-activating quality skills |
@@ -415,7 +415,9 @@ npx devflow-kit agents --reset --yes                        # Skip confirmation 
 | `Enter` | Confirm and save all changes |
 | `Escape` / `q` | Quit without saving |
 
-**Code runs as three agents.** `code` (the `implement` and `issue-fix` modes), `code-fix` (repairs after a failed validation, alignment, QA or CI check) and `code-edit` (mechanical edits) are separate entries in the list and the TUI. Each ships on Sonnet at high effort. An override set on `code` does not reach `code-fix` or `code-edit`; set each one you want to change.
+**Code runs as three agents.** `code` (the `implement` and `issue-fix` modes), `fix` (repairs after a failed validation, alignment, QA or CI check) and `refactor` (mechanical edits) are separate entries in the list and the TUI. Each ships on Sonnet at high effort. An override set on `code` does not reach `fix` or `refactor`; set each one you want to change.
+
+**Old slugs.** `--set <old slug>` still works after an agent rename. It prints an info line (`Agent '<old slug>' has been renamed to '<new slug>' — using canonical name.`), writes the new slug and leaves no old key in `~/.devflow/agent-models.json`. An old key that is already in that file is mapped to its new slug when the file is read. If the old key and the new key both exist, the new key wins. The CHANGELOG lists each old slug and its new slug.
 
 **Effort.** An agent's effort has three states. `default` is no override: the agent keeps the effort it ships, and the EFFORT column reads `default (<shipped effort>)` when it ships one, plain `default` when it does not. A level (`low` to `max`) replaces the shipped effort. `inherit` drops the agent's `effort:` line altogether, so the agent follows your session's effort even when it ships one. `--effort default` removes an override or an `inherit` and restores the shipped effort on the next reapply. Effort applies whether or not external model routing is enabled.
 

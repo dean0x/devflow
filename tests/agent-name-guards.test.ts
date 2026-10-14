@@ -68,34 +68,166 @@ const SLUG_TO_NAME_EXCEPTIONS: Readonly<Record<string, string>> = Object.freeze(
 // ---------------------------------------------------------------------------
 
 /**
+ * One retired spelling of an agent name.
+ *
+ * `patterns` carry no `g` flag, so `test()` holds no state between files. A file hits the form
+ * when any one pattern matches. `bad` holds synthetic text per spelling; the known-bad probe feeds
+ * it to the same collector the sweep calls, so a matcher that goes blind fails there.
+ */
+interface RetiredForm {
+  /** Label in violation messages and the key an allowlist entry names. */
+  name: string
+  patterns: readonly RegExp[]
+  bad: readonly string[]
+}
+
+/** True when `text` holds any spelling of the retired form. */
+const hasRetiredHit = (form: RetiredForm, text: string): boolean =>
+  form.patterns.some(re => re.test(text))
+
+/**
+ * A name no prose uses (a role noun like Coder, or a hyphenated one like Code-fix):
+ * MAXIMAL RECALL, any case, no boundary. This catches Coders, Coder's, coderPath and
+ * ANSI-embedded 31mcoder. Over-match plus an allowlist is safe; under-match is not.
+ */
+const looseForm = (name: string): RetiredForm => ({
+  name,
+  patterns: [new RegExp(name, 'i')],
+  bad: [`Agent(subagent_type="${name}")`],
+})
+
+/**
+ * An agent whose retired name is an ordinary English word (Simplify, Diagnose, Scrutinize).
+ * The unbounded any-case sweep above would flag every use of the verb, so this matches only
+ * the shapes that name the agent:
+ *   - the capitalised word on its own, case-SENSITIVE (a spawn key, a roster row, "the Simplify agent");
+ *   - the agent file (`simplify.md`, `simplify.mds`) and its path (`agents/simplify`);
+ *   - the slug quoted as a code span or a map key (`simplify`, "simplify").
+ * The lowercase verb passes. A capitalised verb that opens a sentence is waived by the allowlist.
+ */
+const verbForm = (name: string): RetiredForm => {
+  const slug = name.toLowerCase()
+  return {
+    name,
+    patterns: [
+      new RegExp(`\\b${name}\\b`),
+      new RegExp(`(?<![\\w-])${slug}\\.mds?\\b`),
+      new RegExp(`agents/${slug}(?![\\w-])`),
+      new RegExp('(["\'`])' + slug + '\\1'),
+    ],
+    bad: [
+      `Agent(subagent_type="${name}")`,
+      `the ${name} agent runs after Code`,
+      `src/assets/agents/${slug}.mds`,
+      `the file lives in agents/${slug}`,
+      `agents: \`${slug}\`, \`test\``,
+    ],
+  }
+}
+
+/**
  * Form B names (frontmatter name:) that once existed but have been renamed.
- * Populated in phase 4 of the agent-action-verbs rename wave.
  *
  * Derived from the actual frontmatter name: values that agents carried before
  * the rename (reading them directly, not inferring from Capitalize(slug)).
  *
- * Each name is searched with MAXIMAL RECALL: case-insensitive, NO trailing boundary.
- * This catches Coders, Coder's, coderPath, and ANSI-embedded 31mcoder.
- * Over-match + allowlist is safe; under-match is not.
- *
  * Legitimate collateral hits are covered by RETIRED_ALLOWLIST below.
  */
-const RETIRED_AGENT_FORM_B: readonly string[] = [
+const RETIRED_AGENT_FORM_B: readonly RetiredForm[] = [
   // 13 agents renamed noun→action-verb (phase 4 of agent-action-verbs wave)
-  'Coder',        // → Code
-  'Designer',     // → Design
-  'Evaluator',    // → Evaluate
-  'Researcher',   // → Research
-  'Reviewer',     // → Review
-  'Scrutinizer',  // → Scrutinize
-  'Simplifier',   // → Simplify
-  'Skimmer',      // → Skim
-  'Synthesizer',  // → Synthesize
-  'Tester',       // → Test
-  'Triager',      // → Triage
-  'Validator',    // → Validate
-  'BugAnalyzer',  // → Diagnose
+  looseForm('Coder'),        // → Code
+  looseForm('Designer'),     // → Design
+  looseForm('Evaluator'),    // → Evaluate
+  looseForm('Researcher'),   // → Research
+  looseForm('Reviewer'),     // → Review
+  looseForm('Scrutinizer'),  // → Harden
+  looseForm('Simplifier'),   // → Polish
+  looseForm('Skimmer'),      // → Skim
+  looseForm('Synthesizer'),  // → Synthesize
+  looseForm('Tester'),       // → Test
+  looseForm('Triager'),      // → Triage
+  looseForm('Validator'),    // → Validate
+  looseForm('BugAnalyzer'),  // → Debug
+  // six agents renamed to state their job (#466). Scrutinize, Simplify and Diagnose are also
+  // ordinary verbs, so only the shapes that name the agent are retired.
+  looseForm('Code-fix'),     // → Fix
+  looseForm('Code-edit'),    // → Refactor
+  verbForm('Scrutinize'),    // → Harden
+  verbForm('Simplify'),      // → Polish
+  verbForm('Diagnose'),      // → Debug
+  // Learning is also the name of the learning feature (the learning-capture KBs, the learning
+  // switch, "Learning-aware"), so only the agent-specific spellings are retired.
+  {
+    name: 'Learning agent',                // → Curate agent
+    patterns: [/\bLearning agents?\b/],
+    bad: ['the Learning agent drains the queue'],
+  },
+  {
+    name: 'name: Learning',                // → name: Curate
+    patterns: [/^name:[ \t]*Learning[ \t]*$/m],
+    bad: ['---\nname: Learning\nmodel: opus\n---'],
+  },
+  {
+    name: 'subagent_type="Learning"',      // → subagent_type="Curate"
+    patterns: [/(?:subagent_type|agentType)\s*[=:]\s*["']learning["']/i],
+    bad: ['Agent(subagent_type="Learning")', 'agentType: "Learning"'],
+  },
+  {
+    name: 'agents/learning',               // → agents/curate
+    patterns: [/agents\/learning(?![\w-])/i],
+    bad: ['src/assets/agents/learning'],
+  },
+  {
+    name: 'references/learning',           // → references/curate
+    patterns: [/references\/learning\//i],
+    bad: ['agent-references/references/learning/maintain.md'],
+  },
+  {
+    name: 'learning.md',                   // → curate.md
+    patterns: [/(?<![\w.-])learning\.md\b/i],
+    bad: ['read learning.md first'],
+  },
+  {
+    name: 'agents.learning',               // → agents.curate (the legacy-key fallback is allowlisted)
+    patterns: [/\bagents\.learning(?![\w-])/],
+    bad: ['agents.learning.model'],
+  },
+  {
+    name: 'AGENT_CONFIG.learning',         // → AGENT_CONFIG.curate
+    patterns: [/\bAGENT_CONFIG\.learning\b/],
+    bad: ['AGENT_CONFIG.learning.model'],
+  },
 ]
+
+/**
+ * Named collector for GAP-5 and the charter check: every retired spelling `content` still holds.
+ *
+ * A hit is waived only by an allowlist entry for this path and name. The entry's contexts are
+ * stripped and the text re-tested, so a stray reference beside a waived one still fails. The sweep
+ * and the known-bad probes both call this, so the guard and its probe cannot drift apart.
+ */
+function collectRetiredNameViolations(
+  displayPath: string,
+  content: string,
+  forms: readonly RetiredForm[] = RETIRED_AGENT_FORM_B,
+  allowlist: ReadonlyArray<AllowlistEntry> = RETIRED_ALLOWLIST,
+): string[] {
+  const out: string[] = []
+  for (const form of forms) {
+    if (!hasRetiredHit(form, content)) continue
+    const entry = allowlist.find(e => e.path === displayPath && e.name === form.name)
+    if (!entry) {
+      out.push(`  ${displayPath}: references retired name '${form.name}'`)
+      continue
+    }
+    let residual = content
+    for (const ctx of entry.contexts) residual = residual.split(ctx).join('')
+    if (hasRetiredHit(form, residual)) {
+      out.push(`  ${displayPath}: references retired name '${form.name}' outside its allowlisted contexts`)
+    }
+  }
+  return out
+}
 
 // ---------------------------------------------------------------------------
 // GAP-5 — allowlist for legitimate collateral hits
@@ -383,6 +515,65 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
       'not a Form-B spawn key',
     contexts: ['evaluator_panel'],
   },
+
+  // -----------------------------------------------------------------------
+  // Simplify — CONCEPT (a capitalised verb opening a sentence, not the agent renamed to Polish;
+  // the lowercase verb needs no row)
+  // -----------------------------------------------------------------------
+  {
+    path: 'src/assets/agents/polish.md',
+    name: 'Simplify',
+    reason:
+      'CONCEPT: the verb in the Polish agent\'s own instruction list; not an agent spawn reference',
+    contexts: ['Simplify code structure by:'],
+  },
+  {
+    path: 'src/assets/skills/test-driven-development/SKILL.md',
+    name: 'Simplify',
+    reason:
+      'CONCEPT: the verb opening a rationalization-table row; no agent reference',
+    contexts: ['Simplify the interface first'],
+  },
+
+  // -----------------------------------------------------------------------
+  // agents.learning — CONTRACT (the documented read of the key the Curate agent carried
+  // before the rename; a new reference elsewhere stays a violation)
+  // -----------------------------------------------------------------------
+  {
+    path: 'src/assets/scripts/hooks/session-start-context',
+    name: 'agents.learning',
+    reason:
+      'CONTRACT: the model-resolution fallback reads agents.curate.model, then the pre-rename ' +
+      'agents.learning.model; not an agent spawn reference',
+    contexts: ['agents.learning.model'],
+  },
+  {
+    path: 'docs/reference/hooks.md',
+    name: 'agents.learning',
+    reason:
+      'CONTRACT: documents the same fallback to the pre-rename agents.learning.model entry',
+    contexts: ['agents.learning.model'],
+  },
+  {
+    path: '.devflow/features/learning-capture-system-agent/KNOWLEDGE.md',
+    name: 'agents.learning',
+    reason:
+      'CONTRACT: documents the same fallback to the pre-rename agents.learning.model entry',
+    contexts: ['agents.learning.model'],
+  },
+
+  // -----------------------------------------------------------------------
+  // Scrutinize — DATA_FIELD (field data recorded under the name the agent carried before the
+  // rename; a new reference elsewhere stays a violation)
+  // -----------------------------------------------------------------------
+  {
+    path: 'docs/reference/platform-assumptions.md',
+    name: 'Scrutinize',
+    reason:
+      'DATA_FIELD: the stall investigation counts agent types from transcripts dated 2026-10-01 to ' +
+      '2026-10-07, which logged Harden as Scrutinize; not an agent spawn reference',
+    contexts: ['(logged as Scrutinize)'],
+  },
 ]
 
 // ---------------------------------------------------------------------------
@@ -532,9 +723,8 @@ describe('GAP-1: slug (form A) ↔ frontmatter name: (form B)', () => {
    * For agents NOT in SLUG_TO_NAME_EXCEPTIONS, the default expected name is
    * capitalizeFirst(slug) — coder → Coder, designer → Designer.
    *
-   * The exception map handles the one case where form B diverges from the
-   * default: diagnose → Diagnose (capitalizeFirst, no hyphens in slug).
-   * That entry exits when the agent is renamed in phase 4.
+   * The exception map holds the cases where form B diverges from the default.
+   * It is empty: every agent's name: is capitalizeFirst(slug).
    */
   it('every agent frontmatter name: matches its slug or the exception map', () => {
     const agents = resolveAllAgents()
@@ -672,9 +862,9 @@ describe('GAP-2: agentType: values in dist ↔ declared roster', () => {
     // Control: the real host passes, so the probes below are not red for an unrelated reason.
     expect(collectValidListDefects(host, text, roster)).toEqual([])
 
-    expect(collectValidListDefects(host, withList(listed.filter(t => t !== 'Code-fix')), roster)).toEqual([
-      `${host}: spawns "Code-fix", which the valid-agentType sentence does not list`,
-      `${host}: omits "Code-fix", which the roster lists`,
+    expect(collectValidListDefects(host, withList(listed.filter(t => t !== 'Fix')), roster)).toEqual([
+      `${host}: spawns "Fix", which the valid-agentType sentence does not list`,
+      `${host}: omits "Fix", which the roster lists`,
     ])
     expect(collectValidListDefects(host, withList([...listed, 'Fixer']), roster)).toEqual([
       `${host}: lists "Fixer", which the roster does not`,
@@ -728,7 +918,7 @@ describe('GAP-2: agentType: values in dist ↔ declared roster', () => {
       )
     }
 
-    // Non-vacuity: dist currently carries ~66 spawn sites + the Learning hook
+    // Non-vacuity: dist currently carries ~66 spawn sites + the Curate hook
     // directive. Far fewer scanned means the regex or the corpus broke.
     expect(
       matchCount,
@@ -826,10 +1016,10 @@ describe('GAP-3: orchestrator charter integrity', () => {
       if (!line.includes('`OPERATION: <mode>`')) {
         violations.push('the Code routing line does not tell a direct Code delegation to open with OPERATION: <mode>')
       }
-      // D-CODE-VARIANTS (AC-303): a mechanical edit goes to Code-edit, and Code keeps implement and issue-fix.
-      const editAt = line.indexOf('Code-edit')
-      if (editAt === -1 || !/^Code-edit \([^)]*`OPERATION: edit`/.test(line.slice(editAt))) {
-        violations.push('the Code routing line does not route `OPERATION: edit` to Code-edit')
+      // D-CODE-VARIANTS (AC-303): a mechanical edit goes to Refactor, and Code keeps implement and issue-fix.
+      const editAt = line.indexOf('Refactor')
+      if (editAt === -1 || !/^Refactor \([^)]*`OPERATION: edit`/.test(line.slice(editAt))) {
+        violations.push('the Code routing line does not route `OPERATION: edit` to Refactor')
       }
       if (/`edit`|OPERATION: edit/.test(editAt === -1 ? line : line.slice(0, editAt))) {
         violations.push('the Code routing line still routes edit to Code')
@@ -901,11 +1091,11 @@ describe('GAP-3: orchestrator charter integrity', () => {
       'the Code routing line does not tell a direct Code delegation to open with OPERATION: <mode>',
     )
 
-    // D-CODE-VARIANTS: the edit route must name the Code-edit variant, and Code must not keep it.
-    const noEditVariant = charter.replace('Code-edit (', 'Code (')
+    // D-CODE-VARIANTS: the edit route must name the Refactor variant, and Code must not keep it.
+    const noEditVariant = charter.replace('Refactor (', 'Code (')
     expect(noEditVariant, 'the seed must land').not.toBe(charter)
     expect(collectCharterContentViolations(noEditVariant)).toContain(
-      'the Code routing line does not route `OPERATION: edit` to Code-edit',
+      'the Code routing line does not route `OPERATION: edit` to Refactor',
     )
     const editOnCode = charter.replace('— `issue-fix` for', '— `edit` for mechanical changes, `issue-fix` for')
     expect(editOnCode, 'the seed must land').not.toBe(charter)
@@ -930,21 +1120,10 @@ describe('GAP-3: orchestrator charter integrity', () => {
     expect(violations.some(v => v.startsWith('no single sentence holds all of'))).toBe(true)
   })
 
-  it('charter contains no retired agent names (vacuous when RETIRED_AGENT_FORM_B is empty)', () => {
-    if (RETIRED_AGENT_FORM_B.length === 0) return // vacuously green in phase 1
-
+  it('charter contains no retired agent names', () => {
     const charter = readFileSync(CHARTER_PATH, 'utf-8')
-    const violations: string[] = []
-
-    for (const retiredName of RETIRED_AGENT_FORM_B) {
-      // MAXIMAL RECALL: case-insensitive, no trailing boundary
-      const re = new RegExp(retiredName, 'i')
-      if (re.test(charter)) {
-        violations.push(
-          `  Charter still references retired name '${retiredName}' — update orchestrator-charter.md`,
-        )
-      }
-    }
+    // The charter has no allowlist: any retired spelling in it is a defect.
+    const violations = collectRetiredNameViolations('orchestrator-charter.md', charter, RETIRED_AGENT_FORM_B, [])
     expect(violations, violations.join('\n')).toHaveLength(0)
   })
 })
@@ -1041,14 +1220,9 @@ describe('GAP-5: no retired agent names in any shipped artifact (fail-loud when 
   })
 
   it('no retired form B names appear in any shipped artifact (vacuous when list is empty)', () => {
-    if (RETIRED_AGENT_FORM_B.length === 0) return // vacuously green in phase 1
-
     // Fail-loud: requireDistFiles() throws if dist is absent
     const distFiles = requireDistFiles()
     const assetsFiles = collectFiles(ASSETS_DIR, ['.md', '.mds'])
-
-    // O(1) lookup from the allowlist: "displayPath\0name" → entry (context-scoped)
-    const allowlistByHit = new Map(RETIRED_ALLOWLIST.map(e => [`${e.path}\0${e.name}`, e]))
 
     const violations: string[] = []
 
@@ -1062,28 +1236,7 @@ describe('GAP-5: no retired agent names in any shipped artifact (fail-loud when 
           if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue
           throw err
         }
-        for (const retiredName of RETIRED_AGENT_FORM_B) {
-          // MAXIMAL RECALL: case-insensitive, NO trailing boundary.
-          // Catches Coders, Coder's, coderPath, ANSI-embedded 31mcoder.
-          const re = new RegExp(retiredName, 'i')
-          if (re.test(content)) {
-            const entry = allowlistByHit.get(`${displayPath}\0${retiredName}`)
-            if (entry) {
-              // Context-scoped: strip every allowlisted context, then re-test.
-              // A residual hit is a NEW reference the entry does not cover.
-              let residual = content
-              for (const ctx of entry.contexts) residual = residual.split(ctx).join('')
-              if (!re.test(residual)) continue
-              violations.push(
-                `  ${displayPath}: references retired name '${retiredName}' outside its allowlisted contexts`,
-              )
-              continue
-            }
-            violations.push(
-              `  ${displayPath}: references retired name '${retiredName}'`,
-            )
-          }
-        }
+        violations.push(...collectRetiredNameViolations(displayPath, content))
       }
     }
 
@@ -1099,6 +1252,63 @@ describe('GAP-5: no retired agent names in any shipped artifact (fail-loud when 
     scan(collectScriptFiles(SCRIPTS_DIR), SCRIPTS_DIR, 'src/assets/scripts/')
 
     expect(violations, `Retired agent names found in shipped artifacts:\n${violations.join('\n')}`).toHaveLength(0)
+  })
+
+  it('every retired form has samples, and each of its patterns is exercised by one', () => {
+    // A pattern no sample reaches could break unnoticed: the probe below would never feed it.
+    expect(RETIRED_AGENT_FORM_B.length, 'no retired forms').toBeGreaterThan(0)
+    const unexercised: string[] = []
+    for (const form of RETIRED_AGENT_FORM_B) {
+      for (const re of form.patterns) {
+        if (!form.bad.some(sample => re.test(sample))) unexercised.push(`${form.name}: ${re}`)
+      }
+    }
+    expect(unexercised, `Patterns with no known-bad sample:\n${unexercised.join('\n')}`).toEqual([])
+  })
+
+  it('known-bad probe: the collector flags every spelling of every retired agent name', () => {
+    // Loops the whole set (not one member) and calls the collector the sweep calls, with no allowlist.
+    const missed: string[] = []
+    for (const form of RETIRED_AGENT_FORM_B) {
+      for (const sample of form.bad) {
+        const found = collectRetiredNameViolations('probe.md', sample, RETIRED_AGENT_FORM_B, [])
+        if (!found.some(v => v.includes(`retired name '${form.name}'`))) missed.push(`${form.name}: ${JSON.stringify(sample)}`)
+      }
+    }
+    expect(missed, `Retired spellings the collector did not flag:\n${missed.join('\n')}`).toEqual([])
+  })
+
+  it('known-bad probe: ordinary words and the learning feature are not retired agent names', () => {
+    const benign = [
+      '---\nfeature: learning-capture-system\nname: Learning capture system\n---',
+      '---\nname: Learning store, ops and rendering\n---',
+      '---\nname: Learning-aware Install & Language-focus Stamp\n---',
+      '# Learning-aware Install & Language-focus Stamp',
+      'Learning is on when `features.learning` is not false.',
+      'The learning agent tuning config lives in learning.json.',
+      'A message that does not help diagnose the problem; tests misdiagnosed as defects.',
+      'Failures that are hard-to-diagnose, so scrutinize the diff.',
+      'Run it to simplify and improve code. Rename, simplify, apply DRY. Fix, simplify first.',
+    ]
+    const wrongly = benign.filter(text => collectRetiredNameViolations('probe.md', text, RETIRED_AGENT_FORM_B, []).length > 0)
+    expect(wrongly, `Plain English or feature prose flagged as a retired agent name:\n${wrongly.join('\n---\n')}`).toEqual([])
+  })
+
+  it('known-bad probe: an allowlist entry waives only its own contexts', () => {
+    const entry: AllowlistEntry = {
+      path: 'probe.md',
+      name: 'Simplify',
+      reason: 'probe',
+      contexts: ['Simplify the interface first'],
+    }
+    const covered = collectRetiredNameViolations('probe.md', 'Simplify the interface first.', RETIRED_AGENT_FORM_B, [entry])
+    expect(covered).toEqual([])
+    const stray = collectRetiredNameViolations(
+      'probe.md', 'Simplify the interface first. Then spawn the Simplify agent.', RETIRED_AGENT_FORM_B, [entry],
+    )
+    expect(stray).toEqual(["  probe.md: references retired name 'Simplify' outside its allowlisted contexts"])
+    const otherFile = collectRetiredNameViolations('other.md', 'Simplify the interface first.', RETIRED_AGENT_FORM_B, [entry])
+    expect(otherFile).toEqual(["  other.md: references retired name 'Simplify'"])
   })
 
   it('RETIRED_ALLOWLIST is bidirectional — every entry matches at least one live corpus hit', () => {
@@ -1168,9 +1378,9 @@ describe('GAP-5: no retired agent names in any shipped artifact (fail-loud when 
 
     const staleEntries: string[] = []
     for (const entry of RETIRED_ALLOWLIST) {
-      const re = new RegExp(entry.name, 'i')
+      const form = RETIRED_AGENT_FORM_B.find(f => f.name === entry.name)
       const file = corpus.find(({ displayPath }) => displayPath === entry.path)
-      if (!file || !re.test(file.content)) {
+      if (!form || !file || !hasRetiredHit(form, file.content)) {
         staleEntries.push(
           `  { path: '${entry.path}', name: '${entry.name}' } — no hit in corpus; stale entry must be removed`,
         )
@@ -1197,7 +1407,9 @@ describe('GAP-5: no retired agent names in any shipped artifact (fail-loud when 
 // ---------------------------------------------------------------------------
 
 /**
- * The action-verb rename map exactly as it must ship.
+ * The rename map exactly as it must ship: the 2.0.0 action-verb rename, the 1.x names
+ * retargeted to their final slug, and the rename of six agents (code-fix, code-edit, scrutinize,
+ * simplify, diagnose, learning).
  *
  * WHY THIS IS PINNED HERE AND NOT IN agent-models.test.ts: the
  * `canonicaliseAgentKeys` suite in that file deletes every key from the
@@ -1211,19 +1423,28 @@ describe('GAP-5: no retired agent names in any shipped artifact (fail-loud when 
  * These guards read the map as shipped and never mutate it.
  */
 const EXPECTED_LEGACY_AGENT_KEYS: Readonly<Record<string, string>> = Object.freeze({
+  // 1.x names, single hop to the final slug
+  'scrutinizer': 'harden',
+  'simplifier': 'polish',
+  'bug-analyzer': 'debug',
+  // 2.0.0 action-verb rename
   'coder': 'code',
   'designer': 'design',
   'evaluator': 'evaluate',
   'researcher': 'research',
   'reviewer': 'review',
-  'scrutinizer': 'scrutinize',
-  'simplifier': 'simplify',
   'skimmer': 'skim',
   'synthesizer': 'synthesize',
   'tester': 'test',
   'triager': 'triage',
   'validator': 'validate',
-  'bug-analyzer': 'diagnose',
+  // rename of six agents
+  'code-fix': 'fix',
+  'code-edit': 'refactor',
+  'scrutinize': 'harden',
+  'simplify': 'polish',
+  'diagnose': 'debug',
+  'learning': 'curate',
 })
 
 describe('GAP-6: shipped LEGACY_AGENT_KEYS integrity', () => {
@@ -1233,7 +1454,7 @@ describe('GAP-6: shipped LEGACY_AGENT_KEYS integrity', () => {
     expect(Object.keys(LEGACY_AGENT_KEYS).length).toBeGreaterThan(0)
   })
 
-  it('pins the exact 13 old→new pairs', () => {
+  it('pins the exact 19 old→new pairs', () => {
     // Sorted plain-object comparison: catches additions, removals, and retargets.
     const actual = Object.fromEntries(
       Object.keys(LEGACY_AGENT_KEYS).sort().map(k => [k, LEGACY_AGENT_KEYS[k]]),
@@ -1242,7 +1463,7 @@ describe('GAP-6: shipped LEGACY_AGENT_KEYS integrity', () => {
       Object.keys(EXPECTED_LEGACY_AGENT_KEYS).sort().map(k => [k, EXPECTED_LEGACY_AGENT_KEYS[k]]),
     )
     expect(actual).toEqual(expected)
-    expect(Object.keys(LEGACY_AGENT_KEYS)).toHaveLength(13)
+    expect(Object.keys(LEGACY_AGENT_KEYS)).toHaveLength(19)
   })
 
   it('no legacy key collides with a live registry agent', () => {
@@ -1283,7 +1504,7 @@ describe('GAP-6: shipped LEGACY_AGENT_KEYS integrity', () => {
 
   it('applies the real shipped map end-to-end (non-synthetic)', () => {
     // The only test in the suite that runs canonicaliseAgentKeys against the
-    // genuine 13 mappings rather than an injected 'old-coder' → 'coder' stub.
+    // genuine 19 mappings rather than an injected 'old-coder' → 'coder' stub.
     const input = Object.fromEntries(
       Object.keys(EXPECTED_LEGACY_AGENT_KEYS).map(k => [k, { model: 'opus' }]),
     )
@@ -1294,7 +1515,9 @@ describe('GAP-6: shipped LEGACY_AGENT_KEYS integrity', () => {
       expect(Object.hasOwn(agents, newKey), `'${newKey}' should exist after migration`).toBe(true)
       expect(agents[newKey]).toEqual({ model: 'opus' })
     }
-    expect(Object.keys(agents)).toHaveLength(13)
+    // 19 old keys land on 16 slugs: scrutinizer/scrutinize, simplifier/simplify and
+    // bug-analyzer/diagnose each meet at one.
+    expect(Object.keys(agents)).toHaveLength(16)
   })
 })
 

@@ -13,7 +13,7 @@ directories:
   - tests/build-mds-generator-hosts.test.ts
   - tests/guards/dist-agents.test.ts
 created: 2026-10-10
-updated: 2026-10-12
+updated: 2026-10-13
 ---
 
 # MDS Build Pipeline
@@ -30,7 +30,7 @@ updated: 2026-10-12
 - **KB-INV-8** Every walk and sweep is bounded (`MAX_WALK_DEPTH`, `MAX_REFERENCE_SWEEP_DEPTH`). The build throws on a breach rather than truncating; the installer's sweep reports into `failed` instead.
 - **KB-INV-9** Dist-first resolution has one owner: `agentSourceDirs()` and `commandSourceDirs(learning)` in `src/core/assets.ts`, spelled most-preferred first. Consumers take the list as-is and never re-spell it (`tests/guards/agent-source-precedence.test.ts`).
 - **KB-INV-10** No test writes the real `dist/`: every spawned build is scoped by `DEVFLOW_MDS_ROOT`, proved by `collectSpawnScoping`; whole-corpus assertions share one memoised `buildCommittedTree()` spawn. `cwd:` is not a scope.
-- **KB-INV-11** The three Code agent hosts (`code`, `code-fix`, `code-edit`) are the only agent hosts that import, each by exactly the one line `@import "./_partials/_code.mds" as code`, and that partial declares no `output-dir:`, so the build skips it and it reaches `dist/agents/` only through those hosts. `@define` stays forbidden in every agent host.
+- **KB-INV-11** The three Code agent hosts (`code`, `fix`, `refactor`) are the only agent hosts that import, each by exactly the one line `@import "./_partials/_code.mds" as code`, and that partial declares no `output-dir:`, so the build skips it and it reaches `dist/agents/` only through those hosts. `@define` stays forbidden in every agent host.
 - **KB-AP-1** Only `{{…}}` interpolates in MDS. Single-brace `{x}` ships as literal text and `\{x\}` ships its backslashes; both compile with no error or warning, so only the lost-expansion and backslash-leak guards catch them.
 - **KB-AP-2** Learning arms are whole-line markers that never nest; a mid-line, mis-cased or unbalanced marker fails the build. A blank line a paragraph needs goes INSIDE the arm that owns it, and a native conditional stays banned in the agent-host corpus until the planned migration.
 - **KB-AP-3** A blank line between a command host's `@import` block and its body reaches the output: the body starts on the next line.
@@ -53,7 +53,7 @@ This KB owns the pipeline: discovery (including the deferred/gated census bucket
 The roster lives in `tests/fixtures/mds-manifest.ts` as named sets, not counts. It is the single source every count-literal test compares against in both directions, and the build's printed counts are asserted against it; floors only rise.
 
 - **Command hosts** `MDS_COMMAND_HOSTS` = the knowledge-workflow hosts (`KNOWLEDGE_COMMAND_HOSTS`), the dynamic hosts and `release`. Every command is a compiled host; none is a static `.md`, and `DIST_COMMAND_FILES` names the same set.
-- **Generator hosts** `MDS_GENERATOR_HOSTS`: `git`, then the agents that take `DECISIONS_CONTEXT` (plus Skim's `LEARNING` input) so their learning arms can build into the off variant: code, code-edit, code-fix, design, diagnose, knowledge, research, review, scrutinize, skim, triage. Code is three hosts (`code.mds`, `code-fix.mds`, `code-edit.mds`) that share the agent partial `src/assets/agents/_partials/_code.mds` by alias; each keeps its own mode sections and preload, and each has a learning-off variant. Hand-authored agents (`evaluate`, `explore`, `learning`, `simplify`, `synthesize`, `test`, `tracker`, `validate`) stay `.md`.
+- **Generator hosts** `MDS_GENERATOR_HOSTS`: `git`, then the agents that take `DECISIONS_CONTEXT` (plus Skim's `LEARNING` input) so their learning arms can build into the off variant: code, debug, design, fix, harden, knowledge, refactor, research, review, skim, triage. Code is three hosts (`code.mds`, `fix.mds`, `refactor.mds`) that share the agent partial `src/assets/agents/_partials/_code.mds` by alias; each keeps its own mode sections and preload, and each has a learning-off variant. Hand-authored agents (`curate`, `evaluate`, `explore`, `polish`, `synthesize`, `test`, `tracker`, `validate`) stay `.md`.
 - **Reference-module sources** `MDS_REFERENCE_MODULES` (see the reference-modules KB).
 - **Partials** declare no `output-dir:` and are skipped: `MDS_PARTIALS` under the commands' `_partials/`, plus `MDS_REFERENCE_PARTIALS` outside it, addressed by repo-relative path: the tracker partials `_common.mds` and `_steps.mds`, the git operation partials `_ops.mds`, `_ops_pr.mds` and `_ops_steps.mds`, and the agent partial `src/assets/agents/_partials/_code.mds`; `ALL_MDS_PARTIALS` is the union the build prints. The tracker provider modules import the git operation partials across directories (`../git/_ops.mds`), which the MDS resolver allows only inside its project root, so `src/assets/mds/.mdsroot` pins that root to `src/assets/mds/` in a checkout, a tarball and a copied test tree alike. `ALL_MDS_HOSTS` is filenames only (reference modules excluded by construction); `ALL_DISCOVERED_HOSTS` is everything `output-dir:` finds, gated or not. `LEARNING_VARIANT_HOSTS` / `LEARNING_OFF_FILES` name the hosts with an arm; `SETTINGS_BLOCK_HOSTS` and `SETTINGS_BLOCK_HOSTS_LEARNING_OFF` name those carrying the settings block, and those that keep it with learning off.
 

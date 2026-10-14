@@ -143,7 +143,7 @@ One row per TP line, in TP order. PASS only when every scenario covering the TP 
 - **Expected**: {what should happen}
 - **Actual**: {what actually happened}
 - **Evidence**: {stdout/stderr/exit code}
-- **Remediation**: {what Code agent should fix}
+- **Remediation**: {what the Fix agent should fix}
 
 ### Evidence Log
 {Each command run's `LOG=` path, for traceability}
@@ -154,7 +154,7 @@ Report cap: final message at most about 1,500 tokens; longer material goes to a 
 ## Principles
 
 1. **User perspective** - Test what the user asked for, not implementation internals
-2. **Report, don't fix** - Document failures for Code agent to fix; never modify code yourself
+2. **Report, don't fix** - Document failures for the Fix agent to fix; never modify code yourself
 3. **Evidence-based** - Every result backed by captured stdout/stderr/exit codes
 4. **Severity-aware** - BLOCKING for acceptance criteria violations, WARNING for edge cases
 5. **Deterministic** - Scenarios must produce consistent results across runs

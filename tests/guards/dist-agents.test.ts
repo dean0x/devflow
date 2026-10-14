@@ -426,15 +426,15 @@ function collectForbiddenConstructs(
  * template.
  *
  * D-CODE-VARIANTS narrows `@import` once more, for three named hosts and one line: the Code
- * variants share their text through `_partials/_code.mds`, so each of `code`, `code-fix` and
- * `code-edit` carries exactly `CODE_PARTIAL_IMPORT` and nothing else. Every other host, and any
+ * variants share their text through `_partials/_code.mds`, so each of `code`, `fix` and
+ * `refactor` carries exactly `CODE_PARTIAL_IMPORT` and nothing else. Every other host, and any
  * other directive in those three, stays forbidden. `@define` stays forbidden in every host: the
  * defines live in the partial.
  */
 const LEGALISED_IN_PHASE2: readonly string[] = ['expandVariants(', '(module, op)']
 
 /** D-CODE-VARIANTS: the only agent hosts that import a partial, and the one line each carries. */
-const CODE_VARIANT_HOSTS: readonly string[] = ['code', 'code-fix', 'code-edit']
+const CODE_VARIANT_HOSTS: readonly string[] = ['code', 'fix', 'refactor']
 const CODE_PARTIAL_IMPORT = '@import "./_partials/_code.mds" as code'
 
 /** The content the fence scans: a Code variant host loses its one permitted import line, no other line. */
@@ -508,8 +508,8 @@ describe('AC-1.2 (Phase-2 scope fence): no conditionals or provider-templated fi
       .toEqual(["code.mds: contains '@import'"])
     expect(collectForbiddenConstructs([{ name: 'git.mds', content: scannedContent('git', `${CODE_PARTIAL_IMPORT}\n`) }], FORBIDDEN_CONSTRUCTS))
       .toEqual(["git.mds: contains '@import'"])
-    expect(collectForbiddenConstructs([{ name: 'code-fix.mds', content: scannedContent('code-fix', '@define tail():\n') }], FORBIDDEN_CONSTRUCTS))
-      .toEqual(["code-fix.mds: contains '@define'"])
+    expect(collectForbiddenConstructs([{ name: 'fix.mds', content: scannedContent('fix', '@define tail():\n') }], FORBIDDEN_CONSTRUCTS))
+      .toEqual(["fix.mds: contains '@define'"])
   })
 
   it('known-bad probe: each forbidden construct is detected by the same collector', () => {

@@ -48,8 +48,8 @@ Use this template when generating your self-review report.
 
 | Pillar | Status | Notes |
 |--------|--------|-------|
-| Naming | SKIP | Simplify agent |
-| Consistency | SKIP | Simplify agent |
+| Naming | SKIP | Polish agent |
+| Consistency | SKIP | Polish agent |
 | Documentation | PASS/FIXED | {details if fixed} |
 
 **Fixes Applied** (if any):
@@ -109,8 +109,8 @@ Add user profile update endpoint
 
 | Pillar | Status | Notes |
 |--------|--------|-------|
-| Naming | SKIP | Simplify agent |
-| Consistency | SKIP | Simplify agent |
+| Naming | SKIP | Polish agent |
+| Consistency | SKIP | Polish agent |
 | Documentation | PASS | JSDoc on public methods |
 
 ---
@@ -169,8 +169,8 @@ Implement order cancellation flow
 
 | Pillar | Status | Notes |
 |--------|--------|-------|
-| Naming | SKIP | Simplify agent |
-| Consistency | SKIP | Simplify agent |
+| Naming | SKIP | Polish agent |
+| Consistency | SKIP | Polish agent |
 | Documentation | FIXED | Added JSDoc explaining cancellation rules |
 
 **Fixes Applied**:
@@ -237,7 +237,7 @@ before implementing refund feature.
 |--------|--------|------------------------|
 | PASS | No issues found for this pillar | No change was needed |
 | FIXED | Issue found and resolved | Fixes were committed and every P0 and P1 is fixed |
-| SKIP | Naming and Consistency only - owned by the Simplify agent | - |
+| SKIP | Naming and Consistency only - owned by the Polish agent | - |
 | BLOCKED | Cannot fix - requires escalation | A P0 cannot be fixed in scope |
 
 ---

@@ -5,7 +5,7 @@ description: "Use when working on the proxy lifecycle (enable, disable, status, 
 category: architecture
 directories: [src/core/proxy-state.ts, src/core/codex-auth-inspect.ts, src/cli/commands/proxy.ts]
 created: 2026-07-24
-updated: 2026-10-10
+updated: 2026-10-13
 ---
 
 # External Model Routing & Per-Agent Model Config

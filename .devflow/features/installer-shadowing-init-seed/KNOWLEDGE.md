@@ -5,7 +5,7 @@ description: "Use when changing init seeding (resolveInitSeed, resolveSeed*, --r
 category: architecture
 directories: [src/cli/commands/init.ts, src/cli/commands/init-seed.ts, src/core/manifest.ts, src/core/feature-config.ts, src/core/migrations.ts, src/cli/commands/proxy.ts]
 created: 2026-10-10
-updated: 2026-10-11
+updated: 2026-10-13
 ---
 
 # Init Seeding, Manifest & Managed Config
@@ -89,11 +89,11 @@ When `proxyEnabled` is true entering the install apply pass, `runProxyPreflight`
 
 ## Migrations (`src/core/migrations.ts`)
 
-The `MIGRATIONS` registry (typed `readonly AnyMigration[]`) has two global entries: `canonicalise-agent-keys-v1`, which renames legacy keys in `~/.devflow/agent-models.json` to their canonical names, and `tracker-conventions-per-provider-v1`, which moves a legacy `~/.devflow/tracker.md` to `~/.devflow/tracker/{provider}.md` by its frontmatter provider through `migrateLegacyTrackerConventions` (`src/core/tracker.ts`; `fs.rename`, so a symlink moves itself; never overwrites; a file with no registry provider stays in place with one warning; the legacy single counter is removed). Its I/O failure THROWS, so the runner does not mark it applied and retries it on the next init.
+The `MIGRATIONS` registry (typed `readonly AnyMigration[]`) has these global entries: `canonicalise-agent-keys-v1`, which renames legacy keys in `~/.devflow/agent-models.json` to their canonical names, `canonicalise-agent-keys-v2`, which runs the same body (`canonicaliseAgentKeysRun`) under an id of its own so a machine that already recorded v1 still has the keys of the six agents renamed to state their job rewritten, and `tracker-conventions-per-provider-v1`, which moves a legacy `~/.devflow/tracker.md` to `~/.devflow/tracker/{provider}.md` by its frontmatter provider through `migrateLegacyTrackerConventions` (`src/core/tracker.ts`; `fs.rename`, so a symlink moves itself; never overwrites; a file with no registry provider stays in place with one warning; the legacy single counter is removed). Its I/O failure THROWS, so the runner does not mark it applied and retries it on the next init.
 - **`AnyMigration`** is the discriminated union `Migration<'global'> | Migration<'per-project'>`, so TypeScript narrows `run()` by `scope` and no `as Migration<'global'>` cast is needed.
 - **`canonicaliseAgentKeys`** returns `{ agents, didMutate, renamed, dropped, guardDropped }`: which keys were renamed, dropped (canonical key already present, old value discarded) and guard-dropped (prototype-pollution guard). `run()` is one linear flow: parse → canonicalise → write → report.
 - **Shared envelope parser:** `parseAgentMappingEnvelope(filePath)` from `agent-models.ts` (I/O, BOM-strip, JSON parse, shape validation) serves both `readAgentMapping` (in-memory canonicalisation) and the migration (disk rewrite).
-- **Failure modes:** `runGlobalMigration` marks a migration applied for ANY non-throwing return. `canonicalise-agent-keys-v1` catches all I/O failures and returns them as `warnings`, so a failed write is silently marked applied and never retried. Net impact is low: `readAgentMapping` canonicalises on EVERY read, so the disk file self-heals on the next write. The reverse hazard is known too: the runner retries a THROWING migration on every `devflow init` forever, with no cap or backoff, which is bounded for the tracker entry by what can fail (a rename and an rm inside `~/.devflow`). A future fix should make genuine I/O failure (as distinct from "malformed file, skip it") throw. `migrations.json` is removed by `removeDevFlowInstallArtifacts`, so migrations re-run cleanly on reinstall.
+- **Failure modes:** `runGlobalMigration` marks a migration applied for ANY non-throwing return. `canonicalise-agent-keys-v1` and `-v2` (one shared body) catch all I/O failures and return them as `warnings`, so a failed write is silently marked applied and never retried. Net impact is low: `readAgentMapping` canonicalises on EVERY read, so the disk file self-heals on the next write. The reverse hazard is known too: the runner retries a THROWING migration on every `devflow init` forever, with no cap or backoff, which is bounded for the tracker entry by what can fail (a rename and an rm inside `~/.devflow`). A future fix should make genuine I/O failure (as distinct from "malformed file, skip it") throw. `migrations.json` is removed by `removeDevFlowInstallArtifacts`, so migrations re-run cleanly on reinstall.
 
 ## Anti-Patterns
 
@@ -106,7 +106,7 @@ The `MIGRATIONS` registry (typed `readonly AnyMigration[]`) has two global entri
 
 ## Gotchas
 
-- **KB-INV-8** `canonicalise-agent-keys-v1`'s failure mode is silent (see Migrations); `readAgentMapping`'s in-memory canonicalisation is the safety net.
+- **KB-INV-8** The failure mode of `canonicalise-agent-keys-v1` and `-v2` (one shared body) is silent (see Migrations); `readAgentMapping`'s in-memory canonicalisation is the safety net.
 - **KB-INV-2** `knownPlugins` is top-level; the `knownFlags` array no longer exists in `ManifestData`.
 - **KB-AP-6** `resolveSeedFeatures` takes only a `ManifestData | null`; seeding any `FeatureSeed` key from `readConfigIfPresent` is the regression that let one repo's `--no-learning` look successful while the manifest kept the old value.
 - **`resolveExistingViewMode` returns `undefined` for `'default'`:** the literal is treated as "no opinion" so the `??` chain falls through.

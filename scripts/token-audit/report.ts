@@ -3,6 +3,7 @@
  * sessions in, an `AuditReport` out. `renderMarkdown` and `renderJson` turn it into text.
  */
 
+import { LEGACY_AGENT_KEYS } from '../../src/core/agent-models.js';
 import { BASH_CLASSES, DECISIONS_SHAPES } from './parse.js';
 import type { AuditRequest, BashClass, CommandMention, DecisionsShape, ParsedSignals, SkillCall } from './parse.js';
 import { segmentAt } from './segment.js';
@@ -24,6 +25,20 @@ import type { AuditError, CapNotice, Limits, Result, SkipCounts, TimeWindow } fr
 // The window and its test live in types.ts so the parser applies the same one (D-AUDIT-WINDOW).
 export { inWindow };
 export type { TimeWindow };
+
+/**
+ * A transcript names a spawn as the agent was spelled the day it ran and the audit never rewrites
+ * history, so the type is canonicalised on the way in: a spawn of the agent that was Code-fix then
+ * is a Fix spawn now, and a window that spans a rename reads as one row. The slug is looked up
+ * through LEGACY_AGENT_KEYS, which keeps the old names that have a new one; any other type
+ * (Code, general-purpose, unknown) is returned as it came.
+ */
+export function canonicalAgentType(agentType: string): string {
+  const slug = agentType.toLowerCase();
+  if (!Object.hasOwn(LEGACY_AGENT_KEYS, slug)) return agentType;
+  const canonical = LEGACY_AGENT_KEYS[slug] as string;
+  return canonical.charAt(0).toUpperCase() + canonical.slice(1);
+}
 
 // ── Input ────────────────────────────────────────────────────────────────────
 
@@ -337,8 +352,8 @@ export interface WorkflowDistributionRow {
   /** Main plus subagent ce per run. */
   readonly ce: DistStat;
   readonly byType: readonly TypeDistRow[];
-  /** Code-fix spawns per run, by the OPERATION of the spawn prompt. */
-  readonly codeFixByOperation: readonly OperationDistRow[];
+  /** Fix spawns per run, by the OPERATION of the spawn prompt. */
+  readonly fixByOperation: readonly OperationDistRow[];
   /** `/implement` only: runs with and without a plan document. */
   readonly byPlan: readonly PlanDistRow[];
 }
@@ -593,8 +608,8 @@ interface RunAcc {
   readonly workflow: string;
   /** True for an `/implement` run started with a plan document (D-AUDIT-RUN-DIST). */
   readonly planDocument: boolean;
-  /** Code-fix spawns of the run by the OPERATION of their prompt. */
-  readonly codeFix: Map<string, number>;
+  /** Fix spawns of the run by the OPERATION of their prompt. */
+  readonly fix: Map<string, number>;
   spawns: number;
   mainTurns: number;
   mainCe: number;
@@ -875,13 +890,13 @@ function filesWrittenReport(records: readonly SpawnRecord[]): FilesWrittenReport
 }
 
 const IMPLEMENT_RUN = 'devflow:implement';
-const CODE_FIX_AGENT = 'Code-fix';
+const FIX_AGENT = 'Fix';
 const UNKNOWN_OPERATION = 'unknown';
 const PLAN_DOCUMENT_RE = /^\S+\.md$/i;
 
 /**
  * D-AUDIT-RUN-DIST: the spread of spawns and ce per workflow run. A run is a segment with main turns
- * or spawns; its ce is main plus subagent. Per agent type (and per Code-fix OPERATION) the figures
+ * or spawns; its ce is main plus subagent. Per agent type (and per Fix OPERATION) the figures
  * run over every run of the workflow, so a run that never spawned the type counts as 0: the median
  * of a rarely used type is then 0, not the median of the runs that used it. The plan flag is read
  * from the run's start: an `/implement` whose argument is a single path ending in `.md` was given a
@@ -899,7 +914,7 @@ function distributionRows(runs: readonly RunAcc[]): WorkflowDistributionRow[] {
   return [...groupBy(runs, run => run.workflow).entries()]
     .map(([workflow, list]): WorkflowDistributionRow => {
       const types = new Set(list.flatMap(run => [...run.types.keys()]));
-      const operations = new Set(list.flatMap(run => [...run.codeFix.keys()]));
+      const operations = new Set(list.flatMap(run => [...run.fix.keys()]));
       const byType = [...types]
         .map((agentType): TypeDistRow => {
           const spawns = list.map(run => run.types.get(agentType)?.spawns ?? 0);
@@ -912,9 +927,9 @@ function distributionRows(runs: readonly RunAcc[]): WorkflowDistributionRow[] {
           };
         })
         .sort((a, b) => b.totalSpawns - a.totalSpawns || (a.agentType < b.agentType ? -1 : 1));
-      const codeFixByOperation = [...operations]
+      const fixByOperation = [...operations]
         .map((operation): OperationDistRow => {
-          const spawns = list.map(run => run.codeFix.get(operation) ?? 0);
+          const spawns = list.map(run => run.fix.get(operation) ?? 0);
           return { operation, totalSpawns: sum(spawns), runsWithOperation: spawns.filter(n => n > 0).length, spawns: spawnStat(spawns) };
         })
         .sort((a, b) => b.totalSpawns - a.totalSpawns || (a.operation < b.operation ? -1 : 1));
@@ -931,7 +946,7 @@ function distributionRows(runs: readonly RunAcc[]): WorkflowDistributionRow[] {
         spawns: spawnStat(list.map(run => run.spawns)),
         ce: ceStat(list.map(runCe)),
         byType,
-        codeFixByOperation,
+        fixByOperation,
         byPlan,
       };
     })
@@ -1055,7 +1070,7 @@ export function buildReport(input: ReportInput): Result<AuditReport, AuditError>
       session: segment.sessionId,
       workflow: segment.label,
       planDocument: segment.label === IMPLEMENT_RUN && planStarts.has(segment.startOrder),
-      codeFix: new Map(),
+      fix: new Map(),
       spawns: 0,
       mainTurns: 0,
       mainCe: 0,
@@ -1099,7 +1114,8 @@ export function buildReport(input: ReportInput): Result<AuditReport, AuditError>
       }
     }
 
-    for (const agent of session.subagents) {
+    for (const spawned of session.subagents) {
+      const agent: SubagentData = { ...spawned, agentType: canonicalAgentType(spawned.agentType) };
       const requests = agent.requests.filter(r => countWindow(r.timestampMs));
       const first = requests[0];
       if (first === undefined) {
@@ -1123,9 +1139,9 @@ export function buildReport(input: ReportInput): Result<AuditReport, AuditError>
       const run = runFor(agent.segment, planStarts);
       run.spawns += 1;
       run.subCe += agentCe;
-      if (agent.agentType === CODE_FIX_AGENT) {
+      if (agent.agentType === FIX_AGENT) {
         const operation = agent.signals?.operation ?? UNKNOWN_OPERATION;
-        run.codeFix.set(operation, (run.codeFix.get(operation) ?? 0) + 1);
+        run.fix.set(operation, (run.fix.get(operation) ?? 0) + 1);
       }
       const runType = run.types.get(agent.agentType) ?? { spawns: 0, ce: 0 };
       runType.spawns += 1;
@@ -1577,11 +1593,11 @@ function renderDistribution(report: AuditReport, out: string[]): void {
         '',
       );
     }
-    if (row.codeFixByOperation.length > 0) {
+    if (row.fixByOperation.length > 0) {
       out.push(
         table(
-          ['Code-fix operation', 'Spawns', 'Runs with it', 'Spawns per run'],
-          row.codeFixByOperation.map(o => [mdCell(o.operation), int(o.totalSpawns), `${int(o.runsWithOperation)} of ${int(row.runs)}`, distText(o.spawns, int)]),
+          ['Fix operation', 'Spawns', 'Runs with it', 'Spawns per run'],
+          row.fixByOperation.map(o => [mdCell(o.operation), int(o.totalSpawns), `${int(o.runsWithOperation)} of ${int(row.runs)}`, distText(o.spawns, int)]),
         ),
         '',
       );
