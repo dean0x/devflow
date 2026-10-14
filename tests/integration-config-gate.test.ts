@@ -24,29 +24,40 @@ import integrationConfig, {
   isAffirmative,
   integrationExclude,
   LIVE_AMBIENT_TEST,
-  LIVE_CLAUDE_TEST,
+  LIVE_PRELOAD_TEST,
   LIVE_CLAUDE_TESTS,
 } from '../vitest.integration.config.js';
 import { ROOT } from './helpers.js';
 
 /**
- * A glob reduced to what the integration `include` list uses: `**` crossing
- * directories and `*` inside one path segment. Anything else throws, so a richer
- * pattern cannot be read as a match it is not.
+ * A glob reduced to what the integration `include` and `exclude` lists use: `**` crossing
+ * directories (`**\/` before a segment, `**` at the end) and `*` inside one path segment.
+ * Anything else throws, so a richer pattern cannot be read as a match it is not.
  */
 function globToRegExp(glob: string): RegExp {
-  if (/[{}()[\]!?]/.test(glob)) throw new Error(`unsupported glob syntax in include pattern: ${glob}`);
+  if (/[{}()[\]!?]/.test(glob)) throw new Error(`unsupported glob syntax in pattern: ${glob}`);
   const body = glob
-    .split('**/')
-    .map(segment => segment.replace(/[.+^$|\\]/g, '\\$&').replace(/\*/g, '[^/]*'))
-    .join('(?:.*/)?');
+    .replace(/[.+^$|\\]/g, '\\$&')
+    .replace(/\*\*\/|\*\*|\*/g, token => {
+      if (token === '**/') return '(?:.*/)?';
+      return token === '**' ? '.*' : '[^/]*';
+    });
   return new RegExp(`^${body}$`);
 }
 
-/** True when the config's include list covers `file` and the opt-in leaves it out of the exclude list. */
-function isCollected(file: string, optIn: string | undefined, include: readonly string[]): boolean {
-  const included = include.some(pattern => globToRegExp(pattern).test(file));
-  return included && !integrationExclude(optIn).includes(file);
+/**
+ * True when the include list covers `file` and no exclude glob covers it. `exclude` is
+ * matched as globs, as `include` is, so a glob that removes a live file is found. It
+ * defaults to the config's own output for `optIn`.
+ */
+function isCollected(
+  file: string,
+  optIn: string | undefined,
+  include: readonly string[],
+  exclude: readonly string[] = integrationExclude(optIn),
+): boolean {
+  const covers = (pattern: string): boolean => globToRegExp(pattern).test(file);
+  return include.some(covers) && !exclude.some(covers);
 }
 
 const INCLUDE: readonly string[] = integrationConfig.test?.include ?? [];
@@ -69,7 +80,7 @@ describe('DEVFLOW_INTEGRATION_ALL gate (isAffirmative)', () => {
 
 describe('integration exclude list', () => {
   it('names both live-claude files, and both exist', () => {
-    expect([...LIVE_CLAUDE_TESTS].sort()).toEqual([LIVE_AMBIENT_TEST, LIVE_CLAUDE_TEST].sort());
+    expect([...LIVE_CLAUDE_TESTS].sort()).toEqual([LIVE_AMBIENT_TEST, LIVE_PRELOAD_TEST].sort());
     for (const file of LIVE_CLAUDE_TESTS) {
       expect(existsSync(path.join(ROOT, file)), `${file} is on the live list but is not a file`).toBe(true);
     }
@@ -103,6 +114,23 @@ describe('integration exclude list', () => {
         ).toBe(true);
       }
     }
+  });
+
+  it('detects a live file that a glob exclude covers, not only a literal path', () => {
+    // `isCollected` has to read `exclude` the way it reads `include`. A literal-path
+    // comparison would report the file as collected and miss a glob that removes it.
+    const file = LIVE_AMBIENT_TEST;
+    expect(isCollected(file, '1', INCLUDE, [LIVE_AMBIENT_TEST]), 'a literal path covers the file').toBe(false);
+    expect(isCollected(file, '1', INCLUDE, ['tests/integration/ambient-*.test.ts']), 'a * glob covers the file').toBe(false);
+    expect(isCollected(file, '1', INCLUDE, ['**/ambient-activation.test.ts']), 'a **/ glob covers the file').toBe(false);
+    expect(isCollected(file, '1', INCLUDE, ['tests/integration/**']), 'a trailing ** glob covers the file').toBe(false);
+  });
+
+  it('keeps a live file collected when no exclude glob covers it', () => {
+    const file = LIVE_AMBIENT_TEST;
+    expect(isCollected(file, '1', INCLUDE, ['**/node_modules/**', '**/.git/**'])).toBe(true);
+    expect(isCollected(file, '1', INCLUDE, ['tests/integration/preload-*.test.ts'])).toBe(true);
+    expect(isCollected(file, '1', INCLUDE, [])).toBe(true);
   });
 
   it('leaves the other integration files collected in both branches', () => {
@@ -150,6 +178,12 @@ describe('include-list matcher used by the collection arms', () => {
     expect(globToRegExp(PATTERN).test('tests/integration-config-gate.test.ts')).toBe(false);
     expect(globToRegExp(PATTERN).test('tests/integration/helpers.ts')).toBe(false);
     expect(globToRegExp(PATTERN).test('tests/other/x.test.ts')).toBe(false);
+  });
+
+  it('reads a trailing ** as any depth below the directory', () => {
+    expect(globToRegExp('tests/integration/**').test('tests/integration/deep/er/x.test.ts')).toBe(true);
+    expect(globToRegExp('**/node_modules/**').test('a/node_modules/b/c/d.js')).toBe(true);
+    expect(globToRegExp('tests/integration/**').test('tests/other/x.test.ts')).toBe(false);
   });
 
   it('refuses glob syntax it cannot read', () => {

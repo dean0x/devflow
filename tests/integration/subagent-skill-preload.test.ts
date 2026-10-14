@@ -100,8 +100,8 @@ async function spawnAgentAndGetAllPreloads(
  * in subagent transcripts).
  *
  * Every session runs in a temp HOME and a temp git repository, with devflow installed into
- * that HOME by `beforeAll`, the permission mode `dontAsk`, and the Agent tool as the only
- * allowed tool (see `createSpawnContext`). It never touches the developer's own ~/.claude
+ * that HOME by `beforeAll`, the permission mode `dontAsk` (set by `buildPreloadArgs`), and
+ * the Agent tool as the only allowed tool. It never touches the developer's own ~/.claude
  * or this checkout.
  *
  * Requirements:
@@ -112,6 +112,7 @@ async function spawnAgentAndGetAllPreloads(
  *
  * Run: DEVFLOW_INTEGRATION_ALL=1 npx vitest run --config vitest.integration.config.ts \
  *        tests/integration/subagent-skill-preload.test.ts
+ * (not part of `npm test` or a plain `npm run test:integration` — each test is an API call)
  */
 const credential = pickCredential(process.env);
 const skipReason = liveSkipReason(credential, isClaudeAvailable());

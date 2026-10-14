@@ -8,9 +8,9 @@ import { defineConfig, configDefaults } from 'vitest/config';
  * this checkout. Both are out of the default sweep, and only an explicit
  * affirmative brings them back.
  */
-export const LIVE_CLAUDE_TEST = 'tests/integration/subagent-skill-preload.test.ts';
+export const LIVE_PRELOAD_TEST = 'tests/integration/subagent-skill-preload.test.ts';
 export const LIVE_AMBIENT_TEST = 'tests/integration/ambient-activation.test.ts';
-export const LIVE_CLAUDE_TESTS: readonly string[] = [LIVE_CLAUDE_TEST, LIVE_AMBIENT_TEST];
+export const LIVE_CLAUDE_TESTS: readonly string[] = [LIVE_PRELOAD_TEST, LIVE_AMBIENT_TEST];
 
 /** The only spellings of DEVFLOW_INTEGRATION_ALL that opt in. */
 const AFFIRMATIVE = new Set(['1', 'true', 'yes']);

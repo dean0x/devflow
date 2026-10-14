@@ -24,7 +24,7 @@ import { HANDOFF_TEMPLATE, REMINDER_TEMPLATE } from '../fixtures/ambient-templat
  * devflow:implement.
  *
  * The session runs in a temp HOME and a temp git repository, with devflow installed into
- * that HOME by `beforeAll` and the permission mode `dontAsk` (see `createSpawnContext`).
+ * that HOME by `beforeAll` and the permission mode `dontAsk` (set by `buildStreamingArgs`).
  * It never touches the developer's own ~/.claude or this checkout.
  *
  * Requirements:
