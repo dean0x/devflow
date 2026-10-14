@@ -31,7 +31,7 @@ import {
 import type { SubagentFile } from '../scripts/token-audit/discover.js';
 import { parseCliArgs, parseWindow, runAudit, runCli } from '../scripts/token-audit/index.js';
 import type { AuditOptions } from '../scripts/token-audit/index.js';
-import { parseTranscriptFile, parseTranscriptLines } from '../scripts/token-audit/parse.js';
+import { bashWrittenPaths, parseTranscriptFile, parseTranscriptLines } from '../scripts/token-audit/parse.js';
 import type { AuditRequest } from '../scripts/token-audit/parse.js';
 import { buildReport, gapBin, inWindow, renderJson, renderMarkdown } from '../scripts/token-audit/report.js';
 import type { AuditReport, ReportInput, SessionData } from '../scripts/token-audit/report.js';
@@ -1428,6 +1428,148 @@ describe('AC-107 Bash result classes and files written (D-AUDIT-BASH-CLASS)', ()
       turnLine({ id: 'w4', content: [use('e4', 'Edit', { old_string: 'x' })] }), // no path: ignored
     ]);
     expect(parsed.signals.filesWritten).toEqual({ calls: 3, distinct: 2 });
+  });
+
+  it('counts MultiEdit by file_path and NotebookEdit by notebook_path like Edit and Write', async () => {
+    const parsed = await signalsOf([
+      turnLine({ id: 'm1', content: [use('tm1', 'MultiEdit', { file_path: '/w/a.ts', edits: [{ old_string: 'x', new_string: 'y' }] })] }),
+      turnLine({ id: 'm2', content: [use('tm2', 'NotebookEdit', { notebook_path: '/w/n.ipynb', new_source: 'redacted' })] }),
+      turnLine({ id: 'm3', content: [use('tm3', 'Edit', { file_path: '/w/a.ts', old_string: 'y', new_string: 'z' })] }),
+      turnLine({ id: 'm4', content: [use('tm4', 'MultiEdit', { edits: [] })] }), // no path: ignored
+      turnLine({ id: 'm5', content: [use('tm5', 'NotebookEdit', { file_path: '/w/not-a-notebook-key.ipynb' })] }), // wrong key: ignored
+    ]);
+    expect(parsed.signals.filesWritten).toEqual({ calls: 3, distinct: 2 });
+  });
+
+  it('counts the files a Bash command writes, one write per path', async () => {
+    const bash = (n: number, command: string): string =>
+      turnLine({ id: `bw${n}`, content: [use(`tbw${n}`, 'Bash', { command })] });
+    const parsed = await signalsOf([
+      bash(1, 'echo a > /w/out.txt'),
+      bash(2, 'echo b >> /w/out.txt'), // same file again: a second call, still one distinct path
+      bash(3, 'cp /w/a.ts /w/b.ts'),
+      bash(4, 'LOG=$(mktemp); npm run build >"$LOG" 2>&1; tail -n 40 "$LOG"'), // the Running-commands pattern writes nothing
+      bash(5, 'git status'),
+    ]);
+    expect(parsed.signals.filesWritten).toEqual({ calls: 3, distinct: 2 });
+  });
+
+  describe('bashWrittenPaths: what a Bash command writes', () => {
+    it('reads > and >> targets, with or without a space and with an fd prefix', () => {
+      expect(bashWrittenPaths('echo a > out.txt')).toEqual(['out.txt']);
+      expect(bashWrittenPaths('echo a >> out.log')).toEqual(['out.log']);
+      expect(bashWrittenPaths('echo a >out.txt')).toEqual(['out.txt']);
+      expect(bashWrittenPaths('cmd 2> err.log')).toEqual(['err.log']);
+      expect(bashWrittenPaths('cmd 2>> err.log')).toEqual(['err.log']);
+      expect(bashWrittenPaths('cmd &> both.log')).toEqual(['both.log']);
+      expect(bashWrittenPaths('cmd > "dir with space/out.txt"')).toEqual(['dir with space/out.txt']);
+      expect(bashWrittenPaths("cmd > 'quoted.txt'")).toEqual(['quoted.txt']);
+    });
+
+    it('reads every file of one command and of each command in a chain', () => {
+      expect(bashWrittenPaths('a > one.txt && b >> two.txt; c | tee three.txt')).toEqual(['one.txt', 'two.txt', 'three.txt']);
+      expect(bashWrittenPaths('cmd > one.txt 2> two.txt')).toEqual(['one.txt', 'two.txt']);
+    });
+
+    it('reads tee targets, with and without -a', () => {
+      expect(bashWrittenPaths('make | tee build.log')).toEqual(['build.log']);
+      expect(bashWrittenPaths('make | tee -a build.log other.log')).toEqual(['build.log', 'other.log']);
+      expect(bashWrittenPaths('make | sudo tee /etc/x.conf')).toEqual(['/etc/x.conf']);
+    });
+
+    it('reads sed -i targets, but not a plain sed read', () => {
+      expect(bashWrittenPaths("sed -i 's/a/b/' src/x.ts")).toEqual(['src/x.ts']);
+      expect(bashWrittenPaths("sed -i '' 's/a/b/' src/x.ts")).toEqual(['src/x.ts']); // BSD empty backup suffix
+      expect(bashWrittenPaths("sed -i.bak -e 's/a/b/' x.ts y.ts")).toEqual(['x.ts', 'y.ts']);
+      expect(bashWrittenPaths("sed --in-place 's/a/b/' x.ts")).toEqual(['x.ts']);
+      expect(bashWrittenPaths("sed -n '1,5p' x.ts")).toEqual([]);
+      expect(bashWrittenPaths("sed 's/a/b/' x.ts")).toEqual([]);
+    });
+
+    it('reads the file of cat > path <<EOF and drops the heredoc body', () => {
+      const command = ['cat > notes.md <<EOF', 'body text > not-a-file.txt', 'cp a.txt b.txt', 'EOF'].join('\n');
+      expect(bashWrittenPaths(command)).toEqual(['notes.md']);
+      expect(bashWrittenPaths("cat >> log.md <<'EOF'\nline > nope\nEOF")).toEqual(['log.md']);
+      expect(bashWrittenPaths('cat > a.txt <<-EOF\n\tbody > nope\n\tEOF')).toEqual(['a.txt']);
+    });
+
+    it('reads the destination of cp and mv', () => {
+      expect(bashWrittenPaths('cp src/a.ts dst/a.ts')).toEqual(['dst/a.ts']);
+      expect(bashWrittenPaths('mv -f old.txt new.txt')).toEqual(['new.txt']);
+      expect(bashWrittenPaths('cp -r a b')).toEqual(['b']);
+      expect(bashWrittenPaths('cp a.ts b.ts dest/')).toEqual(['dest/a.ts', 'dest/b.ts']);
+      expect(bashWrittenPaths('cp -t dest a.ts b.ts')).toEqual(['dest/a.ts', 'dest/b.ts']);
+      expect(bashWrittenPaths('cp "$SRC" out.txt')).toEqual(['out.txt']);
+      expect(bashWrittenPaths('cp only-one-argument')).toEqual([]);
+    });
+
+    it('reads open(path, "w") and open(path, "a") inside a python heredoc only', () => {
+      const py = ["python3 - <<'PY'", "with open('report.json', 'w') as f:", '    f.write(data)', "open(\"tail.log\", \"a\").write(x)", "open('input.txt').read()", "open('rb.bin', 'rb')", 'PY'].join('\n');
+      expect(bashWrittenPaths(py)).toEqual(['report.json', 'tail.log']);
+      expect(bashWrittenPaths("python3 - <<'PY'\nopen(path, 'w')\nPY")).toEqual([]); // not a literal path
+      // The same text in a heredoc that does not feed python is file content, not a write.
+      expect(bashWrittenPaths("cat > x.py <<'EOF'\nopen('inner.txt', 'w')\nEOF")).toEqual(['x.py']);
+      // A python one-liner is not a heredoc: not scanned.
+      expect(bashWrittenPaths("python3 -c \"open('one.txt','w')\"")).toEqual([]);
+    });
+
+    it('ignores /dev/null, fd redirects and other /dev targets', () => {
+      expect(bashWrittenPaths('cmd > /dev/null')).toEqual([]);
+      expect(bashWrittenPaths('cmd >/dev/null 2>&1')).toEqual([]);
+      expect(bashWrittenPaths('cmd 2>&1')).toEqual([]);
+      expect(bashWrittenPaths('cmd >&2')).toEqual([]);
+      expect(bashWrittenPaths('cmd 1>&2 | tee /dev/stderr')).toEqual([]);
+      expect(bashWrittenPaths('cmd &>/dev/null')).toEqual([]);
+      expect(bashWrittenPaths('cmd 2>/dev/null > real.txt')).toEqual(['real.txt']);
+    });
+
+    it('ignores variable targets and mktemp paths', () => {
+      expect(bashWrittenPaths('LOG=$(mktemp); echo "LOG=$LOG"; npm run build >"$LOG" 2>&1; tail -n 40 "$LOG"; echo "EXIT=$?"')).toEqual([]);
+      expect(bashWrittenPaths('cmd > $OUT')).toEqual([]);
+      expect(bashWrittenPaths('cmd > ${OUT}')).toEqual([]);
+      expect(bashWrittenPaths('cmd > "${OUT}/x.log"')).toEqual([]);
+      expect(bashWrittenPaths('cmd > "$(mktemp)"')).toEqual([]);
+      expect(bashWrittenPaths('tmp=$(mktemp) && cp a.txt "$tmp" && tee "$tmp"')).toEqual([]);
+      expect(bashWrittenPaths('cp a.txt "$DEST"')).toEqual([]);
+    });
+
+    it('does not count a > inside a quoted string or a comment', () => {
+      expect(bashWrittenPaths('git commit -m "fix: a -> b, x > y"')).toEqual([]);
+      expect(bashWrittenPaths("git commit -m 'feat: output > file'")).toEqual([]);
+      expect(bashWrittenPaths('echo "a > b" > real.txt')).toEqual(['real.txt']);
+      expect(bashWrittenPaths("awk '{ print $1 > \"split.txt\" }' in.txt")).toEqual([]);
+      expect(bashWrittenPaths('echo ok # redirect > nowhere.txt')).toEqual([]);
+    });
+
+    it('does not count a > in a commit-message heredoc, even with quotes in the body', () => {
+      const commit = ['git commit -m "$(cat <<\'EOF\'', 'fix(x): a -> b', '', 'Say "hi" > there and don\'t break "', 'EOF', ')"', ''].join('\n');
+      expect(bashWrittenPaths(commit)).toEqual([]);
+      expect(bashWrittenPaths(`${commit} && echo done > after.txt`)).toEqual(['after.txt']);
+    });
+
+    it('treats << as text when no closing line follows, and here-strings as input', () => {
+      expect(bashWrittenPaths('echo "a << b" > out.txt')).toEqual(['out.txt']);
+      expect(bashWrittenPaths('cat <<EOF > out.txt\nno end line here')).toEqual(['out.txt']);
+      expect(bashWrittenPaths('grep x <<< "a > b" > out.txt')).toEqual(['out.txt']);
+    });
+
+    it('returns nothing for commands that write no file', () => {
+      expect(bashWrittenPaths('')).toEqual([]);
+      expect(bashWrittenPaths('git status')).toEqual([]);
+      expect(bashWrittenPaths('ls -la | head -5')).toEqual([]);
+      expect(bashWrittenPaths('grep -n foo src | wc -l')).toEqual([]);
+      expect(bashWrittenPaths('cmd >')).toEqual([]); // no target
+    });
+
+    it('stays bounded on large and hostile input', () => {
+      const many = Array.from({ length: 500 }, (_, i) => `echo x > f${i}.txt`).join('; ');
+      const found = bashWrittenPaths(many);
+      expect(found.length).toBeGreaterThan(0);
+      expect(found.length).toBeLessThanOrEqual(64);
+      expect(bashWrittenPaths(`cat <<EOF\n${'> x\n'.repeat(5000)}`).length).toBeLessThanOrEqual(64);
+      expect(bashWrittenPaths('"'.repeat(20000) + ' > f.txt')).toEqual([]);
+      expect(bashWrittenPaths(`${'<<A '.repeat(2000)}\nA\n`).length).toBe(0);
+    });
   });
 
   it('shares the path-set cap with reads', async () => {
