@@ -6,8 +6,8 @@
  *     Boundaries. Its six mode templates live in `references/synthesize/{mode}.md`, and a spawn reads
  *     exactly one, named by the prompt's `Mode: <mode>` line. No `Mode:` line reads none; an unknown mode
  *     answers `BLOCKED: unknown mode` (AC-402, AC-405).
- *   - Learning keeps claim-due in its body. The maintenance ladder lives in `references/learning/maintain.md`,
- *     read only when claim-due hands out an entry (AC-403, tests/learning-agent.test.ts).
+ *   - Curate keeps claim-due in its body. The maintenance ladder lives in `references/curate/maintain.md`,
+ *     read only when claim-due hands out an entry (AC-403, tests/curate-agent.test.ts).
  *   - Both bodies and the largest mode reference sit under ceilings registered in
  *     tests/fixtures/numeric-floors.json (AC-401): lowered by a pass that cut text, never raised to fit text
  *     that grew back.
@@ -30,8 +30,8 @@ const SYNTHESIZE_BODY_MAX_BYTES = 4_070
 /** The largest single Synthesize mode reference, in bytes. Registered as `synthesize-mode-ref-max`; lowered, never raised. */
 const SYNTHESIZE_MODE_REF_MAX_BYTES = 3_940
 
-/** The Learning agent body, in bytes. Registered as `learning-body-max`; lowered, never raised. */
-const LEARNING_BODY_MAX_BYTES = 16_710
+/** The Curate agent body, in bytes. Registered as `curate-body-max`; lowered, never raised. */
+const CURATE_BODY_MAX_BYTES = 16_710
 
 /** What each mode's reference starts with and the output template it holds. */
 const MODE_TEMPLATES: Readonly<Record<string, { readonly heading: string; readonly template: string }>> = {
@@ -188,9 +188,9 @@ export function collectSizeDefects(label: string, text: string, ceiling: number)
   return bytes > ceiling ? [`${label} is ${bytes} bytes, ceiling ${ceiling}`] : []
 }
 
-describe('the Synthesize and Learning bodies sit under their ceilings, and the moved text lives in the references (AC-401)', () => {
+describe('the Synthesize and Curate bodies sit under their ceilings, and the moved text lives in the references (AC-401)', () => {
   const synthesize = resolveAgentSource('synthesize').content
-  const learning = resolveAgentSource('learning').content
+  const curate = resolveAgentSource('curate').content
   const modeRefs = SYNTHESIZE_MODES.map(mode => [mode, readAgentReference(`${REFERENCE_DIR}/${mode}.md`)] as const)
 
   it('the Synthesize body fits `synthesize-body-max`, and every mode reference fits `synthesize-mode-ref-max`', () => {
@@ -202,12 +202,12 @@ describe('the Synthesize and Learning bodies sit under their ceilings, and the m
     }
   })
 
-  it('the Learning body fits `learning-body-max`, and the maintenance ladder is in maintain.md, not the body', () => {
-    expect(Buffer.byteLength(learning), 'the body is read: the guard would pass vacuously on an empty one').toBeGreaterThan(10_000)
-    expect(collectSizeDefects('learning.md', learning, LEARNING_BODY_MAX_BYTES)).toEqual([])
-    const maintain = readAgentReference('learning/maintain.md')
+  it('the Curate body fits `curate-body-max`, and the maintenance ladder is in maintain.md, not the body', () => {
+    expect(Buffer.byteLength(curate), 'the body is read: the guard would pass vacuously on an empty one').toBeGreaterThan(10_000)
+    expect(collectSizeDefects('curate.md', curate, CURATE_BODY_MAX_BYTES)).toEqual([])
+    const maintain = readAgentReference('curate/maintain.md')
     expect(Buffer.byteLength(maintain), 'maintain.md holds the moved ladder').toBeGreaterThan(3_000)
-    expect(learning).not.toContain('the maintenance ladder')
+    expect(curate).not.toContain('the maintenance ladder')
     expect(maintain).toContain('the maintenance ladder')
   })
 

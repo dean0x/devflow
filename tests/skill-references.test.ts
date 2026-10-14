@@ -273,7 +273,7 @@ describe('Format 2: Agent frontmatter skills', () => {
     const agents = resolveAllAgents();
     expect([...agents.keys()]).toEqual(expect.arrayContaining(getAllAgentNames()));
 
-    // D-PRELOAD-TRIM: an agent whose row in the agent-config table lists no skills (Learning)
+    // D-PRELOAD-TRIM: an agent whose row in the agent-config table lists no skills (Curate)
     // has no `skills:` key by design. The parse check below stays strict for every other agent,
     // and for these it asserts the key is absent rather than malformed.
     const preloadsNone = new Set(Object.entries(AGENT_CONFIG).filter(([, row]) => row.skills?.length === 0).map(([name]) => name));

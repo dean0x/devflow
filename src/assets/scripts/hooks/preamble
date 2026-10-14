@@ -75,7 +75,7 @@ elif [[ "$HEAD" == "/"* ]]; then
   dbg "EXIT: slash command — no reminder"
 else
   dbg "ORCHESTRATOR_REMINDER injected"
-  json_prompt_output "Orchestrator reminder: coordinate, don't produce — delegate edits, builds, multi-file reads, and debug loops to the fitting roster agent (Agent tool) or the matching devflow workflow skill.
+  json_prompt_output "Orchestrator reminder: coordinate, don't produce — delegate edits, builds and multi-file reads to the fitting roster agent (Agent tool) or the matching devflow workflow skill. Send debug work to the devflow:debug skill, never to the Debug agent.
 Keep only judgment work mainline: conversation, decisions, routing, synthesis of agent reports."
 fi
 

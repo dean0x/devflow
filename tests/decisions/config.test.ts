@@ -3,10 +3,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import {
-  loadLearningTuningConfig,
-  applyLearningTuningConfigLayer,
-  type LearningTuningConfig,
-} from '../../src/core/learning-tuning-config.js';
+  loadCurateTuningConfig,
+  applyCurateTuningConfigLayer,
+  type CurateTuningConfig,
+} from '../../src/core/curate-tuning-config.js';
 import { AGENT_CONFIG } from '../fixtures/agent-config.js';
 
 // ---------------------------------------------------------------------------
@@ -27,58 +27,58 @@ function ensureDir(dir: string): void {
 }
 
 // ---------------------------------------------------------------------------
-// applyLearningTuningConfigLayer
+// applyCurateTuningConfigLayer
 // ---------------------------------------------------------------------------
 
-describe('applyLearningTuningConfigLayer', () => {
-  const base: LearningTuningConfig = {
+describe('applyCurateTuningConfigLayer', () => {
+  const base: CurateTuningConfig = {
     model: 'opus',
     debug: false,
   };
 
   it('overrides model string field', () => {
-    const result = applyLearningTuningConfigLayer(base, JSON.stringify({ model: 'haiku' }));
+    const result = applyCurateTuningConfigLayer(base, JSON.stringify({ model: 'haiku' }));
     expect(result.model).toBe('haiku');
   });
 
   it('overrides debug boolean field', () => {
-    const result = applyLearningTuningConfigLayer(base, JSON.stringify({ debug: true }));
+    const result = applyCurateTuningConfigLayer(base, JSON.stringify({ debug: true }));
     expect(result.debug).toBe(true);
   });
 
   it('ignores non-boolean debug', () => {
-    const result = applyLearningTuningConfigLayer(base, JSON.stringify({ debug: 'yes' }));
+    const result = applyCurateTuningConfigLayer(base, JSON.stringify({ debug: 'yes' }));
     expect(result.debug).toBe(false);
   });
 
   it('ignores non-string model', () => {
-    const result = applyLearningTuningConfigLayer(base, JSON.stringify({ model: 42 }));
+    const result = applyCurateTuningConfigLayer(base, JSON.stringify({ model: 42 }));
     expect(result.model).toBe('opus');
   });
 
   it('returns a new object — does not mutate input', () => {
-    const input: LearningTuningConfig = { ...base };
-    const result = applyLearningTuningConfigLayer(input, JSON.stringify({ model: 'sonnet' }));
+    const input: CurateTuningConfig = { ...base };
+    const result = applyCurateTuningConfigLayer(input, JSON.stringify({ model: 'sonnet' }));
     expect(result.model).toBe('sonnet');
     expect(input.model).toBe('opus'); // not mutated
     expect(result).not.toBe(input);
   });
 
   it('returns a copy on invalid JSON without throwing', () => {
-    const result = applyLearningTuningConfigLayer(base, 'not valid json');
+    const result = applyCurateTuningConfigLayer(base, 'not valid json');
     expect(result).toEqual(base);
     expect(result).not.toBe(base); // different reference
   });
 
   it('handles empty JSON object — preserves all defaults', () => {
-    const result = applyLearningTuningConfigLayer(base, '{}');
+    const result = applyCurateTuningConfigLayer(base, '{}');
     expect(result).toEqual(base);
   });
 
   it('ignores dropped legacy fields (max_daily_runs/throttle_minutes) without error', () => {
     // On-disk configs from before the dream-system simplification may still carry
     // these fields — they must load without error and be silently ignored.
-    const result = applyLearningTuningConfigLayer(
+    const result = applyCurateTuningConfigLayer(
       base,
       JSON.stringify({ max_daily_runs: 7, throttle_minutes: 15, model: 'haiku' }),
     );
@@ -89,48 +89,48 @@ describe('applyLearningTuningConfigLayer', () => {
 
   // ISS-11: out-of-domain string model values are rejected — falls back to config.model
   it('ISS-11: rejects out-of-domain model string (falls back to config.model)', () => {
-    const result = applyLearningTuningConfigLayer(base, JSON.stringify({ model: 'gpt-4' }));
+    const result = applyCurateTuningConfigLayer(base, JSON.stringify({ model: 'gpt-4' }));
     expect(result.model).toBe('opus'); // config.model preserved
   });
 
   it('ISS-11: rejects empty string model (falls back to config.model)', () => {
-    const result = applyLearningTuningConfigLayer(base, JSON.stringify({ model: '' }));
+    const result = applyCurateTuningConfigLayer(base, JSON.stringify({ model: '' }));
     expect(result.model).toBe('opus');
   });
 
   // ISS-12: non-object JSON values must fall back to config copy (object-shape guard)
   it('ISS-12: returns config copy when JSON is an array', () => {
-    const result = applyLearningTuningConfigLayer(base, JSON.stringify([{ model: 'haiku' }]));
+    const result = applyCurateTuningConfigLayer(base, JSON.stringify([{ model: 'haiku' }]));
     expect(result).toEqual(base);
     expect(result).not.toBe(base);
   });
 
   it('ISS-12: returns config copy when JSON is null', () => {
-    const result = applyLearningTuningConfigLayer(base, 'null');
+    const result = applyCurateTuningConfigLayer(base, 'null');
     expect(result).toEqual(base);
     expect(result).not.toBe(base);
   });
 
   it('ISS-12: returns config copy when JSON is a number', () => {
-    const result = applyLearningTuningConfigLayer(base, '42');
+    const result = applyCurateTuningConfigLayer(base, '42');
     expect(result).toEqual(base);
     expect(result).not.toBe(base);
   });
 
   it('ISS-12: returns config copy when JSON is a boolean', () => {
-    const result = applyLearningTuningConfigLayer(base, 'true');
+    const result = applyCurateTuningConfigLayer(base, 'true');
     expect(result).toEqual(base);
     expect(result).not.toBe(base);
   });
 });
 
 // ---------------------------------------------------------------------------
-// loadLearningTuningConfig — file-system tests
+// loadCurateTuningConfig — file-system tests
 // ---------------------------------------------------------------------------
 
-describe('loadLearningTuningConfig', () => {
+describe('loadCurateTuningConfig', () => {
   let home: string;
-  /** The machine root under the temp HOME — loadLearningTuningConfig's global layer (D-ONE-HOME). */
+  /** The machine root under the temp HOME — loadCurateTuningConfig's global layer (D-ONE-HOME). */
   let devflowDir: string;
   let projectCwd: string;
   let originalHome: string | undefined;
@@ -156,14 +156,14 @@ describe('loadLearningTuningConfig', () => {
   });
 
   it('returns all defaults when no config files exist', () => {
-    const config = loadLearningTuningConfig(projectCwd);
-    expect(config.model).toBe(AGENT_CONFIG.learning.model);
+    const config = loadCurateTuningConfig(projectCwd);
+    expect(config.model).toBe(AGENT_CONFIG.curate.model);
     expect(config.debug).toBe(false);
   });
 
   it('global config overrides defaults', () => {
     writeJson(devflowDir, 'learning.json', { model: 'haiku' });
-    const config = loadLearningTuningConfig(projectCwd);
+    const config = loadCurateTuningConfig(projectCwd);
     expect(config.model).toBe('haiku');
     expect(config.debug).toBe(false); // default preserved
   });
@@ -176,7 +176,7 @@ describe('loadLearningTuningConfig', () => {
     writeJson(path.join(projectCwd, '.devflow', 'learning'), 'learning.json', {
       model: 'sonnet',
     });
-    const config = loadLearningTuningConfig(projectCwd);
+    const config = loadCurateTuningConfig(projectCwd);
     expect(config.model).toBe('sonnet'); // project wins
     expect(config.debug).toBe(true); // global preserved when project doesn't set
   });
@@ -185,7 +185,7 @@ describe('loadLearningTuningConfig', () => {
     writeJson(path.join(projectCwd, '.devflow', 'learning'), 'learning.json', {
       model: 'sonnet',
     });
-    const config = loadLearningTuningConfig(projectCwd);
+    const config = loadCurateTuningConfig(projectCwd);
     expect(config.model).toBe('sonnet');
     expect(config.debug).toBe(false); // default
   });
@@ -196,8 +196,8 @@ describe('loadLearningTuningConfig', () => {
       'not json',
       'utf-8',
     );
-    const config = loadLearningTuningConfig(projectCwd);
-    expect(config.model).toBe(AGENT_CONFIG.learning.model);
+    const config = loadCurateTuningConfig(projectCwd);
+    expect(config.model).toBe(AGENT_CONFIG.curate.model);
   });
 
   it('invalid JSON in project config falls back to global + defaults', () => {
@@ -207,7 +207,7 @@ describe('loadLearningTuningConfig', () => {
       'bad json',
       'utf-8',
     );
-    const config = loadLearningTuningConfig(projectCwd);
+    const config = loadCurateTuningConfig(projectCwd);
     expect(config.model).toBe('haiku'); // global applied
   });
 
@@ -218,20 +218,20 @@ describe('loadLearningTuningConfig', () => {
     writeJson(path.join(projectCwd, '.devflow', 'learning'), 'learning.json', {
       debug: true,
     });
-    const config = loadLearningTuningConfig(projectCwd);
+    const config = loadCurateTuningConfig(projectCwd);
     expect(config.model).toBe('haiku'); // from global
     expect(config.debug).toBe(true); // from project
   });
 
-  it('D-LEARNING-SHIPPED-ROW: the default model is the shipped Learning model when nothing configures it', () => {
+  it('D-LEARNING-SHIPPED-ROW: the default model is the shipped Curate model when nothing configures it', () => {
     // With no layer configuring a model the spawn directive names none, so the frontmatter
-    // model of the Learning agent decides: the default has to describe that run.
+    // model of the Curate agent decides: the default has to describe that run.
     const shippedFrontmatter = fs.readFileSync(
-      path.resolve(import.meta.dirname, '../../src/assets/agents/learning.md'),
+      path.resolve(import.meta.dirname, '../../src/assets/agents/curate.md'),
       'utf-8',
     );
-    expect(/^model: (.+)$/m.exec(shippedFrontmatter)?.[1]).toBe(AGENT_CONFIG.learning.model);
-    expect(loadLearningTuningConfig(projectCwd).model).toBe(AGENT_CONFIG.learning.model);
+    expect(/^model: (.+)$/m.exec(shippedFrontmatter)?.[1]).toBe(AGENT_CONFIG.curate.model);
+    expect(loadCurateTuningConfig(projectCwd).model).toBe(AGENT_CONFIG.curate.model);
   });
 
   it('on-disk config still containing dropped max_daily_runs/throttle_minutes loads without error', () => {
@@ -240,7 +240,7 @@ describe('loadLearningTuningConfig', () => {
       throttle_minutes: 5,
       model: 'haiku',
     });
-    const config = loadLearningTuningConfig(projectCwd);
+    const config = loadCurateTuningConfig(projectCwd);
     expect(config.model).toBe('haiku');
     expect(Reflect.get(config, 'max_daily_runs')).toBeUndefined();
     expect(Reflect.get(config, 'throttle_minutes')).toBeUndefined();

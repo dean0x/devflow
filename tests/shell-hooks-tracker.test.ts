@@ -1388,7 +1388,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
    * FRAME and the subject list that names what must not be mentioned.
    *
    * Sections 2 and 3 cannot be byte-identical in full: the clause names the agent
-   * and the thing it works on, and a Section-3 clause that said "the Learning
+   * and the thing it works on, and a Section-3 clause that said "the Curate
    * agent" would be a bug this guard had enforced. What must be byte-identical is
    * everything around the subject list — the three sentences that carry the
    * silence contract. So the frame is compared as bytes and the subjects are
@@ -1427,14 +1427,14 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     // The invariant frame really is the full three sentences, not a fragment.
     expect(clauses[0].frame).toBe(`${SILENCE_HEAD}{SUBJECTS}${SILENCE_MID}${SILENCE_TAIL}`);
     // …and the subjects are the part that must differ.
-    expect(clauses[0].subjects).toContain('Learning agent');
+    expect(clauses[0].subjects).toContain('Curate agent');
     expect(clauses[1].subjects).toContain('Tracker agent');
     expect(clauses[0].subjects).not.toBe(clauses[1].subjects);
   });
 
   it('known-bad probe: the same collector reports a reworded clause and a broken one', () => {
     const reworded = [
-      `${SILENCE_HEAD}the Learning agent, or the queue${SILENCE_MID}${SILENCE_TAIL}`,
+      `${SILENCE_HEAD}the Curate agent, or the queue${SILENCE_MID}${SILENCE_TAIL}`,
       `${SILENCE_HEAD}the Tracker agent, or the setup${SILENCE_MID}Do not narrate the spawn.`,
     ].join('\n');
     const seen = collectSilenceClauses(reworded);

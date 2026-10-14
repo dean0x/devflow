@@ -57,7 +57,7 @@ function getLearningPendingTurnsPath(projectRoot) {
   return path.join(projectRoot, '.devflow', 'learning', '.pending-turns.jsonl');
 }
 
-/** .devflow/learning/.pending-turns.processing — the claimed batch a Learning run holds while it processes it */
+/** .devflow/learning/.pending-turns.processing — the claimed batch a Curate run holds while it processes it */
 function getLearningPendingTurnsProcessingPath(projectRoot) {
   return path.join(projectRoot, '.devflow', 'learning', '.pending-turns.processing');
 }
@@ -81,8 +81,8 @@ function getPitfallsFilePath(projectRoot) {
   return path.join(projectRoot, '.devflow', 'learning', 'pitfalls.md');
 }
 
-/** .devflow/learning/learning.json — project-level learning agent tuning config */
-function getLearningTuningConfigPath(projectRoot) {
+/** .devflow/learning/learning.json — project-level curate agent tuning config */
+function getCurateTuningConfigPath(projectRoot) {
   return path.join(projectRoot, '.devflow', 'learning', 'learning.json');
 }
 
@@ -179,7 +179,7 @@ module.exports = {
   // Learning content files
   getDecisionsFilePath,
   getPitfallsFilePath,
-  getLearningTuningConfigPath,
+  getCurateTuningConfigPath,
   getDecisionsLedgerPath,
   getDecisionsLogPath,
   getDecisionsArchivePath,

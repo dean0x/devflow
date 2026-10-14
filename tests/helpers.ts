@@ -373,8 +373,8 @@ export function resolveAllAgents(root: string = ROOT): Map<string, AgentSource> 
 
 /**
  * D-AGENT-REFS: the reference-only skill whose files hold text one agent mode needs and the others do
- * not. Synthesize reads `synthesize/{mode}.md` (D-MODE-BY-PATH) and Learning reads
- * `learning/maintain.md` (D-MAINTAIN-ON-DUE), each by explicit path; nothing preloads the skill.
+ * not. Synthesize reads `synthesize/{mode}.md` (D-MODE-BY-PATH) and Curate reads
+ * `curate/maintain.md` (D-MAINTAIN-ON-DUE), each by explicit path; nothing preloads the skill.
  */
 export const AGENT_REFERENCES_SKILL = 'agent-references'
 
@@ -420,8 +420,8 @@ export function commandReferenceSections(text: string): CommandReferenceSection[
 
 /**
  * D-CODE-VARIANTS: the seven operating modes of the Code family (`OPERATION`), by the agent type that
- * runs each. Code takes `implement` (the default when absent) and `issue-fix`; Code-fix takes the four
- * gate-failure fixes and has no default; Code-edit takes `edit`. One map for the spawn-site guard
+ * runs each. Code takes `implement` (the default when absent) and `issue-fix`; Fix takes the four
+ * gate-failure fixes and has no default; Refactor takes `edit`. One map for the spawn-site guard
  * (tests/guards/code-operation.test.ts), the preload guard (tests/guards/code-preload.test.ts) and the
  * variant-shape guard (tests/guards/code-variants.test.ts), so the three cannot disagree about which
  * variant owns a mode. A key is the agent's `name:` (`capitalizeFirst` of its slug), the string a spawn
@@ -429,8 +429,8 @@ export function commandReferenceSections(text: string): CommandReferenceSection[
  */
 export const CODE_OPERATIONS: Readonly<Record<string, readonly string[]>> = {
   'Code': ['implement', 'issue-fix'],
-  'Code-fix': ['validation-fix', 'alignment-fix', 'qa-fix', 'ci-fix'],
-  'Code-edit': ['edit'],
+  'Fix': ['validation-fix', 'alignment-fix', 'qa-fix', 'ci-fix'],
+  'Refactor': ['edit'],
 }
 
 /** The agent types of the Code family, in the order CODE_OPERATIONS lists them. */
@@ -439,7 +439,7 @@ export const CODE_AGENT_TYPES: readonly string[] = Object.keys(CODE_OPERATIONS)
 /** Every mode the Code family runs, across the three variants. */
 export const CODE_MODES: readonly string[] = Object.values(CODE_OPERATIONS).flat()
 
-/** The slug (`devflow agents` key and file basename) of a Code-family agent type: `Code-fix` is `code-fix`. */
+/** The slug (`devflow agents` key and file basename) of a Code-family agent type: `Fix` is `fix`. */
 export const codeSlugOf = (agentType: string): string => agentType.toLowerCase()
 
 export interface CodeSpawnSite {
@@ -456,7 +456,7 @@ export interface CodeSpawnSite {
  * shared by the compliance-lens test (tests/compliance-prompts.test.ts), the OPERATION guard
  * (tests/guards/code-operation.test.ts) and the decisions seam guard (tests/decisions/decisions-seam.test.ts),
  * so the three cannot disagree about what a spawn is. `agentType` defaults to the whole Code family (Code,
- * Code-fix and Code-edit: D-CODE-VARIANTS), which is what the first two read; the seam guard asks for every
+ * Fix and Refactor: D-CODE-VARIANTS), which is what the first two read; the seam guard asks for every
  * declared type (D-DECISIONS-DECLARED-ONLY). Five shapes, as the
  * command layer writes them: a fenced spawn (`Agent(subagent_type="<T>"):` then a quoted payload up to its
  * closing quote, indented or not; one fence may hold two spawns), a one-line prose spawn (Spawn

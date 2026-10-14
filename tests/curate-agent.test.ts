@@ -9,7 +9,7 @@ import { readAgentReference } from './helpers.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const AGENT_PATH = path.resolve(__dirname, '../src/assets/agents/learning.md');
+const AGENT_PATH = path.resolve(__dirname, '../src/assets/agents/curate.md');
 const ROOT = path.resolve(__dirname, '..');
 const LEARNING_STORE = path.resolve(ROOT, 'src/assets/scripts/hooks/lib/learning-store.cjs');
 
@@ -65,11 +65,11 @@ function inOrder(parts: readonly string[], flags = ''): RegExp {
   return new RegExp(parts.map(part => phrase(part).source).join('[\\s\\S]*'), flags);
 }
 
-describe('learning agent', () => {
+describe('curate agent', () => {
   let content: string;
   let frontmatter: string;
   // D-MAINTAIN-ON-DUE: the ladder, the claim-due output format and the close-out batch live in
-  // learning/maintain.md, which a run reads only after claim-due hands out an entry. `prompt` is
+  // curate/maintain.md, which a run reads only after claim-due hands out an entry. `prompt` is
   // the text a run with a due entry sees, in the order it sees it.
   let maintain: string;
   let prompt: string;
@@ -77,17 +77,17 @@ describe('learning agent', () => {
   beforeAll(async () => {
     content = await fs.readFile(AGENT_PATH, 'utf-8');
     frontmatter = parseFrontmatter(content);
-    maintain = readAgentReference('learning/maintain.md');
+    maintain = readAgentReference('curate/maintain.md');
     prompt = `${content}\n${maintain}`;
   });
 
   describe('frontmatter', () => {
-    // D-LEARNING-SHIPPED-ROW: the model and effort are the Learning row of the agent-config
+    // D-LEARNING-SHIPPED-ROW: the model and effort are the Curate row of the agent-config
     // table, so a change of tier is an edit to that row and to the two frontmatter lines.
-    const row = AGENT_CONFIG.learning;
+    const row = AGENT_CONFIG.curate;
 
-    it('is named Learning and ships the model and effort of its table row', () => {
-      expect(frontmatter).toMatch(/^name: Learning$/m);
+    it('is named Curate and ships the model and effort of its table row', () => {
+      expect(frontmatter).toMatch(/^name: Curate$/m);
       expect(frontmatter).toMatch(new RegExp(`^model: ${row.model}$`, 'm'));
       if (row.effort === null) expect(frontmatter).not.toMatch(/^effort:/m);
       else expect(frontmatter).toMatch(new RegExp(`^effort: ${row.effort}$`, 'm'));
@@ -103,7 +103,7 @@ describe('learning agent', () => {
       expect(parseYamlList(frontmatter, 'skills')).toEqual([]);
     });
 
-    // D-LEARNING-SHIPPED-ROW, D-OMIT-CLAUDEMD-SET: Learning no longer receives the project
+    // D-LEARNING-SHIPPED-ROW, D-OMIT-CLAUDEMD-SET: Curate no longer receives the project
     // CLAUDE.md or the rule files, so the body reads what its Encoded check needs (below).
     it('omits the project CLAUDE.md and the rules, as its row says', () => {
       expect(row.omitClaudeMd).toBe(true);
@@ -386,7 +386,7 @@ describe('learning agent', () => {
     // AC-403, D-MAINTAIN-ON-DUE: the body asks claim-due, ends Part 2 on `due none`, and only
     // otherwise reads the maintain step, so a run with nothing due never pays for the ladder.
     describe('maintenance runs only when entries are due (AC-403)', () => {
-      const MAINTAIN_PATH_TEXT = 'skills/devflow:agent-references/references/learning/maintain.md';
+      const MAINTAIN_PATH_TEXT = 'skills/devflow:agent-references/references/curate/maintain.md';
 
       /** Named collector: the Part 2 stub's order or content defects. */
       function collectStubDefects(body: string): string[] {
@@ -496,7 +496,7 @@ describe('learning agent', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Lockstep tests — structural consistency between the Learning agent's claim
+// Lockstep tests — structural consistency between the Curate agent's claim
 // and related infrastructure (staleness threshold, directive, build output).
 // ---------------------------------------------------------------------------
 
@@ -575,10 +575,10 @@ describe('lockstep: no shipped artifact references .devflow/dream/ or subagent_t
 });
 
 describe('lockstep: dream.md not in src/assets/agents/', () => {
-  it('dream.md does not exist in src/assets/agents/ (renamed to learning.md)', () => {
+  it('dream.md does not exist in src/assets/agents/ (renamed to curate.md)', () => {
     // Ensures the old agent name never resurfaces in the canonical assets dir
     const dreamPath = path.join(ROOT, 'src', 'assets', 'agents', 'dream.md');
-    expect(fsSync.existsSync(dreamPath), 'src/assets/agents/dream.md must not exist (use learning.md)').toBe(false);
+    expect(fsSync.existsSync(dreamPath), 'src/assets/agents/dream.md must not exist (use curate.md)').toBe(false);
   });
 });
 

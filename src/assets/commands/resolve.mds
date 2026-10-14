@@ -122,7 +122,7 @@ Resolve this per worktree — unlike the evidence policy above, the settings lin
 
 {{compliance.compliance_inject()}}
 
-Set it per worktree, from that worktree's lens, and pass that worktree's `COMPLIANCE_DIRECTIVE` to each of its Code and Code-fix spawns, on a line of its own.
+Set it per worktree, from that worktree's lens, and pass that worktree's `COMPLIANCE_DIRECTIVE` to each of its Code and Fix spawns, on a line of its own.
 
 **Mint `RESOLUTION_TS` once per run:** `date -u +%Y-%m-%dT%H:%M:%SZ`. Every worktree reuses it — the resolution comment's dedup marker is searched per PR, so one run key keeps a retry of this run deduplicated while the next /resolve on the same PR posts. Phase 5 writes it as the summary's `**Date**:` and Phase 9b-2 passes it, so the local file and the posted marker agree.
 
@@ -274,7 +274,7 @@ Collect from each Code agent:
 **Produces:** RESOLUTION_FILE (early write for compaction safety)
 **Requires:** TRIAGE_RESULTS, CODE_AGENT_RESULTS, TARGET_DIR, TARGET_DIR_REL, BRANCH_INFO, RESOLUTION_TS
 
-**Immediately write `resolution-summary.md`** to `{TARGET_DIR}` using the Write tool. Do this now — not in Phase 9 — while results are fresh in context. This ensures the record is persisted even if later phases (Simplify, Verification Gate, CI gate, Tech Debt) trigger context compaction.
+**Immediately write `resolution-summary.md`** to `{TARGET_DIR}` using the Write tool. Do this now — not in Phase 9 — while results are fresh in context. This ensures the record is persisted even if later phases (Polish, Verification Gate, CI gate, Tech Debt) trigger context compaction.
 
 Set `Tracked` for FIX_SEPARATE and TECH_DEBT items to `(pending)` — to be backfilled after Phase 9 manage-debt (or `TRACEABILITY: DEGRADED ({reason})` if manage-debt degrades).
 
@@ -282,19 +282,19 @@ DUPLICATE issues are listed **only** in `## Duplicates` — never in `## Fixed I
 
 Use the template from the Output Artifact section below.
 
-### Phase 6: Simplify
+### Phase 6: Polish
 
-**Produces:** SIMPLIFICATION_RESULT
+**Produces:** POLISH_RESULT
 **Requires:** CODE_AGENT_RESULTS
 
-If any fixes were made, spawn Simplify agent to refine the changed code:
+If any fixes were made, spawn Polish agent to refine the changed code:
 
 ```
-Agent(subagent_type="Simplify", run_in_background=false):
+Agent(subagent_type="Polish", run_in_background=false):
 "TASK_DESCRIPTION: Issue resolution fixes
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 FILES_CHANGED: {list of files modified by Code agents}
-Simplify and refine the fixes for clarity and consistency
+Polish and refine the fixes for clarity and consistency
 Commit any improvements with a conventional-commit message."
 ```
 
@@ -320,9 +320,9 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
 1. Extract failure details from Validate agent output
 2. Increment `validation_retry_count`
 3. If `validation_retry_count <= 2`:
-   - Spawn Code-fix agent with fix context:
+   - Spawn Fix agent with fix context:
    ```
-   Agent(subagent_type="Code-fix"):
+   Agent(subagent_type="Fix"):
    "OPERATION: validation-fix
    TASK_ID: resolve-{batch-id}-valfix-{count}
    VALIDATION_FAILURES: {parsed failures from Validate agent}
@@ -342,7 +342,7 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
 Record `## Verification` outcome in resolution-summary.md (runs unconditionally after the validation loop exits):
 - Rewrite the `## Verification` section with | Command | Result | table + `Final gate: PASS | FAILED after N attempts`
 
-Push all commits to remote once (Code and Code-fix agents ran with PUSH: false — runs whether the gate PASSED or FAILED, so the branch is always visible before Phase 9 or CI runs):
+Push all commits to remote once (Code and Fix agents ran with PUSH: false — runs whether the gate PASSED or FAILED, so the branch is always visible before Phase 9 or CI runs):
 ```bash
 git -C {worktree} push
 ```
@@ -381,9 +381,9 @@ Phase 7 has pushed already, so this is a no-op unless the head moved since. `exi
 4. **If PENDING** and fewer than 3 waits have run → wait again (step 1). After the third wait → report "CI still running — verify manually before merging" and proceed.
 5. **If INDETERMINATE** and fewer than 3 waits have run → wait again (step 1). After the third wait → report "CI status unknown — verify manually before merging" and proceed.
 <!-- learning:on -->
-6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Code-fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES`, `DECISIONS_CONTEXT` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Code-fix agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
+6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES`, `DECISIONS_CONTEXT` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Fix agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
 <!-- learning:off -->
-6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Code-fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Code-fix agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
+6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Fix agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
 <!-- learning:end -->
 7. **Budget**: at most 3 waits and 2 fixes in all, per worktree. When one is spent, report the current status and proceed.
 <!-- /PATTERN: ci-status-gate -->
@@ -590,8 +590,8 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 ├─ Phase 3: Batch FIX_NOW issues (skip if empty; DUPLICATE issues never dispatched)
 ├─ Phase 4: Fix [Code agent × N, OPERATION: issue-fix, PUSH: false]
 ├─ Phase 5: Write resolution-summary.md (compaction safety; Tracked = "(pending)" or "(pending — TRACEABILITY: DEGRADED)" if manage-debt degrades)
-├─ Phase 6: Simplify [Simplify agent]
-├─ Phase 7: Verification Gate [Validate agent, haiku] + push + Code-fix agent validation-fix loop ≤2
+├─ Phase 6: Polish [Polish agent]
+├─ Phase 7: Verification Gate [Validate agent, haiku] + push + Fix agent validation-fix loop ≤2
 ├─ Phase 8: CI Status Gate (conditional — skipped if no fixes or verification FAILED)
 ├─ Phase 9: Git agent (manage-debt) — FIX_SEPARATE + TECH_DEBT → backfill Tracked={ISSUE_REF} (or TRACEABILITY: DEGRADED on failure)
 │

@@ -2,7 +2,7 @@
 output-dir: dist/agents
 ---
 ---
-name: Scrutinize
+name: Harden
 description: Self-review agent that evaluates and fixes implementation issues using 9-pillar framework. Runs in fresh context after Code agent completes.
 model: opus
 effort: medium
@@ -36,9 +36,9 @@ disallowedTools:
   - mcp__*
 ---
 
-# Scrutinize Agent
+# Harden Agent
 
-You are a meticulous self-review specialist. You evaluate implementations against the 9-pillar quality framework and fix the issues you find. You run in a fresh context after the Code and Simplify agents complete, ensuring adequate resources for thorough review and fixes.
+You are a meticulous self-review specialist. You evaluate implementations against the 9-pillar quality framework and fix the issues you find. You run in a fresh context after the Code and Polish agents complete, ensuring adequate resources for thorough review and fixes.
 
 ## Input Context
 
@@ -68,7 +68,7 @@ Follow the `devflow:apply-decisions` skill to scan the index, Read full bodies o
 
 4. **Evaluate P1 pillars** (Complexity, Error Handling, Tests): These SHOULD pass. Fix all issues found.
 
-5. **Evaluate P2** (Documentation): Fix if straightforward. Naming and Consistency belong to the Simplify agent: report them as SKIP.
+5. **Evaluate P2** (Documentation): Fix if straightforward. Naming and Consistency belong to the Polish agent: report them as SKIP.
 
 6. **Commit fixes**: If any changes were made, create a commit with message "fix: address self-review issues".
 
@@ -106,8 +106,8 @@ Return structured completion status:
 - Tests: PASS | FIXED (description)
 
 ### P2 Pillars
-- Naming: SKIP (Simplify agent)
-- Consistency: SKIP (Simplify agent)
+- Naming: SKIP (Polish agent)
+- Consistency: SKIP (Polish agent)
 - Documentation: PASS | FIXED (description)
 
 ### Files Modified

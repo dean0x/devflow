@@ -2,7 +2,7 @@ import { promises as fs, type Dirent } from 'fs';
 import { existsSync } from 'fs';
 import * as path from 'path';
 import type { PluginDefinition } from '../../core/plugins.js';
-import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, prefixSkillName, unprefixSkillName, getAllSkillNames, getAllAgentNames, getAllCommandNames, FEATURE_OWNED_SKILLS, resolveSkillInstallPlan, omitLearningGatedSkills } from '../../core/plugins.js';
+import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, buildAssetMaps, prefixSkillName, unprefixSkillName, getAllSkillNames, getAllAgentNames, getAllCommandNames, FEATURE_OWNED_SKILLS, resolveSkillInstallPlan, omitLearningGatedSkills } from '../../core/plugins.js';
 import { skillsDir, agentSourceDirs, rulesDir, commandSourceDirs, scriptsDir, compiledSkillRefsDir, type AgentSourceDirs } from '../../core/assets.js';
 import { getPackageRoot, isContainedIn } from '../../core/paths.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '../../core/orphan-sweep.js';
@@ -1918,6 +1918,110 @@ async function removeDeselectedSkills(
   return { removed, failed };
 }
 
+/** What {@link installCommandsAndAgents} needs. */
+export interface CommandsAndAgentsOptions {
+  /** The plugins whose commands and agents are written. */
+  plugins: PluginDefinition[];
+  /** Agent name to owning plugin for `plugins` (buildAssetMaps), so a shared agent is copied once. */
+  agentsMap: Map<string, string>;
+  claudeDir: string;
+  /** The machine's settled learning switch — picks the command and agent variant (D-LEARNING-VARIANT-INSTALL). */
+  learning: boolean;
+  /** The tracker tool servers stamped onto the Git agent's `tools:` line (D-TRACKER-SERVER-ALLOWLIST). */
+  trackerServers: readonly string[];
+  /** Agent source directories, most-preferred first; see {@link FileCopyOptions.agentSourceDirs}. */
+  agentSourceDirs?: AgentSourceDirs;
+  warn: (msg: string) => void;
+}
+
+/**
+ * Write the commands and the agents of `plugins` into `claudeDir`, and nothing else:
+ * no sweep, no stamp, no skills. The one copy path shared by `installViaFileCopy` and
+ * the selective uninstall, which rewrites the files of the plugins that stay installed
+ * after it removed a retired agent.
+ *
+ * Commands come from dist/commands/{name}.md, or — with learning off — the learning-off
+ * variant dist/learning-off/commands/{name}.md when the host has one
+ * (D-LEARNING-VARIANT-INSTALL; commandSourceDirs owns the order). A declared command
+ * with no compiled source file is a hard error, not a skip.
+ *
+ * Agents resolve dist-first with a src fallback: dist/agents/{name}.md (compiled from an
+ * .mds generator host) wins over src/assets/agents/{name}.md. A declared agent absent from
+ * BOTH is a build/packaging failure and throws rather than silently skipping (matches the
+ * command pattern); the message names the build step as well as the tree.
+ *
+ * D-TRACKER-AGENT-OWNER: every declared agent but ONE. The Tracker agent is converged by
+ * `convergeTrackerArtifacts` alone (plan A3), which runs after the install in init and
+ * reports whether this run wrote it. Copying it here too would make every install do the
+ * work twice, and a fresh install would never report `installed` because converge would
+ * find this loop's byte-identical copy already in place. The name is skipped from the COPY
+ * set only. It stays declared in `devflow-core-skills.agents`, so the agent sweep — which
+ * keys on the full registry via getAllAgentNames() — still treats a converged tracker.md as
+ * known and leaves it alone.
+ */
+export async function installCommandsAndAgents(opts: CommandsAndAgentsOptions): Promise<void> {
+  const { plugins, agentsMap, claudeDir, learning, trackerServers, warn } = opts;
+
+  const commandsTarget = path.join(claudeDir, 'commands', 'devflow');
+  const commandDirs = commandSourceDirs(learning);
+  const commandsSourceNames = new Set<string>();
+  for (const plugin of plugins) {
+    for (const cmd of plugin.commands) {
+      const name = cmd.startsWith('/') ? cmd.slice(1) : cmd;
+      commandsSourceNames.add(name);
+    }
+  }
+  if (commandsSourceNames.size > 0) {
+    await fs.mkdir(commandsTarget, { recursive: true });
+    for (const name of commandsSourceNames) {
+      const srcFile = await firstExisting(commandDirs.map(dir => path.join(dir, mdFileName(name))));
+      if (srcFile === undefined) {
+        // The error names the learning-ON path: that file exists for every declared
+        // command, while a learning-off file exists only for a host with an arm.
+        throw new Error(
+          `Command source not found for declared command "${name}": ${path.join(commandSourceDirs(true)[0], mdFileName(name))}. ` +
+          `Ensure build:mds ran successfully before install.`,
+        );
+      }
+      await fs.copyFile(srcFile, path.join(commandsTarget, mdFileName(name)));
+    }
+  }
+
+  const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
+  // Learning-aware (D-LEARNING-VARIANT-INSTALL). An injected list wins as given.
+  const agentDirs = opts.agentSourceDirs ?? agentSourceDirs(undefined, learning);
+  const allAgentNames = new Set<string>();
+  for (const plugin of plugins) {
+    for (const agent of plugin.agents) {
+      if (agent === TRACKER_AGENT_NAME) continue;
+      if (!allAgentNames.has(agent) && agentsMap.get(agent) === plugin.name) {
+        allAgentNames.add(agent);
+      }
+    }
+  }
+  if (allAgentNames.size > 0) {
+    await fs.mkdir(agentsTarget, { recursive: true });
+    for (const agentName of allAgentNames) {
+      if (await skipsForUserOwnedType(agentName, claudeDir, agentsTarget, warn)) continue;
+      const candidates = agentDirs.map(dir => path.join(dir, mdFileName(agentName)));
+      const srcFile = await firstExisting(candidates);
+      if (srcFile === undefined) {
+        throw new Error(
+          `Agent source not found for declared agent "${agentName}": ${path.join(opts.agentSourceDirs?.[0] ?? agentSourceDirs()[0], mdFileName(agentName))}. ` +
+          `Run \`npm run build:mds\` if it is compiled from an .mds generator host, otherwise ` +
+          `ensure the agent file exists in src/assets/agents/ (searched: ${candidates.join(', ')}).`,
+        );
+      }
+      const agentTarget = path.join(agentsTarget, mdFileName(agentName));
+      if (isTrackerStampedAgent(agentName)) {
+        await writeStampedAgent(srcFile, agentTarget, trackerServers, warn);
+      } else {
+        await fs.copyFile(srcFile, agentTarget);
+      }
+    }
+  }
+}
+
 /**
  * Install plugins via manual file copy.
  * Handles cleanup of old monolithic structure, deduplication of shared assets,
@@ -2085,42 +2189,50 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     warn(`Could not remove deselected skill "${prefixSkillName(failure.name)}" — ${String(failure.error)}`);
   }
 
-  // Install commands from selected plugins using registry-driven lookup.
-  // Source: dist/commands/{name}.md, or — with learning off — the learning-off
-  // variant dist/learning-off/commands/{name}.md when the host has one
-  // (D-LEARNING-VARIANT-INSTALL; commandSourceDirs owns the order).
-  // A declared command with no compiled source file is a hard error, not a skip.
+  // Retired agents. The sweep runs BEFORE the copy so the copy can see what it found:
+  // an agent file whose name left the registry means a previous release is installed
+  // here, and every command of that release still spawns the retired name. Sweeping
+  // alone would then strand the plugins that stay installed without their agents.
+  //
+  // Ungated: runs on every install shape. knownNames spans ALL plugins
+  // (getAllAgentNames) so agents from uninstalled plugins survive a partial run. Only
+  // names absent from the full registry are removed.
+  const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
+  const agentSweep = await sweepOrphanedAssets(
+    agentsTarget,
+    new Set(getAllAgentNames()),
+    mdEntryName,
+  );
+  recordSweep(report, 'agent', agentSweep);
+
+  // A partial install writes the selected plugins' commands and agents and leaves every
+  // other plugin's files alone, which is only safe while those files still name agents
+  // that exist. After a retired agent was removed they do not, so a partial install
+  // writes the commands and agents of every plugin the manifest records instead. The
+  // widening is conditional because an ordinary add-one run has nothing to repair and
+  // must not rewrite files the user did not ask about.
+  const widenToInstalled = isPartialInstall && agentSweep.removed.length > 0;
+  const commandAgentPlugins = widenToInstalled ? (options.effectivePlugins ?? plugins) : plugins;
+  const commandAgentMap = widenToInstalled ? buildAssetMaps(commandAgentPlugins).agentsMap : agentsMap;
+
+  // Install commands and agents (D-TRACKER-AGENT-OWNER and the source-resolution rules
+  // are documented on installCommandsAndAgents).
   spinner.message('Installing commands and agents...');
-  const commandsTarget = path.join(claudeDir, 'commands', 'devflow');
-  const commandDirs = commandSourceDirs(learning);
-  const commandsSourceNames = new Set<string>();
-  for (const plugin of plugins) {
-    for (const cmd of plugin.commands) {
-      const name = cmd.startsWith('/') ? cmd.slice(1) : cmd;
-      commandsSourceNames.add(name);
-    }
-  }
-  if (commandsSourceNames.size > 0) {
-    await fs.mkdir(commandsTarget, { recursive: true });
-    for (const name of commandsSourceNames) {
-      const srcFile = await firstExisting(commandDirs.map(dir => path.join(dir, mdFileName(name))));
-      if (srcFile === undefined) {
-        // The error names the learning-ON path: that file exists for every declared
-        // command, while a learning-off file exists only for a host with an arm.
-        throw new Error(
-          `Command source not found for declared command "${name}": ${path.join(commandSourceDirs(true)[0], mdFileName(name))}. ` +
-          `Ensure build:mds ran successfully before install.`,
-        );
-      }
-      await fs.copyFile(srcFile, path.join(commandsTarget, mdFileName(name)));
-    }
-  }
+  await installCommandsAndAgents({
+    plugins: commandAgentPlugins,
+    agentsMap: commandAgentMap,
+    claudeDir,
+    learning,
+    trackerServers,
+    agentSourceDirs: options.agentSourceDirs,
+    warn,
+  });
 
   // Sweep stale command files — ungated: runs on every install shape.
   // knownNames spans ALL plugins (getAllCommandNames) so commands from uninstalled
   // plugins survive a partial run. Only names absent from the full registry are removed.
   recordSweep(report, 'command', await sweepOrphanedAssets(
-    commandsTarget,
+    path.join(claudeDir, 'commands', 'devflow'),
     new Set(getAllCommandNames()),
     mdEntryName,
   ));
@@ -2137,66 +2249,6 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     effectivePlugins: options.effectivePlugins ?? plugins,
     warn,
   });
-
-  // Install agents (deduplicated), resolved dist-first with a src fallback:
-  // dist/agents/{name}.md (compiled from an .mds generator host) wins over
-  // src/assets/agents/{name}.md. A declared agent absent from BOTH is a
-  // build/packaging failure and throws rather than silently skipping (matches
-  // command pattern); the message names the build step as well as the tree.
-  //
-  // D-TRACKER-AGENT-OWNER: every declared agent but ONE. The Tracker agent is
-  // converged by `convergeTrackerArtifacts` alone (plan A3), which runs after this
-  // function in init and reports whether this run wrote it. Copying it here too
-  // would make every install do the work twice, and a fresh install would never
-  // report `installed` because converge would find this loop's byte-identical copy
-  // already in place.
-  //
-  // The name is skipped from the COPY set only. It stays declared in
-  // `devflow-core-skills.agents`, so the sweep below — which keys on the full
-  // registry via getAllAgentNames() — still treats a converged tracker.md as known
-  // and leaves it alone.
-  const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
-  // Learning-aware (D-LEARNING-VARIANT-INSTALL). An injected list wins as given.
-  const agentDirs = options.agentSourceDirs ?? agentSourceDirs(undefined, learning);
-  const allAgentNames = new Set<string>();
-  for (const plugin of plugins) {
-    for (const agent of plugin.agents) {
-      if (agent === TRACKER_AGENT_NAME) continue;
-      if (!allAgentNames.has(agent) && agentsMap.get(agent) === plugin.name) {
-        allAgentNames.add(agent);
-      }
-    }
-  }
-  if (allAgentNames.size > 0) {
-    await fs.mkdir(agentsTarget, { recursive: true });
-    for (const agentName of allAgentNames) {
-      if (await skipsForUserOwnedType(agentName, claudeDir, agentsTarget, warn)) continue;
-      const candidates = agentDirs.map(dir => path.join(dir, mdFileName(agentName)));
-      const srcFile = await firstExisting(candidates);
-      if (srcFile === undefined) {
-        throw new Error(
-          `Agent source not found for declared agent "${agentName}": ${path.join(options.agentSourceDirs?.[0] ?? agentSourceDirs()[0], mdFileName(agentName))}. ` +
-          `Run \`npm run build:mds\` if it is compiled from an .mds generator host, otherwise ` +
-          `ensure the agent file exists in src/assets/agents/ (searched: ${candidates.join(', ')}).`,
-        );
-      }
-      const agentTarget = path.join(agentsTarget, mdFileName(agentName));
-      if (isTrackerStampedAgent(agentName)) {
-        await writeStampedAgent(srcFile, agentTarget, trackerServers, warn);
-      } else {
-        await fs.copyFile(srcFile, agentTarget);
-      }
-    }
-  }
-
-  // Sweep stale agent files — ungated: runs on every install shape.
-  // knownNames spans ALL plugins (getAllAgentNames) so agents from uninstalled
-  // plugins survive a partial run. Only names absent from the full registry are removed.
-  recordSweep(report, 'agent', await sweepOrphanedAssets(
-    agentsTarget,
-    new Set(getAllAgentNames()),
-    mdEntryName,
-  ));
 
   // Install skills from ALL plugins (skillsMap covers all plugins, not just selected).
   // Resolved from flat src/assets/skills/{name}/ (no per-plugin subdirectory).

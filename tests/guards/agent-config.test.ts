@@ -15,19 +15,19 @@
  *                              below; src/core/plugins.ts at each trimmed
  *                              `requires:` entry.
  *  - D-DIAGNOSE-FOCUS-SKILLS   tests/fixtures/agent-config.ts
- *                              (DIAGNOSE_FOCUS_SKILLS) and the Diagnose arm below.
+ *                              (DEBUG_FOCUS_SKILLS) and the Debug arm below.
  *                              The decision itself lives in the Focus Areas table
- *                              of the Diagnose agent: a "Pattern skill
+ *                              of the Debug agent: a "Pattern skill
  *                              (load on demand)" column and one instruction before
  *                              Step 1 to load the row's skills with the Skill tool,
  *                              continuing with the methodology if a load fails.
- *  - D-LEARNING-SHIPPED-ROW    tests/fixtures/agent-config.ts (the learning row).
+ *  - D-LEARNING-SHIPPED-ROW    tests/fixtures/agent-config.ts (the curate row).
  *  - D-OMIT-CLAUDEMD-SET       tests/fixtures/agent-config.ts (the header): which agents
  *                              omit CLAUDE.md and the rules, and why. The omit arm of the
  *                              row check below pins the frontmatter; the digest each omitting
  *                              body carries is held by tests/guards/core-rules-digest.test.ts.
  *  - D-SCAN-IN-CODE            tests/fixtures/agent-config.ts (MCP_DENY_AGENTS) and the
- *                              denylist arm below: Scrutinize and Simplify deny `mcp__*`.
+ *                              denylist arm below: Harden and Polish deny `mcp__*`.
  *  - D-GIT-ROW                 tests/fixtures/agent-config.ts (the git row): an allowlist of
  *                              the tools its bodies direct, with no tracker server named.
  *  - D-TRACKER-ROW             tests/fixtures/agent-config.ts (the tracker row) and the
@@ -45,7 +45,7 @@
  *  - Synthesize states decisions and pitfalls in words, never by ledger ID
  *    (src/assets/agents/synthesize.md). Under `omitClaudeMd` it no longer receives
  *    the project CLAUDE.md, so its own body has to carry the rule.
- *  - Learning names no Grep or Glob tool (src/assets/agents/learning.md). An agent
+ *  - Curate names no Grep or Glob tool (src/assets/agents/curate.md). An agent
  *    that has Bash is given neither tool, so its search steps are Bash commands.
  *
  * What a green run does NOT prove
@@ -70,7 +70,7 @@ import { ROOT, resolveAgentSource, splitFrontmatter, walkFiles } from '../helper
 import { loadShippedAgentDefaults } from '../../src/core/agent-models.js';
 import {
   AGENT_CONFIG,
-  DIAGNOSE_FOCUS_SKILLS,
+  DEBUG_FOCUS_SKILLS,
   MCP_DENY_AGENTS,
   SHARED_DENYLIST,
   type AgentConfigRow,
@@ -372,7 +372,7 @@ function isExcepted(v: ToolBodyViolation, exceptions: readonly ToolBodyException
 }
 
 // ---------------------------------------------------------------------------
-// Named collectors: Diagnose, schema-bearing spawns
+// Named collectors: Debug, schema-bearing spawns
 // ---------------------------------------------------------------------------
 
 /** The section of a document from its `## <heading>` line to the next `## ` line. */
@@ -506,24 +506,24 @@ describe('the table: every agent ships its row (D-AGENT-CONFIG-TABLE)', () => {
     const probes: ReadonlyArray<readonly [string, string, (fm: AgentFrontmatter) => void]> = [
       ['a changed model', 'triage', fm => { fm.model = 'haiku'; }],
       ['a dropped effort', 'triage', fm => { fm.effort = null; }],
-      ['an effort where the row ships none', 'learning', fm => { fm.effort = 'high'; }],
+      ['an effort where the row ships none', 'curate', fm => { fm.effort = 'high'; }],
       ['a changed effort', 'validate', fm => { fm.effort = 'high'; }],
       ['a tool removed from an allowlist', 'triage', fm => { fm.tools = (fm.tools ?? []).slice(1); }],
       ['a tool added to an allowlist', 'triage', fm => { fm.tools = [...(fm.tools ?? []), 'Write']; }],
       ['a name removed from a denylist', 'code', fm => { fm.disallowedTools = (fm.disallowedTools ?? []).slice(1); }],
-      ['Skill missing from a denylist that adds it', 'scrutinize', fm => {
+      ['Skill missing from a denylist that adds it', 'harden', fm => {
         fm.disallowedTools = (fm.disallowedTools ?? []).filter(tool => tool !== 'Skill');
       }],
       ['a denylist on an allowlist agent', 'triage', fm => { fm.disallowedTools = ['Agent']; }],
       ['an allowlist on a denylist agent', 'code', fm => { fm.tools = ['Read']; }],
       ['omitClaudeMd turned off', 'skim', fm => { fm.omitClaudeMd = null; }],
       ['omitClaudeMd turned off for Triage', 'triage', fm => { fm.omitClaudeMd = null; }],
-      ['omitClaudeMd turned off for Learning', 'learning', fm => { fm.omitClaudeMd = null; }],
+      ['omitClaudeMd turned off for Curate', 'curate', fm => { fm.omitClaudeMd = null; }],
       ['omitClaudeMd turned on for Code, which keeps CLAUDE.md', 'code', fm => { fm.omitClaudeMd = 'true'; }],
-      ['omitClaudeMd turned on for Scrutinize, which keeps CLAUDE.md', 'scrutinize', fm => { fm.omitClaudeMd = 'true'; }],
-      ['omitClaudeMd turned on for Simplify, which keeps CLAUDE.md', 'simplify', fm => { fm.omitClaudeMd = 'true'; }],
+      ['omitClaudeMd turned on for Harden, which keeps CLAUDE.md', 'harden', fm => { fm.omitClaudeMd = 'true'; }],
+      ['omitClaudeMd turned on for Polish, which keeps CLAUDE.md', 'polish', fm => { fm.omitClaudeMd = 'true'; }],
       ['a trimmed preload restored', 'validate', fm => { fm.skills = [...(fm.skills ?? []), 'devflow:testing']; }],
-      ['a skills key where the row has none', 'learning', fm => { fm.skills = ['devflow:apply-decisions']; }],
+      ['a skills key where the row has none', 'curate', fm => { fm.skills = ['devflow:apply-decisions']; }],
       ['an unknown key', 'research', fm => { fm.keys = [...fm.keys, 'disallowedtools']; }],
       ['a duplicated tool', 'triage', fm => { fm.tools = [...(fm.tools ?? []), 'Read']; }],
     ];
@@ -607,17 +607,17 @@ describe('one shared denylist (D-SHARED-DENYLIST)', () => {
     for (const tool of SHARED_DENYLIST) expect(tool, tool).toMatch(/^[A-Z][A-Za-z]+$/);
   });
 
-  it('Code and Research deny exactly the list, and Scrutinize and Simplify deny it plus Skill and mcp__*', () => {
+  it('Code and Research deny exactly the list, and Harden and Polish deny it plus Skill and mcp__*', () => {
     for (const name of ['code', 'research']) {
       expect(sameSet(agent(name).fm.disallowedTools ?? [], SHARED_DENYLIST), name).toBe(true);
     }
-    for (const name of ['scrutinize', 'simplify']) {
+    for (const name of ['harden', 'polish']) {
       expect(sameSet(agent(name).fm.disallowedTools ?? [], [...SHARED_DENYLIST, 'Skill', 'mcp__*']), name).toBe(true);
     }
   });
 
-  it('only the agents MCP_DENY_AGENTS names deny MCP, and they are exactly Scrutinize and Simplify (D-SCAN-IN-CODE)', () => {
-    expect([...MCP_DENY_AGENTS].sort()).toEqual(['scrutinize', 'simplify']);
+  it('only the agents MCP_DENY_AGENTS names deny MCP, and they are exactly Harden and Polish (D-SCAN-IN-CODE)', () => {
+    expect([...MCP_DENY_AGENTS].sort()).toEqual(['harden', 'polish']);
     for (const record of agents.values()) {
       const denies = (record.fm.disallowedTools ?? []).some(tool => tool.startsWith('mcp__'));
       expect(denies, record.name).toBe(MCP_DENY_AGENTS.includes(record.name));
@@ -640,20 +640,20 @@ describe('one shared denylist (D-SHARED-DENYLIST)', () => {
     expect(collectDenylistViolations('x', base)).toEqual([]);
   });
 
-  it('known-bad probes: mcp__* is allowed for Scrutinize and Simplify only, and nothing else widens (D-SCAN-IN-CODE)', () => {
-    const base = renderRow('scrutinize', AGENT_CONFIG.scrutinize);
-    expect(collectDenylistViolations('scrutinize', base)).toEqual([]);
-    expect(collectDenylistViolations('simplify', renderRow('simplify', AGENT_CONFIG.simplify))).toEqual([]);
+  it('known-bad probes: mcp__* is allowed for Harden and Polish only, and nothing else widens (D-SCAN-IN-CODE)', () => {
+    const base = renderRow('harden', AGENT_CONFIG.harden);
+    expect(collectDenylistViolations('harden', base)).toEqual([]);
+    expect(collectDenylistViolations('polish', renderRow('polish', AGENT_CONFIG.polish))).toEqual([]);
     // The same list on any other agent is reported (a wildcard, and a denied MCP name).
     expect(collectDenylistViolations('code', base)).toHaveLength(2);
     expect(collectDenylistViolations('git', base)).toHaveLength(2);
     // A different wildcard, a named MCP tool and a web tool stay rejected on the permitted agents.
-    expect(collectDenylistViolations('scrutinize', { ...base, disallowedTools: ['Bash*'] })).toHaveLength(1);
-    expect(collectDenylistViolations('scrutinize', { ...base, disallowedTools: ['mcp__*', 'mcp__tavily__tavily_search'] })).toHaveLength(1);
-    expect(collectDenylistViolations('scrutinize', { ...base, disallowedTools: ['mcp__*', 'WebFetch'] })).toHaveLength(1);
-    expect(collectDenylistViolations('simplify', { ...base, disallowedTools: ['mcp__*', 'WebSearch'] })).toHaveLength(1);
+    expect(collectDenylistViolations('harden', { ...base, disallowedTools: ['Bash*'] })).toHaveLength(1);
+    expect(collectDenylistViolations('harden', { ...base, disallowedTools: ['mcp__*', 'mcp__tavily__tavily_search'] })).toHaveLength(1);
+    expect(collectDenylistViolations('harden', { ...base, disallowedTools: ['mcp__*', 'WebFetch'] })).toHaveLength(1);
+    expect(collectDenylistViolations('polish', { ...base, disallowedTools: ['mcp__*', 'WebSearch'] })).toHaveLength(1);
     // An allowlist never holds a wildcard, whoever the agent is.
-    expect(collectDenylistViolations('scrutinize', { ...base, disallowedTools: null, tools: ['Read', 'mcp__*'] })).toHaveLength(1);
+    expect(collectDenylistViolations('harden', { ...base, disallowedTools: null, tools: ['Read', 'mcp__*'] })).toHaveLength(1);
   });
 });
 
@@ -664,32 +664,32 @@ describe('preload trims (D-PRELOAD-TRIM)', () => {
     expect(agent('evaluate').fm.skills).not.toContain('devflow:software-design');
   });
 
-  it('Diagnose preloads none of the five pattern skills it now loads on demand', () => {
-    const preloaded = agent('diagnose').fm.skills ?? [];
+  it('Debug preloads none of the five pattern skills it now loads on demand', () => {
+    const preloaded = agent('debug').fm.skills ?? [];
     for (const skill of ['security', 'reliability', 'regression', 'consistency', 'complexity']) {
       expect(preloaded, skill).not.toContain(`devflow:${skill}`);
     }
   });
 
-  it('Learning has no skills key at all', () => {
-    expect(agent('learning').fm.skills).toBeNull();
-    expect(agent('learning').fm.keys).not.toContain('skills');
+  it('Curate has no skills key at all', () => {
+    expect(agent('curate').fm.skills).toBeNull();
+    expect(agent('curate').fm.keys).not.toContain('skills');
   });
 });
 
-describe('Diagnose loads its pattern skills on demand (D-DIAGNOSE-FOCUS-SKILLS)', () => {
-  const body = (): string => agent('diagnose').body;
+describe('Debug loads its pattern skills on demand (D-DIAGNOSE-FOCUS-SKILLS)', () => {
+  const body = (): string => agent('debug').body;
 
   it('has one Focus Areas row per focus, naming each skill literally', () => {
     const table = collectFocusTable(body());
-    expect([...table.keys()].sort()).toEqual(Object.keys(DIAGNOSE_FOCUS_SKILLS).sort());
-    for (const [focus, skills] of Object.entries(DIAGNOSE_FOCUS_SKILLS)) {
+    expect([...table.keys()].sort()).toEqual(Object.keys(DEBUG_FOCUS_SKILLS).sort());
+    for (const [focus, skills] of Object.entries(DEBUG_FOCUS_SKILLS)) {
       expect(table.get(focus), focus).toEqual(skills);
     }
   });
 
   it('every skill the table names is loadable with the Skill tool', () => {
-    expect(agent('diagnose').fm.tools).toContain('Skill');
+    expect(agent('debug').fm.tools).toContain('Skill');
   });
 
   it('carries the load instruction before Step 1, with a fallback and no stop rule', () => {
@@ -737,8 +737,8 @@ describe('tool/body agreement (D-TOOL-BODY-MATCH)', () => {
   it('sees both a call and a "the X tool" phrase on the live corpus', () => {
     const reviewBody = collectToolInvocations(agent('review').body);
     expect(reviewBody.some(inv => inv.tool === 'Skill' && !inv.negated)).toBe(true);
-    const diagnoseBody = collectToolInvocations(agent('diagnose').body);
-    expect(diagnoseBody.some(inv => inv.tool === 'Write' && !inv.negated)).toBe(true);
+    const debugBody = collectToolInvocations(agent('debug').body);
+    expect(debugBody.some(inv => inv.tool === 'Write' && !inv.negated)).toBe(true);
   });
 
   const allFindings = (): ToolBodyViolation[] =>
@@ -766,7 +766,7 @@ describe('tool/body agreement (D-TOOL-BODY-MATCH)', () => {
   describe('known-bad probes', () => {
     const noSkill = renderRow('x', AGENT_CONFIG.triage);
     const noEdit = renderRow('x', AGENT_CONFIG.evaluate);
-    const denySkill = renderRow('x', AGENT_CONFIG.scrutinize);
+    const denySkill = renderRow('x', AGENT_CONFIG.harden);
     const unitOf = (text: string): BodyUnit[] => [{ source: 'body', text }];
     const loaded = (text: string, fm: AgentFrontmatter): string[] =>
       collectToolBodyViolations('x', fm, unitOf(text)).map(v => v.tool);
@@ -853,13 +853,13 @@ describe('body-level decisions', () => {
     );
   });
 
-  it('Learning names no Grep or Glob tool, and searches with Bash commands', () => {
-    const body = agent('learning').body;
+  it('Curate names no Grep or Glob tool, and searches with Bash commands', () => {
+    const body = agent('curate').body;
     expect(body).not.toMatch(/\b(?:Grep|Glob)\b/);
     expect(body).toContain('`git grep -P`');
   });
 
-  it('known-bad probe: the Learning check sees a tool name in prose', () => {
+  it('known-bad probe: the Curate check sees a tool name in prose', () => {
     expect('Search the repository (Grep, Glob) for a test.').toMatch(/\b(?:Grep|Glob)\b/);
     expect('each a glob relative to the repository root').not.toMatch(/\b(?:Grep|Glob)\b/);
   });

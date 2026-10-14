@@ -74,6 +74,66 @@ export interface Migration<S extends MigrationScope = MigrationScope> {
 export type AnyMigration = Migration<'global'> | Migration<'per-project'>;
 
 /**
+ * The body of every canonicalise-agent-keys-vN migration: read agent-models.json raw,
+ * apply LEGACY_AGENT_KEYS once, and write the result back atomically when a key changed.
+ * Each migration id passes its own id so that its warnings name it. Idempotent, and a
+ * file with no legacy key is left untouched.
+ */
+function canonicaliseAgentKeysRun(migrationId: string): (ctx: GlobalMigrationContext) => Promise<MigrationRunResult> {
+  return async (ctx): Promise<MigrationRunResult> => {
+    const infos: string[] = []
+    const warnings: string[] = []
+
+    // Fast path: no legacy keys defined — skip without touching the file.
+    if (Object.keys(LEGACY_AGENT_KEYS).length === 0) return { infos, warnings }
+
+    const filePath = path.join(ctx.devflowDir, 'agent-models.json')
+    // parseAgentMappingEnvelope handles IO, BOM-strip, JSON parse, and shape validation.
+    // Raw read intentionally avoids readAgentMapping (which would drop unknown fields).
+    const envelope = await parseAgentMappingEnvelope(filePath)
+    if (envelope.kind === 'skip') return { infos, warnings }
+    if (envelope.kind === 'warn') {
+      warnings.push(`${migrationId}: ${envelope.message}`)
+      return { infos, warnings }
+    }
+
+    const onWarning = (msg: string) => warnings.push(msg)
+    const { agents: migrated, didMutate, renamed, dropped, guardDropped } = canonicaliseAgentKeys(
+      envelope.rawAgents,
+      onWarning,
+    )
+    if (!didMutate) return { infos, warnings }
+
+    // Write back with the canonical keys, preserving the rest of the envelope.
+    // Idempotent under concurrent execution (no lock needed; see D31 comment above).
+    const updated = { ...envelope.envelope, agents: migrated }
+    try {
+      await writeFileAtomicExclusive(filePath, JSON.stringify(updated, null, 2) + '\n')
+    } catch (err: unknown) {
+      warnings.push(`${migrationId}: failed to write ${filePath}: ${(err as Error).message}`)
+      return { infos, warnings }
+    }
+
+    if (renamed.length > 0) {
+      infos.push(
+        `Migrated agent-models.json: renamed ${renamed.map(k => `'${k}' → '${LEGACY_AGENT_KEYS[k] as string}'`).join(', ')}`,
+      )
+    }
+    if (dropped.length > 0) {
+      warnings.push(
+        `${migrationId}: dropped legacy key(s) ${dropped.map(k => `'${k}'`).join(', ')} — the replacement key already holds a value, existing value kept`,
+      )
+    }
+    if (guardDropped.length > 0) {
+      warnings.push(
+        `${migrationId}: dropped legacy key(s) ${guardDropped.map(k => `'${k}'`).join(', ')} — skipped due to prototype-pollution guard`,
+      )
+    }
+    return { infos, warnings }
+  }
+}
+
+/**
  * D31: Registry pattern over scattered `if (!applied.includes(...))` conditionals.
  *
  * A typed array of Migration entries provides:
@@ -92,9 +152,9 @@ export type AnyMigration = Migration<'global'> | Migration<'per-project'>;
  * This was acceptable with an empty MIGRATIONS registry (D37: the vacuous-truth
  * case); this registry's first real entry is added below. Fix deferred.
  *
- * Note how that interacts with `canonicalise-agent-keys-v1`: runGlobalMigration
- * marks a migration applied for ANY non-throwing return, and that entry never
- * throws — it catches every I/O and parse failure and returns it as a *warning*.
+ * Note how that interacts with the `canonicalise-agent-keys-vN` entries: runGlobalMigration
+ * marks a migration applied for ANY non-throwing return, and those entries never
+ * throw — it catches every I/O and parse failure and returns it as a *warning*.
  * So it does NOT hit the unbounded-retry path. It hits the opposite one: a
  * transient EACCES or a failed write records the migration as applied and it
  * never runs again, leaving legacy keys on disk permanently.
@@ -111,58 +171,17 @@ export const MIGRATIONS: readonly AnyMigration[] = [
     id: 'canonicalise-agent-keys-v1',
     description: 'Rename legacy agent keys in ~/.devflow/agent-models.json to their canonical names',
     scope: 'global',
-
-    async run(ctx): Promise<MigrationRunResult> {
-      const infos: string[] = []
-      const warnings: string[] = []
-
-      // Fast path: no legacy keys defined — skip without touching the file.
-      if (Object.keys(LEGACY_AGENT_KEYS).length === 0) return { infos, warnings }
-
-      const filePath = path.join(ctx.devflowDir, 'agent-models.json')
-      // parseAgentMappingEnvelope handles IO, BOM-strip, JSON parse, and shape validation.
-      // Raw read intentionally avoids readAgentMapping (which would drop unknown fields).
-      const envelope = await parseAgentMappingEnvelope(filePath)
-      if (envelope.kind === 'skip') return { infos, warnings }
-      if (envelope.kind === 'warn') {
-        warnings.push(`canonicalise-agent-keys-v1: ${envelope.message}`)
-        return { infos, warnings }
-      }
-
-      const onWarning = (msg: string) => warnings.push(msg)
-      const { agents: migrated, didMutate, renamed, dropped, guardDropped } = canonicaliseAgentKeys(
-        envelope.rawAgents,
-        onWarning,
-      )
-      if (!didMutate) return { infos, warnings }
-
-      // Write back with the canonical keys, preserving the rest of the envelope.
-      // Idempotent under concurrent execution (no lock needed; see D31 comment above).
-      const updated = { ...envelope.envelope, agents: migrated }
-      try {
-        await writeFileAtomicExclusive(filePath, JSON.stringify(updated, null, 2) + '\n')
-      } catch (err: unknown) {
-        warnings.push(`canonicalise-agent-keys-v1: failed to write ${filePath}: ${(err as Error).message}`)
-        return { infos, warnings }
-      }
-
-      if (renamed.length > 0) {
-        infos.push(
-          `Migrated agent-models.json: renamed ${renamed.map(k => `'${k}' → '${LEGACY_AGENT_KEYS[k] as string}'`).join(', ')}`,
-        )
-      }
-      if (dropped.length > 0) {
-        warnings.push(
-          `canonicalise-agent-keys-v1: dropped legacy key(s) ${dropped.map(k => `'${k}'`).join(', ')} — canonical key already present, existing value kept`,
-        )
-      }
-      if (guardDropped.length > 0) {
-        warnings.push(
-          `canonicalise-agent-keys-v1: dropped legacy key(s) ${guardDropped.map(k => `'${k}'`).join(', ')} — skipped due to prototype-pollution guard`,
-        )
-      }
-      return { infos, warnings }
-    },
+    run: canonicaliseAgentKeysRun('canonicalise-agent-keys-v1'),
+  },
+  {
+    // v1 is already recorded as applied on every machine that upgraded through 2.x, so the
+    // six-agent rename needs an id of its own. Both ids run the same body. On a 1.x machine
+    // v1 runs first and, with the single-hop LEGACY_AGENT_KEYS, already lands every key on its
+    // final slug, so v2 finds nothing to rewrite and makes no write.
+    id: 'canonicalise-agent-keys-v2',
+    description: 'Rename the keys of the six renamed agents in ~/.devflow/agent-models.json to their new names',
+    scope: 'global',
+    run: canonicaliseAgentKeysRun('canonicalise-agent-keys-v2'),
   },
   {
     id: 'tracker-conventions-per-provider-v1',

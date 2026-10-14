@@ -1,7 +1,7 @@
 ---
 output-dir: dist/agents
-# D-CODE-VARIANTS: Code runs implement and issue-fix. The gate-failure fixes run on Code-fix and
-# edit runs on Code-edit; the three hosts share _partials/_code.mds.
+# D-CODE-VARIANTS: Code runs implement and issue-fix. The gate-failure fixes run on Fix and
+# edit runs on Refactor; the three hosts share _partials/_code.mds.
 # D-CODE-PRELOADS: Code preloads git, testing, test-driven-development, worktree-support,
 # apply-feature-knowledge and apply-decisions: implement writes tests first, and only the
 # implement and issue-fix spawns pass FEATURE_KNOWLEDGE.

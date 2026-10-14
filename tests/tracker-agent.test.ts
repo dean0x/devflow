@@ -1965,11 +1965,11 @@ describe('Tracker agent registration (P3a-S10, EC-68)', () => {
   });
 
   it('shares its owning plugin with the other hook-spawned agent', () => {
-    // learning escapes Guard 5 reverse for exactly the same reason. Asserting
+    // curate escapes Guard 5 reverse for exactly the same reason. Asserting
     // they sit together means a future split of that plugin cannot silently move
     // one out from under the structural pass.
     const owners = DEVFLOW_PLUGINS.filter(p => p.agents.includes(TRACKER_SLUG));
-    expect(owners[0].agents).toContain('learning');
+    expect(owners[0].agents).toContain('curate');
   });
 
   it('adds NO _roster.mds row — the roster is set-equal to dist spawn sites', () => {

@@ -5,7 +5,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import {
   getLearningDir,
-  getLearningTuningConfigPath,
+  getCurateTuningConfigPath,
 } from '../../core/project-paths.js';
 import { loadShippedAgentDefaults } from '../../core/agent-models.js';
 import { readMachineFeature, writeMachineFeature } from '../../core/feature-switch.js';
@@ -292,7 +292,7 @@ async function handleRestore(anchor: string): Promise<void> {
  * The scope choices of `devflow learning --configure`.
  *
  * D-LEARNING-MODEL-PRECEDENCE: the session-start hook takes the first layer that
- * supplies a model — the project file, then a `devflow agents` Learning mapping,
+ * supplies a model — the project file, then a `devflow agents` Curate mapping,
  * then the global file. A global file therefore has no effect for a user who has
  * such a mapping, and its hint says so.
  */
@@ -301,28 +301,28 @@ export const CONFIGURE_SCOPE_OPTIONS = [
   {
     value: 'global',
     label: 'Global',
-    hint: 'All projects (~/.devflow/learning.json); a devflow agents Learning mapping takes precedence over it',
+    hint: 'All projects (~/.devflow/learning.json); a devflow agents Curate mapping takes precedence over it',
   },
 ] as const;
 
 /** The models `devflow learning --configure` offers, each with what it is good for. */
-const LEARNING_MODEL_CHOICES = [
+const CURATE_MODEL_CHOICES = [
   { value: 'opus', label: 'Opus', note: 'highest quality for detection + curation judgment' },
   { value: 'sonnet', label: 'Sonnet', note: 'good balance of quality and speed' },
   { value: 'haiku', label: 'Haiku', note: 'fastest, lowest cost' },
 ] as const;
 
 /**
- * D-LEARNING-SHIPPED-ROW: the model offered as "Recommended" is the one the Learning
+ * D-LEARNING-SHIPPED-ROW: the model offered as "Recommended" is the one the Curate
  * agent ships with, the `model:` line of its frontmatter. It is read from there and
  * written nowhere else, so a change of the shipped tier moves the recommendation with
  * it and this list never has to be edited. A shipped model outside the three offered
  * (or none) recommends nothing.
  */
-export function learningModelOptions(
+export function curateModelOptions(
   shippedModel: string | undefined,
 ): Array<{ value: string; label: string; hint: string }> {
-  return LEARNING_MODEL_CHOICES.map(choice => ({
+  return CURATE_MODEL_CHOICES.map(choice => ({
     value: choice.value,
     label: choice.label,
     hint: choice.value === shippedModel
@@ -334,10 +334,10 @@ export function learningModelOptions(
 async function handleConfigure(): Promise<void> {
   p.intro(color.bgCyan(color.black(' Learning Configuration ')));
 
-  const shippedModel = (await loadShippedAgentDefaults()).learning?.model;
+  const shippedModel = (await loadShippedAgentDefaults()).curate?.model;
   const model = await p.select({
     message: 'Model for decision detection',
-    options: learningModelOptions(shippedModel),
+    options: curateModelOptions(shippedModel),
   });
   if (p.isCancel(model)) {
     p.cancel('Configuration cancelled.');
@@ -380,7 +380,7 @@ async function handleConfigure(): Promise<void> {
     // main checkout in a linked worktree; the current directory outside git.
     const projectRoot = (await getLedgerRoot()) ?? process.cwd();
     const learningDir = getLearningDir(projectRoot);
-    const projectConfigPath = getLearningTuningConfigPath(projectRoot);
+    const projectConfigPath = getCurateTuningConfigPath(projectRoot);
     // D-CLI-NO-SYMLINK (core/linked-path.ts): nothing is written through a .devflow,
     // a learning folder or a learning.json that is a symbolic link.
     const linked = await firstSymbolicLink([path.dirname(learningDir), learningDir, projectConfigPath]);
@@ -463,7 +463,7 @@ async function handleClear(): Promise<void> {
     return;
   }
 
-  // A mid-run Learning agent whose claimed batch vanishes stops without further
+  // A mid-run Curate agent whose claimed batch vanishes stops without further
   // writes — the desired outcome of clearing.
   const drain = await drainLearningQueue(ledgerRoot);
 
@@ -529,7 +529,7 @@ async function handleToggle(enabled: boolean): Promise<void> {
   }
 
   // Drain the current project's learning (decisions-detection) queue so stale
-  // turns don't process on re-enable. A mid-run Learning agent whose claimed
+  // turns don't process on re-enable. A mid-run Curate agent whose claimed
   // batch vanishes aborts without changes — the desired outcome of disabling.
   const ledgerRoot = await getLedgerRoot();
   if (ledgerRoot) {

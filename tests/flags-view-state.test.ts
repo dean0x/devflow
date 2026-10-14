@@ -644,7 +644,7 @@ describe('flags-view-state — buildFlagRows', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Edit-mode input handling (scrutinize pass)
+// Edit-mode input handling (harden pass)
 //
 // These pin three defects found by driving the reducer the way a user types,
 // rather than by asserting the branches the implementation happens to have.

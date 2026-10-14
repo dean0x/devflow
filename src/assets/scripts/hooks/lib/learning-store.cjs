@@ -1516,7 +1516,7 @@ function moveQueueToClaim(queuePath, claimPath) {
 }
 
 /**
- * Claim the learning queue for one Learning run.
+ * Claim the learning queue for one Curate run.
  *
  * D-OWNED-CLAIM: the learning queue is claimed and released only through the
  * claim-queue and release-claim ops, under the learning lock. A claim moves the

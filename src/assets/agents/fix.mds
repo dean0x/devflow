@@ -1,15 +1,15 @@
 ---
 output-dir: dist/agents
-# D-CODE-VARIANTS: Code-fix runs validation-fix, alignment-fix, qa-fix and ci-fix, and has no default
+# D-CODE-VARIANTS: Fix runs validation-fix, alignment-fix, qa-fix and ci-fix, and has no default
 # mode. Its text is the shared partial _partials/_code.mds plus the four mode sections below.
-# D-CODE-PRELOADS: Code-fix preloads git, testing, worktree-support and apply-decisions: a gate-failure
+# D-CODE-PRELOADS: Fix preloads git, testing, worktree-support and apply-decisions: a gate-failure
 # fix runs the named tests and is not a test-first build, and no fix spawn passes FEATURE_KNOWLEDGE.
-# D-VARIANT-SLUGS: code-fix is its own `devflow agents` slug with Code's model and effort; a `code`
+# D-VARIANT-SLUGS: fix is its own `devflow agents` slug with Code's model and effort; a `code`
 # override does not reach it.
 ---
 @import "./_partials/_code.mds" as code
 ---
-name: Code-fix
+name: Fix
 description: Autonomous gate-failure repair on feature branch. Fixes the listed validation, alignment, QA or CI failures, verifies, and commits.
 model: sonnet
 effort: high
@@ -40,7 +40,7 @@ disallowedTools:
   - DesignSync
 ---
 
-# Code-fix Agent
+# Fix Agent
 
 You are an autonomous repair specialist working on a feature branch. A quality gate (validation, alignment, QA or CI) reported failures. You fix exactly the failures you are given, verify the fix and commit it. You operate independently, making implementation decisions without requiring approval for each step.
 

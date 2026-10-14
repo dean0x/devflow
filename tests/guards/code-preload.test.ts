@@ -9,16 +9,16 @@
  *   Code      git, testing, test-driven-development, worktree-support, apply-feature-knowledge,
  *             apply-decisions. implement and issue-fix write tests first, and only their spawns pass
  *             `FEATURE_KNOWLEDGE`.
- *   Code-fix  git, testing, worktree-support, apply-decisions. A gate-failure fix compiles and runs the
+ *   Fix  git, testing, worktree-support, apply-decisions. A gate-failure fix compiles and runs the
  *             named tests; it is not a test-first build, and no fix spawn passes `FEATURE_KNOWLEDGE`.
- *   Code-edit git, worktree-support, apply-decisions. A mechanical edit adds no behaviour and no tests.
+ *   Refactor git, worktree-support, apply-decisions. A mechanical edit adds no behaviour and no tests.
  *
  * D-NO-RUNTIME-SKILLS: none loads a skill by language or by mode at run time, so the four mode skills the
  * old Step 0 table named and the eight language skills the `DOMAIN` input named are neither preloaded
  * nor named in a variant. The Skill tool stays, so a model can still pick a skill by its description.
  *
  * The SKILL.md files of each variant total at most its ceiling, which the numeric-floor manifest
- * registers (`code-preload-max-bytes`, `code-fix-preload-max-bytes`, `code-edit-preload-max-bytes`), and
+ * registers (`code-preload-max-bytes`, `fix-preload-max-bytes`, `refactor-preload-max-bytes`), and
  * three of them carry their own cap (D-CODE-PRELOAD-CAP). A ceiling is lowered by a pass that cut the
  * artifact and never raised to fit one that grew; `git`, `testing` and `test-driven-development` are
  * fixed terms here, so a later change that grows any of them pays for itself inside the set.
@@ -39,8 +39,8 @@ const SKILLS_DIR = path.join(ROOT, 'src', 'assets', 'skills')
 /** The skills each variant preloads, in the order its frontmatter lists them (apply-decisions, last, is the learning arm). */
 export const CODE_PRELOADS: Readonly<Record<string, readonly string[]>> = {
   'Code': ['git', 'testing', 'test-driven-development', 'worktree-support', 'apply-feature-knowledge', 'apply-decisions'],
-  'Code-fix': ['git', 'testing', 'worktree-support', 'apply-decisions'],
-  'Code-edit': ['git', 'worktree-support', 'apply-decisions'],
+  'Fix': ['git', 'testing', 'worktree-support', 'apply-decisions'],
+  'Refactor': ['git', 'worktree-support', 'apply-decisions'],
 }
 
 /**
@@ -55,16 +55,16 @@ export const RETIRED_RUNTIME_SKILLS: readonly string[] = [
 /** The SKILL.md files of Code's preload together, in bytes. Registered as `code-preload-max-bytes` in tests/fixtures/numeric-floors.json; lowered, never raised. */
 const CODE_PRELOAD_MAX_BYTES = 25_514
 
-/** The SKILL.md files of Code-fix's preload together, in bytes. Registered as `code-fix-preload-max-bytes`; lowered, never raised. */
-const CODE_FIX_PRELOAD_MAX_BYTES = 14_875
+/** The SKILL.md files of Fix's preload together, in bytes. Registered as `fix-preload-max-bytes`; lowered, never raised. */
+const FIX_PRELOAD_MAX_BYTES = 14_875
 
-/** The SKILL.md files of Code-edit's preload together, in bytes. Registered as `code-edit-preload-max-bytes`; lowered, never raised. */
-const CODE_EDIT_PRELOAD_MAX_BYTES = 10_202
+/** The SKILL.md files of Refactor's preload together, in bytes. Registered as `refactor-preload-max-bytes`; lowered, never raised. */
+const REFACTOR_PRELOAD_MAX_BYTES = 10_202
 
 const PRELOAD_MAX_BYTES: Readonly<Record<string, number>> = {
   'Code': CODE_PRELOAD_MAX_BYTES,
-  'Code-fix': CODE_FIX_PRELOAD_MAX_BYTES,
-  'Code-edit': CODE_EDIT_PRELOAD_MAX_BYTES,
+  'Fix': FIX_PRELOAD_MAX_BYTES,
+  'Refactor': REFACTOR_PRELOAD_MAX_BYTES,
 }
 
 /**
@@ -140,10 +140,10 @@ describe('each Code variant preloads only the skills its modes use (D-CODE-PRELO
     }
   })
 
-  it('the variants shrink with their modes: Code-edit preloads a subset of Code-fix, which preloads a subset of Code', () => {
+  it('the variants shrink with their modes: Refactor preloads a subset of Fix, which preloads a subset of Code', () => {
     const set = (agentType: string): string[] => parseFrontmatterSkills(on(agentType))
-    for (const name of set('Code-edit')) expect(set('Code-fix'), `Code-fix lacks ${name}`).toContain(name)
-    for (const name of set('Code-fix')) expect(set('Code'), `Code lacks ${name}`).toContain(name)
+    for (const name of set('Refactor')) expect(set('Fix'), `Fix lacks ${name}`).toContain(name)
+    for (const name of set('Fix')) expect(set('Code'), `Code lacks ${name}`).toContain(name)
   })
 
   it('no variant preloads or names a skill the old Step 0 table or the DOMAIN input loaded at run time (D-NO-RUNTIME-SKILLS)', () => {
@@ -170,9 +170,9 @@ describe('each Code variant preloads only the skills its modes use (D-CODE-PRELO
     expect(collectPreloadSetDefects('Code', [...code, 'patterns'])).toEqual(['runtime skill patterns is preloaded'])
     expect(collectPreloadSetDefects('Code', code.filter(n => n !== 'git'))).toEqual(['missing git'])
     expect(collectPreloadSetDefects('Code', [...code, 'git'])).toEqual(['a skill is listed twice'])
-    // Code-fix owns no test-first skill, so handing it Code's set is reported skill by skill.
-    expect(collectPreloadSetDefects('Code-fix', code)).toEqual(['unexpected test-driven-development', 'unexpected apply-feature-knowledge'])
-    expect(collectPreloadSetDefects('Code-edit', CODE_PRELOADS['Code-fix'])).toEqual(['unexpected testing'])
+    // Fix owns no test-first skill, so handing it Code's set is reported skill by skill.
+    expect(collectPreloadSetDefects('Fix', code)).toEqual(['unexpected test-driven-development', 'unexpected apply-feature-knowledge'])
+    expect(collectPreloadSetDefects('Refactor', CODE_PRELOADS['Fix'])).toEqual(['unexpected testing'])
   })
 })
 
@@ -190,8 +190,8 @@ describe('the preloaded SKILL.md files of each variant stay within their caps (D
   })
 
   it('the ceilings are ordered by the sets they hold, and the variants cost less than the one agent they replace', () => {
-    expect(PRELOAD_MAX_BYTES['Code-edit']).toBeLessThan(PRELOAD_MAX_BYTES['Code-fix'])
-    expect(PRELOAD_MAX_BYTES['Code-fix']).toBeLessThan(PRELOAD_MAX_BYTES['Code'])
+    expect(PRELOAD_MAX_BYTES['Refactor']).toBeLessThan(PRELOAD_MAX_BYTES['Fix'])
+    expect(PRELOAD_MAX_BYTES['Fix']).toBeLessThan(PRELOAD_MAX_BYTES['Code'])
   })
 
   it('known-bad probe: an oversize file and an oversize total are each reported, for each variant', () => {
@@ -201,14 +201,14 @@ describe('the preloaded SKILL.md files of each variant stay within their caps (D
       const total = CODE_PRELOADS[agentType].reduce((sum, name) => sum + real[name], 0)
       expect(collectPreloadSizeDefects(agentType, real, total - 1)).toEqual([`the preload is ${total} bytes, ceiling ${total - 1}`])
     }
-    const bloated = { ...measured('Code-edit'), 'worktree-support': 1_901 }
-    expect(collectPreloadSizeDefects('Code-edit', bloated, Infinity)).toEqual(['worktree-support is 1901 bytes, cap 1900'])
+    const bloated = { ...measured('Refactor'), 'worktree-support': 1_901 }
+    expect(collectPreloadSizeDefects('Refactor', bloated, Infinity)).toEqual(['worktree-support is 1901 bytes, cap 1900'])
   })
 })
 
 // ── The learning-off variants (D-LEARNING-VARIANTS, AC-150, AC-307) ──────────────────────────────────────
 //
-// A machine with learning off installs dist/learning-off/agents/{code,code-fix,code-edit}.md, each of which
+// A machine with learning off installs dist/learning-off/agents/{code,fix,refactor}.md, each of which
 // loses the `devflow:apply-decisions` preload line with the rest of its decisions text. The learning-on file
 // above stays the file each total is measured against; a learning-off variant preloads the same list minus
 // that skill, so its total is the on total less the skill's bytes.

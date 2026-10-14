@@ -1,6 +1,6 @@
 A partial: the text the three Code variants share. `code.mds` (Code: implement, issue-fix),
-`code-fix.mds` (Code-fix: validation-fix, alignment-fix, qa-fix, ci-fix) and `code-edit.mds`
-(Code-edit: edit) are the hosts. A host is any file with `output-dir:`; this file declares none,
+`fix.mds` (Fix: validation-fix, alignment-fix, qa-fix, ci-fix) and `refactor.mds`
+(Refactor: edit) are the hosts. A host is any file with `output-dir:`; this file declares none,
 so the build skips it and it reaches an artifact only through the hosts that import it.
 
 D-CODE-VARIANTS: a spawn runs exactly one mode, so one agent for every mode would pay for every

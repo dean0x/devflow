@@ -25,6 +25,7 @@ export const HANDOFF_TEMPLATE =
 
 /** Fixed string emitted by the preamble hook for a normal (non-handoff, non-slash) prompt. */
 export const REMINDER_TEMPLATE =
-  "Orchestrator reminder: coordinate, don't produce — delegate edits, builds, multi-file reads, " +
-  'and debug loops to the fitting roster agent (Agent tool) or the matching devflow workflow skill.\n' +
+  "Orchestrator reminder: coordinate, don't produce — delegate edits, builds and multi-file reads " +
+  'to the fitting roster agent (Agent tool) or the matching devflow workflow skill. ' +
+  'Send debug work to the devflow:debug skill, never to the Debug agent.\n' +
   'Keep only judgment work mainline: conversation, decisions, routing, synthesis of agent reports.';

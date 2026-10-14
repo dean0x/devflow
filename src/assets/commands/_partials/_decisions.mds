@@ -47,7 +47,7 @@ Line 1 is the checkout's toplevel, line 2 the common git directory. A git older 
 2. **The toplevel** — line 1, or on an older git the line after the echoed flag.
 3. **The start directory itself** — when the command failed or printed no absolute toplevel (outside a git repository).
 
-This is the rule the learning hooks apply, so you read the index the Learning agent writes.
+This is the rule the learning hooks apply, so you read the index the Curate agent writes.
 @end
 
 @define decisions_slice():

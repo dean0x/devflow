@@ -5,7 +5,7 @@ description: "Use when changing learning-off variants, convergeLearningVariants,
 category: architecture
 directories: [src/targets/claude-code/learning-install.ts, src/targets/claude-code/language-stamp.ts, src/cli/commands/learning.ts, src/targets/claude-code/installer.ts, src/core/assets.ts]
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-13
 ---
 
 # Learning-aware Install & Language-focus Stamp

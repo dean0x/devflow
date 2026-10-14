@@ -1064,14 +1064,14 @@ describe('compiled dynamic-build.md: Gate-1-twice cadence + build execution doct
     expect(compiled).toContain('Gate 1 #2');
   });
 
-  it('spawns Simplify and Scrutinize exactly twice each (Gate 1 #1 + Gate 1 #2)', () => {
+  it('spawns Polish and Harden exactly twice each (Gate 1 #1 + Gate 1 #2)', () => {
     // Obsolete-forever strings ('Gate 1 only — no Gate 2 for review-fixes',
-    // 'Simplify recent fixes', '9-pillar review of recent fixes') dropped; count assertions
+    // 'Polish recent fixes', '9-pillar review of recent fixes') dropped; count assertions
     // are the real structural guard under the new single-pass architecture.
-    const simplifyCount = (compiled.match(/agentType: "Simplify"/g) ?? []).length;
-    const scrutinizeCount = (compiled.match(/agentType: "Scrutinize"/g) ?? []).length;
-    expect(simplifyCount, 'Simplify should run only in the two Gate-1 passes').toBe(2);
-    expect(scrutinizeCount, 'Scrutinize should run only in the two Gate-1 passes').toBe(2);
+    const polishCount = (compiled.match(/agentType: "Polish"/g) ?? []).length;
+    const hardenCount = (compiled.match(/agentType: "Harden"/g) ?? []).length;
+    expect(polishCount, 'Polish should run only in the two Gate-1 passes').toBe(2);
+    expect(hardenCount, 'Harden should run only in the two Gate-1 passes').toBe(2);
   });
 });
 
@@ -1093,7 +1093,7 @@ function between(text: string, from: string, to: string): string | null {
 }
 
 /**
- * Named collector: where a Gate 1 pass does not run Simplify, then Scrutinize, then
+ * Named collector: where a Gate 1 pass does not run Polish, then Harden, then
  * Validate, with the first Validate unconditional (a top-level statement of the phase
  * callback, not inside an `if`).
  */
@@ -1109,9 +1109,9 @@ function collectGate1OrderViolations(compiled: string): string[] {
       continue;
     }
     const at = (type: string): number => pass.indexOf(`{ agentType: "${type}" }`);
-    const [simplify, scrutinize, validate] = [at('Simplify'), at('Scrutinize'), at('Validate')];
-    if (simplify === -1 || scrutinize === -1 || validate === -1) out.push(`${label}: a spawn is missing`);
-    else if (!(simplify < scrutinize && scrutinize < validate)) out.push(`${label}: the order is not Simplify, Scrutinize, Validate`);
+    const [polish, harden, validate] = [at('Polish'), at('Harden'), at('Validate')];
+    if (polish === -1 || harden === -1 || validate === -1) out.push(`${label}: a spawn is missing`);
+    else if (!(polish < harden && harden < validate)) out.push(`${label}: the order is not Polish, Harden, Validate`);
     if (!/^  const validation = await agent\(/m.test(pass)) out.push(`${label}: the first Validate is not an unconditional statement of the pass`);
     if (pass.includes('codeChanged')) out.push(`${label}: the pass still branches on codeChanged`);
   }
@@ -1124,13 +1124,13 @@ describe('compiled dynamic-build.md: Gate 1 order (D-VALIDATE-ONCE)', () => {
     compiled = await fs.readFile(path.join(BUILT_COMMANDS, 'dynamic-build.md'), 'utf-8');
   });
 
-  it('both passes spawn Simplify, Scrutinize, then Validate, and Validate is unconditional', () => {
+  it('both passes spawn Polish, Harden, then Validate, and Validate is unconditional', () => {
     expect(collectGate1OrderViolations(compiled)).toEqual([]);
   });
 
-  it('Simplify and Scrutinize are still spawned exactly twice each, and no Validate spawn names a model', () => {
-    expect((compiled.match(/agentType: "Simplify"/g) ?? []).length).toBe(2);
-    expect((compiled.match(/agentType: "Scrutinize"/g) ?? []).length).toBe(2);
+  it('Polish and Harden are still spawned exactly twice each, and no Validate spawn names a model', () => {
+    expect((compiled.match(/agentType: "Polish"/g) ?? []).length).toBe(2);
+    expect((compiled.match(/agentType: "Harden"/g) ?? []).length).toBe(2);
     const validates = [...compiled.matchAll(/agent\(`(?:(?!agent\(`)[\s\S])*?`, \{ agentType: "Validate"[^}]*\}/g)].map(m => m[0]);
     expect(validates.length, 'no Validate spawn read').toBeGreaterThanOrEqual(5);
     expect(validates.filter(v => /\bmodel\b/.test(v.slice(v.lastIndexOf('`'))))).toEqual([]);
@@ -1147,12 +1147,12 @@ describe('compiled dynamic-build.md: Gate 1 order (D-VALIDATE-ONCE)', () => {
   it('gate1_postcode() and engine_invariants() state the same order, with Validate last', () => {
     const doctrine = between(compiled, '### GATE 1 — Post-code pipeline', '**Gate 1 contains NO Evaluate agent') ?? '';
     const steps = [...doctrine.matchAll(/^(\d)\. \*\*(\w+) agent\*\*/gm)].map(m => `${m[1]}:${m[2]}`);
-    expect(steps).toEqual(['1:Simplify', '2:Scrutinize', '3:Validate']);
-    expect(compiled).toContain('before Simplify agent + Scrutinize agent + Validate agent (in that order');
+    expect(steps).toEqual(['1:Polish', '2:Harden', '3:Validate']);
+    expect(compiled).toContain('before Polish agent + Harden agent + Validate agent (in that order');
   });
 
-  it('the escalation type list carries scrutiny-blocked', () => {
-    expect(compiled).toMatch(/"type": "merge-conflict \| gate2-fail \| validation-exhausted \| scrutiny-blocked \|/);
+  it('the escalation type list carries harden-blocked', () => {
+    expect(compiled).toMatch(/"type": "merge-conflict \| gate2-fail \| validation-exhausted \| harden-blocked \|/);
   });
 
   it('known-bad probes: the order before #421 and a surviving codeChanged branch are reported', () => {
@@ -1160,7 +1160,7 @@ describe('compiled dynamic-build.md: Gate 1 order (D-VALIDATE-ONCE)', () => {
       .replace('  const validation = await agent(`Run build, typecheck, lint, and tests on branch ${BRANCH}.\nFollow', '  const earlyValidation = await agent(`Run build, typecheck, lint, and tests on branch ${BRANCH}.\nFollow');
     expect(swapped, 'the seed must land').not.toBe(compiled);
     expect(collectGate1OrderViolations(swapped)).toEqual(['Gate 1 #1: the first Validate is not an unconditional statement of the pass']);
-    const branching = compiled.replace('  await agent(`Simplify and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Simplify" });', '  if (scrutiny.codeChanged) { await agent(`x`, { agentType: "Validate" }); }\n  await agent(`Simplify and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Simplify" });');
+    const branching = compiled.replace('  await agent(`Polish and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Polish" });', '  if (harden.codeChanged) { await agent(`x`, { agentType: "Validate" }); }\n  await agent(`Polish and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Polish" });');
     expect(collectGate1OrderViolations(branching).some(v => v.includes('Gate 1 #1'))).toBe(true);
     expect(collectGate1OrderViolations('no passes here')).toEqual(['Gate 1 #1: the pass was not found', 'Gate 1 #2: the pass was not found']);
   });

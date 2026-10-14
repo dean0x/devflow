@@ -636,8 +636,8 @@ describe('review.md reads DIFF_FILE and verifies with ranged reads (AC-308)', ()
       .toMatch(/Identify changed lines does not read DIFF_FILE/)
   })
 
-  it('the DIFF_COMMAND of /bug-analysis (a Diagnose input) is untouched', () => {
-    expect(resolveAgentSource('diagnose').content).toContain('**DIFF_COMMAND**')
+  it('the DIFF_COMMAND of /bug-analysis (a Debug input) is untouched', () => {
+    expect(resolveAgentSource('debug').content).toContain('**DIFF_COMMAND**')
     expect(readFileSync(path.join(ROOT, 'src/assets/commands/bug-analysis.mds'), 'utf-8')).toContain('DIFF_COMMAND: git diff {DIFF_RANGE}')
   })
 })

@@ -1,6 +1,6 @@
 // tests/decisions/learning-ops.test.ts
 //
-// The entry ops the Learning agent runs through json-helper.cjs, tested through
+// The entry ops the Curate agent runs through json-helper.cjs, tested through
 // their store functions and their stdout grammar.
 //
 // put-observation (--create, --update, --reinforce) stores exactly the content it

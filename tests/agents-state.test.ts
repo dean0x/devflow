@@ -122,7 +122,7 @@ function makeState(overrides: Partial<AgentsViewState> = {}): AgentsViewState {
       ? (overrides.modelCycle as readonly string[])
       : buildModelCycle(catalog);
   const rows = overrides.rows ?? [
-    makeRow({ name: 'diagnose', shippedDefault: 'opus' }),
+    makeRow({ name: 'debug', shippedDefault: 'opus' }),
     makeRow({ name: 'code', shippedDefault: 'sonnet' }),
     makeRow({ name: 'design', shippedDefault: 'opus' }),
   ];
@@ -772,7 +772,7 @@ describe('d — reset to default', () => {
     const state = makeState({
       activeField: 'model',
       rows: [
-        makeRow({ name: 'diagnose', shippedDefault: 'opus' }),
+        makeRow({ name: 'debug', shippedDefault: 'opus' }),
         makeRow({ name: 'code', shippedDefault: 'sonnet', configuredModel: 'opus', originalModel: 'default' }),
         makeRow({ name: 'design', shippedDefault: 'opus' }),
       ],
@@ -785,7 +785,7 @@ describe('d — reset to default', () => {
     const state = makeState({
       activeField: 'effort',
       rows: [
-        makeRow({ name: 'diagnose', shippedDefault: 'opus' }),
+        makeRow({ name: 'debug', shippedDefault: 'opus' }),
         makeRow({ name: 'code', shippedDefault: 'sonnet', configuredEffort: 'high', originalEffort: 'default' }),
         makeRow({ name: 'design', shippedDefault: 'opus' }),
       ],
@@ -807,7 +807,7 @@ describe('d — reset to default', () => {
     const state = makeState({
       activeField: 'model',
       rows: [
-        makeRow({ name: 'diagnose', shippedDefault: 'opus', configuredModel: 'opus', originalModel: 'default' }),
+        makeRow({ name: 'debug', shippedDefault: 'opus', configuredModel: 'opus', originalModel: 'default' }),
         makeRow({ name: 'code', shippedDefault: 'sonnet', configuredModel: 'haiku', originalModel: 'default' }),
         makeRow({ name: 'design', shippedDefault: 'opus', configuredModel: 'fable', originalModel: 'default' }),
       ],

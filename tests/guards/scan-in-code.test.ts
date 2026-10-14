@@ -5,20 +5,20 @@
  * Decisions recorded here:
  *
  *  - D-SCAN-IN-CODE   tests/fixtures/agent-config.ts (MCP_DENY_AGENTS) holds the tool half:
- *                     Scrutinize and Simplify deny `mcp__*`, so neither can reach a scanner.
+ *                     Harden and Polish deny `mcp__*`, so neither can reach a scanner.
  *                     This file holds the body half, in the COMPILED prompts a session loads:
- *                       - Each Code variant (Code, Code-fix, Code-edit) carries one `Security scan (conditional)` block that scans only
+ *                       - Each Code variant (Code, Fix, Refactor) carries one `Security scan (conditional)` block that scans only
  *                         when the session offers a code-scanning tool, scans each changed file
  *                         once by absolute path before the final commit, scans the narrowest
  *                         common directory once when more than 10 files changed, and reports
  *                         `Security scan: unavailable` when there is no tool;
  *                       - that block names no scanner product or tool identifier, because
  *                         which scanner a session has is the session's business;
- *                       - Scrutinize and Simplify each carry the one line that says scanning
+ *                       - Harden and Polish each carry the one line that says scanning
  *                         runs in the Code agent and not there.
  *
- * Code and Scrutinize are generator hosts, so their prompt exists only as compiled output, in a
- * learning-on and a learning-off variant. Simplify is hand-authored and read as installed.
+ * Code and Harden are generator hosts, so their prompt exists only as compiled output, in a
+ * learning-on and a learning-off variant. Polish is hand-authored and read as installed.
  *
  * Every arm runs through a named collector, and each known-bad probe feeds the same collector a
  * mutated body, so a collector that stopped seeing a defect fails its own probe instead of
@@ -238,19 +238,19 @@ describe('Code carries one conditional, vendor-neutral scan block (D-SCAN-IN-COD
   });
 });
 
-describe('Scrutinize and Simplify say scanning runs in the Code agent (D-SCAN-IN-CODE)', () => {
-  it('Scrutinize, learning-on and learning-off, carries the line once', () => {
-    expect(resolveAgentSource('scrutinize').origin).toBe('dist');
-    expect(collectNoScanLineDefects(agentBody('scrutinize'))).toEqual([]);
-    expect(collectNoScanLineDefects(learningOffBody('scrutinize'))).toEqual([]);
+describe('Harden and Polish say scanning runs in the Code agent (D-SCAN-IN-CODE)', () => {
+  it('Harden, learning-on and learning-off, carries the line once', () => {
+    expect(resolveAgentSource('harden').origin).toBe('dist');
+    expect(collectNoScanLineDefects(agentBody('harden'))).toEqual([]);
+    expect(collectNoScanLineDefects(learningOffBody('harden'))).toEqual([]);
   });
 
-  it('Simplify carries the line once', () => {
-    expect(collectNoScanLineDefects(agentBody('simplify'))).toEqual([]);
+  it('Polish carries the line once', () => {
+    expect(collectNoScanLineDefects(agentBody('polish'))).toEqual([]);
   });
 
   describe('known-bad probes: one mutation makes the collector report', () => {
-    const body = agentBody('scrutinize');
+    const body = agentBody('harden');
 
     it('a body without the line reports it', () => {
       expect(collectNoScanLineDefects(body.replace(NO_SCAN_LINE, ''))).toHaveLength(1);

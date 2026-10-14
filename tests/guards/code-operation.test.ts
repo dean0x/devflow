@@ -2,8 +2,8 @@
  * D-CODE-OPERATION-MODES — every Code-family spawn names its operating mode on its first prompt line, and
  * D-CODE-VARIANTS — it names that mode on the variant that runs it.
  *
- * The Code family works in seven modes across three agents: Code (implement, issue-fix), Code-fix
- * (validation-fix, alignment-fix, qa-fix, ci-fix) and Code-edit (edit). A spawn that leaves the mode out
+ * The Code family works in seven modes across three agents: Code (implement, issue-fix), Fix
+ * (validation-fix, alignment-fix, qa-fix, ci-fix) and Refactor (edit). A spawn that leaves the mode out
  * falls back to the loosest protocol its agent has, with no regression-test rule and every mode skill judged
  * against a plan that is not there; a spawn that names a mode on the wrong variant reaches an agent that
  * carries neither the mode's section nor its skills. So the mode is not optional in practice: each spawn in
@@ -25,7 +25,7 @@
  *
  * D-CODE-OPERATION-PINS: the mode each spawn names must fit what the spawn does, and the variant it names must
  * own that mode. A review-finding fix is `issue-fix` on Code, so the regression-test rule applies to it; a gate
- * failure fix is a Code-fix mode; the merge-conflict resolver is `implement` on Code.
+ * failure fix is a Fix mode; the merge-conflict resolver is `implement` on Code.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -43,12 +43,12 @@ const PREAMBLE_PATH = path.join(ROOT, 'src', 'assets', 'commands', '_partials', 
 
 /**
  * Compiled commands that spawn each variant, and the spawn sites each carries today. Floors: may only rise.
- * Code-edit is spawned by the orchestrator charter alone, so no compiled command carries a site for it.
+ * Refactor is spawned by the orchestrator charter alone, so no compiled command carries a site for it.
  */
 const OPERATION_FLOORS: Readonly<Record<string, Readonly<Record<string, number>>>> = {
   'Code': { 'implement.md': 5, 'resolve.md': 1, 'debug.md': 1, 'dynamic-build.md': 4 },
-  'Code-fix': { 'implement.md': 4, 'resolve.md': 2, 'dynamic-build.md': 4 },
-  'Code-edit': {},
+  'Fix': { 'implement.md': 4, 'resolve.md': 2, 'dynamic-build.md': 4 },
+  'Refactor': {},
 }
 
 /** The variant that owns a mode. */
@@ -109,20 +109,20 @@ export function collectUnknownCodeTypes(commands: ReadonlyArray<readonly [string
  */
 const MODE_PINS: ReadonlyArray<readonly [host: string, anchor: string, mode: string, agentType: string]> = [
   ['implement.md', 'TASK_DESCRIPTION: {description}', 'implement', 'Code'],
-  ['implement.md', 'Fix alignment issues', 'alignment-fix', 'Code-fix'],
-  ['implement.md', 'Fix validation failures', 'validation-fix', 'Code-fix'],
-  ['implement.md', 'Fix QA test failures', 'qa-fix', 'Code-fix'],
-  ['implement.md', '`CI_FAILURES`', 'ci-fix', 'Code-fix'],
+  ['implement.md', 'Fix alignment issues', 'alignment-fix', 'Fix'],
+  ['implement.md', 'Fix validation failures', 'validation-fix', 'Fix'],
+  ['implement.md', 'Fix QA test failures', 'qa-fix', 'Fix'],
+  ['implement.md', '`CI_FAILURES`', 'ci-fix', 'Fix'],
   ['resolve.md', 'ISSUES: {fix_now_issues_in_batch}', 'issue-fix', 'Code'],
-  ['resolve.md', 'VALIDATION_FAILURES: {parsed failures from Validate agent}', 'validation-fix', 'Code-fix'],
-  ['resolve.md', '`CI_FAILURES`', 'ci-fix', 'Code-fix'],
+  ['resolve.md', 'VALIDATION_FAILURES: {parsed failures from Validate agent}', 'validation-fix', 'Fix'],
+  ['resolve.md', '`CI_FAILURES`', 'ci-fix', 'Fix'],
   ['debug.md', 'TASK_DESCRIPTION: Implement the fix for this root cause', 'implement', 'Code'],
   ['dynamic-build.md', 'Implement the following ticket on branch', 'implement', 'Code'],
-  ['dynamic-build.md', 'Fix the validation failures on branch', 'validation-fix', 'Code-fix'],
-  ['dynamic-build.md', 'Fix the alignment issues identified by the Evaluate agent', 'alignment-fix', 'Code-fix'],
-  ['dynamic-build.md', 'Fix the failing acceptance test scenarios', 'qa-fix', 'Code-fix'],
+  ['dynamic-build.md', 'Fix the validation failures on branch', 'validation-fix', 'Fix'],
+  ['dynamic-build.md', 'Fix the alignment issues identified by the Evaluate agent', 'alignment-fix', 'Fix'],
+  ['dynamic-build.md', 'Fix the failing acceptance test scenarios', 'qa-fix', 'Fix'],
   ['dynamic-build.md', 'Fix the following confirmed review findings', 'issue-fix', 'Code'],
-  ['dynamic-build.md', 'Fix the final validation failures on branch', 'validation-fix', 'Code-fix'],
+  ['dynamic-build.md', 'Fix the final validation failures on branch', 'validation-fix', 'Fix'],
   ['dynamic-build.md', 'Spawn a Code agent', 'implement', 'Code'],
 ]
 
@@ -138,8 +138,8 @@ export function collectPinDefects(commands: ReadonlyArray<readonly [string, stri
   return out
 }
 
-/** The mode a variant runs when OPERATION is absent. Code-fix has none: a missing OPERATION returns BLOCKED. */
-const DEFAULT_MODE: Readonly<Record<string, string | null>> = { 'Code': 'implement', 'Code-fix': null, 'Code-edit': 'edit' }
+/** The mode a variant runs when OPERATION is absent. Fix has none: a missing OPERATION returns BLOCKED. */
+const DEFAULT_MODE: Readonly<Record<string, string | null>> = { 'Code': 'implement', 'Fix': null, 'Refactor': 'edit' }
 
 /** Named collector: how a variant's mode contract falls short of the modes it owns. */
 export function collectModeContractDefects(agentType: string, text: string): string[] {
@@ -287,28 +287,28 @@ describe('known-bad probes: each shape of untagged or misrouted spawn is reporte
     expect(defects[0]).toMatch(/^implement\.md:\d+: OPERATION: pr-create is not one of implement, issue-fix,/)
   })
 
-  it('(f) a gate-failure fix spawned on Code, and a review-finding fix spawned on Code-fix, are each reported (AC-303)', () => {
-    const fixOnCode = collectOperationDefects(seeded('implement.md', 'Agent(subagent_type="Code-fix"):\n   "OPERATION: qa-fix\n', 'Agent(subagent_type="Code"):\n   "OPERATION: qa-fix\n'))
+  it('(f) a gate-failure fix spawned on Code, and a review-finding fix spawned on Fix, are each reported (AC-303)', () => {
+    const fixOnCode = collectOperationDefects(seeded('implement.md', 'Agent(subagent_type="Fix"):\n   "OPERATION: qa-fix\n', 'Agent(subagent_type="Code"):\n   "OPERATION: qa-fix\n'))
     expect(fixOnCode).toHaveLength(1)
-    expect(fixOnCode[0]).toMatch(/^implement\.md:\d+: OPERATION: qa-fix runs on Code-fix, but the spawn names Code$/)
+    expect(fixOnCode[0]).toMatch(/^implement\.md:\d+: OPERATION: qa-fix runs on Fix, but the spawn names Code$/)
     const templateOnCode = collectOperationDefects(seeded(
       'dynamic-build.md',
-      'Commit fixes with conventional-commit message.`, { agentType: "Code-fix" });',
+      'Commit fixes with conventional-commit message.`, { agentType: "Fix" });',
       'Commit fixes with conventional-commit message.`, { agentType: "Code" });',
     ))
     expect(templateOnCode).toHaveLength(1)
-    expect(templateOnCode[0]).toMatch(/^dynamic-build\.md:\d+: OPERATION: validation-fix runs on Code-fix, but the spawn names Code$/)
+    expect(templateOnCode[0]).toMatch(/^dynamic-build\.md:\d+: OPERATION: validation-fix runs on Fix, but the spawn names Code$/)
     const issueFixOnFix = collectOperationDefects(seeded(
       'dynamic-build.md',
       'unresolved": ["<description of any finding that could not be fixed>"]}`, { agentType: "Code" });',
-      'unresolved": ["<description of any finding that could not be fixed>"]}`, { agentType: "Code-fix" });',
+      'unresolved": ["<description of any finding that could not be fixed>"]}`, { agentType: "Fix" });',
     ))
     expect(issueFixOnFix).toHaveLength(1)
-    expect(issueFixOnFix[0]).toMatch(/^dynamic-build\.md:\d+: OPERATION: issue-fix runs on Code, but the spawn names Code-fix$/)
+    expect(issueFixOnFix[0]).toMatch(/^dynamic-build\.md:\d+: OPERATION: issue-fix runs on Code, but the spawn names Fix$/)
   })
 
   it('(g) a spawn naming a Code variant that does not exist is reported (AC-303)', () => {
-    const defects = collectUnknownCodeTypes(seeded('implement.md', 'Agent(subagent_type="Code-fix"):\n   "OPERATION: qa-fix\n', 'Agent(subagent_type="Code-patch"):\n   "OPERATION: qa-fix\n'))
+    const defects = collectUnknownCodeTypes(seeded('implement.md', 'Agent(subagent_type="Fix"):\n   "OPERATION: qa-fix\n', 'Agent(subagent_type="Code-patch"):\n   "OPERATION: qa-fix\n'))
     expect(defects).toEqual([`implement.md: spawns Code-patch, which is not one of ${CODE_AGENT_TYPES.join(', ')}`])
   })
 
@@ -332,28 +332,28 @@ describe('each variant states the mode contract it owns (D-CODE-OPERATION-MODES,
 
   it('known-bad probe: a lost mode, a lost default, a foreign section, a lost BLOCKED rule and a lost Protocol are each reported', () => {
     const code = source('Code')
-    const fix = source('Code-fix')
-    const edit = source('Code-edit')
+    const fix = source('Fix')
+    const edit = source('Refactor')
     for (const agentType of CODE_AGENT_TYPES) {
       expect(collectModeContractDefects(agentType, source(agentType)), `${agentType}: the real contract is clean, so each seed fails for its own reason`).toEqual([])
     }
     const lostMode = fix.replace(' | `ci-fix` —', ' —')
     expect(lostMode, 'the seed must land').not.toBe(fix)
-    expect(collectModeContractDefects('Code-fix', lostMode).some(d => d.startsWith('the OPERATION line lists'))).toBe(true)
+    expect(collectModeContractDefects('Fix', lostMode).some(d => d.startsWith('the OPERATION line lists'))).toBe(true)
     const lostDefault = code.replace('`implement` (default when absent)', '`implement`')
     expect(lostDefault, 'the seed must land').not.toBe(code)
     expect(collectModeContractDefects('Code', lostDefault)).toContain('the OPERATION line does not make `implement` the default when absent')
     const gainedDefault = fix.replace('`validation-fix` | `alignment-fix`', '`validation-fix` (default when absent) | `alignment-fix`')
     expect(gainedDefault, 'the seed must land').not.toBe(fix)
-    expect(collectModeContractDefects('Code-fix', gainedDefault)).toContain('the OPERATION line names a default, but the variant has none')
+    expect(collectModeContractDefects('Fix', gainedDefault)).toContain('the OPERATION line names a default, but the variant has none')
     const foreign = `${edit}\n## Mode: qa-fix\n\n**Inputs:** x\n`
-    expect(collectModeContractDefects('Code-edit', foreign)).toEqual(['carries "## Mode: qa-fix", a Code-fix mode'])
+    expect(collectModeContractDefects('Refactor', foreign)).toEqual(['carries "## Mode: qa-fix", a Fix mode'])
     const lostBlocked = code.replace('returns BLOCKED', 'returns an error')
     expect(lostBlocked, 'the seed must land').not.toBe(code)
     expect(collectModeContractDefects('Code', lostBlocked)).toContain('the OPERATION line does not say a missing or other value returns BLOCKED')
     const lostProtocol = edit.replace(/(## Mode: edit[\s\S]*?)\*\*Protocol:\*\*/, '$1**Steps:**')
     expect(lostProtocol, 'the seed must land').not.toBe(edit)
-    expect(collectModeContractDefects('Code-edit', lostProtocol)).toEqual(['## Mode: edit has no **Protocol:**'])
+    expect(collectModeContractDefects('Refactor', lostProtocol)).toEqual(['## Mode: edit has no **Protocol:**'])
   })
 })
 
@@ -362,22 +362,22 @@ describe('each variant states the mode contract it owns (D-CODE-OPERATION-MODES,
 // The Git agent's ensure-pr-ready opens the PR under every strategy, so no Code body carries PR text:
 // no input, no paste gate, no D11 PR-body paragraph, no mode. What each keeps is the commit and push of its
 // commit step and the security-scan block (D-SCAN-IN-CODE). The compiled body of each variant is held under
-// its ceiling, registered in tests/fixtures/numeric-floors.json as `code-body-max`, `code-fix-body-max` and
-// `code-edit-body-max`: lowered by a pass that cut the artifact, never raised to fit one that grew.
+// its ceiling, registered in tests/fixtures/numeric-floors.json as `code-body-max`, `fix-body-max` and
+// `refactor-body-max`: lowered by a pass that cut the artifact, never raised to fit one that grew.
 
 /** The compiled Code agent body, in bytes. Registered as `code-body-max`; lowered, never raised. */
 const CODE_BODY_MAX_BYTES = 11_155
 
-/** The compiled Code-fix agent body, in bytes. Registered as `code-fix-body-max`; lowered, never raised. */
-const CODE_FIX_BODY_MAX_BYTES = 8_634
+/** The compiled Fix agent body, in bytes. Registered as `fix-body-max`; lowered, never raised. */
+const FIX_BODY_MAX_BYTES = 8_634
 
-/** The compiled Code-edit agent body, in bytes. Registered as `code-edit-body-max`; lowered, never raised. */
-const CODE_EDIT_BODY_MAX_BYTES = 6_550
+/** The compiled Refactor agent body, in bytes. Registered as `refactor-body-max`; lowered, never raised. */
+const REFACTOR_BODY_MAX_BYTES = 6_550
 
 const BODY_CEILINGS: Readonly<Record<string, number>> = {
   'Code': CODE_BODY_MAX_BYTES,
-  'Code-fix': CODE_FIX_BODY_MAX_BYTES,
-  'Code-edit': CODE_EDIT_BODY_MAX_BYTES,
+  'Fix': FIX_BODY_MAX_BYTES,
+  'Refactor': REFACTOR_BODY_MAX_BYTES,
 }
 
 /** Phrases that belong to opening a PR, none of which a Code body may carry. */
@@ -408,17 +408,17 @@ describe('no Code variant opens a PR and each body stays under its ceiling (D-PR
     }
   })
 
-  it('the variants are ordered by what their modes need: Code-edit < Code-fix < Code', () => {
+  it('the variants are ordered by what their modes need: Refactor < Fix < Code', () => {
     const size = (agentType: string): number => Buffer.byteLength(body(agentType))
-    expect(size('Code-edit')).toBeLessThan(size('Code-fix'))
-    expect(size('Code-fix')).toBeLessThan(size('Code'))
+    expect(size('Refactor')).toBeLessThan(size('Fix'))
+    expect(size('Fix')).toBeLessThan(size('Code'))
   })
 
   it('known-bad probe: a PR phrase, a lost commit rule and an oversize body are each reported', () => {
-    const real = body('Code-fix')
-    expect(collectCodeBodyDefects(real, BODY_CEILINGS['Code-fix']), 'the real body is clean, so each seed fails for its own reason').toEqual([])
+    const real = body('Fix')
+    expect(collectCodeBodyDefects(real, BODY_CEILINGS['Fix']), 'the real body is clean, so each seed fails for its own reason').toEqual([])
     // The ceiling is the measured size, so a seed that adds text needs headroom to fail for its own reason alone.
-    const roomy = BODY_CEILINGS['Code-fix'] + 1_000
+    const roomy = BODY_CEILINGS['Fix'] + 1_000
     expect(collectCodeBodyDefects(`${real}\nCREATE_PR: true\n`, roomy)).toEqual(['the Code body names "CREATE_PR"'])
     expect(collectCodeBodyDefects(real.replace('**Commit and push**', '**Commit**'), roomy))
       .toEqual(['the Code body lost "**Commit and push**"'])

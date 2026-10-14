@@ -3,7 +3,7 @@
  *
  * The full test suite has one owner. Before, any agent that "ran the tests" ran
  * whatever the project's test command was, so a single ticket paid for the whole
- * suite from Code, Scrutinize, Test and Validate in turn. Each of the eight agent
+ * suite from Code, Harden, Test and Validate in turn. Each of the eight agent
  * bodies now carries one `**Gate ownership:**` line that says which checks that
  * agent runs, and Validate runs the full suite once per HEAD and is the only
  * agent that does.
@@ -12,7 +12,7 @@
  *
  *   - each body carries exactly one gate line, and its text is the pinned row;
  *   - every body but Validate's also says that only Validate runs the full suite;
- *   - no body but Validate's instructs a full-suite run, and Simplify and
+ *   - no body but Validate's instructs a full-suite run, and Polish and
  *     Evaluate instruct no build, test or lint command at all;
  *   - the TDD skill says "affected tests" where it used to say "all tests", and
  *     defines the term once.
@@ -40,13 +40,13 @@ const GATE_ROWS: Readonly<Record<string, string>> = {
     'In a fix mode, compile and run the named failing or regression tests. Never the full suite. ' +
     'Batch fixes: one build check per batch, not per edit.',
   // Each variant states the part of Code's row that its modes use.
-  'code-fix':
+  fix:
     'Compile and run the named failing or regression tests. Never the full suite. ' +
     'Batch fixes: one build check per batch, not per edit.',
-  'code-edit': 'Run the tests of the touched modules once. Never the full suite.',
-  simplify: 'Run no build, test or lint command. Reading files and git diffs is not verification.',
+  refactor: 'Run the tests of the touched modules once. Never the full suite.',
+  polish: 'Run no build, test or lint command. Reading files and git diffs is not verification.',
   evaluate: 'Run no build, test or lint command. Git read commands only.',
-  scrutinize: 'Run only a test file you added or changed, once.',
+  harden: 'Run only a test file you added or changed, once.',
   test: 'Run the scenario commands. Never the full suite.',
   validate: 'Run the full suite once per HEAD. You are the only agent that does.',
 }
@@ -88,7 +88,7 @@ const BUILD_TEST_LINT_COMMAND = /\b(npm|pnpm|yarn|npx|cargo|go|make|tsc|eslint|v
 
 /** Named collector: build, test or lint commands in a body that must not run any. */
 function collectCommandDefects(name: string, content: string): string[] {
-  if (name !== 'simplify' && name !== 'evaluate') return []
+  if (name !== 'polish' && name !== 'evaluate') return []
   return content
     .split('\n')
     .filter(l => BUILD_TEST_LINT_COMMAND.test(l))
@@ -135,8 +135,8 @@ describe('D-GATE-OWNERSHIP: who runs which check', () => {
     for (const name of GATE_BODIES) expect(collectFullSuiteDefects(name, body(name))).toEqual([])
   })
 
-  it('Simplify and Evaluate instruct no build, test or lint command', () => {
-    for (const name of ['simplify', 'evaluate']) expect(collectCommandDefects(name, body(name))).toEqual([])
+  it('Polish and Evaluate instruct no build, test or lint command', () => {
+    for (const name of ['polish', 'evaluate']) expect(collectCommandDefects(name, body(name))).toEqual([])
   })
 
   it('the TDD skill says "affected tests" and defines the term once', () => {
@@ -164,9 +164,9 @@ describe('D-GATE-OWNERSHIP: who runs which check', () => {
     ])
   })
 
-  it('known-bad probe: a build command in Simplify and an unqualified "all tests" in the skill are reported', () => {
-    expect(collectCommandDefects('simplify', `${body('simplify')}\nThen run \`npm run lint\` to confirm.\n`)).toEqual([
-      'simplify: instructs a build, test or lint command: Then run `npm run lint` to confirm.',
+  it('known-bad probe: a build command in Polish and an unqualified "all tests" in the skill are reported', () => {
+    expect(collectCommandDefects('polish', `${body('polish')}\nThen run \`npm run lint\` to confirm.\n`)).toEqual([
+      'polish: instructs a build, test or lint command: Then run `npm run lint` to confirm.',
     ])
     expect(collectTddDefects(tddSkill().replace('**Checkpoint:** All affected tests pass.', '**Checkpoint:** All tests pass.')).length)
       .toBeGreaterThan(0)

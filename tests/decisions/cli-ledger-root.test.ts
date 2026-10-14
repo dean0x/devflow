@@ -36,7 +36,7 @@ import {
   getDecisionsLogPath,
   getLearningDir,
   getLearningPendingTurnsPath,
-  getLearningTuningConfigPath,
+  getCurateTuningConfigPath,
 } from '../../src/core/project-paths.js';
 
 const OBS = JSON.stringify({
@@ -123,11 +123,11 @@ describe('devflow learning in a linked worktree acts on the main checkout\'s led
   });
 
   it('--configure writes the project tuning config where session-start-context reads it: the main checkout\'s ledger', async () => {
-    // The hook resolves the Learning agent's model from $LEDGER_ROOT/.devflow/learning/learning.json.
+    // The hook resolves the Curate agent's model from $LEDGER_ROOT/.devflow/learning/learning.json.
     vi.mocked(p.select).mockResolvedValueOnce('sonnet').mockResolvedValueOnce('project');
     vi.mocked(p.confirm).mockResolvedValueOnce(false);
     await learningCommand.parseAsync(['--configure'], { from: 'user' });
-    expect(JSON.parse(fs.readFileSync(getLearningTuningConfigPath(main), 'utf-8'))).toEqual({ model: 'sonnet', debug: false });
+    expect(JSON.parse(fs.readFileSync(getCurateTuningConfigPath(main), 'utf-8'))).toEqual({ model: 'sonnet', debug: false });
     expect(fs.existsSync(path.join(wt, '.devflow'))).toBe(false);
   });
 
@@ -138,7 +138,7 @@ describe('devflow learning in a linked worktree acts on the main checkout\'s led
     vi.mocked(p.select).mockResolvedValueOnce('haiku').mockResolvedValueOnce('project');
     vi.mocked(p.confirm).mockResolvedValueOnce(true);
     await learningCommand.parseAsync(['--configure'], { from: 'user' });
-    expect(JSON.parse(fs.readFileSync(getLearningTuningConfigPath(plain), 'utf-8'))).toEqual({ model: 'haiku', debug: true });
+    expect(JSON.parse(fs.readFileSync(getCurateTuningConfigPath(plain), 'utf-8'))).toEqual({ model: 'haiku', debug: true });
   });
 
   it('--disable drains the main checkout\'s learning queue', async () => {

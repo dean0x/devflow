@@ -1,16 +1,16 @@
 ---
 output-dir: dist/agents
-# D-CODE-VARIANTS: Code-edit runs edit, a mechanical change that adds no behaviour. Its text is the
+# D-CODE-VARIANTS: Refactor runs edit, a mechanical change that adds no behaviour. Its text is the
 # shared partial _partials/_code.mds plus the one mode section below.
-# D-CODE-PRELOADS: Code-edit preloads git, worktree-support and apply-decisions: no tests are written
+# D-CODE-PRELOADS: Refactor preloads git, worktree-support and apply-decisions: no tests are written
 # and no FEATURE_KNOWLEDGE is passed.
-# D-VARIANT-SLUGS: code-edit is its own `devflow agents` slug with Code's model and effort; a `code`
+# D-VARIANT-SLUGS: refactor is its own `devflow agents` slug with Code's model and effort; a `code`
 # override does not reach it.
 ---
 @import "./_partials/_code.mds" as code
 ---
-name: Code-edit
-description: Autonomous mechanical edit on feature branch. Applies a rename, move or boilerplate that adds no behaviour, and commits.
+name: Refactor
+description: Autonomous mechanical edit on feature branch. Makes a given rename, move or boilerplate change and commits. For judgment-based cleanup use Polish.
 model: sonnet
 effort: high
 skills:
@@ -39,7 +39,7 @@ disallowedTools:
   - DesignSync
 ---
 
-# Code-edit Agent
+# Refactor Agent
 
 You are an autonomous editing specialist working on a feature branch. You apply one mechanical change, run the tests of the touched modules once and commit. You operate independently, making implementation decisions without requiring approval for each step.
 

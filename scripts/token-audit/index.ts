@@ -19,7 +19,7 @@ import { SESSION_ID_RE, discoverSessions, projectTranscriptDir, readSubagentMeta
 import type { SessionFiles, SubagentMeta } from './discover.js';
 import { parseTranscriptFile } from './parse.js';
 import type { ParsedStream } from './parse.js';
-import { buildReport, renderJson, renderMarkdown } from './report.js';
+import { buildReport, canonicalAgentType, renderJson, renderMarkdown } from './report.js';
 import type { AuditReport, SessionData, SubagentData } from './report.js';
 import { buildSegments, linkSubagents } from './segment.js';
 import { DEFAULT_LIMITS, MAX_PATH_CHARS, NO_SKIPS, addSkips, exitCodeFor, sanitizeText } from './types.js';
@@ -34,7 +34,7 @@ const USAGE = `Usage: npm run audit:tokens -- (--project <cwd> | --dir <path>) [
   --session <id>        keep only this main session (and its subagents)
   --since <date>        keep requests and tool calls at or after this ISO date or timestamp (date-only is UTC)
   --until <date>        keep requests and tool calls before this ISO timestamp; a date-only value includes that day
-  --agent-type <type>   keep only subagents of this type (main sessions are unaffected)
+  --agent-type <type>   keep only subagents of this type, old or current spelling (main sessions are unaffected)
   --json                print the report as JSON
   --help                print this help
 
@@ -274,7 +274,7 @@ async function loadSession(files: SessionFiles, opts: AuditOptions, window: Time
     if (!metaRead.ok) skipped = addSkips(skipped, { badMeta: 1 });
     const meta = metaRead.ok ? metaRead.value : { agentType: null, toolUseId: null, parentAgentId: null };
     const type = meta.agentType ?? 'unknown';
-    if (opts.agentType !== null && type !== opts.agentType) continue;
+    if (opts.agentType !== null && canonicalAgentType(type) !== canonicalAgentType(opts.agentType)) continue;
     const parsed = await parseTranscriptFile(file.path, limits, window);
     if (!parsed.ok) {
       skipped = addSkips(skipped, { unreadableFiles: 1, symlinks: parsed.error.kind === 'symlink' ? 1 : 0 });

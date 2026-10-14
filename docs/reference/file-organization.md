@@ -31,7 +31,7 @@ devflow/
 │   │   ├── git.ts                    # getGitRoot
 │   │   ├── project-paths.ts          # Per-project .devflow/ path construction
 │   │   ├── learning-store.ts         # Typed seam onto hooks/lib/learning-store.cjs, the store `devflow learning` runs
-│   │   └── ...                       # feature-config.ts, learning-tuning-config.ts, …
+│   │   └── ...                       # feature-config.ts, curate-tuning-config.ts, …
 │   ├── hud/                          # HUD module (TypeScript source)
 │   │   ├── index.ts                  # Entry point: stdin → gather → render → stdout
 │   │   ├── render.ts                 # Smart multi-line layout assembly
@@ -52,12 +52,12 @@ devflow/
 │       │   │   ├── SKILL.md
 │       │   │   └── references/
 │       │   ├── agent-references/     # Reference-only skill: never preloaded; read by explicit path
-│       │   │   └── references/       # synthesize/, learning/, commands/ (rare command branches)
+│       │   │   └── references/       # synthesize/, curate/, commands/ (rare command branches)
 │       │   ├── software-design/
 │       │   └── ...
 │       ├── agents/                   # 20 agents — hand-authored .md, plus MDS generator hosts (.mds → dist/agents/)
 │       │   ├── git.mds                 # MDS generator host → dist/agents/git.md
-│       │   ├── code.mds                # MDS generator host → dist/agents/code.md (eleven agents are hosts besides git; code-fix.mds and code-edit.mds are the other Code variants)
+│       │   ├── code.mds                # MDS generator host → dist/agents/code.md (eleven agents are hosts besides git; fix.mds and refactor.mds are the other Code variants)
 │       │   ├── _partials/_code.mds     # Partial the three Code hosts import (no output-dir:, never compiled directly)
 │       │   ├── synthesize.md
 │       │   └── ...
@@ -102,7 +102,7 @@ devflow/
 │               ├── background-memory-update # Detached claude -p worker on agents.memory (default claude-sonnet-5-5, high effort; `devflow agents` overrides it): drains queue → staged write → CAS swap to WORKING-MEMORY.md (spawned by memory-worker)
 │               ├── learning-lock         # Shared helper: mkdir-based locking
 │               ├── session-start-memory  # SessionStart hook: injects memory + git state; recovers orphaned .pending-turns.processing itself
-│               ├── session-start-context # SessionStart hook: injects the decisions TL;DR counts and index path + the Learning agent spawn directive when the queue is pending
+│               ├── session-start-context # SessionStart hook: injects the decisions TL;DR counts and index path + the Curate agent spawn directive when the queue is pending
 │               ├── session-start-orchestrator # SessionStart hook (ambient, presence-gated): injects orchestrator charter (git repos only)
 │               ├── pre-compact-memory    # PreCompact hook: saves git state + WORKING-MEMORY.md snapshot; bootstraps WORKING-MEMORY.md with HEAD-SHA stamp when absent (requires non-empty branch + 40-hex sha)
 │               ├── preamble              # UserPromptSubmit hook (ambient, presence-gated): plan-handoff fast-path + slash skip + orchestrator reminder (git repos only)
@@ -157,7 +157,7 @@ Plugins are entries in `DEVFLOW_PLUGINS` in `src/core/plugins.ts` — no per-plu
   name: 'devflow-implement',
   description: 'Complete task implementation workflow - accepts plan documents, issues, or task descriptions',
   commands: ['/implement'],
-  agents: ['git', 'code', 'simplify', 'scrutinize', 'evaluate', 'test', 'validate', 'knowledge'],
+  agents: ['git', 'code', 'fix', 'polish', 'harden', 'evaluate', 'test', 'validate', 'knowledge'],
   skills: ['patterns', 'qa', 'quality-gates', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
   requires: ['git', 'testing', 'test-driven-development', 'software-design', /* … */],
   rules: [],
@@ -215,7 +215,7 @@ Assets live once in `src/assets/` and install to the user's `~/.claude/` — no 
 
 ### Agents
 
-All 20 agents (`git`, `synthesize`, `skim`, `simplify`, `code`, `code-fix`, `code-edit`, `review`, `triage`, `evaluate`, `test`, `scrutinize`, `validate`, `design`, `knowledge`, `research`, `diagnose`, `learning`, `tracker`, `explore`) are shared, and every source lives in `src/assets/agents/`. Eight (`synthesize`, `simplify`, `evaluate`, `test`, `validate`, `learning`, `tracker`, `explore`) are hand-authored `.md` files that install verbatim. The other twelve (`git`, `code`, `code-fix`, `code-edit`, `design`, `diagnose`, `knowledge`, `research`, `review`, `scrutinize`, `triage`, `skim`) are `.mds` generator hosts, compiled to `dist/agents/{name}.md` by `npm run build:mds`. The three Code hosts import the partial `_partials/_code.mds`, which declares no `output-dir:` and is never compiled directly.
+All 20 agents (`git`, `synthesize`, `skim`, `polish`, `code`, `fix`, `refactor`, `review`, `triage`, `evaluate`, `test`, `harden`, `validate`, `design`, `knowledge`, `research`, `debug`, `curate`, `tracker`, `explore`) are shared, and every source lives in `src/assets/agents/`. Eight (`synthesize`, `polish`, `evaluate`, `test`, `validate`, `curate`, `tracker`, `explore`) are hand-authored `.md` files that install verbatim. The other twelve (`git`, `code`, `fix`, `refactor`, `design`, `debug`, `knowledge`, `research`, `review`, `harden`, `triage`, `skim`) are `.mds` generator hosts, compiled to `dist/agents/{name}.md` by `npm run build:mds`. The three Code hosts import the partial `_partials/_code.mds`, which declares no `output-dir:` and is never compiled directly.
 
 The installer resolves each declared agent over `agentSourceDirs()` in `src/core/assets.ts` — `dist/agents/`, then `src/assets/agents/` — and copies the first hit, so a compiled artifact supersedes a hand-authored file of the same name. When neither directory has the agent, the install throws naming both candidate paths and `npm run build:mds` rather than silently skipping it. `npm run build:cli` alone (TypeScript) does not produce installable agents; `npm run build` runs both steps.
 
@@ -245,12 +245,12 @@ A capture/spawn split across always-on shell-script hooks. Queue-append (`captur
 | `memory-worker` | Stop (runs in parallel with `capture-turn`; the worker leaves a queue holding only user rows for its next run) | After the 120s throttle (keyed by `.working-memory-last-trigger` mtime), spawns `background-memory-update` as a detached `nohup` worker, a `claude -p` run on `agents.memory` (default `claude-sonnet-5-5`, high effort; `devflow agents` overrides it) |
 | `background-memory-update` | Detached worker (spawned by `memory-worker`) | Drains `.pending-turns.jsonl` → calls `claude -p` on `agents.memory` (default `claude-sonnet-5-5`, high effort; `devflow agents` overrides it; prompt on stdin, reconciliation-aware: bounded git evidence since last stamp, DONE definition) → model writes to `WORKING-MEMORY.md.new` only. CAS verify-and-swap: if `WORKING-MEMORY.md` is byte-identical to the pre-run snapshot, renames `.new` → `WORKING-MEMORY.md` (UPDATED), removes `.processing`, touches `.last-refresh-ok`. CONFLICT (human edited file during run): keeps human's version, discards `.new`, leaves `.processing` for retry. FAIL (staged file absent or un-stamped): leaves `.processing` for crash recovery at next SessionStart. |
 | `session-start-memory` | SessionStart | Reads the already-fresh `WORKING-MEMORY.md` and injects it as `additionalContext` with a git-reconciled 3-state header (A in-sync / B drifted / C refresh-failing banner); also recovers an orphaned `.pending-turns.processing` itself (self-contained cold path) |
-| `session-start-context` | SessionStart | Injects the decisions TL;DR counts and the path of `index.md` and, when the learning queue is non-empty (or a crashed run left a stale `.processing` batch), a `--- LEARNING MAINTENANCE ---` directive instructing the main model to **silently** spawn the background Learning agent with the resolved model (a valid project `.devflow/learning/learning.json` → the `devflow agents` Learning mapping in `~/.devflow/agent-models.json`, which sends no model so the installed frontmatter decides → a valid global `~/.devflow/learning.json` → none; the first layer that supplies a model decides) |
+| `session-start-context` | SessionStart | Injects the decisions TL;DR counts and the path of `index.md` and, when the learning queue is non-empty (or a crashed run left a stale `.processing` batch), a `--- LEARNING MAINTENANCE ---` directive instructing the main model to **silently** spawn the background Curate agent with the resolved model (a valid project `.devflow/learning/learning.json` → the `devflow agents` Curate mapping in `~/.devflow/agent-models.json`, which sends no model so the installed frontmatter decides → a valid global `~/.devflow/learning.json` → none; the first layer that supplies a model decides) |
 | `pre-compact-memory` | PreCompact | Saves git state + WORKING-MEMORY.md snapshot; bootstraps a minimal WORKING-MEMORY.md (with `<!-- memory-head: <40-hex sha> branch: <name> -->` stamp on line 1 and 5 canonical sections) when absent — requires both a non-empty branch name and a 40-hex HEAD sha (detached HEAD and unborn branch skip bootstrap) |
 | `session-start-orchestrator` | SessionStart (ambient, presence-gated) | Injects the orchestrator charter as `additionalContext`; silent outside git repos |
 | `preamble` | UserPromptSubmit (ambient, presence-gated) | Plan-handoff fast-path (`Implement the following plan:` → `devflow:implement`), slash skip, and orchestrator reminder; silent outside git repos |
 
-**Flow**: User sends prompt → `capture-prompt` appends the user turn to both queues → session ends → `capture-turn` appends the assistant turn to both queues, then `memory-worker` spawns `background-memory-update` (if the 120s throttle has expired) which drains the queue, calls `claude -p` with the prompt on stdin, and writes the result via staged CAS to `WORKING-MEMORY.md`. On `/clear` or new session → `session-start-memory` injects the already-written `WORKING-MEMORY.md` as `additionalContext` (3-state git-reconciled header); `session-start-context` injects the decisions TL;DR counts and the index path and, when the learning queue has pending turns, the Learning maintenance directive — the main model silently spawns the Learning agent in the background, which claims the queue with the `claim-queue` op, detects decisions and pitfalls and maintains the entries through the learning ops, releases the claim as its final act, and reports a 1–3 line summary.
+**Flow**: User sends prompt → `capture-prompt` appends the user turn to both queues → session ends → `capture-turn` appends the assistant turn to both queues, then `memory-worker` spawns `background-memory-update` (if the 120s throttle has expired) which drains the queue, calls `claude -p` with the prompt on stdin, and writes the result via staged CAS to `WORKING-MEMORY.md`. On `/clear` or new session → `session-start-memory` injects the already-written `WORKING-MEMORY.md` as `additionalContext` (3-state git-reconciled header); `session-start-context` injects the decisions TL;DR counts and the index path and, when the learning queue has pending turns, the Learning maintenance directive — the main model silently spawns the Curate agent in the background, which claims the queue with the `claim-queue` op, detects decisions and pitfalls and maintains the entries through the learning ops, releases the claim as its final act, and reports a 1–3 line summary.
 
 `devflow memory --disable` writes `features.memory: false` to `~/.devflow/manifest.json`, removes the three memory hooks and drains the current repo's memory queue; the always-on capture hooks stay registered (shared with learning) and stop appending to the memory queue. Use `devflow memory --clear` to clean up pending memory queue files across all projects, or `devflow learning --clear`/`--reset` for the learning queue and learning state.
 
@@ -278,7 +278,7 @@ The data behind them is gitignored. Apart from the queue, which the capture hook
 | `*.pre-v2.jsonl` | Copies of the log, the ledger and the archive, made once by the first write to a tree that still held v1 rows (D-V1-BACKUP-ONCE) |
 | `.pending-turns.jsonl`, `.pending-turns.processing`, `.pending-turns.owner` | The queue, the claimed batch and its owner's token (D-OWNED-CLAIM) |
 
-The Learning agent writes only through `json-helper.cjs` ops. Each runs from the project root, takes any text it needs as one JSON object on stdin, and never creates `.devflow/learning/`: where it is absent, a writer refuses (D-NO-STRAY-TREE):
+The Curate agent writes only through `json-helper.cjs` ops. Each runs from the project root, takes any text it needs as one JSON object on stdin, and never creates `.devflow/learning/`: where it is absent, a writer refuses (D-NO-STRAY-TREE):
 
 - `put-observation --create|--update|--reinforce` validates and stores an observation. An update carries the whole content and never merges (D-PUT-NOT-MERGE), and the active entries the observation backs are re-projected and re-rendered under the same lock (D-PUT-REPROJECTS).
 - `assign-anchor <decision|pitfall> <obs_id>` promotes an observation the ledger does not carry yet, numbering by the ledger registry and skipping any number a tracked file cites (D-LEDGER-REGISTRY, D-E4-SKIP).

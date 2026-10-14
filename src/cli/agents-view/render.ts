@@ -26,7 +26,7 @@
  * fits whole inside the cursor's "‹ … ›" wrapper with the dirty marker
  * ("‹ default (medium) ● ›", 22) — the shipped effort (D-SHIPPED-EFFORT) and the
  * unsaved mark are never clipped on the cursor row. The agent names the registry
- * holds are at most 10 characters ("Scrutinize"); longer orphan keys are
+ * holds are at most 10 characters ("Synthesize"); longer orphan keys are
  * truncated by truncateVisible.
  *
  * MODEL has no such slack for a worker row, whose shipped default is a full

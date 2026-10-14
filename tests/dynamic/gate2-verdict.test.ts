@@ -534,9 +534,9 @@ const ROUTING_TABLE: readonly RoutingCase[] = [
     inputs: { plan: null, criteria: null, testPlan: TEST_PLAN_FIXTURE },
     testVerdict: 'FAIL',
     check: ({ gate2, spawns }) =>
-      gate2.testVerdict === 'FAIL-FIXED' && spawns.some(s => s.agentType === 'Code-fix')
+      gate2.testVerdict === 'FAIL-FIXED' && spawns.some(s => s.agentType === 'Fix')
         ? null
-        : `expected FAIL-FIXED after a Code-fix fix, got ${gate2.testVerdict}`,
+        : `expected FAIL-FIXED after a Fix fix, got ${gate2.testVerdict}`,
   },
 ]
 

@@ -136,9 +136,9 @@ describe('devflow agents and init (built CLI, temp HOME)', () => {
       expect(mappedRun.status, mappedRun.stdout + mappedRun.stderr).toBe(0);
 
       // D-AMBIENT-FOLLOWS-SWITCH: init runs with --no-ambient here, so an agent only the ambient plugin
-      // declares (Code-edit, which the orchestrator charter routes mechanical edits to) is not installed.
+      // declares (Refactor, which the orchestrator charter routes mechanical edits to) is not installed.
       const ambientOnly = getAllAgentNames().filter(name => !DEVFLOW_PLUGINS.some(p => p.name !== 'devflow-ambient' && p.agents.includes(name)));
-      expect(ambientOnly, 'the agents only ambient mode installs').toEqual(['code-edit']);
+      expect(ambientOnly, 'the agents only ambient mode installs').toEqual(['refactor']);
       for (const name of ambientOnly) {
         await expect(fs.access(path.join(installedAgentsDir(bare), `${name}.md`)), `${name} is not installed without ambient mode`).rejects.toThrow();
       }

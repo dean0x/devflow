@@ -467,18 +467,18 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
   },
   {
     literal: '7-day protection window',
-    removedFrom: 'src/assets/agents/learning.md',
+    removedFrom: 'src/assets/agents/curate.md',
     justification:
-      'The Learning agent left any entry dated within the past week untouched, keyed on the ledger ' +
+      'The Curate agent left any entry dated within the past week untouched, keyed on the ledger ' +
       'date with a last_seen fallback for rows that had none. Learning v2 hands out entries for ' +
       'maintenance through claim-due, oldest verification first with a one-day lease, so a new ' +
       'entry is not due until its verification ages, and the window has nothing left to protect.',
   },
   {
     literal: '≤5 curation changes',
-    removedFrom: 'src/assets/agents/learning.md',
+    removedFrom: 'src/assets/agents/curate.md',
     justification:
-      'The Learning agent stopped curating after five changes per run. claim-due now bounds each ' +
+      'The Curate agent stopped curating after five changes per run. claim-due now bounds each ' +
       'run by handing out a small leased batch within a byte budget, and the agent takes exactly ' +
       'one final action per entry it was handed, so a prose cap on top of the plumbing bound ' +
       'would only leave handed-out entries unfinished.',
@@ -497,7 +497,7 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
   //
   // Scoped to the trees that carried the procedure: the agent bodies and the
   // command layer, source and compiled. The spellings are legitimate elsewhere
-  // (the session-start hook spawns the Learning agent in the background, and
+  // (the session-start hook spawns the Curate agent in the background, and
   // docs/reference/platform-assumptions.md describes what was measured), so a
   // repo-wide entry would be a grep rather than a rule.
   // -------------------------------------------------------------------------

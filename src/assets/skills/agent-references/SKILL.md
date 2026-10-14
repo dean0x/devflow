@@ -11,7 +11,7 @@ allowed-tools: Read
 <!-- D-AGENT-REFS: a reference-only skill. It holds text that one agent mode needs and the
      other modes do not, so the agent body stays small and the spawn reads one file on demand.
      D-MODE-BY-PATH: Synthesize reads exactly one synthesize/{mode}.md by explicit path.
-     D-MAINTAIN-ON-DUE: Learning reads learning/maintain.md only after claim-due hands out an entry.
+     D-MAINTAIN-ON-DUE: Curate reads curate/maintain.md only after claim-due hands out an entry.
      D-CMD-REF-HAND: a command moves a rare branch here (hand-authored, byte for byte) and keeps only
      the condition and the read path, so a run that never takes the branch never carries its text.
      Only text with no learning arm and no Git-spawn fence moves. -->
@@ -29,7 +29,7 @@ allowed-tools: Read
 | Path under `references/` | Owner | Read when |
 |--------------------------|-------|-----------|
 | `synthesize/{mode}.md` | Synthesize | The prompt's `Mode:` line names `{mode}` |
-| `learning/maintain.md` | Learning | `claim-due` hands out at least one entry |
+| `curate/maintain.md` | Curate | `claim-due` hands out at least one entry |
 | `commands/{name}.md` | The command named in the file | The command's condition for that branch holds |
 
 The installed directory is `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/devflow:agent-references/`.

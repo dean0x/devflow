@@ -164,11 +164,11 @@ Phase 11 passes the resolved value to the evidence script (`publish`), which dec
 
 {{compliance.compliance_inject()}}
 
-Pass `COMPLIANCE_DIRECTIVE` to every Code and Code-fix spawn, on a line of its own.
+Pass `COMPLIANCE_DIRECTIVE` to every Code and Fix spawn, on a line of its own.
 
 {{decisions_load()}}
 <!-- learning:on -->
-Pass `DECISIONS_CONTEXT` to Code agent (Phase 2) and Scrutinize agent (Phase 4).
+Pass `DECISIONS_CONTEXT` to Code agent (Phase 2) and Harden agent (Phase 4).
 
 <!-- learning:end -->
 {{knowledge_load()}}
@@ -295,16 +295,16 @@ DECISIONS_CONTEXT: {decisions_context}
 - Different files/modules with no imports between them
 - Each subtask is self-contained
 
-### Phase 3: Simplify
+### Phase 3: Polish
 
-**Produces:** SIMPLIFY_OUTPUT
+**Produces:** POLISH_OUTPUT
 **Requires:** FILES_CHANGED
 
-After the Code agent completes, spawn Simplify agent to polish the code. The Phase 6 Validate covers its commits.
+After the Code agent completes, spawn Polish agent to polish the code. The Phase 6 Validate covers its commits.
 
 ```
-Agent(subagent_type="Simplify"):
-"Simplify recently implemented code
+Agent(subagent_type="Polish"):
+"Polish recently implemented code
 Task: {task description}
 FILES_CHANGED: {list of files from Code agent output}
 Focus on code modified by Code agent, apply project standards, enhance clarity
@@ -313,13 +313,13 @@ Commit any improvements with a conventional-commit message."
 
 ### Phase 4: Self-Review
 
-**Produces:** SCRUTINIZE_OUTPUT
+**Produces:** HARDEN_OUTPUT
 **Requires:** FILES_CHANGED
 
-After Simplify agent completes, spawn Scrutinize agent as the quality gate:
+After Polish agent completes, spawn Harden agent as the quality gate:
 
 ```
-Agent(subagent_type="Scrutinize"):
+Agent(subagent_type="Harden"):
 "TASK_DESCRIPTION: {task description}
 FILES_CHANGED: {list of files from Code agent output}
 <!-- learning:on -->
@@ -329,14 +329,14 @@ FEATURE_KNOWLEDGE: {feature_knowledge_rules}
 Evaluate 9 pillars, fix P0/P1 issues, report status"
 ```
 
-Scrutinize agent reports `### Status: PASS | FIXED | BLOCKED`. **If BLOCKED:** report to user and halt. **If PASS or FIXED:** continue to Phase 5. A FIXED status commits fixes and starts no Validate of its own: the Phase 6 run covers them.
+Harden agent reports `### Status: PASS | FIXED | BLOCKED`. **If BLOCKED:** report to user and halt. **If PASS or FIXED:** continue to Phase 5. A FIXED status commits fixes and starts no Validate of its own: the Phase 6 run covers them.
 
 ### Phase 5: Alignment Check
 
 **Produces:** ALIGNMENT_RESULT
 **Requires:** FILES_CHANGED, EXECUTION_PLAN
 
-After Scrutinize agent passes, spawn Evaluate agent to validate alignment. Evaluate agent receives `FEATURE_KNOWLEDGE_RULES` as acceptance context only; pattern and anti-pattern judgments belong to Scrutinize agent:
+After Harden agent passes, spawn Evaluate agent to validate alignment. Evaluate agent receives `FEATURE_KNOWLEDGE_RULES` as acceptance context only; pattern and anti-pattern judgments belong to Harden agent:
 
 ```
 Agent(subagent_type="Evaluate"):
@@ -354,9 +354,9 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
 1. Extract misalignment details from Evaluate agent output
 2. Increment `alignment_fix_count`
 3. If `alignment_fix_count <= 2`:
-   - Spawn Code-fix agent to fix misalignments:
+   - Spawn Fix agent to fix misalignments:
    ```
-   Agent(subagent_type="Code-fix"):
+   Agent(subagent_type="Fix"):
    "OPERATION: alignment-fix
    TASK_ID: {task-id}
    TASK_DESCRIPTION: Fix alignment issues
@@ -375,7 +375,7 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
 **Produces:** VALIDATION_RESULT, VALIDATED_HEAD
 **Requires:** BASE_BRANCH
 
-Validate takes the one full-suite slot, after every commit it must cover: Code, Simplify, Scrutinize and the alignment fixes. After Evaluate agent passes, spawn Validate agent. `FILES_CHANGED` is the branch diff, because the Code agent's own list misses the Simplify, Scrutinize and fix commits (`{base}` is `BASE_BRANCH`):
+Validate takes the one full-suite slot, after every commit it must cover: Code, Polish, Harden and the alignment fixes. After Evaluate agent passes, spawn Validate agent. `FILES_CHANGED` is the branch diff, because the Code agent's own list misses the Polish, Harden and fix commits (`{base}` is `BASE_BRANCH`):
 
 ```
 Agent(subagent_type="Validate"):
@@ -388,9 +388,9 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
 1. Extract failure details from Validate agent output
 2. Increment `validation_retry_count`
 3. If `validation_retry_count <= 2`:
-   - Spawn Code-fix agent with fix context:
+   - Spawn Fix agent with fix context:
    ```
-   Agent(subagent_type="Code-fix"):
+   Agent(subagent_type="Fix"):
    "OPERATION: validation-fix
    TASK_ID: {task-id}
    TASK_DESCRIPTION: Fix validation failures
@@ -442,9 +442,9 @@ After every Test agent run — PASS or FAIL, first run or retry — append its T
 1. Extract failure details from Test agent output
 2. Increment `qa_retry_count`
 3. If `qa_retry_count <= 2`:
-   - Spawn Code-fix agent to fix QA failures:
+   - Spawn Fix agent to fix QA failures:
    ```
-   Agent(subagent_type="Code-fix"):
+   Agent(subagent_type="Fix"):
    "OPERATION: qa-fix
    TASK_ID: {task-id}
    TASK_DESCRIPTION: Fix QA test failures
@@ -499,7 +499,7 @@ COMMIT_UNCOMMITTED: false
 Open the pull request for this branch and return the pre-flight summary."
 ```
 
-`COMMIT_UNCOMMITTED: false` keeps the Git agent from committing a stray file: the Code, Simplify, Scrutinize and fix agents commit their own work. Capture the `- **PR**: #{number}` line of its `### Branch` as `PR_NUMBER`, its `### Uncommitted files` list and its `TRACEABILITY: DEGRADED ({reason})` lines for the Phase 12 report. If it returns `### Status: BLOCKED` or no PR number, report its reason to the user and stop at the report (Phase 12); Phases 10 and 11 do not run.
+`COMMIT_UNCOMMITTED: false` keeps the Git agent from committing a stray file: the Code, Polish, Harden and Fix agents commit their own work. Capture the `- **PR**: #{number}` line of its `### Branch` as `PR_NUMBER`, its `### Uncommitted files` list and its `TRACEABILITY: DEGRADED ({reason})` lines for the Phase 12 report. If it returns `### Status: BLOCKED` or no PR number, report its reason to the user and stop at the report (Phase 12); Phases 10 and 11 do not run.
 
 ### Phase 10: CI Status Gate
 
@@ -508,7 +508,7 @@ Open the pull request for this branch and return the pre-flight summary."
 
 Run under every strategy: Phase 9 opened the PR.
 
-**Push first, outside the gate block.** The gate reads CI for the pushed head, and the Simplify, Scrutinize and fix commits reach the PR only by a push. Push once — never force, and no retry:
+**Push first, outside the gate block.** The gate reads CI for the pushed head, and the Polish, Harden and Fix commits reach the PR only by a push. Push once — never force, and no retry:
 
 ```bash
 git push origin HEAD; echo "exit=$?"
@@ -523,9 +523,9 @@ git push origin HEAD; echo "exit=$?"
 4. **If PENDING** and fewer than 3 waits have run → wait again (step 1). After the third wait → report "CI still running — verify manually before merging" and proceed.
 5. **If INDETERMINATE** and fewer than 3 waits have run → wait again (step 1). After the third wait → report "CI status unknown — verify manually before merging" and proceed.
 <!-- learning:on -->
-6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Code-fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES`, `DECISIONS_CONTEXT` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Code-fix agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
+6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES`, `DECISIONS_CONTEXT` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Fix agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
 <!-- learning:off -->
-6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Code-fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Code-fix agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
+6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Fix agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
 <!-- learning:end -->
 7. **Budget**: at most 3 waits and 2 fixes in all. When one is spent, report the current status and proceed.
 <!-- /PATTERN: ci-status-gate -->
@@ -537,7 +537,7 @@ git push origin HEAD; echo "exit=$?"
 
 Run once, after Phase 10, under every strategy: the PR exists by now, opened in Phase 9. The re-validation path has no CI gate and runs this phase straight after Phase 9. Skip it only when Phase 9 stopped the run. A `ci` TP reads `INDETERMINATE` only when the CI gate could not tell or did not run.
 
-**Push first.** Every claim is keyed to the HEAD an agent reported, and a Scrutinize or fix agent may have committed without pushing; a claim whose SHA is not in the PR reads `UNVERIFIED`. So push the branch once before the script — never force, and no retry:
+**Push first.** Every claim is keyed to the HEAD an agent reported, and a Harden or Fix agent may have committed without pushing; a claim whose SHA is not in the PR reads `UNVERIFIED`. So push the branch once before the script — never force, and no retry:
 
 ```bash
 git push origin HEAD; echo "exit=$?"
@@ -579,7 +579,7 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 │
 ├─ Phase 1: Setup
 ├─ Phase 2: Implement (3-strategy framework)
-├─ Phase 3: Simplify
+├─ Phase 3: Polish
 ├─ Phase 4: Self-Review
 ├─ Phase 5: Alignment Check
 ├─ Phase 6: Validate (the one full-suite slot)
@@ -600,7 +600,7 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 3. **Honest reporting** - Display agent outputs directly
 4. **Strict delegation** - Never perform agent work in main session. "Spawn X" means call Agent tool with X, not do X's work yourself
 5. **Validate agent owns validation** - Never run `npm test`, `npm run build`, or similar in main session; always delegate to Validate agent
-6. **Code-fix agent owns fixes** - Never implement fixes in main session; spawn Code-fix agent for validation failures and alignment fixes
+6. **Fix agent owns fixes** - Never implement fixes in main session; spawn Fix agent for validation failures and alignment fixes
 7. **Loop limits** - Max 2 validation retries, max 2 alignment fix iterations, max 2 QA retries before escalating to user; the CI gate allows at most 3 waits and 2 fixes
 8. **CI awareness** - CI status is checked before merge under every strategy, once Phase 9 has opened the PR; test-plan evidence (Phase 11) is recorded under every strategy once the PR exists
 

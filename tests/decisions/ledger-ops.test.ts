@@ -1733,7 +1733,7 @@ describe('refresh-anchor — pre-existing corpus fixture (REG-S1)', { timeout: 3
 // D-LEDGER-MAIN-WORKTREE (TP-17): the ledger ops run where the directive points
 // ---------------------------------------------------------------------------
 //
-// The Learning agent runs every ledger op from the "Project root:" its spawn
+// The Curate agent runs every ledger op from the "Project root:" its spawn
 // directive names. In a linked worktree session-start-context names the MAIN
 // worktree (resolve-project-root's df_resolve_roots), so an op minted from a
 // worktree session continues the repository's numbering. From the worktree's own

@@ -18,8 +18,8 @@
  * listing it among its inputs); this file does not type it. Spawn sites come from
  * `collectCodeSpawnSites` in tests/helpers.ts, the one collector the OPERATION guard
  * and the compliance-lens test read, so the three count the same sites. It takes the
- * agent type as a parameter and, with none, reads the whole Code family (Code, Code-fix and
- * Code-edit: D-CODE-VARIANTS), so a fix spawn moved to Code-fix keeps the rule 1 check.
+ * agent type as a parameter and, with none, reads the whole Code family (Code, Fix and
+ * Refactor: D-CODE-VARIANTS), so a fix spawn moved to Fix keeps the rule 1 check.
  *
  * Rule 3 reads unfenced prose only: a fenced payload is a spawn, and rules 1 and 2
  * read it. Sentences that cannot name a declared receiver by construction — a
@@ -46,7 +46,7 @@ import {
 const CONTEXT_TOKEN = 'DECISIONS_CONTEXT'
 
 /**
- * Code-family spawn sites (Code, Code-fix and Code-edit, D-CODE-VARIANTS) the four hosts carry today
+ * Code-family spawn sites (Code, Fix and Refactor, D-CODE-VARIANTS) the four hosts carry today
  * (implement 9, resolve 3, debug 1, dynamic-build 8). Floor: may only rise.
  */
 const CODE_SITE_FLOOR = 21
@@ -229,13 +229,13 @@ describe('the declared set is computed from the agent sources', () => {
   it('is the ten agents that list DECISIONS_CONTEXT among their inputs, the three Code variants among them', () => {
     const declared = collectDeclaredTypes()
     expect([...declared].sort()).toEqual(
-      ['Code', 'Code-edit', 'Code-fix', 'Design', 'Diagnose', 'Knowledge', 'Research', 'Review', 'Scrutinize', 'Triage'],
+      ['Code', 'Debug', 'Design', 'Fix', 'Harden', 'Knowledge', 'Refactor', 'Research', 'Review', 'Triage'],
     )
   })
 
   it('does not declare the agents that never take the index', () => {
     const declared = collectDeclaredTypes()
-    for (const type of ['Validate', 'Git', 'Evaluate', 'Synthesize', 'Simplify', 'Test', 'Skim']) {
+    for (const type of ['Validate', 'Git', 'Evaluate', 'Synthesize', 'Polish', 'Test', 'Skim']) {
       expect(declared.has(type), type).toBe(false)
     }
   })
@@ -312,7 +312,7 @@ describe('rule 2: a site that passes the key names a declared type', () => {
     expect(collectUndeclaredReceivers(compiled(), collectDeclaredTypes())).toEqual([])
   })
 
-  it('the declared receivers do pass it (non-vacuous: Triage, Design, Review, Scrutinize, Code)', () => {
+  it('the declared receivers do pass it (non-vacuous: Triage, Design, Review, Harden, Code)', () => {
     const declared = collectDeclaredTypes()
     const passing = new Set<string>()
     for (const [file, text] of compiled()) {
@@ -320,7 +320,7 @@ describe('rule 2: a site that passes the key names a declared type', () => {
         if (declared.has(type) && collectCodeSpawnSites(file, text, type).some(s => s.payload.includes(CONTEXT_TOKEN))) passing.add(type)
       }
     }
-    for (const type of ['Triage', 'Design', 'Review', 'Scrutinize', 'Code']) expect(passing.has(type), type).toBe(true)
+    for (const type of ['Triage', 'Design', 'Review', 'Harden', 'Code']) expect(passing.has(type), type).toBe(true)
   })
 
   it('known-bad probe: a Validate spawn handed the key is reported', () => {
@@ -415,7 +415,7 @@ describe('rule 3: every sentence that gives the key away names a declared receiv
     expect(ok('Pass `DECISIONS_CONTEXT` to all Review agents.')).toEqual([])
     expect(ok('Pass `DECISIONS_CONTEXT` to the Triage agent in Phase 2 and to Code agents in Phase 4.')).toEqual([])
     expect(ok('Pass `DECISIONS_CONTEXT` to Design agents only.')).toEqual([])
-    expect(ok('Then inject the relevant DECISIONS_CONTEXT into the prompts of the Code, Design, Knowledge, Review and Scrutinize agents, using the algorithm.')).toEqual([])
+    expect(ok('Then inject the relevant DECISIONS_CONTEXT into the prompts of the Code, Design, Knowledge, Review and Harden agents, using the algorithm.')).toEqual([])
   })
 
   it('a fenced line is not a sentence: a JavaScript comment that says "injected" is left to rules 1 and 2', () => {
@@ -444,23 +444,23 @@ describe('the authoring step names declared receivers only (AC-125)', () => {
     expect(note).not.toContain('Evaluate')
   })
 
-  it('the inject sentence names every valid agent type that declares the key, the Code-fix variant included', () => {
+  it('the inject sentence names every valid agent type that declares the key, the Fix variant included', () => {
     const declared = collectDeclaredTypes()
     const hosts = ['dynamic-build.md', 'dynamic-plan.md', 'dynamic-profile.md', 'dynamic-tickets.md']
     // Non-vacuity: the valid-and-declared types are read, and the Code-family variant a workflow spawns is among them.
     const reachable = (collectValidAgentTypes(requireDistFile(hosts[0])) ?? []).filter(t => declared.has(t))
     expect(reachable.length, 'valid agent types that declare the key').toBeGreaterThanOrEqual(2)
-    expect(reachable).toContain('Code-fix')
+    expect(reachable).toContain('Fix')
     for (const host of hosts) expect(collectUnnamedReceivers(host, requireDistFile(host), declared), host).toEqual([])
   })
 
-  it('known-bad probe: an inject sentence that drops Code-fix is reported', () => {
+  it('known-bad probe: an inject sentence that drops Fix is reported', () => {
     const declared = collectDeclaredTypes()
     const text = requireDistFile('dynamic-build.md')
-    const dropped = text.replace('the Code, Code-fix, Design,', 'the Code, Design,')
-    expect(dropped, 'the sentence names Code-fix beside Code').not.toBe(text)
+    const dropped = text.replace('the Code, Fix, Design,', 'the Code, Design,')
+    expect(dropped, 'the sentence names Fix beside Code').not.toBe(text)
     expect(collectUnnamedReceivers('dynamic-build.md', dropped, declared)).toEqual([
-      'dynamic-build.md: the inject sentence omits Code-fix, which is valid and declares the key',
+      'dynamic-build.md: the inject sentence omits Fix, which is valid and declares the key',
     ])
   })
 })

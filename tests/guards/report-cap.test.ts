@@ -15,13 +15,13 @@
  *
  * The roster is DERIVED from DEVFLOW_PLUGINS, never listed here, so a new agent
  * without a cap line fails the guard instead of slipping past a stale list.
- * Two agents are excluded, each by name and for a stated reason: `learning` and
+ * Two agents are excluded, each by name and for a stated reason: `curate` and
  * `tracker` are spawned by the session-start hook and are never roster members of a
  * command or workflow. `git` was a third until the Git agent split (#425) gave it
  * an `## Output` section that ends in a cap line and paid for it out of that
  * split's byte cut; its per-operation Output templates stay where they are.
  *
- * Sections are read fence-aware: the Design, Review and Diagnose templates carry
+ * Sections are read fence-aware: the Design, Review and Debug templates carry
  * `## ` lines inside fenced blocks, and those are template payload, not section
  * boundaries. A section ends at the next UNFENCED `## ` heading.
  *
@@ -38,7 +38,7 @@ import { DEVFLOW_PLUGINS } from '../../src/core/plugins.js'
 
 /** Agents outside the roster, with the reason each is out. */
 const EXCLUDED: Readonly<Record<string, string>> = {
-  learning: 'hook-spawned by the session-start learning directive, never a roster member',
+  curate: 'hook-spawned by the session-start learning directive, never a roster member',
   tracker: 'hook-spawned by the session-start tracker-setup directive, never a roster member',
 }
 
@@ -52,19 +52,19 @@ const OUTPUT_HEADING: Readonly<Record<string, string>> = { research: '## Output 
 const EXEMPT_MARKERS: Readonly<Record<string, readonly string[]>> = {
   code: ['`## Verification` block', '`commitShas`', '`unresolved`'],
   // D-CODE-VARIANTS: the variants share Code's Output section from one partial, so they name the same exempt fields.
-  'code-fix': ['`## Verification` block', '`commitShas`', '`unresolved`'],
-  'code-edit': ['`## Verification` block', '`commitShas`', '`unresolved`'],
+  fix: ['`## Verification` block', '`commitShas`', '`unresolved`'],
+  refactor: ['`## Verification` block', '`commitShas`', '`unresolved`'],
   validate: ['`HEAD:` line', '| Command | Status | Exit | Duration |', '30 lines per failing command'],
   test: ['### Test Plan Evidence', '| ID | TP | Type |', '### Evidence Log'],
-  scrutinize: ['`### Status` line', '`status` return field'],
-  simplify: ['completion status', 'commits'],
+  harden: ['`### Status` line', '`status` return field'],
+  polish: ['completion status', 'commits'],
   evaluate: ['`### Status` line', '`### Misalignments Found`'],
   design: ['`## Findings` list'],
   skim: ['`### Relevant Files for Task`'],
   explore: [],
   knowledge: ['`KB_*` status block'],
   review: ['report path', '`filesExamined`', '`findings`'],
-  diagnose: ['Exempt: none'],
+  debug: ['Exempt: none'],
   research: ['Exempt: none'],
   triage: ['whole ledger'],
   synthesize: ['exploration, planning and design'],
@@ -161,8 +161,8 @@ describe('D-REPORT-CAP: the report cap on the roster', () => {
     expect(Object.keys(EXEMPT_MARKERS).sort(), 'every roster agent has an exempt-field record').toEqual([...roster].sort())
   })
 
-  it('excludes learning and tracker by name, each with a reason; git is on the roster', () => {
-    expect(Object.keys(EXCLUDED).sort()).toEqual(['learning', 'tracker'])
+  it('excludes curate and tracker by name, each with a reason; git is on the roster', () => {
+    expect(Object.keys(EXCLUDED).sort()).toEqual(['curate', 'tracker'])
     expect(roster, 'the Git agent split removed git\'s exclusion').toContain('git')
     for (const [name, reason] of Object.entries(EXCLUDED)) {
       expect(reason.length, `${name} needs a stated reason`).toBeGreaterThan(20)
@@ -243,10 +243,10 @@ describe('D-REPORT-CAP: the report cap on the roster', () => {
   it('known-bad probe: a ## line inside a fenced template is not a section boundary', () => {
     const cap = 'Report cap: about 1,500 tokens; `mktemp`; the message gives its path. Exempt: none.'
     const fenced = `## Output\n\n\`\`\`markdown\n## Findings\n\`\`\`\n\n${cap}\n\n## Principles\n`
-    expect(collectCapDefects('diagnose', fenced)).toEqual([])
+    expect(collectCapDefects('debug', fenced)).toEqual([])
     const naive = `## Output\n\n\`\`\`markdown\n## Findings\n${cap}\n\`\`\`\n\n## Principles\n`
-    expect(collectCapDefects('diagnose', naive), 'a cap line inside the fence is not the last line').toEqual([
-      'diagnose: the "## Output" section does not end with a "Report cap:" line',
+    expect(collectCapDefects('debug', naive), 'a cap line inside the fence is not the last line').toEqual([
+      'debug: the "## Output" section does not end with a "Report cap:" line',
     ])
   })
 

@@ -2,9 +2,9 @@
 
 // src/assets/scripts/hooks/json-helper.cjs
 // Provides jq-equivalent operations for hooks when jq is not installed, and the
-// learning ops the Learning agent runs from the project root.
+// learning ops the Curate agent runs from the project root.
 // SECURITY: This is a local CLI helper invoked only by shell hooks and the
-// Learning agent with controlled arguments. No operation takes a file path: a
+// Curate agent with controlled arguments. No operation takes a file path: a
 // file's content arrives on stdin (json-parse redirects it), and the learning ops
 // build every path from the current directory.
 // Usage: node json-helper.cjs <operation> [args...]

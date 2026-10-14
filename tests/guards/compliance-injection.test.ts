@@ -7,7 +7,7 @@
  * (D-COMPLIANCE-INSTALL-ALWAYS) and an install-time variant keyed on the machine switch would be wrong. The
  * only place that knows the resolved lens is the command, so the command carries the instruction:
  *
- *   AC-308  No Code-family body carries a compliance Skill call or a compliance input. Every Code and Code-fix
+ *   AC-308  No Code-family body carries a compliance Skill call or a compliance input. Every Code and Fix
  *           spawn site passes `COMPLIANCE_DIRECTIVE`, which is empty when `COMPLIANCE_FRAMEWORKS` is `off`,
  *           so a lens-off spawn carries nothing about compliance, not even `COMPLIANCE_FRAMEWORKS: off`.
  *   AC-309  No Review or Design body or preload carries compliance-only text. The compliance-focus spawns of
@@ -19,7 +19,7 @@
  * probe both call, over a corpus whose size is asserted first (a sweep that read nothing proves nothing).
  *
  * Out of scope by design: Triage. Its compliance paragraph dispositions findings the Review agents already
- * raised; it loads no skill and takes no lens, so the strict rule below does not read it. Scrutinize's
+ * raised; it loads no skill and takes no lens, so the strict rule below does not read it. Harden's
  * "pattern compliance checking" is unrelated to the lens.
  *
  * What a green run does NOT prove: that a model follows the directive, or that the orchestrating model
@@ -72,7 +72,7 @@ const CODE_SPAWN_FLOORS: Readonly<Record<string, number>> = {
 }
 
 /** Agents whose bodies may carry no compliance text at all (the Design focus list is the one allowance). */
-const STRICT_SLUGS = ['code', 'code-fix', 'code-edit', 'review', 'design'] as const
+const STRICT_SLUGS = ['code', 'fix', 'refactor', 'review', 'design'] as const
 
 /** The focus enumeration Design keeps: a list of focus names shared with every other focus, not compliance-only text. */
 const DESIGN_FOCUS_LIST = /completeness, architecture, security, performance, compliance, consistency, dependencies/
@@ -195,7 +195,7 @@ describe('AC-308: no Code-family body carries the compliance skill; each spawn s
     ).toEqual(Object.keys(CODE_SPAWN_FLOORS).sort())
   })
 
-  it('every Code and Code-fix spawn site passes the directive and none passes the raw lens', () => {
+  it('every Code and Fix spawn site passes the directive and none passes the raw lens', () => {
     const sites = codeSites()
     expect(collectUndirectedSites(sites)).toEqual([])
     expect(collectRawLensSites(sites)).toEqual([])
@@ -241,7 +241,7 @@ describe('AC-308: no Code-family body carries the compliance skill; each spawn s
 
   it('no Code-family body, learning on or off, names the compliance skill or the lens', () => {
     const agents = resolveAllAgents()
-    for (const slug of ['code', 'code-fix', 'code-edit']) {
+    for (const slug of ['code', 'fix', 'refactor']) {
       const source = agents.get(slug)
       expect(source, `${slug}: the agent is not in the registry`).toBeDefined()
       expect(source!.content.length, `${slug}: the body is empty — the guard would pass vacuously`).toBeGreaterThan(4_000)
@@ -306,13 +306,13 @@ describe('AC-308: no Code-family body carries the compliance skill; each spawn s
   })
 
   it('known-bad probe: a Code-family body that names the skill, takes the lens or mentions compliance is reported', () => {
-    const real = resolveAllAgents().get('code-fix')!.content
-    expect(collectAgentBodyDefects('code-fix', real), 'the real body is clean').toEqual([])
-    expect(collectAgentBodyDefects('code-fix', `${real}\n2. Invoke \`Skill(skill="devflow:compliance")\`.\n`))
+    const real = resolveAllAgents().get('fix')!.content
+    expect(collectAgentBodyDefects('fix', real), 'the real body is clean').toEqual([])
+    expect(collectAgentBodyDefects('fix', `${real}\n2. Invoke \`Skill(skill="devflow:compliance")\`.\n`))
       .toEqual(['names devflow:compliance', 'carries compliance text'])
-    expect(collectAgentBodyDefects('code-fix', `${real}\n- **COMPLIANCE_FRAMEWORKS** (optional): the lens\n`))
+    expect(collectAgentBodyDefects('fix', `${real}\n- **COMPLIANCE_FRAMEWORKS** (optional): the lens\n`))
       .toEqual(['names COMPLIANCE_FRAMEWORKS', 'carries compliance text'])
-    expect(collectAgentBodyDefects('code-fix', `${real}\nCheck compliance.\n`)).toEqual(['carries compliance text'])
+    expect(collectAgentBodyDefects('fix', `${real}\nCheck compliance.\n`)).toEqual(['carries compliance text'])
   })
 })
 

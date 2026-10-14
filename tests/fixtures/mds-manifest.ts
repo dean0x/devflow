@@ -111,8 +111,8 @@ export const MDS_PARTIALS = [
  * `_ops.mds`, `_ops_pr.mds` and `_ops_steps.mds` hold every Git operation's contract
  * and inline steps, written once (D-OP-CONTRACT-ONCE) and split three ways by
  * importer for the same compile-cost reason. `agents/_partials/_code.mds` holds the text the
- * three Code variants share (D-CODE-VARIANTS), imported by the `code`, `code-fix` and
- * `code-edit` agent hosts. Each is a partial because it declares no
+ * three Code variants share (D-CODE-VARIANTS), imported by the `code`, `fix` and
+ * `refactor` agent hosts. Each is a partial because it declares no
  * `output-dir:`: the build skips it and it reaches the artifact only through the
  * modules that import it.
  *
@@ -232,21 +232,21 @@ export const SETTINGS_BLOCK_HOSTS_LEARNING_OFF = [
  * src/assets/agents/{name}.mds → dist/agents/{name}.md. Git is the first; the other
  * eleven (the agents that declare learning input, plus Skim) are hosts so their
  * learning arms can be built into the learning-off variant. Code is three hosts
- * (D-CODE-VARIANTS): `code`, `code-fix` and `code-edit`, which share
+ * (D-CODE-VARIANTS): `code`, `fix` and `refactor`, which share
  * `src/assets/agents/_partials/_code.mds`. The rest of the agents stay hand-authored,
  * and an agent never has both an .md and an .mds source.
  */
 export const MDS_GENERATOR_HOSTS = [
   'code',
-  'code-edit',
-  'code-fix',
+  'debug',
   'design',
-  'diagnose',
+  'fix',
   'git',
+  'harden',
   'knowledge',
+  'refactor',
   'research',
   'review',
-  'scrutinize',
   'skim',
   'triage',
 ] as const;
@@ -260,7 +260,7 @@ export const MDS_GENERATOR_HOSTS = [
  *
  * All 14 command hosts (each loads decisions, or hands them on, behind an arm)
  * and the eleven agent hosts that declare `DECISIONS_CONTEXT` (ten, the three Code
- * variants among them) or take the `LEARNING` input (Skim). The Learning agent, `learning.md`, is hand-authored
+ * variants among them) or take the `LEARNING` input (Skim). The Curate agent, `curate.md`, is hand-authored
  * and runs only when learning is on, so it has no variant. The assertions over
  * this set hold at every step: the printed variant count and the files under
  * `dist/learning-off/` both equal it in both directions, the packed tarball
@@ -271,14 +271,14 @@ export const LEARNING_VARIANT_HOSTS: readonly string[] = [
   ...MDS_COMMAND_HOSTS.map(h => `commands/${h}`),
   ...[
     'code',
-    'code-edit',
-    'code-fix',
+    'debug',
     'design',
-    'diagnose',
+    'fix',
+    'harden',
     'knowledge',
+    'refactor',
     'research',
     'review',
-    'scrutinize',
     'skim',
     'triage',
   ].map(h => `agents/${h}`),

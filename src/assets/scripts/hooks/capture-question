@@ -62,7 +62,7 @@ df_resolve_roots "$CWD" 2>/dev/null || true
 PROJECT_ROOT="${DF_ROOT:-$CWD}"
 # The learning queue is the repository's, not the checkout's: in a linked worktree
 # it is the main worktree's queue (D-LEDGER-MAIN-WORKTREE, resolve-project-root),
-# the one the Learning agent drains into the shared ledger. Memory stays per checkout.
+# the one the Curate agent drains into the shared ledger. Memory stays per checkout.
 LEDGER_ROOT="${DF_LEDGER_ROOT:-$PROJECT_ROOT}"
 
 # The machine-wide manifest (the memory/learning switches, D-FEATURES-NARROW-ONLY

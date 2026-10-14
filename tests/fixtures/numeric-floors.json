@@ -80,7 +80,7 @@
       "pattern": "toBe(20)",
       "occurrences": 1,
       "sourceFile": "tests/guards/agent-source-resolver.test.ts",
-      "description": "resolveAllAgents() size — every DEVFLOW_PLUGINS agent resolves through the shared resolver (AC-0.7, GAP-07). 20 includes the hook-spawned Tracker agent, which is declared in devflow-core-skills.agents and filtered at install time rather than held outside the roster, Explore, devflow's override of the Claude Code built-in, and the Code-fix and Code-edit variants of the Code agent (D-CODE-VARIANTS). A floor may only rise."
+      "description": "resolveAllAgents() size — every DEVFLOW_PLUGINS agent resolves through the shared resolver (AC-0.7, GAP-07). 20 includes the hook-spawned Tracker agent, which is declared in devflow-core-skills.agents and filtered at install time rather than held outside the roster, Explore, devflow's override of the Claude Code built-in, and the Fix and Refactor variants of the Code agent (D-CODE-VARIANTS). A floor may only rise."
     },
     {
       "id": "seam-op-section-map",
@@ -264,7 +264,7 @@
       "pattern": "const SPAWNED_AGENT_TYPE_FLOOR = 17",
       "occurrences": 1,
       "sourceFile": "tests/guards/spawn-no-hardcoded-model.test.ts",
-      "description": "Distinct agent types the no-hardcoded-model guard (D-SPAWN-NO-MODEL) must read out of Agent( argument lists across src/assets/{commands,agents,skills,mds} and dist/{commands,agents}. Measured 16 when the guard was added; the Code-fix spawns raised it to 17 (Code-edit is spawned only by the orchestrator charter, which the scan does not read). A parser that stops finding spawns, or stops reading their arguments, would pass the model scan vacuously, so the count is its liveness proof. It counts types, not sites: consolidating or dropping a spawn lowers the site count but not the type count, which falls only when no prompt spawns an agent at all. Floors rise, never fall."
+      "description": "Distinct agent types the no-hardcoded-model guard (D-SPAWN-NO-MODEL) must read out of Agent( argument lists across src/assets/{commands,agents,skills,mds} and dist/{commands,agents}. Measured 16 when the guard was added; the Fix spawns raised it to 17 (Refactor is spawned only by the orchestrator charter, which the scan does not read). A parser that stops finding spawns, or stops reading their arguments, would pass the model scan vacuously, so the count is its liveness proof. It counts types, not sites: consolidating or dropping a spawn lowers the site count but not the type count, which falls only when no prompt spawns an agent at all. Floors rise, never fall."
     },
     {
       "id": "gate-ownership-body-count",
@@ -272,7 +272,7 @@
       "pattern": "GATE_BODIES.length).toBeGreaterThanOrEqual(8)",
       "occurrences": 1,
       "sourceFile": "tests/guards/gate-ownership.test.ts",
-      "description": "Agent bodies that carry a pinned `**Gate ownership:**` row (D-GATE-OWNERSHIP): Code, Code-fix, Code-edit, Simplify, Evaluate, Scrutinize, Test and Validate. The guard pins each row's text, so a row cannot be dropped or reworded quietly; this floor stops the table shrinking behind it. Floors rise, never fall."
+      "description": "Agent bodies that carry a pinned `**Gate ownership:**` row (D-GATE-OWNERSHIP): Code, Fix, Refactor, Polish, Evaluate, Harden, Test and Validate. The guard pins each row's text, so a row cannot be dropped or reworded quietly; this floor stops the table shrinking behind it. Floors rise, never fall."
     },
     {
       "id": "report-cap-roster-count",
@@ -280,7 +280,7 @@
       "pattern": "roster.length).toBeGreaterThanOrEqual(18)",
       "occurrences": 1,
       "sourceFile": "tests/guards/report-cap.test.ts",
-      "description": "Roster agents that carry a `Report cap:` line (D-REPORT-CAP): the union of the plugin `agents` arrays, less `learning` and `tracker` (hook-spawned). The guard derives the roster rather than listing it and requires an exempt-field record for each member; this floor stops the derivation quietly returning fewer agents. The Git agent split (#425) removed the `git` exclusion and raised it from 14 to 15; the Explore override raised it to 16; the Code-fix and Code-edit variants raised it to 18. Floors rise, never fall."
+      "description": "Roster agents that carry a `Report cap:` line (D-REPORT-CAP): the union of the plugin `agents` arrays, less `curate` and `tracker` (hook-spawned). The guard derives the roster rather than listing it and requires an exempt-field record for each member; this floor stops the derivation quietly returning fewer agents. The Git agent split (#425) removed the `git` exclusion and raised it from 14 to 15; the Explore override raised it to 16; the Fix and Refactor variants raised it to 18. Floors rise, never fall."
     },
     {
       "id": "running-commands-site-count",
@@ -288,7 +288,7 @@
       "pattern": "DYNAMIC_BUILD_SITES.length).toBeGreaterThanOrEqual(9)",
       "occurrences": 1,
       "sourceFile": "tests/guards/running-commands-parity.test.ts",
-      "description": "Dynamic-build prompt sites that name the Running commands block instead of prescribing a procedure (D-FOREGROUND-RUN): the Code implementation prompt, both Gate 1 Validate prompts, the Validate re-run after a Gate 1 fix in each pass, the Code fix prompt after Gate 2, the scenario fix prompt, the review-batch fix prompt, the Test prompt and the post-merge Validate. The guard requires each site's quoted text exactly once in the source and in the compiled command; this floor stops the list shrinking behind it. Floors rise, never fall."
+      "description": "Dynamic-build prompt sites that name the Running commands block instead of prescribing a procedure (D-FOREGROUND-RUN): the Code implementation prompt, both Gate 1 Validate prompts, the Validate re-run after a Gate 1 fix in each pass, the Fix prompt after Gate 2, the scenario fix prompt, the review-batch fix prompt, the Test prompt and the post-merge Validate. The guard requires each site's quoted text exactly once in the source and in the compiled command; this floor stops the list shrinking behind it. Floors rise, never fall."
     }
   ],
   "ceilings": [
@@ -434,23 +434,23 @@
       "pattern": "const CODE_PRELOAD_MAX_BYTES = 25_514",
       "occurrences": 1,
       "sourceFile": "tests/guards/code-preload.test.ts",
-      "description": "Total bytes of the six SKILL.md files in Code's frontmatter preload (git, testing, test-driven-development, worktree-support, apply-feature-knowledge, apply-decisions) (D-CODE-PRELOAD-CAP, D-CODE-PRELOADS). The ten-file preload was 53,450 bytes; the four mode skills left the preload and then left the agent altogether (D-NO-RUNTIME-SKILLS), and the set measures 25,514 today, which is the ceiling. Code keeps test-driven-development and apply-feature-knowledge because only its modes write tests first and only its spawns pass FEATURE_KNOWLEDGE; Code-fix and Code-edit hold their own ceilings below. git, testing and test-driven-development are fixed terms here, so growth in any of the six pays for itself inside the six. May be LOWERED, never raised: a preload ceiling raised to fit what the six grew into is a description of their size, and Code is billed on it at every spawn."
+      "description": "Total bytes of the six SKILL.md files in Code's frontmatter preload (git, testing, test-driven-development, worktree-support, apply-feature-knowledge, apply-decisions) (D-CODE-PRELOAD-CAP, D-CODE-PRELOADS). The ten-file preload was 53,450 bytes; the four mode skills left the preload and then left the agent altogether (D-NO-RUNTIME-SKILLS), and the set measures 25,514 today, which is the ceiling. Code keeps test-driven-development and apply-feature-knowledge because only its modes write tests first and only its spawns pass FEATURE_KNOWLEDGE; Fix and Refactor hold their own ceilings below. git, testing and test-driven-development are fixed terms here, so growth in any of the six pays for itself inside the six. May be LOWERED, never raised: a preload ceiling raised to fit what the six grew into is a description of their size, and Code is billed on it at every spawn."
     },
     {
-      "id": "code-fix-preload-max-bytes",
+      "id": "fix-preload-max-bytes",
       "ceiling": 14875,
-      "pattern": "const CODE_FIX_PRELOAD_MAX_BYTES = 14_875",
+      "pattern": "const FIX_PRELOAD_MAX_BYTES = 14_875",
       "occurrences": 1,
       "sourceFile": "tests/guards/code-preload.test.ts",
-      "description": "D-CODE-PRELOADS: total bytes of the four SKILL.md files in Code-fix's frontmatter preload (git, testing, worktree-support, apply-decisions). A gate-failure fix compiles and runs the named tests; it is not a test-first build, and no fix spawn passes FEATURE_KNOWLEDGE, so test-driven-development and apply-feature-knowledge stay with Code. The set measures 14,875, which is the ceiling. May be LOWERED, never raised: Code-fix is billed on it at every spawn."
+      "description": "D-CODE-PRELOADS: total bytes of the four SKILL.md files in Fix's frontmatter preload (git, testing, worktree-support, apply-decisions). A gate-failure fix compiles and runs the named tests; it is not a test-first build, and no fix spawn passes FEATURE_KNOWLEDGE, so test-driven-development and apply-feature-knowledge stay with Code. The set measures 14,875, which is the ceiling. May be LOWERED, never raised: Fix is billed on it at every spawn."
     },
     {
-      "id": "code-edit-preload-max-bytes",
+      "id": "refactor-preload-max-bytes",
       "ceiling": 10202,
-      "pattern": "const CODE_EDIT_PRELOAD_MAX_BYTES = 10_202",
+      "pattern": "const REFACTOR_PRELOAD_MAX_BYTES = 10_202",
       "occurrences": 1,
       "sourceFile": "tests/guards/code-preload.test.ts",
-      "description": "D-CODE-PRELOADS: total bytes of the three SKILL.md files in Code-edit's frontmatter preload (git, worktree-support, apply-decisions). A mechanical edit adds no behaviour and no tests, so it loads no test skill. The set measures 10,202, which is the ceiling. May be LOWERED, never raised: Code-edit is billed on it at every spawn."
+      "description": "D-CODE-PRELOADS: total bytes of the three SKILL.md files in Refactor's frontmatter preload (git, worktree-support, apply-decisions). A mechanical edit adds no behaviour and no tests, so it loads no test skill. The set measures 10,202, which is the ceiling. May be LOWERED, never raised: Refactor is billed on it at every spawn."
     },
     {
       "id": "code-body-max",
@@ -461,20 +461,20 @@
       "description": "D-CODE-VARIANTS and D-PR-BY-GIT: the compiled Code agent body, dist/agents/code.md, in bytes. It was 24,851 while one Code agent held all seven modes and also opened the PR; the Git agent's ensure-pr-ready reference owns the PR text (16,449), and the three variants split the modes, so Code keeps implement and issue-fix and measures 11,155 after D-COMPLIANCE-INJECT moved the compliance step and input (525) out of the body into the command's directive. The guard also holds the body free of every PR-opening phrase and keeps commit-and-push and the security scan (D-SCAN-IN-CODE). May be lowered, never raised: a later addition funds itself with a cut."
     },
     {
-      "id": "code-fix-body-max",
+      "id": "fix-body-max",
       "ceiling": 8634,
-      "pattern": "const CODE_FIX_BODY_MAX_BYTES = 8_634",
+      "pattern": "const FIX_BODY_MAX_BYTES = 8_634",
       "occurrences": 1,
       "sourceFile": "tests/guards/code-operation.test.ts",
-      "description": "D-CODE-VARIANTS: the compiled Code-fix agent body, dist/agents/code-fix.md, in bytes. It carries the four gate-failure fix modes (validation-fix, alignment-fix, qa-fix, ci-fix), the commit step with the security scan and the shared Running commands, Principles, Output and Boundaries text, and measures 8,634 (D-COMPLIANCE-INJECT moved the compliance step and input, 525, out of the body into the command's directive). The guard also holds the body free of every PR-opening phrase. May be lowered, never raised: a later addition funds itself with a cut."
+      "description": "D-CODE-VARIANTS: the compiled Fix agent body, dist/agents/fix.md, in bytes. It carries the four gate-failure fix modes (validation-fix, alignment-fix, qa-fix, ci-fix), the commit step with the security scan and the shared Running commands, Principles, Output and Boundaries text, and measures 8,634 (D-COMPLIANCE-INJECT moved the compliance step and input, 525, out of the body into the command's directive). The guard also holds the body free of every PR-opening phrase. May be lowered, never raised: a later addition funds itself with a cut."
     },
     {
-      "id": "code-edit-body-max",
+      "id": "refactor-body-max",
       "ceiling": 6550,
-      "pattern": "const CODE_EDIT_BODY_MAX_BYTES = 6_550",
+      "pattern": "const REFACTOR_BODY_MAX_BYTES = 6_550",
       "occurrences": 1,
       "sourceFile": "tests/guards/code-operation.test.ts",
-      "description": "D-CODE-VARIANTS: the compiled Code-edit agent body, dist/agents/code-edit.md, in bytes. It carries the one edit mode, the commit step with the security scan and the shared Running commands, Principles, Output and Boundaries text, and measures 6,508. The guard also holds the body free of every PR-opening phrase. May be lowered, never raised: a later addition funds itself with a cut."
+      "description": "D-CODE-VARIANTS: the compiled Refactor agent body, dist/agents/refactor.md, in bytes. It carries the one edit mode, the commit step with the security scan and the shared Running commands, Principles, Output and Boundaries text, and measures 6,532 (the rename to Refactor and its routing note added 24 bytes). The guard also holds the body free of every PR-opening phrase. May be lowered, never raised: a later addition funds itself with a cut."
     },
     {
       "id": "synthesize-body-max",
@@ -493,12 +493,12 @@
       "description": "D-MODE-BY-PATH: the largest single Synthesize mode reference, references/synthesize/{mode}.md of the agent-references skill, in bytes. Review is the largest at 3,922 (its template, its merge rules and the two review-only inputs). A spawn loads the body plus exactly one of these. May be LOWERED, never raised."
     },
     {
-      "id": "learning-body-max",
+      "id": "curate-body-max",
       "ceiling": 16710,
-      "pattern": "const LEARNING_BODY_MAX_BYTES = 16_710",
+      "pattern": "const CURATE_BODY_MAX_BYTES = 16_710",
       "occurrences": 1,
       "sourceFile": "tests/guards/agent-references.test.ts",
-      "description": "D-MAINTAIN-ON-DUE: the Learning agent body, src/assets/agents/learning.md, in bytes. Part 2's maintenance ladder, the claim-due output format and the close-out batch moved to references/learning/maintain.md, which a run reads only when claim-due hands out an entry; the body keeps the Part 2 heading, the claim heartbeat, rotate-observations, the claim-due call and the due-none line, and measures 16,690 (20,539 before the move). rotate-observations stays in the body so a run with nothing due still rotates. May be LOWERED, never raised."
+      "description": "D-MAINTAIN-ON-DUE: the Curate agent body, src/assets/agents/curate.md, in bytes. Part 2's maintenance ladder, the claim-due output format and the close-out batch moved to references/curate/maintain.md, which a run reads only when claim-due hands out an entry; the body keeps the Part 2 heading, the claim heartbeat, rotate-observations, the claim-due call and the due-none line, and measures 16,690 (20,539 before the move). rotate-observations stays in the body so a run with nothing due still rotates. May be LOWERED, never raised."
     },
     {
       "id": "command-bug-analysis-max",

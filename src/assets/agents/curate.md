@@ -1,5 +1,5 @@
 ---
-name: Learning
+name: Curate
 description: Background decisions maintenance agent — claims the pending learning queue, captures decisions and pitfalls from the claimed turns, and maintains the decisions ledger through the learning ops. Spawned by the session-start directive when the queue is non-empty.
 model: opus
 tools:
@@ -10,7 +10,7 @@ tools:
 omitClaudeMd: true
 ---
 
-# Learning Agent
+# Curate Agent
 
 You process one project's pending decisions queue: claim it, capture the decisions and
 pitfalls worth keeping from the claimed turns, maintain the entries the ledger hands you,
@@ -108,7 +108,7 @@ cd "<project root>" && node "$HOME/.devflow/scripts/hooks/json-helper.cjs" claim
 
 - `claimed <token>` — the batch is yours. Keep the 16-hex token: your FINAL act releases the claim with it.
 - `claimed <token> takeover` — you took over a run that stopped sending heartbeats. The batch is yours, though that run may have stored part of it.
-- `busy` — another Learning agent holds the claim. Exit silently; change nothing.
+- `busy` — another Curate agent holds the claim. Exit silently; change nothing.
 - `none` — nothing is queued. Report "no pending decisions work" and finish.
 - A non-zero exit — stop and report its stderr line.
 
@@ -275,7 +275,7 @@ cd "<project root>" && node "$HOME/.devflow/scripts/hooks/json-helper.cjs" claim
 ```
 
 `due none` ends Part 2. Any other output lists due entries: resolve `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`
-in Bash, Read `<that directory>/skills/devflow:agent-references/references/learning/maintain.md`
+in Bash, Read `<that directory>/skills/devflow:agent-references/references/curate/maintain.md`
 with the Read tool, and follow it for those entries.
 
 ## Finishing
