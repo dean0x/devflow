@@ -561,7 +561,9 @@ function pythonWrites(bodies: readonly string[]): string[] {
  *     from a heredoc body.
  * It skips the body of every other heredoc, and a `>` inside quotes or a comment. It never counts
  * `/dev/...` targets, `>&` fd redirects (`2>&1`) or a target with a `$` expansion (`"$LOG"`,
- * `${OUT}`, `$(mktemp)`), which is how a `mktemp` path reaches a redirect. The text is cut at 8,192
+ * `${OUT}`, `$(mktemp)`), which is how a `mktemp` path reaches a redirect. A path stays as written,
+ * not resolved against the working directory, so `a.ts` here and `/w/a.ts` from Edit count as two
+ * distinct paths. The text is cut at 8,192
  * characters, at 16 heredocs and at 64 writes, and every loop is bounded by those.
  */
 export function bashWrittenPaths(command: string): string[] {

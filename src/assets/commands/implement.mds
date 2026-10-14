@@ -300,7 +300,7 @@ DECISIONS_CONTEXT: {decisions_context}
 **Produces:** POLISH_OUTPUT
 **Requires:** FILES_CHANGED
 
-After the Code agent completes, spawn Polish agent to polish the code. The Phase 6 Validate covers its commits.
+After the Code agent completes, spawn Polish agent to polish the code. The Phase 6 Validate covers its commits. `{base}` is `BASE_BRANCH`.
 
 ```
 Agent(subagent_type="Polish"):
@@ -375,7 +375,7 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
 **Produces:** VALIDATION_RESULT, VALIDATED_HEAD
 **Requires:** BASE_BRANCH
 
-Validate takes the one full-suite slot, after every commit it must cover: Code, Polish, Harden and the alignment fixes. After Evaluate agent passes, spawn Validate agent. `FILES_CHANGED` is the branch diff, because the Code agent's own list misses the Polish, Harden and fix commits (`{base}` is `BASE_BRANCH`):
+Validate takes the one full-suite slot, after every commit it must cover: Code, Polish, Harden and the alignment fixes. After Evaluate agent passes, spawn Validate agent. `FILES_CHANGED` is the branch diff, because the Code agent's own list misses the Polish, Harden and fix commits:
 
 ```
 Agent(subagent_type="Validate"):

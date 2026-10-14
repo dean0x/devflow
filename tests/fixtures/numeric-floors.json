@@ -630,19 +630,19 @@
     },
     {
       "id": "command-implement-max",
-      "ceiling": 50052,
-      "pattern": "['implement', 'on', 50_052],",
+      "ceiling": 50051,
+      "pattern": "['implement', 'on', 50_051],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/implement.md, the learning-on build, in bytes. Measured 50,052 when #452 closed (50,070 before its sequential-split rule and git-diff FILES_CHANGED line), with no headroom. Main held 57,212 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/implement.md, the learning-on build, in bytes. Measured 50,051 when #452 closed (50,070 before its sequential-split rule and git-diff FILES_CHANGED line), with no headroom. Main held 57,212 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-implement-learning-off-max",
-      "ceiling": 47198,
-      "pattern": "['implement', 'off', 47_198],",
+      "ceiling": 47197,
+      "pattern": "['implement', 'off', 47_197],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/learning-off/commands/implement.md, the learning-off build, in bytes. Measured 47,198 when #452 closed (47,216 before its sequential-split rule and git-diff FILES_CHANGED line), with no headroom. Main held 54,369 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/learning-off/commands/implement.md, the learning-off build, in bytes. Measured 47,197 when #452 closed (47,216 before its sequential-split rule and git-diff FILES_CHANGED line), with no headroom. Main held 54,369 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-plan-max",
