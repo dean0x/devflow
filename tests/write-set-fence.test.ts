@@ -181,6 +181,13 @@ function rewriteHomeJson(sb: Sandbox, rel: string, edit: (json: Record<string, u
   writeFileSync(abs, `${JSON.stringify(json, null, 2)}\n`)
 }
 
+/** The stored machine gate level a repeat `gates --set lean` finds, so the row does not depend on the row before it. */
+const seedGateLevelLean = (sb: Sandbox): void => {
+  rewriteHomeJson(sb, '.devflow/manifest.json', manifest => {
+    (manifest.features as Record<string, unknown>).gateLevel = 'lean'
+  })
+}
+
 /**
  * The state `init --security none` leaves in HOME: no deny list in the user
  * settings and `none` in the manifest. Seeded rather than installed because
@@ -287,7 +294,7 @@ export const FENCE_ROWS: readonly FenceRow[] = [
   // The machine gate level is written by `gates --set` alone, and only in the manifest. No command removes the key
   // but `init --reset`, so these rows come last and leave the stored `lean` in place for no row to depend on.
   { args: ['gates', '--set', 'lean'], allow: [MANIFEST], mustWrite: true },
-  { args: ['gates', '--set', 'lean'], allow: NONE, mustWrite: false, label: 'repeat' },
+  { args: ['gates', '--set', 'lean'], allow: NONE, mustWrite: false, seed: seedGateLevelLean, label: 'repeat' },
   // A rejected level writes nothing and exits 1.
   { args: ['gates', '--set', 'Lean'], allow: NONE, mustWrite: false, exitCode: 1, label: 'wrong case' },
   { args: ['gates', '--set', 'lean '], allow: NONE, mustWrite: false, exitCode: 1, label: 'trailing space' },
