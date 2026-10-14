@@ -196,6 +196,9 @@ export function collectNoPlanDefects(command: string): string[] {
     if (!rows[0].includes(fragment)) out.push(`the SEQUENTIAL_CODE_AGENTS strategy row does not state "${fragment}"`)
   }
   if (lines.some(l => /\| Frequency \|/.test(l))) out.push('the strategy table still has a Frequency column')
+  const planned = lines.find(l => l.startsWith('- If plan document provided'))
+  if (planned === undefined) out.push('no plan-document strategy line')
+  else if (/SINGLE_CODE_AGENT/.test(planned) || !planned.includes('table below')) out.push('a plan without execution-strategy does not take the strategy table')
   return out
 }
 
@@ -395,9 +398,14 @@ describe('a long plan splits into sequential phases and a run with no plan is on
     expect(frequency, 'the seed must land').not.toBe(command)
     expect(collectNoPlanDefects(frequency)).toEqual(['the strategy table still has a Frequency column'])
 
+    const defaulted = command.replace('(if absent, use the table below)', '(default: SINGLE_CODE_AGENT if absent)')
+    expect(defaulted, 'the seed must land').not.toBe(command)
+    expect(collectNoPlanDefects(defaulted)).toEqual(['a plan without execution-strategy does not take the strategy table'])
+
     expect(collectNoPlanDefects('no rule here')).toEqual([
       '0 no-plan SINGLE_CODE_AGENT rule lines, expected 1',
       '0 SEQUENTIAL_CODE_AGENTS strategy rows, expected 1',
+      'no plan-document strategy line',
     ])
   })
 })

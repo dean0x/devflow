@@ -47,7 +47,7 @@ interface Moved {
   readonly heading: string
   /** UTF-8 length of the removed text without its trailing newline. */
   readonly bytes: number
-  /** SHA-256 of those bytes, taken from `main:src/assets/commands/implement.mds` and `_partials/_evidence_policy.mds`. */
+  /** SHA-256 of those bytes, taken from `main:src/assets/commands/implement.mds` and `_partials/_evidence_policy.mds`. The continuation path is re-pinned to its edited text: #452 added a base-ref guard and `--diff-filter=d` to its diff step. */
   readonly sha256: string
   readonly was: string
 }
@@ -57,7 +57,7 @@ const MOVED: readonly Moved[] = [
   { reference: 'commands/implement-evidence-asks.md', heading: 'Exception grammar', bytes: 1451, sha256: 'a9ab21080bbe77f0ea187471bf6d3d241cd69b11748cd37b95d119e5dad1260c', was: '_evidence_policy.mds, the body of evidence_exception()' },
   { reference: 'commands/implement-evidence-asks.md', heading: 'Record the exception', bytes: 566, sha256: '458cf3e415744aab954b2686f16d4c9fb5f1f3b9bfed1790e32a6a429d821ba8', was: 'implement.mds, the record paragraph' },
   { reference: 'commands/implement-evidence-asks.md', heading: 'Missing test plan ask', bytes: 1358, sha256: '032972c8f3a0443a7aed0863ce248e68393f26b666a940da80c1b0284558d59d', was: 'implement.mds, the missing-test-plan ask and its two options' },
-  { reference: 'commands/implement-revalidate.md', heading: 'Continuation path', bytes: 758, sha256: 'db69bf3ecf4b4cd8e8e923ff917919b6f125dfa34cc7387c25247500d54c39bf', was: 'implement.mds, the re-validation continuation path' },
+  { reference: 'commands/implement-revalidate.md', heading: 'Continuation path', bytes: 855, sha256: '811ec86f41cf39dc373774afa399a4bc27730670ddcead259bd3eded514ac94b', was: 'implement.mds, the re-validation continuation path' },
 ]
 
 const digest = (text: string): string => createHash('sha256').update(Buffer.from(text, 'utf-8')).digest('hex')
