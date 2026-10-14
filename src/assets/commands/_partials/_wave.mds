@@ -72,7 +72,7 @@ MAX_ROUNDS = LLM judgment based on ticket count (heuristic: ticket_count * 2 + 5
 
 **Post-merge validation:** after EVERY merge into the integration branch, the workflow itself spawns the Validate agent (build + test) over the integration branch; Git runs no build or test. A red build immediately after merge is the cheapest possible conflict detector. It always runs — the merge reports `treeEqual` (whether the merge commit's tree equals the ticket branch head's tree) and the wave row records it, but a true value never skips the Validate.
 
-**Undo of a red merge:** on FAIL or no PASS verdict the workflow spawns Git to undo the merge. The undo runs only when no remote branch contains the merge commit and the integration HEAD still equals it, as `git reset --keep {mergeSha}^1` on the integration branch — never `--hard`, never a push. It returns `{"undone": true}` or `{"undone": false, "reason": "..."}`. Undone → the row reads `merged: false` and the ticket is quarantined ("post-merge build red; merge undone"). Not undone → the wave stops taking merges and rounds, and its report names the red integration HEAD.
+**Undo of a red merge:** on FAIL or no PASS verdict the workflow spawns Git to undo the merge. The undo spawn in the wave loop states its gates and exact git lines: never a hard reset, never a push. Undone → the row reads `merged: false` and the ticket is quarantined. Not undone → the wave stops taking merges and rounds, and its report names the red integration HEAD.
 
 **Commit discipline:** Git agent creates atomic commits per logical change, conventional-commit format, on the ticket branch before merge.
 @end
