@@ -45,7 +45,8 @@ interface Run {
 }
 
 interface RunOptions {
-  readonly env?: Record<string, string>;
+  /** Added to the sandbox env; an `undefined` value removes a variable the parent passed down. */
+  readonly env?: Record<string, string | undefined>;
   readonly cwd?: string;
   /** Replaces the default `[base]` argument list. */
   readonly args?: readonly string[];
@@ -65,12 +66,22 @@ function tempDir(prefix: string): string {
   return dir;
 }
 
-function isolatedEnv(home: string, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
-  return sandboxEnv(home, { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', ...extra });
+function isolatedEnv(home: string, extra: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
+  const env = sandboxEnv(home, { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' });
+  for (const [key, value] of Object.entries(extra)) {
+    if (value === undefined) delete env[key];
+    else env[key] = value;
+  }
+  return env;
 }
 
 function cfg(...lines: string[]): string {
   return lines.join('\n') + '\n';
+}
+
+/** A config of exactly `count` lines: comment lines, then the plan-ID check on the last two. */
+function configOfLines(count: number): string {
+  return cfg(...Array.from({ length: count - 2 }, () => '# filler'), 'ids.pattern=tp TP-[0-9]+', 'ids.enabled=true');
 }
 
 function scriptText(): Buffer {
@@ -81,7 +92,7 @@ function scriptText(): Buffer {
 function newRepo() {
   const home = tempDir('lint-pack-home-');
   const dir = tempDir('lint-pack-repo-');
-  const env = (extra: Record<string, string> = {}) => isolatedEnv(home, extra);
+  const env = (extra: Record<string, string | undefined> = {}) => isolatedEnv(home, extra);
 
   const git = (...args: string[]): string => {
     const r = spawnSync('git', args, { cwd: dir, env: env(), encoding: 'utf8', timeout: SUBPROCESS_TIMEOUT_MS });
@@ -297,7 +308,7 @@ describe('lint-pack template: shipped files', () => {
 
   it('passes bash -n, and the test fails when the script is missing', () => {
     expect(fs.existsSync(SCRIPT), `${SCRIPT} must exist`).toBe(true);
-    expect(() => execFileSync('bash', ['-n', SCRIPT], { stdio: 'pipe' })).not.toThrow();
+    expect(() => execFileSync('bash', ['-n', SCRIPT], { stdio: 'pipe', timeout: SUBPROCESS_TIMEOUT_MS })).not.toThrow();
   });
 
   it('declares bash with env and the bash 3.2 strictness the contract pins', () => {
@@ -450,10 +461,29 @@ describe('lint-pack template: exit codes and the last line', () => {
   });
 
   it('cleans its temp directory on success and on error', () => {
-    const { r, base } = simple(IDS_CONF, { 'src/a.ts': 'x\n' }, { 'src/a.ts': '// TP-7\n' });
     const tmp = tempDir('lint-pack-tmp-');
-    expectRun(r.run(base, { env: { TMPDIR: tmp } }), 'plan-id src/a.ts:1 tp\nLINT_PACK: matches 1\n', 1);
+    const env = { TMPDIR: tmp };
+    const ok = simple(IDS_CONF, { 'src/a.ts': 'x\n' }, { 'src/a.ts': '// TP-7\n' });
+    expectRun(ok.r.run(ok.base, { env }), 'plan-id src/a.ts:1 tp\nLINT_PACK: matches 1\n', 1);
     expect(fs.readdirSync(tmp)).toEqual([]);
+
+    // The config is read from the temp directory, so this error comes after the script made it.
+    const badConfig = simple(cfg('bogus.key=1'), { 'src/a.ts': 'x\n' }, { 'src/a.ts': 'y\n' });
+    expectError(badConfig.r.run(badConfig.base, { env }), 'bad-config 1');
+    expect(fs.readdirSync(tmp)).toEqual([]);
+
+    // The linter lists TMPDIR while it runs, which shows the directory the script must remove existed then.
+    const seen = 'tmp-seen.txt';
+    const stub = `#!/usr/bin/env bash\nls -A "$TMPDIR" >${seen}\nexit 3\n`;
+    const linter = simple(SIZE_CONF, { 'src/a.ts': 'x\n', [STUB]: stub }, { 'src/a.ts': 'y\n' });
+    expectError(linter.r.run(linter.base, { env }), 'linter-exit 3');
+    expect(fs.readFileSync(path.join(linter.r.dir, seen), 'utf8').trim()).toMatch(/^lint-pack\.[A-Za-z0-9]+$/);
+    expect(fs.readdirSync(tmp)).toEqual([]);
+  });
+
+  it('creates no temp directory when the base is rejected', () => {
+    const { r } = simple(IDS_CONF, { 'src/a.ts': 'x\n' }, { 'src/a.ts': 'y\n' });
+    const tmp = tempDir('lint-pack-tmp-');
     expectError(r.run('0'.repeat(40), { env: { TMPDIR: tmp } }), 'bad-base');
     expect(fs.readdirSync(tmp)).toEqual([]);
   });
@@ -547,9 +577,26 @@ describe('lint-pack template: error states', () => {
     ['an enabled plan-ID check with no pattern', cfg('# x', 'ids.enabled=true'), 'bad-config 2'],
     ['an enabled stale check with no source glob', cfg('stale.enabled=true', 'stale.symbol=--[a-z]+'), 'bad-config 1'],
     ['an enabled size check with no linter argument', cfg('size.enabled=true'), 'bad-config 1'],
+    ['a size.match given twice', cfg('size.enabled=true', 'size.arg=bash', 'size.match=a', 'size.match=b'), 'bad-config 4'],
+    ['a min-length above 64', cfg('stale.min-length=65'), 'bad-config 1'],
+    ['an exit status above 255', cfg('size.ok-exit=256'), 'bad-config 1'],
+    ['a plan-ID pattern id of 33 characters', cfg('ids.enabled=true', `ids.pattern=${'a'.repeat(33)} TP-[0-9]+`), 'bad-config 2'],
+    ['a config of 1,001 lines', configOfLines(1001), 'bad-config 1001'],
   ])('reports bad-config with the line number for %s', (_name, conf, reason) => {
     const { r, base } = simple(conf, { 'src/a.ts': 'x\n' }, { 'src/a.ts': 'y\n' });
     expectError(r.run(base), reason);
+  });
+
+  // The same keys at their upper bound read clean, and the plan-ID check they sit beside still runs.
+  it.each([
+    ['a min-length of 64', cfg('stale.min-length=64') + IDS_CONF, 'tp'],
+    ['a min-length with a leading zero', cfg('stale.min-length=08') + IDS_CONF, 'tp'],
+    ['an exit status of 255', cfg('size.ok-exit=255') + IDS_CONF, 'tp'],
+    ['a plan-ID pattern id of 32 characters', cfg('ids.enabled=true', `ids.pattern=${'a'.repeat(32)} TP-[0-9]+`), 'a'.repeat(32)],
+    ['a config of 1,000 lines', configOfLines(1000), 'tp'],
+  ])('reads %s', (_name, conf, id) => {
+    const { r, base } = simple(conf, { 'src/a.ts': 'x\n' }, { 'src/a.ts': '// TP-7\n' });
+    expectRun(r.run(base), `plan-id src/a.ts:1 ${id}\nLINT_PACK: matches 1\n`, 1);
   });
 
   it('reads a config with CRLF line endings and no final newline', () => {
@@ -1267,6 +1314,26 @@ describe('lint-pack template: function-size check', () => {
     expectRun(r.run(base), 'LINT_PACK: clean\n', 0);
   });
 
+  it('reads every output line when size.match is not set: another rule counts, a summary line does not', () => {
+    const conf = cfg('size.enabled=true', 'size.arg=bash', `size.arg=${STUB}`);
+    const { r, base } = sizeFixture(conf, [
+      rule('@ROOT@/src/a.ts:2:1'),
+      '@ROOT@/src/a.ts:4:1: Unused variable. [Error/no-unused-vars]',
+      '@ROOT@/src/a.ts:6:9: Unused variable. [Error/no-unused-vars]',
+      '@ROOT@/src/other.ts:1:1: Unused variable. [Error/no-unused-vars]',
+      '✖ 4 problems (4 errors, 0 warnings)',
+      '',
+    ]);
+    const expected = [
+      'function-size src/a.ts:2 function-size',
+      'function-size src/a.ts:6 function-size',
+      'unmatched-diagnostics 1',
+      'LINT_PACK: matches 2',
+      '',
+    ].join('\n');
+    expectRun(r.run(base), expected, 1);
+  });
+
   it('runs the linter from the repository root', () => {
     const r = newRepo();
     const stub = '#!/usr/bin/env bash\npwd -P > cwd.txt\nexit 0\n';
@@ -1820,9 +1887,36 @@ describe('lint-pack template: determinism and hostile environment', () => {
     expectRun(r.run(base, { env }), FULL_ORACLE, 1);
   });
 
-  it('keeps the oracle under a non-C locale in the parent environment', () => {
-    const { r, base } = fullFixture();
-    expectRun(r.run(base, { env: { LANG: 'en_US.UTF-8', LC_COLLATE: 'en_US.UTF-8', LANGUAGE: 'de' } }), FULL_ORACLE, 1);
+  it('keeps C byte order under a non-C locale in the parent environment', () => {
+    // The record paths in C byte order. en_US.UTF-8 orders them differently wherever the runner has the locale.
+    const locale = 'en_US.UTF-8';
+    const cOrder = ['"docs/caf\\303\\251.md"', '-dash.md', 'B.md', 'a.md'];
+    const files: Files = {};
+    for (const n of ['B.md', 'a.md', '-dash.md', 'docs/café.md']) files[n] = '// TP-7\n';
+    const { r, base } = simple(IDS_CONF, { 'src/a.ts': 'x\n' }, files);
+    // One arm leaves LC_ALL unset, so the script's own export of it is what reaches `sort`; the other sets it in the parent.
+    const hostile: ReadonlyArray<Record<string, string | undefined>> = [
+      { LC_ALL: undefined, LANG: locale, LC_COLLATE: locale, LANGUAGE: 'de' },
+      { LC_ALL: locale },
+    ];
+    const sortUnder = (env: Record<string, string | undefined>): string[] => {
+      const probe = spawnSync('sort', [], { input: cOrder.join('\n') + '\n', env: r.env(env), encoding: 'utf8', timeout: SUBPROCESS_TIMEOUT_MS });
+      if (probe.error) throw probe.error;
+      return probe.stdout.split('\n').filter(line => line !== '');
+    };
+
+    // Precondition, which fails and never skips: the runner's sort orders these paths differently from C.
+    expect(sortUnder({ LC_ALL: 'C' }), 'the probe must sort in byte order under LC_ALL=C').toEqual(cOrder);
+    for (const env of hostile) {
+      expect(sortUnder(env), `the runner must have ${locale}, or this test cannot fail`).not.toEqual(cOrder);
+    }
+
+    const expected = [...cOrder.map(p => `plan-id ${p}:1 tp`), 'LINT_PACK: matches 4', ''].join('\n');
+    const full = fullFixture();
+    for (const env of hostile) {
+      expectRun(r.run(base, { env }), expected, 1);
+      expectRun(full.r.run(full.base, { env }), FULL_ORACLE, 1);
+    }
   });
 });
 
