@@ -303,23 +303,30 @@ function expectedSet(level: string, classes: readonly string[], sc: Scenario): s
   return [...(EXPECTED_SETS[classes.join('+')]?.[level] ?? [])]
 }
 
-/** Narrow the classes' full sets by the parsed reference, as the command's Step 1.2b says. */
+/**
+ * Narrow the classes' full sets by the parsed reference, as the command's Step 1.2b says. A missing or malformed
+ * cell of any class fails closed: the whole run is `full`, so every class keeps its full set.
+ */
 export function simulate(level: string, classes: readonly string[], sc: Scenario, ref: ParsedRef): string[] {
   const fulls = classes.map(cls => fullSetOf(cls, sc))
   if (level === 'full') return unique(fulls.flat())
-  const manifestChanged = changesManifest(sc, ref.manifests)
-  const narrow = (cls: string, set: readonly string[]): string[] => {
+  const cells: ParsedCell[] = []
+  for (const cls of classes) {
     const cell = ref.cells.get(cls)?.get(level)
-    if (cell === undefined) return [...set]
+    if (cell === undefined) return unique(fulls.flat())
+    cells.push(cell)
+  }
+  const manifestChanged = changesManifest(sc, ref.manifests)
+  const narrow = (cell: ParsedCell, set: readonly string[]): string[] => {
     if (cell.op === 'keep') return set.filter(n => cell.names.includes(n))
     return set.filter(n => !cell.names.includes(n) || (n === cell.exception && manifestChanged))
   }
   if (classes.length > 1 && !ref.perClassUnion) {
     let list = unique(fulls.flat())
-    for (const cls of classes) list = narrow(cls, list)
+    for (const cell of cells) list = narrow(cell, list)
     return list
   }
-  return unique(classes.flatMap((cls, i) => narrow(cls, fulls[i])))
+  return unique(cells.flatMap((cell, i) => narrow(cell, fulls[i])))
 }
 
 function subsets<T>(items: readonly T[]): T[][] {
@@ -751,6 +758,24 @@ describe('the simulator reads its rules from the reference and the oracle decide
     expect(simulate('standard', ['code'], sc, parsed)).not.toContain('dependencies')
     expect(simulate('standard', ['code'], { ...sc, depPath: 'package.json' }, parsed)).toContain('dependencies')
     expect(simulate('full', ['code'], sc, parsed)).toContain('dependencies')
+  })
+
+  it('a missing class row or a malformed cell makes every class of the run full, as Step 1.2b says', () => {
+    const sc: Scenario = { stamped: [], triggered: [], conditional: [], complianceActive: false, regulated: false, depPath: 'none' }
+    const fullOf = (classes: readonly string[]): string[] => unique(classes.flatMap(cls => fullSetOf(cls, sc))).sort()
+    const run = (ref: ParsedRef, classes: readonly string[]): string[] => [...simulate('lean', classes, sc, ref)].sort()
+    const classes = ['tests-only', 'lockfile-only']
+    // The real reference narrows tests-only at lean: it drops consistency.
+    expect(run(parsed, classes)).toEqual(['dependencies', 'reliability', 'security', 'testing'])
+    expect(fullOf(classes)).toContain('consistency')
+    const noRow = parseLevelRef(seed(REF, /^\| `lockfile-only` .*\n/m, ''))
+    expect(noRow.cells.has('lockfile-only'), 'the seed removed the row').toBe(false)
+    expect(run(noRow, classes), 'a missing row').toEqual(fullOf(classes))
+    const badCell = parseLevelRef(seed(REF, /(\| `lockfile-only` \| keep: dependencies, security \| )keep: dependencies, security/, '$1keep dependencies'))
+    expect(badCell.badCells, 'the seed made one cell malformed').toHaveLength(1)
+    expect(run(badCell, classes), 'a malformed cell').toEqual(fullOf(classes))
+    const noTestsRow = parseLevelRef(seed(REF, /^\| `tests-only` .*\n/m, ''))
+    expect(run(noTestsRow, ['tests-only']), 'a missing row of the only class').toEqual(fullOf(['tests-only']))
   })
 })
 
