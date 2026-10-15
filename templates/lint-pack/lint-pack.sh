@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 #
 # lint-pack.sh: a project-owned lint pack. Copy it into your repository (for
-# example as scripts/lint-pack.sh) and wire it to a `lint-pack` build entry.
-# devflow never runs this file. See README.md next to it.
+# example as scripts/lint-pack.sh) and wire it to a `lint-pack` build-file entry.
+# devflow ships this template. It never runs the template itself, and it never
+# installs or updates your copy. At the `lean` gate level, Validate runs your
+# wired copy. The README is templates/lint-pack/README.md in devflow-kit.
 #
 # Usage:  bash scripts/lint-pack.sh <base-sha>
 #
@@ -44,6 +46,8 @@
 # bad-config <n>, bad-pattern <id>, git-failed, interrupted, linter-missing,
 # linter-exit <n>.
 #
+# bad-config    <n> is the line number in the config; 0 means that .lint-pack.conf
+#               at HEAD is not a regular file (for example a symlink or a directory)
 # git-too-old   git is older than 2.30; a version string that cannot be read is
 #               git-failed
 # interrupted   the run got SIGTERM or SIGINT, for example from a timeout
@@ -53,7 +57,7 @@
 # The pack files are the config, this script, any .gitattributes, and the build
 # files package.json, Makefile, makefile and GNUmakefile (GNU make reads the last
 # two before Makefile). A build file counts only when a changed line names
-# lint-pack or BASE.
+# lint-pack or BASE; for pack-dirty, an untracked build file counts too.
 #
 # Needs bash 3.2 or newer and git 2.30 or newer. No line of added text is ever
 # printed. The last line is always the LINT_PACK line.
