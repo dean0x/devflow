@@ -80,12 +80,23 @@ RUN_REMOVED="none"   # dir or link when a folder or a link was removed from the 
 RUN_FLOOR=""         # the version floor, named on a below-floor line only
 RESULT_FILE=""
 LOCK_HELD="false"
-WORKER_PID="${BASHPID:-$$}"
+# Sets OWN_PID to the real PID of the shell that runs it. The PID comes from a child that
+# execs sh, whose parent is that shell, because `$$` is the worker's PID in every subshell
+# and bash 3.2 has no BASHPID. A failed read gives `$$`.
+own_pid() {
+  OWN_PID=$(exec /bin/sh -c 'echo $PPID' 2>/dev/null) || OWN_PID=""
+  case "$OWN_PID" in
+    ''|*[!0123456789]*) OWN_PID="$$" ;;
+  esac
+}
+own_pid
+WORKER_PID="$OWN_PID"
 finish_run() {
   # Only the worker process itself ends the run. A subshell it forks (the watchdog, the
-  # claude spawn) can be signalled before bash resets its traps and would otherwise run
-  # this trap too: a second Run line, and a lock release by a process that is not the holder.
-  [ "${BASHPID:-$$}" = "$WORKER_PID" ] || return 0
+  # claude spawn) that a signal reaches before bash resets its traps runs this trap too,
+  # and the PID check returns there: it writes no Run line and releases no lock.
+  own_pid
+  [ "$OWN_PID" = "$WORKER_PID" ] || return 0
   local _floor=""
   if [ -n "$RUN_FLOOR" ]; then _floor=" floor=${RUN_FLOOR}"; fi
   log "Run: cli=${RUN_CLI} argv=${RUN_ARGV} result=${RUN_RESULT} denials=${RUN_DENIALS} removed=${RUN_REMOVED}${_floor}"
