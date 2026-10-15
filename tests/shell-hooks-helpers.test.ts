@@ -173,11 +173,12 @@ describe('classifyStdinRun — the rule, on every shape', () => {
 // memory-permission — the worker's write is limited to its staged file
 //
 // background-memory-update and session-start-memory share one sourced helper for the
-// staged-path check, the settings JSON that carries the Edit rule, the fixed result
-// line and the one-time notice. The macos-bash32-hooks CI job runs this file but not
-// tests/eager-memory-refresh.test.ts, so the pattern work is pinned here, under the
-// bash that job puts first on PATH. Every run sources the helpers the way the hooks do
-// and runs under `set -e`, so a helper that ends in a failing status aborts the run.
+// staged-path check, the settings JSON that carries the Edit allow rule and the Edit deny
+// rule, the fixed result line and the one-time notice. The macos-bash32-hooks CI job runs
+// this file but not tests/eager-memory-refresh.test.ts, so the pattern work is pinned
+// here, under the bash that job puts first on PATH. Every run sources the helpers the way
+// the hooks do and runs under `set -e`, so a helper that ends in a failing status aborts
+// the run.
 // =============================================================================
 
 const PERMISSION_HELPER = path.join(HOOKS_DIR, 'memory-permission');

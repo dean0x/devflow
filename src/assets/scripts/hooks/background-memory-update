@@ -109,8 +109,8 @@ trap finish_run EXIT
 # Anchor .devflow/ to the project root (prevents a stray nested .devflow/ when the
 # worker is spawned with a CWD inside .devflow/...). Empty → fall back to CWD.
 source "$SCRIPT_DIR/resolve-project-root" 2>/dev/null || true
-# The staged-path check, the settings JSON for the worker's one Edit rule, the result
-# line and the one-time notice (needs df_no_symlink_below from resolve-project-root).
+# The staged-path check, the settings JSON with the worker's Edit allow and deny rules, the
+# result line and the one-time notice (needs df_no_symlink_below from resolve-project-root).
 source "$SCRIPT_DIR/memory-permission" || { echo "background-memory-update: failed to source memory-permission" >&2; exit 1; }
 PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
 [ -n "$PROJECT_ROOT" ] || PROJECT_ROOT="$CWD"
@@ -910,13 +910,16 @@ fi
 #   --setting-sources user
 #                      only the user's own settings load, never the project's or the
 #                      local ones. The user's settings keep their `env` and their own
-#                      allow rules.
+#                      allow rules, so a user allow rule that covers other paths covers
+#                      the worker too. The user's ask and deny rules on Edit also apply
+#                      to the run.
 #   --settings JSON    an allow rule Edit(//<the canonical staged path>), a deny rule
 #                      Edit(//<the canonical staged path>/*) for every path under it, and
-#                      no hooks. Under dontAsk every other path is refused; a folder or a
-#                      link at the staged path is removed before the run and after it
-#                      (memory_staged_remove). Only Edit rules cover the Write tool: a
-#                      Write(path) rule is never checked, so it would deny every Write.
+#                      no hooks. Under dontAsk a path that no allow rule covers is refused;
+#                      a folder or a link at the staged path is removed before the run
+#                      and after it (memory_staged_remove). Only Edit rules cover the
+#                      Write tool: a Write(path) rule is never checked, so it would deny
+#                      every Write.
 #                      The leading // makes the rule path absolute. The JSON is built by
 #                      memory_settings_json, after the path check above, and its comment
 #                      holds what was measured.
