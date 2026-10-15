@@ -18,6 +18,8 @@
  *   3. The gate-level block of the command: read paragraph, invariants, fallback, learning-arm position.
  *   4. Full is today: the Step 1.1 reduced sets, the rule-1 manifests and the Step 1.2 trigger rows.
  *   5. No second cycle: Step 0e-ii only warns, and nothing restarts a phase or starts /resolve.
+ *   6. The summary: the Synthesize spawn passes the level and the planned focuses, and the summary template
+ *      names them, marks a focus with no report and cannot give APPROVED without a security report.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -480,6 +482,45 @@ export function collectSecondCycleDefects(body: string, ref: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
+// 6. The summary
+// ---------------------------------------------------------------------------
+
+/** AC-11: the Step 3a spawn passes the level and the focuses, and the review summary reference shows and uses them. */
+export function collectSummaryDefects(cr: string, syn: string): string[] {
+  const out: string[] = []
+  const fences = [...(sectionBetween(cr, '### Phase 3:', '### Phase 4:') ?? '').matchAll(/```\n([\s\S]*?)```/g)].map(m => m[1])
+  const synthesize = fences.find(f => f.includes('Agent(subagent_type="Synthesize"'))
+  const git = fences.find(f => f.includes('Agent(subagent_type="Git"'))
+  if (synthesize === undefined) out.push('no Synthesize spawn in Phase 3')
+  else {
+    if (!/^GATE_LEVEL: \{GATE_LEVEL\}$/m.test(synthesize)) out.push('the Synthesize spawn does not pass GATE_LEVEL')
+    if (!/^FOCUSES: \{REVIEW_FOCUS_LIST\}$/m.test(synthesize)) out.push('the Synthesize spawn does not pass FOCUSES')
+    if (!/^REVIEW_BASE_DIR: \S/m.test(synthesize)) out.push('the Synthesize spawn lost REVIEW_BASE_DIR')
+  }
+  if (git === undefined) out.push('no Git spawn in Phase 3')
+  else if (/^(GATE_LEVEL|FOCUSES):/m.test(git)) out.push('the Git spawn carries the level or the focuses')
+  const inputs = sectionBetween(syn, '**Mode inputs:**', '**Process:**') ?? ''
+  for (const input of ['GATE_LEVEL', 'FOCUSES']) if (!inputs.includes(`**${input}**`)) out.push(`the Mode inputs do not declare ${input}`)
+  const template = /```markdown\n([\s\S]*?)```/.exec(syn)?.[1] ?? ''
+  const lines = template.split('\n')
+  const gate = lines.findIndex(l => l.startsWith('**Gate level**: {GATE_LEVEL}'))
+  if (gate === -1) out.push('the summary template has no line that starts with "**Gate level**: {GATE_LEVEL}"')
+  else {
+    if (gate < lines.findIndex(l => l.startsWith('**Date**:'))) out.push('the Gate level line comes before the Date line')
+    if (gate > lines.findIndex(l => l.startsWith('## Merge Recommendation'))) out.push('the Gate level line comes after the Merge Recommendation')
+    if (!lines[gate].includes('(no report)')) out.push('the Gate level line does not mark a focus with no report')
+  }
+  const rule = tableRows(sectionBetween(syn, '**Merge Rules:**', '**Output:**') ?? '')
+    .find(r => /security focus[^|]*no report/i.test(r[0]))
+  if (rule === undefined) out.push('the Merge Rules have no row for a planned security focus with no report')
+  else if (rule[1].startsWith('APPROVED')) out.push(`a planned security focus with no report gives "${rule[1]}"`)
+  const written = [...cr.matchAll(/\{timestamp\}\/([\w{}-]+)\.md/g)].map(m => m[1])
+  for (const name of unique(written)) if (!['{focus}', 'review-summary'].includes(name)) out.push(`the command writes {timestamp}/${name}.md, a file the summary does not need`)
+  if (written.length === 0) out.push('no {timestamp}/*.md write found, so the file-set check proves nothing')
+  return out
+}
+
+// ---------------------------------------------------------------------------
 // Corpus
 // ---------------------------------------------------------------------------
 
@@ -493,6 +534,7 @@ const VARIANTS: ReadonlyArray<{ label: string; body: string }> = (() => {
 })()
 const ON = VARIANTS[0].body
 const REF = readAgentReference('commands/code-review-levels.md')
+const SYN = readAgentReference('synthesize/review.md')
 const SOURCE = readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'code-review.mds'), 'utf-8')
 
 /** Replace `from` with `to` in `body`, failing the test when the seed did not land. */
@@ -506,6 +548,7 @@ describe('the corpus is real', () => {
   it('reads both builds of the command, the level reference and the gate levels', () => {
     for (const { label, body } of VARIANTS) expect(body.length, `${label}: nothing read`).toBeGreaterThan(5000)
     expect(REF.length, 'the level reference is empty').toBeGreaterThan(400)
+    expect(SYN.length, 'the review summary reference is empty').toBeGreaterThan(400)
     expect(SOURCE.length, 'the command source is empty').toBeGreaterThan(5000)
     expect(GATE_LEVELS.length).toBeGreaterThanOrEqual(3)
     expect(GATE_LEVELS).toContain('full')
@@ -647,5 +690,27 @@ describe('no second cycle (AC-10)', () => {
   it('a script path named resolve-settings.cjs is not a /resolve start', () => {
     expect(collectSecondCycleDefects(`${ON}\nnode "$HOME/.devflow/scripts/resolve-settings.cjs" "{root}"\n`, REF)).toEqual([])
     expect(RESOLVE_START.test('node scripts/resolve-evidence-policy.cjs')).toBe(false)
+  })
+})
+
+describe('the summary names the level and the focuses (AC-11)', () => {
+  it.each(VARIANTS)('$label: the Synthesize spawn passes both inputs and the summary reference uses them', ({ body }) => {
+    expect(collectSummaryDefects(body, SYN)).toEqual([])
+  })
+
+  it('known-bad probes: a lost input, a lost Gate level line, a lost marker, a lost security row and a new summary file are each reported', () => {
+    expect(collectSummaryDefects(seed(ON, 'GATE_LEVEL: {GATE_LEVEL}\nFOCUSES: {REVIEW_FOCUS_LIST}\n', 'FOCUSES: {REVIEW_FOCUS_LIST}\n'), SYN))
+      .toContain('the Synthesize spawn does not pass GATE_LEVEL')
+    expect(collectSummaryDefects(seed(ON, 'FOCUSES: {REVIEW_FOCUS_LIST}\n', ''), SYN)).toContain('the Synthesize spawn does not pass FOCUSES')
+    expect(collectSummaryDefects(ON, seed(SYN, /^\*\*Gate level\*\*: .*\n/m, ''))).toContain('the summary template has no line that starts with "**Gate level**: {GATE_LEVEL}"')
+    expect(collectSummaryDefects(ON, seed(SYN, '`(no report)`', 'nothing'))).toContain('the Gate level line does not mark a focus with no report')
+    expect(collectSummaryDefects(ON, seed(SYN, '| Planned security focus has no report | CHANGES REQUESTED |\n', '')))
+      .toContain('the Merge Rules have no row for a planned security focus with no report')
+    expect(collectSummaryDefects(ON, seed(SYN, '| Planned security focus has no report | CHANGES REQUESTED |', '| Planned security focus has no report | APPROVED WITH COMMENTS |')))
+      .toContain('a planned security focus with no report gives "APPROVED WITH COMMENTS"')
+    expect(collectSummaryDefects(ON, seed(SYN, '- **GATE_LEVEL**, **FOCUSES**', '- **GATE_LEVEL**')))
+      .toContain('the Mode inputs do not declare FOCUSES')
+    expect(collectSummaryDefects(`${ON}\nWrite the levels to {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/levels.md.\n`, SYN))
+      .toContain('the command writes {timestamp}/levels.md, a file the summary does not need')
   })
 })
