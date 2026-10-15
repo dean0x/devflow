@@ -148,7 +148,7 @@ interface SpawnSite {
  */
 export function scanSpawns(body: string): SpawnSite[] {
   const lines = body.split('\n')
-  const sites: Array<{ section: string; kind: 'instruction' | 'fence'; text: string; type: string | null }> = []
+  const sites: SpawnSite[] = []
   let section = '(top)'
   let inFence = false
   lines.forEach((line, i) => {
@@ -204,11 +204,10 @@ const ALLOWED: readonly string[] = [...ROSTER_FORM_B, ...BUILT_IN_SPAWN_TYPES]
 // 2. The level reference
 // ---------------------------------------------------------------------------
 
-type ParsedCell = OracleCell
 interface ParsedPlanRef {
   readonly header: readonly string[]
   readonly phaseOrder: readonly number[]
-  readonly rows: ReadonlyMap<number, ParsedCell>
+  readonly rows: ReadonlyMap<number, OracleCell>
   readonly badCells: readonly string[]
   readonly inputsHeader: readonly string[]
   readonly inputs: ReadonlyMap<string, readonly string[]>
@@ -230,7 +229,7 @@ const cellText = (cell: OracleCell): string =>
 export function parsePlanLevelRef(ref: string): ParsedPlanRef {
   const phaseRows = tableRows(sectionBetween(ref, '## Phases', '## Inputs') ?? '')
   const header = phaseRows[0] ?? []
-  const rows = new Map<number, ParsedCell>()
+  const rows = new Map<number, OracleCell>()
   const phaseOrder: number[] = []
   const badCells: string[] = []
   for (const row of phaseRows.slice(1)) {
@@ -517,7 +516,7 @@ export function simulatePlan(level: string, sc: Scenario, ref: ParsedPlanRef | n
   }
   if (level === 'full' || ref === null || ref.badCells.length > 0) return full()
   for (const phase of ROW_PHASES) if (!ref.rows.has(phase)) return full()
-  const cell = (phase: number): ParsedCell => ref.rows.get(phase) ?? SKIP
+  const cell = (phase: number): OracleCell => ref.rows.get(phase) ?? SKIP
   const spawns = (phase: number): number => {
     const c = cell(phase)
     return c.agent === 'skip' ? 0 : sc.multi ? c.multi ?? c.count : c.count
@@ -808,9 +807,9 @@ describe('the level reference holds the decided rows, substitutes and rules (AC-
     const defects = (text: string): string[] => collectPlanLevelRefDefects(text, ON)
     expect(defects(seed(REF, '| IMPL_EXPLORATION_SYNTHESIS | EXPLORE_OUTPUTS |', '| IMPL_EXPLORATION_SYNTHESIS | IMPL_EXPLORE_OUTPUTS |')))
       .toContain('IMPL_EXPLORE_OUTPUTS (read instead of IMPL_EXPLORATION_SYNTHESIS) is not produced by a phase that runs at the narrowed levels')
-    expect(defects(seed(REF, /^\| PLANNING_SYNTHESIS \| PLAN_OUTPUTS \|\n/m, '')))
-      .toContain('PLANNING_SYNTHESIS: a running phase requires it, only a skipped phase produces it, and the table has no row')
-    expect(defects(seed(REF, /^\| PLANNING_SYNTHESIS \| PLAN_OUTPUTS \|\n/m, '')).join('\n')).toMatch(/3 input rows/)
+    const noPlanningRow = defects(seed(REF, /^\| PLANNING_SYNTHESIS \| PLAN_OUTPUTS \|\n/m, ''))
+    expect(noPlanningRow).toContain('PLANNING_SYNTHESIS: a running phase requires it, only a skipped phase produces it, and the table has no row')
+    expect(noPlanningRow.join('\n')).toMatch(/3 input rows/)
     expect(defects(seed(REF, '\n## Rules', '| IMPL_EXPLORE_OUTPUTS | EXPLORE_OUTPUTS |\n\n## Rules')))
       .toEqual(expect.arrayContaining(['IMPL_EXPLORE_OUTPUTS: an input row outside the decided four', 'IMPL_EXPLORE_OUTPUTS: a row that no running phase needs']))
     expect(defects(seed(REF, '| GAP_SYNTHESIS | GAP_OUTPUTS up to Gate 1, ACCEPTED_GAPS after |', '| GAP_SYNTHESIS | GAP_OUTPUTS |')))
@@ -910,8 +909,9 @@ describe('the simulator reads its counts from the reference and the oracle decid
     expect(noReview.some(d => d.includes('no design review on Revise'))).toBe(true)
     expect(defects(seed(REF, '| 6 | skip |\n', '| 6 | skip |\n| 7 | skip |\n')).some(d => d.includes('gates [0, 2], expected [0, 1, 2]'))).toBe(true)
     expect(defects(seed(REF, '| 9 | skip |\n', '| 9 | skip |\n| 13 | skip |\n')).some(d => d.includes('gates [0, 1], expected [0, 1, 2]'))).toBe(true)
-    expect(defects(seed(REF, '| 10 | Plan 1 |', '| 10 | Plan 2 |')).some(d => d.includes('plan 2, expected 1'))).toBe(true)
-    expect(defects(seed(REF, '| 10 | Plan 1 |', '| 10 | Plan 2 |')).some(d => d.includes('Revise plan 2, expected 1'))).toBe(true)
+    const twoPlanners = defects(seed(REF, '| 10 | Plan 1 |', '| 10 | Plan 2 |'))
+    expect(twoPlanners.some(d => d.includes('plan 2, expected 1'))).toBe(true)
+    expect(twoPlanners.some(d => d.includes('Revise plan 2, expected 1'))).toBe(true)
     expect(defects(seed(REF, '| 11 | skip |', '| 11 | Plan 1 |')).some(d => d.includes('Revise synthesize 1, expected 0'))).toBe(true)
     expect(defects(seed(REF, '| 8 | skip |', '| 8 | Explore 4 |')).some(d => d.includes('implExplore 4, expected 0'))).toBe(true)
     expect(defects(seed(REF, '| 4 | skip |', '| 4 | Explore 1 |')).some(d => d.includes('synthesize 1, expected 0'))).toBe(true)
