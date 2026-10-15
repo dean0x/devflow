@@ -51,11 +51,11 @@
 import { describe, it, expect } from 'vitest'
 import { spawnSync } from 'child_process'
 import { readFileSync } from 'fs'
-import { mkdtemp, readFile, rm } from 'fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import * as os from 'os'
 import * as path from 'path'
 
-import { ROOT, SANCTIONED_RESOLUTION, compactDirectiveText, requireDistFile, requireDistFiles, resolveAllAgents, resolveLearningOffSource, sectionBetween, walkFiles } from '../helpers.js'
+import { ROOT, SANCTIONED_RESOLUTION, compactDirectiveFrom, compactDirectiveText, requireDistFile, requireDistFiles, resolveAllAgents, resolveLearningOffSource, sectionBetween, walkFiles } from '../helpers.js'
 import { DEVFLOW_PLUGINS, buildScopedSkillsMap, getAllAgentNames } from '../../src/core/plugins.js'
 import { installViaFileCopy } from '../../src/targets/claude-code/installer.js'
 
@@ -333,6 +333,23 @@ describe('no prompt reaches the Claude directory outside the CLAUDE_CONFIG_DIR r
     expect(entry, 'the compaction directive is not in the corpus').toBeDefined()
     expect(entry?.content).toContain('commands/devflow/')
     expect(entry?.content.length).toBeGreaterThan(100)
+  })
+
+  it('the directive reader takes exactly one COMPACT_SECTION assignment, and a missing hook file fails loudly', async () => {
+    const assignment = "    COMPACT_SECTION='read the command file'"
+    expect(compactDirectiveFrom(`case x in\n${assignment}\nesac\n`)).toBe('read the command file')
+    expect(() => compactDirectiveFrom('COMPACT_SECTION="read the command file"\n')).toThrow('found 0')
+    expect(() => compactDirectiveFrom(`${assignment}\n${assignment}\n`)).toThrow('found 2')
+    const root = await mkdtemp(path.join(os.tmpdir(), 'devflow-claude-dir-hook-'))
+    try {
+      expect(() => compactDirectiveText(root)).toThrow()
+      const hooks = path.join(root, 'src', 'assets', 'scripts', 'hooks')
+      await mkdir(hooks, { recursive: true })
+      await writeFile(path.join(hooks, 'session-start-context'), `${assignment}\n`)
+      expect(compactDirectiveText(root)).toBe('read the command file')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   it('no prompt names the variable outside the sanctioned line and the allowlisted prose, and every devflow install path sits under a bound root', () => {
