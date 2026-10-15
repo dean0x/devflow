@@ -78,7 +78,12 @@ RUN_DENIALS="n/a"    # digits or unknown, set where the run is spawned
 RUN_FLOOR=""         # the version floor, named on a below-floor line only
 RESULT_FILE=""
 LOCK_HELD="false"
+WORKER_PID="${BASHPID:-$$}"
 finish_run() {
+  # Only the worker process itself ends the run. A subshell it forks (the watchdog, the
+  # claude spawn) can be signalled before bash resets its traps and would otherwise run
+  # this trap too: a second Run line, and a lock release by a process that is not the holder.
+  [ "${BASHPID:-$$}" = "$WORKER_PID" ] || return 0
   local _floor=""
   if [ -n "$RUN_FLOOR" ]; then _floor=" floor=${RUN_FLOOR}"; fi
   log "Run: cli=${RUN_CLI} argv=${RUN_ARGV} result=${RUN_RESULT} denials=${RUN_DENIALS}${_floor}"
@@ -1006,8 +1011,9 @@ else
   CLAUDE_EXIT=$?
 fi
 
-# Cancel watchdog (avoids stray kill hitting a recycled PID after this process exits)
-kill "$WD_PID" 2>/dev/null || true
+# Cancel watchdog (avoids stray kill hitting a recycled PID after this process exits).
+# SIGKILL so no trap can run in the watchdog subshell, whatever the bash version.
+kill -KILL "$WD_PID" 2>/dev/null || true
 wait "$WD_PID" 2>/dev/null || true
 
 # The JSON result, reduced to one fixed log line and deleted on every path out of here
