@@ -33,8 +33,8 @@ MEMORY_NOTICE_REASONS="floor path denied"
 # staged_path_safe <path> — returns 0 when <path> can sit in the Edit rule as it is.
 # Sets STAGED_PATH_REFUSAL to "" when it can, `chars` when the path holds a character or
 # a segment the rule cannot carry, and `protected` when a .claude or .git folder lies
-# above it (Claude Code refuses file writes there). The rule text is not escaped, so a
-# character that has a meaning in a rule path is refused rather than quoted: * ? [ ] \
+# above it (Claude Code refuses file writes there). The rule text carries no quoting, so
+# a character that has a meaning in a rule path is refused rather than quoted: * ? [ ] \
 # ( ) " { } and every control character, including newline, tab and DEL. A path that is
 # not absolute, starts with //, or holds an empty, . or .. segment is refused too.
 # The path reaches a JSON string by plain concatenation, which is safe after this check:
@@ -213,7 +213,9 @@ memory_notice_read() {
     _file="$_dir/.worker-notice-$_reason"
     df_file_below "$_root" "$_file" || continue
     _line=""; _tag=""; _ver=""; _floor=""; _extra=""; _text=""; _ok=""
-    IFS= read -r -n 200 _line < "$_file" 2>/dev/null || true
+    # stderr is redirected before stdin, so a notice that a concurrent session start moved
+    # away since the check above fails the open in silence.
+    IFS= read -r -n 200 _line 2>/dev/null < "$_file" || true
     read -r _tag _ver _floor _extra <<< "$_line" || true
     if [ "$_tag" = "$_reason" ] && [ -z "$_extra" ]; then
       case "$_reason" in
@@ -224,7 +226,7 @@ memory_notice_read() {
           fi
           ;;
         path)
-          _text="Devflow: working memory is not updating because the worker cannot write its staged file at this project path. The log names the cause and the fix: ${_logfile}"
+          _text="Devflow: working memory is not updating because the worker cannot write its staged file at this project path. The log names the cause: ${_logfile}"
           _ok="yes"
           ;;
         denied)

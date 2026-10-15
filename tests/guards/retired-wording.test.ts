@@ -533,13 +533,13 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
   //
   // The background worker runs `claude -p` with `--permission-mode dontAsk`, user settings
   // only and one `Edit` rule for its staged file, passed by `--settings`. No hook script
-  // names a permission skip, a bypass mode or an allow-list flag, so the limit cannot be
+  // names a permission skip, a skip-all permission mode or an allow-list flag, so the limit cannot be
   // widened by a flag that comes back. Scoped to the hook scripts, where the spawn lives:
   // other trees (the integration test helpers, docs on what the platform offers) may spell them.
   // -------------------------------------------------------------------------
   ...([
     ['--dangerously-skip-permissions', 'the permission skip flag'],
-    ['bypassPermissions', 'the bypass permission mode'],
+    ['bypassPermissions', 'the skip-all permission mode'],
     ['--allow-dangerously-skip-permissions', 'the flag that makes the skip available'],
     ['--allowedTools', 'the allow-list flag, which pre-approves tools without limiting a path'],
   ] as const).map(([literal, what]): RetiredEntry => ({

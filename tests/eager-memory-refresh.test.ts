@@ -3559,7 +3559,7 @@ const LEAN_ONLY_FLAGS = [
   '--effort', '--safe-mode', '--max-turns', '--disable-slash-commands', '--strict-mcp-config', '--mcp-config',
 ] as const;
 
-/** What no argv form carries: a permission skip, a bypass mode, an allow-list flag. */
+/** What no argv form carries: a permission skip, a skip-all permission mode, an allow-list flag. */
 const FORBIDDEN_ARGV = [
   '--dangerously-skip-permissions', '--allow-dangerously-skip-permissions', 'bypassPermissions', '--allowedTools',
 ] as const;
@@ -3750,7 +3750,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
       expectSwapCompleted();
     });
 
-    it('passes no permission skip, no bypass mode and no allow-list flag (AC1)', () => {
+    it('passes no permission skip, no skip-all permission mode and no allow-list flag (AC1)', () => {
       const rec = runWith(HEALTHY_VERSION);
 
       expectNoForbiddenFlag(recordedArgv(rec));
@@ -4417,6 +4417,22 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
       expect(recordedArgv(rec), 'no -p call').toBeUndefined();
       expect(workerLog()).toContain('FAIL: could not enter the project root');
       expectClaimedRowsPreserved(projectDir, claimed);
+    });
+
+    it('a project root that does not resolve is skipped with no claude run, the queue kept and a path notice left', () => {
+      // `cd -P -- <root>` is the one call that resolves the root; only that call fails here.
+      const bashEnv = path.join(shimDir, 'bash-env.sh');
+      fs.writeFileSync(bashEnv, 'cd() { if [ "${1:-}" = -P ] && [ "${2:-}" = -- ]; then return 1; fi; builtin cd "$@"; }\n');
+      const queue = path.join(memoryDir(), '.pending-turns.jsonl');
+      const before = fs.readFileSync(queue);
+
+      const rec = runWith(HEALTHY_VERSION, { BASH_ENV: bashEnv });
+
+      expect(workerLog()).toContain('SKIP: project root could not be resolved; no LLM run');
+      expect(fs.existsSync(rec.probeLockFile), 'the run stopped before the version probe').toBe(false);
+      expect(recordedArgv(rec), 'no -p call').toBeUndefined();
+      expect(fs.readFileSync(queue).equals(before), 'the queue is byte-identical').toBe(true);
+      expect(fs.readFileSync(path.join(memoryDir(), '.worker-notice-path'), 'utf-8')).toBe('path - -\n');
     });
   });
 });
