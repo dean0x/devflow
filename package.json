@@ -12,6 +12,7 @@
     "!dist/**/*.d.ts",
     "src/assets/",
     "src/targets/claude-code/templates/",
+    "templates/lint-pack/",
     "README.md",
     "LICENSE",
     "CHANGELOG.md"
