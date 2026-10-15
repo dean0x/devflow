@@ -14,5 +14,5 @@
  */
 
 export const FORBIDDEN_ARGV = [
-  '--dangerously-skip-permissions', '--allow-dangerously-skip-permissions', 'bypassPermissions', '--allowedTools',
+  '--dangerously-skip-permissions', '--allow-dangerously-skip-permissions', 'bypassPermissions', '--allowedTools', '--allowed-tools',
 ] as const;
