@@ -17,6 +17,7 @@ import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { compactDirectiveText } from './helpers.js';
 import { HOOK_RUN_ALLOWANCE_MS, HOOKS_DIR, NODE_EXEC_STALL_MS, runHook } from './shell-hooks-helpers.js';
 import {
   claudeMdAuditRoots,
@@ -233,9 +234,9 @@ describe('session-start-context: Sections 5 and 6', () => {
       expect(text).toContain('list headings');
       expect(text).toMatch(/read from (the )?current phase/);
       // (d) the input comes from the summary, under either name the commands use
-      expect(text).toMatch(/take input \(COMMAND_INPUT[/ ]+(or )?ARGUMENTS\) from the summary/);
-      // (e) resume after the last finished phase
-      expect(text).toContain('resume after the last finished phase');
+      expect(text).toMatch(/input \(COMMAND_INPUT[/ ]+(or )?ARGUMENTS\) from summary/);
+      // (e) resume after last finished phase
+      expect(text).toContain('resume after last finished phase');
     }, NODE_RUN_MS);
 
     it('AC-403: byte-identical across different HOMEs and absolute CLAUDE_CONFIG_DIR values; nothing interpolated', () => {
@@ -250,6 +251,10 @@ describe('session-start-context: Sections 5 and 6', () => {
       expect(first).not.toContain(home);
       expect(first).not.toContain('claude-a');
     }, NODE_RUN_MS * 2);
+
+    it('AC-403: the emitted directive is the COMPACT_SECTION text of the hook source', () => {
+      expect(directive(run(plain, 'compact').stdout)).toBe(compactDirectiveText());
+    }, NODE_RUN_MS);
 
     it('AC-403: no $ARGUMENTS placeholder, no unconditional running-command claim, no whole-file read order', () => {
       const text = directive(run(plain, 'compact').stdout);
@@ -810,7 +815,7 @@ describe('session-start-context: Sections 5 and 6', () => {
     it('the directive is single-quoted, so $CLAUDE_CONFIG_DIR is not expanded', () => {
       const line = source().split('\n').find(l => l.trim().startsWith("COMPACT_SECTION='"));
       expect(line).toBeDefined();
-      expect(line).toContain("{$CLAUDE_CONFIG_DIR or ~/.claude}");
+      expect(line).toContain('commands/devflow/<name>.md in $CLAUDE_CONFIG_DIR if absolute, else ~/.claude');
     });
 
     it('Sections 5 and 6 and the audit helpers contain no `exit`', () => {
