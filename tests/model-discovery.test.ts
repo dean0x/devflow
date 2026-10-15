@@ -54,7 +54,7 @@
  *   would never execute, leaving the exit-code paths covered only by mocks.
  */
 
-import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { promises as fsAsync } from 'fs';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -303,6 +303,47 @@ async function warmNodeStub(): Promise<void> {
   } finally {
     await fsAsync.rm(stubDir, { recursive: true, force: true });
   }
+}
+
+/**
+ * A SIGTERM-ignoring node stub that is written once per describe and warmed in
+ * `beforeAll` as that exact file, so the run under the production deadline is not the
+ * first run of a newly written stub (T4 and AC-P8 assert on a PID the stub writes
+ * inside that deadline). While the `warming` marker exists next to it the stub exits 0,
+ * so the warm-up returns; without the marker it writes `stub.pid`, ignores SIGTERM and
+ * hangs. Call it once per describe while the file is collected; read the stub from the
+ * returned function inside a test, which also clears any earlier PID file.
+ */
+function useSigtermIgnoringStub(): () => { stub: string; pidFile: string } {
+  let stubDir = '';
+
+  beforeAll(async () => {
+    stubDir = await fsAsync.mkdtemp(path.join(os.tmpdir(), 'devflow-model-discovery-sigterm-stub-'));
+    const marker = path.join(stubDir, 'warming');
+    const stubContent = [
+      '// SIGTERM-ignoring stub: warm-up run exits 0, a timed run ignores SIGTERM and hangs',
+      `const fs = require('fs');`,
+      `const path = require('path');`,
+      `if (fs.existsSync(path.join(__dirname, 'warming'))) process.exit(0);`,
+      `fs.writeFileSync(path.join(__dirname, 'stub.pid'), String(process.pid));`,
+      `process.on('SIGTERM', () => {});  // ignore SIGTERM — must be SIGKILL'd`,
+      `setInterval(() => {}, 100000);    // hold event loop open indefinitely`,
+    ].join('\n') + '\n';
+    await fsAsync.writeFile(path.join(stubDir, 'stub.js'), stubContent);
+    await fsAsync.writeFile(marker, '');
+    await warmNodeExec(path.join(stubDir, 'stub.js'), 'SIGTERM-ignoring stub');
+    await fsAsync.rm(marker, { force: true });
+  }, COLD_EXEC_WARM_HOOK_MS);
+
+  afterAll(async () => {
+    await fsAsync.rm(stubDir, { recursive: true, force: true });
+  });
+
+  return () => {
+    const pidFile = path.join(stubDir, 'stub.pid');
+    fs.rmSync(pidFile, { force: true });
+    return { stub: path.join(stubDir, 'stub.js'), pidFile };
+  };
 }
 
 beforeEach(async () => {
@@ -1254,7 +1295,7 @@ function shellDeps(stubPath: string, onExitCode?: (code: number) => void): Model
  * The PID file is the proof that the stub ran at all: without it, "no live process" is
  * trivially true and the SIGKILL escalation was never exercised. A missing file is
  * almost always a cold start of node that ran past the production deadline (see
- * warmNodeStub). Production fires SIGKILL on an unref()'d timer SIGKILL_GRACE_MS after
+ * useSigtermIgnoringStub). Production fires SIGKILL on an unref()'d timer SIGKILL_GRACE_MS after
  * discoverExternalModels returns, so the caller waits for it to land before this check.
  */
 function expectStubKilled(pidFile: string): void {
@@ -1353,6 +1394,7 @@ describe('T14: Production spawn — exit-0 stdout becomes a live catalog (no spa
 
 describe('T4: Real-binary stub — stale-cache fallback on spawn failure', () => {
   beforeAll(warmNodeStub, COLD_EXEC_WARM_HOOK_MS);
+  const sigtermStub = useSigtermIgnoringStub();
 
   // Pre-seed a stale cache entry so the stale-cache outcome is deterministic.
   // Uses a different version key from the stubs (0.2.0) so it is skipped by the
@@ -1448,15 +1490,7 @@ describe('T4: Real-binary stub — stale-cache fallback on spawn failure', () =>
     // discoverExternalModels returns. Without this check a leaked stub could accumulate
     // over multiple runs and stretch the suite from ~24s to 40+ minutes (real incident,
     // feature KB 'Leaked stub relays' gotcha).
-    const pidFile = path.join(tmpDir, 'stub-t4-sigterm.pid');
-    const stubContent = [
-      '// SIGTERM-ignoring stub (T4)',
-      `const fs = require('fs');`,
-      `fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));`,
-      'process.on("SIGTERM", () => {});  // ignore SIGTERM — must be killed by SIGKILL',
-      'setInterval(() => {}, 100000);    // hold event loop open',
-    ].join('\n') + '\n';
-    const stub = await writeStubScript(tmpDir, 'stub-t4-sigterm.js', stubContent);
+    const { stub, pidFile } = sigtermStub();
 
     const deps: ModelDiscoveryDeps = {
       resolveProxyBin: async () => ({
@@ -1518,7 +1552,7 @@ describe('T4: Real-binary stub — stale-cache fallback on spawn failure', () =>
 });
 
 describe('AC-P8: SIGTERM + SIGKILL escalation on timeout', () => {
-  beforeAll(warmNodeStub, COLD_EXEC_WARM_HOOK_MS);
+  const sigtermStub = useSigtermIgnoringStub();
 
   it(
     'discoverExternalModels returns known:false (not hang) when process ignores SIGTERM',
@@ -1528,15 +1562,7 @@ describe('AC-P8: SIGTERM + SIGKILL escalation on timeout', () => {
       // .js stub: production spawns it as `process.execPath [stub] models --json`.
       // It writes its own PID, ignores SIGTERM, and hangs. Production must SIGKILL it.
       // No spawnAndCollect injection — the real buildRealSpawnAndCollect path runs.
-      const pidFile = path.join(tmpDir, 'stub-p8.pid');
-      const stubContent = [
-        '// AC-P8 stub: ignore SIGTERM, write PID, hang',
-        `const fs = require('fs');`,
-        `fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));`,
-        `process.on('SIGTERM', () => {});  // ignore SIGTERM — must be SIGKILL'd`,
-        `setInterval(() => {}, 100000);    // hold event loop open indefinitely`,
-      ].join('\n') + '\n';
-      const stub = await writeStubScript(tmpDir, 'stub-p8-sigterm.js', stubContent);
+      const { stub, pidFile } = sigtermStub();
 
       const deps: ModelDiscoveryDeps = {
         resolveProxyBin: async () => ({
