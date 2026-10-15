@@ -33,6 +33,9 @@ const SYNTHESIZE_MODE_REF_MAX_BYTES = 3_805
 /** The `/code-review` gate-level reference, in bytes. Registered as `code-review-levels-ref-max`; lowered, never raised. */
 const CODE_REVIEW_LEVELS_REF_MAX_BYTES = 1_349
 
+/** The `/plan` gate-level reference, in bytes. Registered as `plan-levels-ref-max`; lowered, never raised. */
+const PLAN_LEVELS_REF_MAX_BYTES = 4_056
+
 /** The Curate agent body, in bytes. Registered as `curate-body-max`; lowered, never raised. */
 const CURATE_BODY_MAX_BYTES = 16_710
 
@@ -219,6 +222,14 @@ describe('the Synthesize and Curate bodies sit under their ceilings, and the mov
     expect(collectSizeDefects('code-review-levels.md', ref, CODE_REVIEW_LEVELS_REF_MAX_BYTES)).toEqual([])
     const bytes = Buffer.byteLength(ref)
     expect(collectSizeDefects('code-review-levels.md', ref, bytes - 1)).toEqual([`code-review-levels.md is ${bytes} bytes, ceiling ${bytes - 1}`])
+  })
+
+  it('the plan gate-level reference fits `plan-levels-ref-max`, and a probe one byte under its size is reported', () => {
+    const ref = readAgentReference('commands/plan-levels.md')
+    expect(Buffer.byteLength(ref), 'the reference is read: the guard would pass vacuously on an empty one').toBeGreaterThan(400)
+    expect(collectSizeDefects('plan-levels.md', ref, PLAN_LEVELS_REF_MAX_BYTES)).toEqual([])
+    const bytes = Buffer.byteLength(ref)
+    expect(collectSizeDefects('plan-levels.md', ref, bytes - 1)).toEqual([`plan-levels.md is ${bytes} bytes, ceiling ${bytes - 1}`])
   })
 
   it('the Curate body fits `curate-body-max`, and the maintenance ladder is in maintain.md, not the body', () => {

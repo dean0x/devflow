@@ -65,6 +65,7 @@ d .claude/skills/devflow:agent-references/references/commands/
 - .claude/skills/devflow:agent-references/references/commands/code-review-levels.md
 - .claude/skills/devflow:agent-references/references/commands/implement-evidence-asks.md
 - .claude/skills/devflow:agent-references/references/commands/implement-revalidate.md
+- .claude/skills/devflow:agent-references/references/commands/plan-levels.md
 d .claude/skills/devflow:agent-references/references/curate/
 - .claude/skills/devflow:agent-references/references/curate/maintain.md
 d .claude/skills/devflow:agent-references/references/synthesize/

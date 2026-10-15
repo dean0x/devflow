@@ -2,11 +2,13 @@
  * /plan's Revise loop is bounded (#455, D-PLAN-REVISE-BOUND).
  *
  * Gate 2 used to offer "Revise — re-run phases 10-12 with new constraints (loop back,
- * no limit on revisions)". Each revision spawns five agents (Plan ×3, Synthesize,
- * Design), so an unbounded loop is an unbounded bill. The bound is two revisions; then
- * Gate 2 offers Accept, Cancel, or "Restart /plan with these constraints". The spawn
- * count of a first pass is NOT cut (D-3: no quality evidence to cut a perspective), so
- * this guard holds only the loop's bound and its diagram.
+ * no limit on revisions)". At `full` a revision spawns five agents (Plan ×3,
+ * Synthesize, Design) and the first pass keeps every spawn; at `standard` and `lean`
+ * the levels reference cuts the first pass, on the run evidence in issue #473, and a
+ * revision spawns two (Plan, Design). Either way an unbounded loop is an unbounded
+ * bill. The bound is two revisions; then Gate 2 offers Accept, Cancel, or "Restart
+ * /plan with these constraints". This guard holds only the loop's bound and its
+ * diagram; tests/guards/plan-levels.test.ts holds the spawn counts of each level.
  *
  *   AC-201  Revise is "when fewer than 2 revisions have run", with a budget of "at most
  *           2 revisions"; after that Gate 2 offers Accept, Cancel and Restart. The

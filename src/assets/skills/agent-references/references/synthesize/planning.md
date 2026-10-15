@@ -1,6 +1,6 @@
 ## Mode: Planning
 
-Synthesize outputs from 3 Plan agents (implementation, testing, execution strategy).
+Merge the Plan outputs into one plan. At level full, 3 Plan agents report (implementation, testing, execution strategy) and Synthesize merges them. At levels standard and lean, one Plan agent applies only this file's Execution Strategy Decision and Context Risk, and reports in the order its prompt gives.
 
 **Process:**
 1. Merge implementation steps with testing strategy
@@ -11,7 +11,7 @@ Synthesize outputs from 3 Plan agents (implementation, testing, execution strate
 **Execution Strategy Decision:**
 
 Count the files the plan writes and its plan steps, then choose:
-- **SEQUENTIAL_CODE_AGENTS**: the plan writes >= 10 files or has >= 7 steps. Split it into phases of <= 5 files and <= 6 steps each. Each phase hands off to the next with a summary.
+- **SEQUENTIAL_CODE_AGENTS**: the plan writes >= 10 files or has >= 7 steps. Split it into phases of <= 5 files and <= 6 steps each, and give the phases as the Subtask Breakdown section. Each phase hands off to the next with a summary.
 - **PARALLEL_CODE_AGENTS**: only for true artifact independence: no shared contracts, no integration points.
 - **SINGLE_CODE_AGENT**: every other plan. Coherent A→Z implementation.
 
