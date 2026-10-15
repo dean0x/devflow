@@ -5,7 +5,9 @@
  *
  *  T1 (real-binary, skip if not available): discoverExternalModels returns
  *     known:true with a live result when the routing runtime is installed and
- *     accessible. Validates the full happy path including cache write.
+ *     accessible. Validates the full happy path including cache write. T1 and T13
+ *     run the real runtime through an injected spawn that skips the production
+ *     deadline (machine load); the deadline itself is covered by T4 and AC-P8.
  *
  *  T2 (real-binary): discoverExternalModels with SUBSWITCH_CONFIG pointing at
  *     a legacy config causes exit 1 → known:false (env stripping test: if the
@@ -50,7 +52,7 @@ import { promises as fsAsync } from 'fs';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { execSync } from 'child_process';
+import { spawn } from 'child_process';
 import {
   parseModelsJson,
   discoverExternalModels,
@@ -106,9 +108,9 @@ let cacheDir: string;
 let logPath: string;
 
 /**
- * The discovery log, for an assertion message. The live-runtime tests (T1, T13) race
- * the production spawn deadline, so a `known: false` there must show whether the log
- * says `spawn timed out` or something else.
+ * The discovery log, for an assertion message. A `known: false` in the live-runtime
+ * tests (T1, T13) must show why: a non-zero exit from the runtime, a parse failure,
+ * or a `[test-harness]` line when the harness bound below was hit.
  */
 function discoveryLog(): string {
   try {
@@ -117,6 +119,92 @@ function discoveryLog(): string {
     return '(no log)';
   }
 }
+
+/**
+ * Upper bound for one live-runtime spawn in T1 and T13. It is a harness guard, not a
+ * production value. The production deadline (SPAWN_TIMEOUT_MS) is covered with stubs
+ * in T4 and AC-P8, so the live-runtime tests must not race it: a real
+ * `node <runtime>/dist/cli.js models --json` exec takes 1-6 s when the machine is
+ * loaded. The bound sits under the 10 s test timeout, so a hit fails the assertion
+ * with a `[test-harness]` log line instead of ending as a bare vitest timeout.
+ */
+const LIVE_SPAWN_HARNESS_BOUND_MS = 8_000;
+
+/** Cap on the child stderr kept for the failure log. */
+const LIVE_SPAWN_STDERR_CAP = 4_096;
+
+type SpawnAndCollect = NonNullable<ModelDiscoveryDeps['spawnAndCollect']>;
+
+/**
+ * spawnAndCollect for the live-runtime tests (T1, T13). It runs the exact options
+ * discoverExternalModels builds (execPath, binPath, argv, env, cwd) as a plain child
+ * process and collects stdout and the exit code, with no production deadline. The
+ * tests still prove that production builds the right spawn options (including the
+ * env isolation T13 checks) and parses the real runtime output.
+ *
+ * Bounded by LIVE_SPAWN_HARNESS_BOUND_MS: on a hit the child is killed with SIGKILL,
+ * a `[test-harness]` line goes to the log, and the result is exitCode -1. Child
+ * stderr goes to the log when the exit is non-zero.
+ */
+const spawnLiveRuntime: SpawnAndCollect = (opts) =>
+  new Promise((resolve) => {
+    const note = (line: string): void => {
+      try {
+        fs.appendFileSync(logPath, `${line}\n`);
+      } catch {
+        // The log is diagnostic only; the assertion message falls back to '(no log)'.
+      }
+    };
+
+    const proc = spawn(opts.execPath, [opts.binPath, ...opts.argv], {
+      env: opts.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      cwd: opts.cwd,
+    });
+
+    let settled = false;
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString('utf-8');
+    });
+    proc.stderr.on('data', (chunk: Buffer) => {
+      if (stderr.length < LIVE_SPAWN_STDERR_CAP) stderr += chunk.toString('utf-8');
+    });
+
+    const bound = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try { proc.kill('SIGKILL'); } catch { /* already dead */ }
+      note(
+        `[test-harness] HARNESS FAILURE: live runtime spawn exceeded the ` +
+          `${LIVE_SPAWN_HARNESS_BOUND_MS} ms harness bound (not the production spawn deadline)`,
+      );
+      resolve({ exitCode: -1, stdout: '', timedOut: false });
+    }, LIVE_SPAWN_HARNESS_BOUND_MS);
+
+    proc.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(bound);
+      if (code !== 0 && stderr.length > 0) {
+        note(`[test-harness] runtime stderr: ${stderr.slice(0, LIVE_SPAWN_STDERR_CAP)}`);
+      }
+      resolve({ exitCode: code ?? 1, stdout, timedOut: false });
+    });
+
+    proc.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(bound);
+      note(`[test-harness] live runtime spawn error: ${err.message}`);
+      resolve({ exitCode: -1, stdout: '', timedOut: false });
+    });
+  });
+
+/** Deps for the live-runtime tests: the real bin resolver, the unraced spawn. */
+const liveRuntimeDeps: ModelDiscoveryDeps = { spawnAndCollect: spawnLiveRuntime };
 
 beforeEach(async () => {
   tmpDir = await fsAsync.mkdtemp(path.join(os.tmpdir(), 'devflow-model-discovery-'));
@@ -786,7 +874,9 @@ describe('T1: Real-binary — discoverExternalModels with live runtime', () => {
       throw new Error(`resolveProxyBin failed unexpectedly: ${binResult.error}`);
     }
 
-    const result = await discoverExternalModels(cacheDir, logPath);
+    // spawnLiveRuntime runs the production spawn options without the production
+    // deadline, so machine load cannot turn a slow but correct exec into known:false.
+    const result = await discoverExternalModels(cacheDir, logPath, liveRuntimeDeps);
 
     // subswitch models --json (0.6.0) is a static registry dump: no auth, no relay,
     // no config file required (verified: exit 0, configFileFound:false; the runtime's
@@ -807,7 +897,7 @@ describe('T1: Real-binary — discoverExternalModels with live runtime', () => {
     }
     // 0.6.0 lists gpt-5.5 with retired:true, routable:false — never offered.
     expect(result.selectableNames).not.toContain('gpt-5.5');
-  }, 10_000); // 10s timeout for live spawn
+  }, 10_000); // above LIVE_SPAWN_HARNESS_BOUND_MS
 });
 
 // ---------------------------------------------------------------------------
@@ -961,7 +1051,7 @@ describe('T13: Real-binary — user-level runtime config is isolated from discov
     const origHome = process.env['HOME'];
     process.env['HOME'] = home;
     try {
-      return await discoverExternalModels(cacheDir, logPath);
+      return await discoverExternalModels(cacheDir, logPath, liveRuntimeDeps);
     } finally {
       if (origHome === undefined) {
         delete process.env['HOME'];
