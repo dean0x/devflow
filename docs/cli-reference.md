@@ -233,7 +233,7 @@ The gate level is one of three words that say how much checking a command applie
 | `standard` | The default when no level is set. |
 | `lean` | The least checking. |
 
-**What reads it.** `/code-review` picks its focuses by level. `full` runs every focus. `standard` drops TypeScript, and drops Dependencies on a code diff that changes no dependency manifest (a lockfile alone does not count). `lean` runs Security, Testing and Reliability. Other commands ignore the level until issues #473 and #480 land. `devflow gates --set full` keeps the review as before.
+**What reads it.** `/code-review` picks its focuses by level. `full` runs every focus. `standard` drops TypeScript, and drops Dependencies on a code diff that changes no dependency manifest (a lockfile alone does not count). `lean` runs Security, Testing and Reliability on a code diff, plus Compliance on its own trigger. A docs-only, tests-only or lockfile-only diff runs a smaller set of its own, and Security runs at every level. Other commands ignore the level until issues #473 and #480 land. `devflow gates --set full` keeps the review as before.
 
 ```bash
 npx devflow-kit gates --status      # The level in effect here, which layer decided it, and the machine default

@@ -512,8 +512,11 @@ export function collectSummaryDefects(cr: string, syn: string): string[] {
   const gate = lines.findIndex(l => l.startsWith('**Gate level**: {GATE_LEVEL}'))
   if (gate === -1) out.push('the summary template has no line that starts with "**Gate level**: {GATE_LEVEL}"')
   else {
-    if (gate < lines.findIndex(l => l.startsWith('**Date**:'))) out.push('the Gate level line comes before the Date line')
-    if (gate > lines.findIndex(l => l.startsWith('## Merge Recommendation'))) out.push('the Gate level line comes after the Merge Recommendation')
+    // A missing anchor counts as a wrong order, so a template that lost its Date line is reported.
+    const date = lines.findIndex(l => l.startsWith('**Date**:'))
+    const merge = lines.findIndex(l => l.startsWith('## Merge Recommendation'))
+    if (date === -1 || gate < date) out.push('the Gate level line does not follow the Date line')
+    if (merge === -1 || gate > merge) out.push('the Gate level line does not come before the Merge Recommendation')
     if (!lines[gate].includes('(no report)')) out.push('the Gate level line does not mark a focus with no report')
   }
   const rule = tableRows(sectionBetween(syn, '**Merge Rules:**', '**Output:**') ?? '')
@@ -638,18 +641,33 @@ describe('the command carries the gate-level block, outside the learning arms (A
     expect(collectBlockArmDefects(SOURCE)).toEqual([])
   })
 
-  it('known-bad probes: each removed invariant, a changed root form, a missing Read-tool phrase and a block in a learning arm are reported', () => {
+  it('known-bad probes: each removed invariant, read-paragraph phrase and data-flow line, a changed root form or order, and a block in a learning arm are reported', () => {
     const defects = (text: string): string[] => collectGateLevelBlockDefects(text)
-    expect(defects(seed(ON, 'If the Read fails, or a row is missing or malformed, set `GATE_LEVEL` to `full` for every worktree of this run', 'If the Read fails, continue'))
-      .some(d => d.startsWith('the block lacks: If the Read fails'))).toBe(true)
-    expect(defects(seed(ON, "Apply each class's row to that class's own set, then take the union of the results.", 'Apply the rows.'))
-      .some(d => d.startsWith("the block lacks: Apply each class's row"))).toBe(true)
-    expect(defects(seed(ON, 'Security runs at every level and in every class.', 'Security runs at some levels.'))
-      .some(d => d.startsWith('the block lacks: Security runs at every level'))).toBe(true)
+    for (const item of BLOCK_ITEMS) {
+      expect(defects(seed(ON, item, 'removed')), `removing "${item.slice(0, 40)}"`).toContain(`the block lacks: ${item.slice(0, 60)}`)
+    }
     expect(defects(seed(ON, SANCTIONED_RESOLUTION, 'd="$HOME/.claude";')).join('\n')).toMatch(/the read paragraph lacks: d="\$\{CLAUDE_CONFIG_DIR:-\}"/)
     expect(defects(seed(ON, '` with the Read tool.', '`.'))).toContain('the read paragraph lacks: with the Read tool')
+    expect(defects(seed(ON, 'At `standard` or `lean`, once per run, ', ''))).toEqual([
+      'the read paragraph lacks: `standard` or `lean`',
+      'the read paragraph lacks: once per run',
+    ])
+    const readParagraph = gateBlock(ON)?.split('\n\n').find(p => p.includes(LEVEL_REFERENCE_PATH)) ?? ''
+    expect(readParagraph, 'the read paragraph is in the compiled command').not.toBe('')
+    const pathFirst = `At \`standard\` or \`lean\`, once per run, Read \`<that directory>/${LEVEL_REFERENCE_PATH}\` with the Read tool, after you run \`${SANCTIONED_RESOLUTION} printf '%s\\n' "$d"\` in Bash.`
+    expect(defects(seed(ON, readParagraph, pathFirst))).toEqual(['the resolution comes after the path'])
+    const movedUp = seed(seed(ON, `${readParagraph}\n\n`, ''), '**Language focus stamp.**', `${readParagraph}\n\n**Language focus stamp.**`)
+    expect(defects(movedUp)).toContain('the directory read does not come after the stamp paragraph')
+    expect(defects(`${ON}\nRun \`echo "$CLAUDE_CONFIG_DIR"\`.\n`)).toContain('2 CLAUDE_CONFIG_DIR names in the command, expected 1')
+    expect(defects(seed(ON, '#### Step 1.2b: Narrow by gate level\n\n', ''))).toContain('Step 1.2b has no heading of its own inside the Step 1.2 slice')
     expect(defects(seed(ON, '**Produces:** COMPLIANCE_ACTIVE, COMPLIANCE_FRAMEWORKS, GATE_LEVEL', '**Produces:** COMPLIANCE_ACTIVE, COMPLIANCE_FRAMEWORKS')))
       .toContain('Step 0b Produces does not list GATE_LEVEL')
+    expect(defects(seed(ON, '**Requires:** DIFF_RANGE, REVIEW_DIR, COMPLIANCE_ACTIVE, GATE_LEVEL (from Step 0b)', '**Requires:** DIFF_RANGE, REVIEW_DIR, COMPLIANCE_ACTIVE (from Step 0b)')))
+      .toContain('Phase 1 Requires does not list GATE_LEVEL')
+    expect(defects(seed(ON, '**Requires:** DIFF_CLASS, CHANGED_PATHS, COMPLIANCE_ACTIVE, GATE_LEVEL', '**Requires:** DIFF_CLASS, CHANGED_PATHS, COMPLIANCE_ACTIVE')))
+      .toContain('Step 1.2 Requires does not list GATE_LEVEL')
+    expect(defects(seed(ON, 'one per focus in REVIEW_FOCUS_LIST', 'for the focus set `DIFF_CLASS` selects')))
+      .toContain('Phase 2 does not spawn one Review agent per REVIEW_FOCUS_LIST focus')
     expect(defects(seed(ON, 'Compliance keeps the trigger above at every level.', 'Compliance keeps the trigger above at every level.\nInstalled language focuses: go')))
       .toContain('the block carries a second stamp line')
     expect(defects(seed(ON, 'Compliance keeps the trigger above at every level.', 'Compliance keeps the trigger above at every level for react and rust.')))
@@ -704,12 +722,17 @@ describe('the summary names the level and the focuses (AC-11)', () => {
     expect(collectSummaryDefects(body, SYN)).toEqual([])
   })
 
-  it('known-bad probes: a lost input, a lost Gate level line, a lost marker, a lost security row and a new summary file are each reported', () => {
+  it('known-bad probes: a lost input, a lost or misplaced Gate level line, a lost marker, a lost security row, the level in the Git spawn and a new summary file are each reported', () => {
     expect(collectSummaryDefects(seed(ON, 'GATE_LEVEL: {GATE_LEVEL}\nFOCUSES: {REVIEW_FOCUS_LIST}\n', 'FOCUSES: {REVIEW_FOCUS_LIST}\n'), SYN))
       .toContain('the Synthesize spawn does not pass GATE_LEVEL')
     expect(collectSummaryDefects(seed(ON, 'FOCUSES: {REVIEW_FOCUS_LIST}\n', ''), SYN)).toContain('the Synthesize spawn does not pass FOCUSES')
     expect(collectSummaryDefects(ON, seed(SYN, /^\*\*Gate level\*\*: .*\n/m, ''))).toContain('the summary template has no line that starts with "**Gate level**: {GATE_LEVEL}"')
     expect(collectSummaryDefects(ON, seed(SYN, '`(no report)`', 'nothing'))).toContain('the Gate level line does not mark a focus with no report')
+    expect(collectSummaryDefects(ON, seed(SYN, /^(\*\*Date\*\*: .*\n)(\*\*Gate level\*\*: .*\n)/m, '$2$1'))).toContain('the Gate level line does not follow the Date line')
+    expect(collectSummaryDefects(ON, seed(SYN, /^\*\*Date\*\*: .*\n/m, ''))).toContain('the Gate level line does not follow the Date line')
+    expect(collectSummaryDefects(ON, seed(SYN, /^## Merge Recommendation: .*\n/m, ''))).toContain('the Gate level line does not come before the Merge Recommendation')
+    expect(collectSummaryDefects(seed(ON, 'OPERATION: post-review-summary\n', 'OPERATION: post-review-summary\nGATE_LEVEL: {GATE_LEVEL}\n'), SYN))
+      .toContain('the Git spawn carries the level or the focuses')
     expect(collectSummaryDefects(ON, seed(SYN, '| Planned security focus has no report | CHANGES REQUESTED |\n', '')))
       .toContain('the Merge Rules have no row for a planned security focus with no report')
     expect(collectSummaryDefects(ON, seed(SYN, '| Planned security focus has no report | CHANGES REQUESTED |', '| Planned security focus has no report | APPROVED WITH COMMENTS |')))
