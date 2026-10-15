@@ -14,8 +14,6 @@ output-dir: dist/commands
 
 Orchestrate design planning from requirements discovery through gap analysis to implementation design. Produces a machine-readable design artifact consumed by `/implement`.
 
-The orchestrator only spawns agents and gates — all analytical work is done by agents.
-
 ## Usage
 
 ```
@@ -113,9 +111,9 @@ If the user says "skip" or "just proceed" — skip remaining questions, present 
 <!-- learning:end -->
 
 <!-- learning:on -->
-**Produces:** SKIM_CONTEXT, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES
+**Produces:** SKIM_CONTEXT, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, GATE_LEVEL
 <!-- learning:off -->
-**Produces:** SKIM_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES
+**Produces:** SKIM_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, GATE_LEVEL
 <!-- learning:end -->
 **Requires:** CONFIRMED_SCOPE
 
@@ -152,10 +150,16 @@ Pass `FEATURE_KNOWLEDGE` to Explore and Design agents. Pass `DECISIONS_CONTEXT` 
 Pass `FEATURE_KNOWLEDGE` to Explore and Design agents.
 <!-- learning:end -->
 
+**Gate level.** At `standard` or `lean`, once per run, run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash and Read `<that directory>/skills/devflow:agent-references/references/commands/plan-levels.md` with the Read tool, and apply it to Phases 3-14.
+
+- The reference only removes or merges agents.
+- If the Read fails, or a row is missing or malformed, set `GATE_LEVEL` to `full` and say `level reference unreadable: full applied`.
+- Security runs as its own Design spawn, and the design review runs, at every level and on every Revise pass.
+
 #### Phase 3: Explore Requirements (Parallel)
 
 **Produces:** EXPLORE_OUTPUTS
-**Requires:** SKIM_CONTEXT
+**Requires:** SKIM_CONTEXT, GATE_LEVEL
 
 Spawn 4 `Agent(subagent_type="Explore")` agents **in a single message**, each with Skim agent context and `FEATURE_KNOWLEDGE: {feature_knowledge}` (from Phase 2). Include the instruction: "The FEATURE_KNOWLEDGE is a baseline — VALIDATE, EXTEND, and CORRECT it. For anything it already covers, cite its KB IDs (`{slug} KB-AP-n`) instead of restating the text. Focus on areas the feature knowledge doesn't cover and changes since it was last updated." Ask each agent for a final report of at most about 1,500 tokens: findings with file:line references, not file dumps.
 
@@ -170,8 +174,6 @@ Spawn 4 `Agent(subagent_type="Explore")` agents **in a single message**, each wi
 
 **Produces:** EXPLORATION_SYNTHESIS
 **Requires:** EXPLORE_OUTPUTS
-
-**WAIT** for Phase 3 to complete.
 
 ```
 Agent(subagent_type="Synthesize"):
@@ -253,8 +255,6 @@ Cite evidence from provided artifacts."
 **Produces:** GAP_SYNTHESIS
 **Requires:** GAP_OUTPUTS
 
-**WAIT** for Phase 5 to complete.
-
 ```
 Agent(subagent_type="Synthesize"):
 "Synthesize GAP ANALYSIS outputs for: {feature/issues}
@@ -315,8 +315,6 @@ Spawn 4 `Agent(subagent_type="Explore")` agents **in a single message**, each wi
 **Produces:** IMPL_EXPLORATION_SYNTHESIS
 **Requires:** IMPL_EXPLORE_OUTPUTS
 
-**WAIT** for Phase 8 to complete.
-
 ```
 Agent(subagent_type="Synthesize"):
 "Synthesize IMPLEMENTATION EXPLORATION outputs for: {feature/issues}
@@ -330,7 +328,7 @@ Combine into: patterns to follow, integration points, reusable code, edge cases"
 **Produces:** PLAN_OUTPUTS
 **Requires:** IMPL_EXPLORATION_SYNTHESIS, GAP_SYNTHESIS
 
-Spawn 3 Plan agents **in a single message**, each with implementation exploration synthesis. Ask each agent for a final report of at most about 1,500 tokens: the plan itself, not a restatement of the exploration.
+Spawn 3 `Agent(subagent_type="Plan")` agents **in a single message**, each with implementation exploration synthesis. Ask each agent for a final report of at most about 1,500 tokens: the plan itself, not a restatement of the exploration.
 
 | Focus | Output |
 |-------|--------|
@@ -344,8 +342,6 @@ Implementation steps planner: include explicit gap mitigations (from Phase 6) in
 
 **Produces:** PLANNING_SYNTHESIS
 **Requires:** PLAN_OUTPUTS
-
-**WAIT** for Phase 10 to complete.
 
 ```
 Agent(subagent_type="Synthesize"):
@@ -534,6 +530,7 @@ Display completion summary:
 - Issue URL (if created or enriched) — and any `TRACEABILITY: DEGRADED ({reason})` lines from the Git agent
 - Gap analysis summary (N blocking, M should-address)
 - Design review summary (N anti-patterns found, M mitigated in plan)
+- Gate level: {GATE_LEVEL}, with any level note
 - Suggested next step: `/implement {artifact-path}` or `/implement #{issue-number}`
 
 ---
@@ -581,13 +578,8 @@ Display completion summary:
 
 ## Principles
 
-1. **Orchestration only** — Command spawns agents, never does agent work itself
-2. **Three mandatory gates** — Gate 0 (understand), Gate 1 (scope+gaps), Gate 2 (plan+review); none may be skipped
-3. **Parallel execution** — Explore phases and gap analysis run in parallel; synthesis phases wait
-4. **Evidence-based gaps** — Every gap cites specific text; no speculation
-5. **Scope ruthlessly** — Small, focused plans ship faster; gate 1 enforces scope discipline
-6. **Strict delegation** — Never synthesize, analyze, or plan in main session; always spawn agents
-7. **Design artifacts are machine-readable** — `/implement` can consume the YAML frontmatter directly
+1. **Scope ruthlessly** — Small, focused plans ship faster; gate 1 enforces scope discipline
+2. **Strict delegation** — Never synthesize, analyze, or plan in main session; always spawn agents
 
 ## Error Handling
 
