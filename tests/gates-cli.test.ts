@@ -710,7 +710,7 @@ describe('devflow gates (help and usage)', () => {
     expect(run.out).toMatch(/standard\s+the default/);
     expect(run.out).toMatch(/lean\s+the least checking/);
     expect(run.out).toContain('/code-review and /plan read the level');
-    expect(run.out).toContain('lint pack');
+    expect(run.out).toContain("At lean, /implement has Validate run the project's lint pack.");
     expect(run.out).not.toContain('#473');
     expect(run.out).not.toContain('#474');
     expect(run.out).not.toContain('#475');
