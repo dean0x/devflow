@@ -16,16 +16,25 @@
  * and never assumes upstream masking happened.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { spawnSync } from 'child_process';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { spawnSync, type SpawnSyncOptionsWithStringEncoding, type SpawnSyncReturns } from 'child_process';
 import { createRequire } from 'module';
 import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { resolveAgentSource } from './helpers.js';
+import { HOOK_RUN_ALLOWANCE_MS, NODE_EXEC_STALL_MS } from './shell-hooks-helpers.js';
 
 const SCRIPT = path.resolve(import.meta.dirname, '../src/assets/scripts/redact-secrets.cjs');
+
+// Almost every test here spawns `node` on the scrubber, and on macOS a node exec
+// that follows fork-heavy tests waits on syspolicyd (NODE_EXEC_STALL_MS). The
+// budget of a test that execs node once is the one the hook tests use.
+vi.setConfig({ testTimeout: HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS });
+
+/** The bound on one scrubber child: a child that outlives it is killed. */
+const SPAWN_BOUND_MS = 10_000;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -45,16 +54,33 @@ interface RunResultWithContent extends RunResult {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * The exit code of a scrubber child that exited. A child that did not — killed at
+ * SPAWN_BOUND_MS, or never started — has no exit code, and folding it into one
+ * would make a stalled exec read as a scrubber verdict, so it fails the test as a
+ * harness failure instead.
+ */
+function exitCodeOf(result: SpawnSyncReturns<string>): number {
+  if (result.error !== undefined || result.signal !== null || result.status === null) {
+    const cause = result.error?.message ?? `signal ${result.signal}`;
+    throw new Error(
+      `[test-harness] HARNESS FAILURE: the scrubber child did not exit (${cause}; ` +
+      `spawn bound ${SPAWN_BOUND_MS} ms). This is not a scrubber exit code.`,
+    );
+  }
+  return result.status;
+}
+
 function run(inputPath: string, outputPath: string): RunResult {
   const result = spawnSync('node', [SCRIPT, inputPath, outputPath], {
     encoding: 'utf8',
     stdio: ['pipe', 'pipe', 'pipe'],
-    timeout: 10_000,
+    timeout: SPAWN_BOUND_MS,
   });
   return {
     stdout: result.stdout ?? '',
     stderr: result.stderr ?? '',
-    exitCode: result.status ?? 1,
+    exitCode: exitCodeOf(result),
   };
 }
 
@@ -806,7 +832,7 @@ function runEmit(inputPath: string, extraArgs: readonly string[] = []): EmitResu
   const result = spawnSync('node', [SCRIPT, '--emit', inputPath, ...extraArgs], {
     encoding: 'utf8',
     stdio: ['pipe', 'pipe', 'pipe'],
-    timeout: 10_000,
+    timeout: SPAWN_BOUND_MS,
   });
   const stdout = result.stdout ?? '';
   const nl = stdout.indexOf('\n');
@@ -814,7 +840,7 @@ function runEmit(inputPath: string, extraArgs: readonly string[] = []): EmitResu
     framing: nl === -1 ? stdout : stdout.slice(0, nl),
     body: nl === -1 ? '' : stdout.slice(nl + 1),
     stderr: result.stderr ?? '',
-    exitCode: result.status ?? 1,
+    exitCode: exitCodeOf(result),
     stdout,
   };
 }
@@ -1210,7 +1236,7 @@ describe('--emit: NO BODY on any non-zero exit (AC-3.5, §8.9 — every path)', 
       'utf8',
     );
     const input = writeInput('clean body\n', 'internal-error.txt');
-    const spawnOpts = { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 10_000 } as const;
+    const spawnOpts: SpawnSyncOptionsWithStringEncoding = { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: SPAWN_BOUND_MS };
 
     const broken = spawnSync('node', ['--require', preload, SCRIPT, '--emit', input], spawnOpts);
     expect(broken.status, `internal error must be exit 4.\n${broken.stderr}`).toBe(4);
