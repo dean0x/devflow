@@ -14,6 +14,7 @@ Do the step below after you update.
 
 **What you must do:**
 - Run `devflow init` after you update. A full init installs the commands that accept the new settings line.
+- After `devflow init`, a user with no level gets `standard` in `/code-review`: no TypeScript focus, and no Dependencies focus on a code diff that changes no dependency manifest. Run `devflow gates --set full` to keep today's set.
 
 **Stale-install window:**
 - The settings line now ends with `GATE_LEVEL=<full|standard|lean>`. An installed command from an
@@ -21,6 +22,7 @@ Do the step below after you update.
 - `devflow init --hud-only` and a plugin-only update refresh the resolver script. They do not
   refresh the installed prompts.
 - Until you run a full `devflow init`, every installed command uses its fail-closed settings value.
+- Until you run `devflow init`, the installed `/code-review` ignores the level.
 
 **Known limits:**
 - A corrupt manifest, or one over 1 MiB, reads as the `standard` level. `devflow gates --status`
@@ -28,16 +30,19 @@ Do the step below after you update.
 - `devflow init` still overwrites a corrupt or rejected manifest. The stored level is lost with it.
 - Two commands that write the manifest at the same moment can lose one update.
 - There is no team floor. A repository that declares compliance can run a lower personal level.
+  `/code-review` is now the first command that reads the level, so a personal `lean` level narrows
+  its review even where compliance is declared. The Compliance focus still runs on its trigger.
   Issue [#488](https://github.com/dean0x/devflow/issues/488) (the compliance lens as a floor on
   the level) is open.
 
 ### Added
 
-- **A gate level on the settings line, and the `devflow gates` command** ([#472](https://github.com/dean0x/devflow/issues/472)). The settings line ends with `GATE_LEVEL=<full|standard|lean>`. The level comes from a personal `gateLevel` key in `.devflow/config.json`, then from the machine default `features.gateLevel` in `~/.devflow/manifest.json`, then from `standard`. The personal key may raise or lower the level. It is not a narrow-only switch, and a later change can make it narrow-only. A `gateLevel` in `project.json` is ignored, and no command writes the personal key. A malformed value reads as `full`. `devflow gates --set <level>` writes the machine default and nothing else. `devflow gates --status` shows the level in effect, the layer that decided it and the machine default. The level has no effect yet: no command reads it until [#473](https://github.com/dean0x/devflow/issues/473), [#474](https://github.com/dean0x/devflow/issues/474) and [#480](https://github.com/dean0x/devflow/issues/480) do. Those issues remove this no-effect text.
+- **A gate level on the settings line, and the `devflow gates` command** ([#472](https://github.com/dean0x/devflow/issues/472)). The settings line ends with `GATE_LEVEL=<full|standard|lean>`. The level comes from a personal `gateLevel` key in `.devflow/config.json`, then from the machine default `features.gateLevel` in `~/.devflow/manifest.json`, then from `standard`. The personal key may raise or lower the level. It is not a narrow-only switch, and a later change can make it narrow-only. A `gateLevel` in `project.json` is ignored, and no command writes the personal key. A malformed value reads as `full`. `devflow gates --set <level>` writes the machine default and nothing else. `devflow gates --status` shows the level in effect, the layer that decided it and the machine default. `/code-review` reads the level ([#474](https://github.com/dean0x/devflow/issues/474)); [#473](https://github.com/dean0x/devflow/issues/473) and [#480](https://github.com/dean0x/devflow/issues/480) add more readers.
 - **`devflow init --hud-only` prints a line when the installed prompts come from another devflow version** ([#472](https://github.com/dean0x/devflow/issues/472)). It tells you to run `devflow init`.
 
 ### Changed
 
+- **`/code-review` picks its focus set by gate level** ([#474](https://github.com/dean0x/devflow/issues/474)). `full` runs every focus, as before. `standard`, the default, drops TypeScript, and drops Dependencies on a code diff that changes no dependency manifest (a lockfile alone does not count). `lean` runs Security, Testing and Reliability on a code diff. The Compliance focus keeps its own trigger at every level. A docs-only, tests-only or lockfile-only diff keeps its reduced set, and at `lean` a tests-only diff drops Consistency. A mixed non-code diff runs the union of its classes' sets. Security runs at every level and in every class. `/code-review` reads a new level reference only at `standard` or `lean`. If it cannot read the reference, it says so and runs the full sets. The review summary now shows the gate level and the focuses, and a review with no security report gives CHANGES REQUESTED.
 - **`/implement` splits long plans into sequential Code phases; a run with no plan stays single** ([#452](https://github.com/dean0x/devflow/issues/452)).
 - **Code agents read large files once, by range, and cap printed output** ([#452](https://github.com/dean0x/devflow/issues/452)).
 - **Polish, Harden, Evaluate and Test get the full branch diff as `FILES_CHANGED`** ([#452](https://github.com/dean0x/devflow/issues/452)).

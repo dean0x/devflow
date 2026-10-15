@@ -1,7 +1,7 @@
 ---
 feature: compliance-feature
 name: Compliance Feature & SDLC Traceability
-description: "Use when changing the compliance feature: framework registry, converge, CLI, rule stamping, the settings-line lens, evidence floor. Keywords: COMPLIANCE_FRAMEWORKS, COMPLIANCE_ACTIVE, compliance_gate."
+description: "Use when changing the compliance feature: framework registry, converge, CLI, rule stamping, the settings-line lens, evidence floor, review gate level. Keywords: COMPLIANCE_FRAMEWORKS, COMPLIANCE_ACTIVE, GATE_LEVEL."
 category: architecture
 directories:
   - src/core/compliance.ts
@@ -14,6 +14,7 @@ directories:
   - src/assets/scripts/resolve-evidence-policy.cjs
   - src/assets/commands/_partials/_compliance.mds
   - src/assets/commands/code-review.mds
+  - src/assets/skills/agent-references/references/commands/code-review-levels.md
   - src/assets/commands/plan.mds
   - src/assets/commands/implement.mds
   - src/assets/commands/resolve.mds
@@ -39,7 +40,7 @@ updated: 2026-10-15
 - **KB-AP-9** Never skip the evidence-policy floor on a compliance-enabled machine with zero frameworks: `complianceDefault()` checks only `enabled`.
 - **KB-AP-10** Never import `FEATURE_OWNED_SKILLS` / `FEATURE_OWNED_RULES` into the test that asserts them: use the independent literal `['compliance']`, or the test verifies the constant against itself.
 - **KB-AP-11** A token-free skill shadow passes through byte-identical (C1) and loses every per-framework section; `--status` flags it `[shadowed, composition skipped]`. A skill shadow replaces SKILL.md only: references and fragments always come from canonical source.
-- **KB-AP-12** Never align the compliance lens with the language-focus gate: a language focus is gated by the install-time stamp line `Installed language focuses: <list>`, and the lens is never gated on a file's presence.
+- **KB-AP-12** Never align the compliance lens with the language-focus gate: a language focus is gated on the installer-stamped `Installed language focuses:` line (a machine fact), the lens on `COMPLIANCE_ACTIVE` from the run's settings line.
 - **KB-AP-13** Never parse `policy.json`: where `project.json` has no `evidence`, the file's mere presence resolves `required` (`invalid-file`), and a guard keeps the retired parser out of `src/`.
 - **KB-AP-14** Never hand an agent the raw lens: `COMPLIANCE_FRAMEWORKS: off` is text the model reads, not a gate, so a spawn carries the directive instead, which is empty when the lens is `off`.
 - **KB-INV-1** Compliance is a feature, not a plugin: skill and rule are owned by `FEATURE_OWNED_SKILLS` / `FEATURE_OWNED_RULES`, disjoint from plugin-owned names; `devflow-compliance` lives only in `DELETED_PLUGIN_NAMES`.
@@ -51,6 +52,7 @@ updated: 2026-10-15
 - **KB-INV-7** `src/core/compliance*.ts` is pure; every read, write and prompt lives in `src/targets/` or `src/cli/`.
 - **KB-INV-8** A label written into an artifact comes from the registry's static labels, never from user input.
 - **KB-INV-9** No Code, Fix, Refactor, Review or Design body names the compliance skill or takes a lens input, and the gap-analysis preload carries no compliance text: its compliance section is `references/compliance.md`, which the Design focus spawn Reads by explicit path.
+- **KB-INV-10** In `/code-review` the compliance focus runs on its own trigger (`COMPLIANCE_ACTIVE` and regulated surface, `code` diff only) at every gate level: Step 1.2b only removes focuses, and `code-review-levels.md` never adds `compliance` nor holds its trigger, a framework list, the directive or spawn text (`tests/guards/code-review-levels.test.ts`).
 
 ## Overview
 
@@ -150,7 +152,7 @@ The lens comes from the settings line (`resolve-settings.cjs`), never from a fil
 
 | Command | How it imports | Effect |
 |---|---|---|
-| `/code-review` | `compliance_gate()` and `compliance_focus_inject()`; the gate runs at Step 0b (per worktree) | Adds the `compliance` Review focus when `COMPLIANCE_ACTIVE` AND the diff touches regulated surface (data models, auth flows, logging/observability, payments, IaC, retention); only that Review spawn carries `COMPLIANCE_FOCUS_DIRECTIVE` |
+| `/code-review` | `compliance_gate()` and `compliance_focus_inject()`; the gate runs at Step 0b (per worktree) | Step 1.2 adds the `compliance` Review focus when `COMPLIANCE_ACTIVE` AND the diff touches regulated surface (the list above), on a `code` diff only; Step 1.2b keeps that trigger at every level; only that Review spawn carries `COMPLIANCE_FOCUS_DIRECTIVE` |
 | `/plan` | `compliance_gate()` and `compliance_focus_inject()` in the gap-analysis phase | Adds a compliance Design agent to the single-issue and multi-issue rosters when `COMPLIANCE_ACTIVE`; only its spawn carries `COMPLIANCE_FOCUS_DIRECTIVE` and names `gap-analysis/references/compliance.md` for the agent to Read by path |
 | `/implement` | alias-import, `compliance.compliance_frameworks()` and `compliance.compliance_inject()` | Adds `COMPLIANCE_DIRECTIVE` to every Code and Fix spawn: the implementing ones, the alignment-, validation- and qa-fix loops and the CI-fix spawn; gates nothing. Phase 9 opens the PR through the Git agent, which takes no compliance |
 | `/resolve` | alias-import, the same pair (per worktree root) | Adds that worktree's `COMPLIANCE_DIRECTIVE` to each of its Code and Fix spawns (issue-fix, validation-fix, CI-fix); gates nothing |
@@ -158,7 +160,9 @@ The lens comes from the settings line (`resolve-settings.cjs`), never from a fil
 | `/dynamic-build` | alias-import, `compliance.compliance_lens()` at Pre-authoring step 0b | Authors the value into the workflow script as the shape-gated `COMPLIANCE_FRAMEWORKS` constant (anything but `off`, `none` or a registry-shaped id list becomes `off`), passed as `complianceFrameworks` and forwarded per ticket in WAVE mode; the script builds `COMPLIANCE_DIRECTIVE` from it (empty when `off`) and every engine Code and Fix prompt template carries it; gates nothing |
 | `/release` | none | No compliance gate; release evidence and back-links key on `EVIDENCE_POLICY` |
 
-Compliance reaches an agent only through its spawn prompt (`D-COMPLIANCE-INJECT`). Install-all retired the skill-presence check a fix-phase Code agent once found it by, and an install-time variant keyed on the machine switch would be wrong because the lens is the union of the machine, the default branch and the worktree. So no Code, Fix, Refactor, Review or Design body names the compliance skill or takes a `COMPLIANCE_FRAMEWORKS` input, and the gap-analysis preload carries no compliance text: its compliance section is `src/assets/skills/gap-analysis/references/compliance.md`, which the `/plan` Design compliance-focus spawn Reads by explicit path. Code is split into Code (`implement`, `issue-fix`), Fix (`validation-fix`, `alignment-fix`, `qa-fix`, `ci-fix`) and Refactor (`edit`): the first two receive `COMPLIANCE_DIRECTIVE`, Refactor takes no compliance. `tests/guards/compliance-injection.test.ts` sweeps every Code and Fix spawn site in `dist/commands` and `dist/learning-off/commands` (fenced, prose and workflow-template shapes, per-host site floors, a known-bad probe per shape) and reports any spawn that still hands the raw lens; `tests/compliance-prompts.test.ts` (TP-43) pins the settings-line chain. The compliance SKILL.md checklist says the frameworks in force are "the ids your prompt names". `/resolve`'s thread steps key on `EVIDENCE_POLICY` and its merge-readiness phase on `REQUIRE_NON_AUTHOR_APPROVAL`, never on the lens. No compiled command passes an op-level `COMPLIANCE:` key to the Git agent (the evidence policy's mechanism inputs replaced it); `tests/build-mds.test.ts` section 14 asserts it.
+Compliance reaches an agent only through its spawn prompt: install-all retired the skill-presence check a fix-phase Code agent once found it by, and an install-time variant keyed on the machine switch would be wrong because the lens is the union of the machine, the default branch and the worktree. The gap-analysis compliance section is `src/assets/skills/gap-analysis/references/compliance.md`, which the `/plan` Design compliance-focus spawn Reads by explicit path. Code is split into Code (`implement`, `issue-fix`), Fix (`validation-fix`, `alignment-fix`, `qa-fix`, `ci-fix`) and Refactor (`edit`): the first two receive `COMPLIANCE_DIRECTIVE`, Refactor takes no compliance. `tests/guards/compliance-injection.test.ts` sweeps every Code and Fix spawn site and reports any that still hands the raw lens; `tests/compliance-prompts.test.ts` (TP-43) pins the settings-line chain.
+
+**The lens and the gate level in `/code-review`.** Step 0b reads `COMPLIANCE` and `GATE_LEVEL` off one settings line, independently: the level comes from the personal `gateLevel` or the machine's `features.gateLevel`, never from `project.json` or the lens. Step 1.2 adds `compliance` only for a `code` diff (a reduced class or a mix suppresses conditional triggers). Step 1.2b then narrows REVIEW_FOCUS_LIST from `code-review-levels.md`, Read once per run at `standard` or `lean` through the sanctioned resolution line (an unreadable reference applies the full sets). `standard` drops `typescript` and, unless a listed manifest changed, `dependencies`; the `code` row of `lean` keeps security, testing, reliability and `compliance`, so the focus survives only when its own trigger added it. There is no compliance floor on the level: `lean` narrows the review in a repository that declares compliance (the other core, language and conditional focuses go), while the compliance focus still runs on its trigger.
 
 ### Evidence-policy floor vs. review lens
 
@@ -187,13 +191,13 @@ Two independent things sit on `manifest.features.compliance` and must not be con
 
 **KB-AP-11: shadows.** A skill shadow replaces SKILL.md only; references and fragments are never user-overridable, because they are registry-owned. A token-free shadow installs a SKILL.md with no mapping, active list, checklist or references sections.
 
-**Step 0b resolves the lens per worktree.** `compliance_gate()` runs at `/code-review` Step 0b and each worktree keeps its own `COMPLIANCE_ACTIVE` / `COMPLIANCE_FRAMEWORKS` for every downstream phase. The settings line reads that worktree's project.json, so two worktrees can resolve different lenses, each still carrying the default branch's frameworks.
+**Step 0b resolves the lens and the level per worktree.** `compliance_gate()` runs at `/code-review` Step 0b and each worktree keeps its own `COMPLIANCE_ACTIVE` / `COMPLIANCE_FRAMEWORKS` / `GATE_LEVEL` for every downstream phase. The settings line reads that worktree's project.json, so two worktrees can resolve different lenses, each still carrying the default branch's frameworks.
 
 **KB-AP-9: zero frameworks still floors at `required`.** `complianceDefault()` checks only `enabled: true`; an empty `frameworks: []` does not fall back to `standard`, because the review lens is already on (generic controls) at that state.
 
 **KB-AP-10: the oracle trap.** Tests asserting the `FEATURE_OWNED_*` exclusions use the independent literal `['compliance']` (`tests/plugins.test.ts`).
 
-**KB-AP-12: two gate shapes, deliberately.** `/code-review`'s language focuses are gated by the install-time stamp line `Installed language focuses: <list>`, which the installer rewrites on every install and on `uninstall --plugin` (D-LANGUAGE-FOCUS-STAMP, held by `tests/guards/claude-dir.test.ts`). The same guard holds D-CLAUDE-DIR-PROMPTS: no prompt reads a path under the home Claude directory outside the `CLAUDE_CONFIG_DIR` rule, and `/code-review` names no Claude directory. The command says: "A language focus is spawned only when its file-type condition above fires AND its name appears in that stamped line." The command probes no directory at run time, because those skills install only with their optional plugin and the stamp records which ones the machine has. The compliance lens is never gated on a file's presence, because every machine has its skill. The language-focus gate reads the machine install, never anything per repository.
+**KB-AP-12: two gate shapes, deliberately.** `/code-review` gates a language focus on the one line `Installed language focuses: <list>` of the installed command, which the installer writes from the machine's plugin selection (`src/targets/claude-code/language-stamp.ts`). It replaced a run-time check for the skill file, so a skill file's presence gates nothing in that command. `tests/guards/claude-dir.test.ts` holds D-CLAUDE-DIR-PROMPTS: no prompt reads a path under the home Claude directory outside the `CLAUDE_CONFIG_DIR` rule, and `/code-review` has one such read, the level reference. The lens is no machine fact (it unions machine, default branch and worktree), so a stamp could not carry it.
 
 ## Key Files
 
@@ -208,11 +212,12 @@ Two independent things sit on `manifest.features.compliance` and must not be con
 - `src/core/plugins.ts` - `FEATURE_OWNED_SKILLS`, `FEATURE_OWNED_RULES`, `DELETED_PLUGIN_NAMES`, `resolveFeatureRedirect`
 - `src/assets/commands/_partials/_compliance.mds` - the lens defines (`compliance_frameworks()`, `compliance_lens()`, `compliance_gate()`) and the directive defines (`compliance_directive()`, `compliance_focus_directive()`, `compliance_inject()`, `compliance_focus_inject()`)
 - `src/assets/agents/_partials/_code.mds` with `code.mds`, `fix.mds`, `refactor.mds`, `review.mds` and `design.mds` (all free of compliance text), `src/assets/skills/gap-analysis/references/compliance.md` (the Design focus's patterns, Read by path) and the `src/assets/skills/compliance/SKILL.md` checklist - where the lens is consumed
-- `src/assets/commands/code-review.mds` (Step 0b, regulated-surface gate, focus directive), `plan.mds` (compliance Design agent and focus directive; issue linking mandatory only under `EVIDENCE_POLICY` `required`), `implement.mds`, `debug.mds` and `dynamic-build.mds` (alias-import, inject the Code directive, no gate), `resolve.mds` (injects the Code directive per worktree; Phase 1b and 9b on `EVIDENCE_POLICY` `required`, Phase 9c on `REQUIRE_NON_AUTHOR_APPROVAL`), `release.mds` (Phase 1c evidence policy; no compliance gate)
+- `src/assets/commands/code-review.mds` (Step 0b lens and `GATE_LEVEL`, Step 1.2 regulated-surface gate, Step 1.2b level narrowing, focus directive), `plan.mds` (compliance Design agent and focus directive; issue linking mandatory only under `EVIDENCE_POLICY` `required`), `implement.mds`, `debug.mds` and `dynamic-build.mds` (alias-import, inject the Code directive, no gate), `resolve.mds` (injects the Code directive per worktree; Phase 1b and 9b on `EVIDENCE_POLICY` `required`, Phase 9c on `REQUIRE_NON_AUTHOR_APPROVAL`), `release.mds` (Phase 1c evidence policy; no compliance gate)
 - `src/assets/scripts/resolve-evidence-policy.cjs` - `complianceDefault()` (floor at any framework count, mirrors `normalizeComplianceFeature`), `projectReading()` / `withRetiredPolicy()` (repository floor at R/T/W, project.json-first precedence, retired policy.json by presence only)
 - `tests/compliance-install.test.ts`, `tests/skills.test.ts` - TP-44: the skill and every reference install on every convergence, the rule only when enabled; a seeded-from-source shadow is re-stamped by `--set`
 - `tests/compliance-prompts.test.ts`, `tests/compliance-e2e.test.ts` (S23) - TP-43: the lens from the settings line; a hipaa repository on a compliance-off machine resolves `COMPLIANCE=hipaa` and never installs or changes the machine rule
 - `tests/guards/compliance-injection.test.ts` - the injection guard: every Code and Fix spawn passes the directive and none the raw lens, hosts empty the directive when the lens is off, no agent body names the skill or the lens, the focus spawns carry the focus directive, and the gap-analysis compliance reference exists; reads `dist/commands`, `dist/agents` and `dist/learning-off`
+- `src/assets/skills/agent-references/references/commands/code-review-levels.md`, `tests/guards/code-review-levels.test.ts` - the level cells per diff class, and the guard (its simulator adds `compliance` only on its trigger, `code` class)
 - `tests/scoped-install-e2e.test.ts` (TP-38: `EVERY_INSTALL_CARRIES` includes the skill and its references), `tests/evidence-policy/disposition.test.ts` (names `COMPLIANCE_ACTIVE` as the lens input)
 
 ## Related
@@ -221,5 +226,6 @@ Two independent things sit on `manifest.features.compliance` and must not be con
 - `.devflow/features/compliance-feature-release-trace/KNOWLEDGE.md` - release evidence, `release-trace.cjs`, release notes caps
 - `.devflow/features/tracker-references/KNOWLEDGE.md` - the contract/mechanics split machinery (MDS build, byte budget, containment oracle, installer overlay)
 - `.devflow/features/installer-shadowing/KNOWLEDGE.md` - shadow resolution for SKILL.md and the rule (`validateSkillShadow`, `validateRuleShadow`); `seedRuleShadow` tier logic lives in `rules.ts`
+- `.devflow/features/installer-shadowing-learning-variants/KNOWLEDGE.md` - the `/code-review` language-focus stamp
 - `.devflow/features/resolve-pipeline/KNOWLEDGE.md` - `/resolve` gates Phase 1b/9b on `EVIDENCE_POLICY` and 9c on `REQUIRE_NON_AUTHOR_APPROVAL`, adds `COMPLIANCE_DIRECTIVE` to each Code and Fix spawn; its resolution-summary format has a `## Third-Party Threads` section
 - `src/core/compliance.ts`, `src/targets/claude-code/compliance-install.ts`, `src/assets/commands/_partials/_compliance.mds` - the code this KB describes

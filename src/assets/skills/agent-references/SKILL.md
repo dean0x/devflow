@@ -14,7 +14,9 @@ allowed-tools: Read
      D-MAINTAIN-ON-DUE: Curate reads curate/maintain.md only after claim-due hands out an entry.
      D-CMD-REF-HAND: a command moves a rare branch here (hand-authored, byte for byte) and keeps only
      the condition and the read path, so a run that never takes the branch never carries its text.
-     Only text with no learning arm and no Git-spawn fence moves. -->
+     Only text with no learning arm and no Git-spawn fence moves.
+     /code-review reads commands/code-review-levels.md on its default path (standard or lean), once
+     per run; a failed read applies the full sets. -->
 
 ## Iron Law
 
