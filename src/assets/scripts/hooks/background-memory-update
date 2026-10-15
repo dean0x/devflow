@@ -65,6 +65,28 @@ source "$SCRIPT_DIR/is-hex-sha" || { echo "background-memory-update: failed to s
 
 log "Starting (CWD=$CWD)"
 
+# Every run ends with one `Run:` line that says what it was: the CLI version, the argv
+# form it ran, how it ended and how many calls the permission rule denied. The exit trap
+# writes it, so each way out of the script has one. The fields start as "no CLI read, no
+# run" and the steps below fill them in; each is a keyword or digits, never text from the
+# CLI, the queue or the prompt. The trap also removes RESULT_FILE (the captured JSON
+# result, set at the spawn below) and, once this run holds it, the worker lock.
+RUN_CLI="unknown"    # X.Y.Z once the version probe has read one
+RUN_ARGV="none"      # lean or legacy, set where the run is spawned
+RUN_RESULT="skip"    # updated, conflict, failed, skip or below-floor
+RUN_DENIALS="n/a"    # digits or unknown, set where the run is spawned
+RUN_FLOOR=""         # the version floor, named on a below-floor line only
+RESULT_FILE=""
+LOCK_HELD="false"
+finish_run() {
+  local _floor=""
+  if [ -n "$RUN_FLOOR" ]; then _floor=" floor=${RUN_FLOOR}"; fi
+  log "Run: cli=${RUN_CLI} argv=${RUN_ARGV} result=${RUN_RESULT} denials=${RUN_DENIALS}${_floor}"
+  if [ -n "$RESULT_FILE" ]; then rm -f "$RESULT_FILE" 2>/dev/null || true; fi
+  if [ "$LOCK_HELD" = "true" ]; then rmdir "$LOCK_DIR" 2>/dev/null || true; fi
+}
+trap finish_run EXIT
+
 # --- Resolve paths ---
 # Anchor .devflow/ to the project root (prevents a stray nested .devflow/ when the
 # worker is spawned with a CWD inside .devflow/...). Empty → fall back to CWD.
@@ -263,11 +285,15 @@ if ! probe_claude_version; then
   log "claude --version probe failed or timed out — using the legacy argv"
 elif ! claude_version_parsed "$CLAUDE_VERSION_TEXT"; then
   log "claude --version could not be read — using the legacy argv"
-elif ! claude_version_at_least "$CLAUDE_VERSION_PARSED" "$MEMORY_MIN_PERMISSION_VERSION"; then
-  log "SKIP: Claude Code ${CLAUDE_VERSION_PARSED} is older than ${MEMORY_MIN_PERMISSION_VERSION}, the lowest version on which the worker's write is limited to its staged file; update Claude Code. No LLM run, the queue is kept"
-  memory_notice_write "$MEMORY_DIR" "$PROJECT_ROOT" floor "$CLAUDE_VERSION_PARSED" "$MEMORY_MIN_PERMISSION_VERSION"
-  exit 0
 else
+  RUN_CLI="$CLAUDE_VERSION_PARSED"
+  if ! claude_version_at_least "$CLAUDE_VERSION_PARSED" "$MEMORY_MIN_PERMISSION_VERSION"; then
+    log "SKIP: Claude Code ${CLAUDE_VERSION_PARSED} is older than ${MEMORY_MIN_PERMISSION_VERSION}, the lowest version on which the worker's write is limited to its staged file; update Claude Code. No LLM run, the queue is kept"
+    memory_notice_write "$MEMORY_DIR" "$PROJECT_ROOT" floor "$CLAUDE_VERSION_PARSED" "$MEMORY_MIN_PERMISSION_VERSION"
+    RUN_RESULT="below-floor"
+    RUN_FLOOR="$MEMORY_MIN_PERMISSION_VERSION"
+    exit 0
+  fi
   memory_notice_clear "$MEMORY_DIR" "$PROJECT_ROOT" floor
   if claude_version_at_least "$CLAUDE_VERSION_PARSED" "$MEMORY_MIN_CLAUDE_VERSION"; then
     CLAUDE_ARGV_FORM="lean"
@@ -313,22 +339,14 @@ acquire_lock() {
   return 0
 }
 
-# RESULT_FILE (the captured JSON result, set at the spawn below) is removed here too,
-# so no exit path leaves it behind.
-RESULT_FILE=""
-cleanup_lock() {
-  if [ -n "$RESULT_FILE" ]; then rm -f "$RESULT_FILE" 2>/dev/null || true; fi
-  rmdir "$LOCK_DIR" 2>/dev/null || true
-}
-trap cleanup_lock EXIT
-
 break_stale_lock
 
+# A worker that times out on the lock does not hold it, so finish_run leaves it alone.
 if ! acquire_lock; then
   log "SKIP: lock timeout after 90s — another worker is running"
-  trap - EXIT
   exit 0
 fi
+LOCK_HELD="true"
 
 # Clean up any staged file left by a watchdog-killed prior run.
 # Without this, a stale staged file with a valid stamp would be mistakenly
@@ -932,6 +950,11 @@ fi
 # Every check on the path has passed, so a path notice from an earlier run is stale.
 memory_notice_clear "$MEMORY_DIR" "$PROJECT_ROOT" path
 
+# From here a way out other than the end of the script is a failed run.
+RUN_ARGV="$CLAUDE_ARGV_FORM"
+RUN_RESULT="failed"
+RUN_DENIALS="unknown"
+
 set -m
 (
   cd "$PROJECT_ROOT" || exit 97
@@ -998,6 +1021,7 @@ if [ -n "$RESULT_FILE" ]; then
   log "$MEMORY_RESULT_LINE"
   rm -f "$RESULT_FILE" 2>/dev/null || true
   RESULT_FILE=""
+  RUN_DENIALS="$MEMORY_RESULT_DENIALS"
 fi
 # 0 and an unreported count are both "no denial to report"; any other count is a refusal.
 RESULT_DENIED=""
@@ -1103,6 +1127,7 @@ verify_and_swap() {
 
 OUTCOME="failed"
 verify_and_swap
+RUN_RESULT="$OUTCOME"
 
 # Each stamp below is a `touch`, which follows a symbolic link, and its path was
 # checked before the LLM run, which can take minutes. So, like the swap's target,

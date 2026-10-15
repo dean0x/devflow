@@ -3604,6 +3604,8 @@ interface RecordingOptions {
   readonly exitCode?: number;
   /** The call sleeps this long (seconds) after recording, so the watchdog has to end it. */
   readonly hangSecs?: number;
+  /** The call also appends to the real working memory, as a human edit made during the run would. */
+  readonly editRealFile?: boolean;
 }
 
 /**
@@ -3659,6 +3661,7 @@ function createRecordingClaude(
       ...(options.skipStagedWrite === true
         ? []
         : [`echo '<!-- memory-head: testsha branch: main -->' > '${staged}'`, `echo '## Now' >> '${staged}'`]),
+      ...(options.editRealFile === true ? [`echo 'a human edit' >> '${path.join(memoryDir, 'WORKING-MEMORY.md')}'`] : []),
       ...(options.hangSecs === undefined ? [] : [`sleep ${options.hangSecs}`]),
       `exit ${options.exitCode ?? 0}`,
       '',
@@ -4398,6 +4401,77 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
       expect(workerLog()).toContain('Result not captured: no temporary file could be created');
       expectSwapCompleted();
+    });
+  });
+
+  describe('each run ends with one Run line: the CLI version, the argv form, the result and the denials', () => {
+    const CLEAN = JSON.stringify({ subtype: 'success', is_error: false, num_turns: 2, permission_denials: [] });
+    const TWO_DENIALS = JSON.stringify({
+      subtype: 'success', is_error: false, num_turns: 2,
+      permission_denials: [{ tool_name: 'Write', tool_input: { content: 'BODYCANARY' } }, { tool_name: 'Write', tool_input: { content: 'BODYCANARY' } }],
+    });
+    /** The only fields a Run line may carry, each from a closed set or digits. */
+    const RUN_LINE_SHAPE = /^Run: cli=(\d+\.\d+\.\d+|unknown) argv=(lean|legacy|none) result=(updated|conflict|failed|skip|below-floor) denials=(\d+|unknown|n\/a)( floor=\d+\.\d+\.\d+)?$/;
+    const runLines = (): string[] => workerLog().split('\n').filter(line => line.includes('] Run: ')).map(line => line.slice(line.indexOf('Run: ')));
+
+    /** The one Run line the run wrote. */
+    function onlyRunLine(): string {
+      const lines = runLines();
+      expect(lines, 'one Run line per run').toHaveLength(1);
+      expect(lines[0]).toMatch(RUN_LINE_SHAPE);
+      return lines[0];
+    }
+
+    it.each<readonly [string, string, RecordingOptions, string]>([
+      ['a lean run that swaps the memory in', HEALTHY_VERSION, { resultJson: CLEAN }, 'Run: cli=2.1.293 argv=lean result=updated denials=0'],
+      ['a legacy run that swaps the memory in', 'echo "2.1.285 (Claude Code)"', { resultJson: CLEAN }, 'Run: cli=2.1.285 argv=legacy result=updated denials=0'],
+      ['a run on a CLI whose version cannot be read', ':', { resultJson: CLEAN }, 'Run: cli=unknown argv=legacy result=updated denials=0'],
+      ['a run whose result reports no count', HEALTHY_VERSION, {}, 'Run: cli=2.1.293 argv=lean result=updated denials=unknown'],
+      ['a run that finds the working memory edited', HEALTHY_VERSION, { resultJson: CLEAN, editRealFile: true }, 'Run: cli=2.1.293 argv=lean result=conflict denials=0'],
+      ['a run whose write was refused twice', HEALTHY_VERSION, { resultJson: TWO_DENIALS, skipStagedWrite: true }, 'Run: cli=2.1.293 argv=lean result=failed denials=2'],
+      ['a run that exits non-zero', HEALTHY_VERSION, { exitCode: 2, skipStagedWrite: true }, 'Run: cli=2.1.293 argv=lean result=failed denials=unknown'],
+    ])('%s ends with its own result and count', (_label, versionBody, options, expected) => {
+      runWith(versionBody, {}, options);
+
+      expect(onlyRunLine()).toBe(expected);
+      expect(workerLog()).not.toContain('BODYCANARY');
+    });
+
+    it('a watchdog kill ends as failed', () => {
+      runWith(HEALTHY_VERSION, { DEVFLOW_BG_WATCHDOG_SECS: '2' }, { hangSecs: 300, skipStagedWrite: true });
+
+      expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=lean result=failed denials=unknown');
+    });
+
+    it('a CLI below the permission floor ends as below-floor, with no argv form and the floor named', () => {
+      runWith('echo "2.1.268 (Claude Code)"');
+
+      expect(onlyRunLine()).toBe(`Run: cli=2.1.268 argv=none result=below-floor denials=n/a floor=${PERMISSION_FLOOR}`);
+    });
+
+    it('a skip after the version probe names the version and no argv form', () => {
+      fs.mkdirSync(stagedFile);
+      fs.writeFileSync(path.join(stagedFile, 'inside'), 'keep');
+
+      runWith(HEALTHY_VERSION);
+
+      expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=none result=skip denials=n/a');
+    });
+
+    it('a skip before the version probe names no version', () => {
+      const bashEnv = path.join(shimDir, 'bash-env.sh');
+      fs.writeFileSync(bashEnv, 'cd() { if [ "${1:-}" = -P ] && [ "${2:-}" = -- ]; then return 1; fi; builtin cd "$@"; }\n');
+
+      runWith(HEALTHY_VERSION, { BASH_ENV: bashEnv });
+
+      expect(onlyRunLine()).toBe('Run: cli=unknown argv=none result=skip denials=n/a');
+    });
+
+    it('reads the version as digits only: text around it never reaches the log', () => {
+      runWith('echo "v002.001.0293 SECRETTOKEN-x;rm -rf"', {}, { resultJson: CLEAN });
+
+      expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=lean result=updated denials=0');
+      expect(workerLog()).not.toContain('SECRETTOKEN');
     });
   });
 
