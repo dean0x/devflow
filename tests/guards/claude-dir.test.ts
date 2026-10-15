@@ -30,8 +30,8 @@
  *   used in a file that never sets it (the sanctioned line followed by the
  *   `printf`, the sanctioned line, or that line or allowlist entry (a));
  * - `d-reassigned`: a `d=` assignment that follows the sanctioned line.
- * SITE_ROWS fixes how many sanctioned lines each file holds, so a copy that drifts
- * from the constant byte for byte is not a site.
+ * SITE_ROWS fixes how many sanctioned lines each file holds. A line that differs
+ * from the constant by any byte does not count as a site, so its row fails.
  *
  * WHAT A CLEAN RESULT DOES NOT COVER: a path assembled from parts
  * (`$HOME` + `/.claude`), a variable holding the literal, an absolute path spelt
@@ -157,8 +157,11 @@ const agentFile = (name: string): string => rel(resolveAgentSource(name).path)
 const SYNTHESIZE_FILE = agentFile('synthesize')
 const CURATE_FILE = agentFile('curate')
 
+/** Sanctioned-line counts by file name. A name can be absent, so a lookup yields `undefined` and the caller states the default. */
+type SiteRows = Readonly<Partial<Record<string, number>>>
+
 /** How many sanctioned lines each file holds. A file that is not listed holds none. */
-export const SITE_ROWS: Readonly<Record<string, number>> = {
+export const SITE_ROWS: SiteRows = {
   'dist/commands/code-review.md': 1,
   'dist/commands/dynamic-profile.md': 1,
   'dist/commands/plan.md': 1,
@@ -180,35 +183,49 @@ function residueOf(file: PromptFile, allowed: readonly AllowedRuleProse[]): stri
   return text
 }
 
-const lineDefect = (file: PromptFile, rule: string, text: string, index: number): string =>
-  `${file.name}:${index + 1}: [${rule}] ${text.trim().slice(0, 240)}`
+/** One place in a prompt file that reaches the Claude directory by a route the rules refuse. */
+export interface ClaudeDirDefect {
+  readonly file: string
+  /** One-based line number in the file. */
+  readonly line: number
+  readonly rule: string
+  /** The trimmed text of that line. */
+  readonly text: string
+}
+
+/** A defect as one message line, for the live corpus assertion. */
+const formatDefect = (defect: ClaudeDirDefect): string =>
+  `${defect.file}:${defect.line}: [${defect.rule}] ${defect.text.slice(0, 240)}`
+
+const lineDefect = (file: PromptFile, rule: string, text: string, index: number): ClaudeDirDefect =>
+  ({ file: file.name, line: index + 1, rule, text: text.trim() })
 
 /** The zero-based line that holds the character at `position`. */
 const lineAt = (text: string, position: number): number => text.slice(0, position).split('\n').length - 1
 
 /** One defect for the line of `content` that holds `position`. */
-function defectAt(file: PromptFile, rule: string, content: string, position: number): string {
+function defectAt(file: PromptFile, rule: string, content: string, position: number): ClaudeDirDefect {
   const index = lineAt(content, position)
   return lineDefect(file, rule, content.split('\n')[index], index)
 }
 
 /** One defect per line of `residue` that satisfies `matches`. */
-const lineDefects = (file: PromptFile, rule: string, residue: string, matches: (text: string) => boolean): string[] =>
+const lineDefects = (file: PromptFile, rule: string, residue: string, matches: (text: string) => boolean): ClaudeDirDefect[] =>
   residue.split('\n').flatMap((text, index) => matches(text) ? [lineDefect(file, rule, text, index)] : [])
 
 /** Rule `stray-variable`: the variable name anywhere in what is left. */
-function ruleStrayVariable(file: PromptFile, residue: string): string[] {
+function ruleStrayVariable(file: PromptFile, residue: string): ClaudeDirDefect[] {
   return lineDefects(file, 'stray-variable', residue, text => text.includes('CLAUDE_CONFIG_DIR'))
 }
 
 /** Rule `home-claude-path`: a path into the home Claude directory, or the directory itself, with no exemption for the variable name. */
-function ruleHomeClaudePath(file: PromptFile, residue: string): string[] {
+function ruleHomeClaudePath(file: PromptFile, residue: string): ClaudeDirDefect[] {
   return lineDefects(file, 'home-claude-path', residue, text => PATH_UNDER_HOME_CLAUDE.test(text) || HOME_CLAUDE_DIR.test(text))
 }
 
 /** Rule `unrooted-path`: a devflow install path whose directly preceding text is not one of the three roots. */
-function ruleUnrootedPath(file: PromptFile, residue: string): string[] {
-  const out: string[] = []
+function ruleUnrootedPath(file: PromptFile, residue: string): ClaudeDirDefect[] {
+  const out: ClaudeDirDefect[] = []
   for (const match of residue.matchAll(DEVFLOW_INSTALL_PATH)) {
     const at = match.index ?? 0
     const before = residue.slice(Math.max(0, at - ROOT_LOOKBEHIND), at)
@@ -218,7 +235,7 @@ function ruleUnrootedPath(file: PromptFile, residue: string): string[] {
 }
 
 /** A defect when `root` is used in `file` before `binder` appears, or when `binder` never appears. */
-function unboundRoot(file: PromptFile, rule: string, root: string, binder: string): string[] {
+function unboundRoot(file: PromptFile, rule: string, root: string, binder: string): ClaudeDirDefect[] {
   const use = file.content.indexOf(root)
   if (use < 0) return []
   const set = file.content.indexOf(binder)
@@ -226,7 +243,7 @@ function unboundRoot(file: PromptFile, rule: string, root: string, binder: strin
 }
 
 /** Rule `unbound-claude-dir-root`: `{claude_dir}/` used in a file that holds neither the sanctioned line nor the text of an allowlist entry that binds it. */
-function ruleUnboundClaudeDirRoot(file: PromptFile, allowed: readonly AllowedRuleProse[]): string[] {
+function ruleUnboundClaudeDirRoot(file: PromptFile, allowed: readonly AllowedRuleProse[]): ClaudeDirDefect[] {
   const use = file.content.indexOf(`${CLAUDE_DIR_PLACEHOLDER}/`)
   if (use < 0) return []
   const stated = allowed.some(entry => entry.binds === CLAUDE_DIR_PLACEHOLDER && entry.files.includes(file.name) && file.content.includes(entry.text))
@@ -235,7 +252,7 @@ function ruleUnboundClaudeDirRoot(file: PromptFile, allowed: readonly AllowedRul
 }
 
 /** Rule `unbound-d-root`: a `$d/` use with no sanctioned line before it on its own line. Each Bash call is a fresh shell, so `d` does not carry from one line to the next. */
-function ruleUnboundDRoot(file: PromptFile): string[] {
+function ruleUnboundDRoot(file: PromptFile): ClaudeDirDefect[] {
   return lineDefects(file, 'unbound-d-root', file.content, text => {
     const use = text.indexOf('$d/')
     const bound = text.indexOf(SANCTIONED_RESOLUTION)
@@ -244,13 +261,13 @@ function ruleUnboundDRoot(file: PromptFile): string[] {
 }
 
 /** Rule `d-reassigned`: a `d=` assignment in what is left once the sanctioned line is gone. */
-function ruleDReassigned(file: PromptFile, residue: string): string[] {
+function ruleDReassigned(file: PromptFile, residue: string): ClaudeDirDefect[] {
   return lineDefects(file, 'd-reassigned', residue, text => D_ASSIGNMENT.test(text))
 }
 
 /** Named collector: every place in the corpus that reaches the Claude directory by any route but the sanctioned ones. */
-export function collectClaudeDirDefects(corpus: readonly PromptFile[], allowed: readonly AllowedRuleProse[] = ALLOWED_RULE_PROSE): string[] {
-  const out: string[] = []
+export function collectClaudeDirDefects(corpus: readonly PromptFile[], allowed: readonly AllowedRuleProse[] = ALLOWED_RULE_PROSE): ClaudeDirDefect[] {
+  const out: ClaudeDirDefect[] = []
   for (const file of corpus) {
     const residue = residueOf(file, allowed)
     out.push(
@@ -281,7 +298,7 @@ export function collectAllowlistDefects(corpus: readonly PromptFile[], allowed: 
 }
 
 /** Named collector: the number of sanctioned lines in each corpus file is the number its site row states. */
-export function collectSiteRowDefects(corpus: readonly PromptFile[], rows: Readonly<Record<string, number>> = SITE_ROWS): string[] {
+export function collectSiteRowDefects(corpus: readonly PromptFile[], rows: SiteRows = SITE_ROWS): string[] {
   const out: string[] = []
   for (const name of Object.keys(rows)) {
     if (!corpus.some(f => f.name === name)) out.push(`${name}: a site row names a file that is not in the corpus`)
@@ -323,15 +340,28 @@ let surfaceCache: CorpusClass[] | undefined
 const surface = (): CorpusClass[] => (surfaceCache ??= promptSurface())
 const wholeCorpus = (): PromptFile[] => surface().flatMap(c => c.files)
 
+/** The corpus file named `name`; a name the corpus does not hold is an error that names it. */
+function corpusFile(name: string): PromptFile {
+  const file = wholeCorpus().find(f => f.name === name)
+  if (file === undefined) throw new Error(`${name} is not in the prompt corpus`)
+  return file
+}
+
 /** A real corpus file with a probe appended, as a one-file corpus. */
 function seeded(host: string, addition: string): PromptFile[] {
-  const file = wholeCorpus().find(f => f.name === host)
-  if (file === undefined) throw new Error(`${host} is not in the prompt corpus`)
+  const file = corpusFile(host)
   return [{ name: file.name, content: `${file.content}\n${addition}\n` }]
 }
 
-/** The file a defect message starts with. */
-const defectFile = (defect: string): string => defect.replace(/:\d+: \[.*$/s, '')
+/** The allowlist entry with the given id; an id the allowlist does not hold is an error that names it. */
+function allowedEntry(id: string): AllowedRuleProse {
+  const entry = ALLOWED_RULE_PROSE.find(e => e.id === id)
+  if (entry === undefined) throw new Error(`${id} is not an ALLOWED_RULE_PROSE entry`)
+  return entry
+}
+
+/** The distinct files the defects name, in the order they first appear. */
+const filesOf = (defects: readonly ClaudeDirDefect[]): string[] => [...new Set(defects.map(d => d.file))]
 
 /** A real file that holds the sanctioned line and its `printf`, and one that holds neither. */
 const WITH_LINE = 'dist/commands/code-review.md'
@@ -340,7 +370,7 @@ const WITHOUT_LINE = 'dist/commands/debug.md'
 /** Assert that the collector reports `addition`, seeded into the real file `host`, as a defect of the named rule. */
 function expectReported(host: string, addition: string, rule: string): void {
   const defects = collectClaudeDirDefects(seeded(host, addition))
-  expect(defects.filter(d => d.includes(`[${rule}]`)), `${JSON.stringify(addition)} in ${host} is not reported by rule ${rule}`).not.toEqual([])
+  expect(defects.filter(d => d.rule === rule && d.file === host), `${JSON.stringify(addition)} in ${host} is not reported by rule ${rule}`).not.toEqual([])
 }
 
 /** The directory the sanctioned line prints in a clean shell holding `HOME` and, unless undefined, `CLAUDE_CONFIG_DIR`. */
@@ -394,7 +424,8 @@ describe('no prompt reaches the Claude directory outside the CLAUDE_CONFIG_DIR r
   })
 
   it('no prompt names the variable outside the sanctioned line and the allowlisted prose, and every devflow install path sits under a bound root', () => {
-    expect(collectClaudeDirDefects(wholeCorpus())).toEqual([])
+    const defects = collectClaudeDirDefects(wholeCorpus())
+    expect(defects, defects.map(formatDefect).join('\n')).toEqual([])
   })
 
   it('the allowlist is live: each entry names corpus files that hold its text exactly once', () => {
@@ -495,7 +526,7 @@ describe('no prompt reaches the Claude directory outside the CLAUDE_CONFIG_DIR r
       ...review,
       content: `${review.content}\nfor each language focus, check whether \`~/.claude/skills/devflow:{focus}/SKILL.md\` exists (one file-existence check per candidate focus).\n`,
     }
-    expect([...new Set(collectClaudeDirDefects([seededReview]).map(defectFile))]).toEqual(['dist/commands/code-review.md'])
+    expect(filesOf(collectClaudeDirDefects([seededReview]))).toEqual(['dist/commands/code-review.md'])
   })
 
   it('red probes: every spelling of a read or probe under the home Claude directory is reported', () => {
@@ -572,7 +603,7 @@ describe('no prompt reaches the Claude directory outside the CLAUDE_CONFIG_DIR r
     const renamed = ALLOWED_RULE_PROSE.map(entry => entry.binds === undefined ? entry : { ...entry, id: 'renamed-binder' })
     expect(collectClaudeDirDefects(file, renamed)).toEqual([])
     const unbinding = ALLOWED_RULE_PROSE.map(entry => ({ ...entry, binds: undefined }))
-    expect(collectClaudeDirDefects(file, unbinding).filter(d => d.includes('[unbound-claude-dir-root]'))).not.toEqual([])
+    expect(collectClaudeDirDefects(file, unbinding).filter(d => d.rule === 'unbound-claude-dir-root')).not.toEqual([])
   })
 
   it('negative controls: the rule itself and paths under a bound root are not reported', () => {
@@ -594,7 +625,7 @@ describe('no prompt reaches the Claude directory outside the CLAUDE_CONFIG_DIR r
     const retired = '${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/devflow:agent-references'
     for (const { label, sentinel } of surface()) {
       const defects = collectClaudeDirDefects(seeded(sentinel, retired))
-      expect(defects.map(defectFile), `${label}: the old form seeded into ${sentinel} is not reported against it`).toContain(sentinel)
+      expect(filesOf(defects), `${label}: the old form seeded into ${sentinel} is not reported against it`).toContain(sentinel)
     }
   })
 
@@ -602,22 +633,26 @@ describe('no prompt reaches the Claude directory outside the CLAUDE_CONFIG_DIR r
     const corpus = wholeCorpus()
     for (const entry of ALLOWED_RULE_PROSE) {
       const without = ALLOWED_RULE_PROSE.filter(e => e.id !== entry.id)
-      const reported = [...new Set(collectClaudeDirDefects(corpus, without).map(defectFile))].sort()
+      const reported = filesOf(collectClaudeDirDefects(corpus, without)).sort()
       expect(reported, `removing ${entry.id}`).toEqual([...entry.files].sort())
     }
-    const [ruleProse, compaction] = ALLOWED_RULE_PROSE
-    expect(collectClaudeDirDefects([{ name: 'control.md', content: ruleProse.text }]).map(defectFile)).toContain('control.md')
-    expectReported(WITH_LINE, compaction.text, 'stray-variable')
+    const ruleProse = allowedEntry('rule-prose')
+    expect(filesOf(collectClaudeDirDefects([{ name: 'control.md', content: ruleProse.text }]))).toContain('control.md')
+    expectReported(WITH_LINE, allowedEntry('compaction-rule').text, 'stray-variable')
   })
 
-  it('the allowlist and site-row collectors report a missing file, a changed text and a drifted count', () => {
+  it('the allowlist collector reports a file the corpus lacks and a text the file does not hold once', () => {
     const corpus = wholeCorpus()
-    const [ruleProse] = ALLOWED_RULE_PROSE
+    const ruleProse = allowedEntry('rule-prose')
     expect(collectAllowlistDefects(corpus, [{ ...ruleProse, files: ['dist/commands/absent.md'] }])).toEqual([`${ruleProse.id}: dist/commands/absent.md is not in the corpus`])
     expect(collectAllowlistDefects(corpus, [{ ...ruleProse, text: `${ruleProse.text} and more` }])).toHaveLength(ruleProse.files.length)
+  })
+
+  it('the site-row collector reports a surplus line, a line in an unlisted file, a drifted copy and a row whose file is gone', () => {
     expect(collectSiteRowDefects(seeded(WITH_LINE, SANCTIONED_RESOLUTION), { [WITH_LINE]: 1 })).toEqual([`${WITH_LINE}: 2 sanctioned lines, expected 1`])
     expect(collectSiteRowDefects(seeded(WITHOUT_LINE, SANCTIONED_RESOLUTION))).toContain(`${WITHOUT_LINE}: 1 sanctioned lines, expected 0`)
-    const drifted = { name: WITH_LINE, content: wholeCorpus().find(f => f.name === WITH_LINE)!.content.replace(SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION.replace('/*)', '?*)')) }
+    const withLine = corpusFile(WITH_LINE)
+    const drifted = { name: withLine.name, content: withLine.content.replace(SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION.replace('/*)', '?*)')) }
     expect(collectSiteRowDefects([drifted], { [WITH_LINE]: 1 })).toEqual([`${WITH_LINE}: 0 sanctioned lines, expected 1`])
     expect(collectSiteRowDefects(wholeCorpus().filter(f => f.name !== CURATE_FILE))).toEqual([`${CURATE_FILE}: a site row names a file that is not in the corpus`])
   })
