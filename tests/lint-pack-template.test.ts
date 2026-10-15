@@ -326,6 +326,7 @@ describe('lint-pack template: shipped files', () => {
       'Makefile',
       'scripts/lint-pack.sh',
       'bash 3.2',
+      'git 2.30',
       '--format unix',
       'eslint-formatter-unix',
       'too_many_lines',
@@ -618,6 +619,15 @@ describe('lint-pack template: stale-symbol check', () => {
     expectRun(open.r.run(open.base), 'stale-symbol CHANGELOG.md:2 --old-flag\nLINT_PACK: matches 1\n', 1);
     const allowed = simple(`${STALE_CONF}stale.allow=CHANGELOG.md\n`, files, head);
     expectRun(allowed.r.run(allowed.base), 'LINT_PACK: clean\n', 0);
+  });
+
+  it('reports a doc line the branch adds: only an added line in the source globs keeps a symbol', () => {
+    const { r, base } = simple(
+      STALE_CONF,
+      { 'src/cli.ts': "const a = '--old-flag'\n", 'CHANGELOG.md': '# Changelog\n' },
+      { 'src/cli.ts': 'const a = 1\n', 'CHANGELOG.md': '# Changelog\n- removed --old-flag\n' },
+    );
+    expectRun(r.run(base), 'stale-symbol CHANGELOG.md:2 --old-flag\nLINT_PACK: matches 1\n', 1);
   });
 
   it('uses *.md as the doc glob when none is configured', () => {
@@ -1105,6 +1115,22 @@ describe('lint-pack template: determinism and hostile environment', () => {
     }
     const together = { GIT_LITERAL_PATHSPECS: '1', GIT_NOGLOB_PATHSPECS: '1', GIT_GLOB_PATHSPECS: '1', GIT_ICASE_PATHSPECS: '1' };
     expectRun(r.run(base, { env: together }), FULL_ORACLE, 1);
+  });
+
+  it('keeps the oracle when GIT_DIFF_OPTS asks for context lines, which git lets override -U0', () => {
+    const { r, base } = fullFixture();
+    expectRun(r.run(base, { env: { GIT_DIFF_OPTS: '--unified=3' } }), FULL_ORACLE, 1);
+  });
+
+  it('keeps the oracle when submodule.recurse is on: a submodule file is not a tracked file of the repository', () => {
+    const { r, base } = fullFixture();
+    const sub = newRepo();
+    sub.commit({ 'README.md': 'Use --legacy-mode here.\n', 'flags.ts': "export const KEPT = '--legacy-mode'\n" }, 'sub');
+    r.git('-c', 'protocol.file.allow=always', 'submodule', '--quiet', 'add', sub.dir, 'vendor/sub');
+    r.commit({}, 'submodule');
+    expectRun(r.run(base), FULL_ORACLE, 1);
+    const env = { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'submodule.recurse', GIT_CONFIG_VALUE_0: 'true' };
+    expectRun(r.run(base, { env }), FULL_ORACLE, 1);
   });
 
   it('keeps the oracle with GREP_OPTIONS, GREP_COLOR and GREP_COLORS set', () => {

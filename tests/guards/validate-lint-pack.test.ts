@@ -169,7 +169,7 @@ export function collectValidateDoctrineDefects(body: string): string[] {
   return out
 }
 
-describe('the Validate body holds the lint-pack doctrine (AC-6, AC-7)', () => {
+describe('the Validate body holds the lint-pack doctrine', () => {
   it('reads a real body, and it holds every clause', () => {
     expect(Buffer.byteLength(VALIDATE_BODY), 'the body is empty').toBeGreaterThan(4_000)
     expect(SECTION_CLAUSES.length).toBeGreaterThanOrEqual(19)
@@ -281,7 +281,7 @@ function dropFromArm(text: string, n: number): string {
   return next
 }
 
-describe('only the implement Phase 6 Validate spawn passes the level and the base (AC-8)', () => {
+describe('only the implement Phase 6 Validate spawn passes the level and the base', () => {
   it('the corpus is real: implement spawns Validate twice per build, resolve and the others at least once', () => {
     for (const label of IMPLEMENT_LABELS) {
       const doc = COMMANDS.find(d => d.label === label)
@@ -390,7 +390,7 @@ export function collectReportDefects(doc: Doc): string[] {
   return out
 }
 
-describe('the final report and the PR body show an UNVERIFIED lint pack (AC-7)', () => {
+describe('the final report and the PR body show an UNVERIFIED lint pack', () => {
   it('holds in both builds', () => {
     for (const doc of BUILDS) {
       expect(doc.text.length, doc.label).toBeGreaterThan(30_000)
@@ -455,7 +455,7 @@ function dropPart(rule: string, part: string): string {
   return rule
 }
 
-describe('Fix never edits the lint pack to clear a match (AC-10)', () => {
+describe('Fix never edits the lint pack to clear a match', () => {
   const others: Doc[] = ['code', 'refactor'].map(name => ({ label: `agent ${name}`, text: resolveAgentSource(name).content }))
 
   it('the rule sits in validation-fix only, and no Code or Refactor body carries it', () => {
@@ -525,7 +525,7 @@ function readTree(dir: string): Doc[] {
   }))
 }
 
-describe('the template is shipped, never installed or run (AC-9)', () => {
+describe('the template is shipped, never installed or run', () => {
   const sources = [...readTree(path.join(ROOT, 'src')), ...readTree(path.join(ROOT, 'dist'))]
   const goldens = walkFiles(path.join(ROOT, 'tests', 'fixtures', 'golden'), f => /install-snapshot|hook-matrix/.test(path.basename(f)))
     .map(file => ({ label: path.basename(file), text: readFileSync(file, 'utf-8') }))
@@ -575,7 +575,7 @@ export function collectSizeDefects(label: string, text: string, ceiling: number)
   return bytes > ceiling ? [`${label} is ${bytes} bytes, ceiling ${ceiling}`] : []
 }
 
-describe('the Validate body sits under its ceiling (AC-11)', () => {
+describe('the Validate body sits under its ceiling', () => {
   it('fits `validate-body-max`', () => {
     expect(Buffer.byteLength(VALIDATE_BODY), 'the body is read: the guard would pass vacuously on an empty one').toBeGreaterThan(4_000)
     expect(collectSizeDefects('validate.md', VALIDATE_BODY, VALIDATE_BODY_MAX_BYTES)).toEqual([])

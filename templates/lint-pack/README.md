@@ -34,7 +34,7 @@ Validate finds the pack under one name, `lint-pack`. Add one of these entries.
   	@bash scripts/lint-pack.sh $(BASE)
   ```
 
-Then copy `.lint-pack.conf` to the repository root, turn on the checks you want, and commit both files. The script needs bash 3.2 or newer, git 2.28 or newer, and a POSIX `awk`, `grep`, `sort` and `sed`. It works on the bash 3.2 that macOS ships.
+Then copy `.lint-pack.conf` to the repository root, turn on the checks you want, and commit both files. The script needs bash 3.2 or newer, git 2.30 or newer, and a POSIX `awk`, `grep`, `sort` and `sed`. It works on the bash 3.2 that macOS ships.
 
 Run it by hand like this:
 
@@ -76,7 +76,7 @@ LINT_PACK: matches 2
 
 The error reasons are a closed set: `usage`, `not-a-repo`, `bad-base`, `base-not-ancestor`, `bad-config <line>`, `bad-pattern <id>`, `git-failed`, `linter-missing` and `linter-exit <n>`. A pattern error names the pattern id, or `stale-symbol` or `size-match`.
 
-The same base, the same `HEAD` and the same config give the same bytes on stdout and the same exit code. The script clears the git pathspec variables and the grep variables and sets `LC_ALL=C`. It pins its git calls against hostile `diff.*`, `grep.*`, `color.*` and `core.quotePath` settings.
+The same base, the same `HEAD` and the same config give the same bytes on stdout and the same exit code. The script clears the git pathspec variables, `GIT_DIFF_OPTS` and the grep variables, and sets `LC_ALL=C`. It pins its git calls against hostile `diff.*`, `grep.*`, `color.*`, `core.quotePath` and `submodule.recurse` settings.
 
 ## The config
 
@@ -86,7 +86,7 @@ A glob is a shell glob in which `*` also matches `/`. A pattern is a POSIX exten
 
 ### Check 1: stale symbols
 
-A symbol qualifies when it is on a removed line in the source globs, on no added line, and in no tracked file at `HEAD` outside the doc and help globs. Each line at `HEAD` in the doc and help globs that names the symbol is a match. The search is whole-word and fixed-string, with `git grep` on `HEAD` only.
+A symbol qualifies when it is on a removed line in the source globs, on no added line in the source globs, and in no tracked file at `HEAD` outside the doc and help globs. Each line at `HEAD` in the doc and help globs that names the symbol is a match. This includes a line that the branch added. A submodule is not searched. The search is whole-word and fixed-string, with `git grep` on `HEAD` only.
 
 | Key | Meaning |
 |---|---|

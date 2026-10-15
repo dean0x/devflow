@@ -13,8 +13,9 @@
 # evaluated). Three checks are off until the config enables them:
 #
 #   stale-symbol   a symbol the branch removed from the source globs, that is on
-#                  no added line and in no tracked file outside the doc and help
-#                  globs, but that a doc or help line at HEAD still names
+#                  no added line in the source globs and in no tracked file
+#                  outside the doc and help globs, but that a doc or help line
+#                  at HEAD still names
 #   plan-id        configured POSIX ERE patterns (plan IDs, tombstone phrases)
 #                  that match as whole words on added lines
 #   function-size  diagnostics of a configured linter that fall inside added hunks
@@ -34,7 +35,7 @@
 # Error reasons: usage, not-a-repo, bad-base, base-not-ancestor, bad-config <n>,
 # bad-pattern <id>, git-failed, linter-missing, linter-exit <n>.
 #
-# Needs bash 3.2 or newer and git 2.28 or newer. No line of added text is ever
+# Needs bash 3.2 or newer and git 2.30 or newer. No line of added text is ever
 # printed. The last line is always the LINT_PACK line.
 
 set -u -o pipefail
@@ -42,6 +43,8 @@ set -u -o pipefail
 LC_ALL=C
 export LC_ALL
 unset GIT_LITERAL_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_GLOB_PATHSPECS GIT_ICASE_PATHSPECS
+# GIT_DIFF_OPTS overrides -U0 and would add context lines to the diff.
+unset GIT_DIFF_OPTS
 unset GREP_OPTIONS GREP_COLOR GREP_COLORS
 # A set CDPATH makes a relative cd print the directory it chose.
 unset CDPATH
@@ -64,7 +67,8 @@ BAD_ESCAPE_RE='\\[A-Za-z0-9<>]'
 g() { command git --no-pager -c core.quotePath=true "$@"; }
 DIFF_PINS=(--no-ext-diff --no-textconv --no-color --no-relative --src-prefix=a/ --dst-prefix=b/
   --diff-algorithm=myers --inter-hunk-context=0 --indent-heuristic)
-GREP_PINS=(--no-color --no-column --full-name)
+# A submodule file is not a tracked file of this repository: never search it.
+GREP_PINS=(--no-color --no-column --full-name --no-recurse-submodules)
 
 TMP=''
 DONE=0
