@@ -40,7 +40,7 @@ import { resolvePluginsToInstall } from '../../src/cli/commands/init-seed.js'
 
 const REFERENCE_DIR = 'commands'
 const COMMANDS_DIR = path.join(ROOT, 'src', 'assets', 'commands')
-/** The two root forms a read site may resolve first: the inline expression and the sanctioned resolution line. */
+/** The roots a read site may resolve first, including the sanctioned resolution line. */
 const READ_ROOTS = [
   '${CLAUDE_CONFIG_DIR:-$HOME/.claude}',
   'd="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac;',
@@ -180,7 +180,7 @@ describe('AC-406: every read path exists, is read, and resolves the config direc
     expect(namedReferences('no path here')).toEqual([])
   })
 
-  it('known-bad probes: no root, a root after the path and a missing Read-tool phrase are each reported, and both root forms are accepted', () => {
+  it('known-bad probes: no root, a root after the path and a missing Read-tool phrase are each reported, and the sanctioned resolution line is accepted as the read root', () => {
     const target = 'skills/devflow:agent-references/references/commands/x.md'
     const inline = READ_ROOTS[0]
     const sanctioned = READ_ROOTS[1]
