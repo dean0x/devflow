@@ -27,6 +27,7 @@
 #               are correctly separated by the lock boundary.
 # User-only:    exits without an LLM run (no fabrication) and leaves the queue in place
 #               for the next run (D-QUEUE-NO-ORPHAN-DELETE)
+# No parser:    neither jq nor node on PATH → exits with no LLM run; the queue and any .processing batch are left in place
 
 set -e
 
@@ -112,6 +113,12 @@ finish_run() {
   if [ "$LOCK_HELD" = "true" ]; then rmdir "$LOCK_DIR" 2>/dev/null || true; fi
 }
 trap finish_run EXIT
+
+# No JSON parser: stop before any step reads or moves the queue or the batch (#523).
+if [ "${_JSON_AVAILABLE:-false}" != "true" ]; then
+  log "SKIP: neither jq nor node on PATH; the queue is kept for the next run; no LLM run"
+  exit 0
+fi
 
 # --- Resolve paths ---
 # Anchor .devflow/ to the project root (prevents a stray nested .devflow/ when the
@@ -417,8 +424,6 @@ fi
 # A qa row (captured Q&A pair) counts as content-bearing here too — it carries
 # the same synthesis-worthy signal as an assistant turn (AC-F10). This check
 # and the TURNS_TEXT extraction loop below must agree on that.
-# When neither jq nor node is available (_JSON_AVAILABLE=false) we skip the check
-# and allow the run to proceed — conservative: better to attempt than to skip blindly.
 #
 # D-QUEUE-NO-ORPHAN-DELETE: the queue is never deleted here. Claude Code runs a
 # Stop event's hooks in parallel, so this worker can read the queue after
@@ -426,9 +431,9 @@ fi
 # assistant row; deleting it then loses that turn's prompt. Leaving it costs
 # nothing: the run is still skipped, the next run takes the whole turn once the
 # assistant row lands, and queue-append caps the file (200 -> newest 100 lines).
-if [ ! -f "$PROCESSING_FILE" ] && [ -f "$QUEUE_FILE" ] && [ -s "$QUEUE_FILE" ] && [ "$_JSON_AVAILABLE" = "true" ]; then
+if [ ! -f "$PROCESSING_FILE" ] && [ -f "$QUEUE_FILE" ] && [ -s "$QUEUE_FILE" ]; then
   if [ "$_HAS_JQ" = "true" ]; then
-    _HAS_CONTENT=$(jq -r 'select(.role=="assistant" or .role=="qa") | .role' "$QUEUE_FILE" 2>/dev/null | head -1 || echo "")
+    _HAS_CONTENT=$(jq -R -r '(fromjson | select(.role=="assistant" or .role=="qa") | .role)?' "$QUEUE_FILE" 2>/dev/null | head -1 || echo "")
   else
     # SECURITY: pass path via argv, never interpolate into node -e source (avoids shell injection
     # for repo paths containing quotes or special characters)
@@ -510,10 +515,10 @@ else
 fi
 
 # Single-pass extraction: role + content as TSV (newlines collapsed)
-# When neither jq nor node is available, EXTRACTED stays empty and TURN_COUNT will be 0 → early exit.
+# Each line is parsed alone (jq -R with fromjson, node per line): a malformed line drops only itself (#528).
 if [ "$_HAS_JQ" = "true" ]; then
-  EXTRACTED=$(printf '%s\n' "$ENTRIES" | jq -r '(.role // "") + "\t" + ((.content // "") | gsub("\n"; " "))' 2>/dev/null || echo "")
-elif [ "$_HAS_NODE" = "true" ]; then
+  EXTRACTED=$(printf '%s\n' "$ENTRIES" | jq -R -r '(fromjson | (.role // "") + "\t" + ((.content // "") | gsub("\n"; " ")))?' 2>/dev/null || echo "")
+else
   EXTRACTED=$(printf '%s\n' "$ENTRIES" | node -e '
     const lines = require("fs").readFileSync("/dev/stdin","utf8").split("\n");
     for (const line of lines) {
@@ -526,8 +531,13 @@ elif [ "$_HAS_NODE" = "true" ]; then
       } catch {}
     }
   ' 2>/dev/null || echo "")
-else
-  EXTRACTED=""
+fi
+
+_IN_LINES=$(printf '%s\n' "$ENTRIES" | LC_ALL=C grep -c '[^[:space:]]' || true)
+_OUT_LINES=$(printf '%s\n' "$EXTRACTED" | LC_ALL=C grep -c . || true)
+_SKIPPED=$(( ${_IN_LINES:-0} - ${_OUT_LINES:-0} ))
+if [ "$_SKIPPED" -gt 0 ]; then
+  log "Skipped $_SKIPPED queue line(s) that hold no readable turn"
 fi
 
 TURNS_TEXT=""
@@ -771,7 +781,7 @@ MEMORY_EFFORT_CHARS="abcdefghijklmnopqrstuvwxyz"
 # the `x` when the file, the field or a string there is missing. Always returns 0.
 memory_agent_field() {
   local _file="$HOME/.devflow/agent-models.json"
-  if [ "$_JSON_AVAILABLE" = "true" ] && [ -f "$_file" ]; then
+  if [ -f "$_file" ]; then
     json_string_field_file "$_file" "agents.memory.$1" 2>/dev/null || true
   fi
   printf x
