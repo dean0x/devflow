@@ -18,7 +18,7 @@
  *
  * Guard: throws when dist/cli.js is absent (no silent vacuous pass) — see requireBuiltCli.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { spawnSync } from 'child_process';
 import { promises as fs } from 'fs';
 import * as os from 'os';
@@ -27,6 +27,19 @@ import { requireBuiltCli } from './helpers.js';
 import { ALWAYS_PRESENT_REFS, COMPLIANCE_FRAMEWORKS } from '../src/core/compliance.js';
 
 const CLI = requireBuiltCli();
+
+/** The bound on one spawned child: a child that outlives it is killed. */
+const SUBPROCESS_TIMEOUT_MS = 30_000;
+
+/**
+ * Up to four `node dist/cli.js` spawns run in the body of one scenario (S23b), so the
+ * 5 s and 10 s defaults are not a budget under load: a scenario gets four spawn
+ * bounds. Its `beforeEach` runs up to three more spawns under `hookTimeout`, which
+ * gets the same budget.
+ */
+const SPAWNS_PER_SCENARIO = 4;
+const CLI_SCENARIO_TIMEOUT_MS = SPAWNS_PER_SCENARIO * SUBPROCESS_TIMEOUT_MS;
+vi.setConfig({ testTimeout: CLI_SCENARIO_TIMEOUT_MS, hookTimeout: CLI_SCENARIO_TIMEOUT_MS });
 
 /**
  * What every install carries, whatever the selection (D-COMPLIANCE-INSTALL-ALWAYS):
@@ -53,7 +66,7 @@ function makeRunner(tmpHome: string) {
   return function runCli(...args: string[]): RunResult {
     const result = spawnSync('node', [CLI, ...args], {
       encoding: 'utf-8',
-      timeout: 60000,
+      timeout: SUBPROCESS_TIMEOUT_MS,
       // A temp HOME alone does not isolate `init`: a user-scope install resolves the
       // project git root from its cwd, and an inherited cwd is the developer's repo, so
       // every run rewrote that repo's .devflow/config.json, root .gitignore and
@@ -1290,14 +1303,12 @@ describe('S23 (TP-43, AC-37): a hipaa repository never changes the machine compl
   let repo: string;
   let run: ReturnType<typeof makeRunner>;
   const RULE = () => path.join(claudeDir, 'rules', 'devflow', 'compliance.md');
-  /** Three or four CLI spawns run inside each arm, so the 5 s default is not a budget under load. */
-  const S23_TIMEOUT_MS = 120_000;
 
   /** `init` run from inside the repository — the strongest place for a repo layer to leak. */
   function initFromRepo(...args: string[]): RunResult {
     const result = spawnSync('node', [CLI, 'init', ...args], {
       encoding: 'utf-8',
-      timeout: 60000,
+      timeout: SUBPROCESS_TIMEOUT_MS,
       cwd: repo,
       env: { ...process.env, HOME: tmpHome, FORCE_COLOR: '0', NO_COLOR: '1', CI: '1' },
     });
@@ -1308,7 +1319,7 @@ describe('S23 (TP-43, AC-37): a hipaa repository never changes the machine compl
   function settingsLine(): string {
     const result = spawnSync('node', [path.join(tmpHome, '.devflow', 'scripts', 'resolve-settings.cjs'), repo], {
       encoding: 'utf-8',
-      timeout: 30000,
+      timeout: SUBPROCESS_TIMEOUT_MS,
       cwd: repo,
       env: { ...process.env, HOME: tmpHome },
     });
@@ -1349,7 +1360,7 @@ describe('S23 (TP-43, AC-37): a hipaa repository never changes the machine compl
     const reinit = initFromRepo('--recommended');
     expect(reinit.status, `init from the repository failed:\n${reinit.stderr}`).toBe(0);
     await expect(fs.access(RULE()), 'the repository must never install the machine rule').rejects.toThrow();
-  }, S23_TIMEOUT_MS);
+  });
 
   it('S23b: compliance-on machine (gdpr) — the lens folds hipaa in, and the rule bytes are unchanged', async () => {
     expect(run('init', '--recommended').status).toBe(0);
@@ -1363,7 +1374,7 @@ describe('S23 (TP-43, AC-37): a hipaa repository never changes the machine compl
     const after = await fs.readFile(RULE());
     expect(after.equals(before), 'the machine rule must stay byte-identical').toBe(true);
     expect(after.toString('utf-8')).not.toContain('HIPAA');
-  }, S23_TIMEOUT_MS);
+  });
 });
 
 // ── T1 ────────────────────────────────────────────────────────────────────────

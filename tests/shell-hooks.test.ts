@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as net from 'net';
 import { HANDOFF_TEMPLATE, REMINDER_TEMPLATE } from './fixtures/ambient-templates.js';
+import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
 import { buildRoutingConfigJson } from '../src/core/proxy-state.js';
 import * as p from '@clack/prompts';
 import {
@@ -16,7 +17,9 @@ import {
 import {
   FIFO_RUN_BOUND_MS,
   FIFO_TEST_TIMEOUT_MS,
+  HOOK_RUN_ALLOWANCE_MS,
   HOOKS_DIR,
+  NODE_EXEC_STALL_MS,
   execHook,
   makeFifo,
   releaseFifo,
@@ -30,6 +33,9 @@ function localDateString(): string {
 }
 
 const JSON_HELPER = path.join(HOOKS_DIR, 'json-helper.cjs');
+
+/** A hook run that execs node pays the macOS exec stall at most once. */
+const NODE_RUN_MS = HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS;
 
 const HOOK_SCRIPTS = [
   'debug-trace',
@@ -362,7 +368,7 @@ describe('json-helper.js operations', () => {
     } finally {
       fs.rmSync(probeDir, { recursive: true, force: true });
     }
-  });
+  }, 60_000); // cold `node` execs, which a loaded macOS host can stall for seconds each
 });
 
 describe('json-parse wrapper', () => {
@@ -418,7 +424,7 @@ describe('json-parse wrapper', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, 60_000); // cold `node` execs, which a loaded macOS host can stall for seconds each
 
   describe('json_string_field_file: a typed read that yields a field only when it is a JSON string', () => {
     const hasJq = spawnSync('jq', ['--version'], { encoding: 'utf8' }).status === 0;
@@ -2239,6 +2245,7 @@ describe('ensure-devflow-init behavioral', () => {
 
 describe('ensure-root-gitignore behavioral', () => {
   const ENSURE_ROOT = path.join(HOOKS_DIR, 'ensure-root-gitignore');
+  const writeFakeExecutable = useWarmFakeExecutables();
 
   let tmpDir: string;
 
@@ -2335,11 +2342,12 @@ describe('ensure-root-gitignore behavioral', () => {
   });
 
   it('v6 fast path forks `rm` only for a legacy marker that exists (builtin `[ -e ]` tests)', () => {
-    // An `rm` shim first on PATH logs every invocation, then does the real work.
+    // An `rm` shim first on PATH logs every invocation, then does the real work. It is a
+    // link to the warm dispatcher, so the shim's first exec is not a cold new executable.
     const shimBin = path.join(tmpDir, 'shim-bin');
     const rmLog = path.join(tmpDir, 'rm.log');
     fs.mkdirSync(shimBin);
-    fs.writeFileSync(path.join(shimBin, 'rm'), `#!/bin/bash\necho "$@" >> "${rmLog}"\nexec /bin/rm "$@"\n`, { mode: 0o755 });
+    writeFakeExecutable(path.join(shimBin, 'rm'), `#!/bin/bash\necho "$@" >> "${rmLog}"\nexec /bin/rm "$@"\n`);
     const env = { ...process.env, PATH: `${shimBin}:${process.env.PATH}` };
     execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
 
@@ -5219,7 +5227,7 @@ describe('ensure-proxy behavioral tests', () => {
       } finally {
         fs.rmSync(shadowBin, { recursive: true, force: true });
       }
-    });
+    }, NODE_RUN_MS);
   });
 
   // ── HTTP health body identity check (key-order-independent parse) ────────────

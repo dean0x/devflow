@@ -5,7 +5,11 @@
  *
  *  T1 (real-binary, skip if not available): discoverExternalModels returns
  *     known:true with a live result when the routing runtime is installed and
- *     accessible. Validates the full happy path including cache write.
+ *     accessible. Validates the full happy path including cache write. T1 and T13
+ *     run the real runtime through an injected spawn that skips the production
+ *     deadline (machine load); the deadline itself is covered by T4 and AC-P8.
+ *     A beforeAll in each of the describes that run node under a time bound (T1,
+ *     T13, T4, T14, AC-P8) pays the cold node exec once, in setup.
  *
  *  T2 (real-binary): discoverExternalModels with SUBSWITCH_CONFIG pointing at
  *     a legacy config causes exit 1 → known:false (env stripping test: if the
@@ -21,6 +25,11 @@
  *     Uses a real binary (shell script) that exits non-zero
  *     rather than a mock that always pretends to exit 0.
  *
+ *  T14 (production spawn, success path): a `.js` stub that prints the payload and
+ *     exits 0 — in one write and in several chunks — yields known:true with
+ *     source:'live' through the production spawn, with no spawnAndCollect injection.
+ *     A direct assertion also pins SPAWN_TIMEOUT_MS at 6 s or more.
+ *
  *  T6: spawnAndCollect is ALWAYS called with argv = ['models', '--json'].
  *     Injectable dep captures the actual argv and asserts it is exactly right.
  *     Guards against conditional argv that might degenerate to [] (triggering
@@ -31,8 +40,8 @@
  *     runtime installed. Writes 5 entries upfront; after discovery, exactly 3
  *     remain and they are the newest 3 by embedded timestamp.
  *
- *  AC-P8 (SIGTERM/SIGKILL test): a stub binary that ignores SIGTERM for >2s
- *     is killed by SIGKILL; discoverExternalModels returns known:false (not
+ *  AC-P8 (SIGTERM/SIGKILL test): a stub binary that ignores SIGTERM past
+ *     SIGKILL_GRACE_MS is killed by SIGKILL; discoverExternalModels returns known:false (not
  *     a hang). Uses a real shell binary.
  *
  * Every path that gates on an exit code exercises a REAL
@@ -45,12 +54,12 @@
  *   would never execute, leaving the exit-code paths covered only by mocks.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { promises as fsAsync } from 'fs';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { execSync } from 'child_process';
+import { spawn } from 'child_process';
 import {
   parseModelsJson,
   discoverExternalModels,
@@ -61,7 +70,9 @@ import {
   type ModelDiscoveryDeps,
 } from '../src/core/model-discovery.js';
 import { resolveProxyBin } from '../src/core/proxy-state.js';
+import { scrubChildEnv } from '../src/core/proxy-log.js';
 import { writeCache } from '../src/core/cache.js';
+import { COLD_EXEC_WARM_BOUND_MS, COLD_EXEC_WARM_HOOK_MS } from './helpers/warm-fake-executable.js';
 
 // ---------------------------------------------------------------------------
 // Constants mirroring model-discovery.ts internals
@@ -104,6 +115,236 @@ const VALID_PAYLOAD = JSON.stringify({
 let tmpDir: string;
 let cacheDir: string;
 let logPath: string;
+
+/**
+ * The discovery log, for an assertion message. A `known: false` in the live-runtime
+ * tests (T1, T13) must show why: a non-zero exit from the runtime, a parse failure,
+ * or a `[test-harness]` line when the harness bound below was hit.
+ */
+function discoveryLog(file: string = logPath): string {
+  try {
+    return fs.readFileSync(file, 'utf-8') || '(empty log)';
+  } catch {
+    return '(no log)';
+  }
+}
+
+/**
+ * Upper bound for one live-runtime spawn in T1 and T13. It is a harness guard, not a
+ * production value. The production deadline (SPAWN_TIMEOUT_MS) is covered with stubs
+ * in T4, T14 and AC-P8, so the live-runtime tests must not race it. A real
+ * `node <runtime>/dist/cli.js models --json` exec took 1.0-5.4 s on a loaded machine
+ * (the range SPAWN_TIMEOUT_MS is sized for); the harness uses a wider margin than that
+ * range, so a slow but correct exec still finishes. The bound sits under
+ * LIVE_SPAWN_TEST_TIMEOUT_MS, so a hit fails the assertion with a `[test-harness]` log
+ * line instead of ending as a bare vitest timeout.
+ */
+const LIVE_SPAWN_HARNESS_BOUND_MS = 8_000;
+
+/**
+ * Test timeout for one live-runtime test (T1, T13): the harness bound plus room for
+ * resolving the bin, writing the cache and parsing.
+ */
+const LIVE_SPAWN_TEST_TIMEOUT_MS = LIVE_SPAWN_HARNESS_BOUND_MS + 2_000;
+
+/** Cap on the child stderr kept for the failure log. */
+const LIVE_SPAWN_STDERR_CAP = 4_096;
+
+type SpawnAndCollect = NonNullable<ModelDiscoveryDeps['spawnAndCollect']>;
+
+/**
+ * The live-runtime spawn behind spawnLiveRuntime and the warm-up exec. It runs the
+ * exact options discoverExternalModels builds (execPath, binPath, argv, env, cwd) as a
+ * plain child process and collects stdout and the exit code, with no production
+ * deadline. The tests still prove that production builds the right spawn options
+ * (including the env isolation T13 checks) and parses the real runtime output.
+ *
+ * Bounded by `boundMs`: on a hit the child is killed with SIGKILL, a `[test-harness]`
+ * line goes to `logFile`, and the result is exitCode -1. Child stderr goes to
+ * `logFile` when the exit is non-zero.
+ */
+const spawnLive = (
+  opts: Parameters<SpawnAndCollect>[0],
+  boundMs: number,
+  logFile: string,
+): ReturnType<SpawnAndCollect> =>
+  new Promise((resolve) => {
+    const note = (line: string): void => {
+      try {
+        fs.appendFileSync(logFile, `${line}\n`);
+      } catch {
+        // The log is diagnostic only; the assertion message falls back to '(no log)'.
+      }
+    };
+
+    const proc = spawn(opts.execPath, [opts.binPath, ...opts.argv], {
+      env: opts.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      cwd: opts.cwd,
+    });
+
+    let settled = false;
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString('utf-8');
+    });
+    proc.stderr.on('data', (chunk: Buffer) => {
+      if (stderr.length < LIVE_SPAWN_STDERR_CAP) stderr += chunk.toString('utf-8');
+    });
+
+    const bound = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try { proc.kill('SIGKILL'); } catch { /* already dead */ }
+      note(
+        `[test-harness] HARNESS FAILURE: live runtime spawn exceeded the ` +
+          `${boundMs} ms harness bound (not the production spawn deadline)`,
+      );
+      resolve({ exitCode: -1, stdout: '', timedOut: false });
+    }, boundMs);
+
+    proc.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(bound);
+      if (code !== 0 && stderr.length > 0) {
+        note(`[test-harness] runtime stderr: ${stderr.slice(0, LIVE_SPAWN_STDERR_CAP)}`);
+      }
+      resolve({ exitCode: code ?? 1, stdout, timedOut: false });
+    });
+
+    proc.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(bound);
+      note(`[test-harness] live runtime spawn error: ${err.message}`);
+      resolve({ exitCode: -1, stdout: '', timedOut: false });
+    });
+  });
+
+/** spawnAndCollect for the live-runtime tests (T1, T13): bounded by LIVE_SPAWN_HARNESS_BOUND_MS. */
+const spawnLiveRuntime: SpawnAndCollect = (opts) =>
+  spawnLive(opts, LIVE_SPAWN_HARNESS_BOUND_MS, logPath);
+
+/** Deps for the live-runtime tests: the real bin resolver, the unraced spawn. */
+const liveRuntimeDeps: ModelDiscoveryDeps = { spawnAndCollect: spawnLiveRuntime };
+
+/**
+ * One warm-up exec of node with `binPath`, through the same spawn code and with the same
+ * execPath, argv, env shape and cwd that discoverExternalModels builds, so the cold exec
+ * is paid in a setup hook and not inside a test. On macOS under fork-heavy load (other
+ * test files running at once), the first exec of node waits in the syspolicyd queue for
+ * seconds, and the next one takes ~30 ms. Without the warm-up, the first test that runs
+ * node under a time bound pays that wait inside the bound and can hit it. Linux has no
+ * such queue, so there the warm-up costs one fast exec.
+ *
+ * It writes no cache and reads no user config (XDG_CONFIG_HOME is an empty temp
+ * directory, as in production). A warm-up that does not exit 0 within
+ * COLD_EXEC_WARM_BOUND_MS fails the hook with the harness log, so the cause shows here and
+ * not as a timeout in a test.
+ */
+async function warmNodeExec(binPath: string, what: string): Promise<void> {
+  const warmDir = await fsAsync.mkdtemp(path.join(os.tmpdir(), 'devflow-model-discovery-warm-'));
+  const warmLog = path.join(warmDir, 'proxy.log');
+  try {
+    const warm = await spawnLive(
+      {
+        execPath: process.execPath,
+        binPath,
+        argv: ['models', '--json'],
+        env: { ...scrubChildEnv(), NO_COLOR: '1', XDG_CONFIG_HOME: warmDir },
+        cwd: os.tmpdir(),
+      },
+      COLD_EXEC_WARM_BOUND_MS,
+      warmLog,
+    );
+    expect(
+      warm.exitCode,
+      `the ${what} warm-up exec did not exit 0 within ${COLD_EXEC_WARM_BOUND_MS} ms: ${discoveryLog(warmLog)}`,
+    ).toBe(0);
+  } finally {
+    await fsAsync.rm(warmDir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * beforeAll for the describes that run the live runtime (T1, T13): one real
+ * `models --json` exec of the installed runtime.
+ *
+ * When the runtime is absent the tests skip themselves, so there is nothing to warm
+ * and this returns.
+ */
+async function warmLiveRuntime(): Promise<void> {
+  const binResult = await resolveProxyBin();
+  if (!binResult.ok) {
+    if (binResult.error.includes('MODULE_NOT_FOUND') || binResult.error.includes('routing runtime')) {
+      return;
+    }
+    throw new Error(`resolveProxyBin failed unexpectedly: ${binResult.error}`);
+  }
+  await warmNodeExec(binResult.value.binPath, 'live runtime');
+}
+
+/**
+ * beforeAll for T4, whose per-test `.js` stubs (the overflow and spawn-failure cases) run
+ * through the production spawn: the same warm-up exec as warmLiveRuntime, with a throwaway
+ * stub that exits 0, so the cold exec of node is paid here. It warms node, not a stub
+ * file. A describe whose assertions need the exact stub file to be warm writes it once and
+ * warms it by path instead (T14 and useSigtermIgnoringStub).
+ */
+async function warmNodeStub(): Promise<void> {
+  const stubDir = await fsAsync.mkdtemp(path.join(os.tmpdir(), 'devflow-model-discovery-stub-warm-'));
+  try {
+    const stub = path.join(stubDir, 'warm-stub.js');
+    await fsAsync.writeFile(stub, '// warm-up stub: exits 0\n');
+    await warmNodeExec(stub, 'node stub');
+  } finally {
+    await fsAsync.rm(stubDir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * A SIGTERM-ignoring node stub that is written once per describe and warmed in
+ * `beforeAll` as that exact file, so the run under the production deadline is not the
+ * first run of a newly written stub (T4 and AC-P8 assert on a PID the stub writes
+ * inside that deadline). While the `warming` marker exists next to it the stub exits 0,
+ * so the warm-up returns; without the marker it writes `stub.pid`, ignores SIGTERM and
+ * hangs. Call it once per describe while the file is collected; read the stub from the
+ * returned function inside a test, which also clears any earlier PID file.
+ */
+function useSigtermIgnoringStub(): () => { stub: string; pidFile: string } {
+  let stubDir = '';
+
+  beforeAll(async () => {
+    stubDir = await fsAsync.mkdtemp(path.join(os.tmpdir(), 'devflow-model-discovery-sigterm-stub-'));
+    const marker = path.join(stubDir, 'warming');
+    const stubContent = [
+      '// SIGTERM-ignoring stub: warm-up run exits 0, a timed run ignores SIGTERM and hangs',
+      `const fs = require('fs');`,
+      `const path = require('path');`,
+      `if (fs.existsSync(path.join(__dirname, 'warming'))) process.exit(0);`,
+      `fs.writeFileSync(path.join(__dirname, 'stub.pid'), String(process.pid));`,
+      `process.on('SIGTERM', () => {});  // ignore SIGTERM — must be SIGKILL'd`,
+      `setInterval(() => {}, 100000);    // hold event loop open indefinitely`,
+    ].join('\n') + '\n';
+    await fsAsync.writeFile(path.join(stubDir, 'stub.js'), stubContent);
+    await fsAsync.writeFile(marker, '');
+    await warmNodeExec(path.join(stubDir, 'stub.js'), 'SIGTERM-ignoring stub');
+    await fsAsync.rm(marker, { force: true });
+  }, COLD_EXEC_WARM_HOOK_MS);
+
+  afterAll(async () => {
+    await fsAsync.rm(stubDir, { recursive: true, force: true });
+  });
+
+  return () => {
+    const pidFile = path.join(stubDir, 'stub.pid');
+    fs.rmSync(pidFile, { force: true });
+    return { stub: path.join(stubDir, 'stub.js'), pidFile };
+  };
+}
 
 beforeEach(async () => {
   tmpDir = await fsAsync.mkdtemp(path.join(os.tmpdir(), 'devflow-model-discovery-'));
@@ -759,6 +1000,8 @@ describe('T12: pruneOldEntries after live write', () => {
 // ---------------------------------------------------------------------------
 
 describe('T1: Real-binary — discoverExternalModels with live runtime', () => {
+  beforeAll(warmLiveRuntime, COLD_EXEC_WARM_HOOK_MS);
+
   it('returns known:true with live data when routing runtime is installed', async (ctx) => {
     // Resolve the real bin first — use vitest's ctx.skip() so the test reports SKIPPED
     // (not PASSED) when the runtime is absent. A bare `return` masks the skip as PASSED
@@ -773,7 +1016,9 @@ describe('T1: Real-binary — discoverExternalModels with live runtime', () => {
       throw new Error(`resolveProxyBin failed unexpectedly: ${binResult.error}`);
     }
 
-    const result = await discoverExternalModels(cacheDir, logPath);
+    // spawnLiveRuntime runs the production spawn options without the production
+    // deadline, so machine load cannot turn a slow but correct exec into known:false.
+    const result = await discoverExternalModels(cacheDir, logPath, liveRuntimeDeps);
 
     // subswitch models --json (0.6.0) is a static registry dump: no auth, no relay,
     // no config file required (verified: exit 0, configFileFound:false; the runtime's
@@ -781,7 +1026,7 @@ describe('T1: Real-binary — discoverExternalModels with live runtime', () => {
     // cacheDir is freshly created (beforeEach), so no cache hit is possible — source
     // must be 'live'. Guarding these behind `if (result.known)` would let the test
     // pass vacuously when the live call incorrectly returns known:false.
-    expect(result.known).toBe(true);
+    expect(result.known, discoveryLog()).toBe(true);
     if (!result.known) return; // TypeScript narrowing only
     expect(result.source).toBe('live');
     expect(result.models.length).toBeGreaterThan(0);
@@ -794,7 +1039,7 @@ describe('T1: Real-binary — discoverExternalModels with live runtime', () => {
     }
     // 0.6.0 lists gpt-5.5 with retired:true, routable:false — never offered.
     expect(result.selectableNames).not.toContain('gpt-5.5');
-  }, 10_000); // 10s timeout for live spawn
+  }, LIVE_SPAWN_TEST_TIMEOUT_MS);
 });
 
 // ---------------------------------------------------------------------------
@@ -936,6 +1181,8 @@ describe('T2: Real-binary stub — hostile SUBSWITCH_CONFIG stripped from child 
 // ---------------------------------------------------------------------------
 
 describe('T13: Real-binary — user-level runtime config is isolated from discovery (D-EFR-6)', () => {
+  beforeAll(warmLiveRuntime, COLD_EXEC_WARM_HOOK_MS);
+
   /**
    * Run discovery against the installed runtime with HOME pointed at a temp home
    * whose `.config/subswitch/config.json` holds `userConfig`. HOME is one of the
@@ -948,7 +1195,7 @@ describe('T13: Real-binary — user-level runtime config is isolated from discov
     const origHome = process.env['HOME'];
     process.env['HOME'] = home;
     try {
-      return await discoverExternalModels(cacheDir, logPath);
+      return await discoverExternalModels(cacheDir, logPath, liveRuntimeDeps);
     } finally {
       if (origHome === undefined) {
         delete process.env['HOME'];
@@ -973,10 +1220,10 @@ describe('T13: Real-binary — user-level runtime config is isolated from discov
 
     const result = await discoverWithUserConfig('{"not": "closed"');
 
-    expect(result.known).toBe(true);
+    expect(result.known, discoveryLog()).toBe(true);
     if (!result.known) return; // TypeScript narrowing only
     expect(result.source).toBe('live');
-  }, 10_000);
+  }, LIVE_SPAWN_TEST_TIMEOUT_MS);
 
   it('aliases from a user-level config are not offered — the relay never routes them', async (ctx) => {
     if (await skipWithoutRuntime(ctx)) return;
@@ -985,11 +1232,11 @@ describe('T13: Real-binary — user-level runtime config is isolated from discov
       JSON.stringify({ providers: { codex: { aliases: { 'user-only-alias': 'gpt-5.6-terra' } } } }),
     );
 
-    expect(result.known).toBe(true);
+    expect(result.known, discoveryLog()).toBe(true);
     if (!result.known) return; // TypeScript narrowing only
     expect(result.source).toBe('live');
     expect(result.selectableNames).not.toContain('user-only-alias');
-  }, 10_000);
+  }, LIVE_SPAWN_TEST_TIMEOUT_MS);
 });
 
 // ---------------------------------------------------------------------------
@@ -1043,7 +1290,127 @@ function shellDeps(stubPath: string, onExitCode?: (code: number) => void): Model
   };
 }
 
+/**
+ * Assert that a SIGTERM-ignoring stub wrote its PID and that the process is now dead.
+ * The PID file is the proof that the stub ran at all: without it, "no live process" is
+ * trivially true and the SIGKILL escalation was never exercised. A missing file is
+ * almost always a cold start of node that ran past the production deadline (see
+ * useSigtermIgnoringStub). Production fires SIGKILL on an unref()'d timer SIGKILL_GRACE_MS after
+ * discoverExternalModels returns, so the caller waits for it to land before this check.
+ */
+function expectStubKilled(pidFile: string): void {
+  expect(
+    fs.existsSync(pidFile),
+    `the stub never wrote ${pidFile}: it did not start before the production deadline (a cold start of node), so the SIGKILL check would prove nothing`,
+  ).toBe(true);
+  const pid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
+  expect(Number.isInteger(pid) && pid > 0, `the stub PID file does not hold a PID: ${pidFile}`).toBe(true);
+  let stillAlive = false;
+  try {
+    process.kill(pid, 0); // throws ESRCH if dead
+    stillAlive = true;
+  } catch {
+    // ESRCH — expected: process is dead
+  }
+  expect(stillAlive, `stub process ${pid} is still alive after the SIGKILL grace period`).toBe(false);
+}
+
+/** Deps for a stub run through the production spawn: only the bin resolver is injected. */
+function productionSpawnDeps(stubPath: string): ModelDiscoveryDeps {
+  return {
+    resolveProxyBin: async () => ({
+      ok: true,
+      value: { binPath: stubPath, npxWarning: false, version: '0.2.0' },
+    }),
+    // No spawnAndCollect — production buildRealSpawnAndCollect runs
+  };
+}
+
+describe('SPAWN_TIMEOUT_MS — production deadline floor', () => {
+  // The routing runtime's first exec took 1.0-5.4 s on a loaded machine (see
+  // SPAWN_TIMEOUT_MS in model-discovery.ts). Every timing bound in this file derives from
+  // the constant, so only this assertion fails when the value is cut back.
+  const SPAWN_TIMEOUT_FLOOR_MS = 6_000;
+
+  it('is at least 6 s, so a cold first exec of the routing runtime is not reported as unknown', () => {
+    expect(
+      SPAWN_TIMEOUT_MS,
+      'SPAWN_TIMEOUT_MS must outlast the cold start of the routing runtime (up to 5.4 s measured); a shorter deadline reports an installed runtime as unknown',
+    ).toBeGreaterThanOrEqual(SPAWN_TIMEOUT_FLOOR_MS);
+  });
+});
+
+describe('T14: Production spawn — exit-0 stdout becomes a live catalog (no spawnAndCollect injection)', () => {
+  // The production success path (child exits 0, stdout returned) has no other test: T1 and
+  // T13 inject a local spawn, T3 and T2 inject spawnSync, and the stubs in T4 and AC-P8
+  // never exit 0. Each stub is written once, in setup, and run once there as that exact
+  // file, so the run under the 6 s production deadline is not the first exec of a new file.
+  const payload = `${VALID_PAYLOAD}\n`;
+  const chunkSize = Math.ceil(payload.length / 4);
+  const chunks = [0, 1, 2, 3].map((i) => payload.slice(i * chunkSize, (i + 1) * chunkSize));
+  const stubs = {
+    // Prints the whole payload in one write.
+    single: `process.stdout.write(${JSON.stringify(payload)});\n`,
+    // Each chunk is flushed before the next timer is armed, so the parent reads the
+    // payload as separate 'data' events, not as one buffer.
+    chunked:
+      [
+        `const chunks = ${JSON.stringify(chunks)};`,
+        'let i = 0;',
+        'const next = () => {',
+        '  process.stdout.write(chunks[i], () => {',
+        '    i += 1;',
+        '    if (i < chunks.length) setTimeout(next, 25);',
+        '  });',
+        '};',
+        'next();',
+      ].join('\n') + '\n',
+  };
+  const stubPaths = { single: '', chunked: '' };
+  let stubDir = '';
+
+  beforeAll(async () => {
+    stubDir = await fsAsync.mkdtemp(path.join(os.tmpdir(), 'devflow-model-discovery-t14-stub-'));
+    stubPaths.single = await writeStubScript(stubDir, 'stub-t14-exit0.js', stubs.single);
+    stubPaths.chunked = await writeStubScript(stubDir, 'stub-t14-chunked.js', stubs.chunked);
+    await Promise.all([
+      warmNodeExec(stubPaths.single, 'T14 single-payload stub'),
+      warmNodeExec(stubPaths.chunked, 'T14 chunked stub'),
+    ]);
+  }, COLD_EXEC_WARM_HOOK_MS);
+
+  afterAll(async () => {
+    await fsAsync.rm(stubDir, { recursive: true, force: true });
+  });
+
+  const STUB_TEST_TIMEOUT_MS = SPAWN_TIMEOUT_MS + SIGKILL_GRACE_MS + 5_000;
+
+  async function expectLiveCatalog(stub: string): Promise<void> {
+    const result = await discoverExternalModels(cacheDir, logPath, productionSpawnDeps(stub));
+
+    // cacheDir is fresh (beforeEach) and holds no stale entry, so known:true with
+    // source:'live' can only come from the stdout the production spawn collected.
+    expect(result.known, discoveryLog()).toBe(true);
+    if (!result.known) return; // TypeScript narrowing only
+    expect(result.source).toBe('live');
+    expect(result.models.map((m) => m.id)).toEqual(['gpt-5.6-sol', 'gpt-5.4-terra']);
+    // The raw stdout was cached under the stub's version key.
+    expect(fs.readdirSync(cacheDir)).toContain(`${CACHE_KEY_PREFIX}0.2.0.json`);
+  }
+
+  it('a stub that prints the payload and exits 0 → known:true, source:live', async () => {
+    await expectLiveCatalog(stubPaths.single);
+  }, STUB_TEST_TIMEOUT_MS);
+
+  it('a stub that writes the payload in several chunks → the chunks are joined into one live catalog', async () => {
+    await expectLiveCatalog(stubPaths.chunked);
+  }, STUB_TEST_TIMEOUT_MS);
+});
+
 describe('T4: Real-binary stub — stale-cache fallback on spawn failure', () => {
+  beforeAll(warmNodeStub, COLD_EXEC_WARM_HOOK_MS);
+  const sigtermStub = useSigtermIgnoringStub();
+
   // Pre-seed a stale cache entry so the stale-cache outcome is deterministic.
   // Uses a different version key from the stubs (0.2.0) so it is skipped by the
   // fresh-cache check but found by findStaleFallback. findStaleFallback ignores TTL
@@ -1138,15 +1505,7 @@ describe('T4: Real-binary stub — stale-cache fallback on spawn failure', () =>
     // discoverExternalModels returns. Without this check a leaked stub could accumulate
     // over multiple runs and stretch the suite from ~24s to 40+ minutes (real incident,
     // feature KB 'Leaked stub relays' gotcha).
-    const pidFile = path.join(tmpDir, 'stub-t4-sigterm.pid');
-    const stubContent = [
-      '// SIGTERM-ignoring stub (T4)',
-      `const fs = require('fs');`,
-      `fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));`,
-      'process.on("SIGTERM", () => {});  // ignore SIGTERM — must be killed by SIGKILL',
-      'setInterval(() => {}, 100000);    // hold event loop open',
-    ].join('\n') + '\n';
-    const stub = await writeStubScript(tmpDir, 'stub-t4-sigterm.js', stubContent);
+    const { stub, pidFile } = sigtermStub();
 
     const deps: ModelDiscoveryDeps = {
       resolveProxyBin: async () => ({
@@ -1173,19 +1532,7 @@ describe('T4: Real-binary stub — stale-cache fallback on spawn failure', () =>
     // timer SIGKILL_GRACE_MS after discoverExternalModels returns — wait for it to land,
     // then probe with signal 0 (throws ESRCH when the process is gone). Mirrors AC-P8.
     await new Promise((r) => setTimeout(r, SIGKILL_GRACE_MS + 500));
-    if (fs.existsSync(pidFile)) {
-      const pid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
-      if (Number.isFinite(pid) && pid > 0) {
-        let stillAlive = false;
-        try {
-          process.kill(pid, 0); // throws ESRCH if dead
-          stillAlive = true;
-        } catch {
-          // ESRCH — expected: process is dead
-        }
-        expect(stillAlive).toBe(false);
-      }
-    }
+    expectStubKilled(pidFile);
   }, SPAWN_TIMEOUT_MS + SIGKILL_GRACE_MS + 5_000);
 
   it('300KB payload exceeds STDOUT_CAP → overflow kill → stale-cache (production path)', async () => {
@@ -1220,6 +1567,8 @@ describe('T4: Real-binary stub — stale-cache fallback on spawn failure', () =>
 });
 
 describe('AC-P8: SIGTERM + SIGKILL escalation on timeout', () => {
+  const sigtermStub = useSigtermIgnoringStub();
+
   it(
     'discoverExternalModels returns known:false (not hang) when process ignores SIGTERM',
     async () => {
@@ -1228,15 +1577,7 @@ describe('AC-P8: SIGTERM + SIGKILL escalation on timeout', () => {
       // .js stub: production spawns it as `process.execPath [stub] models --json`.
       // It writes its own PID, ignores SIGTERM, and hangs. Production must SIGKILL it.
       // No spawnAndCollect injection — the real buildRealSpawnAndCollect path runs.
-      const pidFile = path.join(tmpDir, 'stub-p8.pid');
-      const stubContent = [
-        '// AC-P8 stub: ignore SIGTERM, write PID, hang',
-        `const fs = require('fs');`,
-        `fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));`,
-        `process.on('SIGTERM', () => {});  // ignore SIGTERM — must be SIGKILL'd`,
-        `setInterval(() => {}, 100000);    // hold event loop open indefinitely`,
-      ].join('\n') + '\n';
-      const stub = await writeStubScript(tmpDir, 'stub-p8-sigterm.js', stubContent);
+      const { stub, pidFile } = sigtermStub();
 
       const deps: ModelDiscoveryDeps = {
         resolveProxyBin: async () => ({
@@ -1260,21 +1601,10 @@ describe('AC-P8: SIGTERM + SIGKILL escalation on timeout', () => {
       // Wait for SIGKILL to land (unreffed timer in production fires SIGKILL_GRACE_MS
       // after discoverExternalModels returns; add 500ms margin).
       await new Promise((r) => setTimeout(r, SIGKILL_GRACE_MS + 500));
-      if (fs.existsSync(pidFile)) {
-        const pid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
-        if (Number.isFinite(pid) && pid > 0) {
-          let stillAlive = false;
-          try {
-            process.kill(pid, 0); // throws ESRCH if dead
-            stillAlive = true;
-          } catch {
-            // ESRCH — expected: process is dead
-          }
-          expect(stillAlive).toBe(false);
-        }
-      }
+      expectStubKilled(pidFile);
     },
-    // Total budget: SPAWN_TIMEOUT_MS + SIGKILL_GRACE_MS + 2s headroom + 1s verify = ~7.5s
+    // Total budget: twice (SPAWN_TIMEOUT_MS + SIGKILL_GRACE_MS) + 3.5s. The body needs the
+    // deadline plus SIGKILL_GRACE_MS + 500ms; the rest is margin for a loaded machine.
     (SPAWN_TIMEOUT_MS + SIGKILL_GRACE_MS) * 2 + 3_500,
   );
 });

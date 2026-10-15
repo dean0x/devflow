@@ -16,16 +16,48 @@
  * and never assumes upstream masking happened.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { spawnSync } from 'child_process';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
+import { spawnSync, type SpawnSyncOptionsWithStringEncoding, type SpawnSyncReturns } from 'child_process';
 import { createRequire } from 'module';
 import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { resolveAgentSource } from './helpers.js';
+import { HOOK_RUN_ALLOWANCE_MS, NODE_EXEC_STALL_MS } from './shell-hooks-helpers.js';
+import { COLD_EXEC_WARM_BOUND_MS, COLD_EXEC_WARM_HOOK_MS } from './helpers/warm-fake-executable.js';
 
 const SCRIPT = path.resolve(import.meta.dirname, '../src/assets/scripts/redact-secrets.cjs');
+
+// Almost every test here spawns `node` on the scrubber, and on macOS a node exec
+// that follows fork-heavy tests waits on syspolicyd (NODE_EXEC_STALL_MS). The
+// budget of a test that execs node once is the one the hook tests use.
+vi.setConfig({ testTimeout: HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS });
+
+/** The bound on one scrubber child: a child that outlives it is killed. */
+const SPAWN_BOUND_MS = 10_000;
+
+// The first node exec of the file is the one that can wait on syspolicyd for seconds. It
+// is paid here, in a setup hook with its own bound, so no test pays it inside SPAWN_BOUND_MS;
+// a hold that outlasts the hook's bound fails here and names the cause.
+beforeAll(() => {
+  const warmDir = fs.mkdtempSync(path.join(os.tmpdir(), 'redact-secrets-warm-'));
+  try {
+    const warmInput = path.join(warmDir, 'warm-input.txt');
+    fs.writeFileSync(warmInput, 'nothing secret here\n', 'utf8');
+    const warm = spawnSync('node', [SCRIPT, '--emit', warmInput], {
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: COLD_EXEC_WARM_BOUND_MS,
+    });
+    expect(
+      warm.status,
+      `the node warm-up exec did not exit 0 within ${COLD_EXEC_WARM_BOUND_MS} ms (${warm.error?.message ?? `signal ${warm.signal}`})`,
+    ).toBe(0);
+  } finally {
+    fs.rmSync(warmDir, { recursive: true, force: true });
+  }
+}, COLD_EXEC_WARM_HOOK_MS);
 
 // ---------------------------------------------------------------------------
 // Types
@@ -45,16 +77,33 @@ interface RunResultWithContent extends RunResult {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * The exit code of a scrubber child that exited. A child that did not — killed at
+ * SPAWN_BOUND_MS, or never started — has no exit code, and folding it into one
+ * would make a stalled exec read as a scrubber verdict, so it fails the test as a
+ * harness failure instead.
+ */
+function exitCodeOf(result: SpawnSyncReturns<string>): number {
+  if (result.error !== undefined || result.signal !== null || result.status === null) {
+    const cause = result.error?.message ?? `signal ${result.signal}`;
+    throw new Error(
+      `[test-harness] HARNESS FAILURE: the scrubber child did not exit (${cause}; ` +
+      `spawn bound ${SPAWN_BOUND_MS} ms). This is not a scrubber exit code.`,
+    );
+  }
+  return result.status;
+}
+
 function run(inputPath: string, outputPath: string): RunResult {
   const result = spawnSync('node', [SCRIPT, inputPath, outputPath], {
     encoding: 'utf8',
     stdio: ['pipe', 'pipe', 'pipe'],
-    timeout: 10_000,
+    timeout: SPAWN_BOUND_MS,
   });
   return {
     stdout: result.stdout ?? '',
     stderr: result.stderr ?? '',
-    exitCode: result.status ?? 1,
+    exitCode: exitCodeOf(result),
   };
 }
 
@@ -561,9 +610,9 @@ describe('exit codes', () => {
     const result = spawnSync('node', [SCRIPT], {
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 5000,
+      timeout: SPAWN_BOUND_MS,
     });
-    expect(result.status).toBe(1);
+    expect(exitCodeOf(result)).toBe(1);
     // stdout must be empty on usage error (concrete check)
     expect(result.stdout ?? '').toBe('');
   });
@@ -572,9 +621,9 @@ describe('exit codes', () => {
     const result = spawnSync('node', [SCRIPT, '/tmp/one-arg-only'], {
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 5000,
+      timeout: SPAWN_BOUND_MS,
     });
-    expect(result.status).toBe(1);
+    expect(exitCodeOf(result)).toBe(1);
     expect(result.stdout ?? '').toBe('');
   });
 
@@ -634,12 +683,18 @@ describe('adversarial backtracking budget', () => {
     expect(nearMissBody.length).toBeGreaterThan(100_000);
 
     const fixture = header + nearMissBody;
-    const start = Date.now();
-    const r = runWithContent(fixture, tmpDir, 'adversarial-out.txt');
-    const elapsed = Date.now() - start;
 
-    expect(r.exitCode).toBe(0);
+    // The 2 s budget is for the scrubber's own work, which file mode runs as one scrub()
+    // of the content. Timing the child would add the node start, which on a loaded macOS
+    // machine can wait seconds on syspolicyd; so the work is timed in this process, and
+    // the child run only has to exit 0 on the same input.
+    const start = Date.now();
+    SCRUBBER.scrub(fixture);
+    const elapsed = Date.now() - start;
     expect(elapsed).toBeLessThan(2000);
+
+    const r = runWithContent(fixture, tmpDir, 'adversarial-out.txt');
+    expect(r.exitCode).toBe(0);
   });
 });
 
@@ -806,7 +861,7 @@ function runEmit(inputPath: string, extraArgs: readonly string[] = []): EmitResu
   const result = spawnSync('node', [SCRIPT, '--emit', inputPath, ...extraArgs], {
     encoding: 'utf8',
     stdio: ['pipe', 'pipe', 'pipe'],
-    timeout: 10_000,
+    timeout: SPAWN_BOUND_MS,
   });
   const stdout = result.stdout ?? '';
   const nl = stdout.indexOf('\n');
@@ -814,7 +869,7 @@ function runEmit(inputPath: string, extraArgs: readonly string[] = []): EmitResu
     framing: nl === -1 ? stdout : stdout.slice(0, nl),
     body: nl === -1 ? '' : stdout.slice(nl + 1),
     stderr: result.stderr ?? '',
-    exitCode: result.status ?? 1,
+    exitCode: exitCodeOf(result),
     stdout,
   };
 }
@@ -1129,9 +1184,9 @@ describe('--emit: NO BODY on any non-zero exit (AC-3.5, §8.9 — every path)', 
     // The one failure that happens BEFORE the mode is known, so it cannot render a
     // D11-FAIL line — stdout must then be empty rather than partially framed.
     const result = spawnSync('node', [SCRIPT, '--emit'], {
-      encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000,
+      encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: SPAWN_BOUND_MS,
     });
-    expect(result.status).toBe(1);
+    expect(exitCodeOf(result)).toBe(1);
     expect(result.stdout ?? '').toBe('');
   });
 
@@ -1210,10 +1265,10 @@ describe('--emit: NO BODY on any non-zero exit (AC-3.5, §8.9 — every path)', 
       'utf8',
     );
     const input = writeInput('clean body\n', 'internal-error.txt');
-    const spawnOpts = { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 10_000 } as const;
+    const spawnOpts: SpawnSyncOptionsWithStringEncoding = { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: SPAWN_BOUND_MS };
 
     const broken = spawnSync('node', ['--require', preload, SCRIPT, '--emit', input], spawnOpts);
-    expect(broken.status, `internal error must be exit 4.\n${broken.stderr}`).toBe(4);
+    expect(exitCodeOf(broken), `internal error must be exit 4.\n${broken.stderr}`).toBe(4);
     expect(
       broken.stdout ?? '',
       'an internal error must leave stdout entirely EMPTY — not a partial framing, not a body',
@@ -1225,7 +1280,7 @@ describe('--emit: NO BODY on any non-zero exit (AC-3.5, §8.9 — every path)', 
     // above is evidence about the seeded throw and not about a spawn that never
     // reached the script.
     const control = spawnSync('node', [SCRIPT, '--emit', input], spawnOpts);
-    expect(control.status).toBe(0);
+    expect(exitCodeOf(control)).toBe(0);
     expect((control.stdout ?? '').split('\n')[0]).toMatch(FRAMING_RE);
   });
 

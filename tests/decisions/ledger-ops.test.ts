@@ -1354,7 +1354,7 @@ describe('AC-P2b: assign-anchor full write-path performance (CLI-level)', { time
 // Locking discipline: assign-anchor and render happen under one lock (no deadlock)
 // ---------------------------------------------------------------------------
 
-describe('locking discipline: assign-anchor and render under single .decisions.lock', () => {
+describe('locking discipline: assign-anchor and render under single .decisions.lock', { timeout: 30_000 }, () => {
   let tmpDir: string;
 
   beforeEach(() => {

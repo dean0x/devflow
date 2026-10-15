@@ -16,7 +16,8 @@ import { execFileSync, execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { pollForTerminalLine } from './helpers/poll-for-terminal-line.js';
+import { waitForWorkerToFinish } from './helpers/poll-for-terminal-line.js';
+import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
 import { HOOK_RUN_ALLOWANCE_MS, NODE_EXEC_STALL_MS, answersVersion, resolveOnPath, runHook as runSharedHook, spawnWithStdin } from './shell-hooks-helpers.js';
 
 const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks');
@@ -60,10 +61,17 @@ function runHookWithPath(
   });
 }
 
+/**
+ * Every fake claude here is a link to one warm dispatcher script (see warm-fake-executable.ts),
+ * not a new executable per test: the worker runs the fake first as its bounded --version probe,
+ * and on macOS the first exec of a new file can be held for seconds after a fork-heavy run.
+ */
+const writeFakeExecutable = useWarmFakeExecutables();
+
 function createFakeClaudeShim(shimDir: string, memFile: string): void {
   const bin = path.join(shimDir, 'claude');
   const stagedFile = `${memFile}.new`;
-  fs.writeFileSync(
+  writeFakeExecutable(
     bin,
     answersVersion(`#!/bin/bash
 # Writes to staged path; worker CAS-mv's it to the real path (D-MEMORY-STAGED-CAS)
@@ -72,7 +80,6 @@ echo "## Now" >> "${stagedFile}"
 exit 0
 `),
   );
-  fs.chmodSync(bin, 0o755);
 }
 
 function backdateMtime(filePath: string, secondsAgo: number): void {
@@ -500,7 +507,7 @@ describe('memory-worker', () => {
     expect(fs.statSync(triggerFile).mtimeMs).toBe(beforeMtime);
   });
 
-  it('touch-before-spawn: stale trigger -> trigger touched, worker spawned', () => {
+  it('touch-before-spawn: stale trigger -> trigger touched, worker spawned', async () => {
     const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
     createFakeClaudeShim(shimDir, memFile);
     const triggerFile = path.join(projectDir, '.devflow', 'memory', '.working-memory-last-trigger');
@@ -510,7 +517,8 @@ describe('memory-worker', () => {
     runHookWithPath(MEMORY_WORKER, { cwd: projectDir }, homeDir, shimDir);
 
     expect(fs.statSync(triggerFile).mtimeMs).toBeGreaterThan(Date.now() - 15000);
-  });
+    await waitForWorkerToFinish(workerLogPath(projectDir, homeDir, 'background-memory-update'));
+  }, 15000);
 
   it('spawn happens: worker log shows Starting (fake claude shim on PATH)', async () => {
     const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
@@ -525,11 +533,10 @@ describe('memory-worker', () => {
 
     runHookWithPath(MEMORY_WORKER, { cwd: projectDir }, homeDir, shimDir);
 
-    // Poll for the detached worker's log to contain a terminal line.
+    // Wait for the detached worker's final log line, then check it also logged its start.
     // Bounded: 4000ms per attempt, ≤3 attempts total, explicit 15000ms it-timeout.
     const logFile = workerLogPath(projectDir, homeDir, 'background-memory-update');
-    const found = await pollForTerminalLine(logFile, 'Starting (CWD=', 4000, 3);
-    expect(found).toBe(true);
+    await waitForWorkerToFinish(logFile);
     expect(fs.readFileSync(logFile, 'utf-8')).toContain('Starting (CWD=');
   }, 15000);
 
@@ -577,7 +584,7 @@ describe('memory-worker', () => {
     expect(age).toBeGreaterThan(590 * 1000);
   });
 
-  it('a stale repo config memory:false does not switch the worker off', () => {
+  it('a stale repo config memory:false does not switch the worker off', async () => {
     writeFeatureConfig(projectDir, { memory: false });
     writeManifestFeatures(path.join(homeDir, '.devflow'), { memory: true });
     createFakeClaudeShim(shimDir, path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md'));
@@ -588,9 +595,10 @@ describe('memory-worker', () => {
     runHookWithPath(MEMORY_WORKER, { cwd: projectDir }, homeDir, shimDir);
 
     expect(fs.statSync(triggerFile).mtimeMs).toBeGreaterThan(Date.now() - 15000);
-  });
+    await waitForWorkerToFinish(workerLogPath(projectDir, homeDir, 'background-memory-update'));
+  }, 15000);
 
-  it('a manifest without the memory key leaves the worker on (fail-open)', () => {
+  it('a manifest without the memory key leaves the worker on (fail-open)', async () => {
     writeManifestFeatures(path.join(homeDir, '.devflow'), { learning: false });
     createFakeClaudeShim(shimDir, path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md'));
     const triggerFile = path.join(projectDir, '.devflow', 'memory', '.working-memory-last-trigger');
@@ -600,7 +608,8 @@ describe('memory-worker', () => {
     runHookWithPath(MEMORY_WORKER, { cwd: projectDir }, homeDir, shimDir);
 
     expect(fs.statSync(triggerFile).mtimeMs).toBeGreaterThan(Date.now() - 15000);
-  });
+    await waitForWorkerToFinish(workerLogPath(projectDir, homeDir, 'background-memory-update'));
+  }, 15000);
 
   it('hands the spawned worker the machine-root manifest, not one under the project .devflow or an exported DEVFLOW_DIR', async () => {
     // The worker re-reads the switch after spawn against the manifest path it is
@@ -612,8 +621,7 @@ describe('memory-worker', () => {
       writeManifestFeatures(overrideDir, { memory: false });
       writeManifestFeatures(path.join(projectDir, '.devflow'), { memory: false });
       const invokedMarker = path.join(shimDir, 'claude-invoked');
-      fs.writeFileSync(path.join(shimDir, 'claude'), answersVersion(`#!/bin/bash\necho invoked >> "${invokedMarker}"\nexit 1\n`));
-      fs.chmodSync(path.join(shimDir, 'claude'), 0o755);
+      writeFakeExecutable(path.join(shimDir, 'claude'), answersVersion(`#!/bin/bash\necho invoked >> "${invokedMarker}"\nexit 1\n`));
       fs.writeFileSync(
         path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'),
         JSON.stringify({ role: 'user', content: 'hi', ts: 1 }) + '\n' + JSON.stringify({ role: 'assistant', content: 'hey', ts: 2 }) + '\n',
@@ -621,9 +629,13 @@ describe('memory-worker', () => {
 
       runHookWithPath(MEMORY_WORKER, { cwd: projectDir }, homeDir, shimDir, { DEVFLOW_DIR: overrideDir });
 
-      // Bounded: 4000ms per attempt, ≤3 attempts total, explicit 15000ms it-timeout.
-      expect(await pollForTerminalLine(invokedMarker, 'invoked', 4000, 3)).toBe(true);
-      const log = fs.readFileSync(workerLogPath(projectDir, homeDir, 'background-memory-update'), 'utf-8');
+      // One wait, bounded by the 15000ms it-timeout: the worker logs its outcome after claude
+      // exits, and it must finish before afterEach removes the project folder. The marker is
+      // written when claude runs, so it is on disk by then.
+      const logFile = workerLogPath(projectDir, homeDir, 'background-memory-update');
+      await waitForWorkerToFinish(logFile);
+      const log = fs.readFileSync(logFile, 'utf-8');
+      expect(fs.existsSync(invokedMarker), `the worker finished without running claude:\n${log}`).toBe(true);
       expect(log).not.toContain('ABORT: memory disabled');
     } finally {
       fs.rmSync(overrideDir, { recursive: true, force: true });
@@ -678,8 +690,7 @@ describe('background-memory-update: the memory switch (D-FEATURES-NARROW-ONLY)',
     writeFeatureConfig(projectDir, { memory: true });
     // A claude stand-in, so a run that fails to abort can never reach the real one.
     invokedMarker = path.join(shimDir, 'claude-invoked');
-    fs.writeFileSync(path.join(shimDir, 'claude'), answersVersion(`#!/bin/bash\ntouch "${invokedMarker}"\nexit 1\n`));
-    fs.chmodSync(path.join(shimDir, 'claude'), 0o755);
+    writeFakeExecutable(path.join(shimDir, 'claude'), answersVersion(`#!/bin/bash\ntouch "${invokedMarker}"\nexit 1\n`));
   });
 
   afterEach(() => {
@@ -835,6 +846,19 @@ describe('capture-prompt + capture-turn integration', () => {
   });
 });
 
+/**
+ * The budget of every test in the narrowing groups, and of the odd-manifest cases
+ * that hold a narrowing repository file: one hook run plus
+ * one node exec that may meet the syspolicyd wait. A repository file that can
+ * narrow costs a hook run exactly one node exec — resolve-settings.cjs's fold
+ * (D-GATES-FAST-PATH, pinned at one fork by TP-34 in queue-append.test.ts) —
+ * and that exec is intended: the parser, not a shell copy of it, decides the
+ * file. The hook's stdin parse is jq when jq is installed; where it falls back
+ * to node, that exec comes first and the fold then meets a drained queue, so a
+ * test still pays the wait at most once.
+ */
+const NARROWING_TEST_BUDGET_MS = HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS;
+
 // =============================================================================
 // D-FEATURES-NARROW-ONLY — the machine layer, and the retired per-repo keys
 // =============================================================================
@@ -972,7 +996,7 @@ describe('capture hooks read the machine-wide memory and learning switches only'
         expect(exitCode).toBe(0);
         expect(fs.existsSync(memoryQueue())).toBe(false);
         expect(readJsonl(learningQueue())).toHaveLength(rows);
-      });
+      }, NARROWING_TEST_BUDGET_MS);
     }
   }
 
@@ -997,18 +1021,6 @@ describe('capture hooks read the machine-wide memory and learning switches only'
 // TP-34 (AC-30): a repository narrows capture for itself (D-FEATURES-NARROW-ONLY).
 // `features.learning: false` in a committed project.json — or in the worktree's
 // own config.json — silences that queue here while the machine switch stays on.
-
-/**
- * The budget of every test in the two narrowing groups below: one hook run plus
- * one node exec that may meet the syspolicyd wait. A repository file that can
- * narrow costs a hook run exactly one node exec — resolve-settings.cjs's fold
- * (D-GATES-FAST-PATH, pinned at one fork by TP-34 in queue-append.test.ts) —
- * and that exec is intended: the parser, not a shell copy of it, decides the
- * file. The hook's stdin parse is jq when jq is installed; where it falls back
- * to node, that exec comes first and the fold then meets a drained queue, so a
- * test still pays the wait at most once.
- */
-const NARROWING_TEST_BUDGET_MS = HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS;
 
 describe('capture hooks honour a repository narrowing (D-FEATURES-NARROW-ONLY)', { timeout: NARROWING_TEST_BUDGET_MS }, () => {
   let projectDir: string;
