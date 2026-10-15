@@ -25,7 +25,7 @@ import { describe, it, expect } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { DEVFLOW_PLUGINS, getAllSkillNames, getAllAgentNames, getAllRuleNames, getAllCommandNames } from '../src/core/plugins.js';
-import { resolveAgentSource } from './helpers.js';
+import { BUILT_IN_SPAWN_TYPES, resolveAgentSource } from './helpers.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const ASSETS_DIR = path.join(ROOT, 'src', 'assets');
@@ -296,25 +296,46 @@ describe('Guard 4 (command integrity): declared commands ↔ source files', () =
 //
 // Explore is a registered agent like any other: devflow ships an agent named Explore that
 // overrides the Claude Code built-in, so it is declared and checked in both directions.
+// Plan is the other built-in, and devflow ships no agent file for it: BUILT_IN_SPAWN_TYPES admits it
+// by exact name on the forward arm only (spawnedRegistryNames), and the reverse arm is unchanged.
 // Fails LOUD when dist/commands/ is absent — a silent skip is not a guard.
+
+// Matches both Agent(subagent_type="Name") and subagent_type: "Name" syntax.
+const SPAWN_RE = /subagent_type[=:]\s*"([^"]+)"/gi;
+
+// Also matches agentType: "Name" (used by dynamic-* Workflow commands).
+// Harvesting this signal lets Guard 5 verify dynamic plugin agents without a blanket exemption.
+const AGENT_TYPE_RE = /agentType:\s*"([^"]+)"/gi;
+
+/**
+ * Normalize an agent name for comparison across naming conventions:
+ *   - Registry uses filenames:   debug, code
+ *   - subagent_type uses frontmatter name field: Debug, Code
+ * Strip hyphens and lowercase so both representations collapse to the same key.
+ */
+const normalize = (name: string) => name.replace(/-/g, '').toLowerCase();
+
+/**
+ * Named collector (pure): the normalized agent names a compiled command spawns, by `subagent_type` or
+ * `agentType`. A `subagent_type` that byte-equals an entry of BUILT_IN_SPAWN_TYPES is skipped BEFORE
+ * `normalize`: a built-in has no agent file, so no plugin declares it. The compare is on the raw text, so
+ * `plan` and `general-purpose` still reach `normalize` and are reported as undeclared. The `agentType`
+ * harvest has no such exemption: a dynamic host names roster agents only.
+ */
+export function spawnedRegistryNames(content: string): Set<string> {
+  const spawned = new Set<string>();
+  for (const m of content.matchAll(SPAWN_RE)) {
+    if (BUILT_IN_SPAWN_TYPES.includes(m[1])) continue;
+    spawned.add(normalize(m[1]));
+  }
+  for (const m of content.matchAll(AGENT_TYPE_RE)) {
+    spawned.add(normalize(m[1]));
+  }
+  return spawned;
+}
 
 describe('Guard 5 (build-gated): spawned agents ↔ plugin agent declarations', () => {
   const distCommandsDir = path.join(ROOT, 'dist', 'commands');
-
-  // Matches both Agent(subagent_type="Name") and subagent_type: "Name" syntax.
-  const SPAWN_RE = /subagent_type[=:]\s*"([^"]+)"/gi;
-
-  // Also matches agentType: "Name" (used by dynamic-* Workflow commands).
-  // Harvesting this signal lets Guard 5 verify dynamic plugin agents without a blanket exemption.
-  const AGENT_TYPE_RE = /agentType:\s*"([^"]+)"/gi;
-
-  /**
-   * Normalize an agent name for comparison across naming conventions:
-   *   - Registry uses filenames:   debug, code
-   *   - subagent_type uses frontmatter name field: Debug, Code
-   * Strip hyphens and lowercase so both representations collapse to the same key.
-   */
-  const normalize = (name: string) => name.replace(/-/g, '').toLowerCase();
 
   it('spawned subagent_types are declared, and declared agents are spawned (fail-loud when dist absent)', async () => {
     const distExists = await fs.access(distCommandsDir).then(() => true).catch(() => false);
@@ -352,13 +373,7 @@ describe('Guard 5 (build-gated): spawned agents ↔ plugin agent declarations', 
       // Collect all spawned agent names (normalized, deduplicated).
       // Harvest both subagent_type= / subagent_type: AND agentType: so that dynamic-*
       // Workflow commands (which use agentType) are covered without a blanket exemption.
-      const spawned = new Set<string>();
-      for (const m of content.matchAll(SPAWN_RE)) {
-        spawned.add(normalize(m[1]));
-      }
-      for (const m of content.matchAll(AGENT_TYPE_RE)) {
-        spawned.add(normalize(m[1]));
-      }
+      const spawned = spawnedRegistryNames(content);
 
       // If the command uses no known spawn syntax at all, skip both checks.
       if (spawned.size === 0) continue;
@@ -403,6 +418,28 @@ describe('Guard 5 (build-gated): spawned agents ↔ plugin agent declarations', 
       violations,
       `Agent spawn mismatches (fix agents[] in src/core/plugins.ts):\n  ${violations.join('\n  ')}`,
     ).toHaveLength(0);
+  });
+
+  it('known-bad probes: the built-in Plan spawn yields no registry name; plan and general-purpose do', () => {
+    // Plan is a Claude Code built-in with no agent file, so no plugin declares it.
+    expect(BUILT_IN_SPAWN_TYPES).toEqual(['Plan']);
+    const harvest = (text: string): string[] => [...spawnedRegistryNames(text)];
+
+    // Controls: a roster spawn is harvested, in both spawn syntaxes, so an empty result below means "skipped".
+    expect(harvest('Agent(subagent_type="Explore"):')).toEqual(['explore']);
+    expect(harvest('agent(`go`, { agentType: "Fix" })')).toEqual(['fix']);
+
+    // The built-in is skipped on its exact name, in the fenced and the one-line prose spawn.
+    expect(harvest('Agent(subagent_type="Plan"):')).toEqual([]);
+    expect(harvest('Spawn 3 `Agent(subagent_type="Plan")` agents')).toEqual([]);
+
+    // Anything near it is harvested, so Guard 5 reports it as an undeclared name.
+    expect(harvest('Agent(subagent_type="plan"):')).toEqual(['plan']);
+    expect(harvest('Agent(subagent_type="PLAN"):')).toEqual(['plan']);
+    expect(harvest('Agent(subagent_type="general-purpose"):')).toEqual(['generalpurpose']);
+
+    // The exemption is for subagent_type only: a dynamic host naming Plan through agentType is still harvested.
+    expect(harvest('agent(`go`, { agentType: "Plan" })')).toEqual(['plan']);
   });
 });
 
