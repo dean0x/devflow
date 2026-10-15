@@ -56,8 +56,10 @@
  * WHAT A CLEAN RESULT DOES NOT COVER: a path assembled from parts
  * (`$HOME` + `/.claude`), a variable holding the literal, an absolute path spelt
  * with the user's own home (`/Users/x/.claude`), an empty `HOME` (the installer
- * refuses it, where the sanctioned line yields `/.claude`; a known-divergence test
- * pins the line's value), and anything outside the corpus below. Of the hook, only
+ * refuses it, where the sanctioned line yields `/.claude`), an unset `HOME` (the
+ * installer falls back to the system user's home directory, where the sanctioned
+ * line yields `/.claude`; a known-divergence test for each case pins the line's
+ * value), and anything outside the corpus below. Of the hook, only
  * the compaction directive (the text of `COMPACT_SECTION`) is scanned, because the
  * model follows it as text; the hook's own `case` tests are code, and they stay out
  * of scope. Other hooks and the TypeScript CLI resolve the directory in code
@@ -396,9 +398,10 @@ function expectReported(host: string, addition: string, rule: string): void {
   expect(defects.filter(d => d.rule === rule && d.file === host), `${JSON.stringify(addition)} in ${host} is not reported by rule ${rule}`).not.toEqual([])
 }
 
-/** The directory the sanctioned line prints in a clean shell holding `HOME` and, unless undefined, `CLAUDE_CONFIG_DIR`. */
-function sanctionedLineDirectory(home: string, configured: string | undefined): string {
-  const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, HOME: home }
+/** The directory the sanctioned line prints in a clean shell holding, unless undefined, `HOME` and `CLAUDE_CONFIG_DIR`. */
+function sanctionedLineDirectory(home: string | undefined, configured: string | undefined): string {
+  const env: NodeJS.ProcessEnv = { PATH: process.env.PATH }
+  if (home !== undefined) env.HOME = home
   if (configured !== undefined) env.CLAUDE_CONFIG_DIR = configured
   return spawnSync('bash', ['-c', `${SANCTIONED_RESOLUTION} printf '%s' "$d"`], { encoding: 'utf-8', env }).stdout
 }
@@ -527,6 +530,14 @@ describe('no prompt reaches the Claude directory outside the CLAUDE_CONFIG_DIR r
     // The installer reads HOME and, with HOME empty, Node reports an empty home, so getHomeDirectory throws.
     // The throw is platform-dependent (tests/paths.test.ts), so only the line's value is pinned here.
     expect(sanctionedLineDirectory('', undefined)).toBe('/.claude')
+  })
+
+  it('known divergence, an unset HOME: the sanctioned line yields /.claude where the installer falls back to the system user home directory', () => {
+    // The installer reads HOME and, with HOME absent, takes the home directory Node reports for the system user
+    // (readHomeDirectory), so it resolves under a real home. The line has no such fallback and expands the absent
+    // HOME to nothing. The installer's value depends on the machine, so only the line's value is pinned here.
+    // The environment holds PATH alone: HOME and CLAUDE_CONFIG_DIR are both absent, whatever the parent process holds.
+    expect(sanctionedLineDirectory(undefined, undefined)).toBe('/.claude')
   })
 
   it('red probes: a second sanctioned line, a language skill Read and the read moved out of the gate-level block are each reported', () => {
