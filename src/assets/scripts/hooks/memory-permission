@@ -13,7 +13,7 @@
 #   memory_staged_remove    the guarded removal of a folder or a link at the staged path
 #   memory_result_summary   the fixed log line for a captured JSON result
 #   memory_notice_*         the one-time notice: the worker writes it, a session start reads it
-#   memory_denied_seen      the two-in-a-row count that raises the `denied` notice
+#   memory_denied_seen      the count of denied runs that raises the `denied` notice
 #
 # Source it after resolve-project-root (it needs df_no_symlink_below and df_file_below)
 # and, for memory_result_summary, after json-parse. log() is used when the caller has one.
@@ -28,7 +28,7 @@
 
 # The reasons a notice can carry, and the file each one uses beside the memory files:
 #   path    the project path cannot carry the rule, or the staged path is unusable
-#   denied  Claude Code refused the worker's write in two runs in a row
+#   denied  Claude Code refused the worker's write in two runs with no successful update between them
 MEMORY_NOTICE_REASONS="path denied"
 
 # path_occupied <path> — returns 0 when a file, a folder or a link stands on <path>, and 1
@@ -282,7 +282,8 @@ memory_notice_clear() {
 # memory_denied_seen <memory dir> <root> — records one run that Claude Code refused the
 # worker's write in. The first leaves a marker; a second, with the marker still there,
 # raises the `denied` notice. A run that swapped the memory in clears both
-# (memory_notice_clear denied), so only two denied runs in a row count.
+# (memory_notice_clear denied), so only two denied runs with no successful update between
+# them count.
 memory_denied_seen() {
   local _dir="${1:-}" _root="${2:-}" _mark
   [ -d "$_dir" ] || return 0
@@ -295,37 +296,46 @@ memory_denied_seen() {
   return 0
 }
 
+# memory_notice_text <reason> <log file> — sets MEMORY_NOTICE_TEXT to the message for a
+# reason, naming <log file>, and to "" for a reason it has no message for. Always returns 0.
+memory_notice_text() {
+  local _reason="${1:-}" _logfile="${2:-}"
+  local _where="The worker log is .background-memory-update.log under ~/.devflow/logs/, in the folder for the session that ran it. For this session: ${_logfile}"
+  MEMORY_NOTICE_TEXT=""
+  case "$_reason" in
+    path)
+      MEMORY_NOTICE_TEXT="Devflow: working memory is not updating because the worker cannot write its staged file at this project path. ${_where}"
+      ;;
+    denied)
+      MEMORY_NOTICE_TEXT="Devflow: working memory is not updating because Claude Code refused the worker's write in two runs with no successful update between them. ${_where}"
+      ;;
+  esac
+  return 0
+}
+
 # memory_notice_read <memory dir> <root> <log file> — builds the message for each pending
 # notice and moves each to its `.shown` marker, so a reason is shown once. Sets
 # MEMORY_NOTICE_MESSAGE (empty when nothing is pending), joined by a space when more
 # than one reason is pending. A notice is read only where no link sits on its path; one
 # whose content does not fit its reason is moved to `.shown` unshown and logged.
-# <log file> is named in the `path` and `denied` messages. Always returns 0.
+# <log file> is named in the messages (memory_notice_text). Always returns 0.
 memory_notice_read() {
   local _dir="${1:-}" _root="${2:-}" _logfile="${3:-}"
-  local _reason _file _line _tag _extra _text _ok
+  local _reason _file _line _tag _extra _text
   MEMORY_NOTICE_MESSAGE=""
   for _reason in $MEMORY_NOTICE_REASONS; do
     _file="$_dir/.worker-notice-$_reason"
     df_file_below "$_root" "$_file" || continue
-    _line=""; _tag=""; _extra=""; _text=""; _ok=""
+    _line=""; _tag=""; _extra=""; _text=""
     # stderr is redirected before stdin, so a notice that a concurrent session start moved
     # away since the check above fails the open in silence.
     IFS= read -r -n 200 _line 2>/dev/null < "$_file" || true
     read -r _tag _extra <<< "$_line" || true
     if [ "$_tag" = "$_reason" ] && [ -z "$_extra" ]; then
-      case "$_reason" in
-        path)
-          _text="Devflow: working memory is not updating because the worker cannot write its staged file at this project path. The log names the cause: ${_logfile}"
-          _ok="yes"
-          ;;
-        denied)
-          _text="Devflow: working memory is not updating because Claude Code refused the worker's write in two runs in a row. The log has the details: ${_logfile}"
-          _ok="yes"
-          ;;
-      esac
+      memory_notice_text "$_reason" "$_logfile"
+      _text="$MEMORY_NOTICE_TEXT"
     fi
-    if [ -n "$_ok" ]; then
+    if [ -n "$_text" ]; then
       if [ -n "$MEMORY_NOTICE_MESSAGE" ]; then
         MEMORY_NOTICE_MESSAGE="${MEMORY_NOTICE_MESSAGE} ${_text}"
       else

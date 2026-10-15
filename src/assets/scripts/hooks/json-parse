@@ -118,9 +118,9 @@ json_extract_cwd_prompt() {
 # D-SYSTEMMESSAGE-ENVELOPE: the optional second argument is a message shown to the
 # user, carried in the top-level `systemMessage` key beside (never inside)
 # `hookSpecificOutput`; it does not enter the model's context. With ONE argument the
-# envelope is exactly what every existing caller has always received, byte for byte
-# (ensure-proxy, session-start-orchestrator, session-start-memory and Sections 1-5 of
-# session-start-context pass one). With two:
+# envelope holds the context alone, byte for byte (ensure-proxy and
+# session-start-orchestrator pass one; session-start-context and session-start-memory
+# pass two). With two:
 #   - a message and a context  -> both keys, hookSpecificOutput first;
 #   - a message and no context -> `systemMessage` alone, with NO hookSpecificOutput key;
 #   - an empty message         -> the one-argument envelope for that context.

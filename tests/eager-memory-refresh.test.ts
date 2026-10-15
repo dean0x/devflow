@@ -4797,7 +4797,7 @@ describe('S30: a notice from the memory worker is shown once at session start (A
     expect(sessionStart().raw, 'the same refusal again stays quiet').toBe('');
   });
 
-  it('two denied runs in a row raise the denied notice once; one denied run raises nothing', () => {
+  it('two denied runs with no update between them raise the denied notice once; one denied run raises nothing', () => {
     runWorkerOnce(HEALTHY_VERSION, { resultJson: DENIED_RESULT, skipStagedWrite: true });
     expect(fs.existsSync(noticePath('denied')), 'one denied run raises nothing').toBe(false);
     expect(sessionStart().raw).toBe('');
@@ -4818,7 +4818,7 @@ describe('S30: a notice from the memory worker is shown once at session start (A
     seedQueue(projectDir);
     runWorkerOnce(HEALTHY_VERSION, { resultJson: DENIED_RESULT, skipStagedWrite: true });
 
-    expect(fs.existsSync(noticePath('denied')), 'denied, good, denied is not two in a row').toBe(false);
+    expect(fs.existsSync(noticePath('denied')), 'denied, updated, denied is not two denied runs with no update between them').toBe(false);
   });
 
   it('each reason is shown once on its own: a shown path notice does not hide a later denied notice', () => {

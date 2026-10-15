@@ -717,6 +717,7 @@ describe('memory-permission: the one-time notice', () => {
     const first = read('/home/u/.devflow/logs/p/.background-memory-update.log');
     expect(first).toContain('project path');
     expect(first).toContain('/home/u/.devflow/logs/p/.background-memory-update.log');
+    expect(first, 'it names the folder the log sits in').toContain('under ~/.devflow/logs/, in the folder for the session that ran it');
     expect(fs.existsSync(pending('path')), 'moved').toBe(false);
     expect(fs.existsSync(shown('path')), 'shown marker').toBe(true);
 
@@ -745,6 +746,7 @@ describe('memory-permission: the one-time notice', () => {
     run('memory_notice_write "$MEM" "$ROOT" denied');
     const second = read('/home/u/.devflow/logs/p/.background-memory-update.log');
     expect(second).toContain('refused the worker');
+    expect(second, 'it states the count as it is kept').toContain('two runs with no successful update between them');
     expect(second).toContain('/home/u/.devflow/logs/p/.background-memory-update.log');
     expect(second).not.toContain('project path');
   });
@@ -861,7 +863,7 @@ describe('memory-permission: the one-time notice', () => {
     }
   });
 
-  it('raises the denied notice on the second denied run in a row, and a clear resets the count', () => {
+  it('raises the denied notice on the second denied run with no update between, and a clear resets the count', () => {
     run('memory_denied_seen "$MEM" "$ROOT"');
     expect(fs.existsSync(pending('denied')), 'one denied run raises nothing').toBe(false);
     expect(fs.existsSync(path.join(memory, '.worker-denied-once')), 'it leaves its marker').toBe(true);
