@@ -77,6 +77,7 @@ BASE=''
 SELF_ABS=''
 SELF_REL=''
 FLAGS=''
+PC_READY=0
 SEEN=' '
 ANY_ENABLED=0
 
@@ -107,8 +108,20 @@ DROPPED_N=0
 
 # ---- Exit handling ----
 
-# One error, one reason from the closed set. Nothing else reaches stdout.
+# The pack-changed lines, once they are built. An error exit prints them too, so
+# a branch that breaks its own pack still shows that it changed the pack.
+report_pack_changed() {
+  if [ "$PC_READY" = 1 ]; then
+    PC_READY=0
+    cat "$TMP/pc.out" 2>/dev/null
+  fi
+  return 0
+}
+
+# One error, one reason from the closed set. Only the pack-changed lines come
+# before it on stdout.
 die_error() {
+  report_pack_changed
   printf 'LINT_PACK: error %s\n' "$1"
   DONE=1
   exit 2
@@ -117,11 +130,12 @@ die_error() {
 # Remove the temp dir. A run that ends without its result line is a git-failed.
 on_exit() {
   local rc=$?
-  if [ -n "$TMP" ]; then rm -rf "$TMP"; fi
   if [ "$DONE" != 1 ]; then
+    report_pack_changed
     printf 'LINT_PACK: error git-failed\n'
-    exit 2
+    rc=2
   fi
+  if [ -n "$TMP" ]; then rm -rf "$TMP"; fi
   exit "$rc"
 }
 trap on_exit EXIT
@@ -319,7 +333,7 @@ classify_path() {
   FLAGS='='
   if [ "$1" = '.lint-pack.conf' ]; then FLAGS="${FLAGS}OP"; fi
   if [ -n "$SELF_REL" ] && [ "$1" = "$SELF_REL" ]; then FLAGS="${FLAGS}OP"; fi
-  if [ "$1" = '.gitattributes' ]; then FLAGS="${FLAGS}P"; fi
+  case "$1" in .gitattributes | */.gitattributes) FLAGS="${FLAGS}P" ;; esac
   if glob_match "$1" ${STALE_SOURCE[@]+"${STALE_SOURCE[@]}"}; then FLAGS="${FLAGS}S"; fi
   if glob_match "$1" ${STALE_DOC[@]+"${STALE_DOC[@]}"} ${STALE_HELP[@]+"${STALE_HELP[@]}"}; then FLAGS="${FLAGS}D"; fi
   if glob_match "$1" ${STALE_ALLOW[@]+"${STALE_ALLOW[@]}"}; then FLAGS="${FLAGS}A"; fi
@@ -359,14 +373,19 @@ build_diffmap() {
   build_map "$TMP/dm.q" "$TMP/dm.z" "$TMP/dm.map" 0
 }
 
-# The pack files the branch changed, sorted: the config, this script and
+# The pack files the branch changed, sorted: the config, this script and any
 # .gitattributes by name, package.json and Makefile when a changed line names
-# lint-pack. A config renamed away or deleted shows as its old path.
+# lint-pack. A config renamed away or deleted shows as its old path. The lines
+# need only the changed paths and fixed names, so they are built before the
+# config is read and every later error exit prints them.
 pack_changed() {
   command awk -F"$TAB" 'index($3, "P") > 0 { print $1 }' "$TMP/dm.map" >"$TMP/pc.txt" || die_error git-failed
   g diff "${DIFF_PINS[@]}" --no-renames --name-only -Glint-pack --end-of-options "$BASE" HEAD -- \
     package.json Makefile >>"$TMP/pc.txt" 2>/dev/null || die_error git-failed
   command sort -u "$TMP/pc.txt" >"$TMP/pc.sorted" || die_error git-failed
+  command sed 's/^/pack-changed /' "$TMP/pc.sorted" >"$TMP/pc.lines" || die_error git-failed
+  bound_lines "$TMP/pc.lines" "$TMP/pc.out"
+  PC_READY=1
 }
 
 # One -U0 diff, split by an awk pass into the streams each check reads.
@@ -490,9 +509,6 @@ emit() {
   more=0
   if [ "$total" -gt "$MAX_RECORDS" ]; then more=$((total - MAX_RECORDS)); fi
 
-  command sed 's/^/pack-changed /' "$TMP/pc.sorted" >"$TMP/pc.lines" || die_error git-failed
-  bound_lines "$TMP/pc.lines" "$TMP/pc.out"
-
   cat "$TMP/sb1.txt" "$TMP/sb2.txt" | command sort -u >"$TMP/sb.sorted" || die_error git-failed
   sb_total=$(count_lines "$TMP/sb.sorted") || die_error git-failed
   command head -n "$MAX_BINARY" "$TMP/sb.sorted" | command sed 's/^/skipped-binary /' >"$TMP/sb.lines" || die_error git-failed
@@ -530,7 +546,7 @@ emit() {
 write_awk_programs() {
   # Split the -U0 diff. A hunk header gives the exact line counts, so a content
   # line that starts with "--- " or "+++ " is never read as a file header.
-  cat >"$TMP/split.awk" <<'AWK'
+  cat >"$TMP/split.awk" <<'AWK' || die_error git-failed
 function flagsof(p) { return (p in FL) ? FL[p] : "=" }
 function unprefix(p) {
   sub(/\t$/, "", p)
@@ -591,7 +607,7 @@ BEGIN {
 AWK
 
   # Keep safe symbols of the minimum length; count the unsafe ones.
-  cat >"$TMP/safe.awk" <<'AWK'
+  cat >"$TMP/safe.awk" <<'AWK' || die_error git-failed
 {
   t = $0
   if (length(t) < MIN) next
@@ -604,7 +620,7 @@ AWK
   # Read "HEAD:<path>:<line>:<symbol>" lines. A path may hold colons, so the
   # split is the first ":<digits>:" whose rest is a known symbol. A hit in a
   # code file kills the symbol; a hit in a doc or help file is a candidate.
-  cat >"$TMP/hits.awk" <<'AWK'
+  cat >"$TMP/hits.awk" <<'AWK' || die_error git-failed
 function flagsof(p) { return (p in FL) ? FL[p] : "=" }
 BEGIN {
   while ((getline l < TOKENS) > 0) TOK[l] = 1
@@ -654,7 +670,7 @@ END {
 AWK
 
   # Keep a diagnostic "<path>:<line>:..." that lies inside an added hunk.
-  cat >"$TMP/size.awk" <<'AWK'
+  cat >"$TMP/size.awk" <<'AWK' || die_error git-failed
 BEGIN {
   while ((getline l < MAP) > 0) {
     split(l, f, "\t")
@@ -694,6 +710,22 @@ AWK
 
 # ---- Main ----
 
+# The config is the blob at HEAD, never the work tree. The tree says whether it
+# exists, so a blob that will not read is git-failed and never no-config. Only a
+# regular file is a config. The map is rebuilt once the globs are known.
+load_config() {
+  local mode rest
+  g ls-tree HEAD -- .lint-pack.conf >"$TMP/conf.entry" 2>/dev/null || die_error git-failed
+  [ -s "$TMP/conf.entry" ] || return 0
+  IFS=' ' read -r mode rest <"$TMP/conf.entry" || die_error git-failed
+  case "$mode" in 100644 | 100755) ;; *) cfg_fail 0 ;; esac
+  g cat-file blob HEAD:.lint-pack.conf >"$TMP/conf" 2>/dev/null || die_error git-failed
+  read_config
+  finish_config
+  validate_patterns
+  build_map "$TMP/dm.q" "$TMP/dm.z" "$TMP/dm.map" 0
+}
+
 main() {
   local top rc
   [ "$#" -eq 1 ] || die_error usage
@@ -714,12 +746,10 @@ main() {
   TMP=$(mktemp -d "${TMPDIR:-/tmp}/lint-pack.XXXXXX") || die_error git-failed
   case "$SELF_ABS" in "$ROOT"/*) SELF_REL=${SELF_ABS#"$ROOT"/} ;; esac
 
-  # The config is the blob at HEAD, never the work tree. No blob: no config.
-  if g cat-file blob HEAD:.lint-pack.conf >"$TMP/conf" 2>/dev/null; then
-    read_config
-    finish_config
-    validate_patterns
-  fi
+  # The pack-changed lines come before the config, so an error exit shows them.
+  build_diffmap
+  pack_changed
+  load_config
 
   : >"$TMP/rec.stale"
   : >"$TMP/rec.ids"
@@ -732,8 +762,6 @@ main() {
   : >"$TMP/ad2.meta"
   : >"$TMP/ranges.tsv"
   write_awk_programs
-  build_diffmap
-  pack_changed
 
   if [ "$ANY_ENABLED" = 1 ]; then
     diff_main

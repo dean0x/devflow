@@ -249,6 +249,14 @@ function expectError(res: Run, reason: string): void {
   expectRun(res, `LINT_PACK: error ${reason}\n`, 2);
 }
 
+/** Delete one loose object, as a corrupt or partial object store would. `spec` is any git object name. */
+function removeObject(r: Repo, spec: string): void {
+  const oid = r.git('rev-parse', spec).trim();
+  const object = path.join(r.dir, '.git', 'objects', oid.slice(0, 2), oid.slice(2));
+  fs.chmodSync(object, 0o644);
+  fs.rmSync(object);
+}
+
 /** Two-commit repo: `baseFiles` at the base (with the script and `conf`), `headFiles` at HEAD. */
 function simple(conf: string | undefined, baseFiles: Files, headFiles: Files): { r: Repo; base: string; head: string } {
   const r = newRepo();
@@ -474,6 +482,27 @@ describe('lint-pack template: error states', () => {
     fs.chmodSync(object, 0o644);
     fs.rmSync(object);
     expectError(r.run(base), 'git-failed');
+  });
+
+  it('reports git-failed, never no-config, when the config blob at HEAD will not read', () => {
+    const { r, base } = simple(IDS_CONF, { 'src/a.ts': 'x\n' }, { 'src/a.ts': 'y\n' });
+    removeObject(r, 'HEAD:.lint-pack.conf');
+    const res = r.run(base);
+    expectError(res, 'git-failed');
+    expect(res.stderr).toBe('');
+  });
+
+  it('reports bad-config 0 when .lint-pack.conf at HEAD is a symbolic link', () => {
+    const r = newRepo();
+    fs.symlinkSync('src/a.ts', path.join(r.dir, '.lint-pack.conf'));
+    const base = r.commit({ ...pack(), 'src/a.ts': 'ids.enabled=true\n' }, 'base');
+    r.commit({ 'src/a.ts': 'ids.enabled=false\n' }, 'head');
+    expectError(r.run(base), 'bad-config 0');
+  });
+
+  it('reports bad-config 0 when .lint-pack.conf at HEAD is a directory', () => {
+    const { r, base } = simple(undefined, { '.lint-pack.conf/ids.conf': IDS_CONF, 'src/a.ts': 'x\n' }, { 'src/a.ts': 'y\n' });
+    expectError(r.run(base), 'bad-config 0');
   });
 
   it.each([
@@ -1007,6 +1036,21 @@ describe('lint-pack template: pack-changed lines', () => {
     expectRun(r.run(base), expected, 0);
   });
 
+  it('lists a .gitattributes in any directory and ignores near-miss names', () => {
+    const { r, base } = packFixture();
+    r.commit(
+      {
+        'docs/.gitattributes': '*.md binary\n',
+        'a/b/.gitattributes': '*.png binary\n',
+        'docs/x.gitattributes': 'not a pack file\n',
+        'docs/.gitattributes.bak': 'not a pack file\n',
+        'gitattributes/notes.txt': 'not a pack file\n',
+      },
+      'nested attributes',
+    );
+    expectRun(r.run(base), 'pack-changed a/b/.gitattributes\npack-changed docs/.gitattributes\nLINT_PACK: clean\n', 0);
+  });
+
   it('skips package.json and Makefile when no changed line names lint-pack', () => {
     const { r, base } = packFixture();
     r.commit({ 'package.json': PACKAGE('bash scripts/lint-pack.sh', 'vitest run'), Makefile: `${MAKEFILE('@bash scripts/lint-pack.sh $(BASE)')}build:\n\t@true\n` }, 'unrelated');
@@ -1048,6 +1092,108 @@ describe('lint-pack template: pack-changed lines', () => {
     const { r, base } = packFixture();
     fs.appendFileSync(path.join(r.dir, SCRIPT_IN_REPO), '# not committed\n');
     expectRun(r.run(base), 'LINT_PACK: clean\n', 0);
+  });
+});
+
+// ── pack-changed on error exits ──────────────────────────────────────────────
+
+describe('lint-pack template: pack-changed lines on error exits', () => {
+  it('prints pack-changed before bad-config when the branch broke its own config', () => {
+    const { r, base } = simple(IDS_CONF, { 'src/a.ts': 'x\n' }, { '.lint-pack.conf': `${IDS_CONF}bogus.key=1\n` });
+    const res = r.run(base);
+    expectRun(res, 'pack-changed .lint-pack.conf\nLINT_PACK: error bad-config 4\n', 2);
+    expect(res.stderr).toBe('');
+  });
+
+  it('lists every pack file the branch changed, sorted, before a bad-pattern error', () => {
+    const { r, base } = simple(
+      IDS_CONF,
+      { 'src/a.ts': 'x\n' },
+      {
+        '.lint-pack.conf': cfg('ids.enabled=true', 'ids.pattern=bad a{2,1}'),
+        [SCRIPT_IN_REPO]: Buffer.concat([scriptText(), Buffer.from('# local tweak\n')]),
+        '.gitattributes': '*.png binary\n',
+        'docs/.gitattributes': '*.md binary\n',
+      },
+    );
+    const expected = [
+      'pack-changed .gitattributes',
+      'pack-changed .lint-pack.conf',
+      'pack-changed docs/.gitattributes',
+      'pack-changed scripts/lint-pack.sh',
+      'LINT_PACK: error bad-pattern bad',
+      '',
+    ].join('\n');
+    expectRun(r.run(base), expected, 2);
+  });
+
+  it('prints pack-changed before linter-missing when the branch adds the check and the linter', () => {
+    const { r, base } = simple(
+      undefined,
+      { 'src/a.ts': 'x\n' },
+      { '.lint-pack.conf': cfg('size.enabled=true', 'size.arg=tools/not-there') },
+    );
+    expectRun(r.run(base), 'pack-changed .lint-pack.conf\nLINT_PACK: error linter-missing\n', 2);
+  });
+
+  it('prints pack-changed before git-failed when the config blob the branch wrote will not read', () => {
+    const { r, base } = simple(IDS_CONF, { 'src/a.ts': 'x\n' }, { '.lint-pack.conf': `${IDS_CONF}# edited\n` });
+    removeObject(r, 'HEAD:.lint-pack.conf');
+    expectRun(r.run(base), 'pack-changed .lint-pack.conf\nLINT_PACK: error git-failed\n', 2);
+  });
+
+  it('prints only the error when the arguments or the base fail before any diff is read', () => {
+    const { r, base } = simple(IDS_CONF, { 'src/a.ts': 'x\n' }, { '.lint-pack.conf': `${IDS_CONF}bogus.key=1\n` });
+    expectError(r.run('0'.repeat(40)), 'bad-base');
+    expectError(r.run(base, { args: [] }), 'usage');
+  });
+
+  it('prints only the error line when the branch changed no pack file', () => {
+    const { r, base } = simple(`${IDS_CONF}bogus.key=1\n`, { 'src/a.ts': 'x\n' }, { 'src/a.ts': 'y\n' });
+    expectError(r.run(base), 'bad-config 4');
+  });
+});
+
+// ── The awk program writes ───────────────────────────────────────────────────
+
+/** Lines that open an awk program heredoc without the checked `cat` write the script requires. */
+function uncheckedAwkWrites(text: string): string[] {
+  const checked = /^\s*cat >"\$TMP\/[a-z]+\.awk" <<'AWK' \|\| die_error git-failed$/;
+  return text.split('\n').filter(line => line.includes("<<'AWK'") && !checked.test(line));
+}
+
+describe('lint-pack template: the awk program writes', () => {
+  it('checks every awk program write, so a failed write is an error and never an empty program', () => {
+    const text = fs.readFileSync(SCRIPT, 'utf8');
+    const openers = text.split('\n').filter(line => line.includes("<<'AWK'"));
+    const programs = openers.map(line => /\$TMP\/([a-z]+\.awk)/.exec(line)?.[1]);
+    expect(programs.sort()).toEqual(['hits.awk', 'safe.awk', 'size.awk', 'split.awk']);
+    expect(uncheckedAwkWrites(text)).toEqual([]);
+  });
+
+  it('flags an unchecked awk program write (known-bad probe of the same collector)', () => {
+    const bad = ['write() {', '  cat >"$TMP/split.awk" <<\'AWK\'', 'BEGIN {}', 'AWK', '}'].join('\n');
+    expect(uncheckedAwkWrites(bad)).toEqual(['  cat >"$TMP/split.awk" <<\'AWK\'']);
+    const good = bad.replace("<<'AWK'", "<<'AWK' || die_error git-failed");
+    expect(uncheckedAwkWrites(good)).toEqual([]);
+  });
+
+  it.each([1, 2, 3, 4])('reports git-failed when write %i of the four awk programs fails', failAt => {
+    const { r, base } = fullFixture();
+    const bin = tempDir('lint-pack-bin-');
+    const counter = path.join(bin, 'calls');
+    const stub = [
+      '#!/bin/sh',
+      `printf x >>"${counter}"`,
+      `n=$(wc -c <"${counter}" | tr -d ' ')`,
+      `if [ "$n" = "${failAt}" ]; then exit 1; fi`,
+      'exec /bin/cat "$@"',
+      '',
+    ].join('\n');
+    fs.writeFileSync(path.join(bin, 'cat'), stub, { mode: 0o755 });
+    const res = r.run(base, { env: { PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}` } });
+    expectError(res, 'git-failed');
+    expect(res.stderr).toBe('');
   });
 });
 
