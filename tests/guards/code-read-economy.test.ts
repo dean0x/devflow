@@ -76,7 +76,7 @@ const MIN_BODY_BYTES = 3000
 
 const READ_ONCE_MARKER = '**Read once**'
 const READ_ONCE_FRAGMENTS = ['Never re-read an unchanged file', '`grep -n`', '`offset`', '`limit`'] as const
-const SPLIT_FRAGMENTS = ['>= 10 files', '>= 7 steps', '<= 5 files', '<= 6 steps'] as const
+const SPLIT_FRAGMENTS = ['>= 10 files', '>= 7 steps', '<= 5 files', '<= 6 steps', 'the Subtask Breakdown section'] as const
 const TRIGGER_FRAGMENTS = ['>= 10 files', '>= 7 steps'] as const
 
 /** The #453 records this header must name, each with one key number of its evidence. */
@@ -447,6 +447,10 @@ describe('a long plan splits into sequential phases and a run with no plan is on
     const percent = text.replace('- **SINGLE_CODE_AGENT**: every other plan.', '- **SINGLE_CODE_AGENT** (~80%): every other plan.')
     expect(percent, 'the seed must land').not.toBe(text)
     expect(collectSplitRuleDefects(percent)).toEqual(['the reference still carries a percent label'])
+
+    const noSection = text.replace(', and give the phases as the Subtask Breakdown section', '')
+    expect(noSection, 'the seed must land').not.toBe(text)
+    expect(collectSplitRuleDefects(noSection)).toEqual(['the SEQUENTIAL_CODE_AGENTS rule does not state "the Subtask Breakdown section"'])
 
     const noColumns = text.replace('| Files | Steps |', '| Files |')
     expect(noColumns, 'the seed must land').not.toBe(text)
