@@ -854,13 +854,14 @@ export const INFORMATIONAL_OP_MENTIONS: readonly InformationalOpMention[] = [
     why: 'Cites where the ≤50 bound comes from; the bound itself is written on the same line, so ' +
       'nothing in backlink-shipped-issues\' mechanics is needed to apply it.',
   })),
-  // ensure-pr-ready step 4b prefers a reference an EARLIER op returned.
-  ...TRACKER_PROVIDERS.flatMap(({ id }) => ['setup-task', 'ensure-traceable-issue'].map(target => ({
+  // ensure-pr-ready step 4b takes the link line an EARLIER op returned in its Handoff Values block.
+  ...TRACKER_PROVIDERS.flatMap(({ id }) => ['setup-task', 'fetch-issue'].map(target => ({
     file: `tracker/${id}/ensure-pr-ready.md`,
     target,
-    anchor: 'returned by `setup-task` / `ensure-traceable-issue` for this branch',
-    why: 'Names which earlier operation produced the issue reference the caller already holds; ' +
-      'it reads that Output value and runs none of the producing operation\'s steps.',
+    anchor: 'that `setup-task` or `fetch-issue` returned for this branch',
+    why: 'Names which earlier operations produce the PR link line step 4b takes from the Handoff ' +
+      'Values block; it uses that Output value as given and runs none of the producing ' +
+      'operation\'s steps.',
   }))),
   // ensure-pr-ready's handoff paste gate (D-PR-BY-GIT) names the two producers.
   ...TRACKER_PROVIDERS.flatMap(({ id }) => ['setup-task', 'fetch-issue'].map(target => ({

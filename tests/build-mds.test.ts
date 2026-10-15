@@ -1178,12 +1178,46 @@ function collectUndoDefects(text: string): string[] {
   const prompt = undoPrompt(text);
   if (prompt === null) return ['no undo spawn'];
   const out: string[] = [];
-  if (!prompt.includes('git reset --keep ${merge.mergeSha}^1')) out.push('the undo does not run reset --keep on the merge commit\'s first parent');
+  if (!prompt.includes('git reset --keep ${merge.baseSha}')) out.push('the undo does not run reset --keep on the recorded pre-merge SHA');
+  if (/git reset --keep \$\{merge\.mergeSha\}/.test(prompt)) out.push('the undo resets to the merge commit or its first parent');
   if (/reset\s+--hard|--hard/.test(prompt)) out.push('the undo names a hard reset');
   if (/\bpush\b/i.test(prompt)) out.push('the undo names a push');
   if (!prompt.includes('only when no remote branch contains ${merge.mergeSha}')) out.push('the undo is not gated on no remote branch containing the merge');
-  if (!prompt.includes('the HEAD of ${INTEGRATION_BRANCH} still equals ${merge.mergeSha}')) out.push('the undo is not gated on the integration HEAD still being the merge');
-  if (!prompt.includes('{"undone": true}') || !prompt.includes('{"undone": false, "reason":')) out.push('the undo does not pin both return shapes');
+  for (const check of ['git symbolic-ref --short HEAD', 'git rev-parse refs/heads/${INTEGRATION_BRANCH}', 'git rev-parse ${merge.mergeSha}^1']) {
+    if (!prompt.includes(check)) out.push(`the undo does not run the read-only check ${check}`);
+  }
+  if (!prompt.includes('{"undone": true, "head": "<40-hex from git rev-parse refs/heads/${INTEGRATION_BRANCH}>"}') || !prompt.includes('{"undone": false, "reason":')) out.push('the undo does not pin both return shapes');
+  return out;
+}
+
+/** The merge spawn's prompt template: from its lead to the Git spawn options. */
+function mergePrompt(text: string): string | null {
+  const at = text.indexOf('agent(`Merge ${engineResult.branch}');
+  const end = text.indexOf('{ agentType: "Git" }', at);
+  return at === -1 || end === -1 ? null : text.slice(at, end);
+}
+
+/** The merge-in-progress check and the abort the merge instruction pins, as the shipped prompt words them. */
+const MERGE_ABORT_RULE = 'If the merge stops after it began (git rev-parse -q --verify MERGE_HEAD succeeds), run git merge --abort; if that abort fails, return merged true with no mergeSha.';
+/** The local-branch check that runs before the merge, as the shipped prompt words it. */
+const LOCAL_BRANCH_CHECK = 'run git rev-parse --verify --quiet refs/heads/${engineResult.branch} (on a non-zero exit return merged false, reason "no such local branch")';
+
+/** Named collector: what the merge instruction lacks. Its git lines are the ones the real-git test runs. */
+function collectMergeDefects(text: string): string[] {
+  const prompt = mergePrompt(text);
+  if (prompt === null) return ['no merge spawn'];
+  const out: string[] = [];
+  if (!prompt.includes('git merge --no-ff ')) out.push('the merge is not pinned to git merge --no-ff');
+  else if (!prompt.includes('git merge --no-ff refs/heads/${engineResult.branch}')) out.push('the merge is not of refs/heads/<branch>');
+  if (!prompt.includes('run git rev-parse ${INTEGRATION_BRANCH} as baseSha')) out.push('the merge does not record the integration head as baseSha');
+  if (!prompt.includes(LOCAL_BRANCH_CHECK)) out.push('the merge does not check for a local branch before it merges');
+  if (!prompt.includes(MERGE_ABORT_RULE)) out.push('the merge does not abort only a merge that began');
+  if (!prompt.includes('A merge that did not begin returns merged false with the reason.')) out.push('the merge does not return merged false for a merge that did not begin');
+  const recordAt = prompt.indexOf('as baseSha');
+  const mergeAt = prompt.indexOf('git merge --no-ff');
+  if (recordAt !== -1 && mergeAt !== -1 && recordAt > mergeAt) out.push('the merge records baseSha after the merge');
+  const checkAt = prompt.indexOf('git rev-parse --verify --quiet refs/heads/');
+  if (checkAt !== -1 && mergeAt !== -1 && checkAt > mergeAt) out.push('the merge checks for a local branch after the merge');
   return out;
 }
 
@@ -1215,18 +1249,65 @@ describe('dynamic-build: the post-merge Validate belongs to the workflow, and a 
     };
   });
 
-  it('the undo names reset --keep on the first parent, its two gates and both returns, and no hard reset and no push', () => {
+  it('the undo runs three read-only checks, reset --keep on the recorded pre-merge SHA, the remote gate and both returns, and no caret reset, no hard reset and no push', () => {
     expect(collectUndoDefects(compiled)).toEqual([]);
     expect(collectUndoDefects(sources['dynamic-build.mds'])).toEqual([]);
   });
 
   it('known-bad probes: a hard reset, a push and a missing gate are each reported', () => {
-    const hard = compiled.replace('git reset --keep ${merge.mergeSha}^1', 'git reset --hard ${merge.mergeSha}^1');
-    expect(collectUndoDefects(hard)).toEqual(expect.arrayContaining(['the undo does not run reset --keep on the merge commit\'s first parent', 'the undo names a hard reset']));
+    const hard = compiled.replace('git reset --keep ${merge.baseSha}', 'git reset --hard ${merge.baseSha}');
+    expect(hard, 'the seed must land').not.toBe(compiled);
+    expect(collectUndoDefects(hard)).toEqual(expect.arrayContaining(['the undo does not run reset --keep on the recorded pre-merge SHA', 'the undo names a hard reset']));
+    const caret = compiled.replace('git reset --keep ${merge.baseSha}', 'git reset --keep ${merge.mergeSha}^1');
+    expect(caret, 'the seed must land').not.toBe(compiled);
+    expect(collectUndoDefects(caret)).toEqual(['the undo does not run reset --keep on the recorded pre-merge SHA', 'the undo resets to the merge commit or its first parent']);
+    const unchecked = compiled.replace('git rev-parse ${merge.mergeSha}^1 must print', 'git log -1 must print');
+    expect(unchecked, 'the seed must land').not.toBe(compiled);
+    expect(collectUndoDefects(unchecked)).toEqual(['the undo does not run the read-only check git rev-parse ${merge.mergeSha}^1']);
     const pushing = compiled.replace('and no other that changes a branch or a remote', 'then push the branch');
     expect(collectUndoDefects(pushing)).toEqual(['the undo names a push']);
     expect(collectUndoDefects(compiled.replace('only when no remote branch contains ${merge.mergeSha}', 'whether or not a branch contains ${merge.mergeSha}'))).toEqual(['the undo is not gated on no remote branch containing the merge']);
     expect(collectUndoDefects('nothing')).toEqual(['no undo spawn']);
+  });
+
+  it('the merge records baseSha, checks for a local branch, runs git merge --no-ff on refs/heads/<branch>, and aborts only a merge that began', () => {
+    expect(collectMergeDefects(compiled)).toEqual([]);
+    expect(collectMergeDefects(sources['dynamic-build.mds'])).toEqual([]);
+  });
+
+  it('known-bad probes: a bare-name or plain merge, a missing baseSha record, a late baseSha, a missing or late branch check and an abort that is unconditional, conflict-only or absent are each reported', () => {
+    const plain = compiled.replace('git merge --no-ff refs/heads/${engineResult.branch}', 'git merge refs/heads/${engineResult.branch}');
+    expect(plain, 'the seed must land').not.toBe(compiled);
+    expect(collectMergeDefects(plain)).toEqual(['the merge is not pinned to git merge --no-ff']);
+    const bare = compiled.replace('git merge --no-ff refs/heads/${engineResult.branch}', 'git merge --no-ff ${engineResult.branch}');
+    expect(bare, 'the seed must land').not.toBe(compiled);
+    expect(collectMergeDefects(bare)).toEqual(['the merge is not of refs/heads/<branch>']);
+    const unrecorded = compiled.replace('run git rev-parse ${INTEGRATION_BRANCH} as baseSha', 'note the head');
+    expect(unrecorded, 'the seed must land').not.toBe(compiled);
+    expect(collectMergeDefects(unrecorded)).toContain('the merge does not record the integration head as baseSha');
+    const lateRecord = compiled.replace('run git rev-parse ${INTEGRATION_BRANCH} as baseSha, ', '').replace('. If the merge stops after it began', ', then run git rev-parse ${INTEGRATION_BRANCH} as baseSha. If the merge stops after it began');
+    expect(lateRecord, 'the seed must land').not.toBe(compiled);
+    expect(lateRecord.includes('baseSha. If the merge stops after it began'), 'the second half of the seed must land').toBe(true);
+    expect(collectMergeDefects(lateRecord)).toEqual(['the merge records baseSha after the merge']);
+    const unchecked = compiled.replace('run git rev-parse --verify --quiet refs/heads/${engineResult.branch} (on a non-zero exit return merged false, reason "no such local branch"), then run git merge', 'run git merge');
+    expect(unchecked, 'the seed must land').not.toBe(compiled);
+    expect(collectMergeDefects(unchecked)).toEqual(['the merge does not check for a local branch before it merges']);
+    const lateCheck = compiled.replace('run git rev-parse --verify --quiet refs/heads/${engineResult.branch} (on a non-zero exit return merged false, reason "no such local branch"), then run git merge --no-ff refs/heads/${engineResult.branch}.', 'run git merge --no-ff refs/heads/${engineResult.branch}, then run git rev-parse --verify --quiet refs/heads/${engineResult.branch} (on a non-zero exit return merged false, reason "no such local branch").');
+    expect(lateCheck, 'the seed must land').not.toBe(compiled);
+    expect(collectMergeDefects(lateCheck)).toEqual(['the merge checks for a local branch after the merge']);
+    const nothing = compiled.replace('git merge --abort', 'git status');
+    expect(nothing, 'the seed must land').not.toBe(compiled);
+    expect(collectMergeDefects(nothing)).toEqual(['the merge does not abort only a merge that began']);
+    const anyStop = compiled.replace('If the merge stops after it began (git rev-parse -q --verify MERGE_HEAD succeeds), run git merge --abort', 'If the merge stops for any reason, run git merge --abort');
+    expect(anyStop, 'the seed must land').not.toBe(compiled);
+    expect(collectMergeDefects(anyStop)).toEqual(['the merge does not abort only a merge that began']);
+    const conflictOnly = compiled.replace('If the merge stops after it began (git rev-parse -q --verify MERGE_HEAD succeeds), run git merge --abort', 'On a conflict, run git merge --abort');
+    expect(conflictOnly, 'the seed must land').not.toBe(compiled);
+    expect(collectMergeDefects(conflictOnly)).toEqual(['the merge does not abort only a merge that began']);
+    const unbegun = compiled.replace(' A merge that did not begin returns merged false with the reason.', '');
+    expect(unbegun, 'the seed must land').not.toBe(compiled);
+    expect(collectMergeDefects(unbegun)).toEqual(['the merge does not return merged false for a merge that did not begin']);
+    expect(collectMergeDefects('nothing')).toEqual(['no merge spawn']);
   });
 
   it('no Git prompt and no doctrine line in dynamic-build, _wave or _engine asks Git to run Validate', () => {
@@ -1244,9 +1325,186 @@ describe('dynamic-build: the post-merge Validate belongs to the workflow, and a 
     expect(collectGitValidateRequests(oldStep)).toEqual(['a doctrine line asks for a Validate: 5. After any resolution: Validate agent (build + test) immediately']);
   });
 
-  it('the wave doctrine says the post-merge Validate always runs and treeEqual is recorded only', () => {
-    expect(compiled).toContain('It always runs');
+  it('the wave doctrine says the post-merge Validate always runs, unless a bad or unchanged SHA halts the wave first, and treeEqual is recorded only', () => {
+    expect(compiled).toContain('It always runs, except when the wave halts first on a merge with a bad or unchanged SHA');
     expect(compiled).toContain('a true value never skips the Validate');
+  });
+
+  it('the wave doctrine names the merge helper as the place of the undo spawn', () => {
+    expect(compiled).toContain('The undo spawn in `mergeValidateUndo` states its gates and exact git lines');
+    expect(compiled).not.toContain('The undo spawn in the wave loop');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 10c. dynamic-build.md: the wave merge arm stays flat and lives in one helper (#486, finding 6)
+//
+// The merge, the post-merge Validate and the undo were seven levels deep in the
+// per-ticket loop, and the depth hid the undo defect. Both guards have a named
+// collector and a seeded known-bad probe; each test asserts the corpus it read.
+// ---------------------------------------------------------------------------
+
+const WAVE_WHILE = 'while (remainingTickets.length > 0';
+const MERGE_HELPER = 'const mergeValidateUndo = async (ticketId, engineResult) => {';
+/** The deepest a per-ticket loop line may sit below the `while`, in block levels. */
+const MAX_LOOP_LEVELS = 5;
+
+/** The wave loop's lines: from the `while` line to the closing brace at column 0, or null unless the `while` occurs once. */
+function waveLoopLines(text: string): string[] | null {
+  const lines = text.split('\n');
+  const start = lines.findIndex(l => l.startsWith(WAVE_WHILE));
+  if (start === -1 || lines.filter(l => l.startsWith(WAVE_WHILE)).length !== 1) return null;
+  const end = lines.findIndex((l, i) => i > start && l === '}');
+  return end === -1 ? null : lines.slice(start, end + 1);
+}
+
+/** Named collector: loop lines more than MAX_LOOP_LEVELS block levels below the `while` (the fence indents two spaces a level). */
+function collectLoopDepthDefects(text: string): string[] {
+  const loop = waveLoopLines(text);
+  if (loop === null) return ['no wave loop'];
+  const out: string[] = [];
+  for (const line of loop) {
+    const levels = (line.length - line.trimStart().length) / 2;
+    if (line.trim() !== '' && levels > MAX_LOOP_LEVELS) out.push(`a loop line sits ${levels} levels below the while: ${line.trim().slice(0, 50)}`);
+  }
+  return out;
+}
+
+/**
+ * Named collector: where the merge helper is missing, misplaced, reaches the loop's state, or the
+ * loop no longer calls it once right after the engine verdict check.
+ */
+function collectMergeHelperDefects(text: string): string[] {
+  const at = text.indexOf(MERGE_HELPER);
+  if (at === -1 || text.indexOf(MERGE_HELPER, at + 1) !== -1) return ['the merge helper is not declared exactly once'];
+  const end = text.indexOf('\n};\n', at);
+  const loopAt = text.indexOf(WAVE_WHILE);
+  if (end === -1 || loopAt === -1) return ['the merge helper or the wave loop has no end'];
+  const out: string[] = [];
+  const shaAt = text.indexOf('const MERGE_SHA = ');
+  if (!(shaAt !== -1 && shaAt < at && end < loopAt)) out.push('the helper does not sit below MERGE_SHA and above the loop');
+  const body = text.slice(at, end);
+  for (const name of ['waveState', 'results', 'remainingTickets', 'WAVE_TICKETS', 'rowOf', 'reAskedThisDeadlock']) {
+    if (new RegExp(`\\b${name}\\b`).test(body)) out.push(`the helper reaches the loop's ${name}`);
+  }
+  if ((body.match(/agentType: "(\w+)"/g) ?? []).join(',') !== 'agentType: "Git",agentType: "Validate",agentType: "Git"') out.push('the helper does not spawn Git, Validate and Git, in that order');
+  if ((text.match(/if \(post\?\.verdict === "PASS"\) \{/g) ?? []).length !== 1) out.push('the PASS check does not appear exactly once');
+  const loop = text.slice(loopAt);
+  if ((loop.match(/await mergeValidateUndo\(ticketId, engineResult\)/g) ?? []).length !== 1) out.push('the loop does not call the helper exactly once');
+  const afterEngine = loop.slice(loop.lastIndexOf('await runSingleTicketEngine(')).split('\n').slice(1).map(l => l.trim()).filter(l => l !== '' && !l.startsWith('//') && !l.startsWith('<!--'));
+  if (!(afterEngine[0] ?? '').startsWith('if (["PASS", "UNVERIFIED"].includes(')) out.push('the verdict check is not the first statement after the engine call');
+  return out;
+}
+
+/** The repo's ref allowlist, as implement.mds states it for BASE_BRANCH. */
+const REF_ALLOWLIST_CLASS = '[A-Za-z0-9._/+@,#-]{1,200}';
+
+/**
+ * Named collector: where the helper lets a Git-reported ticket branch into a git line unchecked.
+ * The check must refuse a value that is not a string, be the repo's ref allowlist narrowed by a
+ * leading dash or hash, a revision name and any double dot, and run in the helper before the merge spawn.
+ */
+function collectBranchCheckDefects(text: string): string[] {
+  const at = text.indexOf(MERGE_HELPER);
+  const end = at === -1 ? -1 : text.indexOf('\n};\n', at);
+  if (at === -1 || end === -1) return ['no merge helper'];
+  const out: string[] = [];
+  const shape = /const BRANCH_NAME = (\/.*\/);/.exec(text.slice(0, at))?.[1] ?? '';
+  const leading = /^\/\^\(\?!\[([^\]]*)\]/.exec(shape)?.[1] ?? '';
+  if (!shape.includes(REF_ALLOWLIST_CLASS)) out.push('BRANCH_NAME is not the repo ref allowlist');
+  if (!leading.includes('-')) out.push('BRANCH_NAME does not refuse a leading dash');
+  if (!leading.includes('#')) out.push('BRANCH_NAME does not refuse a leading hash');
+  if (!shape.includes('|(?:@|(?:FETCH_|ORIG_|MERGE_)?HEAD)$)')) out.push('BRANCH_NAME does not refuse a revision name');
+  if (!shape.includes('(?!.*\\.\\.)')) out.push('BRANCH_NAME does not refuse a double dot');
+  const body = text.slice(at, end);
+  const checkAt = body.indexOf('BRANCH_NAME.test(engineResult.branch)');
+  const mergeAt = body.indexOf('agent(`Merge ');
+  if (checkAt === -1 || mergeAt === -1 || checkAt > mergeAt) out.push('the helper does not check the branch before the merge spawn');
+  if (!body.includes('typeof engineResult.branch !== "string" || !BRANCH_NAME.test(engineResult.branch)')) out.push('the helper does not refuse a branch that is not a string');
+  return out;
+}
+
+/** The compiled helper with its branch check moved from before the merge spawn to after it, or `text` when the check is not found. */
+function moveBranchCheckAfterMerge(text: string): string {
+  const lineStart = text.indexOf('  if (typeof engineResult.branch !== "string"');
+  const lineEnd = lineStart === -1 ? -1 : text.indexOf('\n', lineStart) + 1;
+  if (lineEnd === 0) return text;
+  const spawnEnd = text.indexOf('{ agentType: "Git" });\n', lineEnd);
+  if (spawnEnd === -1) return text;
+  const afterSpawn = spawnEnd + '{ agentType: "Git" });\n'.length;
+  return text.slice(0, lineStart) + text.slice(lineEnd, afterSpawn) + text.slice(lineStart, lineEnd) + text.slice(afterSpawn);
+}
+
+describe('dynamic-build: the wave merge arm stays flat and lives in one helper (#486, finding 6)', () => {
+  let compiled: string;
+  let source: string;
+  beforeAll(async () => {
+    compiled = await fs.readFile(path.join(BUILT_COMMANDS, 'dynamic-build.md'), 'utf-8');
+    source = readFileSync(path.join(COMMANDS_DIR, 'dynamic-build.mds'), 'utf-8');
+  });
+
+  it('no per-ticket loop line sits more than five block levels below the while', () => {
+    expect(waveLoopLines(compiled)?.length ?? 0, 'the compiled loop was not read').toBeGreaterThan(30);
+    expect(waveLoopLines(source)?.length ?? 0, 'the source loop was not read').toBeGreaterThan(30);
+    expect(collectLoopDepthDefects(compiled)).toEqual([]);
+    expect(collectLoopDepthDefects(source)).toEqual([]);
+  });
+
+  it('the merge, the post-merge Validate and the undo sit in one helper that takes only the ticket and its engine result', () => {
+    expect(collectMergeHelperDefects(compiled)).toEqual([]);
+    expect(collectMergeHelperDefects(source)).toEqual([]);
+  });
+
+  it('the helper checks the ticket branch against the repo ref allowlist before the merge spawn, and implement states the same allowlist', async () => {
+    expect(collectBranchCheckDefects(compiled)).toEqual([]);
+    expect(collectBranchCheckDefects(source)).toEqual([]);
+    const implement = await fs.readFile(path.join(BUILT_COMMANDS, 'implement.md'), 'utf-8');
+    expect(implement, 'implement no longer states the allowlist the wave copies').toContain(REF_ALLOWLIST_CLASS);
+  });
+
+  it('known-bad probes: a missing check, a late check, an untyped value, a loose allowlist and a missing leading, revision or double-dot guard are each reported', () => {
+    const unchecked = compiled.replace('typeof engineResult.branch !== "string" || !BRANCH_NAME.test(engineResult.branch)', 'false');
+    expect(unchecked, 'the seed must land').not.toBe(compiled);
+    expect(collectBranchCheckDefects(unchecked)).toEqual(['the helper does not check the branch before the merge spawn', 'the helper does not refuse a branch that is not a string']);
+    const late = moveBranchCheckAfterMerge(compiled);
+    expect(late, 'the seed must land').not.toBe(compiled);
+    expect(collectBranchCheckDefects(late)).toEqual(['the helper does not check the branch before the merge spawn']);
+    const coerced = compiled.replace('typeof engineResult.branch !== "string" || !BRANCH_NAME.test(engineResult.branch)', '!BRANCH_NAME.test(String(engineResult.branch))');
+    expect(coerced, 'the seed must land').not.toBe(compiled);
+    expect(collectBranchCheckDefects(coerced)).toEqual(['the helper does not check the branch before the merge spawn', 'the helper does not refuse a branch that is not a string']);
+    const loose = compiled.replace('[A-Za-z0-9._/+@,#-]{1,200}', '[A-Za-z0-9._/+@,#-]{1,255}');
+    expect(loose, 'the seed must land').not.toBe(compiled);
+    expect(collectBranchCheckDefects(loose)).toEqual(['BRANCH_NAME is not the repo ref allowlist']);
+    const noDash = compiled.replace('(?![-#]|', '(?![#]|');
+    expect(noDash, 'the seed must land').not.toBe(compiled);
+    expect(collectBranchCheckDefects(noDash)).toEqual(['BRANCH_NAME does not refuse a leading dash']);
+    const noHash = compiled.replace('(?![-#]|', '(?![-]|');
+    expect(noHash, 'the seed must land').not.toBe(compiled);
+    expect(collectBranchCheckDefects(noHash)).toEqual(['BRANCH_NAME does not refuse a leading hash']);
+    const noRevisions = compiled.replace('|(?:@|(?:FETCH_|ORIG_|MERGE_)?HEAD)$)', ')');
+    expect(noRevisions, 'the seed must land').not.toBe(compiled);
+    expect(collectBranchCheckDefects(noRevisions)).toEqual(['BRANCH_NAME does not refuse a revision name']);
+    const dots = compiled.replace('(?!.*\\.\\.)', '');
+    expect(dots, 'the seed must land').not.toBe(compiled);
+    expect(collectBranchCheckDefects(dots)).toEqual(['BRANCH_NAME does not refuse a double dot']);
+    expect(collectBranchCheckDefects('nothing')).toEqual(['no merge helper']);
+  });
+
+  it('known-bad probes: a seven-level arm, a helper that reaches loop state and a helper that is missing are each reported', () => {
+    const deep = compiled.replace('        if (halted !== null) waveState.halted = halted;', '        if (halted !== null) {\n          if (kept) {\n            if (reason) {\n              waveState.halted = halted;\n            }\n          }\n        }');
+    expect(deep, 'the seed must land').not.toBe(compiled);
+    expect(collectLoopDepthDefects(deep)).toContain('a loop line sits 7 levels below the while: waveState.halted = halted;');
+    expect(collectLoopDepthDefects('nothing')).toEqual(['no wave loop']);
+    const reaching = compiled.replace('  const treeEqual = ', '  waveState.round++;\n  const treeEqual = ');
+    expect(reaching, 'the seed must land').not.toBe(compiled);
+    expect(collectMergeHelperDefects(reaching)).toEqual(["the helper reaches the loop's waveState"]);
+    const twice = compiled.replace('  const undo = await agent(', '  if (post?.verdict === "PASS") {\n    return done(true, "");\n  }\n  const undo = await agent(');
+    expect(twice, 'the seed must land').not.toBe(compiled);
+    expect(collectMergeHelperDefects(twice)).toEqual(['the PASS check does not appear exactly once']);
+    expect(collectMergeHelperDefects(compiled.replace(MERGE_HELPER, 'const mergeValidateUndo2 = async (ticketId, engineResult) => {'))).toEqual(['the merge helper is not declared exactly once']);
+    const earlyCall = compiled.replace('      // PASS and UNVERIFIED merge', '      void engineResult;\n      // PASS and UNVERIFIED merge');
+    expect(earlyCall, 'the seed must land').not.toBe(compiled);
+    expect(collectMergeHelperDefects(earlyCall)).toEqual(['the verdict check is not the first statement after the engine call']);
   });
 });
 

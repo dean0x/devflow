@@ -99,6 +99,9 @@ const MAX_MS = 570_000
 // A virtual world: gh as a function of the call and the time, a clock that moves
 // ---------------------------------------------------------------------------
 
+/** How long a fake gh call takes when its reply names no `took`. */
+const DEFAULT_CALL_MS = 1000
+
 /** What the fake gh does with one call. `took` is the call's duration; `hang` runs out its timeout. */
 interface Reply { status?: number | null; stdout?: string; stderr?: string; error?: { code: string }; took?: number; hang?: boolean }
 type Kind = 'view' | 'checks'
@@ -129,7 +132,7 @@ class World {
     if (this.elapsed + timeout > MAX_MS + 1) this.violations.push(`a gh call at ${this.elapsed} ms was given ${timeout} ms, past ${MAX_MS}`)
     const kind: Kind = args[1] === 'view' ? 'view' : 'checks'
     const reply = this.script({ kind, nth: this.counts[kind]++, elapsed: this.elapsed })
-    const took = reply.hang === true ? timeout : Math.min(reply.took ?? 1000, timeout)
+    const took = reply.hang === true ? timeout : Math.min(reply.took ?? DEFAULT_CALL_MS, timeout)
     if (this.moves) this.t += took
     if (reply.hang === true) return { status: null, error: { code: 'ETIMEDOUT' } }
     if (reply.error !== undefined) return { status: null, error: reply.error }
@@ -442,6 +445,102 @@ describe('AC-12: ci-wait classifies only the head it was told about', () => {
 })
 
 // ---------------------------------------------------------------------------
+// The settle windows: a head mismatch and an empty check list each keep their own clock
+// ---------------------------------------------------------------------------
+
+describe('the settle windows: a head mismatch and an empty check list each keep their own 90 s clock', () => {
+  const SETTLE_MS = 90_000
+  const BAD_GH: Reply = { status: 1, stderr: 'HTTP 502: Bad Gateway\n' }
+
+  it('empty, pending, empty: the pending poll resets the empty clock, so two short empty stretches are not NO_CI', async () => {
+    // Each gh checks call takes 25 s, so the two empty results are 92 s apart: one clock would settle.
+    const r = await run(({ kind, nth }) => {
+      if (kind === 'view') return viewOk()
+      if (nth === 0 || nth === 2) return { stdout: '[]', took: 25_000 }
+      if (nth === 1) return { ...checksOk('pending'), took: 25_000 }
+      return checksOk('pass')
+    })
+    const checks = r.world.of('checks')
+    expect(statusOf(r.line)).toBe('PASSING')
+    expect(checks).toHaveLength(4)
+    expect(checks[2].elapsedBefore - checks[0].elapsedBefore, 'the empty results are further apart than the window').toBeGreaterThan(SETTLE_MS)
+  })
+
+  it('a mismatch for 80 s, then a match with no checks: NO_CI comes 90 s after the first empty result, not sooner', async () => {
+    // The view takes no time, so the five mismatch polls fall at 0, 20, 40, 60 and 80 s.
+    const r = await run(({ kind, nth }) => (kind === 'view'
+      ? { ...viewOk(nth < 5 ? OLD_HEAD : HEAD), took: 0 }
+      : { stdout: '[]' }))
+    const views = r.world.of('view')
+    const checks = r.world.of('checks')
+    expect(views[4].elapsedBefore - views[0].elapsedBefore).toBe(80_000)
+    expect(statusOf(r.line)).toBe('NO_CI')
+    // The empty reply names no `took`, so the first empty result lands one default call after its call began.
+    const firstEmptyAt = checks[0].elapsedBefore + DEFAULT_CALL_MS
+    expect(r.world.elapsed - firstEmptyAt).toBeGreaterThanOrEqual(SETTLE_MS)
+    expect(checks, 'the fifth empty result is still inside the window').toHaveLength(6)
+  })
+
+  it('a failed poll between two mismatches leaves the mismatch clock where it was', async () => {
+    const r = await run(({ kind, nth }) => (kind === 'view' ? (nth === 2 ? BAD_GH : viewOk(OLD_HEAD)) : checksOk('pass')))
+    expect(field(r.line, 'reason')).toBe('head-mismatch')
+    // Reads at 0, 21, (failed), 63, 84 and 105 s after the first mismatch: the sixth is the first past 90 s.
+    expect(r.world.of('view')).toHaveLength(6)
+    expect(r.world.of('checks')).toHaveLength(0)
+  })
+
+  it('a failed poll between two empty results leaves the empty clock where it was', async () => {
+    const r = await run(({ kind, nth }) => (kind === 'view' ? viewOk() : nth === 2 ? BAD_GH : { stdout: '[]' }))
+    expect(statusOf(r.line)).toBe('NO_CI')
+    // Reads at 0, 22, (failed), 66, 88 and 110 s after the first empty result: the sixth is the first past 90 s.
+    expect(r.world.of('checks')).toHaveLength(6)
+  })
+
+  describe('the boundary: a window settles at exactly 90,000 ms and not at 89,999 ms', () => {
+    // Mismatch path: a view takes 10 s, so polls fall 30 s apart and the fourth read is 90 s after the first.
+    const mismatch = (lastTook: number): Script => ({ kind, nth }) => (kind === 'view'
+      ? { ...viewOk(OLD_HEAD), took: nth === 3 ? lastTook : 10_000 }
+      : checksOk('pass'))
+    // Empty path: a view and a checks call take 5 s each, so polls fall 30 s apart as well.
+    const empty = (lastTook: number): Script => ({ kind, nth }) => (kind === 'view'
+      ? { ...viewOk(), took: 5_000 }
+      : { stdout: '[]', took: nth === 3 ? lastTook : 5_000 })
+
+    it('mismatch path: 90,000 ms settles at the fourth read', async () => {
+      const r = await run(mismatch(10_000))
+      expect(field(r.line, 'reason')).toBe('head-mismatch')
+      expect(r.world.of('view')).toHaveLength(4)
+      expect(r.world.sleeps).toEqual([20_000, 20_000, 20_000])
+      expect(waitedOf(r.line)).toBe(100)
+    })
+
+    it('mismatch path: 89,999 ms does not settle, and the fifth read does', async () => {
+      const r = await run(mismatch(9_999))
+      expect(field(r.line, 'reason')).toBe('head-mismatch')
+      expect(r.world.of('view')).toHaveLength(5)
+      expect(r.world.sleeps).toEqual([20_000, 20_000, 20_000, 20_000])
+      expect(waitedOf(r.line)).toBe(130)
+    })
+
+    it('empty path: 90,000 ms settles at the fourth read', async () => {
+      const r = await run(empty(5_000))
+      expect(statusOf(r.line)).toBe('NO_CI')
+      expect(r.world.of('checks')).toHaveLength(4)
+      expect(r.world.sleeps).toEqual([20_000, 20_000, 20_000])
+      expect(waitedOf(r.line)).toBe(100)
+    })
+
+    it('empty path: 89,999 ms does not settle, and the fifth read does', async () => {
+      const r = await run(empty(4_999))
+      expect(statusOf(r.line)).toBe('NO_CI')
+      expect(r.world.of('checks')).toHaveLength(5)
+      expect(r.world.sleeps).toEqual([20_000, 20_000, 20_000, 20_000])
+      expect(waitedOf(r.line)).toBe(130)
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
 // AC-10: names
 // ---------------------------------------------------------------------------
 
@@ -728,6 +827,17 @@ function collectUnboundedLoops(source: string): string[] {
   return [...codeLines(source).join('\n').matchAll(/while\s*\(\s*(?:true|1)\s*\)|for\s*\(\s*;\s*;\s*\)/g)].map(m => m[0])
 }
 
+/** The settle comparisons in code lines, and the clock each settle() call inside waitForCi is given. */
+function collectSettleSites(source: string): { comparisons: number; windows: string[] } {
+  const code = codeLines(source).join('\n')
+  const start = code.indexOf('async function waitForCi(')
+  const wait = start < 0 ? '' : code.slice(start, code.indexOf('\n}\n', start))
+  return {
+    comparisons: [...code.matchAll(/>=\s*settleMs\b/g)].length,
+    windows: [...wait.matchAll(/\bsettle\(\s*(\w+)\s*,/g)].map(m => m[1]),
+  }
+}
+
 describe('source guards (ci-wait.cjs)', () => {
   it('no shell, no exec, no literal sleep, one production spawnSync', () => {
     expect(SOURCE.length).toBeGreaterThan(1000)
@@ -763,6 +873,21 @@ describe('source guards (ci-wait.cjs)', () => {
     ]) {
       expect(SOURCE, `${marker} missing`).toContain(marker)
     }
+  })
+
+  it('the settle comparison appears once, in the helper, and each window calls the helper once on its own clock', () => {
+    const sites = collectSettleSites(SOURCE)
+    expect(sites.comparisons).toBe(1)
+    expect(sites.windows).toEqual(['firstMismatchAt', 'firstEmptyAt'])
+    const probe = [
+      'async function waitForCi(i) {',
+      '  settle(firstMismatchAt, 1, 2); settle(firstMismatchAt, 1, 2);',
+      '}',
+      'function settle(f, n, s) { return n - f >= settleMs }',
+      'const z = 1 >= settleMs',
+      '',
+    ].join('\n')
+    expect(collectSettleSites(probe)).toEqual({ comparisons: 2, windows: ['firstMismatchAt', 'firstMismatchAt'] })
   })
 
   it('pins the ratchet constant exactly once, as the manifest spells it', () => {

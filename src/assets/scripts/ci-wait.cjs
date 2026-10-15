@@ -384,6 +384,22 @@ function parseChecks(stdout) {
 // ---------------------------------------------------------------------------
 
 /**
+ * One settle window, as a pure step. `firstAt` is when the condition was first seen,
+ * or null when the poll before did not see it; the window opens at `now` then. It is
+ * done once `settleMs` have passed since it opened. The caller keeps one clock per
+ * window and stores the returned `firstAt`.
+ *
+ * @param {number | null} firstAt
+ * @param {number} now
+ * @param {number} settleMs
+ * @returns {{ firstAt: number, done: boolean }}
+ */
+function settle(firstAt, now, settleMs) {
+  const opened = firstAt === null ? now : firstAt;
+  return { firstAt: opened, done: now - opened >= settleMs };
+}
+
+/**
  * D-CI-HEAD-BINDING: wait for the CI verdict of `head`, and of nothing else. `gh pr
  * checks` has no SHA field and reports the PR's current head, so each poll reads
  * `headRefOid` first. A different value means the checks on offer belong to another
@@ -471,8 +487,9 @@ async function waitForCi(input) {
       const oid = parseHeadRefOid(view.stdout);
       if (oid === null) return finish('INDETERMINATE', 'unparseable', [], []);
       if (oid !== head) {
-        firstMismatchAt = firstMismatchAt === null ? clock.now() : firstMismatchAt;
-        step = clock.now() - firstMismatchAt >= settleMs
+        const mismatch = settle(firstMismatchAt, clock.now(), settleMs);
+        firstMismatchAt = mismatch.firstAt;
+        step = mismatch.done
           ? { state: 'done', result: finish('INDETERMINATE', 'head-mismatch', [], []) }
           : { state: 'pending', pending: [] };
       } else {
@@ -487,8 +504,9 @@ async function waitForCi(input) {
           const rows = isResult ? parseChecks(checks.stdout) : [];
           if (rows === null) return finish('INDETERMINATE', 'unparseable', [], []);
           if (rows.length === 0) {
-            firstEmptyAt = firstEmptyAt === null ? clock.now() : firstEmptyAt;
-            step = clock.now() - firstEmptyAt >= settleMs
+            const empty = settle(firstEmptyAt, clock.now(), settleMs);
+            firstEmptyAt = empty.firstAt;
+            step = empty.done
               ? { state: 'done', result: finish('NO_CI', null, [], []) }
               : { state: 'pending', pending: [] };
           } else {
