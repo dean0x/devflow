@@ -516,6 +516,15 @@ export const CODE_MODES: readonly string[] = Object.values(CODE_OPERATIONS).flat
 /** The slug (`devflow agents` key and file basename) of a Code-family agent type: `Fix` is `fix`. */
 export const codeSlugOf = (agentType: string): string => agentType.toLowerCase()
 
+/**
+ * The agent types a command may spawn although devflow ships no agent file for them: Claude Code's own
+ * built-ins. `Plan` is the one: /plan's planning spawn uses it. The set is CLOSED: a new entry needs a
+ * recorded decision, never an edit made to quiet a guard. A spawn guard compares a `subagent_type` value
+ * to it byte-exact, before any case folding or hyphen stripping, so `plan` is not `Plan`. It never admits
+ * `general-purpose`, which the built-in resolver would accept and a roster guard must still reject.
+ */
+export const BUILT_IN_SPAWN_TYPES: readonly string[] = Object.freeze(['Plan'])
+
 export interface CodeSpawnSite {
   readonly file: string
   /** 1-based line the spawn starts on. */

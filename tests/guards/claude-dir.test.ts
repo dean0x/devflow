@@ -119,6 +119,47 @@ export function collectCodeReviewDirReadDefects(body: string): string[] {
   return out
 }
 
+/** The skills path /plan reads at a gate level: the levels reference, under the resolved directory. */
+const PLAN_LEVEL_REFERENCE_PATH = 'skills/devflow:agent-references/references/commands/plan-levels.md'
+
+/** The other skills path /plan reads: the compliance reference that the Phase 5 compliance spawn reads. */
+const PLAN_COMPLIANCE_REFERENCE_PATH = 'skills/devflow:gap-analysis/references/compliance.md'
+
+/**
+ * How many times a compiled /plan holds each of the three counts: one read in the gate-level block and one in
+ * the Phase 5 compliance spawn. The figure comes from measuring the compiled command, never from a read line
+ * edited to fit it.
+ */
+const PLAN_DIR_READS = 2
+
+/**
+ * Named collector: how a compiled /plan reaches the Claude directory. Two reads are allowed, each through the
+ * sanctioned resolution line: the levels reference inside the gate-level block, with the line before the path,
+ * and the compliance reference in the Phase 5 compliance spawn.
+ */
+export function collectPlanDirReadDefects(body: string): string[] {
+  const out: string[] = []
+  const lines = countOf(body, SANCTIONED_RESOLUTION)
+  if (lines !== PLAN_DIR_READS) out.push(`${lines} sanctioned resolution lines, expected ${PLAN_DIR_READS}`)
+  const names = countOf(body, 'CLAUDE_CONFIG_DIR')
+  if (names !== PLAN_DIR_READS) out.push(`${names} CLAUDE_CONFIG_DIR names, expected ${PLAN_DIR_READS}`)
+  const skillPaths = (body.match(/skills\/devflow:[^\s`'")]*/g) ?? []).sort()
+  const wanted = [PLAN_COMPLIANCE_REFERENCE_PATH, PLAN_LEVEL_REFERENCE_PATH].sort()
+  if (skillPaths.length !== PLAN_DIR_READS) out.push(`${skillPaths.length} skills/devflow: paths, expected ${PLAN_DIR_READS}`)
+  else if (skillPaths.join(' ') !== wanted.join(' ')) out.push(`the skills paths are ${skillPaths.join(', ')}, expected ${wanted.join(', ')}`)
+  const block = sectionBetween(body, '**Gate level.**', '#### Phase 3:')
+  if (block === null) out.push('no gate-level block')
+  else {
+    const resolution = block.indexOf(SANCTIONED_RESOLUTION)
+    const levels = block.indexOf(PLAN_LEVEL_REFERENCE_PATH)
+    if (resolution === -1) out.push('the sanctioned resolution line sits outside the gate-level block')
+    if (levels === -1) out.push('the levels reference path sits outside the gate-level block')
+    if (resolution !== -1 && levels !== -1 && levels < resolution) out.push('the levels reference path comes before the sanctioned resolution line')
+  }
+  if (body.includes('{claude_dir}')) out.push('a {claude_dir} placeholder')
+  return out
+}
+
 /** A path under the home Claude directory: `~/.claude/x`, `$HOME/.claude/x`, `${HOME}/.claude/x`. */
 const PATH_UNDER_HOME_CLAUDE = /(?:~|\$HOME|\$\{HOME\})\/\.claude\/[^\s`'")]/
 
@@ -194,11 +235,11 @@ type SiteRows = Readonly<Partial<Record<string, number>>>
 export const SITE_ROWS: SiteRows = {
   'dist/commands/code-review.md': 1,
   'dist/commands/dynamic-profile.md': 1,
-  'dist/commands/plan.md': 1,
+  'dist/commands/plan.md': 2,
   'dist/commands/implement.md': 2,
   'dist/learning-off/commands/code-review.md': 1,
   'dist/learning-off/commands/dynamic-profile.md': 1,
-  'dist/learning-off/commands/plan.md': 1,
+  'dist/learning-off/commands/plan.md': 2,
   'dist/learning-off/commands/implement.md': 2,
   [SYNTHESIZE_FILE]: 1,
   [CURATE_FILE]: 2,
@@ -565,6 +606,50 @@ describe('no prompt reaches the Claude directory outside the CLAUDE_CONFIG_DIR r
     const moved = seed(seed(review, `${readParagraph}\n\n`, ''), 'Set `DIFF_CLASS` by these rules', `${readParagraph}\n\nSet \`DIFF_CLASS\` by these rules`)
     expect(collectCodeReviewDirReadDefects(moved)).toEqual(['the sanctioned resolution line sits outside the gate-level block'])
     expect(collectCodeReviewDirReadDefects(`${review}\nRead {claude_dir}/x.`)).toEqual(['a {claude_dir} placeholder'])
+  })
+
+  it("/plan's directory reads are the levels reference in the gate-level block and the compliance reference, each through the sanctioned line", () => {
+    // Both builds, with every count taken from the measurement of the compiled command: two sanctioned lines,
+    // two CLAUDE_CONFIG_DIR names and two skills paths, and no {claude_dir} placeholder.
+    const plan = requireDistFile('plan.md')
+    expect(collectPlanDirReadDefects(plan)).toEqual([])
+    const off = resolveLearningOffSource('commands', 'plan')
+    expect(off, 'dist/learning-off/commands/plan.md is absent: run `npm run build:mds`').not.toBeNull()
+    expect(collectPlanDirReadDefects(off as string)).toEqual([])
+    // Non-vacuity: the compiled command holds the levels path and the compliance path the collector expects.
+    for (const body of [plan, off as string]) {
+      expect(body).toContain(PLAN_LEVEL_REFERENCE_PATH)
+      expect(body).toContain(PLAN_COMPLIANCE_REFERENCE_PATH)
+    }
+  })
+
+  it("red probes: a third sanctioned line, a third skills path, the levels read moved out of the gate-level block, the path before the line and a {claude_dir} placeholder are each reported in /plan", () => {
+    const plan = requireDistFile('plan.md')
+    const seed = (body: string, from: string, to: string): string => {
+      const next = body.replace(from, () => to)
+      expect(next, `the seed ${JSON.stringify(from.slice(0, 40))} must change the text`).not.toBe(body)
+      return next
+    }
+    const anchor = 'No gate may be skipped.'
+    expect(collectPlanDirReadDefects(seed(plan, anchor, `${anchor} Run \`${SANCTIONED_RESOLUTION_PRINT}\` in Bash.`))).toEqual([
+      '3 sanctioned resolution lines, expected 2',
+      '3 CLAUDE_CONFIG_DIR names, expected 2',
+    ])
+    expect(collectPlanDirReadDefects(seed(plan, anchor, `${anchor} Read \`<that directory>/skills/devflow:go/SKILL.md\` with the Read tool.`)))
+      .toEqual(['3 skills/devflow: paths, expected 2'])
+    expect(collectPlanDirReadDefects(seed(plan, PLAN_COMPLIANCE_REFERENCE_PATH, 'skills/devflow:gap-analysis/references/other.md')))
+      .toEqual([`the skills paths are skills/devflow:agent-references/references/commands/plan-levels.md, skills/devflow:gap-analysis/references/other.md, expected ${PLAN_LEVEL_REFERENCE_PATH}, ${PLAN_COMPLIANCE_REFERENCE_PATH}`])
+    const readPart = `run \`${SANCTIONED_RESOLUTION_PRINT}\` in Bash and Read \`<that directory>/${PLAN_LEVEL_REFERENCE_PATH}\` with the Read tool`
+    expect(plan, 'the levels read is in the compiled command').toContain(readPart)
+    const phase3 = '#### Phase 3: Explore Requirements (Parallel)\n\n'
+    const moved = seed(seed(plan, readPart, 'read the levels reference'), phase3, `${phase3}${readPart}.\n\n`)
+    expect(collectPlanDirReadDefects(moved)).toEqual([
+      'the sanctioned resolution line sits outside the gate-level block',
+      'the levels reference path sits outside the gate-level block',
+    ])
+    const pathFirst = `Read \`<that directory>/${PLAN_LEVEL_REFERENCE_PATH}\` with the Read tool, after you run \`${SANCTIONED_RESOLUTION_PRINT}\` in Bash`
+    expect(collectPlanDirReadDefects(seed(plan, readPart, pathFirst))).toEqual(['the levels reference path comes before the sanctioned resolution line'])
+    expect(collectPlanDirReadDefects(`${plan}\nRead {claude_dir}/x.`)).toEqual(['a {claude_dir} placeholder'])
   })
 
   it('red probe: the superseded presence gate, seeded into the real compiled command, is reported', () => {

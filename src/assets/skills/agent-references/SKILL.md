@@ -16,7 +16,9 @@ allowed-tools: Read
      the condition and the read path, so a run that never takes the branch never carries its text.
      Only text with no learning arm and no Git-spawn fence moves.
      /code-review reads commands/code-review-levels.md on its default path (standard or lean), once
-     per run; a failed read applies the full sets. -->
+     per run; a failed read applies the full sets.
+     /plan reads commands/plan-levels.md at standard or lean, once per run; a failed read runs the
+     full shape. -->
 
 ## Iron Law
 

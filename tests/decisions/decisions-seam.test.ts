@@ -79,8 +79,6 @@ function collectKnownTypes(commands: ReadonlyArray<readonly [string, string]>): 
   }
   for (const [, text] of commands) {
     for (const m of text.matchAll(SPAWNED_TYPE)) known.add(m[1])
-    // A built-in phase can be named in prose alone ("Spawn 3 Plan agents").
-    for (const m of text.matchAll(/\b[Ss]pawn (?:[\w-]+ )?(?:[\w-]+ )?([A-Z][A-Za-z]+) agents?\b/g)) known.add(m[1])
   }
   return known
 }

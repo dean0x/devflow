@@ -28,7 +28,7 @@ import { existsSync, readFileSync, readdirSync, type Dirent } from 'fs'
 import * as path from 'path'
 import { getAllAgentNames } from '../src/core/plugins.js'
 import { LEGACY_AGENT_KEYS, canonicaliseAgentKeys } from '../src/core/agent-models.js'
-import { collectValidAgentTypes, requireDistFiles, requireDistFile, resolveAgentSource, resolveAllAgents } from './helpers.js'
+import { BUILT_IN_SPAWN_TYPES, collectValidAgentTypes, requireDistFiles, requireDistFile, resolveAgentSource, resolveAllAgents } from './helpers.js'
 
 const ROOT = path.resolve(import.meta.dirname, '..')
 const ASSETS_DIR = path.join(ROOT, 'src', 'assets')
@@ -687,6 +687,28 @@ function collectValidListDefects(host: string, text: string, roster: ReadonlySet
 }
 
 /**
+ * A `subagent_type` literal: `subagent_type="X"`, `subagent_type: "X"` and the shell-escaped
+ * `subagent_type=\"X\"` form used inside hook heredoc strings.
+ */
+const SPAWN_LITERAL_RE = /subagent_type[=:]\s*\\?"([^"\\]+)\\?"/g
+
+/**
+ * Named collector: the `subagent_type` literals in `content` that name no spawnable type. A literal
+ * passes when it byte-equals a live form-B name, or an entry of BUILT_IN_SPAWN_TYPES. `Plan` is a Claude
+ * Code built-in that devflow ships no agent file for, so no form-B name stands behind it. The compare is
+ * exact: `plan`, `PLAN` and `general-purpose` are reported.
+ */
+export function collectSpawnLiteralDefects(displayPath: string, content: string, formBNames: ReadonlySet<string>): string[] {
+  const out: string[] = []
+  for (const m of content.matchAll(SPAWN_LITERAL_RE)) {
+    const name = m[1]
+    if (formBNames.has(name) || BUILT_IN_SPAWN_TYPES.includes(name)) continue
+    out.push(`  ${displayPath}: subagent_type "${name}" does not byte-equal any agent frontmatter name:`)
+  }
+  return out
+}
+
+/**
  * Parse the "| AgentName | tier | … |" roster table from _roster.mds source.
  * Returns name → model tier.
  */
@@ -882,7 +904,9 @@ describe('GAP-2: agentType: values in dist ↔ declared roster', () => {
      * pass both while failing at spawn time. This closes that hole: every
      * literal must byte-equal an actual frontmatter name: value. Explore is
      * one: devflow's explore.md ships `name: Explore`, so the built-in's name
-     * needs no exemption.
+     * needs no exemption. Plan is the other built-in, and devflow ships no
+     * agent file for it, so the closed set BUILT_IN_SPAWN_TYPES admits it by
+     * its exact name.
      */
     // Truth set: the real frontmatter name: values via the resolver, not a derived transform.
     const agents = resolveAllAgents()
@@ -891,21 +915,11 @@ describe('GAP-2: agentType: values in dist ↔ declared roster', () => {
       [...agents.values()].map(source => readFrontmatterName(source.path)),
     )
 
-    // Matches subagent_type="X", subagent_type: "X", and the shell-escaped
-    // subagent_type=\"X\" form used inside hook heredoc strings.
-    const re = /subagent_type[=:]\s*\\?"([^"\\]+)\\?"/g
-
     let matchCount = 0
     const violations: string[] = []
     const scanContent = (displayPath: string, content: string) => {
-      for (const m of content.matchAll(re)) {
-        matchCount++
-        const name = m[1]
-        if (formBNames.has(name)) continue
-        violations.push(
-          `  ${displayPath}: subagent_type "${name}" does not byte-equal any agent frontmatter name:`,
-        )
-      }
+      matchCount += [...content.matchAll(SPAWN_LITERAL_RE)].length
+      violations.push(...collectSpawnLiteralDefects(displayPath, content, formBNames))
     }
 
     for (const f of requireDistFiles()) {
@@ -929,6 +943,30 @@ describe('GAP-2: agentType: values in dist ↔ declared roster', () => {
       violations,
       `Case-exact subagent_type mismatches (spawn resolution is exact; Guard 5 normalizes):\n${violations.join('\n')}`,
     ).toHaveLength(0)
+  })
+
+  it('known-bad probes: the built-in Plan type passes by exact name; general-purpose, plan and PLAN are reported', () => {
+    // Plan is a Claude Code built-in with no agent file, so it is in no form-B set. BUILT_IN_SPAWN_TYPES is
+    // closed: a new entry needs a recorded decision.
+    expect(BUILT_IN_SPAWN_TYPES).toEqual(['Plan'])
+
+    const formBNames = new Set(['Explore', 'Synthesize', 'Design'])
+    const defectsOf = (content: string): string[] => collectSpawnLiteralDefects('probe.md', content, formBNames)
+    const defect = (name: string): string => `  probe.md: subagent_type "${name}" does not byte-equal any agent frontmatter name:`
+
+    // Controls: a form-B name is clean, and so is the built-in in each spelling the corpus uses.
+    expect(defectsOf('Agent(subagent_type="Explore"):')).toEqual([])
+    expect(defectsOf('Agent(subagent_type="Plan"):')).toEqual([])
+    expect(defectsOf('Spawn 3 `Agent(subagent_type="Plan")` agents')).toEqual([])
+    expect(defectsOf('subagent_type: "Plan"')).toEqual([])
+    expect(defectsOf('subagent_type=\\"Plan\\"')).toEqual([])
+
+    // Probes: the allow set is the exact name Plan and nothing nearby.
+    expect(defectsOf('Agent(subagent_type="general-purpose"):')).toEqual([defect('general-purpose')])
+    expect(defectsOf('Agent(subagent_type="plan"):')).toEqual([defect('plan')])
+    expect(defectsOf('Agent(subagent_type="PLAN"):')).toEqual([defect('PLAN')])
+    expect(defectsOf('Agent(subagent_type="Plan "):')).toEqual([defect('Plan ')])
+    expect(defectsOf('Agent(subagent_type="Plan"): then Agent(subagent_type="plan"):')).toEqual([defect('plan')])
   })
 })
 

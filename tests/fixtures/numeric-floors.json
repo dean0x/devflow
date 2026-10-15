@@ -501,6 +501,14 @@
       "description": "D-CMD-REF-HAND: references/commands/code-review-levels.md of the agent-references skill, in bytes. /code-review reads it once per run at the standard level (the default) or lean, so it is standing context on the default path. Measured 1,349 after the manifest list grew, with no headroom. May be LOWERED, never raised."
     },
     {
+      "id": "plan-levels-ref-max",
+      "ceiling": 4056,
+      "pattern": "const PLAN_LEVELS_REF_MAX_BYTES = 4_056",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/agent-references.test.ts",
+      "description": "D-CMD-REF-HAND: references/commands/plan-levels.md of the agent-references skill, in bytes. /plan reads it once per run at the standard level (the default) or lean, so it is standing context on the default path. Measured 4,056 after the review fixes of #473, with no headroom. May be LOWERED, never raised."
+    },
+    {
       "id": "curate-body-max",
       "ceiling": 16710,
       "pattern": "const CURATE_BODY_MAX_BYTES = 16_710",
@@ -654,19 +662,19 @@
     },
     {
       "id": "command-plan-max",
-      "ceiling": 38018,
-      "pattern": "['plan', 'on', 38_018],",
+      "ceiling": 37997,
+      "pattern": "['plan', 'on', 37_997],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/plan.md, the learning-on build, in bytes. Measured 38,018 after #472 (38,096 when #456 closed), with no headroom. Main held 39,153 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/plan.md, the learning-on build, in bytes. Measured 37,997 after #473 (38,018 after #472, 38,096 when #456 closed), with no headroom. Main held 39,153 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-plan-learning-off-max",
-      "ceiling": 35050,
-      "pattern": "['plan', 'off', 35_050],",
+      "ceiling": 35029,
+      "pattern": "['plan', 'off', 35_029],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/learning-off/commands/plan.md, the learning-off build, in bytes. Measured 35,050 after #472 (35,126 when #456 closed), with no headroom. Main held 36,166 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/learning-off/commands/plan.md, the learning-off build, in bytes. Measured 35,029 after #473 (35,050 after #472, 35,126 when #456 closed), with no headroom. Main held 36,166 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-release-max",

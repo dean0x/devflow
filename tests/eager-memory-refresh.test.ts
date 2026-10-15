@@ -19,7 +19,8 @@ import { execSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { pollForTerminalLine } from './helpers/poll-for-terminal-line.js';
+import { waitForWorkerToFinish } from './helpers/poll-for-terminal-line.js';
+import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
 import { WORKER_AGENTS, validateWorkerValue } from '../src/core/agent-models.js';
 import { MEMORY_MIN_PERMISSION_VERSION } from '../src/cli/commands/memory.js';
 import { FORBIDDEN_ARGV } from './fixtures/forbidden-argv.js';
@@ -46,6 +47,15 @@ const BACKGROUND_UPDATER = path.join(HOOKS_DIR, 'background-memory-update');
 // ---------------------------------------------------------------------------
 // Harness helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Every fake executable in this file (claude, and the mv and cksum stand-ins) runs through
+ * the shared warm dispatcher, so no test runs a cold executable. A fake claude that is new
+ * for each test pays the macOS first-exec hold inside the worker's version probe, which is
+ * bounded at 1 s in one test and 10 s in the others: the probe then kills the fake before
+ * its first line (a missing probe-pid.txt), or the worker falls back to the legacy argv.
+ */
+const writeFakeExecutable = useWarmFakeExecutables();
 
 /** Run a hook with a custom PATH prefix (fake claude shim intercepts spawning) */
 function runHookWithFakeClaude(
@@ -195,7 +205,7 @@ function buildNoCksumPath(tmpBase: string): string {
 function createFakeClaudeShim(shimDir: string, memFile: string): void {
   const bin = path.join(shimDir, 'claude');
   const stagedFile = `${memFile}.new`;
-  fs.writeFileSync(
+  writeFakeExecutable(
     bin,
     answersVersion(`#!/bin/bash
 # Fake claude shim for tests — writes to staged path, not real path
@@ -205,7 +215,6 @@ echo "- test memory content written by fake claude" >> "${stagedFile}"
 exit 0
 `)
   );
-  fs.chmodSync(bin, 0o755);
 }
 
 /**
@@ -216,11 +225,10 @@ exit 0
 function createPromptCapturingShim(shimDir: string, stagedFile: string): string {
   const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
   const claudeBin = path.join(shimDir, 'claude');
-  fs.writeFileSync(
+  writeFakeExecutable(
     claudeBin,
     answersVersion(`#!/bin/bash\ncat > "${stdinCapture}"\necho "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"\necho "## Now" >> "${stagedFile}"\nexit 0\n`)
   );
-  fs.chmodSync(claudeBin, 0o755);
   return stdinCapture;
 }
 
@@ -605,8 +613,7 @@ describe('S4: AC-F3/P3 — watchdog and failure path', () => {
   it('AC-F3/failure: claude exits 1 → .processing retained, .last-refresh-ok NOT created', () => {
     // Shim exits 1 immediately — simulates a failed claude invocation
     const failBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(failBin, answersVersion('#!/bin/bash\nexit 1\n'));
-    fs.chmodSync(failBin, 0o755);
+    writeFakeExecutable(failBin, answersVersion('#!/bin/bash\nexit 1\n'));
 
     const claimed = readQueueBytes(projectDir);
     runWorker(projectDir, homeDir, shimDir);
@@ -620,8 +627,7 @@ describe('S4: AC-F3/P3 — watchdog and failure path', () => {
   it('AC-F3/watchdog-behavioral: worker SURVIVES watchdog kill; .last-refresh-ok NOT touched; .processing retained', () => {
     // Hanging fake claude — sleeps indefinitely so the watchdog must fire.
     const hangBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(hangBin, answersVersion('#!/bin/bash\nsleep 300\n'));
-    fs.chmodSync(hangBin, 0o755);
+    writeFakeExecutable(hangBin, answersVersion('#!/bin/bash\nsleep 300\n'));
 
     // Set DEVFLOW_BG_WATCHDOG_SECS=2 so the watchdog fires after 2s, not 120s.
     // The 5s SIGTERM->SIGKILL grace period is NOT made short here — the fake claude
@@ -929,10 +935,12 @@ describe('S11: AC-C3 — no memory.* marker in .devflow/dream/ after a memory-wo
       shimDir
     );
 
-    // Wait for background-memory-update to start — prevents afterEach rmSync racing
-    // with an in-flight detached worker. Bounded: 4000ms × ≤3 attempts; 15000ms it-timeout.
-    const logFile = workerLogPath(projectDir, homeDir);
-    await pollForTerminalLine(logFile, 'Starting (CWD=', 4000, 3);
+    // Wait for background-memory-update to FINISH, not to start: it is detached, and it keeps
+    // writing into the project folder (the probe, the lock, the queue claim, the staged swap)
+    // long after its first log line, so afterEach would remove the folder under it and leave
+    // an orphan retrying the lock for up to 90 s. The worker's last line is its outcome, or the
+    // reason it skipped. Bounded: 4000ms × ≤3 attempts; 15000ms it-timeout.
+    await waitForWorkerToFinish(workerLogPath(projectDir, homeDir));
 
     const dreamDir = path.join(projectDir, '.devflow', 'dream');
     const memMarkers = fs.readdirSync(dreamDir).filter((f) => f.startsWith('memory'));
@@ -977,7 +985,7 @@ describe('S13: D56c crash-recovery — leftover .processing merged with new queu
     // Capture the stdin the fake claude receives so we can assert both batches are present
     const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
     const claudeBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(
+    writeFakeExecutable(
       claudeBin,
       answersVersion(`#!/bin/bash
 # Record stdin so the test can assert both turn-batches are present
@@ -989,7 +997,6 @@ echo "- crash-recovery test" >> "${memFile}.new"
 exit 0
 `)
     );
-    fs.chmodSync(claudeBin, 0o755);
 
     const ts = Math.floor(Date.now() / 1000);
 
@@ -1037,7 +1044,7 @@ exit 0
 
     // Use a fake claude that records stdin and writes a success memory file
     const claudeBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(
+    writeFakeExecutable(
       claudeBin,
       answersVersion(`#!/bin/bash
 # Drain stdin (required so the worker's <<< doesn't stall)
@@ -1049,7 +1056,6 @@ echo "- overflow cap test" >> "${memFile}.new"
 exit 0
 `)
     );
-    fs.chmodSync(claudeBin, 0o755);
 
     const ts = Math.floor(Date.now() / 1000);
 
@@ -1089,8 +1095,7 @@ exit 0
     const processingFile = path.join(memoryDir, '.pending-turns.processing');
     const queueFile = path.join(memoryDir, '.pending-turns.jsonl');
     const failBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(failBin, answersVersion('#!/bin/bash\ncat > /dev/null\nexit 1\n'));
-    fs.chmodSync(failBin, 0o755);
+    writeFakeExecutable(failBin, answersVersion('#!/bin/bash\ncat > /dev/null\nexit 1\n'));
 
     const ts = Math.floor(Date.now() / 1000);
     const rows = (prefix: string, count: number, from: number): string =>
@@ -1170,8 +1175,7 @@ describe('S14: .last-refresh-ok baseline-before-run discipline', () => {
     const baselineMtimeMs = fs.statSync(okFile).mtimeMs;
 
     const failBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(failBin, answersVersion('#!/bin/bash\nexit 1\n'));
-    fs.chmodSync(failBin, 0o755);
+    writeFakeExecutable(failBin, answersVersion('#!/bin/bash\nexit 1\n'));
 
     runWorker(projectDir, homeDir, shimDir);
 
@@ -1217,7 +1221,7 @@ describe('S15: stdin/argv safety — prompt content delivered via STDIN, not arg
 
     // Fake claude records both argv and stdin, then writes a success memory file
     const claudeBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(
+    writeFakeExecutable(
       claudeBin,
       answersVersion(`#!/bin/bash
 # Record argv (all positional arguments as a single line)
@@ -1231,7 +1235,6 @@ echo "- stdin safety test" >> "${memFile}.new"
 exit 0
 `)
     );
-    fs.chmodSync(claudeBin, 0o755);
 
     // Use a highly distinctive sentinel value that cannot appear in any argv flag
     const SENTINEL = 'UNIQUE_TURN_CONTENT_FOR_STDIN_SAFETY_TEST';
@@ -1396,8 +1399,7 @@ describe('S17: degraded path — no jq + no node → conservative exit, no memor
     // Fake claude shim that exits 0 — placed in shimDir so `command -v claude` succeeds.
     // The binary gate passes, so the worker enters the degraded JSON extraction path.
     const claudeBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(claudeBin, answersVersion('#!/bin/bash\nexit 0\n'));
-    fs.chmodSync(claudeBin, 0o755);
+    writeFakeExecutable(claudeBin, answersVersion('#!/bin/bash\nexit 0\n'));
 
     // Build a PATH: shimDir (has claude) + symlink farm (no jq, no node) + /bin
     const noJsonFarm = buildNoJsonParsePath(os.tmpdir());
@@ -1524,7 +1526,7 @@ describe('S18: AC-F10 — qa rows in background-memory-update (orphan gate + TUR
     const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
     const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
     const claudeBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(
+    writeFakeExecutable(
       claudeBin,
       answersVersion(`#!/bin/bash
 cat > "${stdinCapture}"
@@ -1534,7 +1536,6 @@ echo "## Now" >> "${memFile}.new"
 exit 0
 `)
     );
-    fs.chmodSync(claudeBin, 0o755);
 
     const ts = Math.floor(Date.now() / 1000);
     fs.writeFileSync(
@@ -1807,7 +1808,7 @@ describe('S21: staged compare-and-swap verification paths', () => {
 
     // Fake claude writes valid staged AND modifies real file (simulates human edit mid-run)
     const claudeBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(
+    writeFakeExecutable(
       claudeBin,
       answersVersion(`#!/bin/bash
 echo "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"
@@ -1820,7 +1821,6 @@ echo "- human edit during worker run" >> "${memFile}"
 exit 0
 `)
     );
-    fs.chmodSync(claudeBin, 0o755);
 
     const claimed = readQueueBytes(projectDir);
     const { exitCode } = runWorker(projectDir, homeDir, shimDir);
@@ -1854,14 +1854,13 @@ exit 0
 
     // Fake claude: drains stdin but writes NOTHING to staged path
     const claudeBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(
+    writeFakeExecutable(
       claudeBin,
       answersVersion(`#!/bin/bash
 cat > /dev/null
 exit 0
 `)
     );
-    fs.chmodSync(claudeBin, 0o755);
 
     const claimed = readQueueBytes(projectDir);
     const { exitCode } = runWorker(projectDir, homeDir, shimDir);
@@ -1882,7 +1881,7 @@ exit 0
   it('staged path in prompt: worker instructs claude to write to .new staged path', () => {
     const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
     const claudeBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(
+    writeFakeExecutable(
       claudeBin,
       answersVersion(`#!/bin/bash
 cat > "${stdinCapture}"
@@ -1891,7 +1890,6 @@ echo "## Now" >> "${stagedFile}"
 exit 0
 `)
     );
-    fs.chmodSync(claudeBin, 0o755);
 
     const { exitCode } = runWorker(projectDir, homeDir, shimDir);
     expect(exitCode).toBe(0);
@@ -1911,7 +1909,7 @@ exit 0
     // that is not the .new path.
     const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
     const claudeBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(
+    writeFakeExecutable(
       claudeBin,
       answersVersion(`#!/bin/bash
 cat > "${stdinCapture}"
@@ -1919,7 +1917,6 @@ echo "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"
 exit 0
 `)
     );
-    fs.chmodSync(claudeBin, 0o755);
 
     runWorker(projectDir, homeDir, shimDir);
     const capturedStdin = fs.readFileSync(stdinCapture, 'utf-8');
@@ -1940,7 +1937,7 @@ exit 0
     expect(fs.existsSync(memFile)).toBe(false);
 
     const claudeBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(
+    writeFakeExecutable(
       claudeBin,
       answersVersion(`#!/bin/bash
 cat > /dev/null
@@ -1954,7 +1951,6 @@ echo "- created externally during worker run" >> "${memFile}"
 exit 0
 `)
     );
-    fs.chmodSync(claudeBin, 0o755);
 
     const claimed = readQueueBytes(projectDir);
     const { exitCode } = runWorker(projectDir, homeDir, shimDir);
@@ -1977,7 +1973,7 @@ exit 0
     fs.writeFileSync(memFile, '<!-- memory-head: old branch: main -->\n## Now\n- original\n');
 
     const claudeBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(
+    writeFakeExecutable(
       claudeBin,
       answersVersion(`#!/bin/bash
 cat > /dev/null
@@ -1986,7 +1982,6 @@ echo "## Now" >> "${stagedFile}"
 exit 0
 `)
     );
-    fs.chmodSync(claudeBin, 0o755);
 
     const claimed = readQueueBytes(projectDir);
     const { exitCode } = runWorker(projectDir, homeDir, shimDir);
@@ -2015,14 +2010,13 @@ exit 0
 
     const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
     const claudeBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(
+    writeFakeExecutable(
       claudeBin,
       answersVersion(`#!/bin/bash
 cat > "${stdinCapture}"
 exit 0
 `)
     );
-    fs.chmodSync(claudeBin, 0o755);
 
     runWorker(projectDir, homeDir, shimDir);
     const capturedStdin = fs.readFileSync(stdinCapture, 'utf-8');
@@ -2056,9 +2050,9 @@ exit 0
     );
 
     // Run 1 fake claude: writes staged file AND mutates the real file → CONFLICT
-    const claudeBin1 = path.join(shimDir, 'claude-run1');
-    fs.writeFileSync(
-      claudeBin1,
+    const claudeBin = path.join(shimDir, 'claude');
+    writeFakeExecutable(
+      claudeBin,
       answersVersion(`#!/bin/bash
 echo "<!-- memory-head: worker-run1 branch: main -->" > "${stagedFile}"
 echo "## Now" >> "${stagedFile}"
@@ -2070,11 +2064,6 @@ echo "- human edited during run1" >> "${memFile}"
 exit 0
 `)
     );
-    fs.chmodSync(claudeBin1, 0o755);
-    // Symlink as 'claude' for Run 1
-    const claudeBin = path.join(shimDir, 'claude');
-    if (fs.existsSync(claudeBin)) fs.unlinkSync(claudeBin);
-    fs.symlinkSync(claudeBin1, claudeBin);
 
     const run1 = runWorker(projectDir, homeDir, shimDir);
     expect(run1.exitCode).toBe(0);
@@ -2092,9 +2081,9 @@ exit 0
     // This proves no turns are lost across the CONFLICT.
 
     const stdinCapture2 = path.join(shimDir, 'stdin-captured-run2.txt');
-    const claudeBin2 = path.join(shimDir, 'claude-run2');
-    fs.writeFileSync(
-      claudeBin2,
+    // The Run 2 fake replaces the Run 1 fake behind the same 'claude'
+    writeFakeExecutable(
+      claudeBin,
       answersVersion(`#!/bin/bash
 cat > "${stdinCapture2}"
 echo "<!-- memory-head: testsha2 branch: main -->" > "${stagedFile}"
@@ -2103,10 +2092,6 @@ echo "- clean run2 output" >> "${stagedFile}"
 exit 0
 `)
     );
-    fs.chmodSync(claudeBin2, 0o755);
-    // Repoint 'claude' to Run 2 shim
-    fs.unlinkSync(claudeBin);
-    fs.symlinkSync(claudeBin2, claudeBin);
 
     const run2 = runWorker(projectDir, homeDir, shimDir);
     expect(run2.exitCode).toBe(0);
@@ -2367,8 +2352,7 @@ describe('S23: reconciliation-aware worker prompt — COMMITS_SINCE and TODAY (B
 
     const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
     const claudeBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(claudeBin, answersVersion(`#!/bin/bash\ncat > "${stdinCapture}"\necho "<!-- memory-head: testsha branch: ${defaultBranch} -->" > "${stagedFile}"\necho "## Now" >> "${stagedFile}"\nexit 0\n`));
-    fs.chmodSync(claudeBin, 0o755);
+    writeFakeExecutable(claudeBin, answersVersion(`#!/bin/bash\ncat > "${stdinCapture}"\necho "<!-- memory-head: testsha branch: ${defaultBranch} -->" > "${stagedFile}"\necho "## Now" >> "${stagedFile}"\nexit 0\n`));
 
     const { exitCode } = runWorker(projectDir, homeDir, shimDir);
     expect(exitCode).toBe(0);
@@ -2610,7 +2594,7 @@ describe('S25: CAS heartbeat, fail-closed checksum, and orphan-gate retry-batch 
 
     // Fake claude writes valid staged AND modifies real file — triggers CONFLICT
     const claudeBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(
+    writeFakeExecutable(
       claudeBin,
       answersVersion(`#!/bin/bash
 echo "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"
@@ -2619,7 +2603,6 @@ echo "<!-- memory-head: human branch: main -->" > "${memFile}"
 exit 0
 `)
     );
-    fs.chmodSync(claudeBin, 0o755);
 
     const { exitCode } = runWorker(projectDir, homeDir, shimDir);
     expect(exitCode).toBe(0);
@@ -2646,11 +2629,10 @@ exit 0
     try {
       // Add a fake claude that would succeed if reached — proves the cksum check fires first
       const claudeBin = path.join(noCksumDir, 'claude');
-      fs.writeFileSync(
+      writeFakeExecutable(
         claudeBin,
         answersVersion(`#!/bin/bash\necho "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"\nexit 0\n`)
       );
-      fs.chmodSync(claudeBin, 0o755);
 
       // Override PATH to only the farm dir — no /bin, so cksum is unreachable
       const { exitCode } = runWorker(projectDir, homeDir, noCksumDir, {
@@ -2679,12 +2661,11 @@ exit 0
     // cksum shim that always exits 1: command -v cksum finds it (startup assert passes),
     // but cksum "$MEMORY_FILE" fails → CKSUM_FAILED="true" → conflict outcome, never match
     const cksumShim = path.join(shimDir, 'cksum');
-    fs.writeFileSync(cksumShim, `#!/bin/bash\nexit 1\n`);
-    fs.chmodSync(cksumShim, 0o755);
+    writeFakeExecutable(cksumShim, `#!/bin/bash\nexit 1\n`);
 
     // Fake claude writes a valid staged file (would be swapped if CAS permitted)
     const claudeBin = path.join(shimDir, 'claude');
-    fs.writeFileSync(
+    writeFakeExecutable(
       claudeBin,
       answersVersion(`#!/bin/bash
 echo "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"
@@ -2692,7 +2673,6 @@ echo "## Now" >> "${stagedFile}"
 exit 0
 `)
     );
-    fs.chmodSync(claudeBin, 0o755);
 
     const { exitCode } = runWorker(projectDir, homeDir, shimDir);
     expect(exitCode).toBe(0);
@@ -2810,7 +2790,7 @@ describe('S26: pre-compact backup.json is replaced by a rename, never rewritten 
     const shimDir = path.join(homeDir, 'shim');
     fs.mkdirSync(shimDir);
     const refused = path.join(homeDir, 'mv-refused');
-    fs.writeFileSync(path.join(shimDir, 'mv'), [
+    writeFakeExecutable(path.join(shimDir, 'mv'), [
       '#!/bin/bash',
       'for last in "$@"; do :; done',
       'case "$last" in',
@@ -2818,7 +2798,6 @@ describe('S26: pre-compact backup.json is replaced by a rename, never rewritten 
       'esac',
       'exec "$REAL_MV" "$@"',
     ].join('\n') + '\n');
-    fs.chmodSync(path.join(shimDir, 'mv'), 0o755);
     const realMv = execSync('command -v mv', { shell: '/bin/bash', encoding: 'utf-8' }).trim();
 
     const run = runPreCompact({
@@ -2939,11 +2918,10 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
   /** A claude stand-in that records that it ran and writes a valid staged memory file. */
   function claudeThatRecordsItsRun(): string {
     const invoked = path.join(shimDir, 'claude-invoked');
-    fs.writeFileSync(
+    writeFakeExecutable(
       path.join(shimDir, 'claude'),
       answersVersion(`#!/bin/bash\ncat > /dev/null\n: > "${invoked}"\necho "<!-- memory-head: testsha branch: main -->" > "${memoryDir}/WORKING-MEMORY.md.new"\nexit 0\n`),
     );
-    fs.chmodSync(path.join(shimDir, 'claude'), 0o755);
     return invoked;
   }
 
@@ -3001,8 +2979,7 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
     // 160 leftover lines plus 60 new ones: past the 200-line cap, so the trim runs.
     fs.writeFileSync(batch, rows('old', 160), { mode: 0o600 });
     fs.writeFileSync(path.join(memoryDir, '.pending-turns.jsonl'), rows('new', 60), { mode: 0o600 });
-    fs.writeFileSync(path.join(shimDir, 'claude'), answersVersion('#!/bin/bash\ncat > /dev/null\nexit 1\n'));
-    fs.chmodSync(path.join(shimDir, 'claude'), 0o755);
+    writeFakeExecutable(path.join(shimDir, 'claude'), answersVersion('#!/bin/bash\ncat > /dev/null\nexit 1\n'));
 
     // The copy's name ends in the worker's PID, and exec keeps the PID, so the
     // wrapper plants the link at exactly that name, checks it is there, and then
@@ -3031,8 +3008,7 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
     // 160 leftover lines plus 60 new ones: past the 200-line cap, so the trim runs.
     fs.writeFileSync(batch, rows('old', 160), { mode: 0o600 });
     fs.writeFileSync(path.join(memoryDir, '.pending-turns.jsonl'), rows('new', 60), { mode: 0o600 });
-    fs.writeFileSync(path.join(shimDir, 'claude'), answersVersion('#!/bin/bash\ncat > /dev/null\nexit 1\n'));
-    fs.chmodSync(path.join(shimDir, 'claude'), 0o755);
+    writeFakeExecutable(path.join(shimDir, 'claude'), answersVersion('#!/bin/bash\ncat > /dev/null\nexit 1\n'));
     const fifo = path.join(tmp, 'fifo');
     makeFifo(fifo);
 
@@ -3257,11 +3233,10 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
     // The stand-in writes a valid staged memory and then plants the link the swap
     // renames onto. The run began with no working memory, so the swap's checksum
     // comparison alone cannot tell the link from the absent file it replaced.
-    fs.writeFileSync(
+    writeFakeExecutable(
       path.join(shimDir, 'claude'),
       answersVersion(`#!/bin/bash\ncat > /dev/null\necho "<!-- memory-head: testsha branch: main -->" > "${memoryFile}.new"\nln -s "${outsideDir}" "${memoryFile}"\nexit 0\n`),
     );
-    fs.chmodSync(path.join(shimDir, 'claude'), 0o755);
 
     expect(runWorker(projectDir, homeDir, shimDir).exitCode).toBe(0);
 
@@ -3288,11 +3263,10 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
     const fake = path.join(tmp, 'fake-staged-memory.md');
     const FAKE = '<!-- memory-head: testsha branch: main -->\n## Now\n- a file outside the project\n';
     fs.writeFileSync(fake, FAKE);
-    fs.writeFileSync(
+    writeFakeExecutable(
       path.join(shimDir, 'claude'),
       answersVersion(`#!/bin/bash\ncat > /dev/null\nln -s "${fake}" "${staged}"\nexit 0\n`),
     );
-    fs.chmodSync(path.join(shimDir, 'claude'), 0o755);
 
     expect(runWorker(projectDir, homeDir, shimDir).exitCode).toBe(0);
 
@@ -3316,11 +3290,10 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
     const okFile = path.join(memoryDir, '.last-refresh-ok');
     // The stand-in writes a valid staged memory, so the swap succeeds, and plants a
     // link at the success stamp.
-    fs.writeFileSync(
+    writeFakeExecutable(
       path.join(shimDir, 'claude'),
       answersVersion(`#!/bin/bash\ncat > /dev/null\necho "<!-- memory-head: testsha branch: main -->" > "${memoryDir}/WORKING-MEMORY.md.new"\nln -s "${created}" "${okFile}"\nexit 0\n`),
     );
-    fs.chmodSync(path.join(shimDir, 'claude'), 0o755);
 
     expect(runWorker(projectDir, homeDir, shimDir).exitCode).toBe(0);
 
@@ -3339,14 +3312,13 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
     // The stand-in writes a valid staged memory and a working memory of its own, so
     // the swap is a conflict, whose heartbeat touches the batch, and puts a link in
     // the batch's place.
-    fs.writeFileSync(
+    writeFakeExecutable(
       path.join(shimDir, 'claude'),
       answersVersion(
         `#!/bin/bash\ncat > /dev/null\necho "<!-- memory-head: testsha branch: main -->" > "${memoryFile}.new"\n` +
           `echo "an edit made during the run" > "${memoryFile}"\nrm "${batch}"\nln -s "${created}" "${batch}"\nexit 0\n`,
       ),
     );
-    fs.chmodSync(path.join(shimDir, 'claude'), 0o755);
 
     expect(runWorker(projectDir, homeDir, shimDir).exitCode).toBe(0);
 
@@ -3642,7 +3614,7 @@ function createRecordingClaude(
   const resultFile = path.join(shimDir, 'result-body.json');
   if (options.resultJson !== undefined) fs.writeFileSync(resultFile, options.resultJson);
   const bin = path.join(shimDir, 'claude');
-  fs.writeFileSync(
+  writeFakeExecutable(
     bin,
     [
       '#!/bin/bash',
@@ -3674,7 +3646,6 @@ function createRecordingClaude(
       '',
     ].join('\n'),
   );
-  fs.chmodSync(bin, 0o755);
   return rec;
 }
 
@@ -3833,6 +3804,9 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
       expect(recordedArgv(rec)).toEqual(legacyArgv(WORKER_AGENTS.memory.model, ruleStaged()));
       expectSwapCompleted();
+      // The probe writes its PID as its first line. A missing file means the fake was killed
+      // by the 1 s bound before it started, and the kill below would prove nothing.
+      expect(fs.existsSync(rec.probePidFile), 'the fake claude started and recorded its PID before the 1 s probe bound killed it').toBe(true);
       const pid = Number(fs.readFileSync(rec.probePidFile, 'utf-8').trim());
       expect(Number.isInteger(pid) && pid > 1, 'non-vacuity: the probe recorded its PID').toBe(true);
       expect(processExists(pid), 'the hung probe is not left running').toBe(false);
