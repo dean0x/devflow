@@ -4,9 +4,10 @@
  * Claude Code reads `CLAUDE_CONFIG_DIR` when it is set to an absolute path, else
  * `~/.claude` (D-CLAUDE-CONFIG-DIR, src/targets/claude-code/claude-paths.ts), and
  * the installer writes skills there by the same rule. A prompt must follow that
- * rule: one that probes or reads `~/.claude/…` directly, or that expands the
- * variable in a looser way, disagrees with both the moment the variable holds
- * anything but an absolute path.
+ * rule. A prompt that probes or reads `~/.claude/…` directly disagrees with the
+ * installer whenever the variable holds an absolute path. A prompt that expands the
+ * variable in a looser way disagrees whenever it holds a value that is not an
+ * absolute path.
  *
  * THE SANCTIONED FORM is one shell line that resolves the directory the way the
  * installer does, and a prompt names paths under the result (`$d/…`,
@@ -14,33 +15,53 @@
  *
  *   d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac;
  *
+ * A parity test runs the line in bash and calls getClaudeDirectory under the same
+ * environment, and the two must print the same directory.
+ *
  * THIS GUARD IS AN ALLOWLIST. Per file, each exact copy of the sanctioned line is
- * removed, and so is each piece of rule prose in ALLOWED_RULE_PROSE that is scoped
- * to that file (it is replaced by its short form). Nothing else may name the
- * variable. What is left is checked by `collectClaudeDirDefects`, one function per
- * rule, and every defect names its rule:
- * - `stray-variable`: `CLAUDE_CONFIG_DIR` in any other spelling or place;
- * - `home-claude-path`: a path INTO the home Claude directory (`~/.claude/x`,
- *   `$HOME/.claude/x`, `${HOME}/.claude/x`), or the directory ITSELF, whatever
- *   verb surrounds it and whether or not the variable is named beside it;
- * - `unrooted-path`: a `skills/devflow:`, `commands/devflow/`, `agents/devflow/`
- *   or `rules/devflow` path not directly under `$d/`, `<that directory>/` or
- *   `{claude_dir}/`;
- * - `unbound-that-directory`, `unbound-d-root`, `unbound-claude-dir-root`: a root
- *   used in a file that never sets it (the sanctioned line followed by the
- *   `printf`, the sanctioned line, or that line or allowlist entry (a));
- * - `d-reassigned`: a `d=` assignment that follows the sanctioned line.
+ * removed, and each piece of rule prose in ALLOWED_RULE_PROSE that is scoped to that
+ * file is replaced by its short form. What is left is the residue, and the residue
+ * may not name the variable. `collectClaudeDirDefects` runs one function per rule,
+ * and every defect names its rule.
+ *
+ * Four rules read the residue. For them the order of the text does not matter:
+ * - `stray-variable`: fires on `CLAUDE_CONFIG_DIR` in any other spelling or place;
+ * - `home-claude-path`: fires on a path INTO the home Claude directory
+ *   (`~/.claude/x`, `$HOME/.claude/x`, `${HOME}/.claude/x`) and on the directory
+ *   ITSELF, whatever verb surrounds it and whether or not the variable is named
+ *   beside it;
+ * - `unrooted-path`: fires on a `skills/devflow:`, `commands/devflow/`,
+ *   `agents/devflow/` or `rules/devflow` path that does not sit directly under
+ *   `$d/`, `<that directory>/` or `{claude_dir}/`;
+ * - `d-reassigned`: fires on any `d=` assignment outside the sanctioned line, at the
+ *   start of a line or after whitespace, `;`, `&`, `|`, `(` or a backtick, and on a
+ *   `for d in` loop. `cut -d=` stays clean.
+ *
+ * Three rules read the whole file as written, and each checks a root against its
+ * binder:
+ * - `unbound-d-root`: fires on a `$d/` that has no sanctioned line earlier on the
+ *   SAME line. Order and line both matter, because each Bash call is a fresh shell
+ *   and `d` does not carry from one line to the next;
+ * - `unbound-that-directory`: fires when the first `<that directory>` of a file has
+ *   no sanctioned line followed by its `printf` earlier in the file. Order matters,
+ *   and the binder may sit on another line;
+ * - `unbound-claude-dir-root`: fires on `{claude_dir}/` in a file that holds neither
+ *   the sanctioned line nor the text of an ALLOWED_RULE_PROSE entry that carries
+ *   `binds` and is scoped to that file. It checks presence only, because the rule
+ *   prose that defines `{claude_dir}` follows its first use in the file.
+ *
  * SITE_ROWS fixes how many sanctioned lines each file holds. A line that differs
  * from the constant by any byte does not count as a site, so its row fails.
  *
  * WHAT A CLEAN RESULT DOES NOT COVER: a path assembled from parts
  * (`$HOME` + `/.claude`), a variable holding the literal, an absolute path spelt
  * with the user's own home (`/Users/x/.claude`), an empty `HOME` (the installer
- * refuses it, where the sanctioned line yields `/.claude`), and anything outside
- * the corpus below. Of the hook, only the compaction directive (the text of `COMPACT_SECTION`)
- * is scanned, because the model follows it as text; the hook's own `case` tests
- * are code, and they stay out of scope. Other hooks and the TypeScript CLI resolve
- * the directory in code (getClaudeDirectory) and are held to it by their own tests.
+ * refuses it, where the sanctioned line yields `/.claude`; a known-divergence test
+ * pins the line's value), and anything outside the corpus below. Of the hook, only
+ * the compaction directive (the text of `COMPACT_SECTION`) is scanned, because the
+ * model follows it as text; the hook's own `case` tests are code, and they stay out
+ * of scope. Other hooks and the TypeScript CLI resolve the directory in code
+ * (getClaudeDirectory) and are held to it by their own tests.
  *
  * THE CORPUS is the installed prompt surface by class, each with a sentinel and a
  * floor so a class that went missing fails by name: compiled commands, every
@@ -579,7 +600,7 @@ describe('no prompt reaches the Claude directory outside the CLAUDE_CONFIG_DIR r
     }
   })
 
-  it('red probes: a root used in a file that never sets it, and a `d=` assignment after the sanctioned line, are reported', () => {
+  it('red probes: a root with no binder, a root used before its binder, and a `d=` assignment outside the sanctioned line are each reported', () => {
     expectReported(WITHOUT_LINE, 'ls "$d/skills/devflow:agent-references"', 'unbound-d-root')
     expectReported(WITHOUT_LINE, `Read "$d/skills/devflow:agent-references" first, then ${SANCTIONED_RESOLUTION}`, 'unbound-d-root')
     expectReported(WITHOUT_LINE, 'Read `<that directory>/skills/devflow:agent-references`.', 'unbound-that-directory')
