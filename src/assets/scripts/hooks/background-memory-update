@@ -892,9 +892,9 @@ fi
 # Why Write-only is safe: the staged path is empty before every run (the removal and
 # the checked precondition after the lock above, then the check just before the spawn),
 # so the one Write is always a create. Write refuses an existing file that has not been
-# read, and a worker whose every Write failed that way once exited 0 with nothing
-# written. That is why the staged path is checked twice, and why a denied Write is
-# counted from the JSON result and logged, not left to look like a success.
+# read, and a refused Write can leave the run's exit status at 0. That is why the staged
+# path is checked twice, and why a denied Write is counted from the JSON result and
+# logged, not left to look like a success.
 #
 # The lean floor is 2.1.286, the lowest CLI on which the whole lean argv was run and its
 # flags, the settings `env` under --safe-mode and the effort override were checked
