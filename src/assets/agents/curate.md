@@ -142,7 +142,7 @@ You are not handed CLAUDE.md or the rule files, and two checks compare a lesson 
 rule that already states it: Part 1's already-encoded search and Part 2's first rung.
 Before the first of those comparisons, Read `<project root>/CLAUDE.md` once. Both also
 compare against a rules file, so list the installed ones with
-`cd "<project root>" && find "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/rules/devflow" -name '*.md'`
+`d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"; cd "<project root>" && find "$d/rules/devflow" -name '*.md'`
 and Read each once. Keep what you read for every later comparison in the run; a file that
 is missing is skipped. A run that ends before any comparison reads none of them.
 
@@ -190,8 +190,6 @@ Bad:
 {"id": "obs_fix", "type": "pitfall", "title": "Fixed the claim bug (see PF-NNN)", "rule": "Use the approach from #123 at store.cjs:88; all 9 ops do it now.", "why": "It was broken.", "scope": ["area:hooks"], "provenance": "this session"}
 ```
 
-It breaks every rule above, and its why names no failure.
-
 ## Part 1 — Capture
 
 **LLM judgment — creation bar (abstain-by-default)**:
@@ -221,7 +219,7 @@ Concrete failure → PF; forward-looking architectural choice → ADR.
 For each lesson that clears the bar:
 
 1. **Dedup before creating.** Run `list` once and read ACTIVE, INACTIVE and OBSERVATIONS;
-   `show` any line that may cover the same concern. Duplication is worse than silence.
+   `show` any line that may cover the same concern.
    - An active entry or a stored observation covers it: reinforce that row with
      `put-observation --reinforce`. When the turns sharpen or correct it, rewrite it
      instead with `put-observation --update` and its whole content.
@@ -240,7 +238,7 @@ For each lesson that clears the bar:
    cd "<project root>" && node "$HOME/.devflow/scripts/hooks/json-helper.cjs" assign-anchor pitfall obs_...
    ```
 
-   The anchor is the one stdout line. NEVER invent an ADR-NNN/PF-NNN number yourself —
+   NEVER invent an ADR-NNN/PF-NNN number yourself —
    `assign-anchor` is the only source of numbering. `… is already promoted (…)` means the
    ledger holds the observation: update it instead, restoring an inactive entry first. An
    observation you do not promote waits in the log, where a recurrence promotes it and
@@ -274,7 +272,7 @@ Then take this run's work list, once:
 cd "<project root>" && node "$HOME/.devflow/scripts/hooks/json-helper.cjs" claim-due
 ```
 
-`due none` ends Part 2. Any other output lists due entries: resolve `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`
+`due none` ends Part 2. Any other output lists due entries: run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"`
 in Bash, Read `<that directory>/skills/devflow:agent-references/references/curate/maintain.md`
 with the Read tool, and follow it for those entries.
 

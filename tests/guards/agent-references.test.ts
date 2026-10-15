@@ -20,7 +20,7 @@ import { describe, it, expect } from 'vitest'
 import { readdirSync } from 'fs'
 
 import {
-  SYNTHESIZE_MODES, agentReferencePath, isAgentBlock, parseFences, readAgentReference,
+  SANCTIONED_RESOLUTION, SYNTHESIZE_MODES, agentReferencePath, isAgentBlock, parseFences, readAgentReference,
   requireDistFile, requireDistFiles, resolveAgentSource,
 } from '../helpers.js'
 
@@ -47,7 +47,7 @@ const MODE_TEMPLATES: Readonly<Record<string, { readonly heading: string; readon
 }
 
 const REFERENCE_DIR = 'synthesize'
-const ROUTE_PATH = '${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/devflow:agent-references/references/synthesize'
+const ROUTE_PATH = '$d/skills/devflow:agent-references/references/synthesize'
 
 interface Route {
   readonly mode: string
@@ -109,6 +109,7 @@ export function collectRoutingDefects(
   }
   if (/^## Mode: /m.test(body)) out.push('the body still holds a "## Mode:" section')
   if (!section.includes(ROUTE_PATH)) out.push('the section does not give the reference directory path')
+  if (!section.includes(SANCTIONED_RESOLUTION)) out.push('the section does not resolve the directory with the sanctioned line')
   if (!section.includes('Read exactly one reference')) out.push('the section does not say to read exactly one reference')
   if (!section.includes('No `Mode:` line: read no template')) out.push('the section does not say a missing Mode line reads no template')
   if (!section.includes('answer `BLOCKED: unknown mode`')) out.push('the section does not say an unknown mode answers BLOCKED')
