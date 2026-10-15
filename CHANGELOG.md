@@ -35,6 +35,17 @@ Do the step below after you update.
   Issue [#488](https://github.com/dean0x/devflow/issues/488) (the compliance lens as a floor on
   the level) is open.
 
+### Upgrade notes — Working memory
+
+The memory worker's write is limited to its staged file. Read the items below after you update.
+
+**What you must do:**
+- Update Claude Code to 2.1.269 or newer. On an older version, working memory does not update and Claude Code shows no message. The worker log has one line that says why.
+- If a worker `env` value lives only in your project or local Claude Code settings, move it to your user settings file. The worker loads only the user settings.
+
+**Known limits:**
+- A project path that contains any of `* ? [ ] \ " { }` or a control character gets no working-memory updates. The permission rule carries the path without quoting. The worker skips the project, logs the reason and shows one message at session start. Parentheses and spaces in the path are carried as they are.
+
 ### Added
 
 - **A gate level on the settings line, and the `devflow gates` command** ([#472](https://github.com/dean0x/devflow/issues/472)). The settings line ends with `GATE_LEVEL=<full|standard|lean>`. The level comes from a personal `gateLevel` key in `.devflow/config.json`, then from the machine default `features.gateLevel` in `~/.devflow/manifest.json`, then from `standard`. The personal key may raise or lower the level. It is not a narrow-only switch, and a later change can make it narrow-only. A `gateLevel` in `project.json` is ignored, and no command writes the personal key. A malformed value reads as `full`. `devflow gates --set <level>` writes the machine default and nothing else. `devflow gates --status` shows the level in effect, the layer that decided it and the machine default. `/code-review` reads the level ([#474](https://github.com/dean0x/devflow/issues/474)); [#473](https://github.com/dean0x/devflow/issues/473) and [#480](https://github.com/dean0x/devflow/issues/480) add more readers.
