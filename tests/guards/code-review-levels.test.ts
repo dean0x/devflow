@@ -144,9 +144,15 @@ const unique = (names: readonly string[]): string[] => [...new Set(names)]
 const sameSet = (a: readonly string[], b: readonly string[]): boolean => unique(a).sort().join(',') === unique(b).sort().join(',')
 const baseName = (p: string): string => p.slice(p.lastIndexOf('/') + 1)
 
+const manifestPatterns = new Map<string, RegExp>()
+
 /** Whether a file name equals a manifest name, where `*` in the name stands for any characters. */
 function nameMatches(file: string, pattern: string): boolean {
-  const re = new RegExp(`^${pattern.split('*').map(part => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`)
+  let re = manifestPatterns.get(pattern)
+  if (re === undefined) {
+    re = new RegExp(`^${pattern.split('*').map(part => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`)
+    manifestPatterns.set(pattern, re)
+  }
   return re.test(file)
 }
 
@@ -283,8 +289,18 @@ const changesManifest = (sc: Scenario, manifests: readonly string[]): boolean =>
   changedPaths(sc).some(p => manifests.some(m => nameMatches(baseName(p), m)))
 
 /** The oracle's full-level set of one class: the set the command builds before it narrows. */
-function fullSetOf(cls: string, sc: Scenario): string[] {
-  if (cls !== 'code') return [...(FULL_REDUCED[cls] ?? [])]
+const codeFullSets = new WeakMap<Scenario, readonly string[]>()
+
+function fullSetOf(cls: string, sc: Scenario): readonly string[] {
+  if (cls !== 'code') return FULL_REDUCED[cls] ?? []
+  const cached = codeFullSets.get(sc)
+  if (cached !== undefined) return cached
+  const built = buildCodeFullSet(sc)
+  codeFullSets.set(sc, built)
+  return built
+}
+
+function buildCodeFullSet(sc: Scenario): string[] {
   const language = LANGUAGE.filter(l => sc.triggered.includes(l) && sc.stamped.includes(l))
   const conditional = CONDITIONAL.filter(c => sc.conditional.includes(c) && (c !== 'dependencies' || sc.depPath !== 'none'))
   const compliance = sc.complianceActive && sc.regulated ? ['compliance'] : []
@@ -292,7 +308,7 @@ function fullSetOf(cls: string, sc: Scenario): string[] {
 }
 
 /** The oracle's expected set at a level, from the hand-written rules and sets only. */
-function expectedSet(level: string, classes: readonly string[], sc: Scenario): string[] {
+function expectedSet(level: string, classes: readonly string[], sc: Scenario): readonly string[] {
   if (classes.length === 1 && classes[0] === 'code') {
     const full = fullSetOf('code', sc)
     if (level === 'full') return full
@@ -338,16 +354,37 @@ const STAMPED: ReadonlyArray<readonly string[]> = [[], [...LANGUAGE], ['typescri
 const TRIGGERED: ReadonlyArray<readonly string[]> = [[], ['typescript'], ['typescript', 'react', 'go']]
 const DEP_PATHS = ['none', 'package.json', 'package-lock.json', 'Podfile'] as const
 
-function* scenarios(): Generator<Scenario> {
+/** The scenario grid, built once: every probe walks the same grid. */
+const SCENARIOS: readonly Scenario[] = (() => {
+  const grid: Scenario[] = []
   for (const stamped of STAMPED) for (const triggered of TRIGGERED) for (const conditional of subsets(CONDITIONAL)) {
     for (const complianceActive of [false, true]) for (const regulated of [false, true]) for (const depPath of DEP_PATHS) {
-      yield { stamped, triggered, conditional, complianceActive, regulated, depPath }
+      grid.push({ stamped, triggered, conditional, complianceActive, regulated, depPath })
     }
   }
-}
+  return grid
+})()
 
 const describeScenario = (sc: Scenario): string =>
   `stamped=[${sc.stamped.join(',')}] triggered=[${sc.triggered.join(',')}] conditional=[${sc.conditional.join(',')}] compliance=${sc.complianceActive}/${sc.regulated} dep=${sc.depPath}`
+
+interface OracleRow { readonly full: readonly string[]; readonly want: readonly string[] }
+
+const oracleRows = new Map<string, readonly OracleRow[]>()
+
+/**
+ * The oracle's full and expected set for every scenario of one level and class combination, in grid order. The oracle
+ * reads nothing parsed, so each probe of the same run shares one table.
+ */
+function oracleFor(level: string, classes: readonly string[]): readonly OracleRow[] {
+  const key = `${level}|${classes.join('+')}`
+  let rows = oracleRows.get(key)
+  if (rows === undefined) {
+    rows = SCENARIOS.map(sc => ({ full: unique(classes.flatMap(cls => fullSetOf(cls, sc))), want: expectedSet(level, classes, sc) }))
+    oracleRows.set(key, rows)
+  }
+  return rows
+}
 
 /**
  * AC-1, AC-2, AC-3, AC-4, AC-5, AC-7, AC-8: every level, class combination and scenario. The first defect of each
@@ -358,10 +395,10 @@ export function collectSimulationDefects(parsed: ParsedRef, run: typeof simulate
   const report = (key: string, message: string): void => { if (!first.has(key)) first.set(key, message) }
   for (const level of GATE_LEVELS) for (const classes of CLASS_COMBOS) {
     const label = `${level} ${classes.join('+')}`
-    for (const sc of scenarios()) {
+    const expected = oracleFor(level, classes)
+    for (const [i, sc] of SCENARIOS.entries()) {
       const got = run(level, classes, sc, parsed)
-      const full = unique(classes.flatMap(cls => fullSetOf(cls, sc)))
-      const want = expectedSet(level, classes, sc)
+      const { full, want } = expected[i]
       if (!got.includes('security')) report(`${label}|security`, `${label}: no security (${describeScenario(sc)})`)
       if (got.some(n => !full.includes(n))) report(`${label}|subset`, `${label}: a focus outside the full set (${describeScenario(sc)})`)
       if (got.includes('compliance') && !classes.includes('code')) report(`${label}|compliance`, `${label}: compliance without the code class`)
@@ -661,7 +698,7 @@ describe('the corpus is real', () => {
     expect(GATE_LEVELS.length).toBeGreaterThanOrEqual(3)
     expect(GATE_LEVELS).toContain('full')
     expect(CLASS_COMBOS.length, 'code plus seven non-empty reduced subsets').toBe(8)
-    expect([...scenarios()].length, 'the scenario grid is empty').toBeGreaterThan(1000)
+    expect(SCENARIOS.length, 'the scenario grid is empty').toBeGreaterThan(1000)
   })
 })
 
