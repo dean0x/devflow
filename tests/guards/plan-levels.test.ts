@@ -367,11 +367,9 @@ function phaseFlow(body: string): Map<number, { produces: string[]; requires: st
   return flow
 }
 
-/** AC-3, AC-4, AC-5, AC-6, AC-9, AC-10: the reference's rows, substitutes and rules, against the command's data flow. */
-export function collectPlanLevelRefDefects(ref: string, plan: string): string[] {
+/** The phase rows: the decided header and cells, in the decided order, none above the full count. */
+function collectPhaseRowDefects(parsed: ParsedPlanRef): string[] {
   const out: string[] = []
-  const parsed = parsePlanLevelRef(ref)
-  if (!ref.startsWith('# Plan: phases by gate level\n')) out.push('the reference does not open with "# Plan: phases by gate level"')
   const narrowed = GATE_LEVELS.filter(level => level !== 'full')
   const wantHeader = `Phase | ${narrowed.join(', ')}`
   if (parsed.header.join(' | ') !== wantHeader) out.push(`the header is "${parsed.header.join(' | ')}", expected "${wantHeader}"`)
@@ -393,7 +391,12 @@ export function collectPlanLevelRefDefects(ref: string, plan: string): string[] 
     if (cell.count > full.count) out.push(`Phase ${phase}: count ${cell.count} is above the full count ${full.count}`)
     if (cell.multi !== null && cell.multi > full.multi) out.push(`Phase ${phase}: multi-issue count ${cell.multi} is above the full count ${full.multi}`)
   }
-  // Inputs: a substitute is produced by a phase that runs, and a name that a running phase needs has a row.
+  return out
+}
+
+/** The input substitutes: each is produced by a phase that runs, and each name a running phase needs has a row. */
+function collectInputDefects(parsed: ParsedPlanRef, plan: string): string[] {
+  const out: string[] = []
   if (parsed.inputsHeader.join(' | ') !== 'Name | Read instead') out.push(`the inputs header is "${parsed.inputsHeader.join(' | ')}", expected "Name | Read instead"`)
   if (parsed.inputsIntro !== INPUTS_INTRO) out.push(`the inputs rule is not: ${INPUTS_INTRO}`)
   if (parsed.inputNames.length !== INPUT_ROWS.length || unique(parsed.inputNames).length !== parsed.inputNames.length) {
@@ -419,7 +422,12 @@ export function collectPlanLevelRefDefects(ref: string, plan: string): string[] 
     .filter(name => producersOf(name).length > 0 && producersOf(name).every(phase => skipped.has(phase)))
   for (const name of needed) if (!parsed.inputs.has(name)) out.push(`${name}: a running phase requires it, only a skipped phase produces it, and the table has no row`)
   for (const name of parsed.inputNames) if (!needed.includes(name)) out.push(`${name}: a row that no running phase needs`)
-  // Rules: the decided keys in order, each with its needles inside its own rule.
+  return out
+}
+
+/** The rules: the decided keys in order with their needles, security alone in the gap groups, and no forbidden text. */
+function collectRuleDefects(parsed: ParsedPlanRef, ref: string): string[] {
+  const out: string[] = []
   const wantKeys = RULE_NEEDLES.map(([key]) => key)
   if (parsed.ruleKeys.join(',') !== wantKeys.join(',')) out.push(`the rules are "${parsed.ruleKeys.join(', ')}", expected "${wantKeys.join(', ')}"`)
   for (const [key, needles] of RULE_NEEDLES) {
@@ -441,6 +449,13 @@ export function collectPlanLevelRefDefects(ref: string, plan: string): string[] 
   for (const [needle, what] of REF_FORBIDDEN) if (ref.includes(needle)) out.push(`the reference carries ${what}`)
   if (GATE_SKIP.test(ref)) out.push('the reference carries gate-skip text')
   return out
+}
+
+/** AC-3, AC-4, AC-5, AC-6, AC-9, AC-10: the reference's rows, substitutes and rules, against the command's data flow. */
+export function collectPlanLevelRefDefects(ref: string, plan: string): string[] {
+  const parsed = parsePlanLevelRef(ref)
+  const opening = ref.startsWith('# Plan: phases by gate level\n') ? [] : ['the reference does not open with "# Plan: phases by gate level"']
+  return [...opening, ...collectPhaseRowDefects(parsed), ...collectInputDefects(parsed, plan), ...collectRuleDefects(parsed, ref)]
 }
 
 // ---------------------------------------------------------------------------
