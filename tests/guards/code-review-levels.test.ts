@@ -49,13 +49,17 @@ const FULL_REDUCED: Readonly<Record<string, readonly string[]>> = {
 
 /** The Step 1.1 rule-1 manifest and build file names. */
 const RULE1_MANIFESTS = ['package.json', 'go.mod', 'Cargo.toml', 'pyproject.toml', 'requirements*.txt', 'CMakeLists.txt'] as const
-/** The level reference's own list: rule 1 plus the manifests of Ruby, PHP, Maven, Gradle and other Python layouts. */
+/** The level reference's own list: rule 1 plus the manifests of Ruby, PHP, Maven, Gradle, other Python layouts, Go workspaces, .NET, Swift, CocoaPods, Dart, Scala, Elixir and Deno. */
 const MANIFESTS = [
-  ...RULE1_MANIFESTS, 'Gemfile', 'composer.json', 'pom.xml', 'build.gradle', 'build.gradle.kts', 'setup.py', 'setup.cfg', 'Pipfile',
+  ...RULE1_MANIFESTS, 'Gemfile', 'composer.json', 'pom.xml', 'build.gradle*', 'setup.py', 'setup.cfg', 'Pipfile',
+  'go.work', '*.csproj', 'Directory.*.props', 'Package.swift', 'Podfile', 'pubspec.yaml', 'build.sbt', 'mix.exs', 'deno.json',
 ] as const
+/** File names a glob entry of the list must also match, beyond the `-dev` fill the loop below makes. */
+const GLOB_EXAMPLES = ['build.gradle.kts', 'requirements-dev.txt', 'App.csproj', 'Directory.Packages.props'] as const
 /** The rule-4 lockfiles: used only to prove that a lockfile alone drops the dependencies lens. */
 const LOCKFILES = [
   'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lockb', 'Cargo.lock', 'go.sum', 'poetry.lock', 'uv.lock', 'Gemfile.lock', 'composer.lock',
+  'Podfile.lock', 'pubspec.lock', 'mix.lock', 'Package.resolved', 'deno.lock', 'go.work.sum',
 ] as const
 
 type Level = 'standard' | 'lean'
@@ -364,10 +368,9 @@ export function collectSimulationDefects(parsed: ParsedRef): string[] {
   }
   // Manifest names and lockfiles, one at a time, on a standard code diff that has the dependencies trigger.
   const base: Scenario = { stamped: [], triggered: [], conditional: ['dependencies'], complianceActive: false, regulated: false, depPath: 'none' }
-  for (const manifest of MANIFESTS) {
-    const file = manifest.includes('*') ? manifest.replace('*', '-dev') : manifest
+  for (const file of [...MANIFESTS.map(manifest => manifest.replaceAll('*', '-dev')), ...GLOB_EXAMPLES]) {
     const got = simulate('standard', ['code'], { ...base, depPath: file }, parsed)
-    if (!got.includes('dependencies')) report(`manifest|${manifest}`, `standard code: a changed ${file} does not keep dependencies`)
+    if (!got.includes('dependencies')) report(`manifest|${file}`, `standard code: a changed ${file} does not keep dependencies`)
   }
   for (const lockfile of LOCKFILES) {
     const got = simulate('standard', ['code'], { ...base, depPath: lockfile }, parsed)
@@ -672,6 +675,7 @@ describe('the level reference holds the decided sets (AC-2, AC-3, AC-4, AC-6, AC
       .toMatch(/code\/standard: "drop: typescript", expected/)
     expect(defects(seed(REF, ' (dependencies stays when a listed manifest changed)', ''))).toContain('code/standard: the manifest exception for dependencies is missing')
     expect(defects(seed(REF, '`Gemfile`, ', '')).join('\n')).toMatch(/the manifest list is/)
+    expect(defects(seed(REF, ', `deno.json`', '')).join('\n')).toMatch(/the manifest list is/)
     expect(defects(seed(REF, 'keep: security, testing, reliability, compliance', 'keep: testing, reliability, compliance')))
       .toContain('code/lean: a keep cell without security')
     expect(defects(seed(REF, /(\| `docs-only` \| )keep: documentation, consistency, security/, '$1keep: documentation, consistency, security, compliance')))
@@ -709,6 +713,9 @@ describe('the simulator reads its rules from the reference and the oracle decide
       'apply each class\'s row in turn to the one list'))
     expect(sequential.some(d => d.startsWith('lean docs-only+tests-only: got [security], expected'))).toBe(true)
     expect(defects(seed(REF, '`Gemfile`, ', '')).some(d => d.startsWith('standard code: a changed Gemfile does not keep dependencies'))).toBe(true)
+    expect(defects(seed(REF, ', `Podfile`', '')).some(d => d.startsWith('standard code: a changed Podfile does not keep dependencies'))).toBe(true)
+    expect(defects(seed(REF, '`build.gradle*`', '`build.gradle`')).some(d => d.startsWith('standard code: a changed build.gradle.kts does not keep dependencies'))).toBe(true)
+    expect(defects(seed(REF, '`*.csproj`', '`App.sln`')).some(d => d.startsWith('standard code: a changed App.csproj does not keep dependencies'))).toBe(true)
     expect(defects(seed(REF, 'drop: typescript, dependencies', 'drop: dependencies')).some(d => d.startsWith('standard code: got'))).toBe(true)
   })
 

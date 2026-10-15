@@ -2,7 +2,7 @@
 
 ## Sets
 
-Each cell narrows one class's full-level set. `keep:` leaves only the named focuses the set holds; `drop:` removes the named focuses. A cell never adds a focus.
+Each cell narrows one class's full set. `keep:` leaves only the named focuses; `drop:` removes them. A cell never adds a focus.
 
 | Class | standard | lean |
 |-------|----------|------|
@@ -13,7 +13,7 @@ Each cell narrows one class's full-level set. `keep:` leaves only the named focu
 
 ## Rules
 
-- **Manifests:** `package.json`, `go.mod`, `Cargo.toml`, `pyproject.toml`, `requirements*.txt`, `CMakeLists.txt`, `Gemfile`, `composer.json`, `pom.xml`, `build.gradle`, `build.gradle.kts`, `setup.py`, `setup.cfg`, `Pipfile`. A changed path matches when its file name is one of these. A lockfile alone is not a manifest change.
+- **Manifests:** `package.json`, `go.mod`, `go.work`, `Cargo.toml`, `pyproject.toml`, `requirements*.txt`, `CMakeLists.txt`, `Gemfile`, `composer.json`, `pom.xml`, `build.gradle*`, `setup.py`, `setup.cfg`, `Pipfile`, `*.csproj`, `Directory.*.props`, `Package.swift`, `Podfile`, `pubspec.yaml`, `build.sbt`, `mix.exs`, `deno.json`. A path matches by file name. A lockfile alone is not a manifest change.
 - **Mixed diff:** apply each class's row to that class's own set, then take the union of the results, with no further cap.
 - **Security:** every cell keeps `security`.
-- **Compliance:** a set holds `compliance` only when the command's own trigger added it, on the `code` class. This file never adds it.
+- **Compliance:** only the command's own trigger adds `compliance`, on the `code` class.
