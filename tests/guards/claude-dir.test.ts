@@ -47,6 +47,11 @@
  * agent as installed (dist-first), the compiled git references, the hand-authored
  * skills and rules, the learning-off builds of commands and agents, and the
  * compaction directive of the session-start hook.
+ *
+ * THE COMPILED CLASSES MUST BE CURRENT. The first test fails by name when a compiled
+ * command, agent or reference is older than a source it is compiled from
+ * (`collectStaleOutputs`, shared with the no-config-read guard), so no scan below
+ * reads a stale build.
  */
 
 import { describe, it, expect, vi } from 'vitest'
@@ -56,7 +61,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import * as os from 'os'
 import * as path from 'path'
 
-import { RETIRED_INLINE_EXPANSION, ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, compactDirectiveFrom, compactDirectiveText, requireDistFile, requireDistFiles, resolveAgentSource, resolveAllAgents, resolveLearningOffSource, sectionBetween, walkFiles } from '../helpers.js'
+import { MIN_COMPILED_PROMPTS, RETIRED_INLINE_EXPANSION, ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, collectStaleOutputs, compactDirectiveFrom, compactDirectiveText, compiledPrompts, requireDistFile, requireDistFiles, resolveAgentSource, resolveAllAgents, resolveLearningOffSource, sectionBetween, walkFiles } from '../helpers.js'
 import { DEVFLOW_PLUGINS, buildScopedSkillsMap, getAllAgentNames } from '../../src/core/plugins.js'
 import { installViaFileCopy } from '../../src/targets/claude-code/installer.js'
 import { getClaudeDirectory } from '../../src/targets/claude-code/claude-paths.js'
@@ -389,6 +394,15 @@ function installerDirectory(home: string, configured: string | undefined): strin
 }
 
 describe('no prompt reaches the Claude directory outside the CLAUDE_CONFIG_DIR rule (D-CLAUDE-DIR-PROMPTS)', () => {
+  it('the compiled prompt corpus is current: no dist/ output is older than a source it is compiled from', () => {
+    // First, so a stale build is named before any scan reads text nobody ships. It fails; it never skips.
+    expect(compiledPrompts().length, 'no compiled prompt found — run `npm run build:mds`').toBeGreaterThanOrEqual(MIN_COMPILED_PROMPTS)
+    expect(
+      collectStaleOutputs(),
+      'dist/ is older than its sources, so every scan below reads text nobody ships — run `npm run build:mds`',
+    ).toEqual([])
+  })
+
   it('reads a real corpus: every class is present, by sentinel and by floor', () => {
     for (const { label, files, sentinel, floor } of surface()) {
       expect(files.map(f => f.name), `${label}: sentinel ${sentinel} not in the corpus`).toContain(sentinel)
