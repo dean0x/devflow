@@ -1,0 +1,254 @@
+#!/bin/bash
+
+# memory-permission — the memory worker's write permission, as one sourced helper.
+#
+# background-memory-update starts `claude -p` in a permission mode that denies every
+# call no rule allows, with one allow rule: an Edit rule for its staged file
+# (WORKING-MEMORY.md.new), the only path the worker's write may reach. This helper
+# holds what the worker and session-start-memory share, so one bash 3.2 test run
+# covers it (tests/shell-hooks-helpers.test.ts):
+#   staged_path_safe        whether a staged path can sit in that rule
+#   memory_settings_json    the settings JSON that carries the rule
+#   memory_result_summary   the fixed log line for a captured JSON result
+#   memory_notice_*         the one-time notice: the worker writes it, a session start reads it
+#   memory_denied_seen      the two-in-a-row count that raises the `denied` notice
+#
+# Source it after resolve-project-root (it needs df_no_symlink_below and df_file_below)
+# and, for memory_result_summary, after json-parse. log() is used when the caller has one.
+#
+# Errexit safety: both hooks run under `set -e`, and a helper's last non-zero status
+# aborts the caller. So each helper ends in an explicit `return 0` or a `return` with the
+# status it means, link checks are predicates inside `if`, and a create that noclobber may
+# refuse ends in `|| true`. Callers call a predicate inside an `if` or an `||` list.
+#
+# Character sets are spelled out in the patterns below: a range such as a-z collates by
+# locale on bash 3.2.
+
+# The reasons a notice can carry, and the file each one uses beside the memory files:
+#   floor   Claude Code is older than the version the worker's rule needs
+#   path    the project path cannot carry the rule, or the staged path is unusable
+#   denied  Claude Code refused the worker's write in two runs in a row
+MEMORY_NOTICE_REASONS="floor path denied"
+
+# staged_path_safe <path> — returns 0 when <path> can sit in the Edit rule as it is.
+# Sets STAGED_PATH_REFUSAL to "" when it can, `chars` when the path holds a character or
+# a segment the rule cannot carry, and `protected` when a .claude or .git folder lies
+# above it (Claude Code refuses file writes there). The rule text is not escaped, so a
+# character that has a meaning in a rule path is refused rather than quoted: * ? [ ] \
+# ( ) " { } and every control character, including newline, tab and DEL. A path that is
+# not absolute, starts with //, or holds an empty, . or .. segment is refused too.
+# The path reaches a JSON string by plain concatenation, which is safe after this check:
+# $, backtick and % are inert there, and " \ and controls cannot occur.
+staged_path_safe() {
+  local _p="${1:-}"
+  STAGED_PATH_REFUSAL=""
+  case "$_p" in
+    /*) ;;
+    *) STAGED_PATH_REFUSAL="chars"; return 1 ;;
+  esac
+  case "$_p" in
+    //*|*//*|*/./*|*/../*|*/.|*/..) STAGED_PATH_REFUSAL="chars"; return 1 ;;
+  esac
+  case "$_p" in
+    *[[:cntrl:]]*) STAGED_PATH_REFUSAL="chars"; return 1 ;;
+  esac
+  case "$_p" in
+    *'*'*|*'?'*|*'['*|*']'*|*'\'*|*'('*|*')'*|*'"'*|*'{'*|*'}'*) STAGED_PATH_REFUSAL="chars"; return 1 ;;
+  esac
+  case "$_p" in
+    */.claude/*|*/.git/*) STAGED_PATH_REFUSAL="protected"; return 1 ;;
+  esac
+  return 0
+}
+
+# memory_settings_json <staged path> — prints the settings JSON for `claude --settings`:
+# one allow rule, Edit on the staged path (// makes the rule path absolute), a deny rule
+# for anything below that path, and no hooks. Prints nothing and returns 1 for a path
+# staged_path_safe refuses, so a rule is never built for an unchecked path.
+memory_settings_json() {
+  local _p="${1:-}"
+  staged_path_safe "$_p" || return 1
+  printf '%s' '{"permissions":{"allow":["Edit(/'"$_p"')"],"deny":["Edit(/'"$_p"'/**)"]},"disableAllHooks":true}'
+  return 0
+}
+
+# memory_result_summary <file> — reduces a `--output-format json` result file to a fixed
+# line, and reads nothing else of it: the tool input and the result text, which can hold
+# the memory body, are never read. Sets, in the caller's scope:
+#   MEMORY_RESULT_LINE     Result: <subtype>, is_error=<true|false>, <n> turn(s),
+#                          <d> permission denial(s)[, api_status=<digits>]
+#                          or Result: not reported (empty|unparseable|no parser)
+#   MEMORY_RESULT_DENIALS  the denial count as digits, or `unknown` when the result does
+#                          not report one (an absent or non-array field is never 0)
+# Every field is checked against its own shape, so text from the file cannot enter the
+# line: a field that fails its check reads `unknown`. Always returns 0.
+memory_result_summary() {
+  local _f="${1:-}" _sub="" _err="" _turns="" _den="" _status="" _api=""
+  MEMORY_RESULT_LINE=""
+  MEMORY_RESULT_DENIALS="unknown"
+  if [ "${_JSON_AVAILABLE:-false}" != "true" ]; then
+    MEMORY_RESULT_LINE="Result: not reported (no parser)"
+    return 0
+  fi
+  if [ -z "$_f" ] || [ ! -s "$_f" ]; then
+    MEMORY_RESULT_LINE="Result: not reported (empty)"
+    return 0
+  fi
+  _den=$(json_array_length_file "$_f" "permission_denials") || _den=""
+  if [ -z "$_den" ]; then
+    MEMORY_RESULT_LINE="Result: not reported (unparseable)"
+    return 0
+  fi
+  case "$_den" in
+    ''|*[!0123456789]*) _den="unknown" ;;
+  esac
+  if [ "${#_den}" -gt 6 ]; then _den="unknown"; fi
+  _sub=$(json_string_field_file "$_f" "subtype") || _sub=""
+  case "$_sub" in
+    ''|*[!abcdefghijklmnopqrstuvwxyz_]*) _sub="unknown" ;;
+  esac
+  if [ "${#_sub}" -gt 40 ]; then _sub="unknown"; fi
+  _err=$(json_field_file "$_f" "is_error" "") || _err=""
+  case "$_err" in
+    true|false) ;;
+    *) _err="unknown" ;;
+  esac
+  _turns=$(json_field_file "$_f" "num_turns" "") || _turns=""
+  case "$_turns" in
+    ''|*[!0123456789]*) _turns="unknown" ;;
+  esac
+  if [ "${#_turns}" -gt 6 ]; then _turns="unknown"; fi
+  _status=$(json_field_file "$_f" "api_error_status" "") || _status=""
+  case "$_status" in
+    ''|*[!0123456789]*) ;;
+    *) if [ "${#_status}" -le 3 ]; then _api=", api_status=${_status}"; fi ;;
+  esac
+  MEMORY_RESULT_LINE="Result: ${_sub}, is_error=${_err}, ${_turns} turn(s), ${_den} permission denial(s)${_api}"
+  MEMORY_RESULT_DENIALS="$_den"
+  return 0
+}
+
+# memory_notice_write <memory dir> <root> <reason> [<version> <floor>] — leaves a notice
+# for the next session start, once per reason: only where neither the notice nor its
+# `.shown` marker stands, and where no link sits on the way down from <root>. The
+# builtin tests come first, since noclobber alone opens a link to a FIFO or a device;
+# noclobber then makes the create itself exclusive. Content: `<reason> <version> <floor>`,
+# with - for a field the reason does not use. Best effort: a refusal leaves nothing.
+memory_notice_write() {
+  local _dir="${1:-}" _root="${2:-}" _reason="${3:-}" _ver="${4:--}" _floor="${5:--}" _file
+  case " $MEMORY_NOTICE_REASONS " in
+    *" $_reason "*) ;;
+    *) return 0 ;;
+  esac
+  [ -d "$_dir" ] || return 0
+  _file="$_dir/.worker-notice-$_reason"
+  if [ ! -e "$_file" ] && [ ! -L "$_file" ] && [ ! -e "$_file.shown" ] && [ ! -L "$_file.shown" ] \
+     && df_no_symlink_below "$_root" "$_file" "$_file.shown"; then
+    ( umask 077; set -C; printf '%s %s %s\n' "$_reason" "$_ver" "$_floor" > "$_file" ) 2>/dev/null || true
+  fi
+  return 0
+}
+
+# memory_notice_clear <memory dir> <root> <reason> — removes the notice, its `.shown`
+# marker and, for `denied`, the one-denied-run marker, once the cause is gone. The
+# files are removed only where no link sits on the way down from <root>.
+memory_notice_clear() {
+  local _dir="${1:-}" _root="${2:-}" _reason="${3:-}" _file _mark
+  case " $MEMORY_NOTICE_REASONS " in
+    *" $_reason "*) ;;
+    *) return 0 ;;
+  esac
+  _file="$_dir/.worker-notice-$_reason"
+  _mark="$_dir/.worker-denied-once"
+  if [ -e "$_file" ] || [ -L "$_file" ] || [ -e "$_file.shown" ] || [ -L "$_file.shown" ]; then
+    if df_no_symlink_below "$_root" "$_file" "$_file.shown"; then
+      rm -f "$_file" "$_file.shown" 2>/dev/null || true
+    fi
+  fi
+  if [ "$_reason" = "denied" ] && { [ -e "$_mark" ] || [ -L "$_mark" ]; }; then
+    if df_no_symlink_below "$_root" "$_mark"; then
+      rm -f "$_mark" 2>/dev/null || true
+    fi
+  fi
+  return 0
+}
+
+# memory_denied_seen <memory dir> <root> — records one run that Claude Code refused the
+# worker's write in. The first leaves a marker; a second, with the marker still there,
+# raises the `denied` notice. A run that swapped the memory in clears both
+# (memory_notice_clear denied), so only two denied runs in a row count.
+memory_denied_seen() {
+  local _dir="${1:-}" _root="${2:-}" _mark
+  [ -d "$_dir" ] || return 0
+  _mark="$_dir/.worker-denied-once"
+  if [ -e "$_mark" ] || [ -L "$_mark" ]; then
+    memory_notice_write "$_dir" "$_root" "denied"
+  elif df_no_symlink_below "$_root" "$_mark"; then
+    ( umask 077; set -C; : > "$_mark" ) 2>/dev/null || true
+  fi
+  return 0
+}
+
+# memory_notice_valid_version <text> — returns 0 for a dotted number of at most 20
+# characters: digits and dots only, no empty part.
+memory_notice_valid_version() {
+  local _v="${1:-}"
+  case "$_v" in
+    ''|*[!0123456789.]*|.*|*.|*..*) return 1 ;;
+  esac
+  [ "${#_v}" -le 20 ]
+}
+
+# memory_notice_read <memory dir> <root> <log file> — builds the message for each pending
+# notice and moves each to its `.shown` marker, so a reason is shown once. Sets
+# MEMORY_NOTICE_MESSAGE (empty when nothing is pending), joined by a space when more
+# than one reason is pending. A notice is read only where no link sits on its path; one
+# whose content does not fit its reason is moved to `.shown` unshown and logged.
+# <log file> is named in the `path` and `denied` messages. Always returns 0.
+memory_notice_read() {
+  local _dir="${1:-}" _root="${2:-}" _logfile="${3:-}"
+  local _reason _file _line _tag _ver _floor _extra _text _ok
+  MEMORY_NOTICE_MESSAGE=""
+  for _reason in $MEMORY_NOTICE_REASONS; do
+    _file="$_dir/.worker-notice-$_reason"
+    df_file_below "$_root" "$_file" || continue
+    _line=""; _tag=""; _ver=""; _floor=""; _extra=""; _text=""; _ok=""
+    IFS= read -r -n 200 _line < "$_file" 2>/dev/null || true
+    read -r _tag _ver _floor _extra <<< "$_line" || true
+    if [ "$_tag" = "$_reason" ] && [ -z "$_extra" ]; then
+      case "$_reason" in
+        floor)
+          if memory_notice_valid_version "$_ver" && memory_notice_valid_version "$_floor"; then
+            _text="Devflow: working memory is not updating because Claude Code ${_ver} is older than ${_floor}. Update Claude Code (claude update) to resume it."
+            _ok="yes"
+          fi
+          ;;
+        path)
+          _text="Devflow: working memory is not updating because the worker cannot write its staged file at this project path. The log names the cause and the fix: ${_logfile}"
+          _ok="yes"
+          ;;
+        denied)
+          _text="Devflow: working memory is not updating because Claude Code refused the worker's write in two runs in a row. The log has the details: ${_logfile}"
+          _ok="yes"
+          ;;
+      esac
+    fi
+    if [ -n "$_ok" ]; then
+      if [ -n "$MEMORY_NOTICE_MESSAGE" ]; then
+        MEMORY_NOTICE_MESSAGE="${MEMORY_NOTICE_MESSAGE} ${_text}"
+      else
+        MEMORY_NOTICE_MESSAGE="$_text"
+      fi
+    elif declare -F log >/dev/null 2>&1; then
+      log "Worker notice for reason ${_reason} ignored: its content does not fit the reason"
+    fi
+    if df_no_symlink_below "$_root" "$_file" "$_file.shown"; then
+      if [ ! -e "$_file.shown" ] && [ ! -L "$_file.shown" ]; then
+        mv "$_file" "$_file.shown" 2>/dev/null || true
+      else
+        rm -f "$_file" 2>/dev/null || true
+      fi
+    fi
+  done
+  return 0
+}

@@ -48,6 +48,7 @@ const HOOK_SCRIPTS = [
   'ensure-root-gitignore',
   'resolve-project-root',
   'queue-append',
+  'memory-permission',
   'learning-lock',
   'capture-prompt',
   'capture-turn',
