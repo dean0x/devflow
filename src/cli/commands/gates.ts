@@ -60,7 +60,7 @@ export const GATE_LEVEL_MEANINGS: Readonly<Record<GateLevel, string>> = Object.f
 
 /** What reads the level today; each later reader updates this text. */
 export const GATE_LEVEL_EFFECT =
-  '/code-review and /plan read the level: standard and lean run fewer review focuses and fewer planning agents. Other commands read it once issue #480 lands.';
+  '/code-review and /plan read the level: standard and lean run fewer review focuses and fewer planning agents. At lean, /implement has Validate run the project\'s lint pack. Other commands read it once issue #480 lands.';
 
 const MACHINE_MANIFEST_NAME = 'manifest.json';
 const MACHINE_INVALID_LINE = `invalid (${MACHINE_MANIFEST_NAME}; reads as full)`;

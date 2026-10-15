@@ -703,15 +703,17 @@ describe('devflow gates (help and usage)', () => {
     expect(await snapshot(tmpHome)).toEqual(before);
   }, SUBPROCESS_TIMEOUT_MS);
 
-  it('lists the three levels with a meaning each, and says /code-review and /plan read the level', () => {
+  it('lists the three levels with a meaning each, and says /code-review, /plan and the Validate lint pack read the level', () => {
     const run = runCli(['gates', '--help']);
     expect(run.status, run.out).toBe(0);
     expect(run.out).toMatch(/full\s+the most checking/);
     expect(run.out).toMatch(/standard\s+the default/);
     expect(run.out).toMatch(/lean\s+the least checking/);
     expect(run.out).toContain('/code-review and /plan read the level');
+    expect(run.out).toContain('lint pack');
     expect(run.out).not.toContain('#473');
     expect(run.out).not.toContain('#474');
+    expect(run.out).not.toContain('#475');
     expect(run.out).toContain('Set the machine\'s default gate level: full, standard, or lean');
   }, SUBPROCESS_TIMEOUT_MS);
 
