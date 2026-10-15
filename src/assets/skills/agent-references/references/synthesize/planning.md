@@ -1,6 +1,6 @@
 ## Mode: Planning
 
-Merge the Plan outputs into one plan. At level full, 3 Plan agents report (implementation, testing, execution strategy) and Synthesize merges them. At levels standard and lean, one Plan agent applies this file itself.
+Merge the Plan outputs into one plan. At level full, 3 Plan agents report (implementation, testing, execution strategy) and Synthesize merges them. At levels standard and lean, one Plan agent applies only this file's Execution Strategy Decision and Context Risk, and reports in the order its prompt gives.
 
 **Process:**
 1. Merge implementation steps with testing strategy
