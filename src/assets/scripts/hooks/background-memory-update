@@ -460,14 +460,24 @@ if [ ! -f "$PROCESSING_FILE" ] && [ -f "$QUEUE_FILE" ] && [ -s "$QUEUE_FILE" ]; 
   fi
 fi
 
+# Succeeds when the file is not empty and its last byte is not a line break (a row cut off
+# before its break). The command substitution drops a trailing line break, so only a last
+# byte of another kind is left in it.
+ends_without_newline() {
+  [ -s "$1" ] && [ -n "$(tail -c 1 "$1" 2>/dev/null)" ]
+}
+
 # --- Claim queue atomically (D56c contract: .pending-turns.processing recovered at SessionStart) ---
 # If a leftover .processing exists from a previous crash, merge new queue entries into it.
 if [ -f "$PROCESSING_FILE" ]; then
   log "Found leftover .processing from previous crash — merging"
   if [ -f "$QUEUE_FILE" ]; then
-    # The queue is removed only after its rows are in the batch. A failed append leaves the
-    # queue for the next run; an append that stopped part-way may repeat rows then.
-    if cat "$QUEUE_FILE" >> "$PROCESSING_FILE" 2>/dev/null; then
+    # The queue is removed only after its rows are in the batch. A batch whose last row has
+    # no line break first gets one, so the first queue row does not run into that row and
+    # become one malformed line that the parser drops. A failed append leaves the queue for
+    # the next run; an append that stopped part-way may repeat rows then, and a line break
+    # added before a failed append only leaves a blank line, which the parser ignores.
+    if { ! ends_without_newline "$PROCESSING_FILE" || printf '\n' >> "$PROCESSING_FILE"; } 2>/dev/null && cat "$QUEUE_FILE" >> "$PROCESSING_FILE" 2>/dev/null; then
       rm -f "$QUEUE_FILE" 2>/dev/null || true
       log "Merged new queue entries into recovery batch"
     else
@@ -508,6 +518,11 @@ fi
 touch "$PROCESSING_FILE" 2>/dev/null || true
 
 TOTAL_LINES=$(wc -l < "$PROCESSING_FILE" | tr -d ' ')
+# wc -l counts line breaks, so a last row with no break is not in its count. Count it, so a
+# batch of one such row is a batch with a row, and only a batch with no byte is empty.
+if ends_without_newline "$PROCESSING_FILE"; then
+  TOTAL_LINES=$(( TOTAL_LINES + 1 ))
+fi
 log "Processing $TOTAL_LINES queued entries"
 
 if [ "$TOTAL_LINES" -eq 0 ]; then
@@ -537,7 +552,7 @@ fi
 # queue merged into it, and no LLM runs. Exit 0 with no row still means "no readable turn".
 _PARSER_RC=0
 if [ "$_HAS_JQ" = "true" ]; then
-  EXTRACTED=$(printf '%s\n' "$ENTRIES" | jq -R -r '(fromjson | select(.role=="user" or .role=="assistant" or .role=="qa") | .role + "\t" + ((.content // "") | gsub("\n"; " ")))?' 2>/dev/null) || _PARSER_RC=$?
+  EXTRACTED=$(printf '%s\n' "$ENTRIES" | jq -R -r '(fromjson | select(.role=="user" or .role=="assistant" or .role=="qa") | .role + "\t" + ((.content // "") | split("\n") | join(" ")))?' 2>/dev/null) || _PARSER_RC=$?
 else
   EXTRACTED=$(printf '%s\n' "$ENTRIES" | node -e '
     const lines = require("fs").readFileSync("/dev/stdin","utf8").split("\n");

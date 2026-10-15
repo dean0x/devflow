@@ -4983,7 +4983,7 @@ describe('S32: a JSON parser that exits non-zero keeps the batch and the queue (
 
   /** What each backend's call holds: the extraction only, the orphan check only. */
   const FAIL_ON: Record<Backend, { extract: string; orphan: string }> = {
-    jq: { extract: 'gsub', orphan: 'select(.role=="assistant"' },
+    jq: { extract: 'split', orphan: 'select(.role=="assistant"' },
     node: { extract: '/dev/stdin', orphan: 'process.argv' },
   };
   const backends: Backend[] = HAS_JQ ? ['jq', 'node'] : ['node'];
@@ -5243,3 +5243,91 @@ describe.skipIf(typeof process.getuid === 'function' && process.getuid() === 0)(
     });
   },
 );
+
+// =============================================================================
+// S35 — A batch that ends without a line break loses no turn (#523)
+//
+// A leftover batch can end in a row that was cut before its line break. The queue is
+// appended to that batch, so its first row must start on a new line; otherwise the two
+// join into one malformed line and the queued turn is lost when the queue is removed.
+// A batch of one readable row with no final line break is a batch with a turn: `wc -l`
+// counts line breaks, so it reads 0 there, and the batch must not be removed as empty.
+// Each case runs on the default backend and on the node backend.
+// =============================================================================
+describe('S35: a batch that ends without a line break loses no turn (#523)', { timeout: LEAN_RUN_TIMEOUT_MS }, () => {
+  let projectDir: string;
+  let homeDir: string;
+  let shimDir: string;
+  let memoryDir: string;
+  let queueFile: string;
+  let processingFile: string;
+  let stagedFile: string;
+  let stdinCapture: string;
+
+  beforeEach(() => {
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s35-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s35-home-'));
+    shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s35-shim-'));
+    memoryDir = path.join(projectDir, '.devflow', 'memory');
+    queueFile = path.join(memoryDir, '.pending-turns.jsonl');
+    processingFile = path.join(memoryDir, '.pending-turns.processing');
+    stagedFile = path.join(memoryDir, 'WORKING-MEMORY.md.new');
+    fs.mkdirSync(memoryDir, { recursive: true });
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'dream'), { recursive: true });
+    initGitRepo(projectDir);
+    stdinCapture = createPromptCapturingShim(shimDir, stagedFile);
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  });
+
+  const row = (role: string, content: string): string => JSON.stringify({ role, content, ts: 1 });
+  const readLog = (): string => {
+    const logFile = workerLogPath(projectDir, homeDir);
+    return fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8') : '';
+  };
+  /** Runs the worker on the default backend, or with no jq on the PATH. */
+  const runOn = (backend: 'default' | 'node'): { exitCode: number | null } => {
+    if (backend === 'default') return runWorker(projectDir, homeDir, shimDir);
+    const fullPath = `${shimDir}:${buildToolFarm([], { node: process.execPath })}`;
+    expect(resolveOnPath('jq', fullPath), 'no jq on the PATH').toBeUndefined();
+    expect(resolveOnPath('node', fullPath), 'node on the PATH').toBeDefined();
+    return runWorker(projectDir, homeDir, shimDir, { PATH: fullPath });
+  };
+
+  for (const backend of ['default', 'node'] as const) {
+    describe(`${backend} backend`, () => {
+      it('a: the first queued row does not join a cut last row of the batch, and the queued turn reaches the prompt', () => {
+        fs.writeFileSync(
+          processingFile,
+          [row('user', 'BATCH-PROMPT'), row('assistant', 'BATCH-ANSWER'), '{"role":"assistant","content":"cut'].join('\n'),
+        );
+        fs.writeFileSync(queueFile, [row('user', 'QUEUE-PROMPT'), row('assistant', 'QUEUE-ANSWER')].join('\n') + '\n');
+
+        expect(runOn(backend).exitCode).toBe(0);
+
+        const log = readLog();
+        expect(log).toContain('Merged new queue entries into recovery batch');
+        expect(log).toContain('Skipped 1 queue line(s) that hold no readable turn');
+        const prompt = fs.readFileSync(stdinCapture, 'utf-8');
+        for (const text of ['BATCH-PROMPT', 'BATCH-ANSWER', 'QUEUE-PROMPT', 'QUEUE-ANSWER']) {
+          expect(prompt).toContain(text);
+        }
+      });
+
+      it('b: a batch of one readable row with no final line break is not removed as empty, and its turn reaches the prompt', () => {
+        fs.writeFileSync(processingFile, row('assistant', 'LONE-ANSWER'));
+
+        expect(runOn(backend).exitCode).toBe(0);
+
+        const log = readLog();
+        expect(log).not.toContain('Processing file empty');
+        expect(log).toContain('Built 1 turns');
+        expect(fs.readFileSync(stdinCapture, 'utf-8')).toContain('LONE-ANSWER');
+      });
+    });
+  }
+});
