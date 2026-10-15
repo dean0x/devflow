@@ -51,6 +51,8 @@ Do the step below after you update.
 
 ### Fixed
 
+- **Prompts resolve the Claude config directory with the same rule as the installer** ([#N](https://github.com/dean0x/devflow/pull/N)). `CLAUDE_CONFIG_DIR` applies when it is an absolute path, else `~/.claude`.
+
 - **A tracked `.devflow/config.json` no longer applies as personal config** ([#489](https://github.com/dean0x/devflow/pull/489)). devflow ignores it and shows a warning.
 
 ---
