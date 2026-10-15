@@ -1,8 +1,9 @@
 /**
  * tests/fixtures/forbidden-argv.ts
  *
- * THE list of spellings that skip a permission check, select the skip-all mode or
- * pre-approve tools without limiting a path. It is data only and registers no test,
+ * THE list of spellings that skip a permission check, select the skip-all mode or the
+ * accept-edits mode, set a default permission mode in a settings file, or pre-approve
+ * tools without limiting a path. It is data only and registers no test,
  * so any test file may import it:
  *
  *   - tests/eager-memory-refresh.test.ts — no argv form the memory worker passes to
@@ -15,4 +16,5 @@
 
 export const FORBIDDEN_ARGV = [
   '--dangerously-skip-permissions', '--allow-dangerously-skip-permissions', 'bypassPermissions', '--allowedTools', '--allowed-tools',
+  'acceptEdits', '"defaultMode"',
 ] as const;
