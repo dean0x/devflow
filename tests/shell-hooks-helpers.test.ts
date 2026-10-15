@@ -408,74 +408,76 @@ describe('memory-permission: the one-time notice', () => {
     run(`memory_notice_read "$MEM" "$ROOT" "${logPath}"\nprintf '%s' "$MEMORY_NOTICE_MESSAGE"`);
   const logged = (): string => (fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8') : '');
 
-  it('writes a floor notice once, mode 0600, and a second write leaves it as it was', () => {
-    run('memory_notice_write "$MEM" "$ROOT" floor 2.1.250 2.1.269');
-    expect(fs.readFileSync(pending('floor'), 'utf-8')).toBe('floor 2.1.250 2.1.269\n');
-    expect(fs.statSync(pending('floor')).mode & 0o777).toBe(0o600);
+  it('writes a path notice once, mode 0600, and a second write leaves it as it was', () => {
+    run('memory_notice_write "$MEM" "$ROOT" path');
+    expect(fs.readFileSync(pending('path'), 'utf-8')).toBe('path\n');
+    expect(fs.statSync(pending('path')).mode & 0o777).toBe(0o600);
 
-    run('memory_notice_write "$MEM" "$ROOT" floor 2.1.100 2.1.269');
-    expect(fs.readFileSync(pending('floor'), 'utf-8')).toBe('floor 2.1.250 2.1.269\n');
+    fs.appendFileSync(pending('path'), '');
+    const before = fs.statSync(pending('path')).ino;
+    run('memory_notice_write "$MEM" "$ROOT" path');
+    expect(fs.readFileSync(pending('path'), 'utf-8')).toBe('path\n');
+    expect(fs.statSync(pending('path')).ino, 'the second write made no new file').toBe(before);
   });
 
-  it('shows the update remedy once: the read moves the notice to its shown marker, and a later write stays quiet', () => {
-    run('memory_notice_write "$MEM" "$ROOT" floor 2.1.250 2.1.269');
+  it('writes nothing for a reason it does not know', () => {
+    run('memory_notice_write "$MEM" "$ROOT" unknown\nmemory_notice_write "$MEM" "$ROOT" ""');
+    expect(fs.readdirSync(memory)).toEqual([]);
+  });
 
-    const first = read();
-    expect(first).toContain('Update Claude Code');
-    expect(first).toContain('2.1.250');
-    expect(first).toContain('2.1.269');
-    expect(fs.existsSync(pending('floor')), 'moved').toBe(false);
-    expect(fs.existsSync(shown('floor')), 'shown marker').toBe(true);
+  it('shows a notice once: the read moves it to its shown marker, and a later write stays quiet', () => {
+    run('memory_notice_write "$MEM" "$ROOT" path');
+
+    const first = read('/home/u/.devflow/logs/p/.background-memory-update.log');
+    expect(first).toContain('project path');
+    expect(first).toContain('/home/u/.devflow/logs/p/.background-memory-update.log');
+    expect(fs.existsSync(pending('path')), 'moved').toBe(false);
+    expect(fs.existsSync(shown('path')), 'shown marker').toBe(true);
 
     expect(read(), 'not shown at the next start').toBe('');
-    run('memory_notice_write "$MEM" "$ROOT" floor 2.1.250 2.1.269');
-    expect(fs.existsSync(pending('floor')), 'a shown reason is not raised again').toBe(false);
+    run('memory_notice_write "$MEM" "$ROOT" path');
+    expect(fs.existsSync(pending('path')), 'a shown reason is not raised again').toBe(false);
   });
 
   it('a clear removes the notice and its shown marker, so the reason can be raised again', () => {
-    run('memory_notice_write "$MEM" "$ROOT" floor 2.1.250 2.1.269');
+    run('memory_notice_write "$MEM" "$ROOT" path');
     read();
-    expect(fs.existsSync(shown('floor'))).toBe(true);
+    expect(fs.existsSync(shown('path'))).toBe(true);
 
-    run('memory_notice_clear "$MEM" "$ROOT" floor');
-    expect(fs.existsSync(pending('floor'))).toBe(false);
-    expect(fs.existsSync(shown('floor'))).toBe(false);
-
-    run('memory_notice_write "$MEM" "$ROOT" floor 2.1.251 2.1.269');
-    expect(read()).toContain('2.1.251');
-  });
-
-  it('keeps each reason apart: a shown floor notice does not hide a path notice, and each has its own remedy', () => {
-    run('memory_notice_write "$MEM" "$ROOT" floor 2.1.250 2.1.269');
-    expect(read()).toContain('Update Claude Code');
+    run('memory_notice_clear "$MEM" "$ROOT" path');
+    expect(fs.existsSync(pending('path'))).toBe(false);
+    expect(fs.existsSync(shown('path'))).toBe(false);
 
     run('memory_notice_write "$MEM" "$ROOT" path');
-    const second = read('/home/u/.devflow/logs/p/.background-memory-update.log');
-    expect(second).toContain('project path');
-    expect(second).toContain('/home/u/.devflow/logs/p/.background-memory-update.log');
-    expect(second).not.toContain('Update Claude Code');
-
-    run('memory_notice_write "$MEM" "$ROOT" denied');
-    expect(read()).toContain('refused the worker');
+    expect(read()).toContain('project path');
   });
 
-  it('joins the messages when more than one reason is pending, and ignores a reason it does not know', () => {
-    run('memory_notice_write "$MEM" "$ROOT" floor 2.1.250 2.1.269\nmemory_notice_write "$MEM" "$ROOT" path\nmemory_notice_write "$MEM" "$ROOT" unknown');
-    expect(fs.existsSync(pending('unknown'))).toBe(false);
+  it('keeps each reason apart: a shown path notice does not hide a denied notice, and each has its own message', () => {
+    run('memory_notice_write "$MEM" "$ROOT" path');
+    expect(read()).toContain('project path');
+
+    run('memory_notice_write "$MEM" "$ROOT" denied');
+    const second = read('/home/u/.devflow/logs/p/.background-memory-update.log');
+    expect(second).toContain('refused the worker');
+    expect(second).toContain('/home/u/.devflow/logs/p/.background-memory-update.log');
+    expect(second).not.toContain('project path');
+  });
+
+  it('joins the messages when more than one reason is pending', () => {
+    run('memory_notice_write "$MEM" "$ROOT" path\nmemory_notice_write "$MEM" "$ROOT" denied');
 
     const message = read();
-    expect(message).toContain('Update Claude Code');
     expect(message).toContain('project path');
+    expect(message).toContain('refused the worker');
   });
 
   it('moves a notice whose content does not fit its reason to the shown marker unshown, and logs it', () => {
     for (const [reason, content] of [
-      ['floor', 'path - -\n'],
-      ['floor', 'floor x.y.z 2.1.269\n'],
-      ['floor', 'floor 2.1.250\n'],
-      ['floor', 'floor 2.1.250 2.1.269 extra\n'],
-      ['floor', 'floor 2.1..250 2.1.269\n'],
-      ['path', 'denied - -\n'],
+      ['path', 'denied\n'],
+      ['path', 'path extra\n'],
+      ['path', 'path - -\n'],
+      ['path', '\n'],
+      ['denied', 'path\n'],
       ['denied', '\n'],
     ] as const) {
       fs.writeFileSync(pending(reason), content);
@@ -489,13 +491,13 @@ describe('memory-permission: the one-time notice', () => {
 
   it('reads nothing through a link: a linked notice is left as it was and its target unread', () => {
     const target = path.join(root, 'outside.txt');
-    fs.writeFileSync(target, 'floor 2.1.250 2.1.269\n');
-    fs.symlinkSync(target, pending('floor'));
+    fs.writeFileSync(target, 'path\n');
+    fs.symlinkSync(target, pending('path'));
 
     expect(read()).toBe('');
-    expect(fs.lstatSync(pending('floor')).isSymbolicLink(), 'the link is left in place').toBe(true);
-    expect(fs.existsSync(shown('floor'))).toBe(false);
-    expect(fs.readFileSync(target, 'utf-8')).toBe('floor 2.1.250 2.1.269\n');
+    expect(fs.lstatSync(pending('path')).isSymbolicLink(), 'the link is left in place').toBe(true);
+    expect(fs.existsSync(shown('path'))).toBe(false);
+    expect(fs.readFileSync(target, 'utf-8')).toBe('path\n');
   });
 
   it('writes nothing through a linked memory folder or onto a planted link', () => {
@@ -505,31 +507,31 @@ describe('memory-permission: the one-time notice', () => {
     fs.renameSync(memory, real);
     fs.symlinkSync(elsewhere, memory);
 
-    run('memory_notice_write "$MEM" "$ROOT" floor 2.1.250 2.1.269');
+    run('memory_notice_write "$MEM" "$ROOT" path');
     expect(fs.readdirSync(elsewhere), 'nothing written through the linked folder').toEqual([]);
 
     fs.rmSync(memory);
     fs.renameSync(real, memory);
     const target = path.join(root, 'victim.txt');
     fs.writeFileSync(target, 'keep');
-    fs.symlinkSync(target, pending('path'));
-    run('memory_notice_write "$MEM" "$ROOT" path');
+    fs.symlinkSync(target, pending('denied'));
+    run('memory_notice_write "$MEM" "$ROOT" denied');
     expect(fs.readFileSync(target, 'utf-8'), 'a link at the name is not written through').toBe('keep');
   });
 
   it('leaves a FIFO at the notice name alone and does not wait on it', () => {
-    makeFifo(pending('floor'));
+    makeFifo(pending('path'));
     try {
       const result = spawnSync('bash', [
-        '-e', '-c', 'source "$1"; source "$2"; source "$3"; memory_notice_write "$4" "$5" floor 2.1.250 2.1.269; echo done',
+        '-e', '-c', 'source "$1"; source "$2"; source "$3"; memory_notice_write "$4" "$5" path; echo done',
         '_', path.join(HOOKS_DIR, 'resolve-project-root'), path.join(HOOKS_DIR, 'json-parse'), PERMISSION_HELPER, memory, root,
       ], { encoding: 'utf8', timeout: FIFO_RUN_BOUND_MS });
 
       expect(result.status, 'not blocked on the FIFO').toBe(0);
       expect(result.stdout.trim()).toBe('done');
-      expect(fs.statSync(pending('floor')).isFIFO(), 'the FIFO is left in place').toBe(true);
+      expect(fs.statSync(pending('path')).isFIFO(), 'the FIFO is left in place').toBe(true);
     } finally {
-      releaseFifo(pending('floor'));
+      releaseFifo(pending('path'));
     }
   });
 
@@ -553,7 +555,7 @@ describe('memory-permission: the one-time notice', () => {
 
   it('writes nothing when the memory folder does not exist', () => {
     fs.rmSync(memory, { recursive: true });
-    run('memory_notice_write "$MEM" "$ROOT" floor 2.1.250 2.1.269\nmemory_denied_seen "$MEM" "$ROOT"\nmemory_notice_clear "$MEM" "$ROOT" floor');
+    run('memory_notice_write "$MEM" "$ROOT" path\nmemory_denied_seen "$MEM" "$ROOT"\nmemory_notice_clear "$MEM" "$ROOT" path');
     expect(fs.existsSync(memory)).toBe(false);
   });
 });

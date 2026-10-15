@@ -349,11 +349,11 @@ ${COMPACT_NOTE}"
 fi
 
 # --- One-time worker notice ---
-# When the memory worker cannot refresh memory for a reason only the user can fix (Claude
-# Code older than the worker needs, a project path its permission rule cannot carry, the
-# worker's write refused twice in a row), it leaves a notice file. The message is shown
-# to the user once per reason, whether or not a working memory exists, and the file moves
-# to its `.shown` marker so the next start stays quiet (memory-permission).
+# When the memory worker cannot refresh memory for a reason only the user can fix (a
+# project path its permission rule cannot carry, the worker's write refused twice in a
+# row), it leaves a notice file. The message is shown to the user once per reason,
+# whether or not a working memory exists, and the file moves to its `.shown` marker so
+# the next start stays quiet (memory-permission).
 # D-SYSTEMMESSAGE-ENVELOPE: it travels as `systemMessage`, beside the context and never in it.
 memory_notice_read "$MEMORY_DIR" "$PROJECT_ROOT" "$LOG_DIR/.background-memory-update.log"
 SYSTEM_MESSAGE="$MEMORY_NOTICE_MESSAGE"

@@ -21,6 +21,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { pollForTerminalLine } from './helpers/poll-for-terminal-line.js';
 import { WORKER_AGENTS, validateWorkerValue } from '../src/core/agent-models.js';
+import { MEMORY_MIN_PERMISSION_VERSION } from '../src/cli/commands/memory.js';
 import {
   FIFO_RUN_BOUND_MS,
   FIFO_TEST_TIMEOUT_MS,
@@ -3563,8 +3564,8 @@ const FORBIDDEN_ARGV = [
   '--dangerously-skip-permissions', '--allow-dangerously-skip-permissions', 'bypassPermissions', '--allowedTools',
 ] as const;
 
-/** The lowest CLI version the worker runs on (MEMORY_MIN_PERMISSION_VERSION in the hook). */
-const PERMISSION_FLOOR = '2.1.269';
+/** The lowest CLI version the worker runs on: the one value `devflow init` states and the hook holds equal (tests/memory.test.ts). */
+const PERMISSION_FLOOR = MEMORY_MIN_PERMISSION_VERSION;
 
 /** The lowest CLI version that gets the lean form (MEMORY_MIN_CLAUDE_VERSION in the hook). */
 const LEAN_FLOOR = '2.1.286';
@@ -4061,7 +4062,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
       ['2.1.268', 'one patch under the floor'],
     ];
 
-    it.each(BELOW_FLOOR)('a claude that reports %s (%s) is not run: no -p call, the queue kept, the update line logged', (version) => {
+    it.each(BELOW_FLOOR)('a claude that reports %s (%s) is not run: no -p call, the queue kept, one line logged, no notice', (version) => {
       const queue = path.join(memoryDir(), '.pending-turns.jsonl');
       const okFile = path.join(memoryDir(), '.last-refresh-ok');
       const before = fs.readFileSync(queue);
@@ -4070,14 +4071,14 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
       expect(fs.existsSync(rec.probeLockFile), 'non-vacuity: the probe ran, so the version was read').toBe(true);
       expect(recordedArgv(rec), 'no -p call').toBeUndefined();
-      expect(workerLog()).toContain(`SKIP: Claude Code ${version} is older than ${PERMISSION_FLOOR}`);
-      expect(workerLog()).toContain('update Claude Code');
+      const logged = workerLog().trimEnd().split('\n');
+      expect(logged, 'the start line and then exactly one line for the run').toHaveLength(2);
+      expect(logged[1].endsWith(`] Run: cli=${version} argv=none result=below-floor denials=n/a floor=${PERMISSION_FLOOR}`), logged[1]).toBe(true);
       expect(fs.readFileSync(queue).equals(before), 'the queue is byte-identical').toBe(true);
       expect(fs.existsSync(path.join(memoryDir(), '.pending-turns.processing')), 'nothing claimed').toBe(false);
       expect(fs.existsSync(okFile), 'no success stamp').toBe(false);
       expect(fs.existsSync(path.join(memoryDir(), '.working-memory.lock')), 'no lock left').toBe(false);
-      expect(fs.readFileSync(path.join(memoryDir(), '.worker-notice-floor'), 'utf-8'), 'a floor notice for the next session start')
-        .toBe(`floor ${version} ${PERMISSION_FLOOR}\n`);
+      expect(fs.readdirSync(memoryDir()).filter(name => name.startsWith('.worker-notice')), 'no notice file of any kind').toEqual([]);
     });
 
     it('a claude that exits 2 on the run logs the exit code, keeps the batch and leaves the success stamp alone', () => {
@@ -4095,10 +4096,10 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
       expect(fs.statSync(okFile).mtimeMs, '.last-refresh-ok not touched').toBe(stamp);
     });
 
-    it.each(['floor', 'path', 'denied'] as const)('a permitted run clears a %s notice and its shown marker', (reason) => {
+    it.each(['path', 'denied'] as const)('a permitted run clears a %s notice and its shown marker', (reason) => {
       const pending = path.join(memoryDir(), `.worker-notice-${reason}`);
-      fs.writeFileSync(pending, `${reason} - -\n`);
-      fs.writeFileSync(`${pending}.shown`, `${reason} - -\n`);
+      fs.writeFileSync(pending, `${reason}\n`);
+      fs.writeFileSync(`${pending}.shown`, `${reason}\n`);
       fs.writeFileSync(path.join(memoryDir(), '.worker-denied-once'), '');
 
       runWith(HEALTHY_VERSION);
@@ -4171,7 +4172,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
       expect(fs.existsSync(path.join(shimDir, 'argv.txt')), 'no -p call').toBe(false);
       expect(onlyWorkerLog()).toContain('SKIP: the memory path holds characters the permission rule cannot carry; no LLM run');
       expect(fs.readFileSync(path.join(memory, '.pending-turns.jsonl')).equals(before), 'the queue is byte-identical').toBe(true);
-      expect(fs.readFileSync(path.join(memory, '.worker-notice-path'), 'utf-8')).toBe('path - -\n');
+      expect(fs.readFileSync(path.join(memory, '.worker-notice-path'), 'utf-8')).toBe('path\n');
     });
 
     it.each([
@@ -4246,7 +4247,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
       expect(recordedArgv(rec), 'no -p call').toBeUndefined();
       expect(workerLog()).toContain(`SKIP: ${fs.realpathSync(projectDir)}/.devflow/memory/WORKING-MEMORY.md.new is a folder that is not empty; remove it to resume memory updates; no LLM run`);
       expect(fs.readFileSync(path.join(stagedFile, 'inside'), 'utf-8'), 'the folder keeps its file').toBe('keep');
-      expect(fs.readFileSync(path.join(memoryDir(), '.worker-notice-path'), 'utf-8')).toBe('path - -\n');
+      expect(fs.readFileSync(path.join(memoryDir(), '.worker-notice-path'), 'utf-8')).toBe('path\n');
     });
 
     it('stops with no claude call when a link is planted at the staged path after the lock', () => {
@@ -4505,7 +4506,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
       expect(fs.existsSync(rec.probeLockFile), 'the run stopped before the version probe').toBe(false);
       expect(recordedArgv(rec), 'no -p call').toBeUndefined();
       expect(fs.readFileSync(queue).equals(before), 'the queue is byte-identical').toBe(true);
-      expect(fs.readFileSync(path.join(memoryDir(), '.worker-notice-path'), 'utf-8')).toBe('path - -\n');
+      expect(fs.readFileSync(path.join(memoryDir(), '.worker-notice-path'), 'utf-8')).toBe('path\n');
     });
   });
 });
@@ -4514,7 +4515,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 // S30 — AC4: the worker's one-time notice reaches the user once, at session start
 //
 // When the worker cannot refresh memory for a reason only the user can fix, it leaves a
-// notice file with a reason code (floor, path or denied), and the next session start
+// notice file with a reason code (path or denied), and the next session start
 // shows each reason once as a systemMessage, whether or not a working memory exists.
 // =============================================================================
 describe('S30: a notice from the memory worker is shown once at session start (AC4)', { timeout: LEAN_RUN_TIMEOUT_MS }, () => {
@@ -4551,45 +4552,47 @@ describe('S30: a notice from the memory worker is shown once at session start (A
     return { raw: stdout, systemMessage: parsed.systemMessage, context: parsed.hookSpecificOutput?.additionalContext };
   }
 
-  it('a skip below the permission floor shows the update notice once, with no working memory, and not at the second start', () => {
+  /** Leave the staged path held by a folder that has a file in it, so the next run stops there. */
+  function holdStagedPath(): void {
+    fs.mkdirSync(stagedFile);
+    fs.writeFileSync(path.join(stagedFile, 'inside'), 'keep');
+  }
+
+  it('a skip below the permission floor leaves no notice, so a session start tells the user nothing', () => {
     runWorkerOnce('echo "2.1.268 (Claude Code)"');
     expect(fs.existsSync(memFile), 'non-vacuity: there is no working memory').toBe(false);
+    expect(fs.readFileSync(workerLogPath(projectDir, homeDir), 'utf-8'), 'non-vacuity: the run was a below-floor skip').toContain('result=below-floor');
 
-    const first = sessionStart();
-    expect(first.systemMessage).toContain('Update Claude Code');
-    expect(first.systemMessage).toContain('2.1.268');
-    expect(first.systemMessage).toContain(PERMISSION_FLOOR);
-    expect(first.context, 'the notice is a user message, not model context').toBeUndefined();
-
-    expect(sessionStart().raw, 'the second start prints nothing').toBe('');
-    expect(fs.existsSync(`${noticePath('floor')}.shown`), 'the shown marker stays').toBe(true);
-
-    runWorkerOnce('echo "2.1.268 (Claude Code)"');
-    expect(sessionStart().raw, 'a later skip for the same reason stays quiet').toBe('');
+    expect(fs.readdirSync(memoryDir()).filter(name => name.startsWith('.worker-notice')), 'no notice file').toEqual([]);
+    expect(sessionStart().raw, 'nothing printed').toBe('');
   });
 
   it('the notice rides beside the working memory: the memory is the context, the notice the systemMessage', () => {
     const head = execSync('git rev-parse HEAD', { cwd: projectDir, encoding: 'utf-8' }).trim();
     fs.writeFileSync(memFile, `<!-- memory-head: ${head} branch: main -->\n## Now\n- some progress\n`);
-    runWorkerOnce('echo "2.1.268 (Claude Code)"');
+    holdStagedPath();
+    runWorkerOnce(HEALTHY_VERSION);
 
     const start = sessionStart();
     expect(start.context).toContain('WORKING MEMORY');
-    expect(start.context, 'the notice text is not in the context').not.toContain('Update Claude Code');
-    expect(start.systemMessage).toContain('Update Claude Code');
+    expect(start.context, 'the notice text is not in the context').not.toContain('project path');
+    expect(start.systemMessage).toContain('project path');
   });
 
-  it('a permitted run clears the floor notice, so a later skip is shown again', () => {
-    runWorkerOnce('echo "2.1.268 (Claude Code)"');
-    expect(sessionStart().systemMessage).toContain('Update Claude Code');
+  it('a permitted run clears the path notice, so a later refusal is shown again', () => {
+    holdStagedPath();
+    runWorkerOnce(HEALTHY_VERSION);
+    expect(sessionStart().systemMessage).toContain('project path');
 
+    fs.rmSync(stagedFile, { recursive: true });
     seedQueue(projectDir);
     runWorkerOnce(HEALTHY_VERSION);
-    expect(fs.existsSync(noticePath('floor')) || fs.existsSync(`${noticePath('floor')}.shown`), 'both files are gone').toBe(false);
+    expect(fs.existsSync(noticePath('path')) || fs.existsSync(`${noticePath('path')}.shown`), 'both files are gone').toBe(false);
 
     seedQueue(projectDir);
-    runWorkerOnce('echo "2.1.268 (Claude Code)"');
-    expect(sessionStart().systemMessage).toContain('Update Claude Code');
+    holdStagedPath();
+    runWorkerOnce(HEALTHY_VERSION);
+    expect(sessionStart().systemMessage).toContain('project path');
   });
 
   it('a persistent path refusal raises the path notice once, with its own remedy', () => {
@@ -4600,7 +4603,7 @@ describe('S30: a notice from the memory worker is shown once at session start (A
     const first = sessionStart();
     expect(first.systemMessage).toContain('project path');
     expect(first.systemMessage).toContain('.background-memory-update.log');
-    expect(first.systemMessage, 'a path notice does not tell the user to update').not.toContain('Update Claude Code');
+    expect(first.systemMessage, 'a path notice does not carry the denied remedy').not.toContain('refused the worker');
 
     expect(sessionStart().raw).toBe('');
     runWorkerOnce(HEALTHY_VERSION);
@@ -4631,27 +4634,27 @@ describe('S30: a notice from the memory worker is shown once at session start (A
     expect(fs.existsSync(noticePath('denied')), 'denied, good, denied is not two in a row').toBe(false);
   });
 
-  it('each reason is shown once on its own: a shown floor notice does not hide a later path notice', () => {
-    runWorkerOnce('echo "2.1.268 (Claude Code)"');
-    expect(sessionStart().systemMessage).toContain('Update Claude Code');
-
-    seedQueue(projectDir);
-    fs.mkdirSync(stagedFile);
-    fs.writeFileSync(path.join(stagedFile, 'inside'), 'keep');
+  it('each reason is shown once on its own: a shown path notice does not hide a later denied notice', () => {
+    holdStagedPath();
     runWorkerOnce(HEALTHY_VERSION);
-
-    expect(fs.existsSync(`${noticePath('floor')}.shown`), 'the permitted run cleared the floor marker').toBe(false);
     expect(sessionStart().systemMessage).toContain('project path');
+
+    fs.rmSync(stagedFile, { recursive: true });
+    runWorkerOnce(HEALTHY_VERSION, { resultJson: DENIED_RESULT, skipStagedWrite: true });
+    runWorkerOnce(HEALTHY_VERSION, { resultJson: DENIED_RESULT, skipStagedWrite: true });
+
+    expect(fs.existsSync(`${noticePath('path')}.shown`), 'the permitted runs cleared the path marker').toBe(false);
+    expect(sessionStart().systemMessage).toContain('refused the worker');
   });
 
   it('ignores a notice that is a link, and one whose content does not fit its reason', () => {
     const outside = path.join(shimDir, 'outside.txt');
-    fs.writeFileSync(outside, 'floor 2.1.250 2.1.269\n');
-    fs.symlinkSync(outside, noticePath('floor'));
-    fs.writeFileSync(noticePath('path'), 'denied - -\n');
+    fs.writeFileSync(outside, 'path\n');
+    fs.symlinkSync(outside, noticePath('path'));
+    fs.writeFileSync(noticePath('denied'), 'path\n');
 
     expect(sessionStart().raw, 'nothing shown').toBe('');
-    expect(fs.lstatSync(noticePath('floor')).isSymbolicLink(), 'the link is left as it was').toBe(true);
-    expect(fs.existsSync(`${noticePath('path')}.shown`), 'the odd notice is moved aside, unshown').toBe(true);
+    expect(fs.lstatSync(noticePath('path')).isSymbolicLink(), 'the link is left as it was').toBe(true);
+    expect(fs.existsSync(`${noticePath('denied')}.shown`), 'the odd notice is moved aside, unshown').toBe(true);
   });
 });

@@ -184,8 +184,9 @@ fi
 # read, gets the legacy argv instead, because one flag a CLI does not know fails every
 # run. A CLI whose version is read and is older than MEMORY_MIN_PERMISSION_VERSION, the
 # lowest version on which the worker's write is limited to its staged file, gets no run
-# at all: the queue is kept and a one-time notice asks the user to update Claude Code.
-# The probe runs here, once $CLAUDE_BIN has resolved and the link check has
+# at all: the queue is kept and the run's `Run:` line says below-floor. `devflow init`
+# states this version; src/cli/commands/memory.ts holds the same value, and a test holds
+# the two equal. The probe runs here, once $CLAUDE_BIN has resolved and the link check has
 # passed, and before the lock is taken, so a slow or hung `--version` can never extend
 # the lock's hold. It is bounded by DEVFLOW_BG_VERSION_PROBE_SECS (default 10, at most
 # 60; tests override it as they do DEVFLOW_BG_WATCHDOG_SECS) with the watchdog's
@@ -288,13 +289,10 @@ elif ! claude_version_parsed "$CLAUDE_VERSION_TEXT"; then
 else
   RUN_CLI="$CLAUDE_VERSION_PARSED"
   if ! claude_version_at_least "$CLAUDE_VERSION_PARSED" "$MEMORY_MIN_PERMISSION_VERSION"; then
-    log "SKIP: Claude Code ${CLAUDE_VERSION_PARSED} is older than ${MEMORY_MIN_PERMISSION_VERSION}, the lowest version on which the worker's write is limited to its staged file; update Claude Code. No LLM run, the queue is kept"
-    memory_notice_write "$MEMORY_DIR" "$PROJECT_ROOT" floor "$CLAUDE_VERSION_PARSED" "$MEMORY_MIN_PERMISSION_VERSION"
     RUN_RESULT="below-floor"
     RUN_FLOOR="$MEMORY_MIN_PERMISSION_VERSION"
     exit 0
   fi
-  memory_notice_clear "$MEMORY_DIR" "$PROJECT_ROOT" floor
   if claude_version_at_least "$CLAUDE_VERSION_PARSED" "$MEMORY_MIN_CLAUDE_VERSION"; then
     CLAUDE_ARGV_FORM="lean"
   else
