@@ -26,9 +26,16 @@
 #   +<k> more                          records beyond the first 50
 #   pack-changed <path>                a pack file the branch changed; these lines
 #                                      also print before an error line
+#   pack-dirty <path>                  a pack file that differs from HEAD in the work
+#                                      tree or the index, or that is untracked; these
+#                                      lines print after the pack-changed lines, and
+#                                      also before an error line
 #   skipped-binary <path>              at most 10, then +<k> more
 #   symbol-cap <n> | unsafe-tokens <n> | unmatched-diagnostics <n>
 #   dropped-long-lines <n>             counts, printed only when not zero
+#   base <sha>                         the commit the run compared: the line just before
+#                                      the LINT_PACK line, on every run that got past the
+#                                      base checks, an error exit included
 #   LINT_PACK: clean | no-config       exit 0
 #   LINT_PACK: matches <n>             exit 1
 #   LINT_PACK: error <reason>          exit 2
@@ -42,6 +49,11 @@
 # interrupted   the run got SIGTERM or SIGINT, for example from a timeout
 # linter-exit   the linter exited with a status outside the accepted set, or with
 #               any non-zero status and no "<path>:<line>:" line in its output
+#
+# The pack files are the config, this script, any .gitattributes, and the build
+# files package.json, Makefile, makefile and GNUmakefile (GNU make reads the last
+# two before Makefile). A build file counts only when a changed line names
+# lint-pack or BASE.
 #
 # Needs bash 3.2 or newer and git 2.30 or newer. No line of added text is ever
 # printed. The last line is always the LINT_PACK line.
@@ -79,6 +91,9 @@ DIAGNOSTIC_RE='^.+:[0-9]+:'
 g() { command git --no-pager -c core.quotePath=true "$@"; }
 DIFF_PINS=(--no-ext-diff --no-textconv --no-color --no-relative --src-prefix=a/ --dst-prefix=b/
   --diff-algorithm=myers --inter-hunk-context=0 --indent-heuristic)
+# The build files that run the pack, and the changed lines in them that count.
+BUILD_FILES=(package.json Makefile makefile GNUmakefile)
+BUILD_LINE_RE='lint-pack|BASE'
 # A submodule file is not a tracked file of this repository: never search it.
 GREP_PINS=(--no-color --no-column --full-name --no-recurse-submodules)
 
@@ -88,6 +103,7 @@ ROOT=''
 BASE=''
 SELF_ABS=''
 SELF_REL=''
+BASE_OK=0
 FLAGS=''
 PC_READY=0
 SEEN=' '
@@ -120,9 +136,9 @@ DROPPED_N=0
 
 # ---- Exit handling ----
 
-# The pack-changed lines, once they are built. An error exit prints them too, so
-# a branch that breaks its own pack still shows that it changed the pack.
-report_pack_changed() {
+# The pack-changed and pack-dirty lines, once they are built. An error exit prints
+# them too, so a branch that breaks its own pack still shows that it changed it.
+report_pack_lines() {
   if [ "$PC_READY" = 1 ]; then
     PC_READY=0
     cat "$TMP/pc.out" 2>/dev/null
@@ -130,10 +146,18 @@ report_pack_changed() {
   return 0
 }
 
-# One error, one reason from the closed set. Only the pack-changed lines come
-# before it on stdout.
+# The base the run compared, once the base checks have passed. It is the line just
+# before the result line, an error result included.
+report_base() {
+  if [ "$BASE_OK" = 1 ]; then printf 'base %s\n' "$BASE"; fi
+  return 0
+}
+
+# One error, one reason from the closed set. Only the pack lines and the base line
+# come before it on stdout.
 die_error() {
-  report_pack_changed
+  report_pack_lines
+  report_base
   printf 'LINT_PACK: error %s\n' "$1"
   DONE=1
   exit 2
@@ -143,7 +167,8 @@ die_error() {
 on_exit() {
   local rc=$?
   if [ "$DONE" != 1 ]; then
-    report_pack_changed
+    report_pack_lines
+    report_base
     printf 'LINT_PACK: error git-failed\n'
     rc=2
   fi
@@ -394,18 +419,43 @@ build_diffmap() {
 }
 
 # The pack files the branch changed, sorted: the config, this script and any
-# .gitattributes by name, package.json and Makefile when a changed line names
-# lint-pack. A config renamed away or deleted shows as its old path. The lines
-# need only the changed paths and fixed names, so they are built before the
-# config is read and every later error exit prints them.
+# .gitattributes by name, a build file when a changed line names lint-pack or BASE.
+# A config renamed away or deleted shows as its old path. Then the pack files that
+# differ from HEAD in the work tree. The lines need only the changed paths and fixed
+# names, so they are built before the config is read and every later error exit
+# prints them.
 pack_changed() {
   command awk -F"$TAB" 'index($3, "P") > 0 { print $1 }' "$TMP/dm.map" >"$TMP/pc.txt" || die_error git-failed
-  g diff "${DIFF_PINS[@]}" --no-renames --name-only -Glint-pack --end-of-options "$BASE" HEAD -- \
-    package.json Makefile >>"$TMP/pc.txt" 2>/dev/null || die_error git-failed
+  g diff "${DIFF_PINS[@]}" --no-renames --name-only "-G$BUILD_LINE_RE" --end-of-options "$BASE" HEAD -- \
+    "${BUILD_FILES[@]}" >>"$TMP/pc.txt" 2>/dev/null || die_error git-failed
   command sort -u "$TMP/pc.txt" >"$TMP/pc.sorted" || die_error git-failed
   command sed 's/^/pack-changed /' "$TMP/pc.sorted" >"$TMP/pc.lines" || die_error git-failed
+  pack_dirty
   bound_lines "$TMP/pc.lines" "$TMP/pc.out"
   PC_READY=1
+}
+
+# The pack files that differ from HEAD in the work tree or the index, or that are
+# untracked and not ignored, sorted, appended to the pack lines. The script is a
+# literal pathspec: its name may hold glob characters. A build file counts only for
+# a changed line that names lint-pack or BASE, or when it is untracked.
+pack_dirty() {
+  local side
+  local -a mode specs
+  specs=(':(literal).lint-pack.conf' .gitattributes '*/.gitattributes')
+  if [ -n "$SELF_REL" ]; then specs[${#specs[@]}]=":(literal)$SELF_REL"; fi
+  : >"$TMP/pd.txt"
+  for side in tree index; do
+    mode=()
+    if [ "$side" = index ]; then mode=(--cached); fi
+    g diff "${DIFF_PINS[@]}" --no-renames --name-only ${mode[@]+"${mode[@]}"} --end-of-options HEAD -- \
+      "${specs[@]}" >>"$TMP/pd.txt" 2>/dev/null || die_error git-failed
+    g diff "${DIFF_PINS[@]}" --no-renames --name-only "-G$BUILD_LINE_RE" ${mode[@]+"${mode[@]}"} --end-of-options HEAD -- \
+      "${BUILD_FILES[@]}" >>"$TMP/pd.txt" 2>/dev/null || die_error git-failed
+  done
+  g ls-files --others --exclude-standard -- "${specs[@]}" "${BUILD_FILES[@]}" >>"$TMP/pd.txt" 2>/dev/null || die_error git-failed
+  command sort -u "$TMP/pd.txt" >"$TMP/pd.sorted" || die_error git-failed
+  command sed 's/^/pack-dirty /' "$TMP/pd.sorted" >>"$TMP/pc.lines" || die_error git-failed
 }
 
 # One -U0 diff, split by an awk pass into the streams each check reads.
@@ -562,6 +612,7 @@ emit() {
     if [ "$UNSAFE_N" -gt 0 ]; then printf 'unsafe-tokens %s\n' "$UNSAFE_N"; fi
     if [ "$UNMATCHED_N" -gt 0 ]; then printf 'unmatched-diagnostics %s\n' "$UNMATCHED_N"; fi
     if [ "$DROPPED_N" -gt 0 ]; then printf 'dropped-long-lines %s\n' "$DROPPED_N"; fi
+    report_base
     printf 'LINT_PACK: %s\n' "$state"
   } >"$TMP/result.txt"
   cat "$TMP/result.txt"
@@ -780,10 +831,12 @@ main() {
 
   BASE=$1
   [[ $BASE =~ $BASE_RE ]] || die_error bad-base
-  g rev-parse --verify --quiet --end-of-options "${BASE}^{commit}" >/dev/null 2>&1 || die_error bad-base
+  # The commit the argument names, so the base line shows what the run compared.
+  BASE=$(g rev-parse --verify --quiet --end-of-options "${BASE}^{commit}" 2>/dev/null) || die_error bad-base
+  [[ $BASE =~ $BASE_RE ]] || die_error bad-base
   g merge-base --is-ancestor "$BASE" HEAD >/dev/null 2>&1
   rc=$?
-  case "$rc" in 0) ;; 1) die_error base-not-ancestor ;; *) die_error git-failed ;; esac
+  case "$rc" in 0) BASE_OK=1 ;; 1) die_error base-not-ancestor ;; *) die_error git-failed ;; esac
 
   TMP=$(mktemp -d "${TMPDIR:-/tmp}/lint-pack.XXXXXX") || die_error git-failed
   case "$SELF_ABS" in "$ROOT"/*) SELF_REL=${SELF_ABS#"$ROOT"/} ;; esac

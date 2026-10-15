@@ -241,12 +241,31 @@ function fullFixture(): { r: Repo; base: string } {
   return { r, base };
 }
 
-function expectRun(res: Run, stdout: string, status: number): void {
-  expect({ stdout: res.stdout, status: res.status }).toEqual({ stdout, status });
+/** A result that ends before the base is confirmed: usage, git version, repository and base errors. It prints no `base` record. */
+const BEFORE_BASE_RESULT = /^LINT_PACK: error (usage|git-too-old|not-a-repo|bad-base|base-not-ancestor)\n$/;
+
+/** Split the `base <sha>` record, which sits just before the result line, from the rest of stdout. */
+function splitBase(stdout: string): { rest: string; base: string | null } {
+  const lines = stdout.split('\n');
+  const resultAt = lines.length - 2;
+  const found = resultAt >= 1 ? /^base ([0-9a-f]{40})$/.exec(lines[resultAt - 1] ?? '') : null;
+  if (found === null) return { rest: stdout, base: null };
+  lines.splice(resultAt - 1, 1);
+  return { rest: lines.join('\n'), base: found[1] ?? null };
 }
 
-function expectError(res: Run, reason: string): void {
-  expectRun(res, `LINT_PACK: error ${reason}\n`, 2);
+/**
+ * Compare stdout without its `base` record and the exit code with the oracle. The record must be there whenever a
+ * base was confirmed, and absent when the run ended before that; `hasBase` overrides the guess made from the oracle.
+ */
+function expectRun(res: Run, stdout: string, status: number, hasBase?: boolean): void {
+  const { rest, base } = splitBase(res.stdout);
+  const expectedBase = hasBase ?? !BEFORE_BASE_RESULT.test(stdout);
+  expect({ stdout: rest, status: res.status, hasBase: base !== null }).toEqual({ stdout, status, hasBase: expectedBase });
+}
+
+function expectError(res: Run, reason: string, hasBase?: boolean): void {
+  expectRun(res, `LINT_PACK: error ${reason}\n`, 2, hasBase);
 }
 
 /** Delete one loose object, as a corrupt or partial object store would. `spec` is any git object name. */
@@ -638,7 +657,7 @@ describe('lint-pack template: the git version precondition', () => {
 
   it.each(['banana', '', 'git version'])('reports git-failed when git --version prints %j', version => {
     const { r, base } = planIdFixture();
-    expectError(r.run(base, { env: { PATH: pathWithGitVersion(version) } }), 'git-failed');
+    expectError(r.run(base, { env: { PATH: pathWithGitVersion(version) } }), 'git-failed', false);
   });
 
   it('still reports bad-base with a git that is new enough', () => {
@@ -772,15 +791,64 @@ describe('lint-pack template: the error reasons in the header', () => {
   });
 });
 
+/** Record words the script prints through a fixed `printf` or `sed` prefix. The check ids come from the awk passes. */
+function printedRecordWords(text: string): string[] {
+  const code = text.split('\n').filter(line => !/^\s*#/.test(line)).join('\n');
+  const found = new Set<string>();
+  for (const m of code.matchAll(/printf '([a-z][a-z-]*) %s/g)) found.add(m[1]);
+  for (const m of code.matchAll(/s\/\^\/([a-z][a-z-]*) \//g)) found.add(m[1]);
+  return [...found].sort();
+}
+
+/** Record words the header's Output block names, each as `<word> <placeholder>`; the result lines are not records. */
+function headerRecordWords(text: string): string[] {
+  const lines = text.split('\n');
+  const start = lines.findIndex(line => line.startsWith('# Output'));
+  const end = lines.findIndex(line => line.startsWith('# Error reasons:'));
+  if (start < 0 || end < start) return [];
+  const found = new Set<string>();
+  const records = lines.slice(start, end).filter(line => !line.includes('LINT_PACK:'));
+  for (const m of records.join('\n').matchAll(/([a-z][a-z-]*) <[a-z]+>/g)) found.add(m[1]);
+  return [...found].sort();
+}
+
+/** Records printed but not named in the header (`undocumented`) and named but never printed (`unused`). */
+function recordDrift(text: string): string[] {
+  const printed = printedRecordWords(text);
+  const named = headerRecordWords(text);
+  return [
+    ...printed.filter(word => !named.includes(word)).map(word => `undocumented ${word}`),
+    ...named.filter(word => !printed.includes(word)).map(word => `unused ${word}`),
+  ];
+}
+
+describe('lint-pack template: the records in the header', () => {
+  it('names every record line the script prints, and no other', () => {
+    const text = fs.readFileSync(SCRIPT, 'utf8');
+    expect(printedRecordWords(text)).toEqual([
+      'base', 'dropped-long-lines', 'pack-changed', 'pack-dirty', 'skipped-binary', 'symbol-cap', 'unmatched-diagnostics', 'unsafe-tokens',
+    ]);
+    expect(recordDrift(text)).toEqual([]);
+  });
+
+  it('flags a record that is printed but not named, and one that is named but never printed (known-bad probe)', () => {
+    const header = ['# Output (stdout only):', '#   foo <path>   a record', '#   gone <n>', '# Error reasons: usage.', ''];
+    const body = ["f() { sed 's/^/foo /' x; }"];
+    expect(recordDrift([...header, ...body].join('\n'))).toEqual(['unused gone']);
+    expect(recordDrift([...header, ...body, "g() { printf 'brand-new %s\\n' 1; }"].join('\n'))).toEqual(['undocumented brand-new', 'unused gone']);
+  });
+});
+
 // ── Config as data ───────────────────────────────────────────────────────────
 
 describe('lint-pack template: the config is data read from HEAD', () => {
-  it('ignores an uncommitted edit to the config in the work tree', () => {
+  it('ignores an uncommitted edit to the config in the work tree and reports the edit', () => {
     const { r, base } = fullFixture();
+    const dirty = FULL_ORACLE.replace('LINT_PACK:', 'pack-dirty .lint-pack.conf\nLINT_PACK:');
     fs.writeFileSync(path.join(r.dir, '.lint-pack.conf'), cfg('ids.enabled=false'));
-    expectRun(r.run(base), FULL_ORACLE, 1);
+    expectRun(r.run(base), dirty, 1);
     fs.rmSync(path.join(r.dir, '.lint-pack.conf'));
-    expectRun(r.run(base), FULL_ORACLE, 1);
+    expectRun(r.run(base), dirty, 1);
   });
 
   it('reads allow globs as data: command substitution and backticks never run', () => {
@@ -1270,9 +1338,37 @@ describe('lint-pack template: pack-changed lines', () => {
     expectRun(r.run(base), 'pack-changed a/b/.gitattributes\npack-changed docs/.gitattributes\nLINT_PACK: clean\n', 0);
   });
 
-  it('skips package.json and Makefile when no changed line names lint-pack', () => {
+  it('skips package.json and Makefile when no changed line names lint-pack or BASE', () => {
     const { r, base } = packFixture();
     r.commit({ 'package.json': PACKAGE('bash scripts/lint-pack.sh', 'vitest run'), Makefile: `${MAKEFILE('@bash scripts/lint-pack.sh $(BASE)')}build:\n\t@true\n` }, 'unrelated');
+    expectRun(r.run(base), 'LINT_PACK: clean\n', 0);
+  });
+
+  it.each(['Makefile', 'GNUmakefile', 'makefile'])('reports a %s line that can change the base', name => {
+    const r = newRepo();
+    const recipe = MAKEFILE('@bash scripts/lint-pack.sh $(BASE)');
+    const base = r.commit({ ...pack(IDS_CONF), [name]: recipe }, 'base');
+    r.commit({ [name]: `${recipe}override BASE := $(shell git rev-parse HEAD)\n` }, 'head');
+    expectRun(r.run(base), `pack-changed ${name}\nLINT_PACK: clean\n`, 0);
+  });
+
+  it('reports a build file the branch adds when a line of it can change the base', () => {
+    const { r, base } = packFixture();
+    r.commit({ GNUmakefile: 'override BASE := $(shell git rev-parse HEAD)\ninclude Makefile\n' }, 'add a build file');
+    expectRun(r.run(base), 'pack-changed GNUmakefile\nLINT_PACK: clean\n', 0);
+  });
+
+  it('reports a package.json line that can change the base', () => {
+    const { r, base } = packFixture();
+    r.commit({ 'package.json': PACKAGE('bash scripts/lint-pack.sh', 'BASE=HEAD vitest') }, 'head');
+    expectRun(r.run(base), 'pack-changed package.json\nLINT_PACK: clean\n', 0);
+  });
+
+  it.each(['GNUmakefile', 'makefile'])('skips %s when no changed line names lint-pack or BASE', name => {
+    const r = newRepo();
+    const recipe = MAKEFILE('@bash scripts/lint-pack.sh $(BASE)');
+    const base = r.commit({ ...pack(IDS_CONF), [name]: recipe }, 'base');
+    r.commit({ [name]: `${recipe}build:\n\t@true\n` }, 'unrelated');
     expectRun(r.run(base), 'LINT_PACK: clean\n', 0);
   });
 
@@ -1306,11 +1402,231 @@ describe('lint-pack template: pack-changed lines', () => {
     const cdpath = { CDPATH: `${path.join(r.dir, 'src')}:${r.dir}:.` };
     expectRun(r.run(base, { script: SCRIPT_IN_REPO, env: cdpath }), expected, 0);
   });
+});
 
-  it('lists nothing for an uncommitted edit to a pack file', () => {
-    const { r, base } = packFixture();
+// ── pack-dirty ───────────────────────────────────────────────────────────────
+
+describe('lint-pack template: pack-dirty lines', () => {
+  const RECIPE = 'lint-pack:\n\t@bash scripts/lint-pack.sh $(BASE)\n';
+  const OVERRIDE = 'override BASE := $(shell git rev-parse HEAD)\n';
+  const PACKAGE_JSON = '{\n  "scripts": {\n    "lint-pack": "bash scripts/lint-pack.sh",\n    "test": "vitest"\n  }\n}\n';
+  const MATCH = 'plan-id src/a.ts:2 tp\n';
+
+  /** The oracle of the fixture below: its one record, then one pack-dirty line per path. */
+  const withDirty = (...paths: string[]): string => `${MATCH}${paths.map(p => `pack-dirty ${p}\n`).join('')}LINT_PACK: matches 1\n`;
+
+  /** A committed pack with every kind of pack file, and one plan-ID match at HEAD. */
+  function dirtyFixture() {
+    const r = newRepo();
+    const base = r.commit(
+      {
+        ...pack(IDS_CONF),
+        'package.json': PACKAGE_JSON,
+        Makefile: RECIPE,
+        '.gitattributes': '*.png binary\n',
+        'docs/.gitattributes': '*.md text\n',
+        'src/a.ts': 'x\n',
+      },
+      'base',
+    );
+    r.commit({ 'src/a.ts': 'x\n// TP-7\n' }, 'head');
+    return { r, base };
+  }
+
+  it('prints nothing extra for a clean work tree', () => {
+    const { r, base } = dirtyFixture();
+    expectRun(r.run(base), withDirty(), 1);
+  });
+
+  it.each([SCRIPT_IN_REPO, '.lint-pack.conf', '.gitattributes', 'docs/.gitattributes'])('reports an uncommitted edit to %s', file => {
+    const { r, base } = dirtyFixture();
+    fs.appendFileSync(path.join(r.dir, file), '# not committed\n');
+    expectRun(r.run(base), withDirty(file), 1);
+  });
+
+  it('reports a pack file deleted from the work tree', () => {
+    const { r, base } = dirtyFixture();
+    fs.rmSync(path.join(r.dir, '.lint-pack.conf'));
+    expectRun(r.run(base), withDirty('.lint-pack.conf'), 1);
+  });
+
+  it('reports an edit that sits in the index only, with the work tree back at HEAD', () => {
+    const { r, base } = dirtyFixture();
+    fs.writeFileSync(path.join(r.dir, '.lint-pack.conf'), `${IDS_CONF}# staged\n`);
+    r.git('add', '.lint-pack.conf');
+    fs.writeFileSync(path.join(r.dir, '.lint-pack.conf'), IDS_CONF);
+    expectRun(r.run(base), withDirty('.lint-pack.conf'), 1);
+  });
+
+  it.each([SCRIPT_IN_REPO, `../${SCRIPT_IN_REPO}`])('names the script by its repository path when it is invoked as %s', script => {
+    const { r, base } = dirtyFixture();
     fs.appendFileSync(path.join(r.dir, SCRIPT_IN_REPO), '# not committed\n');
-    expectRun(r.run(base), 'LINT_PACK: clean\n', 0);
+    const cwd = script.startsWith('..') ? path.join(r.dir, 'src') : r.dir;
+    expectRun(r.run(base, { script, cwd }), withDirty(SCRIPT_IN_REPO), 1);
+  });
+
+  it('reports nothing for the repository copy when the script runs from outside the repository', () => {
+    const { r, base } = dirtyFixture();
+    fs.appendFileSync(path.join(r.dir, SCRIPT_IN_REPO), '# not committed\n');
+    const outside = path.join(tempDir('lint-pack-outside-'), 'lint-pack.sh');
+    fs.writeFileSync(outside, scriptText(), { mode: 0o755 });
+    expectRun(r.run(base, { script: outside }), withDirty(), 1);
+  });
+
+  it.each([
+    ['Makefile', `${RECIPE}${OVERRIDE}`],
+    ['package.json', PACKAGE_JSON.replace('"vitest"', '"BASE=HEAD vitest"')],
+    ['package.json', PACKAGE_JSON.replace('"bash scripts/lint-pack.sh"', '"true"')],
+  ])('reports an uncommitted %s line that can change the base or the entry', (file, text) => {
+    const { r, base } = dirtyFixture();
+    r.write({ [file]: text });
+    expectRun(r.run(base), withDirty(file), 1);
+  });
+
+  it.each([
+    ['Makefile', `${RECIPE}build:\n\t@true\n`],
+    ['package.json', PACKAGE_JSON.replace('"vitest"', '"vitest run"')],
+  ])('skips an uncommitted %s edit when no changed line names lint-pack or BASE', (file, text) => {
+    const { r, base } = dirtyFixture();
+    r.write({ [file]: text });
+    expectRun(r.run(base), withDirty(), 1);
+  });
+
+  it.each(['GNUmakefile', 'makefile'])('reports an untracked %s', name => {
+    const r = newRepo();
+    const base = r.commit({ ...pack(IDS_CONF), 'src/a.ts': 'x\n' }, 'base');
+    r.commit({ 'src/a.ts': 'x\n// TP-7\n' }, 'head');
+    r.write({ [name]: OVERRIDE });
+    expectRun(r.run(base), withDirty(name), 1);
+  });
+
+  it('reports an untracked .gitattributes in any directory, and skips an ignored directory', () => {
+    const { r, base } = dirtyFixture();
+    r.write({
+      'extra/deep/.gitattributes': '* binary\n',
+      'extra/x.gitattributes': 'not a pack file\n',
+      'node_modules/pkg/.gitattributes': '* binary\n',
+      '.gitignore': 'node_modules/\n',
+    });
+    expectRun(r.run(base), withDirty('extra/deep/.gitattributes'), 1);
+  });
+
+  it('prints one line per path for directory names with a space, a newline or non-ASCII bytes', () => {
+    const { r, base } = dirtyFixture();
+    r.write({ 'we ird/.gitattributes': 'x\n', 'a\nb/.gitattributes': 'x\n', 'café/.gitattributes': 'x\n' });
+    const expected = [
+      MATCH.trimEnd(),
+      'pack-dirty "a\\nb/.gitattributes"',
+      'pack-dirty "caf\\303\\251/.gitattributes"',
+      'pack-dirty we ird/.gitattributes',
+      'LINT_PACK: matches 1',
+      '',
+    ].join('\n');
+    expectRun(r.run(base), expected, 1);
+  });
+
+  it('prints the dirty paths sorted, after the pack-changed lines and before the base line', () => {
+    const r = newRepo();
+    const base = r.commit({ ...pack(IDS_CONF), '.gitattributes': '*.png binary\n', 'src/a.ts': 'x\n' }, 'base');
+    r.commit({ '.gitattributes': '*.png binary\n*.md text\n', 'src/a.ts': 'x\n// TP-7\n' }, 'head');
+    fs.appendFileSync(path.join(r.dir, SCRIPT_IN_REPO), '# not committed\n');
+    fs.appendFileSync(path.join(r.dir, '.lint-pack.conf'), '# not committed\n');
+    fs.appendFileSync(path.join(r.dir, '.gitattributes'), '# not committed\n');
+    const res = r.run(base);
+    const expected = [
+      'plan-id src/a.ts:2 tp',
+      'pack-changed .gitattributes',
+      'pack-dirty .gitattributes',
+      'pack-dirty .lint-pack.conf',
+      `pack-dirty ${SCRIPT_IN_REPO}`,
+      `base ${base}`,
+      'LINT_PACK: matches 1',
+      '',
+    ].join('\n');
+    expect({ stdout: res.stdout, status: res.status }).toEqual({ stdout: expected, status: 1 });
+  });
+
+  it('prints the dirty paths before an error line', () => {
+    const { r, base } = simple(IDS_CONF, { 'src/a.ts': 'x\n' }, { '.lint-pack.conf': `${IDS_CONF}bogus.key=1\n` });
+    fs.appendFileSync(path.join(r.dir, SCRIPT_IN_REPO), '# not committed\n');
+    expectRun(r.run(base), `pack-changed .lint-pack.conf\npack-dirty ${SCRIPT_IN_REPO}\nLINT_PACK: error bad-config 4\n`, 2);
+  });
+
+  it('reports the same lines with every pathspec variable exported', () => {
+    const { r, base } = dirtyFixture();
+    fs.appendFileSync(path.join(r.dir, 'docs/.gitattributes'), '# not committed\n');
+    r.write({ 'extra/.gitattributes': '* binary\n' });
+    const env = { GIT_LITERAL_PATHSPECS: '1', GIT_NOGLOB_PATHSPECS: '1', GIT_GLOB_PATHSPECS: '1', GIT_ICASE_PATHSPECS: '1' };
+    expectRun(r.run(base, { env }), withDirty('docs/.gitattributes', 'extra/.gitattributes'), 1);
+  });
+});
+
+// ── The base line ────────────────────────────────────────────────────────────
+
+describe('lint-pack template: the base line', () => {
+  /** A topic branch that forks from `root` while another commit sits on the side: the merge-base is `root`. */
+  function branchFixture() {
+    const r = newRepo();
+    const root = r.commit({ ...pack(IDS_CONF), 'src/a.ts': 'x\n' }, 'root');
+    const side = r.commit({ 'src/a.ts': 'side\n' }, 'side');
+    r.git('checkout', '-q', '--detach', root);
+    r.commit({ 'src/a.ts': 'x\n// TP-7\n' }, 'topic');
+    return { r, root, side, mergeBase: r.git('merge-base', side, 'HEAD').trim() };
+  }
+
+  it('prints the merge-base the pack compared on the line before the result', () => {
+    const { r, root, mergeBase } = branchFixture();
+    expect(mergeBase).toBe(root);
+    const res = r.run(mergeBase);
+    expect({ stdout: res.stdout, status: res.status }).toEqual({
+      stdout: `plan-id src/a.ts:2 tp\nbase ${mergeBase}\nLINT_PACK: matches 1\n`,
+      status: 1,
+    });
+    expect(res.stderr).toBe('');
+  });
+
+  it.each([
+    ['clean', IDS_CONF, 'LINT_PACK: clean', 0],
+    ['no-config', undefined, 'LINT_PACK: no-config', 0],
+  ])('prints the base on a %s result', (_name, conf, result, status) => {
+    const { r, base } = simple(conf, { 'src/a.ts': 'x\n' }, { 'src/a.ts': 'y\n' });
+    const res = r.run(base);
+    expect({ stdout: res.stdout, status: res.status }).toEqual({ stdout: `base ${base}\n${result}\n`, status });
+  });
+
+  it('prints the base on an error that comes after the base is confirmed', () => {
+    const { r, base } = simple(IDS_CONF, { 'src/a.ts': 'x\n' }, { '.lint-pack.conf': `${IDS_CONF}bogus.key=1\n` });
+    const res = r.run(base);
+    expect({ stdout: res.stdout, status: res.status }).toEqual({
+      stdout: `pack-changed .lint-pack.conf\nbase ${base}\nLINT_PACK: error bad-config 4\n`,
+      status: 2,
+    });
+  });
+
+  it('prints the base on a git-failed error that comes after the base is confirmed', () => {
+    const { r, base } = simple(IDS_CONF, { 'src/a.ts': 'x\n' }, { '.lint-pack.conf': `${IDS_CONF}# edited\n` });
+    removeObject(r, 'HEAD:.lint-pack.conf');
+    expect(r.run(base).stdout).toBe(`pack-changed .lint-pack.conf\nbase ${base}\nLINT_PACK: error git-failed\n`);
+  });
+
+  it('prints no base line when the run ends before the base is confirmed', () => {
+    const { r, side } = branchFixture();
+    const cases: ReadonlyArray<readonly [string, Run]> = [
+      ['usage', r.run('', { args: [] })],
+      ['bad-base', r.run('0'.repeat(40))],
+      ['base-not-ancestor', r.run(side)],
+    ];
+    for (const [reason, res] of cases) {
+      expect({ stdout: res.stdout, status: res.status }, reason).toEqual({ stdout: `LINT_PACK: error ${reason}\n`, status: 2 });
+    }
+  });
+
+  it('prints the commit the base names when the base is the id of an annotated tag', () => {
+    const { r, base } = simple(IDS_CONF, { 'src/a.ts': 'x\n' }, { 'src/a.ts': 'y\n' });
+    r.git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'tag.gpgsign=false', 'tag', '-a', '-m', 'tag', 'v1', base);
+    const tagId = r.git('rev-parse', 'v1').trim();
+    expect(tagId).not.toBe(base);
+    expect(r.run(tagId).stdout).toBe(`base ${base}\nLINT_PACK: clean\n`);
   });
 });
 
