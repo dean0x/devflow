@@ -131,6 +131,8 @@ devflow/
 │   ├── bump-version.ts               # Version bump script
 │   ├── token-audit/                  # `npm run audit:tokens`: token spend from local transcripts (not shipped)
 │   └── update-golden.ts              # Golden fixture regeneration (git-agent target; github-status-lines refuses without --unfreeze)
+├── templates/                        # Project-owned templates that ship in the npm package and are never installed
+│   └── lint-pack/                    # lint-pack.sh, .lint-pack.conf, README.md: the lean lint pack template
 ├── tests/                            # Test harness
 │   ├── helpers.ts                    # Shared helpers: resolveAgentSource, resolveAllAgents, extractOpSectionFromCorpus, gitAgentSinkCorpus, walkFiles, loadGolden, extractStatusLines, parseFences, isAgentBlock, requireDistFile/requireDistFiles
 │   ├── seams/                        # Command→agent input contract
@@ -196,9 +198,11 @@ Assets live once in `src/assets/` and install to the user's `~/.claude/` — no 
 | Scripts (root) | `src/assets/scripts/*.cjs`, `lib/`, `hud.sh` | `~/.devflow/scripts/` | None — edit → init |
 | Scripts (hooks) | `src/assets/scripts/hooks/` | `~/.devflow/scripts/hooks/` | None — edit → init |
 
+`templates/lint-pack/` is not an asset. It ships in the npm package, `devflow init` never installs it, and devflow never runs it. A project copies the folder, owns the copy and wires it as a root `lint-pack` script, which Validate runs at the `lean` gate level. The template README describes the wiring.
+
 ### Packaging
 
-`npm pack` ships `dist/` (compiled JS, commands, compiled agents, learning-off variants, and generated skill references) and `src/assets/` (skills, agents — hand-authored `.md` and `.mds` generator hosts alike — rules, scripts). No `plugins/` or `shared/` directories are included.
+`npm pack` ships `dist/` (compiled JS, commands, compiled agents, learning-off variants, and generated skill references), `src/assets/` (skills, agents — hand-authored `.md` and `.mds` generator hosts alike — rules, scripts) and `templates/lint-pack/` (the lint pack template: a script, an example config and a README). No `plugins/` or `shared/` directories are included.
 
 ### Adding a Skill to a Plugin
 
