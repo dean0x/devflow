@@ -142,7 +142,16 @@ export function tableRows(section: string): string[][] {
 
 const step11 = (body: string): string | null => sectionBetween(body, '#### Step 1.1:', '#### Step 1.2:')
 const step12 = (body: string): string | null => sectionBetween(body, '#### Step 1.2:', '#### Step 1.3:')
+const step12Own = (body: string): string | null => sectionBetween(body, '#### Step 1.2:', '#### Step 1.2b:')
+const step12b = (body: string): string | null => sectionBetween(body, '#### Step 1.2b:', '#### Step 1.3:')
+const phase3 = (body: string): string | null => sectionBetween(body, '### Phase 3:', '### Phase 4:')
 const gateBlock = (body: string): string | null => sectionBetween(body, '**Gate level.**', '#### Step 1.3:')
+
+/** The names on a section's `**Produces:**` or `**Requires:**` line, parentheticals dropped. */
+function dataFlowNames(section: string | null, kind: 'Produces' | 'Requires'): string[] {
+  const line = new RegExp(`^\\*\\*${kind}:\\*\\* (.+)$`, 'm').exec(section ?? '')?.[1] ?? ''
+  return line.replace(/\([^)]*\)/g, '').split(',').map(n => n.trim()).filter(n => n !== '')
+}
 
 const unique = (names: readonly string[]): string[] => [...new Set(names)]
 const sameSet = (a: readonly string[], b: readonly string[]): boolean => unique(a).sort().join(',') === unique(b).sort().join(',')
@@ -384,7 +393,9 @@ export function collectGateLevelBlockDefects(body: string): string[] {
   const out: string[] = []
   const block = gateBlock(body)
   if (block === null) return ['no gate-level block between "**Gate level.**" and "#### Step 1.3:"']
-  if (!(step12(body) ?? '').includes('#### Step 1.2b: Narrow by gate level')) out.push('Step 1.2b has no heading of its own inside the Step 1.2 slice')
+  const own = step12Own(body)
+  const narrow = step12b(body)
+  if (own === null || narrow === null || !narrow.startsWith('#### Step 1.2b: Narrow by gate level')) out.push('Step 1.2b has no heading of its own after Step 1.2')
   const read = block.split('\n\n').find(p => p.includes(LEVEL_REFERENCE_PATH))
   if (read === undefined) out.push('the block has no read paragraph for the level reference')
   else {
@@ -404,7 +415,20 @@ export function collectGateLevelBlockDefects(body: string): string[] {
   if (!/\*\*Produces:\*\* [^\n]*GATE_LEVEL/.test(produces)) out.push('Step 0b Produces does not list GATE_LEVEL')
   const phase1 = sectionBetween(body, '### Phase 1: Analyze Changed Files', '#### Step 1.1:') ?? ''
   if (!/\*\*Requires:\*\* [^\n]*GATE_LEVEL/.test(phase1)) out.push('Phase 1 Requires does not list GATE_LEVEL')
-  if (!/\*\*Requires:\*\* [^\n]*GATE_LEVEL/.test(step12(body) ?? '')) out.push('Step 1.2 Requires does not list GATE_LEVEL')
+  if (/\*\*Produces:\*\* [^\n]*every class/.test(own ?? '')) out.push('Step 1.2 Produces claims every class, which only Step 1.2b narrows')
+  if (dataFlowNames(own, 'Requires').includes('GATE_LEVEL')) out.push('Step 1.2 Requires lists GATE_LEVEL, which only Step 1.2b reads')
+  for (const name of ['REVIEW_FOCUS_LIST', 'GATE_LEVEL']) {
+    if (!dataFlowNames(narrow, 'Produces').includes(name)) out.push(`Step 1.2b Produces does not list ${name}`)
+  }
+  for (const name of ['REVIEW_FOCUS_LIST', 'DIFF_CLASS', 'CHANGED_PATHS', 'GATE_LEVEL']) {
+    if (!dataFlowNames(narrow, 'Requires').includes(name)) out.push(`Step 1.2b Requires does not list ${name}`)
+  }
+  for (const name of ['GATE_LEVEL', 'REVIEW_FOCUS_LIST']) {
+    if (!dataFlowNames(phase3(body), 'Requires').includes(name)) out.push(`Phase 3 Requires does not list ${name}`)
+  }
+  if (/Resolve the compliance lens$/m.test(body)) out.push('a Step 0b title names the compliance lens alone, but the step also yields GATE_LEVEL')
+  if (!(own ?? '').includes('REVIEW_FOCUS_LIST starts with the eight core focuses')) out.push('Step 1.2 does not say the code list starts with the eight core focuses')
+  if (/core focuses are unconditional/.test(own ?? '')) out.push('Step 1.2 calls the core focuses unconditional, but Step 1.2b narrows them')
   if (!body.includes('sets the diff range, never the gate level')) out.push('Edge Cases does not say --full sets the diff range, never the gate level')
   if (!body.includes('one per focus in REVIEW_FOCUS_LIST')) out.push('Phase 2 does not spawn one Review agent per REVIEW_FOCUS_LIST focus')
   return out
@@ -453,6 +477,9 @@ export function collectFullIsTodayDefects(body: string): string[] {
     if (row === undefined || row[0] !== condition || row[1] !== adds) out.push(`trigger row ${i + 1} is "${(row ?? []).join(' | ')}", expected "${condition} | ${adds}"`)
   })
   if (!s12.includes('| COMPLIANCE_ACTIVE AND diff touches regulated surface | compliance |')) out.push('the compliance trigger row is not byte-equal')
+  const sentence = s12.split('\n\n').find(p => p.includes('COMPLIANCE_ACTIVE` AND the diff touches regulated surface'))
+  if (sentence === undefined) out.push('Step 1.2 has no compliance sentence')
+  else if (!sentence.endsWith(': on a `code` diff, add `compliance`.')) out.push('the compliance sentence is not limited to the `code` class')
   return out
 }
 
@@ -677,13 +704,37 @@ describe('the command carries the gate-level block, outside the learning arms (A
     const movedUp = seed(seed(ON, `${readParagraph}\n\n`, ''), '**Language focus stamp.**', `${readParagraph}\n\n**Language focus stamp.**`)
     expect(defects(movedUp)).toContain('the directory read does not come after the stamp paragraph')
     expect(defects(`${ON}\nRun \`echo "$CLAUDE_CONFIG_DIR"\`.\n`)).toContain('2 CLAUDE_CONFIG_DIR names in the command, expected 1')
-    expect(defects(seed(ON, '#### Step 1.2b: Narrow by gate level\n\n', ''))).toContain('Step 1.2b has no heading of its own inside the Step 1.2 slice')
+    expect(defects(seed(ON, '#### Step 1.2b: Narrow by gate level\n\n', ''))).toContain('Step 1.2b has no heading of its own after Step 1.2')
     expect(defects(seed(ON, '**Produces:** COMPLIANCE_ACTIVE, COMPLIANCE_FRAMEWORKS, GATE_LEVEL', '**Produces:** COMPLIANCE_ACTIVE, COMPLIANCE_FRAMEWORKS')))
       .toContain('Step 0b Produces does not list GATE_LEVEL')
     expect(defects(seed(ON, '**Requires:** DIFF_RANGE, REVIEW_DIR, COMPLIANCE_ACTIVE, GATE_LEVEL (from Step 0b)', '**Requires:** DIFF_RANGE, REVIEW_DIR, COMPLIANCE_ACTIVE (from Step 0b)')))
       .toContain('Phase 1 Requires does not list GATE_LEVEL')
-    expect(defects(seed(ON, '**Requires:** DIFF_CLASS, CHANGED_PATHS, COMPLIANCE_ACTIVE, GATE_LEVEL', '**Requires:** DIFF_CLASS, CHANGED_PATHS, COMPLIANCE_ACTIVE')))
-      .toContain('Step 1.2 Requires does not list GATE_LEVEL')
+    expect(defects(seed(ON, '**Requires:** DIFF_CLASS, CHANGED_PATHS, COMPLIANCE_ACTIVE', '**Requires:** DIFF_CLASS, CHANGED_PATHS, COMPLIANCE_ACTIVE, GATE_LEVEL')))
+      .toContain('Step 1.2 Requires lists GATE_LEVEL, which only Step 1.2b reads')
+    expect(defects(seed(ON, '**Produces:** REVIEW_FOCUS_LIST (code class)', '**Produces:** REVIEW_FOCUS_LIST (code class; every class by level)')))
+      .toContain('Step 1.2 Produces claims every class, which only Step 1.2b narrows')
+    const P12B = '**Produces:** REVIEW_FOCUS_LIST, GATE_LEVEL'
+    const R12B = '**Requires:** REVIEW_FOCUS_LIST, DIFF_CLASS, CHANGED_PATHS, GATE_LEVEL'
+    const R3 = '**Requires:** REVIEW_FOCUS_OUTPUTS, REVIEW_DIR, PR_INFO, GATE_LEVEL, REVIEW_FOCUS_LIST'
+    for (const [from, to, defect] of [
+      [P12B, '**Produces:** REVIEW_FOCUS_LIST', 'Step 1.2b Produces does not list GATE_LEVEL'],
+      [P12B, '**Produces:** GATE_LEVEL', 'Step 1.2b Produces does not list REVIEW_FOCUS_LIST'],
+      [R12B, '**Requires:** REVIEW_FOCUS_LIST, DIFF_CLASS, CHANGED_PATHS', 'Step 1.2b Requires does not list GATE_LEVEL'],
+      [R12B, '**Requires:** REVIEW_FOCUS_LIST, DIFF_CLASS, GATE_LEVEL', 'Step 1.2b Requires does not list CHANGED_PATHS'],
+      [R12B, '**Requires:** REVIEW_FOCUS_LIST, CHANGED_PATHS, GATE_LEVEL', 'Step 1.2b Requires does not list DIFF_CLASS'],
+      [R12B, '**Requires:** DIFF_CLASS, CHANGED_PATHS, GATE_LEVEL', 'Step 1.2b Requires does not list REVIEW_FOCUS_LIST'],
+      [R3, '**Requires:** REVIEW_FOCUS_OUTPUTS, REVIEW_DIR, PR_INFO, REVIEW_FOCUS_LIST', 'Phase 3 Requires does not list GATE_LEVEL'],
+      [R3, '**Requires:** REVIEW_FOCUS_OUTPUTS, REVIEW_DIR, PR_INFO, GATE_LEVEL', 'Phase 3 Requires does not list REVIEW_FOCUS_LIST'],
+    ] as const) {
+      expect(defects(seed(ON, from, to)), defect).toContain(defect)
+    }
+    expect(defects(seed(ON, '#### Step 0b: Resolve the compliance lens and gate level', '#### Step 0b: Resolve the compliance lens')))
+      .toContain('a Step 0b title names the compliance lens alone, but the step also yields GATE_LEVEL')
+    expect(defects(seed(ON, '├─ Step 0b: Resolve the compliance lens and gate level', '├─ Step 0b: Resolve the compliance lens')))
+      .toContain('a Step 0b title names the compliance lens alone, but the step also yields GATE_LEVEL')
+    const unconditional = seed(ON, 'REVIEW_FOCUS_LIST starts with the eight core focuses', 'the eight core focuses are unconditional; REVIEW_FOCUS_LIST holds the language focuses')
+    expect(defects(unconditional)).toContain('Step 1.2 calls the core focuses unconditional, but Step 1.2b narrows them')
+    expect(defects(unconditional)).toContain('Step 1.2 does not say the code list starts with the eight core focuses')
     expect(defects(seed(ON, 'one per focus in REVIEW_FOCUS_LIST', 'for the focus set `DIFF_CLASS` selects')))
       .toContain('Phase 2 does not spawn one Review agent per REVIEW_FOCUS_LIST focus')
     expect(defects(seed(ON, 'Compliance keeps the trigger above at every level.', 'Compliance keeps the trigger above at every level.\nInstalled language focuses: go')))
@@ -706,6 +757,8 @@ describe('full is today (AC-1)', () => {
     expect(collectFullIsTodayDefects(seed(ON, '| .go files | go |', '| .go files | golang |')).join('\n')).toMatch(/trigger row 5 is ".go files \| golang"/)
     expect(collectFullIsTodayDefects(seed(ON, '| COMPLIANCE_ACTIVE AND diff touches regulated surface | compliance |', '| COMPLIANCE_ACTIVE AND diff touches PII | compliance |')))
       .toContain('the compliance trigger row is not byte-equal')
+    expect(collectFullIsTodayDefects(seed(ON, ': on a `code` diff, add `compliance`.', ': add `compliance`.')))
+      .toContain('the compliance sentence is not limited to the `code` class')
     expect(collectFullIsTodayDefects(seed(ON, '- `docs-only`: documentation, consistency, security', '- `docs-only`: documentation, security')))
       .toContain('docs-only set is "documentation, security", expected "documentation, consistency, security"')
     expect(collectFullIsTodayDefects(seed(ON, '`CMakeLists.txt`)', '`CMakeLists.txt`, `Gemfile`)')).join('\n')).toMatch(/the rule-1 manifests are/)

@@ -35,17 +35,17 @@ Run a comprehensive code review of the current branch by spawning parallel revie
    - **Exactly one listed:** load neither the skill nor the reference — that worktree is the only candidate, and Step 0c's Git agent validates its branch
 2. **If `--path` flag provided:** use only that worktree, skip discovery
    **`--path` validation**: Before proceeding, verify the path exists as a directory and appears in `git worktree list` output. If not: report error and stop.
-3. **If only 1 reviewable worktree** (the common case): proceed as single-worktree flow — zero behavior change
+3. **If only 1 reviewable worktree**: proceed as single-worktree flow — zero behavior change
 4. **If multiple reviewable worktrees:** report "Found N worktrees with reviewable branches: {list with paths and branches}" and proceed with multi-worktree flow
 
-#### Step 0b: Resolve the compliance lens
+#### Step 0b: Resolve the compliance lens and gate level
 
 **Produces:** COMPLIANCE_ACTIVE, COMPLIANCE_FRAMEWORKS, GATE_LEVEL
 
 {{settings.settings_resolve()}}
 
 {{compliance_gate()}}
-Keep each worktree's values for every downstream phase of that worktree.
+Keep each worktree's values for every downstream phase.
 
 #### Step 0b-ii: Resolve the evidence policy
 
@@ -87,7 +87,7 @@ Validate branch, commit if needed, push, create PR if needed.
 Return: branch, base_branch, branch-slug, PR#"
 ```
 
-In multi-worktree mode, spawn all pre-flight agents **in a single message** (parallel).
+In multi-worktree mode, spawn all pre-flight agents **in a single message**.
 
 **If BLOCKED:** In single-worktree mode, stop and report. In multi-worktree mode, report the failure but continue with other worktrees.
 
@@ -127,7 +127,7 @@ For each worktree, perform a single pass over timestamped directories:
 2. Iterate once: accumulate CYCLE_NUMBER count for each directory containing `resolution-summary.md`; capture the first (most-recent) such directory as PRIOR_DIR.
 3. If CYCLE_NUMBER = 0: set PRIOR_RESOLUTIONS=(none), CYCLE_NUMBER=1, proceed.
 4. Otherwise: set CYCLE_NUMBER = count + 1. Read `{PRIOR_DIR}/resolution-summary.md` as PRIOR_RESOLUTIONS.
-5. If `--full`: still load PRIOR_RESOLUTIONS (valuable for Review agent cross-cycle awareness).
+5. If `--full`: still load PRIOR_RESOLUTIONS.
 
 #### Step 0e-ii: Convergence Assessment
 
@@ -206,8 +206,8 @@ A mixed non-code diff runs the union of the sets of the classes it holds. Langua
 
 #### Step 1.2: Choose the focuses
 
-**Produces:** REVIEW_FOCUS_LIST (code class; every class by level)
-**Requires:** DIFF_CLASS, CHANGED_PATHS, COMPLIANCE_ACTIVE, GATE_LEVEL
+**Produces:** REVIEW_FOCUS_LIST (code class)
+**Requires:** DIFF_CLASS, CHANGED_PATHS, COMPLIANCE_ACTIVE
 
 When `DIFF_CLASS` is `code`, read the file types from the paths in `paths.txt` to determine conditional reviews:
 
@@ -226,18 +226,18 @@ When `DIFF_CLASS` is `code`, read the file types from the paths in `paths.txt` t
 | Docs or significant code | documentation |
 | COMPLIANCE_ACTIVE AND diff touches regulated surface | compliance |
 
-If `COMPLIANCE_ACTIVE` AND the diff touches regulated surface (data models, auth flows, logging/observability, payments, IaC, retention): add `compliance`.
+If `COMPLIANCE_ACTIVE` AND the diff touches regulated surface (data models, auth flows, logging/observability, payments, IaC, retention): on a `code` diff, add `compliance`.
 
 **Language focus stamp.** The eight language focuses — `typescript`, `react`, `accessibility`, `ui-design`, `go`, `java`, `python`, `rust` — ship with optional plugins, and the installer stamps the ones installed on this machine onto this line, rewriting it on every install and on `uninstall --plugin`:
 
 Installed language focuses: (none)
 
-A language focus is spawned only when its file-type condition above fires AND its name appears in that stamped line. A focus missing from the line is never spawned, even when its trigger fires. The eight core focuses are unconditional and are never stamp-gated.
+A language focus is spawned only when its file-type condition above fires AND its name appears in that stamped line. A focus missing from the line is never spawned, even when its trigger fires. On a `code` diff, REVIEW_FOCUS_LIST starts with the eight core focuses. Step 1.2b may narrow them; they are never stamp-gated.
 
 #### Step 1.2b: Narrow by gate level
 
-**Produces:** REVIEW_FOCUS_LIST
-**Requires:** REVIEW_FOCUS_LIST, DIFF_CLASS
+**Produces:** REVIEW_FOCUS_LIST, GATE_LEVEL
+**Requires:** REVIEW_FOCUS_LIST, DIFF_CLASS, CHANGED_PATHS, GATE_LEVEL
 
 **Gate level.** Narrow REVIEW_FOCUS_LIST, for every class, by this worktree's `GATE_LEVEL`. `full` keeps it and reads nothing.
 
@@ -339,7 +339,7 @@ Spawn Review agents **in a single message**, one per focus in REVIEW_FOCUS_LIST 
 | documentation | conditional | devflow:documentation | diff.patch |
 | compliance | diff-driven | devflow:compliance | diff.patch |
 
-Review agent count: at `full`, `code` runs 8 core +1-12 (max 20 per worktree); `standard` runs up to 2 fewer; lean `code` runs 3-4; a reduced class or a mix runs 2-6.
+Review agent count: at `full`, `code` runs 8 core +1-12; `standard` runs up to 2 fewer; lean `code` runs 3-4; a reduced class or a mix runs 2-6.
 
 {{compliance_focus_inject()}}
 
@@ -372,11 +372,11 @@ In multi-worktree mode, process worktrees **sequentially**: complete Phases 1-4 
 ### Phase 3: Synthesis → Review Comment (Sequential)
 
 **Produces:** REVIEW_SUMMARY, PR_COMMENT
-**Requires:** REVIEW_FOCUS_OUTPUTS, REVIEW_DIR, PR_INFO
+**Requires:** REVIEW_FOCUS_OUTPUTS, REVIEW_DIR, PR_INFO, GATE_LEVEL, REVIEW_FOCUS_LIST
 
 **WAIT** for Phase 2. For each worktree, run steps 3a and 3b in sequence:
 
-**Step 3a — Synthesize agent** per worktree (wait for completion before 3b):
+**Step 3a — Synthesize agent** per worktree:
 ```
 Agent(subagent_type="Synthesize", run_in_background=false):
 "Mode: review
@@ -425,7 +425,7 @@ Per worktree, after successful completion:
 │
 ├─ Phase 0: Worktree Discovery & Pre-flight
 │  ├─ Step 0a: git worktree list → filter reviewable
-│  ├─ Step 0b: Resolve the compliance lens
+│  ├─ Step 0b: Resolve the compliance lens and gate level
 │  ├─ Step 0c: Git agent (ensure-pr-ready) per worktree [parallel]
 │  ├─ Step 0d: Incremental detection + timestamp setup per worktree
 │  ├─ Step 0e-i: Load prior resolution-summary.md
