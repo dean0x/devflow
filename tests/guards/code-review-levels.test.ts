@@ -28,7 +28,7 @@ import { readFileSync } from 'fs'
 import * as path from 'path'
 
 import { GATE_LEVELS } from '../../src/core/gate-level.js'
-import { ROOT, readAgentReference, requireDistFile, resolveLearningOffSource } from '../helpers.js'
+import { ROOT, SANCTIONED_RESOLUTION, readAgentReference, requireDistFile, resolveLearningOffSource, sectionBetween, tableRows } from '../helpers.js'
 
 // ---------------------------------------------------------------------------
 // Independent oracle: written by hand from the issue and the gate decisions, never parsed
@@ -121,29 +121,11 @@ const TODAY_TRIGGER_ROWS: ReadonlyArray<readonly [string, string]> = [
   ['COMPLIANCE_ACTIVE AND diff touches regulated surface', 'compliance'],
 ]
 
-/** The one root form the level read may use. Copied here, not imported from another test file. */
-const SANCTIONED_RESOLUTION = 'd="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac;'
 const LEVEL_REFERENCE_PATH = 'skills/devflow:agent-references/references/commands/code-review-levels.md'
 
 // ---------------------------------------------------------------------------
 // Section readers
 // ---------------------------------------------------------------------------
-
-/** The text from `start` up to (not including) `end`, or null when either anchor is absent. */
-export function sectionBetween(body: string, start: string, end: string | null): string | null {
-  const from = body.indexOf(start)
-  if (from === -1) return null
-  if (end === null) return body.slice(from)
-  const to = body.indexOf(end, from + start.length)
-  return to === -1 ? null : body.slice(from, to)
-}
-
-/** Table rows of a section, as trimmed cells, separator rows dropped. */
-export function tableRows(section: string): string[][] {
-  return section.split('\n')
-    .filter(line => line.startsWith('|') && !/^\|[\s:|-]+\|$/.test(line))
-    .map(line => line.split('|').slice(1, -1).map(cell => cell.trim()))
-}
 
 const step11 = (body: string): string | null => sectionBetween(body, '#### Step 1.1:', '#### Step 1.2:')
 const step12 = (body: string): string | null => sectionBetween(body, '#### Step 1.2:', '#### Step 1.3:')

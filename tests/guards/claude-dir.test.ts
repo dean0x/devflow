@@ -41,23 +41,12 @@ import { mkdtemp, readFile, rm } from 'fs/promises'
 import * as os from 'os'
 import * as path from 'path'
 
-import { ROOT, requireDistFile, requireDistFiles, resolveAllAgents, resolveLearningOffSource, walkFiles } from '../helpers.js'
+import { ROOT, SANCTIONED_RESOLUTION, requireDistFile, requireDistFiles, resolveAllAgents, resolveLearningOffSource, sectionBetween, walkFiles } from '../helpers.js'
 import { DEVFLOW_PLUGINS, buildScopedSkillsMap, getAllAgentNames } from '../../src/core/plugins.js'
 import { installViaFileCopy } from '../../src/targets/claude-code/installer.js'
 
-/** The resolution line every compiled probe of the Claude directory must use. */
-const SANCTIONED_RESOLUTION = 'd="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac;'
-
 /** The one skills path /code-review reads: the gate-level reference, under the resolved directory. */
 const LEVEL_REFERENCE_PATH = 'skills/devflow:agent-references/references/commands/code-review-levels.md'
-
-/** The text from `start` up to (not including) `end`, or null when either anchor is absent. */
-function sectionBetween(body: string, start: string, end: string): string | null {
-  const from = body.indexOf(start)
-  if (from === -1) return null
-  const to = body.indexOf(end, from + start.length)
-  return to === -1 ? null : body.slice(from, to)
-}
 
 /**
  * Named collector: how a compiled /code-review reaches the Claude directory. Exactly one read is allowed:

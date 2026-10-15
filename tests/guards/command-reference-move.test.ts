@@ -32,7 +32,7 @@ import { existsSync, readFileSync, readdirSync } from 'fs'
 import * as path from 'path'
 
 import {
-  AGENT_REFERENCES_SKILL, ROOT, agentReferencePath, commandReferenceSections, loadGolden, readAgentReference,
+  AGENT_REFERENCES_SKILL, ROOT, SANCTIONED_RESOLUTION, agentReferencePath, commandReferenceSections, loadGolden, readAgentReference,
   requireDistFile,
 } from '../helpers.js'
 import { DEVFLOW_PLUGINS, skillsOf } from '../../src/core/plugins.js'
@@ -41,10 +41,7 @@ import { resolvePluginsToInstall } from '../../src/cli/commands/init-seed.js'
 const REFERENCE_DIR = 'commands'
 const COMMANDS_DIR = path.join(ROOT, 'src', 'assets', 'commands')
 /** The roots a read site may resolve first, including the sanctioned resolution line. */
-const READ_ROOTS = [
-  '${CLAUDE_CONFIG_DIR:-$HOME/.claude}',
-  'd="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac;',
-] as const
+const READ_ROOTS = ['${CLAUDE_CONFIG_DIR:-$HOME/.claude}', SANCTIONED_RESOLUTION] as const
 const READ_PATH_RE = /skills\/devflow:agent-references\/references\/commands\/([a-z0-9-]+\.md)/g
 
 /** One section a command lost and a reference now holds, exactly. */

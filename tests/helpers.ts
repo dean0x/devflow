@@ -1828,6 +1828,28 @@ export function extractSection(content: string, startAnchor: string, endAnchor: 
 }
 
 /**
+ * The text from `start` up to (not including) `end`, or null when either anchor is absent.
+ * Unlike `extractSection` it never throws: a collector reads null as a defect to report.
+ */
+export function sectionBetween(body: string, start: string, end: string | null): string | null {
+  const from = body.indexOf(start)
+  if (from === -1) return null
+  if (end === null) return body.slice(from)
+  const to = body.indexOf(end, from + start.length)
+  return to === -1 ? null : body.slice(from, to)
+}
+
+/** Table rows of a section, as trimmed cells, separator rows dropped. */
+export function tableRows(section: string): string[][] {
+  return section.split('\n')
+    .filter(line => line.startsWith('|') && !/^\|[\s:|-]+\|$/.test(line))
+    .map(line => line.split('|').slice(1, -1).map(cell => cell.trim()))
+}
+
+/** The one shell line that resolves the Claude directory: `CLAUDE_CONFIG_DIR` when absolute, else `$HOME/.claude`. */
+export const SANCTIONED_RESOLUTION = 'd="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac;'
+
+/**
  * Canonical ManifestData factory for tests.
  *
  * Returns a minimal but structurally complete ManifestData with:
