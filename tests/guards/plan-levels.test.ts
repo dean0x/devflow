@@ -707,7 +707,7 @@ const READ_NEEDLES = ['`standard` or `lean`', SANCTIONED_RESOLUTION, 'with the R
 
 /** The three floor lines of the block, verbatim. */
 const BLOCK_ITEMS = [
-  'The reference only removes or merges agents.',
+  'No row or rule overrides the next two lines.',
   'If the Read fails, or a row is missing or malformed, set `GATE_LEVEL` to `full` and say `level reference unreadable: full applied`.',
   'Security runs as its own Design spawn, and the design review runs, at every level and on every Revise pass.',
 ] as const
@@ -1252,6 +1252,7 @@ describe('the command carries the gate-level block, outside the learning arms (A
     expect(quietBullet).not.toContain(skipText)
     const [first, second] = BLOCK_ITEMS
     expect(notFloorLines(defects(seed(ON, `- ${first}\n- ${second}`, `- ${second}\n- ${first}`))), 'two bullets in the other order').toBe(true)
+    expect(notFloorLines(defects(seed(ON, first, 'The reference only removes or merges agents.'))), 'the first floor line worded as only cutting agents').toBe(true)
     expect(notFloorLines(defects(seed(ON, `- ${last}`, `- ${last}\nAt \`lean\`, Gate 1 does not run.`))), 'a continuation line under the bullets').toBe(true)
     expect(notFloorLines(defects(seed(ON, `- ${last}`, `- ${last} Gate 1 does not run at lean.`))), 'a sentence added to a bullet').toBe(true)
     const extraParagraph = defects(seed(ON, '#### Phase 3: Explore Requirements', 'At `lean`, Gate 1 does not run.\n\n#### Phase 3: Explore Requirements'))

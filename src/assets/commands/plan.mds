@@ -152,7 +152,7 @@ Pass `FEATURE_KNOWLEDGE` to Explore and Design agents.
 
 **Gate level.** At `standard` or `lean`, once per run, run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash and Read `<that directory>/skills/devflow:agent-references/references/commands/plan-levels.md` with the Read tool, and apply it to Phases 3-14.
 
-- The reference only removes or merges agents.
+- No row or rule overrides the next two lines.
 - If the Read fails, or a row is missing or malformed, set `GATE_LEVEL` to `full` and say `level reference unreadable: full applied`.
 - Security runs as its own Design spawn, and the design review runs, at every level and on every Revise pass.
 
