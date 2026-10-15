@@ -27,7 +27,7 @@ import {
   resolveAllAgents, resolveLearningOffSource, sectionBetween, walkFiles,
 } from '../helpers.js'
 
-/** The Validate agent body, src/assets/agents/validate.md, in bytes. Registered as `validate-body-max`; lowered, never raised. */
+/** The Validate agent body, as resolveAgentSource reads it, in bytes. Registered as `validate-body-max`; lowered, never raised. */
 const VALIDATE_BODY_MAX_BYTES = 6_049
 
 // ---------------------------------------------------------------------------
@@ -540,7 +540,7 @@ describe('the template is shipped, never installed or run', () => {
 
   it('the corpus is real, and the rules hold', () => {
     expect(sources.length, 'src and dist are read').toBeGreaterThan(300)
-    expect(sources.some(d => d.label === 'src/assets/agents/validate.md'), 'the Validate body is scanned').toBe(true)
+    expect(sources.some(d => d.text === VALIDATE_BODY), 'the Validate body is scanned').toBe(true)
     expect(sources.some(d => d.label.startsWith('dist/') && d.label.endsWith('.js')), 'compiled CLI code is scanned').toBe(true)
     expect(goldens.length, 'the install snapshots and the hook matrix are read').toBeGreaterThanOrEqual(4)
     expect(input.packageFiles.length, 'package.json files is read').toBeGreaterThan(3)
