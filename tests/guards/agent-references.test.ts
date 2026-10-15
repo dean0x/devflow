@@ -31,7 +31,7 @@ const SYNTHESIZE_BODY_MAX_BYTES = 4_070
 const SYNTHESIZE_MODE_REF_MAX_BYTES = 3_805
 
 /** The `/code-review` gate-level reference, in bytes. Registered as `code-review-levels-ref-max`; lowered, never raised. */
-const CODE_REVIEW_LEVELS_REF_MAX_BYTES = 1_352
+const CODE_REVIEW_LEVELS_REF_MAX_BYTES = 1_349
 
 /** The Curate agent body, in bytes. Registered as `curate-body-max`; lowered, never raised. */
 const CURATE_BODY_MAX_BYTES = 16_710
