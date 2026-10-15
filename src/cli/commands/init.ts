@@ -35,7 +35,7 @@ import { LEGACY_SKILL_NAMES } from '../../targets/claude-code/legacy.js';
 import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete, type SafeDeleteInfo } from '../../core/safe-delete.js';
 import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../../core/safe-delete-install.js';
 import { convergeAmbientHooks } from './ambient.js';
-import { convergeMemoryHooks, drainMemoryQueue } from './memory.js';
+import { convergeMemoryHooks, drainMemoryQueue, workingMemoryNote } from './memory.js';
 import { addCaptureHooks, removeCaptureHooks } from './capture.js';
 import { removeDreamHook } from './legacy-hooks.js';
 import { addProxyHooks, removeProxyHooks, applyProxyEnv, stripProxyEnv, runProxyPreflight, buildRealPreflightDeps } from './proxy.js';
@@ -1452,15 +1452,7 @@ export const initCommand = new Command('init')
       if (options.memory !== undefined) {
         memoryEnabled = options.memory;
       } else {
-        p.note(
-          'Preserves session context across /clear, restarts, and context\n' +
-          'compaction. Clear your session at any point and resume right\n' +
-          'where you left off.\n\n' +
-          'Runs a background agent on session stop that consumes additional\n' +
-          'tokens. Consider skipping if token usage is a concern.\n' +
-          'Applies to every project.',
-          'Working Memory',
-        );
+        p.note(workingMemoryNote(), 'Working Memory');
         const memoryChoice = await p.confirm({
           message: 'Enable working memory? (Recommended)',
           initialValue: seed.features.memory,
