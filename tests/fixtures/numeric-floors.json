@@ -486,11 +486,19 @@
     },
     {
       "id": "synthesize-mode-ref-max",
-      "ceiling": 3940,
-      "pattern": "const SYNTHESIZE_MODE_REF_MAX_BYTES = 3_940",
+      "ceiling": 3830,
+      "pattern": "const SYNTHESIZE_MODE_REF_MAX_BYTES = 3_830",
       "occurrences": 1,
       "sourceFile": "tests/guards/agent-references.test.ts",
-      "description": "D-MODE-BY-PATH: the largest single Synthesize mode reference, references/synthesize/{mode}.md of the agent-references skill, in bytes. Review is the largest at 3,922 (its template, its merge rules and the two review-only inputs). A spawn loads the body plus exactly one of these. May be LOWERED, never raised."
+      "description": "D-MODE-BY-PATH: the largest single Synthesize mode reference, references/synthesize/{mode}.md of the agent-references skill, in bytes. Review is the largest at 3,830 (its template, its merge rules and the review-only inputs). A spawn loads the body plus exactly one of these. May be LOWERED, never raised."
+    },
+    {
+      "id": "code-review-levels-ref-max",
+      "ceiling": 1352,
+      "pattern": "const CODE_REVIEW_LEVELS_REF_MAX_BYTES = 1_352",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/agent-references.test.ts",
+      "description": "D-CMD-REF-HAND: references/commands/code-review-levels.md of the agent-references skill, in bytes. /code-review reads it once per run at the standard level (the default) or lean, so it is standing context on the default path. Measured 1,352 when #474 closed, with no headroom. May be LOWERED, never raised."
     },
     {
       "id": "curate-body-max",
@@ -518,19 +526,19 @@
     },
     {
       "id": "command-code-review-max",
-      "ceiling": 35246,
-      "pattern": "['code-review', 'on', 35_246],",
+      "ceiling": 35058,
+      "pattern": "['code-review', 'on', 35_058],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/code-review.md, the learning-on build, in bytes. Measured 35,246 when #456 closed, with no headroom. Main held 36,680 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/code-review.md, the learning-on build, in bytes. Measured 35,058 when #474 closed, with no headroom. Main held 36,680 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-code-review-learning-off-max",
-      "ceiling": 32499,
-      "pattern": "['code-review', 'off', 32_499],",
+      "ceiling": 32313,
+      "pattern": "['code-review', 'off', 32_313],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/learning-off/commands/code-review.md, the learning-off build, in bytes. Measured 32,499 when #456 closed, with no headroom. Main held 33,996 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/learning-off/commands/code-review.md, the learning-off build, in bytes. Measured 32,313 when #474 closed, with no headroom. Main held 33,996 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-debug-max",
