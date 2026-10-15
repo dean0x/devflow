@@ -357,13 +357,13 @@ const describeScenario = (sc: Scenario): string =>
  * AC-1, AC-2, AC-3, AC-4, AC-5, AC-7, AC-8: every level, class combination and scenario. The first defect of each
  * kind per level and class combination is reported, so one wrong cell gives a short list.
  */
-export function collectSimulationDefects(parsed: ParsedRef): string[] {
+export function collectSimulationDefects(parsed: ParsedRef, run: typeof simulate = simulate): string[] {
   const first = new Map<string, string>()
   const report = (key: string, message: string): void => { if (!first.has(key)) first.set(key, message) }
   for (const level of GATE_LEVELS) for (const classes of CLASS_COMBOS) {
     const label = `${level} ${classes.join('+')}`
     for (const sc of scenarios()) {
-      const got = simulate(level, classes, sc, parsed)
+      const got = run(level, classes, sc, parsed)
       const full = unique(classes.flatMap(cls => fullSetOf(cls, sc)))
       const want = expectedSet(level, classes, sc)
       if (!got.includes('security')) report(`${label}|security`, `${label}: no security (${describeScenario(sc)})`)
@@ -375,11 +375,11 @@ export function collectSimulationDefects(parsed: ParsedRef): string[] {
   // Manifest names and lockfiles, one at a time, on a standard code diff that has the dependencies trigger.
   const base: Scenario = { stamped: [], triggered: [], conditional: ['dependencies'], complianceActive: false, regulated: false, depPath: 'none' }
   for (const file of [...MANIFESTS.map(manifest => manifest.replaceAll('*', '-dev')), ...GLOB_EXAMPLES]) {
-    const got = simulate('standard', ['code'], { ...base, depPath: file }, parsed)
+    const got = run('standard', ['code'], { ...base, depPath: file }, parsed)
     if (!got.includes('dependencies')) report(`manifest|${file}`, `standard code: a changed ${file} does not keep dependencies`)
   }
   for (const lockfile of LOCKFILES) {
-    const got = simulate('standard', ['code'], { ...base, depPath: lockfile }, parsed)
+    const got = run('standard', ['code'], { ...base, depPath: lockfile }, parsed)
     if (got.includes('dependencies')) report(`lockfile|${lockfile}`, `standard code: a changed ${lockfile} with code keeps dependencies`)
   }
   return [...first.values()]
@@ -684,6 +684,24 @@ describe('the level reference holds the decided sets (AC-2, AC-3, AC-4, AC-6, AC
     expect(defects(seed(REF, ' (dependencies stays when a listed manifest changed)', ''))).toContain('code/standard: the manifest exception for dependencies is missing')
     expect(defects(seed(REF, '`Gemfile`, ', '')).join('\n')).toMatch(/the manifest list is/)
     expect(defects(seed(REF, ', `deno.json`', '')).join('\n')).toMatch(/the manifest list is/)
+    expect(defects(seed(REF, /^\| `lockfile-only` .*\n/m, '')).join('\n')).toMatch(/the class rows are "code, docs-only, tests-only", expected/)
+    expect(defects(seed(REF, '\n\n## Rules', '\n| `extra` | keep: security | keep: security |\n\n## Rules')).join('\n'))
+      .toMatch(/the class rows are "code, docs-only, tests-only, lockfile-only, extra"/)
+    expect(defects(seed(REF, '| keep: testing, reliability, security |', '| keep testing |')).join('\n')).toMatch(/a cell does not match the cell form: tests-only\/lean: keep testing/)
+    expect(defects(seed(REF, '| keep: testing, reliability, security |', '| keep: testing, reliability, security, bogus |')))
+      .toContain('tests-only/lean: "bogus" is not a focus name')
+    expect(defects(seed(REF, 'drop: typescript, dependencies', 'drop: typescript, security')))
+      .toContain('code/standard: a drop cell that drops security')
+    expect(defects(seed(REF, '| keep: testing, reliability, security |', '| keep: testing, reliability, security, documentation |')))
+      .toContain('tests-only/lean: "documentation" is outside the class\'s full set')
+    expect(defects(seed(REF, /(\| `lockfile-only` \| keep: dependencies, security)/, '$1 (dependencies stays when a listed manifest changed)')))
+      .toContain('lockfile-only/standard: an exception for "dependencies", only dependencies on code/standard is allowed')
+    expect(defects(seed(REF, /(\| `code` \| drop: typescript, dependencies) \(dependencies stays/, '$1 (typescript stays')))
+      .toContain('code/standard: an exception for "typescript", only dependencies on code/standard is allowed')
+    expect(defects(seed(REF, /(keep: security, testing, reliability, compliance) \|/, '$1 (dependencies stays when a listed manifest changed) |')))
+      .toContain('code/lean: an exception for "dependencies", only dependencies on code/standard is allowed')
+    expect(collectLevelRefDefects(REF, 'Step 1.1 is absent.')).toContain('no rule-1 manifest names were parsed from Step 1.1')
+    expect(defects(seed(REF, '`go.mod`, ', ''))).toContain('the manifest list lacks the rule-1 name go.mod')
     expect(defects(seed(REF, ' A path matches by file name.', ''))).toContain('the Manifests line lacks: A path matches by file name.')
     expect(defects(seed(REF, 'A path matches by file name.', 'A path matches by directory name.'))).toContain('the Manifests line lacks: A path matches by file name.')
     expect(defects(seed(REF, ' A lockfile alone is not a manifest change.', ''))).toContain('the Manifests line lacks: A lockfile alone is not a manifest change.')
@@ -730,6 +748,13 @@ describe('the simulator reads its rules from the reference and the oracle decide
     expect(defects(seed(REF, '`build.gradle*`', '`build.gradle`')).some(d => d.startsWith('standard code: a changed build.gradle.kts does not keep dependencies'))).toBe(true)
     expect(defects(seed(REF, '`*.csproj`', '`App.sln`')).some(d => d.startsWith('standard code: a changed App.csproj does not keep dependencies'))).toBe(true)
     expect(defects(seed(REF, 'drop: typescript, dependencies', 'drop: dependencies')).some(d => d.startsWith('standard code: got'))).toBe(true)
+    expect(defects(seed(REF, ', `deno.json`', ', `deno.json`, `yarn.lock`')).some(d => d.startsWith('standard code: a changed yarn.lock with code keeps dependencies'))).toBe(true)
+  })
+
+  it('known-bad probes: a run that adds a focus outside the full set, or compliance without the code class, is reported', () => {
+    const adding = (name: string): typeof simulate => (level, classes, sc, ref) => [...simulate(level, classes, sc, ref), name]
+    expect(collectSimulationDefects(parsed, adding('bogus')).some(d => d.includes(': a focus outside the full set ('))).toBe(true)
+    expect(collectSimulationDefects(parsed, adding('compliance')).some(d => d.startsWith('lean docs-only: compliance without the code class'))).toBe(true)
   })
 
   it('a lockfile with code drops the dependencies lens at standard, and a manifest keeps it', () => {
