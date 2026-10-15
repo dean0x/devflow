@@ -17,6 +17,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { pollForTerminalLine } from './helpers/poll-for-terminal-line.js';
+import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
 import { HOOK_RUN_ALLOWANCE_MS, NODE_EXEC_STALL_MS, answersVersion, resolveOnPath, runHook as runSharedHook, spawnWithStdin } from './shell-hooks-helpers.js';
 
 const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks');
@@ -60,10 +61,17 @@ function runHookWithPath(
   });
 }
 
+/**
+ * Every fake claude here is a link to one warm dispatcher script (see warm-fake-executable.ts),
+ * not a new executable per test: the worker runs the fake first as its bounded --version probe,
+ * and on macOS the first exec of a new file can be held for seconds after a fork-heavy run.
+ */
+const writeFakeExecutable = useWarmFakeExecutables();
+
 function createFakeClaudeShim(shimDir: string, memFile: string): void {
   const bin = path.join(shimDir, 'claude');
   const stagedFile = `${memFile}.new`;
-  fs.writeFileSync(
+  writeFakeExecutable(
     bin,
     answersVersion(`#!/bin/bash
 # Writes to staged path; worker CAS-mv's it to the real path (D-MEMORY-STAGED-CAS)
@@ -72,7 +80,6 @@ echo "## Now" >> "${stagedFile}"
 exit 0
 `),
   );
-  fs.chmodSync(bin, 0o755);
 }
 
 function backdateMtime(filePath: string, secondsAgo: number): void {
@@ -638,8 +645,7 @@ describe('memory-worker', () => {
       writeManifestFeatures(overrideDir, { memory: false });
       writeManifestFeatures(path.join(projectDir, '.devflow'), { memory: false });
       const invokedMarker = path.join(shimDir, 'claude-invoked');
-      fs.writeFileSync(path.join(shimDir, 'claude'), answersVersion(`#!/bin/bash\necho invoked >> "${invokedMarker}"\nexit 1\n`));
-      fs.chmodSync(path.join(shimDir, 'claude'), 0o755);
+      writeFakeExecutable(path.join(shimDir, 'claude'), answersVersion(`#!/bin/bash\necho invoked >> "${invokedMarker}"\nexit 1\n`));
       fs.writeFileSync(
         path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'),
         JSON.stringify({ role: 'user', content: 'hi', ts: 1 }) + '\n' + JSON.stringify({ role: 'assistant', content: 'hey', ts: 2 }) + '\n',
