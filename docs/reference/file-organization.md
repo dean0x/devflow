@@ -137,7 +137,7 @@ devflow/
 │   ├── seams/                        # Command→agent input contract
 │   ├── goldens/                      # Byte-equality against tests/fixtures/golden/
 │   ├── docs/                         # Docs guards — the CLAUDE.md Tracker block cap and the selection-scoped naming
-│   ├── guards/                       # Named-collector guards with known-bad probes: literal-agent-paths, retired-wording, numeric-floor-manifest, agent-source-resolver, agent-source-precedence, dist-agents, extended-references, capability-hoist, heredoc-quoting, fence-grammar, provider-scope, requires-closure
+│   ├── guards/                       # Named-collector guards with known-bad probes: literal-agent-paths, retired-wording, numeric-floor-manifest, agent-source-resolver, agent-source-precedence, dist-agents, extended-references, capability-hoist, heredoc-quoting, fence-grammar, provider-scope, requires-closure, no-permission-skip-in-hooks (no hook script spells a permission-skip flag, the skip-all mode or an allow-list flag)
 │   ├── tracker/                      # Tracker contract/mechanics split — byte budget, schema scope, hostile values, single-authority registries, reference reachability
 │   ├── dynamic/                      # Two-sided writer↔reader grammar seams
 │   ├── installer/                    # Generated-reference overlay (converge-not-merge, atomic per-unit swap)
