@@ -61,7 +61,7 @@ function oneRun(withFolder: boolean, trace: boolean): Promise<string | null> {
 describe('zz run-line stress', () => {
   it('many concurrent workers write one Run line each', async () => {
     const bad: string[] = [];
-    const total = 240; const width = 8; let next = 0;
+    const total = 480; const width = 8; let next = 0;
     const lane = async (): Promise<void> => {
       while (next < total) {
         const i = next++;
@@ -71,5 +71,5 @@ describe('zz run-line stress', () => {
     };
     await Promise.all(Array.from({ length: width }, lane));
     expect(bad.length, bad.slice(0, 2).join('\n=====\n')).toBe(0);
-  }, 280000);
+  }, 590000);
 });

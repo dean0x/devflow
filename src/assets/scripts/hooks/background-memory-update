@@ -234,7 +234,10 @@ probe_claude_version() {
   ) </dev/null >/dev/null 2>&1 &
   _wd_pid=$!
   if wait "$_pid" 2>/dev/null; then _status=0; fi
-  kill "$_wd_pid" 2>/dev/null || true
+  # SIGKILL, not SIGTERM: a fast probe ends while the watchdog subshell may not have run
+  # yet, and SIGTERM sent to a subshell that still carries the exit trap runs that trap
+  # there, which writes a second `Run:` line. SIGKILL runs no trap.
+  kill -KILL "$_wd_pid" 2>/dev/null || true
   wait "$_wd_pid" 2>/dev/null || true
   if [ "$_status" -eq 0 ]; then
     CLAUDE_VERSION_TEXT=$(head -c 512 "$_out" 2>/dev/null || true)
