@@ -259,13 +259,14 @@ describe('memory-permission: staged_path_safe', () => {
 describe('memory-permission: memory_settings_json', () => {
   const build = (p: string) => inHook('memory_settings_json "$1"', [p]);
 
-  it('builds the exact JSON: one Edit allow rule on the absolute staged path, no hooks', () => {
+  it('builds the exact JSON: an Edit allow rule on the absolute staged path, an Edit deny rule on every path under it, no hooks', () => {
     const staged = '/Users/dev/proj/.devflow/memory/WORKING-MEMORY.md.new';
     const run = build(staged);
 
     expect(run.status).toBe(0);
     expect(run.stdout).toBe(
-      '{"permissions":{"allow":["Edit(//Users/dev/proj/.devflow/memory/WORKING-MEMORY.md.new)"]},"disableAllHooks":true}',
+      '{"permissions":{"allow":["Edit(//Users/dev/proj/.devflow/memory/WORKING-MEMORY.md.new)"],'
+      + '"deny":["Edit(//Users/dev/proj/.devflow/memory/WORKING-MEMORY.md.new/*)"]},"disableAllHooks":true}',
     );
   });
 
@@ -276,9 +277,10 @@ describe('memory-permission: memory_settings_json', () => {
       '/Users/dev/café/.devflow/memory/WORKING-MEMORY.md.new',
     ]) {
       const parsed = JSON.parse(build(staged).stdout) as {
-        permissions: { allow: string[] }; disableAllHooks: boolean;
+        permissions: { allow: string[]; deny: string[] }; disableAllHooks: boolean;
       };
       expect(parsed.permissions.allow, staged).toEqual([`Edit(/${staged})`]);
+      expect(parsed.permissions.deny, staged).toEqual([`Edit(/${staged}/*)`]);
       expect(parsed.disableAllHooks).toBe(true);
     }
   });
@@ -288,6 +290,184 @@ describe('memory-permission: memory_settings_json', () => {
 
     expect(run.stdout).toBe('');
     expect(run.status).not.toBe(0);
+  });
+});
+
+describe('memory-permission: memory_staged_remove', () => {
+  const STAGED_NAME = 'WORKING-MEMORY.md.new';
+  let tmp: string;
+  let root: string;
+  let memory: string;
+  let outside: string;
+  beforeEach(() => {
+    tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'memory-staged-')));
+    root = path.join(tmp, 'proj');
+    memory = path.join(root, '.devflow', 'memory');
+    outside = path.join(tmp, 'outside');
+    fs.mkdirSync(memory, { recursive: true });
+    fs.mkdirSync(outside);
+    fs.writeFileSync(path.join(outside, 'keep.txt'), 'keep');
+  });
+  afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
+
+  /** One call: the status and the two variables it sets. `prelude` runs first, e.g. to shadow `rm`. */
+  function remove(dir: string, rootArg: string, staged: string, prelude = ''): { rc: number; removed: string; refusal: string } {
+    const run = inHook(
+      `${prelude}\nif memory_staged_remove "$1" "$2" "$3"; then rc=0; else rc=$?; fi\nprintf 'rc=%s removed=%s refusal=%s\\n' "$rc" "$STAGED_REMOVED" "$STAGED_REMOVE_REFUSAL"`,
+      [dir, rootArg, staged],
+    );
+    expect(run.status, run.stderr).toBe(0);
+    const m = /^rc=(\d+) removed=(\S*) refusal=(\S*)$/.exec(run.stdout.trim());
+    expect(m, run.stdout).not.toBeNull();
+    return { rc: Number(m![1]), removed: m![2], refusal: m![3] };
+  }
+  const staged = (): string => path.join(memory, STAGED_NAME);
+  const present = (p: string): boolean => { try { fs.lstatSync(p); return true; } catch { return false; } };
+
+  it('removes nothing and reports none when nothing stands at the staged path', () => {
+    expect(remove(memory, root, staged())).toEqual({ rc: 0, removed: 'none', refusal: '' });
+  });
+
+  it('leaves a regular file alone: the caller removes a stale staged file itself', () => {
+    fs.writeFileSync(staged(), 'stale');
+
+    expect(remove(memory, root, staged())).toEqual({ rc: 0, removed: 'none', refusal: '' });
+    expect(fs.readFileSync(staged(), 'utf-8')).toBe('stale');
+  });
+
+  it('removes an empty folder at the staged path', () => {
+    fs.mkdirSync(staged());
+
+    expect(remove(memory, root, staged())).toEqual({ rc: 0, removed: 'dir', refusal: '' });
+    expect(present(staged())).toBe(false);
+  });
+
+  it('removes a folder with nested folders and files, and only that folder', () => {
+    fs.mkdirSync(path.join(staged(), 'a', 'b'), { recursive: true });
+    fs.writeFileSync(path.join(staged(), 'a', 'b', 'c'), 'x');
+    fs.writeFileSync(path.join(staged(), '.hidden'), 'x');
+    fs.writeFileSync(path.join(memory, 'WORKING-MEMORY.md'), 'memory');
+    fs.writeFileSync(path.join(memory, '.pending-turns.jsonl'), 'queue');
+
+    expect(remove(memory, root, staged())).toEqual({ rc: 0, removed: 'dir', refusal: '' });
+    expect(present(staged())).toBe(false);
+    expect(fs.readdirSync(memory).sort(), 'its neighbours stay').toEqual(['.pending-turns.jsonl', 'WORKING-MEMORY.md']);
+  });
+
+  it('never follows a link inside the folder: the link goes, the folder it names stays', () => {
+    fs.mkdirSync(staged());
+    fs.symlinkSync(outside, path.join(staged(), 'to-outside'));
+
+    expect(remove(memory, root, staged())).toEqual({ rc: 0, removed: 'dir', refusal: '' });
+    expect(present(staged())).toBe(false);
+    expect(fs.readFileSync(path.join(outside, 'keep.txt'), 'utf-8')).toBe('keep');
+  });
+
+  it.each([
+    ['a folder', () => outside],
+    ['a file', () => path.join(outside, 'keep.txt')],
+    ['nothing', () => path.join(outside, 'absent')],
+  ] as const)('removes a link to %s as the link, and never follows it', (_label, target) => {
+    fs.symlinkSync(target(), staged());
+
+    expect(remove(memory, root, staged())).toEqual({ rc: 0, removed: 'link', refusal: '' });
+    expect(present(staged())).toBe(false);
+    expect(fs.readFileSync(path.join(outside, 'keep.txt'), 'utf-8'), 'the target is untouched').toBe('keep');
+  });
+
+  describe('refuses, removes nothing and names the fact it could not prove', () => {
+    it('path: the staged path is not exactly <memory dir>/WORKING-MEMORY.md.new', () => {
+      const other = path.join(memory, 'OTHER');
+      fs.mkdirSync(other);
+      fs.mkdirSync(path.join(root, 'sub'));
+      fs.mkdirSync(path.join(root, 'sub', STAGED_NAME));
+      fs.mkdirSync(staged());
+
+      expect(remove(memory, root, other)).toEqual({ rc: 1, removed: 'none', refusal: 'path' });
+      expect(remove(memory, root, path.join(root, 'sub', STAGED_NAME))).toEqual({ rc: 1, removed: 'none', refusal: 'path' });
+      expect(remove(memory, root, `${staged()}/`)).toEqual({ rc: 1, removed: 'none', refusal: 'path' });
+      expect(present(other)).toBe(true);
+      expect(present(path.join(root, 'sub', STAGED_NAME))).toBe(true);
+      expect(present(staged()), 'a trailing slash is not the exact path').toBe(true);
+    });
+
+    it('parent: the memory dir does not resolve to <root>/.devflow/memory', () => {
+      const elsewhere = path.join(root, 'elsewhere');
+      fs.mkdirSync(path.join(elsewhere, STAGED_NAME), { recursive: true });
+      fs.mkdirSync(path.join(outside, STAGED_NAME));
+
+      expect(remove(elsewhere, root, path.join(elsewhere, STAGED_NAME))).toEqual({ rc: 1, removed: 'none', refusal: 'parent' });
+      expect(remove(outside, root, path.join(outside, STAGED_NAME))).toEqual({ rc: 1, removed: 'none', refusal: 'parent' });
+      expect(present(path.join(elsewhere, STAGED_NAME))).toBe(true);
+      expect(present(path.join(outside, STAGED_NAME))).toBe(true);
+    });
+
+    it('link: a link sits on the way down from the root to the memory dir', () => {
+      fs.rmSync(path.join(root, '.devflow'), { recursive: true });
+      fs.mkdirSync(path.join(outside, 'memory', STAGED_NAME), { recursive: true });
+      fs.symlinkSync(outside, path.join(root, '.devflow'));
+
+      expect(remove(memory, root, staged())).toEqual({ rc: 1, removed: 'none', refusal: 'link' });
+      expect(present(path.join(outside, 'memory', STAGED_NAME)), 'the folder the link names stays').toBe(true);
+    });
+
+    it('link: the memory dir itself is a link', () => {
+      fs.rmSync(memory, { recursive: true });
+      fs.mkdirSync(path.join(outside, STAGED_NAME));
+      fs.symlinkSync(outside, memory);
+
+      expect(remove(memory, root, staged())).toEqual({ rc: 1, removed: 'none', refusal: 'link' });
+      expect(present(path.join(outside, STAGED_NAME))).toBe(true);
+    });
+
+    it.each([
+      ['an empty root', ''],
+      ['a relative root', 'proj'],
+    ])('args: %s', (_label, rootArg) => {
+      fs.mkdirSync(staged());
+
+      expect(remove(memory, rootArg, staged())).toEqual({ rc: 1, removed: 'none', refusal: 'args' });
+      expect(present(staged())).toBe(true);
+    });
+
+    it('args: an empty memory dir or staged path', () => {
+      fs.mkdirSync(staged());
+
+      expect(remove('', root, staged())).toEqual({ rc: 1, removed: 'none', refusal: 'args' });
+      expect(remove(memory, root, '')).toEqual({ rc: 1, removed: 'none', refusal: 'args' });
+      expect(present(staged())).toBe(true);
+    });
+
+    it('size: the folder lists more than 256 lines', () => {
+      fs.mkdirSync(staged());
+      for (let i = 0; i < 300; i++) fs.writeFileSync(path.join(staged(), `f${i}`), 'x');
+
+      expect(remove(memory, root, staged())).toEqual({ rc: 1, removed: 'none', refusal: 'size' });
+      expect(fs.readdirSync(staged()), 'every file stays').toHaveLength(300);
+    });
+
+    it('size: a folder with 200 files is within the bound and is removed', () => {
+      fs.mkdirSync(staged());
+      for (let i = 0; i < 200; i++) fs.writeFileSync(path.join(staged(), `f${i}`), 'x');
+
+      expect(remove(memory, root, staged())).toEqual({ rc: 0, removed: 'dir', refusal: '' });
+      expect(present(staged())).toBe(false);
+    });
+
+    it('rm: the delete itself fails and something still stands there', () => {
+      fs.mkdirSync(staged());
+
+      expect(remove(memory, root, staged(), 'rm() { return 1; }')).toEqual({ rc: 1, removed: 'none', refusal: 'rm' });
+      expect(present(staged())).toBe(true);
+    });
+
+    it('rm: a link that cannot be removed', () => {
+      fs.symlinkSync(outside, staged());
+
+      expect(remove(memory, root, staged(), 'rm() { return 1; }')).toEqual({ rc: 1, removed: 'none', refusal: 'rm' });
+      expect(fs.readlinkSync(staged())).toBe(outside);
+      expect(fs.readFileSync(path.join(outside, 'keep.txt'), 'utf-8')).toBe('keep');
+    });
   });
 });
 

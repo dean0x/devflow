@@ -3,12 +3,13 @@
 # memory-permission — the memory worker's write permission, as one sourced helper.
 #
 # background-memory-update starts `claude -p` in a permission mode that denies every
-# call no rule allows, with one allow rule: an Edit rule for its staged file
-# (WORKING-MEMORY.md.new), the only path the worker's write may reach. This helper
-# holds what the worker and session-start-memory share, so one bash 3.2 test run
-# covers it (tests/shell-hooks-helpers.test.ts):
-#   staged_path_safe        whether a staged path can sit in that rule
-#   memory_settings_json    the settings JSON that carries the rule
+# call no rule allows, with an allow rule for its staged file (WORKING-MEMORY.md.new),
+# the only path the worker's write may reach, and a deny rule for every path under it.
+# This helper holds what the worker and session-start-memory share, so one bash 3.2 test
+# run covers it (tests/shell-hooks-helpers.test.ts):
+#   staged_path_safe        whether a staged path can sit in those rules
+#   memory_settings_json    the settings JSON that carries the rules
+#   memory_staged_remove    the guarded removal of a folder or a link at the staged path
 #   memory_result_summary   the fixed log line for a captured JSON result
 #   memory_notice_*         the one-time notice: the worker writes it, a session start reads it
 #   memory_denied_seen      the two-in-a-row count that raises the `denied` notice
@@ -29,13 +30,13 @@
 #   denied  Claude Code refused the worker's write in two runs in a row
 MEMORY_NOTICE_REASONS="path denied"
 
-# staged_path_safe <path> — returns 0 when <path> can sit in the Edit rule as it is.
+# staged_path_safe <path> — returns 0 when <path> can sit in the Edit rules as it is.
 # Sets STAGED_PATH_REFUSAL to "" when it can, `chars` when the path holds a character or
-# a segment the rule cannot carry, and `protected` when a .claude or .git folder lies
-# above it (Claude Code refuses file writes there). The rule text carries no quoting, so
-# a character that has a meaning in a rule path is refused rather than quoted: * ? [ ] \
-# ( ) " { } and every control character, including newline, tab and DEL. A path that is
-# not absolute, starts with //, or holds an empty, . or .. segment is refused too.
+# a segment the rules cannot carry, and `protected` when a .claude or .git folder lies
+# above it (the worker skips such a project and logs the reason). The rule text carries no
+# quoting, so a character that has a meaning in a rule path is refused rather than quoted:
+# * ? [ ] \ ( ) " { } and every control character, including newline, tab and DEL. A path
+# that is not absolute, starts with //, or holds an empty, . or .. segment is refused too.
 # The path reaches a JSON string by plain concatenation, which is safe after this check:
 # $, backtick and % are inert there, and " \ and controls cannot occur.
 staged_path_safe() {
@@ -61,14 +62,88 @@ staged_path_safe() {
 }
 
 # memory_settings_json <staged path> — prints the settings JSON for `claude --settings`:
-# one allow rule, Edit on the staged path (// makes the rule path absolute), and no hooks.
-# The rule is exact-path, so under dontAsk the worker's write is limited to its staged
-# file and any other path is refused. Prints nothing and returns 1 for a path
-# staged_path_safe refuses, so a rule is never built for an unchecked path.
+# two rules and no hooks (// makes a rule path absolute):
+#   allow  Edit(//<staged>)     the staged file
+#   deny   Edit(//<staged>/*)   every path under the staged path
+# Under dontAsk, any call no rule allows is refused, so the worker's write is limited to
+# its staged file. Measured on Claude Code 2.1.269, 2.1.280, 2.1.286 and 2.1.299, both argv
+# forms, against a local stand-in for the Messages API (2026-10-15): with these two rules
+# the Write of the staged file succeeds, and a Write to <staged>/x, <staged>/a/b,
+# <staged>/a/b/c/d/e, <staged>/.hidden or <staged>/../<name> is refused. The deny is
+# `/*` and not `/**`: `/**` was measured to refuse the staged file too (2.1.269 and
+# 2.1.299, 0 of 3 writes), and then no memory is written. Prints nothing and returns 1
+# for a path staged_path_safe refuses, so a rule is never built for an unchecked path.
 memory_settings_json() {
   local _p="${1:-}"
   staged_path_safe "$_p" || return 1
-  printf '%s' '{"permissions":{"allow":["Edit(/'"$_p"')"]},"disableAllHooks":true}'
+  printf '%s' '{"permissions":{"allow":["Edit(/'"$_p"')"],"deny":["Edit(/'"$_p"'/*)"]},"disableAllHooks":true}'
+  return 0
+}
+
+# STAGED_REMOVE_MAX_LISTING — the most lines `ls -RA` may print for a folder at the staged
+# path. A folder with a longer listing is not deleted.
+STAGED_REMOVE_MAX_LISTING=256
+
+# memory_staged_remove <memory dir> <root> <staged path> — makes the staged path empty
+# when a folder or a link stands on it, with one delete of exactly that path. <root> is
+# the project root as it resolves on disk. It deletes only when it can prove all of these,
+# and otherwise deletes nothing, returns 1 and sets STAGED_REMOVE_REFUSAL to the keyword
+# of the first fact it could not prove:
+#   args    <memory dir>, <root> and <staged path> are all set, and both paths are absolute
+#   path    <staged path> is exactly <memory dir>/WORKING-MEMORY.md.new
+#   parent  <memory dir> is <root>/.devflow/memory, as a string and then on disk
+#   link    no link sits on the way down from <root> to <memory dir>
+#   size    a folder lists at most STAGED_REMOVE_MAX_LISTING lines of `ls -RA`
+#   rm      the delete took effect: nothing stands on the staged path afterwards
+# A link is removed as the link (`rm -f`, never `-r`), so what it names is never touched;
+# a folder is removed with `rm -rf`, which unlinks a link inside it and never follows one.
+# The path is a single quoted word, so no pattern expands. Sets STAGED_REMOVED to `link`,
+# `dir`, or `none` (nothing removed). A regular file, or nothing, is left as it is and
+# returns 0: the caller removes a stale staged file itself. Returns 0 when no folder and
+# no link stands on the path afterwards. The checks and the delete are separate steps, so
+# a process that swaps something in between is not stopped; such a process already runs as
+# the user.
+memory_staged_remove() {
+  local _dir="${1:-}" _root="${2:-}" _staged="${3:-}" _kind="" _phys="" _n=0
+  STAGED_REMOVED="none"
+  STAGED_REMOVE_REFUSAL=""
+  case "$_dir" in /?*) ;; *) STAGED_REMOVE_REFUSAL="args"; return 1 ;; esac
+  case "$_root" in /?*) ;; *) STAGED_REMOVE_REFUSAL="args"; return 1 ;; esac
+  case "$_staged" in /?*) ;; *) STAGED_REMOVE_REFUSAL="args"; return 1 ;; esac
+  if [ -L "$_staged" ]; then
+    _kind="link"
+  elif [ -d "$_staged" ]; then
+    _kind="dir"
+  else
+    return 0
+  fi
+  if [ "$_staged" != "$_dir/WORKING-MEMORY.md.new" ]; then
+    STAGED_REMOVE_REFUSAL="path"; return 1
+  fi
+  if [ "$_dir" != "$_root/.devflow/memory" ]; then
+    STAGED_REMOVE_REFUSAL="parent"; return 1
+  fi
+  if ! df_no_symlink_below "$_root" "$_dir"; then
+    STAGED_REMOVE_REFUSAL="link"; return 1
+  fi
+  _phys=$(cd -P -- "$_dir" 2>/dev/null && pwd -P) || _phys=""
+  if [ "$_phys" != "$_root/.devflow/memory" ]; then
+    STAGED_REMOVE_REFUSAL="parent"; return 1
+  fi
+  if [ "$_kind" = "dir" ]; then
+    _n=$(ls -RA -- "$_staged" 2>/dev/null | head -n $((STAGED_REMOVE_MAX_LISTING + 1)) | wc -l) || _n=0
+    _n=$((_n + 0))
+    if [ "$_n" -gt "$STAGED_REMOVE_MAX_LISTING" ]; then
+      STAGED_REMOVE_REFUSAL="size"; return 1
+    fi
+    rm -rf -- "$_staged" 2>/dev/null || true
+  else
+    rm -f -- "$_staged" 2>/dev/null || true
+  fi
+  if [ -e "$_staged" ] || [ -L "$_staged" ]; then
+    STAGED_REMOVE_REFUSAL="rm"; return 1
+  fi
+  STAGED_REMOVED="$_kind"
   return 0
 }
 

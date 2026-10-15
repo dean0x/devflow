@@ -3277,7 +3277,7 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
   // LLM run, so the stand-in plants the link there during its run, to a file outside
   // the project whose line 1 carries a valid stamp: nothing else stands between that
   // link and a swap that would rename the link itself into the working memory's place.
-  it('background-memory-update: a link that appears at WORKING-MEMORY.md.new during the LLM run is neither read nor renamed into place', () => {
+  it('background-memory-update: a link that appears at WORKING-MEMORY.md.new during the LLM run is removed, and is neither read nor renamed into place', () => {
     fs.mkdirSync(memoryDir, { recursive: true });
     seedQueue(projectDir);
     const memoryFile = path.join(memoryDir, 'WORKING-MEMORY.md');
@@ -3298,10 +3298,12 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
     expect(fs.readFileSync(fake, 'utf-8'), 'the link target is byte-identical').toBe(FAKE);
     expect(isLink(memoryFile), 'the working memory is not replaced by the link').toBe(false);
     expect(fs.readFileSync(memoryFile, 'utf-8'), 'the existing working memory is left as it was').toBe(MEMORY);
-    expect(fs.readlinkSync(staged), 'non-vacuity: the stand-in planted the link, and it is left where it was').toBe(fake);
+    expect(() => fs.lstatSync(staged), 'the planted link is removed, and the file it names is not moved').toThrow(/ENOENT/);
     expect(fs.existsSync(path.join(memoryDir, '.last-refresh-ok')), 'no refresh is recorded').toBe(false);
     expect(fs.existsSync(path.join(memoryDir, '.pending-turns.processing')), 'the batch is kept for a later run').toBe(true);
-    expect(refusals('background-memory-update'), 'the refusal is logged once').toHaveLength(1);
+    const log = fs.readFileSync(path.join(homeDir, '.devflow', 'logs', projectDir.replace(/^\//, '').replace(/\//g, '-'), '.background-memory-update.log'), 'utf-8');
+    expect(log).toContain('after the run and was removed; the run is failed');
+    expect(log).toMatch(/Run: cli=2\.1\.293 argv=lean result=failed denials=\w+ removed=link\n/);
   });
 
   // The run's paths are checked before the LLM run, which can take minutes, and the
@@ -3524,11 +3526,12 @@ describe('S28: the memory hooks never read through a symbolic link into the sess
 const LEAN_RUN_TIMEOUT_MS = HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS + 10_000;
 
 /**
- * The settings JSON the spawn passes to `--settings`: one Edit allow rule on the
- * absolute staged path (the leading // makes the rule path absolute), and no hooks.
+ * The settings JSON the spawn passes to `--settings`: an Edit allow rule on the absolute
+ * staged path (the leading // makes the rule path absolute), an Edit deny rule on every
+ * path under it, and no hooks.
  */
 function settingsJson(stagedPath: string): string {
-  return `{"permissions":{"allow":["Edit(/${stagedPath})"]},"disableAllHooks":true}`;
+  return `{"permissions":{"allow":["Edit(/${stagedPath})"],"deny":["Edit(/${stagedPath}/*)"]},"disableAllHooks":true}`;
 }
 
 /**
@@ -3607,6 +3610,8 @@ interface RecordingOptions {
   readonly hangSecs?: number;
   /** The call also appends to the real working memory, as a human edit made during the run would. */
   readonly editRealFile?: boolean;
+  /** A bash snippet the call runs after recording, e.g. to leave a folder at the staged path. */
+  readonly duringRun?: string;
 }
 
 /**
@@ -3663,6 +3668,7 @@ function createRecordingClaude(
         ? []
         : [`echo '<!-- memory-head: testsha branch: main -->' > '${staged}'`, `echo '## Now' >> '${staged}'`]),
       ...(options.editRealFile === true ? [`echo 'a human edit' >> '${path.join(memoryDir, 'WORKING-MEMORY.md')}'`] : []),
+      ...(options.duringRun === undefined ? [] : [options.duringRun]),
       ...(options.hangSecs === undefined ? [] : [`sleep ${options.hangSecs}`]),
       `exit ${options.exitCode ?? 0}`,
       '',
@@ -4013,9 +4019,9 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
   describe('a staged file the worker cannot clear (AC8)', () => {
     it('skips the run: no LLM call, the batch and the queue untouched, no lock left', () => {
-      // `rm -f` cannot remove a directory, so the staged path stays occupied.
+      // A folder whose listing is over the bound is not deleted, so the staged path stays occupied.
       fs.mkdirSync(stagedFile);
-      fs.writeFileSync(path.join(stagedFile, 'inside'), 'keep');
+      for (let i = 0; i < 300; i++) fs.writeFileSync(path.join(stagedFile, `f${i}`), 'keep');
       const processing = path.join(memoryDir(), '.pending-turns.processing');
       const queue = path.join(memoryDir(), '.pending-turns.jsonl');
       const okFile = path.join(memoryDir(), '.last-refresh-ok');
@@ -4073,7 +4079,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
       expect(recordedArgv(rec), 'no -p call').toBeUndefined();
       const logged = workerLog().trimEnd().split('\n');
       expect(logged, 'the start line and then exactly one line for the run').toHaveLength(2);
-      expect(logged[1].endsWith(`] Run: cli=${version} argv=none result=below-floor denials=n/a floor=${PERMISSION_FLOOR}`), logged[1]).toBe(true);
+      expect(logged[1].endsWith(`] Run: cli=${version} argv=none result=below-floor denials=n/a removed=none floor=${PERMISSION_FLOOR}`), logged[1]).toBe(true);
       expect(fs.readFileSync(queue).equals(before), 'the queue is byte-identical').toBe(true);
       expect(fs.existsSync(path.join(memoryDir(), '.pending-turns.processing')), 'nothing claimed').toBe(false);
       expect(fs.existsSync(okFile), 'no success stamp').toBe(false);
@@ -4185,7 +4191,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
       runWorkerAt(project);
 
       expect(fs.existsSync(path.join(shimDir, 'argv.txt')), 'no -p call').toBe(false);
-      expect(onlyWorkerLog()).toContain('SKIP: the project lies inside a .claude or .git folder, where Claude Code refuses file writes; no LLM run');
+      expect(onlyWorkerLog()).toContain('SKIP: the project lies inside a .claude or .git folder; no LLM run');
       expect(fs.existsSync(path.join(memory, '.worker-notice-path'))).toBe(true);
     });
 
@@ -4228,26 +4234,136 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
     });
   });
 
-  describe('the staged path just before the spawn and a folder in its place (AC6)', () => {
-    it('removes an empty folder at the staged path and runs', () => {
+  describe('a folder or a link at the staged path is removed with one guarded delete, before the run and after it (AC6)', () => {
+    const present = (p: string): boolean => { try { fs.lstatSync(p); return true; } catch { return false; } };
+    const runLines = (): string[] => workerLog().split('\n').filter(line => line.includes('] Run: ')).map(line => line.slice(line.indexOf('Run: ')));
+    const onlyRunLine = (): string => {
+      expect(runLines(), 'one Run line per run').toHaveLength(1);
+      return runLines()[0];
+    };
+    /** A folder outside the project with one file in it: what a link at the staged path names. */
+    const makeOutside = (): string => {
+      const outside = path.join(shimDir, 'outside');
+      fs.mkdirSync(outside);
+      fs.writeFileSync(path.join(outside, 'keep.txt'), 'keep');
+      return outside;
+    };
+    const fillFolder = (folder: string, count: number): void => {
+      fs.mkdirSync(folder);
+      for (let i = 0; i < count; i++) fs.writeFileSync(path.join(folder, `f${i}`), 'x');
+    };
+
+    it('removes an empty folder at the staged path, runs, and records removed=dir', () => {
       fs.mkdirSync(stagedFile);
 
       const rec = runWith(HEALTHY_VERSION);
 
       expect(recordedArgv(rec), 'the -p call happened').toBeDefined();
       expectSwapCompleted();
+      expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=lean result=updated denials=unknown removed=dir');
     });
 
-    it('skips a folder that holds files with the fix-it line and a path notice, and removes nothing', () => {
-      fs.mkdirSync(stagedFile);
-      fs.writeFileSync(path.join(stagedFile, 'inside'), 'keep');
+    it('removes a folder that holds files and a nested folder, runs, and records removed=dir', () => {
+      fs.mkdirSync(path.join(stagedFile, 'a', 'b'), { recursive: true });
+      fs.writeFileSync(path.join(stagedFile, 'inside'), 'x');
+      fs.writeFileSync(path.join(stagedFile, 'a', 'b', 'deep'), 'x');
+
+      const rec = runWith(HEALTHY_VERSION);
+
+      expect(recordedArgv(rec), 'the -p call happened').toBeDefined();
+      expectSwapCompleted();
+      expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=lean result=updated denials=unknown removed=dir');
+    });
+
+    it.each([
+      ['a folder', (outside: string) => outside],
+      ['a file', (outside: string) => path.join(outside, 'keep.txt')],
+      ['nothing', (outside: string) => path.join(outside, 'absent')],
+    ] as const)('removes a link to %s at the staged path as the link, never follows it, runs, and records removed=link', (_label, target) => {
+      const outside = makeOutside();
+      fs.symlinkSync(target(outside), stagedFile);
+
+      const rec = runWith(HEALTHY_VERSION);
+
+      expect(recordedArgv(rec), 'the -p call happened').toBeDefined();
+      expectSwapCompleted();
+      expect(fs.readFileSync(path.join(outside, 'keep.txt'), 'utf-8'), 'what the link named is untouched').toBe('keep');
+      expect(fs.readdirSync(outside)).toEqual(['keep.txt']);
+      expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=lean result=updated denials=unknown removed=link');
+    });
+
+    it('does not delete a folder with a long listing: no claude call, the queue left, a path notice, result=failed and removed=none', () => {
+      fillFolder(stagedFile, 300);
+      const queueBefore = readQueueBytes(projectDir);
 
       const rec = runWith(HEALTHY_VERSION);
 
       expect(recordedArgv(rec), 'no -p call').toBeUndefined();
-      expect(workerLog()).toContain(`SKIP: ${fs.realpathSync(projectDir)}/.devflow/memory/WORKING-MEMORY.md.new is a folder that is not empty; remove it to resume memory updates; no LLM run`);
-      expect(fs.readFileSync(path.join(stagedFile, 'inside'), 'utf-8'), 'the folder keeps its file').toBe('keep');
+      expect(workerLog()).toContain(`SKIP: ${ruleStaged()} is a folder or a link that was not removed (size); remove it to resume memory updates; no LLM run`);
+      expect(fs.readdirSync(stagedFile), 'every file stays').toHaveLength(300);
+      expect(readQueueBytes(projectDir).equals(queueBefore), 'the queue is untouched').toBe(true);
+      expect(fs.existsSync(path.join(memoryDir(), '.pending-turns.processing')), 'nothing is claimed').toBe(false);
       expect(fs.readFileSync(path.join(memoryDir(), '.worker-notice-path'), 'utf-8')).toBe('path\n');
+      expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=none result=failed denials=n/a removed=none');
+    });
+
+    it('a folder that appears at the staged path during the run is removed and the run is failed, with the reason logged', () => {
+      const claimed = readQueueBytes(projectDir);
+
+      const rec = runWith(HEALTHY_VERSION, {}, {
+        skipStagedWrite: true,
+        duringRun: `mkdir -p '${stagedFile}/a' && echo canary > '${stagedFile}/a/b'`,
+      });
+
+      expect(recordedArgv(rec), 'the -p call happened').toBeDefined();
+      expect(present(stagedFile), 'the folder is gone').toBe(false);
+      expect(workerLog()).toContain(`FAIL: a dir stood at ${ruleStaged()} after the run and was removed; the run is failed`);
+      expect(workerLog()).toContain('FAIL: verification failed — leaving .processing for recovery');
+      expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=lean result=failed denials=unknown removed=dir');
+      expectClaimedRowsPreserved(projectDir, claimed);
+      expect(fs.existsSync(memFile), 'no working memory is written').toBe(false);
+      expect(fs.existsSync(path.join(memoryDir(), '.last-refresh-ok')), 'no success stamp').toBe(false);
+    });
+
+    it('a link that appears at the staged path during the run is removed, not followed, and the run is failed', () => {
+      const outside = makeOutside();
+      const claimed = readQueueBytes(projectDir);
+
+      runWith(HEALTHY_VERSION, {}, { skipStagedWrite: true, duringRun: `ln -s '${outside}' '${stagedFile}'` });
+
+      expect(present(stagedFile), 'the link is gone').toBe(false);
+      expect(fs.readdirSync(outside), 'what the link named is untouched').toEqual(['keep.txt']);
+      expect(workerLog()).toContain(`FAIL: a link stood at ${ruleStaged()} after the run and was removed; the run is failed`);
+      expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=lean result=failed denials=unknown removed=link');
+      expectClaimedRowsPreserved(projectDir, claimed);
+    });
+
+    it('a folder that appears during the run and cannot be removed is left, named in the log, and the run is failed with removed=none', () => {
+      const claimed = readQueueBytes(projectDir);
+
+      runWith(HEALTHY_VERSION, {}, {
+        skipStagedWrite: true,
+        duringRun: `mkdir '${stagedFile}'; i=0; while [ $i -lt 300 ]; do : > '${stagedFile}'/f$i; i=$((i+1)); done`,
+      });
+
+      expect(fs.readdirSync(stagedFile), 'the folder and its files stay').toHaveLength(300);
+      expect(workerLog()).toContain(`FAIL: a folder or a link stands at ${ruleStaged()} after the run and was not removed (size); remove it to resume memory updates`);
+      expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=lean result=failed denials=unknown removed=none');
+      expectClaimedRowsPreserved(projectDir, claimed);
+    });
+
+    it('a folder that the previous run left and could not remove stops the next run as the first one did, until it is removed', () => {
+      fillFolder(stagedFile, 300);
+      runWith(HEALTHY_VERSION);
+      expect(workerLog()).toContain('(size); remove it to resume memory updates; no LLM run');
+
+      expect(fs.existsSync(path.join(memoryDir(), '.worker-notice-path')), 'the first run left a path notice').toBe(true);
+      fs.rmSync(stagedFile, { recursive: true });
+      const rec = runWith(HEALTHY_VERSION);
+
+      expect(recordedArgv(rec), 'the -p call happened').toBeDefined();
+      expectSwapCompleted();
+      expect(fs.existsSync(path.join(memoryDir(), '.worker-notice-path')), 'a permitted run clears the notice').toBe(false);
     });
 
     it('stops with no claude call when a link is planted at the staged path after the lock', () => {
@@ -4412,7 +4528,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
       permission_denials: [{ tool_name: 'Write', tool_input: { content: 'BODYCANARY' } }, { tool_name: 'Write', tool_input: { content: 'BODYCANARY' } }],
     });
     /** The only fields a Run line may carry, each from a closed set or digits. */
-    const RUN_LINE_SHAPE = /^Run: cli=(\d+\.\d+\.\d+|unknown) argv=(lean|legacy|none) result=(updated|conflict|failed|skip|below-floor) denials=(\d+|unknown|n\/a)( floor=\d+\.\d+\.\d+)?$/;
+    const RUN_LINE_SHAPE = /^Run: cli=(\d+\.\d+\.\d+|unknown) argv=(lean|legacy|none) result=(updated|conflict|failed|skip|below-floor) denials=(\d+|unknown|n\/a) removed=(none|dir|link)( floor=\d+\.\d+\.\d+)?$/;
     const runLines = (): string[] => workerLog().split('\n').filter(line => line.includes('] Run: ')).map(line => line.slice(line.indexOf('Run: ')));
 
     /** The one Run line the run wrote. */
@@ -4424,13 +4540,13 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
     }
 
     it.each<readonly [string, string, RecordingOptions, string]>([
-      ['a lean run that swaps the memory in', HEALTHY_VERSION, { resultJson: CLEAN }, 'Run: cli=2.1.293 argv=lean result=updated denials=0'],
-      ['a legacy run that swaps the memory in', 'echo "2.1.285 (Claude Code)"', { resultJson: CLEAN }, 'Run: cli=2.1.285 argv=legacy result=updated denials=0'],
-      ['a run on a CLI whose version cannot be read', ':', { resultJson: CLEAN }, 'Run: cli=unknown argv=legacy result=updated denials=0'],
-      ['a run whose result reports no count', HEALTHY_VERSION, {}, 'Run: cli=2.1.293 argv=lean result=updated denials=unknown'],
-      ['a run that finds the working memory edited', HEALTHY_VERSION, { resultJson: CLEAN, editRealFile: true }, 'Run: cli=2.1.293 argv=lean result=conflict denials=0'],
-      ['a run whose write was refused twice', HEALTHY_VERSION, { resultJson: TWO_DENIALS, skipStagedWrite: true }, 'Run: cli=2.1.293 argv=lean result=failed denials=2'],
-      ['a run that exits non-zero', HEALTHY_VERSION, { exitCode: 2, skipStagedWrite: true }, 'Run: cli=2.1.293 argv=lean result=failed denials=unknown'],
+      ['a lean run that swaps the memory in', HEALTHY_VERSION, { resultJson: CLEAN }, 'Run: cli=2.1.293 argv=lean result=updated denials=0 removed=none'],
+      ['a legacy run that swaps the memory in', 'echo "2.1.285 (Claude Code)"', { resultJson: CLEAN }, 'Run: cli=2.1.285 argv=legacy result=updated denials=0 removed=none'],
+      ['a run on a CLI whose version cannot be read', ':', { resultJson: CLEAN }, 'Run: cli=unknown argv=legacy result=updated denials=0 removed=none'],
+      ['a run whose result reports no count', HEALTHY_VERSION, {}, 'Run: cli=2.1.293 argv=lean result=updated denials=unknown removed=none'],
+      ['a run that finds the working memory edited', HEALTHY_VERSION, { resultJson: CLEAN, editRealFile: true }, 'Run: cli=2.1.293 argv=lean result=conflict denials=0 removed=none'],
+      ['a run whose write was refused twice', HEALTHY_VERSION, { resultJson: TWO_DENIALS, skipStagedWrite: true }, 'Run: cli=2.1.293 argv=lean result=failed denials=2 removed=none'],
+      ['a run that exits non-zero', HEALTHY_VERSION, { exitCode: 2, skipStagedWrite: true }, 'Run: cli=2.1.293 argv=lean result=failed denials=unknown removed=none'],
     ])('%s ends with its own result and count', (_label, versionBody, options, expected) => {
       runWith(versionBody, {}, options);
 
@@ -4441,22 +4557,23 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
     it('a watchdog kill ends as failed', () => {
       runWith(HEALTHY_VERSION, { DEVFLOW_BG_WATCHDOG_SECS: '2' }, { hangSecs: 300, skipStagedWrite: true });
 
-      expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=lean result=failed denials=unknown');
+      expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=lean result=failed denials=unknown removed=none');
     });
 
     it('a CLI below the permission floor ends as below-floor, with no argv form and the floor named', () => {
       runWith('echo "2.1.268 (Claude Code)"');
 
-      expect(onlyRunLine()).toBe(`Run: cli=2.1.268 argv=none result=below-floor denials=n/a floor=${PERMISSION_FLOOR}`);
+      expect(onlyRunLine()).toBe(`Run: cli=2.1.268 argv=none result=below-floor denials=n/a removed=none floor=${PERMISSION_FLOOR}`);
     });
 
     it('a skip after the version probe names the version and no argv form', () => {
-      fs.mkdirSync(stagedFile);
-      fs.writeFileSync(path.join(stagedFile, 'inside'), 'keep');
+      // A queue with a user row only: the worker leaves it and starts no run.
+      fs.writeFileSync(path.join(memoryDir(), '.pending-turns.jsonl'), JSON.stringify({ role: 'user', content: 'hello', ts: 1 }) + '\n');
 
       runWith(HEALTHY_VERSION);
 
-      expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=none result=skip denials=n/a');
+      expect(workerLog()).toContain('User-only queue (no assistant/qa turn) — leaving it for the next run');
+      expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=none result=skip denials=n/a removed=none');
     });
 
     it('a skip before the version probe names no version', () => {
@@ -4465,13 +4582,13 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
       runWith(HEALTHY_VERSION, { BASH_ENV: bashEnv });
 
-      expect(onlyRunLine()).toBe('Run: cli=unknown argv=none result=skip denials=n/a');
+      expect(onlyRunLine()).toBe('Run: cli=unknown argv=none result=skip denials=n/a removed=none');
     });
 
     it('reads the version as digits only: text around it never reaches the log', () => {
       runWith('echo "v002.001.0293 SECRETTOKEN-x;rm -rf"', {}, { resultJson: CLEAN });
 
-      expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=lean result=updated denials=0');
+      expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=lean result=updated denials=0 removed=none');
       expect(workerLog()).not.toContain('SECRETTOKEN');
     });
   });
@@ -4552,10 +4669,10 @@ describe('S30: a notice from the memory worker is shown once at session start (A
     return { raw: stdout, systemMessage: parsed.systemMessage, context: parsed.hookSpecificOutput?.additionalContext };
   }
 
-  /** Leave the staged path held by a folder that has a file in it, so the next run stops there. */
+  /** Leave the staged path held by a folder the worker will not delete (its listing is over the bound), so the next run stops there. */
   function holdStagedPath(): void {
     fs.mkdirSync(stagedFile);
-    fs.writeFileSync(path.join(stagedFile, 'inside'), 'keep');
+    for (let i = 0; i < 300; i++) fs.writeFileSync(path.join(stagedFile, `f${i}`), 'keep');
   }
 
   it('a skip below the permission floor leaves no notice, so a session start tells the user nothing', () => {
@@ -4596,8 +4713,7 @@ describe('S30: a notice from the memory worker is shown once at session start (A
   });
 
   it('a persistent path refusal raises the path notice once, with its own remedy', () => {
-    fs.mkdirSync(stagedFile);
-    fs.writeFileSync(path.join(stagedFile, 'inside'), 'keep');
+    holdStagedPath();
     runWorkerOnce(HEALTHY_VERSION);
 
     const first = sessionStart();

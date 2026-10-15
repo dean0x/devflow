@@ -98,7 +98,7 @@ devflow/
 │               ├── capture-turn          # Stop hook: appends assistant turn to memory + learning queues; never spawns
 │               ├── capture-question      # PostToolUse hook (matcher: AskUserQuestion): appends answered questions to both queues
 │               ├── queue-append          # Shared helper: queue_append_row / queue_append_both / queue_read_gates
-│               ├── memory-permission     # Sourced helper: the memory worker's staged-path check, Edit-rule settings JSON, result line and one-time notice
+│               ├── memory-permission     # Sourced helper: the memory worker's staged-path check, allow and deny rule settings JSON, guarded removal at the staged path, result line and one-time notice
 │               ├── memory-worker         # Stop hook (runs in parallel with capture-turn): 120s throttle, spawns background-memory-update
 │               ├── background-memory-update # Detached claude -p worker on agents.memory (default claude-sonnet-5-5, high effort; `devflow agents` overrides it): drains queue → staged write → CAS swap to WORKING-MEMORY.md (spawned by memory-worker)
 │               ├── learning-lock         # Shared helper: mkdir-based locking

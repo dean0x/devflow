@@ -66,15 +66,17 @@ source "$SCRIPT_DIR/is-hex-sha" || { echo "background-memory-update: failed to s
 log "Starting (CWD=$CWD)"
 
 # Every run ends with one `Run:` line that says what it was: the CLI version, the argv
-# form it ran, how it ended and how many calls the permission rule denied. The exit trap
-# writes it, so each way out of the script has one. The fields start as "no CLI read, no
-# run" and the steps below fill them in; each is a keyword or digits, never text from the
-# CLI, the queue or the prompt. The trap also removes RESULT_FILE (the captured JSON
-# result, set at the spawn below) and, once this run holds it, the worker lock.
+# form it ran, how it ended, how many calls the permission rules denied and what the
+# worker removed from the staged path. The exit trap writes it, so each way out of the
+# script has one. The fields start as "no CLI read, no run" and the steps below fill them
+# in; each is a keyword or digits, never text from the CLI, the queue or the prompt. The
+# trap also removes RESULT_FILE (the captured JSON result, set at the spawn below) and,
+# once this run holds it, the worker lock.
 RUN_CLI="unknown"    # X.Y.Z once the version probe has read one
 RUN_ARGV="none"      # lean or legacy, set where the run is spawned
 RUN_RESULT="skip"    # updated, conflict, failed, skip or below-floor
 RUN_DENIALS="n/a"    # digits or unknown, set where the run is spawned
+RUN_REMOVED="none"   # dir or link when a folder or a link was removed from the staged path
 RUN_FLOOR=""         # the version floor, named on a below-floor line only
 RESULT_FILE=""
 LOCK_HELD="false"
@@ -86,7 +88,7 @@ finish_run() {
   [ "${BASHPID:-$$}" = "$WORKER_PID" ] || return 0
   local _floor=""
   if [ -n "$RUN_FLOOR" ]; then _floor=" floor=${RUN_FLOOR}"; fi
-  log "Run: cli=${RUN_CLI} argv=${RUN_ARGV} result=${RUN_RESULT} denials=${RUN_DENIALS}${_floor}"
+  log "Run: cli=${RUN_CLI} argv=${RUN_ARGV} result=${RUN_RESULT} denials=${RUN_DENIALS} removed=${RUN_REMOVED}${_floor}"
   if [ -n "$RESULT_FILE" ]; then rm -f "$RESULT_FILE" 2>/dev/null || true; fi
   if [ "$LOCK_HELD" = "true" ]; then rmdir "$LOCK_DIR" 2>/dev/null || true; fi
 }
@@ -162,15 +164,15 @@ if ! df_no_symlink_below "$PROJECT_ROOT" "$LOCK_DIR" "$QUEUE_FILE" "$PROCESSING_
 fi
 
 # --- The worker's write is limited to its staged file ---
-# The run gets one allow rule, an Edit rule for $STAGED_FILE, and a permission mode that
-# denies every call no rule allows. The rule is plain text in a settings JSON, so the
-# staged path is checked before the JSON is built: a character that has a meaning in a
-# rule path, or a project inside a .claude or .git folder (where Claude Code refuses file
-# writes), ends the run here with no LLM call, and a one-time notice tells the user
-# (memory-permission). The prompt, the rule and the checks below all use this one path.
+# The run gets an allow rule for $STAGED_FILE, a deny rule for every path under it, and a
+# permission mode that denies every call no rule allows. The rules are plain text in a
+# settings JSON, so the staged path is checked before the JSON is built: a character that
+# has a meaning in a rule path, or a project inside a .claude or .git folder, ends the run
+# here with no LLM call, and a one-time notice tells the user (memory-permission). The
+# prompt, the rules and the checks below all use this one path.
 if ! staged_path_safe "$STAGED_FILE"; then
   if [ "$STAGED_PATH_REFUSAL" = "protected" ]; then
-    log "SKIP: the project lies inside a .claude or .git folder, where Claude Code refuses file writes; no LLM run"
+    log "SKIP: the project lies inside a .claude or .git folder; no LLM run"
   else
     log "SKIP: the memory path holds characters the permission rule cannot carry; no LLM run"
   fi
@@ -351,31 +353,36 @@ if ! acquire_lock; then
 fi
 LOCK_HELD="true"
 
-# Clean up any staged file left by a watchdog-killed prior run.
-# Without this, a stale staged file with a valid stamp would be mistakenly
-# mv-ed to the real path on the NEXT run's CAS check (D-MEMORY-STAGED-CAS).
+# Clean up whatever stands at the staged path after a watchdog-killed or odd prior run.
+# Without this, a stale staged file with a valid stamp would be mistakenly mv-ed to the
+# real path on the NEXT run's CAS check (D-MEMORY-STAGED-CAS).
 #
 # D-MEMORY-WORKER-LEAN: the removal is also a CHECKED precondition. The model gets the
 # Write tool alone, and Write refuses a file that exists and has not been read, which
 # is how an earlier Write-only worker failed silently: every Write errored while the
 # run exited 0. Once nothing stands at the staged path, the one Write is always a
-# create, so Write-only is safe. A path `rm -f` cannot clear (a directory, say) would
-# make every Write fail. An empty folder there is removed (`rmdir`, never recursive,
-# and only where no link sits on the path); a folder that holds files is not the
-# worker's to delete. Whatever still stands there stops the run here instead: no LLM
-# call, the batch and the queue untouched (nothing has been claimed yet), the lock
-# released by the EXIT trap, and a one-time notice for the user. `-e` or `-L`, so a
+# create, so Write-only is safe. A folder or a link there is removed first, by one
+# guarded delete of exactly that path (memory_staged_remove: only
+# <project>/.devflow/memory/WORKING-MEMORY.md.new, never through a link, a bounded
+# listing, no pattern), then `rm -f` clears a stale regular file. Whatever still stands
+# there stops the run here instead: no LLM call, the batch and the queue untouched
+# (nothing has been claimed yet), the lock released by the EXIT trap, a one-time notice
+# for the user, and a Run line that says `failed` and `removed=none`. `-e` or `-L`, so a
 # link there counts as present.
-rm -f "$STAGED_FILE" 2>/dev/null || true
-if [ -d "$STAGED_FILE" ] && [ ! -L "$STAGED_FILE" ] && df_no_symlink_below "$PROJECT_ROOT" "$STAGED_FILE"; then
-  rmdir "$STAGED_FILE" 2>/dev/null || true
+if ! memory_staged_remove "$MEMORY_DIR" "$PROJECT_ROOT" "$STAGED_FILE"; then
+  RUN_RESULT="failed"
+  log "SKIP: $STAGED_FILE is a folder or a link that was not removed (${STAGED_REMOVE_REFUSAL}); remove it to resume memory updates; no LLM run"
+  memory_notice_write "$MEMORY_DIR" "$PROJECT_ROOT" path
+  exit 0
 fi
+RUN_REMOVED="$STAGED_REMOVED"
+if [ "$STAGED_REMOVED" != "none" ]; then
+  log "Removed a $STAGED_REMOVED from $STAGED_FILE before the run"
+fi
+rm -f "$STAGED_FILE" 2>/dev/null || true
 if [ -e "$STAGED_FILE" ] || [ -L "$STAGED_FILE" ]; then
-  if [ -d "$STAGED_FILE" ] && [ ! -L "$STAGED_FILE" ]; then
-    log "SKIP: $STAGED_FILE is a folder that is not empty; remove it to resume memory updates; no LLM run"
-  else
-    log "SKIP: $STAGED_FILE could not be removed — a Write to it would fail, so no LLM run; the batch and the queue are left as they are"
-  fi
+  RUN_RESULT="failed"
+  log "SKIP: $STAGED_FILE could not be removed — a Write to it would fail, so no LLM run; the batch and the queue are left as they are"
   memory_notice_write "$MEMORY_DIR" "$PROJECT_ROOT" path
   exit 0
 fi
@@ -888,13 +895,15 @@ fi
 #                      only the user's own settings load, never the project's or the
 #                      local ones. The user's settings keep their `env` and their own
 #                      allow rules.
-#   --settings JSON    one allow rule, Edit(//<the canonical staged path>), and no hooks.
-#                      The rule is exact-path, so under dontAsk every other path is
-#                      refused; the staged-folder check before the run covers a folder
-#                      at the staged path. Only Edit rules cover the Write tool: a
+#   --settings JSON    an allow rule Edit(//<the canonical staged path>), a deny rule
+#                      Edit(//<the canonical staged path>/*) for every path under it, and
+#                      no hooks. Under dontAsk every other path is refused; a folder or a
+#                      link at the staged path is removed before the run and after it
+#                      (memory_staged_remove). Only Edit rules cover the Write tool: a
 #                      Write(path) rule is never checked, so it would deny every Write.
 #                      The leading // makes the rule path absolute. The JSON is built by
-#                      memory_settings_json, after the path check above.
+#                      memory_settings_json, after the path check above, and its comment
+#                      holds what was measured.
 #   --output-format json
 #                      the result as one JSON object: its subtype, error flag, turn
 #                      count and the list of denied calls. The hook reduces it to one
@@ -1033,6 +1042,20 @@ case "$MEMORY_RESULT_DENIALS" in
   unknown|0) ;;
   *) RESULT_DENIED="yes" ;;
 esac
+
+# A folder or a link at the staged path now was put there during the run: the path was
+# empty at the spawn. It is removed the way it is before a run (memory_staged_remove), and
+# the run ends as failed: the checks below find no staged file, and the batch stays for
+# recovery. If the removal is refused, the folder stays, the log names the reason and the
+# next run stops at the same guard. The tests are builtins, so a normal run forks nothing.
+if [ -L "$STAGED_FILE" ] || [ -d "$STAGED_FILE" ]; then
+  if memory_staged_remove "$MEMORY_DIR" "$PROJECT_ROOT" "$STAGED_FILE"; then
+    RUN_REMOVED="$STAGED_REMOVED"
+    log "FAIL: a $STAGED_REMOVED stood at $STAGED_FILE after the run and was removed; the run is failed"
+  else
+    log "FAIL: a folder or a link stands at $STAGED_FILE after the run and was not removed (${STAGED_REMOVE_REFUSAL}); remove it to resume memory updates"
+  fi
+fi
 
 if [ "$CLAUDE_EXIT" -gt 128 ]; then
   log "FAIL: claude -p killed by watchdog after ${WATCHDOG_SECS}s"
