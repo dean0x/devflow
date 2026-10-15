@@ -813,9 +813,8 @@ describe('session-start-context: Sections 5 and 6', () => {
     });
 
     it('the directive is single-quoted, so $CLAUDE_CONFIG_DIR is not expanded', () => {
-      const line = source().split('\n').find(l => l.trim().startsWith("COMPACT_SECTION='"));
-      expect(line).toBeDefined();
-      expect(line).toContain('commands/devflow/<name>.md in $CLAUDE_CONFIG_DIR if absolute, else ~/.claude');
+      // The reader takes only a single-quoted assignment, so it finds the text only while the text stays a literal.
+      expect(compactDirectiveText()).toContain('commands/devflow/<name>.md in $CLAUDE_CONFIG_DIR if absolute, else ~/.claude');
     });
 
     it('Sections 5 and 6 and the audit helpers contain no `exit`', () => {
