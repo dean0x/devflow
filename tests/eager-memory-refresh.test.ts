@@ -4888,6 +4888,19 @@ describe('S31: a malformed queue line drops only itself (#528)', { timeout: LEAN
       expect(fs.existsSync(processingFile), 'the batch is removed').toBe(false);
       expect(fs.existsSync(stdinCapture), 'no LLM run started').toBe(false);
     });
+
+    it('e: a cut-off assistant line is not a turn, so a fresh queue of user rows stays in place', () => {
+      writeLines(queueFile, ['{"role":"assistant","content":"cut', row('user', 'ONLY-PROMPT')]);
+      const queueBytes = fs.readFileSync(queueFile);
+
+      const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+
+      expect(exitCode).toBe(0);
+      expect(readLog()).toContain('User-only queue');
+      expect(fs.readFileSync(queueFile), 'the queue is kept byte for byte').toEqual(queueBytes);
+      expect(fs.existsSync(processingFile), 'the queue is not claimed').toBe(false);
+      expect(fs.existsSync(stdinCapture), 'no LLM run started').toBe(false);
+    });
   });
 
   it('d: on the node backend a line that is not JSON is skipped, and the same count is logged', () => {

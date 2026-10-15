@@ -1110,7 +1110,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
   /**
    * An ADDITIVE symlink farm with every tool the hook needs EXCEPT jq, so
    * `command -v jq` fails deterministically on macOS and Linux and json-parse
-   * takes the node fallback (_HAS_JQ=false). Mirrors buildNoCksumPath in
+   * takes the node fallback (_HAS_JQ=false). Mirrors buildToolFarm in
    * tests/eager-memory-refresh.test.ts — never subtract from PATH.
    */
   function buildNoJqPath(base: string): string {
