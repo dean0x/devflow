@@ -5,7 +5,7 @@ import { createRequire } from 'module';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { AGENT_CONFIG } from './fixtures/agent-config.js';
-import { commandReferenceSections, readAgentReference, RETIRED_INLINE_EXPANSION, SANCTIONED_RESOLUTION } from './helpers.js';
+import { commandReferenceSections, readAgentReference, RETIRED_INLINE_EXPANSION, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT } from './helpers.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -454,11 +454,11 @@ describe('curate agent', () => {
         expect(content).toContain(MAINTAIN_PATH_TEXT);
       });
 
-      it('known-bad probes: a second line, a line after its use, a missing line, a late reference path, a fenced heading and lost sections are each reported', () => {
+      it('known-bad probes: a second line, a line after its use, a missing line, a missing `$d/` use, a missing or late reference path, a fenced heading and lost sections are each reported', () => {
         const find = `cd "<project root>" && find "$d/rules/devflow" -name '*.md'`;
         const sections = (inputs: string, part2: string): string => `## Inputs\n${inputs}\n## Part 2 — Maintain\n${part2}\n## Finishing\n`;
         const okInputs = `${SANCTIONED_RESOLUTION} ${find}`;
-        const okPart2 = `${SANCTIONED_RESOLUTION} printf '%s\\n' "$d"\nRead <that directory>/${MAINTAIN_PATH_TEXT}`;
+        const okPart2 = `${SANCTIONED_RESOLUTION_PRINT}\nRead <that directory>/${MAINTAIN_PATH_TEXT}`;
         expect(collectReadSiteDefects(sections(okInputs, okPart2)), 'the clean seed is clean, so each seed fails for its own reason').toEqual([]);
         expect(collectReadSiteDefects(sections(`\`\`\`text\n## quoted\n\`\`\`\n${okInputs}`, okPart2)), 'a fenced heading does not end Inputs').toEqual([]);
 
@@ -467,6 +467,12 @@ describe('curate agent', () => {
         ]);
         expect(collectReadSiteDefects(sections(`${find}; ${SANCTIONED_RESOLUTION}`, okPart2))).toEqual([
           'Inputs uses "$d/" before the sanctioned resolution line',
+        ]);
+        expect(collectReadSiteDefects(sections(SANCTIONED_RESOLUTION, okPart2))).toEqual([
+          'Inputs never uses "$d/"',
+        ]);
+        expect(collectReadSiteDefects(sections(okInputs, SANCTIONED_RESOLUTION_PRINT))).toEqual([
+          'Part 2 never names the maintain reference path',
         ]);
         expect(collectReadSiteDefects(sections(okInputs, `Read <that directory>/${MAINTAIN_PATH_TEXT}`))).toEqual([
           'Part 2 holds 0 sanctioned resolution lines, expected 1',

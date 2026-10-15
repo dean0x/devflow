@@ -62,9 +62,13 @@
  * non-empty total says nothing about a class that went missing, so every class
  * is asserted by name.
  *
- * THE COMPILED CLASSES MUST BE CURRENT. A dist/ older than its sources is a
- * clean scan of text nobody ships, so the guard first fails by name on any
- * compiled prompt older than an input it is compiled from (#406).
+ * THE COMPILED CLASSES MUST BE CURRENT, WITHIN THE LIMITS OF THE CHECK. A dist/
+ * older than its sources is a clean scan of text nobody ships, so the guard first
+ * fails by name on any compiled prompt older than the inputs `compiledPrompts`
+ * names for it (#406): a command against its own host and the command partials, an
+ * agent against its own generator host only, and a reference against the reference
+ * modules. An edit to a partial that agents share, without a rebuild, is not
+ * detected.
  *
  * NO EXEMPTIONS (TP-42). The Git agent, the last reader, resolves its tracker
  * provider, site and key from the settings line like every other prompt. The

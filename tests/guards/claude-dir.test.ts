@@ -59,7 +59,9 @@
  * refuses it, where the sanctioned line yields `/.claude`), an unset `HOME` (the
  * installer falls back to the system user's home directory, where the sanctioned
  * line yields `/.claude`; a known-divergence test for each case pins the line's
- * value), and anything outside the corpus below. Of the hook, only
+ * value), a reassignment of `d` that `d-reassigned` does not match (it matches `d=`
+ * and `for d in` only, so `d+=`, `unset d`, `read d` and `printf -v d` pass), and
+ * anything outside the corpus below. Of the hook, only
  * the compaction directive (the text of `COMPACT_SECTION`) is scanned, because the
  * model follows it as text; the hook's own `case` tests are code, and they stay out
  * of scope. Other hooks and the TypeScript CLI resolve the directory in code
@@ -71,10 +73,13 @@
  * skills and rules, the learning-off builds of commands and agents, and the
  * compaction directive of the session-start hook.
  *
- * THE COMPILED CLASSES MUST BE CURRENT. The first test fails by name when a compiled
- * command, agent or reference is older than a source it is compiled from
- * (`collectStaleOutputs`, shared with the no-config-read guard), so no scan below
- * reads a stale build.
+ * THE COMPILED CLASSES MUST BE CURRENT, WITHIN THE LIMITS OF THE CHECK. The first test
+ * fails by name when a compiled prompt is older than the inputs `compiledPrompts`
+ * names for it (`collectStaleOutputs`, shared with the no-config-read guard): a
+ * command against its own host and the command partials, an agent against its own
+ * generator host only, and a reference against the reference modules. An edit to a
+ * partial that agents share (for example `src/assets/agents/_partials/_code.mds`)
+ * without a rebuild is NOT detected, so run `npm run build:mds` after such an edit.
  */
 
 import { describe, it, expect, vi } from 'vitest'
