@@ -142,7 +142,7 @@ You are not handed CLAUDE.md or the rule files, and two checks compare a lesson 
 rule that already states it: Part 1's already-encoded search and Part 2's first rung.
 Before the first of those comparisons, Read `<project root>/CLAUDE.md` once. Both also
 compare against a rules file, so list the installed ones with
-`d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"; cd "<project root>" && find "$d/rules/devflow" -name '*.md'`
+`d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; cd "<project root>" && find "$d/rules/devflow" -name '*.md'`
 and Read each once. Keep what you read for every later comparison in the run; a file that
 is missing is skipped. A run that ends before any comparison reads none of them.
 

@@ -40,7 +40,7 @@ An input that only one mode uses is listed in that mode's reference.
 Take the mode from the first prompt line that starts with `Mode:`. Read exactly one reference for it. Resolve the directory in Bash, then Read the file by its absolute path with the Read tool, never with `cat`:
 
 ```bash
-d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; echo "$d/skills/devflow:agent-references/references/synthesize"
+d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d/skills/devflow:agent-references/references/synthesize"
 ```
 
 | Mode | File in that directory |
