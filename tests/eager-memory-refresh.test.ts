@@ -4634,6 +4634,8 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
       expect(fs.existsSync(marker), 'non-vacuity: the fake cd was armed').toBe(true);
       expect(recordedArgv(rec), 'no -p call').toBeUndefined();
       expect(workerLog()).toContain('FAIL: could not enter the project root');
+      expect(onlyRunLine()).toMatch(/^Run: cli=2\.1\.293 argv=lean result=failed /);
+      expect(fs.existsSync(path.join(memoryDir(), '.working-memory.lock')), 'the lock is released').toBe(false);
       expectClaimedRowsPreserved(projectDir, claimed);
     });
 
