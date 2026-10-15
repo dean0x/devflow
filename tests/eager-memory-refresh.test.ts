@@ -3522,25 +3522,60 @@ describe('S28: the memory hooks never read through a symbolic link into the sess
 /** One worker run's bound: its own work, a node exec stall, and the 1 s probe bound the hang arm uses. */
 const LEAN_RUN_TIMEOUT_MS = HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS + 10_000;
 
-/** The lean argv, exactly as the spawn passes it, for a model and an effort. */
-function leanArgv(model: string, effort: string): string[] {
+/**
+ * The settings JSON the spawn passes to `--settings`: one Edit allow rule on the
+ * absolute staged path (the leading // makes the rule path absolute), a deny rule
+ * below it, and no hooks.
+ */
+function settingsJson(stagedPath: string): string {
+  return `{"permissions":{"allow":["Edit(/${stagedPath})"],"deny":["Edit(/${stagedPath}/**)"]},"disableAllHooks":true}`;
+}
+
+/**
+ * The four flags both forms carry, in the order the spawn passes them. The staged path
+ * is the canonical one: the project root as it resolves on disk (`fs.realpathSync`).
+ */
+function permissionFlags(stagedPath: string): string[] {
+  return ['--permission-mode', 'dontAsk', '--setting-sources', 'user', '--settings', settingsJson(stagedPath), '--output-format', 'json'];
+}
+
+/** The lean argv, exactly as the spawn passes it, for a model, an effort and the canonical staged path. */
+function leanArgv(model: string, effort: string, stagedPath: string): string[] {
   return [
     '-p', '--model', model, '--effort', effort, '--safe-mode',
     '--tools', 'Write', '--disable-slash-commands',
     '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',
-    '--max-turns', '3', '--dangerously-skip-permissions', '--output-format', 'text',
+    '--max-turns', '3', ...permissionFlags(stagedPath),
   ];
 }
 
-/** The legacy argv, exactly as the spawn passes it, for a model. It carries no effort. */
-function legacyArgv(model: string): string[] {
-  return ['-p', '--model', model, '--tools', 'Write', '--dangerously-skip-permissions', '--output-format', 'text'];
+/** The legacy argv, exactly as the spawn passes it, for a model and the staged path. It carries no effort. */
+function legacyArgv(model: string, stagedPath: string): string[] {
+  return ['-p', '--model', model, '--tools', 'Write', ...permissionFlags(stagedPath)];
 }
 
-/** Every flag only the lean form passes (the legacy form carries none, and neither carries --allowedTools). */
+/** Every flag only the lean form passes (the legacy form carries none). */
 const LEAN_ONLY_FLAGS = [
   '--effort', '--safe-mode', '--max-turns', '--disable-slash-commands', '--strict-mcp-config', '--mcp-config',
 ] as const;
+
+/** What no argv form carries: a permission skip, a bypass mode, an allow-list flag. */
+const FORBIDDEN_ARGV = [
+  '--dangerously-skip-permissions', '--allow-dangerously-skip-permissions', 'bypassPermissions', '--allowedTools',
+] as const;
+
+/** The lowest CLI version the worker runs on (MEMORY_MIN_PERMISSION_VERSION in the hook). */
+const PERMISSION_FLOOR = '2.1.269';
+
+/** The lowest CLI version that gets the lean form (MEMORY_MIN_CLAUDE_VERSION in the hook). */
+const LEAN_FLOOR = '2.1.286';
+
+function expectNoForbiddenFlag(argv: string[] | undefined): void {
+  expect(argv, 'the -p call happened').toBeDefined();
+  for (const flag of FORBIDDEN_ARGV) {
+    expect(argv, flag).not.toContain(flag);
+  }
+}
 
 interface RecordingClaude {
   /** One argument per line; written by the `-p` call only. */
@@ -3554,15 +3589,37 @@ interface RecordingClaude {
   readonly runLockFile: string;
   /** The probe's PID, written before the version body runs. */
   readonly probePidFile: string;
+  /** The `-p` call's working directory, physical (`pwd -P`). */
+  readonly cwdFile: string;
+  /** The names in $TMPDIR while the `-p` call ran. */
+  readonly tmpListFile: string;
+}
+
+/** What the `-p` call of the recording fake does besides recording. */
+interface RecordingOptions {
+  /** The JSON result printed on stdout (the worker captures stdout as the result). */
+  readonly resultJson?: string;
+  /** The call writes no staged file. */
+  readonly skipStagedWrite?: boolean;
+  /** The call exits with this status after recording and writing. */
+  readonly exitCode?: number;
+  /** The call sleeps this long (seconds) after recording, so the watchdog has to end it. */
+  readonly hangSecs?: number;
 }
 
 /**
  * A fake claude that answers `--version` with `versionBody` (a bash snippet) and, for
- * any other call, records its argv, environment, stdin and the lock state, then writes
- * a stamped staged memory file. `--version` writes nothing a `-p` call writes, so a
- * file's presence says which call made it.
+ * any other call, records its argv, environment, stdin, working directory and the lock
+ * state, then writes a stamped staged memory file. `--version` writes nothing a `-p`
+ * call writes, so a file's presence says which call made it. `options` changes what the
+ * `-p` call prints, writes and exits with.
  */
-function createRecordingClaude(shimDir: string, memoryDir: string, versionBody: string): RecordingClaude {
+function createRecordingClaude(
+  shimDir: string,
+  memoryDir: string,
+  versionBody: string,
+  options: RecordingOptions = {},
+): RecordingClaude {
   const rec: RecordingClaude = {
     argvFile: path.join(shimDir, 'argv.txt'),
     envFile: path.join(shimDir, 'env.txt'),
@@ -3570,9 +3627,13 @@ function createRecordingClaude(shimDir: string, memoryDir: string, versionBody: 
     probeLockFile: path.join(shimDir, 'probe-lock.txt'),
     runLockFile: path.join(shimDir, 'run-lock.txt'),
     probePidFile: path.join(shimDir, 'probe-pid.txt'),
+    cwdFile: path.join(shimDir, 'cwd.txt'),
+    tmpListFile: path.join(shimDir, 'tmp-list.txt'),
   };
   const lock = path.join(memoryDir, '.working-memory.lock');
   const staged = path.join(memoryDir, 'WORKING-MEMORY.md.new');
+  const resultFile = path.join(shimDir, 'result-body.json');
+  if (options.resultJson !== undefined) fs.writeFileSync(resultFile, options.resultJson);
   const bin = path.join(shimDir, 'claude');
   fs.writeFileSync(
     bin,
@@ -3592,10 +3653,15 @@ function createRecordingClaude(shimDir: string, memoryDir: string, versionBody: 
       '  echo "CLAUDE_CODE_DISABLE_AUTO_MEMORY=${CLAUDE_CODE_DISABLE_AUTO_MEMORY-<unset>}"',
       '  echo "CLAUDE_CODE_EFFORT_LEVEL=${CLAUDE_CODE_EFFORT_LEVEL-<unset>}"',
       `} > '${rec.envFile}'`,
+      `pwd -P > '${rec.cwdFile}'`,
+      `ls "\${TMPDIR:-/tmp}" > '${rec.tmpListFile}'`,
       `cat > '${rec.stdinFile}'`,
-      `echo '<!-- memory-head: testsha branch: main -->' > '${staged}'`,
-      `echo '## Now' >> '${staged}'`,
-      'exit 0',
+      ...(options.resultJson === undefined ? [] : [`cat '${resultFile}'`]),
+      ...(options.skipStagedWrite === true
+        ? []
+        : [`echo '<!-- memory-head: testsha branch: main -->' > '${staged}'`, `echo '## Now' >> '${staged}'`]),
+      ...(options.hangSecs === undefined ? [] : [`sleep ${options.hangSecs}`]),
+      `exit ${options.exitCode ?? 0}`,
       '',
     ].join('\n'),
   );
@@ -3650,10 +3716,12 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
   const memoryDir = (): string => path.join(projectDir, '.devflow', 'memory');
   const workerLog = (): string => fs.readFileSync(workerLogPath(projectDir, homeDir), 'utf-8');
+  /** The staged path as the rule carries it: the project root as it resolves on disk. */
+  const ruleStaged = (): string => path.join(fs.realpathSync(projectDir), '.devflow', 'memory', 'WORKING-MEMORY.md.new');
 
   /** Run the worker once against a recording fake and return what the fake saw. */
-  function runWith(versionBody: string, extraEnv: Record<string, string> = {}): RecordingClaude {
-    const rec = createRecordingClaude(shimDir, memoryDir(), versionBody);
+  function runWith(versionBody: string, extraEnv: Record<string, string> = {}, options: RecordingOptions = {}): RecordingClaude {
+    const rec = createRecordingClaude(shimDir, memoryDir(), versionBody, options);
     // The fake is what `claude` resolves to: it sits first on the PATH the worker gets.
     expect(fs.statSync(path.join(shimDir, 'claude')).mode & 0o111, 'the fake claude is executable').not.toBe(0);
     expect(runWorker(projectDir, homeDir, shimDir, extraEnv).exitCode).toBe(0);
@@ -3672,7 +3740,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
     it('passes exactly the lean argv with the shipped model and effort, and no inherited effort level', () => {
       const rec = runWith(HEALTHY_VERSION, { CLAUDE_CODE_EFFORT_LEVEL: 'low' });
 
-      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort));
+      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort, ruleStaged()));
       expect(recordedEnv(rec)).toEqual({
         DEVFLOW_BG_UPDATER: '1',
         CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1',
@@ -3682,10 +3750,10 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
       expectSwapCompleted();
     });
 
-    it('never passes --allowedTools', () => {
+    it('passes no permission skip, no bypass mode and no allow-list flag (AC1)', () => {
       const rec = runWith(HEALTHY_VERSION);
 
-      expect(recordedArgv(rec)).not.toContain('--allowedTools');
+      expectNoForbiddenFlag(recordedArgv(rec));
     });
 
     it('names the model, the effort and the argv form on its spawn log line', () => {
@@ -3707,14 +3775,13 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
   describe('the legacy argv (AC5, AC6)', () => {
     /**
-     * Each way the probe can fail to put the CLI at or above the floor. `2.0.999` and
-     * `2.1.99` are above the floor read as text and below it read as numbers, so they
-     * catch a lexical comparison.
+     * Each way the probe can leave a CLI on the legacy form: a version the permission
+     * floor admits but the lean floor does not, one that cannot be read, and a probe
+     * that fails. A version below the permission floor gets no run at all (below).
      */
     const LEGACY_CASES: ReadonlyArray<readonly [string, string]> = [
-      ['reports a version below the floor', 'echo "2.1.285 (Claude Code)"'],
-      ['reports a lower minor with a larger patch', 'echo "2.0.999 (Claude Code)"'],
-      ['reports a lower patch that is longer as text', 'echo "2.1.99 (Claude Code)"'],
+      ['reports a version between the permission floor and the lean floor', 'echo "2.1.285 (Claude Code)"'],
+      ['reports exactly the permission floor', `echo "${PERMISSION_FLOOR} (Claude Code)"`],
       ['prints nothing parseable', 'echo "no version here"'],
       ['prints a version with two components', 'echo "2.1 (Claude Code)"'],
       ['prints nothing', ':'],
@@ -3724,16 +3791,17 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
     it.each(LEGACY_CASES)('a claude that %s gets the legacy argv, and the run still swaps', (_label, versionBody) => {
       const rec = runWith(versionBody);
 
-      expect(recordedArgv(rec)).toEqual(legacyArgv(WORKER_AGENTS.memory.model));
+      expect(recordedArgv(rec)).toEqual(legacyArgv(WORKER_AGENTS.memory.model, ruleStaged()));
       expect(recordedEnv(rec)).toEqual({
         DEVFLOW_BG_UPDATER: '1',
         CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1',
         CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
         CLAUDE_CODE_EFFORT_LEVEL: '<unset>',
       });
-      for (const flag of [...LEAN_ONLY_FLAGS, '--allowedTools']) {
+      for (const flag of LEAN_ONLY_FLAGS) {
         expect(recordedArgv(rec), flag).not.toContain(flag);
       }
+      expectNoForbiddenFlag(recordedArgv(rec));
       expectSwapCompleted();
       expect(workerLog()).toContain(`Spawning claude -p (model ${WORKER_AGENTS.memory.model}, no effort passed, legacy argv, `);
     });
@@ -3741,7 +3809,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
     it('a claude whose --version outlasts the probe bound gets the legacy argv, and the probe is killed', () => {
       const rec = runWith('sleep 30', { DEVFLOW_BG_VERSION_PROBE_SECS: '1' });
 
-      expect(recordedArgv(rec)).toEqual(legacyArgv(WORKER_AGENTS.memory.model));
+      expect(recordedArgv(rec)).toEqual(legacyArgv(WORKER_AGENTS.memory.model, ruleStaged()));
       expectSwapCompleted();
       const pid = Number(fs.readFileSync(rec.probePidFile, 'utf-8').trim());
       expect(Number.isInteger(pid) && pid > 1, 'non-vacuity: the probe recorded its PID').toBe(true);
@@ -3762,7 +3830,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
     it.each(MODERN_CASES)('a claude that reports %s gets the lean argv', (_label, versionBody) => {
       const rec = runWith(versionBody);
 
-      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort));
+      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort, ruleStaged()));
     });
   });
 
@@ -3772,7 +3840,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
       const rec = runWith(HEALTHY_VERSION);
 
-      expect(recordedArgv(rec)).toEqual(leanArgv('sonnet', 'medium'));
+      expect(recordedArgv(rec)).toEqual(leanArgv('sonnet', 'medium', ruleStaged()));
       expect(workerLog()).toContain('Spawning claude -p (model sonnet, effort medium, lean argv, ');
     });
 
@@ -3781,7 +3849,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
       const rec = runWith(HEALTHY_VERSION);
 
-      expect(recordedArgv(rec)).toEqual(leanArgv('claude-opus-4-8', WORKER_AGENTS.memory.effort));
+      expect(recordedArgv(rec)).toEqual(leanArgv('claude-opus-4-8', WORKER_AGENTS.memory.effort, ruleStaged()));
     });
 
     it('takes the shipped value for `default`, without a fallback line', () => {
@@ -3789,20 +3857,20 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
       const rec = runWith(HEALTHY_VERSION);
 
-      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort));
+      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort, ruleStaged()));
       expect(workerLog()).not.toContain('agents.memory');
     });
 
     it('passes the model alone when only a model is set', () => {
       writeAgentModels(homeDir, { memory: { model: 'haiku' } });
 
-      expect(recordedArgv(runWith(HEALTHY_VERSION))).toEqual(leanArgv('haiku', WORKER_AGENTS.memory.effort));
+      expect(recordedArgv(runWith(HEALTHY_VERSION))).toEqual(leanArgv('haiku', WORKER_AGENTS.memory.effort, ruleStaged()));
     });
 
     it('passes the effort alone when only an effort is set', () => {
       writeAgentModels(homeDir, { memory: { effort: 'xhigh' } });
 
-      expect(recordedArgv(runWith(HEALTHY_VERSION))).toEqual(leanArgv(WORKER_AGENTS.memory.model, 'xhigh'));
+      expect(recordedArgv(runWith(HEALTHY_VERSION))).toEqual(leanArgv(WORKER_AGENTS.memory.model, 'xhigh', ruleStaged()));
     });
 
     it('ignores an entry for another agent and a file with no agents.memory', () => {
@@ -3810,7 +3878,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
       const rec = runWith(HEALTHY_VERSION);
 
-      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort));
+      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort, ruleStaged()));
     });
 
     it('treats a value that is not a string as absent', () => {
@@ -3818,7 +3886,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
       const rec = runWith(HEALTHY_VERSION);
 
-      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort));
+      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort, ruleStaged()));
     });
 
     it('treats an unparseable agent-models.json as absent', () => {
@@ -3827,7 +3895,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
       const rec = runWith(HEALTHY_VERSION);
 
-      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort));
+      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort, ruleStaged()));
     });
 
     it('reads agents.memory on the node backend when jq is not installed', () => {
@@ -3851,7 +3919,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
       expect(runWorker(projectDir, homeDir, shimDir, { PATH: nodeOnlyPath }).exitCode).toBe(0);
 
-      expect(recordedArgv(rec)).toEqual(leanArgv('opus', 'low'));
+      expect(recordedArgv(rec)).toEqual(leanArgv('opus', 'low', ruleStaged()));
     });
 
     it('passes the legacy argv the model and no effort', () => {
@@ -3859,7 +3927,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
       const rec = runWith('echo "2.1.285"');
 
-      expect(recordedArgv(rec)).toEqual(legacyArgv('opus'));
+      expect(recordedArgv(rec)).toEqual(legacyArgv('opus', ruleStaged()));
     });
 
     /**
@@ -3900,7 +3968,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
         const rec = runWith(HEALTHY_VERSION, { LC_ALL: 'en_US.UTF-8' });
 
-        expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort));
+        expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort, ruleStaged()));
         const log = workerLog();
         expect(log, 'the model fallback names its field').toMatch(/agents\.memory\.model[^\n]*shipped/);
         expect(log, 'the effort fallback names its field').toMatch(/agents\.memory\.effort[^\n]*shipped/);
@@ -3925,7 +3993,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
       const rec = runWith(HEALTHY_VERSION, { LC_ALL: 'en_US.UTF-8' });
 
-      expect(recordedArgv(rec)).toEqual(leanArgv('opus', WORKER_AGENTS.memory.effort));
+      expect(recordedArgv(rec)).toEqual(leanArgv('opus', WORKER_AGENTS.memory.effort, ruleStaged()));
       expect(workerLog()).toMatch(/agents\.memory\.effort[^\n]*shipped/);
       expect(workerLog()).not.toMatch(/agents\.memory\.model[^\n]*shipped/);
     });
@@ -3935,7 +4003,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
       const rec = runWith(HEALTHY_VERSION);
 
-      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, 'low'));
+      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, 'low', ruleStaged()));
       expect(workerLog()).toMatch(/agents\.memory\.model[^\n]*shipped/);
     });
   });
@@ -3977,6 +4045,378 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
       expect(recordedArgv(rec), 'the -p call happened').toBeDefined();
       expect(fs.readFileSync(memFile, 'utf-8'), 'the stale leftover was not the file swapped in').not.toContain('leftover');
       expectSwapCompleted();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // The worker's write is limited to its staged file
+  // ---------------------------------------------------------------------------
+
+  describe('a CLI below the permission floor gets no run (AC3)', () => {
+    const BELOW_FLOOR: ReadonlyArray<readonly [string, string]> = [
+      ['2.0.999', 'a lower minor with a larger patch'],
+      ['2.1.99', 'a lower patch that is longer as text'],
+      ['2.1.268', 'one patch under the floor'],
+    ];
+
+    it.each(BELOW_FLOOR)('a claude that reports %s (%s) is not run: no -p call, the queue kept, the update line logged', (version) => {
+      const queue = path.join(memoryDir(), '.pending-turns.jsonl');
+      const okFile = path.join(memoryDir(), '.last-refresh-ok');
+      const before = fs.readFileSync(queue);
+
+      const rec = runWith(`echo "${version} (Claude Code)"`);
+
+      expect(fs.existsSync(rec.probeLockFile), 'non-vacuity: the probe ran, so the version was read').toBe(true);
+      expect(recordedArgv(rec), 'no -p call').toBeUndefined();
+      expect(workerLog()).toContain(`SKIP: Claude Code ${version} is older than ${PERMISSION_FLOOR}`);
+      expect(workerLog()).toContain('update Claude Code');
+      expect(fs.readFileSync(queue).equals(before), 'the queue is byte-identical').toBe(true);
+      expect(fs.existsSync(path.join(memoryDir(), '.pending-turns.processing')), 'nothing claimed').toBe(false);
+      expect(fs.existsSync(okFile), 'no success stamp').toBe(false);
+      expect(fs.existsSync(path.join(memoryDir(), '.working-memory.lock')), 'no lock left').toBe(false);
+      expect(fs.readFileSync(path.join(memoryDir(), '.worker-notice-floor'), 'utf-8'), 'a floor notice for the next session start')
+        .toBe(`floor ${version} ${PERMISSION_FLOOR}\n`);
+    });
+
+    it('a claude that exits 2 on the run logs the exit code, keeps the batch and leaves the success stamp alone', () => {
+      const okFile = path.join(memoryDir(), '.last-refresh-ok');
+      fs.writeFileSync(okFile, '');
+      backdateMtime(okFile, 3600);
+      const stamp = fs.statSync(okFile).mtimeMs;
+      const claimed = readQueueBytes(projectDir);
+
+      const rec = runWith(HEALTHY_VERSION, {}, { exitCode: 2, skipStagedWrite: true });
+
+      expect(recordedArgv(rec), 'the -p call happened').toBeDefined();
+      expect(workerLog()).toContain('FAIL: claude -p exited with code 2');
+      expectClaimedRowsPreserved(projectDir, claimed);
+      expect(fs.statSync(okFile).mtimeMs, '.last-refresh-ok not touched').toBe(stamp);
+    });
+
+    it.each(['floor', 'path', 'denied'] as const)('a permitted run clears a %s notice and its shown marker', (reason) => {
+      const pending = path.join(memoryDir(), `.worker-notice-${reason}`);
+      fs.writeFileSync(pending, `${reason} - -\n`);
+      fs.writeFileSync(`${pending}.shown`, `${reason} - -\n`);
+      fs.writeFileSync(path.join(memoryDir(), '.worker-denied-once'), '');
+
+      runWith(HEALTHY_VERSION);
+
+      expect(fs.existsSync(pending), 'the notice').toBe(false);
+      expect(fs.existsSync(`${pending}.shown`), 'its shown marker').toBe(false);
+      expect(fs.existsSync(path.join(memoryDir(), '.worker-denied-once')), 'a run that swapped the memory in resets the denied count')
+        .toBe(false);
+    });
+  });
+
+  describe('the staged path is checked before any run, and the rule and the prompt carry one canonical path (AC5, AC6, AC8)', () => {
+    const extraRoots: string[] = [];
+    afterEach(() => {
+      for (const root of extraRoots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+    });
+
+    /** A project folder (not a git repository) with a seeded queue, removed after the test. */
+    function makeProject(...segments: string[]): { project: string; memory: string } {
+      const base = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s29-proj-'));
+      extraRoots.push(base);
+      const project = path.join(base, ...segments);
+      const memory = path.join(project, '.devflow', 'memory');
+      fs.mkdirSync(memory, { recursive: true });
+      seedQueue(project);
+      return { project, memory };
+    }
+
+    /** The hook runs against `cwd` as one argument, so a folder name is never read as shell syntax. */
+    function runWorkerAt(cwd: string, extraEnv: Record<string, string> = {}): void {
+      spawnSync('bash', [BACKGROUND_UPDATER, cwd], {
+        env: { ...process.env, HOME: homeDir, PATH: fakeClaudePath(shimDir), ...extraEnv },
+        stdio: 'ignore',
+        timeout: LEAN_RUN_TIMEOUT_MS,
+      });
+    }
+
+    /** The one worker log under the test's home, whatever slug the folder name gave it. */
+    function onlyWorkerLog(): string {
+      const logsDir = path.join(homeDir, '.devflow', 'logs');
+      const logs = fs.readdirSync(logsDir)
+        .map(dir => path.join(logsDir, dir, '.background-memory-update.log'))
+        .filter(file => fs.existsSync(file));
+      expect(logs, 'one worker log').toHaveLength(1);
+      return fs.readFileSync(logs[0], 'utf-8');
+    }
+
+    const REFUSED_NAMES: ReadonlyArray<readonly [string, string]> = [
+      ['an asterisk', 'a*b'],
+      ['a question mark', 'a?b'],
+      ['an opening bracket', 'a[b'],
+      ['a closing bracket', 'a]b'],
+      ['a backslash', 'a\\b'],
+      ['an opening parenthesis', 'a(b'],
+      ['a closing parenthesis', 'a)b'],
+      ['a double quote', 'a"b'],
+      ['an opening brace', 'a{b'],
+      ['a closing brace', 'a}b'],
+      ['a newline', 'a\nb'],
+      ['a tab', 'a\tb'],
+    ];
+
+    it.each(REFUSED_NAMES)('a project folder with %s is skipped with no claude run, the queue kept and a path notice left', (_label, name) => {
+      const { project, memory } = makeProject(name);
+      createRecordingClaude(shimDir, memory, HEALTHY_VERSION);
+      const before = fs.readFileSync(path.join(memory, '.pending-turns.jsonl'));
+
+      runWorkerAt(project);
+
+      expect(fs.existsSync(path.join(shimDir, 'argv.txt')), 'no -p call').toBe(false);
+      expect(onlyWorkerLog()).toContain('SKIP: the memory path holds characters the permission rule cannot carry; no LLM run');
+      expect(fs.readFileSync(path.join(memory, '.pending-turns.jsonl')).equals(before), 'the queue is byte-identical').toBe(true);
+      expect(fs.readFileSync(path.join(memory, '.worker-notice-path'), 'utf-8')).toBe('path - -\n');
+    });
+
+    it.each([
+      ['.claude', ['.claude', 'worktrees', 'w']],
+      ['.git', ['.git', 'm']],
+    ] as const)('a project inside a %s folder is skipped with no claude run', (_folder, segments) => {
+      const { project, memory } = makeProject(...segments);
+      createRecordingClaude(shimDir, memory, HEALTHY_VERSION);
+
+      runWorkerAt(project);
+
+      expect(fs.existsSync(path.join(shimDir, 'argv.txt')), 'no -p call').toBe(false);
+      expect(onlyWorkerLog()).toContain('SKIP: the project lies inside a .claude or .git folder, where Claude Code refuses file writes; no LLM run');
+      expect(fs.existsSync(path.join(memory, '.worker-notice-path'))).toBe(true);
+    });
+
+    it('a project folder that holds a space and a comma is run, and the rule carries the path as it is', () => {
+      const { project, memory } = makeProject('proj with space, and a comma');
+      const rec = createRecordingClaude(shimDir, memory, HEALTHY_VERSION);
+
+      runWorkerAt(project);
+
+      const staged = path.join(fs.realpathSync(project), '.devflow', 'memory', 'WORKING-MEMORY.md.new');
+      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort, staged));
+      expect(fs.existsSync(path.join(memory, 'WORKING-MEMORY.md')), 'the memory was written').toBe(true);
+    });
+
+    it('a non-git project reached through a link gets the canonical path in the prompt and in the rule alike', () => {
+      const { project } = makeProject('real');
+      const linked = path.join(path.dirname(project), 'linked');
+      fs.symlinkSync(project, linked);
+      const rec = createRecordingClaude(shimDir, path.join(project, '.devflow', 'memory'), HEALTHY_VERSION);
+
+      runWorkerAt(linked);
+
+      const staged = path.join(fs.realpathSync(project), '.devflow', 'memory', 'WORKING-MEMORY.md.new');
+      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort, staged));
+      const prompt = fs.readFileSync(rec.stdinFile, 'utf-8');
+      expect(prompt, 'the prompt names the canonical staged path').toContain(`write ${staged} using the Write tool`);
+      expect(prompt, 'the link never reaches the prompt').not.toContain(linked);
+      expect(fs.existsSync(path.join(project, '.devflow', 'memory', 'WORKING-MEMORY.md')), 'the memory was written').toBe(true);
+    });
+
+    it('a session started in a subfolder runs claude from the project root (AC8)', () => {
+      const sub = path.join(projectDir, 'packages', 'deep');
+      fs.mkdirSync(sub, { recursive: true });
+      const rec = createRecordingClaude(shimDir, memoryDir(), HEALTHY_VERSION);
+
+      runWorkerAt(sub);
+
+      expect(fs.readFileSync(rec.cwdFile, 'utf-8').trim()).toBe(fs.realpathSync(projectDir));
+      expectSwapCompleted();
+    });
+  });
+
+  describe('the staged path just before the spawn and a folder in its place (AC6)', () => {
+    it('removes an empty folder at the staged path and runs', () => {
+      fs.mkdirSync(stagedFile);
+
+      const rec = runWith(HEALTHY_VERSION);
+
+      expect(recordedArgv(rec), 'the -p call happened').toBeDefined();
+      expectSwapCompleted();
+    });
+
+    it('skips a folder that holds files with the fix-it line and a path notice, and removes nothing', () => {
+      fs.mkdirSync(stagedFile);
+      fs.writeFileSync(path.join(stagedFile, 'inside'), 'keep');
+
+      const rec = runWith(HEALTHY_VERSION);
+
+      expect(recordedArgv(rec), 'no -p call').toBeUndefined();
+      expect(workerLog()).toContain(`SKIP: ${fs.realpathSync(projectDir)}/.devflow/memory/WORKING-MEMORY.md.new is a folder that is not empty; remove it to resume memory updates; no LLM run`);
+      expect(fs.readFileSync(path.join(stagedFile, 'inside'), 'utf-8'), 'the folder keeps its file').toBe('keep');
+      expect(fs.readFileSync(path.join(memoryDir(), '.worker-notice-path'), 'utf-8')).toBe('path - -\n');
+    });
+
+    it('stops with no claude call when a link is planted at the staged path after the lock', () => {
+      const outside = path.join(shimDir, 'outside.txt');
+      fs.writeFileSync(outside, 'keep');
+      // The worker asks git for the head after it claims the queue, which is after it cleared the
+      // staged path and before the spawn: the fake git plants the link there, once.
+      const realGit = resolveOnPath('git', process.env.PATH ?? '/usr/bin:/bin');
+      expect(realGit, 'a real git to hand over to').toBeDefined();
+      const gitShim = path.join(shimDir, 'git');
+      fs.writeFileSync(gitShim, [
+        '#!/bin/bash',
+        `if [ -f '${path.join(memoryDir(), '.pending-turns.processing')}' ] && [ ! -L '${stagedFile}' ]; then ln -s '${outside}' '${stagedFile}'; fi`,
+        `exec '${realGit}' "$@"`,
+        '',
+      ].join('\n'));
+      fs.chmodSync(gitShim, 0o755);
+      const claimed = readQueueBytes(projectDir);
+
+      const rec = runWith(HEALTHY_VERSION);
+
+      expect(recordedArgv(rec), 'no -p call').toBeUndefined();
+      expect(workerLog()).toContain('SKIP: the staged path changed before the run; leaving .processing for recovery');
+      expect(fs.lstatSync(stagedFile).isSymbolicLink(), 'the planted link is left in place').toBe(true);
+      expect(fs.readFileSync(outside, 'utf-8'), 'its target is untouched').toBe('keep');
+      expectClaimedRowsPreserved(projectDir, claimed);
+    });
+  });
+
+  describe('the JSON result is reduced to a fixed line and its file is always deleted (AC7)', () => {
+    let tmpDir: string;
+    beforeEach(() => { tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s29-tmp-')); });
+    afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+    const DENIED = JSON.stringify({
+      type: 'result', subtype: 'success', is_error: false, num_turns: 2, result: 'RESULTTEXTCANARY',
+      permission_denials: [
+        { tool_name: 'Write', tool_input: { file_path: '/elsewhere/one', content: 'BODYCANARY one' } },
+        { tool_name: 'Write', tool_input: { file_path: '/elsewhere/two', content: 'BODYCANARY two' } },
+      ],
+    });
+    const resultFilesLeft = (): string[] => fs.readdirSync(tmpDir).filter(name => name.startsWith('devflow-memory-result.'));
+
+    it('a result with two denials logs the fixed denied line; no input text reaches the log; no temp file remains', () => {
+      const claimed = readQueueBytes(projectDir);
+
+      const rec = runWith(HEALTHY_VERSION, { TMPDIR: tmpDir }, { resultJson: DENIED, skipStagedWrite: true });
+
+      const log = workerLog();
+      expect(fs.readFileSync(rec.tmpListFile, 'utf-8'), 'non-vacuity: the result file existed during the run').toContain('devflow-memory-result.');
+      expect(log).toContain('Result: success, is_error=false, 2 turn(s), 2 permission denial(s)');
+      expect(log).toContain('FAIL: Write denied by permission rule (2) — leaving .processing for recovery');
+      for (const canary of ['BODYCANARY', 'RESULTTEXTCANARY', '/elsewhere']) {
+        expect(log, canary).not.toContain(canary);
+      }
+      expect(resultFilesLeft(), 'the temp result file is deleted').toEqual([]);
+      expectClaimedRowsPreserved(projectDir, claimed);
+      expect(fs.existsSync(path.join(memoryDir(), '.last-refresh-ok')), 'no success stamp').toBe(false);
+    });
+
+    it('a lean run that ends with exit 1 after denials logs the denied line with the exit code', () => {
+      runWith(HEALTHY_VERSION, { TMPDIR: tmpDir }, { resultJson: DENIED, skipStagedWrite: true, exitCode: 1 });
+
+      const log = workerLog();
+      expect(log).toContain('FAIL: Write denied by permission rule (2), exit 1');
+      expect(log).not.toContain('FAIL: claude -p exited with code');
+      expect(log).not.toContain('BODYCANARY');
+      expect(resultFilesLeft()).toEqual([]);
+    });
+
+    it('a result with the error flag set logs the flag and the API status as digits only', () => {
+      runWith(HEALTHY_VERSION, { TMPDIR: tmpDir }, {
+        resultJson: JSON.stringify({
+          subtype: 'error_during_execution', is_error: true, api_error_status: 429, num_turns: 1,
+          permission_denials: [], result: 'RESULTTEXTCANARY',
+        }),
+        skipStagedWrite: true,
+      });
+
+      const log = workerLog();
+      expect(log).toContain('Result: error_during_execution, is_error=true, 1 turn(s), 0 permission denial(s), api_status=429');
+      expect(log).toContain('FAIL: verification failed — leaving .processing for recovery');
+      expect(log).not.toContain('RESULTTEXTCANARY');
+    });
+
+    it('an API status that is not digits is left out of the line', () => {
+      runWith(HEALTHY_VERSION, { TMPDIR: tmpDir }, {
+        resultJson: JSON.stringify({ subtype: 'success', is_error: true, api_error_status: 'FORBIDDEN;x', num_turns: 1, permission_denials: [] }),
+        skipStagedWrite: true,
+      });
+
+      expect(workerLog()).toMatch(/Result: success, is_error=true, 1 turn\(s\), 0 permission denial\(s\)\n/);
+    });
+
+    it('a result without a denial list logs unknown, never 0, and ends in the generic failure line', () => {
+      runWith(HEALTHY_VERSION, { TMPDIR: tmpDir }, {
+        resultJson: JSON.stringify({ subtype: 'success', is_error: false, num_turns: 1 }),
+        skipStagedWrite: true,
+      });
+
+      const log = workerLog();
+      expect(log).toContain('Result: success, is_error=false, 1 turn(s), unknown permission denial(s)');
+      expect(log).toContain('FAIL: verification failed — leaving .processing for recovery');
+      expect(log).not.toContain('Write denied');
+    });
+
+    it('a run that prints no result, or one that is not JSON, logs a distinct not-reported line, then the missing-file warning', () => {
+      runWith(HEALTHY_VERSION, { TMPDIR: tmpDir }, { skipStagedWrite: true });
+      const empty = workerLog();
+      expect(empty).toContain('Result: not reported (empty)');
+      expect(empty).toContain('WARN: staged file missing or empty after claude -p run');
+      expect(empty).toContain('FAIL: verification failed — leaving .processing for recovery');
+
+      fs.rmSync(path.join(memoryDir(), '.pending-turns.processing'), { force: true });
+      seedQueue(projectDir);
+      fs.rmSync(workerLogPath(projectDir, homeDir));
+      runWith(HEALTHY_VERSION, { TMPDIR: tmpDir }, { resultJson: 'this is not json', skipStagedWrite: true });
+      const garbled = workerLog();
+      expect(garbled).toContain('Result: not reported (unparseable)');
+      expect(garbled).toContain('WARN: staged file missing or empty after claude -p run');
+      expect(resultFilesLeft()).toEqual([]);
+    });
+
+    it('a watchdog kill deletes the temp result file and logs the kill', () => {
+      const claimed = readQueueBytes(projectDir);
+
+      const rec = runWith(HEALTHY_VERSION, { TMPDIR: tmpDir, DEVFLOW_BG_WATCHDOG_SECS: '2' }, { hangSecs: 300, skipStagedWrite: true });
+
+      expect(fs.readFileSync(rec.tmpListFile, 'utf-8'), 'non-vacuity: the result file existed during the run').toContain('devflow-memory-result.');
+      expect(workerLog()).toContain('FAIL: claude -p killed by watchdog after 2s');
+      expect(resultFilesLeft(), 'the temp result file is deleted').toEqual([]);
+      expectClaimedRowsPreserved(projectDir, claimed);
+    });
+
+    it('a non-zero exit deletes the temp result file and logs the exit code', () => {
+      const rec = runWith(HEALTHY_VERSION, { TMPDIR: tmpDir }, { exitCode: 2, skipStagedWrite: true });
+
+      expect(fs.readFileSync(rec.tmpListFile, 'utf-8'), 'non-vacuity: the result file existed during the run').toContain('devflow-memory-result.');
+      expect(workerLog()).toContain('FAIL: claude -p exited with code 2');
+      expect(resultFilesLeft()).toEqual([]);
+    });
+
+    it('a run that swaps the memory in leaves no temp result file either', () => {
+      runWith(HEALTHY_VERSION, { TMPDIR: tmpDir });
+
+      expectSwapCompleted();
+      expect(resultFilesLeft()).toEqual([]);
+    });
+
+    it('goes on without a count when the temp file cannot be made, and says so', () => {
+      runWith(HEALTHY_VERSION, { TMPDIR: path.join(tmpDir, 'absent') });
+
+      expect(workerLog()).toContain('Result not captured: no temporary file could be created');
+      expectSwapCompleted();
+    });
+  });
+
+  describe('a project root the spawn cannot enter (AC3)', () => {
+    it('logs its own line and starts no claude run', () => {
+      const marker = path.join(shimDir, 'root-unreachable');
+      // `cd` fails once the marker exists; the fake's --version probe, which runs before the
+      // spawn, creates it. The hook's own cd to the project root is then the one that fails.
+      const bashEnv = path.join(shimDir, 'bash-env.sh');
+      fs.writeFileSync(bashEnv, `cd() { if [ -e '${marker}' ]; then return 1; fi; builtin cd "$@"; }\n`);
+      const claimed = readQueueBytes(projectDir);
+
+      const rec = runWith(`: > '${marker}'; ${HEALTHY_VERSION}`, { BASH_ENV: bashEnv });
+
+      expect(fs.existsSync(marker), 'non-vacuity: the fake cd was armed').toBe(true);
+      expect(recordedArgv(rec), 'no -p call').toBeUndefined();
+      expect(workerLog()).toContain('FAIL: could not enter the project root');
+      expectClaimedRowsPreserved(projectDir, claimed);
     });
   });
 });

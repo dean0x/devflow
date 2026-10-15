@@ -528,6 +528,28 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
       'an explicit Bash timeout, and the new block\'s prohibition is worded without any of the ' +
       'registered spellings.',
   })),
+  // -------------------------------------------------------------------------
+  // The memory worker's write is limited to its staged file.
+  //
+  // The background worker runs `claude -p` with `--permission-mode dontAsk`, user settings
+  // only and one `Edit` rule for its staged file, passed by `--settings`. No hook script
+  // names a permission skip, a bypass mode or an allow-list flag, so the limit cannot be
+  // widened by a flag that comes back. Scoped to the hook scripts, where the spawn lives:
+  // other trees (the integration test helpers, docs on what the platform offers) may spell them.
+  // -------------------------------------------------------------------------
+  ...([
+    ['--dangerously-skip-permissions', 'the permission skip flag'],
+    ['bypassPermissions', 'the bypass permission mode'],
+    ['--allow-dangerously-skip-permissions', 'the flag that makes the skip available'],
+    ['--allowedTools', 'the allow-list flag, which pre-approves tools without limiting a path'],
+  ] as const).map(([literal, what]): RetiredEntry => ({
+    literal,
+    removedFrom: 'src/assets/scripts/hooks/background-memory-update (the worker spawn)',
+    scope: ['src/assets/scripts/hooks/'],
+    justification:
+      `No hook script passes ${what}. The memory worker's write is limited to its staged file by ` +
+      '`--permission-mode dontAsk`, user settings only and one Edit rule passed by `--settings`.',
+  })),
   {
     literal: 'Cap: 50 entries per file',
     removedFrom: 'docs/reference/file-organization.md',
