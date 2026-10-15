@@ -526,6 +526,10 @@ export function collectSecondCycleDefects(body: string, ref: string): string[] {
 // 6. The summary
 // ---------------------------------------------------------------------------
 
+/** The Merge Rules condition for a review with no security report. */
+const NO_SECURITY_REPORT = /security focus[^|]*no report/i
+const mergeRulesSection = (syn: string): string => sectionBetween(syn, '**Merge Rules', '**Output:**') ?? ''
+
 /** What a review finds in blocking, and which focuses its FOCUSES input lists. */
 interface MergeFacts { critical: number; high: number; medium: number; focuses: readonly string[] }
 
@@ -539,7 +543,7 @@ function mergeRecommendationWithoutSecurityReport(rows: string[][], facts: Merge
     if (condition === 'Any HIGH in blocking') return facts.high > 0
     if (condition === 'Only MEDIUM in blocking') return facts.medium > 0
     if (condition === 'No blocking issues') return facts.critical + facts.high + facts.medium === 0
-    if (/security focus[^|]*no report/i.test(condition)) return !/plan|FOCUSES/i.test(condition) || facts.focuses.includes('security')
+    if (NO_SECURITY_REPORT.test(condition)) return !/plan|FOCUSES/i.test(condition) || facts.focuses.includes('security')
     return undefined
   }
   for (const [condition, outcome] of rows) {
@@ -557,9 +561,9 @@ function mergeRecommendationWithoutSecurityReport(rows: string[][], facts: Merge
  */
 export function collectApprovedWithoutSecurityDefects(syn: string): string[] {
   const out: string[] = []
-  const section = sectionBetween(syn, '**Merge Rules', '**Output:**') ?? ''
+  const section = mergeRulesSection(syn)
   const rows = tableRows(section).filter(r => r.length >= 2 && r[0] !== 'Condition')
-  const security = rows.findIndex(r => /security focus[^|]*no report/i.test(r[0]))
+  const security = rows.findIndex(r => NO_SECURITY_REPORT.test(r[0]))
   if (!/first matching row/i.test(section)) out.push('the Merge Rules do not say that the first matching row applies')
   if (security === -1) return out
   rows.forEach((row, i) => {
@@ -608,12 +612,12 @@ export function collectSummaryDefects(cr: string, syn: string): string[] {
     if (merge === -1 || gate > merge) out.push('the Gate level line does not come before the Merge Recommendation')
     if (!lines[gate].includes('(no report)')) out.push('the Gate level line does not mark a focus with no report')
   }
-  const ruleRows = tableRows(sectionBetween(syn, '**Merge Rules', '**Output:**') ?? '').filter(r => r[0] !== 'Condition')
+  const ruleRows = tableRows(mergeRulesSection(syn)).filter(r => r[0] !== 'Condition')
   const outcomes = unique(ruleRows.map(r => r[1])).join(' | ')
   const slot = /^## Merge Recommendation: \{(.*)\}$/m.exec(template)?.[1]
   if (slot !== outcomes) out.push(`the Merge Recommendation slot is "${slot ?? '(none)'}", the Merge Rules give "${outcomes}"`)
   if (!/^\{Max 5 brief items /m.test(template)) out.push('the Suggestions guidance lost its limit of 5 brief items')
-  const rule = ruleRows.find(r => /security focus[^|]*no report/i.test(r[0]))
+  const rule = ruleRows.find(r => NO_SECURITY_REPORT.test(r[0]))
   if (rule === undefined) out.push('the Merge Rules have no row for the security focus with no report')
   else if (rule[1].startsWith('APPROVED')) out.push(`the security focus with no report gives "${rule[1]}"`)
   out.push(...collectApprovedWithoutSecurityDefects(syn))
@@ -926,7 +930,7 @@ describe('the summary names the level and the focuses (AC-11)', () => {
       .toContain('the Merge Rules have no row for the security focus with no report')
     expect(collectSummaryDefects(ON, seed(SYN, SECURITY_ROW, '| Security focus has no report (it runs in every review) | APPROVED WITH COMMENTS |')))
       .toContain('the security focus with no report gives "APPROVED WITH COMMENTS"')
-    expect(collectSummaryDefects(ON, seed(SYN, /^(\| Security focus has no report .*\n)(.*\n)(\| No blocking issues \| APPROVED \|)$/m, '$2$3\n$1'.trimEnd())))
+    expect(collectSummaryDefects(ON, seed(SYN, /^(\| Security focus has no report .*\n)(.*\n)(\| No blocking issues \| APPROVED \|)$/m, '$2$3\n$1')))
       .toContain('the "No blocking issues" row gives "APPROVED" before the security row, so APPROVED is reachable with no security report')
     expect(collectSummaryDefects(ON, seed(SYN, ' (first matching row applies)', '')))
       .toContain('the Merge Rules do not say that the first matching row applies')
