@@ -1325,12 +1325,14 @@ describe('S16: queue-claim lost-race — mv failure takes SKIP path, queue prese
 // json-parse sets _JSON_AVAILABLE=false when it finds neither. The worker then
 // stops directly after its exit trap is set: it logs SKIP, writes the skip Run line and
 // exits 0. It reads, claims and merges nothing, so the queue and any leftover
-// .processing batch stay byte for byte as they were, no lock is taken, and claude is
-// never called (the version probe is a call too).
+// .processing batch stay byte for byte as they were, a lock that was there stays as it
+// was (a stale one is not broken), and claude is never called (the version probe is a
+// call too).
 //
 // The PATH is a tool farm (buildToolFarm): a bare /bin on the PATH finds jq on ubuntu.
 // The test asserts that the full PATH resolves neither jq nor node, so the case runs
-// without a parser on both CI systems.
+// without a parser on any machine. CI runs it twice: on ubuntu in build-and-test, and on
+// macOS under bash 3.2 in the macos-bash32-hooks job (its memory worker parser step).
 // =============================================================================
 describe('S17: no jq and no node → SKIP, the queue and the batch are kept, claude is never called (#523)', () => {
   let projectDir: string;
@@ -1339,6 +1341,8 @@ describe('S17: no jq and no node → SKIP, the queue and the batch are kept, cla
   let memoryDir: string;
   let queueFile: string;
   let processingFile: string;
+  let lockDir: string;
+  let lockMtimeMs: number;
 
   beforeEach(() => {
     projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s17-'));
@@ -1351,6 +1355,12 @@ describe('S17: no jq and no node → SKIP, the queue and the batch are kept, cla
     fs.mkdirSync(path.join(projectDir, '.devflow', 'dream'), { recursive: true });
     initGitRepo(projectDir);
     seedQueue(projectDir);
+    // A stale lock (older than the worker's 300 s threshold). A run that got past the
+    // no-parser stop would break it, and the exit trap would never restore it.
+    lockDir = path.join(memoryDir, '.working-memory.lock');
+    fs.mkdirSync(lockDir);
+    backdateMtime(lockDir, 600);
+    lockMtimeMs = fs.statSync(lockDir).mtimeMs;
   });
 
   afterEach(() => {
@@ -1381,7 +1391,8 @@ describe('S17: no jq and no node → SKIP, the queue and the batch are kept, cla
     expect(result.log).toContain('SKIP: neither jq nor node on PATH');
     expect(result.log).toContain('Run: cli=unknown argv=none result=skip denials=n/a removed=none');
     expect(result.log, 'the worker stopped before it read the batch').not.toContain('No parseable turns');
-    expect(fs.existsSync(path.join(memoryDir, '.working-memory.lock')), 'no lock').toBe(false);
+    expect(fs.existsSync(lockDir), 'the stale lock is not touched').toBe(true);
+    expect(fs.statSync(lockDir).mtimeMs, 'the stale lock keeps its mtime').toBe(lockMtimeMs);
     expect(fs.existsSync(path.join(memoryDir, '.last-refresh-ok')), 'no success marker').toBe(false);
     expect(fs.existsSync(path.join(memoryDir, 'WORKING-MEMORY.md')), 'no memory written').toBe(false);
     expect(fs.existsSync(path.join(memoryDir, 'WORKING-MEMORY.md.new')), 'no staged file').toBe(false);
@@ -3889,16 +3900,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
       writeAgentModels(homeDir, { memory: { model: 'opus', effort: 'low' } });
       // An additive farm, never a subtraction (jq lives in /usr/bin on macOS and in
       // /bin on merged-usr Linux): every tool the worker calls, node, and no jq.
-      const farm = path.join(shimDir, 'node-only-bin');
-      fs.mkdirSync(farm);
-      for (const tool of [
-        'bash', 'cat', 'chmod', 'cksum', 'cp', 'cut', 'date', 'dirname', 'echo', 'find', 'git', 'grep', 'head', 'kill', 'ls',
-        'mkdir', 'mktemp', 'mv', 'nohup', 'rm', 'rmdir', 'sed', 'sleep', 'stat', 'tail', 'touch', 'tr', 'wc',
-      ]) {
-        const found = ['/usr/bin', '/bin'].map(dir => path.join(dir, tool)).find(candidate => fs.existsSync(candidate));
-        if (found !== undefined) fs.symlinkSync(found, path.join(farm, tool));
-      }
-      fs.symlinkSync(process.execPath, path.join(farm, 'node'));
+      const farm = buildToolFarm([], { node: process.execPath });
       const nodeOnlyPath = `${shimDir}:${farm}`;
       expect(resolveOnPath('jq', nodeOnlyPath), 'non-vacuity: no jq on this PATH').toBeUndefined();
       expect(resolveOnPath('node', nodeOnlyPath), 'node is on this PATH').toBe(path.join(farm, 'node'));
@@ -4778,7 +4780,7 @@ describe('S30: a notice from the memory worker is shown once at session start (A
 });
 
 // =============================================================================
-// S31 — One malformed queue line drops only itself (#528)
+// S31 — One malformed queue line drops only that line (#528)
 //
 // The worker parses each queue line alone: jq -R with fromjson, node line by line. A line
 // that is not JSON is skipped, and the log states how many lines of the read window were.
@@ -4790,7 +4792,16 @@ describe('S30: a notice from the memory worker is shown once at session start (A
 // =============================================================================
 const HAS_JQ = spawnSync('jq', ['--version'], { encoding: 'utf8' }).status === 0;
 
-describe('S31: a malformed queue line drops only itself (#528)', { timeout: LEAN_RUN_TIMEOUT_MS }, () => {
+// The jq cases of S31 to S33 skip when jq is missing. On CI a missing jq fails this test
+// instead, so the per-line parse that keeps readable turns on the jq path is never
+// skipped while the run stays green.
+describe('S31: the jq backend cases cannot skip silently on CI (#528)', () => {
+  it.runIf(Boolean(process.env.CI))('jq is installed when CI is set', () => {
+    expect(HAS_JQ, 'jq must be on the PATH of a CI run').toBe(true);
+  });
+});
+
+describe('S31: a malformed queue line drops only that line (#528)', { timeout: LEAN_RUN_TIMEOUT_MS }, () => {
   let projectDir: string;
   let homeDir: string;
   let shimDir: string;
@@ -4857,7 +4868,7 @@ describe('S31: a malformed queue line drops only itself (#528)', { timeout: LEAN
       expect(prompt).toContain('BATCH-ANSWER');
     });
 
-    it('b: a malformed middle line drops only itself, and the rows after it reach the prompt', () => {
+    it('b: a malformed middle line drops only that line, and the rows after it reach the prompt', () => {
       writeLines(queueFile, [
         row('user', 'EARLY-PROMPT'),
         row('assistant', 'EARLY-ANSWER'),
@@ -4884,7 +4895,9 @@ describe('S31: a malformed queue line drops only itself (#528)', { timeout: LEAN
       const { exitCode } = runWorker(projectDir, homeDir, shimDir);
 
       expect(exitCode).toBe(0);
-      expect(readLog()).toContain('No parseable turns');
+      const log = readLog();
+      expect(log).toContain('Skipped 3 queue line(s) that hold no readable turn');
+      expect(log).toContain('No parseable turns');
       expect(fs.existsSync(processingFile), 'the batch is removed').toBe(false);
       expect(fs.existsSync(stdinCapture), 'no LLM run started').toBe(false);
     });
@@ -4929,9 +4942,23 @@ describe('S31: a malformed queue line drops only itself (#528)', { timeout: LEAN
     const { exitCode } = runWorker(projectDir, homeDir, shimDir, { PATH: fullPath });
 
     expect(exitCode).toBe(0);
-    expect(readLog()).toContain('No parseable turns');
+    const log = readLog();
+    expect(log).toContain('Skipped 3 queue line(s) that hold no readable turn');
+    expect(log).toContain('No parseable turns');
     expect(fs.existsSync(processingFile), 'the batch is removed').toBe(false);
     expect(fs.existsSync(stdinCapture), 'no LLM run started').toBe(false);
+  });
+
+  it('g: a queue of readable turns logs no skipped-line text', () => {
+    writeLines(queueFile, [row('user', 'CLEAN-PROMPT'), row('assistant', 'CLEAN-ANSWER')]);
+
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+
+    expect(exitCode).toBe(0);
+    const log = readLog();
+    expect(log).toContain('Built 1 turns');
+    expect(log).not.toContain('queue line(s) that hold no readable turn');
+    expect(fs.readFileSync(stdinCapture, 'utf-8')).toContain('CLEAN-PROMPT');
   });
 });
 
