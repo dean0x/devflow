@@ -150,6 +150,13 @@ function nameMatches(file: string, pattern: string): boolean {
   return re.test(file)
 }
 
+/**
+ * Whether `text` names a language focus as a whole name, so "untrusted" does not name `rust`. A bare "go" is an
+ * ordinary word, so `go` counts only inside backticks.
+ */
+const namesLanguageFocus = (text: string): boolean =>
+  LANGUAGE.some(name => new RegExp(name === 'go' ? '`go`' : `(?<![\\w-])${name}(?![\\w-])`).test(text))
+
 // ---------------------------------------------------------------------------
 // 1. The level reference
 // ---------------------------------------------------------------------------
@@ -404,7 +411,7 @@ export function collectGateLevelBlockDefects(body: string): string[] {
   const stampAt = body.indexOf('A language focus is spawned only when its file-type condition above fires')
   if (stampAt === -1 || body.indexOf('CLAUDE_CONFIG_DIR') < stampAt) out.push('the directory read does not come after the stamp paragraph')
   if (block.split('\n').some(l => l.startsWith('Installed language focuses: '))) out.push('the block carries a second stamp line')
-  if (LANGUAGE.some(l => l !== 'go' && block.includes(l)) || block.includes('`go`')) out.push('the block restates a language focus list')
+  if (namesLanguageFocus(block)) out.push('the block restates a language focus list')
   const produces = sectionBetween(body, '#### Step 0b:', '#### Step 0b-ii:') ?? ''
   if (!/\*\*Produces:\*\* [^\n]*GATE_LEVEL/.test(produces)) out.push('Step 0b Produces does not list GATE_LEVEL')
   const phase1 = sectionBetween(body, '### Phase 1: Analyze Changed Files', '#### Step 1.1:') ?? ''
@@ -818,6 +825,19 @@ describe('the command carries the gate-level block, outside the learning arms (A
     const inArm = seed(seed(SOURCE, '#### Step 1.2b: Narrow by gate level', '<!-- learning:on -->\n#### Step 1.2b: Narrow by gate level'),
       '#### Step 1.3: Write the diff files', '<!-- learning:end -->\n#### Step 1.3: Write the diff files')
     expect(collectBlockArmDefects(inArm)).toEqual(['the gate-level block sits inside a learning:on arm'])
+  })
+
+  it('the language-focus check reads whole names: a word that contains a name passes, and every real name is reported', () => {
+    const anchor = 'Compliance keeps the trigger above at every level.'
+    const withSentence = (sentence: string): string[] => collectGateLevelBlockDefects(seed(ON, anchor, `${anchor} ${sentence}`))
+    for (const word of ['untrusted', 'javascript', 'reactive', 'pythonic', 'inaccessibility']) {
+      expect(withSentence(`The ${word} table is ignored.`), `"${word}" is not a focus name`).toEqual([])
+    }
+    for (const name of LANGUAGE) {
+      const written = name === 'go' ? '`go`' : name
+      expect(withSentence(`It also drops ${written}.`), `"${written}" is a focus name`).toContain('the block restates a language focus list')
+      expect(withSentence(`It also drops \`${name}\`.`), `"\`${name}\`" is a focus name`).toContain('the block restates a language focus list')
+    }
   })
 })
 
