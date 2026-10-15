@@ -56,7 +56,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import * as os from 'os'
 import * as path from 'path'
 
-import { ROOT, SANCTIONED_RESOLUTION, compactDirectiveFrom, compactDirectiveText, requireDistFile, requireDistFiles, resolveAgentSource, resolveAllAgents, resolveLearningOffSource, sectionBetween, walkFiles } from '../helpers.js'
+import { RETIRED_INLINE_EXPANSION, ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, compactDirectiveFrom, compactDirectiveText, requireDistFile, requireDistFiles, resolveAgentSource, resolveAllAgents, resolveLearningOffSource, sectionBetween, walkFiles } from '../helpers.js'
 import { DEVFLOW_PLUGINS, buildScopedSkillsMap, getAllAgentNames } from '../../src/core/plugins.js'
 import { installViaFileCopy } from '../../src/targets/claude-code/installer.js'
 import { getClaudeDirectory } from '../../src/targets/claude-code/claude-paths.js'
@@ -91,9 +91,6 @@ const PATH_UNDER_HOME_CLAUDE = /(?:~|\$HOME|\$\{HOME\})\/\.claude\/[^\s`'")]/
 
 /** The home Claude directory itself, not followed by more of a name. */
 const HOME_CLAUDE_DIR = /(?:~|\$HOME|\$\{HOME\})\/\.claude(?![\w.-])/
-
-/** The sanctioned line followed by the `printf` that shows the directory it resolved. */
-const SANCTIONED_RESOLUTION_PRINT = `${SANCTIONED_RESOLUTION} printf '%s\\n' "$d"`
 
 /** A devflow install path: the part a root must directly precede. */
 const DEVFLOW_INSTALL_PATH = /skills\/devflow:|commands\/devflow\/|agents\/devflow\/|rules\/devflow/g
@@ -545,12 +542,11 @@ describe('no prompt reaches the Claude directory outside the CLAUDE_CONFIG_DIR r
   })
 
   it('red probes: every form of the retired inline expansion, in the shapes a read site takes, is reported', () => {
-    const retired = '${CLAUDE_CONFIG_DIR:-$HOME/.claude}'
     const probes = [
-      `Read \`${retired}/skills/devflow:agent-references/SKILL.md\` with the Read tool.`,
-      `resolve \`${retired}\` in Bash`,
-      `echo "${retired}/skills/devflow:agent-references/references/synthesize"`,
-      `cd "<project root>" && find "${retired}/rules/devflow" -name '*.md'`,
+      `Read \`${RETIRED_INLINE_EXPANSION}/skills/devflow:agent-references/SKILL.md\` with the Read tool.`,
+      `resolve \`${RETIRED_INLINE_EXPANSION}\` in Bash`,
+      `echo "${RETIRED_INLINE_EXPANSION}/skills/devflow:agent-references/references/synthesize"`,
+      `cd "<project root>" && find "${RETIRED_INLINE_EXPANSION}/rules/devflow" -name '*.md'`,
       '${CLAUDE_CONFIG_DIR-/opt/claude}',
       '${CLAUDE_CONFIG_DIR:=/opt/claude}',
       '$CLAUDE_CONFIG_DIR/skills/devflow:agent-references',
@@ -622,7 +618,7 @@ describe('no prompt reaches the Claude directory outside the CLAUDE_CONFIG_DIR r
   })
 
   it('the corpus classes are live: the old form seeded into the sentinel of each class is reported against that file', () => {
-    const retired = '${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/devflow:agent-references'
+    const retired = `${RETIRED_INLINE_EXPANSION}/skills/devflow:agent-references`
     for (const { label, sentinel } of surface()) {
       const defects = collectClaudeDirDefects(seeded(sentinel, retired))
       expect(filesOf(defects), `${label}: the old form seeded into ${sentinel} is not reported against it`).toContain(sentinel)

@@ -5,7 +5,7 @@ import { createRequire } from 'module';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { AGENT_CONFIG } from './fixtures/agent-config.js';
-import { readAgentReference, SANCTIONED_RESOLUTION } from './helpers.js';
+import { readAgentReference, RETIRED_INLINE_EXPANSION, SANCTIONED_RESOLUTION } from './helpers.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -420,7 +420,7 @@ describe('curate agent', () => {
       it('resolves the config directory the way the rule-file listing does', () => {
         expect(content).toContain(SANCTIONED_RESOLUTION);
         expect(content.split(SANCTIONED_RESOLUTION).length - 1, 'one sanctioned line at each of the two read sites').toBe(2);
-        expect(content).not.toContain('${CLAUDE_CONFIG_DIR:-$HOME/.claude}');
+        expect(content).not.toContain(RETIRED_INLINE_EXPANSION);
         expect(content).toContain(MAINTAIN_PATH_TEXT);
       });
 

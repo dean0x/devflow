@@ -1849,6 +1849,12 @@ export function tableRows(section: string): string[][] {
 /** The one shell line that resolves the Claude directory: `CLAUDE_CONFIG_DIR` when absolute, else `$HOME/.claude`. */
 export const SANCTIONED_RESOLUTION = 'd="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac;'
 
+/** The sanctioned resolution line followed by the `printf` that shows the directory it resolved. */
+export const SANCTIONED_RESOLUTION_PRINT = `${SANCTIONED_RESOLUTION} printf '%s\\n' "$d"`
+
+/** The inline expansion that the sanctioned resolution line replaced; no prompt may carry it. */
+export const RETIRED_INLINE_EXPANSION = '${CLAUDE_CONFIG_DIR:-$HOME/.claude}'
+
 const COMPACT_SECTION_RE = /^\s*COMPACT_SECTION='([^']*)'$/gm
 
 /** The compaction resume directive that a session-start hook source assigns to `COMPACT_SECTION`; throws unless there is exactly one assignment. */
