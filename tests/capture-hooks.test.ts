@@ -132,6 +132,30 @@ function workerLogPath(projectDir: string, homeDir: string, hookName: string): s
   return path.join(homeDir, '.devflow', 'logs', slug, `.${hookName}.log`);
 }
 
+/**
+ * The lines that end a background-memory-update run: the outcome of a run that reached
+ * claude (drained, retained, failed), and the reason a run stopped before it (skipped,
+ * aborted). The worker's first line, "Starting", does not end a run.
+ */
+const WORKER_FINAL_LINE =
+  /SUCCESS: queue drained|CONFLICT: queue retained|FAIL: (?:verification failed|claude -p)|SKIP:|ABORT:/;
+
+/**
+ * Wait for the detached worker to FINISH, not to start. It keeps writing into the project
+ * folder (the probe, the lock, the queue claim, the staged swap) long after its first log
+ * line, so a test that returned at "Starting" would have afterEach remove the folder under
+ * it and leave an orphan that retries the lock for up to 90 s. Fails with the worker log
+ * when no final line shows up. Bounded: 4000ms × ≤3 attempts, so a test that calls this
+ * allows itself a 15000ms it-timeout.
+ */
+async function waitForWorkerToFinish(logFile: string): Promise<void> {
+  const finished = await pollForTerminalLine(logFile, WORKER_FINAL_LINE, 4000, 3);
+  expect(
+    finished,
+    `the detached worker logged no final line within 12 s:\n${fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8') : '(no log)'}`,
+  ).toBe(true);
+}
+
 // =============================================================================
 // capture-prompt
 // =============================================================================
@@ -500,7 +524,7 @@ describe('memory-worker', () => {
     expect(fs.statSync(triggerFile).mtimeMs).toBe(beforeMtime);
   });
 
-  it('touch-before-spawn: stale trigger -> trigger touched, worker spawned', () => {
+  it('touch-before-spawn: stale trigger -> trigger touched, worker spawned', async () => {
     const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
     createFakeClaudeShim(shimDir, memFile);
     const triggerFile = path.join(projectDir, '.devflow', 'memory', '.working-memory-last-trigger');
@@ -510,7 +534,8 @@ describe('memory-worker', () => {
     runHookWithPath(MEMORY_WORKER, { cwd: projectDir }, homeDir, shimDir);
 
     expect(fs.statSync(triggerFile).mtimeMs).toBeGreaterThan(Date.now() - 15000);
-  });
+    await waitForWorkerToFinish(workerLogPath(projectDir, homeDir, 'background-memory-update'));
+  }, 15000);
 
   it('spawn happens: worker log shows Starting (fake claude shim on PATH)', async () => {
     const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
@@ -525,11 +550,10 @@ describe('memory-worker', () => {
 
     runHookWithPath(MEMORY_WORKER, { cwd: projectDir }, homeDir, shimDir);
 
-    // Poll for the detached worker's log to contain a terminal line.
+    // Wait for the detached worker's final log line, then check it also logged its start.
     // Bounded: 4000ms per attempt, ≤3 attempts total, explicit 15000ms it-timeout.
     const logFile = workerLogPath(projectDir, homeDir, 'background-memory-update');
-    const found = await pollForTerminalLine(logFile, 'Starting (CWD=', 4000, 3);
-    expect(found).toBe(true);
+    await waitForWorkerToFinish(logFile);
     expect(fs.readFileSync(logFile, 'utf-8')).toContain('Starting (CWD=');
   }, 15000);
 
@@ -577,7 +601,7 @@ describe('memory-worker', () => {
     expect(age).toBeGreaterThan(590 * 1000);
   });
 
-  it('a stale repo config memory:false does not switch the worker off', () => {
+  it('a stale repo config memory:false does not switch the worker off', async () => {
     writeFeatureConfig(projectDir, { memory: false });
     writeManifestFeatures(path.join(homeDir, '.devflow'), { memory: true });
     createFakeClaudeShim(shimDir, path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md'));
@@ -588,9 +612,10 @@ describe('memory-worker', () => {
     runHookWithPath(MEMORY_WORKER, { cwd: projectDir }, homeDir, shimDir);
 
     expect(fs.statSync(triggerFile).mtimeMs).toBeGreaterThan(Date.now() - 15000);
-  });
+    await waitForWorkerToFinish(workerLogPath(projectDir, homeDir, 'background-memory-update'));
+  }, 15000);
 
-  it('a manifest without the memory key leaves the worker on (fail-open)', () => {
+  it('a manifest without the memory key leaves the worker on (fail-open)', async () => {
     writeManifestFeatures(path.join(homeDir, '.devflow'), { learning: false });
     createFakeClaudeShim(shimDir, path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md'));
     const triggerFile = path.join(projectDir, '.devflow', 'memory', '.working-memory-last-trigger');
@@ -600,7 +625,8 @@ describe('memory-worker', () => {
     runHookWithPath(MEMORY_WORKER, { cwd: projectDir }, homeDir, shimDir);
 
     expect(fs.statSync(triggerFile).mtimeMs).toBeGreaterThan(Date.now() - 15000);
-  });
+    await waitForWorkerToFinish(workerLogPath(projectDir, homeDir, 'background-memory-update'));
+  }, 15000);
 
   it('hands the spawned worker the machine-root manifest, not one under the project .devflow or an exported DEVFLOW_DIR', async () => {
     // The worker re-reads the switch after spawn against the manifest path it is
@@ -623,7 +649,11 @@ describe('memory-worker', () => {
 
       // Bounded: 4000ms per attempt, ≤3 attempts total, explicit 15000ms it-timeout.
       expect(await pollForTerminalLine(invokedMarker, 'invoked', 4000, 3)).toBe(true);
-      const log = fs.readFileSync(workerLogPath(projectDir, homeDir, 'background-memory-update'), 'utf-8');
+      // The marker is written when claude runs; the worker logs its outcome after that run
+      // exits, and it must finish before afterEach removes the project folder.
+      const logFile = workerLogPath(projectDir, homeDir, 'background-memory-update');
+      await waitForWorkerToFinish(logFile);
+      const log = fs.readFileSync(logFile, 'utf-8');
       expect(log).not.toContain('ABORT: memory disabled');
     } finally {
       fs.rmSync(overrideDir, { recursive: true, force: true });
