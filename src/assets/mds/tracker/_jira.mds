@@ -406,27 +406,14 @@ Load when the resolved tracker provider is `jira` and the operation is `post-wav
 
 Load when the resolved tracker provider is `jira` and the operation is `ensure-pr-ready`.
 
-**Mechanics held here:** the whole operation. Steps 1–4a, the PR-host half of step 4b and steps 4c–6 are PR-host mechanics, the same under every provider (written once in `_ops.mds`): devflow deliberately keeps pull requests on their existing host while the tracker is this one, so nothing about the PR surface is provider-dependent. Step 4b is this provider's: resolving the issue key for this branch and rendering the link line.
+**Mechanics held here:** the whole operation. Steps 1–4a, the PR-host half of step 4b and steps 4c–6 are PR-host mechanics, the same under every provider (written once in `_ops.mds`): devflow deliberately keeps pull requests on their existing host while the tracker is this one, so nothing about the PR surface is provider-dependent. Step 4b takes its link line and refuses it the same way under every provider; only its note on closing effects is this provider's.
 
 ### Process
 
 {{opsteps.ensure_pr_ready_steps_to_4a()}}
 
-4b. (ALWAYS-ON) Ensure the PR body contains a `## Related Issues` section naming the verified issue when one is known. A given `ISSUE_PR_LINK` is already decided in step 4a: skip the resolution and the rendering below. Resolution order:
-   a. Prefer the issue key returned by `setup-task` / `ensure-traceable-issue` for this branch — it was verified at creation time.
-   b. Otherwise fall back to the branch name pattern `{type}/{KEY}-{slug}`: {{common.ref_preflight_branch("matching `^[A-Z][A-Z0-9_]{1,9}-[1-9][0-9]{0,8}$`")}}
-   c. The *fetch by key* capability absent or denied ⇒ `TRACEABILITY: DEGRADED (no tracker tool for fetch by key)` and skip the section; the PR is never blocked on it.
-
-   Render the line through `## Reference Rendering`. **This provider has no closing-reference magic** — a reference in a PR body does not transition or close anything here, and claiming otherwise in the rendered text would promise an effect that never happens; closing is a `## Transitions` matter and `gather-release-evidence` reports the absence as `TRACEABILITY: DEGRADED (unsupported by jira)`. `## Reference Rendering` absent, or its token discarded by the gate below ⇒ render the key on its own line under the section heading, and record the discard under `### Substitutions`.
-
-   Publish the section through step 4b's PR-host half.
-
-   If no verified issue key is discoverable, skip silently. A failure while updating the PR body emits `TRACEABILITY: DEGRADED ({reason})` and continues — a failed Related Issues update never blocks the PR.
+4b. (ALWAYS-ON) Ensure the PR body contains a `## Related Issues` section with the `{{pr_link_default()}}` line of this branch's issue. {{common.pr_link_resolution(" **This provider has no closing-reference magic** — a reference in a PR body does not transition or close anything here, and claiming otherwise in the rendered text would promise an effect that never happens; closing is a `## Transitions` matter and `gather-release-evidence` reports the absence as `TRACEABILITY: DEGRADED (unsupported by jira)`.")}}
 {{opsteps.ensure_pr_ready_steps_from_4c()}}
-
-{{mcp.reference_rendering_gate()}}
-
-**This provider's documented default is `{{pr_link_default()}}`.** It is stated here because it is a provider fact, and the gate above is what routes to it: a section that is absent, a file that is absent and a token the gate discarded all render this, and none of them is a degradation.
 
 {{opsteps.ensure_pr_ready_pr_edit()}}
 @end

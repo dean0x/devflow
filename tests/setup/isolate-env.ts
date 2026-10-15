@@ -11,8 +11,9 @@
  *
  * Vitest runs setup files before EACH test file, so each file gets a fresh HOME,
  * removed after the file finishes. The integration config deliberately does not
- * use this file: its live-`claude` test needs the developer's own `~/.claude`, so
- * its one `init` spawn is sandboxed at the call site through `sandboxEnv` instead.
+ * use this file: the two live-`claude` files build their own temp HOME and temp
+ * repository (`createSpawnContext`), and the other integration files that spawn
+ * `init` sandbox it at the call site through `sandboxEnv`.
  *
  * Imports are limited to node built-ins and `./home-isolation.js` — see that
  * module's header for why nothing from `src/` may load before the redirect.
