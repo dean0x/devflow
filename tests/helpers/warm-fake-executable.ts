@@ -8,13 +8,14 @@
  *
  * Every fake is a symlink to ONE dispatcher script that sources the plain data file
  * `<link>.body`. A test writes only that data file and a link, and a link is not a new
- * executable: on macOS the first exec of a newly written file is held for 0.5-6 s by
- * syspolicyd after a fork-heavy run (measured: the second exec of the same file takes
- * ~3-12 ms, and a new link to a warm script ~2.5 ms), and a fake that is new for each
- * test pays that hold inside whatever time bound the test sets. The dispatcher is written
- * and executed once, in `beforeAll`, so no test runs a cold executable under a time
- * bound. Sourcing reads the body in the dispatcher's own shell, so the fake runs the same
- * script text, with the same `$$`, arguments and `exit`, as a file of its own would.
+ * executable: on macOS the first exec of a newly written file is held by syspolicyd
+ * after a fork-heavy run (measured 1.0-5.4 s; harness bounds use a wider margin; the
+ * second exec of the same file takes ~3-12 ms, and a new link to a warm script
+ * ~2.5 ms), and a fake that is new for each test pays that hold inside whatever time
+ * bound the test sets. The dispatcher is written and executed once, in `beforeAll`, so
+ * no test runs a cold executable under a time bound. Sourcing reads the body in the
+ * dispatcher's own shell, so the fake runs the same script text, with the same `$$`,
+ * arguments and `exit`, as a file of its own would.
  */
 
 import { afterAll, beforeAll, expect } from 'vitest';
