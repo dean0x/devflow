@@ -645,7 +645,7 @@ describe('memory-permission: memory_result_summary', () => {
         expect(over[0]).toBe('Result: unknown, is_error=true, unknown turn(s), 0 permission denial(s)');
       }, 60_000);
 
-      it('names a file with no content, one that does not parse, and a missing file apart', () => {
+      it('reads a file with no content and a missing file as empty, and a file that does not parse as unparseable, with no count invented', () => {
         expect(summarise('')[0]).toBe('Result: not reported (empty)');
         expect(summarise('not-json{{{')[0]).toBe('Result: not reported (unparseable)');
         expect(summarise(null)[0]).toBe('Result: not reported (empty)');
