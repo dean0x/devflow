@@ -56,7 +56,7 @@ This is the **orchestrated flow** — you stay in the loop between every step. W
 
 **A staffed agent roster.** 20 specialized agents with explicit model assignments — Opus for analysis, Sonnet for execution, Haiku for I/O. Reassign any agent's model with `devflow agents`, including GPT models through external model routing (`devflow proxy`).
 
-**Up to 20 parallel Review agents.** Security, architecture, performance, complexity, consistency, regression, testing, and more. Each produces findings with severity, confidence scoring, and concrete fixes. Conditional Review agents activate when relevant (TypeScript for `.ts` files, database for schema changes, compliance when regulated surface detected in the diff). Every finding gets validated and resolved automatically.
+**Up to 20 parallel Review agents.** Security, architecture, performance, complexity, consistency, regression, testing, and more. Each produces findings with severity, confidence scoring, and concrete fixes. Conditional Review agents activate when relevant (language focuses such as TypeScript for `.ts` files, database for schema changes, compliance when regulated surface detected in the diff). The gate level narrows these sets: the default `standard` level drops the TypeScript focus, and `lean` runs fewer focuses still. Every finding gets validated and resolved automatically.
 
 **Memory that persists.** Session context survives restarts, `/clear`, and context compaction. Your agent picks up exactly where it left off.
 
