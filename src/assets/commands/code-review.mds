@@ -40,7 +40,7 @@ Run a comprehensive code review of the current branch by spawning parallel revie
 
 #### Step 0b: Resolve the compliance lens
 
-**Produces:** COMPLIANCE_ACTIVE, COMPLIANCE_FRAMEWORKS
+**Produces:** COMPLIANCE_ACTIVE, COMPLIANCE_FRAMEWORKS, GATE_LEVEL
 
 {{settings.settings_resolve()}}
 
@@ -169,7 +169,7 @@ For each reviewable worktree, call:
 ### Phase 1: Analyze Changed Files
 
 **Produces:** REVIEW_FOCUS_LIST, DIFF_CLASS, DIFF_FILES
-**Requires:** DIFF_RANGE, REVIEW_DIR, COMPLIANCE_ACTIVE (from Step 0b)
+**Requires:** DIFF_RANGE, REVIEW_DIR, COMPLIANCE_ACTIVE, GATE_LEVEL (from Step 0b)
 
 Per worktree, in order. Each `git` command here writes to a file and prints nothing.
 
@@ -206,8 +206,8 @@ A mixed non-code diff runs the union of the sets of the classes it holds. Langua
 
 #### Step 1.2: Choose the focuses
 
-**Produces:** REVIEW_FOCUS_LIST (code class)
-**Requires:** DIFF_CLASS, CHANGED_PATHS, COMPLIANCE_ACTIVE
+**Produces:** REVIEW_FOCUS_LIST (code class; every class by level)
+**Requires:** DIFF_CLASS, CHANGED_PATHS, COMPLIANCE_ACTIVE, GATE_LEVEL
 
 When `DIFF_CLASS` is `code`, read the file types from the paths in `paths.txt` to determine conditional reviews:
 
@@ -233,6 +233,17 @@ Regulated surface: data models, auth flows, logging/observability, payments, IaC
 Installed language focuses: (none)
 
 A language focus is spawned only when its file-type condition above fires AND its name appears in that stamped line. A focus missing from the line is never spawned, even when its trigger fires. The eight core focuses are unconditional and are never stamp-gated.
+
+#### Step 1.2b: Narrow by gate level
+
+**Gate level.** Narrow REVIEW_FOCUS_LIST, for every class, by this worktree's `GATE_LEVEL`. `full` keeps it and reads nothing.
+
+At `standard` or `lean`, once per run, run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash and Read `<that directory>/skills/devflow:agent-references/references/commands/code-review-levels.md` with the Read tool.
+
+- Apply each class's row to that class's own set, then take the union of the results. A row only removes focuses.
+- If the Read fails, or a row is missing or malformed, set `GATE_LEVEL` to `full` for every worktree of this run and say `level reference unreadable: full sets applied`.
+- Security runs at every level and in every class.
+- Compliance keeps the trigger above at every level.
 
 #### Step 1.3: Write the diff files
 
@@ -297,9 +308,9 @@ Pass `FEATURE_KNOWLEDGE` to all Review agents.
 **Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, FEATURE_KNOWLEDGE, PR_DESCRIPTION, PRIOR_RESOLUTIONS, REVIEW_FOCUS_LIST, DIFF_CLASS, DIFF_FILES
 <!-- learning:end -->
 
-Spawn Review agents **in a single message**, for the focus set `DIFF_CLASS` selects (max 20 per worktree):
+Spawn Review agents **in a single message**, one per focus in REVIEW_FOCUS_LIST (max 20 per worktree):
 
-- `code`: the 8 core reviews on the full `diff.patch`, plus the language and conditional focuses Phase 1 added.
+- `code`: the 8 core reviews on the full `diff.patch` (lean keeps 3), plus the language and conditional focuses Phase 1 added.
 - `docs-only`, `tests-only`, `lockfile-only`: only the reduced set Phase 1 names, each reading `diff.patch`; a mixed non-code diff runs the union. No language or conditional focus is spawned, whatever its trigger.
 
 | Focus | Runs | Pattern Skill | DIFF_FILE |
@@ -325,7 +336,7 @@ Spawn Review agents **in a single message**, for the focus set `DIFF_CLASS` sele
 | documentation | conditional | devflow:documentation | diff.patch |
 | compliance | diff-driven | devflow:compliance | diff.patch |
 
-Review agent count: `code` runs 8 core, +1-12 added by Phase 1 (max 20 total per worktree); a reduced class or a mix runs 2-6.
+Review agent count: at `full`, `code` runs 8 core +1-12 (max 20 per worktree); `standard` runs up to 2 fewer; lean `code` runs 3-4; a reduced class or a mix runs 2-6.
 
 {{compliance_focus_inject()}}
 
@@ -420,7 +431,7 @@ Per worktree, after successful completion:
 │  │
 │  ├─ Phase 1: Analyze changed files
 │  │  ├─ Classify the diff (paths.txt → DIFF_CLASS)
-│  │  ├─ Choose the focuses (code class: file types + the language stamp)
+│  │  ├─ Choose the focuses (code: file types + the language stamp; all: the gate level)
 │  │  └─ Write diff.patch and diff-{focus}.patch, by redirect
 │  │
 │  ├─ Phase 2: Reviews (PARALLEL within worktree), one per REVIEW_FOCUS_LIST focus
@@ -438,12 +449,12 @@ Per worktree, after successful completion:
 
 | Case | Handling |
 |------|----------|
-| `--full` in multi-worktree mode | Applies to all worktrees (global modifier) |
+| `--full` in multi-worktree mode | Applies to all worktrees (global modifier). It sets the diff range, never the gate level |
 | Review comment already posted | Git agent matches its own marker on the `{cycle, timestamp}` pair → skip silently (D7); a re-review in the same cycle (different timestamp) posts its own comment. The marker's format belongs to the operation; this caller passes the pair and never restates the literal |
 | Concurrent sessions | Advisory only, each session computes independently |
-| Docs-only diff | Its Step 1.1 set |
-| Tests-only diff | Its Step 1.1 set |
-| Lockfile-only diff | Its Step 1.1 set |
+| Docs-only diff | Its Step 1.1 set, narrowed by level |
+| Tests-only diff | Its Step 1.1 set, narrowed by level |
+| Lockfile-only diff | Its Step 1.1 set, narrowed by level |
 | Mixed non-code diff | The union of the matching sets |
 | A path matching no class pattern, or an empty path list | `code` (fail-safe) |
 | A file moved across classes | `--no-renames` lists both paths, so a code path makes the diff `code` |
@@ -454,7 +465,7 @@ Per worktree, after successful completion:
 
 ## Backwards Compatibility
 
-- **Single worktree**: Auto-discovery finds only one worktree → proceeds exactly as before. Zero behavior change.
+- **Gate level**: `full` runs the sets named here; the default `standard` and `lean` narrow them. `devflow gates --set full` keeps them.
 
 ## Principles
 

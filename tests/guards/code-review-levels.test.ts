@@ -1,0 +1,651 @@
+/**
+ * /code-review focus sets per gate level (#474, part of epic #468).
+ *
+ * `GATE_LEVEL` comes from the accepted settings line. `/code-review` narrows REVIEW_FOCUS_LIST by it in
+ * its own step, Step 1.2b, once per worktree and before the diff files are written:
+ *   - `full` is today: the command reads nothing and keeps every set.
+ *   - `standard` drops `typescript` and, on a `code` diff, `dependencies` unless a listed manifest changed.
+ *   - `lean` keeps security, testing and reliability on a `code` diff, plus compliance on its own trigger.
+ *   - Security runs at every level and in every class.
+ * The class-by-level table lives in `references/commands/code-review-levels.md`. The command reads it only
+ * at `standard` or `lean`, once per run, through the sanctioned resolution line, and a failed read applies
+ * the full sets.
+ *
+ * What this file holds, each arm through a named collector and a known-bad probe over the same collector:
+ *   1. The reference: its table form, closed vocabulary, subset-by-construction, manifest list and rules.
+ *   2. A simulator that reads its rules only from the parsed reference. The expected sets come only from
+ *      the hand-written oracle below, so a wrong reference fails the assertions instead of agreeing with them.
+ *   3. The gate-level block of the command: read paragraph, invariants, fallback, learning-arm position.
+ *   4. Full is today: the Step 1.1 reduced sets, the rule-1 manifests and the Step 1.2 trigger rows.
+ *   5. No second cycle: Step 0e-ii only warns, and nothing restarts a phase or starts /resolve.
+ */
+
+import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'fs'
+import * as path from 'path'
+
+import { GATE_LEVELS } from '../../src/core/gate-level.js'
+import { ROOT, readAgentReference, requireDistFile, resolveLearningOffSource } from '../helpers.js'
+
+// ---------------------------------------------------------------------------
+// Independent oracle: written by hand from the issue and the gate decisions, never parsed
+// ---------------------------------------------------------------------------
+
+const CORE = ['security', 'architecture', 'performance', 'complexity', 'consistency', 'regression', 'testing', 'reliability'] as const
+const LANGUAGE = ['typescript', 'react', 'accessibility', 'ui-design', 'go', 'java', 'python', 'rust'] as const
+const CONDITIONAL = ['database', 'dependencies', 'documentation'] as const
+const CLASSES = ['code', 'docs-only', 'tests-only', 'lockfile-only'] as const
+const REDUCED = ['docs-only', 'tests-only', 'lockfile-only'] as const
+const VOCABULARY: readonly string[] = [...CORE, ...LANGUAGE, ...CONDITIONAL, 'compliance']
+
+const FULL_REDUCED: Readonly<Record<string, readonly string[]>> = {
+  'docs-only': ['documentation', 'consistency', 'security'],
+  'tests-only': ['testing', 'reliability', 'consistency', 'security'],
+  'lockfile-only': ['dependencies', 'security'],
+}
+
+/** The Step 1.1 rule-1 manifest and build file names. */
+const RULE1_MANIFESTS = ['package.json', 'go.mod', 'Cargo.toml', 'pyproject.toml', 'requirements*.txt', 'CMakeLists.txt'] as const
+/** The level reference's own list: rule 1 plus the manifests of Ruby, PHP, Maven, Gradle and other Python layouts. */
+const MANIFESTS = [
+  ...RULE1_MANIFESTS, 'Gemfile', 'composer.json', 'pom.xml', 'build.gradle', 'build.gradle.kts', 'setup.py', 'setup.cfg', 'Pipfile',
+] as const
+/** The rule-4 lockfiles: used only to prove that a lockfile alone drops the dependencies lens. */
+const LOCKFILES = [
+  'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lockb', 'Cargo.lock', 'go.sum', 'poetry.lock', 'uv.lock', 'Gemfile.lock', 'composer.lock',
+] as const
+
+type Level = 'standard' | 'lean'
+interface ExpectedCell { readonly op: 'keep' | 'drop'; readonly names: readonly string[] }
+
+const EXPECTED_CELLS: Readonly<Record<(typeof CLASSES)[number], Readonly<Record<Level, ExpectedCell>>>> = {
+  code: {
+    standard: { op: 'drop', names: ['typescript', 'dependencies'] },
+    lean: { op: 'keep', names: ['security', 'testing', 'reliability', 'compliance'] },
+  },
+  'docs-only': {
+    standard: { op: 'keep', names: ['documentation', 'consistency', 'security'] },
+    lean: { op: 'keep', names: ['documentation', 'consistency', 'security'] },
+  },
+  'tests-only': {
+    standard: { op: 'keep', names: ['testing', 'reliability', 'consistency', 'security'] },
+    lean: { op: 'keep', names: ['testing', 'reliability', 'security'] },
+  },
+  'lockfile-only': {
+    standard: { op: 'keep', names: ['dependencies', 'security'] },
+    lean: { op: 'keep', names: ['dependencies', 'security'] },
+  },
+}
+
+const DOCS = ['documentation', 'consistency', 'security']
+const TESTS = ['testing', 'reliability', 'consistency', 'security']
+const TESTS_LEAN = ['testing', 'reliability', 'security']
+const LOCK = ['dependencies', 'security']
+const DOCS_TESTS = ['documentation', 'consistency', 'security', 'testing', 'reliability']
+const TESTS_LOCK = ['testing', 'reliability', 'consistency', 'security', 'dependencies']
+const TESTS_LOCK_LEAN = ['testing', 'reliability', 'security', 'dependencies']
+const DOCS_LOCK = ['documentation', 'consistency', 'security', 'dependencies']
+const ALL_THREE = ['documentation', 'consistency', 'security', 'testing', 'reliability', 'dependencies']
+
+/** Hand-written sets of every reduced and mixed non-code combination, per level (AC-4, AC-5). */
+const EXPECTED_SETS: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>> = {
+  'docs-only': { full: DOCS, standard: DOCS, lean: DOCS },
+  'tests-only': { full: TESTS, standard: TESTS, lean: TESTS_LEAN },
+  'lockfile-only': { full: LOCK, standard: LOCK, lean: LOCK },
+  'docs-only+tests-only': { full: DOCS_TESTS, standard: DOCS_TESTS, lean: DOCS_TESTS },
+  'tests-only+lockfile-only': { full: TESTS_LOCK, standard: TESTS_LOCK, lean: TESTS_LOCK_LEAN },
+  'docs-only+lockfile-only': { full: DOCS_LOCK, standard: DOCS_LOCK, lean: DOCS_LOCK },
+  'docs-only+tests-only+lockfile-only': { full: ALL_THREE, standard: ALL_THREE, lean: ALL_THREE },
+}
+
+/** The twelve Step 1.2 trigger rows as they stood before #474, verbatim. */
+const TODAY_TRIGGER_ROWS: ReadonlyArray<readonly [string, string]> = [
+  ['Any .ts or .tsx files', 'typescript'],
+  ['.tsx or .jsx files (React components)', 'react'],
+  ['.tsx or .jsx files (React components)', 'accessibility'],
+  ['.tsx/.jsx/.css/.scss files', 'ui-design'],
+  ['.go files', 'go'],
+  ['.java files', 'java'],
+  ['.py files', 'python'],
+  ['.rs files', 'rust'],
+  ['DB/migration files', 'database'],
+  ['Dependency files changed', 'dependencies'],
+  ['Docs or significant code', 'documentation'],
+  ['COMPLIANCE_ACTIVE AND diff touches regulated surface', 'compliance'],
+]
+
+/** The one root form the level read may use. Copied here, not imported from another test file. */
+const SANCTIONED_RESOLUTION = 'd="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac;'
+const LEVEL_REFERENCE_PATH = 'skills/devflow:agent-references/references/commands/code-review-levels.md'
+
+// ---------------------------------------------------------------------------
+// Section readers
+// ---------------------------------------------------------------------------
+
+/** The text from `start` up to (not including) `end`, or null when either anchor is absent. */
+export function sectionBetween(body: string, start: string, end: string | null): string | null {
+  const from = body.indexOf(start)
+  if (from === -1) return null
+  if (end === null) return body.slice(from)
+  const to = body.indexOf(end, from + start.length)
+  return to === -1 ? null : body.slice(from, to)
+}
+
+/** Table rows of a section, as trimmed cells, separator rows dropped. */
+export function tableRows(section: string): string[][] {
+  return section.split('\n')
+    .filter(line => line.startsWith('|') && !/^\|[\s:|-]+\|$/.test(line))
+    .map(line => line.split('|').slice(1, -1).map(cell => cell.trim()))
+}
+
+const step11 = (body: string): string | null => sectionBetween(body, '#### Step 1.1:', '#### Step 1.2:')
+const step12 = (body: string): string | null => sectionBetween(body, '#### Step 1.2:', '#### Step 1.3:')
+const gateBlock = (body: string): string | null => sectionBetween(body, '**Gate level.**', '#### Step 1.3:')
+
+const unique = (names: readonly string[]): string[] => [...new Set(names)]
+const sameSet = (a: readonly string[], b: readonly string[]): boolean => unique(a).sort().join(',') === unique(b).sort().join(',')
+const baseName = (p: string): string => p.slice(p.lastIndexOf('/') + 1)
+
+/** Whether a file name equals a manifest name, where `*` in the name stands for any characters. */
+function nameMatches(file: string, pattern: string): boolean {
+  const re = new RegExp(`^${pattern.split('*').map(part => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`)
+  return re.test(file)
+}
+
+// ---------------------------------------------------------------------------
+// 1. The level reference
+// ---------------------------------------------------------------------------
+
+interface ParsedCell { readonly op: 'keep' | 'drop'; readonly names: readonly string[]; readonly exception: string | null }
+interface ParsedRef {
+  readonly header: readonly string[]
+  readonly cells: ReadonlyMap<string, ReadonlyMap<string, ParsedCell>>
+  readonly badCells: readonly string[]
+  readonly manifests: readonly string[]
+  readonly perClassUnion: boolean
+}
+
+const CELL_RE = /^(keep|drop): ([a-z-]+(?:, [a-z-]+)*)(?: \(([a-z-]+) stays when a listed manifest changed\))?$/
+
+/** Parse the reference into its table cells, manifest list and mixed rule. Lenient: defects are reported by the collector. */
+export function parseLevelRef(ref: string): ParsedRef {
+  const rows = tableRows(sectionBetween(ref, '## Sets', '## Rules') ?? '')
+  const header = rows[0] ?? []
+  const cells = new Map<string, Map<string, ParsedCell>>()
+  const badCells: string[] = []
+  for (const row of rows.slice(1)) {
+    const cls = (row[0] ?? '').replace(/`/g, '')
+    const perLevel = new Map<string, ParsedCell>()
+    header.slice(1).forEach((level, i) => {
+      const text = row[i + 1] ?? ''
+      const m = CELL_RE.exec(text)
+      if (m === null) { badCells.push(`${cls}/${level}: ${text}`); return }
+      perLevel.set(level, { op: m[1] as 'keep' | 'drop', names: m[2].split(', '), exception: m[3] ?? null })
+    })
+    cells.set(cls, perLevel)
+  }
+  const manifestLine = /^- \*\*Manifests:\*\* (.*)$/m.exec(ref)?.[1] ?? ''
+  const mixedLine = /^- \*\*Mixed diff:\*\* (.*)$/m.exec(ref)?.[1] ?? ''
+  return {
+    header,
+    cells,
+    badCells,
+    manifests: [...manifestLine.matchAll(/`([^`]+)`/g)].map(m => m[1]),
+    perClassUnion: mixedLine.includes("to that class's own set") && mixedLine.includes('take the union of the results'),
+  }
+}
+
+/** The rule-1 manifest names, parsed from the command's Step 1.1. */
+function rule1Manifests(cr: string): string[] {
+  const rule = /^1\. [^\n]*$/m.exec(step11(cr) ?? '')?.[0] ?? ''
+  const list = /manifest or build file \(([^)]*)\)/.exec(rule)?.[1] ?? ''
+  return [...list.matchAll(/`([^`]+)`/g)].map(m => m[1])
+}
+
+/** Text the reference must never carry: it names `compliance` only as a lens name. */
+const REF_FORBIDDEN: ReadonlyArray<readonly [string, string]> = [
+  ['<!-- learning:', 'a learning marker'],
+  ['Agent(subagent_type=', 'a spawn block'],
+  ['COMPLIANCE_FRAMEWORKS', 'a framework list'],
+  ['devflow:compliance', 'the compliance skill'],
+  ['regulated surface', 'the compliance trigger'],
+]
+
+/** AC-2, AC-3, AC-4, AC-6, AC-7, AC-8: the reference table, its vocabulary, its manifest list and its rules. */
+export function collectLevelRefDefects(ref: string, cr: string): string[] {
+  const out: string[] = []
+  const parsed = parseLevelRef(ref)
+  const narrowed = GATE_LEVELS.filter(level => level !== 'full')
+  const wantHeader = ['Class', ...narrowed]
+  if (parsed.header.join(' | ') !== wantHeader.join(' | ')) out.push(`the header is "${parsed.header.join(' | ')}", expected "${wantHeader.join(' | ')}"`)
+  const classes = [...parsed.cells.keys()]
+  if (classes.join(',') !== CLASSES.join(',')) out.push(`the class rows are "${classes.join(', ')}", expected "${CLASSES.join(', ')}"`)
+  for (const bad of parsed.badCells) out.push(`a cell does not match the cell form: ${bad}`)
+  for (const [cls, perLevel] of parsed.cells) {
+    for (const [level, cell] of perLevel) {
+      const where = `${cls}/${level}`
+      for (const name of cell.names) if (!VOCABULARY.includes(name)) out.push(`${where}: "${name}" is not a focus name`)
+      if (cell.op === 'keep' && !cell.names.includes('security')) out.push(`${where}: a keep cell without security`)
+      if (cell.op === 'drop' && cell.names.includes('security')) out.push(`${where}: a drop cell that drops security`)
+      if (cls !== 'code' && cell.names.includes('compliance')) out.push(`${where}: compliance outside the code class`)
+      const full = FULL_REDUCED[cls]
+      if (full !== undefined) {
+        for (const name of cell.names) if (!full.includes(name)) out.push(`${where}: "${name}" is outside the class's full set`)
+      }
+      if (cell.exception !== null && !(cls === 'code' && level === 'standard' && cell.exception === 'dependencies')) {
+        out.push(`${where}: an exception for "${cell.exception}", only dependencies on code/standard is allowed`)
+      }
+      const want = (EXPECTED_CELLS as Readonly<Record<string, Readonly<Record<string, ExpectedCell>>>>)[cls]?.[level]
+      if (want !== undefined && (want.op !== cell.op || !sameSet(want.names, cell.names))) {
+        out.push(`${where}: "${cell.op}: ${cell.names.join(', ')}", expected "${want.op}: ${want.names.join(', ')}"`)
+      }
+    }
+  }
+  const standardCode = parsed.cells.get('code')?.get('standard')
+  if (standardCode !== undefined && standardCode.exception !== 'dependencies') out.push('code/standard: the manifest exception for dependencies is missing')
+  if (!sameSet(parsed.manifests, MANIFESTS)) out.push(`the manifest list is "${parsed.manifests.join(', ')}", expected "${MANIFESTS.join(', ')}"`)
+  for (const name of rule1Manifests(cr)) if (!parsed.manifests.includes(name)) out.push(`the manifest list lacks the rule-1 name ${name}`)
+  if (rule1Manifests(cr).length === 0) out.push('no rule-1 manifest names were parsed from Step 1.1')
+  if (!parsed.perClassUnion) out.push('the mixed-diff rule is not "apply each class\'s row to that class\'s own set, then take the union of the results"')
+  for (const [needle, what] of REF_FORBIDDEN) if (ref.includes(needle)) out.push(`the reference carries ${what}`)
+  return out
+}
+
+// ---------------------------------------------------------------------------
+// 2. The simulator
+// ---------------------------------------------------------------------------
+
+interface Scenario {
+  readonly stamped: readonly string[]
+  readonly triggered: readonly string[]
+  readonly conditional: readonly string[]
+  readonly complianceActive: boolean
+  readonly regulated: boolean
+  readonly depPath: string
+}
+
+const changedPaths = (sc: Scenario): string[] => (sc.depPath === 'none' ? ['src/x.ts'] : ['src/x.ts', sc.depPath])
+
+/** The oracle's full-level set of one class: the set the command builds before it narrows. */
+function fullSetOf(cls: string, sc: Scenario): string[] {
+  if (cls !== 'code') return [...(FULL_REDUCED[cls] ?? [])]
+  const language = LANGUAGE.filter(l => sc.triggered.includes(l) && sc.stamped.includes(l))
+  const conditional = CONDITIONAL.filter(c => sc.conditional.includes(c) && (c !== 'dependencies' || sc.depPath !== 'none'))
+  const compliance = sc.complianceActive && sc.regulated ? ['compliance'] : []
+  return [...CORE, ...language, ...conditional, ...compliance]
+}
+
+/** The oracle's expected set at a level, from the hand-written rules and sets only. */
+function expectedSet(level: string, classes: readonly string[], sc: Scenario): string[] {
+  if (classes.length === 1 && classes[0] === 'code') {
+    const full = fullSetOf('code', sc)
+    if (level === 'full') return full
+    if (level === 'lean') return full.filter(n => ['security', 'testing', 'reliability', 'compliance'].includes(n))
+    const manifestChanged = changedPaths(sc).some(p => MANIFESTS.some(m => nameMatches(baseName(p), m)))
+    return full.filter(n => n !== 'typescript' && (n !== 'dependencies' || manifestChanged))
+  }
+  return [...(EXPECTED_SETS[classes.join('+')]?.[level] ?? [])]
+}
+
+/** Narrow the classes' full sets by the parsed reference, as the command's Step 1.2b says. */
+export function simulate(level: string, classes: readonly string[], sc: Scenario, ref: ParsedRef): string[] {
+  const fulls = classes.map(cls => fullSetOf(cls, sc))
+  if (level === 'full') return unique(fulls.flat())
+  const manifestChanged = changedPaths(sc).some(p => ref.manifests.some(m => nameMatches(baseName(p), m)))
+  const narrow = (cls: string, set: readonly string[]): string[] => {
+    const cell = ref.cells.get(cls)?.get(level)
+    if (cell === undefined) return [...set]
+    if (cell.op === 'keep') return set.filter(n => cell.names.includes(n))
+    return set.filter(n => !cell.names.includes(n) || (n === cell.exception && manifestChanged))
+  }
+  if (classes.length > 1 && !ref.perClassUnion) {
+    let list = unique(fulls.flat())
+    for (const cls of classes) list = narrow(cls, list)
+    return list
+  }
+  return unique(classes.flatMap((cls, i) => narrow(cls, fulls[i])))
+}
+
+function subsets<T>(items: readonly T[]): T[][] {
+  return items.reduce<T[][]>((acc, item) => [...acc, ...acc.map(s => [...s, item])], [[]])
+}
+
+const CLASS_COMBOS: ReadonlyArray<readonly string[]> = [['code'], ...subsets(REDUCED).filter(s => s.length > 0)]
+const STAMPED: ReadonlyArray<readonly string[]> = [[], [...LANGUAGE], ['typescript', 'go']]
+const TRIGGERED: ReadonlyArray<readonly string[]> = [[], ['typescript'], ['typescript', 'react', 'go']]
+const DEP_PATHS = ['none', 'package.json', 'package-lock.json', 'Podfile'] as const
+
+function* scenarios(): Generator<Scenario> {
+  for (const stamped of STAMPED) for (const triggered of TRIGGERED) for (const conditional of subsets(CONDITIONAL)) {
+    for (const complianceActive of [false, true]) for (const regulated of [false, true]) for (const depPath of DEP_PATHS) {
+      yield { stamped, triggered, conditional, complianceActive, regulated, depPath }
+    }
+  }
+}
+
+const describeScenario = (sc: Scenario): string =>
+  `stamped=[${sc.stamped.join(',')}] triggered=[${sc.triggered.join(',')}] conditional=[${sc.conditional.join(',')}] compliance=${sc.complianceActive}/${sc.regulated} dep=${sc.depPath}`
+
+/**
+ * AC-1, AC-2, AC-3, AC-4, AC-5, AC-7, AC-8: every level, class combination and scenario. The first defect of each
+ * kind per level and class combination is reported, so one wrong cell gives a short list.
+ */
+export function collectSimulationDefects(parsed: ParsedRef): string[] {
+  const first = new Map<string, string>()
+  const report = (key: string, message: string): void => { if (!first.has(key)) first.set(key, message) }
+  for (const level of GATE_LEVELS) for (const classes of CLASS_COMBOS) {
+    const label = `${level} ${classes.join('+')}`
+    for (const sc of scenarios()) {
+      const got = simulate(level, classes, sc, parsed)
+      const full = unique(classes.flatMap(cls => fullSetOf(cls, sc)))
+      const want = expectedSet(level, classes, sc)
+      if (!got.includes('security')) report(`${label}|security`, `${label}: no security (${describeScenario(sc)})`)
+      if (got.some(n => !full.includes(n))) report(`${label}|subset`, `${label}: a focus outside the full set (${describeScenario(sc)})`)
+      if (got.includes('compliance') && !classes.includes('code')) report(`${label}|compliance`, `${label}: compliance without the code class`)
+      if (!sameSet(got, want)) report(`${label}|set`, `${label}: got [${got.join(', ')}], expected [${want.join(', ')}] (${describeScenario(sc)})`)
+    }
+  }
+  // Manifest names and lockfiles, one at a time, on a standard code diff that has the dependencies trigger.
+  const base: Scenario = { stamped: [], triggered: [], conditional: ['dependencies'], complianceActive: false, regulated: false, depPath: 'none' }
+  for (const manifest of MANIFESTS) {
+    const file = manifest.includes('*') ? manifest.replace('*', '-dev') : manifest
+    const got = simulate('standard', ['code'], { ...base, depPath: file }, parsed)
+    if (!got.includes('dependencies')) report(`manifest|${manifest}`, `standard code: a changed ${file} does not keep dependencies`)
+  }
+  for (const lockfile of LOCKFILES) {
+    const got = simulate('standard', ['code'], { ...base, depPath: lockfile }, parsed)
+    if (got.includes('dependencies')) report(`lockfile|${lockfile}`, `standard code: a changed ${lockfile} with code keeps dependencies`)
+  }
+  return [...first.values()]
+}
+
+// ---------------------------------------------------------------------------
+// 3. The gate-level block of the command
+// ---------------------------------------------------------------------------
+
+const BLOCK_ITEMS = [
+  "Apply each class's row to that class's own set, then take the union of the results.",
+  'A row only removes focuses.',
+  'If the Read fails, or a row is missing or malformed, set `GATE_LEVEL` to `full` for every worktree of this run',
+  'level reference unreadable: full sets applied',
+  'Security runs at every level and in every class.',
+  'Compliance keeps the trigger above at every level.',
+] as const
+
+/** AC-7, AC-8, AC-9, AC-14: the block that narrows REVIEW_FOCUS_LIST, in one compiled build. */
+export function collectGateLevelBlockDefects(body: string): string[] {
+  const out: string[] = []
+  const block = gateBlock(body)
+  if (block === null) return ['no gate-level block between "**Gate level.**" and "#### Step 1.3:"']
+  if (!(step12(body) ?? '').includes('#### Step 1.2b: Narrow by gate level')) out.push('Step 1.2b has no heading of its own inside the Step 1.2 slice')
+  const read = block.split('\n\n').find(p => p.includes(LEVEL_REFERENCE_PATH))
+  if (read === undefined) out.push('the block has no read paragraph for the level reference')
+  else {
+    for (const needle of ['`standard` or `lean`', SANCTIONED_RESOLUTION, 'with the Read tool', 'once per run']) {
+      if (!read.includes(needle)) out.push(`the read paragraph lacks: ${needle.slice(0, 50)}`)
+    }
+    if (read.indexOf(SANCTIONED_RESOLUTION) > read.indexOf(LEVEL_REFERENCE_PATH)) out.push('the resolution comes after the path')
+  }
+  for (const item of BLOCK_ITEMS) if (!block.includes(item)) out.push(`the block lacks: ${item.slice(0, 60)}`)
+  const names = body.split('CLAUDE_CONFIG_DIR').length - 1
+  if (names !== 1) out.push(`${names} CLAUDE_CONFIG_DIR names in the command, expected 1`)
+  const stampAt = body.indexOf('A language focus is spawned only when its file-type condition above fires')
+  if (stampAt === -1 || body.indexOf('CLAUDE_CONFIG_DIR') < stampAt) out.push('the directory read does not come after the stamp paragraph')
+  if (block.split('\n').some(l => l.startsWith('Installed language focuses: '))) out.push('the block carries a second stamp line')
+  if (LANGUAGE.some(l => l !== 'go' && block.includes(l)) || block.includes('`go`')) out.push('the block restates a language focus list')
+  const produces = sectionBetween(body, '#### Step 0b:', '#### Step 0b-ii:') ?? ''
+  if (!/\*\*Produces:\*\* [^\n]*GATE_LEVEL/.test(produces)) out.push('Step 0b Produces does not list GATE_LEVEL')
+  const phase1 = sectionBetween(body, '### Phase 1: Analyze Changed Files', '#### Step 1.1:') ?? ''
+  if (!/\*\*Requires:\*\* [^\n]*GATE_LEVEL/.test(phase1)) out.push('Phase 1 Requires does not list GATE_LEVEL')
+  if (!/\*\*Requires:\*\* [^\n]*GATE_LEVEL/.test(step12(body) ?? '')) out.push('Step 1.2 Requires does not list GATE_LEVEL')
+  if (!body.includes('sets the diff range, never the gate level')) out.push('Edge Cases does not say --full sets the diff range, never the gate level')
+  if (!body.includes('one per focus in REVIEW_FOCUS_LIST')) out.push('Phase 2 does not spawn one Review agent per REVIEW_FOCUS_LIST focus')
+  return out
+}
+
+/** AC-8: in the source, the block sits outside every learning arm, so both builds carry it. */
+export function collectBlockArmDefects(source: string): string[] {
+  let arm: string | null = null
+  let inBlock = false
+  let seen = false
+  const out: string[] = []
+  for (const line of source.split('\n')) {
+    const open = /^<!-- learning:(on|off) -->$/.exec(line)
+    if (open !== null) { arm = open[1]; continue }
+    if (line === '<!-- learning:end -->') { arm = null; continue }
+    if (line.startsWith('#### Step 1.2b: Narrow by gate level')) { inBlock = true; seen = true }
+    else if (line.startsWith('#### Step 1.3:')) inBlock = false
+    if (inBlock && arm !== null) { out.push(`the gate-level block sits inside a learning:${arm} arm`); break }
+  }
+  if (!seen) out.push('the source has no Step 1.2b heading')
+  return out
+}
+
+// ---------------------------------------------------------------------------
+// 4. Full is today
+// ---------------------------------------------------------------------------
+
+/** AC-1: the Step 1.1 reduced sets, the rule-1 manifests and the Step 1.2 trigger rows equal the text before #474. */
+export function collectFullIsTodayDefects(body: string): string[] {
+  const out: string[] = []
+  const s11 = step11(body)
+  if (s11 === null) return ['no Step 1.1']
+  for (const [cls, focuses] of Object.entries(FULL_REDUCED)) {
+    const got = new RegExp(`^- \`${cls}\`: ([^\\n]+)$`, 'm').exec(s11)?.[1]
+    if (got === undefined) out.push(`no reduced set line for ${cls}`)
+    else if (got !== focuses.join(', ')) out.push(`${cls} set is "${got}", expected "${focuses.join(', ')}"`)
+  }
+  if (rule1Manifests(body).join(',') !== RULE1_MANIFESTS.join(',')) out.push(`the rule-1 manifests are "${rule1Manifests(body).join(', ')}", expected "${RULE1_MANIFESTS.join(', ')}"`)
+  const s12 = step12(body)
+  if (s12 === null) return [...out, 'no Step 1.2']
+  const rows = tableRows(s12).slice(1)
+  if (rows.length !== TODAY_TRIGGER_ROWS.length) out.push(`${rows.length} trigger rows, expected ${TODAY_TRIGGER_ROWS.length}`)
+  TODAY_TRIGGER_ROWS.forEach(([condition, adds], i) => {
+    const row = rows[i]
+    if (row === undefined || row[0] !== condition || row[1] !== adds) out.push(`trigger row ${i + 1} is "${(row ?? []).join(' | ')}", expected "${condition} | ${adds}"`)
+  })
+  if (!s12.includes('| COMPLIANCE_ACTIVE AND diff touches regulated surface | compliance |')) out.push('the compliance trigger row is not byte-equal')
+  return out
+}
+
+// ---------------------------------------------------------------------------
+// 5. No second cycle
+// ---------------------------------------------------------------------------
+
+const RESTART_PHASE = /\b(return|go back|loop back|re-?enter|restart)\b[^.\n]{0,40}\bPhase [12]\b/i
+const SECOND_CYCLE = /\b(start|begin|launch|trigger|run)s?\b[^.\n]{0,20}\b(second|another|new|next) (review )?cycle/i
+/** A /resolve command start; a script path such as `scripts/resolve-settings.cjs` is not one. */
+const RESOLVE_START = /(^|[\s(`])\/(devflow:)?resolve\b(?![-.])/m
+
+/** AC-10: Step 0e-ii only warns and continues, and nothing in the command or the reference starts another cycle. */
+export function collectSecondCycleDefects(body: string, ref: string): string[] {
+  const out: string[] = []
+  if (!/^MAX_REVIEW_CYCLES = 10$/m.test(body)) out.push('MAX_REVIEW_CYCLES = 10 is missing')
+  const rows = tableRows(sectionBetween(body, '**Decision table — Step 0e-ii paths:**', '#### Step 0f:') ?? '')
+  const outcome = (condition: string): string | undefined => rows.find(r => r[0] === condition)?.[1]
+  for (const condition of ['CYCLE_NUMBER > MAX_REVIEW_CYCLES', 'fp_ratio > 0.7 AND CYCLE_NUMBER >= 3']) {
+    if (outcome(condition) !== 'Warn in output, continue') out.push(`the outcome of "${condition}" is "${outcome(condition) ?? '(no row)'}", expected "Warn in output, continue"`)
+  }
+  if (!(rows.find(r => r[0].startsWith('denominator = 0'))?.[1] ?? '').startsWith('fp_ratio = 0, skip warning')) out.push('the parse-failure row does not skip the warning')
+  const continues = body.match(/^\s*Continue with review\.$/gm) ?? []
+  if (continues.length !== 2) out.push(`${continues.length} "Continue with review." lines, expected 2`)
+  for (const [name, text] of [['the command', body], ['the reference', ref]] as const) {
+    if (RESTART_PHASE.test(text)) out.push(`${name} restarts or re-enters Phase 1 or 2`)
+    if (SECOND_CYCLE.test(text)) out.push(`${name} starts a second cycle`)
+    if (RESOLVE_START.test(text)) out.push(`${name} starts /resolve`)
+  }
+  const afterPhase3 = body.slice(Math.max(0, body.indexOf('### Phase 3:')))
+  if (/Agent\(subagent_type="Review"/.test(afterPhase3)) out.push('a Review agent is spawned after Phase 3')
+  return out
+}
+
+// ---------------------------------------------------------------------------
+// Corpus
+// ---------------------------------------------------------------------------
+
+const VARIANTS: ReadonlyArray<{ label: string; body: string }> = (() => {
+  const off = resolveLearningOffSource('commands', 'code-review')
+  if (off === null) throw new Error('dist/learning-off/commands/code-review.md is absent: run `npm run build:mds`')
+  return [
+    { label: 'learning on', body: requireDistFile('code-review.md') },
+    { label: 'learning off', body: off },
+  ]
+})()
+const ON = VARIANTS[0].body
+const REF = readAgentReference('commands/code-review-levels.md')
+const SOURCE = readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'code-review.mds'), 'utf-8')
+
+/** Replace `from` with `to` in `body`, failing the test when the seed did not land. */
+function seed(body: string, from: string | RegExp, to: string): string {
+  const next = typeof from === 'string' ? body.replace(from, () => to) : body.replace(from, to)
+  expect(next, `the seed ${String(from)} must change the text`).not.toBe(body)
+  return next
+}
+
+describe('the corpus is real', () => {
+  it('reads both builds of the command, the level reference and the gate levels', () => {
+    for (const { label, body } of VARIANTS) expect(body.length, `${label}: nothing read`).toBeGreaterThan(5000)
+    expect(REF.length, 'the level reference is empty').toBeGreaterThan(400)
+    expect(SOURCE.length, 'the command source is empty').toBeGreaterThan(5000)
+    expect(GATE_LEVELS.length).toBeGreaterThanOrEqual(3)
+    expect(GATE_LEVELS).toContain('full')
+    expect(CLASS_COMBOS.length, 'code plus seven non-empty reduced subsets').toBe(8)
+    expect([...scenarios()].length, 'the scenario grid is empty').toBeGreaterThan(1000)
+  })
+})
+
+describe('the level reference holds the decided sets (AC-2, AC-3, AC-4, AC-6, AC-7)', () => {
+  it('is well formed, a subset by construction and free of compliance logic', () => {
+    expect(collectLevelRefDefects(REF, ON)).toEqual([])
+    const parsed = parseLevelRef(REF)
+    expect(parsed.cells.size, 'four class rows').toBe(4)
+    expect(parsed.manifests.length, 'the manifest list is parsed').toBe(MANIFESTS.length)
+  })
+
+  it('known-bad probes: each seeded change is reported', () => {
+    const defects = (text: string): string[] => collectLevelRefDefects(text, ON)
+    expect(defects(seed(REF, '| keep: testing, reliability, security |', '| keep: testing, reliability, consistency, security |')).join('\n'))
+      .toMatch(/tests-only\/lean: "keep: testing, reliability, consistency, security", expected/)
+    expect(defects(seed(REF, 'drop: typescript, dependencies', 'drop: dependencies')).join('\n'))
+      .toMatch(/code\/standard: "drop: dependencies", expected "drop: typescript, dependencies"/)
+    expect(defects(seed(REF, 'drop: typescript, dependencies (dependencies stays', 'drop: typescript (dependencies stays')).join('\n'))
+      .toMatch(/code\/standard: "drop: typescript", expected/)
+    expect(defects(seed(REF, ' (dependencies stays when a listed manifest changed)', ''))).toContain('code/standard: the manifest exception for dependencies is missing')
+    expect(defects(seed(REF, '`Gemfile`, ', '')).join('\n')).toMatch(/the manifest list is/)
+    expect(defects(seed(REF, 'keep: security, testing, reliability, compliance', 'keep: testing, reliability, compliance')))
+      .toContain('code/lean: a keep cell without security')
+    expect(defects(seed(REF, /(\| `docs-only` \| )keep: documentation, consistency, security/, '$1keep: documentation, consistency, security, compliance')))
+      .toContain('docs-only/standard: compliance outside the code class')
+    expect(defects(seed(REF, '| Class | standard | lean |', '| Class | full | standard | lean |')).join('\n')).toMatch(/the header is "Class \| full \| standard \| lean"/)
+    expect(defects(seed(REF, '| Class | standard | lean |', '| Class | standard | lean | extra |')).join('\n')).toMatch(/the header is/)
+    expect(defects(`${REF}\n<!-- learning:on -->\n`)).toContain('the reference carries a learning marker')
+    expect(defects(`${REF}\nCOMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}\n`)).toContain('the reference carries a framework list')
+    expect(defects(`${REF}\nRead devflow:compliance for the framework.\n`)).toContain('the reference carries the compliance skill')
+    expect(defects(`${REF}\nAgent(subagent_type="Review"): x\n`)).toContain('the reference carries a spawn block')
+    expect(defects(`${REF}\nAdd compliance when the diff touches regulated surface.\n`)).toContain('the reference carries the compliance trigger')
+    expect(defects(seed(REF, "to that class's own set", 'to the one list'))).toContain('the mixed-diff rule is not "apply each class\'s row to that class\'s own set, then take the union of the results"')
+  })
+})
+
+describe('the simulator reads its rules from the reference and the oracle decides the sets (AC-1..AC-8)', () => {
+  const parsed = parseLevelRef(REF)
+
+  it('every level, class combination and scenario gets the decided set, with security everywhere and no set outside the full set', () => {
+    expect(collectSimulationDefects(parsed)).toEqual([])
+  })
+
+  it('the hand-written mixed sets are the decided sizes at lean: docs+tests 5, tests+lockfile 4, docs+lockfile 4, all three 6', () => {
+    const sizes = Object.fromEntries(Object.entries(EXPECTED_SETS).map(([k, v]) => [k, v.lean.length]))
+    expect(sizes).toMatchObject({
+      'docs-only+tests-only': 5, 'tests-only+lockfile-only': 4, 'docs-only+lockfile-only': 4, 'docs-only+tests-only+lockfile-only': 6,
+    })
+  })
+
+  it('known-bad probes: a lean tests-only without security, the manifest exception removed and a sequential mixed rule are each reported', () => {
+    const defects = (text: string): string[] => collectSimulationDefects(parseLevelRef(text))
+    expect(defects(seed(REF, '| keep: testing, reliability, security |', '| keep: testing, reliability |')).some(d => d.startsWith('lean tests-only: no security'))).toBe(true)
+    expect(defects(seed(REF, ' (dependencies stays when a listed manifest changed)', '')).some(d => d.startsWith('standard code: a changed package.json does not keep dependencies'))).toBe(true)
+    const sequential = defects(seed(REF, 'apply each class\'s row to that class\'s own set, then take the union of the results, with no further cap',
+      'apply each class\'s row in turn to the one list'))
+    expect(sequential.some(d => d.startsWith('lean docs-only+tests-only: got [security], expected'))).toBe(true)
+    expect(defects(seed(REF, '`Gemfile`, ', '')).some(d => d.startsWith('standard code: a changed Gemfile does not keep dependencies'))).toBe(true)
+    expect(defects(seed(REF, 'drop: typescript, dependencies', 'drop: dependencies')).some(d => d.startsWith('standard code: got'))).toBe(true)
+  })
+
+  it('a lockfile with code drops the dependencies lens at standard, and a manifest keeps it', () => {
+    const sc: Scenario = { stamped: [], triggered: [], conditional: ['dependencies'], complianceActive: false, regulated: false, depPath: 'package-lock.json' }
+    expect(simulate('standard', ['code'], sc, parsed)).not.toContain('dependencies')
+    expect(simulate('standard', ['code'], { ...sc, depPath: 'package.json' }, parsed)).toContain('dependencies')
+    expect(simulate('full', ['code'], sc, parsed)).toContain('dependencies')
+  })
+})
+
+describe('the command carries the gate-level block, outside the learning arms (AC-8, AC-9, AC-14)', () => {
+  it.each(VARIANTS)('$label: the block, the read paragraph and the invariants', ({ body }) => {
+    expect(collectGateLevelBlockDefects(body)).toEqual([])
+  })
+
+  it('the source holds the block outside every learning arm', () => {
+    expect(collectBlockArmDefects(SOURCE)).toEqual([])
+  })
+
+  it('known-bad probes: each removed invariant, a changed root form, a missing Read-tool phrase and a block in a learning arm are reported', () => {
+    const defects = (text: string): string[] => collectGateLevelBlockDefects(text)
+    expect(defects(seed(ON, 'If the Read fails, or a row is missing or malformed, set `GATE_LEVEL` to `full` for every worktree of this run', 'If the Read fails, continue'))
+      .some(d => d.startsWith('the block lacks: If the Read fails'))).toBe(true)
+    expect(defects(seed(ON, "Apply each class's row to that class's own set, then take the union of the results.", 'Apply the rows.'))
+      .some(d => d.startsWith("the block lacks: Apply each class's row"))).toBe(true)
+    expect(defects(seed(ON, 'Security runs at every level and in every class.', 'Security runs at some levels.'))
+      .some(d => d.startsWith('the block lacks: Security runs at every level'))).toBe(true)
+    expect(defects(seed(ON, SANCTIONED_RESOLUTION, 'd="$HOME/.claude";')).join('\n')).toMatch(/the read paragraph lacks: d="\$\{CLAUDE_CONFIG_DIR:-\}"/)
+    expect(defects(seed(ON, '` with the Read tool.', '`.'))).toContain('the read paragraph lacks: with the Read tool')
+    expect(defects(seed(ON, '**Produces:** COMPLIANCE_ACTIVE, COMPLIANCE_FRAMEWORKS, GATE_LEVEL', '**Produces:** COMPLIANCE_ACTIVE, COMPLIANCE_FRAMEWORKS')))
+      .toContain('Step 0b Produces does not list GATE_LEVEL')
+    expect(defects(seed(ON, 'Compliance keeps the trigger above at every level.', 'Compliance keeps the trigger above at every level.\nInstalled language focuses: go')))
+      .toContain('the block carries a second stamp line')
+    expect(defects(seed(ON, 'Compliance keeps the trigger above at every level.', 'Compliance keeps the trigger above at every level for react and rust.')))
+      .toContain('the block restates a language focus list')
+    expect(defects(seed(ON, 'It sets the diff range, never the gate level', 'It applies to all'))).toContain('Edge Cases does not say --full sets the diff range, never the gate level')
+    const inArm = seed(seed(SOURCE, '#### Step 1.2b: Narrow by gate level', '<!-- learning:on -->\n#### Step 1.2b: Narrow by gate level'),
+      '#### Step 1.3: Write the diff files', '<!-- learning:end -->\n#### Step 1.3: Write the diff files')
+    expect(collectBlockArmDefects(inArm)).toEqual(['the gate-level block sits inside a learning:on arm'])
+  })
+})
+
+describe('full is today (AC-1)', () => {
+  it.each(VARIANTS)('$label: the reduced sets, the rule-1 manifests and the twelve trigger rows are unchanged', ({ body }) => {
+    expect(collectFullIsTodayDefects(body)).toEqual([])
+  })
+
+  it('known-bad probes: an edited trigger row, a reduced set and a manifest name are each reported', () => {
+    expect(collectFullIsTodayDefects(seed(ON, '| .go files | go |', '| .go files | golang |')).join('\n')).toMatch(/trigger row 5 is ".go files \| golang"/)
+    expect(collectFullIsTodayDefects(seed(ON, '| COMPLIANCE_ACTIVE AND diff touches regulated surface | compliance |', '| COMPLIANCE_ACTIVE AND diff touches PII | compliance |')))
+      .toContain('the compliance trigger row is not byte-equal')
+    expect(collectFullIsTodayDefects(seed(ON, '- `docs-only`: documentation, consistency, security', '- `docs-only`: documentation, security')))
+      .toContain('docs-only set is "documentation, security", expected "documentation, consistency, security"')
+    expect(collectFullIsTodayDefects(seed(ON, '`CMakeLists.txt`)', '`CMakeLists.txt`, `Gemfile`)')).join('\n')).toMatch(/the rule-1 manifests are/)
+  })
+})
+
+describe('no second cycle (AC-10)', () => {
+  it.each(VARIANTS)('$label: Step 0e-ii only warns and nothing restarts a phase, a cycle or /resolve', ({ body }) => {
+    expect(collectSecondCycleDefects(body, REF)).toEqual([])
+  })
+
+  it('known-bad probes: a stop, a second-cycle sentence, a resolve start, a restart and a late Review spawn are each reported', () => {
+    expect(collectSecondCycleDefects(seed(ON, '| CYCLE_NUMBER > MAX_REVIEW_CYCLES | Warn in output, continue |', '| CYCLE_NUMBER > MAX_REVIEW_CYCLES | Stop |'), REF).join('\n'))
+      .toMatch(/the outcome of "CYCLE_NUMBER > MAX_REVIEW_CYCLES" is "Stop"/)
+    expect(collectSecondCycleDefects(seed(ON, /^ {3}Continue with review\.$/m, '   Stop the review.'), REF)).toContain('1 "Continue with review." lines, expected 2')
+    expect(collectSecondCycleDefects(ON, `${REF}\nStart a second review cycle.\n`)).toContain('the reference starts a second cycle')
+    expect(collectSecondCycleDefects(`${ON}\nThen run \`/resolve\`.\n`, REF)).toContain('the command starts /resolve')
+    expect(collectSecondCycleDefects(`${ON}\nThen run \`/devflow:resolve\`.\n`, REF)).toContain('the command starts /resolve')
+    expect(collectSecondCycleDefects(`${ON}\nThen go back to Phase 1.\n`, REF)).toContain('the command restarts or re-enters Phase 1 or 2')
+    expect(collectSecondCycleDefects(seed(ON, '### Phase 4: Write Review Head Marker & Report', '### Phase 4: Write Review Head Marker & Report\n\nAgent(subagent_type="Review", run_in_background=false): "Mode: again"\n'), REF))
+      .toContain('a Review agent is spawned after Phase 3')
+  })
+
+  it('a script path named resolve-settings.cjs is not a /resolve start', () => {
+    expect(collectSecondCycleDefects(`${ON}\nnode "$HOME/.devflow/scripts/resolve-settings.cjs" "{root}"\n`, REF)).toEqual([])
+    expect(RESOLVE_START.test('node scripts/resolve-evidence-policy.cjs')).toBe(false)
+  })
+})

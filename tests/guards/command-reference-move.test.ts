@@ -14,6 +14,8 @@
  *     be split across files, and a Git fence is read by guards that scan the command.
  *   - Read paths. Every path a command names exists in the skill sources, every reference is named by a
  *     command, the read resolves the config directory in Bash first, and the compiled command carries it.
+ *     A host may read a reference on its default path (`/code-review` at `standard` or `lean`) as well as on
+ *     a rare branch; either way the read site passes through one named collector.
  *   - Installation. The skill belongs to `devflow-core-skills` alone, which every selection installs, so a
  *     selection of any plugin that uses a reference installs it; the install goldens list each file.
  *   - D-10: no plugin lists `agent-references` in `requires:`. A command reads the file by path, which the
@@ -38,7 +40,11 @@ import { resolvePluginsToInstall } from '../../src/cli/commands/init-seed.js'
 
 const REFERENCE_DIR = 'commands'
 const COMMANDS_DIR = path.join(ROOT, 'src', 'assets', 'commands')
-const READ_ROOT = '${CLAUDE_CONFIG_DIR:-$HOME/.claude}'
+/** The two root forms a read site may resolve first: the inline expression and the sanctioned resolution line. */
+const READ_ROOTS = [
+  '${CLAUDE_CONFIG_DIR:-$HOME/.claude}',
+  'd="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac;',
+] as const
 const READ_PATH_RE = /skills\/devflow:agent-references\/references\/commands\/([a-z0-9-]+\.md)/g
 
 /** One section a command lost and a reference now holds, exactly. */
@@ -133,12 +139,23 @@ export function namedReferences(text: string): string[] {
   return [...new Set([...text.matchAll(READ_PATH_RE)].map(m => m[1]))].sort()
 }
 
+/** Named collector: what is wrong with one paragraph that names a reference by read path. */
+export function collectReadSiteDefects(name: string, paragraph: string): string[] {
+  const out: string[] = []
+  const at = paragraph.search(/skills\/devflow:agent-references\//)
+  const roots = READ_ROOTS.map(r => paragraph.indexOf(r)).filter(i => i >= 0)
+  if (roots.length === 0) out.push(`${name}.mds: the read site must resolve a config-directory root before the path`)
+  else if (Math.min(...roots) > at) out.push(`${name}.mds: the root comes after the path`)
+  if (!paragraph.includes('with the Read tool')) out.push(`${name}.mds: the read goes through the Read tool`)
+  return out
+}
+
 describe('AC-406: every read path exists, is read, and resolves the config directory first', () => {
   it('each path a command names is a file of the skill, and each file is named by a command', () => {
     const files = referenceFiles()
-    expect(files, 'the reference directory is empty, so this guard proves nothing').toEqual(['implement-evidence-asks.md', 'implement-revalidate.md'])
+    expect(files, 'the reference directory is empty, so this guard proves nothing').toEqual(['code-review-levels.md', 'implement-evidence-asks.md', 'implement-revalidate.md'])
     const named = new Map(commandSources().map(s => [s.name, namedReferences(s.content)] as const).filter(([, refs]) => refs.length > 0))
-    expect([...named.keys()], 'only a host reads a reference, never a shared partial').toEqual(['implement'])
+    expect([...named.keys()], 'only a host reads a reference, never a shared partial').toEqual(['code-review', 'implement'])
     const all = [...new Set([...named.values()].flat())].sort()
     expect(all.filter(f => !existsSync(agentReferencePath(`${REFERENCE_DIR}/${f}`))), 'a named path with no file').toEqual([])
     expect(files.filter(f => !all.includes(f)), 'a reference no command reads').toEqual([])
@@ -147,23 +164,36 @@ describe('AC-406: every read path exists, is read, and resolves the config direc
   it('each read site resolves the config directory in Bash first, and the compiled command carries the path', () => {
     for (const { name, content } of commandSources()) {
       const paragraphs = content.split('\n\n').filter(p => namedReferences(p).length > 0)
-      for (const p of paragraphs) {
-        expect(p.indexOf(READ_ROOT), `${name}.mds: the read site must resolve ${READ_ROOT} before the path`).toBeGreaterThanOrEqual(0)
-        expect(p.indexOf(READ_ROOT)).toBeLessThan(p.search(/skills\/devflow:agent-references\//))
-        expect(p, `${name}.mds: the read goes through the Read tool`).toContain('with the Read tool')
-      }
+      for (const p of paragraphs) expect(collectReadSiteDefects(name, p)).toEqual([])
       if (paragraphs.length > 0) {
         const built = requireDistFile(`${name}.md`)
         expect(namedReferences(built), `${name}: the compiled command names the same files`).toEqual(namedReferences(content))
       }
     }
     expect(namedReferences(requireDistFile('implement.md'))).toEqual(['implement-evidence-asks.md', 'implement-revalidate.md'])
+    expect(namedReferences(requireDistFile('code-review.md'))).toEqual(['code-review-levels.md'])
   })
 
   it('known-bad probes: a path with no file and a read without the config-directory step are told apart', () => {
     expect(namedReferences('Read `<d>/skills/devflow:agent-references/references/commands/nope.md`')).toEqual(['nope.md'])
     expect(existsSync(agentReferencePath(`${REFERENCE_DIR}/nope.md`))).toBe(false)
     expect(namedReferences('no path here')).toEqual([])
+  })
+
+  it('known-bad probes: no root, a root after the path and a missing Read-tool phrase are each reported, and both root forms are accepted', () => {
+    const target = 'skills/devflow:agent-references/references/commands/x.md'
+    const inline = READ_ROOTS[0]
+    const sanctioned = READ_ROOTS[1]
+    expect(collectReadSiteDefects('probe', `Read \`<d>/${target}\` with the Read tool.`))
+      .toEqual(['probe.mds: the read site must resolve a config-directory root before the path'])
+    expect(collectReadSiteDefects('probe', `Read \`<d>/${target}\` with the Read tool, after resolving ${inline}.`))
+      .toEqual(['probe.mds: the root comes after the path'])
+    expect(collectReadSiteDefects('probe', `Resolve ${inline} in Bash and Read \`<d>/${target}\`.`))
+      .toEqual(['probe.mds: the read goes through the Read tool'])
+    expect(collectReadSiteDefects('probe', `Run \`d="$HOME/.claude";\` in Bash and Read \`<d>/${target}\` with the Read tool.`))
+      .toEqual(['probe.mds: the read site must resolve a config-directory root before the path'])
+    expect(collectReadSiteDefects('probe', `Resolve ${inline} in Bash and Read \`<d>/${target}\` with the Read tool.`)).toEqual([])
+    expect(collectReadSiteDefects('probe', `Run \`${sanctioned} printf '%s\\n' "$d"\` in Bash and Read \`<d>/${target}\` with the Read tool.`)).toEqual([])
   })
 
   it('a selection of any plugin that uses a reference installs the skill, and the install goldens list each file', () => {
