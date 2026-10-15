@@ -43,6 +43,9 @@ The memory worker's write is limited to its staged file. Read the items below af
 - Update Claude Code to 2.1.269 or newer. On an older version, working memory does not update and Claude Code shows no message. The worker log has one line that says why.
 - If a worker `env` value lives only in your project or local Claude Code settings, move it to your user settings file. The worker loads only the user settings.
 
+**Your own settings:**
+- Allow rules in your own Claude Code settings also apply to the worker's run. A user-level Edit allow rule that covers other paths covers the worker too.
+
 **Known limits:**
 - A project path that contains any of `* ? [ ] \ " { }` or a control character gets no working-memory updates. The permission rule carries the path without quoting. The worker skips the project, logs the reason and shows one message at session start. Parentheses and spaces in the path are carried as they are.
 
