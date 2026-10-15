@@ -52,6 +52,7 @@ Do the step below after you update.
 ### Fixed
 
 - **A tracked `.devflow/config.json` no longer applies as personal config** ([#489](https://github.com/dean0x/devflow/pull/489)). devflow ignores it and shows a warning.
+- **Model discovery waits up to 6 s for the routing runtime** (was 2 s). On a loaded machine, the first start of node with the routing runtime can take more than 2 s. Discovery then reported an installed runtime as unknown in the agents TUI and in `devflow proxy --enable`. A runtime that does not answer within 6 s still falls back to the stale cache.
 
 ---
 

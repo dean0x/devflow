@@ -34,8 +34,8 @@
  *     runtime installed. Writes 5 entries upfront; after discovery, exactly 3
  *     remain and they are the newest 3 by embedded timestamp.
  *
- *  AC-P8 (SIGTERM/SIGKILL test): a stub binary that ignores SIGTERM for >2s
- *     is killed by SIGKILL; discoverExternalModels returns known:false (not
+ *  AC-P8 (SIGTERM/SIGKILL test): a stub binary that ignores SIGTERM past
+ *     SIGKILL_GRACE_MS is killed by SIGKILL; discoverExternalModels returns known:false (not
  *     a hang). Uses a real shell binary.
  *
  * Every path that gates on an exit code exercises a REAL
@@ -1447,7 +1447,8 @@ describe('AC-P8: SIGTERM + SIGKILL escalation on timeout', () => {
         }
       }
     },
-    // Total budget: SPAWN_TIMEOUT_MS + SIGKILL_GRACE_MS + 2s headroom + 1s verify = ~7.5s
+    // Total budget: twice (SPAWN_TIMEOUT_MS + SIGKILL_GRACE_MS) + 3.5s. The body needs the
+    // deadline plus SIGKILL_GRACE_MS + 500ms; the rest is margin for a loaded machine.
     (SPAWN_TIMEOUT_MS + SIGKILL_GRACE_MS) * 2 + 3_500,
   );
 });

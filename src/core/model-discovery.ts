@@ -76,9 +76,13 @@ const STDOUT_CAP = 262_144;
  * within this window receives SIGTERM followed by a SIGKILL escalation after
  * SIGKILL_GRACE_MS. Zero retries — the stale cache is the retry.
  *
+ * The window must outlast a cold start on a loaded machine: the first exec of
+ * node with the routing runtime can take 1.0-5.4 s while the OS vets the new
+ * process. A shorter window reports an installed runtime as unknown.
+ *
  * Exported so tests can derive timing bounds without mirroring the literal.
  */
-export const SPAWN_TIMEOUT_MS = 2_000;
+export const SPAWN_TIMEOUT_MS = 6_000;
 
 /**
  * Grace period (ms) between SIGTERM and SIGKILL escalation. Unreffed so the
