@@ -39,6 +39,8 @@ dbg "CWD=$CWD"
 # Anchor .devflow/ to the project root (prevents a stray nested .devflow/ when this
 # hook runs with a CWD inside .devflow/...). Empty → fall back to CWD.
 source "$SCRIPT_DIR/resolve-project-root" 2>/dev/null || true
+# The one-time notice the memory worker leaves (needs df_file_below from resolve-project-root).
+source "$SCRIPT_DIR/memory-permission" || { echo "session-start-memory: failed to source memory-permission" >&2; exit 1; }
 PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
 [ -n "$PROJECT_ROOT" ] || PROJECT_ROOT="$CWD"
 
@@ -346,17 +348,34 @@ ${COMPACT_NOTE}"
   fi
 fi
 
+# --- One-time worker notice ---
+# When the memory worker cannot refresh memory for a reason only the user can fix (Claude
+# Code older than the worker needs, a project path its permission rule cannot carry, the
+# worker's write refused twice in a row), it leaves a notice file. The message is shown
+# to the user once per reason, whether or not a working memory exists, and the file moves
+# to its `.shown` marker so the next start stays quiet (memory-permission).
+# D-SYSTEMMESSAGE-ENVELOPE: it travels as `systemMessage`, beside the context and never in it.
+memory_notice_read "$MEMORY_DIR" "$PROJECT_ROOT" "$LOG_DIR/.background-memory-update.log"
+SYSTEM_MESSAGE="$MEMORY_NOTICE_MESSAGE"
+if [ -n "$SYSTEM_MESSAGE" ]; then
+  dbg "Worker notice shown"
+  log "Worker notice shown to the user"
+fi
+
 # --- Output ---
 
-# Only output if we have something to inject
-if [ -z "$CONTEXT" ]; then
+# Only output if we have something to inject or to tell the user
+if [ -z "$CONTEXT" ] && [ -z "$SYSTEM_MESSAGE" ]; then
   dbg "EXIT: no context to inject"
   exit 0
 fi
 
 dbg "OUTPUT_LENGTH=${#CONTEXT}"
-log "Injecting memory context (${#CONTEXT} chars)"
+if [ -n "$CONTEXT" ]; then
+  log "Injecting memory context (${#CONTEXT} chars)"
+fi
 dbg "=== HOOK COMPLETE ==="
 
-# Output as additionalContext JSON envelope (Claude sees it as system context, not user-visible)
-json_session_output "$CONTEXT"
+# Output as additionalContext JSON envelope (Claude sees it as system context, not user-visible);
+# a notice adds a systemMessage the user sees.
+json_session_output "$CONTEXT" "$SYSTEM_MESSAGE"

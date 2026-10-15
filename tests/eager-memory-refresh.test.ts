@@ -4420,3 +4420,149 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
     });
   });
 });
+
+// =============================================================================
+// S30 — AC4: the worker's one-time notice reaches the user once, at session start
+//
+// When the worker cannot refresh memory for a reason only the user can fix, it leaves a
+// notice file with a reason code (floor, path or denied), and the next session start
+// shows each reason once as a systemMessage, whether or not a working memory exists.
+// =============================================================================
+describe('S30: a notice from the memory worker is shown once at session start (AC4)', { timeout: LEAN_RUN_TIMEOUT_MS }, () => {
+  let projectDir: string;
+  let homeDir: string;
+  let shimDir: string;
+  let memFile: string;
+  let stagedFile: string;
+
+  makeWorkerFixture('emr-s30', (f) => {
+    ({ projectDir, homeDir, shimDir, memFile, stagedFile } = f);
+  });
+
+  const memoryDir = (): string => path.join(projectDir, '.devflow', 'memory');
+  const noticePath = (reason: string): string => path.join(memoryDir(), `.worker-notice-${reason}`);
+
+  /** One worker run against a recording fake that reports `versionBody` and does what `options` says. */
+  function runWorkerOnce(versionBody: string, options: RecordingOptions = {}): void {
+    createRecordingClaude(shimDir, memoryDir(), versionBody, options);
+    expect(runWorker(projectDir, homeDir, shimDir).exitCode).toBe(0);
+  }
+
+  const DENIED_RESULT = JSON.stringify({
+    subtype: 'success', is_error: false, num_turns: 2,
+    permission_denials: [{ tool_name: 'Write', tool_input: { content: 'BODYCANARY' } }, { tool_name: 'Write', tool_input: { content: 'BODYCANARY' } }],
+  });
+
+  /** One session start: what the hook printed, parsed. `raw` is empty when it printed nothing. */
+  function sessionStart(): { raw: string; systemMessage?: string; context?: string } {
+    const { stdout, exitCode } = runHook(SESSION_START_MEMORY_HOOK, { cwd: projectDir }, homeDir);
+    expect(exitCode).toBe(0);
+    if (stdout.trim() === '') return { raw: '' };
+    const parsed = JSON.parse(stdout.trim()) as { systemMessage?: string; hookSpecificOutput?: { additionalContext?: string } };
+    return { raw: stdout, systemMessage: parsed.systemMessage, context: parsed.hookSpecificOutput?.additionalContext };
+  }
+
+  it('a skip below the permission floor shows the update notice once, with no working memory, and not at the second start', () => {
+    runWorkerOnce('echo "2.1.268 (Claude Code)"');
+    expect(fs.existsSync(memFile), 'non-vacuity: there is no working memory').toBe(false);
+
+    const first = sessionStart();
+    expect(first.systemMessage).toContain('Update Claude Code');
+    expect(first.systemMessage).toContain('2.1.268');
+    expect(first.systemMessage).toContain(PERMISSION_FLOOR);
+    expect(first.context, 'the notice is a user message, not model context').toBeUndefined();
+
+    expect(sessionStart().raw, 'the second start prints nothing').toBe('');
+    expect(fs.existsSync(`${noticePath('floor')}.shown`), 'the shown marker stays').toBe(true);
+
+    runWorkerOnce('echo "2.1.268 (Claude Code)"');
+    expect(sessionStart().raw, 'a later skip for the same reason stays quiet').toBe('');
+  });
+
+  it('the notice rides beside the working memory: the memory is the context, the notice the systemMessage', () => {
+    const head = execSync('git rev-parse HEAD', { cwd: projectDir, encoding: 'utf-8' }).trim();
+    fs.writeFileSync(memFile, `<!-- memory-head: ${head} branch: main -->\n## Now\n- some progress\n`);
+    runWorkerOnce('echo "2.1.268 (Claude Code)"');
+
+    const start = sessionStart();
+    expect(start.context).toContain('WORKING MEMORY');
+    expect(start.context, 'the notice text is not in the context').not.toContain('Update Claude Code');
+    expect(start.systemMessage).toContain('Update Claude Code');
+  });
+
+  it('a permitted run clears the floor notice, so a later skip is shown again', () => {
+    runWorkerOnce('echo "2.1.268 (Claude Code)"');
+    expect(sessionStart().systemMessage).toContain('Update Claude Code');
+
+    seedQueue(projectDir);
+    runWorkerOnce(HEALTHY_VERSION);
+    expect(fs.existsSync(noticePath('floor')) || fs.existsSync(`${noticePath('floor')}.shown`), 'both files are gone').toBe(false);
+
+    seedQueue(projectDir);
+    runWorkerOnce('echo "2.1.268 (Claude Code)"');
+    expect(sessionStart().systemMessage).toContain('Update Claude Code');
+  });
+
+  it('a persistent path refusal raises the path notice once, with its own remedy', () => {
+    fs.mkdirSync(stagedFile);
+    fs.writeFileSync(path.join(stagedFile, 'inside'), 'keep');
+    runWorkerOnce(HEALTHY_VERSION);
+
+    const first = sessionStart();
+    expect(first.systemMessage).toContain('project path');
+    expect(first.systemMessage).toContain('.background-memory-update.log');
+    expect(first.systemMessage, 'a path notice does not tell the user to update').not.toContain('Update Claude Code');
+
+    expect(sessionStart().raw).toBe('');
+    runWorkerOnce(HEALTHY_VERSION);
+    expect(sessionStart().raw, 'the same refusal again stays quiet').toBe('');
+  });
+
+  it('two denied runs in a row raise the denied notice once; one denied run raises nothing', () => {
+    runWorkerOnce(HEALTHY_VERSION, { resultJson: DENIED_RESULT, skipStagedWrite: true });
+    expect(fs.existsSync(noticePath('denied')), 'one denied run raises nothing').toBe(false);
+    expect(sessionStart().raw).toBe('');
+
+    runWorkerOnce(HEALTHY_VERSION, { resultJson: DENIED_RESULT, skipStagedWrite: true });
+    const first = sessionStart();
+    expect(first.systemMessage).toContain('refused the worker');
+    expect(first.systemMessage).not.toContain('BODYCANARY');
+
+    expect(sessionStart().raw, 'shown once').toBe('');
+  });
+
+  it('a run that swaps the memory in between resets the denied count', () => {
+    runWorkerOnce(HEALTHY_VERSION, { resultJson: DENIED_RESULT, skipStagedWrite: true });
+    runWorkerOnce(HEALTHY_VERSION);
+    expect(fs.existsSync(memFile), 'non-vacuity: the good run swapped the memory in').toBe(true);
+
+    seedQueue(projectDir);
+    runWorkerOnce(HEALTHY_VERSION, { resultJson: DENIED_RESULT, skipStagedWrite: true });
+
+    expect(fs.existsSync(noticePath('denied')), 'denied, good, denied is not two in a row').toBe(false);
+  });
+
+  it('each reason is shown once on its own: a shown floor notice does not hide a later path notice', () => {
+    runWorkerOnce('echo "2.1.268 (Claude Code)"');
+    expect(sessionStart().systemMessage).toContain('Update Claude Code');
+
+    seedQueue(projectDir);
+    fs.mkdirSync(stagedFile);
+    fs.writeFileSync(path.join(stagedFile, 'inside'), 'keep');
+    runWorkerOnce(HEALTHY_VERSION);
+
+    expect(fs.existsSync(`${noticePath('floor')}.shown`), 'the permitted run cleared the floor marker').toBe(false);
+    expect(sessionStart().systemMessage).toContain('project path');
+  });
+
+  it('ignores a notice that is a link, and one whose content does not fit its reason', () => {
+    const outside = path.join(shimDir, 'outside.txt');
+    fs.writeFileSync(outside, 'floor 2.1.250 2.1.269\n');
+    fs.symlinkSync(outside, noticePath('floor'));
+    fs.writeFileSync(noticePath('path'), 'denied - -\n');
+
+    expect(sessionStart().raw, 'nothing shown').toBe('');
+    expect(fs.lstatSync(noticePath('floor')).isSymbolicLink(), 'the link is left as it was').toBe(true);
+    expect(fs.existsSync(`${noticePath('path')}.shown`), 'the odd notice is moved aside, unshown').toBe(true);
+  });
+});
