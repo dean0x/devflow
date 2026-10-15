@@ -17,7 +17,7 @@
  * bash 3.2 job (see .github/workflows/ci.yml).
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { execFileSync, spawnSync } from 'child_process';
+import { execFileSync, spawn, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -325,6 +325,12 @@ describe('lint-pack template: shipped files', () => {
     }
   });
 
+  it('points the example linter at the local binary, never at npx that can fetch an unpinned package', () => {
+    const lines = fs.readFileSync(EXAMPLE_CONFIG, 'utf8').split('\n');
+    expect(lines).toContain('size.arg=./node_modules/.bin/eslint');
+    expect(lines.filter(line => /^size\.arg=npx$/.test(line))).toEqual([]);
+  });
+
   it('documents ownership, location, wiring, limits and the allow-glob step in the README', () => {
     const text = fs.readFileSync(TEMPLATE_README, 'utf8');
     for (const needle of [
@@ -567,6 +573,202 @@ describe('lint-pack template: error states', () => {
     const { r } = simple(cfg('bogus.key=1'), { 'src/a.ts': 'x\n' }, { 'src/a.ts': 'y\n' });
     expectError(r.run('0'.repeat(40)), 'bad-base');
     expectError(r.run('zzz'), 'bad-base');
+  });
+});
+
+// ── Git version and interruption ─────────────────────────────────────────────
+
+/** The real git, found on PATH, for a shim to hand every other call to. */
+function realGitPath(): string {
+  for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
+    const candidate = path.join(dir, 'git');
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return candidate;
+    } catch {
+      // not in this directory
+    }
+  }
+  throw new Error('git is not on PATH');
+}
+
+/** A PATH whose first entry holds a `git` that reports `version` and runs the real git for every other call. */
+function pathWithGitVersion(version: string): string {
+  const bin = tempDir('lint-pack-gitbin-');
+  const shim = [
+    '#!/bin/sh',
+    `if [ "$1" = "--version" ]; then printf '%s\\n' '${version}'; exit 0; fi`,
+    `exec "${realGitPath()}" "$@"`,
+    '',
+  ].join('\n');
+  fs.writeFileSync(path.join(bin, 'git'), shim, { mode: 0o755 });
+  return `${bin}${path.delimiter}${process.env.PATH ?? ''}`;
+}
+
+describe('lint-pack template: the git version precondition', () => {
+  const planIdFixture = () => simple(IDS_CONF, { 'src/a.ts': 'x\n' }, { 'src/a.ts': '// TP-7\n' });
+
+  it.each([
+    'git version 2.29.3',
+    'git version 2.25.1',
+    'git version 2.9.5',
+    'git version 1.9.5',
+    'git version 2.29.0.windows.1',
+  ])('reports git-too-old for %s, before the base is checked', version => {
+    const { r, base } = planIdFixture();
+    const env = { PATH: pathWithGitVersion(version) };
+    const res = r.run(base, { env });
+    expectError(res, 'git-too-old');
+    expect(res.stderr).toBe('');
+    expectError(r.run('0'.repeat(40), { env }), 'git-too-old');
+    expectError(r.run('zzz', { env }), 'git-too-old');
+  });
+
+  it.each([
+    'git version 2.30.0',
+    'git version 2.39.3 (Apple Git-145)',
+    'git version 2.30.0.windows.1',
+    'git version 2.100.0',
+    'git version 3.0.0',
+    'git version 10.1.2',
+  ])('runs with %s', version => {
+    const { r, base } = planIdFixture();
+    expectRun(r.run(base, { env: { PATH: pathWithGitVersion(version) } }), 'plan-id src/a.ts:1 tp\nLINT_PACK: matches 1\n', 1);
+  });
+
+  it.each(['banana', '', 'git version'])('reports git-failed when git --version prints %j', version => {
+    const { r, base } = planIdFixture();
+    expectError(r.run(base, { env: { PATH: pathWithGitVersion(version) } }), 'git-failed');
+  });
+
+  it('still reports bad-base with a git that is new enough', () => {
+    const { r } = planIdFixture();
+    expectError(r.run('0'.repeat(40), { env: { PATH: pathWithGitVersion('git version 2.30.0') } }), 'bad-base');
+  });
+});
+
+const POLL_MS = 50;
+/** 20 s: well inside SUBPROCESS_TIMEOUT_MS, so a pack that never reaches the linter fails the assertion first. */
+const MAX_POLLS = 400;
+
+/**
+ * Run the pack in its own process group, wait until the linter stub has started, then signal the whole
+ * group, as a timeout wrapper does. The group is killed in `finally`, so no stub outlives the test.
+ */
+async function runUntilSignalled(r: Repo, base: string, signal: NodeJS.Signals, tmp: string): Promise<Run> {
+  const marker = path.join(r.dir, 'linter-started');
+  const child = spawn('bash', [path.join(r.dir, SCRIPT_IN_REPO), base], {
+    cwd: r.dir,
+    env: r.env({ TMPDIR: tmp }),
+    detached: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const pid = child.pid;
+  if (pid === undefined) throw new Error('the pack did not start');
+  let stdout = '';
+  let stderr = '';
+  let exited = false;
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  child.stdout.on('data', (chunk: string) => { stdout += chunk; });
+  child.stderr.on('data', (chunk: string) => { stderr += chunk; });
+  const closed = new Promise<number | null>((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', code => {
+      exited = true;
+      resolve(code);
+    });
+  });
+  try {
+    for (let polls = 0; polls < MAX_POLLS && !exited && !fs.existsSync(marker); polls++) {
+      await new Promise(resolve => setTimeout(resolve, POLL_MS));
+    }
+    expect(fs.existsSync(marker), `the linter stub must start (stdout: ${stdout})`).toBe(true);
+    process.kill(-pid, signal);
+    const status = await closed;
+    return { stdout, stderr, status };
+  } finally {
+    try {
+      process.kill(-pid, 'SIGKILL');
+    } catch {
+      // the group is already gone
+    }
+  }
+}
+
+describe('lint-pack template: an interrupted run', () => {
+  const SLOW_LINTER = '#!/usr/bin/env bash\n: > linter-started\nsleep 60\n';
+
+  it.each(['SIGTERM', 'SIGINT'] as const)('reports interrupted, never git-failed, on %s and removes its temp dir', async signal => {
+    const { r, base } = simple(SIZE_CONF, { 'src/a.ts': 'x\n', [STUB]: SLOW_LINTER }, { 'src/a.ts': 'y\n' });
+    const tmp = tempDir('lint-pack-tmp-');
+    const res = await runUntilSignalled(r, base, signal, tmp);
+    expectError(res, 'interrupted');
+    expect(res.stderr).toBe('');
+    expect(fs.readdirSync(tmp)).toEqual([]);
+  });
+
+  it('prints the pack-changed lines before interrupted', async () => {
+    const { r, base } = simple(
+      undefined,
+      { 'src/a.ts': 'x\n', [STUB]: SLOW_LINTER },
+      { '.lint-pack.conf': SIZE_CONF },
+    );
+    const res = await runUntilSignalled(r, base, 'SIGTERM', tempDir('lint-pack-tmp-'));
+    expectRun(res, 'pack-changed .lint-pack.conf\nLINT_PACK: error interrupted\n', 2);
+  });
+});
+
+// ── Header and printed reasons ───────────────────────────────────────────────
+
+/** Reasons the script can print: its `die_error <reason>` calls and every literal `LINT_PACK: error <reason>` line. */
+function printedReasons(text: string): string[] {
+  const code = text.split('\n').filter(line => !/^\s*#/.test(line)).join('\n');
+  const found = new Set<string>();
+  for (const m of code.matchAll(/die_error "?([a-z][a-z0-9-]*)/g)) found.add(m[1]);
+  for (const m of code.matchAll(/LINT_PACK: error ([a-z][a-z0-9-]*)/g)) found.add(m[1]);
+  return [...found].sort();
+}
+
+/** Reasons the header names in its `Error reasons:` paragraph. */
+function headerReasons(text: string): string[] {
+  const lines = text.split('\n');
+  const start = lines.findIndex(line => line.startsWith('# Error reasons:'));
+  if (start < 0) return [];
+  const paragraph: string[] = [];
+  for (const line of lines.slice(start)) {
+    if (!line.startsWith('# ')) break;
+    paragraph.push(line.slice(2));
+    if (line.endsWith('.')) break;
+  }
+  const body = paragraph.join(' ').replace('Error reasons:', '');
+  return body.split(',').map(item => item.trim().replace(/\.$/, '').split(' ')[0]).filter(Boolean).sort();
+}
+
+/** Reasons printed but not named in the header (`undocumented`) and named but never printed (`unused`). */
+function reasonDrift(text: string): string[] {
+  const printed = printedReasons(text);
+  const named = headerReasons(text);
+  return [
+    ...printed.filter(reason => !named.includes(reason)).map(reason => `undocumented ${reason}`),
+    ...named.filter(reason => !printed.includes(reason)).map(reason => `unused ${reason}`),
+  ];
+}
+
+describe('lint-pack template: the error reasons in the header', () => {
+  it('names every reason the script prints, and no other', () => {
+    const text = fs.readFileSync(SCRIPT, 'utf8');
+    const printed = printedReasons(text);
+    expect(printed.length, 'the collector must see the reasons').toBeGreaterThanOrEqual(11);
+    expect(printed).toEqual(expect.arrayContaining(['git-failed', 'git-too-old', 'interrupted', 'linter-exit']));
+    expect(reasonDrift(text)).toEqual([]);
+  });
+
+  it('flags a reason that is printed but not named, and one that is named but never printed (known-bad probe)', () => {
+    const header = ['# Error reasons: usage, bad-config <n>, gone.', '#', ''];
+    const body = ['f() { die_error usage; }', 'g() { die_error "bad-config $1"; }'];
+    expect(reasonDrift([...header, ...body].join('\n'))).toEqual(['unused gone']);
+    expect(reasonDrift([...header, ...body, 'h() { die_error brand-new; }'].join('\n'))).toEqual(['undocumented brand-new', 'unused gone']);
   });
 });
 
@@ -978,6 +1180,23 @@ describe('lint-pack template: function-size check', () => {
     expectRun(accepted.r.run(accepted.base), 'function-size src/a.ts:2 function-size\nLINT_PACK: matches 1\n', 1);
     const narrowed = sizeFixture(`${SIZE_CONF}size.ok-exit=0\n`, [], 1);
     expectError(narrowed.r.run(narrowed.base), 'linter-exit 1');
+  });
+
+  it('reports linter-exit for a non-zero status with no path:line diagnostic, even inside the accepted set', () => {
+    // A runner that never ran the linter (a failed npx fetch, a missing module) exits 1 and prints no diagnostic.
+    const silent = sizeFixture(SIZE_CONF, [], 1);
+    expectError(silent.r.run(silent.base), 'linter-exit 1');
+    const noise = sizeFixture(SIZE_CONF, ['npm error code ENOTCACHED', 'npm error request to https://registry.example.invalid/eslint failed'], 1);
+    expectError(noise.r.run(noise.base), 'linter-exit 1');
+    const custom = sizeFixture(`${SIZE_CONF}size.ok-exit=2\n`, [], 2);
+    expectError(custom.r.run(custom.base), 'linter-exit 2');
+    const stderrOnly = sizeFixture(SIZE_CONF, ['Error: Cannot find module eslint'], 1, true);
+    expectError(stderrOnly.r.run(stderrOnly.base), 'linter-exit 1');
+  });
+
+  it('still reads a non-zero status with path:line diagnostics that miss size.match as a lint result', () => {
+    const { r, base } = sizeFixture(SIZE_CONF, ['@ROOT@/src/a.ts:2:9: Unused variable. [Error/no-unused-vars]'], 1);
+    expectRun(r.run(base), 'LINT_PACK: clean\n', 0);
   });
 
   it('runs the linter from the repository root', () => {

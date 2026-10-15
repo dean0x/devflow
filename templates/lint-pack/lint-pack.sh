@@ -24,7 +24,8 @@
 #
 #   <check-id> <path>:<line> <id>      one record per match, sorted, at most 50
 #   +<k> more                          records beyond the first 50
-#   pack-changed <path>                a pack file the branch changed
+#   pack-changed <path>                a pack file the branch changed; these lines
+#                                      also print before an error line
 #   skipped-binary <path>              at most 10, then +<k> more
 #   symbol-cap <n> | unsafe-tokens <n> | unmatched-diagnostics <n>
 #   dropped-long-lines <n>             counts, printed only when not zero
@@ -32,8 +33,15 @@
 #   LINT_PACK: matches <n>             exit 1
 #   LINT_PACK: error <reason>          exit 2
 #
-# Error reasons: usage, not-a-repo, bad-base, base-not-ancestor, bad-config <n>,
-# bad-pattern <id>, git-failed, linter-missing, linter-exit <n>.
+# Error reasons: usage, git-too-old, not-a-repo, bad-base, base-not-ancestor,
+# bad-config <n>, bad-pattern <id>, git-failed, interrupted, linter-missing,
+# linter-exit <n>.
+#
+# git-too-old   git is older than 2.30; a version string that cannot be read is
+#               git-failed
+# interrupted   the run got SIGTERM or SIGINT, for example from a timeout
+# linter-exit   the linter exited with a status outside the accepted set, or with
+#               any non-zero status and no "<path>:<line>:" line in its output
 #
 # Needs bash 3.2 or newer and git 2.30 or newer. No line of added text is ever
 # printed. The last line is always the LINT_PACK line.
@@ -54,6 +62,8 @@ MAX_CONF_LINES=1000
 MAX_RECORDS=50
 MAX_SYMBOLS=500
 MAX_BINARY=10
+MIN_GIT_MAJOR=2
+MIN_GIT_MINOR=30
 
 TAB=$(printf '\t')
 KEY_RE='^[a-z][a-z0-9-]*(\.[a-z0-9-]+)+$'
@@ -62,6 +72,8 @@ BASE_RE='^[0-9a-f]{40}$'
 BLANK_RE='^[[:space:]]*$'
 NUM_RE='^[0-9]{1,3}$'
 BAD_ESCAPE_RE='\\[A-Za-z0-9<>]'
+GIT_VERSION_RE='^([0-9]+)\.([0-9]+)'
+DIAGNOSTIC_RE='^.+:[0-9]+:'
 
 # Every git call: no pager, and quoted paths in git's C-quoted form.
 g() { command git --no-pager -c core.quotePath=true "$@"; }
@@ -139,6 +151,14 @@ on_exit() {
   exit "$rc"
 }
 trap on_exit EXIT
+
+# A timeout wrapper ends a run with SIGTERM, a user with SIGINT: say so, and let
+# the exit trap remove the temp dir. Further signals are ignored meanwhile.
+on_signal() {
+  trap '' TERM INT
+  die_error interrupted
+}
+trap on_signal TERM INT
 
 # ---- Small helpers ----
 
@@ -476,7 +496,9 @@ check_ids() {
 check_size() {
   local rc ok e
   # The linter is argv, one word per config line, run from the root. No shell.
-  ( cd "$ROOT" && "${SIZE_ARG[@]}" ) </dev/null >"$TMP/lint.out" 2>&1
+  # The outer redirect keeps bash's own "Terminated" note off stderr when a signal
+  # ends the linter's subshell.
+  { ( cd "$ROOT" && "${SIZE_ARG[@]}" ) </dev/null >"$TMP/lint.out" 2>&1; } 2>/dev/null
   rc=$?
   case "$rc" in 126 | 127) die_error linter-missing ;; esac
   ok=0
@@ -484,6 +506,12 @@ check_size() {
     if [ "$rc" -eq "$e" ]; then ok=1; fi
   done
   [ "$ok" = 1 ] || die_error "linter-exit $rc"
+  # A non-zero status without one "<path>:<line>:" line is not a lint result: the
+  # linter did not run (a failed fetch, a missing module). Never read it as clean.
+  if [ "$rc" -ne 0 ]; then
+    command grep -a -q -E -e "$DIAGNOSTIC_RE" "$TMP/lint.out"
+    case "$?" in 0) ;; 1) die_error "linter-exit $rc" ;; *) die_error git-failed ;; esac
+  fi
   if [ -n "$SIZE_MATCH" ]; then
     command grep -a -E -e "$SIZE_MATCH" "$TMP/lint.out" >"$TMP/lint.sel"
     rc=$?
@@ -726,11 +754,25 @@ load_config() {
   build_map "$TMP/dm.q" "$TMP/dm.z" "$TMP/dm.map" 0
 }
 
+# git 2.30 or newer: the base checks use --end-of-options, which an older git
+# rejects, and that would read as bad-base. Compare numbers, never strings.
+check_git_version() {
+  local out
+  out=$(command git --version 2>/dev/null) || die_error git-failed
+  out=${out#git version }
+  [[ $out =~ $GIT_VERSION_RE ]] || die_error git-failed
+  if [ $((10#${BASH_REMATCH[1]})) -lt "$MIN_GIT_MAJOR" ]; then die_error git-too-old; fi
+  if [ $((10#${BASH_REMATCH[1]})) -eq "$MIN_GIT_MAJOR" ] && [ $((10#${BASH_REMATCH[2]})) -lt "$MIN_GIT_MINOR" ]; then
+    die_error git-too-old
+  fi
+}
+
 main() {
   local top rc
   [ "$#" -eq 1 ] || die_error usage
   resolve_self
   command -v git >/dev/null 2>&1 || die_error git-failed
+  check_git_version
   top=$(command git rev-parse --show-toplevel 2>/dev/null) || die_error not-a-repo
   [ -n "$top" ] || die_error not-a-repo
   cd "$top" 2>/dev/null || die_error not-a-repo
