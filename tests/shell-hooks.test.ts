@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as net from 'net';
 import { HANDOFF_TEMPLATE, REMINDER_TEMPLATE } from './fixtures/ambient-templates.js';
+import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
 import { buildRoutingConfigJson } from '../src/core/proxy-state.js';
 import * as p from '@clack/prompts';
 import {
@@ -2239,6 +2240,7 @@ describe('ensure-devflow-init behavioral', () => {
 
 describe('ensure-root-gitignore behavioral', () => {
   const ENSURE_ROOT = path.join(HOOKS_DIR, 'ensure-root-gitignore');
+  const writeFakeExecutable = useWarmFakeExecutables();
 
   let tmpDir: string;
 
@@ -2335,11 +2337,12 @@ describe('ensure-root-gitignore behavioral', () => {
   });
 
   it('v6 fast path forks `rm` only for a legacy marker that exists (builtin `[ -e ]` tests)', () => {
-    // An `rm` shim first on PATH logs every invocation, then does the real work.
+    // An `rm` shim first on PATH logs every invocation, then does the real work. It is a
+    // link to the warm dispatcher, so the shim's first exec is not a cold new executable.
     const shimBin = path.join(tmpDir, 'shim-bin');
     const rmLog = path.join(tmpDir, 'rm.log');
     fs.mkdirSync(shimBin);
-    fs.writeFileSync(path.join(shimBin, 'rm'), `#!/bin/bash\necho "$@" >> "${rmLog}"\nexec /bin/rm "$@"\n`, { mode: 0o755 });
+    writeFakeExecutable(path.join(shimBin, 'rm'), `#!/bin/bash\necho "$@" >> "${rmLog}"\nexec /bin/rm "$@"\n`);
     const env = { ...process.env, PATH: `${shimBin}:${process.env.PATH}` };
     execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
 

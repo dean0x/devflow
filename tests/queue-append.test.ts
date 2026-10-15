@@ -16,6 +16,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { SETTINGS_SWITCH_TABLE, type SwitchRow } from './fixtures/settings-switch-table.js';
+import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
 import {
   FIFO_RUN_BOUND_MS,
   FIFO_TEST_TIMEOUT_MS,
@@ -23,6 +24,7 @@ import {
   NODE_EXEC_STALL_MS,
   makeFifo,
   releaseFifo,
+  resolveOnPath,
   spawnWithStdin,
 } from './shell-hooks-helpers.js';
 
@@ -780,17 +782,13 @@ describe('queue_read_gates <manifest> <root>: the repository narrows, never wide
   // this read, so a repository file that cannot narrow must cost nothing. The
   // counter is a PATH shim: `node` and `jq` stand-ins that log each exec and hand
   // over to the real binary, so every parser fork is seen however it is spelled.
+  // Each stand-in is a link to the warm dispatcher, so no test runs a new executable.
   describe('TP-34 (AC-30): zero parser forks unless a file can narrow, exactly one when one can', () => {
+    const writeFakeExecutable = useWarmFakeExecutables();
     let shimDir: string;
     let forkLog: string;
 
-    const realBinary = (name: string): string | null => {
-      try {
-        return execSync(`command -v ${name}`, { shell: '/bin/bash' }).toString().trim() || null;
-      } catch {
-        return null;
-      }
-    };
+    const realBinary = (name: string): string | null => resolveOnPath(name, process.env.PATH ?? '/usr/bin:/bin') ?? null;
 
     beforeEach(() => {
       shimDir = path.join(tmpDir, 'shim');
@@ -799,9 +797,7 @@ describe('queue_read_gates <manifest> <root>: the repository narrows, never wide
       for (const name of ['node', 'jq']) {
         const real = realBinary(name);
         if (real === null) continue;
-        const shim = path.join(shimDir, name);
-        fs.writeFileSync(shim, `#!/bin/bash\necho ${name} >> "${forkLog}"\nexec "${real}" "$@"\n`);
-        fs.chmodSync(shim, 0o755);
+        writeFakeExecutable(path.join(shimDir, name), `#!/bin/bash\necho ${name} >> "${forkLog}"\nexec "${real}" "$@"\n`);
       }
     });
 

@@ -14,12 +14,13 @@
  * from invoking the real claude binary and hanging for 120s.
  */
 
-import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { pollForTerminalLine } from './helpers/poll-for-terminal-line.js';
+import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
 import { WORKER_AGENTS, validateWorkerValue } from '../src/core/agent-models.js';
 import {
   FIFO_RUN_BOUND_MS,
@@ -46,57 +47,13 @@ const BACKGROUND_UPDATER = path.join(HOOKS_DIR, 'background-memory-update');
 // ---------------------------------------------------------------------------
 
 /**
- * Every fake executable in this file (claude, and the mv and cksum stand-ins) is a symlink
- * to ONE dispatcher script that sources the plain data file `<link>.body`. A test writes
- * only that data file and a link, and a link is not a new executable: on macOS the first
- * exec of a newly written file is held for 0.5-6 s by syspolicyd after a fork-heavy run
- * (measured: the second exec of the same file takes ~12 ms), and a fake claude that is new
- * for each test pays that hold inside the worker's version probe, which is bounded at 1 s
- * in one test and 10 s in the others. The probe then kills the fake before its first line
- * (a missing probe-pid.txt), or the worker falls back to the legacy argv. The dispatcher
- * is written and executed once per file, in `beforeAll`, so no test runs a cold executable
- * under a time bound. Sourcing reads the body in the dispatcher's own shell, so the fake
- * runs the same script text, with the same `$$`, arguments and `exit`, as before.
+ * Every fake executable in this file (claude, and the mv and cksum stand-ins) runs through
+ * the shared warm dispatcher, so no test runs a cold executable. A fake claude that is new
+ * for each test pays the macOS first-exec hold inside the worker's version probe, which is
+ * bounded at 1 s in one test and 10 s in the others: the probe then kills the fake before
+ * its first line (a missing probe-pid.txt), or the worker falls back to the legacy argv.
  */
-const FAKE_EXEC_WARM_BOUND_MS = 30_000;
-const FAKE_DISPATCHER = '#!/bin/bash\n. "$0.body"\n';
-let fakeDispatcherDir = '';
-let fakeDispatcher = '';
-
-/**
- * Make `bin` run `script` (a whole bash script, shebang line included) through the warm
- * dispatcher. Writing it again replaces the earlier script. The body is found beside the
- * path that was executed, so swap a fake by writing it again, never by linking to another fake.
- */
-function writeFakeExecutable(bin: string, script: string): void {
-  if (fakeDispatcher === '') {
-    throw new Error('writeFakeExecutable: the warm dispatcher is built in beforeAll; call this from a test or a per-test hook');
-  }
-  fs.writeFileSync(`${bin}.body`, script);
-  fs.rmSync(bin, { force: true });
-  fs.symlinkSync(fakeDispatcher, bin);
-}
-
-beforeAll(() => {
-  fakeDispatcherDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-fakes-'));
-  fakeDispatcher = path.join(fakeDispatcherDir, 'dispatcher');
-  fs.writeFileSync(fakeDispatcher, FAKE_DISPATCHER);
-  fs.chmodSync(fakeDispatcher, 0o755);
-  // Pay the first-exec hold here, through a link as the tests will run it, under this
-  // hook's own bound: a hold that outlasts it fails here and names the cause, instead of
-  // as a missing PID file or a legacy argv inside an unrelated test.
-  const warmLink = path.join(fakeDispatcherDir, 'warm');
-  writeFakeExecutable(warmLink, '#!/bin/bash\nexit 0\n');
-  const warm = spawnSync(warmLink, [], { timeout: FAKE_EXEC_WARM_BOUND_MS });
-  expect(
-    warm.status,
-    `the fake-executable dispatcher did not run within ${FAKE_EXEC_WARM_BOUND_MS} ms: ${warm.error?.message ?? `signal ${warm.signal}`}`,
-  ).toBe(0);
-}, FAKE_EXEC_WARM_BOUND_MS + 5_000);
-
-afterAll(() => {
-  fs.rmSync(fakeDispatcherDir, { recursive: true, force: true });
-});
+const writeFakeExecutable = useWarmFakeExecutables();
 
 /** Run a hook with a custom PATH prefix (fake claude shim intercepts spawning) */
 function runHookWithFakeClaude(
