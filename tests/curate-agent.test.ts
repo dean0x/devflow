@@ -5,7 +5,7 @@ import { createRequire } from 'module';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { AGENT_CONFIG } from './fixtures/agent-config.js';
-import { readAgentReference, RETIRED_INLINE_EXPANSION, SANCTIONED_RESOLUTION } from './helpers.js';
+import { commandReferenceSections, readAgentReference, RETIRED_INLINE_EXPANSION, SANCTIONED_RESOLUTION } from './helpers.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -417,11 +417,64 @@ describe('curate agent', () => {
         expect(maintain).toContain('RETIRE BY STATUS');
       });
 
+      /**
+       * Named collector: where the sanctioned resolution line sits at the two read sites. Inputs holds it once,
+       * before the first `$d/` it binds; Part 2 holds it once, before the maintain path it resolves. The sections
+       * come from the fence-aware splitter, so a `## ` line quoted in a fence does not cut one short. The total
+       * across the file is pinned once, in `SITE_ROWS` (tests/guards/claude-dir.test.ts).
+       */
+      function collectReadSiteDefects(body: string): string[] {
+        const sections = commandReferenceSections(body);
+        const inputs = sections.find(sec => sec.heading === 'Inputs')?.body;
+        const part2 = sections.find(sec => sec.heading.startsWith('Part 2'))?.body;
+        const out: string[] = [];
+        const countIn = (text: string): number => text.split(SANCTIONED_RESOLUTION).length - 1;
+        if (inputs === undefined) out.push('no Inputs section');
+        else {
+          const line = inputs.indexOf(SANCTIONED_RESOLUTION);
+          const use = inputs.indexOf('$d/');
+          if (countIn(inputs) !== 1) out.push(`Inputs holds ${countIn(inputs)} sanctioned resolution lines, expected 1`);
+          if (use === -1) out.push('Inputs never uses "$d/"');
+          if (line !== -1 && use !== -1 && use < line) out.push('Inputs uses "$d/" before the sanctioned resolution line');
+        }
+        if (part2 === undefined) out.push('no Part 2 section');
+        else {
+          const line = part2.indexOf(SANCTIONED_RESOLUTION);
+          const read = part2.indexOf(MAINTAIN_PATH_TEXT);
+          if (countIn(part2) !== 1) out.push(`Part 2 holds ${countIn(part2)} sanctioned resolution lines, expected 1`);
+          if (read === -1) out.push('Part 2 never names the maintain reference path');
+          if (line !== -1 && read !== -1 && read < line) out.push('Part 2 names the maintain reference path before the sanctioned resolution line');
+        }
+        return out;
+      }
+
       it('resolves the config directory the way the rule-file listing does', () => {
-        expect(content).toContain(SANCTIONED_RESOLUTION);
-        expect(content.split(SANCTIONED_RESOLUTION).length - 1, 'one sanctioned line at each of the two read sites').toBe(2);
+        expect(collectReadSiteDefects(content)).toEqual([]);
         expect(content).not.toContain(RETIRED_INLINE_EXPANSION);
         expect(content).toContain(MAINTAIN_PATH_TEXT);
+      });
+
+      it('known-bad probes: a second line, a line after its use, a missing line, a late reference path, a fenced heading and lost sections are each reported', () => {
+        const find = `cd "<project root>" && find "$d/rules/devflow" -name '*.md'`;
+        const sections = (inputs: string, part2: string): string => `## Inputs\n${inputs}\n## Part 2 — Maintain\n${part2}\n## Finishing\n`;
+        const okInputs = `${SANCTIONED_RESOLUTION} ${find}`;
+        const okPart2 = `${SANCTIONED_RESOLUTION} printf '%s\\n' "$d"\nRead <that directory>/${MAINTAIN_PATH_TEXT}`;
+        expect(collectReadSiteDefects(sections(okInputs, okPart2)), 'the clean seed is clean, so each seed fails for its own reason').toEqual([]);
+        expect(collectReadSiteDefects(sections(`\`\`\`text\n## quoted\n\`\`\`\n${okInputs}`, okPart2)), 'a fenced heading does not end Inputs').toEqual([]);
+
+        expect(collectReadSiteDefects(sections(`${SANCTIONED_RESOLUTION} ${okInputs}`, okPart2))).toEqual([
+          'Inputs holds 2 sanctioned resolution lines, expected 1',
+        ]);
+        expect(collectReadSiteDefects(sections(`${find}; ${SANCTIONED_RESOLUTION}`, okPart2))).toEqual([
+          'Inputs uses "$d/" before the sanctioned resolution line',
+        ]);
+        expect(collectReadSiteDefects(sections(okInputs, `Read <that directory>/${MAINTAIN_PATH_TEXT}`))).toEqual([
+          'Part 2 holds 0 sanctioned resolution lines, expected 1',
+        ]);
+        expect(collectReadSiteDefects(sections(okInputs, `Read <that directory>/${MAINTAIN_PATH_TEXT}\n${SANCTIONED_RESOLUTION}`))).toEqual([
+          'Part 2 names the maintain reference path before the sanctioned resolution line',
+        ]);
+        expect(collectReadSiteDefects('## Finishing\n')).toEqual(['no Inputs section', 'no Part 2 section']);
       });
 
       it('known-bad probes: a reference read before `due none`, a ladder left in the body and a missing call are each reported', () => {
