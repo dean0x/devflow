@@ -105,6 +105,19 @@ let tmpDir: string;
 let cacheDir: string;
 let logPath: string;
 
+/**
+ * The discovery log, for an assertion message. The live-runtime tests (T1, T13) race
+ * the production spawn deadline, so a `known: false` there must show whether the log
+ * says `spawn timed out` or something else.
+ */
+function discoveryLog(): string {
+  try {
+    return fs.readFileSync(logPath, 'utf-8') || '(empty log)';
+  } catch {
+    return '(no log)';
+  }
+}
+
 beforeEach(async () => {
   tmpDir = await fsAsync.mkdtemp(path.join(os.tmpdir(), 'devflow-model-discovery-'));
   cacheDir = path.join(tmpDir, 'cache');
@@ -781,7 +794,7 @@ describe('T1: Real-binary — discoverExternalModels with live runtime', () => {
     // cacheDir is freshly created (beforeEach), so no cache hit is possible — source
     // must be 'live'. Guarding these behind `if (result.known)` would let the test
     // pass vacuously when the live call incorrectly returns known:false.
-    expect(result.known).toBe(true);
+    expect(result.known, discoveryLog()).toBe(true);
     if (!result.known) return; // TypeScript narrowing only
     expect(result.source).toBe('live');
     expect(result.models.length).toBeGreaterThan(0);
@@ -973,7 +986,7 @@ describe('T13: Real-binary — user-level runtime config is isolated from discov
 
     const result = await discoverWithUserConfig('{"not": "closed"');
 
-    expect(result.known).toBe(true);
+    expect(result.known, discoveryLog()).toBe(true);
     if (!result.known) return; // TypeScript narrowing only
     expect(result.source).toBe('live');
   }, 10_000);
@@ -985,7 +998,7 @@ describe('T13: Real-binary — user-level runtime config is isolated from discov
       JSON.stringify({ providers: { codex: { aliases: { 'user-only-alias': 'gpt-5.6-terra' } } } }),
     );
 
-    expect(result.known).toBe(true);
+    expect(result.known, discoveryLog()).toBe(true);
     if (!result.known) return; // TypeScript narrowing only
     expect(result.source).toBe('live');
     expect(result.selectableNames).not.toContain('user-only-alias');
