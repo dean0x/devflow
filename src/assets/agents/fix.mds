@@ -69,14 +69,14 @@ You receive from orchestrator:
 
 ## Mode: validation-fix
 
-When `OPERATION: validation-fix`, you are fixing failures reported by the Validate agent gate.
+When `OPERATION: validation-fix`, you are fixing failures reported by Validate.
 
 **Inputs:** `VALIDATION_FAILURES` (structured failures from Validate agent), `SCOPE: Fix only the listed failures, no other changes`, `PUSH: false`
 
 **Protocol:**
 1. Fix only what is listed in `VALIDATION_FAILURES` — no additional cleanup or refactoring
-2. Commit fixes; orchestrator re-runs Validate agent after each attempt (max 2 attempts total)
-3. Never edit the lint pack, its config, its build-file entry or `.gitattributes` to clear a lint-pack match; report it under Blockers
+2. Commit fixes; Validate re-runs after each attempt (max 2 attempts total)
+3. Never edit the lint pack, its config, its build-file entry or any `.gitattributes`, or silence the linter, to clear a lint-pack match; report it under Blockers
 
 ## Mode: alignment-fix
 

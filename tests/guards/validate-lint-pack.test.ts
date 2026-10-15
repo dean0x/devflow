@@ -11,8 +11,8 @@
  *      `BASE_SHA`, as the first two lines of its prompt, in both builds.
  *   3. The data flow and the report: Phase 1 Produces and Phase 6 Requires list `GATE_LEVEL`; Phase 12 shows
  *      Validate's `Lint pack:` line, if any; Phase 9 passes an UNVERIFIED line to the PR body's Testing part.
- *   4. The Fix rule: validation-fix never edits the pack, its config, its build-file entry or `.gitattributes`
- *      to clear a match, and no other mode carries the rule.
+ *   4. The Fix rule: validation-fix never edits the pack, its config, its build-file entry or any
+ *      `.gitattributes`, and never silences the linter, to clear a match; no other mode carries the rule.
  *   5. Ownership: the template folder holds exactly three files, the package ships it, and no prompt, hook or
  *      CLI source names the template script or runs the folder. No install golden names the pack.
  *   6. Size: the Validate body sits under its ceiling, registered as `validate-body-max`; lowered, never raised.
@@ -100,6 +100,15 @@ function withDoc(docs: readonly Doc[], label: string, change: (text: string) => 
 // 1. The doctrine
 // ---------------------------------------------------------------------------
 
+/** The clause that rejects a malformed base before it reaches a command line. It must come before the run. */
+const BASE_CHECK = 'A first `BASE_SHA:` not matching `^[0-9a-f]{40}$` is an error; else run'
+
+/** The start of the run command, after which the base check is too late. */
+const RUN_FORM = '`npm run -s lint-pack --'
+
+/** The lead sentence: the report-only rule that the one-item Principles list used to hold. */
+const REPORT_ONLY = 'report the results; never fix code, commit or modify files.'
+
 /** What the `## Lint pack` section must say, one clause each. The collector and its probes range over this whole table. */
 const SECTION_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]> = [
   ['the exact lean gate on the first level line', 'Only if the first `GATE_LEVEL:` line is exactly `lean`'],
@@ -108,14 +117,15 @@ const SECTION_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]> =
   ['the Lint row never runs the pack', 'The Lint row never runs it.'],
   ['one discovery source', 'Use the root `package.json` script `lint-pack`, else the root `Makefile` target; look nowhere else.'],
   ['not configured without either entry', 'Neither: not configured.'],
+  ['a malformed BASE_SHA is an error before the run', BASE_CHECK],
   ['the npm form', '`npm run -s lint-pack -- <BASE_SHA>`'],
   ['the make form', '`make -s lint-pack BASE=<BASE_SHA>`'],
-  ['the capture form and the log read', 'in the capture form; Read the log'],
+  ['the capture form, an explicit Bash timeout and the log read', 'in the capture form with an explicit Bash `timeout`; Read the log'],
   ['the last LINT_PACK line decides', 'Its last `LINT_PACK:` line decides'],
   ['no-config reads as not configured', '`no-config` is not configured'],
   ['clean reads as clean', '`clean` is clean'],
   ['matches set FAIL and fill Parsed References', '`matches <n>` sets FAIL, each record into Parsed References'],
-  ['every other outcome is an error', 'Any other line, none, a timeout or a first `BASE_SHA:` not matching `^[0-9a-f]{40}$` is an error'],
+  ['every other outcome is an error', 'Any other line, none or a timeout is an error'],
   ['an error keeps Status', 'Status stays'],
   ['an error reads UNVERIFIED, never a pass', 'the pack is UNVERIFIED, never a pass'],
   ['EXIT never decides the pack', '`EXIT=` never decides it'],
@@ -129,8 +139,8 @@ const OUTPUT_PIECES: ReadonlyArray<readonly [label: string, piece: string]> = [
   ['the clean state', ' | clean | '],
   ['the matches state', '<n> matches'],
   ['the UNVERIFIED state with its reason', 'UNVERIFIED (error <reason>)'],
-  ['the pack-changed slot', '{; pack changed: <paths>}'],
-  ['the skipped-binary slot', '{; <n> binary skipped}'],
+  ['the pack-changed slot', '{; pack-changed: <paths>}'],
+  ['the skipped-binary slot', '{; skipped-binary: <n>}'],
 ]
 
 const SECOND_SOURCE_WORDS: readonly string[] = ['scripts/', '.sh', 'Cargo.toml', 'pyproject', 'justfile', 'Taskfile']
@@ -138,16 +148,21 @@ const SECOND_SOURCE_WORDS: readonly string[] = ['scripts/', '.sh', 'Cargo.toml',
 /** Named collector: how the Validate body falls short of the lint-pack doctrine. */
 export function collectValidateDoctrineDefects(body: string): string[] {
   const out: string[] = []
-  const section = sectionBetween(body, '## Lint pack\n', '\n## Principles')
-  if (section === null) return ['the body has no `## Lint pack` section before `## Principles`']
-  if (!(body.indexOf('\n## Running commands') < body.indexOf('\n## Lint pack\n'))) out.push('the Lint pack section does not follow Running commands')
+  const section = sectionBetween(body, '## Lint pack\n', '\n## Output\n')
+  if (section === null) return ['the body has no `## Lint pack` section before `## Output`']
+  const running = body.indexOf('\n## Running commands\n')
+  if (running === -1 || !(running < body.indexOf('\n## Lint pack\n'))) out.push('the Lint pack section does not follow Running commands')
   for (const [label, clause] of SECTION_CLAUSES) {
     if (!section.includes(clause)) out.push(`the Lint pack section lost: ${label}`)
   }
+  const baseAt = section.indexOf(BASE_CHECK)
+  const runAt = section.indexOf(RUN_FORM)
+  if (baseAt !== -1 && runAt !== -1 && !(baseAt < runAt)) out.push('the BASE_SHA check does not come before the run')
   if (/\b(standard|full)\b/.test(section)) out.push('the Lint pack section names a level other than lean')
   for (const word of SECOND_SOURCE_WORDS) {
     if (section.includes(word)) out.push(`the Lint pack section names a second discovery source: ${word.trim()}`)
   }
+  if (!body.includes(REPORT_ONLY)) out.push('the lead line does not state the report-only rule')
   if (!body.includes('skipping any that do not exist and stopping on first failure:')) out.push('the lead line does not skip a table command that does not exist')
   if (!body.includes('- **GATE_LEVEL**, **BASE_SHA** (optional): see Lint pack.')) out.push('the Input context has no optional GATE_LEVEL and BASE_SHA bullet')
   const output = sectionBetween(body, '\n## Output\n', '\n## Core rules')
@@ -172,7 +187,7 @@ export function collectValidateDoctrineDefects(body: string): string[] {
 describe('the Validate body holds the lint-pack doctrine', () => {
   it('reads a real body, and it holds every clause', () => {
     expect(Buffer.byteLength(VALIDATE_BODY), 'the body is empty').toBeGreaterThan(4_000)
-    expect(SECTION_CLAUSES.length).toBeGreaterThanOrEqual(19)
+    expect(SECTION_CLAUSES.length).toBeGreaterThanOrEqual(20)
     expect(OUTPUT_PIECES.length).toBe(6)
     expect(collectValidateDoctrineDefects(VALIDATE_BODY)).toEqual([])
   })
@@ -196,7 +211,9 @@ describe('the Validate body holds the lint-pack doctrine', () => {
     expect(collectValidateDoctrineDefects(seed(VALIDATE_BODY, '- **GATE_LEVEL**, **BASE_SHA** (optional): see Lint pack.\n', '')))
       .toContain('the Input context has no optional GATE_LEVEL and BASE_SHA bullet')
     expect(collectValidateDoctrineDefects(seed(VALIDATE_BODY, '## Lint pack\n', '## Lint\n')))
-      .toEqual(['the body has no `## Lint pack` section before `## Principles`'])
+      .toEqual(['the body has no `## Lint pack` section before `## Output`'])
+    expect(collectValidateDoctrineDefects(seed(VALIDATE_BODY, '\n## Output\n', '\n## Report\n')))
+      .toEqual(['the body has no `## Lint pack` section before `## Output`'])
     expect(collectValidateDoctrineDefects(seed(VALIDATE_BODY, '### Lint Pack (lean only)\n', '')))
       .toContain('the Output block has no Lint Pack section')
     const belowCap = seed(VALIDATE_BODY, /(### Lint Pack \(lean only\)\n[^\n]*\n\n)/, '')
@@ -204,6 +221,30 @@ describe('the Validate body holds the lint-pack doctrine', () => {
     expect(collectValidateDoctrineDefects(belowCap)).toContain('the Lint Pack section is not between Parsed References and Blockers, above the cap line')
     expect(collectValidateDoctrineDefects(seed(VALIDATE_BODY, 'table, Parsed References and the `Lint pack:` line.', 'table and Parsed References.')))
       .toContain('the cap line does not exempt the `Lint pack:` line')
+  })
+
+  it('probes: a lost or moved heading, a missing Output section, line or cap placement, a late base check and a lost report-only rule are reported', () => {
+    const lintAt = VALIDATE_BODY.indexOf('## Lint pack\n')
+    const outputAt = VALIDATE_BODY.indexOf('\n## Output\n')
+    const runningAt = VALIDATE_BODY.indexOf('## Running commands\n')
+    const section = VALIDATE_BODY.slice(lintAt, outputAt + 1)
+    expect(lintAt, 'the Lint pack section follows Running commands').toBeGreaterThan(runningAt)
+    expect(runningAt, 'Running commands is found').toBeGreaterThan(-1)
+    const above = `${VALIDATE_BODY.slice(0, runningAt)}${section}${VALIDATE_BODY.slice(runningAt, lintAt)}${VALIDATE_BODY.slice(outputAt + 1)}`
+    expect(above, 'the Lint pack section moves above Running commands').not.toBe(VALIDATE_BODY)
+    expect(collectValidateDoctrineDefects(above)).toEqual(['the Lint pack section does not follow Running commands'])
+    expect(collectValidateDoctrineDefects(seed(VALIDATE_BODY, '\n## Running commands\n', '\n## Running\n')))
+      .toEqual(['the Lint pack section does not follow Running commands'])
+    expect(collectValidateDoctrineDefects(seed(VALIDATE_BODY, '\n## Core rules', '\n## Rules')))
+      .toContain('the body has no `## Output` section before `## Core rules`')
+    expect(collectValidateDoctrineDefects(seed(VALIDATE_BODY, '\nLint pack: {', '\nPack: {')))
+      .toContain('the Output block has no `Lint pack:` line')
+    expect(collectValidateDoctrineDefects(seed(VALIDATE_BODY, '\n## Core rules', '\nTrailing note.\n\n## Core rules')))
+      .toContain('the cap line is not last in Output')
+    const late = seed(seed(VALIDATE_BODY, BASE_CHECK, 'Run'), 'Read the log.', `Read the log. ${BASE_CHECK}`)
+    expect(collectValidateDoctrineDefects(late)).toEqual(['the BASE_SHA check does not come before the run'])
+    expect(collectValidateDoctrineDefects(seed(VALIDATE_BODY, REPORT_ONLY, 'report the results.')))
+      .toContain('the lead line does not state the report-only rule')
   })
 })
 
@@ -353,6 +394,20 @@ describe('only the implement Phase 6 Validate spawn passes the level and the bas
       .toContain(`${REVALIDATE_LABEL}: the re-validation path names GATE_LEVEL or BASE_SHA`)
   })
 
+  it('probes: an extra or missing Produces or Requires line is counted, in every arm and build', () => {
+    expect(collectDataFlowDefects(IMPLEMENT_SOURCE, 3)).toContain(`${IMPLEMENT_SOURCE.label}: Phase 1 has 2 Produces lines, expected 3`)
+    for (const doc of BUILDS) {
+      const twice = seed(doc.text, /^(\*\*Produces:\*\* TASK_ID[^\n]*)$/m, '$1\n$1')
+      expect(collectDataFlowDefects({ label: doc.label, text: twice }, 1), doc.label)
+        .toContain(`${doc.label}: Phase 1 has 2 Produces lines, expected 1`)
+      const requires = '**Requires:** BASE_BRANCH, GATE_LEVEL\n'
+      expect(collectDataFlowDefects({ label: doc.label, text: seed(doc.text, requires, `${requires}${requires}`) }, 1), doc.label)
+        .toContain(`${doc.label}: Phase 6 has 2 Requires lines, expected 1`)
+      expect(collectDataFlowDefects({ label: doc.label, text: seed(doc.text, requires, '') }, 1), doc.label)
+        .toContain(`${doc.label}: Phase 6 has 0 Requires lines, expected 1`)
+    }
+  })
+
   it('probes: a dropped Produces or Requires entry is reported, in every arm and build', () => {
     for (const arm of [0, 1]) {
       expect(collectDataFlowDefects({ label: IMPLEMENT_SOURCE.label, text: dropFromArm(IMPLEMENT_SOURCE.text, arm) }, 2), `arm ${arm}`)
@@ -402,6 +457,10 @@ describe('the final report and the PR body show an UNVERIFIED lint pack', () => 
     for (const doc of BUILDS) {
       expect(collectReportDefects({ label: doc.label, text: seed(doc.text, "Validate's `Lint pack:` line if any, ", '') }), doc.label)
         .toContain(`${doc.label}: Phase 12 does not show Validate's Lint pack line, if any`)
+      expect(collectReportDefects({ label: doc.label, text: seed(doc.text, '### Phase 12: Report', '### Phase 12: Summary') }), doc.label)
+        .toContain(`${doc.label}: no Phase 12 section`)
+      expect(collectReportDefects({ label: doc.label, text: seed(doc.text, 'PR_DESCRIPTION_GUIDANCE:', 'PR_GUIDANCE:') }), doc.label)
+        .toContain(`${doc.label}: Phase 9 has no PR_DESCRIPTION_GUIDANCE line`)
       const clause = ", then Validate's `Lint pack:` line if UNVERIFIED, for Testing"
       for (const [lost, changed] of [
         ["Validate's `Lint pack:` line", ''],
@@ -420,8 +479,8 @@ describe('the final report and the PR body show an UNVERIFIED lint pack', () => 
 // 4. The Fix rule
 // ---------------------------------------------------------------------------
 
-/** The four parts of the pack the rule names. The collector and its probes range over this whole table. */
-const RULE_PARTS: readonly string[] = ['the lint pack', 'its config', 'its build-file entry', '`.gitattributes`']
+/** The five things the rule forbids. The collector and its probes range over this whole table. */
+const RULE_PARTS: readonly string[] = ['the lint pack', 'its config', 'its build-file entry', 'any `.gitattributes`', 'silence the linter']
 
 /** Named collector: how the Fix body fails to forbid editing the pack, in validation-fix and nowhere else. */
 export function collectFixRuleDefects(fix: string, others: readonly Doc[]): string[] {
@@ -472,6 +531,8 @@ describe('Fix never edits the lint pack to clear a match', () => {
       expect(collectFixRuleDefects(seed(FIX_BODY, rule, dropPart(rule, part)), others), part)
         .toContain(`the validation-fix rule does not name ${part}`)
     }
+    expect(collectFixRuleDefects(seed(FIX_BODY, 'any `.gitattributes`', '`.gitattributes`'), others))
+      .toContain('the validation-fix rule does not name any `.gitattributes`')
     for (const piece of ['to clear a lint-pack match', 'report it under Blockers']) {
       expect(collectFixRuleDefects(seed(FIX_BODY, piece, 'x'), others), piece).toContain(`the validation-fix rule lost: ${piece}`)
     }

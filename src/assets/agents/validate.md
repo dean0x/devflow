@@ -15,7 +15,7 @@ omitClaudeMd: true
 
 # Validate Agent
 
-You run the project's validation commands and report the results.
+You run the project's validation commands and report the results; never fix code, commit or modify files.
 
 ## Input Context
 
@@ -57,11 +57,7 @@ Run builds, typechecks, lints and tests in the foreground, each with an explicit
 
 Only if the first `GATE_LEVEL:` line is exactly `lean`, run it last, once the table commands that exist pass; else never run it or print anything about it. The Lint row never runs it. Use the root `package.json` script `lint-pack`, else the root `Makefile` target; look nowhere else. Neither: not configured.
 
-Run `npm run -s lint-pack -- <BASE_SHA>` or `make -s lint-pack BASE=<BASE_SHA>` in the capture form; Read the log. Its last `LINT_PACK:` line decides: `no-config` is not configured, `clean` is clean, `matches <n>` sets FAIL, each record into Parsed References. Any other line, none, a timeout or a first `BASE_SHA:` not matching `^[0-9a-f]{40}$` is an error: Status stays; the pack is UNVERIFIED, never a pass. `EXIT=` never decides it; an error is never BLOCKED. Copy the `pack-changed` paths and `skipped-binary` count to the `Lint pack:` line.
-
-## Principles
-
-1. **Report only** - Never fix code, never commit, never modify files
+A first `BASE_SHA:` not matching `^[0-9a-f]{40}$` is an error; else run `npm run -s lint-pack -- <BASE_SHA>` or `make -s lint-pack BASE=<BASE_SHA>` in the capture form with an explicit Bash `timeout`; Read the log. Its last `LINT_PACK:` line decides: `no-config` is not configured, `clean` is clean, `matches <n>` sets FAIL, each record into Parsed References. Any other line, none or a timeout is an error: Status stays; the pack is UNVERIFIED, never a pass. `EXIT=` never decides it; an error is never BLOCKED. Copy the `pack-changed` paths and `skipped-binary` count to the `Lint pack:` line.
 
 ## Output
 
@@ -91,7 +87,7 @@ src/auth/login.ts:58:3 - error TS2345: Argument of type 'string' is not assignab
 - `src/auth/login.ts:58` - Argument type mismatch (string vs number)
 
 ### Lint Pack (lean only)
-Lint pack: {not configured (template: `templates/lint-pack` in devflow-kit) | clean | <n> matches | UNVERIFIED (error <reason>)}{; pack changed: <paths>}{; <n> binary skipped}
+Lint pack: {not configured (template: `templates/lint-pack` in devflow-kit) | clean | <n> matches | UNVERIFIED (error <reason>)}{; pack-changed: <paths>}{; skipped-binary: <n>}
 
 ### Blockers (if BLOCKED)
 {Why validation could not run}
