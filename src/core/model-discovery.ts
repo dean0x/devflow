@@ -77,8 +77,10 @@ const STDOUT_CAP = 262_144;
  * SIGKILL_GRACE_MS. Zero retries — the stale cache is the retry.
  *
  * The window must outlast a cold start on a loaded machine: the first exec of
- * node with the routing runtime can take 1.0-5.4 s while the OS vets the new
- * process. A shorter window reports an installed runtime as unknown.
+ * node with the routing runtime took 1.0-5.4 s in measurement while the OS vetted
+ * the new process. A shorter window reports an installed runtime as unknown. The
+ * test harness bounds (tests/model-discovery.test.ts) use a wider margin than this
+ * measured range.
  *
  * Exported so tests can derive timing bounds without mirroring the literal.
  */
