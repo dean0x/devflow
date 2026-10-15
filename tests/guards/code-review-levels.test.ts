@@ -28,7 +28,7 @@ import { readFileSync } from 'fs'
 import * as path from 'path'
 
 import { GATE_LEVELS } from '../../src/core/gate-level.js'
-import { ROOT, SANCTIONED_RESOLUTION, readAgentReference, requireDistFile, resolveLearningOffSource, sectionBetween, tableRows } from '../helpers.js'
+import { ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, readAgentReference, requireDistFile, resolveLearningOffSource, sectionBetween, tableRows } from '../helpers.js'
 
 // ---------------------------------------------------------------------------
 // Independent oracle: written by hand from the issue and the gate decisions, never parsed
@@ -845,7 +845,7 @@ describe('the command carries the gate-level block, outside the learning arms (A
     ])
     const readParagraph = gateBlock(ON)?.split('\n\n').find(p => p.includes(LEVEL_REFERENCE_PATH)) ?? ''
     expect(readParagraph, 'the read paragraph is in the compiled command').not.toBe('')
-    const pathFirst = `At \`standard\` or \`lean\`, once per run, Read \`<that directory>/${LEVEL_REFERENCE_PATH}\` with the Read tool, after you run \`${SANCTIONED_RESOLUTION} printf '%s\\n' "$d"\` in Bash.`
+    const pathFirst = `At \`standard\` or \`lean\`, once per run, Read \`<that directory>/${LEVEL_REFERENCE_PATH}\` with the Read tool, after you run \`${SANCTIONED_RESOLUTION_PRINT}\` in Bash.`
     expect(defects(seed(ON, readParagraph, pathFirst))).toEqual(['the resolution comes after the path'])
     const movedUp = seed(seed(ON, `${readParagraph}\n\n`, ''), '**Language focus stamp.**', `${readParagraph}\n\n**Language focus stamp.**`)
     expect(defects(movedUp)).toContain('the directory read does not come after the stamp paragraph')

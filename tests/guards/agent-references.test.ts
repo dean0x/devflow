@@ -20,8 +20,8 @@ import { describe, it, expect } from 'vitest'
 import { readdirSync } from 'fs'
 
 import {
-  SYNTHESIZE_MODES, agentReferencePath, isAgentBlock, parseFences, readAgentReference,
-  requireDistFile, requireDistFiles, resolveAgentSource,
+  RETIRED_INLINE_EXPANSION, SANCTIONED_RESOLUTION, SYNTHESIZE_MODES, agentReferencePath, isAgentBlock, parseFences,
+  readAgentReference, requireDistFile, requireDistFiles, resolveAgentSource,
 } from '../helpers.js'
 
 /** The Synthesize agent body, in bytes. Registered as `synthesize-body-max`; lowered, never raised. */
@@ -47,7 +47,7 @@ const MODE_TEMPLATES: Readonly<Record<string, { readonly heading: string; readon
 }
 
 const REFERENCE_DIR = 'synthesize'
-const ROUTE_PATH = '${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/devflow:agent-references/references/synthesize'
+const ROUTE_PATH = '$d/skills/devflow:agent-references/references/synthesize'
 
 interface Route {
   readonly mode: string
@@ -109,6 +109,7 @@ export function collectRoutingDefects(
   }
   if (/^## Mode: /m.test(body)) out.push('the body still holds a "## Mode:" section')
   if (!section.includes(ROUTE_PATH)) out.push('the section does not give the reference directory path')
+  if (!section.includes(SANCTIONED_RESOLUTION)) out.push('the section does not resolve the directory with the sanctioned line')
   if (!section.includes('Read exactly one reference')) out.push('the section does not say to read exactly one reference')
   if (!section.includes('No `Mode:` line: read no template')) out.push('the section does not say a missing Mode line reads no template')
   if (!section.includes('answer `BLOCKED: unknown mode`')) out.push('the section does not say an unknown mode answers BLOCKED')
@@ -140,7 +141,7 @@ describe('Synthesize routes each mode to one reference file by explicit path (AC
     expect(section).toContain('A `Mode:` value that is not in the table: read nothing and answer `BLOCKED: unknown mode`.')
   })
 
-  it('known-bad probes: a lost row, a missing file, a lost template, a template back in the body, an orphan file and lost rules are each reported', () => {
+  it('known-bad probes: a lost row, a missing file, a lost template, a template back in the body, an orphan file, a lost resolution line, a changed route path and lost rules are each reported', () => {
     const files = listedFiles()
     expect(collectRoutingDefects(body, readReference, files), 'the real routing is clean, so each seed fails for its own reason').toEqual([])
 
@@ -159,6 +160,13 @@ describe('Synthesize routes each mode to one reference file by explicit path (AC
 
     expect(collectRoutingDefects(`${body}\n${MODE_TEMPLATES.research.template}\n`, readReference, files)).toEqual(['the body still holds the research template'])
     expect(collectRoutingDefects(body, readReference, [...files, 'stray.md'])).toEqual(['stray.md: in the reference directory but no routing row names it'])
+
+    const noResolution = body.replace(SANCTIONED_RESOLUTION, () => '')
+    expect(noResolution, 'the seed must land').not.toBe(body)
+    expect(collectRoutingDefects(noResolution, readReference, files)).toEqual(['the section does not resolve the directory with the sanctioned line'])
+    const otherPath = body.replace(ROUTE_PATH, () => ROUTE_PATH.replace('$d', () => RETIRED_INLINE_EXPANSION))
+    expect(otherPath, 'the seed must land').not.toBe(body)
+    expect(collectRoutingDefects(otherPath, readReference, files)).toEqual(['the section does not give the reference directory path'])
 
     const noBlocked = body.replace('answer `BLOCKED: unknown mode`', 'answer nothing')
     expect(collectRoutingDefects(noBlocked, readReference, files)).toEqual(['the section does not say an unknown mode answers BLOCKED'])

@@ -848,7 +848,7 @@ fi
 #   (a) an if-clause, so it applies only when a devflow command was running, with an
 #       explicit ignore clause;
 #   (b) where the command file lives, by rule: commands/devflow/ under the Claude
-#       config directory ($CLAUDE_CONFIG_DIR, else ~/.claude);
+#       config directory ($CLAUDE_CONFIG_DIR when absolute, else ~/.claude);
 #   (c) the read mechanics: list the headings, then read from the phase in progress,
 #       never the whole file;
 #   (d) that the command's input (COMMAND_INPUT in the commands that bind it, an
@@ -862,7 +862,7 @@ fi
 case "$SESSION_SOURCE" in
   compact)
     dbg "compaction resume directive emitted"
-    COMPACT_SECTION='If a devflow command was running: re-read {$CLAUDE_CONFIG_DIR or ~/.claude}/commands/devflow/<name>.md, list headings, read from current phase, take input (COMMAND_INPUT/ARGUMENTS) from the summary, resume after the last finished phase. Else ignore.'
+    COMPACT_SECTION='If a devflow command was running: read commands/devflow/<name>.md in $CLAUDE_CONFIG_DIR if absolute, else ~/.claude, list headings, read from current phase, input (COMMAND_INPUT/ARGUMENTS) from summary, resume after last finished phase. Else ignore.'
     if [ -n "$CONTEXT" ]; then
       CONTEXT="${CONTEXT}
 

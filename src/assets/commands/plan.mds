@@ -43,8 +43,6 @@ $ARGUMENTS
 
 ## Clarification Gates
 
-**MANDATORY**: Three gates that must complete before proceeding.
-
 | Gate | Phase | Purpose |
 |------|-------|---------|
 | Gate 0 | Phase 1 | Requirements discovery before exploration |
@@ -237,7 +235,7 @@ DECISIONS_CONTEXT: {decisions_context}
 <!-- learning:end -->
 FEATURE_KNOWLEDGE: {feature_knowledge}
 {COMPLIANCE_FOCUS_DIRECTIVE}  (compliance focus only)
-Resolve `${CLAUDE_CONFIG_DIR:-$HOME/.claude}` in Bash, then Read `<that directory>/skills/devflow:gap-analysis/references/compliance.md` with the Read tool and apply it as your focus patterns.  (compliance focus only)
+Run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash, then Read `<that directory>/skills/devflow:gap-analysis/references/compliance.md` with the Read tool and apply it as your focus patterns.  (compliance focus only)
 Artifacts:
   Feature/Issues: {feature description or issue bodies}
   Exploration synthesis: {Phase 4 output}
