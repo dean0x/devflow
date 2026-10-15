@@ -34,7 +34,7 @@ Executes a single task through the complete development lifecycle. Accepts plan 
 2. **Implementation** — Write code on the feature branch
 3. **Refinement** — Polish (code clarity) + Harden (9-pillar quality; reports PASS, FIXED or BLOCKED)
 4. **Alignment** — Evaluate verifies implementation matches the original request
-5. **Validation** — One full build, typecheck, lint, and test run over the branch diff, after the code is final. At `lean`, Validate then runs the project's `lint-pack` script, if it has one; matches go to Fix
+5. **Validation** — One full build, typecheck, lint, and test run over the branch diff, after the code is final. At `lean` ([gate level](cli-reference.md#gate-level)), Validate then runs the project's `lint-pack` script, if it has one; matches go to Fix
 6. **QA Testing** — Test executes scenario-based acceptance tests and records one claim per TP line
 7. **Re-validation** — Only if QA fixes committed: a changed-only Validate over what they changed
 8. **Open PR** — The Git agent opens the PR after the quality gates; its body carries the test-plan block and any `## Evidence Exceptions`

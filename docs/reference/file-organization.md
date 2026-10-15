@@ -199,11 +199,11 @@ Assets live once in `src/assets/` and install to the user's `~/.claude/` — no 
 | Scripts (root) | `src/assets/scripts/*.cjs`, `lib/`, `hud.sh` | `~/.devflow/scripts/` | None — edit → init |
 | Scripts (hooks) | `src/assets/scripts/hooks/` | `~/.devflow/scripts/hooks/` | None — edit → init |
 
-`templates/lint-pack/` is not an asset. It ships in the npm package, `devflow init` never installs it, and devflow never runs it. A project copies the folder, owns the copy and wires it as a root `lint-pack` script, which Validate runs at the `lean` gate level. The template README describes the wiring.
+`templates/lint-pack/` is not an asset. It ships in the npm package, `devflow init` never installs it, and devflow never runs the template itself. A project copies the folder, owns the copy and wires it as a root `lint-pack` script or `Makefile` target, which Validate runs at the `lean` gate level. The template README describes the wiring.
 
 ### Packaging
 
-`npm pack` ships `dist/` (compiled JS, commands, compiled agents, learning-off variants, and generated skill references), `src/assets/` (skills, agents — hand-authored `.md` and `.mds` generator hosts alike — rules, scripts) and `templates/lint-pack/` (the lint pack template: a script, an example config and a README). No `plugins/` or `shared/` directories are included.
+`npm pack` ships `dist/` (compiled JS, commands, compiled agents, learning-off variants, and generated skill references), `src/assets/` (skills, agents — hand-authored `.md` and `.mds` generator hosts alike — rules, scripts), `src/targets/claude-code/templates/` (the install templates) and `templates/lint-pack/` (the lint pack template: a script, an example config and a README). No `plugins/` or `shared/` directories are included.
 
 ### Adding a Skill to a Plugin
 
