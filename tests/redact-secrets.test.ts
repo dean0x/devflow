@@ -16,7 +16,7 @@
  * and never assumes upstream masking happened.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { spawnSync, type SpawnSyncOptionsWithStringEncoding, type SpawnSyncReturns } from 'child_process';
 import { createRequire } from 'module';
 import { createHash } from 'crypto';
@@ -25,6 +25,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { resolveAgentSource } from './helpers.js';
 import { HOOK_RUN_ALLOWANCE_MS, NODE_EXEC_STALL_MS } from './shell-hooks-helpers.js';
+import { COLD_EXEC_WARM_BOUND_MS, COLD_EXEC_WARM_HOOK_MS } from './helpers/warm-fake-executable.js';
 
 const SCRIPT = path.resolve(import.meta.dirname, '../src/assets/scripts/redact-secrets.cjs');
 
@@ -35,6 +36,28 @@ vi.setConfig({ testTimeout: HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS });
 
 /** The bound on one scrubber child: a child that outlives it is killed. */
 const SPAWN_BOUND_MS = 10_000;
+
+// The first node exec of the file is the one that can wait on syspolicyd for seconds. It
+// is paid here, in a setup hook with its own bound, so no test pays it inside SPAWN_BOUND_MS;
+// a hold that outlasts the hook's bound fails here and names the cause.
+beforeAll(() => {
+  const warmDir = fs.mkdtempSync(path.join(os.tmpdir(), 'redact-secrets-warm-'));
+  try {
+    const warmInput = path.join(warmDir, 'warm-input.txt');
+    fs.writeFileSync(warmInput, 'nothing secret here\n', 'utf8');
+    const warm = spawnSync('node', [SCRIPT, '--emit', warmInput], {
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: COLD_EXEC_WARM_BOUND_MS,
+    });
+    expect(
+      warm.status,
+      `the node warm-up exec did not exit 0 within ${COLD_EXEC_WARM_BOUND_MS} ms (${warm.error?.message ?? `signal ${warm.signal}`})`,
+    ).toBe(0);
+  } finally {
+    fs.rmSync(warmDir, { recursive: true, force: true });
+  }
+}, COLD_EXEC_WARM_HOOK_MS);
 
 // ---------------------------------------------------------------------------
 // Types
@@ -660,12 +683,18 @@ describe('adversarial backtracking budget', () => {
     expect(nearMissBody.length).toBeGreaterThan(100_000);
 
     const fixture = header + nearMissBody;
-    const start = Date.now();
-    const r = runWithContent(fixture, tmpDir, 'adversarial-out.txt');
-    const elapsed = Date.now() - start;
 
-    expect(r.exitCode).toBe(0);
+    // The 2 s budget is for the scrubber's own work, which file mode runs as one scrub()
+    // of the content. Timing the child would add the node start, which on a loaded macOS
+    // machine can wait seconds on syspolicyd; so the work is timed in this process, and
+    // the child run only has to exit 0 on the same input.
+    const start = Date.now();
+    SCRUBBER.scrub(fixture);
+    const elapsed = Date.now() - start;
     expect(elapsed).toBeLessThan(2000);
+
+    const r = runWithContent(fixture, tmpDir, 'adversarial-out.txt');
+    expect(r.exitCode).toBe(0);
   });
 });
 
