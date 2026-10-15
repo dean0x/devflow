@@ -135,8 +135,15 @@ function newRepo() {
     return { stdout: r.stdout, stderr: r.stderr, status: r.status };
   };
 
+  /** Run any command in the repo with the isolated env, as a build entry would. */
+  const exec = (command: string, args: readonly string[]): Run => {
+    const r = spawnSync(command, args, { cwd: dir, env: env(), encoding: 'utf8', timeout: SUBPROCESS_TIMEOUT_MS });
+    if (r.error) throw r.error;
+    return { stdout: r.stdout, stderr: r.stderr, status: r.status };
+  };
+
   git('init', '-q');
-  return { dir, home, env, git, write, commit, run };
+  return { dir, home, env, git, write, commit, run, exec };
 }
 
 type Repo = ReturnType<typeof newRepo>;
@@ -297,6 +304,59 @@ function simple(conf: string | undefined, baseFiles: Files, headFiles: Files): {
 
 // ── Template files and syntax ────────────────────────────────────────────────
 
+/** The git variables that change how a pathspec matches. The script unsets all of them. */
+const PATHSPEC_VARIABLES = ['GIT_LITERAL_PATHSPECS', 'GIT_NOGLOB_PATHSPECS', 'GIT_GLOB_PATHSPECS', 'GIT_ICASE_PATHSPECS'] as const;
+
+function allPathspecVariables(): Record<string, string> {
+  return Object.fromEntries(PATHSPEC_VARIABLES.map(name => [name, '1']));
+}
+
+/** The code lines of a bash script: every line that is not a comment line. */
+function bashCodeLines(text: string): string[] {
+  return text.split('\n').filter(line => !/^\s*#/.test(line));
+}
+
+/**
+ * What the script may not use: constructs that need bash 4 or later (the script must run on the 3.2 that macOS
+ * ships), and the data-only rule (no eval, no sourcing, no indirect expansion). `bad` is a known-bad sample that
+ * the entry has to flag.
+ */
+const BASH_32_DENYLIST: ReadonlyArray<{ readonly name: string; readonly pattern: RegExp; readonly bad: string }> = [
+  { name: 'associative array', pattern: /\b(?:declare|local|typeset|readonly)\s+(?:-[A-Za-z]+\s+)*-[A-Za-z]*A/, bad: 'declare -A seen' },
+  { name: 'nameref', pattern: /\b(?:declare|local|typeset)\s+(?:-[A-Za-z]+\s+)*-[A-Za-z]*n/, bad: '  local -n ref=other' },
+  { name: 'mapfile or readarray', pattern: /\b(?:mapfile|readarray)\b/, bad: 'mapfile -t lines <file' },
+  { name: 'case-changing expansion', pattern: /\$\{[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?(?:,,?|\^\^?)[^}]*\}/, bad: 'echo "${name^^}"' },
+  { name: 'transform expansion', pattern: /\$\{[A-Za-z_][A-Za-z0-9_]*@[A-Za-z]\}/, bad: 'echo "${name@Q}"' },
+  { name: 'negative array index', pattern: /\$\{[A-Za-z_][A-Za-z0-9_]*\[-\d+\]\}|\b[A-Za-z_][A-Za-z0-9_]*\[-\d+\]=/, bad: 'last=${list[-1]}' },
+  { name: 'variable-set test', pattern: /(?:\btest|\[\[?)\s+(?:!\s+)?-v\s/, bad: 'if [[ -v name ]]; then :; fi' },
+  { name: 'pipe of stderr', pattern: /\|&/, bad: 'cmd |& tee out' },
+  { name: 'append of both streams', pattern: /&>>/, bad: 'cmd &>> out' },
+  { name: 'coprocess', pattern: /\bcoproc\b/, bad: 'coproc WORKER { cmd; }' },
+  { name: 'case fall-through', pattern: /;;?&(?!&)/, bad: '  a) one ;&\n  b) two ;;&' },
+  { name: 'wait -n', pattern: /\bwait\s+(?:-[A-Za-z]+\s+)*-[A-Za-z]*n/, bad: 'wait -n' },
+  { name: 'bash 4 shell option', pattern: /\bshopt\b[^\n]*\b(?:globstar|lastpipe|inherit_errexit)\b/, bad: 'shopt -s lastpipe' },
+  { name: 'bash 4 variable', pattern: /\$\{?(?:BASHPID|EPOCHSECONDS|EPOCHREALTIME|SRANDOM)\b/, bad: 'now=$EPOCHSECONDS' },
+  { name: 'printf time format', pattern: /%\([^)]*\)T/, bad: "printf '%(%s)T' -1" },
+  { name: 'eval', pattern: /\beval\s/, bad: 'eval "$cmd"' },
+  { name: 'source', pattern: /\bsource\s/, bad: 'source ./env.sh' },
+  { name: 'indirect expansion', pattern: /\$\{!/, bad: 'echo "${!name}"' },
+];
+
+/** The names of the denylisted constructs in the code lines of `text`. The shipped-script guard and its probes both call this. */
+function bash32Violations(text: string): string[] {
+  const code = bashCodeLines(text).join('\n');
+  return BASH_32_DENYLIST.filter(entry => entry.pattern.test(code)).map(entry => entry.name);
+}
+
+/** A job block of a GitHub Actions workflow: from its two-space key to the next job key, or to the end of the file. */
+function workflowJob(workflow: string, key: string): string | null {
+  const start = workflow.indexOf(`\n  ${key}:`);
+  if (start === -1) return null;
+  const rest = workflow.slice(start + 1);
+  const next = rest.slice(1).search(/\n {2}[A-Za-z0-9_-]+:/);
+  return next === -1 ? rest : rest.slice(0, next + 1);
+}
+
 describe('lint-pack template: shipped files', () => {
   it('holds exactly the script, the example config and the README', () => {
     expect(fs.readdirSync(TEMPLATE_DIR).sort()).toEqual(['.lint-pack.conf', 'README.md', 'lint-pack.sh']);
@@ -313,14 +373,37 @@ describe('lint-pack template: shipped files', () => {
 
   it('declares bash with env and the bash 3.2 strictness the contract pins', () => {
     const text = fs.readFileSync(SCRIPT, 'utf8');
-    const code = text.split('\n').filter(line => !/^\s*#/.test(line)).join('\n');
+    const code = bashCodeLines(text).join('\n');
     expect(text.split('\n')[0]).toBe('#!/usr/bin/env bash');
     expect(code).toMatch(/^set -u -o pipefail$/m);
     expect(code).not.toMatch(/^set -[a-z]*e/m);
-    for (const forbidden of ['declare -A', 'mapfile', 'readarray', 'eval ', 'source ', '${!']) {
-      expect(code, `bash 3.2 or data-only rule: ${forbidden}`).not.toContain(forbidden);
+  });
+
+  it('uses no bash 4 construct and no eval, source or indirect expansion', () => {
+    const text = fs.readFileSync(SCRIPT, 'utf8');
+    expect(bashCodeLines(text).length, 'the corpus must hold the script code, or the guard checks nothing').toBeGreaterThan(200);
+    expect(bash32Violations(text)).toEqual([]);
+  });
+
+  it('flags each denylisted construct in a known-bad sample, and none in bash 3.2 code or in comments', () => {
+    for (const entry of BASH_32_DENYLIST) {
+      expect(bash32Violations(entry.bad), `the sample for ${entry.name}`).toContain(entry.name);
+      expect(bash32Violations(`# ${entry.bad.replace(/\n/g, '\n# ')}\n`), `${entry.name} in a comment`).toEqual([]);
     }
-    expect(code).not.toMatch(/\$\{[A-Za-z_]+(,,|\^\^)\}/);
+    const bash32 = [
+      'local -a mode specs',
+      'local -r name=x',
+      'declare -i count=0',
+      'set -u -o pipefail',
+      'case "$x" in a) one ;; b) two ;; esac',
+      'if [[ -n "$x" && -z "${y-}" ]]; then :; fi',
+      'last=${list[${#list[@]}-1]}',
+      'for item in ${list[@]+"${list[@]}"}; do :; done',
+      'cmd >out 2>&1 && other &>/dev/null',
+      "grep -E '[-0-9]+' file | sort",
+      'wait "$pid"',
+    ].join('\n');
+    expect(bash32Violations(bash32)).toEqual([]);
   });
 
   it('ships an example config that turns every check off and documents every key', () => {
@@ -1411,6 +1494,25 @@ describe('lint-pack template: pack-changed lines', () => {
     expectRun(r.run(base), 'LINT_PACK: clean\n', 0);
   });
 
+  it('lists no Package.json: only the lower-case package.json is a build file, even with a case-insensitive pathspec variable exported', () => {
+    const r = newRepo();
+    const base = r.commit({ ...pack(IDS_CONF), 'Package.json': PACKAGE('true') }, 'base');
+    const head = r.commit({ 'Package.json': PACKAGE('bash scripts/lint-pack.sh') }, 'head');
+    // Precondition, which fails and never skips: a case-insensitive pathspec does match this file, so the exported variable could change the lines.
+    const changed = (extra: Record<string, string | undefined>): string => {
+      const probe = spawnSync('git', ['diff', '--name-only', '-Glint-pack', base, head, '--', 'package.json'], {
+        cwd: r.dir, env: r.env(extra), encoding: 'utf8', timeout: SUBPROCESS_TIMEOUT_MS,
+      });
+      if (probe.error) throw probe.error;
+      return probe.stdout;
+    };
+    expect(changed({}), 'a plain pathspec must not match Package.json').toBe('');
+    expect(changed({ GIT_ICASE_PATHSPECS: '1' }), 'GIT_ICASE_PATHSPECS must make the pathspec match Package.json').toBe('Package.json\n');
+
+    expectRun(r.run(base), 'LINT_PACK: clean\n', 0);
+    expectRun(r.run(base, { env: { GIT_ICASE_PATHSPECS: '1' } }), 'LINT_PACK: clean\n', 0);
+  });
+
   it.each(['Makefile', 'GNUmakefile', 'makefile'])('reports a %s line that can change the base', name => {
     const r = newRepo();
     const recipe = MAKEFILE('@bash scripts/lint-pack.sh $(BASE)');
@@ -1619,11 +1721,13 @@ describe('lint-pack template: pack-dirty lines', () => {
     expectRun(r.run(base), `pack-changed .lint-pack.conf\npack-dirty ${SCRIPT_IN_REPO}\nLINT_PACK: error bad-config 4\n`, 2);
   });
 
-  it('reports the same lines with every pathspec variable exported', () => {
+  // The nested .gitattributes files are found by the pathspec `*/.gitattributes`, so each variable that changes how
+  // a glob or a literal name matches changes the lines. Each arm fails when the script stops unsetting its variable.
+  it.each([...PATHSPEC_VARIABLES, 'all four'])('reports the same lines with %s exported', which => {
     const { r, base } = dirtyFixture();
     fs.appendFileSync(path.join(r.dir, 'docs/.gitattributes'), '# not committed\n');
     r.write({ 'extra/.gitattributes': '* binary\n' });
-    const env = { GIT_LITERAL_PATHSPECS: '1', GIT_NOGLOB_PATHSPECS: '1', GIT_GLOB_PATHSPECS: '1', GIT_ICASE_PATHSPECS: '1' };
+    const env = which === 'all four' ? allPathspecVariables() : { [which]: '1' };
     expectRun(r.run(base, { env }), withDirty('docs/.gitattributes', 'extra/.gitattributes'), 1);
   });
 });
@@ -1856,13 +1960,9 @@ describe('lint-pack template: determinism and hostile environment', () => {
     expectRun(res, FULL_ORACLE, 1);
   });
 
-  it('keeps the oracle with the pathspec variables exported, singly and together', () => {
+  it('keeps the oracle with every pathspec variable exported together', () => {
     const { r, base } = fullFixture();
-    for (const name of ['GIT_LITERAL_PATHSPECS', 'GIT_NOGLOB_PATHSPECS', 'GIT_GLOB_PATHSPECS', 'GIT_ICASE_PATHSPECS']) {
-      expectRun(r.run(base, { env: { [name]: '1' } }), FULL_ORACLE, 1);
-    }
-    const together = { GIT_LITERAL_PATHSPECS: '1', GIT_NOGLOB_PATHSPECS: '1', GIT_GLOB_PATHSPECS: '1', GIT_ICASE_PATHSPECS: '1' };
-    expectRun(r.run(base, { env: together }), FULL_ORACLE, 1);
+    expectRun(r.run(base, { env: allPathspecVariables() }), FULL_ORACLE, 1);
   });
 
   it('keeps the oracle when GIT_DIFF_OPTS asks for context lines, which git lets override -U0', () => {
@@ -1920,6 +2020,78 @@ describe('lint-pack template: determinism and hostile environment', () => {
   });
 });
 
+// ── The build entries Validate runs ──────────────────────────────────────────
+
+/** The code block of one language in the README, with the indent of its fence removed. */
+function readmeBlock(language: string): string {
+  const lines = fs.readFileSync(TEMPLATE_README, 'utf8').split('\n');
+  const open = lines.findIndex(line => new RegExp(`^ *\`\`\`${language}$`).test(line));
+  expect(open, `the README must show a ${language} block`).toBeGreaterThan(-1);
+  const indent = (lines[open] ?? '').indexOf('`');
+  const body: string[] = [];
+  for (const line of lines.slice(open + 1)) {
+    if (/^ *```$/.test(line)) break;
+    body.push(line.slice(indent));
+  }
+  return `${body.join('\n')}\n`;
+}
+
+/** Whether `make` is on this runner. The make arm is gated on it and says so when it is skipped. */
+const HAS_MAKE = spawnSync('make', ['--version'], { encoding: 'utf8', timeout: SUBPROCESS_TIMEOUT_MS }).status === 0;
+
+describe('lint-pack template: the build entries Validate runs', () => {
+  /** The full fixture with a build file committed before the base, so it is not a pack change. */
+  function wiredFixture(buildFile: string, content: string) {
+    const r = newRepo();
+    r.commit({ [buildFile]: content }, 'wiring');
+    const base = fullBase(r);
+    fullHead(r);
+    const head = r.git('rev-parse', 'HEAD').trim();
+    return { r, base, head };
+  }
+
+  /** A run whose base is HEAD has no changed line, so it ends clean; the stub linter's three diagnostics match no changed line. */
+  const CLEAN_AT_HEAD = 'unmatched-diagnostics 3\nLINT_PACK: clean\n';
+
+  /** What each documented entry has to hand through: one base argument, the stdout, and a status that is zero only for a clean run. */
+  function expectSameAsDirect(via: Run, direct: Run, exactStatus: boolean): void {
+    expect(via.stdout).toBe(direct.stdout);
+    if (exactStatus) expect(via.status).toBe(direct.status);
+    else expect(via.status === 0).toBe(direct.status === 0);
+  }
+
+  it('runs the README package.json script as `npm run -s lint-pack -- <sha>`, with one argument and the exit code through', () => {
+    const { r, base, head } = wiredFixture('package.json', readmeBlock('json'));
+    const matches = r.run(base);
+    expectRun(matches, FULL_ORACLE, 1);
+    expectSameAsDirect(r.exec('npm', ['run', '-s', 'lint-pack', '--', base]), matches, true);
+
+    const clean = r.run(head);
+    expectRun(clean, CLEAN_AT_HEAD, 0);
+    expectSameAsDirect(r.exec('npm', ['run', '-s', 'lint-pack', '--', head]), clean, true);
+
+    const bad = r.run('0'.repeat(40));
+    expectError(bad, 'bad-base');
+    expectSameAsDirect(r.exec('npm', ['run', '-s', 'lint-pack', '--', '0'.repeat(40)]), bad, true);
+  });
+
+  // make reports every failed recipe as its own status 2, so this arm checks zero against non-zero, and the last line.
+  it.skipIf(!HAS_MAKE)('runs the README Makefile target as `make -s lint-pack BASE=<sha>`, with the base through and a failing run failing', () => {
+    const { r, base, head } = wiredFixture('Makefile', readmeBlock('make'));
+    const matches = r.run(base);
+    expectRun(matches, FULL_ORACLE, 1);
+    expectSameAsDirect(r.exec('make', ['-s', 'lint-pack', `BASE=${base}`]), matches, false);
+
+    const clean = r.run(head);
+    expectRun(clean, CLEAN_AT_HEAD, 0);
+    expectSameAsDirect(r.exec('make', ['-s', 'lint-pack', `BASE=${head}`]), clean, false);
+
+    const bad = r.run('0'.repeat(40));
+    expectError(bad, 'bad-base');
+    expectSameAsDirect(r.exec('make', ['-s', 'lint-pack', `BASE=${'0'.repeat(40)}`]), bad, false);
+  });
+});
+
 // ── Fixture isolation and CI wiring ──────────────────────────────────────────
 
 describe('lint-pack template: fixture isolation and CI wiring', () => {
@@ -1943,14 +2115,16 @@ describe('lint-pack template: fixture isolation and CI wiring', () => {
   });
 
   it('runs this suite in the macOS bash 3.2 job next to the shell-hook suites', () => {
+    const probe = 'jobs:\n  first:\n    run: a\n  second:\n    suites="tests/other.test.ts"\n';
+    expect(workflowJob(probe, 'first'), 'a job block ends at the next job key').not.toContain('suites=');
+    expect(workflowJob(probe, 'missing')).toBeNull();
+
     const ci = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'ci.yml'), 'utf8');
-    const job = ci.slice(ci.indexOf('macos-bash32-hooks:'));
-    expect(job.length).toBeGreaterThan(0);
-    const suites = job.split('\n').find(line => /^\s*suites="/.test(line));
+    const job = workflowJob(ci, 'macos-bash32-hooks');
+    expect(job, 'ci.yml must have the macos-bash32-hooks job').not.toBeNull();
+    const suites = (job ?? '').split('\n').find(line => /^\s*suites="/.test(line));
     expect(suites, 'the macOS job must name its suites').toBeDefined();
     expect(suites).toContain('tests/lint-pack-template.test.ts');
     expect(suites).toContain('tests/shell-hooks.test.ts');
-    const prose = ci.replace(/\n\s*#\s*/g, ' ');
-    expect(prose).toContain('the shell-hook suites, the lint-pack template suite and the installed-hook matrix');
   });
 });
