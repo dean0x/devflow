@@ -80,13 +80,21 @@ RUN_REMOVED="none"   # dir or link when a folder or a link was removed from the 
 RUN_FLOOR=""         # the version floor, named on a below-floor line only
 RESULT_FILE=""
 LOCK_HELD="false"
-# Sets OWN_PID to the real PID of the shell that runs it. The PID comes from a child that
-# execs sh, whose parent is that shell, because `$$` is the worker's PID in every subshell
-# and bash 3.2 has no BASHPID. A failed read gives `$$`.
+# Sets OWN_PID to a value that is the worker's own PID in the worker's shell and differs in
+# every subshell. It is BASHPID when that is set (bash 4 and later, no fork). Otherwise it is
+# the PID that a child, which execs sh, reports as its parent: that parent is this shell, and
+# `$$` would be the worker's PID in every subshell. When that read fails or is not a number,
+# BASH_SUBSHELL decides: 0 is the worker's own shell (`$$`), and above 0 is a subshell, which
+# gets a non-numeric value that never equals the worker's PID.
 own_pid() {
+  if [ -n "${BASHPID:-}" ]; then
+    OWN_PID="$BASHPID"
+    return 0
+  fi
   OWN_PID=$(exec /bin/sh -c 'echo $PPID' 2>/dev/null) || OWN_PID=""
   case "$OWN_PID" in
-    ''|*[!0123456789]*) OWN_PID="$$" ;;
+    ''|*[!0123456789]*)
+      if [ "${BASH_SUBSHELL:-0}" = "0" ]; then OWN_PID="$$"; else OWN_PID="subshell"; fi ;;
   esac
 }
 own_pid
@@ -276,7 +284,8 @@ claude_version_parsed() {
 # Returns 0 when the version in $1 is at or above the version in $2, comparing the three
 # components as numbers left to right (2.10.0 is above 2.1.286). Returns 1 when it is
 # below, or when either text is no version for claude_version_parsed. It leaves
-# CLAUDE_VERSION_PARSED set to the parse of $1.
+# CLAUDE_VERSION_PARSED holding the parse of $1 when both texts parse, and empty when either
+# one does not parse.
 claude_version_at_least() {
   local _f1 _f2 _f3 _v1 _v2 _v3 _rest
   claude_version_parsed "$2" || return 1
@@ -1081,7 +1090,8 @@ if [ -L "$STAGED_FILE" ] || [ -d "$STAGED_FILE" ]; then
 fi
 
 # Logs a run whose Write the permission rules refused, with its closing text <$1>, and
-# counts the run toward the two-in-a-row `denied` notice.
+# counts the run toward the `denied` notice (two denied runs with no successful update
+# between them).
 record_denied_run() {
   log "FAIL: Write denied by permission rule (${MEMORY_RESULT_DENIALS})$1"
   memory_denied_seen "$MEMORY_DIR" "$PROJECT_ROOT"

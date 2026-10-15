@@ -61,7 +61,12 @@ describe('the memory worker writes one Run line per run', () => {
       return source.slice(start + 1, end + endMark.length);
     }
 
-    it('writes the Run line and releases the lock only in the worker, not in a subshell that a signal ends', () => {
+    /**
+     * Runs the trap code in a harness: a plain subshell, and two background subshells that a
+     * signal ends, each holding the exit trap. `prelude` and `transform` shape the harness;
+     * the lines it prints say, per case, whether the lock is still held.
+     */
+    function runHarness(prelude: string[], transform: (trap: string) => string): { status: number | null; stderr: string; lines: string[]; lockLeft: boolean } {
       const root = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-trap-'));
       try {
         const lock = path.join(root, 'lock');
@@ -76,12 +81,13 @@ describe('the memory worker writes one Run line per run', () => {
         ].join('; ');
         fs.writeFileSync(harness, [
           'set -e',
+          ...prelude,
           'log() { echo "LOG $*"; }',
           'RUN_CLI="unknown"; RUN_ARGV="none"; RUN_RESULT="skip"; RUN_DENIALS="n/a"; RUN_REMOVED="none"; RUN_FLOOR=""',
           'RESULT_FILE=""',
           `LOCK_DIR='${lock}'`,
           'LOCK_HELD="true"',
-          trapCode(),
+          transform(trapCode()),
           'state() { if [ -d "$LOCK_DIR" ]; then echo "$1: lock held"; else echo "$1: lock released"; fi; }',
           '( trap finish_run EXIT; exit 0 )',
           'state "a plain subshell"',
@@ -97,18 +103,42 @@ describe('the memory worker writes one Run line per run', () => {
         ].join('\n'));
 
         const result = spawnSync('bash', [harness], { encoding: 'utf-8', timeout: 60000 });
-
-        expect(result.status, `the harness ended cleanly: ${result.stderr}`).toBe(0);
-        expect(result.stdout.trim().split('\n')).toEqual([
-          'a plain subshell: lock held',
-          'a background subshell that a signal ends: lock held',
-          'a background subshell in its own group that a signal ends: lock held',
-          'LOG Run: cli=unknown argv=none result=skip denials=n/a removed=none',
-        ]);
-        expect(fs.existsSync(lock), 'the worker itself released the lock when it ended').toBe(false);
+        return {
+          status: result.status,
+          stderr: result.stderr,
+          lines: result.stdout.trim().split('\n'),
+          lockLeft: fs.existsSync(lock),
+        };
       } finally {
         fs.rmSync(root, { recursive: true, force: true });
       }
+    }
+
+    const EXPECTED = [
+      'a plain subshell: lock held',
+      'a background subshell that a signal ends: lock held',
+      'a background subshell in its own group that a signal ends: lock held',
+      'LOG Run: cli=unknown argv=none result=skip denials=n/a removed=none',
+    ];
+
+    it('writes the Run line and releases the lock only in the worker, not in a subshell that a signal ends', () => {
+      const run = runHarness([], trap => trap);
+      expect(run.status, `the harness ended cleanly: ${run.stderr}`).toBe(0);
+      expect(run.lines).toEqual(EXPECTED);
+      expect(run.lockLeft, 'the worker itself released the lock when it ended').toBe(false);
+    });
+
+    it('keeps that rule when the read of the real PID fails: a subshell writes no line, the worker writes one', () => {
+      // BASHPID is unset so the read path runs on every bash, and the shell the read execs
+      // is a path that does not exist, so the read fails in the worker and in every subshell.
+      const run = runHarness(['unset BASHPID'], trap => {
+        const failing = trap.replace('exec /bin/sh -c', 'exec /nonexistent/sh -c');
+        expect(failing, 'the read execs /bin/sh').not.toBe(trap);
+        return failing;
+      });
+      expect(run.status, `the harness ended cleanly: ${run.stderr}`).toBe(0);
+      expect(run.lines).toEqual(EXPECTED);
+      expect(run.lockLeft, 'the worker itself released the lock when it ended').toBe(false);
     });
   });
 
