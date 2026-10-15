@@ -534,7 +534,7 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
   // The background worker runs `claude -p` with `--permission-mode dontAsk`, user settings
   // only and one `Edit` rule for its staged file, passed by `--settings`. No hook script
   // names a permission skip, a skip-all permission mode or an allow-list flag, so the limit cannot be
-  // widened by a flag that comes back. Scoped to the hook scripts, where the spawn lives:
+  // widened by adding such a flag. Scoped to the hook scripts, where the spawn lives:
   // other trees (the integration test helpers, docs on what the platform offers) may spell them.
   // -------------------------------------------------------------------------
   ...([
