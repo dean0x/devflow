@@ -293,13 +293,20 @@ describe('json-helper.js operations', () => {
     }, 60_000);
 
     it('every other caller passes exactly one argument, so its envelope is unchanged', () => {
-      const callers: Array<[string, number]> = [['ensure-proxy', 6], ['session-start-orchestrator', 1], ['session-start-memory', 1]];
+      const callers: Array<[string, number]> = [['ensure-proxy', 6], ['session-start-orchestrator', 1]];
       for (const [name, expected] of callers) {
         const source = fs.readFileSync(path.join(HOOKS_DIR, name), 'utf-8');
         const sites = source.split('\n').filter(line => /^\s*json_session_output\b/.test(line));
         expect(sites, name).toHaveLength(expected);
         for (const site of sites) expect(site.trim(), name).toMatch(/^json_session_output "\$[A-Z_]+"$/);
       }
+    });
+
+    it('session-start-memory passes exactly the context and the message, both quoted variables', () => {
+      const source = fs.readFileSync(path.join(HOOKS_DIR, 'session-start-memory'), 'utf-8');
+      const sites = source.split('\n').filter(line => /^\s*json_session_output\b/.test(line));
+      expect(sites).toHaveLength(1);
+      expect(sites[0].trim()).toBe('json_session_output "$CONTEXT" "$SYSTEM_MESSAGE"');
     });
 
     it('session-start-context passes the message as the second argument and never inside the context', () => {
