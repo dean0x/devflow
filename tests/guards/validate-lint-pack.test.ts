@@ -8,7 +8,8 @@
  *   1. The doctrine: the Validate body's Lint pack section, its Input bullet, its lead line and its Output
  *      block, with the four states and both slots above the cap line.
  *   2. One spawn site: of every Validate spawn, only the `/implement` Phase 6 one passes `GATE_LEVEL` and
- *      `BASE_SHA`, as the first two lines of its prompt, in both builds.
+ *      `BASE_SHA`, as the first two lines of its prompt, in both builds. The re-validation reference skips
+ *      Phase 1, so it takes `GATE_LEVEL` from Phase 1's settings step for Phase 6 and never names `BASE_SHA`.
  *   3. The data flow and the report: Phase 1 Produces and Phase 6 Requires list `GATE_LEVEL`; Phase 12 shows
  *      Validate's `Lint pack:` line, if any; Phase 9 passes an UNVERIFIED line to the PR body's Testing part.
  *   4. The Fix rule: validation-fix never edits the pack, its config, its build-file entry or any
@@ -256,6 +257,10 @@ const LEVEL_LINE = /^"?GATE_LEVEL:/m
 const BASE_LINE = /^BASE_SHA:/m
 const PHASE6_LEVEL = 'GATE_LEVEL: {GATE_LEVEL}'
 const PHASE6_BASE = 'BASE_SHA: {output of `git merge-base {BASE_BRANCH} HEAD`}'
+/** The Phase 1 step a run that skips Phase 1 runs for its level; the re-validation reference points at it by this name. */
+const SETTINGS_STEP = '**Resolve the settings line**'
+/** The re-validation reference's step that takes the level, as a numbered list line. */
+const REVALIDATE_LEVEL_STEP = /^\d+\. \*\*Take GATE_LEVEL\*\*/
 
 /** Named collector: every fenced spawn of the Validate agent in a text. */
 export function collectValidateFences(text: string): string[] {
@@ -274,6 +279,9 @@ export function collectSpawnSiteDefects(docs: readonly Doc[]): string[] {
   for (const doc of docs) {
     const isImplement = IMPLEMENT_LABELS.includes(doc.label)
     const phase6 = isImplement ? sectionBetween(doc.text, '### Phase 6: Validate', '### Phase 7:') : null
+    if (isImplement && !(sectionBetween(doc.text, '### Phase 1: Setup', '### Phase 2:') ?? '').includes(SETTINGS_STEP)) {
+      out.push(`${doc.label}: Phase 1 has no ${SETTINGS_STEP} step for the re-validation path to run`)
+    }
     const site = phase6 === null ? null : collectValidateFences(phase6)[0] ?? null
     if (isImplement && site === null) out.push(`${doc.label}: Phase 6 has no Validate spawn`)
     for (const fence of collectValidateSpawns(doc.text)) {
@@ -287,7 +295,14 @@ export function collectSpawnSiteDefects(docs: readonly Doc[]): string[] {
       if (LEVEL_LINE.test(fence)) out.push(`${doc.label}: a Validate spawn other than implement Phase 6 passes GATE_LEVEL`)
       if (BASE_LINE.test(fence)) out.push(`${doc.label}: a Validate spawn other than implement Phase 6 passes BASE_SHA`)
     }
-    if (doc.label === REVALIDATE_LABEL && /GATE_LEVEL|BASE_SHA/.test(doc.text)) out.push(`${doc.label}: the re-validation path names GATE_LEVEL or BASE_SHA`)
+    if (doc.label === REVALIDATE_LABEL) {
+      const step = doc.text.split('\n').find(line => REVALIDATE_LEVEL_STEP.test(line))
+      if (step === undefined) out.push(`${doc.label}: the re-validation path has no step that takes GATE_LEVEL`)
+      else if (!step.includes('unless Phase 1 ran') || !step.includes(SETTINGS_STEP) || !step.includes('`GATE_LEVEL`')) {
+        out.push(`${doc.label}: the re-validation step does not take GATE_LEVEL from the Phase 1 settings step unless Phase 1 ran`)
+      }
+      if (/BASE_SHA/.test(doc.text)) out.push(`${doc.label}: the re-validation path names BASE_SHA`)
+    }
   }
   return out
 }
@@ -389,9 +404,23 @@ describe('only the implement Phase 6 Validate spawn passes the level and the bas
       expect(collectSpawnSiteDefects(withDoc(SPAWN_CORPUS, label, addLevel)), label)
         .toContain(`${label}: a Validate spawn other than implement Phase 6 passes GATE_LEVEL`)
     }
-    const revalidate = (text: string): string => `${text}\nPass GATE_LEVEL.\n`
-    expect(collectSpawnSiteDefects(withDoc(SPAWN_CORPUS, REVALIDATE_LABEL, revalidate)))
-      .toContain(`${REVALIDATE_LABEL}: the re-validation path names GATE_LEVEL or BASE_SHA`)
+    const noStep = (text: string): string => seed(text, /^\d+\. \*\*Take GATE_LEVEL\*\*[^\n]*\n/m, '')
+    expect(collectSpawnSiteDefects(withDoc(SPAWN_CORPUS, REVALIDATE_LABEL, noStep)))
+      .toContain(`${REVALIDATE_LABEL}: the re-validation path has no step that takes GATE_LEVEL`)
+    const noPointer = (text: string): string => seed(text, SETTINGS_STEP, '**Resolve the line**')
+    expect(collectSpawnSiteDefects(withDoc(SPAWN_CORPUS, REVALIDATE_LABEL, noPointer)))
+      .toContain(`${REVALIDATE_LABEL}: the re-validation step does not take GATE_LEVEL from the Phase 1 settings step unless Phase 1 ran`)
+    const noCondition = (text: string): string => seed(text, 'GATE_LEVEL**: unless Phase 1 ran,', 'GATE_LEVEL**:')
+    expect(collectSpawnSiteDefects(withDoc(SPAWN_CORPUS, REVALIDATE_LABEL, noCondition)))
+      .toContain(`${REVALIDATE_LABEL}: the re-validation step does not take GATE_LEVEL from the Phase 1 settings step unless Phase 1 ran`)
+    const revalidateBase = (text: string): string => `${text}\nPass BASE_SHA.\n`
+    expect(collectSpawnSiteDefects(withDoc(SPAWN_CORPUS, REVALIDATE_LABEL, revalidateBase)))
+      .toContain(`${REVALIDATE_LABEL}: the re-validation path names BASE_SHA`)
+    for (const label of IMPLEMENT_LABELS) {
+      const renamed = (text: string): string => seed(text, SETTINGS_STEP, '**Resolve the line**')
+      expect(collectSpawnSiteDefects(withDoc(SPAWN_CORPUS, label, renamed)), label)
+        .toContain(`${label}: Phase 1 has no ${SETTINGS_STEP} step for the re-validation path to run`)
+    }
   })
 
   it('probes: an extra or missing Produces or Requires line is counted, in every arm and build', () => {

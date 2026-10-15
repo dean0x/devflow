@@ -522,7 +522,7 @@
       "pattern": "const VALIDATE_BODY_MAX_BYTES = 6_049",
       "occurrences": 1,
       "sourceFile": "tests/guards/validate-lint-pack.test.ts",
-      "description": "The Validate agent body, src/assets/agents/validate.md, in bytes. It is hand-authored. The lean lint-pack wiring (the Lint pack section, the Output slot, the Input bullet and the digest line) is funded with named cuts in the same body and measures 6,041; the ceiling is the size before that change. The cut pool of the Output example is kept for later Validate edits. May be LOWERED, never raised: a later addition funds itself with a cut."
+      "description": "The Validate agent body, src/assets/agents/validate.md, in bytes. It is hand-authored. The lean lint-pack wiring (the Lint pack section, the Output slot, the Input bullet and the digest line) is funded with named cuts in the same body and measures 6,045; the ceiling is the size before that change. The cut pool of the Output example is kept for later Validate edits. May be LOWERED, never raised: a later addition funds itself with a cut."
     },
     {
       "id": "command-bug-analysis-max",
