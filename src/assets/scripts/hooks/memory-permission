@@ -5,6 +5,7 @@
 # background-memory-update starts `claude -p` in a permission mode that denies every
 # call no rule allows, with an allow rule for its staged file (WORKING-MEMORY.md.new),
 # the only path the worker's write may reach, and a deny rule for every path under it.
+# Allow rules in the user's own settings also apply to the run.
 # This helper holds what the worker and session-start-memory share, so one bash 3.2 test
 # run covers it (tests/shell-hooks-helpers.test.ts):
 #   path_occupied           whether a file, a folder or a link, even a dangling one, stands on a path
@@ -78,8 +79,9 @@ staged_path_safe() {
 #   allow  Edit(//<staged>)     the staged file
 #   deny   Edit(//<staged>/*)   every path under the staged path
 # Under dontAsk, any call no rule allows is refused, so the worker's write is limited to
-# its staged file. Measured on Claude Code 2.1.269, 2.1.280, 2.1.286 and 2.1.299, both argv
-# forms, against a local stand-in for the Messages API (2026-10-15): with these two rules
+# its staged file and to what allow rules in the user's own settings cover.
+# Measured on Claude Code 2.1.269, 2.1.280, 2.1.286 and 2.1.299, both argv forms,
+# against a local stand-in for the Messages API (2026-10-15): with these two rules
 # the Write of the staged file succeeds, and a Write to <staged>/x, <staged>/a/b,
 # <staged>/a/b/c/d/e, <staged>/.hidden or <staged>/../<name> is refused. The deny is
 # `/*` and not `/**`: `/**` was measured to refuse the staged file too (2.1.269 and
