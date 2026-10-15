@@ -22,6 +22,7 @@ import * as os from 'os';
 import { pollForTerminalLine } from './helpers/poll-for-terminal-line.js';
 import { WORKER_AGENTS, validateWorkerValue } from '../src/core/agent-models.js';
 import { MEMORY_MIN_PERMISSION_VERSION } from '../src/cli/commands/memory.js';
+import { FORBIDDEN_ARGV } from './fixtures/forbidden-argv.js';
 import {
   FIFO_RUN_BOUND_MS,
   FIFO_TEST_TIMEOUT_MS,
@@ -3560,11 +3561,6 @@ function legacyArgv(model: string, stagedPath: string): string[] {
 /** Every flag only the lean form passes (the legacy form carries none). */
 const LEAN_ONLY_FLAGS = [
   '--effort', '--safe-mode', '--max-turns', '--disable-slash-commands', '--strict-mcp-config', '--mcp-config',
-] as const;
-
-/** What no argv form carries: a permission skip, a skip-all permission mode, an allow-list flag. */
-const FORBIDDEN_ARGV = [
-  '--dangerously-skip-permissions', '--allow-dangerously-skip-permissions', 'bypassPermissions', '--allowedTools',
 ] as const;
 
 /**
