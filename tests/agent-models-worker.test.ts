@@ -109,7 +109,7 @@ function collectMemoryHookValues(hookSource: string): {
   };
 }
 
-/** What follows `--model` on each argv line of the hook's `claude -p` spawns. */
+/** What follows `--model` on each argv line of the hook's `claude -p` argv. */
 function collectMemoryHookModelArgs(hookSource: string): string[] {
   return [...hookSource.matchAll(/^[ \t]*--model[ \t]+([^\s\\]+)/gm)].map(m => m[1]);
 }
@@ -140,8 +140,8 @@ describe('memory worker runtime parity', () => {
     expect(hook.effort).toEqual([WORKER_AGENTS.memory.effort]);
   });
 
-  it('the spawn names its model by variable only: no model literal sits in either argv', () => {
-    expect(collectMemoryHookModelArgs(HOOK_SOURCE)).toEqual(['"$MEMORY_MODEL"', '"$MEMORY_MODEL"']);
+  it('the spawn names its model by variable only: no model literal sits in the argv', () => {
+    expect(collectMemoryHookModelArgs(HOOK_SOURCE)).toEqual(['"$MEMORY_MODEL"']);
   });
 
   it("the hook's model alias list is CLAUDE_MODEL_ALIASES", () => {

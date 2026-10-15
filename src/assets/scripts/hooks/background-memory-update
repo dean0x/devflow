@@ -5,7 +5,8 @@
 # 120s throttle expires. Drains .pending-turns.jsonl → calls `claude -p` on the model
 # and effort the `agents.memory` entry of ~/.devflow/agent-models.json names, else the
 # shipped worker default, in a lean session (D-MEMORY-WORKER-LEAN) →
-# rewrites WORKING-MEMORY.md with a git-reconciliation stamp on line 1.
+# rewrites WORKING-MEMORY.md with a git-reconciliation stamp on line 1. The run's write
+# is limited to its staged file, WORKING-MEMORY.md.new (see "the spawn" below).
 #
 # Applies the LLM-vs-plumbing principle: artifact content (WORKING-MEMORY.md) is
 # authored by the LLM; this script only does plumbing (lock, queue drain, spawn).
@@ -64,12 +65,73 @@ source "$SCRIPT_DIR/is-hex-sha" || { echo "background-memory-update: failed to s
 
 log "Starting (CWD=$CWD)"
 
+# Every run ends with one `Run:` line that says what it was: the CLI version, the argv
+# form it ran, how it ended, how many calls the permission rules denied and what the
+# worker removed from the staged path. The exit trap writes it, so each way out of the
+# script has one. The fields start as "no CLI read, no run" and the steps below fill them
+# in; each is a keyword or digits, never text from the CLI, the queue or the prompt. The
+# trap also removes RESULT_FILE (the captured JSON result, set at the spawn below) and,
+# once this run holds it, the worker lock.
+RUN_CLI="unknown"    # X.Y.Z once the version probe has read one
+RUN_ARGV="none"      # lean or legacy, set where the run is spawned
+RUN_RESULT="skip"    # updated, conflict, failed, skip or below-floor
+RUN_DENIALS="n/a"    # digits or unknown, set where the run is spawned
+RUN_REMOVED="none"   # dir or link when a folder or a link was removed from the staged path
+RUN_FLOOR=""         # the version floor, named on a below-floor line only
+RESULT_FILE=""
+LOCK_HELD="false"
+# Sets OWN_PID to a value that is the worker's own PID in the worker's shell and differs in
+# every subshell. It is BASHPID when that is set (bash 4 and later, no fork). Otherwise it is
+# the PID that a child, which execs sh, reports as its parent: that parent is this shell, and
+# `$$` would be the worker's PID in every subshell. When that read fails or is not a number,
+# BASH_SUBSHELL decides: 0 is the worker's own shell (`$$`), and above 0 is a subshell, which
+# gets a non-numeric value that never equals the worker's PID.
+own_pid() {
+  if [ -n "${BASHPID:-}" ]; then
+    OWN_PID="$BASHPID"
+    return 0
+  fi
+  OWN_PID=$(exec /bin/sh -c 'echo $PPID' 2>/dev/null) || OWN_PID=""
+  case "$OWN_PID" in
+    ''|*[!0123456789]*)
+      if [ "${BASH_SUBSHELL:-0}" = "0" ]; then OWN_PID="$$"; else OWN_PID="subshell"; fi ;;
+  esac
+}
+own_pid
+WORKER_PID="$OWN_PID"
+finish_run() {
+  # Only the worker process itself ends the run. A subshell it forks (the watchdog, the
+  # claude spawn) that a signal reaches before bash resets its traps runs this trap too,
+  # and the PID check returns there: it writes no Run line and releases no lock.
+  own_pid
+  [ "$OWN_PID" = "$WORKER_PID" ] || return 0
+  local _floor=""
+  if [ -n "$RUN_FLOOR" ]; then _floor=" floor=${RUN_FLOOR}"; fi
+  log "Run: cli=${RUN_CLI} argv=${RUN_ARGV} result=${RUN_RESULT} denials=${RUN_DENIALS} removed=${RUN_REMOVED}${_floor}"
+  if [ -n "$RESULT_FILE" ]; then rm -f "$RESULT_FILE" 2>/dev/null || true; fi
+  if [ "$LOCK_HELD" = "true" ]; then rmdir "$LOCK_DIR" 2>/dev/null || true; fi
+}
+trap finish_run EXIT
+
 # --- Resolve paths ---
 # Anchor .devflow/ to the project root (prevents a stray nested .devflow/ when the
 # worker is spawned with a CWD inside .devflow/...). Empty → fall back to CWD.
 source "$SCRIPT_DIR/resolve-project-root" 2>/dev/null || true
+# The staged-path check, the settings JSON with the worker's Edit allow and deny rules, the
+# result line and the one-time notice (needs df_no_symlink_below from resolve-project-root).
+source "$SCRIPT_DIR/memory-permission" || { echo "background-memory-update: failed to source memory-permission" >&2; exit 1; }
 PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
 [ -n "$PROJECT_ROOT" ] || PROJECT_ROOT="$CWD"
+# One canonical root feeds every path below, the staged path in the prompt and in the
+# permission rule included: the rule matches a path as it resolves on disk, so a root
+# reached through a link is resolved here once (`cd -P`, `pwd -P`) and never again.
+PROJECT_ROOT_CANONICAL=$(cd -P -- "$PROJECT_ROOT" 2>/dev/null && pwd -P) || PROJECT_ROOT_CANONICAL=""
+if [ -z "$PROJECT_ROOT_CANONICAL" ]; then
+  log "SKIP: project root could not be resolved; no LLM run"
+  memory_notice_write "$PROJECT_ROOT/.devflow/memory" "$PROJECT_ROOT" path
+  exit 0
+fi
+PROJECT_ROOT="$PROJECT_ROOT_CANONICAL"
 PROJECT_DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
 MEMORY_DIR="$PROJECT_DEVFLOW_DIR/memory"
 QUEUE_FILE="$MEMORY_DIR/.pending-turns.jsonl"
@@ -120,11 +182,37 @@ if ! df_no_symlink_below "$PROJECT_ROOT" "$LOCK_DIR" "$QUEUE_FILE" "$PROCESSING_
   exit 0
 fi
 
+# --- The worker's write is limited to its staged file ---
+# The run gets an allow rule for $STAGED_FILE, a deny rule for every path under it, and a
+# permission mode that denies every call no rule allows. The rules are plain text in a
+# settings JSON, so the staged path is checked before the JSON is built: a character that
+# has a meaning in a rule path, or a project inside a .git folder, ends the run here with
+# no LLM call, and a one-time notice tells the user (memory-permission). The prompt, the
+# rules and the checks below all use this one path.
+if ! staged_path_safe "$STAGED_FILE"; then
+  if [ "$STAGED_PATH_REFUSAL" = "protected" ]; then
+    log "SKIP: the project lies inside a .git folder; no LLM run"
+  else
+    log "SKIP: the memory path holds characters the permission rule cannot carry; no LLM run"
+  fi
+  memory_notice_write "$MEMORY_DIR" "$PROJECT_ROOT" path
+  exit 0
+fi
+MEMORY_SETTINGS_JSON=$(memory_settings_json "$STAGED_FILE") || MEMORY_SETTINGS_JSON=""
+if [ -z "$MEMORY_SETTINGS_JSON" ]; then
+  log "SKIP: the permission rule for the staged file could not be built; no LLM run"
+  exit 0
+fi
+
 # --- CLI version probe: choose the argv form (D-MEMORY-WORKER-LEAN) ---
 # The lean argv (--effort, --safe-mode, --max-turns, ...) is verified from
 # MEMORY_MIN_CLAUDE_VERSION up. A CLI older than that, or one whose version cannot be
 # read, gets the legacy argv instead, because one flag a CLI does not know fails every
-# run. The probe runs here, once $CLAUDE_BIN has resolved and the link check has
+# run. A CLI whose version is read and is older than MEMORY_MIN_PERMISSION_VERSION, the
+# lowest version on which the worker's write was measured to be limited to its staged
+# file, gets no run at all: the queue is kept and the run's `Run:` line says below-floor.
+# `devflow init` states this version; src/cli/commands/memory.ts holds the same value, and
+# a test holds the two equal. The probe runs here, once $CLAUDE_BIN has resolved and the link check has
 # passed, and before the lock is taken, so a slow or hung `--version` can never extend
 # the lock's hold. It is bounded by DEVFLOW_BG_VERSION_PROBE_SECS (default 10, at most
 # 60; tests override it as they do DEVFLOW_BG_WATCHDOG_SECS) with the watchdog's
@@ -134,6 +222,10 @@ fi
 # aborts the caller, so each helper below ends in an explicit return status and is
 # called inside an `if` condition.
 MEMORY_MIN_CLAUDE_VERSION="2.1.286"
+# The lowest version measured, 2.1.269 (2026-10-15, with 2.1.280, 2.1.286 and 2.1.299): on
+# each, the staged file was written and every other path was refused. The cells are in
+# docs/reference/platform-assumptions.md.
+MEMORY_MIN_PERMISSION_VERSION="2.1.269"
 
 # Sets CLAUDE_VERSION_TEXT to the first 512 bytes `claude --version` printed ("" on any
 # failure). Returns 0 when it exited 0 inside the bound, else 1. A hung probe gets
@@ -161,7 +253,10 @@ probe_claude_version() {
   ) </dev/null >/dev/null 2>&1 &
   _wd_pid=$!
   if wait "$_pid" 2>/dev/null; then _status=0; fi
-  kill "$_wd_pid" 2>/dev/null || true
+  # SIGKILL, not SIGTERM: a fast probe ends while the watchdog subshell may not have run
+  # yet, and SIGTERM sent to a subshell that still carries the exit trap runs that trap
+  # there, which writes a second `Run:` line. SIGKILL runs no trap.
+  kill -KILL "$_wd_pid" 2>/dev/null || true
   wait "$_wd_pid" 2>/dev/null || true
   if [ "$_status" -eq 0 ]; then
     CLAUDE_VERSION_TEXT=$(head -c 512 "$_out" 2>/dev/null || true)
@@ -170,21 +265,35 @@ probe_claude_version() {
   return "$_status"
 }
 
-# Returns 0 when the first X.Y.Z in $1 is at or above the first X.Y.Z in $2, comparing
-# the three components as base-10 numbers left to right (2.10.0 is above 2.1.286, and
-# a leading zero is not octal). Returns 1 when it is below, or when either text holds
-# no X.Y.Z or a component longer than six digits. The digit set is spelled out: a
+# Returns 0 and sets CLAUDE_VERSION_PARSED to the first X.Y.Z in $1, each component as a
+# base-10 number without leading zeros (a leading zero is not octal). Returns 1 when $1
+# holds no X.Y.Z or a component longer than six digits. This is the one definition of a
+# version: the run's CLI version and both floors read it. The digit set is spelled out: a
 # range such as 0-9 collates by locale on bash 3.2.
-claude_version_at_least() {
-  local _text="$1" _floor="$2" _re='([0123456789]+)\.([0123456789]+)\.([0123456789]+)'
-  local _f1 _f2 _f3 _v1 _v2 _v3
-  [[ "$_floor" =~ $_re ]] || return 1
-  _f1=${BASH_REMATCH[1]}; _f2=${BASH_REMATCH[2]}; _f3=${BASH_REMATCH[3]}
-  [[ "$_text" =~ $_re ]] || return 1
+claude_version_parsed() {
+  local _re='([0123456789]+)\.([0123456789]+)\.([0123456789]+)'
+  local _v1 _v2 _v3
+  CLAUDE_VERSION_PARSED=""
+  [[ "$1" =~ $_re ]] || return 1
   _v1=${BASH_REMATCH[1]}; _v2=${BASH_REMATCH[2]}; _v3=${BASH_REMATCH[3]}
   if [ "${#_v1}" -gt 6 ] || [ "${#_v2}" -gt 6 ] || [ "${#_v3}" -gt 6 ]; then return 1; fi
-  _v1=$((10#$_v1)); _v2=$((10#$_v2)); _v3=$((10#$_v3))
-  _f1=$((10#$_f1)); _f2=$((10#$_f2)); _f3=$((10#$_f3))
+  CLAUDE_VERSION_PARSED="$((10#$_v1)).$((10#$_v2)).$((10#$_v3))"
+  return 0
+}
+
+# Returns 0 when the version in $1 is at or above the version in $2, comparing the three
+# components as numbers left to right (2.10.0 is above 2.1.286). Returns 1 when it is
+# below, or when either text is no version for claude_version_parsed. It leaves
+# CLAUDE_VERSION_PARSED holding the parse of $1 when both texts parse, and empty when either
+# one does not parse.
+claude_version_at_least() {
+  local _f1 _f2 _f3 _v1 _v2 _v3 _rest
+  claude_version_parsed "$2" || return 1
+  _f1=${CLAUDE_VERSION_PARSED%%.*}; _rest=${CLAUDE_VERSION_PARSED#*.}
+  _f2=${_rest%%.*}; _f3=${_rest#*.}
+  claude_version_parsed "$1" || return 1
+  _v1=${CLAUDE_VERSION_PARSED%%.*}; _rest=${CLAUDE_VERSION_PARSED#*.}
+  _v2=${_rest%%.*}; _v3=${_rest#*.}
   if [ "$_v1" -ne "$_f1" ]; then
     if [ "$_v1" -gt "$_f1" ]; then return 0; fi
     return 1
@@ -197,13 +306,30 @@ claude_version_at_least() {
   return 1
 }
 
+# The permission floor sits at or below the lean floor: a CLI the lean form runs on
+# always has the permission flags too.
+if ! claude_version_at_least "$MEMORY_MIN_CLAUDE_VERSION" "$MEMORY_MIN_PERMISSION_VERSION"; then
+  echo "[background-memory-update] FATAL: MEMORY_MIN_PERMISSION_VERSION ($MEMORY_MIN_PERMISSION_VERSION) must not exceed MEMORY_MIN_CLAUDE_VERSION ($MEMORY_MIN_CLAUDE_VERSION)" >&2
+  exit 1
+fi
+
 CLAUDE_ARGV_FORM="legacy"
 if ! probe_claude_version; then
   log "claude --version probe failed or timed out — using the legacy argv"
-elif claude_version_at_least "$CLAUDE_VERSION_TEXT" "$MEMORY_MIN_CLAUDE_VERSION"; then
-  CLAUDE_ARGV_FORM="lean"
+elif ! claude_version_parsed "$CLAUDE_VERSION_TEXT"; then
+  log "claude --version could not be read — using the legacy argv"
 else
-  log "claude --version is below ${MEMORY_MIN_CLAUDE_VERSION} or unparseable — using the legacy argv"
+  RUN_CLI="$CLAUDE_VERSION_PARSED"
+  if ! claude_version_at_least "$RUN_CLI" "$MEMORY_MIN_PERMISSION_VERSION"; then
+    RUN_RESULT="below-floor"
+    RUN_FLOOR="$MEMORY_MIN_PERMISSION_VERSION"
+    exit 0
+  fi
+  if claude_version_at_least "$RUN_CLI" "$MEMORY_MIN_CLAUDE_VERSION"; then
+    CLAUDE_ARGV_FORM="lean"
+  else
+    log "claude --version is below ${MEMORY_MIN_CLAUDE_VERSION} — using the legacy argv"
+  fi
 fi
 
 # --- Worker-level lock (300s stale-break — much longer than learning-lock's 30s) ---
@@ -243,34 +369,46 @@ acquire_lock() {
   return 0
 }
 
-cleanup_lock() {
-  rmdir "$LOCK_DIR" 2>/dev/null || true
-}
-trap cleanup_lock EXIT
-
 break_stale_lock
 
+# A worker that times out on the lock does not hold it, so finish_run leaves it alone.
 if ! acquire_lock; then
   log "SKIP: lock timeout after 90s — another worker is running"
-  trap - EXIT
   exit 0
 fi
+LOCK_HELD="true"
 
-# Clean up any staged file left by a watchdog-killed prior run.
-# Without this, a stale staged file with a valid stamp would be mistakenly
-# mv-ed to the real path on the NEXT run's CAS check (D-MEMORY-STAGED-CAS).
+# Clean up whatever stands at the staged path after a watchdog-killed or odd prior run.
+# Without this, a stale staged file with a valid stamp would be mistakenly mv-ed to the
+# real path on the NEXT run's CAS check (D-MEMORY-STAGED-CAS).
 #
 # D-MEMORY-WORKER-LEAN: the removal is also a CHECKED precondition. The model gets the
 # Write tool alone, and Write refuses a file that exists and has not been read, which
 # is how an earlier Write-only worker failed silently: every Write errored while the
 # run exited 0. Once nothing stands at the staged path, the one Write is always a
-# create, so Write-only is safe. A path `rm -f` cannot clear (a directory, say) would
-# make every Write fail, so the run stops here instead: no LLM call, the batch and
-# the queue untouched (nothing has been claimed yet), the lock released by the EXIT
-# trap. `-e` or `-L`, so a link there counts as present.
+# create, so Write-only is safe. A folder or a link there is removed first, by one
+# guarded delete of exactly that path (memory_staged_remove: only
+# <project>/.devflow/memory/WORKING-MEMORY.md.new, never through a link, a bounded
+# listing, no pattern), then `rm -f` clears a stale regular file. Whatever still stands
+# there stops the run here instead: no LLM call, the batch and the queue untouched
+# (nothing has been claimed yet), the lock released by the EXIT trap, a one-time notice
+# for the user, and a Run line that says `failed` and `removed=none`. A link there counts
+# as present (path_occupied).
+if ! memory_staged_remove "$MEMORY_DIR" "$PROJECT_ROOT" "$STAGED_FILE"; then
+  RUN_RESULT="failed"
+  log "SKIP: $STAGED_FILE is a folder or a link that was not removed (${STAGED_REMOVE_REFUSAL}); remove it to resume memory updates; no LLM run"
+  memory_notice_write "$MEMORY_DIR" "$PROJECT_ROOT" path
+  exit 0
+fi
+RUN_REMOVED="$STAGED_REMOVED"
+if [ "$STAGED_REMOVED" != "none" ]; then
+  log "Removed a ${STAGED_REMOVED/dir/folder} from $STAGED_FILE before the run"
+fi
 rm -f "$STAGED_FILE" 2>/dev/null || true
-if [ -e "$STAGED_FILE" ] || [ -L "$STAGED_FILE" ]; then
+if path_occupied "$STAGED_FILE"; then
+  RUN_RESULT="failed"
   log "SKIP: $STAGED_FILE could not be removed — a Write to it would fail, so no LLM run; the batch and the queue are left as they are"
+  memory_notice_write "$MEMORY_DIR" "$PROJECT_ROOT" path
   exit 0
 fi
 
@@ -740,15 +878,18 @@ fi
 # Job-control notifications go to stderr which is redirected to the log — suppress them.
 #
 # D-MEMORY-WORKER-LEAN — the spawn. The worker opens a headless session to make one
-# Write, so the session is cut to what that Write needs. Prompt on stdin, output and
-# errors to the log, as before. Two argv forms, chosen by the version probe above:
+# Write, so the session is cut to what that Write needs, and the Write is limited to its
+# staged file. The prompt goes on stdin, the JSON result to a temporary file and the
+# errors to the log. Two argv forms, chosen by the version probe above:
 #
 #   lean (CLI at or above MEMORY_MIN_CLAUDE_VERSION):
 #     -p --model M --effort E --safe-mode --tools Write --disable-slash-commands \
 #     --strict-mcp-config --mcp-config '{"mcpServers":{}}' --max-turns 3 \
-#     --dangerously-skip-permissions --output-format text
+#     --permission-mode dontAsk --setting-sources user --settings JSON \
+#     --output-format json
 #   legacy (older, unreadable or timed-out probe):
-#     -p --model M --tools Write --dangerously-skip-permissions --output-format text
+#     -p --model M --tools Write --permission-mode dontAsk --setting-sources user \
+#     --settings JSON --output-format json
 #
 # What each flag is for:
 #   --model, --effort  the resolved agents.memory values above. --effort is the only
@@ -760,8 +901,7 @@ fi
 #                      Auth, model selection and built-in tools work as usual, and
 #                      settings `env` (the provider URL and key) still applies under
 #                      it (measured on 2026-10-09), so a routed or keyed install works.
-#   --tools Write      Write is the only tool. `--allowedTools` only pre-approves, it
-#                      leaves every tool, listing and MCP server loaded.
+#   --tools Write      Write is the only tool.
 #   --disable-slash-commands, --strict-mcp-config with an empty --mcp-config
 #                      no slash-command or skill listing, no MCP server and none of the
 #                      instructions they add to the context.
@@ -773,59 +913,123 @@ fi
 #                      pattern). `--max-turns` is not listed in `claude --help` there
 #                      but is registered (`--max-turns abc` errors "must be a number"),
 #                      which is why it was exercised rather than read off the help.
-#   --dangerously-skip-permissions  headless: nothing could answer a prompt.
-#   --output-format text
+#   --permission-mode dontAsk
+#                      a call no allow rule covers is denied and never asked, so a
+#                      headless run cannot wait on a prompt and the denial is the limit.
+#   --setting-sources user
+#                      only the user's own settings load, never the project's or the
+#                      local ones. The user's settings keep their `env` and their own
+#                      allow rules, so a user allow rule that covers other paths covers
+#                      the worker too. The user's ask and deny rules on Edit also apply
+#                      to the run.
+#   --settings JSON    an allow rule Edit(//<the canonical staged path>), a deny rule
+#                      Edit(//<the canonical staged path>/*) for every path under it, and
+#                      no hooks. Under dontAsk a path that no allow rule covers is refused;
+#                      a folder or a link at the staged path is removed before the run
+#                      and after it (memory_staged_remove). Only Edit rules cover the
+#                      Write tool: a Write(path) rule is never checked, so it would deny
+#                      every Write.
+#                      The leading // makes the rule path absolute. The JSON is built by
+#                      memory_settings_json, after the path check above, and its comment
+#                      holds what was measured.
+#   --output-format json
+#                      the result as one JSON object: its subtype, error flag, turn
+#                      count and the list of denied calls. The hook reduces it to one
+#                      fixed log line (memory_result_summary) and deletes the file; the
+#                      denied calls' input, which can hold the memory body, is never
+#                      read or logged.
 #   DEVFLOW_BG_UPDATER=1  the recursion guard stays on both forms, though --safe-mode
 #                      also disables hooks. CLAUDE_CODE_DISABLE_CLAUDE_MDS=1 and
 #                      CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 keep the instruction files and
 #                      auto-memory out on both forms, including the legacy one.
 #
-# Why Write-only is safe: the staged path is empty before every run (the removal and
-# the checked precondition after the lock above), so the one Write is always a create.
-# Write refuses an existing file that has not been read, and that is the whole history
-# of this flag set:
-#   a472a490  passed `--tools "Write"` with `--allowedTools` for two memory files;
-#   e701cecc  widened the tools to `Read,Write,Bash` after counting the silent
-#             read-before-write failures (the run exited 0 while every Write errored);
-#   baf02265  removed both flags, with no reason in its message;
-#   6186645f  raised the worker's model and kept `--allowedTools 'Read,Write'`.
+# The run starts in the project root, so a session that began in a subfolder runs from
+# the same place. The worker enters the root before the fork; a root it cannot enter ends
+# the run with its own log line and starts no claude, so the spawn's exit status is what
+# claude returned and nothing else. The spawn is a subshell that ends in `exec`, so the
+# claude process keeps the subshell's PID, which is its process group's leader (set -m
+# below), and the watchdog can signal the whole group.
 #
-# The version floor is 2.1.286, the lowest CLI on which the whole lean argv was run
-# and its flags, the settings `env` under --safe-mode and the effort override were
-# checked (2.1.286 and 2.1.292 to 2.1.294 behave identically; 2026-10-09, recorded in
+# Why Write-only is safe: the staged path is empty before every run (the removal and
+# the checked precondition after the lock above, then the check just before the spawn),
+# so the one Write is always a create. Write refuses an existing file that has not been
+# read, and a refused Write can leave the run's exit status at 0. That is why the staged
+# path is checked twice, and why a denied Write is counted from the JSON result and
+# logged, not left to look like a success.
+#
+# The lean floor is 2.1.286, the lowest CLI on which the whole lean argv was run and its
+# flags, the settings `env` under --safe-mode and the effort override were checked
+# (2.1.286 and 2.1.292 to 2.1.294 behave identically; 2026-10-09, recorded in
 # docs/reference/platform-assumptions.md). The legacy form carries no --effort,
 # --safe-mode, --max-turns, --disable-slash-commands, --strict-mcp-config or
 # --mcp-config, none of which is verified on older CLIs, so on it effort is not
-# applied, MCP servers stay loaded and there is no turn cap.
+# applied, MCP servers stay loaded and there is no turn cap. A CLI below
+# MEMORY_MIN_PERMISSION_VERSION gets no run at all: the limit was measured from that
+# version up.
 #
 # The turns input has no byte cap: the queue holds every turn whole by design, and the
 # prompt is bounded by the newest-20-rows window above and the 64 KB existing-memory
 # cap, not by cutting a turn.
 unset CLAUDE_CODE_EFFORT_LEVEL
-set -m
-if [ "$CLAUDE_ARGV_FORM" = "lean" ]; then
-  DEVFLOW_BG_UPDATER=1 CLAUDE_CODE_DISABLE_CLAUDE_MDS=1 CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 "$CLAUDE_BIN" -p \
-    --model "$MEMORY_MODEL" \
-    --effort "$MEMORY_EFFORT" \
-    --safe-mode \
-    --tools Write \
-    --disable-slash-commands \
-    --strict-mcp-config \
-    --mcp-config '{"mcpServers":{}}' \
-    --max-turns 3 \
-    --dangerously-skip-permissions \
-    --output-format text \
-    <<< "$PROMPT" \
-    >> "$LOG_FILE" 2>&1 &
-else
-  DEVFLOW_BG_UPDATER=1 CLAUDE_CODE_DISABLE_CLAUDE_MDS=1 CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 "$CLAUDE_BIN" -p \
-    --model "$MEMORY_MODEL" \
-    --tools Write \
-    --dangerously-skip-permissions \
-    --output-format text \
-    <<< "$PROMPT" \
-    >> "$LOG_FILE" 2>&1 &
+
+# The JSON result goes to a temporary file the exit trap also removes. mktemp creates it
+# readable by the user alone; if it cannot be made, the result goes to /dev/null and the
+# run goes on without a count.
+RESULT_FILE=$(mktemp "${TMPDIR:-/tmp}/devflow-memory-result.XXXXXX" 2>/dev/null) || RESULT_FILE=""
+if [ -z "$RESULT_FILE" ]; then
+  log "Result not captured: no temporary file could be created"
 fi
+
+# Re-check the staged path just before the spawn: the lock is held and the path was
+# cleared, but the prompt took time to build. A file or a link there now, or a link
+# anywhere on its way, was put there since, so the run does not start; the batch stays
+# in .processing for recovery.
+if path_occupied "$STAGED_FILE" || ! df_no_symlink_below "$PROJECT_ROOT" "$STAGED_FILE"; then
+  RUN_RESULT="failed"
+  log "SKIP: the staged path changed before the run; leaving .processing for recovery"
+  exit 0
+fi
+# Every check on the path has passed, so a path notice from an earlier run is stale.
+memory_notice_clear "$MEMORY_DIR" "$PROJECT_ROOT" path
+
+# From here a way out other than the end of the script is a failed run.
+RUN_ARGV="$CLAUDE_ARGV_FORM"
+RUN_RESULT="failed"
+RUN_DENIALS="unknown"
+
+if ! cd "$PROJECT_ROOT" 2>/dev/null; then
+  log "FAIL: could not enter the project root"
+  exit 0
+fi
+
+# One argv for both forms, in the order the flags are passed: the model, the Write tool and
+# the four permission flags that limit the worker's write are stated here once; the lean
+# form adds its own flags. (`+=` needs bash 3.1; the array is never empty, so its
+# expansion below is safe on 3.2.)
+CLAUDE_ARGV=(
+  -p
+  --model "$MEMORY_MODEL"
+)
+if [ "$CLAUDE_ARGV_FORM" = "lean" ]; then
+  CLAUDE_ARGV+=(--effort "$MEMORY_EFFORT" --safe-mode)
+fi
+CLAUDE_ARGV+=(--tools Write)
+if [ "$CLAUDE_ARGV_FORM" = "lean" ]; then
+  CLAUDE_ARGV+=(--disable-slash-commands --strict-mcp-config --mcp-config '{"mcpServers":{}}' --max-turns 3)
+fi
+CLAUDE_ARGV+=(
+  --permission-mode dontAsk
+  --setting-sources user
+  --settings "$MEMORY_SETTINGS_JSON"
+  --output-format json
+)
+
+set -m
+(
+  DEVFLOW_BG_UPDATER=1 CLAUDE_CODE_DISABLE_CLAUDE_MDS=1 CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 exec "$CLAUDE_BIN" "${CLAUDE_ARGV[@]}" \
+    <<< "$PROMPT" \
+    > "${RESULT_FILE:-/dev/null}" 2>> "$LOG_FILE"
+) &
 CLAUDE_PID=$!
 set +m
 
@@ -848,9 +1052,51 @@ else
   CLAUDE_EXIT=$?
 fi
 
-# Cancel watchdog (avoids stray kill hitting a recycled PID after this process exits)
-kill "$WD_PID" 2>/dev/null || true
+# Cancel watchdog (avoids stray kill hitting a recycled PID after this process exits).
+# SIGKILL so no trap can run in the watchdog subshell, whatever the bash version.
+kill -KILL "$WD_PID" 2>/dev/null || true
 wait "$WD_PID" 2>/dev/null || true
+
+# The JSON result, reduced to one fixed log line and deleted on every path out of here
+# (the exit trap removes it too). Only counts and flags are read from it: the denied
+# calls' input and the result text never reach the log.
+MEMORY_RESULT_DENIALS="unknown"
+if [ -n "$RESULT_FILE" ]; then
+  memory_result_summary "$RESULT_FILE"
+  log "$MEMORY_RESULT_LINE"
+  rm -f "$RESULT_FILE" 2>/dev/null || true
+  RESULT_FILE=""
+  RUN_DENIALS="$MEMORY_RESULT_DENIALS"
+fi
+# 0 and an unreported count are both "no denial to report"; any other count is a refusal.
+RESULT_DENIED=""
+case "$MEMORY_RESULT_DENIALS" in
+  unknown|0) ;;
+  *) RESULT_DENIED="yes" ;;
+esac
+
+# A folder or a link at the staged path now was put there during the run: the path was
+# empty at the spawn. It is removed the way it is before a run (memory_staged_remove), and
+# the run ends as failed: the checks below find no staged file, and the batch stays for
+# recovery. If the removal is refused, the folder stays, the log names the reason and the
+# next run stops at the same guard. The tests are builtins, so a normal run forks nothing.
+if [ -L "$STAGED_FILE" ] || [ -d "$STAGED_FILE" ]; then
+  if memory_staged_remove "$MEMORY_DIR" "$PROJECT_ROOT" "$STAGED_FILE"; then
+    RUN_REMOVED="$STAGED_REMOVED"
+    log "FAIL: a ${STAGED_REMOVED/dir/folder} stood at $STAGED_FILE after the run and was removed; the run is failed"
+  else
+    log "FAIL: a folder or a link stands at $STAGED_FILE after the run and was not removed (${STAGED_REMOVE_REFUSAL}); remove it to resume memory updates"
+  fi
+fi
+
+# Logs a run whose Write the permission rules refused, with its closing text <$1>, and
+# counts the run toward the `denied` notice (two denied runs with no successful update
+# between them).
+record_denied_run() {
+  log "FAIL: Write denied by permission rule (${MEMORY_RESULT_DENIALS})$1"
+  memory_denied_seen "$MEMORY_DIR" "$PROJECT_ROOT"
+  return 0
+}
 
 if [ "$CLAUDE_EXIT" -gt 128 ]; then
   log "FAIL: claude -p killed by watchdog after ${WATCHDOG_SECS}s"
@@ -861,7 +1107,13 @@ if [ "$CLAUDE_EXIT" -gt 128 ]; then
   # keeping this plumbing script simple.
   exit 0
 elif [ "$CLAUDE_EXIT" -ne 0 ]; then
-  log "FAIL: claude -p exited with code $CLAUDE_EXIT"
+  if [ -n "$RESULT_DENIED" ]; then
+    # A refused Write can end the run non-zero too (the lean form's turn cap), so the
+    # count is named here as well as the exit code.
+    record_denied_run ", exit $CLAUDE_EXIT"
+  else
+    log "FAIL: claude -p exited with code $CLAUDE_EXIT"
+  fi
   # Leave .processing for crash recovery (see same rate-bound note above)
   exit 0
 fi
@@ -939,6 +1191,7 @@ verify_and_swap() {
 
 OUTCOME="failed"
 verify_and_swap
+RUN_RESULT="$OUTCOME"
 
 # Each stamp below is a `touch`, which follows a symbolic link, and its path was
 # checked before the LLM run, which can take minutes. So, like the swap's target,
@@ -946,6 +1199,8 @@ verify_and_swap
 # during the run, and the stamp is skipped and logged (D-HOOKS-NO-SYMLINK, git-marker).
 if [ "$OUTCOME" = "updated" ]; then
   rm -f "$PROCESSING_FILE" 2>/dev/null || true
+  # A run that swapped the memory in ends any count of runs the write was refused in.
+  memory_notice_clear "$MEMORY_DIR" "$PROJECT_ROOT" denied
   if df_no_symlink_below "$PROJECT_ROOT" "$OK_FILE"; then
     touch "$OK_FILE" 2>/dev/null || true
     log "SUCCESS: queue drained, .last-refresh-ok touched"
@@ -961,6 +1216,9 @@ elif [ "$OUTCOME" = "conflict" ]; then
     log "Heartbeat skipped: a symbolic link appeared on the path to $PROCESSING_FILE during the run"
   fi
   log "CONFLICT: queue retained in .processing, .last-refresh-ok untouched"
+elif [ -n "$RESULT_DENIED" ]; then
+  # Leave .processing for session-start-memory's D56c cold path; do NOT touch .last-refresh-ok
+  record_denied_run " — leaving .processing for recovery"
 else
   # Leave .processing for session-start-memory's D56c cold path; do NOT touch .last-refresh-ok
   log "FAIL: verification failed — leaving .processing for recovery"

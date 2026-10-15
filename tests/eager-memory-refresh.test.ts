@@ -22,6 +22,8 @@ import * as os from 'os';
 import { waitForWorkerToFinish } from './helpers/poll-for-terminal-line.js';
 import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
 import { WORKER_AGENTS, validateWorkerValue } from '../src/core/agent-models.js';
+import { MEMORY_MIN_PERMISSION_VERSION } from '../src/cli/commands/memory.js';
+import { FORBIDDEN_ARGV } from './fixtures/forbidden-argv.js';
 import {
   FIFO_RUN_BOUND_MS,
   FIFO_TEST_TIMEOUT_MS,
@@ -794,13 +796,13 @@ describe('S8: AC-C2/C4 — security constraints', () => {
   // assert sentinel appears in stdin capture and NOT in argv capture). The structural
   // grep for `<<< "$PROMPT"` is dropped to avoid implementation coupling.
 
-  it('DEVFLOW_BG_UPDATER=1 set as env prefix on both claude invocations (worker side invariant)', () => {
+  it('DEVFLOW_BG_UPDATER=1 is the env prefix of the one claude spawn that both argv forms share (worker side invariant)', () => {
     // The behavioural twin is S29, which records the variable in the environment of
-    // the lean and of the legacy spawn. This keeps the source half: the lean and the
-    // legacy spawn each carry the recursion guard as an env prefix.
+    // the lean and of the legacy spawn. This keeps the source half: the worker has one
+    // spawn line, and it carries the recursion guard as an env prefix.
     const src = fs.readFileSync(BACKGROUND_UPDATER, 'utf-8');
-    const spawns = src.match(/^[ \t]*DEVFLOW_BG_UPDATER=1 [^\n]*"\$CLAUDE_BIN" -p /gm) ?? [];
-    expect(spawns).toHaveLength(2);
+    const spawns = src.match(/^[ \t]*DEVFLOW_BG_UPDATER=1 [^\n]*exec "\$CLAUDE_BIN"/gm) ?? [];
+    expect(spawns).toHaveLength(1);
   });
 
   it('PROMPT content never appears in worker log — sentinel in queue turn does NOT leak to log', () => {
@@ -3251,7 +3253,7 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
   // LLM run, so the stand-in plants the link there during its run, to a file outside
   // the project whose line 1 carries a valid stamp: nothing else stands between that
   // link and a swap that would rename the link itself into the working memory's place.
-  it('background-memory-update: a link that appears at WORKING-MEMORY.md.new during the LLM run is neither read nor renamed into place', () => {
+  it('background-memory-update: a link that appears at WORKING-MEMORY.md.new during the LLM run is removed, and is neither read nor renamed into place', () => {
     fs.mkdirSync(memoryDir, { recursive: true });
     seedQueue(projectDir);
     const memoryFile = path.join(memoryDir, 'WORKING-MEMORY.md');
@@ -3271,10 +3273,12 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
     expect(fs.readFileSync(fake, 'utf-8'), 'the link target is byte-identical').toBe(FAKE);
     expect(isLink(memoryFile), 'the working memory is not replaced by the link').toBe(false);
     expect(fs.readFileSync(memoryFile, 'utf-8'), 'the existing working memory is left as it was').toBe(MEMORY);
-    expect(fs.readlinkSync(staged), 'non-vacuity: the stand-in planted the link, and it is left where it was').toBe(fake);
+    expect(() => fs.lstatSync(staged), 'the planted link is removed, and the file it names is not moved').toThrow(/ENOENT/);
     expect(fs.existsSync(path.join(memoryDir, '.last-refresh-ok')), 'no refresh is recorded').toBe(false);
     expect(fs.existsSync(path.join(memoryDir, '.pending-turns.processing')), 'the batch is kept for a later run').toBe(true);
-    expect(refusals('background-memory-update'), 'the refusal is logged once').toHaveLength(1);
+    const log = fs.readFileSync(workerLogPath(projectDir, homeDir), 'utf-8');
+    expect(log).toContain('after the run and was removed; the run is failed');
+    expect(log).toMatch(/Run: cli=2\.1\.293 argv=lean result=failed denials=\w+ removed=link\n/);
   });
 
   // The run's paths are checked before the LLM run, which can take minutes, and the
@@ -3494,25 +3498,59 @@ describe('S28: the memory hooks never read through a symbolic link into the sess
 /** One worker run's bound: its own work, a node exec stall, and the 1 s probe bound the hang arm uses. */
 const LEAN_RUN_TIMEOUT_MS = HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS + 10_000;
 
-/** The lean argv, exactly as the spawn passes it, for a model and an effort. */
-function leanArgv(model: string, effort: string): string[] {
+/**
+ * The settings JSON the spawn passes to `--settings`: an Edit allow rule on the absolute
+ * staged path (the leading // makes the rule path absolute), an Edit deny rule on every
+ * path under it, and no hooks.
+ */
+function settingsJson(stagedPath: string): string {
+  return `{"permissions":{"allow":["Edit(/${stagedPath})"],"deny":["Edit(/${stagedPath}/*)"]},"disableAllHooks":true}`;
+}
+
+/**
+ * The four flags both forms carry, in the order the spawn passes them. The staged path
+ * is the canonical one: the project root as it resolves on disk (`fs.realpathSync`).
+ */
+function permissionFlags(stagedPath: string): string[] {
+  return ['--permission-mode', 'dontAsk', '--setting-sources', 'user', '--settings', settingsJson(stagedPath), '--output-format', 'json'];
+}
+
+/** The lean argv, exactly as the spawn passes it, for a model, an effort and the canonical staged path. */
+function leanArgv(model: string, effort: string, stagedPath: string): string[] {
   return [
     '-p', '--model', model, '--effort', effort, '--safe-mode',
     '--tools', 'Write', '--disable-slash-commands',
     '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',
-    '--max-turns', '3', '--dangerously-skip-permissions', '--output-format', 'text',
+    '--max-turns', '3', ...permissionFlags(stagedPath),
   ];
 }
 
-/** The legacy argv, exactly as the spawn passes it, for a model. It carries no effort. */
-function legacyArgv(model: string): string[] {
-  return ['-p', '--model', model, '--tools', 'Write', '--dangerously-skip-permissions', '--output-format', 'text'];
+/** The legacy argv, exactly as the spawn passes it, for a model and the staged path. It carries no effort. */
+function legacyArgv(model: string, stagedPath: string): string[] {
+  return ['-p', '--model', model, '--tools', 'Write', ...permissionFlags(stagedPath)];
 }
 
-/** Every flag only the lean form passes (the legacy form carries none, and neither carries --allowedTools). */
+/** Every flag only the lean form passes (the legacy form carries none). */
 const LEAN_ONLY_FLAGS = [
   '--effort', '--safe-mode', '--max-turns', '--disable-slash-commands', '--strict-mcp-config', '--mcp-config',
 ] as const;
+
+/**
+ * The lowest CLI version the worker runs on, which is the lowest one measured: the one
+ * value `devflow init` states and the hook holds equal (tests/memory.test.ts). The cases
+ * below test just under it, between it and the lean floor, and exactly on it.
+ */
+const PERMISSION_FLOOR = MEMORY_MIN_PERMISSION_VERSION;
+
+/** The lowest CLI version that gets the lean form (MEMORY_MIN_CLAUDE_VERSION in the hook). */
+const LEAN_FLOOR = '2.1.286';
+
+function expectNoForbiddenFlag(argv: string[] | undefined): void {
+  expect(argv, 'the -p call happened').toBeDefined();
+  for (const flag of FORBIDDEN_ARGV) {
+    expect(argv, flag).not.toContain(flag);
+  }
+}
 
 interface RecordingClaude {
   /** One argument per line; written by the `-p` call only. */
@@ -3526,15 +3564,41 @@ interface RecordingClaude {
   readonly runLockFile: string;
   /** The probe's PID, written before the version body runs. */
   readonly probePidFile: string;
+  /** The `-p` call's working directory, physical (`pwd -P`). */
+  readonly cwdFile: string;
+  /** The names in $TMPDIR while the `-p` call ran. */
+  readonly tmpListFile: string;
+}
+
+/** What the `-p` call of the recording fake does besides recording. */
+interface RecordingOptions {
+  /** The JSON result printed on stdout (the worker captures stdout as the result). */
+  readonly resultJson?: string;
+  /** The call writes no staged file. */
+  readonly skipStagedWrite?: boolean;
+  /** The call exits with this status after recording and writing. */
+  readonly exitCode?: number;
+  /** The call sleeps this long (seconds) after recording, so the watchdog has to end it. */
+  readonly hangSecs?: number;
+  /** The call also appends to the real working memory, as a human edit made during the run would. */
+  readonly editRealFile?: boolean;
+  /** A bash snippet the call runs after recording, e.g. to leave a folder at the staged path. */
+  readonly duringRun?: string;
 }
 
 /**
  * A fake claude that answers `--version` with `versionBody` (a bash snippet) and, for
- * any other call, records its argv, environment, stdin and the lock state, then writes
- * a stamped staged memory file. `--version` writes nothing a `-p` call writes, so a
- * file's presence says which call made it.
+ * any other call, records its argv, environment, stdin, working directory and the lock
+ * state, then writes a stamped staged memory file. `--version` writes nothing a `-p`
+ * call writes, so a file's presence says which call made it. `options` changes what the
+ * `-p` call prints, writes and exits with.
  */
-function createRecordingClaude(shimDir: string, memoryDir: string, versionBody: string): RecordingClaude {
+function createRecordingClaude(
+  shimDir: string,
+  memoryDir: string,
+  versionBody: string,
+  options: RecordingOptions = {},
+): RecordingClaude {
   const rec: RecordingClaude = {
     argvFile: path.join(shimDir, 'argv.txt'),
     envFile: path.join(shimDir, 'env.txt'),
@@ -3542,9 +3606,13 @@ function createRecordingClaude(shimDir: string, memoryDir: string, versionBody: 
     probeLockFile: path.join(shimDir, 'probe-lock.txt'),
     runLockFile: path.join(shimDir, 'run-lock.txt'),
     probePidFile: path.join(shimDir, 'probe-pid.txt'),
+    cwdFile: path.join(shimDir, 'cwd.txt'),
+    tmpListFile: path.join(shimDir, 'tmp-list.txt'),
   };
   const lock = path.join(memoryDir, '.working-memory.lock');
   const staged = path.join(memoryDir, 'WORKING-MEMORY.md.new');
+  const resultFile = path.join(shimDir, 'result-body.json');
+  if (options.resultJson !== undefined) fs.writeFileSync(resultFile, options.resultJson);
   const bin = path.join(shimDir, 'claude');
   writeFakeExecutable(
     bin,
@@ -3564,10 +3632,17 @@ function createRecordingClaude(shimDir: string, memoryDir: string, versionBody: 
       '  echo "CLAUDE_CODE_DISABLE_AUTO_MEMORY=${CLAUDE_CODE_DISABLE_AUTO_MEMORY-<unset>}"',
       '  echo "CLAUDE_CODE_EFFORT_LEVEL=${CLAUDE_CODE_EFFORT_LEVEL-<unset>}"',
       `} > '${rec.envFile}'`,
+      `pwd -P > '${rec.cwdFile}'`,
+      `ls "\${TMPDIR:-/tmp}" > '${rec.tmpListFile}'`,
       `cat > '${rec.stdinFile}'`,
-      `echo '<!-- memory-head: testsha branch: main -->' > '${staged}'`,
-      `echo '## Now' >> '${staged}'`,
-      'exit 0',
+      ...(options.resultJson === undefined ? [] : [`cat '${resultFile}'`]),
+      ...(options.skipStagedWrite === true
+        ? []
+        : [`echo '<!-- memory-head: testsha branch: main -->' > '${staged}'`, `echo '## Now' >> '${staged}'`]),
+      ...(options.editRealFile === true ? [`echo 'a human edit' >> '${path.join(memoryDir, 'WORKING-MEMORY.md')}'`] : []),
+      ...(options.duringRun === undefined ? [] : [options.duringRun]),
+      ...(options.hangSecs === undefined ? [] : [`sleep ${options.hangSecs}`]),
+      `exit ${options.exitCode ?? 0}`,
       '',
     ].join('\n'),
   );
@@ -3622,9 +3697,24 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
   const memoryDir = (): string => path.join(projectDir, '.devflow', 'memory');
   const workerLog = (): string => fs.readFileSync(workerLogPath(projectDir, homeDir), 'utf-8');
 
+  /** The only fields a Run line may carry, each from a closed set or digits. */
+  const RUN_LINE_SHAPE = /^Run: cli=(\d+\.\d+\.\d+|unknown) argv=(lean|legacy|none) result=(updated|conflict|failed|skip|below-floor) denials=(\d+|unknown|n\/a) removed=(none|dir|link)( floor=\d+\.\d+\.\d+)?$/;
+  const runLines = (): string[] => workerLog().split('\n').filter(line => line.includes('] Run: ')).map(line => line.slice(line.indexOf('Run: ')));
+
+  /** The one Run line the run wrote, checked against the line's shape. */
+  function onlyRunLine(): string {
+    const lines = runLines();
+    expect(lines, `one Run line per run; the log was:\n${workerLog()}`).toHaveLength(1);
+    expect(lines[0]).toMatch(RUN_LINE_SHAPE);
+    return lines[0];
+  }
+
+  /** The staged path as the rule carries it: the project root as it resolves on disk. */
+  const ruleStaged = (): string => path.join(fs.realpathSync(projectDir), '.devflow', 'memory', 'WORKING-MEMORY.md.new');
+
   /** Run the worker once against a recording fake and return what the fake saw. */
-  function runWith(versionBody: string, extraEnv: Record<string, string> = {}): RecordingClaude {
-    const rec = createRecordingClaude(shimDir, memoryDir(), versionBody);
+  function runWith(versionBody: string, extraEnv: Record<string, string> = {}, options: RecordingOptions = {}): RecordingClaude {
+    const rec = createRecordingClaude(shimDir, memoryDir(), versionBody, options);
     // The fake is what `claude` resolves to: it sits first on the PATH the worker gets.
     expect(fs.statSync(path.join(shimDir, 'claude')).mode & 0o111, 'the fake claude is executable').not.toBe(0);
     expect(runWorker(projectDir, homeDir, shimDir, extraEnv).exitCode).toBe(0);
@@ -3643,7 +3733,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
     it('passes exactly the lean argv with the shipped model and effort, and no inherited effort level', () => {
       const rec = runWith(HEALTHY_VERSION, { CLAUDE_CODE_EFFORT_LEVEL: 'low' });
 
-      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort));
+      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort, ruleStaged()));
       expect(recordedEnv(rec)).toEqual({
         DEVFLOW_BG_UPDATER: '1',
         CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1',
@@ -3653,10 +3743,10 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
       expectSwapCompleted();
     });
 
-    it('never passes --allowedTools', () => {
+    it('passes no permission skip, no skip-all permission mode and no allow-list flag (AC1)', () => {
       const rec = runWith(HEALTHY_VERSION);
 
-      expect(recordedArgv(rec)).not.toContain('--allowedTools');
+      expectNoForbiddenFlag(recordedArgv(rec));
     });
 
     it('names the model, the effort and the argv form on its spawn log line', () => {
@@ -3678,14 +3768,13 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
   describe('the legacy argv (AC5, AC6)', () => {
     /**
-     * Each way the probe can fail to put the CLI at or above the floor. `2.0.999` and
-     * `2.1.99` are above the floor read as text and below it read as numbers, so they
-     * catch a lexical comparison.
+     * Each way the probe can leave a CLI on the legacy form: a version the permission
+     * floor admits but the lean floor does not, one that cannot be read, and a probe
+     * that fails. A version below the permission floor gets no run at all (below).
      */
     const LEGACY_CASES: ReadonlyArray<readonly [string, string]> = [
-      ['reports a version below the floor', 'echo "2.1.285 (Claude Code)"'],
-      ['reports a lower minor with a larger patch', 'echo "2.0.999 (Claude Code)"'],
-      ['reports a lower patch that is longer as text', 'echo "2.1.99 (Claude Code)"'],
+      ['reports a version between the permission floor and the lean floor', 'echo "2.1.285 (Claude Code)"'],
+      ['reports exactly the permission floor', `echo "${PERMISSION_FLOOR} (Claude Code)"`],
       ['prints nothing parseable', 'echo "no version here"'],
       ['prints a version with two components', 'echo "2.1 (Claude Code)"'],
       ['prints nothing', ':'],
@@ -3695,16 +3784,17 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
     it.each(LEGACY_CASES)('a claude that %s gets the legacy argv, and the run still swaps', (_label, versionBody) => {
       const rec = runWith(versionBody);
 
-      expect(recordedArgv(rec)).toEqual(legacyArgv(WORKER_AGENTS.memory.model));
+      expect(recordedArgv(rec)).toEqual(legacyArgv(WORKER_AGENTS.memory.model, ruleStaged()));
       expect(recordedEnv(rec)).toEqual({
         DEVFLOW_BG_UPDATER: '1',
         CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1',
         CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
         CLAUDE_CODE_EFFORT_LEVEL: '<unset>',
       });
-      for (const flag of [...LEAN_ONLY_FLAGS, '--allowedTools']) {
+      for (const flag of LEAN_ONLY_FLAGS) {
         expect(recordedArgv(rec), flag).not.toContain(flag);
       }
+      expectNoForbiddenFlag(recordedArgv(rec));
       expectSwapCompleted();
       expect(workerLog()).toContain(`Spawning claude -p (model ${WORKER_AGENTS.memory.model}, no effort passed, legacy argv, `);
     });
@@ -3712,7 +3802,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
     it('a claude whose --version outlasts the probe bound gets the legacy argv, and the probe is killed', () => {
       const rec = runWith('sleep 30', { DEVFLOW_BG_VERSION_PROBE_SECS: '1' });
 
-      expect(recordedArgv(rec)).toEqual(legacyArgv(WORKER_AGENTS.memory.model));
+      expect(recordedArgv(rec)).toEqual(legacyArgv(WORKER_AGENTS.memory.model, ruleStaged()));
       expectSwapCompleted();
       // The probe writes its PID as its first line. A missing file means the fake was killed
       // by the 1 s bound before it started, and the kill below would prove nothing.
@@ -3725,7 +3815,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
   describe('the version floor compares numbers, component by component', () => {
     const MODERN_CASES: ReadonlyArray<readonly [string, string]> = [
-      ['exactly the floor', 'echo "2.1.286 (Claude Code)"'],
+      ['exactly the floor', `echo "${LEAN_FLOOR} (Claude Code)"`],
       ['a higher patch', 'echo "2.1.293 (Claude Code)"'],
       ['a higher minor with a smaller patch', 'echo "2.10.0 (Claude Code)"'],
       ['a higher major', 'echo "3.0.0 (Claude Code)"'],
@@ -3736,7 +3826,24 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
     it.each(MODERN_CASES)('a claude that reports %s gets the lean argv', (_label, versionBody) => {
       const rec = runWith(versionBody);
 
-      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort));
+      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort, ruleStaged()));
+    });
+  });
+
+  describe('each fact is stated once in the worker source', () => {
+    /** The worker's code lines: comments and blank lines left out. */
+    const codeLines = (): string[] =>
+      fs.readFileSync(BACKGROUND_UPDATER, 'utf-8').split('\n').filter(line => line.trim() !== '' && !line.trim().startsWith('#'));
+    const occurrences = (needle: string): number => codeLines().filter(line => line.includes(needle)).length;
+
+    it('one parser defines a version: the digit pattern sits in one function', () => {
+      expect(occurrences("'([0123456789]+)\\.([0123456789]+)\\.([0123456789]+)'")).toBe(1);
+    });
+
+    it('one argv carries the limit on the worker\'s write: the permission flags and the spawn are written once', () => {
+      for (const needle of ['--permission-mode dontAsk', '--setting-sources user', '--settings "$MEMORY_SETTINGS_JSON"', '--output-format json', 'exec "$CLAUDE_BIN"']) {
+        expect(occurrences(needle), needle).toBe(1);
+      }
     });
   });
 
@@ -3746,7 +3853,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
       const rec = runWith(HEALTHY_VERSION);
 
-      expect(recordedArgv(rec)).toEqual(leanArgv('sonnet', 'medium'));
+      expect(recordedArgv(rec)).toEqual(leanArgv('sonnet', 'medium', ruleStaged()));
       expect(workerLog()).toContain('Spawning claude -p (model sonnet, effort medium, lean argv, ');
     });
 
@@ -3755,7 +3862,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
       const rec = runWith(HEALTHY_VERSION);
 
-      expect(recordedArgv(rec)).toEqual(leanArgv('claude-opus-4-8', WORKER_AGENTS.memory.effort));
+      expect(recordedArgv(rec)).toEqual(leanArgv('claude-opus-4-8', WORKER_AGENTS.memory.effort, ruleStaged()));
     });
 
     it('takes the shipped value for `default`, without a fallback line', () => {
@@ -3763,20 +3870,20 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
       const rec = runWith(HEALTHY_VERSION);
 
-      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort));
+      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort, ruleStaged()));
       expect(workerLog()).not.toContain('agents.memory');
     });
 
     it('passes the model alone when only a model is set', () => {
       writeAgentModels(homeDir, { memory: { model: 'haiku' } });
 
-      expect(recordedArgv(runWith(HEALTHY_VERSION))).toEqual(leanArgv('haiku', WORKER_AGENTS.memory.effort));
+      expect(recordedArgv(runWith(HEALTHY_VERSION))).toEqual(leanArgv('haiku', WORKER_AGENTS.memory.effort, ruleStaged()));
     });
 
     it('passes the effort alone when only an effort is set', () => {
       writeAgentModels(homeDir, { memory: { effort: 'xhigh' } });
 
-      expect(recordedArgv(runWith(HEALTHY_VERSION))).toEqual(leanArgv(WORKER_AGENTS.memory.model, 'xhigh'));
+      expect(recordedArgv(runWith(HEALTHY_VERSION))).toEqual(leanArgv(WORKER_AGENTS.memory.model, 'xhigh', ruleStaged()));
     });
 
     it('ignores an entry for another agent and a file with no agents.memory', () => {
@@ -3784,7 +3891,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
       const rec = runWith(HEALTHY_VERSION);
 
-      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort));
+      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort, ruleStaged()));
     });
 
     it('treats a value that is not a string as absent', () => {
@@ -3792,7 +3899,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
       const rec = runWith(HEALTHY_VERSION);
 
-      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort));
+      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort, ruleStaged()));
     });
 
     it('treats an unparseable agent-models.json as absent', () => {
@@ -3801,7 +3908,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
       const rec = runWith(HEALTHY_VERSION);
 
-      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort));
+      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort, ruleStaged()));
     });
 
     it('reads agents.memory on the node backend when jq is not installed', () => {
@@ -3825,7 +3932,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
       expect(runWorker(projectDir, homeDir, shimDir, { PATH: nodeOnlyPath }).exitCode).toBe(0);
 
-      expect(recordedArgv(rec)).toEqual(leanArgv('opus', 'low'));
+      expect(recordedArgv(rec)).toEqual(leanArgv('opus', 'low', ruleStaged()));
     });
 
     it('passes the legacy argv the model and no effort', () => {
@@ -3833,7 +3940,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
       const rec = runWith('echo "2.1.285"');
 
-      expect(recordedArgv(rec)).toEqual(legacyArgv('opus'));
+      expect(recordedArgv(rec)).toEqual(legacyArgv('opus', ruleStaged()));
     });
 
     /**
@@ -3874,7 +3981,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
         const rec = runWith(HEALTHY_VERSION, { LC_ALL: 'en_US.UTF-8' });
 
-        expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort));
+        expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort, ruleStaged()));
         const log = workerLog();
         expect(log, 'the model fallback names its field').toMatch(/agents\.memory\.model[^\n]*shipped/);
         expect(log, 'the effort fallback names its field').toMatch(/agents\.memory\.effort[^\n]*shipped/);
@@ -3899,7 +4006,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
       const rec = runWith(HEALTHY_VERSION, { LC_ALL: 'en_US.UTF-8' });
 
-      expect(recordedArgv(rec)).toEqual(leanArgv('opus', WORKER_AGENTS.memory.effort));
+      expect(recordedArgv(rec)).toEqual(leanArgv('opus', WORKER_AGENTS.memory.effort, ruleStaged()));
       expect(workerLog()).toMatch(/agents\.memory\.effort[^\n]*shipped/);
       expect(workerLog()).not.toMatch(/agents\.memory\.model[^\n]*shipped/);
     });
@@ -3909,16 +4016,16 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
       const rec = runWith(HEALTHY_VERSION);
 
-      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, 'low'));
+      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, 'low', ruleStaged()));
       expect(workerLog()).toMatch(/agents\.memory\.model[^\n]*shipped/);
     });
   });
 
   describe('a staged file the worker cannot clear (AC8)', () => {
     it('skips the run: no LLM call, the batch and the queue untouched, no lock left', () => {
-      // `rm -f` cannot remove a directory, so the staged path stays occupied.
+      // A folder whose listing is over the bound is not deleted, so the staged path stays occupied.
       fs.mkdirSync(stagedFile);
-      fs.writeFileSync(path.join(stagedFile, 'inside'), 'keep');
+      for (let i = 0; i < 300; i++) fs.writeFileSync(path.join(stagedFile, `f${i}`), 'keep');
       const processing = path.join(memoryDir(), '.pending-turns.processing');
       const queue = path.join(memoryDir(), '.pending-turns.jsonl');
       const okFile = path.join(memoryDir(), '.last-refresh-ok');
@@ -3952,5 +4059,746 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
       expect(fs.readFileSync(memFile, 'utf-8'), 'the stale leftover was not the file swapped in').not.toContain('leftover');
       expectSwapCompleted();
     });
+  });
+
+  // ---------------------------------------------------------------------------
+  // The worker's write is limited to its staged file
+  // ---------------------------------------------------------------------------
+
+  describe('a CLI below the permission floor gets no run (AC3)', () => {
+    const BELOW_FLOOR: ReadonlyArray<readonly [string, string]> = [
+      ['2.0.999', 'a lower minor with a larger patch'],
+      ['2.1.99', 'a lower patch that is longer as text'],
+      ['2.1.268', 'one patch under the floor'],
+    ];
+
+    it.each(BELOW_FLOOR)('a claude that reports %s (%s) is not run: no -p call, the queue kept, one line logged, no notice', (version) => {
+      const queue = path.join(memoryDir(), '.pending-turns.jsonl');
+      const okFile = path.join(memoryDir(), '.last-refresh-ok');
+      const before = fs.readFileSync(queue);
+
+      const rec = runWith(`echo "${version} (Claude Code)"`);
+
+      expect(fs.existsSync(rec.probeLockFile), 'non-vacuity: the probe ran, so the version was read').toBe(true);
+      expect(recordedArgv(rec), 'no -p call').toBeUndefined();
+      const logged = workerLog().trimEnd().split('\n');
+      expect(logged, 'the start line and then exactly one line for the run').toHaveLength(2);
+      expect(logged[1].endsWith(`] Run: cli=${version} argv=none result=below-floor denials=n/a removed=none floor=${PERMISSION_FLOOR}`), logged[1]).toBe(true);
+      expect(fs.readFileSync(queue).equals(before), 'the queue is byte-identical').toBe(true);
+      expect(fs.existsSync(path.join(memoryDir(), '.pending-turns.processing')), 'nothing claimed').toBe(false);
+      expect(fs.existsSync(okFile), 'no success stamp').toBe(false);
+      expect(fs.existsSync(path.join(memoryDir(), '.working-memory.lock')), 'no lock left').toBe(false);
+      expect(fs.readdirSync(memoryDir()).filter(name => name.startsWith('.worker-notice')), 'no notice file of any kind').toEqual([]);
+    });
+  });
+
+  describe('the staged path is checked before any run, and the rule and the prompt carry one canonical path (AC5, AC6, AC8)', () => {
+    const extraRoots: string[] = [];
+    afterEach(() => {
+      for (const root of extraRoots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+    });
+
+    /** A project folder (not a git repository) with a seeded queue, removed after the test. */
+    function makeProject(...segments: string[]): { project: string; memory: string } {
+      const base = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s29-proj-'));
+      extraRoots.push(base);
+      const project = path.join(base, ...segments);
+      const memory = path.join(project, '.devflow', 'memory');
+      fs.mkdirSync(memory, { recursive: true });
+      seedQueue(project);
+      return { project, memory };
+    }
+
+    /** The hook runs against `cwd` as one argument, so a folder name is never read as shell syntax. */
+    function runWorkerAt(cwd: string, extraEnv: Record<string, string> = {}): void {
+      spawnSync('bash', [BACKGROUND_UPDATER, cwd], {
+        env: { ...process.env, HOME: homeDir, PATH: fakeClaudePath(shimDir), ...extraEnv },
+        stdio: 'ignore',
+        timeout: LEAN_RUN_TIMEOUT_MS,
+      });
+    }
+
+    /** The one worker log under the test's home, whatever slug the folder name gave it. */
+    function onlyWorkerLog(): string {
+      const logsDir = path.join(homeDir, '.devflow', 'logs');
+      const logs = fs.readdirSync(logsDir)
+        .map(dir => path.join(logsDir, dir, '.background-memory-update.log'))
+        .filter(file => fs.existsSync(file));
+      expect(logs, 'one worker log').toHaveLength(1);
+      return fs.readFileSync(logs[0], 'utf-8');
+    }
+
+    const REFUSED_NAMES: ReadonlyArray<readonly [string, string]> = [
+      ['an asterisk', 'a*b'],
+      ['a question mark', 'a?b'],
+      ['an opening bracket', 'a[b'],
+      ['a closing bracket', 'a]b'],
+      ['a backslash', 'a\\b'],
+      ['a double quote', 'a"b'],
+      ['an opening brace', 'a{b'],
+      ['a closing brace', 'a}b'],
+      ['a newline', 'a\nb'],
+      ['a tab', 'a\tb'],
+    ];
+
+    it.each(REFUSED_NAMES)('a project folder with %s is skipped with no claude run, the queue kept and a path notice left', (_label, name) => {
+      const { project, memory } = makeProject(name);
+      createRecordingClaude(shimDir, memory, HEALTHY_VERSION);
+      const before = fs.readFileSync(path.join(memory, '.pending-turns.jsonl'));
+
+      runWorkerAt(project);
+
+      expect(fs.existsSync(path.join(shimDir, 'argv.txt')), 'no -p call').toBe(false);
+      expect(onlyWorkerLog()).toContain('SKIP: the memory path holds characters the permission rule cannot carry; no LLM run');
+      expect(fs.readFileSync(path.join(memory, '.pending-turns.jsonl')).equals(before), 'the queue is byte-identical').toBe(true);
+      expect(fs.readFileSync(path.join(memory, '.worker-notice-path'), 'utf-8')).toBe('path\n');
+    });
+
+    it('a project inside a .git folder is skipped with no claude run, the reason logged and a path notice left', () => {
+      const { project, memory } = makeProject('.git', 'm');
+      createRecordingClaude(shimDir, memory, HEALTHY_VERSION);
+
+      runWorkerAt(project);
+
+      expect(fs.existsSync(path.join(shimDir, 'argv.txt')), 'no -p call').toBe(false);
+      expect(onlyWorkerLog()).toContain('SKIP: the project lies inside a .git folder; no LLM run');
+      expect(fs.existsSync(path.join(memory, '.worker-notice-path'))).toBe(true);
+    });
+
+    it('a project inside a .claude folder, such as a checkout in .claude/worktrees, is run like any other', () => {
+      const { project, memory } = makeProject('.claude', 'worktrees', 'w');
+      const rec = createRecordingClaude(shimDir, memory, HEALTHY_VERSION);
+
+      runWorkerAt(project);
+
+      const staged = path.join(fs.realpathSync(project), '.devflow', 'memory', 'WORKING-MEMORY.md.new');
+      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort, staged));
+      expect(fs.existsSync(path.join(memory, 'WORKING-MEMORY.md')), 'the memory was written').toBe(true);
+      expect(fs.existsSync(path.join(memory, '.worker-notice-path'))).toBe(false);
+    });
+
+    it('a project folder that holds parentheses is run, and the rule carries the path as it is', () => {
+      const { project, memory } = makeProject('obs ( )', 'proj (copy)');
+      const rec = createRecordingClaude(shimDir, memory, HEALTHY_VERSION);
+
+      runWorkerAt(project);
+
+      const staged = path.join(fs.realpathSync(project), '.devflow', 'memory', 'WORKING-MEMORY.md.new');
+      expect(staged, 'the path holds both parentheses').toContain('obs ( )/proj (copy)/');
+      expect(recordedArgv(rec), 'allow Edit(//<staged>), deny Edit(//<staged>/*), both with the parentheses').toEqual(
+        leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort, staged),
+      );
+      expect(fs.existsSync(path.join(memory, 'WORKING-MEMORY.md')), 'the memory was written').toBe(true);
+      expect(fs.existsSync(path.join(memory, '.worker-notice-path')), 'no path notice').toBe(false);
+    });
+
+    it('a project folder that holds parentheses and a refused character is skipped with a path notice', () => {
+      const { project, memory } = makeProject('obs ( )', 'pr*oj');
+      createRecordingClaude(shimDir, memory, HEALTHY_VERSION);
+
+      runWorkerAt(project);
+
+      expect(fs.existsSync(path.join(shimDir, 'argv.txt')), 'no -p call').toBe(false);
+      expect(fs.readFileSync(path.join(memory, '.worker-notice-path'), 'utf-8')).toBe('path\n');
+    });
+
+    it('a project folder that holds a space and a comma is run, and the rule carries the path as it is', () => {
+      const { project, memory } = makeProject('proj with space, and a comma');
+      const rec = createRecordingClaude(shimDir, memory, HEALTHY_VERSION);
+
+      runWorkerAt(project);
+
+      const staged = path.join(fs.realpathSync(project), '.devflow', 'memory', 'WORKING-MEMORY.md.new');
+      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort, staged));
+      expect(fs.existsSync(path.join(memory, 'WORKING-MEMORY.md')), 'the memory was written').toBe(true);
+    });
+
+    it('a non-git project reached through a link gets the canonical path in the prompt and in the rule alike', () => {
+      const { project } = makeProject('real');
+      const linked = path.join(path.dirname(project), 'linked');
+      fs.symlinkSync(project, linked);
+      const rec = createRecordingClaude(shimDir, path.join(project, '.devflow', 'memory'), HEALTHY_VERSION);
+
+      runWorkerAt(linked);
+
+      const staged = path.join(fs.realpathSync(project), '.devflow', 'memory', 'WORKING-MEMORY.md.new');
+      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort, staged));
+      const prompt = fs.readFileSync(rec.stdinFile, 'utf-8');
+      expect(prompt, 'the prompt names the canonical staged path').toContain(`write ${staged} using the Write tool`);
+      expect(prompt, 'the link never reaches the prompt').not.toContain(linked);
+      expect(fs.existsSync(path.join(project, '.devflow', 'memory', 'WORKING-MEMORY.md')), 'the memory was written').toBe(true);
+    });
+
+    it('a session started in a subfolder runs claude from the project root (AC8)', () => {
+      const sub = path.join(projectDir, 'packages', 'deep');
+      fs.mkdirSync(sub, { recursive: true });
+      const rec = createRecordingClaude(shimDir, memoryDir(), HEALTHY_VERSION);
+
+      runWorkerAt(sub);
+
+      expect(fs.readFileSync(rec.cwdFile, 'utf-8').trim()).toBe(fs.realpathSync(projectDir));
+      expectSwapCompleted();
+    });
+  });
+
+  describe('a folder or a link at the staged path is removed with one guarded delete, before the run and after it (AC6)', () => {
+    const present = (p: string): boolean => { try { fs.lstatSync(p); return true; } catch { return false; } };
+    /** A folder outside the project with one file in it: what a link at the staged path names. */
+    const makeOutside = (): string => {
+      const outside = path.join(shimDir, 'outside');
+      fs.mkdirSync(outside);
+      fs.writeFileSync(path.join(outside, 'keep.txt'), 'keep');
+      return outside;
+    };
+    const fillFolder = (folder: string, count: number): void => {
+      fs.mkdirSync(folder);
+      for (let i = 0; i < count; i++) fs.writeFileSync(path.join(folder, `f${i}`), 'x');
+    };
+
+    it('removes an empty folder at the staged path, runs, and records removed=dir', () => {
+      fs.mkdirSync(stagedFile);
+
+      const rec = runWith(HEALTHY_VERSION);
+
+      expect(recordedArgv(rec), 'the -p call happened').toBeDefined();
+      expectSwapCompleted();
+      expect(workerLog()).toContain(`Removed a folder from ${ruleStaged()} before the run`);
+      expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=lean result=updated denials=unknown removed=dir');
+    });
+
+    it('removes a folder that holds files and a nested folder, runs, and records removed=dir', () => {
+      fs.mkdirSync(path.join(stagedFile, 'a', 'b'), { recursive: true });
+      fs.writeFileSync(path.join(stagedFile, 'inside'), 'x');
+      fs.writeFileSync(path.join(stagedFile, 'a', 'b', 'deep'), 'x');
+
+      const rec = runWith(HEALTHY_VERSION);
+
+      expect(recordedArgv(rec), 'the -p call happened').toBeDefined();
+      expectSwapCompleted();
+      expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=lean result=updated denials=unknown removed=dir');
+    });
+
+    it.each([
+      ['a folder', (outside: string) => outside],
+      ['a file', (outside: string) => path.join(outside, 'keep.txt')],
+      ['nothing', (outside: string) => path.join(outside, 'absent')],
+    ] as const)('removes a link to %s at the staged path as the link, never follows it, runs, and records removed=link', (_label, target) => {
+      const outside = makeOutside();
+      fs.symlinkSync(target(outside), stagedFile);
+
+      const rec = runWith(HEALTHY_VERSION);
+
+      expect(recordedArgv(rec), 'the -p call happened').toBeDefined();
+      expectSwapCompleted();
+      expect(fs.readFileSync(path.join(outside, 'keep.txt'), 'utf-8'), 'what the link named is untouched').toBe('keep');
+      expect(fs.readdirSync(outside)).toEqual(['keep.txt']);
+      expect(workerLog()).toContain(`Removed a link from ${ruleStaged()} before the run`);
+      expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=lean result=updated denials=unknown removed=link');
+    });
+
+    it('does not delete a folder with a long listing: no claude call, the queue left, a path notice, result=failed and removed=none', () => {
+      fillFolder(stagedFile, 300);
+      const queueBefore = readQueueBytes(projectDir);
+
+      const rec = runWith(HEALTHY_VERSION);
+
+      expect(recordedArgv(rec), 'no -p call').toBeUndefined();
+      expect(workerLog()).toContain(`SKIP: ${ruleStaged()} is a folder or a link that was not removed (size); remove it to resume memory updates; no LLM run`);
+      expect(fs.readdirSync(stagedFile), 'every file stays').toHaveLength(300);
+      expect(readQueueBytes(projectDir).equals(queueBefore), 'the queue is untouched').toBe(true);
+      expect(fs.existsSync(path.join(memoryDir(), '.pending-turns.processing')), 'nothing is claimed').toBe(false);
+      expect(fs.readFileSync(path.join(memoryDir(), '.worker-notice-path'), 'utf-8')).toBe('path\n');
+      expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=none result=failed denials=n/a removed=none');
+    });
+
+    it('a folder that appears at the staged path during the run is removed and the run is failed, with the reason logged', () => {
+      const claimed = readQueueBytes(projectDir);
+
+      const rec = runWith(HEALTHY_VERSION, {}, {
+        skipStagedWrite: true,
+        duringRun: `mkdir -p '${stagedFile}/a' && echo canary > '${stagedFile}/a/b'`,
+      });
+
+      expect(recordedArgv(rec), 'the -p call happened').toBeDefined();
+      expect(present(stagedFile), 'the folder is gone').toBe(false);
+      expect(workerLog()).toContain(`FAIL: a folder stood at ${ruleStaged()} after the run and was removed; the run is failed`);
+      expect(workerLog()).toContain('FAIL: verification failed — leaving .processing for recovery');
+      expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=lean result=failed denials=unknown removed=dir');
+      expectClaimedRowsPreserved(projectDir, claimed);
+      expect(fs.existsSync(memFile), 'no working memory is written').toBe(false);
+      expect(fs.existsSync(path.join(memoryDir(), '.last-refresh-ok')), 'no success stamp').toBe(false);
+    });
+
+    it('a link that appears at the staged path during the run is removed, not followed, and the run is failed', () => {
+      const outside = makeOutside();
+      const claimed = readQueueBytes(projectDir);
+
+      runWith(HEALTHY_VERSION, {}, { skipStagedWrite: true, duringRun: `ln -s '${outside}' '${stagedFile}'` });
+
+      expect(present(stagedFile), 'the link is gone').toBe(false);
+      expect(fs.readdirSync(outside), 'what the link named is untouched').toEqual(['keep.txt']);
+      expect(workerLog()).toContain(`FAIL: a link stood at ${ruleStaged()} after the run and was removed; the run is failed`);
+      expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=lean result=failed denials=unknown removed=link');
+      expectClaimedRowsPreserved(projectDir, claimed);
+    });
+
+    it('a folder that appears during the run and cannot be removed is left, named in the log, and the run is failed with removed=none', () => {
+      const claimed = readQueueBytes(projectDir);
+
+      runWith(HEALTHY_VERSION, {}, {
+        skipStagedWrite: true,
+        duringRun: `mkdir '${stagedFile}'; i=0; while [ $i -lt 300 ]; do : > '${stagedFile}'/f$i; i=$((i+1)); done`,
+      });
+
+      expect(fs.readdirSync(stagedFile), 'the folder and its files stay').toHaveLength(300);
+      expect(workerLog()).toContain(`FAIL: a folder or a link stands at ${ruleStaged()} after the run and was not removed (size); remove it to resume memory updates`);
+      expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=lean result=failed denials=unknown removed=none');
+      expectClaimedRowsPreserved(projectDir, claimed);
+    });
+
+    it('a folder that the previous run left and could not remove stops the next run as the first one did, until it is removed', () => {
+      fillFolder(stagedFile, 300);
+      runWith(HEALTHY_VERSION);
+      expect(workerLog()).toContain('(size); remove it to resume memory updates; no LLM run');
+
+      expect(fs.existsSync(path.join(memoryDir(), '.worker-notice-path')), 'the first run left a path notice').toBe(true);
+      fs.rmSync(stagedFile, { recursive: true });
+      const rec = runWith(HEALTHY_VERSION);
+
+      expect(recordedArgv(rec), 'the -p call happened').toBeDefined();
+      expectSwapCompleted();
+      expect(fs.existsSync(path.join(memoryDir(), '.worker-notice-path')), 'a permitted run clears the notice').toBe(false);
+    });
+
+    it.each([
+      ['a file', true],
+      ['nothing', false],
+    ] as const)('stops with no claude call when a link to %s is planted at the staged path after the lock', (_label, targetExists) => {
+      const outside = path.join(shimDir, 'outside.txt');
+      if (targetExists) fs.writeFileSync(outside, 'keep');
+      // The worker asks git for the head after it claims the queue, which is after it cleared the
+      // staged path and before the spawn: the fake git plants the link there, once.
+      const realGit = resolveOnPath('git', process.env.PATH ?? '/usr/bin:/bin');
+      expect(realGit, 'a real git to hand over to').toBeDefined();
+      const gitShim = path.join(shimDir, 'git');
+      fs.writeFileSync(gitShim, [
+        '#!/bin/bash',
+        `if [ -f '${path.join(memoryDir(), '.pending-turns.processing')}' ] && [ ! -L '${stagedFile}' ]; then ln -s '${outside}' '${stagedFile}'; fi`,
+        `exec '${realGit}' "$@"`,
+        '',
+      ].join('\n'));
+      fs.chmodSync(gitShim, 0o755);
+      const claimed = readQueueBytes(projectDir);
+
+      const rec = runWith(HEALTHY_VERSION);
+
+      expect(recordedArgv(rec), 'no -p call').toBeUndefined();
+      expect(workerLog()).toContain('SKIP: the staged path changed before the run; leaving .processing for recovery');
+      expect(onlyRunLine(), 'a claimed batch left for recovery is a failed run').toBe('Run: cli=2.1.293 argv=none result=failed denials=n/a removed=none');
+      expect(fs.lstatSync(stagedFile).isSymbolicLink(), 'the planted link is left in place').toBe(true);
+      if (targetExists) expect(fs.readFileSync(outside, 'utf-8'), 'its target is untouched').toBe('keep');
+      else expect(fs.existsSync(outside), 'nothing is created through the link').toBe(false);
+      expectClaimedRowsPreserved(projectDir, claimed);
+    });
+  });
+
+  describe('the JSON result is reduced to a fixed line and its file is always deleted (AC7)', () => {
+    let tmpDir: string;
+    beforeEach(() => { tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s29-tmp-')); });
+    afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+    const DENIED = JSON.stringify({
+      type: 'result', subtype: 'success', is_error: false, num_turns: 2, result: 'RESULTTEXTCANARY',
+      permission_denials: [
+        { tool_name: 'Write', tool_input: { file_path: '/elsewhere/one', content: 'BODYCANARY one' } },
+        { tool_name: 'Write', tool_input: { file_path: '/elsewhere/two', content: 'BODYCANARY two' } },
+      ],
+    });
+    const resultFilesLeft = (): string[] => fs.readdirSync(tmpDir).filter(name => name.startsWith('devflow-memory-result.'));
+
+    it('a result with two denials logs the fixed denied line; no input text reaches the log; no temp file remains', () => {
+      const claimed = readQueueBytes(projectDir);
+
+      const rec = runWith(HEALTHY_VERSION, { TMPDIR: tmpDir }, { resultJson: DENIED, skipStagedWrite: true });
+
+      const log = workerLog();
+      expect(fs.readFileSync(rec.tmpListFile, 'utf-8'), 'non-vacuity: the result file existed during the run').toContain('devflow-memory-result.');
+      expect(log).toContain('Result: success, is_error=false, 2 turn(s), 2 permission denial(s)');
+      expect(log).toContain('FAIL: Write denied by permission rule (2) — leaving .processing for recovery');
+      for (const canary of ['BODYCANARY', 'RESULTTEXTCANARY', '/elsewhere']) {
+        expect(log, canary).not.toContain(canary);
+      }
+      expect(resultFilesLeft(), 'the temp result file is deleted').toEqual([]);
+      expectClaimedRowsPreserved(projectDir, claimed);
+      expect(fs.existsSync(path.join(memoryDir(), '.last-refresh-ok')), 'no success stamp').toBe(false);
+    });
+
+    it('a lean run that ends with exit 1 after denials logs the denied line with the exit code', () => {
+      runWith(HEALTHY_VERSION, { TMPDIR: tmpDir }, { resultJson: DENIED, skipStagedWrite: true, exitCode: 1 });
+
+      const log = workerLog();
+      expect(log).toContain('FAIL: Write denied by permission rule (2), exit 1');
+      expect(log).not.toContain('FAIL: claude -p exited with code');
+      expect(log).not.toContain('BODYCANARY');
+      expect(resultFilesLeft()).toEqual([]);
+    });
+
+    it('a result with the error flag set logs the flag and the API status as digits only', () => {
+      runWith(HEALTHY_VERSION, { TMPDIR: tmpDir }, {
+        resultJson: JSON.stringify({
+          subtype: 'error_during_execution', is_error: true, api_error_status: 429, num_turns: 1,
+          permission_denials: [], result: 'RESULTTEXTCANARY',
+        }),
+        skipStagedWrite: true,
+      });
+
+      const log = workerLog();
+      expect(log).toContain('Result: error_during_execution, is_error=true, 1 turn(s), 0 permission denial(s), api_status=429');
+      expect(log).toContain('FAIL: verification failed — leaving .processing for recovery');
+      expect(log).not.toContain('RESULTTEXTCANARY');
+    });
+
+    it('an API status that is not digits is left out of the line', () => {
+      runWith(HEALTHY_VERSION, { TMPDIR: tmpDir }, {
+        resultJson: JSON.stringify({ subtype: 'success', is_error: true, api_error_status: 'FORBIDDEN;x', num_turns: 1, permission_denials: [] }),
+        skipStagedWrite: true,
+      });
+
+      expect(workerLog()).toMatch(/Result: success, is_error=true, 1 turn\(s\), 0 permission denial\(s\)\n/);
+    });
+
+    it('a result without a denial list logs unknown, never 0, and ends in the generic failure line', () => {
+      runWith(HEALTHY_VERSION, { TMPDIR: tmpDir }, {
+        resultJson: JSON.stringify({ subtype: 'success', is_error: false, num_turns: 1 }),
+        skipStagedWrite: true,
+      });
+
+      const log = workerLog();
+      expect(log).toContain('Result: success, is_error=false, 1 turn(s), unknown permission denial(s)');
+      expect(log).toContain('FAIL: verification failed — leaving .processing for recovery');
+      expect(log).not.toContain('Write denied');
+    });
+
+    it('a run that prints no result, or one that is not JSON, logs a distinct not-reported line, then the missing-file warning', () => {
+      runWith(HEALTHY_VERSION, { TMPDIR: tmpDir }, { skipStagedWrite: true });
+      const empty = workerLog();
+      expect(empty).toContain('Result: not reported (empty)');
+      expect(empty).toContain('WARN: staged file missing or empty after claude -p run');
+      expect(empty).toContain('FAIL: verification failed — leaving .processing for recovery');
+
+      fs.rmSync(path.join(memoryDir(), '.pending-turns.processing'), { force: true });
+      seedQueue(projectDir);
+      fs.rmSync(workerLogPath(projectDir, homeDir));
+      runWith(HEALTHY_VERSION, { TMPDIR: tmpDir }, { resultJson: 'this is not json', skipStagedWrite: true });
+      const garbled = workerLog();
+      expect(garbled).toContain('Result: not reported (unparseable)');
+      expect(garbled).toContain('WARN: staged file missing or empty after claude -p run');
+      expect(resultFilesLeft()).toEqual([]);
+    });
+
+    it('a watchdog kill deletes the temp result file, logs the kill and ends the run as failed', () => {
+      const claimed = readQueueBytes(projectDir);
+
+      const rec = runWith(HEALTHY_VERSION, { TMPDIR: tmpDir, DEVFLOW_BG_WATCHDOG_SECS: '2' }, { hangSecs: 300, skipStagedWrite: true });
+
+      expect(fs.readFileSync(rec.tmpListFile, 'utf-8'), 'non-vacuity: the result file existed during the run').toContain('devflow-memory-result.');
+      expect(workerLog()).toContain('FAIL: claude -p killed by watchdog after 2s');
+      expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=lean result=failed denials=unknown removed=none');
+      expect(resultFilesLeft(), 'the temp result file is deleted').toEqual([]);
+      expectClaimedRowsPreserved(projectDir, claimed);
+    });
+
+    it('a non-zero exit deletes the temp result file, logs the exit code, keeps the batch and leaves the success stamp alone', () => {
+      const okFile = path.join(memoryDir(), '.last-refresh-ok');
+      fs.writeFileSync(okFile, '');
+      backdateMtime(okFile, 3600);
+      const stamp = fs.statSync(okFile).mtimeMs;
+      const claimed = readQueueBytes(projectDir);
+
+      const rec = runWith(HEALTHY_VERSION, { TMPDIR: tmpDir }, { exitCode: 2, skipStagedWrite: true });
+
+      expect(recordedArgv(rec), 'the -p call happened').toBeDefined();
+      expect(fs.readFileSync(rec.tmpListFile, 'utf-8'), 'non-vacuity: the result file existed during the run').toContain('devflow-memory-result.');
+      expect(workerLog()).toContain('FAIL: claude -p exited with code 2');
+      expect(resultFilesLeft()).toEqual([]);
+      expectClaimedRowsPreserved(projectDir, claimed);
+      expect(fs.statSync(okFile).mtimeMs, '.last-refresh-ok not touched').toBe(stamp);
+    });
+
+    it('a run that swaps the memory in leaves no temp result file either', () => {
+      runWith(HEALTHY_VERSION, { TMPDIR: tmpDir });
+
+      expectSwapCompleted();
+      expect(resultFilesLeft()).toEqual([]);
+    });
+
+    it('goes on without a count when the temp file cannot be made, and says so', () => {
+      runWith(HEALTHY_VERSION, { TMPDIR: path.join(tmpDir, 'absent') });
+
+      expect(workerLog()).toContain('Result not captured: no temporary file could be created');
+      expectSwapCompleted();
+    });
+  });
+
+  describe('each run ends with one Run line: the CLI version, the argv form, the result and the denials', () => {
+    const CLEAN = JSON.stringify({ subtype: 'success', is_error: false, num_turns: 2, permission_denials: [] });
+    const TWO_DENIALS = JSON.stringify({
+      subtype: 'success', is_error: false, num_turns: 2,
+      permission_denials: [{ tool_name: 'Write', tool_input: { content: 'BODYCANARY' } }, { tool_name: 'Write', tool_input: { content: 'BODYCANARY' } }],
+    });
+    it.each<readonly [string, string, RecordingOptions, string]>([
+      ['a lean run that swaps the memory in', HEALTHY_VERSION, { resultJson: CLEAN }, 'Run: cli=2.1.293 argv=lean result=updated denials=0 removed=none'],
+      ['a legacy run that swaps the memory in', 'echo "2.1.285 (Claude Code)"', { resultJson: CLEAN }, 'Run: cli=2.1.285 argv=legacy result=updated denials=0 removed=none'],
+      ['a run on a CLI whose version cannot be read', ':', { resultJson: CLEAN }, 'Run: cli=unknown argv=legacy result=updated denials=0 removed=none'],
+      ['a run whose result reports no count', HEALTHY_VERSION, {}, 'Run: cli=2.1.293 argv=lean result=updated denials=unknown removed=none'],
+      ['a run that finds the working memory edited', HEALTHY_VERSION, { resultJson: CLEAN, editRealFile: true }, 'Run: cli=2.1.293 argv=lean result=conflict denials=0 removed=none'],
+      ['a run whose write was refused twice', HEALTHY_VERSION, { resultJson: TWO_DENIALS, skipStagedWrite: true }, 'Run: cli=2.1.293 argv=lean result=failed denials=2 removed=none'],
+      ['a run that exits non-zero', HEALTHY_VERSION, { exitCode: 2, skipStagedWrite: true }, 'Run: cli=2.1.293 argv=lean result=failed denials=unknown removed=none'],
+    ])('%s ends with its own result and count', (_label, versionBody, options, expected) => {
+      runWith(versionBody, {}, options);
+
+      expect(onlyRunLine()).toBe(expected);
+      expect(workerLog()).not.toContain('BODYCANARY');
+    });
+
+    it('a CLI below the permission floor ends as below-floor, with no argv form and the floor named', () => {
+      runWith('echo "2.1.268 (Claude Code)"');
+
+      expect(onlyRunLine()).toBe(`Run: cli=2.1.268 argv=none result=below-floor denials=n/a removed=none floor=${PERMISSION_FLOOR}`);
+    });
+
+    it('a skip after the version probe names the version and no argv form', () => {
+      // A queue with a user row only: the worker leaves it and starts no run.
+      fs.writeFileSync(path.join(memoryDir(), '.pending-turns.jsonl'), JSON.stringify({ role: 'user', content: 'hello', ts: 1 }) + '\n');
+
+      runWith(HEALTHY_VERSION);
+
+      expect(workerLog()).toContain('User-only queue (no assistant/qa turn) — leaving it for the next run');
+      expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=none result=skip denials=n/a removed=none');
+    });
+
+    it('a skip before the version probe names no version', () => {
+      const bashEnv = path.join(shimDir, 'bash-env.sh');
+      fs.writeFileSync(bashEnv, 'cd() { if [ "${1:-}" = -P ] && [ "${2:-}" = -- ]; then return 1; fi; builtin cd "$@"; }\n');
+
+      runWith(HEALTHY_VERSION, { BASH_ENV: bashEnv });
+
+      expect(onlyRunLine()).toBe('Run: cli=unknown argv=none result=skip denials=n/a removed=none');
+    });
+
+    it('reads the version as digits only: text around it never reaches the log', () => {
+      runWith('echo "v002.001.0293 SECRETTOKEN-x;rm -rf"', {}, { resultJson: CLEAN });
+
+      expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=lean result=updated denials=0 removed=none');
+      expect(workerLog()).not.toContain('SECRETTOKEN');
+    });
+  });
+
+  describe('a project root the spawn cannot enter (AC3)', () => {
+    it('logs its own line and starts no claude run', () => {
+      const marker = path.join(shimDir, 'root-unreachable');
+      // `cd` fails once the marker exists; the fake's --version probe, which runs before the
+      // spawn, creates it. The hook's own cd to the project root is then the one that fails.
+      const bashEnv = path.join(shimDir, 'bash-env.sh');
+      fs.writeFileSync(bashEnv, `cd() { if [ -e '${marker}' ]; then return 1; fi; builtin cd "$@"; }\n`);
+      const claimed = readQueueBytes(projectDir);
+
+      const rec = runWith(`: > '${marker}'; ${HEALTHY_VERSION}`, { BASH_ENV: bashEnv });
+
+      expect(fs.existsSync(marker), 'non-vacuity: the fake cd was armed').toBe(true);
+      expect(recordedArgv(rec), 'no -p call').toBeUndefined();
+      expect(workerLog()).toContain('FAIL: could not enter the project root');
+      expect(onlyRunLine()).toMatch(/^Run: cli=2\.1\.293 argv=lean result=failed /);
+      expect(fs.existsSync(path.join(memoryDir(), '.working-memory.lock')), 'the lock is released').toBe(false);
+      expectClaimedRowsPreserved(projectDir, claimed);
+    });
+
+    it('a claude that itself exits 97 is reported as a claude exit', () => {
+      const claimed = readQueueBytes(projectDir);
+
+      const rec = runWith(HEALTHY_VERSION, {}, { exitCode: 97, skipStagedWrite: true });
+
+      expect(recordedArgv(rec), 'the -p call happened').toBeDefined();
+      expect(workerLog()).toContain('FAIL: claude -p exited with code 97');
+      expect(workerLog()).not.toContain('could not enter the project root');
+      expectClaimedRowsPreserved(projectDir, claimed);
+    });
+
+    it('a project root that does not resolve is skipped with no claude run, the queue kept and a path notice left', () => {
+      // `cd -P -- <root>` is the one call that resolves the root; only that call fails here.
+      const bashEnv = path.join(shimDir, 'bash-env.sh');
+      fs.writeFileSync(bashEnv, 'cd() { if [ "${1:-}" = -P ] && [ "${2:-}" = -- ]; then return 1; fi; builtin cd "$@"; }\n');
+      const queue = path.join(memoryDir(), '.pending-turns.jsonl');
+      const before = fs.readFileSync(queue);
+
+      const rec = runWith(HEALTHY_VERSION, { BASH_ENV: bashEnv });
+
+      expect(workerLog()).toContain('SKIP: project root could not be resolved; no LLM run');
+      expect(fs.existsSync(rec.probeLockFile), 'the run stopped before the version probe').toBe(false);
+      expect(recordedArgv(rec), 'no -p call').toBeUndefined();
+      expect(fs.readFileSync(queue).equals(before), 'the queue is byte-identical').toBe(true);
+      expect(fs.readFileSync(path.join(memoryDir(), '.worker-notice-path'), 'utf-8')).toBe('path\n');
+    });
+  });
+});
+
+// =============================================================================
+// S30 — AC4: the worker's one-time notice reaches the user once, at session start
+//
+// When the worker cannot refresh memory for a reason only the user can fix, it leaves a
+// notice file with a reason code (path or denied), and the next session start
+// shows each reason once as a systemMessage, whether or not a working memory exists.
+// =============================================================================
+describe('S30: a notice from the memory worker is shown once at session start (AC4)', { timeout: LEAN_RUN_TIMEOUT_MS }, () => {
+  let projectDir: string;
+  let homeDir: string;
+  let shimDir: string;
+  let memFile: string;
+  let stagedFile: string;
+
+  makeWorkerFixture('emr-s30', (f) => {
+    ({ projectDir, homeDir, shimDir, memFile, stagedFile } = f);
+  });
+
+  const memoryDir = (): string => path.join(projectDir, '.devflow', 'memory');
+  const noticePath = (reason: string): string => path.join(memoryDir(), `.worker-notice-${reason}`);
+
+  /** One worker run against a recording fake that reports `versionBody` and does what `options` says. */
+  function runWorkerOnce(versionBody: string, options: RecordingOptions = {}): void {
+    createRecordingClaude(shimDir, memoryDir(), versionBody, options);
+    expect(runWorker(projectDir, homeDir, shimDir).exitCode).toBe(0);
+  }
+
+  const DENIED_RESULT = JSON.stringify({
+    subtype: 'success', is_error: false, num_turns: 2,
+    permission_denials: [{ tool_name: 'Write', tool_input: { content: 'BODYCANARY' } }, { tool_name: 'Write', tool_input: { content: 'BODYCANARY' } }],
+  });
+
+  /** One session start: what the hook printed, parsed. `raw` is empty when it printed nothing. */
+  function sessionStart(): { raw: string; systemMessage?: string; context?: string } {
+    const { stdout, exitCode } = runHook(SESSION_START_MEMORY_HOOK, { cwd: projectDir }, homeDir);
+    expect(exitCode).toBe(0);
+    if (stdout.trim() === '') return { raw: '' };
+    const parsed = JSON.parse(stdout.trim()) as { systemMessage?: string; hookSpecificOutput?: { additionalContext?: string } };
+    return { raw: stdout, systemMessage: parsed.systemMessage, context: parsed.hookSpecificOutput?.additionalContext };
+  }
+
+  /** Leave the staged path held by a folder the worker will not delete (its listing is over the bound), so the next run stops there. */
+  function holdStagedPath(): void {
+    fs.mkdirSync(stagedFile);
+    for (let i = 0; i < 300; i++) fs.writeFileSync(path.join(stagedFile, `f${i}`), 'keep');
+  }
+
+  it('a skip below the permission floor leaves no notice, so a session start tells the user nothing', () => {
+    runWorkerOnce('echo "2.1.268 (Claude Code)"');
+    expect(fs.existsSync(memFile), 'non-vacuity: there is no working memory').toBe(false);
+    expect(fs.readFileSync(workerLogPath(projectDir, homeDir), 'utf-8'), 'non-vacuity: the run was a below-floor skip').toContain('result=below-floor');
+
+    expect(fs.readdirSync(memoryDir()).filter(name => name.startsWith('.worker-notice')), 'no notice file').toEqual([]);
+    expect(sessionStart().raw, 'nothing printed').toBe('');
+  });
+
+  it('the notice rides beside the working memory: the memory is the context, the notice the systemMessage', () => {
+    const head = execSync('git rev-parse HEAD', { cwd: projectDir, encoding: 'utf-8' }).trim();
+    fs.writeFileSync(memFile, `<!-- memory-head: ${head} branch: main -->\n## Now\n- some progress\n`);
+    holdStagedPath();
+    runWorkerOnce(HEALTHY_VERSION);
+
+    const start = sessionStart();
+    expect(start.context).toContain('WORKING MEMORY');
+    expect(start.context, 'the notice text is not in the context').not.toContain('project path');
+    expect(start.systemMessage).toContain('project path');
+  });
+
+  it('a permitted run clears the path notice, so a later refusal is shown again', () => {
+    holdStagedPath();
+    runWorkerOnce(HEALTHY_VERSION);
+    expect(sessionStart().systemMessage).toContain('project path');
+
+    fs.rmSync(stagedFile, { recursive: true });
+    seedQueue(projectDir);
+    runWorkerOnce(HEALTHY_VERSION);
+    expect(fs.existsSync(noticePath('path')) || fs.existsSync(`${noticePath('path')}.shown`), 'both files are gone').toBe(false);
+
+    seedQueue(projectDir);
+    holdStagedPath();
+    runWorkerOnce(HEALTHY_VERSION);
+    expect(sessionStart().systemMessage).toContain('project path');
+  });
+
+  it.each(['path', 'denied'] as const)('a permitted run clears a %s notice and its shown marker', (reason) => {
+    const pending = noticePath(reason);
+    fs.writeFileSync(pending, `${reason}\n`);
+    fs.writeFileSync(`${pending}.shown`, `${reason}\n`);
+    fs.writeFileSync(path.join(memoryDir(), '.worker-denied-once'), '');
+
+    runWorkerOnce(HEALTHY_VERSION);
+
+    expect(fs.existsSync(pending), 'the notice').toBe(false);
+    expect(fs.existsSync(`${pending}.shown`), 'its shown marker').toBe(false);
+    expect(fs.existsSync(path.join(memoryDir(), '.worker-denied-once')), 'a run that swapped the memory in resets the denied count')
+      .toBe(false);
+  });
+
+  it('a persistent path refusal raises the path notice once, with its own remedy', () => {
+    holdStagedPath();
+    runWorkerOnce(HEALTHY_VERSION);
+
+    const first = sessionStart();
+    expect(first.systemMessage).toContain('project path');
+    expect(first.systemMessage).toContain('.background-memory-update.log');
+    expect(first.systemMessage, 'a path notice does not carry the denied remedy').not.toContain('refused the worker');
+
+    expect(sessionStart().raw).toBe('');
+    runWorkerOnce(HEALTHY_VERSION);
+    expect(sessionStart().raw, 'the same refusal again stays quiet').toBe('');
+  });
+
+  it('two denied runs with no update between them raise the denied notice once; one denied run raises nothing', () => {
+    runWorkerOnce(HEALTHY_VERSION, { resultJson: DENIED_RESULT, skipStagedWrite: true });
+    expect(fs.existsSync(noticePath('denied')), 'one denied run raises nothing').toBe(false);
+    expect(sessionStart().raw).toBe('');
+
+    runWorkerOnce(HEALTHY_VERSION, { resultJson: DENIED_RESULT, skipStagedWrite: true });
+    const first = sessionStart();
+    expect(first.systemMessage).toContain('refused the worker');
+    expect(first.systemMessage).not.toContain('BODYCANARY');
+
+    expect(sessionStart().raw, 'shown once').toBe('');
+  });
+
+  it('a run that swaps the memory in between resets the denied count', () => {
+    runWorkerOnce(HEALTHY_VERSION, { resultJson: DENIED_RESULT, skipStagedWrite: true });
+    runWorkerOnce(HEALTHY_VERSION);
+    expect(fs.existsSync(memFile), 'non-vacuity: the good run swapped the memory in').toBe(true);
+
+    seedQueue(projectDir);
+    runWorkerOnce(HEALTHY_VERSION, { resultJson: DENIED_RESULT, skipStagedWrite: true });
+
+    expect(fs.existsSync(noticePath('denied')), 'denied, updated, denied is not two denied runs with no update between them').toBe(false);
+  });
+
+  it('each reason is shown once on its own: a shown path notice does not hide a later denied notice', () => {
+    holdStagedPath();
+    runWorkerOnce(HEALTHY_VERSION);
+    expect(sessionStart().systemMessage).toContain('project path');
+
+    fs.rmSync(stagedFile, { recursive: true });
+    runWorkerOnce(HEALTHY_VERSION, { resultJson: DENIED_RESULT, skipStagedWrite: true });
+    runWorkerOnce(HEALTHY_VERSION, { resultJson: DENIED_RESULT, skipStagedWrite: true });
+
+    expect(fs.existsSync(`${noticePath('path')}.shown`), 'the permitted runs cleared the path marker').toBe(false);
+    expect(sessionStart().systemMessage).toContain('refused the worker');
+  });
+
+  it('ignores a notice that is a link, and one whose content does not fit its reason', () => {
+    const outside = path.join(shimDir, 'outside.txt');
+    fs.writeFileSync(outside, 'path\n');
+    fs.symlinkSync(outside, noticePath('path'));
+    fs.writeFileSync(noticePath('denied'), 'path\n');
+
+    expect(sessionStart().raw, 'nothing shown').toBe('');
+    expect(fs.lstatSync(noticePath('path')).isSymbolicLink(), 'the link is left as it was').toBe(true);
+    expect(fs.existsSync(`${noticePath('denied')}.shown`), 'the odd notice is moved aside, unshown').toBe(true);
   });
 });
