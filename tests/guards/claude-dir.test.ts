@@ -41,12 +41,31 @@ import { mkdtemp, readFile, rm } from 'fs/promises'
 import * as os from 'os'
 import * as path from 'path'
 
-import { ROOT, requireDistFile, requireDistFiles, resolveAllAgents, walkFiles } from '../helpers.js'
+import { ROOT, SANCTIONED_RESOLUTION, requireDistFile, requireDistFiles, resolveAllAgents, resolveLearningOffSource, sectionBetween, walkFiles } from '../helpers.js'
 import { DEVFLOW_PLUGINS, buildScopedSkillsMap, getAllAgentNames } from '../../src/core/plugins.js'
 import { installViaFileCopy } from '../../src/targets/claude-code/installer.js'
 
-/** The resolution line every compiled probe of the Claude directory must use. */
-const SANCTIONED_RESOLUTION = 'd="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac;'
+/** The one skills path /code-review reads: the gate-level reference, under the resolved directory. */
+const LEVEL_REFERENCE_PATH = 'skills/devflow:agent-references/references/commands/code-review-levels.md'
+
+/**
+ * Named collector: how a compiled /code-review reaches the Claude directory. Exactly one read is allowed:
+ * the sanctioned resolution line, once, inside the gate-level block, followed by the one level-reference path.
+ */
+export function collectCodeReviewDirReadDefects(body: string): string[] {
+  const out: string[] = []
+  const count = (needle: string): number => body.split(needle).length - 1
+  if (count(SANCTIONED_RESOLUTION) !== 1) out.push(`${count(SANCTIONED_RESOLUTION)} sanctioned resolution lines, expected 1`)
+  if (count('CLAUDE_CONFIG_DIR') !== 1) out.push(`${count('CLAUDE_CONFIG_DIR')} CLAUDE_CONFIG_DIR names, expected 1`)
+  const skillPaths = body.match(/skills\/devflow:[^\s`'")]*/g) ?? []
+  if (skillPaths.length !== 1) out.push(`${skillPaths.length} skills/devflow: paths, expected 1`)
+  else if (skillPaths[0] !== LEVEL_REFERENCE_PATH) out.push(`the one skills path is ${skillPaths[0]}, expected the level reference`)
+  const block = sectionBetween(body, '**Gate level.**', '#### Step 1.3:')
+  if (block === null) out.push('no gate-level block')
+  else if (!block.includes(SANCTIONED_RESOLUTION)) out.push('the sanctioned resolution line sits outside the gate-level block')
+  if (body.includes('{claude_dir}')) out.push('a {claude_dir} placeholder')
+  return out
+}
 
 /** A path under the home Claude directory: `~/.claude/x`, `$HOME/.claude/x`, `${HOME}/.claude/x`. */
 const PATH_UNDER_HOME_CLAUDE = /(?:~|\$HOME|\$\{HOME\})\/\.claude\/[^\s`'")]/
@@ -131,17 +150,18 @@ describe('no prompt reaches ~/.claude outside the CLAUDE_CONFIG_DIR rule (D-CLAU
     }
   })
 
-  it('/code-review no longer probes the Claude directory: its language gate is the install-time stamp (D-LANGUAGE-FOCUS-STAMP)', async () => {
+  it("/code-review's language gate is the install-time stamp, and its one directory read is the level reference (D-LANGUAGE-FOCUS-STAMP)", async () => {
     // The positive half for the command whose probe moved: the compiled command carries the
-    // stamp rule and the stamp line, and nothing in it resolves or names the Claude directory;
-    // the installed copy carries the list. tests/installer/language-stamp*.test.ts holds the
-    // rest of the installer side.
+    // stamp rule and the stamp line, and its only read under the Claude directory is the level
+    // reference, through the sanctioned resolution line; the installed copy carries the list.
+    // tests/installer/language-stamp*.test.ts holds the rest of the installer side.
     const review = requireDistFile('code-review.md')
     expect(review).toContain('A language focus is spawned only when its file-type condition above fires AND its name appears in that stamped line.')
     expect(review.split('\n').filter(line => line.startsWith('Installed language focuses: '))).toHaveLength(1)
-    expect(review).not.toContain(SANCTIONED_RESOLUTION)
-    expect(review).not.toContain('CLAUDE_CONFIG_DIR')
-    expect(review).not.toContain('{claude_dir}')
+    expect(collectCodeReviewDirReadDefects(review)).toEqual([])
+    const off = resolveLearningOffSource('commands', 'code-review')
+    expect(off, 'dist/learning-off/commands/code-review.md is absent: run `npm run build:mds`').not.toBeNull()
+    expect(collectCodeReviewDirReadDefects(off as string)).toEqual([])
 
     // The installed copy, into injected temp directories (never the real home): a selection with
     // devflow-typescript installs a code-review whose stamp lists typescript.
@@ -174,6 +194,28 @@ describe('no prompt reaches ~/.claude outside the CLAUDE_CONFIG_DIR rule (D-CLAU
     expect(run({ CLAUDE_CONFIG_DIR: '' })).toBe('/home/probe/.claude')
     expect(run({ CLAUDE_CONFIG_DIR: 'relative/dir' })).toBe('/home/probe/.claude')
     expect(run({ CLAUDE_CONFIG_DIR: '/opt/claude config' })).toBe('/opt/claude config')
+  })
+
+  it('red probes: a second sanctioned line, a language skill Read and the read moved out of the gate-level block are each reported', () => {
+    const review = requireDistFile('code-review.md')
+    const seed = (body: string, from: string, to: string): string => {
+      const next = body.replace(from, () => to)
+      expect(next, `the seed ${JSON.stringify(from.slice(0, 40))} must change the text`).not.toBe(body)
+      return next
+    }
+    const stampEnd = 'are never stamp-gated.'
+    const second = seed(review, stampEnd, `${stampEnd} Run \`${SANCTIONED_RESOLUTION} printf '%s\\n' "$d"\` in Bash.`)
+    expect(collectCodeReviewDirReadDefects(second)).toEqual([
+      '2 sanctioned resolution lines, expected 1',
+      '2 CLAUDE_CONFIG_DIR names, expected 1',
+    ])
+    const skillRead = seed(review, stampEnd, `${stampEnd} Read \`<that directory>/skills/devflow:go/SKILL.md\` with the Read tool.`)
+    expect(collectCodeReviewDirReadDefects(skillRead)).toEqual(['2 skills/devflow: paths, expected 1'])
+    const readParagraph = review.split('\n\n').find(p => p.includes(LEVEL_REFERENCE_PATH))
+    expect(readParagraph, 'the read paragraph is in the compiled command').toBeDefined()
+    const moved = seed(seed(review, `${readParagraph}\n\n`, ''), 'Set `DIFF_CLASS` by these rules', `${readParagraph}\n\nSet \`DIFF_CLASS\` by these rules`)
+    expect(collectCodeReviewDirReadDefects(moved)).toEqual(['the sanctioned resolution line sits outside the gate-level block'])
+    expect(collectCodeReviewDirReadDefects(`${review}\nRead {claude_dir}/x.`)).toEqual(['a {claude_dir} placeholder'])
   })
 
   it('red probe: the superseded presence gate, seeded into the real compiled command, is reported', () => {

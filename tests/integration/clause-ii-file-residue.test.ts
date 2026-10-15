@@ -102,9 +102,9 @@ function runSync(
 /**
  * Run `devflow init --recommended` in a subprocess with a fully isolated HOME.
  *
- * The integration suite runs under the developer's real HOME (its live-`claude`
- * test needs the real ~/.claude), so this is the one place the suite's `init`
- * spawn is sandboxed, and it is sandboxed by construction: the env comes
+ * The integration suite runs under the developer's real HOME. Its two live-`claude`
+ * files build their own temp HOME and temp repo through `createSpawnContext`; this
+ * is the place where the suite's `init` spawn is sandboxed, by construction: the env comes
  * from `sandboxEnv`, an allowlist that throws unless HOME is a temp dir and never
  * forwards an inherited DEVFLOW_DIR / CLAUDE_CODE_DIR / CLAUDE_CONFIG_DIR. The
  * resolved HOME is echoed before the spawn so the run is checkable in the log.

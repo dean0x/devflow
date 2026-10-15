@@ -5,7 +5,7 @@ description: "Use when holding a prompt doctrine with a guard, adding an install
 category: conventions
 directories: [tests/guards, tests/commands, tests/learning, tests/decisions, tests/installer, tests/integration, tests/setup, tests/core, tests/install-snapshot.test.ts, tests/install-snapshot-helpers.ts, tests/write-set-fence.test.ts, tests/init-location-invariance.test.ts, tests/install-bound-input.test.ts, tests/session-start-compact.test.ts]
 created: 2026-10-10
-updated: 2026-10-13
+updated: 2026-10-14
 ---
 
 # Test Harness - Prompt-Corpus Doctrine Guards and Install-Level Regression Net
@@ -95,7 +95,7 @@ These complete the regression net the one-install-scope decision required before
 
 ## Live and CLI-Spawning Tests
 
-**Subagent skill preload (`tests/integration/subagent-skill-preload.test.ts`)** spawns real `claude` CLI sessions. The suite is skipped when `claude` is absent (CI skips it); prompts must stay read-only; session identity is deterministic (`runClaudeAndWait` generates a UUID before spawning and passes `--session-id <uuid>`); there is a 3-second post-SIGTERM wait and one bounded retry (`MAX_SPAWN_ATTEMPTS`). It is excluded from routine integration runs by `exclude` in `vitest.integration.config.ts`, and the only way back in is `DEVFLOW_INTEGRATION_ALL` set to an explicit affirmative spelling (`0`, `false`, `no` and `off` are not opt-ins).
+**Live `claude` tests (`tests/integration/subagent-skill-preload.test.ts`, `tests/integration/ambient-activation.test.ts`)** spawn real `claude` CLI sessions. `vitest.integration.config.ts` excludes both at glob time, so a command-line path does not bring them back; the only way in is `DEVFLOW_INTEGRATION_ALL` set to `1`, `true` or `yes` (`0`, `false`, `no` and `off` are not opt-ins). A file skips with a printed reason when `claude` or a credential is absent. Each file builds a temp HOME and a temp git repository with `createSpawnContext` (`tests/integration/helpers.ts`), installs devflow into that HOME with `init --security user` and memory and learning off (no capture hooks in the temp settings), and spawns with `--permission-mode dontAsk`, an allow list, a deny list and `--strict-mcp-config`, never the skip flag. `tests/guards/integration-spawn.test.ts` refuses a `claude` spawn under `tests/` without `env` and `cwd`, and refuses the skip flag and `bypassPermissions`. Prompts must stay read-only; session identity is deterministic (`runClaudeAndWait` generates a UUID before spawning and passes `--session-id <uuid>`); there is a 3-second post-SIGTERM wait and one bounded retry (`MAX_SPAWN_ATTEMPTS`).
 
 **Clause (ii) file-residue (`tests/integration/clause-ii-file-residue.test.ts`)** mechanises the file-residue half of the prefix-shippability clause (ii) acceptance criterion: it packs the real tarball, installs into a scratch `$HOME`, creates a throwaway git repo, runs `devflow init --recommended`, and asserts `git status --porcelain` has no `??` (untracked) entries.
 
@@ -121,7 +121,7 @@ These complete the regression net the one-install-scope decision required before
 - `tests/write-set-fence.test.ts` / `tests/init-location-invariance.test.ts` - the write-set fence and init location matrix
 - `tests/init-review-publication.test.ts` / `tests/feature-toggle-config.test.ts` - CLI-spawning config-write tests; `tests/core/feature-config-managed-write.test.ts` is the direct-call unit sibling of the latter
 - `tests/integration/helpers.ts` - `isClaudeAvailable`, `runClaudeAndWait`, `runClaudeStreaming`, `getSubagentPreloadResult`, `buildSubagentsPath`, `parseStreamEvent`
-- `tests/integration/subagent-skill-preload.test.ts` - real claude CLI spawn tests; `tests/integration/clause-ii-file-residue.test.ts` - prefix-shippability file-residue guard; `vitest.integration.config.ts` - the exclusion and opt-in
+- `tests/integration/subagent-skill-preload.test.ts`, `tests/integration/ambient-activation.test.ts` - live claude CLI tests; `tests/guards/integration-spawn.test.ts` - their spawn guard; `tests/integration/clause-ii-file-residue.test.ts` - prefix-shippability file-residue guard; `vitest.integration.config.ts` - the exclusion and opt-in
 - `tests/guards/running-commands-parity.test.ts`, `gate-ownership.test.ts`, `report-cap.test.ts`, `arguments-once.test.ts`, `spawn-no-hardcoded-model.test.ts`, `code-variants.test.ts`, `code-operation.test.ts`, `code-preload.test.ts`, `compliance-injection.test.ts`, `agent-references.test.ts`, `skill-description-caps.test.ts`, `tests/commands/report-caps.test.ts`, `tests/commands/knowledge-preload.test.ts`, `tests/install-bound-input.test.ts`, `tests/guards/core-rules-digest.test.ts`, `scan-in-code.test.ts`, `preload-cleanup.test.ts`, `docs-framework-authority.test.ts`, `worktree-support-split.test.ts`, `tests/commands/design-plan-discovery.test.ts`, `synthesize-base-dir.test.ts` - the prompt-corpus doctrine guards
 - `tests/learning/*.test.ts`, `tests/decisions/decisions-seam.test.ts`, `tests/guards/feature-knowledge-delivery.test.ts`, `kb-shape.test.ts`, `handoff-sections.test.ts`, `validate-quiet-form.test.ts`, `code-review-diff-gating.test.ts`, `no-autocompact-pct-override.test.ts`, `tests/installer/language-stamp*.test.ts`, `tests/session-start-compact.test.ts`, `tests/core/claude-md-audit.test.ts` - learning-variant, decisions, KB-shape, review-gating and compaction guards
 - `tests/guards/no-ledger-citations.test.ts`, `claude-dir.test.ts`, `docs-root.test.ts`, `settings-atomic-write.test.ts`, `no-config-read.test.ts`, `heredoc-quoting.test.ts`, `tests/hook-log-paths.test.ts`, `tests/skill-references.test.ts` - corpus-wide text guards
@@ -130,8 +130,7 @@ These complete the regression net the one-install-scope decision required before
 
 | File | Exception | Justification |
 |------|-----------|---------------|
-| `tests/integration/subagent-skill-preload.test.ts` | Spawns real `claude` with `--dangerously-skip-permissions` | Required for subagent spawn; prompts are read-only by test design |
-| The integration vitest config | Has no `setupFiles` temp-HOME redirect | The live-`claude` test needs the real `~/.claude`; its one `init` spawn is sandboxed at the call site through `sandboxEnv` |
+| The integration vitest config | Has no `setupFiles` temp-HOME redirect | The two live-`claude` files build their own temp HOME and repository; other `init` spawns are sandboxed at the call site through `sandboxEnv` |
 | Hook scripts | Outside `spawn-no-hardcoded-model` by design | The guard scans prompt text under `src/assets/{commands,agents,skills,mds}` and `dist/{commands,agents}`, not hook scripts |
 
 ## Related

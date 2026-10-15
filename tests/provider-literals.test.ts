@@ -902,15 +902,6 @@ const SHARED_RULES: readonly SharedRule[] = [
       'whole reason the entry gate is anchored rather than merely matched',
   },
   {
-    define: 'ref_preflight_branch',
-    module: COMMON_AUTHORING_MODULE,
-    emitted: 'the existence check is the guard',
-    why:
-      'the branch-name path, where the token is not a caller\'s reference at all. A copy that ' +
-      'dropped the existence check would render a PR link for a token that merely looks like a ' +
-      'reference — a link to another workspace\'s issue, rendered as this run\'s',
-  },
-  {
     define: 'ref_preflight_tail',
     emitted: '— a `COMPLETE` over zero processed issues is the report a release believes.',
     why:
