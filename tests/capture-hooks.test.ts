@@ -16,7 +16,7 @@ import { execFileSync, execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { pollForTerminalLine } from './helpers/poll-for-terminal-line.js';
+import { waitForWorkerToFinish } from './helpers/poll-for-terminal-line.js';
 import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
 import { HOOK_RUN_ALLOWANCE_MS, NODE_EXEC_STALL_MS, answersVersion, resolveOnPath, runHook as runSharedHook, spawnWithStdin } from './shell-hooks-helpers.js';
 
@@ -137,30 +137,6 @@ function makeGitProject(prefix: string): string {
 function workerLogPath(projectDir: string, homeDir: string, hookName: string): string {
   const slug = projectDir.replace(/^\//, '').replace(/\//g, '-');
   return path.join(homeDir, '.devflow', 'logs', slug, `.${hookName}.log`);
-}
-
-/**
- * The lines that end a background-memory-update run: the outcome of a run that reached
- * claude (drained, retained, failed), and the reason a run stopped before it (skipped,
- * aborted). The worker's first line, "Starting", does not end a run.
- */
-const WORKER_FINAL_LINE =
-  /SUCCESS: queue drained|CONFLICT: queue retained|FAIL: (?:verification failed|claude -p)|SKIP:|ABORT:/;
-
-/**
- * Wait for the detached worker to FINISH, not to start. It keeps writing into the project
- * folder (the probe, the lock, the queue claim, the staged swap) long after its first log
- * line, so a test that returned at "Starting" would have afterEach remove the folder under
- * it and leave an orphan that retries the lock for up to 90 s. Fails with the worker log
- * when no final line shows up. Bounded: 4000ms × ≤3 attempts, so a test that calls this
- * allows itself a 15000ms it-timeout.
- */
-async function waitForWorkerToFinish(logFile: string): Promise<void> {
-  const finished = await pollForTerminalLine(logFile, WORKER_FINAL_LINE, 4000, 3);
-  expect(
-    finished,
-    `the detached worker logged no final line within 12 s:\n${fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8') : '(no log)'}`,
-  ).toBe(true);
 }
 
 // =============================================================================
@@ -653,13 +629,13 @@ describe('memory-worker', () => {
 
       runHookWithPath(MEMORY_WORKER, { cwd: projectDir }, homeDir, shimDir, { DEVFLOW_DIR: overrideDir });
 
-      // Bounded: 4000ms per attempt, ≤3 attempts total, explicit 15000ms it-timeout.
-      expect(await pollForTerminalLine(invokedMarker, 'invoked', 4000, 3)).toBe(true);
-      // The marker is written when claude runs; the worker logs its outcome after that run
-      // exits, and it must finish before afterEach removes the project folder.
+      // One wait, bounded by the 15000ms it-timeout: the worker logs its outcome after claude
+      // exits, and it must finish before afterEach removes the project folder. The marker is
+      // written when claude runs, so it is on disk by then.
       const logFile = workerLogPath(projectDir, homeDir, 'background-memory-update');
       await waitForWorkerToFinish(logFile);
       const log = fs.readFileSync(logFile, 'utf-8');
+      expect(fs.existsSync(invokedMarker), `the worker finished without running claude:\n${log}`).toBe(true);
       expect(log).not.toContain('ABORT: memory disabled');
     } finally {
       fs.rmSync(overrideDir, { recursive: true, force: true });
@@ -714,8 +690,7 @@ describe('background-memory-update: the memory switch (D-FEATURES-NARROW-ONLY)',
     writeFeatureConfig(projectDir, { memory: true });
     // A claude stand-in, so a run that fails to abort can never reach the real one.
     invokedMarker = path.join(shimDir, 'claude-invoked');
-    fs.writeFileSync(path.join(shimDir, 'claude'), answersVersion(`#!/bin/bash\ntouch "${invokedMarker}"\nexit 1\n`));
-    fs.chmodSync(path.join(shimDir, 'claude'), 0o755);
+    writeFakeExecutable(path.join(shimDir, 'claude'), answersVersion(`#!/bin/bash\ntouch "${invokedMarker}"\nexit 1\n`));
   });
 
   afterEach(() => {

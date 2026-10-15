@@ -19,7 +19,7 @@ import { execSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { pollForTerminalLine } from './helpers/poll-for-terminal-line.js';
+import { waitForWorkerToFinish } from './helpers/poll-for-terminal-line.js';
 import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
 import { WORKER_AGENTS, validateWorkerValue } from '../src/core/agent-models.js';
 import {
@@ -938,17 +938,7 @@ describe('S11: AC-C3 — no memory.* marker in .devflow/dream/ after a memory-wo
     // long after its first log line, so afterEach would remove the folder under it and leave
     // an orphan retrying the lock for up to 90 s. The worker's last line is its outcome, or the
     // reason it skipped. Bounded: 4000ms × ≤3 attempts; 15000ms it-timeout.
-    const logFile = workerLogPath(projectDir, homeDir);
-    const finished = await pollForTerminalLine(
-      logFile,
-      /SUCCESS: queue drained|CONFLICT: queue retained|FAIL: verification failed|SKIP:/,
-      4000,
-      3,
-    );
-    expect(
-      finished,
-      `the detached worker logged no final line within 12 s:\n${fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8') : '(no log)'}`,
-    ).toBe(true);
+    await waitForWorkerToFinish(workerLogPath(projectDir, homeDir));
 
     const dreamDir = path.join(projectDir, '.devflow', 'dream');
     const memMarkers = fs.readdirSync(dreamDir).filter((f) => f.startsWith('memory'));

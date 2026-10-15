@@ -23,10 +23,20 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-/** Bound on the one cold exec in the setup hook. A hold that outlasts it fails there and names the cause. */
-export const FAKE_EXEC_WARM_BOUND_MS = 30_000;
+/**
+ * Bound on the one cold exec a setup hook pays so that no test does: the dispatcher
+ * here, or any other executable a test file warms in `beforeAll` (a real runtime, a
+ * node stub). A hold that outlasts it fails in the hook and names the cause.
+ */
+export const COLD_EXEC_WARM_BOUND_MS = 30_000;
 
-const FAKE_DISPATCHER = '#!/bin/bash\n. "$0.body"\n';
+/** Timeout for a setup hook that pays the cold exec: its bound plus room for the rest of the hook. */
+export const COLD_EXEC_WARM_HOOK_MS = COLD_EXEC_WARM_BOUND_MS + 5_000;
+
+/** The first line of every fake body: the dispatcher sources the body with bash. */
+const FAKE_SHEBANG = '#!/bin/bash\n';
+
+const FAKE_DISPATCHER = `${FAKE_SHEBANG}. "$0.body"\n`;
 
 /**
  * Make `bin` run `script` (a whole bash script, shebang line included) through the warm
@@ -49,6 +59,11 @@ export function useWarmFakeExecutables(): WriteFakeExecutable {
     if (dispatcher === '') {
       throw new Error('writeFakeExecutable: the warm dispatcher is built in beforeAll; call this from a test or a per-test hook');
     }
+    if (!script.startsWith(FAKE_SHEBANG)) {
+      throw new Error(
+        `writeFakeExecutable: the fake body for ${bin} must start with "#!/bin/bash" and a newline, because the dispatcher sources it with bash; it starts with ${JSON.stringify(script.slice(0, 24))}`,
+      );
+    }
     fs.writeFileSync(`${bin}.body`, script);
     fs.rmSync(bin, { force: true });
     fs.symlinkSync(dispatcher, bin);
@@ -60,13 +75,13 @@ export function useWarmFakeExecutables(): WriteFakeExecutable {
     fs.writeFileSync(dispatcher, FAKE_DISPATCHER);
     fs.chmodSync(dispatcher, 0o755);
     const warmLink = path.join(dispatcherDir, 'warm');
-    writeFakeExecutable(warmLink, '#!/bin/bash\nexit 0\n');
-    const warm = spawnSync(warmLink, [], { timeout: FAKE_EXEC_WARM_BOUND_MS });
+    writeFakeExecutable(warmLink, `${FAKE_SHEBANG}exit 0\n`);
+    const warm = spawnSync(warmLink, [], { timeout: COLD_EXEC_WARM_BOUND_MS });
     expect(
       warm.status,
-      `the fake-executable dispatcher did not run within ${FAKE_EXEC_WARM_BOUND_MS} ms: ${warm.error?.message ?? `signal ${warm.signal}`}`,
+      `the fake-executable dispatcher did not run within ${COLD_EXEC_WARM_BOUND_MS} ms: ${warm.error?.message ?? `signal ${warm.signal}`}`,
     ).toBe(0);
-  }, FAKE_EXEC_WARM_BOUND_MS + 5_000);
+  }, COLD_EXEC_WARM_HOOK_MS);
 
   afterAll(() => {
     if (dispatcherDir !== '') fs.rmSync(dispatcherDir, { recursive: true, force: true });
