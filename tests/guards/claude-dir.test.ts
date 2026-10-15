@@ -3,36 +3,49 @@
  *
  * Claude Code reads `CLAUDE_CONFIG_DIR` when it is set to an absolute path, else
  * `~/.claude` (D-CLAUDE-CONFIG-DIR, src/targets/claude-code/claude-paths.ts), and
- * the installer writes skills there by the same rule. A prompt that probes or
- * reads `~/.claude/…` directly disagrees with both the moment the variable is
- * set: `/dynamic-profile` mined an empty or stale `~/.claude/projects`.
+ * the installer writes skills there by the same rule. A prompt must follow that
+ * rule: one that probes or reads `~/.claude/…` directly, or that expands the
+ * variable in a looser way, disagrees with both the moment the variable holds
+ * anything but an absolute path.
  *
  * THE SANCTIONED FORM is one shell line that resolves the directory the way the
  * installer does, and a prompt names paths under the result (`$d/…`,
- * `{claude_dir}/…`):
+ * `<that directory>/…`, `{claude_dir}/…`):
  *
  *   d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac;
  *
- * WHAT COUNTS AS A VIOLATION (the matcher):
- * - a path INTO the home Claude directory — `~/.claude/x`, `$HOME/.claude/x`,
- *   `${HOME}/.claude/x`: a read or an existence check of something under it,
- *   whatever verb surrounds it, because no use of such a path is correct when
- *   `CLAUDE_CONFIG_DIR` is set;
- * - the directory ITSELF on a line that does not name `CLAUDE_CONFIG_DIR` — a
- *   listing or a glob root handed over without the rule that picks it.
- * The directory named beside `CLAUDE_CONFIG_DIR` (the sanctioned line, or prose
- * stating the rule: "else `$HOME/.claude`") is the rule, not a bypass of it.
+ * THIS GUARD IS AN ALLOWLIST. Per file, each exact copy of the sanctioned line is
+ * removed, and so is each piece of rule prose in ALLOWED_RULE_PROSE that is scoped
+ * to that file (it is replaced by its short form). Nothing else may name the
+ * variable. What is left is checked by `collectClaudeDirDefects`, one function per
+ * rule, and every defect names its rule:
+ * - `stray-variable`: `CLAUDE_CONFIG_DIR` in any other spelling or place;
+ * - `home-claude-path`: a path INTO the home Claude directory (`~/.claude/x`,
+ *   `$HOME/.claude/x`, `${HOME}/.claude/x`), or the directory ITSELF, whatever
+ *   verb surrounds it and whether or not the variable is named beside it;
+ * - `unrooted-path`: a `skills/devflow:`, `commands/devflow/`, `agents/devflow/`
+ *   or `rules/devflow` path not directly under `$d/`, `<that directory>/` or
+ *   `{claude_dir}/`;
+ * - `unbound-that-directory`, `unbound-d-root`, `unbound-claude-dir-root`: a root
+ *   used in a file that never sets it (the sanctioned line followed by the
+ *   `printf`, the sanctioned line, or that line or allowlist entry (a));
+ * - `d-reassigned`: a `d=` assignment that follows the sanctioned line.
+ * SITE_ROWS fixes how many sanctioned lines each file holds, so a copy that drifts
+ * from the constant byte for byte is not a site.
  *
  * WHAT A CLEAN RESULT DOES NOT COVER: a path assembled from parts
  * (`$HOME` + `/.claude`), a variable holding the literal, an absolute path spelt
  * with the user's own home (`/Users/x/.claude`), and anything outside the corpus
- * below. Hooks and the TypeScript CLI are not prompts: they resolve the directory
- * in code (getClaudeDirectory) and are held to it by their own tests.
+ * below. Of the hook, only the compaction directive (the text of `COMPACT_SECTION`)
+ * is scanned, because the model follows it as text; the hook's own `case` tests
+ * are code, and they stay out of scope. Other hooks and the TypeScript CLI resolve
+ * the directory in code (getClaudeDirectory) and are held to it by their own tests.
  *
  * THE CORPUS is the installed prompt surface by class, each with a sentinel and a
  * floor so a class that went missing fails by name: compiled commands, every
- * agent as installed (dist-first), the compiled git references, and the
- * hand-authored skills and rules.
+ * agent as installed (dist-first), the compiled git references, the hand-authored
+ * skills and rules, the learning-off builds of commands and agents, and the
+ * compaction directive of the session-start hook.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -41,7 +54,7 @@ import { mkdtemp, readFile, rm } from 'fs/promises'
 import * as os from 'os'
 import * as path from 'path'
 
-import { ROOT, SANCTIONED_RESOLUTION, requireDistFile, requireDistFiles, resolveAllAgents, resolveLearningOffSource, sectionBetween, walkFiles } from '../helpers.js'
+import { ROOT, SANCTIONED_RESOLUTION, compactDirectiveText, requireDistFile, requireDistFiles, resolveAllAgents, resolveLearningOffSource, sectionBetween, walkFiles } from '../helpers.js'
 import { DEVFLOW_PLUGINS, buildScopedSkillsMap, getAllAgentNames } from '../../src/core/plugins.js'
 import { installViaFileCopy } from '../../src/targets/claude-code/installer.js'
 
@@ -73,30 +86,185 @@ const PATH_UNDER_HOME_CLAUDE = /(?:~|\$HOME|\$\{HOME\})\/\.claude\/[^\s`'")]/
 /** The home Claude directory itself, not followed by more of a name. */
 const HOME_CLAUDE_DIR = /(?:~|\$HOME|\$\{HOME\})\/\.claude(?![\w.-])/
 
+/** The sanctioned line followed by the `printf` that shows the directory it resolved. */
+const SANCTIONED_RESOLUTION_PRINT = `${SANCTIONED_RESOLUTION} printf '%s\\n' "$d"`
+
+/** A devflow install path: the part a root must directly precede. */
+const DEVFLOW_INSTALL_PATH = /skills\/devflow:|commands\/devflow\/|agents\/devflow\/|rules\/devflow/g
+
+/** The three roots a devflow install path may sit under. */
+const BOUND_ROOTS = ['$d/', '<that directory>/', '{claude_dir}/'] as const
+
+/** The `d=` assignment that follows the start of a line, a space, `;` or a backtick; `cut -d=` stays clean. */
+const D_ASSIGNMENT = /(?:^|[ ;`])d=/
+
+/** The name of the compaction directive entry in the corpus: the hook file and the variable that holds the text. */
+export const COMPACTION_ENTRY = 'src/assets/scripts/hooks/session-start-context#COMPACT_SECTION'
+
 interface PromptFile {
   readonly name: string
   readonly content: string
 }
 
-interface ClaudeDirUse {
-  readonly file: string
-  readonly line: number
+/** Rule prose that states the rule in words and may therefore name the variable, in the listed files only. */
+export interface AllowedRuleProse {
+  readonly id: string
   readonly text: string
+  readonly replaceWith: string
+  readonly files: readonly string[]
 }
 
-/** Whether one line reaches the home Claude directory outside the resolution rule. */
-function isUnresolvedClaudeDir(text: string): boolean {
-  if (PATH_UNDER_HOME_CLAUDE.test(text)) return true
-  return HOME_CLAUDE_DIR.test(text) && !text.includes('CLAUDE_CONFIG_DIR')
+/** Entry (a): the prose rule that gives `{claude_dir}` its meaning. */
+const RULE_PROSE_ID = 'rule-prose'
+
+export const ALLOWED_RULE_PROSE: readonly AllowedRuleProse[] = [
+  {
+    id: RULE_PROSE_ID,
+    text: '`CLAUDE_CONFIG_DIR` when that is set to an absolute path, else `$HOME/.claude`',
+    replaceWith: '{claude_dir}',
+    files: [
+      'dist/commands/dynamic-profile.md',
+      'dist/learning-off/commands/dynamic-profile.md',
+      'src/assets/skills/agent-references/SKILL.md',
+    ],
+  },
+  {
+    id: 'compaction-rule',
+    text: 'commands/devflow/<name>.md in $CLAUDE_CONFIG_DIR if absolute, else ~/.claude',
+    replaceWith: '{claude_dir}/commands/devflow/<name>.md',
+    files: [COMPACTION_ENTRY],
+  },
+]
+
+/** How many sanctioned lines each file holds. A file that is not listed holds none. */
+export const SITE_ROWS: Readonly<Record<string, number>> = {
+  'dist/commands/code-review.md': 1,
+  'dist/commands/dynamic-profile.md': 1,
+  'dist/commands/plan.md': 1,
+  'dist/commands/implement.md': 2,
+  'dist/learning-off/commands/code-review.md': 1,
+  'dist/learning-off/commands/dynamic-profile.md': 1,
+  'dist/learning-off/commands/plan.md': 1,
+  'dist/learning-off/commands/implement.md': 2,
+  'src/assets/agents/synthesize.md': 1,
+  'src/assets/agents/curate.md': 2,
 }
 
-/** Named collector: every line in the corpus that names the home Claude directory outside the rule. */
-function collectUnresolvedClaudeDir(corpus: readonly PromptFile[]): ClaudeDirUse[] {
-  const out: ClaudeDirUse[] = []
-  for (const { name, content } of corpus) {
-    content.split('\n').forEach((text, index) => {
-      if (isUnresolvedClaudeDir(text)) out.push({ file: name, line: index + 1, text: text.trim().slice(0, 240) })
-    })
+const countOf = (text: string, needle: string): number => text.split(needle).length - 1
+
+/** What a file holds once the sanctioned line is taken out and each prose entry scoped to the file is replaced. */
+function residueOf(file: PromptFile, allowed: readonly AllowedRuleProse[]): string {
+  let text = file.content.split(SANCTIONED_RESOLUTION).join('')
+  for (const entry of allowed) {
+    if (entry.files.includes(file.name)) text = text.split(entry.text).join(entry.replaceWith)
+  }
+  return text
+}
+
+const lineDefect = (file: PromptFile, rule: string, text: string, index: number): string =>
+  `${file.name}:${index + 1}: [${rule}] ${text.trim().slice(0, 240)}`
+
+/** The zero-based line that holds the character at `position`. */
+const lineAt = (text: string, position: number): number => text.slice(0, position).split('\n').length - 1
+
+/** One defect for the line of `content` that holds `position`. */
+const defectAt = (file: PromptFile, rule: string, content: string, position: number): string =>
+  lineDefect(file, rule, content.split('\n')[lineAt(content, position)], lineAt(content, position))
+
+/** Rule `stray-variable`: the variable name anywhere in what is left. */
+function ruleStrayVariable(file: PromptFile, residue: string): string[] {
+  return residue.split('\n').flatMap((text, index) => text.includes('CLAUDE_CONFIG_DIR') ? [lineDefect(file, 'stray-variable', text, index)] : [])
+}
+
+/** Rule `home-claude-path`: a path into the home Claude directory, or the directory itself, with no exemption for the variable name. */
+function ruleHomeClaudePath(file: PromptFile, residue: string): string[] {
+  return residue.split('\n').flatMap((text, index) =>
+    PATH_UNDER_HOME_CLAUDE.test(text) || HOME_CLAUDE_DIR.test(text) ? [lineDefect(file, 'home-claude-path', text, index)] : [])
+}
+
+/** Rule `unrooted-path`: a devflow install path whose directly preceding text is not one of the three roots. */
+function ruleUnrootedPath(file: PromptFile, residue: string): string[] {
+  const out: string[] = []
+  for (const match of residue.matchAll(DEVFLOW_INSTALL_PATH)) {
+    const at = match.index ?? 0
+    const before = residue.slice(Math.max(0, at - 24), at)
+    if (!BOUND_ROOTS.some(root => before.endsWith(root))) out.push(defectAt(file, 'unrooted-path', residue, at))
+  }
+  return out
+}
+
+/** Rule `unbound-that-directory`: `<that directory>` used before the sanctioned line and its `printf` appear. */
+function ruleUnboundThatDirectory(file: PromptFile): string[] {
+  const use = file.content.indexOf('<that directory>')
+  if (use < 0) return []
+  const set = file.content.indexOf(SANCTIONED_RESOLUTION_PRINT)
+  return set >= 0 && set < use ? [] : [defectAt(file, 'unbound-that-directory', file.content, use)]
+}
+
+/** Rule `unbound-d-root`: `$d/` used before the sanctioned line appears. */
+function ruleUnboundDRoot(file: PromptFile): string[] {
+  const use = file.content.indexOf('$d/')
+  if (use < 0) return []
+  const set = file.content.indexOf(SANCTIONED_RESOLUTION)
+  return set >= 0 && set < use ? [] : [defectAt(file, 'unbound-d-root', file.content, use)]
+}
+
+/** Rule `unbound-claude-dir-root`: `{claude_dir}/` used in a file that holds neither the sanctioned line nor entry (a). */
+function ruleUnboundClaudeDirRoot(file: PromptFile, allowed: readonly AllowedRuleProse[]): string[] {
+  const use = file.content.indexOf('{claude_dir}/')
+  if (use < 0) return []
+  const prose = allowed.find(entry => entry.id === RULE_PROSE_ID)
+  const stated = prose !== undefined && prose.files.includes(file.name) && file.content.includes(prose.text)
+  if (stated || file.content.includes(SANCTIONED_RESOLUTION)) return []
+  return [defectAt(file, 'unbound-claude-dir-root', file.content, use)]
+}
+
+/** Rule `d-reassigned`: a `d=` assignment in what is left once the sanctioned line is gone. */
+function ruleDReassigned(file: PromptFile, residue: string): string[] {
+  return residue.split('\n').flatMap((text, index) => D_ASSIGNMENT.test(text) ? [lineDefect(file, 'd-reassigned', text, index)] : [])
+}
+
+/** Named collector: every place in the corpus that reaches the Claude directory by any route but the sanctioned ones. */
+export function collectClaudeDirDefects(corpus: readonly PromptFile[], allowed: readonly AllowedRuleProse[] = ALLOWED_RULE_PROSE): string[] {
+  const out: string[] = []
+  for (const file of corpus) {
+    const residue = residueOf(file, allowed)
+    out.push(
+      ...ruleStrayVariable(file, residue),
+      ...ruleHomeClaudePath(file, residue),
+      ...ruleUnrootedPath(file, residue),
+      ...ruleUnboundThatDirectory(file),
+      ...ruleUnboundDRoot(file),
+      ...ruleUnboundClaudeDirRoot(file, allowed),
+      ...ruleDReassigned(file, residue),
+    )
+  }
+  return out
+}
+
+/** Named collector: each (entry, file) pair of the allowlist is live: the file is in the corpus and holds the text once. */
+export function collectAllowlistDefects(corpus: readonly PromptFile[], allowed: readonly AllowedRuleProse[] = ALLOWED_RULE_PROSE): string[] {
+  const out: string[] = []
+  for (const entry of allowed) {
+    for (const name of entry.files) {
+      const file = corpus.find(f => f.name === name)
+      if (file === undefined) out.push(`${entry.id}: ${name} is not in the corpus`)
+      else if (countOf(file.content, entry.text) !== 1) out.push(`${entry.id}: ${name} holds the text ${countOf(file.content, entry.text)} times, expected 1`)
+    }
+  }
+  return out
+}
+
+/** Named collector: the number of sanctioned lines in each corpus file is the number its site row states. */
+export function collectSiteRowDefects(corpus: readonly PromptFile[], rows: Readonly<Record<string, number>> = SITE_ROWS): string[] {
+  const out: string[] = []
+  for (const name of Object.keys(rows)) {
+    if (!corpus.some(f => f.name === name)) out.push(`${name}: a site row names a file that is not in the corpus`)
+  }
+  for (const file of corpus) {
+    const found = countOf(file.content, SANCTIONED_RESOLUTION)
+    const expected = rows[file.name] ?? 0
+    if (found !== expected) out.push(`${file.name}: ${found} sanctioned lines, expected ${expected}`)
   }
   return out
 }
@@ -123,21 +291,60 @@ function promptSurface(): CorpusClass[] {
     { label: 'references', files: readTree('dist/skills'), sentinel: 'dist/skills/git/references/publication-gate.md', floor: 20 },
     { label: 'skills', files: readTree('src/assets/skills'), sentinel: 'src/assets/skills/worktree-support/SKILL.md', floor: 30 },
     { label: 'rules', files: readTree('src/assets/rules'), sentinel: 'src/assets/rules/security.md', floor: 4 },
+    { label: 'learning-off', files: readTree('dist/learning-off'), sentinel: 'dist/learning-off/commands/code-review.md', floor: 25 },
+    { label: 'compaction directive', files: [{ name: COMPACTION_ENTRY, content: compactDirectiveText() }], sentinel: COMPACTION_ENTRY, floor: 1 },
   ]
 }
 
+let surfaceCache: CorpusClass[] | undefined
+const surface = (): CorpusClass[] => (surfaceCache ??= promptSurface())
+const wholeCorpus = (): PromptFile[] => surface().flatMap(c => c.files)
 
-describe('no prompt reaches ~/.claude outside the CLAUDE_CONFIG_DIR rule (D-CLAUDE-DIR-PROMPTS)', () => {
+/** A real corpus file with a probe appended, as a one-file corpus. */
+function seeded(host: string, addition: string): PromptFile[] {
+  const file = wholeCorpus().find(f => f.name === host)
+  if (file === undefined) throw new Error(`${host} is not in the prompt corpus`)
+  return [{ name: file.name, content: `${file.content}\n${addition}\n` }]
+}
+
+/** The file a defect message starts with. */
+const defectFile = (defect: string): string => defect.replace(/:\d+: \[.*$/s, '')
+
+/** A real file that holds the sanctioned line and its `printf`, and one that holds neither. */
+const WITH_LINE = 'dist/commands/code-review.md'
+const WITHOUT_LINE = 'dist/commands/debug.md'
+
+/** Assert that the collector reports `addition`, seeded into the real file `host`, as a defect of the named rule. */
+function expectReported(host: string, addition: string, rule: string): void {
+  const defects = collectClaudeDirDefects(seeded(host, addition))
+  expect(defects.filter(d => d.includes(`[${rule}]`)), `${JSON.stringify(addition)} in ${host} is not reported by rule ${rule}`).not.toEqual([])
+}
+
+describe('no prompt reaches the Claude directory outside the CLAUDE_CONFIG_DIR rule (D-CLAUDE-DIR-PROMPTS)', () => {
   it('reads a real corpus: every class is present, by sentinel and by floor', () => {
-    for (const { label, files, sentinel, floor } of promptSurface()) {
+    for (const { label, files, sentinel, floor } of surface()) {
       expect(files.map(f => f.name), `${label}: sentinel ${sentinel} not in the corpus`).toContain(sentinel)
       expect(files.length, `${label}: ${files.length} files, below the floor of ${floor}`).toBeGreaterThanOrEqual(floor)
     }
   })
 
-  it('no prompt names a path under the home Claude directory, or the directory without the rule', () => {
-    const found = collectUnresolvedClaudeDir(promptSurface().flatMap(c => c.files))
-    expect(found.map(u => `${u.file}:${u.line}: ${u.text}`)).toEqual([])
+  it('the compaction directive class holds the directive text itself', () => {
+    const entry = wholeCorpus().find(f => f.name === COMPACTION_ENTRY)
+    expect(entry, 'the compaction directive is not in the corpus').toBeDefined()
+    expect(entry?.content).toContain('commands/devflow/')
+    expect(entry?.content.length).toBeGreaterThan(100)
+  })
+
+  it('no prompt names the variable outside the sanctioned line and the allowlisted prose, and every devflow install path sits under a bound root', () => {
+    expect(collectClaudeDirDefects(wholeCorpus())).toEqual([])
+  })
+
+  it('the allowlist is live: each entry names corpus files that hold its text exactly once', () => {
+    expect(collectAllowlistDefects(wholeCorpus())).toEqual([])
+  })
+
+  it('each file holds the number of sanctioned lines its site row states, and no other file holds one', () => {
+    expect(collectSiteRowDefects(wholeCorpus())).toEqual([])
   })
 
   it('the consumer carries the sanctioned resolution: /dynamic-profile', () => {
@@ -194,6 +401,10 @@ describe('no prompt reaches ~/.claude outside the CLAUDE_CONFIG_DIR rule (D-CLAU
     expect(run({ CLAUDE_CONFIG_DIR: '' })).toBe('/home/probe/.claude')
     expect(run({ CLAUDE_CONFIG_DIR: 'relative/dir' })).toBe('/home/probe/.claude')
     expect(run({ CLAUDE_CONFIG_DIR: '/opt/claude config' })).toBe('/opt/claude config')
+    expect(run({ CLAUDE_CONFIG_DIR: '~/x' })).toBe('/home/probe/.claude')
+    expect(run({ CLAUDE_CONFIG_DIR: ' /abs' })).toBe('/home/probe/.claude')
+    expect(run({ CLAUDE_CONFIG_DIR: '/' })).toBe('/')
+    expect(run({ HOME: '' })).toBe('/.claude')
   })
 
   it('red probes: a second sanctioned line, a language skill Read and the read moved out of the gate-level block are each reported', () => {
@@ -220,12 +431,12 @@ describe('no prompt reaches ~/.claude outside the CLAUDE_CONFIG_DIR rule (D-CLAU
 
   it('red probe: the superseded presence gate, seeded into the real compiled command, is reported', () => {
     const review = { name: 'dist/commands/code-review.md', content: requireDistFile('code-review.md') }
-    expect(collectUnresolvedClaudeDir([review])).toEqual([])
-    const seeded = {
+    expect(collectClaudeDirDefects([review])).toEqual([])
+    const seededReview = {
       ...review,
       content: `${review.content}\nfor each language focus, check whether \`~/.claude/skills/devflow:{focus}/SKILL.md\` exists (one file-existence check per candidate focus).\n`,
     }
-    expect(collectUnresolvedClaudeDir([seeded]).map(u => u.file)).toEqual(['dist/commands/code-review.md'])
+    expect([...new Set(collectClaudeDirDefects([seededReview]).map(defectFile))]).toEqual(['dist/commands/code-review.md'])
   })
 
   it('red probes: every spelling of a read or probe under the home Claude directory is reported', () => {
@@ -240,22 +451,89 @@ describe('no prompt reaches ~/.claude outside the CLAUDE_CONFIG_DIR rule (D-CLAU
       'ls ~/.claude',
       'Glob the transcripts under `$HOME/.claude`.',
     ]
-    for (const probe of probes) {
-      expect(collectUnresolvedClaudeDir([{ name: 'probe.md', content: probe }]), probe).toHaveLength(1)
+    for (const probe of probes) expectReported(WITH_LINE, probe, 'home-claude-path')
+  })
+
+  it('red probes: every form of the retired inline expansion, in the shapes a read site takes, is reported', () => {
+    const retired = '${CLAUDE_CONFIG_DIR:-$HOME/.claude}'
+    const probes = [
+      `Read \`${retired}/skills/devflow:x/SKILL.md\` with the Read tool.`,
+      `resolve \`${retired}\` in Bash`,
+      `echo "${retired}/skills/devflow:agent-references/references/synthesize"`,
+      `cd "<project root>" && find "${retired}/rules/devflow" -name '*.md'`,
+      '${CLAUDE_CONFIG_DIR-/opt/claude}',
+      '${CLAUDE_CONFIG_DIR:=/opt/claude}',
+      '$CLAUDE_CONFIG_DIR/skills/devflow:x',
+      '"${CLAUDE_CONFIG_DIR}"/skills/devflow:x',
+      '{$CLAUDE_CONFIG_DIR or ~/.claude}/commands/devflow/<name>.md',
+      'Read it from `CLAUDE_CONFIG_DIR`, else `~/.claude`.',
+      'd="${CLAUDE_CONFIG_DIR:-}"; case "$d" in ?*) ;; *) d="$HOME/.claude" ;; esac;',
+      `${SANCTIONED_RESOLUTION} echo "\${CLAUDE_CONFIG_DIR}"`,
+    ]
+    for (const probe of probes) expectReported(WITH_LINE, probe, 'stray-variable')
+  })
+
+  it('red probes: a devflow install path with no bound root before it is reported', () => {
+    for (const probe of ['.claude/skills/devflow:x/SKILL.md', 'Read skills/devflow:go/SKILL.md', 'find rules/devflow', 'ls commands/devflow/', 'ls agents/devflow/']) {
+      expectReported(WITH_LINE, probe, 'unrooted-path')
     }
   })
 
-  it('negative controls: the rule itself and paths under the resolved directory are not reported', () => {
+  it('red probes: a root used in a file that never sets it, and a `d=` assignment after the sanctioned line, are reported', () => {
+    expectReported(WITHOUT_LINE, 'ls "$d/skills/devflow:x"', 'unbound-d-root')
+    expectReported(WITHOUT_LINE, `Read "$d/skills/devflow:x" first, then ${SANCTIONED_RESOLUTION}`, 'unbound-d-root')
+    expectReported(WITHOUT_LINE, 'Read `<that directory>/skills/devflow:x`.', 'unbound-that-directory')
+    expectReported(WITHOUT_LINE, `Run \`${SANCTIONED_RESOLUTION}\` in Bash, Read \`<that directory>/skills/devflow:x\`.`, 'unbound-that-directory')
+    expectReported(WITHOUT_LINE, 'Read `{claude_dir}/skills/devflow:x`.', 'unbound-claude-dir-root')
+    expectReported(WITH_LINE, `${SANCTIONED_RESOLUTION} d="/elsewhere"; ls "$d"`, 'd-reassigned')
+    expectReported(WITH_LINE, `\`${SANCTIONED_RESOLUTION}d=/elsewhere\``, 'd-reassigned')
+    expectReported(WITHOUT_LINE, 'echo ready; d=/elsewhere', 'd-reassigned')
+  })
+
+  it('negative controls: the rule itself and paths under a bound root are not reported', () => {
     const controls = [
       SANCTIONED_RESOLUTION,
-      "`{claude_dir}` is Claude Code's directory: `CLAUDE_CONFIG_DIR` when that is set to an absolute path, else `$HOME/.claude`.",
+      `${SANCTIONED_RESOLUTION} printf '%s\\n' "$d"; ls "$d/skills/devflow:x"`,
+      'Read `<that directory>/skills/devflow:x`.',
+      'Read `{claude_dir}/skills/devflow:x`.',
       'rg -l "AskUserQuestion" "{claude_dir}/projects/" 2>/dev/null | head -50',
       'test -f "$d/skills/devflow:{focus}/SKILL.md"',
       'deploy.ts          # AI editors (.claude/, .cursor/ dirs)',
       'the installed copies under `~/.devflow` are produced from these',
+      'cut -d= -f1',
     ]
-    for (const control of controls) {
-      expect(collectUnresolvedClaudeDir([{ name: 'control.md', content: control }]), control).toEqual([])
+    for (const control of controls) expect(collectClaudeDirDefects(seeded(WITH_LINE, control)), control).toEqual([])
+  })
+
+  it('the corpus classes are live: the old form seeded into the sentinel of each class is reported against that file', () => {
+    const retired = '${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/devflow:x'
+    for (const { label, sentinel } of surface()) {
+      const defects = collectClaudeDirDefects(seeded(sentinel, retired))
+      expect(defects.map(defectFile), `${label}: the old form seeded into ${sentinel} is not reported against it`).toContain(sentinel)
     }
+  })
+
+  it('the allowlist entries are scoped: removing one reports each of its files, and the prose out of its files is reported', () => {
+    const corpus = wholeCorpus()
+    for (const entry of ALLOWED_RULE_PROSE) {
+      const without = ALLOWED_RULE_PROSE.filter(e => e.id !== entry.id)
+      const reported = [...new Set(collectClaudeDirDefects(corpus, without).map(defectFile))].sort()
+      expect(reported, `removing ${entry.id}`).toEqual([...entry.files].sort())
+    }
+    const [ruleProse, compaction] = ALLOWED_RULE_PROSE
+    expect(collectClaudeDirDefects([{ name: 'control.md', content: ruleProse.text }]).map(defectFile)).toContain('control.md')
+    expectReported(WITH_LINE, compaction.text, 'stray-variable')
+  })
+
+  it('the allowlist and site-row collectors report a missing file, a changed text and a drifted count', () => {
+    const corpus = wholeCorpus()
+    const [ruleProse] = ALLOWED_RULE_PROSE
+    expect(collectAllowlistDefects(corpus, [{ ...ruleProse, files: ['dist/commands/absent.md'] }])).toEqual([`${ruleProse.id}: dist/commands/absent.md is not in the corpus`])
+    expect(collectAllowlistDefects(corpus, [{ ...ruleProse, text: `${ruleProse.text} and more` }])).toHaveLength(ruleProse.files.length)
+    expect(collectSiteRowDefects(seeded(WITH_LINE, SANCTIONED_RESOLUTION), { [WITH_LINE]: 1 })).toEqual([`${WITH_LINE}: 2 sanctioned lines, expected 1`])
+    expect(collectSiteRowDefects(seeded(WITHOUT_LINE, SANCTIONED_RESOLUTION))).toContain(`${WITHOUT_LINE}: 1 sanctioned lines, expected 0`)
+    const drifted = { name: WITH_LINE, content: wholeCorpus().find(f => f.name === WITH_LINE)!.content.replace(SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION.replace('/*)', '?*)')) }
+    expect(collectSiteRowDefects([drifted], { [WITH_LINE]: 1 })).toEqual([`${WITH_LINE}: 0 sanctioned lines, expected 1`])
+    expect(collectSiteRowDefects(wholeCorpus().filter(f => f.name !== 'src/assets/agents/curate.md'))).toEqual(['src/assets/agents/curate.md: a site row names a file that is not in the corpus'])
   })
 })
