@@ -197,7 +197,7 @@ Two independent things sit on `manifest.features.compliance` and must not be con
 
 **KB-AP-10: the oracle trap.** Tests asserting the `FEATURE_OWNED_*` exclusions use the independent literal `['compliance']` (`tests/plugins.test.ts`).
 
-**KB-AP-12: two gate shapes, deliberately.** `/code-review` gates a language focus on the one line `Installed language focuses: <list>` of the installed command, which the installer writes from the machine's plugin selection (`src/targets/claude-code/language-stamp.ts`). It replaced a run-time check for the skill file, so a skill file's presence gates nothing in that command; `tests/guards/claude-dir.test.ts` allows it one directory read, the level reference. The lens is no machine fact (it unions machine, default branch and worktree), so a stamp could not carry it.
+**KB-AP-12: two gate shapes, deliberately.** `/code-review` gates a language focus on the one line `Installed language focuses: <list>` of the installed command, which the installer writes from the machine's plugin selection (`src/targets/claude-code/language-stamp.ts`). It replaced a run-time check for the skill file, so a skill file's presence gates nothing in that command. `tests/guards/claude-dir.test.ts` holds D-CLAUDE-DIR-PROMPTS: no prompt reads a path under the home Claude directory outside the `CLAUDE_CONFIG_DIR` rule, and `/code-review` has one such read, the level reference. The lens is no machine fact (it unions machine, default branch and worktree), so a stamp could not carry it.
 
 ## Key Files
 

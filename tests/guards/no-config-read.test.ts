@@ -62,9 +62,13 @@
  * non-empty total says nothing about a class that went missing, so every class
  * is asserted by name.
  *
- * THE COMPILED CLASSES MUST BE CURRENT. A dist/ older than its sources is a
- * clean scan of text nobody ships, so the guard first fails by name on any
- * compiled prompt older than an input it is compiled from (#406).
+ * THE COMPILED CLASSES MUST BE CURRENT, WITHIN THE LIMITS OF THE CHECK. A dist/
+ * older than its sources is a clean scan of text nobody ships, so the guard first
+ * fails by name on any compiled prompt older than the inputs `compiledPrompts`
+ * names for it (#406): a command against its own host and the command partials, an
+ * agent against its own generator host only, and a reference against the reference
+ * modules. An edit to a partial that agents share, without a rebuild, is not
+ * detected.
  *
  * NO EXEMPTIONS (TP-42). The Git agent, the last reader, resolves its tracker
  * provider, site and key from the settings line like every other prompt. The
@@ -75,11 +79,11 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import * as path from 'path'
 
-import { ROOT, requireDistFile, requireDistFiles, resolveAllAgents, walkFiles } from '../helpers.js'
+import { AGENT_HOSTS_DIR, MIN_COMPILED_PROMPTS, ROOT, collectStaleOutputs, compiledPrompts, requireDistFile, requireDistFiles, resolveAllAgents, walkFiles } from '../helpers.js'
 import { getAllAgentNames } from '../../src/core/plugins.js'
 
 // ---------------------------------------------------------------------------
@@ -263,67 +267,8 @@ function promptSurface(): CorpusClass[] {
 // Currency: the compiled classes are built from the sources under review
 // ---------------------------------------------------------------------------
 
-/**
- * Where agent generator hosts live. Assembled, not spelt: the literal-agent-path
- * guard reserves that spelling for resolveAgentSource, and this is a source
- * directory for an mtime, never an agent read.
- */
-const AGENT_HOSTS_DIR = ['src', 'assets', 'agents'].join('/')
 /** The Git agent's generator host, for the hermetic currency probe. */
 const GIT_HOST = `${AGENT_HOSTS_DIR}/git.mds`
-
-/** A compiled prompt and the sources it is compiled from, repo-relative. */
-interface CompiledPrompt {
-  readonly output: string
-  readonly inputs: readonly string[]
-}
-
-/** Repo-relative files under `root/dir` passing `keep`; none when the directory is absent. */
-function listFiles(root: string, dir: string, keep: (file: string) => boolean): string[] {
-  try {
-    return walkFiles(path.join(root, dir), keep).map(f => path.relative(root, f).split(path.sep).join('/'))
-  } catch {
-    return []
-  }
-}
-
-/**
- * Every compiled prompt under `root` with its inputs: a command host with every
- * command partial (a partial edit can move any host that imports it), each agent
- * with its generator host, and each generated reference with every reference
- * module.
- */
-function compiledPrompts(root: string): CompiledPrompt[] {
-  const partials = listFiles(root, 'src/assets/commands/_partials', f => f.endsWith('.mds'))
-  const modules = listFiles(root, 'src/assets/mds', f => f.endsWith('.mds'))
-  const commands = listFiles(root, 'dist/commands', f => f.endsWith('.md')).map(output => {
-    const base = path.basename(output, '.md')
-    return { output, inputs: [`src/assets/commands/${base}.mds`, ...partials] }
-  })
-  const agents = listFiles(root, 'dist/agents', f => f.endsWith('.md'))
-    .map(output => ({ output, inputs: [`${AGENT_HOSTS_DIR}/${path.basename(output, '.md')}.mds`] }))
-  const references = listFiles(root, 'dist/skills', f => f.endsWith('.md')).map(output => ({ output, inputs: modules }))
-  return [...commands, ...agents, ...references]
-}
-
-/** Named collector: each compiled prompt older than one of its inputs, naming the first such input. */
-function collectStaleOutputs(root: string): string[] {
-  const mtime = (rel: string): number | null => {
-    try {
-      return statSync(path.join(root, rel)).mtimeMs
-    } catch {
-      return null
-    }
-  }
-  const out: string[] = []
-  for (const { output, inputs } of compiledPrompts(root)) {
-    const built = mtime(output)
-    if (built === null) continue
-    const newer = inputs.filter(i => (mtime(i) ?? -Infinity) > built)
-    if (newer.length > 0) out.push(`${output} is STALE: ${newer[0]} changed after it was built`)
-  }
-  return out
-}
 
 /** Files excused from the rule, with the reason. Empty since the Git agent moved onto the settings line (TP-42). */
 const EXEMPT: ReadonlyMap<string, string> = new Map()
@@ -334,9 +279,9 @@ const EXEMPT: ReadonlyMap<string, string> = new Map()
 
 describe('the compiled prompt corpus is current (#406)', () => {
   it('no compiled command, agent or reference is older than a source it is compiled from', () => {
-    expect(compiledPrompts(ROOT).length, 'no compiled prompt found — run `npm run build:mds`').toBeGreaterThanOrEqual(40)
+    expect(compiledPrompts().length, 'no compiled prompt found — run `npm run build:mds`').toBeGreaterThanOrEqual(MIN_COMPILED_PROMPTS)
     expect(
-      collectStaleOutputs(ROOT),
+      collectStaleOutputs(),
       'dist/ is older than its sources, so every scan below reads text nobody ships — run `npm run build:mds`',
     ).toEqual([])
   })

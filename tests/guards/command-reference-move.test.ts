@@ -32,7 +32,7 @@ import { existsSync, readFileSync, readdirSync } from 'fs'
 import * as path from 'path'
 
 import {
-  AGENT_REFERENCES_SKILL, ROOT, SANCTIONED_RESOLUTION, agentReferencePath, commandReferenceSections, loadGolden, readAgentReference,
+  AGENT_REFERENCES_SKILL, RETIRED_INLINE_EXPANSION, ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, agentReferencePath, commandReferenceSections, loadGolden, readAgentReference,
   requireDistFile,
 } from '../helpers.js'
 import { DEVFLOW_PLUGINS, skillsOf } from '../../src/core/plugins.js'
@@ -40,8 +40,8 @@ import { resolvePluginsToInstall } from '../../src/cli/commands/init-seed.js'
 
 const REFERENCE_DIR = 'commands'
 const COMMANDS_DIR = path.join(ROOT, 'src', 'assets', 'commands')
-/** The roots a read site may resolve first, including the sanctioned resolution line. */
-const READ_ROOTS = ['${CLAUDE_CONFIG_DIR:-$HOME/.claude}', SANCTIONED_RESOLUTION] as const
+/** The root a read site resolves first: the sanctioned resolution line. */
+const READ_ROOTS = [SANCTIONED_RESOLUTION] as const
 const READ_PATH_RE = /skills\/devflow:agent-references\/references\/commands\/([a-z0-9-]+\.md)/g
 
 /** One section a command lost and a reference now holds, exactly. */
@@ -179,18 +179,18 @@ describe('AC-406: every read path exists, is read, and resolves the config direc
 
   it('known-bad probes: no root, a root after the path and a missing Read-tool phrase are each reported, and the sanctioned resolution line is accepted as the read root', () => {
     const target = 'skills/devflow:agent-references/references/commands/x.md'
-    const inline = READ_ROOTS[0]
-    const sanctioned = READ_ROOTS[1]
+    const sanctioned = READ_ROOTS[0]
     expect(collectReadSiteDefects('probe', `Read \`<d>/${target}\` with the Read tool.`))
       .toEqual(['probe.mds: the read site must resolve a config-directory root before the path'])
-    expect(collectReadSiteDefects('probe', `Read \`<d>/${target}\` with the Read tool, after resolving ${inline}.`))
+    expect(collectReadSiteDefects('probe', `Read \`<d>/${target}\` with the Read tool, after resolving ${sanctioned}.`))
       .toEqual(['probe.mds: the root comes after the path'])
-    expect(collectReadSiteDefects('probe', `Resolve ${inline} in Bash and Read \`<d>/${target}\`.`))
+    expect(collectReadSiteDefects('probe', `Resolve ${sanctioned} in Bash and Read \`<d>/${target}\`.`))
       .toEqual(['probe.mds: the read goes through the Read tool'])
     expect(collectReadSiteDefects('probe', `Run \`d="$HOME/.claude";\` in Bash and Read \`<d>/${target}\` with the Read tool.`))
       .toEqual(['probe.mds: the read site must resolve a config-directory root before the path'])
-    expect(collectReadSiteDefects('probe', `Resolve ${inline} in Bash and Read \`<d>/${target}\` with the Read tool.`)).toEqual([])
-    expect(collectReadSiteDefects('probe', `Run \`${sanctioned} printf '%s\\n' "$d"\` in Bash and Read \`<d>/${target}\` with the Read tool.`)).toEqual([])
+    expect(collectReadSiteDefects('probe', `Resolve ${RETIRED_INLINE_EXPANSION} in Bash and Read \`<d>/${target}\` with the Read tool.`))
+      .toEqual(['probe.mds: the read site must resolve a config-directory root before the path'])
+    expect(collectReadSiteDefects('probe', `Run \`${SANCTIONED_RESOLUTION_PRINT}\` in Bash and Read \`<d>/${target}\` with the Read tool.`)).toEqual([])
   })
 
   it('a selection of any plugin that uses a reference installs the skill, and the install goldens list each file', () => {

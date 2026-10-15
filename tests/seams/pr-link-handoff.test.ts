@@ -2,7 +2,7 @@ import { describe, it, expect, afterAll } from 'vitest'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
-import { buildCommittedTree, cleanupCommittedTree, collectCodeSpawnSites, collectOrderViolations, ensurePrReadyReference, gitOperationReferenceCorpus, requireDistFile, walkFiles } from '../helpers.js'
+import { ROOT, buildCommittedTree, cleanupCommittedTree, collectCodeSpawnSites, collectOrderViolations, ensurePrReadyReference, gitOperationReferenceCorpus, requireDistFile, walkFiles } from '../helpers.js'
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
 
 /** The generated `devflow:git` reference tree — the providers' own mechanics. */
@@ -294,7 +294,7 @@ describe('ensure-pr-ready — the paste gate, one row per tracker grammar', () =
     ).toMatch(/`\(none\)`[\s\S]{0,200}?not a mismatch/i)
     expect(
       PR_READY,
-      'with no rendered line the section keeps its heading and carries no reference — a bare ' +
+      'with no rendered line the section carries no reference — a bare ' +
       'number names a different issue under each provider, so any line composed from it would be a guess',
     ).toContain('never compose one from `ISSUE_NUMBER`')
     expect(
@@ -418,6 +418,217 @@ describe('ensure-pr-ready — the paste gate, one row per tracker grammar', () =
   })
 })
 
+// -------------------------------------------------------------------------
+// A supplied ISSUE_PR_LINK is final (#486, finding 3, from #459).
+//
+// Step 4a decides the closing line of a PR it is handed one for, and a supplied
+// value — `(none)` included — is its whole answer: step 4b runs only for an ABSENT
+// key. Before this, `(none)` fell through to step 4b, and GitHub's step 4b composed
+// a `Closes #{n}` line from a bare number or from the branch name: the same digits
+// name a different issue under each provider, so the PR could close the wrong
+// issue, or carry two `## Related Issues` headings (4a's empty one and 4b's).
+//
+// The paragraphs are read from the compiled GitHub reference. Step 4a is written
+// once in `_ops_steps.mds` and expanded into every provider's reference, so the
+// GitHub copy stands for it; step 4b is each provider's own, so the second describe
+// reads all three.
+// -------------------------------------------------------------------------
+
+/** The blank-line-bounded paragraph of `ref` that opens with `lead`; '' when none does. */
+function paragraphStartingWith(ref: string, lead: string): string {
+  return ref.split(/\n[ \t]*\n/).find(p => p.trimStart().startsWith(lead)) ?? ''
+}
+
+/** A reference's step 4b, from its heading to step 4c; '' when either bound is absent. */
+function step4bOf(ref: string): string {
+  const start = ref.indexOf('\n4b. (ALWAYS-ON)')
+  const end = ref.indexOf('\n4c. ', start)
+  return start === -1 || end === -1 ? '' : ref.slice(start, end)
+}
+
+/** Step 4a's refusal line, which step 4b repeats word for word when the Handoff Values line fails the same check. */
+const STEP_4A_REFUSAL = 'TRACEABILITY: DEGRADED (issue reference "{ref}" does not match any tracker reference grammar)'
+
+/**
+ * Named collector: how a step 4b block composes a closing line itself instead of taking the Handoff Values one,
+ * or departs from the one form all three providers share. Step 4b is a single source with no lettered option,
+ * no order, no fetch-by-key gate (it makes no tracker call) and no discoverability condition. It renders
+ * nothing either: the Handoff Values line reaches it already rendered, so a provider note that renders a
+ * key, or names `## Reference Rendering`, tells the step to publish a line the shared text forbids.
+ */
+function collectStep4bComposition(block: string): string[] {
+  const out: string[] = []
+  const has = (what: string, found: boolean): void => { if (found) out.push(what) }
+  has('a rendering fallback', /render the (key|reference)|`## Reference Rendering`/.test(block))
+  has('a branch-name fallback', /branch name pattern/.test(block))
+  has('a lettered resolution option', /^\s+[a-z]\. /m.test(block))
+  has('a resolution order', /Resolution order/.test(block))
+  has('a fetch-by-key gate', /fetch by key/.test(block))
+  has('a discoverability condition', /discoverable/.test(block))
+  has('a producer that returns no Handoff Values block', /ensure-traceable-issue/.test(block))
+  has('a number verified with the tracker CLI', /gh issue view/.test(block))
+  has('a line built from a verified issue number', /verified issue number/.test(block))
+  if (!/Never compose a line from a bare issue number/.test(block)) out.push('no ban on composing from a bare number')
+  if (!block.includes('step 4a\'s shape check')) out.push('no pass through step 4a\'s shape check')
+  if (!(block.includes('`setup-task`') && block.includes('`fetch-issue`') && block.includes('### Handoff Values'))) {
+    out.push('no Handoff Values source naming setup-task and fetch-issue')
+  }
+  if (!block.includes(STEP_4A_REFUSAL)) out.push('no refusal outcome in step 4a\'s words')
+  if (!block.includes('This step composes no line itself.')) out.push('no statement that step 4b composes no line')
+  return out
+}
+
+describe('ensure-pr-ready — a supplied ISSUE_PR_LINK is final and step 4b composes nothing (#486, finding 3)', () => {
+  const FINAL = paragraphStartingWith(PR_READY, '**A given `ISSUE_PR_LINK` is final.**')
+  const NONE = paragraphStartingWith(PR_READY, '`(none)`')
+
+  it('is non-vacuous: the paragraphs and the step 4b block are found', () => {
+    expect(FINAL, 'the final-link paragraph').not.toBe('')
+    expect(NONE, 'the (none) paragraph').not.toBe('')
+    expect(step4bOf(PR_READY), 'the GitHub step 4b block').not.toBe('')
+  })
+
+  it('(a) a supplied (none) is final: it gives no reference and never reaches step 4b', () => {
+    expect(FINAL, 'a supplied value is final, `(none)` included').toMatch(/When it is given, `\(none\)` included,/)
+    expect(FINAL, '`(none)` no longer leaves the answer to step 4b').not.toMatch(/`\(none\)` or absent leaves the answer to step 4b/)
+    expect(FINAL, 'the old condition excluded `(none)`').not.toContain('given and not `(none)`')
+    expect(FINAL, 'only an absent key reaches step 4b').toContain('Only an absent `ISSUE_PR_LINK` goes to step 4b')
+    expect(FINAL, 'an admitted wave block is the section\'s only writer').toContain('no admitted wave block exists')
+    expect(NONE, 'an absent block is no longer a `(none)` case — only a supplied value is read here').not.toContain('absent `### Handoff Values` block')
+  })
+
+  it('(b) the degraded line shows when ISSUE_NUMBER is set and no line is admitted', () => {
+    expect(
+      FINAL,
+      'a set ISSUE_NUMBER with no admitted line is reported under the registered reason, not left silent',
+    ).toMatch(/When `ISSUE_NUMBER` is set and no line is admitted,[^.]*`TRACEABILITY: DEGRADED \(ambiguous issue reference\)`/)
+  })
+
+  it('(c) GitHub step 4b has no bare-number composition and no branch-name option', () => {
+    const block = step4bOf(PR_READY)
+    expect(
+      collectStep4bComposition(block),
+      'step 4b takes only the Handoff Values line, through the step 4a shape check — it composes no line itself',
+    ).toEqual([])
+    expect(block, 'the pinned guard: a given link is decided in step 4a').toContain('A given `ISSUE_PR_LINK` is already decided in step 4a: skip the resolution below.')
+    expect(block, 'the pinned guard: the section is published through the PR-host half').toContain('Publish the section through step 4b\'s PR-host half.')
+  })
+
+  it('(d) none for both keys gives no Related Issues heading, and an empty heading needs ISSUE_NUMBER', () => {
+    expect(
+      NONE,
+      'an unconditional empty heading is what put a heading on issue-less PRs',
+    ).not.toContain('emit the `## Related Issues` heading with no reference')
+    expect(
+      FINAL,
+      'with ISSUE_NUMBER `(none)` and no line, the PR body carries no heading',
+    ).toMatch(/when it is `\(none\)`, write no heading/)
+    expect(
+      FINAL,
+      'the empty heading belongs to a set ISSUE_NUMBER',
+    ).toMatch(/When `ISSUE_NUMBER` is set and no line is admitted, emit the heading with no reference/)
+  })
+
+  it('known-bad probes: a branch fallback, a second option and a composing step 4b are each reported', () => {
+    const block = step4bOf(PR_READY)
+    expect(collectStep4bComposition(block), 'the real block is clean, so each seed fails for its own reason').toEqual([])
+    const seeded = `${block}\n   b. If unavailable, fall back to the branch name pattern \`{type}/{number}-{slug}\` and verify with \`gh issue view {n}\`, a verified issue number.`
+    expect(collectStep4bComposition(seeded)).toEqual([
+      'a branch-name fallback',
+      'a lettered resolution option',
+      'a number verified with the tracker CLI',
+      'a line built from a verified issue number',
+    ])
+    expect(collectStep4bComposition('4b. Render the line.')).toEqual([
+      'no ban on composing from a bare number',
+      'no pass through step 4a\'s shape check',
+      'no Handoff Values source naming setup-task and fetch-issue',
+      'no refusal outcome in step 4a\'s words',
+      'no statement that step 4b composes no line',
+    ])
+    const leftovers: ReadonlyArray<{ seed: string; reports: string }> = [
+      { seed: '   Resolution order:', reports: 'a resolution order' },
+      { seed: '   The *fetch by key* capability absent or denied ⇒ `TRACEABILITY: DEGRADED (no tracker tool for fetch by key)` and skip the section.', reports: 'a fetch-by-key gate' },
+      { seed: '   If no verified issue key is discoverable, skip silently.', reports: 'a discoverability condition' },
+      { seed: '   The line is the one `ensure-traceable-issue` returned.', reports: 'a producer that returns no Handoff Values block' },
+      { seed: '   `## Reference Rendering` absent, or its token discarded by the gate below ⇒ render the key as the documented default below, on its own line under the section heading, and record the discard under `### Substitutions`.', reports: 'a rendering fallback' },
+      { seed: '   Absent or discarded ⇒ render the reference as the documented default below, on its own line under the section heading.', reports: 'a rendering fallback' },
+      { seed: '   `## Reference Rendering` names the form of the line\'s token; the check above still decides what is published.', reports: 'a rendering fallback' },
+    ]
+    for (const { seed, reports } of leftovers) {
+      const seeded = `${block}\n${seed}`
+      expect(seeded, 'the seed must land').not.toBe(block)
+      expect(collectStep4bComposition(seeded), `the seed ${JSON.stringify(seed)} must be reported by name`).toEqual([reports])
+    }
+    expect(
+      collectStep4bComposition(block.replace(STEP_4A_REFUSAL, 'TRACEABILITY: DEGRADED (no line)')),
+      'a step 4b that words its refusal differently from step 4a is reported',
+    ).toEqual(['no refusal outcome in step 4a\'s words'])
+    expect(step4bOf('no step four-b here'), 'an absent block reads as empty, never as a pass').toBe('')
+  })
+})
+
+describe('ensure-pr-ready — no provider\'s step 4b composes a closing line from a bare number or a branch name (#486, finding 3)', () => {
+  const BRANCH_DERIVED = [
+    ['the branch-name pattern', /\{type\}\/\{[A-Za-z]+\}-\{slug\}/],
+    ['the extract-and-verify instruction', /extract the segment/],
+    ['the look-alike token warning', /merely looks like one/],
+  ] as const
+
+  /** Named collector: the branch-derived resolution text a provider's step 4b still carries. */
+  function collectBranchDerivedText(block: string): string[] {
+    return BRANCH_DERIVED.filter(([, pattern]) => pattern.test(block)).map(([what]) => what)
+  }
+
+  it.each(PASTE_PROVIDERS)('%s: step 4b takes only the Handoff Values line and composes nothing', provider => {
+    const block = step4bOf(ensurePrReadyReference(provider))
+    expect(block, `the ${provider} step 4b block`).not.toBe('')
+    expect(collectStep4bComposition(block), `${provider} step 4b composes a line itself or departs from the shared form`).toEqual([])
+    expect(collectBranchDerivedText(block), `${provider} step 4b still derives a reference from the branch name`).toEqual([])
+    expect(block, 'the pinned guard: a given link is decided in step 4a').toContain('A given `ISSUE_PR_LINK` is already decided in step 4a: skip the resolution below.')
+    expect(block, 'the pinned guard: the section is published through the PR-host half').toContain('Publish the section through step 4b\'s PR-host half.')
+  })
+
+  it('the three providers state one step 4b: the shared sentences are the same bytes in each', () => {
+    const SHARED_SENTENCES = [
+      'A given `ISSUE_PR_LINK` is already decided in step 4a: skip the resolution below.',
+      'the only source is the `PR link line` of the `### Handoff Values` block that `setup-task` or `fetch-issue` returned for this branch.',
+      'Publish it only if it passes step 4a\'s shape check.',
+      `A line that fails the check is refused as step 4a refuses it, not repaired: emit \`${STEP_4A_REFUSAL}\` and publish nothing.`,
+      'This step composes no line itself. Never compose a line from a bare issue number or a branch name.',
+      'If no such line exists, skip silently.',
+    ]
+    for (const provider of PASTE_PROVIDERS) {
+      const block = step4bOf(ensurePrReadyReference(provider))
+      for (const sentence of SHARED_SENTENCES) {
+        expect(block, `${provider} step 4b must carry the shared sentence: ${sentence}`).toContain(sentence)
+      }
+    }
+  })
+
+  it('no tracker source calls the branch-name define, and the define is gone', () => {
+    const trackerDir = path.join(ROOT, 'src', 'assets', 'mds', 'tracker')
+    const sources = walkFiles(trackerDir, f => f.endsWith('.mds'))
+    expect(sources.length, 'non-vacuous: the tracker sources are found').toBeGreaterThan(3)
+    const callers = sources.filter(f => fs.readFileSync(f, 'utf-8').includes('ref_preflight_branch')).map(f => path.relative(ROOT, f))
+    expect(callers, 'the branch-name define, its export and its callers are removed').toEqual([])
+  })
+
+  it('known-bad probes: a seeded branch fallback in each provider is reported by name', () => {
+    for (const provider of PASTE_PROVIDERS) {
+      const block = step4bOf(ensurePrReadyReference(provider))
+      expect(collectBranchDerivedText(block), `${provider}: the real block is clean, so the seed fails for its own reason`).toEqual([])
+      const seeded = `${block}\n   b. Otherwise fall back to the branch name pattern \`{type}/{KEY}-{slug}\`: extract the segment and verify it. A branch name can carry a token that merely looks like one.`
+      expect(collectBranchDerivedText(seeded), provider).toEqual([
+        'the branch-name pattern',
+        'the extract-and-verify instruction',
+        'the look-alike token warning',
+      ])
+      expect(collectStep4bComposition(seeded), provider).toEqual(['a branch-name fallback', 'a lettered resolution option'])
+    }
+  })
+})
+
 describe('handoff seam — setup-task and fetch-issue producers ↔ ensure-pr-ready consumer', () => {
   it('both sides spell the two pasted labels identically', () => {
     for (const label of ['- **PR link line**:', '- **Branch token**:']) {
@@ -452,9 +663,10 @@ describe('handoff seam — setup-task and fetch-issue producers ↔ ensure-pr-re
 //
 // The Code agent opens no PR, so it takes none of the PR keys: no Code spawn
 // forwards ISSUE_NUMBER, ISSUE_PR_LINK or PR_EXCEPTIONS (an exact-0 guard). The one
-// consumer is the PR-opening Git spawn, so the relation that replaced "every
-// ISSUE_NUMBER payload also carries ISSUE_PR_LINK" is: a workflow that captures
-// ISSUE_PR_LINK forwards it to its PR-opening Git spawn (D-LINK-FLOOR). A workflow
+// consumer is the PR-opening Git spawn, so the relation over its fences is: a workflow
+// that captures ISSUE_PR_LINK forwards it to its PR-opening Git spawn (D-LINK-FLOOR),
+// and every such fence that passes ISSUE_NUMBER passes ISSUE_PR_LINK beside it, so step
+// 4b (which runs only for an absent link) never meets a set issue. A workflow
 // opens its PR in one of two ways, both named below: /implement passes the link
 // itself, /dynamic-build composes a wave block from each ticket's captured
 // `issuePrLink` and passes that.
@@ -611,6 +823,24 @@ function collectUnforwardedPrOpens(file: string, source: string): string[] {
     .map(p => `${p.file}:${p.line}: the PR-opening spawn does not pass ${key}`)
 }
 
+/** A spawn payload line that passes `key`: the key opens the line, after indent and an optional quote. */
+function passesKey(block: string, key: string): boolean {
+  return new RegExp(`^[ \\t]*"?${key}: `, 'm').test(block)
+}
+
+/**
+ * Named collector: PR-opening spawns that pass ISSUE_NUMBER but not ISSUE_PR_LINK.
+ *
+ * Step 4b runs only for an ABSENT ISSUE_PR_LINK. A spawn that sets ISSUE_NUMBER and omits the
+ * link would send a set issue to step 4b, whose heading step 4a has already written. Keeping the
+ * two keys together is what lets step 4a's final rule leave step 4b nothing to compose.
+ */
+function collectIssueNumberWithoutLink(payloads: readonly SpawnPayload[]): string[] {
+  return payloads
+    .filter(p => passesKey(p.block, 'ISSUE_NUMBER') && !passesKey(p.block, 'ISSUE_PR_LINK'))
+    .map(p => `${p.file}:${p.line}: the PR-opening spawn passes ISSUE_NUMBER without ISSUE_PR_LINK`)
+}
+
 describe('ISSUE_PR_LINK reaches the PR-opening Git spawn (D-LINK-FLOOR)', () => {
   it('every capturing workflow forwards the link into its ensure-pr-ready spawn, and the named set is exactly that set', async () => {
     const commands = await deployedCommands()
@@ -620,6 +850,24 @@ describe('ISSUE_PR_LINK reaches the PR-opening Git spawn (D-LINK-FLOOR)', () => 
       expect(collectEnsurePrReadySpawns(name, content).length, `${name}: no PR-opening spawn to forward into`).toBeGreaterThan(0)
       expect(collectUnforwardedPrOpens(name, content), name).toEqual([])
     }
+  }, 20_000)
+
+  it('(e) every ensure-pr-ready fence that passes ISSUE_NUMBER also passes ISSUE_PR_LINK, and one such fence exists', async () => {
+    // A characterization, not a RED case: it holds on the base this fix starts from.
+    const commands = await deployedCommands()
+    const payloads = commands.flatMap(([name, content]) => collectEnsurePrReadySpawns(name, content))
+    const withNumber = payloads.filter(p => passesKey(p.block, 'ISSUE_NUMBER'))
+    expect(withNumber.length, 'no fence passes ISSUE_NUMBER, so the relation below holds over nothing').toBeGreaterThan(0)
+    expect(collectIssueNumberWithoutLink(payloads)).toEqual([])
+  }, 20_000)
+
+  it('known-bad probe: a fence that passes ISSUE_NUMBER and drops ISSUE_PR_LINK is reported', async () => {
+    const commands = await deployedCommands()
+    const implement = commands.find(([n]) => n === 'implement.md')?.[1] ?? ''
+    expect(collectIssueNumberWithoutLink(collectEnsurePrReadySpawns('implement.md', implement)), 'the real fence is clean').toEqual([])
+    const dropped = implement.replace(/^ISSUE_PR_LINK: .*\n/m, '')
+    expect(dropped, 'the drop seed must land').not.toBe(implement)
+    expect(collectIssueNumberWithoutLink(collectEnsurePrReadySpawns('implement.md', dropped))).toHaveLength(1)
   }, 20_000)
 
   it('the floor: at least issue-pr-link-pr-open-sites PR-opening spawns pass ISSUE_PR_LINK: itself', async () => {
@@ -763,6 +1011,8 @@ describe('ensure-pr-ready opens the PR (D-LINK-VERBATIM, D-COMMIT-EXPLICIT, D-PR
     for (const key of NEW_INPUTS) need(`the Input line does not declare ${key} as optional`, input.includes(`\`${key}\` (optional)`))
     need('a given link is final, pasted without step 4b resolving',
       ref.includes("**A given `ISSUE_PR_LINK` is final.**") && ref.includes('step 4b does not resolve a number'))
+    need('a given none is final too, and only an absent link reaches step 4b',
+      ref.includes('When it is given, `(none)` included,') && ref.includes('Only an absent `ISSUE_PR_LINK` goes to step 4b'))
     need('step 4b skips its resolution for a given link', /4b\. \(ALWAYS-ON\)[^\n]*A given `ISSUE_PR_LINK` is already decided in step 4a: skip the resolution/.test(ref))
     need('COMMIT_UNCOMMITTED defaults to true', ref.includes('`COMMIT_UNCOMMITTED` is `true` when absent'))
     need('false commits nothing and lists the stray files', ref.includes('When it is `false`, commit nothing') && ref.includes('list each uncommitted path under `### Uncommitted files`'))
@@ -786,6 +1036,7 @@ describe('ensure-pr-ready opens the PR (D-LINK-VERBATIM, D-COMMIT-EXPLICIT, D-PR
     const real = ensurePrReadyReference()
     const seeds: ReadonlyArray<{ from: string; to: string; expected: string }> = [
       { from: ' A given `ISSUE_PR_LINK` is already decided in step 4a: skip the resolution below.', to: '', expected: 'step 4b skips its resolution for a given link' },
+      { from: 'Only an absent `ISSUE_PR_LINK` goes to step 4b', to: 'An absent or `(none)` `ISSUE_PR_LINK` goes to step 4b', expected: 'a given none is final too, and only an absent link reaches step 4b' },
       { from: '`COMMIT_UNCOMMITTED` is `true` when absent', to: '`COMMIT_UNCOMMITTED` is `false` when absent', expected: 'COMMIT_UNCOMMITTED defaults to true' },
       { from: 'When it is `false`, commit nothing', to: 'When it is `false`, commit anyway', expected: 'false commits nothing and lists the stray files' },
       { from: '**On scrubber failure** (non-zero exit or script missing): still create the PR — PR existence is the deliverable', to: '**On scrubber failure** (non-zero exit or script missing): create no PR', expected: 'a failed scrub still creates the PR with a minimal body' },

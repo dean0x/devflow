@@ -94,7 +94,7 @@ describe('D-TEST-HOME-ISOLATION: wiring', () => {
     expect(unitConfig.test?.setupFiles).toContain('tests/setup/isolate-env.ts');
   });
 
-  it('the integration config does not — its live claude test needs the real ~/.claude', () => {
+  it('the integration config does not — its files sandbox their own spawns at the call site', () => {
     const setupFiles = [integrationConfig.test?.setupFiles ?? []].flat();
     expect(setupFiles).not.toContain('tests/setup/isolate-env.ts');
   });

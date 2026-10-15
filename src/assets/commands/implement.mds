@@ -46,7 +46,7 @@ $ARGUMENTS
 
 ### Re-validation Continuation Path
 
-When the user explicitly asks to re-validate, re-check, or re-run quality gates after making their own changes, resolve `${CLAUDE_CONFIG_DIR:-$HOME/.claude}` in Bash, Read `<that directory>/skills/devflow:agent-references/references/commands/implement-revalidate.md` with the Read tool and follow it. Otherwise proceed with the full pipeline below.
+When the user explicitly asks to re-validate, re-check, or re-run quality gates after making their own changes, run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash, Read `<that directory>/skills/devflow:agent-references/references/commands/implement-revalidate.md` with the Read tool and follow it. Otherwise proceed with the full pipeline below.
 
 ### Phase 1: Setup
 
@@ -114,9 +114,6 @@ The two tests this command does make are its own under every provider:
   `setup-task` fetches whatever it is handed — so the command would derive a
   branch from a failed lookup and drop the request on the floor.
 
-A one-word task description (`/implement refactor`) fails the issue lookup and is
-reported: an unfetched issue is visible, a silently discarded request is not.
-
 **Capture from Git agent output** (used throughout flow):
 - `TASK_ID`: The branch name created by Git agent (use as TASK_ID for rest of flow)
 - `BASE_BRANCH`: Branch this feature was created from (for PR target)
@@ -125,7 +122,7 @@ reported: an unfetched issue is visible, a silently discarded request is not.
 
 {{issue_capture_contract()}}
 
-**Ticket link, only when `ISSUE_REQUIRED` is `true`:** when the capture above holds no `ISSUE_PR_LINK` (absent, or `(none)`), resolve `${CLAUDE_CONFIG_DIR:-$HOME/.claude}` in Bash, Read `<that directory>/skills/devflow:agent-references/references/commands/implement-evidence-asks.md` with the Read tool (once per run), then run its ticket link ask and **Record the exception at once** as it directs, before any Code spawn. `PR_EXCEPTIONS` is `(none)` until an exception is recorded.
+**Ticket link, only when `ISSUE_REQUIRED` is `true`:** when the capture above holds no `ISSUE_PR_LINK` (absent, or `(none)`), run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash, Read `<that directory>/skills/devflow:agent-references/references/commands/implement-evidence-asks.md` with the Read tool (once per run), then run its ticket link ask and **Record the exception at once** as it directs, before any Code spawn. `PR_EXCEPTIONS` is `(none)` until an exception is recorded.
 
 **Test plan.** Before any Code spawn, give the task a test plan in the evidence file `{worktree}/.devflow/docs/evidence-{branch_slug}.md` (`EVIDENCE_FILE`) — unlike the handoff file, it stays after the PR exists. It holds up to three sections, in this order and nothing else: `## Test Plan`; `## Evidence Exceptions`, a byte copy of `PR_EXCEPTIONS` present only while that is not `(none)`; and `## Claims`, always last, so every claim is appended at the end of the file. Create the file if absent; if it exists, replace its `## Test Plan` and `## Evidence Exceptions` sections and keep `## Claims` byte-identical.
 

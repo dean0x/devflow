@@ -95,7 +95,7 @@ Registered unconditionally by `addContextHook` (`src/cli/commands/context.ts`), 
 
 **Section 5, compaction resume directive (D-COMPACT-RESUME-DIRECTIVE).** After a compaction nothing tells the model to re-read the devflow command it was running (Claude Code is believed to re-inject a long command only in part; unverified here). On a `compact` start one fixed line is appended to `CONTEXT`, never sent as a `systemMessage`:
 
-`If a devflow command was running: re-read {$CLAUDE_CONFIG_DIR or ~/.claude}/commands/devflow/<name>.md, list headings, read from current phase, take input (COMMAND_INPUT/ARGUMENTS) from the summary, resume after the last finished phase. Else ignore.`
+`If a devflow command was running: read commands/devflow/<name>.md in $CLAUDE_CONFIG_DIR if absolute, else ~/.claude, list headings, read from current phase, input (COMMAND_INPUT/ARGUMENTS) from summary, resume after last finished phase. Else ignore.`
 
 The ceiling is `compact-directive-max-chars` in `tests/fixtures/numeric-floors.json`, via `COMPACT_DIRECTIVE_MAX_CHARS` in `tests/session-start-compact.test.ts`, which also holds the five elements: if-clause with an ignore clause, command file by rule, headings then the phase in progress, input from the summary, resume after the last finished phase. The line is re-sent on every compaction for every user, so lower the ceiling after a pass that cuts the text and never raise it. It is a single-quoted constant (`$CLAUDE_CONFIG_DIR` reaches the model as text), names both `COMMAND_INPUT` and `ARGUMENTS` because only some commands bind `COMMAND_INPUT`, and is emitted on every compact in every project, leaving "was a command running?" to the model. On the same compact `session-start-orchestrator` re-injects the charter.
 

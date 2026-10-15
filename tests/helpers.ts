@@ -145,6 +145,80 @@ export function requireBuiltCli(root: string = ROOT): string {
 }
 
 /**
+ * Where agent generator hosts live. Assembled, not spelt: the literal-agent-path
+ * guard reserves that spelling for resolveAgentSource, and this is a source
+ * directory for an mtime, never an agent read.
+ */
+export const AGENT_HOSTS_DIR = ['src', 'assets', 'agents'].join('/')
+
+/** A built `dist/` holds at least this many compiled prompts; fewer means the build did not run, and a currency check over them would pass by reading nothing. */
+export const MIN_COMPILED_PROMPTS = 40
+
+/** A compiled prompt and the sources it is compiled from, repo-relative. */
+export interface CompiledPrompt {
+  readonly output: string
+  readonly inputs: readonly string[]
+}
+
+/** Repo-relative files under `root/dir` passing `keep`; none when the directory is absent. */
+function listFiles(root: string, dir: string, keep: (file: string) => boolean): string[] {
+  try {
+    return walkFiles(path.join(root, dir), keep).map(f => path.relative(root, f).split(path.sep).join('/'))
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Every compiled prompt under `root` with its inputs: a command host with every
+ * command partial (a partial edit can move any host that imports it), each agent
+ * with its generator host, and each generated reference with every reference
+ * module.
+ *
+ * @param root - Repository root to resolve paths against (default: ROOT).
+ *   Pass a temp-dir root in tests to scan a hand-built tree instead of the real dist.
+ */
+export function compiledPrompts(root: string = ROOT): CompiledPrompt[] {
+  const partials = listFiles(root, 'src/assets/commands/_partials', f => f.endsWith('.mds'))
+  const modules = listFiles(root, 'src/assets/mds', f => f.endsWith('.mds'))
+  const commands = listFiles(root, 'dist/commands', f => f.endsWith('.md')).map(output => {
+    const base = path.basename(output, '.md')
+    return { output, inputs: [`src/assets/commands/${base}.mds`, ...partials] }
+  })
+  const agents = listFiles(root, 'dist/agents', f => f.endsWith('.md'))
+    .map(output => ({ output, inputs: [`${AGENT_HOSTS_DIR}/${path.basename(output, '.md')}.mds`] }))
+  const references = listFiles(root, 'dist/skills', f => f.endsWith('.md')).map(output => ({ output, inputs: modules }))
+  return [...commands, ...agents, ...references]
+}
+
+/**
+ * Named collector: each compiled prompt older than one of its inputs, naming the first such input.
+ *
+ * A prompt scan must never read a stale build, so a guard over `dist/` asserts this
+ * is empty before it scans, and fails loudly rather than skipping.
+ *
+ * @param root - Repository root to resolve paths against (default: ROOT).
+ *   Pass a temp-dir root in tests to verify the report without touching the real dist.
+ */
+export function collectStaleOutputs(root: string = ROOT): string[] {
+  const mtime = (rel: string): number | null => {
+    try {
+      return statSync(path.join(root, rel)).mtimeMs
+    } catch {
+      return null
+    }
+  }
+  const out: string[] = []
+  for (const { output, inputs } of compiledPrompts(root)) {
+    const built = mtime(output)
+    if (built === null) continue
+    const newer = inputs.filter(i => (mtime(i) ?? -Infinity) > built)
+    if (newer.length > 0) out.push(`${output} is STALE: ${newer[0]} changed after it was built`)
+  }
+  return out
+}
+
+/**
  * The only parent variables a sandboxed child inherits: what locates binaries,
  * temp space and locale. Nothing here can redirect a devflow or Claude Code write.
  */
@@ -1849,6 +1923,26 @@ export function tableRows(section: string): string[][] {
 /** The one shell line that resolves the Claude directory: `CLAUDE_CONFIG_DIR` when absolute, else `$HOME/.claude`. */
 export const SANCTIONED_RESOLUTION = 'd="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac;'
 
+/** The sanctioned resolution line followed by the `printf` that shows the directory it resolved. */
+export const SANCTIONED_RESOLUTION_PRINT = `${SANCTIONED_RESOLUTION} printf '%s\\n' "$d"`
+
+/** The inline expansion that the sanctioned resolution line replaced; no prompt may carry it. */
+export const RETIRED_INLINE_EXPANSION = '${CLAUDE_CONFIG_DIR:-$HOME/.claude}'
+
+const COMPACT_SECTION_RE = /^\s*COMPACT_SECTION='([^']*)'$/gm
+
+/** The compaction resume directive that a session-start hook source assigns to `COMPACT_SECTION`; throws unless there is exactly one assignment. */
+export function compactDirectiveFrom(source: string): string {
+  const found = [...source.matchAll(COMPACT_SECTION_RE)]
+  if (found.length !== 1) throw new Error(`expected exactly one COMPACT_SECTION assignment, found ${found.length}`)
+  return found[0][1]
+}
+
+/** The compaction resume directive of the session-start hook under `root`; a missing hook file throws. */
+export function compactDirectiveText(root: string = ROOT): string {
+  return compactDirectiveFrom(readFileSync(path.join(root, 'src', 'assets', 'scripts', 'hooks', 'session-start-context'), 'utf-8'))
+}
+
 /**
  * Canonical ManifestData factory for tests.
  *
@@ -2071,12 +2165,14 @@ export const TOOL_CALL_MECHANICS_CLAIMS: readonly ProviderMechanicsClaim[] = [
       'an inferred type is a value the tracker never enumerated, so the create call fails at the ' +
       'far end or, worse, succeeds against a type that means something else in that project',
   },
-  // §14.3's discarded-token rule, as THREE token rows over the two operations
-  // that render a reference — see the token-vs-sentence note above the table.
+  // §14.3's discarded-token rule, as THREE token rows over the one operation
+  // that renders a reference — see the token-vs-sentence note above the table.
+  // `ensure-pr-ready` is not one: its step 4b publishes the Handoff Values line as
+  // given and renders nothing, so it owes neither the default nor the record.
   {
     label: 'the fallback renders the reference itself',
     criterion: '§14.3',
-    ops: ['ensure-pr-ready', 'create-release'],
+    ops: ['create-release'],
     pattern: v => new RegExp(`[Rr]ender the ${v.refNoun}\\b`),
     why:
       'the DEFAULT half. Without it a discarded token leaves the operation with no instruction for ' +
@@ -2085,7 +2181,7 @@ export const TOOL_CALL_MECHANICS_CLAIMS: readonly ProviderMechanicsClaim[] = [
   {
     label: 'the fallback reference goes on its own line',
     criterion: '§14.3',
-    ops: ['ensure-pr-ready', 'create-release'],
+    ops: ['create-release'],
     pattern: () => /on its own line/,
     why:
       'the documented shape of that default. A reference folded into surrounding prose is a ' +
@@ -2095,7 +2191,7 @@ export const TOOL_CALL_MECHANICS_CLAIMS: readonly ProviderMechanicsClaim[] = [
   {
     label: 'the discard is recorded under `### Substitutions`',
     criterion: '§14.3',
-    ops: ['ensure-pr-ready', 'create-release'],
+    ops: ['create-release'],
     pattern: () => /[Rr]ecord the discard under `### Substitutions`/,
     why:
       'the RECORD half — both halves or neither. A default with no record is a silent substitution: ' +
