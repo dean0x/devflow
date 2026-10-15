@@ -917,6 +917,8 @@ describe('every spawn names its type (AC-1)', () => {
 })
 
 describe('the level reference holds the decided rows, substitutes and rules (AC-3, AC-4, AC-5, AC-6, AC-9, AC-10)', () => {
+  const defects = (text: string): string[] => collectPlanLevelRefDefects(text, ON)
+
   it.each(VARIANTS)('$label: is well formed and matches the command', ({ body }) => {
     expect(collectPlanLevelRefDefects(REF, body)).toEqual([])
   })
@@ -931,7 +933,6 @@ describe('the level reference holds the decided rows, substitutes and rules (AC-
   })
 
   it('known-bad probes: a changed, extra, removed or reordered row and a count above full are each reported', () => {
-    const defects = (text: string): string[] => collectPlanLevelRefDefects(text, ON)
     expect(defects(seed(REF, '| 12 | Design 1 |', '| 12 | skip |'))).toContain('Phase 12: "skip", expected "Design 1"')
     expect(defects(seed(REF, '| 10 | Plan 1 |', '| 10 | Plan 2 |'))).toContain('Phase 10: "Plan 2", expected "Plan 1"')
     expect(defects(seed(REF, '| 10 | Plan 1 |', '| 10 | Plan 4 |'))).toContain('Phase 10: count 4 is above the full count 3')
@@ -951,7 +952,6 @@ describe('the level reference holds the decided rows, substitutes and rules (AC-
   })
 
   it('known-bad probes: a wrong substitute, a removed row and an unneeded row in the inputs table are each reported', () => {
-    const defects = (text: string): string[] => collectPlanLevelRefDefects(text, ON)
     expect(defects(seed(REF, '| IMPL_EXPLORATION_SYNTHESIS | EXPLORE_OUTPUTS |', '| IMPL_EXPLORATION_SYNTHESIS | IMPL_EXPLORE_OUTPUTS |')))
       .toContain('IMPL_EXPLORE_OUTPUTS (read instead of IMPL_EXPLORATION_SYNTHESIS) is not produced by a phase that runs at the narrowed levels')
     const noPlanningRow = defects(seed(REF, /^\| PLANNING_SYNTHESIS \| PLAN_OUTPUTS \|\n/m, ''))
@@ -970,7 +970,6 @@ describe('the level reference holds the decided rows, substitutes and rules (AC-
   })
 
   it('known-bad probes: every rule needle, removed from its own rule, is reported', () => {
-    const defects = (text: string): string[] => collectPlanLevelRefDefects(text, ON)
     for (const [key, needles] of RULE_NEEDLES) {
       for (const needle of needles) {
         expect(defects(seed(REF, needle, 'removed')), `removing "${needle.slice(0, 40)}" from the ${key} rule`).toContain(`the ${key} rule lacks: ${needle.slice(0, 60)}`)
@@ -985,7 +984,6 @@ describe('the level reference holds the decided rows, substitutes and rules (AC-
   })
 
   it('known-bad probes: the named rule edits of the decision are each reported', () => {
-    const defects = (text: string): string[] => collectPlanLevelRefDefects(text, ON)
     const lacks = (key: string, needle: string): string => `the ${key} rule lacks: ${needle.slice(0, 60)}`
     // The Research rule: the fallback, the codebase check, the tool-result exclusion and a clock test.
     expect(defects(seed(REF, ' Otherwise, or when unsure, run the Explore round.', ''))).toContain(lacks('Research', 'Otherwise, or when unsure, run the Explore round.'))
@@ -1042,7 +1040,6 @@ describe('the level reference holds the decided rows, substitutes and rules (AC-
   })
 
   it('known-bad probes: an added line, a rule line in the wrong place, a removed or repeated heading and intro and a prose inputs cell are each reported', () => {
-    const defects = (text: string): string[] => collectPlanLevelRefDefects(text, ON)
     const outside = (section: string, line: string): string => `the reference has a line outside its closed shapes${section === '' ? '' : ` under ${section}`}: ${line}`
     // The gate-skip denylist cannot see "does not run": only the closed shape reports these lines.
     const added = 'At `lean`, Gate 1 does not run and Phase 12 does not run.'
@@ -1076,7 +1073,6 @@ describe('the level reference holds the decided rows, substitutes and rules (AC-
   })
 
   it('known-bad probes: a sentence added to a rule, or inside one, is reported for each rule', () => {
-    const defects = (text: string): string[] => collectPlanLevelRefDefects(text, ON)
     const holds = (key: string): RegExp => new RegExp(`the ${key} rule holds text outside its needles`)
     // A sentence after the last needle of every rule: no rule may keep more than the word "and" outside its needles.
     for (const [key] of RULE_NEEDLES) {
@@ -1108,10 +1104,8 @@ describe('the Plan rule sends the one planner to a file that exists and still ho
     expect(defects(REF, moved)).toEqual([`the path that the Plan rule derives does not exist: ${moved.replace(PLANNING_REF.from, PLANNING_REF.to)}`])
     expect(defects(REF, LEVELS_FILE, () => null)).toEqual([`the path that the Plan rule derives does not exist: ${derived}`])
     // The sections: each marker renamed in the planning file, and each name dropped from the rule.
-    const renamedRisk = PLANNING.replace('**Context Risk**', '**Hazard**')
-    const renamedDecision = PLANNING.replace('**Execution Strategy Decision:**', '**Strategy:**')
-    expect(renamedRisk, 'the seed must change the planning text').not.toBe(PLANNING)
-    expect(renamedDecision, 'the seed must change the planning text').not.toBe(PLANNING)
+    const renamedRisk = seed(PLANNING, '**Context Risk**', '**Hazard**')
+    const renamedDecision = seed(PLANNING, '**Execution Strategy Decision:**', '**Strategy:**')
     expect(defects(REF, LEVELS_FILE, () => renamedRisk)).toEqual(['synthesize/planning.md lacks the section the Plan rule applies: **Context Risk**'])
     expect(defects(REF, LEVELS_FILE, () => renamedDecision)).toEqual(['synthesize/planning.md lacks the section the Plan rule applies: **Execution Strategy Decision:**'])
     expect(defects(REF, LEVELS_FILE, () => '')).toHaveLength(2)
@@ -1196,6 +1190,9 @@ describe('the simulator reads its counts from the reference and the oracle decid
 })
 
 describe('the command carries the gate-level block, outside the learning arms (AC-6, AC-9, AC-12)', () => {
+  const defects = collectPlanGateBlockDefects
+  const readParagraph = gateBlock(ON)?.split('\n\n').find(p => p.includes(LEVEL_REFERENCE_PATH)) ?? ''
+
   it.each(VARIANTS)('$label: the block, the read paragraph, the floor lines and the data flow', ({ body }) => {
     expect(collectPlanGateBlockDefects(body)).toEqual([])
   })
@@ -1205,8 +1202,6 @@ describe('the command carries the gate-level block, outside the learning arms (A
   })
 
   it('known-bad probes: each removed floor line and read phrase, the range set back, a moved root and a block in a learning arm are reported', () => {
-    const defects = (text: string): string[] => collectPlanGateBlockDefects(text)
-    const readParagraph = gateBlock(ON)?.split('\n\n').find(p => p.includes(LEVEL_REFERENCE_PATH)) ?? ''
     expect(readParagraph, 'the read paragraph is in the compiled command').not.toBe('')
     for (const item of BLOCK_ITEMS) {
       expect(defects(seed(ON, item, 'removed')), `removing "${item.slice(0, 40)}"`).toContain(`the block lacks: ${item.slice(0, 60)}`)
@@ -1238,7 +1233,6 @@ describe('the command carries the gate-level block, outside the learning arms (A
   })
 
   it('known-bad probes: an added bullet, a reordered bullet, a continuation line, an added paragraph and gate-skip text in the block are each reported', () => {
-    const defects = (text: string): string[] => collectPlanGateBlockDefects(text)
     const notFloorLines = (found: string[]): boolean => found.some(d => d.startsWith('the block lines are not the three floor lines'))
     const skipText = 'the gate-level block carries gate-skip text'
     const last = BLOCK_ITEMS[BLOCK_ITEMS.length - 1]
@@ -1258,7 +1252,6 @@ describe('the command carries the gate-level block, outside the learning arms (A
     const extraParagraph = defects(seed(ON, '#### Phase 3: Explore Requirements', 'At `lean`, Gate 1 does not run.\n\n#### Phase 3: Explore Requirements'))
     expect(extraParagraph).toContain('the block has 3 paragraphs, expected 2: the read paragraph and the floor lines')
     // Gate-skip text anywhere in the block, in the read paragraph as well.
-    const readParagraph = gateBlock(ON)?.split('\n\n').find(p => p.includes(LEVEL_REFERENCE_PATH)) ?? ''
     expect(defects(seed(ON, readParagraph, `${readParagraph} Skip Gate 1 at \`lean\`.`))).toContain(skipText)
     // The scan covers the block only: other phases say `skip Gate 0 questions` on purpose.
     expect(defects(`${ON}\nskip Gate 0 questions\n`)).toEqual([])
@@ -1267,12 +1260,13 @@ describe('the command carries the gate-level block, outside the learning arms (A
 })
 
 describe('full is today (AC-2)', () => {
+  const defects = collectFullIsTodayDefects
+
   it.each(VARIANTS)('$label: the spawn counts, focus tables and Revise menu are unchanged, with no skip text', ({ body }) => {
     expect(collectFullIsTodayDefects(body)).toEqual([])
   })
 
   it('known-bad probes: a changed count, a changed focus table, a changed spawn type and skip text seeded into the command are each reported', () => {
-    const defects = (text: string): string[] => collectFullIsTodayDefects(text)
     const found = (needle: string, times: number, got: number): string => `expected ${times} of "${needle}", found ${got}`
     expect(defects(seed(ON, 'Spawn 4 `Agent(subagent_type="Explore")` agents', 'Spawn 2 `Agent(subagent_type="Explore")` agents'))).toContain(found(FULL.explore, 2, 1))
     expect(defects(seed(ON, '**Single-issue**: Spawn 4 Design agents', '**Single-issue**: Spawn 2 Design agents'))).toContain(found(FULL.single, 1, 0))
