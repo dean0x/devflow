@@ -259,14 +259,13 @@ describe('memory-permission: staged_path_safe', () => {
 describe('memory-permission: memory_settings_json', () => {
   const build = (p: string) => inHook('memory_settings_json "$1"', [p]);
 
-  it('builds the exact JSON: one Edit allow rule on the absolute staged path, a deny below it, no hooks', () => {
+  it('builds the exact JSON: one Edit allow rule on the absolute staged path, no hooks', () => {
     const staged = '/Users/dev/proj/.devflow/memory/WORKING-MEMORY.md.new';
     const run = build(staged);
 
     expect(run.status).toBe(0);
     expect(run.stdout).toBe(
-      '{"permissions":{"allow":["Edit(//Users/dev/proj/.devflow/memory/WORKING-MEMORY.md.new)"],'
-      + '"deny":["Edit(//Users/dev/proj/.devflow/memory/WORKING-MEMORY.md.new/**)"]},"disableAllHooks":true}',
+      '{"permissions":{"allow":["Edit(//Users/dev/proj/.devflow/memory/WORKING-MEMORY.md.new)"]},"disableAllHooks":true}',
     );
   });
 
@@ -277,10 +276,9 @@ describe('memory-permission: memory_settings_json', () => {
       '/Users/dev/café/.devflow/memory/WORKING-MEMORY.md.new',
     ]) {
       const parsed = JSON.parse(build(staged).stdout) as {
-        permissions: { allow: string[]; deny: string[] }; disableAllHooks: boolean;
+        permissions: { allow: string[] }; disableAllHooks: boolean;
       };
       expect(parsed.permissions.allow, staged).toEqual([`Edit(/${staged})`]);
-      expect(parsed.permissions.deny, staged).toEqual([`Edit(/${staged}/**)`]);
       expect(parsed.disableAllHooks).toBe(true);
     }
   });

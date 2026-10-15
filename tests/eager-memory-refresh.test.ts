@@ -3524,11 +3524,10 @@ const LEAN_RUN_TIMEOUT_MS = HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS + 10_000;
 
 /**
  * The settings JSON the spawn passes to `--settings`: one Edit allow rule on the
- * absolute staged path (the leading // makes the rule path absolute), a deny rule
- * below it, and no hooks.
+ * absolute staged path (the leading // makes the rule path absolute), and no hooks.
  */
 function settingsJson(stagedPath: string): string {
-  return `{"permissions":{"allow":["Edit(/${stagedPath})"],"deny":["Edit(/${stagedPath}/**)"]},"disableAllHooks":true}`;
+  return `{"permissions":{"allow":["Edit(/${stagedPath})"]},"disableAllHooks":true}`;
 }
 
 /**

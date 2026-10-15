@@ -62,13 +62,14 @@ staged_path_safe() {
 }
 
 # memory_settings_json <staged path> — prints the settings JSON for `claude --settings`:
-# one allow rule, Edit on the staged path (// makes the rule path absolute), a deny rule
-# for anything below that path, and no hooks. Prints nothing and returns 1 for a path
+# one allow rule, Edit on the staged path (// makes the rule path absolute), and no hooks.
+# The rule is exact-path, so under dontAsk the worker's write is limited to its staged
+# file and any other path is refused. Prints nothing and returns 1 for a path
 # staged_path_safe refuses, so a rule is never built for an unchecked path.
 memory_settings_json() {
   local _p="${1:-}"
   staged_path_safe "$_p" || return 1
-  printf '%s' '{"permissions":{"allow":["Edit(/'"$_p"')"],"deny":["Edit(/'"$_p"'/**)"]},"disableAllHooks":true}'
+  printf '%s' '{"permissions":{"allow":["Edit(/'"$_p"')"]},"disableAllHooks":true}'
   return 0
 }
 

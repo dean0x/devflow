@@ -867,11 +867,12 @@ fi
 #                      only the user's own settings load, never the project's or the
 #                      local ones. The user's settings keep their `env` and their own
 #                      allow rules.
-#   --settings JSON    one allow rule, Edit(//<the canonical staged path>), a deny rule
-#                      for any path below it (so a Write cannot make it a folder), and
-#                      no hooks. Only Edit rules cover the Write tool: a Write(path)
-#                      rule is never checked, so it would deny every Write. The leading
-#                      // makes the rule path absolute. The JSON is built by
+#   --settings JSON    one allow rule, Edit(//<the canonical staged path>), and no hooks.
+#                      The rule is exact-path, so under dontAsk every other path is
+#                      refused; the staged-folder check before the run covers a folder
+#                      at the staged path. Only Edit rules cover the Write tool: a
+#                      Write(path) rule is never checked, so it would deny every Write.
+#                      The leading // makes the rule path absolute. The JSON is built by
 #                      memory_settings_json, after the path check above.
 #   --output-format json
 #                      the result as one JSON object: its subtype, error flag, turn
