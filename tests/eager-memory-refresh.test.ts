@@ -3302,7 +3302,7 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
     expect(() => fs.lstatSync(staged), 'the planted link is removed, and the file it names is not moved').toThrow(/ENOENT/);
     expect(fs.existsSync(path.join(memoryDir, '.last-refresh-ok')), 'no refresh is recorded').toBe(false);
     expect(fs.existsSync(path.join(memoryDir, '.pending-turns.processing')), 'the batch is kept for a later run').toBe(true);
-    const log = fs.readFileSync(path.join(homeDir, '.devflow', 'logs', projectDir.replace(/^\//, '').replace(/\//g, '-'), '.background-memory-update.log'), 'utf-8');
+    const log = fs.readFileSync(workerLogPath(projectDir, homeDir), 'utf-8');
     expect(log).toContain('after the run and was removed; the run is failed');
     expect(log).toMatch(/Run: cli=2\.1\.293 argv=lean result=failed denials=\w+ removed=link\n/);
   });
@@ -3725,6 +3725,19 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
   const memoryDir = (): string => path.join(projectDir, '.devflow', 'memory');
   const workerLog = (): string => fs.readFileSync(workerLogPath(projectDir, homeDir), 'utf-8');
+
+  /** The only fields a Run line may carry, each from a closed set or digits. */
+  const RUN_LINE_SHAPE = /^Run: cli=(\d+\.\d+\.\d+|unknown) argv=(lean|legacy|none) result=(updated|conflict|failed|skip|below-floor) denials=(\d+|unknown|n\/a) removed=(none|dir|link)( floor=\d+\.\d+\.\d+)?$/;
+  const runLines = (): string[] => workerLog().split('\n').filter(line => line.includes('] Run: ')).map(line => line.slice(line.indexOf('Run: ')));
+
+  /** The one Run line the run wrote, checked against the line's shape. */
+  function onlyRunLine(): string {
+    const lines = runLines();
+    expect(lines, `one Run line per run; the log was:\n${workerLog()}`).toHaveLength(1);
+    expect(lines[0]).toMatch(RUN_LINE_SHAPE);
+    return lines[0];
+  }
+
   /** The staged path as the rule carries it: the project root as it resolves on disk. */
   const ruleStaged = (): string => path.join(fs.realpathSync(projectDir), '.devflow', 'memory', 'WORKING-MEMORY.md.new');
 
@@ -3828,7 +3841,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
   describe('the version floor compares numbers, component by component', () => {
     const MODERN_CASES: ReadonlyArray<readonly [string, string]> = [
-      ['exactly the floor', 'echo "2.1.286 (Claude Code)"'],
+      ['exactly the floor', `echo "${LEAN_FLOOR} (Claude Code)"`],
       ['a higher patch', 'echo "2.1.293 (Claude Code)"'],
       ['a higher minor with a smaller patch', 'echo "2.10.0 (Claude Code)"'],
       ['a higher major', 'echo "3.0.0 (Claude Code)"'],
@@ -4103,35 +4116,6 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
       expect(fs.existsSync(path.join(memoryDir(), '.working-memory.lock')), 'no lock left').toBe(false);
       expect(fs.readdirSync(memoryDir()).filter(name => name.startsWith('.worker-notice')), 'no notice file of any kind').toEqual([]);
     });
-
-    it('a claude that exits 2 on the run logs the exit code, keeps the batch and leaves the success stamp alone', () => {
-      const okFile = path.join(memoryDir(), '.last-refresh-ok');
-      fs.writeFileSync(okFile, '');
-      backdateMtime(okFile, 3600);
-      const stamp = fs.statSync(okFile).mtimeMs;
-      const claimed = readQueueBytes(projectDir);
-
-      const rec = runWith(HEALTHY_VERSION, {}, { exitCode: 2, skipStagedWrite: true });
-
-      expect(recordedArgv(rec), 'the -p call happened').toBeDefined();
-      expect(workerLog()).toContain('FAIL: claude -p exited with code 2');
-      expectClaimedRowsPreserved(projectDir, claimed);
-      expect(fs.statSync(okFile).mtimeMs, '.last-refresh-ok not touched').toBe(stamp);
-    });
-
-    it.each(['path', 'denied'] as const)('a permitted run clears a %s notice and its shown marker', (reason) => {
-      const pending = path.join(memoryDir(), `.worker-notice-${reason}`);
-      fs.writeFileSync(pending, `${reason}\n`);
-      fs.writeFileSync(`${pending}.shown`, `${reason}\n`);
-      fs.writeFileSync(path.join(memoryDir(), '.worker-denied-once'), '');
-
-      runWith(HEALTHY_VERSION);
-
-      expect(fs.existsSync(pending), 'the notice').toBe(false);
-      expect(fs.existsSync(`${pending}.shown`), 'its shown marker').toBe(false);
-      expect(fs.existsSync(path.join(memoryDir(), '.worker-denied-once')), 'a run that swapped the memory in resets the denied count')
-        .toBe(false);
-    });
   });
 
   describe('the staged path is checked before any run, and the rule and the prompt carry one canonical path (AC5, AC6, AC8)', () => {
@@ -4285,11 +4269,6 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
   describe('a folder or a link at the staged path is removed with one guarded delete, before the run and after it (AC6)', () => {
     const present = (p: string): boolean => { try { fs.lstatSync(p); return true; } catch { return false; } };
-    const runLines = (): string[] => workerLog().split('\n').filter(line => line.includes('] Run: ')).map(line => line.slice(line.indexOf('Run: ')));
-    const onlyRunLine = (): string => {
-      expect(runLines(), `one Run line per run; the log was:\n${workerLog()}`).toHaveLength(1);
-      return runLines()[0];
-    };
     /** A folder outside the project with one file in it: what a link at the staged path names. */
     const makeOutside = (): string => {
       const outside = path.join(shimDir, 'outside');
@@ -4543,23 +4522,33 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
       expect(resultFilesLeft()).toEqual([]);
     });
 
-    it('a watchdog kill deletes the temp result file and logs the kill', () => {
+    it('a watchdog kill deletes the temp result file, logs the kill and ends the run as failed', () => {
       const claimed = readQueueBytes(projectDir);
 
       const rec = runWith(HEALTHY_VERSION, { TMPDIR: tmpDir, DEVFLOW_BG_WATCHDOG_SECS: '2' }, { hangSecs: 300, skipStagedWrite: true });
 
       expect(fs.readFileSync(rec.tmpListFile, 'utf-8'), 'non-vacuity: the result file existed during the run').toContain('devflow-memory-result.');
       expect(workerLog()).toContain('FAIL: claude -p killed by watchdog after 2s');
+      expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=lean result=failed denials=unknown removed=none');
       expect(resultFilesLeft(), 'the temp result file is deleted').toEqual([]);
       expectClaimedRowsPreserved(projectDir, claimed);
     });
 
-    it('a non-zero exit deletes the temp result file and logs the exit code', () => {
+    it('a non-zero exit deletes the temp result file, logs the exit code, keeps the batch and leaves the success stamp alone', () => {
+      const okFile = path.join(memoryDir(), '.last-refresh-ok');
+      fs.writeFileSync(okFile, '');
+      backdateMtime(okFile, 3600);
+      const stamp = fs.statSync(okFile).mtimeMs;
+      const claimed = readQueueBytes(projectDir);
+
       const rec = runWith(HEALTHY_VERSION, { TMPDIR: tmpDir }, { exitCode: 2, skipStagedWrite: true });
 
+      expect(recordedArgv(rec), 'the -p call happened').toBeDefined();
       expect(fs.readFileSync(rec.tmpListFile, 'utf-8'), 'non-vacuity: the result file existed during the run').toContain('devflow-memory-result.');
       expect(workerLog()).toContain('FAIL: claude -p exited with code 2');
       expect(resultFilesLeft()).toEqual([]);
+      expectClaimedRowsPreserved(projectDir, claimed);
+      expect(fs.statSync(okFile).mtimeMs, '.last-refresh-ok not touched').toBe(stamp);
     });
 
     it('a run that swaps the memory in leaves no temp result file either', () => {
@@ -4583,18 +4572,6 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
       subtype: 'success', is_error: false, num_turns: 2,
       permission_denials: [{ tool_name: 'Write', tool_input: { content: 'BODYCANARY' } }, { tool_name: 'Write', tool_input: { content: 'BODYCANARY' } }],
     });
-    /** The only fields a Run line may carry, each from a closed set or digits. */
-    const RUN_LINE_SHAPE = /^Run: cli=(\d+\.\d+\.\d+|unknown) argv=(lean|legacy|none) result=(updated|conflict|failed|skip|below-floor) denials=(\d+|unknown|n\/a) removed=(none|dir|link)( floor=\d+\.\d+\.\d+)?$/;
-    const runLines = (): string[] => workerLog().split('\n').filter(line => line.includes('] Run: ')).map(line => line.slice(line.indexOf('Run: ')));
-
-    /** The one Run line the run wrote. */
-    function onlyRunLine(): string {
-      const lines = runLines();
-      expect(lines, `one Run line per run; the log was:\n${workerLog()}`).toHaveLength(1);
-      expect(lines[0]).toMatch(RUN_LINE_SHAPE);
-      return lines[0];
-    }
-
     it.each<readonly [string, string, RecordingOptions, string]>([
       ['a lean run that swaps the memory in', HEALTHY_VERSION, { resultJson: CLEAN }, 'Run: cli=2.1.293 argv=lean result=updated denials=0 removed=none'],
       ['a legacy run that swaps the memory in', 'echo "2.1.285 (Claude Code)"', { resultJson: CLEAN }, 'Run: cli=2.1.285 argv=legacy result=updated denials=0 removed=none'],
@@ -4608,12 +4585,6 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
       expect(onlyRunLine()).toBe(expected);
       expect(workerLog()).not.toContain('BODYCANARY');
-    });
-
-    it('a watchdog kill ends as failed', () => {
-      runWith(HEALTHY_VERSION, { DEVFLOW_BG_WATCHDOG_SECS: '2' }, { hangSecs: 300, skipStagedWrite: true });
-
-      expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=lean result=failed denials=unknown removed=none');
     });
 
     it('a CLI below the permission floor ends as below-floor, with no argv form and the floor named', () => {
@@ -4777,6 +4748,20 @@ describe('S30: a notice from the memory worker is shown once at session start (A
     holdStagedPath();
     runWorkerOnce(HEALTHY_VERSION);
     expect(sessionStart().systemMessage).toContain('project path');
+  });
+
+  it.each(['path', 'denied'] as const)('a permitted run clears a %s notice and its shown marker', (reason) => {
+    const pending = noticePath(reason);
+    fs.writeFileSync(pending, `${reason}\n`);
+    fs.writeFileSync(`${pending}.shown`, `${reason}\n`);
+    fs.writeFileSync(path.join(memoryDir(), '.worker-denied-once'), '');
+
+    runWorkerOnce(HEALTHY_VERSION);
+
+    expect(fs.existsSync(pending), 'the notice').toBe(false);
+    expect(fs.existsSync(`${pending}.shown`), 'its shown marker').toBe(false);
+    expect(fs.existsSync(path.join(memoryDir(), '.worker-denied-once')), 'a run that swapped the memory in resets the denied count')
+      .toBe(false);
   });
 
   it('a persistent path refusal raises the path notice once, with its own remedy', () => {
