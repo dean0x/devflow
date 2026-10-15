@@ -226,7 +226,7 @@ When `DIFF_CLASS` is `code`, read the file types from the paths in `paths.txt` t
 | Docs or significant code | documentation |
 | COMPLIANCE_ACTIVE AND diff touches regulated surface | compliance |
 
-Regulated surface: data models, auth flows, logging/observability, payments, IaC, retention.
+If `COMPLIANCE_ACTIVE` AND the diff touches regulated surface (data models, auth flows, logging/observability, payments, IaC, retention): add `compliance`.
 
 **Language focus stamp.** The eight language focuses — `typescript`, `react`, `accessibility`, `ui-design`, `go`, `java`, `python`, `rust` — ship with optional plugins, and the installer stamps the ones installed on this machine onto this line, rewriting it on every install and on `uninstall --plugin`:
 
@@ -235,6 +235,9 @@ Installed language focuses: (none)
 A language focus is spawned only when its file-type condition above fires AND its name appears in that stamped line. A focus missing from the line is never spawned, even when its trigger fires. The eight core focuses are unconditional and are never stamp-gated.
 
 #### Step 1.2b: Narrow by gate level
+
+**Produces:** REVIEW_FOCUS_LIST
+**Requires:** REVIEW_FOCUS_LIST, DIFF_CLASS
 
 **Gate level.** Narrow REVIEW_FOCUS_LIST, for every class, by this worktree's `GATE_LEVEL`. `full` keeps it and reads nothing.
 
@@ -453,7 +456,6 @@ Per worktree, after successful completion:
 |------|----------|
 | `--full` in multi-worktree mode | Applies to all worktrees (global modifier). It sets the diff range, never the gate level |
 | Review comment already posted | Git agent matches its own marker on the `{cycle, timestamp}` pair → skip silently (D7); a re-review in the same cycle (different timestamp) posts its own comment. The marker's format belongs to the operation; this caller passes the pair and never restates the literal |
-| Concurrent sessions | Advisory only, each session computes independently |
 | Docs-only diff | Its Step 1.1 set, narrowed by level |
 | Tests-only diff | Its Step 1.1 set, narrowed by level |
 | Lockfile-only diff | Its Step 1.1 set, narrowed by level |
@@ -474,7 +476,5 @@ Per worktree, after successful completion:
 1. **Orchestration only** - Command spawns agents, doesn't do git/review work itself. The exceptions are the read-only Phase 0 probes (`git worktree list`, `git -C ... branch --show-current`, `git -C ... cat-file -t`), the bounded Phase 1 path listing (a redirect into `paths.txt`, a `wc -l` count and ranged reads) and the redirect-only patch writes (`diff.patch`, `diff-{focus}.patch`). Redirect-only writes print nothing, so no diff content reaches this thread
 2. **Parallel, not background** - Multiple agents in one message, but `run_in_background=false` so phases complete before proceeding
 3. **Git agent for git work** - All git operations go through Git agent, except the exceptions named in Principle 1; redirect-only writes print nothing
-4. **Clear ownership** - Each agent owns its output completely
-5. **Honest reporting** - Display agent outputs directly
-6. **Incremental by default** - Only review new changes unless `--full` specified
-7. **Auto-discover worktrees** - One command handles all reviewable branches
+4. **Honest reporting** - Display agent outputs directly
+5. **Incremental by default** - Only review new changes unless `--full` specified
