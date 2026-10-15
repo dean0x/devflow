@@ -70,8 +70,8 @@
  * - The refused words are matched as text inside the call and inside the
  *   `tests/integration/` files. A builder outside that directory that adds the
  *   flag and hands the list to a spawn through a variable is not seen.
- *   tests/eager-memory-refresh.test.ts spells the flag in the argv it asserts
- *   about the production worker. That is not a spawn and not under
+ *   tests/fixtures/forbidden-argv.ts spells the flag in the list of argv forms
+ *   the production worker must never pass. That is not a spawn and not under
  *   `tests/integration/`, so it does not match, and no allowlist entry exists.
  * - String, template and comment bodies are masked by a small scanner. A regular
  *   expression literal that holds a quote, or a template literal nested inside
@@ -484,6 +484,7 @@ describe('no test starts claude or the built CLI unsandboxed (#486)', () => {
 describe('integration-spawn guard: seeded probes', () => {
   const INTEGRATION_FILE = 'tests/integration/example.test.ts';
   const OTHER_FILE = 'tests/example.test.ts';
+  const FORBIDDEN_ARGV_FILE = 'tests/fixtures/forbidden-argv.ts';
   const SKIP_FLAG = REFUSED_WORDS[0]!.needle;
   const BYPASS = REFUSED_WORDS[1]!.needle;
 
@@ -788,19 +789,19 @@ describe('integration-spawn guard: seeded probes', () => {
     expect(exempt[0]!.call).toMatch(/^\(\s*(['"`])claude --version\1\s*[,)]/);
   });
 
-  it('does not report the eager-memory argv literals: they are not a spawn and not under tests/integration', () => {
-    const eagerMemoryArgv =
+  it('does not report a list of forbidden argv literals: it is not a spawn and not under tests/integration', () => {
+    const argvListing =
       "const lean = ['-p', '--model', model, '--effort', effort, '--safe-mode', '--tools', 'Write',\n" +
       `  '--max-turns', '3', '${SKIP_FLAG}', '--output-format', 'text'];\n` +
       `const legacy = ['-p', '--model', model, '--tools', 'Write', '${SKIP_FLAG}', '--output-format', 'text'];`;
-    expect(findSpawnViolations([{ path: 'tests/eager-memory-refresh.test.ts', content: eagerMemoryArgv }])).toEqual([]);
+    expect(findSpawnViolations([{ path: FORBIDDEN_ARGV_FILE, content: argvListing }])).toEqual([]);
   });
 
-  it('does not report the real eager-memory file, which still holds the literal', () => {
+  it('does not report the real forbidden-argv fixture, which holds the literal', () => {
     // The probe above is only meaningful while that file spells the flag.
-    const real = corpus.find(entry => entry.path === 'tests/eager-memory-refresh.test.ts');
-    expect(real, 'tests/eager-memory-refresh.test.ts is missing from the corpus').toBeDefined();
-    expect(real!.content.includes(SKIP_FLAG), 'the file no longer spells the flag — the probe above is vacuous').toBe(true);
+    const real = corpus.find(entry => entry.path === FORBIDDEN_ARGV_FILE);
+    expect(real, `${FORBIDDEN_ARGV_FILE} is missing from the corpus`).toBeDefined();
+    expect(real!.content.includes(SKIP_FLAG), 'the file does not spell the flag — the probe above is vacuous').toBe(true);
     expect(findSpawnViolations([real!])).toEqual([]);
   });
 

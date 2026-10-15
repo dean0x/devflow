@@ -1,0 +1,358 @@
+#!/bin/bash
+
+# memory-permission — the memory worker's write permission, as one sourced helper.
+#
+# background-memory-update starts `claude -p` in a permission mode that denies every
+# call no rule allows, with an allow rule for its staged file (WORKING-MEMORY.md.new),
+# the only path the worker's write may reach, and a deny rule for every path under it.
+# Allow rules in the user's own settings also apply to the run.
+# This helper holds what the worker and session-start-memory share, so one bash 3.2 test
+# run covers it (tests/shell-hooks-helpers.test.ts):
+#   path_occupied           whether a file, a folder or a link, even a dangling one, stands on a path
+#   staged_path_safe        whether a staged path can sit in those rules
+#   memory_settings_json    the settings JSON that carries the rules
+#   memory_staged_remove    the guarded removal of a folder or a link at the staged path
+#   memory_result_summary   the fixed log line for a captured JSON result
+#   memory_notice_*         the one-time notice: the worker writes it, a session start reads it
+#   memory_denied_seen      the count of denied runs that raises the `denied` notice
+#
+# Source it after resolve-project-root (it needs df_no_symlink_below and df_file_below)
+# and, for memory_result_summary, after json-parse. log() is used when the caller has one.
+#
+# Errexit safety: both hooks run under `set -e`, and a helper's last non-zero status
+# aborts the caller. So each helper ends in an explicit `return 0` or a `return` with the
+# status it means, link checks are predicates inside `if`, and a create that noclobber may
+# refuse ends in `|| true`. Callers call a predicate inside an `if` or an `||` list.
+#
+# Character sets are spelled out in the patterns below: a range such as a-z collates by
+# locale on bash 3.2.
+
+# The reasons a notice can carry, and the file each one uses beside the memory files:
+#   path    the project path cannot carry the rule, or the staged path is unusable
+#   denied  Claude Code refused the worker's write in two runs with no successful update between them
+MEMORY_NOTICE_REASONS="path denied"
+
+# path_occupied <path> — returns 0 when a file, a folder or a link stands on <path>, and 1
+# when nothing does. A link counts whatever it names, a dangling link included: the name is
+# taken, and a create or a move onto it is not safe. Call it inside an `if` or an `||` list.
+path_occupied() {
+  if [ -e "${1:-}" ] || [ -L "${1:-}" ]; then
+    return 0
+  fi
+  return 1
+}
+
+# staged_path_safe <path> — returns 0 when <path> can sit in the Edit rules as it is.
+# Sets STAGED_PATH_REFUSAL to "" when it can, `chars` when the path holds a character or
+# a segment the rules cannot carry, and `protected` when a .git folder lies above it (the
+# worker skips such a project and logs the reason). A .claude folder above it is fine: a
+# checkout in .claude/worktrees gets its working memory updated. The rule text carries no
+# quoting, so a character that has a meaning in a rule path is refused rather than quoted:
+# * ? [ ] \ " { } and every control character, including newline, tab and DEL. A path that
+# is not absolute, starts with //, or holds an empty, . or .. segment is refused too. ( and )
+# are carried as they are. The path reaches a JSON string by plain concatenation, which is
+# safe after this check: $, backtick and % are inert there, and " \ and controls cannot occur.
+staged_path_safe() {
+  local _p="${1:-}"
+  STAGED_PATH_REFUSAL=""
+  case "$_p" in
+    /*) ;;
+    *) STAGED_PATH_REFUSAL="chars"; return 1 ;;
+  esac
+  case "$_p" in
+    //*|*//*|*/./*|*/../*|*/.|*/..) STAGED_PATH_REFUSAL="chars"; return 1 ;;
+  esac
+  case "$_p" in
+    *[[:cntrl:]]*) STAGED_PATH_REFUSAL="chars"; return 1 ;;
+  esac
+  case "$_p" in
+    *'*'*|*'?'*|*'['*|*']'*|*'\'*|*'"'*|*'{'*|*'}'*) STAGED_PATH_REFUSAL="chars"; return 1 ;;
+  esac
+  case "$_p" in
+    */.git/*) STAGED_PATH_REFUSAL="protected"; return 1 ;;
+  esac
+  return 0
+}
+
+# memory_settings_json <staged path> — prints the settings JSON for `claude --settings`:
+# two rules and no hooks (// makes a rule path absolute):
+#   allow  Edit(//<staged>)     the staged file
+#   deny   Edit(//<staged>/*)   every path under the staged path
+# Under dontAsk, any call no rule allows is refused, so the worker's write is limited to
+# its staged file and to what allow rules in the user's own settings cover.
+# Measured on Claude Code 2.1.269, 2.1.280, 2.1.286 and 2.1.299, both argv forms,
+# against a local stand-in for the Messages API (2026-10-15): with these two rules
+# the Write of the staged file succeeds, and a Write to <staged>/x, <staged>/a/b,
+# <staged>/a/b/c/d/e, <staged>/.hidden or <staged>/../<name> is refused. The deny is
+# `/*` and not `/**`: `/**` was measured to refuse the staged file too (2.1.269 and
+# 2.1.299, 0 of 3 writes), and then no memory is written. A path with two pairs of ( ) in it
+# (`obs ( )/proj (copy)`) carries both rules as they are: on 2.1.269 with the legacy argv
+# and on 2.1.299 with the lean argv, the Write of the staged file succeeded and a Write to
+# <staged>/x, <staged>/a/b, <staged>/.hidden, <staged>/../<name> and to a file in the
+# project root was refused. Prints nothing and returns 1 for a path staged_path_safe
+# refuses, so a rule is never built for an unchecked path.
+memory_settings_json() {
+  local _p="${1:-}"
+  staged_path_safe "$_p" || return 1
+  printf '%s' '{"permissions":{"allow":["Edit(/'"$_p"')"],"deny":["Edit(/'"$_p"'/*)"]},"disableAllHooks":true}'
+  return 0
+}
+
+# STAGED_REMOVE_MAX_LISTING — the most lines `ls -RA` may print for a folder at the staged
+# path. A folder with a longer listing is not deleted.
+STAGED_REMOVE_MAX_LISTING=256
+
+# memory_staged_remove <memory dir> <root> <staged path> — makes the staged path empty
+# when a folder or a link stands on it, with one delete of exactly that path. <root> is
+# the project root as it resolves on disk. It deletes only when it can prove all of these,
+# and otherwise deletes nothing, returns 1 and sets STAGED_REMOVE_REFUSAL to the keyword
+# of the first fact it could not prove:
+#   args    <memory dir>, <root> and <staged path> are all set, and both paths are absolute
+#   path    <staged path> is exactly <memory dir>/WORKING-MEMORY.md.new
+#   parent  <memory dir> is <root>/.devflow/memory, as a string and then on disk
+#   link    no link sits on the way down from <root> to <memory dir>
+#   size    a folder lists at most STAGED_REMOVE_MAX_LISTING lines of `ls -RA`
+#   rm      the delete took effect: nothing stands on the staged path afterwards
+# A link is removed as the link (`rm -f`, never `-r`), so what it names is never touched;
+# a folder is removed with `rm -rf`, which unlinks a link inside it and never follows one.
+# The path is a single quoted word, so no pattern expands. Sets STAGED_REMOVED to `link`,
+# `dir`, or `none` (nothing removed). A regular file, or nothing, is left as it is and
+# returns 0: the caller removes a stale staged file itself. Returns 0 when no folder and
+# no link stands on the path afterwards. The checks and the delete are separate steps, so
+# a process that swaps something in between is not stopped; such a process already runs as
+# the user.
+memory_staged_remove() {
+  local _dir="${1:-}" _root="${2:-}" _staged="${3:-}" _kind="" _phys="" _n=0
+  STAGED_REMOVED="none"
+  STAGED_REMOVE_REFUSAL=""
+  case "$_dir" in /?*) ;; *) STAGED_REMOVE_REFUSAL="args"; return 1 ;; esac
+  case "$_root" in /?*) ;; *) STAGED_REMOVE_REFUSAL="args"; return 1 ;; esac
+  case "$_staged" in /?*) ;; *) STAGED_REMOVE_REFUSAL="args"; return 1 ;; esac
+  if [ -L "$_staged" ]; then
+    _kind="link"
+  elif [ -d "$_staged" ]; then
+    _kind="dir"
+  else
+    return 0
+  fi
+  if [ "$_staged" != "$_dir/WORKING-MEMORY.md.new" ]; then
+    STAGED_REMOVE_REFUSAL="path"; return 1
+  fi
+  if [ "$_dir" != "$_root/.devflow/memory" ]; then
+    STAGED_REMOVE_REFUSAL="parent"; return 1
+  fi
+  if ! df_no_symlink_below "$_root" "$_dir"; then
+    STAGED_REMOVE_REFUSAL="link"; return 1
+  fi
+  _phys=$(cd -P -- "$_dir" 2>/dev/null && pwd -P) || _phys=""
+  if [ "$_phys" != "$_root/.devflow/memory" ]; then
+    STAGED_REMOVE_REFUSAL="parent"; return 1
+  fi
+  if [ "$_kind" = "dir" ]; then
+    _n=$(ls -RA -- "$_staged" 2>/dev/null | head -n $((STAGED_REMOVE_MAX_LISTING + 1)) | wc -l) || _n=0
+    _n=$((_n + 0))
+    if [ "$_n" -gt "$STAGED_REMOVE_MAX_LISTING" ]; then
+      STAGED_REMOVE_REFUSAL="size"; return 1
+    fi
+    rm -rf -- "$_staged" 2>/dev/null || true
+  else
+    rm -f -- "$_staged" 2>/dev/null || true
+  fi
+  if path_occupied "$_staged"; then
+    STAGED_REMOVE_REFUSAL="rm"; return 1
+  fi
+  STAGED_REMOVED="$_kind"
+  return 0
+}
+
+# The most characters a result field may carry into the log line. A longer value reads
+# `unknown` (a status code is left out).
+MEMORY_RESULT_DENIALS_MAX_DIGITS=6
+MEMORY_RESULT_TURNS_MAX_DIGITS=6
+MEMORY_RESULT_STATUS_MAX_DIGITS=3
+MEMORY_RESULT_SUBTYPE_MAX_CHARS=40
+
+# _memory_field_within <digits|letters> <value> <max> — sets _MEMORY_FIELD to <value> when
+# it is one or more characters of the named set and at most <max> of them, and to `unknown`
+# otherwise. `digits` is 0-9; `letters` is a-z and _. Both are spelled out, since a range
+# collates by locale on bash 3.2. A builtin only, so it forks nothing. Always returns 0.
+_memory_field_within() {
+  local _set="${1:-}" _value="${2:-}" _max="${3:-0}"
+  _MEMORY_FIELD="unknown"
+  case "$_set" in
+    digits)
+      case "$_value" in ''|*[!0123456789]*) return 0 ;; esac
+      ;;
+    letters)
+      case "$_value" in ''|*[!abcdefghijklmnopqrstuvwxyz_]*) return 0 ;; esac
+      ;;
+    *) return 0 ;;
+  esac
+  if [ "${#_value}" -le "$_max" ]; then _MEMORY_FIELD="$_value"; fi
+  return 0
+}
+
+# memory_result_summary <file> — reduces a `--output-format json` result file to a fixed
+# line, and reads nothing else of it: the tool input and the result text, which can hold
+# the memory body, are never read. Sets, in the caller's scope:
+#   MEMORY_RESULT_LINE     Result: <subtype>, is_error=<true|false>, <n> turn(s),
+#                          <d> permission denial(s)[, api_status=<digits>]
+#                          or Result: not reported (empty|unparseable|no parser)
+#   MEMORY_RESULT_DENIALS  the denial count as digits, or `unknown` when the result does
+#                          not report one (an absent or non-array field is never 0)
+# Every field is checked against its own shape, so text from the file cannot enter the
+# line: a field that fails its check reads `unknown`. Always returns 0.
+memory_result_summary() {
+  local _f="${1:-}" _sub="" _err="" _turns="" _den="" _status="" _api=""
+  MEMORY_RESULT_LINE=""
+  MEMORY_RESULT_DENIALS="unknown"
+  if [ "${_JSON_AVAILABLE:-false}" != "true" ]; then
+    MEMORY_RESULT_LINE="Result: not reported (no parser)"
+    return 0
+  fi
+  if [ -z "$_f" ] || [ ! -s "$_f" ]; then
+    MEMORY_RESULT_LINE="Result: not reported (empty)"
+    return 0
+  fi
+  _den=$(json_array_length_file "$_f" "permission_denials") || _den=""
+  if [ -z "$_den" ]; then
+    MEMORY_RESULT_LINE="Result: not reported (unparseable)"
+    return 0
+  fi
+  _memory_field_within digits "$_den" "$MEMORY_RESULT_DENIALS_MAX_DIGITS"; _den="$_MEMORY_FIELD"
+  _sub=$(json_string_field_file "$_f" "subtype") || _sub=""
+  _memory_field_within letters "$_sub" "$MEMORY_RESULT_SUBTYPE_MAX_CHARS"; _sub="$_MEMORY_FIELD"
+  _err=$(json_field_file "$_f" "is_error" "") || _err=""
+  case "$_err" in
+    true|false) ;;
+    *) _err="unknown" ;;
+  esac
+  _turns=$(json_field_file "$_f" "num_turns" "") || _turns=""
+  _memory_field_within digits "$_turns" "$MEMORY_RESULT_TURNS_MAX_DIGITS"; _turns="$_MEMORY_FIELD"
+  _status=$(json_field_file "$_f" "api_error_status" "") || _status=""
+  _memory_field_within digits "$_status" "$MEMORY_RESULT_STATUS_MAX_DIGITS"
+  if [ "$_MEMORY_FIELD" != "unknown" ]; then _api=", api_status=${_MEMORY_FIELD}"; fi
+  MEMORY_RESULT_LINE="Result: ${_sub}, is_error=${_err}, ${_turns} turn(s), ${_den} permission denial(s)${_api}"
+  MEMORY_RESULT_DENIALS="$_den"
+  return 0
+}
+
+# memory_notice_write <memory dir> <root> <reason> — leaves a notice for the next session
+# start, once per reason: only where neither the notice nor its `.shown` marker stands,
+# and where no link sits on the way down from <root>. The builtin tests come first, since
+# noclobber alone opens a link to a FIFO or a device; noclobber then makes the create
+# itself exclusive. Content: the reason. Best effort: a refusal leaves nothing.
+memory_notice_write() {
+  local _dir="${1:-}" _root="${2:-}" _reason="${3:-}" _file
+  case " $MEMORY_NOTICE_REASONS " in
+    *" $_reason "*) ;;
+    *) return 0 ;;
+  esac
+  [ -d "$_dir" ] || return 0
+  _file="$_dir/.worker-notice-$_reason"
+  if ! path_occupied "$_file" && ! path_occupied "$_file.shown" \
+     && df_no_symlink_below "$_root" "$_file" "$_file.shown"; then
+    ( umask 077; set -C; printf '%s\n' "$_reason" > "$_file" ) 2>/dev/null || true
+  fi
+  return 0
+}
+
+# memory_notice_clear <memory dir> <root> <reason> — removes the notice, its `.shown`
+# marker and, for `denied`, the one-denied-run marker, once the cause is gone. The
+# files are removed only where no link sits on the way down from <root>.
+memory_notice_clear() {
+  local _dir="${1:-}" _root="${2:-}" _reason="${3:-}" _file _mark
+  case " $MEMORY_NOTICE_REASONS " in
+    *" $_reason "*) ;;
+    *) return 0 ;;
+  esac
+  _file="$_dir/.worker-notice-$_reason"
+  _mark="$_dir/.worker-denied-once"
+  if path_occupied "$_file" || path_occupied "$_file.shown"; then
+    if df_no_symlink_below "$_root" "$_file" "$_file.shown"; then
+      rm -f "$_file" "$_file.shown" 2>/dev/null || true
+    fi
+  fi
+  if [ "$_reason" = "denied" ] && path_occupied "$_mark"; then
+    if df_no_symlink_below "$_root" "$_mark"; then
+      rm -f "$_mark" 2>/dev/null || true
+    fi
+  fi
+  return 0
+}
+
+# memory_denied_seen <memory dir> <root> — records one run that Claude Code refused the
+# worker's write in. The first leaves a marker; a second, with the marker still there,
+# raises the `denied` notice. A run that swapped the memory in clears both
+# (memory_notice_clear denied), so only two denied runs with no successful update between
+# them count.
+memory_denied_seen() {
+  local _dir="${1:-}" _root="${2:-}" _mark
+  [ -d "$_dir" ] || return 0
+  _mark="$_dir/.worker-denied-once"
+  if path_occupied "$_mark"; then
+    memory_notice_write "$_dir" "$_root" "denied"
+  elif df_no_symlink_below "$_root" "$_mark"; then
+    ( umask 077; set -C; : > "$_mark" ) 2>/dev/null || true
+  fi
+  return 0
+}
+
+# memory_notice_text <reason> <log file> — sets MEMORY_NOTICE_TEXT to the message for a
+# reason, naming <log file>, and to "" for a reason it has no message for. Always returns 0.
+memory_notice_text() {
+  local _reason="${1:-}" _logfile="${2:-}"
+  local _where="The worker log is .background-memory-update.log under ~/.devflow/logs/, in the folder for the session that ran it. For this session: ${_logfile}"
+  MEMORY_NOTICE_TEXT=""
+  case "$_reason" in
+    path)
+      MEMORY_NOTICE_TEXT="Devflow: working memory is not updating because the worker cannot write its staged file at this project path. ${_where}"
+      ;;
+    denied)
+      MEMORY_NOTICE_TEXT="Devflow: working memory is not updating because Claude Code refused the worker's write in two runs with no successful update between them. ${_where}"
+      ;;
+  esac
+  return 0
+}
+
+# memory_notice_read <memory dir> <root> <log file> — builds the message for each pending
+# notice and moves each to its `.shown` marker, so a reason is shown once. Sets
+# MEMORY_NOTICE_MESSAGE (empty when nothing is pending), joined by a space when more
+# than one reason is pending. A notice is read only where no link sits on its path; one
+# whose content does not fit its reason is moved to `.shown` unshown and logged.
+# <log file> is named in the messages (memory_notice_text). Always returns 0.
+memory_notice_read() {
+  local _dir="${1:-}" _root="${2:-}" _logfile="${3:-}"
+  local _reason _file _line _tag _extra _text
+  MEMORY_NOTICE_MESSAGE=""
+  for _reason in $MEMORY_NOTICE_REASONS; do
+    _file="$_dir/.worker-notice-$_reason"
+    df_file_below "$_root" "$_file" || continue
+    _line=""; _tag=""; _extra=""; _text=""
+    # stderr is redirected before stdin, so a notice that a concurrent session start moved
+    # away since the check above fails the open in silence.
+    IFS= read -r -n 200 _line 2>/dev/null < "$_file" || true
+    read -r _tag _extra <<< "$_line" || true
+    if [ "$_tag" = "$_reason" ] && [ -z "$_extra" ]; then
+      memory_notice_text "$_reason" "$_logfile"
+      _text="$MEMORY_NOTICE_TEXT"
+    fi
+    if [ -n "$_text" ]; then
+      if [ -n "$MEMORY_NOTICE_MESSAGE" ]; then
+        MEMORY_NOTICE_MESSAGE="${MEMORY_NOTICE_MESSAGE} ${_text}"
+      else
+        MEMORY_NOTICE_MESSAGE="$_text"
+      fi
+    elif declare -F log >/dev/null 2>&1; then
+      log "Worker notice for reason ${_reason} ignored: its content does not fit the reason"
+    fi
+    if df_no_symlink_below "$_root" "$_file" "$_file.shown"; then
+      if ! path_occupied "$_file.shown"; then
+        mv "$_file" "$_file.shown" 2>/dev/null || true
+      else
+        rm -f "$_file" 2>/dev/null || true
+      fi
+    fi
+  done
+  return 0
+}

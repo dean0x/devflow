@@ -128,7 +128,6 @@ Each anti-pattern is explained in its Rules bullet; the ones that need more are 
 
 | File | Exception | Justification |
 |------|-----------|---------------|
-| `src/assets/scripts/hooks/background-memory-update` | Still spawns `claude` with the skip flag | Tracked in follow-up #497; no test spawn uses the flag |
 | The integration vitest config | Has no `setupFiles` temp-HOME redirect | The two live-`claude` files build their own temp HOME and repository; other `init` spawns are sandboxed at the call site through `sandboxEnv` |
 | Hook scripts | Outside `spawn-no-hardcoded-model` by design | The guard scans prompt text under `src/assets/{commands,agents,skills,mds}` and `dist/{commands,agents}`, not hook scripts |
 

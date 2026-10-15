@@ -12,6 +12,7 @@
 // Operations:
 //   get-field <field> [default]           Read field from stdin JSON
 //   get-string-field <field>              Read field from stdin JSON only when it is a string
+//   array-length <field>                  Count of an array field in stdin JSON; `unknown` for any other type
 //   extract-cwd-field <field>             Extract cwd + arbitrary field, SOH-byte delimited
 //   session-output <context> [message]    Build SessionStart output envelope (+ systemMessage)
 //   prompt-output <context>               Build UserPromptSubmit output envelope
@@ -277,6 +278,16 @@ try {
       const input = JSON.parse(readStdin());
       const val = getNestedField(input, args[0]);
       if (typeof val === 'string' && !val.includes('\0')) process.stdout.write(val);
+      break;
+    }
+
+    case 'array-length': {
+      // The count of an array field: digits for an array, the word `unknown` for an
+      // absent field or any other type, so a caller can tell none from not reported.
+      // jq's `length` on an array agrees (json-parse json_array_length_file).
+      const input = JSON.parse(readStdin());
+      const val = getNestedField(input, args[0]);
+      console.log(Array.isArray(val) ? String(val.length) : 'unknown');
       break;
     }
 

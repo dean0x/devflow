@@ -3,7 +3,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { exec } from 'child_process';
-import { addMemoryHooks, removeMemoryHooks, hasMemoryHooks, countMemoryHooks, convergeMemoryHooks, cleanQueueFiles, hasMemoryDir, filterProjectsWithMemory } from '../src/cli/commands/memory.js';
+import { addMemoryHooks, removeMemoryHooks, hasMemoryHooks, countMemoryHooks, convergeMemoryHooks, cleanQueueFiles, hasMemoryDir, filterProjectsWithMemory, MEMORY_MIN_PERMISSION_VERSION, workingMemoryNote } from '../src/cli/commands/memory.js';
 
 /**
  * Seed a temp HOME that stands in for `~/.devflow`.
@@ -926,5 +926,26 @@ describe('memory hook ownership is exact (#391)', () => {
   ])('on %s, still recognises and removes an old install\'s %s hook', (event, _label, command) => {
     const input = JSON.stringify({ hooks: { [event]: [{ hooks: [{ type: 'command', command }] }] } });
     expect(JSON.parse(removeMemoryHooks(input)).hooks).toBeUndefined();
+  });
+});
+
+describe('the memory worker version floor', () => {
+  it('the worker script and the CLI hold the same floor', async () => {
+    const hook = await fs.readFile(path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks', 'background-memory-update'), 'utf-8');
+    const held = hook.match(/^MEMORY_MIN_PERMISSION_VERSION="(\d+\.\d+\.\d+)"$/m);
+
+    expect(held, 'the worker script declares the floor on a line of its own').not.toBeNull();
+    expect(held?.[1]).toBe(MEMORY_MIN_PERMISSION_VERSION);
+  });
+
+  it('the init step for working memory states the floor', () => {
+    expect(workingMemoryNote()).toContain(`Needs Claude Code ${MEMORY_MIN_PERMISSION_VERSION} or newer.`);
+  });
+
+  it('the init step keeps the lines that describe working memory', () => {
+    const note = workingMemoryNote();
+
+    expect(note).toContain('Preserves session context');
+    expect(note).toContain('Applies to every project.');
   });
 });

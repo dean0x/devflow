@@ -74,6 +74,28 @@ const LEGACY_HOOK_SUFFIXES: Record<string, readonly string[]> = {
   ].map(runHookSuffix),
 };
 
+/**
+ * The lowest Claude Code the memory worker runs on: the lowest version on which the
+ * worker's write was measured to be limited to its staged file (2026-10-15,
+ * docs/reference/platform-assumptions.md). Below it the worker does not run and logs one
+ * line. `background-memory-update` holds the same value as MEMORY_MIN_PERMISSION_VERSION;
+ * a test holds the two equal.
+ */
+export const MEMORY_MIN_PERMISSION_VERSION = '2.1.269';
+
+/** The note `devflow init` shows at its working-memory step. */
+export function workingMemoryNote(): string {
+  return (
+    'Preserves session context across /clear, restarts, and context\n' +
+    'compaction. Clear your session at any point and resume right\n' +
+    'where you left off.\n\n' +
+    'Runs a background agent on session stop that consumes additional\n' +
+    'tokens. Consider skipping if token usage is a concern.\n' +
+    `Needs Claude Code ${MEMORY_MIN_PERMISSION_VERSION} or newer.\n` +
+    'Applies to every project.'
+  );
+}
+
 /** D-EXACT-HOOK-OWNER: the current memory hook for `marker` (hooks.ts). */
 function isMemoryHook(marker: string): HookPredicate {
   return devflowHookOwner([marker]);

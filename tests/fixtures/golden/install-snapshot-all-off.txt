@@ -336,6 +336,7 @@ x .devflow/scripts/hooks/lib/project-paths.cjs
 x .devflow/scripts/hooks/lib/render-decisions.cjs
 x .devflow/scripts/hooks/lib/safe-path.cjs
 x .devflow/scripts/hooks/log-paths
+x .devflow/scripts/hooks/memory-permission
 x .devflow/scripts/hooks/memory-worker
 x .devflow/scripts/hooks/pre-compact-memory
 x .devflow/scripts/hooks/preamble

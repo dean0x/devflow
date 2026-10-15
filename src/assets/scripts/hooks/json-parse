@@ -69,6 +69,21 @@ json_string_field_file() {
   fi
 }
 
+# The element count of an array field in a JSON file. Usage: json_array_length_file "/path/to/file.json" "field"
+# Prints the count as digits when the field is an array, and the word `unknown` for an
+# absent field or any other type (a number, string, object, boolean or null), so a
+# caller can tell "none" from "not reported". Prints nothing, and fails, when the file
+# cannot be read or parsed. Silent on stderr and read the same way on both backends
+# (the node path reads the file on stdin, with its stderr redirected first).
+json_array_length_file() {
+  local file="$1" field="$2"
+  if [ "$_HAS_JQ" = "true" ]; then
+    jq -r "(try .$field catch null) | if type == \"array\" then length else \"unknown\" end" "$file" 2>/dev/null
+  else
+    node "$_JSON_HELPER" array-length "$field" 2>/dev/null < "$file"
+  fi
+}
+
 # --- Multi-field batched extraction ---
 
 # Extract cwd and an arbitrary top-level field from stdin JSON in a single
@@ -103,9 +118,9 @@ json_extract_cwd_prompt() {
 # D-SYSTEMMESSAGE-ENVELOPE: the optional second argument is a message shown to the
 # user, carried in the top-level `systemMessage` key beside (never inside)
 # `hookSpecificOutput`; it does not enter the model's context. With ONE argument the
-# envelope is exactly what every existing caller has always received, byte for byte
-# (ensure-proxy, session-start-orchestrator, session-start-memory and Sections 1-5 of
-# session-start-context pass one). With two:
+# envelope holds the context alone, byte for byte (ensure-proxy and
+# session-start-orchestrator pass one; session-start-context and session-start-memory
+# pass two). With two:
 #   - a message and a context  -> both keys, hookSpecificOutput first;
 #   - a message and no context -> `systemMessage` alone, with NO hookSpecificOutput key;
 #   - an empty message         -> the one-argument envelope for that context.
