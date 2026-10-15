@@ -8,6 +8,7 @@
  *     accessible. Validates the full happy path including cache write. T1 and T13
  *     run the real runtime through an injected spawn that skips the production
  *     deadline (machine load); the deadline itself is covered by T4 and AC-P8.
+ *     A beforeAll in each of those describes pays the cold node exec once, in setup.
  *
  *  T2 (real-binary): discoverExternalModels with SUBSWITCH_CONFIG pointing at
  *     a legacy config causes exit 1 → known:false (env stripping test: if the
@@ -47,7 +48,7 @@
  *   would never execute, leaving the exit-code paths covered only by mocks.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { promises as fsAsync } from 'fs';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -63,6 +64,7 @@ import {
   type ModelDiscoveryDeps,
 } from '../src/core/model-discovery.js';
 import { resolveProxyBin } from '../src/core/proxy-state.js';
+import { scrubChildEnv } from '../src/core/proxy-log.js';
 import { writeCache } from '../src/core/cache.js';
 
 // ---------------------------------------------------------------------------
@@ -112,9 +114,9 @@ let logPath: string;
  * tests (T1, T13) must show why: a non-zero exit from the runtime, a parse failure,
  * or a `[test-harness]` line when the harness bound below was hit.
  */
-function discoveryLog(): string {
+function discoveryLog(file: string = logPath): string {
   try {
-    return fs.readFileSync(logPath, 'utf-8') || '(empty log)';
+    return fs.readFileSync(file, 'utf-8') || '(empty log)';
   } catch {
     return '(no log)';
   }
@@ -136,21 +138,25 @@ const LIVE_SPAWN_STDERR_CAP = 4_096;
 type SpawnAndCollect = NonNullable<ModelDiscoveryDeps['spawnAndCollect']>;
 
 /**
- * spawnAndCollect for the live-runtime tests (T1, T13). It runs the exact options
- * discoverExternalModels builds (execPath, binPath, argv, env, cwd) as a plain child
- * process and collects stdout and the exit code, with no production deadline. The
- * tests still prove that production builds the right spawn options (including the
- * env isolation T13 checks) and parses the real runtime output.
+ * The live-runtime spawn behind spawnLiveRuntime and the warm-up exec. It runs the
+ * exact options discoverExternalModels builds (execPath, binPath, argv, env, cwd) as a
+ * plain child process and collects stdout and the exit code, with no production
+ * deadline. The tests still prove that production builds the right spawn options
+ * (including the env isolation T13 checks) and parses the real runtime output.
  *
- * Bounded by LIVE_SPAWN_HARNESS_BOUND_MS: on a hit the child is killed with SIGKILL,
- * a `[test-harness]` line goes to the log, and the result is exitCode -1. Child
- * stderr goes to the log when the exit is non-zero.
+ * Bounded by `boundMs`: on a hit the child is killed with SIGKILL, a `[test-harness]`
+ * line goes to `logFile`, and the result is exitCode -1. Child stderr goes to
+ * `logFile` when the exit is non-zero.
  */
-const spawnLiveRuntime: SpawnAndCollect = (opts) =>
+const spawnLive = (
+  opts: Parameters<SpawnAndCollect>[0],
+  boundMs: number,
+  logFile: string,
+): ReturnType<SpawnAndCollect> =>
   new Promise((resolve) => {
     const note = (line: string): void => {
       try {
-        fs.appendFileSync(logPath, `${line}\n`);
+        fs.appendFileSync(logFile, `${line}\n`);
       } catch {
         // The log is diagnostic only; the assertion message falls back to '(no log)'.
       }
@@ -179,10 +185,10 @@ const spawnLiveRuntime: SpawnAndCollect = (opts) =>
       try { proc.kill('SIGKILL'); } catch { /* already dead */ }
       note(
         `[test-harness] HARNESS FAILURE: live runtime spawn exceeded the ` +
-          `${LIVE_SPAWN_HARNESS_BOUND_MS} ms harness bound (not the production spawn deadline)`,
+          `${boundMs} ms harness bound (not the production spawn deadline)`,
       );
       resolve({ exitCode: -1, stdout: '', timedOut: false });
-    }, LIVE_SPAWN_HARNESS_BOUND_MS);
+    }, boundMs);
 
     proc.on('close', (code) => {
       if (settled) return;
@@ -203,8 +209,68 @@ const spawnLiveRuntime: SpawnAndCollect = (opts) =>
     });
   });
 
+/** spawnAndCollect for the live-runtime tests (T1, T13): bounded by LIVE_SPAWN_HARNESS_BOUND_MS. */
+const spawnLiveRuntime: SpawnAndCollect = (opts) =>
+  spawnLive(opts, LIVE_SPAWN_HARNESS_BOUND_MS, logPath);
+
 /** Deps for the live-runtime tests: the real bin resolver, the unraced spawn. */
 const liveRuntimeDeps: ModelDiscoveryDeps = { spawnAndCollect: spawnLiveRuntime };
+
+/**
+ * Bound for the warm-up exec below, and the same figure the node exec barrier in
+ * tests/shell-hooks.test.ts uses. On macOS under fork-heavy load (other test files
+ * running at once), the first exec of node with a given script waits in the
+ * syspolicyd queue for seconds, and the next one takes ~30 ms. Without the warm-up,
+ * the first live-runtime test pays that wait inside LIVE_SPAWN_HARNESS_BOUND_MS and
+ * can hit it. Linux has no such queue, so there the warm-up costs one fast exec.
+ */
+const LIVE_RUNTIME_WARM_BOUND_MS = 30_000;
+
+/** Hook timeout for the warm-up: its bound plus room for resolving the bin and cleanup. */
+const LIVE_RUNTIME_WARM_HOOK_MS = LIVE_RUNTIME_WARM_BOUND_MS + 5_000;
+
+/**
+ * beforeAll for the describes that run the live runtime (T1, T13): one real
+ * `models --json` exec through the same spawn code, with the same execPath, bin,
+ * argv, env shape and cwd that discoverExternalModels builds, so the cold exec is
+ * paid here and not inside a test. It writes no cache and reads no user config
+ * (XDG_CONFIG_HOME is an empty temp directory, as in production).
+ *
+ * When the runtime is absent the tests skip themselves, so there is nothing to warm
+ * and this returns. A warm-up that does not exit 0 within its bound fails the hook
+ * with the harness log, so the cause shows here and not as a timeout in a test.
+ */
+async function warmLiveRuntime(): Promise<void> {
+  const binResult = await resolveProxyBin();
+  if (!binResult.ok) {
+    if (binResult.error.includes('MODULE_NOT_FOUND') || binResult.error.includes('routing runtime')) {
+      return;
+    }
+    throw new Error(`resolveProxyBin failed unexpectedly: ${binResult.error}`);
+  }
+
+  const warmDir = await fsAsync.mkdtemp(path.join(os.tmpdir(), 'devflow-model-discovery-warm-'));
+  const warmLog = path.join(warmDir, 'proxy.log');
+  try {
+    const warm = await spawnLive(
+      {
+        execPath: process.execPath,
+        binPath: binResult.value.binPath,
+        argv: ['models', '--json'],
+        env: { ...scrubChildEnv(), NO_COLOR: '1', XDG_CONFIG_HOME: warmDir },
+        cwd: os.tmpdir(),
+      },
+      LIVE_RUNTIME_WARM_BOUND_MS,
+      warmLog,
+    );
+    expect(
+      warm.exitCode,
+      `the live runtime warm-up exec did not exit 0 within ${LIVE_RUNTIME_WARM_BOUND_MS} ms: ${discoveryLog(warmLog)}`,
+    ).toBe(0);
+  } finally {
+    await fsAsync.rm(warmDir, { recursive: true, force: true });
+  }
+}
 
 beforeEach(async () => {
   tmpDir = await fsAsync.mkdtemp(path.join(os.tmpdir(), 'devflow-model-discovery-'));
@@ -860,6 +926,8 @@ describe('T12: pruneOldEntries after live write', () => {
 // ---------------------------------------------------------------------------
 
 describe('T1: Real-binary — discoverExternalModels with live runtime', () => {
+  beforeAll(warmLiveRuntime, LIVE_RUNTIME_WARM_HOOK_MS);
+
   it('returns known:true with live data when routing runtime is installed', async (ctx) => {
     // Resolve the real bin first — use vitest's ctx.skip() so the test reports SKIPPED
     // (not PASSED) when the runtime is absent. A bare `return` masks the skip as PASSED
@@ -1039,6 +1107,8 @@ describe('T2: Real-binary stub — hostile SUBSWITCH_CONFIG stripped from child 
 // ---------------------------------------------------------------------------
 
 describe('T13: Real-binary — user-level runtime config is isolated from discovery (D-EFR-6)', () => {
+  beforeAll(warmLiveRuntime, LIVE_RUNTIME_WARM_HOOK_MS);
+
   /**
    * Run discovery against the installed runtime with HOME pointed at a temp home
    * whose `.config/subswitch/config.json` holds `userConfig`. HOME is one of the
