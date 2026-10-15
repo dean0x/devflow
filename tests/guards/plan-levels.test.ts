@@ -15,20 +15,24 @@
  * What this file holds, each arm through a named collector and a known-bad probe over the same collector:
  *   1. Typed spawns: every spawn line and every `Agent(` fence names a roster agent or the built-in `Plan`,
  *      byte-exact, and the reference holds no spawn text. The floor is the set of six types, not a site count.
- *   2. The reference: its phase rows, its input substitutes and its rules.
- *   3. A simulator that reads its counts only from the parsed reference. The expected runs come only from the
- *      hand-written oracle below, so a wrong reference fails the assertions instead of agreeing with them.
- *   4. The gate-level block of the command: read paragraph, floor lines, data flow, learning-arm position.
+ *   2. The reference: its phase rows, its input substitutes and its rules, closed to a title, three headings,
+ *      table lines, bold-label rules and two pinned intros, with the text left in each rule bounded. The file
+ *      the Plan rule sends the one planner to must exist and still hold the two sections the rule names.
+ *   3. A simulator that reads the narrowed-level counts only from the parsed reference and the full-level
+ *      counts only from the `FULL_SPAWNS` and focus tables. The expected runs come only from the hand-written
+ *      oracle below, so a wrong reference or a wrong full table fails the assertions instead of agreeing with them.
+ *   4. The gate-level block of the command, closed to the read paragraph and the three floor lines, with no
+ *      gate-skip text: read paragraph, floor lines, data flow, learning-arm position.
  *   5. Full is today: the spawn counts, the focus tables and the Revise menu, with no skip text in the command.
  *   6. The gates and the run report.
  */
 
 import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import * as path from 'path'
 
 import { GATE_LEVELS } from '../../src/core/gate-level.js'
-import { BUILT_IN_SPAWN_TYPES, ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, readAgentReference, requireDistFile, resolveAllAgents, resolveLearningOffSource, sectionBetween, tableRows } from '../helpers.js'
+import { BUILT_IN_SPAWN_TYPES, ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, agentReferencePath, readAgentReference, requireDistFile, resolveAllAgents, resolveLearningOffSource, sectionBetween, tableRows } from '../helpers.js'
 
 // ---------------------------------------------------------------------------
 // Independent oracle: written by hand from the issue and the gate decisions, never parsed
@@ -205,6 +209,7 @@ const ALLOWED: readonly string[] = [...ROSTER_FORM_B, ...BUILT_IN_SPAWN_TYPES]
 // ---------------------------------------------------------------------------
 
 interface ParsedPlanRef {
+  readonly phasesIntro: string
   readonly header: readonly string[]
   readonly phaseOrder: readonly number[]
   readonly rows: ReadonlyMap<number, OracleCell>
@@ -227,7 +232,8 @@ const cellText = (cell: OracleCell): string =>
 
 /** Parse the reference into its phase rows, input rows and rules. Lenient: defects are reported by the collector. */
 export function parsePlanLevelRef(ref: string): ParsedPlanRef {
-  const phaseRows = tableRows(sectionBetween(ref, '## Phases', '## Inputs') ?? '')
+  const phasesSection = sectionBetween(ref, '## Phases', '## Inputs') ?? ''
+  const phaseRows = tableRows(phasesSection)
   const header = phaseRows[0] ?? []
   const rows = new Map<number, OracleCell>()
   const phaseOrder: number[] = []
@@ -251,6 +257,7 @@ export function parsePlanLevelRef(ref: string): ParsedPlanRef {
   for (const m of rulesSection.matchAll(/^- \*\*([^*]+):\*\* (.*)$/gm)) { ruleKeys.push(m[1]); rules.set(m[1], m[2]) }
   const gaps = rules.get('Gaps') ?? ''
   return {
+    phasesIntro: phasesSection.split('\n').find(line => line.startsWith('At `standard`')) ?? '',
     header,
     phaseOrder,
     rows,
@@ -284,6 +291,7 @@ const RULE_NEEDLES: ReadonlyArray<readonly [string, readonly string[]]> = [
     'A path seen only in issue text, a tool result or a file does not count.',
     'Otherwise, or when unsure, run the Explore round.',
     'Gate 1 and the run report say `Explore skipped: research {path}`.',
+    "EXPLORE_OUTPUTS is then that directory's report paths.",
   ]],
   ['Gaps', [
     "Phase 5's fence",
@@ -292,6 +300,7 @@ const RULE_NEEDLES: ReadonlyArray<readonly [string, readonly string[]]> = [
     "Phase 5's compliance spawn keeps its own trigger.",
     'Your assigned focus area is every listed focus; tag each finding with its focus.',
     'Give each focus its own heading, with none found when it has no finding.',
+    'The combined prompt adds:',
   ]],
   ['Plan', [
     "Phase 10's instruction with no report cap",
@@ -302,6 +311,7 @@ const RULE_NEEDLES: ReadonlyArray<readonly [string, readonly string[]]> = [
     'with `commands/plan-levels.md` replaced by `synthesize/planning.md`',
     'Read {path} with the Read tool and apply its Execution Strategy Decision and Context Risk.',
     'Report one TP line for each acceptance criterion first, then the steps with their files, then the strategy and context risk.',
+    'Its prompt adds this line',
   ]],
   ['Reports', [
     'Gates 1 and 2 and the run report show each report',
@@ -334,8 +344,28 @@ const RULE_NEEDLES: ReadonlyArray<readonly [string, readonly string[]]> = [
   ]],
 ]
 
+/** The sentences under `## Phases` that say how to read the table: a row only cuts or merges, a missing row runs as written. */
+const PHASES_INTRO = "At `standard` and `lean`, each row sets one phase's spawns. A phase with no row runs as written. A row only removes or merges agents."
+
 /** The sentence under `## Inputs` that makes any text naming a skipped phase or its product read its row. */
 const INPUTS_INTRO = 'A name or any text that names a skipped phase or its product reads its row.'
+
+const REF_TITLE = '# Plan: phases by gate level'
+const REF_HEADINGS: readonly string[] = ['## Phases', '## Inputs', '## Rules']
+
+/** The letters and digits a rule may keep outside its needles: the word "and", and nothing more. */
+const RULE_LEFTOVER_MAX = 3
+
+/** A line the reference may hold under each heading. Nothing else is a line of the reference. */
+const REF_SECTION_LINES: Readonly<Record<string, (line: string) => boolean>> = {
+  '## Phases': line => line.startsWith('|') || line === PHASES_INTRO,
+  '## Inputs': line => line.startsWith('|') || line === INPUTS_INTRO,
+  '## Rules': line => /^- \*\*[^*]+:\*\* \S/.test(line),
+}
+
+/** An inputs-table cell: the name of a product, or the substitute with the one gate-bound form the table holds. */
+const INPUT_NAME_RE = /^[A-Z][A-Z_]*$/
+const INPUT_READ_RE = /^[A-Z][A-Z_]*(?: up to Gate 1, [A-Z][A-Z_]* after)?$/
 
 /** Text the reference must never carry: it holds rows and rules only, no spawn, install path, compliance logic, gate skip or plan-size cap. */
 const REF_FORBIDDEN: ReadonlyArray<readonly [string, string]> = [
@@ -369,9 +399,51 @@ function phaseFlow(body: string): Map<number, { produces: string[]; requires: st
   return flow
 }
 
+/**
+ * The reference is a closed set of lines: the title, the three headings in order, and under each heading only its own
+ * lines (table lines and the pinned intro, or bold-label rules). Every inputs cell is a name, never prose. A line
+ * that is none of these, or an intro that appears twice, is a defect, so added text cannot hide between the rows.
+ */
+export function collectRefShapeDefects(ref: string): string[] {
+  const out: string[] = []
+  const headings: string[] = []
+  const seen = new Set<string>()
+  let allowed: ((line: string) => boolean) | null = null
+  let section = ''
+  for (const [index, line] of ref.split('\n').entries()) {
+    if (line === '' || (index === 0 && line === REF_TITLE)) continue
+    if (REF_HEADINGS.includes(line)) { headings.push(line); section = line; allowed = REF_SECTION_LINES[line]; continue }
+    if (allowed === null || !allowed(line)) { out.push(`the reference has a line outside its closed shapes${section === '' ? '' : ` under ${section}`}: ${line.slice(0, 60)}`); continue }
+    if (line === PHASES_INTRO || line === INPUTS_INTRO) {
+      if (seen.has(line)) out.push(`the reference repeats an intro: ${line.slice(0, 60)}`)
+      seen.add(line)
+    }
+    if (section === '## Inputs' && line.startsWith('|') && !/^\|[\s:|-]+\|$/.test(line)) {
+      const cells = tableRows(line)[0] ?? []
+      const shaped = cells.length === 2 && (cells[0] === 'Name' || INPUT_NAME_RE.test(cells[0])) && (cells[1] === 'Read instead' || INPUT_READ_RE.test(cells[1]))
+      if (!shaped) out.push(`an inputs row is not a name and a substitute: ${line.slice(0, 80)}`)
+    }
+  }
+  if (headings.join(',') !== REF_HEADINGS.join(',')) out.push(`the headings are "${headings.join(', ')}", expected "${REF_HEADINGS.join(', ')}"`)
+  return out
+}
+
+/** The letters and digits of a rule that no needle covers. Needles may overlap; each is marked at its first place. */
+function ruleLeftover(rule: string, needles: readonly string[]): string {
+  const covered = new Array<boolean>(rule.length).fill(false)
+  for (const needle of needles) {
+    const at = rule.indexOf(needle)
+    if (at !== -1) covered.fill(true, at, at + needle.length)
+  }
+  let left = ''
+  for (let i = 0; i < rule.length; i++) if (!covered[i]) left += rule[i]
+  return left.replace(/[^A-Za-z0-9]/g, '')
+}
+
 /** The phase rows: the decided header and cells, in the decided order, none above the full count. */
 function collectPhaseRowDefects(parsed: ParsedPlanRef): string[] {
   const out: string[] = []
+  if (parsed.phasesIntro !== PHASES_INTRO) out.push(`the phases rule is not: ${PHASES_INTRO}`)
   const narrowed = GATE_LEVELS.filter(level => level !== 'full')
   const wantHeader = `Phase | ${narrowed.join(', ')}`
   if (parsed.header.join(' | ') !== wantHeader) out.push(`the header is "${parsed.header.join(' | ')}", expected "${wantHeader}"`)
@@ -397,7 +469,7 @@ function collectPhaseRowDefects(parsed: ParsedPlanRef): string[] {
 }
 
 /** The input substitutes: each is produced by a phase that runs, and each name a running phase needs has a row. */
-function collectInputDefects(parsed: ParsedPlanRef, plan: string): string[] {
+export function collectInputDefects(parsed: ParsedPlanRef, plan: string): string[] {
   const out: string[] = []
   if (parsed.inputsHeader.join(' | ') !== 'Name | Read instead') out.push(`the inputs header is "${parsed.inputsHeader.join(' | ')}", expected "Name | Read instead"`)
   if (parsed.inputsIntro !== INPUTS_INTRO) out.push(`the inputs rule is not: ${INPUTS_INTRO}`)
@@ -436,6 +508,8 @@ function collectRuleDefects(parsed: ParsedPlanRef, ref: string): string[] {
     const rule = parsed.rules.get(key)
     if (rule === undefined) continue
     for (const needle of needles) if (!rule.includes(needle)) out.push(`the ${key} rule lacks: ${needle.slice(0, 60)}`)
+    const leftover = ruleLeftover(rule, needles)
+    if (leftover.length > RULE_LEFTOVER_MAX) out.push(`the ${key} rule holds text outside its needles: ${leftover.slice(0, 60)}`)
   }
   // Gaps: security is a spawn of its own, and the combined group never names it.
   const [alone, combined] = parsed.gapGroups
@@ -457,7 +531,39 @@ function collectRuleDefects(parsed: ParsedPlanRef, ref: string): string[] {
 export function collectPlanLevelRefDefects(ref: string, plan: string): string[] {
   const parsed = parsePlanLevelRef(ref)
   const opening = ref.startsWith('# Plan: phases by gate level\n') ? [] : ['the reference does not open with "# Plan: phases by gate level"']
-  return [...opening, ...collectPhaseRowDefects(parsed), ...collectInputDefects(parsed, plan), ...collectRuleDefects(parsed, ref)]
+  return [...opening, ...collectRefShapeDefects(ref), ...collectPhaseRowDefects(parsed), ...collectInputDefects(parsed, plan), ...collectRuleDefects(parsed, ref)]
+}
+
+/** The file the Plan rule sends the one planner to, from the level reference's own folder, and the two sections it applies. */
+const PLANNING_REF = { from: 'commands/plan-levels.md', to: 'synthesize/planning.md' } as const
+const PLANNING_MARKERS = ['**Execution Strategy Decision:**', '**Context Risk**'] as const
+
+/** The text of a file, or null when it is absent. A read that fails for any other reason throws. */
+const readIfPresent = (file: string): string | null => (existsSync(file) ? readFileSync(file, 'utf-8') : null)
+
+/**
+ * The Plan rule tells the one planner to read the sibling `synthesize/planning.md` and apply its Execution Strategy
+ * Decision and Context Risk. `levelsFile` is the level reference's own path; the rule's replacement turns it into the
+ * planning path. That path must exist, the rule must name both sections, and the file must still hold both markers.
+ * A missing file is a defect, never a skip.
+ */
+export function collectPlanningLinkDefects(ref: string, levelsFile: string, read: (file: string) => string | null = readIfPresent): string[] {
+  const rule = parsePlanLevelRef(ref).rules.get('Plan') ?? ''
+  const replacement = /with `([^`]+)` replaced by `([^`]+)`/.exec(rule)
+  if (replacement === null) return ['the Plan rule gives no path replacement for the planning reference']
+  const [, from, to] = replacement
+  if (from !== PLANNING_REF.from || to !== PLANNING_REF.to) return [`the Plan rule replaces "${from}" by "${to}", expected "${PLANNING_REF.from}" by "${PLANNING_REF.to}"`]
+  if (!levelsFile.endsWith(from)) return [`the level reference path "${levelsFile}" does not end with "${from}"`]
+  const target = `${levelsFile.slice(0, -from.length)}${to}`
+  const text = read(target)
+  if (text === null) return [`the path that the Plan rule derives does not exist: ${target}`]
+  const out: string[] = []
+  for (const marker of PLANNING_MARKERS) {
+    const name = marker.replace(/[*:]/g, '')
+    if (!rule.includes(name)) out.push(`the Plan rule does not name: ${name}`)
+    if (!text.includes(marker)) out.push(`${to} lacks the section the Plan rule applies: ${marker}`)
+  }
+  return out
 }
 
 // ---------------------------------------------------------------------------
@@ -524,12 +630,23 @@ const GATE_PHASES: ReadonlyArray<readonly [number, number]> = [[0, 1], [1, 7], [
  * Run /plan at a level by the parsed reference, as the gate-level block says. A null reference, a malformed cell
  * or a missing row fails closed: the whole run is `full`. The research skip and the compliance trigger are the
  * command's own rules, so they are fixed here and held by the reference's needles.
+ *
+ * The `full` run reads its counts from `fullSpawns` (default `FULL_SPAWNS`) and its gap groups from the Phase 5 focus
+ * table, never from the constants of `expectedRun`. The oracle and this arm are two encodings of the full shape, so
+ * the full scenarios compare them with each other instead of the arm with itself.
  */
-export function simulatePlan(level: string, sc: Scenario, ref: ParsedPlanRef | null): PlanRun {
+export function simulatePlan(level: string, sc: Scenario, ref: ParsedPlanRef | null, fullSpawns: Readonly<Record<number, FullSpawn>> = FULL_SPAWNS): PlanRun {
   const full = (): PlanRun => {
-    const focuses = [...FULL_GAP_FOCUSES, ...(sc.multi ? MULTI_GAP_FOCUSES : [])]
-    const groups = [...focuses.map(f => [f]), ...(sc.compliance ? [['compliance']] : [])]
-    return { explore: 4, implExplore: 4, synthesize: 4, gapSpawns: groups.length, gapGroups: canonGroups(groups), plan: 3, review: 1, gates: [0, 1, 2], revise: { plan: 3, synthesize: 1, review: 1 } }
+    const spawns = (phase: number): number => (sc.multi ? fullSpawns[phase].multi : fullSpawns[phase].count)
+    const phase5Focuses = FULL_FOCUS_TABLES.find(([phase]) => phase === 5)?.[1] ?? []
+    const multiOnly: readonly string[] = MULTI_GAP_FOCUSES
+    const groups = [...phase5Focuses.filter(f => f !== 'compliance' && (sc.multi || !multiOnly.includes(f))).map(f => [f]), ...(sc.compliance ? [['compliance']] : [])]
+    return {
+      explore: spawns(3), implExplore: spawns(8), synthesize: [4, 6, 9, 11].reduce((n, phase) => n + spawns(phase), 0),
+      gapSpawns: spawns(5) + (sc.compliance ? 1 : 0), gapGroups: canonGroups(groups),
+      plan: spawns(10), review: spawns(12), gates: GATE_PHASES.map(([gate]) => gate),
+      revise: { plan: spawns(10), synthesize: spawns(11), review: spawns(12) },
+    }
   }
   if (level === 'full' || ref === null || ref.badCells.length > 0) return full()
   for (const phase of ROW_PHASES) if (!ref.rows.has(phase)) return full()
@@ -595,11 +712,20 @@ const BLOCK_ITEMS = [
   'Security runs as its own Design spawn, and the design review runs, at every level and on every Revise pass.',
 ] as const
 
-/** AC-6, AC-9, AC-12: the block that applies the reference, in one compiled build. */
+/**
+ * AC-6, AC-9, AC-12: the block that applies the reference, in one compiled build. The block is a closed set: the read
+ * paragraph, then a paragraph that holds the three floor lines and nothing else. Gate-skip text is looked for in the
+ * block only, because other phases of the command say `skip Gate 0 questions` on purpose.
+ */
 export function collectPlanGateBlockDefects(body: string): string[] {
   const out: string[] = []
   const block = gateBlock(body)
   if (block === null) return ['no gate-level block between "**Gate level.**" and "#### Phase 3:"']
+  const paragraphs = block.split('\n\n').filter(p => p.trim() !== '')
+  if (paragraphs.length !== 2) out.push(`the block has ${paragraphs.length} paragraphs, expected 2: the read paragraph and the floor lines`)
+  const floorLines = (paragraphs[1] ?? '').split('\n')
+  if (floorLines.join('\n') !== BLOCK_ITEMS.map(item => `- ${item}`).join('\n')) out.push(`the block lines are not the three floor lines: ${floorLines.join(' | ').slice(0, 200)}`)
+  if (GATE_SKIP.test(block)) out.push('the gate-level block carries gate-skip text')
   const read = block.split('\n\n').find(p => p.includes(LEVEL_REFERENCE_PATH))
   if (read === undefined) out.push('the block has no read paragraph for the level reference')
   else {
@@ -722,6 +848,9 @@ const VARIANTS: ReadonlyArray<{ label: string; body: string }> = (() => {
 })()
 const ON = VARIANTS[0].body
 const REF = readAgentReference('commands/plan-levels.md')
+const PLANNING = readAgentReference('synthesize/planning.md')
+/** The level reference's own source path, with `/` separators, as the Plan rule's replacement reads it. */
+const LEVELS_FILE = agentReferencePath(PLANNING_REF.from).split(path.sep).join('/')
 const SOURCE = readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'plan.mds'), 'utf-8')
 
 /** Replace `from` with `to` in `body`, failing the test when the seed did not land. */
@@ -735,6 +864,7 @@ describe('the corpus is real', () => {
   it('reads both builds of the command, the level reference, the source and the gate levels', () => {
     for (const { label, body } of VARIANTS) expect(body.length, `${label}: nothing read`).toBeGreaterThan(5000)
     expect(REF.length, 'the level reference is empty').toBeGreaterThan(400)
+    expect(PLANNING.length, 'the planning reference is empty').toBeGreaterThan(400)
     expect(SOURCE.length, 'the command source is empty').toBeGreaterThan(5000)
     expect(GATE_LEVELS).toContain('full')
     expect(GATE_LEVELS.filter(level => level !== 'full')).toEqual(['standard', 'lean'])
@@ -910,6 +1040,89 @@ describe('the level reference holds the decided rows, substitutes and rules (AC-
     }
     expect(defects(`${REF}\nRead \`$CLAUDE_CONFIG_DIR/x\`.\n`)).toContain('the reference carries the config directory variable')
   })
+
+  it('known-bad probes: an added line, a rule line in the wrong place, a removed or repeated heading and intro and a prose inputs cell are each reported', () => {
+    const defects = (text: string): string[] => collectPlanLevelRefDefects(text, ON)
+    const outside = (section: string, line: string): string => `the reference has a line outside its closed shapes${section === '' ? '' : ` under ${section}`}: ${line}`
+    // The gate-skip denylist cannot see "does not run": only the closed shape reports these lines.
+    const added = 'At `lean`, Gate 1 does not run and Phase 12 does not run.'
+    expect(GATE_SKIP.test(added), 'the added line is invisible to the gate-skip denylist').toBe(false)
+    expect(collectPlanSimulationDefects(parsePlanLevelRef(seed(REF, '\n## Inputs', `\n${added}\n\n## Inputs`))), 'the simulator cannot see the line either').toEqual([])
+    expect(defects(seed(REF, '\n## Inputs', `\n${added}\n\n## Inputs`))).toContain(outside('## Phases', added))
+    expect(defects(seed(REF, '\n## Rules', `\n${added}\n\n## Rules`))).toContain(outside('## Inputs', added))
+    expect(defects(`${REF}\n${added}\n`)).toContain(outside('## Rules', added))
+    expect(defects(`${REF}\n- At \`lean\`, skip security.\n`)).toContain(outside('## Rules', '- At `lean`, skip security.'))
+    expect(defects(`${REF}\n  The design review does not run on Revise.\n`)).toContain(outside('## Rules', '  The design review does not run on Revise.'))
+    expect(defects(seed(REF, '\n## Inputs', '\n- **Extra:** a rule in the phases section\n\n## Inputs'))).toContain(outside('## Phases', '- **Extra:** a rule in the phases section'))
+    expect(defects(seed(REF, '\n## Rules', '\n## Extra\n\n## Rules'))).toContain(outside('## Inputs', '## Extra'))
+    expect(defects(`${added}\n${REF}`), 'a line above the title').toEqual(expect.arrayContaining(['the reference does not open with "# Plan: phases by gate level"', outside('', added)]))
+    // Headings: removed, renamed and out of order.
+    expect(defects(seed(REF, '## Inputs\n', '')).join('\n')).toMatch(/the headings are "## Phases, ## Rules"/)
+    expect(defects(seed(REF, '## Rules', '## Rule')).join('\n')).toMatch(/the headings are "## Phases, ## Inputs"/)
+    // The Phases intro is pinned like the Inputs intro: removed, shortened, changed and repeated.
+    const wantPhases = `the phases rule is not: ${PHASES_INTRO}`
+    expect(defects(seed(REF, PHASES_INTRO, 'At `standard` and `lean`, each row sets one phase\'s spawns.'))).toContain(wantPhases)
+    expect(defects(seed(REF, ' A row only removes or merges agents.', ''))).toContain(wantPhases)
+    expect(defects(seed(REF, 'A row only removes or merges agents.', 'A row may skip any phase.'))).toContain(wantPhases)
+    expect(defects(seed(REF, PHASES_INTRO + '\n', ''))).toContain(wantPhases)
+    expect(defects(seed(REF, PHASES_INTRO, `${PHASES_INTRO}\n${PHASES_INTRO}`))).toContain(`the reference repeats an intro: ${PHASES_INTRO.slice(0, 60)}`)
+    expect(defects(seed(REF, INPUTS_INTRO, `${INPUTS_INTRO}\n${INPUTS_INTRO}`))).toContain(`the reference repeats an intro: ${INPUTS_INTRO.slice(0, 60)}`)
+    // An inputs cell may name only products: prose in a cell carries no uppercase name, so the substitute check cannot see it.
+    const prose = seed(REF, '| PLANNING_SYNTHESIS | PLAN_OUTPUTS |', '| PLANNING_SYNTHESIS | PLAN_OUTPUTS, and the design review is skipped |')
+    expect(collectInputDefects(parsePlanLevelRef(prose), ON), 'the substitute check cannot see the prose').toEqual([])
+    expect(defects(prose)).toContain('an inputs row is not a name and a substitute: | PLANNING_SYNTHESIS | PLAN_OUTPUTS, and the design review is skipped |')
+    expect(defects(seed(REF, '| EXPLORATION_SYNTHESIS | EXPLORE_OUTPUTS |', '| EXPLORATION_SYNTHESIS | EXPLORE_OUTPUTS | extra |')).join('\n')).toMatch(/an inputs row is not a name and a substitute/)
+    expect(defects(seed(REF, '| EXPLORATION_SYNTHESIS |', '| the exploration |')).join('\n')).toMatch(/an inputs row is not a name and a substitute/)
+  })
+
+  it('known-bad probes: a sentence added to a rule, or inside one, is reported for each rule', () => {
+    const defects = (text: string): string[] => collectPlanLevelRefDefects(text, ON)
+    const holds = (key: string): RegExp => new RegExp(`the ${key} rule holds text outside its needles`)
+    // A sentence after the last needle of every rule: no rule may keep more than the word "and" outside its needles.
+    for (const [key] of RULE_NEEDLES) {
+      const rule = REF.split('\n').find(line => line.startsWith(`- **${key}:**`)) ?? ''
+      expect(rule, `the ${key} rule is in the reference`).not.toBe('')
+      expect(defects(seed(REF, rule, `${rule} The design review does not run on Revise.`)).join('\n'), `a sentence added to the ${key} rule`).toMatch(holds(key))
+    }
+    expect(defects(seed(REF, 'The level is not read again.', 'The level is not read again. The design review does not run on Revise.')).join('\n')).toMatch(holds('Revise'))
+    expect(defects(seed(REF, '- **Gaps:** ', '- **Gaps:** At `lean` the security spawn does not run. ')).join('\n')).toMatch(holds('Gaps'))
+    // Text inserted between two needles of a rule.
+    expect(defects(seed(REF, 'Merge or drop nothing;', 'Merge or drop nothing, except that at `lean` security may merge;')).join('\n')).toMatch(holds('Reports'))
+    expect(defects(seed(REF, '; its topic covers CONFIRMED_SCOPE', '; unless the topic is close, its topic covers CONFIRMED_SCOPE')).join('\n')).toMatch(holds('Research'))
+    expect(defects(seed(REF, ' Its prompt adds this line,', ' Its prompt adds this line only at `lean`,')).join('\n')).toMatch(holds('Plan'))
+  })
+})
+
+describe('the Plan rule sends the one planner to a file that exists and still holds the two sections it names', () => {
+  it('the derived path exists, and the planning reference holds both sections', () => {
+    expect(collectPlanningLinkDefects(REF, LEVELS_FILE)).toEqual([])
+    for (const marker of PLANNING_MARKERS) expect(PLANNING, marker).toContain(marker)
+  })
+
+  it('known-bad probes: a moved file, a renamed section, a changed replacement and a path off the folder are each reported', () => {
+    const defects = (ref: string, levelsFile: string = LEVELS_FILE, read?: (file: string) => string | null): string[] => collectPlanningLinkDefects(ref, levelsFile, read)
+    const derived = LEVELS_FILE.replace(PLANNING_REF.from, PLANNING_REF.to)
+    // The real file system arm: a level reference in a folder that has no sibling planning file.
+    const moved = LEVELS_FILE.replace('/references/commands/', '/references-moved/commands/')
+    expect(moved, 'the probe path must differ').not.toBe(LEVELS_FILE)
+    expect(defects(REF, moved)).toEqual([`the path that the Plan rule derives does not exist: ${moved.replace(PLANNING_REF.from, PLANNING_REF.to)}`])
+    expect(defects(REF, LEVELS_FILE, () => null)).toEqual([`the path that the Plan rule derives does not exist: ${derived}`])
+    // The sections: each marker renamed in the planning file, and each name dropped from the rule.
+    const renamedRisk = PLANNING.replace('**Context Risk**', '**Hazard**')
+    const renamedDecision = PLANNING.replace('**Execution Strategy Decision:**', '**Strategy:**')
+    expect(renamedRisk, 'the seed must change the planning text').not.toBe(PLANNING)
+    expect(renamedDecision, 'the seed must change the planning text').not.toBe(PLANNING)
+    expect(defects(REF, LEVELS_FILE, () => renamedRisk)).toEqual(['synthesize/planning.md lacks the section the Plan rule applies: **Context Risk**'])
+    expect(defects(REF, LEVELS_FILE, () => renamedDecision)).toEqual(['synthesize/planning.md lacks the section the Plan rule applies: **Execution Strategy Decision:**'])
+    expect(defects(REF, LEVELS_FILE, () => '')).toHaveLength(2)
+    expect(defects(seed(REF, 'apply its Execution Strategy Decision and Context Risk', 'apply its Execution Strategy Decision and Risk'))).toEqual(['the Plan rule does not name: Context Risk'])
+    expect(defects(seed(REF, 'apply its Execution Strategy Decision and', 'apply its strategy and'))).toEqual(['the Plan rule does not name: Execution Strategy Decision'])
+    // The replacement itself.
+    expect(defects(seed(REF, 'replaced by `synthesize/planning.md`', 'replaced by `synthesize/plan.md`')))
+      .toEqual(['the Plan rule replaces "commands/plan-levels.md" by "synthesize/plan.md", expected "commands/plan-levels.md" by "synthesize/planning.md"'])
+    expect(defects(seed(REF, 'with `commands/plan-levels.md` replaced by `synthesize/planning.md`', 'with the sibling file'))).toEqual(['the Plan rule gives no path replacement for the planning reference'])
+    expect(defects(REF, '/x/plan-levels.md')).toEqual(['the level reference path "/x/plan-levels.md" does not end with "commands/plan-levels.md"'])
+  })
 })
 
 describe('the simulator reads its counts from the reference and the oracle decides the runs (AC-2, AC-3, AC-6, AC-11)', () => {
@@ -954,6 +1167,17 @@ describe('the simulator reads its counts from the reference and the oracle decid
     expect(collectPlanSimulationDefects(parsed, noCompliance).some(d => d.includes('compliance on') && d.includes('gapSpawns'))).toBe(true)
     const researchAtFull: typeof simulatePlan = (level, sc, ref) => (sc.research ? { ...simulatePlan(level, sc, ref), explore: 0 } : simulatePlan(level, sc, ref))
     expect(collectPlanSimulationDefects(parsed, researchAtFull).some(d => d.startsWith('full:') && d.includes('explore 0, expected 4'))).toBe(true)
+  })
+
+  it('known-bad probes: a full table that disagrees with the oracle is reported at full, so the full scenarios compare two encodings', () => {
+    const withTable = (table: Readonly<Record<number, FullSpawn>>): typeof simulatePlan => (level, sc, ref) => simulatePlan(level, sc, ref, table)
+    const found = (table: Readonly<Record<number, FullSpawn>>): string[] => collectPlanSimulationDefects(parsed, withTable(table))
+    expect(found(FULL_SPAWNS), 'the real full table agrees with the oracle').toEqual([])
+    expect(found({ ...FULL_SPAWNS, 10: { agent: 'Plan', count: 2, multi: 2 } }).some(d => d.startsWith('full:') && d.includes('plan 2, expected 3'))).toBe(true)
+    expect(found({ ...FULL_SPAWNS, 3: { agent: 'Explore', count: 4, multi: 3 } }).some(d => d.startsWith('full:') && d.includes('several issues') && d.includes('explore 3, expected 4'))).toBe(true)
+    expect(found({ ...FULL_SPAWNS, 5: { agent: 'Design', count: 4, multi: 5 } }).some(d => d.startsWith('full:') && d.includes('gapSpawns 5, expected 6'))).toBe(true)
+    expect(found({ ...FULL_SPAWNS, 9: { agent: 'Synthesize', count: 0, multi: 0 } }).some(d => d.startsWith('full:') && d.includes('synthesize 3, expected 4'))).toBe(true)
+    expect(found({ ...FULL_SPAWNS, 12: { agent: 'Design', count: 0, multi: 0 } }).some(d => d.startsWith('full:') && d.includes('no design review on the first pass'))).toBe(true)
   })
 
   it('a null reference, a missing row or a malformed cell makes the whole run full, as the gate-level block says', () => {
@@ -1011,6 +1235,33 @@ describe('the command carries the gate-level block, outside the learning arms (A
     const inOff = seed(seed(SOURCE, '**Gate level.**', '<!-- learning:off -->\n**Gate level.**'), '#### Phase 3: Explore Requirements', '<!-- learning:end -->\n#### Phase 3: Explore Requirements')
     expect(collectBlockArmDefects(inOff)).toEqual(['the gate-level block sits inside a learning:off arm'])
     expect(collectBlockArmDefects(seed(SOURCE, '**Gate level.**', '**Level.**'))).toEqual(['the source has no gate-level block'])
+  })
+
+  it('known-bad probes: an added bullet, a reordered bullet, a continuation line, an added paragraph and gate-skip text in the block are each reported', () => {
+    const defects = (text: string): string[] => collectPlanGateBlockDefects(text)
+    const notFloorLines = (found: string[]): boolean => found.some(d => d.startsWith('the block lines are not the three floor lines'))
+    const skipText = 'the gate-level block carries gate-skip text'
+    const last = BLOCK_ITEMS[BLOCK_ITEMS.length - 1]
+    // A bullet that skips Gate 1 and the design review: the equality and the gate-skip scan each report it.
+    const skipBullet = defects(seed(ON, `- ${last}`, `- ${last}\n- At \`lean\`, skip Gate 1 and the design review.`))
+    expect(notFloorLines(skipBullet), 'an added skip bullet').toBe(true)
+    expect(skipBullet).toContain(skipText)
+    // The same bullet in words that the gate-skip scan cannot see: only the equality reports it.
+    const quietBullet = defects(seed(ON, `- ${last}`, `- ${last}\n- At \`lean\`, Gate 1 and the design review do not run.`))
+    expect(notFloorLines(quietBullet), 'an added bullet the gate-skip scan cannot see').toBe(true)
+    expect(quietBullet).not.toContain(skipText)
+    const [first, second] = BLOCK_ITEMS
+    expect(notFloorLines(defects(seed(ON, `- ${first}\n- ${second}`, `- ${second}\n- ${first}`))), 'two bullets in the other order').toBe(true)
+    expect(notFloorLines(defects(seed(ON, `- ${last}`, `- ${last}\nAt \`lean\`, Gate 1 does not run.`))), 'a continuation line under the bullets').toBe(true)
+    expect(notFloorLines(defects(seed(ON, `- ${last}`, `- ${last} Gate 1 does not run at lean.`))), 'a sentence added to a bullet').toBe(true)
+    const extraParagraph = defects(seed(ON, '#### Phase 3: Explore Requirements', 'At `lean`, Gate 1 does not run.\n\n#### Phase 3: Explore Requirements'))
+    expect(extraParagraph).toContain('the block has 3 paragraphs, expected 2: the read paragraph and the floor lines')
+    // Gate-skip text anywhere in the block, in the read paragraph as well.
+    const readParagraph = gateBlock(ON)?.split('\n\n').find(p => p.includes(LEVEL_REFERENCE_PATH)) ?? ''
+    expect(defects(seed(ON, readParagraph, `${readParagraph} Skip Gate 1 at \`lean\`.`))).toContain(skipText)
+    // The scan covers the block only: other phases say `skip Gate 0 questions` on purpose.
+    expect(defects(`${ON}\nskip Gate 0 questions\n`)).toEqual([])
+    expect(GATE_SKIP.test('skip Gate 0 questions'), 'the scan does match that phrase, so only its scope keeps the command green').toBe(true)
   })
 })
 
