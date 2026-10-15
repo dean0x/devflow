@@ -178,6 +178,7 @@ interface ParsedRef {
   readonly cells: ReadonlyMap<string, ReadonlyMap<string, ParsedCell>>
   readonly badCells: readonly string[]
   readonly manifests: readonly string[]
+  readonly manifestRule: string
   readonly perClassUnion: boolean
 }
 
@@ -207,6 +208,7 @@ export function parseLevelRef(ref: string): ParsedRef {
     cells,
     badCells,
     manifests: [...manifestLine.matchAll(/`([^`]+)`/g)].map(m => m[1]),
+    manifestRule: manifestLine,
     perClassUnion: mixedLine.includes("to that class's own set") && mixedLine.includes('take the union of the results'),
   }
 }
@@ -217,6 +219,9 @@ function rule1Manifests(cr: string): string[] {
   const list = /manifest or build file \(([^)]*)\)/.exec(rule)?.[1] ?? ''
   return [...list.matchAll(/`([^`]+)`/g)].map(m => m[1])
 }
+
+/** The two sentences of the Manifests line that decide which changed paths keep the dependencies focus. */
+const MANIFEST_SENTENCES = ['A path matches by file name.', 'A lockfile alone is not a manifest change.'] as const
 
 /** Text the reference must never carry: it names `compliance` only as a lens name. */
 const REF_FORBIDDEN: ReadonlyArray<readonly [string, string]> = [
@@ -260,6 +265,7 @@ export function collectLevelRefDefects(ref: string, cr: string): string[] {
   const standardCode = parsed.cells.get('code')?.get('standard')
   if (standardCode !== undefined && standardCode.exception !== 'dependencies') out.push('code/standard: the manifest exception for dependencies is missing')
   if (!sameSet(parsed.manifests, MANIFESTS)) out.push(`the manifest list is "${parsed.manifests.join(', ')}", expected "${MANIFESTS.join(', ')}"`)
+  for (const sentence of MANIFEST_SENTENCES) if (!parsed.manifestRule.includes(sentence)) out.push(`the Manifests line lacks: ${sentence}`)
   const rule1 = rule1Manifests(cr)
   if (rule1.length === 0) out.push('no rule-1 manifest names were parsed from Step 1.1')
   for (const name of rule1) if (!parsed.manifests.includes(name)) out.push(`the manifest list lacks the rule-1 name ${name}`)
@@ -384,6 +390,8 @@ export function collectSimulationDefects(parsed: ParsedRef): string[] {
 // ---------------------------------------------------------------------------
 
 const BLOCK_ITEMS = [
+  "Narrow REVIEW_FOCUS_LIST, for every class, by this worktree's `GATE_LEVEL`.",
+  '`full` keeps it and reads nothing.',
   "Apply each class's row to that class's own set, then take the union of the results.",
   'A row only removes focuses.',
   'If the Read fails, or a row is missing or malformed, set `GATE_LEVEL` to `full` for every worktree of this run',
@@ -676,6 +684,11 @@ describe('the level reference holds the decided sets (AC-2, AC-3, AC-4, AC-6, AC
     expect(defects(seed(REF, ' (dependencies stays when a listed manifest changed)', ''))).toContain('code/standard: the manifest exception for dependencies is missing')
     expect(defects(seed(REF, '`Gemfile`, ', '')).join('\n')).toMatch(/the manifest list is/)
     expect(defects(seed(REF, ', `deno.json`', '')).join('\n')).toMatch(/the manifest list is/)
+    expect(defects(seed(REF, ' A path matches by file name.', ''))).toContain('the Manifests line lacks: A path matches by file name.')
+    expect(defects(seed(REF, 'A path matches by file name.', 'A path matches by directory name.'))).toContain('the Manifests line lacks: A path matches by file name.')
+    expect(defects(seed(REF, ' A lockfile alone is not a manifest change.', ''))).toContain('the Manifests line lacks: A lockfile alone is not a manifest change.')
+    expect(defects(seed(REF, 'A lockfile alone is not a manifest change.', 'A lockfile alone is a manifest change.')))
+      .toContain('the Manifests line lacks: A lockfile alone is not a manifest change.')
     expect(defects(seed(REF, 'keep: security, testing, reliability, compliance', 'keep: testing, reliability, compliance')))
       .toContain('code/lean: a keep cell without security')
     expect(defects(seed(REF, /(\| `docs-only` \| )keep: documentation, consistency, security/, '$1keep: documentation, consistency, security, compliance')))
@@ -741,6 +754,9 @@ describe('the command carries the gate-level block, outside the learning arms (A
     for (const item of BLOCK_ITEMS) {
       expect(defects(seed(ON, item, 'removed')), `removing "${item.slice(0, 40)}"`).toContain(`the block lacks: ${item.slice(0, 60)}`)
     }
+    expect(defects(seed(ON, 'Narrow REVIEW_FOCUS_LIST, for every class, by', 'Narrow REVIEW_FOCUS_LIST, for the `code` class only, by')))
+      .toContain(`the block lacks: ${BLOCK_ITEMS[0].slice(0, 60)}`)
+    expect(defects(seed(ON, '`full` keeps it and reads nothing.', '`full` keeps it and reads the level reference.'))).toContain('the block lacks: `full` keeps it and reads nothing.')
     expect(defects(seed(ON, SANCTIONED_RESOLUTION, 'd="$HOME/.claude";')).join('\n')).toMatch(/the read paragraph lacks: d="\$\{CLAUDE_CONFIG_DIR:-\}"/)
     expect(defects(seed(ON, '` with the Read tool.', '`.'))).toContain('the read paragraph lacks: with the Read tool')
     expect(defects(seed(ON, 'At `standard` or `lean`, once per run, ', ''))).toEqual([
