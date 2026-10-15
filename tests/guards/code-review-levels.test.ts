@@ -246,8 +246,9 @@ export function collectLevelRefDefects(ref: string, cr: string): string[] {
   const standardCode = parsed.cells.get('code')?.get('standard')
   if (standardCode !== undefined && standardCode.exception !== 'dependencies') out.push('code/standard: the manifest exception for dependencies is missing')
   if (!sameSet(parsed.manifests, MANIFESTS)) out.push(`the manifest list is "${parsed.manifests.join(', ')}", expected "${MANIFESTS.join(', ')}"`)
-  for (const name of rule1Manifests(cr)) if (!parsed.manifests.includes(name)) out.push(`the manifest list lacks the rule-1 name ${name}`)
-  if (rule1Manifests(cr).length === 0) out.push('no rule-1 manifest names were parsed from Step 1.1')
+  const rule1 = rule1Manifests(cr)
+  if (rule1.length === 0) out.push('no rule-1 manifest names were parsed from Step 1.1')
+  for (const name of rule1) if (!parsed.manifests.includes(name)) out.push(`the manifest list lacks the rule-1 name ${name}`)
   if (!parsed.perClassUnion) out.push('the mixed-diff rule is not "apply each class\'s row to that class\'s own set, then take the union of the results"')
   for (const [needle, what] of REF_FORBIDDEN) if (ref.includes(needle)) out.push(`the reference carries ${what}`)
   return out
@@ -268,6 +269,10 @@ interface Scenario {
 
 const changedPaths = (sc: Scenario): string[] => (sc.depPath === 'none' ? ['src/x.ts'] : ['src/x.ts', sc.depPath])
 
+/** Whether any changed path of the scenario is named like one of the manifests. */
+const changesManifest = (sc: Scenario, manifests: readonly string[]): boolean =>
+  changedPaths(sc).some(p => manifests.some(m => nameMatches(baseName(p), m)))
+
 /** The oracle's full-level set of one class: the set the command builds before it narrows. */
 function fullSetOf(cls: string, sc: Scenario): string[] {
   if (cls !== 'code') return [...(FULL_REDUCED[cls] ?? [])]
@@ -283,7 +288,7 @@ function expectedSet(level: string, classes: readonly string[], sc: Scenario): s
     const full = fullSetOf('code', sc)
     if (level === 'full') return full
     if (level === 'lean') return full.filter(n => ['security', 'testing', 'reliability', 'compliance'].includes(n))
-    const manifestChanged = changedPaths(sc).some(p => MANIFESTS.some(m => nameMatches(baseName(p), m)))
+    const manifestChanged = changesManifest(sc, MANIFESTS)
     return full.filter(n => n !== 'typescript' && (n !== 'dependencies' || manifestChanged))
   }
   return [...(EXPECTED_SETS[classes.join('+')]?.[level] ?? [])]
@@ -293,7 +298,7 @@ function expectedSet(level: string, classes: readonly string[], sc: Scenario): s
 export function simulate(level: string, classes: readonly string[], sc: Scenario, ref: ParsedRef): string[] {
   const fulls = classes.map(cls => fullSetOf(cls, sc))
   if (level === 'full') return unique(fulls.flat())
-  const manifestChanged = changedPaths(sc).some(p => ref.manifests.some(m => nameMatches(baseName(p), m)))
+  const manifestChanged = changesManifest(sc, ref.manifests)
   const narrow = (cls: string, set: readonly string[]): string[] => {
     const cell = ref.cells.get(cls)?.get(level)
     if (cell === undefined) return [...set]
@@ -437,7 +442,8 @@ export function collectFullIsTodayDefects(body: string): string[] {
     if (got === undefined) out.push(`no reduced set line for ${cls}`)
     else if (got !== focuses.join(', ')) out.push(`${cls} set is "${got}", expected "${focuses.join(', ')}"`)
   }
-  if (rule1Manifests(body).join(',') !== RULE1_MANIFESTS.join(',')) out.push(`the rule-1 manifests are "${rule1Manifests(body).join(', ')}", expected "${RULE1_MANIFESTS.join(', ')}"`)
+  const rule1 = rule1Manifests(body)
+  if (rule1.join(',') !== RULE1_MANIFESTS.join(',')) out.push(`the rule-1 manifests are "${rule1.join(', ')}", expected "${RULE1_MANIFESTS.join(', ')}"`)
   const s12 = step12(body)
   if (s12 === null) return [...out, 'no Step 1.2']
   const rows = tableRows(s12).slice(1)
