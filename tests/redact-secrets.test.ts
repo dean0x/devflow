@@ -587,9 +587,9 @@ describe('exit codes', () => {
     const result = spawnSync('node', [SCRIPT], {
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 5000,
+      timeout: SPAWN_BOUND_MS,
     });
-    expect(result.status).toBe(1);
+    expect(exitCodeOf(result)).toBe(1);
     // stdout must be empty on usage error (concrete check)
     expect(result.stdout ?? '').toBe('');
   });
@@ -598,9 +598,9 @@ describe('exit codes', () => {
     const result = spawnSync('node', [SCRIPT, '/tmp/one-arg-only'], {
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 5000,
+      timeout: SPAWN_BOUND_MS,
     });
-    expect(result.status).toBe(1);
+    expect(exitCodeOf(result)).toBe(1);
     expect(result.stdout ?? '').toBe('');
   });
 
@@ -1155,9 +1155,9 @@ describe('--emit: NO BODY on any non-zero exit (AC-3.5, §8.9 — every path)', 
     // The one failure that happens BEFORE the mode is known, so it cannot render a
     // D11-FAIL line — stdout must then be empty rather than partially framed.
     const result = spawnSync('node', [SCRIPT, '--emit'], {
-      encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000,
+      encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: SPAWN_BOUND_MS,
     });
-    expect(result.status).toBe(1);
+    expect(exitCodeOf(result)).toBe(1);
     expect(result.stdout ?? '').toBe('');
   });
 
@@ -1239,7 +1239,7 @@ describe('--emit: NO BODY on any non-zero exit (AC-3.5, §8.9 — every path)', 
     const spawnOpts: SpawnSyncOptionsWithStringEncoding = { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: SPAWN_BOUND_MS };
 
     const broken = spawnSync('node', ['--require', preload, SCRIPT, '--emit', input], spawnOpts);
-    expect(broken.status, `internal error must be exit 4.\n${broken.stderr}`).toBe(4);
+    expect(exitCodeOf(broken), `internal error must be exit 4.\n${broken.stderr}`).toBe(4);
     expect(
       broken.stdout ?? '',
       'an internal error must leave stdout entirely EMPTY — not a partial framing, not a body',
@@ -1251,7 +1251,7 @@ describe('--emit: NO BODY on any non-zero exit (AC-3.5, §8.9 — every path)', 
     // above is evidence about the seeded throw and not about a spawn that never
     // reached the script.
     const control = spawnSync('node', [SCRIPT, '--emit', input], spawnOpts);
-    expect(control.status).toBe(0);
+    expect(exitCodeOf(control)).toBe(0);
     expect((control.stdout ?? '').split('\n')[0]).toMatch(FRAMING_RE);
   });
 

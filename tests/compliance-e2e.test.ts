@@ -28,12 +28,17 @@ import { ALWAYS_PRESENT_REFS, COMPLIANCE_FRAMEWORKS } from '../src/core/complian
 
 const CLI = requireBuiltCli();
 
+/** The bound on one spawned child: a child that outlives it is killed. */
+const SUBPROCESS_TIMEOUT_MS = 30_000;
+
 /**
- * Two to four `node dist/cli.js` spawns run inside each scenario, and a scenario's
- * `beforeEach` runs up to three more, so the 5 s and 10 s defaults are not a budget
- * under load. Each spawn is bounded on its own (`timeout` in the runners below).
+ * Up to four `node dist/cli.js` spawns run in the body of one scenario (S23b), so the
+ * 5 s and 10 s defaults are not a budget under load: a scenario gets four spawn
+ * bounds. Its `beforeEach` runs up to three more spawns under `hookTimeout`, which
+ * gets the same budget.
  */
-const CLI_SCENARIO_TIMEOUT_MS = 120_000;
+const SPAWNS_PER_SCENARIO = 4;
+const CLI_SCENARIO_TIMEOUT_MS = SPAWNS_PER_SCENARIO * SUBPROCESS_TIMEOUT_MS;
 vi.setConfig({ testTimeout: CLI_SCENARIO_TIMEOUT_MS, hookTimeout: CLI_SCENARIO_TIMEOUT_MS });
 
 /**
@@ -61,7 +66,7 @@ function makeRunner(tmpHome: string) {
   return function runCli(...args: string[]): RunResult {
     const result = spawnSync('node', [CLI, ...args], {
       encoding: 'utf-8',
-      timeout: 60000,
+      timeout: SUBPROCESS_TIMEOUT_MS,
       // A temp HOME alone does not isolate `init`: a user-scope install resolves the
       // project git root from its cwd, and an inherited cwd is the developer's repo, so
       // every run rewrote that repo's .devflow/config.json, root .gitignore and
@@ -1303,7 +1308,7 @@ describe('S23 (TP-43, AC-37): a hipaa repository never changes the machine compl
   function initFromRepo(...args: string[]): RunResult {
     const result = spawnSync('node', [CLI, 'init', ...args], {
       encoding: 'utf-8',
-      timeout: 60000,
+      timeout: SUBPROCESS_TIMEOUT_MS,
       cwd: repo,
       env: { ...process.env, HOME: tmpHome, FORCE_COLOR: '0', NO_COLOR: '1', CI: '1' },
     });
@@ -1314,7 +1319,7 @@ describe('S23 (TP-43, AC-37): a hipaa repository never changes the machine compl
   function settingsLine(): string {
     const result = spawnSync('node', [path.join(tmpHome, '.devflow', 'scripts', 'resolve-settings.cjs'), repo], {
       encoding: 'utf-8',
-      timeout: 30000,
+      timeout: SUBPROCESS_TIMEOUT_MS,
       cwd: repo,
       env: { ...process.env, HOME: tmpHome },
     });

@@ -1139,9 +1139,6 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
   }
 
   describe('_HAS_JQ=false parity: the node fallback reaches the same outcome on every shape', () => {
-    // A case is one or two hook runs, and the node exec stall is paid once.
-    const CASE_BUDGET_MS = HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS;
-
     // One farm for the group: it holds symlinks only, and no case changes it.
     let farmBase: string;
     let env: Record<string, string>;
@@ -1168,7 +1165,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
 
       fs.rmSync(attemptsOf(homeDir), { force: true });
       expect(emittedNothing(run(sessionStart(tmpDir, 'resume'), homeDir, env).stdout)).toBe(true);
-    }, CASE_BUDGET_MS);
+    }, HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS); // two hook runs; the node exec stall is paid once
 
     // github, a zero-byte sentinel, hostile sentinel values, a broken manifest ⇒ nothing
     it.each<[string, TrackerSeed]>([
@@ -1183,7 +1180,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
       const { stdout, exitCode } = run(sessionStart(tmpDir), homeDir, env);
       expect(exitCode, `exit code for ${JSON.stringify(seed)}`).toBe(0);
       expect(emittedNothing(stdout), `node backend emitted for ${JSON.stringify(seed)}`).toBe(true);
-    }, CASE_BUDGET_MS);
+    }, HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS);
   });
 
   // ---------------------------------------------------------------------------
