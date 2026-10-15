@@ -517,6 +517,14 @@
       "description": "D-MAINTAIN-ON-DUE: the Curate agent body, src/assets/agents/curate.md, in bytes. Part 2's maintenance ladder, the claim-due output format and the close-out batch moved to references/curate/maintain.md, which a run reads only when claim-due hands out an entry; the body keeps the Part 2 heading, the claim heartbeat, rotate-observations, the claim-due call and the due-none line, and measures 16,690 (20,539 before the move). rotate-observations stays in the body so a run with nothing due still rotates. May be LOWERED, never raised."
     },
     {
+      "id": "validate-body-max",
+      "ceiling": 6049,
+      "pattern": "const VALIDATE_BODY_MAX_BYTES = 6_049",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/validate-lint-pack.test.ts",
+      "description": "The Validate agent body, src/assets/agents/validate.md, in bytes. It is hand-authored. The lean lint-pack wiring (the Lint pack section, the Output slot, the Input bullet and the digest line) is funded with named cuts in the same body and measures 6,041; the ceiling is the size before that change. The cut pool of the Output example is kept for later Validate edits. May be LOWERED, never raised: a later addition funds itself with a cut."
+    },
+    {
       "id": "command-bug-analysis-max",
       "ceiling": 24966,
       "pattern": "['bug-analysis', 'on', 24_966],",
