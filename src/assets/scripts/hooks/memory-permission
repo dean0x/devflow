@@ -7,6 +7,7 @@
 # the only path the worker's write may reach, and a deny rule for every path under it.
 # This helper holds what the worker and session-start-memory share, so one bash 3.2 test
 # run covers it (tests/shell-hooks-helpers.test.ts):
+#   path_occupied           whether a file, a folder or a link, even a dangling one, stands on a path
 #   staged_path_safe        whether a staged path can sit in those rules
 #   memory_settings_json    the settings JSON that carries the rules
 #   memory_staged_remove    the guarded removal of a folder or a link at the staged path
@@ -30,16 +31,26 @@
 #   denied  Claude Code refused the worker's write in two runs in a row
 MEMORY_NOTICE_REASONS="path denied"
 
+# path_occupied <path> — returns 0 when a file, a folder or a link stands on <path>, and 1
+# when nothing does. A link counts whatever it names, a dangling link included: the name is
+# taken, and a create or a move onto it is not safe. Call it inside an `if` or an `||` list.
+path_occupied() {
+  if [ -e "${1:-}" ] || [ -L "${1:-}" ]; then
+    return 0
+  fi
+  return 1
+}
+
 # staged_path_safe <path> — returns 0 when <path> can sit in the Edit rules as it is.
 # Sets STAGED_PATH_REFUSAL to "" when it can, `chars` when the path holds a character or
 # a segment the rules cannot carry, and `protected` when a .git folder lies above it (the
 # worker skips such a project and logs the reason). A .claude folder above it is fine: a
 # checkout in .claude/worktrees gets its working memory updated. The rule text carries no
 # quoting, so a character that has a meaning in a rule path is refused rather than quoted:
-# * ? [ ] \ ( ) " { } and every control character, including newline, tab and DEL. A path
-# that is not absolute, starts with //, or holds an empty, . or .. segment is refused too.
-# The path reaches a JSON string by plain concatenation, which is safe after this check:
-# $, backtick and % are inert there, and " \ and controls cannot occur.
+# * ? [ ] \ " { } and every control character, including newline, tab and DEL. A path that
+# is not absolute, starts with //, or holds an empty, . or .. segment is refused too. ( and )
+# are carried as they are. The path reaches a JSON string by plain concatenation, which is
+# safe after this check: $, backtick and % are inert there, and " \ and controls cannot occur.
 staged_path_safe() {
   local _p="${1:-}"
   STAGED_PATH_REFUSAL=""
@@ -54,7 +65,7 @@ staged_path_safe() {
     *[[:cntrl:]]*) STAGED_PATH_REFUSAL="chars"; return 1 ;;
   esac
   case "$_p" in
-    *'*'*|*'?'*|*'['*|*']'*|*'\'*|*'('*|*')'*|*'"'*|*'{'*|*'}'*) STAGED_PATH_REFUSAL="chars"; return 1 ;;
+    *'*'*|*'?'*|*'['*|*']'*|*'\'*|*'"'*|*'{'*|*'}'*) STAGED_PATH_REFUSAL="chars"; return 1 ;;
   esac
   case "$_p" in
     */.git/*) STAGED_PATH_REFUSAL="protected"; return 1 ;;
@@ -72,8 +83,12 @@ staged_path_safe() {
 # the Write of the staged file succeeds, and a Write to <staged>/x, <staged>/a/b,
 # <staged>/a/b/c/d/e, <staged>/.hidden or <staged>/../<name> is refused. The deny is
 # `/*` and not `/**`: `/**` was measured to refuse the staged file too (2.1.269 and
-# 2.1.299, 0 of 3 writes), and then no memory is written. Prints nothing and returns 1
-# for a path staged_path_safe refuses, so a rule is never built for an unchecked path.
+# 2.1.299, 0 of 3 writes), and then no memory is written. A path with two pairs of ( ) in it
+# (`obs ( )/proj (copy)`) carries both rules as they are: on 2.1.269 with the legacy argv
+# and on 2.1.299 with the lean argv, the Write of the staged file succeeded and a Write to
+# <staged>/x, <staged>/a/b, <staged>/.hidden, <staged>/../<name> and to a file in the
+# project root was refused. Prints nothing and returns 1 for a path staged_path_safe
+# refuses, so a rule is never built for an unchecked path.
 memory_settings_json() {
   local _p="${1:-}"
   staged_path_safe "$_p" || return 1
@@ -141,10 +156,37 @@ memory_staged_remove() {
   else
     rm -f -- "$_staged" 2>/dev/null || true
   fi
-  if [ -e "$_staged" ] || [ -L "$_staged" ]; then
+  if path_occupied "$_staged"; then
     STAGED_REMOVE_REFUSAL="rm"; return 1
   fi
   STAGED_REMOVED="$_kind"
+  return 0
+}
+
+# The most characters a result field may carry into the log line. A longer value reads
+# `unknown` (a status code is left out).
+MEMORY_RESULT_DENIALS_MAX_DIGITS=6
+MEMORY_RESULT_TURNS_MAX_DIGITS=6
+MEMORY_RESULT_STATUS_MAX_DIGITS=3
+MEMORY_RESULT_SUBTYPE_MAX_CHARS=40
+
+# _memory_field_within <digits|letters> <value> <max> — sets _MEMORY_FIELD to <value> when
+# it is one or more characters of the named set and at most <max> of them, and to `unknown`
+# otherwise. `digits` is 0-9; `letters` is a-z and _. Both are spelled out, since a range
+# collates by locale on bash 3.2. A builtin only, so it forks nothing. Always returns 0.
+_memory_field_within() {
+  local _set="${1:-}" _value="${2:-}" _max="${3:-0}"
+  _MEMORY_FIELD="unknown"
+  case "$_set" in
+    digits)
+      case "$_value" in ''|*[!0123456789]*) return 0 ;; esac
+      ;;
+    letters)
+      case "$_value" in ''|*[!abcdefghijklmnopqrstuvwxyz_]*) return 0 ;; esac
+      ;;
+    *) return 0 ;;
+  esac
+  if [ "${#_value}" -le "$_max" ]; then _MEMORY_FIELD="$_value"; fi
   return 0
 }
 
@@ -175,30 +217,19 @@ memory_result_summary() {
     MEMORY_RESULT_LINE="Result: not reported (unparseable)"
     return 0
   fi
-  case "$_den" in
-    ''|*[!0123456789]*) _den="unknown" ;;
-  esac
-  if [ "${#_den}" -gt 6 ]; then _den="unknown"; fi
+  _memory_field_within digits "$_den" "$MEMORY_RESULT_DENIALS_MAX_DIGITS"; _den="$_MEMORY_FIELD"
   _sub=$(json_string_field_file "$_f" "subtype") || _sub=""
-  case "$_sub" in
-    ''|*[!abcdefghijklmnopqrstuvwxyz_]*) _sub="unknown" ;;
-  esac
-  if [ "${#_sub}" -gt 40 ]; then _sub="unknown"; fi
+  _memory_field_within letters "$_sub" "$MEMORY_RESULT_SUBTYPE_MAX_CHARS"; _sub="$_MEMORY_FIELD"
   _err=$(json_field_file "$_f" "is_error" "") || _err=""
   case "$_err" in
     true|false) ;;
     *) _err="unknown" ;;
   esac
   _turns=$(json_field_file "$_f" "num_turns" "") || _turns=""
-  case "$_turns" in
-    ''|*[!0123456789]*) _turns="unknown" ;;
-  esac
-  if [ "${#_turns}" -gt 6 ]; then _turns="unknown"; fi
+  _memory_field_within digits "$_turns" "$MEMORY_RESULT_TURNS_MAX_DIGITS"; _turns="$_MEMORY_FIELD"
   _status=$(json_field_file "$_f" "api_error_status" "") || _status=""
-  case "$_status" in
-    ''|*[!0123456789]*) ;;
-    *) if [ "${#_status}" -le 3 ]; then _api=", api_status=${_status}"; fi ;;
-  esac
+  _memory_field_within digits "$_status" "$MEMORY_RESULT_STATUS_MAX_DIGITS"
+  if [ "$_MEMORY_FIELD" != "unknown" ]; then _api=", api_status=${_MEMORY_FIELD}"; fi
   MEMORY_RESULT_LINE="Result: ${_sub}, is_error=${_err}, ${_turns} turn(s), ${_den} permission denial(s)${_api}"
   MEMORY_RESULT_DENIALS="$_den"
   return 0
@@ -217,7 +248,7 @@ memory_notice_write() {
   esac
   [ -d "$_dir" ] || return 0
   _file="$_dir/.worker-notice-$_reason"
-  if [ ! -e "$_file" ] && [ ! -L "$_file" ] && [ ! -e "$_file.shown" ] && [ ! -L "$_file.shown" ] \
+  if ! path_occupied "$_file" && ! path_occupied "$_file.shown" \
      && df_no_symlink_below "$_root" "$_file" "$_file.shown"; then
     ( umask 077; set -C; printf '%s\n' "$_reason" > "$_file" ) 2>/dev/null || true
   fi
@@ -235,12 +266,12 @@ memory_notice_clear() {
   esac
   _file="$_dir/.worker-notice-$_reason"
   _mark="$_dir/.worker-denied-once"
-  if [ -e "$_file" ] || [ -L "$_file" ] || [ -e "$_file.shown" ] || [ -L "$_file.shown" ]; then
+  if path_occupied "$_file" || path_occupied "$_file.shown"; then
     if df_no_symlink_below "$_root" "$_file" "$_file.shown"; then
       rm -f "$_file" "$_file.shown" 2>/dev/null || true
     fi
   fi
-  if [ "$_reason" = "denied" ] && { [ -e "$_mark" ] || [ -L "$_mark" ]; }; then
+  if [ "$_reason" = "denied" ] && path_occupied "$_mark"; then
     if df_no_symlink_below "$_root" "$_mark"; then
       rm -f "$_mark" 2>/dev/null || true
     fi
@@ -256,7 +287,7 @@ memory_denied_seen() {
   local _dir="${1:-}" _root="${2:-}" _mark
   [ -d "$_dir" ] || return 0
   _mark="$_dir/.worker-denied-once"
-  if [ -e "$_mark" ] || [ -L "$_mark" ]; then
+  if path_occupied "$_mark"; then
     memory_notice_write "$_dir" "$_root" "denied"
   elif df_no_symlink_below "$_root" "$_mark"; then
     ( umask 077; set -C; : > "$_mark" ) 2>/dev/null || true
@@ -304,7 +335,7 @@ memory_notice_read() {
       log "Worker notice for reason ${_reason} ignored: its content does not fit the reason"
     fi
     if df_no_symlink_below "$_root" "$_file" "$_file.shown"; then
-      if [ ! -e "$_file.shown" ] && [ ! -L "$_file.shown" ]; then
+      if ! path_occupied "$_file.shown"; then
         mv "$_file" "$_file.shown" 2>/dev/null || true
       else
         rm -f "$_file" 2>/dev/null || true

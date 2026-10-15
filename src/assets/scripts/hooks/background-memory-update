@@ -383,8 +383,8 @@ LOCK_HELD="true"
 # listing, no pattern), then `rm -f` clears a stale regular file. Whatever still stands
 # there stops the run here instead: no LLM call, the batch and the queue untouched
 # (nothing has been claimed yet), the lock released by the EXIT trap, a one-time notice
-# for the user, and a Run line that says `failed` and `removed=none`. `-e` or `-L`, so a
-# link there counts as present.
+# for the user, and a Run line that says `failed` and `removed=none`. A link there counts
+# as present (path_occupied).
 if ! memory_staged_remove "$MEMORY_DIR" "$PROJECT_ROOT" "$STAGED_FILE"; then
   RUN_RESULT="failed"
   log "SKIP: $STAGED_FILE is a folder or a link that was not removed (${STAGED_REMOVE_REFUSAL}); remove it to resume memory updates; no LLM run"
@@ -393,10 +393,10 @@ if ! memory_staged_remove "$MEMORY_DIR" "$PROJECT_ROOT" "$STAGED_FILE"; then
 fi
 RUN_REMOVED="$STAGED_REMOVED"
 if [ "$STAGED_REMOVED" != "none" ]; then
-  log "Removed a $STAGED_REMOVED from $STAGED_FILE before the run"
+  log "Removed a ${STAGED_REMOVED/dir/folder} from $STAGED_FILE before the run"
 fi
 rm -f "$STAGED_FILE" 2>/dev/null || true
-if [ -e "$STAGED_FILE" ] || [ -L "$STAGED_FILE" ]; then
+if path_occupied "$STAGED_FILE"; then
   RUN_RESULT="failed"
   log "SKIP: $STAGED_FILE could not be removed — a Write to it would fail, so no LLM run; the batch and the queue are left as they are"
   memory_notice_write "$MEMORY_DIR" "$PROJECT_ROOT" path
@@ -972,7 +972,7 @@ fi
 # cleared, but the prompt took time to build. A file or a link there now, or a link
 # anywhere on its way, was put there since, so the run does not start; the batch stays
 # in .processing for recovery.
-if [ -e "$STAGED_FILE" ] || [ -L "$STAGED_FILE" ] || ! df_no_symlink_below "$PROJECT_ROOT" "$STAGED_FILE"; then
+if path_occupied "$STAGED_FILE" || ! df_no_symlink_below "$PROJECT_ROOT" "$STAGED_FILE"; then
   RUN_RESULT="failed"
   log "SKIP: the staged path changed before the run; leaving .processing for recovery"
   exit 0
@@ -1071,7 +1071,7 @@ esac
 if [ -L "$STAGED_FILE" ] || [ -d "$STAGED_FILE" ]; then
   if memory_staged_remove "$MEMORY_DIR" "$PROJECT_ROOT" "$STAGED_FILE"; then
     RUN_REMOVED="$STAGED_REMOVED"
-    log "FAIL: a $STAGED_REMOVED stood at $STAGED_FILE after the run and was removed; the run is failed"
+    log "FAIL: a ${STAGED_REMOVED/dir/folder} stood at $STAGED_FILE after the run and was removed; the run is failed"
   else
     log "FAIL: a folder or a link stands at $STAGED_FILE after the run and was not removed (${STAGED_REMOVE_REFUSAL}); remove it to resume memory updates"
   fi

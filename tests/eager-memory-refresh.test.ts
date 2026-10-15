@@ -4180,8 +4180,6 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
       ['an opening bracket', 'a[b'],
       ['a closing bracket', 'a]b'],
       ['a backslash', 'a\\b'],
-      ['an opening parenthesis', 'a(b'],
-      ['a closing parenthesis', 'a)b'],
       ['a double quote', 'a"b'],
       ['an opening brace', 'a{b'],
       ['a closing brace', 'a}b'],
@@ -4223,6 +4221,31 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
       expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort, staged));
       expect(fs.existsSync(path.join(memory, 'WORKING-MEMORY.md')), 'the memory was written').toBe(true);
       expect(fs.existsSync(path.join(memory, '.worker-notice-path'))).toBe(false);
+    });
+
+    it('a project folder that holds parentheses is run, and the rule carries the path as it is', () => {
+      const { project, memory } = makeProject('obs ( )', 'proj (copy)');
+      const rec = createRecordingClaude(shimDir, memory, HEALTHY_VERSION);
+
+      runWorkerAt(project);
+
+      const staged = path.join(fs.realpathSync(project), '.devflow', 'memory', 'WORKING-MEMORY.md.new');
+      expect(staged, 'the path holds both parentheses').toContain('obs ( )/proj (copy)/');
+      expect(recordedArgv(rec), 'allow Edit(//<staged>), deny Edit(//<staged>/*), both with the parentheses').toEqual(
+        leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort, staged),
+      );
+      expect(fs.existsSync(path.join(memory, 'WORKING-MEMORY.md')), 'the memory was written').toBe(true);
+      expect(fs.existsSync(path.join(memory, '.worker-notice-path')), 'no path notice').toBe(false);
+    });
+
+    it('a project folder that holds parentheses and a refused character is skipped with a path notice', () => {
+      const { project, memory } = makeProject('obs ( )', 'pr*oj');
+      createRecordingClaude(shimDir, memory, HEALTHY_VERSION);
+
+      runWorkerAt(project);
+
+      expect(fs.existsSync(path.join(shimDir, 'argv.txt')), 'no -p call').toBe(false);
+      expect(fs.readFileSync(path.join(memory, '.worker-notice-path'), 'utf-8')).toBe('path\n');
     });
 
     it('a project folder that holds a space and a comma is run, and the rule carries the path as it is', () => {
@@ -4290,6 +4313,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
       expect(recordedArgv(rec), 'the -p call happened').toBeDefined();
       expectSwapCompleted();
+      expect(workerLog()).toContain(`Removed a folder from ${ruleStaged()} before the run`);
       expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=lean result=updated denials=unknown removed=dir');
     });
 
@@ -4319,6 +4343,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
       expectSwapCompleted();
       expect(fs.readFileSync(path.join(outside, 'keep.txt'), 'utf-8'), 'what the link named is untouched').toBe('keep');
       expect(fs.readdirSync(outside)).toEqual(['keep.txt']);
+      expect(workerLog()).toContain(`Removed a link from ${ruleStaged()} before the run`);
       expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=lean result=updated denials=unknown removed=link');
     });
 
@@ -4347,7 +4372,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
       expect(recordedArgv(rec), 'the -p call happened').toBeDefined();
       expect(present(stagedFile), 'the folder is gone').toBe(false);
-      expect(workerLog()).toContain(`FAIL: a dir stood at ${ruleStaged()} after the run and was removed; the run is failed`);
+      expect(workerLog()).toContain(`FAIL: a folder stood at ${ruleStaged()} after the run and was removed; the run is failed`);
       expect(workerLog()).toContain('FAIL: verification failed — leaving .processing for recovery');
       expect(onlyRunLine()).toBe('Run: cli=2.1.293 argv=lean result=failed denials=unknown removed=dir');
       expectClaimedRowsPreserved(projectDir, claimed);
@@ -4396,9 +4421,12 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
       expect(fs.existsSync(path.join(memoryDir(), '.worker-notice-path')), 'a permitted run clears the notice').toBe(false);
     });
 
-    it('stops with no claude call when a link is planted at the staged path after the lock', () => {
+    it.each([
+      ['a file', true],
+      ['nothing', false],
+    ] as const)('stops with no claude call when a link to %s is planted at the staged path after the lock', (_label, targetExists) => {
       const outside = path.join(shimDir, 'outside.txt');
-      fs.writeFileSync(outside, 'keep');
+      if (targetExists) fs.writeFileSync(outside, 'keep');
       // The worker asks git for the head after it claims the queue, which is after it cleared the
       // staged path and before the spawn: the fake git plants the link there, once.
       const realGit = resolveOnPath('git', process.env.PATH ?? '/usr/bin:/bin');
@@ -4419,7 +4447,8 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
       expect(workerLog()).toContain('SKIP: the staged path changed before the run; leaving .processing for recovery');
       expect(onlyRunLine(), 'a claimed batch left for recovery is a failed run').toBe('Run: cli=2.1.293 argv=none result=failed denials=n/a removed=none');
       expect(fs.lstatSync(stagedFile).isSymbolicLink(), 'the planted link is left in place').toBe(true);
-      expect(fs.readFileSync(outside, 'utf-8'), 'its target is untouched').toBe('keep');
+      if (targetExists) expect(fs.readFileSync(outside, 'utf-8'), 'its target is untouched').toBe('keep');
+      else expect(fs.existsSync(outside), 'nothing is created through the link').toBe(false);
       expectClaimedRowsPreserved(projectDir, claimed);
     });
   });

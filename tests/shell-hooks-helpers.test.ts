@@ -217,8 +217,6 @@ describe('memory-permission: staged_path_safe', () => {
     ['an opening bracket', '/p/a[b/.devflow/memory/WORKING-MEMORY.md.new'],
     ['a closing bracket', '/p/a]b/.devflow/memory/WORKING-MEMORY.md.new'],
     ['a backslash', '/p/a\\b/.devflow/memory/WORKING-MEMORY.md.new'],
-    ['an opening parenthesis', '/p/a(b/.devflow/memory/WORKING-MEMORY.md.new'],
-    ['a closing parenthesis', '/p/a)b/.devflow/memory/WORKING-MEMORY.md.new'],
     ['a double quote', '/p/a"b/.devflow/memory/WORKING-MEMORY.md.new'],
     ['an opening brace', '/p/a{b/.devflow/memory/WORKING-MEMORY.md.new'],
     ['a closing brace', '/p/a}b/.devflow/memory/WORKING-MEMORY.md.new'],
@@ -242,6 +240,17 @@ describe('memory-permission: staged_path_safe', () => {
     const accepted = [
       '/p/.claude/worktrees/w/.devflow/memory/WORKING-MEMORY.md.new',
       '/p/.claude/.devflow/memory/WORKING-MEMORY.md.new',
+    ];
+    expect(safe(...accepted)).toEqual(accepted.map(() => 'ok:'));
+  });
+
+  it('accepts a path with an opening or a closing parenthesis, or both, which the rule carries as they are', () => {
+    const accepted = [
+      '/Users/dev/obs ( )/proj/.devflow/memory/WORKING-MEMORY.md.new',
+      '/Users/dev/proj (copy)/.devflow/memory/WORKING-MEMORY.md.new',
+      '/Users/dev/a(b/.devflow/memory/WORKING-MEMORY.md.new',
+      '/Users/dev/a)b/.devflow/memory/WORKING-MEMORY.md.new',
+      '/Users/dev/(x)/(y)/.devflow/memory/WORKING-MEMORY.md.new',
     ];
     expect(safe(...accepted)).toEqual(accepted.map(() => 'ok:'));
   });
@@ -293,11 +302,86 @@ describe('memory-permission: memory_settings_json', () => {
     }
   });
 
-  it('prints nothing and fails for a path the check refuses, so no rule is built for it', () => {
-    const run = build('/Users/dev/pr*oj/.devflow/memory/WORKING-MEMORY.md.new');
+  it('carries the parentheses of a path in both rules as they are: the exact allow and deny text, in valid JSON', () => {
+    const staged = '/Users/dev/obs ( )/proj (copy)/.devflow/memory/WORKING-MEMORY.md.new';
+    const run = build(staged);
+
+    expect(run.status).toBe(0);
+    expect(run.stdout).toBe(
+      '{"permissions":{"allow":["Edit(//Users/dev/obs ( )/proj (copy)/.devflow/memory/WORKING-MEMORY.md.new)"],'
+      + '"deny":["Edit(//Users/dev/obs ( )/proj (copy)/.devflow/memory/WORKING-MEMORY.md.new/*)"]},"disableAllHooks":true}',
+    );
+    const parsed = JSON.parse(run.stdout) as { permissions: { allow: string[]; deny: string[] } };
+    expect(parsed.permissions.allow, 'one allow rule, for the staged file only').toEqual([`Edit(/${staged})`]);
+    expect(parsed.permissions.deny, 'one deny rule, for every path under the staged file').toEqual([`Edit(/${staged}/*)`]);
+  });
+
+  it.each([
+    ['an asterisk', '/Users/dev/pr*oj'],
+    ['a question mark', '/Users/dev/pr?oj'],
+    ['an opening bracket', '/Users/dev/pr[oj'],
+    ['a closing bracket', '/Users/dev/pr]oj'],
+    ['a backslash', '/Users/dev/pr\\oj'],
+    ['a double quote', '/Users/dev/pr"oj'],
+    ['an opening brace', '/Users/dev/pr{oj'],
+    ['a closing brace', '/Users/dev/pr}oj'],
+    ['a newline', '/Users/dev/pr\noj'],
+  ])('prints nothing and fails for a path with %s, so no rule is built for it', (_label, project) => {
+    const run = build(`${project}/.devflow/memory/WORKING-MEMORY.md.new`);
 
     expect(run.stdout).toBe('');
     expect(run.status).not.toBe(0);
+  });
+
+  it('prints nothing and fails for a path with parentheses and a refused character, so no rule is built for it', () => {
+    const run = build('/Users/dev/obs ( )*/proj/.devflow/memory/WORKING-MEMORY.md.new');
+
+    expect(run.stdout).toBe('');
+    expect(run.status).not.toBe(0);
+  });
+});
+
+describe('memory-permission: path_occupied', () => {
+  let tmp: string;
+  beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'memory-occupied-')); });
+  afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
+
+  /** `occupied` or `free` for each path, from one call under `set -e`: the predicate is read inside an `if`. */
+  const verdicts = (...paths: string[]): string[] =>
+    inHook(
+      'for p in "$@"; do if path_occupied "$p"; then echo occupied; else echo free; fi; done',
+      paths,
+    ).stdout.trim().split('\n');
+
+  it('counts a file, a folder, and a link to either as occupied', () => {
+    const file = path.join(tmp, 'file');
+    const folder = path.join(tmp, 'folder');
+    fs.writeFileSync(file, 'x');
+    fs.mkdirSync(folder);
+    fs.symlinkSync(file, path.join(tmp, 'link-to-file'));
+    fs.symlinkSync(folder, path.join(tmp, 'link-to-folder'));
+
+    expect(verdicts(file, folder, path.join(tmp, 'link-to-file'), path.join(tmp, 'link-to-folder')))
+      .toEqual(['occupied', 'occupied', 'occupied', 'occupied']);
+  });
+
+  it('counts a dangling link as occupied: the name is taken although nothing stands behind it', () => {
+    const dangling = path.join(tmp, 'dangling');
+    fs.symlinkSync(path.join(tmp, 'absent'), dangling);
+
+    expect(fs.existsSync(dangling), 'the link names nothing').toBe(false);
+    expect(verdicts(dangling)).toEqual(['occupied']);
+  });
+
+  it('counts a missing path and an empty path as free', () => {
+    expect(verdicts(path.join(tmp, 'absent'), '')).toEqual(['free', 'free']);
+  });
+
+  it('ends in a status the caller reads in an if, and does not abort a hook that runs under set -e', () => {
+    const run = inHook('if path_occupied "$1"; then echo occupied; fi\nif ! path_occupied "$1"; then echo free; fi\necho after', [path.join(tmp, 'absent')]);
+
+    expect(run.status).toBe(0);
+    expect(run.stdout.trim().split('\n')).toEqual(['free', 'after']);
   });
 });
 
@@ -546,6 +630,20 @@ describe('memory-permission: memory_result_summary', () => {
         expect(longStatus).toBe('Result: success, is_error=true, 1 turn(s), 0 permission denial(s)');
       }, 60_000);
 
+      it('keeps each field within its length cap: a value one character over the cap reads unknown or is left out', () => {
+        const within = summarise(JSON.stringify({
+          subtype: 'a'.repeat(40), is_error: true, num_turns: 999999, api_error_status: 599,
+          permission_denials: [{}, {}, {}],
+        }));
+        expect(within[0]).toBe(`Result: ${'a'.repeat(40)}, is_error=true, 999999 turn(s), 3 permission denial(s), api_status=599`);
+
+        const over = summarise(JSON.stringify({
+          subtype: 'a'.repeat(41), is_error: true, num_turns: 1000000, api_error_status: 1000,
+          permission_denials: [],
+        }));
+        expect(over[0]).toBe('Result: unknown, is_error=true, unknown turn(s), 0 permission denial(s)');
+      }, 60_000);
+
       it('names a file with no content, one that does not parse, and a missing file apart', () => {
         expect(summarise('')[0]).toBe('Result: not reported (empty)');
         expect(summarise('not-json{{{')[0]).toBe('Result: not reported (unparseable)');
@@ -705,6 +803,46 @@ describe('memory-permission: the one-time notice', () => {
     fs.symlinkSync(target, pending('denied'));
     run('memory_notice_write "$MEM" "$ROOT" denied');
     expect(fs.readFileSync(target, 'utf-8'), 'a link at the name is not written through').toBe('keep');
+  });
+
+  describe('a dangling link at a notice name is a name that is taken', () => {
+    const dangling = (file: string): string => {
+      const target = path.join(root, 'absent-target');
+      fs.symlinkSync(target, file);
+      return target;
+    };
+
+    it('memory_notice_write writes nothing through a dangling link at the notice, and none when its shown marker is one', () => {
+      const target = dangling(pending('path'));
+      run('memory_notice_write "$MEM" "$ROOT" path');
+      expect(fs.existsSync(target), 'nothing is created through the link').toBe(false);
+      expect(fs.lstatSync(pending('path')).isSymbolicLink(), 'the link is left in place').toBe(true);
+
+      fs.rmSync(pending('path'));
+      const shownTarget = dangling(shown('path'));
+      run('memory_notice_write "$MEM" "$ROOT" path');
+      expect(fs.existsSync(pending('path')), 'a shown marker, even a dangling link, keeps the reason quiet').toBe(false);
+      expect(fs.existsSync(shownTarget)).toBe(false);
+    });
+
+    it('memory_notice_clear takes a dangling link at each name as present, and the link guard leaves it in place', () => {
+      const targets = [pending('denied'), shown('denied'), path.join(memory, '.worker-denied-once')].map(dangling);
+
+      run('memory_notice_clear "$MEM" "$ROOT" denied');
+
+      expect(fs.readdirSync(memory).sort(), 'no link is followed or removed').toEqual(
+        ['.worker-denied-once', '.worker-notice-denied', '.worker-notice-denied.shown'],
+      );
+      for (const target of targets) expect(fs.existsSync(target)).toBe(false);
+    });
+
+    it('memory_denied_seen counts a dangling link at the denied-once marker as the first denied run', () => {
+      dangling(path.join(memory, '.worker-denied-once'));
+
+      run('memory_denied_seen "$MEM" "$ROOT"');
+
+      expect(fs.existsSync(pending('denied')), 'the second denied run raises the notice').toBe(true);
+    });
   });
 
   it('leaves a FIFO at the notice name alone and does not wait on it', () => {
