@@ -360,7 +360,7 @@ export const AGENT_CONFIG: Readonly<Record<string, AgentConfigRow>> = {
     policy: { kind: 'allow', tools: ['Bash', 'Read', 'Grep', 'Glob'] },
     omitClaudeMd: true,
     skills: ['worktree-support'],
-    digest: ['context-economy'],
+    digest: ['context-economy', 'untrusted-input'],
   },
   synthesize: {
     model: 'haiku',

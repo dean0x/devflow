@@ -54,7 +54,7 @@ const EXEMPT_MARKERS: Readonly<Record<string, readonly string[]>> = {
   // D-CODE-VARIANTS: the variants share Code's Output section from one partial, so they name the same exempt fields.
   fix: ['`## Verification` block', '`commitShas`', '`unresolved`'],
   refactor: ['`## Verification` block', '`commitShas`', '`unresolved`'],
-  validate: ['`HEAD:` line', '| Command | Status | Exit | Duration |', '30 lines per failing command'],
+  validate: ['`HEAD:` line', '| Command | Status | Exit | Duration |', '`Lint pack:` line', '30 lines per failing command'],
   test: ['### Test Plan Evidence', '| ID | TP | Type |', '### Evidence Log'],
   harden: ['`### Status` line', '`status` return field'],
   polish: ['completion status', 'commits'],
