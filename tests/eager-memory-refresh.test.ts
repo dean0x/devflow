@@ -3567,7 +3567,11 @@ const FORBIDDEN_ARGV = [
   '--dangerously-skip-permissions', '--allow-dangerously-skip-permissions', 'bypassPermissions', '--allowedTools',
 ] as const;
 
-/** The lowest CLI version the worker runs on: the one value `devflow init` states and the hook holds equal (tests/memory.test.ts). */
+/**
+ * The lowest CLI version the worker runs on, which is the lowest one measured: the one
+ * value `devflow init` states and the hook holds equal (tests/memory.test.ts). The cases
+ * below test just under it, between it and the lean floor, and exactly on it.
+ */
 const PERMISSION_FLOOR = MEMORY_MIN_PERMISSION_VERSION;
 
 /** The lowest CLI version that gets the lean form (MEMORY_MIN_CLAUDE_VERSION in the hook). */

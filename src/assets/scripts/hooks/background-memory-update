@@ -190,10 +190,10 @@ fi
 # MEMORY_MIN_CLAUDE_VERSION up. A CLI older than that, or one whose version cannot be
 # read, gets the legacy argv instead, because one flag a CLI does not know fails every
 # run. A CLI whose version is read and is older than MEMORY_MIN_PERMISSION_VERSION, the
-# lowest version on which the worker's write is limited to its staged file, gets no run
-# at all: the queue is kept and the run's `Run:` line says below-floor. `devflow init`
-# states this version; src/cli/commands/memory.ts holds the same value, and a test holds
-# the two equal. The probe runs here, once $CLAUDE_BIN has resolved and the link check has
+# lowest version on which the worker's write was measured to be limited to its staged
+# file, gets no run at all: the queue is kept and the run's `Run:` line says below-floor.
+# `devflow init` states this version; src/cli/commands/memory.ts holds the same value, and
+# a test holds the two equal. The probe runs here, once $CLAUDE_BIN has resolved and the link check has
 # passed, and before the lock is taken, so a slow or hung `--version` can never extend
 # the lock's hold. It is bounded by DEVFLOW_BG_VERSION_PROBE_SECS (default 10, at most
 # 60; tests override it as they do DEVFLOW_BG_WATCHDOG_SECS) with the watchdog's
@@ -203,6 +203,9 @@ fi
 # aborts the caller, so each helper below ends in an explicit return status and is
 # called inside an `if` condition.
 MEMORY_MIN_CLAUDE_VERSION="2.1.286"
+# The lowest version measured, 2.1.269 (2026-10-15, with 2.1.280, 2.1.286 and 2.1.299): on
+# each, the staged file was written and every other path was refused. The cells are in
+# docs/reference/platform-assumptions.md.
 MEMORY_MIN_PERMISSION_VERSION="2.1.269"
 
 # Sets CLAUDE_VERSION_TEXT to the first 512 bytes `claude --version` printed ("" on any
@@ -935,8 +938,8 @@ fi
 # --safe-mode, --max-turns, --disable-slash-commands, --strict-mcp-config or
 # --mcp-config, none of which is verified on older CLIs, so on it effort is not
 # applied, MCP servers stay loaded and there is no turn cap. A CLI below
-# MEMORY_MIN_PERMISSION_VERSION gets no run at all: on it the rule is not known to limit
-# the write.
+# MEMORY_MIN_PERMISSION_VERSION gets no run at all: the limit was measured from that
+# version up.
 #
 # The turns input has no byte cap: the queue holds every turn whole by design, and the
 # prompt is bounded by the newest-20-rows window above and the 64 KB existing-memory
