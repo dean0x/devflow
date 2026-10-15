@@ -4919,4 +4919,300 @@ describe('S31: a malformed queue line drops only itself (#528)', { timeout: LEAN
     expect(prompt).toContain('NODE-PROMPT');
     expect(prompt).toContain('NODE-ANSWER');
   });
+
+  it('f: on the node backend a leftover batch with no readable line is removed, and no LLM run starts', () => {
+    writeLines(processingFile, ['not json', '{"role":', '}{']);
+    const fullPath = `${shimDir}:${buildToolFarm([], { node: process.execPath })}`;
+    expect(resolveOnPath('jq', fullPath), 'no jq on the PATH').toBeUndefined();
+    expect(resolveOnPath('node', fullPath), 'node on the PATH').toBeDefined();
+
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir, { PATH: fullPath });
+
+    expect(exitCode).toBe(0);
+    expect(readLog()).toContain('No parseable turns');
+    expect(fs.existsSync(processingFile), 'the batch is removed').toBe(false);
+    expect(fs.existsSync(stdinCapture), 'no LLM run started').toBe(false);
+  });
 });
+
+// =============================================================================
+// S32 — A JSON parser that exits non-zero keeps the batch and the queue (#523)
+//
+// Exit 0 with no readable row still means that the batch holds no turn, and the worker
+// removes it (S31 c, f). A parser that exits non-zero has said nothing about the turns:
+// the worker keeps them, logs a SKIP line that names the failure and runs no LLM. On the
+// leftover-batch path the queue is already merged into the batch when the parser runs, so
+// the batch then holds both byte for byte. On the fresh-queue path the orphan check keeps
+// the queue where it is.
+//
+// The fake parser fails only the call whose arguments hold PARSER_FAIL_ON, and runs the
+// real tool for every other call. json-parse finds a parser with `command -v` and the
+// worker calls it elsewhere, so a parser that failed everywhere would stop the run at
+// another step. The shim writes `parser-failed` when it fails, which shows that the
+// failing call happened.
+// =============================================================================
+describe('S32: a JSON parser that exits non-zero keeps the batch and the queue (#523)', { timeout: LEAN_RUN_TIMEOUT_MS }, () => {
+  type Backend = 'jq' | 'node';
+
+  /** What each backend's call holds: the extraction only, the orphan check only. */
+  const FAIL_ON: Record<Backend, { extract: string; orphan: string }> = {
+    jq: { extract: 'gsub', orphan: 'select(.role=="assistant"' },
+    node: { extract: '/dev/stdin', orphan: 'process.argv' },
+  };
+  const backends: Backend[] = HAS_JQ ? ['jq', 'node'] : ['node'];
+
+  let projectDir: string;
+  let homeDir: string;
+  let shimDir: string;
+  let memoryDir: string;
+  let queueFile: string;
+  let processingFile: string;
+  let stagedFile: string;
+  let stdinCapture: string;
+
+  beforeEach(() => {
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s32-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s32-home-'));
+    shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s32-shim-'));
+    memoryDir = path.join(projectDir, '.devflow', 'memory');
+    queueFile = path.join(memoryDir, '.pending-turns.jsonl');
+    processingFile = path.join(memoryDir, '.pending-turns.processing');
+    stagedFile = path.join(memoryDir, 'WORKING-MEMORY.md.new');
+    fs.mkdirSync(memoryDir, { recursive: true });
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'dream'), { recursive: true });
+    initGitRepo(projectDir);
+    stdinCapture = createPromptCapturingShim(shimDir, stagedFile);
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  });
+
+  const row = (role: string, content: string): string => JSON.stringify({ role, content, ts: 1 });
+  const rowsBytes = (lines: string[]): Buffer => Buffer.from(lines.join('\n') + '\n');
+  const readLog = (): string => {
+    const logFile = workerLogPath(projectDir, homeDir);
+    return fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8') : '';
+  };
+
+  /** Run the worker with a parser of `backend` that exits 3 on a call whose arguments hold `failOn`. */
+  function runWithFailingParser(backend: Backend, failOn: string): number {
+    const failingShim = (real: string): string => `#!/bin/bash
+case "$*" in
+  *"$PARSER_FAIL_ON"*) : > "${shimDir}/parser-failed"; exit 3 ;;
+esac
+exec "${real}" "$@"
+`;
+    let pathValue: string;
+    if (backend === 'jq') {
+      const realJq = resolveOnPath('jq', process.env.PATH ?? '/usr/bin:/bin');
+      expect(realJq, 'jq is on the machine PATH').toBeDefined();
+      writeFakeExecutable(path.join(shimDir, 'jq'), failingShim(realJq as string));
+      pathValue = fakeClaudePath(shimDir);
+      expect(resolveOnPath('jq', pathValue), 'the fake jq resolves first').toBe(path.join(shimDir, 'jq'));
+    } else {
+      writeFakeExecutable(path.join(shimDir, 'node'), failingShim(process.execPath));
+      pathValue = `${shimDir}:${buildToolFarm()}`;
+      expect(resolveOnPath('jq', pathValue), 'no jq on the PATH').toBeUndefined();
+      expect(resolveOnPath('node', pathValue), 'the fake node resolves').toBe(path.join(shimDir, 'node'));
+    }
+    return runWorker(projectDir, homeDir, shimDir, { PATH: pathValue, PARSER_FAIL_ON: failOn }).exitCode;
+  }
+
+  function expectParserSkip(exitCode: number): void {
+    expect(exitCode).toBe(0);
+    expect(fs.existsSync(path.join(shimDir, 'parser-failed')), 'non-vacuity: the failing call happened').toBe(true);
+    const log = readLog();
+    expect(log).toContain('SKIP: the JSON parser exited 3');
+    expect(log).toContain('no LLM run');
+    expect(log.match(/Run: /g), 'one Run line').toHaveLength(1);
+    expect(log).toContain('result=skip');
+    expect(log).not.toContain('No parseable turns');
+    expect(log).not.toContain('User-only queue');
+    expect(fs.existsSync(stdinCapture), 'no LLM run started').toBe(false);
+    expect(fs.existsSync(path.join(memoryDir, '.working-memory.lock')), 'the lock is released').toBe(false);
+  }
+
+  describe.each(backends)('%s backend', (backend) => {
+    it('a leftover batch and a queue of readable turns both survive, and the batch is not removed', () => {
+      const batchBytes = rowsBytes([row('user', 'BATCH-PROMPT'), row('assistant', 'BATCH-ANSWER')]);
+      const queueBytes = rowsBytes([row('user', 'QUEUE-PROMPT'), row('assistant', 'QUEUE-ANSWER')]);
+      fs.writeFileSync(processingFile, batchBytes);
+      fs.writeFileSync(queueFile, queueBytes);
+
+      expectParserSkip(runWithFailingParser(backend, FAIL_ON[backend].extract));
+
+      expect(fs.readFileSync(processingFile), 'the batch holds the batch and the merged queue, byte for byte')
+        .toEqual(Buffer.concat([batchBytes, queueBytes]));
+      expect(fs.existsSync(queueFile), 'the queue is inside the batch').toBe(false);
+    });
+
+    it('a fresh queue whose extraction fails stays whole in the batch it was claimed into', () => {
+      const queueBytes = rowsBytes([row('user', 'QUEUE-PROMPT'), row('assistant', 'QUEUE-ANSWER')]);
+      fs.writeFileSync(queueFile, queueBytes);
+
+      expectParserSkip(runWithFailingParser(backend, FAIL_ON[backend].extract));
+
+      expect(fs.readFileSync(processingFile), 'no turn lost').toEqual(queueBytes);
+    });
+
+    it('a fresh queue whose orphan check fails stays in the queue, and no batch is made', () => {
+      const queueBytes = rowsBytes([row('user', 'QUEUE-PROMPT'), row('assistant', 'QUEUE-ANSWER')]);
+      fs.writeFileSync(queueFile, queueBytes);
+
+      expectParserSkip(runWithFailingParser(backend, FAIL_ON[backend].orphan));
+
+      expect(fs.readFileSync(queueFile), 'the queue is kept byte for byte').toEqual(queueBytes);
+      expect(fs.existsSync(processingFile), 'the queue is not claimed').toBe(false);
+    });
+  });
+});
+
+// =============================================================================
+// S33 — jq and node read a queue the same way (#528)
+//
+// Both parsers emit only a row whose role is user, assistant or qa, and the worker counts
+// every other non-blank line as skipped. A line that is valid JSON but no turn (null, a
+// number, an array, a string, an object with no role or a role that is no string or no
+// known role, a role that holds a newline) was a row on one backend and a skip on the
+// other, so the two logged different counts. The same queue now logs the same count.
+// =============================================================================
+describe('S33: jq and node log the same skip count and build the same turns (#528)', { timeout: LEAN_RUN_TIMEOUT_MS }, () => {
+  let projectDir: string;
+  let homeDir: string;
+  let shimDir: string;
+  let memoryDir: string;
+  let queueFile: string;
+  let stagedFile: string;
+  let stdinCapture: string;
+
+  beforeEach(() => {
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s33-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s33-home-'));
+    shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s33-shim-'));
+    memoryDir = path.join(projectDir, '.devflow', 'memory');
+    queueFile = path.join(memoryDir, '.pending-turns.jsonl');
+    stagedFile = path.join(memoryDir, 'WORKING-MEMORY.md.new');
+    fs.mkdirSync(memoryDir, { recursive: true });
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'dream'), { recursive: true });
+    initGitRepo(projectDir);
+    stdinCapture = createPromptCapturingShim(shimDir, stagedFile);
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  });
+
+  /** One readable user and assistant turn, and ten lines that hold no readable turn. */
+  const PARITY_QUEUE = [
+    JSON.stringify({ role: 'user', content: 'PARITY-PROMPT first line\nsecond line', ts: 1 }),
+    'null',
+    '42',
+    '{"role":5}',
+    '{}',
+    JSON.stringify({ role: 'user\nx', content: 'newline role', ts: 1 }),
+    '[1]',
+    '"just a string"',
+    JSON.stringify({ role: 'system', content: 'not a turn', ts: 1 }),
+    JSON.stringify({ role: 'user', content: 0, ts: 1 }),
+    'garbage{',
+    JSON.stringify({ role: 'assistant', content: 'PARITY-ANSWER', ts: 1 }),
+  ];
+  const EXPECTED_SKIPPED = 10;
+
+  function expectParityResult(): void {
+    const logFile = workerLogPath(projectDir, homeDir);
+    const log = fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8') : '';
+    expect(log).toContain(`Skipped ${EXPECTED_SKIPPED} queue line(s) that hold no readable turn`);
+    expect(log).toContain('Built 1 turns');
+    const prompt = fs.readFileSync(stdinCapture, 'utf-8');
+    expect(prompt, 'a newline in a valid row is a space').toContain('PARITY-PROMPT first line second line');
+    expect(prompt).toContain('PARITY-ANSWER');
+  }
+
+  it.skipIf(!HAS_JQ)('jq backend', () => {
+    fs.writeFileSync(queueFile, PARITY_QUEUE.join('\n') + '\n');
+
+    expect(runWorker(projectDir, homeDir, shimDir).exitCode).toBe(0);
+
+    expectParityResult();
+  });
+
+  it('node backend', () => {
+    fs.writeFileSync(queueFile, PARITY_QUEUE.join('\n') + '\n');
+    const fullPath = `${shimDir}:${buildToolFarm([], { node: process.execPath })}`;
+    expect(resolveOnPath('jq', fullPath), 'no jq on the PATH').toBeUndefined();
+    expect(resolveOnPath('node', fullPath), 'node on the PATH').toBeDefined();
+
+    expect(runWorker(projectDir, homeDir, shimDir, { PATH: fullPath }).exitCode).toBe(0);
+
+    expectParityResult();
+  });
+});
+
+// =============================================================================
+// S34 — A queue that could not be appended to the leftover batch is kept (#523)
+//
+// The worker merges the queue into a leftover batch with `cat >>`, then removes the queue.
+// When the append fails, the queue is the only copy of those turns, so it stays for the
+// next run. A read-only batch makes the append fail without any privilege; a process with
+// root rights writes to it anyway, so the case is skipped there.
+// =============================================================================
+describe.skipIf(typeof process.getuid === 'function' && process.getuid() === 0)(
+  'S34: a queue that could not be appended to the leftover batch is kept (#523)',
+  { timeout: LEAN_RUN_TIMEOUT_MS },
+  () => {
+    let projectDir: string;
+    let homeDir: string;
+    let shimDir: string;
+    let memoryDir: string;
+    let queueFile: string;
+    let processingFile: string;
+    let stagedFile: string;
+    let stdinCapture: string;
+
+    beforeEach(() => {
+      projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s34-'));
+      homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s34-home-'));
+      shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s34-shim-'));
+      memoryDir = path.join(projectDir, '.devflow', 'memory');
+      queueFile = path.join(memoryDir, '.pending-turns.jsonl');
+      processingFile = path.join(memoryDir, '.pending-turns.processing');
+      stagedFile = path.join(memoryDir, 'WORKING-MEMORY.md.new');
+      fs.mkdirSync(memoryDir, { recursive: true });
+      fs.mkdirSync(path.join(projectDir, '.devflow', 'dream'), { recursive: true });
+      initGitRepo(projectDir);
+      stdinCapture = createPromptCapturingShim(shimDir, stagedFile);
+    });
+
+    afterEach(() => {
+      fs.rmSync(projectDir, { recursive: true, force: true });
+      fs.rmSync(homeDir, { recursive: true, force: true });
+      fs.rmSync(shimDir, { recursive: true, force: true });
+    });
+
+    it('the queue stays byte for byte, and the batch alone goes to the update', () => {
+      const row = (role: string, content: string): string => JSON.stringify({ role, content, ts: 1 });
+      const queueBytes = Buffer.from([row('user', 'QUEUE-PROMPT'), row('assistant', 'QUEUE-ANSWER')].join('\n') + '\n');
+      fs.writeFileSync(processingFile, [row('user', 'BATCH-PROMPT'), row('assistant', 'BATCH-ANSWER')].join('\n') + '\n');
+      fs.chmodSync(processingFile, 0o444);
+      fs.writeFileSync(queueFile, queueBytes);
+
+      const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+
+      expect(exitCode).toBe(0);
+      const logFile = workerLogPath(projectDir, homeDir);
+      const log = fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8') : '';
+      expect(log).toContain('the queue is kept');
+      expect(log).not.toContain('Merged new queue entries');
+      expect(fs.readFileSync(queueFile), 'the queue is kept byte for byte').toEqual(queueBytes);
+      const prompt = fs.readFileSync(stdinCapture, 'utf-8');
+      expect(prompt).toContain('BATCH-PROMPT');
+      expect(prompt).not.toContain('QUEUE-PROMPT');
+    });
+  },
+);

@@ -28,6 +28,7 @@
 # User-only:    exits without an LLM run (no fabrication) and leaves the queue in place
 #               for the next run (D-QUEUE-NO-ORPHAN-DELETE)
 # No parser:    neither jq nor node on PATH → exits with no LLM run; the queue and any .processing batch are left in place
+# Parser fails: jq or node exits non-zero while it reads the queue or the batch → exits with no LLM run; the turns are kept
 
 set -e
 
@@ -432,8 +433,12 @@ fi
 # nothing: the run is still skipped, the next run takes the whole turn once the
 # assistant row lands, and queue-append caps the file (200 -> newest 100 lines).
 if [ ! -f "$PROCESSING_FILE" ] && [ -f "$QUEUE_FILE" ] && [ -s "$QUEUE_FILE" ]; then
+  # A parser that exits non-zero has not said that the queue holds no turn, so the status is
+  # read from the parser itself (no pipe after it) and the queue is kept as it is.
+  _PARSER_RC=0
   if [ "$_HAS_JQ" = "true" ]; then
-    _HAS_CONTENT=$(jq -R -r '(fromjson | select(.role=="assistant" or .role=="qa") | .role)?' "$QUEUE_FILE" 2>/dev/null | head -1 || echo "")
+    _HAS_CONTENT=$(jq -R -r '(fromjson | select(.role=="assistant" or .role=="qa") | .role)?' "$QUEUE_FILE" 2>/dev/null) || _PARSER_RC=$?
+    _HAS_CONTENT="${_HAS_CONTENT%%$'\n'*}"
   else
     # SECURITY: pass path via argv, never interpolate into node -e source (avoids shell injection
     # for repo paths containing quotes or special characters)
@@ -443,7 +448,11 @@ if [ ! -f "$PROCESSING_FILE" ] && [ -f "$QUEUE_FILE" ] && [ -s "$QUEUE_FILE" ]; 
       for (const l of lines) {
         try { const o = JSON.parse(l); if (o.role === "assistant" || o.role === "qa") { process.stdout.write(o.role); break; } } catch {}
       }
-    ' "$QUEUE_FILE" 2>/dev/null || echo "")
+    ' "$QUEUE_FILE" 2>/dev/null) || _PARSER_RC=$?
+  fi
+  if [ "$_PARSER_RC" -ne 0 ]; then
+    log "SKIP: the JSON parser exited $_PARSER_RC on the queue; the queue is kept for the next run; no LLM run"
+    exit 0
   fi
   if [ -z "$_HAS_CONTENT" ]; then
     log "User-only queue (no assistant/qa turn) — leaving it for the next run"
@@ -456,9 +465,14 @@ fi
 if [ -f "$PROCESSING_FILE" ]; then
   log "Found leftover .processing from previous crash — merging"
   if [ -f "$QUEUE_FILE" ]; then
-    cat "$QUEUE_FILE" >> "$PROCESSING_FILE" 2>/dev/null || true
-    rm -f "$QUEUE_FILE" 2>/dev/null || true
-    log "Merged new queue entries into recovery batch"
+    # The queue is removed only after its rows are in the batch. A failed append leaves the
+    # queue for the next run; an append that stopped part-way may repeat rows then.
+    if cat "$QUEUE_FILE" >> "$PROCESSING_FILE" 2>/dev/null; then
+      rm -f "$QUEUE_FILE" 2>/dev/null || true
+      log "Merged new queue entries into recovery batch"
+    else
+      log "Could not append the queue to the recovery batch — the queue is kept for the next run"
+    fi
   fi
   # Cap to prevent unbounded growth
   PROC_OVERFLOW_CAP=200    # truncate when processing file exceeds this many lines
@@ -515,9 +529,15 @@ else
 fi
 
 # Single-pass extraction: role + content as TSV (newlines collapsed)
-# Each line is parsed alone (jq -R with fromjson, node per line): a malformed line drops only itself (#528).
+# Each line is parsed alone (jq -R with fromjson, node per line): a malformed line drops only that line.
+# A row cut off before its line break runs into the next row, so the two are one malformed line (#528).
+# Both parsers emit a row only when its role is user, assistant or qa and its content is a
+# string (or absent), so a line that is JSON but no turn is a skipped line on either backend.
+# A parser that exits non-zero has read nothing it can vouch for: the batch is kept, with the
+# queue merged into it, and no LLM runs. Exit 0 with no row still means "no readable turn".
+_PARSER_RC=0
 if [ "$_HAS_JQ" = "true" ]; then
-  EXTRACTED=$(printf '%s\n' "$ENTRIES" | jq -R -r '(fromjson | (.role // "") + "\t" + ((.content // "") | gsub("\n"; " ")))?' 2>/dev/null || echo "")
+  EXTRACTED=$(printf '%s\n' "$ENTRIES" | jq -R -r '(fromjson | select(.role=="user" or .role=="assistant" or .role=="qa") | .role + "\t" + ((.content // "") | gsub("\n"; " ")))?' 2>/dev/null) || _PARSER_RC=$?
 else
   EXTRACTED=$(printf '%s\n' "$ENTRIES" | node -e '
     const lines = require("fs").readFileSync("/dev/stdin","utf8").split("\n");
@@ -525,12 +545,18 @@ else
       if (!line.trim()) continue;
       try {
         const obj = JSON.parse(line);
-        const role = obj.role || "";
-        const content = (obj.content || "").replace(/\n/g, " ");
-        process.stdout.write(role + "\t" + content + "\n");
+        const role = obj === null ? undefined : obj.role;
+        if (role !== "user" && role !== "assistant" && role !== "qa") continue;
+        const content = obj.content == null || obj.content === false ? "" : obj.content;
+        if (typeof content !== "string") continue;
+        process.stdout.write(role + "\t" + content.replace(/\n/g, " ") + "\n");
       } catch {}
     }
-  ' 2>/dev/null || echo "")
+  ' 2>/dev/null) || _PARSER_RC=$?
+fi
+if [ "$_PARSER_RC" -ne 0 ]; then
+  log "SKIP: the JSON parser exited $_PARSER_RC on the batch; the batch is kept for the next run; no LLM run"
+  exit 0
 fi
 
 _IN_LINES=$(printf '%s\n' "$ENTRIES" | LC_ALL=C grep -c '[^[:space:]]' || true)
