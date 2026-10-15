@@ -4251,7 +4251,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
     const present = (p: string): boolean => { try { fs.lstatSync(p); return true; } catch { return false; } };
     const runLines = (): string[] => workerLog().split('\n').filter(line => line.includes('] Run: ')).map(line => line.slice(line.indexOf('Run: ')));
     const onlyRunLine = (): string => {
-      expect(runLines(), 'one Run line per run').toHaveLength(1);
+      expect(runLines(), `one Run line per run; the log was:\n${workerLog()}`).toHaveLength(1);
       return runLines()[0];
     };
     /** A folder outside the project with one file in it: what a link at the staged path names. */
@@ -4547,7 +4547,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
     /** The one Run line the run wrote. */
     function onlyRunLine(): string {
       const lines = runLines();
-      expect(lines, 'one Run line per run').toHaveLength(1);
+      expect(lines, `one Run line per run; the log was:\n${workerLog()}`).toHaveLength(1);
       expect(lines[0]).toMatch(RUN_LINE_SHAPE);
       return lines[0];
     }
