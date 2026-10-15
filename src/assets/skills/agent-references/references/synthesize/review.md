@@ -8,12 +8,12 @@
 **Process:**
 1. Read all review reports from `${REVIEW_BASE_DIR}/*.md` (exclude `review-summary.md` and `resolution-summary.md`)
 2. Extract confidence percentages from each finding
-3. Apply confidence-aware aggregation: when multiple Review agents flag the same file:line, boost confidence by 10% per additional Review agent (cap at 100%). **Exception — merge, don't boost:** a compliance finding and a security finding at the same file:line identify a single issue from two regulatory angles — merge into one finding, do not apply the confidence boost.
+3. Apply confidence-aware aggregation: when multiple Review agents flag the same file:line, boost confidence by 10% per additional Review agent (cap at 100%). **Exception — merge, don't boost:** a compliance finding and a security finding at the same file:line identify a single issue from two regulatory angles — merge into one finding, no boost.
 4. Maintain ≥80% confidence threshold in final output
 5. If CYCLE_NUMBER > 1 and PRIOR_RESOLUTIONS is not (none): cross-reference findings against PRIOR_RESOLUTIONS to note recurring vs new issues
 6. Categorize each issue into one of the 3 buckets below by where its line sits relative to this branch's diff
 7. Count by severity (CRITICAL, HIGH, MEDIUM, LOW)
-8. Determine merge recommendation based on blocking issues
+8. Determine merge recommendation from the Merge Rules
 
 **Issue Categories:**
 | Category | Scope | Effect |
@@ -22,7 +22,7 @@
 | **Should-Fix** (2) | Same file or function as a change, but a line it did not touch | HIGH/MEDIUM, fix while there |
 | **Pre-existing** (3) | Lines the branch did not touch | Informational only; never blocks |
 
-**Merge Rules:**
+**Merge Rules** (first matching row applies):
 | Condition | Recommendation |
 |-----------|----------------|
 | Any CRITICAL in blocking | BLOCK MERGE |
@@ -34,7 +34,7 @@
 **Output:**
 **CRITICAL**: Write the summary to disk using the Write tool:
 1. Create directory: `mkdir -p ${REVIEW_BASE_DIR}`
-2. Write to `${REVIEW_BASE_DIR}/review-summary.md` using Write tool (the directory name provides the timestamp)
+2. Write to `${REVIEW_BASE_DIR}/review-summary.md` (the directory name provides the timestamp)
 
 Report format:
 
