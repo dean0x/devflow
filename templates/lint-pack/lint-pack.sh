@@ -812,14 +812,14 @@ load_config() {
 # git 2.30 or newer: the base checks use --end-of-options, which an older git
 # rejects, and that would read as bad-base. Compare numbers, never strings.
 check_git_version() {
-  local out
+  local out major minor
   out=$(command git --version 2>/dev/null) || die_error git-failed
   out=${out#git version }
   [[ $out =~ $GIT_VERSION_RE ]] || die_error git-failed
-  if [ $((10#${BASH_REMATCH[1]})) -lt "$MIN_GIT_MAJOR" ]; then die_error git-too-old; fi
-  if [ $((10#${BASH_REMATCH[1]})) -eq "$MIN_GIT_MAJOR" ] && [ $((10#${BASH_REMATCH[2]})) -lt "$MIN_GIT_MINOR" ]; then
-    die_error git-too-old
-  fi
+  major=$((10#${BASH_REMATCH[1]}))
+  minor=$((10#${BASH_REMATCH[2]}))
+  if [ "$major" -lt "$MIN_GIT_MAJOR" ]; then die_error git-too-old; fi
+  if [ "$major" -eq "$MIN_GIT_MAJOR" ] && [ "$minor" -lt "$MIN_GIT_MINOR" ]; then die_error git-too-old; fi
 }
 
 main() {
