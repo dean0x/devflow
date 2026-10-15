@@ -19,7 +19,8 @@
  *   4. Full is today: the Step 1.1 reduced sets, the rule-1 manifests and the Step 1.2 trigger rows.
  *   5. No second cycle: Step 0e-ii only warns, and nothing restarts a phase or starts /resolve.
  *   6. The summary: the Synthesize spawn passes the level and the planned focuses, and the summary template
- *      names them, marks a focus with no report and cannot give APPROVED without a security report.
+ *      names them, marks a focus with no report, spells its outcomes as the Merge Rules do and cannot give
+ *      APPROVED without a security report, whatever FOCUSES lists.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -518,9 +519,34 @@ export function collectSecondCycleDefects(body: string, ref: string): string[] {
 // 6. The summary
 // ---------------------------------------------------------------------------
 
+/** What a review finds in blocking, and which focuses its FOCUSES input lists. */
+interface MergeFacts { critical: number; high: number; medium: number; focuses: readonly string[] }
+
 /**
- * AC-11: no APPROVED outcome is reachable while a planned security focus has no report. The Merge Rules are read
- * top to bottom, so the security row must sit before every APPROVED row, and the table must say the first match wins.
+ * The recommendation the Merge Rules give for these facts when no security report exists: the first row whose
+ * condition holds. A row that names the plan holds only when the plan lists security; an unknown row is named.
+ */
+function mergeRecommendationWithoutSecurityReport(rows: string[][], facts: MergeFacts): string {
+  const holds = (condition: string): boolean | undefined => {
+    if (condition === 'Any CRITICAL in blocking') return facts.critical > 0
+    if (condition === 'Any HIGH in blocking') return facts.high > 0
+    if (condition === 'Only MEDIUM in blocking') return facts.medium > 0
+    if (condition === 'No blocking issues') return facts.critical + facts.high + facts.medium === 0
+    if (/security focus[^|]*no report/i.test(condition)) return !/plan|FOCUSES/i.test(condition) || facts.focuses.includes('security')
+    return undefined
+  }
+  for (const [condition, outcome] of rows) {
+    const hit = holds(condition)
+    if (hit === undefined) return `(unknown condition "${condition}")`
+    if (hit) return outcome
+  }
+  return '(no row applies)'
+}
+
+/**
+ * AC-11: a review with no security report is never APPROVED, whatever FOCUSES lists, and a CRITICAL finding still
+ * blocks the merge. The Merge Rules are read top to bottom, so the security row must sit after the BLOCK MERGE row
+ * and before every APPROVED row, its condition must not name the plan, and the table must say the first match wins.
  */
 export function collectApprovedWithoutSecurityDefects(syn: string): string[] {
   const out: string[] = []
@@ -532,6 +558,18 @@ export function collectApprovedWithoutSecurityDefects(syn: string): string[] {
   rows.forEach((row, i) => {
     if (row[1].startsWith('APPROVED') && i < security) out.push(`the "${row[0]}" row gives "${row[1]}" before the security row, so APPROVED is reachable with no security report`)
   })
+  const cases: ReadonlyArray<readonly [string, Pick<MergeFacts, 'critical' | 'high' | 'medium'>, string]> = [
+    ['a CRITICAL blocking issue', { critical: 1, high: 0, medium: 0 }, 'BLOCK MERGE'],
+    ['a HIGH blocking issue', { critical: 0, high: 1, medium: 0 }, 'CHANGES REQUESTED'],
+    ['a MEDIUM blocking issue', { critical: 0, high: 0, medium: 1 }, 'CHANGES REQUESTED'],
+    ['no blocking issue', { critical: 0, high: 0, medium: 0 }, 'CHANGES REQUESTED'],
+  ]
+  for (const focuses of [CORE, CORE.filter(f => f !== 'security'), []] as ReadonlyArray<readonly string[]>) {
+    for (const [label, counts, expected] of cases) {
+      const got = mergeRecommendationWithoutSecurityReport(rows, { ...counts, focuses })
+      if (got !== expected) out.push(`with no security report, FOCUSES [${focuses.join(', ')}] and ${label}, the Merge Rules give "${got}", expected "${expected}"`)
+    }
+  }
   return out
 }
 
@@ -563,10 +601,14 @@ export function collectSummaryDefects(cr: string, syn: string): string[] {
     if (merge === -1 || gate > merge) out.push('the Gate level line does not come before the Merge Recommendation')
     if (!lines[gate].includes('(no report)')) out.push('the Gate level line does not mark a focus with no report')
   }
-  const rule = tableRows(sectionBetween(syn, '**Merge Rules', '**Output:**') ?? '')
-    .find(r => /security focus[^|]*no report/i.test(r[0]))
-  if (rule === undefined) out.push('the Merge Rules have no row for a planned security focus with no report')
-  else if (rule[1].startsWith('APPROVED')) out.push(`a planned security focus with no report gives "${rule[1]}"`)
+  const ruleRows = tableRows(sectionBetween(syn, '**Merge Rules', '**Output:**') ?? '').filter(r => r[0] !== 'Condition')
+  const outcomes = unique(ruleRows.map(r => r[1])).join(' | ')
+  const slot = /^## Merge Recommendation: \{(.*)\}$/m.exec(template)?.[1]
+  if (slot !== outcomes) out.push(`the Merge Recommendation slot is "${slot ?? '(none)'}", the Merge Rules give "${outcomes}"`)
+  if (!/^\{Max 5 brief items /m.test(template)) out.push('the Suggestions guidance lost its limit of 5 brief items')
+  const rule = ruleRows.find(r => /security focus[^|]*no report/i.test(r[0]))
+  if (rule === undefined) out.push('the Merge Rules have no row for the security focus with no report')
+  else if (rule[1].startsWith('APPROVED')) out.push(`the security focus with no report gives "${rule[1]}"`)
   out.push(...collectApprovedWithoutSecurityDefects(syn))
   const written = [...cr.matchAll(/\{timestamp\}\/([\w{}-]+)\.md/g)].map(m => m[1])
   for (const name of unique(written)) if (!['{focus}', 'review-summary'].includes(name)) out.push(`the command writes {timestamp}/${name}.md, a file the summary does not need`)
@@ -589,6 +631,7 @@ const VARIANTS: ReadonlyArray<{ label: string; body: string }> = (() => {
 const ON = VARIANTS[0].body
 const REF = readAgentReference('commands/code-review-levels.md')
 const SYN = readAgentReference('synthesize/review.md')
+const SECURITY_ROW = '| Security focus has no report (it runs in every review) | CHANGES REQUESTED |'
 const SOURCE = readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'code-review.mds'), 'utf-8')
 
 /** Replace `from` with `to` in `body`, failing the test when the seed did not land. */
@@ -804,14 +847,25 @@ describe('the summary names the level and the focuses (AC-11)', () => {
     expect(collectSummaryDefects(ON, seed(SYN, /^## Merge Recommendation: .*\n/m, ''))).toContain('the Gate level line does not come before the Merge Recommendation')
     expect(collectSummaryDefects(seed(ON, 'OPERATION: post-review-summary\n', 'OPERATION: post-review-summary\nGATE_LEVEL: {GATE_LEVEL}\n'), SYN))
       .toContain('the Git spawn carries the level or the focuses')
-    expect(collectSummaryDefects(ON, seed(SYN, '| Planned security focus has no report | CHANGES REQUESTED |\n', '')))
-      .toContain('the Merge Rules have no row for a planned security focus with no report')
-    expect(collectSummaryDefects(ON, seed(SYN, '| Planned security focus has no report | CHANGES REQUESTED |', '| Planned security focus has no report | APPROVED WITH COMMENTS |')))
-      .toContain('a planned security focus with no report gives "APPROVED WITH COMMENTS"')
-    expect(collectSummaryDefects(ON, seed(SYN, /^(\| Planned security focus has no report \| CHANGES REQUESTED \|\n)(.*\n)(\| No blocking issues \| APPROVED \|)$/m, '$2$3\n$1'.trimEnd())))
+    expect(collectSummaryDefects(ON, seed(SYN, `${SECURITY_ROW}\n`, '')))
+      .toContain('the Merge Rules have no row for the security focus with no report')
+    expect(collectSummaryDefects(ON, seed(SYN, SECURITY_ROW, '| Security focus has no report (it runs in every review) | APPROVED WITH COMMENTS |')))
+      .toContain('the security focus with no report gives "APPROVED WITH COMMENTS"')
+    expect(collectSummaryDefects(ON, seed(SYN, /^(\| Security focus has no report .*\n)(.*\n)(\| No blocking issues \| APPROVED \|)$/m, '$2$3\n$1'.trimEnd())))
       .toContain('the "No blocking issues" row gives "APPROVED" before the security row, so APPROVED is reachable with no security report')
     expect(collectSummaryDefects(ON, seed(SYN, ' (first matching row applies)', '')))
       .toContain('the Merge Rules do not say that the first matching row applies')
+    expect(collectSummaryDefects(ON, seed(SYN, /^(\| Any CRITICAL in blocking \| BLOCK MERGE \|\n)(\| Any HIGH in blocking \| CHANGES REQUESTED \|\n)(\| Security focus has no report .*\n)/m, '$3$1$2')))
+      .toContain('with no security report, FOCUSES [security, architecture, performance, complexity, consistency, regression, testing, reliability] and a CRITICAL blocking issue, the Merge Rules give "CHANGES REQUESTED", expected "BLOCK MERGE"')
+    for (const planned of ['| Planned security focus has no report | CHANGES REQUESTED |', '| Security focus in FOCUSES has no report | CHANGES REQUESTED |']) {
+      const defects = collectSummaryDefects(ON, seed(SYN, SECURITY_ROW, planned))
+      expect(defects).toContain('with no security report, FOCUSES [architecture, performance, complexity, consistency, regression, testing, reliability] and no blocking issue, the Merge Rules give "APPROVED", expected "CHANGES REQUESTED"')
+      expect(defects).toContain('with no security report, FOCUSES [] and no blocking issue, the Merge Rules give "APPROVED", expected "CHANGES REQUESTED"')
+    }
+    expect(collectSummaryDefects(ON, seed(SYN, '{BLOCK MERGE | CHANGES REQUESTED | APPROVED WITH COMMENTS | APPROVED}', '{BLOCK | CHANGES_REQUESTED | APPROVED}')))
+      .toContain('the Merge Recommendation slot is "BLOCK | CHANGES_REQUESTED | APPROVED", the Merge Rules give "BLOCK MERGE | CHANGES REQUESTED | APPROVED WITH COMMENTS | APPROVED"')
+    expect(collectSummaryDefects(ON, seed(SYN, '{Max 5 brief items ', '{Max 5 items ')))
+      .toContain('the Suggestions guidance lost its limit of 5 brief items')
     expect(collectSummaryDefects(ON, seed(SYN, '- **GATE_LEVEL**, **FOCUSES**', '- **GATE_LEVEL**')))
       .toContain('the Mode inputs do not declare FOCUSES')
     expect(collectSummaryDefects(`${ON}\nWrite the levels to {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/levels.md.\n`, SYN))
