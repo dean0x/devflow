@@ -17,7 +17,9 @@ import {
 import {
   FIFO_RUN_BOUND_MS,
   FIFO_TEST_TIMEOUT_MS,
+  HOOK_RUN_ALLOWANCE_MS,
   HOOKS_DIR,
+  NODE_EXEC_STALL_MS,
   execHook,
   makeFifo,
   releaseFifo,
@@ -31,6 +33,9 @@ function localDateString(): string {
 }
 
 const JSON_HELPER = path.join(HOOKS_DIR, 'json-helper.cjs');
+
+/** A hook run that execs node pays the macOS exec stall at most once. */
+const NODE_RUN_MS = HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS;
 
 const HOOK_SCRIPTS = [
   'debug-trace',
@@ -363,7 +368,7 @@ describe('json-helper.js operations', () => {
     } finally {
       fs.rmSync(probeDir, { recursive: true, force: true });
     }
-  });
+  }, 60_000); // cold `node` execs, which a loaded macOS host can stall for seconds each
 });
 
 describe('json-parse wrapper', () => {
@@ -419,7 +424,7 @@ describe('json-parse wrapper', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, 60_000); // cold `node` execs, which a loaded macOS host can stall for seconds each
 
   describe('json_string_field_file: a typed read that yields a field only when it is a JSON string', () => {
     const hasJq = spawnSync('jq', ['--version'], { encoding: 'utf8' }).status === 0;
@@ -5222,7 +5227,7 @@ describe('ensure-proxy behavioral tests', () => {
       } finally {
         fs.rmSync(shadowBin, { recursive: true, force: true });
       }
-    });
+    }, NODE_RUN_MS);
   });
 
   // ── HTTP health body identity check (key-order-independent parse) ────────────

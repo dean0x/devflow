@@ -535,7 +535,18 @@ describe('queue_append_row never writes through a symbolic link (D-HOOKS-NO-SYML
   }, FIFO_TEST_TIMEOUT_MS);
 });
 
-describe('queue_read_gates', () => {
+/**
+ * The budget of every test in the two gate-read groups: one sourced queue-append
+ * run plus one node exec that may meet the syspolicyd wait. A repository-layer
+ * gate read execs node at most once — the resolver's fold when a repository file
+ * can narrow, else the node-backend manifest parse (TP-34 pins it) — and the
+ * manifest parse that follows only a failed fold would meet a drained queue. A
+ * machine-layer test on the node backend reads several manifests; every exec
+ * after the first meets a drained queue too.
+ */
+const GATE_READ_TEST_BUDGET_MS = HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS;
+
+describe('queue_read_gates', { timeout: GATE_READ_TEST_BUDGET_MS }, () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -689,15 +700,6 @@ describe('queue_read_gates', () => {
 // ---------------------------------------------------------------------------
 // The repository layer: queue_read_gates <manifest> <root> (D-FEATURES-NARROW-ONLY)
 // ---------------------------------------------------------------------------
-
-/**
- * The budget of every test in the group below: one sourced queue-append run plus
- * one node exec that may meet the syspolicyd wait. A gate read execs node at
- * most once — the resolver's fold when a repository file can narrow, else the
- * node-backend manifest parse (TP-34 pins it) — and the manifest parse that
- * follows only a failed fold would meet a drained queue.
- */
-const GATE_READ_TEST_BUDGET_MS = HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS;
 
 describe('queue_read_gates <manifest> <root>: the repository narrows, never widens', { timeout: GATE_READ_TEST_BUDGET_MS }, () => {
   let tmpDir: string;
