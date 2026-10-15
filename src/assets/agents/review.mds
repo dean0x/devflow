@@ -280,3 +280,5 @@ use the same prefix so values are not double-masked.
 | java | If .java files changed |
 | python | If .py files changed |
 | rust | If .rs files changed |
+
+The gate level (`GATE_LEVEL`, `/code-review` Step 1.2b) removes focuses from this table at `standard` and `lean`.

@@ -49,8 +49,8 @@ import { getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
 // ── Wording ────────────────────────────────────────────────────────────────────
 
 /**
- * What each level means, in one line. No command reads the level yet, so each line
- * says what the word stands for and not what a command does with it.
+ * What each level means, in one line. Each line says what the word stands for and
+ * not what a command does with it.
  */
 export const GATE_LEVEL_MEANINGS: Readonly<Record<GateLevel, string>> = Object.freeze({
   full: 'the most checking; any value that is not a level also reads as full',
@@ -58,9 +58,9 @@ export const GATE_LEVEL_MEANINGS: Readonly<Record<GateLevel, string>> = Object.f
   lean: 'the least checking',
 });
 
-/** Why the level changes no behavior yet; the issues that read it remove this text. */
-export const GATE_LEVEL_NO_EFFECT =
-  'No command reads the level yet, so it has no effect until issues #473, #474 and #480 read it.';
+/** What reads the level today; each later reader updates this text. */
+export const GATE_LEVEL_EFFECT =
+  '/code-review reads the level: standard and lean run fewer review focuses. Other commands read it once issues #473 and #480 land.';
 
 const MACHINE_MANIFEST_NAME = 'manifest.json';
 const MACHINE_INVALID_LINE = `invalid (${MACHINE_MANIFEST_NAME}; reads as full)`;
@@ -354,7 +354,7 @@ export const gatesCommand = new Command('gates')
     `\nGate levels:\n${levelsHelp()}\n\n` +
     `The default is ${DEFAULT_GATE_LEVEL}. --set writes only the machine default. A personal .devflow/config.json ` +
     '"gateLevel" overrides it in one repository; no command writes that key.\n' +
-    GATE_LEVEL_NO_EFFECT,
+    GATE_LEVEL_EFFECT,
   )
   .action(async (options: GatesOptions) => {
     const devflowDir = getDevFlowDirectory();
@@ -367,7 +367,7 @@ export const gatesCommand = new Command('gates')
         `Valid levels:\n${levelsHelp()}`,
         'Usage',
       );
-      p.outro(color.dim(GATE_LEVEL_NO_EFFECT));
+      p.outro(color.dim(GATE_LEVEL_EFFECT));
       return;
     }
 
