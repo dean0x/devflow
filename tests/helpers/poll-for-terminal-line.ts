@@ -10,14 +10,16 @@
 import * as fs from 'fs';
 
 /**
- * Poll a log file for a terminal needle line.
+ * Poll a log file for a terminal needle line: a substring, or a pattern when several
+ * lines end the run (the first one logged wins). The pattern is tested without state,
+ * so pass one without the `g` or `y` flag.
  * Retries up to maxAttempts times, each attempt polling for pollMs milliseconds.
  * Total bound = pollMs * maxAttempts (default call sites use 4000 * 3 = 12 s).
  * All waits and retry counts explicitly bounded (no unbounded while loop).
  */
 export async function pollForTerminalLine(
   logFile: string,
-  needle: string,
+  needle: string | RegExp,
   pollMs: number,
   maxAttempts: number,
 ): Promise<boolean> {
@@ -26,7 +28,7 @@ export async function pollForTerminalLine(
     while (Date.now() < deadline) {
       if (fs.existsSync(logFile)) {
         const content = fs.readFileSync(logFile, 'utf-8');
-        if (content.includes(needle)) return true;
+        if (typeof needle === 'string' ? content.includes(needle) : needle.test(content)) return true;
       }
       await new Promise<void>((r) => setTimeout(r, 100));
     }
