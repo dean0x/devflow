@@ -476,6 +476,58 @@ describe('json-parse wrapper', () => {
     }
   });
 
+  describe('json_array_length_file: the count of an array field, `unknown` for anything else', () => {
+    const hasJq = spawnSync('jq', ['--version'], { encoding: 'utf8' }).status === 0;
+    const backends = [
+      { name: 'jq', prelude: '', enabled: hasJq },
+      { name: 'node fallback', prelude: '_HAS_JQ=false &&', enabled: true },
+    ] as const;
+
+    for (const backend of backends) {
+      describe.skipIf(!backend.enabled)(`${backend.name} backend`, () => {
+        let dir: string;
+        beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'json-array-length-')); });
+        afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }); });
+
+        const count = (file: string, field: string) => {
+          const run = spawnSync('bash', [
+            '-c', `source "$1" && ${backend.prelude} json_array_length_file "$2" "$3"`,
+            '_', path.join(HOOKS_DIR, 'json-parse'), file, field,
+          ], { encoding: 'utf8' });
+          return { status: run.status, stdout: run.stdout, stderr: run.stderr };
+        };
+
+        it('prints the element count of an array, 0 for an empty one, nested fields included', () => {
+          const file = path.join(dir, 'r.json');
+          fs.writeFileSync(file, JSON.stringify({ two: [{ a: 1 }, 'x'], none: [], deep: { list: [1, 2, 3] } }));
+
+          expect(count(file, 'two')).toEqual({ status: 0, stdout: '2\n', stderr: '' });
+          expect(count(file, 'none')).toEqual({ status: 0, stdout: '0\n', stderr: '' });
+          expect(count(file, 'deep.list')).toEqual({ status: 0, stdout: '3\n', stderr: '' });
+        }, 60_000); // cold `node` execs, which a loaded macOS host can stall for seconds each
+
+        it('prints `unknown`, never a number, for an absent field and every other JSON type', () => {
+          const file = path.join(dir, 'r.json');
+          fs.writeFileSync(file, JSON.stringify({ n: 42, s: 'abc', t: true, z: null, o: { a: 1 } }));
+
+          for (const field of ['missing', 'n', 's', 't', 'z', 'o', 's.deeper', 'n.deeper']) {
+            expect(count(file, field), field).toEqual({ status: 0, stdout: 'unknown\n', stderr: '' });
+          }
+        }, 60_000);
+
+        it('prints nothing on stderr for a file it cannot parse or open, and does not succeed', () => {
+          const broken = path.join(dir, 'broken.json');
+          fs.writeFileSync(broken, 'not-json{{{');
+          for (const target of [broken, path.join(dir, 'absent.json')]) {
+            const run = count(target, 'permission_denials');
+            expect({ stdout: run.stdout, stderr: run.stderr }, path.basename(target)).toEqual({ stdout: '', stderr: '' });
+            expect(run.status, path.basename(target)).not.toBe(0);
+          }
+        }, 60_000);
+      });
+    }
+  });
+
   it('every node fallback whose jq path discards stderr is silent on input it cannot parse, and still fails', () => {
     // json_field_file, whose fallback reads its file on stdin, is covered by the test above.
     const rows: ReadonlyArray<readonly [string, readonly string[]]> = [

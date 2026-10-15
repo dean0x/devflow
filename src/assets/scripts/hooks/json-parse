@@ -69,6 +69,21 @@ json_string_field_file() {
   fi
 }
 
+# The element count of an array field in a JSON file. Usage: json_array_length_file "/path/to/file.json" "field"
+# Prints the count as digits when the field is an array, and the word `unknown` for an
+# absent field or any other type (a number, string, object, boolean or null), so a
+# caller can tell "none" from "not reported". Prints nothing, and fails, when the file
+# cannot be read or parsed. Silent on stderr and read the same way on both backends
+# (the node path reads the file on stdin, with its stderr redirected first).
+json_array_length_file() {
+  local file="$1" field="$2"
+  if [ "$_HAS_JQ" = "true" ]; then
+    jq -r "(try .$field catch null) | if type == \"array\" then length else \"unknown\" end" "$file" 2>/dev/null
+  else
+    node "$_JSON_HELPER" array-length "$field" 2>/dev/null < "$file"
+  fi
+}
+
 # --- Multi-field batched extraction ---
 
 # Extract cwd and an arbitrary top-level field from stdin JSON in a single
