@@ -185,7 +185,7 @@ git -C "{WORKTREE_PATH}" diff --name-only --no-renames {DIFF_RANGE} > "{REVIEW_D
 wc -l < "{REVIEW_DIR}/paths.txt"
 ```
 
-Read `paths.txt` once when the count is about 40 or fewer, and in ranges of about 40 lines (Read with offset and limit) when it is more. `--no-renames` lists a moved file under its old path and its new one, so a move cannot take a file out of its own class.
+Read `paths.txt` once when the count is about 40 or fewer, and in ranges of about 40 lines (Read with offset and limit) when it is more.
 
 Set `DIFF_CLASS` by these rules, in order; the first that decides wins:
 
@@ -202,7 +202,7 @@ Each reduced class runs only its focus set, every member reading `diff.patch`:
 - `tests-only`: testing, reliability, consistency, security
 - `lockfile-only`: dependencies, security
 
-A mixed non-code diff runs the union of the sets of the classes it holds. Language and conditional triggers inside a reduced class are suppressed: they add no focus, and Step 1.2 applies to the `code` class only.
+A mixed non-code diff runs the union of the sets of the classes it holds. Language and conditional triggers inside a reduced class are suppressed.
 
 #### Step 1.2: Choose the focuses
 
@@ -226,7 +226,7 @@ When `DIFF_CLASS` is `code`, read the file types from the paths in `paths.txt` t
 | Docs or significant code | documentation |
 | COMPLIANCE_ACTIVE AND diff touches regulated surface | compliance |
 
-If `COMPLIANCE_ACTIVE` AND the diff touches regulated surface (data models, auth flows, logging/observability, payments, IaC, retention): add `compliance` to REVIEW_FOCUS_LIST for this worktree.
+Regulated surface: data models, auth flows, logging/observability, payments, IaC, retention.
 
 **Language focus stamp.** The eight language focuses — `typescript`, `react`, `accessibility`, `ui-design`, `go`, `java`, `python`, `rust` — ship with optional plugins, and the installer stamps the ones installed on this machine onto this line, rewriting it on every install and on `uninstall --plugin`:
 
@@ -353,7 +353,7 @@ Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE — feature-specifi
 IMPORTANT: Write report to {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/{focus}.md using Write tool"
 ```
 
-In multi-worktree mode, process worktrees **sequentially** (one worktree at a time). Complete Phases 1-4 for each worktree before starting the next. This prevents agent overload — spawning 8-20 Review agents per worktree across multiple worktrees simultaneously overwhelms the system.
+In multi-worktree mode, process worktrees **sequentially**: complete Phases 1-4 for one worktree before starting the next, so Review spawns never pile up.
 
 ### Phase 3: Synthesis → Review Comment (Sequential)
 
@@ -402,8 +402,6 @@ Per worktree, after successful completion:
    - Publication status: FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config) | STUB (visibility undeterminable) | STUB (evidence policy) (from Git agent)
    - Artifact paths
 
-In multi-worktree mode, report results per worktree.
-
 ## Architecture
 
 ```
@@ -415,7 +413,7 @@ In multi-worktree mode, report results per worktree.
 │  ├─ Step 0c: Git agent (ensure-pr-ready) per worktree [parallel]
 │  ├─ Step 0d: Incremental detection + timestamp setup per worktree
 │  ├─ Step 0e-i: Load prior resolution-summary.md
-│  ├─ Step 0e-ii: Convergence assessment (warn if FP ratio > 70%)
+│  ├─ Step 0e-ii: Convergence assessment (warn only)
 │  └─ Step 0f: Resolve REVIEW_PUBLICATION per worktree (publication gate)
 │
 ├─ Per worktree (SEQUENTIAL — one worktree at a time):
@@ -425,15 +423,13 @@ In multi-worktree mode, report results per worktree.
 │  │  ├─ Choose the focuses (code class: file types + the language stamp)
 │  │  └─ Write diff.patch and diff-{focus}.patch, by redirect
 │  │
-│  ├─ Phase 2: Reviews (PARALLEL within worktree)
-│  │  ├─ code: Review agents security, architecture, performance, complexity,
-│  │  │        consistency, regression, testing, reliability (diff.patch)
-│  │  ├─ code: + language (diff-{focus}.patch) and conditional Review agents
+│  ├─ Phase 2: Reviews (PARALLEL within worktree), one per REVIEW_FOCUS_LIST focus
+│  │  ├─ code: core (diff.patch), language (diff-{focus}.patch), conditional
 │  │  └─ docs-only / tests-only / lockfile-only: the reduced set (diff.patch)
 │  │
 │  ├─ Phase 3: Synthesis → Review Comment (SEQUENTIAL within worktree)
 │  │  ├─ Step 3a: Synthesize agent (mode: review, writes review-summary.md)
-│  │  └─ Step 3b: Git agent (post-review-summary, D7 marker-dedup, REVIEW_PUBLICATION)
+│  │  └─ Step 3b: Git agent (post-review-summary)
 │  │
 │  └─ Phase 4: Write .last-review-head + display results
 ```
@@ -445,13 +441,13 @@ In multi-worktree mode, report results per worktree.
 | `--full` in multi-worktree mode | Applies to all worktrees (global modifier) |
 | Review comment already posted | Git agent matches its own marker on the `{cycle, timestamp}` pair → skip silently (D7); a re-review in the same cycle (different timestamp) posts its own comment. The marker's format belongs to the operation; this caller passes the pair and never restates the literal |
 | Concurrent sessions | Advisory only, each session computes independently |
-| Docs-only diff | `docs-only`: documentation, consistency, security on `diff.patch`; no language or conditional focus |
-| Tests-only diff | `tests-only`: testing, reliability, consistency, security on `diff.patch`; no language or conditional focus |
-| Lockfile-only diff | `lockfile-only`: dependencies, security on `diff.patch` |
-| Mixed non-code diff (docs with tests, tests with a lockfile) | The union of the matching sets, on `diff.patch` |
-| A path matching no class pattern, or an empty path list | `code` (fail-safe): the 8 core focuses on the full diff |
-| A file moved across classes | `--no-renames` lists the old and the new path, so a code path makes the diff `code` |
-| Path listing above about 40 lines | The count is printed; `paths.txt` is read in ranges of about 40 lines |
+| Docs-only diff | Its Step 1.1 set |
+| Tests-only diff | Its Step 1.1 set |
+| Lockfile-only diff | Its Step 1.1 set |
+| Mixed non-code diff | The union of the matching sets |
+| A path matching no class pattern, or an empty path list | `code` (fail-safe) |
+| A file moved across classes | `--no-renames` lists both paths, so a code path makes the diff `code` |
+| Path listing above about 40 lines | Read in ranges (Step 1.1) |
 | Language files changed, plugin not installed | The focus is absent from the stamped line: not spawned |
 | Public repo (`auto` mode) | Git agent probes visibility, posts counts-only STUB comment; full report stays local |
 | `reviewPublication: off` | Git agent skips posting the review comment (OFF) — except that, only when `EVIDENCE_POLICY` is `required`, Step 0f passes `stub` and a counts-only STUB comment posts |
@@ -459,7 +455,6 @@ In multi-worktree mode, report results per worktree.
 ## Backwards Compatibility
 
 - **Single worktree**: Auto-discovery finds only one worktree → proceeds exactly as before. Zero behavior change.
-- **Legacy flat layout**: If `{worktree}/.devflow/docs/reviews/{branch-slug}/` contains flat `*.md` files (no timestamped subdirectories), new runs create timestamped subdirectories. Old flat files remain untouched.
 
 ## Principles
 
