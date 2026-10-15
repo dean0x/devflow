@@ -1851,16 +1851,12 @@ export const SANCTIONED_RESOLUTION = 'd="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /
 
 const COMPACT_SECTION_RE = /^\s*COMPACT_SECTION='([^']*)'$/gm
 
-/** The compaction resume directive that a session-start hook source assigns to `COMPACT_SECTION`; throws unless there is exactly one assignment. */
-export function compactDirectiveFrom(source: string): string {
+/** The compaction resume directive that the session-start hook assigns to `COMPACT_SECTION`; throws unless there is exactly one assignment. */
+export function compactDirectiveText(): string {
+  const source = readFileSync(path.join(ROOT, 'src', 'assets', 'scripts', 'hooks', 'session-start-context'), 'utf-8')
   const found = [...source.matchAll(COMPACT_SECTION_RE)]
   if (found.length !== 1) throw new Error(`expected exactly one COMPACT_SECTION assignment, found ${found.length}`)
   return found[0][1]
-}
-
-/** The compaction resume directive of the session-start hook under `root`. */
-export function compactDirectiveText(root: string = ROOT): string {
-  return compactDirectiveFrom(readFileSync(path.join(root, 'src', 'assets', 'scripts', 'hooks', 'session-start-context'), 'utf-8'))
 }
 
 /**
