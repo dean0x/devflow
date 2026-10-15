@@ -789,13 +789,13 @@ describe('S8: AC-C2/C4 — security constraints', () => {
   // assert sentinel appears in stdin capture and NOT in argv capture). The structural
   // grep for `<<< "$PROMPT"` is dropped to avoid implementation coupling.
 
-  it('DEVFLOW_BG_UPDATER=1 set as env prefix on both claude invocations (worker side invariant)', () => {
+  it('DEVFLOW_BG_UPDATER=1 is the env prefix of the one claude spawn that both argv forms share (worker side invariant)', () => {
     // The behavioural twin is S29, which records the variable in the environment of
-    // the lean and of the legacy spawn. This keeps the source half: the lean and the
-    // legacy spawn each carry the recursion guard as an env prefix.
+    // the lean and of the legacy spawn. This keeps the source half: the worker has one
+    // spawn line, and it carries the recursion guard as an env prefix.
     const src = fs.readFileSync(BACKGROUND_UPDATER, 'utf-8');
-    const spawns = src.match(/^[ \t]*DEVFLOW_BG_UPDATER=1 [^\n]*"\$CLAUDE_BIN" -p /gm) ?? [];
-    expect(spawns).toHaveLength(2);
+    const spawns = src.match(/^[ \t]*DEVFLOW_BG_UPDATER=1 [^\n]*exec "\$CLAUDE_BIN"/gm) ?? [];
+    expect(spawns).toHaveLength(1);
   });
 
   it('PROMPT content never appears in worker log — sentinel in queue turn does NOT leak to log', () => {
@@ -3847,6 +3847,23 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
     });
   });
 
+  describe('each fact is stated once in the worker source', () => {
+    /** The worker's code lines: comments and blank lines left out. */
+    const codeLines = (): string[] =>
+      fs.readFileSync(BACKGROUND_UPDATER, 'utf-8').split('\n').filter(line => line.trim() !== '' && !line.trim().startsWith('#'));
+    const occurrences = (needle: string): number => codeLines().filter(line => line.includes(needle)).length;
+
+    it('one parser defines a version: the digit pattern sits in one function', () => {
+      expect(occurrences("'([0123456789]+)\\.([0123456789]+)\\.([0123456789]+)'")).toBe(1);
+    });
+
+    it('one argv carries the limit on the worker\'s write: the permission flags and the spawn are written once', () => {
+      for (const needle of ['--permission-mode dontAsk', '--setting-sources user', '--settings "$MEMORY_SETTINGS_JSON"', '--output-format json', 'exec "$CLAUDE_BIN"']) {
+        expect(occurrences(needle), needle).toBe(1);
+      }
+    });
+  });
+
   describe('agents.memory (AC2, AC3)', () => {
     it('passes a valid model and effort from agents.memory', () => {
       writeAgentModels(homeDir, { memory: { model: 'sonnet', effort: 'medium' } });
@@ -4400,6 +4417,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
 
       expect(recordedArgv(rec), 'no -p call').toBeUndefined();
       expect(workerLog()).toContain('SKIP: the staged path changed before the run; leaving .processing for recovery');
+      expect(onlyRunLine(), 'a claimed batch left for recovery is a failed run').toBe('Run: cli=2.1.293 argv=none result=failed denials=n/a removed=none');
       expect(fs.lstatSync(stagedFile).isSymbolicLink(), 'the planted link is left in place').toBe(true);
       expect(fs.readFileSync(outside, 'utf-8'), 'its target is untouched').toBe('keep');
       expectClaimedRowsPreserved(projectDir, claimed);
@@ -4620,6 +4638,17 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
       expect(fs.existsSync(marker), 'non-vacuity: the fake cd was armed').toBe(true);
       expect(recordedArgv(rec), 'no -p call').toBeUndefined();
       expect(workerLog()).toContain('FAIL: could not enter the project root');
+      expectClaimedRowsPreserved(projectDir, claimed);
+    });
+
+    it('a claude that itself exits 97 is reported as a claude exit', () => {
+      const claimed = readQueueBytes(projectDir);
+
+      const rec = runWith(HEALTHY_VERSION, {}, { exitCode: 97, skipStagedWrite: true });
+
+      expect(recordedArgv(rec), 'the -p call happened').toBeDefined();
+      expect(workerLog()).toContain('FAIL: claude -p exited with code 97');
+      expect(workerLog()).not.toContain('could not enter the project root');
       expectClaimedRowsPreserved(projectDir, claimed);
     });
 

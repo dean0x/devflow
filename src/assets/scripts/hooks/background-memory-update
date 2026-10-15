@@ -257,21 +257,34 @@ probe_claude_version() {
   return "$_status"
 }
 
-# Returns 0 when the first X.Y.Z in $1 is at or above the first X.Y.Z in $2, comparing
-# the three components as base-10 numbers left to right (2.10.0 is above 2.1.286, and
-# a leading zero is not octal). Returns 1 when it is below, or when either text holds
-# no X.Y.Z or a component longer than six digits. The digit set is spelled out: a
+# Returns 0 and sets CLAUDE_VERSION_PARSED to the first X.Y.Z in $1, each component as a
+# base-10 number without leading zeros (a leading zero is not octal). Returns 1 when $1
+# holds no X.Y.Z or a component longer than six digits. This is the one definition of a
+# version: the run's CLI version and both floors read it. The digit set is spelled out: a
 # range such as 0-9 collates by locale on bash 3.2.
-claude_version_at_least() {
-  local _text="$1" _floor="$2" _re='([0123456789]+)\.([0123456789]+)\.([0123456789]+)'
-  local _f1 _f2 _f3 _v1 _v2 _v3
-  [[ "$_floor" =~ $_re ]] || return 1
-  _f1=${BASH_REMATCH[1]}; _f2=${BASH_REMATCH[2]}; _f3=${BASH_REMATCH[3]}
-  [[ "$_text" =~ $_re ]] || return 1
+claude_version_parsed() {
+  local _re='([0123456789]+)\.([0123456789]+)\.([0123456789]+)'
+  local _v1 _v2 _v3
+  CLAUDE_VERSION_PARSED=""
+  [[ "$1" =~ $_re ]] || return 1
   _v1=${BASH_REMATCH[1]}; _v2=${BASH_REMATCH[2]}; _v3=${BASH_REMATCH[3]}
   if [ "${#_v1}" -gt 6 ] || [ "${#_v2}" -gt 6 ] || [ "${#_v3}" -gt 6 ]; then return 1; fi
-  _v1=$((10#$_v1)); _v2=$((10#$_v2)); _v3=$((10#$_v3))
-  _f1=$((10#$_f1)); _f2=$((10#$_f2)); _f3=$((10#$_f3))
+  CLAUDE_VERSION_PARSED="$((10#$_v1)).$((10#$_v2)).$((10#$_v3))"
+  return 0
+}
+
+# Returns 0 when the version in $1 is at or above the version in $2, comparing the three
+# components as numbers left to right (2.10.0 is above 2.1.286). Returns 1 when it is
+# below, or when either text is no version for claude_version_parsed. It leaves
+# CLAUDE_VERSION_PARSED set to the parse of $1.
+claude_version_at_least() {
+  local _f1 _f2 _f3 _v1 _v2 _v3 _rest
+  claude_version_parsed "$2" || return 1
+  _f1=${CLAUDE_VERSION_PARSED%%.*}; _rest=${CLAUDE_VERSION_PARSED#*.}
+  _f2=${_rest%%.*}; _f3=${_rest#*.}
+  claude_version_parsed "$1" || return 1
+  _v1=${CLAUDE_VERSION_PARSED%%.*}; _rest=${CLAUDE_VERSION_PARSED#*.}
+  _v2=${_rest%%.*}; _v3=${_rest#*.}
   if [ "$_v1" -ne "$_f1" ]; then
     if [ "$_v1" -gt "$_f1" ]; then return 0; fi
     return 1
@@ -282,20 +295,6 @@ claude_version_at_least() {
   fi
   if [ "$_v3" -ge "$_f3" ]; then return 0; fi
   return 1
-}
-
-# Returns 0 and sets CLAUDE_VERSION_PARSED to the first X.Y.Z in $1, each component as a
-# base-10 number without leading zeros. Returns 1 when $1 holds no X.Y.Z or a component
-# longer than six digits, as claude_version_at_least does. The digit set is spelled out.
-claude_version_parsed() {
-  local _re='([0123456789]+)\.([0123456789]+)\.([0123456789]+)'
-  local _v1 _v2 _v3
-  CLAUDE_VERSION_PARSED=""
-  [[ "$1" =~ $_re ]] || return 1
-  _v1=${BASH_REMATCH[1]}; _v2=${BASH_REMATCH[2]}; _v3=${BASH_REMATCH[3]}
-  if [ "${#_v1}" -gt 6 ] || [ "${#_v2}" -gt 6 ] || [ "${#_v3}" -gt 6 ]; then return 1; fi
-  CLAUDE_VERSION_PARSED="$((10#$_v1)).$((10#$_v2)).$((10#$_v3))"
-  return 0
 }
 
 # The permission floor sits at or below the lean floor: a CLI the lean form runs on
@@ -312,12 +311,12 @@ elif ! claude_version_parsed "$CLAUDE_VERSION_TEXT"; then
   log "claude --version could not be read — using the legacy argv"
 else
   RUN_CLI="$CLAUDE_VERSION_PARSED"
-  if ! claude_version_at_least "$CLAUDE_VERSION_PARSED" "$MEMORY_MIN_PERMISSION_VERSION"; then
+  if ! claude_version_at_least "$RUN_CLI" "$MEMORY_MIN_PERMISSION_VERSION"; then
     RUN_RESULT="below-floor"
     RUN_FLOOR="$MEMORY_MIN_PERMISSION_VERSION"
     exit 0
   fi
-  if claude_version_at_least "$CLAUDE_VERSION_PARSED" "$MEMORY_MIN_CLAUDE_VERSION"; then
+  if claude_version_at_least "$RUN_CLI" "$MEMORY_MIN_CLAUDE_VERSION"; then
     CLAUDE_ARGV_FORM="lean"
   else
     log "claude --version is below ${MEMORY_MIN_CLAUDE_VERSION} — using the legacy argv"
@@ -933,10 +932,11 @@ fi
 #                      auto-memory out on both forms, including the legacy one.
 #
 # The run starts in the project root, so a session that began in a subfolder runs from
-# the same place. The spawn is a subshell that ends in `exec`, so the claude process keeps
-# the subshell's PID, which is its process group's leader (set -m below), and the
-# watchdog can signal the whole group. A project root the subshell cannot enter exits
-# 97 and starts no claude; the log then says so.
+# the same place. The worker enters the root before the fork; a root it cannot enter ends
+# the run with its own log line and starts no claude, so the spawn's exit status is what
+# claude returned and nothing else. The spawn is a subshell that ends in `exec`, so the
+# claude process keeps the subshell's PID, which is its process group's leader (set -m
+# below), and the watchdog can signal the whole group.
 #
 # Why Write-only is safe: the staged path is empty before every run (the removal and
 # the checked precondition after the lock above, then the check just before the spawn),
@@ -973,6 +973,7 @@ fi
 # anywhere on its way, was put there since, so the run does not start; the batch stays
 # in .processing for recovery.
 if [ -e "$STAGED_FILE" ] || [ -L "$STAGED_FILE" ] || ! df_no_symlink_below "$PROJECT_ROOT" "$STAGED_FILE"; then
+  RUN_RESULT="failed"
   log "SKIP: the staged path changed before the run; leaving .processing for recovery"
   exit 0
 fi
@@ -984,36 +985,38 @@ RUN_ARGV="$CLAUDE_ARGV_FORM"
 RUN_RESULT="failed"
 RUN_DENIALS="unknown"
 
+if ! cd "$PROJECT_ROOT" 2>/dev/null; then
+  log "FAIL: could not enter the project root"
+  exit 0
+fi
+
+# One argv for both forms, in the order the flags are passed: the model, the Write tool and
+# the four permission flags that limit the worker's write are stated here once; the lean
+# form adds its own flags. (`+=` needs bash 3.1; the array is never empty, so its
+# expansion below is safe on 3.2.)
+CLAUDE_ARGV=(
+  -p
+  --model "$MEMORY_MODEL"
+)
+if [ "$CLAUDE_ARGV_FORM" = "lean" ]; then
+  CLAUDE_ARGV+=(--effort "$MEMORY_EFFORT" --safe-mode)
+fi
+CLAUDE_ARGV+=(--tools Write)
+if [ "$CLAUDE_ARGV_FORM" = "lean" ]; then
+  CLAUDE_ARGV+=(--disable-slash-commands --strict-mcp-config --mcp-config '{"mcpServers":{}}' --max-turns 3)
+fi
+CLAUDE_ARGV+=(
+  --permission-mode dontAsk
+  --setting-sources user
+  --settings "$MEMORY_SETTINGS_JSON"
+  --output-format json
+)
+
 set -m
 (
-  cd "$PROJECT_ROOT" || exit 97
-  if [ "$CLAUDE_ARGV_FORM" = "lean" ]; then
-    DEVFLOW_BG_UPDATER=1 CLAUDE_CODE_DISABLE_CLAUDE_MDS=1 CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 exec "$CLAUDE_BIN" -p \
-      --model "$MEMORY_MODEL" \
-      --effort "$MEMORY_EFFORT" \
-      --safe-mode \
-      --tools Write \
-      --disable-slash-commands \
-      --strict-mcp-config \
-      --mcp-config '{"mcpServers":{}}' \
-      --max-turns 3 \
-      --permission-mode dontAsk \
-      --setting-sources user \
-      --settings "$MEMORY_SETTINGS_JSON" \
-      --output-format json \
-      <<< "$PROMPT" \
-      > "${RESULT_FILE:-/dev/null}" 2>> "$LOG_FILE"
-  else
-    DEVFLOW_BG_UPDATER=1 CLAUDE_CODE_DISABLE_CLAUDE_MDS=1 CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 exec "$CLAUDE_BIN" -p \
-      --model "$MEMORY_MODEL" \
-      --tools Write \
-      --permission-mode dontAsk \
-      --setting-sources user \
-      --settings "$MEMORY_SETTINGS_JSON" \
-      --output-format json \
-      <<< "$PROMPT" \
-      > "${RESULT_FILE:-/dev/null}" 2>> "$LOG_FILE"
-  fi
+  DEVFLOW_BG_UPDATER=1 CLAUDE_CODE_DISABLE_CLAUDE_MDS=1 CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 exec "$CLAUDE_BIN" "${CLAUDE_ARGV[@]}" \
+    <<< "$PROMPT" \
+    > "${RESULT_FILE:-/dev/null}" 2>> "$LOG_FILE"
 ) &
 CLAUDE_PID=$!
 set +m
@@ -1074,6 +1077,14 @@ if [ -L "$STAGED_FILE" ] || [ -d "$STAGED_FILE" ]; then
   fi
 fi
 
+# Logs a run whose Write the permission rules refused, with its closing text <$1>, and
+# counts the run toward the two-in-a-row `denied` notice.
+record_denied_run() {
+  log "FAIL: Write denied by permission rule (${MEMORY_RESULT_DENIALS})$1"
+  memory_denied_seen "$MEMORY_DIR" "$PROJECT_ROOT"
+  return 0
+}
+
 if [ "$CLAUDE_EXIT" -gt 128 ]; then
   log "FAIL: claude -p killed by watchdog after ${WATCHDOG_SECS}s"
   # Leave .processing for crash recovery (session-start-memory's D56c cold path).
@@ -1082,15 +1093,11 @@ if [ "$CLAUDE_EXIT" -gt 128 ]; then
   # via session-start-memory State C (stale .last-refresh-ok) rather than a retry counter here,
   # keeping this plumbing script simple.
   exit 0
-elif [ "$CLAUDE_EXIT" -eq 97 ]; then
-  log "FAIL: could not enter the project root"
-  exit 0
 elif [ "$CLAUDE_EXIT" -ne 0 ]; then
   if [ -n "$RESULT_DENIED" ]; then
     # A refused Write can end the run non-zero too (the lean form's turn cap), so the
     # count is named here as well as the exit code.
-    log "FAIL: Write denied by permission rule (${MEMORY_RESULT_DENIALS}), exit $CLAUDE_EXIT"
-    memory_denied_seen "$MEMORY_DIR" "$PROJECT_ROOT"
+    record_denied_run ", exit $CLAUDE_EXIT"
   else
     log "FAIL: claude -p exited with code $CLAUDE_EXIT"
   fi
@@ -1198,8 +1205,7 @@ elif [ "$OUTCOME" = "conflict" ]; then
   log "CONFLICT: queue retained in .processing, .last-refresh-ok untouched"
 elif [ -n "$RESULT_DENIED" ]; then
   # Leave .processing for session-start-memory's D56c cold path; do NOT touch .last-refresh-ok
-  log "FAIL: Write denied by permission rule (${MEMORY_RESULT_DENIALS}) — leaving .processing for recovery"
-  memory_denied_seen "$MEMORY_DIR" "$PROJECT_ROOT"
+  record_denied_run " — leaving .processing for recovery"
 else
   # Leave .processing for session-start-memory's D56c cold path; do NOT touch .last-refresh-ok
   log "FAIL: verification failed — leaving .processing for recovery"
