@@ -288,11 +288,11 @@ async function warmLiveRuntime(): Promise<void> {
 }
 
 /**
- * beforeAll for the describes that run a `.js` stub through the production spawn
- * (T4, T14, AC-P8): the same warm-up exec as warmLiveRuntime, with a stub that exits 0,
- * so the cold exec of node is paid here. A stub test runs under the 6 s production
- * deadline, so a cold exec that outlasts it ends as a spurious timeout (T14) or as a
- * stub that never ran (the PID checks in T4 and AC-P8).
+ * beforeAll for T4, whose per-test `.js` stubs (the overflow and spawn-failure cases) run
+ * through the production spawn: the same warm-up exec as warmLiveRuntime, with a throwaway
+ * stub that exits 0, so the cold exec of node is paid here. It warms node, not a stub
+ * file. A describe whose assertions need the exact stub file to be warm writes it once and
+ * warms it by path instead (T14 and useSigtermIgnoringStub).
  */
 async function warmNodeStub(): Promise<void> {
   const stubDir = await fsAsync.mkdtemp(path.join(os.tmpdir(), 'devflow-model-discovery-stub-warm-'));
@@ -1343,14 +1343,49 @@ describe('SPAWN_TIMEOUT_MS — production deadline floor', () => {
 describe('T14: Production spawn — exit-0 stdout becomes a live catalog (no spawnAndCollect injection)', () => {
   // The production success path (child exits 0, stdout returned) has no other test: T1 and
   // T13 inject a local spawn, T3 and T2 inject spawnSync, and the stubs in T4 and AC-P8
-  // never exit 0. The first exec of node under the 6 s production deadline is paid in setup.
-  beforeAll(warmNodeStub, COLD_EXEC_WARM_HOOK_MS);
+  // never exit 0. Each stub is written once, in setup, and run once there as that exact
+  // file, so the run under the 6 s production deadline is not the first exec of a new file.
+  const payload = `${VALID_PAYLOAD}\n`;
+  const chunkSize = Math.ceil(payload.length / 4);
+  const chunks = [0, 1, 2, 3].map((i) => payload.slice(i * chunkSize, (i + 1) * chunkSize));
+  const stubs = {
+    // Prints the whole payload in one write.
+    single: `process.stdout.write(${JSON.stringify(payload)});\n`,
+    // Each chunk is flushed before the next timer is armed, so the parent reads the
+    // payload as separate 'data' events, not as one buffer.
+    chunked:
+      [
+        `const chunks = ${JSON.stringify(chunks)};`,
+        'let i = 0;',
+        'const next = () => {',
+        '  process.stdout.write(chunks[i], () => {',
+        '    i += 1;',
+        '    if (i < chunks.length) setTimeout(next, 25);',
+        '  });',
+        '};',
+        'next();',
+      ].join('\n') + '\n',
+  };
+  const stubPaths = { single: '', chunked: '' };
+  let stubDir = '';
+
+  beforeAll(async () => {
+    stubDir = await fsAsync.mkdtemp(path.join(os.tmpdir(), 'devflow-model-discovery-t14-stub-'));
+    stubPaths.single = await writeStubScript(stubDir, 'stub-t14-exit0.js', stubs.single);
+    stubPaths.chunked = await writeStubScript(stubDir, 'stub-t14-chunked.js', stubs.chunked);
+    await Promise.all([
+      warmNodeExec(stubPaths.single, 'T14 single-payload stub'),
+      warmNodeExec(stubPaths.chunked, 'T14 chunked stub'),
+    ]);
+  }, COLD_EXEC_WARM_HOOK_MS);
+
+  afterAll(async () => {
+    await fsAsync.rm(stubDir, { recursive: true, force: true });
+  });
 
   const STUB_TEST_TIMEOUT_MS = SPAWN_TIMEOUT_MS + SIGKILL_GRACE_MS + 5_000;
 
-  async function expectLiveCatalog(name: string, stubContent: string): Promise<void> {
-    const stub = await writeStubScript(tmpDir, name, stubContent);
-
+  async function expectLiveCatalog(stub: string): Promise<void> {
     const result = await discoverExternalModels(cacheDir, logPath, productionSpawnDeps(stub));
 
     // cacheDir is fresh (beforeEach) and holds no stale entry, so known:true with
@@ -1364,31 +1399,11 @@ describe('T14: Production spawn — exit-0 stdout becomes a live catalog (no spa
   }
 
   it('a stub that prints the payload and exits 0 → known:true, source:live', async () => {
-    await expectLiveCatalog(
-      'stub-t14-exit0.js',
-      `process.stdout.write(${JSON.stringify(`${VALID_PAYLOAD}\n`)});\n`,
-    );
+    await expectLiveCatalog(stubPaths.single);
   }, STUB_TEST_TIMEOUT_MS);
 
   it('a stub that writes the payload in several chunks → the chunks are joined into one live catalog', async () => {
-    const payload = `${VALID_PAYLOAD}\n`;
-    const chunkSize = Math.ceil(payload.length / 4);
-    const chunks = [0, 1, 2, 3].map((i) => payload.slice(i * chunkSize, (i + 1) * chunkSize));
-    // Each chunk is flushed before the next timer is armed, so the parent reads the
-    // payload as separate 'data' events, not as one buffer.
-    const stubContent = [
-      `const chunks = ${JSON.stringify(chunks)};`,
-      'let i = 0;',
-      'const next = () => {',
-      '  process.stdout.write(chunks[i], () => {',
-      '    i += 1;',
-      '    if (i < chunks.length) setTimeout(next, 25);',
-      '  });',
-      '};',
-      'next();',
-    ].join('\n') + '\n';
-
-    await expectLiveCatalog('stub-t14-chunked.js', stubContent);
+    await expectLiveCatalog(stubPaths.chunked);
   }, STUB_TEST_TIMEOUT_MS);
 });
 
