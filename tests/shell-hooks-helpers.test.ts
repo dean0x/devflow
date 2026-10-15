@@ -231,11 +231,19 @@ describe('memory-permission: staged_path_safe', () => {
     expect(safe(p)).toEqual(['refused:chars']);
   });
 
-  it('refuses a project inside a .claude or .git folder, with the protected reason', () => {
+  it('refuses a project inside a .git folder, with the protected reason', () => {
     expect(safe(
-      '/p/.claude/worktrees/w/.devflow/memory/WORKING-MEMORY.md.new',
       '/p/.git/modules/m/.devflow/memory/WORKING-MEMORY.md.new',
+      '/p/.git/worktrees/w/.devflow/memory/WORKING-MEMORY.md.new',
     )).toEqual(['refused:protected', 'refused:protected']);
+  });
+
+  it('accepts a project inside a .claude folder, such as a checkout in .claude/worktrees', () => {
+    const accepted = [
+      '/p/.claude/worktrees/w/.devflow/memory/WORKING-MEMORY.md.new',
+      '/p/.claude/.devflow/memory/WORKING-MEMORY.md.new',
+    ];
+    expect(safe(...accepted)).toEqual(accepted.map(() => 'ok:'));
   });
 
   it('accepts a normal path and the characters that stay inert in the rule and its JSON', () => {

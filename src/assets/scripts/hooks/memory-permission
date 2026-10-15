@@ -32,8 +32,9 @@ MEMORY_NOTICE_REASONS="path denied"
 
 # staged_path_safe <path> — returns 0 when <path> can sit in the Edit rules as it is.
 # Sets STAGED_PATH_REFUSAL to "" when it can, `chars` when the path holds a character or
-# a segment the rules cannot carry, and `protected` when a .claude or .git folder lies
-# above it (the worker skips such a project and logs the reason). The rule text carries no
+# a segment the rules cannot carry, and `protected` when a .git folder lies above it (the
+# worker skips such a project and logs the reason). A .claude folder above it is fine: a
+# checkout in .claude/worktrees gets its working memory updated. The rule text carries no
 # quoting, so a character that has a meaning in a rule path is refused rather than quoted:
 # * ? [ ] \ ( ) " { } and every control character, including newline, tab and DEL. A path
 # that is not absolute, starts with //, or holds an empty, . or .. segment is refused too.
@@ -56,7 +57,7 @@ staged_path_safe() {
     *'*'*|*'?'*|*'['*|*']'*|*'\'*|*'('*|*')'*|*'"'*|*'{'*|*'}'*) STAGED_PATH_REFUSAL="chars"; return 1 ;;
   esac
   case "$_p" in
-    */.claude/*|*/.git/*) STAGED_PATH_REFUSAL="protected"; return 1 ;;
+    */.git/*) STAGED_PATH_REFUSAL="protected"; return 1 ;;
   esac
   return 0
 }

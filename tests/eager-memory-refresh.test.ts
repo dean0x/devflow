@@ -4181,18 +4181,27 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
       expect(fs.readFileSync(path.join(memory, '.worker-notice-path'), 'utf-8')).toBe('path\n');
     });
 
-    it.each([
-      ['.claude', ['.claude', 'worktrees', 'w']],
-      ['.git', ['.git', 'm']],
-    ] as const)('a project inside a %s folder is skipped with no claude run', (_folder, segments) => {
-      const { project, memory } = makeProject(...segments);
+    it('a project inside a .git folder is skipped with no claude run, the reason logged and a path notice left', () => {
+      const { project, memory } = makeProject('.git', 'm');
       createRecordingClaude(shimDir, memory, HEALTHY_VERSION);
 
       runWorkerAt(project);
 
       expect(fs.existsSync(path.join(shimDir, 'argv.txt')), 'no -p call').toBe(false);
-      expect(onlyWorkerLog()).toContain('SKIP: the project lies inside a .claude or .git folder; no LLM run');
+      expect(onlyWorkerLog()).toContain('SKIP: the project lies inside a .git folder; no LLM run');
       expect(fs.existsSync(path.join(memory, '.worker-notice-path'))).toBe(true);
+    });
+
+    it('a project inside a .claude folder, such as a checkout in .claude/worktrees, is run like any other', () => {
+      const { project, memory } = makeProject('.claude', 'worktrees', 'w');
+      const rec = createRecordingClaude(shimDir, memory, HEALTHY_VERSION);
+
+      runWorkerAt(project);
+
+      const staged = path.join(fs.realpathSync(project), '.devflow', 'memory', 'WORKING-MEMORY.md.new');
+      expect(recordedArgv(rec)).toEqual(leanArgv(WORKER_AGENTS.memory.model, WORKER_AGENTS.memory.effort, staged));
+      expect(fs.existsSync(path.join(memory, 'WORKING-MEMORY.md')), 'the memory was written').toBe(true);
+      expect(fs.existsSync(path.join(memory, '.worker-notice-path'))).toBe(false);
     });
 
     it('a project folder that holds a space and a comma is run, and the rule carries the path as it is', () => {

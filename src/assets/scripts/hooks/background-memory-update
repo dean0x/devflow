@@ -167,12 +167,12 @@ fi
 # The run gets an allow rule for $STAGED_FILE, a deny rule for every path under it, and a
 # permission mode that denies every call no rule allows. The rules are plain text in a
 # settings JSON, so the staged path is checked before the JSON is built: a character that
-# has a meaning in a rule path, or a project inside a .claude or .git folder, ends the run
-# here with no LLM call, and a one-time notice tells the user (memory-permission). The
-# prompt, the rules and the checks below all use this one path.
+# has a meaning in a rule path, or a project inside a .git folder, ends the run here with
+# no LLM call, and a one-time notice tells the user (memory-permission). The prompt, the
+# rules and the checks below all use this one path.
 if ! staged_path_safe "$STAGED_FILE"; then
   if [ "$STAGED_PATH_REFUSAL" = "protected" ]; then
-    log "SKIP: the project lies inside a .claude or .git folder; no LLM run"
+    log "SKIP: the project lies inside a .git folder; no LLM run"
   else
     log "SKIP: the memory path holds characters the permission rule cannot carry; no LLM run"
   fi
