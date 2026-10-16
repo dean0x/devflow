@@ -800,15 +800,23 @@ const POLL_MS = 50;
 /** 20 s: well inside SUBPROCESS_TIMEOUT_MS, so a pack that never reaches the linter fails the assertion first. */
 const MAX_POLLS = 400;
 
+interface SignalOptions {
+  /** Added to the env of the run, for example a PATH with a shim in front. */
+  readonly env?: Record<string, string | undefined>;
+  /** The file, in the repository root, whose creation tells the test that the run reached the slow step. */
+  readonly marker?: string;
+}
+
 /**
- * Run the pack in its own process group, wait until the linter stub has started, then signal the whole
- * group, as a timeout wrapper does. The group is killed in `finally`, so no stub outlives the test.
+ * Run the pack in its own process group, wait until the slow step (the linter stub, or a shim named in `opts`) has
+ * started, then signal the whole group, as a timeout wrapper does. The group is killed in `finally`, so nothing
+ * outlives the test.
  */
-async function runUntilSignalled(r: Repo, base: string, signal: NodeJS.Signals, tmp: string): Promise<Run> {
-  const marker = path.join(r.dir, 'linter-started');
+async function runUntilSignalled(r: Repo, base: string, signal: NodeJS.Signals, tmp: string, opts: SignalOptions = {}): Promise<Run> {
+  const marker = path.join(r.dir, opts.marker ?? 'linter-started');
   const child = spawn('bash', [path.join(r.dir, SCRIPT_IN_REPO), base], {
     cwd: r.dir,
-    env: r.env({ TMPDIR: tmp }),
+    env: r.env({ TMPDIR: tmp, ...opts.env }),
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -832,7 +840,7 @@ async function runUntilSignalled(r: Repo, base: string, signal: NodeJS.Signals, 
     for (let polls = 0; polls < MAX_POLLS && !exited && !fs.existsSync(marker); polls++) {
       await new Promise(resolve => setTimeout(resolve, POLL_MS));
     }
-    expect(fs.existsSync(marker), `the linter stub must start (stdout: ${stdout})`).toBe(true);
+    expect(fs.existsSync(marker), `the slow step must start (stdout: ${stdout})`).toBe(true);
     process.kill(-pid, signal);
     const status = await closed;
     return { stdout, stderr, status };
@@ -865,6 +873,67 @@ describe('lint-pack template: an interrupted run', () => {
     );
     const res = await runUntilSignalled(r, base, 'SIGTERM', tempDir('lint-pack-tmp-'));
     expectRun(res, 'pack-changed .lint-pack.conf\nLINT_PACK: error interrupted\n', 2);
+  });
+
+  const SHIM_MARKER = 'shim-started';
+
+  /**
+   * A PATH whose first entry holds a `tool` that runs the real one for every call, except a call with an argument that
+   * matches `pattern` (a shell case pattern): that call creates the marker, sleeps `seconds`, and runs the real tool
+   * before or after the sleep. A signal that the script ignores meanwhile reaches the shim as an ignored signal too.
+   */
+  function pathWithSleepingTool(tool: string, real: string, pattern: string, r: Repo, when: 'before' | 'after', seconds: number): string {
+    const bin = tempDir('lint-pack-sleepbin-');
+    const marker = path.join(r.dir, SHIM_MARKER);
+    const slow = when === 'before'
+      ? [`: > '${marker}'`, `sleep ${seconds}`, `exec "${real}" "$@"`]
+      : [`"${real}" "$@"`, 'rc=$?', `: > '${marker}'`, `sleep ${seconds}`, 'exit "$rc"'];
+    const shim = ['#!/bin/sh', 'for arg in "$@"; do', '  case "$arg" in', `    ${pattern})`, ...slow.map(line => `      ${line}`), '      ;;', '  esac', 'done', `exec "${real}" "$@"`, ''].join('\n');
+    fs.writeFileSync(path.join(bin, tool), shim, { mode: 0o755 });
+    return `${bin}${path.delimiter}${process.env.PATH ?? ''}`;
+  }
+
+  // `g ... >file` puts the file on the shell's own stdout while git runs, and so does the result block of the final
+  // step: a signal in either window must still print the base and the error on the real stdout.
+  it('prints the base and interrupted when the signal lands in a git call that writes to a file', async () => {
+    const { r, base } = simple(IDS_CONF, { 'src/a.ts': 'x\n' }, { 'src/a.ts': 'y\n' });
+    const tmp = tempDir('lint-pack-tmp-');
+    const PATH = pathWithSleepingTool('git', realGitPath(), 'ls-files', r, 'before', 60);
+    const res = await runUntilSignalled(r, base, 'SIGTERM', tmp, { env: { PATH }, marker: SHIM_MARKER });
+    expect({ stdout: res.stdout, status: res.status }).toEqual({ stdout: `base ${base}\nLINT_PACK: error interrupted\n`, status: 2 });
+    expect(res.stderr).toBe('');
+    expect(fs.readdirSync(tmp)).toEqual([]);
+  });
+
+  it('prints the pack lines, the base and interrupted when the signal lands in the result block', async () => {
+    const { r, base } = simple(undefined, { 'src/a.ts': 'x\n' }, { '.lint-pack.conf': IDS_CONF });
+    const tmp = tempDir('lint-pack-tmp-');
+    const PATH = pathWithSleepingTool('cat', '/bin/cat', '*/rec.out', r, 'before', 60);
+    const res = await runUntilSignalled(r, base, 'SIGTERM', tmp, { env: { PATH }, marker: SHIM_MARKER });
+    expect({ stdout: res.stdout, status: res.status }).toEqual({
+      stdout: `pack-changed .lint-pack.conf\nbase ${base}\nLINT_PACK: error interrupted\n`,
+      status: 2,
+    });
+    expect(fs.readdirSync(tmp)).toEqual([]);
+  });
+
+  // Once the result is final, a late signal changes nothing: one result line, the run's own exit code, no temp dir left.
+  it.each(['before', 'after'] as const)('prints one result and removes its temp dir when the signal lands %s the result prints', async when => {
+    const { r, base } = simple(IDS_CONF, { 'src/a.ts': 'x\n' }, { 'src/a.ts': 'y\n' });
+    const tmp = tempDir('lint-pack-tmp-');
+    const PATH = pathWithSleepingTool('cat', '/bin/cat', '*/result.txt', r, when, 1);
+    const res = await runUntilSignalled(r, base, 'SIGTERM', tmp, { env: { PATH }, marker: SHIM_MARKER });
+    expect({ stdout: res.stdout, status: res.status }).toEqual({ stdout: `base ${base}\nLINT_PACK: clean\n`, status: 0 });
+    expect(fs.readdirSync(tmp)).toEqual([]);
+  });
+
+  it('prints one result and removes its temp dir when the signal lands during the removal of the temp dir', async () => {
+    const { r, base } = simple(IDS_CONF, { 'src/a.ts': 'x\n' }, { 'src/a.ts': 'y\n' });
+    const tmp = tempDir('lint-pack-tmp-');
+    const PATH = pathWithSleepingTool('rm', '/bin/rm', '*/lint-pack.*', r, 'before', 1);
+    const res = await runUntilSignalled(r, base, 'SIGTERM', tmp, { env: { PATH }, marker: SHIM_MARKER });
+    expect({ stdout: res.stdout, status: res.status }).toEqual({ stdout: `base ${base}\nLINT_PACK: clean\n`, status: 0 });
+    expect(fs.readdirSync(tmp)).toEqual([]);
   });
 });
 
@@ -1392,6 +1461,39 @@ describe('lint-pack template: function-size check', () => {
     expectError(stderrOnly.r.run(stderrOnly.base), 'linter-exit 1');
   });
 
+  it('reports linter-exit for a crash whose only path:line: text is a stack frame, with or without size.match', () => {
+    // A Node linter that dies on a missing module prints indented frames that hold `<loc>:<line>:<col>)`, and exits 1.
+    const frames = [
+      'node:internal/modules/cjs/loader:1145',
+      '    at Module._resolveFilename (node:internal/modules/cjs/loader:1145:15)',
+      '    at /work/tools/size.js:3:1',
+    ];
+    const withMatch = sizeFixture(SIZE_CONF, frames, 1);
+    expectError(withMatch.r.run(withMatch.base), 'linter-exit 1');
+    const noMatch = sizeFixture(cfg('size.enabled=true', 'size.arg=bash', `size.arg=${STUB}`), frames, 1);
+    expectError(noMatch.r.run(noMatch.base), 'linter-exit 1');
+    // A bare `scheme:path:line:col` line holds a colon in its path part, so it is not a diagnostic either.
+    const bare = sizeFixture(SIZE_CONF, ['node:internal/modules/cjs/loader:1145:15'], 1);
+    expectError(bare.r.run(bare.base), 'linter-exit 1');
+  });
+
+  it('reads a path:line: diagnostic with a space in its path as a lint result', () => {
+    const r = newRepo();
+    const diagnostic = `@ROOT@/my src/a b.ts:2:1: ${SIZE_RULE}`;
+    const base = r.commit({ ...pack(SIZE_CONF), 'my src/a b.ts': 'line1\nline2\n', [STUB]: stubLinter(r.dir, [diagnostic], 1) }, 'base');
+    r.commit({ 'my src/a b.ts': 'line1\nchanged2\n' }, 'head');
+    expectRun(r.run(base), 'function-size my src/a b.ts:2 function-size\nLINT_PACK: matches 1\n', 1);
+  });
+
+  it('closes fd 9, which holds the real stdout, for the linter, so a linter daemon never holds the caller\'s pipe', () => {
+    const stub = '#!/usr/bin/env bash\nif { : >&9; } 2>/dev/null; then echo open >fd9.txt; else echo closed >fd9.txt; fi\nexit 0\n';
+    const r = newRepo();
+    const base = r.commit({ ...pack(SIZE_CONF), 'src/a.ts': 'x\n', [STUB]: stub }, 'base');
+    r.commit({ 'src/a.ts': 'y\n' }, 'head');
+    expectRun(r.run(base), 'LINT_PACK: clean\n', 0);
+    expect(fs.readFileSync(path.join(r.dir, 'fd9.txt'), 'utf8').trim()).toBe('closed');
+  });
+
   it('still reads a non-zero status with path:line diagnostics that miss size.match as a lint result', () => {
     const { r, base } = sizeFixture(SIZE_CONF, ['@ROOT@/src/a.ts:2:9: Unused variable. [Error/no-unused-vars]'], 1);
     expectRun(r.run(base), 'LINT_PACK: clean\n', 0);
@@ -1428,6 +1530,21 @@ describe('lint-pack template: function-size check', () => {
 });
 
 // ── pack-changed ─────────────────────────────────────────────────────────────
+
+/** `count` nested .gitattributes files, `d01/.gitattributes` and so on: sorted order is numeric order. */
+function nested(prefix: string, count: number): Files {
+  return Object.fromEntries(Array.from({ length: count }, (_, i) => [`${prefix}${String(i + 1).padStart(2, '0')}/.gitattributes`, '# note\n']));
+}
+
+/** The paths `<prefix>NN/.gitattributes` for the numbers `from` to `to`. */
+function nestedPaths(prefix: string, from: number, to: number): string[] {
+  return Array.from({ length: to - from + 1 }, (_, i) => `${prefix}${String(from + i).padStart(2, '0')}/.gitattributes`);
+}
+
+/** The output lines `<word> <path>` for those paths. */
+function nestedLines(word: string, prefix: string, from: number, to: number): string[] {
+  return nestedPaths(prefix, from, to).map(p => `${word} ${p}`);
+}
 
 describe('lint-pack template: pack-changed lines', () => {
   const PACKAGE = (lintPack: string, test = 'vitest'): string =>
@@ -1531,6 +1648,40 @@ describe('lint-pack template: pack-changed lines', () => {
     const { r, base } = packFixture();
     r.commit({ 'package.json': PACKAGE('bash scripts/lint-pack.sh', 'BASE=HEAD vitest') }, 'head');
     expectRun(r.run(base), 'pack-changed package.json\nLINT_PACK: clean\n', 0);
+  });
+
+  it('reports a Makefile line that can change the base even when the file holds a NUL byte', () => {
+    const { r, base } = packFixture();
+    const text = `${MAKEFILE('@bash scripts/lint-pack.sh $(BASE)')}override BASE := $(shell git rev-parse HEAD)\n`;
+    r.commit({ Makefile: Buffer.concat([Buffer.from('# note'), Buffer.from([0]), Buffer.from(`\n${text}`)]) }, 'binary build file');
+    expect(r.git('diff', '--numstat', base, 'HEAD', '--', 'Makefile'), 'git must see the Makefile as binary').toMatch(/^-\t-\tMakefile\n$/);
+    // The plan-ID check is on, so the changed binary file is also listed as one the check did not search.
+    expectRun(r.run(base), 'pack-changed Makefile\nskipped-binary Makefile\nLINT_PACK: clean\n', 0);
+  });
+
+  it('lists exactly 20 changed pack files without a +k more line', () => {
+    const { r, base } = packFixture();
+    r.commit(nested('d', 20), 'twenty nested attributes');
+    expectRun(r.run(base), [...nestedLines('pack-changed', 'd', 1, 20), 'LINT_PACK: clean', ''].join('\n'), 0);
+  });
+
+  it('lists at most 20 changed pack files, sorted, then +k more', () => {
+    const { r, base } = packFixture();
+    r.commit(nested('d', 23), 'many nested attributes');
+    expectRun(r.run(base), [...nestedLines('pack-changed', 'd', 1, 20), '+3 more', 'LINT_PACK: clean', ''].join('\n'), 0);
+  });
+
+  it('prints the capped pack lines, with +k more, before an error line', () => {
+    const { r, base } = packFixture();
+    r.commit({ ...nested('d', 22), '.lint-pack.conf': `${IDS_CONF}bogus.key=1\n` }, 'many nested attributes and a bad config');
+    const expected = [
+      'pack-changed .lint-pack.conf',
+      ...nestedLines('pack-changed', 'd', 1, 19),
+      '+3 more',
+      'LINT_PACK: error bad-config 4',
+      '',
+    ].join('\n');
+    expectRun(r.run(base), expected, 2);
   });
 
   it.each(['GNUmakefile', 'makefile'])('skips %s when no changed line names lint-pack or BASE', name => {
@@ -1678,6 +1829,39 @@ describe('lint-pack template: pack-dirty lines', () => {
       '.gitignore': 'node_modules/\n',
     });
     expectRun(r.run(base), withDirty('extra/deep/.gitattributes'), 1);
+  });
+
+  it.each(['work tree', 'index'])('reports an uncommitted Makefile line that can change the base even when the file holds a NUL byte (%s)', where => {
+    const { r, base } = dirtyFixture();
+    r.write({ Makefile: Buffer.from(`# note\0\n${RECIPE}${OVERRIDE}`) });
+    expect(r.git('diff', '--numstat', 'HEAD', '--', 'Makefile'), 'git must see the Makefile as binary').toMatch(/^-\t-\tMakefile\n$/);
+    if (where === 'index') {
+      r.git('add', 'Makefile');
+      r.write({ Makefile: RECIPE });
+    }
+    expectRun(r.run(base), withDirty('Makefile'), 1);
+  });
+
+  it('lists exactly 20 dirty pack files without a +k more line', () => {
+    const { r, base } = dirtyFixture();
+    r.write(nested('u', 20));
+    expectRun(r.run(base), withDirty(...nestedPaths('u', 1, 20)), 1);
+  });
+
+  it('lists at most 20 dirty pack files, sorted, then +k more, after the capped pack-changed lines and their +k more', () => {
+    const { r, base } = dirtyFixture();
+    r.commit(nested('c', 21), 'many nested attributes');
+    r.write(nested('u', 22));
+    const expected = [
+      MATCH.trimEnd(),
+      ...nestedLines('pack-changed', 'c', 1, 20),
+      '+1 more',
+      ...nestedLines('pack-dirty', 'u', 1, 20),
+      '+2 more',
+      'LINT_PACK: matches 1',
+      '',
+    ].join('\n');
+    expectRun(r.run(base), expected, 1);
   });
 
   it('prints one line per path for directory names with a space, a newline or non-ASCII bytes', () => {

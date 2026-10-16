@@ -26,12 +26,13 @@
 #
 #   <check-id> <path>:<line> <id>      one record per match, sorted, at most 50
 #   +<k> more                          records beyond the first 50
-#   pack-changed <path>                a pack file the branch changed; these lines
-#                                      also print before an error line
+#   pack-changed <path>                a pack file the branch changed; at most 20, then
+#                                      +<k> more; these lines also print before an error
+#                                      line
 #   pack-dirty <path>                  a pack file that differs from HEAD in the work
-#                                      tree or the index, or that is untracked; these
-#                                      lines print after the pack-changed lines, and
-#                                      also before an error line
+#                                      tree or the index, or that is untracked; at most
+#                                      20, then +<k> more; these lines print after the
+#                                      pack-changed lines, and also before an error line
 #   skipped-binary <path>              at most 10, then +<k> more
 #   symbol-cap <n> | unsafe-tokens <n> | unmatched-diagnostics <n>
 #   dropped-long-lines <n>             counts, printed only when not zero
@@ -78,6 +79,7 @@ MAX_CONF_LINES=1000
 MAX_RECORDS=50
 MAX_SYMBOLS=500
 MAX_BINARY=10
+MAX_PACK=20
 MIN_GIT_MAJOR=2
 MIN_GIT_MINOR=30
 
@@ -89,7 +91,9 @@ BLANK_RE='^[[:space:]]*$'
 NUM_RE='^[0-9]{1,3}$'
 BAD_ESCAPE_RE='\\[A-Za-z0-9<>]'
 GIT_VERSION_RE='^([0-9]+)\.([0-9]+)'
-DIAGNOSTIC_RE='^.+:[0-9]+:'
+# A diagnostic starts with a path and holds no colon before its line number. An
+# indented stack frame, and a "node:internal/..." prefix, are not diagnostics.
+DIAGNOSTIC_RE='^[^[:space:]][^:]*:[0-9]+:'
 
 # Every git call: no pager, and quoted paths in git's C-quoted form.
 g() { command git --no-pager -c core.quotePath=true "$@"; }
@@ -140,6 +144,11 @@ DROPPED_N=0
 
 # ---- Exit handling ----
 
+# File descriptor 9 is the real stdout. Every result line goes to it, never to fd 1:
+# a redirect that is active when a signal lands (a `g ... >file` call, the result
+# block) would take the lines, and the last line would not be the LINT_PACK line.
+exec 9>&1
+
 # The pack-changed and pack-dirty lines, once they are built. An error exit prints
 # them too, so a branch that breaks its own pack still shows that it changed it.
 report_pack_lines() {
@@ -157,23 +166,28 @@ report_base() {
   return 0
 }
 
-# One error, one reason from the closed set. Only the pack lines and the base line
-# come before it on stdout.
-die_error() {
+# The error result on the real stdout: the pack lines, the base line, the reason.
+print_error() {
   report_pack_lines
   report_base
   printf 'LINT_PACK: error %s\n' "$1"
+} >&9
+
+# One error, one reason from the closed set. Only the pack lines and the base line
+# come before it on stdout.
+die_error() {
+  print_error "$1"
   DONE=1
   exit 2
 }
 
 # Remove the temp dir. A run that ends without its result line is a git-failed.
+# A signal that lands now changes nothing, and it must not cut the removal short.
 on_exit() {
   local rc=$?
+  trap '' TERM INT
   if [ "$DONE" != 1 ]; then
-    report_pack_lines
-    report_base
-    printf 'LINT_PACK: error git-failed\n'
+    print_error git-failed
     rc=2
   fi
   if [ -n "$TMP" ]; then rm -rf "$TMP"; fi
@@ -182,9 +196,11 @@ on_exit() {
 trap on_exit EXIT
 
 # A timeout wrapper ends a run with SIGTERM, a user with SIGINT: say so, and let
-# the exit trap remove the temp dir. Further signals are ignored meanwhile.
+# the exit trap remove the temp dir. Further signals are ignored meanwhile, and so
+# is every signal once the result is final.
 on_signal() {
   trap '' TERM INT
+  if [ "$DONE" = 1 ]; then return 0; fi
   die_error interrupted
 }
 trap on_signal TERM INT
@@ -422,18 +438,28 @@ build_diffmap() {
   build_map "$TMP/dm.q" "$TMP/dm.z" "$TMP/dm.map" 0
 }
 
+# The "+<k> more" line for the lines of file $1 beyond the first $MAX_PACK, if any.
+more_after_cap() {
+  local total
+  total=$(count_lines "$1") || die_error git-failed
+  if [ "$total" -gt "$MAX_PACK" ]; then printf '+%s more\n' $((total - MAX_PACK)); fi
+  return 0
+}
+
 # The pack files the branch changed, sorted: the config, this script and any
 # .gitattributes by name, a build file when a changed line names lint-pack or BASE.
 # A config renamed away or deleted shows as its old path. Then the pack files that
 # differ from HEAD in the work tree. The lines need only the changed paths and fixed
 # names, so they are built before the config is read and every later error exit
-# prints them.
+# prints them. At most $MAX_PACK lines of each kind print, then "+<k> more". The
+# build-file diff reads a binary file as text, so a NUL byte hides no line.
 pack_changed() {
   command awk -F"$TAB" 'index($3, "P") > 0 { print $1 }' "$TMP/dm.map" >"$TMP/pc.txt" || die_error git-failed
-  g diff "${DIFF_PINS[@]}" --no-renames --name-only "-G$BUILD_LINE_RE" --end-of-options "$BASE" HEAD -- \
+  g diff "${DIFF_PINS[@]}" --no-renames --name-only --text "-G$BUILD_LINE_RE" --end-of-options "$BASE" HEAD -- \
     "${BUILD_FILES[@]}" >>"$TMP/pc.txt" 2>/dev/null || die_error git-failed
   command sort -u "$TMP/pc.txt" >"$TMP/pc.sorted" || die_error git-failed
-  command sed 's/^/pack-changed /' "$TMP/pc.sorted" >"$TMP/pc.lines" || die_error git-failed
+  command head -n "$MAX_PACK" "$TMP/pc.sorted" | command sed 's/^/pack-changed /' >"$TMP/pc.lines" || die_error git-failed
+  more_after_cap "$TMP/pc.sorted" >>"$TMP/pc.lines"
   pack_dirty
   bound_lines "$TMP/pc.lines" "$TMP/pc.out"
   PC_READY=1
@@ -454,12 +480,13 @@ pack_dirty() {
     if [ "$side" = index ]; then mode=(--cached); fi
     g diff "${DIFF_PINS[@]}" --no-renames --name-only ${mode[@]+"${mode[@]}"} --end-of-options HEAD -- \
       "${specs[@]}" >>"$TMP/pd.txt" 2>/dev/null || die_error git-failed
-    g diff "${DIFF_PINS[@]}" --no-renames --name-only "-G$BUILD_LINE_RE" ${mode[@]+"${mode[@]}"} --end-of-options HEAD -- \
+    g diff "${DIFF_PINS[@]}" --no-renames --name-only --text "-G$BUILD_LINE_RE" ${mode[@]+"${mode[@]}"} --end-of-options HEAD -- \
       "${BUILD_FILES[@]}" >>"$TMP/pd.txt" 2>/dev/null || die_error git-failed
   done
   g ls-files --others --exclude-standard -- "${specs[@]}" "${BUILD_FILES[@]}" >>"$TMP/pd.txt" 2>/dev/null || die_error git-failed
   command sort -u "$TMP/pd.txt" >"$TMP/pd.sorted" || die_error git-failed
-  command sed 's/^/pack-dirty /' "$TMP/pd.sorted" >>"$TMP/pc.lines" || die_error git-failed
+  command head -n "$MAX_PACK" "$TMP/pd.sorted" | command sed 's/^/pack-dirty /' >>"$TMP/pc.lines" || die_error git-failed
+  more_after_cap "$TMP/pd.sorted" >>"$TMP/pc.lines"
 }
 
 # One -U0 diff, split by an awk pass into the streams each check reads.
@@ -551,8 +578,9 @@ check_size() {
   local rc ok e
   # The linter is argv, one word per config line, run from the root. No shell.
   # The outer redirect keeps bash's own "Terminated" note off stderr when a signal
-  # ends the linter's subshell.
-  { ( cd "$ROOT" && "${SIZE_ARG[@]}" ) </dev/null >"$TMP/lint.out" 2>&1; } 2>/dev/null
+  # ends the linter's subshell. The linter does not get fd 9, so a daemon that it
+  # leaves behind never holds the caller's pipe open.
+  { ( cd "$ROOT" && "${SIZE_ARG[@]}" ) </dev/null >"$TMP/lint.out" 2>&1 9>&-; } 2>/dev/null
   rc=$?
   case "$rc" in 126 | 127) die_error linter-missing ;; esac
   ok=0
@@ -619,8 +647,11 @@ emit() {
     report_base
     printf 'LINT_PACK: %s\n' "$state"
   } >"$TMP/result.txt"
-  cat "$TMP/result.txt"
+  # The result is final: a signal that lands now changes nothing, and it must not
+  # cut the print short. The print goes to the real stdout.
+  trap '' TERM INT
   DONE=1
+  cat "$TMP/result.txt" >&9
   exit "$code"
 }
 
