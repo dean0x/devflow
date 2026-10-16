@@ -104,6 +104,47 @@ export interface LearningStoreError {
 
 export type LearningStoreResult<T> = Result<T, LearningStoreError>;
 
+/** The names and directories a ledger move takes; the last three default to the machine's own. */
+export interface LedgerMoveOptions {
+  /** The old folder name under `.devflow`. */
+  readonly oldName: string;
+  /** The new folder name under `.devflow`; a plain name different from `oldName`. */
+  readonly newName: string;
+  /** The machine directory that holds the move lock; default `$HOME/.devflow`. */
+  readonly machineDir?: string;
+  /** The home directory the root may not be; default `$HOME`. */
+  readonly homeDir?: string;
+  /** Epoch milliseconds; default `Date.now()`. */
+  readonly now?: number;
+}
+
+/**
+ * `moveLedger`'s answer. `none`: no old folder, nothing was locked or created.
+ * `busy`: a lock or a fresh claim is held, try again at the next event. `moved`: the
+ * folder was renamed whole (`whole-folder`), the new folder won and the old one is
+ * the backup (`kept-new`), or the old ledger set moved into the new folder and the
+ * old one is the backup (`moved-in`); `backup` names the backup folder under
+ * `.devflow`, null for a whole-folder rename.
+ */
+export type LedgerMoveOutcome =
+  | { readonly state: 'none' | 'busy'; readonly notes: readonly string[] }
+  | {
+    readonly state: 'moved';
+    readonly mode: 'whole-folder' | 'kept-new' | 'moved-in';
+    readonly backup: string | null;
+    readonly rendered: boolean;
+    readonly notes: readonly string[];
+  };
+
+/** `sweepLedgerBackups`'s answer: the queue files merged out of the backups a move left. */
+export interface LedgerSweepOutcome {
+  readonly state: 'none' | 'busy' | 'swept';
+  readonly files: number;
+  readonly merged: number;
+  readonly overflowed: number;
+  readonly notes: readonly string[];
+}
+
 /**
  * The part of the store's `module.exports` the CLI calls. Each function refuses
  * without `.devflow/learning/` (error kind `no-learning-dir`); the writers refuse a
@@ -149,6 +190,14 @@ export interface LearningStoreModule {
     root: string,
     opts?: { readonly timeoutMs?: number },
   ): LearningStoreResult<{ readonly removed: number }>;
+  /**
+   * Move the old ledger folder to the new name, once, or merge it into a new folder
+   * that already exists. Never waits on a lock. Error kinds: `invalid-input`, `refused`
+   * (the root or a link among the set is unsafe; nothing was changed), `io-error`.
+   */
+  moveLedger(root: string, opts: LedgerMoveOptions): LearningStoreResult<LedgerMoveOutcome>;
+  /** Merge what the backups a move left hold into the new folder's pending queue; same error kinds as `moveLedger`. */
+  sweepLedgerBackups(root: string, opts: LedgerMoveOptions): LearningStoreResult<LedgerSweepOutcome>;
 }
 
 /**
@@ -166,6 +215,8 @@ export const LEARNING_STORE_SURFACE = Object.freeze({
   restoreAnchor: 'function',
   clearUnreferenced: 'function',
   resetLearning: 'function',
+  moveLedger: 'function',
+  sweepLedgerBackups: 'function',
 } as const satisfies Record<keyof LearningStoreModule, SurfaceKind>);
 
 export type LearningStoreLoad = Result<LearningStoreModule, EvidencePolicyLoadError>;

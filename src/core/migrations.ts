@@ -327,7 +327,7 @@ export function reportMigrationResult(
  * Process an array of items with at most `limit` concurrent Promises.
  * Returns PromiseSettledResult for every item in the original order.
  */
-async function pooled<T, R>(
+export async function pooled<T, R>(
   items: T[],
   limit: number,
   fn: (item: T) => Promise<R>,

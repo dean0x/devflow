@@ -60,6 +60,7 @@ describe('loadLearningStore — the package copy, shape-checked, never a throw',
       'INACTIVE_STATUSES', 'ANCHOR_ID_RE',
       'readLearningState', 'buildListing', 'readListing', 'formatListing', 'showByKey',
       'restoreAnchor', 'clearUnreferenced', 'resetLearning',
+      'moveLedger', 'sweepLedgerBackups',
     ]);
     const raw = NODE_REQUIRE(LEARNING_STORE) as Record<string, unknown>;
     for (const [key, kind] of Object.entries(LEARNING_STORE_SURFACE)) {

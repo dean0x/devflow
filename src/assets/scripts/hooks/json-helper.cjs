@@ -41,9 +41,11 @@
 //                                          claimed <token>[ takeover] | busy | none
 //   release-claim <token>                 Release the claim the token owns; prints
 //                                          released | not-owner | gone
+//   move-ledger <root> <old> <new>        Move a project's old ledger folder to the new name,
+//                                          once; prints none | busy | moved <mode> and notes
 //
-// Every learning op above except claim-queue and release-claim first refreshes
-// the mtime of an existing queue claim — the heartbeat (D-OWNED-CLAIM).
+// Every learning op above except claim-queue, release-claim and move-ledger first
+// refreshes the mtime of an existing queue claim — the heartbeat (D-OWNED-CLAIM).
 
 'use strict';
 
@@ -539,6 +541,27 @@ try {
         exitWithUsage('release-claim <token> (the 16 hex characters claim-queue printed)');
       }
       process.exitCode = emit(store.releaseClaim(process.cwd(), args[0]), release => release.state);
+      break;
+    }
+
+    // -------------------------------------------------------------------------
+    // move-ledger <root> <old> <new>
+    // Move the project's old ledger folder to the new name, once (moveLedger,
+    // learning-store.cjs). Not a learning op: it sends no heartbeat, because a
+    // heartbeat would refresh a claim the move has to judge stale. Unlike the
+    // learning ops it takes its paths as arguments, so a caller outside the project
+    // root can name the root; every path stays one argv word, never a shell word.
+    // stdout: none | busy | moved <mode>, then `backup <name>` when a backup was made
+    // and one `note <text>` line for each note
+    // -------------------------------------------------------------------------
+    case 'move-ledger': {
+      if (args.length !== 3) exitWithUsage('move-ledger <root> <old-folder> <new-folder> (the root is an absolute path)');
+      const { store } = learning();
+      process.exitCode = emit(store.moveLedger(args[0], { oldName: args[1], newName: args[2] }), moved => [
+        moved.state === 'moved' ? `moved ${moved.mode}` : moved.state,
+        ...(moved.state === 'moved' && moved.backup !== null ? [`backup ${store.singleLine(moved.backup)}`] : []),
+        ...moved.notes.map(note => `note ${store.singleLine(note)}`),
+      ].join('\n'));
       break;
     }
 

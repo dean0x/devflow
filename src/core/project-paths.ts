@@ -10,7 +10,9 @@
  * ARCHITECTURE: This module is the single source of truth for path layout.
  *
  * CJS COUNTERPART: src/assets/scripts/hooks/lib/project-paths.cjs must mirror this file
- * exactly. Keep them in sync when adding or changing functions.
+ * exactly. Keep them in sync when adding or changing functions. The one exception is
+ * `curationMoveMarkerKey`: the shell writes the marker it names and only the TypeScript
+ * readers compute it.
  */
 
 import * as path from 'path';
@@ -37,6 +39,61 @@ export function getFeaturesDir(projectRoot: string): string {
 /** .devflow/docs/ — generated documentation artifacts */
 export function getDocsDir(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'docs');
+}
+
+// ---------------------------------------------------------------------------
+// The rename's names: the old names in one frozen block, the new ones beside it
+// ---------------------------------------------------------------------------
+
+/**
+ * The names the rename retires, kept in one place so the one-time ledger move, the
+ * backup readers and uninstall all spell them the same way. The CJS mirror and the
+ * shell move shim list the same names (tests/project-paths.test.ts pins both).
+ */
+export const LEGACY_NAMES = Object.freeze({
+  /** The old ledger folder under .devflow/. */
+  folder: 'learning',
+  /** The prefix of the folder the move leaves behind: `<prefix><UTC stamp>-<random>`. */
+  backupPrefix: 'learning.backup-',
+  /** The old project tuning file, inside the old folder. */
+  tuningFile: 'learning.json',
+});
+
+/** The new ledger folder under .devflow/. */
+export const CURATION_DIR_NAME = 'curation';
+
+/** The new project tuning file, inside the new folder. */
+export const CURATION_TUNING_FILE_NAME = 'curation.json';
+
+/** Letters and digits: the bytes the move marker key keeps as they are. */
+const ALPHANUMERIC_BYTE = /^[A-Za-z0-9]$/;
+
+/** The number of trailing root bytes the move marker key spells out. */
+const MARKER_KEY_TAIL_BYTES = 60;
+
+/**
+ * The key of a ledger root's move-refusal marker (`curation-move.<key>.skip` at
+ * the logs root): a 32-bit hash of every UTF-8 byte of the root, as eight
+ * lowercase hex characters, then an underscore, then the last 60 bytes of the
+ * root with every byte outside letters and digits replaced by an underscore.
+ *
+ * The hash starts at 5381 and takes each byte as `byte & 255`, setting the hash to
+ * 33 times the hash plus the byte, masked to 32 bits. The shell computes the same
+ * string with builtins only under LC_ALL=C, so bash 3.2 and bash 5 must agree on a
+ * non-ASCII root; status and the HUD read the marker through this function. A key
+ * collision only costs one extra move attempt.
+ */
+export function curationMoveMarkerKey(projectRoot: string): string {
+  const bytes = Buffer.from(projectRoot, 'utf8');
+  let hash = 5381;
+  for (const byte of bytes) hash = (Math.imul(hash, 33) + byte) >>> 0;
+  const start = Math.max(0, bytes.length - MARKER_KEY_TAIL_BYTES);
+  let tail = '';
+  for (const byte of bytes.subarray(start)) {
+    const char = String.fromCharCode(byte);
+    tail += ALPHANUMERIC_BYTE.test(char) ? char : '_';
+  }
+  return `${hash.toString(16).padStart(8, '0')}_${tail}`;
 }
 
 // ---------------------------------------------------------------------------

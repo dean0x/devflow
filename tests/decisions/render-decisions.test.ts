@@ -17,6 +17,7 @@ const require = createRequire(import.meta.url);
 
 const {
   renderDecisionsFile,
+  renderLearningFiles,
   renderAndWriteAll,
   selectActiveRows,
   selectInactiveRows,
@@ -25,6 +26,11 @@ const {
   anchorNumeric,
 } = require(path.join(ROOT, 'src/assets/scripts/hooks/lib/render-decisions.cjs')) as {
   renderDecisionsFile: (rows: Record<string, unknown>[], kind: 'decisions' | 'pitfalls') => string;
+  renderLearningFiles: (
+    worktreePath: string,
+    rows: Record<string, unknown>[],
+    outputDir: string,
+  ) => Array<{ path: string; content: string }>;
   renderAndWriteAll: (worktreePath: string, rows: Record<string, unknown>[]) => void;
   selectActiveRows: (rows: Record<string, unknown>[], kind: 'decisions' | 'pitfalls') => Record<string, unknown>[];
   selectInactiveRows: (rows: Record<string, unknown>[], kind: 'decisions' | 'pitfalls') => Record<string, unknown>[];
@@ -256,6 +262,41 @@ describe('renderAndWriteAll', () => {
     const { learningDir } = seedLearningTree(tmpDir);
     renderAndWriteAll(tmpDir, [makeDecisionRow()]);
     expect(fs.readdirSync(learningDir).sort()).toEqual(['decisions.md', 'index.md', 'pitfalls.md']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// renderLearningFiles — the output folder is an argument, and the index names it
+// ---------------------------------------------------------------------------
+
+describe('renderLearningFiles — output folder', () => {
+  const root = '/some/project';
+  const todaysDir = path.join(root, '.devflow', 'learning');
+  const otherDir = path.join(root, '.devflow', 'curation');
+  const rows = [makeDecisionRow(), makePitfallRow()];
+
+  it('puts the body files first and the index last, all inside the folder it is given', () => {
+    const files = renderLearningFiles(root, rows, otherDir);
+    expect(files.map(file => file.path)).toEqual([
+      path.join(otherDir, 'decisions.md'),
+      path.join(otherDir, 'pitfalls.md'),
+      path.join(otherDir, 'index.md'),
+    ]);
+  });
+
+  it('writes an index whose footer names the given folder and no other', () => {
+    const index = renderLearningFiles(root, rows, otherDir)[2].content;
+    expect(index).toContain(`ADR-NNN entries live in ${path.join(otherDir, 'decisions.md')}`);
+    expect(index).toContain(`PF-NNN  entries live in ${path.join(otherDir, 'pitfalls.md')}`);
+    expect(index).not.toContain(todaysDir);
+  });
+
+  it('changes nothing but the folder: the same rows give the same bytes in any folder', () => {
+    const today = renderLearningFiles(root, rows, todaysDir);
+    const other = renderLearningFiles(root, rows, otherDir);
+    for (let i = 0; i < today.length; i++) {
+      expect(other[i].content).toBe(today[i].content.split(todaysDir).join(otherDir));
+    }
   });
 });
 

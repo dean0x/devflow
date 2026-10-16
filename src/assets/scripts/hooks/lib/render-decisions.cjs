@@ -26,6 +26,7 @@
 'use strict';
 
 const fs = require('fs');
+const path = require('path');
 
 const {
   initDecisionsContent,
@@ -38,6 +39,7 @@ const {
 } = require('./decisions-format.cjs');
 
 const {
+  getLearningDir,
   getDecisionsFilePath,
   getPitfallsFilePath,
   getDecisionsIndexPath,
@@ -230,13 +232,23 @@ function renderDecisionsFile(rows, kind) {
  * and the learning store's writers write exactly these contents, and `--check`
  * compares exactly these.
  *
+ * The files belong in `outputDir`, which the caller names: the index lists the
+ * absolute path of the decisions and pitfalls files, so it names the folder it is
+ * rendered for and no other. The file names are the path helpers'.
+ *
  * @param {string} worktreePath - Absolute path to the worktree root.
  * @param {object[]} rows - All rows from the ledger (unfiltered).
+ * @param {string} outputDir - Absolute path of the folder the three files belong in.
  * @returns {Array<{ path: string, content: string }>}
+ * @throws {TypeError} when `outputDir` is not an absolute path
  */
-function renderLearningFiles(worktreePath, rows) {
-  const decisionsFilePath = getDecisionsFilePath(worktreePath);
-  const pitfallsFilePath = getPitfallsFilePath(worktreePath);
+function renderLearningFiles(worktreePath, rows, outputDir) {
+  if (typeof outputDir !== 'string' || !path.isAbsolute(outputDir)) {
+    throw new TypeError('renderLearningFiles: outputDir must be an absolute path');
+  }
+  const inOutputDir = file => path.join(outputDir, path.basename(file));
+  const decisionsFilePath = inOutputDir(getDecisionsFilePath(worktreePath));
+  const pitfallsFilePath = inOutputDir(getPitfallsFilePath(worktreePath));
 
   // Hoist active-row selection: computed once per kind, reused for both the
   // body render and the index build — avoids two redundant selectActiveRows passes.
@@ -259,7 +271,7 @@ function renderLearningFiles(worktreePath, rows) {
     },
     {
       // Compact index: a write-time artifact consumed via plain Read.
-      path: getDecisionsIndexPath(worktreePath),
+      path: inOutputDir(getDecisionsIndexPath(worktreePath)),
       content: buildIndexContent(activeDecisionRows, activePitfallRows, {
         decisionsFilePath,
         pitfallsFilePath,
@@ -284,7 +296,7 @@ function renderAndWriteAll(worktreePath, rows) {
   if (!hasLearningDir(worktreePath)) {
     throw new Error(`renderAndWriteAll: no .devflow/learning/ under ${worktreePath}`);
   }
-  const [decisions, pitfalls, index] = renderLearningFiles(worktreePath, rows);
+  const [decisions, pitfalls, index] = renderLearningFiles(worktreePath, rows, getLearningDir(worktreePath));
 
   // Write body files first; index last. On a crash between body writes and the
   // index write: on the FIRST render the index is absent (reader falls back to
@@ -396,7 +408,7 @@ function checkCommand(root) {
     return 1;
   }
   let drift = false;
-  for (const file of renderLearningFiles(root, readLedgerRows(root))) {
+  for (const file of renderLearningFiles(root, readLedgerRows(root), getLearningDir(root))) {
     const onDisk = readIfPresent(file.path);
     if (onDisk !== file.content) {
       process.stderr.write(`[render-decisions] DRIFT: ${file.path}${onDisk === null ? ' (missing)' : ''}\n`);

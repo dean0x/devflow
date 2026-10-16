@@ -40,6 +40,10 @@ import {
   getReviewsDir,
   getDesignDir,
   getResearchDir,
+  LEGACY_NAMES,
+  CURATION_DIR_NAME,
+  CURATION_TUNING_FILE_NAME,
+  curationMoveMarkerKey,
 } from '../src/core/project-paths.js';
 import * as tsPathsNs from '../src/core/project-paths.js';
 
@@ -227,14 +231,78 @@ describe('CJS project-paths parity', () => {
   // Structural full-export parity: guards against silent drift where a function
   // is added to one module but not the other. The hardcoded list above only
   // covers enumerated functions; this asserts the COMPLETE export sets match so
-  // any future addition to one side without the other fails fast.
+  // any future addition to one side without the other fails fast. The one
+  // exception is named: the marker key is read by the TypeScript status and HUD
+  // readers and written by the shell, so the CJS layer has no use for it.
+  const TS_ONLY_FUNCTIONS = ['curationMoveMarkerKey'];
   it('TypeScript and CJS export the identical set of function names', () => {
     const tsNames = Object.keys(tsPathsNs)
       .filter(k => typeof (tsPathsNs as Record<string, unknown>)[k] === 'function')
+      .filter(k => !TS_ONLY_FUNCTIONS.includes(k))
       .sort();
     const cjsNames = Object.keys(cjsPaths)
       .filter(k => typeof (cjsPaths as Record<string, unknown>)[k] === 'function')
       .sort();
     expect(cjsNames).toEqual(tsNames);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The rename's name blocks: the old names live in one frozen block per mirror,
+// the new folder and tuning file names beside it. Nothing reads them yet.
+// ---------------------------------------------------------------------------
+
+describe('curation rename name blocks', () => {
+  it('LEGACY_NAMES lists the old folder, backup prefix and tuning file, in both mirrors', () => {
+    const expected = { folder: 'learning', backupPrefix: 'learning.backup-', tuningFile: 'learning.json' };
+    expect(LEGACY_NAMES).toEqual(expected);
+    expect(cjsPaths.LEGACY_NAMES).toEqual(expected);
+  });
+
+  it('LEGACY_NAMES is frozen in both mirrors, so no caller can rewrite an old name', () => {
+    expect(Object.isFrozen(LEGACY_NAMES)).toBe(true);
+    expect(Object.isFrozen(cjsPaths.LEGACY_NAMES)).toBe(true);
+  });
+
+  it('both mirrors name the curation folder and tuning file the same', () => {
+    expect(CURATION_DIR_NAME).toBe('curation');
+    expect(cjsPaths.CURATION_DIR_NAME).toBe(CURATION_DIR_NAME);
+    expect(CURATION_TUNING_FILE_NAME).toBe('curation.json');
+    expect(cjsPaths.CURATION_TUNING_FILE_NAME).toBe(CURATION_TUNING_FILE_NAME);
+  });
+
+  it('no path helper flips yet: the learning helpers still name the old folder', () => {
+    expect(getLearningDir(ROOT)).toBe(path.join(ROOT, '.devflow', LEGACY_NAMES.folder));
+    expect(getCurateTuningConfigPath(ROOT)).toBe(path.join(ROOT, '.devflow', LEGACY_NAMES.folder, LEGACY_NAMES.tuningFile));
+  });
+});
+
+describe('curationMoveMarkerKey', () => {
+  // Expected values come from an independent calculation (a 32-bit multiply-by-33
+  // hash from 5381 over every UTF-8 byte, then the last 60 bytes with each byte
+  // outside letters and digits replaced by an underscore), not from this module.
+  it.each([
+    ['/a', '005970b5__a'],
+    ['/some/project', '9d1d3a6e__some_project'],
+    ['/Users/dean/Sandbox/devflow-rename', 'dee293f6__Users_dean_Sandbox_devflow_rename'],
+  ])('a root shorter than 60 bytes keeps all of its bytes: %s', (root, key) => {
+    expect(curationMoveMarkerKey(root)).toBe(key);
+  });
+
+  it('a non-ASCII root hashes and replaces each UTF-8 byte, not each character', () => {
+    expect(curationMoveMarkerKey('/tmp/ünï/projéct')).toBe('44e2d000__tmp___n___proj__ct');
+  });
+
+  it('a root longer than 60 bytes hashes the whole path but names only its last 60 bytes', () => {
+    const root = `/${'x'.repeat(70)}/end`;
+    expect(curationMoveMarkerKey(root)).toBe(`1db2baaa_${'x'.repeat(56)}_end`);
+  });
+
+  it('two roots that share their last 60 bytes still get different keys', () => {
+    expect(curationMoveMarkerKey('/a/same/tail')).not.toBe(curationMoveMarkerKey('/b/same/tail'));
+  });
+
+  it('is safe to use as a file name: lowercase hex, an underscore, then letters, digits and underscores', () => {
+    expect(curationMoveMarkerKey('/we ird/$(touch x)/"q"')).toMatch(/^[0-9a-f]{8}_[A-Za-z0-9_]{1,60}$/);
   });
 });

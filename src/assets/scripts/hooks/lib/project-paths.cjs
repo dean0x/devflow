@@ -40,6 +40,30 @@ function getDocsDir(projectRoot) {
 }
 
 // ---------------------------------------------------------------------------
+// The rename's names: the old names in one frozen block, the new ones beside it
+// ---------------------------------------------------------------------------
+
+/**
+ * The names the rename retires, kept in one place so the one-time ledger move, the
+ * backup readers and uninstall all spell them the same way. The TypeScript mirror
+ * and the shell move shim list the same names (tests/project-paths.test.ts pins both).
+ */
+const LEGACY_NAMES = Object.freeze({
+  /** The old ledger folder under .devflow/. */
+  folder: 'learning',
+  /** The prefix of the folder the move leaves behind: `<prefix><UTC stamp>-<random>`. */
+  backupPrefix: 'learning.backup-',
+  /** The old project tuning file, inside the old folder. */
+  tuningFile: 'learning.json',
+});
+
+/** The new ledger folder under .devflow/. */
+const CURATION_DIR_NAME = 'curation';
+
+/** The new project tuning file, inside the new folder. */
+const CURATION_TUNING_FILE_NAME = 'curation.json';
+
+// ---------------------------------------------------------------------------
 // Feature config (neutral .devflow root — not inside learning/)
 // ---------------------------------------------------------------------------
 
@@ -165,6 +189,10 @@ function getResearchDir(projectRoot) {
 }
 
 module.exports = {
+  // The rename's names
+  LEGACY_NAMES,
+  CURATION_DIR_NAME,
+  CURATION_TUNING_FILE_NAME,
   // Core directories
   getMemoryDir,
   getLearningDir,
