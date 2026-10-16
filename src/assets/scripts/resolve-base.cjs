@@ -27,7 +27,9 @@
 //   REASON    one code from REASON_NOTES; NOTE is derived from it (none, info, degraded,
 //             stop). The output is checked against LINE_RE and against that table before
 //             it is written. Anything that fails the check prints FALLBACK_LINE.
-// stderr stays empty. The name is never written to stdout or stderr.
+// stderr stays empty. The name is never written to stdout or stderr. When stdout cannot
+// be written, the script exits 3 with nothing on stderr; every other path exits 0 with
+// one line.
 //
 // Check order: the strict name class (STRICT_NAME_RE), then `git check-ref-format`, then
 // the origin URL, then the cross-repository flag, then the fetch, then the choice of tip,
