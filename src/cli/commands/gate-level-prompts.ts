@@ -36,7 +36,11 @@ export const GATE_LEVEL_SELECT_MESSAGE = 'Gate level for this machine';
  */
 const MALFORMED_READS_AS: GateLevel = 'full';
 
-/** The one-line effect of each level, as the select hint and the catalogue show it. */
+/**
+ * The one-line effect of each level, as the select hint and the catalogue show it.
+ * It restates GATE_LEVEL_EFFECT in gates.ts per level: when a later command starts
+ * to read the level, update both.
+ */
 export const GATE_LEVEL_HINTS: Readonly<Record<GateLevel, string>> = Object.freeze({
   full: 'the most checking: every review focus and the full planning shape',
   standard: 'fewer review focuses and planning agents (the default)',

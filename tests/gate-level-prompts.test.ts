@@ -9,6 +9,7 @@
  *   - resolveGateLevelForInit: both init paths (Recommended / Advanced), the flag, the
  *     promptless contracts, and the cancel outcome
  *   - formatGateLevelSummary: the post-install row, from the state the run acted on
+ *   - init.ts wiring: both wizard paths call the one shared helper with their own mode
  *
  * The gate keys on `modePromptShown`, never on the mode name. Nothing here calls
  * process.exit and nothing throws: the returned discriminated unions drive every
@@ -16,6 +17,7 @@
  * asserts its own row count, so no test passes without exercising what it claims to.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { promises as fs } from 'fs';
 import {
   GATE_LEVEL_HINTS,
   GATE_LEVEL_SELECT_MESSAGE,
@@ -470,5 +472,39 @@ describe('formatGateLevelSummary', () => {
     expect(line.message).toContain('Gate level: full');
     expect(line.message).not.toContain('lean');
     expect(line.message).toContain('changed nothing');
+  });
+});
+
+// ── init.ts wiring: both wizard paths reach the one shared helper ──────────────
+
+/**
+ * A spawned child has no TTY, so the end-to-end suite cannot reach the prompt.
+ * These read init.ts and pin the wiring that the tests above assume: one shared
+ * helper, called once on each wizard path, with the caller's own mode and
+ * modePromptShown. A literal mode would collapse the gate table to one row.
+ */
+describe('init.ts wiring', () => {
+  const INIT_SOURCE = new URL('../src/cli/commands/init.ts', import.meta.url);
+
+  /** The `resolveGateLevelForInit({...})` call, verbatim. Throws when it is not findable. */
+  function gateCall(source: string): string {
+    const call = /resolveGateLevelForInit\(\{[\s\S]*?\}\)/.exec(source);
+    if (call === null) {
+      throw new Error('the resolveGateLevelForInit call is not findable in init.ts, so no assertion below reads it');
+    }
+    return call[0];
+  }
+
+  it('calls the one shared helper, once on each wizard path', async () => {
+    const source = await fs.readFile(INIT_SOURCE, 'utf-8');
+    expect((source.match(/resolveGateLevelForInit\(\{/g) ?? []).length).toBe(1);
+    expect((source.match(/await runGateLevelStepAt\('recommended'\)/g) ?? []).length).toBe(1);
+    expect((source.match(/await runGateLevelStepAt\('advanced'\)/g) ?? []).length).toBe(1);
+  });
+
+  it('forwards the caller\'s mode and modePromptShown, never a literal', async () => {
+    const lines = gateCall(await fs.readFile(INIT_SOURCE, 'utf-8')).split('\n').map(line => line.trim());
+    expect(lines).toContain('mode,');
+    expect(lines).toContain('modePromptShown,');
   });
 });

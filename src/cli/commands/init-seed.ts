@@ -433,8 +433,9 @@ export function applyCliToggles(
     behavior: toggles.behavior ?? base.behavior,
     compliance: toggles.compliance ?? base.compliance,
     tracker: toggles.tracker ?? base.tracker,
-    // No command-line flag names the gate level, so the seed's raw value passes
-    // through. Only `undefined` means "not specified": `null` is a value, not a gap.
+    // init resolves --gate-level and the wizard answer after this merge
+    // (gate-level-prompts.ts), so the seed's raw value passes through here. Only
+    // `undefined` means "not specified": `null` is a value, not a gap.
     gateLevel: toggles.gateLevel !== undefined ? toggles.gateLevel : base.gateLevel,
   };
 }

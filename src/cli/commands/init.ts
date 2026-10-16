@@ -2761,7 +2761,8 @@ export const initCommand = new Command('init')
         // through parseTrackerId (CLI), the typed wizard select, or the seed, which
         // itself came through normalizeTrackerFeature on read.
         tracker: { provider: trackerProvider, ...(trackerServers !== undefined ? { servers: trackerServers } : {}) },
-        // The prior machine gate level, raw (see where `gateLevel` is read above).
+        // The machine gate level: --gate-level, the wizard answer, or the prior value raw
+        // (see where `gateLevel` is read above).
         ...(gateLevel !== undefined ? { gateLevel } : {}),
       },
       installedAt: existingManifest?.installedAt ?? now,
