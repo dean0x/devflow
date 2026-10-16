@@ -249,14 +249,66 @@ describe('init over a manifest readManifest refuses', () => {
     expect(out.replace(/\s+/g, ' ')).toMatch(KEPT_WARNING);
   }, MULTI_RUN_TIMEOUT_MS);
 
-  it('--reset still removes a level stored in a refused manifest, and does not claim to keep it', async () => {
+  it('--reset still removes a level stored in a refused manifest, names the level it replaced, and does not claim to keep it', async () => {
     runInit(repo, '--recommended', '--gate-level', 'full');
     await writeManifestText(await editedManifestText(raw => { delete raw.installedAt; }));
 
     const out = runInit(repo, '--reset', '--recommended');
 
     expect(Object.hasOwn(await readFeatures(), 'gateLevel')).toBe(false);
+    expect(gateLevelLine(out)).toContain('Gate level: standard (default) (was full) — the machine default');
     expect(out.replace(/\s+/g, ' ')).not.toMatch(KEPT_WARNING);
+  }, MULTI_RUN_TIMEOUT_MS);
+
+  it('--reset over a manifest that is not JSON writes no level, and has no lost level to report', async () => {
+    runInit(repo, '--recommended', '--gate-level', 'full');
+    await writeManifestText('{not json');
+
+    const out = runInit(repo, '--reset', '--recommended');
+
+    expect(Object.hasOwn(await readFeatures(), 'gateLevel')).toBe(false);
+    expect(gateLevelLine(out)).toContain('Gate level: standard (default) — the machine default');
+    expect(out).not.toContain('could not be read');
+  }, MULTI_RUN_TIMEOUT_MS);
+
+  it('passes a malformed or null stored level through as it is, and the summary says how it reads', async () => {
+    for (const stored of ['Lean', null]) {
+      runInit(repo, '--recommended', '--gate-level', 'full');
+      await writeManifestText(await editedManifestText(raw => {
+        delete raw.installedAt;
+        (raw.features as Record<string, unknown>).gateLevel = stored;
+      }));
+
+      const out = runInit(repo, '--recommended');
+
+      const features = await readFeatures();
+      expect(Object.hasOwn(features, 'gateLevel'), `init dropped a stored ${JSON.stringify(stored)}`).toBe(true);
+      expect(features.gateLevel).toBe(stored);
+      expect(gateLevelLine(out)).toContain('Gate level: invalid (manifest.json; reads as full) — the machine default');
+      expect(gateLevelLine(out)).not.toContain('(was');
+      expect(out.replace(/\s+/g, ' ')).toMatch(KEPT_WARNING);
+      expect(out).not.toContain('Lean');
+    }
+  }, MULTI_RUN_TIMEOUT_MS);
+
+  it('a stored level nested too deeply to write back is reported as unreadable, and init still replaces the manifest', async () => {
+    runInit(repo, '--recommended', '--gate-level', 'full');
+    const placeholder = 'ZZ-deep-placeholder';
+    const text = await editedManifestText(raw => {
+      delete raw.installedAt;
+      (raw.features as Record<string, unknown>).gateLevel = placeholder;
+    });
+    const depth = 200_000;
+    await writeManifestText(text.replace(`"${placeholder}"`, '['.repeat(depth) + ']'.repeat(depth)));
+
+    const out = runInit(repo, '--recommended');
+
+    expect(Object.hasOwn(await readFeatures(), 'gateLevel')).toBe(false);
+    expect(out).not.toContain('Failed to write');
+    expect(out.replace(/\s+/g, ' ')).toContain('stored gate level could not be read');
+    // The hint works: the manifest init wrote takes the level.
+    expect(runCli(repo, 'gates', '--set', 'lean').status).toBe(0);
+    expect(await readFeatures()).toMatchObject({ gateLevel: 'lean' });
   }, MULTI_RUN_TIMEOUT_MS);
 
   it('--gate-level sets the level over a manifest that is not JSON', async () => {
@@ -278,10 +330,9 @@ describe('init over a manifest readManifest refuses', () => {
 
     expect(Object.hasOwn(await readFeatures(), 'gateLevel')).toBe(false);
     expect(out).not.toContain('standard (default)');
-    const flat = out.replace(/\s+/g, ' ');
-    expect(flat).toContain('stored gate level could not be read');
-    expect(flat).toContain('standard');
-    expect(flat).toContain('devflow gates --set <level>');
+    expect(out.replace(/\s+/g, ' ')).toContain(
+      'Gate level: the stored gate level could not be read, so init recorded none and standard applies (the machine default); set it again with devflow gates --set <level>',
+    );
     // The hint works: the manifest init wrote takes the level.
     expect(runCli(repo, 'gates', '--set', 'lean').status).toBe(0);
     expect(await readFeatures()).toMatchObject({ gateLevel: 'lean' });
@@ -311,11 +362,14 @@ describe('init --hud-only over a manifest readManifest refuses', () => {
         (raw.features as Record<string, unknown>).gateLevel = stored;
       }));
 
-      runInit(repo, '--hud-only');
+      const out = runInit(repo, '--hud-only');
 
       const features = await readFeatures();
       expect(Object.hasOwn(features, 'gateLevel'), `--hud-only dropped a stored ${JSON.stringify(stored)}`).toBe(true);
       expect(features.gateLevel).toBe(stored);
+      expect(gateLevelLine(out)).toContain('Gate level: invalid (manifest.json; reads as full)');
+      expect(out.replace(/\s+/g, ' ')).toMatch(KEPT_WARNING);
+      expect(out).not.toContain('Lean');
     }
   }, MULTI_RUN_TIMEOUT_MS);
 
