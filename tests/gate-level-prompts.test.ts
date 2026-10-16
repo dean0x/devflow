@@ -4,7 +4,8 @@
  * Covers:
  *   - resolveGateLevelInitState: the --gate-level boundary (valid, invalid, --hud-only)
  *   - shouldRunGateLevelStep: all 8 gate rows (the compliance/tracker gate table)
- *   - gateLevelPromptSeed / describeGateLevel: first install, re-init, malformed values
+ *   - classifyGateLevel / gateLevelPromptSeed / describeGateLevel: first install, re-init,
+ *     malformed values
  *   - runGateLevelStep: step semantics via fake recorded IO (injectable prompts)
  *   - resolveGateLevelForInit: both init paths (Recommended / Advanced), the flag, the
  *     promptless contracts, and the cancel outcome
@@ -13,6 +14,7 @@
  *     readManifest refuses, and the prompt and summary texts for a level read from one or
  *     not readable at all
  *   - formatGateLevelRow: the gate-level row of the Recommended settings note
+ *   - parity with devflow gates: the two level tables and the malformed wording agree
  *   - init.ts wiring: both wizard paths call the one shared helper with their own mode
  *
  * The gate keys on `modePromptShown`, never on the mode name. Nothing here calls
@@ -27,6 +29,7 @@ import * as path from 'path';
 import {
   GATE_LEVEL_HINTS,
   GATE_LEVEL_SELECT_MESSAGE,
+  classifyGateLevel,
   describeGateLevel,
   formatGateLevelCatalogue,
   formatGateLevelRow,
@@ -42,9 +45,11 @@ import {
   type GateLevelPromptIO,
 } from '../src/cli/commands/gate-level-prompts.js';
 import type { PromptOutcome } from '../src/cli/commands/prompt-io.js';
+import { GATE_LEVEL_EFFECT, GATE_LEVEL_MEANINGS, renderGateStatus } from '../src/cli/commands/gates.js';
 import {
   DEFAULT_GATE_LEVEL,
   GATE_LEVELS,
+  MALFORMED_GATE_LEVEL_READS_AS,
   parseGateLevel,
   type GateLevel,
   type GateManifestRead,
@@ -227,8 +232,43 @@ describe('gateLevelPromptSeed and describeGateLevel', () => {
     expect(MALFORMED).toHaveLength(8);
     for (const value of MALFORMED) {
       expect(gateLevelPromptSeed(value), `expected ${JSON.stringify(value)} to read as full`).toBe('full');
-      expect(describeGateLevel(value)).toContain('reads as full');
+      expect(describeGateLevel(value)).toBe(`invalid (manifest.json; reads as ${MALFORMED_GATE_LEVEL_READS_AS})`);
     }
+  });
+
+  it('a level that cannot be read starts on the level that applies, and names no stored level', () => {
+    expect(gateLevelPromptSeed(undefined, 'unreadable')).toBe(DEFAULT_GATE_LEVEL);
+  });
+});
+
+describe('classifyGateLevel', () => {
+  it('reads an absent value as the default', () => {
+    expect(classifyGateLevel(undefined)).toEqual({ kind: 'default' });
+    expect(classifyGateLevel(undefined, 'manifest')).toEqual({ kind: 'default' });
+    expect(classifyGateLevel(undefined, 'rejected')).toEqual({ kind: 'default' });
+  });
+
+  it('reads each of the three words as that level', () => {
+    for (const level of GATE_LEVELS) {
+      expect(classifyGateLevel(level)).toEqual({ kind: 'level', level });
+    }
+  });
+
+  it('reads every other present value as malformed, null and the empty string included', () => {
+    const MALFORMED: unknown[] = ['Lean', 'lean ', '', null, false, 0, 5, { level: 'lean' }];
+    expect(MALFORMED).toHaveLength(8);
+    for (const value of MALFORMED) {
+      expect(classifyGateLevel(value), `stored ${JSON.stringify(value)}`).toEqual({ kind: 'malformed' });
+    }
+  });
+
+  it('reads an absent value from a manifest that cannot be read as unreadable, never as the default', () => {
+    expect(classifyGateLevel(undefined, 'unreadable')).toEqual({ kind: 'unreadable' });
+  });
+
+  it('reads a value that is present as itself whatever the origin, so a recorded level is never unknown', () => {
+    expect(classifyGateLevel('lean', 'unreadable')).toEqual({ kind: 'level', level: 'lean' });
+    expect(classifyGateLevel('Lean', 'rejected')).toEqual({ kind: 'malformed' });
   });
 });
 
@@ -319,7 +359,8 @@ describe('formatGateLevelRow', () => {
 
   it('shows the level a malformed value reads as, never the raw value', () => {
     const row = formatGateLevelRow('ZZ-raw-canary', 'rejected');
-    expect(row).toContain('full');
+    expect(row).toBe(describeGateLevel('ZZ-raw-canary'));
+    expect(row).toContain('reads as full');
     expect(row).not.toContain('ZZ-raw-canary');
   });
 
@@ -425,7 +466,7 @@ describe('runGateLevelStep', () => {
 
     await runGateLevelStep({ stored: 'ZZ-raw-canary', storedOrigin: 'rejected', prompts });
 
-    expect(notes[0].message).toContain('reads as full');
+    expect(notes[0].message).toContain('Current setting: invalid (manifest.json; reads as full)');
     expect(notes[0].message).not.toContain('ZZ-raw-canary');
     expect(asked[0].initialValue).toBe('full');
   });
@@ -659,17 +700,64 @@ describe('formatGateLevelSummary', () => {
   });
 
   it('shows the level a malformed stored value reads as, not the raw value', () => {
-    const [line] = formatGateLevelSummary({ level: 'ZZ-raw-canary', priorLevel: undefined, manifestWritten: true });
-    expect(line.message).toContain('Gate level: full');
+    const [line] = formatGateLevelSummary({ level: 'ZZ-raw-canary', priorLevel: 'ZZ-raw-canary', manifestWritten: true });
+    expect(line.message).toContain('Gate level: invalid (manifest.json; reads as full)');
     expect(line.message).not.toContain('ZZ-raw-canary');
   });
 
-  it('when the manifest was not written, reports the prior level and warns that nothing changed', () => {
+  it('when the manifest was not written, reports the prior level and warns that the gate level did not change', () => {
     const [line] = formatGateLevelSummary({ level: 'lean', priorLevel: 'full', manifestWritten: false });
     expect(line.level).toBe('warn');
     expect(line.message).toContain('Gate level: full');
     expect(line.message).not.toContain('lean');
-    expect(line.message).toContain('changed nothing');
+    expect(line.message).toContain('so the gate level did not change');
+    expect(line.message).not.toContain('changed nothing');
+  });
+
+  describe('a run that changes the level names the prior one', () => {
+    const only = (input: Parameters<typeof formatGateLevelSummary>[0]): string => {
+      const lines = formatGateLevelSummary(input);
+      expect(lines).toHaveLength(1);
+      expect(lines[0].level).toBe('info');
+      return lines[0].message;
+    };
+
+    it('--reset over a stored level: the default it falls back to, and the level it replaced', () => {
+      expect(only({ level: undefined, priorLevel: 'lean', manifestWritten: true }))
+        .toContain('Gate level: standard (default) (was lean) — the machine default');
+    });
+
+    it('a chosen level over another: the level it replaced', () => {
+      expect(only({ level: 'lean', priorLevel: 'full', manifestWritten: true }))
+        .toContain('Gate level: lean (was full) — the machine default');
+    });
+
+    it('a chosen level over a default nobody recorded: the level that applied until now', () => {
+      expect(only({ level: 'lean', priorLevel: undefined, manifestWritten: true }))
+        .toContain('Gate level: lean (was standard) — the machine default');
+    });
+
+    it('a chosen level over a malformed one: the level that malformed value read as, never the raw value', () => {
+      const message = only({ level: 'lean', priorLevel: 'ZZ-raw-canary', manifestWritten: true });
+      expect(message).toContain('Gate level: lean (was full)');
+      expect(message).not.toContain('ZZ-raw-canary');
+    });
+
+    it('is silent when the level that applies did not change', () => {
+      const SAME: Array<[unknown, unknown, string]> = [
+        ['lean', 'lean', 'the same level'],
+        [undefined, undefined, 'a first install'],
+        ['standard', undefined, 'an explicit standard over the default'],
+        [undefined, 'standard', 'the default over a stored standard'],
+        ['ZZ-raw-canary', 'ZZ-raw-canary', 'a malformed value written back as it was stored'],
+        ['full', 'ZZ-raw-canary', 'the level a malformed value reads as, accepted at the prompt'],
+        [null, null, 'a null written back as it was stored'],
+      ];
+      expect(SAME).toHaveLength(7);
+      for (const [level, priorLevel, label] of SAME) {
+        expect(only({ level, priorLevel, manifestWritten: true }), label).not.toContain('(was');
+      }
+    });
   });
 
   describe('a level read from a refused manifest', () => {
@@ -684,16 +772,22 @@ describe('formatGateLevelSummary', () => {
       expect(lines[1].message).toContain('replaced the manifest');
     });
 
-    it('says nothing of a kept level when the run set another one', () => {
+    it('names no prior level for a level it kept', () => {
+      const lines = formatGateLevelSummary({ level: 'full', priorLevel: 'full', priorOrigin: 'rejected', manifestWritten: true });
+      expect(lines[0].message).not.toContain('(was');
+    });
+
+    it('says nothing of a kept level when the run set another one, and names the level it replaced', () => {
       const lines = formatGateLevelSummary({ level: 'lean', priorLevel: 'full', priorOrigin: 'rejected', manifestWritten: true });
       expect(lines).toHaveLength(1);
-      expect(lines[0].message).toContain('Gate level: lean');
+      expect(lines[0].message).toContain('Gate level: lean (was full)');
     });
 
     it('keeps a malformed level as it is stored, names how it reads, and never prints the raw value', () => {
       const lines = formatGateLevelSummary({ level: 'ZZ-raw-canary', priorLevel: 'ZZ-raw-canary', priorOrigin: 'rejected', manifestWritten: true });
       expect(lines).toHaveLength(2);
-      expect(lines[0].message).toContain('Gate level: full');
+      expect(lines[0].message).toContain('Gate level: invalid (manifest.json; reads as full)');
+      expect(lines[0].message).not.toContain('(was');
       expect(lines.map(line => line.message).join('\n')).not.toContain('ZZ-raw-canary');
     });
 
@@ -702,7 +796,7 @@ describe('formatGateLevelSummary', () => {
       expect(lines).toHaveLength(1);
       expect(lines[0].level).toBe('warn');
       expect(lines[0].message).toContain('Gate level: full');
-      expect(lines[0].message).toContain('changed nothing');
+      expect(lines[0].message).toContain('so the gate level did not change');
     });
   });
 
@@ -718,11 +812,12 @@ describe('formatGateLevelSummary', () => {
       expect(lines[0].message).not.toContain('standard (default)');
     });
 
-    it('is a plain summary line when the run recorded a level', () => {
+    it('is a plain summary line when the run recorded a level, with no prior level invented for it', () => {
       const lines = formatGateLevelSummary({ level: 'lean', priorLevel: undefined, priorOrigin: 'unreadable', manifestWritten: true });
       expect(lines).toHaveLength(1);
       expect(lines[0].level).toBe('info');
       expect(lines[0].message).toContain('Gate level: lean');
+      expect(lines[0].message).not.toContain('(was');
     });
 
     it('when the manifest was not written, does not show the default as the prior level', () => {
@@ -730,9 +825,69 @@ describe('formatGateLevelSummary', () => {
       expect(lines).toHaveLength(1);
       expect(lines[0].level).toBe('warn');
       expect(lines[0].message).toContain('cannot be read');
-      expect(lines[0].message).toContain('changed nothing');
+      expect(lines[0].message).toContain('so the gate level did not change');
       expect(lines[0].message).not.toContain('standard (default)');
     });
+  });
+});
+
+// ── Parity with devflow gates ──────────────────────────────────────────────────
+
+/**
+ * `devflow gates` and the init prompt each describe the levels, in two tables:
+ * GATE_LEVEL_MEANINGS and GATE_LEVEL_EFFECT in gates.ts, GATE_LEVEL_HINTS here. One
+ * table per level set, one reading of a malformed value. These rows fail when one side
+ * changes and the other does not.
+ */
+describe('the init prompt and devflow gates describe the same levels', () => {
+  const sorted = (keys: readonly string[]): string[] => [...keys].sort();
+
+  it('both tables hold exactly the levels the registry lists', () => {
+    expect(sorted(Object.keys(GATE_LEVEL_HINTS))).toEqual(sorted(GATE_LEVELS));
+    expect(sorted(Object.keys(GATE_LEVEL_MEANINGS))).toEqual(sorted(GATE_LEVELS));
+    for (const level of GATE_LEVELS) {
+      expect(GATE_LEVEL_HINTS[level].length, `hint for ${level}`).toBeGreaterThan(0);
+      expect(GATE_LEVEL_MEANINGS[level].length, `meaning for ${level}`).toBeGreaterThan(0);
+    }
+  });
+
+  it('both name the one level a malformed value reads as, and no other', () => {
+    const meaningsThatFold = GATE_LEVELS.filter(level => GATE_LEVEL_MEANINGS[level].includes('reads as'));
+    expect(meaningsThatFold).toEqual([MALFORMED_GATE_LEVEL_READS_AS]);
+    expect(GATE_LEVEL_MEANINGS[MALFORMED_GATE_LEVEL_READS_AS]).toContain(`reads as ${MALFORMED_GATE_LEVEL_READS_AS}`);
+    expect(describeGateLevel('Lean')).toContain(`reads as ${MALFORMED_GATE_LEVEL_READS_AS}`);
+    expect(gateLevelPromptSeed('Lean')).toBe(MALFORMED_GATE_LEVEL_READS_AS);
+  });
+
+  it('init words a malformed value exactly as the Machine line of devflow gates does', () => {
+    const { lines } = renderGateStatus({
+      kind: 'resolved',
+      manifest: 'readable',
+      manifestPath: '/home/user/.devflow/manifest.json',
+      level: MALFORMED_GATE_LEVEL_READS_AS,
+      source: 'machine',
+      invalid: true,
+      machine: 'invalid',
+      trackedWarning: null,
+    });
+    expect(lines).toContain(`Machine:   ${describeGateLevel('Lean')}`);
+  });
+
+  it('both state the same lint-pack effect, for the same level', () => {
+    const lintLevels = GATE_LEVELS.filter(level => GATE_LEVEL_HINTS[level].includes('lint pack'));
+    expect(lintLevels).toHaveLength(1);
+    expect(GATE_LEVEL_EFFECT).toMatch(new RegExp(`At ${lintLevels[0]}, .*lint pack`));
+  });
+
+  it('both say fewer review focuses for the same levels', () => {
+    const [strictest] = GATE_LEVELS;
+    const fewerInHints = GATE_LEVELS.filter(level => GATE_LEVEL_HINTS[level].includes('fewer review focuses'));
+    const clause = /read the level: (.+?) run fewer review focuses/.exec(GATE_LEVEL_EFFECT)?.[1] ?? '';
+    expect(clause, 'GATE_LEVEL_EFFECT names the levels that run fewer review focuses').not.toBe('');
+    expect(fewerInHints.length).toBeGreaterThan(0);
+    for (const level of fewerInHints) expect(clause, `the effect text names ${level}`).toContain(level);
+    expect(clause).not.toContain(strictest);
+    expect(GATE_LEVEL_HINTS[strictest]).not.toContain('fewer');
   });
 });
 

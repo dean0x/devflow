@@ -18,8 +18,9 @@ import { describeEchoedValue } from './echo-value.js';
  * diff.
  *
  * A present value that is not one of the three words is MALFORMED. A reader reads
- * it as `full` and leaves it on disk as written: no read and no unrelated write
- * heals it to absent, which would lower the level without a word.
+ * it as {@link MALFORMED_GATE_LEVEL_READS_AS} and leaves it on disk as written: no
+ * read and no unrelated write heals it to absent, which would lower the level
+ * without a word.
  */
 export const GATE_LEVELS = Object.freeze(['full', 'standard', 'lean'] as const);
 
@@ -27,6 +28,14 @@ export type GateLevel = (typeof GATE_LEVELS)[number];
 
 /** The level when neither the personal file nor the manifest records one. */
 export const DEFAULT_GATE_LEVEL: GateLevel = 'standard';
+
+/**
+ * The level every reader gives a MALFORMED value: the strictest, so a typo never
+ * lowers the checking. `devflow gates` and the init prompt show it from here. The
+ * settings resolver (`resolve-settings.cjs`) folds to the same level in its own
+ * copy, and a parity test holds the two to each other.
+ */
+export const MALFORMED_GATE_LEVEL_READS_AS: GateLevel = 'full';
 
 /**
  * Largest manifest read, in bytes. Pinned by a parity test to the resolver

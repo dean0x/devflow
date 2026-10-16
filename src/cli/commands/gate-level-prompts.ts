@@ -37,6 +37,7 @@ import type { SummaryLine } from './install-report.js';
 import {
   DEFAULT_GATE_LEVEL,
   GATE_LEVELS,
+  MALFORMED_GATE_LEVEL_READS_AS,
   parseGateLevel,
   readGateManifest,
   type GateLevel,
@@ -50,16 +51,9 @@ import type { ManifestData } from '../../core/manifest.js';
 export const GATE_LEVEL_SELECT_MESSAGE = 'Gate level for this machine';
 
 /**
- * What a malformed stored value reads as. `src/core/gate-level.ts` documents that
- * every reader folds a value that is not one of the three words to the strictest
- * level, so the prompt shows that level rather than a word the machine does not use.
- */
-const MALFORMED_READS_AS: GateLevel = 'full';
-
-/**
  * The one-line effect of each level, as the select hint and the catalogue show it.
  * It restates GATE_LEVEL_EFFECT in gates.ts per level: when a later command starts
- * to read the level, update both.
+ * to read the level, update both. A parity test fails when only one changes.
  */
 export const GATE_LEVEL_HINTS: Readonly<Record<GateLevel, string>> = Object.freeze({
   full: 'the most checking: every review focus and the full planning shape',
@@ -79,35 +73,6 @@ export function gateLevelChoices(): Array<{ value: GateLevel; label: string; hin
 export function formatGateLevelCatalogue(): string {
   const width = Math.max(...GATE_LEVELS.map(level => level.length));
   return 'Levels:\n' + GATE_LEVELS.map(level => `  ${level.padEnd(width)}  ${GATE_LEVEL_HINTS[level]}`).join('\n');
-}
-
-/**
- * Name the level a stored manifest value stands for, for the note header and the
- * summary line. Pure function — no I/O, no side effects.
- *
- *   undefined   no level is recorded: `standard (default)`
- *   a level     that level
- *   otherwise   malformed: the level it reads as, and why
- *
- * `standard` carries the `(default)` marker only when nothing is recorded, so a
- * reader can tell "I chose this" from "this is what devflow does when nobody chooses".
- */
-export function describeGateLevel(stored: unknown): string {
-  if (stored === undefined) return `${DEFAULT_GATE_LEVEL} (default)`;
-  const parsed = parseGateLevel(stored);
-  if (parsed.ok) return parsed.value;
-  return `${MALFORMED_READS_AS} (the stored value is not a gate level, so it reads as ${MALFORMED_READS_AS})`;
-}
-
-/**
- * The level the select starts on: the stored level on a re-init, the default on a
- * first install or after --reset, and the level a malformed value reads as.
- * Pure and total.
- */
-export function gateLevelPromptSeed(stored: unknown): GateLevel {
-  if (stored === undefined) return DEFAULT_GATE_LEVEL;
-  const parsed = parseGateLevel(stored);
-  return parsed.ok ? parsed.value : MALFORMED_READS_AS;
 }
 
 // ── Where the stored level was found ───────────────────────────────────────────
@@ -182,6 +147,108 @@ export async function readStoredGateLevel(
 ): Promise<StoredGateLevel> {
   if (manifest !== null || reset) return { origin: 'manifest', value: manifest?.features.gateLevel };
   return storedGateLevelFromRaw(await readGateManifest(devflowDir));
+}
+
+// ── Reading a stored level ─────────────────────────────────────────────────────
+
+/**
+ * What a stored value stands for. Every text, seed and comparison about a stored
+ * level starts from this one classification:
+ *
+ *   default      nothing is recorded: the machine default applies
+ *   level        one of the three words
+ *   malformed    a value that is not a level, `null` and the empty string included;
+ *                every reader reads it as MALFORMED_GATE_LEVEL_READS_AS
+ *   unreadable   the manifest cannot be read, so what it stored is unknown
+ */
+export type GateLevelReading =
+  | { readonly kind: 'default' }
+  | { readonly kind: 'level'; readonly level: GateLevel }
+  | { readonly kind: 'malformed' }
+  | { readonly kind: 'unreadable' };
+
+/**
+ * Classify a raw stored value, and where it was found (default: the manifest init
+ * reads). Pure and total — the one place that tells absent, valid and malformed
+ * apart.
+ *
+ * `unreadable` is an absent value from a manifest that could not be read: no value
+ * was read, so none is shown as the default. A value that is present is classified
+ * as itself whatever the origin.
+ */
+export function classifyGateLevel(stored: unknown, origin: StoredGateLevelOrigin = 'manifest'): GateLevelReading {
+  if (stored === undefined) return origin === 'unreadable' ? { kind: 'unreadable' } : { kind: 'default' };
+  const parsed = parseGateLevel(stored);
+  return parsed.ok ? { kind: 'level', level: parsed.value } : { kind: 'malformed' };
+}
+
+/**
+ * The level that applies for a reading, as every reader gives it: the level itself,
+ * the default for an absent or unknown one, and the fold for a malformed one.
+ */
+function appliedLevel(reading: GateLevelReading): GateLevel {
+  switch (reading.kind) {
+    case 'level':
+      return reading.level;
+    case 'malformed':
+      return MALFORMED_GATE_LEVEL_READS_AS;
+    case 'default':
+    case 'unreadable':
+      return DEFAULT_GATE_LEVEL;
+    default: {
+      const exhaustive: never = reading;
+      return exhaustive;
+    }
+  }
+}
+
+/**
+ * A malformed value, in the words of the `Machine:` line of `devflow gates`
+ * (MACHINE_INVALID_LINE in gates.ts): a parity test holds the two to the same text.
+ * The raw value is never shown.
+ */
+const MALFORMED_TEXT = `invalid (manifest.json; reads as ${MALFORMED_GATE_LEVEL_READS_AS})`;
+
+/** A reading as the note header and the summary line name it. */
+function describeReading(reading: GateLevelReading): string {
+  switch (reading.kind) {
+    case 'default':
+      return `${DEFAULT_GATE_LEVEL} (default)`;
+    case 'level':
+      return reading.level;
+    case 'malformed':
+      return MALFORMED_TEXT;
+    case 'unreadable':
+      return 'unknown (the stored gate level cannot be read)';
+    default: {
+      const exhaustive: never = reading;
+      return exhaustive;
+    }
+  }
+}
+
+/**
+ * Name the level a stored manifest value stands for, for the note header and the
+ * summary line. Pure function — no I/O, no side effects.
+ *
+ *   undefined   no level is recorded: `standard (default)`
+ *   a level     that level
+ *   otherwise   malformed: `invalid`, and the level it reads as, as `devflow gates` words it
+ *
+ * `standard` carries the `(default)` marker only when nothing is recorded, so a
+ * reader can tell "I chose this" from "this is what devflow does when nobody chooses".
+ */
+export function describeGateLevel(stored: unknown): string {
+  return describeReading(classifyGateLevel(stored));
+}
+
+/**
+ * The level the select starts on: the stored level on a re-init, the default on a
+ * first install, after --reset or when the stored level cannot be read, and the level
+ * a malformed value reads as. Pure and total.
+ */
+export function gateLevelPromptSeed(stored: unknown, origin: StoredGateLevelOrigin = 'manifest'): GateLevel {
+  return appliedLevel(classifyGateLevel(stored, origin));
 }
 
 /** The "Current setting" lines of the prompt note, from the stored value and where it was found. */
@@ -341,7 +408,7 @@ export async function runGateLevelStep(opts: {
   const outcome = await prompts.selectLevel({
     message: GATE_LEVEL_SELECT_MESSAGE,
     options: gateLevelChoices(),
-    initialValue: gateLevelPromptSeed(stored),
+    initialValue: gateLevelPromptSeed(stored, storedOrigin),
   });
 
   if (outcome.kind === 'cancel') return { kind: 'cancelled' };
@@ -396,17 +463,31 @@ export async function resolveGateLevelForInit(opts: {
  * read, when this run records none, is shown as unknown, never as the default.
  */
 export function formatGateLevelRow(level: unknown, origin: StoredGateLevelOrigin): string {
-  if (origin === 'unreadable' && level === undefined) {
-    return 'unknown (cannot be read, so init records none)';
-  }
-  return describeGateLevel(level);
+  const reading = classifyGateLevel(level, origin);
+  return reading.kind === 'unreadable'
+    ? 'unknown (cannot be read, so init records none)'
+    : describeReading(reading);
+}
+
+/**
+ * ` (was X)` when a run changed the level that applies, else empty. It compares the
+ * levels the two readings stand for, so a malformed value written back as it was
+ * stored, or accepted at the prompt as the level it reads as, is no change. An
+ * unreadable prior has no level to name, so none is invented.
+ */
+function replacedLevelNote(prior: GateLevelReading, recorded: GateLevelReading): string {
+  if (prior.kind === 'unreadable') return '';
+  const was = appliedLevel(prior);
+  return was === appliedLevel(recorded) ? '' : ` (was ${was})`;
 }
 
 /**
  * The gate-level lines of init's post-install summary, from the state the run acted
  * on (D-INIT-REAL-OUTCOME): the level this run recorded when the manifest reached
- * disk, else the level the manifest on disk still holds, with a warning that this
- * run saved nothing. Pure — the caller renders.
+ * disk, else the level the manifest on disk still holds, with a warning that the gate
+ * level did not change. Pure — the caller renders.
+ *
+ * A run that changes the level that applies names the one it replaced: `(was lean)`.
  *
  * `priorOrigin` says where the prior level was found (default: the manifest):
  *
@@ -422,16 +503,15 @@ export function formatGateLevelSummary(input: {
   manifestWritten: boolean;
 }): SummaryLine[] {
   const origin = input.priorOrigin ?? 'manifest';
+  const prior = classifyGateLevel(input.priorLevel, origin);
   if (!input.manifestWritten) {
-    const prior = origin === 'unreadable'
-      ? 'unknown (the stored gate level cannot be read)'
-      : describeGateLevel(input.priorLevel);
     return [{
       level: 'warn',
-      message: `Gate level: ${prior} — this run could not save the manifest, so it changed nothing`,
+      message: `Gate level: ${describeReading(prior)} — this run could not save the manifest, so the gate level did not change`,
     }];
   }
-  if (origin === 'unreadable' && input.level === undefined) {
+  const recorded = classifyGateLevel(input.level, origin);
+  if (recorded.kind === 'unreadable') {
     return [{
       level: 'warn',
       message: `Gate level: the stored gate level could not be read, so init recorded none and ${DEFAULT_GATE_LEVEL} applies (the machine default); set it again with devflow gates --set <level>`,
@@ -439,7 +519,7 @@ export function formatGateLevelSummary(input: {
   }
   const lines: SummaryLine[] = [{
     level: 'info',
-    message: `Gate level: ${describeGateLevel(input.level)} — the machine default; change it with devflow gates --set <level>`,
+    message: `Gate level: ${describeReading(recorded)}${replacedLevelNote(prior, recorded)} — the machine default; change it with devflow gates --set <level>`,
   }];
   if (origin === 'rejected' && input.level === input.priorLevel) {
     lines.push({

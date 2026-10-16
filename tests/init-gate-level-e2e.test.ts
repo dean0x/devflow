@@ -56,6 +56,13 @@ function runInit(cwd: string, ...args: string[]): string {
   return out;
 }
 
+/** The post-install summary line that names the gate level; the settings note pads its row with spaces. */
+function gateLevelLine(out: string): string {
+  const line = out.split('\n').find(candidate => /Gate level: \S/.test(candidate));
+  expect(line, `no gate level line in:\n${out}`).toBeDefined();
+  return line ?? '';
+}
+
 async function readFeatures(): Promise<Record<string, unknown>> {
   return (JSON.parse(await fs.readFile(manifestPath(), 'utf-8')) as { features: Record<string, unknown> }).features;
 }
@@ -180,6 +187,7 @@ describe('init without --gate-level, with no prompt', () => {
     const out = runInit(repo);
     expect(await readFeatures()).toMatchObject({ gateLevel: 'lean' });
     expect(out).toMatch(/Gate level: lean\b/);
+    expect(gateLevelLine(out)).not.toContain('(was');
   }, MULTI_RUN_TIMEOUT_MS);
 
   it('keeps a malformed stored level as written, and the summary says how it reads', async () => {
@@ -191,14 +199,16 @@ describe('init without --gate-level, with no prompt', () => {
     const out = runInit(repo, '--recommended');
 
     expect(await readFeatures()).toMatchObject({ gateLevel: 'ZZ-raw-canary' });
-    expect(out).toContain('Gate level: full');
+    expect(out).toContain('Gate level: invalid (manifest.json; reads as full)');
+    expect(gateLevelLine(out)).not.toContain('(was');
     expect(out).not.toContain('ZZ-raw-canary');
   }, MULTI_RUN_TIMEOUT_MS);
 
-  it('--reset removes the level', async () => {
+  it('--reset removes the level, and the summary names the level it replaced', async () => {
     runInit(repo, '--recommended', '--gate-level', 'lean');
-    runInit(repo, '--reset', '--recommended');
+    const out = runInit(repo, '--reset', '--recommended');
     expect(Object.hasOwn(await readFeatures(), 'gateLevel')).toBe(false);
+    expect(out).toContain('Gate level: standard (default) (was lean)');
   }, MULTI_RUN_TIMEOUT_MS);
 });
 

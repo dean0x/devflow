@@ -26,6 +26,7 @@ import color from 'picocolors';
 import {
   DEFAULT_GATE_LEVEL,
   GATE_LEVELS,
+  MALFORMED_GATE_LEVEL_READS_AS,
   machineGateLevel,
   parseGateLevel,
   readGateManifest,
@@ -50,7 +51,8 @@ import { getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
 
 /**
  * What each level means, in one line. Each line says what the word stands for and
- * not what a command does with it.
+ * not what a command does with it. The line for MALFORMED_GATE_LEVEL_READS_AS says
+ * that a value that is not a level reads as it.
  */
 export const GATE_LEVEL_MEANINGS: Readonly<Record<GateLevel, string>> = Object.freeze({
   full: 'the most checking; any value that is not a level also reads as full',
@@ -58,12 +60,17 @@ export const GATE_LEVEL_MEANINGS: Readonly<Record<GateLevel, string>> = Object.f
   lean: 'the least checking',
 });
 
-/** What reads the level today; each later reader updates this text. */
+/**
+ * What reads the level today; each later reader updates this text.
+ *
+ * The init prompt restates this per level in GATE_LEVEL_HINTS (gate-level-prompts.ts):
+ * edit both together. A parity test fails when only one changes.
+ */
 export const GATE_LEVEL_EFFECT =
   '/code-review and /plan read the level: standard and lean run fewer review focuses and fewer planning agents. At lean, /implement has Validate run the project\'s lint pack. Other commands read it once issue #480 lands.';
 
 const MACHINE_MANIFEST_NAME = 'manifest.json';
-const MACHINE_INVALID_LINE = `invalid (${MACHINE_MANIFEST_NAME}; reads as full)`;
+const MACHINE_INVALID_LINE = `invalid (${MACHINE_MANIFEST_NAME}; reads as ${MALFORMED_GATE_LEVEL_READS_AS})`;
 const VALID_LEVELS = GATE_LEVELS.join(', ');
 const VALID_LEVELS_OR = `${GATE_LEVELS.slice(0, -1).join(', ')}, or ${GATE_LEVELS[GATE_LEVELS.length - 1]}`;
 
