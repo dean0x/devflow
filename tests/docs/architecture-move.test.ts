@@ -34,7 +34,7 @@ interface MovedParagraph {
  */
 const MOVED_PARAGRAPHS: readonly MovedParagraph[] = [
   { lead: 'LLM-vs-plumbing principle', bytes: 739, sha256: 'c5d362ddb9c5115d98fa453427fd4adce8a9e49e6a705c51ee1d29ae7ce34417' },
-  { lead: 'Runtime data', bytes: 2202, sha256: '2465292446d9cd0652a99572931d8158bce81a885746f03bfa0c9aea49b52a26' },
+  { lead: 'Runtime data', bytes: 2263, sha256: '084cf46ca626aea71e8029c30630048388260407f6140a858dea10373d2594d3' },
   { lead: 'Feature Knowledge Bases', bytes: 890, sha256: 'ea20f3ff1fdb2d0b9774fe9cf544423d10a6544533582a490ca186d14b02a134' },
   { lead: 'Rules', bytes: 319, sha256: 'd6826dc4b431132b12df032831419dd384630b6a9b62244122fcbf6bb15963e9' },
   { lead: 'Selection-scoped Skill Installation', bytes: 532, sha256: '6fb4e7f9edd3e3fadfa766384dfcedffaddb178beff86543823dfe0aa8aec9fb' },
