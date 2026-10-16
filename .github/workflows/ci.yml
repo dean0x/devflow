@@ -63,3 +63,9 @@ jobs:
           # One file at a time: these suites spawn hundreds of hook processes, and in
           # parallel on a 3-core runner the load alone times tests out (5 s default).
           npx vitest run --no-file-parallelism $suites
+      - name: Memory worker parser cases under bash 3.2
+        # The worker's no-parser keep (S17), its per-line parse (S31 to S33), its
+        # append-failure keep (S34), its mid-row batch keep (S35) and its startup assert
+        # (REL-3a), run under the bash 3.2
+        # that the PATH step above puts first. The rest of this file runs in build-and-test.
+        run: npx vitest run --no-file-parallelism tests/eager-memory-refresh.test.ts -t 'S17|S31|S32|S33|S34|S35|REL-3a'
