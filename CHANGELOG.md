@@ -5,7 +5,7 @@ All notable changes to Devflow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [3.7.0] - 2026-10-16
 
 ### Upgrade notes — Gate level
 
@@ -1752,6 +1752,7 @@ devflow init
 ---
 
 [Unreleased]: https://github.com/dean0x/devflow/compare/v3.7.0...HEAD
+[3.7.0]: https://github.com/dean0x/devflow/compare/v3.6.0...v3.7.0
 [3.6.0]: https://github.com/dean0x/devflow/compare/v3.5.0...v3.6.0
 [3.5.0]: https://github.com/dean0x/devflow/compare/v3.4.0...v3.5.0
 [3.4.0]: https://github.com/dean0x/devflow/compare/v3.3.0...v3.4.0
