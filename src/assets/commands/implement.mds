@@ -2,7 +2,7 @@
 description: Execute a single task through implementation, quality gates, and PR creation - accepts plan documents, issues, or task descriptions
 output-dir: dist/commands
 ---
-@import { knowledge_load, knowledge_writeback } from "./_partials/_knowledge.mds"
+@import { knowledge_load, knowledge_writeback_after_load } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
 @import { docs_root } from "./_partials/_docs_root.mds"
 @import { evidence_policy } from "./_partials/_evidence_policy.mds"
@@ -562,7 +562,7 @@ If Phase 9 listed uncommitted files, show them as a `### Uncommitted files` subs
 
 If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lines in the report.
 
-{{knowledge_writeback()}}
+{{knowledge_writeback_after_load()}}
 
 ## Architecture
 
