@@ -32,9 +32,11 @@ import {
   DEFAULT_GATE_LEVEL,
   GATE_LEVELS,
   parseGateLevel,
+  readGateManifest,
   type GateLevel,
   type GateManifestRead,
 } from '../../core/gate-level.js';
+import type { ManifestData } from '../../core/manifest.js';
 
 // ── Shared prompt content ──────────────────────────────────────────────────────
 
@@ -157,6 +159,23 @@ export function storedGateLevelFromRaw(read: GateManifestRead): StoredGateLevel 
       return exhaustive;
     }
   }
+}
+
+/**
+ * Where init finds the stored level when it reads the machine manifest: the manifest
+ * readManifest() returned, else (unless --reset asked to forget it) the raw file.
+ * Never throws — readGateManifest() reports every failure as a result.
+ *
+ * Every writer that replaces the manifest reads the level through this one function, so
+ * `devflow init` and `devflow init --hud-only` keep and report the same stored level.
+ */
+export async function readStoredGateLevel(
+  devflowDir: string,
+  manifest: ManifestData | null,
+  reset: boolean,
+): Promise<StoredGateLevel> {
+  if (manifest !== null || reset) return { origin: 'manifest', value: manifest?.features.gateLevel };
+  return storedGateLevelFromRaw(await readGateManifest(devflowDir));
 }
 
 /** The "Current setting" lines of the prompt note, from the stored value and where it was found. */

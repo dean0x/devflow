@@ -259,6 +259,72 @@ describe('init over a manifest readManifest refuses', () => {
   }, MULTI_RUN_TIMEOUT_MS);
 });
 
+describe('init --hud-only over a manifest readManifest refuses', () => {
+  const KEPT_WARNING = /kept the stored gate level/;
+
+  it('a manifest missing a required field keeps its stored level, and warns', async () => {
+    runInit(repo, '--recommended', '--gate-level', 'full');
+    await writeManifestText(await editedManifestText(raw => { delete raw.installedAt; }));
+
+    const out = runInit(repo, '--hud-only');
+
+    expect(await readFeatures()).toMatchObject({ gateLevel: 'full', hud: true });
+    expect(out.replace(/\s+/g, ' ')).toMatch(KEPT_WARNING);
+    // `devflow gates` reads the same level from the file --hud-only wrote.
+    expect(runCli(repo, 'gates', '--status').out).toContain('Machine:   full');
+  }, MULTI_RUN_TIMEOUT_MS);
+
+  it('passes a malformed or null stored level through as it is', async () => {
+    for (const stored of ['Lean', null]) {
+      runInit(repo, '--recommended', '--gate-level', 'full');
+      await writeManifestText(await editedManifestText(raw => {
+        delete raw.installedAt;
+        (raw.features as Record<string, unknown>).gateLevel = stored;
+      }));
+
+      runInit(repo, '--hud-only');
+
+      const features = await readFeatures();
+      expect(Object.hasOwn(features, 'gateLevel'), `--hud-only dropped a stored ${JSON.stringify(stored)}`).toBe(true);
+      expect(features.gateLevel).toBe(stored);
+    }
+  }, MULTI_RUN_TIMEOUT_MS);
+
+  it('a manifest with no stored level writes none, and does not claim to keep one', async () => {
+    runInit(repo, '--recommended');
+    await writeManifestText(await editedManifestText(raw => { delete raw.installedAt; }));
+
+    const out = runInit(repo, '--hud-only');
+
+    expect(Object.hasOwn(await readFeatures(), 'gateLevel')).toBe(false);
+    expect(out.replace(/\s+/g, ' ')).not.toMatch(KEPT_WARNING);
+  }, MULTI_RUN_TIMEOUT_MS);
+
+  it('a manifest that is not JSON writes no level, and says how to set it again', async () => {
+    runInit(repo, '--recommended', '--gate-level', 'full');
+    await writeManifestText('{not json');
+
+    const out = runInit(repo, '--hud-only');
+
+    expect(Object.hasOwn(await readFeatures(), 'gateLevel')).toBe(false);
+    const flat = out.replace(/\s+/g, ' ');
+    expect(flat).toContain('stored gate level could not be read');
+    expect(flat).toContain('devflow gates --set <level>');
+    // The hint works: the manifest --hud-only wrote takes the level.
+    expect(runCli(repo, 'gates', '--set', 'lean').status).toBe(0);
+    expect(await readFeatures()).toMatchObject({ gateLevel: 'lean' });
+  }, MULTI_RUN_TIMEOUT_MS);
+
+  it('over a manifest init can read, says nothing about the gate level', async () => {
+    runInit(repo, '--recommended', '--gate-level', 'lean');
+
+    const out = runInit(repo, '--hud-only');
+
+    expect(await readFeatures()).toMatchObject({ gateLevel: 'lean' });
+    expect(out).not.toContain('Gate level');
+  }, MULTI_RUN_TIMEOUT_MS);
+});
+
 describe('the Recommended settings note names the gate level', () => {
   const ROW = (text: string): RegExp => new RegExp(`Gate level: {6}${text}`);
 

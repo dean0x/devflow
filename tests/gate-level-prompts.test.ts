@@ -9,8 +9,10 @@
  *   - resolveGateLevelForInit: both init paths (Recommended / Advanced), the flag, the
  *     promptless contracts, and the cancel outcome
  *   - formatGateLevelSummary: the post-install row, from the state the run acted on
- *   - storedGateLevelFromRaw: the level init keeps from a manifest readManifest refuses, and
- *     the prompt and summary texts for a level read from one or not readable at all
+ *   - storedGateLevelFromRaw / readStoredGateLevel: the level init keeps from a manifest
+ *     readManifest refuses, and the prompt and summary texts for a level read from one or
+ *     not readable at all
+ *   - formatGateLevelRow: the gate-level row of the Recommended settings note
  *   - init.ts wiring: both wizard paths call the one shared helper with their own mode
  *
  * The gate keys on `modePromptShown`, never on the mode name. Nothing here calls
@@ -18,8 +20,10 @@
  * caller decision. The fake IO fails loudly when over-consumed, and each table
  * asserts its own row count, so no test passes without exercising what it claims to.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import {
   GATE_LEVEL_HINTS,
   GATE_LEVEL_SELECT_MESSAGE,
@@ -29,6 +33,7 @@ import {
   formatGateLevelSummary,
   gateLevelChoices,
   gateLevelPromptSeed,
+  readStoredGateLevel,
   resolveGateLevelForInit,
   resolveGateLevelInitOption,
   runGateLevelStep,
@@ -242,6 +247,47 @@ describe('storedGateLevelFromRaw', () => {
       .toEqual({ origin: 'manifest', value: 'lean' });
     expect(storedGateLevelFromRaw({ kind: 'object', raw: rawManifest({}) }))
       .toEqual({ origin: 'manifest', value: undefined });
+  });
+});
+
+describe('readStoredGateLevel', () => {
+  it('reads the level from a manifest readManifest returned, without opening the file', async () => {
+    const manifest = makeManifest({ features: { ...makeManifest().features, gateLevel: 'lean' } });
+    expect(await readStoredGateLevel('/nonexistent-devflow-dir', manifest, false))
+      .toEqual({ origin: 'manifest', value: 'lean' });
+  });
+
+  describe('with no manifest from readManifest', () => {
+    let devflowDir: string;
+    beforeEach(async () => {
+      devflowDir = await fs.mkdtemp(path.join(os.tmpdir(), 'df-stored-gate-'));
+    });
+    afterEach(async () => {
+      await fs.rm(devflowDir, { recursive: true, force: true });
+    });
+    const writeManifestText = (text: string): Promise<void> => fs.writeFile(path.join(devflowDir, 'manifest.json'), text, 'utf-8');
+
+    it('reads no level on a first install', async () => {
+      expect(await readStoredGateLevel(devflowDir, null, false)).toEqual({ origin: 'manifest', value: undefined });
+    });
+
+    it('keeps the raw level of a manifest it refuses, malformed and null included', async () => {
+      for (const stored of ['full', 'Lean', null]) {
+        await writeManifestText(JSON.stringify({ features: { gateLevel: stored } }));
+        expect(await readStoredGateLevel(devflowDir, null, false), `stored ${JSON.stringify(stored)}`)
+          .toEqual({ origin: 'rejected', value: stored });
+      }
+    });
+
+    it('reports a manifest that cannot be read as unreadable', async () => {
+      await writeManifestText('{not json');
+      expect(await readStoredGateLevel(devflowDir, null, false)).toEqual({ origin: 'unreadable', value: undefined });
+    });
+
+    it('under --reset forgets what a refused manifest stores', async () => {
+      await writeManifestText(JSON.stringify({ features: { gateLevel: 'full' } }));
+      expect(await readStoredGateLevel(devflowDir, null, true)).toEqual({ origin: 'manifest', value: undefined });
+    });
   });
 });
 

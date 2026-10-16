@@ -88,12 +88,12 @@ import {
   buildClackGateLevelPrompts,
   formatGateLevelRow,
   formatGateLevelSummary,
+  readStoredGateLevel,
   resolveGateLevelForInit,
   resolveGateLevelInitOption,
-  storedGateLevelFromRaw,
   type StoredGateLevel,
 } from './gate-level-prompts.js';
-import { readGateManifest, type GateLevel } from '../../core/gate-level.js';
+import type { GateLevel } from '../../core/gate-level.js';
 import {
   shouldRunAttributionStep,
   runAttributionStep,
@@ -716,12 +716,18 @@ export async function drainDisabledFeatureQueues(
  * bumped version would make the next init skip the upgrade it still owes.
  *
  * With no prior manifest the result is the fresh HUD-only record: every other
- * feature off, which is what is installed.
+ * feature off, which is what is installed. `readManifest()` also reads a manifest it
+ * refuses as no manifest, so `refusedGateLevel` carries the machine gate level found in
+ * the raw file (`readStoredGateLevel`): the fresh record keeps it exactly as stored,
+ * malformed and `null` included, and holds no key when it is `undefined`. Init never
+ * writes a gate level the user did not choose. It is ignored over a prior install,
+ * whose own level is already kept.
  */
 export function buildHudOnlyManifest(
   existing: ManifestData | null,
   version: string,
   now: string,
+  refusedGateLevel?: unknown,
 ): ManifestData {
   if (existing !== null) {
     return {
@@ -742,6 +748,7 @@ export function buildHudOnlyManifest(
       // The exported default, not a literal — the one constant every other
       // module reads, so a moved default moves here too.
       tracker: { provider: DEFAULT_TRACKER_PROVIDER },
+      ...(refusedGateLevel !== undefined ? { gateLevel: refusedGateLevel } : {}),
     },
     installedAt: now,
     updatedAt: now,
@@ -967,13 +974,27 @@ export const initCommand = new Command('init')
       try {
         existingHudManifest = await readManifest(devflowDir);
       } catch { /* absent on fresh install — existingHudManifest stays null */ }
+      // A manifest readManifest() refuses reads as none, but its machine gate level is still
+      // stored there: --hud-only keeps it and says so, as the full init does. --reset does not
+      // apply here, so nothing asks to forget it.
+      const hudStoredGate = await readStoredGateLevel(devflowDir, existingHudManifest, false);
 
+      let hudManifestWritten = false;
       try {
         await writeManifest(
           devflowDir,
-          buildHudOnlyManifest(existingHudManifest, version, new Date().toISOString()),
+          buildHudOnlyManifest(existingHudManifest, version, new Date().toISOString(), hudStoredGate.value),
         );
+        hudManifestWritten = true;
       } catch { /* non-fatal */ }
+      if (hudStoredGate.origin !== 'manifest') {
+        logSummaryLines(formatGateLevelSummary({
+          level: hudStoredGate.value,
+          priorLevel: hudStoredGate.value,
+          priorOrigin: hudStoredGate.origin,
+          manifestWritten: hudManifestWritten,
+        }));
+      }
 
       const hudOnlySkew = formatHudOnlySkew(existingHudManifest?.version ?? null, await readRunningVersion());
       if (hudOnlySkew !== null) p.log.warn(hudOnlySkew);
@@ -996,9 +1017,7 @@ export const initCommand = new Command('init')
     // is refused (and --reset did not ask to forget it) the raw file decides: a level found in it
     // is kept as stored, and a file that cannot be read at all is carried as "unreadable" and
     // reported. This is an init-side override; the seed itself still comes from the manifest alone.
-    const storedGate: StoredGateLevel = existingManifest !== null || options.reset
-      ? { origin: 'manifest', value: existingManifest?.features.gateLevel }
-      : storedGateLevelFromRaw(await readGateManifest(devflowDir));
+    const storedGate: StoredGateLevel = await readStoredGateLevel(devflowDir, existingManifest, !!options.reset);
     // D-INIT-NOT-HOME (same-location.ts): a repository rooted at HOME is no
     // project, so init treats it as no repository — no .devflow/config.json (that
     // would be the machine root's), no .claudeignore, no .gitignore block, no
