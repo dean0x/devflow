@@ -197,7 +197,7 @@ describe('the strict name class (AC-7)', () => {
     '', '-x', '--help', '-', '#x', '#', 'origin/main', 'origin/', 'a..b', '..', 'a/../b', '@', 'HEAD', 'FETCH_HEAD',
     'ORIG_HEAD', 'MERGE_HEAD', 'a b', 'a\tb', 'a\nb', 'a\rb', 'a\0b', 'a;b', 'a|b', 'a&b', 'a$b', '$(id)', '`id`',
     'a"b', "a'b", 'a\\b', 'a*b', 'a?b', 'a[b', 'a{b}', 'a:b', 'a~b', 'a^b', 'a!b', 'a<b', 'a>b', 'a(b', 'a)b',
-    'a=b', 'a%b', 'é', 'a‮b', 'a'.repeat(201), 'main\n',
+    'a=b', 'a%b', 'é', 'a\u202eb', 'a'.repeat(201), 'main\n',
   ]
 
   it('admits the closed set: ASCII letters, digits and ._/+@,#-, at most 200', () => {
