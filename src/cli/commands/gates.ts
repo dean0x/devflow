@@ -69,7 +69,7 @@ export const GATE_LEVEL_MEANINGS: Readonly<Record<GateLevel, string>> = Object.f
  * two tables share (the lint pack level and the levels that run fewer review focuses).
  */
 export const GATE_LEVEL_EFFECT =
-  '/code-review and /plan read the level: standard and lean run fewer review focuses and fewer planning agents. At lean, /implement has Validate run the project\'s lint pack. Other commands read it once issue #480 lands.';
+  '/code-review and /plan read the level: standard and lean run fewer review focuses and fewer planning agents. At lean, /implement has Validate run the project\'s lint pack. /implement and /resolve also read the level and name it in their report; their level references hold no phase rules yet.';
 
 const MACHINE_MANIFEST_NAME = 'manifest.json';
 const MACHINE_INVALID_LINE = `invalid (${MACHINE_MANIFEST_NAME}; reads as ${MALFORMED_GATE_LEVEL_READS_AS})`;
