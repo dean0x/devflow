@@ -227,7 +227,7 @@ Collect every decision and pitfall the Triage agent's Reasoning columns state, i
 **Produces:** BATCHES
 **Requires:** TRIAGE_RESULTS
 
-If FIX_NOW list is empty: skip to Phase 5 — write full summary (Phase 5), run manage-debt (Phase 9) if FIX_SEPARATE/TECH_DEBT exist, run thread resolution + resolution comment (Phase 9b), run merge readiness (Phase 9c), display results (Phase 10).
+If FIX_NOW list is empty: skip to Phase 5, then run Phases 9, 9b, 9c and 10.
 
 Otherwise, batch FIX_NOW issues for Code agent execution. **DUPLICATE issues are never dispatched** — they inherit the primary's outcome:
 - **Same-file issues** → one batch (one Code agent per file, sequential for same-file pairs)
@@ -274,7 +274,7 @@ Collect from each Code agent:
 **Produces:** RESOLUTION_FILE (early write for compaction safety)
 **Requires:** TRIAGE_RESULTS, CODE_AGENT_RESULTS, TARGET_DIR, TARGET_DIR_REL, BRANCH_INFO, RESOLUTION_TS
 
-**Immediately write `resolution-summary.md`** to `{TARGET_DIR}` using the Write tool. Do this now — not in Phase 9 — while results are fresh in context. This ensures the record is persisted even if later phases (Polish, Verification Gate, CI gate, Tech Debt) trigger context compaction.
+**Immediately write `resolution-summary.md`** to `{TARGET_DIR}` using the Write tool. Do this now — not in Phase 9 — while results are fresh in context.
 
 Set `Tracked` for FIX_SEPARATE and TECH_DEBT items to `(pending)` — to be backfilled after Phase 9 manage-debt (or `TRACEABILITY: DEGRADED ({reason})` if manage-debt degrades).
 
@@ -349,7 +349,7 @@ git -C {worktree} push
 
 **If `fork_no_push` is set:** do not push. Record `Push: skipped — cannot push to fork` under `## Verification`, and skip Phase 8 — no pushed commit exists for CI to check.
 
-**Route after push:** VERIFICATION_STATUS = PASS → continue to Phase 8 (CI gate). VERIFICATION_STATUS = FAILED → skip Phase 8; proceed directly to Phase 9 (manage-debt), then Phase 9b (thread resolution + resolution comment), then Phase 9c (merge readiness), then Phase 10 (report). VERIFICATION_STATUS = SKIPPED → skip Phase 8 (no fixes applied); proceed to Phase 9 (manage-debt), then Phase 9b (thread resolution + resolution comment), then Phase 9c (merge readiness, when non-author approval is required), then Phase 10 (report).
+**Route after push:** VERIFICATION_STATUS = PASS → continue to Phase 8 (CI gate). FAILED or SKIPPED → skip Phase 8 and continue with Phase 9 and the later phases in order.
 
 ### Phase 8: CI Status Gate (Conditional)
 
@@ -584,15 +584,15 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 /resolve (orchestrator - spawns agents only)
 │
 ├─ Phase 0: Worktree Discovery & Pre-flight
-├─ Phase 1: Parse issues from TARGET_DIR + extract confidence %
+├─ Phase 1: Parse issues from TARGET_DIR
 ├─ Phase 1b: Fetch external threads (evidence policy required)
 ├─ Phase 2: Global Triage [Triage agent, opus, single agent]
-├─ Phase 3: Batch FIX_NOW issues (skip if empty; DUPLICATE issues never dispatched)
-├─ Phase 4: Fix [Code agent × N, OPERATION: issue-fix, PUSH: false]
+├─ Phase 3: Batch FIX_NOW issues
+├─ Phase 4: Fix [Code agent × N]
 ├─ Phase 5: Write resolution-summary.md (compaction safety; Tracked = "(pending)" or "(pending — TRACEABILITY: DEGRADED)" if manage-debt degrades)
-├─ Phase 6: Polish [Polish agent]
+├─ Phase 6: Polish
 ├─ Phase 7: Verification Gate [Validate agent, haiku] + push + Fix agent validation-fix loop ≤2
-├─ Phase 8: CI Status Gate (conditional — skipped if no fixes or verification FAILED)
+├─ Phase 8: CI Status Gate (conditional)
 ├─ Phase 9: Git agent (manage-debt) — FIX_SEPARATE + TECH_DEBT → backfill Tracked={ISSUE_REF} (or TRACEABILITY: DEGRADED on failure)
 │
 ├─ Phase 9b: Thread resolution + resolution comment
@@ -611,7 +611,6 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 | Case | Handling |
 |------|----------|
 | No reviews exist | Check bug-analysis fallback (Step 0c-5b); if also absent, error and suggest `/code-review` or `/bug-analysis` |
-| All false positives | Normal completion, report shows 0 fixes |
 | Fix attempt fails | Revert changes, mark BLOCKED, continue others |
 | Issue dependencies | Sequential chain, skip dependents if predecessor blocked |
 | No actionable issues | Report "No issues to resolve" |
@@ -629,9 +628,8 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 ## Principles
 
 1. **Orchestration only** - Command spawns agents, doesn't do git/resolve work itself
-2. **No agent grades its own homework** - Triage agent validates, Code agents fix, Validate agent verifies
-3. **Git agent for git work** - All git operations go through Git agent; the CI wait, the evidence refresh and the merge-readiness check are inline scripts (plumbing, no model work)
-4. **Traceability-aware** - Policy-gated ops (thread fetch/resolve, merge readiness) are skipped cleanly when the evidence policy does not ask for them; resolution comment (Phase 9b-2) is always-on; test-plan evidence is re-verified (≤1 Test agent) and refreshed only when this run moved the head (Steps 9b-0, 9b-3)
+2. **Git agent for git work** - All git operations go through Git agent; the CI wait, the evidence refresh and the merge-readiness check are inline scripts (plumbing, no model work)
+3. **Traceability-aware** - Policy-gated ops (thread fetch/resolve, merge readiness) are skipped cleanly when the evidence policy does not ask for them; resolution comment (Phase 9b-2) is always-on; test-plan evidence is re-verified (≤1 Test agent) and refreshed only when this run moved the head (Steps 9b-0, 9b-3)
 
 ## Output Artifact
 
