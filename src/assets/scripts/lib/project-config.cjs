@@ -16,7 +16,7 @@
 //   {"version":1,"evidence":"required|standard","compliance":["gdpr",…],
 //    "tracker":{"provider":"github|jira|linear","site":"https://…","key":"ACME"},
 //    "reviewPublication":"off|auto|full",
-//    "features":{"memory":false,"learning":false,"knowledge":false}}
+//    "features":{"memory":false,"curation":false,"learning":false,"knowledge":false}}
 // Each known key is classified on its own — absent, valid or malformed — so one
 // bad value never takes its neighbours down with it (AC-26). What a malformed
 // value MEANS is the consumer's decision, made once in each caller's fold:
@@ -81,8 +81,12 @@ const TRACKER_PROVIDER_IDS = Object.freeze(['github', 'jira', 'linear']);
  */
 const COMPLIANCE_IDS = Object.freeze(['gdpr', 'hipaa', 'pci-dss', 'soc2', 'iso-27001', 'sox']);
 
-/** The feature switches a repo layer may narrow. */
-const FEATURE_SWITCHES = Object.freeze(['memory', 'learning', 'knowledge']);
+/**
+ * The feature keys a repo layer may narrow with. `curation` is the learning
+ * feature's current name and `learning` its pre-rename one (#529): both are read,
+ * each on its own, and a literal false in either turns the feature off.
+ */
+const FEATURE_SWITCHES = Object.freeze(['memory', 'curation', 'learning', 'knowledge']);
 
 /**
  * A tracker site: the Jira setup-task gate (src/assets/mds/tracker/_jira.mds,
@@ -124,7 +128,7 @@ const MAX_JSON_DEPTH = 32;
  * @typedef {{ kind: 'absent' } | { kind: 'malformed' } | { kind: 'valid', value: T }} Field
  *
  * @typedef {{ provider: Field<string>, site: Field<string>, key: Field<string> }} ProjectTracker
- * @typedef {{ memory: Field<boolean>, learning: Field<boolean>, knowledge: Field<boolean> }} FeatureFields
+ * @typedef {{ memory: Field<boolean>, curation: Field<boolean>, learning: Field<boolean>, knowledge: Field<boolean> }} FeatureFields
  *
  * @typedef {{ kind: 'absent' } | { kind: 'invalid' } | {
  *   kind: 'parsed',
@@ -515,7 +519,9 @@ function asKey(value) {
 
 /**
  * The `features` object: each switch its own field, boolean only. A consumer
- * narrows on a literal `false` alone.
+ * narrows on a literal `false` alone. `curation` and `learning` are two keys of
+ * one feature, parsed independently: a duplicate or a non-boolean value in one
+ * leaves the other readable. The retired `decisions` key is never read here.
  *
  * @param {Record<string, unknown>} obj
  * @param {Set<string>} duplicates
@@ -529,6 +535,7 @@ function featuresField(obj, duplicates) {
       ok: true,
       value: Object.freeze({
         memory: fieldOf(value, duplicates, base, 'memory', asBoolean),
+        curation: fieldOf(value, duplicates, base, 'curation', asBoolean),
         learning: fieldOf(value, duplicates, base, 'learning', asBoolean),
         knowledge: fieldOf(value, duplicates, base, 'knowledge', asBoolean),
       }),

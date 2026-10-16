@@ -42,8 +42,11 @@ export type TrackerConfigOverride =
  * knowledge are switched in ~/.devflow/manifest.json, and a hand-written
  * `features` object here (like the one in the team's `.devflow/project.json`)
  * may only narrow them — resolve-settings.cjs reads it through the shared
- * parser; nothing in this module interprets it. devflow never writes `features`:
- * it is carried verbatim by every managed write, like the `tracker` override. The
+ * parser; nothing in this module interprets it. The learning switch is narrowed
+ * through `features.learning` or `features.curation` (a false in either key turns
+ * it off), and neither key is ever rewritten or renamed here. devflow never
+ * writes `features`: it is carried verbatim by every managed write, like the
+ * `tracker` override. The
  * old top-level per-repo keys are retired ({@link RETIRED_CONFIG_KEYS}) — no
  * gate reads them, and the next managed write drops them from the file.
  *

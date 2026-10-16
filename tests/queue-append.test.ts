@@ -630,6 +630,27 @@ describe('queue_read_gates', { timeout: GATE_READ_TEST_BUDGET_MS }, () => {
         expect(gates(manifestWith({ decisions: 'false' }))).toMatchObject({ learning: 'true' });
       }, 15000);
 
+      it('learning is read under curation and learning: a false in either is off, a disagreeing pair resolves off (TP-10)', () => {
+        expect(gates(manifestWith({ memory: true, curation: false }))).toMatchObject({ memory: 'true', learning: 'false', exitCode: 0 });
+        expect(gates(manifestWith({ curation: true, learning: false }))).toMatchObject({ learning: 'false' });
+        expect(gates(manifestWith({ curation: false, learning: true }))).toMatchObject({ learning: 'false' });
+        expect(gates(manifestWith({ curation: true, learning: true }))).toMatchObject({ learning: 'true' });
+        expect(gates(manifestWith({ curation: true }))).toMatchObject({ learning: 'true' });
+        // The pre-rename key is read only when neither current key is a boolean.
+        expect(gates(manifestWith({ curation: true, decisions: false }))).toMatchObject({ learning: 'true' });
+        expect(gates(manifestWith({ curation: 'x', learning: 0, decisions: false }))).toMatchObject({ learning: 'false' });
+        // A non-boolean value is ignored for that key only.
+        expect(gates(manifestWith({ curation: 'false' }))).toMatchObject({ learning: 'true' });
+        expect(gates(manifestWith({ curation: 'true', learning: false }))).toMatchObject({ learning: 'false' });
+        // curation belongs to learning alone.
+        expect(gates(manifestWith({ curation: false }))).toMatchObject({ memory: 'true' });
+      }, 30000);
+
+      it('an escaped curation key still switches learning off', () => {
+        expect(gates('{"features":{"cur\\u0061tion":false}}')).toMatchObject({ memory: 'true', learning: 'false', exitCode: 0 });
+        expect(gates('{"features":{"curation":true,"le\\u0061rning":false}}')).toMatchObject({ learning: 'false' });
+      });
+
       it('an escaped key still switches off (a \\u escape always takes the full parse)', () => {
         // JSON.parse and jq decode "memory" to "memory"; the builtin fast
         // path cannot see through an escape, so it must never decide such a file.
@@ -640,7 +661,7 @@ describe('queue_read_gates', { timeout: GATE_READ_TEST_BUDGET_MS }, () => {
 
       it('forks no parser when no switch can be off, and exactly one when one can (D-GATES-FAST-PATH)', () => {
         // Every capture hook and session start pays this read. A manifest whose
-        // text holds no `"memory"|"learning"|"decisions": false` cannot switch
+        // text holds no `"memory"|"curation"|"learning"|"decisions": false` cannot switch
         // anything off, so it is answered by shell builtins alone. The parser is
         // shadowed by a function that logs each call before running the real one.
         const forkLog = path.join(tmpDir, 'forks.log');
@@ -663,7 +684,7 @@ describe('queue_read_gates', { timeout: GATE_READ_TEST_BUDGET_MS }, () => {
         // they are not switches and must not cost a fork.
         const on = probe(JSON.stringify({
           version: '2.0.0',
-          features: { ambient: true, memory: true, learning: true, proxy: false, compliance: { enabled: false } },
+          features: { ambient: true, memory: true, curation: true, learning: true, proxy: false, compliance: { enabled: false } },
         }, null, 2));
         expect(on).toMatchObject({ exitCode: 0, forks: 0 });
         expect(on.stdout).toContain('MEMORY=true LEARNING=true');
@@ -671,6 +692,11 @@ describe('queue_read_gates', { timeout: GATE_READ_TEST_BUDGET_MS }, () => {
         const off = probe(JSON.stringify({ features: { memory: false } }, null, 2));
         expect(off).toMatchObject({ exitCode: 0, forks: 1 });
         expect(off.stdout).toContain('MEMORY=false LEARNING=true');
+
+        // The curation key is a switch too: one fork, and learning reads off.
+        const curationOff = probe(JSON.stringify({ features: { memory: true, curation: false } }, null, 2));
+        expect(curationOff).toMatchObject({ exitCode: 0, forks: 1 });
+        expect(curationOff.stdout).toContain('MEMORY=true LEARNING=false');
       });
     });
   }
@@ -805,7 +831,7 @@ describe('queue_read_gates <manifest> <root>: the repository narrows, never wide
 
     const forks = (): string[] => (fs.existsSync(forkLog) ? fs.readFileSync(forkLog, 'utf-8').trim().split('\n').filter(Boolean) : []);
     const shimEnv = (): NodeJS.ProcessEnv => ({ ...process.env, PATH: `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}` });
-    const MANIFEST = { version: '2.5.0', features: { memory: true, learning: true, knowledge: true, proxy: false } };
+    const MANIFEST = { version: '2.5.0', features: { memory: true, curation: true, learning: true, knowledge: true, proxy: false } };
 
     for (const backend of [{ name: 'jq', noJq: false }, { name: 'node fallback', noJq: true }]) {
       describe(`${backend.name} backend`, () => {
@@ -823,7 +849,7 @@ describe('queue_read_gates <manifest> <root>: the repository narrows, never wide
             project: JSON.stringify({
               version: 1, evidence: 'required', compliance: ['gdpr'],
               tracker: { provider: 'jira', site: 'https://acme.atlassian.net', key: 'ACME' },
-              reviewPublication: 'auto', features: { memory: true, learning: true },
+              reviewPublication: 'auto', features: { memory: true, curation: true, learning: true },
             }, null, 2),
             personal: '{"reviewPublication":"full","tracker":"github"}',
           });
@@ -836,7 +862,7 @@ describe('queue_read_gates <manifest> <root>: the repository narrows, never wide
           // decisions have no shell gate: none of them can narrow a queue.
           writeLayers({
             manifest: MANIFEST,
-            project: '{"memory":false,"learning":false,"decisions":false,"features":{"knowledge":false,"decisions":false}}',
+            project: '{"memory":false,"curation":false,"learning":false,"decisions":false,"features":{"knowledge":false,"decisions":false}}',
             personal: '{"memory":false,"features":{"knowledge":false}}',
           });
           expect(probe()).toEqual({ memory: 'true', learning: 'true', exitCode: 0 });
@@ -845,6 +871,47 @@ describe('queue_read_gates <manifest> <root>: the repository narrows, never wide
 
         it('project.json features.learning false: exactly one fork, learning off', () => {
           writeLayers({ manifest: MANIFEST, project: '{"version":1,"features":{"learning":false}}', personal: null });
+          expect(probe()).toEqual({ memory: 'true', learning: 'false', exitCode: 0 });
+          expect(forks()).toEqual(['node']);
+        });
+
+        it('project.json features.curation false: exactly one fork, learning off (TP-33)', () => {
+          writeLayers({ manifest: MANIFEST, project: '{"version":1,"features":{"curation":false}}', personal: null });
+          expect(probe()).toEqual({ memory: 'true', learning: 'false', exitCode: 0 });
+          expect(forks()).toEqual(['node']);
+        });
+
+        it('config.json features.curation false: exactly one fork, learning off', () => {
+          writeLayers({ manifest: MANIFEST, project: null, personal: '{"features":{"curation":false}}' });
+          expect(probe()).toEqual({ memory: 'true', learning: 'false', exitCode: 0 });
+          expect(forks()).toEqual(['node']);
+        });
+
+        it('a repository file with both keys costs exactly one fork, whichever key is false (TP-33)', () => {
+          for (const features of [
+            '{"curation":false,"learning":false}',
+            '{"curation":false,"learning":true}',
+            '{"curation":true,"learning":false}',
+          ]) {
+            fs.rmSync(forkLog, { force: true });
+            writeLayers({ manifest: MANIFEST, project: `{"version":1,"features":${features}}`, personal: null });
+            expect(probe(), features).toEqual({ memory: 'true', learning: 'false', exitCode: 0 });
+            expect(forks(), features).toEqual(['node']);
+          }
+        });
+
+        it('a repository file with both keys true: zero forks', () => {
+          writeLayers({ manifest: MANIFEST, project: '{"version":1,"features":{"curation":true,"learning":true}}', personal: null });
+          expect(probe()).toEqual({ memory: 'true', learning: 'true', exitCode: 0 });
+          expect(forks()).toEqual([]);
+        });
+
+        it('a manifest curation:false with a repository file holding both keys: still exactly one fork', () => {
+          writeLayers({
+            manifest: { features: { memory: true, curation: false } },
+            project: '{"features":{"curation":false,"learning":false}}',
+            personal: '{"features":{"curation":false}}',
+          });
           expect(probe()).toEqual({ memory: 'true', learning: 'false', exitCode: 0 });
           expect(forks()).toEqual(['node']);
         });

@@ -371,13 +371,27 @@ function isPlainObject(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/**
+ * The keys a switch is stored under, current names first (feature-switch.ts
+ * CURRENT_KEYS). `learning` is read under `curation` and `learning` (#529); the
+ * settings-line field keeps its name.
+ */
+const CURRENT_SWITCH_KEYS = Object.freeze({
+  memory: Object.freeze(['memory']),
+  learning: Object.freeze(['curation', 'learning']),
+  knowledge: Object.freeze(['knowledge']),
+});
+
 /** The pre-rename key each switch was stored under (feature-switch.ts LEGACY_KEYS). */
 const LEGACY_SWITCH_KEYS = Object.freeze({ learning: 'decisions', knowledge: 'kb' });
 
 /**
- * src/core/feature-switch.ts isMachineFeatureOn exactly: only an explicit
- * boolean `false` is off, the legacy key is read when the current one is not a
- * boolean, and anything that is not a manifest-shaped object is on.
+ * src/core/feature-switch.ts isMachineFeatureOn exactly. Off when any current
+ * key is a boolean `false`; else on when any current key is a boolean `true`;
+ * else, when neither is a boolean, the pre-rename key decides if it is a
+ * boolean; else on. A non-boolean value is ignored for that key only, so a
+ * disagreeing pair resolves to off. Anything that is not a manifest-shaped
+ * object is on.
  *
  * @param {unknown} manifest
  * @param {FeatureSwitch} feature
@@ -387,9 +401,10 @@ function machineSwitchOn(manifest, feature) {
   if (!isPlainObject(manifest)) return true;
   const features = manifest.features;
   if (!isPlainObject(features)) return true;
+  const current = CURRENT_SWITCH_KEYS[feature].map(key => features[key]).filter(value => typeof value === 'boolean');
+  if (current.length > 0) return !current.includes(false);
   const legacy = /** @type {Record<string, string>} */ (LEGACY_SWITCH_KEYS)[feature];
-  const value = legacy !== undefined && typeof features[feature] !== 'boolean' ? features[legacy] : features[feature];
-  return value !== false;
+  return legacy === undefined || features[legacy] !== false;
 }
 
 /**
@@ -625,6 +640,11 @@ function foldCompliance(project, manifest, defaultBranch) {
  * narrows: absent, malformed, duplicated and unreadable all leave the switch as
  * the machine set it. No repo layer can turn on what the machine turned off.
  *
+ * A switch with two current keys (`learning`: `curation` and `learning`, #529)
+ * is a narrow-only union: a literal `false` in either key of a file narrows it,
+ * and each key is classified on its own, so a duplicate or a non-boolean value
+ * in one key leaves the other readable.
+ *
  * @param {any} project
  * @param {any} personal
  * @param {unknown} manifest
@@ -635,7 +655,8 @@ function foldSwitch(project, personal, manifest, feature) {
   /** @param {any} file */
   const narrows = file => {
     const features = fieldIn(file, 'features', 'absent');
-    return features.kind === 'valid' && features.value[feature].kind === 'valid' && features.value[feature].value === false;
+    if (features.kind !== 'valid') return false;
+    return CURRENT_SWITCH_KEYS[feature].some(key => features.value[key].kind === 'valid' && features.value[key].value === false);
   };
   if (!machineSwitchOn(manifest, feature)) return Object.freeze({ on: false, source: 'machine' });
   if (narrows(project)) return Object.freeze({ on: false, source: 'project' });

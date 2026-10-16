@@ -114,6 +114,21 @@ describe('feature toggles write the machine-wide switch, never the per-repo conf
     expect(after.updatedAt).not.toBe('2026-01-01T00:00:00.000Z');
   }, 60_000);
 
+  it.each([
+    { flag: '--enable', enabled: true },
+    { flag: '--disable', enabled: false },
+  ] as const)('★ devflow learning $flag leaves a personal features.learning and features.curation opt-out byte-identical (TP-13)', ({ flag, enabled }) => {
+    seedManifest({ memory: true, learning: !enabled, knowledge: true });
+    const configBody = '{\n  "reviewPublication": "full",\n  "features": { "learning": false, "curation": false }\n}\n';
+    seedConfig(configBody);
+
+    const result = runToggle('learning', flag);
+
+    expect(result.status, `devflow learning ${flag} failed:\n${result.out}`).toBe(0);
+    expect(fs.readFileSync(configPath(), 'utf-8')).toBe(configBody);
+    expect(readManifest().features.learning).toBe(enabled);
+  }, 60_000);
+
   it.each(TOGGLES)('devflow $feature $flag refuses without a manifest and creates none', ({ feature, flag }) => {
     const result = runToggle(feature, flag);
 

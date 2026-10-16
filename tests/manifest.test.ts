@@ -200,6 +200,58 @@ describe('readManifest', () => {
     }
   });
 
+  it('reads learning under curation and learning: false wins, and the pre-rename key decides only when neither is a boolean (TP-10)', async () => {
+    const base = { version: '2.0.0', plugins: ['devflow-core-skills'], scope: 'user', installedAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' };
+    const cases: Array<[Record<string, unknown>, boolean]> = [
+      [{ curation: false }, false],
+      [{ curation: true }, true],
+      [{ curation: true, learning: false }, false],
+      [{ curation: false, learning: true }, false],
+      [{ curation: false, learning: false }, false],
+      [{ curation: true, learning: true }, true],
+      [{ curation: true, decisions: false }, true],
+      [{ learning: true, decisions: false }, true],
+      [{ curation: 'x', decisions: false }, false],
+      [{ curation: 'false' }, true],
+      [{ curation: 'true', learning: false }, false],
+    ];
+    for (const [extra, expected] of cases) {
+      await fs.writeFile(
+        path.join(tmpDir, 'manifest.json'),
+        JSON.stringify({ ...base, features: { ambient: true, memory: true, flags: {}, ...extra } }),
+        'utf-8',
+      );
+      const result = await readManifest(tmpDir);
+      expect(result, JSON.stringify(extra)).not.toBeNull();
+      expect(result!.features.learning, JSON.stringify(extra)).toBe(expected);
+    }
+  });
+
+  it('a read of a disagreeing curation and learning pair writes nothing (the heal is a later step)', async () => {
+    const body = JSON.stringify({
+      version: '2.0.0', plugins: [], scope: 'user', installedAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+      features: { ambient: true, memory: true, hud: false, knowledge: true, curation: false, learning: true, rules: true, flags: {}, proxy: false },
+    });
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), body, 'utf-8');
+    expect((await readManifest(tmpDir))!.features.learning).toBe(false);
+    expect(await fs.readFile(path.join(tmpDir, 'manifest.json'), 'utf-8')).toBe(body);
+  });
+
+  it('a toggle through syncManifestFeature keeps a disagreeing curation and learning pair off', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'manifest.json'),
+      JSON.stringify({
+        version: '2.0.0', plugins: [], scope: 'user', installedAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+        features: { ambient: true, memory: true, hud: false, curation: false, learning: true, flags: {} },
+      }),
+      'utf-8',
+    );
+    await syncManifestFeature(tmpDir, 'hud', true);
+    const onDisk = JSON.parse(await fs.readFile(path.join(tmpDir, 'manifest.json'), 'utf-8')) as { features: Record<string, unknown> };
+    expect(onDisk.features).toMatchObject({ hud: true, learning: false });
+    expect((await readManifest(tmpDir))!.features.learning).toBe(false);
+  });
+
   it('a toggle through syncManifestFeature never writes an absent learning/knowledge key back as false', async () => {
     // Pre-fix, `devflow hud --enable` on an older manifest persisted the reader's
     // `false` default — silently switching learning and knowledge off machine-wide.

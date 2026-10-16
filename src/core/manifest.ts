@@ -11,6 +11,7 @@ import {
 import { normalizeComplianceFeature, type ComplianceFeatureState } from './compliance.js';
 import { normalizeTrackerFeature, type TrackerFeatureState } from './tracker.js';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
+import { isMachineFeatureOn } from './feature-switch.js';
 
 /**
  * Where the Devflow security deny list is installed.
@@ -52,6 +53,8 @@ export interface ManifestData {
     /**
      * Renamed from decisions — self-healed from features.decisions on read.
      * Absent (with no legacy `decisions`) reads as true — D-FEATURES-ABSENT-ON.
+     * A `features.curation` key on disk is read beside it and false wins; the
+     * key this field writes back is still `learning`.
      */
     learning: boolean;
     rules: boolean;
@@ -203,7 +206,8 @@ export function hasRequiredManifestFields(data: Record<string, unknown>): boolea
  *
  * Self-heals the following on-disk inconsistencies:
  * - features.kb → features.knowledge rename (both absent → true, D-FEATURES-ABSENT-ON)
- * - features.decisions → features.learning rename (both absent → true, D-FEATURES-ABSENT-ON)
+ * - features.decisions → features.learning rename (both absent → true, D-FEATURES-ABSENT-ON);
+ *   `features.curation` is read beside `features.learning`, and false wins
  * - features.flags as string[] → FlagsRecord (via migrateLegacyFlagsToRecord)
  * - features.viewMode folded into flags['view-mode'] and stripped from result
  * - features.knownFlags stripped from result (folded into FlagsRecord key-presence)
@@ -249,12 +253,15 @@ export async function readManifest(
       : typeof features.kb === 'boolean' ? features.kb as boolean
       : true;
     // Self-heal: rename features.decisions → features.learning on disk.
-    // Coalesce: features.learning wins; fall back to features.decisions; default ON.
-    // D-LEARNING-LEGACY-DECISIONS: isMachineFeatureOn and queue_read_gates apply
-    // this exact precedence, so the legacy key is honoured before the heal lands.
-    const learning = typeof features.learning === 'boolean' ? features.learning
-      : typeof features.decisions === 'boolean' ? features.decisions as boolean
-      : true;
+    // Coalesce (#529): the learning switch is read under two current keys,
+    // `curation` and `learning`. A boolean false in either is off, a boolean true
+    // in either is on when neither is false, and the pre-rename
+    // features.decisions decides only when neither current key is a boolean;
+    // default ON. isMachineFeatureOn IS that rule (D-LEARNING-LEGACY-DECISIONS),
+    // and queue_read_gates and resolve-settings.cjs mirror it, so the legacy key
+    // is honoured before the heal lands and a disagreeing pair reads off. This
+    // read side writes nothing new: the key written back is still `learning`.
+    const learning = isMachineFeatureOn(data, 'learning');
 
     // Self-heal: non-string-array or absent knownFlags/knownPlugins → undefined (never partial/garbage)
     const asStringArray = (val: unknown): string[] | undefined =>

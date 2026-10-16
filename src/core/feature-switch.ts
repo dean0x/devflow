@@ -10,17 +10,23 @@ import { writeFileAtomicExclusive } from './fs-atomic.js';
  * `features.memory`, `features.learning` and `features.knowledge` in
  * `~/.devflow/manifest.json` are the MACHINE switch — `devflow init` and
  * `devflow memory|learning|knowledge --enable/--disable` write that one value,
- * and {@link readMachineFeature} reads it. A repository adds two layers that can
- * only turn a feature OFF, never on:
+ * and {@link readMachineFeature} reads it. The learning switch is read under a
+ * second current key, `features.curation`, because the feature is being renamed:
+ * a false in either key turns it off (see {@link isMachineFeatureOn}), and this
+ * module still writes only `features.learning`. A repository adds two layers
+ * that can only turn a feature OFF, never on:
  *
  *   effective = machine AND project.json `features.<name>` AND config.json `features.<name>`
  *
  * where only a literal `false` narrows — absent, malformed and unreadable values
- * leave the machine switch deciding. (An unreadable repository file also fails
- * the settings line closed, so commands read `KNOWLEDGE=off` from it; the
- * hooks never read that line, and for them it narrows nothing.) The
- * team-committed `.devflow/project.json` and the personal `.devflow/config.json`
- * are both parsed by the shared lib/project-config.cjs, and the fold lives in
+ * leave the machine switch deciding. A repository file narrows the learning
+ * switch through `features.learning` or `features.curation`: a literal `false`
+ * in either key turns it off, and each key is parsed on its own. (An unreadable
+ * repository file also fails the settings line closed, so commands read
+ * `KNOWLEDGE=off` from it; the hooks never read that line, and for them it
+ * narrows nothing.) The team-committed `.devflow/project.json` and the
+ * personal `.devflow/config.json` are both parsed by the shared
+ * lib/project-config.cjs, and the fold lives in
  * resolve-settings.cjs (`MEMORY=`/`LEARNING=`/`KNOWLEDGE=` on its settings
  * line); the CLI's `--status` prints the effective state only when a repo layer
  * narrows it, or an unreadable repo file closes it. No repo layer can
@@ -61,6 +67,20 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * The keys a RAW manifest may hold a machine feature under, current names first.
+ *
+ * `learning` is read under two current keys, `curation` and `learning`: the
+ * feature is being renamed, and a manifest written before the rename holds only
+ * `learning`. No precedence rule exists between the two (see
+ * {@link isMachineFeatureOn}). `memory` and `knowledge` have one current key.
+ */
+const CURRENT_KEYS: Readonly<Record<MachineFeature, readonly string[]>> = {
+  memory: ['memory'],
+  learning: ['curation', 'learning'],
+  knowledge: ['knowledge'],
+};
+
+/**
  * The pre-rename key each machine feature was stored under, where one exists:
  * `learning` was `decisions` and `knowledge` was `kb`. A manifest no
  * command has rewritten since the rename can still hold only the legacy key.
@@ -80,13 +100,23 @@ const LEGACY_KEYS: Readonly<Partial<Record<MachineFeature, string>>> = {
  * shell hooks, so the CLI's status and the runtime never disagree about the
  * same file.
  *
+ * The machine rule (issue #529), identical in every reader —
+ * this function, resolve-settings.cjs and the shell gates:
+ *   1. off when ANY current key (`curation`, `learning`) is a boolean `false`;
+ *   2. else on when any current key is a boolean `true`;
+ *   3. else, when neither current key is a boolean, the pre-rename key decides
+ *      if it is a boolean (`decisions` for learning, `kb` for knowledge);
+ *   4. else ON.
+ * A non-boolean value is ignored for that key only. A disagreeing pair
+ * therefore resolves to OFF: false wins, so a switch a user turned off never
+ * comes back on because the other spelling still says true.
+ *
  * D-LEARNING-LEGACY-DECISIONS (a sub-decision of D-FEATURES-NARROW-ONLY):
- * `learning` is read as `features.learning` when that is a boolean, else the
- * legacy `features.decisions` when THAT is a boolean, else ON — readManifest's
- * migration precedence exactly. The legacy key is otherwise honoured only once
- * some command happens to run readManifest and heal it, so a `decisions: false`
- * would keep learning running until then. queue_read_gates applies the same
- * precedence.
+ * the legacy `features.decisions` is read only when neither current key is a
+ * boolean — readManifest's migration precedence exactly. The legacy key is
+ * otherwise honoured only once some command happens to run readManifest and
+ * heal it, so a `decisions: false` would keep learning running until then.
+ * queue_read_gates applies the same precedence.
  *
  * D-KNOWLEDGE-LEGACY-KB (the same sub-decision for the other renamed key):
  * `knowledge` is read as `features.knowledge` when that is a boolean, else the
@@ -106,11 +136,12 @@ export function isMachineFeatureOn(rawManifest: unknown, feature: MachineFeature
   if (!isJsonObject(rawManifest)) return true;
   const features = rawManifest.features;
   if (!isJsonObject(features)) return true;
+  const current = CURRENT_KEYS[feature]
+    .map((key) => features[key])
+    .filter((value): value is boolean => typeof value === 'boolean');
+  if (current.length > 0) return !current.includes(false);
   const legacyKey = LEGACY_KEYS[feature];
-  const value = legacyKey !== undefined && typeof features[feature] !== 'boolean'
-    ? features[legacyKey]
-    : features[feature];
-  return value !== false;
+  return legacyKey === undefined || features[legacyKey] !== false;
 }
 
 /**

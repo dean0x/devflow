@@ -325,6 +325,57 @@ describe('a symlinked config.json is refused, never followed and never replaced'
   });
 });
 
+describe('a personal opt-out under the pre-rename key (#529, TP-13)', () => {
+  const lib = ((): ProjectConfigLib => {
+    const loaded = loadProjectConfigLib();
+    if (!loaded.ok) throw new Error(`strict parser failed to load: ${loaded.error.path}`);
+    return loaded.value;
+  })();
+
+  it('★ the merge carries features.learning and features.curation as they are — none is renamed, added or dropped', () => {
+    for (const features of [
+      { learning: false },
+      { curation: false },
+      { learning: false, curation: true },
+      { learning: true, curation: false, memory: false },
+    ]) {
+      expect(mergeManagedConfig({ reviewPublication: 'full', features }, MANAGED), JSON.stringify(features))
+        .toEqual({ ...MANAGED, features });
+    }
+  });
+
+  it('★ a managed write leaves the pre-rename key in place, and the shared parser still reads it as an opt-out', async () => {
+    seedConfig('{\n  "reviewPublication": "full",\n  "features": { "learning": false }\n}\n');
+
+    await writeManagedConfig(tmpDir, MANAGED);
+
+    const stored = readRaw();
+    expect(stored.features).toEqual({ learning: false });
+    const parsed = lib.parsePersonalBytes(readFileSync(configPath()));
+    expect(parsed).toMatchObject({
+      kind: 'parsed',
+      features: { kind: 'valid', value: { learning: { kind: 'valid', value: false }, curation: { kind: 'absent' } } },
+    });
+  });
+
+  it('★ a second managed write changes no byte of the features object', async () => {
+    seedConfig(JSON.stringify({ reviewPublication: 'full', features: { learning: false, curation: false } }));
+
+    await writeManagedConfig(tmpDir, MANAGED);
+    const first = readFileSync(configPath(), 'utf-8');
+    await writeManagedConfig(tmpDir, MANAGED);
+
+    expect(readFileSync(configPath(), 'utf-8')).toBe(first);
+    expect(readRaw().features).toEqual({ learning: false, curation: false });
+  });
+
+  it('a top-level curation or learning key is no switch: the parser reads only features.*', () => {
+    expect(lib.parsePersonalBytes(Buffer.from(JSON.stringify({ curation: false, learning: false })))).toMatchObject({
+      kind: 'parsed', features: { kind: 'absent' },
+    });
+  });
+});
+
 describe('classifyConfigBytes: the shared strict parser decides', () => {
   const lib = ((): ProjectConfigLib => {
     const loaded = loadProjectConfigLib();
