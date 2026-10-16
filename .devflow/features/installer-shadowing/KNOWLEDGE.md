@@ -5,7 +5,7 @@ description: "Use when changing installViaFileCopy, InstallReport, installAllRul
 category: architecture
 directories: [src/targets/claude-code/installer.ts, src/targets/claude-code/legacy.ts, src/cli/commands/rules.ts, src/cli/commands/skills.ts, src/core/plugins.ts, src/core/assets.ts, src/core/paths.ts, src/core/orphan-sweep.ts]
 created: 2026-07-13
-updated: 2026-10-13
+updated: 2026-10-17
 ---
 
 # Installer & Skill/Rule Shadowing
@@ -51,7 +51,7 @@ This KB is the hub for the install-to-uninstall lifecycle and owns the core pipe
 - `installer-shadowing-uninstall` — uninstall lifecycle and the managed security deny-list removal.
 - `installer-shadowing-init-seed` — init seeding, manifest snapshots, managed config write, drain, proxy preflight order, migrations.
 - `installer-shadowing-init-artifacts` — the `.gitignore` carve-out block and the CLAUDE.md import audit.
-- `installer-shadowing-wizard-flags` — prompt-IO seam, compliance and attribution wizard steps, flags CLI/TUI, the managed-shape oracle.
+- `installer-shadowing-wizard-flags` — prompt-IO seam, compliance, attribution and gate-level wizard steps, flags CLI/TUI, the managed-shape oracle.
 - `installer-shadowing-tracker-wiring` — tracker manifest group, wizard step, `devflow tracker`, Tracker agent install.
 
 ## System Context
