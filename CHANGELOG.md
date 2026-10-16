@@ -64,7 +64,7 @@ The memory worker's write is limited to its staged file. Read the items below af
 - **`/implement` splits long plans into sequential Code phases; a run with no plan stays single** ([#452](https://github.com/dean0x/devflow/issues/452)).
 - **Code agents read large files once, by range, and cap printed output** ([#452](https://github.com/dean0x/devflow/issues/452)).
 - **Polish, Harden, Evaluate and Test get the full branch diff as `FILES_CHANGED`** ([#452](https://github.com/dean0x/devflow/issues/452)).
-- **`/implement` stops when the base branch name has a character outside ASCII letters, digits and `._/+@,#-`, or is longer than 200** ([#452](https://github.com/dean0x/devflow/issues/452)). The check also covers the re-validation path. It keeps a hostile branch name out of the shell line that builds the branch diff. Git accepts some refused names, such as `café`. For them, `/implement` stops and tells the user which characters are allowed.
+- **`/implement` stops when the base branch name has a character outside ASCII letters, digits and `._/+@,#-`, or is longer than 200** ([#452](https://github.com/dean0x/devflow/issues/452)). The check also covers the re-validation path. Git accepts some refused names, such as `café`. For them, `/implement` stops and tells the user which characters are allowed.
 - **The token audit counts files written through Bash** ([#442](https://github.com/dean0x/devflow/issues/442)).
 - **The memory worker's write is limited to its staged file.** The `claude -p` run loads only your own Claude Code settings plus two permission rules, an allow rule for `.devflow/memory/WORKING-MEMORY.md.new` and a deny rule for every path under it, and a permission mode that refuses every call that no allow rule covers. Allow rules in your own Claude Code settings also apply to the run, so a user-level Edit allow rule that covers other paths covers the worker too. A folder or a link at the staged path is removed by one guarded delete of exactly that path; when it cannot be removed, the run fails and removes nothing. The worker ignores a project's or a local Claude Code settings file.
 - **Working memory needs Claude Code 2.1.269 or newer.** `devflow init` states the version at its working-memory step. On an older Claude Code the worker does not run, keeps the queue and writes one log line that says why, so working memory does not update until you update Claude Code.
@@ -1751,7 +1751,7 @@ devflow init
 
 ---
 
-[Unreleased]: https://github.com/dean0x/devflow/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/dean0x/devflow/compare/v3.7.0...HEAD
 [3.6.0]: https://github.com/dean0x/devflow/compare/v3.5.0...v3.6.0
 [3.5.0]: https://github.com/dean0x/devflow/compare/v3.4.0...v3.5.0
 [3.4.0]: https://github.com/dean0x/devflow/compare/v3.3.0...v3.4.0
