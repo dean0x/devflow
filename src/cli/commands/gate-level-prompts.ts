@@ -379,6 +379,20 @@ export async function resolveGateLevelForInit(opts: {
 // ── Summary ────────────────────────────────────────────────────────────────────
 
 /**
+ * The gate-level row of the Recommended settings note, from the level the run will
+ * record (or the stored value it keeps) and where the stored value was found. Pure.
+ *
+ * It names the level the way the post-install summary does. A level that could not be
+ * read, when this run records none, is shown as unknown, never as the default.
+ */
+export function formatGateLevelRow(level: unknown, origin: StoredGateLevelOrigin): string {
+  if (origin === 'unreadable' && level === undefined) {
+    return 'unknown (cannot be read, so init records none)';
+  }
+  return describeGateLevel(level);
+}
+
+/**
  * The gate-level lines of init's post-install summary, from the state the run acted
  * on (D-INIT-REAL-OUTCOME): the level this run recorded when the manifest reached
  * disk, else the level the manifest on disk still holds, with a warning that this

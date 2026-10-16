@@ -25,6 +25,7 @@ import {
   GATE_LEVEL_SELECT_MESSAGE,
   describeGateLevel,
   formatGateLevelCatalogue,
+  formatGateLevelRow,
   formatGateLevelSummary,
   gateLevelChoices,
   gateLevelPromptSeed,
@@ -241,6 +242,30 @@ describe('storedGateLevelFromRaw', () => {
       .toEqual({ origin: 'manifest', value: 'lean' });
     expect(storedGateLevelFromRaw({ kind: 'object', raw: rawManifest({}) }))
       .toEqual({ origin: 'manifest', value: undefined });
+  });
+});
+
+describe('formatGateLevelRow', () => {
+  it('names the default when no level is recorded', () => {
+    expect(formatGateLevelRow(undefined, 'manifest')).toBe('standard (default)');
+  });
+
+  it('names a level, whether it was chosen or kept', () => {
+    expect(formatGateLevelRow('lean', 'manifest')).toBe('lean');
+    expect(formatGateLevelRow('full', 'rejected')).toBe('full');
+    expect(formatGateLevelRow('lean', 'unreadable')).toBe('lean');
+  });
+
+  it('shows the level a malformed value reads as, never the raw value', () => {
+    const row = formatGateLevelRow('ZZ-raw-canary', 'rejected');
+    expect(row).toContain('full');
+    expect(row).not.toContain('ZZ-raw-canary');
+  });
+
+  it('shows an unreadable level as unknown, never as the default', () => {
+    const row = formatGateLevelRow(undefined, 'unreadable');
+    expect(row).toMatch(/^unknown\b/);
+    expect(row).not.toContain('standard (default)');
   });
 });
 

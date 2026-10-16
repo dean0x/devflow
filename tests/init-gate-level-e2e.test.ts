@@ -259,6 +259,33 @@ describe('init over a manifest readManifest refuses', () => {
   }, MULTI_RUN_TIMEOUT_MS);
 });
 
+describe('the Recommended settings note names the gate level', () => {
+  const ROW = (text: string): RegExp => new RegExp(`Gate level: {6}${text}`);
+
+  it('shows the default on a first install', () => {
+    expect(runInit(repo, '--recommended')).toMatch(ROW('standard \\(default\\)'));
+  }, MULTI_RUN_TIMEOUT_MS);
+
+  it('shows the level --gate-level sets', () => {
+    expect(runInit(repo, '--recommended', '--gate-level', 'lean')).toMatch(ROW('lean\\b'));
+  }, MULTI_RUN_TIMEOUT_MS);
+
+  it('shows the stored level a promptless re-init keeps', () => {
+    runInit(repo, '--recommended', '--gate-level', 'full');
+    expect(runInit(repo, '--recommended')).toMatch(ROW('full\\b'));
+  }, MULTI_RUN_TIMEOUT_MS);
+
+  it('shows an unreadable stored level as unknown, never as the default', async () => {
+    runInit(repo, '--recommended', '--gate-level', 'full');
+    await writeManifestText('{not json');
+
+    const out = runInit(repo, '--recommended');
+
+    expect(out).toMatch(ROW('unknown'));
+    expect(out).not.toMatch(ROW('standard'));
+  }, MULTI_RUN_TIMEOUT_MS);
+});
+
 describe('a personal gateLevel still wins over the machine level init sets', () => {
   it('keeps the personal key and reports it as the level in effect', async () => {
     await fs.mkdir(path.join(repo, '.devflow'), { recursive: true });

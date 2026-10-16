@@ -86,6 +86,7 @@ import {
 } from './tracker-prompts.js';
 import {
   buildClackGateLevelPrompts,
+  formatGateLevelRow,
   formatGateLevelSummary,
   resolveGateLevelForInit,
   resolveGateLevelInitOption,
@@ -1479,6 +1480,9 @@ export const initCommand = new Command('init')
         // tracker step's ONLY surface on this path — both surfaces or it is
         // invisible on one path.
         `Tracker:         ${formatTrackerSummary(trackerProvider)}`,
+        // The level this run will record, or the stored one it keeps; the summary after the
+        // install reports what the run really recorded.
+        `Gate level:      ${formatGateLevelRow(gateLevel, storedGate.origin)}`,
         `View mode:       ${readViewMode(enabledFlags)}`,
         `Claude Code flags: ${defaultFlagCount} configured`,
         `.claudeignore:   ${resolveClaudeignoreOutcome(claudeignorePresent)}`,
