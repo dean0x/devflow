@@ -8,6 +8,10 @@
  * gate-level-prompts.test.ts, which drives both wizard paths with fake prompts; a
  * spawned child here has no TTY.
  *
+ * A manifest that readManifest refuses (a missing required field, a byte-order mark, or text
+ * that is not JSON) must never cost the machine level a user chose: init keeps a level it can
+ * still read, and says so when it cannot read one.
+ *
  * These drive the REAL compiled CLI. Every spawn gets its env from the shared
  * `sandboxEnv(tmpHome)` — an allowlist with HOME pinned to a temp dir — and the
  * helper asserts that HOME is not a real home before a run can start. Requires a
@@ -54,6 +58,18 @@ function runInit(cwd: string, ...args: string[]): string {
 
 async function readFeatures(): Promise<Record<string, unknown>> {
   return (JSON.parse(await fs.readFile(manifestPath(), 'utf-8')) as { features: Record<string, unknown> }).features;
+}
+
+/** Rewrite the manifest init wrote, as a hand edit, an older devflow or a broken disk would leave it. */
+async function writeManifestText(text: string): Promise<void> {
+  await fs.writeFile(manifestPath(), text, 'utf-8');
+}
+
+/** The manifest init wrote, parsed, with `mutate` applied, as text with two-space indent. */
+async function editedManifestText(mutate: (raw: Record<string, unknown>) => void): Promise<string> {
+  const raw = JSON.parse(await fs.readFile(manifestPath(), 'utf-8')) as Record<string, unknown>;
+  mutate(raw);
+  return JSON.stringify(raw, null, 2) + '\n';
 }
 
 beforeEach(async () => {
@@ -173,6 +189,73 @@ describe('init without --gate-level, with no prompt', () => {
     runInit(repo, '--recommended', '--gate-level', 'lean');
     runInit(repo, '--reset', '--recommended');
     expect(Object.hasOwn(await readFeatures(), 'gateLevel')).toBe(false);
+  }, MULTI_RUN_TIMEOUT_MS);
+});
+
+describe('init over a manifest readManifest refuses', () => {
+  const KEPT_WARNING = /kept the stored gate level/;
+
+  it('a manifest missing a required field keeps its stored level on a promptless re-init, and warns', async () => {
+    runInit(repo, '--recommended', '--gate-level', 'full');
+    await writeManifestText(await editedManifestText(raw => { delete raw.installedAt; }));
+
+    const out = runInit(repo, '--recommended');
+
+    expect(await readFeatures()).toMatchObject({ gateLevel: 'full' });
+    expect(out).toMatch(/Gate level: full\b/);
+    expect(out).not.toContain('standard (default)');
+    expect(out.replace(/\s+/g, ' ')).toMatch(KEPT_WARNING);
+    // `devflow gates` reads the same level from the file init wrote.
+    expect(runCli(repo, 'gates', '--status').out).toContain('Machine:   full');
+  }, MULTI_RUN_TIMEOUT_MS);
+
+  it('a manifest with a leading byte-order mark keeps its stored level on a promptless re-init, and warns', async () => {
+    runInit(repo, '--recommended', '--gate-level', 'full');
+    await writeManifestText('\ufeff' + await editedManifestText(() => undefined));
+
+    const out = runInit(repo, '--recommended');
+
+    expect(await readFeatures()).toMatchObject({ gateLevel: 'full' });
+    expect(out).toMatch(/Gate level: full\b/);
+    expect(out.replace(/\s+/g, ' ')).toMatch(KEPT_WARNING);
+  }, MULTI_RUN_TIMEOUT_MS);
+
+  it('--reset still removes a level stored in a refused manifest, and does not claim to keep it', async () => {
+    runInit(repo, '--recommended', '--gate-level', 'full');
+    await writeManifestText(await editedManifestText(raw => { delete raw.installedAt; }));
+
+    const out = runInit(repo, '--reset', '--recommended');
+
+    expect(Object.hasOwn(await readFeatures(), 'gateLevel')).toBe(false);
+    expect(out.replace(/\s+/g, ' ')).not.toMatch(KEPT_WARNING);
+  }, MULTI_RUN_TIMEOUT_MS);
+
+  it('--gate-level sets the level over a manifest that is not JSON', async () => {
+    runInit(repo, '--recommended');
+    await writeManifestText('{not json');
+
+    const out = runInit(repo, '--recommended', '--gate-level', 'lean');
+
+    expect(await readFeatures()).toMatchObject({ gateLevel: 'lean' });
+    expect(out).toMatch(/Gate level: lean\b/);
+    expect(out).not.toContain('could not be read');
+  }, MULTI_RUN_TIMEOUT_MS);
+
+  it('a promptless re-init over a manifest that is not JSON writes no level, and says how to set it again', async () => {
+    runInit(repo, '--recommended', '--gate-level', 'full');
+    await writeManifestText('{not json');
+
+    const out = runInit(repo, '--recommended');
+
+    expect(Object.hasOwn(await readFeatures(), 'gateLevel')).toBe(false);
+    expect(out).not.toContain('standard (default)');
+    const flat = out.replace(/\s+/g, ' ');
+    expect(flat).toContain('stored gate level could not be read');
+    expect(flat).toContain('standard');
+    expect(flat).toContain('devflow gates --set <level>');
+    // The hint works: the manifest init wrote takes the level.
+    expect(runCli(repo, 'gates', '--set', 'lean').status).toBe(0);
+    expect(await readFeatures()).toMatchObject({ gateLevel: 'lean' });
   }, MULTI_RUN_TIMEOUT_MS);
 });
 

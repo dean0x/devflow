@@ -73,10 +73,14 @@ const VALID_LEVELS_OR = `${GATE_LEVELS.slice(0, -1).join(', ')}, or ${GATE_LEVEL
  * What `~/.devflow/manifest.json` is, for a warning:
  *   absent       no file (no warning: a machine without devflow is not a fault)
  *   readable     an object the manifest reader accepts
- *   unreadable   corrupt, over the size bound, or valid JSON the manifest reader
- *                rejects; `devflow init` will replace the file
+ *   rejected     valid JSON with a `features` object that the manifest reader
+ *                refuses (a required field is missing or mistyped, or a byte-order
+ *                mark leads); `devflow init` replaces the file and keeps the gate
+ *                level stored in it
+ *   unreadable   corrupt or over the size bound; `devflow init` replaces the file
+ *                and cannot keep a level it cannot read
  */
-export type GateManifestState = 'absent' | 'readable' | 'unreadable';
+export type GateManifestState = 'absent' | 'readable' | 'rejected' | 'unreadable';
 
 interface GateStatusBase {
   readonly manifest: GateManifestState;
@@ -140,8 +144,8 @@ function manifestState(read: GateManifestRead): GateManifestState {
   switch (read.kind) {
     case 'absent': return 'absent';
     case 'object': return 'readable';
-    case 'corrupt':
-    case 'rejected': return 'unreadable';
+    case 'rejected': return 'rejected';
+    case 'corrupt': return 'unreadable';
     default: {
       const exhaustive: never = read;
       return exhaustive;
@@ -213,8 +217,19 @@ function machineLine(machine: MachineValue): string {
 }
 
 function manifestWarning(status: GateStatus): string | null {
-  if (status.manifest !== 'unreadable') return null;
-  return `Manifest at ${status.manifestPath} cannot be read as a manifest; devflow init will replace this file.`;
+  switch (status.manifest) {
+    case 'absent':
+    case 'readable':
+      return null;
+    case 'rejected':
+      return `Manifest at ${status.manifestPath} is not a manifest devflow accepts; devflow init will replace this file and keep any gate level stored in it.`;
+    case 'unreadable':
+      return `Manifest at ${status.manifestPath} cannot be read; devflow init will replace this file and cannot keep its gate level. Set the level again with devflow gates --set <level> after init.`;
+    default: {
+      const exhaustive: never = status.manifest;
+      return exhaustive;
+    }
+  }
 }
 
 /**

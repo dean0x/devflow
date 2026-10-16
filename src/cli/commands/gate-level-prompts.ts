@@ -18,11 +18,23 @@
  *
  * The shared DI seam (PromptOutcome, WizardPromptIO, clackNote, clackSelect) is
  * defined once in prompt-io.ts and imported here, never re-declared.
+ *
+ * Init never writes a level the user did not choose. readManifest() reads a manifest
+ * it refuses as no manifest at all, yet `devflow gates` and the settings resolver
+ * still read that file's level, so init reads the raw file in that case
+ * (storedGateLevelFromRaw): a level found there is kept as stored, and a file that
+ * cannot be read at all is named as unreadable, never shown as the default.
  */
 
 import { clackNote, clackSelect, type PromptOutcome, type WizardPromptIO } from './prompt-io.js';
 import type { SummaryLine } from './install-report.js';
-import { DEFAULT_GATE_LEVEL, GATE_LEVELS, parseGateLevel, type GateLevel } from '../../core/gate-level.js';
+import {
+  DEFAULT_GATE_LEVEL,
+  GATE_LEVELS,
+  parseGateLevel,
+  type GateLevel,
+  type GateManifestRead,
+} from '../../core/gate-level.js';
 
 // ── Shared prompt content ──────────────────────────────────────────────────────
 
@@ -88,6 +100,81 @@ export function gateLevelPromptSeed(stored: unknown): GateLevel {
   if (stored === undefined) return DEFAULT_GATE_LEVEL;
   const parsed = parseGateLevel(stored);
   return parsed.ok ? parsed.value : MALFORMED_READS_AS;
+}
+
+// ── Where the stored level was found ───────────────────────────────────────────
+
+/**
+ * Where init found the stored machine gate level:
+ *
+ *   manifest    in the manifest init reads (or nowhere, on a first install or after
+ *               --reset): the seed holds it
+ *   rejected    in a manifest that readManifest() refuses, read raw: init keeps the
+ *               level as stored while it replaces that manifest
+ *   unreadable  nowhere: the manifest cannot be read at all, so what it stored is unknown
+ */
+export type StoredGateLevelOrigin = 'manifest' | 'rejected' | 'unreadable';
+
+/** The raw stored level and where it was found. `value` is `undefined` when none is recorded. */
+export interface StoredGateLevel {
+  readonly origin: StoredGateLevelOrigin;
+  readonly value: unknown;
+}
+
+/** `features.gateLevel` of a raw manifest, exactly as stored; `undefined` for an absent key. */
+function rawGateLevelOf(raw: Record<string, unknown>): unknown {
+  const features = raw.features;
+  if (typeof features !== 'object' || features === null) return undefined;
+  return Object.getOwnPropertyDescriptor(features, 'gateLevel')?.value;
+}
+
+/**
+ * Classify the stored level from the raw read of a manifest that readManifest()
+ * returned null for. Pure — the caller reads the file.
+ *
+ *   absent                 a first install: nothing stored
+ *   rejected, with a key   the key's value, raw: a malformed value or `null` passes
+ *                          through untouched, never defaulted, narrowed or healed
+ *   rejected, no key       nothing stored
+ *   corrupt                unreadable: no level can be known
+ *   object                 readManifest() would accept it, so its level is an ordinary
+ *                          stored level (a file that changed between the two reads)
+ */
+export function storedGateLevelFromRaw(read: GateManifestRead): StoredGateLevel {
+  switch (read.kind) {
+    case 'absent':
+      return { origin: 'manifest', value: undefined };
+    case 'corrupt':
+      return { origin: 'unreadable', value: undefined };
+    case 'object':
+      return { origin: 'manifest', value: rawGateLevelOf(read.raw) };
+    case 'rejected': {
+      const value = rawGateLevelOf(read.raw);
+      return { origin: value === undefined ? 'manifest' : 'rejected', value };
+    }
+    default: {
+      const exhaustive: never = read;
+      return exhaustive;
+    }
+  }
+}
+
+/** The "Current setting" lines of the prompt note, from the stored value and where it was found. */
+function currentSettingLines(stored: unknown, origin: StoredGateLevelOrigin): string {
+  switch (origin) {
+    case 'manifest':
+      return `Current setting: ${describeGateLevel(stored)}`;
+    case 'rejected':
+      return `Current setting: ${describeGateLevel(stored)}\n` +
+        'It comes from a manifest that devflow cannot use. Init replaces that manifest and keeps this level unless you choose another.';
+    case 'unreadable':
+      return 'Current setting: unknown\n' +
+        `The stored gate level cannot be read, so ${DEFAULT_GATE_LEVEL} applies until you choose a level.`;
+    default: {
+      const exhaustive: never = origin;
+      return exhaustive;
+    }
+  }
 }
 
 // ── The --gate-level boundary ──────────────────────────────────────────────────
@@ -212,7 +299,9 @@ export type GateLevelStepOutcome = GateLevelStepResolved | GateLevelStepCancelle
  *      never `p.confirm`: Enter-through must be an INFORMED keep of a named level.
  *
  * `stored` is the raw manifest value (see FeatureSeed.gateLevel): the step shows
- * and starts from it, and never narrows it.
+ * and starts from it, and never narrows it. `storedOrigin` says where it was found
+ * (default: the manifest); an unreadable level is shown as unknown, not as the default,
+ * and the select then starts on the level that applies.
  *
  * Returns:
  *   {kind:'resolved', level} — the chosen level.
@@ -224,12 +313,13 @@ export type GateLevelStepOutcome = GateLevelStepResolved | GateLevelStepCancelle
  */
 export async function runGateLevelStep(opts: {
   stored: unknown;
+  storedOrigin?: StoredGateLevelOrigin;
   prompts: GateLevelPromptIO;
 }): Promise<GateLevelStepOutcome> {
-  const { stored, prompts } = opts;
+  const { stored, storedOrigin = 'manifest', prompts } = opts;
 
   prompts.note(
-    `Current setting: ${describeGateLevel(stored)}\n\n` +
+    `${currentSettingLines(stored, storedOrigin)}\n\n` +
     'Sets how much checking /code-review, /plan and /implement apply on this\n' +
     'machine. A personal "gateLevel" in a repository\'s .devflow/config.json\n' +
     'overrides it in that repository. Change it later with\n' +
@@ -272,14 +362,15 @@ export type GateLevelInitOutcome =
 export async function resolveGateLevelForInit(opts: {
   cliLevel: GateLevel | undefined;
   stored: unknown;
+  storedOrigin?: StoredGateLevelOrigin;
   mode: 'recommended' | 'advanced';
   modePromptShown: boolean;
   isTTY: boolean;
   prompts: GateLevelPromptIO;
 }): Promise<GateLevelInitOutcome> {
-  const { cliLevel, stored, mode, modePromptShown, isTTY, prompts } = opts;
+  const { cliLevel, stored, storedOrigin, mode, modePromptShown, isTTY, prompts } = opts;
   if (shouldRunGateLevelStep({ mode, modePromptShown, isTTY, hasCliOverride: cliLevel !== undefined })) {
-    const step = await runGateLevelStep({ stored, prompts });
+    const step = await runGateLevelStep({ stored, storedOrigin, prompts });
     return step.kind === 'cancelled' ? { kind: 'cancelled' } : { kind: 'resolved', level: step.level };
   }
   return { kind: 'resolved', level: cliLevel ?? stored };
@@ -288,24 +379,49 @@ export async function resolveGateLevelForInit(opts: {
 // ── Summary ────────────────────────────────────────────────────────────────────
 
 /**
- * The gate-level line of init's post-install summary, from the state the run acted
+ * The gate-level lines of init's post-install summary, from the state the run acted
  * on (D-INIT-REAL-OUTCOME): the level this run recorded when the manifest reached
  * disk, else the level the manifest on disk still holds, with a warning that this
  * run saved nothing. Pure — the caller renders.
+ *
+ * `priorOrigin` says where the prior level was found (default: the manifest):
+ *
+ *   rejected     the level came from a manifest that was replaced; when the run
+ *                recorded that same value, a warning says init kept it
+ *   unreadable   no level could be read; a run that recorded none warns that standard
+ *                now applies and how to set the level again
  */
 export function formatGateLevelSummary(input: {
   level: unknown;
   priorLevel: unknown;
+  priorOrigin?: StoredGateLevelOrigin;
   manifestWritten: boolean;
 }): SummaryLine[] {
+  const origin = input.priorOrigin ?? 'manifest';
   if (!input.manifestWritten) {
+    const prior = origin === 'unreadable'
+      ? 'unknown (the stored gate level cannot be read)'
+      : describeGateLevel(input.priorLevel);
     return [{
       level: 'warn',
-      message: `Gate level: ${describeGateLevel(input.priorLevel)} — this run could not save the manifest, so it changed nothing`,
+      message: `Gate level: ${prior} — this run could not save the manifest, so it changed nothing`,
     }];
   }
-  return [{
+  if (origin === 'unreadable' && input.level === undefined) {
+    return [{
+      level: 'warn',
+      message: `Gate level: the stored gate level could not be read, so init recorded none and ${DEFAULT_GATE_LEVEL} applies (the machine default); set it again with devflow gates --set <level>`,
+    }];
+  }
+  const lines: SummaryLine[] = [{
     level: 'info',
     message: `Gate level: ${describeGateLevel(input.level)} — the machine default; change it with devflow gates --set <level>`,
   }];
+  if (origin === 'rejected' && input.level === input.priorLevel) {
+    lines.push({
+      level: 'warn',
+      message: 'Init kept the stored gate level while it replaced the manifest, which devflow could not use as a manifest',
+    });
+  }
+  return lines;
 }

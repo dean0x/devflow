@@ -89,8 +89,10 @@ import {
   formatGateLevelSummary,
   resolveGateLevelForInit,
   resolveGateLevelInitOption,
+  storedGateLevelFromRaw,
+  type StoredGateLevel,
 } from './gate-level-prompts.js';
-import type { GateLevel } from '../../core/gate-level.js';
+import { readGateManifest, type GateLevel } from '../../core/gate-level.js';
 import {
   shouldRunAttributionStep,
   runAttributionStep,
@@ -986,6 +988,16 @@ export const initCommand = new Command('init')
     try {
       existingManifest = await readManifest(devflowDir, { onWarning: (message) => p.log.warn(message) });
     } catch { /* unreadable manifest — seeded as a fresh install */ }
+    // The stored machine gate level, and where it was found. readManifest() reads a manifest it
+    // refuses (a missing required field, a byte-order mark, unparseable JSON) as no manifest, so
+    // the seed holds no level for it, yet `devflow gates` and the settings resolver still read
+    // that file's level. Init never writes a level the user did not choose, so when the manifest
+    // is refused (and --reset did not ask to forget it) the raw file decides: a level found in it
+    // is kept as stored, and a file that cannot be read at all is carried as "unreadable" and
+    // reported. This is an init-side override; the seed itself still comes from the manifest alone.
+    const storedGate: StoredGateLevel = existingManifest !== null || options.reset
+      ? { origin: 'manifest', value: existingManifest?.features.gateLevel }
+      : storedGateLevelFromRaw(await readGateManifest(devflowDir));
     // D-INIT-NOT-HOME (same-location.ts): a repository rooted at HOME is no
     // project, so init treats it as no repository — no .devflow/config.json (that
     // would be the machine root's), no .claudeignore, no .gitignore block, no
@@ -1245,9 +1257,10 @@ export const initCommand = new Command('init')
     const trackerServers = seed.features.tracker.servers;
     // The machine gate level (features.gateLevel), shared with `devflow gates --set`. The seed holds
     // it raw: `undefined` only for an absent key or a --reset seed, a malformed value or `null` as
-    // stored. It stays raw unless --gate-level or the wizard step sets it, so a plain init never
+    // stored. A manifest readManifest() refuses carries its raw level instead (`storedGate`, read
+    // above). It stays raw unless --gate-level or the wizard step sets it, so a plain init never
     // defaults, narrows or heals it; the full manifest write below then leaves an absent key out.
-    let gateLevel: unknown = seed.features.gateLevel;
+    let gateLevel: unknown = storedGate.origin === 'rejected' ? storedGate.value : seed.features.gateLevel;
     let enabledFlags: FlagsRecord = { ...seed.flags };
     // viewModeExplicit: true when --reset is passed; signals resolveFinalViewMode to let the
     // seed-time view-mode win over an externally-set value in settings.json.
@@ -1318,6 +1331,7 @@ export const initCommand = new Command('init')
       const outcome = await resolveGateLevelForInit({
         cliLevel: cliGateLevel,
         stored: gateLevel,
+        storedOrigin: storedGate.origin,
         mode,
         modePromptShown,
         isTTY: process.stdin.isTTY,
@@ -2820,7 +2834,8 @@ export const initCommand = new Command('init')
     // The gate level this run recorded, from the manifest the run wrote (D-INIT-REAL-OUTCOME).
     logSummaryLines(formatGateLevelSummary({
       level: gateLevel,
-      priorLevel: existingManifest?.features.gateLevel,
+      priorLevel: storedGate.value,
+      priorOrigin: storedGate.origin,
       manifestWritten: trackerLifecycle.manifestWritten,
     }));
 
