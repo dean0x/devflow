@@ -528,7 +528,7 @@ describe('the script under process.execPath (AC-6, AC-7)', SPAWN_BUDGET, () => {
     expect(r.stdout).toBe(`BASE_REF=${s.shas.S1} TIP=local FETCH=failed REASON=no-remote-branch NOTE=none\n`)
   })
 
-  it('answers every refusal with the one stop line and never writes a name or creates a file', () => {
+  it('prints only the refusal line for a name outside the allowed set', () => {
     const w = newWorld()
     const marker = path.join(w.root, 'created-by-name')
     const refused = [`$(touch ${marker})`, 'zz-marker.lock', 'zz marker', '-zz-marker', 'zz-marker..x']
