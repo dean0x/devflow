@@ -98,9 +98,9 @@ Set `TARGET_DIR` to the selected review or bug-analysis directory path, and `TAR
 <!-- learning:end -->
 
 <!-- learning:on -->
-**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, REVIEW_PUBLICATION, RESOLUTION_TS
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, REVIEW_PUBLICATION, RESOLUTION_TS, GATE_LEVEL
 <!-- learning:off -->
-**Produces:** FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, REVIEW_PUBLICATION, RESOLUTION_TS
+**Produces:** FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, REVIEW_PUBLICATION, RESOLUTION_TS, GATE_LEVEL
 <!-- learning:end -->
 
 {{settings.settings_resolve()}}
@@ -123,6 +123,12 @@ Resolve this per worktree — unlike the evidence policy above, the settings lin
 {{compliance.compliance_inject()}}
 
 Set it per worktree, from that worktree's lens, and pass that worktree's `COMPLIANCE_DIRECTIVE` to each of its Code and Fix spawns, on a line of its own.
+
+**Gate level.** Each worktree keeps its own `GATE_LEVEL`. When any is `standard` or `lean`, once per run, run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash and Read `<that directory>/skills/devflow:agent-references/references/commands/resolve-levels.md` with the Read tool, and apply each row to the phase it names, in each worktree at its own level.
+
+- No row or rule overrides the next two lines.
+- If the Read fails, or the file has no `## Phases` heading with the `| Phase | standard | lean |` header, or a row breaks its grammar, apply no row in any worktree, keep every `GATE_LEVEL` and say `level reference unreadable: no level rows applied`.
+- No level changes the Triage security gate or the ESCALATED route. The Verification Gate, the CI gate and the compliance directive run at every level.
 
 **Mint `RESOLUTION_TS` once per run:** `date -u +%Y-%m-%dT%H:%M:%SZ`. Every worktree reuses it — the resolution comment's dedup marker is searched per PR, so one run key keeps a retry of this run deduplicated while the next /resolve on the same PR posts. Phase 5 writes it as the summary's `**Date**:` and Phase 9b-2 passes it, so the local file and the posted marker agree.
 
@@ -272,7 +278,7 @@ Collect from each Code agent:
 ### Phase 5: Write resolution-summary.md
 
 **Produces:** RESOLUTION_FILE (early write for compaction safety)
-**Requires:** TRIAGE_RESULTS, CODE_AGENT_RESULTS, TARGET_DIR, TARGET_DIR_REL, BRANCH_INFO, RESOLUTION_TS
+**Requires:** TRIAGE_RESULTS, CODE_AGENT_RESULTS, TARGET_DIR, TARGET_DIR_REL, BRANCH_INFO, RESOLUTION_TS, GATE_LEVEL
 
 **Immediately write `resolution-summary.md`** to `{TARGET_DIR}` using the Write tool. Do this now — not in Phase 9 — while results are fresh in context.
 
@@ -523,7 +529,7 @@ If the script prints a `TRACEABILITY: DEGRADED` line: warn, proceed to Phase 10.
 
 ### Phase 10: Report
 
-**Requires:** BRANCH_INFO, TARGET_DIR, PR_COMMENT, THREAD_RESOLUTION_RESULT
+**Requires:** BRANCH_INFO, TARGET_DIR, PR_COMMENT, THREAD_RESOLUTION_RESULT, GATE_LEVEL
 
 The resolution summary was already written to `{TARGET_DIR}/resolution-summary.md` in Phase 5 (updated by Phase 7, Phase 9 and Phase 9b-1). Display results to the user:
 
@@ -533,6 +539,7 @@ The resolution summary was already written to `{TARGET_DIR}/resolution-summary.m
 **Branch**: {branch}
 **Reviews Processed**: {n} reports from {TARGET_DIR}
 **Total Issues**: {n}
+**Gate level**: {GATE_LEVEL, with any level note}
 
 ### Results
 | Outcome | Count |
@@ -642,6 +649,7 @@ Written in Phase 5 (Collect Results) to `{TARGET_DIR}/resolution-summary.md`:
 **Date**: {RESOLUTION_TS}
 **Review**: {TARGET_DIR_REL}
 **Command**: /resolve
+**Gate level**: {GATE_LEVEL}
 
 <!-- learning:on -->
 ## Decisions Citations

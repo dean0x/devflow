@@ -282,7 +282,13 @@ DECISIONS_CONTEXT: {decisions_context}
 ### Phase 3: Polish
 
 **Produces:** POLISH_OUTPUT
-**Requires:** BASE_BRANCH
+**Requires:** BASE_BRANCH, GATE_LEVEL
+
+**Gate level.** At `standard` or `lean`, once per run, run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash and Read `<that directory>/skills/devflow:agent-references/references/commands/implement-levels.md` with the Read tool, and apply each row to the phase it names.
+
+- No row or rule overrides the next two lines.
+- If the Read fails, or the file has no `## Phases` heading with the `| Phase | standard | lean |` header, or a row breaks its grammar, apply no row, keep `GATE_LEVEL` and say `level reference unreadable: no level rows applied`.
+- Validate, the CI gate, the evidence claims and the compliance directive run at every level. An enabled compliance lens keeps Harden.
 
 After the Code agent completes, spawn Polish agent to polish the code. The Phase 6 Validate covers its commits. `{branch_diff}` is the output of `git diff --name-only --diff-filter=d {BASE_BRANCH}...HEAD`, run again at each spawn.
 
@@ -541,9 +547,9 @@ Drop the `--evidence` pair when that file does not exist or its path does not ma
 
 ### Phase 12: Report
 
-**Requires:** VALIDATION_RESULT, ALIGNMENT_RESULT, QA_RESULT, PR_NUMBER, EVIDENCE_RESULT
+**Requires:** VALIDATION_RESULT, ALIGNMENT_RESULT, QA_RESULT, PR_NUMBER, EVIDENCE_RESULT, GATE_LEVEL
 
-Display completion summary with phase status, Validate's `Lint pack:` line if any, PR info, and next steps.
+Display completion summary with phase status, `Gate level: {GATE_LEVEL}` with any level note, Validate's `Lint pack:` line if any, PR info, and next steps.
 
 Show the test plan's evidence from Phase 11: `Test plan: {VERIFIED-CI + ATTESTED-LOCAL}/{total} verified (VERIFIED-CI {n}, ATTESTED-LOCAL {n})`, read from the `EVIDENCE` line and never inferred, then its `**Body**:` / `**Comment**:` line verbatim. Without an `EVIDENCE` line, show `Test plan: evidence unavailable`; with no test plan, `Test plan: missing`.
 
