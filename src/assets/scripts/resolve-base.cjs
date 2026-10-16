@@ -651,8 +651,9 @@ function main(argv, deps) {
 
 /**
  * The ONLY stdout write and exit-code assignment. A write that fails (a closed pipe, an
- * unwritable descriptor) sets exit 3, whether it fails synchronously, through the write
- * callback, or as a stream 'error' event.
+ * unwritable descriptor, a stdout that cannot be opened) sets exit 3, whether it fails
+ * synchronously, through the write callback, or as a stream 'error' event. Nothing is
+ * written to stderr on any of these paths.
  *
  * @param {{ code: number, line: string }} outcome
  * @returns {void}
@@ -660,8 +661,8 @@ function main(argv, deps) {
 function emit(outcome) {
   process.exitCode = outcome.code;
   const writeFailed = () => { process.exitCode = 3; };
-  process.stdout.on('error', writeFailed);
   try {
+    process.stdout.on('error', writeFailed);
     process.stdout.write(outcome.line + '\n', err => { if (err) writeFailed(); });
   } catch (_) {
     writeFailed();

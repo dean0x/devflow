@@ -540,6 +540,17 @@ describe('the script under process.execPath (AC-6, AC-7)', SPAWN_BUDGET, () => {
     expect(runScript(w, ['local', 'main'], { PATH: path.join(w.root, 'no-such-dir') }))
       .toEqual({ stdout: `${RB.FALLBACK_LINE}\n`, stderr: '', status: 0 })
   })
+
+  it('sets exit 3 and writes nothing to stderr when stdout cannot be opened', () => {
+    const dir = fs.mkdtempSync(path.join(tmp, 'no-stdout-'))
+    const preload = path.join(dir, 'stdout-unavailable.cjs')
+    fs.writeFileSync(preload, "Object.defineProperty(process, 'stdout', { configurable: true, get() { throw new Error('stdout unavailable') } })\n")
+    // the usage path makes no git call, so the only failure is the stdout one
+    const r = spawnSync(process.execPath, ['--require', preload, RESOLVE_BASE_SCRIPT, 'local'], {
+      cwd: dir, env: env0(dir), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000,
+    })
+    expect({ stderr: r.stderr, status: r.status }).toEqual({ stderr: '', status: 3 })
+  })
 })
 
 // ---------------------------------------------------------------------------
