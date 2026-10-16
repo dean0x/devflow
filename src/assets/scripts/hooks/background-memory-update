@@ -27,6 +27,8 @@
 #               are correctly separated by the lock boundary.
 # User-only:    exits without an LLM run (no fabrication) and leaves the queue in place
 #               for the next run (D-QUEUE-NO-ORPHAN-DELETE)
+# No parser:    neither jq nor node on PATH → exits with no LLM run; the queue and any .processing batch are left in place
+# Parser fails: jq or node exits non-zero while it reads the queue or the batch → exits with no LLM run; the turns are kept
 
 set -e
 
@@ -112,6 +114,12 @@ finish_run() {
   if [ "$LOCK_HELD" = "true" ]; then rmdir "$LOCK_DIR" 2>/dev/null || true; fi
 }
 trap finish_run EXIT
+
+# No JSON parser: stop before any step reads or moves the queue or the batch (#523).
+if [ "${_JSON_AVAILABLE:-false}" != "true" ]; then
+  log "SKIP: neither jq nor node on PATH; the queue is kept for the next run; no LLM run"
+  exit 0
+fi
 
 # --- Resolve paths ---
 # Anchor .devflow/ to the project root (prevents a stray nested .devflow/ when the
@@ -417,8 +425,6 @@ fi
 # A qa row (captured Q&A pair) counts as content-bearing here too — it carries
 # the same synthesis-worthy signal as an assistant turn (AC-F10). This check
 # and the TURNS_TEXT extraction loop below must agree on that.
-# When neither jq nor node is available (_JSON_AVAILABLE=false) we skip the check
-# and allow the run to proceed — conservative: better to attempt than to skip blindly.
 #
 # D-QUEUE-NO-ORPHAN-DELETE: the queue is never deleted here. Claude Code runs a
 # Stop event's hooks in parallel, so this worker can read the queue after
@@ -426,9 +432,13 @@ fi
 # assistant row; deleting it then loses that turn's prompt. Leaving it costs
 # nothing: the run is still skipped, the next run takes the whole turn once the
 # assistant row lands, and queue-append caps the file (200 -> newest 100 lines).
-if [ ! -f "$PROCESSING_FILE" ] && [ -f "$QUEUE_FILE" ] && [ -s "$QUEUE_FILE" ] && [ "$_JSON_AVAILABLE" = "true" ]; then
+if [ ! -f "$PROCESSING_FILE" ] && [ -f "$QUEUE_FILE" ] && [ -s "$QUEUE_FILE" ]; then
+  # A parser that exits non-zero has not said that the queue holds no turn, so the status is
+  # read from the parser itself (no pipe after it) and the queue is kept as it is.
+  _PARSER_RC=0
   if [ "$_HAS_JQ" = "true" ]; then
-    _HAS_CONTENT=$(jq -r 'select(.role=="assistant" or .role=="qa") | .role' "$QUEUE_FILE" 2>/dev/null | head -1 || echo "")
+    _HAS_CONTENT=$(jq -R -r '(fromjson | select(.role=="assistant" or .role=="qa") | .role)?' "$QUEUE_FILE" 2>/dev/null) || _PARSER_RC=$?
+    _HAS_CONTENT="${_HAS_CONTENT%%$'\n'*}"
   else
     # SECURITY: pass path via argv, never interpolate into node -e source (avoids shell injection
     # for repo paths containing quotes or special characters)
@@ -438,7 +448,11 @@ if [ ! -f "$PROCESSING_FILE" ] && [ -f "$QUEUE_FILE" ] && [ -s "$QUEUE_FILE" ] &
       for (const l of lines) {
         try { const o = JSON.parse(l); if (o.role === "assistant" || o.role === "qa") { process.stdout.write(o.role); break; } } catch {}
       }
-    ' "$QUEUE_FILE" 2>/dev/null || echo "")
+    ' "$QUEUE_FILE" 2>/dev/null) || _PARSER_RC=$?
+  fi
+  if [ "$_PARSER_RC" -ne 0 ]; then
+    log "SKIP: the JSON parser exited $_PARSER_RC on the queue; the queue is kept for the next run; no LLM run"
+    exit 0
   fi
   if [ -z "$_HAS_CONTENT" ]; then
     log "User-only queue (no assistant/qa turn) — leaving it for the next run"
@@ -446,14 +460,29 @@ if [ ! -f "$PROCESSING_FILE" ] && [ -f "$QUEUE_FILE" ] && [ -s "$QUEUE_FILE" ] &
   fi
 fi
 
+# Succeeds when the file is not empty and its last byte is not a line break (a row cut off
+# before its break). The command substitution drops a trailing line break, so only a last
+# byte of another kind is left in it.
+ends_without_newline() {
+  [ -s "$1" ] && [ -n "$(tail -c 1 "$1" 2>/dev/null)" ]
+}
+
 # --- Claim queue atomically (D56c contract: .pending-turns.processing recovered at SessionStart) ---
 # If a leftover .processing exists from a previous crash, merge new queue entries into it.
 if [ -f "$PROCESSING_FILE" ]; then
   log "Found leftover .processing from previous crash — merging"
   if [ -f "$QUEUE_FILE" ]; then
-    cat "$QUEUE_FILE" >> "$PROCESSING_FILE" 2>/dev/null || true
-    rm -f "$QUEUE_FILE" 2>/dev/null || true
-    log "Merged new queue entries into recovery batch"
+    # The queue is removed only after its rows are in the batch. A batch whose last row has
+    # no line break first gets one, so the first queue row does not run into that row and
+    # become one malformed line that the parser drops. A failed append leaves the queue for
+    # the next run; an append that stopped part-way may repeat rows then, and a line break
+    # added before a failed append only leaves a blank line, which the parser ignores.
+    if { ! ends_without_newline "$PROCESSING_FILE" || printf '\n' >> "$PROCESSING_FILE"; } 2>/dev/null && cat "$QUEUE_FILE" >> "$PROCESSING_FILE" 2>/dev/null; then
+      rm -f "$QUEUE_FILE" 2>/dev/null || true
+      log "Merged new queue entries into recovery batch"
+    else
+      log "Could not append the queue to the recovery batch — the queue is kept for the next run"
+    fi
   fi
   # Cap to prevent unbounded growth
   PROC_OVERFLOW_CAP=200    # truncate when processing file exceeds this many lines
@@ -489,6 +518,11 @@ fi
 touch "$PROCESSING_FILE" 2>/dev/null || true
 
 TOTAL_LINES=$(wc -l < "$PROCESSING_FILE" | tr -d ' ')
+# wc -l counts line breaks, so a last row with no break is not in its count. Count it, so a
+# batch of one such row is a batch with a row, and only a batch with no byte is empty.
+if ends_without_newline "$PROCESSING_FILE"; then
+  TOTAL_LINES=$(( TOTAL_LINES + 1 ))
+fi
 log "Processing $TOTAL_LINES queued entries"
 
 if [ "$TOTAL_LINES" -eq 0 ]; then
@@ -510,24 +544,41 @@ else
 fi
 
 # Single-pass extraction: role + content as TSV (newlines collapsed)
-# When neither jq nor node is available, EXTRACTED stays empty and TURN_COUNT will be 0 → early exit.
+# Each line is parsed alone (jq -R with fromjson, node per line): a malformed line drops only that line.
+# A row cut off before its line break runs into the next row, so the two are one malformed line (#528).
+# Both parsers emit a row only when its role is user, assistant or qa and its content is a
+# string (or absent), so a line that is JSON but no turn is a skipped line on either backend.
+# A parser that exits non-zero has read nothing it can vouch for: the batch is kept, with the
+# queue merged into it, and no LLM runs. Exit 0 with no row still means "no readable turn".
+_PARSER_RC=0
 if [ "$_HAS_JQ" = "true" ]; then
-  EXTRACTED=$(printf '%s\n' "$ENTRIES" | jq -r '(.role // "") + "\t" + ((.content // "") | gsub("\n"; " "))' 2>/dev/null || echo "")
-elif [ "$_HAS_NODE" = "true" ]; then
+  EXTRACTED=$(printf '%s\n' "$ENTRIES" | jq -R -r '(fromjson | select(.role=="user" or .role=="assistant" or .role=="qa") | .role + "\t" + ((.content // "") | split("\n") | join(" ")))?' 2>/dev/null) || _PARSER_RC=$?
+else
   EXTRACTED=$(printf '%s\n' "$ENTRIES" | node -e '
     const lines = require("fs").readFileSync("/dev/stdin","utf8").split("\n");
     for (const line of lines) {
       if (!line.trim()) continue;
       try {
         const obj = JSON.parse(line);
-        const role = obj.role || "";
-        const content = (obj.content || "").replace(/\n/g, " ");
-        process.stdout.write(role + "\t" + content + "\n");
+        const role = obj === null ? undefined : obj.role;
+        if (role !== "user" && role !== "assistant" && role !== "qa") continue;
+        const content = obj.content == null || obj.content === false ? "" : obj.content;
+        if (typeof content !== "string") continue;
+        process.stdout.write(role + "\t" + content.replace(/\n/g, " ") + "\n");
       } catch {}
     }
-  ' 2>/dev/null || echo "")
-else
-  EXTRACTED=""
+  ' 2>/dev/null) || _PARSER_RC=$?
+fi
+if [ "$_PARSER_RC" -ne 0 ]; then
+  log "SKIP: the JSON parser exited $_PARSER_RC on the batch; the batch is kept for the next run; no LLM run"
+  exit 0
+fi
+
+_IN_LINES=$(printf '%s\n' "$ENTRIES" | LC_ALL=C grep -c '[^[:space:]]' || true)
+_OUT_LINES=$(printf '%s\n' "$EXTRACTED" | LC_ALL=C grep -c . || true)
+_SKIPPED=$(( ${_IN_LINES:-0} - ${_OUT_LINES:-0} ))
+if [ "$_SKIPPED" -gt 0 ]; then
+  log "Skipped $_SKIPPED queue line(s) that hold no readable turn"
 fi
 
 TURNS_TEXT=""
@@ -771,7 +822,7 @@ MEMORY_EFFORT_CHARS="abcdefghijklmnopqrstuvwxyz"
 # the `x` when the file, the field or a string there is missing. Always returns 0.
 memory_agent_field() {
   local _file="$HOME/.devflow/agent-models.json"
-  if [ "$_JSON_AVAILABLE" = "true" ] && [ -f "$_file" ]; then
+  if [ -f "$_file" ]; then
     json_string_field_file "$_file" "agents.memory.$1" 2>/dev/null || true
   fi
   printf x

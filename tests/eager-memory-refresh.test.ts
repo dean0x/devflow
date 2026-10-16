@@ -130,68 +130,55 @@ function workerLogPath(projectDir: string, homeDir: string): string {
   return path.join(homeDir, '.devflow', 'logs', slug, '.background-memory-update.log');
 }
 
-/**
- * Build a symlink-farm directory containing all required system tools EXCEPT jq and node,
- * suitable for constructing a PATH where _JSON_AVAILABLE=false in json-parse.
- *
- * This is necessary because on macOS /usr/bin/jq exists and cannot be shadowed by a
- * non-executable file — command -v skips non-executables but still finds /usr/bin/jq.
- * A symlink farm that omits jq and node is the only portable-reliable approach.
- */
-function buildNoJsonParsePath(tmpBase: string): string {
-  const farmDir = path.join(tmpBase, 'nojson-bin');
-  fs.mkdirSync(farmDir, { recursive: true });
-  // Tools sourced helpers and the worker actually call (from /usr/bin since /bin lacks them)
-  const usrBinTools = [
-    'wc', 'head', 'tail', 'tr', 'touch', 'stat', 'sed', 'cut',
-    'nohup', 'git', 'find', 'grep', 'mktemp', 'dirname', 'cksum',
-  ];
-  for (const t of usrBinTools) {
-    const src = `/usr/bin/${t}`;
-    const dst = path.join(farmDir, t);
-    if (fs.existsSync(src) && !fs.existsSync(dst)) {
-      try { fs.symlinkSync(src, dst); } catch { /* skip if already exists */ }
-    }
-  }
-  // /bin provides: bash, cat, chmod, cp, date, echo, kill, ls, mkdir, mv, rm, rmdir, sleep
-  return `${farmDir}:/bin`;
-}
+/** Tool farms made by `buildToolFarm`; the top-level afterEach below removes them. */
+const toolFarms: string[] = [];
+
+afterEach(() => {
+  for (const farm of toolFarms.splice(0)) fs.rmSync(farm, { recursive: true, force: true });
+});
+
+/** Tools the worker and its sourced helpers call. None of them is a JSON parser. */
+const FARM_TOOLS = [
+  // /usr/bin on macOS; /usr/bin or /bin on Linux
+  'wc', 'head', 'tail', 'tr', 'touch', 'stat', 'sed', 'cut',
+  'nohup', 'git', 'find', 'grep', 'mktemp', 'dirname', 'cksum',
+  // /bin on macOS; /usr/bin or /bin on Linux
+  'bash', 'cat', 'chmod', 'cp', 'date', 'echo', 'kill', 'ls',
+  'mkdir', 'mv', 'rm', 'rmdir', 'sleep', 'printf',
+] as const;
 
 /**
- * Build a symlink-farm directory containing all tools the worker and its sourced helpers
- * need, EXCEPT cksum. Setting PATH to only this directory makes `command -v cksum` fail
- * deterministically on macOS and Linux, triggering the worker's startup assert.
+ * Build a symlink-farm directory with the tools the worker and its sourced helpers need,
+ * and nothing else: no jq and no node, unless `extra` adds them. A test PATH made of this
+ * directory has no JSON parser, which makes `_JSON_AVAILABLE` false in json-parse.
  *
- * Uses an additive farm (not subtractive PATH filtering): Linux /bin carries cksum, so
- * appending /bin to PATH always re-introduces it. Instead we symlink every needed tool
- * from /usr/bin or /bin (whichever exists on the current platform) but never cksum.
+ * The farm is additive (not a PATH with entries filtered out). A bare `/bin` or `/usr/bin`
+ * on the PATH brings jq back on ubuntu and macOS, and a non-executable file cannot shadow
+ * it: `command -v` skips it but still finds the real one. So no `/bin` follows the farm.
+ *
+ * `omit` names tools to leave out (`['cksum']` for the startup assert). `extra` maps a tool
+ * name to the absolute path it links to (`{ node: process.execPath }` for the node backend).
+ * Each tool links from /usr/bin, else /bin. The farm is removed in the afterEach above.
  */
-function buildNoCksumPath(tmpBase: string): string {
-  const farmDir = fs.mkdtempSync(path.join(tmpBase, 'emr-s25-nocksum-'));
-  // All tools the worker + sourced helpers call before (and after) the cksum assert.
-  // On Linux many /bin entries are symlinks into /usr/bin; we probe both so the farm
-  // works on macOS (/usr/bin-centric) and Linux (/bin or /usr/bin).
-  const tools = [
-    // /usr/bin tools on macOS; present in /usr/bin or /bin on Linux
-    'wc', 'head', 'tail', 'tr', 'touch', 'stat', 'sed', 'cut',
-    'nohup', 'git', 'find', 'grep', 'mktemp', 'dirname',
-    // /bin tools on macOS; also /usr/bin or /bin on Linux
-    'bash', 'cat', 'chmod', 'cp', 'date', 'echo', 'kill', 'ls',
-    'mkdir', 'mv', 'rm', 'rmdir', 'sleep',
-    // 'cksum' deliberately absent — startup assert must fire
-  ];
-  for (const t of tools) {
-    const dst = path.join(farmDir, t);
-    if (fs.existsSync(dst)) continue;
+function buildToolFarm(
+  omit: readonly string[] = [],
+  extra: Readonly<Record<string, string>> = {},
+): string {
+  const farmDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-farm-'));
+  toolFarms.push(farmDir);
+  for (const tool of FARM_TOOLS) {
+    if (omit.includes(tool)) continue;
     for (const prefix of ['/usr/bin', '/bin']) {
-      const src = `${prefix}/${t}`;
+      const src = `${prefix}/${tool}`;
       if (fs.existsSync(src)) {
-        try { fs.symlinkSync(src, dst); } catch { /* skip already-exists */ }
+        fs.symlinkSync(src, path.join(farmDir, tool));
         break;
       }
     }
   }
-  // No trailing /bin — the whole point is that cksum is not reachable
+  for (const [tool, target] of Object.entries(extra)) {
+    fs.symlinkSync(target, path.join(farmDir, tool));
+  }
   return farmDir;
 }
 
@@ -1333,45 +1320,47 @@ describe('S16: queue-claim lost-race — mv failure takes SKIP path, queue prese
 });
 
 // =============================================================================
-// S17 — Degraded path: neither jq nor node available (_JSON_AVAILABLE=false)
+// S17 — No JSON parser: neither jq nor node is on the worker's PATH (#523)
 //
-// When both jq and node are absent from PATH, json-parse sets _JSON_AVAILABLE=false.
-// The worker then:
-//   (1) passes the `command -v claude` binary gate (fake claude shim is on PATH)
-//   (2) skips the orphan-only guard (conservative: it cannot tell a user-only queue without JSON)
-//   (3) claims the queue (mv to .processing)
-//   (4) attempts degraded shell extraction (EXTRACTED="" on macOS BSD tools,
-//       may extract partial data on Linux GNU tools)
+// json-parse sets _JSON_AVAILABLE=false when it finds neither. The worker then
+// stops directly after its exit trap is set: it logs SKIP, writes the skip Run line and
+// exits 0. It reads, claims and merges nothing, so the queue and any leftover
+// .processing batch stay byte for byte as they were, a lock that was there stays as it
+// was (a stale one is not broken), and claude is never called (the version probe is a
+// call too).
 //
-// Two platform-dependent conservative exit paths — BOTH are safe:
-//   Path A (macOS/BSD grep+sed):  EXTRACTED="" → TURN_COUNT=0 → logs
-//           "No parseable turns — skipping" → removes .processing → exit 0
-//   Path B (Linux/GNU grep+sed):  EXTRACTED non-empty → TURN_COUNT>0 → invokes
-//           no-op fake claude → verification fails → logs
-//           "FAIL: verification failed — leaving .processing for recovery" → exit 0
-//
-// The platform-independent SAFETY CONTRACT (asserted below):
-//   - Worker passed the binary gate (not a SKIP exit)
-//   - No WORKING-MEMORY.md written regardless of extraction result
-//   - Worker exited 0 (conservative, no crash)
-//   - Log contains at least one known conservative-exit marker
-//
-// A fake claude shim is prepended so `command -v claude` succeeds. Queue has
-// user+assistant turns so the orphan guard would NOT exit early if it ran.
-// Behavioral coverage for degraded/edge paths.
+// The PATH is a tool farm (buildToolFarm): a bare /bin on the PATH finds jq on ubuntu.
+// The test asserts that the full PATH resolves neither jq nor node, so the case runs
+// without a parser on any machine. CI runs it twice: on ubuntu in build-and-test, and on
+// macOS under bash 3.2 in the macos-bash32-hooks job (its memory worker parser step).
 // =============================================================================
-describe('S17: degraded path — no jq + no node → conservative exit, no memory write', () => {
+describe('S17: no jq and no node → SKIP, the queue and the batch are kept, claude is never called (#523)', () => {
   let projectDir: string;
   let homeDir: string;
   let shimDir: string;
+  let memoryDir: string;
+  let queueFile: string;
+  let processingFile: string;
+  let lockDir: string;
+  let lockMtimeMs: number;
 
   beforeEach(() => {
     projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s17-'));
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s17-home-'));
     shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s17-shim-'));
-    fs.mkdirSync(path.join(projectDir, '.devflow', 'memory'), { recursive: true });
+    memoryDir = path.join(projectDir, '.devflow', 'memory');
+    queueFile = path.join(memoryDir, '.pending-turns.jsonl');
+    processingFile = path.join(memoryDir, '.pending-turns.processing');
+    fs.mkdirSync(memoryDir, { recursive: true });
     fs.mkdirSync(path.join(projectDir, '.devflow', 'dream'), { recursive: true });
     initGitRepo(projectDir);
+    seedQueue(projectDir);
+    // A stale lock (older than the worker's 300 s threshold). A run that got past the
+    // no-parser stop would break it, and the exit trap would never restore it.
+    lockDir = path.join(memoryDir, '.working-memory.lock');
+    fs.mkdirSync(lockDir);
+    backdateMtime(lockDir, 600);
+    lockMtimeMs = fs.statSync(lockDir).mtimeMs;
   });
 
   afterEach(() => {
@@ -1380,62 +1369,61 @@ describe('S17: degraded path — no jq + no node → conservative exit, no memor
     fs.rmSync(shimDir, { recursive: true, force: true });
   });
 
-  it('no jq/node: worker passes binary gate, exits conservatively with no memory write', () => {
-    const memFile   = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
-    const queueFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl');
-
-    // Seed a queue with BOTH user and assistant turns.
-    // This ensures the orphan guard (which is SKIPPED in degraded mode) would not have fired —
-    // any conservative exit is driven by the degraded JSON path, not the orphan-only guard.
-    const ts = Math.floor(Date.now() / 1000);
-    fs.writeFileSync(
-      queueFile,
-      [
-        JSON.stringify({ role: 'user',      content: 'do something', ts }),
-        JSON.stringify({ role: 'assistant', content: 'done',         ts: ts + 1 }),
-      ].join('\n') + '\n'
-    );
-
-    // Fake claude shim that exits 0 — placed in shimDir so `command -v claude` succeeds.
-    // The binary gate passes, so the worker enters the degraded JSON extraction path.
+  /**
+   * Run the worker on a PATH that resolves a fake claude and no JSON parser. The fake claude
+   * uses builtins only and records every call, `--version` included.
+   */
+  function runWithoutParser(): { exitCode: number; log: string } {
     const claudeBin = path.join(shimDir, 'claude');
-    writeFakeExecutable(claudeBin, answersVersion('#!/bin/bash\nexit 0\n'));
+    writeFakeExecutable(claudeBin, `#!/bin/bash\n: > "${shimDir}/claude-called"\nexit 0\n`);
+    const fullPath = `${shimDir}:${buildToolFarm()}`;
+    expect(resolveOnPath('claude', fullPath), 'the fake claude resolves first').toBe(claudeBin);
+    expect(resolveOnPath('jq', fullPath), 'no jq on the PATH').toBeUndefined();
+    expect(resolveOnPath('node', fullPath), 'no node on the PATH').toBeUndefined();
 
-    // Build a PATH: shimDir (has claude) + symlink farm (no jq, no node) + /bin
-    const noJsonFarm = buildNoJsonParsePath(os.tmpdir());
-    const degradedPath = `${shimDir}:${noJsonFarm}`;
-    expect(resolveOnPath('claude', degradedPath), 'the fake claude resolves first on the degraded PATH').toBe(claudeBin);
-
-    const { exitCode } = runWorker(projectDir, homeDir, shimDir, {
-      PATH: degradedPath,
-    });
-
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir, { PATH: fullPath });
     const logFile = workerLogPath(projectDir, homeDir);
-    const logContent = fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8') : '';
+    return { exitCode, log: fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8') : '' };
+  }
 
-    // (1) Non-vacuous guard: worker PASSED the binary gate (did not SKIP before degraded path).
-    //     If this fails, the shim setup is broken and the test is meaningless.
-    expect(logContent).not.toContain('SKIP: claude binary not found on PATH');
+  function expectKept(result: { exitCode: number; log: string }): void {
+    expect(result.exitCode).toBe(0);
+    expect(result.log).toContain('SKIP: neither jq nor node on PATH');
+    expect(result.log).toContain('Run: cli=unknown argv=none result=skip denials=n/a removed=none');
+    expect(result.log, 'the worker stopped before it read the batch').not.toContain('No parseable turns');
+    expect(fs.existsSync(lockDir), 'the stale lock is not touched').toBe(true);
+    expect(fs.statSync(lockDir).mtimeMs, 'the stale lock keeps its mtime').toBe(lockMtimeMs);
+    expect(fs.existsSync(path.join(memoryDir, '.last-refresh-ok')), 'no success marker').toBe(false);
+    expect(fs.existsSync(path.join(memoryDir, 'WORKING-MEMORY.md')), 'no memory written').toBe(false);
+    expect(fs.existsSync(path.join(memoryDir, 'WORKING-MEMORY.md.new')), 'no staged file').toBe(false);
+    expect(fs.existsSync(path.join(shimDir, 'claude-called')), 'claude was never called').toBe(false);
+  }
 
-    // (2) Safety outcome: no memory write regardless of platform extraction behaviour.
-    expect(fs.existsSync(memFile)).toBe(false);
+  it('A: a queue alone stays byte for byte in the queue, with no batch made', () => {
+    const queueBytes = fs.readFileSync(queueFile);
+    expect(queueBytes.length, 'non-vacuity: the queue holds rows').toBeGreaterThan(0);
 
-    // (3) Worker exited 0 — both conservative exit paths are clean (no crash).
-    expect(exitCode).toBe(0);
+    expectKept(runWithoutParser());
 
-    // (4) Log contains at least one conservative-exit marker, confirming the worker
-    //     reached and completed the degraded path (not a silent exit or unknown failure).
-    //     Both platform-dependent exit paths are accepted:
-    //       - macOS/BSD: "No parseable turns — skipping"  (EXTRACTED="" → TURN_COUNT=0)
-    //       - Linux/GNU: "FAIL: verification failed — leaving .processing for recovery"
-    const conservativeExitMarkers = [
-      'No parseable turns',
-      'verification failed — leaving .processing for recovery',
-    ];
-    const reachedConservativeExit = conservativeExitMarkers.some(marker =>
-      logContent.includes(marker)
+    expect(fs.readFileSync(queueFile)).toEqual(queueBytes);
+    expect(fs.existsSync(processingFile), 'no batch made').toBe(false);
+  });
+
+  it('B: a queue and a leftover batch both stay byte for byte, and are not merged', () => {
+    const queueBytes = fs.readFileSync(queueFile);
+    const ts = Math.floor(Date.now() / 1000);
+    const batchBytes = Buffer.from(
+      [
+        JSON.stringify({ role: 'user', content: 'an earlier prompt', ts: ts - 60 }),
+        JSON.stringify({ role: 'assistant', content: 'an earlier answer', ts: ts - 59 }),
+      ].join('\n') + '\n',
     );
-    expect(reachedConservativeExit).toBe(true);
+    fs.writeFileSync(processingFile, batchBytes);
+
+    expectKept(runWithoutParser());
+
+    expect(fs.readFileSync(queueFile)).toEqual(queueBytes);
+    expect(fs.readFileSync(processingFile)).toEqual(batchBytes);
   });
 });
 
@@ -2623,34 +2611,31 @@ exit 0
   it('REL-3a: cksum absent from PATH — startup assert fires, no swap, queue not claimed', () => {
     // Build an additive symlink farm with all worker-required tools EXCEPT cksum.
     // Additive farm (not subtractive /bin exclusion): Linux /bin carries cksum, so
-    // PATH=${farm}:/bin always re-introduces it on Linux. buildNoCksumPath never
-    // includes cksum regardless of platform — command -v cksum fails deterministically.
-    const noCksumDir = buildNoCksumPath(os.tmpdir());
-    try {
-      // Add a fake claude that would succeed if reached — proves the cksum check fires first
-      const claudeBin = path.join(noCksumDir, 'claude');
-      writeFakeExecutable(
-        claudeBin,
-        answersVersion(`#!/bin/bash\necho "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"\nexit 0\n`)
-      );
+    // PATH=${farm}:/bin always re-introduces it on Linux. buildToolFarm adds no /bin,
+    // so command -v cksum fails deterministically on both platforms. The farm links
+    // node: a worker with no JSON parser stops before the cksum assert is reached.
+    const noCksumDir = buildToolFarm(['cksum'], { node: process.execPath });
+    // Add a fake claude that would succeed if reached — proves the cksum check fires first
+    const claudeBin = path.join(noCksumDir, 'claude');
+    writeFakeExecutable(
+      claudeBin,
+      answersVersion(`#!/bin/bash\necho "<!-- memory-head: testsha branch: main -->" > "${stagedFile}"\nexit 0\n`)
+    );
 
-      // Override PATH to only the farm dir — no /bin, so cksum is unreachable
-      const { exitCode } = runWorker(projectDir, homeDir, noCksumDir, {
-        PATH: noCksumDir,
-      });
-      expect(exitCode).toBe(0);
+    // Override PATH to only the farm dir — no /bin, so cksum is unreachable
+    const { exitCode } = runWorker(projectDir, homeDir, noCksumDir, {
+      PATH: noCksumDir,
+    });
+    expect(exitCode).toBe(0);
 
-      // Worker must have bailed before claiming the queue (startup assert fires early)
-      const processingFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing');
-      expect(fs.existsSync(processingFile)).toBe(false);
-      // Real file must not be written
-      expect(fs.existsSync(memFile)).toBe(false);
-      // Log must contain SKIP with cksum reason
-      const log = fs.readFileSync(workerLogPath(projectDir, homeDir), 'utf-8');
-      expect(log).toContain('cksum not on PATH');
-    } finally {
-      fs.rmSync(noCksumDir, { recursive: true, force: true });
-    }
+    // Worker must have bailed before claiming the queue (startup assert fires early)
+    const processingFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing');
+    expect(fs.existsSync(processingFile)).toBe(false);
+    // Real file must not be written
+    expect(fs.existsSync(memFile)).toBe(false);
+    // Log must contain SKIP with cksum reason
+    const log = fs.readFileSync(workerLogPath(projectDir, homeDir), 'utf-8');
+    expect(log).toContain('cksum not on PATH');
   });
 
   // REL-3b: cksum in PATH but always exits 1 — CKSUM_FAILED triggers conflict, real file untouched
@@ -3915,16 +3900,7 @@ describe('S29: the memory worker reads agents.memory and picks its argv by CLI v
       writeAgentModels(homeDir, { memory: { model: 'opus', effort: 'low' } });
       // An additive farm, never a subtraction (jq lives in /usr/bin on macOS and in
       // /bin on merged-usr Linux): every tool the worker calls, node, and no jq.
-      const farm = path.join(shimDir, 'node-only-bin');
-      fs.mkdirSync(farm);
-      for (const tool of [
-        'bash', 'cat', 'chmod', 'cksum', 'cp', 'cut', 'date', 'dirname', 'echo', 'find', 'git', 'grep', 'head', 'kill', 'ls',
-        'mkdir', 'mktemp', 'mv', 'nohup', 'rm', 'rmdir', 'sed', 'sleep', 'stat', 'tail', 'touch', 'tr', 'wc',
-      ]) {
-        const found = ['/usr/bin', '/bin'].map(dir => path.join(dir, tool)).find(candidate => fs.existsSync(candidate));
-        if (found !== undefined) fs.symlinkSync(found, path.join(farm, tool));
-      }
-      fs.symlinkSync(process.execPath, path.join(farm, 'node'));
+      const farm = buildToolFarm([], { node: process.execPath });
       const nodeOnlyPath = `${shimDir}:${farm}`;
       expect(resolveOnPath('jq', nodeOnlyPath), 'non-vacuity: no jq on this PATH').toBeUndefined();
       expect(resolveOnPath('node', nodeOnlyPath), 'node is on this PATH').toBe(path.join(farm, 'node'));
@@ -4801,4 +4777,557 @@ describe('S30: a notice from the memory worker is shown once at session start (A
     expect(fs.lstatSync(noticePath('path')).isSymbolicLink(), 'the link is left as it was').toBe(true);
     expect(fs.existsSync(`${noticePath('denied')}.shown`), 'the odd notice is moved aside, unshown').toBe(true);
   });
+});
+
+// =============================================================================
+// S31 — One malformed queue line drops only that line (#528)
+//
+// The worker parses each queue line alone: jq -R with fromjson, node line by line. A line
+// that is not JSON is skipped, and the log states how many lines of the read window were.
+// Before, jq read the queue as one stream, so one bad line stopped the parse: the valid
+// rows after it were lost, or the whole batch was deleted.
+//
+// Every run uses createPromptCapturingShim. The shim writes stdin-captured.txt only when the
+// worker starts an LLM run, so the absence of that file proves that no run started.
+// =============================================================================
+const HAS_JQ = spawnSync('jq', ['--version'], { encoding: 'utf8' }).status === 0;
+
+// The jq cases of S31 to S33 skip when jq is missing. On CI a missing jq fails this test
+// instead, so the per-line parse that keeps readable turns on the jq path is never
+// skipped while the run stays green.
+describe('S31: the jq backend cases cannot skip silently on CI (#528)', () => {
+  it.runIf(Boolean(process.env.CI))('jq is installed when CI is set', () => {
+    expect(HAS_JQ, 'jq must be on the PATH of a CI run').toBe(true);
+  });
+});
+
+describe('S31: a malformed queue line drops only that line (#528)', { timeout: LEAN_RUN_TIMEOUT_MS }, () => {
+  let projectDir: string;
+  let homeDir: string;
+  let shimDir: string;
+  let memoryDir: string;
+  let queueFile: string;
+  let processingFile: string;
+  let stagedFile: string;
+  let stdinCapture: string;
+
+  beforeEach(() => {
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s31-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s31-home-'));
+    shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s31-shim-'));
+    memoryDir = path.join(projectDir, '.devflow', 'memory');
+    queueFile = path.join(memoryDir, '.pending-turns.jsonl');
+    processingFile = path.join(memoryDir, '.pending-turns.processing');
+    stagedFile = path.join(memoryDir, 'WORKING-MEMORY.md.new');
+    fs.mkdirSync(memoryDir, { recursive: true });
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'dream'), { recursive: true });
+    initGitRepo(projectDir);
+    stdinCapture = createPromptCapturingShim(shimDir, stagedFile);
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  });
+
+  const row = (role: string, content: string): string => JSON.stringify({ role, content, ts: 1 });
+  const writeLines = (file: string, lines: string[]): void => fs.writeFileSync(file, lines.join('\n') + '\n');
+  const readLog = (): string => {
+    const logFile = workerLogPath(projectDir, homeDir);
+    return fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8') : '';
+  };
+
+  describe.skipIf(!HAS_JQ)('jq backend', () => {
+    it('a: a malformed first line of a fresh queue is skipped, and the valid turn reaches the prompt', () => {
+      writeLines(queueFile, ['garbage{', row('user', 'FIRST-PROMPT'), row('assistant', 'FIRST-ANSWER')]);
+
+      const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+
+      expect(exitCode).toBe(0);
+      const log = readLog();
+      expect(log).toContain('Built 1 turns');
+      expect(log).toContain('Skipped 1 queue line(s) that hold no readable turn');
+      const prompt = fs.readFileSync(stdinCapture, 'utf-8');
+      expect(prompt).toContain('FIRST-PROMPT');
+      expect(prompt).toContain('FIRST-ANSWER');
+    });
+
+    it('a2: a leftover batch that starts with a malformed line keeps its valid turns for the update', () => {
+      writeLines(processingFile, ['garbage{', row('user', 'BATCH-PROMPT'), row('assistant', 'BATCH-ANSWER')]);
+
+      const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+
+      expect(exitCode).toBe(0);
+      const log = readLog();
+      expect(log).toContain('Built 1 turns');
+      expect(log).toContain('Skipped 1 queue line(s) that hold no readable turn');
+      expect(log).not.toContain('No parseable turns');
+      const prompt = fs.readFileSync(stdinCapture, 'utf-8');
+      expect(prompt).toContain('BATCH-PROMPT');
+      expect(prompt).toContain('BATCH-ANSWER');
+    });
+
+    it('b: a malformed middle line drops only that line, and the rows after it reach the prompt', () => {
+      writeLines(queueFile, [
+        row('user', 'EARLY-PROMPT'),
+        row('assistant', 'EARLY-ANSWER'),
+        '{"role":',
+        row('user', 'LATE-PROMPT'),
+        row('assistant', 'LATE-ANSWER'),
+      ]);
+
+      const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+
+      expect(exitCode).toBe(0);
+      const log = readLog();
+      expect(log).toContain('Built 2 turns');
+      expect(log).toContain('Skipped 1 queue line(s) that hold no readable turn');
+      const prompt = fs.readFileSync(stdinCapture, 'utf-8');
+      for (const text of ['EARLY-PROMPT', 'EARLY-ANSWER', 'LATE-PROMPT', 'LATE-ANSWER']) {
+        expect(prompt).toContain(text);
+      }
+    });
+
+    it('c: a leftover batch with no readable line is removed, and no LLM run starts', () => {
+      writeLines(processingFile, ['not json', '{"role":', '}{']);
+
+      const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+
+      expect(exitCode).toBe(0);
+      const log = readLog();
+      expect(log).toContain('Skipped 3 queue line(s) that hold no readable turn');
+      expect(log).toContain('No parseable turns');
+      expect(fs.existsSync(processingFile), 'the batch is removed').toBe(false);
+      expect(fs.existsSync(stdinCapture), 'no LLM run started').toBe(false);
+    });
+
+    it('e: a cut-off assistant line is not a turn, so a fresh queue of user rows stays in place', () => {
+      writeLines(queueFile, ['{"role":"assistant","content":"cut', row('user', 'ONLY-PROMPT')]);
+      const queueBytes = fs.readFileSync(queueFile);
+
+      const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+
+      expect(exitCode).toBe(0);
+      expect(readLog()).toContain('User-only queue');
+      expect(fs.readFileSync(queueFile), 'the queue is kept byte for byte').toEqual(queueBytes);
+      expect(fs.existsSync(processingFile), 'the queue is not claimed').toBe(false);
+      expect(fs.existsSync(stdinCapture), 'no LLM run started').toBe(false);
+    });
+  });
+
+  it('d: on the node backend a line that is not JSON is skipped, and the same count is logged', () => {
+    writeLines(queueFile, [row('user', 'NODE-PROMPT'), 'garbage{', row('assistant', 'NODE-ANSWER')]);
+    const fullPath = `${shimDir}:${buildToolFarm([], { node: process.execPath })}`;
+    expect(resolveOnPath('jq', fullPath), 'no jq on the PATH').toBeUndefined();
+    expect(resolveOnPath('node', fullPath), 'node on the PATH').toBeDefined();
+
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir, { PATH: fullPath });
+
+    expect(exitCode).toBe(0);
+    const log = readLog();
+    expect(log).toContain('Built 1 turns');
+    expect(log).toContain('Skipped 1 queue line(s) that hold no readable turn');
+    const prompt = fs.readFileSync(stdinCapture, 'utf-8');
+    expect(prompt).toContain('NODE-PROMPT');
+    expect(prompt).toContain('NODE-ANSWER');
+  });
+
+  it('f: on the node backend a leftover batch with no readable line is removed, and no LLM run starts', () => {
+    writeLines(processingFile, ['not json', '{"role":', '}{']);
+    const fullPath = `${shimDir}:${buildToolFarm([], { node: process.execPath })}`;
+    expect(resolveOnPath('jq', fullPath), 'no jq on the PATH').toBeUndefined();
+    expect(resolveOnPath('node', fullPath), 'node on the PATH').toBeDefined();
+
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir, { PATH: fullPath });
+
+    expect(exitCode).toBe(0);
+    const log = readLog();
+    expect(log).toContain('Skipped 3 queue line(s) that hold no readable turn');
+    expect(log).toContain('No parseable turns');
+    expect(fs.existsSync(processingFile), 'the batch is removed').toBe(false);
+    expect(fs.existsSync(stdinCapture), 'no LLM run started').toBe(false);
+  });
+
+  it('g: a queue of readable turns logs no skipped-line text', () => {
+    writeLines(queueFile, [row('user', 'CLEAN-PROMPT'), row('assistant', 'CLEAN-ANSWER')]);
+
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+
+    expect(exitCode).toBe(0);
+    const log = readLog();
+    expect(log).toContain('Built 1 turns');
+    expect(log).not.toContain('queue line(s) that hold no readable turn');
+    expect(fs.readFileSync(stdinCapture, 'utf-8')).toContain('CLEAN-PROMPT');
+  });
+});
+
+// =============================================================================
+// S32 — A JSON parser that exits non-zero keeps the batch and the queue (#523)
+//
+// Exit 0 with no readable row still means that the batch holds no turn, and the worker
+// removes it (S31 c, f). A parser that exits non-zero has said nothing about the turns:
+// the worker keeps them, logs a SKIP line that names the failure and runs no LLM. On the
+// leftover-batch path the queue is already merged into the batch when the parser runs, so
+// the batch then holds both byte for byte. On the fresh-queue path the orphan check keeps
+// the queue where it is.
+//
+// The fake parser fails only the call whose arguments hold PARSER_FAIL_ON, and runs the
+// real tool for every other call. json-parse finds a parser with `command -v` and the
+// worker calls it elsewhere, so a parser that failed everywhere would stop the run at
+// another step. The shim writes `parser-failed` when it fails, which shows that the
+// failing call happened.
+// =============================================================================
+describe('S32: a JSON parser that exits non-zero keeps the batch and the queue (#523)', { timeout: LEAN_RUN_TIMEOUT_MS }, () => {
+  type Backend = 'jq' | 'node';
+
+  /** What each backend's call holds: the extraction only, the orphan check only. */
+  const FAIL_ON: Record<Backend, { extract: string; orphan: string }> = {
+    jq: { extract: 'split', orphan: 'select(.role=="assistant"' },
+    node: { extract: '/dev/stdin', orphan: 'process.argv' },
+  };
+  const backends: Backend[] = HAS_JQ ? ['jq', 'node'] : ['node'];
+
+  let projectDir: string;
+  let homeDir: string;
+  let shimDir: string;
+  let memoryDir: string;
+  let queueFile: string;
+  let processingFile: string;
+  let stagedFile: string;
+  let stdinCapture: string;
+
+  beforeEach(() => {
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s32-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s32-home-'));
+    shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s32-shim-'));
+    memoryDir = path.join(projectDir, '.devflow', 'memory');
+    queueFile = path.join(memoryDir, '.pending-turns.jsonl');
+    processingFile = path.join(memoryDir, '.pending-turns.processing');
+    stagedFile = path.join(memoryDir, 'WORKING-MEMORY.md.new');
+    fs.mkdirSync(memoryDir, { recursive: true });
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'dream'), { recursive: true });
+    initGitRepo(projectDir);
+    stdinCapture = createPromptCapturingShim(shimDir, stagedFile);
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  });
+
+  const row = (role: string, content: string): string => JSON.stringify({ role, content, ts: 1 });
+  const rowsBytes = (lines: string[]): Buffer => Buffer.from(lines.join('\n') + '\n');
+  const readLog = (): string => {
+    const logFile = workerLogPath(projectDir, homeDir);
+    return fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8') : '';
+  };
+
+  /** Run the worker with a parser of `backend` that exits 3 on a call whose arguments hold `failOn`. */
+  function runWithFailingParser(backend: Backend, failOn: string): number {
+    const failingShim = (real: string): string => `#!/bin/bash
+case "$*" in
+  *"$PARSER_FAIL_ON"*) : > "${shimDir}/parser-failed"; exit 3 ;;
+esac
+exec "${real}" "$@"
+`;
+    let pathValue: string;
+    if (backend === 'jq') {
+      const realJq = resolveOnPath('jq', process.env.PATH ?? '/usr/bin:/bin');
+      expect(realJq, 'jq is on the machine PATH').toBeDefined();
+      writeFakeExecutable(path.join(shimDir, 'jq'), failingShim(realJq as string));
+      pathValue = fakeClaudePath(shimDir);
+      expect(resolveOnPath('jq', pathValue), 'the fake jq resolves first').toBe(path.join(shimDir, 'jq'));
+    } else {
+      writeFakeExecutable(path.join(shimDir, 'node'), failingShim(process.execPath));
+      pathValue = `${shimDir}:${buildToolFarm()}`;
+      expect(resolveOnPath('jq', pathValue), 'no jq on the PATH').toBeUndefined();
+      expect(resolveOnPath('node', pathValue), 'the fake node resolves').toBe(path.join(shimDir, 'node'));
+    }
+    return runWorker(projectDir, homeDir, shimDir, { PATH: pathValue, PARSER_FAIL_ON: failOn }).exitCode;
+  }
+
+  function expectParserSkip(exitCode: number): void {
+    expect(exitCode).toBe(0);
+    expect(fs.existsSync(path.join(shimDir, 'parser-failed')), 'non-vacuity: the failing call happened').toBe(true);
+    const log = readLog();
+    expect(log).toContain('SKIP: the JSON parser exited 3');
+    expect(log).toContain('no LLM run');
+    expect(log.match(/Run: /g), 'one Run line').toHaveLength(1);
+    expect(log).toContain('result=skip');
+    expect(log).not.toContain('No parseable turns');
+    expect(log).not.toContain('User-only queue');
+    expect(fs.existsSync(stdinCapture), 'no LLM run started').toBe(false);
+    expect(fs.existsSync(path.join(memoryDir, '.working-memory.lock')), 'the lock is released').toBe(false);
+  }
+
+  describe.each(backends)('%s backend', (backend) => {
+    it('a leftover batch and a queue of readable turns both survive, and the batch is not removed', () => {
+      const batchBytes = rowsBytes([row('user', 'BATCH-PROMPT'), row('assistant', 'BATCH-ANSWER')]);
+      const queueBytes = rowsBytes([row('user', 'QUEUE-PROMPT'), row('assistant', 'QUEUE-ANSWER')]);
+      fs.writeFileSync(processingFile, batchBytes);
+      fs.writeFileSync(queueFile, queueBytes);
+
+      expectParserSkip(runWithFailingParser(backend, FAIL_ON[backend].extract));
+
+      expect(fs.readFileSync(processingFile), 'the batch holds the batch and the merged queue, byte for byte')
+        .toEqual(Buffer.concat([batchBytes, queueBytes]));
+      expect(fs.existsSync(queueFile), 'the queue is inside the batch').toBe(false);
+    });
+
+    it('a fresh queue whose extraction fails stays whole in the batch it was claimed into', () => {
+      const queueBytes = rowsBytes([row('user', 'QUEUE-PROMPT'), row('assistant', 'QUEUE-ANSWER')]);
+      fs.writeFileSync(queueFile, queueBytes);
+
+      expectParserSkip(runWithFailingParser(backend, FAIL_ON[backend].extract));
+
+      expect(fs.readFileSync(processingFile), 'no turn lost').toEqual(queueBytes);
+    });
+
+    it('a fresh queue whose orphan check fails stays in the queue, and no batch is made', () => {
+      const queueBytes = rowsBytes([row('user', 'QUEUE-PROMPT'), row('assistant', 'QUEUE-ANSWER')]);
+      fs.writeFileSync(queueFile, queueBytes);
+
+      expectParserSkip(runWithFailingParser(backend, FAIL_ON[backend].orphan));
+
+      expect(fs.readFileSync(queueFile), 'the queue is kept byte for byte').toEqual(queueBytes);
+      expect(fs.existsSync(processingFile), 'the queue is not claimed').toBe(false);
+    });
+  });
+});
+
+// =============================================================================
+// S33 — jq and node read a queue the same way (#528)
+//
+// Both parsers emit only a row whose role is user, assistant or qa, and the worker counts
+// every other non-blank line as skipped. A line that is valid JSON but no turn (null, a
+// number, an array, a string, an object with no role or a role that is no string or no
+// known role, a role that holds a newline) was a row on one backend and a skip on the
+// other, so the two logged different counts. The same queue now logs the same count.
+// =============================================================================
+describe('S33: jq and node log the same skip count and build the same turns (#528)', { timeout: LEAN_RUN_TIMEOUT_MS }, () => {
+  let projectDir: string;
+  let homeDir: string;
+  let shimDir: string;
+  let memoryDir: string;
+  let queueFile: string;
+  let stagedFile: string;
+  let stdinCapture: string;
+
+  beforeEach(() => {
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s33-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s33-home-'));
+    shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s33-shim-'));
+    memoryDir = path.join(projectDir, '.devflow', 'memory');
+    queueFile = path.join(memoryDir, '.pending-turns.jsonl');
+    stagedFile = path.join(memoryDir, 'WORKING-MEMORY.md.new');
+    fs.mkdirSync(memoryDir, { recursive: true });
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'dream'), { recursive: true });
+    initGitRepo(projectDir);
+    stdinCapture = createPromptCapturingShim(shimDir, stagedFile);
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  });
+
+  /** One readable user and assistant turn, and ten lines that hold no readable turn. */
+  const PARITY_QUEUE = [
+    JSON.stringify({ role: 'user', content: 'PARITY-PROMPT first line\nsecond line', ts: 1 }),
+    'null',
+    '42',
+    '{"role":5}',
+    '{}',
+    JSON.stringify({ role: 'user\nx', content: 'newline role', ts: 1 }),
+    '[1]',
+    '"just a string"',
+    JSON.stringify({ role: 'system', content: 'not a turn', ts: 1 }),
+    JSON.stringify({ role: 'user', content: 0, ts: 1 }),
+    'garbage{',
+    JSON.stringify({ role: 'assistant', content: 'PARITY-ANSWER', ts: 1 }),
+  ];
+  const EXPECTED_SKIPPED = 10;
+
+  function expectParityResult(): void {
+    const logFile = workerLogPath(projectDir, homeDir);
+    const log = fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8') : '';
+    expect(log).toContain(`Skipped ${EXPECTED_SKIPPED} queue line(s) that hold no readable turn`);
+    expect(log).toContain('Built 1 turns');
+    const prompt = fs.readFileSync(stdinCapture, 'utf-8');
+    expect(prompt, 'a newline in a valid row is a space').toContain('PARITY-PROMPT first line second line');
+    expect(prompt).toContain('PARITY-ANSWER');
+  }
+
+  it.skipIf(!HAS_JQ)('jq backend', () => {
+    fs.writeFileSync(queueFile, PARITY_QUEUE.join('\n') + '\n');
+
+    expect(runWorker(projectDir, homeDir, shimDir).exitCode).toBe(0);
+
+    expectParityResult();
+  });
+
+  it('node backend', () => {
+    fs.writeFileSync(queueFile, PARITY_QUEUE.join('\n') + '\n');
+    const fullPath = `${shimDir}:${buildToolFarm([], { node: process.execPath })}`;
+    expect(resolveOnPath('jq', fullPath), 'no jq on the PATH').toBeUndefined();
+    expect(resolveOnPath('node', fullPath), 'node on the PATH').toBeDefined();
+
+    expect(runWorker(projectDir, homeDir, shimDir, { PATH: fullPath }).exitCode).toBe(0);
+
+    expectParityResult();
+  });
+});
+
+// =============================================================================
+// S34 — A queue that could not be appended to the leftover batch is kept (#523)
+//
+// The worker merges the queue into a leftover batch with `cat >>`, then removes the queue.
+// When the append fails, the queue is the only copy of those turns, so it stays for the
+// next run. A read-only batch makes the append fail without any privilege; a process with
+// root rights writes to it anyway, so the case is skipped there.
+// =============================================================================
+describe.skipIf(typeof process.getuid === 'function' && process.getuid() === 0)(
+  'S34: a queue that could not be appended to the leftover batch is kept (#523)',
+  { timeout: LEAN_RUN_TIMEOUT_MS },
+  () => {
+    let projectDir: string;
+    let homeDir: string;
+    let shimDir: string;
+    let memoryDir: string;
+    let queueFile: string;
+    let processingFile: string;
+    let stagedFile: string;
+    let stdinCapture: string;
+
+    beforeEach(() => {
+      projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s34-'));
+      homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s34-home-'));
+      shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s34-shim-'));
+      memoryDir = path.join(projectDir, '.devflow', 'memory');
+      queueFile = path.join(memoryDir, '.pending-turns.jsonl');
+      processingFile = path.join(memoryDir, '.pending-turns.processing');
+      stagedFile = path.join(memoryDir, 'WORKING-MEMORY.md.new');
+      fs.mkdirSync(memoryDir, { recursive: true });
+      fs.mkdirSync(path.join(projectDir, '.devflow', 'dream'), { recursive: true });
+      initGitRepo(projectDir);
+      stdinCapture = createPromptCapturingShim(shimDir, stagedFile);
+    });
+
+    afterEach(() => {
+      fs.rmSync(projectDir, { recursive: true, force: true });
+      fs.rmSync(homeDir, { recursive: true, force: true });
+      fs.rmSync(shimDir, { recursive: true, force: true });
+    });
+
+    it('the queue stays byte for byte, and the batch alone goes to the update', () => {
+      const row = (role: string, content: string): string => JSON.stringify({ role, content, ts: 1 });
+      const queueBytes = Buffer.from([row('user', 'QUEUE-PROMPT'), row('assistant', 'QUEUE-ANSWER')].join('\n') + '\n');
+      fs.writeFileSync(processingFile, [row('user', 'BATCH-PROMPT'), row('assistant', 'BATCH-ANSWER')].join('\n') + '\n');
+      fs.chmodSync(processingFile, 0o444);
+      fs.writeFileSync(queueFile, queueBytes);
+
+      const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+
+      expect(exitCode).toBe(0);
+      const logFile = workerLogPath(projectDir, homeDir);
+      const log = fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8') : '';
+      expect(log).toContain('the queue is kept');
+      expect(log).not.toContain('Merged new queue entries');
+      expect(fs.readFileSync(queueFile), 'the queue is kept byte for byte').toEqual(queueBytes);
+      const prompt = fs.readFileSync(stdinCapture, 'utf-8');
+      expect(prompt).toContain('BATCH-PROMPT');
+      expect(prompt).not.toContain('QUEUE-PROMPT');
+    });
+  },
+);
+
+// =============================================================================
+// S35 — A batch that ends without a line break loses no turn (#523)
+//
+// A leftover batch can end in a row that was cut before its line break. The queue is
+// appended to that batch, so its first row must start on a new line; otherwise the two
+// join into one malformed line and the queued turn is lost when the queue is removed.
+// A batch of one readable row with no final line break is a batch with a turn: `wc -l`
+// counts line breaks, so it reads 0 there, and the batch must not be removed as empty.
+// Each case runs on the default backend and on the node backend.
+// =============================================================================
+describe('S35: a batch that ends without a line break loses no turn (#523)', { timeout: LEAN_RUN_TIMEOUT_MS }, () => {
+  let projectDir: string;
+  let homeDir: string;
+  let shimDir: string;
+  let memoryDir: string;
+  let queueFile: string;
+  let processingFile: string;
+  let stagedFile: string;
+  let stdinCapture: string;
+
+  beforeEach(() => {
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s35-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s35-home-'));
+    shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s35-shim-'));
+    memoryDir = path.join(projectDir, '.devflow', 'memory');
+    queueFile = path.join(memoryDir, '.pending-turns.jsonl');
+    processingFile = path.join(memoryDir, '.pending-turns.processing');
+    stagedFile = path.join(memoryDir, 'WORKING-MEMORY.md.new');
+    fs.mkdirSync(memoryDir, { recursive: true });
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'dream'), { recursive: true });
+    initGitRepo(projectDir);
+    stdinCapture = createPromptCapturingShim(shimDir, stagedFile);
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  });
+
+  const row = (role: string, content: string): string => JSON.stringify({ role, content, ts: 1 });
+  const readLog = (): string => {
+    const logFile = workerLogPath(projectDir, homeDir);
+    return fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8') : '';
+  };
+  /** Runs the worker on the default backend, or with no jq on the PATH. */
+  const runOn = (backend: 'default' | 'node'): { exitCode: number | null } => {
+    if (backend === 'default') return runWorker(projectDir, homeDir, shimDir);
+    const fullPath = `${shimDir}:${buildToolFarm([], { node: process.execPath })}`;
+    expect(resolveOnPath('jq', fullPath), 'no jq on the PATH').toBeUndefined();
+    expect(resolveOnPath('node', fullPath), 'node on the PATH').toBeDefined();
+    return runWorker(projectDir, homeDir, shimDir, { PATH: fullPath });
+  };
+
+  for (const backend of ['default', 'node'] as const) {
+    describe(`${backend} backend`, () => {
+      it('a: the first queued row does not join a cut last row of the batch, and the queued turn reaches the prompt', () => {
+        fs.writeFileSync(
+          processingFile,
+          [row('user', 'BATCH-PROMPT'), row('assistant', 'BATCH-ANSWER'), '{"role":"assistant","content":"cut'].join('\n'),
+        );
+        fs.writeFileSync(queueFile, [row('user', 'QUEUE-PROMPT'), row('assistant', 'QUEUE-ANSWER')].join('\n') + '\n');
+
+        expect(runOn(backend).exitCode).toBe(0);
+
+        const log = readLog();
+        expect(log).toContain('Merged new queue entries into recovery batch');
+        expect(log).toContain('Skipped 1 queue line(s) that hold no readable turn');
+        const prompt = fs.readFileSync(stdinCapture, 'utf-8');
+        for (const text of ['BATCH-PROMPT', 'BATCH-ANSWER', 'QUEUE-PROMPT', 'QUEUE-ANSWER']) {
+          expect(prompt).toContain(text);
+        }
+      });
+
+      it('b: a batch of one readable row with no final line break is not removed as empty, and its turn reaches the prompt', () => {
+        fs.writeFileSync(processingFile, row('assistant', 'LONE-ANSWER'));
+
+        expect(runOn(backend).exitCode).toBe(0);
+
+        const log = readLog();
+        expect(log).not.toContain('Processing file empty');
+        expect(log).toContain('Built 1 turns');
+        expect(fs.readFileSync(stdinCapture, 'utf-8')).toContain('LONE-ANSWER');
+      });
+    });
+  }
 });
