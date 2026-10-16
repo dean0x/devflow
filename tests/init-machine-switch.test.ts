@@ -86,6 +86,27 @@ describe('buildHudOnlyManifest keeps the machine gate level', () => {
     const result = buildHudOnlyManifest(null, '9.9.9', NOW);
     expect(Object.hasOwn(result.features, 'gateLevel')).toBe(false);
   });
+
+  it.each([
+    ['a valid level', 'lean'],
+    ['a malformed level', 'Lean'],
+    ['null', null],
+  ])('a fresh record keeps %s read raw from a manifest readManifest refused', (_label, value) => {
+    const result = buildHudOnlyManifest(null, '9.9.9', NOW, value);
+    expect(Object.hasOwn(result.features, 'gateLevel')).toBe(true);
+    expect(result.features.gateLevel).toBe(value);
+  });
+
+  it('a fresh record holds no key when the refused manifest stored none', () => {
+    const result = buildHudOnlyManifest(null, '9.9.9', NOW, undefined);
+    expect(Object.hasOwn(result.features, 'gateLevel')).toBe(false);
+  });
+
+  it('over a prior install the prior level wins over a level read from a refused manifest', () => {
+    const prior = fullInstall();
+    prior.features.gateLevel = 'lean';
+    expect(buildHudOnlyManifest(prior, '9.9.9', NOW, 'full').features.gateLevel).toBe('lean');
+  });
 });
 
 describe('installedVersionMatches', () => {

@@ -8,7 +8,12 @@
  * same. So each row spawns the REAL compiled CLI over a manifest holding a stored
  * value and compares the raw bytes of the key afterwards. Three stored values
  * cover the cases that differ: a valid level, a capitalised one the fold reads as
- * `full`, and a JSON `null`. `init --reset` is the one writer that removes the key.
+ * `full`, and a JSON `null`.
+ *
+ * `init` is the one writer that can change the key. `--gate-level <level>` and the
+ * interactive prompt set it, and `init --reset` removes it. No row here passes the
+ * flag, and a spawned init has no TTY, so every init row is a promptless init that
+ * keeps the value; init-gate-level-e2e.test.ts covers the init runs that set it.
  * After each chain one spawn of the installed settings resolver checks the level the
  * prompts read, and a hand-written personal `gateLevel` in `.devflow/config.json` is
  * checked to survive the reset.

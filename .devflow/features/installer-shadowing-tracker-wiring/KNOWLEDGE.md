@@ -5,7 +5,7 @@ description: "Use when changing the tracker wizard step, devflow tracker (--set/
 category: component-patterns
 directories: [src/core/tracker.ts, src/cli/commands/tracker-prompts.ts, src/cli/commands/tracker.ts, src/targets/claude-code/tracker-install.ts, src/core/feature-config.ts, src/core/manifest.ts, src/cli/commands/init.ts]
 created: 2026-10-10
-updated: 2026-10-11
+updated: 2026-10-17
 ---
 
 # Tracker Selection Wiring in Init & CLI
@@ -48,6 +48,7 @@ Parallel to the compliance and attribution modules with its own gate and a provi
 - `TrackerPromptIO` — `WizardPromptIO` plus `selectProvider` (the step is a three-way choice, not an on/off toggle; the inherited boolean `select` is unused but kept so the seam stays substitutable). `buildClackTrackerPrompts()` is the real adapter; `providerChoices()`, `formatProviderCatalogue()`, `TRACKER_SELECT_MESSAGE` feed it.
 - `runTrackerStep({seed, prompts})` — pure orchestrator (no `throw` / `process.exit()` / direct I/O) returning `{kind:'resolved', state, messages}` or `{kind:'cancelled'}`. `formatTrackerSummary(provider)` is the pure formatter for the Recommended summary row.
 - **Call sites in `init.ts`:** both the Recommended and the Advanced path call `shouldRunTrackerStep` with the same shape compliance uses (`mode`, `modePromptShown`, `isTTY: process.stdin.isTTY`, `hasCliOverride: cliTrackerOverride !== undefined`), so the paths cannot drift onto different gates. Recommended's outcome surfaces only through the `Tracker: {summary}` row — the step emits no per-step messages there, matching compliance. Advanced has no end-of-wizard recap, so its `trackerStep.messages` are the step's only surface and are emitted unconditionally. Precedence at the merge point is `cliTrackerOverride ?? wizardTracker ?? seed.features.tracker`; `applyCliToggles` supplies the seed arm as it does for `compliance`.
+- **The gate-level step follows it:** on each path the gate-level wizard step (`gate-level-prompts.ts`, wizard-flags KB) runs right after the tracker step with the same gate shape (`gateDecision = await runGateLevelStepAt(mode)`; `--gate-level` is its CLI override). Unlike the tracker, it is not merged through `applyCliToggles`: init decides the level in `resolveGateLevelForInit` alone. It delegates to the shared `shouldRunPromptedWizardStep` (`prompt-io.ts`); the tracker gate keeps its own copy of the same table until #554 moves it.
 
 ## `devflow tracker` CLI (`src/cli/commands/tracker.ts`)
 
@@ -65,7 +66,7 @@ Mirrors `devflow compliance` (`D-TRACKER-PAIR`): the action handles `--status` a
 
 **Declared but skipped:** the Tracker agent stays in `devflow-core-skills.agents` but the generic agent copy loop skips it. `TRACKER_AGENT_NAME` (exported from `tracker-install.ts`, the one authority on the name) is what that loop skips and what the full-install pre-clean keeps around; being declared keeps the registry-keyed agent sweep from treating it as an orphan and keeps the agent-roster floor true without a `FEATURE_OWNED_AGENTS` set.
 
-**Init's counterpart** — `persistManifestThenConvergeTracker({devflowDir, claudeDir, manifestData, io})` (`D-TRACKER-CONVERGE`, over `TrackerLifecycleIO`): write the manifest, then — only if it landed — `convergeArtifacts` (the agent), then `rearmInference` and `applySentinel` in parallel (disjoint files, `D-TRACKER-PARALLEL`); the `ManifestTrackerOutcome` carries `manifestWritten`, `converged`, `agent: TrackerAgentState` and the messages, and the summary line comes from `formatTrackerAssetSummary`. A failed manifest write returns before touching any artifact and warns that the selection was not persisted. `drainDisabledFeatureQueues` runs only after `manifestWritten: true` (init-seed KB). The sentinel's write scope matters: a toggle can converge every artifact it writes and still miss the gate that decides if it writes a narrower scope (one repo's `config.json`) than every reader shares (the manifest) — the same write-scope vs read-scope lesson that fixed the memory/learning/knowledge switches.
+**Init's counterpart** — `persistManifestThenConvergeTracker({devflowDir, claudeDir, manifestData, io})` (`D-TRACKER-CONVERGE`, over `TrackerLifecycleIO`): write the manifest, then — only if it landed — `convergeArtifacts` (the agent), then `rearmInference` and `applySentinel` in parallel (disjoint files, `D-TRACKER-PARALLEL`); the `ManifestTrackerOutcome` carries `manifestWritten`, `converged`, `agent: TrackerAgentState` and the messages, and the summary line comes from `formatTrackerAssetSummary`. A failed manifest write returns before touching any artifact and warns that the selection was not persisted. The same write records the machine gate level, so `manifestWritten` also feeds the gate-level summary: after a failed write it warns that the gate level did not change (wizard-flags KB). `drainDisabledFeatureQueues` runs only after `manifestWritten: true` (init-seed KB). The sentinel's write scope matters: a toggle can converge every artifact it writes and still miss the gate that decides if it writes a narrower scope (one repo's `config.json`) than every reader shares (the manifest) — the same write-scope vs read-scope lesson that fixed the memory/learning/knowledge switches.
 
 ## Core Tracker Module (`src/core/tracker.ts`)
 
@@ -76,7 +77,7 @@ The domain leaf module this KB's call sites consume: `TrackerProvider`, `Tracker
 - **KB-AP-1** The hard-null set makes any manifest lacking the field read as "no prior install".
 - **KB-AP-2** The "do nothing else" rule is the point: a `--set` that probed `devflow:git`, overlaid references or renamed conventions would duplicate work every install already carries.
 - **KB-AP-4** An inspection command that changed nothing would leave the only escape from the attempt cap a hand deletion; a machine-state change the output does not mention cannot be audited, hence the `Inference:` line.
-- **KB-AP-6** The tracker gate copies the compliance table exactly (Advanced always, Recommended only when `modePromptShown`), while the attribution gate diverges deliberately (wizard-flags KB).
+- **KB-AP-6** The tracker gate copies the compliance table exactly (Advanced always, Recommended only when `modePromptShown`), while the attribution gate diverges deliberately (wizard-flags KB). The table has three copies: the shared `shouldRunPromptedWizardStep` (`prompt-io.ts`, used by the gate-level gate), `shouldRunComplianceStep` and `shouldRunTrackerStep`. Until #554 moves the last two onto the shared one, a change to the table is made in all three.
 
 ## Gotchas
 
@@ -91,7 +92,7 @@ The domain leaf module this KB's call sites consume: `TrackerProvider`, `Tracker
 - `src/cli/commands/tracker-prompts.ts` — `shouldRunTrackerStep`, `TrackerPromptIO`, `buildClackTrackerPrompts`, `runTrackerStep`, `formatTrackerSummary`, `providerChoices`, `formatProviderCatalogue`, `TRACKER_SELECT_MESSAGE`
 - `src/cli/commands/tracker.ts` — `trackerCommand`, `runTrackerSet` + `TrackerSetIO` + `buildTrackerSetIO` + `TrackerSetOutcome`, `formatTrackerStatus`, `readTrackerMechanics` / `formatTrackerMechanics` / `TrackerMechanicsState`, `readTrackerStatusConventions`, `readTrackerProvenance` / `formatTrackerProvenance`, `TrackerCliActionMessage`, the `// ── Set ─` anchor
 - `src/targets/claude-code/tracker-install.ts` — `convergeTrackerArtifacts`, `TRACKER_AGENT_NAME`, `TrackerAgentState` (`installed | unchanged`), `ConvergeTrackerArtifactsResult`
-- `src/cli/commands/init.ts` — `persistManifestThenConvergeTracker`, `TrackerLifecycleIO`, `ManifestTrackerOutcome`, the `shouldRunTrackerStep` call sites
+- `src/cli/commands/init.ts` — `persistManifestThenConvergeTracker`, `TrackerLifecycleIO`, `ManifestTrackerOutcome`, the `shouldRunTrackerStep` call sites (and the gate-level step right after each)
 - `src/core/feature-config.ts` — `TrackerConfigOverride`, `parseTrackerOverride`; `src/core/manifest.ts` — `normalizeTrackerFeature` use in `readManifest`
 - `src/targets/claude-code/compliance-install.ts` — `convergeComplianceArtifacts` (owned by the `compliance-feature` KB): the compliance counterpart that also installs on every machine
 - `tests/tracker-cli.test.ts`, `tests/tracker-install.test.ts` — the CLI subprocess and agent-install pins
@@ -101,7 +102,7 @@ The domain leaf module this KB's call sites consume: `TrackerProvider`, `Tracker
 - `.devflow/features/installer-shadowing/KNOWLEDGE.md` — hub
 - `.devflow/features/installer-shadowing-reference-overlay/KNOWLEDGE.md` — the generated tree every install carries, which `--set` never touches
 - `.devflow/features/installer-shadowing-init-seed/KNOWLEDGE.md` — `resolveSeedFeatures` tracker seeding, the migration that moves legacy conventions, the drain ordering
-- `.devflow/features/installer-shadowing-wizard-flags/KNOWLEDGE.md` — the prompt-IO seam and the other two gates
+- `.devflow/features/installer-shadowing-wizard-flags/KNOWLEDGE.md` — the prompt-IO seam, the shared gate predicate and the other wizard gates (compliance, attribution, gate level)
 - `.devflow/features/installer-shadowing-uninstall/KNOWLEDGE.md` — the tracker runtime artifacts and the conventions' user-content classification
 - `.devflow/features/tracker-feature/KNOWLEDGE.md` — what a selection means at read time: settings-line resolution, Tracker agent protocol, mismatch guard
 - `.devflow/features/tracker-references/KNOWLEDGE.md` — the generated reference tree and its byte budget

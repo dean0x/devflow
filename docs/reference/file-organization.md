@@ -14,6 +14,7 @@ devflow/
 │   │   │                             #   uninstall.ts, safe-delete.ts, security.ts, debug.ts,
 │   │   │                             #   capture.ts, legacy-hooks.ts, compliance.ts,
 │   │   │                             #   compliance-prompts.ts, attribution-prompts.ts,
+│   │   │                             #   tracker-prompts.ts, gate-level-prompts.ts,
 │   │   │                             #   prompt-io.ts, proxy.ts, agents.ts, gates.ts, knowledge/
 │   │   ├── tui/                      # Generic TUI shell — runTui<S,A> driver, normalizeKey, cell helpers
 │   │   ├── flags-view/               # Claude Code flags editor TUI — standalone `devflow flags` command, inline screen mode (state.ts, render.ts, terminal.ts, index.ts)

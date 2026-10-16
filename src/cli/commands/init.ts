@@ -85,6 +85,18 @@ import {
   type TrackerStepMessage,
 } from './tracker-prompts.js';
 import {
+  buildClackGateLevelPrompts,
+  carriedGateLevel,
+  formatGateLevelRow,
+  formatGateLevelSummary,
+  readStoredGateLevel,
+  resolveGateLevelForInit,
+  resolveGateLevelInitState,
+  type GateLevelDecision,
+  type StoredGateLevel,
+} from './gate-level-prompts.js';
+import type { GateLevel } from '../../core/gate-level.js';
+import {
   shouldRunAttributionStep,
   runAttributionStep,
   buildClackAttributionPrompts,
@@ -626,6 +638,12 @@ interface InitOptions {
    * There is no --no-tracker: --tracker github is the default (decision D-E).
    */
   tracker?: string;
+  /**
+   * Machine gate level (full | standard | lean), parsed by parseGateLevel.
+   * string    → --gate-level <level> (set the machine level, suppress the wizard prompt)
+   * undefined → not passed; the prompt (interactive) or the stored value (otherwise)
+   */
+  gateLevel?: string;
   security?: SecurityMode;
   hudOnly?: boolean;
   recommended?: boolean;
@@ -700,12 +718,18 @@ export async function drainDisabledFeatureQueues(
  * bumped version would make the next init skip the upgrade it still owes.
  *
  * With no prior manifest the result is the fresh HUD-only record: every other
- * feature off, which is what is installed.
+ * feature off, which is what is installed. `readManifest()` also reads a manifest it
+ * refuses as no manifest, so `refusedGateLevel` carries the machine gate level found in
+ * the raw file (`readStoredGateLevel`): the fresh record keeps it exactly as stored,
+ * malformed and `null` included, and holds no key when it is `undefined`. Init never
+ * writes a gate level the user did not choose. It is ignored over a prior install,
+ * whose own level is already kept.
  */
 export function buildHudOnlyManifest(
   existing: ManifestData | null,
   version: string,
   now: string,
+  refusedGateLevel?: unknown,
 ): ManifestData {
   if (existing !== null) {
     return {
@@ -726,6 +750,7 @@ export function buildHudOnlyManifest(
       // The exported default, not a literal — the one constant every other
       // module reads, so a moved default moves here too.
       tracker: { provider: DEFAULT_TRACKER_PROVIDER },
+      ...(refusedGateLevel !== undefined ? { gateLevel: refusedGateLevel } : {}),
     },
     installedAt: now,
     updatedAt: now,
@@ -856,6 +881,7 @@ export const initCommand = new Command('init')
   .option('--compliance <list>', 'Enable compliance with comma-separated framework IDs (e.g., gdpr,hipaa)')
   .option('--no-compliance', 'Disable compliance (removes the rule; the skill and framework references stay installed; frameworks remembered for re-enable)')
   .option('--tracker <id>', 'The machine\'s default issue tracker provider: github, jira, or linear')
+  .option('--gate-level <full|standard|lean>', 'The machine\'s default gate level: full, standard, or lean (skips the gate level prompt)')
   .option('--security <mode>', 'Security deny list location: user, managed, or none', /^(user|managed|none)$/i)
   .option('--hud-only', 'Install only the HUD (no plugins, hooks, or extras)')
   .option('--recommended', 'Apply recommended defaults after plugin selection (skip advanced prompts)')
@@ -882,6 +908,20 @@ export const initCommand = new Command('init')
     if (options.reset && options.plugin) {
       p.log.error('--reset and --plugin are mutually exclusive. Use --reset alone to restore defaults, or --plugin to update a specific plugin.');
       process.exit(1);
+    }
+
+    // Parse --gate-level at the boundary, before anything is written (--hud-only writes early).
+    // Strict — reject, never repair — so a typo'd level exits here rather than being ignored.
+    let cliGateLevel: GateLevel | undefined;
+    {
+      const gateLevelResult = resolveGateLevelInitState(options.gateLevel, !!options.hudOnly);
+      if (gateLevelResult !== undefined) {
+        if (!gateLevelResult.ok) {
+          p.log.error(gateLevelResult.error);
+          process.exit(1);
+        }
+        cliGateLevel = gateLevelResult.value;
+      }
     }
 
     // D-SCOPE-RETIRED: refuse a retired --scope value before anything is written.
@@ -936,13 +976,28 @@ export const initCommand = new Command('init')
       try {
         existingHudManifest = await readManifest(devflowDir);
       } catch { /* absent on fresh install — existingHudManifest stays null */ }
+      // A manifest readManifest() refuses reads as none, but its machine gate level is still
+      // stored there: --hud-only keeps it and says so, as the full init does. --reset does not
+      // apply here, so nothing asks to forget it.
+      const hudStoredGate = await readStoredGateLevel(devflowDir, existingHudManifest, false);
 
+      let hudManifestWritten = false;
       try {
         await writeManifest(
           devflowDir,
-          buildHudOnlyManifest(existingHudManifest, version, new Date().toISOString()),
+          buildHudOnlyManifest(existingHudManifest, version, new Date().toISOString(), hudStoredGate.value),
         );
+        hudManifestWritten = true;
       } catch { /* non-fatal */ }
+      if (hudStoredGate.origin !== 'manifest') {
+        logSummaryLines(formatGateLevelSummary({
+          level: hudStoredGate.value,
+          priorLevel: hudStoredGate.value,
+          priorOrigin: hudStoredGate.origin,
+          kept: true,
+          manifestWritten: hudManifestWritten,
+        }));
+      }
 
       const hudOnlySkew = formatHudOnlySkew(existingHudManifest?.version ?? null, await readRunningVersion());
       if (hudOnlySkew !== null) p.log.warn(hudOnlySkew);
@@ -958,6 +1013,15 @@ export const initCommand = new Command('init')
     try {
       existingManifest = await readManifest(devflowDir, { onWarning: (message) => p.log.warn(message) });
     } catch { /* unreadable manifest — seeded as a fresh install */ }
+    // The stored machine gate level, and where it was found. readManifest() reads a manifest it
+    // refuses (a missing required field, a byte-order mark, unparseable JSON) as no manifest, so
+    // the seed holds no level for it, yet `devflow gates` and the settings resolver still read
+    // that file's level. Init never writes a level the user did not choose, so when readManifest()
+    // returned none the raw file decides: a level found in it is the level the run replaces, and
+    // is kept as stored unless --reset asks to forget it. A file that cannot be read at all is
+    // reported as "unreadable". This is an init-side override; the seed itself still comes from
+    // the manifest alone.
+    const storedGate: StoredGateLevel = await readStoredGateLevel(devflowDir, existingManifest, !!options.reset);
     // D-INIT-NOT-HOME (same-location.ts): a repository rooted at HOME is no
     // project, so init treats it as no repository — no .devflow/config.json (that
     // would be the machine root's), no .claudeignore, no .gitignore block, no
@@ -1215,11 +1279,21 @@ export const initCommand = new Command('init')
     // alone, so init carries the prior value through untouched: it stamps the installed agents
     // with it and writes it back to the manifest. Absent stays absent (the default list).
     const trackerServers = seed.features.tracker.servers;
-    // The machine gate level (features.gateLevel) is set by `devflow gates --set` alone, so init
-    // carries the prior value through raw: no default, no narrowing, a stored `null` kept. The
-    // seed holds `undefined` only for an absent key or a --reset seed, and the full manifest
-    // write below then leaves the key out.
-    const gateLevel = seed.features.gateLevel;
+    // The machine gate level (features.gateLevel), shared with `devflow gates --set`. The seed holds
+    // it raw: `undefined` only for an absent key or a --reset seed, a malformed value or `null` as
+    // stored. When readManifest() returned none, the raw level (`storedGate`, read above) stands in
+    // for the seed, as `carriedGateLevel` decides. It stays raw unless --gate-level or the wizard
+    // step sets it, so a plain init never defaults, narrows or heals it; the full manifest write
+    // below then leaves an absent key out. Each wizard path assigns the decision `runGateLevelStepAt`
+    // makes; that is the only precedence site (--gate-level, then the wizard answer, then this
+    // carried level), and `carried` says whether the level is still the carried one.
+    const carriedGate = carriedGateLevel({
+      manifest: existingManifest,
+      reset: !!options.reset,
+      stored: storedGate,
+      seedLevel: seed.features.gateLevel,
+    });
+    let gateDecision: GateLevelDecision = { level: carriedGate.value, carried: true };
     let enabledFlags: FlagsRecord = { ...seed.flags };
     // viewModeExplicit: true when --reset is passed; signals resolveFinalViewMode to let the
     // seed-time view-mode win over an externally-set value in settings.json.
@@ -1281,6 +1355,32 @@ export const initCommand = new Command('init')
       return trackerStep.state;
     };
 
+    /**
+     * Decide the machine gate level for one wizard path: --gate-level, else the wizard step
+     * (gated on modePromptShown), else the stored value untouched. The step's outcome line is
+     * the post-install gate level summary row, on both paths.
+     *
+     * Returns the decision, the level raw as `resolveGateLevelForInit` returns it and whether it
+     * is the carried stored level. The caller assigns it to `gateDecision`: that value is the
+     * only precedence decision, and nothing after the call revises it.
+     */
+    const runGateLevelStepAt = async (mode: 'recommended' | 'advanced'): Promise<GateLevelDecision> => {
+      const outcome = await resolveGateLevelForInit({
+        cliLevel: cliGateLevel,
+        stored: gateDecision.level,
+        storedOrigin: carriedGate.origin,
+        mode,
+        modePromptShown,
+        isTTY: process.stdin.isTTY,
+        prompts: buildClackGateLevelPrompts(),
+      });
+      if (outcome.kind === 'cancelled') {
+        p.cancel('Installation cancelled.');
+        process.exit(0);
+      }
+      return { level: outcome.level, carried: outcome.carried };
+    };
+
     // Safe-delete detection (both paths need this)
     const platform = detectPlatform();
     const shell = detectShell();
@@ -1325,6 +1425,10 @@ export const initCommand = new Command('init')
       const wizardTracker = await runTrackerStepAt(
         'recommended', seed.features.tracker.provider, false,
       );
+
+      // Gate level wizard step — same gate; --recommended and !isTTY keep the stored value.
+      // The decision is final here: applyCliToggles below carries no gate level.
+      gateDecision = await runGateLevelStepAt('recommended');
 
       // No attribution step here: the suppress-attribution question is Advanced-only (D27).
       // Recommended silently carries the seeded value in enabledFlags — fresh installs get
@@ -1406,6 +1510,9 @@ export const initCommand = new Command('init')
         // tracker step's ONLY surface on this path — both surfaces or it is
         // invisible on one path.
         `Tracker:         ${formatTrackerSummary(trackerProvider)}`,
+        // The level this run will record, or the stored one it keeps; the summary after the
+        // install reports what the run really recorded.
+        `Gate level:      ${formatGateLevelRow(gateDecision.level, carriedGate.origin)}`,
         `View mode:       ${readViewMode(enabledFlags)}`,
         `Claude Code flags: ${defaultFlagCount} configured`,
         `.claudeignore:   ${resolveClaudeignoreOutcome(claudeignorePresent)}`,
@@ -1651,6 +1758,9 @@ export const initCommand = new Command('init')
         if (overrideLine.level === 'success') p.log.success(overrideLine.text);
         else p.log.info(overrideLine.text);
       }
+
+      // Gate level wizard step — same gate as the Recommended path; re-init lands here.
+      gateDecision = await runGateLevelStepAt('advanced');
 
       // Attribution feature (after compliance, before flags). This is the ONLY call site —
       // the attribution question is Advanced-only (D27); the Recommended path never asks and
@@ -2706,8 +2816,9 @@ export const initCommand = new Command('init')
         // through parseTrackerId (CLI), the typed wizard select, or the seed, which
         // itself came through normalizeTrackerFeature on read.
         tracker: { provider: trackerProvider, ...(trackerServers !== undefined ? { servers: trackerServers } : {}) },
-        // The prior machine gate level, raw (see where `gateLevel` is read above).
-        ...(gateLevel !== undefined ? { gateLevel } : {}),
+        // The machine gate level: --gate-level, the wizard answer, or the prior value raw
+        // (see where `gateDecision` is read above).
+        ...(gateDecision.level !== undefined ? { gateLevel: gateDecision.level } : {}),
       },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,
@@ -2760,6 +2871,15 @@ export const initCommand = new Command('init')
       agent: trackerLifecycle.agent,
     });
     logSummaryLines(trackerLines);
+
+    // The gate level this run recorded, from the manifest the run wrote (D-INIT-REAL-OUTCOME).
+    logSummaryLines(formatGateLevelSummary({
+      level: gateDecision.level,
+      priorLevel: storedGate.value,
+      priorOrigin: storedGate.origin,
+      kept: gateDecision.carried && carriedGate.origin === 'rejected',
+      manifestWritten: trackerLifecycle.manifestWritten,
+    }));
 
     // CLAUDE.md import audit (D-CLAUDE-MD-IMPORT-AUDIT, D-AUDIT-STAMP): after the install, on
     // both paths, through claudeMdAuditStep. Global roots always; the project's roots when init
