@@ -669,13 +669,7 @@ function emit(outcome) {
 }
 
 if (require.main === module) {
-  let outcome;
-  try {
-    outcome = main(process.argv);
-  } catch (_) {
-    outcome = { code: 0, line: FALLBACK_LINE };
-  }
-  emit(outcome);
+  emit(main(process.argv));
 }
 
 // ---------------------------------------------------------------------------
