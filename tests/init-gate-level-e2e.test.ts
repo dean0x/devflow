@@ -110,9 +110,18 @@ describe('init --help', () => {
 });
 
 describe('init --gate-level <level>', () => {
-  it('sets the machine level with no prompt, and the summary shows it', async () => {
+  it('sets the machine level with no prompt, writes no gateLevel into the repository config, and the summary shows it', async () => {
+    const config = path.join(repo, '.devflow', 'config.json');
+    await fs.mkdir(path.dirname(config), { recursive: true });
+    await fs.writeFile(config, '{"reviewPublication":"auto"}\n', 'utf-8');
+
     const out = runInit(repo, '--recommended', '--gate-level', 'lean');
+
     expect(await readFeatures()).toMatchObject({ gateLevel: 'lean' });
+    // The level is the machine's; init rewrites the repository config without adding it.
+    const repoConfig = JSON.parse(await fs.readFile(config, 'utf-8')) as Record<string, unknown>;
+    expect(repoConfig).toMatchObject({ reviewPublication: 'auto' });
+    expect(Object.hasOwn(repoConfig, 'gateLevel')).toBe(false);
     expect(out).toMatch(/Gate level: lean\b/);
     // `devflow gates` reads the same field.
     const status = runCli(repo, 'gates', '--status');
@@ -389,14 +398,5 @@ describe('a personal gateLevel still wins over the machine level init sets', () 
     expect(status.status).toBe(0);
     expect(status.out).toContain('Effective: full (personal)');
     expect(status.out).toContain('Machine:   lean');
-  }, MULTI_RUN_TIMEOUT_MS);
-
-  it('init does not write a gateLevel into a repository config that has none', async () => {
-    runInit(repo, '--recommended', '--gate-level', 'lean');
-    const personal = path.join(repo, '.devflow', 'config.json');
-    if (existsSync(personal)) {
-      const config = JSON.parse(await fs.readFile(personal, 'utf-8')) as Record<string, unknown>;
-      expect(Object.hasOwn(config, 'gateLevel')).toBe(false);
-    }
   }, MULTI_RUN_TIMEOUT_MS);
 });

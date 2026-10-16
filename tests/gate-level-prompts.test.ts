@@ -60,12 +60,19 @@ import { makeManifest } from './helpers.js';
 // ── Fake prompt builder ────────────────────────────────────────────────────────
 
 /**
+ * What a test answers at the level prompt: a chosen level, a cancel, or `accept`, which
+ * is Enter on the value the prompt showed. `accept` returns what the prompt offered as
+ * `initialValue`, so a test that accepts checks that the shown start value is what Enter writes.
+ */
+type LevelAnswer = PromptOutcome<GateLevel> | { kind: 'accept' };
+
+/**
  * Build a fake GateLevelPromptIO from queued responses. Responses are consumed in
  * order; the test fails loudly if a prompt is called more times than responses
  * were queued (non-vacuous assertions).
  */
 function makePrompts() {
-  const levelQueue: PromptOutcome<GateLevel>[] = [];
+  const levelQueue: LevelAnswer[] = [];
   const notes: Array<{ message: string; title: string }> = [];
   const asked: Array<Parameters<GateLevelPromptIO['selectLevel']>[0]> = [];
 
@@ -78,6 +85,7 @@ function makePrompts() {
       asked.push(opts);
       const next = levelQueue.shift();
       if (!next) throw new Error('No selectLevel response queued — test missing a queued outcome');
+      if (next.kind === 'accept') return { kind: 'value', value: opts.initialValue };
       return next;
     },
   };
@@ -401,7 +409,7 @@ describe('gateLevelChoices and formatGateLevelCatalogue', () => {
 describe('runGateLevelStep', () => {
   it('first install: the select starts on the default level and offers all three', async () => {
     const { prompts, levelQueue, asked } = makePrompts();
-    levelQueue.push({ kind: 'value', value: 'standard' });
+    levelQueue.push({ kind: 'accept' });
 
     await runGateLevelStep({ stored: undefined, prompts });
 
@@ -414,8 +422,8 @@ describe('runGateLevelStep', () => {
   it('re-init: the select starts on the stored level, and accepting it keeps it', async () => {
     for (const stored of GATE_LEVELS) {
       const { prompts, levelQueue, asked } = makePrompts();
-      // Accept the prompt exactly as shown: answer with whatever it starts on.
-      levelQueue.push({ kind: 'value', value: stored });
+      // Accept the prompt exactly as shown: Enter on whatever it starts on.
+      levelQueue.push({ kind: 'accept' });
 
       const outcome = await runGateLevelStep({ stored, prompts });
 
@@ -426,7 +434,7 @@ describe('runGateLevelStep', () => {
 
   it('the note shows the current machine value', async () => {
     const { prompts, levelQueue, notes } = makePrompts();
-    levelQueue.push({ kind: 'value', value: 'lean' });
+    levelQueue.push({ kind: 'accept' });
 
     await runGateLevelStep({ stored: 'lean', prompts });
 
@@ -439,7 +447,7 @@ describe('runGateLevelStep', () => {
 
   it('the note on a first install names the default', async () => {
     const { prompts, levelQueue, notes } = makePrompts();
-    levelQueue.push({ kind: 'value', value: 'standard' });
+    levelQueue.push({ kind: 'accept' });
 
     await runGateLevelStep({ stored: undefined, prompts });
 
@@ -448,7 +456,7 @@ describe('runGateLevelStep', () => {
 
   it('a level read from a refused manifest: the note names it and says init keeps it, and the select starts on it', async () => {
     const { prompts, levelQueue, notes, asked } = makePrompts();
-    levelQueue.push({ kind: 'value', value: 'full' });
+    levelQueue.push({ kind: 'accept' });
 
     const outcome = await runGateLevelStep({ stored: 'full', storedOrigin: 'rejected', prompts });
 
@@ -462,7 +470,7 @@ describe('runGateLevelStep', () => {
 
   it('a malformed level read from a refused manifest: the note says how it reads, never the raw value', async () => {
     const { prompts, levelQueue, notes, asked } = makePrompts();
-    levelQueue.push({ kind: 'value', value: 'full' });
+    levelQueue.push({ kind: 'accept' });
 
     await runGateLevelStep({ stored: 'ZZ-raw-canary', storedOrigin: 'rejected', prompts });
 
@@ -473,7 +481,7 @@ describe('runGateLevelStep', () => {
 
   it('a stored level that cannot be read: the note says so and never shows the default as if it were stored', async () => {
     const { prompts, levelQueue, notes, asked } = makePrompts();
-    levelQueue.push({ kind: 'value', value: 'standard' });
+    levelQueue.push({ kind: 'accept' });
 
     await runGateLevelStep({ stored: undefined, storedOrigin: 'unreadable', prompts });
 
@@ -633,7 +641,7 @@ describe('resolveGateLevelForInit', () => {
 
     it('first install, Advanced chosen at the mode prompt: asks, and accepting keeps the default', async () => {
       const { prompts, levelQueue, asked } = makePrompts();
-      levelQueue.push({ kind: 'value', value: 'standard' });
+      levelQueue.push({ kind: 'accept' });
 
       const outcome = await resolveGateLevelForInit({
         ...base, mode: 'advanced', modePromptShown: true, prompts,
@@ -645,7 +653,7 @@ describe('resolveGateLevelForInit', () => {
 
     it('re-init (Advanced, no mode prompt): asks, starting on the stored level, and accepting keeps it', async () => {
       const { prompts, levelQueue, asked } = makePrompts();
-      levelQueue.push({ kind: 'value', value: 'full' });
+      levelQueue.push({ kind: 'accept' });
 
       const outcome = await resolveGateLevelForInit({
         ...base, mode: 'advanced', stored: 'full', prompts,
@@ -667,7 +675,7 @@ describe('resolveGateLevelForInit', () => {
       expect(outcome).toEqual({ kind: 'resolved', level: 'lean' });
     });
 
-    it('a cancelled prompt returns cancelled and records nothing', async () => {
+    it('a cancelled prompt returns cancelled on both paths', async () => {
       for (const mode of ['recommended', 'advanced'] as const) {
         const { prompts, levelQueue } = makePrompts();
         levelQueue.push({ kind: 'cancel' });
