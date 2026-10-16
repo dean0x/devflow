@@ -90,7 +90,7 @@ import {
   formatGateLevelSummary,
   readStoredGateLevel,
   resolveGateLevelForInit,
-  resolveGateLevelInitOption,
+  resolveGateLevelInitState,
   type StoredGateLevel,
 } from './gate-level-prompts.js';
 import type { GateLevel } from '../../core/gate-level.js';
@@ -912,7 +912,7 @@ export const initCommand = new Command('init')
     // Strict — reject, never repair — so a typo'd level exits here rather than being ignored.
     let cliGateLevel: GateLevel | undefined;
     {
-      const gateLevelResult = resolveGateLevelInitOption(options.gateLevel, !!options.hudOnly);
+      const gateLevelResult = resolveGateLevelInitState(options.gateLevel, !!options.hudOnly);
       if (gateLevelResult !== undefined) {
         if (!gateLevelResult.ok) {
           p.log.error(gateLevelResult.error);

@@ -9,6 +9,9 @@
  * D-PROMPT-IO: WizardPromptIO is the base DI seam for all two-action wizard
  * steps (note + boolean select). Modules that add a third prompt extend this
  * interface with an intersection type (e.g. CompliancePromptIO).
+ *
+ * The shared wizard gate predicate (shouldRunPromptedWizardStep) lives here too,
+ * beside the seam every prompted step already imports.
  */
 
 import * as p from '@clack/prompts';
@@ -36,6 +39,44 @@ export interface WizardPromptIO {
     options: Array<{ value: boolean; label: string; hint: string }>;
     initialValue: boolean;
   }) => Promise<PromptOutcome<boolean>>;
+}
+
+// ── Shared gate predicate ─────────────────────────────────────────────────────
+
+/**
+ * Determines whether a wizard step that runs on both wizard paths should run for a
+ * given init invocation.
+ *
+ * Gate table (key on modePromptShown, never on the mode name):
+ *
+ *   --recommended flag / !isTTY fallback             → no (promptless contract preserved)
+ *   Interactive mode-prompt → Recommended            → yes (modePromptShown=true)
+ *   --advanced flag / re-init (banner path)          → yes (mode='advanced', isTTY=true)
+ *   Interactive mode-prompt → Advanced               → yes (modePromptShown=true)
+ *   Any path with the step's CLI flag                → no (hasCliOverride wins)
+ *
+ * A step that wires only the Recommended path is dead on every re-init, because re-init
+ * is Advanced-only by construction, so each step calls this predicate from both paths.
+ * The gate-level step delegates here. The attribution step is Advanced-only by design
+ * and does not use this table.
+ *
+ * Pure predicate — no side effects, fully testable without a TTY.
+ */
+export function shouldRunPromptedWizardStep(input: {
+  mode: 'recommended' | 'advanced';
+  modePromptShown: boolean;
+  isTTY: boolean;
+  hasCliOverride: boolean;
+}): boolean {
+  if (input.hasCliOverride) return false;
+  if (!input.isTTY) return false;
+  // Advanced path: non-TTY has already exit-1'd, so isTTY=true here → always run.
+  // Covers: --advanced flag, re-init banner path, interactive-prompt → advanced.
+  if (input.mode === 'advanced') return true;
+  // Recommended path: only run when the Setup-mode p.select actually ran
+  // (user made an active choice). --recommended flag and !isTTY fallback never set
+  // modePromptShown=true, preserving their promptless contracts.
+  return input.modePromptShown;
 }
 
 // ── Shared clack adapters ─────────────────────────────────────────────────────

@@ -26,7 +26,13 @@
  * cannot be read at all is named as unreadable, never shown as the default.
  */
 
-import { clackNote, clackSelect, type PromptOutcome, type WizardPromptIO } from './prompt-io.js';
+import {
+  clackNote,
+  clackSelect,
+  shouldRunPromptedWizardStep,
+  type PromptOutcome,
+  type WizardPromptIO,
+} from './prompt-io.js';
 import type { SummaryLine } from './install-report.js';
 import {
   DEFAULT_GATE_LEVEL,
@@ -207,13 +213,13 @@ function currentSettingLines(stored: unknown, origin: StoredGateLevelOrigin): st
  *
  * Returns undefined when the option was not passed.
  */
-export function resolveGateLevelInitOption(
+export function resolveGateLevelInitState(
   option: string | undefined,
   hudOnly: boolean,
 ): { ok: true; value: GateLevel } | { ok: false; error: string } | undefined {
   if (typeof option !== 'string') return undefined;
   const parsed = parseGateLevel(option);
-  if (!parsed.ok) return { ok: false, error: `--gate-level: ${parsed.error}` };
+  if (!parsed.ok) return { ok: false, error: parsed.error };
   if (hudOnly) {
     return {
       ok: false,
@@ -228,17 +234,10 @@ export function resolveGateLevelInitOption(
 /**
  * Determines whether the gate-level wizard step should run for a given init invocation.
  *
- * Gate table (key on modePromptShown, never on the mode name):
- *
- *   --recommended flag / !isTTY fallback             → no (promptless contract preserved)
- *   Interactive mode-prompt → Recommended            → yes (modePromptShown=true)
- *   --advanced flag / re-init (banner path)          → yes (mode='advanced', isTTY=true)
- *   Interactive mode-prompt → Advanced               → yes (modePromptShown=true)
- *   Any path with --gate-level <level>               → no (hasCliOverride wins)
- *
- * Both wizard paths call this predicate through resolveGateLevelForInit, so the
- * table above is the single authority for both. Re-init is Advanced-only by
- * construction, so a Recommended-only wiring would be dead on every re-init.
+ * The gate table, keyed on modePromptShown and never on the mode name, is
+ * `shouldRunPromptedWizardStep` in prompt-io.ts: the one authority for both wizard
+ * paths, which reach it through resolveGateLevelForInit. `--gate-level <level>` is
+ * the CLI override that suppresses the step on every path.
  *
  * Pure predicate — no side effects, fully testable without a TTY.
  */
@@ -248,15 +247,7 @@ export function shouldRunGateLevelStep(input: {
   isTTY: boolean;
   hasCliOverride: boolean;
 }): boolean {
-  if (input.hasCliOverride) return false;
-  if (!input.isTTY) return false;
-  // Advanced path: non-TTY has already exit-1'd, so isTTY=true here → always run.
-  // Covers: --advanced flag, re-init banner path, interactive-prompt → advanced.
-  if (input.mode === 'advanced') return true;
-  // Recommended path: only run when the Setup-mode p.select actually ran
-  // (user made an active choice). --recommended flag and !isTTY fallback never set
-  // modePromptShown=true, preserving their promptless contracts.
-  return input.modePromptShown;
+  return shouldRunPromptedWizardStep(input);
 }
 
 // ── DI seam ────────────────────────────────────────────────────────────────────

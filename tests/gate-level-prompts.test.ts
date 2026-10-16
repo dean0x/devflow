@@ -2,7 +2,7 @@
  * Tests for src/cli/commands/gate-level-prompts.ts
  *
  * Covers:
- *   - resolveGateLevelInitOption: the --gate-level boundary (valid, invalid, --hud-only)
+ *   - resolveGateLevelInitState: the --gate-level boundary (valid, invalid, --hud-only)
  *   - shouldRunGateLevelStep: all 8 gate rows (the compliance/tracker gate table)
  *   - gateLevelPromptSeed / describeGateLevel: first install, re-init, malformed values
  *   - runGateLevelStep: step semantics via fake recorded IO (injectable prompts)
@@ -35,14 +35,20 @@ import {
   gateLevelPromptSeed,
   readStoredGateLevel,
   resolveGateLevelForInit,
-  resolveGateLevelInitOption,
+  resolveGateLevelInitState,
   runGateLevelStep,
   shouldRunGateLevelStep,
   storedGateLevelFromRaw,
   type GateLevelPromptIO,
 } from '../src/cli/commands/gate-level-prompts.js';
 import type { PromptOutcome } from '../src/cli/commands/prompt-io.js';
-import { DEFAULT_GATE_LEVEL, GATE_LEVELS, type GateLevel, type GateManifestRead } from '../src/core/gate-level.js';
+import {
+  DEFAULT_GATE_LEVEL,
+  GATE_LEVELS,
+  parseGateLevel,
+  type GateLevel,
+  type GateManifestRead,
+} from '../src/core/gate-level.js';
 import { FEATURE_DEFAULTS, resolveSeedFeatures } from '../src/cli/commands/init-seed.js';
 import { makeManifest } from './helpers.js';
 
@@ -80,17 +86,17 @@ function neverPrompts(): GateLevelPromptIO {
   return { note: fail, select: fail, selectLevel: fail };
 }
 
-// ── resolveGateLevelInitOption — the --gate-level boundary ─────────────────────
+// ── resolveGateLevelInitState — the --gate-level boundary ─────────────────────
 
-describe('resolveGateLevelInitOption', () => {
+describe('resolveGateLevelInitState', () => {
   it('returns undefined when the option was not passed', () => {
-    expect(resolveGateLevelInitOption(undefined, false)).toBeUndefined();
+    expect(resolveGateLevelInitState(undefined, false)).toBeUndefined();
   });
 
   it('accepts each of the three levels', () => {
     expect(GATE_LEVELS).toHaveLength(3);
     for (const level of GATE_LEVELS) {
-      expect(resolveGateLevelInitOption(level, false)).toEqual({ ok: true, value: level });
+      expect(resolveGateLevelInitState(level, false)).toEqual({ ok: true, value: level });
     }
   });
 
@@ -98,23 +104,32 @@ describe('resolveGateLevelInitOption', () => {
     const BAD = ['Lean', 'lean ', ' lean', 'FULL', 'strict', '', 'standard,lean'];
     expect(BAD).toHaveLength(7);
     for (const value of BAD) {
-      const result = resolveGateLevelInitOption(value, false);
+      const result = resolveGateLevelInitState(value, false);
       expect(result?.ok, `expected ${JSON.stringify(value)} to be rejected`).toBe(false);
       if (result !== undefined && !result.ok) {
-        expect(result.error).toContain('--gate-level');
         expect(result.error).toContain('Valid levels: full, standard, lean');
       }
     }
   });
 
+  it('passes the parser error through unchanged, as the tracker and compliance parsers do', () => {
+    for (const value of ['Lean', 'strict', '']) {
+      const parsed = parseGateLevel(value);
+      expect(parsed.ok).toBe(false);
+      if (!parsed.ok) {
+        expect(resolveGateLevelInitState(value, false)).toEqual({ ok: false, error: parsed.error });
+      }
+    }
+  });
+
   it('refuses --hud-only with a valid level instead of ignoring the flag', () => {
-    const result = resolveGateLevelInitOption('lean', true);
+    const result = resolveGateLevelInitState('lean', true);
     expect(result?.ok).toBe(false);
     if (result !== undefined && !result.ok) expect(result.error).toContain('--hud-only');
   });
 
   it('reports a bad value before the --hud-only conflict', () => {
-    const result = resolveGateLevelInitOption('Lean', true);
+    const result = resolveGateLevelInitState('Lean', true);
     expect(result?.ok).toBe(false);
     if (result !== undefined && !result.ok) expect(result.error).toContain('Valid levels');
   });
@@ -455,7 +470,7 @@ describe('runGateLevelStep', () => {
   });
 });
 
-// ── resolveGateLevelInitOption + resolveGateLevelForInit: the init paths ───────
+// ── resolveGateLevelInitState + resolveGateLevelForInit: the init paths ───────
 
 describe('resolveGateLevelForInit', () => {
   const base = { cliLevel: undefined, stored: undefined, modePromptShown: false, isTTY: true } as const;
