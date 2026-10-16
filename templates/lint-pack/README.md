@@ -173,6 +173,7 @@ The `pack-changed` and `pack-dirty` lines print even when the result is `no-conf
 - The script searches `HEAD` with `git grep`. It never follows a symlink out of the repository.
 - The linter must finish within the Bash timeout that Validate sets for the run. If the timeout stops the script with SIGTERM or SIGINT, the script prints `LINT_PACK: error interrupted`. Validate then reports the pack as `UNVERIFIED`.
 - A `pack-dirty` line lists an untracked file only when git does not ignore it.
+- The pack prints the base it compared (`base <sha>`), but Validate does not check that base yet, and issue #537 adds that check. A changed build-file line that names `lint-pack` or `BASE` inside the compared range is still reported as a pack change.
 
 ## False positives
 

@@ -199,7 +199,7 @@ Assets live once in `src/assets/` and install to the user's `~/.claude/` — no 
 | Scripts (root) | `src/assets/scripts/*.cjs`, `lib/`, `hud.sh` | `~/.devflow/scripts/` | None — edit → init |
 | Scripts (hooks) | `src/assets/scripts/hooks/` | `~/.devflow/scripts/hooks/` | None — edit → init |
 
-`templates/lint-pack/` is not an asset. It ships in the npm package, `devflow init` never installs it, and devflow never runs the template itself. A project copies the folder, owns the copy and wires it as a root `lint-pack` script or `Makefile` target, which Validate runs at the `lean` gate level. The template README describes the wiring.
+`templates/lint-pack/` is not an asset. It ships in the npm package, `devflow init` never installs it, and devflow never runs the template itself. A project copies the folder, owns the copy and wires it as a root `lint-pack` script or `Makefile` target, which Validate runs last at the `lean` gate level and at no other level. The script finds the faults a linter does not in the branch diff. A project clears an accepted match with an allow glob in `.lint-pack.conf`. The template README describes the wiring.
 
 ### Packaging
 
