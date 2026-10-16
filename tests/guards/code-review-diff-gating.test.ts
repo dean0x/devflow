@@ -370,7 +370,7 @@ export function collectReviewAgentDefects(review: string): string[] {
   else {
     if (!/absolute path/i.test(file[0])) out.push('DIFF_FILE is not described as an absolute path')
     if (!/Page a `DIFF_FILE` larger than one Read with offset\/limit\./.test(file[0])) out.push('the paging sentence for a large DIFF_FILE is missing')
-    if (!file[0].includes('`git diff {base_branch}...HEAD`')) out.push('the default git diff fallback is missing from the DIFF_FILE bullet')
+    if (!file[0].includes('`git diff {DIFF_RANGE}`')) out.push('the default git diff fallback is missing from the DIFF_FILE bullet')
   }
   const range = /^- \*\*DIFF_RANGE\*\* \(optional\): [^\n]*$/m.exec(review)
   if (range === null) out.push('review.md Input does not declare DIFF_RANGE')
@@ -378,6 +378,7 @@ export function collectReviewAgentDefects(review: string): string[] {
   const identify = review.match(/^\d+\. \*\*Identify changed lines\*\*[^\n]*$/gm) ?? []
   if (identify.length === 0) out.push('no Identify changed lines responsibility')
   for (const line of identify) if (!line.includes('`DIFF_FILE`')) out.push(`Identify changed lines does not read DIFF_FILE: ${line.slice(0, 60)}`)
+  for (const line of identify) if (!line.includes('DIFF_RANGE')) out.push(`Identify changed lines does not fall back to DIFF_RANGE: ${line.slice(0, 60)}`)
   const verify = /Self-verify findings[\s\S]*?finding at original confidence\./.exec(review)
   if (verify === null) out.push('no Self-verify responsibility')
   else {
@@ -391,6 +392,41 @@ export function collectReviewAgentDefects(review: string): string[] {
 // ---------------------------------------------------------------------------
 // Corpus
 // ---------------------------------------------------------------------------
+
+/**
+ * #495 (use a fresh base for branch diffs): the base ref that ensure-pr-ready returns is the base of
+ * DIFF_RANGE. The Extract line tests the Base line and the hex base_ref and carries no copy of the name
+ * class (the Git op already stops on a refused name); a non-zero diff exit stops at the first diff; a
+ * degraded base prints one freshness line.
+ */
+export function collectFreshBaseDefects(body: string): string[] {
+  const out: string[] = []
+  const spawnAt = body.indexOf('OPERATION: ensure-pr-ready')
+  const ret = spawnAt === -1 ? null : /^Return:[^\n]*/m.exec(body.slice(spawnAt))
+  if (ret === null) out.push('the ensure-pr-ready spawn has no Return line')
+  else if (!/\bbase_ref\b/.test(ret[0])) out.push('the Return line does not carry base_ref')
+  const extract = /^\*\*Extract from response:\*\*[^\n]*/m.exec(body)
+  if (extract === null) out.push('no Extract line')
+  else {
+    const line = extract[0]
+    if (!/`base_ref`/.test(line)) out.push('the Extract line does not take base_ref')
+    if (!/Base line reads \(rejected\)/.test(line)) out.push('the Extract line does not test the Base line for (rejected)')
+    if (!/`base_ref` is not 40 or 64 hex/.test(line)) out.push('the Extract line does not test base_ref for 40 or 64 hex')
+    if (!/Stop with cause and fix/.test(line)) out.push('the Extract line does not stop with the cause and the fix')
+    if (/\{1,200\}|origin\\\//.test(line)) out.push('the Extract line carries a copy of the name class')
+  }
+  const ranges = [...body.matchAll(/Set `DIFF_RANGE` to `([^`]+)`/g)].map(m => m[1])
+  if (!ranges.includes('{base_ref}...HEAD')) out.push('DIFF_RANGE is not built from base_ref')
+  if (!ranges.includes('{last-review-sha}...HEAD')) out.push('the incremental DIFF_RANGE changed')
+  if (ranges.some(r => r.includes('{base_branch}'))) out.push('DIFF_RANGE is built from a base name')
+  const listing = step(body, '1.1')
+  if (listing === null) out.push('no Step 1.1 (Classify the diff) in Phase 1')
+  else if (!/A non-zero diff exit stops\./.test(listing)) out.push('Step 1.1 does not say a non-zero diff exit stops')
+  const fresh = body.split('\n').filter(l => /DEGRADED/.test(l) && /\bbase\b/.test(l))
+  if (fresh.length !== 1) out.push(`${fresh.length} freshness lines, expected 1`)
+  else if (!/once in the header/.test(fresh[0])) out.push('the freshness line is not printed once in the header')
+  return out
+}
 
 const VARIANTS: ReadonlyArray<{ label: string; body: string }> = (() => {
   const off = resolveLearningOffSource('commands', 'code-review')
@@ -630,8 +666,10 @@ describe('review.md reads DIFF_FILE and verifies with ranged reads (AC-308)', ()
       .toContain('the paging sentence for a large DIFF_FILE is missing')
     expect(collectReviewAgentDefects(seed(review, 'ranged read of 30 lines either side', 'read of the whole file')))
       .toContain('Responsibility 9 does not require a ranged read of 30 lines either side')
-    expect(collectReviewAgentDefects(seed(review, ' If not provided, default to `git diff {base_branch}...HEAD`.', '')))
+    expect(collectReviewAgentDefects(seed(review, ' If not provided, default to `git diff {DIFF_RANGE}`.', '')))
       .toContain('the default git diff fallback is missing from the DIFF_FILE bullet')
+    expect(collectReviewAgentDefects(seed(review, 'else run `git diff {DIFF_RANGE}`', 'else get it against the base branch')).join('\n'))
+      .toMatch(/Identify changed lines does not fall back to DIFF_RANGE/)
     expect(collectReviewAgentDefects(seed(review, /\*\*Identify changed lines\*\* - Read the diff from `DIFF_FILE`/, '**Identify changed lines** - Read the diff from the base')).join('\n'))
       .toMatch(/Identify changed lines does not read DIFF_FILE/)
   })
@@ -639,6 +677,35 @@ describe('review.md reads DIFF_FILE and verifies with ranged reads (AC-308)', ()
   it('the DIFF_COMMAND of /bug-analysis (a Debug input) is untouched', () => {
     expect(resolveAgentSource('debug').content).toContain('**DIFF_COMMAND**')
     expect(readFileSync(path.join(ROOT, 'src/assets/commands/bug-analysis.mds'), 'utf-8')).toContain('DIFF_COMMAND: git diff {DIFF_RANGE}')
+  })
+})
+
+describe('DIFF_RANGE starts at the fresh base that ensure-pr-ready returns (#495)', () => {
+  it.each(VARIANTS)('$label: Return, Extract, DIFF_RANGE, the exit rule and the freshness line', ({ body }) => {
+    expect(collectFreshBaseDefects(body)).toEqual([])
+  })
+
+  it('known-bad probes: each lost or weakened part is reported', () => {
+    expect(collectFreshBaseDefects(seed(ON, 'Return: branch, base_branch, base_ref, branch-slug, PR#', 'Return: branch, base_branch, branch-slug, PR#')))
+      .toContain('the Return line does not carry base_ref')
+    expect(collectFreshBaseDefects(seed(ON, 'Base line reads (rejected) or', 'Base line is fine or')))
+      .toContain('the Extract line does not test the Base line for (rejected)')
+    expect(collectFreshBaseDefects(seed(ON, '`base_ref` is not 40 or 64 hex', '`base_ref` is empty')))
+      .toContain('the Extract line does not test base_ref for 40 or 64 hex')
+    expect(collectFreshBaseDefects(seed(ON, 'Stop with cause and fix when', 'Warn when')))
+      .toContain('the Extract line does not stop with the cause and the fix')
+    expect(collectFreshBaseDefects(seed(ON, 'Stop with cause and fix when', 'Stop with cause and fix unless it matches `^[A-Za-z0-9._/+@,#-]{1,200}$`, or when')))
+      .toContain('the Extract line carries a copy of the name class')
+    expect(collectFreshBaseDefects(seed(ON, 'Set `DIFF_RANGE` to `{base_ref}...HEAD`', 'Set `DIFF_RANGE` to `{base_branch}...HEAD`')).join('\n'))
+      .toMatch(/DIFF_RANGE is not built from base_ref[\s\S]*DIFF_RANGE is built from a base name/)
+    expect(collectFreshBaseDefects(seed(ON, 'Set `DIFF_RANGE` to `{last-review-sha}...HEAD`', 'Set `DIFF_RANGE` to `{last-review-sha}..HEAD`')))
+      .toContain('the incremental DIFF_RANGE changed')
+    expect(collectFreshBaseDefects(seed(ON, 'A non-zero diff exit stops. ', '')))
+      .toContain('Step 1.1 does not say a non-zero diff exit stops')
+    expect(collectFreshBaseDefects(seed(ON, /^Print a returned base .*$/m, '')))
+      .toContain('0 freshness lines, expected 1')
+    expect(collectFreshBaseDefects(seed(ON, 'line once in the header.', 'line.')))
+      .toContain('the freshness line is not printed once in the header')
   })
 })
 

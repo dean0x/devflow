@@ -130,6 +130,86 @@ describe('bug-analysis.md — incremental detection', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Group 2b: Fresh base for branch diffs (#495)
+//
+// The base ref that ensure-pr-ready returns is the base of DIFF_RANGE. The Extract line tests the
+// Base line and the hex base_ref and carries no copy of the name class (the Git op already stops on
+// a refused name). A non-zero diff exit stops; an empty list stops only on exit 0; a degraded base
+// prints one freshness line. The Debug diff command follows DIFF_RANGE and needs no text change.
+// ---------------------------------------------------------------------------
+
+function collectFreshBaseDefects(body: string): string[] {
+  const out: string[] = [];
+  const spawnAt = body.indexOf('OPERATION: ensure-pr-ready');
+  const ret = spawnAt === -1 ? null : /^Return:[^\n]*/m.exec(body.slice(spawnAt));
+  if (ret === null) out.push('the ensure-pr-ready spawn has no Return line');
+  else if (!/\bbase_ref\b/.test(ret[0])) out.push('the Return line does not carry base_ref');
+  const extract = /^\*\*Extract from response:\*\*[^\n]*/m.exec(body);
+  if (extract === null) out.push('no Extract line');
+  else {
+    const line = extract[0];
+    if (!/`base_ref`/.test(line)) out.push('the Extract line does not take base_ref');
+    if (!/Base line reads \(rejected\)/.test(line)) out.push('the Extract line does not test the Base line for (rejected)');
+    if (!/`base_ref` is not 40 or 64 hex/.test(line)) out.push('the Extract line does not test base_ref for 40 or 64 hex');
+    if (!/Stop with cause and fix/.test(line)) out.push('the Extract line does not stop with the cause and the fix');
+    if (/\{1,200\}|origin\\\//.test(line)) out.push('the Extract line carries a copy of the name class');
+  }
+  const ranges = [...body.matchAll(/Set `DIFF_RANGE` to `([^`]+)`/g)].map(m => m[1]);
+  if (!ranges.includes('{base_ref}...HEAD')) out.push('DIFF_RANGE is not built from base_ref');
+  if (!ranges.includes('{sha}...HEAD')) out.push('the incremental DIFF_RANGE changed');
+  if (ranges.some(r => r.includes('{base_branch}'))) out.push('DIFF_RANGE is built from a base name');
+  const step2b = extractSection(body, 'Step 2b:', 'Step 2c:');
+  if (!/A non-zero diff exit stops\./.test(step2b)) out.push('Step 2b does not say a non-zero diff exit stops');
+  const row = body.split('\n').find(l => l.startsWith('| Zero changed files in DIFF_RANGE'));
+  if (row === undefined) out.push('no stop row for zero changed files');
+  else if (!/^\| Zero changed files in DIFF_RANGE with exit 0 \|/.test(row)) out.push('the zero-files stop row does not fire only on exit 0');
+  const fresh = body.split('\n').filter(l => /DEGRADED/.test(l) && /\bbase\b/.test(l));
+  if (fresh.length !== 1) out.push(`${fresh.length} freshness lines, expected 1`);
+  else if (!/once in the header/.test(fresh[0])) out.push('the freshness line is not printed once in the header');
+  if (!body.includes('DIFF_COMMAND: git diff {DIFF_RANGE}')) out.push('the Debug diff command does not follow DIFF_RANGE');
+  return out;
+}
+
+describe('bug-analysis.md — DIFF_RANGE starts at the fresh base that ensure-pr-ready returns (#495)', () => {
+  const seed = (from: string | RegExp, to: string): string => {
+    const next = content.replace(from, to);
+    expect(next, `the seed ${String(from)} must change the text`).not.toBe(content);
+    return next;
+  };
+
+  it('Return, Extract, DIFF_RANGE, the exit rule, the stop row and the freshness line', () => {
+    expect(collectFreshBaseDefects(content)).toEqual([]);
+  });
+
+  it('known-bad probes: each lost or weakened part is reported', () => {
+    expect(collectFreshBaseDefects(seed('Return: branch, base_branch, base_ref, branch-slug, PR#', 'Return: branch, base_branch, branch-slug, PR#')))
+      .toContain('the Return line does not carry base_ref');
+    expect(collectFreshBaseDefects(seed('Base line reads (rejected) or', 'Base line is fine or')))
+      .toContain('the Extract line does not test the Base line for (rejected)');
+    expect(collectFreshBaseDefects(seed('`base_ref` is not 40 or 64 hex', '`base_ref` is empty')))
+      .toContain('the Extract line does not test base_ref for 40 or 64 hex');
+    expect(collectFreshBaseDefects(seed('Stop with cause and fix when', 'Warn when')))
+      .toContain('the Extract line does not stop with the cause and the fix');
+    expect(collectFreshBaseDefects(seed('Stop with cause and fix when', 'Stop with cause and fix unless it matches `^[A-Za-z0-9._/+@,#-]{1,200}$`, or when')))
+      .toContain('the Extract line carries a copy of the name class');
+    expect(collectFreshBaseDefects(seed('Set `DIFF_RANGE` to `{base_ref}...HEAD`', 'Set `DIFF_RANGE` to `{base_branch}...HEAD`')).join('\n'))
+      .toMatch(/DIFF_RANGE is not built from base_ref[\s\S]*DIFF_RANGE is built from a base name/);
+    expect(collectFreshBaseDefects(seed('Set `DIFF_RANGE` to `{sha}...HEAD`', 'Set `DIFF_RANGE` to `{sha}..HEAD`')))
+      .toContain('the incremental DIFF_RANGE changed');
+    expect(collectFreshBaseDefects(seed(' A non-zero diff exit stops.', '')))
+      .toContain('Step 2b does not say a non-zero diff exit stops');
+    expect(collectFreshBaseDefects(seed('| Zero changed files in DIFF_RANGE with exit 0 |', '| Zero changed files in DIFF_RANGE |')))
+      .toContain('the zero-files stop row does not fire only on exit 0');
+    expect(collectFreshBaseDefects(seed(/^Print a returned base .*\n/m, '')))
+      .toContain('0 freshness lines, expected 1');
+    expect(collectFreshBaseDefects(seed('line once in the header.', 'line.')))
+      .toContain('the freshness line is not printed once in the header');
+    expect(collectFreshBaseDefects(seed('DIFF_COMMAND: git diff {DIFF_RANGE}', 'DIFF_COMMAND: git diff main...HEAD')))
+      .toContain('the Debug diff command does not follow DIFF_RANGE');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Group 3: Static tool invocation — safety patterns
 // ---------------------------------------------------------------------------
 

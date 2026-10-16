@@ -10,7 +10,7 @@ output-dir: dist/commands
 @import "./_partials/_settings.mds" as settings
 # Code Review Command
 
-Run a comprehensive code review of the current branch by spawning parallel review agents, then synthesizing results into PR comments. Supports incremental reviews, timestamped report directories, and multi-worktree auto-discovery.
+Run a comprehensive code review of the current branch by spawning parallel review agents, then synthesizing results into PR comments.
 
 ## Usage
 
@@ -35,7 +35,7 @@ Run a comprehensive code review of the current branch by spawning parallel revie
    - **Exactly one listed:** load neither the skill nor the reference — that worktree is the only candidate, and Step 0c's Git agent validates its branch
 2. **If `--path` flag provided:** use only that worktree, skip discovery
    **`--path` validation**: Before proceeding, verify the path exists as a directory and appears in `git worktree list` output. If not: report error and stop.
-3. **If only 1 reviewable worktree**: proceed as single-worktree flow — zero behavior change
+3. **If only 1 reviewable worktree**: proceed as single-worktree flow
 4. **If multiple reviewable worktrees:** report "Found N worktrees with reviewable branches: {list with paths and branches}" and proceed with multi-worktree flow
 
 #### Step 0b: Resolve the compliance lens and gate level
@@ -84,14 +84,15 @@ PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
 PR_TEST_PLAN_BLOCK: {PR_TEST_PLAN_BLOCK verbatim, or (none)}
 APPLY_CONVENTIONS: {APPLY_CONVENTIONS}
 Validate branch, commit if needed, push, create PR if needed.
-Return: branch, base_branch, branch-slug, PR#"
+Return: branch, base_branch, base_ref, branch-slug, PR#"
 ```
 
 In multi-worktree mode, spawn all pre-flight agents **in a single message**.
 
 **If BLOCKED:** In single-worktree mode, stop and report. In multi-worktree mode, report the failure but continue with other worktrees.
 
-**Extract from response:** `branch`, `base_branch`, `branch_slug`, `pr_number` per worktree.
+**Extract from response:** `branch`, `base_branch`, `base_ref`, `branch_slug`, `pr_number` per worktree. Stop with cause and fix when the Base line reads (rejected) or `base_ref` is not 40 or 64 hex.
+Print a returned base `TRACEABILITY: DEGRADED` line once in the header.
 
 **Fetch PR body** (after extracting `pr_number`):
 ```bash
@@ -111,11 +112,11 @@ For each worktree:
 3. Check if `{worktree}/.devflow/docs/reviews/{branch-slug}/.last-review-head` exists:
    - **If yes AND `--full` NOT set:**
      - Read the SHA from the file
-     - Verify reachable: `git -C {worktree} cat-file -t {sha}` (handles rebases — if unreachable, fallback to full)
+     - Verify reachable: `git -C {worktree} cat-file -t {sha}` (if unreachable, fallback to full)
      - Check if SHA == current HEAD → if so, skip review: "No new commits since last review. Use --full for a full re-review."
      - Set `DIFF_RANGE` to `{last-review-sha}...HEAD`
    - **If no (first review), or `--full`:**
-     - Set `DIFF_RANGE` to `{base_branch}...HEAD`
+     - Set `DIFF_RANGE` to `{base_ref}...HEAD`
 
 #### Step 0e-i: Load Prior Resolution and Count Cycles
 
@@ -185,7 +186,7 @@ git -C "{WORKTREE_PATH}" diff --name-only --no-renames {DIFF_RANGE} > "{REVIEW_D
 wc -l < "{REVIEW_DIR}/paths.txt"
 ```
 
-Read `paths.txt` once when the count is about 40 or fewer, and in ranges of about 40 lines (Read with offset and limit) when it is more.
+A non-zero diff exit stops. Read `paths.txt` once when the count is about 40 or fewer, and in ranges of about 40 lines (Read with offset and limit) when it is more.
 
 Set `DIFF_CLASS` by these rules, in order; the first that decides wins:
 
@@ -367,7 +368,7 @@ Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE — feature-specifi
 IMPORTANT: Write report to {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/{focus}.md using Write tool"
 ```
 
-In multi-worktree mode, process worktrees **sequentially**: complete Phases 1-4 for one worktree before starting the next, so Review spawns never pile up.
+In multi-worktree mode, process worktrees **sequentially**: complete Phases 1-4 for one worktree before starting the next.
 
 ### Phase 3: Synthesis → Review Comment (Sequential)
 
@@ -473,7 +474,7 @@ Per worktree, after successful completion:
 
 ## Principles
 
-1. **Orchestration only** - Command spawns agents, doesn't do git/review work itself. The exceptions are the read-only Phase 0 probes (`git worktree list`, `git -C ... branch --show-current`, `git -C ... cat-file -t`), the bounded Phase 1 path listing (a redirect into `paths.txt`, a `wc -l` count and ranged reads) and the redirect-only patch writes (`diff.patch`, `diff-{focus}.patch`). Redirect-only writes print nothing, so no diff content reaches this thread
+1. **Orchestration only** - Command spawns agents, doesn't do git/review work itself. The exceptions are the read-only Phase 0 probes (`git worktree list`, `git -C ... branch --show-current`, `git -C ... cat-file -t`), the bounded Phase 1 path listing (a redirect into `paths.txt`, a `wc -l` count and ranged reads) and the redirect-only patch writes (`diff.patch`, `diff-{focus}.patch`). Redirect-only writes print nothing
 2. **Parallel, not background** - Multiple agents in one message, but `run_in_background=false` so phases complete before proceeding
 3. **Git agent for git work** - All git operations go through Git agent, except the exceptions named in Principle 1; redirect-only writes print nothing
 4. **Honest reporting** - Display agent outputs directly

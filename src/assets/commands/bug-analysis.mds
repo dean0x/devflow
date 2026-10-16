@@ -9,7 +9,7 @@ output-dir: dist/commands
 @import "./_partials/_settings.mds" as settings
 # Bug Analysis Command
 
-Run a proactive bug analysis on the current branch by combining static analysis tools with parallel semantic analyzers, then synthesizing results into an actionable bug report. Supports incremental analysis, timestamped report directories, and `/resolve` compatibility.
+Run a proactive bug analysis on the current branch by combining static analysis tools with parallel semantic analyzers, then synthesizing results into an actionable bug report.
 
 ## Usage
 
@@ -47,10 +47,11 @@ Agent(subagent_type="Git", run_in_background=false):
 PR_TEST_PLAN_BLOCK: {PR_TEST_PLAN_BLOCK verbatim, or (none)}
 APPLY_CONVENTIONS: {APPLY_CONVENTIONS}
 Validate branch, commit if needed, push, create PR if needed.
-Return: branch, base_branch, branch-slug, PR#"
+Return: branch, base_branch, base_ref, branch-slug, PR#"
 ```
 
-**Extract from response:** `branch`, `base_branch`, `branch_slug`, `pr_number`.
+**Extract from response:** `branch`, `base_branch`, `base_ref`, `branch_slug`, `pr_number`. Stop with cause and fix when the Base line reads (rejected) or `base_ref` is not 40 or 64 hex.
+Print a returned base `TRACEABILITY: DEGRADED` line once in the header.
 
 **Fetch PR body** (after extracting `pr_number`):
 ```bash
@@ -74,7 +75,7 @@ If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
      - If SHA == current HEAD → "No new commits since last analysis. Use --full for a full re-analysis." Stop.
      - Set `DIFF_RANGE` to `{sha}...HEAD`
    - **If not exists, unreachable SHA, or `--full`:**
-     - Set `DIFF_RANGE` to `{base_branch}...HEAD`
+     - Set `DIFF_RANGE` to `{base_ref}...HEAD`
 2. Generate timestamp: `YYYY-MM-DD_HHMM`. If directory already exists (same-minute collision), append seconds (`YYYY-MM-DD_HHMMSS`).
 3. Create timestamped analysis directory: `mkdir -p "{worktree}/.devflow/docs/bug-analysis/{branch-slug}/{timestamp}/"`
 4. Set `ANALYSIS_DIR` to that path.
@@ -87,7 +88,7 @@ If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
 CHANGED_FILES=$(git diff --name-only {DIFF_RANGE})
 ```
 
-Store result as `CHANGED_FILES` — used throughout Steps 2d and Phase 4 to avoid repeated git invocations and ensure consistency.
+Store as `CHANGED_FILES`; Steps 2d and Phase 4 read it. A non-zero diff exit stops.
 
 If output is empty → "No changes to analyze." Stop.
 
@@ -116,7 +117,7 @@ Skip if `--no-static` flag provided or all tools unavailable.
 
 Run available tools on the changed files (from `CHANGED_FILES` computed in Step 2b).
 
-**Semgrep and Snyk run in parallel** — launch both in the background, then wait for both before proceeding to CodeQL. CodeQL is conditional and sequential (it needs Semgrep/Snyk results to decide whether to run).
+**Semgrep and Snyk run in parallel** — launch both in the background, then wait for both before proceeding to CodeQL. CodeQL is conditional and sequential.
 
 **Semgrep** (if available):
 ```bash
@@ -157,7 +158,7 @@ trap - EXIT INT TERM
 ```
 Parse `CODEQL_SARIF` → extract findings. If database creation fails, `CODEQL_EXIT` is non-zero — skip CodeQL findings and note it. The `trap` guarantees cleanup on SIGTERM/SIGINT/EXIT so orphaned temp directories do not accumulate across interrupted sessions.
 
-**Normalize** all findings to unified table, cap at top 50 by severity. Truncate each Description entry to 200 characters maximum to bound the serialized size of `STATIC_FINDINGS`:
+**Normalize** all findings to unified table, cap at top 50 by severity. Truncate each Description entry to 200 characters maximum:
 
 | Tool | File:Line | CWE | Severity | Title | Description |
 |------|-----------|-----|----------|-------|-------------|
@@ -344,7 +345,7 @@ Run `/resolve` to process and fix these findings.
 |------|----------|
 | No new commits since last analysis | Stop: "No new commits since last analysis. Use --full for a full re-analysis." |
 | Rebase invalidates `.last-analysis-head` SHA | `git cat-file -t` check fails → fallback to full diff |
-| Zero changed files in DIFF_RANGE | Stop: "No changes to analyze." |
+| Zero changed files in DIFF_RANGE with exit 0 | Stop: "No changes to analyze." |
 | Same-minute analysis collision | `mkdir` with seconds suffix (`YYYY-MM-DD_HHMMSS`) |
 | All static tools unavailable | Warn, proceed with semantic-only analysis |
 | `--no-static` flag | Skip Phase 2c and 2d entirely; `STATIC_FINDINGS=(none)` |

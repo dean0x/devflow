@@ -19,21 +19,11 @@
  *   AC-15  The invocation text is accepted by the script's own argument parser. /implement
  *          calls once, before Phase 2; every other call is counted per file (the call
  *          budget), and the channel lines exist.
- *   AC-16  The sites that the later plan phases fix are listed in PENDING_SITES, keyed by
- *          the owning phase. Each phase removes its own entries in the commit that fixes
- *          them. The last phase deletes PENDING_SITES, `matchesEntry` and the three pending
- *          checks in the final describe block; the "no site is flagged" test then reads
- *          `expect(findings).toEqual([])`.
+ *   AC-16  No built prompt carries a flagged base site: every collector finds nothing.
  *
  * How a site is identified. Every collector returns Findings: a file label, the learning
  * arm, a rule and an anchor. For a shell line the anchor is the command text. For a
- * required text the anchor is a fixed site label (the requirement table names it). A
- * pending entry matches a finding by file, rule and anchor substring.
- *
- * Phases 4, 5, 7 and 8 change prompt text whose final wording this file cannot see. If a
- * requirement detector below does not accept the wording of the phase that owns it, that
- * phase tunes the detector together with its fix, in the same commit, and keeps the
- * matching known-bad probe red-then-green.
+ * required text the anchor is a fixed site label (the requirement table names it).
  *
  * Every collector has a known-bad probe on seeded text (in memory; nothing is written
  * into dist/ or src/) and a non-empty-corpus assertion, so a green result cannot come
@@ -750,51 +740,6 @@ function allFindings(prompts: readonly Prompt[]): Finding[] {
 }
 
 // ---------------------------------------------------------------------------
-// PENDING_SITES: the sites a later plan phase fixes (AC-16)
-// ---------------------------------------------------------------------------
-
-type OwningPhase = 4 | 5 | 7 | 8
-
-interface PendingSite {
-  /** The plan phase that fixes the site and removes this entry. */
-  readonly phase: OwningPhase
-  readonly file: string
-  readonly rule: Rule
-  /** A substring of the finding's anchor. */
-  readonly anchor: string
-}
-
-const PENDING_SITES: readonly PendingSite[] = [
-  // Phase 7: /code-review and the reviewer fallback.
-  { phase: 7, file: 'commands/code-review.md', rule: 'return-base-ref', anchor: 'Return' },
-  { phase: 7, file: 'commands/code-review.md', rule: 'extract-checks', anchor: 'Extract' },
-  { phase: 7, file: 'commands/code-review.md', rule: 'diff-range', anchor: 'DIFF_RANGE {base_branch}...HEAD' },
-  { phase: 7, file: 'commands/code-review.md', rule: 'channel-line', anchor: 'freshness line' },
-  { phase: 7, file: 'commands/code-review.md', rule: 'sink-exit', anchor: 'paths listing' },
-  { phase: 7, file: 'agents/review.md', rule: 'shell-name', anchor: 'git diff {base_branch}...HEAD' },
-  { phase: 7, file: 'agents/review.md', rule: 'reviewer-fallback', anchor: 'Identify changed lines' },
-
-  // Phase 8: /bug-analysis.
-  { phase: 8, file: 'commands/bug-analysis.md', rule: 'return-base-ref', anchor: 'Return' },
-  { phase: 8, file: 'commands/bug-analysis.md', rule: 'extract-checks', anchor: 'Extract' },
-  { phase: 8, file: 'commands/bug-analysis.md', rule: 'diff-range', anchor: 'DIFF_RANGE {base_branch}...HEAD' },
-  { phase: 8, file: 'commands/bug-analysis.md', rule: 'channel-line', anchor: 'freshness line' },
-  { phase: 8, file: 'commands/bug-analysis.md', rule: 'sink-exit', anchor: 'CHANGED_FILES' },
-]
-
-/** The files each phase edits; an entry keyed to the wrong phase is caught. */
-const PHASE_FILES: Readonly<Record<OwningPhase, readonly string[]>> = {
-  4: ['git-ops/ensure-pr-ready.md', 'git-ops/validate-branch.md'],
-  5: ['commands/implement.md', 'references/implement-revalidate.md'],
-  7: ['commands/code-review.md', 'agents/review.md'],
-  8: ['commands/bug-analysis.md'],
-}
-
-function matchesEntry(e: PendingSite, f: Finding): boolean {
-  return e.file === f.file && e.rule === f.rule && f.anchor.includes(e.anchor)
-}
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -983,24 +928,8 @@ describe('the Git op copies agree', () => {
   })
 })
 
-describe('every base site is fixed or listed with its owning phase (AC-16)', () => {
-  it('each pending entry names an owning phase that edits its file', () => {
-    const bad = PENDING_SITES.filter(e => !PHASE_FILES[e.phase].includes(e.file)).map(e => `${e.phase}: ${e.file} :: ${e.rule} :: ${e.anchor}`)
-    expect(bad).toEqual([])
-  })
-
-  it('no pending entry repeats another', () => {
-    const keys = PENDING_SITES.map(e => `${e.file} :: ${e.rule} :: ${e.anchor}`)
-    expect(keys.filter((k, i) => keys.indexOf(k) !== i)).toEqual([])
-  })
-
-  it('every pending entry matches a flagged site, so none is vacuous', () => {
-    const vacuous = PENDING_SITES.filter(e => !findings.some(f => matchesEntry(e, f))).map(e => `${e.phase}: ${e.file} :: ${e.rule} :: ${e.anchor}`)
-    expect(vacuous, 'the owning phase fixed these sites: remove their entries').toEqual([])
-  })
-
-  it('every flagged site has a pending entry', () => {
-    const unlisted = findings.filter(f => !PENDING_SITES.some(e => matchesEntry(e, f)))
-    expect([...new Set(unlisted.map(describeFinding))], 'fix the site, or list it under its owning phase').toEqual([])
+describe('no base site is flagged (AC-16)', () => {
+  it('every collector finds nothing in the built prompts', () => {
+    expect(findings.map(describeFinding)).toEqual([])
   })
 })
