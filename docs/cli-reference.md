@@ -27,6 +27,7 @@ Use `--recommended` or `--advanced` flags for non-interactive setup.
 | `--behavior` / `--no-behavior` | Enable/disable the opt-in behavior rule — agents reply in ASD-STE100 Simplified Technical English (default: off; asked in the Advanced wizard only; a re-init keeps the recorded value) |
 | `--compliance <list>` / `--no-compliance` | Enable compliance with comma-separated framework IDs (e.g., `gdpr,hipaa`) / disable preserving frameworks (default: off; bypasses the wizard entirely when passed) |
 | `--tracker <id>` | The machine's default issue tracker provider: `github`, `jira`, or `linear` (default: `github`); a repository's `.devflow/project.json` can select its own. Suppresses the tracker wizard question on both init paths. There is no `--no-tracker` — `--tracker github` is the default |
+| `--gate-level <level>` | The machine's default gate level: `full`, `standard`, or `lean` (default: `standard`); a personal `gateLevel` in `.devflow/config.json` still wins in its repository. Suppresses the gate level wizard question on both init paths. An invalid value exits 1 before anything is written; it cannot be combined with `--hud-only` |
 | `--hud-only` | Install only the HUD (no plugins, hooks, or extras) |
 | `--recommended` | Apply recommended defaults after plugin selection (skip advanced prompts) |
 | `--advanced` | Show all configuration prompts |
@@ -240,6 +241,7 @@ The gate level is one of three words that say how much checking a command applie
 ```bash
 npx devflow-kit gates --status      # The level in effect here, which layer decided it, and the machine default
 npx devflow-kit gates --set lean    # Set the machine default: full, standard or lean
+npx devflow-kit init --gate-level lean  # Set it during init, with no prompt
 npx devflow-kit gates               # No flag: print usage and the valid levels
 ```
 
@@ -251,13 +253,25 @@ npx devflow-kit gates               # No flag: print usage and the valid levels
 
 **Raise or lower.** The memory, learning and knowledge switches are narrow-only: a repository file can turn them off but never on. The gate level is not a switch. Your personal `gateLevel` may raise the level above the machine default as well as lower it. The committed `.devflow/project.json` has no `gateLevel`: a key of that name there is ignored, and there is no team floor, so a repository that declares compliance can still run a lower personal level.
 
+**Set it at init.** `devflow init` asks for the machine default, so you meet the choice during setup. The prompt lists `full`, `standard` and `lean` with a one-line effect each. On a first install it starts on `standard`. On a re-init it shows the current value and starts on it, so Enter keeps it. It runs under the same gate as the tracker question:
+
+| Invocation | Asks? |
+|---|---|
+| `--advanced` or a re-init (TTY) | Yes, always |
+| Interactive run where you chose Recommended at the Setup-mode prompt | Yes |
+| `--recommended` flag | No — keeps the stored value, or records none on a first install |
+| Non-TTY / piped | No — same |
+| Any run passing `--gate-level <level>` | No — the flag sets the level on every path |
+
+Init writes the same field as `gates --set`, `features.gateLevel`, and the summary at the end of init shows the level that is now set. Init never writes the personal key in `config.json`, so a personal level still wins in its repository. `--gate-level` is matched exactly, like `--set`: `Lean` or an empty value exits 1 before init writes anything, and the error names the valid levels.
+
 **Who writes what.** `gates --set` writes the machine default and nothing else: it changes only `features.gateLevel` and `updatedAt` in the manifest, never `project.json` or `config.json`, and it installs nothing and re-arms nothing. A repeat prints `Gate level: <level> (unchanged)` and writes nothing. No command writes the personal key. Set it by hand in the repository's `.devflow/config.json`, which is personal, so keep it out of git:
 
 ```json
 {"gateLevel":"lean"}
 ```
 
-The machine default sits in `~/.devflow/manifest.json` as `features.gateLevel`; `gates --set` writes it, and a hand edit has the same effect:
+The machine default sits in `~/.devflow/manifest.json` as `features.gateLevel`; `gates --set` and `init` write it, and a hand edit has the same effect:
 
 ```json
 {"features":{"gateLevel":"lean"}}
@@ -285,7 +299,7 @@ The output is titled `Gate Level Status`. The `Effective:` line is the level in 
 
 If the manifest is corrupt, over 1 MiB, or valid JSON that devflow rejects, `--status` warns that `devflow init` will replace the file, and the machine default in it is lost with the rest. A plain `devflow init` over a manifest that devflow reads keeps the level.
 
-**Reset, update and uninstall.** `devflow init --reset` removes the machine default, so the level reads `standard` again unless a personal level is set; a personal key in `config.json` survives the reset. A plain `devflow init`, `devflow init --hud-only` and every command that writes the manifest keep the stored value as it is. A full `devflow uninstall` removes the manifest, and the machine default with it; `devflow uninstall --plugin` keeps it. Your personal key lives in the repository's `.devflow/config.json`, which uninstall removes only if you accept the offer to remove that repository's `.devflow/`.
+**Reset, update and uninstall.** `devflow init --reset` removes the machine default, so the level reads `standard` again unless a personal level is set; a personal key in `config.json` survives the reset. An interactive `--reset` asks again, starting on `standard`, and `--reset --gate-level <level>` sets the new level after the reset. A `devflow init --recommended`, a non-interactive `devflow init`, `devflow init --hud-only` and every command that writes the manifest keep the stored value as it is. An interactive re-init keeps it when you accept the prompt as shown. A full `devflow uninstall` removes the manifest, and the machine default with it; `devflow uninstall --plugin` keeps it. Your personal key lives in the repository's `.devflow/config.json`, which uninstall removes only if you accept the offer to remove that repository's `.devflow/`.
 
 **After an update, run `devflow init`.** The settings line gained the `GATE_LEVEL` field, and the installed command prompts must carry the matching pattern. `devflow init --hud-only` and a plugin-only update refresh the resolver script but not those prompts, so until a full `devflow init` every installed command that reads the settings line falls back to its fail-closed value. `devflow init --hud-only` prints one line when the installed prompts come from a different devflow version than the running CLI.
 
