@@ -765,21 +765,6 @@ interface PendingSite {
 }
 
 const PENDING_SITES: readonly PendingSite[] = [
-  // Phase 4: the Git ops (ensure-pr-ready step 5, validate-branch steps 6 and 7).
-  { phase: 4, file: 'git-ops/ensure-pr-ready.md', rule: 'strict-copy', anchor: 'step 5 check' },
-  { phase: 4, file: 'git-ops/ensure-pr-ready.md', rule: 'resolver-call', anchor: 'call count' },
-  { phase: 4, file: 'git-ops/ensure-pr-ready.md', rule: 'cross-flag', anchor: 'cross flag' },
-  { phase: 4, file: 'git-ops/ensure-pr-ready.md', rule: 'consumer-stop', anchor: 'resolver-unavailable stop' },
-  { phase: 4, file: 'git-ops/ensure-pr-ready.md', rule: 'channel-line', anchor: 'freshness line' },
-  { phase: 4, file: 'git-ops/validate-branch.md', rule: 'strict-copy', anchor: 'steps 6 and 7 check' },
-  { phase: 4, file: 'git-ops/validate-branch.md', rule: 'shell-name', anchor: 'rev-parse --verify {default}' },
-  { phase: 4, file: 'git-ops/validate-branch.md', rule: 'shell-name', anchor: 'diff {base_branch}...HEAD --name-only' },
-  { phase: 4, file: 'git-ops/validate-branch.md', rule: 'resolver-call', anchor: 'call count' },
-  { phase: 4, file: 'git-ops/validate-branch.md', rule: 'cross-flag', anchor: 'cross flag' },
-  { phase: 4, file: 'git-ops/validate-branch.md', rule: 'consumer-stop', anchor: 'resolver-unavailable stop' },
-  { phase: 4, file: 'git-ops/validate-branch.md', rule: 'blocked-no-base', anchor: 'Diff Scope BLOCKED' },
-  { phase: 4, file: 'git-ops/validate-branch.md', rule: 'sink-exit', anchor: 'Diff Scope' },
-
   // Phase 5: /implement and its re-validation reference.
   { phase: 5, file: 'commands/implement.md', rule: 'strict-copy', anchor: 'setup check' },
   { phase: 5, file: 'commands/implement.md', rule: 'post-capture-check', anchor: 'post-capture check' },

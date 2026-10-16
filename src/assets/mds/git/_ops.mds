@@ -57,6 +57,7 @@ Pre-flight: make the branch ready for review and open its PR.
 ### Branch
 - **Current**: {branch}
 - **Base**: {base_branch}
+- **Base ref**: {base_ref}
 - **Branch Slug**: {branch-slug}
 - **PR**: #{number}
 

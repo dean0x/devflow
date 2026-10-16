@@ -126,6 +126,8 @@ For each issue reference in `SHIPPED_ISSUES` (sequentially, the first ≤50 in l
 
    On any 4xx/5xx from `gh pr edit`: emit `TRACEABILITY: DEGRADED ({reason})` and continue — a failed retitle never blocks the PR.
 5. Get base branch from PR
+   5a. Read `baseRefName` and `isCrossRepository` from the PR (`gh pr view --json baseRefName,isCrossRepository`, run in `{worktree}`). Stop unless the name matches `^(?![-#]|origin\/|(?:@|(?:FETCH_|ORIG_|MERGE_)?HEAD)$)(?!.*\.\.)[A-Za-z0-9._\/+@,#-]{1,200}$`: end with Status BLOCKED, no PR line, the Base line `(rejected)` and Base ref `none`, naming only the allowed set, never the name (ASCII letters, digits and `._/+@,#-`, at most 200; no leading `-` or `#`, no `origin/` prefix, no `..`, not `@` or a HEAD name). Otherwise run, in one Bash call, `cd "{worktree}" && B="<name>" && X=<isCrossRepository, else false> && node "$HOME/.devflow/scripts/resolve-base.cjs" pr "${B}" --cross "${X}"; echo "exit=$?"`. Write the name only as `${B}`, never in prose.
+   5b. Use the one line starting `BASE_REF=`; any other output reads as `REASON=resolver-unavailable`. `base_ref` is its BASE_REF value (`none` only when no base is usable); print REASON. Only an invalid name stops this operation. For NOTE `degraded` and `stop`, emit `TRACEABILITY: DEGRADED (base {REASON})` with the Status block's lines, adding `run devflow init` for resolver-unavailable. The Base line always appears.
 6. Derive branch-slug (replace `/` with `-`)
 @end
 
