@@ -150,9 +150,9 @@ export function collectReadSiteDefects(name: string, paragraph: string): string[
 describe('AC-406: every read path exists, is read, and resolves the config directory first', () => {
   it('each path a command names is a file of the skill, and each file is named by a command', () => {
     const files = referenceFiles()
-    expect(files, 'the reference directory is empty, so this guard proves nothing').toEqual(['code-review-levels.md', 'implement-evidence-asks.md', 'implement-revalidate.md', 'plan-levels.md'])
+    expect(files, 'the reference directory is empty, so this guard proves nothing').toEqual(['code-review-levels.md', 'implement-evidence-asks.md', 'implement-levels.md', 'implement-revalidate.md', 'plan-levels.md', 'resolve-levels.md'])
     const named = new Map(commandSources().map(s => [s.name, namedReferences(s.content)] as const).filter(([, refs]) => refs.length > 0))
-    expect([...named.keys()], 'only a host reads a reference, never a shared partial').toEqual(['code-review', 'implement', 'plan'])
+    expect([...named.keys()], 'only a host reads a reference, never a shared partial').toEqual(['code-review', 'implement', 'plan', 'resolve'])
     const all = [...new Set([...named.values()].flat())].sort()
     expect(all.filter(f => !existsSync(agentReferencePath(`${REFERENCE_DIR}/${f}`))), 'a named path with no file').toEqual([])
     expect(files.filter(f => !all.includes(f)), 'a reference no command reads').toEqual([])
@@ -167,9 +167,10 @@ describe('AC-406: every read path exists, is read, and resolves the config direc
         expect(namedReferences(built), `${name}: the compiled command names the same files`).toEqual(namedReferences(content))
       }
     }
-    expect(namedReferences(requireDistFile('implement.md'))).toEqual(['implement-evidence-asks.md', 'implement-revalidate.md'])
+    expect(namedReferences(requireDistFile('implement.md'))).toEqual(['implement-evidence-asks.md', 'implement-levels.md', 'implement-revalidate.md'])
     expect(namedReferences(requireDistFile('code-review.md'))).toEqual(['code-review-levels.md'])
     expect(namedReferences(requireDistFile('plan.md'))).toEqual(['plan-levels.md'])
+    expect(namedReferences(requireDistFile('resolve.md'))).toEqual(['resolve-levels.md'])
   })
 
   it('known-bad probes: a path with no file and a read without the config-directory step are told apart', () => {
