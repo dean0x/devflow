@@ -339,6 +339,32 @@ describe('init over a manifest readManifest refuses', () => {
   }, MULTI_RUN_TIMEOUT_MS);
 });
 
+describe('init over a valid manifest over the size bound of devflow gates', () => {
+  const BOUND = 1_048_576;
+
+  it('keeps the stored level, as the warning of devflow gates says, and replaces the manifest', async () => {
+    runInit(repo, '--recommended', '--gate-level', 'lean');
+    await writeManifestText(await editedManifestText(raw => { raw.pad = 'x'.repeat(BOUND + 50_000); }));
+    expect((await fs.stat(manifestPath())).size).toBeGreaterThan(BOUND);
+
+    // devflow gates cannot read the file, and says init keeps a level only if it can read it.
+    const before = runCli(repo, 'gates', '--status').out.replace(/\s+/g, ' ');
+    expect(before).toContain('cannot be read by devflow gates');
+    expect(before).toContain('Init keeps a gate level stored in it only if init can read the file.');
+    expect(before).not.toContain('cannot keep');
+
+    // init can read it, so init keeps the level.
+    const out = runInit(repo, '--recommended');
+
+    expect(await readFeatures()).toMatchObject({ gateLevel: 'lean' });
+    expect(gateLevelLine(out)).toContain('Gate level: lean');
+    expect(out).not.toContain('could not be read');
+    const after = runCli(repo, 'gates', '--status').out;
+    expect(after).toContain('Machine:   lean');
+    expect(after).not.toContain('cannot be read');
+  }, MULTI_RUN_TIMEOUT_MS);
+});
+
 describe('init --hud-only over a manifest readManifest refuses', () => {
   const KEPT_WARNING = /kept the stored gate level/;
 

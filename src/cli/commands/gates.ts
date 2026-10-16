@@ -81,11 +81,13 @@ const VALID_LEVELS_OR = `${GATE_LEVELS.slice(0, -1).join(', ')}, or ${GATE_LEVEL
  *   absent       no file (no warning: a machine without devflow is not a fault)
  *   readable     an object the manifest reader accepts
  *   rejected     valid JSON with a `features` object that the manifest reader
- *                refuses (a required field is missing or mistyped, or a byte-order
+ *                rejects (a required field is missing or mistyped, or a byte-order
  *                mark leads); `devflow init` replaces the file and keeps the gate
- *                level stored in it
- *   unreadable   corrupt or over the size bound; `devflow init` replaces the file
- *                and cannot keep a level it cannot read
+ *                level stored in it, unless the run sets another level or resets
+ *   unreadable   corrupt or over the size bound: `devflow gates` cannot read it.
+ *                `devflow init` replaces the file and keeps its level only if init
+ *                can read it; the manifest reader has no size bound, so a valid
+ *                file over the bound is one init can read
  */
 export type GateManifestState = 'absent' | 'readable' | 'rejected' | 'unreadable';
 
@@ -229,9 +231,9 @@ function manifestWarning(status: GateStatus): string | null {
     case 'readable':
       return null;
     case 'rejected':
-      return `Manifest at ${status.manifestPath} is not a manifest devflow accepts; devflow init will replace this file and keep any gate level stored in it.`;
+      return `Manifest at ${status.manifestPath} is a manifest that devflow rejects; devflow init will replace this file and keep a gate level stored in it unless you choose another level or use --reset.`;
     case 'unreadable':
-      return `Manifest at ${status.manifestPath} cannot be read; devflow init will replace this file and cannot keep its gate level. Set the level again with devflow gates --set <level> after init.`;
+      return `Manifest at ${status.manifestPath} cannot be read by devflow gates; devflow init will replace this file. Init keeps a gate level stored in it only if init can read the file. If init reports that it could not read the level, set it again with devflow gates --set <level>.`;
     default: {
       const exhaustive: never = status.manifest;
       return exhaustive;
@@ -370,7 +372,7 @@ function levelsHelp(): string {
 export const gatesCommand = new Command('gates')
   .description('Show or set the machine\'s default gate level')
   .option('--status', 'Show the gate level in effect here, which layer decided it, and the machine default')
-  .option('--set <level>', `Set the machine's default gate level: ${VALID_LEVELS_OR}`)
+  .option(`--set <${GATE_LEVELS.join('|')}>`, `Set the machine's default gate level: ${VALID_LEVELS_OR}`)
   .addHelpText(
     'after',
     `\nGate levels:\n${levelsHelp()}\n\n` +

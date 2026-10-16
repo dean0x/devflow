@@ -210,17 +210,17 @@ describe('renderGateStatus', () => {
     expect(renderGateStatus(status).warnings).toEqual(['tracked!']);
   });
 
-  it('warns that init keeps the level of a rejected manifest it replaces, naming its path', () => {
+  it('warns that init keeps the level of a rejected manifest it replaces unless the run chooses another, naming its path', () => {
     const rejected: GateStatus = { kind: 'resolved', manifest: 'rejected', manifestPath: MANIFEST_PATH, level: 'lean', source: 'machine', invalid: false, machine: 'lean', trackedWarning: null };
     expect(renderGateStatus(rejected).warnings).toEqual([
-      `Manifest at ${MANIFEST_PATH} is not a manifest devflow accepts; devflow init will replace this file and keep any gate level stored in it.`,
+      `Manifest at ${MANIFEST_PATH} is a manifest that devflow rejects; devflow init will replace this file and keep a gate level stored in it unless you choose another level or use --reset.`,
     ]);
   });
 
-  it('warns that init cannot keep the level of an unreadable manifest, and says how to set it again', () => {
+  it('warns that devflow gates cannot read an unreadable manifest, that init keeps its level only if init can read it, and says how to set it again', () => {
     const unreadable: GateStatus = { kind: 'resolved', manifest: 'unreadable', manifestPath: MANIFEST_PATH, level: 'standard', source: 'default', invalid: false, machine: null, trackedWarning: null };
     expect(renderGateStatus(unreadable).warnings).toEqual([
-      `Manifest at ${MANIFEST_PATH} cannot be read; devflow init will replace this file and cannot keep its gate level. Set the level again with devflow gates --set <level> after init.`,
+      `Manifest at ${MANIFEST_PATH} cannot be read by devflow gates; devflow init will replace this file. Init keeps a gate level stored in it only if init can read the file. If init reports that it could not read the level, set it again with devflow gates --set <level>.`,
     ]);
   });
 
@@ -503,6 +503,7 @@ describe('devflow gates --set', () => {
     const run = runCli(['gates', '--set']);
     expect(run.status, run.out).toBe(1);
     expect(run.out).toContain('argument missing');
+    for (const level of ['full', 'standard', 'lean']) expect(run.out).toContain(level);
     expect(run.out).not.toContain('Gate levels:');
     expect(await snapshot(tmpHome)).toEqual(before);
   }, SUBPROCESS_TIMEOUT_MS);
@@ -623,12 +624,12 @@ describe('devflow gates --status', () => {
     expect(run.out).not.toContain('cannot be read');
   }, SUBPROCESS_TIMEOUT_MS);
 
-  it('warns that init cannot keep the level of an unparseable manifest, and reads it as the default', async () => {
+  it('warns that devflow gates cannot read an unparseable manifest, and reads it as the default', async () => {
     await writeManifestText('{not json');
     const run = runCli(['gates', '--status']);
     expect(run.status, run.out).toBe(0);
     expect(run.out).toContain('Effective: standard (default)');
-    expect(run.out).toContain(`Manifest at ${manifestPath()} cannot be read; devflow init will replace this file and cannot keep its gate level.`);
+    expect(run.out).toContain(`Manifest at ${manifestPath()} cannot be read by devflow gates; devflow init will replace this file.`);
     expect(run.out).toContain('devflow gates --set <level>');
   }, SUBPROCESS_TIMEOUT_MS);
 
@@ -637,16 +638,19 @@ describe('devflow gates --status', () => {
     const run = runCli(['gates', '--status']);
     expect(run.status, run.out).toBe(0);
     expect(run.out).toContain('Effective: standard (default)');
-    expect(run.out).toContain('devflow init will replace this file and cannot keep its gate level');
+    expect(run.out).toContain('cannot be read by devflow gates; devflow init will replace this file.');
   }, SUBPROCESS_TIMEOUT_MS);
 
-  it('warns for a manifest over 1 MiB and reads it as the default', async () => {
+  it('warns for a valid manifest over 1 MiB, reads it as the default, and does not say init loses its level', async () => {
     const m = JSON.parse(manifestJson('lean')) as Record<string, unknown>;
     await writeManifestText(JSON.stringify({ ...m, pad: 'x'.repeat(1_100_000) }));
     const run = runCli(['gates', '--status']);
     expect(run.status, run.out).toBe(0);
     expect(run.out).toContain('Effective: standard (default)');
-    expect(run.out).toContain('devflow init will replace this file and cannot keep its gate level');
+    const flat = run.out.replace(/\s+/g, ' ');
+    expect(flat).toContain('cannot be read by devflow gates; devflow init will replace this file.');
+    expect(flat).toContain('Init keeps a gate level stored in it only if init can read the file.');
+    expect(flat).not.toContain('cannot keep');
   }, SUBPROCESS_TIMEOUT_MS);
 
   it('warns for valid JSON the manifest reader rejects, and keeps its stored level', async () => {
@@ -654,7 +658,7 @@ describe('devflow gates --status', () => {
     const run = runCli(['gates', '--status']);
     expect(run.status, run.out).toBe(0);
     expect(run.out).toContain('Effective: lean (machine)');
-    expect(run.out).toContain('devflow init will replace this file and keep any gate level stored in it');
+    expect(run.out.replace(/\s+/g, ' ')).toContain('devflow init will replace this file and keep a gate level stored in it unless you choose another level or use --reset');
   }, SUBPROCESS_TIMEOUT_MS);
 
   it('warns for a manifest with a leading byte-order mark, which the manifest reader rejects, and keeps its stored level', async () => {
@@ -662,7 +666,7 @@ describe('devflow gates --status', () => {
     const run = runCli(['gates', '--status']);
     expect(run.status, run.out).toBe(0);
     expect(run.out).toContain('Effective: lean (machine)');
-    expect(run.out).toContain('devflow init will replace this file and keep any gate level stored in it');
+    expect(run.out.replace(/\s+/g, ' ')).toContain('devflow init will replace this file and keep a gate level stored in it unless you choose another level or use --reset');
   }, SUBPROCESS_TIMEOUT_MS);
 
   it('wins over --set, exits 0 and writes nothing, even over a manifest the manifest reader would heal', async () => {
@@ -727,7 +731,9 @@ describe('devflow gates (help and usage)', () => {
     expect(run.out).not.toContain('#473');
     expect(run.out).not.toContain('#474');
     expect(run.out).not.toContain('#475');
-    expect(run.out).toContain('Set the machine\'s default gate level: full, standard, or lean');
+    // commander wraps the option description, so compare the flattened text.
+    const flat = run.out.replace(/\s+/g, ' ');
+    expect(flat).toContain('--set <full|standard|lean> Set the machine\'s default gate level: full, standard, or lean');
   }, SUBPROCESS_TIMEOUT_MS);
 
   it('is listed in the top-level help', () => {
