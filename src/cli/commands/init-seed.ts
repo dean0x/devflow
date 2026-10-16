@@ -62,9 +62,10 @@ export interface FeatureSeed {
    * The machine gate level, exactly as the manifest stores it: a valid level, a
    * malformed value or `null`. Required, so the compiler forces every seed site to
    * name it. It is `undefined` only when the manifest holds no key, there is no
-   * manifest, or the seed is a --reset seed. Init never defaults, narrows or asks
-   * about it: `devflow gates --set` is its only writer, and the full manifest write
-   * puts back whatever the seed holds.
+   * manifest, or the seed is a --reset seed. The seed never defaults or narrows it:
+   * the gate-level wizard step and `--gate-level` (gate-level-prompts.ts) are the
+   * only places init changes it, `devflow gates --set` is the other writer, and the
+   * full manifest write puts back whatever the run holds.
    */
   gateLevel: unknown;
 }

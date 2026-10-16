@@ -85,6 +85,13 @@ import {
   type TrackerStepMessage,
 } from './tracker-prompts.js';
 import {
+  buildClackGateLevelPrompts,
+  formatGateLevelSummary,
+  resolveGateLevelForInit,
+  resolveGateLevelInitOption,
+} from './gate-level-prompts.js';
+import type { GateLevel } from '../../core/gate-level.js';
+import {
   shouldRunAttributionStep,
   runAttributionStep,
   buildClackAttributionPrompts,
@@ -626,6 +633,12 @@ interface InitOptions {
    * There is no --no-tracker: --tracker github is the default (decision D-E).
    */
   tracker?: string;
+  /**
+   * Machine gate level (full | standard | lean), parsed by parseGateLevel.
+   * string    → --gate-level <level> (set the machine level, suppress the wizard prompt)
+   * undefined → not passed; the prompt (interactive) or the stored value (otherwise)
+   */
+  gateLevel?: string;
   security?: SecurityMode;
   hudOnly?: boolean;
   recommended?: boolean;
@@ -856,6 +869,7 @@ export const initCommand = new Command('init')
   .option('--compliance <list>', 'Enable compliance with comma-separated framework IDs (e.g., gdpr,hipaa)')
   .option('--no-compliance', 'Disable compliance (removes the rule; the skill and framework references stay installed; frameworks remembered for re-enable)')
   .option('--tracker <id>', 'The machine\'s default issue tracker provider: github, jira, or linear')
+  .option('--gate-level <level>', 'The machine\'s default gate level: full, standard, or lean (skips the gate level prompt)')
   .option('--security <mode>', 'Security deny list location: user, managed, or none', /^(user|managed|none)$/i)
   .option('--hud-only', 'Install only the HUD (no plugins, hooks, or extras)')
   .option('--recommended', 'Apply recommended defaults after plugin selection (skip advanced prompts)')
@@ -882,6 +896,20 @@ export const initCommand = new Command('init')
     if (options.reset && options.plugin) {
       p.log.error('--reset and --plugin are mutually exclusive. Use --reset alone to restore defaults, or --plugin to update a specific plugin.');
       process.exit(1);
+    }
+
+    // Parse --gate-level at the boundary, before anything is written (--hud-only writes early).
+    // Strict — reject, never repair — so a typo'd level exits here rather than being ignored.
+    let cliGateLevel: GateLevel | undefined;
+    {
+      const gateLevelResult = resolveGateLevelInitOption(options.gateLevel, !!options.hudOnly);
+      if (gateLevelResult !== undefined) {
+        if (!gateLevelResult.ok) {
+          p.log.error(gateLevelResult.error);
+          process.exit(1);
+        }
+        cliGateLevel = gateLevelResult.value;
+      }
     }
 
     // D-SCOPE-RETIRED: refuse a retired --scope value before anything is written.
@@ -1215,11 +1243,11 @@ export const initCommand = new Command('init')
     // alone, so init carries the prior value through untouched: it stamps the installed agents
     // with it and writes it back to the manifest. Absent stays absent (the default list).
     const trackerServers = seed.features.tracker.servers;
-    // The machine gate level (features.gateLevel) is set by `devflow gates --set` alone, so init
-    // carries the prior value through raw: no default, no narrowing, a stored `null` kept. The
-    // seed holds `undefined` only for an absent key or a --reset seed, and the full manifest
-    // write below then leaves the key out.
-    const gateLevel = seed.features.gateLevel;
+    // The machine gate level (features.gateLevel), shared with `devflow gates --set`. The seed holds
+    // it raw: `undefined` only for an absent key or a --reset seed, a malformed value or `null` as
+    // stored. It stays raw unless --gate-level or the wizard step sets it, so a plain init never
+    // defaults, narrows or heals it; the full manifest write below then leaves an absent key out.
+    let gateLevel: unknown = seed.features.gateLevel;
     let enabledFlags: FlagsRecord = { ...seed.flags };
     // viewModeExplicit: true when --reset is passed; signals resolveFinalViewMode to let the
     // seed-time view-mode win over an externally-set value in settings.json.
@@ -1281,6 +1309,27 @@ export const initCommand = new Command('init')
       return trackerStep.state;
     };
 
+    /**
+     * Decide the machine gate level for one wizard path: --gate-level, else the wizard step
+     * (gated on modePromptShown), else the stored value untouched. The step's outcome line is
+     * the post-install gate level summary row, on both paths.
+     */
+    const runGateLevelStepAt = async (mode: 'recommended' | 'advanced'): Promise<void> => {
+      const outcome = await resolveGateLevelForInit({
+        cliLevel: cliGateLevel,
+        stored: gateLevel,
+        mode,
+        modePromptShown,
+        isTTY: process.stdin.isTTY,
+        prompts: buildClackGateLevelPrompts(),
+      });
+      if (outcome.kind === 'cancelled') {
+        p.cancel('Installation cancelled.');
+        process.exit(0);
+      }
+      gateLevel = outcome.level;
+    };
+
     // Safe-delete detection (both paths need this)
     const platform = detectPlatform();
     const shell = detectShell();
@@ -1325,6 +1374,9 @@ export const initCommand = new Command('init')
       const wizardTracker = await runTrackerStepAt(
         'recommended', seed.features.tracker.provider, false,
       );
+
+      // Gate level wizard step — same gate; --recommended and !isTTY keep the stored value.
+      await runGateLevelStepAt('recommended');
 
       // No attribution step here: the suppress-attribution question is Advanced-only (D27).
       // Recommended silently carries the seeded value in enabledFlags — fresh installs get
@@ -1651,6 +1703,9 @@ export const initCommand = new Command('init')
         if (overrideLine.level === 'success') p.log.success(overrideLine.text);
         else p.log.info(overrideLine.text);
       }
+
+      // Gate level wizard step — same gate as the Recommended path; re-init lands here.
+      await runGateLevelStepAt('advanced');
 
       // Attribution feature (after compliance, before flags). This is the ONLY call site —
       // the attribution question is Advanced-only (D27); the Recommended path never asks and
@@ -2760,6 +2815,13 @@ export const initCommand = new Command('init')
       agent: trackerLifecycle.agent,
     });
     logSummaryLines(trackerLines);
+
+    // The gate level this run recorded, from the manifest the run wrote (D-INIT-REAL-OUTCOME).
+    logSummaryLines(formatGateLevelSummary({
+      level: gateLevel,
+      priorLevel: existingManifest?.features.gateLevel,
+      manifestWritten: trackerLifecycle.manifestWritten,
+    }));
 
     // CLAUDE.md import audit (D-CLAUDE-MD-IMPORT-AUDIT, D-AUDIT-STAMP): after the install, on
     // both paths, through claudeMdAuditStep. Global roots always; the project's roots when init
