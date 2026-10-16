@@ -417,10 +417,15 @@ export function resolveResetGatedInputs(
  * undefined means "user did not specify this flag, keep the seed value".
  *
  * Applies explicit --ambient/--no-ambient etc. passed alongside --recommended.
+ *
+ * The machine gate level is not a toggle: `resolveGateLevelForInit` (gate-level-prompts.ts)
+ * is the one place that decides it (--gate-level, then the wizard answer, then the stored
+ * value), and init holds that decision itself. The result carries the seed's raw value only
+ * to stay a complete FeatureSeed.
  */
 export function applyCliToggles(
   base: FeatureSeed,
-  toggles: Partial<FeatureSeed>,
+  toggles: Partial<Omit<FeatureSeed, 'gateLevel'>>,
 ): FeatureSeed {
   return {
     ambient: toggles.ambient ?? base.ambient,
@@ -433,9 +438,6 @@ export function applyCliToggles(
     behavior: toggles.behavior ?? base.behavior,
     compliance: toggles.compliance ?? base.compliance,
     tracker: toggles.tracker ?? base.tracker,
-    // init resolves --gate-level and the wizard answer after this merge
-    // (gate-level-prompts.ts), so the seed's raw value passes through here. Only
-    // `undefined` means "not specified": `null` is a value, not a gap.
-    gateLevel: toggles.gateLevel !== undefined ? toggles.gateLevel : base.gateLevel,
+    gateLevel: base.gateLevel,
   };
 }

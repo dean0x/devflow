@@ -1260,6 +1260,8 @@ export const initCommand = new Command('init')
     // stored. A manifest readManifest() refuses carries its raw level instead (`storedGate`, read
     // above). It stays raw unless --gate-level or the wizard step sets it, so a plain init never
     // defaults, narrows or heals it; the full manifest write below then leaves an absent key out.
+    // Each wizard path assigns the level `runGateLevelStepAt` decides; that is the only precedence
+    // site (--gate-level, then the wizard answer, then this stored value).
     let gateLevel: unknown = storedGate.origin === 'rejected' ? storedGate.value : seed.features.gateLevel;
     let enabledFlags: FlagsRecord = { ...seed.flags };
     // viewModeExplicit: true when --reset is passed; signals resolveFinalViewMode to let the
@@ -1326,8 +1328,12 @@ export const initCommand = new Command('init')
      * Decide the machine gate level for one wizard path: --gate-level, else the wizard step
      * (gated on modePromptShown), else the stored value untouched. The step's outcome line is
      * the post-install gate level summary row, on both paths.
+     *
+     * Returns the decided level, raw as `resolveGateLevelForInit` returns it. The caller
+     * assigns it to `gateLevel`: that value is the only precedence decision, and nothing
+     * after the call revises it.
      */
-    const runGateLevelStepAt = async (mode: 'recommended' | 'advanced'): Promise<void> => {
+    const runGateLevelStepAt = async (mode: 'recommended' | 'advanced'): Promise<unknown> => {
       const outcome = await resolveGateLevelForInit({
         cliLevel: cliGateLevel,
         stored: gateLevel,
@@ -1341,7 +1347,7 @@ export const initCommand = new Command('init')
         p.cancel('Installation cancelled.');
         process.exit(0);
       }
-      gateLevel = outcome.level;
+      return outcome.level;
     };
 
     // Safe-delete detection (both paths need this)
@@ -1390,7 +1396,8 @@ export const initCommand = new Command('init')
       );
 
       // Gate level wizard step — same gate; --recommended and !isTTY keep the stored value.
-      await runGateLevelStepAt('recommended');
+      // The decision is final here: applyCliToggles below carries no gate level.
+      gateLevel = await runGateLevelStepAt('recommended');
 
       // No attribution step here: the suppress-attribution question is Advanced-only (D27).
       // Recommended silently carries the seeded value in enabledFlags — fresh installs get
@@ -1719,7 +1726,7 @@ export const initCommand = new Command('init')
       }
 
       // Gate level wizard step — same gate as the Recommended path; re-init lands here.
-      await runGateLevelStepAt('advanced');
+      gateLevel = await runGateLevelStepAt('advanced');
 
       // Attribution feature (after compliance, before flags). This is the ONLY call site —
       // the attribution question is Advanced-only (D27); the Recommended path never asks and

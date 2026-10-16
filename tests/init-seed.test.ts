@@ -973,6 +973,13 @@ describe('gate level seeding', () => {
     }
   });
 
+  it('applyCliToggles takes no gate level: init decides it in resolveGateLevelForInit alone', () => {
+    const seed: FeatureSeed = { ...FEATURE_DEFAULTS, gateLevel: 'full' };
+    // `as never`: the toggles type has no gateLevel, so a second precedence rule cannot be named.
+    const result = applyCliToggles(seed, { gateLevel: 'lean' } as never);
+    expect(result.gateLevel).toBe('full');
+  });
+
   it('applyCliToggles keeps the seed value while it applies other toggles', () => {
     const seed: FeatureSeed = { ...FEATURE_DEFAULTS, gateLevel: 'full' };
     const result = applyCliToggles(seed, { hud: false, tracker: { provider: 'jira' } });

@@ -677,6 +677,13 @@ describe('init.ts wiring', () => {
     expect((source.match(/await runGateLevelStepAt\('advanced'\)/g) ?? []).length).toBe(1);
   });
 
+  it('takes the decided level from the step on each path, so no hidden assignment is left', async () => {
+    const source = await fs.readFile(INIT_SOURCE, 'utf-8');
+    expect((source.match(/gateLevel = await runGateLevelStepAt\('recommended'\)/g) ?? []).length).toBe(1);
+    expect((source.match(/gateLevel = await runGateLevelStepAt\('advanced'\)/g) ?? []).length).toBe(1);
+    expect(source).not.toMatch(/const runGateLevelStepAt = async \([^)]*\): Promise<void>/);
+  });
+
   it('forwards the caller\'s mode and modePromptShown, never a literal', async () => {
     const lines = gateCall(await fs.readFile(INIT_SOURCE, 'utf-8')).split('\n').map(line => line.trim());
     expect(lines).toContain('mode,');
