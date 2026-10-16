@@ -92,9 +92,11 @@ describe('init --help', () => {
     expect(status).toBe(0);
     // commander wraps a long description, so compare the flattened text.
     const flat = out.replace(/\s+/g, ' ');
-    const at = flat.indexOf('--gate-level <level>');
+    const flag = '--gate-level <full|standard|lean>';
+    const at = flat.indexOf(flag);
     expect(at, 'init --help does not list --gate-level').toBeGreaterThanOrEqual(0);
-    const description = flat.slice(at, flat.indexOf(' --', at + 1));
+    const start = at + flag.length;
+    const description = flat.slice(start, flat.indexOf(' --', start));
     for (const level of ['full', 'standard', 'lean']) expect(description).toContain(level);
     expect(description).toContain('prompt');
   });
@@ -132,6 +134,14 @@ describe('init --gate-level <level>', () => {
     expect(existsSync(devflowDir()), 'a rejected run created ~/.devflow').toBe(false);
     expect(existsSync(path.join(claudeDir(), 'settings.json')), 'a rejected run wrote settings.json').toBe(false);
   }, MULTI_RUN_TIMEOUT_MS);
+
+  it('exits 1 when --gate-level has no value, names the valid levels, and writes nothing', async () => {
+    const { status, out } = runCli(repo, 'init', '--recommended', '--gate-level');
+    expect(status, `expected a bare --gate-level to exit 1:\n${out}`).toBe(1);
+    for (const level of ['full', 'standard', 'lean']) expect(out).toContain(level);
+    expect(existsSync(devflowDir()), 'a rejected run created ~/.devflow').toBe(false);
+    expect(existsSync(path.join(claudeDir(), 'settings.json')), 'a rejected run wrote settings.json').toBe(false);
+  }, SUBPROCESS_TIMEOUT_MS);
 
   it('leaves an existing install byte-for-byte unchanged on an invalid level', async () => {
     runInit(repo, '--recommended', '--gate-level', 'lean');
