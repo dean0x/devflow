@@ -222,7 +222,7 @@ esac
 
 PROJECT_DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
 LEDGER_DEVFLOW_DIR="$LEDGER_ROOT/.devflow"
-LEARNING_DIR="$LEDGER_DEVFLOW_DIR/learning"
+LEARNING_DIR="$LEDGER_DEVFLOW_DIR/curation"
 
 # --- Learning gate: the machine switch, narrowed by this checkout ---
 # D-FEATURES-NARROW-ONLY (see queue-append): ~/.devflow/manifest.json's
@@ -238,15 +238,28 @@ LEARNING_ENABLED="$_QG_LEARNING"
 # Learning is project work: off outside a git project (D-HOOKS-GIT-ONLY above).
 [ -n "$PROJECT_OK" ] || LEARNING_ENABLED="false"
 
+# --- The one-time ledger folder move (curation-move) ---
+# The old learning/ folder moves to curation/ here, at every session start, resume,
+# clear and compact: on the LEDGER root (the main worktree's, in a linked worktree),
+# before Section 1's heal can create a folder, and whether or not the curation
+# switch is on, because the old folder holds the project's decisions either way. The
+# `retry` word clears an earlier refusal's marker, so a refused root is looked at
+# once per session. A held or refused move leaves the old folder in place.
+if [ -n "$PROJECT_OK" ]; then
+  source "$SCRIPT_DIR/curation-move" 2>/dev/null || true
+  df_curation_move "$LEDGER_ROOT" retry 2>/dev/null || true
+fi
+
 # --- Section 1: Project Decisions TL;DR ---
 if [ "$LEARNING_ENABLED" = "true" ]; then
-  # Heal older installs that have .devflow/ but not .devflow/learning/, never
+  # Heal older installs that have .devflow/ but not .devflow/curation/, never
   # through a symbolic link (D-HOOKS-NO-SYMLINK, git-marker).
-  # The creator rule (git-marker, df_ledger_folder): the folder made is the old name's
-  # while that name is present, so a new name never hides an old ledger.
+  # The creator rule (git-marker, df_ledger_folder): the folder made is the new one
+  # only when the old learning/ name is absent, so a new folder never hides an old
+  # ledger.
   if [ -d "$LEDGER_DEVFLOW_DIR" ] && [ ! -d "$LEARNING_DIR" ]; then
     DF_LEDGER_FOLDER=""
-    df_ledger_folder "$LEDGER_DEVFLOW_DIR" learning || true
+    df_ledger_folder "$LEDGER_DEVFLOW_DIR" learning curation || true
     if df_no_symlink_below "$LEDGER_ROOT" "$DF_LEDGER_FOLDER"; then
       mkdir -p "$DF_LEDGER_FOLDER" 2>/dev/null || true
     else
@@ -318,7 +331,7 @@ fi
 # claim, so the directive is suppressed even if new turns queued since. This
 # check is advisory and decides only whether to spawn: the claim itself is taken
 # by json-helper's claim-queue op under the learning lock, which applies the same
-# threshold (D-OWNED-CLAIM, lib/learning-store.cjs), so a spawn that loses a race
+# threshold (D-OWNED-CLAIM, lib/curation-store.cjs), so a spawn that loses a race
 # exits on `busy`.
 if [ "$LEARNING_ENABLED" = "true" ]; then
   QUEUE_FILE="$LEARNING_DIR/.pending-turns.jsonl"
@@ -363,11 +376,11 @@ ${LEARNING_PAUSED_SECTION}"
   if [ -n "$LEARNING_WORK" ]; then
     # D-LEARNING-MODEL-PRECEDENCE — the model of the spawn. The first layer that
     # supplies a model decides:
-    #   1. a valid project learning.json "model"                      -> model="<value>"
+    #   1. a valid project curation.json "model"                      -> model="<value>"
     #   2. agents.curate.model in $HOME/.devflow/agent-models.json, else
     #      agents.learning.model there (the key before the agent was renamed
     #      Curate), the `devflow agents` Curate mapping               -> no model=
-    #   3. a valid $HOME/.devflow/learning.json "model"               -> model="<value>"
+    #   3. a valid $HOME/.devflow/curation.json "model"               -> model="<value>"
     #   4. none                                                       -> no model=
     # With no model= the spawn takes the model of the installed Curate agent's
     # frontmatter, which is where a `devflow agents` mapping is applied, so the
@@ -383,7 +396,7 @@ ${LEARNING_PAUSED_SECTION}"
     # `devflow agents` drops `learning`, but this hook still reads it.
     #
     # Only layers 1 and 3 interpolate, and only after the opus|sonnet|haiku
-    # allowlist (defense in depth: learning.json is user/config-controlled, and a
+    # allowlist (defense in depth: curation.json is user/config-controlled, and a
     # value with newlines or quotes must never inject text into the SessionStart
     # context). Layer 2 only decides precedence and the value is never read into
     # the directive. It counts only when agents.curate.model, or failing that
@@ -397,19 +410,19 @@ ${LEARNING_PAUSED_SECTION}"
     # than silently ignoring it for a model nothing will run. The type is read by
     # json_string_field_file, which keeps the number 42 apart from the string "42"
     # on both the jq and the node backend. An entry with an effort alone supplies
-    # no model either, so it does not displace a global learning.json. An invalid
+    # no model either, so it does not displace a global curation.json. An invalid
     # layer-1 or layer-3 value counts as absent and falls through. A missing,
     # unreadable or malformed agent-models.json reads as empty (the typed read
     # discards its errors), so the mapping layer is absent. A dormant external
     # mapping model, any name of that charset, still decides: its model is inactive
     # while the proxy is off and the shipped tier runs, but this hook does not know
     # the proxy state.
-    # A project learning.json a symbolic link leads to is absent (D-HOOKS-NO-SYMLINK).
+    # A project curation.json a symbolic link leads to is absent (D-HOOKS-NO-SYMLINK).
     # The machine root is $HOME/.devflow and nothing relocates it.
     CURATE_MODEL=""
     CURATE_MODEL_LAYER=""
-    if df_file_below "$LEDGER_ROOT" "$LEARNING_DIR/learning.json"; then
-      _SC_CM=$(json_field_file "$LEARNING_DIR/learning.json" "model" "")
+    if df_file_below "$LEDGER_ROOT" "$LEARNING_DIR/curation.json"; then
+      _SC_CM=$(json_field_file "$LEARNING_DIR/curation.json" "model" "")
       case "$_SC_CM" in
         opus|sonnet|haiku) CURATE_MODEL="$_SC_CM"; CURATE_MODEL_LAYER="project" ;;
       esac

@@ -154,8 +154,8 @@ afterEach(async () => {
 // ---------------------------------------------------------------------------
 
 describe('init follows the machine switch (AC-139, AC-148)', () => {
-  it('init --no-learning installs the curation-off prompts and no apply-decisions skill', async () => {
-    init('--recommended', '--no-learning');
+  it('init --no-curation installs the curation-off prompts and no apply-decisions skill', async () => {
+    init('--recommended', '--no-curation');
 
     await expectAll('off');
     expect(await exists(skillDir()), 'the skill has no reader on a curation-off machine').toBe(false);
@@ -171,7 +171,7 @@ describe('init follows the machine switch (AC-139, AC-148)', () => {
   }, SCENARIO_TIMEOUT_MS);
 
   it('a prompt with no curation-off file is installed once, the same on both sides of the switch', async () => {
-    init('--recommended', '--no-learning');
+    init('--recommended', '--no-curation');
     const offInstall = await fs.readFile(installedPrompt('agents', 'evaluate.md'));
     init('--recommended');
     const onInstall = await fs.readFile(installedPrompt('agents', 'evaluate.md'));
@@ -180,14 +180,14 @@ describe('init follows the machine switch (AC-139, AC-148)', () => {
     expect(offInstall.equals(onInstall)).toBe(true);
   }, SCENARIO_TIMEOUT_MS);
 
-  it('init --no-learning over a full curation-on install converges the prompts it did not copy (--plugin)', async () => {
+  it('init --no-curation over a full curation-on install converges the prompts it did not copy (--plugin)', async () => {
     init('--recommended');
     await expectAll('on');
     expect(await exists(skillDir())).toBe(true);
 
     // A partial install copies one plugin's files; every other plugin's installed file
     // is the converge's to flip, and the skill the copy skipped is the converge's to remove.
-    init('--no-learning', '--plugin=implement');
+    init('--no-curation', '--plugin=implement');
 
     await expectAll('off');
     expect(await exists(skillDir())).toBe(false);
@@ -195,11 +195,11 @@ describe('init follows the machine switch (AC-139, AC-148)', () => {
   }, SCENARIO_TIMEOUT_MS);
 
   it('a re-init on the same switch moves nothing: every installed prompt and the file list are identical', async () => {
-    init('--recommended', '--no-learning');
+    init('--recommended', '--no-curation');
     const before = await promptDigest();
     expect(before.size, 'non-vacuity: prompts were installed').toBeGreaterThan(20);
 
-    init('--recommended', '--no-learning');
+    init('--recommended', '--no-curation');
 
     expect(await promptDigest()).toEqual(before);
     expect(await installedTree()).toEqual([...new Set(await installedTree())]);
@@ -212,7 +212,7 @@ describe('init follows the machine switch (AC-139, AC-148)', () => {
 
 describe('devflow learning --enable/--disable converges the install (AC-140, AC-141)', () => {
   it('--enable brings back the curation-on prompts and the skill, and --disable reverses it', async () => {
-    init('--recommended', '--no-learning');
+    init('--recommended', '--no-curation');
     await expectAll('off');
 
     const enabled = okCli(os.tmpdir(), 'learning', '--enable');
@@ -228,7 +228,7 @@ describe('devflow learning --enable/--disable converges the install (AC-140, AC-
   }, SCENARIO_TIMEOUT_MS);
 
   it('a toggle to the value already installed prints nothing about prompts and writes nothing', async () => {
-    init('--recommended', '--no-learning');
+    init('--recommended', '--no-curation');
     const tree = await installedTree();
     const manifest = await fs.readFile(manifestFile());
 
@@ -346,7 +346,7 @@ describe('a skill shadow follows the switch', () => {
     await fs.mkdir(path.dirname(shadow), { recursive: true });
     await fs.writeFile(shadow, '---\nname: apply-decisions\ndescription: mine\n---\nmy own apply-decisions\n');
 
-    init('--recommended', '--no-learning');
+    init('--recommended', '--no-curation');
     expect(await exists(skillDir()), 'not installed with learning off').toBe(false);
     expect(await fs.readFile(shadow, 'utf-8'), 'a shadow is user content').toContain('my own apply-decisions');
 

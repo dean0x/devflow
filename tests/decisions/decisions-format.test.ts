@@ -689,8 +689,8 @@ describe('buildTldrLine', () => {
 // ---------------------------------------------------------------------------
 
 const OPTS = {
-  decisionsFilePath: '/project/.devflow/learning/decisions.md',
-  pitfallsFilePath:  '/project/.devflow/learning/pitfalls.md',
+  decisionsFilePath: '/project/.devflow/curation/decisions.md',
+  pitfallsFilePath:  '/project/.devflow/curation/pitfalls.md',
 };
 
 function makeAdrRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -1030,8 +1030,8 @@ describe('buildIndexContent — v2 rows', () => {
       '  PF-002  Editing installed scripts directly  [Active]  —  src/assets/scripts/hooks/\n' +
       '  PF-003  Writers refuse a missing learning tree  —  area:learning\n' +
       '\n' +
-      'ADR-NNN entries live in /project/.devflow/learning/decisions.md\n' +
-      'PF-NNN  entries live in /project/.devflow/learning/pitfalls.md\n' +
+      'ADR-NNN entries live in /project/.devflow/curation/decisions.md\n' +
+      'PF-NNN  entries live in /project/.devflow/curation/pitfalls.md\n' +
       'Read the relevant file and locate the matching `## ADR-NNN:` or `## PF-NNN:` heading for the full body.',
     );
     const v1Lines = buildIndexContent([v1Decision], [v1Pitfall], OPTS).split('\n').filter(l => l.startsWith('  '));
@@ -1069,7 +1069,7 @@ describe('json-helper.cjs assign-anchor renders through decisions-format', () =>
   /** Promote `logRow` with assign-anchor in a fresh learning tree; return the minted ledger row and the rendered file. */
   function promote(logRow: Record<string, unknown>, file: 'decisions.md' | 'pitfalls.md'): { ledgerRow: Record<string, unknown>; written: string } {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fmt-compat-test-'));
-    const learningDir = path.join(tmpDir, '.devflow', 'learning');
+    const learningDir = path.join(tmpDir, '.devflow', 'curation');
     fs.mkdirSync(learningDir, { recursive: true });
     try {
       fs.writeFileSync(path.join(learningDir, 'decisions-log.jsonl'), JSON.stringify(logRow) + '\n', 'utf8');

@@ -25,18 +25,20 @@
  * sweep. The store takes every lock with no wait, so a busy project is reported and
  * moves at its next event. A per-project outcome never decides init's exit code.
  *
- * Nothing calls this module yet; init.ts wires it in a later commit.
+ * Callers: init.ts runs {@link runInitCurationMove} between its legacy sweep and the
+ * manifest write, and the curation command runs {@link moveLedgerRoot} for one root
+ * (configure and the toggles). The real I/O is built in curation-move-io.ts.
  */
 
 import * as path from 'path';
 import { pooled } from '../../core/migrations.js';
-import { LEGACY_NAMES } from '../../core/project-paths.js';
+import { CURATION_DIR_NAME, CURATION_TUNING_FILE_NAME, LEGACY_NAMES, getGlobalCurateTuningConfigPath } from '../../core/project-paths.js';
 import type {
   LearningStoreModule,
   LedgerMoveOptions,
   LedgerMoveOutcome,
   LedgerSweepOutcome,
-} from '../../core/learning-store.js';
+} from '../../core/curation-store.js';
 
 /** At most this many projects are probed or moved at once (the migration runner's pool). */
 export const MOVE_POOL_LIMIT = 16;
@@ -157,7 +159,7 @@ export async function moveProjectLedgers(
   };
 }
 
-function checkOptions(opts: ProjectLedgerMoveOptions): string | null {
+function checkOptions(opts: SharedMoveOptions): string | null {
   if (!FOLDER_NAME_RE.test(opts.oldName) || !FOLDER_NAME_RE.test(opts.newName) || opts.oldName === opts.newName) {
     return 'the old and new folder names must be two different plain names';
   }
@@ -203,8 +205,25 @@ async function physicalOf(target: string, io: ProjectLedgerMoveIO): Promise<stri
   }
 }
 
+/** The options one root's move needs: the names and the two directories the store refuses. */
+export type SharedMoveOptions = Pick<ProjectLedgerMoveOptions, 'homeDir' | 'machineDir' | 'oldName' | 'newName'>;
+
+/** The I/O one root's move needs. */
+export type SharedMoveIO = Pick<ProjectLedgerMoveIO, 'readdir' | 'store' | 'now'>;
+
+/**
+ * Move one ledger root's folder, then sweep its backups when one exists. The one move
+ * that init (per project) and the curation command (configure and the toggles, for
+ * the current project) share. Takes every lock with no wait; never throws.
+ */
+export async function moveLedgerRoot(root: string, opts: SharedMoveOptions, io: SharedMoveIO): Promise<ProjectMoveOutcome> {
+  const invalid = checkOptions(opts);
+  if (invalid !== null) return { kind: 'error', root, message: invalid };
+  return moveOne(root, opts, io);
+}
+
 /** Move one project's ledger folder, then sweep its backups when one exists. */
-async function moveOne(root: string, opts: ProjectLedgerMoveOptions, io: ProjectLedgerMoveIO): Promise<ProjectMoveOutcome> {
+async function moveOne(root: string, opts: SharedMoveOptions, io: SharedMoveIO): Promise<ProjectMoveOutcome> {
   const storeOpts = (): LedgerMoveOptions => ({
     oldName: opts.oldName,
     newName: opts.newName,
@@ -227,7 +246,7 @@ async function moveOne(root: string, opts: ProjectLedgerMoveOptions, io: Project
   const answer: LedgerMoveOutcome = moved.value;
   if (answer.state === 'busy') return { kind: 'busy', root };
 
-  const sweep = await sweepIfBackup(root, opts, io, storeOpts);
+  const sweep = await sweepIfBackup(root, io, storeOpts);
   if (answer.state === 'moved') {
     return { kind: 'moved', root, mode: answer.mode, backup: answer.backup, rendered: answer.rendered, notes: answer.notes, sweep };
   }
@@ -237,8 +256,7 @@ async function moveOne(root: string, opts: ProjectLedgerMoveOptions, io: Project
 /** Run the backup sweep when `.devflow` holds a backup folder; answer null when there is nothing to report. */
 async function sweepIfBackup(
   root: string,
-  opts: ProjectLedgerMoveOptions,
-  io: ProjectLedgerMoveIO,
+  io: SharedMoveIO,
   storeOpts: () => LedgerMoveOptions,
 ): Promise<BackupSweepReport | null> {
   let entries: readonly string[] | null;
@@ -283,7 +301,7 @@ function describeFailure(error: unknown): string {
 // ---------------------------------------------------------------------------
 
 /** The lines for one project: none when it moved cleanly or had nothing to move. */
-function describeOutcome(outcome: ProjectMoveOutcome): string[] {
+export function describeOutcome(outcome: ProjectMoveOutcome): string[] {
   const lines: string[] = [];
   switch (outcome.kind) {
     case 'busy':
@@ -316,4 +334,160 @@ function describeOutcome(outcome: ProjectMoveOutcome): string[] {
     }
   }
   return lines;
+}
+
+// ---------------------------------------------------------------------------
+// The global tuning file
+// ---------------------------------------------------------------------------
+
+/** What sits at a path, without following a link: a regular file, anything else, nothing, or a probe that failed. */
+export type TuningPathKind = 'file' | 'other' | 'absent' | 'error';
+
+export type RenameIfAbsentResult =
+  | { readonly state: 'renamed' }
+  | { readonly state: 'exists' }
+  | { readonly state: 'failed'; readonly message: string };
+
+/** The I/O the global tuning file's rename uses. Every member is total: it answers a value and does not throw. */
+export interface GlobalTuningMoveIO {
+  kindOf(target: string): Promise<TuningPathKind>;
+  /** Rename `from` to `to` unless `to` exists. Never replaces a file. */
+  renameIfAbsent(from: string, to: string): Promise<RenameIfAbsentResult>;
+}
+
+export type GlobalTuningOutcome =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'renamed' }
+  | { readonly kind: 'kept-new' }
+  | { readonly kind: 'left-alone' }
+  | { readonly kind: 'error'; readonly message: string };
+
+export interface GlobalTuningMoveReport {
+  readonly outcome: GlobalTuningOutcome;
+  /** One line when the outcome needs a word, else none. */
+  readonly lines: readonly string[];
+}
+
+/**
+ * Rename the global curate tuning file from its old name to the new one, inside the
+ * machine directory. State-checked, never run-once: an old file with no new one is
+ * renamed; with both present the new name wins, the old file stays and one line says
+ * so; with no old file there is nothing to do. The rename never replaces a file, so
+ * two inits at once cannot lose the new one. A link or another non-file under the old
+ * name is left alone.
+ */
+export async function moveGlobalTuningFile(machineDir: string, io: GlobalTuningMoveIO): Promise<GlobalTuningMoveReport> {
+  const oldPath = path.join(machineDir, LEGACY_NAMES.tuningFile);
+  const newPath = getGlobalCurateTuningConfigPath(machineDir);
+  const done = (outcome: GlobalTuningOutcome, ...lines: string[]): GlobalTuningMoveReport => ({ outcome, lines });
+
+  const oldKind = await probeKind(oldPath, io);
+  if (oldKind === 'absent') return done({ kind: 'none' });
+  if (oldKind === 'error') {
+    return done({ kind: 'error', message: 'the file could not be checked' },
+      `The global tuning file ${oldPath} could not be checked. The next init tries again.`);
+  }
+  if (oldKind === 'other') {
+    return done({ kind: 'left-alone' },
+      `The global tuning file ${oldPath} is not a regular file, so it was not renamed to ${CURATION_TUNING_FILE_NAME}.`);
+  }
+
+  const newKind = await probeKind(newPath, io);
+  if (newKind === 'error') {
+    return done({ kind: 'error', message: 'the new name could not be checked' },
+      `The global tuning file ${newPath} could not be checked. The next init tries again.`);
+  }
+  if (newKind !== 'absent') return done({ kind: 'kept-new' }, keptNewLine(machineDir));
+
+  let renamed: RenameIfAbsentResult;
+  try {
+    renamed = await io.renameIfAbsent(oldPath, newPath);
+  } catch (error) {
+    renamed = { state: 'failed', message: describeFailure(error) };
+  }
+  switch (renamed.state) {
+    case 'renamed':
+      return done({ kind: 'renamed' });
+    case 'exists':
+      return done({ kind: 'kept-new' }, keptNewLine(machineDir));
+    case 'failed':
+      return done({ kind: 'error', message: renamed.message },
+        `The global tuning file ${oldPath} could not be renamed: ${renamed.message}. The next init tries again.`);
+    default: {
+      const unreachable: never = renamed;
+      return unreachable;
+    }
+  }
+}
+
+async function probeKind(target: string, io: GlobalTuningMoveIO): Promise<TuningPathKind> {
+  try {
+    return await io.kindOf(target);
+  } catch {
+    return 'error';
+  }
+}
+
+function keptNewLine(machineDir: string): string {
+  return `Both ${LEGACY_NAMES.tuningFile} and ${CURATION_TUNING_FILE_NAME} exist in ${machineDir}. ` +
+    `${CURATION_TUNING_FILE_NAME} is used, and ${LEGACY_NAMES.tuningFile} was left in place.`;
+}
+
+// ---------------------------------------------------------------------------
+// The whole init step
+// ---------------------------------------------------------------------------
+
+export interface InitCurationMoveIO {
+  /** The per-project move's I/O, or the reason the store could not be loaded (one line, not one per project). */
+  readonly ledger: ProjectLedgerMoveIO | { readonly unavailable: string };
+  readonly tuning: GlobalTuningMoveIO;
+}
+
+export interface InitCurationMoveReport {
+  /** The lines init prints, in order: the tuning file first, then one for each project that did not move cleanly. */
+  readonly lines: readonly string[];
+  /** The move notice, printed once per run: set only when at least one project moved. */
+  readonly notice: string | null;
+  readonly movedCount: number;
+}
+
+/** The notice init prints once when a project moved. */
+export function moveNotice(movedCount: number): string {
+  return `Moved the curation data of ${movedCount} project${movedCount === 1 ? '' : 's'} ` +
+    `from .devflow/${LEGACY_NAMES.folder}/ to .devflow/${CURATION_DIR_NAME}/. ` +
+    'Where a project already had both folders, the old one was kept as a backup.';
+}
+
+/**
+ * The init step: rename the global tuning file, then move every target project's
+ * ledger folder. Answers lines and one notice; it never throws and never decides
+ * init's exit code. A step that cannot run (bad options) becomes one line.
+ */
+export async function runInitCurationMove(
+  opts: ProjectLedgerMoveOptions,
+  io: InitCurationMoveIO,
+): Promise<InitCurationMoveReport> {
+  const lines: string[] = [];
+  try {
+    lines.push(...(await moveGlobalTuningFile(opts.machineDir, io.tuning)).lines);
+  } catch (error) {
+    lines.push(`The global tuning file was not renamed: ${describeFailure(error)}.`);
+  }
+  let movedCount = 0;
+  if ('unavailable' in io.ledger) {
+    lines.push(`The ledger move did not run: ${io.ledger.unavailable}. The next init tries again.`);
+    return { lines, notice: null, movedCount };
+  }
+  try {
+    const result = await moveProjectLedgers(opts, io.ledger);
+    if (result.ok) {
+      lines.push(...result.value.lines);
+      movedCount = result.value.movedCount;
+    } else {
+      lines.push(`The ledger move did not run: ${result.error.message}.`);
+    }
+  } catch (error) {
+    lines.push(`The ledger move did not run: ${describeFailure(error)}.`);
+  }
+  return { lines, notice: movedCount > 0 ? moveNotice(movedCount) : null, movedCount };
 }

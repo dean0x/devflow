@@ -4,14 +4,14 @@ import { resolveAgentSource, resolveAllAgents } from '../helpers'
 
 /**
  * Named collector: sentences in an agent source that tell the agent to read the
- * learning index (`.devflow/learning/index.md`) for itself. A mention in an input
+ * learning index (`.devflow/curation/index.md`) for itself. A mention in an input
  * description ("pre-rendered to ...") is not an instruction, so the verb must come
  * first in the sentence.
  */
 function collectSelfReadInstructions(agents: ReadonlyArray<readonly [string, string]>): string[] {
   return agents.flatMap(([name, content]) =>
     content.split(/(?<=[.!?])\s+|\n/)
-      .filter(s => /\b[Rr]eads?\b[^.\n]*\.devflow\/learning\/index\.md/.test(s))
+      .filter(s => /\b[Rr]eads?\b[^.\n]*\.devflow\/curation\/index\.md/.test(s))
       .map(s => `${name}: ${s.trim().slice(0, 100)}`),
   )
 }
@@ -36,7 +36,7 @@ describe('Command surfaces — index.md direct read', () => {
     it(`${label} reads index.md (no decisions-index.cjs subprocess)`, () => {
       const content = loadFile(relPath)
       // Must reference the pre-rendered index.md artifact (now under learning/)
-      expect(content).toContain('.devflow/learning/index.md')
+      expect(content).toContain('.devflow/curation/index.md')
       // Must NOT reference decisions-index.cjs in any form (the script is retired)
       expect(content).not.toContain('decisions-index.cjs')
     })
@@ -122,7 +122,7 @@ describe('Consumer agents — devflow:apply-decisions in skills frontmatter', ()
 
 describe('DECISIONS_CONTEXT input declaration — canonical form', () => {
   const CANONICAL_DESCRIPTION =
-    '**DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this repository (pre-rendered to `.devflow/learning/index.md` in its main worktree). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.'
+    '**DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this repository (pre-rendered to `.devflow/curation/index.md` in its main worktree). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.'
 
   const consumerAgents: Array<[string, string]> = [
     ['triage.md', 'triage'],
@@ -188,8 +188,8 @@ describe('consumers read the decisions index from the main worktree', () => {
     expect(content).toContain('An absent key or `(none)` means no decisions context.')
     expect(content).not.toContain('Otherwise read the decisions index')
     expect(content).not.toContain('--git-common-dir')
-    expect(content).not.toContain('.devflow/learning/decisions.md')
-    expect(content).not.toContain('.devflow/learning/pitfalls.md')
+    expect(content).not.toContain('.devflow/curation/decisions.md')
+    expect(content).not.toContain('.devflow/curation/pitfalls.md')
   })
 
   it('no agent is told to read the learning index itself, and the apply-decisions skip guard has no read-it-yourself clause', () => {
@@ -203,11 +203,11 @@ describe('consumers read the decisions index from the main worktree', () => {
 
   it('known-bad probe: the retired Code fallback sentence is reported as a self-read instruction', () => {
     const retired =
-      'Otherwise read the decisions index — `.devflow/learning/index.md` at the repository\'s main worktree ' +
+      'Otherwise read the decisions index — `.devflow/curation/index.md` at the repository\'s main worktree ' +
       '(`git rev-parse --path-format=absolute --git-common-dir`) — and follow `devflow:apply-decisions` on it.'
     expect(collectSelfReadInstructions([['code', retired]])).toHaveLength(1)
     // An input description that names where the index is rendered is not an instruction to read it.
-    expect(collectSelfReadInstructions([['triage', 'pre-rendered to `.devflow/learning/index.md` in its main worktree']])).toEqual([])
+    expect(collectSelfReadInstructions([['triage', 'pre-rendered to `.devflow/curation/index.md` in its main worktree']])).toEqual([])
   })
 
   it('skim.md reads the decisions TL;DR at the main worktree, else the toplevel, else the start directory', () => {
@@ -218,9 +218,9 @@ describe('consumers read the decisions index from the main worktree', () => {
     const tiers = ['the main worktree', 'else the toplevel', 'else `{start}`'].map(tier => step6.indexOf(tier))
     expect(tiers.every(at => at > -1), step6).toBe(true)
     expect([...tiers].sort((a, b) => a - b)).toEqual(tiers)
-    expect(step6).toContain('`{ledger}/.devflow/learning/decisions.md`')
+    expect(step6).toContain('`{ledger}/.devflow/curation/decisions.md`')
     expect(step6).toContain('`<!-- TL;DR: N decisions -->`')
-    expect(step6).not.toContain('If `.devflow/learning/decisions.md` exists')
+    expect(step6).not.toContain('If `.devflow/curation/decisions.md` exists')
   })
 
   it('code.md states applied decisions and pitfalls in words, never by ID', () => {
@@ -247,7 +247,7 @@ describe('consumers read the decisions index from the main worktree', () => {
     expect(source).toMatch(/^@import "\.\/_decisions\.mds" as decisions$/m)
     expect(source).toContain('{{decisions.decisions_locate()}}')
     expect(source).not.toMatch(/@import \{[^}]*\} from "\.\/_decisions\.mds"/)
-    expect(source).toContain('`{ledger}/.devflow/learning/index.md`')
+    expect(source).toContain('`{ledger}/.devflow/curation/index.md`')
   })
 
   it('the decisions step is its own define, authoring_decisions: gate then locator, none of it in authoring_preamble', () => {
@@ -269,7 +269,7 @@ describe('consumers read the decisions index from the main worktree', () => {
   it('the dynamic-build implement bundle passes the DECISIONS_CONTEXT loaded before authoring', () => {
     const content = loadFile('dist/commands/dynamic-build.md')
     expect(content).toContain('relevant DECISIONS_CONTEXT (the index you loaded before authoring)')
-    expect(content).not.toContain('DECISIONS_CONTEXT (from `.devflow/learning/index.md`)')
+    expect(content).not.toContain('DECISIONS_CONTEXT (from `.devflow/curation/index.md`)')
   })
 })
 

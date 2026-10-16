@@ -7,20 +7,20 @@ import { writeFileAtomicExclusive } from './fs-atomic.js';
  * repository may only narrow.
  *
  * D-FEATURES-NARROW-ONLY (#392, superseding the machine-only rule of #378):
- * `features.memory`, `features.learning` and `features.knowledge` in
+ * `features.memory`, `features.curation` and `features.knowledge` in
  * `~/.devflow/manifest.json` are the MACHINE switch — `devflow init` and
- * `devflow memory|learning|knowledge --enable/--disable` write that one value,
- * and {@link readMachineFeature} reads it. The learning switch is read under a
- * second current key, `features.curation`, because the feature is being renamed:
- * a false in either key turns it off (see {@link isMachineFeatureOn}), and this
- * module still writes only `features.learning`. A repository adds two layers
- * that can only turn a feature OFF, never on:
+ * `devflow memory|curation|knowledge --enable/--disable` write that one value,
+ * and {@link readMachineFeature} reads it. The curation switch is stored under
+ * TWO current keys, `features.curation` and its pre-rename copy `features.learning`
+ * (a 3.7.0 CLI still reads only the copy): every write sets both to the same value,
+ * and a false in either key turns the switch off (see {@link isMachineFeatureOn}).
+ * A repository adds two layers that can only turn a feature OFF, never on:
  *
  *   effective = machine AND project.json `features.<name>` AND config.json `features.<name>`
  *
  * where only a literal `false` narrows — absent, malformed and unreadable values
- * leave the machine switch deciding. A repository file narrows the learning
- * switch through `features.learning` or `features.curation`: a literal `false`
+ * leave the machine switch deciding. A repository file narrows the curation
+ * switch through `features.curation` or `features.learning`: a literal `false`
  * in either key turns it off, and each key is parsed on its own. (An unreadable
  * repository file also fails the settings line closed, so commands read
  * `KNOWLEDGE=off` from it; the hooks never read that line, and for them it
@@ -39,7 +39,7 @@ import { writeFileAtomicExclusive } from './fs-atomic.js';
  * so a stale `learning: false` left in an old config.json never comes back to
  * life as a switch.
  */
-export type MachineFeature = 'memory' | 'learning' | 'knowledge';
+export type MachineFeature = 'memory' | 'curation' | 'knowledge';
 
 /**
  * Machine switches that are OPT-IN: off until the user turns them on.
@@ -69,27 +69,36 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
 /**
  * The keys a RAW manifest may hold a machine feature under, current names first.
  *
- * `learning` is read under two current keys, `curation` and `learning`: the
- * feature is being renamed, and a manifest written before the rename holds only
+ * `curation` is stored under two current keys, `curation` and `learning`: the
+ * feature was renamed, and a manifest written before the rename holds only
  * `learning`. No precedence rule exists between the two (see
- * {@link isMachineFeatureOn}). `memory` and `knowledge` have one current key.
+ * {@link isMachineFeatureOn}); every write sets both. `memory` and `knowledge`
+ * have one current key.
  */
 const CURRENT_KEYS: Readonly<Record<MachineFeature, readonly string[]>> = {
   memory: ['memory'],
-  learning: ['curation', 'learning'],
+  curation: ['curation', 'learning'],
   knowledge: ['knowledge'],
 };
 
 /**
  * The pre-rename key each machine feature was stored under, where one exists:
- * `learning` was `decisions` and `knowledge` was `kb`. A manifest no
+ * `curation` was `decisions` and `knowledge` was `kb`. A manifest no
  * command has rewritten since the rename can still hold only the legacy key.
  * `memory` was never renamed.
  */
 const LEGACY_KEYS: Readonly<Partial<Record<MachineFeature, string>>> = {
-  learning: 'decisions',
+  curation: 'decisions',
   knowledge: 'kb',
 };
+
+/**
+ * The keys a write sets for `feature`: the feature's own key, and for `curation` its
+ * pre-rename copy too (the manifest mirror). Opt-in switches have one key.
+ */
+function writtenKeys(feature: MachineFeature | OptInMachineFeature): readonly string[] {
+  return feature === 'behavior' ? [feature] : CURRENT_KEYS[feature];
+}
 
 /**
  * Whether a RAW parsed manifest leaves `feature` switched on. Pure.
@@ -105,7 +114,7 @@ const LEGACY_KEYS: Readonly<Partial<Record<MachineFeature, string>>> = {
  *   1. off when ANY current key (`curation`, `learning`) is a boolean `false`;
  *   2. else on when any current key is a boolean `true`;
  *   3. else, when neither current key is a boolean, the pre-rename key decides
- *      if it is a boolean (`decisions` for learning, `kb` for knowledge);
+ *      if it is a boolean (`decisions` for curation, `kb` for knowledge);
  *   4. else ON.
  * A non-boolean value is ignored for that key only. A disagreeing pair
  * therefore resolves to OFF: false wins, so a switch a user turned off never
@@ -150,7 +159,9 @@ export function isMachineFeatureOn(rawManifest: unknown, feature: MachineFeature
  * is no `features` record to write into).
  *
  * Only `features.<feature>` and `updatedAt` change; every other key is carried
- * verbatim. Writing `learning` leaves a legacy `decisions` key in place, and
+ * verbatim. Writing `curation` sets BOTH current keys (`curation` and its
+ * pre-rename copy `learning`) to the one value, so a disagreeing pair is
+ * overwritten, never carried. It leaves a legacy `decisions` key in place, and
  * writing `knowledge` a legacy `kb` key, inert: the boolean just written wins
  * over it (D-LEARNING-LEGACY-DECISIONS, D-KNOWLEDGE-LEGACY-KB). Going through
  * readManifest()/writeManifest() instead would refuse a manifest that reader
@@ -165,26 +176,31 @@ export function setMachineFeature(
   now: string,
 ): Record<string, unknown> | null {
   if (!isJsonObject(rawManifest) || !isJsonObject(rawManifest.features)) return null;
+  const written: Record<string, boolean> = {};
+  for (const key of writtenKeys(feature)) written[key] = enabled;
   return {
     ...rawManifest,
-    features: { ...rawManifest.features, [feature]: enabled },
+    features: { ...rawManifest.features, ...written },
     updatedAt: now,
   };
 }
 
 /**
  * Whether a RAW parsed manifest already records `feature` as exactly `enabled`:
- * `features.<feature>` is that boolean. Pure. Stricter than
+ * every key a write sets (`writtenKeys`) is that boolean. Pure. Stricter than
  * {@link isMachineFeatureOn} on purpose — an absent key, a non-boolean value and
- * a legacy key all read as a state without being recorded as it, so writing the
- * explicit boolean is still a change.
+ * a legacy key all read as a state without being recorded as it, and for
+ * `curation` a disagreeing pair, or one key alone, is a copy that disagrees or is
+ * missing: not recorded, so the write that follows puts both keys right.
  */
 function isMachineFeatureRecorded(
   rawManifest: unknown,
   feature: MachineFeature | OptInMachineFeature,
   enabled: boolean,
 ): boolean {
-  return isJsonObject(rawManifest) && isJsonObject(rawManifest.features) && rawManifest.features[feature] === enabled;
+  if (!isJsonObject(rawManifest) || !isJsonObject(rawManifest.features)) return false;
+  const features = rawManifest.features;
+  return writtenKeys(feature).every((key) => features[key] === enabled);
 }
 
 async function readRawManifest(devflowDir: string): Promise<unknown> {

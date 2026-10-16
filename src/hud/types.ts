@@ -34,7 +34,7 @@ export type ComponentId =
   | 'codexQuota'
   | 'todoProgress'
   | 'configCounts'
-  | 'learningCounts'
+  | 'curationCounts'
   | 'sessionCost'
   | 'releaseInfo'
   | 'worktreeCount';
@@ -138,11 +138,20 @@ export interface ConfigCountsData {
 }
 
 /**
- * Decisions/pitfalls counts data for the learningCounts component.
+ * What the empty branch says about a project whose ledger folder still has the old name:
+ * `pointer` asks for a session start or `devflow init` (the move has not run), `refused`
+ * says the move was tried and refused (a marker exists for the root).
  */
-export interface LearningCountsData {
+export type CurationMoveNotice = 'pointer' | 'refused';
+
+/**
+ * Decisions/pitfalls counts data for the curationCounts component. `move` is set only
+ * when both counts are zero and the old folder exists.
+ */
+export interface CurationCountsData {
   decisions: number;
   pitfalls: number;
+  move?: CurationMoveNotice;
 }
 
 /**
@@ -155,7 +164,7 @@ export interface GatherContext {
   usage: UsageData | null;
   codexUsage: CodexUsage | null;
   configCounts: ConfigCountsData | null;
-  learningCounts: LearningCountsData | null;
+  curationCounts: CurationCountsData | null;
   costHistory: CostAggregation | null;
   config: HudConfig & { components: ComponentId[] };
   devflowDir: string;

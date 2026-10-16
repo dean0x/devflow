@@ -1,4 +1,4 @@
-// src/assets/scripts/hooks/lib/learning-store.cjs
+// src/assets/scripts/hooks/lib/curation-store.cjs
 //
 // The v2 learning store: the one place the learning plumbing reads, validates,
 // projects and writes the decisions log, the ledger and their side files.
@@ -6,7 +6,7 @@
 // DESIGN: plumbing only. No function here prints or calls process.exit. Work that
 // can fail on its input or on the lock returns a Result — { ok: true, value } or
 // { ok: false, error: { kind, message } } — and its caller prints it: json-helper.cjs
-// for the ops, or the `devflow learning` CLI through src/core/learning-store.ts. A throw
+// for the ops, or the `devflow learning` CLI through src/core/curation-store.ts. A throw
 // means a broken invariant or an I/O failure, never an expected outcome; a lock
 // held by withDecisionsLock is released on every path, the throw included.
 //
@@ -17,7 +17,7 @@
 // The module also holds the one-time move of the old ledger folder to its new name
 // (moveLedger, sweepLedgerBackups): the one place that names both folders.
 //
-// Files under <root>/.devflow/learning/:
+// Files under <root>/.devflow/curation/:
 //   decisions-log.jsonl          observation rows — the content authority
 //   decisions-ledger.jsonl       anchored rows — projections of log rows
 //   decisions-log.archive.jsonl  rotated-out observation rows (D-ROTATE-UNREFERENCED)
@@ -30,7 +30,7 @@
 //                                owner's token (D-OWNED-CLAIM)
 //
 // TS COUNTERPARTS: src/core/observations.ts mirrors the status lists (D201), and
-// src/core/learning-store.ts transcribes the functions the CLI calls from their
+// src/core/curation-store.ts transcribes the functions the CLI calls from their
 // JSDoc here (D-LEARNING-STORE-SEAM) — change both together.
 
 'use strict';
@@ -560,7 +560,7 @@ function writeJsonlAtomic(file, rows) {
 // ---------------------------------------------------------------------------
 
 /**
- * True when `<root>/.devflow/learning` exists and is a directory.
+ * True when `<root>/.devflow/curation` exists and is a directory.
  *
  * @param {string} root - project root
  * @returns {boolean}
@@ -575,7 +575,7 @@ function hasLearningDir(root) {
 }
 
 /**
- * The error Result of an op run where `<root>/.devflow/learning/` is absent
+ * The error Result of an op run where `<root>/.devflow/curation/` is absent
  * (D-NO-STRAY-TREE).
  *
  * @param {string} opName - operation name, for the message
@@ -585,7 +585,7 @@ function hasLearningDir(root) {
 function noLearningDir(opName, root) {
   return {
     ok: false,
-    error: { kind: 'no-learning-dir', message: `${opName}: no .devflow/learning/ under ${root} — run from the project root` },
+    error: { kind: 'no-learning-dir', message: `${opName}: no .devflow/curation/ under ${root} — run from the project root` },
   };
 }
 
@@ -600,7 +600,7 @@ function isSymbolicLink(file) {
 }
 
 /**
- * The first of `<root>/.devflow` and `<root>/.devflow/learning` that is itself a
+ * The first of `<root>/.devflow` and `<root>/.devflow/curation` that is itself a
  * symbolic link, or null when neither is (D-NO-LINKED-TREE).
  *
  * @param {string} root - project root
@@ -615,7 +615,7 @@ function linkedLearningFolder(root) {
 }
 
 /**
- * The error Result of an op run where `.devflow` or `.devflow/learning` under its
+ * The error Result of an op run where `.devflow` or `.devflow/curation` under its
  * root is a symbolic link (D-NO-LINKED-TREE).
  *
  * @param {string} opName - operation name, for the message
@@ -646,7 +646,7 @@ function isResult(value) {
  * silently discards the first one's change.
  *
  * D-NO-STRAY-TREE: a learning writer refuses with `no-learning-dir` when
- * `.devflow/learning/` is absent under its root, and the store never creates that
+ * `.devflow/curation/` is absent under its root, and the store never creates that
  * directory or its parent — the lock directory is the only thing made inside it.
  * Reason: a writer run from the wrong directory would otherwise create a learning
  * tree there and write a ledger that no session ever reads.
@@ -656,7 +656,7 @@ function isResult(value) {
  * lands between two renames of the move's ledger set.
  *
  * D-NO-LINKED-TREE: a learning writer refuses with `not-a-directory`, changing
- * nothing, when `.devflow` or `.devflow/learning` under its root is a symbolic
+ * nothing, when `.devflow` or `.devflow/curation` under its root is a symbolic
  * link. Reason: a repository can commit either one as a link to a folder elsewhere
  * on the machine, and a writer that followed it would take its lock there and
  * rewrite, quarantine, archive, render or delete files in whatever folder the link
@@ -1378,7 +1378,7 @@ function removeEmptyDir(dir) {
  * and what arrives once the lock is free — a captured turn, or the next writer's
  * lock — belongs to the next run.
  *
- * Like every learning writer it refuses without `.devflow/learning/` and creates
+ * Like every learning writer it refuses without `.devflow/curation/` and creates
  * nothing (D-NO-STRAY-TREE), refuses a learning directory or a `.devflow` that is a
  * symbolic link and removes nothing (D-NO-LINKED-TREE), since emptying it would
  * empty whatever directory the link leads to, and waits at most `timeoutMs` for the
@@ -1417,7 +1417,7 @@ const CLAIM_STALE_SECS = 900;
 /** How long a claim waits for the queue's own lock (ms): the wait of queue-append's overflow truncation. */
 const QUEUE_LOCK_TIMEOUT_MS = 2000;
 
-/** Age after which the queue's own lock counts as abandoned (ms): learning-lock's threshold. */
+/** Age after which the queue's own lock counts as abandoned (ms): curation-lock's threshold. */
 const QUEUE_LOCK_STALE_MS = 30000;
 
 /** A claim token: 16 lowercase hex characters. */
@@ -1557,7 +1557,7 @@ function moveQueueToClaim(queuePath, claimPath) {
  * clobber a batch, mv kept the queue's old mtime so a fresh claim could look stale
  * at once, and an unconditional final unlink deleted another run's claim.
  *
- * Without .devflow/learning/ it answers none and creates nothing.
+ * Without .devflow/curation/ it answers none and creates nothing.
  *
  * @param {string} root - project root
  * @param {{ now?: number, token?: string, timeoutMs?: number }} [opts]
@@ -3190,7 +3190,7 @@ function putUnderLock(root, mode, input, { now, scopeMatches }) {
  * The data behind `list`, read-only: buildListing over the ledger and the log as
  * they are, every glob scope checked against the files git tracks. Malformed
  * lines are counted, never quarantined (D-QUARANTINE-MALFORMED). Refuses without
- * .devflow/learning/ (D-NO-STRAY-TREE).
+ * .devflow/curation/ (D-NO-STRAY-TREE).
  *
  * @param {string} root - project root
  * @param {{ scopeMatches?: (glob: string) => boolean }} [opts] - default gitScopeMatcher(root)
@@ -3280,7 +3280,7 @@ function formatListing(listing) {
  * the log and the history as they are. When lines were skipped as malformed
  * (D-QUARANTINE-MALFORMED), a found entry gains `malformed: { ledger, log }` and
  * a not-found message says a skipped line may hold it. Refuses without
- * .devflow/learning/ (D-NO-STRAY-TREE).
+ * .devflow/curation/ (D-NO-STRAY-TREE).
  *
  * @param {string} root - project root
  * @param {string} key - an anchor id or an observation id
@@ -3421,7 +3421,7 @@ function nextAnchorFromLedger(ledgerRows, type) {
  */
 function isCitedScanExcluded(relPath) {
   const norm = relPath.split(path.sep).join('/');
-  if (norm === '.devflow/learning' || norm.startsWith('.devflow/learning/')) return true;
+  if (norm === '.devflow/curation' || norm.startsWith('.devflow/curation/')) return true;
   return norm.split('/').some(segment => CITED_SCAN_EXCLUDED_SEGMENTS.includes(segment));
 }
 

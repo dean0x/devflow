@@ -11,7 +11,7 @@ import { addMemoryHooks, removeMemoryHooks, hasMemoryHooks, countMemoryHooks, co
  * Both hook-integration describes below spawn hooks that source `hook-log-init`,
  * which calls `devflow_log_dir` and so `mkdir -p "$HOME/.devflow/logs/<slug>"`
  * unconditionally; `session-start-context` additionally reads user-scope state —
- * the global learning.json, and the tracker manifest and its `.tracker.enabled`
+ * the global curation.json, and the tracker manifest and its `.tracker.enabled`
  * sentinel — out of `$HOME/.devflow`. Every invocation therefore
  * passes an explicit HOME, so no assertion here writes to, or is decided by, the
  * developer's real machine.
@@ -572,7 +572,7 @@ describe('session-start-memory hook integration', () => {
   beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-hook-test-'));
     tmpHome = await mkTmpHome();
-    await fs.mkdir(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+    await fs.mkdir(path.join(tmpDir, '.devflow', 'curation'), { recursive: true });
   });
 
   afterEach(async () => {
@@ -584,7 +584,7 @@ describe('session-start-memory hook integration', () => {
     // Decisions TL;DR injection moved from session-start-memory to session-start-context.
     // session-start-memory only handles working memory (WORKING-MEMORY.md).
     await fs.writeFile(
-      path.join(tmpDir, '.devflow', 'learning', 'decisions.md'),
+      path.join(tmpDir, '.devflow', 'curation', 'decisions.md'),
       '<!-- TL;DR: 2 decisions. Key: ADR-001 Result types, ADR-002 Single-coder -->\n# Architectural Decisions',
     );
 
@@ -624,7 +624,7 @@ describe('session-start-context hook integration', () => {
     // Project context is injected only in a git project (D-HOOKS-GIT-ONLY); an
     // empty `.git` is a marker, not a repository, so the root stays tmpDir.
     await fs.mkdir(path.join(tmpDir, '.git'));
-    await fs.mkdir(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+    await fs.mkdir(path.join(tmpDir, '.devflow', 'curation'), { recursive: true });
   });
 
   afterEach(async () => {
@@ -634,11 +634,11 @@ describe('session-start-context hook integration', () => {
 
   it('injects PROJECT DECISIONS TL;DR from decisions files', async () => {
     await fs.writeFile(
-      path.join(tmpDir, '.devflow', 'learning', 'decisions.md'),
+      path.join(tmpDir, '.devflow', 'curation', 'decisions.md'),
       '<!-- TL;DR: 2 decisions. Key: ADR-001 Result types, ADR-002 Single-coder -->\n# Architectural Decisions',
     );
     await fs.writeFile(
-      path.join(tmpDir, '.devflow', 'learning', 'pitfalls.md'),
+      path.join(tmpDir, '.devflow', 'curation', 'pitfalls.md'),
       '<!-- TL;DR: 1 pitfall. Key: PF-001 Synthesizer glob -->\n# Known Pitfalls',
     );
 
@@ -653,7 +653,7 @@ describe('session-start-context hook integration', () => {
 
   it('produces no leading newlines when only decisions files exist', async () => {
     await fs.writeFile(
-      path.join(tmpDir, '.devflow', 'learning', 'decisions.md'),
+      path.join(tmpDir, '.devflow', 'curation', 'decisions.md'),
       '<!-- TL;DR: 1 decision. Key: ADR-001 Test -->\n# Architectural Decisions',
     );
 

@@ -185,12 +185,12 @@ describe('a learning toggle keeps the stamp (the composition with the variant co
   it('a re-init on the same switch leaves the stamped curation-off file identical', async () => {
     init();
     init('--plugin=devflow-typescript');
-    init('--no-learning');
+    init('--no-curation');
     const content = await fs.readFile(installedCommand('code-review'), 'utf-8');
     expect(content.split('\n')).toContain(`${STAMP_PREFIX}typescript`);
     expect(content, 'the curation-off variant, stamped').toBe((await learningOffBytes('code-review') as string).replace(`${STAMP_PREFIX}(none)`, `${STAMP_PREFIX}typescript`));
 
-    init('--no-learning');
+    init('--no-curation');
 
     expect(await fs.readFile(installedCommand('code-review'), 'utf-8')).toBe(content);
   }, SCENARIO_TIMEOUT_MS);

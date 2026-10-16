@@ -68,7 +68,7 @@ log() { :; }
 dbg() { :; }
 source "${path.join(HOOKS_DIR, 'json-parse')}"
 source "${path.join(HOOKS_DIR, 'get-mtime')}"
-source "${path.join(HOOKS_DIR, 'learning-lock')}"
+source "${path.join(HOOKS_DIR, 'curation-lock')}"
 source "${path.join(HOOKS_DIR, 'queue-append')}"
 ${script}
 `;
@@ -222,7 +222,7 @@ describe('the grids', () => {
 
 describe('TypeScript readers: the machine layer', () => {
   it('isMachineFeatureOn follows the rule', () => {
-    for (const c of MACHINE_CASES) expect(isMachineFeatureOn(c.manifest, 'learning'), c.name).toBe(c.expected);
+    for (const c of MACHINE_CASES) expect(isMachineFeatureOn(c.manifest, 'curation'), c.name).toBe(c.expected);
   });
 
   it('readManifest follows the rule', async () => {
@@ -231,7 +231,7 @@ describe('TypeScript readers: the machine layer', () => {
       fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(c.manifest));
       const read = await readManifest(dir);
       expect(read, c.name).not.toBeNull();
-      expect(read!.features.learning, c.name).toBe(c.expected);
+      expect(read!.features.curation, c.name).toBe(c.expected);
     }
   });
 });

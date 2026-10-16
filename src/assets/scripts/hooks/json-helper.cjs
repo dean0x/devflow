@@ -67,7 +67,7 @@ let learningModules = null;
  */
 function learning() {
   if (learningModules === null) {
-    learningModules = { store: require('./lib/learning-store.cjs') };
+    learningModules = { store: require('./lib/curation-store.cjs') };
   }
   return learningModules;
 }
@@ -255,7 +255,7 @@ function heartbeat(root) {
 // The learning ops run from the project root and take no path to a learning file:
 // each builds its paths from the current directory. Every op that writes takes the
 // store's one learning lock through withDecisionsLock (D-ONE-LEARNING-LOCK) and
-// refuses, creating nothing, when .devflow/learning/ is absent (D-NO-STRAY-TREE)
+// refuses, creating nothing, when .devflow/curation/ is absent (D-NO-STRAY-TREE)
 // or when it, or .devflow, is a symbolic link (D-NO-LINKED-TREE).
 // A locked body returns its Result; emit prints it once the lock is released.
 if (require.main === module) {
@@ -355,7 +355,7 @@ try {
     // assign-anchor <decision|pitfall> <obs_id>
     // Promote a v2 observation no ledger row carries to the next entry of its
     // type, skipping each number a tracked file cites (assignAnchor,
-    // learning-store.cjs: D-LEDGER-REGISTRY, D-E4-SKIP). It never writes the log.
+    // curation-store.cjs: D-LEDGER-REGISTRY, D-E4-SKIP). It never writes the log.
     // stdout: the anchor; stderr: `assign-anchor: skipped <anchor>, cited in
     // <path>:<line>` for each number skipped
     // -------------------------------------------------------------------------
@@ -379,7 +379,7 @@ try {
     // Make an active entry inactive with the one JSON object on stdin its status
     // takes: { reason } for Retired and Deprecated, { by } for Superseded, and
     // { at, quote } for Encoded, the quote checked at the verify ref
-    // (retireAnchor, learning-store.cjs: D-ENCODED-QUOTE).
+    // (retireAnchor, curation-store.cjs: D-ENCODED-QUOTE).
     // stdout: the new status in lower case and the anchor, then `repointed
     // <anchor>` for each entry re-pointed to the successor
     // -------------------------------------------------------------------------
@@ -402,7 +402,7 @@ try {
     // Make an inactive entry active again, its notes, last_verified and
     // last_attempt cleared so it is due for maintenance again, ordered after
     // integrity problems and legacy entries, or among them when it is one
-    // (restoreAnchor, learning-store.cjs: D-DUE-ORDER).
+    // (restoreAnchor, curation-store.cjs: D-DUE-ORDER).
     // stdout: restored <anchor>
     // -------------------------------------------------------------------------
     case 'restore-anchor': {
@@ -417,7 +417,7 @@ try {
     // -------------------------------------------------------------------------
     // refresh-anchor <anchor> [<anchor>...] [--verified]
     // Re-project active v2 entries from their log rows, or under --verified stamp
-    // them verified today; all or nothing (refreshAnchors, learning-store.cjs).
+    // them verified today; all or nothing (refreshAnchors, curation-store.cjs).
     // stdout: `reprojected <anchor>` or `unchanged <anchor>` per anchor, or
     // `verified <anchor>` under --verified, in the order given
     // -------------------------------------------------------------------------
@@ -437,7 +437,7 @@ try {
     // rotate-observations
     // Archive the log rows no ledger row carries once 30 days have passed since
     // their last activity, and delete the usage telemetry's leftovers
-    // (D-ROTATE-UNREFERENCED, learning-store.cjs). Takes no argument: the log and
+    // (D-ROTATE-UNREFERENCED, curation-store.cjs). Takes no argument: the log and
     // the archive are the project root's.
     // stdout: rotated <N> observations
     // -------------------------------------------------------------------------
@@ -451,7 +451,7 @@ try {
     // -------------------------------------------------------------------------
     // put-observation --create|--update|--reinforce
     // Store one observation from the JSON object on stdin (D-PUT-NOT-MERGE,
-    // D-PUT-REPROJECTS, learning-store.cjs). Exactly one mode flag; no other argv.
+    // D-PUT-REPROJECTS, curation-store.cjs). Exactly one mode flag; no other argv.
     // stdout: created <id> | updated <id> | unchanged <id> | reinforced <id> <n>,
     // then one `reprojected <anchor>` line per entry re-projected
     // -------------------------------------------------------------------------
@@ -472,7 +472,7 @@ try {
     // -------------------------------------------------------------------------
     // list
     // Print the ledger and the log by section, read-only (readListing and
-    // formatListing, learning-store.cjs). Takes no argument.
+    // formatListing, curation-store.cjs). Takes no argument.
     // stdout: the ACTIVE, INACTIVE, OBSERVATIONS and INTEGRITY sections, then
     // MALFORMED when lines were skipped
     // -------------------------------------------------------------------------
@@ -485,7 +485,7 @@ try {
 
     // -------------------------------------------------------------------------
     // show <anchor|obs_id>
-    // Print one entry, read-only (showByKey, learning-store.cjs).
+    // Print one entry, read-only (showByKey, curation-store.cjs).
     // stdout: pretty JSON { key, ledger, log, history_versions, flags }, plus
     // malformed when lines were skipped
     // -------------------------------------------------------------------------
@@ -501,7 +501,7 @@ try {
     // -------------------------------------------------------------------------
     // claim-due
     // Hand out the entries due for maintenance and lease each for a day
-    // (claimDue, learning-store.cjs: D-DUE-ORDER, D-VERIFY-REF). Takes no argument.
+    // (claimDue, curation-store.cjs: D-DUE-ORDER, D-VERIFY-REF). Takes no argument.
     // stdout: ref <origin/HEAD|HEAD> <sha12>, or ref none; then one
     // `<anchor> <reason> <bytes>` line per entry handed out, or due none
     // -------------------------------------------------------------------------
@@ -517,7 +517,7 @@ try {
 
     // -------------------------------------------------------------------------
     // claim-queue
-    // Claim the learning queue for this run (D-OWNED-CLAIM, learning-store.cjs).
+    // Claim the learning queue for this run (D-OWNED-CLAIM, curation-store.cjs).
     // Takes no argument; mints the token itself.
     // stdout: claimed <token> | claimed <token> takeover | busy | none
     // -------------------------------------------------------------------------
@@ -532,7 +532,7 @@ try {
 
     // -------------------------------------------------------------------------
     // release-claim <token>
-    // Release the claim the token owns (D-OWNED-CLAIM, learning-store.cjs).
+    // Release the claim the token owns (D-OWNED-CLAIM, curation-store.cjs).
     // stdout: released | not-owner | gone
     // -------------------------------------------------------------------------
     case 'release-claim': {
@@ -547,7 +547,7 @@ try {
     // -------------------------------------------------------------------------
     // move-ledger <root> <old> <new>
     // Move the project's old ledger folder to the new name, once (moveLedger,
-    // learning-store.cjs). Not a learning op: it sends no heartbeat, because a
+    // curation-store.cjs). Not a learning op: it sends no heartbeat, because a
     // heartbeat would refresh a claim the move has to judge stale. Unlike the
     // learning ops it takes its paths as arguments, so a caller outside the project
     // root can name the root; every path stays one argv word, never a shell word.

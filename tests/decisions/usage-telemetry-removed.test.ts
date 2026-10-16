@@ -24,7 +24,7 @@ const CAPTURE_TURN = path.join(HOOKS_DIR, 'capture-turn');
 const USAGE_FILE_BYTES = `${JSON.stringify({ version: 1, entries: { 'ADR-001': { cites: 0, last_cited: null } } }, null, 2)}\n`;
 
 function usageFilePath(project: string): string {
-  return path.join(project, '.devflow', 'learning', '.decisions-usage.json');
+  return path.join(project, '.devflow', 'curation', '.decisions-usage.json');
 }
 
 describe('the usage scanner is not shipped', () => {
@@ -71,7 +71,7 @@ describe('no hook or op counts citations', { timeout: 30_000 }, () => {
     expect(run.exitCode).toBe(0);
     expect(fs.readFileSync(usageFilePath(project), 'utf8')).toBe(USAGE_FILE_BYTES);
     // Non-vacuity: the hook ran through to the queue append.
-    const queued = fs.readFileSync(path.join(project, '.devflow', 'learning', '.pending-turns.jsonl'), 'utf8');
+    const queued = fs.readFileSync(path.join(project, '.devflow', 'curation', '.pending-turns.jsonl'), 'utf8');
     expect(queued.trim().split('\n').map(line => JSON.parse(line).content)).toEqual([message]);
   });
 
@@ -88,7 +88,7 @@ describe('no hook or op counts citations', { timeout: 30_000 }, () => {
 
   it('rotate-observations deletes the usage file and usage lock an older install left', () => {
     seedLearningTree(project);
-    const usageLock = path.join(project, '.devflow', 'learning', '.decisions-usage.lock');
+    const usageLock = path.join(project, '.devflow', 'curation', '.decisions-usage.lock');
     fs.writeFileSync(usageFilePath(project), USAGE_FILE_BYTES);
     fs.mkdirSync(usageLock);
 

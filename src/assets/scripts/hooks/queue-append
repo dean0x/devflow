@@ -6,8 +6,8 @@
 # under a lock. Used by capture-prompt, capture-turn, and capture-question so the
 # per-feature dual-queue-append logic exists in exactly one place.
 #
-# Source-order requirement: source json-parse (for _HAS_JQ) and learning-lock (for
-# learning_lock_acquire/learning_lock_release, which itself requires get-mtime) BEFORE
+# Source-order requirement: source json-parse (for _HAS_JQ) and curation-lock (for
+# curation_lock_acquire/curation_lock_release, which itself requires get-mtime) BEFORE
 # calling queue_append_row or queue_append_both, and define log/dbg. This file
 # sources its sibling git-marker itself, for df_no_symlink_below. Sourcing it only
 # defines functions -- no side effects until they are called.
@@ -17,10 +17,17 @@
 #   <root>: the project root for the memory queue, the ledger root for the learning
 #   queue. When the queue, or a folder between <root> and it, is a symbolic link,
 #   nothing is written: the skip is logged once and the call returns 0, as a
-#   skipped capture does (D-HOOKS-NO-SYMLINK, git-marker). Otherwise it
-#   creates the queue's folder if absent, and the file with mode 0600 (umask 077).
+#   skipped capture does (D-HOOKS-NO-SYMLINK, git-marker). Otherwise it builds the
+#   row first (a row that fails to build writes nothing), then makes one builtin
+#   append under umask 077, so a queue it creates has mode 0600. A ledger queue
+#   follows the creator rule (git-marker, df_ledger_queue): it is appended to in the
+#   old learning/ folder while that exists, which is never created here; the new
+#   curation/ folder is created only when the old name is absent. An append that
+#   finds the old folder gone (the one-time move ran meanwhile) looks again and goes
+#   on in the new folder, so a capture never drops a row and never waits. Any other
+#   queue's folder is created if absent.
 #   After appending, truncates from 200 to the newest 100 lines under a lock
-#   (learning_lock_acquire on "<queue_file>.lock", 2s timeout), keeping mode 0600.
+#   (curation_lock_acquire on "<queue_file>.lock", 2s timeout), keeping mode 0600.
 #   The append itself is intentionally lock-free (accepted-class race shared with
 #   the pre-existing memory design -- see the design doc's "Append-vs-claim race"
 #   note).
@@ -95,31 +102,61 @@ source "${BASH_SOURCE[0]%/*}/git-marker" 2>/dev/null || true
 
 queue_append_row() {
   local _qar_root="$1" _qar_file="$2" _qar_role="$3" _qar_content="$4" _qar_ts="$5"
+  local _qar_row="" _qar_given="$2" _qar_old="learning" _qar_new="curation"
 
   # The creator rule (git-marker, df_ledger_queue): a ledger queue is appended to in
   # the old folder while that folder is present, so a new name never hides an old
   # ledger. Any other queue (the memory queue) comes back unchanged. A helper that
   # failed to source is a command not found, so the queue stays as given and the
   # check below, from the same library, refuses it.
-  if df_ledger_queue "$_qar_file" learning; then _qar_file="$DF_LEDGER_QUEUE"; fi
+  if df_ledger_queue "$_qar_file" "$_qar_old" "$_qar_new"; then _qar_file="$DF_LEDGER_QUEUE"; fi
 
   # D-HOOKS-NO-SYMLINK (git-marker): a skipped append is a skipped capture.
   if ! df_no_symlink_below "$_qar_root" "$_qar_file"; then
     log "Queue skipped: a symbolic link sits on the path to $_qar_file; nothing written"
     return 0
   fi
-  mkdir -p "${_qar_file%/*}" 2>/dev/null || true
 
-  if [ ! -f "$_qar_file" ]; then
-    (umask 077 && touch "$_qar_file") 2>/dev/null || true
+  # The row is built first and written after, in one builtin call, so a builder that
+  # fails halfway writes nothing: no partial line can reach the queue.
+  if [ "$_HAS_JQ" = "true" ]; then
+    _qar_row=$(jq -n -c --arg role "$_qar_role" --arg content "$_qar_content" --argjson ts "$_qar_ts" \
+      '{role: $role, content: $content, ts: $ts}') || _qar_row=""
+  else
+    _qar_row=$(node -e "process.stdout.write(JSON.stringify({role:process.argv[1],content:process.argv[2],ts:parseInt(process.argv[3])}))" \
+      -- "$_qar_role" "$_qar_content" "$_qar_ts") || _qar_row=""
+  fi
+  if [ -z "$_qar_row" ]; then
+    log "Queue skipped: the row could not be built; nothing written ($(basename "$_qar_file"))"
+    return 0
   fi
 
-  if [ "$_HAS_JQ" = "true" ]; then
-    jq -n -c --arg role "$_qar_role" --arg content "$_qar_content" --argjson ts "$_qar_ts" \
-      '{role: $role, content: $content, ts: $ts}' >> "$_qar_file"
-  else
-    node -e "process.stdout.write(JSON.stringify({role:process.argv[1],content:process.argv[2],ts:parseInt(process.argv[3])})+String.fromCharCode(10))" \
-      -- "$_qar_role" "$_qar_content" "$_qar_ts" >> "$_qar_file"
+  # A folder is made only where this append is its creator: never the old ledger
+  # folder, which a move may rename away at any moment, and which a make-again would
+  # bring back beside the new one. An old folder that is gone leaves the append to
+  # fail, and the re-probe below decides again.
+  case "${_qar_file%/*}" in
+    */"$_qar_old") ;;
+    *) mkdir -p "${_qar_file%/*}" 2>/dev/null || true ;;
+  esac
+
+  # Created files are 0600 (SEC-2): the umask is set in this hook process, and the
+  # append is the one builtin call between opening the queue and writing the row.
+  # The redirection error is silenced by 2>/dev/null written BEFORE it.
+  umask 077
+  if ! printf '%s\n' "$_qar_row" 2>/dev/null >> "$_qar_file"; then
+    # The old folder may have been moved after the probe. Look again: when the old
+    # name is gone, the creator makes the new folder once and the row goes there.
+    df_ledger_queue "$_qar_given" "$_qar_old" "$_qar_new" || true
+    if [ "$DF_LEDGER_QUEUE" != "$_qar_file" ] \
+      && df_no_symlink_below "$_qar_root" "$DF_LEDGER_QUEUE" \
+      && mkdir -p "${DF_LEDGER_QUEUE%/*}" 2>/dev/null \
+      && printf '%s\n' "$_qar_row" 2>/dev/null >> "$DF_LEDGER_QUEUE"; then
+      _qar_file="$DF_LEDGER_QUEUE"
+    else
+      log "Queue append failed: $_qar_file could not be written"
+      return 0
+    fi
   fi
 
   # Overflow safety: >200 lines -> keep newest 100, locked to prevent a multi-session race.
@@ -128,7 +165,7 @@ queue_append_row() {
     _qar_lines=$(wc -l < "$_qar_file" | tr -d ' ')
     if [ "$_qar_lines" -gt 200 ]; then
       local _qar_lock="${_qar_file}.lock"
-      if learning_lock_acquire "$_qar_lock" 2; then
+      if curation_lock_acquire "$_qar_lock" 2; then
         _qar_lines=$(wc -l < "$_qar_file" | tr -d ' ')
         if [ "$_qar_lines" -gt 200 ]; then
           local _qar_tmp="${_qar_file}.tmp.$$"
@@ -148,7 +185,7 @@ queue_append_row() {
             log "Queue overflow: not truncated, its copy could not be written ($(basename "$_qar_file"))"
           fi
         fi
-        learning_lock_release "$_qar_lock"
+        curation_lock_release "$_qar_lock"
       fi
     fi
   fi

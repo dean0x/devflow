@@ -915,7 +915,7 @@ describe('list', { timeout: 30_000 }, () => {
 
   it('refuses without a learning directory and creates nothing', () => {
     expect(runJsonHelper(dir, ['list'])).toEqual({
-      code: 1, stdout: '', stderr: `list: no .devflow/learning/ under ${dir} — run from the project root\n`,
+      code: 1, stdout: '', stderr: `list: no .devflow/curation/ under ${dir} — run from the project root\n`,
     });
     expect(fs.readdirSync(dir)).toEqual([]);
   });
@@ -1019,7 +1019,7 @@ describe('show', { timeout: 30_000 }, () => {
 
   it('refuses without a learning directory and creates nothing', () => {
     expect(runJsonHelper(dir, ['show', 'ADR-001'])).toEqual({
-      code: 1, stdout: '', stderr: `show: no .devflow/learning/ under ${dir} — run from the project root\n`,
+      code: 1, stdout: '', stderr: `show: no .devflow/curation/ under ${dir} — run from the project root\n`,
     });
     expect(fs.readdirSync(dir)).toEqual([]);
   });
@@ -1332,7 +1332,7 @@ describe('assignAnchor (D-LEDGER-REGISTRY)', () => {
     fs.rmSync(paths.learningDir, { recursive: true });
     expect(store.assignAnchor(dir, 'decision', 'obs_store_one', { now: FIXTURE_NOW })).toEqual({
       ok: false,
-      error: { kind: 'no-learning-dir', message: `assign-anchor: no .devflow/learning/ under ${dir} — run from the project root` },
+      error: { kind: 'no-learning-dir', message: `assign-anchor: no .devflow/curation/ under ${dir} — run from the project root` },
     });
     expect(fs.readdirSync(path.join(dir, '.devflow'))).toEqual([]);
   });
@@ -1434,7 +1434,7 @@ describe('collectCitedAnchorIds (D-E4-SKIP)', { timeout: 30_000 }, () => {
     initGitRepo(dir, {
       '.gitignore': 'ignored/\n',
       'ignored/scratch.md': 'ADR-003\n',
-      '.devflow/learning/decisions.md': '## ADR-004: an entry\n',
+      '.devflow/curation/decisions.md': '## ADR-004: an entry\n',
       'node_modules/pkg/readme.md': 'ADR-005\n',
       'dist/app.js': '// ADR-006\n',
       'crates/target/notes.md': 'ADR-008\n',
@@ -1684,7 +1684,7 @@ describe('refreshAnchors: re-projection from the log (D-LOG-CONTENT-AUTHORITY)',
     fs.rmSync(paths.learningDir, { recursive: true });
     expect(refresh(['ADR-001'])).toEqual({
       ok: false,
-      error: { kind: 'no-learning-dir', message: `refresh-anchor: no .devflow/learning/ under ${dir} — run from the project root` },
+      error: { kind: 'no-learning-dir', message: `refresh-anchor: no .devflow/curation/ under ${dir} — run from the project root` },
     });
     expect(fs.readdirSync(path.join(dir, '.devflow'))).toEqual([]);
   });
@@ -1933,7 +1933,7 @@ describe('retireAnchor: Retired and Deprecated take a reason', () => {
     fs.rmSync(paths.learningDir, { recursive: true });
     expect(retire('ADR-001', 'Retired', { reason: 'gone' })).toEqual({
       ok: false,
-      error: { kind: 'no-learning-dir', message: `retire-anchor: no .devflow/learning/ under ${dir} — run from the project root` },
+      error: { kind: 'no-learning-dir', message: `retire-anchor: no .devflow/curation/ under ${dir} — run from the project root` },
     });
     expect(fs.readdirSync(path.join(dir, '.devflow'))).toEqual([]);
   });
@@ -2241,7 +2241,7 @@ describe('restoreAnchor', () => {
     fs.rmSync(paths.learningDir, { recursive: true });
     expect(restore('ADR-001')).toEqual({
       ok: false,
-      error: { kind: 'no-learning-dir', message: `restore-anchor: no .devflow/learning/ under ${dir} — run from the project root` },
+      error: { kind: 'no-learning-dir', message: `restore-anchor: no .devflow/curation/ under ${dir} — run from the project root` },
     });
     expect(fs.readdirSync(path.join(dir, '.devflow'))).toEqual([]);
   });

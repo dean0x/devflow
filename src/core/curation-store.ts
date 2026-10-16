@@ -1,6 +1,6 @@
 /**
  * The CLI's view of the learning store — a typed seam onto the package's own
- * `hooks/lib/learning-store.cjs`, never a second implementation of it.
+ * `hooks/lib/curation-store.cjs`, never a second implementation of it.
  *
  * D-LEARNING-STORE-SEAM: `devflow learning` reads and writes the learning tree only
  * through the store module json-helper's ops and the hooks run, loaded with the
@@ -21,9 +21,9 @@ import { scriptsDir } from './assets.js';
 import { loadScript, type EvidencePolicyLoadError, type Result, type SurfaceKind } from './evidence-policy.js';
 
 /** The store, relative to src/assets/scripts/ (and ~/.devflow/scripts/). */
-export const LEARNING_STORE_SCRIPT_NAME = join('hooks', 'lib', 'learning-store.cjs');
+export const CURATION_STORE_SCRIPT_NAME = join('hooks', 'lib', 'curation-store.cjs');
 
-// ── Transcribed shapes (learning-store.cjs JSDoc) ──────────────────────────────
+// ── Transcribed shapes (curation-store.cjs JSDoc) ──────────────────────────────
 
 /** A ledger or log row as the store read it: one JSON object, any keys. */
 export type LearningRow = Readonly<Record<string, unknown>>;
@@ -147,8 +147,8 @@ export interface LedgerSweepOutcome {
 
 /**
  * The part of the store's `module.exports` the CLI calls. Each function refuses
- * without `.devflow/learning/` (error kind `no-learning-dir`); the writers refuse a
- * `.devflow` or `.devflow/learning` that is a symbolic link, changing nothing (error
+ * without `.devflow/curation/` (error kind `no-learning-dir`); the writers refuse a
+ * `.devflow` or `.devflow/curation` that is a symbolic link, changing nothing (error
  * kind `not-a-directory`), and wait at most `timeoutMs` for the learning lock
  * (error kind `busy`).
  */
@@ -227,7 +227,7 @@ export type LearningStoreLoad = Result<LearningStoreModule, EvidencePolicyLoadEr
  * `not-found`; a module that throws on load or lacks a surface key is `unusable`.
  */
 export function loadLearningStore(dir: string = scriptsDir()): LearningStoreLoad {
-  return loadScript<LearningStoreModule>(join(dir, LEARNING_STORE_SCRIPT_NAME), LEARNING_STORE_SURFACE);
+  return loadScript<LearningStoreModule>(join(dir, CURATION_STORE_SCRIPT_NAME), LEARNING_STORE_SURFACE);
 }
 
 /**

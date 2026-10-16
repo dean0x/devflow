@@ -94,7 +94,7 @@ describe('feature toggles write the machine-wide switch, never the per-repo conf
   it.each(TOGGLES)('★ devflow $feature $flag writes features.$feature and leaves config.json byte-identical', ({ feature, flag, enabled }) => {
     // The switch starts opposite to the toggle, so the write is a real change;
     // the repo config holds stale opposite values a pre-#378 toggle wrote.
-    seedManifest({ memory: !enabled, learning: !enabled, knowledge: !enabled });
+    seedManifest({ memory: !enabled, learning: !enabled, curation: !enabled, knowledge: !enabled });
     const configBody = JSON.stringify({
       memory: !enabled, learning: !enabled, knowledge: !enabled, reviewPublication: 'full', tracker: 'jira',
     });
@@ -107,8 +107,10 @@ describe('feature toggles write the machine-wide switch, never the per-repo conf
     const after = readManifest();
     expect(after.features).toEqual({
       ambient: true, hud: false, tracker: { provider: 'jira' },
-      memory: !enabled, learning: !enabled, knowledge: !enabled,
+      memory: !enabled, learning: !enabled, curation: !enabled, knowledge: !enabled,
       [feature]: enabled,
+      // The curation switch is one setting under two keys: a toggle writes both (#529).
+      ...(feature === 'learning' ? { curation: enabled } : {}),
     });
     expect(after.teamNote).toBe('kept');
     expect(after.updatedAt).not.toBe('2026-01-01T00:00:00.000Z');
@@ -127,6 +129,19 @@ describe('feature toggles write the machine-wide switch, never the per-repo conf
     expect(result.status, `devflow learning ${flag} failed:\n${result.out}`).toBe(0);
     expect(fs.readFileSync(configPath(), 'utf-8')).toBe(configBody);
     expect(readManifest().features.learning).toBe(enabled);
+    expect(readManifest().features.curation).toBe(enabled);
+  }, 60_000);
+
+  it.each([
+    { flag: '--enable', enabled: true },
+    { flag: '--disable', enabled: false },
+  ] as const)('devflow learning $flag on a manifest that holds only the old key writes both keys equal (TP-11)', ({ flag, enabled }) => {
+    seedManifest({ memory: true, learning: !enabled, knowledge: true });
+
+    const result = runToggle('learning', flag);
+
+    expect(result.status, `devflow learning ${flag} failed:\n${result.out}`).toBe(0);
+    expect(readManifest().features).toMatchObject({ learning: enabled, curation: enabled });
   }, 60_000);
 
   it.each(TOGGLES)('devflow $feature $flag refuses without a manifest and creates none', ({ feature, flag }) => {

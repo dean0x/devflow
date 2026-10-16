@@ -12,11 +12,11 @@
 // Filtering rules (must match AC-F3):
 //   - anchor_id must be set (unanchored observing rows are excluded)
 //   - type must match kind: 'decision' rows → decisions.md; 'pitfall' rows → pitfalls.md
-//   - an active row (isActive from learning-store.cjs, the one status list) renders
+//   - an active row (isActive from curation-store.cjs, the one status list) renders
 //     its body; an inactive one is listed in the file's Inactive table instead
 //
-// Row shape: a v2 ledger row (schema 2) or a v1 one; see learning-store.cjs.
-// Ledger file: .devflow/learning/decisions-ledger.jsonl (anchored rows only).
+// Row shape: a v2 ledger row (schema 2) or a v1 one; see curation-store.cjs.
+// Ledger file: .devflow/curation/decisions-ledger.jsonl (anchored rows only).
 // If absent, treat as empty corpus.
 //
 // Byte-compat: formatDecisionBody / formatPitfallBody / formatEntryBodyV2 /
@@ -53,7 +53,7 @@ const {
   hasLearningDir,
   withDecisionsLock,
   writeFileAtomic,
-} = require('./learning-store.cjs');
+} = require('./curation-store.cjs');
 
 // ---------------------------------------------------------------------------
 // Ledger parsing
@@ -285,16 +285,16 @@ function renderLearningFiles(worktreePath, rows, outputDir) {
 /**
  * Render decisions.md, pitfalls.md and index.md from the given ledger rows and
  * write them atomically. It takes no lock: the caller holds .decisions.lock
- * (D-ONE-LEARNING-LOCK). It writes only into an existing `.devflow/learning/`:
+ * (D-ONE-LEARNING-LOCK). It writes only into an existing `.devflow/curation/`:
  * without one it throws before writing anything (D-NO-STRAY-TREE).
  *
  * @param {string} worktreePath - Absolute path to the worktree root.
  * @param {object[]} rows - All rows from the ledger (unfiltered).
- * @throws when `<worktreePath>/.devflow/learning/` does not exist, or a write fails
+ * @throws when `<worktreePath>/.devflow/curation/` does not exist, or a write fails
  */
 function renderAndWriteAll(worktreePath, rows) {
   if (!hasLearningDir(worktreePath)) {
-    throw new Error(`renderAndWriteAll: no .devflow/learning/ under ${worktreePath}`);
+    throw new Error(`renderAndWriteAll: no .devflow/curation/ under ${worktreePath}`);
   }
   const [decisions, pitfalls, index] = renderLearningFiles(worktreePath, rows, getLearningDir(worktreePath));
 
@@ -404,7 +404,7 @@ function renderCommand(root) {
  */
 function checkCommand(root) {
   if (!hasLearningDir(root)) {
-    process.stderr.write(`${CLI_NAME}: no .devflow/learning/ under ${root} — run from the project root\n`);
+    process.stderr.write(`${CLI_NAME}: no .devflow/curation/ under ${root} — run from the project root\n`);
     return 1;
   }
   let drift = false;

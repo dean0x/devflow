@@ -1,5 +1,5 @@
-// tests/hud-learning-counts.test.ts
-// Tests for the HUD learning/pitfalls counts component (D309).
+// tests/hud-curation-counts.test.ts
+// Tests for the HUD curation counts component (decisions and pitfalls) (D309).
 // Validates active-row counting from decisions-ledger.jsonl, inactive-status
 // exclusion, and graceful fallback when the ledger is missing or unreadable.
 
@@ -9,13 +9,14 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { execFileSync, execSync } from 'node:child_process';
-import learningCounts, {
+import curationCounts, {
   LEDGER_MAX_BYTES,
-  gatherLearningCounts,
-  gatherLedgerLearningCounts,
-} from '../src/hud/components/learning-counts.js';
+  gatherCurationCounts,
+  gatherLedgerCurationCounts,
+} from '../src/hud/components/curation-counts.js';
 import { stripAnsi } from '../src/hud/colors.js';
-import type { LearningCountsData, GatherContext } from '../src/hud/types.js';
+import type { CurationCountsData, GatherContext } from '../src/hud/types.js';
+import { curationMoveMarkerKey } from '../src/core/project-paths.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const require = createRequire(import.meta.url);
@@ -36,14 +37,14 @@ function makeRow(type: string, extra: Record<string, unknown> = {}): string {
   });
 }
 
-function makeCtx(data: LearningCountsData | null): GatherContext {
+function makeCtx(data: CurationCountsData | null): GatherContext {
   return {
     stdin: {},
     git: null,
     transcript: null,
     usage: null,
     configCounts: null,
-    learningCounts: data,
+    curationCounts: data,
     costHistory: null,
     config: { enabled: true, detail: false, components: [] },
     devflowDir: '/test/.devflow',
@@ -52,14 +53,14 @@ function makeCtx(data: LearningCountsData | null): GatherContext {
   };
 }
 
-describe('gatherLearningCounts', () => {
+describe('gatherCurationCounts', () => {
   let tmpDir: string;
   let ledgerPath: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hud-learning-counts-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
-    ledgerPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl');
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hud-curation-counts-'));
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'curation'), { recursive: true });
+    ledgerPath = path.join(tmpDir, '.devflow', 'curation', 'decisions-ledger.jsonl');
   });
 
   afterEach(() => {
@@ -75,7 +76,7 @@ describe('gatherLearningCounts', () => {
     ];
     fs.writeFileSync(ledgerPath, lines.join('\n') + '\n');
 
-    expect(gatherLearningCounts(tmpDir)).toEqual({ decisions: 3, pitfalls: 1 });
+    expect(gatherCurationCounts(tmpDir)).toEqual({ decisions: 3, pitfalls: 1 });
   });
 
   it('treats absent decisions_status and Active as active', () => {
@@ -85,7 +86,7 @@ describe('gatherLearningCounts', () => {
     ];
     fs.writeFileSync(ledgerPath, lines.join('\n') + '\n');
 
-    expect(gatherLearningCounts(tmpDir)).toEqual({ decisions: 2, pitfalls: 0 });
+    expect(gatherCurationCounts(tmpDir)).toEqual({ decisions: 2, pitfalls: 0 });
   });
 
   it('excludes Encoded, Deprecated, Superseded, and Retired rows', () => {
@@ -98,7 +99,7 @@ describe('gatherLearningCounts', () => {
     ];
     fs.writeFileSync(ledgerPath, lines.join('\n') + '\n');
 
-    expect(gatherLearningCounts(tmpDir)).toEqual({ decisions: 0, pitfalls: 1 });
+    expect(gatherCurationCounts(tmpDir)).toEqual({ decisions: 0, pitfalls: 1 });
   });
 
   it('skips rows without anchor_id', () => {
@@ -108,24 +109,24 @@ describe('gatherLearningCounts', () => {
     ];
     fs.writeFileSync(ledgerPath, lines.join('\n') + '\n');
 
-    expect(gatherLearningCounts(tmpDir)).toEqual({ decisions: 1, pitfalls: 0 });
+    expect(gatherCurationCounts(tmpDir)).toEqual({ decisions: 1, pitfalls: 0 });
   });
 
   it('skips malformed JSON lines', () => {
     const content = `not json at all\n${makeRow('pitfall', { anchor_id: 'PF-001' })}\n{truncated\n`;
     fs.writeFileSync(ledgerPath, content);
 
-    expect(gatherLearningCounts(tmpDir)).toEqual({ decisions: 0, pitfalls: 1 });
+    expect(gatherCurationCounts(tmpDir)).toEqual({ decisions: 0, pitfalls: 1 });
   });
 
   it('returns null when the ledger file is missing', () => {
-    expect(gatherLearningCounts(tmpDir)).toBeNull();
+    expect(gatherCurationCounts(tmpDir)).toBeNull();
   });
 
   it('returns null when the ledger holds no valid rows', () => {
     fs.writeFileSync(ledgerPath, 'garbage\n\n{"type":"decision"}\n');
 
-    expect(gatherLearningCounts(tmpDir)).toBeNull();
+    expect(gatherCurationCounts(tmpDir)).toBeNull();
   });
 
   it('returns zero counts (not null) when every row is inactive', () => {
@@ -134,7 +135,7 @@ describe('gatherLearningCounts', () => {
       makeRow('decision', { anchor_id: 'ADR-001', decisions_status: 'Retired' }) + '\n',
     );
 
-    expect(gatherLearningCounts(tmpDir)).toEqual({ decisions: 0, pitfalls: 0 });
+    expect(gatherCurationCounts(tmpDir)).toEqual({ decisions: 0, pitfalls: 0 });
   });
 });
 
@@ -142,14 +143,14 @@ describe('gatherLearningCounts', () => {
 // counts only a regular file of at most LEDGER_MAX_BYTES and never reads a ledger
 // that is itself a symbolic link. A link, a FIFO or an oversized file shows no
 // counts, as an absent ledger does, and none of them can stall the read.
-describe('gatherLearningCounts reads only a bounded regular ledger (D-HUD-LEDGER-BOUNDED)', () => {
+describe('gatherCurationCounts reads only a bounded regular ledger (D-HUD-LEDGER-BOUNDED)', () => {
   let tmpDir: string;
   let ledgerPath: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hud-learning-bounded-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
-    ledgerPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl');
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hud-curation-bounded-'));
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'curation'), { recursive: true });
+    ledgerPath = path.join(tmpDir, '.devflow', 'curation', 'decisions-ledger.jsonl');
   });
 
   afterEach(() => {
@@ -167,31 +168,31 @@ describe('gatherLearningCounts reads only a bounded regular ledger (D-HUD-LEDGER
     fs.writeFileSync(elsewhere, [makeRow('decision'), makeRow('pitfall')].join('\n') + '\n');
     fs.symlinkSync(elsewhere, ledgerPath);
 
-    expect(gatherLearningCounts(tmpDir)).toBeNull();
+    expect(gatherCurationCounts(tmpDir)).toBeNull();
   });
 
   it('shows no counts for a ledger that is a symbolic link to an endless source', () => {
     fs.symlinkSync('/dev/zero', ledgerPath);
 
-    expect(gatherLearningCounts(tmpDir)).toBeNull();
+    expect(gatherCurationCounts(tmpDir)).toBeNull();
   });
 
   it('shows no counts for a FIFO at the ledger path, and never blocks on it', () => {
     execFileSync('mkfifo', [ledgerPath]);
 
-    expect(gatherLearningCounts(tmpDir)).toBeNull();
+    expect(gatherCurationCounts(tmpDir)).toBeNull();
   });
 
   it('counts a ledger of exactly LEDGER_MAX_BYTES', () => {
     ledgerOfSize(LEDGER_MAX_BYTES);
 
-    expect(gatherLearningCounts(tmpDir)).toEqual({ decisions: 1, pitfalls: 0 });
+    expect(gatherCurationCounts(tmpDir)).toEqual({ decisions: 1, pitfalls: 0 });
   });
 
   it('shows no counts for a ledger one byte over LEDGER_MAX_BYTES', () => {
     ledgerOfSize(LEDGER_MAX_BYTES + 1);
 
-    expect(gatherLearningCounts(tmpDir)).toBeNull();
+    expect(gatherCurationCounts(tmpDir)).toBeNull();
   });
 
   it('LEDGER_MAX_BYTES leaves real ledgers, about 0.5 MB, far below the cap', () => {
@@ -202,7 +203,7 @@ describe('gatherLearningCounts reads only a bounded regular ledger (D-HUD-LEDGER
 // D-LEDGER-MAIN-WORKTREE: the HUD counts the ledger the hooks write. In a
 // linked worktree that is the main checkout's; from a subdirectory it is the
 // repository root's — never the session cwd's own (nonexistent) ledger.
-describe('gatherLedgerLearningCounts resolves the ledger root like the hooks', { timeout: 30_000 }, () => {
+describe('gatherLedgerCurationCounts resolves the ledger root like the hooks', { timeout: 30_000 }, () => {
   let base: string;
   let main: string;
   let wt: string;
@@ -216,15 +217,15 @@ describe('gatherLedgerLearningCounts resolves the ledger root like the hooks', {
     execSync('git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init', { cwd: main, stdio: 'pipe' });
     wt = path.join(base, 'wt');
     execSync(`git worktree add -q "${wt}" -b feat`, { cwd: main, stdio: 'pipe' });
-    fs.mkdirSync(path.join(main, '.devflow', 'learning'), { recursive: true });
+    fs.mkdirSync(path.join(main, '.devflow', 'curation'), { recursive: true });
     fs.writeFileSync(
-      path.join(main, '.devflow', 'learning', 'decisions-ledger.jsonl'),
+      path.join(main, '.devflow', 'curation', 'decisions-ledger.jsonl'),
       [makeRow('decision'), makeRow('pitfall')].join('\n') + '\n',
     );
     outside = path.join(base, 'outside');
-    fs.mkdirSync(path.join(outside, '.devflow', 'learning'), { recursive: true });
+    fs.mkdirSync(path.join(outside, '.devflow', 'curation'), { recursive: true });
     fs.writeFileSync(
-      path.join(outside, '.devflow', 'learning', 'decisions-ledger.jsonl'),
+      path.join(outside, '.devflow', 'curation', 'decisions-ledger.jsonl'),
       makeRow('decision') + '\n',
     );
   });
@@ -234,49 +235,154 @@ describe('gatherLedgerLearningCounts resolves the ledger root like the hooks', {
   });
 
   it('counts the main checkout\'s ledger from a linked worktree', async () => {
-    expect(await gatherLedgerLearningCounts(wt, { home: outside })).toEqual({ decisions: 1, pitfalls: 1 });
+    expect(await gatherLedgerCurationCounts(wt, { home: outside })).toEqual({ decisions: 1, pitfalls: 1 });
   });
 
   it('counts the repository root\'s ledger from a subdirectory', async () => {
     const sub = path.join(main, 'packages', 'app');
     fs.mkdirSync(sub, { recursive: true });
-    expect(await gatherLedgerLearningCounts(sub, { home: outside })).toEqual({ decisions: 1, pitfalls: 1 });
+    expect(await gatherLedgerCurationCounts(sub, { home: outside })).toEqual({ decisions: 1, pitfalls: 1 });
   });
 
   it('keeps the worktree\'s own ledger when the main checkout is HOME', async () => {
-    expect(await gatherLedgerLearningCounts(wt, { home: main })).toBeNull();
+    expect(await gatherLedgerCurationCounts(wt, { home: main })).toBeNull();
   });
 
   it('outside a git repository counts the cwd\'s ledger (the prior behaviour)', async () => {
-    expect(await gatherLedgerLearningCounts(outside, { home: main })).toEqual({ decisions: 1, pitfalls: 0 });
+    expect(await gatherLedgerCurationCounts(outside, { home: main })).toEqual({ decisions: 1, pitfalls: 0 });
   });
 });
 
-describe('learningCounts component', () => {
+describe('the old ledger folder: the pointer and the refused line, only in the empty branch (#529, TP-17, TP-27)', () => {
+  let base: string;
+  let root: string;
+  let home: string;
+
+  const oldDir = (): string => path.join(root, '.devflow', 'learning');
+  const newDir = (): string => path.join(root, '.devflow', 'curation');
+  const markerPath = (): string => path.join(home, '.devflow', 'logs', `curation-move.${curationMoveMarkerKey(root)}.skip`);
+  const POINTER = 'Curation: open Claude Code in this project once, or run devflow init';
+  const REFUSED = 'Curation: move refused, see the hook log';
+
+  beforeEach(() => {
+    base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hud-old-folder-')));
+    root = path.join(base, 'project');
+    home = path.join(base, 'home');
+    fs.mkdirSync(root);
+    fs.mkdirSync(path.join(home, '.devflow', 'logs'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+
+  const rendered = async (data: CurationCountsData | null): Promise<string | null> => {
+    const result = await curationCounts(makeCtx(data));
+    return result === null ? null : stripAnsi(result.raw);
+  };
+
+  it('shows the pointer when only the old folder exists', async () => {
+    fs.mkdirSync(oldDir(), { recursive: true });
+
+    const data = await gatherLedgerCurationCounts(root, { home });
+
+    expect(data).toEqual({ decisions: 0, pitfalls: 0, move: 'pointer' });
+    expect(await rendered(data)).toBe(POINTER);
+  });
+
+  it('shows the refused line when a marker exists for this root', async () => {
+    fs.mkdirSync(oldDir(), { recursive: true });
+    fs.writeFileSync(markerPath(), '');
+
+    const data = await gatherLedgerCurationCounts(root, { home });
+
+    expect(data).toEqual({ decisions: 0, pitfalls: 0, move: 'refused' });
+    expect(await rendered(data)).toBe(REFUSED);
+  });
+
+  it('a marker for another root does not make this root refused', async () => {
+    fs.mkdirSync(oldDir(), { recursive: true });
+    fs.writeFileSync(
+      path.join(home, '.devflow', 'logs', `curation-move.${curationMoveMarkerKey(path.join(base, 'other'))}.skip`),
+      '',
+    );
+
+    expect((await gatherLedgerCurationCounts(root, { home }))?.move).toBe('pointer');
+  });
+
+  it('shows neither when the old folder is absent, whatever the marker says', async () => {
+    fs.writeFileSync(markerPath(), '');
+
+    expect(await gatherLedgerCurationCounts(root, { home })).toBeNull();
+  });
+
+  it('never reads or counts the old ledger', async () => {
+    fs.mkdirSync(oldDir(), { recursive: true });
+    fs.writeFileSync(path.join(oldDir(), 'decisions-ledger.jsonl'), [makeRow('decision'), makeRow('pitfall')].join('\n') + '\n');
+
+    expect(await gatherLedgerCurationCounts(root, { home })).toEqual({ decisions: 0, pitfalls: 0, move: 'pointer' });
+  });
+
+  it('does not test the old folder when the new ledger has counts', async () => {
+    fs.mkdirSync(newDir(), { recursive: true });
+    fs.writeFileSync(path.join(newDir(), 'decisions-ledger.jsonl'), makeRow('decision') + '\n');
+    fs.mkdirSync(oldDir(), { recursive: true });
+    fs.writeFileSync(markerPath(), '');
+
+    expect(await gatherLedgerCurationCounts(root, { home })).toEqual({ decisions: 1, pitfalls: 0 });
+  });
+
+  it('shows the pointer when the new ledger holds only retired rows and the old folder exists', async () => {
+    fs.mkdirSync(newDir(), { recursive: true });
+    fs.writeFileSync(path.join(newDir(), 'decisions-ledger.jsonl'), makeRow('decision', { decisions_status: 'Retired' }) + '\n');
+    fs.mkdirSync(oldDir(), { recursive: true });
+
+    expect(await gatherLedgerCurationCounts(root, { home })).toEqual({ decisions: 0, pitfalls: 0, move: 'pointer' });
+  });
+
+  it('counts a link at the old name as present, as the shell does', async () => {
+    fs.mkdirSync(path.join(base, 'elsewhere'));
+    fs.mkdirSync(path.join(root, '.devflow'));
+    fs.symlinkSync(path.join(base, 'elsewhere'), oldDir());
+
+    expect((await gatherLedgerCurationCounts(root, { home }))?.move).toBe('pointer');
+  });
+
+  it('renders the notice only for empty counts: counts win over a stray notice', async () => {
+    expect(await rendered({ decisions: 2, pitfalls: 0, move: 'pointer' })).toBe('Curation: 2 decisions');
+  });
+
+  it('keeps the label the same length as before the rename', async () => {
+    expect('Curation:'.length).toBe('Learning:'.length);
+    expect(await rendered({ decisions: 1, pitfalls: 1 })).toBe('Curation: 1 decision, 1 pitfall');
+  });
+});
+
+describe('curationCounts component', () => {
   it('returns null when no data was gathered', async () => {
-    expect(await learningCounts(makeCtx(null))).toBeNull();
+    expect(await curationCounts(makeCtx(null))).toBeNull();
   });
 
   it('returns null when counts are all zero', async () => {
-    expect(await learningCounts(makeCtx({ decisions: 0, pitfalls: 0 }))).toBeNull();
+    expect(await curationCounts(makeCtx({ decisions: 0, pitfalls: 0 }))).toBeNull();
   });
 
   it('renders decisions and pitfalls with singular/plural forms', async () => {
-    const result = await learningCounts(makeCtx({ decisions: 1, pitfalls: 2 }));
+    const result = await curationCounts(makeCtx({ decisions: 1, pitfalls: 2 }));
 
     expect(result).not.toBeNull();
-    expect(result!.raw).toBe('Learning: 1 decision, 2 pitfalls');
+    expect(result!.raw).toBe('Curation: 1 decision, 2 pitfalls');
   });
 
   it('omits zero-count parts', async () => {
-    const result = await learningCounts(makeCtx({ decisions: 3, pitfalls: 0 }));
+    const result = await curationCounts(makeCtx({ decisions: 3, pitfalls: 0 }));
 
     expect(result).not.toBeNull();
-    expect(result!.raw).toBe('Learning: 3 decisions');
+    expect(result!.raw).toBe('Curation: 3 decisions');
   });
 
   it('dims the rendered text without altering content', async () => {
-    const result = await learningCounts(makeCtx({ decisions: 2, pitfalls: 1 }));
+    const result = await curationCounts(makeCtx({ decisions: 2, pitfalls: 1 }));
 
     expect(result).not.toBeNull();
     expect(stripAnsi(result!.text)).toBe(result!.raw);
@@ -287,8 +393,8 @@ describe('learningCounts component', () => {
 // Contract test (D309): the HUD's active-row semantics must mirror
 // render-decisions.cjs exactly, or the counts shown by the HUD would drift
 // from the entries visible in decisions.md/pitfalls.md. This pins the
-// mirror by comparing gatherLearningCounts' active/inactive determination
-// (via count presence) against the renderer's isActive() — the learning
+// mirror by comparing gatherCurationCounts' active/inactive determination
+// (via count presence) against the renderer's isActive() — the curation
 // store's, which it re-exports — for the full status matrix, rather than
 // duplicating the inactive status list here.
 // ---------------------------------------------------------------------------
@@ -297,9 +403,9 @@ describe('mirrors render-decisions.cjs active-row semantics (D309)', () => {
   let ledgerPath: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hud-learning-mirror-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
-    ledgerPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl');
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hud-curation-mirror-'));
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'curation'), { recursive: true });
+    ledgerPath = path.join(tmpDir, '.devflow', 'curation', 'decisions-ledger.jsonl');
   });
 
   afterEach(() => {
@@ -326,7 +432,7 @@ describe('mirrors render-decisions.cjs active-row semantics (D309)', () => {
       fs.writeFileSync(ledgerPath, JSON.stringify(row) + '\n');
 
       const expectedActive = cjsIsActive(row);
-      const counts = gatherLearningCounts(tmpDir);
+      const counts = gatherCurationCounts(tmpDir);
       const actualActive = counts !== null && counts.decisions === 1;
 
       expect(actualActive).toBe(expectedActive);

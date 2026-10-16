@@ -4,8 +4,8 @@
 // new ledger folder names as arguments. The four places that create the ledger
 // folder (the session-start heal, the ensure-devflow-init scaffold, queue append and
 // the configure writer) create the new folder only when the old name is absent at the
-// ledger root. They call these helpers with the old name only, so for now every answer
-// is today's path; a later commit adds the new name to each call.
+// ledger root. They call these helpers with the old and the new name. The helpers take
+// the names as arguments, so the tests below run on made-up names.
 //
 // The shell half runs the helpers from the hooks' git-marker library in a bash
 // process with an empty PATH, so a helper that forked any external command would fail:

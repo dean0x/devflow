@@ -9,6 +9,10 @@ import { getGitRoot } from '../../core/git.js';
 import { isSameLocation, withoutHomeRoots } from '../../core/same-location.js';
 import { pruneHookLogDirs, MAX_HOOK_LOG_DIRS, type LogDirPruneReport } from '../../core/hook-log-dirs.js';
 import { getLedgerRoot } from '../../core/ledger-root.js';
+import { CURATION_DIR_NAME, LEGACY_NAMES } from '../../core/project-paths.js';
+import { formatLearningStoreUnavailable, loadLearningStore } from '../../core/curation-store.js';
+import { runInitCurationMove, type InitCurationMoveReport } from './init-curation-move.js';
+import { realGlobalTuningMoveIO, realProjectLedgerMoveIO } from './curation-move-io.js';
 import { describeEchoedValue } from '../../core/echo-value.js';
 import { installViaFileCopy, composeScripts, type InstallReport } from '../../targets/claude-code/installer.js';
 import { formatOverlaySummary, formatSkillScopeSummary, formatTrackerAssetSummary, isPluginListUnchanged, type SummaryLine } from './install-report.js';
@@ -52,7 +56,7 @@ import { convergeFlagsIntoSettings, countActiveFlags, readViewMode, type FlagsRe
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
 import { writeManagedConfig, readConfigIfPresent, DEFAULT_CONFIG, type FeatureConfig, type ManagedConfigWriteError } from '../../core/feature-config.js';
-import { drainLearningQueue } from '../../core/learning-queue-cleanup.js';
+import { drainLearningQueue } from '../../core/curation-queue-cleanup.js';
 import { formatRefusedDrain, type QueueDrain } from '../../core/queue-drain.js';
 import { removeManagedDenyList, describeManagedDenyRemoval } from './security.js';
 import { resolveInitSeed, applyCliToggles, resolveResetGatedInputs, resolvePluginsToInstall } from './init-seed.js';
@@ -615,7 +619,7 @@ interface InitOptions {
   memory?: boolean;
   hud?: boolean;
   knowledge?: boolean;
-  learning?: boolean;
+  curation?: boolean;
   rules?: boolean;
   /** External model routing. Advanced-only; never part of Recommended defaults. */
   proxy?: boolean;
@@ -649,6 +653,39 @@ interface InitOptions {
   recommended?: boolean;
   advanced?: boolean;
   reset?: boolean;
+}
+
+/**
+ * The curation move step (#529): rename the global tuning file, then move each target
+ * project's ledger folder from the old name to the new one. The targets are the
+ * discovered projects (else the current repository) plus the current repository's own
+ * ledger root, which the step lists once. State-checked on every run, with no run-once
+ * record. Never throws: a project that cannot move is a line, not an exit code.
+ *
+ * Init runs it after the legacy sweep and BEFORE the manifest is persisted and the
+ * disabled-feature queues drain, so the drain sees the moved folder.
+ */
+export async function moveCurationData(opts: {
+  discoveredProjects: readonly string[];
+  gitRoot: string | null;
+  homeDir: string;
+  devflowDir: string;
+}): Promise<InitCurationMoveReport> {
+  const loaded = loadLearningStore();
+  return runInitCurationMove(
+    {
+      projectRoots: projectRoots([...opts.discoveredProjects], opts.gitRoot),
+      ownLedgerRoot: opts.gitRoot === null ? null : await getLedgerRoot(),
+      homeDir: opts.homeDir,
+      machineDir: opts.devflowDir,
+      oldName: LEGACY_NAMES.folder,
+      newName: CURATION_DIR_NAME,
+    },
+    {
+      ledger: loaded.ok ? realProjectLedgerMoveIO(loaded.value) : { unavailable: formatLearningStoreUnavailable(loaded.error) },
+      tuning: realGlobalTuningMoveIO(),
+    },
+  );
 }
 
 /** The queue drains `drainDisabledFeatureQueues` performs — injected for tests. */
@@ -697,7 +734,7 @@ export async function drainDisabledFeatureQueues(
   }
   if (!opts.learningEnabled && opts.ledgerRoot !== null) {
     const learning = await io.drainLearningQueue(opts.ledgerRoot);
-    if (!learning.drained) refused.push(formatRefusedDrain('learning', learning.linkedFolder));
+    if (!learning.drained) refused.push(formatRefusedDrain('curation', learning.linkedFolder));
   }
   return refused;
 }
@@ -744,7 +781,7 @@ export function buildHudOnlyManifest(
     scope: 'user',
     features: {
       ambient: false, memory: false, hud: true, knowledge: false,
-      learning: false, rules: false, flags: {}, proxy: false,
+      curation: false, rules: false, flags: {}, proxy: false,
       behavior: false,
       compliance: { enabled: false, frameworks: [] },
       // The exported default, not a literal — the one constant every other
@@ -870,8 +907,8 @@ export const initCommand = new Command('init')
   .option('--no-hud', 'Disable HUD status line')
   .option('--knowledge', 'Enable feature knowledge bases')
   .option('--no-knowledge', 'Disable feature knowledge bases')
-  .option('--learning', 'Enable learning (decision/pitfall tracking)')
-  .option('--no-learning', 'Disable learning (decision/pitfall tracking)')
+  .option('--curation', 'Enable curation (decision/pitfall tracking)')
+  .option('--no-curation', 'Disable curation (decision/pitfall tracking)')
   .option('--rules', 'Enable rules (always-on engineering principles)')
   .option('--no-rules', 'Disable rules')
   .option('--proxy', 'Enable external model routing (GPT models via your OpenAI/Codex subscription)')
@@ -1258,7 +1295,7 @@ export const initCommand = new Command('init')
     let memoryEnabled = seed.features.memory;
     let hudEnabled = seed.features.hud;
     let knowledgeEnabled = seed.features.knowledge;
-    let learningEnabled = seed.features.learning;
+    let learningEnabled = seed.features.curation;
     let rulesEnabled = seed.features.rules;
     // proxy: Advanced-only; Recommended path carries seed value unchanged.
     // Fresh installs → false (FEATURE_DEFAULTS.proxy). Re-inits → prior manifest value.
@@ -1442,7 +1479,7 @@ export const initCommand = new Command('init')
         memory: options.memory,
         hud: options.hud,
         knowledge: options.knowledge,
-        learning: options.learning,
+        curation: options.curation,
         rules: options.rules,
         proxy: options.proxy,
         behavior: options.behavior,
@@ -1454,7 +1491,7 @@ export const initCommand = new Command('init')
       memoryEnabled = effectiveFeatures.memory;
       hudEnabled = effectiveFeatures.hud;
       knowledgeEnabled = effectiveFeatures.knowledge;
-      learningEnabled = effectiveFeatures.learning;
+      learningEnabled = effectiveFeatures.curation;
       rulesEnabled = effectiveFeatures.rules;
       proxyEnabled = effectiveFeatures.proxy;
       behaviorEnabled = effectiveFeatures.behavior;
@@ -1499,7 +1536,7 @@ export const initCommand = new Command('init')
       const summaryLines = [
         `Ambient mode:    ${ambientEnabled ? 'enabled' : 'disabled'}`,
         `Working memory:  ${memoryEnabled ? 'enabled' : 'disabled'}`,
-        `Learning:        ${learningEnabled ? 'enabled' : 'disabled'}`,
+        `Curation:        ${learningEnabled ? 'enabled' : 'disabled'}`,
         `Rules:           ${rulesEnabled ? 'enabled' : 'disabled'}`,
         `HUD:             ${hudEnabled ? 'enabled' : 'disabled'}`,
         `Knowledge bases: ${knowledgeEnabled ? 'enabled' : 'disabled'}`,
@@ -1611,18 +1648,18 @@ export const initCommand = new Command('init')
         knowledgeEnabled = knowledgeChoice;
       }
 
-      if (options.learning !== undefined) {
-        learningEnabled = options.learning;
+      if (options.curation !== undefined) {
+        learningEnabled = options.curation;
       } else {
         p.note(
           'Detects architectural decisions and pitfalls from your session\n' +
           'dialogs. Runs a background agent on session stop that consumes\n' +
           'additional tokens. Applies to every project.',
-          'Learning (Decision/Pitfall Tracking)',
+          'Curation (Decision/Pitfall Tracking)',
         );
         const learningChoice = await p.confirm({
-          message: 'Enable learning? (Recommended)',
-          initialValue: seed.features.learning,
+          message: 'Enable curation? (Recommended)',
+          initialValue: seed.features.curation,
         });
         if (p.isCancel(learningChoice)) {
           p.cancel('Installation cancelled.');
@@ -2275,12 +2312,19 @@ export const initCommand = new Command('init')
       'lib/staleness.cjs',
       'dream-lock',
       'decisions-usage-scan.cjs',
+      'learning-lock',
+      'lib/learning-store.cjs',
     ];
     const hooksDir = path.join(devflowDir, 'scripts', 'hooks');
     for (const legacy of LEGACY_HOOK_FILES) {
       const legacyPath = path.join(hooksDir, legacy);
       try { await fs.rm(legacyPath); } catch { /* doesn't exist */ }
     }
+
+    // The curation move (#529): after the legacy sweep, before the manifest persist and
+    // the disabled-feature drain below, so the drain sees the moved folder. Its lines
+    // and its one notice print with the install warnings, after the spinner stops.
+    const curationMove = await moveCurationData({ discoveredProjects, gitRoot, homeDir, devflowDir });
 
     // === Settings & hooks (all automatic based on collected choices) ===
     s.message('Configuring settings');
@@ -2742,6 +2786,8 @@ export const initCommand = new Command('init')
     logSummaryLines(formatSkillScopeSummary(installReport, pluginListUnchanged));
 
     for (const warning of installWarnings) p.log.warn(warning);
+    for (const line of curationMove.lines) p.log.warn(line);
+    if (curationMove.notice !== null) p.log.info(curationMove.notice);
 
     const installedSet = new Set(pluginsToInstall.flatMap(p => p.commands).filter(c => c.length > 0));
     const orderedCommands = WORKFLOW_ORDER.filter(cmd => installedSet.has(cmd));
@@ -2796,7 +2842,7 @@ export const initCommand = new Command('init')
         memory: memoryEnabled,
         hud: hudEnabled,
         knowledge: knowledgeEnabled,
-        learning: learningEnabled,
+        curation: learningEnabled,
         rules: rulesEnabled,
         // FlagsRecord written directly — key-presence encodes "known".
         // view-mode is encoded as flags['view-mode'] (the resolved final value).

@@ -1,7 +1,9 @@
 import * as fs from 'node:fs';
-import type { ComponentResult, GatherContext, LearningCountsData } from '../types.js';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import type { ComponentResult, GatherContext, CurationCountsData, CurationMoveNotice } from '../types.js';
 import { dim } from '../colors.js';
-import { getDecisionsLedgerPath } from '../../core/project-paths.js';
+import { curationMoveMarkerKey, getDecisionsLedgerPath, LEGACY_NAMES } from '../../core/project-paths.js';
 import { getLedgerRoot, type LedgerRootOptions } from '../../core/ledger-root.js';
 import { isActiveDecisionsStatus } from '../../core/observations.js';
 
@@ -77,16 +79,16 @@ function isLedgerCountRow(val: unknown): val is LedgerCountRow {
 }
 
 /**
- * Read .devflow/learning/decisions-ledger.jsonl and count active anchored
+ * Read .devflow/curation/decisions-ledger.jsonl and count active anchored
  * rows by type. Returns null if the ledger is missing, is refused by
  * D-HUD-LEDGER-BOUNDED, or holds no valid rows (graceful fallback). Exported for
  * use by the main HUD entry point.
  */
-export function gatherLearningCounts(cwd: string): LearningCountsData | null {
+export function gatherCurationCounts(cwd: string): CurationCountsData | null {
   const content = readBoundedLedger(getDecisionsLedgerPath(cwd));
   if (content === null) return null;
 
-  const counts: LearningCountsData = { decisions: 0, pitfalls: 0 };
+  const counts: CurationCountsData = { decisions: 0, pitfalls: 0 };
   let parsedAny = false;
 
   for (const rawLine of content.split('\n')) {
@@ -119,36 +121,74 @@ export function gatherLearningCounts(cwd: string): LearningCountsData | null {
  * call, bounded by the HUD's per-command budget; run it alongside the git
  * status gather, not after it (D-LEDGER-MAIN-WORKTREE).
  */
-export async function gatherLedgerLearningCounts(
+export async function gatherLedgerCurationCounts(
   cwd: string,
   options: Pick<LedgerRootOptions, 'home'> = {},
-): Promise<LearningCountsData | null> {
+): Promise<CurationCountsData | null> {
   const root = await getLedgerRoot(cwd, { ...options, timeoutMs: LEDGER_ROOT_TIMEOUT_MS });
-  return gatherLearningCounts(root ?? cwd);
+  const ledgerRoot = root ?? cwd;
+  const counts = gatherCurationCounts(ledgerRoot);
+  if (counts !== null && counts.decisions + counts.pitfalls > 0) return counts;
+
+  const move = gatherMoveNotice(ledgerRoot, options.home ?? os.homedir());
+  if (move === null) return counts;
+  return { decisions: counts?.decisions ?? 0, pitfalls: counts?.pitfalls ?? 0, move };
+}
+
+/** Whether anything, a link included, sits at `target`. One lstat, never followed. */
+function exists(target: string): boolean {
+  try {
+    fs.lstatSync(target);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
- * HUD component: decisions/pitfalls counts.
- * Shows how many active ADR/PF entries the project has accumulated.
- * Returns null when no ledger exists or every entry is retired.
+ * The empty branch's one extra question: does the project still have the old ledger
+ * folder? One existence test. If it does, a second existence test looks for the move's
+ * refusal marker, which the shell writes at `<home>/.devflow/logs/curation-move.<key>.skip`
+ * under the key of this same root. The old ledger itself is never opened or counted.
  */
-export default async function learningCounts(
+function gatherMoveNotice(ledgerRoot: string, home: string): CurationMoveNotice | null {
+  if (!exists(path.join(ledgerRoot, '.devflow', LEGACY_NAMES.folder))) return null;
+  const marker = path.join(home, '.devflow', 'logs', `curation-move.${curationMoveMarkerKey(ledgerRoot)}.skip`);
+  return exists(marker) ? 'refused' : 'pointer';
+}
+
+const MOVE_NOTICE_TEXT: Readonly<Record<CurationMoveNotice, string>> = {
+  pointer: 'open Claude Code in this project once, or run devflow init',
+  refused: 'move refused, see the hook log',
+};
+
+/**
+ * HUD component: decisions/pitfalls counts.
+ * Shows how many active ADR/PF entries the project has accumulated. When there are
+ * none and the ledger folder still has its old name, it shows the pointer or the
+ * refused line instead. Returns null when no ledger exists or every entry is retired.
+ */
+export default async function curationCounts(
   ctx: GatherContext,
 ): Promise<ComponentResult | null> {
-  const data = ctx.learningCounts;
+  const data = ctx.curationCounts;
   if (!data) return null;
 
   const { decisions, pitfalls } = data;
-  if (decisions + pitfalls === 0) return null;
+  if (decisions + pitfalls === 0) {
+    if (data.move === undefined) return null;
+    const notice = `Curation: ${MOVE_NOTICE_TEXT[data.move]}`;
+    return { text: dim(notice), raw: notice };
+  }
 
   const parts: string[] = [];
   if (decisions > 0) parts.push(`${decisions} decision${decisions !== 1 ? 's' : ''}`);
   if (pitfalls > 0) parts.push(`${pitfalls} pitfall${pitfalls !== 1 ? 's' : ''}`);
 
   // Intentionally one dimmed clause (unlike config-counts, which dims each
-  // part and joins with a middot for a list of independent facts): "Learning:
+  // part and joins with a middot for a list of independent facts): "Curation:
   // N decisions, M pitfalls" reads as a single sentence, so the whole string
   // is dimmed once and parts are comma-joined rather than middot-separated.
-  const raw = `Learning: ${parts.join(', ')}`;
+  const raw = `Curation: ${parts.join(', ')}`;
   return { text: dim(raw), raw };
 }

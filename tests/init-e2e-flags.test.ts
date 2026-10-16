@@ -44,7 +44,7 @@ const SUBPROCESS_TIMEOUT_MS = 60_000;
 function runInit(tmpHome: string, extraArgs: string[] = []): { status: number | null; stdout: string; stderr: string } {
   const result = spawnSync(
     process.execPath,
-    [CLI_PATH, 'init', '--recommended', '--no-ambient', '--no-memory', '--no-learning', '--no-knowledge', '--no-rules', ...extraArgs],
+    [CLI_PATH, 'init', '--recommended', '--no-ambient', '--no-memory', '--no-curation', '--no-knowledge', '--no-rules', ...extraArgs],
     {
       cwd: os.tmpdir(), // non-git dir → earlyGitRoot=null → no project discovery
       encoding: 'utf-8',
@@ -757,7 +757,7 @@ function runCli(
   return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
 }
 
-const MINIMAL_INIT = ['init', '--recommended', '--no-ambient', '--no-memory', '--no-learning', '--no-knowledge', '--no-rules'];
+const MINIMAL_INIT = ['init', '--recommended', '--no-ambient', '--no-memory', '--no-curation', '--no-knowledge', '--no-rules'];
 
 describe('resolveRetiredScopeOption (D-SCOPE-RETIRED)', () => {
   it('no flag and `user` in any case proceed', () => {

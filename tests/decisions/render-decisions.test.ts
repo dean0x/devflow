@@ -143,7 +143,7 @@ describe('isActive', () => {
   });
 
   it('is the learning store\'s isActive, re-exported', () => {
-    const store = require(path.join(ROOT, 'src/assets/scripts/hooks/lib/learning-store.cjs')) as {
+    const store = require(path.join(ROOT, 'src/assets/scripts/hooks/lib/curation-store.cjs')) as {
       isActive: (row: Record<string, unknown>) => boolean;
     };
     expect(isActive).toBe(store.isActive);
@@ -249,12 +249,12 @@ describe('renderAndWriteAll', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('refuses a root without .devflow/learning/ and creates nothing', () => {
-    expect(() => renderAndWriteAll(tmpDir, [makeDecisionRow()])).toThrow(/no \.devflow\/learning\//);
+  it('refuses a root without .devflow/curation/ and creates nothing', () => {
+    expect(() => renderAndWriteAll(tmpDir, [makeDecisionRow()])).toThrow(/no \.devflow\/curation\//);
     expect(fs.readdirSync(tmpDir)).toEqual([]);
 
     fs.mkdirSync(path.join(tmpDir, '.devflow'));
-    expect(() => renderAndWriteAll(tmpDir, [makeDecisionRow()])).toThrow(/no \.devflow\/learning\//);
+    expect(() => renderAndWriteAll(tmpDir, [makeDecisionRow()])).toThrow(/no \.devflow\/curation\//);
     expect(fs.readdirSync(path.join(tmpDir, '.devflow'))).toEqual([]);
   });
 
@@ -271,8 +271,8 @@ describe('renderAndWriteAll', () => {
 
 describe('renderLearningFiles — output folder', () => {
   const root = '/some/project';
-  const todaysDir = path.join(root, '.devflow', 'learning');
-  const otherDir = path.join(root, '.devflow', 'curation');
+  const todaysDir = path.join(root, '.devflow', 'curation');
+  const otherDir = path.join(root, '.devflow', 'elsewhere');
   const rows = [makeDecisionRow(), makePitfallRow()];
 
   it('puts the body files first and the index last, all inside the folder it is given', () => {
@@ -767,7 +767,7 @@ describe('CLI render', { timeout: 30_000 }, () => {
     const run = runRenderer(tmpDir, ['render', tmpDir]);
 
     expect(run.code).toBe(1);
-    expect(run.stderr).toContain('render-decisions: no .devflow/learning/ under ');
+    expect(run.stderr).toContain('render-decisions: no .devflow/curation/ under ');
     expect(fs.readdirSync(tmpDir)).toEqual([]);
   });
 
@@ -926,7 +926,7 @@ describe('render summary byte counts match actual file sizes', { timeout: 30_000
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'render-bytecount-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'curation'), { recursive: true });
   });
 
   afterEach(() => {
@@ -937,7 +937,7 @@ describe('render summary byte counts match actual file sizes', { timeout: 30_000
     // formatIndexEntryLine appends "  —  <area>" when area is non-null.
     // U+2014 em dash is 3 UTF-8 bytes but 1 JS character — String.length
     // was used before this fix, making index.md appear 2 bytes smaller than it is.
-    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
+    const decisionsDir = path.join(tmpDir, '.devflow', 'curation');
     const row = makePitfallRow({
       anchor_id: 'PF-001',
       details: 'area: tests/hooks; issue: Y; impact: Z; resolution: W',
@@ -1037,7 +1037,7 @@ describe('CLI --check', { timeout: 30_000 }, () => {
     const run = runRenderer(tmpDir, ['--check', tmpDir]);
 
     expect(run.code).toBe(1);
-    expect(run.stderr).toContain('render-decisions: no .devflow/learning/ under ');
+    expect(run.stderr).toContain('render-decisions: no .devflow/curation/ under ');
     expect(fs.readdirSync(tmpDir)).toEqual([]);
   });
 

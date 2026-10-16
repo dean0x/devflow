@@ -132,7 +132,7 @@ describe('devflow init: the audit note (end to end)', () => {
   function runInit(cwd: string, extraArgs: string[] = []) {
     const result = spawnSync(
       process.execPath,
-      [CLI, 'init', '--recommended', '--no-ambient', '--no-memory', '--no-learning', '--no-knowledge', '--no-rules', ...extraArgs],
+      [CLI, 'init', '--recommended', '--no-ambient', '--no-memory', '--no-curation', '--no-knowledge', '--no-rules', ...extraArgs],
       { cwd, encoding: 'utf-8', timeout: INIT_TIMEOUT_MS, env: sandboxEnv(home), stdio: ['ignore', 'pipe', 'pipe'] },
     );
     if (result.error) throw result.error;

@@ -94,8 +94,8 @@ function readConfigFile(filePath: string): string | null {
  *
  * Priority (highest wins): project config → global config → defaults.
  *
- * - Global:  `~/.devflow/learning.json`
- * - Project: `<ledgerRoot>/.devflow/learning/learning.json` — pass the ledger root
+ * - Global:  `~/.devflow/curation.json`
+ * - Project: `<ledgerRoot>/.devflow/curation/curation.json` — pass the ledger root
  *   (getLedgerRoot), where session-start-context reads it and `devflow learning
  *   --configure` writes it (D-LEDGER-MAIN-WORKTREE).
  *

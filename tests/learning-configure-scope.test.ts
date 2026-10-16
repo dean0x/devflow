@@ -22,7 +22,7 @@ describe('devflow learning --configure scope options', () => {
   });
 
   it('the Global hint still names the file it writes', () => {
-    expect(hintOf('global')).toContain('~/.devflow/learning.json');
+    expect(hintOf('global')).toContain('~/.devflow/curation.json');
   });
 
   it('the Global hint says a devflow agents Curate mapping takes precedence over the global file', () => {
@@ -33,7 +33,7 @@ describe('devflow learning --configure scope options', () => {
   });
 
   it('the Project hint is unchanged: a project file outranks the mapping', () => {
-    expect(hintOf('project')).toBe('This project only (.devflow/learning/learning.json)');
+    expect(hintOf('project')).toBe('This project only (.devflow/curation/curation.json)');
   });
 });
 

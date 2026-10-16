@@ -1,6 +1,6 @@
 // src/assets/scripts/hooks/lib/mkdir-lock.cjs
 //
-// Shared mkdir-based locking helpers used by learning-store.cjs — whose
+// Shared mkdir-based locking helpers used by curation-store.cjs — whose
 // withDecisionsLock every learning op that writes and the render CLI take, and
 // whose queue claim also takes the queue's own lock — and any other CJS hook that
 // needs exclusive access to a shared resource.

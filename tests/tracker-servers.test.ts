@@ -596,7 +596,7 @@ describe('AC-401: install under each provider, then --servers (subprocess, temp 
     return { status: result.status, out: `${result.stdout ?? ''}${result.stderr ?? ''}` };
   }
   const init = (provider: string) =>
-    cli(['init', '--recommended', '--no-ambient', '--no-memory', '--no-learning', '--no-knowledge', '--no-rules', '--tracker', provider]);
+    cli(['init', '--recommended', '--no-ambient', '--no-memory', '--no-curation', '--no-knowledge', '--no-rules', '--tracker', provider]);
   const agent = (name: string): Promise<string> => fs.readFile(path.join(home, '.claude', 'agents', 'devflow', `${name}.md`), 'utf-8');
   const manifestTracker = async (): Promise<Record<string, unknown>> =>
     (JSON.parse(await fs.readFile(path.join(home, '.devflow', 'manifest.json'), 'utf-8')) as { features: { tracker: Record<string, unknown> } }).features.tracker;

@@ -68,7 +68,7 @@ Read `.release/RELEASE-FLOW.md`:
 
 {{decisions_locate()}}
 
-Read `{ledger}/.devflow/learning/index.md`. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
+Read `{ledger}/.devflow/curation/index.md`. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
 
 {{decisions_slice()}}
 

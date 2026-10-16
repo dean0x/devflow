@@ -11,7 +11,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const AGENT_PATH = path.resolve(__dirname, '../src/assets/agents/curate.md');
 const ROOT = path.resolve(__dirname, '..');
-const LEARNING_STORE = path.resolve(ROOT, 'src/assets/scripts/hooks/lib/learning-store.cjs');
+const LEARNING_STORE = path.resolve(ROOT, 'src/assets/scripts/hooks/lib/curation-store.cjs');
 
 /** Recursively find all files matching an extension under a directory. */
 function findFiles(dir: string, exts: string[]): string[] {
@@ -173,14 +173,14 @@ describe('curate agent', () => {
     });
 
     it('never makes, moves or deletes the claim by hand', () => {
-      expect(content).not.toContain('mv .devflow/learning/.pending-turns.jsonl');
-      expect(content).not.toContain('unlink .devflow/learning/.pending-turns.processing');
-      expect(content).not.toContain('cat .devflow/learning/.pending-turns.jsonl >>');
+      expect(content).not.toContain('mv .devflow/curation/.pending-turns.jsonl');
+      expect(content).not.toContain('unlink .devflow/curation/.pending-turns.processing');
+      expect(content).not.toContain('cat .devflow/curation/.pending-turns.jsonl >>');
       expect(content).not.toMatch(/\brm -[rf]+[^\n]*\.pending-turns\.processing/);
     });
 
     it('heartbeats with touch -c at the Part 1 → Part 2 boundary and after each maintained entry', () => {
-      expect(content).toContain('touch -c .devflow/learning/.pending-turns.processing');
+      expect(content).toContain('touch -c .devflow/curation/.pending-turns.processing');
       expect(content).toMatch(inOrder(['Heartbeat', 'Part 1 → Part 2 boundary']));
       expect(maintain).toMatch(phrase('After each maintained entry, refresh the claim'));
     });
@@ -532,7 +532,7 @@ describe('curate agent', () => {
       expect(prompt).not.toMatch(/low-confidence/i);
       expect(prompt).not.toContain('"confidence"');
       expect(prompt).not.toContain('quality_ok');
-      expect(prompt).not.toContain('cat >> .devflow/learning/decisions-log.jsonl');
+      expect(prompt).not.toContain('cat >> .devflow/curation/decisions-log.jsonl');
     });
 
     it('carries no usage grounding, citation re-pointing or collision stop', () => {
@@ -658,9 +658,9 @@ describe('AC-C9: decisions_load() (none) fallback for both absent and empty inde
     expect(content).toMatch(/absent or empty.*\(none\)/s);
   });
 
-  it('_decisions.mds reads from .devflow/learning/index.md (not the old decisions/ path)', async () => {
+  it('_decisions.mds reads from .devflow/curation/index.md (not the old decisions/ path)', async () => {
     const content = await fs.readFile(DECISIONS_MDS, 'utf-8');
-    expect(content).toContain('.devflow/learning/index.md');
+    expect(content).toContain('.devflow/curation/index.md');
     expect(content).not.toContain('.devflow/decisions/index.md');
   });
 });

@@ -83,7 +83,7 @@ describe('writeManagedConfig', () => {
   it('creates .devflow/config.json (neutral root, not inside learning/)', async () => {
     await writeManagedConfig(tmpDir, { reviewPublication: 'full' });
     expect(readRaw(tmpDir)).toEqual({ reviewPublication: 'full' });
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'learning', 'config.json'))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'curation', 'config.json'))).toBe(false);
     expect(fs.existsSync(path.join(tmpDir, '.devflow', 'dream', 'config.json'))).toBe(false);
   });
 

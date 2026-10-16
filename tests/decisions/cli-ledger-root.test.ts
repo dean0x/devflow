@@ -1,7 +1,7 @@
 /**
  * D-LEDGER-MAIN-WORKTREE — `devflow learning` run from a linked worktree reads,
  * clears, resets and drains the ledger the hooks write: the main checkout's
- * `.devflow/learning/`, not the worktree's own (getLedgerRoot, not getGitRoot).
+ * `.devflow/curation/`, not the worktree's own (getLedgerRoot, not getGitRoot).
  *
  * Real git fixture (a main checkout with `.devflow/` and a linked worktree); only
  * the prompts and the machine devflow directory are stubbed. process.cwd() is
@@ -123,7 +123,7 @@ describe('devflow learning in a linked worktree acts on the main checkout\'s led
   });
 
   it('--configure writes the project tuning config where session-start-context reads it: the main checkout\'s ledger', async () => {
-    // The hook resolves the Curate agent's model from $LEDGER_ROOT/.devflow/learning/learning.json.
+    // The hook resolves the Curate agent's model from $LEDGER_ROOT/.devflow/curation/curation.json.
     vi.mocked(p.select).mockResolvedValueOnce('sonnet').mockResolvedValueOnce('project');
     vi.mocked(p.confirm).mockResolvedValueOnce(false);
     await learningCommand.parseAsync(['--configure'], { from: 'user' });

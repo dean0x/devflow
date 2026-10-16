@@ -5,7 +5,7 @@
  * ~/.devflow/manifest.json — and every runtime gate reads that switch; a
  * repository's `features` can only narrow it, never widen it.
  *
- * The reported bug: `devflow init --no-learning` printed "Learning: disabled"
+ * The reported bug: `devflow init --no-curation` printed "Curation: disabled"
  * while every OTHER repo — one holding a stale `learning: true` an earlier init
  * wrote, one with no config, a non-git cwd — kept capturing and spawning the
  * Curate agent, because the runtime gates read the per-repo config. Those
@@ -103,8 +103,8 @@ async function writeRepoConfig(repo: string, body: Record<string, unknown>): Pro
   await fs.writeFile(path.join(repo, '.devflow', 'config.json'), JSON.stringify(body), 'utf-8');
 }
 
-const learningQueue = (dir: string): string => path.join(dir, '.devflow', 'learning', '.pending-turns.jsonl');
-const learningProcessing = (dir: string): string => path.join(dir, '.devflow', 'learning', '.pending-turns.processing');
+const learningQueue = (dir: string): string => path.join(dir, '.devflow', 'curation', '.pending-turns.jsonl');
+const learningProcessing = (dir: string): string => path.join(dir, '.devflow', 'curation', '.pending-turns.processing');
 
 async function seedLearningQueue(dir: string): Promise<void> {
   await fs.mkdir(path.dirname(learningQueue(dir)), { recursive: true });
@@ -161,7 +161,7 @@ afterEach(async () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('init --no-<feature> switches the feature off in every project', () => {
-  it('learning: silences a second repo and a non-git cwd, drains the cwd queue, and init --learning restores every repo', async () => {
+  it('learning: silences a second repo and a non-git cwd, drains the cwd queue, and init --curation restores every repo', async () => {
     // Repo B carries the stale `true` an earlier init wrote — the reported case.
     await writeRepoConfig(repoB, STALE_ON);
     await seedLearningQueue(repoA);
@@ -169,9 +169,9 @@ describe('init --no-<feature> switches the feature off in every project', () => 
     await seedLearningQueue(repoB);
     await seedLearningQueue(nonGit);
 
-    const out = runInit(repoA, '--recommended', '--no-learning', '--no-knowledge');
-    expect(out).toMatch(/Learning:\s+disabled/);
-    expect(await readManifestFeatures()).toMatchObject({ learning: false, knowledge: false });
+    const out = runInit(repoA, '--recommended', '--no-curation', '--no-knowledge');
+    expect(out).toMatch(/Curation:\s+disabled/);
+    expect(await readManifestFeatures()).toMatchObject({ curation: false, learning: false, knowledge: false });
 
     // The cwd repo's pending learning queue (and a claimed batch) is drained.
     expect(existsSync(learningQueue(repoA))).toBe(false);
@@ -192,8 +192,8 @@ describe('init --no-<feature> switches the feature off in every project', () => 
     expect(runCli(repoB, 'knowledge', '--status').out).toContain('Status: disabled');
 
     // Turning it back on from ANOTHER directory restores every repo.
-    runInit(nonGit, '--recommended', '--learning', '--knowledge');
-    expect(await readManifestFeatures()).toMatchObject({ learning: true, knowledge: true });
+    runInit(nonGit, '--recommended', '--curation', '--knowledge');
+    expect(await readManifestFeatures()).toMatchObject({ curation: true, learning: true, knowledge: true });
     await seedLearningQueue(repoA);
     expect(sessionContext(repoA)).toContain('--- LEARNING MAINTENANCE ---');
     expect(sessionContext(repoB)).toContain('--- LEARNING MAINTENANCE ---');
@@ -238,9 +238,9 @@ describe('init --no-<feature> switches the feature off in every project', () => 
       await fs.mkdir(path.dirname(memoryQueue(wt)), { recursive: true });
       await fs.writeFile(memoryQueue(wt), '{"role":"user"}\n', 'utf-8');
 
-      runInit(wt, '--recommended', '--no-learning', '--no-memory');
+      runInit(wt, '--recommended', '--no-curation', '--no-memory');
 
-      expect(existsSync(learningQueue(repoA)), 'the main checkout\'s learning queue survived init --no-learning').toBe(false);
+      expect(existsSync(learningQueue(repoA)), 'the main checkout\'s learning queue survived init --no-curation').toBe(false);
       expect(existsSync(memoryQueue(wt)), 'this checkout\'s memory queue survived init --no-memory').toBe(false);
       // Memory is per checkout: the main checkout's own queue is not this run's to drain.
       expect(existsSync(memoryQueue(repoA))).toBe(true);
@@ -250,7 +250,7 @@ describe('init --no-<feature> switches the feature off in every project', () => 
   }, MULTI_RUN_TIMEOUT_MS);
 
   it('a re-init keeps the machine-wide choice even from a repo whose config says true', async () => {
-    runInit(repoA, '--recommended', '--no-learning', '--no-knowledge', '--no-memory');
+    runInit(repoA, '--recommended', '--no-curation', '--no-knowledge', '--no-memory');
     await writeRepoConfig(repoB, STALE_ON);
 
     // A plain re-init (an upgrade, say) from repo B must not flip the switch back.
@@ -342,7 +342,7 @@ describe('devflow memory|learning|knowledge --enable/--disable are machine-wide'
     expect(linesOf(memoryQueue(repoB))).toBe(2);
   }, MULTI_RUN_TIMEOUT_MS);
 
-  it('learning --disable, memory --disable and init --no-learning --no-memory delete nothing through a linked queue folder, and say so (D-CLI-NO-SYMLINK)', async () => {
+  it('learning --disable, memory --disable and init --no-curation --no-memory delete nothing through a linked queue folder, and say so (D-CLI-NO-SYMLINK)', async () => {
     runInit(repoA, '--recommended');
     const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'df-switch-outside-'));
     try {
@@ -351,19 +351,19 @@ describe('devflow memory|learning|knowledge --enable/--disable are machine-wide'
       const repoReal = await fs.realpath(repoA);
       const kept = path.join(outside, '.pending-turns.jsonl');
       await fs.writeFile(kept, 'a file outside the project\n', 'utf-8');
-      for (const folder of ['memory', 'learning']) {
+      for (const folder of ['memory', 'curation']) {
         await fs.rm(path.join(repoA, '.devflow', folder), { recursive: true, force: true });
         await fs.symlink(outside, path.join(repoA, '.devflow', folder));
       }
 
-      for (const feature of ['learning', 'memory']) {
+      for (const [feature, folder] of [['learning', 'curation'], ['memory', 'memory']]) {
         const run = runCli(repoA, feature, '--disable');
         expect(run.status, run.out).toBe(0);
-        expect(run.out).toContain(`${path.join(repoReal, '.devflow', feature)} is a symbolic link`);
+        expect(run.out).toContain(`${path.join(repoReal, '.devflow', folder)} is a symbolic link`);
       }
-      const reinit = runInit(repoA, '--recommended', '--no-learning', '--no-memory');
+      const reinit = runInit(repoA, '--recommended', '--no-curation', '--no-memory');
       expect(reinit).toContain(`${path.join(repoReal, '.devflow', 'memory')} is a symbolic link`);
-      expect(reinit).toContain(`${path.join(repoReal, '.devflow', 'learning')} is a symbolic link`);
+      expect(reinit).toContain(`${path.join(repoReal, '.devflow', 'curation')} is a symbolic link`);
 
       expect(await fs.readFile(kept, 'utf-8'), 'nothing is deleted through either link').toBe('a file outside the project\n');
       expect(await readManifestFeatures()).toMatchObject({ learning: false, memory: false });
@@ -420,21 +420,21 @@ async function editManifestVersion(version: string): Promise<void> {
 describe('older manifests agree with the runtime gates', () => {
   it('a manifest without learning/knowledge keys: a plain re-init keeps both enabled (D-FEATURES-ABSENT-ON)', async () => {
     runInit(repoA, '--recommended');
-    await editManifestFeatures(['learning', 'knowledge']);
+    await editManifestFeatures(['curation', 'learning', 'knowledge']);
     // The gates already read the absent keys as on…
     expect(runCli(repoA, 'learning', '--status').out).toContain('Learning: enabled');
     expect(runCli(repoA, 'knowledge', '--status').out).toContain('Status: enabled');
 
     // …so a plain re-init (an upgrade) must record them on, not seed them off.
     runInit(repoA, '--recommended');
-    expect(await readManifestFeatures()).toMatchObject({ learning: true, knowledge: true });
+    expect(await readManifestFeatures()).toMatchObject({ curation: true, learning: true, knowledge: true });
     await seedLearningQueue(repoA);
     expect(sessionContext(repoA)).toContain('--- LEARNING MAINTENANCE ---');
   }, MULTI_RUN_TIMEOUT_MS);
 
   it('a manifest holding only the legacy decisions:false: learning is off in the hooks and the CLI status (D-LEARNING-LEGACY-DECISIONS)', async () => {
     runInit(repoA, '--recommended');
-    await editManifestFeatures(['learning'], { decisions: false });
+    await editManifestFeatures(['curation', 'learning'], { decisions: false });
     await seedLearningQueue(repoB);
 
     expect(sessionContext(repoB)).not.toContain('LEARNING MAINTENANCE');
@@ -446,7 +446,7 @@ describe('older manifests agree with the runtime gates', () => {
     expect(runCli(repoA, 'learning', '--status').out).toContain('Learning: disabled');
 
     // An explicit learning value wins over the legacy key.
-    await editManifestFeatures([], { learning: true });
+    await editManifestFeatures([], { curation: true, learning: true });
     expect(sessionContext(repoB)).toContain('--- LEARNING MAINTENANCE ---');
     expect(runCli(repoA, 'learning', '--status').out).toContain('Learning: enabled');
   }, MULTI_RUN_TIMEOUT_MS);
@@ -535,7 +535,7 @@ describe('init --hud-only over a full install (D-HUD-ONLY-PRESERVE)', () => {
 
 describe('init on→off re-init transitions', () => {
   it('memory, ambient, HUD, rules, learning and knowledge all turn off on re-init', async () => {
-    runInit(repoA, '--recommended', '--ambient', '--memory', '--hud', '--rules', '--learning', '--knowledge');
+    runInit(repoA, '--recommended', '--ambient', '--memory', '--hud', '--rules', '--curation', '--knowledge');
     const on = await readSettings();
     expect(hasMemoryHooks(on)).toBe(true);
     expect(hasAmbientHook(on)).toBe(true);
@@ -549,7 +549,7 @@ describe('init on→off re-init transitions', () => {
     // Non-vacuity: learning is really on for the seeded queue before the re-init.
     expect(sessionContext(repoA)).toContain('--- LEARNING MAINTENANCE ---');
 
-    runInit(repoA, '--recommended', '--no-ambient', '--no-memory', '--no-hud', '--no-rules', '--no-learning', '--no-knowledge');
+    runInit(repoA, '--recommended', '--no-ambient', '--no-memory', '--no-hud', '--no-rules', '--no-curation', '--no-knowledge');
     const off = await readSettings();
     expect(hasMemoryHooks(off)).toBe(false);
     expect(hasAmbientHook(off)).toBe(false);

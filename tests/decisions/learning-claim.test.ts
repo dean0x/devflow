@@ -43,7 +43,7 @@ interface ClaimPaths {
 }
 
 function claimPaths(dir: string): ClaimPaths {
-  const learningDir = path.join(dir, '.devflow', 'learning');
+  const learningDir = path.join(dir, '.devflow', 'curation');
   const queue = path.join(learningDir, '.pending-turns.jsonl');
   return {
     learningDir,
@@ -467,7 +467,7 @@ describe('claim-queue and release-claim ops', { timeout: 30_000 }, () => {
   it('release-claim refuses without a learning directory and creates nothing', () => {
     const run = runJsonHelper(dir, ['release-claim', TOKEN_A]);
     expect(run.code).toBe(1);
-    expect(run.stderr).toBe(`release-claim: no .devflow/learning/ under ${fs.realpathSync(dir)} — run from the project root\n`);
+    expect(run.stderr).toBe(`release-claim: no .devflow/curation/ under ${fs.realpathSync(dir)} — run from the project root\n`);
     expect(fs.readdirSync(dir)).toEqual([]);
   });
 

@@ -191,7 +191,10 @@ const DECISIONS_SLICE_RE = /\(slice:\s*\d+\s+of\s+\d+\s+entries/;
 /** The first line of the next prompt field (`HANDOFF_REQUIRED: true`, `PR_DESCRIPTION (...)`) ends the block. */
 const FIELD_LINE_RE = /^[A-Z][A-Z0-9_]{2,}[ \t]*[:(]/;
 const INDEX_LINE_RE = /^\s*(?:ADR|PF)-\d{3,4}\s{2,}\S/;
-const LEDGER_PATH_RE = /(?:index|decisions|pitfalls)\.md|\.devflow\/learning/;
+const LEDGER_PATH_RE = /(?:index|decisions|pitfalls)\.md|\.devflow\/(?:curation|learning)/;
+/** The ledger folder is `curation`; transcripts from before the rename read `learning`. */
+const LEDGER_INDEX_PATH_RE = /\/\.devflow\/(?:curation|learning)\/index\.md$/;
+const LEDGER_BODIES_PATH_RE = /\/\.devflow\/(?:curation|learning)\/(?:decisions|pitfalls)\.md$/;
 const CITATION_RE = /\b(?:ADR|PF)-\d{3,4}\b/g;
 
 const QUOTED_RE = /'[^']*'|"(?:[^"\\]|\\.)*"/g;
@@ -686,8 +689,8 @@ export function bashWrittenPaths(command: string): string[] {
 
 function ledgerKind(path: string): 'index' | 'bodies' | null {
   const rooted = path.startsWith('/') ? path : `/${path}`;
-  if (rooted.endsWith('/.devflow/learning/index.md')) return 'index';
-  if (rooted.endsWith('/.devflow/learning/decisions.md') || rooted.endsWith('/.devflow/learning/pitfalls.md')) return 'bodies';
+  if (LEDGER_INDEX_PATH_RE.test(rooted)) return 'index';
+  if (LEDGER_BODIES_PATH_RE.test(rooted)) return 'bodies';
   return null;
 }
 

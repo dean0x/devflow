@@ -9,6 +9,7 @@ import { DEVFLOW_PLUGINS, getAllAgentNames, parsePluginSelection, skillsOf, type
 import { TRACKER_ATTEMPTS_NAMES, TRACKER_PROVIDER_IDS, TRACKER_STAGED_PREFIX } from '../src/core/tracker.js';
 import { modelCacheDir } from '../src/core/cache.js';
 import { CLAUDE_MD_AUDIT_STAMP_FILE, CLAUDE_MD_AUDIT_STAMP_TMP_PREFIX } from '../src/core/claude-md-audit.js';
+import { loadLearningStore } from '../src/core/curation-store.js';
 import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
 import { DEVFLOW_GITIGNORE_BLOCK, DEVFLOW_TRACKED_PATHS } from '../src/targets/claude-code/post-install.js';
 
@@ -877,6 +878,174 @@ describe('resolveInstallArtifactPaths (the staged-file family)', () => {
     // The preview and the removal read one resolver, so a path removed without
     // being previewed is not reachable.
     expect(extras).toContain(orphan);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The curation move's machine state (#529, TP-11)
+// ---------------------------------------------------------------------------
+//
+// The move takes one lock per ledger root, a directory `.curation-move-<16 hex>.lock`
+// directly in ~/.devflow. Its name exists only on disk, so the artifact list names it
+// by shape, and the resolver expands the shape against the real directory. Only a real
+// directory of exactly that shape goes: a link, a file or a near miss stays.
+
+describe('the move-lock family (installArtifactPaths and resolveInstallArtifactPaths)', () => {
+  let tmpDir: string;
+  const lockName = (hex: string): string => `.curation-move-${hex}.lock`;
+  const HEX = '0123456789abcdef';
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-movelock-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('declares the lock family as a directory prefix entry, and it is not user content', () => {
+    const entry = installArtifactPaths(tmpDir).find(e => e.relPath === '.curation-move-');
+    expect(entry, 'the move lock must be an install artifact').toBeDefined();
+    expect(entry?.isPrefix).toBe(true);
+    expect(entry?.isDir).toBe(true);
+    expect(userContentPaths(tmpDir).map(e => e.relPath).filter(r => r.startsWith('.curation-move-'))).toEqual([]);
+  });
+
+  it('the lock name the store builds has the shape the artifact list matches', () => {
+    const loaded = loadLearningStore();
+    if (!loaded.ok) throw new Error('the store must load');
+    const key = (loaded.value as unknown as { curationMoveLockKey(root: string): string }).curationMoveLockKey('/some/ledger/root');
+    expect(key).toMatch(/^[0-9a-f]{16}$/);
+    expect(path.basename(path.join(tmpDir, lockName(key)))).toBe(lockName(key));
+  });
+
+  it('expands to each real lock directory of exactly the shape, and to nothing else', async () => {
+    await fs.mkdir(path.join(tmpDir, lockName(HEX)));
+    await fs.mkdir(path.join(tmpDir, lockName('fedcba9876543210')));
+    await fs.writeFile(path.join(tmpDir, lockName(HEX)) + '/pid', '42', 'utf-8');
+    const nearMisses = [
+      lockName('0123456789abcde'),        // fifteen characters
+      lockName('0123456789abcdef0'),      // seventeen characters
+      lockName('AAAAAAAAAAAAAAAA'),       // upper case
+      lockName('0123456789abcdeg'),       // not hex
+      `.curation-move-${HEX}.lock.bak`,   // a suffix after the lock suffix
+      `curation-move-${HEX}.lock`,        // no leading dot
+      `..curation-move-${HEX}.lock`,
+      `.curation-move-${HEX}.lockx`,
+      '.curation-move.journal',
+      '.curation-move-',
+    ];
+    for (const name of nearMisses) await fs.mkdir(path.join(tmpDir, name));
+
+    const resolved = (await resolveInstallArtifactPaths(tmpDir)).map(e => e.relPath);
+
+    expect(resolved).toContain(lockName(HEX));
+    expect(resolved).toContain(lockName('fedcba9876543210'));
+    for (const name of nearMisses) expect(resolved, name).not.toContain(name);
+    expect(resolved).not.toContain('.curation-move-');
+  });
+
+  it('leaves a link and a file that are named like a lock', async () => {
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-movelock-outside-'));
+    try {
+      await fs.writeFile(path.join(outside, 'precious'), 'keep', 'utf-8');
+      await fs.symlink(outside, path.join(tmpDir, lockName(HEX)));
+      await fs.writeFile(path.join(tmpDir, lockName('fedcba9876543210')), 'a file', 'utf-8');
+
+      const resolved = (await resolveInstallArtifactPaths(tmpDir)).map(e => e.relPath);
+      expect(resolved).not.toContain(lockName(HEX));
+      expect(resolved).not.toContain(lockName('fedcba9876543210'));
+
+      await removeDevFlowInstallArtifacts(tmpDir, false);
+      expect(await fs.readFile(path.join(outside, 'precious'), 'utf-8')).toBe('keep');
+      await expect(fs.lstat(path.join(tmpDir, lockName(HEX)))).resolves.toBeDefined();
+      await expect(fs.lstat(path.join(tmpDir, lockName('fedcba9876543210')))).resolves.toBeDefined();
+    } finally {
+      await fs.rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('an artifacts-only removal takes a lock directory with its contents, and leaves user content', async () => {
+    const lock = path.join(tmpDir, lockName(HEX));
+    await fs.mkdir(lock);
+    await fs.writeFile(path.join(lock, 'pid'), '42', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, 'tracker.md'), 'user content', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, 'curation.json'), '{}', 'utf-8');
+
+    await removeDevFlowInstallArtifacts(tmpDir, false);
+
+    await expect(fs.lstat(lock)).rejects.toThrow();
+    expect(await fs.readFile(path.join(tmpDir, 'tracker.md'), 'utf-8')).toBe('user content');
+    expect(await fs.readFile(path.join(tmpDir, 'curation.json'), 'utf-8')).toBe('{}');
+  });
+
+  it('the dry-run preview names a lock it is about to remove', async () => {
+    const lock = path.join(tmpDir, lockName(HEX));
+    await fs.mkdir(lock);
+    const claudeDir = path.join(tmpDir, 'claude-home');
+    await fs.mkdir(claudeDir, { recursive: true });
+
+    expect(await enumerateDryRunExtras(claudeDir, tmpDir)).toContain(lock);
+  });
+});
+
+describe('uninstall and the curation data (#529, TP-11)', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-curation-uninstall-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('deletes manifest.json whole, with both machine keys in it', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'manifest.json'),
+      JSON.stringify({ version: '3.8.0', features: { curation: false, learning: false } }),
+      'utf-8',
+    );
+
+    await removeDevFlowInstallArtifacts(tmpDir, false);
+
+    await expect(fs.lstat(path.join(tmpDir, 'manifest.json'))).rejects.toThrow();
+  });
+
+  it('removes the logs folder with the skip markers in it, and no step lists the markers', async () => {
+    const logs = path.join(tmpDir, 'logs');
+    await fs.mkdir(logs);
+    await fs.writeFile(path.join(logs, 'curation-move.0123abcd_work_repo.skip'), '', 'utf-8');
+    await fs.writeFile(path.join(logs, '.hook.log'), 'x', 'utf-8');
+
+    await removeDevFlowInstallArtifacts(tmpDir, false);
+
+    await expect(fs.lstat(logs)).rejects.toThrow();
+    expect(installArtifactPaths(tmpDir).some(e => e.relPath.includes('curation-move.') && e.relPath.endsWith('.skip'))).toBe(false);
+  });
+
+  it('keeps the global tuning file under both names through an artifacts-only removal, and names both', async () => {
+    await fs.writeFile(path.join(tmpDir, 'curation.json'), '{}', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, 'learning.json'), '{}', 'utf-8');
+
+    await removeDevFlowInstallArtifacts(tmpDir, false);
+
+    await expect(fs.lstat(path.join(tmpDir, 'curation.json'))).resolves.toBeDefined();
+    await expect(fs.lstat(path.join(tmpDir, 'learning.json'))).resolves.toBeDefined();
+    expect(await enumerateUserDevFlowContent(tmpDir)).toEqual(expect.arrayContaining(['curation.json', 'learning.json']));
+  });
+
+  it('the confirmed project-data removal takes the old folder, the new folder and every backup folder', () => {
+    const entries = [
+      { name: 'learning', isDir: true },
+      { name: 'curation', isDir: true },
+      { name: 'learning.backup-20261017T020304Z-ab12cd', isDir: true },
+      { name: 'memory', isDir: true },
+      { name: 'features', isDir: true },
+    ];
+    const { remove, keep } = partitionProjectData(entries);
+    expect(remove.map(e => e.name)).toEqual(expect.arrayContaining(['learning', 'curation', 'learning.backup-20261017T020304Z-ab12cd']));
+    expect(keep.map(e => e.name)).toEqual(['features']);
   });
 });
 

@@ -1,6 +1,6 @@
 // tests/decisions/learning-store.test.ts
 //
-// Tests for src/assets/scripts/hooks/lib/learning-store.cjs — the v2 learning
+// Tests for src/assets/scripts/hooks/lib/curation-store.cjs — the v2 learning
 // store: frozen constants, the one status list (and its TypeScript mirror),
 // strict JSONL reads with quarantine, the atomic writers, the lock wrapper,
 // observation validation, the ledger projection, content history, the pre-v2
@@ -213,10 +213,10 @@ describe('readJsonl (D-QUARANTINE-MALFORMED)', () => {
 describe('rejectedPathFor', () => {
   it('names the sibling .rejected.jsonl of each learning file', () => {
     const p = learningPaths('/repo');
-    expect(store.rejectedPathFor(p.log)).toBe('/repo/.devflow/learning/decisions-log.rejected.jsonl');
-    expect(store.rejectedPathFor(p.ledger)).toBe('/repo/.devflow/learning/decisions-ledger.rejected.jsonl');
-    expect(store.rejectedPathFor(p.archive)).toBe('/repo/.devflow/learning/decisions-log.archive.rejected.jsonl');
-    expect(store.rejectedPathFor(p.history)).toBe('/repo/.devflow/learning/decisions-history.rejected.jsonl');
+    expect(store.rejectedPathFor(p.log)).toBe('/repo/.devflow/curation/decisions-log.rejected.jsonl');
+    expect(store.rejectedPathFor(p.ledger)).toBe('/repo/.devflow/curation/decisions-ledger.rejected.jsonl');
+    expect(store.rejectedPathFor(p.archive)).toBe('/repo/.devflow/curation/decisions-log.archive.rejected.jsonl');
+    expect(store.rejectedPathFor(p.history)).toBe('/repo/.devflow/curation/decisions-history.rejected.jsonl');
   });
 });
 
@@ -324,13 +324,13 @@ describe('hasLearningDir', () => {
   beforeEach(() => { tmp = makeTmp('learning-store-hasdir-'); });
   afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
-  it('is true only when .devflow/learning is a directory', () => {
+  it('is true only when .devflow/curation is a directory', () => {
     expect(store.hasLearningDir(tmp)).toBe(false);
     fs.mkdirSync(path.join(tmp, '.devflow'));
-    fs.writeFileSync(path.join(tmp, '.devflow', 'learning'), 'a file, not a directory');
+    fs.writeFileSync(path.join(tmp, '.devflow', 'curation'), 'a file, not a directory');
     expect(store.hasLearningDir(tmp)).toBe(false);
-    fs.rmSync(path.join(tmp, '.devflow', 'learning'));
-    fs.mkdirSync(path.join(tmp, '.devflow', 'learning'));
+    fs.rmSync(path.join(tmp, '.devflow', 'curation'));
+    fs.mkdirSync(path.join(tmp, '.devflow', 'curation'));
     expect(store.hasLearningDir(tmp)).toBe(true);
   });
 });
@@ -347,7 +347,7 @@ describe('withDecisionsLock (D-ONE-LEARNING-LOCK, D-NO-STRAY-TREE)', () => {
       ok: false,
       error: {
         kind: 'no-learning-dir',
-        message: `put-observation: no .devflow/learning/ under ${tmp} — run from the project root`,
+        message: `put-observation: no .devflow/curation/ under ${tmp} — run from the project root`,
       },
     });
     expect(ran).toBe(false);
@@ -408,7 +408,7 @@ describe('withDecisionsLock (D-ONE-LEARNING-LOCK, D-NO-STRAY-TREE)', () => {
   });
 });
 
-// A repository can commit .devflow, or .devflow/learning, as a symbolic link to a
+// A repository can commit .devflow, or .devflow/curation, as a symbolic link to a
 // folder elsewhere on the machine. Every learning writer refuses such a tree in the
 // lock wrapper, before it takes the lock, and the claim heartbeat leaves it alone:
 // nothing in the folder the link names is created, changed, moved or removed, its
@@ -460,16 +460,16 @@ describe('a learning tree reached through a symbolic link (D-NO-LINKED-TREE)', {
     return entries;
   }
 
-  /** Link `.devflow/learning` (or `.devflow` itself) under tmp to a seeded tree elsewhere; return the link. */
-  function linkTree(which: 'learning' | 'devflow'): string {
+  /** Link `.devflow/curation` (or `.devflow` itself) under tmp to a seeded tree elsewhere; return the link. */
+  function linkTree(which: 'curation' | 'devflow'): string {
     initGitRepo(tmp, { 'src/a.ts': 'export const a = 1;\n' });
-    if (which === 'learning') {
+    if (which === 'curation') {
       seedTreeIn(elsewhere);
       fs.mkdirSync(path.join(tmp, '.devflow'));
-      fs.symlinkSync(elsewhere, path.join(tmp, '.devflow', 'learning'));
-      return path.join(tmp, '.devflow', 'learning');
+      fs.symlinkSync(elsewhere, path.join(tmp, '.devflow', 'curation'));
+      return path.join(tmp, '.devflow', 'curation');
     }
-    seedTreeIn(path.join(elsewhere, 'learning'));
+    seedTreeIn(path.join(elsewhere, 'curation'));
     fs.symlinkSync(elsewhere, path.join(tmp, '.devflow'));
     return path.join(tmp, '.devflow');
   }
@@ -501,8 +501,8 @@ describe('a learning tree reached through a symbolic link (D-NO-LINKED-TREE)', {
     { args: ['release-claim', TOKEN] },
   ];
 
-  for (const which of ['learning', 'devflow'] as const) {
-    const label = which === 'learning' ? '.devflow/learning' : '.devflow';
+  for (const which of ['curation', 'devflow'] as const) {
+    const label = which === 'curation' ? '.devflow/curation' : '.devflow';
 
     it(`withDecisionsLock refuses a ${label} that is a symbolic link, running nothing and changing nothing where it leads`, () => {
       const link = linkTree(which);
@@ -1493,12 +1493,12 @@ describe('clearUnreferenced (D-CLEAR-UNREFERENCED)', () => {
     expect(snapshotTree(tmp)).toEqual(before);
   });
 
-  it('refuses without .devflow/learning/ and creates nothing (D-NO-STRAY-TREE)', () => {
+  it('refuses without .devflow/curation/ and creates nothing (D-NO-STRAY-TREE)', () => {
     fs.mkdirSync(path.join(tmp, '.devflow'));
     const result = store.clearUnreferenced(tmp, { now: FIXTURE_NOW });
     expect(result).toEqual({
       ok: false,
-      error: { kind: 'no-learning-dir', message: `clear: no .devflow/learning/ under ${tmp} — run from the project root` },
+      error: { kind: 'no-learning-dir', message: `clear: no .devflow/curation/ under ${tmp} — run from the project root` },
     });
     expect(fs.readdirSync(path.join(tmp, '.devflow'))).toEqual([]);
   });
@@ -1530,7 +1530,7 @@ describe('resetLearning (D-RESET-UNDER-LOCK)', () => {
     for (const file of [
       p.history, store.rejectedPathFor(p.log), p.log.replace(/\.jsonl$/, '.pre-v2.jsonl'),
       path.join(p.learningDir, 'decisions.md'), path.join(p.learningDir, 'pitfalls.md'), path.join(p.learningDir, 'index.md'),
-      path.join(p.learningDir, 'learning.json'),
+      path.join(p.learningDir, 'curation.json'),
       path.join(p.learningDir, '.pending-turns.jsonl'), path.join(p.learningDir, '.pending-turns.processing'),
       path.join(p.learningDir, '.pending-turns.owner'),
     ]) {
@@ -1555,10 +1555,10 @@ describe('resetLearning (D-RESET-UNDER-LOCK)', () => {
     expect(snapshotTree(path.join(tmp, '.devflow', 'memory'))).toEqual(memory);
   });
 
-  it('refuses without .devflow/learning/ and creates nothing, in a bare directory or under an existing .devflow/ (D-NO-STRAY-TREE)', () => {
+  it('refuses without .devflow/curation/ and creates nothing, in a bare directory or under an existing .devflow/ (D-NO-STRAY-TREE)', () => {
     const refusal = {
       ok: false,
-      error: { kind: 'no-learning-dir', message: `reset: no .devflow/learning/ under ${tmp} — run from the project root` },
+      error: { kind: 'no-learning-dir', message: `reset: no .devflow/curation/ under ${tmp} — run from the project root` },
     };
     expect(store.resetLearning(tmp)).toEqual(refusal);
     expect(fs.readdirSync(tmp)).toEqual([]);

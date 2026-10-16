@@ -1976,7 +1976,7 @@ export function makeManifest(overrides: Partial<ManifestData> = {}): ManifestDat
       memory: true,
       hud: true,
       knowledge: true,
-      learning: true,
+      curation: true,
       rules: true,
       proxy: false,
       behavior: false,

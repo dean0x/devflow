@@ -71,7 +71,7 @@ LEDGER_ROOT="${DF_LEDGER_ROOT:-$PROJECT_ROOT}"
 DEVFLOW_MANIFEST="$HOME/.devflow/manifest.json"
 PROJECT_DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
 MEMORY_DIR="$PROJECT_DEVFLOW_DIR/memory"
-LEARNING_DIR="$LEDGER_ROOT/.devflow/learning"
+LEARNING_DIR="$LEDGER_ROOT/.devflow/curation"
 
 # --- Parse questions + answers into "question<TAB>answer" rows (one subprocess) ---
 # Defensive against: tool_response absent or a plain string (error case), missing
@@ -138,7 +138,7 @@ fi
 source "$SCRIPT_DIR/hook-log-init" "capture-question"
 source "$SCRIPT_DIR/ensure-devflow-init" "$CWD" || exit 0
 source "$SCRIPT_DIR/get-mtime" || { echo "capture-question: failed to source get-mtime" >&2; exit 1; }
-source "$SCRIPT_DIR/learning-lock" || { echo "capture-question: failed to source learning-lock" >&2; exit 1; }
+source "$SCRIPT_DIR/curation-lock" || { echo "capture-question: failed to source curation-lock" >&2; exit 1; }
 
 # Each queue is checked from the root it lies below, and its folder created there,
 # by queue_append_row (D-HOOKS-NO-SYMLINK, git-marker).

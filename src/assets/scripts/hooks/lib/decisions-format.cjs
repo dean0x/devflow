@@ -3,7 +3,7 @@
 // Shared pure formatting helpers for decisions.md and pitfalls.md output.
 //
 // DESIGN: Shared pure formatting helpers for render-decisions.cjs, the one
-// renderer: its CLI and every learning-store writer render through it, so all of
+// renderer: its CLI and every curation-store writer render through it, so all of
 // them share the EXACT same format functions. This is the single source of truth
 // for the byte-compat output strings — any drift here will break the
 // renderer/session-start-context TL;DR parser.
@@ -82,7 +82,7 @@ const {
   isV2,
   singleLine,
   inactiveNote,
-} = require('./learning-store.cjs');
+} = require('./curation-store.cjs');
 
 /** JS LineTerminator set — /m `^` matches after each of these and `.` excludes them. */
 const LINE_TERMINATORS = /[\r\n\u2028\u2029]/g;

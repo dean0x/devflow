@@ -20,7 +20,7 @@ import {
 
 describe('isMachineFeatureOn (pure)', () => {
   it('is off only for an explicit boolean false', () => {
-    expect(isMachineFeatureOn({ features: { learning: false } }, 'learning')).toBe(false);
+    expect(isMachineFeatureOn({ features: { learning: false } }, 'curation')).toBe(false);
     expect(isMachineFeatureOn({ features: { knowledge: false } }, 'knowledge')).toBe(false);
     expect(isMachineFeatureOn({ features: { memory: false } }, 'memory')).toBe(false);
   });
@@ -29,7 +29,7 @@ describe('isMachineFeatureOn (pure)', () => {
     expect(isMachineFeatureOn({ features: { memory: true } }, 'memory')).toBe(true);
     expect(isMachineFeatureOn({ features: {} }, 'memory')).toBe(true);
     expect(isMachineFeatureOn({ features: { memory: 'false' } }, 'memory')).toBe(true);
-    expect(isMachineFeatureOn({ features: { learning: 0 } }, 'learning')).toBe(true);
+    expect(isMachineFeatureOn({ features: { learning: 0 } }, 'curation')).toBe(true);
   });
 
   it('is on for anything that is not a manifest-shaped object (fail-open)', () => {
@@ -40,14 +40,14 @@ describe('isMachineFeatureOn (pure)', () => {
 
   it('learning honours the legacy features.decisions key exactly as readManifest migrates it (D-LEARNING-LEGACY-DECISIONS)', () => {
     // learning if boolean, else decisions if boolean, else on.
-    expect(isMachineFeatureOn({ features: { decisions: false } }, 'learning')).toBe(false);
-    expect(isMachineFeatureOn({ features: { decisions: true } }, 'learning')).toBe(true);
-    expect(isMachineFeatureOn({ features: { decisions: false, learning: true } }, 'learning')).toBe(true);
-    expect(isMachineFeatureOn({ features: { decisions: true, learning: false } }, 'learning')).toBe(false);
+    expect(isMachineFeatureOn({ features: { decisions: false } }, 'curation')).toBe(false);
+    expect(isMachineFeatureOn({ features: { decisions: true } }, 'curation')).toBe(true);
+    expect(isMachineFeatureOn({ features: { decisions: false, learning: true } }, 'curation')).toBe(true);
+    expect(isMachineFeatureOn({ features: { decisions: true, learning: false } }, 'curation')).toBe(false);
     // A non-boolean learning is not a value, so the legacy key still decides.
-    expect(isMachineFeatureOn({ features: { decisions: false, learning: 'yes' } }, 'learning')).toBe(false);
+    expect(isMachineFeatureOn({ features: { decisions: false, learning: 'yes' } }, 'curation')).toBe(false);
     // A non-boolean decisions decides nothing.
-    expect(isMachineFeatureOn({ features: { decisions: 'false' } }, 'learning')).toBe(true);
+    expect(isMachineFeatureOn({ features: { decisions: 'false' } }, 'curation')).toBe(true);
     // The legacy key belongs to learning alone.
     expect(isMachineFeatureOn({ features: { decisions: false } }, 'memory')).toBe(true);
     expect(isMachineFeatureOn({ features: { decisions: false } }, 'knowledge')).toBe(true);
@@ -65,12 +65,12 @@ describe('isMachineFeatureOn (pure)', () => {
     expect(isMachineFeatureOn({ features: { kb: 'false' } }, 'knowledge')).toBe(true);
     // The legacy key belongs to knowledge alone.
     expect(isMachineFeatureOn({ features: { kb: false } }, 'memory')).toBe(true);
-    expect(isMachineFeatureOn({ features: { kb: false } }, 'learning')).toBe(true);
+    expect(isMachineFeatureOn({ features: { kb: false } }, 'curation')).toBe(true);
   });
 
   it('reads each feature independently', () => {
     const raw = { features: { learning: false, knowledge: true } };
-    expect(isMachineFeatureOn(raw, 'learning')).toBe(false);
+    expect(isMachineFeatureOn(raw, 'curation')).toBe(false);
     expect(isMachineFeatureOn(raw, 'knowledge')).toBe(true);
     expect(isMachineFeatureOn(raw, 'memory')).toBe(true);
   });
@@ -96,25 +96,25 @@ describe('isMachineFeatureOn (pure)', () => {
         it(`curation ${curation} x learning ${learning}`, () => {
           const booleans = [curation, learning].filter((c) => c === 'true' || c === 'false');
           const expected = booleans.length === 0 ? true : !booleans.includes('false');
-          expect(isMachineFeatureOn({ features: featuresOf(curation, learning) }, 'learning')).toBe(expected);
+          expect(isMachineFeatureOn({ features: featuresOf(curation, learning) }, 'curation')).toBe(expected);
         });
       }
     }
 
     it('a disagreeing pair resolves to off, in either direction', () => {
-      expect(isMachineFeatureOn({ features: { curation: true, learning: false } }, 'learning')).toBe(false);
-      expect(isMachineFeatureOn({ features: { curation: false, learning: true } }, 'learning')).toBe(false);
+      expect(isMachineFeatureOn({ features: { curation: true, learning: false } }, 'curation')).toBe(false);
+      expect(isMachineFeatureOn({ features: { curation: false, learning: true } }, 'curation')).toBe(false);
     });
 
     it('the pre-rename decisions key is read only when neither current key is a boolean', () => {
-      expect(isMachineFeatureOn({ features: { decisions: false } }, 'learning')).toBe(false);
-      expect(isMachineFeatureOn({ features: { curation: 'x', decisions: false } }, 'learning')).toBe(false);
-      expect(isMachineFeatureOn({ features: { curation: 'x', learning: 7, decisions: false } }, 'learning')).toBe(false);
-      expect(isMachineFeatureOn({ features: { curation: true, decisions: false } }, 'learning')).toBe(true);
-      expect(isMachineFeatureOn({ features: { learning: true, decisions: false } }, 'learning')).toBe(true);
-      expect(isMachineFeatureOn({ features: { curation: true, learning: true, decisions: false } }, 'learning')).toBe(true);
-      expect(isMachineFeatureOn({ features: { curation: false, decisions: true } }, 'learning')).toBe(false);
-      expect(isMachineFeatureOn({ features: { decisions: 'false' } }, 'learning')).toBe(true);
+      expect(isMachineFeatureOn({ features: { decisions: false } }, 'curation')).toBe(false);
+      expect(isMachineFeatureOn({ features: { curation: 'x', decisions: false } }, 'curation')).toBe(false);
+      expect(isMachineFeatureOn({ features: { curation: 'x', learning: 7, decisions: false } }, 'curation')).toBe(false);
+      expect(isMachineFeatureOn({ features: { curation: true, decisions: false } }, 'curation')).toBe(true);
+      expect(isMachineFeatureOn({ features: { learning: true, decisions: false } }, 'curation')).toBe(true);
+      expect(isMachineFeatureOn({ features: { curation: true, learning: true, decisions: false } }, 'curation')).toBe(true);
+      expect(isMachineFeatureOn({ features: { curation: false, decisions: true } }, 'curation')).toBe(false);
+      expect(isMachineFeatureOn({ features: { decisions: 'false' } }, 'curation')).toBe(true);
     });
 
     it('the curation key belongs to the learning feature alone', () => {
@@ -130,7 +130,7 @@ describe('isMachineFeatureOn (pure)', () => {
 
     it('anything that is not a manifest-shaped object still reads as on', () => {
       for (const raw of [undefined, null, 42, [], { features: null }, { features: [false] }, { features: 'curation' }]) {
-        expect(isMachineFeatureOn(raw, 'learning')).toBe(true);
+        expect(isMachineFeatureOn(raw, 'curation')).toBe(true);
       }
     });
   });
@@ -148,11 +148,38 @@ describe('setMachineFeature (pure)', () => {
     });
   });
 
-  it('never heals an absent sibling key (an absent learning key stays absent, i.e. on)', () => {
+  it('never heals an absent sibling key (an absent curation key stays absent, i.e. on)', () => {
     const next = setMachineFeature({ features: { memory: true } }, 'memory', false, NOW);
     expect(next).not.toBeNull();
     expect((next as { features: Record<string, unknown> }).features).toEqual({ memory: false });
-    expect(isMachineFeatureOn(next, 'learning')).toBe(true);
+    expect(isMachineFeatureOn(next, 'curation')).toBe(true);
+  });
+
+  describe('the curation feature writes both current keys (the manifest mirror, TP-11)', () => {
+    it.each([true, false])('curation=%s sets curation and learning to the same value and nothing else', (value) => {
+      const raw = { version: '3.0.0', features: { ambient: true, memory: true } };
+      const next = setMachineFeature(raw, 'curation', value, NOW) as { features: Record<string, unknown>; updatedAt: string };
+      expect(next.features).toEqual({ ambient: true, memory: true, curation: value, learning: value });
+      expect(next.updatedAt).toBe(NOW);
+    });
+
+    it('overwrites a disagreeing pair with the requested value in both keys', () => {
+      const raw = { features: { curation: true, learning: false } };
+      const next = setMachineFeature(raw, 'curation', true, NOW) as { features: Record<string, unknown> };
+      expect(next.features).toEqual({ curation: true, learning: true });
+      expect(isMachineFeatureOn(next, 'curation')).toBe(true);
+    });
+
+    it('leaves a pre-rename decisions key in place, inert under the booleans just written', () => {
+      const next = setMachineFeature({ features: { decisions: false } }, 'curation', true, NOW) as { features: Record<string, unknown> };
+      expect(next.features).toEqual({ decisions: false, curation: true, learning: true });
+      expect(isMachineFeatureOn(next, 'curation')).toBe(true);
+    });
+
+    it('memory and knowledge still write one key', () => {
+      expect((setMachineFeature({ features: {} }, 'memory', false, NOW) as { features: unknown }).features).toEqual({ memory: false });
+      expect((setMachineFeature({ features: {} }, 'knowledge', false, NOW) as { features: unknown }).features).toEqual({ knowledge: false });
+    });
   });
 
   it('never mutates its input', () => {
@@ -164,7 +191,7 @@ describe('setMachineFeature (pure)', () => {
 
   it('is null when there is no features record to write into', () => {
     for (const raw of [undefined, null, [], 'x', {}, { features: null }, { features: [] }]) {
-      expect(setMachineFeature(raw, 'learning', true, NOW)).toBeNull();
+      expect(setMachineFeature(raw, 'curation', true, NOW)).toBeNull();
     }
   });
 });
@@ -202,31 +229,31 @@ describe('readMachineFeature / writeMachineFeature (I/O)', () => {
   it('reads the raw key, not a healed default — a manifest lacking the key stays on', async () => {
     // readManifest() heals an absent learning key to false; the switch must not.
     await writeManifest(JSON.stringify({ version: '1', features: { ambient: true, memory: true } }));
-    expect(await readMachineFeature(devflowDir, 'learning')).toBe(true);
+    expect(await readMachineFeature(devflowDir, 'curation')).toBe(true);
   });
 
   it('never writes the manifest on read (no heal side effect)', async () => {
     const body = JSON.stringify({ version: '1', features: { kb: false, learning: false } });
     await writeManifest(body);
-    await readMachineFeature(devflowDir, 'learning');
+    await readMachineFeature(devflowDir, 'curation');
     expect(await fs.readFile(manifestPath(), 'utf-8')).toBe(body);
   });
 
   it('a manifest holding a disagreeing curation and learning pair reads off, and a read writes nothing (TP-10)', async () => {
     const body = JSON.stringify({ version: '1', features: { curation: true, learning: false } });
     await writeManifest(body);
-    expect(await readMachineFeature(devflowDir, 'learning')).toBe(false);
+    expect(await readMachineFeature(devflowDir, 'curation')).toBe(false);
     expect(await fs.readFile(manifestPath(), 'utf-8')).toBe(body);
   });
 
   it('a manifest holding only curation:false reads learning as off', async () => {
     await writeManifest(JSON.stringify({ version: '1', features: { ambient: true, curation: false } }));
-    expect(await readMachineFeature(devflowDir, 'learning')).toBe(false);
+    expect(await readMachineFeature(devflowDir, 'curation')).toBe(false);
   });
 
   it('write round-trips through read, for every feature', async () => {
     await writeManifest(JSON.stringify({ version: '1', features: { ambient: true } }));
-    for (const feature of ['memory', 'learning', 'knowledge'] as const) {
+    for (const feature of ['memory', 'curation', 'knowledge'] as const) {
       expect((await writeMachineFeature(devflowDir, feature, false)).ok).toBe(true);
       expect(await readMachineFeature(devflowDir, feature)).toBe(false);
       expect((await writeMachineFeature(devflowDir, feature, true)).ok).toBe(true);
@@ -243,7 +270,8 @@ describe('readMachineFeature / writeMachineFeature (I/O)', () => {
     const after = await readRaw();
     expect(after.features).toEqual({ ambient: false, memory: false, tracker: { provider: 'linear' } });
     expect(after.updatedAt).not.toBe('old');
-    // An absent learning key was not healed into an explicit false.
+    // An absent curation switch was not healed into an explicit false.
+    expect('curation' in after.features).toBe(false);
     expect('learning' in after.features).toBe(false);
   });
 
@@ -254,10 +282,11 @@ describe('readMachineFeature / writeMachineFeature (I/O)', () => {
 
     it.each([
       ['memory', true], ['memory', false],
-      ['learning', true], ['learning', false],
+      ['curation', true], ['curation', false],
       ['knowledge', true], ['knowledge', false],
     ] as const)('%s=%s: writeMachineFeature to the same value leaves the manifest byte-identical', async (feature, value) => {
-      const body = recorded({ ambient: true, [feature]: value });
+      // The curation switch is recorded in both current keys; a no-op needs both to hold the value.
+      const body = recorded({ ambient: true, [feature]: value, ...(feature === 'curation' ? { learning: value } : {}) });
       await writeManifest(body);
 
       expect(await writeMachineFeature(devflowDir, feature, value)).toEqual({ ok: true, value: undefined });
@@ -265,24 +294,47 @@ describe('readMachineFeature / writeMachineFeature (I/O)', () => {
       expect(await fs.readFile(manifestPath(), 'utf-8')).toBe(body);
     });
 
-    it('a different value is still written, and refreshes updatedAt', async () => {
-      await writeManifest(recorded({ learning: true }));
-      await writeMachineFeature(devflowDir, 'learning', false);
+    it('a different value is still written to both keys, and refreshes updatedAt', async () => {
+      await writeManifest(recorded({ curation: true, learning: true }));
+      await writeMachineFeature(devflowDir, 'curation', false);
       const after = await readRaw();
-      expect(after.features.learning).toBe(false);
+      expect(after.features).toEqual({ curation: false, learning: false });
       expect(after.updatedAt).not.toBe('old');
     });
 
-    it('an absent key is not "already recorded": the explicit value is written', async () => {
+    it('an absent key is not "already recorded": the explicit value is written to both keys', async () => {
       await writeManifest(recorded({ ambient: true }));
-      await writeMachineFeature(devflowDir, 'learning', true);
-      expect((await readRaw()).features).toEqual({ ambient: true, learning: true });
+      await writeMachineFeature(devflowDir, 'curation', true);
+      expect((await readRaw()).features).toEqual({ ambient: true, curation: true, learning: true });
     });
 
-    it('a legacy key is not "already recorded" either: decisions:false then --disable writes learning:false', async () => {
+    it('a manifest holding only the pre-rename learning key is not "already recorded": the curation key is added', async () => {
+      await writeManifest(recorded({ learning: false }));
+      await writeMachineFeature(devflowDir, 'curation', false);
+      expect((await readRaw()).features).toEqual({ curation: false, learning: false });
+    });
+
+    it('a disagreeing pair is not "already recorded" for either value: both keys are rewritten (TP-10)', async () => {
+      for (const value of [true, false]) {
+        await writeManifest(recorded({ curation: true, learning: false }));
+        expect(await writeMachineFeature(devflowDir, 'curation', value)).toEqual({ ok: true, value: undefined });
+        const after = await readRaw();
+        expect(after.features).toEqual({ curation: value, learning: value });
+        expect(after.updatedAt).not.toBe('old');
+      }
+    });
+
+    it('a legacy key is not "already recorded" either: decisions:false then --disable writes both current keys false', async () => {
       await writeManifest(recorded({ decisions: false }));
-      await writeMachineFeature(devflowDir, 'learning', false);
-      expect((await readRaw()).features).toEqual({ decisions: false, learning: false });
+      await writeMachineFeature(devflowDir, 'curation', false);
+      expect((await readRaw()).features).toEqual({ decisions: false, curation: false, learning: false });
+    });
+
+    it('a manifest with the pair equal and a stale decisions key is already recorded: nothing is written', async () => {
+      const body = recorded({ decisions: true, curation: false, learning: false });
+      await writeManifest(body);
+      await writeMachineFeature(devflowDir, 'curation', false);
+      expect(await fs.readFile(manifestPath(), 'utf-8')).toBe(body);
     });
 
     it('a non-boolean value is not "already recorded": it is replaced by the boolean', async () => {
@@ -293,13 +345,13 @@ describe('readMachineFeature / writeMachineFeature (I/O)', () => {
 
     it('still refuses with not-installed when the manifest is not manifest-shaped, whatever the value', async () => {
       await writeManifest('{ not json');
-      expect(await writeMachineFeature(devflowDir, 'learning', true)).toEqual({ ok: false, error: 'not-installed' });
-      expect(await writeMachineFeature(devflowDir, 'learning', false)).toEqual({ ok: false, error: 'not-installed' });
+      expect(await writeMachineFeature(devflowDir, 'curation', true)).toEqual({ ok: false, error: 'not-installed' });
+      expect(await writeMachineFeature(devflowDir, 'curation', false)).toEqual({ ok: false, error: 'not-installed' });
     });
   });
 
   it('refuses with not-installed when there is no manifest, and creates none', async () => {
-    expect(await writeMachineFeature(devflowDir, 'learning', false)).toEqual({ ok: false, error: 'not-installed' });
+    expect(await writeMachineFeature(devflowDir, 'curation', false)).toEqual({ ok: false, error: 'not-installed' });
     await expect(fs.access(manifestPath())).rejects.toThrow();
   });
 

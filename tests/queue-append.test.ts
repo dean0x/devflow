@@ -6,7 +6,7 @@
  *
  * Harness note: queue_append_row/queue_append_both/queue_read_gates are bash
  * functions (sourced, not standalone executables), so each test sources
- * json-parse -> get-mtime -> learning-lock -> queue-append and then calls the
+ * json-parse -> get-mtime -> curation-lock -> queue-append and then calls the
  * function(s) under test via a small inline bash script executed with `bash -c`.
  */
 
@@ -39,7 +39,7 @@ log() { :; }
 dbg() { :; }
 source "${path.join(HOOKS_DIR, 'json-parse')}"
 source "${path.join(HOOKS_DIR, 'get-mtime')}"
-source "${path.join(HOOKS_DIR, 'learning-lock')}"
+source "${path.join(HOOKS_DIR, 'curation-lock')}"
 source "${QUEUE_APPEND}"
 ${script}
 `;
@@ -256,7 +256,7 @@ log() { :; }
 dbg() { :; }
 source "${path.join(HOOKS_DIR, 'json-parse')}"
 source "${path.join(HOOKS_DIR, 'get-mtime')}"
-source "${path.join(HOOKS_DIR, 'learning-lock')}"
+source "${path.join(HOOKS_DIR, 'curation-lock')}"
 source "${QUEUE_APPEND}"
 queue_append_row "$1" "$2" "user" "row-$3" "$3"
 `,
@@ -310,7 +310,7 @@ log() { :; }
 dbg() { :; }
 source "${path.join(HOOKS_DIR, 'json-parse')}"
 source "${path.join(HOOKS_DIR, 'get-mtime')}"
-source "${path.join(HOOKS_DIR, 'learning-lock')}"
+source "${path.join(HOOKS_DIR, 'curation-lock')}"
 source "${QUEUE_APPEND}"
 queue_append_row "$1" "$2" "user" "race-$3" "$3"
 `,
@@ -533,6 +533,207 @@ describe('queue_append_row never writes through a symbolic link (D-HOOKS-NO-SYML
     expect(readJsonl(queue), 'the row is appended; the trim waits for a later append').toHaveLength(201);
     expect(fs.readdirSync(path.dirname(queue)).filter((name) => name.includes('.tmp.')), 'the planted link is removed').toEqual([]);
   }, FIFO_TEST_TIMEOUT_MS);
+});
+
+// ---------------------------------------------------------------------------
+// TP-41: the write rule. The row is built first, and one builtin append writes it,
+// so a builder that fails halfway leaves no partial line in the queue.
+// ---------------------------------------------------------------------------
+
+describe('queue_append_row: the write rule (TP-41)', () => {
+  const writeFakeExecutable = useWarmFakeExecutables();
+  let tmpDir: string;
+  let shimDir: string;
+  let callLog: string;
+  let queue: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'queue-append-write-'));
+    shimDir = path.join(tmpDir, 'shim');
+    callLog = path.join(tmpDir, 'calls.log');
+    queue = path.join(tmpDir, 'q.jsonl');
+    fs.mkdirSync(shimDir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  const shimEnv = (): NodeJS.ProcessEnv => ({ ...process.env, PATH: `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}` });
+  const calls = (): string[] => (fs.existsSync(callLog) ? fs.readFileSync(callLog, 'utf-8').trim().split('\n').filter(Boolean) : []);
+  const append = (setup = '', env?: NodeJS.ProcessEnv) =>
+    runWithQueueAppend(`${setup}\nqueue_append_row "${tmpDir}" "${queue}" "user" "we chose X over Y" "7"`, env);
+
+  for (const backend of [{ name: 'jq', noJq: false, tool: 'jq' }, { name: 'node fallback', noJq: true, tool: 'node' }]) {
+    describe(`${backend.name} backend`, () => {
+      // A builder that prints half a row and fails. Before the write rule its output went
+      // straight into the queue, so this left a line that no reader could parse.
+      beforeEach(() => {
+        writeFakeExecutable(path.join(shimDir, backend.tool), `#!/bin/bash\nprintf '%s' '{"role":"us'\nexit 1\n`);
+      });
+
+      it('a row that fails to build writes nothing: no partial line, and no queue file is created', () => {
+        const { exitCode, stderr } = append(backend.noJq ? '_HAS_JQ=false' : '', shimEnv());
+
+        expect(exitCode, stderr).toBe(0);
+        expect(fs.existsSync(queue)).toBe(false);
+      });
+
+      it('a row that fails to build leaves the queued rows byte-identical', () => {
+        const queued = `${JSON.stringify({ role: 'user', content: 'earlier', ts: 1 })}\n`;
+        fs.writeFileSync(queue, queued, { mode: 0o600 });
+
+        const { exitCode, stderr } = append(backend.noJq ? '_HAS_JQ=false' : '', shimEnv());
+
+        expect(exitCode, stderr).toBe(0);
+        expect(fs.readFileSync(queue, 'utf-8')).toBe(queued);
+      });
+    });
+  }
+
+  it('a row that builds is written as exactly one newline-terminated line per call', () => {
+    expect(append().exitCode).toBe(0);
+    expect(append().exitCode).toBe(0);
+
+    const text = fs.readFileSync(queue, 'utf-8');
+    expect(text.split('\n')).toHaveLength(3);
+    expect(text.endsWith('\n')).toBe(true);
+    expect(readJsonl(queue)).toEqual([
+      { role: 'user', content: 'we chose X over Y', ts: 7 },
+      { role: 'user', content: 'we chose X over Y', ts: 7 },
+    ]);
+  });
+
+  it('the append creates the queue itself, at 0600 whatever the caller umask, and runs no touch', () => {
+    writeFakeExecutable(path.join(shimDir, 'touch'), `#!/bin/bash\necho touch >> "${callLog}"\nexit 0\n`);
+
+    const { exitCode, stderr } = append('umask 022', shimEnv());
+
+    expect(exitCode, stderr).toBe(0);
+    expect((fs.statSync(queue).mode & 0o777).toString(8)).toBe('600');
+    expect(calls(), 'creating the file is part of the append, not a separate command').toEqual([]);
+  });
+
+  it('a queue that already exists keeps its mode: the append only adds a line', () => {
+    fs.writeFileSync(queue, '', { mode: 0o640 });
+    fs.chmodSync(queue, 0o640);
+
+    expect(append('umask 022').exitCode).toBe(0);
+
+    expect((fs.statSync(queue).mode & 0o777).toString(8)).toBe('640');
+    expect(readJsonl(queue)).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The creator rule (#529): a ledger queue is appended to in the old folder while it
+// exists, and the new folder is made only when the old name is absent. An append
+// that finds the old folder gone (the move ran meanwhile) looks again and goes on
+// in the new folder: the row is not dropped and the old folder is not made again.
+// ---------------------------------------------------------------------------
+
+describe('queue_append_row: the ledger folder follows the creator rule', () => {
+  let tmpDir: string;
+  let root: string;
+  let devflow: string;
+  let oldQueue: string;
+  let newQueue: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'queue-append-creator-'));
+    root = path.join(tmpDir, 'repo');
+    devflow = path.join(root, '.devflow');
+    oldQueue = path.join(devflow, 'learning', '.pending-turns.jsonl');
+    newQueue = path.join(devflow, 'curation', '.pending-turns.jsonl');
+    fs.mkdirSync(root);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  /** One append of a fixed row for the curation queue, after `setup`. */
+  const append = (setup = ''): { exitCode: number; stderr: string } =>
+    runWithQueueAppend(`${setup}\nqueue_append_row "${root}" "${newQueue}" "user" "we chose X over Y" "1"`);
+  const row = { role: 'user', content: 'we chose X over Y', ts: 1 };
+
+  it('appends to the old folder while it exists, and makes no new folder', () => {
+    fs.mkdirSync(path.dirname(oldQueue), { recursive: true });
+    fs.writeFileSync(oldQueue, `${JSON.stringify({ role: 'user', content: 'earlier', ts: 0 })}\n`, { mode: 0o600 });
+
+    const { exitCode, stderr } = append();
+
+    expect(exitCode, stderr).toBe(0);
+    expect(readJsonl(oldQueue)).toEqual([{ role: 'user', content: 'earlier', ts: 0 }, row]);
+    expect(fs.existsSync(path.join(devflow, 'curation')), 'no new folder beside the old one').toBe(false);
+  });
+
+  it('an old folder without a queue file gets the file, and still no new folder is made', () => {
+    fs.mkdirSync(path.dirname(oldQueue), { recursive: true });
+
+    expect(append().exitCode).toBe(0);
+
+    expect(readJsonl(oldQueue)).toEqual([row]);
+    expect(fs.existsSync(path.join(devflow, 'curation'))).toBe(false);
+  });
+
+  it('makes the new folder, and no old one, when the old name is absent', () => {
+    fs.mkdirSync(devflow);
+
+    expect(append().exitCode).toBe(0);
+
+    expect(readJsonl(newQueue)).toEqual([row]);
+    expect(fs.existsSync(path.join(devflow, 'learning'))).toBe(false);
+  });
+
+  it('appends to the new folder when it exists and the old name is absent', () => {
+    fs.mkdirSync(path.dirname(newQueue), { recursive: true });
+    fs.writeFileSync(newQueue, `${JSON.stringify({ role: 'user', content: 'earlier', ts: 0 })}\n`, { mode: 0o600 });
+
+    expect(append().exitCode).toBe(0);
+
+    expect(readJsonl(newQueue)).toEqual([{ role: 'user', content: 'earlier', ts: 0 }, row]);
+    expect(fs.existsSync(path.join(devflow, 'learning'))).toBe(false);
+  });
+
+  it('a dangling link at the old name counts as present: nothing is made where it points, and no new folder is made', () => {
+    const created = path.join(tmpDir, 'created-through-the-link');
+    fs.mkdirSync(devflow);
+    fs.symlinkSync(created, path.join(devflow, 'learning'));
+
+    const { exitCode, stderr } = append();
+
+    expect(exitCode, stderr).toBe(0);
+    expect(fs.existsSync(created)).toBe(false);
+    expect(fs.existsSync(path.join(devflow, 'curation'))).toBe(false);
+  });
+
+  it('the old folder moved away between the probe and the append: the row lands once in the new folder, and the old folder is not made again', () => {
+    fs.mkdirSync(path.dirname(oldQueue), { recursive: true });
+    fs.writeFileSync(oldQueue, '', { mode: 0o600 });
+
+    // The probe answers with the old folder, then the move takes it away, as it would
+    // between the hook's probe and its append.
+    const { exitCode, stderr } = append(`
+      eval "_probed_$(declare -f df_ledger_queue)"
+      df_ledger_queue() { _probed_df_ledger_queue "$@"; rm -rf "${path.join(devflow, 'learning')}"; }
+    `);
+
+    expect(exitCode, stderr).toBe(0);
+    expect(readJsonl(newQueue)).toEqual([row]);
+    expect(fs.existsSync(path.join(devflow, 'learning')), 'the old folder stays gone').toBe(false);
+  });
+
+  it('the memory queue is not redirected, whichever ledger folder exists', () => {
+    const memoryQueue = path.join(devflow, 'memory', '.pending-turns.jsonl');
+    fs.mkdirSync(path.join(devflow, 'learning'), { recursive: true });
+
+    const { exitCode, stderr } = runWithQueueAppend(`queue_append_row "${root}" "${memoryQueue}" "user" "we chose X over Y" "1"`);
+
+    expect(exitCode, stderr).toBe(0);
+    expect(readJsonl(memoryQueue)).toEqual([row]);
+    expect(fs.existsSync(oldQueue)).toBe(false);
+  });
 });
 
 /**

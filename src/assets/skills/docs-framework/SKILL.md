@@ -64,7 +64,7 @@ All generated documentation lives under `.devflow/docs/` at the checkout's tople
 ├── WORKING-MEMORY.md                   # Auto-maintained by Stop hook (overwritten)
 └── backup.json                         # Pre-compact git state snapshot
 
-.devflow/learning/
+.devflow/curation/
 ├── decisions.md                        # Architectural decisions (ADR-NNN format)
 └── pitfalls.md                         # Known pitfalls (PF-NNN format)
 ```

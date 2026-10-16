@@ -3,7 +3,7 @@
 // The one-time ledger move: moveLedger renames a project's old ledger folder to
 // the new name, or merges it into a new folder that already exists, and
 // sweepLedgerBackups merges what is left in the backup the move leaves behind.
-// Both live in the learning store (hooks/lib/learning-store.cjs) and take the
+// Both live in the learning store (hooks/lib/curation-store.cjs) and take the
 // folder names as arguments, so nothing here depends on the path helpers' current
 // folder. Every test builds its own project and its own machine directory in a
 // temp tree: nothing reads or writes the real HOME or a real project.
@@ -846,7 +846,7 @@ describe('moveLedger — an interrupted set move resumes from its journal (TP-40
     expect(exists(path.join(backup, JOURNAL))).toBe(false);
     expect(exists(path.join(site.newDir, JOURNAL))).toBe(false);
     const after = store.withDecisionsLock('put-observation', site.root, () => ({ ok: true, value: null }));
-    expect(!after.ok && after.error.kind).toBe('no-learning-dir');
+    expect(after.ok).toBe(true);
   });
 
   it('a resume does not decide the winner again: the log that moved in does not make the new folder win', () => {

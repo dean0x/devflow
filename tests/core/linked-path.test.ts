@@ -29,7 +29,7 @@ afterEach(async () => {
 });
 
 const devflow = (): string => path.join(root, '.devflow');
-const learning = (): string => path.join(root, '.devflow', 'learning');
+const learning = (): string => path.join(root, '.devflow', 'curation');
 
 describe('firstSymbolicLink (D-CLI-NO-SYMLINK)', () => {
   it('is null when nothing stands at any path', async () => {

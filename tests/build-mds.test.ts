@@ -627,7 +627,7 @@ describe('silent-migration guards: no escape leak and no lost helper expansion i
 // ---------------------------------------------------------------------------
 
 describe('decisions_load adoption in compiled knowledge command outputs', () => {
-  it('all 9 knowledge command outputs contain the .devflow/learning/index.md read (decisions_load expansion)', async () => {
+  it('all 9 knowledge command outputs contain the .devflow/curation/index.md read (decisions_load expansion)', async () => {
     let scanned = 0;
     for (const basename of KNOWLEDGE_HOSTS) {
       const outputPath = path.join(BUILT_COMMANDS, `${basename}.md`);
@@ -641,8 +641,8 @@ describe('decisions_load adoption in compiled knowledge command outputs', () => 
       scanned++;
       expect(
         content,
-        `${DIST_COMMANDS}/${basename}.md must contain .devflow/learning/index.md (decisions_load expansion)`,
-      ).toContain('.devflow/learning/index.md');
+        `${DIST_COMMANDS}/${basename}.md must contain .devflow/curation/index.md (decisions_load expansion)`,
+      ).toContain('.devflow/curation/index.md');
     }
     expect(scanned, 'scanned zero dist commands — guard is vacuous').toBeGreaterThan(0);
   });
@@ -672,7 +672,7 @@ describe('decisions_load adoption in compiled knowledge command outputs', () => 
   // Named collector, shared by the live scan and the known-bad probe below.
   const GATE_SENTENCE = 'When the settings line says `CURATION=off`';
   const LOCATE_CALL = 'rev-parse --path-format=absolute --show-toplevel --git-common-dir';
-  const INDEX_READ = '/.devflow/learning/index.md`';
+  const INDEX_READ = '/.devflow/curation/index.md`';
 
   function collectGateOrderProblems(basename: string, content: string): string[] {
     const gate = content.indexOf(GATE_SENTENCE);

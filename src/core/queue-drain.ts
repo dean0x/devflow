@@ -2,7 +2,7 @@
  * @file queue-drain.ts
  *
  * `drainQueueFiles`, the delete the queue drains share — `drainLearningQueue`
- * (learning-queue-cleanup.ts) and `drainMemoryQueue` (cli/commands/memory.ts) —
+ * (curation-queue-cleanup.ts) and `drainMemoryQueue` (cli/commands/memory.ts) —
  * and `formatRefusedDrain`, the line the CLI prints for a drain it refused.
  */
 
@@ -35,6 +35,6 @@ export async function drainQueueFiles(folders: readonly string[], files: readonl
 }
 
 /** The warning for a drain refused at `linkedFolder`: which queue kept its files, and why. */
-export function formatRefusedDrain(queue: 'learning' | 'memory', linkedFolder: string): string {
+export function formatRefusedDrain(queue: 'curation' | 'memory', linkedFolder: string): string {
   return `The ${queue} queue was not drained: ${linkedFolder} is a symbolic link, and devflow deletes nothing through one`;
 }

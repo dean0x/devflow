@@ -46,7 +46,7 @@ You receive from orchestrator:
 - **TASK_DESCRIPTION**: What was implemented
 - **FILES_CHANGED**: List of modified files from Code agent output
 <!-- curation:on -->
-- **DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this repository (pre-rendered to `.devflow/learning/index.md` in its main worktree). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.
+- **DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this repository (pre-rendered to `.devflow/curation/index.md` in its main worktree). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.
 <!-- curation:end -->
 - **FEATURE_KNOWLEDGE** (optional): Per KB, the Rules bullets and the KB path, with no heading index, for pattern compliance checking. Check implementation against each bullet's anti-pattern, gotcha or invariant; Read a KB section from its path for more. Follow `devflow:apply-feature-knowledge`.
 

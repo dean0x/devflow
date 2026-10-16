@@ -2,7 +2,7 @@
 //
 // Shared fixtures for the v2 learning tests: row factories for the v2 and v1
 // shapes, a learning-tree seeder, a git repository builder and a json-helper
-// runner. Every learning test that seeds a `.devflow/learning/` tree, builds a
+// runner. Every learning test that seeds a `.devflow/curation/` tree, builds a
 // repository or spawns json-helper.cjs takes them from here, so the row shapes
 // the store, the ops and the renderer are tested on stay one definition.
 //
@@ -17,7 +17,7 @@ import * as path from 'path';
 
 export const ROOT = path.resolve(import.meta.dirname, '../..');
 export const JSON_HELPER = path.join(ROOT, 'src/assets/scripts/hooks/json-helper.cjs');
-export const LEARNING_STORE = path.join(ROOT, 'src/assets/scripts/hooks/lib/learning-store.cjs');
+export const LEARNING_STORE = path.join(ROOT, 'src/assets/scripts/hooks/lib/curation-store.cjs');
 
 export type Row = Record<string, unknown>;
 
@@ -141,7 +141,7 @@ export interface LearningTreePaths {
 
 /** The learning-tree paths under project root `dir` (nothing is created). */
 export function learningPaths(dir: string): LearningTreePaths {
-  const learningDir = path.join(dir, '.devflow', 'learning');
+  const learningDir = path.join(dir, '.devflow', 'curation');
   return {
     learningDir,
     log: path.join(learningDir, 'decisions-log.jsonl'),
@@ -158,7 +158,7 @@ export function toJsonl(rows: readonly Row[]): string {
 }
 
 /**
- * Create `<dir>/.devflow/learning/` and write each given file as JSONL. A file
+ * Create `<dir>/.devflow/curation/` and write each given file as JSONL. A file
  * left out is not created, so a test can seed a tree with no ledger or no archive.
  */
 export function seedLearningTree(

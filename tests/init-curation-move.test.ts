@@ -2,26 +2,37 @@
 //
 // The init step that moves each project's ledger folder to the curation name
 // (src/cli/commands/init-curation-move.ts). The step takes its path probes, its
-// store seam and its clock as parameters, so every test here injects fakes: no
-// test touches a real folder, the real HOME or the real store. Nothing in
-// init.ts calls the step yet; these tests are its only caller.
+// store seam and its clock as parameters, so most tests here inject fakes. The one
+// group that uses the real store (TP-37) works in a temp directory and sets HOME
+// to it; no test touches the real HOME or a real project.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
+import { promises as fs } from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import {
   moveProjectLedgers,
+  moveLedgerRoot,
+  moveGlobalTuningFile,
+  runInitCurationMove,
+  describeOutcome,
+  moveNotice,
   MOVE_POOL_LIMIT,
+  type GlobalTuningMoveIO,
+  type RenameIfAbsentResult,
+  type TuningPathKind,
   type ProjectLedgerMoveIO,
   type ProjectLedgerMoveOptions,
   type ProjectLedgerMoveReport,
   type ProjectLedgerMoveResult,
 } from '../src/cli/commands/init-curation-move.js';
+import { loadLearningStore } from '../src/core/curation-store.js';
 import type {
   LearningStoreResult,
   LedgerMoveOptions,
   LedgerMoveOutcome,
   LedgerSweepOutcome,
-} from '../src/core/learning-store.js';
+} from '../src/core/curation-store.js';
 
 const HOME = '/home/dean';
 const MACHINE = '/home/dean/.devflow';
@@ -423,5 +434,261 @@ describe('moveProjectLedgers: the bound and the arguments', () => {
     const before = JSON.stringify(opts);
     await moveProjectLedgers(opts, io);
     expect(JSON.stringify(opts)).toBe(before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The shared single-root move (configure and the toggles)
+// ---------------------------------------------------------------------------
+
+describe('moveLedgerRoot: the move one root gets from configure and the toggles', () => {
+  const names = { homeDir: HOME, machineDir: MACHINE, oldName: OLD, newName: NEW };
+
+  it('asks the store once for that root and reports the outcome', async () => {
+    const { io, rec } = fakeIO({ moves: { '/w/a': ok(MOVED) } });
+    const outcome = await moveLedgerRoot('/w/a', names, io);
+    expect(outcome).toMatchObject({ kind: 'moved', root: '/w/a', mode: 'whole-folder' });
+    expect(rec.order).toEqual(['move:/w/a']);
+    expect(rec.moveArgs[0].opts).toEqual({ oldName: OLD, newName: NEW, machineDir: MACHINE, homeDir: HOME, now: NOW });
+  });
+
+  it('reports a busy lock as busy, with no wait and no sweep', async () => {
+    const { io, rec } = fakeIO({ moves: { '/w/a': ok(BUSY) }, devflowEntries: { '/w/a': ['learning.backup-x'] } });
+    expect(await moveLedgerRoot('/w/a', names, io)).toEqual({ kind: 'busy', root: '/w/a' });
+    expect(rec.order).toEqual(['move:/w/a']);
+  });
+
+  it('reports a link as refused and an I/O failure as an error', async () => {
+    const { io } = fakeIO({
+      moves: { '/w/l': fail('refused', 'a link'), '/w/e': fail('error', 'EACCES') },
+    });
+    expect(await moveLedgerRoot('/w/l', names, io)).toMatchObject({ kind: 'refused', message: 'a link' });
+    expect(await moveLedgerRoot('/w/e', names, io)).toMatchObject({ kind: 'error', message: 'EACCES' });
+  });
+
+  it('turns a store call that throws into an error, never a throw', async () => {
+    const { io } = fakeIO({ moves: { '/w/a': () => { throw new Error('boom'); } } });
+    expect(await moveLedgerRoot('/w/a', names, io)).toEqual({ kind: 'error', root: '/w/a', message: 'boom' });
+  });
+
+  it('refuses bad names and calls nothing', async () => {
+    const { io, rec } = fakeIO();
+    expect(await moveLedgerRoot('/w/a', { ...names, newName: OLD }, io)).toMatchObject({ kind: 'error', root: '/w/a' });
+    expect(rec.order).toEqual([]);
+  });
+
+  it('sweeps a backup after a move, as init does', async () => {
+    const { io, rec } = fakeIO({ moves: { '/w/a': ok(MOVED) }, devflowEntries: { '/w/a': ['learning.backup-20260101'] } });
+    await moveLedgerRoot('/w/a', names, io);
+    expect(rec.order).toEqual(['move:/w/a', 'sweep:/w/a']);
+  });
+
+  it('describeOutcome gives a busy, refused or failed root one line and a clean move none', () => {
+    expect(describeOutcome({ kind: 'busy', root: '/w/a' })).toHaveLength(1);
+    expect(describeOutcome({ kind: 'refused', root: '/w/a', message: 'a link' })).toEqual([expect.stringContaining('refused')]);
+    expect(describeOutcome({ kind: 'error', root: '/w/a', message: 'x' })).toHaveLength(1);
+    expect(describeOutcome({ kind: 'unchanged', root: '/w/a', sweep: null })).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The global tuning file (TP-14)
+// ---------------------------------------------------------------------------
+
+describe('moveGlobalTuningFile (TP-14)', () => {
+  const OLD_FILE = path.join(MACHINE, 'learning.json');
+  const NEW_FILE = path.join(MACHINE, 'curation.json');
+
+  function fakeTuning(state: Record<string, TuningPathKind>, rename: RenameIfAbsentResult = { state: 'renamed' }) {
+    const calls: string[] = [];
+    const io: GlobalTuningMoveIO = {
+      kindOf: async (target) => state[target] ?? 'absent',
+      renameIfAbsent: async (from, to) => { calls.push(`${from} -> ${to}`); return rename; },
+    };
+    return { io, calls };
+  }
+
+  it('renames the old file when only the old name exists', async () => {
+    const { io, calls } = fakeTuning({ [OLD_FILE]: 'file' });
+    const report = await moveGlobalTuningFile(MACHINE, io);
+    expect(report.outcome).toEqual({ kind: 'renamed' });
+    expect(report.lines).toEqual([]);
+    expect(calls).toEqual([`${OLD_FILE} -> ${NEW_FILE}`]);
+  });
+
+  it('does nothing when there is no old file (the steady state), and probes nothing else', async () => {
+    const { io, calls } = fakeTuning({ [NEW_FILE]: 'file' });
+    const report = await moveGlobalTuningFile(MACHINE, io);
+    expect(report).toEqual({ outcome: { kind: 'none' }, lines: [] });
+    expect(calls).toEqual([]);
+  });
+
+  it('keeps the new name with both present, leaves the old file, and logs one line', async () => {
+    const { io, calls } = fakeTuning({ [OLD_FILE]: 'file', [NEW_FILE]: 'file' });
+    const report = await moveGlobalTuningFile(MACHINE, io);
+    expect(report.outcome).toEqual({ kind: 'kept-new' });
+    expect(report.lines).toHaveLength(1);
+    expect(report.lines[0]).toContain('learning.json');
+    expect(report.lines[0]).toContain('curation.json');
+    expect(calls).toEqual([]);
+  });
+
+  it('reads a rename that finds the new name taken (a race) as the both-present case', async () => {
+    const { io } = fakeTuning({ [OLD_FILE]: 'file' }, { state: 'exists' });
+    const report = await moveGlobalTuningFile(MACHINE, io);
+    expect(report.outcome).toEqual({ kind: 'kept-new' });
+    expect(report.lines).toHaveLength(1);
+  });
+
+  it('leaves a link or a directory under the old name alone, with one line', async () => {
+    const { io, calls } = fakeTuning({ [OLD_FILE]: 'other' });
+    const report = await moveGlobalTuningFile(MACHINE, io);
+    expect(report.outcome).toEqual({ kind: 'left-alone' });
+    expect(report.lines).toHaveLength(1);
+    expect(calls).toEqual([]);
+  });
+
+  it('reports a failed rename as one line that says the next init tries again', async () => {
+    const { io } = fakeTuning({ [OLD_FILE]: 'file' }, { state: 'failed', message: 'EACCES' });
+    const report = await moveGlobalTuningFile(MACHINE, io);
+    expect(report.outcome).toEqual({ kind: 'error', message: 'EACCES' });
+    expect(report.lines[0]).toContain('EACCES');
+    expect(report.lines[0]).toContain('next init');
+  });
+
+  it('turns a probe or a rename that throws into an error outcome, never a throw', async () => {
+    const throwingProbe: GlobalTuningMoveIO = { kindOf: async () => { throw new Error('x'); }, renameIfAbsent: async () => ({ state: 'renamed' }) };
+    expect((await moveGlobalTuningFile(MACHINE, throwingProbe)).outcome.kind).toBe('error');
+    const throwingRename: GlobalTuningMoveIO = { kindOf: async (t) => (t === OLD_FILE ? 'file' : 'absent'), renameIfAbsent: async () => { throw new Error('y'); } };
+    expect((await moveGlobalTuningFile(MACHINE, throwingRename)).outcome).toEqual({ kind: 'error', message: 'y' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The whole init step (TP-8, caller)
+// ---------------------------------------------------------------------------
+
+describe('runInitCurationMove: the lines and the notice init prints', () => {
+  const quietTuning: GlobalTuningMoveIO = { kindOf: async () => 'absent', renameIfAbsent: async () => ({ state: 'renamed' }) };
+
+  it('prints nothing when nothing moved', async () => {
+    const { io } = fakeIO();
+    const report = await runInitCurationMove(options({ projectRoots: ['/w/a'] }), { ledger: io, tuning: quietTuning });
+    expect(report).toEqual({ lines: [], notice: null, movedCount: 0 });
+  });
+
+  it('prints the move notice once, however many projects moved', async () => {
+    const { io } = fakeIO({ moves: { '/w/a': ok(MOVED), '/w/b': ok(MOVED), '/w/c': ok(MOVED) } });
+    const report = await runInitCurationMove(options({ projectRoots: ['/w/a', '/w/b', '/w/c'] }), { ledger: io, tuning: quietTuning });
+    expect(report.movedCount).toBe(3);
+    expect(report.notice).toBe(moveNotice(3));
+    expect(report.notice).toContain('3 projects');
+    expect(report.notice).toContain('.devflow/learning/');
+    expect(report.notice).toContain('.devflow/curation/');
+    expect(report.lines).toEqual([]);
+  });
+
+  it('says "1 project" for one', () => {
+    expect(moveNotice(1)).toContain('1 project ');
+    expect(moveNotice(1)).not.toContain('projects');
+  });
+
+  it('puts the tuning-file line first, then one line per project that did not move, and keeps the exit code out of it', async () => {
+    const { io } = fakeIO({ moves: { '/w/a': ok(BUSY), '/w/b': fail('refused', 'a link'), '/w/c': ok(MOVED) } });
+    const bothTuning: GlobalTuningMoveIO = { kindOf: async () => 'file', renameIfAbsent: async () => ({ state: 'renamed' }) };
+    const report = await runInitCurationMove(options({ projectRoots: ['/w/a', '/w/b', '/w/c'] }), { ledger: io, tuning: bothTuning });
+    expect(report.lines).toHaveLength(3);
+    expect(report.lines[0]).toContain('curation.json');
+    expect(report.lines[1]).toContain('/w/a');
+    expect(report.lines[2]).toContain('/w/b');
+    expect(report.movedCount).toBe(1);
+    expect(report.notice).not.toBeNull();
+  });
+
+  it('turns bad options into one line and does not throw', async () => {
+    const { io, rec } = fakeIO();
+    const report = await runInitCurationMove(options({ newName: OLD }), { ledger: io, tuning: quietTuning });
+    expect(report.lines).toHaveLength(1);
+    expect(report.notice).toBeNull();
+    expect(rec.order).toEqual([]);
+  });
+
+  it('renames the tuning file even when there is no project to move', async () => {
+    const calls: string[] = [];
+    const tuning: GlobalTuningMoveIO = {
+      kindOf: async (t) => (t.endsWith('learning.json') ? 'file' : 'absent'),
+      renameIfAbsent: async (from, to) => { calls.push(`${path.basename(from)}>${path.basename(to)}`); return { state: 'renamed' }; },
+    };
+    const { io } = fakeIO();
+    await runInitCurationMove(options(), { ledger: io, tuning });
+    expect(calls).toEqual(['learning.json>curation.json']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Two movers on one root, under two spellings (TP-37), with the real store
+// ---------------------------------------------------------------------------
+
+describe('moveProjectLedgers with the real store: init and a session start meet at one lock (TP-37)', () => {
+  let tmp: string | null = null;
+  afterEach(async () => {
+    if (tmp !== null) await fs.rm(tmp, { recursive: true, force: true });
+    tmp = null;
+  });
+
+  it('skips a root whose move lock another mover holds, reached through a link spelling, with no wait', async () => {
+    const loaded = loadLearningStore();
+    if (!loaded.ok) throw new Error('the store must load');
+    const store = loaded.value;
+    tmp = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'df-move-tp37-')));
+    const home = path.join(tmp, 'home');
+    const machine = path.join(home, '.devflow');
+    const parent = path.join(tmp, 'work');
+    const repo = path.join(parent, 'repo');
+    await fs.mkdir(path.join(repo, '.devflow', 'learning'), { recursive: true });
+    await fs.writeFile(path.join(repo, '.devflow', 'learning', 'decisions-ledger.jsonl'), '{"anchor_id":"ADR-001"}\n');
+    await fs.mkdir(machine, { recursive: true });
+    // A second spelling of the same root: a link ABOVE it (a link AT the root is refused by design).
+    const parentLink = path.join(tmp, 'work-link');
+    await fs.symlink(parent, parentLink);
+    const spelling = path.join(parentLink, 'repo');
+
+    // The other mover (a session start) holds the lock under the physical spelling.
+    const key = store.curationMoveLockKey(repo);
+    const lockDir = path.join(machine, `.curation-move-${key}.lock`);
+    await fs.mkdir(lockDir);
+
+    const io: ProjectLedgerMoveIO = {
+      ledgerRootOf: async (project) => project,
+      realpath: async (target) => fs.realpath(target).catch(() => null),
+      readdir: async (dir) => fs.readdir(dir).catch(() => null),
+      store,
+      now: () => Date.now(),
+    };
+    const started = Date.now();
+    const result = await moveProjectLedgers(
+      { projectRoots: [spelling], ownLedgerRoot: null, homeDir: home, machineDir: machine, oldName: OLD, newName: NEW },
+      io,
+    );
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(reportOf(result).outcomes).toEqual([{ kind: 'busy', root: spelling }]);
+    // Nothing moved: the old folder is whole and no new folder exists.
+    await expect(fs.stat(path.join(repo, '.devflow', 'learning', 'decisions-ledger.jsonl'))).resolves.toBeDefined();
+    await expect(fs.stat(path.join(repo, '.devflow', 'curation'))).rejects.toMatchObject({ code: 'ENOENT' });
+
+    // With the lock released, the same init moves it, and a second pass is a no-op.
+    await fs.rmdir(lockDir);
+    const moved = await moveProjectLedgers(
+      { projectRoots: [spelling, repo], ownLedgerRoot: null, homeDir: home, machineDir: machine, oldName: OLD, newName: NEW },
+      io,
+    );
+    expect(reportOf(moved).outcomes.map(o => o.kind)).toEqual(['moved']);
+    expect(await fs.readFile(path.join(repo, '.devflow', 'curation', 'decisions-ledger.jsonl'), 'utf-8')).toBe('{"anchor_id":"ADR-001"}\n');
+    await expect(fs.stat(path.join(repo, '.devflow', 'learning'))).rejects.toMatchObject({ code: 'ENOENT' });
+    const again = await moveProjectLedgers(
+      { projectRoots: [spelling, repo], ownLedgerRoot: null, homeDir: home, machineDir: machine, oldName: OLD, newName: NEW },
+      io,
+    );
+    expect(reportOf(again).outcomes.map(o => o.kind)).toEqual(['unchanged']);
   });
 });

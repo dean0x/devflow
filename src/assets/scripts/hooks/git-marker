@@ -182,9 +182,8 @@ df_ledger_queue() {
 # df_global_tuning_file <machine_dir> — sets DF_GLOBAL_TUNING_FILE to the global
 # curate-agent tuning file inside the machine directory (~/.devflow). The shell
 # twin of getGlobalCurateTuningConfigPath in src/core/project-paths.ts: the one
-# place a hook names the file, so the rename flips one name here and one there.
-# It still names the old file. Zero forks; returns 0.
+# place a hook names the file. Zero forks; returns 0.
 df_global_tuning_file() {
-  DF_GLOBAL_TUNING_FILE="$1/learning.json"
+  DF_GLOBAL_TUNING_FILE="$1/curation.json"
   return 0
 }

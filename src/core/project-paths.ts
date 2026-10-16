@@ -26,9 +26,9 @@ export function getMemoryDir(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'memory');
 }
 
-/** .devflow/learning/ — learning state root */
+/** .devflow/curation/ — curation state root */
 export function getLearningDir(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning');
+  return path.join(projectRoot, '.devflow', 'curation');
 }
 
 /** .devflow/features/ — per-feature knowledge bases */
@@ -69,11 +69,10 @@ export const CURATION_TUNING_FILE_NAME = 'curation.json';
  * The global curate-agent tuning file inside the machine directory (`~/.devflow`).
  * The one place that names it: the configure writer, the TypeScript reader, the
  * shell reader (`df_global_tuning_file` in the hooks' git-marker library) and the
- * global-file lists all come through here, so the rename flips one constant. It still
- * returns the old file name.
+ * global-file lists all come through here.
  */
 export function getGlobalCurateTuningConfigPath(machineDir: string): string {
-  return path.join(machineDir, LEGACY_NAMES.tuningFile);
+  return path.join(machineDir, CURATION_TUNING_FILE_NAME);
 }
 
 /** Letters and digits: the bytes the move marker key keeps as they are. */
@@ -108,7 +107,7 @@ export function curationMoveMarkerKey(projectRoot: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Feature config (neutral .devflow root — not inside learning/)
+// Feature config (neutral .devflow root — not inside curation/)
 // ---------------------------------------------------------------------------
 
 /** .devflow/config.json — per-repo facts {reviewPublication, tracker override} */
@@ -120,68 +119,68 @@ export function getFeatureConfigPath(projectRoot: string): string {
 // Learning queue files
 // ---------------------------------------------------------------------------
 
-/** .devflow/learning/.pending-turns.jsonl — decisions detection queue */
+/** .devflow/curation/.pending-turns.jsonl — decisions detection queue */
 export function getLearningPendingTurnsPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', '.pending-turns.jsonl');
+  return path.join(projectRoot, '.devflow', 'curation', '.pending-turns.jsonl');
 }
 
-/** .devflow/learning/.pending-turns.processing — the claimed batch a Curate run holds while it processes it */
+/** .devflow/curation/.pending-turns.processing — the claimed batch a Curate run holds while it processes it */
 export function getLearningPendingTurnsProcessingPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', '.pending-turns.processing');
+  return path.join(projectRoot, '.devflow', 'curation', '.pending-turns.processing');
 }
 
-/** .devflow/learning/.pending-turns.owner — the token of the run that holds the claim (learning-store.cjs) */
+/** .devflow/curation/.pending-turns.owner — the token of the run that holds the claim (curation-store.cjs) */
 export function getLearningClaimOwnerPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', '.pending-turns.owner');
+  return path.join(projectRoot, '.devflow', 'curation', '.pending-turns.owner');
 }
 
 // ---------------------------------------------------------------------------
 // Learning content files
 // ---------------------------------------------------------------------------
 
-/** .devflow/learning/decisions.md */
+/** .devflow/curation/decisions.md */
 export function getDecisionsFilePath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', 'decisions.md');
+  return path.join(projectRoot, '.devflow', 'curation', 'decisions.md');
 }
 
-/** .devflow/learning/pitfalls.md */
+/** .devflow/curation/pitfalls.md */
 export function getPitfallsFilePath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', 'pitfalls.md');
+  return path.join(projectRoot, '.devflow', 'curation', 'pitfalls.md');
 }
 
-/** .devflow/learning/learning.json — project-level curate agent tuning config */
+/** .devflow/curation/curation.json — project-level curate agent tuning config */
 export function getCurateTuningConfigPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', 'learning.json');
+  return path.join(projectRoot, '.devflow', 'curation', 'curation.json');
 }
 
-/** .devflow/learning/decisions-ledger.jsonl — anchored ledger rows (single source of truth for rendering) */
+/** .devflow/curation/decisions-ledger.jsonl — anchored ledger rows (single source of truth for rendering) */
 export function getDecisionsLedgerPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', 'decisions-ledger.jsonl');
+  return path.join(projectRoot, '.devflow', 'curation', 'decisions-ledger.jsonl');
 }
 
-/** .devflow/learning/decisions-log.jsonl */
+/** .devflow/curation/decisions-log.jsonl */
 export function getDecisionsLogPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', 'decisions-log.jsonl');
+  return path.join(projectRoot, '.devflow', 'curation', 'decisions-log.jsonl');
 }
 
-/** .devflow/learning/decisions-log.archive.jsonl — rotated-out stale observing rows (gitignored) */
+/** .devflow/curation/decisions-log.archive.jsonl — rotated-out stale observing rows (gitignored) */
 export function getDecisionsArchivePath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', 'decisions-log.archive.jsonl');
+  return path.join(projectRoot, '.devflow', 'curation', 'decisions-log.archive.jsonl');
 }
 
-/** .devflow/learning/decisions-history.jsonl — prior content versions of rewritten entries (learning-store.cjs) */
+/** .devflow/curation/decisions-history.jsonl — prior content versions of rewritten entries (curation-store.cjs) */
 export function getDecisionsHistoryPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', 'decisions-history.jsonl');
+  return path.join(projectRoot, '.devflow', 'curation', 'decisions-history.jsonl');
 }
 
-/** .devflow/learning/.decisions.lock — mkdir-based lock directory */
+/** .devflow/curation/.decisions.lock — mkdir-based lock directory */
 export function getDecisionsLockDir(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', '.decisions.lock');
+  return path.join(projectRoot, '.devflow', 'curation', '.decisions.lock');
 }
 
-/** .devflow/learning/index.md — pre-rendered compact index written by render-decisions.cjs */
+/** .devflow/curation/index.md — pre-rendered compact index written by render-decisions.cjs */
 export function getDecisionsIndexPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', 'index.md');
+  return path.join(projectRoot, '.devflow', 'curation', 'index.md');
 }
 
 // ---------------------------------------------------------------------------

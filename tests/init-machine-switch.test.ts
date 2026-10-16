@@ -21,7 +21,7 @@ function fullInstall(): ManifestData {
     scope: 'user',
     knownPlugins: ['devflow-implement', 'devflow-code-review'],
     features: {
-      ambient: true, memory: true, hud: false, knowledge: true, learning: true, rules: true,
+      ambient: true, memory: true, hud: false, knowledge: true, curation: true, rules: true,
       flags: { tui: true }, security: 'user', proxy: true,
       compliance: { enabled: true, frameworks: ['gdpr'] },
       tracker: { provider: 'jira' },
@@ -57,7 +57,7 @@ describe('buildHudOnlyManifest', () => {
       scope: 'user',
       installedAt: NOW,
       updatedAt: NOW,
-      features: { hud: true, ambient: false, memory: false, learning: false, knowledge: false, rules: false, proxy: false },
+      features: { hud: true, ambient: false, memory: false, curation: false, knowledge: false, rules: false, proxy: false },
     });
     expect(result.features.tracker.provider).toBe('github');
     expect(result.features.compliance).toEqual({ enabled: false, frameworks: [] });
@@ -187,7 +187,7 @@ describe('drainDisabledFeatureQueues (D-INIT-DRAIN-AFTER-SWITCH)', () => {
     const refused = await drainDisabledFeatureQueues({ gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: false, learningEnabled: false, manifestWritten: true }, io);
     expect(refused).toEqual([
       expect.stringMatching(/memory queue.*\/repo\/\.devflow\/memory is a symbolic link/),
-      expect.stringMatching(/learning queue.*\/repo\/\.devflow is a symbolic link/),
+      expect.stringMatching(/curation queue.*\/repo\/\.devflow is a symbolic link/),
     ]);
   });
 
@@ -202,14 +202,14 @@ describe('drainDisabledFeatureQueues (D-INIT-DRAIN-AFTER-SWITCH)', () => {
       await fs.mkdir(outside);
       await fs.writeFile(queue, 'a file outside the project\n');
       await fs.symlink(outside, path.join(repo, '.devflow', 'memory'));
-      await fs.symlink(outside, path.join(repo, '.devflow', 'learning'));
+      await fs.symlink(outside, path.join(repo, '.devflow', 'curation'));
 
       const refused = await drainDisabledFeatureQueues({ gitRoot: repo, ledgerRoot: repo, memoryEnabled: false, learningEnabled: false, manifestWritten: true });
 
       expect(await fs.readFile(queue, 'utf-8'), 'nothing is deleted through either link').toBe('a file outside the project\n');
       expect(refused).toHaveLength(2);
       expect(refused[0]).toContain(`${path.join(repo, '.devflow', 'memory')} is a symbolic link`);
-      expect(refused[1]).toContain(`${path.join(repo, '.devflow', 'learning')} is a symbolic link`);
+      expect(refused[1]).toContain(`${path.join(repo, '.devflow', 'curation')} is a symbolic link`);
     } finally {
       vi.unstubAllEnvs();
       await fs.rm(tmp, { recursive: true, force: true });

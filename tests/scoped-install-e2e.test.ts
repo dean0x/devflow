@@ -67,7 +67,7 @@ function run(args: string[]): { status: number | null; stdout: string; stderr: s
 function init(extraArgs: string[] = []) {
   return run([
     'init', '--recommended',
-    '--no-ambient', '--no-memory', '--no-learning', '--no-knowledge', '--no-rules',
+    '--no-ambient', '--no-memory', '--no-curation', '--no-knowledge', '--no-rules',
     ...extraArgs,
   ]);
 }
@@ -312,7 +312,7 @@ describe('partial install and selective uninstall', () => {
 
     const partial = run([
       'init', '--recommended', '--plugin=devflow-typescript',
-      '--no-ambient', '--no-memory', '--no-learning', '--no-knowledge', '--no-rules',
+      '--no-ambient', '--no-memory', '--no-curation', '--no-knowledge', '--no-rules',
     ]);
     expect(partial.status, `--plugin install failed:\n${partial.stdout}\n${partial.stderr}`).toBe(0);
 

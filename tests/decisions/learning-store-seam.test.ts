@@ -2,7 +2,7 @@
 //
 // The CLI's view of the learning store (D-LEARNING-STORE-SEAM):
 // src/core/learning-store.ts loads the package's own
-// src/assets/scripts/hooks/lib/learning-store.cjs — the module json-helper's ops
+// src/assets/scripts/hooks/lib/curation-store.cjs — the module json-helper's ops
 // and the hooks run — through the evidence-policy seam's loadScript, shape-checks
 // its surface, and answers a Result for a missing or unusable module, never a
 // throw.
@@ -15,11 +15,11 @@ import * as path from 'path';
 
 import { scriptsDir } from '../../src/core/assets.js';
 import {
-  LEARNING_STORE_SCRIPT_NAME,
+  CURATION_STORE_SCRIPT_NAME,
   LEARNING_STORE_SURFACE,
   formatLearningStoreUnavailable,
   loadLearningStore,
-} from '../../src/core/learning-store.js';
+} from '../../src/core/curation-store.js';
 import { LEARNING_STORE, ROOT } from './learning-fixtures.js';
 
 const NODE_REQUIRE = createRequire(import.meta.url);
@@ -37,15 +37,15 @@ afterAll(() => {
 /** A scripts directory holding `content` where the store lives. */
 function scriptsDirWithStore(name: string, content: string): string {
   const dir = path.join(tmp, name);
-  const file = path.join(dir, LEARNING_STORE_SCRIPT_NAME);
+  const file = path.join(dir, CURATION_STORE_SCRIPT_NAME);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, content, 'utf8');
   return dir;
 }
 
 describe('loadLearningStore — the package copy, shape-checked, never a throw', () => {
-  it('loads join(scriptsDir(), hooks/lib/learning-store.cjs): the module the ops and the hooks run', () => {
-    const packageCopy = path.join(scriptsDir(), LEARNING_STORE_SCRIPT_NAME);
+  it('loads join(scriptsDir(), hooks/lib/curation-store.cjs): the module the ops and the hooks run', () => {
+    const packageCopy = path.join(scriptsDir(), CURATION_STORE_SCRIPT_NAME);
     expect(packageCopy).toBe(LEARNING_STORE);
     expect(packageCopy.startsWith(path.join(ROOT, 'src', 'assets', 'scripts'))).toBe(true);
 
@@ -82,7 +82,7 @@ describe('loadLearningStore — the package copy, shape-checked, never a throw',
     const loaded = loadLearningStore(empty);
     expect(loaded.ok).toBe(false);
     expect(!loaded.ok && loaded.error.kind).toBe('not-found');
-    expect(!loaded.ok && loaded.error.path).toBe(path.join(empty, LEARNING_STORE_SCRIPT_NAME));
+    expect(!loaded.ok && loaded.error.path).toBe(path.join(empty, CURATION_STORE_SCRIPT_NAME));
   });
 
   it('a store missing or mistyping surface keys ⇒ Err unusable naming each one', () => {
@@ -108,8 +108,8 @@ describe('loadLearningStore — the package copy, shape-checked, never a throw',
 
 describe('formatLearningStoreUnavailable', () => {
   it('says the store could not be used and names the reinstall remedy, for each error kind', () => {
-    const notFound = formatLearningStoreUnavailable({ kind: 'not-found', path: '/x/learning-store.cjs' });
-    const unusable = formatLearningStoreUnavailable({ kind: 'unusable', path: '/x/learning-store.cjs', detail: 'missing: readListing' });
+    const notFound = formatLearningStoreUnavailable({ kind: 'not-found', path: '/x/curation-store.cjs' });
+    const unusable = formatLearningStoreUnavailable({ kind: 'unusable', path: '/x/curation-store.cjs', detail: 'missing: readListing' });
     expect(notFound).toBe('learning store not found — reinstall devflow-kit');
     expect(unusable).toBe('learning store failed to load — reinstall devflow-kit');
   });

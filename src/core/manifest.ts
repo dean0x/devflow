@@ -51,12 +51,13 @@ export interface ManifestData {
     /** Absent (with no legacy `kb`) reads as true — D-FEATURES-ABSENT-ON in readManifest */
     knowledge: boolean;
     /**
-     * Renamed from decisions — self-healed from features.decisions on read.
-     * Absent (with no legacy `decisions`) reads as true — D-FEATURES-ABSENT-ON.
-     * A `features.curation` key on disk is read beside it and false wins; the
-     * key this field writes back is still `learning`.
+     * The curation switch, renamed from learning (and, before that, decisions).
+     * Absent (with no legacy key) reads as true — D-FEATURES-ABSENT-ON. On disk it is
+     * stored under TWO keys, `curation` and its pre-rename copy `learning`; a false in
+     * either reads off, and {@link writeManifest} writes both equal. The data model
+     * carries the one resolved value.
      */
-    learning: boolean;
+    curation: boolean;
     rules: boolean;
     /**
      * Typed flag state record (keyed by flag id).
@@ -206,8 +207,11 @@ export function hasRequiredManifestFields(data: Record<string, unknown>): boolea
  *
  * Self-heals the following on-disk inconsistencies:
  * - features.kb → features.knowledge rename (both absent → true, D-FEATURES-ABSENT-ON)
- * - features.decisions → features.learning rename (both absent → true, D-FEATURES-ABSENT-ON);
- *   `features.curation` is read beside `features.learning`, and false wins
+ * - the curation switch (features.curation beside its pre-rename copy features.learning,
+ *   and the oldest features.decisions) resolves by the machine rule — false in either
+ *   current key wins, both absent → true (D-FEATURES-ABSENT-ON) — and the heal writes
+ *   both current keys to the resolved value and drops `decisions`; a second read writes
+ *   nothing
  * - features.flags as string[] → FlagsRecord (via migrateLegacyFlagsToRecord)
  * - features.viewMode folded into flags['view-mode'] and stripped from result
  * - features.knownFlags stripped from result (folded into FlagsRecord key-presence)
@@ -252,16 +256,15 @@ export async function readManifest(
     const knowledge = typeof features.knowledge === 'boolean' ? features.knowledge
       : typeof features.kb === 'boolean' ? features.kb as boolean
       : true;
-    // Self-heal: rename features.decisions → features.learning on disk.
-    // Coalesce (#529): the learning switch is read under two current keys,
-    // `curation` and `learning`. A boolean false in either is off, a boolean true
-    // in either is on when neither is false, and the pre-rename
+    // Self-heal: the curation switch is stored under two current keys, `curation`
+    // and its pre-rename copy `learning` (#529). A boolean false in either is off, a
+    // boolean true in either is on when neither is false, and the pre-rename
     // features.decisions decides only when neither current key is a boolean;
     // default ON. isMachineFeatureOn IS that rule (D-LEARNING-LEGACY-DECISIONS),
     // and queue_read_gates and resolve-settings.cjs mirror it, so the legacy key
-    // is honoured before the heal lands and a disagreeing pair reads off. This
-    // read side writes nothing new: the key written back is still `learning`.
-    const learning = isMachineFeatureOn(data, 'learning');
+    // is honoured before the heal lands and a disagreeing pair reads off. The heal
+    // (needsHeal below) writes the resolved value to both current keys once.
+    const curation = isMachineFeatureOn(data, 'curation');
 
     // Self-heal: non-string-array or absent knownFlags/knownPlugins → undefined (never partial/garbage)
     const asStringArray = (val: unknown): string[] | undefined =>
@@ -281,10 +284,15 @@ export async function readManifest(
     // D39: sanitize all values; block prototype pollution keys.
     const sanitizedFlags = sanitizeFlagsRecord(parsedFlags);
 
-    // needsHeal when any legacy artifact is present on disk
+    // needsHeal when any legacy artifact is present on disk. The curation pair is a
+    // defect unless BOTH current keys are present and equal to the resolved value
+    // (a disagreeing pair, one key alone and neither key all heal); once healed,
+    // the pair holds and a second read writes nothing.
     const needsHeal =
       features.kb !== undefined ||
       features.decisions !== undefined ||
+      features.curation !== curation ||
+      features.learning !== curation ||
       flagsWereLegacy ||
       features.knownFlags !== undefined ||
       features.viewMode !== undefined ||
@@ -305,7 +313,7 @@ export async function readManifest(
         memory: features.memory as boolean,
         hud: typeof features.hud === 'boolean' ? features.hud : false,
         knowledge,
-        learning,
+        curation,
         rules: typeof features.rules === 'boolean' ? features.rules : true,
         flags: sanitizedFlags,
         // knownFlags and viewMode are NOT carried into the result.
@@ -364,8 +372,24 @@ export async function writeManifest(devflowDir: string, data: ManifestData): Pro
   await fs.mkdir(devflowDir, { recursive: true });
   const manifestPath = path.join(devflowDir, 'manifest.json');
   // D-MANIFEST-SCOPE-PINNED: every write records 'user', whatever the caller holds.
-  const pinned: ManifestData = { ...data, scope: 'user' };
+  // The manifest mirror (#529): the pre-rename key `learning` is written equal to
+  // `curation`, right after it, so every typed writer keeps the copy a 3.7.0 CLI reads.
+  const pinned = { ...data, scope: 'user' as const, features: withCurationMirror(data.features) };
   await writeFileAtomicExclusive(manifestPath, JSON.stringify(pinned, null, 2) + '\n');
+}
+
+/**
+ * `features` with the pre-rename key `learning` set equal to `curation`, placed right
+ * after it. Pure. Any `learning` the input carried is replaced, never kept.
+ */
+function withCurationMirror(features: ManifestData['features']): Record<string, unknown> {
+  const mirrored: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(features)) {
+    if (key === 'learning') continue;
+    mirrored[key] = value;
+    if (key === 'curation') mirrored.learning = value;
+  }
+  return mirrored;
 }
 
 /**

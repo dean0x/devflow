@@ -96,7 +96,7 @@ const TRACKER_SENTINEL = '<HOME>/.devflow/.tracker.enabled'
 const SKILL_SHADOWS = '<HOME>/.devflow/skills/**'
 const AGENT_MODELS = '<HOME>/.devflow/agent-models.json'
 const REPO_MEMORY = '<REPO>/.devflow/memory/**'
-const REPO_LEARNING = '<REPO>/.devflow/learning/**'
+const REPO_LEARNING = '<REPO>/.devflow/curation/**'
 
 const NONE: readonly string[] = []
 
@@ -146,8 +146,8 @@ const seedMemoryQueue = (sb: Sandbox): void =>
   seedFile(sb, '.devflow/memory/.pending-turns.jsonl', `${JSON.stringify({ role: 'user', content: 'fence', ts: 1 })}\n`)
 
 const seedLearningState = (sb: Sandbox): void => {
-  seedFile(sb, '.devflow/learning/decisions-log.jsonl', `${JSON.stringify({ id: 'obs_fence', type: 'decision' })}\n`)
-  seedFile(sb, '.devflow/learning/.pending-turns.jsonl', `${JSON.stringify({ role: 'user', content: 'fence', ts: 1 })}\n`)
+  seedFile(sb, '.devflow/curation/decisions-log.jsonl', `${JSON.stringify({ id: 'obs_fence', type: 'decision' })}\n`)
+  seedFile(sb, '.devflow/curation/.pending-turns.jsonl', `${JSON.stringify({ role: 'user', content: 'fence', ts: 1 })}\n`)
 }
 
 /** The fenced entry: a v2 pitfall, retired, with the observation it projects. */
@@ -163,11 +163,11 @@ const FENCE_CONTENT = {
 
 /** A retired entry and its observation, for --restore to bring back; --list and --show then read what it left. */
 const seedRetiredEntry = (sb: Sandbox): void => {
-  seedFile(sb, '.devflow/learning/decisions-log.jsonl', `${JSON.stringify({
+  seedFile(sb, '.devflow/curation/decisions-log.jsonl', `${JSON.stringify({
     schema: 2, id: 'obs_fence_entry', ...FENCE_CONTENT,
     observations: 1, first_seen: '2026-01-01T00:00:00.000Z', last_seen: '2026-01-01T00:00:00.000Z',
   })}\n`)
-  seedFile(sb, '.devflow/learning/decisions-ledger.jsonl', `${JSON.stringify({
+  seedFile(sb, '.devflow/curation/decisions-ledger.jsonl', `${JSON.stringify({
     schema: 2, id: 'obs_fence_entry', type: 'pitfall', anchor_id: FENCE_ENTRY, decisions_status: 'Retired',
     title: FENCE_CONTENT.title, rule: FENCE_CONTENT.rule, why: FENCE_CONTENT.why, scope: FENCE_CONTENT.scope,
     provenance: FENCE_CONTENT.provenance, date: '2026-01-01', status_note: 'fence', retired_on: '2026-01-02',

@@ -549,6 +549,28 @@ export function curationToggleSkew(installedVersion: string, runningVersion: str
 }
 
 /**
+ * The version-skew line for a command that writes curation data, or null when the
+ * installed scripts are the ones this CLI would write. A hook of another version
+ * reads and creates a different ledger folder, so such a command writes nothing until
+ * `devflow init` has run. Apart from the toggle's own check (`curationToggleSkew`,
+ * which also names the prompt variants): this line is for configure and the other
+ * mutating subcommands. The installed version is hand-editable file content, so it
+ * prints through `describeEchoedValue`.
+ */
+export async function installedScriptsSkew(devflowDir: string, packageRoot?: string): Promise<string | null> {
+  const manifest = await readManifest(devflowDir);
+  if (manifest === null) {
+    return 'No readable install manifest, so the installed scripts are not known. Run `devflow init` first. Nothing was written.';
+  }
+  const running = await readRunningVersion(packageRoot);
+  if (installedVersionMatches(manifest.version, running)) return null;
+  return (
+    `The installed scripts come from devflow ${describeEchoedValue(manifest.version)} and this CLI is ` +
+    `${running ?? 'of unknown version'}. Run \`devflow init\` first. Nothing was written.`
+  );
+}
+
+/**
  * What `devflow learning --enable/--disable` does after the switch is written:
  * converge the installed tree onto the new value, then reapply the saved agent
  * model and effort mapping.

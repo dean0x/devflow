@@ -97,7 +97,7 @@ Entry format before you run the op once more. A value with a bad shape (text tha
 one line, a scope with too many entries, a malformed glob) reports only that: fix the shape
 first, and expect its other problems on the retry. Any other refusal — a lock timeout, an
 entry whose state changed — means skip that item and name it in your summary, except
-`<op>: no .devflow/learning/ under <root> — run from the project root`: the inputs
+`<op>: no .devflow/curation/ under <root> — run from the project root`: the inputs
 vanished (Step 0).
 
 ## Step 0 — Claim the queue
@@ -112,7 +112,7 @@ cd "<project root>" && node "$HOME/.devflow/scripts/hooks/json-helper.cjs" claim
 - `none` — nothing is queued. Report "no pending decisions work" and finish.
 - A non-zero exit — stop and report its stderr line.
 
-The claim is `.devflow/learning/.pending-turns.processing`, and its owner token sits
+The claim is `.devflow/curation/.pending-turns.processing`, and its owner token sits
 beside it. claim-queue makes both and release-claim removes them: never create, move or
 delete either yourself.
 
@@ -121,17 +121,17 @@ Part 1 → Part 2 boundary and after each maintained entry, with one command tha
 proves the claim still exists:
 
 ```bash
-cd "<project root>" && touch -c .devflow/learning/.pending-turns.processing && test -f .devflow/learning/.pending-turns.processing
+cd "<project root>" && touch -c .devflow/curation/.pending-turns.processing && test -f .devflow/curation/.pending-turns.processing
 ```
 
 **Vanished inputs**: if that command fails, or an op answers
-`no .devflow/learning/ under <root>`, the user cleared or disabled learning mid-run. Stop
+`no .devflow/curation/ under <root>`, the user cleared or disabled learning mid-run. Stop
 without further writes and go straight to Finishing. Never recreate them.
 
 ## Inputs
 
 The claimed turns are the one input you read directly with your Read tool:
-`.devflow/learning/.pending-turns.processing`, one JSON row per line — `user`,
+`.devflow/curation/.pending-turns.processing`, one JSON row per line — `user`,
 `assistant` and `qa` turns. Read it in full, or its last 30 dialog-worthy entries when it
 is very large.
 
@@ -285,7 +285,7 @@ with the Read tool, and follow it for those entries.
    ```
 
    `released` is the normal end. `not-owner` means another run took the claim over; `gone`,
-   or a release refused with `no .devflow/learning/`, means learning was cleared or
+   or a release refused with `no .devflow/curation/`, means learning was cleared or
    disabled. Note either in your summary. Never delete, move or rewrite the claim or its
    owner file yourself: a run that crashes before this line leaves the claim for a later
    takeover, the correct outcome for a partial run.

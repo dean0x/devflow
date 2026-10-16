@@ -39,7 +39,7 @@ The orchestrator provides:
 **Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
 
 <!-- curation:on -->
-- **DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this repository (pre-rendered to `.devflow/learning/index.md` in its main worktree). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.
+- **DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this repository (pre-rendered to `.devflow/curation/index.md` in its main worktree). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.
 <!-- curation:end -->
 - **FEATURE_KNOWLEDGE** (optional): Per KB, the Rules bullets most relevant to the feature, the KB path and a heading index, for pattern-aware gap analysis. Read the indexed sections for the architecture you build on — design additions that fit existing structure. Follow `devflow:apply-feature-knowledge`.
 

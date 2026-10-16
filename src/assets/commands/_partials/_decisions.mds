@@ -64,7 +64,7 @@ Hand each agent that takes `DECISIONS_CONTEXT` a slice, not the whole index: the
 
 **Step 1 — Read the pre-rendered index:**
 
-Attempt to read `{ledger}/.devflow/learning/index.md`.
+Attempt to read `{ledger}/.devflow/curation/index.md`.
 
 - If the file exists and contains non-empty content: use that content as `DECISIONS_CONTEXT`.
 - If the file is absent or empty: set `DECISIONS_CONTEXT` to `(none)`.

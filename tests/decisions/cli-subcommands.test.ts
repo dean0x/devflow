@@ -58,6 +58,7 @@ vi.mock('@clack/prompts', () => ({
 import { getLedgerRoot } from '../../src/core/ledger-root.js';
 import { getDevFlowDirectory } from '../../src/targets/claude-code/claude-paths.js';
 import { learningCommand } from '../../src/cli/commands/learning.js';
+import { loadLearningStore } from '../../src/core/curation-store.js';
 import * as p from '@clack/prompts';
 import {
   getLearningPendingTurnsPath,
@@ -171,18 +172,69 @@ function queueFilesPresent(root: string): boolean[] {
     .map(file => fs.existsSync(file));
 }
 
-/** A scratch devflow root with an installed manifest — never the real one. */
-function makeMachineDevflowDir(): string {
+/** The version of the package under test: a manifest that records it is not skewed against this CLI. */
+const RUNNING_VERSION = (JSON.parse(
+  fs.readFileSync(path.join(import.meta.dirname, '../../package.json'), 'utf-8'),
+) as { version: string }).version;
+
+/**
+ * A scratch devflow root with an installed manifest — never the real one. The version
+ * defaults to one that differs from the running package (a skewed install); a test that
+ * needs matching installed scripts passes RUNNING_VERSION.
+ */
+function makeMachineDevflowDir(version = '2.0.0'): string {
   const devflowDir = makeTmpDir();
   fs.writeFileSync(path.join(devflowDir, 'manifest.json'), JSON.stringify({
-    version: '2.0.0', plugins: [], scope: 'user', features: { ambient: true, memory: true, learning: true },
+    version, plugins: [], scope: 'user', features: { ambient: true, memory: true, curation: true, learning: true },
     installedAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
   }));
   return devflowDir;
 }
 
+/** The two keys the curation switch is stored under, as the command left them. */
+function readSwitchKeys(dir: string): { curation: unknown; learning: unknown } {
+  const features = (JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf-8')) as {
+    features: Record<string, unknown>;
+  }).features;
+  return { curation: features.curation, learning: features.learning };
+}
+
+/**
+ * Seed a pre-rename ledger folder (`.devflow/learning/`): a ledger, a log and the pending
+ * queue. With `claimed` it also holds a Curate run's claim (the processing batch and its
+ * owner file); a fresh claim makes the move busy, so a test that moves leaves it out.
+ */
+function seedOldFolder(dir: string, claimed = false): string {
+  const old = path.join(dir, '.devflow', 'learning');
+  fs.mkdirSync(old, { recursive: true });
+  fs.writeFileSync(path.join(old, 'decisions-ledger.jsonl'), toJsonl(LEDGER));
+  fs.writeFileSync(path.join(old, 'decisions-log.jsonl'), toJsonl(LOG));
+  fs.writeFileSync(path.join(old, '.pending-turns.jsonl'), '{"role":"user"}\n');
+  if (claimed) {
+    fs.writeFileSync(path.join(old, '.pending-turns.processing'), '{"role":"user"}\n');
+    fs.writeFileSync(path.join(old, '.pending-turns.owner'), '0123456789abcdef\n');
+  }
+  return old;
+}
+
+/** Hold the move lock of `dir` as another mover would, under the machine directory. */
+function holdMoveLock(machineDir: string, dir: string): string {
+  const loaded = loadLearningStore();
+  if (!loaded.ok) throw new Error('the store must load');
+  const lock = path.join(machineDir, `.curation-move-${loaded.value.curationMoveLockKey(fs.realpathSync(dir))}.lock`);
+  fs.mkdirSync(lock);
+  return lock;
+}
+
 let root: string;
 let devflowDir: string;
+
+/** Re-install the scratch machine directory with a manifest that records the running version: matching scripts, no skew. */
+function useMatchingInstall(): void {
+  fs.rmSync(devflowDir, { recursive: true, force: true });
+  devflowDir = makeMachineDevflowDir(RUNNING_VERSION);
+  vi.mocked(getDevFlowDirectory).mockReturnValue(devflowDir);
+}
 
 beforeEach(() => {
   root = makeTmpDir();
@@ -539,7 +591,7 @@ describe('learning --clear', { timeout: 30_000 }, () => {
 // ---------------------------------------------------------------------------
 
 describe('learning --reset', { timeout: 30_000 }, () => {
-  it('removes .devflow/learning/ — entries, observations, the queue and its claim — and leaves the rest of .devflow/ alone', async () => {
+  it('removes .devflow/curation/ — entries, observations, the queue and its claim — and leaves the rest of .devflow/ alone', async () => {
     seedCorpus(root);
     seedQueue(root);
     fs.writeFileSync(path.join(root, '.devflow', 'config.json'), '{"features":{}}\n');
@@ -548,7 +600,7 @@ describe('learning --reset', { timeout: 30_000 }, () => {
 
     const run = await runLearning(['--reset']);
 
-    expect(run.success).toBe('Reset complete — removed .devflow/learning/ state.');
+    expect(run.success).toBe('Reset complete — removed .devflow/curation/ state.');
     expect(run.exitCode).toBe(0);
     expect(queueFilesPresent(root)).toEqual([false, false, false]);
     expect(fs.existsSync(learningPaths(root).learningDir)).toBe(false);
@@ -565,7 +617,7 @@ describe('learning --reset', { timeout: 30_000 }, () => {
     const run = await runLearning(['--reset']);
 
     expect(run.error).toBe('');
-    expect(run.success).toBe('Reset complete — removed .devflow/learning/ state.');
+    expect(run.success).toBe('Reset complete — removed .devflow/curation/ state.');
     expect(run.exitCode).toBe(0);
     expect(fs.existsSync(paths.learningDir)).toBe(false);
   });
@@ -586,7 +638,7 @@ describe('learning --reset', { timeout: 30_000 }, () => {
     expect(snapshotTree(root)).toEqual(before);
   });
 
-  it('when .devflow/learning is a symbolic link: exit 1, and nothing the link leads to is removed', async () => {
+  it('when .devflow/curation is a symbolic link: exit 1, and nothing the link leads to is removed', async () => {
     const { learningDir } = learningPaths(root);
     const elsewhere = path.join(root, 'elsewhere');
     fs.mkdirSync(path.join(elsewhere, 'sub'), { recursive: true });
@@ -607,9 +659,9 @@ describe('learning --reset', { timeout: 30_000 }, () => {
   it('when .devflow is a symbolic link: exit 1, and nothing in the learning folder the link leads to is removed', async () => {
     const linkedDevflow = path.join(root, '.devflow');
     const elsewhere = path.join(root, 'elsewhere');
-    fs.mkdirSync(path.join(elsewhere, 'learning'), { recursive: true });
-    fs.writeFileSync(path.join(elsewhere, 'learning', 'decisions-log.jsonl'), 'kept\n');
-    fs.writeFileSync(path.join(elsewhere, 'learning', 'notes.txt'), 'kept\n');
+    fs.mkdirSync(path.join(elsewhere, 'curation'), { recursive: true });
+    fs.writeFileSync(path.join(elsewhere, 'curation', 'decisions-log.jsonl'), 'kept\n');
+    fs.writeFileSync(path.join(elsewhere, 'curation', 'notes.txt'), 'kept\n');
     fs.symlinkSync(elsewhere, linkedDevflow);
     const before = snapshotTree(elsewhere);
 
@@ -621,7 +673,7 @@ describe('learning --reset', { timeout: 30_000 }, () => {
     expect(snapshotTree(elsewhere)).toEqual(before);
   });
 
-  it('in a project that never had learning data: says so, exits 0 and creates nothing, neither .devflow/ nor .devflow/learning/', async () => {
+  it('in a project that never had learning data: says so, exits 0 and creates nothing, neither .devflow/ nor .devflow/curation/', async () => {
     const run = await runLearning(['--reset']);
 
     expect(run.info).toBe('No learning data to reset.');
@@ -665,13 +717,14 @@ describe('learning --reset', { timeout: 30_000 }, () => {
 describe('learning --disable drains the learning pending-turns queue', () => {
   /** The machine-wide switch, as the command left it. */
   function readLearningSwitch(): unknown {
-    return (JSON.parse(fs.readFileSync(path.join(devflowDir, 'manifest.json'), 'utf-8')) as {
-      features: Record<string, unknown>;
-    }).features.learning;
+    // Both keys always agree after a toggle (the manifest mirror): one answer for both.
+    const keys = readSwitchKeys(devflowDir);
+    expect(keys.learning, 'the pre-rename copy equals the curation key').toBe(keys.curation);
+    return keys.curation;
   }
 
   beforeEach(() => {
-    fs.mkdirSync(path.join(root, '.devflow', 'learning'), { recursive: true });
+    fs.mkdirSync(path.join(root, '.devflow', 'curation'), { recursive: true });
     seedQueue(root);
   });
 
@@ -690,7 +743,7 @@ describe('learning --disable drains the learning pending-turns queue', () => {
 
   it('does not create a .disabled sentinel (the gate is the manifest)', async () => {
     await runLearning(['--disable']);
-    expect(fs.existsSync(path.join(root, '.devflow', 'learning', '.disabled'))).toBe(false);
+    expect(fs.existsSync(path.join(root, '.devflow', 'curation', '.disabled'))).toBe(false);
   });
 
   it('drains unconditionally — a leftover .worker.lock dir from an old install does not block it', async () => {
@@ -718,14 +771,14 @@ describe('learning --disable drains the learning pending-turns queue', () => {
     expect(queueFilesPresent(root).slice(0, 2)).toEqual([false, false]);
   });
 
-  // D-CLI-NO-SYMLINK: a repository can commit .devflow or .devflow/learning as a link
+  // D-CLI-NO-SYMLINK: a repository can commit .devflow or .devflow/curation as a link
   // to a folder elsewhere; the drain then deletes nothing, says so, and the switch is
   // still turned off.
-  for (const linked of ['.devflow', path.join('.devflow', 'learning')]) {
+  for (const linked of ['.devflow', path.join('.devflow', 'curation')]) {
     it(`a linked ${linked}: deletes nothing where it points, says so, and still switches learning off (D-CLI-NO-SYMLINK)`, async () => {
       const outside = makeTmpDir();
       try {
-        const queueDir = linked === '.devflow' ? path.join(outside, 'learning') : outside;
+        const queueDir = linked === '.devflow' ? path.join(outside, 'curation') : outside;
         fs.mkdirSync(queueDir, { recursive: true });
         const files = ['.pending-turns.jsonl', '.pending-turns.processing', '.pending-turns.owner'].map(f => path.join(queueDir, f));
         for (const file of files) fs.writeFileSync(file, 'a file outside the project\n');
@@ -747,9 +800,9 @@ describe('learning --disable drains the learning pending-turns queue', () => {
 });
 
 // ---------------------------------------------------------------------------
-// --configure writes the project tuning config, learning.json, under the ledger's
-// .devflow/learning. A repository can commit .devflow, the learning folder or
-// learning.json itself as a link; the command then writes nothing, says why and
+// --configure writes the project tuning config, curation.json, under the ledger's
+// .devflow/curation. A repository can commit .devflow, the learning folder or
+// curation.json itself as a link; the command then writes nothing, says why and
 // exits 1 (D-CLI-NO-SYMLINK).
 // ---------------------------------------------------------------------------
 
@@ -759,6 +812,7 @@ describe('learning --configure never writes the project config through a symboli
 
   beforeEach(() => {
     outside = makeTmpDir();
+    useMatchingInstall();
   });
 
   afterEach(() => {
@@ -774,21 +828,21 @@ describe('learning --configure never writes the project config through a symboli
 
   const LAYOUTS: ReadonlyArray<readonly [string, () => string]> = [
     ['.devflow', () => {
-      fs.mkdirSync(path.join(outside, 'learning'));
-      fs.writeFileSync(path.join(outside, 'learning', 'learning.json'), KEEP);
+      fs.mkdirSync(path.join(outside, 'curation'));
+      fs.writeFileSync(path.join(outside, 'curation', 'curation.json'), KEEP);
       fs.symlinkSync(outside, path.join(root, '.devflow'));
-      return path.join(outside, 'learning', 'learning.json');
+      return path.join(outside, 'curation', 'curation.json');
     }],
-    [path.join('.devflow', 'learning'), () => {
-      fs.writeFileSync(path.join(outside, 'learning.json'), KEEP);
+    [path.join('.devflow', 'curation'), () => {
+      fs.writeFileSync(path.join(outside, 'curation.json'), KEEP);
       fs.mkdirSync(path.join(root, '.devflow'));
-      fs.symlinkSync(outside, path.join(root, '.devflow', 'learning'));
-      return path.join(outside, 'learning.json');
+      fs.symlinkSync(outside, path.join(root, '.devflow', 'curation'));
+      return path.join(outside, 'curation.json');
     }],
-    [path.join('.devflow', 'learning', 'learning.json'), () => {
+    [path.join('.devflow', 'curation', 'curation.json'), () => {
       fs.writeFileSync(path.join(outside, 'target'), KEEP);
-      fs.mkdirSync(path.join(root, '.devflow', 'learning'), { recursive: true });
-      fs.symlinkSync(path.join(outside, 'target'), path.join(root, '.devflow', 'learning', 'learning.json'));
+      fs.mkdirSync(path.join(root, '.devflow', 'curation'), { recursive: true });
+      fs.symlinkSync(path.join(outside, 'target'), path.join(root, '.devflow', 'curation', 'curation.json'));
       return path.join(outside, 'target');
     }],
   ];
@@ -808,8 +862,266 @@ describe('learning --configure never writes the project config through a symboli
   it('non-vacuity: a plain project gets its config', async () => {
     const run = await configureProject();
 
-    expect(JSON.parse(fs.readFileSync(path.join(root, '.devflow', 'learning', 'learning.json'), 'utf-8'))).toEqual({ model: 'sonnet', debug: false });
+    expect(JSON.parse(fs.readFileSync(path.join(root, '.devflow', 'curation', 'curation.json'), 'utf-8'))).toEqual({ model: 'sonnet', debug: false });
     expect(run.exitCode).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The toggles (TP-17, toggle half): both machine keys first; under version skew the
+// toggle moves nothing; otherwise it tries the shared move with no wait, and a busy
+// move is not an error; only --disable drains, each ledger folder that exists.
+// ---------------------------------------------------------------------------
+
+describe('learning --enable/--disable: the curation switch and the folder move (#529)', () => {
+  const OLD = (): string => path.join(root, '.devflow', 'learning');
+  const NEW = (): string => path.join(root, '.devflow', 'curation');
+  const queueIn = (dir: string): boolean[] =>
+    ['.pending-turns.jsonl', '.pending-turns.processing', '.pending-turns.owner'].map(f => fs.existsSync(path.join(dir, f)));
+
+  describe('the two machine keys', () => {
+    it.each([['--disable', false], ['--enable', true]] as const)('%s writes curation and learning to %s', async (flag, value) => {
+      const before = flag === '--enable' ? { curation: false, learning: false } : { curation: true, learning: true };
+      const manifest = JSON.parse(fs.readFileSync(path.join(devflowDir, 'manifest.json'), 'utf-8')) as { features: Record<string, unknown> };
+      manifest.features = { ...manifest.features, ...before };
+      fs.writeFileSync(path.join(devflowDir, 'manifest.json'), JSON.stringify(manifest));
+
+      await runLearning([flag]);
+
+      expect(readSwitchKeys(devflowDir)).toEqual({ curation: value, learning: value });
+    });
+
+    it('repairs a disagreeing pair: --enable puts both keys on, --disable both off', async () => {
+      for (const [flag, value] of [['--enable', true], ['--disable', false]] as const) {
+        const manifest = JSON.parse(fs.readFileSync(path.join(devflowDir, 'manifest.json'), 'utf-8')) as { features: Record<string, unknown> };
+        manifest.features = { ...manifest.features, curation: !value, learning: value };
+        fs.writeFileSync(path.join(devflowDir, 'manifest.json'), JSON.stringify(manifest));
+        await runLearning([flag]);
+        expect(readSwitchKeys(devflowDir)).toEqual({ curation: value, learning: value });
+      }
+    });
+
+    it('a toggle to the value both keys already hold leaves manifest.json byte-identical (D-NOOP-TOGGLE)', async () => {
+      const file = path.join(devflowDir, 'manifest.json');
+      const before = fs.readFileSync(file, 'utf-8');
+      await runLearning(['--enable']);
+      expect(fs.readFileSync(file, 'utf-8')).toBe(before);
+    });
+
+    it('writes the keys with no git root (the switch is not per-project)', async () => {
+      vi.mocked(getLedgerRoot).mockResolvedValue(null);
+      await runLearning(['--disable']);
+      expect(readSwitchKeys(devflowDir)).toEqual({ curation: false, learning: false });
+    });
+  });
+
+  describe('under version skew the toggle records the switch and moves nothing', () => {
+    it('--enable leaves the old folder where it was and prints the run-init hint', async () => {
+      const old = seedOldFolder(root);
+      const run = await runLearning(['--enable']);
+      expect(readSwitchKeys(devflowDir)).toEqual({ curation: true, learning: true });
+      expect(fs.existsSync(old)).toBe(true);
+      expect(fs.existsSync(NEW())).toBe(false);
+      expect(run.warn).toContain('devflow init');
+      expect(run.exitCode).toBe(0);
+    });
+
+    it('--disable drains the old folder\'s queue, keeps its ledger, and moves nothing', async () => {
+      const old = seedOldFolder(root, true);
+      const run = await runLearning(['--disable']);
+      expect(readSwitchKeys(devflowDir)).toEqual({ curation: false, learning: false });
+      expect(queueIn(old)).toEqual([false, false, false]);
+      expect(fs.existsSync(path.join(old, 'decisions-ledger.jsonl'))).toBe(true);
+      expect(fs.existsSync(NEW())).toBe(false);
+      expect(run.success).toBe('Learning disabled in every project');
+    });
+
+    it('--disable drains the queue of both folders when both exist', async () => {
+      const old = seedOldFolder(root, true);
+      fs.mkdirSync(NEW(), { recursive: true });
+      seedQueue(root);
+      await runLearning(['--disable']);
+      expect(queueIn(old)).toEqual([false, false, false]);
+      expect(queueFilesPresent(root)).toEqual([false, false, false]);
+    });
+  });
+
+  describe('with matching installed scripts the toggle moves the folder, with no wait', () => {
+    beforeEach(useMatchingInstall);
+
+    it('--enable moves the old folder; the pending file stays unchanged (enable never drains)', async () => {
+      const old = seedOldFolder(root);
+      const queueBody = fs.readFileSync(path.join(old, '.pending-turns.jsonl'), 'utf-8');
+
+      const run = await runLearning(['--enable']);
+
+      expect(fs.existsSync(old)).toBe(false);
+      expect(fs.readFileSync(path.join(NEW(), '.pending-turns.jsonl'), 'utf-8')).toBe(queueBody);
+      expect(fs.existsSync(path.join(NEW(), 'decisions-ledger.jsonl'))).toBe(true);
+      expect(run.exitCode).toBe(0);
+      expect(run.success).toContain('Learning enabled');
+    });
+
+    it('--disable moves the folder, then drains the queue in the folder it moved to', async () => {
+      // The seeded folder holds only the pending queue (no claim), so the move is not deferred.
+      const old = seedOldFolder(root);
+      await runLearning(['--disable']);
+      expect(fs.existsSync(old)).toBe(false);
+      expect(queueIn(NEW())).toEqual([false, false, false]);
+      expect(fs.existsSync(path.join(NEW(), 'decisions-ledger.jsonl'))).toBe(true);
+      expect(readSwitchKeys(devflowDir)).toEqual({ curation: false, learning: false });
+    });
+
+    it('a busy move is not an error: the switch is recorded, the old folder stays, the exit code is 0', async () => {
+      const old = seedOldFolder(root);
+      const lock = holdMoveLock(devflowDir, root);
+      const started = Date.now();
+
+      const run = await runLearning(['--enable']);
+
+      expect(Date.now() - started, 'the toggle takes the lock with no wait').toBeLessThan(5000);
+      expect(fs.existsSync(lock)).toBe(true);
+      expect(readSwitchKeys(devflowDir)).toEqual({ curation: true, learning: true });
+      expect(fs.existsSync(old)).toBe(true);
+      expect(fs.existsSync(NEW())).toBe(false);
+      expect(run.exitCode).toBe(0);
+      expect(run.error).toBe('');
+    });
+
+    it('--disable with a busy move still drains the old folder\'s queue', async () => {
+      const old = seedOldFolder(root, true);
+      holdMoveLock(devflowDir, root);
+      await runLearning(['--disable']);
+      expect(queueIn(old)).toEqual([false, false, false]);
+      expect(fs.existsSync(path.join(old, 'decisions-ledger.jsonl'))).toBe(true);
+    });
+
+    it('with no old folder nothing is moved and no store is needed', async () => {
+      const run = await runLearning(['--enable']);
+      expect(fs.existsSync(OLD())).toBe(false);
+      expect(fs.existsSync(NEW())).toBe(false);
+      expect(run.exitCode).toBe(0);
+    });
+
+    it('a refused move (the old folder is a link) is reported as a warning, never a failure', async () => {
+      const outside = makeTmpDir();
+      try {
+        fs.mkdirSync(path.join(root, '.devflow'), { recursive: true });
+        fs.symlinkSync(outside, OLD());
+        const run = await runLearning(['--enable']);
+        expect(readSwitchKeys(devflowDir)).toEqual({ curation: true, learning: true });
+        expect(run.warn).toContain('refused');
+        expect(run.exitCode).toBe(0);
+        expect(fs.readdirSync(outside)).toEqual([]);
+      } finally {
+        fs.rmSync(outside, { recursive: true, force: true });
+      }
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// --configure moves the folder first (TP-17, configure half): a busy move refuses with
+// a retry message and writes nothing; version skew refuses with the skew line; the new
+// folder is created only when the old name is absent.
+// ---------------------------------------------------------------------------
+
+describe('learning --configure with the old folder present (#529)', () => {
+  const OLD = (): string => path.join(root, '.devflow', 'learning');
+  const NEW = (): string => path.join(root, '.devflow', 'curation');
+
+  async function configure(scope: 'project' | 'global' = 'project'): Promise<LearningRun> {
+    vi.mocked(p.select).mockResolvedValueOnce('sonnet').mockResolvedValueOnce(scope);
+    vi.mocked(p.confirm).mockResolvedValueOnce(false);
+    return runLearning(['--configure']);
+  }
+
+  describe('with matching installed scripts', () => {
+    beforeEach(useMatchingInstall);
+
+    it('moves the old folder first, then writes curation.json into the new folder', async () => {
+      const old = seedOldFolder(root);
+      const ledgerBody = fs.readFileSync(path.join(old, 'decisions-ledger.jsonl'), 'utf-8');
+
+      const run = await configure();
+
+      expect(run.exitCode).toBe(0);
+      expect(fs.existsSync(old)).toBe(false);
+      expect(JSON.parse(fs.readFileSync(path.join(NEW(), 'curation.json'), 'utf-8'))).toEqual({ model: 'sonnet', debug: false });
+      expect(fs.readFileSync(path.join(NEW(), 'decisions-ledger.jsonl'), 'utf-8')).toBe(ledgerBody);
+    });
+
+    it('a busy move refuses with a retry message, writes nothing, and exits 1', async () => {
+      const old = seedOldFolder(root);
+      holdMoveLock(devflowDir, root);
+      const before = snapshotTree(root);
+
+      const run = await configure();
+
+      expect(run.exitCode).toBe(1);
+      expect(run.error).toMatch(/try again/i);
+      expect(snapshotTree(root)).toEqual(before);
+      expect(fs.existsSync(NEW())).toBe(false);
+      expect(fs.existsSync(path.join(old, 'curation.json'))).toBe(false);
+      expect(fs.existsSync(path.join(old, 'learning.json'))).toBe(false);
+    });
+
+    it('a refused move (the old folder is a link) writes nothing and exits 1', async () => {
+      const outside = makeTmpDir();
+      try {
+        fs.mkdirSync(path.join(root, '.devflow'), { recursive: true });
+        fs.symlinkSync(outside, OLD());
+        const run = await configure();
+        expect(run.exitCode).toBe(1);
+        expect(run.error).toContain('refused');
+        expect(fs.readdirSync(outside)).toEqual([]);
+        expect(fs.existsSync(NEW())).toBe(false);
+      } finally {
+        fs.rmSync(outside, { recursive: true, force: true });
+      }
+    });
+
+    it('with no old folder it creates the new folder, as before', async () => {
+      const run = await configure();
+      expect(run.exitCode).toBe(0);
+      expect(fs.existsSync(path.join(NEW(), 'curation.json'))).toBe(true);
+      expect(fs.existsSync(OLD())).toBe(false);
+    });
+
+    it('global scope writes curation.json in the machine directory and moves nothing', async () => {
+      const old = seedOldFolder(root);
+      const run = await configure('global');
+      expect(run.exitCode).toBe(0);
+      expect(JSON.parse(fs.readFileSync(path.join(devflowDir, 'curation.json'), 'utf-8'))).toEqual({ model: 'sonnet', debug: false });
+      expect(fs.existsSync(old)).toBe(true);
+    });
+  });
+
+  describe('under version skew', () => {
+    it('refuses with the skew line, writes nothing, and exits 1', async () => {
+      seedOldFolder(root);
+      const before = snapshotTree(root);
+
+      const run = await configure();
+
+      expect(run.exitCode).toBe(1);
+      expect(run.error).toContain('devflow init');
+      expect(run.error).toContain('2.0.0');
+      expect(snapshotTree(root)).toEqual(before);
+      expect(fs.existsSync(NEW())).toBe(false);
+    });
+
+    it('refuses with no old folder too, because the installed hooks would not read the new folder', async () => {
+      const run = await configure();
+      expect(run.exitCode).toBe(1);
+      expect(fs.existsSync(NEW())).toBe(false);
+    });
+
+    it('global scope is not refused: it writes the machine file', async () => {
+      const run = await configure('global');
+      expect(run.exitCode).toBe(0);
+      expect(fs.existsSync(path.join(devflowDir, 'curation.json'))).toBe(true);
+    });
   });
 });
 

@@ -643,6 +643,33 @@ export interface InstallArtifactEntry {
    * `mktemp` name, where the set of paths exists only on disk.
    */
   isPrefix?: boolean;
+  /**
+   * For a prefix entry: the whole basename must also match this shape. A child that
+   * starts with the prefix but has another shape is not a Devflow artifact.
+   */
+  shape?: RegExp;
+  /**
+   * For a prefix entry: the child must be a real directory. A link or a file with a
+   * matching name is left alone, whatever it points at.
+   */
+  realDirOnly?: boolean;
+}
+
+/**
+ * The curation move's lock, one directory per ledger root, taken directly in the machine
+ * directory: `.curation-move-<16 lowercase hex>.lock`. The store builds the name from a
+ * hash of the real ledger root, so the names exist only on disk.
+ */
+const CURATION_MOVE_LOCK_PREFIX = '.curation-move-';
+const CURATION_MOVE_LOCK_SHAPE = /^\.curation-move-[0-9a-f]{16}\.lock$/;
+
+/** Whether `child` of `devflowDir` is a real directory (a link is not followed). */
+async function isRealDirectory(devflowDir: string, child: string): Promise<boolean> {
+  try {
+    return (await fs.lstat(path.join(devflowDir, child))).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -673,7 +700,10 @@ export async function resolveInstallArtifactPaths(
       }
     }
     for (const child of children) {
-      if (child.startsWith(entry.relPath)) resolved.push({ relPath: child, isDir: entry.isDir });
+      if (!child.startsWith(entry.relPath)) continue;
+      if (entry.shape !== undefined && !entry.shape.test(child)) continue;
+      if (entry.realDirOnly === true && !(await isRealDirectory(devflowDir, child))) continue;
+      resolved.push({ relPath: child, isDir: entry.isDir });
     }
   }
 
@@ -742,6 +772,11 @@ export function installArtifactPaths(devflowDir: string): ReadonlyArray<InstallA
     // A prefix, because the names exist only on disk. Content is a scrubbed copy
     // that was never placed, so it is machine state like the three above.
     { relPath: TRACKER_STAGED_PREFIX, isPrefix: true },
+    // The curation move's per-root lock directory. A crash between taking the lock and
+    // releasing it leaves one behind, and its name carries a hash that exists only on disk.
+    // Only a real directory of exactly that shape goes; the move's skip markers sit under
+    // logs/ and go with it.
+    { relPath: CURATION_MOVE_LOCK_PREFIX, isPrefix: true, isDir: true, shape: CURATION_MOVE_LOCK_SHAPE, realDirOnly: true },
     // per-project hook logs (logs/{project-slug}/) AND global logs — remove the
     // whole logs/ tree; covers proxy.log, debug logs, and any project-slug dirs.
     { relPath: 'logs', isDir: true },
@@ -1087,7 +1122,7 @@ export async function refreshRetainedCommandsAndAgents(opts: {
       plugins: retained,
       agentsMap: buildAssetMaps(retained).agentsMap,
       claudeDir,
-      curation: manifest.features.learning,
+      curation: manifest.features.curation,
       trackerServers: effectiveTrackerServers(manifest.features.tracker),
       warn: (msg) => p.log.warn(msg),
     });

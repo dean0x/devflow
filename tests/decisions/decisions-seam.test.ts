@@ -204,7 +204,7 @@ function collectBadSentences(
 
 const GATE = 'When the settings line says `CURATION=off`'
 const LOCATE = 'rev-parse --path-format=absolute --show-toplevel --git-common-dir'
-const INDEX_READ = '/.devflow/learning/index.md`'
+const INDEX_READ = '/.devflow/curation/index.md`'
 
 /** Named collector: how a decisions-loading host orders its gate sentence, its locate call and its index read. */
 function collectGateOrderDefects(host: string, text: string): string[] {

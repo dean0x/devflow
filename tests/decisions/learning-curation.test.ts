@@ -79,14 +79,14 @@ function makeObsRow(overrides: Record<string, unknown> = {}): Record<string, unk
 }
 
 function writeLedger(dir: string, rows: Record<string, unknown>[]): string {
-  const ledgerPath = path.join(dir, '.devflow', 'learning', 'decisions-ledger.jsonl');
+  const ledgerPath = path.join(dir, '.devflow', 'curation', 'decisions-ledger.jsonl');
   fs.mkdirSync(path.dirname(ledgerPath), { recursive: true });
   fs.writeFileSync(ledgerPath, rows.map(r => JSON.stringify(r)).join('\n') + '\n', 'utf8');
   return ledgerPath;
 }
 
 function readDecisionsMd(dir: string): string {
-  return fs.readFileSync(path.join(dir, '.devflow', 'learning', 'decisions.md'), 'utf8');
+  return fs.readFileSync(path.join(dir, '.devflow', 'curation', 'decisions.md'), 'utf8');
 }
 
 // ---------------------------------------------------------------------------
@@ -136,7 +136,7 @@ describe('Curate agent curation contract (AC-C3)', () => {
   });
 
   it('names the claim file and releases the claim with release-claim as the FINAL act', () => {
-    expect(agentContent).toContain('.devflow/learning/.pending-turns.processing');
+    expect(agentContent).toContain('.devflow/curation/.pending-turns.processing');
     expect(agentContent).toContain('FINAL act');
     expect(agentContent).toContain('json-helper.cjs" release-claim <token>');
   });
@@ -233,7 +233,7 @@ describe('AC-F5: retire-anchor hides entry from .md, keeps in ledger', { timeout
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'curation-retire-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'curation'), { recursive: true });
   });
 
   afterEach(() => {
@@ -268,7 +268,7 @@ describe('AC-F5: retire-anchor hides entry from .md, keeps in ledger', { timeout
 
     expect(retire('ADR-002', 'Retired')).toBe(0);
 
-    const rows = parseLedger(path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl'));
+    const rows = parseLedger(path.join(tmpDir, '.devflow', 'curation', 'decisions-ledger.jsonl'));
     expect(rows).toHaveLength(2);
     const retiredRow = rows.find(r => r.anchor_id === 'ADR-002');
     expect(retiredRow).toBeDefined();
@@ -284,7 +284,7 @@ describe('AC-F5: retire-anchor hides entry from .md, keeps in ledger', { timeout
     expect(retire('ADR-002', 'Retired')).toBe(0);
 
     // Write a new observation and promote it — should get ADR-003, not ADR-002
-    const logPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-log.jsonl');
+    const logPath = path.join(tmpDir, '.devflow', 'curation', 'decisions-log.jsonl');
     fs.writeFileSync(logPath, JSON.stringify(makeV2LogRow({ id: 'obs_new' })) + '\n', 'utf8');
     const result = runJsonHelper(tmpDir, ['assign-anchor', 'decision', 'obs_new']);
     expect(result.code).toBe(0);
@@ -305,7 +305,7 @@ describe('AC-F5: retire-anchor hides entry from .md, keeps in ledger', { timeout
     expect(md).not.toContain('Going Deprecated');
     expect(md).toContain('| ADR-002 | Deprecated | The store moved |\n');
 
-    const rows = parseLedger(path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl'));
+    const rows = parseLedger(path.join(tmpDir, '.devflow', 'curation', 'decisions-ledger.jsonl'));
     const dep = rows.find(r => r.anchor_id === 'ADR-002');
     expect(dep!.decisions_status).toBe('Deprecated');
   });
@@ -332,7 +332,7 @@ describe('AC-F6: a retired entry is recoverable — restore-anchor renders it ag
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'curation-recover-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'curation'), { recursive: true });
   });
 
   afterEach(() => {
@@ -429,7 +429,7 @@ describe('AC-F9: rotation step wired into curation (contract check)', () => {
     try {
       const staleDate = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
       writeLedger(tmpDir, [makeLedgerRow({ id: 'obs_stale_anchored', anchor_id: 'ADR-001' })]);
-      const logPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-log.jsonl');
+      const logPath = path.join(tmpDir, '.devflow', 'curation', 'decisions-log.jsonl');
       store.writeJsonlAtomic(logPath, [
         makeObsRow({ id: 'obs_stale_unanchored', status: 'observing', last_seen: staleDate }),
         makeObsRow({ id: 'obs_stale_anchored', status: 'observing', last_seen: staleDate }),
@@ -437,7 +437,7 @@ describe('AC-F9: rotation step wired into curation (contract check)', () => {
 
       expect(store.rotateObservations(tmpDir)).toEqual({ ok: true, value: { rotated: 1, appended: 1 } });
 
-      const archive = parseLedger(path.join(tmpDir, '.devflow', 'learning', 'decisions-log.archive.jsonl'));
+      const archive = parseLedger(path.join(tmpDir, '.devflow', 'curation', 'decisions-log.archive.jsonl'));
       expect(archive.map(r => r.id)).toEqual(['obs_stale_unanchored']);
       expect(parseLedger(logPath).map(r => r.id)).toEqual(['obs_stale_anchored']);
     } finally {

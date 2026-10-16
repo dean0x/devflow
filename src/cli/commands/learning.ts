@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import {
+  CURATION_DIR_NAME,
   LEGACY_NAMES,
   getLearningDir,
   getCurateTuningConfigPath,
@@ -16,25 +17,28 @@ import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-co
 import {
   applyCurationToggle,
   describeCurationConverge,
+  installedScriptsSkew,
   readRunningVersion,
 } from '../../targets/claude-code/curation-install.js';
 import { getLedgerRoot, ledgerFolderToCreate } from '../../core/ledger-root.js';
-import { drainLearningQueue } from '../../core/learning-queue-cleanup.js';
+import { drainLearningQueue } from '../../core/curation-queue-cleanup.js';
 import { firstSymbolicLink } from '../../core/linked-path.js';
 import { formatRefusedDrain } from '../../core/queue-drain.js';
+import { describeOutcome } from './init-curation-move.js';
+import { runSharedMove, type SharedMoveResult } from './curation-move-io.js';
 import {
   formatLearningStoreUnavailable,
   loadLearningStore,
   type LearningListing,
   type LearningStoreError,
   type LearningStoreModule,
-} from '../../core/learning-store.js';
+} from '../../core/curation-store.js';
 
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
 
-/** What the read and restore commands say about a project with no `.devflow/learning/`. */
+/** What the read and restore commands say about a project with no `.devflow/curation/`. */
 const NO_LEARNING_DATA = 'No learning data in this project yet.';
 
 /**
@@ -126,6 +130,29 @@ async function isDirectory(dir: string): Promise<boolean> {
   }
 }
 
+/**
+ * Whether the old ledger folder name is present under `root`'s `.devflow`: a folder, a
+ * file or a link, dangling or not. The cheap state check that keeps the store unloaded
+ * where there is nothing to move. A probe that fails for another reason reads as
+ * present, so the move itself reports the problem.
+ */
+async function oldLedgerFolderPresent(root: string): Promise<boolean> {
+  try {
+    await fs.lstat(path.join(root, '.devflow', LEGACY_NAMES.folder));
+    return true;
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException).code;
+    return code !== 'ENOENT' && code !== 'ENOTDIR';
+  }
+}
+
+/** The lines a move that did not complete says: its own, or the store's reason when it could not load. */
+function moveProblemLines(outcome: SharedMoveResult): string[] {
+  return outcome.kind === 'unavailable'
+    ? [`The curation data was not moved: ${outcome.message}.`]
+    : describeOutcome(outcome);
+}
+
 // ---------------------------------------------------------------------------
 // Sub-command handlers
 // ---------------------------------------------------------------------------
@@ -194,7 +221,7 @@ async function handleStatus(): Promise<void> {
   // D-FEATURES-NARROW-ONLY: the machine switch is the manifest's and reads the
   // same from every directory; a repository layer can only narrow it, and adds a
   // line only when it does. The entry counts are per-project.
-  const enabled = await readMachineFeature(getDevFlowDirectory(), 'learning');
+  const enabled = await readMachineFeature(getDevFlowDirectory(), 'curation');
   const settingsModule = loadSettingsModule();
   const narrowed = enabled ? narrowedSwitchLabel(settingsModule, { dir: process.cwd() }, 'learning') : null;
   const stateLine = `Learning: ${enabled ? 'enabled' : 'disabled'}`
@@ -299,11 +326,11 @@ async function handleRestore(anchor: string): Promise<void> {
  * such a mapping, and its hint says so.
  */
 export const CONFIGURE_SCOPE_OPTIONS = [
-  { value: 'project', label: 'Project', hint: 'This project only (.devflow/learning/learning.json)' },
+  { value: 'project', label: 'Project', hint: 'This project only (.devflow/curation/curation.json)' },
   {
     value: 'global',
     label: 'Global',
-    hint: 'All projects (~/.devflow/learning.json); a devflow agents Curate mapping takes precedence over it',
+    hint: 'All projects (~/.devflow/curation.json); a devflow agents Curate mapping takes precedence over it',
   },
 ] as const;
 
@@ -379,10 +406,30 @@ async function handleConfigure(): Promise<void> {
     p.log.success(`Global config written to ${color.dim(globalConfigPath)}`);
   } else {
     // D-LEDGER-MAIN-WORKTREE: session-start-context reads the project tuning config
-    // from the ledger ($LEDGER_ROOT/.devflow/learning/), so write it there — the
+    // from the ledger ($LEDGER_ROOT/.devflow/curation/), so write it there — the
     // main checkout in a linked worktree; the current directory outside git.
     const projectRoot = (await getLedgerRoot()) ?? process.cwd();
-    const learningDir = await ledgerFolderToCreate(projectRoot, LEGACY_NAMES.folder);
+    // Installed scripts of another version read and create another ledger folder: write nothing.
+    const skew = await installedScriptsSkew(getDevFlowDirectory());
+    if (skew !== null) {
+      p.log.error(skew);
+      process.exitCode = 1;
+      return;
+    }
+    // The shared move runs first. A busy lock, a link or a failed move refuses the write,
+    // so the config never lands in a folder the readers do not use.
+    if (await oldLedgerFolderPresent(projectRoot)) {
+      const moved = await runSharedMove(projectRoot);
+      if (moved.kind !== 'moved' && moved.kind !== 'unchanged') {
+        p.log.error(moved.kind === 'busy'
+          ? 'Another run is moving this project\'s curation data. Nothing was written; try again in a moment.'
+          : `${moveProblemLines(moved).join(' ')} Nothing was written.`);
+        process.exitCode = 1;
+        return;
+      }
+    }
+    // The creator rule: the new folder is made only when the old name is absent.
+    const learningDir = await ledgerFolderToCreate(projectRoot, LEGACY_NAMES.folder, CURATION_DIR_NAME);
     const projectConfigPath = getCurateTuningConfigPath(projectRoot);
     // D-CLI-NO-SYMLINK (core/linked-path.ts): nothing is written through a .devflow,
     // a learning folder or a learning.json that is a symbolic link.
@@ -430,7 +477,7 @@ async function handleReset(): Promise<void> {
     process.exitCode = 1;
     return;
   }
-  p.log.success('Reset complete — removed .devflow/learning/ state.');
+  p.log.success('Reset complete — removed .devflow/curation/ state.');
 }
 
 /**
@@ -474,7 +521,7 @@ async function handleClear(): Promise<void> {
     `Cleared ${counted(cleared.value.cleared, 'observation')} no entry uses and kept ${cleared.value.kept} ` +
     `that entries use${drain.drained ? '; drained the learning queue.' : '.'}`,
   );
-  if (!drain.drained) p.log.warn(formatRefusedDrain('learning', drain.linkedFolder));
+  if (!drain.drained) p.log.warn(formatRefusedDrain('curation', drain.linkedFolder));
 }
 
 /**
@@ -487,8 +534,12 @@ async function handleClear(): Promise<void> {
  * Warn-not-fail: the switch itself is already recorded, and either mismatch is
  * safe (an on variant is still gated at run time, an off variant loads no
  * decisions), so a problem here never changes the exit code.
+ *
+ * Answers whether the converge ran, which means the installed files are the ones
+ * this CLI writes. The toggle moves the ledger folder only then: under version skew
+ * (or when that could not be told) it moves nothing.
  */
-async function convergeInstalledVariants(enabled: boolean): Promise<void> {
+async function convergeInstalledVariants(enabled: boolean): Promise<'converged' | 'not-converged'> {
   try {
     const outcome = await applyCurationToggle({
       claudeDir: getClaudeDirectory(),
@@ -499,31 +550,55 @@ async function convergeInstalledVariants(enabled: boolean): Promise<void> {
     });
     if (outcome.kind === 'skipped') {
       p.log.warn(outcome.message);
-      return;
+      return 'not-converged';
     }
     const changed = describeCurationConverge(outcome.result, enabled);
     if (changed !== null) p.log.info(color.dim(`Installed prompts: ${changed}`));
+    return 'converged';
   } catch (err) {
     p.log.warn(`Could not update the installed prompts for the new learning setting — run ${color.cyan('devflow init')}: ${String(err)}`);
+    return 'not-converged';
+  }
+}
+
+/**
+ * The toggle's move of the current project's ledger folder: tried once with no wait,
+ * and only where the old folder is present. A busy move is not an error — the project
+ * moves at its next event — and a refusal or a failure is a warning: the switch is
+ * already recorded, so neither changes the exit code.
+ */
+async function tryMoveForToggle(ledgerRoot: string): Promise<void> {
+  if (!(await oldLedgerFolderPresent(ledgerRoot))) return;
+  const outcome = await runSharedMove(ledgerRoot);
+  if (outcome.kind === 'moved' || outcome.kind === 'unchanged') return;
+  for (const line of moveProblemLines(outcome)) {
+    if (outcome.kind === 'busy') p.log.info(color.dim(line));
+    else p.log.warn(line);
   }
 }
 
 /**
  * `--enable` / `--disable`: the machine-wide switch (D-FEATURES-NARROW-ONLY),
- * converged exactly as `devflow init --learning / --no-learning` converges it —
- * the manifest value, the installed prompt variants and skill
- * (D-LEARNING-VARIANT-INSTALL), and on disable a drained queue in the current
- * project. Never requires a git root: the switch is not a per-project setting.
+ * converged exactly as `devflow init --curation / --no-curation` converges it —
+ * the manifest value (both machine keys, written first), the installed prompt
+ * variants and skill (D-LEARNING-VARIANT-INSTALL), the current project's ledger
+ * folder move, and on disable a drained queue in every ledger folder that exists.
+ * Never requires a git root: the switch is not a per-project setting.
+ *
+ * Under version skew the toggle records the switch and moves nothing; otherwise it
+ * tries the shared move with no wait. Only `--disable` drains, skew included.
  */
 async function handleToggle(enabled: boolean): Promise<void> {
-  const recorded = await writeMachineFeature(getDevFlowDirectory(), 'learning', enabled);
+  const recorded = await writeMachineFeature(getDevFlowDirectory(), 'curation', enabled);
   if (!recorded.ok) {
     p.log.error(`Devflow is not installed on this machine — run ${color.cyan('devflow init')} first`);
     process.exitCode = 1;
     return;
   }
 
-  await convergeInstalledVariants(enabled);
+  const converged = await convergeInstalledVariants(enabled);
+  const ledgerRoot = await getLedgerRoot();
+  if (converged === 'converged' && ledgerRoot) await tryMoveForToggle(ledgerRoot);
 
   if (enabled) {
     p.log.success('Learning enabled in every project (a repository can opt out)');
@@ -531,13 +606,13 @@ async function handleToggle(enabled: boolean): Promise<void> {
     return;
   }
 
-  // Drain the current project's learning (decisions-detection) queue so stale
-  // turns don't process on re-enable. A mid-run Curate agent whose claimed
-  // batch vanishes aborts without changes — the desired outcome of disabling.
-  const ledgerRoot = await getLedgerRoot();
+  // Drain the current project's curation (decisions-detection) queue, in each ledger
+  // folder that exists, so stale turns don't process on re-enable. A mid-run Curate
+  // agent whose claimed batch vanishes aborts without changes — the desired outcome
+  // of disabling.
   if (ledgerRoot) {
     const drain = await drainLearningQueue(ledgerRoot);
-    if (!drain.drained) p.log.warn(formatRefusedDrain('learning', drain.linkedFolder));
+    if (!drain.drained) p.log.warn(formatRefusedDrain('curation', drain.linkedFolder));
   }
   p.log.success('Learning disabled in every project');
 }
