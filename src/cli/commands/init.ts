@@ -86,6 +86,7 @@ import {
 } from './tracker-prompts.js';
 import {
   buildClackGateLevelPrompts,
+  carriedGateLevel,
   formatGateLevelRow,
   formatGateLevelSummary,
   readStoredGateLevel,
@@ -1013,10 +1014,11 @@ export const initCommand = new Command('init')
     // The stored machine gate level, and where it was found. readManifest() reads a manifest it
     // refuses (a missing required field, a byte-order mark, unparseable JSON) as no manifest, so
     // the seed holds no level for it, yet `devflow gates` and the settings resolver still read
-    // that file's level. Init never writes a level the user did not choose, so when the manifest
-    // is refused (and --reset did not ask to forget it) the raw file decides: a level found in it
-    // is kept as stored, and a file that cannot be read at all is carried as "unreadable" and
-    // reported. This is an init-side override; the seed itself still comes from the manifest alone.
+    // that file's level. Init never writes a level the user did not choose, so when readManifest()
+    // returned none the raw file decides: a level found in it is the level the run replaces, and
+    // is kept as stored unless --reset asks to forget it. A file that cannot be read at all is
+    // reported as "unreadable". This is an init-side override; the seed itself still comes from
+    // the manifest alone.
     const storedGate: StoredGateLevel = await readStoredGateLevel(devflowDir, existingManifest, !!options.reset);
     // D-INIT-NOT-HOME (same-location.ts): a repository rooted at HOME is no
     // project, so init treats it as no repository — no .devflow/config.json (that
@@ -1277,12 +1279,19 @@ export const initCommand = new Command('init')
     const trackerServers = seed.features.tracker.servers;
     // The machine gate level (features.gateLevel), shared with `devflow gates --set`. The seed holds
     // it raw: `undefined` only for an absent key or a --reset seed, a malformed value or `null` as
-    // stored. A manifest readManifest() refuses carries its raw level instead (`storedGate`, read
-    // above). It stays raw unless --gate-level or the wizard step sets it, so a plain init never
-    // defaults, narrows or heals it; the full manifest write below then leaves an absent key out.
-    // Each wizard path assigns the level `runGateLevelStepAt` decides; that is the only precedence
-    // site (--gate-level, then the wizard answer, then this stored value).
-    let gateLevel: unknown = storedGate.origin === 'rejected' ? storedGate.value : seed.features.gateLevel;
+    // stored. When readManifest() returned none, the raw level (`storedGate`, read above) stands in
+    // for the seed, as `carriedGateLevel` decides. It stays raw unless --gate-level or the wizard
+    // step sets it, so a plain init never defaults, narrows or heals it; the full manifest write
+    // below then leaves an absent key out. Each wizard path assigns the level `runGateLevelStepAt`
+    // decides; that is the only precedence site (--gate-level, then the wizard answer, then this
+    // carried level).
+    const carriedGate = carriedGateLevel({
+      manifest: existingManifest,
+      reset: !!options.reset,
+      stored: storedGate,
+      seedLevel: seed.features.gateLevel,
+    });
+    let gateLevel: unknown = carriedGate.value;
     let enabledFlags: FlagsRecord = { ...seed.flags };
     // viewModeExplicit: true when --reset is passed; signals resolveFinalViewMode to let the
     // seed-time view-mode win over an externally-set value in settings.json.
@@ -1357,7 +1366,7 @@ export const initCommand = new Command('init')
       const outcome = await resolveGateLevelForInit({
         cliLevel: cliGateLevel,
         stored: gateLevel,
-        storedOrigin: storedGate.origin,
+        storedOrigin: carriedGate.origin,
         mode,
         modePromptShown,
         isTTY: process.stdin.isTTY,
@@ -1501,7 +1510,7 @@ export const initCommand = new Command('init')
         `Tracker:         ${formatTrackerSummary(trackerProvider)}`,
         // The level this run will record, or the stored one it keeps; the summary after the
         // install reports what the run really recorded.
-        `Gate level:      ${formatGateLevelRow(gateLevel, storedGate.origin)}`,
+        `Gate level:      ${formatGateLevelRow(gateLevel, carriedGate.origin)}`,
         `View mode:       ${readViewMode(enabledFlags)}`,
         `Claude Code flags: ${defaultFlagCount} configured`,
         `.claudeignore:   ${resolveClaudeignoreOutcome(claudeignorePresent)}`,

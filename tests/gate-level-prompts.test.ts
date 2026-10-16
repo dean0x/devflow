@@ -10,9 +10,9 @@
  *   - resolveGateLevelForInit: both init paths (Recommended / Advanced), the flag, the
  *     promptless contracts, and the cancel outcome
  *   - formatGateLevelSummary: the post-install row, from the state the run acted on
- *   - storedGateLevelFromRaw / readStoredGateLevel: the level init keeps from a manifest
- *     readManifest refuses, and the prompt and summary texts for a level read from one or
- *     not readable at all
+ *   - storedGateLevelFromRaw / readStoredGateLevel / carriedGateLevel: the level init keeps
+ *     from a manifest readManifest refuses, the level a run carries into the manifest it
+ *     writes, and the prompt and summary texts for a level read from one or not readable at all
  *   - formatGateLevelRow: the gate-level row of the Recommended settings note
  *   - parity with devflow gates: the two level tables and the malformed wording agree
  *   - init.ts wiring: both wizard paths call the one shared helper with their own mode
@@ -29,6 +29,7 @@ import * as path from 'path';
 import {
   GATE_LEVEL_HINTS,
   GATE_LEVEL_SELECT_MESSAGE,
+  carriedGateLevel,
   classifyGateLevel,
   describeGateLevel,
   formatGateLevelCatalogue,
@@ -280,6 +281,16 @@ describe('classifyGateLevel', () => {
   });
 });
 
+/** An array nested `depth` levels deep, built without recursion. */
+function nestedArray(depth: number): unknown {
+  let value: unknown = [];
+  for (let level = 0; level < depth; level++) value = [value];
+  return value;
+}
+
+/** Deep enough that JSON.stringify runs out of stack, shallow enough that JSON.parse still reads it. */
+const DEEP_NESTING = 200_000;
+
 describe('storedGateLevelFromRaw', () => {
   const rawManifest = (features: Record<string, unknown>): Record<string, unknown> => ({ features });
 
@@ -310,6 +321,16 @@ describe('storedGateLevelFromRaw', () => {
       .toEqual({ origin: 'manifest', value: 'lean' });
     expect(storedGateLevelFromRaw({ kind: 'object', raw: rawManifest({}) }))
       .toEqual({ origin: 'manifest', value: undefined });
+  });
+
+  it('reports a level that cannot be written back as JSON as unreadable, so the write that replaces the manifest cannot fail on it', () => {
+    const deep = nestedArray(DEEP_NESTING);
+    // The precondition: this value parses, and serializing it fails.
+    expect(() => JSON.stringify(deep)).toThrow(RangeError);
+    for (const kind of ['rejected', 'object'] as const) {
+      const stored = storedGateLevelFromRaw({ kind, raw: rawManifest({ gateLevel: deep }) });
+      expect(stored, kind).toEqual({ origin: 'unreadable', value: undefined });
+    }
   });
 });
 
@@ -347,10 +368,70 @@ describe('readStoredGateLevel', () => {
       expect(await readStoredGateLevel(devflowDir, null, false)).toEqual({ origin: 'unreadable', value: undefined });
     });
 
-    it('under --reset forgets what a refused manifest stores', async () => {
+    it('reports a level nested too deeply to write back as unreadable', async () => {
+      await writeManifestText(`{"features":{"gateLevel":${'['.repeat(DEEP_NESTING)}${']'.repeat(DEEP_NESTING)}}}`);
+      expect(await readStoredGateLevel(devflowDir, null, false)).toEqual({ origin: 'unreadable', value: undefined });
+    });
+
+    it('under --reset still reads the level a refused manifest stores, as the level the run replaces', async () => {
       await writeManifestText(JSON.stringify({ features: { gateLevel: 'full' } }));
+      expect(await readStoredGateLevel(devflowDir, null, true)).toEqual({ origin: 'rejected', value: 'full' });
+    });
+
+    it('under --reset reports no warning for a manifest it cannot read, which the reset forgets anyway', async () => {
+      await writeManifestText('{not json');
       expect(await readStoredGateLevel(devflowDir, null, true)).toEqual({ origin: 'manifest', value: undefined });
     });
+
+    it('under --reset reads the level of a manifest readManifest returned, as before', async () => {
+      const manifest = makeManifest({ features: { ...makeManifest().features, gateLevel: 'lean' } });
+      expect(await readStoredGateLevel(devflowDir, manifest, true)).toEqual({ origin: 'manifest', value: 'lean' });
+    });
+  });
+});
+
+describe('carriedGateLevel', () => {
+  const manifest = makeManifest({ features: { ...makeManifest().features, gateLevel: 'lean' } });
+
+  it('over a manifest readManifest returned, carries the seed level', () => {
+    expect(carriedGateLevel({ manifest, reset: false, stored: { origin: 'manifest', value: 'lean' }, seedLevel: 'lean' }))
+      .toEqual({ origin: 'manifest', value: 'lean' });
+  });
+
+  it('when readManifest returned none, carries the level read raw, malformed and null included', () => {
+    for (const value of ['full', 'Lean', null]) {
+      expect(carriedGateLevel({ manifest: null, reset: false, stored: { origin: 'rejected', value }, seedLevel: undefined }), `stored ${JSON.stringify(value)}`)
+        .toEqual({ origin: 'rejected', value });
+    }
+  });
+
+  it('when the raw read finds a manifest readManifest returned none for, carries its level, as --hud-only does', () => {
+    expect(carriedGateLevel({ manifest: null, reset: false, stored: { origin: 'manifest', value: 'full' }, seedLevel: undefined }))
+      .toEqual({ origin: 'manifest', value: 'full' });
+  });
+
+  it('carries no level for a manifest that cannot be read, and keeps the origin', () => {
+    expect(carriedGateLevel({ manifest: null, reset: false, stored: { origin: 'unreadable', value: undefined }, seedLevel: undefined }))
+      .toEqual({ origin: 'unreadable', value: undefined });
+  });
+
+  it('on a first install carries no level', () => {
+    expect(carriedGateLevel({ manifest: null, reset: false, stored: { origin: 'manifest', value: undefined }, seedLevel: undefined }))
+      .toEqual({ origin: 'manifest', value: undefined });
+  });
+
+  it('under --reset carries the seed level alone, whatever was stored', () => {
+    const STORED = [
+      { origin: 'rejected', value: 'full' },
+      { origin: 'manifest', value: 'full' },
+      { origin: 'unreadable', value: undefined },
+    ] as const;
+    for (const stored of STORED) {
+      expect(carriedGateLevel({ manifest: null, reset: true, stored, seedLevel: undefined }), stored.origin)
+        .toEqual({ origin: 'manifest', value: undefined });
+    }
+    expect(carriedGateLevel({ manifest, reset: true, stored: { origin: 'manifest', value: 'lean' }, seedLevel: undefined }))
+      .toEqual({ origin: 'manifest', value: undefined });
   });
 });
 
@@ -522,7 +603,7 @@ describe('runGateLevelStep', () => {
 // ── resolveGateLevelInitState + resolveGateLevelForInit: the init paths ───────
 
 describe('resolveGateLevelForInit', () => {
-  const base = { cliLevel: undefined, stored: undefined, modePromptShown: false, isTTY: true } as const;
+  const base = { cliLevel: undefined, stored: undefined, storedOrigin: 'manifest', modePromptShown: false, isTTY: true } as const;
 
   describe('promptless paths keep the stored value untouched', () => {
     const STORED: unknown[] = [undefined, 'full', 'standard', 'lean', 'Lean', '', null, 5];
@@ -578,9 +659,25 @@ describe('resolveGateLevelForInit', () => {
         ...base, mode: 'advanced', stored: undefined, storedOrigin: 'unreadable', prompts,
       });
 
+      expect(notes[0].message).toContain('Current setting: unknown');
       expect(notes[0].message).toContain('cannot be read');
       expect(notes[0].message).not.toContain('standard (default)');
       expect(outcome).toEqual({ kind: 'resolved', level: 'lean' });
+    });
+
+    it('interactive: the prompt receives the origin, so a level from a refused manifest is named as kept', async () => {
+      const { prompts, levelQueue, notes, asked } = makePrompts();
+      levelQueue.push({ kind: 'accept' });
+
+      const outcome = await resolveGateLevelForInit({
+        ...base, mode: 'advanced', stored: 'full', storedOrigin: 'rejected', prompts,
+      });
+
+      expect(notes[0].message).toContain('Current setting: full');
+      expect(notes[0].message).toContain('devflow cannot use');
+      expect(notes[0].message).toContain('keeps this level');
+      expect(asked[0].initialValue).toBe('full');
+      expect(outcome).toEqual({ kind: 'resolved', level: 'full' });
     });
 
     it('--gate-level replaces either without a prompt', async () => {
@@ -608,6 +705,7 @@ describe('resolveGateLevelForInit', () => {
         const outcome = await resolveGateLevelForInit({
           cliLevel: 'lean',
           stored: 'full',
+          storedOrigin: 'manifest',
           mode: path.mode,
           modePromptShown: path.modePromptShown,
           isTTY: path.isTTY,
@@ -769,6 +867,13 @@ describe('formatGateLevelSummary', () => {
   });
 
   describe('a level read from a refused manifest', () => {
+    it('--reset over it: the default it falls back to, the level it replaced, and no claim that it was kept', () => {
+      const lines = formatGateLevelSummary({ level: undefined, priorLevel: 'full', priorOrigin: 'rejected', manifestWritten: true });
+      expect(lines).toHaveLength(1);
+      expect(lines[0].level).toBe('info');
+      expect(lines[0].message).toContain('Gate level: standard (default) (was full) — the machine default');
+    });
+
     it('names the kept level, and warns that init kept it while it replaced the refused manifest', () => {
       const lines = formatGateLevelSummary({ level: 'full', priorLevel: 'full', priorOrigin: 'rejected', manifestWritten: true });
       expect(lines).toHaveLength(2);
@@ -926,16 +1031,36 @@ describe('init.ts wiring', () => {
     expect((source.match(/await runGateLevelStepAt\('advanced'\)/g) ?? []).length).toBe(1);
   });
 
-  it('takes the decided level from the step on each path, so no hidden assignment is left', async () => {
+  it('assigns the gate level in exactly three places: its start, and the step outcome on each path', async () => {
     const source = await fs.readFile(INIT_SOURCE, 'utf-8');
+    expect((source.match(/\blet gateLevel\b/g) ?? []).length).toBe(1);
+    expect((source.match(/\blet gateLevel: unknown = carriedGate\.value;/g) ?? []).length).toBe(1);
+    expect((source.match(/\bgateLevel = /g) ?? []).length).toBe(2);
     expect((source.match(/gateLevel = await runGateLevelStepAt\('recommended'\)/g) ?? []).length).toBe(1);
     expect((source.match(/gateLevel = await runGateLevelStepAt\('advanced'\)/g) ?? []).length).toBe(1);
     expect(source).not.toMatch(/const runGateLevelStepAt = async \([^)]*\): Promise<void>/);
+  });
+
+  it('starts the gate level from the one shared decision, over the seed and the stored reading', async () => {
+    const source = await fs.readFile(INIT_SOURCE, 'utf-8');
+    const call = /const carriedGate = carriedGateLevel\(\{[\s\S]*?\}\);/.exec(source);
+    expect(call, 'the carriedGateLevel call is not findable in init.ts').not.toBeNull();
+    const lines = (call?.[0] ?? '').split('\n').map(line => line.trim());
+    expect(lines).toContain('manifest: existingManifest,');
+    expect(lines).toContain('reset: !!options.reset,');
+    expect(lines).toContain('stored: storedGate,');
+    expect(lines).toContain('seedLevel: seed.features.gateLevel,');
   });
 
   it('forwards the caller\'s mode and modePromptShown, never a literal', async () => {
     const lines = gateCall(await fs.readFile(INIT_SOURCE, 'utf-8')).split('\n').map(line => line.trim());
     expect(lines).toContain('mode,');
     expect(lines).toContain('modePromptShown,');
+  });
+
+  it('forwards the carried level and where it was found to the prompt', async () => {
+    const lines = gateCall(await fs.readFile(INIT_SOURCE, 'utf-8')).split('\n').map(line => line.trim());
+    expect(lines).toContain('stored: gateLevel,');
+    expect(lines).toContain('storedOrigin: carriedGate.origin,');
   });
 });

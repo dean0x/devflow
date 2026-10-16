@@ -84,7 +84,8 @@ export function formatGateLevelCatalogue(): string {
  *               --reset): the seed holds it
  *   rejected    in a manifest that readManifest() refuses, read raw: init keeps the
  *               level as stored while it replaces that manifest
- *   unreadable  nowhere: the manifest cannot be read at all, so what it stored is unknown
+ *   unreadable  nowhere: the manifest cannot be read at all, or stores a level that cannot be
+ *               written back as JSON, so what it stored is unknown
  */
 export type StoredGateLevelOrigin = 'manifest' | 'rejected' | 'unreadable';
 
@@ -101,6 +102,22 @@ function rawGateLevelOf(raw: Record<string, unknown>): unknown {
   return Object.getOwnPropertyDescriptor(features, 'gateLevel')?.value;
 }
 
+const UNREADABLE_GATE_LEVEL: StoredGateLevel = Object.freeze({ origin: 'unreadable', value: undefined });
+
+/**
+ * Whether a raw value can be written back as JSON. The file parses a value that nests
+ * deeper than the serializer's stack, and writing that value back fails, which would stop
+ * init from ever replacing the manifest that stores it.
+ */
+function serializes(value: unknown): boolean {
+  try {
+    JSON.stringify(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Classify the stored level from the raw read of a manifest that readManifest()
  * returned null for. Pure — the caller reads the file.
@@ -112,18 +129,20 @@ function rawGateLevelOf(raw: Record<string, unknown>): unknown {
  *   corrupt                unreadable: no level can be known
  *   object                 readManifest() would accept it, so its level is an ordinary
  *                          stored level (a file that changed between the two reads)
+ *   a value that does not serialize
+ *                          unreadable, whatever the file: the level cannot be kept
  */
 export function storedGateLevelFromRaw(read: GateManifestRead): StoredGateLevel {
   switch (read.kind) {
     case 'absent':
       return { origin: 'manifest', value: undefined };
     case 'corrupt':
-      return { origin: 'unreadable', value: undefined };
+      return UNREADABLE_GATE_LEVEL;
     case 'object':
-      return { origin: 'manifest', value: rawGateLevelOf(read.raw) };
     case 'rejected': {
       const value = rawGateLevelOf(read.raw);
-      return { origin: value === undefined ? 'manifest' : 'rejected', value };
+      if (value !== undefined && !serializes(value)) return UNREADABLE_GATE_LEVEL;
+      return { origin: read.kind === 'rejected' && value !== undefined ? 'rejected' : 'manifest', value };
     }
     default: {
       const exhaustive: never = read;
@@ -134,19 +153,44 @@ export function storedGateLevelFromRaw(read: GateManifestRead): StoredGateLevel 
 
 /**
  * Where init finds the stored level when it reads the machine manifest: the manifest
- * readManifest() returned, else (unless --reset asked to forget it) the raw file.
- * Never throws — readGateManifest() reports every failure as a result.
+ * readManifest() returned, else the raw file. Never throws — readGateManifest() reports
+ * every failure as a result.
  *
- * Every writer that replaces the manifest reads the level through this one function, so
- * `devflow init` and `devflow init --hud-only` keep and report the same stored level.
+ * This is the level the run replaces, which the summary names. Every writer that
+ * replaces the manifest reads it through this one function, so `devflow init` and
+ * `devflow init --hud-only` report the same stored level. `--reset` forgets a level in
+ * what it writes (see {@link carriedGateLevel}), not in what it reports, except for a
+ * manifest it cannot read: there is no level to name, and the reset forgets it anyway.
  */
 export async function readStoredGateLevel(
   devflowDir: string,
   manifest: ManifestData | null,
   reset: boolean,
 ): Promise<StoredGateLevel> {
-  if (manifest !== null || reset) return { origin: 'manifest', value: manifest?.features.gateLevel };
-  return storedGateLevelFromRaw(await readGateManifest(devflowDir));
+  if (manifest !== null) return { origin: 'manifest', value: manifest.features.gateLevel };
+  const stored = storedGateLevelFromRaw(await readGateManifest(devflowDir));
+  return reset && stored.origin === 'unreadable' ? { origin: 'manifest', value: undefined } : stored;
+}
+
+/**
+ * The level a full init starts from, and where it was found: what the manifest it writes
+ * holds unless --gate-level or the wizard answer sets another. Pure.
+ *
+ * The seed holds the level of the manifest readManifest() returned, and none after
+ * --reset. When readManifest() returned none, the raw reading is the level to keep: init
+ * never writes a level the user did not choose, and `init --hud-only` keeps the same one.
+ * That holds for a refused manifest and for a file that changed between the two reads.
+ * --reset forgets it.
+ */
+export function carriedGateLevel(input: {
+  manifest: ManifestData | null;
+  reset: boolean;
+  stored: StoredGateLevel;
+  seedLevel: unknown;
+}): StoredGateLevel {
+  const { manifest, reset, stored, seedLevel } = input;
+  if (manifest !== null || reset) return { origin: 'manifest', value: seedLevel };
+  return stored;
 }
 
 // ── Reading a stored level ─────────────────────────────────────────────────────
@@ -439,7 +483,7 @@ export type GateLevelInitOutcome =
 export async function resolveGateLevelForInit(opts: {
   cliLevel: GateLevel | undefined;
   stored: unknown;
-  storedOrigin?: StoredGateLevelOrigin;
+  storedOrigin: StoredGateLevelOrigin;
   mode: 'recommended' | 'advanced';
   modePromptShown: boolean;
   isTTY: boolean;
