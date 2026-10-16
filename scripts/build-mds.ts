@@ -55,10 +55,10 @@
  * byte offset 0 verbatim (it is never interpolated), so block 1 survives
  * compilation unchanged and is removed from the compiled bytes.
  *
- * Learning variants (D-LEARNING-VARIANTS, src/core/learning-variants.ts): after the
- * strip, a command or agent body is split on its learning markers. The learning-on
+ * Curation variants (D-LEARNING-VARIANTS, src/core/curation-variants.ts): after the
+ * strip, a command or agent body is split on its curation markers. The curation-on
  * variant is written to the host's own path and, when the host carries an arm, the
- * learning-off variant to dist/learning-off/{commands,agents}/{name}.md. The split
+ * curation-off variant to dist/curation-off/{commands,agents}/{name}.md. The split
  * runs on the compiled text, so it costs no compileFile call and nothing against
  * the per-module compile-time guard. A reference module may carry no marker: its
  * sections ship as written, so a marker there is refused.
@@ -87,8 +87,9 @@
  * Prune: after a clean build, every `.md` in dist/commands/ and dist/agents/ that
  * no host emitted is deleted (pruneOrphanCommands, pruneOrphanAgents), and the same
  * sweep runs recursively over dist/skills/git/references/ (pruneOrphanReferences)
- * and dist/learning-off/ (pruneOrphanLearningOff). Every sweep is keyed on the files
- * this build actually wrote.
+ * and dist/curation-off/ (pruneOrphanCurationOff). Every sweep is keyed on the files
+ * this build actually wrote. The retired off tree (LEGACY_OFF_OUTPUT_DIR) is removed
+ * whole (pruneLegacyOffTree), because no host writes there.
  * dist/agents/ is gitignored and outranks src/assets/agents/ in both the
  * installer's resolve and loadShippedAgentDefaults's merge, so a file left there is
  * installed in preference to the audited source on every `devflow init`; the
@@ -123,13 +124,14 @@ import {
 } from "../src/core/mds-variants.js";
 import { MAX_REFERENCE_SWEEP_DEPTH } from "../src/core/reference-sweep.js";
 import {
-  LEARNING_OFF_OUTPUT_DIR,
-  containsLearningMarker,
-  describeLearningSplitError,
-  learningOffRelPath,
-  splitLearningVariants,
-  type LearningSplitError,
-} from "../src/core/learning-variants.js";
+  CURATION_OFF_OUTPUT_DIR,
+  LEGACY_OFF_OUTPUT_DIR,
+  containsCurationMarker,
+  describeCurationSplitError,
+  curationOffRelPath,
+  splitCurationVariants,
+  type CurationSplitError,
+} from "../src/core/curation-variants.js";
 
 // DEVFLOW_MDS_ROOT overrides the repo root for tests that need to operate on a
 // temporary directory instead of the real src/assets/commands/ tree.
@@ -175,10 +177,10 @@ interface CompileOutcome {
   source: string;
   dest: string;
   warnings: string[];
-  /** Absolute path of every file this host wrote, learning-off variant included. */
+  /** Absolute path of every file this host wrote, curation-off variant included. */
   written: string[];
-  /** 1 when the host wrote a learning-off variant, else 0. */
-  learningOff: number;
+  /** 1 when the host wrote a curation-off variant, else 0. */
+  curationOff: number;
 }
 
 function formatMdsError(err: unknown, sourcePath: string): string {
@@ -617,12 +619,12 @@ type HostPlan =
       /** The single file this host emits, resolved absolute. */
       readonly dest: string;
       /**
-       * Where this host's learning-off variant lands if the body carries an arm,
+       * Where this host's curation-off variant lands if the body carries an arm,
        * resolved absolute. Planned for every one-file host but NOT claimed in
        * destsOf: it is written only after the split, and it sits in a tree of its
        * own, so two hosts can collide on it only by colliding on `dest` first.
        */
-      readonly learningOffDest: string;
+      readonly curationOffDest: string;
     }
   | {
       readonly variant: "skill-refs";
@@ -686,7 +688,7 @@ function planSingleFile(
     variant,
     outAbs,
     dest: path.join(outAbs, `${nameResult.value}.md`),
-    learningOffDest: path.resolve(ROOT, ...learningOffRelPath(variant, `${nameResult.value}.md`).split("/")),
+    curationOffDest: path.resolve(ROOT, ...curationOffRelPath(variant, `${nameResult.value}.md`).split("/")),
   };
 }
 
@@ -782,37 +784,37 @@ function planHost(host: HostEntry): HostPlan {
 }
 
 /**
- * The text a learning-split refusal can be located by: the nearest content line
+ * The text a curation-split refusal can be located by: the nearest content line
  * above the marker it names.
  *
- * The line numbers in a LearningSplitError count the COMPILED body, because the
+ * The line numbers in a CurationSplitError count the COMPILED body, because the
  * split runs after the compile, and a marker that came from a partial has no line
  * in the host at all. A quoted neighbour is what lets an author find the spot in
  * either. Marker lines and blank lines are skipped, and the scan is bounded by the
  * body's own length.
  */
-function learningSplitNeighbour(body: string, error: LearningSplitError): string | null {
+function curationSplitNeighbour(body: string, error: CurationSplitError): string | null {
   const at = "line" in error ? error.line : error.openedAt;
   const lines = body.split("\n");
   for (let i = Math.min(at, lines.length) - 2; i >= 0; i--) {
     const text = lines[i].trim();
-    if (text !== "" && !containsLearningMarker(text)) return text.slice(0, 80);
+    if (text !== "" && !containsCurationMarker(text)) return text.slice(0, 80);
   }
   return null;
 }
 
 /**
- * Render a learning-split refusal as the error the build throws.
+ * Render a curation-split refusal as the error the build throws.
  *
- * The wording lives in describeLearningSplitError so the build and its tests share
- * one text; this adds the host and a quoted neighbour (see learningSplitNeighbour),
+ * The wording lives in describeCurationSplitError so the build and its tests share
+ * one text; this adds the host and a quoted neighbour (see curationSplitNeighbour),
  * and returns the Error so main()'s aggregation keeps the single exit.
  */
-function learningSplitRefusal(rel: string, error: LearningSplitError, body: string): Error {
-  const neighbour = learningSplitNeighbour(body, error);
+function curationSplitRefusal(rel: string, error: CurationSplitError, body: string): Error {
+  const neighbour = curationSplitNeighbour(body, error);
   const where = neighbour === null ? "" : ` (below "${neighbour}")`;
   return new Error(
-    `${rel}: learning-variant split refused — ${describeLearningSplitError(error)}${where}. ` +
+    `${rel}: curation-variant split refused — ${describeCurationSplitError(error)}${where}. ` +
     `Line numbers count the compiled output, not the source.`,
   );
 }
@@ -847,22 +849,22 @@ function materializeOutputs(host: HostEntry, plan: HostPlan, body: string): Plan
   const rel = path.relative(ROOT, host.file);
 
   if (plan.variant !== "skill-refs") {
-    // D-LEARNING-VARIANTS: the learning-on variant is the artifact at the host's own
-    // path, so every existing reader of dist/ keeps working; the learning-off variant
+    // D-LEARNING-VARIANTS: the curation-on variant is the artifact at the host's own
+    // path, so every existing reader of dist/ keeps working; the curation-off variant
     // exists only for a host that has an arm.
-    const split = splitLearningVariants(body);
-    if (!split.ok) throw learningSplitRefusal(rel, split.error, body);
+    const split = splitCurationVariants(body);
+    if (!split.ok) throw curationSplitRefusal(rel, split.error, body);
     const outputs: PlannedOutput[] = [{ dest: plan.dest, content: split.value.on }];
-    if (split.value.hasArms) outputs.push({ dest: plan.learningOffDest, content: split.value.off });
+    if (split.value.hasArms) outputs.push({ dest: plan.curationOffDest, content: split.value.off });
     return outputs;
   }
 
   // A reference module fans out into sections that ship as written, with no variant
   // to select: a marker in one would reach the installed reference as text.
-  if (containsLearningMarker(body)) {
+  if (containsCurationMarker(body)) {
     throw new Error(
-      `${rel}: a reference module may not carry learning-variant markers — its sections ship as ` +
-      `written, so a marker would reach the installed reference as text. Learning arms belong in a ` +
+      `${rel}: a reference module may not carry curation-variant markers — its sections ship as ` +
+      `written, so a marker would reach the installed reference as text. Curation arms belong in a ` +
       `command or agent host.`,
     );
   }
@@ -918,7 +920,7 @@ async function compileHost(host: HostEntry, plan: HostPlan): Promise<CompileOutc
     }
   }
 
-  const learningOff = plan.variant !== "skill-refs" && outputs.length > 1 ? 1 : 0;
+  const curationOff = plan.variant !== "skill-refs" && outputs.length > 1 ? 1 : 0;
   const destLabel = plan.variant === "skill-refs" && outputs.length > 1
     ? `${path.relative(ROOT, outAbs)}/ (${outputs.length} file(s))`
     : outputs.map(o => path.relative(ROOT, o.dest)).join(" + ");
@@ -928,7 +930,7 @@ async function compileHost(host: HostEntry, plan: HostPlan): Promise<CompileOutc
     dest: destLabel,
     warnings: result.warnings,
     written: outputs.map(o => o.dest),
-    learningOff,
+    curationOff,
   };
 }
 
@@ -985,16 +987,40 @@ function pruneOrphanReferences(claimed: ReadonlySet<string>): string[] {
 }
 
 /**
- * Delete every `.md` under dist/learning-off/ that this build did not write.
+ * Delete every `.md` under dist/curation-off/ that this build did not write.
  *
- * The learning-off variant of a host exists only while the host carries an arm, so
+ * The curation-off variant of a host exists only while the host carries an arm, so
  * the set of files that should be here is known only from what the build wrote:
  * a host that loses its last arm leaves its old variant behind, and a variant left
- * there would be installed on a learning-off machine in place of the real prompt.
+ * there would be installed on a curation-off machine in place of the real prompt.
  * Recursive, so a file parked under any other subdirectory of the tree goes too.
  */
-function pruneOrphanLearningOff(written: ReadonlySet<string>): string[] {
-  return pruneOrphans(path.resolve(ROOT, LEARNING_OFF_OUTPUT_DIR), written, true);
+function pruneOrphanCurationOff(written: ReadonlySet<string>): string[] {
+  return pruneOrphans(path.resolve(ROOT, CURATION_OFF_OUTPUT_DIR), written, true);
+}
+
+/**
+ * Remove the retired off tree (LEGACY_OFF_OUTPUT_DIR) whole, when it exists.
+ *
+ * No build writes there any more and no installer reads it, so every file in it is
+ * stale. It is gitignored, but a checkout that built before the rename still holds
+ * it, and a package packed from that checkout would ship it. The sweep is not keyed
+ * on written files: the folder belongs to no host. A link in its place is removed as
+ * a link, and its target is left alone.
+ *
+ * @returns The repo-relative path removed, or an empty list when it was absent.
+ */
+function pruneLegacyOffTree(): string[] {
+  const dirAbs = path.resolve(ROOT, LEGACY_OFF_OUTPUT_DIR);
+  try {
+    fs.lstatSync(dirAbs);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return [];
+    throw err;
+  }
+  fs.rmSync(dirAbs, { recursive: true, force: true });
+  return [path.relative(ROOT, dirAbs)];
 }
 
 /**
@@ -1174,7 +1200,7 @@ async function main(): Promise<void> {
 
   // Every planned host was written (a refusal would have exited above), so the
   // written set is complete and anything else in these trees is stale. Keyed on
-  // what was WRITTEN rather than what was planned: a learning-off variant is
+  // what was WRITTEN rather than what was planned: a curation-off variant is
   // planned for every one-file host and written only for one with an arm.
   const writtenDests = new Set(outcomes.flatMap(o => o.written));
   for (const rel of pruneOrphanCommands(writtenDests)) {
@@ -1186,11 +1212,14 @@ async function main(): Promise<void> {
   for (const rel of pruneOrphanReferences(writtenDests)) {
     console.log(`  pruned:   ${rel} (no reference module)`);
   }
-  for (const rel of pruneOrphanLearningOff(writtenDests)) {
-    console.log(`  pruned:   ${rel} (no learning arm)`);
+  for (const rel of pruneOrphanCurationOff(writtenDests)) {
+    console.log(`  pruned:   ${rel} (no curation arm)`);
   }
-  const learningOffCount = outcomes.reduce((n, o) => n + o.learningOff, 0);
-  console.log(`  ${learningOffCount} learning-off variant(s) written`);
+  for (const rel of pruneLegacyOffTree()) {
+    console.log(`  pruned:   ${rel} (retired off tree)`);
+  }
+  const curationOffCount = outcomes.reduce((n, o) => n + o.curationOff, 0);
+  console.log(`  ${curationOffCount} curation-off variant(s) written`);
 
   console.log("\nMDS commands build complete!");
 }

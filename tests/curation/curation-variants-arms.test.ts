@@ -1,28 +1,28 @@
 /**
- * The learning arms of the real prompts (D-LEARNING-VARIANTS; AC-127 to AC-131,
+ * The curation arms of the real prompts (D-LEARNING-VARIANTS; AC-127 to AC-131,
  * AC-133, AC-138, AC-153).
  *
- * tests/learning/learning-variants.test.ts holds the splitter and
- * tests/learning/learning-variants-build.test.ts the build wiring, both over fixtures.
+ * tests/curation/curation-variants.test.ts holds the splitter and
+ * tests/curation/curation-variants-build.test.ts the build wiring, both over fixtures.
  * This file holds the ARMS THE COMMANDS AND AGENTS ACTUALLY CARRY, read from the built
  * tree:
  *
- *   parity        each learning-on variant is the compiled host with every arm resolved
- *                 on, and each learning-off variant the same with every arm resolved off
+ *   parity        each curation-on variant is the compiled host with every arm resolved
+ *                 on, and each curation-off variant the same with every arm resolved off
  *                 (an independent line scanner, not the splitter the build uses);
- *   arms          an on arm is learning text, an off arm never is. A substitution pair
+ *   arms          an on arm is curation text, an off arm never is. A substitution pair
  *                 whose two sides differ only in a list or step number is structural:
- *                 the item follows a learning-only item, so its number depends on the
+ *                 the item follows a curation-only item, so its number depends on the
  *                 variant;
- *   off tree      nothing under dist/learning-off holds a learning token, and no off agent
+ *   off tree      nothing under dist/curation-off holds a curation token, and no off agent
  *                 preloads apply-decisions. The one thing outside the rule is the settings
  *                 block's grammar line, which names the CURATION field of the line the
  *                 resolver prints: SETTINGS_LINE_RE is pinned and the field does not
  *                 move, so the 8 off hosts that keep the block keep that line;
  *   completeness  every artifact that holds a token has an off counterpart, the Curate
- *                 agent excepted (it runs only when learning is on);
+ *                 agent excepted (it runs only when curation is on);
  *   frontmatter   an off agent's frontmatter is its on frontmatter minus the preload line;
- *   settings      14 hosts carry the settings block when learning is on, 8 when it is off;
+ *   settings      14 hosts carry the settings block when curation is on, 8 when it is off;
  *   anchors       no status-line anchor the sampler reads sits inside an arm, and no off
  *                 arm repeats one, so the frozen fixture is untouched.
  *
@@ -44,30 +44,30 @@ import {
   walkFiles,
 } from '../helpers.js'
 import {
-  LEARNING_OFF_FILES,
-  LEARNING_VARIANT_HOSTS,
+  CURATION_OFF_FILES,
+  CURATION_VARIANT_HOSTS,
   MDS_COMMAND_HOSTS,
   MDS_GENERATOR_HOSTS,
   SETTINGS_BLOCK_HOSTS,
-  SETTINGS_BLOCK_HOSTS_LEARNING_OFF,
+  SETTINGS_BLOCK_HOSTS_CURATION_OFF,
 } from '../fixtures/mds-manifest.js'
-import { LEARNING_OFF_OUTPUT_DIR } from '../../src/core/learning-variants.js'
+import { CURATION_OFF_OUTPUT_DIR } from '../../src/core/curation-variants.js'
 
-/** Settings blocks in the learning-on build: all 14 command hosts. */
+/** Settings blocks in the curation-on build: all 14 command hosts. */
 const ON_BLOCK_COUNT = 14
-/** Settings blocks in the learning-off build: the hosts with a consumer other than learning. */
+/** Settings blocks in the curation-off build: the hosts with a consumer other than curation. */
 const OFF_BLOCK_COUNT = 8
 
-const TOKEN_RE = /DECISIONS_CONTEXT|decisions_context|apply-decisions|learning\/index\.md|learning\/decisions\.md|CURATION/
+const TOKEN_RE = /DECISIONS_CONTEXT|decisions_context|apply-decisions|curation\/index\.md|curation\/decisions\.md|CURATION/
 /** What an on arm may hold besides a token: the heading, step and tree wording that names decisions. */
-const LEARNING_WORD_RE = /\b[Dd]ecisions?\b|\bADR\b|pitfall/
-const MARKER_RE = /^[ \t]*<!-- learning:(on|off|end) -->[ \t]*$/
+const CURATION_WORD_RE = /\b[Dd]ecisions?\b|\bADR\b|pitfall/
+const MARKER_RE = /^[ \t]*<!-- curation:(on|off|end) -->[ \t]*$/
 const SETTINGS_OPENING = '**Resolve the settings line**'
 /** The settings grammar paragraph: one line, naming every field of the resolver's output, CURATION included. */
 const SETTINGS_GRAMMAR_LINE_RE = /TRACKER=<github\|jira\|linear>/
 const PRELOAD = 'devflow:apply-decisions'
 
-const OFF_DIR = path.join(ROOT, LEARNING_OFF_OUTPUT_DIR)
+const OFF_DIR = path.join(ROOT, CURATION_OFF_OUTPUT_DIR)
 
 type Kind = 'commands' | 'agents'
 interface Host { readonly kind: Kind; readonly name: string; readonly source: string }
@@ -125,16 +125,16 @@ function onlyRenumbered(a: string, b: string): boolean {
   return a !== b && a.replace(/\d+/g, '#') === b.replace(/\d+/g, '#')
 }
 
-/** Named collector: the arm problems of one body — an on side without learning text, an off side with a token. */
+/** Named collector: the arm problems of one body — an on side without curation text, an off side with a token. */
 function collectArmDefects(label: string, body: string): string[] {
   const out: string[] = []
   collectArmGroups(body).forEach((group, i) => {
     if (group.on !== null) {
-      const learning = TOKEN_RE.test(group.on) || LEARNING_WORD_RE.test(group.on)
+      const curation = TOKEN_RE.test(group.on) || CURATION_WORD_RE.test(group.on)
       const structural = group.off !== null && onlyRenumbered(group.on, group.off)
-      if (!learning && !structural) out.push(`${label}: on arm ${i + 1} holds no learning text — "${group.on.trim().slice(0, 60)}"`)
+      if (!curation && !structural) out.push(`${label}: on arm ${i + 1} holds no curation text — "${group.on.trim().slice(0, 60)}"`)
     }
-    if (group.off !== null && TOKEN_RE.test(group.off)) out.push(`${label}: off arm ${i + 1} holds a learning token — "${group.off.trim().slice(0, 60)}"`)
+    if (group.off !== null && TOKEN_RE.test(group.off)) out.push(`${label}: off arm ${i + 1} holds a curation token — "${group.off.trim().slice(0, 60)}"`)
   })
   return out
 }
@@ -144,7 +144,7 @@ function withoutSettingsGrammar(text: string): string {
   return text.split('\n').filter(l => !SETTINGS_GRAMMAR_LINE_RE.test(l)).join('\n')
 }
 
-/** Named collector: the learning tokens one off-variant text holds, the settings grammar line aside. */
+/** Named collector: the curation tokens one off-variant text holds, the settings grammar line aside. */
 function collectOffTokens(label: string, text: string): string[] {
   return withoutSettingsGrammar(text).split('\n')
     .map((line, i) => [line, i + 1] as const)
@@ -184,7 +184,7 @@ const rawBody = (host: Host): string => {
   return body
 }
 
-/** The learning-on file of a host, as the build wrote it. */
+/** The curation-on file of a host, as the build wrote it. */
 const onFile = (host: Host): string => readFileSync(path.join(ROOT, 'dist', host.kind, `${host.name}.md`), 'utf-8')
 
 /**
@@ -203,33 +203,33 @@ function comparable(host: Host, file: string): string {
 }
 
 describe('the roster of arm-bearing hosts is the hosts whose compiled body carries a marker', () => {
-  it('a host has a learning-off variant exactly when its compiled body carries an arm', () => {
+  it('a host has a curation-off variant exactly when its compiled body carries an arm', () => {
     const withArms = collectHosts().filter(h => rawBody(h).split('\n').some(l => MARKER_RE.test(l))).map(h => `${h.kind}/${h.name}`).sort()
-    expect(withArms).toEqual([...LEARNING_VARIANT_HOSTS].sort())
+    expect(withArms).toEqual([...CURATION_VARIANT_HOSTS].sort())
   })
 
   it('git is a generator host with no arm, so it has no variant', () => {
     expect(MDS_GENERATOR_HOSTS).toContain('git')
-    expect(LEARNING_VARIANT_HOSTS).not.toContain('agents/git')
+    expect(CURATION_VARIANT_HOSTS).not.toContain('agents/git')
   })
 })
 
 describe('parity: each variant is the compiled host with its arms resolved (AC-127)', () => {
-  it('the learning-on file of every arm-bearing host equals the body with every arm resolved on', () => {
-    const hosts = collectHosts().filter(h => LEARNING_VARIANT_HOSTS.includes(`${h.kind}/${h.name}`))
+  it('the curation-on file of every arm-bearing host equals the body with every arm resolved on', () => {
+    const hosts = collectHosts().filter(h => CURATION_VARIANT_HOSTS.includes(`${h.kind}/${h.name}`))
     expect(hosts.length, 'arm-bearing hosts').toBeGreaterThanOrEqual(23)
     for (const host of hosts) {
       const raw = rawBody(host)
-      expect(comparable(host, onFile(host)), `${host.kind}/${host.name} learning-on`).toBe(expectedVariant(raw, 'on'))
+      expect(comparable(host, onFile(host)), `${host.kind}/${host.name} curation-on`).toBe(expectedVariant(raw, 'on'))
     }
   })
 
-  it('the learning-off file of every arm-bearing host equals the body with every arm resolved off', () => {
-    const hosts = collectHosts().filter(h => LEARNING_VARIANT_HOSTS.includes(`${h.kind}/${h.name}`))
+  it('the curation-off file of every arm-bearing host equals the body with every arm resolved off', () => {
+    const hosts = collectHosts().filter(h => CURATION_VARIANT_HOSTS.includes(`${h.kind}/${h.name}`))
     for (const host of hosts) {
       const off = resolveLearningOffSource(host.kind, host.name)
-      expect(off, `${host.kind}/${host.name} has a learning-off file`).not.toBeNull()
-      expect(comparable(host, off as string), `${host.kind}/${host.name} learning-off`).toBe(expectedVariant(rawBody(host), 'off'))
+      expect(off, `${host.kind}/${host.name} has a curation-off file`).not.toBeNull()
+      expect(comparable(host, off as string), `${host.kind}/${host.name} curation-off`).toBe(expectedVariant(rawBody(host), 'off'))
     }
   })
 
@@ -246,20 +246,20 @@ describe('parity: each variant is the compiled host with its arms resolved (AC-1
   })
 
   it('the independent scanner resolves an arm pair, an else and a lone on arm the way the build does', () => {
-    const body = ['a', '<!-- learning:on -->', 'x', '<!-- learning:off -->', 'y', '<!-- learning:end -->', 'b', '  <!-- learning:on -->', 'z', '  <!-- learning:end -->', 'c'].join('\n')
+    const body = ['a', '<!-- curation:on -->', 'x', '<!-- curation:off -->', 'y', '<!-- curation:end -->', 'b', '  <!-- curation:on -->', 'z', '  <!-- curation:end -->', 'c'].join('\n')
     expect(resolveArms(body, 'on')).toBe('a\nx\nb\nz\nc')
     expect(resolveArms(body, 'off')).toBe('a\ny\nb\nc')
   })
 })
 
-describe('every on arm is learning text and no off arm is (AC-128)', () => {
+describe('every on arm is curation text and no off arm is (AC-128)', () => {
   it('holds in every arm-bearing host', () => {
     const defects = collectHosts().flatMap(h => collectArmDefects(`${h.kind}/${h.name}`, rawBody(h)))
     expect(defects).toEqual([])
   })
 
   it('the arms are found: every host carries at least one group, and the corpus holds both sides', () => {
-    const groups = collectHosts().filter(h => LEARNING_VARIANT_HOSTS.includes(`${h.kind}/${h.name}`)).flatMap(h => collectArmGroups(rawBody(h)))
+    const groups = collectHosts().filter(h => CURATION_VARIANT_HOSTS.includes(`${h.kind}/${h.name}`)).flatMap(h => collectArmGroups(rawBody(h)))
     expect(groups.length, 'arm groups found').toBeGreaterThanOrEqual(100)
     expect(groups.some(g => g.on !== null && g.off !== null), 'a substitution pair').toBe(true)
     expect(groups.some(g => g.on !== null && g.off === null), 'a lone on arm').toBe(true)
@@ -267,22 +267,22 @@ describe('every on arm is learning text and no off arm is (AC-128)', () => {
 
   it('known-bad probes: an on arm with unrelated text, an off arm with a token, and an unrelated substitution are reported', () => {
     const wrap = (...parts: string[]): string => parts.join('\n')
-    expect(collectArmDefects('p', wrap('<!-- learning:on -->', 'Hello world', '<!-- learning:end -->'))).toEqual([
-      'p: on arm 1 holds no learning text — "Hello world"',
+    expect(collectArmDefects('p', wrap('<!-- curation:on -->', 'Hello world', '<!-- curation:end -->'))).toEqual([
+      'p: on arm 1 holds no curation text — "Hello world"',
     ])
-    expect(collectArmDefects('p', wrap('<!-- learning:on -->', 'DECISIONS_CONTEXT: x', '<!-- learning:off -->', 'DECISIONS_CONTEXT: y', '<!-- learning:end -->'))).toEqual([
-      'p: off arm 1 holds a learning token — "DECISIONS_CONTEXT: y"',
+    expect(collectArmDefects('p', wrap('<!-- curation:on -->', 'DECISIONS_CONTEXT: x', '<!-- curation:off -->', 'DECISIONS_CONTEXT: y', '<!-- curation:end -->'))).toEqual([
+      'p: off arm 1 holds a curation token — "DECISIONS_CONTEXT: y"',
     ])
-    expect(collectArmDefects('p', wrap('<!-- learning:on -->', '4. **Assess**', '<!-- learning:off -->', '3. **Assess**', '<!-- learning:end -->'))).toEqual([])
-    expect(collectArmDefects('p', wrap('<!-- learning:on -->', '4. **Assess**', '<!-- learning:off -->', '3. **Weigh**', '<!-- learning:end -->'))).toHaveLength(1)
+    expect(collectArmDefects('p', wrap('<!-- curation:on -->', '4. **Assess**', '<!-- curation:off -->', '3. **Assess**', '<!-- curation:end -->'))).toEqual([])
+    expect(collectArmDefects('p', wrap('<!-- curation:on -->', '4. **Assess**', '<!-- curation:off -->', '3. **Weigh**', '<!-- curation:end -->'))).toHaveLength(1)
   })
 })
 
-describe('nothing under dist/learning-off holds a learning token, and no off agent preloads apply-decisions (AC-129)', () => {
+describe('nothing under dist/curation-off holds a curation token, and no off agent preloads apply-decisions (AC-129)', () => {
   const offFiles = (): string[] => walkFiles(OFF_DIR, f => f.endsWith('.md')).map(f => path.relative(OFF_DIR, f).split(path.sep).join('/'))
 
   it('the tree is non-empty and holds exactly the roster', () => {
-    expect(offFiles().sort()).toEqual([...LEARNING_OFF_FILES].sort())
+    expect(offFiles().sort()).toEqual([...CURATION_OFF_FILES].sort())
   })
 
   it('no file holds a token outside the settings grammar line', () => {
@@ -290,7 +290,7 @@ describe('nothing under dist/learning-off holds a learning token, and no off age
     expect(found).toEqual([])
   })
 
-  it('no off agent preloads apply-decisions, and every agent that declared it still does when learning is on', () => {
+  it('no off agent preloads apply-decisions, and every agent that declared it still does when curation is on', () => {
     const offAgents = offFiles().filter(rel => rel.startsWith('agents/'))
     expect(offAgents.length, 'off agents').toBe(11)
     for (const rel of offAgents) {
@@ -299,14 +299,14 @@ describe('nothing under dist/learning-off holds a learning token, and no off age
       expect(readFileSync(path.join(OFF_DIR, rel), 'utf-8'), `${rel} names the skill`).not.toContain(PRELOAD)
       const on = parseFrontmatterSkills(resolveAgentSource(name).content)
       if (['skim'].includes(name)) expect(on, `${name} never preloaded it`).not.toContain('apply-decisions')
-      else expect(on, `${name} preloads it when learning is on`).toContain('apply-decisions')
+      else expect(on, `${name} preloads it when curation is on`).toContain('apply-decisions')
     }
   })
 
-  it('the learning-on tree is the contrast: it holds tokens in every host', () => {
+  it('the curation-on tree is the contrast: it holds tokens in every host', () => {
     for (const rel of offFiles()) {
       const text = readFileSync(path.join(ROOT, 'dist', rel), 'utf-8')
-      expect(TOKEN_RE.test(withoutSettingsGrammar(text)), `${rel} (learning-on)`).toBe(true)
+      expect(TOKEN_RE.test(withoutSettingsGrammar(text)), `${rel} (curation-on)`).toBe(true)
     }
   })
 
@@ -320,7 +320,7 @@ describe('nothing under dist/learning-off holds a learning token, and no off age
 
   it('the settings grammar line is the one exemption: it is exempt only by its template', () => {
     const block = requireDistFile('implement.md').split('\n').filter(l => SETTINGS_GRAMMAR_LINE_RE.test(l))
-    expect(block, 'one grammar line in the learning-on implement.md').toHaveLength(1)
+    expect(block, 'one grammar line in the curation-on implement.md').toHaveLength(1)
     expect(TOKEN_RE.test(block[0])).toBe(true)
     expect(collectOffTokens('r', block[0])).toEqual([])
     expect(collectOffTokens('r', block[0].replace('TRACKER=<github|jira|linear>', 'TRACKER=<x>'))).toHaveLength(1)
@@ -340,23 +340,23 @@ describe('completeness: every artifact that holds a token has an off counterpart
     return [...commands, ...agents]
   }
 
-  /** The one artifact that is allowed to hold learning text and have no variant: it runs only when learning is on. */
+  /** The one artifact that is allowed to hold curation text and have no variant: it runs only when curation is on. */
   const EXEMPT = 'agents/curate.md'
 
   function collectMissingCounterparts(artifacts: ReadonlyArray<{ rel: string; text: string }>, hasOff: (rel: string) => boolean): string[] {
     return artifacts
       .filter(a => a.rel !== EXEMPT && TOKEN_RE.test(withoutSettingsGrammar(a.text)) && !hasOff(a.rel))
-      .map(a => `${a.rel} holds a learning token and has no learning-off variant`)
+      .map(a => `${a.rel} holds a curation token and has no curation-off variant`)
   }
 
-  it('every artifact with a token outside the settings grammar has a file under dist/learning-off', () => {
+  it('every artifact with a token outside the settings grammar has a file under dist/curation-off', () => {
     const artifacts = collectArtifacts()
     expect(artifacts.length, 'artifacts scanned').toBeGreaterThanOrEqual(25)
     expect(artifacts.map(a => a.rel), 'the Curate agent is among them, so the exemption is exercised').toContain(EXEMPT)
     expect(collectMissingCounterparts(artifacts, rel => existsSync(path.join(OFF_DIR, rel)))).toEqual([])
   })
 
-  it('every artifact whose only token is the settings grammar still has a variant when it carries a learning arm', () => {
+  it('every artifact whose only token is the settings grammar still has a variant when it carries a curation arm', () => {
     const artifacts = collectArtifacts().filter(a => a.rel.startsWith('commands/'))
     for (const a of artifacts) expect(existsSync(path.join(OFF_DIR, a.rel)), a.rel).toBe(true)
   })
@@ -367,7 +367,7 @@ describe('completeness: every artifact that holds a token has an off counterpart
       { rel: EXEMPT, text: 'Reads learning/decisions.md.' },
       { rel: 'agents/validate.md', text: 'No token here.' },
     ]
-    expect(collectMissingCounterparts(probe, () => false)).toEqual(['agents/triage.md holds a learning token and has no learning-off variant'])
+    expect(collectMissingCounterparts(probe, () => false)).toEqual(['agents/triage.md holds a curation token and has no curation-off variant'])
     expect(collectMissingCounterparts(probe, rel => rel === 'agents/triage.md')).toEqual([])
   })
 })
@@ -405,37 +405,37 @@ describe('settings blocks per variant (AC-138)', () => {
   const carrying = (read: (host: string) => string | null): string[] =>
     MDS_COMMAND_HOSTS.filter(h => (read(h) ?? '').includes(SETTINGS_OPENING)).sort()
 
-  it('the learning-on build carries the block in all 14 hosts, once each', () => {
+  it('the curation-on build carries the block in all 14 hosts, once each', () => {
     expect(carrying(h => requireDistFile(`${h}.md`))).toEqual([...SETTINGS_BLOCK_HOSTS].sort())
     expect(SETTINGS_BLOCK_HOSTS).toHaveLength(ON_BLOCK_COUNT)
     for (const h of MDS_COMMAND_HOSTS) expect(requireDistFile(`${h}.md`).split(SETTINGS_OPENING).length - 1, h).toBe(1)
   })
 
-  it('the learning-off build carries it in the 8 hosts with a consumer other than learning, and the other six sit in the on arm', () => {
+  it('the curation-off build carries it in the 8 hosts with a consumer other than curation, and the other six sit in the on arm', () => {
     const off = carrying(h => resolveLearningOffSource('commands', h))
-    expect(off).toEqual([...SETTINGS_BLOCK_HOSTS_LEARNING_OFF].sort())
+    expect(off).toEqual([...SETTINGS_BLOCK_HOSTS_CURATION_OFF].sort())
     expect(off).toHaveLength(OFF_BLOCK_COUNT)
-    const sixOnly = SETTINGS_BLOCK_HOSTS.filter(h => !(SETTINGS_BLOCK_HOSTS_LEARNING_OFF as readonly string[]).includes(h))
+    const sixOnly = SETTINGS_BLOCK_HOSTS.filter(h => !(SETTINGS_BLOCK_HOSTS_CURATION_OFF as readonly string[]).includes(h))
     expect(sixOnly).toHaveLength(ON_BLOCK_COUNT - OFF_BLOCK_COUNT)
     for (const h of sixOnly) {
       const group = collectArmGroups(rawBody({ kind: 'commands', name: h, source: '' })).find(g => g.on !== null && g.on.includes(SETTINGS_OPENING))
-      expect(group, `${h}: the block sits inside a learning-on arm`).toBeDefined()
-      expect(resolveLearningOffSource('commands', h), `${h} (learning-off)`).not.toContain(SETTINGS_OPENING)
+      expect(group, `${h}: the block sits inside a curation-on arm`).toBeDefined()
+      expect(resolveLearningOffSource('commands', h), `${h} (curation-off)`).not.toContain(SETTINGS_OPENING)
     }
   })
 
-  it('each off host that keeps the block has a consumer left that is not learning', () => {
-    for (const h of SETTINGS_BLOCK_HOSTS_LEARNING_OFF) {
+  it('each off host that keeps the block has a consumer left that is not curation', () => {
+    for (const h of SETTINGS_BLOCK_HOSTS_CURATION_OFF) {
       const text = resolveLearningOffSource('commands', h) as string
       const consumers = ['**Resolve the compliance lens**', '**Resolve `REVIEW_PUBLICATION` per worktree:**', 'take the settings line resolved above for that root']
       expect(consumers.some(c => text.includes(c)), `${h}: a surviving consumer of the settings line`).toBe(true)
     }
   })
 
-  it('the runtime gate and Skim\'s CURATION skip live in the learning-on build only', () => {
+  it('the runtime gate and Skim\'s CURATION skip live in the curation-on build only', () => {
     for (const h of MDS_COMMAND_HOSTS) {
-      expect(requireDistFile(`${h}.md`), `${h} (learning-on)`).toContain('When the settings line says `CURATION=off`')
-      expect(resolveLearningOffSource('commands', h), `${h} (learning-off)`).not.toContain('When the settings line says `CURATION=off`')
+      expect(requireDistFile(`${h}.md`), `${h} (curation-on)`).toContain('When the settings line says `CURATION=off`')
+      expect(resolveLearningOffSource('commands', h), `${h} (curation-off)`).not.toContain('When the settings line says `CURATION=off`')
     }
     expect(resolveAgentSource('skim').content).toContain('When `CURATION` is `off`, skip this step')
     const skimOff = resolveLearningOffSource('agents', 'skim') as string
@@ -455,7 +455,7 @@ describe('no status-line anchor sits inside an arm, and no off arm repeats one (
   }
 
   // The three PR-body lines live in ensure-pr-ready's PR skeleton (D-PR-BY-GIT). That
-  // skeleton is a reference partial, which carries no learning arms and has no learning-off variant.
+  // skeleton is a reference partial, which carries no curation arms and has no curation-off variant.
   const SOURCE_OF = {
     prReady: 'src/assets/mds/git/_ops_steps.mds',
     dynamicBuild: 'src/assets/commands/dynamic-build.mds',
@@ -475,7 +475,7 @@ describe('no status-line anchor sits inside an arm, and no off arm repeats one (
         const m = MARKER_RE.exec(lines[i])
         if (m !== null) arm = m[1] === 'end' ? null : m[1]
       }
-      if (arm !== null) out.push(`${rel}: "${anchor.slice(0, 50)}" sits inside a learning:${arm} arm`)
+      if (arm !== null) out.push(`${rel}: "${anchor.slice(0, 50)}" sits inside a curation:${arm} arm`)
     }
     return out
   }
@@ -493,12 +493,12 @@ describe('no status-line anchor sits inside an arm, and no off arm repeats one (
     expect(collectAnchorDefects(collectSamplerAnchors(), read)).toEqual([])
   })
 
-  it('no learning-off file repeats an anchor line, so the sampler reading the on variant meets each once', () => {
+  it('no curation-off file repeats an anchor line, so the sampler reading the on variant meets each once', () => {
     for (const { target, anchor } of collectSamplerAnchors()) {
-      if (target === 'prReady') continue // a reference has no learning-off variant
+      if (target === 'prReady') continue // a reference has no curation-off variant
       const off = resolveLearningOffSource('commands', target === 'dynamicBuild' ? 'dynamic-build' : 'resolve')
       const copies = (off ?? '').split('\n').filter(l => l.includes(anchor)).length
-      expect(copies, `"${anchor.slice(0, 50)}" in the learning-off build`).toBeLessThanOrEqual(1)
+      expect(copies, `"${anchor.slice(0, 50)}" in the curation-off build`).toBeLessThanOrEqual(1)
     }
   })
 
@@ -507,7 +507,7 @@ describe('no status-line anchor sits inside an arm, and no off arm repeats one (
     const at = (body: string): string[] => collectAnchorDefects(anchors, () => body)
     const src = 'src/assets/mds/git/_ops_steps.mds'
     expect(at('a\nANCHOR LINE\nb')).toEqual([])
-    expect(at('a\n<!-- learning:on -->\nANCHOR LINE\n<!-- learning:end -->\nb')).toEqual([`${src}: "ANCHOR LINE" sits inside a learning:on arm`])
+    expect(at('a\n<!-- curation:on -->\nANCHOR LINE\n<!-- curation:end -->\nb')).toEqual([`${src}: "ANCHOR LINE" sits inside a curation:on arm`])
     expect(at('ANCHOR LINE\nANCHOR LINE')).toEqual([`${src}: "ANCHOR LINE" appears 2 times, expected once`])
     expect(at('nothing')).toEqual([`${src}: "ANCHOR LINE" appears 0 times, expected once`])
   })

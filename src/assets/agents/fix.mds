@@ -17,9 +17,9 @@ skills:
   - devflow:git
   - devflow:testing
   - devflow:worktree-support
-<!-- learning:on -->
+<!-- curation:on -->
   - devflow:apply-decisions
-<!-- learning:end -->
+<!-- curation:end -->
 disallowedTools:
   - Agent
   - SendMessage

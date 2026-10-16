@@ -80,7 +80,7 @@ export function collectSynthesizeCategoryDefects(body: string): string[] {
 }
 
 describe('agents drop the preloads their bodies never read (D-PRELOAD-CLEANUP)', () => {
-  it.each(Object.keys(KEPT))('%s keeps exactly its remaining preload, in both learning variants', (agent) => {
+  it.each(Object.keys(KEPT))('%s keeps exactly its remaining preload, in both curation variants', (agent) => {
     const variants = [resolveAgentSource(agent).content, resolveLearningOffSource('agents', agent) ?? resolveAgentSource(agent).content]
     for (const content of variants) {
       expect(collectRestoredPreloads(agent, content)).toEqual([])
@@ -90,7 +90,7 @@ describe('agents drop the preloads their bodies never read (D-PRELOAD-CLEANUP)',
     }
   })
 
-  it('the learning-on variants keep every preload the cleanup left, in order', () => {
+  it('the curation-on variants keep every preload the cleanup left, in order', () => {
     for (const [agent, kept] of Object.entries(KEPT)) {
       expect(parseFrontmatterSkills(resolveAgentSource(agent).content), agent).toEqual(kept)
     }
@@ -108,10 +108,10 @@ describe('agents drop the preloads their bodies never read (D-PRELOAD-CLEANUP)',
 })
 
 describe('Triage states the security rule inline (D-TRIAGE-SECURITY-INLINE, AC-503)', () => {
-  it('both learning variants carry the definition and the live-secret rule within the byte ceiling', () => {
+  it('both curation variants carry the definition and the live-secret rule within the byte ceiling', () => {
     const on = resolveAgentSource('triage').content
     const off = resolveLearningOffSource('agents', 'triage')
-    expect(off, 'triage has a learning-off variant').not.toBeNull()
+    expect(off, 'triage has a curation-off variant').not.toBeNull()
     expect(collectTriageSecurityDefects(on)).toEqual([])
     expect(collectTriageSecurityDefects(off ?? '')).toEqual([])
   })

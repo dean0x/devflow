@@ -14,14 +14,14 @@
  * back to its installed state, so each row starts from a known one.
  *
  * D-LEARNING-VARIANT-FENCE: `learning --enable` / `--disable` converge the installed
- * learning variants (D-LEARNING-VARIANT-INSTALL), so their allowlist is the manifest
+ * curation variants (D-LEARNING-VARIANT-INSTALL), so their allowlist is the manifest
  * plus that surface and nothing wider: the command and agent files of the variant
- * roster (the files under dist/learning-off, the converge's own roster source) and
+ * roster (the files under dist/curation-off, the converge's own roster source) and
  * the learning-gated skill directories. The roster is read from the build, not typed
  * here, so a new arm is admitted with no edit; it is matched file by file, never as a
  * `commands/**` or `agents/**` subtree, so a stray write to any other agent, command
  * or skill still fails the fence. In a row the surface is the one entry
- * {@link LEARNING_VARIANT_SURFACE}, which the check expands to those paths.
+ * {@link CURATION_VARIANT_SURFACE}, which the check expands to those paths.
  *
  * Coverage is held to the CLI's own definitions, not to this table: every
  * top-level command in `devflow --help` has a row or a reason in UNFENCED_COMMANDS,
@@ -41,8 +41,8 @@ import {
   SUBPROCESS_TIMEOUT_MS, createSandbox, diffTree, excludeGit, readTree, removeSandbox, resolveOnPath, runCli,
   runCliOk, sandboxChildEnv, type Sandbox,
 } from './install-snapshot-helpers.js'
-import { learningOffDir } from '../src/core/assets.js'
-import { LEARNING_GATED_SKILLS, prefixSkillName } from '../src/core/plugins.js'
+import { curationOffDir } from '../src/core/assets.js'
+import { CURATION_GATED_SKILLS, prefixSkillName } from '../src/core/plugins.js'
 import { initCommand } from '../src/cli/commands/init.js'
 import { uninstallCommand } from '../src/cli/commands/uninstall.js'
 import { ambientCommand } from '../src/cli/commands/ambient.js'
@@ -72,7 +72,7 @@ export interface FenceRow {
   /**
    * The paths the command may change, as `<HOME>/…`, `<REPO>/…` or `<SANDBOX>/…`.
    * An entry ending in `/**` admits that path and everything under it.
-   * {@link LEARNING_VARIANT_SURFACE} admits the learning-variant roster (see there).
+   * {@link CURATION_VARIANT_SURFACE} admits the curation-variant roster (see there).
    * Any other entry admits exactly that path.
    */
   readonly allow: readonly string[]
@@ -101,40 +101,40 @@ const REPO_LEARNING = '<REPO>/.devflow/learning/**'
 const NONE: readonly string[] = []
 
 /** The prompt kinds the learning converge rewrites, installed at `<HOME>/.claude/<kind>/devflow/<file>`. */
-const LEARNING_VARIANT_KINDS = ['commands', 'agents'] as const
+const CURATION_VARIANT_KINDS = ['commands', 'agents'] as const
 
 /**
  * The surfaces a learning toggle's converge may write (D-LEARNING-VARIANT-FENCE):
  * each roster file's installed path, and each learning-gated skill directory.
  *
- * The roster is the `.md` files under dist/learning-off/<kind>, read through the
- * converge's own `learningOffDir`. An absent directory throws rather than yielding an
+ * The roster is the `.md` files under dist/curation-off/<kind>, read through the
+ * converge's own `curationOffDir`. An absent directory throws rather than yielding an
  * empty roster, which would fence the toggle to the manifest and fail every row for
  * a reason that names no cause.
  */
-function learningVariantAllow(): string[] {
-  const prompts = LEARNING_VARIANT_KINDS.flatMap(kind => {
-    const dir = learningOffDir(kind)
+function curationVariantAllow(): string[] {
+  const prompts = CURATION_VARIANT_KINDS.flatMap(kind => {
+    const dir = curationOffDir(kind)
     let names: string[]
     try {
       names = readdirSync(dir).filter(name => name.endsWith('.md')).sort()
     } catch (err) {
-      throw new Error(`the learning-variant roster is unreadable (${dir}) — run \`npm run build:mds\`: ${String(err)}`)
+      throw new Error(`the curation-variant roster is unreadable (${dir}) — run \`npm run build:mds\`: ${String(err)}`)
     }
     return names.map(name => `<HOME>/.claude/${kind}/devflow/${name}`)
   })
-  const skills = LEARNING_GATED_SKILLS.map(skill => `<HOME>/.claude/skills/${prefixSkillName(skill)}/**`)
+  const skills = CURATION_GATED_SKILLS.map(skill => `<HOME>/.claude/skills/${prefixSkillName(skill)}/**`)
   return [...prompts, ...skills]
 }
 
-const LEARNING_VARIANT_PATHS: readonly string[] = learningVariantAllow()
+const CURATION_VARIANT_PATHS: readonly string[] = curationVariantAllow()
 
 /**
- * The learning-variant surface as ONE allowlist entry. A row names the token; the
- * check expands it to {@link LEARNING_VARIANT_PATHS}, so the surface is matched file
+ * The curation-variant surface as ONE allowlist entry. A row names the token; the
+ * check expands it to {@link CURATION_VARIANT_PATHS}, so the surface is matched file
  * by file and counts once in {@link allowlistSize} (D-ALLOWLIST-COUNTING).
  */
-export const LEARNING_VARIANT_SURFACE = '<LEARNING-VARIANT-SURFACE>'
+export const CURATION_VARIANT_SURFACE = '<CURATION-VARIANT-SURFACE>'
 
 function seedFile(sb: Sandbox, rel: string, content: string): void {
   const abs = path.join(sb.repo, rel)
@@ -217,8 +217,8 @@ export const FENCE_ROWS: readonly FenceRow[] = [
   { args: ['memory', '--clear'], allow: [REPO_MEMORY], mustWrite: true, seed: seedMemoryQueue },
   { args: ['memory', '--status'], allow: NONE, mustWrite: false },
 
-  { args: ['learning', '--disable'], allow: [MANIFEST, LEARNING_VARIANT_SURFACE], mustWrite: true },
-  { args: ['learning', '--enable'], allow: [MANIFEST, LEARNING_VARIANT_SURFACE], mustWrite: true },
+  { args: ['learning', '--disable'], allow: [MANIFEST, CURATION_VARIANT_SURFACE], mustWrite: true },
+  { args: ['learning', '--enable'], allow: [MANIFEST, CURATION_VARIANT_SURFACE], mustWrite: true },
   { args: ['learning', '--restore', FENCE_ENTRY], allow: [REPO_LEARNING], mustWrite: true, seed: seedRetiredEntry },
   { args: ['learning', '--list'], allow: NONE, mustWrite: false },
   { args: ['learning', '--show', FENCE_ENTRY], allow: NONE, mustWrite: false },
@@ -344,9 +344,9 @@ export function fencePath(rel: string): string {
   return `<SANDBOX>/${rel}`
 }
 
-/** The allowlist with {@link LEARNING_VARIANT_SURFACE} replaced by the paths it stands for. */
+/** The allowlist with {@link CURATION_VARIANT_SURFACE} replaced by the paths it stands for. */
 function expandAllow(allow: readonly string[]): string[] {
-  return allow.flatMap(entry => (entry === LEARNING_VARIANT_SURFACE ? LEARNING_VARIANT_PATHS : [entry]))
+  return allow.flatMap(entry => (entry === CURATION_VARIANT_SURFACE ? CURATION_VARIANT_PATHS : [entry]))
 }
 
 function allowed(p: string, allow: readonly string[]): boolean {
@@ -366,7 +366,7 @@ export function fenceViolations(changed: readonly string[], allow: readonly stri
  * The number of distinct allowlist entries across the table — the fence's footprint.
  *
  * D-ALLOWLIST-COUNTING: counted as declared, before expansion. A roster-derived
- * surface ({@link LEARNING_VARIANT_SURFACE}) is ONE entry, because its members come
+ * surface ({@link CURATION_VARIANT_SURFACE}) is ONE entry, because its members come
  * from the build and not from hand edits: a new arm grows the roster with no one
  * touching this file, so the count measures the paths a person has declared. Every
  * hand-written path is one entry each, so a new hand-written path still moves the
@@ -406,24 +406,24 @@ describe('write-set fence check', () => {
   })
 })
 
-describe('write-set fence: the learning-variant allowlist', () => {
-  const ROW_ALLOW = [MANIFEST, LEARNING_VARIANT_SURFACE]
+describe('write-set fence: the curation-variant allowlist', () => {
+  const ROW_ALLOW = [MANIFEST, CURATION_VARIANT_SURFACE]
   const roster = (kind: 'commands' | 'agents'): string[] =>
-    LEARNING_VARIANT_PATHS.filter(entry => entry.startsWith(`<HOME>/.claude/${kind}/devflow/`))
+    CURATION_VARIANT_PATHS.filter(entry => entry.startsWith(`<HOME>/.claude/${kind}/devflow/`))
 
-  it('is the dist/learning-off roster, file by file, plus the learning-gated skill directory', () => {
+  it('is the dist/curation-off roster, file by file, plus the learning-gated skill directory', () => {
     // Non-vacuity: the roster really was read, and carries both kinds.
     expect(roster('commands').length).toBeGreaterThan(0)
     expect(roster('agents').length).toBeGreaterThan(0)
-    for (const kind of LEARNING_VARIANT_KINDS) {
-      const files = readdirSync(learningOffDir(kind)).filter(name => name.endsWith('.md'))
+    for (const kind of CURATION_VARIANT_KINDS) {
+      const files = readdirSync(curationOffDir(kind)).filter(name => name.endsWith('.md'))
       expect(roster(kind).map(entry => path.posix.basename(entry)).sort()).toEqual(files.sort())
     }
-    expect(LEARNING_VARIANT_PATHS).toContain('<HOME>/.claude/skills/devflow:apply-decisions/**')
+    expect(CURATION_VARIANT_PATHS).toContain('<HOME>/.claude/skills/devflow:apply-decisions/**')
   })
 
   it('admits no subtree of the commands, agents or skills directories', () => {
-    const subtrees = LEARNING_VARIANT_PATHS.filter(entry => entry.endsWith('/**'))
+    const subtrees = CURATION_VARIANT_PATHS.filter(entry => entry.endsWith('/**'))
     expect(subtrees).toEqual(['<HOME>/.claude/skills/devflow:apply-decisions/**'])
   })
 
@@ -442,7 +442,7 @@ describe('write-set fence: the learning-variant allowlist', () => {
   // Known-bad probes: a write the converge never makes must still fail the fence.
   it('rejects a write to an agent outside the roster', () => {
     const stray = '<HOME>/.claude/agents/devflow/not-in-the-roster.md'
-    expect(LEARNING_VARIANT_PATHS).not.toContain(stray)
+    expect(CURATION_VARIANT_PATHS).not.toContain(stray)
     expect(fenceViolations([stray], ROW_ALLOW)).toEqual([stray])
   })
 
@@ -515,8 +515,8 @@ describe('write-set fence coverage', () => {
     expect(allowlistSize(FENCE_ROWS)).toBeLessThanOrEqual(12)
   })
 
-  it('counts the learning-variant surface once, and every hand-written entry once each', () => {
-    const learningRows = FENCE_ROWS.filter(row => row.allow.includes(LEARNING_VARIANT_SURFACE))
+  it('counts the curation-variant surface once, and every hand-written entry once each', () => {
+    const learningRows = FENCE_ROWS.filter(row => row.allow.includes(CURATION_VARIANT_SURFACE))
     // Non-vacuity: the surface really is in the table, in both learning toggles.
     expect(learningRows.map(rowName)).toEqual(['devflow learning --disable', 'devflow learning --enable'])
     expect(allowlistSize(learningRows)).toBe(2) // the manifest and the surface

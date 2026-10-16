@@ -272,7 +272,7 @@ describe('installViaFileCopy — command-missing hard error', () => {
 
     await expect(
       installViaFileCopy({
-        learning: true,
+        curation: true,
         plugins: [fakePlugin],
         claudeDir,
         devflowDir,
@@ -303,7 +303,7 @@ describe('installViaFileCopy — command-missing hard error', () => {
 
     let caught: Error | undefined;
     try {
-      await installViaFileCopy({ plugins: [fakePlugin], claudeDir, devflowDir, skillsMap, agentsMap, spinner, learning: true });
+      await installViaFileCopy({ plugins: [fakePlugin], claudeDir, devflowDir, skillsMap, agentsMap, spinner, curation: true });
     } catch (e) {
       caught = e as Error;
     }
@@ -356,7 +356,7 @@ describe('installViaFileCopy — prefix-diff sweep', () => {
     const { skillsMap, agentsMap } = buildAssetMaps([noOpPlugin]);
 
     await installViaFileCopy({
-      learning: true,
+      curation: true,
       plugins: [noOpPlugin],
       claudeDir,
       devflowDir,
@@ -384,7 +384,7 @@ describe('installViaFileCopy — prefix-diff sweep', () => {
     const { skillsMap, agentsMap } = buildAssetMaps([noOpPlugin]);
 
     await installViaFileCopy({
-      learning: true,
+      curation: true,
       plugins: [noOpPlugin],
       claudeDir,
       devflowDir,
@@ -413,7 +413,7 @@ describe('installViaFileCopy — prefix-diff sweep', () => {
     const { skillsMap, agentsMap } = buildAssetMaps([noOpPlugin]);
 
     await installViaFileCopy({
-      learning: true,
+      curation: true,
       plugins: [noOpPlugin],
       claudeDir,
       devflowDir,
@@ -467,7 +467,7 @@ describe('installViaFileCopy — prefix-diff sweep', () => {
     const { skillsMap, agentsMap } = buildAssetMaps([securityPlugin]);
 
     await installViaFileCopy({
-      learning: true,
+      curation: true,
       plugins: [securityPlugin],
       claudeDir,
       devflowDir,
@@ -526,7 +526,7 @@ describe('installViaFileCopy — hard-error on missing declared source (WS6a)', 
 
     await expect(
       installViaFileCopy({
-        learning: true,
+        curation: true,
         plugins: [fakePlugin],
         claudeDir,
         devflowDir,
@@ -558,7 +558,7 @@ describe('installViaFileCopy — hard-error on missing declared source (WS6a)', 
     let caught: Error | undefined;
     try {
       await installViaFileCopy({
-        learning: true,
+        curation: true,
         plugins: [fakePlugin],
         claudeDir,
         devflowDir,
@@ -605,7 +605,7 @@ describe('installViaFileCopy — hard-error on missing declared source (WS6a)', 
     let caught: Error | undefined;
     try {
       await installViaFileCopy({
-        learning: true,
+        curation: true,
         plugins: [fakePlugin],
         claudeDir,
         devflowDir,
@@ -652,7 +652,7 @@ describe('installViaFileCopy — hard-error on missing declared source (WS6a)', 
 
     await expect(
       installViaFileCopy({
-        learning: true,
+        curation: true,
         plugins: [noOpPlugin],
         claudeDir,
         devflowDir,
@@ -684,7 +684,7 @@ describe('installViaFileCopy — hard-error on missing declared source (WS6a)', 
 
     await expect(
       installViaFileCopy({
-        learning: true,
+        curation: true,
         plugins: [noOpPlugin],
         claudeDir,
         devflowDir,
@@ -731,7 +731,7 @@ describe('installViaFileCopy — sweep results in InstallReport (A2)', () => {
     // on a full install the entire agents/devflow dir is removed before the sweep,
     // making the sweep a no-op for that case.
     const report = await installViaFileCopy({
-      learning: true,
+      curation: true,
       plugins: [noOpPlugin],
       claudeDir,
       devflowDir,
@@ -762,7 +762,7 @@ describe('installViaFileCopy — sweep results in InstallReport (A2)', () => {
 
     const { skillsMap, agentsMap } = buildAssetMaps([noOpPlugin]);
     const report = await installViaFileCopy({
-      learning: true,
+      curation: true,
       plugins: [noOpPlugin],
       claudeDir,
       devflowDir,
@@ -783,7 +783,7 @@ describe('installViaFileCopy — sweep results in InstallReport (A2)', () => {
     const { skillsMap, agentsMap } = buildAssetMaps([noOpPlugin]);
 
     const report = await installViaFileCopy({
-      learning: true,
+      curation: true,
       plugins: [noOpPlugin],
       claudeDir,
       devflowDir,
@@ -830,7 +830,7 @@ describe('compliance skill orphan sweep — FEATURE_OWNED_SKILLS protection', ()
     const spinner = { start: () => {}, stop: () => {}, message: () => {} };
 
     const report = await installViaFileCopy({
-      learning: true,
+      curation: true,
       plugins: [noOpPlugin],
       claudeDir,
       devflowDir,
@@ -902,7 +902,7 @@ describe('installViaFileCopy — dist-preferred agent resolution', () => {
       rules: [],
     };
     await installViaFileCopy({
-      learning: true,
+      curation: true,
       plugins: [fakePlugin],
       claudeDir,
       devflowDir: path.join(tmpDir, 'devflow'),
@@ -971,7 +971,7 @@ describe('installViaFileCopy — dist-preferred agent resolution', () => {
       rules: [],
     };
     await installViaFileCopy({
-      learning: true,
+      curation: true,
       plugins: [fakePlugin],
       claudeDir,
       devflowDir: path.join(tmpDir, 'devflow-default'),
@@ -1019,7 +1019,7 @@ describe('installViaFileCopy — a partial install pairs only matching settings-
     const { skillsMap, agentsMap } = buildAssetMaps(plugins);
 
     await installViaFileCopy({
-      learning: true,
+      curation: true,
       plugins,
       claudeDir,
       devflowDir,

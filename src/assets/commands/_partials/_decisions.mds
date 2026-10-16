@@ -14,8 +14,8 @@ root's: the root the ledger is located from.
 
 D-LEARNING-VARIANTS: the gate guards a repository that narrows learning off on a machine
 where it is on. On a machine with learning off the decisions text is absent altogether: the
-whole of `decisions_load()` is a learning-on arm, so every expansion of it exists only in the
-learning-on build. `decisions_gate()` and `decisions_locate()` are leaves, reached only from
+whole of `decisions_load()` is a curation-on arm, so every expansion of it exists only in the
+curation-on build. `decisions_gate()` and `decisions_locate()` are leaves, reached only from
 inside an arm (`decisions_load()`, `authoring_decisions()`, or a host's own on arm), and carry
 no arm of their own: an arm cannot nest.
 
@@ -27,7 +27,7 @@ that scope. Siblings over one diff share ONE slice, so their prompts stay identi
 it: the index stays a pre-rendered file read, never built on demand, and matching a line to a task is
 judgment, which stays with the model. When unsure, include the line: a slice that misses costs one
 full-index read, a slice that over-includes costs only its bytes. `decisions_slice()` is a leaf like
-the gate and the locator, reached only from inside a learning-on arm, so a learning-off build carries
+the gate and the locator, reached only from inside a curation-on arm, so a curation-off build carries
 none of the rule (D-LEARNING-VARIANTS).
 
 @define decisions_gate():
@@ -55,7 +55,7 @@ Hand each agent that takes `DECISIONS_CONTEXT` a slice, not the whole index: the
 @end
 
 @define decisions_load():
-<!-- learning:on -->
+<!-- curation:on -->
 ### Load DECISIONS_CONTEXT
 
 {{decisions_gate()}}
@@ -79,7 +79,7 @@ When `DECISIONS_CONTEXT` is not `(none)`, hand it only to the agents whose contr
 
 Those agents follow `devflow:apply-decisions`. A host that uses the index in its own thread says so in its own step.
 
-<!-- learning:end -->
+<!-- curation:end -->
 @end
 
 @export decisions_gate

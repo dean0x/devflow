@@ -1,26 +1,26 @@
 /**
- * Learning-variant installer for the Claude Code target.
+ * Curation-variant installer for the Claude Code target.
  *
- * D-LEARNING-VARIANT-INSTALL: the install follows the machine's learning switch
+ * D-LEARNING-VARIANT-INSTALL: the install follows the machine's curation switch
  * (`features.learning` in ~/.devflow/manifest.json) and nothing else. When the
- * switch is off, every command and agent that has a learning-off variant
- * (dist/learning-off/{commands,agents}, built by D-LEARNING-VARIANTS) is installed
+ * switch is off, every command and agent that has a curation-off variant
+ * (dist/curation-off/{commands,agents}, built by D-LEARNING-VARIANTS) is installed
  * from it, and the apply-decisions skill is not installed, so the decisions text
  * reaches no prompt and the skill has no reader. When the switch is on, the
- * learning-on files and the skill are installed. Three pieces carry it:
+ * curation-on files and the skill are installed. Three pieces carry it:
  *
  *   - the source order (src/core/assets.ts commandSourceDirs / agentSourceDirs):
- *     with learning off the learning-off directory is consulted first, then the
+ *     with curation off the curation-off directory is consulted first, then the
  *     normal order, so a host with no arm installs its one file as before;
- *   - the skill condition (LEARNING_GATED_SKILLS in src/core/plugins.ts):
- *     installViaFileCopy leaves the skill out when learning is off;
- *   - {@link convergeLearningVariants}, below: the converge that makes an
+ *   - the skill condition (CURATION_GATED_SKILLS in src/core/plugins.ts):
+ *     installViaFileCopy leaves the skill out when curation is off;
+ *   - {@link convergeCurationVariants}, below: the converge that makes an
  *     ALREADY-installed tree match the switch, run by `devflow init` after the
  *     file copy and by `devflow learning --enable/--disable` after the switch is
- *     written ({@link applyLearningToggle}).
+ *     written ({@link applyCurationToggle}).
  *
  * The converge, decided in turn:
- *   - Its roster is the files that exist under dist/learning-off, not a list typed
+ *   - Its roster is the files that exist under dist/curation-off, not a list typed
  *     here: the build owns which hosts have an arm, so a new arm is converged with
  *     no edit to this file.
  *   - It rewrites only files that are ALREADY installed. A `--plugin` install
@@ -42,27 +42,27 @@
  *     the skill is resolved through the installer's own resolveSkillSource. Only
  *     skills and rules have shadows; commands and agents have none, so there is
  *     nothing for an off variant to collide with. A shadow of apply-decisions
- *     under learning off is DORMANT in the same sense as one for a deselected
+ *     under curation off is DORMANT in the same sense as one for a deselected
  *     skill: kept in ~/.devflow/skills, never installed, never deleted, and
- *     applied again the moment learning comes back on.
+ *     applied again the moment curation comes back on.
  *   - Version skew: the variants in this package were built with this version.
  *     When the manifest records another version, the installed files are not the
- *     ones this package would rewrite, so {@link applyLearningToggle} skips the
+ *     ones this package would rewrite, so {@link applyCurationToggle} skips the
  *     converge and says to run `devflow init`.
  *   - An agent's installed `model:` and `effort:` are carried into the variant before
  *     the byte comparison (D-AGENT-OVERRIDE-CARRY, see {@link withInstalledState}),
  *     so the overrides `devflow agents` and the proxy put there are never written
  *     back to the shipped values and a no-op converge writes no agent.
- *     {@link applyLearningToggle} still runs reapplyAgentMapping straight after a
+ *     {@link applyCurationToggle} still runs reapplyAgentMapping straight after a
  *     converge that rewrote an agent: it reads agent-models.json and is the authority.
  *
  * D-LEARNING-PRELOAD-MACHINE-ONLY (amended): the apply-decisions preload follows
  * the machine switch only, never a repository's narrowing, because a repository
- * can narrow learning off on a machine where it is on and the installed agents are
- * machine-wide. Met by the variant: the learning-off agent files do not preload
- * the skill (no install-time frontmatter rewrite exists), and the learning-on files
+ * can narrow curation off on a machine where it is on and the installed agents are
+ * machine-wide. Met by the variant: the curation-off agent files do not preload
+ * the skill (no install-time frontmatter rewrite exists), and the curation-on files
  * keep the preload and their run-time gate for a narrowed repository. A repo
- * `project.json` with `learning: false` on a learning-on machine therefore changes
+ * `project.json` with `curation: false` on a curation-on machine therefore changes
  * nothing installed.
  *
  * I/O orchestration in src/targets/; the pure selection rules stay in src/core/.
@@ -73,19 +73,19 @@ import * as path from 'path';
 import {
   agentSourceDirs,
   commandSourceDirs,
-  learningOffDir,
+  curationOffDir,
 } from '../../core/assets.js';
 import { carryStampedTools } from '../../core/agent-frontmatter.js';
 import { carryAgentOverrides, reapplyAgentMapping } from '../../core/agent-models.js';
 import { describeEchoedValue } from '../../core/echo-value.js';
 import { writeFileAtomicExclusive } from '../../core/fs-atomic.js';
-import type { LearningVariantKind } from '../../core/learning-variants.js';
+import type { CurationVariantKind } from '../../core/curation-variants.js';
 import { readManifest } from '../../core/manifest.js';
 import { getPackageRoot } from '../../core/paths.js';
 import { isProxyEnabled } from '../../core/proxy-state.js';
 import {
   DEVFLOW_PLUGINS,
-  LEARNING_GATED_SKILLS,
+  CURATION_GATED_SKILLS,
   installedLanguageFocuses,
   prefixSkillName,
   skillsOf,
@@ -101,7 +101,7 @@ import { LANGUAGE_STAMPED_COMMANDS, stampForConverge } from './language-stamp.js
  * 9 agents; the bound exists so a directory that grew without limit cannot turn the
  * converge into an unbounded loop (every loop has an explicit bound).
  */
-export const MAX_LEARNING_ROSTER = 256;
+export const MAX_CURATION_ROSTER = 256;
 
 /** Deepest skill-directory descent the tree comparison takes. */
 const MAX_SKILL_TREE_DEPTH = 4;
@@ -109,29 +109,29 @@ const MAX_SKILL_TREE_DEPTH = 4;
 /** A roster entry is a flat, lowercase, hyphenated markdown basename. */
 const ROSTER_NAME_RE = /^[a-z0-9][a-z0-9-]*\.md$/;
 
-const KINDS: readonly LearningVariantKind[] = ['commands', 'agents'];
+const KINDS: readonly CurationVariantKind[] = ['commands', 'agents'];
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-/** What a converge left the learning-gated skill directory in. */
-export type LearningSkillState =
+/** What a converge left the curation-gated skill directory in. */
+export type CurationSkillState =
   /** Installed, or replaced because the bytes differed. */
   | 'installed'
-  /** Removed (learning off). */
+  /** Removed (curation off). */
   | 'removed'
   /** Already as the switch wants it: present and identical, or absent. */
   | 'unchanged'
-  /** Learning on, but no plugin of the selection requires the skill: nothing installed. */
+  /** Curation on, but no plugin of the selection requires the skill: nothing installed. */
   | 'not-selected'
   | 'failed';
 
-export interface ConvergeLearningVariantsOptions {
+export interface ConvergeCurationVariantsOptions {
   /** Claude Code's config directory (e.g. ~/.claude). Must be absolute. */
   claudeDir: string;
   /** The machine root (~/.devflow), where skill shadows live. */
   devflowDir: string;
-  /** The machine's settled learning switch. */
-  learning: boolean;
+  /** The machine's settled curation switch. */
+  curation: boolean;
   /** The effective plugin selection: the skill is installed on switch-on only if its closure holds it. */
   plugins: readonly PluginDefinition[];
   warn: (msg: string) => void;
@@ -139,7 +139,7 @@ export interface ConvergeLearningVariantsOptions {
   packageRoot?: string;
 }
 
-export interface ConvergeLearningVariantsResult {
+export interface ConvergeCurationVariantsResult {
   /** True when nothing failed. False when any warn path was taken: callers read this, they do not catch. */
   converged: boolean;
   /** Installed command files this run rewrote, as `name.md`. */
@@ -150,46 +150,46 @@ export interface ConvergeLearningVariantsResult {
   unchanged: number;
   /** Roster entries with no installed file (another plugin's, or never installed): left alone. */
   notInstalled: number;
-  skill: LearningSkillState;
+  skill: CurationSkillState;
 }
 
 type FileOutcome = 'rewritten' | 'unchanged' | 'not-installed' | 'failed';
 
 // ── Internals ──────────────────────────────────────────────────────────────
 
-function installedFile(claudeDir: string, kind: LearningVariantKind, fileName: string): string {
+function installedFile(claudeDir: string, kind: CurationVariantKind, fileName: string): string {
   return path.join(claudeDir, kind, 'devflow', fileName);
 }
 
-/** The learning-ON source directories for a kind, most-preferred first. */
-function onSourceDirs(kind: LearningVariantKind, root: string): readonly string[] {
+/** The curation-ON source directories for a kind, most-preferred first. */
+function onSourceDirs(kind: CurationVariantKind, root: string): readonly string[] {
   return kind === 'commands' ? commandSourceDirs(true, root) : agentSourceDirs(root, true);
 }
 
 /**
- * The roster of one kind: the `.md` files under dist/learning-off/<kind>, sorted.
+ * The roster of one kind: the `.md` files under dist/curation-off/<kind>, sorted.
  *
  * `present` is false when the directory does not exist (the build has not run, or
  * only `build:cli` did), so the caller can say so instead of reporting a converge
  * that had nothing to do.
  */
 async function readRoster(
-  kind: LearningVariantKind,
+  kind: CurationVariantKind,
   root: string,
   warn: (msg: string) => void,
 ): Promise<{ names: string[]; present: boolean }> {
   let entries: string[];
   try {
-    entries = await fs.readdir(learningOffDir(kind, root));
+    entries = await fs.readdir(curationOffDir(kind, root));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { names: [], present: false };
-    warn(`learning variants: cannot read the ${kind} variants — ${String(err)}`);
+    warn(`curation variants: cannot read the ${kind} variants — ${String(err)}`);
     return { names: [], present: false };
   }
   const names = entries.filter(entry => ROSTER_NAME_RE.test(entry)).sort();
-  if (names.length > MAX_LEARNING_ROSTER) {
-    warn(`learning variants: ${names.length} ${kind} variants exceed the bound of ${MAX_LEARNING_ROSTER}; converging the first ${MAX_LEARNING_ROSTER}`);
-    return { names: names.slice(0, MAX_LEARNING_ROSTER), present: true };
+  if (names.length > MAX_CURATION_ROSTER) {
+    warn(`curation variants: ${names.length} ${kind} variants exceed the bound of ${MAX_CURATION_ROSTER}; converging the first ${MAX_CURATION_ROSTER}`);
+    return { names: names.slice(0, MAX_CURATION_ROSTER), present: true };
   }
   return { names, present: true };
 }
@@ -241,7 +241,7 @@ async function firstReadable(candidates: readonly string[]): Promise<{ file: str
  * Pure.
  */
 function withInstalledState(
-  kind: LearningVariantKind,
+  kind: CurationVariantKind,
   fileName: string,
   source: Buffer,
   installed: Buffer,
@@ -265,32 +265,32 @@ function withInstalledState(
  * file is still tried.
  */
 async function convergeFile(
-  kind: LearningVariantKind,
+  kind: CurationVariantKind,
   fileName: string,
-  opts: Required<Pick<ConvergeLearningVariantsOptions, 'claudeDir' | 'learning' | 'warn'>> & {
+  opts: Required<Pick<ConvergeCurationVariantsOptions, 'claudeDir' | 'curation' | 'warn'>> & {
     root: string;
     /** The effective selection's language list, stamped into a copy that has none to carry. */
     focuses: readonly string[];
   },
 ): Promise<FileOutcome> {
-  const { claudeDir, learning, warn, root, focuses } = opts;
+  const { claudeDir, curation, warn, root, focuses } = opts;
   const target = installedFile(claudeDir, kind, fileName);
 
   const installed = await readIfPresent(target);
   if (installed === 'absent') return 'not-installed';
   if (installed === 'unreadable') {
-    warn(`learning variants: cannot read the installed ${kind}/${fileName} (${target}) — left as it is`);
+    warn(`curation variants: cannot read the installed ${kind}/${fileName} (${target}) — left as it is`);
     return 'failed';
   }
 
-  // Learning off: the variant is the roster file itself. Learning on: the normal
-  // source order, which is where the learning-on file of that host lives.
-  const candidates = learning
+  // Curation off: the variant is the roster file itself. Curation on: the normal
+  // source order, which is where the curation-on file of that host lives.
+  const candidates = curation
     ? onSourceDirs(kind, root).map(dir => path.join(dir, fileName))
-    : [path.join(learningOffDir(kind, root), fileName)];
+    : [path.join(curationOffDir(kind, root), fileName)];
   const source = await firstReadable(candidates);
   if (source === undefined) {
-    warn(`learning variants: no source for ${kind}/${fileName} (searched: ${candidates.join(', ')}) — left as it is`);
+    warn(`curation variants: no source for ${kind}/${fileName} (searched: ${candidates.join(', ')}) — left as it is`);
     return 'failed';
   }
 
@@ -305,7 +305,7 @@ async function convergeFile(
     // target's permission mode.
     await writeFileAtomicExclusive(target, wanted.toString('utf-8'));
   } catch (err) {
-    warn(`learning variants: could not rewrite ${kind}/${fileName} (${target}) — ${String(err)}`);
+    warn(`curation variants: could not rewrite ${kind}/${fileName} (${target}) — ${String(err)}`);
     return 'failed';
   }
   return 'rewritten';
@@ -362,7 +362,7 @@ async function pathExists(p: string): Promise<boolean> {
  * crash leaves behind must not look like a second skill to Claude Code.
  */
 async function swapInSkillDirectory(claudeDir: string, sourceDir: string, target: string): Promise<void> {
-  const staging = path.join(claudeDir, `.devflow-learning-${process.pid}-${Date.now().toString(36)}.tmp`);
+  const staging = path.join(claudeDir, `.devflow-curation-${process.pid}-${Date.now().toString(36)}.tmp`);
   const backup = `${staging}.old`;
   try {
     await copyDirectory(sourceDir, staging);
@@ -381,17 +381,17 @@ async function swapInSkillDirectory(claudeDir: string, sourceDir: string, target
   }
 }
 
-/** Converge the learning-gated skill directories. Never throws. */
-async function convergeSkills(opts: ConvergeLearningVariantsOptions): Promise<LearningSkillState> {
-  const { claudeDir, devflowDir, learning, plugins, warn } = opts;
+/** Converge the curation-gated skill directories. Never throws. */
+async function convergeSkills(opts: ConvergeCurationVariantsOptions): Promise<CurationSkillState> {
+  const { claudeDir, devflowDir, curation, plugins, warn } = opts;
   const selected = skillsOf(plugins);
-  let state: LearningSkillState = 'unchanged';
+  let state: CurationSkillState = 'unchanged';
 
   // Every gated skill is converged: a failure on one must not skip the next.
-  for (const skill of LEARNING_GATED_SKILLS) {
+  for (const skill of CURATION_GATED_SKILLS) {
     const target = path.join(claudeDir, 'skills', prefixSkillName(skill));
     try {
-      if (!learning) {
+      if (!curation) {
         if (!(await pathExists(target))) continue;
         await fs.rm(target, { recursive: true });
         state = 'removed';
@@ -407,7 +407,7 @@ async function convergeSkills(opts: ConvergeLearningVariantsOptions): Promise<Le
       await swapInSkillDirectory(claudeDir, resolved.dir, target);
       state = 'installed';
     } catch (err) {
-      warn(`learning variants: could not converge the ${prefixSkillName(skill)} skill (${target}) — ${String(err)}`);
+      warn(`curation variants: could not converge the ${prefixSkillName(skill)} skill (${target}) — ${String(err)}`);
       state = 'failed';
     }
   }
@@ -418,24 +418,24 @@ async function convergeSkills(opts: ConvergeLearningVariantsOptions): Promise<Le
 
 /**
  * Make the installed commands, agents and apply-decisions skill match the
- * machine's learning switch.
+ * machine's curation switch.
  *
  * Never throws. A caller reads `converged`; it does not catch. A claudeDir that is
  * not absolute is reported the same way rather than thrown, because an install
  * must not die on it.
  */
-export async function convergeLearningVariants(
-  opts: ConvergeLearningVariantsOptions,
-): Promise<ConvergeLearningVariantsResult> {
-  const { claudeDir, learning, warn } = opts;
-  const empty: ConvergeLearningVariantsResult = {
+export async function convergeCurationVariants(
+  opts: ConvergeCurationVariantsOptions,
+): Promise<ConvergeCurationVariantsResult> {
+  const { claudeDir, curation, warn } = opts;
+  const empty: ConvergeCurationVariantsResult = {
     converged: false, commandsRewritten: [], agentsRewritten: [], unchanged: 0, notInstalled: 0, skill: 'unchanged',
   };
 
   // Precondition, asserted in production code: a relative claudeDir would resolve
   // the install targets somewhere unexpected.
   if (!path.isAbsolute(claudeDir)) {
-    warn(`learning variants: claudeDir is not an absolute path ("${claudeDir}") — skipping convergence`);
+    warn(`curation variants: claudeDir is not an absolute path ("${claudeDir}") — skipping convergence`);
     return empty;
   }
   const root = opts.packageRoot ?? getPackageRoot();
@@ -444,17 +444,17 @@ export async function convergeLearningVariants(
   let failed = false;
   let unchanged = 0;
   let notInstalled = 0;
-  const rewritten: Record<LearningVariantKind, string[]> = { commands: [], agents: [] };
+  const rewritten: Record<CurationVariantKind, string[]> = { commands: [], agents: [] };
 
   for (const kind of KINDS) {
     const roster = await readRoster(kind, root, warn);
     if (!roster.present) {
-      warn(`learning variants: no ${kind} variants under ${learningOffDir(kind, root)} — run \`npm run build:mds\`; installed ${kind} left as they are`);
+      warn(`curation variants: no ${kind} variants under ${curationOffDir(kind, root)} — run \`npm run build:mds\`; installed ${kind} left as they are`);
       failed = true;
       continue;
     }
     for (const fileName of roster.names) {
-      const outcome = await convergeFile(kind, fileName, { claudeDir, learning, warn, root, focuses });
+      const outcome = await convergeFile(kind, fileName, { claudeDir, curation, warn, root, focuses });
       if (outcome === 'rewritten') rewritten[kind].push(fileName);
       else if (outcome === 'unchanged') unchanged++;
       else if (outcome === 'not-installed') notInstalled++;
@@ -494,13 +494,13 @@ export async function readRunningVersion(packageRoot: string = getPackageRoot())
  *
  * The caller prints it only on a toggle: a run that moved nothing says nothing.
  */
-export function describeLearningConverge(result: ConvergeLearningVariantsResult, learning: boolean): string | null {
+export function describeCurationConverge(result: ConvergeCurationVariantsResult, curation: boolean): string | null {
   const parts: string[] = [];
   const prompts = result.commandsRewritten.length + result.agentsRewritten.length;
   if (prompts > 0) {
     parts.push(
       `${result.commandsRewritten.length} command(s) and ${result.agentsRewritten.length} agent(s) ` +
-      `rewritten for the learning-${learning ? 'on' : 'off'} variant`,
+      `rewritten for the curation-${curation ? 'on' : 'off'} variant`,
     );
   }
   if (result.skill === 'installed') parts.push('the apply-decisions skill installed');
@@ -508,26 +508,26 @@ export function describeLearningConverge(result: ConvergeLearningVariantsResult,
   return parts.length === 0 ? null : parts.join('; ');
 }
 
-export interface ApplyLearningToggleOptions {
+export interface ApplyCurationToggleOptions {
   claudeDir: string;
   devflowDir: string;
   /** The value the switch was just set to. */
-  learning: boolean;
+  curation: boolean;
   /** The running package's version; null when it cannot be read. */
   runningVersion: string | null;
   warn: (msg: string) => void;
   packageRoot?: string;
 }
 
-export type LearningToggleOutcome =
+export type CurationToggleOutcome =
   /** The converge did not run: the installed files are not ones this package would rewrite. */
   | { kind: 'skipped'; reason: 'no-manifest' | 'version-skew'; message: string }
-  | { kind: 'converged'; result: ConvergeLearningVariantsResult; agentMappingReapplied: boolean };
+  | { kind: 'converged'; result: ConvergeCurationVariantsResult; agentMappingReapplied: boolean };
 
 /**
  * Whether the version the manifest records is the version of the running package.
  * Pure. An unknown running version (null) never matches: the installed files are then
- * not known to be the ones this package would write. Both callers, the learning
+ * not known to be the ones this package would write. Both callers, the curation
  * toggle and `init --hud-only`, ask this one question.
  */
 export function installedVersionMatches(installedVersion: string, runningVersion: string | null): boolean {
@@ -540,11 +540,11 @@ export function installedVersionMatches(installedVersion: string, runningVersion
  * installed version is hand-editable file content, so it prints through
  * `describeEchoedValue`.
  */
-export function learningToggleSkew(installedVersion: string, runningVersion: string | null, learning: boolean): string | null {
+export function curationToggleSkew(installedVersion: string, runningVersion: string | null, curation: boolean): string | null {
   if (installedVersionMatches(installedVersion, runningVersion)) return null;
   return (
     `The installed prompts come from devflow ${describeEchoedValue(installedVersion)} and this CLI is ${runningVersion ?? 'of unknown version'}, ` +
-    `so the learning-${learning ? 'on' : 'off'} variants were not applied. Run \`devflow init\` to apply them.`
+    `so the curation-${curation ? 'on' : 'off'} variants were not applied. Run \`devflow init\` to apply them.`
   );
 }
 
@@ -562,25 +562,25 @@ export function learningToggleSkew(installedVersion: string, runningVersion: str
  *
  * Never throws.
  */
-export async function applyLearningToggle(opts: ApplyLearningToggleOptions): Promise<LearningToggleOutcome> {
-  const { claudeDir, devflowDir, learning, runningVersion, warn } = opts;
+export async function applyCurationToggle(opts: ApplyCurationToggleOptions): Promise<CurationToggleOutcome> {
+  const { claudeDir, devflowDir, curation, runningVersion, warn } = opts;
 
   const manifest = await readManifest(devflowDir);
   if (manifest === null) {
     return {
       kind: 'skipped',
       reason: 'no-manifest',
-      message: 'No readable install manifest, so the learning variants were not applied. Run `devflow init`.',
+      message: 'No readable install manifest, so the curation variants were not applied. Run `devflow init`.',
     };
   }
-  const skew = learningToggleSkew(manifest.version, runningVersion, learning);
+  const skew = curationToggleSkew(manifest.version, runningVersion, curation);
   if (skew !== null) return { kind: 'skipped', reason: 'version-skew', message: skew };
 
   const selection = new Set(manifest.plugins);
-  const result = await convergeLearningVariants({
+  const result = await convergeCurationVariants({
     claudeDir,
     devflowDir,
-    learning,
+    curation,
     plugins: DEVFLOW_PLUGINS.filter(plugin => selection.has(plugin.name)),
     warn,
     packageRoot: opts.packageRoot,
@@ -597,7 +597,7 @@ export async function applyLearningToggle(opts: ApplyLearningToggleOptions): Pro
       });
       agentMappingReapplied = true;
     } catch (err) {
-      warn(`learning variants: could not reapply the agent model mapping — ${String(err)}`);
+      warn(`curation variants: could not reapply the agent model mapping — ${String(err)}`);
     }
   }
   return { kind: 'converged', result, agentMappingReapplied };

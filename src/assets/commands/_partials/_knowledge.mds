@@ -104,9 +104,9 @@ FEATURE_SLUG: {slug derived from primary changed directory, kebab-case}
 FEATURE_NAME: {human-readable name}
 DIRECTORIES: {list of primary directories touched by this workflow}
 FILES_CHANGED: {list of files changed}
-<!-- learning:on -->
+<!-- curation:on -->
 DECISIONS_CONTEXT: {the slice for these directories, else (none)}
-<!-- learning:end -->
+<!-- curation:end -->
 
 Write the knowledge base to:
   {worktree}/.devflow/features/{slug}/KNOWLEDGE.md

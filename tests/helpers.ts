@@ -8,7 +8,7 @@ import { getAllAgentNames } from '../src/core/plugins.js'
 import { agentSourceDirs, compiledSkillRefsDir } from '../src/core/assets.js'
 import { MAX_REFERENCE_SWEEP_DEPTH } from '../src/core/reference-sweep.js'
 import { GIT_OPERATIONS, PR_HOST_DESTINATION_ROOT, operationReferenceRel } from '../src/core/mds-variants.js'
-import { learningOffRelPath, type LearningVariantKind } from '../src/core/learning-variants.js'
+import { curationOffRelPath, type CurationVariantKind } from '../src/core/curation-variants.js'
 import { assertTempHome } from './setup/home-isolation.js'
 
 export const ROOT = path.resolve(import.meta.dirname, '..')
@@ -415,15 +415,15 @@ export function resolveAgentSource(name: string, root: string = ROOT): AgentSour
 }
 
 /**
- * The learning-off variant of a compiled prompt (D-LEARNING-VARIANTS): the file the build writes under
- * `dist/learning-off/<kind>/<name>.md` for a host that has an arm, or null when the host has none. The
- * learning-on variant is what `resolveAgentSource` and `requireDistFile` read.
+ * The curation-off variant of a compiled prompt (D-LEARNING-VARIANTS): the file the build writes under
+ * `dist/curation-off/<kind>/<name>.md` for a host that has an arm, or null when the host has none. The
+ * curation-on variant is what `resolveAgentSource` and `requireDistFile` read.
  *
  * @param root - Repository root to resolve paths against (default: ROOT).
  */
-export function resolveLearningOffSource(kind: LearningVariantKind, name: string, root: string = ROOT): string | null {
+export function resolveLearningOffSource(kind: CurationVariantKind, name: string, root: string = ROOT): string | null {
   try {
-    return readFileSync(path.join(root, learningOffRelPath(kind, `${name}.md`)), 'utf-8')
+    return readFileSync(path.join(root, curationOffRelPath(kind, `${name}.md`)), 'utf-8')
   } catch {
     return null
   }

@@ -9,7 +9,7 @@ import { readFileSync, promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { buildHudOnlyManifest, drainDisabledFeatureQueues, formatHudOnlySkew, type DisabledQueueDrainIO } from '../src/cli/commands/init.js';
-import { installedVersionMatches } from '../src/targets/claude-code/learning-install.js';
+import { installedVersionMatches } from '../src/targets/claude-code/curation-install.js';
 import type { ManifestData } from '../src/core/manifest.js';
 
 const NOW = '2026-09-26T00:00:00.000Z';

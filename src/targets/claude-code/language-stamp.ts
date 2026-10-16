@@ -10,7 +10,7 @@
  *   - The carrier is one line, `Installed language focuses: <list>`, shipped as `(none)` in
  *     src/assets/commands/code-review.mds and found again by an anchored match, so a later run can
  *     re-stamp a copy an earlier run stamped. It carries no MDS interpolation braces, and it sits outside
- *     every learning arm, so both variants carry it. A separate stamped file would add a file to the
+ *     every curation arm, so both variants carry it. A separate stamped file would add a file to the
  *     install walk and the install goldens, which an in-place rewrite leaves unchanged.
  *   - Only code-review.md carries it. /dynamic-build spawns every review focus and drops none (plan
  *     decision 1), so it has no stamp, no reduced classes and no DIFF_FILE.
@@ -22,8 +22,8 @@
  *   - `devflow uninstall --plugin` removes a language plugin's skill but no command, so its name would
  *     stay in the stamped copy; the selective phase re-stamps from the plugins that remain, through
  *     {@link restampInstalledCommands} like the install.
- *   - Composition with the learning converge (D-LEARNING-VARIANT-INSTALL), pinned: the converge rewrites
- *     installed command files from dist or dist/learning-off, and those files carry the shipped `(none)`
+ *   - Composition with the curation converge (D-LEARNING-VARIANT-INSTALL), pinned: the converge rewrites
+ *     installed command files from dist or dist/curation-off, and those files carry the shipped `(none)`
  *     line. It therefore applies {@link carryLanguageStamp} inside its own write path, putting the stamp
  *     it finds on the installed copy into the variant it writes ({@link stampForConverge}); a copy with no
  *     list to carry, one installed before the stamp existed, is stamped from the converge's selection
@@ -96,7 +96,7 @@ export function applyLanguageStamp(content: string, focuses: readonly string[]):
 /**
  * `source` with its stamp line replaced by the one on `installed`.
  *
- * The learning converge's write path (see the header): the variant it installs keeps the list the
+ * The curation converge's write path (see the header): the variant it installs keeps the list the
  * install stamped. Returns `source` unchanged unless both sides hold exactly one stamp line and the
  * installed one is a well-formed list, so a damaged or hostile line is never copied into a fresh file.
  */
@@ -116,7 +116,7 @@ function carriableStampLine(installed: string): string | null {
 }
 
 /**
- * The text the learning converge installs for a stamped command: `source` carrying the installed copy's
+ * The text the curation converge installs for a stamped command: `source` carrying the installed copy's
  * list ({@link carryLanguageStamp}) when the copy holds one, else `source` stamped with `focuses`, the
  * effective selection's list, exactly as the install stamps it.
  *

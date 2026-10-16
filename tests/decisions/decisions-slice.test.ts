@@ -4,15 +4,15 @@
  * The orchestrating main model cuts the slice: it copies the index lines that touch an agent's work,
  * verbatim, behind a `(slice: N of M entries — full index: <path>)` marker and ahead of the footer.
  * Siblings over one diff share ONE slice. No script slices, so the pre-rendered index stays a plain
- * file read and judgment stays with the model. The rule is learning-on text only: a learning-off
+ * file read and judgment stays with the model. The rule is curation-on text only: a curation-off
  * machine loads no index, so its build carries no trace of it.
  *
  * What this file holds:
- *   - every compiled learning-on command that loads decisions states the rule and the pointer to the
+ *   - every compiled curation-on command that loads decisions states the rule and the pointer to the
  *     full index (fourteen hosts, counted where they are read);
  *   - the fan-out notes name ONE shared slice, and the Knowledge spawn block takes the slice for its
  *     directories;
- *   - no learning-off variant carries any of it;
+ *   - no curation-off variant carries any of it;
  *   - `devflow:apply-decisions` lets an agent read the full index when its work leaves the slice, in
  *     the same bytes it had before (the preload ceilings in tests/guards/code-preload.test.ts hold the
  *     total).
@@ -34,7 +34,7 @@ const MARKER = '(slice: N of M entries — full index: '
 const SHARED_SLICE = 'ONE slice'
 const WHEN_UNSURE = 'When unsure, include the line'
 const RULE_START = 'Hand each agent that takes `DECISIONS_CONTEXT` a slice, not the whole index'
-/** The sentences that carry the rule; a learning-off build holds none of them. */
+/** The sentences that carry the rule; a curation-off build holds none of them. */
 const RULE_LITERALS: readonly string[] = [RULE_START, MARKER, SHARED_SLICE, WHEN_UNSURE]
 
 /** The rule paragraph of a compiled host: from its first words to the end of the shared-slice sentence. */
@@ -67,10 +67,10 @@ const offTexts = (): Map<string, string> =>
   new Map(MDS_COMMAND_HOSTS.map(h => [h, resolveLearningOffSource('commands', h) ?? ''] as const))
 
 // ---------------------------------------------------------------------------
-// Learning-on hosts
+// Curation-on hosts
 // ---------------------------------------------------------------------------
 
-describe('decisions slice — every compiled learning-on host states the rule and the full-index pointer', () => {
+describe('decisions slice — every compiled curation-on host states the rule and the full-index pointer', () => {
   it('reads all fourteen command hosts', () => {
     const texts = onTexts()
     expect(texts.size).toBe(14)
@@ -159,25 +159,25 @@ describe('decisions slice — the Knowledge spawn block takes the slice for its 
 })
 
 // ---------------------------------------------------------------------------
-// Learning-off
+// Curation-off
 // ---------------------------------------------------------------------------
 
-describe('decisions slice — a learning-off build carries none of it', () => {
-  it('reads all fourteen learning-off hosts', () => {
+describe('decisions slice — a curation-off build carries none of it', () => {
+  it('reads all fourteen curation-off hosts', () => {
     const texts = offTexts()
     expect(texts.size).toBe(14)
-    for (const [host, text] of texts) expect(text.length, `${host}: learning-off variant missing`).toBeGreaterThan(1000)
+    for (const [host, text] of texts) expect(text.length, `${host}: curation-off variant missing`).toBeGreaterThan(1000)
   })
 
-  it('no learning-off host holds a rule literal, a marker, or a slice of the index', () => {
+  it('no curation-off host holds a rule literal, a marker, or a slice of the index', () => {
     expect(collectHostsCarrying(offTexts(), [...RULE_LITERALS, '(slice:', 'full index'])).toEqual([])
   })
 
-  it('known-bad probe: the learning-on text run through the same collector is reported for every host', () => {
+  it('known-bad probe: the curation-on text run through the same collector is reported for every host', () => {
     expect(collectHostsCarrying(onTexts(), [MARKER]).length).toBe(14)
   })
 
-  it('the learning-on text of each host differs from its learning-off text by the rule (the pair is not one file twice)', () => {
+  it('the curation-on text of each host differs from its curation-off text by the rule (the pair is not one file twice)', () => {
     const on = onTexts()
     const off = offTexts()
     for (const host of MDS_COMMAND_HOSTS) {
@@ -187,7 +187,7 @@ describe('decisions slice — a learning-off build carries none of it', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Source shape: one define, expanded only inside learning-on arms
+// Source shape: one define, expanded only inside curation-on arms
 // ---------------------------------------------------------------------------
 
 describe('decisions slice — the partial states the rule once, as a leaf', () => {
@@ -205,14 +205,14 @@ describe('decisions slice — the partial states the rule once, as a leaf', () =
     expect(body).not.toContain('learning:')
   })
 
-  it('decisions_load expands the leaf after the index read, inside its learning-on arm', () => {
+  it('decisions_load expands the leaf after the index read, inside its curation-on arm', () => {
     const load = partial().split('@define decisions_load():')[1] ?? ''
-    expect(load.indexOf('<!-- learning:on -->')).toBeGreaterThan(-1)
+    expect(load.indexOf('<!-- curation:on -->')).toBeGreaterThan(-1)
     const read = load.indexOf('Read the pre-rendered index')
     const slice = load.indexOf('{{decisions_slice()}}')
     expect(read).toBeGreaterThan(-1)
     expect(slice).toBeGreaterThan(read)
-    expect(slice).toBeLessThan(load.indexOf('<!-- learning:end -->'))
+    expect(slice).toBeLessThan(load.indexOf('<!-- curation:end -->'))
   })
 
   it('every other expansion sits inside an on arm too', () => {
@@ -221,8 +221,8 @@ describe('decisions slice — the partial states the rule once, as a leaf', () =
       const at = text.search(/\{\{(?:decisions\.)?decisions_slice\(\)\}\}/)
       expect(at, `${rel}: expansion`).toBeGreaterThan(-1)
       const before = text.slice(0, at)
-      expect(before.lastIndexOf('<!-- learning:on -->'), `${rel}: arm opens before`).toBeGreaterThan(before.lastIndexOf('<!-- learning:end -->'))
-      expect(before.lastIndexOf('<!-- learning:on -->'), `${rel}: no off arm between`).toBeGreaterThan(before.lastIndexOf('<!-- learning:off -->'))
+      expect(before.lastIndexOf('<!-- curation:on -->'), `${rel}: arm opens before`).toBeGreaterThan(before.lastIndexOf('<!-- curation:end -->'))
+      expect(before.lastIndexOf('<!-- curation:on -->'), `${rel}: no off arm between`).toBeGreaterThan(before.lastIndexOf('<!-- curation:off -->'))
     }
   })
 })

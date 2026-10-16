@@ -8,7 +8,7 @@ is its own define, `authoring_decisions()`, expanded by the hosts that load
 decisions (dynamic-build, dynamic-plan, dynamic-tickets and dynamic-profile) right
 after their settings block, so the gate in it reads a line already resolved.
 `authoring_preamble()` carries no decisions text. D-LEARNING-VARIANTS: the whole of
-`authoring_decisions()` is a learning-on arm, so a learning-off build carries no decisions
+`authoring_decisions()` is a curation-on arm, so a curation-off build carries no decisions
 step.
 
 D-DECISIONS-DECLARED-ONLY: the step names, as the receivers of the index, only the
@@ -92,7 +92,7 @@ When a ticket requires multiple sequential Code agent phases, each Code agent ap
 @end
 
 @define authoring_decisions():
-<!-- learning:on -->
+<!-- curation:on -->
 ### DECISIONS_CONTEXT — obtain BEFORE authoring
 
 {{decisions.decisions_gate()}}
@@ -105,7 +105,7 @@ The script body cannot perform this read — you (the main model) do it before a
 
 {{decisions.decisions_slice()}} The script carries one `DECISIONS_CONTEXT` for every agent, so cut it once, over the whole run.
 
-<!-- learning:end -->
+<!-- curation:end -->
 @end
 
 @export authoring_preamble

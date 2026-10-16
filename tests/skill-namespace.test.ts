@@ -227,7 +227,7 @@ describe('installViaFileCopy skill lifecycle', () => {
   /** Run installViaFileCopy with the security skill (real source, no seedPlugin needed) */
   async function runInstall(opts?: { isPartialInstall?: boolean }): Promise<InstallReport> {
     return installViaFileCopy({
-      learning: true,
+      curation: true,
       plugins: [],
       claudeDir,
       devflowDir,

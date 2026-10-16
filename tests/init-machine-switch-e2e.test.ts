@@ -561,7 +561,7 @@ describe('init on→off re-init transitions', () => {
     // init never writes a feature switch into the per-repo config (D-FEATURES-NARROW-ONLY).
     expect(await readRepoConfig(repoA)).toEqual({ reviewPublication: 'auto' });
     expect(existsSync(memoryQueue(repoA))).toBe(false);
-    expect(existsSync(learningQueue(repoA)), 'the learning-off re-init drains the repo learning queue').toBe(false);
+    expect(existsSync(learningQueue(repoA)), 'the curation-off re-init drains the repo learning queue').toBe(false);
     expect(sessionContext(repoA)).not.toContain('LEARNING MAINTENANCE');
     expect(runCli(repoA, 'knowledge', '--status').out).toContain('Status: disabled');
     expect(JSON.parse(await fs.readFile(path.join(devflowDir(), 'hud.json'), 'utf-8')).enabled).toBe(false);

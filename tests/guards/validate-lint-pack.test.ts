@@ -41,7 +41,7 @@ interface Doc {
 }
 
 const IMPLEMENT_ON = 'dist/commands/implement.md'
-const IMPLEMENT_OFF = 'dist/learning-off/commands/implement.md'
+const IMPLEMENT_OFF = 'dist/curation-off/commands/implement.md'
 const IMPLEMENT_LABELS: readonly string[] = [IMPLEMENT_ON, IMPLEMENT_OFF]
 const REVALIDATE_LABEL = 'reference commands/implement-revalidate.md'
 
@@ -51,7 +51,7 @@ function commandDocs(): Doc[] {
   for (const file of requireDistFiles()) {
     docs.push({ label: `dist/commands/${file}`, text: requireDistFile(file) })
     const off = resolveLearningOffSource('commands', file.replace(/\.md$/, ''))
-    if (off !== null) docs.push({ label: `dist/learning-off/commands/${file}`, text: off })
+    if (off !== null) docs.push({ label: `dist/curation-off/commands/${file}`, text: off })
   }
   return docs
 }
@@ -313,7 +313,7 @@ function dataFlowLines(section: string | null, kind: 'Produces' | 'Requires'): s
   return lines.map(l => l.slice(`**${kind}:**`.length).replace(/\([^)]*\)/g, '').split(',').map(n => n.trim()).filter(n => n !== ''))
 }
 
-/** Named collector: how a copy of `/implement` fails to list `GATE_LEVEL` in the data flow, once per learning arm it holds. */
+/** Named collector: how a copy of `/implement` fails to list `GATE_LEVEL` in the data flow, once per curation arm it holds. */
 export function collectDataFlowDefects(doc: Doc, arms: number): string[] {
   const out: string[] = []
   const phase1 = dataFlowLines(sectionBetween(doc.text, '### Phase 1: Setup', '### Phase 2:'), 'Produces')
@@ -329,7 +329,7 @@ export function collectDataFlowDefects(doc: Doc, arms: number): string[] {
   return out
 }
 
-/** The text with `GATE_LEVEL` dropped from the n-th Phase 1 Produces line (one line per learning arm). */
+/** The text with `GATE_LEVEL` dropped from the n-th Phase 1 Produces line (one line per curation arm). */
 function dropFromArm(text: string, n: number): string {
   let seen = 0
   const next = text.replace(/^(\*\*Produces:\*\* TASK_ID[^\n]*), GATE_LEVEL$/gm, (whole: string, kept: string) => (seen++ === n ? kept : whole))
@@ -344,7 +344,7 @@ describe('only the implement Phase 6 Validate spawn passes the level and the bas
       expect(collectValidateSpawns(doc?.text ?? '').length, label).toBe(2)
     }
     for (const base of ['resolve', 'self-review', 'release', 'dynamic-build']) {
-      for (const label of [`dist/commands/${base}.md`, `dist/learning-off/commands/${base}.md`]) {
+      for (const label of [`dist/commands/${base}.md`, `dist/curation-off/commands/${base}.md`]) {
         const doc = COMMANDS.find(d => d.label === label)
         expect(doc, `${label} is read`).toBeDefined()
         expect(collectValidateSpawns(doc?.text ?? '').length, label).toBeGreaterThanOrEqual(1)
@@ -388,7 +388,7 @@ describe('only the implement Phase 6 Validate spawn passes the level and the bas
       expect(collectSpawnSiteDefects(withDoc(SPAWN_CORPUS, label, noSite)), label).toContain(`${label}: Phase 6 has no Validate spawn`)
     }
     for (const base of ['resolve', 'self-review', 'release', 'dynamic-build']) {
-      for (const label of [`dist/commands/${base}.md`, `dist/learning-off/commands/${base}.md`]) {
+      for (const label of [`dist/commands/${base}.md`, `dist/curation-off/commands/${base}.md`]) {
         const addBase = (text: string): string => {
           const spawn = collectValidateSpawns(text)[0] ?? ''
           return seed(text, spawn, spawn.endsWith('```') ? `${spawn.slice(0, -3)}${PHASE6_BASE}\n\`\`\`` : `${spawn}\n${PHASE6_BASE}`)

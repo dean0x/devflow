@@ -148,7 +148,7 @@ export function collectPreloadDefects(
   return out
 }
 
-/** Every agent the registry declares, as installed: the compiled or source body, and each learning-off variant. */
+/** Every agent the registry declares, as installed: the compiled or source body, and each curation-off variant. */
 const liveAgents = (): Array<readonly [string, string]> =>
   getAllAgentNames().flatMap(name => {
     const off = resolveLearningOffSource('agents', name)

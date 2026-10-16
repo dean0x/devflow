@@ -1,7 +1,7 @@
 /**
  * D-LANGUAGE-FOCUS-STAMP (#428): the installer stamps the language focuses an install selection makes
  * available into the installed /code-review command, and re-stamps them on every install, on a partial
- * install, on `uninstall --plugin` and through a learning-variant converge.
+ * install, on `uninstall --plugin` and through a curation-variant converge.
  *
  * This file holds the pure function (registry + effective selection -> list), the line rewrite, the
  * installed-file rewrite, and the installer / uninstall / converge wiring against injected temp
@@ -26,7 +26,7 @@ import {
   renderLanguageStamp,
   restampInstalledCommands,
 } from '../../src/targets/claude-code/language-stamp.js';
-import { convergeLearningVariants } from '../../src/targets/claude-code/learning-install.js';
+import { convergeCurationVariants } from '../../src/targets/claude-code/curation-install.js';
 import { runSelectivePhaseForScope } from '../../src/cli/commands/uninstall.js';
 import {
   DEVFLOW_PLUGINS,
@@ -69,11 +69,11 @@ async function install(opts: {
   plugins: PluginDefinition[];
   effectivePlugins?: PluginDefinition[];
   isPartialInstall: boolean;
-  learning?: boolean;
+  curation?: boolean;
 }): Promise<void> {
   const effective = opts.effectivePlugins ?? opts.plugins;
   await installViaFileCopy({
-    learning: opts.learning ?? true,
+    curation: opts.curation ?? true,
     plugins: opts.plugins,
     effectivePlugins: effective,
     claudeDir,
@@ -369,17 +369,17 @@ describe('installViaFileCopy stamps the installed code-review from the effective
 });
 
 // ---------------------------------------------------------------------------
-// The learning converge keeps the stamp (the composition D-LANGUAGE-FOCUS-STAMP pins)
+// The curation converge keeps the stamp (the composition D-LANGUAGE-FOCUS-STAMP pins)
 // ---------------------------------------------------------------------------
 
-describe('a learning-variant converge keeps the installed stamp', () => {
-  const converge = (learning: boolean): ReturnType<typeof convergeLearningVariants> =>
-    convergeLearningVariants({
-      claudeDir, devflowDir, learning, plugins: [CORE, REVIEW, TYPESCRIPT, GO], warn: m => warnings.push(m),
+describe('a curation-variant converge keeps the installed stamp', () => {
+  const converge = (curation: boolean): ReturnType<typeof convergeCurationVariants> =>
+    convergeCurationVariants({
+      claudeDir, devflowDir, curation, plugins: [CORE, REVIEW, TYPESCRIPT, GO], warn: m => warnings.push(m),
     });
 
   it('switching the variant rewrites the file but carries the stamp across', async () => {
-    await install({ plugins: [CORE, REVIEW, TYPESCRIPT, GO], isPartialInstall: false, learning: true });
+    await install({ plugins: [CORE, REVIEW, TYPESCRIPT, GO], isPartialInstall: false, curation: true });
     const onVariant = await readInstalledReview();
     expect(stampOf(onVariant)).toBe('Installed language focuses: typescript, go');
 
@@ -395,7 +395,7 @@ describe('a learning-variant converge keeps the installed stamp', () => {
   });
 
   it('a copy with no stamp to carry is stamped from the selection, not given the shipped (none)', async () => {
-    await install({ plugins: [CORE, REVIEW, TYPESCRIPT, GO], isPartialInstall: false, learning: true });
+    await install({ plugins: [CORE, REVIEW, TYPESCRIPT, GO], isPartialInstall: false, curation: true });
     // A copy an earlier version installed, before the stamp line existed: nothing to carry. A
     // `--plugin` init right after an upgrade reaches it through the converge, never the copy.
     const stampless = (await readInstalledReview())
@@ -412,7 +412,7 @@ describe('a learning-variant converge keeps the installed stamp', () => {
   });
 
   it('a converge that finds the right variant and the right stamp rewrites nothing', async () => {
-    await install({ plugins: [CORE, REVIEW, TYPESCRIPT, GO], isPartialInstall: false, learning: false });
+    await install({ plugins: [CORE, REVIEW, TYPESCRIPT, GO], isPartialInstall: false, curation: false });
     const before = await fs.stat(installedReview());
     const result = await converge(false);
     expect(result.commandsRewritten).not.toContain('code-review.md');

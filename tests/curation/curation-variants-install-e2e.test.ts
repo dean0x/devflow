@@ -3,7 +3,7 @@
  * the install carries (D-LEARNING-VARIANT-INSTALL, plan section 3.B).
  *
  * Drives the REAL compiled CLI (`node dist/cli.js`) against isolated temp HOMEs, because
- * the unit tests in learning-variants-install.test.ts call the converge with hand-built
+ * the unit tests in curation-variants-install.test.ts call the converge with hand-built
  * trees and therefore cannot see a wiring mistake between the CLI, the installer and the
  * converge. Every claim here is about what a user's ~/.claude holds afterwards.
  *
@@ -13,7 +13,7 @@
  * at Claude Code detection before reaching the code under test. The first assertion of
  * each scenario is on installed bytes, never on an exit code a short-circuit also returns.
  *
- * Requires a build (`npm run build`): the spawned CLI reads dist/ and dist/learning-off.
+ * Requires a build (`npm run build`): the spawned CLI reads dist/ and dist/curation-off.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -74,14 +74,14 @@ async function exists(p: string): Promise<boolean> {
 }
 
 async function rosterOf(kind: Kind): Promise<string[]> {
-  return (await fs.readdir(path.join(ROOT, 'dist', 'learning-off', kind))).filter(f => f.endsWith('.md')).sort();
+  return (await fs.readdir(path.join(ROOT, 'dist', 'curation-off', kind))).filter(f => f.endsWith('.md')).sort();
 }
 
 /** Which variant the installed file is, by comparing its bytes with both build outputs. */
 async function variantOf(kind: Kind, file: string): Promise<Variant> {
   let installed: Buffer;
   try { installed = await fs.readFile(installedPrompt(kind, file)); } catch { return 'missing'; }
-  const off = await fs.readFile(path.join(ROOT, 'dist', 'learning-off', kind, file));
+  const off = await fs.readFile(path.join(ROOT, 'dist', 'curation-off', kind, file));
   const on = await fs.readFile(path.join(ROOT, 'dist', kind, file));
   if (installed.equals(off)) return 'off';
   if (installed.equals(on)) return 'on';
@@ -133,13 +133,13 @@ async function manifestLearning(): Promise<boolean | undefined> {
 async function expectAll(variant: 'on' | 'off', minimum = 15): Promise<void> {
   const groups = await installedVariants();
   const other = variant === 'on' ? 'off' : 'on';
-  expect(groups[other], `files still the learning-${other} variant`).toEqual([]);
+  expect(groups[other], `files still the curation-${other} variant`).toEqual([]);
   expect(groups.other, 'files that are neither variant').toEqual([]);
-  expect(groups[variant].length, `installed learning-${variant} files (non-vacuity)`).toBeGreaterThanOrEqual(minimum);
+  expect(groups[variant].length, `installed curation-${variant} files (non-vacuity)`).toBeGreaterThanOrEqual(minimum);
 }
 
 beforeEach(async () => {
-  tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-learning-e2e-'));
+  tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-curation-e2e-'));
   expect(() => assertTempHome(tmpHome)).not.toThrow();
   // init refuses a HOME with no ~/.claude: Claude Code's presence check, not under test.
   await fs.mkdir(claudeDir(), { recursive: true });
@@ -154,15 +154,15 @@ afterEach(async () => {
 // ---------------------------------------------------------------------------
 
 describe('init follows the machine switch (AC-139, AC-148)', () => {
-  it('init --no-learning installs the learning-off prompts and no apply-decisions skill', async () => {
+  it('init --no-learning installs the curation-off prompts and no apply-decisions skill', async () => {
     init('--recommended', '--no-learning');
 
     await expectAll('off');
-    expect(await exists(skillDir()), 'the skill has no reader on a learning-off machine').toBe(false);
+    expect(await exists(skillDir()), 'the skill has no reader on a curation-off machine').toBe(false);
     expect(await manifestLearning()).toBe(false);
   }, SCENARIO_TIMEOUT_MS);
 
-  it('init with learning on installs the learning-on prompts and the skill, byte for byte', async () => {
+  it('init with learning on installs the curation-on prompts and the skill, byte for byte', async () => {
     init('--recommended');
 
     await expectAll('on');
@@ -170,17 +170,17 @@ describe('init follows the machine switch (AC-139, AC-148)', () => {
     expect(await manifestLearning()).toBe(true);
   }, SCENARIO_TIMEOUT_MS);
 
-  it('a prompt with no learning-off file is installed once, the same on both sides of the switch', async () => {
+  it('a prompt with no curation-off file is installed once, the same on both sides of the switch', async () => {
     init('--recommended', '--no-learning');
     const offInstall = await fs.readFile(installedPrompt('agents', 'evaluate.md'));
     init('--recommended');
     const onInstall = await fs.readFile(installedPrompt('agents', 'evaluate.md'));
 
-    expect(await exists(path.join(ROOT, 'dist', 'learning-off', 'agents', 'evaluate.md'))).toBe(false);
+    expect(await exists(path.join(ROOT, 'dist', 'curation-off', 'agents', 'evaluate.md'))).toBe(false);
     expect(offInstall.equals(onInstall)).toBe(true);
   }, SCENARIO_TIMEOUT_MS);
 
-  it('init --no-learning over a full learning-on install converges the prompts it did not copy (--plugin)', async () => {
+  it('init --no-learning over a full curation-on install converges the prompts it did not copy (--plugin)', async () => {
     init('--recommended');
     await expectAll('on');
     expect(await exists(skillDir())).toBe(true);
@@ -211,7 +211,7 @@ describe('init follows the machine switch (AC-139, AC-148)', () => {
 // ---------------------------------------------------------------------------
 
 describe('devflow learning --enable/--disable converges the install (AC-140, AC-141)', () => {
-  it('--enable brings back the learning-on prompts and the skill, and --disable reverses it', async () => {
+  it('--enable brings back the curation-on prompts and the skill, and --disable reverses it', async () => {
     init('--recommended', '--no-learning');
     await expectAll('off');
 
@@ -266,12 +266,12 @@ describe('devflow learning --enable/--disable converges the install (AC-140, AC-
     okCli(os.tmpdir(), 'learning', '--disable');
     const off = await fs.readFile(installedPrompt('agents', 'code.md'), 'utf-8');
     expect(off, 'still the override').toMatch(/^effort: low$/m);
-    expect(off, 'and the learning-off body, with no apply-decisions preload').not.toContain('apply-decisions');
+    expect(off, 'and the curation-off body, with no apply-decisions preload').not.toContain('apply-decisions');
 
     okCli(os.tmpdir(), 'learning', '--enable');
     const on = await fs.readFile(installedPrompt('agents', 'code.md'), 'utf-8');
     expect(on).toMatch(/^effort: low$/m);
-    expect(on, 'back to the learning-on body').toContain('devflow:apply-decisions');
+    expect(on, 'back to the curation-on body').toContain('devflow:apply-decisions');
   }, SCENARIO_TIMEOUT_MS);
 
   it('a --plugin install gains no other plugin\'s files when the switch is toggled (AC-143)', async () => {
@@ -290,7 +290,7 @@ describe('devflow learning --enable/--disable converges the install (AC-140, AC-
     expect(await variantOf('commands', 'implement.md')).toBe('on');
   }, SCENARIO_TIMEOUT_MS);
 
-  it('a repository that narrows learning off changes nothing installed on a learning-on machine (AC-144)', async () => {
+  it('a repository that narrows learning off changes nothing installed on a curation-on machine (AC-144)', async () => {
     const repo = path.join(tmpHome, 'repo');
     await fs.mkdir(path.join(repo, '.devflow'), { recursive: true });
     await fs.writeFile(path.join(repo, '.devflow', 'project.json'), '{"features":{"learning":false}}\n');

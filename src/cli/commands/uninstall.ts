@@ -1083,7 +1083,7 @@ export async function refreshRetainedCommandsAndAgents(opts: {
       plugins: retained,
       agentsMap: buildAssetMaps(retained).agentsMap,
       claudeDir,
-      learning: manifest.features.learning,
+      curation: manifest.features.learning,
       trackerServers: effectiveTrackerServers(manifest.features.tracker),
       warn: (msg) => p.log.warn(msg),
     });

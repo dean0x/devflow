@@ -23,16 +23,16 @@ inside a define is split by the build like an arm in a host: the markers sit on 
 - **TASK_ID**: Unique identifier (e.g., "task-2025-01-15_1430")
 - **TASK_DESCRIPTION**: What to do
 - **PUSH** (optional): `true` (default) | `false` — when false, commit only; orchestrator owns push/CI gate
-<!-- learning:on -->
+<!-- curation:on -->
 - **DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries.
   When provided, use `devflow:apply-decisions` to Read full bodies on demand.
-<!-- learning:end -->
+<!-- curation:end -->
 @end
 
 @define decisions_orient():
-<!-- learning:on -->
+<!-- curation:on -->
    - If `DECISIONS_CONTEXT` is provided, follow `devflow:apply-decisions` on it. An absent key or `(none)` means no decisions context. State every decision or pitfall you apply in words in code, comments, tests and commit messages, never by its ID.
-<!-- learning:end -->
+<!-- curation:end -->
 @end
 
 @define commit_push():

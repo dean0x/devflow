@@ -369,7 +369,7 @@ const INPUT_READ_RE = /^[A-Z][A-Z_]*(?: up to Gate 1, [A-Z][A-Z_]* after)?$/
 
 /** Text the reference must never carry: it holds rows and rules only, no spawn, install path, compliance logic, gate skip or plan-size cap. */
 const REF_FORBIDDEN: ReadonlyArray<readonly [string, string]> = [
-  ['<!-- learning:', 'a learning marker'],
+  ['<!-- curation:', 'a curation marker'],
   ['Agent(', 'a spawn block'],
   ['subagent_type', 'a subagent_type field'],
   ['COMPLIANCE_', 'a compliance variable'],
@@ -749,19 +749,19 @@ export function collectPlanGateBlockDefects(body: string): string[] {
   return out
 }
 
-/** AC-6: in the source, the block sits outside every learning arm, so both builds carry it. */
+/** AC-6: in the source, the block sits outside every curation arm, so both builds carry it. */
 export function collectBlockArmDefects(source: string): string[] {
   let arm: string | null = null
   let inBlock = false
   let seen = false
   const out: string[] = []
   for (const line of source.split('\n')) {
-    const open = /^<!-- learning:(on|off) -->$/.exec(line)
+    const open = /^<!-- curation:(on|off) -->$/.exec(line)
     if (open !== null) { arm = open[1]; continue }
-    if (line === '<!-- learning:end -->') { arm = null; continue }
+    if (line === '<!-- curation:end -->') { arm = null; continue }
     if (line.startsWith('**Gate level.**')) { inBlock = true; seen = true }
     else if (line.startsWith('#### Phase 3:')) inBlock = false
-    if (inBlock && arm !== null) { out.push(`the gate-level block sits inside a learning:${arm} arm`); break }
+    if (inBlock && arm !== null) { out.push(`the gate-level block sits inside a curation:${arm} arm`); break }
   }
   if (!seen) out.push('the source has no gate-level block')
   return out
@@ -848,7 +848,7 @@ export function collectReportDefects(body: string): string[] {
 
 const VARIANTS: ReadonlyArray<{ label: string; body: string }> = (() => {
   const off = resolveLearningOffSource('commands', 'plan')
-  if (off === null) throw new Error('dist/learning-off/commands/plan.md is absent: run `npm run build:mds`')
+  if (off === null) throw new Error('dist/curation-off/commands/plan.md is absent: run `npm run build:mds`')
   return [
     { label: 'learning on', body: requireDistFile('plan.md') },
     { label: 'learning off', body: off },
@@ -1035,8 +1035,8 @@ describe('the level reference holds the decided rows, substitutes and rules (AC-
       .toContain(lacks('Reports', 'Gates 1 and 2 and the run report show each report'))
     // The Research data line.
     expect(defects(seed(REF, /^- \*\*Research data:\*\* .*\n/m, '')).join('\n')).toMatch(/the rules are "Explore, Research, Gaps, Plan, Reports, Scope, Revise, Run report"/)
-    // Forbidden text: a learning marker, compliance logic, and gate-skip text.
-    expect(defects(`${REF}\n<!-- learning:on -->\n`)).toContain('the reference carries a learning marker')
+    // Forbidden text: a curation marker, compliance logic, and gate-skip text.
+    expect(defects(`${REF}\n<!-- curation:on -->\n`)).toContain('the reference carries a curation marker')
     expect(defects(`${REF}\nCOMPLIANCE_FRAMEWORKS: x\n`)).toContain('the reference carries a compliance variable')
     expect(defects(`${REF}\nRead devflow:compliance for the framework.\n`)).toContain('the reference carries the compliance skill')
     expect(defects(`${REF}\nRead gap-analysis/references/compliance.md first.\n`)).toContain('the reference carries the compliance reference path')
@@ -1210,7 +1210,7 @@ describe('the simulator reads its counts from the reference and the oracle decid
   })
 })
 
-describe('the command carries the gate-level block, outside the learning arms (AC-6, AC-9, AC-12)', () => {
+describe('the command carries the gate-level block, outside the curation arms (AC-6, AC-9, AC-12)', () => {
   const defects = collectPlanGateBlockDefects
   const readParagraph = gateBlock(ON)?.split('\n\n').find(p => p.includes(LEVEL_REFERENCE_PATH)) ?? ''
   const isPinned = (found: string[]): boolean => found.some(d => d.startsWith('the read paragraph is not the pinned sentence'))
@@ -1219,11 +1219,11 @@ describe('the command carries the gate-level block, outside the learning arms (A
     expect(collectPlanGateBlockDefects(body)).toEqual([])
   })
 
-  it('the source holds the block outside every learning arm', () => {
+  it('the source holds the block outside every curation arm', () => {
     expect(collectBlockArmDefects(SOURCE)).toEqual([])
   })
 
-  it('known-bad probes: each removed floor line and read phrase, the range set back, a moved root, an added sentence and a block in a learning arm are reported', () => {
+  it('known-bad probes: each removed floor line and read phrase, the range set back, a moved root, an added sentence and a block in a curation arm are reported', () => {
     expect(readParagraph, 'the read paragraph is in the compiled command').not.toBe('')
     expect(readParagraph, 'the pinned sentence is the compiled one').toBe(READ_PARAGRAPH)
     for (const item of BLOCK_ITEMS) {
@@ -1251,10 +1251,10 @@ describe('the command carries the gate-level block, outside the learning arms (A
     expect(defects(seed(ON, P2, '**Produces:** SKIM_CONTEXT, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES'))).toContain('Phase 2 Produces does not list GATE_LEVEL')
     expect(defects(seed(ON, R3, '**Requires:** SKIM_CONTEXT'))).toContain('Phase 3 Requires does not list GATE_LEVEL')
     expect(defects(seed(ON, '**Gate level.**', '**Level.**'))).toEqual(['no gate-level block between "**Gate level.**" and "#### Phase 3:"'])
-    const inArm = seed(seed(SOURCE, '**Gate level.**', '<!-- learning:on -->\n**Gate level.**'), '#### Phase 3: Explore Requirements', '<!-- learning:end -->\n#### Phase 3: Explore Requirements')
-    expect(collectBlockArmDefects(inArm)).toEqual(['the gate-level block sits inside a learning:on arm'])
-    const inOff = seed(seed(SOURCE, '**Gate level.**', '<!-- learning:off -->\n**Gate level.**'), '#### Phase 3: Explore Requirements', '<!-- learning:end -->\n#### Phase 3: Explore Requirements')
-    expect(collectBlockArmDefects(inOff)).toEqual(['the gate-level block sits inside a learning:off arm'])
+    const inArm = seed(seed(SOURCE, '**Gate level.**', '<!-- curation:on -->\n**Gate level.**'), '#### Phase 3: Explore Requirements', '<!-- curation:end -->\n#### Phase 3: Explore Requirements')
+    expect(collectBlockArmDefects(inArm)).toEqual(['the gate-level block sits inside a curation:on arm'])
+    const inOff = seed(seed(SOURCE, '**Gate level.**', '<!-- curation:off -->\n**Gate level.**'), '#### Phase 3: Explore Requirements', '<!-- curation:end -->\n#### Phase 3: Explore Requirements')
+    expect(collectBlockArmDefects(inOff)).toEqual(['the gate-level block sits inside a curation:off arm'])
     expect(collectBlockArmDefects(seed(SOURCE, '**Gate level.**', '**Level.**'))).toEqual(['the source has no gate-level block'])
   })
 

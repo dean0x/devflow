@@ -1,10 +1,10 @@
 /**
- * The learning-variant converge (D-LEARNING-VARIANT-INSTALL), against temp trees.
+ * The curation-variant converge (D-LEARNING-VARIANT-INSTALL), against temp trees.
  *
- * Covers convergeLearningVariants, applyLearningToggle and the install-side source
+ * Covers convergeCurationVariants, applyCurationToggle and the install-side source
  * order and skill condition in isolation: what the converge reads, what it writes,
- * what it refuses to touch and how it fails. tests/learning/
- * learning-variants-install-e2e.test.ts drives the same behaviour through the real
+ * what it refuses to touch and how it fails. tests/curation/
+ * curation-variants-install-e2e.test.ts drives the same behaviour through the real
  * CLI under a temp HOME.
  *
  * Every converge here runs against a temp CLAUDE dir and a temp package root, and
@@ -21,27 +21,27 @@ import * as path from 'path';
 
 import { installViaFileCopy, type Spinner } from '../../src/targets/claude-code/installer.js';
 import {
-  applyLearningToggle,
-  convergeLearningVariants,
-  describeLearningConverge,
-  learningToggleSkew,
-  MAX_LEARNING_ROSTER,
+  applyCurationToggle,
+  convergeCurationVariants,
+  describeCurationConverge,
+  curationToggleSkew,
+  MAX_CURATION_ROSTER,
   readRunningVersion,
-  type ConvergeLearningVariantsResult,
-} from '../../src/targets/claude-code/learning-install.js';
+  type ConvergeCurationVariantsResult,
+} from '../../src/targets/claude-code/curation-install.js';
 import { saveAgentMapping } from '../../src/core/agent-models.js';
 import {
   agentSourceDirs,
   commandSourceDirs,
-  learningOffDir,
+  curationOffDir,
   skillsDir,
 } from '../../src/core/assets.js';
 import {
   DEVFLOW_PLUGINS,
   buildAssetMaps,
   buildScopedSkillsMap,
-  LEARNING_GATED_SKILLS,
-  omitLearningGatedSkills,
+  CURATION_GATED_SKILLS,
+  omitCurationGatedSkills,
   skillsOf,
   type PluginDefinition,
 } from '../../src/core/plugins.js';
@@ -90,14 +90,14 @@ const installedSkill = (): string => path.join(claudeDir, 'skills', SKILL_DIR);
 /**
  * A package root with two hosts that have an arm (one command, one agent) and one
  * command with no arm, so the "no variant, no touch" rule has a subject.
- * Learning-on text is the normal path, learning-off text the dist/learning-off path.
+ * Curation-on text is the normal path, curation-off text the dist/curation-off path.
  */
 async function seedPackage(): Promise<void> {
   await write(path.join(pkg, 'dist', 'commands', 'implement.md'), 'implement ON\n');
-  await write(path.join(learningOffDir('commands', pkg), 'implement.md'), 'implement OFF\n');
+  await write(path.join(curationOffDir('commands', pkg), 'implement.md'), 'implement OFF\n');
   await write(path.join(pkg, 'dist', 'commands', 'no-arm.md'), 'no-arm\n');
   await write(path.join(pkg, 'dist', 'agents', 'code.md'), 'code ON\n');
-  await write(path.join(learningOffDir('agents', pkg), 'code.md'), 'code OFF\n');
+  await write(path.join(curationOffDir('agents', pkg), 'code.md'), 'code OFF\n');
   await write(path.join(skillsDir(pkg), SKILL, 'SKILL.md'), PKG_SKILL);
 }
 
@@ -107,12 +107,12 @@ async function installOn(): Promise<void> {
   await write(installedAgent('code'), 'code ON\n');
 }
 
-function converge(learning: boolean, plugins: readonly PluginDefinition[] = FULL_SELECTION) {
-  return convergeLearningVariants({ claudeDir, devflowDir, learning, plugins, warn, packageRoot: pkg });
+function converge(curation: boolean, plugins: readonly PluginDefinition[] = FULL_SELECTION) {
+  return convergeCurationVariants({ claudeDir, devflowDir, curation, plugins, warn, packageRoot: pkg });
 }
 
 beforeEach(async () => {
-  tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-learning-install-'));
+  tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-curation-install-'));
   expect(() => assertTempHome(tmp)).not.toThrow();
   claudeDir = path.join(tmp, 'claude');
   devflowDir = path.join(tmp, 'devflow');
@@ -132,36 +132,36 @@ afterEach(async () => {
 // ---------------------------------------------------------------------------
 
 describe('source order (assets.ts)', () => {
-  it('learning off puts the learning-off directory first for commands and for agents', () => {
-    expect(commandSourceDirs(false, pkg)).toEqual([learningOffDir('commands', pkg), path.join(pkg, 'dist', 'commands')]);
+  it('curation off puts the curation-off directory first for commands and for agents', () => {
+    expect(commandSourceDirs(false, pkg)).toEqual([curationOffDir('commands', pkg), path.join(pkg, 'dist', 'commands')]);
     expect(agentSourceDirs(pkg, false)).toEqual([
-      learningOffDir('agents', pkg),
+      curationOffDir('agents', pkg),
       path.join(pkg, 'dist', 'agents'),
       path.join(pkg, 'src', 'assets', 'agents'),
     ]);
   });
 
-  it('learning on keeps today\'s order exactly, and the default is learning on', () => {
+  it('curation on keeps today\'s order exactly, and the default is curation on', () => {
     expect(commandSourceDirs(true, pkg)).toEqual([path.join(pkg, 'dist', 'commands')]);
     expect(agentSourceDirs(pkg, true)).toEqual([path.join(pkg, 'dist', 'agents'), path.join(pkg, 'src', 'assets', 'agents')]);
     expect(agentSourceDirs(pkg)).toEqual(agentSourceDirs(pkg, true));
   });
 
-  it('known-bad probe: the learning-off directory is never consulted when learning is on', () => {
-    expect(commandSourceDirs(true, pkg).some(dir => dir.includes('learning-off'))).toBe(false);
-    expect(agentSourceDirs(pkg, true).some(dir => dir.includes('learning-off'))).toBe(false);
+  it('known-bad probe: the curation-off directory is never consulted when curation is on', () => {
+    expect(commandSourceDirs(true, pkg).some(dir => dir.includes('curation-off'))).toBe(false);
+    expect(agentSourceDirs(pkg, true).some(dir => dir.includes('curation-off'))).toBe(false);
   });
 });
 
 describe('the skill condition (plugins.ts)', () => {
   it('the gated set is exactly apply-decisions, pinned as an independent literal', () => {
-    expect([...LEARNING_GATED_SKILLS]).toEqual(['apply-decisions']);
+    expect([...CURATION_GATED_SKILLS]).toEqual(['apply-decisions']);
   });
 
-  it('omitLearningGatedSkills drops the skill with learning off and returns the map itself with learning on', () => {
+  it('omitCurationGatedSkills drops the skill with curation off and returns the map itself with curation on', () => {
     const map = new Map([['apply-decisions', 'devflow-core-skills'], ['git', 'devflow-core-skills']]);
-    expect([...omitLearningGatedSkills(map, false).keys()]).toEqual(['git']);
-    expect(omitLearningGatedSkills(map, true)).toBe(map);
+    expect([...omitCurationGatedSkills(map, false).keys()]).toEqual(['git']);
+    expect(omitCurationGatedSkills(map, true)).toBe(map);
     expect([...map.keys()], 'the input is never mutated').toEqual(['apply-decisions', 'git']);
   });
 });
@@ -170,7 +170,7 @@ describe('the skill condition (plugins.ts)', () => {
 // installViaFileCopy honours the switch (AC-139, AC-148)
 // ---------------------------------------------------------------------------
 
-describe('installViaFileCopy honours the learning switch', () => {
+describe('installViaFileCopy honours the curation switch', () => {
   const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
   const plugin = (name: string): PluginDefinition => {
     const found = DEVFLOW_PLUGINS.find(p => p.name === name);
@@ -179,10 +179,10 @@ describe('installViaFileCopy honours the learning switch', () => {
   };
   const selection = (): PluginDefinition[] => [plugin('devflow-core-skills'), plugin('devflow-implement')];
 
-  async function install(learning: boolean, isPartialInstall = false) {
+  async function install(curation: boolean, isPartialInstall = false) {
     const plugins = selection();
     return installViaFileCopy({
-      learning,
+      curation,
       plugins,
       effectivePlugins: plugins,
       claudeDir,
@@ -197,18 +197,18 @@ describe('installViaFileCopy honours the learning switch', () => {
 
   const real = (...segments: string[]): Promise<string> => read(path.join(ROOT, ...segments));
 
-  it('learning off installs the learning-off variant of a command and an agent that have one, and no apply-decisions skill', async () => {
+  it('curation off installs the curation-off variant of a command and an agent that have one, and no apply-decisions skill', async () => {
     const report = await install(false);
 
-    expect(await read(installedCommand('implement'))).toBe(await real('dist', 'learning-off', 'commands', 'implement.md'));
-    expect(await read(installedAgent('code'))).toBe(await real('dist', 'learning-off', 'agents', 'code.md'));
-    expect(await exists(installedSkill()), 'the skill has no reader with learning off').toBe(false);
+    expect(await read(installedCommand('implement'))).toBe(await real('dist', 'curation-off', 'commands', 'implement.md'));
+    expect(await read(installedAgent('code'))).toBe(await real('dist', 'curation-off', 'agents', 'code.md'));
+    expect(await exists(installedSkill()), 'the skill has no reader with curation off').toBe(false);
     expect(await exists(path.join(claudeDir, 'skills', 'devflow:git')), 'every other skill still installs').toBe(true);
     expect(report.removedSkills, 'a machine condition is not reported as a deselection').toEqual([]);
     expect(report.dormantShadows).toEqual([]);
   });
 
-  it('learning on installs the learning-on variant and the skill', async () => {
+  it('curation on installs the curation-on variant and the skill', async () => {
     await install(true);
 
     expect(await read(installedCommand('implement'))).toBe(await real('dist', 'commands', 'implement.md'));
@@ -216,48 +216,48 @@ describe('installViaFileCopy honours the learning switch', () => {
     expect(await exists(installedSkill())).toBe(true);
   });
 
-  it('an agent with no learning-off file falls through to the one compiled file', async () => {
+  it('an agent with no curation-off file falls through to the one compiled file', async () => {
     await install(false);
 
-    expect(await exists(path.join(learningOffDir('agents', ROOT), 'evaluate.md'))).toBe(false);
+    expect(await exists(path.join(curationOffDir('agents', ROOT), 'evaluate.md'))).toBe(false);
     expect(await read(installedAgent('evaluate'))).toBe(await real('src', 'assets', 'agents', 'evaluate.md'));
   });
 
-  it('a full install with learning off removes a skill copy a learning-on install left behind', async () => {
+  it('a full install with curation off removes a skill copy a curation-on install left behind', async () => {
     await install(true);
     expect(await exists(installedSkill())).toBe(true);
 
     await install(false);
 
     expect(await exists(installedSkill())).toBe(false);
-    expect(await read(installedCommand('implement'))).toBe(await real('dist', 'learning-off', 'commands', 'implement.md'));
+    expect(await read(installedCommand('implement'))).toBe(await real('dist', 'curation-off', 'commands', 'implement.md'));
   });
 
-  it('a partial install with learning off skips the skill but never removes it: that is the converge\'s job', async () => {
+  it('a partial install with curation off skips the skill but never removes it: that is the converge\'s job', async () => {
     await install(true);
 
     await install(false, true);
 
-    expect(await exists(installedSkill()), 'removal on a partial install belongs to convergeLearningVariants').toBe(true);
-    const converged = await convergeLearningVariants({
-      claudeDir, devflowDir, learning: false, plugins: selection(), warn,
+    expect(await exists(installedSkill()), 'removal on a partial install belongs to convergeCurationVariants').toBe(true);
+    const converged = await convergeCurationVariants({
+      claudeDir, devflowDir, curation: false, plugins: selection(), warn,
     });
     expect(converged.skill).toBe('removed');
     expect(await exists(installedSkill())).toBe(false);
   });
 
-  it('known-bad probe: a learning-on install is not the learning-off bytes (the comparison is not vacuous)', async () => {
+  it('known-bad probe: a curation-on install is not the curation-off bytes (the comparison is not vacuous)', async () => {
     await install(true);
-    expect(await read(installedCommand('implement'))).not.toBe(await real('dist', 'learning-off', 'commands', 'implement.md'));
+    expect(await read(installedCommand('implement'))).not.toBe(await real('dist', 'curation-off', 'commands', 'implement.md'));
   });
 });
 
 // ---------------------------------------------------------------------------
-// convergeLearningVariants: the files
+// convergeCurationVariants: the files
 // ---------------------------------------------------------------------------
 
-describe('convergeLearningVariants: installed prompts', () => {
-  it('learning off rewrites the installed commands and agents that have a variant (AC-139)', async () => {
+describe('convergeCurationVariants: installed prompts', () => {
+  it('curation off rewrites the installed commands and agents that have a variant (AC-139)', async () => {
     await installOn();
 
     const result = await converge(false);
@@ -270,7 +270,7 @@ describe('convergeLearningVariants: installed prompts', () => {
     expect(warnings).toEqual([]);
   });
 
-  it('learning on restores them from the normal source order (AC-140)', async () => {
+  it('curation on restores them from the normal source order (AC-140)', async () => {
     await write(installedCommand('implement'), 'implement OFF\n');
     await write(installedAgent('code'), 'code OFF\n');
 
@@ -281,7 +281,7 @@ describe('convergeLearningVariants: installed prompts', () => {
     expect(await read(installedAgent('code'))).toBe('code ON\n');
   });
 
-  it('learning on prefers dist/agents over the src fallback for the restored agent', async () => {
+  it('curation on prefers dist/agents over the src fallback for the restored agent', async () => {
     await write(path.join(pkg, 'src', 'assets', 'agents', 'code.md'), 'code SRC\n');
     await write(installedAgent('code'), 'code OFF\n');
 
@@ -349,7 +349,7 @@ describe('convergeLearningVariants: installed prompts', () => {
 
   it('converges the roster of a kind in sorted order and ignores names that are not flat lowercase markdown', async () => {
     for (const bad of ['UPPER.md', 'notes.txt', '.hidden.md', 'two words.md']) {
-      await write(path.join(learningOffDir('commands', pkg), bad), 'junk OFF\n');
+      await write(path.join(curationOffDir('commands', pkg), bad), 'junk OFF\n');
       await write(installedCommand(bad.replace(/\.md$/, '')), 'junk ON\n');
     }
     await installOn();
@@ -361,47 +361,47 @@ describe('convergeLearningVariants: installed prompts', () => {
   });
 
   it('bounds the roster: more entries than the cap are not all converged', async () => {
-    for (let i = 0; i < MAX_LEARNING_ROSTER + 3; i++) {
+    for (let i = 0; i < MAX_CURATION_ROSTER + 3; i++) {
       const name = `cmd-${String(i).padStart(4, '0')}`;
-      await write(path.join(learningOffDir('commands', pkg), `${name}.md`), 'OFF\n');
+      await write(path.join(curationOffDir('commands', pkg), `${name}.md`), 'OFF\n');
       await write(installedCommand(name), 'ON\n');
     }
 
     const result = await converge(false);
 
-    expect(result.commandsRewritten.length).toBeLessThanOrEqual(MAX_LEARNING_ROSTER);
+    expect(result.commandsRewritten.length).toBeLessThanOrEqual(MAX_CURATION_ROSTER);
     expect(warnings.some(w => w.includes('exceed the bound'))).toBe(true);
   });
 });
 
 // ---------------------------------------------------------------------------
-// convergeLearningVariants: agent overrides (D-AGENT-OVERRIDE-CARRY)
+// convergeCurationVariants: agent overrides (D-AGENT-OVERRIDE-CARRY)
 // ---------------------------------------------------------------------------
 
-describe('convergeLearningVariants: agent model and effort overrides', () => {
+describe('convergeCurationVariants: agent model and effort overrides', () => {
   /** An agent file: frontmatter with the given model and effort (null: no effort line), then the variant body. */
   const agentText = (variant: 'ON' | 'OFF', model = 'sonnet', effort: string | null = 'high'): string =>
     `---\nname: Code\nmodel: ${model}\n${effort === null ? '' : `effort: ${effort}\n`}---\n\nbody ${variant}\n`;
 
   beforeEach(async () => {
     await write(path.join(pkg, 'dist', 'agents', 'code.md'), agentText('ON'));
-    await write(path.join(learningOffDir('agents', pkg), 'code.md'), agentText('OFF'));
+    await write(path.join(curationOffDir('agents', pkg), 'code.md'), agentText('OFF'));
   });
 
-  it.each([true, false])('a no-op converge (learning %s) with an override installed writes no agent file and reports none rewritten', async (learning) => {
-    const variant = learning ? 'ON' : 'OFF';
+  it.each([true, false])('a no-op converge (curation %s) with an override installed writes no agent file and reports none rewritten', async (curation) => {
+    const variant = curation ? 'ON' : 'OFF';
     await write(installedAgent('code'), agentText(variant, 'opus', 'low'));
-    await converge(learning); // settles the skill, the one other thing a converge installs or removes
+    await converge(curation); // settles the skill, the one other thing a converge installs or removes
     const before = await fs.stat(installedAgent('code'));
 
-    const result = await converge(learning);
+    const result = await converge(curation);
 
     expect(result.converged).toBe(true);
     expect(result.agentsRewritten).toEqual([]);
     expect(result.unchanged).toBe(1);
     expect(await read(installedAgent('code'))).toBe(agentText(variant, 'opus', 'low'));
     expect((await fs.stat(installedAgent('code'))).ino, 'an atomic rewrite would have replaced the inode').toBe(before.ino);
-    expect(describeLearningConverge(result, learning), 'a no-op prints nothing').toBeNull();
+    expect(describeCurationConverge(result, curation), 'a no-op prints nothing').toBeNull();
     expect(warnings).toEqual([]);
   });
 
@@ -452,7 +452,7 @@ describe('convergeLearningVariants: agent model and effort overrides', () => {
 
   it('commands are never given an agent\'s frontmatter carry', async () => {
     await write(path.join(pkg, 'dist', 'commands', 'implement.md'), '---\nmodel: sonnet\n---\n\nimplement ON\n');
-    await write(path.join(learningOffDir('commands', pkg), 'implement.md'), '---\nmodel: sonnet\n---\n\nimplement OFF\n');
+    await write(path.join(curationOffDir('commands', pkg), 'implement.md'), '---\nmodel: sonnet\n---\n\nimplement OFF\n');
     await write(installedCommand('implement'), '---\nmodel: opus\n---\n\nimplement ON\n');
 
     await converge(false);
@@ -462,10 +462,10 @@ describe('convergeLearningVariants: agent model and effort overrides', () => {
 });
 
 // ---------------------------------------------------------------------------
-// convergeLearningVariants: failure handling (AC-146)
+// convergeCurationVariants: failure handling (AC-146)
 // ---------------------------------------------------------------------------
 
-describe('convergeLearningVariants: failures only warn (AC-146)', () => {
+describe('convergeCurationVariants: failures only warn (AC-146)', () => {
   it('one unreadable installed file warns and fails the result, while every other file and the skill still converge', async () => {
     await installOn();
     // A directory where the installed command should be: readFile fails with EISDIR.
@@ -496,8 +496,8 @@ describe('convergeLearningVariants: failures only warn (AC-146)', () => {
   it('a relative claudeDir is refused with a warning and nothing is written', async () => {
     await installOn();
 
-    const result = await convergeLearningVariants({
-      claudeDir: 'relative/claude', devflowDir, learning: false, plugins: FULL_SELECTION, warn, packageRoot: pkg,
+    const result = await convergeCurationVariants({
+      claudeDir: 'relative/claude', devflowDir, curation: false, plugins: FULL_SELECTION, warn, packageRoot: pkg,
     });
 
     expect(result.converged).toBe(false);
@@ -505,9 +505,9 @@ describe('convergeLearningVariants: failures only warn (AC-146)', () => {
     expect(await read(installedCommand('implement'))).toBe('implement ON\n');
   });
 
-  it('an absent learning-off tree warns for both kinds and touches nothing', async () => {
+  it('an absent curation-off tree warns for both kinds and touches nothing', async () => {
     await installOn();
-    await fs.rm(path.join(pkg, 'dist', 'learning-off'), { recursive: true });
+    await fs.rm(path.join(pkg, 'dist', 'curation-off'), { recursive: true });
 
     const result = await converge(false);
 
@@ -519,20 +519,20 @@ describe('convergeLearningVariants: failures only warn (AC-146)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// convergeLearningVariants: the apply-decisions skill (AC-148)
+// convergeCurationVariants: the apply-decisions skill (AC-148)
 // ---------------------------------------------------------------------------
 
-describe('convergeLearningVariants: the apply-decisions skill', () => {
+describe('convergeCurationVariants: the apply-decisions skill', () => {
   const sourceSkill = (): Promise<string> => read(path.join(skillsDir(pkg), SKILL, 'SKILL.md'));
 
-  it('learning on installs the skill when the selection requires it (AC-140)', async () => {
+  it('curation on installs the skill when the selection requires it (AC-140)', async () => {
     const result = await converge(true);
 
     expect(result.skill).toBe('installed');
     expect(await read(path.join(installedSkill(), 'SKILL.md'))).toBe(await sourceSkill());
   });
 
-  it('learning off removes the installed skill, and does it again as a no-op (AC-141)', async () => {
+  it('curation off removes the installed skill, and does it again as a no-op (AC-141)', async () => {
     await converge(true);
 
     const off = await converge(false);
@@ -542,7 +542,7 @@ describe('convergeLearningVariants: the apply-decisions skill', () => {
     expect((await converge(false)).skill).toBe('unchanged');
   });
 
-  it('known-bad probe: learning on does NOT add the skill to a selection that never carried it (AC-143)', async () => {
+  it('known-bad probe: curation on does NOT add the skill to a selection that never carried it (AC-143)', async () => {
     expect(skillsOf([WITHOUT_SKILL]).has(SKILL)).toBe(false);
 
     const result = await converge(true, [WITHOUT_SKILL]);
@@ -571,7 +571,7 @@ describe('convergeLearningVariants: the apply-decisions skill', () => {
     expect(result.skill).toBe('installed');
     expect(await read(path.join(installedSkill(), 'SKILL.md'))).toBe(await sourceSkill());
     expect(await exists(path.join(installedSkill(), 'EXTRA.md'))).toBe(false);
-    expect((await fs.readdir(claudeDir)).filter(name => name.startsWith('.devflow-learning-'))).toEqual([]);
+    expect((await fs.readdir(claudeDir)).filter(name => name.startsWith('.devflow-curation-'))).toEqual([]);
   });
 
   it('the skill source is the injected package root\'s, never the running package\'s', async () => {
@@ -614,7 +614,7 @@ describe('convergeLearningVariants: the apply-decisions skill', () => {
     expect(await read(path.join(installedSkill(), 'SKILL.md'))).toBe(await sourceSkill());
   });
 
-  it('under learning off a shadow is dormant: the installed skill goes, the shadow stays, and enabling brings it back', async () => {
+  it('under curation off a shadow is dormant: the installed skill goes, the shadow stays, and enabling brings it back', async () => {
     const shadow = path.join(devflowDir, 'skills', SKILL, 'SKILL.md');
     await write(shadow, 'my own apply-decisions\n');
     await converge(true);
@@ -632,35 +632,35 @@ describe('convergeLearningVariants: the apply-decisions skill', () => {
 // The toggle: version skew and the manifest (AC-145)
 // ---------------------------------------------------------------------------
 
-describe('learningToggleSkew (AC-145)', () => {
+describe('curationToggleSkew (AC-145)', () => {
   it('names nothing when the installed and running versions agree', () => {
-    expect(learningToggleSkew('3.3.0', '3.3.0', false)).toBeNull();
+    expect(curationToggleSkew('3.3.0', '3.3.0', false)).toBeNull();
   });
 
   it('names both versions, the variant and the remedy when they differ', () => {
-    const message = learningToggleSkew('3.2.0', '3.3.0', true);
+    const message = curationToggleSkew('3.2.0', '3.3.0', true);
     expect(message).toContain('3.2.0');
     expect(message).toContain('3.3.0');
-    expect(message).toContain('learning-on');
+    expect(message).toContain('curation-on');
     expect(message).toContain('devflow init');
-    expect(learningToggleSkew('3.2.0', '3.3.0', false)).toContain('learning-off');
+    expect(curationToggleSkew('3.2.0', '3.3.0', false)).toContain('curation-off');
   });
 
   it('known-bad probe: an unreadable running version is skew, never a match', () => {
-    expect(learningToggleSkew('3.3.0', null, false)).toContain('devflow init');
+    expect(curationToggleSkew('3.3.0', null, false)).toContain('devflow init');
   });
 
   it('prints an installed version with its control characters replaced', () => {
     // The manifest check on `version` is only that it is truthy, so a hand-edited
     // file can put terminal escapes and a newline in it. The escapes are written
     // as source escapes: tests/guards/no-control-bytes.test.ts forbids raw bytes.
-    const message = learningToggleSkew('3.2.0\u001b[31m\u0007\n', '3.3.0', true);
+    const message = curationToggleSkew('3.2.0\u001b[31m\u0007\n', '3.3.0', true);
     expect(message).toContain('devflow 3.2.0?[31m??');
     expect([...(message ?? '')].some((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f)).toBe(false);
   });
 });
 
-describe('applyLearningToggle', () => {
+describe('applyCurationToggle', () => {
   async function writeManifest(version: string, plugins: readonly string[]): Promise<void> {
     await write(path.join(devflowDir, 'manifest.json'), JSON.stringify({
       version,
@@ -672,8 +672,8 @@ describe('applyLearningToggle', () => {
     }));
   }
 
-  const toggle = (learning: boolean, runningVersion: string | null) =>
-    applyLearningToggle({ claudeDir, devflowDir, learning, runningVersion, warn, packageRoot: pkg });
+  const toggle = (curation: boolean, runningVersion: string | null) =>
+    applyCurationToggle({ claudeDir, devflowDir, curation, runningVersion, warn, packageRoot: pkg });
 
   it('without a readable manifest it skips and says to run init', async () => {
     await installOn();
@@ -729,13 +729,13 @@ describe('applyLearningToggle', () => {
   });
 });
 
-describe('applyLearningToggle with a saved agent override (D-AGENT-OVERRIDE-CARRY)', () => {
+describe('applyCurationToggle with a saved agent override (D-AGENT-OVERRIDE-CARRY)', () => {
   const agent = (variant: 'ON' | 'OFF', model: string, effort: string): string =>
     `---\nname: Code\nmodel: ${model}\neffort: ${effort}\n---\n\nbody ${variant}\n`;
 
   beforeEach(async () => {
     await write(path.join(pkg, 'dist', 'agents', 'code.md'), agent('ON', 'sonnet', 'high'));
-    await write(path.join(learningOffDir('agents', pkg), 'code.md'), agent('OFF', 'sonnet', 'high'));
+    await write(path.join(curationOffDir('agents', pkg), 'code.md'), agent('OFF', 'sonnet', 'high'));
     await write(path.join(devflowDir, 'manifest.json'), JSON.stringify({
       version: '3.3.0',
       plugins: ['devflow-core-skills'],
@@ -747,8 +747,8 @@ describe('applyLearningToggle with a saved agent override (D-AGENT-OVERRIDE-CARR
     await saveAgentMapping(devflowDir, { version: 1, agents: { code: { model: 'opus', effort: 'low' } } });
   });
 
-  const toggle = (learning: boolean) =>
-    applyLearningToggle({ claudeDir, devflowDir, learning, runningVersion: '3.3.0', warn, packageRoot: pkg });
+  const toggle = (curation: boolean) =>
+    applyCurationToggle({ claudeDir, devflowDir, curation, runningVersion: '3.3.0', warn, packageRoot: pkg });
 
   it('a no-op toggle writes no agent file, reports none rewritten and does not reach for the reapply', async () => {
     await write(installedAgent('code'), agent('OFF', 'opus', 'low'));
@@ -760,7 +760,7 @@ describe('applyLearningToggle with a saved agent override (D-AGENT-OVERRIDE-CARR
     if (outcome.kind !== 'converged') return;
     expect(outcome.result.agentsRewritten).toEqual([]);
     expect(outcome.agentMappingReapplied).toBe(false);
-    expect(describeLearningConverge(outcome.result, false)).toBeNull();
+    expect(describeCurationConverge(outcome.result, false)).toBeNull();
     expect((await fs.stat(installedAgent('code'))).ino).toBe(before.ino);
     expect(warnings).toEqual([]);
   });
@@ -779,21 +779,21 @@ describe('applyLearningToggle with a saved agent override (D-AGENT-OVERRIDE-CARR
   });
 });
 
-describe('describeLearningConverge and readRunningVersion', () => {
-  const base: ConvergeLearningVariantsResult = {
+describe('describeCurationConverge and readRunningVersion', () => {
+  const base: ConvergeCurationVariantsResult = {
     converged: true, commandsRewritten: [], agentsRewritten: [], unchanged: 0, notInstalled: 0, skill: 'unchanged',
   };
 
   it('says nothing when nothing changed, so a no-op toggle prints nothing', () => {
-    expect(describeLearningConverge(base, false)).toBeNull();
-    expect(describeLearningConverge({ ...base, skill: 'not-selected' }, true)).toBeNull();
+    expect(describeCurationConverge(base, false)).toBeNull();
+    expect(describeCurationConverge({ ...base, skill: 'not-selected' }, true)).toBeNull();
   });
 
   it('counts the rewritten prompts and names the skill change', () => {
-    const line = describeLearningConverge(
+    const line = describeCurationConverge(
       { ...base, commandsRewritten: ['a.md', 'b.md'], agentsRewritten: ['c.md'], skill: 'removed' }, false);
-    expect(line).toBe('2 command(s) and 1 agent(s) rewritten for the learning-off variant; the apply-decisions skill removed');
-    expect(describeLearningConverge({ ...base, skill: 'installed' }, true)).toBe('the apply-decisions skill installed');
+    expect(line).toBe('2 command(s) and 1 agent(s) rewritten for the curation-off variant; the apply-decisions skill removed');
+    expect(describeCurationConverge({ ...base, skill: 'installed' }, true)).toBe('the apply-decisions skill installed');
   });
 
   it('reads the package version, and null when package.json is missing or holds none', async () => {

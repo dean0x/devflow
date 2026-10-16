@@ -220,7 +220,7 @@ const MANIFEST_SENTENCES = ['A path matches by file name.', 'A lockfile alone is
 
 /** Text the reference must never carry: it names `compliance` only as a lens name. */
 const REF_FORBIDDEN: ReadonlyArray<readonly [string, string]> = [
-  ['<!-- learning:', 'a learning marker'],
+  ['<!-- curation:', 'a curation marker'],
   ['Agent(subagent_type=', 'a spawn block'],
   ['COMPLIANCE_FRAMEWORKS', 'a framework list'],
   ['devflow:compliance', 'the compliance skill'],
@@ -479,19 +479,19 @@ export function collectGateLevelBlockDefects(body: string): string[] {
   return out
 }
 
-/** AC-8: in the source, the block sits outside every learning arm, so both builds carry it. */
+/** AC-8: in the source, the block sits outside every curation arm, so both builds carry it. */
 export function collectBlockArmDefects(source: string): string[] {
   let arm: string | null = null
   let inBlock = false
   let seen = false
   const out: string[] = []
   for (const line of source.split('\n')) {
-    const open = /^<!-- learning:(on|off) -->$/.exec(line)
+    const open = /^<!-- curation:(on|off) -->$/.exec(line)
     if (open !== null) { arm = open[1]; continue }
-    if (line === '<!-- learning:end -->') { arm = null; continue }
+    if (line === '<!-- curation:end -->') { arm = null; continue }
     if (line.startsWith('#### Step 1.2b: Narrow by gate level')) { inBlock = true; seen = true }
     else if (line.startsWith('#### Step 1.3:')) inBlock = false
-    if (inBlock && arm !== null) { out.push(`the gate-level block sits inside a learning:${arm} arm`); break }
+    if (inBlock && arm !== null) { out.push(`the gate-level block sits inside a curation:${arm} arm`); break }
   }
   if (!seen) out.push('the source has no Step 1.2b heading')
   return out
@@ -670,7 +670,7 @@ export function collectSummaryDefects(cr: string, syn: string): string[] {
 
 const VARIANTS: ReadonlyArray<{ label: string; body: string }> = (() => {
   const off = resolveLearningOffSource('commands', 'code-review')
-  if (off === null) throw new Error('dist/learning-off/commands/code-review.md is absent: run `npm run build:mds`')
+  if (off === null) throw new Error('dist/curation-off/commands/code-review.md is absent: run `npm run build:mds`')
   return [
     { label: 'learning on', body: requireDistFile('code-review.md') },
     { label: 'learning off', body: off },
@@ -750,7 +750,7 @@ describe('the level reference holds the decided sets (AC-2, AC-3, AC-4, AC-6, AC
       .toContain('docs-only/standard: compliance outside the code class')
     expect(defects(seed(REF, '| Class | standard | lean |', '| Class | full | standard | lean |')).join('\n')).toMatch(/the header is "Class \| full \| standard \| lean"/)
     expect(defects(seed(REF, '| Class | standard | lean |', '| Class | standard | lean | extra |')).join('\n')).toMatch(/the header is/)
-    expect(defects(`${REF}\n<!-- learning:on -->\n`)).toContain('the reference carries a learning marker')
+    expect(defects(`${REF}\n<!-- curation:on -->\n`)).toContain('the reference carries a curation marker')
     expect(defects(`${REF}\nCOMPLIANCE_FRAMEWORKS: {COMPLIANCE_FRAMEWORKS}\n`)).toContain('the reference carries a framework list')
     expect(defects(`${REF}\nRead devflow:compliance for the framework.\n`)).toContain('the reference carries the compliance skill')
     expect(defects(`${REF}\nAgent(subagent_type="Review"): x\n`)).toContain('the reference carries a spawn block')
@@ -820,16 +820,16 @@ describe('the simulator reads its rules from the reference and the oracle decide
   })
 })
 
-describe('the command carries the gate-level block, outside the learning arms (AC-8, AC-9, AC-14)', () => {
+describe('the command carries the gate-level block, outside the curation arms (AC-8, AC-9, AC-14)', () => {
   it.each(VARIANTS)('$label: the block, the read paragraph and the invariants', ({ body }) => {
     expect(collectGateLevelBlockDefects(body)).toEqual([])
   })
 
-  it('the source holds the block outside every learning arm', () => {
+  it('the source holds the block outside every curation arm', () => {
     expect(collectBlockArmDefects(SOURCE)).toEqual([])
   })
 
-  it('known-bad probes: each removed invariant, read-paragraph phrase and data-flow line, a changed root form or order, and a block in a learning arm are reported', () => {
+  it('known-bad probes: each removed invariant, read-paragraph phrase and data-flow line, a changed root form or order, and a block in a curation arm are reported', () => {
     const defects = (text: string): string[] => collectGateLevelBlockDefects(text)
     for (const item of BLOCK_ITEMS) {
       expect(defects(seed(ON, item, 'removed')), `removing "${item.slice(0, 40)}"`).toContain(`the block lacks: ${item.slice(0, 60)}`)
@@ -888,9 +888,9 @@ describe('the command carries the gate-level block, outside the learning arms (A
     expect(defects(seed(ON, 'Compliance keeps the trigger above at every level.', 'Compliance keeps the trigger above at every level for react and rust.')))
       .toContain('the block restates a language focus list')
     expect(defects(seed(ON, 'It sets the diff range, never the gate level', 'It applies to all'))).toContain('Edge Cases does not say --full sets the diff range, never the gate level')
-    const inArm = seed(seed(SOURCE, '#### Step 1.2b: Narrow by gate level', '<!-- learning:on -->\n#### Step 1.2b: Narrow by gate level'),
-      '#### Step 1.3: Write the diff files', '<!-- learning:end -->\n#### Step 1.3: Write the diff files')
-    expect(collectBlockArmDefects(inArm)).toEqual(['the gate-level block sits inside a learning:on arm'])
+    const inArm = seed(seed(SOURCE, '#### Step 1.2b: Narrow by gate level', '<!-- curation:on -->\n#### Step 1.2b: Narrow by gate level'),
+      '#### Step 1.3: Write the diff files', '<!-- curation:end -->\n#### Step 1.3: Write the diff files')
+    expect(collectBlockArmDefects(inArm)).toEqual(['the gate-level block sits inside a curation:on arm'])
   })
 
   it('the language-focus check reads whole names: a word that contains a name passes, and every real name is reported', () => {

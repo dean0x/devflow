@@ -56,14 +56,14 @@ import {
   resolveVariantModules,
 } from '../../src/core/mds-variants.js';
 import { resolveAgentSource, splitFrontmatter, walkFiles, ROOT, type CorpusEntry } from '../helpers.js';
-import { SETTINGS_BLOCK_HOSTS, SETTINGS_BLOCK_HOSTS_LEARNING_OFF } from '../fixtures/mds-manifest.js';
-import { LEARNING_OFF_OUTPUT_DIR } from '../../src/core/learning-variants.js';
+import { SETTINGS_BLOCK_HOSTS, SETTINGS_BLOCK_HOSTS_CURATION_OFF } from '../fixtures/mds-manifest.js';
+import { CURATION_OFF_OUTPUT_DIR } from '../../src/core/curation-variants.js';
 
 const DIST_COMMANDS = path.join(ROOT, 'dist', 'commands');
 const DIST_SKILLS = path.join(ROOT, 'dist', 'skills');
-/** The learning-off variants of the commands and agents (D-LEARNING-VARIANTS): prompts an install lays down like any other. */
-const LEARNING_OFF_AGENTS = `${LEARNING_OFF_OUTPUT_DIR}/agents`;
-const LEARNING_OFF_COMMANDS = `${LEARNING_OFF_OUTPUT_DIR}/commands`;
+/** The curation-off variants of the commands and agents (D-LEARNING-VARIANTS): prompts an install lays down like any other. */
+const CURATION_OFF_AGENTS = `${CURATION_OFF_OUTPUT_DIR}/agents`;
+const CURATION_OFF_COMMANDS = `${CURATION_OFF_OUTPUT_DIR}/commands`;
 const REFS_DIR = compiledSkillRefsDir();
 
 // ---------------------------------------------------------------------------
@@ -90,8 +90,8 @@ const PROVIDER_SCAN_ROOTS: readonly ScanRoot[] = [
   { label: 'dist/agents', dir: compiledAgentsDir(ROOT), exts: ['.md'] },
   { label: 'dist/commands', dir: DIST_COMMANDS, exts: ['.md'] },
   { label: 'dist/skills', dir: DIST_SKILLS, exts: ['.md'] },
-  { label: LEARNING_OFF_AGENTS, dir: path.join(ROOT, LEARNING_OFF_AGENTS), exts: ['.md'] },
-  { label: LEARNING_OFF_COMMANDS, dir: path.join(ROOT, LEARNING_OFF_COMMANDS), exts: ['.md'] },
+  { label: CURATION_OFF_AGENTS, dir: path.join(ROOT, CURATION_OFF_AGENTS), exts: ['.md'] },
+  { label: CURATION_OFF_COMMANDS, dir: path.join(ROOT, CURATION_OFF_COMMANDS), exts: ['.md'] },
 ];
 
 function scanCorpus(): CorpusEntry[] {
@@ -217,7 +217,7 @@ const ALLOWLISTED_PROVIDER_REGIONS: readonly AllowlistedRegion[] = [
     label: "the settings partial's accepted-line shape",
     files: [
       ...SETTINGS_BLOCK_HOSTS.flatMap(h => [`src/assets/commands/${h}.md`, `dist/commands/${h}.md`]),
-      ...SETTINGS_BLOCK_HOSTS_LEARNING_OFF.map(h => `${LEARNING_OFF_COMMANDS}/${h}.md`),
+      ...SETTINGS_BLOCK_HOSTS_CURATION_OFF.map(h => `${CURATION_OFF_COMMANDS}/${h}.md`),
     ],
     from: 'one line of the form `TRACKER=<',
     to: ' — these fields, in this order, nothing else',
@@ -658,7 +658,7 @@ function vendorCorpus(): CorpusEntry[] {
 /**
  * `VENDOR_ALLOWLIST` (D-SCAN-IN-CODE): the one `mcp__` literal this scan admits is Harden's
  * `  - mcp__*` entry in its `disallowedTools` frontmatter, in the compiled agent and in its
- * learning-off variant. The wildcard denies every MCP tool and names none, so it binds no
+ * curation-off variant. The wildcard denies every MCP tool and names none, so it binds no
  * contract to a transport; Polish carries the same entry, but it is hand-authored and outside
  * this scan. The exemption is one exact line in two named files: any other `mcp__` literal in
  * those files, and the same line anywhere else (the Git agent included), is still reported.
@@ -666,7 +666,7 @@ function vendorCorpus(): CorpusEntry[] {
  * fails when a file no longer carries its line.
  */
 const VENDOR_ALLOWLIST: { readonly files: readonly string[]; readonly line: string; readonly token: string } = {
-  files: ['dist/agents/harden.md', `${LEARNING_OFF_AGENTS}/harden.md`],
+  files: ['dist/agents/harden.md', `${CURATION_OFF_AGENTS}/harden.md`],
   line: '- mcp__*',
   token: 'mcp__ tool literal',
 };

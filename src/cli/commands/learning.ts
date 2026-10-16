@@ -12,10 +12,10 @@ import { readMachineFeature, writeMachineFeature } from '../../core/feature-swit
 import { loadSettingsModule, narrowedSwitchLabel, personalConfigTrackedWarning } from '../../core/evidence-policy.js';
 import { getClaudeDirectory, getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
 import {
-  applyLearningToggle,
-  describeLearningConverge,
+  applyCurationToggle,
+  describeCurationConverge,
   readRunningVersion,
-} from '../../targets/claude-code/learning-install.js';
+} from '../../targets/claude-code/curation-install.js';
 import { getLedgerRoot } from '../../core/ledger-root.js';
 import { drainLearningQueue } from '../../core/learning-queue-cleanup.js';
 import { firstSymbolicLink } from '../../core/linked-path.js';
@@ -487,10 +487,10 @@ async function handleClear(): Promise<void> {
  */
 async function convergeInstalledVariants(enabled: boolean): Promise<void> {
   try {
-    const outcome = await applyLearningToggle({
+    const outcome = await applyCurationToggle({
       claudeDir: getClaudeDirectory(),
       devflowDir: getDevFlowDirectory(),
-      learning: enabled,
+      curation: enabled,
       runningVersion: await readRunningVersion(),
       warn: (msg) => p.log.warn(msg),
     });
@@ -498,7 +498,7 @@ async function convergeInstalledVariants(enabled: boolean): Promise<void> {
       p.log.warn(outcome.message);
       return;
     }
-    const changed = describeLearningConverge(outcome.result, enabled);
+    const changed = describeCurationConverge(outcome.result, enabled);
     if (changed !== null) p.log.info(color.dim(`Installed prompts: ${changed}`));
   } catch (err) {
     p.log.warn(`Could not update the installed prompts for the new learning setting — run ${color.cyan('devflow init')}: ${String(err)}`);

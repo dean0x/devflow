@@ -1,6 +1,6 @@
 /**
- * Unit tests for src/core/learning-variants.ts: the splitter that turns one
- * compiled prompt body into its learning-on and learning-off variants
+ * Unit tests for src/core/curation-variants.ts: the splitter that turns one
+ * compiled prompt body into its curation-on and curation-off variants
  * (D-LEARNING-VARIANTS; AC-127, AC-134).
  *
  * Every refusal is shown by a known-bad probe: a seeded body that must be refused
@@ -11,19 +11,20 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  LEARNING_MARKER_RE,
-  LEARNING_OFF_OUTPUT_DIR,
-  containsLearningMarker,
-  describeLearningSplitError,
-  learningOffRelPath,
-  splitLearningVariants,
-  type LearningSplit,
-  type LearningSplitError,
-} from '../../src/core/learning-variants.js';
+  CURATION_MARKER_RE,
+  CURATION_OFF_OUTPUT_DIR,
+  LEGACY_OFF_OUTPUT_DIR,
+  containsCurationMarker,
+  describeCurationSplitError,
+  curationOffRelPath,
+  splitCurationVariants,
+  type CurationSplit,
+  type CurationSplitError,
+} from '../../src/core/curation-variants.js';
 
-const ON = '<!-- learning:on -->';
-const OFF = '<!-- learning:off -->';
-const END = '<!-- learning:end -->';
+const ON = '<!-- curation:on -->';
+const OFF = '<!-- curation:off -->';
+const END = '<!-- curation:end -->';
 
 /** Join lines the way a file holds them, ending in a newline. */
 function body(...lines: string[]): string {
@@ -31,15 +32,15 @@ function body(...lines: string[]): string {
 }
 
 /** Split and unwrap, failing the test (not throwing in the module) on a refusal. */
-function split(text: string): LearningSplit {
-  const result = splitLearningVariants(text);
+function split(text: string): CurationSplit {
+  const result = splitCurationVariants(text);
   if (!result.ok) throw new Error(`expected a split, got ${JSON.stringify(result.error)}`);
   return result.value;
 }
 
 /** Split and unwrap the refusal. */
-function refusal(text: string): LearningSplitError {
-  const result = splitLearningVariants(text);
+function refusal(text: string): CurationSplitError {
+  const result = splitCurationVariants(text);
   if (result.ok) throw new Error(`expected a refusal, got a split with hasArms=${result.value.hasArms}`);
   return result.error;
 }
@@ -49,7 +50,7 @@ describe('a body with no marker', () => {
     ['empty', ''],
     ['one line, no newline', 'Just text.'],
     ['two paragraphs with a trailing newline', 'One.\n\nTwo.\n'],
-    ['a learning word that is not a marker', 'Learning is on; see learning:on in the docs.\n'],
+    ['a curation word that is not a marker', 'Curation is on; see curation:on in the docs.\n'],
   ])('%s: both variants are the body, hasArms is false', (_label, text) => {
     expect(split(text)).toEqual({ on: text, off: text, hasArms: false });
   });
@@ -176,21 +177,21 @@ describe('where a marker may sit', () => {
     });
   });
 
-  it('LEARNING_MARKER_RE matches exactly the three whole-line markers', () => {
+  it('CURATION_MARKER_RE matches exactly the three whole-line markers', () => {
     for (const word of ['on', 'off', 'end']) {
-      expect(LEARNING_MARKER_RE.exec(`<!-- learning:${word} -->`)?.[1]).toBe(word);
-      expect(LEARNING_MARKER_RE.exec(`\t  <!-- learning:${word} -->  \t`)?.[1]).toBe(word);
+      expect(CURATION_MARKER_RE.exec(`<!-- curation:${word} -->`)?.[1]).toBe(word);
+      expect(CURATION_MARKER_RE.exec(`\t  <!-- curation:${word} -->  \t`)?.[1]).toBe(word);
     }
     for (const notMarker of [
-      '<!-- learning:on --> trailing text',
-      'leading text <!-- learning:on -->',
-      '<!--learning:on-->',
-      '<!-- learning:ON -->',
-      '<!-- learning:else -->',
-      '<!-- learning: on -->',
+      '<!-- curation:on --> trailing text',
+      'leading text <!-- curation:on -->',
+      '<!--curation:on-->',
+      '<!-- curation:ON -->',
+      '<!-- curation:else -->',
+      '<!-- curation: on -->',
       '',
     ]) {
-      expect(LEARNING_MARKER_RE.test(notMarker), JSON.stringify(notMarker)).toBe(false);
+      expect(CURATION_MARKER_RE.test(notMarker), JSON.stringify(notMarker)).toBe(false);
     }
   });
 });
@@ -246,11 +247,11 @@ describe('what the splitter refuses (known-bad probes, AC-134)', () => {
     expect(refusal(body('a', `text ${ON}`, 'b'))).toEqual({
       kind: 'stray-marker', line: 2, text: `text ${ON}`,
     });
-    expect(refusal(body('<!--learning:on-->'))).toEqual({
-      kind: 'stray-marker', line: 1, text: '<!--learning:on-->',
+    expect(refusal(body('<!--curation:on-->'))).toEqual({
+      kind: 'stray-marker', line: 1, text: '<!--curation:on-->',
     });
-    expect(refusal(body('<!-- Learning:End -->'))).toEqual({
-      kind: 'stray-marker', line: 1, text: '<!-- Learning:End -->',
+    expect(refusal(body('<!-- Curation:End -->'))).toEqual({
+      kind: 'stray-marker', line: 1, text: '<!-- Curation:End -->',
     });
   });
 
@@ -261,26 +262,54 @@ describe('what the splitter refuses (known-bad probes, AC-134)', () => {
     expect(error.kind === 'stray-marker' && error.text.length).toBe(80);
   });
 
+  it('a retired marker is refused in any spacing or case, whole line or embedded (TP-4)', () => {
+    const spellings = [
+      '<!-- learning:on -->',
+      '<!-- learning:off -->',
+      '<!-- learning:end -->',
+      '<!--learning:on-->',
+      '<!-- Learning:End -->',
+      '<!-- LEARNING : OFF -->',
+      '\t<!--   learning :on-->  ',
+      'text <!-- learning:on --> more text',
+    ];
+    for (const spelling of spellings) {
+      expect(refusal(body('a', spelling, 'b')), JSON.stringify(spelling)).toEqual({
+        kind: 'legacy-marker', line: 2, text: spelling.trim(),
+      });
+    }
+  });
+
+  it('a retired marker is never an alias: it is refused inside a current arm and beside current markers', () => {
+    expect(refusal(body(ON, 'content', '<!-- learning:off -->', 'other', END))).toEqual({
+      kind: 'legacy-marker', line: 3, text: '<!-- learning:off -->',
+    });
+    expect(refusal(body('<!-- learning:on -->', 'content', END))).toEqual({
+      kind: 'legacy-marker', line: 1, text: '<!-- learning:on -->',
+    });
+  });
+
   it('a refusal returns no partial split', () => {
-    const result = splitLearningVariants(body(ON, 'x'));
+    const result = splitCurationVariants(body(ON, 'x'));
     expect(result.ok).toBe(false);
     expect(result).not.toHaveProperty('value');
   });
 });
 
-describe('describeLearningSplitError', () => {
-  const ONE_OF_EACH: Readonly<Record<LearningSplitError['kind'], LearningSplitError>> = {
+describe('describeCurationSplitError', () => {
+  const ONE_OF_EACH: Readonly<Record<CurationSplitError['kind'], CurationSplitError>> = {
     'nested-arm': { kind: 'nested-arm', line: 7, arm: 'on', openedAt: 3 },
     'repeated-off': { kind: 'repeated-off', line: 9, openedAt: 5 },
     'unopened-end': { kind: 'unopened-end', line: 11 },
     'unclosed-arm': { kind: 'unclosed-arm', arm: 'off', openedAt: 13 },
     'empty-arm': { kind: 'empty-arm', arm: 'on', openedAt: 15, closedAt: 16 },
-    'stray-marker': { kind: 'stray-marker', line: 17, text: 'x <!-- learning:on -->' },
+    'stray-marker': { kind: 'stray-marker', line: 17, text: 'x <!-- curation:on -->' },
+    'legacy-marker': { kind: 'legacy-marker', line: 19, text: '<!-- learning:on -->' },
   };
 
   it('names the line of every refusal kind, one sentence each', () => {
     for (const [kind, error] of Object.entries(ONE_OF_EACH)) {
-      const text = describeLearningSplitError(error);
+      const text = describeCurationSplitError(error);
       expect(text, kind).toMatch(/\b(line|lines) \d+|opened at line \d+/);
       expect(text.includes('\n'), `${kind}: one line`).toBe(false);
       expect(text, kind).not.toMatch(/unhandled/);
@@ -295,29 +324,44 @@ describe('describeLearningSplitError', () => {
       refusal(body(ON, 'x')).kind,
       refusal(body(ON, END)).kind,
       refusal(body(`x ${ON}`)).kind,
+      refusal(body('<!-- learning:on -->')).kind,
     ]);
     expect([...produced].sort()).toEqual(Object.keys(ONE_OF_EACH).sort());
   });
 });
 
-describe('containsLearningMarker', () => {
+describe('containsCurationMarker', () => {
   it('sees a valid marker, a malformed one and one embedded in prose', () => {
-    expect(containsLearningMarker(`a\n${ON}\nb`)).toBe(true);
-    expect(containsLearningMarker('<!--learning:end-->')).toBe(true);
-    expect(containsLearningMarker('see <!-- Learning : off --> here')).toBe(true);
+    expect(containsCurationMarker(`a\n${ON}\nb`)).toBe(true);
+    expect(containsCurationMarker('<!--curation:end-->')).toBe(true);
+    expect(containsCurationMarker('see <!-- Curation : off --> here')).toBe(true);
   });
 
-  it('is false for text that only mentions learning', () => {
-    expect(containsLearningMarker('learning:on is a settings field\n<!-- an ordinary comment -->')).toBe(false);
-    expect(containsLearningMarker('')).toBe(false);
+  it('is false for text that only mentions curation', () => {
+    expect(containsCurationMarker('curation:on is a settings field\n<!-- an ordinary comment -->')).toBe(false);
+    expect(containsCurationMarker('')).toBe(false);
+  });
+
+  it('also sees the retired spelling, in any spacing or case', () => {
+    expect(containsCurationMarker('<!-- learning:on -->')).toBe(true);
+    expect(containsCurationMarker('<!--learning:end-->')).toBe(true);
+    expect(containsCurationMarker('see <!-- LEARNING : off --> here')).toBe(true);
+    expect(containsCurationMarker('learning:on is only a word here')).toBe(false);
   });
 });
 
-describe('where the learning-off variant lands', () => {
-  it('learningOffRelPath puts a variant beside its kind under dist/learning-off', () => {
-    expect(LEARNING_OFF_OUTPUT_DIR).toBe('dist/learning-off');
-    expect(learningOffRelPath('commands', 'implement.md')).toBe('dist/learning-off/commands/implement.md');
-    expect(learningOffRelPath('agents', 'code.md')).toBe('dist/learning-off/agents/code.md');
+describe('where the curation-off variant lands', () => {
+  it('curationOffRelPath puts a variant beside its kind under dist/curation-off', () => {
+    expect(CURATION_OFF_OUTPUT_DIR).toBe('dist/curation-off');
+    expect(curationOffRelPath('commands', 'implement.md')).toBe('dist/curation-off/commands/implement.md');
+    expect(curationOffRelPath('agents', 'code.md')).toBe('dist/curation-off/agents/code.md');
+  });
+
+  it('the retired off tree is a different folder under dist, so the prune never touches the live one', () => {
+    expect(LEGACY_OFF_OUTPUT_DIR).toBe('dist/learning-off');
+    expect(LEGACY_OFF_OUTPUT_DIR).not.toBe(CURATION_OFF_OUTPUT_DIR);
+    expect(CURATION_OFF_OUTPUT_DIR.startsWith(`${LEGACY_OFF_OUTPUT_DIR}/`)).toBe(false);
+    expect(LEGACY_OFF_OUTPUT_DIR.startsWith(`${CURATION_OFF_OUTPUT_DIR}/`)).toBe(false);
   });
 });
 
@@ -370,7 +414,7 @@ describe('parity over generated bodies', () => {
       expect(got.on, `seed ${seed}`).toBe(`${wantOn.join('\n')}${wantOn.length > 0 ? '\n' : ''}`);
       expect(got.off, `seed ${seed}`).toBe(`${wantOff.join('\n')}${wantOff.length > 0 ? '\n' : ''}`);
       if (got.hasArms) withArms++;
-      expect(got.hasArms, `seed ${seed}`).toBe(lines.some(l => LEARNING_MARKER_RE.test(l)));
+      expect(got.hasArms, `seed ${seed}`).toBe(lines.some(l => CURATION_MARKER_RE.test(l)));
     }
     // Non-vacuity: the generator reaches both shapes.
     expect(withArms, 'no generated body carried an arm').toBeGreaterThan(MAX_CASES / 2);

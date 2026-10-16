@@ -4,7 +4,7 @@
  * One Code agent paid for every mode's text and skills on every spawn. Three hosts now share one partial
  * (`src/assets/agents/_partials/_code.mds`): Code (implement, issue-fix), Fix (validation-fix,
  * alignment-fix, qa-fix, ci-fix) and Refactor (edit). This file holds what the three must share and what
- * none of them may carry, read from the COMPILED prompts a session loads, in both learning variants:
+ * none of them may carry, read from the COMPILED prompts a session loads, in both curation variants:
  *
  *   AC-305  No variant has a Step 0 table, a `DOMAIN` input or a runtime skill-load instruction, so no
  *           variant carries a `Skill(...)` call at all (D-COMPLIANCE-INJECT: the compliance skill's load
@@ -14,8 +14,8 @@
  *           input and the instruction to state a decision in words). Only Code preloads
  *           `apply-feature-knowledge` and takes `FEATURE_KNOWLEDGE`: only the implement and issue-fix
  *           spawns pass it.
- *   AC-307  Each variant has a learning-off build, listed in the manifest and present on disk. (The
- *           install of those files is held by the learning-variants install tests, which walk the same
+ *   AC-307  Each variant has a curation-off build, listed in the manifest and present on disk. (The
+ *           install of those files is held by the curation-variants install tests, which walk the same
  *           manifest.)
  *
  * No Code-family spawn in a compiled command passes `DOMAIN` either: the input is gone, so a spawn that
@@ -36,7 +36,7 @@ import {
   CODE_AGENT_TYPES, ROOT, codeSlugOf, collectCodeSpawnSites, parseFrontmatterSkills,
   requireDistFile, requireDistFiles, resolveAgentSource, resolveLearningOffSource,
 } from '../helpers.js'
-import { LEARNING_OFF_FILES, MDS_GENERATOR_HOSTS, LEARNING_VARIANT_HOSTS } from '../fixtures/mds-manifest.js'
+import { CURATION_OFF_FILES, MDS_GENERATOR_HOSTS, CURATION_VARIANT_HOSTS } from '../fixtures/mds-manifest.js'
 
 const SCAN_OPENER = '**Security scan (conditional):**'
 const SCAN_CONDITION = 'Only when this session offers a code-scanning tool.'
@@ -49,7 +49,7 @@ function compiled(agentType: string, variant: Variant): string {
   const slug = codeSlugOf(agentType)
   if (variant === 'on') return resolveAgentSource(slug).content
   const text = resolveLearningOffSource('agents', slug)
-  if (text === null) throw new Error(`dist/learning-off/agents/${slug}.md is absent — run \`npm run build\` first`)
+  if (text === null) throw new Error(`dist/curation-off/agents/${slug}.md is absent — run \`npm run build\` first`)
   return text
 }
 
@@ -198,14 +198,14 @@ describe('every Code variant keeps the scan and apply-decisions; only Code takes
   })
 })
 
-describe('each Code variant is a host with a learning-off build (AC-307)', () => {
-  it('the manifest lists the three hosts and their three learning-off files, and the files exist', () => {
+describe('each Code variant is a host with a curation-off build (AC-307)', () => {
+  it('the manifest lists the three hosts and their three curation-off files, and the files exist', () => {
     for (const agentType of CODE_AGENT_TYPES) {
       const slug = codeSlugOf(agentType)
       expect(MDS_GENERATOR_HOSTS, `${slug} is a generator host`).toContain(slug)
-      expect(LEARNING_VARIANT_HOSTS, `${slug} has a learning variant`).toContain(`agents/${slug}`)
-      expect(LEARNING_OFF_FILES, `${slug} has a learning-off file`).toContain(`agents/${slug}.md`)
-      expect(existsSync(path.join(ROOT, 'dist', 'learning-off', 'agents', `${slug}.md`)), `dist/learning-off/agents/${slug}.md is built`).toBe(true)
+      expect(CURATION_VARIANT_HOSTS, `${slug} has a curation variant`).toContain(`agents/${slug}`)
+      expect(CURATION_OFF_FILES, `${slug} has a curation-off file`).toContain(`agents/${slug}.md`)
+      expect(existsSync(path.join(ROOT, 'dist', 'curation-off', 'agents', `${slug}.md`)), `dist/curation-off/agents/${slug}.md is built`).toBe(true)
       expect(resolveAgentSource(slug).origin, `${slug} is read from its compiled host`).toBe('dist')
     }
   })

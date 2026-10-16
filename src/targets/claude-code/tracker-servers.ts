@@ -17,7 +17,7 @@
  *          a `--plugin` run that does not install Git leaves the installed, stamped copy alone.
  *       2. `convergeTrackerArtifacts` stamps Tracker as it writes it, and compares the STAMPED text
  *          with the installed file, so a steady-state run reports `unchanged`.
- *       3. `convergeLearningVariants` (init, `devflow learning --enable/--disable`) carries the
+ *       3. `convergeCurationVariants` (init, `devflow learning --enable/--disable`) carries the
  *          installed stamp onto the variant it writes (`carryStampedTools`), the way it carries
  *          `model:` and `effort:`, so a variant switch keeps the list and a repeat run is byte-equal.
  *       4. `devflow tracker --servers` re-stamps the installed copies at once ({@link restampTrackerAgents}).

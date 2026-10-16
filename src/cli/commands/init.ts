@@ -104,7 +104,7 @@ import {
   attributionSeedFrom,
 } from './attribution-prompts.js';
 import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
-import { convergeLearningVariants, installedVersionMatches, readRunningVersion } from '../../targets/claude-code/learning-install.js';
+import { convergeCurationVariants, installedVersionMatches, readRunningVersion } from '../../targets/claude-code/curation-install.js';
 import {
   auditAndRecordClaudeMd,
   formatClaudeMdAuditNote,
@@ -2085,7 +2085,7 @@ export const initCommand = new Command('init')
         // The SETTLED switch, after the flag, the prompt and the seed have all had
         // their say (D-LEARNING-VARIANT-INSTALL): the files installed here and the
         // manifest written at the end of init cannot disagree about it.
-        learning: learningEnabled,
+        curation: learningEnabled,
         trackerServers,
         // Non-fatal install notices with no other channel (skipped symlinks in the
         // generated reference tree, mode-normalisation failures) reach the user rather
@@ -2106,10 +2106,10 @@ export const initCommand = new Command('init')
     // Warn-not-abort: either mismatch is safe (an on variant is still gated at run
     // time, an off variant loads no decisions). The agent mapping is reapplied below.
     try {
-      const learningConverge = await convergeLearningVariants({
+      const learningConverge = await convergeCurationVariants({
         claudeDir,
         devflowDir,
-        learning: learningEnabled,
+        curation: learningEnabled,
         plugins: effectivePlugins,
         warn: (msg) => installWarnings.push(msg),
       });

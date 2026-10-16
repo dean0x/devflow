@@ -75,12 +75,12 @@ Pass it as `complianceFrameworks` when invoking the workflow; the engine builds 
 
 `{integration worktree root}` is the toplevel of the checkout the integration branch is checked out in: `{worktree}` unless the wave runs in a linked worktree.
 
-<!-- learning:on -->
+<!-- curation:on -->
 **1. Apply decisions context**
 
 Apply the `devflow:apply-decisions` algorithm to the DECISIONS_CONTEXT loaded by the decisions step above: scan the index, Read relevant entries, note the verbatim ADR/PF IDs you will inject into Code agent prompts.
 
-<!-- learning:end -->
+<!-- curation:end -->
 **2. Read budget**
 
 Note the `budget` value from the Workflow tool context (or default to "medium" if not provided). This governs Review agent roster size and verification vote count.
@@ -158,9 +158,9 @@ const TICKET = args.ticket || args[0] || "see task description";
 const PLAN = args.plan || null;
 const CRITERIA = args.criteria || null;
 const TEST_PLAN = args.testPlan || null;  // the plan's checked TP lines, one string (Pre-authoring step 4)
-<!-- learning:on -->
+<!-- curation:on -->
 const DECISIONS_CONTEXT = args.decisionsContext || "";  // injected before authoring
-<!-- learning:end -->
+<!-- curation:end -->
 const ISSUE_INPUT = args.issueInput || args.issueNumber || "(none)";  // this ticket's OWN raw reference (Pre-authoring step 5; a wave passes issueInput) — setup-task's input, never a Code agent's
 const ISSUE_REQUIRED = String(args.issueRequired) === "false" ? "false" : "true";  // Pre-authoring step 0; only an explicit false turns it off — absent or unrecognised fails closed, like the resolver
 const APPLY_CONVENTIONS = String(args.applyConventions) === "false" ? "false" : "true";
@@ -205,11 +205,11 @@ ${TICKET}
 
 ${PLAN ? `Implementation plan:\n${PLAN}` : "No plan provided — use best judgment."}
 
-<!-- learning:on -->
+<!-- curation:on -->
 Relevant architectural decisions (apply devflow:apply-decisions algorithm):
 ${DECISIONS_CONTEXT}
 
-<!-- learning:end -->
+<!-- curation:end -->
 ${COMPLIANCE_DIRECTIVE}
 
 When you build or run tests to verify your work, follow your Running commands block.
@@ -244,9 +244,9 @@ Return: {"verdict": "PASS" | "FAIL", "details": "..."}`, { agentType: "Validate"
       await agent(`OPERATION: validation-fix
 Fix the validation failures on branch ${BRANCH}:
 ${failureDetails}
-<!-- learning:on -->
+<!-- curation:on -->
 DECISIONS_CONTEXT: ${DECISIONS_CONTEXT}
-<!-- learning:end -->
+<!-- curation:end -->
 ${COMPLIANCE_DIRECTIVE}
 Commit fixes with conventional-commit message.`, { agentType: "Fix" });
       const recheck = await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH} after fix attempt ${attempt} (follow your Running commands block).
@@ -287,9 +287,9 @@ Return: {"verdict": "PASS" | "FAIL", "rationale": "..."} — FAIL if either answ
       await agent(`OPERATION: alignment-fix
 Fix the alignment issues identified by the Evaluate agent on branch ${BRANCH}:
 ${evaluation?.rationale || "see the Evaluate agent's report"}
-<!-- learning:on -->
+<!-- curation:on -->
 DECISIONS_CONTEXT: ${DECISIONS_CONTEXT}
-<!-- learning:end -->
+<!-- curation:end -->
 ${COMPLIANCE_DIRECTIVE}
 Self-verify your fix compiles, following your Running commands block. Commit fixes.`, { agentType: "Fix" });
       evalVerdict = "FAIL-FIXED";  // issues found, fixes applied, not re-evaluated by design
@@ -309,9 +309,9 @@ Cover: functionality, API contracts, performance, and cover every TEST_PLAN scen
       await agent(`OPERATION: qa-fix
 Fix the failing acceptance test scenarios on branch ${BRANCH}:
 ${testResult.failures}
-<!-- learning:on -->
+<!-- curation:on -->
 DECISIONS_CONTEXT: ${DECISIONS_CONTEXT}
-<!-- learning:end -->
+<!-- curation:end -->
 ${COMPLIANCE_DIRECTIVE}
 Self-verify your fix compiles and the scenarios pass, following your Running commands block. Commit fixes.`, { agentType: "Fix" });
       testVerdict = "FAIL-FIXED";  // issues found, fixes applied, not re-evaluated by design
@@ -429,9 +429,9 @@ ISSUES:
 ${chunk.map((f, n) => `${n + 1}. ${f.file ? `${f.file}${f.line ? `:${f.line}` : ""} — ` : ""}${f.description} (${f.severity})`).join("\n")}
 SCOPE: ${chunk.map((f, n) => `${n + 1}=${CAREFUL_SEVERITIES.has(String(f.severity).toLowerCase()) ? "Careful" : "Standard"}`).join(", ")}
 PUSH: false
-<!-- learning:on -->
+<!-- curation:on -->
 DECISIONS_CONTEXT: ${DECISIONS_CONTEXT}
-<!-- learning:end -->
+<!-- curation:end -->
 ${COMPLIANCE_DIRECTIVE}
 Fix all findings in this batch. Self-verify your fix compiles, following your Running commands block. Commit with conventional-commit message.
 Return: {"status": "fixed"|"blocked", "commitShas": ["<sha>"], "unresolved": ["<description of any finding that could not be fixed>"]}`, { agentType: "Code" });
@@ -490,9 +490,9 @@ Return: {"verdict": "PASS" | "FAIL", "details": "..."}`, { agentType: "Validate"
       await agent(`OPERATION: validation-fix
 Fix the final validation failures on branch ${BRANCH}:
 ${failureDetails}
-<!-- learning:on -->
+<!-- curation:on -->
 DECISIONS_CONTEXT: ${DECISIONS_CONTEXT}
-<!-- learning:end -->
+<!-- curation:end -->
 ${COMPLIANCE_DIRECTIVE}
 Self-verify your fix compiles. Commit fixes with conventional-commit message.`, { agentType: "Fix" });
       const recheck = await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH} (final gate, after fix attempt ${attempt}; follow your Running commands block).
@@ -646,11 +646,11 @@ Return: {"ready": [...ticket-ids], "blocked": [{"ticket": "id", "namedBlocker": 
   for (const ticketId of ready) {
     try {
       // ticketId is this ticket's OWN ISSUE_REF (pre-fetch heading): the engine's `ticket` and setup-task ISSUE_INPUT; the engine returns the branch setup-task created, merged below; plans[ticketId] is its own plan (Pre-authoring step 4)
-<!-- learning:on -->
+<!-- curation:on -->
       const engineResult = await runSingleTicketEngine({ ticket: ticketId, baseBranch: INTEGRATION_BRANCH, ...(plans[ticketId] || {}), decisionsContext: DECISIONS_CONTEXT, issueRequired: ISSUE_REQUIRED, applyConventions: APPLY_CONVENTIONS, complianceFrameworks: COMPLIANCE_FRAMEWORKS, issueInput: ticketId });
-<!-- learning:off -->
+<!-- curation:off -->
       const engineResult = await runSingleTicketEngine({ ticket: ticketId, baseBranch: INTEGRATION_BRANCH, ...(plans[ticketId] || {}), issueRequired: ISSUE_REQUIRED, applyConventions: APPLY_CONVENTIONS, complianceFrameworks: COMPLIANCE_FRAMEWORKS, issueInput: ticketId });
-<!-- learning:end -->
+<!-- curation:end -->
       // PASS and UNVERIFIED merge (verdict, or overallVerdict as the SINGLE alias); PARTIAL, FAIL, ESCALATED (the ticket-link and branch stops included) or no verdict quarantine.
       if (["PASS", "UNVERIFIED"].includes(engineResult.verdict || engineResult.overallVerdict)) {
         const { kept, reason, halted, treeEqual } = await mergeValidateUndo(ticketId, engineResult);

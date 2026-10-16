@@ -1,26 +1,26 @@
 /**
- * Learning-variant splitter: one compiled prompt body in, its learning-on and
- * learning-off variants out.
+ * Curation-variant splitter: one compiled prompt body in, its curation-on and
+ * curation-off variants out.
  *
  * Pure module, zero I/O. Every refusal is a Result; the exiting shell is
  * scripts/build-mds.ts, which renders these errors into the build's single exit.
  *
- * D-LEARNING-VARIANTS: when learning is off on a machine, the decisions text is
+ * D-LEARNING-VARIANTS: when curation is off on a machine, the decisions text is
  * ABSENT from every prompt it would have reached, not merely gated at run time.
- * The build therefore emits two variants of a prompt that carries learning text:
- * the learning-on variant at today's path (dist/commands/x.md, dist/agents/x.md)
- * and the learning-off variant at dist/learning-off/{commands,agents}/x.md, only
+ * The build therefore emits two variants of a prompt that carries curation text:
+ * the curation-on variant at today's path (dist/commands/x.md, dist/agents/x.md)
+ * and the curation-off variant at dist/curation-off/{commands,agents}/x.md, only
  * for a host that has an arm. A prompt with no arm has one variant and no
- * learning-off file.
+ * curation-off file.
  *
  * The arms are whole-line markers in the host or in a partial it expands:
  *
- *   <!-- learning:on -->     opens an arm that only the learning-on variant keeps
- *   <!-- learning:off -->    opens an arm that only the learning-off variant keeps;
+ *   <!-- curation:on -->     opens an arm that only the curation-on variant keeps
+ *   <!-- curation:off -->    opens an arm that only the curation-off variant keeps;
  *                            directly after an on arm it is that arm's else
- *   <!-- learning:end -->    closes the arm
+ *   <!-- curation:end -->    closes the arm
  *
- * A marker line matches LEARNING_MARKER_RE. It may be indented and may sit inside
+ * A marker line matches CURATION_MARKER_RE. It may be indented and may sit inside
  * a fenced block, a list, a define body or an agent's second frontmatter block,
  * because MDS passes an HTML comment through untouched. The splitter runs on the
  * COMPILED body, after the MDS compile, so it adds no compileFile call, no import
@@ -36,21 +36,26 @@
  * fence- and indent-aware `@if` (dean0x/mdscript#452). That swap, with the
  * @mdscript/mds upgrade it rides on proven byte-identical in dist/ and this module
  * deleted, is dean0x/devflow#439. The mapping is one to one: `on` becomes
- * `@if learning:`, `off` becomes `@else:` and `end` becomes `@end`. A standalone
- * `off` arm, with no on arm before it, becomes an `@if learning:` with an empty
+ * `@if curation:`, `off` becomes `@else:` and `end` becomes `@end`. A standalone
+ * `off` arm, with no on arm before it, becomes an `@if curation:` with an empty
  * body followed by `@else:`.
  *
- * What the splitter refuses, each as a LearningSplitError with the source line:
+ * What the splitter refuses, each as a CurationSplitError with the source line:
  *   - nesting: an `on` marker while an arm is open, or a second `off` in one arm;
  *   - an `end` with no open arm;
  *   - an arm still open at the end of the body;
  *   - an empty arm (no line with content between its marker and the next);
- *   - a stray marker: a line that names `<!-- learning:` but is not a whole-line
+ *   - a retired marker: a line that names the pre-rename spelling of the marker, in
+ *     any spacing or case, which would otherwise ship as prompt text;
+ *   - a stray marker: a line that names `<!-- curation:` but is not a whole-line
  *     marker, which would otherwise ship as prompt text.
+ *
+ * The retired spelling is never accepted as an alias: the build fails on it, so a
+ * host that still carries it cannot ship a prompt with both variants silently equal.
  *
  * Scope guarantee: this module answers one question (what are the two variants of
  * this body?) and one cheap one for the build to ask of a body that must carry no
- * arms (containsLearningMarker). It decides nothing about WHICH text belongs in an
+ * arms (containsCurationMarker). It decides nothing about WHICH text belongs in an
  * arm: that is authoring, and the guards over the built trees hold it.
  */
 
@@ -71,29 +76,38 @@ function Err<E>(error: E): Result<never, E> {
 }
 
 // ---------------------------------------------------------------------------
-// Where the learning-off variant lands
+// Where the curation-off variant lands
 // ---------------------------------------------------------------------------
 
-/** The host kinds that can carry a learning arm: the ones whose output is a prompt, not a reference. */
-export type LearningVariantKind = 'commands' | 'agents';
+/** The host kinds that can carry a curation arm: the ones whose output is a prompt, not a reference. */
+export type CurationVariantKind = 'commands' | 'agents';
 
 /**
- * Repo-relative root of the learning-off variants.
+ * Repo-relative root of the curation-off variants.
  *
  * Exported because the build's orphan prune names this directory even when no
  * host carries an arm, which is exactly the case where every file in it is an
  * orphan, so it cannot be derived from the plan.
  */
-export const LEARNING_OFF_OUTPUT_DIR = 'dist/learning-off';
+export const CURATION_OFF_OUTPUT_DIR = 'dist/curation-off';
 
 /**
- * POSIX repo-relative path of the learning-off variant of an output file.
+ * Repo-relative root of the retired off tree, from before the rename.
  *
- * `fileName` is the already-validated basename the learning-on variant is written
+ * The build removes this folder whole after a clean run, so a checkout that built
+ * before the rename keeps no stale prompts there: nothing reads the folder, and the
+ * package would otherwise ship it.
+ */
+export const LEGACY_OFF_OUTPUT_DIR = 'dist/learning-off';
+
+/**
+ * POSIX repo-relative path of the curation-off variant of an output file.
+ *
+ * `fileName` is the already-validated basename the curation-on variant is written
  * under (`implement.md`), so the two variants of one host always share a name.
  */
-export function learningOffRelPath(kind: LearningVariantKind, fileName: string): string {
-  return `${LEARNING_OFF_OUTPUT_DIR}/${kind}/${fileName}`;
+export function curationOffRelPath(kind: CurationVariantKind, fileName: string): string {
+  return `${CURATION_OFF_OUTPUT_DIR}/${kind}/${fileName}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -101,23 +115,29 @@ export function learningOffRelPath(kind: LearningVariantKind, fileName: string):
 // ---------------------------------------------------------------------------
 
 /**
- * A whole-line learning marker. The group captures `on`, `off` or `end`.
+ * A whole-line curation marker. The group captures `on`, `off` or `end`.
  *
  * Anchored at both ends with no nested quantifier, so a match is linear in the
  * line length. Leading and trailing space or tab is allowed; anything else on the
  * line is not a marker.
  */
-export const LEARNING_MARKER_RE = /^[ \t]*<!-- learning:(on|off|end) -->[ \t]*$/;
+export const CURATION_MARKER_RE = /^[ \t]*<!-- curation:(on|off|end) -->[ \t]*$/;
 
 /**
  * The fragment that makes a line a marker ATTEMPT: loose on spacing and case so a
  * malformed marker is caught rather than shipped. Every valid marker contains it.
  */
-const MARKER_FRAGMENT_RE = /<!--\s*learning\s*:/i;
+const MARKER_FRAGMENT_RE = /<!--\s*curation\s*:/i;
 
-/** True when the text names a learning marker anywhere, valid or not. */
-export function containsLearningMarker(text: string): boolean {
-  return MARKER_FRAGMENT_RE.test(text);
+/**
+ * The same attempt test for the retired spelling of the marker. No spelling of it is
+ * valid, so a line that matches is always refused.
+ */
+const LEGACY_MARKER_FRAGMENT_RE = /<!--\s*learning\s*:/i;
+
+/** True when the text names a marker anywhere, in the current or the retired spelling, valid or not. */
+export function containsCurationMarker(text: string): boolean {
+  return MARKER_FRAGMENT_RE.test(text) || LEGACY_MARKER_FRAGMENT_RE.test(text);
 }
 
 type MarkerWord = 'on' | 'off' | 'end';
@@ -125,7 +145,7 @@ type MarkerWord = 'on' | 'off' | 'end';
 function markerOf(line: string): MarkerWord | null {
   // A CRLF body carries the carriage return on the line; it is not part of the marker.
   const bare = line.endsWith('\r') ? line.slice(0, -1) : line;
-  const match = LEARNING_MARKER_RE.exec(bare);
+  const match = CURATION_MARKER_RE.exec(bare);
   return match === null ? null : (match[1] as MarkerWord);
 }
 
@@ -133,9 +153,9 @@ function markerOf(line: string): MarkerWord | null {
 // The split
 // ---------------------------------------------------------------------------
 
-export type LearningArm = 'on' | 'off';
+export type CurationArm = 'on' | 'off';
 
-export interface LearningSplit {
+export interface CurationSplit {
   /** The body with every `on` arm kept and every `off` arm dropped. */
   readonly on: string;
   /** The body with every `off` arm kept and every `on` arm dropped. */
@@ -145,19 +165,20 @@ export interface LearningSplit {
 }
 
 /** Why a body cannot be split. Every line number is 1-based, in the body that was passed. */
-export type LearningSplitError =
-  | { kind: 'nested-arm'; line: number; arm: LearningArm; openedAt: number }
+export type CurationSplitError =
+  | { kind: 'nested-arm'; line: number; arm: CurationArm; openedAt: number }
   | { kind: 'repeated-off'; line: number; openedAt: number }
   | { kind: 'unopened-end'; line: number }
-  | { kind: 'unclosed-arm'; arm: LearningArm; openedAt: number }
-  | { kind: 'empty-arm'; arm: LearningArm; openedAt: number; closedAt: number }
+  | { kind: 'unclosed-arm'; arm: CurationArm; openedAt: number }
+  | { kind: 'empty-arm'; arm: CurationArm; openedAt: number; closedAt: number }
+  | { kind: 'legacy-marker'; line: number; text: string }
   | { kind: 'stray-marker'; line: number; text: string };
 
 /** The longest stretch of a stray line a refusal quotes. */
 const STRAY_QUOTE_MAX = 80;
 
 /**
- * Split a compiled body into its learning-on and learning-off variants.
+ * Split a compiled body into its curation-on and curation-off variants.
  *
  * Total and pure: the same input gives the same output, and a refusal is a
  * Result. The loop is one pass over the body's lines, so its bound is the body's
@@ -167,7 +188,7 @@ const STRAY_QUOTE_MAX = 80;
  * refused as empty, because it would add blank lines to one variant and nothing to
  * the other, which is a mistake rather than a design.
  */
-export function splitLearningVariants(body: string): Result<LearningSplit, LearningSplitError> {
+export function splitCurationVariants(body: string): Result<CurationSplit, CurationSplitError> {
   const lines = body.split('\n');
   const on: string[] = [];
   const off: string[] = [];
@@ -175,7 +196,7 @@ export function splitLearningVariants(body: string): Result<LearningSplit, Learn
 
   // The open arm, if any: which one, the line of the marker that opened it, and
   // whether it has held a line with content yet.
-  let arm: LearningArm | null = null;
+  let arm: CurationArm | null = null;
   let armOpenedAt = 0;
   let armHasContent = false;
 
@@ -185,6 +206,9 @@ export function splitLearningVariants(body: string): Result<LearningSplit, Learn
     const marker = markerOf(line);
 
     if (marker === null) {
+      if (LEGACY_MARKER_FRAGMENT_RE.test(line)) {
+        return Err({ kind: 'legacy-marker', line: lineNo, text: line.trim().slice(0, STRAY_QUOTE_MAX) });
+      }
       if (MARKER_FRAGMENT_RE.test(line)) {
         return Err({ kind: 'stray-marker', line: lineNo, text: line.trim().slice(0, STRAY_QUOTE_MAX) });
       }
@@ -237,35 +261,40 @@ export function splitLearningVariants(body: string): Result<LearningSplit, Learn
  * fall through into a message that does not describe it. Shared by the build and
  * the tests, so the text asserted is the text shipped.
  */
-export function describeLearningSplitError(error: LearningSplitError): string {
+export function describeCurationSplitError(error: CurationSplitError): string {
   switch (error.kind) {
     case 'nested-arm':
       return (
-        `line ${error.line}: a learning:on marker inside the ${error.arm} arm opened at line ` +
-        `${error.openedAt} — arms do not nest; close it with learning:end first`
+        `line ${error.line}: a curation:on marker inside the ${error.arm} arm opened at line ` +
+        `${error.openedAt} — arms do not nest; close it with curation:end first`
       );
     case 'repeated-off':
       return (
-        `line ${error.line}: a second learning:off marker inside the off arm opened at line ` +
+        `line ${error.line}: a second curation:off marker inside the off arm opened at line ` +
         `${error.openedAt} — an arm has at most one else`
       );
     case 'unopened-end':
-      return `line ${error.line}: a learning:end marker with no open arm`;
+      return `line ${error.line}: a curation:end marker with no open arm`;
     case 'unclosed-arm':
-      return `the ${error.arm} arm opened at line ${error.openedAt} is never closed with learning:end`;
+      return `the ${error.arm} arm opened at line ${error.openedAt} is never closed with curation:end`;
     case 'empty-arm':
       return (
         `lines ${error.openedAt}-${error.closedAt}: the ${error.arm} arm holds no line with content — ` +
         `delete the arm or put its text inside it`
       );
+    case 'legacy-marker':
+      return (
+        `line ${error.line}: "${error.text}" uses the retired learning marker — rename it to ` +
+        `<!-- curation:on -->, <!-- curation:off --> or <!-- curation:end -->`
+      );
     case 'stray-marker':
       return (
-        `line ${error.line}: "${error.text}" names a learning marker but is not one — a marker ` +
-        `is a whole line, exactly <!-- learning:on -->, <!-- learning:off --> or <!-- learning:end -->`
+        `line ${error.line}: "${error.text}" names a curation marker but is not one — a marker ` +
+        `is a whole line, exactly <!-- curation:on -->, <!-- curation:off --> or <!-- curation:end -->`
       );
     default: {
       const unhandled: never = error;
-      return `unhandled learning split error ${JSON.stringify(unhandled)}`;
+      return `unhandled curation split error ${JSON.stringify(unhandled)}`;
     }
   }
 }
