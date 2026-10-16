@@ -66,8 +66,8 @@ LINT_PACK: matches 2
 |---|---|
 | `<check-id> <path>:<line> <id>` | One match. The check id is `stale-symbol`, `plan-id` or `function-size`. The id is the symbol, the pattern id, or `function-size`. A path keeps the quoted form that git uses for odd names. |
 | `+<k> more` | The matches beyond the first 50. Records are sorted by check id, path and line number. |
-| `pack-changed <path>` | A pack file that the branch changed. These lines also print before an error line. See "No self-silencing". |
-| `pack-dirty <path>` | A pack file that differs from `HEAD` in the work tree or the index, or that is untracked and not ignored. These lines come after the `pack-changed` lines, and they also print before an error line. |
+| `pack-changed <path>` | A pack file that the branch changed. At most 20 are listed, then `+<k> more`. These lines also print before an error line. See "No self-silencing". |
+| `pack-dirty <path>` | A pack file that differs from `HEAD` in the work tree or the index, or that is untracked and not ignored. At most 20 are listed, then `+<k> more`. These lines come after the `pack-changed` lines, and they also print before an error line. |
 | `skipped-binary <path>` | A file that git treats as binary, so the script did not search it. At most 10 are listed, then `+<k> more`. |
 | `symbol-cap <n>` | The number of symbols left out because the script searches at most 500. |
 | `unsafe-tokens <n>` | The number of symbols dropped because they are longer than 64 bytes or hold characters outside `A-Za-z0-9_.:/-`. |
