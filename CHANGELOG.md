@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes — Lint pack
+
+**Stale-install window:**
+- Until you run `devflow init`, the installed `/implement` and Validate do not run the lint pack.
+
+### Added
+
+- **A lint pack template, and a lean lint pack in Validate** ([#475](https://github.com/dean0x/devflow/issues/475)). The package ships a template in `templates/lint-pack/`: a script, an example config and a README. You copy it into your repository and own the copy. devflow does not install, update or run the template itself. At `lean`, Phase 6 of `/implement` has Validate run your root `lint-pack` script last, after the build, typecheck, lint and test commands pass. Validate finds it as a `package.json` script, else as a `Makefile` target. The script reads the lines the branch changed. It finds a removed flag that a doc still names, a plan ID or a tombstone phrase in new text, and an oversized function (through your own linter). A match fails validation and reaches Fix as a file and line reference. Fix does not edit the lint pack, its config, its build-file entry or any `.gitattributes` to clear a match. Fix does not silence the linter to clear a match, with a disable comment or a linter-config change. It reports the match under Blockers. A pack error does not change the validation result. A git older than 2.30, a config that the script cannot read, a linter that did not run and a run that a timeout stops are pack errors, never a clean run. A pack error reads `UNVERIFIED` in the `/implement` final report and in the Testing part of the PR body. The pack also prints a `pack-changed` line for a changed build-file line in the compared range that names `lint-pack` or `BASE`, a `pack-dirty` line for an uncommitted change to a pack file, and the base it compared. Known limit: the pack prints the base it compared (`base <sha>`), but Validate does not check that base yet, and issue #537 adds that check. If the project has no `lint-pack` script or target, Validate prints one "not configured" line. The re-validation that you ask `/implement` for runs the pack. The re-validation after QA fixes, `/resolve`, `/self-review`, `/release` and `/dynamic-build` do not run it, and no level below `lean` runs it. To clear a match that you judge false, add an allow glob to `.lint-pack.conf`, commit it, and ask `/implement` to re-validate.
+
 ---
 
 ## [3.7.0] - 2026-10-16

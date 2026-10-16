@@ -789,7 +789,7 @@ describe('AC-11: Phase 11 runs the evidence script once, after Phase 10, for eve
 
   it('the re-validation path, the Report and the CI-awareness principle name the evidence step', () => {
     const lines = implementMd().split('\n')
-    expect(revalidateReference().split('\n').find(l => l.startsWith('5. **Proceed to Phase 9**'))).toContain('**Phase 11** (Evidence)')
+    expect(revalidateReference().split('\n').find(l => l.startsWith('6. **Proceed to Phase 9**'))).toContain('**Phase 11** (Evidence)')
     expect(lines.find(l => l.startsWith('Show the test plan\'s evidence from Phase 11'))).toContain('never inferred')
     expect(lines.find(l => /^\d+\. \*\*CI awareness\*\*/.test(l))).toContain('test-plan evidence (Phase 11) is recorded under every strategy')
   })

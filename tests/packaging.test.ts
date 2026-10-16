@@ -14,8 +14,9 @@
  *   is renamed or deleted.
  *
  * Guard 5 (files[] coverage): the package.json `files` array includes every directory
- *   required for a working install (dist/, src/assets/, src/targets/claude-code/templates/).
- *   A missing entry causes `npm pack` to silently omit critical runtime files.
+ *   required for a working install (dist/, src/assets/, src/targets/claude-code/templates/)
+ *   and the project-owned lint-pack template (templates/lint-pack/), which ships but is
+ *   never installed. A missing entry causes `npm pack` to silently omit critical files.
  *
  * Guard 6e (generated references): the tarball carries every file the installer's
  *   reference overlay converges to. An absent generated reference makes the overlay
@@ -350,6 +351,9 @@ describe('Guard 4 (commands source): every dist/commands/*.md has a known source
  *                     sources (*.mds under commands/ and agents/)
  *   - `src/targets/claude-code/templates/`  install templates (.claudeignore, settings.json)
  *
+ * It must also ship `templates/lint-pack/`, the project-owned lint-pack template that
+ * a project copies and owns. The installer never reads it.
+ *
  * A missing entry causes npm to silently omit files from the tarball, breaking
  * downstream installs without any error at publish time.
  */
@@ -381,6 +385,10 @@ describe('Guard 5 (files[] coverage): package.json includes required directories
     {
       entry: 'src/targets/claude-code/templates/',
       reason: 'install templates (.claudeignore, settings.json) used by devflow init',
+    },
+    {
+      entry: 'templates/lint-pack/',
+      reason: 'project-owned lint-pack template; shipped, never installed',
     },
   ];
 
@@ -493,6 +501,27 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
       `Files found: ${commandMds.join(', ')}\n` +
       `If a command was added or removed, update the manifest intentionally.`,
     ).toEqual([...DIST_COMMAND_FILES].sort());
+  });
+
+  it('tarball carries the lint-pack template: its script, its example config and its README, nothing else under templates/', () => {
+    // The template is project-owned: a project copies it out of the package and
+    // devflow never installs or runs it. Only the tarball can ship it, so a
+    // dropped `files[]` entry would leave the README's "where to find it" empty.
+    const files = getPackFiles();
+    expect(
+      files.length,
+      'npm pack --dry-run produced no files — run `npm run build` first (guard cannot verify)',
+    ).toBeGreaterThan(0);
+
+    const templates = files.filter(f => f.startsWith('templates/')).sort();
+    expect(
+      templates,
+      'The tarball must carry exactly the lint-pack script, the example config and the README under templates/lint-pack/.',
+    ).toEqual([
+      'templates/lint-pack/.lint-pack.conf',
+      'templates/lint-pack/README.md',
+      'templates/lint-pack/lint-pack.sh',
+    ]);
   });
 
   it('tarball carries the compiled agent of every generator host (dist/agents/*.md)', () => {

@@ -13,7 +13,7 @@ output-dir: dist/commands
 @import "./_partials/_settings.mds" as settings
 # Implement Command
 
-Orchestrate a single task through implementation by spawning specialized agents. The orchestrator only spawns agents and passes context - all work is done by agents.
+Orchestrate a single task through implementation by spawning specialized agents.
 
 ## Usage
 
@@ -40,8 +40,6 @@ $ARGUMENTS
 
 {{issue_ref_grammar()}}
 
-> **Tip**: For best results, run `/plan` first to produce a design artifact, then pass it to `/implement`.
-
 ## Phases
 
 ### Re-validation Continuation Path
@@ -51,9 +49,9 @@ When the user explicitly asks to re-validate, re-check, or re-run quality gates 
 ### Phase 1: Setup
 
 <!-- learning:on -->
-**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION
+**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION, GATE_LEVEL
 <!-- learning:off -->
-**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION
+**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION, GATE_LEVEL
 <!-- learning:end -->
 
 Record the current branch name as `BASE_BRANCH`. Stop the run unless it matches `^[A-Za-z0-9._/+@,#-]{1,200}$`, telling the user it allows only ASCII letters, digits and `._/+@,#-`, at most 200.
@@ -368,13 +366,15 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
 ### Phase 6: Validate
 
 **Produces:** VALIDATION_RESULT, VALIDATED_HEAD
-**Requires:** BASE_BRANCH
+**Requires:** BASE_BRANCH, GATE_LEVEL
 
 Validate takes the one full-suite slot, after every commit it must cover: Code, Polish, Harden and the alignment fixes. After Evaluate agent passes, spawn Validate agent. `FILES_CHANGED` is the branch diff:
 
 ```
 Agent(subagent_type="Validate"):
-"FILES_CHANGED: {branch_diff}
+"GATE_LEVEL: {GATE_LEVEL}
+BASE_SHA: {output of `git merge-base {BASE_BRANCH} HEAD`}
+FILES_CHANGED: {branch_diff}
 VALIDATION_SCOPE: full
 Run build, typecheck, lint, test. Report pass/fail with failure details."
 ```
@@ -488,7 +488,7 @@ ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
 ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
 PR_EXCEPTIONS: {the ## Evidence Exceptions section of {worktree}/.devflow/docs/handoff-{branch_slug}.md verbatim, or (none)}
 PR_TEST_PLAN_BLOCK: {PR_TEST_PLAN_BLOCK verbatim, or (none)}
-PR_DESCRIPTION_GUIDANCE: {pr_description_guidance from Phase 1 unless it is (none), then the Code agents' reports from CODE_AGENT_OUTPUT in spawn order — Implementation, Commits and Key Decisions, and a sequential agent's ## Phase {N} Implementation Summary}
+PR_DESCRIPTION_GUIDANCE: {pr_description_guidance from Phase 1 unless it is (none), then the Code agents' reports from CODE_AGENT_OUTPUT in spawn order — Implementation, Commits and Key Decisions, and a sequential agent's ## Phase {N} Implementation Summary, then Validate's `Lint pack:` line if UNVERIFIED, for Testing}
 APPLY_CONVENTIONS: {APPLY_CONVENTIONS}
 COMMIT_UNCOMMITTED: false
 Open the pull request for this branch and return the pre-flight summary."
@@ -552,7 +552,7 @@ Drop the `--evidence` pair when that file does not exist or its path does not ma
 
 **Requires:** VALIDATION_RESULT, ALIGNMENT_RESULT, QA_RESULT, PR_NUMBER, EVIDENCE_RESULT
 
-Display completion summary with phase status, PR info, and next steps.
+Display completion summary with phase status, Validate's `Lint pack:` line if any, PR info, and next steps.
 
 Show the test plan's evidence from Phase 11: `Test plan: {VERIFIED-CI + ATTESTED-LOCAL}/{total} verified (VERIFIED-CI {n}, ATTESTED-LOCAL {n})`, read from the `EVIDENCE` line and never inferred, then its `**Body**:` / `**Comment**:` line verbatim. Without an `EVIDENCE` line, show `Test plan: evidence unavailable`; with no test plan, `Test plan: missing`.
 
@@ -591,13 +591,12 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 ## Principles
 
 1. **Orchestration only** - Command spawns agents, never does work itself; the inline calls are the bounded plumbing the charter allows: the Phase 10 and Phase 11 pushes, the Phase 10 ci-wait call, the Phase 11 evidence publish call and the evidence script checks
-2. **Agent ownership** - Each agent owns its output completely
-3. **Honest reporting** - Display agent outputs directly
-4. **Strict delegation** - Never perform agent work in main session. "Spawn X" means call Agent tool with X, not do X's work yourself
-5. **Validate agent owns validation** - Never run `npm test`, `npm run build`, or similar in main session; always delegate to Validate agent
-6. **Fix agent owns fixes** - Never implement fixes in main session; spawn Fix agent for validation failures and alignment fixes
-7. **Loop limits** - Max 2 validation retries, max 2 alignment fix iterations, max 2 QA retries before escalating to user; the CI gate allows at most 3 waits and 2 fixes
-8. **CI awareness** - CI status is checked before merge under every strategy, once Phase 9 has opened the PR; test-plan evidence (Phase 11) is recorded under every strategy once the PR exists
+2. **Honest reporting** - Display agent outputs directly
+3. **Strict delegation** - Never perform agent work in main session. "Spawn X" means call Agent tool with X, not do X's work yourself
+4. **Validate agent owns validation** - Never run `npm test`, `npm run build`, or similar in main session; always delegate to Validate agent
+5. **Fix agent owns fixes** - Never implement fixes in main session; spawn Fix agent for validation failures and alignment fixes
+6. **Loop limits** - Max 2 validation retries, max 2 alignment fix iterations, max 2 QA retries before escalating to user; the CI gate allows at most 3 waits and 2 fixes
+7. **CI awareness** - CI status is checked before merge under every strategy, once Phase 9 has opened the PR; test-plan evidence (Phase 11) is recorded under every strategy once the PR exists
 
 ## Error Handling
 

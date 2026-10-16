@@ -110,7 +110,7 @@ describe('the Validation Order table has a Quiet form column and a fallback sent
     expect(collectTableDefects(body.replace('`pytest -q`, ', ''))).toEqual(['Test: the Quiet form cell does not list `pytest -q`'])
     expect(collectTableDefects(body.replace(FALLBACK, 'Re-run the suite verbosely.'))).toEqual(['the fallback sentence is missing or reworded'])
 
-    const moved = body.replace(FALLBACK, '').replace('## Principles', `${FALLBACK}\n\n## Principles`)
+    const moved = body.replace(FALLBACK, '').replace('## Output', `${FALLBACK}\n\n## Output`)
     expect(collectTableDefects(moved)).toEqual(['the fallback sentence sits inside or after the Running commands block'])
 
     expect(collectBlockIntrusions(body.replace('- The same rules hold', '| a | b |\n- The same rules hold'))).toEqual(['the block carries a table row'])
