@@ -1,11 +1,11 @@
 ---
 feature: installer-shadowing-wizard-flags
 name: Wizard Steps, Flags CLI/TUI & Managed-shape Oracle
-description: "Use when changing prompt-io, the compliance or attribution wizard step, the devflow flags CLI/TUI, convergeFlagsIntoSettings or the managed-shape oracle (settingHoldsManagedShape). Keywords: wizard, flags, TUI."
+description: "Use when changing prompt-io, the compliance, attribution or gate-level wizard step, init --gate-level, the flags CLI/TUI, convergeFlagsIntoSettings or settingHoldsManagedShape. Keywords: wizard, flags, TUI, gate level."
 category: component-patterns
-directories: [src/cli/commands/prompt-io.ts, src/cli/commands/compliance-prompts.ts, src/cli/commands/attribution-prompts.ts, src/cli/commands/flags.ts, src/cli/flags-view, src/cli/tui, src/core/flags.ts]
+directories: [src/cli/commands/prompt-io.ts, src/cli/commands/compliance-prompts.ts, src/cli/commands/attribution-prompts.ts, src/cli/commands/gate-level-prompts.ts, src/cli/commands/flags.ts, src/cli/flags-view, src/cli/tui, src/core/flags.ts]
 created: 2026-10-10
-updated: 2026-10-11
+updated: 2026-10-16
 ---
 
 # Wizard Steps, Flags CLI/TUI & Managed-shape Oracle
@@ -25,6 +25,9 @@ updated: 2026-10-11
 - **KB-AP-11** `persistFlagConfig` never reports success with an absent manifest, and success is tracked in locals, never read back off the process-wide `process.exitCode`.
 - **KB-AP-12** `--enable` / `--disable` are boolean-only: non-boolean flags use `--set`.
 - **KB-AP-13** Do not expect `ENTER_ALT` sequences from the flags TUI: it runs inline (`screen: 'inline'`); only agents-view uses the default alt screen.
+- **KB-AP-14** `GATE_LEVEL_HINTS` (gate-level-prompts.ts) restates `GATE_LEVEL_EFFECT` (gates.ts) per level: editing one without the other leaves the init prompt and `devflow gates` describing different effects.
+- **KB-AP-15** Never default, narrow or heal the stored gate level on a seed or promptless path (no `??` default, no `parseGateLevel` write-back): a stored `null` or malformed value must pass through raw.
+- **KB-AP-16** init never writes the personal `gateLevel` in a repository's `.devflow/config.json`: it writes only the manifest `features.gateLevel`, and the personal key still wins where it exists.
 - **KB-INV-1** `settingDeleteGuard` protects deletion, not writes: `suppress-attribution` enabled always writes `{"commit":"","pr":""}`, overwriting a custom attribution; disabled deletes the key only when the value deep-equals the managed shape. Test-pinned.
 - **KB-INV-2** `settingValueHoldsManagedShape` is the single equality oracle for managed-shape comparisons; `canDeleteSettingKey`, `resolveExistingAttributionSuppression` and the adoption fold all delegate to it.
 - **KB-INV-3** The `attribution` settings key is owned exclusively by the flags pipeline (`applyFlags` / `stripFlags` via `convergeFlagsIntoSettings`); a registry-driven test asserts no setting-target key appears in the template.
@@ -35,10 +38,12 @@ updated: 2026-10-11
 - **KB-INV-8** Flag `blurb` and `hint` length caps are enforced by registry-walk tests in `tests/flags.test.ts`, not by TypeScript types.
 - **KB-INV-9** A guarded setting flag the manifest has not recorded starts OFF when its settings key already holds a value that is not the managed shape; `respectUserOwnedSettings` (built on `settingHoldsUserValue`) is the one rule, applied by the init seed and by the flags TUI's starting rows, with no flag id special-cased. A flag the manifest records keeps its value, so an explicit enable still wins.
 - **KB-INV-10** `settingDeleteGuard` has the type of `onPayload` (`SettingPayload`), so a scalar flag guards its scalar the same way an object flag guards its shape: `subagent-cache-5m` writes `"5m"` to `subagentPromptCacheTtl` and deletes the key only when the value is still `"5m"`, so a user's own `"1h"` survives disable and uninstall.
+- **KB-INV-11** `--gate-level` is parsed (`resolveGateLevelInitOption`, strict) right after the `--reset`/`--plugin` check and before any write: an invalid level exits 1 and `--hud-only --gate-level` exits 1.
+- **KB-INV-12** The gate-level gate is `shouldRunGateLevelStep`, keyed on `modePromptShown`, reached only through `resolveGateLevelForInit` from `runGateLevelStepAt` on both wizard paths; precedence is `--gate-level`, then the wizard answer, then the stored value raw.
 
 ## Overview
 
-Three CLI-layer concerns share this KB because they converge on the flags record: the wizard step modules (`compliance-prompts.ts`, `attribution-prompts.ts` over the shared `prompt-io.ts` seam), the `devflow flags` command and its inline TUI, and the pure registry pipeline in `src/core/flags.ts` that writes the record into `settings.json`. Core stays UI-agnostic: all I/O-free flag logic lives in `src/core/flags.ts`; the CLI modules own prompts, Commander wiring, settings I/O and manifest persistence, and the init-specific prompt modules (and `init-seed.ts`) live in `src/cli/commands/` rather than `src/core/` for that reason. The tracker wizard step has its own gate and prompt shape and is in the tracker-wiring KB; init-seed (the KB of that name) covers how the seed is computed.
+Three CLI-layer concerns share this KB because they converge on the flags record: the wizard step modules (`compliance-prompts.ts`, `attribution-prompts.ts`, `gate-level-prompts.ts` over the shared `prompt-io.ts` seam), the `devflow flags` command and its inline TUI, and the pure registry pipeline in `src/core/flags.ts` that writes the record into `settings.json`. Core stays UI-agnostic: all I/O-free flag logic lives in `src/core/flags.ts`; the CLI modules own prompts, Commander wiring, settings I/O and manifest persistence, and the init-specific prompt modules (and `init-seed.ts`) live in `src/cli/commands/` rather than `src/core/` for that reason. The tracker wizard step has its own gate and prompt shape and is in the tracker-wiring KB; init-seed (the KB of that name) covers how the seed is computed.
 
 ## Shared Wizard Prompt-IO Seam (`prompt-io.ts`)
 
@@ -46,7 +51,7 @@ A one-definition seam owning the shared DI types and the real clack adapters:
 - `PromptOutcome<T>` — `{ kind: 'value'; value: T } | { kind: 'cancel' }`.
 - `WizardPromptIO` — the base injectable interface: `note(message, title): void` + `select(opts): Promise<PromptOutcome<boolean>>`.
 - `clackNote` / `clackSelect<T>` — the real adapters; `clackSelect` narrows away the cancel branch with `p.isCancel` as a type guard, no `as T` cast.
-- `AttributionPromptIO` is a type alias of `WizardPromptIO` (a named export kept for tests and callers importing it by name); `CompliancePromptIO` and `TrackerPromptIO` extend it with their own prompt.
+- `AttributionPromptIO` is a type alias of `WizardPromptIO` (a named export kept for tests and callers importing it by name); `CompliancePromptIO`, `TrackerPromptIO` and `GateLevelPromptIO` extend it with their own prompt.
 
 A new wizard step builds on this module rather than redefining those types.
 
@@ -67,6 +72,19 @@ Parallel structure to the compliance module with a deliberately different gate:
 - `applyAttributionAnswer(flags, outcome): FlagsRecord` — immutable merge (a new record, never a mutation) and the single merge site; `init.ts` must not duplicate the spread.
 - `runAttributionStep({seed, prompts})` — pure orchestrator. Its note names the destructive enable branch ("Yes REPLACES any existing `attribution` value in settings.json, including a custom one") and carries an org AI-disclosure-policy clause.
 - **Call site in `init.ts`:** `mode: useRecommended ? 'recommended' : 'advanced'` (never a string literal); one call, in the Advanced path only, via `shouldRunAttributionStep`; `attributionSeedFrom(enabledFlags)` derives the seed and `applyAttributionAnswer(enabledFlags, outcome)` updates `enabledFlags`.
+
+## Gate-Level Wizard Step (`gate-level-prompts.ts`)
+
+Asks for the MACHINE gate level, manifest `features.gateLevel`, the field `devflow gates --set` also writes (`src/cli/commands/gates.ts`). The closed set and parser stay in `src/core/gate-level.ts` (`GATE_LEVELS`, `DEFAULT_GATE_LEVEL`, `parseGateLevel`); this module only imports them.
+- **Gate:** `shouldRunGateLevelStep({mode, modePromptShown, isTTY, hasCliOverride})` has the compliance table: `hasCliOverride` (`--gate-level`) → no; non-TTY → no; Advanced → yes; Recommended → only when `modePromptShown`. Re-init is Advanced-only, so the Advanced call site is the one that matters there. The rows are pinned in the `shouldRunGateLevelStep` describe of `tests/gate-level-prompts.test.ts`.
+- **Prompt content:** `GATE_LEVEL_HINTS` (one-line effect per level), `gateLevelChoices()` (`GATE_LEVELS` order: full, standard, lean), `formatGateLevelCatalogue()`, `GATE_LEVEL_SELECT_MESSAGE`. The step uses `p.select`, never `p.confirm`, so pressing Enter is an informed keep of a named level.
+- **Seed and naming:** `gateLevelPromptSeed(stored)` is the stored level on re-init, `standard` for `undefined` (first install, a manifest without the key, `--reset`) and `full` for a malformed value (`MALFORMED_READS_AS`: every reader folds a non-level to the strictest). `describeGateLevel(stored)` adds the `(default)` marker only when nothing is recorded, so "I chose standard" differs from "nobody chose".
+- **DI seam:** `GateLevelPromptIO extends WizardPromptIO` with a sibling `selectLevel` (the shared `select` is boolean-typed; widening it would change the seam for every wizard). `buildClackGateLevelPrompts()` delegates to `clackNote` / `clackSelect`.
+- **Orchestrators:** `runGateLevelStep({stored, prompts})` is pure and returns `{kind:'resolved', level}` or `{kind:'cancelled'}`. `resolveGateLevelForInit({cliLevel, stored, mode, modePromptShown, isTTY, prompts})` wraps the gate and the step: when the step does not run it resolves `cliLevel ?? stored`, so its `level` is `unknown` (an absent, malformed or `null` value passes through untouched). Neither throws or exits.
+- **Boundary:** `resolveGateLevelInitOption(option, hudOnly)` returns `undefined` when the flag was absent, else `{ok:true, value}` or `{ok:false, error}`: strict (`Lean` or an empty value is rejected), reports a bad value before the `--hud-only` conflict, and refuses `--hud-only` because that path writes no level.
+- **Summary:** `formatGateLevelSummary({level, priorLevel, manifestWritten})` returns `SummaryLine[]` from the state the run acted on: the recorded level ("the machine default; change it with devflow gates --set"), or, when the manifest did not reach disk, a warning that names the prior level and says the run changed nothing.
+- **Call sites in `init.ts`:** the `runGateLevelStepAt(mode)` closure sits beside `runTrackerStepAt`, reads and reassigns `let gateLevel: unknown = seed.features.gateLevel`, and owns the cancel idiom (`p.cancel` + `process.exit(0)`). It is awaited once on the Recommended path and once on the Advanced path, each right after the tracker step. It emits no step messages: the summary line after the tracker asset summary (`logSummaryLines(formatGateLevelSummary(...))`, `manifestWritten` from `trackerLifecycle`) is the only surface on both paths. The manifest write spreads `gateLevel` in only when it is not `undefined`, so a first install records none and `--reset` removes it.
+- **Seed plumbing (`init-seed.ts`):** `FeatureSeed.gateLevel: unknown` is required so the compiler forces every seed site to name it; `resolveSeedFeatures` reads `manifest?.features.gateLevel` with no default operator, `FEATURE_DEFAULTS.gateLevel` is `undefined`, and `applyCliToggles` tests `!== undefined` rather than `??` because `null` is a stored value, not a gap.
 
 ## Flags Pipeline and the Managed-shape Oracle (`src/core/flags.ts`)
 
@@ -100,6 +118,9 @@ An interactive editor launched exclusively by `devflow flags` bare on a TTY (D40
 - **KB-AP-4** The template merge runs BEFORE the flags pipeline, so a template-written value would be immediately overwritten, or on the off path leave a stale block. Single ownership is enforced by omission from the template and the merge function and by a registry-driven test in `tests/post-install-merge.test.ts`.
 - **KB-AP-5** `resolveExistingAttributionSuppression` and the Step 2b fold both use the oracle; a hand-rolled copy drifts.
 - **KB-AP-7** Skipping the restore reintroduces the re-init non-idempotency (#388 AC-3).
+- **KB-AP-14** The two tables differ in shape (`GATE_LEVEL_HINTS` is a per-level `Record`, `GATE_LEVEL_EFFECT` one sentence about what reads the level), so TypeScript cannot flag drift. `gates.ts` says each later reader updates its text; the prompt hints must follow in the same change.
+- **KB-AP-15** `manifest?.features.gateLevel ?? DEFAULT` turns a stored `null` into `standard`, and init would then write that over a value every reader folds to `full`, silently lowering the level. So `FeatureSeed.gateLevel` is raw, the promptless path is `cliLevel ?? stored` (the only `??`, and `cliLevel` is a parsed level or `undefined`), and an absent key stays out of the manifest write.
+- **KB-AP-16** The machine level and the personal level are different keys: the wizard text and the summary line say "the machine default", and `tests/init-gate-level-e2e.test.ts` pins that init leaves a repository config without `gateLevel` alone and keeps an existing personal key.
 
 ## Gotchas
 
@@ -109,6 +130,9 @@ An interactive editor launched exclusively by `devflow flags` bare on a TTY (D40
 - **KB-AP-13** A flags TUI test expecting `ENTER_ALT` fails for `runFlagsTui` but passes for agents-view tests; use `screen: 'alt'` explicitly when testing alt-screen behaviour.
 - **Selective uninstall never strips flags** (`runCleanupPhase` only), so flag state persists when individual plugins are removed (uninstall KB).
 - **KB-INV-4 fold timing:** a record that already has `suppress-attribution: false` or `null` still deletes the block; the fold only claims unclaimed flags.
+- **KB-INV-12 wiring test is source text:** the `init.ts wiring` describe in `tests/gate-level-prompts.test.ts` regex-matches `init.ts`: exactly one `resolveGateLevelForInit({` call, one `await runGateLevelStepAt('recommended')`, one `await runGateLevelStepAt('advanced')`, and the call must carry `mode,` and `modePromptShown,` as shorthand lines (a literal mode would collapse the gate table). Renaming the closure or reformatting the call fails it by design.
+- **Malformed stored level:** the prompt starts on `full` and its note says why; the summary names the level it reads as, never the raw value. A plain `--recommended` or non-TTY init keeps the malformed value as written.
+- **KB-INV-11 `--hud-only` writes early:** `--hud-only` writes before the wizard, so the `--gate-level` parse sits above every write; an invalid value leaves an existing install byte-for-byte unchanged (`tests/init-gate-level-e2e.test.ts`).
 - **Test fixtures must match runtime shapes:** `tests/init-e2e-flags.test.ts` drives subprocess e2e tests over the real init settings pass.
 
 ## Key Files
@@ -118,8 +142,9 @@ An interactive editor launched exclusively by `devflow flags` bare on a TTY (D40
 - `src/cli/commands/prompt-io.ts` — `PromptOutcome`, `WizardPromptIO`, `clackNote`, `clackSelect`
 - `src/cli/commands/compliance-prompts.ts` — `shouldRunComplianceStep`, `runComplianceStep`, `CompliancePromptIO`, `buildClackCompliancePrompts`, `formatComplianceSummary`, `frameworkChoices`, `FRAMEWORK_SELECT_MESSAGE`, `formatFrameworkCatalogue`
 - `src/cli/commands/attribution-prompts.ts` — `shouldRunAttributionStep`, `AttributionPromptIO`, `buildClackAttributionPrompts`, `attributionSeedFrom`, `applyAttributionAnswer`, `runAttributionStep`
+- `src/cli/commands/gate-level-prompts.ts` — `shouldRunGateLevelStep`, `runGateLevelStep`, `resolveGateLevelForInit`, `resolveGateLevelInitOption`, `GateLevelPromptIO`, `buildClackGateLevelPrompts`, `gateLevelChoices`, `GATE_LEVEL_HINTS`, `gateLevelPromptSeed`, `describeGateLevel`, `formatGateLevelCatalogue`, `formatGateLevelSummary`
 - `src/cli/flags-view/{state,render,terminal,index}.ts` (`FlagsViewState`, `FlagRow`, `FlagsIntent`, `FlagsTuiResult`, `runFlagsTui`) and `src/cli/tui/{terminal,cells}.ts` (`runTui`, `RunTuiSpec`, `INLINE_MARGIN`, `cursorUp`, `sanitizeCell`, `padToVisible`, `truncateVisible`) — the TUI as above
-- `tests/flags.test.ts` (blurb ≤ 30 and hint ≤ 76 registry walks; the registry-size assertion; the `subagent-cache-5m` scalar-guard describes), `tests/flags-cli.test.ts` (bare TUI rows), `tests/post-install-merge.test.ts` (single ownership), `tests/init-e2e-flags.test.ts` (subprocess init settings pass), `tests/flags-view-render.test.ts` (render)
+- `tests/flags.test.ts` (blurb ≤ 30 and hint ≤ 76 registry walks; the registry-size assertion; the `subagent-cache-5m` scalar-guard describes), `tests/flags-cli.test.ts` (bare TUI rows), `tests/post-install-merge.test.ts` (single ownership), `tests/init-e2e-flags.test.ts` (subprocess init settings pass), `tests/flags-view-render.test.ts` (render), `tests/gate-level-prompts.test.ts` (gate table, seed, orchestrators, summary, `init.ts` wiring), `tests/init-gate-level-e2e.test.ts` (subprocess `--gate-level`, promptless paths, personal-key coexistence)
 
 ## Related
 
@@ -128,4 +153,6 @@ An interactive editor launched exclusively by `devflow flags` bare on a TTY (D40
 - `.devflow/features/installer-shadowing-tracker-wiring/KNOWLEDGE.md` — the third wizard gate, copying the compliance table
 - `.devflow/features/installer-shadowing-uninstall/KNOWLEDGE.md` — `stripFlags` with shape-guarded deletion on full uninstall
 - `.devflow/features/compliance-feature/KNOWLEDGE.md` — what the compliance step selects and installs
+- `src/core/gate-level.ts` and `src/cli/commands/gates.ts` — the level set, parser and manifest writer the step reuses, and `GATE_LEVEL_EFFECT` that `GATE_LEVEL_HINTS` restates
+- `docs/reference/init.md` — the user-facing gate level paragraph and `--gate-level`
 - `.devflow/features/external-model-routing/KNOWLEDGE.md` — agents-view TUI (alt screen) and proxy
