@@ -4,8 +4,10 @@ import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import {
+  LEGACY_NAMES,
   getLearningDir,
   getCurateTuningConfigPath,
+  getGlobalCurateTuningConfigPath,
 } from '../../core/project-paths.js';
 import { loadShippedAgentDefaults } from '../../core/agent-models.js';
 import { readMachineFeature, writeMachineFeature } from '../../core/feature-switch.js';
@@ -16,7 +18,7 @@ import {
   describeCurationConverge,
   readRunningVersion,
 } from '../../targets/claude-code/curation-install.js';
-import { getLedgerRoot } from '../../core/ledger-root.js';
+import { getLedgerRoot, ledgerFolderToCreate } from '../../core/ledger-root.js';
 import { drainLearningQueue } from '../../core/learning-queue-cleanup.js';
 import { firstSymbolicLink } from '../../core/linked-path.js';
 import { formatRefusedDrain } from '../../core/queue-drain.js';
@@ -372,14 +374,15 @@ async function handleConfigure(): Promise<void> {
   if (scope === 'global') {
     const globalDir = getDevFlowDirectory();
     await fs.mkdir(globalDir, { recursive: true });
-    await fs.writeFile(path.join(globalDir, 'learning.json'), configJson, 'utf-8');
-    p.log.success(`Global config written to ${color.dim(path.join(globalDir, 'learning.json'))}`);
+    const globalConfigPath = getGlobalCurateTuningConfigPath(globalDir);
+    await fs.writeFile(globalConfigPath, configJson, 'utf-8');
+    p.log.success(`Global config written to ${color.dim(globalConfigPath)}`);
   } else {
     // D-LEDGER-MAIN-WORKTREE: session-start-context reads the project tuning config
     // from the ledger ($LEDGER_ROOT/.devflow/learning/), so write it there — the
     // main checkout in a linked worktree; the current directory outside git.
     const projectRoot = (await getLedgerRoot()) ?? process.cwd();
-    const learningDir = getLearningDir(projectRoot);
+    const learningDir = await ledgerFolderToCreate(projectRoot, LEGACY_NAMES.folder);
     const projectConfigPath = getCurateTuningConfigPath(projectRoot);
     // D-CLI-NO-SYMLINK (core/linked-path.ts): nothing is written through a .devflow,
     // a learning folder or a learning.json that is a symbolic link.

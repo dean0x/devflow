@@ -42,6 +42,7 @@ import { stripFlags } from '../../core/flags.js';
 import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-cleanup.js';
 import { getPackageRoot, isContainedIn } from '../../core/paths.js';
 import { firstSymbolicLink } from '../../core/linked-path.js';
+import { CURATION_TUNING_FILE_NAME, LEGACY_NAMES } from '../../core/project-paths.js';
 import { restampInstalledCommands } from '../../targets/claude-code/language-stamp.js';
 import { installCommandsAndAgents } from '../../targets/claude-code/installer.js';
 
@@ -589,8 +590,10 @@ export function userContentPaths(devflowDir: string): ReadonlyArray<UserContentE
       const name = `${TRACKER_LEGACY_CONVENTIONS_FILE}.${id}.bak`;
       return { relPath: name, label: `${name} (previous issue tracker conventions)` };
     }),
-    // learning.json — global curate agent tuning config
-    { relPath: 'learning.json', label: 'learning.json' },
+    // The global curate agent tuning config, under both its names: the new name on an
+    // upgraded machine, and the old name, which a downgraded machine can still hold.
+    { relPath: CURATION_TUNING_FILE_NAME, label: CURATION_TUNING_FILE_NAME },
+    { relPath: LEGACY_NAMES.tuningFile, label: LEGACY_NAMES.tuningFile },
     // hud.json — user HUD enable/disable preference and display config
     { relPath: 'hud.json', label: 'hud.json (HUD configuration)' },
   ];
@@ -763,7 +766,8 @@ export function installArtifactPaths(devflowDir: string): ReadonlyArray<InstallA
  * so an entry here is deleted even when the user answers "no" to the full wipe.
  * User-authored state (everything in `userContentPaths`: skill/rule shadows,
  * preference-profile.md, the tracker conventions with the legacy tracker.md and
- * its backups, learning.json, hud.json) is removed only by the confirmed full-dir rm.
+ * its backups, the global tuning file under both names, hud.json) is removed only by
+ * the confirmed full-dir rm.
  * agent-models.json is an INSTALL ARTIFACT (stale per-agent overrides silently
  * re-apply to renamed/deleted agents on reinstall — AC-P1-F4) and therefore
  * belongs in this list, not in enumerateUserDevFlowContent.

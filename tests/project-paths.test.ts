@@ -26,6 +26,7 @@ import {
   getDecisionsFilePath,
   getPitfallsFilePath,
   getCurateTuningConfigPath,
+  getGlobalCurateTuningConfigPath,
   getDecisionsLedgerPath,
   getDecisionsLogPath,
   getDecisionsArchivePath,
@@ -195,6 +196,7 @@ describe('CJS project-paths parity', () => {
     { name: 'getDecisionsFilePath', ts: getDecisionsFilePath, cjs: cjsPaths.getDecisionsFilePath },
     { name: 'getPitfallsFilePath', ts: getPitfallsFilePath, cjs: cjsPaths.getPitfallsFilePath },
     { name: 'getCurateTuningConfigPath', ts: getCurateTuningConfigPath, cjs: cjsPaths.getCurateTuningConfigPath },
+    { name: 'getGlobalCurateTuningConfigPath', ts: getGlobalCurateTuningConfigPath, cjs: cjsPaths.getGlobalCurateTuningConfigPath },
     { name: 'getDecisionsLedgerPath', ts: getDecisionsLedgerPath, cjs: cjsPaths.getDecisionsLedgerPath },
     { name: 'getDecisionsLogPath', ts: getDecisionsLogPath, cjs: cjsPaths.getDecisionsLogPath },
     { name: 'getDecisionsArchivePath', ts: getDecisionsArchivePath, cjs: cjsPaths.getDecisionsArchivePath },
@@ -269,6 +271,17 @@ describe('curation rename name blocks', () => {
     expect(cjsPaths.CURATION_DIR_NAME).toBe(CURATION_DIR_NAME);
     expect(CURATION_TUNING_FILE_NAME).toBe('curation.json');
     expect(cjsPaths.CURATION_TUNING_FILE_NAME).toBe(CURATION_TUNING_FILE_NAME);
+  });
+
+  it('the global tuning-path helper joins the machine directory and the old tuning file name, in both mirrors', () => {
+    const machineDir = '/home/dean/.devflow';
+    expect(getGlobalCurateTuningConfigPath(machineDir)).toBe(path.join(machineDir, LEGACY_NAMES.tuningFile));
+    expect(cjsPaths.getGlobalCurateTuningConfigPath(machineDir)).toBe(path.join(machineDir, LEGACY_NAMES.tuningFile));
+  });
+
+  it('the global tuning-path helper is separate from the project tuning-path helper', () => {
+    expect(getGlobalCurateTuningConfigPath(ROOT)).toBe(path.join(ROOT, LEGACY_NAMES.tuningFile));
+    expect(getGlobalCurateTuningConfigPath(ROOT)).not.toBe(getCurateTuningConfigPath(ROOT));
   });
 
   it('no path helper flips yet: the learning helpers still name the old folder', () => {

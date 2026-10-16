@@ -96,6 +96,13 @@ source "${BASH_SOURCE[0]%/*}/git-marker" 2>/dev/null || true
 queue_append_row() {
   local _qar_root="$1" _qar_file="$2" _qar_role="$3" _qar_content="$4" _qar_ts="$5"
 
+  # The creator rule (git-marker, df_ledger_queue): a ledger queue is appended to in
+  # the old folder while that folder is present, so a new name never hides an old
+  # ledger. Any other queue (the memory queue) comes back unchanged. A helper that
+  # failed to source is a command not found, so the queue stays as given and the
+  # check below, from the same library, refuses it.
+  if df_ledger_queue "$_qar_file" learning; then _qar_file="$DF_LEDGER_QUEUE"; fi
+
   # D-HOOKS-NO-SYMLINK (git-marker): a skipped append is a skipped capture.
   if ! df_no_symlink_below "$_qar_root" "$_qar_file"; then
     log "Queue skipped: a symbolic link sits on the path to $_qar_file; nothing written"

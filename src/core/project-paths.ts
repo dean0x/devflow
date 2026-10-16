@@ -65,6 +65,17 @@ export const CURATION_DIR_NAME = 'curation';
 /** The new project tuning file, inside the new folder. */
 export const CURATION_TUNING_FILE_NAME = 'curation.json';
 
+/**
+ * The global curate-agent tuning file inside the machine directory (`~/.devflow`).
+ * The one place that names it: the configure writer, the TypeScript reader, the
+ * shell reader (`df_global_tuning_file` in the hooks' git-marker library) and the
+ * global-file lists all come through here, so the rename flips one constant. It still
+ * returns the old file name.
+ */
+export function getGlobalCurateTuningConfigPath(machineDir: string): string {
+  return path.join(machineDir, LEGACY_NAMES.tuningFile);
+}
+
 /** Letters and digits: the bytes the move marker key keeps as they are. */
 const ALPHANUMERIC_BYTE = /^[A-Za-z0-9]$/;
 

@@ -49,7 +49,10 @@ fi
 # main checkout holds the ledger (D-LEDGER-MAIN-WORKTREE, resolve-project-root) a
 # learning/ here would be an empty directory nothing writes to; the capture hooks
 # create the ledger's own learning/ at the ledger root when they append to it.
-_EDI_LEARNING="$_DEVFLOW_DIR/learning"
+# The creator rule (git-marker, df_ledger_folder): the folder made is the old name's
+# while that name is present, so a new name never hides an old ledger.
+df_ledger_folder "$_DEVFLOW_DIR" learning || return 1
+_EDI_LEARNING="$DF_LEDGER_FOLDER"
 [ "$_EDI_LEDGER" = "$_EDI_ROOT" ] || _EDI_LEARNING=""
 
 # Fast-path: if all subdirectories already exist, skip mkdir and gitignore setup.

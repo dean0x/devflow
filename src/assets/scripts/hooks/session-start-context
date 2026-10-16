@@ -242,11 +242,15 @@ LEARNING_ENABLED="$_QG_LEARNING"
 if [ "$LEARNING_ENABLED" = "true" ]; then
   # Heal older installs that have .devflow/ but not .devflow/learning/, never
   # through a symbolic link (D-HOOKS-NO-SYMLINK, git-marker).
+  # The creator rule (git-marker, df_ledger_folder): the folder made is the old name's
+  # while that name is present, so a new name never hides an old ledger.
   if [ -d "$LEDGER_DEVFLOW_DIR" ] && [ ! -d "$LEARNING_DIR" ]; then
-    if df_no_symlink_below "$LEDGER_ROOT" "$LEARNING_DIR"; then
-      mkdir -p "$LEARNING_DIR" 2>/dev/null || true
+    DF_LEDGER_FOLDER=""
+    df_ledger_folder "$LEDGER_DEVFLOW_DIR" learning || true
+    if df_no_symlink_below "$LEDGER_ROOT" "$DF_LEDGER_FOLDER"; then
+      mkdir -p "$DF_LEDGER_FOLDER" 2>/dev/null || true
     else
-      log "Skipped: a symbolic link sits on the path to $LEARNING_DIR; nothing written"
+      log "Skipped: a symbolic link sits on the path to $DF_LEDGER_FOLDER; nothing written"
     fi
   fi
   if [ -d "$LEARNING_DIR" ]; then
@@ -432,8 +436,10 @@ ${LEARNING_PAUSED_SECTION}"
         esac
       done
     fi
-    if [ -z "$CURATE_MODEL_LAYER" ] && [ -f "$HOME/.devflow/learning.json" ]; then
-      _SC_CM=$(json_field_file "$HOME/.devflow/learning.json" "model" "")
+    DF_GLOBAL_TUNING_FILE=""
+    df_global_tuning_file "$HOME/.devflow" || true
+    if [ -z "$CURATE_MODEL_LAYER" ] && [ -n "$DF_GLOBAL_TUNING_FILE" ] && [ -f "$DF_GLOBAL_TUNING_FILE" ]; then
+      _SC_CM=$(json_field_file "$DF_GLOBAL_TUNING_FILE" "model" "")
       case "$_SC_CM" in
         opus|sonnet|haiku) CURATE_MODEL="$_SC_CM"; CURATE_MODEL_LAYER="global" ;;
       esac

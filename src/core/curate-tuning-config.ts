@@ -1,7 +1,6 @@
 import * as fs from 'fs';
-import * as path from 'path';
 import { getDevFlowDirectory } from '../targets/claude-code/claude-paths.js';
-import { getCurateTuningConfigPath } from './project-paths.js';
+import { getCurateTuningConfigPath, getGlobalCurateTuningConfigPath } from './project-paths.js';
 
 /**
  * Closed set of valid model aliases for the Curate agent.
@@ -103,7 +102,7 @@ function readConfigFile(filePath: string): string | null {
  * Invalid JSON in either file is silently ignored and treated as absent.
  */
 export function loadCurateTuningConfig(ledgerRoot: string): CurateTuningConfig {
-  const globalConfigPath = path.join(getDevFlowDirectory(), 'learning.json');
+  const globalConfigPath = getGlobalCurateTuningConfigPath(getDevFlowDirectory());
   const projectConfigPath = getCurateTuningConfigPath(ledgerRoot);
 
   let config: CurateTuningConfig = { ...DEFAULTS };

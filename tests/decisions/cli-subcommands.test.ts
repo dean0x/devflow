@@ -34,7 +34,8 @@ vi.mock('../../src/targets/claude-code/claude-paths.js', () => ({
   getDevFlowDirectory: vi.fn(() => '/home/user/.devflow'),
 }));
 
-vi.mock('../../src/core/ledger-root.js', () => ({
+vi.mock('../../src/core/ledger-root.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/core/ledger-root.js')>()),
   getLedgerRoot: vi.fn(),
 }));
 

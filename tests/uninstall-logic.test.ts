@@ -505,6 +505,41 @@ describe('enumerateUserDevFlowContent (WS5)', () => {
     expect(result.some(s => s.includes('learning.json'))).toBe(false);
   });
 
+  // === curation.json: the new global tuning name, listed beside the old one ===
+  //
+  // A downgraded machine can still hold the old name, and an upgraded one holds the
+  // new name, so the list names both until a later release retires the old one.
+
+  it('includes curation.json when it exists', async () => {
+    await fs.writeFile(path.join(tmpDir, 'curation.json'), '{"model":"opus"}', 'utf-8');
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    expect(result.some(s => s.includes('curation.json'))).toBe(true);
+    expect(result.some(s => s.includes('learning.json'))).toBe(false);
+  });
+
+  it('does not include curation.json when it is absent', async () => {
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    expect(result.some(s => s.includes('curation.json'))).toBe(false);
+  });
+
+  it('lists the old and the new tuning file separately when both exist', async () => {
+    await fs.writeFile(path.join(tmpDir, 'learning.json'), '{}', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, 'curation.json'), '{}', 'utf-8');
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    expect(result).toHaveLength(2);
+    expect(result.some(s => s.includes('learning.json'))).toBe(true);
+    expect(result.some(s => s.includes('curation.json'))).toBe(true);
+  });
+
+  it('keeps curation.json through an artifacts-only removal, as it keeps learning.json', async () => {
+    await fs.writeFile(path.join(tmpDir, 'curation.json'), '{}', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, 'learning.json'), '{}', 'utf-8');
+    const before = await enumerateUserDevFlowContent(tmpDir);
+    await removeDevFlowInstallArtifacts(tmpDir, false);
+    expect(await enumerateUserDevFlowContent(tmpDir)).toEqual(before);
+    expect(await fs.readdir(tmpDir)).toEqual(expect.arrayContaining(['curation.json', 'learning.json']));
+  });
+
   // === combined ===
 
   it('returns all four entries when all user-authored items exist', async () => {
