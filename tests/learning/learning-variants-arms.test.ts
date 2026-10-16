@@ -16,7 +16,7 @@
  *                 variant;
  *   off tree      nothing under dist/learning-off holds a learning token, and no off agent
  *                 preloads apply-decisions. The one thing outside the rule is the settings
- *                 block's grammar line, which names the LEARNING field of the line the
+ *                 block's grammar line, which names the CURATION field of the line the
  *                 resolver prints: SETTINGS_LINE_RE is pinned and the field does not
  *                 move, so the 8 off hosts that keep the block keep that line;
  *   completeness  every artifact that holds a token has an off counterpart, the Curate
@@ -58,12 +58,12 @@ const ON_BLOCK_COUNT = 14
 /** Settings blocks in the learning-off build: the hosts with a consumer other than learning. */
 const OFF_BLOCK_COUNT = 8
 
-const TOKEN_RE = /DECISIONS_CONTEXT|decisions_context|apply-decisions|learning\/index\.md|learning\/decisions\.md|LEARNING/
+const TOKEN_RE = /DECISIONS_CONTEXT|decisions_context|apply-decisions|learning\/index\.md|learning\/decisions\.md|CURATION/
 /** What an on arm may hold besides a token: the heading, step and tree wording that names decisions. */
 const LEARNING_WORD_RE = /\b[Dd]ecisions?\b|\bADR\b|pitfall/
 const MARKER_RE = /^[ \t]*<!-- learning:(on|off|end) -->[ \t]*$/
 const SETTINGS_OPENING = '**Resolve the settings line**'
-/** The settings grammar paragraph: one line, naming every field of the resolver's output, LEARNING included. */
+/** The settings grammar paragraph: one line, naming every field of the resolver's output, CURATION included. */
 const SETTINGS_GRAMMAR_LINE_RE = /TRACKER=<github\|jira\|linear>/
 const PRELOAD = 'devflow:apply-decisions'
 
@@ -139,7 +139,7 @@ function collectArmDefects(label: string, body: string): string[] {
   return out
 }
 
-/** The text with the settings grammar paragraph removed: the one place the LEARNING field is named in an off build. */
+/** The text with the settings grammar paragraph removed: the one place the CURATION field is named in an off build. */
 function withoutSettingsGrammar(text: string): string {
   return text.split('\n').filter(l => !SETTINGS_GRAMMAR_LINE_RE.test(l)).join('\n')
 }
@@ -314,7 +314,7 @@ describe('nothing under dist/learning-off holds a learning token, and no off age
     const sample = readFileSync(path.join(OFF_DIR, 'commands/research.md'), 'utf-8')
     expect(collectOffTokens('r', sample)).toEqual([])
     expect(collectOffTokens('r', `${sample}\nPass \`DECISIONS_CONTEXT\` on.`)).toHaveLength(1)
-    expect(collectOffTokens('r', `${sample}\nWhen the settings line says \`LEARNING=off\`, skip.`)).toHaveLength(1)
+    expect(collectOffTokens('r', `${sample}\nWhen the settings line says \`CURATION=off\`, skip.`)).toHaveLength(1)
     expect(parseFrontmatterSkills('---\nskills:\n  - devflow:apply-decisions\n---\n')).toContain('apply-decisions')
   })
 
@@ -432,14 +432,14 @@ describe('settings blocks per variant (AC-138)', () => {
     }
   })
 
-  it('the runtime gate and Skim\'s LEARNING skip live in the learning-on build only', () => {
+  it('the runtime gate and Skim\'s CURATION skip live in the learning-on build only', () => {
     for (const h of MDS_COMMAND_HOSTS) {
-      expect(requireDistFile(`${h}.md`), `${h} (learning-on)`).toContain('When the settings line says `LEARNING=off`')
-      expect(resolveLearningOffSource('commands', h), `${h} (learning-off)`).not.toContain('When the settings line says `LEARNING=off`')
+      expect(requireDistFile(`${h}.md`), `${h} (learning-on)`).toContain('When the settings line says `CURATION=off`')
+      expect(resolveLearningOffSource('commands', h), `${h} (learning-off)`).not.toContain('When the settings line says `CURATION=off`')
     }
-    expect(resolveAgentSource('skim').content).toContain('When `LEARNING` is `off`, skip this step')
+    expect(resolveAgentSource('skim').content).toContain('When `CURATION` is `off`, skip this step')
     const skimOff = resolveLearningOffSource('agents', 'skim') as string
-    expect(skimOff).not.toContain('LEARNING')
+    expect(skimOff).not.toContain('CURATION')
     expect(skimOff).not.toContain('### Step 6: Project Knowledge')
     expect(skimOff).toContain('### Step 6: Generate Summary')
     expect(skimOff).not.toContain('### Active Decisions')

@@ -115,11 +115,11 @@ const LIB = NODE_REQUIRE(PROJECT_CONFIG_LIB) as LibModule;
 
 const FAIL_CLOSED =
   'TRACKER=github TRACKER_SOURCE=default TRACKER_WARN=invalid SITE=none KEY=none '
-  + 'REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=on LEARNING=on KNOWLEDGE=off GATE_LEVEL=full';
+  + 'REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=on CURATION=on KNOWLEDGE=off GATE_LEVEL=full';
 
 const DEFAULT_LINE =
   'TRACKER=github TRACKER_SOURCE=default TRACKER_WARN=none SITE=none KEY=none '
-  + 'REVIEW_PUBLICATION=auto COMPLIANCE=off MEMORY=on LEARNING=on KNOWLEDGE=on GATE_LEVEL=standard';
+  + 'REVIEW_PUBLICATION=auto COMPLIANCE=off MEMORY=on CURATION=on KNOWLEDGE=on GATE_LEVEL=standard';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -269,14 +269,14 @@ describe('module surface and SETTINGS_LINE_RE', () => {
       + ' SITE=(?<site>none|https:\\/\\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9-]+)+)'
       + ' KEY=(?<key>none|[A-Z][A-Z0-9_]{1,9}) REVIEW_PUBLICATION=(?<publication>off|auto|full)'
       + ` COMPLIANCE=(?<compliance>off|generic|(?:${IDS})(?:,(?:${IDS})){0,5})`
-      + ' MEMORY=(?<memory>on|off) LEARNING=(?<learning>on|off) KNOWLEDGE=(?<knowledge>on|off)'
+      + ' MEMORY=(?<memory>on|off) CURATION=(?<learning>on|off) KNOWLEDGE=(?<knowledge>on|off)'
       + ' GATE_LEVEL=(?<gateLevel>full|standard|lean)$',
     );
     expect(SETTINGS.SETTINGS_LINE_RE.flags).toBe('');
   });
 
   const GOOD = 'TRACKER=jira TRACKER_SOURCE=project TRACKER_WARN=none SITE=https://acme.atlassian.net KEY=ACME '
-    + 'REVIEW_PUBLICATION=full COMPLIANCE=gdpr,hipaa MEMORY=on LEARNING=off KNOWLEDGE=on GATE_LEVEL=lean';
+    + 'REVIEW_PUBLICATION=full COMPLIANCE=gdpr,hipaa MEMORY=on CURATION=off KNOWLEDGE=on GATE_LEVEL=lean';
 
   it('accepts a full line, every compliance id alone and each of the three levels', () => {
     expect(GOOD).toMatch(SETTINGS.SETTINGS_LINE_RE);
@@ -301,7 +301,7 @@ describe('module surface and SETTINGS_LINE_RE', () => {
     ['an empty compliance', GOOD.replace('COMPLIANCE=gdpr,hipaa', 'COMPLIANCE=')],
     ['publication stub', GOOD.replace('REVIEW_PUBLICATION=full', 'REVIEW_PUBLICATION=stub')],
     ['a switch spelled true', GOOD.replace('MEMORY=on', 'MEMORY=true')],
-    ['reordered fields', GOOD.replace('MEMORY=on LEARNING=off', 'LEARNING=off MEMORY=on')],
+    ['reordered fields', GOOD.replace('MEMORY=on CURATION=off', 'CURATION=off MEMORY=on')],
     ['a missing field', GOOD.replace(' KNOWLEDGE=on', '')],
     ['a missing level', GOOD.replace(' GATE_LEVEL=lean', '')],
     ['a capitalised level', GOOD.replace('GATE_LEVEL=lean', 'GATE_LEVEL=Lean')],
@@ -309,7 +309,7 @@ describe('module surface and SETTINGS_LINE_RE', () => {
     ['an empty level', GOOD.replace('GATE_LEVEL=lean', 'GATE_LEVEL=')],
     ['a level with a trailing run', GOOD.replace('GATE_LEVEL=lean', 'GATE_LEVEL=lean2')],
     ['a level with a trailing field', `${GOOD} EXTRA=1`],
-    ['the level before the switches', GOOD.replace('MEMORY=on LEARNING=off KNOWLEDGE=on GATE_LEVEL=lean', 'GATE_LEVEL=lean MEMORY=on LEARNING=off KNOWLEDGE=on')],
+    ['the level before the switches', GOOD.replace('MEMORY=on CURATION=off KNOWLEDGE=on GATE_LEVEL=lean', 'GATE_LEVEL=lean MEMORY=on CURATION=off KNOWLEDGE=on')],
     ['a level group left open', GOOD.replace('GATE_LEVEL=lean', 'GATE_LEVEL=lean full')],
   ])('rejects %s', (_label, line) => {
     expect(line).not.toMatch(SETTINGS.SETTINGS_LINE_RE);
@@ -422,7 +422,7 @@ describe('TP-32 (AC-28): settings mode is local — one grammar line, local git 
     }));
     const r = run([TOPLEVEL(root), ORIGIN_HEAD_UNSET]);
     expect(r.stdout).toBe('TRACKER=jira TRACKER_SOURCE=project TRACKER_WARN=none SITE=https://acme.atlassian.net KEY=ACME '
-      + 'REVIEW_PUBLICATION=off COMPLIANCE=hipaa MEMORY=on LEARNING=off KNOWLEDGE=on GATE_LEVEL=standard\n');
+      + 'REVIEW_PUBLICATION=off COMPLIANCE=hipaa MEMORY=on CURATION=off KNOWLEDGE=on GATE_LEVEL=standard\n');
   });
 
   it('TP-37 (AC-32): a github machine whose project.json selects jira resolves jira from the project', () => {
@@ -443,7 +443,7 @@ describe('TP-32 (AC-28): settings mode is local — one grammar line, local git 
     }));
     const r = run([TOPLEVEL(root), ORIGIN_HEAD_UNSET]);
     expect(r.stdout).toBe('TRACKER=linear TRACKER_SOURCE=machine TRACKER_WARN=none SITE=none KEY=none '
-      + 'REVIEW_PUBLICATION=auto COMPLIANCE=soc2 MEMORY=off LEARNING=on KNOWLEDGE=on GATE_LEVEL=standard\n');
+      + 'REVIEW_PUBLICATION=auto COMPLIANCE=soc2 MEMORY=off CURATION=on KNOWLEDGE=on GATE_LEVEL=standard\n');
   });
 
   it('exit arms: usage prints nothing; an unusable dir and an unanswering git print the fail-closed line', () => {
@@ -1505,7 +1505,7 @@ describe('TP-30 (AC-26): a malformed evidence leaves tracker and features in the
       project: '{"evidence":"required","evidence":"standard","tracker":{"provider":"jira","key":"ACME"},"features":{"learning":false}}',
     });
     expect(line).toBe('TRACKER=jira TRACKER_SOURCE=project TRACKER_WARN=none SITE=none KEY=ACME '
-      + 'REVIEW_PUBLICATION=auto COMPLIANCE=off MEMORY=on LEARNING=off KNOWLEDGE=on GATE_LEVEL=standard');
+      + 'REVIEW_PUBLICATION=auto COMPLIANCE=off MEMORY=on CURATION=off KNOWLEDGE=on GATE_LEVEL=standard');
   });
 });
 
@@ -1625,7 +1625,7 @@ describe('whole-file rule: an unreadable project.json or config.json fails its o
     expect(s.ok).toBe(true);
     expect(s.unreadable).toBeNull();
     expect(SETTINGS.formatSettingsLine(s)).toBe('TRACKER=github TRACKER_SOURCE=default TRACKER_WARN=invalid SITE=none '
-      + 'KEY=none REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=on LEARNING=on KNOWLEDGE=on GATE_LEVEL=standard');
+      + 'KEY=none REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=on CURATION=on KNOWLEDGE=on GATE_LEVEL=standard');
     expect(settingsFor({}).unreadable).toBeNull();
   });
 

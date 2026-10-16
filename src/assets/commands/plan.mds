@@ -125,7 +125,7 @@ Spawn Skim agent for codebase context:
 Agent(subagent_type="Skim"):
 "Orient in codebase for design planning: {feature/issues}
 <!-- learning:on -->
-LEARNING: {LEARNING from the settings line}
+CURATION: {CURATION from the settings line}
 <!-- learning:end -->
 Run rskim on source directories (NOT repo root) to identify:
 - Existing patterns and conventions in the affected area

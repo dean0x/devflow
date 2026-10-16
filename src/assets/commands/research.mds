@@ -83,7 +83,7 @@ Analyze the research question to infer research types needed (min 2, max 5). For
 Only if `codebase` type is in RESEARCH_PLAN.
 
 <!-- learning:on -->
-Spawn `Agent(subagent_type="Skim")` with `LEARNING` from the settings line, targeting codebase areas relevant to the research question.
+Spawn `Agent(subagent_type="Skim")` with `CURATION` from the settings line, targeting codebase areas relevant to the research question.
 <!-- learning:off -->
 Spawn `Agent(subagent_type="Skim")` targeting codebase areas relevant to the research question.
 <!-- learning:end -->

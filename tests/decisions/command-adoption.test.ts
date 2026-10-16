@@ -296,13 +296,13 @@ describe('code-review.md — decisions loading phase', () => {
 })
 
 // -------------------------------------------------------------------------
-// Skim — the LEARNING input and the skip rule (D-DECISIONS-LEARNING-GATE)
+// Skim — the CURATION input and the skip rule (D-DECISIONS-LEARNING-GATE)
 // -------------------------------------------------------------------------
 
-describe('Skim takes LEARNING, skips Step 6 when it is off, and its callers pass it', () => {
+describe('Skim takes CURATION, skips Step 6 when it is off, and its callers pass it', () => {
   const SKIM_HOSTS = ['explore', 'plan', 'research'] as const
   const SETTINGS_OPENING = '**Resolve the settings line**'
-  const SKIP_RULE = 'When `LEARNING` is `off`, skip this step'
+  const SKIP_RULE = 'When `CURATION` is `off`, skip this step'
   const TLDR_READ = 'Read the decisions TL;DR'
 
   /** Named collector: the spawn text of every Skim spawn — a fenced payload, else the rest of its line. */
@@ -317,13 +317,13 @@ describe('Skim takes LEARNING, skips Step 6 when it is off, and its callers pass
     return out
   }
 
-  /** Named collector: Skim spawns that do not pass LEARNING, or that precede the host's settings block. */
+  /** Named collector: Skim spawns that do not pass CURATION, or that precede the host's settings block. */
   function collectSkimSpawnDefects(host: string, text: string): string[] {
     const spawns = collectSkimSpawns(text)
     if (spawns.length === 0) return [`${host}: no Skim spawn found`]
     const block = text.indexOf(SETTINGS_OPENING)
     return spawns.flatMap(({ at, span }) => [
-      ...(span.includes('LEARNING') ? [] : [`${host}: a Skim spawn does not pass LEARNING`]),
+      ...(span.includes('CURATION') ? [] : [`${host}: a Skim spawn does not pass CURATION`]),
       ...(block !== -1 && block < at ? [] : [`${host}: a Skim spawn precedes the settings block`]),
     ])
   }
@@ -333,12 +333,12 @@ describe('Skim takes LEARNING, skips Step 6 when it is off, and its callers pass
     const skip = step6.indexOf(SKIP_RULE)
     const read = step6.indexOf(TLDR_READ)
     return [
-      ...(skip === -1 ? ['Step 6 has no LEARNING skip rule'] : []),
+      ...(skip === -1 ? ['Step 6 has no CURATION skip rule'] : []),
       ...(skip !== -1 && read !== -1 && read < skip ? ['Step 6 reads the TL;DR before the skip rule'] : []),
     ]
   }
 
-  it('explore, plan and research pass LEARNING into every Skim spawn, after their settings block', () => {
+  it('explore, plan and research pass CURATION into every Skim spawn, after their settings block', () => {
     for (const host of SKIM_HOSTS) {
       const text = loadFile(`dist/commands/${host}.md`)
       expect(collectSkimSpawns(text).length, `${host}: Skim spawns found`).toBeGreaterThanOrEqual(1)
@@ -346,24 +346,24 @@ describe('Skim takes LEARNING, skips Step 6 when it is off, and its callers pass
     }
   })
 
-  it('known-bad probes: a Skim spawn without LEARNING, and one before the settings block, are reported', () => {
+  it('known-bad probes: a Skim spawn without CURATION, and one before the settings block, are reported', () => {
     expect(collectSkimSpawnDefects('p', `${SETTINGS_OPENING}\nSpawn \`Agent(subagent_type="Skim")\` to orient.`))
-      .toEqual(['p: a Skim spawn does not pass LEARNING'])
-    expect(collectSkimSpawnDefects('p', `Spawn \`Agent(subagent_type="Skim")\` with \`LEARNING\` to orient.\n${SETTINGS_OPENING}`))
+      .toEqual(['p: a Skim spawn does not pass CURATION'])
+    expect(collectSkimSpawnDefects('p', `Spawn \`Agent(subagent_type="Skim")\` with \`CURATION\` to orient.\n${SETTINGS_OPENING}`))
       .toEqual(['p: a Skim spawn precedes the settings block'])
     expect(collectSkimSpawnDefects('p', 'no spawn')).toEqual(['p: no Skim spawn found'])
   })
 
-  it('Skim lists LEARNING in its input context and opens Step 6 with the skip rule', () => {
+  it('Skim lists CURATION in its input context and opens Step 6 with the skip rule', () => {
     const skim = resolveAgentSource('skim').content
-    expect(extractSection(skim, '## Input Context', '**Worktree Support**')).toContain('- **LEARNING** (optional): `on` | `off`')
+    expect(extractSection(skim, '## Input Context', '**Worktree Support**')).toContain('- **CURATION** (optional): `on` | `off`')
     const step6 = extractSection(skim, '### Step 6: Project Knowledge', '### Step 7')
     expect(step6.slice('### Step 6: Project Knowledge'.length).trimStart().startsWith(SKIP_RULE)).toBe(true)
     expect(collectStep6Defects(step6)).toEqual([])
   })
 
   it('known-bad probes: a Step 6 with no skip rule, and one that reads the TL;DR first, are reported', () => {
-    expect(collectStep6Defects(`### Step 6\n${TLDR_READ} at the ledger.`)).toEqual(['Step 6 has no LEARNING skip rule'])
+    expect(collectStep6Defects(`### Step 6\n${TLDR_READ} at the ledger.`)).toEqual(['Step 6 has no CURATION skip rule'])
     expect(collectStep6Defects(`### Step 6\n${TLDR_READ} first. ${SKIP_RULE} after.`)).toEqual(['Step 6 reads the TL;DR before the skip rule'])
   })
 })

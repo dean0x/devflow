@@ -56,7 +56,7 @@
 //   TRACKER=<github|jira|linear> TRACKER_SOURCE=<project|personal|machine|default>
 //   TRACKER_WARN=<none|mismatch|invalid> SITE=<url|none> KEY=<KEY|none>
 //   REVIEW_PUBLICATION=<off|auto|full> COMPLIANCE=<off|generic|id,…>
-//   MEMORY=<on|off> LEARNING=<on|off> KNOWLEDGE=<on|off> GATE_LEVEL=<full|standard|lean>
+//   MEMORY=<on|off> CURATION=<on|off> KNOWLEDGE=<on|off> GATE_LEVEL=<full|standard|lean>
 // (one line on stdout; wrapped here for reading). Every value is a closed token
 // or a SITE/KEY that passed its shape gate, so no other byte of a config file can
 // reach stdout. Whole-file rule: a project.json or config.json that EXISTS but
@@ -175,7 +175,7 @@ const SETTINGS_LINE_RE = new RegExp(
   + ' REVIEW_PUBLICATION=(?<publication>' + PUBLICATIONS.join('|') + ')'
   + ' COMPLIANCE=(?<compliance>off|generic|(?:' + COMPLIANCE_IDS.join('|') + ')(?:,(?:'
   + COMPLIANCE_IDS.join('|') + ')){0,' + String(COMPLIANCE_IDS.length - 1) + '})'
-  + ' MEMORY=(?<memory>on|off) LEARNING=(?<learning>on|off) KNOWLEDGE=(?<knowledge>on|off)'
+  + ' MEMORY=(?<memory>on|off) CURATION=(?<learning>on|off) KNOWLEDGE=(?<knowledge>on|off)'
   + ' GATE_LEVEL=(?<gateLevel>' + GATE_LEVELS.join('|') + ')$',
 );
 
@@ -188,7 +188,7 @@ const SETTINGS_LINE_RE = new RegExp(
  *   REVIEW_PUBLICATION=off   nothing is published (raised to a stub under required)
  *   COMPLIANCE=generic       the review lens still runs
  *   KNOWLEDGE=off            no knowledge write-back commits into the repository
- *   MEMORY/LEARNING=on       the machine switch is the one that turns them off;
+ *   MEMORY/CURATION=on       the machine switch is the one that turns them off;
  *                            hooks never consume this line (their gate folds an
  *                            unreadable file as narrowing nothing)
  *   GATE_LEVEL=full          the most checking applies: a resolver that cannot read
@@ -196,7 +196,7 @@ const SETTINGS_LINE_RE = new RegExp(
  */
 const SETTINGS_FAIL_CLOSED_LINE =
   'TRACKER=github TRACKER_SOURCE=default TRACKER_WARN=invalid SITE=none KEY=none '
-  + 'REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=on LEARNING=on KNOWLEDGE=off GATE_LEVEL=full';
+  + 'REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=on CURATION=on KNOWLEDGE=off GATE_LEVEL=full';
 
 /** Bound on each local git call. */
 const GIT_TIMEOUT_MS = 5000;
@@ -1024,7 +1024,7 @@ function formatSettingsLine(s) {
     + ' REVIEW_PUBLICATION=' + s.reviewPublication
     + ' COMPLIANCE=' + complianceToken(s.compliance)
     + ' MEMORY=' + onOff(s.switches.memory)
-    + ' LEARNING=' + onOff(s.switches.learning)
+    + ' CURATION=' + onOff(s.switches.learning)
     + ' KNOWLEDGE=' + onOff(s.switches.knowledge)
     + ' GATE_LEVEL=' + s.gateLevel;
 }

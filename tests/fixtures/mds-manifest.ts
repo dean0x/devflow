@@ -260,7 +260,7 @@ export const MDS_GENERATOR_HOSTS = [
  *
  * All 14 command hosts (each loads decisions, or hands them on, behind an arm)
  * and the eleven agent hosts that declare `DECISIONS_CONTEXT` (ten, the three Code
- * variants among them) or take the `LEARNING` input (Skim). The Curate agent, `curate.md`, is hand-authored
+ * variants among them) or take the `CURATION` input (Skim). The Curate agent, `curate.md`, is hand-authored
  * and runs only when learning is on, so it has no variant. The assertions over
  * this set hold at every step: the printed variant count and the files under
  * `dist/learning-off/` both equal it in both directions, the packed tarball

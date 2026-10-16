@@ -274,7 +274,7 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
     const locate = /^@define decisions_locate\(\):\n([\s\S]*?)\n@end$/m.exec(partial)?.[1] ?? ''
     expect(locate, 'the locate define body').toContain('**The main worktree**')
     const gate = /^@define decisions_gate\(\):\n([\s\S]*?)\n@end$/m.exec(partial)?.[1] ?? ''
-    expect(gate, 'the gate define body').toContain('`LEARNING=off`')
+    expect(gate, 'the gate define body').toContain('`CURATION=off`')
     const release = sectionOf(requireDistFile('release.md'), RELEASE_CONTEXT_HEADING)
     expect(release).toContain(locate)
     expect(release.indexOf(gate), 'the gate sentence comes first').toBeGreaterThan(-1)

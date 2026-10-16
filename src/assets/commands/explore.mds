@@ -56,7 +56,7 @@ The orchestrator uses `DECISIONS_CONTEXT` locally when framing exploration — p
 **Produces:** ORIENT_OUTPUT
 
 <!-- learning:on -->
-Spawn `Agent(subagent_type="Skim")` with `LEARNING` from the settings line, to get codebase overview relevant to the exploration question:
+Spawn `Agent(subagent_type="Skim")` with `CURATION` from the settings line, to get codebase overview relevant to the exploration question:
 <!-- learning:off -->
 Spawn `Agent(subagent_type="Skim")` to get codebase overview relevant to the exploration question:
 <!-- learning:end -->

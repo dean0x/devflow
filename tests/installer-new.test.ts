@@ -17,7 +17,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { composeScripts, installViaFileCopy } from '../src/targets/claude-code/installer.js';
-import { buildAssetMaps } from '../src/core/plugins.js';
+import { buildAssetMaps, DEVFLOW_PLUGINS } from '../src/core/plugins.js';
 import type { PluginDefinition } from '../src/core/plugins.js';
 import { agentsDir, compiledAgentsDir, type AgentSourceDirs } from '../src/core/assets.js';
 import { resolveAgentSource, splitFrontmatter } from './helpers.js';
@@ -993,4 +993,58 @@ describe('installViaFileCopy — dist-preferred agent resolution', () => {
       `${AGENT} still has a hand-authored source — pick an agent with only a generator host`,
     ).rejects.toThrow();
   });
+});
+
+// ---------------------------------------------------------------------------
+// Settings-line field name across a partial install
+// ---------------------------------------------------------------------------
+
+describe('installViaFileCopy — a partial install pairs only matching settings-line names', () => {
+  const spinner = { start: () => {}, stop: () => {}, message: () => {} };
+
+  async function* walk(dir: string): AsyncGenerator<string> {
+    for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) yield* walk(full);
+      else yield full;
+    }
+  }
+
+  it('installs the emitter and the prompts that parse its line with the same field name', async () => {
+    const plan = DEVFLOW_PLUGINS.find((p) => p.name === 'devflow-plan');
+    expect(plan, 'the devflow-plan plugin is registered').toBeDefined();
+    const plugins = [plan!];
+    const claudeDir = path.join(tmpDir, 'claude');
+    const devflowDir = path.join(tmpDir, 'devflow');
+    const { skillsMap, agentsMap } = buildAssetMaps(plugins);
+
+    await installViaFileCopy({
+      learning: true,
+      plugins,
+      claudeDir,
+      devflowDir,
+      skillsMap,
+      agentsMap,
+      isPartialInstall: true,
+      spinner,
+    });
+
+    const emitter = await fs.readFile(path.join(devflowDir, 'scripts', 'resolve-settings.cjs'), 'utf-8');
+    expect(emitter, 'the installed emitter writes the new field').toContain("' CURATION=' + onOff(");
+    expect(emitter, 'the installed emitter never writes the old field').not.toMatch(/(?<![\w-])LEARNING=/);
+
+    const prompts = [path.join(claudeDir, 'commands', 'devflow', 'plan.md'), path.join(claudeDir, 'agents', 'devflow', 'skim.md')];
+    for (const file of prompts) {
+      const text = await fs.readFile(file, 'utf-8');
+      expect(text, `${path.basename(file)} names the new field`).toContain('CURATION');
+      expect(text, `${path.basename(file)} never names the old field`).not.toMatch(/(?<![\w-])LEARNING(?![\w-])/);
+    }
+
+    const installedPromptFiles: string[] = [];
+    for await (const file of walk(claudeDir)) if (file.endsWith('.md')) installedPromptFiles.push(file);
+    expect(installedPromptFiles.length, 'the partial install wrote prompt files').toBeGreaterThan(0);
+    for (const file of installedPromptFiles) {
+      expect(await fs.readFile(file, 'utf-8'), path.relative(claudeDir, file)).not.toMatch(/(?<![\w-])LEARNING=/);
+    }
+  }, 20_000);
 });

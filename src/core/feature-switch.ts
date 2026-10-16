@@ -27,7 +27,7 @@ import { writeFileAtomicExclusive } from './fs-atomic.js';
  * narrows nothing.) The team-committed `.devflow/project.json` and the
  * personal `.devflow/config.json` are both parsed by the shared
  * lib/project-config.cjs, and the fold lives in
- * resolve-settings.cjs (`MEMORY=`/`LEARNING=`/`KNOWLEDGE=` on its settings
+ * resolve-settings.cjs (`MEMORY=`/`CURATION=`/`KNOWLEDGE=` on its settings
  * line); the CLI's `--status` prints the effective state only when a repo layer
  * narrows it, or an unreadable repo file closes it. No repo layer can
  * re-enable what the machine turned off, so the #378 split — a repo that kept a
