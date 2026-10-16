@@ -88,29 +88,10 @@ Derive branch name from issue or description, create feature branch, and fetch i
 Return the branch setup summary."
 ```
 
-The issue token is forwarded **unclassified**, and the routing is decided by
-SHAPE alone — how many tokens `COMMAND_INPUT` has, and whether it ends in `.md`.
+The issue token is forwarded **unclassified**; routing is by SHAPE alone (the token count of `COMMAND_INPUT`, and whether it ends in `.md`). Only `setup-task` has resolved a provider, so a `starts with #` test here would be a github test under a neutral name: it would reclassify `PROJ-12` and `ENG-12` as task descriptions, so the branch comes from prose, no issue is fetched and nothing reports it. Token COUNT is provider-neutral: every issue spelling is one token and no free-text description is.
 
-`setup-task` is the one step that has resolved a provider, and therefore the only
-one that knows what an issue reference looks like on this machine: `#123`,
-`PROJ-12` and `ENG-12` are three providers' spellings of the same thing. A
-`starts with #` test here would be a github test wearing a neutral name — it
-reclassifies every other provider's reference as a task description, so the
-branch is derived from prose and no issue is ever fetched, with nothing reporting
-a problem. Token COUNT is the gate that stays provider-neutral: every one of
-those spellings is a single token, and no free-text task description is.
-
-The two tests this command does make are its own under every provider:
-
-- **Extension.** A path ending in `.md` is a plan document, never an issue
-  reference — it goes to `PLAN_ARTIFACT_PATH` and neither of the other two keys.
-  `ISSUE_INPUT` then carries the plan's frontmatter `issue` instead, never the
-  path (Plan Document Handling step 4).
-- **Token count.** A single token is an issue reference. Two or more is prose:
-  forwarding only its FIRST token would send `/implement fix the login bug` to
-  the Git agent as `ISSUE_INPUT: fix` with no description at all, and
-  `setup-task` fetches whatever it is handed — so the command would derive a
-  branch from a failed lookup and drop the request on the floor.
+- **Extension.** A path ending in `.md` is a plan document, never an issue reference: it goes to `PLAN_ARTIFACT_PATH` only, and `ISSUE_INPUT` carries the plan's frontmatter `issue`, never the path (Plan Document Handling step 4).
+- **Token count.** One token is an issue reference; two or more is prose. Forwarding the FIRST token alone would send `/implement fix the login bug` as `ISSUE_INPUT: fix` with no description, and `setup-task` would fetch whatever it is handed, so the request is dropped.
 
 **Capture from Git agent output** (used throughout flow):
 - `TASK_ID`: The branch name created by Git agent (use as TASK_ID for rest of flow)

@@ -2914,6 +2914,57 @@ describe('implement.md forwards the issue argument unclassified (§23)', () => {
     ).not.toContain('\n\n');
   });
 
+  /**
+   * The prose after the setup-task spawn fence, up to the capture block: the text that
+   * says why each routing rule exists. Scoped there so a reason cannot be satisfied by
+   * the same words elsewhere in the command.
+   */
+  function routingProse(source: string): string {
+    const at = source.indexOf('OPERATION: setup-task');
+    const fenceEnd = at === -1 ? -1 : source.indexOf('```', at);
+    const end = fenceEnd === -1 ? -1 : source.indexOf('**Capture from Git agent output**', fenceEnd);
+    expect(end, 'the routing prose was not found between the setup-task spawn and the capture block').toBeGreaterThan(fenceEnd);
+    return source.slice(fenceEnd + 3, end);
+  }
+
+  /**
+   * Each routing rule and the failure its text names. Every fragment of a reason must be
+   * present, so condensing the text cannot drop a reason and keep the rule.
+   */
+  const ROUTING_REASONS: ReadonlyArray<readonly [string, readonly RegExp[]]> = [
+    ['routing is by shape alone', [/forwarded \*\*unclassified\*\*/, /SHAPE alone/]],
+    ['a `starts with #` test is a github test that reclassifies the other providers\' references as prose', [/`starts with #` test/, /github test/, /`PROJ-12`/, /`ENG-12`/, /task descriptions/]],
+    ['a misrouted reference takes its branch from prose, fetches no issue and reports nothing', [/branch comes from prose/, /no issue is fetched/, /nothing reports it/]],
+    ['the token count is the provider-neutral gate', [/Token COUNT is provider-neutral/, /every issue spelling is one token/, /no free-text description is/]],
+    ['a `.md` path is a plan document, never an issue reference', [/\*\*Extension\.\*\*/, /never an issue reference/, /`PLAN_ARTIFACT_PATH`/, /frontmatter `issue`, never the path/]],
+    ['forwarding the first token alone sends `ISSUE_INPUT: fix` with no description and drops the request', [/\*\*Token count\.\*\*/, /FIRST token/, /`ISSUE_INPUT: fix`/, /no description/, /request is dropped/]],
+  ];
+
+  /** Named collector: the routing rules whose reason is no longer fully stated. */
+  function collectRoutingReasonDefects(prose: string): string[] {
+    return ROUTING_REASONS.filter(([, fragments]) => fragments.some(f => !f.test(prose))).map(([label]) => label);
+  }
+
+  it('the routing text keeps the reason for each rule', async () => {
+    const source = await fs.readFile(path.join(BUILT_COMMANDS, 'implement.md'), 'utf-8');
+    expect(ROUTING_REASONS.length, 'the reason table is empty, so this guard proves nothing').toBe(6);
+    expect(collectRoutingReasonDefects(routingProse(source))).toEqual([]);
+  });
+
+  it('known-bad probes: dropping any one fragment of a reason reports that reason', async () => {
+    const prose = routingProse(await fs.readFile(path.join(BUILT_COMMANDS, 'implement.md'), 'utf-8'));
+    for (const [label, fragments] of ROUTING_REASONS) {
+      for (const fragment of fragments) {
+        const hit = fragment.exec(prose)?.[0];
+        expect(hit, `${fragment} does not match the routing prose`).toBeDefined();
+        const cut = prose.replace(hit as string, '');
+        expect(cut, 'the seed must land').not.toBe(prose);
+        expect(collectRoutingReasonDefects(cut), `${fragment} dropped`).toContain(label);
+      }
+    }
+    expect(collectRoutingReasonDefects('')).toHaveLength(ROUTING_REASONS.length);
+  });
+
   it('known-bad probe: EVERY classifier rule fires on its own shape', async () => {
     const SHAPES: ReadonlyArray<readonly [string, string]> = [
       ['a `#` prefix test', 'ISSUE_INPUT: {issue if $ARGUMENTS starts with `#`, otherwise omit}'],
