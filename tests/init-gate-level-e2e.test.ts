@@ -260,6 +260,20 @@ describe('init over a manifest readManifest refuses', () => {
     expect(out.replace(/\s+/g, ' ')).not.toMatch(KEPT_WARNING);
   }, MULTI_RUN_TIMEOUT_MS);
 
+  it('a level the run chooses is no kept level: --gate-level over a refused manifest that stores the same level, with or without --reset', async () => {
+    for (const args of [['--recommended', '--gate-level', 'lean'], ['--reset', '--recommended', '--gate-level', 'lean']]) {
+      runInit(repo, '--recommended', '--gate-level', 'lean');
+      await writeManifestText(await editedManifestText(raw => { delete raw.installedAt; }));
+
+      const out = runInit(repo, ...args);
+
+      expect(await readFeatures(), args.join(' ')).toMatchObject({ gateLevel: 'lean' });
+      expect(gateLevelLine(out), args.join(' ')).toContain('Gate level: lean — the machine default');
+      expect(gateLevelLine(out)).not.toContain('(was');
+      expect(out.replace(/\s+/g, ' '), args.join(' ')).not.toMatch(KEPT_WARNING);
+    }
+  }, MULTI_RUN_TIMEOUT_MS);
+
   it('--reset over a manifest that is not JSON writes no level, and has no lost level to report', async () => {
     runInit(repo, '--recommended', '--gate-level', 'full');
     await writeManifestText('{not json');

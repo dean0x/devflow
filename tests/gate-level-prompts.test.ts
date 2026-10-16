@@ -542,7 +542,7 @@ describe('runGateLevelStep', () => {
     const outcome = await runGateLevelStep({ stored: 'full', storedOrigin: 'rejected', prompts });
 
     expect(notes[0].message).toContain('Current setting: full');
-    expect(notes[0].message).toContain('devflow cannot use');
+    expect(notes[0].message).toContain('devflow rejects');
     expect(notes[0].message).toContain('keeps this level');
     expect(notes[0].message).not.toContain('standard (default)');
     expect(asked[0].initialValue).toBe('full');
@@ -624,7 +624,7 @@ describe('resolveGateLevelForInit', () => {
             stored,
             prompts: neverPrompts(),
           });
-          expect(outcome, `stored ${JSON.stringify(stored)}`).toEqual({ kind: 'resolved', level: stored });
+          expect(outcome, `stored ${JSON.stringify(stored)}`).toEqual({ kind: 'resolved', level: stored, carried: true });
         }
       });
     }
@@ -633,7 +633,7 @@ describe('resolveGateLevelForInit', () => {
       const outcome = await resolveGateLevelForInit({
         ...base, mode: 'recommended', stored: resolveSeedFeatures(null).gateLevel, prompts: neverPrompts(),
       });
-      expect(outcome).toEqual({ kind: 'resolved', level: undefined });
+      expect(outcome).toEqual({ kind: 'resolved', level: undefined, carried: true });
     });
   });
 
@@ -643,12 +643,12 @@ describe('resolveGateLevelForInit', () => {
         const kept = await resolveGateLevelForInit({
           ...base, mode: 'recommended', stored, storedOrigin: 'rejected', prompts: neverPrompts(),
         });
-        expect(kept, `stored ${JSON.stringify(stored)}`).toEqual({ kind: 'resolved', level: stored });
+        expect(kept, `stored ${JSON.stringify(stored)}`).toEqual({ kind: 'resolved', level: stored, carried: true });
       }
       const unreadable = await resolveGateLevelForInit({
         ...base, mode: 'recommended', stored: undefined, storedOrigin: 'unreadable', prompts: neverPrompts(),
       });
-      expect(unreadable).toEqual({ kind: 'resolved', level: undefined });
+      expect(unreadable).toEqual({ kind: 'resolved', level: undefined, carried: true });
     });
 
     it('interactive: the prompt receives the origin, so an unreadable level is not shown as the default', async () => {
@@ -662,7 +662,7 @@ describe('resolveGateLevelForInit', () => {
       expect(notes[0].message).toContain('Current setting: unknown');
       expect(notes[0].message).toContain('cannot be read');
       expect(notes[0].message).not.toContain('standard (default)');
-      expect(outcome).toEqual({ kind: 'resolved', level: 'lean' });
+      expect(outcome).toEqual({ kind: 'resolved', level: 'lean', carried: false });
     });
 
     it('interactive: the prompt receives the origin, so a level from a refused manifest is named as kept', async () => {
@@ -674,10 +674,10 @@ describe('resolveGateLevelForInit', () => {
       });
 
       expect(notes[0].message).toContain('Current setting: full');
-      expect(notes[0].message).toContain('devflow cannot use');
+      expect(notes[0].message).toContain('devflow rejects');
       expect(notes[0].message).toContain('keeps this level');
       expect(asked[0].initialValue).toBe('full');
-      expect(outcome).toEqual({ kind: 'resolved', level: 'full' });
+      expect(outcome).toEqual({ kind: 'resolved', level: 'full', carried: false });
     });
 
     it('--gate-level replaces either without a prompt', async () => {
@@ -686,7 +686,7 @@ describe('resolveGateLevelForInit', () => {
           ...base, cliLevel: 'lean', mode: 'advanced', stored: storedOrigin === 'rejected' ? 'full' : undefined,
           storedOrigin, prompts: neverPrompts(),
         });
-        expect(outcome, storedOrigin).toEqual({ kind: 'resolved', level: 'lean' });
+        expect(outcome, storedOrigin).toEqual({ kind: 'resolved', level: 'lean', carried: false });
       }
     });
   });
@@ -711,7 +711,7 @@ describe('resolveGateLevelForInit', () => {
           isTTY: path.isTTY,
           prompts: neverPrompts(),
         });
-        expect(outcome).toEqual({ kind: 'resolved', level: 'lean' });
+        expect(outcome).toEqual({ kind: 'resolved', level: 'lean', carried: false });
       });
     }
 
@@ -719,7 +719,7 @@ describe('resolveGateLevelForInit', () => {
       const outcome = await resolveGateLevelForInit({
         ...base, cliLevel: 'lean', stored: 'Lean', mode: 'advanced', prompts: neverPrompts(),
       });
-      expect(outcome).toEqual({ kind: 'resolved', level: 'lean' });
+      expect(outcome).toEqual({ kind: 'resolved', level: 'lean', carried: false });
     });
   });
 
@@ -734,7 +734,7 @@ describe('resolveGateLevelForInit', () => {
 
       expect(asked).toHaveLength(1);
       expect(asked[0].initialValue).toBe('standard');
-      expect(outcome).toEqual({ kind: 'resolved', level: 'lean' });
+      expect(outcome).toEqual({ kind: 'resolved', level: 'lean', carried: false });
     });
 
     it('first install, Advanced chosen at the mode prompt: asks, and accepting keeps the default', async () => {
@@ -746,7 +746,7 @@ describe('resolveGateLevelForInit', () => {
       });
 
       expect(asked[0].initialValue).toBe('standard');
-      expect(outcome).toEqual({ kind: 'resolved', level: 'standard' });
+      expect(outcome).toEqual({ kind: 'resolved', level: 'standard', carried: false });
     });
 
     it('re-init (Advanced, no mode prompt): asks, starting on the stored level, and accepting keeps it', async () => {
@@ -759,7 +759,7 @@ describe('resolveGateLevelForInit', () => {
 
       expect(asked).toHaveLength(1);
       expect(asked[0].initialValue).toBe('full');
-      expect(outcome).toEqual({ kind: 'resolved', level: 'full' });
+      expect(outcome).toEqual({ kind: 'resolved', level: 'full', carried: false });
     });
 
     it('re-init: a different answer replaces the stored level', async () => {
@@ -770,7 +770,7 @@ describe('resolveGateLevelForInit', () => {
         ...base, mode: 'advanced', stored: 'full', prompts,
       });
 
-      expect(outcome).toEqual({ kind: 'resolved', level: 'lean' });
+      expect(outcome).toEqual({ kind: 'resolved', level: 'lean', carried: false });
     });
 
     it('a cancelled prompt returns cancelled on both paths', async () => {
@@ -792,7 +792,7 @@ describe('resolveGateLevelForInit', () => {
 
 describe('formatGateLevelSummary', () => {
   it('names the level the run recorded, as the machine default', () => {
-    const lines = formatGateLevelSummary({ level: 'lean', priorLevel: 'full', manifestWritten: true });
+    const lines = formatGateLevelSummary({ level: 'lean', priorLevel: 'full', kept: false, manifestWritten: true });
     expect(lines).toHaveLength(1);
     expect(lines[0].level).toBe('info');
     expect(lines[0].message).toContain('Gate level: lean');
@@ -801,18 +801,18 @@ describe('formatGateLevelSummary', () => {
   });
 
   it('names the default when no level is recorded', () => {
-    const [line] = formatGateLevelSummary({ level: undefined, priorLevel: undefined, manifestWritten: true });
+    const [line] = formatGateLevelSummary({ level: undefined, priorLevel: undefined, kept: false, manifestWritten: true });
     expect(line.message).toContain('Gate level: standard (default)');
   });
 
   it('shows the level a malformed stored value reads as, not the raw value', () => {
-    const [line] = formatGateLevelSummary({ level: 'ZZ-raw-canary', priorLevel: 'ZZ-raw-canary', manifestWritten: true });
+    const [line] = formatGateLevelSummary({ level: 'ZZ-raw-canary', priorLevel: 'ZZ-raw-canary', kept: false, manifestWritten: true });
     expect(line.message).toContain('Gate level: invalid (manifest.json; reads as full)');
     expect(line.message).not.toContain('ZZ-raw-canary');
   });
 
   it('when the manifest was not written, reports the prior level and warns that the gate level did not change', () => {
-    const [line] = formatGateLevelSummary({ level: 'lean', priorLevel: 'full', manifestWritten: false });
+    const [line] = formatGateLevelSummary({ level: 'lean', priorLevel: 'full', kept: false, manifestWritten: false });
     expect(line.level).toBe('warn');
     expect(line.message).toContain('Gate level: full');
     expect(line.message).not.toContain('lean');
@@ -829,22 +829,22 @@ describe('formatGateLevelSummary', () => {
     };
 
     it('--reset over a stored level: the default it falls back to, and the level it replaced', () => {
-      expect(only({ level: undefined, priorLevel: 'lean', manifestWritten: true }))
+      expect(only({ level: undefined, priorLevel: 'lean', kept: false, manifestWritten: true }))
         .toContain('Gate level: standard (default) (was lean) — the machine default');
     });
 
     it('a chosen level over another: the level it replaced', () => {
-      expect(only({ level: 'lean', priorLevel: 'full', manifestWritten: true }))
+      expect(only({ level: 'lean', priorLevel: 'full', kept: false, manifestWritten: true }))
         .toContain('Gate level: lean (was full) — the machine default');
     });
 
     it('a chosen level over a default nobody recorded: the level that applied until now', () => {
-      expect(only({ level: 'lean', priorLevel: undefined, manifestWritten: true }))
+      expect(only({ level: 'lean', priorLevel: undefined, kept: false, manifestWritten: true }))
         .toContain('Gate level: lean (was standard) — the machine default');
     });
 
     it('a chosen level over a malformed one: the level that malformed value read as, never the raw value', () => {
-      const message = only({ level: 'lean', priorLevel: 'ZZ-raw-canary', manifestWritten: true });
+      const message = only({ level: 'lean', priorLevel: 'ZZ-raw-canary', kept: false, manifestWritten: true });
       expect(message).toContain('Gate level: lean (was full)');
       expect(message).not.toContain('ZZ-raw-canary');
     });
@@ -861,43 +861,52 @@ describe('formatGateLevelSummary', () => {
       ];
       expect(SAME).toHaveLength(7);
       for (const [level, priorLevel, label] of SAME) {
-        expect(only({ level, priorLevel, manifestWritten: true }), label).not.toContain('(was');
+        expect(only({ level, priorLevel, kept: false, manifestWritten: true }), label).not.toContain('(was');
       }
     });
   });
 
   describe('a level read from a refused manifest', () => {
     it('--reset over it: the default it falls back to, the level it replaced, and no claim that it was kept', () => {
-      const lines = formatGateLevelSummary({ level: undefined, priorLevel: 'full', priorOrigin: 'rejected', manifestWritten: true });
+      const lines = formatGateLevelSummary({ level: undefined, priorLevel: 'full', priorOrigin: 'rejected', kept: false, manifestWritten: true });
       expect(lines).toHaveLength(1);
       expect(lines[0].level).toBe('info');
       expect(lines[0].message).toContain('Gate level: standard (default) (was full) — the machine default');
     });
 
     it('names the kept level, and warns that init kept it while it replaced the refused manifest', () => {
-      const lines = formatGateLevelSummary({ level: 'full', priorLevel: 'full', priorOrigin: 'rejected', manifestWritten: true });
+      const lines = formatGateLevelSummary({ level: 'full', priorLevel: 'full', priorOrigin: 'rejected', kept: true, manifestWritten: true });
       expect(lines).toHaveLength(2);
       expect(lines[0].level).toBe('info');
       expect(lines[0].message).toContain('Gate level: full');
       expect(lines[0].message).not.toContain('(default)');
       expect(lines[1].level).toBe('warn');
       expect(lines[1].message).toContain('kept the stored gate level');
-      expect(lines[1].message).toContain('replaced the manifest');
+      expect(lines[1].message).toContain('replaced a manifest that devflow rejects');
     });
 
     it('names no prior level for a level it kept', () => {
-      const lines = formatGateLevelSummary({ level: 'full', priorLevel: 'full', priorOrigin: 'rejected', manifestWritten: true });
+      const lines = formatGateLevelSummary({ level: 'full', priorLevel: 'full', priorOrigin: 'rejected', kept: true, manifestWritten: true });
       expect(lines[0].message).not.toContain('(was');
     });
 
     it('says nothing of a kept level when the run set another one, and names the level it replaced', () => {
-      const lines = formatGateLevelSummary({ level: 'lean', priorLevel: 'full', priorOrigin: 'rejected', manifestWritten: true });
+      const lines = formatGateLevelSummary({ level: 'lean', priorLevel: 'full', priorOrigin: 'rejected', kept: false, manifestWritten: true });
       expect(lines).toHaveLength(1);
       expect(lines[0].message).toContain('Gate level: lean (was full)');
     });
 
+    it('says nothing of a kept level when the user chose the level the manifest stored (--gate-level, or an answer at the prompt)', () => {
+      for (const priorLevel of ['full', 'ZZ-raw-canary']) {
+        const lines = formatGateLevelSummary({ level: priorLevel, priorLevel, priorOrigin: 'rejected', kept: false, manifestWritten: true });
+        expect(lines, `stored ${priorLevel}`).toHaveLength(1);
+        expect(lines[0].level).toBe('info');
+        expect(lines[0].message).not.toContain('kept');
+      }
+    });
+
     it('keeps a malformed level as it is stored, names how it reads, and never prints the raw value', () => {
-      const lines = formatGateLevelSummary({ level: 'ZZ-raw-canary', priorLevel: 'ZZ-raw-canary', priorOrigin: 'rejected', manifestWritten: true });
+      const lines = formatGateLevelSummary({ level: 'ZZ-raw-canary', priorLevel: 'ZZ-raw-canary', priorOrigin: 'rejected', kept: true, manifestWritten: true });
       expect(lines).toHaveLength(2);
       expect(lines[0].message).toContain('Gate level: invalid (manifest.json; reads as full)');
       expect(lines[0].message).not.toContain('(was');
@@ -905,7 +914,7 @@ describe('formatGateLevelSummary', () => {
     });
 
     it('when the manifest was not written, names the level still on disk and claims nothing was kept', () => {
-      const lines = formatGateLevelSummary({ level: 'full', priorLevel: 'full', priorOrigin: 'rejected', manifestWritten: false });
+      const lines = formatGateLevelSummary({ level: 'full', priorLevel: 'full', priorOrigin: 'rejected', kept: true, manifestWritten: false });
       expect(lines).toHaveLength(1);
       expect(lines[0].level).toBe('warn');
       expect(lines[0].message).toContain('Gate level: full');
@@ -915,7 +924,7 @@ describe('formatGateLevelSummary', () => {
 
   describe('a stored level that cannot be read', () => {
     it('warns that it could not be read, names the level that applies, and says how to set it again', () => {
-      const lines = formatGateLevelSummary({ level: undefined, priorLevel: undefined, priorOrigin: 'unreadable', manifestWritten: true });
+      const lines = formatGateLevelSummary({ level: undefined, priorLevel: undefined, priorOrigin: 'unreadable', kept: false, manifestWritten: true });
       expect(lines).toHaveLength(1);
       expect(lines[0].level).toBe('warn');
       expect(lines[0].message).toContain('could not be read');
@@ -926,7 +935,7 @@ describe('formatGateLevelSummary', () => {
     });
 
     it('is a plain summary line when the run recorded a level, with no prior level invented for it', () => {
-      const lines = formatGateLevelSummary({ level: 'lean', priorLevel: undefined, priorOrigin: 'unreadable', manifestWritten: true });
+      const lines = formatGateLevelSummary({ level: 'lean', priorLevel: undefined, priorOrigin: 'unreadable', kept: false, manifestWritten: true });
       expect(lines).toHaveLength(1);
       expect(lines[0].level).toBe('info');
       expect(lines[0].message).toContain('Gate level: lean');
@@ -934,7 +943,7 @@ describe('formatGateLevelSummary', () => {
     });
 
     it('when the manifest was not written, does not show the default as the prior level', () => {
-      const lines = formatGateLevelSummary({ level: undefined, priorLevel: undefined, priorOrigin: 'unreadable', manifestWritten: false });
+      const lines = formatGateLevelSummary({ level: undefined, priorLevel: undefined, priorOrigin: 'unreadable', kept: false, manifestWritten: false });
       expect(lines).toHaveLength(1);
       expect(lines[0].level).toBe('warn');
       expect(lines[0].message).toContain('cannot be read');
@@ -1031,13 +1040,13 @@ describe('init.ts wiring', () => {
     expect((source.match(/await runGateLevelStepAt\('advanced'\)/g) ?? []).length).toBe(1);
   });
 
-  it('assigns the gate level in exactly three places: its start, and the step outcome on each path', async () => {
+  it('assigns the gate decision in exactly three places: its start, and the step outcome on each path', async () => {
     const source = await fs.readFile(INIT_SOURCE, 'utf-8');
-    expect((source.match(/\blet gateLevel\b/g) ?? []).length).toBe(1);
-    expect((source.match(/\blet gateLevel: unknown = carriedGate\.value;/g) ?? []).length).toBe(1);
-    expect((source.match(/\bgateLevel = /g) ?? []).length).toBe(2);
-    expect((source.match(/gateLevel = await runGateLevelStepAt\('recommended'\)/g) ?? []).length).toBe(1);
-    expect((source.match(/gateLevel = await runGateLevelStepAt\('advanced'\)/g) ?? []).length).toBe(1);
+    expect((source.match(/\blet gateDecision\b/g) ?? []).length).toBe(1);
+    expect((source.match(/\blet gateDecision: GateLevelDecision = \{ level: carriedGate\.value, carried: true \};/g) ?? []).length).toBe(1);
+    expect((source.match(/\bgateDecision = /g) ?? []).length).toBe(2);
+    expect((source.match(/gateDecision = await runGateLevelStepAt\('recommended'\)/g) ?? []).length).toBe(1);
+    expect((source.match(/gateDecision = await runGateLevelStepAt\('advanced'\)/g) ?? []).length).toBe(1);
     expect(source).not.toMatch(/const runGateLevelStepAt = async \([^)]*\): Promise<void>/);
   });
 
@@ -1060,7 +1069,15 @@ describe('init.ts wiring', () => {
 
   it('forwards the carried level and where it was found to the prompt', async () => {
     const lines = gateCall(await fs.readFile(INIT_SOURCE, 'utf-8')).split('\n').map(line => line.trim());
-    expect(lines).toContain('stored: gateLevel,');
+    expect(lines).toContain('stored: gateDecision.level,');
     expect(lines).toContain('storedOrigin: carriedGate.origin,');
+  });
+
+  it('tells the summary the stored level was kept only when it is the carried level of a refused manifest', async () => {
+    const source = await fs.readFile(INIT_SOURCE, 'utf-8');
+    const call = /logSummaryLines\(formatGateLevelSummary\(\{\s*level: gateDecision\.level,[\s\S]*?\}\)\);/.exec(source);
+    expect(call, 'the init summary call is not findable in init.ts').not.toBeNull();
+    const lines = (call?.[0] ?? '').split('\n').map(line => line.trim());
+    expect(lines).toContain("kept: gateDecision.carried && carriedGate.origin === 'rejected',");
   });
 });

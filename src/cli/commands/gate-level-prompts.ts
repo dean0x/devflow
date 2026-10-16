@@ -302,7 +302,7 @@ function currentSettingLines(stored: unknown, origin: StoredGateLevelOrigin): st
       return `Current setting: ${describeGateLevel(stored)}`;
     case 'rejected':
       return `Current setting: ${describeGateLevel(stored)}\n` +
-        'It comes from a manifest that devflow cannot use. Init replaces that manifest and keeps this level unless you choose another.';
+        'It comes from a manifest that devflow rejects. Init replaces that manifest and keeps this level unless you choose another.';
     case 'unreadable':
       return 'Current setting: unknown\n' +
         `The stored gate level cannot be read, so ${DEFAULT_GATE_LEVEL} applies until you choose a level.`;
@@ -466,10 +466,17 @@ export async function runGateLevelStep(opts: {
  * What init records after the gate-level decision. `level` is the value for
  * `features.gateLevel`: the chosen level, or — when no prompt ran and no flag was
  * passed — the stored value exactly as it was (absent, malformed and `null`
- * included), so a plain init never lowers or heals a level.
+ * included), so a plain init never lowers or heals a level. `carried` says which: it is
+ * true only for the stored value, and false for a level the user chose with
+ * --gate-level or at the prompt.
  */
+export interface GateLevelDecision {
+  readonly level: unknown;
+  readonly carried: boolean;
+}
+
 export type GateLevelInitOutcome =
-  | { kind: 'resolved'; level: unknown }
+  | ({ kind: 'resolved' } & GateLevelDecision)
   | { kind: 'cancelled' };
 
 /**
@@ -492,9 +499,11 @@ export async function resolveGateLevelForInit(opts: {
   const { cliLevel, stored, storedOrigin, mode, modePromptShown, isTTY, prompts } = opts;
   if (shouldRunGateLevelStep({ mode, modePromptShown, isTTY, hasCliOverride: cliLevel !== undefined })) {
     const step = await runGateLevelStep({ stored, storedOrigin, prompts });
-    return step.kind === 'cancelled' ? { kind: 'cancelled' } : { kind: 'resolved', level: step.level };
+    return step.kind === 'cancelled' ? { kind: 'cancelled' } : { kind: 'resolved', level: step.level, carried: false };
   }
-  return { kind: 'resolved', level: cliLevel ?? stored };
+  return cliLevel === undefined
+    ? { kind: 'resolved', level: stored, carried: true }
+    : { kind: 'resolved', level: cliLevel, carried: false };
 }
 
 // ── Summary ────────────────────────────────────────────────────────────────────
@@ -535,15 +544,20 @@ function replacedLevelNote(prior: GateLevelReading, recorded: GateLevelReading):
  *
  * `priorOrigin` says where the prior level was found (default: the manifest):
  *
- *   rejected     the level came from a manifest that was replaced; when the run
- *                recorded that same value, a warning says init kept it
+ *   rejected     the level came from a manifest that was replaced; when `kept` is
+ *                true, a warning says init kept it
  *   unreadable   no level could be read; a run that recorded none warns that standard
  *                now applies and how to set the level again
+ *
+ * `kept` is true only when the manifest was written with the stored level carried
+ * over: no --reset, no --gate-level and no prompt answer chose the level. A level the
+ * user chose is a choice, even when it equals the stored one.
  */
 export function formatGateLevelSummary(input: {
   level: unknown;
   priorLevel: unknown;
   priorOrigin?: StoredGateLevelOrigin;
+  kept: boolean;
   manifestWritten: boolean;
 }): SummaryLine[] {
   const origin = input.priorOrigin ?? 'manifest';
@@ -565,10 +579,10 @@ export function formatGateLevelSummary(input: {
     level: 'info',
     message: `Gate level: ${describeReading(recorded)}${replacedLevelNote(prior, recorded)} — the machine default; change it with devflow gates --set <level>`,
   }];
-  if (origin === 'rejected' && input.level === input.priorLevel) {
+  if (origin === 'rejected' && input.kept) {
     lines.push({
       level: 'warn',
-      message: 'Init kept the stored gate level while it replaced the manifest, which devflow could not use as a manifest',
+      message: 'Init kept the stored gate level while it replaced a manifest that devflow rejects',
     });
   }
   return lines;

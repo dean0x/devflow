@@ -92,6 +92,7 @@ import {
   readStoredGateLevel,
   resolveGateLevelForInit,
   resolveGateLevelInitState,
+  type GateLevelDecision,
   type StoredGateLevel,
 } from './gate-level-prompts.js';
 import type { GateLevel } from '../../core/gate-level.js';
@@ -993,6 +994,7 @@ export const initCommand = new Command('init')
           level: hudStoredGate.value,
           priorLevel: hudStoredGate.value,
           priorOrigin: hudStoredGate.origin,
+          kept: true,
           manifestWritten: hudManifestWritten,
         }));
       }
@@ -1282,16 +1284,16 @@ export const initCommand = new Command('init')
     // stored. When readManifest() returned none, the raw level (`storedGate`, read above) stands in
     // for the seed, as `carriedGateLevel` decides. It stays raw unless --gate-level or the wizard
     // step sets it, so a plain init never defaults, narrows or heals it; the full manifest write
-    // below then leaves an absent key out. Each wizard path assigns the level `runGateLevelStepAt`
-    // decides; that is the only precedence site (--gate-level, then the wizard answer, then this
-    // carried level).
+    // below then leaves an absent key out. Each wizard path assigns the decision `runGateLevelStepAt`
+    // makes; that is the only precedence site (--gate-level, then the wizard answer, then this
+    // carried level), and `carried` says whether the level is still the carried one.
     const carriedGate = carriedGateLevel({
       manifest: existingManifest,
       reset: !!options.reset,
       stored: storedGate,
       seedLevel: seed.features.gateLevel,
     });
-    let gateLevel: unknown = carriedGate.value;
+    let gateDecision: GateLevelDecision = { level: carriedGate.value, carried: true };
     let enabledFlags: FlagsRecord = { ...seed.flags };
     // viewModeExplicit: true when --reset is passed; signals resolveFinalViewMode to let the
     // seed-time view-mode win over an externally-set value in settings.json.
@@ -1358,14 +1360,14 @@ export const initCommand = new Command('init')
      * (gated on modePromptShown), else the stored value untouched. The step's outcome line is
      * the post-install gate level summary row, on both paths.
      *
-     * Returns the decided level, raw as `resolveGateLevelForInit` returns it. The caller
-     * assigns it to `gateLevel`: that value is the only precedence decision, and nothing
-     * after the call revises it.
+     * Returns the decision, the level raw as `resolveGateLevelForInit` returns it and whether it
+     * is the carried stored level. The caller assigns it to `gateDecision`: that value is the
+     * only precedence decision, and nothing after the call revises it.
      */
-    const runGateLevelStepAt = async (mode: 'recommended' | 'advanced'): Promise<unknown> => {
+    const runGateLevelStepAt = async (mode: 'recommended' | 'advanced'): Promise<GateLevelDecision> => {
       const outcome = await resolveGateLevelForInit({
         cliLevel: cliGateLevel,
-        stored: gateLevel,
+        stored: gateDecision.level,
         storedOrigin: carriedGate.origin,
         mode,
         modePromptShown,
@@ -1376,7 +1378,7 @@ export const initCommand = new Command('init')
         p.cancel('Installation cancelled.');
         process.exit(0);
       }
-      return outcome.level;
+      return { level: outcome.level, carried: outcome.carried };
     };
 
     // Safe-delete detection (both paths need this)
@@ -1426,7 +1428,7 @@ export const initCommand = new Command('init')
 
       // Gate level wizard step — same gate; --recommended and !isTTY keep the stored value.
       // The decision is final here: applyCliToggles below carries no gate level.
-      gateLevel = await runGateLevelStepAt('recommended');
+      gateDecision = await runGateLevelStepAt('recommended');
 
       // No attribution step here: the suppress-attribution question is Advanced-only (D27).
       // Recommended silently carries the seeded value in enabledFlags — fresh installs get
@@ -1510,7 +1512,7 @@ export const initCommand = new Command('init')
         `Tracker:         ${formatTrackerSummary(trackerProvider)}`,
         // The level this run will record, or the stored one it keeps; the summary after the
         // install reports what the run really recorded.
-        `Gate level:      ${formatGateLevelRow(gateLevel, carriedGate.origin)}`,
+        `Gate level:      ${formatGateLevelRow(gateDecision.level, carriedGate.origin)}`,
         `View mode:       ${readViewMode(enabledFlags)}`,
         `Claude Code flags: ${defaultFlagCount} configured`,
         `.claudeignore:   ${resolveClaudeignoreOutcome(claudeignorePresent)}`,
@@ -1758,7 +1760,7 @@ export const initCommand = new Command('init')
       }
 
       // Gate level wizard step — same gate as the Recommended path; re-init lands here.
-      gateLevel = await runGateLevelStepAt('advanced');
+      gateDecision = await runGateLevelStepAt('advanced');
 
       // Attribution feature (after compliance, before flags). This is the ONLY call site —
       // the attribution question is Advanced-only (D27); the Recommended path never asks and
@@ -2815,8 +2817,8 @@ export const initCommand = new Command('init')
         // itself came through normalizeTrackerFeature on read.
         tracker: { provider: trackerProvider, ...(trackerServers !== undefined ? { servers: trackerServers } : {}) },
         // The machine gate level: --gate-level, the wizard answer, or the prior value raw
-        // (see where `gateLevel` is read above).
-        ...(gateLevel !== undefined ? { gateLevel } : {}),
+        // (see where `gateDecision` is read above).
+        ...(gateDecision.level !== undefined ? { gateLevel: gateDecision.level } : {}),
       },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,
@@ -2872,9 +2874,10 @@ export const initCommand = new Command('init')
 
     // The gate level this run recorded, from the manifest the run wrote (D-INIT-REAL-OUTCOME).
     logSummaryLines(formatGateLevelSummary({
-      level: gateLevel,
+      level: gateDecision.level,
       priorLevel: storedGate.value,
       priorOrigin: storedGate.origin,
+      kept: gateDecision.carried && carriedGate.origin === 'rejected',
       manifestWritten: trackerLifecycle.manifestWritten,
     }));
 
