@@ -278,7 +278,7 @@ export async function resolveGateLevelForInit(opts: {
     const step = await runGateLevelStep({ stored, prompts });
     return step.kind === 'cancelled' ? { kind: 'cancelled' } : { kind: 'resolved', level: step.level };
   }
-  return { kind: 'resolved', level: cliLevel !== undefined ? cliLevel : stored };
+  return { kind: 'resolved', level: cliLevel ?? stored };
 }
 
 // ── Summary ────────────────────────────────────────────────────────────────────
