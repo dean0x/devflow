@@ -53,7 +53,10 @@ export const GATE_LEVEL_SELECT_MESSAGE = 'Gate level for this machine';
 /**
  * The one-line effect of each level, as the select hint and the catalogue show it.
  * It restates GATE_LEVEL_EFFECT in gates.ts per level: when a later command starts
- * to read the level, update both. A parity test fails when only one changes.
+ * to read the level, update both. One test pins the exact text of both tables, so any
+ * change to either fails it until you update the other table and the pin; further rows
+ * check the clauses the two tables share (the lint pack level and the levels that run
+ * fewer review focuses).
  */
 export const GATE_LEVEL_HINTS: Readonly<Record<GateLevel, string>> = Object.freeze({
   full: 'the most checking: every review focus and the full planning shape',

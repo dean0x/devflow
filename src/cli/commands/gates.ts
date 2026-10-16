@@ -64,7 +64,9 @@ export const GATE_LEVEL_MEANINGS: Readonly<Record<GateLevel, string>> = Object.f
  * What reads the level today; each later reader updates this text.
  *
  * The init prompt restates this per level in GATE_LEVEL_HINTS (gate-level-prompts.ts):
- * edit both together. A parity test fails when only one changes.
+ * edit both together. One test pins the exact text of both tables, so any change to either
+ * fails it until you update the other table and the pin; further rows check the clauses the
+ * two tables share (the lint pack level and the levels that run fewer review focuses).
  */
 export const GATE_LEVEL_EFFECT =
   '/code-review and /plan read the level: standard and lean run fewer review focuses and fewer planning agents. At lean, /implement has Validate run the project\'s lint pack. Other commands read it once issue #480 lands.';

@@ -956,13 +956,51 @@ describe('formatGateLevelSummary', () => {
 // ── Parity with devflow gates ──────────────────────────────────────────────────
 
 /**
- * `devflow gates` and the init prompt each describe the levels, in two tables:
- * GATE_LEVEL_MEANINGS and GATE_LEVEL_EFFECT in gates.ts, GATE_LEVEL_HINTS here. One
- * table per level set, one reading of a malformed value. These rows fail when one side
- * changes and the other does not.
+ * `devflow gates` and the init prompt each describe the levels, in tables:
+ * GATE_LEVEL_MEANINGS and GATE_LEVEL_EFFECT in gates.ts, GATE_LEVEL_HINTS here.
+ *
+ * Two kinds of check hold them together:
+ *   - the pin: the exact text of every table, so a change to any table fails until the
+ *     other tables are checked and the pin is updated. It cannot tell which change is
+ *     right; it makes every change a deliberate one.
+ *   - the facet rows: the level sets, the level a malformed value reads as, the lint pack
+ *     level and the levels that run fewer review focuses. They fail when the tables
+ *     disagree on those facets, and they do not read any other clause.
  */
 describe('the init prompt and devflow gates describe the same levels', () => {
   const sorted = (keys: readonly string[]): string[] => [...keys].sort();
+
+  describe('the exact text of the tables is pinned', () => {
+    const UPDATE_BOTH =
+      'The init prompt (GATE_LEVEL_HINTS) and devflow gates (GATE_LEVEL_EFFECT, GATE_LEVEL_MEANINGS) '
+      + 'describe the same levels. Update the other table too, then update this pin.';
+
+    it('GATE_LEVEL_HINTS', () => {
+      expect({ ...GATE_LEVEL_HINTS }, `GATE_LEVEL_HINTS changed. ${UPDATE_BOTH}`).toEqual({
+        full: 'the most checking: every review focus and the full planning shape',
+        standard: 'fewer review focuses and planning agents (the default)',
+        lean: 'the least checking; /implement also has Validate run the project lint pack',
+      });
+    });
+
+    it('GATE_LEVEL_EFFECT', () => {
+      expect(
+        GATE_LEVEL_EFFECT,
+        `GATE_LEVEL_EFFECT changed. ${UPDATE_BOTH}`,
+      ).toBe(
+        '/code-review and /plan read the level: standard and lean run fewer review focuses and fewer planning agents. '
+        + 'At lean, /implement has Validate run the project\'s lint pack. Other commands read it once issue #480 lands.',
+      );
+    });
+
+    it('GATE_LEVEL_MEANINGS', () => {
+      expect({ ...GATE_LEVEL_MEANINGS }, `GATE_LEVEL_MEANINGS changed. ${UPDATE_BOTH}`).toEqual({
+        full: 'the most checking; any value that is not a level also reads as full',
+        standard: 'the default when no level is set',
+        lean: 'the least checking',
+      });
+    });
+  });
 
   it('both tables hold exactly the levels the registry lists', () => {
     expect(sorted(Object.keys(GATE_LEVEL_HINTS))).toEqual(sorted(GATE_LEVELS));
