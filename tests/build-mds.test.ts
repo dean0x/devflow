@@ -35,6 +35,7 @@ import { promises as fs, readFileSync } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { spawnSync } from 'child_process';
+import { createRequire } from 'module';
 import { init, compile, isMdsError } from '@mdscript/mds';
 import {
   KNOWLEDGE_COMMAND_HOSTS,
@@ -59,6 +60,7 @@ import {
   collectBackslashBraceLeaks,
   type EmittedFile,
 } from './helpers.js';
+import { RESOLVE_BASE_SCRIPT } from './evidence/seam.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const COMMANDS_DIR = path.join(ROOT, 'src', 'assets', 'commands');
@@ -1396,8 +1398,20 @@ function collectMergeHelperDefects(text: string): string[] {
   return out;
 }
 
-/** The repo's ref allowlist, as implement.mds states it for BASE_BRANCH. */
+/** The strict base-name class the resolver exports and implement.mds copies for BASE_BRANCH. */
+const STRICT_NAME_SOURCE = (createRequire(import.meta.url)(RESOLVE_BASE_SCRIPT) as { STRICT_NAME_RE: RegExp }).STRICT_NAME_RE.source;
+
+/** The repo's ref allowlist, as the helper's regex literal states it: a character class takes the slash unescaped. */
 const REF_ALLOWLIST_CLASS = '[A-Za-z0-9._/+@,#-]{1,200}';
+
+/** The part of the strict class the helper shares: the same refusals, less the `origin/` prefix, written as a regex literal. */
+const HELPER_SHARED_SHAPE = `/${STRICT_NAME_SOURCE.replace('origin\\/|', '').replace('._\\/+', '._/+')}/`;
+
+/** Named collector: the helper's `BRANCH_NAME` literal when it is not the shared part of implement's strict class. */
+function collectSharedShapeDefects(text: string): string[] {
+  const shape = /const BRANCH_NAME = (\/.*\/);/.exec(text)?.[1];
+  return shape === HELPER_SHARED_SHAPE ? [] : ["BRANCH_NAME is not the shared part of implement's strict class"];
+}
 
 /**
  * Named collector: where the helper lets a Git-reported ticket branch into a git line unchecked.
@@ -1459,7 +1473,19 @@ describe('dynamic-build: the wave merge arm stays flat and lives in one helper (
     expect(collectBranchCheckDefects(compiled)).toEqual([]);
     expect(collectBranchCheckDefects(source)).toEqual([]);
     const implement = await fs.readFile(path.join(BUILT_COMMANDS, 'implement.md'), 'utf-8');
-    expect(implement, 'implement no longer states the allowlist the wave copies').toContain(REF_ALLOWLIST_CLASS);
+    expect(implement, 'implement no longer states the strict class the wave helper shares').toContain(STRICT_NAME_SOURCE);
+  });
+
+  it("the helper's BRANCH_NAME is the strict class less the origin/ prefix refusal", () => {
+    expect(collectSharedShapeDefects(compiled)).toEqual([]);
+    expect(collectSharedShapeDefects(source)).toEqual([]);
+    const narrower = compiled.replace('(?!.*\\.\\.)', '');
+    expect(narrower, 'the seed must land').not.toBe(compiled);
+    expect(collectSharedShapeDefects(narrower)).toEqual(["BRANCH_NAME is not the shared part of implement's strict class"]);
+    const withPrefix = compiled.replace('(?![-#]|', '(?![-#]|origin\\/|');
+    expect(withPrefix, 'the seed must land').not.toBe(compiled);
+    expect(collectSharedShapeDefects(withPrefix)).toEqual(["BRANCH_NAME is not the shared part of implement's strict class"]);
+    expect(collectSharedShapeDefects('nothing')).toEqual(["BRANCH_NAME is not the shared part of implement's strict class"]);
   });
 
   it('known-bad probes: a missing check, a late check, an untyped value, a loose allowlist and a missing leading, revision or double-dot guard are each reported', () => {

@@ -49,12 +49,12 @@ When the user explicitly asks to re-validate, re-check, or re-run quality gates 
 ### Phase 1: Setup
 
 <!-- learning:on -->
-**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION, GATE_LEVEL
+**Produces:** TASK_ID, BASE_BRANCH, BASE_REF, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION, GATE_LEVEL
 <!-- learning:off -->
-**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION, GATE_LEVEL
+**Produces:** TASK_ID, BASE_BRANCH, BASE_REF, EXECUTION_PLAN, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION, GATE_LEVEL
 <!-- learning:end -->
 
-Record the current branch name as `BASE_BRANCH`. Stop the run unless it matches `^[A-Za-z0-9._/+@,#-]{1,200}$`, telling the user it allows only ASCII letters, digits and `._/+@,#-`, at most 200.
+Record the current branch name as `BASE_BRANCH`. Stop the run unless it matches `^(?![-#]|origin\/|(?:@|(?:FETCH_|ORIG_|MERGE_)?HEAD)$)(?!.*\.\.)[A-Za-z0-9._\/+@,#-]{1,200}$`, telling the user it allows only ASCII letters, digits and `._/+@,#-`, at most 200; no leading `-` or `#`, no `origin/` prefix, no `..`, not `@` or a HEAD name.
 
 {{docs_root()}}
 
@@ -95,7 +95,7 @@ The issue token is forwarded **unclassified**; routing is by SHAPE alone (the to
 
 **Capture from Git agent output** (used throughout flow):
 - `TASK_ID`: The branch name created by Git agent (use as TASK_ID for rest of flow)
-- `BASE_BRANCH`: Branch this feature was created from (for PR target)
+- `BASE_BRANCH`: Branch this feature was created from (for PR target); stop unless it passes the setup check
 - `ISSUE_NUMBER`: the provider-canonical issue identifier for this task — the same value the Git agent emits as `ISSUE_ID` (if provided, or created by the Git agent's issue-first step in setup-task)
 - `branch_slug`: `TASK_ID` with every `/` replaced by `-`. It names `handoff-{branch_slug}.md` and `evidence-{branch_slug}.md` only when it matches `^[A-Za-z0-9._-]{1,200}$`; any other branch name stops the run here, telling the user it cannot name those files.
 
@@ -146,6 +146,8 @@ Pass `DECISIONS_CONTEXT` to Code agent (Phase 2) and Harden agent (Phase 4).
 
 <!-- learning:end -->
 {{knowledge_load()}}
+
+**Fresh base.** Before Phase 2, run `cd "{worktree}" && node "$HOME/.devflow/scripts/resolve-base.cjs" local "{BASE_BRANCH}"; echo "exit=$?"`. Output other than one `BASE_REF=` line (40 or 64 hex, or `none`) with `exit=0` counts as `NOTE=stop`, `REASON=resolver-unavailable`. Record `BASE_REF`. By `NOTE`: `none` continues; `info` prints one plain line; `degraded` records `TRACEABILITY: DEGRADED (base {REASON})`, and for `timeout` names `git fetch origin <base>`; `stop` (`BASE_REF=none`) stops the run, naming REASON and its fix: `git fetch --unshallow` (no-merge-base), `git fetch origin <base>` (no-ref), `run devflow init` (resolver-unavailable), the allowed set without the name (invalid-name), none (usage).
 
 ### Phase 2: Implement
 
@@ -272,9 +274,9 @@ DECISIONS_CONTEXT: {decisions_context}
 ### Phase 3: Polish
 
 **Produces:** POLISH_OUTPUT
-**Requires:** BASE_BRANCH
+**Requires:** BASE_REF
 
-After the Code agent completes, spawn Polish agent to polish the code. The Phase 6 Validate covers its commits. `{branch_diff}` is the output of `git diff --name-only --diff-filter=d {BASE_BRANCH}...HEAD`, run again at each spawn.
+After the Code agent completes, spawn Polish agent to polish the code. The Phase 6 Validate covers its commits. `{branch_diff}` is the output of `git diff --name-only --diff-filter=d {BASE_REF}...HEAD`, run again at each spawn; a non-zero exit stops, and an empty list counts only on exit 0.
 
 ```
 Agent(subagent_type="Polish"):
@@ -288,7 +290,7 @@ Commit any improvements with a conventional-commit message."
 ### Phase 4: Self-Review
 
 **Produces:** HARDEN_OUTPUT
-**Requires:** BASE_BRANCH
+**Requires:** BASE_REF
 
 After Polish agent completes, spawn Harden agent as the quality gate:
 
@@ -308,7 +310,7 @@ Harden agent reports `### Status: PASS | FIXED | BLOCKED`. **If BLOCKED:** repor
 ### Phase 5: Alignment Check
 
 **Produces:** ALIGNMENT_RESULT
-**Requires:** BASE_BRANCH, EXECUTION_PLAN
+**Requires:** BASE_REF, EXECUTION_PLAN
 
 After Harden agent passes, spawn Evaluate agent to validate alignment. Evaluate agent receives `FEATURE_KNOWLEDGE_RULES` as acceptance context only; pattern and anti-pattern judgments belong to Harden agent:
 
@@ -347,14 +349,14 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
 ### Phase 6: Validate
 
 **Produces:** VALIDATION_RESULT, VALIDATED_HEAD
-**Requires:** BASE_BRANCH, GATE_LEVEL
+**Requires:** BASE_REF, GATE_LEVEL
 
 Validate takes the one full-suite slot, after every commit it must cover: Code, Polish, Harden and the alignment fixes. After Evaluate agent passes, spawn Validate agent. `FILES_CHANGED` is the branch diff:
 
 ```
 Agent(subagent_type="Validate"):
 "GATE_LEVEL: {GATE_LEVEL}
-BASE_SHA: {output of `git merge-base {BASE_BRANCH} HEAD`}
+BASE_SHA: {BASE_REF}
 FILES_CHANGED: {branch_diff}
 VALIDATION_SCOPE: full
 Run build, typecheck, lint, test. Report pass/fail with failure details."
@@ -396,7 +398,7 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
 ### Phase 7: QA Testing
 
 **Produces:** QA_RESULT
-**Requires:** BASE_BRANCH, EXECUTION_PLAN, TEST_PLAN, VALIDATED_HEAD
+**Requires:** BASE_REF, EXECUTION_PLAN, TEST_PLAN, VALIDATED_HEAD
 
 After Phase 6 passes, spawn Test agent for scenario-based acceptance testing:
 
@@ -537,7 +539,7 @@ Display completion summary with phase status, Validate's `Lint pack:` line if an
 
 Show the test plan's evidence from Phase 11: `Test plan: {VERIFIED-CI + ATTESTED-LOCAL}/{total} verified (VERIFIED-CI {n}, ATTESTED-LOCAL {n})`, read from the `EVIDENCE` line and never inferred, then its `**Body**:` / `**Comment**:` line verbatim. Without an `EVIDENCE` line, show `Test plan: evidence unavailable`; with no test plan, `Test plan: missing`.
 
-If any Git agent output emitted `TRACEABILITY: DEGRADED ({reason})` lines during the run, or Phase 10's push, Phase 11's push or Phase 11's script output carried one, surface them verbatim in the report under a `### Traceability` subsection so the user can act on them.
+If any Git agent output emitted `TRACEABILITY: DEGRADED ({reason})` lines during the run, or Phase 1's base check, Phase 10's push, Phase 11's push or Phase 11's script output carried one, surface them verbatim in the report under a `### Traceability` subsection so the user can act on them.
 
 If Phase 9 listed uncommitted files, show them as a `### Uncommitted files` subsection: the user commits them or discards them.
 
@@ -571,7 +573,7 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 
 ## Principles
 
-1. **Orchestration only** - Command spawns agents, never does work itself; the inline calls are the bounded plumbing the charter allows: the Phase 10 and Phase 11 pushes, the Phase 10 ci-wait call, the Phase 11 evidence publish call and the evidence script checks
+1. **Orchestration only** - Command spawns agents, never does work itself; the inline calls are the bounded plumbing the charter allows: the Phase 1 base resolver call, the Phase 10 and Phase 11 pushes, the Phase 10 ci-wait call, the Phase 11 evidence publish call and the evidence script checks
 2. **Honest reporting** - Display agent outputs directly
 3. **Strict delegation** - Never perform agent work in main session. "Spawn X" means call Agent tool with X, not do X's work yourself
 4. **Validate agent owns validation** - Never run `npm test`, `npm run build`, or similar in main session; always delegate to Validate agent

@@ -765,24 +765,6 @@ interface PendingSite {
 }
 
 const PENDING_SITES: readonly PendingSite[] = [
-  // Phase 5: /implement and its re-validation reference.
-  { phase: 5, file: 'commands/implement.md', rule: 'strict-copy', anchor: 'setup check' },
-  { phase: 5, file: 'commands/implement.md', rule: 'post-capture-check', anchor: 'post-capture check' },
-  { phase: 5, file: 'commands/implement.md', rule: 'produces-base-ref', anchor: 'Phase 1 Produces' },
-  { phase: 5, file: 'commands/implement.md', rule: 'requires-base-ref', anchor: 'Requires' },
-  { phase: 5, file: 'commands/implement.md', rule: 'resolver-call', anchor: 'call count' },
-  { phase: 5, file: 'commands/implement.md', rule: 'consumer-stop', anchor: 'resolver-unavailable stop' },
-  { phase: 5, file: 'commands/implement.md', rule: 'channel-line', anchor: 'freshness line' },
-  { phase: 5, file: 'commands/implement.md', rule: 'inline-list', anchor: 'charter inline list' },
-  // The branch diff sink and the Validate spawn's BASE_SHA probe.
-  { phase: 5, file: 'commands/implement.md', rule: 'shell-name', anchor: 'diff-filter=d {BASE_BRANCH}...HEAD' },
-  { phase: 5, file: 'commands/implement.md', rule: 'shell-name', anchor: 'git merge-base {BASE_BRANCH} HEAD' },
-  { phase: 5, file: 'commands/implement.md', rule: 'sink-exit', anchor: 'branch_diff' },
-  { phase: 5, file: 'references/implement-revalidate.md', rule: 'strict-copy', anchor: 'revalidate check' },
-  { phase: 5, file: 'references/implement-revalidate.md', rule: 'resolver-call', anchor: 'call count' },
-  { phase: 5, file: 'references/implement-revalidate.md', rule: 'cross-flag', anchor: 'cross flag' },
-  { phase: 5, file: 'references/implement-revalidate.md', rule: 'consumer-stop', anchor: 'resolver-unavailable stop' },
-
   // Phase 7: /code-review and the reviewer fallback.
   { phase: 7, file: 'commands/code-review.md', rule: 'return-base-ref', anchor: 'Return' },
   { phase: 7, file: 'commands/code-review.md', rule: 'extract-checks', anchor: 'Extract' },

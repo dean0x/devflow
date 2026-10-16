@@ -256,7 +256,7 @@ describe('the Validate body holds the lint-pack doctrine', () => {
 const LEVEL_LINE = /^"?GATE_LEVEL:/m
 const BASE_LINE = /^BASE_SHA:/m
 const PHASE6_LEVEL = 'GATE_LEVEL: {GATE_LEVEL}'
-const PHASE6_BASE = 'BASE_SHA: {output of `git merge-base {BASE_BRANCH} HEAD`}'
+const PHASE6_BASE = 'BASE_SHA: {BASE_REF}'
 /** The Phase 1 step a run that skips Phase 1 runs for its level; the re-validation reference points at it by this name. */
 const SETTINGS_STEP = '**Resolve the settings line**'
 /** The re-validation reference's step that takes the level, as a numbered list line. */
@@ -323,7 +323,7 @@ export function collectDataFlowDefects(doc: Doc, arms: number): string[] {
   }
   const phase6 = dataFlowLines(sectionBetween(doc.text, '### Phase 6: Validate', '### Phase 7:'), 'Requires')
   if (phase6.length !== 1) out.push(`${doc.label}: Phase 6 has ${phase6.length} Requires lines, expected 1`)
-  for (const name of ['BASE_BRANCH', 'GATE_LEVEL']) {
+  for (const name of ['BASE_REF', 'GATE_LEVEL']) {
     if (!phase6.some(names => names.includes(name))) out.push(`${doc.label}: Phase 6 Requires does not list ${name}`)
   }
   return out
@@ -429,7 +429,7 @@ describe('only the implement Phase 6 Validate spawn passes the level and the bas
       const twice = seed(doc.text, /^(\*\*Produces:\*\* TASK_ID[^\n]*)$/m, '$1\n$1')
       expect(collectDataFlowDefects({ label: doc.label, text: twice }, 1), doc.label)
         .toContain(`${doc.label}: Phase 1 has 2 Produces lines, expected 1`)
-      const requires = '**Requires:** BASE_BRANCH, GATE_LEVEL\n'
+      const requires = '**Requires:** BASE_REF, GATE_LEVEL\n'
       expect(collectDataFlowDefects({ label: doc.label, text: seed(doc.text, requires, `${requires}${requires}`) }, 1), doc.label)
         .toContain(`${doc.label}: Phase 6 has 2 Requires lines, expected 1`)
       expect(collectDataFlowDefects({ label: doc.label, text: seed(doc.text, requires, '') }, 1), doc.label)
@@ -445,9 +445,9 @@ describe('only the implement Phase 6 Validate spawn passes the level and the bas
     for (const doc of BUILDS) {
       expect(collectDataFlowDefects({ label: doc.label, text: dropFromArm(doc.text, 0) }, 1), doc.label)
         .toContain(`${doc.label}: a Phase 1 Produces line does not list GATE_LEVEL`)
-      for (const name of ['BASE_BRANCH', 'GATE_LEVEL']) {
-        const other = name === 'GATE_LEVEL' ? 'BASE_BRANCH' : 'GATE_LEVEL'
-        const dropped = seed(doc.text, '**Requires:** BASE_BRANCH, GATE_LEVEL\n', `**Requires:** ${other}\n`)
+      for (const name of ['BASE_REF', 'GATE_LEVEL']) {
+        const other = name === 'GATE_LEVEL' ? 'BASE_REF' : 'GATE_LEVEL'
+        const dropped = seed(doc.text, '**Requires:** BASE_REF, GATE_LEVEL\n', `**Requires:** ${other}\n`)
         expect(collectDataFlowDefects({ label: doc.label, text: dropped }, 1), `${doc.label} ${name}`)
           .toContain(`${doc.label}: Phase 6 Requires does not list ${name}`)
       }
