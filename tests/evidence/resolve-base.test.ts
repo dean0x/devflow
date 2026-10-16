@@ -349,7 +349,7 @@ function commitFile(dir: string, home: string, rel: string): string {
 
 /** Exit status of a git command that is expected to fail or to answer "absent". */
 function gitStatus(cwd: string, home: string, args: readonly string[]): number | null {
-  return spawnSync('git', [...args], { cwd, env: env0(home), stdio: 'ignore', timeout: 20_000 }).status
+  return spawnSync('git', [...args], { cwd, env: scopedEnv(home), stdio: 'ignore', timeout: 20_000 }).status
 }
 
 beforeAll(() => {
@@ -371,7 +371,7 @@ beforeAll(() => {
   fs.mkdirSync(probe)
   sha256Supported = gitStatus(probe, home, ['init', '-q', '--object-format=sha256']) === 0
   // the first node start after a burst of git processes can take seconds: pay it here, not in a test
-  spawnSync(process.execPath, ['-e', '0'], { cwd: tmp, env: env0(home), stdio: 'ignore', timeout: 60_000 })
+  spawnSync(process.execPath, ['-e', '0'], { cwd: tmp, env: scopedEnv(home), stdio: 'ignore', timeout: 60_000 })
 }, 90_000)
 
 afterAll(() => {
@@ -463,11 +463,13 @@ function fieldsOf(line: string): Record<string, string> {
   return Object.fromEntries(line.split(' ').map(kv => [kv.slice(0, kv.indexOf('=')), kv.slice(kv.indexOf('=') + 1)]))
 }
 
-function countingSpawn(): { spawn: SpawnFn; calls: string[][] } {
+function countingSpawn(home: string): { spawn: SpawnFn; calls: string[][] } {
   const calls: string[][] = []
   const spawn: SpawnFn = (file, args, opts) => {
     calls.push([file, ...args])
-    return spawnSync(file, args, opts as Parameters<typeof spawnSync>[2]) as SpawnResult
+    // the script's own environment is the scoped one plus its additions, so scoping it again keeps it whole
+    const { cwd, env } = opts as { cwd: string; env: Record<string, string> }
+    return spawnSync(file, args, { ...(opts as object), cwd, env: scopedEnv(home, env) }) as unknown as SpawnResult
   }
   return { spawn, calls }
 }
@@ -547,7 +549,7 @@ describe('the script under process.execPath (AC-6, AC-7)', SPAWN_BUDGET, () => {
     fs.writeFileSync(preload, "Object.defineProperty(process, 'stdout', { configurable: true, get() { throw new Error('stdout unavailable') } })\n")
     // the usage path makes no git call, so the only failure is the stdout one
     const r = spawnSync(process.execPath, ['--require', preload, RESOLVE_BASE_SCRIPT, 'local'], {
-      cwd: dir, env: env0(dir), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000,
+      cwd: dir, env: scopedEnv(dir), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000,
     })
     expect({ stderr: r.stderr, status: r.status }).toEqual({ stderr: '', status: 3 })
   })
@@ -611,7 +613,7 @@ describe('fetch outcomes (AC-5)', SPAWN_BUDGET, () => {
   it('no origin remote: no fetch, the local tip, REASON no-origin', () => {
     const s = buildScenario('fresh', 'main')
     git(s.w.work, s.w.home, 'remote', 'remove', 'origin')
-    const { spawn, calls } = countingSpawn()
+    const { spawn, calls } = countingSpawn(s.w.home)
     const r = runBase(s.w, 'local', 'main', { spawn })
     expectWant(r, { tip: 'local', reason: 'no-origin', note: 'info', fetch: 'skipped', base: s.shas.M0 })
     expect(calls.filter(isFetchCall)).toHaveLength(0)
@@ -651,7 +653,7 @@ describe('fetch outcomes (AC-5)', SPAWN_BUDGET, () => {
     const s = buildScenario('fresh', 'main')
     advanceOrigin(s.w, 'm1.txt')
     fs.writeFileSync(path.join(s.w.work, '.git', 'refs', 'remotes', 'origin', 'main.lock'), '')
-    const { spawn, calls } = countingSpawn()
+    const { spawn, calls } = countingSpawn(s.w.home)
     const r = runBase(s.w, 'pr', 'main', { spawn })
     expectWant(r, { tip: 'origin', reason: 'fetch-failed', note: 'degraded', fetch: 'failed', base: s.shas.M0 })
     expect(calls.filter(isFetchCall)).toHaveLength(1)
@@ -660,7 +662,7 @@ describe('fetch outcomes (AC-5)', SPAWN_BUDGET, () => {
   it('a cross-repository PR runs no fetch, uses the local base and says fork-origin', () => {
     const s = buildScenario('stale', 'main', { keepCachedRef: true })
     git(s.w.work, s.w.home, 'remote', 'set-url', 'origin', path.join(s.w.root, 'missing.git'))
-    const { spawn, calls } = countingSpawn()
+    const { spawn, calls } = countingSpawn(s.w.home)
     for (const mode of ['pr', 'local'] as const) {
       const r = runBase(s.w, mode, 'main', { cross: true, spawn })
       // the cached origin ref is not used: it belongs to the other repository
@@ -671,7 +673,7 @@ describe('fetch outcomes (AC-5)', SPAWN_BUDGET, () => {
 
   it('--cross false still fetches', () => {
     const s = buildScenario('fresh', 'main')
-    const { spawn, calls } = countingSpawn()
+    const { spawn, calls } = countingSpawn(s.w.home)
     expectWant(runBase(s.w, 'pr', 'main', { cross: false, spawn }), s.want.pr)
     expect(calls.filter(isFetchCall)).toHaveLength(1)
   })
@@ -715,7 +717,7 @@ describe('names that fail a check (AC-7)', SPAWN_BUDGET, () => {
     const marker = path.join(w.root, 'created-by-name')
     const names = [`$(touch ${marker})`, `\`touch ${marker}\``, `a;touch ${marker}`, '-x', '#x', 'origin/main', 'a..b', 'HEAD', '', 'a b']
     for (const name of names) {
-      const { spawn, calls } = countingSpawn()
+      const { spawn, calls } = countingSpawn(w.home)
       const out = RB.main(['node', 'resolve-base.cjs', 'local', name], { cwd: w.work, env: env0(w.home), spawn })
       expect(out, JSON.stringify(name)).toEqual({ code: 0, line: stopLine })
       expect(calls, JSON.stringify(name)).toEqual([])
@@ -727,7 +729,7 @@ describe('names that fail a check (AC-7)', SPAWN_BUDGET, () => {
     const w = newWorld()
     for (const name of ['a.lock', 'a/', '/a', 'a//b', '.a', 'a.', 'a/.b', 'a/b.lock/c', 'x/y.lock']) {
       expect(RB.isStrictName(name), `class admits ${name}`).toBe(true)
-      const { spawn, calls } = countingSpawn()
+      const { spawn, calls } = countingSpawn(w.home)
       const out = RB.main(['node', 'resolve-base.cjs', 'pr', name], { cwd: w.work, env: env0(w.home), spawn })
       expect(out, name).toEqual({ code: 0, line: stopLine })
       expect(calls.filter(isFetchCall), name).toEqual([])
@@ -739,7 +741,7 @@ describe('names that fail a check (AC-7)', SPAWN_BUDGET, () => {
   it('a usage error makes no git call and prints the usage stop', () => {
     const w = newWorld()
     for (const args of [[], ['local'], ['fork', 'main'], ['local', 'main', 'extra'], ['local', 'main', '--cross', 'maybe']]) {
-      const { spawn, calls } = countingSpawn()
+      const { spawn, calls } = countingSpawn(w.home)
       const out = RB.main(['node', 'resolve-base.cjs', ...args], { cwd: w.work, env: env0(w.home), spawn })
       expect(out, JSON.stringify(args)).toEqual({ code: 0, line: 'BASE_REF=none TIP=none FETCH=skipped REASON=usage NOTE=stop' })
       expect(calls, JSON.stringify(args)).toEqual([])
@@ -749,7 +751,7 @@ describe('names that fail a check (AC-7)', SPAWN_BUDGET, () => {
   it('accepted names (slash, plus, comma, at) reach the fetch with the full refspec', () => {
     const w = newWorld()
     for (const name of ['release/1.x', 'feature/a+b', 'v1.0@x', 'a,b#c']) {
-      const { spawn, calls } = countingSpawn()
+      const { spawn, calls } = countingSpawn(w.home)
       const out = RB.main(['node', 'resolve-base.cjs', 'pr', name], { cwd: w.work, env: env0(w.home), spawn })
       expect(out.code).toBe(0)
       const fetch = calls.find(isFetchCall)

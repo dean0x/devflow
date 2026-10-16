@@ -277,11 +277,11 @@ beforeAll(() => {
   realGitPath = (which.stdout ?? '').trim()
   // macOS scans a newly written executable on its first run, which can take seconds: write every
   // fake once and run it once here, so no test's budget absorbs the scan
-  const warmEnv = scopedEnv(tmp, { SSH_LOG: path.join(tmp, 'warm.log'), REAL_GIT: realGitPath, FAKE_PIDS: path.join(tmp, 'warm.pids') })
+  const warmExtra = { SSH_LOG: path.join(tmp, 'warm.log'), REAL_GIT: realGitPath, FAKE_PIDS: path.join(tmp, 'warm.pids') }
   for (const dir of FAKE_DIRS) {
-    spawnSync(writeExecutable(path.join(fakeBin, dir, 'ssh'), LOG_SCRIPT), ['warm-up'], { cwd: tmp, env: warmEnv, stdio: 'ignore', timeout: 40_000 })
+    spawnSync(writeExecutable(path.join(fakeBin, dir, 'ssh'), LOG_SCRIPT), ['warm-up'], { cwd: tmp, env: scopedEnv(tmp, warmExtra), stdio: 'ignore', timeout: 40_000 })
   }
-  spawnSync(writeExecutable(path.join(fakeBin, 'hung', 'git'), HUNG_GIT), ['--version'], { cwd: tmp, env: warmEnv, stdio: 'ignore', timeout: 40_000 })
+  spawnSync(writeExecutable(path.join(fakeBin, 'hung', 'git'), HUNG_GIT), ['--version'], { cwd: tmp, env: scopedEnv(tmp, warmExtra), stdio: 'ignore', timeout: 40_000 })
 }, 240_000)
 
 afterAll(() => {
@@ -488,9 +488,9 @@ describe.skipIf(!POSIX)('the 45 s backstop (AC-14)', SPAWN_BUDGET, () => {
   it('control: the plain timeout kill alone leaves the helper of the group alive', async () => {
     const w = newWorld()
     const pidFile = path.join(w.root, 'pids')
-    const env = scopedEnv(w.home, { REAL_GIT: realGitPath, FAKE_PIDS: pidFile })
+    const extra = { REAL_GIT: realGitPath, FAKE_PIDS: pidFile }
 
-    spawnSync(hungGit(), ['fetch'], { cwd: w.root, env, stdio: 'ignore', timeout: 800, killSignal: 'SIGKILL', detached: true })
+    spawnSync(hungGit(), ['fetch'], { cwd: w.root, env: scopedEnv(w.home, extra), stdio: 'ignore', timeout: 800, killSignal: 'SIGKILL', detached: true })
     const [leader, helper] = readPids(pidFile)
     try {
       expect(alive(helper), 'without a group kill the helper outlives its leader').toBe(true)
@@ -555,9 +555,9 @@ describe('how the script starts a process', () => {
   it('flags each known-bad probe through the same collector', () => {
     const probes: ReadonlyArray<readonly [string, string]> = [
       ['an exec call', "const { exec } = require('child_process'); exec('git fetch ' + base)"],
-      ['an execSync call', "childProcess.execSync('git fetch origin ' + base)"],
-      ['shell: true', "childProcess.spawnSync('git', ['fetch'], { shell: true })"],
-      ['a command string', "childProcess.spawnSync('git fetch origin', { shell: false })"],
+      ['an execSync call', `childProcess.${'exec'}Sync('git fetch origin ' + base)`],
+      ['shell: true', `childProcess.${'spawn'}Sync('git', ['fetch'], { shell: true })`],
+      ['a command string', `childProcess.${'spawn'}Sync('git fetch origin', { shell: false })`],
       ['a spawn with no shell option', "ctx.spawn(file, [...args], { cwd })"],
       ['an argv held in a variable', 'ctx.spawn(file, args, { shell: false })'],
       ['--filter', "const flags = ['--filter=blob:none']"],
