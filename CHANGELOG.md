@@ -69,9 +69,11 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
   A reader never treats a disagreement as on.
 - To turn it on again, run `devflow curation --enable`. This writes both keys.
 - A 3.7 toggle writes only the old key. An opt-out made on 3.7 stays in force after you upgrade again.
-  An enable made on 3.7 after a 3.8 disable stays off until you run `devflow curation --enable`.
+  If you ran no 3.7 `devflow init`, an enable made on 3.7 after a 3.8 disable stays off until you run `devflow curation --enable`.
+- A 3.7 `devflow init` removes the key `features.curation`. After that, only the old key carries the opt-out.
+  A 3.7 enable made after that init then takes effect when you upgrade again.
 - Between the package update and `devflow init`, `devflow curation --enable` and `--disable` write both keys
-  and move nothing. Only `--disable` drains the queue. The commands `--restore`, `--clear`, `--reset`
+  and move nothing. Only `--disable` drains the queue among these toggles. The commands `--restore`, `--clear`, `--reset`
   and `--configure` (project scope) refuse until you run `devflow init`.
 
 **The backup:**
@@ -89,8 +91,9 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
 - A merge never takes a pending queue above 200 lines.
 - Rows that do not fit wait in overflow files in the backup. A later init merges them as room appears.
   Status counts them as pending rows, so the delete step waits for zero pending rows.
-- The move drops no row. A full queue that receives a capture is trimmed to its newest 100 lines.
+- The move itself drops no row. A full queue that receives a capture is trimmed to its newest 100 lines.
   This is the rule from before, and the move does not cause it.
+- `devflow init` drains the queue of a project where curation is off, as it did before 3.8.0.
 
 **Outcomes that need action:**
 - Busy: another run holds the move lock. Init prints `Ledger move skipped for <root>: a lock is held.`
