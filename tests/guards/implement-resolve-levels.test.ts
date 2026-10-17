@@ -18,7 +18,8 @@
  *   b. The data flow: `GATE_LEVEL` in the Produces and Requires lines that carry it.
  *   c. The fail-closed bullet: no row applied, the level kept, and the Phase 6 Validate prompt still carries it.
  *   d. The reference grammar: title, headings, header, closed phase set, cell grammar (a never-skip phase takes no
- *      `skip`, `pass level` needs a spawn) and Rules bullets.
+ *      `skip`, `pass level` needs a spawn) and Rules bullets. The `devflow gates` text says the references hold no
+ *      phase rules exactly while no table has a row.
  *   e. Row safety, a tripwire: protected phases, never-skip phases, floor controls, dispositions and actions no row
  *      may carry.
  *   f. `full` reads nothing: the reference path appears only inside the block, and no Validate fence of
@@ -34,6 +35,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import * as path from 'path'
 
+import { GATE_LEVEL_EFFECT } from '../../src/cli/commands/gates.js'
 import { ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, isAgentBlock, parseFences, readAgentReference, requireDistFile, resolveAgentSource, resolveLearningOffSource, sectionBetween, tableRows } from '../helpers.js'
 
 // ---------------------------------------------------------------------------
@@ -537,6 +539,21 @@ export function collectLevelReferenceDefects(ref: string, spec: LevelSpec, body:
   ]
 }
 
+/** The clause of the `devflow gates` level text that holds while both tables are empty. */
+const NO_RULES_CLAIM = 'no phase rules yet'
+
+/**
+ * AC-5: the `devflow gates` level text says the references hold "no phase rules yet" exactly while no table has a row.
+ * The first change that adds a row fails here until it also updates that text.
+ */
+export function collectCliClaimDefects(effect: string, refs: Readonly<Record<string, string>>): string[] {
+  const withRows = SPECS.filter(spec => referenceRows(refs[spec.cmd]).length > 0).map(spec => spec.cmd)
+  const says = effect.includes(NO_RULES_CLAIM)
+  if (withRows.length === 0 && !says) return [`no table has a row, but the devflow gates text does not say "${NO_RULES_CLAIM}"`]
+  if (withRows.length > 0 && says) return [`a table has a row (${withRows.join(', ')}), but the devflow gates text still says "${NO_RULES_CLAIM}"`]
+  return []
+}
+
 // ---------------------------------------------------------------------------
 // e. Row safety, a tripwire
 // ---------------------------------------------------------------------------
@@ -791,6 +808,15 @@ function withRows(ref: string, rows: readonly string[], bullets: readonly string
   return next
 }
 
+/** The reference with two of its `## ` sections in each other's place. */
+function swapSections(ref: string, first: string, second: string): string {
+  const parts = ref.split(/^(?=## )/m)
+  const indexOf = (heading: string): number => parts.findIndex(part => part.startsWith(`${heading}\n`))
+  const [i, j] = [indexOf(first), indexOf(second)]
+  expect(Math.min(i, j), `the reference holds "${first}" and "${second}"`).toBeGreaterThan(-1)
+  return parts.map((part, k) => (k === i ? parts[j] : k === j ? parts[i] : part)).join('')
+}
+
 /** A probe seeds text inside the block, so it first checks that the compiled command carries the pinned read paragraph: without it the probe fails for that reason. */
 function needsBlock(body: string, spec: LevelSpec): void {
   expect(body.includes(spec.readParagraph), `the compiled ${spec.cmd} lacks the pinned Gate level read paragraph`).toBe(true)
@@ -833,6 +859,17 @@ describe('the level references hold the fixed grammar and no rows (AC-5)', () =>
     expect((sectionOf(parseRef(REFS[spec.cmd]), '## Rules')?.lines ?? []).filter(line => line.startsWith('- '))).toEqual([])
   })
 
+  it('the devflow gates text says "no phase rules yet" exactly while no table has a row, and a table with a row or a text without the clause is reported', () => {
+    expect(collectCliClaimDefects(GATE_LEVEL_EFFECT, REFS)).toEqual([])
+    const withRow = { ...REFS, resolve: withRows(REFS.resolve, ['| 6 Polish | skip | - |']) }
+    expect(collectCliClaimDefects(GATE_LEVEL_EFFECT, withRow)).toEqual([`a table has a row (resolve), but the devflow gates text still says "${NO_RULES_CLAIM}"`])
+    const bothRows = { implement: withRows(REFS.implement, ['| 3 Polish | skip | - |']), resolve: withRow.resolve }
+    expect(collectCliClaimDefects(GATE_LEVEL_EFFECT, bothRows)).toEqual([`a table has a row (implement, resolve), but the devflow gates text still says "${NO_RULES_CLAIM}"`])
+    const dropped = seed(GATE_LEVEL_EFFECT, NO_RULES_CLAIM, 'phase rules')
+    expect(collectCliClaimDefects(dropped, REFS)).toEqual([`no table has a row, but the devflow gates text does not say "${NO_RULES_CLAIM}"`])
+    expect(collectCliClaimDefects(dropped, withRow), 'a text without the clause fits a table with a row').toEqual([])
+  })
+
   it.each(SPECS)('$cmd: the reference holds no spawn block, no subagent_type and no learning marker, and a seeded one is reported', spec => {
     const ref = REFS[spec.cmd]
     expect(ref).not.toContain('Agent(')
@@ -843,7 +880,7 @@ describe('the level references hold the fixed grammar and no rows (AC-5)', () =>
     expect(defects(`${ref}\n<!-- learning:on -->\n`)).toContain('the reference carries a learning marker')
   })
 
-  it.each(SPECS)('$cmd: known-bad probes: a missing heading, a changed title or header, a bad phase, a bad cell and an unknown bullet are each reported', spec => {
+  it.each(SPECS)('$cmd: known-bad probes: a missing or swapped heading, a changed title or header, a bad phase, a bad cell and an unknown bullet are each reported', spec => {
     const ref = REFS[spec.cmd]
     const body = bodyOf(spec)
     const defects = (text: string): string[] => collectLevelReferenceDefects(text, spec, body)
@@ -852,11 +889,13 @@ describe('the level references hold the fixed grammar and no rows (AC-5)', () =>
     expect(defects(seed(ref, '## Phases\n', ''))).toContain('no "## Phases" heading')
     expect(defects(seed(ref, '## Grammar\n', ''))).toContain('no "## Grammar" heading')
     expect(defects(seed(ref, '## Rules\n', ''))).toContain('no "## Rules" heading')
+    expect(defects(swapSections(ref, '## Grammar', '## Rules'))).toContain('the headings are "## Phases, ## Rules, ## Grammar", expected "## Phases, ## Grammar, ## Rules"')
     expect(defects(seed(ref, spec.title, '# Levels'))).toContain(`the reference does not open with "${spec.title}"`)
     expect(defects(seed(ref, TABLE_HEADER, '| Phase | standard, lean |'))).toContain(`the table header is "| Phase | standard, lean |", expected "${TABLE_HEADER}"`)
     expect(defects(seed(ref, TABLE_HEADER, '| Phase | full | standard | lean |'))).toContain(`the table header is "| Phase | full | standard | lean |", expected "${TABLE_HEADER}"`)
     expect(defects(seed(ref, TABLE_SEPARATOR, '|---|---|---|'))).toContain(`the table separator is "|---|---|---|", expected "${TABLE_SEPARATOR}"`)
     expect(defects(withRows(ref, [`| ${num} | skip | skip |`]))).toContain(`a row phase is not "<number> <name>": ${num}`)
+    expect(defects(withRows(ref, ['| Phase 6 | skip | - |']))).toContain('a row phase is not "<number> <name>": Phase 6')
     expect(defects(withRows(ref, [`| ${sample} | skip |`]))).toContain(`a row does not have three cells: | ${sample} | skip |`)
     expect(defects(withRows(ref, [`| ${sample} | drop: x | - |`]))).toContain(`row ${num} standard: the cell holds "drop: x", which is not skip, -, apply: <name> or pass level`)
     expect(defects(withRows(ref, [`| ${sample} | - | apply: nosuch |`]))).toContain(`row ${num} lean: the cell applies "nosuch", which no Rules bullet names`)
@@ -867,7 +906,7 @@ describe('the level references hold the fixed grammar and no rows (AC-5)', () =>
     expect(defects(withRows(ref, [], ['- **a:** Polish the diff.', '- **a:** Polish it again.']))).toContain('the Rules bullet "a" is repeated')
   })
 
-  it('known-bad probes: the phase set is closed and keyed by the compiled heading name', () => {
+  it('known-bad probes: the phase set is closed and keyed by the compiled heading name, and a repeated phase heading is reported', () => {
     const impl = (rows: string[]): string[] => collectLevelReferenceDefects(withRows(REFS.implement, rows), IMPLEMENT, bodyOf(IMPLEMENT))
     expect(impl(['| 4 Polish | - | skip |'])).toEqual(expect.arrayContaining(['phase 4 is named "Polish", expected "Self-Review"', 'phase 4 "Polish" is not the compiled "### Phase 4:" heading ("Self-Review")']))
     expect(impl(['| 6 Validate | skip | skip |'])).toContain('a row for phase 6, which is outside the closed set 3, 4, 5')
@@ -881,6 +920,10 @@ describe('the level references hold the fixed grammar and no rows (AC-5)', () =>
     expect(renamed, 'the heading seed landed').not.toBe(bodyOf(IMPLEMENT))
     expect(collectClosedSetDefects(IMPLEMENT, renamed)).toContain('the closed set names "3 Polish", but the compiled "### Phase 3:" heading is "Tidy"')
     expect(collectLevelReferenceDefects(withRows(REFS.implement, ['| 3 Polish | skip | skip |']), IMPLEMENT, renamed)).toContain('phase 3 "Polish" is not the compiled "### Phase 3:" heading ("Tidy")')
+    for (const spec of SPECS) {
+      const [num, name] = spec.closed[0]
+      expect(collectClosedSetDefects(spec, `${bodyOf(spec)}\n### Phase ${num}: ${name}\n`), `a second "### Phase ${num}:" heading of ${spec.cmd}`).toContain(`the compiled command holds 2 "### Phase ${num}:" headings, expected 1`)
+    }
     const grown = `${bodyOf(RESOLVE)}\n### Phase 11: Extra\n`
     expect(collectClosedSetDefects(RESOLVE, grown)).toContain('the protected phases are 0, 1, 1b, 5, 7, 8, 9b, 9c, 10, 11, expected 0, 1, 1b, 5, 7, 8, 9b, 9c, 10')
   })
@@ -1107,6 +1150,9 @@ describe('the command carries one Gate level block, closed and in its place (AC-
     const moved = collectLevelBlockDefects(movedBlock(body, spec), spec)
     if (spec.cmd === 'implement') expect(moved).toContain(spec.outsideMessage)
     else expect(moved).toEqual(expect.arrayContaining([`the block is not followed by "${spec.nextParagraph}"`, `the block does not follow "${spec.prevHas}"`]))
+    expect(collectLevelBlockDefects(movedBlock(body, { ...spec, moveBefore: spec.regionFrom }), spec), 'the block in front of its region').toContain(spec.outsideMessage)
+    const block = blockText(spec)
+    expect(collectLevelBlockDefects(`${seed(body, `${block}\n\n`, '')}\n${block}\n\n`, spec), 'the block after its region').toContain(spec.outsideMessage)
   })
 
   it.each(SPECS)('$cmd: known-bad probes: a block inside a learning arm of the source is reported', spec => {
@@ -1182,11 +1228,13 @@ describe('full reads no level reference (AC-2)', () => {
     expect(collectFullPathDefects(body, spec)).toEqual([])
   })
 
-  it.each(SPECS)('$cmd: known-bad probes: a second mention and a removed level condition are reported', spec => {
+  it.each(SPECS)('$cmd: known-bad probes: a second mention, a mention outside the read paragraph and a removed level condition are reported', spec => {
     const body = bodyOf(spec)
     needsBlock(body, spec)
     const defects = (text: string): string[] => collectFullPathDefects(text, spec)
     expect(defects(`${body}\nRead ${spec.refFile} again.\n`)).toContain(`${spec.refFile} is named 2 times, expected once, inside the Gate level block`)
+    const elsewhere = `${seed(body, spec.readParagraph, spec.readParagraph.replace(spec.refFile, 'levels.md'))}\nRead ${spec.refFile}.\n`
+    expect(defects(elsewhere)).toEqual([`the one mention of ${spec.refFile} is outside the Gate level block`])
     expect(defects(seed(body, spec.levelCondition, 'Once per run'))).toContain(`the read is not conditioned on "${spec.levelCondition}"`)
   })
 
