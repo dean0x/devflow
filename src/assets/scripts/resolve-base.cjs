@@ -292,10 +292,10 @@ function select(f) {
     tip = f.localBehind ? 'origin' : 'local';
   }
 
-  const side = tip === 'origin' ? remote : local;
-  const base = side === null ? null : side.base;
-  if (base === null) return stopWith('no-merge-base', fetch);
-  return { baseRef: base, tip, fetch, reason: successReason(f, tip) };
+  // The branches above leave the chosen side present.
+  const side = /** @type {Side} */ (tip === 'origin' ? remote : local);
+  if (side.base === null) return stopWith('no-merge-base', fetch);
+  return { baseRef: side.base, tip, fetch, reason: successReason(f, tip) };
 }
 
 /**
@@ -316,9 +316,9 @@ function successReason(f, tip) {
 /**
  * @typedef {{ status: number | null, stdout?: unknown, stderr?: unknown, error?: { code?: unknown } | null, pid?: number }} RawResult
  * @typedef {(file: string, args: string[], opts: Record<string, unknown>) => RawResult} SpawnFn
- * @typedef {{ spawn: SpawnFn, env: NodeJS.ProcessEnv, parentEnv: NodeJS.ProcessEnv, cwd: string, timeoutMs: number, platform: string,
+ * @typedef {{ spawn: SpawnFn, env: NodeJS.ProcessEnv, parentEnv: NodeJS.ProcessEnv, cwd: string, fetchTimeoutMs: number, platform: string,
  *   now: () => number, deadline: number }} Context
- *   timeoutMs: the bound of the fetch. now: a monotonic clock in ms. deadline: the end of the run budget on that clock.
+ *   fetchTimeoutMs: the bound of the fetch. now: a monotonic clock in ms. deadline: the end of the run budget on that clock.
  * @typedef {{ ok: boolean, answered: boolean, status: number | null, errorCode: string | null, stdout: string, stderr: string, pid: number }} CallResult
  * @typedef {{ env: NodeJS.ProcessEnv, timeoutMs: number, maxBuffer: number, grouped: boolean }} CallOptions
  *   grouped: run as the leader of its own process group, killed with SIGKILL on a timeout
@@ -378,7 +378,7 @@ function makeContext(deps) {
     env: childEnv(parentEnv),
     parentEnv,
     cwd: typeof d.cwd === 'string' && d.cwd !== '' ? d.cwd : process.cwd(),
-    timeoutMs: Math.min(injected, FETCH_TIMEOUT_MS),
+    fetchTimeoutMs: Math.min(injected, FETCH_TIMEOUT_MS),
     platform: typeof d.platform === 'string' ? d.platform : process.platform,
     now,
     deadline: now() + RUN_BUDGET_MS,
@@ -518,7 +518,7 @@ function fetchBase(ctx, name, sshConfigured) {
   const env = Object.assign({}, ctx.env);
   if (!sshConfigured) env.GIT_SSH_COMMAND = SSH_DEFAULT_COMMAND;
   const r = runCall(ctx, 'git', fetchArgv(name, ctx.platform), {
-    env, timeoutMs: ctx.timeoutMs, maxBuffer: FETCH_MAX_BUFFER, grouped: true,
+    env, timeoutMs: ctx.fetchTimeoutMs, maxBuffer: FETCH_MAX_BUFFER, grouped: true,
   });
   if (!r.answered) killGroup(r.pid, ctx.platform);
   if (r.ok) return { state: 'ok', reason: null };
@@ -602,6 +602,96 @@ function commitResolves(ctx, sha) {
   return r.ok && lineOf(r.stdout) === sha;
 }
 
+/**
+ * The two name checks: the strict class, then `git check-ref-format`. A name that fails the
+ * class makes no git call.
+ *
+ * @param {Context} ctx
+ * @param {string} name
+ * @returns {string | null}  the stop reason, or null when the name passes both
+ */
+function checkName(ctx, name) {
+  if (!isStrictName(name)) return 'invalid-name';
+  const format = git(ctx, ['check-ref-format', 'refs/heads/' + name]);
+  if (!format.answered) return 'resolver-unavailable';
+  if (format.status === 1) return 'invalid-name';
+  return format.status === 0 ? null : 'resolver-unavailable';
+}
+
+/**
+ * Whether the fetch is skipped: no origin URL (a missing key or an empty value), or a
+ * cross-repository PR. An unanswered call, or an exit other than 0 or 1, is unknown.
+ *
+ * @param {Context} ctx
+ * @param {boolean} cross
+ * @returns {{ kind: 'ok', skip: null | 'no-origin' | 'fork-origin' } | { kind: 'unknown' }}
+ */
+function originSkip(ctx, cross) {
+  const origin = git(ctx, ['config', '--get', 'remote.origin.url']);
+  if (!origin.answered) return { kind: 'unknown' };
+  if (origin.status === 1 || (origin.status === 0 && lineOf(origin.stdout) === '')) return { kind: 'ok', skip: 'no-origin' };
+  if (origin.status !== 0) return { kind: 'unknown' };
+  return { kind: 'ok', skip: cross ? 'fork-origin' : null };
+}
+
+/**
+ * The fork point of one tip and HEAD: no side for an absent ref, otherwise the merge base.
+ *
+ * @param {Context} ctx
+ * @param {Tip} tip  a tip that is not unknown
+ * @returns {{ kind: 'ok', side: Side | null } | { kind: 'unknown' }}
+ */
+function sideOf(ctx, tip) {
+  if (tip.kind !== 'sha') return { kind: 'ok', side: null };
+  const m = mergeBaseOf(ctx, tip.sha);
+  return m.kind === 'unknown' ? m : { kind: 'ok', side: { base: m.base } };
+}
+
+/**
+ * The fork point of each ref and HEAD: the tip of each ref first, then the merge base of
+ * each tip. The origin ref is read only when `readRemote`. A side is null when its ref is
+ * absent.
+ *
+ * @param {Context} ctx
+ * @param {string} name
+ * @param {boolean} readRemote
+ * @returns {{ kind: 'ok', local: Side | null, remote: Side | null } | { kind: 'unknown' }}
+ */
+function sidesOf(ctx, name, readRemote) {
+  const localTip = tipOf(ctx, 'refs/heads/' + name);
+  if (localTip.kind === 'unknown') return { kind: 'unknown' };
+  /** @type {Tip} */
+  let remoteTip = { kind: 'absent' };
+  if (readRemote) {
+    remoteTip = tipOf(ctx, 'refs/remotes/origin/' + name);
+    if (remoteTip.kind === 'unknown') return { kind: 'unknown' };
+  }
+  const local = sideOf(ctx, localTip);
+  if (local.kind === 'unknown') return local;
+  const remote = sideOf(ctx, remoteTip);
+  if (remote.kind === 'unknown') return remote;
+  return { kind: 'ok', local: local.side, remote: remote.side };
+}
+
+/**
+ * Whether the local fork point is an ancestor of origin's. Asked only in the pre-PR rule,
+ * and only when both sides have a fork point; null otherwise.
+ *
+ * @param {Context} ctx
+ * @param {'local' | 'pr'} mode
+ * @param {Side | null} local
+ * @param {Side | null} remote
+ * @returns {{ kind: 'ok', behind: boolean | null } | { kind: 'unknown' }}
+ */
+function localBehindOf(ctx, mode, local, remote) {
+  if (mode !== 'local' || local === null || remote === null || local.base === null || remote.base === null) {
+    return { kind: 'ok', behind: null };
+  }
+  if (local.base === remote.base) return { kind: 'ok', behind: true };
+  const ancestry = isAncestor(ctx, local.base, remote.base);
+  return ancestry.kind === 'unknown' ? ancestry : { kind: 'ok', behind: ancestry.ancestor };
+}
+
 // ---------------------------------------------------------------------------
 // resolveBase
 // ---------------------------------------------------------------------------
@@ -628,20 +718,12 @@ function resolveBase(req, ctx) {
   /** @param {string} reason @returns {Selection} */
   const stop = reason => stopWith(reason, fetchState);
 
-  if (!isStrictName(name)) return stop('invalid-name');
+  const refused = checkName(ctx, name);
+  if (refused !== null) return stop(refused);
 
-  const format = git(ctx, ['check-ref-format', 'refs/heads/' + name]);
-  if (!format.answered) return stop('resolver-unavailable');
-  if (format.status === 1) return stop('invalid-name');
-  if (format.status !== 0) return stop('resolver-unavailable');
-
-  const origin = git(ctx, ['config', '--get', 'remote.origin.url']);
-  if (!origin.answered) return stop('resolver-unavailable');
-  /** @type {null | 'no-origin' | 'fork-origin'} */
-  let skip = null;
-  if (origin.status === 1 || (origin.status === 0 && lineOf(origin.stdout) === '')) skip = 'no-origin';
-  else if (origin.status !== 0) return stop('resolver-unavailable');
-  else if (req.cross) skip = 'fork-origin';
+  const origin = originSkip(ctx, req.cross);
+  if (origin.kind === 'unknown') return stop('resolver-unavailable');
+  const skip = origin.skip;
 
   /** @type {FetchOutcome} */
   let fetch = { state: 'skipped', reason: null };
@@ -652,43 +734,12 @@ function resolveBase(req, ctx) {
     fetchState = fetch.state;
   }
 
-  const localTip = tipOf(ctx, 'refs/heads/' + name);
-  if (localTip.kind === 'unknown') return stop('resolver-unavailable');
-  /** @type {Tip} */
-  let remoteTip = { kind: 'absent' };
-  if (skip === null && fetch.reason !== 'no-remote-branch') {
-    remoteTip = tipOf(ctx, 'refs/remotes/origin/' + name);
-    if (remoteTip.kind === 'unknown') return stop('resolver-unavailable');
-  }
+  const sides = sidesOf(ctx, name, skip === null && fetch.reason !== 'no-remote-branch');
+  if (sides.kind === 'unknown') return stop('resolver-unavailable');
+  const behind = localBehindOf(ctx, req.mode, sides.local, sides.remote);
+  if (behind.kind === 'unknown') return stop('resolver-unavailable');
 
-  /** @type {Side | null} */
-  let local = null;
-  /** @type {Side | null} */
-  let remote = null;
-  if (localTip.kind === 'sha') {
-    const m = mergeBaseOf(ctx, localTip.sha);
-    if (m.kind === 'unknown') return stop('resolver-unavailable');
-    local = { base: m.base };
-  }
-  if (remoteTip.kind === 'sha') {
-    const m = mergeBaseOf(ctx, remoteTip.sha);
-    if (m.kind === 'unknown') return stop('resolver-unavailable');
-    remote = { base: m.base };
-  }
-
-  /** @type {boolean | null} */
-  let localBehind = null;
-  if (req.mode === 'local' && local !== null && remote !== null && local.base !== null && remote.base !== null) {
-    if (local.base === remote.base) {
-      localBehind = true;
-    } else {
-      const ancestry = isAncestor(ctx, local.base, remote.base);
-      if (ancestry.kind === 'unknown') return stop('resolver-unavailable');
-      localBehind = ancestry.ancestor;
-    }
-  }
-
-  const chosen = select({ mode: req.mode, skip, fetch, local, remote, localBehind });
+  const chosen = select({ mode: req.mode, skip, fetch, local: sides.local, remote: sides.remote, localBehind: behind.behind });
   if (chosen.baseRef !== 'none' && !commitResolves(ctx, chosen.baseRef)) return stop('resolver-unavailable');
   return chosen;
 }
