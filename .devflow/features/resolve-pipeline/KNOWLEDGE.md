@@ -28,7 +28,7 @@ updated: 2026-10-17
 - **KB-INV-14** Steps 9b-0, 9b-3 and 9c run `verify-evidence.cjs` inline through Bash; a `TARGET_DIR_REL` reaching the shell matches `^[A-Za-z0-9._/-]+$` (a fork author picks the branch name), a `{pr_number}` is digits only, else the run counts as failed.
 - **KB-INV-15** The Code-family tail (`_code.mds`) carries Read-once and one quiet-output line byte-equal to `validate.md`'s, outside `## Running commands`; `tests/guards/code-read-economy.test.ts` holds both, and `CODE_FAMILY_SHARED_OUTPUT_LINE` admits that one digest line to Code, Fix and Refactor only.
 - **KB-INV-16** /implement splits by one rule (`SPLIT_FRAGMENTS`; no plan is SINGLE) and passes `{branch_diff}` (`git diff --name-only --diff-filter=d {BASE_BRANCH}...HEAD`) as `FILES_CHANGED` to Polish, Harden, Evaluate, Validate and Test, never the Code agent's list; Setup stops the run, naming the allowed set, unless `BASE_BRANCH` matches `^[A-Za-z0-9._/+@,#-]{1,200}$`.
-- **KB-INV-17** A failed or malformed read of `resolve-levels.md` applies no row in any worktree, keeps every worktree's `GATE_LEVEL` and says `level reference unreadable: no level rows applied`; no level touches the Triage security gate, ESCALATED, the Verification Gate, the CI gate or the compliance directive.
+- **KB-INV-17** A failed or malformed read of `resolve-levels.md` applies no row in any worktree, keeps every worktree's `GATE_LEVEL` and says `level reference unreadable: no level rows applied`; no level touches the Triage security gate, ESCALATED, the Verification Gate, the CI gate or the compliance directive, and Global Triage, Batch FIX_NOW, Fix and Manage Debt never take `skip`.
 - **KB-AP-1** Never route ESCALATED security issues to manage-debt: they belong in `## Escalations` with a display callout.
 - **KB-AP-2** Never body-instruct `Skill(...)` in Triage: its skills preload from frontmatter and a re-invocation trips the re-entrancy guard.
 - **KB-AP-3** Never use TECH_DEBT for "touches many files" or "changes public API": that is FIX_NOW/Careful or FIX_SEPARATE.
@@ -48,7 +48,7 @@ updated: 2026-10-17
 
 ## Overview
 
-`/resolve` keeps judgment apart from execution, so no agent grades its own homework: a dedicated Triage agent (opus) classifies every review issue before any Code agent touches code. The point is **separation of judgment from execution**: Triage assigns verdicts by blast radius, the Code agent fixes only what it is told (`OPERATION: issue-fix`), and a Validate agent (haiku) verifies before any commit reaches the remote. This split replaced a single `Resolver` agent; `devflow init` prunes its installed file, with no tombstone in the sources.
+`/resolve` keeps judgment apart from execution, so no agent grades its own homework: a dedicated Triage agent (opus) classifies every review issue before any Code agent touches code. The point is **separation of judgment from execution**: Triage assigns verdicts by blast radius, the Code agent fixes only what it is told (`OPERATION: issue-fix`), and a Validate agent (haiku) verifies before any commit reaches the remote. This split replaced a single `Resolver` agent, which `devflow init` prunes.
 
 A traceability layer (Phases 1b, 9b, 9c) fetches external review threads, resolves them after the push and checks merge readiness. A seventh verdict, **DUPLICATE**, plus a pre-pass that collapses same-defect issues before the matrix, de-skews the `fp_ratio` convergence formula and prevents duplicate debt tickets without changing the code-review.mds parser.
 
@@ -67,7 +67,7 @@ A traceability layer (Phases 1b, 9b, 9c) fetches external review threads, resolv
 | Validate | **haiku** | build/typecheck/lint/test gate |
 | Test | sonnet | Step 9b-0 only: re-verify stale test-plan items, at most one spawn per cycle |
 
-The `devflow-resolve` entry of `DEVFLOW_PLUGINS` (`plugins.ts`) declares `agents: [git, triage, code, fix, polish, validate, test, knowledge]`; `tests/registry-integrity.test.ts` keeps registry and sources consistent. `update-pr-evidence` (9b-3) and `check-merge-readiness` (9c) stay defined Git operations whose steps are the same script run.
+The `devflow-resolve` entry of `DEVFLOW_PLUGINS` (`plugins.ts`) declares the agents in the table above plus `knowledge`; `tests/registry-integrity.test.ts` keeps registry and sources consistent. `update-pr-evidence` (9b-3) and `check-merge-readiness` (9c) stay defined Git operations whose steps are the same script run.
 
 ## Component Architecture
 
@@ -80,7 +80,7 @@ Phase 0   Pre-flight: 0a worktree discovery; 0b Git validate-branch per worktree
 Phase 1   Parse issues → ISSUES (with reviewer_confidence %)
 Phase 1b  Git fetch-review-threads → THREAD_MAP  [EVIDENCE_POLICY required]
 Phase 2   One global Triage agent → verdict ledger, one verdict per issue; duplicate pre-pass first
-Phase 3   Batch FIX_NOW (same-file sequential, distinct-file parallel, max 5 per batch); DUPLICATEs never dispatched
+Phase 3   Batch FIX_NOW (same-file sequential, distinct-file parallel in one message, max 5 per batch; KB-INV-11); DUPLICATEs never dispatched
 Phase 4   Code × N (issue-fix, PUSH: false) → CODE_AGENT_RESULTS
 Phase 5   Write resolution-summary.md, Tracked = "(pending)"  ← compaction safety
 Phase 6   Polish (only if fixes were made)
@@ -95,7 +95,7 @@ Phase 9c  verify-evidence.cjs readiness, inline  [REQUIRE_NON_AUTHOR_APPROVAL tr
 Phase 10  Display results
 ```
 
-An empty FIX_NOW list skips Phases 3-4 and 6-8 but still writes the summary and runs 9, 9b, 9c and 10; its route reads "skip to Phase 5, then run Phases 9, 9b, 9c and 10", pinned word for word, so it names no pushing phase.
+An empty FIX_NOW list skips Phases 3-4 and 6-8 but still writes the summary and runs 9, 9b, 9c and 10; its route reads "skip to Phase 5, then run Phases 9, 9b, 9c and 10", pinned word for word, so it names no pushing phase. An all-false-positive run takes this route, so the one edge row that reports "No issues to resolve" (`No issues parsed`) names the parse-time case only.
 
 **Phase 5 writes early**: `resolution-summary.md` is written right after Phase 4, because Polish, Validate, the CI gate, manage-debt and thread resolution can each trigger compaction. `Tracked` starts as `(pending)` (or `(pending — TRACEABILITY: DEGRADED ({reason}))` when manage-debt degrades) and is backfilled after Phase 9. Later phases patch sections only: Phase 7 `## Verification`, Phase 9 `Tracked`, Phase 9b `## Third-Party Threads`.
 
@@ -105,9 +105,9 @@ An empty FIX_NOW list skips Phases 3-4 and 6-8 but still writes the summary and 
 
 **`RESOLUTION_TS`** is minted once per run (`date -u`) in Step 0d for every worktree. Phase 5 writes it as the summary's `**Date**:` and 9b-2 passes it, so the local file and the posted dedup marker agree; a retry of this run stays deduplicated while the next /resolve on the same PR posts.
 
-**Settings and decisions**: `resolve.mds` alias-imports `_partials/_settings.mds` and expands `settings_resolve()` once in Step 0d, ahead of the decisions load, publication gate and compliance lens. Those partials import nothing from it and refer to "the line resolved above", so `REVIEW_PUBLICATION`, `COMPLIANCE_FRAMEWORKS` and `GATE_LEVEL` are still read per worktree. `COMPLIANCE_FRAMEWORKS` (`compliance_frameworks()` from `_partials/_compliance.mds`, alias-imported) never reaches an agent as an input: `compliance_inject()` builds each worktree's `COMPLIANCE_DIRECTIVE` from it (KB-INV-13). `DECISIONS_CONTEXT` (KB-INV-12): `decisions_load()` Step 2 has the main model copy the index lines that touch the work, one shared slice for sibling spawns. It exists only in the learning-on build, and `decisions_gate()` sets it to `(none)` when the settings line says `LEARNING=off`.
+**Settings and decisions**: `resolve.mds` alias-imports `_partials/_settings.mds` and expands `settings_resolve()` once in Step 0d, ahead of the decisions load, publication gate and compliance lens. Those partials import nothing from it and refer to "the line resolved above", so `REVIEW_PUBLICATION`, `COMPLIANCE_FRAMEWORKS` and `GATE_LEVEL` are still read per worktree. `compliance_inject()` builds each worktree's `COMPLIANCE_DIRECTIVE` from `COMPLIANCE_FRAMEWORKS`, which never reaches an agent (KB-INV-13). `DECISIONS_CONTEXT` (KB-INV-12): `decisions_load()` Step 2 has the main model copy the index lines that touch the work, one shared slice for sibling spawns; it exists only in the learning-on build (`decisions_gate()` sets `(none)` under `LEARNING=off`).
 
-**Gate level** (KB-INV-17): the settings line carries `GATE_LEVEL`, kept per worktree. Step 0d's `**Gate level.**` block reads `resolve-levels.md` (`agent-references`) once per run when any worktree is `standard` or `lean`, and applies each row in each worktree at its own level; at `full` everywhere nothing is read. The reference holds the fixed grammar and no rows yet, so a read changes nothing, and no row may skip Global Triage. Phase 10 shows `**Gate level**: {GATE_LEVEL, with any level note}` after `Total Issues`, and Phase 5 writes `**Gate level**: {GATE_LEVEL}` into each worktree's summary header after `**Command**: /resolve`; the convergence parser reads neither, so it does not change. /implement has the matching block at the start of Phase 3 (guards: `test-harness-prompt-install`).
+**Gate level** (KB-INV-17): the settings line carries `GATE_LEVEL`, kept per worktree. Step 0d's `**Gate level.**` block reads `resolve-levels.md` (`agent-references`) once per run when any worktree is `standard` or `lean`, and applies each row in each worktree at its own level; at `full` everywhere nothing is read. The reference holds the fixed grammar and no rows yet, so a read changes nothing. The grammar bars `skip` on Global Triage, Batch FIX_NOW, Fix and Manage Debt (no row leaves a FIX_NOW security finding unfixed, a FIX_SEPARATE item unticketed or the CI gate dropped), counts a skipped phase as passed with its `**Produces:**` names reading `skipped`, and has Global Triage, one spawn for all worktrees, take the strictest level in the run (`full`, `standard`, `lean`). Phase 10 shows `**Gate level**: {GATE_LEVEL, with any level note}` after `Total Issues`, and Phase 5 writes `**Gate level**: {GATE_LEVEL}` into each worktree's summary header after `**Command**: /resolve`; the convergence parser reads neither, so it does not change. /implement has the matching block at the start of Phase 3 (guards: `test-harness-prompt-install`).
 
 ### Review Directory Targeting
 
@@ -171,13 +171,11 @@ The Code family is three agents, Code, Fix and Refactor, whose text is the share
 | Fix | `validation-fix` | /resolve Phase 7 gate and /implement Phase 6 | Fix validation failures only; PUSH: false |
 | Fix | `ci-fix` | /resolve Phase 8 and the /implement Phase 10 CI gate, on FAILING | Fix only the checks named in `CI_FAILURES` (names only, Fix fetches the logs itself); PUSH: false |
 
-The rest serve other commands: Code `implement` (default, full implementation with plan; /implement), Fix `alignment-fix` (/implement Phase 5 misalignments) and `qa-fix` (Phase 7 Test failures), and Refactor `edit` (a mechanical rename or move, delegated by the orchestrator charter). No Code variant opens a PR: the Git agent's `ensure-pr-ready` does.
+The rest serve other commands: Code `implement` (default, full implementation with plan; /implement), Fix `alignment-fix` (/implement Phase 5 misalignments) and `qa-fix` (Phase 7 Test failures), and Refactor `edit` (a mechanical rename or move, delegated by the orchestrator charter).
 
 **issue-fix rules**: pre-classified FIX_NOW issues only, never re-litigated (KB-INV-1, KB-AP-8); same-file issues → one commit; a regression fix without a failing-then-passing regression test is INCOMPLETE → report BLOCKED, do not commit; self-verification is compile plus the regression test only (code.mds's `Gate ownership` line: Phase 7 is the one full run); returns `{status, commitShas, unresolved}` plus a `## Verification` block.
 
-**Batching** (KB-INV-11): distinct-file Code agents spawn in one message, at most 5 issues per batch.
-
-**Shared tail**: the `tail()` of `_code.mds` holds `## Running commands`, then `## Principles` (1 Read once: never re-read an unchanged file; over 400 lines, or on a second look, `grep -n` then a ranged Read; 2 Small, focused changes; 3 Fail honestly), one quiet-output line (page large files, cap output, count matches before printing), `## Output` and `## Boundaries`. That line sits outside `## Running commands`, whose bytes `running-commands-parity.test.ts` owns. "Orient, then match patterns", "Work on feature branch", "Be decisive", "Trust handoff summaries" and the issue-fix "Self-verification scope" were cut as duplicates; the handoff `Integration Points` is one `path:line` pointer line.
+**Shared tail**: the `tail()` of `_code.mds` holds `## Running commands`, then `## Principles` (1 Read once: never re-read an unchanged file; over 400 lines, or on a second look, `grep -n` then a ranged Read; 2 Small, focused changes; 3 Fail honestly), one quiet-output line (page large files, cap output, count matches before printing; outside `## Running commands`, whose bytes `running-commands-parity.test.ts` owns), `## Output` and `## Boundaries`. "Orient, then match patterns", "Work on feature branch", "Be decisive", "Trust handoff summaries" and the issue-fix "Self-verification scope" stay cut as duplicates; the handoff `Integration Points` is one `path:line` line.
 
 **/implement split** (`implement.mds`, worded again in the `synthesize/planning.md` reference): SEQUENTIAL_CODE_AGENTS at 10 or more files or 7 or more steps, each phase at most 5 files and 6 steps, else one Code agent. The Phase 3 intro defines `{branch_diff}` once, and each later spawn runs it again: the Code agent's list misses the Polish, Harden and fix commits, and the filter keeps deleted paths out of the Harden and Evaluate reads. `implement-revalidate.md` carries the same guard on a `BASE_BRANCH` read from the PR base, else the default branch, and the Phase 3-7 `**Requires:**` lines name `BASE_BRANCH`; `tests/evidence/implement-flow.test.ts` pins both.
 
@@ -219,11 +217,11 @@ All PR commenting goes through `post-review-summary` (/code-review Phase 3b) or 
 
 ## Triage Agent Contract
 
-Triage (opus, tools Read/Grep/Glob/Bash) is the sole judgment agent.
+Triage (opus, tools Read/Grep/Glob/Bash) is the sole judgment agent and spawns no sub-agents: its tool list has no spawn tool.
 
-- **Skills** preloaded in frontmatter: `devflow:security`, `devflow:worktree-support`, `devflow:apply-feature-knowledge`, and `devflow:apply-decisions` in the learning-on build only.
+- **Skills** preloaded in frontmatter: `devflow:worktree-support`, `devflow:apply-feature-knowledge`, and `devflow:apply-decisions` in the learning-on build only; the security-finding rule is inline in the body.
 - **`FEATURE_KNOWLEDGE`** is per KB: the Rules bullets most relevant to the issues, the KB path and a heading index (sections are read on demand).
-- Reads 30 lines around each reported file:line, runs the pre-pass first, then the matrix on primaries only. Evidence per verdict is in the matrix table; BY_DESIGN's ADR route is absent from the learning-off build, leaving the inline comment/doc.
+- Reads 30 lines around each reported file:line, runs the pre-pass first, then the matrix on primaries only. Evidence per verdict is in the matrix table.
 - Output is a verdict ledger over ESCALATED, FIX_NOW, FALSE_POSITIVE, BY_DESIGN, FIX_SEPARATE, TECH_DEBT and DUPLICATE, plus a Summary. The report cap exempts the whole ledger (returned inline in full) because /resolve checks every issue id against it. It goes to the orchestrator, not to Code agents.
 
 ## Learning Variants
@@ -241,32 +239,32 @@ Validate (haiku) runs build, typecheck, lint and tests (`VALIDATION_SCOPE: full`
 Static guards fail loudly when a literal changes. Wider seam and guard family: `tests/seams/command-agent-input.test.ts` (spawn-key seam: forward, reverse, producers), `tests/goldens/{git-agent-golden,github-status-lines}.test.ts`, `tests/guards/{agent-source-resolver,retired-wording,numeric-floor-manifest,extended-references}.test.ts`.
 
 **`tests/git-agent.test.ts`** (build-gated) reads the Git agent body plus the compiled `devflow:git` references; the body declares no operation, each operation's one reference carries its `## Operation:` heading, contract and steps (`gitOperationReferenceCorpus` is that corpus, `gitAgentSinkCorpus` the union over all providers). `extractOpSectionFromCorpus` cuts an operation in `union` or `sole` mode from its unfenced column-0 `## Operation:` heading to the next unfenced `## `, so a `## ` line in an Output fence is payload.
-- Guard 0 non-vacuousness; Guard 1 a reference section for every `REQUIRED_OPS` entry and no `## Operation:` heading in the body; Guard 2 numeric bounds (comment-length caps, processing and learn-conventions scan bounds) plus the fetch-issues-batch pins.
+- Guard 0 non-vacuousness; Guard 1 a reference section for every `REQUIRED_OPS` entry and no `## Operation:` heading in the body; Guard 2 numeric bounds (comment-length caps, processing and learn-conventions scan bounds).
 - Guard 3 the D9 sentence (KB-INV-8, `sole` mode, `resolve-review-threads` reference) with FALSE_POSITIVE and BY_DESIGN reply-only; Guard 8 the same fragment in `resolve.mds` and compiled `resolve.md`. Guard 4 the D4 rate-limit clauses (4b no provider detector literals in the body). Guard 5 the dedup marker forms, which live only in the PR-host references, with a known-bad probe.
 
-**`tests/registry-integrity.test.ts` Guard 6** (build-gated). Forward: every `OPERATION: X` in a Git-agent spawn of a compiled command has a row in git.md's `## Operations` table. Reverse: every such row is named in a compiled command or listed in `INTERNAL_OPS` (`learn-conventions`, `check-ci-status`); `fetch-issues-batch` is wired live from `plan.mds`. No command spawns `update-pr-evidence` or `check-merge-readiness`, so the reverse check meets `check-merge-readiness` only by its name in resolve.md's prose.
+**`tests/registry-integrity.test.ts` Guard 6** (build-gated). Forward: every `OPERATION: X` in a Git-agent spawn of a compiled command has a row in git.md's `## Operations` table. Reverse: every such row is named in a compiled command or listed in `INTERNAL_OPS` (`learn-conventions`, `check-ci-status`). No command spawns `update-pr-evidence` or `check-merge-readiness`, so the reverse check meets `check-merge-readiness` only by its name in resolve.md's prose.
 
 **`tests/build-mds.test.ts`** (build-gated): §15 compiled code-review.md references `post-review-summary`, passes `REVIEW_TIMESTAMP` and has no `comment-pr`; §16 compiled resolve.md carries the traceability ops, `Third-Party Threads` and the KB-INV-9 gating; §16b (DUPLICATE, consumer) pins the `DUPLICATE` bucket, `duplicate_of`, the `| Duplicates Collapsed | ` row and the `## Duplicates` heading.
 
 **`tests/resolve/duplicate-verdict.test.ts`** (producer; reads Triage via `resolveAgentSource('triage')` plus `resolve.mds`) guards the pre-pass order, the chaining prohibition, security-primary election, the "primary only" matrix scope, the `### DUPLICATE` table and tally, the `duplicate_of` seam and the section-exclusivity sentence.
 
-**`tests/guards/code-read-economy.test.ts`** (build-gated) holds, in the compiled Code, Fix and Refactor bodies (`CODE_AGENT_TYPES`), the Read-once marker (`READ_ONCE_FRAGMENTS`) and the quiet-output line (KB-INV-15), plus the split wording (`SPLIT_FRAGMENTS`) in the planning reference and compiled `/implement`. `collectFullSuiteBriefDefects` reads the Code-family spawns in compiled `/implement` and `/resolve`, both builds, and fails any that asks for the full suite (a Validate spawn may). `core-rules-digest.test.ts` admits no other digest line in those bodies; `code-operation.test.ts` holds the body ceilings; `validate-quiet-form.test.ts` keeps the quiet form out of the shared Running commands block.
+**`tests/guards/code-read-economy.test.ts`** (build-gated) holds, in the compiled Code, Fix and Refactor bodies (`CODE_AGENT_TYPES`), the Read-once marker (`READ_ONCE_FRAGMENTS`) and the quiet-output line (KB-INV-15), plus the split wording (`SPLIT_FRAGMENTS`) in the planning reference and compiled `/implement`. `collectFullSuiteBriefDefects` reads the Code-family spawns in compiled `/implement` and `/resolve`, both builds, and fails any that asks for the full suite (a Validate spawn may). Green proves wording, not obedience: the guard proves the text, not that agents follow it. `core-rules-digest.test.ts` admits no other digest line in those bodies; `code-operation.test.ts` holds the body ceilings; `validate-quiet-form.test.ts` keeps the quiet form out of the shared Running commands block.
 
-**The inline evidence scripts** are pinned by `tests/evidence/resolve-refresh.test.ts` (Phase 9b order, the inline call shape, no Git spawn), `tests/evidence/update-pr-evidence.test.ts` (`publish` under the `gh` fake in `pr-shim.ts`, scrub before post) and `tests/evidence/merge-readiness-script.test.ts` with `merge-readiness.test.ts` (the ladder). `resolve-refresh.test.ts` also keeps unique the resolve.mds lines the frozen status-lines fixture samples by first match (the diagram's Phase 5 and 9 lines, the `gh/GitHub absent` edge-case row, the Tracked and manage-debt DEGRADED lines). `tests/guards/command-size.test.ts` holds the command byte ceilings.
+**The inline evidence scripts** are pinned by `tests/evidence/resolve-refresh.test.ts` (Phase 9b order, the inline call shape, no Git spawn), `tests/evidence/update-pr-evidence.test.ts` (`publish` under the `gh` fake in `pr-shim.ts`, scrub before post) and `tests/evidence/merge-readiness-script.test.ts` with `merge-readiness.test.ts` (the ladder). `resolve-refresh.test.ts` also keeps unique the resolve.mds lines the frozen status-lines fixture samples by first match (list: `test-harness-goldens-budgets`). `tests/guards/command-size.test.ts` holds the command byte ceilings.
 
 ## Anti-Patterns
 
 - **KB-AP-1, KB-AP-3**: a debt backlog buries an escalation with no visibility; a misused TECH_DEBT hides work that is FIX_NOW/Careful (clear blast radius) or FIX_SEPARATE.
 - **KB-AP-2**: a body `Skill(...)` re-enters a skill already preloaded; output containing its guard string (for example `already running`) is a Triage failure in the completeness check (retry once, then abort).
-- **KB-AP-4, KB-AP-5, KB-AP-6**: a summary written after Phase 6 can lose the result data to compaction during Polish or Validate; Phases 1b, 9b-1, 9b-2 and 9c all skip and continue on DEGRADED; callers (resolve.mds, code-review.mds) pass operation inputs only.
+- **KB-AP-4, KB-AP-5, KB-AP-6**: a summary written after Phase 6 can lose its data to compaction; Phases 1b, 9b-1, 9b-2 and 9c all skip and continue on DEGRADED; callers (resolve.mds, code-review.mds) pass operation inputs only.
 - **KB-AP-7, KB-AP-8**: only non-DUPLICATE FIX_NOW issues are batched in Phase 3, and the thread mapping happens before the Git operation is called, so the operation contract stays unchanged.
 
 ## Gotchas
 
 - **KB-AP-9, KB-AP-10**: in multi-worktree mode pre-flight and Code batches run in parallel but Phase 9 is always sequential; `DIFF_FILES` is `""`, not omitted, when the `### Diff Scope` block is missing.
-- **KB-INV-9**: the compliance lens is not a /resolve gate. /code-review and /plan gate their compliance agent on `COMPLIANCE_ACTIVE` (`true` unless `COMPLIANCE_FRAMEWORKS` is `off`); /resolve only builds a per-worktree `COMPLIANCE_DIRECTIVE` for its Code and Fix spawns. Every install carries the compliance skill, so no prompt checks for the skill file.
+- **KB-INV-9**: the compliance lens is not a /resolve gate. /code-review and /plan gate their compliance agent on `COMPLIANCE_ACTIVE` (`true` unless `COMPLIANCE_FRAMEWORKS` is `off`); /resolve only builds a per-worktree `COMPLIANCE_DIRECTIVE` for its Code and Fix spawns.
 - **KB-AP-12**: the Recommended deny-list blocks `rm`'s flag spellings (`rm -f`, `rm -rf` and compounds containing them), not a flagless `rm <path>` or `unlink <path>`. Keep cleanup failure-tolerant, and after a denial retry once in a narrower form before reporting a leftover.
-- **KB-AP-15**: an edit that needs bytes condenses a line the command already states or moves a rare branch to a reference read by explicit path (D-CMD-REF-HAND); the ceiling is never raised.
+- **KB-AP-15**: new text is paid for by condensing a line the command already states or moving a rare branch to a reference (D-CMD-REF-HAND); a ceiling is never raised.
 
 ## Key Files
 
