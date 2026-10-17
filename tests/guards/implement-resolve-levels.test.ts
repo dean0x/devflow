@@ -44,7 +44,7 @@ const LEVEL_DIR = 'skills/devflow:agent-references/references/commands'
 const OPEN = '**Gate level.**'
 const TABLE_HEADER = '| Phase | standard | lean |'
 const TABLE_SEPARATOR = '|-------|----------|------|'
-const RULES_INTRO = 'An `apply:` cell names one bullet of this section. A row names every bullet.'
+const RULES_INTRO = 'An `apply:` cell names one bullet of this section. Each bullet is named by at least one row.'
 
 const GRAMMAR_CELL = "- **Cell:** `-` runs the phase as written; `skip`, alone, skips it; `apply: <name>` applies the `## Rules` bullet `<name>`; `pass level` adds the line `GATE_LEVEL: {GATE_LEVEL}` to every spawn prompt of the phase, and a phase with no spawn never takes `pass level`. Join `apply:` and `pass level` with `; `. Each `apply:` names exactly one bullet. Any other cell is malformed."
 const GRAMMAR_RULES_BULLET = '- **Rules bullet:** a Rules bullet opens `- **<name>:**`.'
@@ -96,7 +96,7 @@ const IMPLEMENT: LevelSpec = {
   protectedPhases: ['1', '2', '6', '7', '8', '9', '10', '11', '12'],
   intro: 'At `standard` and `lean`, a row sets its phase at that level. A phase with no row runs as written, and a table with no rows is well-formed.',
   grammar: [
-    "- **Phase:** `3 Polish`, `4 Self-Review` or `5 Alignment Check`: the number and the name of the command's `### Phase N:` heading, matched with the colon, without its parenthetical. Any other phase, or a name that is not its number's heading, is malformed.",
+    "- **Phase:** `3 Polish`, `4 Self-Review` or `5 Alignment Check`: the number and the text after `### Phase N: ` in the command, without a trailing parenthetical. Any other phase, or a name that is not its number's heading, is malformed.",
     GRAMMAR_CELL,
     GRAMMAR_RULES_BULLET,
     GRAMMAR_SKIPPED,
@@ -140,7 +140,7 @@ const RESOLVE: LevelSpec = {
   protectedPhases: ['0', '1', '1b', '5', '7', '8', '9b', '9c', '10'],
   intro: 'At `standard` and `lean`, a row sets its phase at that level. Each worktree reads the column of its own level, except in a global phase. A phase with no row runs as written, and a table with no rows is well-formed.',
   grammar: [
-    "- **Phase:** `2 Global Triage`, `3 Batch FIX_NOW Issues`, `4 Fix`, `6 Polish` or `9 Manage Debt`: the number and the name of the command's `### Phase N:` heading, matched with the colon, without its parenthetical. Phase `9` never covers `9b` or `9c`. Any other phase, or a name that is not its number's heading, is malformed.",
+    "- **Phase:** `2 Global Triage`, `3 Batch FIX_NOW Issues`, `4 Fix`, `6 Polish` or `9 Manage Debt`: the number and the text after `### Phase N: ` in the command, without a trailing parenthetical. Phase `9` never covers `9b` or `9c`. Any other phase, or a name that is not its number's heading, is malformed.",
     GRAMMAR_CELL,
     GRAMMAR_RULES_BULLET,
     GRAMMAR_SKIPPED,
@@ -466,20 +466,43 @@ export function collectLevelReferenceDefects(ref: string, spec: LevelSpec, body:
 // e. Row safety, a tripwire
 // ---------------------------------------------------------------------------
 
-/** A removal or deferral word, in its common forms. */
-const REMOVAL = /\b(?:skip|drop|remov|omit|disabl|bypass|ignor|defer)\w*|\b(?:without|no)\b|\bturn(?:s|ed|ing)? off\b/i
-/** A control that no level may remove. */
-const FLOOR_OBJECT = /\b(?:security|ESCALATED|compliance|Validate|Harden|the CI gate|the Verification Gate|the evidence claims)\b/i
-const SECURITY = /\bsecurity\b/i
-const DISPOSITION = /\b(?:TECH_DEBT|FALSE_POSITIVE|BY_DESIGN|FIX_SEPARATE)\b/i
-/** Shell, write, push and GitHub text, which no row may add. */
-const ACTION = /```|\bgit\b|\bgh\b|\bpush(?:es|ed|ing)?\b|\bWrite tool\b|\bBash\b|\bGitHub\b/i
+/** Stems of removal verbs; a stem matches every word that begins with it ("remov" matches remove, removed, removal). */
+const REMOVAL_STEMS = ['skip', 'drop', 'remov', 'omit', 'disabl', 'bypass', 'ignor', 'defer', 'stop'] as const
+/** Whole words and phrases of removal and negation; "does not run" and "do not spawn" are read through "not". */
+const REMOVAL_WORDS = ['without', 'no', 'not', 'never', "don't", "doesn't", 'cut', 'leave out', 'turn off', 'turns off', 'turned off', 'turning off'] as const
+/** Names of the controls that no level may remove, with and without "the": the Triage, security, ESCALATED, Harden, Validate, CI, Verification, evidence and compliance controls. */
+const FLOOR_NAMES = ['security', 'ESCALATED', 'compliance', 'Triage', 'Harden', 'Validate', 'validation', 'CI', 'verification', 'evidence'] as const
+/** The dispositions that Triage gives a finding; a security or ESCALATED finding may go to none of them. */
+const DISPOSITIONS = ['TECH_DEBT', 'FALSE_POSITIVE', 'BY_DESIGN', 'FIX_SEPARATE', 'DUPLICATE'] as const
+/** Whole words for a shell, write, push, commit, post or GitHub action, which no row may add. */
+const ACTION_WORDS = ['git', 'gh', 'push', 'pushes', 'pushed', 'pushing', 'commit', 'commits', 'committed', 'committing', 'write', 'writes', 'wrote', 'written', 'writing', 'post', 'posts', 'posted', 'posting', 'PR', 'Bash', 'GitHub'] as const
 
-/** Why one cell or one Rules bullet is unsafe, as phrases. The match is case-insensitive and on word boundaries. */
-function unsafeReasons(text: string): string[] {
+/** The array as regex source: each entry escaped, and a space in a phrase read as any run of spaces. */
+const anyOf = (words: readonly string[]): string => words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '\\s+')).join('|')
+const wholeWords = (words: readonly string[]): RegExp => new RegExp(`\\b(?:${anyOf(words)})\\b`, 'i')
+const REMOVAL = `\\b(?:${anyOf(REMOVAL_STEMS)})\\w*|\\b(?:${anyOf(REMOVAL_WORDS)})\\b`
+/** At most this many words may stand between a removal word and the control it removes, in one sentence. Farther apart, they are two clauses: "Pass no extra files to Validate". */
+const NEAR_WORDS = 2
+const NEAR = `(?:[^\\w.;:!?\\n]+\\w+){0,${NEAR_WORDS}}[^\\w.;:!?\\n]+`
+
+const SECURITY = /\bsecurity\b/i
+const ESCALATED = /\bESCALATED\b/i
+const DISPOSITION = wholeWords(DISPOSITIONS)
+const ACTION = new RegExp(`\`\`\`|${wholeWords(ACTION_WORDS).source}`, 'i')
+
+/** A removal word within NEAR_WORDS of a floor name or of a protected phase named by its number ("Phase 7"), in either order. */
+function removalPattern(floorPhases: readonly string[]): RegExp {
+  const names = `\\b(?:${anyOf(FLOOR_NAMES)})\\b`
+  const floor = floorPhases.length === 0 ? names : `${names}|\\bPhases?\\s+(?:${anyOf(floorPhases)})\\b`
+  return new RegExp(`(?:${REMOVAL})${NEAR}(?:${floor})|(?:${floor})${NEAR}(?:${REMOVAL})`, 'i')
+}
+
+/** Why one cell or one Rules bullet is unsafe, as phrases. The match is case-insensitive and on word boundaries. `floorPhases` are the phase numbers that no row may skip. */
+function unsafeReasons(text: string, floorPhases: readonly string[]): string[] {
   const out: string[] = []
-  if (REMOVAL.test(text) && FLOOR_OBJECT.test(text)) out.push('removes or defers a floor control')
+  if (removalPattern(floorPhases).test(text)) out.push('removes or defers a floor control')
   if (SECURITY.test(text) && DISPOSITION.test(text)) out.push('routes a security finding to a disposition')
+  if (ESCALATED.test(text) && DISPOSITION.test(text)) out.push('routes an ESCALATED finding to a disposition')
   if (ACTION.test(text)) out.push('adds a shell, write, push or GitHub action')
   return out
 }
@@ -500,6 +523,7 @@ export function collectRowSafetyDefects(ref: string, spec: LevelSpec, body: stri
   if (rules.filter(line => !line.startsWith('- ')).join('\n') !== RULES_INTRO) out.push('the "## Rules" section holds text other than the pinned intro and its bullets')
 
   const guarded = protectedOf(spec, body)
+  const floorPhases = [...guarded, ...spec.neverSkip]
   const applied = new Set<string>()
   for (const line of referenceRows(ref)) {
     const cells = splitRow(line)
@@ -511,14 +535,14 @@ export function collectRowSafetyDefects(ref: string, spec: LevelSpec, body: stri
     else if (!spec.closed.some(([n]) => n === num)) out.push(`a row for phase ${num}, which is outside the closed set`)
     levels.forEach((cell, i) => {
       const column = i === 0 ? 'standard' : 'lean'
-      for (const reason of unsafeReasons(cell)) out.push(`row ${num} ${column} cell "${cell}" ${reason}`)
+      for (const reason of unsafeReasons(cell, floorPhases)) out.push(`row ${num} ${column} cell "${cell}" ${reason}`)
       for (const m of cell.matchAll(/apply: ([^;]+)/g)) applied.add(m[1].trim())
       if (spec.neverSkip.includes(num) && cell === 'skip') out.push(`row ${num} ${column} cell ${takesSkip(num)}`)
     })
   }
   for (const line of rules.filter(l => l.startsWith('- '))) {
     const name = /^- \*\*([^*:]+):\*\*/.exec(line)?.[1] ?? line.slice(0, 40)
-    for (const reason of unsafeReasons(line)) out.push(`Rules bullet "${name}" ${reason}`)
+    for (const reason of unsafeReasons(line, floorPhases)) out.push(`Rules bullet "${name}" ${reason}`)
     if (!applied.has(name)) out.push(`Rules bullet "${name}" is named by no row`)
   }
   return out
@@ -856,31 +880,40 @@ describe('row safety is a tripwire over the references (AC-6)', () => {
     const row = spec.sampleRow
     const defects = (bullet: string): string[] => collectRowSafetyDefects(withRows(REFS[spec.cmd], [`| ${row} | apply: probe | - |`], [`- **probe:** ${bullet}`]), spec, body)
     const floor = 'Rules bullet "probe" removes or defers a floor control'
-    for (const bullet of [
-      'Drop the security check.',
-      'Turn off ESCALATED routing.',
-      'Bypass the compliance directive.',
-      'Skip Validate.',
-      'Skip Harden.',
-      'Omit the CI gate.',
-      'Ignore the Verification Gate.',
-      'Defer the evidence claims.',
-      'Run without security review.',
-      'Disable compliance.',
-      'Remove ESCALATED.',
-      'No security check.',
-      'BYPASS THE COMPLIANCE DIRECTIVE.',
-    ]) expect(defects(bullet), bullet).toContain(floor)
-    expect(defects('Route security findings to TECH_DEBT.')).toContain('Rules bullet "probe" routes a security finding to a disposition')
-    expect(defects('Mark every security finding FALSE_POSITIVE.')).toContain('Rules bullet "probe" routes a security finding to a disposition')
-    expect(defects('Send a security finding to BY_DESIGN.')).toContain('Rules bullet "probe" routes a security finding to a disposition')
-    expect(defects('Send a security finding to FIX_SEPARATE.')).toContain('Rules bullet "probe" routes a security finding to a disposition')
+    const routesSecurity = 'Rules bullet "probe" routes a security finding to a disposition'
+    const routesEscalated = 'Rules bullet "probe" routes an ESCALATED finding to a disposition'
+    // A removal verb that precedes the floor name.
+    const verbs = ['Drop the security check.', 'Turn off ESCALATED routing.', 'Bypass the compliance directive.', 'Skip Validate.', 'Skip Harden.', 'Omit the CI gate.', 'Ignore the Verification Gate.', 'Defer the evidence claims.', 'Run without security review.', 'Disable compliance.', 'Remove ESCALATED.', 'No security check.', 'BYPASS THE COMPLIANCE DIRECTIVE.']
+    // A negation, stop, leave out or cut, on either side of the floor name.
+    const negations = ['Validate does not run.', 'Never run Validate.', 'Do not spawn Validate.', "Don't run Validate.", 'Stop Validate.', 'Leave out Validate.', 'Cut the CI gate.']
+    // A floor name without "the", and the names Triage, validation, verification, evidence and CI alone.
+    const bareNames = ['Skip Verification Gate.', 'Skip CI.', 'Omit CI gate.', 'Defer evidence claims.', 'Skip validation.', 'Skip Triage.', 'Skip the Triage agent and treat every finding as FIX_NOW.']
+    // A protected phase named by its number: the Verification Gate and the CI gate are Phases 7 and 8 of /resolve.
+    const phases = ['Skip Phase 7 and Phase 8.', 'Do not run Phase 7.']
+    for (const bullet of [...verbs, ...negations, ...bareNames, ...phases]) expect(defects(bullet), bullet).toContain(floor)
+    expect(defects('Route security findings to TECH_DEBT.')).toContain(routesSecurity)
+    expect(defects('Mark every security finding FALSE_POSITIVE.')).toContain(routesSecurity)
+    expect(defects('Send a security finding to BY_DESIGN.')).toContain(routesSecurity)
+    expect(defects('Send a security finding to FIX_SEPARATE.')).toContain(routesSecurity)
+    expect(defects('Mark security findings DUPLICATE.')).toContain(routesSecurity)
+    expect(defects('Route ESCALATED findings to TECH_DEBT.')).toContain(routesEscalated)
+    expect(defects('Treat ESCALATED as DUPLICATE.')).toContain(routesEscalated)
     const action = 'Rules bullet "probe" adds a shell, write, push or GitHub action'
-    for (const bullet of ['Run git push after the spawn.', 'Call gh pr comment.', 'Use the Write tool on the summary.', 'Run Bash to count lines.', 'Post to GitHub.']) expect(defects(bullet), bullet).toContain(action)
+    for (const bullet of ['Run git push after the spawn.', 'Call gh pr comment.', 'Use the Write tool on the summary.', 'Run Bash to count lines.', 'Post to GitHub.', 'Commit the result.', 'Write the summary to disk.', 'Post a PR comment.']) expect(defects(bullet), bullet).toContain(action)
     expect(defects('Run `x` in a fence: ```sh\nls\n```')).toContain(action)
     expect(defects('Polish only the files named in the diff.'), 'a safe bullet').toEqual([])
+    // "no" and "not" here do not apply to Validate: the removal word and the floor name are too far apart to read as one clause.
+    expect(defects('Pass no extra files to Validate.'), 'a safe bullet with no and Validate').toEqual([])
+    expect(defects('Run Validate on files that are not generated.'), 'a safe bullet with not and Validate').toEqual([])
     const unnamed = collectRowSafetyDefects(withRows(REFS[spec.cmd], [], ['- **tidy:** Polish only the files named in the diff.']), spec, body)
     expect(unnamed).toEqual(['Rules bullet "tidy" is named by no row'])
+  })
+
+  it('known-bad probes (/resolve): a never-skip phase is named by its number, and Polish alone may be skipped by number', () => {
+    const defects = (bullet: string): string[] => collectRowSafetyDefects(withRows(REFS.resolve, ['| 6 Polish | apply: probe | - |'], [`- **probe:** ${bullet}`]), RESOLVE, bodyOf(RESOLVE))
+    const floor = 'Rules bullet "probe" removes or defers a floor control'
+    for (const num of RESOLVE.neverSkip) expect(defects(`Skip Phase ${num}.`), `Phase ${num}`).toContain(floor)
+    expect(defects('Skip Phase 6.'), 'Polish may skip').toEqual([])
   })
 
   it.each(SPECS)('$cmd: known-bad probes: a cell that removes a floor control, a changed Grammar word and a changed Phases intro are reported', spec => {
@@ -890,7 +923,7 @@ describe('row safety is a tripwire over the references (AC-6)', () => {
     const num = row.split(' ')[0]
     expect(collectRowSafetyDefects(withRows(ref, [`| ${row} | apply: bypass-security | - |`], ['- **bypass-security:** Polish the diff.']), spec, body))
       .toContain(`row ${num} standard cell "apply: bypass-security" removes or defers a floor control`)
-    expect(collectRowSafetyDefects(seed(ref, 'matched with the colon', 'matched with the colon today'), spec, body)).toEqual(['the "## Grammar" text is not the pinned text'])
+    expect(collectRowSafetyDefects(seed(ref, 'without a trailing parenthetical', 'without its parenthetical'), spec, body)).toEqual(['the "## Grammar" text is not the pinned text'])
     expect(collectRowSafetyDefects(seed(ref, 'a table with no rows is well-formed', 'a table with no rows is well formed'), spec, body)).toEqual(['the "## Phases" intro is not the pinned paragraph'])
     expect(collectRowSafetyDefects(seed(ref, 'reads `skipped`', 'reads `PASS`'), spec, body), 'the Skipped bullet').toEqual(['the "## Grammar" text is not the pinned text'])
     expect(collectRowSafetyDefects(seed(ref, 'to every spawn prompt of the phase, and a phase with no spawn never takes `pass level`', "to the phase's spawn prompt"), spec, body), 'the pass level target').toEqual(['the "## Grammar" text is not the pinned text'])

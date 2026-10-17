@@ -9,7 +9,7 @@ At `standard` and `lean`, a row sets its phase at that level. A phase with no ro
 
 ## Grammar
 
-- **Phase:** `3 Polish`, `4 Self-Review` or `5 Alignment Check`: the number and the name of the command's `### Phase N:` heading, matched with the colon, without its parenthetical. Any other phase, or a name that is not its number's heading, is malformed.
+- **Phase:** `3 Polish`, `4 Self-Review` or `5 Alignment Check`: the number and the text after `### Phase N: ` in the command, without a trailing parenthetical. Any other phase, or a name that is not its number's heading, is malformed.
 - **Cell:** `-` runs the phase as written; `skip`, alone, skips it; `apply: <name>` applies the `## Rules` bullet `<name>`; `pass level` adds the line `GATE_LEVEL: {GATE_LEVEL}` to every spawn prompt of the phase, and a phase with no spawn never takes `pass level`. Join `apply:` and `pass level` with `; `. Each `apply:` names exactly one bullet. Any other cell is malformed.
 - **Rules bullet:** a Rules bullet opens `- **<name>:**`.
 - **Skipped:** a skipped phase counts as passed, so the next phase starts as written. Each name on its `**Produces:**` line reads `skipped`, and a report shows `skipped`, never a pass.
@@ -19,4 +19,4 @@ At `standard` and `lean`, a row sets its phase at that level. A phase with no ro
 
 ## Rules
 
-An `apply:` cell names one bullet of this section. A row names every bullet.
+An `apply:` cell names one bullet of this section. Each bullet is named by at least one row.
