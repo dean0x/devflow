@@ -718,19 +718,19 @@
     },
     {
       "id": "command-resolve-max",
-      "ceiling": 52252,
-      "pattern": "['resolve', 'on', 52_252],",
+      "ceiling": 52248,
+      "pattern": "['resolve', 'on', 52_248],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/resolve.md, the learning-on build, in bytes. Measured 52,252 after the gate-level block, paid by named cuts (52,287 after #472; 52,422 when #456 closed), with no headroom. Main held 54,899 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/resolve.md, the learning-on build, in bytes. Measured 52,248 after the empty-issues edge row was renamed, paid by named cuts (52,252 after the gate-level block; 52,287 after #472; 52,422 when #456 closed), with no headroom. Main held 54,899 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-resolve-learning-off-max",
-      "ceiling": 49052,
-      "pattern": "['resolve', 'off', 49_052],",
+      "ceiling": 49048,
+      "pattern": "['resolve', 'off', 49_048],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/learning-off/commands/resolve.md, the learning-off build, in bytes. Measured 49,052 after the gate-level block, paid by named cuts (49,087 after #472; 49,220 when #456 closed), with no headroom. Main held 51,692 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/learning-off/commands/resolve.md, the learning-off build, in bytes. Measured 49,048 after the empty-issues edge row was renamed, paid by named cuts (49,052 after the gate-level block; 49,087 after #472; 49,220 when #456 closed), with no headroom. Main held 51,692 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-self-review-max",
