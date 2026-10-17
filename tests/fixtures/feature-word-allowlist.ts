@@ -171,13 +171,6 @@ export const FEATURE_WORD_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
       'names are the ones an older release installed.',
   },
   {
-    path: /^(?:src\/assets\/scripts\/hooks\/session-start-context|src\/core\/tracker\.ts)$/,
-    pattern: /whichever provider it is learning\.|^ \* is learning\.$/,
-    reason:
-      'Ordinary English. The sentence says a tracker agent learns a provider, and it has ' +
-      'nothing to do with the curation feature.',
-  },
-  {
     path: 'src/cli/commands/init.ts',
     pattern: /'(?:(?:background|stop-update|session-end|eval)-learning|learning-lock|lib\/learning-store\.cjs)'/,
     reason:

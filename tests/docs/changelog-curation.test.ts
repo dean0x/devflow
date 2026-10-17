@@ -102,6 +102,7 @@ const CHECKLIST: ReadonlyArray<{ readonly item: string; readonly patterns: reado
   { item: '3.7 toggle during a downgrade', patterns: [/A 3\.7 toggle writes only the old key/, /stays off until you run `devflow curation --enable`/] },
   { item: 'backup location', patterns: [/\.devflow\/learning\.backup-<stamp>-<8 hex>/, /one folder for each move/] },
   { item: 'backup delete step', patterns: [/Delete a backup folder only when `devflow curation --status` shows 0 pending rows/] },
+  { item: 'backup deletion rule', patterns: [/No devflow command deletes a backup, except `devflow uninstall`/, /after you confirm/, /`devflow curation --reset` and `devflow curation --clear` leave the backup in place/] },
   { item: 'status counts backup rows', patterns: [/`Backup:` line/, /pending rows/] },
   { item: 'queue cap', patterns: [/never takes a pending queue above 200 lines/, /overflow files/, /Status counts them as pending rows/, /newest 100 lines/] },
   { item: 'busy outcome', patterns: [/Busy:/, /Wait a moment, then run the command again/] },

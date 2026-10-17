@@ -261,7 +261,7 @@ export const TRACKER_STAGED_PREFIX = '.tracker-staged.';
  * its own attempts: a machine that meets jira in one repository and linear in
  * another must not have the broken one cap the working one. The claim file stays
  * global — one Tracker agent runs at a time on a machine, whichever provider it
- * is learning.
+ * is inferring.
  */
 export function trackerAttemptsName(provider: TrackerProvider): string {
   return `.tracker.${provider}.attempts`;

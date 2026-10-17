@@ -587,7 +587,7 @@ if [ -n "$TRACKER_PROVIDER" ] && [ ! -f "$TRACKER_CONVENTIONS" ]; then
   # connection is routine; without a cap the hook respawns a background agent at
   # every startup forever. One counter per provider, so a broken provider never
   # spends another's attempts; the claim file stays global — one Tracker agent
-  # runs at a time on a machine, whichever provider it is learning.
+  # runs at a time on a machine, whichever provider it is inferring.
   TRACKER_ATTEMPTS_MAX=5
   # Its OWN literal, deliberately NOT shared with Curate's 900 above: one
   # shared constant would make a change to either feature silently reclassify the

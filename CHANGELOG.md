@@ -77,7 +77,9 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
 **The backup:**
 - Where: `.devflow/learning.backup-<stamp>-<8 hex>` in the project, one folder for each move.
   A move makes a backup only where a project had both folders.
-- Devflow never deletes a backup. The old queue files and the overflow files stay in it.
+- No devflow command deletes a backup, except `devflow uninstall`. It removes the backup with the project data, after you confirm.
+  `devflow curation --reset` and `devflow curation --clear` leave the backup in place.
+  The old queue files and the overflow files stay in it.
 - `devflow curation --status` prints one `Backup:` line for each backup folder.
   The line shows how many pending rows the backup still holds.
 - Delete a backup folder only when `devflow curation --status` shows 0 pending rows for it.

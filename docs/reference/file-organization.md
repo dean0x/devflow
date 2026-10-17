@@ -263,7 +263,7 @@ A capture/spawn split across always-on shell-script hooks. Queue-append (`captur
 
 Hooks auto-create `.devflow/` on first run — no manual setup needed per project.
 
-Before 3.8 the folder was `.devflow/learning/`. A project that still has it moves it to `.devflow/curation/` at the next `devflow init` or session start, and a move that finds both folders keeps the loser as `.devflow/learning.backup-<stamp>-<8 hex>` (see the Curation Pipeline section of `docs/reference/hooks.md`). Devflow never deletes a backup. `devflow curation --status` prints its pending rows, and you delete it by hand when it shows none.
+Before 3.8 the folder was `.devflow/learning/`. A project that still has it moves it to `.devflow/curation/` at the next `devflow init` or session start, and a move that finds both folders keeps the loser as `.devflow/learning.backup-<stamp>-<8 hex>` (see the Curation Pipeline section of `docs/reference/hooks.md`). No devflow command deletes a backup, except `devflow uninstall`. It removes the backup with the project data, after you confirm. `devflow curation --reset` and `devflow curation --clear` leave the backup in place. `devflow curation --status` prints its pending rows, and you delete it by hand when it shows none.
 
 ## Project Knowledge
 
