@@ -292,7 +292,7 @@ function reportSweep(swept: LedgerSweepOutcome): BackupSweepReport | null {
   }
 }
 
-function describeFailure(error: unknown): string {
+export function describeFailure(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 

@@ -21,6 +21,7 @@ import {
   type CurationStoreModule,
 } from '../../core/curation-store.js';
 import {
+  describeFailure,
   moveLedgerRoot,
   type GlobalTuningMoveIO,
   type ProjectLedgerMoveIO,
@@ -68,14 +69,14 @@ export function realGlobalTuningMoveIO(): GlobalTuningMoveIO {
         const code = (error as NodeJS.ErrnoException).code;
         if (code === 'EEXIST') return { state: 'exists' };
         if (code !== 'EPERM' && code !== 'ENOTSUP' && code !== 'EXDEV') {
-          return { state: 'failed', message: error instanceof Error ? error.message : String(error) };
+          return { state: 'failed', message: describeFailure(error) };
         }
         if ((await kindOf(to)) !== 'absent') return { state: 'exists' };
         try {
           await fs.rename(from, to);
           return { state: 'renamed' };
         } catch (renameError) {
-          return { state: 'failed', message: renameError instanceof Error ? renameError.message : String(renameError) };
+          return { state: 'failed', message: describeFailure(renameError) };
         }
       }
       try {
@@ -85,7 +86,7 @@ export function realGlobalTuningMoveIO(): GlobalTuningMoveIO {
         const code = (error as NodeJS.ErrnoException).code;
         // The old name is already gone (another run finished the rename): the new name is in place.
         if (code === 'ENOENT') return { state: 'renamed' };
-        return { state: 'failed', message: error instanceof Error ? error.message : String(error) };
+        return { state: 'failed', message: describeFailure(error) };
       }
     },
   };
