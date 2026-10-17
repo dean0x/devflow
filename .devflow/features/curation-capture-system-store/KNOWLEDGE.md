@@ -1,20 +1,20 @@
 ---
-feature: learning-capture-system-store
-name: Learning store, ops and rendering
-description: "Use when changing learning-store.cjs, a json-helper learning op, the observation or ledger schema, the one lock, or rendered decisions.md, pitfalls.md and index.md. Keywords: put-observation, assign-anchor."
+feature: curation-capture-system-store
+name: Curation store, ops and rendering
+description: "Use when changing curation-store.cjs, a json-helper curation op, the observation or ledger schema, the one lock, or rendered decisions.md, pitfalls.md and index.md. Keywords: put-observation, assign-anchor."
 category: architecture
 directories:
-  - src/assets/scripts/hooks/lib/learning-store.cjs
+  - src/assets/scripts/hooks/lib/curation-store.cjs
   - src/assets/scripts/hooks/lib/render-decisions.cjs
   - src/assets/scripts/hooks/lib/decisions-format.cjs
   - src/assets/scripts/hooks/json-helper.cjs
-  - src/core/learning-store.ts
+  - src/core/curation-store.ts
   - src/core/observations.ts
 created: 2026-10-10
 updated: 2026-10-13
 ---
 
-# Learning Store, Ops and Rendering
+# Curation Store, Ops and Rendering
 
 ## Rules
 
@@ -23,7 +23,7 @@ updated: 2026-10-13
 - **KB-INV-3** Every write to the log, ledger, side files and rendered files happens under the one `.decisions.lock`, taken through `withDecisionsLock`; its `fn` returns a Result, and only `render --check` takes no lock.
 - **KB-INV-4** A put carries the whole content and never merges (`validateObservationInput`); a reinforce carries `{id}` alone; text reaches an op only on stdin through a quoted heredoc, argv holds shape-gated tokens only.
 - **KB-INV-5** Store functions return a Result and never print or `process.exit`; `json-helper` sets `process.exitCode` once, outside every lock, and a refusal (exit 1, empty stdout) leaves no lock, quarantine, backup or history behind.
-- **KB-INV-6** The store never creates `.devflow/learning/` or its parent: a writer, `list`, `show` or `render --check` run where the tree is absent refuses and creates nothing.
+- **KB-INV-6** The store never creates `.devflow/curation/` or its parent: a writer, `list`, `show` or `render --check` run where the tree is absent refuses and creates nothing.
 - **KB-INV-7** A malformed line is quarantined to the file's `.rejected.jsonl` before a writer rewrites, never read as a row and never silently dropped; read-only paths count and report but never write.
 - **KB-INV-8** Before a write replaces content, `appendHistory` records the prior log and ledger rows (`HISTORY_DEPTH` versions per id); a write that leaves content as it was records nothing.
 - **KB-INV-9** Claims about code are checked at `origin/HEAD` as last fetched (`HEAD` only without one), never in the working tree or index (`resolveVerifyRef`), and Encoded needs a quote found at that ref's commit.
@@ -33,7 +33,7 @@ updated: 2026-10-13
 - **KB-AP-2** Writing entry content into the ledger by any path but `toLedgerRowV2`: an entry that disagrees with its log row shows as a `ledger-only-content` flag.
 - **KB-AP-3** Deciding promotion from a log row's `anchor_id` or status: most anchored rows have none, so the guard promotes one observation twice under two numbers.
 - **KB-AP-4** A second lock, a lock-free write, or `process.exit()` inside a store function: exit skips the `finally` that releases the lock.
-- **KB-AP-5** Creating `.devflow/learning/` from a writer or render path, or passing a path or text on argv.
+- **KB-AP-5** Creating `.devflow/curation/` from a writer or render path, or passing a path or text on argv.
 - **KB-AP-6** A git call that reads the index without the fsmonitor override in its argv, outside a wrapper whose body prepends it, or whose argv is built at run time.
 - **KB-AP-7** A ledger ID, `#123` issue reference or file-and-line reference in an observation's title, rule or why, or any ledger ID in committed text.
 - **KB-AP-8** Minting an anchor over a number a tracked file cites: that citation would silently bind to an unrelated entry, so `assign-anchor` skips cited numbers.
@@ -44,11 +44,11 @@ updated: 2026-10-13
 
 ## Overview
 
-The store is **the single schema authority** for the learning ledger. An *observation* (title, rule, why, scope, provenance) is stored once in the log. A *ledger row* projects it under an ADR/PF number and adds what is about the entry rather than in it. `decisions.md`, `pitfalls.md` and `index.md` are generated from the ledger. Files are rewritten in place under one lock; history, quarantine and a one-time backup protect what a rewrite replaces. This KB covers the store module, the `json-helper.cjs` ops, the lock and the renderer; the hooks and switches are in the hub (`learning-capture-system`), the Curate agent, the owned queue claim, the CLI and the HUD in `learning-capture-system-agent`, and the symbolic-link rules in `learning-capture-system-links`.
+The store is **the single schema authority** for the curation ledger. An *observation* (title, rule, why, scope, provenance) is stored once in the log. A *ledger row* projects it under an ADR/PF number and adds what is about the entry rather than in it. `decisions.md`, `pitfalls.md` and `index.md` are generated from the ledger. Files are rewritten in place under one lock; history, quarantine and a one-time backup protect what a rewrite replaces. This KB covers the store module, the `json-helper.cjs` ops, the lock and the renderer; the hooks and switches are in the hub (`curation-capture-system`), the Curate agent, the owned queue claim, the CLI and the HUD in `curation-capture-system-agent`, and the symbolic-link rules in `curation-capture-system-links`.
 
-## The learning store
+## The curation store
 
-**Contract.** Store functions return a Result, `{ok:true,value}` or `{ok:false,error:{kind,message}}`, for anything that can fail on input or the lock; they never print and never call `process.exit`. A throw means a broken invariant or an I/O failure. `json-helper.cjs` prints Results (`emit`), and the CLI reaches the same file through `src/core/learning-store.ts`. The store requires only node built-ins, `project-paths`, `mkdir-lock` and `safe-path`; `decisions-format` and `render-decisions` require the store, never the reverse (`renderAll` lazy-requires the renderer on first render). `now` is epoch milliseconds throughout.
+**Contract.** Store functions return a Result, `{ok:true,value}` or `{ok:false,error:{kind,message}}`, for anything that can fail on input or the lock; they never print and never call `process.exit`. A throw means a broken invariant or an I/O failure. `json-helper.cjs` prints Results (`emit`), and the CLI reaches the same file through `src/core/curation-store.ts`. The store requires only node built-ins, `project-paths`, `mkdir-lock` and `safe-path`; `decisions-format` and `render-decisions` require the store, never the reverse (`renderAll` lazy-requires the renderer on first render). `now` is epoch milliseconds throughout.
 
 | What | Keys |
 |---|---|
@@ -76,7 +76,7 @@ The store is **the single schema authority** for the learning ledger. An *observ
 
 ## The ops (json-helper.cjs)
 
-Each runs as `cd "<root>" && node "$HOME/.devflow/scripts/hooks/json-helper.cjs" <op> …` from the project root and takes **no path**: every file path is built from the cwd. argv carries only shape-gated tokens (type, anchor `ANCHOR_ID_RE`, observation id, status, flags, the 16-hex claim token). Text arrives as one JSON object on stdin (read from fd 0, capped inside `readStdinJson`). Exit 0 means the op did what stdout says; exit 1 means empty stdout and the reason on stderr, with nothing written. A multi-problem refusal reads `<op>: the input has <N> problems; nothing was written` then one `  <field>: <message>` per problem. Every learning op except `claim-queue` and `release-claim` sends the claim heartbeat first (see the agent KB). The same file serves the hooks' jq-less fallback through generic ops (see the memory-worker KB), which load no learning module and send no heartbeat.
+Each runs as `cd "<root>" && node "$HOME/.devflow/scripts/hooks/json-helper.cjs" <op> …` from the project root and takes **no path**: every file path is built from the cwd. argv carries only shape-gated tokens (type, anchor `ANCHOR_ID_RE`, observation id, status, flags, the 16-hex claim token). Text arrives as one JSON object on stdin (read from fd 0, capped inside `readStdinJson`). Exit 0 means the op did what stdout says; exit 1 means empty stdout and the reason on stderr, with nothing written. A multi-problem refusal reads `<op>: the input has <N> problems; nothing was written` then one `  <field>: <message>` per problem. Every curation op except `claim-queue`, `release-claim` and `move-ledger` sends the claim heartbeat first (see the agent KB). The same file serves the hooks' jq-less fallback through generic ops (see the memory-worker KB), which load no curation module and send no heartbeat.
 
 ```bash
 # Text reaches an op only on stdin, through a QUOTED heredoc, so the shell expands nothing in it
@@ -104,7 +104,7 @@ The shape is the op contract: the whole content every time, ids and statuses on 
 **Writers.**
 
 - **`claim-due`** prints `ref <origin/HEAD|HEAD> <sha12>` (`ref none` without a commit), then `<anchor> <reason> <bytes>` lines or `due none`. It stamps `last_attempt` on each active entry handed out and writes only then (backup, ledger quarantine, ledger); it never renders, since no template shows `last_attempt`. Scope-glob git calls run before the lock.
-- **`assign-anchor <decision|pitfall> <obs_id>`** (D-E4-SKIP) promotes a v2 observation no ledger row carries. The number is one past the highest any ledger row of that type holds (inactive included; decisions and pitfalls number separately; padded to three digits), skipping each number a tracked file cites as a whole word, at most `E4_MAX_SKIPS`, then it refuses. The scan runs once before the lock: `git ls-files`, else a bounded walk of `CITED_SCAN_MAX_ENTRIES` entries; it skips the learning tree, `CITED_SCAN_EXCLUDED_SEGMENTS` (`.git`, `node_modules`, `target`, `dist`), symlinks, binaries and files over `CITED_SCAN_MAX_FILE_BYTES`, and opens files with O_NOFOLLOW and O_NONBLOCK. stdout is the anchor; each skip is the stderr line `assign-anchor: skipped <anchor>, cited in <path>:<line>`, information not an error. The row is the v2 projection with the type's active status and today (UTC) as `date` and `last_verified`; the log is never written. Refuses an id not in the log or held twice, already promoted, a v1 observation, a type mismatch. Minting over a cited number would silently bind that citation to an unrelated entry.
+- **`assign-anchor <decision|pitfall> <obs_id>`** (D-E4-SKIP) promotes a v2 observation no ledger row carries. The number is one past the highest any ledger row of that type holds (inactive included; decisions and pitfalls number separately; padded to three digits), skipping each number a tracked file cites as a whole word, at most `E4_MAX_SKIPS`, then it refuses. The scan runs once before the lock: `git ls-files`, else a bounded walk of `CITED_SCAN_MAX_ENTRIES` entries; it skips the curation tree, `CITED_SCAN_EXCLUDED_SEGMENTS` (`.git`, `node_modules`, `target`, `dist`), symlinks, binaries and files over `CITED_SCAN_MAX_FILE_BYTES`, and opens files with O_NOFOLLOW and O_NONBLOCK. stdout is the anchor; each skip is the stderr line `assign-anchor: skipped <anchor>, cited in <path>:<line>`, information not an error. The row is the v2 projection with the type's active status and today (UTC) as `date` and `last_verified`; the log is never written. Refuses an id not in the log or held twice, already promoted, a v1 observation, a type mismatch. Minting over a cited number would silently bind that citation to an unrelated entry.
 - **`refresh-anchor <anchor>… [--verified]`**, all or nothing. Without `--verified` each active v2 entry is re-projected from its log row (`reprojected|unchanged <anchor>`, history first when content changes); with it only `last_verified` becomes today (`verified <anchor>`, no log row needed). One refused anchor refuses the batch and every refused anchor is listed: not held once, inactive (`restore it with restore-anchor first`), v1, and without `--verified` a log row missing, doubled, v1 or of another type. A batch that changes nothing writes and renders nothing and exits 0.
 - **`retire-anchor <anchor> <Encoded|Superseded|Retired|Deprecated>`** (D-ENCODED-QUOTE) takes stdin by status (other keys refused) and prints `<status in lower case> <anchor>`:
   - `Retired`, `Deprecated`: `{reason}`, one line within `FIELD_LIMITS.note`, kept as `status_note`.
@@ -114,24 +114,25 @@ The shape is the op contract: the whole content every time, ids and statuses on 
 - **`restore-anchor <anchor>`**: an inactive entry becomes active with its type's status and loses `status_note`, `superseded_by`, `encoded_at`, `retired_on`, `last_verified` and `last_attempt`, so the next `claim-due` hands it out ahead of every verified entry; content and `date` stay. Prints `restored <anchor>`.
 - **`rotate-observations`** (D-ROTATE-UNREFERENCED) prints `rotated <N> observations` (always plural). Under the lock it deletes leftover `.decisions-usage.json` and `.decisions-usage.lock/`, then archives each log row that no ledger row carries (a log row's own status or copied `anchor_id` is ignored) once its last activity (`last_seen`, else `first_seen`, else `created`) is at least `ROTATE_AGE_DAYS` old; an unparseable date keeps the row. An archived row is appended unless an identical JSON line is already there, then the log is rewritten without it; backup and log quarantine happen only when rows are due. Only the ledger knows what is promoted, and a dedup by id would drop the newer version of a row whose older one is already archived.
 - **`claim-queue`** and **`release-claim <token>`**: see the owned claim in the agent KB.
+- **`move-ledger <root> <old> <new>`** is not a curation op and the one op that takes paths, as three argv words (the root is absolute). It moves the old ledger folder to the new name once (`moveLedger`) and prints `none`, `busy` or `moved <mode>` (`whole-folder`, `kept-new` or `moved-in`), then `backup <name>` and one `note <text>` line for each note. It sends no heartbeat, because that would refresh a claim the move must judge stale. It refuses a root that is not a real ledger root (a link, the home directory, the machine directory). It takes the move lock and both folders' store and queue locks with no wait, and a fresh claim in either folder makes it `busy`. A queue row that does not fit under the cap goes to a counted overflow file in the old folder, which stays as the backup. `backupPendingRows(root)` counts the pending rows in `.devflow/learning.backup-*` folders for `devflow curation --status`, read-only (hub KB, KB-INV-17).
 
 ## One lock, no stray tree, no linked tree
 
 **D-ONE-LEARNING-LOCK.** Every write to the log, ledger, side files and rendered files happens under `.decisions.lock`, taken through `withDecisionsLock(opName, root, fn, {timeoutMs, staleMs})` (defaults `LOCK_ACQUIRE_TIMEOUT_MS` and `LOCK_STALE_MS`, mkdir-based). Two writers under two locks each read a file, change it and rename their copy over it, and the second rename silently discards the first's change. `fn` must return a Result (anything else throws a TypeError); a throw propagates after the lock is released; a busy lock answers `<op>: timeout acquiring lock at <lockDir>`. The ops, `render`, `--clear`, `--restore` and `--reset` all use it, and `render` reads the ledger inside it. `render --check` takes none, because taking it would create the lock directory.
 
-**D-NO-STRAY-TREE.** The store never creates `.devflow/learning/` or its parent (the lock mkdir is non-recursive, so ENOENT means no tree). A writer run where the tree is absent refuses `<op>: no .devflow/learning/ under <root> — run from the project root` and creates nothing; `list`, `show` and `render --check` refuse the same way. A writer run from the wrong directory would otherwise create a ledger no session ever reads. Only the capture hooks (through `queue_append_row`, after its link check), `ensure-devflow-init`, `session-start-context` (healing an older install) and `devflow learning --configure` create the tree, each only where no link sits on the way.
+**D-NO-STRAY-TREE.** The store never creates `.devflow/curation/` or its parent (the lock mkdir is non-recursive, so ENOENT means no tree). A writer run where the tree is absent refuses `<op>: no .devflow/curation/ under <root> — run from the project root` and creates nothing; `list`, `show` and `render --check` refuse the same way. A writer run from the wrong directory would otherwise create a ledger no session ever reads. Only the capture hooks (through `queue_append_row`, after its link check), `ensure-devflow-init`, `session-start-context` (healing an older install) and `devflow curation --configure` create the tree, each only where no link sits on the way.
 
-**D-NO-LINKED-TREE.** `withDecisionsLock` is also where a writer learns that `.devflow` or `.devflow/learning` is a symbolic link: it refuses with kind `not-a-directory` before taking the lock (the full rule is in the links KB). An absent tree and a linked tree both leave everything unchanged.
+**D-NO-LINKED-TREE.** `withDecisionsLock` is also where a writer learns that `.devflow` or `.devflow/curation` is a symbolic link: it refuses with kind `not-a-directory` before taking the lock (the full rule is in the links KB). An absent tree and a linked tree both leave everything unchanged.
 
 ## Render (render-decisions.cjs, decisions-format.cjs)
 
-A pure, clock-free render of ledger rows. `renderLearningFiles(root, rows)` returns decisions, pitfalls, index in write order; `renderAndWriteAll` writes them atomically (index last) and throws before writing without the learning directory; the store's `renderAll` writes the same contents and prints nothing, so an op's stderr stays empty on success. **D-V1-BYTE-STABLE**: a row without `schema: 2` renders byte for byte as before (`raw_body` verbatim, else the v1 formatters from `details`) and keeps its v1 index line; only a schema-2 row takes the v2 body and line, because moving v1 bytes would show every untouched entry as changed.
+A pure, clock-free render of ledger rows. `renderCurationFiles(root, rows)` returns decisions, pitfalls, index in write order; `renderAndWriteAll` writes them atomically (index last) and throws before writing without the curation directory; the store's `renderAll` writes the same contents and prints nothing, so an op's stderr stays empty on success. **D-V1-BYTE-STABLE**: a row without `schema: 2` renders byte for byte as before (`raw_body` verbatim, else the v1 formatters from `details`) and keeps its v1 index line; only a schema-2 row takes the v2 body and line, because moving v1 bytes would show every untouched entry as changed.
 
 ```markdown
 <!-- TL;DR: 2 decisions -->      <- active count only; plural even for one
 # Architectural Decisions
 
-Generated from the local learning ledger by devflow; do not edit. Active entries follow; retired ones are listed under Inactive.
+Generated from the local curation ledger by devflow; do not edit. Active entries follow; retired ones are listed under Inactive.
 
 ## ADR-NNN: {title}
 
@@ -177,22 +178,22 @@ Every loop and read has a bound, each a named constant: `E4_MAX_SKIPS`, `CITED_S
 
 | File | Purpose |
 |------|---------|
-| `src/assets/scripts/hooks/lib/learning-store.cjs` | The store: schema, validation, projection, locking, every writer and reader |
-| `src/assets/scripts/hooks/json-helper.cjs` | Op dispatcher: `learning()` lazy load, `emit`, `readStdinJson`, `LEARNING_OPS`, heartbeat; exports nothing |
-| `src/assets/scripts/hooks/lib/render-decisions.cjs` | Renderer, `renderLearningFiles`, `render`/`--check` CLI |
+| `src/assets/scripts/hooks/lib/curation-store.cjs` | The store: schema, validation, projection, locking, every writer and reader |
+| `src/assets/scripts/hooks/json-helper.cjs` | Op dispatcher: `curation()` lazy load, `emit`, `readStdinJson`, `CURATION_OPS`, heartbeat; exports nothing |
+| `src/assets/scripts/hooks/lib/render-decisions.cjs` | Renderer, `renderCurationFiles`, `render`/`--check` CLI |
 | `src/assets/scripts/hooks/lib/decisions-format.cjs` | v1 formatters (byte-stable), v2 body, Inactive table, TL;DR, index builder |
 | `src/assets/scripts/hooks/lib/project-paths.cjs` · `src/core/project-paths.ts` | Path single source, export parity pinned by a test |
 | `src/assets/scripts/hooks/lib/mkdir-lock.cjs` · `lib/safe-path.cjs` | mkdir lock helpers, path safety |
-| `src/core/learning-store.ts` | Typed seam onto the store (see the agent KB) |
+| `src/core/curation-store.ts` | Typed seam onto the store (see the agent KB) |
 | `src/core/observations.ts` | Status lists mirrored for the HUD, parity pinned by a test |
-| `tests/decisions/learning-fixtures.ts` | Row factories, `seedLearningTree`, `initGitRepo`, `runJsonHelper`, `requireLearningStore` |
-| `tests/decisions/learning-store.test.ts` | Store behaviour, including the linked-tree and linked-file suites |
+| `tests/decisions/curation-fixtures.ts` | Row factories, `seedCurationTree`, `initGitRepo`, `runJsonHelper`, `requireCurationStore` |
+| `tests/decisions/curation-store.test.ts` | Store behaviour, including the linked-tree and linked-file suites |
 
 ## Related
 
-- `.devflow/features/learning-capture-system/KNOWLEDGE.md`: the hub: data files, feature switches, roots, the capture hooks and the table of D-series names.
-- `.devflow/features/learning-capture-system-agent/KNOWLEDGE.md`: the Curate agent that drives these ops, the owned queue claim and heartbeat, `devflow learning`, the TypeScript seam and the HUD.
-- `.devflow/features/learning-capture-system-links/KNOWLEDGE.md`: how the store refuses to write or read through a symbolic link (`linkedLearningFolder`, `readTextUnlinked`).
-- `.devflow/features/learning-capture-system-memory-worker/KNOWLEDGE.md`: the generic jq-less ops that share `json-helper.cjs`.
+- `.devflow/features/curation-capture-system/KNOWLEDGE.md`: the hub: data files, feature switches, roots, the capture hooks and the table of D-series names.
+- `.devflow/features/curation-capture-system-agent/KNOWLEDGE.md`: the Curate agent that drives these ops, the owned queue claim and heartbeat, `devflow curation`, the TypeScript seam and the HUD.
+- `.devflow/features/curation-capture-system-links/KNOWLEDGE.md`: how the store refuses to write or read through a symbolic link (`linkedCurationFolder`, `readTextUnlinked`).
+- `.devflow/features/curation-capture-system-memory-worker/KNOWLEDGE.md`: the generic jq-less ops that share `json-helper.cjs`.
 - `.devflow/features/test-harness/KNOWLEDGE.md`: the guards on this area (`no-ledger-citations`, `no-fsmonitor-index-read`).
-- `docs/reference/hooks.md` (the Learning pipeline) and `docs/reference/file-organization.md` (the data-file table and ops).
+- `docs/reference/hooks.md` (the Curation pipeline) and `docs/reference/file-organization.md` (the data-file table and ops).

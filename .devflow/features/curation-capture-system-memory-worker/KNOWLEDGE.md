@@ -1,5 +1,5 @@
 ---
-feature: learning-capture-system-memory-worker
+feature: curation-capture-system-memory-worker
 name: Memory worker, backup and jq-less JSON fallback
 description: "Use when changing background-memory-update, its queue parse, memory-permission, the claude -p argv, version floor, the pre-compact backup or json-parse. Keywords: verify_and_swap, agents.memory, backup.json."
 category: component-patterns
@@ -106,7 +106,7 @@ The memory queue (`.devflow/memory/.pending-turns.jsonl`) is drained by the deta
 
 ## Generic ops (the hooks' jq-less fallback)
 
-`hooks/json-parse` is the JSON seam the shell hooks source: each wrapper runs `jq` when it is installed and otherwise one generic op of `json-helper.cjs` on `node`, and with neither tool `_JSON_AVAILABLE` is false, which a hook checks after sourcing. The generic ops load no learning module and send no heartbeat. They are exactly `get-field` (behind `json_field` and `json_field_file`), `get-string-field` (behind `json_string_field_file`), `array-length` (behind `json_array_length_file`: the element count of an array field as digits, the word `unknown` for an absent field or any other type, and no output with a failing status for a file that cannot be read or parsed), `extract-cwd-field` (`json_extract_cwd_field`, and `json_extract_cwd_prompt` over it), `session-output <context> [message]` (`json_session_output "$ctx" ["$msg"]`; with one argument or an empty message the envelope is the plain one, and a message becomes the top-level `systemMessage`, alone when the context is empty, D-SYSTEMMESSAGE-ENVELOPE), `prompt-output` (`json_prompt_output`) and `backup-construct` (`json_backup_construct`).
+`hooks/json-parse` is the JSON seam the shell hooks source: each wrapper runs `jq` when it is installed and otherwise one generic op of `json-helper.cjs` on `node`, and with neither tool `_JSON_AVAILABLE` is false, which a hook checks after sourcing. The generic ops load no curation module and send no heartbeat. They are exactly `get-field` (behind `json_field` and `json_field_file`), `get-string-field` (behind `json_string_field_file`), `array-length` (behind `json_array_length_file`: the element count of an array field as digits, the word `unknown` for an absent field or any other type, and no output with a failing status for a file that cannot be read or parsed), `extract-cwd-field` (`json_extract_cwd_field`, and `json_extract_cwd_prompt` over it), `session-output <context> [message]` (`json_session_output "$ctx" ["$msg"]`; with one argument or an empty message the envelope is the plain one, and a message becomes the top-level `systemMessage`, alone when the context is empty, D-SYSTEMMESSAGE-ENVELOPE), `prompt-output` (`json_prompt_output`) and `backup-construct` (`json_backup_construct`).
 
 - **Silent where jq is; failure is a status, not a message.** Where a jq path discards stderr (`json_field`, `json_field_file`, `json_string_field_file`, `json_array_length_file`, `json_extract_cwd_field`), its node fallback does too; a caller that must survive an unparseable file, or must not trust partial output (jq prints each value it parsed before the one that failed), checks the status, and a `set -e` hook guards the call. `json_field_file` redirects stderr BEFORE stdin (`2>/dev/null < "$file"`), so the shell's own error for a file it cannot open is discarded too. The three envelope wrappers keep stderr on both backends.
 - **Files arrive on stdin.** No op takes a path: `json_field_file` feeds its file to `get-field`, `json_string_field_file` to `get-string-field`.
@@ -152,8 +152,8 @@ The memory queue (`.devflow/memory/.pending-turns.jsonl`) is drained by the deta
 
 ## Related
 
-- `.devflow/features/learning-capture-system/KNOWLEDGE.md`: the hub: the capture hooks that fill the memory queue, the feature switches and hook ownership.
-- `.devflow/features/learning-capture-system-links/KNOWLEDGE.md`: the helpers (`df_no_symlink_below`, `df_file_below`) and the safe-create and mode rules this pipeline applies.
-- `.devflow/features/learning-capture-system-store/KNOWLEDGE.md`: `json-helper.cjs` and the learning ops that share the file with the generic ops.
+- `.devflow/features/curation-capture-system/KNOWLEDGE.md`: the hub: the capture hooks that fill the memory queue, the feature switches and hook ownership.
+- `.devflow/features/curation-capture-system-links/KNOWLEDGE.md`: the helpers (`df_no_symlink_below`, `df_file_below`) and the safe-create and mode rules this pipeline applies.
+- `.devflow/features/curation-capture-system-store/KNOWLEDGE.md`: `json-helper.cjs` and the curation ops that share the file with the generic ops.
 - `.devflow/features/external-model-routing/KNOWLEDGE.md`: the `agents.memory` entry's shape and worker domain, and the `devflow agents` writer.
 - `docs/reference/hooks.md`: the Working Memory pipeline.
