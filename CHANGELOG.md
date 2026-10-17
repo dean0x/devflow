@@ -12,6 +12,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **Stale-install window:**
 - Until you run `devflow init`, the installed `/implement` and Validate do not run the lint pack.
 
+### Upgrade notes — Base resolver
+
+The base resolver ([#495](https://github.com/dean0x/devflow/issues/495)) adds stops and a script call.
+Do the step below after you update.
+
+**What you must do:**
+- Run `devflow init` after you update. A full init installs `resolve-base.cjs` and the updated commands.
+
+**New stops:**
+- `/implement`, `/code-review` and `/bug-analysis` stop when no usable base exists, for example in a shallow clone without the base history. The message names the cause and the fix: `git fetch --unshallow`, `git fetch origin <base>`, or a re-run (and `devflow init` if the re-run repeats the stop).
+- The same three commands stop on a base branch name outside the allowed set. The message states the set.
+- In `/code-review` multi-worktree mode, a rejected base blocks only that worktree.
+- The Git agent's `validate-branch` returns BLOCKED in the same cases. `/resolve` takes its branch diff from it.
+- The Git agent's `ensure-pr-ready` stops only on a base name outside the allowed set. For any other base stop it prints `TRACEABILITY: DEGRADED (base {REASON}; fix: {fix})` and goes on.
+
+**New resolver call:**
+- `ensure-pr-ready` calls `resolve-base.cjs` in `pr` mode with the base branch of the PR. The call makes at most one fetch of the base branch.
+- `/implement` passes the base ref that it resolved in Phase 1, so a normal `/implement` run makes one fetch.
+- The `/dynamic-build` wave PR step runs `ensure-pr-ready` with no base ref, so that step makes this call.
+
+**Stale-install window:**
+- Until you run `devflow init`, the installed commands and Git agent do not call the resolver, so the new stops do not apply.
+
+**Known limits:**
+- A fetch that stops at its 45-second bound can leave a `refs/remotes/origin/<name>.lock` file in the git directory. Later runs then report `fetch-failed` until you delete the file.
+
 ### Added
 
 - **`devflow init` asks for the gate level** ([#543](https://github.com/dean0x/devflow/issues/543)). Before, only `devflow gates --set <level>` set the machine gate level, so a user who ran `init` did not learn that the level exists. An interactive `init` now asks for it: `full`, `standard` or `lean`, each with a one-line effect. On a first install the prompt starts on `standard`. On a re-init it shows the current value and starts on it, so Enter keeps a valid level. A malformed or `null` stored value starts the prompt on `full`, and accepting it writes `full` in its place; the machine level that applies does not change. `devflow init --gate-level <full|standard|lean>` sets the machine level with no prompt, in an interactive or a non-interactive run. A bad value, or no value, exits 1 before `init` writes anything and names the valid levels; the flag cannot be combined with `--hud-only`. `devflow init --recommended` and a non-interactive `init` show no prompt and keep the stored value. The Recommended settings note has a `Gate level:` row. The summary at the end of `init` shows the level that is now set, and adds `(was X)` when the run changes the machine level that applies. `init` writes the same machine default as `devflow gates --set`, and a personal `gateLevel` in a repository's `.devflow/config.json` still wins there. If `~/.devflow/manifest.json` is valid JSON with a `features` object that devflow rejects (a field is missing or mistyped, or a byte-order mark leads), a promptless `init` and `init --hud-only` keep the gate level stored in it, as it is stored, and warn that they kept the level while they replaced the file. When the prompt runs, your answer is the level, and accepting a malformed or `null` value writes `full`. If the manifest is corrupt, is not JSON, has no `features` object, or is over 1 MiB and also one that devflow rejects, `init` cannot read the level. The prompt shows `Current setting: unknown` and starts on `standard`. A promptless `init` or `init --hud-only` records no level and warns that `standard` applies and that `devflow gates --set <level>` sets it again. `devflow gates --status` words its manifest warning for each case. `devflow init --reset` still removes the stored level, and over a rejected manifest the summary names the level it removed, as in `(was full)`. A bare `devflow gates --set` now names the levels in its error, as `devflow init --gate-level` does.
@@ -19,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **`/implement`, `/code-review`, `/bug-analysis` and `/resolve` use a fresh base for branch diffs, and branch-name validation is tighter** ([#495](https://github.com/dean0x/devflow/issues/495)). A new script, `resolve-base.cjs`, fetches the base branch, picks the base by one stated rule and prints one status line. The branch diff starts at the fork point of that base and `HEAD`. A fetch that gets no answer stops after 45 seconds. The command then uses the best base it has and prints a warning. When no usable base exists, for example in a shallow clone without the base history, `/implement`, `/code-review` and `/bug-analysis` stop and name the cause and a fix. `/resolve` takes its branch diff from the Git agent's `validate-branch`, which returns BLOCKED in that case. Each `/implement` run can make up to two extra fetches of the base branch. A base branch name is checked against a stricter allowed set, and the refusal message states that set. Run `devflow init` after you update, to install the script and the updated commands.
+- **`/implement`, `/code-review`, `/bug-analysis` and `/resolve` use a fresh base for branch diffs, and branch-name validation is tighter** ([#495](https://github.com/dean0x/devflow/issues/495)). A new script, `resolve-base.cjs`, makes at most one fetch of the base branch, picks the base by one stated rule and prints one status line. The fetch updates only the remote-tracking ref of the base branch, and credential prompts are off for it. The branch diff starts at the fork point of that base and `HEAD`. The fetch stops after 45 seconds, each local git call stops after 30 seconds, and one run has a budget of 100 seconds. A local git call that gives no answer reports `resolver-unavailable`. When the fetch fails or times out, `/implement`, `/code-review` and `/bug-analysis` use the best base they have and print a warning. Known limit: `/resolve` uses that base without a warning. When no usable base exists, for example in a shallow clone without the base history, `/implement`, `/code-review` and `/bug-analysis` stop and name the cause and a fix. `/resolve` takes its branch diff from the Git agent's `validate-branch`, which returns BLOCKED in that case. A normal `/implement` run fetches the base branch once, and a re-validation that you ask for can add one more fetch. A base branch name is checked against a stricter allowed set, and the refusal message states that set. In `/code-review` multi-worktree mode, a rejected base blocks only that worktree. `/code-review` and `/bug-analysis` use the stored review head of an incremental run only when it is a commit ID of 40 or 64 lowercase hex digits. Any other value takes the full range. Run `devflow init` after you update, to install the script and the updated commands.
 
 ---
 
