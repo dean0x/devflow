@@ -65,7 +65,7 @@ describe('initDecisionsContent', () => {
     expect(result).toBe(
       '<!-- TL;DR: 0 decisions -->\n' +
       '# Architectural Decisions\n\n' +
-      'Generated from the local learning ledger by devflow; do not edit. ' +
+      'Generated from the local curation ledger by devflow; do not edit. ' +
       'Active entries follow; retired ones are listed under Inactive.\n'
     );
   });
@@ -75,7 +75,7 @@ describe('initDecisionsContent', () => {
     expect(result).toBe(
       '<!-- TL;DR: 0 pitfalls -->\n' +
       '# Known Pitfalls\n\n' +
-      'Generated from the local learning ledger by devflow; do not edit. ' +
+      'Generated from the local curation ledger by devflow; do not edit. ' +
       'Active entries follow; retired ones are listed under Inactive.\n'
     );
   });

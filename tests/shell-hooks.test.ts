@@ -923,7 +923,7 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
     const { stdout } = runHook(path.join(HOOKS_DIR, 'session-start-context'), { cwd: wt, source: 'startup' }, homeDir);
     const ctx = JSON.parse(stdout).hookSpecificOutput.additionalContext as string;
 
-    expect(ctx).toContain('--- LEARNING MAINTENANCE ---');
+    expect(ctx).toContain('--- CURATION MAINTENANCE ---');
     expect(ctx).toContain(`Project root: ${main}")`);
     expect(ctx).not.toContain(`Project root: ${wt}`);
     expect(ctx).toContain('ADR-003 Main');
@@ -3135,6 +3135,12 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
 
   const wholeLines = (content: string): string[] => content.split('\n').map(l => l.trim());
 
+  /** The comment word moved with the feature name; it is comment text, never a block sentinel. */
+  const CURATION_COMMENT = '# Devflow runtime data — local by default (memory, curation, docs, locks).';
+  const OLD_COMMENT = '# Devflow runtime data — local by default (memory, learning, docs, locks).';
+  /** The shipped current block as a user's .gitignore holds it from before the rename. */
+  const OLD_COMMENT_BLOCK = DEVFLOW_GITIGNORE_BLOCK.replace(CURATION_COMMENT, OLD_COMMENT);
+
   const PARITY_CASES: Array<{
     label: string;
     input: string | null;
@@ -3542,6 +3548,17 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
       projectLinePresent: true,
       blockPresent: false,
     },
+    {
+      label: '(z) current block carrying the pre-curation comment — no-op in both twins, no duplicate block, no stamp work',
+      input: `node_modules/\n\n${OLD_COMMENT_BLOCK}\n`,
+      expected: `node_modules/\n\n${OLD_COMMENT_BLOCK}\n`,
+      changed: false,
+      devflowSentinelPresent: true,
+      claudeignoreLinePresent: true,
+      policyLinePresent: true,
+      projectLinePresent: true,
+      blockPresent: false,
+    },
 ];
 
   it('PARITY_CASES covers every v5 and v6 upgrade row and keeps the completion lines out of every no-sentinel row', () => {
@@ -3549,10 +3566,10 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
     // and D-GITIGNORE-V6 migrations depend on exist, and the only row with no block
     // sentinel in its result is the user opt-out.
     const labels = PARITY_CASES.map(r => r.label);
-    for (const tag of ['(g)', '(h)', '(i)', '(j)', '(k)', '(l)', '(m)', '(n)', '(o)', '(p)', '(q)', '(r)', '(s)', '(t)', '(u)', '(v)', '(w)', '(x)', '(y)']) {
+    for (const tag of ['(g)', '(h)', '(i)', '(j)', '(k)', '(l)', '(m)', '(n)', '(o)', '(p)', '(q)', '(r)', '(s)', '(t)', '(u)', '(v)', '(w)', '(x)', '(y)', '(z)']) {
       expect(labels.filter(l => l.startsWith(tag)), `row ${tag}`).toHaveLength(1);
     }
-    expect(PARITY_CASES.length).toBeGreaterThanOrEqual(33);
+    expect(PARITY_CASES.length).toBeGreaterThanOrEqual(34);
     // The v5 history literal really is v5: the policy line, no project line.
     expect(V5_BLOCK_SEED_LINES).toContain(POLICY_LINE);
     expect(V5_BLOCK_SEED_LINES).not.toContain(PROJECT_LINE);
@@ -3562,6 +3579,19 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
     expect(current.slice(-3)).toEqual([POLICY_LINE, PROJECT_LINE, CLAUDEIGNORE_LINE]);
     expect(PARITY_CASES.filter(r => !r.devflowSentinelPresent).map(r => r.label))
       .toEqual(['user-authored /.devflow/ entry (no carve-out forced)']);
+  });
+
+  it('both writers open a fresh block with the curation comment, and the old-comment fixture differs from it in that line alone', () => {
+    const shellResult = runShell(null);
+    const tsResult = applyTs(null);
+    expect(shellResult.split('\n')[0], 'shell: first line').toBe(CURATION_COMMENT);
+    expect(tsResult.split('\n')[0], 'ts: first line').toBe(CURATION_COMMENT);
+    expect(shellResult, 'shell: the retired comment word is gone').not.toContain(OLD_COMMENT);
+    expect(tsResult, 'ts: the retired comment word is gone').not.toContain(OLD_COMMENT);
+    expect(OLD_COMMENT_BLOCK).not.toBe(DEVFLOW_GITIGNORE_BLOCK);
+    expect(OLD_COMMENT_BLOCK.split('\n').slice(1)).toEqual(DEVFLOW_GITIGNORE_BLOCK.split('\n').slice(1));
+    // Same length: the swap moves no byte count.
+    expect(OLD_COMMENT_BLOCK.length).toBe(DEVFLOW_GITIGNORE_BLOCK.length);
   });
 
   for (const row of PARITY_CASES) {
@@ -4159,7 +4189,7 @@ describe('session-start-context root .gitignore (memory-independent)', () => {
 // =============================================================================
 //
 // When the learning queue holds captured turns (or a crashed run left a stale
-// .processing batch), session-start-context emits a "--- LEARNING MAINTENANCE ---"
+// .processing batch), session-start-context emits a "--- CURATION MAINTENANCE ---"
 // directive instructing the main model to spawn the background Curate agent with
 // the resolved model: a valid project curation.json, then a `devflow agents`
 // Curate mapping (agents.curate.model, else the pre-rename agents.learning.model; it
@@ -4170,7 +4200,7 @@ describe('session-start-context root .gitignore (memory-independent)', () => {
 // `features.learning` in ~/.devflow/manifest.json, which the checkout's
 // project.json / config.json can only narrow (D-FEATURES-NARROW-ONLY).
 
-describe('session-start-context: learning maintenance directive (Section 2)', () => {
+describe('session-start-context: curation maintenance directive (Section 2)', () => {
   const CONTEXT_HOOK = path.join(HOOKS_DIR, 'session-start-context');
 
   let tmpDir: string;
@@ -4209,7 +4239,7 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
     expect(exitCode).toBe(0);
 
     const ctx = contextOf(stdout);
-    expect(ctx).toContain('--- LEARNING MAINTENANCE ---');
+    expect(ctx).toContain('--- CURATION MAINTENANCE ---');
     expect(ctx).toContain('subagent_type="Curate"');
     expect(ctx, 'the installed frontmatter decides the model').not.toContain('model=');
     expect(ctx, 'there is no opus fallback in the directive').not.toMatch(/\bopus\b/);
@@ -4224,6 +4254,21 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
     expect(fs.existsSync(queuePath(tmpDir))).toBe(true);
   });
 
+  it('the directive says curation throughout: the header and both body lines, never the retired feature word', () => {
+    seedQueue(tmpDir);
+
+    const { stdout } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
+
+    const ctx = contextOf(stdout);
+    const section = ctx.slice(ctx.indexOf('--- CURATION MAINTENANCE ---'));
+    expect(section.startsWith('--- CURATION MAINTENANCE ---\n')).toBe(true);
+    expect(section).toContain('Captured turns are pending in the curation queue.');
+    expect(section).toContain('Process the pending curation queue per your agent instructions.');
+    // The project root is the test's own temp dir, whose name this check must not read.
+    expect(section.split(tmpDir).join('<root>')).not.toMatch(/learning/i);
+    expect(ctx).not.toContain('LEARNING MAINTENANCE');
+  });
+
   it('no directive when the queue is empty or absent', () => {
     // Zero-byte queue file (the -s test) + a TL;DR so there is JSON output to inspect.
     fs.writeFileSync(queuePath(tmpDir), '');
@@ -4234,7 +4279,7 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
 
     const { stdout, exitCode } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
     expect(exitCode).toBe(0);
-    expect(contextOf(stdout)).not.toContain('LEARNING MAINTENANCE');
+    expect(contextOf(stdout)).not.toContain('CURATION MAINTENANCE');
   });
 
   // D-FEATURES-NARROW-ONLY: `devflow init --no-curation` / `devflow learning
@@ -4278,7 +4323,7 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
       writeManifestFeatures({ ambient: true });
 
       const { stdout } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir, ENV);
-      expect(contextOf(stdout)).toContain('--- LEARNING MAINTENANCE ---');
+      expect(contextOf(stdout)).toContain('--- CURATION MAINTENANCE ---');
     });
 
     it('a stale repo config learning:false does not suppress the directive or the TL;DR', () => {
@@ -4288,7 +4333,7 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
       writeManifestFeatures({ learning: true });
 
       const ctx = contextOf(runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir, ENV).stdout);
-      expect(ctx).toContain('--- LEARNING MAINTENANCE ---');
+      expect(ctx).toContain('--- CURATION MAINTENANCE ---');
       expect(ctx).toContain('PROJECT DECISIONS');
     });
   });
@@ -4308,7 +4353,7 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
 
     const { stdout, exitCode } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
     expect(exitCode).toBe(0);
-    expect(stdout.trim() === '' || !contextOf(stdout).includes('LEARNING MAINTENANCE')).toBe(true);
+    expect(stdout.trim() === '' || !contextOf(stdout).includes('CURATION MAINTENANCE')).toBe(true);
   });
 
   it('stale .processing (older than 900s) emits the directive even with an empty queue', () => {
@@ -4319,7 +4364,7 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
     const { stdout, exitCode } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
     expect(exitCode).toBe(0);
     const ctx = contextOf(stdout);
-    expect(ctx).toContain('--- LEARNING MAINTENANCE ---');
+    expect(ctx).toContain('--- CURATION MAINTENANCE ---');
     expect(ctx).toContain('subagent_type="Curate"');
   });
 
@@ -4503,7 +4548,7 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
 
       expect(exitCode).toBe(0);
       const ctx = contextOf(stdout);
-      expect(ctx, 'non-vacuity: the directive is emitted').toContain('--- LEARNING MAINTENANCE ---');
+      expect(ctx, 'non-vacuity: the directive is emitted').toContain('--- CURATION MAINTENANCE ---');
       expect(ctx, 'out of the model-name charset, so the mapping is absent and the global file decides').toContain('model="sonnet"');
       expect(ctx).not.toContain('evil');
       expect(ctx).not.toContain('$(');
@@ -4794,7 +4839,7 @@ describe('session-start-context never reads through a symbolic link under .devfl
 
     expect(exitCode).toBe(0);
     const ctx = contextOf(stdout);
-    expect(ctx, 'non-vacuity: the directive is emitted').toContain('--- LEARNING MAINTENANCE ---');
+    expect(ctx, 'non-vacuity: the directive is emitted').toContain('--- CURATION MAINTENANCE ---');
     expect(ctx, 'the linked file is absent, so no layer supplies a model').not.toContain('model=');
     expect(ctx).not.toContain('haiku');
     expect(refusals(), 'the refusal is logged once').toHaveLength(1);
@@ -4805,13 +4850,13 @@ describe('session-start-context never reads through a symbolic link under .devfl
 
     const linked = run();
     expect(linked.exitCode).toBe(0);
-    expect(contextOf(linked.stdout)).not.toContain('LEARNING MAINTENANCE');
+    expect(contextOf(linked.stdout)).not.toContain('CURATION MAINTENANCE');
     expect(refusals(), 'the refusal is logged once').toHaveLength(1);
 
     // Non-vacuity: the same queue, as a real file, does send the agent.
     fs.unlinkSync(path.join(curationDir, '.pending-turns.jsonl'));
     fs.writeFileSync(path.join(curationDir, '.pending-turns.jsonl'), '{"role":"user","content":"we chose X over Y","ts":1}\n');
-    expect(contextOf(run().stdout)).toContain('--- LEARNING MAINTENANCE ---');
+    expect(contextOf(run().stdout)).toContain('--- CURATION MAINTENANCE ---');
   });
 
   it('a linked stale batch sends no Curate agent to it', () => {
@@ -4824,14 +4869,14 @@ describe('session-start-context never reads through a symbolic link under .devfl
 
     const linked = run();
     expect(linked.exitCode).toBe(0);
-    expect(contextOf(linked.stdout)).not.toContain('LEARNING MAINTENANCE');
+    expect(contextOf(linked.stdout)).not.toContain('CURATION MAINTENANCE');
     expect(refusals(), 'the refusal is logged once').toHaveLength(1);
 
     // Non-vacuity: the same stale batch, as a real file, does send the agent.
     fs.unlinkSync(batch);
     fs.writeFileSync(batch, '{"role":"user","content":"orphaned","ts":1}\n');
     fs.utimesSync(batch, stale, stale);
-    expect(contextOf(run().stdout)).toContain('--- LEARNING MAINTENANCE ---');
+    expect(contextOf(run().stdout)).toContain('--- CURATION MAINTENANCE ---');
   });
 
   it('a linked learning folder: no TL;DR, no Index line, no directive, and each file read from it refused once', () => {

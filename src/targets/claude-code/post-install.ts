@@ -97,7 +97,7 @@ const DEVFLOW_PROJECT_LINE = '!.devflow/project.json';
  * so the init-time path and the always-on hook path produce the same file.
  */
 const DEVFLOW_GITIGNORE_BLOCK_LINES = [
-  '# Devflow runtime data — local by default (memory, learning, docs, locks).',
+  '# Devflow runtime data — local by default (memory, curation, docs, locks).',
   '# Shared via git: feature knowledge bases under .devflow/features/ (index.md and',
   '# every {slug}/KNOWLEDGE.md), .devflow/conventions.md (naming authority),',
   '# .devflow/policy.json (retired; presence only) and .devflow/project.json (team settings).',

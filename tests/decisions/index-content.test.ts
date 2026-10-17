@@ -268,6 +268,29 @@ describe('renderAndWriteAll — index.md integration', () => {
     expect(content).toBe('(none)\n')
   })
 
+  it('every rendered file names the curation ledger as its source, and none names the retired feature word', () => {
+    const tmpDir = makeTmp()
+    renderAndWriteAll(tmpDir, [makeDecisionRow(), makePitfallRow()])
+    const dir = path.join(tmpDir, '.devflow', 'curation')
+    for (const name of ['decisions.md', 'pitfalls.md']) {
+      const content = fs.readFileSync(path.join(dir, name), 'utf8')
+      expect(content, `${name} notice`).toContain(
+        'Generated from the local curation ledger by devflow; do not edit. ' +
+        'Active entries follow; retired ones are listed under Inactive.\n',
+      )
+      expect(content, `${name} carries no retired feature word`).not.toContain('learning ledger')
+    }
+    const index = fs.readFileSync(path.join(dir, 'index.md'), 'utf8')
+    expect(index).not.toMatch(/learning ledger/i)
+  })
+
+  it('the self-learning source stamp is a kept content identifier: a row still renders it byte-identical', () => {
+    const tmpDir = makeTmp()
+    renderAndWriteAll(tmpDir, [makeDecisionRow({ id: 'obs_stamp1' })])
+    const decisions = fs.readFileSync(path.join(tmpDir, '.devflow', 'curation', 'decisions.md'), 'utf8')
+    expect(decisions).toContain('- **Source**: self-learning:obs_stamp1\n')
+  })
+
   it('index.md lists no inactive entry, while decisions.md and pitfalls.md list them under Inactive', () => {
     const tmpDir = makeTmp()
     const rows = [

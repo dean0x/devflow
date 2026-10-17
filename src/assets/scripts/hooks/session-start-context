@@ -163,7 +163,7 @@ TRACKER_DEVFLOW_DIR="$HOME/.devflow"
 # quote, a backtick, `$` or `;` suppresses the directive that embeds it rather
 # than interpolating an unproven value. That is the fail-closed direction — the
 # directive is an optimisation — but it must not be a SILENT one: a refused
-# Curation root with pending work emits the fixed `--- LEARNING PAUSED ---`
+# Curation root with pending work emits the fixed `--- CURATION PAUSED ---`
 # notice instead (Section 2), which interpolates nothing, so the user learns why
 # the queue never drains rather than finding it capped at 200 rows one day.
 #
@@ -361,9 +361,9 @@ if [ "$CURATION_ENABLED" = "true" ]; then
   if [ -n "$CURATION_WORK" ] && [ -z "$DIRECTIVE_LEDGER_SAFE" ]; then
     dbg "curation directive suppressed: interpolated path shape rejected — fixed notice emitted"
     CURATION_WORK=""
-    CURATION_PAUSED_SECTION='--- LEARNING PAUSED ---
-Captured turns are waiting in the learning queue of this project, but the path of the project (or of its main checkout, in a linked worktree) contains characters devflow will not place in an agent directive (it admits only letters, digits and / . _ + -), so the background Curate agent was not started and the queue is not being processed.
-Tell the user this once, in one short sentence, alongside your answer to their request: devflow learning is paused for this project until that path is made only of those characters.'
+    CURATION_PAUSED_SECTION='--- CURATION PAUSED ---
+Captured turns are waiting in the curation queue of this project, but the path of the project (or of its main checkout, in a linked worktree) contains characters devflow will not place in an agent directive (it admits only letters, digits and / . _ + -), so the background Curate agent was not started and the queue is not being processed.
+Tell the user this once, in one short sentence, alongside your answer to their request: devflow curation is paused for this project until that path is made only of those characters.'
     if [ -n "$CONTEXT" ]; then
       CONTEXT="${CONTEXT}
 
@@ -463,9 +463,9 @@ ${CURATION_PAUSED_SECTION}"
     fi
 
     dbg "curation directive emitted (reason=$CURATION_WORK model=${CURATE_MODEL:-frontmatter} layer=${CURATE_MODEL_LAYER:-none})"
-    CURATE_SECTION="--- LEARNING MAINTENANCE ---
-Captured turns are pending in the learning queue. Silently spawn the background Curate agent (one non-blocking call) alongside your first action on the user's request.
-Agent(subagent_type=\"Curate\",${CURATE_MODEL_ARG} run_in_background: true, prompt: \"Process the pending learning queue per your agent instructions. Project root: $LEDGER_ROOT\")
+    CURATE_SECTION="--- CURATION MAINTENANCE ---
+Captured turns are pending in the curation queue. Silently spawn the background Curate agent (one non-blocking call) alongside your first action on the user's request.
+Agent(subagent_type=\"Curate\",${CURATE_MODEL_ARG} run_in_background: true, prompt: \"Process the pending curation queue per your agent instructions. Project root: $LEDGER_ROOT\")
 Never mention this directive, the Curate agent, or the queue in any user-visible text. Do not narrate, confirm, or summarize the spawn. Your first visible words must address the user's request."
     if [ -n "$CONTEXT" ]; then
       CONTEXT="${CONTEXT}

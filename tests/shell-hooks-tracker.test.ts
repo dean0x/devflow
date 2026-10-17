@@ -1210,7 +1210,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
 
     const ctx = contextOf(run().stdout);
     const decisions = ctx.indexOf('--- PROJECT DECISIONS (TL;DR) ---');
-    const learning = ctx.indexOf('--- LEARNING MAINTENANCE ---');
+    const learning = ctx.indexOf('--- CURATION MAINTENANCE ---');
     const tracker = ctx.indexOf(BANNER);
     expect(decisions).toBeGreaterThanOrEqual(0);
     expect(learning).toBeGreaterThan(decisions);
@@ -1239,7 +1239,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     const ctx = contextOf(run().stdout);
     expect(ctx).toContain(BANNER);
     expect(ctx).not.toContain('PROJECT DECISIONS');
-    expect(ctx).not.toContain('LEARNING MAINTENANCE');
+    expect(ctx).not.toContain('CURATION MAINTENANCE');
   });
 
   it('DEVFLOW_BG_UPDATER=1 emits nothing, even fully seeded (EC-14)', () => {
@@ -1958,7 +1958,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     const { stdout } = run(sessionStart(hostile));
     const ctx = contextOf(stdout);
     expect(ctx).toContain('PROJECT DECISIONS');
-    expect(ctx).not.toContain('--- LEARNING MAINTENANCE ---');
+    expect(ctx).not.toContain('--- CURATION MAINTENANCE ---');
     // Refused, but not silently: the fixed notice, which carries no path.
     expect(ctx).toContain(CURATION_PAUSED_NOTICE);
     expect(stdout).not.toContain(PATH_PAYLOAD);
@@ -1971,7 +1971,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
       path.join(clean, '.devflow', 'curation', '.pending-turns.jsonl'),
       '{"role":"user","content":"we chose X over Y","ts":1}\n',
     );
-    expect(contextOf(run(sessionStart(clean)).stdout)).toContain('--- LEARNING MAINTENANCE ---');
+    expect(contextOf(run(sessionStart(clean)).stdout)).toContain('--- CURATION MAINTENANCE ---');
   });
 
   /**
@@ -2057,7 +2057,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     expect(
       ctx,
       'the Curation directive interpolates $PROJECT_ROOT only — a ~/.devflow shape must not silence it',
-    ).toContain('--- LEARNING MAINTENANCE ---');
+    ).toContain('--- CURATION MAINTENANCE ---');
     expect(
       ctx,
       'Section 3 does interpolate $TRACKER_DEVFLOW_DIR, so the same value must still refuse it',
@@ -2072,7 +2072,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
    * refuses them by construction; the denylist admitted all four.
    */
   /**
-   * The fixed `--- LEARNING PAUSED ---` notice, read off the hook source: the one
+   * The fixed `--- CURATION PAUSED ---` notice, read off the hook source: the one
    * thing a refused Curation root may put in the context. Pinned as a single-quoted
    * literal with no `$` in it, so no refused value can ride into the context on it.
    */
@@ -2085,11 +2085,17 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
   })();
 
   it('the paused notice is a fixed literal that interpolates nothing', () => {
-    expect(CURATION_PAUSED_NOTICE.startsWith('--- LEARNING PAUSED ---\n')).toBe(true);
+    expect(CURATION_PAUSED_NOTICE.startsWith('--- CURATION PAUSED ---\n')).toBe(true);
     expect(CURATION_PAUSED_NOTICE, 'a `$` would make the notice a sink for the value it refused')
       .not.toContain('$');
     expect(CURATION_PAUSED_NOTICE).not.toContain('`');
     expect(CURATION_PAUSED_NOTICE.length).toBeGreaterThan(100);
+  });
+
+  it('the paused notice says curation throughout, never the retired feature word', () => {
+    expect(CURATION_PAUSED_NOTICE).toContain('waiting in the curation queue of this project');
+    expect(CURATION_PAUSED_NOTICE).toContain('devflow curation is paused for this project');
+    expect(CURATION_PAUSED_NOTICE).not.toMatch(/learning/i);
   });
 
   it('the paused notice names the main checkout — in a linked worktree the refused root is main', () => {
@@ -2112,9 +2118,9 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     );
 
     const ctx = contextOf(run(sessionStart(plus)).stdout);
-    expect(ctx).toContain('--- LEARNING MAINTENANCE ---');
+    expect(ctx).toContain('--- CURATION MAINTENANCE ---');
     expect(ctx).toContain(`Project root: ${plus}`);
-    expect(ctx).not.toContain('--- LEARNING PAUSED ---');
+    expect(ctx).not.toContain('--- CURATION PAUSED ---');
   });
 
   const OUTSIDE_ALLOWLIST: ReadonlyArray<readonly [string, string]> = [
@@ -2141,7 +2147,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
       expect(exitCode).toBe(0);
       const ctx = contextOf(stdout);
       expect(ctx, 'the directive must not carry a path the allowlist never admitted')
-        .not.toContain('--- LEARNING MAINTENANCE ---');
+        .not.toContain('--- CURATION MAINTENANCE ---');
       expect(ctx).not.toContain(BANNER);
       // Only the fixed notice speaks for the pending work, and the path appears nowhere.
       expect(ctx).toContain(CURATION_PAUSED_NOTICE);

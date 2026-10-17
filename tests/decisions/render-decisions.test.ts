@@ -305,7 +305,7 @@ describe('renderCurationFiles — output folder', () => {
 // ---------------------------------------------------------------------------
 
 const GENERATED_NOTICE =
-  'Generated from the local learning ledger by devflow; do not edit. ' +
+  'Generated from the local curation ledger by devflow; do not edit. ' +
   'Active entries follow; retired ones are listed under Inactive.\n';
 
 describe('renderDecisionsFile — golden', () => {

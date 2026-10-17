@@ -226,7 +226,7 @@ const PF_KEYS = /** @type {const} */ (['area', 'issue', 'impact', 'resolution'])
 
 /** The line under each rendered file's title: who writes the file and what it lists. */
 const GENERATED_NOTICE =
-  'Generated from the local learning ledger by devflow; do not edit. ' +
+  'Generated from the local curation ledger by devflow; do not edit. ' +
   'Active entries follow; retired ones are listed under Inactive.';
 
 /**
