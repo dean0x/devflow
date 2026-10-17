@@ -5,7 +5,7 @@ description: "Use when changing /resolve triage, DUPLICATE collapsing, Code-fami
 category: architecture
 directories: [src/assets/commands/resolve.mds, src/assets/agents/triage.mds, src/assets/agents/code.mds, src/assets/agents/fix.mds, src/assets/agents/refactor.mds, src/assets/agents/_partials/_code.mds, src/assets/commands/implement.mds, src/core/plugins.ts, src/assets/commands/code-review.mds]
 created: 2026-07-08
-updated: 2026-10-14
+updated: 2026-10-17
 ---
 
 # Resolve Pipeline (Triage → Fix → Verify)
@@ -28,6 +28,7 @@ updated: 2026-10-14
 - **KB-INV-14** Steps 9b-0, 9b-3 and 9c run `verify-evidence.cjs` inline through Bash; a `TARGET_DIR_REL` reaching the shell matches `^[A-Za-z0-9._/-]+$` (a fork author picks the branch name), a `{pr_number}` is digits only, else the run counts as failed.
 - **KB-INV-15** The Code-family tail (`_code.mds`) carries Read-once and one quiet-output line byte-equal to `validate.md`'s, outside `## Running commands`; `tests/guards/code-read-economy.test.ts` holds both, and `CODE_FAMILY_SHARED_OUTPUT_LINE` admits that one digest line to Code, Fix and Refactor only.
 - **KB-INV-16** /implement splits by one rule (`SPLIT_FRAGMENTS`; no plan is SINGLE) and passes `{branch_diff}` (`git diff --name-only --diff-filter=d {BASE_BRANCH}...HEAD`) as `FILES_CHANGED` to Polish, Harden, Evaluate, Validate and Test, never the Code agent's list; Setup stops the run, naming the allowed set, unless `BASE_BRANCH` matches `^[A-Za-z0-9._/+@,#-]{1,200}$`.
+- **KB-INV-17** A failed or malformed read of `resolve-levels.md` applies no row in any worktree, keeps every worktree's `GATE_LEVEL` and says `level reference unreadable: no level rows applied`; no level touches the Triage security gate, ESCALATED, the Verification Gate, the CI gate or the compliance directive, and Global Triage, Batch FIX_NOW, Fix and Manage Debt never take `skip` (a row or Rules bullet that breaks this is malformed).
 - **KB-AP-1** Never route ESCALATED security issues to manage-debt: they belong in `## Escalations` with a display callout.
 - **KB-AP-2** Never body-instruct `Skill(...)` in Triage: its skills preload from frontmatter and a re-invocation trips the re-entrancy guard.
 - **KB-AP-3** Never use TECH_DEBT for "touches many files" or "changes public API": that is FIX_NOW/Careful or FIX_SEPARATE.
@@ -47,9 +48,9 @@ updated: 2026-10-14
 
 ## Overview
 
-`/resolve` implements "no agent grades its own homework": a dedicated Triage agent (opus) classifies every review issue before any Code agent touches code. The point is **separation of judgment from execution**: Triage assigns verdicts by blast radius, the Code agent fixes only what it is told (`OPERATION: issue-fix`), and a Validate agent (haiku) verifies before any commit reaches the remote. This split replaced a single `Resolver` agent; `devflow init` prunes its installed file (registry-diff orphan sweep), with no tombstone in the sources.
+`/resolve` keeps judgment apart from execution, so no agent grades its own homework: a dedicated Triage agent (opus) classifies every review issue before any Code agent touches code. The point is **separation of judgment from execution**: Triage assigns verdicts by blast radius, the Code agent fixes only what it is told (`OPERATION: issue-fix`), and a Validate agent (haiku) verifies before any commit reaches the remote. This split replaced a single `Resolver` agent, which `devflow init` prunes.
 
-A traceability layer (Phases 1b, 9b, 9c) fetches external review threads, resolves them after the push and checks merge readiness, gated on the evidence policy and non-author approval, never on compliance. A seventh verdict, **DUPLICATE**, plus a pre-pass that collapses same-defect issues before the matrix, de-skews the `fp_ratio` convergence formula and prevents duplicate debt tickets without changing the code-review.mds parser.
+A traceability layer (Phases 1b, 9b, 9c) fetches external review threads, resolves them after the push and checks merge readiness. A seventh verdict, **DUPLICATE**, plus a pre-pass that collapses same-defect issues before the matrix, de-skews the `fp_ratio` convergence formula and prevents duplicate debt tickets without changing the code-review.mds parser.
 
 ## System Context
 
@@ -66,7 +67,7 @@ A traceability layer (Phases 1b, 9b, 9c) fetches external review threads, resolv
 | Validate | **haiku** | build/typecheck/lint/test gate |
 | Test | sonnet | Step 9b-0 only: re-verify stale test-plan items, at most one spawn per cycle |
 
-The `devflow-resolve` entry of `DEVFLOW_PLUGINS` (`plugins.ts`) declares `agents: [git, triage, code, fix, polish, validate, test, knowledge]`; `tests/registry-integrity.test.ts` keeps registry and sources consistent. `update-pr-evidence` (9b-3) and `check-merge-readiness` (9c) stay defined Git operations whose steps are the same script run.
+The `devflow-resolve` entry of `DEVFLOW_PLUGINS` (`plugins.ts`) declares the agents of the table above (every row but Script) plus `knowledge`; `tests/registry-integrity.test.ts` keeps registry and sources consistent. `update-pr-evidence` (9b-3) and `check-merge-readiness` (9c) stay defined Git operations whose steps are the same script run.
 
 ## Component Architecture
 
@@ -75,11 +76,11 @@ The `devflow-resolve` entry of `DEVFLOW_PLUGINS` (`plugins.ts`) declares `agents
 ```
 Phase 0   Pre-flight: 0a worktree discovery; 0b Git validate-branch per worktree [parallel] → DIFF_FILES;
           0c target the latest review directory; 0d settings, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE (and
-          _RULES), evidence policy, publication mode, compliance lens and RESOLUTION_TS
+          _RULES), evidence policy, publication mode, compliance lens, gate level and RESOLUTION_TS
 Phase 1   Parse issues → ISSUES (with reviewer_confidence %)
 Phase 1b  Git fetch-review-threads → THREAD_MAP  [EVIDENCE_POLICY required]
 Phase 2   One global Triage agent → verdict ledger, one verdict per issue; duplicate pre-pass first
-Phase 3   Batch FIX_NOW (same-file sequential, distinct-file parallel, max 5 per batch); DUPLICATEs never dispatched
+Phase 3   Batch FIX_NOW (same-file sequential, distinct-file parallel in one message, max 5 per batch; KB-INV-11); DUPLICATEs never dispatched
 Phase 4   Code × N (issue-fix, PUSH: false) → CODE_AGENT_RESULTS
 Phase 5   Write resolution-summary.md, Tracked = "(pending)"  ← compaction safety
 Phase 6   Polish (only if fixes were made)
@@ -94,21 +95,23 @@ Phase 9c  verify-evidence.cjs readiness, inline  [REQUIRE_NON_AUTHOR_APPROVAL tr
 Phase 10  Display results
 ```
 
-An empty FIX_NOW list skips Phases 3-4 and 6-8 but still writes the summary and runs 9, 9b, 9c and 10.
+An empty FIX_NOW list skips Phases 3-4 and 6-8 but still writes the summary and runs 9, 9b, 9c and 10; its route reads "skip to Phase 5, then run Phases 9, 9b, 9c and 10", pinned word for word, so it names no pushing phase. An all-false-positive run takes this route, so the one edge row that reports "No issues to resolve" (`No issues parsed`) names the parse-time case only.
 
-**Phase 5 writes early**: `resolution-summary.md` is written right after Phase 4 while the Code outputs are in context, because Polish, Validate, the CI gate, manage-debt and thread resolution can each trigger compaction. `Tracked` starts as `(pending)` (or `(pending — TRACEABILITY: DEGRADED ({reason}))` when manage-debt degrades) and is backfilled after Phase 9. Later phases patch sections only: Phase 7 `## Verification`, Phase 9 `Tracked`, Phase 9b `## Third-Party Threads`.
+**Phase 5 writes early**: `resolution-summary.md` is written right after Phase 4, because Polish, Validate, the CI gate, manage-debt and thread resolution can each trigger compaction. `Tracked` starts as `(pending)` (or `(pending — TRACEABILITY: DEGRADED ({reason}))` when manage-debt degrades) and is backfilled after Phase 9. Later phases patch sections only: Phase 7 `## Verification`, Phase 9 `Tracked`, Phase 9b `## Third-Party Threads`.
 
-**Push timing**: Phase 7 pushes at its end, PASSED or FAILED, so the branch is on the remote before CI, debt management or thread resolution; the Code-family spawns (Phase 4 issue-fix, validation-fix, ci-fix) all take `PUSH: false`. Phase 8 pushes again (a no-op unless the head moved, never forced, no retry) and after each ci-fix; a failed push records `TRACEABILITY: DEGRADED (ci push failed)` and stops the wait.
+**Push timing**: Phase 7 pushes at its end, PASSED or FAILED, so the branch is on the remote before CI, debt management or thread resolution. Phase 8 pushes again (a no-op unless the head moved, never forced, no retry) and after each ci-fix; a failed push records `TRACEABILITY: DEGRADED (ci push failed)` and stops the wait.
 
 **Fork PRs**: when `validate-branch` returns `TRACEABILITY: DEGRADED (cannot push to fork)`, `fork_no_push` is set: Phase 7 skips the push, Phase 8 is skipped, 9b-1 drops FIXED entries and records them DEGRADED in `## Third-Party Threads` (their commits never reached the PR), 9b-2 still posts, and 9b-0 and 9b-3 are skipped because the head did not move.
 
-**`RESOLUTION_TS`** is minted once per run (`date -u`) in Step 0d for every worktree. Phase 5 writes it as the summary's `**Date**:` and 9b-2 passes it, so the local file and the posted dedup marker agree; a retry of this run stays deduplicated while the next /resolve on the same PR posts.
+**`RESOLUTION_TS`** is minted once per run in Step 0d for every worktree. Phase 5 writes it as the summary's `**Date**:` and 9b-2 passes it, so the local file and the posted dedup marker agree; a retry of this run stays deduplicated while the next /resolve on the same PR posts.
 
-**Settings and decisions**: `resolve.mds` alias-imports `_partials/_settings.mds` and expands `settings_resolve()` once in Step 0d, ahead of the decisions load, publication gate and compliance lens. Those partials import nothing from it and refer to "the line resolved above", so `REVIEW_PUBLICATION` and `COMPLIANCE_FRAMEWORKS` are still read per worktree. `COMPLIANCE_FRAMEWORKS` (`compliance_frameworks()` from `_partials/_compliance.mds`, alias-imported) never reaches an agent as an input: `compliance_inject()` builds `COMPLIANCE_DIRECTIVE` from it per worktree, empty when the lens is `off`, and each Code and Fix spawn (issue-fix, validation-fix, ci-fix) carries it on a line of its own. `DECISIONS_CONTEXT` goes to Triage and those Code-family spawns only, as a slice: `decisions_load()` Step 2 has the main model copy the index lines that touch the work, one shared slice for sibling spawns, behind a `(slice: N of M entries — full index: <path>)` marker. It exists only in the learning-on build, and `decisions_gate()` sets it to `(none)` when the settings line says `LEARNING=off`.
+**Settings and decisions**: `resolve.mds` alias-imports `_partials/_settings.mds` and expands `settings_resolve()` once in Step 0d, ahead of the decisions load, publication gate and compliance lens. Those partials import nothing from it and refer to "the line resolved above", so `REVIEW_PUBLICATION`, `COMPLIANCE_FRAMEWORKS` and `GATE_LEVEL` are still read per worktree. `compliance_inject()` builds each worktree's `COMPLIANCE_DIRECTIVE` from `COMPLIANCE_FRAMEWORKS`, which never reaches an agent (KB-INV-13). `DECISIONS_CONTEXT` (KB-INV-12): `decisions_load()` Step 2 has the main model copy the index lines that touch the work, one shared slice for sibling spawns; it exists only in the learning-on build (`decisions_gate()` sets `(none)` under `LEARNING=off`).
+
+**Gate level** (KB-INV-17): the settings line carries `GATE_LEVEL`, kept per worktree. Step 0d's `**Gate level.**` block reads `resolve-levels.md` (`agent-references`) once per run when any worktree is `standard` or `lean`, and applies each row to the phase it names, as the reference says: a worktree reads the column of its own level, except in a global phase; at `full` everywhere nothing is read. The reference holds the fixed grammar and no rows yet, so a read changes nothing. The grammar bars `skip` on Global Triage, Batch FIX_NOW, Fix and Manage Debt (no row leaves a FIX_NOW security finding unfixed, a FIX_SEPARATE item unticketed or the CI gate dropped; a row or Rules bullet that breaks this is malformed, so no row applies in any worktree) and gives a phase with no spawn (Batch FIX_NOW) only `-`. A skipped phase does not stop the run, and its `**Produces:**` names read `SKIPPED`. Global Triage, one spawn for all worktrees, is the global phase: it takes the cell of the strictest level in the run (`full` strictest, then `standard`, `lean`) and at `full` runs as written. Phase 10 shows `**Gate level**: {GATE_LEVEL, with any level note}` after `Total Issues`, and Phase 5 writes `**Gate level**: {GATE_LEVEL}` into each worktree's summary header after `**Command**: /resolve`; the convergence parser reads neither, so it does not change. /implement has the matching block at the start of Phase 3 (guards: `test-harness-prompt-install`).
 
 ### Review Directory Targeting
 
-Step 0c takes, per worktree, the newest of the 10 most recent timestamped directories under `.devflow/docs/reviews/{branch-slug}/` that holds `review-summary.md`; one already holding `resolution-summary.md` is resolved. `--review {timestamp}` picks one directly but works only in single-worktree flow (pair `--path` with it to target a worktree). With no timestamped subdirectories, flat `*.md` files there are read directly (legacy layout). When every review is resolved, the command falls back to the latest unresolved bug-analysis directory (a focus report present, no `resolution-summary.md`, same 10-directory scan limit); reviews take priority. Phase 1 skips `review-summary.md`, `resolution-summary.md`, `bug-analysis-summary.md` and `static-findings.md`. `tests/resolve/bug-analysis-fallback.test.ts` pins priority, exclusions and scan limit.
+Step 0c takes, per worktree, the newest of the 10 most recent timestamped directories under `.devflow/docs/reviews/{branch-slug}/` that holds `review-summary.md`; one already holding `resolution-summary.md` is resolved. `--review {timestamp}` picks one directly but works only in single-worktree flow (pair `--path` with it to target a worktree). With no timestamped subdirectories, flat `*.md` files there are read directly. When every review is resolved, the command falls back to the latest unresolved bug-analysis directory (a focus report present, no `resolution-summary.md`, same 10-directory scan limit); reviews take priority. Phase 1 skips `review-summary.md`, `resolution-summary.md`, `bug-analysis-summary.md` and `static-findings.md`. `tests/resolve/bug-analysis-fallback.test.ts` pins priority, exclusions and scan limit.
 
 ### DIFF_FILES Flow
 
@@ -119,11 +122,11 @@ Step 0c takes, per worktree, the newest of the 10 most recent timestamped direct
 `EVIDENCE_POLICY` is resolved once per run by the `evidence_policy()` partial; these phases key on it (or on `REQUIRE_NON_AUTHOR_APPROVAL`), never on compliance.
 
 - **1b fetch-review-threads**: before Triage, Git returns a `THREAD_MAP` of `ext-{N}` records, one per unresolved external (non-devflow-authored) thread. DEGRADED → record the reason, empty map, continue.
-- **9b-1 resolve-review-threads** (after the Phase 9 backfill): each `ext-{N}` is matched to an issue verdict (FIXED, FALSE_POSITIVE, BY_DESIGN, ESCALATED) by file:line correlation, with `commit_sha` added for FIXED; unmatched threads are ESCALATED (human review), never dropped. A match on a DUPLICATE uses the **primary's** verdict and verification status, so the thread author never sees DUPLICATE (the Git agent's verdict set has none, so the operation contract is unchanged). Results go into `## Third-Party Threads` before 9b-2, which posts that file.
-- **D9 gate** (single authority: the `resolve-review-threads` operation's reference under `references/pr/`, not `git.md`): `resolveReviewThread` runs **only when `VERIFICATION_STATUS == PASS` AND verdict `FIXED` AND `commit_sha` non-empty**. FALSE_POSITIVE and BY_DESIGN are reply-only (devflow supplies cited evidence, the thread author closes the thread); ESCALATED, FAILED and SKIPPED are always reply-only, so with VERIFICATION_STATUS FAILED or SKIPPED every thread gets a reply and none is resolved.
+- **9b-1 resolve-review-threads** (after the Phase 9 backfill): each `ext-{N}` is matched to an issue verdict (FIXED, FALSE_POSITIVE, BY_DESIGN, ESCALATED) by file:line correlation, with `commit_sha` added for FIXED; unmatched threads are ESCALATED (human review), never dropped. A match on a DUPLICATE uses the **primary's** verdict and verification status, so the thread author never sees DUPLICATE. Results go into `## Third-Party Threads` before 9b-2, which posts that file.
+- **D9 gate** (single authority: the `resolve-review-threads` operation's reference under `references/pr/`, not `git.md`): `resolveReviewThread` runs **only when `VERIFICATION_STATUS == PASS` AND verdict `FIXED` AND `commit_sha` non-empty**. FALSE_POSITIVE and BY_DESIGN are reply-only (devflow supplies cited evidence, the thread author closes the thread); ESCALATED, FAILED and SKIPPED are always reply-only.
 - **9b-2 post-resolution-summary** (always-on): one consolidated PR comment keyed on `<!-- devflow:resolution-summary ts:{TS} -->`, skipped when already posted, with `REVIEW_PUBLICATION` passed through (visibility-gated: counts-only STUB on public or unknown repos).
 - **9b-3 update-pr-evidence** is `verify-evidence.cjs publish` with `--evidence` (dropped when 9b-0 appended no claim) and `--publication` set to the mode 9b-2 reported, run inline through Bash with `timeout: 180000`. `EVIDENCE_REFRESH` is its stdout (the `## PR Evidence` block's `EVIDENCE` and `**Body**:` / `**Comment**:` lines, then any `TRACEABILITY: DEGRADED` lines); exit 2, empty stdout or any other exit reads `TRACEABILITY: DEGRADED (evidence unavailable)`. It never blocks.
-- **9c check-merge-readiness** is `verify-evidence.cjs readiness --require-non-author-approval true` (the phase runs only when it is `true`), inline with the same timeout. Stdout is the `## Merge Readiness` block, READY / NOT_READY / DEGRADED (exit 2), reported in Phase 10; `NOT_READY (CI pending)` is the expected state after a push, and empty stdout or any other exit reads `TRACEABILITY: DEGRADED (readiness unavailable)`. **Never blocking.**
+- **9c check-merge-readiness** is `verify-evidence.cjs readiness --require-non-author-approval true`, inline with the same timeout. Stdout is the `## Merge Readiness` block, READY / NOT_READY / DEGRADED (exit 2), reported in Phase 10; `NOT_READY (CI pending)` is the expected state after a push, and empty stdout or any other exit reads `TRACEABILITY: DEGRADED (readiness unavailable)`. **Never blocking.**
 - **TRACEABILITY: DEGRADED**: no-PR, no-gh-auth or no-remote makes the Git agent (or, for 9b-3 and 9c, the script) report it with a reason; every traceability operation then skips and continues.
 
 ## Duplicate Grouping Pre-Pass
@@ -132,7 +135,7 @@ A pre-filter, not a matrix row: it runs **before** the blast-radius matrix and s
 
 1. **Group by same defect**: same root cause, typically the same or adjacent file:line reported by different review foci, or one logical error phrased differently.
 2. **Select primary**: the most specific and complete report; in a mixed security/non-security group the security member is always primary, so security findings are never collapsed into non-security primaries.
-3. **Security Gate for the whole group**: if any member is a security finding the primary goes through the Security Gate (FIX_NOW or ESCALATED only), however many non-security members there are.
+3. **Security Gate for the whole group**: if any member is a security finding the primary goes through the Security Gate (FIX_NOW or ESCALATED only).
 4. **Non-primary members** get **DUPLICATE** with `duplicate_of: <primary-id>`, naming a non-DUPLICATE issue (no chaining).
 5. **Single-member groups** are their own primary and go straight to the matrix.
 6. **Inheritance**: a DUPLICATE inherits its primary's final outcome (FIX_NOW → fixed by the Code agents that fix the primary; FALSE_POSITIVE → excluded from the False Positives section and count).
@@ -168,15 +171,13 @@ The Code family is three agents, Code, Fix and Refactor, whose text is the share
 | Fix | `validation-fix` | /resolve Phase 7 gate and /implement Phase 6 | Fix validation failures only; PUSH: false |
 | Fix | `ci-fix` | /resolve Phase 8 and the /implement Phase 10 CI gate, on FAILING | Fix only the checks named in `CI_FAILURES` (names only, Fix fetches the logs itself); PUSH: false |
 
-The rest serve other commands: Code `implement` (default, full implementation with plan; /implement), Fix `alignment-fix` (/implement Phase 5 misalignments) and `qa-fix` (Phase 7 Test failures), and Refactor `edit` (a mechanical rename or move, delegated by the orchestrator charter). No Code variant opens a PR: the Git agent's `ensure-pr-ready` does.
+The rest serve other commands: Code `implement` (default, full implementation with plan; /implement), Fix `alignment-fix` (/implement Phase 5 misalignments) and `qa-fix` (Phase 7 Test failures), and Refactor `edit` (a mechanical rename or move).
 
 **issue-fix rules**: pre-classified FIX_NOW issues only, never re-litigated (KB-INV-1, KB-AP-8); same-file issues → one commit; a regression fix without a failing-then-passing regression test is INCOMPLETE → report BLOCKED, do not commit; self-verification is compile plus the regression test only (code.mds's `Gate ownership` line: Phase 7 is the one full run); returns `{status, commitShas, unresolved}` plus a `## Verification` block.
 
-**Batching** (KB-INV-11): distinct-file Code agents spawn in one message, at most 5 issues per batch.
+**Shared tail**: the `tail()` of `_code.mds` holds `## Running commands`, then `## Principles` (1 Read once: never re-read an unchanged file; over 400 lines, or on a second look, `grep -n` then a ranged Read; 2 Small, focused changes; 3 Fail honestly), one quiet-output line (page large files, cap output, count matches before printing; outside `## Running commands`, whose bytes `running-commands-parity.test.ts` owns), `## Output` and `## Boundaries`. "Orient, then match patterns", "Work on feature branch", "Be decisive", "Trust handoff summaries" and the issue-fix "Self-verification scope" stay cut as duplicates.
 
-**Shared tail**: the `tail()` of `_code.mds` holds `## Running commands`, then `## Principles` (1 Read once: never re-read an unchanged file; over 400 lines, or on a second look, `grep -n` then a ranged Read; 2 Small, focused changes; 3 Fail honestly), one quiet-output line (page large files, cap output, count matches before printing), `## Output` and `## Boundaries`. That line is byte-equal to `validate.md`'s and outside `## Running commands`, whose bytes `running-commands-parity.test.ts` owns. "Orient, then match patterns", "Work on feature branch", "Be decisive", "Trust handoff summaries" and the issue-fix "Self-verification scope" were cut as duplicates; the handoff `Integration Points` is one `path:line` pointer line.
-
-**/implement split** (`implement.mds`, worded again in the `synthesize/planning.md` reference): SEQUENTIAL_CODE_AGENTS at 10 or more files or 7 or more steps, each phase at most 5 files and 6 steps, else one Code agent; no plan document means SINGLE. The Phase 3 intro defines `{branch_diff}` once, and each later spawn runs it again: the Code agent's list misses the Polish, Harden and fix commits, and the filter keeps deleted paths out of the Harden and Evaluate reads. `implement-revalidate.md` carries the same guard on a `BASE_BRANCH` read from the PR base, else the default branch, and the Phase 3-7 `**Requires:**` lines name `BASE_BRANCH`; `tests/evidence/implement-flow.test.ts` pins both.
+**/implement split** (`implement.mds`, worded again in the `synthesize/planning.md` reference): SEQUENTIAL_CODE_AGENTS past its file and step thresholds, each phase within its own (`SPLIT_FRAGMENTS` pins the numbers), else one Code agent. The Phase 3 intro defines `{branch_diff}` once, and each later spawn runs it again: the Code agent's list misses the Polish, Harden and fix commits, and the filter keeps deleted paths out of the Harden and Evaluate reads. `implement-revalidate.md` carries the same guard on a `BASE_BRANCH` read from the PR base, else the default branch, and the Phase 3-7 `**Requires:**` lines name `BASE_BRANCH`; `tests/evidence/implement-flow.test.ts` pins both.
 
 ## Parser Coupling: resolution-summary.md ↔ /code-review
 
@@ -197,16 +198,16 @@ The rest serve other commands: Code `implement` (default, full implementation wi
 
 - **fp_ratio** = `fp_count / (fp_count + fixed_count + deferred_count)`; the `Deferred` row is FIX_SEPARATE + TECH_DEBT combined; By Design and Escalated sit outside the denominator. `fp_ratio > 0.7` with `CYCLE_NUMBER >= 3` emits a convergence warning that never blocks; a zero denominator or parse failure gives `fp_ratio = 0`.
 - **Counting**: `Total Issues` counts every triaged issue including collapsed duplicates; every row between `Total Issues` and `Duplicates Collapsed` counts unique issues only, so `Total Issues` equals the sum of the rows below it.
-- **Safe additions**: `## Escalations`, `## Blocked`, `## By Design`, `## Third-Party Threads`, the `| Duplicates Collapsed | {n} |` row, `## Duplicates` (`| Issue | Duplicate Of | File:Line |`), and in the learning-on build `## Decisions Citations`. **Unsafe**: renaming `Fixed` → `Resolved`, splitting `Deferred` into two rows, `False Positive` → `False Positives`, restructuring the Statistics table.
-- **Section exclusivity**: a DUPLICATE appears **only** in `## Duplicates`, never in `## Fixed Issues`, `## False Positives`, `## By Design`, `## Fix Separately`, `## Deferred to Tech Debt`, `## Escalations` or `## Blocked`. A duplicate of a FALSE_POSITIVE primary leaves only the primary in the `False Positive` row and section. This also keeps manage-debt from ticketing duplicates: the primary's ticket covers them.
+- **Safe additions**: `## Escalations`, `## Blocked`, `## By Design`, `## Third-Party Threads`, the `**Gate level**:` header line, the `| Duplicates Collapsed | {n} |` row, `## Duplicates` (`| Issue | Duplicate Of | File:Line |`), and in the learning-on build `## Decisions Citations`. **Unsafe**: renaming a label above (`Fixed` → `Resolved`), splitting `Deferred`, restructuring the Statistics table.
+- **Section exclusivity**: a DUPLICATE appears **only** in `## Duplicates`, never in `## Fixed Issues`, `## False Positives`, `## By Design`, `## Fix Separately`, `## Deferred to Tech Debt`, `## Escalations` or `## Blocked`. A duplicate of a FALSE_POSITIVE primary leaves only the primary in the `False Positive` row and section; the primary's ticket covers the duplicates.
 
 ## Code-Review Phase 3: Sequential Synthesis + Comment
 
 Per worktree, step 3b waits for 3a: **3a** is the Synthesize agent writing `review-summary.md` into the timestamped review directory; **3b** is the Git agent (`OPERATION: post-review-summary`) posting a consolidated PR comment.
 
-**D7 dedup key is the cycle+timestamp pair**, marker `<!-- devflow:review-summary cycle:{N} ts:{REVIEW_TIMESTAMP} -->`: a same-cycle re-review (different REVIEW_TIMESTAMP) posts its own comment; an exact re-run (same REVIEW_TIMESTAMP) deduplicates silently. The caller spawn in code-review.mds passes `REVIEW_TIMESTAMP: {timestamp}` and does not restate the marker; its format is owned by the operation's PR-host mechanics (`references/pr/`), which git.md itself must not restate.
+**D7 dedup key is the cycle+timestamp pair**, marker `<!-- devflow:review-summary cycle:{N} ts:{REVIEW_TIMESTAMP} -->`: a same-cycle re-review (different REVIEW_TIMESTAMP) posts its own comment; an exact re-run deduplicates silently. The caller spawn in code-review.mds passes `REVIEW_TIMESTAMP: {timestamp}`; the marker format is owned by the operation's PR-host mechanics (`references/pr/`), which git.md must not restate.
 
-**Resolution order in /code-review is load-bearing**: Step 0b resolves the compliance lens (`COMPLIANCE_ACTIVE`, `COMPLIANCE_FRAMEWORKS`) from the settings line and Step 0b-ii the evidence policy, both before Step 0c spawns the Git agent (`ensure-pr-ready`), which takes `APPLY_CONVENTIONS` from the policy. The lens gates only the compliance Review focus in Phase 1 and never reaches the Git agent.
+**Resolution order in /code-review is load-bearing**: Step 0b resolves the compliance lens and Step 0b-ii the evidence policy, both before Step 0c spawns the Git agent (`ensure-pr-ready`), which takes `APPLY_CONVENTIONS` from the policy. The lens gates only the compliance Review focus in Phase 1 and never reaches the Git agent.
 
 All PR commenting goes through `post-review-summary` (/code-review Phase 3b) or `post-resolution-summary` (/resolve Phase 9b-2); there is no `comment-pr` operation.
 
@@ -216,68 +217,66 @@ All PR commenting goes through `post-review-summary` (/code-review Phase 3b) or 
 
 ## Triage Agent Contract
 
-Triage (opus, tools Read/Grep/Glob/Bash) is the sole judgment agent; `triage.mds` compiles with a learning-off variant.
+Triage (opus, tools Read/Grep/Glob/Bash) is the sole judgment agent and spawns no sub-agents: its tool list has no spawn tool.
 
-- **Skills** preloaded in frontmatter: `devflow:security`, `devflow:worktree-support`, `devflow:apply-feature-knowledge`, and `devflow:apply-decisions` in the learning-on build only.
+- **Skills** preloaded in frontmatter: `devflow:worktree-support`, `devflow:apply-feature-knowledge`, and `devflow:apply-decisions` in the learning-on build only; the security-finding rule is inline in the body.
 - **`FEATURE_KNOWLEDGE`** is per KB: the Rules bullets most relevant to the issues, the KB path and a heading index (sections are read on demand).
-- Reads 30 lines around each reported file:line, runs the pre-pass first, then the matrix on primaries only. Evidence per verdict is in the matrix table; BY_DESIGN's ADR route is absent from the learning-off build, leaving the inline comment/doc.
-- Output is a verdict ledger over ESCALATED, FIX_NOW, FALSE_POSITIVE, BY_DESIGN, FIX_SEPARATE, TECH_DEBT and DUPLICATE, plus a Summary. The report cap exempts the whole ledger (returned inline in full) because /resolve checks every issue id against it. It goes to the orchestrator, not to Code agents, and Triage never spawns sub-agents.
+- Reads 30 lines around each reported file:line, runs the pre-pass first, then the matrix on primaries only. Evidence per verdict is in the matrix table.
+- Output is a verdict ledger over ESCALATED, FIX_NOW, FALSE_POSITIVE, BY_DESIGN, FIX_SEPARATE, TECH_DEBT and DUPLICATE, plus a Summary. The report cap exempts the whole ledger (returned inline in full) because /resolve checks every issue id against it. It goes to the orchestrator, not to Code agents.
 
 ## Learning Variants
 
-`resolve.mds`, `triage.mds` and the Code hosts (`code.mds`, `fix.mds`) carry whole-line `<!-- learning:on -->` / `<!-- learning:off -->` / `<!-- learning:end -->` arms. The build compiles each host twice: the learning-on file in `dist/commands/` or `dist/agents/`, and a learning-off file under `dist/learning-off/`; install and the learning toggle pick one from the machine's learning switch. The learning-off /resolve drops Step 0d's decisions load, `DECISIONS_CONTEXT` in Produces/Requires and the Triage and Code-family spawns, the apply-decisions instruction, the Reasoning-column collection sentence and the `## Decisions Citations` section of resolution-summary.md; Triage drops the apply-decisions preload, the Apply Decisions responsibility (later numbers become on/off pairs) and the ADR route to BY_DESIGN.
+`resolve.mds`, `triage.mds` and the Code hosts (`code.mds`, `fix.mds`) carry whole-line `<!-- learning:on -->` / `<!-- learning:off -->` / `<!-- learning:end -->` arms. The build compiles each host twice, learning on in `dist/commands/` or `dist/agents/` and learning off under `dist/learning-off/`; The learning-off /resolve drops Step 0d's decisions load, `DECISIONS_CONTEXT` in Produces/Requires and the Triage and Code-family spawns, the apply-decisions instruction, the Reasoning-column collection sentence and the `## Decisions Citations` section of resolution-summary.md; Triage drops the apply-decisions preload, the Apply Decisions responsibility (later numbers become on/off pairs) and the ADR route to BY_DESIGN.
 
-Items rewritten rather than removed (Step 0d's heading and Produces, the Phase 2 and 4 Requires, the `ci-fix` step 6) exist in both arms and must be edited together. `tests/learning/learning-variants-arms.test.ts` checks each variant against an independent resolution of the compiled host.
+Items rewritten rather than removed (Step 0d's heading and Produces, the Phase 2 and 4 Requires, the `ci-fix` step 6) exist in both arms (KB-AP-13). `tests/learning/learning-variants-arms.test.ts` checks each variant against an independent resolution of the compiled host.
 
 ## Verification Gate (Phase 7)
 
-Validate (haiku) runs build, typecheck, lint and tests (`VALIDATION_SCOPE: full`) against `FILES_CHANGED` from the Code outputs; with no fixes it is SKIPPED. On FAIL, `validation_retry_count` is incremented and, while it is at most 2, a Fix agent runs `validation-fix` (`PUSH: false`) and the gate re-validates. Past two attempts VERIFICATION_STATUS is FAILED: a blocking callout goes into `## Verification`, Phase 8 is skipped and the pipeline proceeds. PASS continues to Phase 8; FAILED and SKIPPED go straight to Phase 9.
+Validate (haiku) runs build, typecheck, lint and tests (`VALIDATION_SCOPE: full`) against `FILES_CHANGED` from the Code outputs; with no fixes it is SKIPPED. On FAIL, `validation_retry_count` is incremented and, while it is at most 2, a Fix agent runs `validation-fix` (`PUSH: false`) and the gate re-validates. Past two attempts VERIFICATION_STATUS is FAILED: a blocking callout goes into `## Verification`. Route after push, pinned word for word: PASS continues to Phase 8; FAILED or SKIPPED skip it and continue with Phase 9 and the later phases in order.
 
 ## Test Guards
 
-Static guards fail loudly when a literal changes. Wider seam and guard family: `tests/seams/command-agent-input.test.ts` (spawn-key seam: forward, reverse, producers), `tests/goldens/{git-agent-golden,github-status-lines}.test.ts`, `tests/guards/{agent-source-resolver,retired-wording,numeric-floor-manifest,extended-references}.test.ts`.
+Wider seam and guard family: `tests/seams/command-agent-input.test.ts` (spawn-key seam: forward, reverse, producers), `tests/goldens/{git-agent-golden,github-status-lines}.test.ts`, `tests/guards/{agent-source-resolver,retired-wording,numeric-floor-manifest,extended-references}.test.ts`.
 
 **`tests/git-agent.test.ts`** (build-gated) reads the Git agent body plus the compiled `devflow:git` references; the body declares no operation, each operation's one reference carries its `## Operation:` heading, contract and steps (`gitOperationReferenceCorpus` is that corpus, `gitAgentSinkCorpus` the union over all providers). `extractOpSectionFromCorpus` cuts an operation in `union` or `sole` mode from its unfenced column-0 `## Operation:` heading to the next unfenced `## `, so a `## ` line in an Output fence is payload.
-- Guard 0 non-vacuousness; Guard 1 a reference section for every `REQUIRED_OPS` entry and no `## Operation:` heading in the body.
-- Guard 2 numeric bounds (comment-length caps, processing bounds, learn-conventions scan bounds), plus the fetch-issues-batch truncation, header and single-query pins.
-- Guard 3 the D9 sentence (KB-INV-8, read in `sole` mode from the `resolve-review-threads` reference), FALSE_POSITIVE and BY_DESIGN reply-only; Guard 8 the same fragment in `resolve.mds` and compiled `resolve.md`. Guard 4 the D4 rate-limit clauses; 4b no provider detector literals in the body. Guard 5 the dedup marker forms, which live only in the PR-host references, with a known-bad probe.
+- Guard 0 non-vacuousness; Guard 1 a reference section for every `REQUIRED_OPS` entry and no `## Operation:` heading in the body; Guard 2 numeric bounds (comment-length caps, processing and learn-conventions scan bounds) plus the fetch-issues-batch pins (issue-count bound, `TRUNCATED ({n} not processed)`, `## Issues Batch` header).
+- Guard 3 the D9 sentence (KB-INV-8, `sole` mode, `resolve-review-threads` reference) with FALSE_POSITIVE and BY_DESIGN reply-only; Guard 8 the same fragment in `resolve.mds` and compiled `resolve.md`. Guard 4 the D4 rate-limit clauses (4b no provider detector literals in the body). Guard 5 the dedup marker forms, which live only in the PR-host references, with a known-bad probe.
 
-**`tests/registry-integrity.test.ts` Guard 6** (build-gated). Forward: every `OPERATION: X` in a Git-agent spawn of a compiled command has a row in git.md's `## Operations` table. Reverse: every such row is named in a compiled command or listed in `INTERNAL_OPS` (`learn-conventions`, `check-ci-status`); `fetch-issues-batch` is wired live from `plan.mds`. No command spawns `update-pr-evidence` or `check-merge-readiness`, so the reverse check meets `check-merge-readiness` only by its name in resolve.md's prose. It fails loudly when `dist/commands/` is absent.
+**`tests/registry-integrity.test.ts` Guard 6** (build-gated). Forward: every `OPERATION: X` in a Git-agent spawn of a compiled command has a row in git.md's `## Operations` table. Reverse: every such row is named in a compiled command or listed in `INTERNAL_OPS` (`learn-conventions`, `check-ci-status`). No command spawns `update-pr-evidence` or `check-merge-readiness`, so the reverse check meets `check-merge-readiness` only by its name in resolve.md's prose.
 
-**`tests/build-mds.test.ts`** (build-gated; each `beforeAll` asserts the build exits 0, scan loops `scanned > 0`): §15 compiled code-review.md references `post-review-summary`, passes `REVIEW_TIMESTAMP` and has no `comment-pr`; §16 compiled resolve.md carries the traceability ops, `Third-Party Threads` and the KB-INV-9 gating; §16b (DUPLICATE, consumer) pins the `DUPLICATE` bucket, `duplicate_of`, the `| Duplicates Collapsed | ` row and the `## Duplicates` heading.
+**`tests/build-mds.test.ts`** (build-gated): §15 compiled code-review.md references `post-review-summary`, passes `REVIEW_TIMESTAMP` and has no `comment-pr`; §16 compiled resolve.md carries the traceability ops, `Third-Party Threads` and the KB-INV-9 gating; §16b (DUPLICATE, consumer) pins the `DUPLICATE` bucket, `duplicate_of`, the `| Duplicates Collapsed | ` row and the `## Duplicates` heading.
 
 **`tests/resolve/duplicate-verdict.test.ts`** (producer; reads Triage via `resolveAgentSource('triage')` plus `resolve.mds`) guards the pre-pass order, the chaining prohibition, security-primary election, the "primary only" matrix scope, the `### DUPLICATE` table and tally, the `duplicate_of` seam and the section-exclusivity sentence.
 
-**`tests/guards/code-read-economy.test.ts`** (build-gated, loud on a missing build) holds, in the compiled Code, Fix and Refactor bodies (the roster is `CODE_AGENT_TYPES`), the Read-once marker (`READ_ONCE_FRAGMENTS`) and the quiet-output line, a whole bullet line equal to `validate.md`'s, each outside `## Running commands`, plus the split wording (`SPLIT_FRAGMENTS`) in the planning reference and compiled `/implement`. `collectFullSuiteBriefDefects` reads the Code-family spawns in compiled `/implement` and `/resolve`, both builds, and fails any that asks for the full suite (a Validate spawn may). Green proves wording, not obedience. `core-rules-digest.test.ts` allows exactly `CODE_FAMILY_SHARED_OUTPUT_LINE` in those three bodies and reports any other digest line; `code-operation.test.ts` holds the body ceilings; `validate-quiet-form.test.ts` keeps the quiet form out of the shared Running commands block in Code, Fix, Refactor, Validate and Test.
+**`tests/guards/code-read-economy.test.ts`** (build-gated) holds, in the compiled Code, Fix and Refactor bodies (`CODE_AGENT_TYPES`), the Read-once marker (`READ_ONCE_FRAGMENTS`) and the quiet-output line (KB-INV-15), plus the split wording (`SPLIT_FRAGMENTS`) in the planning reference and compiled `/implement`. `collectFullSuiteBriefDefects` reads the Code-family spawns in compiled `/implement` and `/resolve`, both builds, and fails any that asks for the full suite (a Validate spawn may). Green proves wording, not obedience: the guard proves the text, not that agents follow it. `core-rules-digest.test.ts` admits no other digest line there, `code-operation.test.ts` holds the body ceilings and `validate-quiet-form.test.ts` the Running commands block.
 
-**The inline evidence scripts** are pinned by `tests/evidence/resolve-refresh.test.ts` (Phase 9b order, the inline call shape, no Git spawn), `tests/evidence/update-pr-evidence.test.ts` (`publish` under the `gh` fake in `pr-shim.ts`, scrub before post) and `tests/evidence/merge-readiness-script.test.ts` with `merge-readiness.test.ts` (the ladder). `resolve-refresh.test.ts` also keeps unique the resolve.mds lines the frozen status-lines fixture samples by first match (the diagram's Phase 5 and 9 lines, the `gh/GitHub absent` edge-case row, the Tracked and manage-debt DEGRADED lines). `tests/guards/command-size.test.ts` holds the command byte ceilings.
+**The inline evidence scripts** are pinned by `tests/evidence/resolve-refresh.test.ts` (Phase 9b order, the inline call shape, no Git spawn), `tests/evidence/update-pr-evidence.test.ts` (`publish` under the `gh` fake in `pr-shim.ts`, scrub before post) and `tests/evidence/merge-readiness-script.test.ts` with `merge-readiness.test.ts` (the ladder). `resolve-refresh.test.ts` also keeps unique the resolve.mds lines the frozen status-lines fixture samples by first match (list: `test-harness-goldens-budgets`).
 
 ## Anti-Patterns
 
 - **KB-AP-1, KB-AP-3**: a debt backlog buries an escalation with no visibility; a misused TECH_DEBT hides work that is FIX_NOW/Careful (clear blast radius) or FIX_SEPARATE.
 - **KB-AP-2**: a body `Skill(...)` re-enters a skill already preloaded; output containing its guard string (for example `already running`) is a Triage failure in the completeness check (retry once, then abort).
-- **KB-AP-4, KB-AP-5, KB-AP-6**: a summary written after Phase 6 can lose the result data to compaction during Polish or Validate; Phases 1b, 9b-1, 9b-2 and 9c all skip and continue on DEGRADED; callers (resolve.mds, code-review.mds) pass operation inputs only.
+- **KB-AP-4, KB-AP-5, KB-AP-6**: a summary written after Phase 6 can lose its data to compaction; Phases 1b, 9b-1, 9b-2 and 9c all skip and continue on DEGRADED; callers (resolve.mds, code-review.mds) pass operation inputs only.
 - **KB-AP-7, KB-AP-8**: only non-DUPLICATE FIX_NOW issues are batched in Phase 3, and the thread mapping happens before the Git operation is called, so the operation contract stays unchanged.
 
 ## Gotchas
 
 - **KB-AP-9, KB-AP-10**: in multi-worktree mode pre-flight and Code batches run in parallel but Phase 9 is always sequential; `DIFF_FILES` is `""`, not omitted, when the `### Diff Scope` block is missing.
-- **KB-INV-9**: the compliance lens is not a /resolve gate. /code-review and /plan gate their compliance agent on `COMPLIANCE_ACTIVE` (`true` unless `COMPLIANCE_FRAMEWORKS` is `off`); /resolve only builds a per-worktree `COMPLIANCE_DIRECTIVE` for its Code and Fix spawns. Every install carries the compliance skill, so no prompt checks for the skill file.
+- **KB-INV-9**: the compliance lens is not a /resolve gate. /code-review and /plan gate their compliance agent on `COMPLIANCE_ACTIVE` (`true` unless `COMPLIANCE_FRAMEWORKS` is `off`); /resolve only builds a per-worktree `COMPLIANCE_DIRECTIVE` for its Code and Fix spawns.
 - **KB-AP-12**: the Recommended deny-list blocks `rm`'s flag spellings (`rm -f`, `rm -rf` and compounds containing them), not a flagless `rm <path>` or `unlink <path>`. Keep cleanup failure-tolerant, and after a denial retry once in a narrower form before reporting a leftover.
-- **KB-AP-15**: an edit that needs bytes condenses a line the command already states or moves a rare branch to a reference read by explicit path (D-CMD-REF-HAND); the ceiling is never raised.
+- **KB-AP-15**: besides condensing a line the command already states, a rare branch can move to a reference (D-CMD-REF-HAND).
 
 ## Key Files
 
-- `src/assets/commands/resolve.mds` — /resolve orchestration (Phases 0-10 plus 1b, 9b, 9c); compiled to `dist/commands/` and `dist/learning-off/commands/`
+- `src/assets/commands/resolve.mds` — /resolve orchestration (Phases 0-10 plus 1b, 9b, 9c)
 - `src/assets/agents/triage.mds` — Triage agent (opus MDS host): pre-pass, matrix, evidence rules, ledger format
 - `src/assets/agents/code.mds`, `fix.mds`, `refactor.mds` — the Code-family MDS hosts (`issue-fix`; `validation-fix`, `ci-fix`; `edit`), each with its own mode sections; `src/assets/agents/_partials/_code.mds` holds the shared text, tail and Principles
 - `src/assets/commands/implement.mds` — /implement: the sequential-split rule and the `git diff` `FILES_CHANGED` for the gate agents
-- `src/assets/agents/git.mds` (compiles to `dist/agents/git.md`) — Git agent: the traceability operations; each loads one reference (contracts in `src/assets/mds/git/_ops*.mds`, PR-host mechanics and the D9 gate in `references/pr/`, the marker legend in `references/decision-markers.md`)
+- `src/assets/agents/git.mds` — Git agent: the traceability operations; each loads one reference (contracts in `src/assets/mds/git/_ops*.mds`, PR-host mechanics and the D9 gate in `references/pr/`, the marker legend in `references/decision-markers.md`)
 - `src/assets/commands/_partials/_settings.mds`, `_compliance.mds` — `settings_resolve()`; `compliance_frameworks()` (/resolve) and `compliance_gate()` (adds `COMPLIANCE_ACTIVE`; /code-review and /plan)
 - `src/assets/scripts/verify-evidence.cjs` — the evidence script /resolve runs inline (`verify --stale-out`, `publish`, `readiness`)
 - `src/core/plugins.ts` — the `devflow-resolve` entry of `DEVFLOW_PLUGINS`
 - `src/assets/commands/code-review.mds` — convergence parser (Step 0e-ii), Phase 3 synthesis, Step 0b compliance lens, `REVIEW_TIMESTAMP` input
-- Guards: see Test Guards
 
 ## Related
 
@@ -285,6 +284,7 @@ Static guards fail loudly when a literal changes. Wider seam and guard family: `
 - `.devflow/features/compliance-feature/KNOWLEDGE.md` — source of the settings-line compliance lens, the compliance partial, the traceability Git operations and the `TRACEABILITY: DEGRADED` contract
 - `.devflow/features/feature-knowledge-system/KNOWLEDGE.md` — how `FEATURE_KNOWLEDGE` reaches Triage and the Code issue-fix spawns (Rules plus heading index; Fix spawns take none) and how the learning variants build
 - `.devflow/features/learning-capture-system/KNOWLEDGE.md` — `decisions_load()` and the `DECISIONS_CONTEXT` index
+- `.devflow/features/test-harness-prompt-install/KNOWLEDGE.md` — the level guards that pin the Gate level block, report lines and short routes
 - `.devflow/features/test-harness/KNOWLEDGE.md` — the helpers (`resolveAgentSource`, `extractOpSectionFromCorpus`) and guard suites behind Test Guards
 - `.devflow/features/test-harness-goldens-budgets/KNOWLEDGE.md` — the frozen status-lines fixture that samples resolve.mds lines, and the command byte ceilings
 - `.devflow/features/tracker-references/KNOWLEDGE.md` — Git-agent operation mechanics and the reference files the markers live in

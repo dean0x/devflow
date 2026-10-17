@@ -41,6 +41,8 @@ Executes a single task through the complete development lifecycle. Accepts plan 
 9. **CI Gate** — Push, then wait for CI on the pushed head and fix failures
 10. **Evidence** — Push, then refresh the PR's test-plan block and post its evidence comment
 
+**Gate level.** `/implement` names the [gate level](cli-reference.md#gate-level) in its report. At `standard` and `lean`, it also reads its level reference once, at the start of the Refinement step, and applies each row to the phase that the row names. The reference has no rows yet, so it changes no phase. If the reference cannot be read, `/implement` applies no row, keeps the level and says `level reference unreadable: no level rows applied`. The level still goes to Validate, so at `lean` the lint pack still runs. Validate, the CI gate, the evidence claims and the compliance directive run at every level. An enabled compliance lens keeps Harden.
+
 ```
 /implement .devflow/docs/design/42-jwt-auth.2026-04-07_1430.md  # From plan document
 /implement #42               # From a tracker issue
@@ -93,6 +95,8 @@ Processes all issues from `/code-review` reports through a validation/fix split:
 8. **Evidence** — When this run moved the PR's head, re-test the test-plan lines the push made stale, then refresh the PR's test-plan block and evidence comment
 9. **Merge Readiness** — Under a `required` evidence policy, a report-only check: no unresolved threads, an approving review, passing CI, every TP verified (or a test-plan exception) and a trusted non-author approval
 10. **Report** — Write resolution summary with Verification, By Design, Fix Separately, and Escalations sections; duplicate findings reported by multiple Review agents are collapsed via the DUPLICATE verdict so Statistics counts reflect unique issues
+
+**Gate level.** Each worktree keeps its own [gate level](cli-reference.md#gate-level). When any worktree is at `standard` or `lean`, `/resolve` reads its level reference once per run and applies each row at that worktree's level. Global Triage is one spawn for all worktrees, so it uses the strictest level in the run. The reference has no rows yet, so it changes no phase. The display and `resolution-summary.md` name the level. If the reference cannot be read, `/resolve` applies no row in any worktree, keeps every level and says `level reference unreadable: no level rows applied`. No level changes the Triage security gate or the ESCALATED route. The Verification Gate, the CI gate and the compliance directive run at every level.
 
 ```
 /resolve                     # Resolve latest review (or all worktrees)
