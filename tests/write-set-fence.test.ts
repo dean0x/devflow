@@ -291,8 +291,9 @@ export const FENCE_ROWS: readonly FenceRow[] = [
   { args: ['proxy', '--status'], allow: NONE, mustWrite: false },
   { args: ['safe-delete', '--status'], allow: NONE, mustWrite: false },
 
-  // The machine gate level is written by `gates --set` alone, and only in the manifest. No command removes the key
-  // but `init --reset`, so these rows come last and leave the stored `lean` in place for no row to depend on.
+  // Of the fenced commands, only `gates --set` writes the machine gate level (init, unfenced, also sets it), and only
+  // in the manifest. No command removes the key but `init --reset`, so these rows come last and leave the stored
+  // `lean` in place for no row to depend on.
   { args: ['gates', '--set', 'lean'], allow: [MANIFEST], mustWrite: true },
   { args: ['gates', '--set', 'lean'], allow: NONE, mustWrite: false, seed: seedGateLevelLean, label: 'repeat' },
   // A rejected level writes nothing and exits 1.

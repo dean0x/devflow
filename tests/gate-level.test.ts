@@ -18,6 +18,7 @@ import * as os from 'os';
 import {
   DEFAULT_GATE_LEVEL,
   GATE_LEVELS,
+  MALFORMED_GATE_LEVEL_READS_AS,
   MAX_MANIFEST_BYTES,
   machineGateLevel,
   parseGateLevel,
@@ -27,7 +28,7 @@ import {
 } from '../src/core/gate-level.js';
 import { hasRequiredManifestFields, readManifest } from '../src/core/manifest.js';
 import { makeManifest } from './helpers.js';
-import { PROJECT_CONFIG_LIB } from './evidence-policy/scripted-shim.js';
+import { PROJECT_CONFIG_LIB, SETTINGS_SCRIPT } from './evidence-policy/scripted-shim.js';
 
 const NOW = '2026-10-14T00:00:00.000Z';
 
@@ -44,6 +45,17 @@ describe('the level registry', () => {
     expect(DEFAULT_GATE_LEVEL).toBe('standard');
     expect(GATE_LEVELS).toContain(DEFAULT_GATE_LEVEL);
     expect(MAX_MANIFEST_BYTES).toBe(1048576);
+  });
+
+  it('folds a value that is not a level to the strictest level, the same one the settings resolver folds it to', () => {
+    expect(MALFORMED_GATE_LEVEL_READS_AS).toBe(GATE_LEVELS[0]);
+    expect(MALFORMED_GATE_LEVEL_READS_AS).toBe('full');
+    const resolver = createRequire(import.meta.url)(SETTINGS_SCRIPT) as {
+      foldGateLevel(personal: unknown, manifest: unknown): { gateLevel: string; gateLevelInvalid: boolean };
+    };
+    const folded = resolver.foldGateLevel({ kind: 'absent' }, { features: { gateLevel: 'Lean' } });
+    expect(folded.gateLevelInvalid).toBe(true);
+    expect(folded.gateLevel).toBe(MALFORMED_GATE_LEVEL_READS_AS);
   });
 });
 

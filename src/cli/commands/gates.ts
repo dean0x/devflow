@@ -26,6 +26,7 @@ import color from 'picocolors';
 import {
   DEFAULT_GATE_LEVEL,
   GATE_LEVELS,
+  MALFORMED_GATE_LEVEL_READS_AS,
   machineGateLevel,
   parseGateLevel,
   readGateManifest,
@@ -50,7 +51,8 @@ import { getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
 
 /**
  * What each level means, in one line. Each line says what the word stands for and
- * not what a command does with it.
+ * not what a command does with it. The line for MALFORMED_GATE_LEVEL_READS_AS says
+ * that a value that is not a level reads as it.
  */
 export const GATE_LEVEL_MEANINGS: Readonly<Record<GateLevel, string>> = Object.freeze({
   full: 'the most checking; any value that is not a level also reads as full',
@@ -58,12 +60,19 @@ export const GATE_LEVEL_MEANINGS: Readonly<Record<GateLevel, string>> = Object.f
   lean: 'the least checking',
 });
 
-/** What reads the level today; each later reader updates this text. */
+/**
+ * What reads the level today; each later reader updates this text.
+ *
+ * The init prompt restates this per level in GATE_LEVEL_HINTS (gate-level-prompts.ts):
+ * edit both together. One test pins the exact text of both tables, so any change to either
+ * fails it until you update the other table and the pin; further rows check the clauses the
+ * two tables share (the lint pack level and the levels that run fewer review focuses).
+ */
 export const GATE_LEVEL_EFFECT =
   '/code-review and /plan read the level: standard and lean run fewer review focuses and fewer planning agents. At lean, /implement has Validate run the project\'s lint pack. Other commands read it once issue #480 lands.';
 
 const MACHINE_MANIFEST_NAME = 'manifest.json';
-const MACHINE_INVALID_LINE = `invalid (${MACHINE_MANIFEST_NAME}; reads as full)`;
+const MACHINE_INVALID_LINE = `invalid (${MACHINE_MANIFEST_NAME}; reads as ${MALFORMED_GATE_LEVEL_READS_AS})`;
 const VALID_LEVELS = GATE_LEVELS.join(', ');
 const VALID_LEVELS_OR = `${GATE_LEVELS.slice(0, -1).join(', ')}, or ${GATE_LEVELS[GATE_LEVELS.length - 1]}`;
 
@@ -73,10 +82,16 @@ const VALID_LEVELS_OR = `${GATE_LEVELS.slice(0, -1).join(', ')}, or ${GATE_LEVEL
  * What `~/.devflow/manifest.json` is, for a warning:
  *   absent       no file (no warning: a machine without devflow is not a fault)
  *   readable     an object the manifest reader accepts
- *   unreadable   corrupt, over the size bound, or valid JSON the manifest reader
- *                rejects; `devflow init` will replace the file
+ *   rejected     valid JSON with a `features` object that the manifest reader
+ *                rejects (a required field is missing or mistyped, or a byte-order
+ *                mark leads); `devflow init` replaces the file and keeps the gate
+ *                level stored in it, unless the run sets another level or resets
+ *   unreadable   corrupt or over the size bound: `devflow gates` cannot read it.
+ *                `devflow init` replaces the file and keeps its level only if init
+ *                can read it; the manifest reader has no size bound, so a valid
+ *                file over the bound is one init can read
  */
-export type GateManifestState = 'absent' | 'readable' | 'unreadable';
+export type GateManifestState = 'absent' | 'readable' | 'rejected' | 'unreadable';
 
 interface GateStatusBase {
   readonly manifest: GateManifestState;
@@ -140,8 +155,8 @@ function manifestState(read: GateManifestRead): GateManifestState {
   switch (read.kind) {
     case 'absent': return 'absent';
     case 'object': return 'readable';
-    case 'corrupt':
-    case 'rejected': return 'unreadable';
+    case 'rejected': return 'rejected';
+    case 'corrupt': return 'unreadable';
     default: {
       const exhaustive: never = read;
       return exhaustive;
@@ -213,8 +228,19 @@ function machineLine(machine: MachineValue): string {
 }
 
 function manifestWarning(status: GateStatus): string | null {
-  if (status.manifest !== 'unreadable') return null;
-  return `Manifest at ${status.manifestPath} cannot be read as a manifest; devflow init will replace this file.`;
+  switch (status.manifest) {
+    case 'absent':
+    case 'readable':
+      return null;
+    case 'rejected':
+      return `Manifest at ${status.manifestPath} is a manifest that devflow rejects; devflow init will replace this file and keep a gate level stored in it unless you choose another level or use --reset.`;
+    case 'unreadable':
+      return `Manifest at ${status.manifestPath} cannot be read by devflow gates; devflow init will replace this file. Init keeps a gate level stored in it only if init can read the file. If init reports that it could not read the level, set it again with devflow gates --set <level>.`;
+    default: {
+      const exhaustive: never = status.manifest;
+      return exhaustive;
+    }
+  }
 }
 
 /**
@@ -348,7 +374,7 @@ function levelsHelp(): string {
 export const gatesCommand = new Command('gates')
   .description('Show or set the machine\'s default gate level')
   .option('--status', 'Show the gate level in effect here, which layer decided it, and the machine default')
-  .option('--set <level>', `Set the machine's default gate level: ${VALID_LEVELS_OR}`)
+  .option(`--set <${GATE_LEVELS.join('|')}>`, `Set the machine's default gate level: ${VALID_LEVELS_OR}`)
   .addHelpText(
     'after',
     `\nGate levels:\n${levelsHelp()}\n\n` +
