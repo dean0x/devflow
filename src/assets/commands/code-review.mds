@@ -91,8 +91,7 @@ In multi-worktree mode, spawn all pre-flight agents **in a single message**.
 
 **If BLOCKED:** In single-worktree mode, stop and report. In multi-worktree mode, report the failure but continue with other worktrees.
 
-**Extract from response:** `branch`, `base_branch`, `base_ref`, `branch_slug`, `pr_number` per worktree. Stop with cause and fix when the Base line reads (rejected) or `base_ref` is not 40 or 64 hex.
-Print a returned base `TRACEABILITY: DEGRADED` line once in the header.
+**Extract from response:** `branch`, `base_branch`, `base_ref`, `branch_slug`, `pr_number` per worktree. Stop with cause and fix when the Base line reads (rejected) or `base_ref` is not 40 or 64 hex and Step 0d takes the full range; name the Git agent's fix, never your own. In multi-worktree mode this blocks only that worktree.
 
 **Fetch PR body** (after extracting `pr_number`):
 ```bash
@@ -111,7 +110,7 @@ For each worktree:
 2. Create timestamped review directory: `mkdir -p {worktree}/.devflow/docs/reviews/{branch-slug}/{timestamp}/`
 3. Check if `{worktree}/.devflow/docs/reviews/{branch-slug}/.last-review-head` exists:
    - **If yes AND `--full` NOT set:**
-     - Read the SHA from the file
+     - Read the SHA from the file. The stored review head is checked as a commit ID: use it only when it is exactly 40 or 64 lowercase hex, else take the full-range path
      - Verify reachable: `git -C {worktree} cat-file -t {sha}` (if unreachable, fallback to full)
      - Check if SHA == current HEAD → if so, skip review: "No new commits since last review. Use --full for a full re-review."
      - Set `DIFF_RANGE` to `{last-review-sha}...HEAD`
@@ -183,10 +182,11 @@ List the changed paths into `{REVIEW_DIR}/paths.txt` and print only the line cou
 
 ```bash
 git -C "{WORKTREE_PATH}" diff --name-only --no-renames {DIFF_RANGE} > "{REVIEW_DIR}/paths.txt"
+echo "exit=$?"
 wc -l < "{REVIEW_DIR}/paths.txt"
 ```
 
-A non-zero diff exit stops. Read `paths.txt` once when the count is about 40 or fewer, and in ranges of about 40 lines (Read with offset and limit) when it is more.
+The `exit=` line is the diff's. A non-zero diff exit stops. Read `paths.txt` once when the count is about 40 or fewer, and in ranges of about 40 lines (Read with offset and limit) when it is more.
 
 Set `DIFF_CLASS` by these rules, in order; the first that decides wins:
 
@@ -417,6 +417,7 @@ Per worktree, after successful completion:
    - Issue counts by category (🔴 blocking / ⚠️ should-fix / ℹ️ pre-existing)
    - Review comment status: POSTED / POSTED+TRUNCATED (body exceeded 60k after redaction) / SKIPPED (D7 dedup) / DEGRADED (from Git)
    - Publication status: FULL (private repo) | FULL (config override) | STUB (public repository) | OFF (publication disabled by config) | STUB (visibility undeterminable) | STUB (evidence policy) (from Git agent)
+   - Any base `TRACEABILITY: DEGRADED` line from Step 0c, as returned
    - Artifact paths
 
 ## Architecture
@@ -428,17 +429,14 @@ Per worktree, after successful completion:
 │  ├─ Step 0a: git worktree list → filter reviewable
 │  ├─ Step 0b: Resolve the compliance lens and gate level
 │  ├─ Step 0c: Git agent (ensure-pr-ready) per worktree [parallel]
-│  ├─ Step 0d: Incremental detection + timestamp setup per worktree
-│  ├─ Step 0e-i: Load prior resolution-summary.md
-│  ├─ Step 0e-ii: Convergence assessment (warn only)
-│  └─ Step 0f: Resolve REVIEW_PUBLICATION per worktree (publication gate)
+│  └─ Steps 0d-0f: incremental range, prior resolution, convergence (warn only), publication mode
 │
 ├─ Per worktree (SEQUENTIAL — one worktree at a time):
 │  │
 │  ├─ Phase 1: Analyze changed files
 │  │  ├─ Classify the diff (paths.txt → DIFF_CLASS)
-│  │  ├─ Choose the focuses (code: file types + the language stamp; all: the gate level)
-│  │  └─ Write diff.patch and diff-{focus}.patch, by redirect
+│  │  ├─ Choose the focuses (file types, language stamp, gate level)
+│  │  └─ Write diff.patch and diff-{focus}.patch
 │  │
 │  ├─ Phase 2: Reviews (PARALLEL within worktree), one per REVIEW_FOCUS_LIST focus
 │  │  ├─ code: core (diff.patch), language (diff-{focus}.patch), conditional
@@ -465,7 +463,6 @@ Per worktree, after successful completion:
 | A file moved across classes | `--no-renames` lists both paths, so a code path makes the diff `code` |
 | Path listing above about 40 lines | Read in ranges (Step 1.1) |
 | Language files changed, plugin not installed | The focus is absent from the stamped line: not spawned |
-| Public repo (`auto` mode) | Git agent probes visibility, posts counts-only STUB comment; full report stays local |
 | `reviewPublication: off` | Git agent skips posting the review comment (OFF) — except that, only when `EVIDENCE_POLICY` is `required`, Step 0f passes `stub` and a counts-only STUB comment posts |
 
 ## Backwards Compatibility

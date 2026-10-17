@@ -498,6 +498,9 @@ function fixTableFindings(p: Prompt): Unmet[] {
 const EXIT_RE = /\bnon-zero\b|\bexit (?:status|code|0)\b|\bexit=/i
 const CHANNEL_RE = /DEGRADED[^\n]*\bbase\b|\bbase\b[^\n]*DEGRADED/i
 
+/** The heading where each review command reports its result: the base DEGRADED line is an item from there on. */
+const REPORT_HEADINGS: Readonly<Record<string, string>> = { 'commands/code-review.md': '### Phase 4:', 'commands/bug-analysis.md': '### Phase 7:' }
+
 interface SinkSpec {
   readonly file: string
   readonly anchor: string
@@ -709,7 +712,23 @@ const REQUIREMENTS: readonly Requirement[] = [
       file: 'commands/code-review.md',
       anchor: 'freshness line',
       bad: 'Review comment status: POSTED / DEGRADED (from Git)',
-      good: 'When the base is degraded, print the Git op DEGRADED line for the base once in the header.',
+      good: 'Any base `TRACEABILITY: DEGRADED` line from Step 0c, as returned',
+    },
+  },
+  {
+    rule: 'channel-slot',
+    files: REVIEW_COMMANDS,
+    check: p => {
+      const heading = REPORT_HEADINGS[p.file]
+      const at = heading === undefined ? -1 : p.text.indexOf(heading)
+      const slot = at === -1 ? '' : p.text.slice(at)
+      return slot.split('\n').some(l => CHANNEL_RE.test(l)) ? [] : unmet('freshness slot', `no line from ${heading} on carries the base freshness DEGRADED line`)
+    },
+    probe: {
+      file: 'commands/code-review.md',
+      anchor: 'freshness slot',
+      bad: 'Print a returned base `TRACEABILITY: DEGRADED` line once in the header.\n\n### Phase 4: Write Review Head Marker & Report\n   - Artifact paths',
+      good: '### Phase 4: Write Review Head Marker & Report\n   - Any base `TRACEABILITY: DEGRADED` line from Step 0c, as returned',
     },
   },
   {

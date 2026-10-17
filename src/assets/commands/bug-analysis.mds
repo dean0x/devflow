@@ -50,8 +50,7 @@ Validate branch, commit if needed, push, create PR if needed.
 Return: branch, base_branch, base_ref, branch-slug, PR#"
 ```
 
-**Extract from response:** `branch`, `base_branch`, `base_ref`, `branch_slug`, `pr_number`. Stop with cause and fix when the Base line reads (rejected) or `base_ref` is not 40 or 64 hex.
-Print a returned base `TRACEABILITY: DEGRADED` line once in the header.
+**Extract from response:** `branch`, `base_branch`, `base_ref`, `branch_slug`, `pr_number`. Stop with cause and fix when the Base line reads (rejected) or `base_ref` is not 40 or 64 hex and Step 2a takes the full range; name the Git agent's fix, never your own.
 
 **Fetch PR body** (after extracting `pr_number`):
 ```bash
@@ -70,7 +69,7 @@ If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
 
 1. Check `{worktree}/.devflow/docs/bug-analysis/{branch-slug}/.last-analysis-head`:
    - **If exists AND `--full` NOT set:**
-     - Read the SHA from the file
+     - Read the SHA from the file. The stored analysis head is checked as a commit ID: use it only when it is exactly 40 or 64 lowercase hex, else take the full-range path
      - Verify reachable: `git cat-file -t {sha}` — if exit code non-zero (rebase invalidated SHA), fall through to full
      - If SHA == current HEAD → "No new commits since last analysis. Use --full for a full re-analysis." Stop.
      - Set `DIFF_RANGE` to `{sha}...HEAD`
@@ -274,6 +273,7 @@ Output: {ANALYSIS_DIR}/bug-analysis-summary.md"
 ## Bug Analysis Complete
 
 **Branch**: {branch} -> {base_branch}
+{any base `TRACEABILITY: DEGRADED` line from Phase 1, as returned}
 **Analysis**: {ANALYSIS_DIR}
 
 ### Risk Assessment: {risk_level}
@@ -351,10 +351,6 @@ Run `/resolve` to process and fix these findings.
 | `--no-static` flag | Skip Phase 2c and 2d entirely; `STATIC_FINDINGS=(none)` |
 | `--full` flag | Bypass incremental detection (Step 2a), run full diff from base |
 | CodeQL database creation fails | Skip CodeQL, note in output, continue with other tools |
-| Static tool produces no findings | `STATIC_FINDINGS=(none)` — normal, proceed with semantic analysis |
-| No plan artifact found | `PLAN_CONTEXT=(none)`, `ACCEPTANCE_RULES=(none)` — proceed without acceptance criteria |
-| `integration` focus skipped | Not spawned when only 1 directory changed |
-| `usability` focus skipped | Not spawned when no UI files changed |
 
 ## Resolve Compatibility
 

@@ -396,8 +396,9 @@ export function collectReviewAgentDefects(review: string): string[] {
 /**
  * #495 (use a fresh base for branch diffs): the base ref that ensure-pr-ready returns is the base of
  * DIFF_RANGE. The Extract line tests the Base line and the hex base_ref and carries no copy of the name
- * class (the Git op already stops on a refused name); a non-zero diff exit stops at the first diff; a
- * degraded base prints one freshness line.
+ * class (the Git op already stops on a refused name), ends the stop at the worktree, and tests the hex
+ * base_ref only for a full-range run; a non-zero diff exit stops at the first diff and the `exit=` line
+ * after the listing is the diff's own; a degraded base prints one freshness line, a Phase 4 item.
  */
 export function collectFreshBaseDefects(body: string): string[] {
   const out: string[] = []
@@ -414,6 +415,9 @@ export function collectFreshBaseDefects(body: string): string[] {
     if (!/`base_ref` is not 40 or 64 hex/.test(line)) out.push('the Extract line does not test base_ref for 40 or 64 hex')
     if (!/Stop with cause and fix/.test(line)) out.push('the Extract line does not stop with the cause and the fix')
     if (/\{1,200\}|origin\\\//.test(line)) out.push('the Extract line carries a copy of the name class')
+    if (!/hex and Step 0d takes the full range/.test(line)) out.push('the Extract line does not limit the hex test to a full-range run')
+    if (!/this blocks only that worktree/.test(line)) out.push('the Extract line does not end the stop at one worktree')
+    if (!/name the Git agent's fix, never your own/.test(line)) out.push('the Extract line does not name the fix the Git agent returned')
   }
   const ranges = [...body.matchAll(/Set `DIFF_RANGE` to `([^`]+)`/g)].map(m => m[1])
   if (!ranges.includes('{base_ref}...HEAD')) out.push('DIFF_RANGE is not built from base_ref')
@@ -421,10 +425,32 @@ export function collectFreshBaseDefects(body: string): string[] {
   if (ranges.some(r => r.includes('{base_branch}'))) out.push('DIFF_RANGE is built from a base name')
   const listing = step(body, '1.1')
   if (listing === null) out.push('no Step 1.1 (Classify the diff) in Phase 1')
-  else if (!/A non-zero diff exit stops\./.test(listing)) out.push('Step 1.1 does not say a non-zero diff exit stops')
+  else {
+    if (!/A non-zero diff exit stops\./.test(listing)) out.push('Step 1.1 does not say a non-zero diff exit stops')
+    const fenced = fencedLines(listing)
+    if (fenced[fenced.indexOf(LIST_COMMAND) + 1] !== 'echo "exit=$?"') out.push('Step 1.1 does not echo the diff exit status right after the listing')
+    if (!/The `exit=` line is the diff's\./.test(listing)) out.push('Step 1.1 does not say the exit= line is the diff\'s')
+  }
   const fresh = body.split('\n').filter(l => /DEGRADED/.test(l) && /\bbase\b/.test(l))
   if (fresh.length !== 1) out.push(`${fresh.length} freshness lines, expected 1`)
-  else if (!/once in the header/.test(fresh[0])) out.push('the freshness line is not printed once in the header')
+  else if (!(sectionBetween(body, '### Phase 4:', '## Architecture') ?? '').includes(fresh[0])) out.push('the freshness line is not a Phase 4 item')
+  else if (!/from Step 0c, as returned/.test(fresh[0])) out.push('the freshness line is not the Step 0c line as returned')
+  return out
+}
+
+/** The stored review head: checked as a commit ID, before any git command or DIFF_RANGE takes it. */
+export function collectStoredHeadDefects(body: string): string[] {
+  const s = sectionBetween(body, '#### Step 0d:', '#### Step 0e-i:')
+  if (s === null) return ['no Step 0d (incremental detection)']
+  const out: string[] = []
+  const line = /^[^\n]*checked as a commit ID[^\n]*/m.exec(s)
+  if (line === null) return ['the stored review head is not checked as a commit ID']
+  if (!/\bexactly 40 or 64 lowercase hex\b/.test(line[0])) out.push('the stored review head check does not require exactly 40 or 64 lowercase hex')
+  if (!/else take the full-range path/.test(line[0])) out.push('a stored review head that fails the check does not take the full-range path')
+  const check = s.indexOf('checked as a commit ID')
+  const uses = ['cat-file -t {sha}', 'Set `DIFF_RANGE` to `{last-review-sha}...HEAD`'].map(use => s.indexOf(use))
+  if (uses.some(at => at === -1)) out.push('Step 0d lost the reachability check or the incremental range')
+  else if (uses.some(at => at < check)) out.push('the stored review head is used before it is checked')
   return out
 }
 
@@ -700,12 +726,43 @@ describe('DIFF_RANGE starts at the fresh base that ensure-pr-ready returns (#495
       .toMatch(/DIFF_RANGE is not built from base_ref[\s\S]*DIFF_RANGE is built from a base name/)
     expect(collectFreshBaseDefects(seed(ON, 'Set `DIFF_RANGE` to `{last-review-sha}...HEAD`', 'Set `DIFF_RANGE` to `{last-review-sha}..HEAD`')))
       .toContain('the incremental DIFF_RANGE changed')
+    expect(collectFreshBaseDefects(seed(ON, ' and Step 0d takes the full range', '')))
+      .toContain('the Extract line does not limit the hex test to a full-range run')
+    expect(collectFreshBaseDefects(seed(ON, ' In multi-worktree mode this blocks only that worktree.', '')))
+      .toContain('the Extract line does not end the stop at one worktree')
+    expect(collectFreshBaseDefects(seed(ON, "name the Git agent's fix, never your own", 'name a fix')))
+      .toContain('the Extract line does not name the fix the Git agent returned')
     expect(collectFreshBaseDefects(seed(ON, 'A non-zero diff exit stops. ', '')))
       .toContain('Step 1.1 does not say a non-zero diff exit stops')
-    expect(collectFreshBaseDefects(seed(ON, /^Print a returned base .*$/m, '')))
+    expect(collectFreshBaseDefects(seed(ON, `${LIST_COMMAND}\necho "exit=$?"\n`, `${LIST_COMMAND}\n`)))
+      .toContain('Step 1.1 does not echo the diff exit status right after the listing')
+    expect(collectFreshBaseDefects(seed(ON, "The `exit=` line is the diff's. ", '')))
+      .toContain("Step 1.1 does not say the exit= line is the diff's")
+    expect(collectFreshBaseDefects(seed(ON, /^ *- Any base .*\n/m, '')))
       .toContain('0 freshness lines, expected 1')
-    expect(collectFreshBaseDefects(seed(ON, 'line once in the header.', 'line.')))
-      .toContain('the freshness line is not printed once in the header')
+    const moved = seed(seed(ON, /^ *- Any base .*\n/m, ''), 'blocks only that worktree.', 'blocks only that worktree.\nPrint a returned base `TRACEABILITY: DEGRADED` line once in the header.')
+    expect(collectFreshBaseDefects(moved)).toContain('the freshness line is not a Phase 4 item')
+    expect(collectFreshBaseDefects(seed(ON, 'from Step 0c, as returned', 'from Step 0c')))
+      .toContain('the freshness line is not the Step 0c line as returned')
+  })
+})
+
+describe('the stored review head is checked as a commit ID (Step 0d)', () => {
+  const CHECK = ' The stored review head is checked as a commit ID: use it only when it is exactly 40 or 64 lowercase hex, else take the full-range path'
+
+  it.each(VARIANTS)('$label: the check comes before the reachability test and the incremental range', ({ body }) => {
+    expect(collectStoredHeadDefects(body)).toEqual([])
+  })
+
+  it('known-bad probes: a missing, weakened or late check is reported', () => {
+    expect(collectStoredHeadDefects(seed(ON, CHECK, '')))
+      .toContain('the stored review head is not checked as a commit ID')
+    expect(collectStoredHeadDefects(seed(ON, 'exactly 40 or 64 lowercase hex', 'hex')))
+      .toContain('the stored review head check does not require exactly 40 or 64 lowercase hex')
+    expect(collectStoredHeadDefects(seed(ON, 'else take the full-range path', 'else go on')))
+      .toContain('a stored review head that fails the check does not take the full-range path')
+    expect(collectStoredHeadDefects(seed(seed(ON, CHECK, ''), 'cat-file -t {sha}`', `cat-file -t {sha}\`${CHECK}`)))
+      .toContain('the stored review head is used before it is checked')
   })
 })
 

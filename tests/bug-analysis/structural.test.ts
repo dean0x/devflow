@@ -134,8 +134,10 @@ describe('bug-analysis.md — incremental detection', () => {
 //
 // The base ref that ensure-pr-ready returns is the base of DIFF_RANGE. The Extract line tests the
 // Base line and the hex base_ref and carries no copy of the name class (the Git op already stops on
-// a refused name). A non-zero diff exit stops; an empty list stops only on exit 0; a degraded base
-// prints one freshness line. The Debug diff command follows DIFF_RANGE and needs no text change.
+// a refused name), ends the hex test at a full-range run, and takes the fix from the Git agent. A
+// non-zero diff exit stops; an empty list stops only on exit 0; a degraded base prints one freshness
+// line under Branch in the Phase 7 report. The stored analysis head is checked as a commit ID before
+// it is used. The Debug diff command follows DIFF_RANGE and needs no text change.
 // ---------------------------------------------------------------------------
 
 function collectFreshBaseDefects(body: string): string[] {
@@ -153,6 +155,8 @@ function collectFreshBaseDefects(body: string): string[] {
     if (!/`base_ref` is not 40 or 64 hex/.test(line)) out.push('the Extract line does not test base_ref for 40 or 64 hex');
     if (!/Stop with cause and fix/.test(line)) out.push('the Extract line does not stop with the cause and the fix');
     if (/\{1,200\}|origin\\\//.test(line)) out.push('the Extract line carries a copy of the name class');
+    if (!/hex and Step 2a takes the full range/.test(line)) out.push('the Extract line does not limit the hex test to a full-range run');
+    if (!/name the Git agent's fix, never your own/.test(line)) out.push('the Extract line does not name the fix the Git agent returned');
   }
   const ranges = [...body.matchAll(/Set `DIFF_RANGE` to `([^`]+)`/g)].map(m => m[1]);
   if (!ranges.includes('{base_ref}...HEAD')) out.push('DIFF_RANGE is not built from base_ref');
@@ -165,8 +169,29 @@ function collectFreshBaseDefects(body: string): string[] {
   else if (!/^\| Zero changed files in DIFF_RANGE with exit 0 \|/.test(row)) out.push('the zero-files stop row does not fire only on exit 0');
   const fresh = body.split('\n').filter(l => /DEGRADED/.test(l) && /\bbase\b/.test(l));
   if (fresh.length !== 1) out.push(`${fresh.length} freshness lines, expected 1`);
-  else if (!/once in the header/.test(fresh[0])) out.push('the freshness line is not printed once in the header');
+  else {
+    const at = body.indexOf(fresh[0]);
+    const branch = body.indexOf('**Branch**: {branch}');
+    const analysis = body.indexOf('**Analysis**: {ANALYSIS_DIR}');
+    if (branch === -1 || analysis === -1 || at < branch || at > analysis) out.push('the freshness line is not under Branch in the Phase 7 report');
+    else if (!/from Phase 1, as returned/.test(fresh[0])) out.push('the freshness line is not the Phase 1 line as returned');
+  }
   if (!body.includes('DIFF_COMMAND: git diff {DIFF_RANGE}')) out.push('the Debug diff command does not follow DIFF_RANGE');
+  return out;
+}
+
+// The stored analysis head: checked as a commit ID, before any git command or DIFF_RANGE takes it.
+function collectStoredHeadDefects(body: string): string[] {
+  const s = extractSection(body, 'Step 2a:', 'Step 2b:');
+  const out: string[] = [];
+  const line = /^[^\n]*checked as a commit ID[^\n]*/m.exec(s);
+  if (line === null) return ['the stored analysis head is not checked as a commit ID'];
+  if (!/\bexactly 40 or 64 lowercase hex\b/.test(line[0])) out.push('the stored analysis head check does not require exactly 40 or 64 lowercase hex');
+  if (!/else take the full-range path/.test(line[0])) out.push('a stored analysis head that fails the check does not take the full-range path');
+  const check = s.indexOf('checked as a commit ID');
+  const uses = ['git cat-file -t {sha}', 'Set `DIFF_RANGE` to `{sha}...HEAD`'].map(use => s.indexOf(use));
+  if (uses.some(at => at === -1)) out.push('Step 2a lost the reachability check or the incremental range');
+  else if (uses.some(at => at < check)) out.push('the stored analysis head is used before it is checked');
   return out;
 }
 
@@ -200,12 +225,42 @@ describe('bug-analysis.md — DIFF_RANGE starts at the fresh base that ensure-pr
       .toContain('Step 2b does not say a non-zero diff exit stops');
     expect(collectFreshBaseDefects(seed('| Zero changed files in DIFF_RANGE with exit 0 |', '| Zero changed files in DIFF_RANGE |')))
       .toContain('the zero-files stop row does not fire only on exit 0');
-    expect(collectFreshBaseDefects(seed(/^Print a returned base .*\n/m, '')))
+    expect(collectFreshBaseDefects(seed(' and Step 2a takes the full range', '')))
+      .toContain('the Extract line does not limit the hex test to a full-range run');
+    expect(collectFreshBaseDefects(seed("name the Git agent's fix, never your own", 'name a fix')))
+      .toContain('the Extract line does not name the fix the Git agent returned');
+    expect(collectFreshBaseDefects(seed(/^\{any base .*\n/m, '')))
       .toContain('0 freshness lines, expected 1');
-    expect(collectFreshBaseDefects(seed('line once in the header.', 'line.')))
-      .toContain('the freshness line is not printed once in the header');
+    const moved = seed(/^\{any base .*\n/m, '').replace('never your own.', 'never your own.\nPrint a returned base `TRACEABILITY: DEGRADED` line once in the header.');
+    expect(collectFreshBaseDefects(moved)).toContain('the freshness line is not under Branch in the Phase 7 report');
+    expect(collectFreshBaseDefects(seed('from Phase 1, as returned', 'from Phase 1')))
+      .toContain('the freshness line is not the Phase 1 line as returned');
     expect(collectFreshBaseDefects(seed('DIFF_COMMAND: git diff {DIFF_RANGE}', 'DIFF_COMMAND: git diff main...HEAD')))
       .toContain('the Debug diff command does not follow DIFF_RANGE');
+  });
+});
+
+describe('bug-analysis.md — the stored analysis head is checked as a commit ID (Step 2a)', () => {
+  const CHECK = ' The stored analysis head is checked as a commit ID: use it only when it is exactly 40 or 64 lowercase hex, else take the full-range path';
+  const seed = (from: string, to: string): string => {
+    const next = content.replace(from, to);
+    expect(next, `the seed ${from} must change the text`).not.toBe(content);
+    return next;
+  };
+
+  it('the check comes before the reachability test and the incremental range', () => {
+    expect(collectStoredHeadDefects(content)).toEqual([]);
+  });
+
+  it('known-bad probes: a missing, weakened or late check is reported', () => {
+    expect(collectStoredHeadDefects(seed(CHECK, '')))
+      .toContain('the stored analysis head is not checked as a commit ID');
+    expect(collectStoredHeadDefects(seed('exactly 40 or 64 lowercase hex', 'hex')))
+      .toContain('the stored analysis head check does not require exactly 40 or 64 lowercase hex');
+    expect(collectStoredHeadDefects(seed('else take the full-range path', 'else go on')))
+      .toContain('a stored analysis head that fails the check does not take the full-range path');
+    const late = seed(CHECK, '').replace('git cat-file -t {sha}', `git cat-file -t {sha}${CHECK}`);
+    expect(collectStoredHeadDefects(late)).toContain('the stored analysis head is used before it is checked');
   });
 });
 
