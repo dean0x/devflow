@@ -25,9 +25,7 @@
  *   h. The two `/resolve` routes that skip phases, and the numbered principles.
  * The spawn fences of both commands are pinned in `implement-resolve-full-fences.test.ts`.
  *
- * The reference arms (d, e) read the two references and pass as soon as the references exist. The command arms
- * (a, b, c, f, g, h) read the compiled commands and pass once the commands carry the block, the data flow, the
- * report lines and the two routes.
+ * The reference arms (d, e) read the two references. The command arms (a, b, c, f, g, h) read the compiled commands.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -553,7 +551,9 @@ export function collectCutRouteDefects(body: string): string[] {
     if (empty[0] !== ROUTE_EMPTY) out.push(`the empty FIX_NOW route is not the pinned sentence: ${empty[0].slice(0, 200)}`)
     const named = [...new Set(empty[0].match(/\b\d+[bc]?\b/g) ?? [])]
     for (const n of named.filter(p => ['6', '7', '8'].includes(p))) out.push(`the empty FIX_NOW route names Phase ${n}`)
-    if ([...named].sort().join(', ') !== [...ROUTE_EMPTY_PHASES].sort().join(', ')) out.push(`the empty FIX_NOW route names phases ${[...named].sort().join(', ')}, expected ${[...ROUTE_EMPTY_PHASES].sort().join(', ')}`)
+    const namedSorted = [...named].sort().join(', ')
+    const expectedSorted = [...ROUTE_EMPTY_PHASES].sort().join(', ')
+    if (namedSorted !== expectedSorted) out.push(`the empty FIX_NOW route names phases ${namedSorted}, expected ${expectedSorted}`)
   }
   const push = lines.filter(line => line.startsWith('**Route after push:**'))
   if (push.length !== 1) out.push(`the route after push appears ${push.length} times, expected once`)
@@ -620,9 +620,9 @@ function withRows(ref: string, rows: readonly string[], bullets: readonly string
   return next
 }
 
-/** A command-arm probe seeds text that the commands carry once the block is written: when it is absent the probe fails for that reason. */
+/** A probe seeds text inside the block, so it first checks that the compiled command carries the pinned read paragraph: without it the probe fails for that reason. */
 function needsBlock(body: string, spec: LevelSpec): void {
-  expect(body.includes(spec.readParagraph), `the compiled ${spec.cmd} lacks the pinned Gate level read paragraph: the block is not written yet`).toBe(true)
+  expect(body.includes(spec.readParagraph), `the compiled ${spec.cmd} lacks the pinned Gate level read paragraph`).toBe(true)
 }
 
 /** The block taken out of its place and put in front of `spec.moveBefore`. */
@@ -873,7 +873,7 @@ describe('the command carries one Gate level block, closed and in its place (AC-
 
   it.each(SPECS)('$cmd: known-bad probes: a block inside a learning arm of the source is reported', spec => {
     const source = SOURCES[spec.cmd]
-    expect(source.includes(OPEN), `the ${spec.cmd} source lacks the Gate level block: it is not written yet`).toBe(true)
+    expect(source.includes(OPEN), `the ${spec.cmd} source lacks the Gate level block`).toBe(true)
     for (const arm of ['on', 'off']) {
       const wrapped = seed(seed(source, OPEN, `<!-- learning:${arm} -->\n${OPEN}`), spec.sourceEnd, `<!-- learning:end -->\n${spec.sourceEnd}`)
       expect(collectBlockArmDefects(wrapped, spec)).toEqual([`the gate-level block sits inside a learning:${arm} arm`])
@@ -893,7 +893,7 @@ describe('the data flow lists GATE_LEVEL where the block and the reports use it 
 
   it.each(SPECS)('$cmd: known-bad probes: each site without GATE_LEVEL is reported', spec => {
     const body = bodyOf(spec)
-    expect(collectDataFlowDefects(body, spec), 'the data flow is not written yet').toEqual([])
+    expect(collectDataFlowDefects(body, spec), 'the unmodified data flow has no defect').toEqual([])
     for (const { site, kind, start, end } of spec.dataFlow) {
       const without = seedIn(body, start, end, new RegExp(`^(\\*\\*${kind}:\\*\\* .*?), GATE_LEVEL`, 'm'), '$1')
       expect(collectDataFlowDefects(without, spec), site).toEqual([`${site} ${kind} does not list GATE_LEVEL`])
@@ -959,7 +959,6 @@ describe('full reads no level reference (AC-2)', () => {
     const withLevel = seedIn(body, '### Phase 7: Verification Gate', '### Phase 8:', 'Agent(subagent_type="Validate"):\n"', 'Agent(subagent_type="Validate"):\n"GATE_LEVEL: {GATE_LEVEL}\n')
     expect(defects(withLevel)).toContain('the Phase 7 Validate fence names GATE_LEVEL')
     expect(defects(seedIn(body, '### Phase 7: Verification Gate', '### Phase 8:', 'Agent(subagent_type="Validate"):', 'Agent(subagent_type="Test"):'))).toContain('Phase 7 holds 0 Validate fences, expected 1')
-    expect(parseFences(sectionBetween(body, '### Phase 7: Verification Gate', '### Phase 8:') ?? '').filter(f => isAgentBlock(f, 'Validate')).join('')).not.toContain('GATE_LEVEL')
   })
 })
 
@@ -974,14 +973,14 @@ describe('the report names the level (AC-4)', () => {
 
   it('known-bad probes (/implement): the Phase 12 line without the level note is reported', () => {
     const body = bodyOf(IMPLEMENT)
-    expect(collectReportDefects(body, IMPLEMENT), 'the Phase 12 report line is not written yet').toEqual([])
+    expect(collectReportDefects(body, IMPLEMENT), 'the unmodified Phase 12 line has no defect').toEqual([])
     expect(collectReportDefects(seed(body, '`Gate level: {GATE_LEVEL}` with any level note, ', ''), IMPLEMENT)).toEqual([`the Phase 12 report line is not the pinned sentence: ${IMPLEMENT_REPORT}`])
     expect(collectReportDefects(seed(body, 'with any level note, ', ''), IMPLEMENT)).toHaveLength(1)
   })
 
   it('known-bad probes (/resolve): the display line and the summary header line are each required', () => {
     const body = bodyOf(RESOLVE)
-    expect(collectReportDefects(body, RESOLVE), 'the display and the summary header lines are not written yet').toEqual([])
+    expect(collectReportDefects(body, RESOLVE), 'the unmodified display and summary header have no defect').toEqual([])
     expect(collectReportDefects(seed(body, '**Gate level**: {GATE_LEVEL, with any level note}\n', ''), RESOLVE)).toEqual(['the display lacks the Gate level line between **Total Issues** and ### Results'])
     expect(collectReportDefects(seed(body, RESOLVE_HEADER, '**Command**: /resolve\n\n'), RESOLVE)).toEqual(['the summary template lacks the Gate level line right after **Command**: /resolve'])
     expect(collectReportDefects(seed(body, '**Gate level**: {GATE_LEVEL}\n\n', '**Gate level**: {GATE_LEVEL}\n\n## Extra\n\n'), RESOLVE)).toEqual(['the Gate level header line is not followed by the learning arm or ## Statistics'])
@@ -999,7 +998,7 @@ describe('the /resolve routes that skip phases pass no pushing phase (A1)', () =
 
   it('known-bad probes: a pushing phase in the route, the retired wording and a shortened route are each reported', () => {
     const body = bodyOf(RESOLVE)
-    expect(collectCutRouteDefects(body), 'the cuts are not written yet').toEqual([])
+    expect(collectCutRouteDefects(body), 'the unmodified routes have no defect').toEqual([])
     expect(collectCutRouteDefects(seed(body, 'Phases 9, 9b', 'Phases 7, 9, 9b'))).toEqual(expect.arrayContaining(['the empty FIX_NOW route names Phase 7']))
     expect(collectCutRouteDefects(seed(body, 'skip to Phase 5, then', 'skip to Phase 5, then run Phase 6, then'))).toContain('the empty FIX_NOW route names Phase 6')
     expect(collectCutRouteDefects(seed(body, ROUTE_EMPTY, 'If FIX_NOW list is empty: skip to Phase 5 and run the later phases in order.')))

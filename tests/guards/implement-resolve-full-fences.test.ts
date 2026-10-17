@@ -153,6 +153,9 @@ export function collectSpawnFences(text: string): { fences: SpawnFence[]; unread
   return { fences, unreadable }
 }
 
+/** The map key of a fence: heading, agent type and ordinal, joined by NUL. */
+const keyOf = (heading: string, agent: string, ordinal: number): string => `${heading}\u0000${agent}\u0000${ordinal}`
+
 const where = (heading: string, agent: string, ordinal: number): string => `"${heading}", ${agent} #${ordinal}`
 
 /** What differs between the pinned table and the fences of one compiled file. Each defect ends with the repin command. */
@@ -161,16 +164,16 @@ export function collectFenceDigestDefects(label: string, text: string, pinned: r
   const { fences, unreadable } = collectSpawnFences(text)
   const end = ` Repin: ${REPIN_COMMAND}`
   for (const line of unreadable) out.push(`${label}: ${line}.${end}`)
-  const want = new Map(pinned.map(([heading, agent, ordinal, digest]) => [`${heading}\u0000${agent}\u0000${ordinal}`, digest] as const))
-  const got = new Map(fences.map(f => [`${f.heading}\u0000${f.agent}\u0000${f.ordinal}`, f] as const))
+  const want = new Map(pinned.map(([heading, agent, ordinal, digest]) => [keyOf(heading, agent, ordinal), digest] as const))
+  const got = new Set(fences.map(f => keyOf(f.heading, f.agent, f.ordinal)))
   for (const f of fences) {
-    const expected = want.get(`${f.heading}\u0000${f.agent}\u0000${f.ordinal}`)
+    const expected = want.get(keyOf(f.heading, f.agent, f.ordinal))
     const actual = sha256(f.fence)
     if (expected === undefined) out.push(`${label}: a fence was added under ${where(f.heading, f.agent, f.ordinal)}: ${actual}.${end}`)
     else if (expected !== actual) out.push(`${label}: the fence under ${where(f.heading, f.agent, f.ordinal)} changed: expected ${expected}, actual ${actual}.${end}`)
   }
   for (const [heading, agent, ordinal] of pinned) {
-    if (!got.has(`${heading}\u0000${agent}\u0000${ordinal}`)) out.push(`${label}: the fence under ${where(heading, agent, ordinal)} is gone.${end}`)
+    if (!got.has(keyOf(heading, agent, ordinal))) out.push(`${label}: the fence under ${where(heading, agent, ordinal)} is gone.${end}`)
   }
   return out
 }
