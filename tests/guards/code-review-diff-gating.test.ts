@@ -717,6 +717,8 @@ describe('DIFF_RANGE starts at the fresh base that ensure-pr-ready returns (#495
       .toContain("Step 1.1 does not say the exit= line is the diff's")
     expect(collectReviewFreshBaseDefects(seed(ON, /^ *- Any base .*\n/m, '')))
       .toContain('0 freshness lines, expected 1')
+    expect(collectReviewFreshBaseDefects(seed(ON, 'blocks only that worktree.', 'blocks only that worktree.\nPrint a returned base `TRACEABILITY: DEGRADED` line once in the header.')))
+      .toContain('2 freshness lines, expected 1')
     const moved = seed(seed(ON, /^ *- Any base .*\n/m, ''), 'blocks only that worktree.', 'blocks only that worktree.\nPrint a returned base `TRACEABILITY: DEGRADED` line once in the header.')
     expect(collectReviewFreshBaseDefects(moved)).toContain('the freshness line is not a Phase 4 item')
     expect(collectReviewFreshBaseDefects(seed(ON, 'from Step 0c, as returned', 'from Step 0c')))
@@ -741,6 +743,15 @@ describe('the stored review head is tracked-free and checked as a commit ID (Ste
       .toContain('a stored review head that fails the check does not take the full-range path')
     expect(collectStoredHeadDefects(seed(seed(ON, CHECK, ''), 'cat-file -t {sha}`', `cat-file -t {sha}\`${CHECK}`), REVIEW_RANGE))
       .toContain('the stored review head is used before it is checked')
+  })
+
+  it('known-bad probes: a missing step, reachability check or incremental range is reported', () => {
+    expect(collectStoredHeadDefects(seed(ON, REVIEW_RANGE.stepFrom, '#### Step 0z:'), REVIEW_RANGE))
+      .toEqual(['no Step 0d (incremental detection)'])
+    expect(collectStoredHeadDefects(seed(ON, 'cat-file -t {sha}', 'cat-file -t {head}'), REVIEW_RANGE))
+      .toContain('Step 0d lost the reachability check or the incremental range')
+    expect(collectStoredHeadDefects(seed(ON, 'Set `DIFF_RANGE` to `{last-review-sha}...HEAD`', 'Set `DIFF_RANGE` to `{last-review-sha}..HEAD`'), REVIEW_RANGE))
+      .toContain('Step 0d lost the reachability check or the incremental range')
   })
 
   it('known-bad probes: a missing, late or fall-back-less tracked-file check is reported', () => {

@@ -474,6 +474,9 @@ const FIX_TABLE_RE = /Fix by REASON:[^\n]*?\{fix\}` is left out\./
 /** The fix a consumer names when the resolver gives no usable line. */
 const RESOLVER_FIX = 're-run; if it repeats, run devflow init'
 
+/** The reason a consumer reads when the resolver gives no usable line, as the prompts write it. */
+const RESOLVER_UNAVAILABLE_TOKEN = '`REASON=resolver-unavailable`'
+
 /** The reason-to-fix sentence of ensure-pr-ready step 5b: the one text every other copy equals. */
 const CANONICAL_FIX_TABLE: string | null = (() => {
   const entry = gitOperationReferenceCorpus('github').find(e => path.basename(e.path) === 'ensure-pr-ready.md')
@@ -658,12 +661,12 @@ const REQUIREMENTS: readonly Requirement[] = [
   {
     rule: 'consumer-stop',
     files: DIRECT_CALLERS,
-    check: p => (p.text.includes('resolver-unavailable') && p.text.includes(`\`${RESOLVER_FIX}\``) ? [] : unmet('resolver-unavailable stop', 'the consumer does not name resolver-unavailable with the re-run, then devflow init fix')),
+    check: p => (p.text.includes(RESOLVER_UNAVAILABLE_TOKEN) && p.text.includes(`\`${RESOLVER_FIX}\``) ? [] : unmet('resolver-unavailable stop', 'the consumer does not read other output as REASON=resolver-unavailable with the re-run, then devflow init fix')),
     probe: {
       file: 'git-ops/validate-branch.md',
       anchor: 'resolver-unavailable stop',
-      bad: 'Any other output is a stop with REASON resolver-unavailable; the fix is `run devflow init`.',
-      good: `Any other output is a stop with REASON resolver-unavailable; the fix is \`${RESOLVER_FIX}\`.`,
+      bad: `Any other output is a stop with REASON resolver-unavailable; the fix is \`${RESOLVER_FIX}\`.`,
+      good: `Any other output reads as ${RESOLVER_UNAVAILABLE_TOKEN}; the fix is \`${RESOLVER_FIX}\`.`,
     },
   },
   {
@@ -905,6 +908,15 @@ describe('known-bad probes: each collector reports the seeded bad text and passe
     })
   }
 
+  it('RULES lists exactly the rule names that the requirements and the name-site collector report', () => {
+    const reported = new Set<string>([
+      ...REQUIREMENTS.map(r => r.rule),
+      ...collectNameSites(seeded('commands/implement.md', 'run `git diff --name-only {BASE_BRANCH}...HEAD`')).map(f => f.rule),
+      ...collectNameSites(seeded('agents/seeded.md', STALE_CHECK_SEED)).map(f => f.rule),
+    ])
+    expect([...reported].sort()).toEqual([...RULES].sort())
+  })
+
   it('sink-exit: the code-review patch writes without an exit rule are reported, and with one are not', () => {
     const write = '```bash\ngit -C "{WORKTREE_PATH}" diff --no-color --no-ext-diff --no-textconv {DIFF_RANGE} > "{REVIEW_DIR}/diff.patch"\n```\n\nIt holds the whole diff of `DIFF_RANGE`.'
     const anchors = (text: string): string[] => sinkFindings(seeded('commands/code-review.md', text)).map(u => u.anchor).filter(a => a === 'patch writes')
@@ -954,6 +966,11 @@ describe('known-bad probes: each collector reports the seeded bad text and passe
     const details = (text: string): string[] => fixTableFindings(seeded('commands/implement.md', text)).map(u => u.detail)
     expect(details(canonical)).toEqual([])
     expect(details(canonical.replace('`git fetch --unshallow`', '`git fetch --depth=1000`'))).toEqual(['the sentence differs from the ensure-pr-ready step 5b sentence'])
+    expect(details('The file names no fix for a base stop.')).toEqual(['the file has no reason-to-fix sentence'])
+    expect(details(canonical.replace('invalid-name the allowed set', 'fetch-failed `git fetch`; invalid-name the allowed set'))).toEqual([
+      'a fix for a reason that has none: fetch-failed',
+      'the sentence differs from the ensure-pr-ready step 5b sentence',
+    ])
     expect(details(canonical.replace(`\`${RESOLVER_FIX}\``, '`run devflow init`'))).toEqual([
       'resolver-unavailable does not say to re-run before devflow init',
       'the sentence differs from the ensure-pr-ready step 5b sentence',

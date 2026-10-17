@@ -40,7 +40,7 @@ import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 
-import { RESOLVE_BASE_SCRIPT } from './seam.js'
+import { RESOLVE_BASE_SCRIPT, SUBPROCESS_TIMEOUT_MS } from './seam.js'
 import { realGit, scopedEnv } from '../evidence-policy/scripted-shim.js'
 
 // ---------------------------------------------------------------------------
@@ -99,8 +99,6 @@ interface ResolveBase {
 const req = createRequire(import.meta.url)
 const RB = req(RESOLVE_BASE_SCRIPT) as ResolveBase
 
-/** The bound of one node or git launch, and the timeout of every test that makes one (slow under full-suite load). */
-const SUBPROCESS_TIMEOUT_MS = 60_000
 const SPAWN_BUDGET = { timeout: SUBPROCESS_TIMEOUT_MS } as const
 
 const HEX_A = 'a'.repeat(40)

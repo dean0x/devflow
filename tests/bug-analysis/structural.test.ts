@@ -206,6 +206,8 @@ describe('bug-analysis.md — DIFF_RANGE starts at the fresh base that ensure-pr
       .toContain('the Extract line does not name the fix the Git agent returned');
     expect(collectAnalysisFreshBaseDefects(seed(/^\{any base .*\n/m, '')))
       .toContain('0 freshness lines, expected 1');
+    expect(collectAnalysisFreshBaseDefects(seed('never your own.', 'never your own.\nPrint a returned base `TRACEABILITY: DEGRADED` line once in the header.')))
+      .toContain('2 freshness lines, expected 1');
     const moved = seed(/^\{any base .*\n/m, '').replace('never your own.', 'never your own.\nPrint a returned base `TRACEABILITY: DEGRADED` line once in the header.');
     expect(collectAnalysisFreshBaseDefects(moved)).toContain('the freshness line is not under Branch in the Phase 7 report');
     expect(collectAnalysisFreshBaseDefects(seed('from Phase 1, as returned', 'from Phase 1')))
@@ -237,6 +239,15 @@ describe('bug-analysis.md — the stored analysis head is tracked-free and check
       .toContain('a stored analysis head that fails the check does not take the full-range path');
     const late = seed(CHECK, '').replace('git cat-file -t {sha}', `git cat-file -t {sha}${CHECK}`);
     expect(collectStoredHeadDefects(late, ANALYSIS_RANGE)).toContain('the stored analysis head is used before it is checked');
+  });
+
+  it('known-bad probes: a missing step, reachability check or incremental range is reported', () => {
+    expect(collectStoredHeadDefects(content.replaceAll('Step 2a:', 'Step 2z:'), ANALYSIS_RANGE))
+      .toEqual(['no Step 2a (incremental detection)']);
+    expect(collectStoredHeadDefects(seed('git cat-file -t {sha}', 'git cat-file -t {head}'), ANALYSIS_RANGE))
+      .toContain('Step 2a lost the reachability check or the incremental range');
+    expect(collectStoredHeadDefects(seed('Set `DIFF_RANGE` to `{sha}...HEAD`', 'Set `DIFF_RANGE` to `{sha}..HEAD`'), ANALYSIS_RANGE))
+      .toContain('Step 2a lost the reachability check or the incremental range');
   });
 
   it('known-bad probes: a missing, late or fall-back-less tracked-file check is reported', () => {

@@ -27,12 +27,12 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { createRequire } from 'module'
-import { spawnSync } from 'child_process'
+import { spawnSync, type SpawnSyncOptions } from 'child_process'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 
-import { RESOLVE_BASE_SCRIPT } from './seam.js'
+import { RESOLVE_BASE_SCRIPT, SUBPROCESS_TIMEOUT_MS } from './seam.js'
 import { realGit, scopedEnv } from '../evidence-policy/scripted-shim.js'
 
 // ---------------------------------------------------------------------------
@@ -69,7 +69,7 @@ const req = createRequire(import.meta.url)
 const RB = req(RESOLVE_BASE_SCRIPT) as ResolveBase
 const SOURCE = fs.readFileSync(RESOLVE_BASE_SCRIPT, 'utf-8')
 
-const SPAWN_BUDGET = { timeout: 30_000 } as const
+const SPAWN_BUDGET = { timeout: SUBPROCESS_TIMEOUT_MS } as const
 const POSIX = process.platform !== 'win32'
 const NULL_DEVICE = process.platform === 'win32' ? 'NUL' : '/dev/null'
 const SHA = 'a'.repeat(40)
@@ -499,15 +499,15 @@ beforeAll(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-resolve-base-proc-'))
   fakeBin = path.join(tmp, 'bin')
   fs.mkdirSync(fakeBin)
-  const which = spawnSync('sh', ['-c', 'command -v git'], { cwd: tmp, env: scopedEnv(tmp), encoding: 'utf8', timeout: 10_000 })
+  const which = spawnSync('sh', ['-c', 'command -v git'], { cwd: tmp, env: scopedEnv(tmp), encoding: 'utf8', timeout: SUBPROCESS_TIMEOUT_MS })
   realGitPath = (which.stdout ?? '').trim()
   // macOS scans a newly written executable on its first run, which can take seconds: write every
   // fake once and run it once here, so no test's budget absorbs the scan
   const warmExtra = { SSH_LOG: path.join(tmp, 'warm.log'), REAL_GIT: realGitPath, FAKE_PIDS: path.join(tmp, 'warm.pids') }
   for (const dir of FAKE_DIRS) {
-    spawnSync(writeExecutable(path.join(fakeBin, dir, 'ssh'), LOG_SCRIPT), ['warm-up'], { cwd: tmp, env: scopedEnv(tmp, warmExtra), stdio: 'ignore', timeout: 40_000 })
+    spawnSync(writeExecutable(path.join(fakeBin, dir, 'ssh'), LOG_SCRIPT), ['warm-up'], { cwd: tmp, env: scopedEnv(tmp, warmExtra), stdio: 'ignore', timeout: SUBPROCESS_TIMEOUT_MS })
   }
-  spawnSync(writeExecutable(path.join(fakeBin, 'hung', 'git'), HUNG_GIT), ['--version'], { cwd: tmp, env: scopedEnv(tmp, warmExtra), stdio: 'ignore', timeout: 40_000 })
+  spawnSync(writeExecutable(path.join(fakeBin, 'hung', 'git'), HUNG_GIT), ['--version'], { cwd: tmp, env: scopedEnv(tmp, warmExtra), stdio: 'ignore', timeout: SUBPROCESS_TIMEOUT_MS })
   // the three programs of the AC-12 test: written once, and run once here for the same reason
   settingsDir = path.join(fakeBin, 'settings')
   marksDir = path.join(tmp, 'marks')
@@ -518,9 +518,9 @@ beforeAll(() => {
     writeExecutable(path.join(settingsDir, 'fsmonitor.sh'), `#!/bin/sh\ntouch "${path.join(marksDir, 'fsmonitor')}"\n`),
   ]
   for (const program of settingsPrograms) {
-    spawnSync(program, ['warm-up'], { cwd: tmp, env: scopedEnv(tmp), stdio: 'ignore', timeout: 40_000 })
+    spawnSync(program, ['warm-up'], { cwd: tmp, env: scopedEnv(tmp), stdio: 'ignore', timeout: SUBPROCESS_TIMEOUT_MS })
   }
-}, 240_000)
+}, 10 * SUBPROCESS_TIMEOUT_MS)
 
 afterAll(() => {
   fs.rmSync(tmp, { recursive: true, force: true })
@@ -730,7 +730,7 @@ describe.skipIf(!POSIX)('the 45 s backstop (AC-14)', SPAWN_BUDGET, () => {
     const elapsed = Date.now() - started
 
     expect(out.line).toBe(`BASE_REF=${w.m0} TIP=origin FETCH=failed REASON=timeout NOTE=degraded`)
-    expect(elapsed, 'returns within the injected bound plus the local calls').toBeLessThan(20_000)
+    expect(elapsed, 'the injected bound ended the fetch, not the 45 s backstop').toBeLessThan(RB.FETCH_TIMEOUT_MS)
     const pids = readPids(pidFile)
     expect(pids).toHaveLength(2)
     expect(await gone(pids), 'no process of the fetch group survives').toBe(true)
@@ -741,9 +741,14 @@ describe.skipIf(!POSIX)('the 45 s backstop (AC-14)', SPAWN_BUDGET, () => {
     const pidFile = path.join(w.root, 'pids')
     const extra = { REAL_GIT: realGitPath, FAKE_PIDS: pidFile }
 
-    spawnSync(hungGit(), ['fetch'], { cwd: w.root, env: scopedEnv(w.home, extra), stdio: 'ignore', timeout: HUNG_BOUND_MS, killSignal: 'SIGKILL', detached: true })
+    // spawnSync honors `detached` (the child leads a new process group, as in the production fetch) although SpawnSyncOptions does not declare it
+    const options: SpawnSyncOptions & { detached: boolean } = { cwd: w.root, env: scopedEnv(w.home, extra), stdio: 'ignore', timeout: HUNG_BOUND_MS, killSignal: 'SIGKILL', detached: true }
+    const run = spawnSync(hungGit(), ['fetch'], options)
     const [leader, helper] = readPids(pidFile)
     try {
+      expect((run.error as NodeJS.ErrnoException | undefined)?.code, 'the timeout ended the leader').toBe('ETIMEDOUT')
+      const group = spawnSync('ps', ['-o', 'pgid=', '-p', String(helper)], { encoding: 'utf8', timeout: SUBPROCESS_TIMEOUT_MS })
+      expect(Number(group.stdout.trim()), 'the helper sits in the leader group').toBe(leader)
       expect(alive(helper), 'without a group kill the helper outlives its leader').toBe(true)
     } finally {
       try { process.kill(-leader, 'SIGKILL') } catch { /* already gone */ }

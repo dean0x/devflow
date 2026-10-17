@@ -3298,7 +3298,7 @@ function ensurePrReadyBaseDefects(section: string): string[] {
     ['5a reads the cross flag from isCrossRepository', a.includes('isCrossRepository') && a.includes('X=<isCrossRepository')],
     ['5a runs the pr-mode call after the check, in one Bash call', a.includes(PR_MODE_CALL) && a.indexOf(BASE_CHECK) < a.indexOf(PR_MODE_CALL)],
     ['5a keeps the name out of prose', a.includes('only as `${B}`')],
-    ['5a keeps the PR line and degrades when the PR gives no base name', a.includes('If that call gives no name, keep the PR line') && a.includes('`(unreadable)`') && a.includes('`TRACEABILITY: DEGRADED (base name unreadable; fix: re-run)`') && a.indexOf('gives no name') < a.indexOf(BASE_CHECK)],
+    ['5a keeps the PR line, degrades and skips the rest of step 5 when the PR gives no base name', a.includes('If that call gives no name, keep the PR line') && a.includes('`(unreadable)`') && a.includes('`TRACEABILITY: DEGRADED (base name unreadable; fix: re-run)`') && a.includes('and skip the rest of step 5. Stop unless') && a.indexOf('gives no name') < a.indexOf(BASE_CHECK)],
     ['5a skips the resolver for a given hex BASE_REF on the same base name', a.includes('when `BASE_REF` is 40 or 64 lowercase hex and the name equals `BASE_BRANCH`, skip the resolver and 5b: `base_ref` is `BASE_REF`') && a.indexOf(BASE_CHECK) < a.indexOf('when `BASE_REF`') && a.indexOf('when `BASE_REF`') < a.indexOf(PR_MODE_CALL)],
     ['the Input lists BASE_REF as optional', section.includes('`BASE_BRANCH` (optional), `BASE_REF` (optional)')],
     ['5b takes the one BASE_REF line only with exit=0 and reads other output as resolver-unavailable', b.includes('`BASE_REF=`') && b.includes('together with `exit=0`') && b.includes('`REASON=resolver-unavailable`') && b.includes('run devflow init')],
@@ -3329,7 +3329,7 @@ function validateBranchBaseDefects(section: string): string[] {
     ['step 6 probes the default branch without a name placeholder', !/\{(?:default|base_branch)\}/.test(step6.replace(/`base_branch`/g, ''))],
     ['step 7 diffs against the hex base ref and echoes the exit status', step7.includes('git -C "{worktree}" diff --name-only {base_ref}...HEAD; echo "exit=$?"') && step7.includes('40 or 64 hex')],
     ['step 7 treats a non-zero exit as BLOCKED and an empty list as valid only with exit 0', step7.includes('a non-zero exit is BLOCKED') && step7.includes('empty list counts only with `exit=0`')],
-    ['the contract says it fetches the base and lists the diff against base_ref', contract.includes('it fetches the base branch once (the remote-tracking ref only), lists the diff against `base_ref`') && !/read-only/i.test(contract)],
+    ['the contract says it fetches the base and lists the diff against base_ref', contract.includes('it fetches the base branch at most once (the remote-tracking ref only), lists the diff against `base_ref`') && !/read-only/i.test(contract)],
   ]);
 }
 
@@ -3365,7 +3365,8 @@ describe('git agent: PR ops use a fresh base for branch diffs (#495)', () => {
     expect(ensurePrReadyBaseDefects(ensure.replace('Only an invalid name stops this operation', 'Any failure stops this operation'))).toContain('5b stops only on an invalid name');
     expect(ensurePrReadyBaseDefects(ensure.replace(BASE_FIX_TABLE, ''))).toContain('5b carries the reason-to-fix table');
     expect(ensurePrReadyBaseDefects(ensure.replace('together with `exit=0`', ''))).toContain('5b takes the one BASE_REF line only with exit=0 and reads other output as resolver-unavailable');
-    expect(ensurePrReadyBaseDefects(ensure.replace('If that call gives no name, keep the PR line', 'If that call gives no name, stop'))).toContain('5a keeps the PR line and degrades when the PR gives no base name');
+    expect(ensurePrReadyBaseDefects(ensure.replace('If that call gives no name, keep the PR line', 'If that call gives no name, stop'))).toContain('5a keeps the PR line, degrades and skips the rest of step 5 when the PR gives no base name');
+    expect(ensurePrReadyBaseDefects(ensure.replace('and skip the rest of step 5. Stop unless', 'and skip 5b. Stop unless'))).toContain('5a keeps the PR line, degrades and skips the rest of step 5 when the PR gives no base name');
     expect(ensurePrReadyBaseDefects(ensure.replace('skip the resolver and 5b', 'run the resolver'))).toContain('5a skips the resolver for a given hex BASE_REF on the same base name');
     expect(ensurePrReadyBaseDefects(ensure.replace('`BASE_REF` (optional), ', ''))).toEqual(['the Input lists BASE_REF as optional']);
     expect(ensurePrReadyBaseDefects(ensure.replace(' or `(base name unreadable; fix: re-run)`', ''))).toEqual(['the Output names the step-5 DEGRADED lines and an invalid name as the only BLOCKED cause']);
@@ -3373,7 +3374,7 @@ describe('git agent: PR ops use a fresh base for branch diffs (#495)', () => {
     expect(validateBranchBaseDefects(sectionValidate.replace(BASE_FIX_TABLE, ''))).toContain('step 6 carries the reason-to-fix table');
     expect(validateBranchBaseDefects(sectionValidate.replace('with `exit=0`', ''))).toContain('step 6 takes the BASE_REF line only with exit=0');
     expect(validateBranchBaseDefects(sectionValidate.replace('naming REASON and its fix', 'naming REASON'))).toContain('step 6 names the fix in its BLOCKED result');
-    expect(validateBranchBaseDefects(sectionValidate.replace('it fetches the base branch once (the remote-tracking ref only), lists', 'it is a read-only check, lists'))).toEqual(['the contract says it fetches the base and lists the diff against base_ref']);
+    expect(validateBranchBaseDefects(sectionValidate.replace('it fetches the base branch at most once (the remote-tracking ref only), lists', 'it is a read-only check, lists'))).toEqual(['the contract says it fetches the base and lists the diff against base_ref']);
     expect(validateBranchBaseDefects(sectionValidate.replace('never an empty `### Diff Scope`', 'an empty `### Diff Scope` is fine'))).toContain('step 6 never gives an empty Diff Scope');
     expect(validateBranchBaseDefects(sectionValidate.replace('diff --name-only {base_ref}...HEAD; echo "exit=$?"', 'diff {base_branch}...HEAD --name-only'))).toContain('step 7 diffs against the hex base ref and echoes the exit status');
   });
