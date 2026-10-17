@@ -265,7 +265,7 @@ const RULES = [
   'shell-name', 'strict-copy', 'grammar-copy', 'diff-range', 'sink-exit',
   'resolver-call', 'cross-flag', 'consumer-stop', 'reason-fix-table', 'post-capture-check',
   'produces-base-ref', 'requires-base-ref', 'inline-list', 'return-base-ref',
-  'extract-checks', 'channel-line', 'blocked-no-base', 'reviewer-fallback',
+  'extract-checks', 'channel-line', 'channel-slot', 'blocked-no-base', 'reviewer-fallback',
 ] as const
 
 type Rule = typeof RULES[number]

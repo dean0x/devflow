@@ -277,22 +277,36 @@ const TIP_ORIGIN = 'd'.repeat(40)
 const BASE_LOCAL = 'a'.repeat(40)
 const BASE_ORIGIN = 'b'.repeat(40)
 
-/** Names the call site of one script call from its argv; the local and origin tips have distinct ids. */
-function siteOf(args: readonly string[]): Site | 'fetch' {
+/** The two arguments every local git call of the script starts with. */
+const LOCAL_OVERRIDE = ['-c', 'core.fsmonitor=false'] as const
+
+/** What the stub names a call: a listed local site, the fetch, or `unknown` for any other argv. */
+type Seen = Site | 'fetch' | 'unknown'
+
+/** The exact argv of each listed local site, after the override; the local and origin tips have distinct ids. */
+const LOCAL_ARGV: Readonly<Record<Site, readonly string[]>> = {
+  'check-ref-format': ['check-ref-format', 'refs/heads/main'],
+  'config remote.origin.url': ['config', '--get', 'remote.origin.url'],
+  'config core.sshCommand': ['config', '--get', 'core.sshCommand'],
+  'rev-parse local tip': ['rev-parse', '--verify', '--quiet', 'refs/heads/main^{commit}'],
+  'rev-parse origin tip': ['rev-parse', '--verify', '--quiet', 'refs/remotes/origin/main^{commit}'],
+  'merge-base local tip': ['merge-base', TIP_LOCAL, 'HEAD'],
+  'merge-base origin tip': ['merge-base', TIP_ORIGIN, 'HEAD'],
+  'merge-base --is-ancestor': ['merge-base', '--is-ancestor', BASE_LOCAL, BASE_ORIGIN],
+  'rev-parse chosen base': ['rev-parse', '--verify', '--quiet', `${BASE_ORIGIN}^{commit}`],
+}
+
+const sameArgv = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every((v, i) => v === b[i])
+
+/** Names the call site of one script call from its exact argv; any argv that matches no listed site is `unknown`. */
+function siteOf(args: readonly string[]): Seen {
   const rest = [...args]
   while (rest[0] === '-c') rest.splice(0, 2)
-  const [sub, second] = rest
-  const last = rest[rest.length - 1]
-  if (sub === 'fetch') return 'fetch'
-  if (sub === 'check-ref-format') return 'check-ref-format'
-  if (sub === 'config') return rest.includes('remote.origin.url') ? 'config remote.origin.url' : 'config core.sshCommand'
-  if (sub === 'rev-parse') {
-    if (last === 'refs/heads/main^{commit}') return 'rev-parse local tip'
-    if (last === 'refs/remotes/origin/main^{commit}') return 'rev-parse origin tip'
-    return 'rev-parse chosen base'
-  }
-  if (second === '--is-ancestor') return 'merge-base --is-ancestor'
-  return second === TIP_LOCAL ? 'merge-base local tip' : 'merge-base origin tip'
+  if (rest[0] === 'fetch') return 'fetch'
+  if (!sameArgv(args.slice(0, LOCAL_OVERRIDE.length), LOCAL_OVERRIDE)) return 'unknown'
+  const local = args.slice(LOCAL_OVERRIDE.length)
+  const listed = (Object.entries(LOCAL_ARGV) as [Site, readonly string[]][]).find(([, argv]) => sameArgv(argv, local))
+  return listed === undefined ? 'unknown' : listed[0]
 }
 
 const ok = (stdout = ''): SpawnResult => ({ status: 0, stdout: Buffer.from(stdout), stderr: Buffer.from('') })
@@ -309,9 +323,12 @@ const HAPPY: Readonly<Record<Site | 'fetch', SpawnResult>> = {
   'rev-parse chosen base': ok(`${BASE_ORIGIN}\n`),
 }
 
+/** The answer to a call that matches no listed site: an error exit the script does not expect. */
+const UNLISTED: SpawnResult = { status: 97, stdout: Buffer.from(''), stderr: Buffer.from('') }
+
 /** Answers every call by its site; `unanswered` replaces the answer at one site. Records the sites and the calls. */
-function siteStub(unanswered?: { site: Site; result: SpawnResult }, onCall?: (site: Site | 'fetch') => SpawnResult | undefined): { spawn: SpawnFn; sites: (Site | 'fetch')[]; calls: Call[] } {
-  const sites: (Site | 'fetch')[] = []
+function siteStub(unanswered?: { site: Site; result: SpawnResult }, onCall?: (site: Seen) => SpawnResult | undefined): { spawn: SpawnFn; sites: Seen[]; calls: Call[] } {
+  const sites: Seen[] = []
   const calls: Call[] = []
   const spawn: SpawnFn = (file, args, opts) => {
     calls.push({ file, args: [...args], opts })
@@ -319,6 +336,7 @@ function siteStub(unanswered?: { site: Site; result: SpawnResult }, onCall?: (si
     sites.push(site)
     const timed = onCall?.(site)
     if (timed !== undefined) return timed
+    if (site === 'unknown') return UNLISTED
     return unanswered !== undefined && unanswered.site === site ? unanswered.result : HAPPY[site]
   }
   return { spawn, sites, calls }
@@ -347,8 +365,25 @@ describe('a local git call that gives no answer (AC-15)', () => {
   it.each(['local', 'pr'] as const)('control: in %s mode every call answers, the stub reaches every listed site and the line is fresh', mode => {
     const { spawn, sites } = siteStub()
     expect(run('main', mode, { spawn, env: { PATH: '/bin' } }).line).toBe(FRESH)
+    expect(sites, 'every call the script makes matches a listed site').not.toContain('unknown')
     const expected = SITES.filter(s => s.modes.includes(mode)).map(s => s.site)
     expect(new Set(sites)).toEqual(new Set([...expected, 'fetch']))
+  })
+
+  it('control: an argv that matches no listed site is reported as unknown, so a new local call fails the control', () => {
+    const unlisted: readonly (readonly string[])[] = [
+      [...LOCAL_OVERRIDE, 'rev-parse', '--git-dir'],
+      [...LOCAL_OVERRIDE, 'rev-parse', '--verify', '--quiet', 'refs/heads/other^{commit}'],
+      [...LOCAL_OVERRIDE, 'merge-base', '--octopus', TIP_LOCAL, 'HEAD'],
+      [...LOCAL_OVERRIDE, 'merge-base', 'e'.repeat(40), 'HEAD'],
+      [...LOCAL_OVERRIDE, 'config', '--get', 'user.name'],
+      [...LOCAL_OVERRIDE, 'status'],
+      ['rev-parse', '--verify', '--quiet', `${BASE_ORIGIN}^{commit}`],
+    ]
+    for (const argv of unlisted) expect(siteOf(argv), argv.join(' ')).toBe('unknown')
+    const { spawn, sites } = siteStub()
+    for (const argv of unlisted) spawn('git', [...argv], {})
+    expect(sites).toEqual(unlisted.map(() => 'unknown'))
   })
 
   const ROWS = SITES.flatMap(s => s.modes.flatMap(mode => KINDS.map(k => ({ mode, site: s.site, fetch: s.fetch, kind: k.kind, result: k.result }))))
@@ -357,6 +392,7 @@ describe('a local git call that gives no answer (AC-15)', () => {
     const { spawn, sites } = siteStub({ site: row.site, result: row.result })
     const out = run('main', row.mode, { spawn, env: { PATH: '/bin' } })
     expect(sites, 'the call site was reached').toContain(row.site)
+    expect(sites, 'every call the script makes matches a listed site').not.toContain('unknown')
     expect(out).toEqual({ code: 0, line: `BASE_REF=none TIP=none FETCH=${row.fetch} REASON=resolver-unavailable NOTE=stop` })
   })
 
@@ -374,7 +410,7 @@ describe('the run budget (AC-15)', () => {
   })
 
   /** A clock the stub moves forward by `stepMs` per call. */
-  function clocked(stepMs: number, fetchResult?: SpawnResult): { deps: Deps; calls: Call[]; sites: (Site | 'fetch')[] } {
+  function clocked(stepMs: number, fetchResult?: SpawnResult): { deps: Deps; calls: Call[]; sites: Seen[] } {
     let t = 0
     const { spawn: inner, calls, sites } = siteStub(undefined, site => (site === 'fetch' ? fetchResult : undefined))
     const spawn: SpawnFn = (file, args, opts) => { const r = inner(file, args, opts); t += stepMs; return r }
