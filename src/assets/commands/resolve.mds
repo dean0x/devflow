@@ -124,7 +124,7 @@ Resolve this per worktree — unlike the evidence policy above, the settings lin
 
 Set it per worktree, from that worktree's lens, and pass that worktree's `COMPLIANCE_DIRECTIVE` to each of its Code and Fix spawns, on a line of its own.
 
-**Gate level.** Each worktree keeps its own `GATE_LEVEL`. When any is `standard` or `lean`, once per run, run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash and Read `<that directory>/skills/devflow:agent-references/references/commands/resolve-levels.md` with the Read tool, and apply each row to the phase it names, in each worktree at its own level.
+**Gate level.** Each worktree keeps its own `GATE_LEVEL`. When any is `standard` or `lean`, once per run, run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash and Read `<that directory>/skills/devflow:agent-references/references/commands/resolve-levels.md` with the Read tool, and apply each row to the phase it names, as the reference says.
 
 - No row or rule overrides the next two lines.
 - If the Read fails, or the file has no `## Phases` heading with the `| Phase | standard | lean |` header, or a row breaks its grammar, apply no row in any worktree, keep every `GATE_LEVEL` and say `level reference unreadable: no level rows applied`.
