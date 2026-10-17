@@ -380,12 +380,14 @@ interface CallBudget {
   readonly direct: number
   /** The mode of every direct call. */
   readonly mode?: 'local' | 'pr'
+  /** The mode of each direct call, in any order, for a file that makes one call per mode. */
+  readonly modes?: readonly ('local' | 'pr')[]
   /** ensure-pr-ready spawns (each is one call inside the Git op). */
   readonly spawns?: number
 }
 
 const CALL_BUDGET: Readonly<Record<string, CallBudget>> = {
-  // Two calls per /implement run: this one, and the one inside the Phase 9 ensure-pr-ready spawn.
+  // One resolver run per /implement run: this call. The Phase 9 ensure-pr-ready spawn takes its BASE_REF and runs none.
   'commands/implement.md': { direct: 1, mode: 'local', spawns: 1 },
   // One call per reviewed worktree: the spawn sits inside the per-worktree step.
   'commands/code-review.md': { direct: 0, spawns: 1 },
@@ -396,7 +398,8 @@ const CALL_BUDGET: Readonly<Record<string, CallBudget>> = {
   'git-ops/ensure-pr-ready.md': { direct: 1, mode: 'pr' },
   // One call per validate-branch run.
   'git-ops/validate-branch.md': { direct: 1, mode: 'pr' },
-  'references/implement-revalidate.md': { direct: 1, mode: 'pr' },
+  // A PR takes the pr rule; no PR takes the pre-PR local rule.
+  'references/implement-revalidate.md': { direct: 2, modes: ['pr', 'local'] },
 }
 
 const DIRECT_CALLERS: readonly string[] = ['commands/implement.md', 'references/implement-revalidate.md', 'git-ops/ensure-pr-ready.md', 'git-ops/validate-branch.md']
@@ -427,6 +430,8 @@ function invocationErrors(span: string): string[] {
   return errors
 }
 
+const modeOf = (span: string): string | undefined => shellWords(span).find((w, i, all) => all[i - 1]?.value.endsWith('resolve-base.cjs'))?.value
+
 function callFindings(p: Prompt): Unmet[] {
   const budget = CALL_BUDGET[p.file] ?? { direct: 0 }
   const calls = callSpans(p)
@@ -435,8 +440,13 @@ function callFindings(p: Prompt): Unmet[] {
   for (const { span } of calls) {
     const errors = invocationErrors(span)
     if (errors.length > 0) out.push({ anchor: 'invocation', detail: errors.join('; ') })
-    const mode = shellWords(span).find((w, i, all) => all[i - 1]?.value.endsWith('resolve-base.cjs'))?.value
+    const mode = modeOf(span)
     if (budget.mode !== undefined && mode !== budget.mode) out.push({ anchor: 'invocation', detail: `mode ${mode} where ${budget.mode} is expected` })
+  }
+  if (budget.modes !== undefined) {
+    const got = calls.map(({ span }) => modeOf(span)).sort().join()
+    const want = [...budget.modes].sort().join()
+    if (got !== want) out.push({ anchor: 'invocation', detail: `modes ${got} where ${want} are expected` })
   }
   if (p.file === 'commands/implement.md' && calls.length > 0) {
     const call = calls[0].line.offset
@@ -461,7 +471,16 @@ const FIX_REASONS: readonly string[] = Object.entries(resolver.REASON_NOTES)
 
 const FIX_TABLE_RE = /Fix by REASON:[^\n]*?\{fix\}` is left out\./
 
-/** Why the reason-to-fix sentence of a Git op does not cover the script's vocabulary; empty when it does. */
+/** The fix a consumer names when the resolver gives no usable line. */
+const RESOLVER_FIX = 're-run; if it repeats, run devflow init'
+
+/** The reason-to-fix sentence of ensure-pr-ready step 5b: the one text every other copy equals. */
+const CANONICAL_FIX_TABLE: string | null = (() => {
+  const entry = gitOperationReferenceCorpus('github').find(e => path.basename(e.path) === 'ensure-pr-ready.md')
+  return entry === undefined ? null : (FIX_TABLE_RE.exec(entry.content)?.[0] ?? null)
+})()
+
+/** Why the reason-to-fix sentence of a file does not equal the Git op sentence or cover the script's vocabulary; empty when it does. */
 function fixTableFindings(p: Prompt): Unmet[] {
   const table = FIX_TABLE_RE.exec(p.text)?.[0]
   if (table === undefined) return unmet('reason-fix table', 'the file has no reason-to-fix sentence')
@@ -470,11 +489,11 @@ function fixTableFindings(p: Prompt): Unmet[] {
   const out: Unmet[] = []
   if (missing.length > 0) out.push({ anchor: 'reason-fix table', detail: `no fix for: ${missing.join(', ')}` })
   if (extra.length > 0) out.push({ anchor: 'reason-fix table', detail: `a fix for a reason that has none: ${extra.join(', ')}` })
-  if (!/resolver-unavailable `re-run[^`]*devflow init`/.test(table)) out.push({ anchor: 'reason-fix table', detail: 'resolver-unavailable does not say to re-run before devflow init' })
+  if (!table.includes(`resolver-unavailable \`${RESOLVER_FIX}\``)) out.push({ anchor: 'reason-fix table', detail: 'resolver-unavailable does not say to re-run before devflow init' })
+  if (CANONICAL_FIX_TABLE === null) out.push({ anchor: 'reason-fix table', detail: 'ensure-pr-ready has no reason-to-fix sentence to compare with' })
+  else if (table !== CANONICAL_FIX_TABLE) out.push({ anchor: 'reason-fix table', detail: 'the sentence differs from the ensure-pr-ready step 5b sentence' })
   return out
 }
-
-const FIX_TABLE_SEED = (reasons: readonly string[]): string => `Fix by REASON: ${reasons.map(r => (r === 'resolver-unavailable' ? `${r} \`re-run; if it repeats, run devflow init\`` : `${r} \`fix\``)).join('; ')}; any other REASON none, and \`; fix: {fix}\` is left out.`
 
 const EXIT_RE = /\bnon-zero\b|\bexit (?:status|code|0)\b|\bexit=/i
 const CHANNEL_RE = /DEGRADED[^\n]*\bbase\b|\bbase\b[^\n]*DEGRADED/i
@@ -594,13 +613,13 @@ const REQUIREMENTS: readonly Requirement[] = [
     check: p => {
       const line = p.text.split('\n').find(l => l.includes('the inline calls are the bounded plumbing'))
       if (line === undefined) return unmet('charter inline list', 'the allowed-inline list was not found')
-      return /resolver|resolve-base/i.test(line) ? [] : unmet('charter inline list', 'the allowed-inline list does not name the resolver call')
+      return /fresh base step's resolver calls \(Phase 1, re-validation\)/.test(line) ? [] : unmet('charter inline list', 'the allowed-inline list does not name the resolver calls of the fresh base step, in Phase 1 and in re-validation')
     },
     probe: {
       file: 'commands/implement.md',
       anchor: 'charter inline list',
-      bad: '1. **Orchestration only** - the inline calls are the bounded plumbing the charter allows: the Phase 10 push.',
-      good: '1. **Orchestration only** - the inline calls are the bounded plumbing the charter allows: the Phase 1 resolver call, the Phase 10 push.',
+      bad: '1. **Orchestration only** - the inline calls are the bounded plumbing the charter allows: the Phase 1 resolver call, the Phase 10 push.',
+      good: "1. **Orchestration only** - the inline calls are the bounded plumbing the charter allows: the fresh base step's resolver calls (Phase 1, re-validation), the Phase 10 push.",
     },
   },
   {
@@ -635,23 +654,23 @@ const REQUIREMENTS: readonly Requirement[] = [
   {
     rule: 'consumer-stop',
     files: DIRECT_CALLERS,
-    check: p => (p.text.includes('resolver-unavailable') && p.text.includes('devflow init') ? [] : unmet('resolver-unavailable stop', 'the consumer does not name resolver-unavailable with the devflow init fix')),
+    check: p => (p.text.includes('resolver-unavailable') && p.text.includes(`\`${RESOLVER_FIX}\``) ? [] : unmet('resolver-unavailable stop', 'the consumer does not name resolver-unavailable with the re-run, then devflow init fix')),
     probe: {
       file: 'git-ops/validate-branch.md',
       anchor: 'resolver-unavailable stop',
-      bad: 'Any other output is a stop.',
-      good: 'Any other output is a stop with REASON resolver-unavailable; the fix is `run devflow init`.',
+      bad: 'Any other output is a stop with REASON resolver-unavailable; the fix is `run devflow init`.',
+      good: `Any other output is a stop with REASON resolver-unavailable; the fix is \`${RESOLVER_FIX}\`.`,
     },
   },
   {
     rule: 'reason-fix-table',
-    files: ['git-ops/ensure-pr-ready.md', 'git-ops/validate-branch.md'],
+    files: ['commands/implement.md', 'git-ops/ensure-pr-ready.md', 'git-ops/validate-branch.md'],
     check: fixTableFindings,
     probe: {
-      file: 'git-ops/validate-branch.md',
+      file: 'commands/implement.md',
       anchor: 'reason-fix table',
-      bad: FIX_TABLE_SEED(FIX_REASONS.filter(r => r !== 'no-ref')),
-      good: FIX_TABLE_SEED(FIX_REASONS),
+      bad: (CANONICAL_FIX_TABLE ?? '').replace('no-ref or timeout', 'timeout'),
+      good: CANONICAL_FIX_TABLE ?? '',
     },
   },
   {
@@ -892,6 +911,27 @@ describe('known-bad probes: each collector reports the seeded bad text and passe
     expect(callFindings(seeded('commands/implement.md', early)).map(u => u.anchor)).toContain('call position')
     expect(callFindings(seeded('commands/implement.md', placed))).toEqual([])
   })
+
+  it('resolver-call: the re-validation reference makes one pr call and one local call, never two of a mode', () => {
+    const pr = `\`${CALL_SEED('pr "${B}" --cross "${X}"; echo "exit=$?"')}\``
+    const local = `\`${CALL_SEED('local "${B}"; echo "exit=$?"')}\``
+    const details = (text: string): string[] => callFindings(seeded('references/implement-revalidate.md', text)).map(u => u.detail)
+    expect(details(`${pr} when gh returned a PR, else ${local}`)).toEqual([])
+    expect(details(`${pr} when gh returned a PR, else ${pr}`)).toEqual(['modes pr,pr where local,pr are expected'])
+    expect(details(pr)).toEqual(['found 1 direct call(s), expected 2', 'modes pr where local,pr are expected'])
+  })
+
+  it('reason-fix-table: a copy that differs from the ensure-pr-ready sentence, or lacks the re-run, is reported', () => {
+    expect(CANONICAL_FIX_TABLE, 'ensure-pr-ready step 5b holds no reason-to-fix sentence').not.toBeNull()
+    const canonical = CANONICAL_FIX_TABLE ?? ''
+    const details = (text: string): string[] => fixTableFindings(seeded('commands/implement.md', text)).map(u => u.detail)
+    expect(details(canonical)).toEqual([])
+    expect(details(canonical.replace('`git fetch --unshallow`', '`git fetch --depth=1000`'))).toEqual(['the sentence differs from the ensure-pr-ready step 5b sentence'])
+    expect(details(canonical.replace(`\`${RESOLVER_FIX}\``, '`run devflow init`'))).toEqual([
+      'resolver-unavailable does not say to re-run before devflow init',
+      'the sentence differs from the ensure-pr-ready step 5b sentence',
+    ])
+  })
 })
 
 describe('accepted names reach each use as one literal word (AC-8)', () => {
@@ -923,8 +963,10 @@ describe('accepted names reach each use as one literal word (AC-8)', () => {
     for (const name of acceptedNames()) {
       if (/[$`\\"!]/.test(name)) bad.push(`${name}: holds a character that is not literal inside double quotes`)
       for (const use of uses) {
-        const words = shellWords(use.replace(new RegExp(NAME_PATTERN, 'g'), () => name))
-        if (!words.some(w => w.value === name && w.quoted === 'double')) bad.push(`${name}: not one double-quoted word in ${use.slice(0, 60)}`)
+        const filled = use.replace(new RegExp(NAME_PATTERN, 'g'), () => name)
+        // The name is one double-quoted word, or the double-quoted value of the `B=` binding that the call then passes as "${B}".
+        const kept = shellWords(filled).some(w => (w.value === name && w.quoted === 'double') || (w.value === `B=${name}` && filled.includes(`B="${name}"`)))
+        if (!kept) bad.push(`${name}: not one double-quoted word in ${use.slice(0, 60)}`)
       }
     }
     expect(bad).toEqual([])

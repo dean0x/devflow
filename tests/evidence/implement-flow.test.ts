@@ -768,7 +768,7 @@ describe('0b: Phase 11 pushes the branch before the evidence call', () => {
 
   it('the Report surfaces the push\'s DEGRADED line and Phase 11 says the push never forces and never stops the run', () => {
     const md = implementMd()
-    expect(md).toContain('or Phase 1\'s base check, Phase 10\'s push, Phase 11\'s push or Phase 11\'s script output carried one, surface them verbatim')
+    expect(md).toContain('or the fresh base step, Phase 10\'s push, Phase 11\'s push or Phase 11\'s script output carried one, surface them verbatim')
     // The diagram's sub-bullet restated this paragraph and was cut; the Phase 11 body is the one statement.
     const phase = md.slice(md.indexOf(PHASE11), md.indexOf('### Phase 12: Report'))
     expect(phase).toContain('push the branch once before the script — never force, and no retry')
@@ -1224,9 +1224,12 @@ function collectBaseBranchGuardDefects(md: string, revalidate: string = revalida
   else if (!rerecord!.includes(REVALIDATE_FORK_POINT)) out.push('the re-validation path does not say that the branch diff starts at BASE_REF, the fork point')
   else if (rerecord!.indexOf(BASE_BRANCH_PATTERN) > rerecord!.indexOf(REVALIDATE_BRANCH_DIFF)) out.push('the re-validation guard comes after the branch diff')
   else if (!rerecord!.includes('baseRefName')) out.push('the re-validation path does not say where BASE_BRANCH comes from when Phase 1 is skipped')
+  else if (!rerecord!.includes('never the name')) out.push('the re-validation stop line does not say that it never writes the name')
   const call = revalidate.split('\n').find(l => l.includes(RESOLVER))
-  if (call === undefined || !/ pr "\{BASE_BRANCH\}" --cross "/.test(call) || !call.includes('isCrossRepository')) {
+  if (call === undefined || !/ pr "\$\{B\}" --cross "/.test(call) || !call.includes('isCrossRepository')) {
     out.push('the re-validation path does not run the pr-mode resolver over the checked name with the cross flag from isCrossRepository')
+  } else if (!/ local "\$\{B\}"/.test(call)) {
+    out.push('the re-validation path does not run the local-mode resolver over the checked name when gh returned no PR')
   } else if (rerecord !== undefined && revalidate.indexOf(call) < revalidate.indexOf(rerecord)) {
     out.push('the re-validation path resolves the base before it checks the name')
   }
@@ -1296,6 +1299,9 @@ describe('#452: BASE_BRANCH is checked before it reaches a shell line', () => {
     const sourceless = rerecord.replaceAll('baseRefName', 'x')
     expect(sourceless, 'the seed must land').not.toBe(rerecord)
     expect(collectBaseBranchGuardDefects(md, reval.replace(rerecord, () => sourceless))).toEqual(['the re-validation path does not say where BASE_BRANCH comes from when Phase 1 is skipped'])
+    const namesIt = rerecord.replace('never the name', 'the name')
+    expect(namesIt, 'the seed must land').not.toBe(rerecord)
+    expect(collectBaseBranchGuardDefects(md, reval.replace(rerecord, () => namesIt))).toEqual(['the re-validation stop line does not say that it never writes the name'])
     expect(collectBaseBranchGuardDefects(md, reval.replace(rerecord, ''))).toEqual([lostReval])
 
     const call = reval.split('\n').find(l => l.includes(RESOLVER))!
@@ -1303,6 +1309,9 @@ describe('#452: BASE_BRANCH is checked before it reaches a shell line', () => {
     expect(collectBaseBranchGuardDefects(md, reval.replace(call, ''))).toEqual([lostCall])
     expect(collectBaseBranchGuardDefects(md, reval.replace(call, () => call.replace(' pr "', ' local "')))).toEqual([lostCall])
     expect(collectBaseBranchGuardDefects(md, reval.replace(call, () => call.replaceAll('isCrossRepository', 'x')))).toEqual([lostCall])
+    const noLocal = call.replace(' local "', ' pr "')
+    expect(noLocal, 'the seed must land').not.toBe(call)
+    expect(collectBaseBranchGuardDefects(md, reval.replace(call, () => noLocal))).toEqual(['the re-validation path does not run the local-mode resolver over the checked name when gh returned no PR'])
     expect(collectBaseBranchGuardDefects(md, reval.replace(`${rerecord}\n${call}`, () => `${call}\n${rerecord}`))).toEqual(['the re-validation path resolves the base before it checks the name'])
   })
 })
@@ -1322,7 +1331,7 @@ function collectPointerDefects(md: string, revalidate: string = revalidateRefere
   need('the diagram lacks the Phase 6 Validate', md.includes('├─ Phase 6: Validate (the one full-suite slot)'))
   need('the diagram lacks the Phase 8 Re-Validate', md.includes('├─ Phase 8: Re-Validate (only if a qa-fix committed)'))
   need('the Orchestration-only principle does not name the Phase 10 push and the ci-wait call', /\*\*Orchestration only\*\*[^\n]*Phase 10[^\n]*push[^\n]*ci-wait call/.test(md))
-  need('the Orchestration-only principle does not name the Phase 1 base resolver call', /\*\*Orchestration only\*\*[^\n]*the Phase 1 base resolver call/.test(md))
+  need('the Orchestration-only principle does not name the resolver calls of the fresh base step', /\*\*Orchestration only\*\*[^\n]*the fresh base step's resolver calls \(Phase 1, re-validation\)/.test(md))
   need('the Loop-limits principle does not carry the CI gate budget', /\*\*Loop limits\*\*[^\n]*at most 3 waits and 2 fixes/.test(md))
   return out
 }
@@ -1341,9 +1350,9 @@ describe('#421 AC-26: the cross-references match the new phase numbers', () => {
       'Phase 1 does not point Harden at Phase 4',
     ]))
     expect(collectPointerDefects(md.replace('the CI gate allows at most 3 waits and 2 fixes', 'the CI gate polls ten times'))).toEqual(['the Loop-limits principle does not carry the CI gate budget'])
-    const unnamed = md.replace('the Phase 1 base resolver call, ', '')
+    const unnamed = md.replace("the fresh base step's resolver calls (Phase 1, re-validation), ", '')
     expect(unnamed, 'the seed must land').not.toBe(md)
-    expect(collectPointerDefects(unnamed)).toEqual(['the Orchestration-only principle does not name the Phase 1 base resolver call'])
+    expect(collectPointerDefects(unnamed)).toEqual(['the Orchestration-only principle does not name the resolver calls of the fresh base step'])
   })
 })
 
@@ -1352,7 +1361,7 @@ describe('#421 AC-26: the cross-references match the new phase numbers', () => {
 // ---------------------------------------------------------------------------
 
 /** The call: the local rule over the checked name, in the worktree, with the exit status echoed. */
-const FRESH_BASE_CALL = 'cd "{worktree}" && node "$HOME/.devflow/scripts/resolve-base.cjs" local "{BASE_BRANCH}"; echo "exit=$?"'
+const FRESH_BASE_CALL = 'cd "{worktree}" && B="{BASE_BRANCH}" && node "$HOME/.devflow/scripts/resolve-base.cjs" local "${B}"; echo "exit=$?"'
 
 /** What the fresh-base step states: [what it must say, the text that says it]. */
 const FRESH_BASE_PARTS: ReadonlyArray<readonly [string, string]> = [
@@ -1361,13 +1370,12 @@ const FRESH_BASE_PARTS: ReadonlyArray<readonly [string, string]> = [
   ['unusable output reads as resolver-unavailable', '`REASON=resolver-unavailable`'],
   ['BASE_REF is recorded', 'Record `BASE_REF`.'],
   ['info prints one plain line', '`info` prints one plain line'],
-  ['degraded records the base DEGRADED line', '`degraded` records `TRACEABILITY: DEGRADED (base {REASON})`'],
-  ['a timeout names the manual fetch', 'for `timeout` names `git fetch origin <base>`'],
+  ['degraded records the base DEGRADED line with its fix', '`degraded` records `TRACEABILITY: DEGRADED (base {REASON}; fix: {fix})`'],
   ['a stop, with BASE_REF none, names its cause and fix', '`stop` (`BASE_REF=none`) stops the run, naming REASON and its fix'],
-  ['no-merge-base names the unshallow fix', '`git fetch --unshallow` (no-merge-base)'],
-  ['no-ref names the fetch fix', '`git fetch origin <base>` (no-ref)'],
-  ['resolver-unavailable names the install fix', '`run devflow init` (resolver-unavailable)'],
-  ['invalid-name states the allowed set, never the name', 'the allowed set without the name (invalid-name)'],
+  ['no-merge-base names the unshallow fix', 'no-merge-base `git fetch --unshallow`'],
+  ['no-ref and timeout name the fetch fix', 'no-ref or timeout `git fetch origin <base>`'],
+  ['resolver-unavailable names the re-run, then the install fix', 'resolver-unavailable `re-run; if it repeats, run devflow init`'],
+  ['invalid-name states the allowed set, never the name', 'invalid-name the allowed set, never the name'],
 ]
 
 /** Named collector: what the fresh-base step, its channel, its sink and its Validate hand-off fail to state. */
@@ -1379,7 +1387,7 @@ function collectFreshBaseDefects(md: string): string[] {
   const step = md.slice(start, end)
   for (const [what, text] of FRESH_BASE_PARTS) if (!step.includes(text)) out.push(`the fresh-base step lacks: ${what}`)
   const traceability = md.split('\n').find(l => l.includes('under a `### Traceability` subsection')) ?? ''
-  if (!traceability.includes("Phase 1's base check")) out.push("the Traceability section does not name Phase 1's base check")
+  if (!traceability.includes('the fresh base step')) out.push('the Traceability section does not name the fresh base step')
   const phase1 = phaseSection(md, H.p1) ?? ''
   const produces = phase1.split('\n').filter(l => l.startsWith('**Produces:**'))
   if (produces.length === 0 || produces.some(l => !/\bBASE_REF\b/.test(l))) out.push('Phase 1 does not produce BASE_REF')
@@ -1387,7 +1395,9 @@ function collectFreshBaseDefects(md: string): string[] {
   if (!validate.includes('\nBASE_SHA: {BASE_REF}\n')) out.push('the Phase 6 Validate spawn does not take BASE_SHA from BASE_REF')
   if (md.includes('git merge-base')) out.push('a git merge-base over the base name remains')
   const openPr = phaseSection(md, H.p9) ?? ''
-  if (!openPr.includes('BASE_BRANCH: {base branch}') || /\bBASE_REF\b/.test(openPr)) out.push('the Phase 9 PR target is not the bare base branch name')
+  if (!openPr.includes('\nBASE_BRANCH: {base branch}\n')) out.push('the Phase 9 PR target is not the bare base branch name')
+  if (!openPr.includes('\nBASE_REF: {BASE_REF}\n')) out.push('the Phase 9 spawn does not pass BASE_REF to ensure-pr-ready')
+  if (!/^\*\*Requires:\*\*[^\n]*\bBASE_REF\b/m.test(openPr)) out.push('Phase 9 does not require BASE_REF')
   return out
 }
 
@@ -1407,9 +1417,9 @@ describe('#495: /implement resolves a fresh base once, before Phase 2, and every
   it('known-bad probes: a lost step, a lost channel, a lost product, a bare-name Validate base and a hex PR target are each reported', () => {
     const md = implementMd()
     expect(collectFreshBaseDefects(md.replace('**Fresh base.**', '**Base.**'))).toEqual(['no fresh-base step'])
-    const noChannel = md.replace("Phase 1's base check, ", '')
+    const noChannel = md.replace('the fresh base step, ', '')
     expect(noChannel, 'the seed must land').not.toBe(md)
-    expect(collectFreshBaseDefects(noChannel)).toEqual(["the Traceability section does not name Phase 1's base check"])
+    expect(collectFreshBaseDefects(noChannel)).toEqual(['the Traceability section does not name the fresh base step'])
     const noProduct = md.replace('**Produces:** TASK_ID, BASE_BRANCH, BASE_REF,', '**Produces:** TASK_ID, BASE_BRANCH,')
     expect(noProduct, 'the seed must land').not.toBe(md)
     expect(collectFreshBaseDefects(noProduct)).toEqual(['Phase 1 does not produce BASE_REF'])
@@ -1419,5 +1429,11 @@ describe('#495: /implement resolves a fresh base once, before Phase 2, and every
     const hexTarget = md.replace(/(### Phase 9: Open PR[\s\S]*?)BASE_BRANCH: \{base branch\}/, '$1BASE_BRANCH: {BASE_REF}')
     expect(hexTarget, 'the seed must land').not.toBe(md)
     expect(collectFreshBaseDefects(hexTarget)).toEqual(['the Phase 9 PR target is not the bare base branch name'])
+    const noPass = md.replace('BASE_BRANCH: {base branch}\nBASE_REF: {BASE_REF}\n', 'BASE_BRANCH: {base branch}\n')
+    expect(noPass, 'the seed must land').not.toBe(md)
+    expect(collectFreshBaseDefects(noPass)).toEqual(['the Phase 9 spawn does not pass BASE_REF to ensure-pr-ready'])
+    const noRequire = md.replace(/(### Phase 9: Open PR[\s\S]*?\*\*Requires:\*\* BASE_BRANCH), BASE_REF,/, '$1,')
+    expect(noRequire, 'the seed must land').not.toBe(md)
+    expect(collectFreshBaseDefects(noRequire)).toEqual(['Phase 9 does not require BASE_REF'])
   })
 })
