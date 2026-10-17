@@ -63,10 +63,12 @@ export const GATE_LEVEL_MEANINGS: Readonly<Record<GateLevel, string>> = Object.f
 /**
  * What reads the level today; each later reader updates this text.
  *
- * The init prompt restates this per level in GATE_LEVEL_HINTS (gate-level-prompts.ts):
- * edit both together. One test pins the exact text of both tables, so any change to either
- * fails it until you update the other table and the pin; further rows check the clauses the
- * two tables share (the lint pack level and the levels that run fewer review focuses).
+ * The init prompt restates what each level does in GATE_LEVEL_HINTS (gate-level-prompts.ts).
+ * Edit the hints too when what a level does changes. A reader that has no rule that changes
+ * a phase leaves the hints true, so it edits this text alone. One test pins the exact text of
+ * both tables, so a change to either fails it until you check the other table and update the
+ * pin; further rows check the clauses the two tables share (the lint pack level and the
+ * levels that run fewer review focuses).
  */
 export const GATE_LEVEL_EFFECT =
   '/code-review and /plan read the level: standard and lean run fewer review focuses and fewer planning agents. At lean, /implement has Validate run the project\'s lint pack. /implement and /resolve also read the level and name it in their report; their level references hold no phase rules yet.';
