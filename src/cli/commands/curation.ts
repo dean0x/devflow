@@ -279,7 +279,7 @@ async function handleStatus(): Promise<void> {
   // line only when it does. The entry counts are per-project.
   const enabled = await readMachineFeature(getDevFlowDirectory(), 'curation');
   const settingsModule = loadSettingsModule();
-  const narrowed = enabled ? narrowedSwitchLabel(settingsModule, { dir: process.cwd() }, 'learning') : null;
+  const narrowed = enabled ? narrowedSwitchLabel(settingsModule, { dir: process.cwd() }, 'curation') : null;
   const stateLine = `Curation: ${enabled ? 'enabled' : 'disabled'}`
     + (narrowed === null ? '' : `\nEffective here: ${narrowed}`);
   const trackedWarning = personalConfigTrackedWarning(settingsModule, { dir: process.cwd() });

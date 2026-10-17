@@ -114,7 +114,7 @@ const {
 /** @typedef {'off' | 'auto' | 'full'} Publication */
 /** @typedef {'full' | 'standard' | 'lean'} GateLevel */
 /** @typedef {'personal' | 'machine' | 'default'} GateLevelSource */
-/** @typedef {'memory' | 'learning' | 'knowledge'} FeatureSwitch */
+/** @typedef {'memory' | 'curation' | 'knowledge'} FeatureSwitch */
 /** @typedef {'machine' | 'project' | 'personal'} SwitchSource */
 
 /** Who decided TRACKER. `default` is github with no layer naming a provider. */
@@ -175,7 +175,7 @@ const SETTINGS_LINE_RE = new RegExp(
   + ' REVIEW_PUBLICATION=(?<publication>' + PUBLICATIONS.join('|') + ')'
   + ' COMPLIANCE=(?<compliance>off|generic|(?:' + COMPLIANCE_IDS.join('|') + ')(?:,(?:'
   + COMPLIANCE_IDS.join('|') + ')){0,' + String(COMPLIANCE_IDS.length - 1) + '})'
-  + ' MEMORY=(?<memory>on|off) CURATION=(?<learning>on|off) KNOWLEDGE=(?<knowledge>on|off)'
+  + ' MEMORY=(?<memory>on|off) CURATION=(?<curation>on|off) KNOWLEDGE=(?<knowledge>on|off)'
   + ' GATE_LEVEL=(?<gateLevel>' + GATE_LEVELS.join('|') + ')$',
 );
 
@@ -269,7 +269,7 @@ const PROJECT_REL = '.devflow/project.json';
  *   key: string | null,
  *   reviewPublication: Publication,
  *   compliance: { enabled: boolean, frameworks: readonly string[] },
- *   switches: { memory: SwitchState, learning: SwitchState, knowledge: SwitchState },
+ *   switches: { memory: SwitchState, curation: SwitchState, knowledge: SwitchState },
  *   gateLevel: GateLevel,
  *   gateLevelSource: GateLevelSource | null,
  *   gateLevelInvalid: boolean,
@@ -341,7 +341,7 @@ const FAIL_CLOSED_SETTINGS = Object.freeze({
   compliance: Object.freeze({ enabled: true, frameworks: Object.freeze([]) }),
   switches: Object.freeze({
     memory: Object.freeze({ on: true, source: /** @type {SwitchSource} */ ('machine') }),
-    learning: Object.freeze({ on: true, source: /** @type {SwitchSource} */ ('machine') }),
+    curation: Object.freeze({ on: true, source: /** @type {SwitchSource} */ ('machine') }),
     knowledge: Object.freeze({ on: false, source: /** @type {SwitchSource} */ ('machine') }),
   }),
   gateLevel: /** @type {GateLevel} */ ('full'),
@@ -373,17 +373,17 @@ function isPlainObject(value) {
 
 /**
  * The keys a switch is stored under, current names first (feature-switch.ts
- * CURRENT_KEYS). `learning` is read under `curation` and `learning` (#529); the
- * settings-line field keeps its name.
+ * CURRENT_KEYS). `curation` is read under `curation` and its pre-rename copy
+ * `learning` (#529).
  */
 const CURRENT_SWITCH_KEYS = Object.freeze({
   memory: Object.freeze(['memory']),
-  learning: Object.freeze(['curation', 'learning']),
+  curation: Object.freeze(['curation', 'learning']),
   knowledge: Object.freeze(['knowledge']),
 });
 
 /** The pre-rename key each switch was stored under (feature-switch.ts LEGACY_KEYS). */
-const LEGACY_SWITCH_KEYS = Object.freeze({ learning: 'decisions', knowledge: 'kb' });
+const LEGACY_SWITCH_KEYS = Object.freeze({ curation: 'decisions', knowledge: 'kb' });
 
 /**
  * src/core/feature-switch.ts isMachineFeatureOn exactly. Off when any current
@@ -640,7 +640,7 @@ function foldCompliance(project, manifest, defaultBranch) {
  * narrows: absent, malformed, duplicated and unreadable all leave the switch as
  * the machine set it. No repo layer can turn on what the machine turned off.
  *
- * A switch with two current keys (`learning`: `curation` and `learning`, #529)
+ * A switch with two current keys (`curation`: `curation` and `learning`, #529)
  * is a narrow-only union: a literal `false` in either key of a file narrows it,
  * and each key is classified on its own, so a duplicate or a non-boolean value
  * in one key leaves the other readable.
@@ -745,7 +745,7 @@ function foldSettings(inputs) {
     compliance: lens.compliance,
     switches: Object.freeze({
       memory: foldSwitch(project, personal, manifest, 'memory'),
-      learning: foldSwitch(project, personal, manifest, 'learning'),
+      curation: foldSwitch(project, personal, manifest, 'curation'),
       knowledge: foldSwitch(project, personal, manifest, 'knowledge'),
     }),
     ...foldGateLevel(personal, manifest),
@@ -1024,7 +1024,7 @@ function formatSettingsLine(s) {
     + ' REVIEW_PUBLICATION=' + s.reviewPublication
     + ' COMPLIANCE=' + complianceToken(s.compliance)
     + ' MEMORY=' + onOff(s.switches.memory)
-    + ' CURATION=' + onOff(s.switches.learning)
+    + ' CURATION=' + onOff(s.switches.curation)
     + ' KNOWLEDGE=' + onOff(s.switches.knowledge)
     + ' GATE_LEVEL=' + s.gateLevel;
 }

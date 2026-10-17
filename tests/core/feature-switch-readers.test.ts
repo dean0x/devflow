@@ -294,8 +294,8 @@ describe('the settings resolver, through the evidence-policy seam', { timeout: 1
     for (const c of MACHINE_CASES) {
       const s = settings.resolveSettings({ dir: repo, manifest: c.manifest });
       expect(s.ok, c.name).toBe(true);
-      expect(s.switches.learning.on, c.name).toBe(c.expected);
-      expect(s.switches.learning.source, c.name).toBe('machine');
+      expect(s.switches.curation.on, c.name).toBe(c.expected);
+      expect(s.switches.curation.source, c.name).toBe('machine');
     }
   });
 
@@ -308,7 +308,7 @@ describe('the settings resolver, through the evidence-policy seam', { timeout: 1
       }
       const s = settings.resolveSettings({ dir: repo, manifest: MACHINE_ON });
       expect(s.ok, c.name).toBe(true);
-      expect(s.switches.learning.on, c.name).toBe(c.expected);
+      expect(s.switches.curation.on, c.name).toBe(c.expected);
       // memory and knowledge are untouched by a curation or learning key.
       expect(s.switches.memory.on, c.name).toBe(true);
       expect(s.switches.knowledge.on, c.name).toBe(true);
@@ -319,6 +319,6 @@ describe('the settings resolver, through the evidence-policy seam', { timeout: 1
     fs.writeFileSync(path.join(repo, '.devflow', 'project.json'), fileOf('true', 'true'));
     fs.rmSync(path.join(repo, '.devflow', 'config.json'), { force: true });
     const off = { version: '3.7.0', features: { memory: true, curation: false, learning: true, knowledge: true } };
-    expect(settings.resolveSettings({ dir: repo, manifest: off }).switches.learning).toEqual({ on: false, source: 'machine' });
+    expect(settings.resolveSettings({ dir: repo, manifest: off }).switches.curation).toEqual({ on: false, source: 'machine' });
   });
 });

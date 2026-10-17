@@ -69,7 +69,7 @@ interface Settings {
   readonly key: string | null;
   readonly reviewPublication: 'off' | 'auto' | 'full';
   readonly compliance: { readonly enabled: boolean; readonly frameworks: readonly string[] };
-  readonly switches: { readonly memory: SwitchState; readonly learning: SwitchState; readonly knowledge: SwitchState };
+  readonly switches: { readonly memory: SwitchState; readonly curation: SwitchState; readonly knowledge: SwitchState };
   readonly gateLevel: 'full' | 'standard' | 'lean';
   readonly gateLevelSource: 'personal' | 'machine' | 'default' | null;
   readonly gateLevelInvalid: boolean;
@@ -269,7 +269,7 @@ describe('module surface and SETTINGS_LINE_RE', () => {
       + ' SITE=(?<site>none|https:\\/\\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9-]+)+)'
       + ' KEY=(?<key>none|[A-Z][A-Z0-9_]{1,9}) REVIEW_PUBLICATION=(?<publication>off|auto|full)'
       + ` COMPLIANCE=(?<compliance>off|generic|(?:${IDS})(?:,(?:${IDS})){0,5})`
-      + ' MEMORY=(?<memory>on|off) CURATION=(?<learning>on|off) KNOWLEDGE=(?<knowledge>on|off)'
+      + ' MEMORY=(?<memory>on|off) CURATION=(?<curation>on|off) KNOWLEDGE=(?<knowledge>on|off)'
       + ' GATE_LEVEL=(?<gateLevel>full|standard|lean)$',
     );
     expect(SETTINGS.SETTINGS_LINE_RE.flags).toBe('');
@@ -983,7 +983,7 @@ describe('D-PERSONAL-UNTRACKED: a tracked .devflow/config.json is ignored, with 
 // ---------------------------------------------------------------------------
 
 describe('TP-33: feature switches = machine AND project AND personal (only a literal false narrows)', () => {
-  const FEATURES: readonly MachineFeature[] = ['memory', 'learning', 'knowledge'];
+  const FEATURES: readonly MachineFeature[] = ['memory', 'curation', 'knowledge'];
   type Layer = 'absent' | 'true' | 'false' | 'malformed';
   const LAYERS: readonly Layer[] = ['absent', 'true', 'false', 'malformed'];
   const fileFor = (feature: MachineFeature, v: Layer): string | undefined => (v === 'absent'
@@ -1016,7 +1016,7 @@ describe('readRepoLayers: the seam the hooks\' one parser fork reads through (D-
       const viaLayers = SETTINGS.foldSettings({ ...SETTINGS.readRepoLayers(dir), manifest: row.manifest, retiredPolicyFile: false });
       expect({
         memory: viaLayers.switches.memory.on,
-        learning: viaLayers.switches.learning.on,
+        curation: viaLayers.switches.curation.on,
         knowledge: viaLayers.switches.knowledge.on,
       }, row.name).toEqual(row.expect);
       const viaResolve = settingsFor({}, row.manifest, dir);
@@ -1075,9 +1075,9 @@ describe('TP-49: the shared switch fixture table (tests/fixtures/settings-switch
     // its `expect` is the fold's answer, which the readRepoLayers test holds.
     expect({
       memory: s.switches.memory.on,
-      learning: s.switches.learning.on,
+      curation: s.switches.curation.on,
       knowledge: s.switches.knowledge.on,
-    }).toEqual(row.unreadable === undefined ? row.expect : { memory: true, learning: true, knowledge: false });
+    }).toEqual(row.unreadable === undefined ? row.expect : { memory: true, curation: true, knowledge: false });
     expect(s.unreadable).toBe(row.unreadable ?? null);
   });
 });
@@ -1741,7 +1741,7 @@ describe('parity: the machine layer reads the manifest exactly as the CLI does',
   it.each(MANIFESTS)('%s', (_label, manifest) => {
     const s = machineOnly(manifest);
     expect(s.switches.memory.on, 'memory').toBe(isMachineFeatureOn(manifest, 'memory'));
-    expect(s.switches.learning.on, 'curation').toBe(isMachineFeatureOn(manifest, 'curation'));
+    expect(s.switches.curation.on, 'curation').toBe(isMachineFeatureOn(manifest, 'curation'));
     expect(s.switches.knowledge.on, 'knowledge').toBe(isMachineFeatureOn(manifest, 'knowledge'));
     const features = (manifest as { features?: { tracker?: unknown; compliance?: unknown } } | null)?.features;
     const rawTracker = typeof features === 'object' && features !== null ? features.tracker : undefined;

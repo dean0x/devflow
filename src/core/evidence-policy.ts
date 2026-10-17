@@ -140,7 +140,7 @@ export interface RepoSettings {
   readonly compliance: { readonly enabled: boolean; readonly frameworks: readonly string[] };
   readonly switches: {
     readonly memory: SettingsSwitchState;
-    readonly learning: SettingsSwitchState;
+    readonly curation: SettingsSwitchState;
     readonly knowledge: SettingsSwitchState;
   };
   /** The gate level that applies. `full` for a fail-closed result or a malformed deciding value. */

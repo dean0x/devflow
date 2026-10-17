@@ -63,13 +63,13 @@ export interface SwitchRow {
   readonly manifest: unknown;
   readonly project: string | null;
   readonly personal: string | null;
-  readonly expect: { readonly memory: boolean; readonly learning: boolean; readonly knowledge: boolean };
+  readonly expect: { readonly memory: boolean; readonly curation: boolean; readonly knowledge: boolean };
   /** The first repository layer whose file exists but cannot be read as a JSON object. */
   readonly unreadable?: 'project' | 'personal';
 }
 
-const ALL_ON = { memory: true, learning: true, knowledge: true } as const;
-const CURATION_OFF = { memory: true, learning: false, knowledge: true } as const;
+const ALL_ON = { memory: true, curation: true, knowledge: true } as const;
+const CURATION_OFF = { memory: true, curation: false, knowledge: true } as const;
 
 /** A manifest with every switch on, as `devflow init` writes it. */
 export const MANIFEST_ON = { version: '2.5.0', features: { memory: true, learning: true, knowledge: true } };
@@ -82,35 +82,35 @@ export const SETTINGS_SWITCH_TABLE: readonly SwitchRow[] = [
     manifest: { features: { memory: false, learning: false, knowledge: false } },
     project: '{"features":{"memory":true,"learning":true,"knowledge":true}}',
     personal: '{"features":{"memory":true,"learning":true,"knowledge":true}}',
-    expect: { memory: false, learning: false, knowledge: false },
+    expect: { memory: false, curation: false, knowledge: false },
   },
   {
     name: 'project narrows learning',
     manifest: MANIFEST_ON,
     project: '{"version":1,"features":{"learning":false}}',
     personal: null,
-    expect: { memory: true, learning: false, knowledge: true },
+    expect: { memory: true, curation: false, knowledge: true },
   },
   {
     name: 'personal narrows memory',
     manifest: MANIFEST_ON,
     project: null,
     personal: '{"reviewPublication":"auto","features":{"memory":false}}',
-    expect: { memory: false, learning: true, knowledge: true },
+    expect: { memory: false, curation: true, knowledge: true },
   },
   {
     name: 'project and personal narrow different switches',
     manifest: MANIFEST_ON,
     project: '{"features":{"knowledge":false}}',
     personal: '{"features":{"learning":false}}',
-    expect: { memory: true, learning: false, knowledge: false },
+    expect: { memory: true, curation: false, knowledge: false },
   },
   {
     name: 'a literal true never widens a machine off',
     manifest: { features: { learning: false } },
     project: '{"features":{"learning":true}}',
     personal: null,
-    expect: { memory: true, learning: false, knowledge: true },
+    expect: { memory: true, curation: false, knowledge: true },
   },
   {
     name: 'a string "false" is not a literal false',
@@ -176,7 +176,7 @@ export const SETTINGS_SWITCH_TABLE: readonly SwitchRow[] = [
     manifest: { features: { memory: false, learning: true, knowledge: true } },
     project: '{"features":{"learning":false}',
     personal: null,
-    expect: { memory: false, learning: true, knowledge: true },
+    expect: { memory: false, curation: true, knowledge: true },
     unreadable: 'project',
   },
   {
@@ -184,28 +184,28 @@ export const SETTINGS_SWITCH_TABLE: readonly SwitchRow[] = [
     manifest: { features: { decisions: false } },
     project: null,
     personal: null,
-    expect: { memory: true, learning: false, knowledge: true },
+    expect: { memory: true, curation: false, knowledge: true },
   },
   {
     name: 'whitespace inside the literal false still narrows',
     manifest: MANIFEST_ON,
     project: '{ "features" : { "memory" :\n false } }',
     personal: null,
-    expect: { memory: false, learning: true, knowledge: true },
+    expect: { memory: false, curation: true, knowledge: true },
   },
   {
     name: 'a \\u-escaped features key and switch still narrow',
     manifest: MANIFEST_ON,
     project: '{"f\\u0065atures":{"le\\u0061rning":false}}',
     personal: null,
-    expect: { memory: true, learning: false, knowledge: true },
+    expect: { memory: true, curation: false, knowledge: true },
   },
   {
     name: 'a nested object before the switch still narrows',
     manifest: MANIFEST_ON,
     project: '{"features":{"future":{"a":{"b":1}},"memory":false}}',
     personal: null,
-    expect: { memory: false, learning: true, knowledge: true },
+    expect: { memory: false, curation: true, knowledge: true },
   },
   {
     name: 'features.decisions in a repository file narrows nothing',
@@ -249,7 +249,7 @@ export const SETTINGS_SWITCH_TABLE: readonly SwitchRow[] = [
     manifest: MANIFEST_ON,
     project: paddedTo(4096),
     personal: null,
-    expect: { memory: false, learning: true, knowledge: true },
+    expect: { memory: false, curation: true, knowledge: true },
   },
   {
     name: 'a file of 4097 bytes narrows nothing',
@@ -272,7 +272,7 @@ export const SETTINGS_SWITCH_TABLE: readonly SwitchRow[] = [
     manifest: { features: { memory: true, learning: true, knowledge: false } },
     project: '{"features":{"memory":false}}',
     personal: '{"features":{"learning":false}}',
-    expect: { memory: false, learning: false, knowledge: false },
+    expect: { memory: false, curation: false, knowledge: false },
   },
 
   // ── The learning switch under its two current keys, curation and learning (#529) ──
@@ -409,7 +409,7 @@ export const SETTINGS_SWITCH_TABLE: readonly SwitchRow[] = [
     manifest: MANIFEST_ON,
     project: '{"features":{"curation":false}}',
     personal: '{"features":{"memory":false}}',
-    expect: { memory: false, learning: false, knowledge: true },
+    expect: { memory: false, curation: false, knowledge: true },
   },
   {
     name: 'a non-boolean curation is ignored for that key only: learning:false still narrows',
@@ -515,7 +515,7 @@ export const SETTINGS_SWITCH_TABLE: readonly SwitchRow[] = [
     manifest: { features: { curation: true, learning: true, memory: false } },
     project: null,
     personal: '{"features":{"curation":false}',
-    expect: { memory: false, learning: true, knowledge: true },
+    expect: { memory: false, curation: true, knowledge: true },
     unreadable: 'personal',
   },
   {
@@ -523,6 +523,6 @@ export const SETTINGS_SWITCH_TABLE: readonly SwitchRow[] = [
     manifest: { features: { memory: true, curation: false, knowledge: true } },
     project: '{"features":{"learning":false}}',
     personal: '{"features":{"memory":false}}',
-    expect: { memory: false, learning: false, knowledge: true },
+    expect: { memory: false, curation: false, knowledge: true },
   },
 ];

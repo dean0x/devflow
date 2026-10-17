@@ -329,7 +329,7 @@ export async function readManifest(
         proxy: typeof features.proxy === 'boolean' ? features.proxy : false,
         // Self-heal: absent/malformed compliance → {enabled:false, frameworks:[]}
         compliance: normalizeComplianceFeature(features.compliance),
-        // D-BEHAVIOR-OPT-IN: absent/malformed → false (opt-in; the inverse of knowledge/learning).
+        // D-BEHAVIOR-OPT-IN: absent/malformed → false (opt-in; the inverse of knowledge/curation).
         behavior: features.behavior === true,
         // Self-heal: absent/malformed/unknown tracker → {provider:'github'} (AC-3.21).
         // Deliberately NOT in the hard-null set above — see the field's doc comment.

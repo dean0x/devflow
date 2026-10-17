@@ -973,7 +973,7 @@ describe('queue_read_gates <manifest> <root>: the repository narrows, never wide
         writeLayers(row);
         expect(gatesAt({ noJq: backend.noJq })).toEqual({
           memory: String(row.expect.memory),
-          learning: String(row.expect.learning),
+          learning: String(row.expect.curation),
           exitCode: 0,
         });
       });

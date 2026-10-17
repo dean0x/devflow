@@ -23,11 +23,26 @@
  * dynamic constraint. `scope` narrows an entry to the trees it is retired FROM;
  * `pattern` replaces the substring test for residue whose spellings cannot be
  * enumerated in advance.
+ *
+ * The last two describe blocks are a different kind of guard, and they do not use
+ * the denylist: the FEATURE-WORD guard (AC-1 of the curation rename) reads every
+ * tracked file outside tests/ for the old feature word and lets a hit through only
+ * when an entry of tests/fixtures/feature-word-allowlist.ts covers its exact text.
+ * It is an allowlist over one word, where the denylist above is a list of many
+ * literals, so it keeps its own fixture.
  */
 
 import { describe, it, expect } from 'vitest';
-import { readdirSync, readFileSync, existsSync } from 'fs';
+import { readdirSync, readFileSync, existsSync, lstatSync } from 'fs';
+import { execFileSync } from 'child_process';
 import * as path from 'path';
+import {
+  FEATURE_WORD,
+  FEATURE_WORD_ALLOWLIST,
+  SECTION_EXEMPTIONS,
+  type AllowlistEntry,
+  type SectionExemption,
+} from '../fixtures/feature-word-allowlist.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 
@@ -905,5 +920,289 @@ describe('retired-wording guard — CHANGELOG.md across the release bump', () =>
         `"${literal}" in a fresh [Unreleased] After-half must still be caught`,
       ).toHaveLength(1);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The FEATURE-WORD guard (AC-1 of the curation rename)
+//
+// The feature was called "learning" before 3.8 and is called "curation" now. The
+// word may not come back: every tracked file outside tests/ is read, and every
+// occurrence of the word (any case, inside any word, so `learningCounts` and
+// `LEARNING_OPS` count) must sit inside text that an entry of the allowlist
+// covers, or inside a section the allowlist exempts by its heading.
+//
+// Tests are out of scope on purpose. They name the old word to pin the migration
+// and the legacy readers, and a guard that read them would only force each such
+// test to carry a second copy of its own reason.
+//
+// The scan is a named collector so the main guard and the non-vacuity probes run
+// the SAME logic: a probe that re-implemented the loop would prove the probe.
+// ---------------------------------------------------------------------------
+
+interface ScannedFile {
+  readonly relPath: string;
+  readonly content: string;
+}
+
+interface FeatureWordReport {
+  /** `path:line: text` for each line with an uncovered hit, and each path that carries the word. */
+  readonly violations: string[];
+  /** Entries that covered no hit. */
+  readonly unusedEntries: string[];
+  /** Section exemptions that exempted no hit. */
+  readonly unusedSections: string[];
+}
+
+const FEATURE_WORD_ALL = new RegExp(FEATURE_WORD.source, 'gi');
+const MAX_REPORTED_LINE = 200;
+/** Words an entry must never cover alone: an entry that does covers every use of the word. */
+const BARE_SAMPLES: readonly string[] = [
+  'learning', 'Learning', 'LEARNING', 'learningCounts', 'LEARNING_OPS', ' learning ', 'the learning curve',
+];
+
+function entryApplies(scope: string | RegExp, relPath: string): boolean {
+  if (typeof scope !== 'string') return scope.test(relPath);
+  return scope.endsWith('/') ? relPath.startsWith(scope) : relPath === scope;
+}
+
+/** `[start, end)` of every non-empty match of `re` on `line`. */
+function spansOf(re: RegExp, line: string): Array<readonly [number, number]> {
+  const flags = re.flags.includes('g') ? re.flags : `${re.flags}g`;
+  const spans: Array<readonly [number, number]> = [];
+  for (const m of line.matchAll(new RegExp(re.source, flags))) {
+    if (m[0].length > 0) spans.push([m.index ?? 0, (m.index ?? 0) + m[0].length]);
+  }
+  return spans;
+}
+
+function describeEntry(entry: AllowlistEntry): string {
+  return `${String(entry.path)}  ${String(entry.pattern)}`;
+}
+
+function describeSection(section: SectionExemption): string {
+  return `${section.path}  ${String(section.start)} .. ${String(section.end)}`;
+}
+
+function scanForFeatureWord(
+  files: ReadonlyArray<ScannedFile>,
+  allowlist: ReadonlyArray<AllowlistEntry>,
+  sections: ReadonlyArray<SectionExemption>,
+): FeatureWordReport {
+  const violations: string[] = [];
+  const usedEntries = new Set<AllowlistEntry>();
+  const usedSections = new Set<SectionExemption>();
+
+  for (const { relPath, content } of files) {
+    if (relPath.startsWith('tests/')) continue;
+    if (FEATURE_WORD.test(relPath)) violations.push(`${relPath}: the file path carries the feature word`);
+
+    const fileEntries = allowlist.filter(entry => entryApplies(entry.path, relPath));
+    const fileSections = sections.filter(section => section.path === relPath);
+    const open = new Set<SectionExemption>();
+
+    content.split('\n').forEach((line, index) => {
+      for (const section of fileSections) {
+        if (open.has(section) && section.end.test(line)) open.delete(section);
+        if (!open.has(section) && section.start.test(line)) open.add(section);
+      }
+      if (!FEATURE_WORD.test(line)) return;
+      if (open.size > 0) {
+        for (const section of open) usedSections.add(section);
+        return;
+      }
+
+      const covering: Array<readonly [number, number]> = [];
+      for (const entry of fileEntries) {
+        for (const span of spansOf(entry.pattern, line)) {
+          if (!FEATURE_WORD.test(line.slice(span[0], span[1]))) continue;
+          usedEntries.add(entry);
+          covering.push(span);
+        }
+      }
+      const uncovered = [...line.matchAll(FEATURE_WORD_ALL)].some(hit => {
+        const at = hit.index ?? 0;
+        return !covering.some(([from, to]) => from <= at && at + hit[0].length <= to);
+      });
+      if (uncovered) violations.push(`${relPath}:${index + 1}: ${line.trim().slice(0, MAX_REPORTED_LINE)}`);
+    });
+  }
+
+  return {
+    violations,
+    unusedEntries: allowlist.filter(entry => !usedEntries.has(entry)).map(describeEntry),
+    unusedSections: sections.filter(section => !usedSections.has(section)).map(describeSection),
+  };
+}
+
+/** Entries whose pattern covers the word with no context around it. */
+function looseEntries(allowlist: ReadonlyArray<AllowlistEntry>): string[] {
+  return allowlist
+    .filter(entry => BARE_SAMPLES.some(sample => spansOf(entry.pattern, sample).length > 0))
+    .map(describeEntry);
+}
+
+/** Every tracked text file outside tests/, as the working tree holds it. */
+function trackedFilesOutsideTests(): ScannedFile[] {
+  const listed = execFileSync('git', ['ls-files', '-z'], {
+    cwd: ROOT,
+    encoding: 'utf-8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  const files: ScannedFile[] = [];
+  for (const relPath of listed.split('\0')) {
+    if (relPath === '' || relPath.startsWith('tests/')) continue;
+    const abs = path.join(ROOT, relPath);
+    let stat;
+    try {
+      stat = lstatSync(abs);
+    } catch {
+      continue; // listed and deleted in this working tree
+    }
+    if (!stat.isFile()) continue; // a symbolic link or a submodule
+    const bytes = readFileSync(abs);
+    if (bytes.includes(0)) continue; // binary
+    files.push({ relPath, content: bytes.toString('utf-8') });
+  }
+  return files;
+}
+
+const wordsIn = (text: string): number => text.trim().split(/\s+/).length;
+
+describe('feature-word guard — the old feature word stays out of the tree (AC-1)', () => {
+  const files = trackedFilesOutsideTests();
+  const report = scanForFeatureWord(files, FEATURE_WORD_ALLOWLIST, SECTION_EXEMPTIONS);
+
+  it('reads the whole tracked tree outside tests/ (non-vacuity)', () => {
+    expect(files.length, 'the scan reached almost no files').toBeGreaterThan(100);
+    const reached = new Set(files.map(file => file.relPath.split('/')[0]));
+    for (const top of ['src', 'docs', 'scripts', 'CHANGELOG.md', 'README.md', 'CLAUDE.md', 'package.json']) {
+      expect(reached.has(top), `${top} is not in the scan`).toBe(true);
+    }
+    expect(files.some(file => file.relPath.startsWith('tests/'))).toBe(false);
+  });
+
+  it('every entry and every section exemption carries a reason in words', () => {
+    expect(FEATURE_WORD_ALLOWLIST.length).toBeGreaterThan(0);
+    expect(SECTION_EXEMPTIONS.length).toBeGreaterThan(0);
+    for (const entry of FEATURE_WORD_ALLOWLIST) {
+      expect(wordsIn(entry.reason), `${describeEntry(entry)} has no reason`).toBeGreaterThanOrEqual(6);
+    }
+    for (const section of SECTION_EXEMPTIONS) {
+      expect(wordsIn(section.reason), `${describeSection(section)} has no reason`).toBeGreaterThanOrEqual(6);
+    }
+  });
+
+  it('no entry covers the bare word: each pins the words around its hit', () => {
+    expect(looseEntries(FEATURE_WORD_ALLOWLIST)).toEqual([]);
+  });
+
+  it('no use of the old feature word sits outside the allowlist', () => {
+    expect(
+      report.violations,
+      `the old feature word is back. Rename it, or add an allowlist entry with a reason:\n  ${report.violations.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('no entry and no section exemption is stale (each covers a real hit)', () => {
+    expect(report.unusedEntries, `entries that cover no hit:\n  ${report.unusedEntries.join('\n  ')}`).toEqual([]);
+    expect(report.unusedSections, `sections that exempt no hit:\n  ${report.unusedSections.join('\n  ')}`).toEqual([]);
+  });
+});
+
+describe('feature-word guard — non-vacuity probes (the same collector as the guard)', () => {
+  const scan = (
+    synthetic: ReadonlyArray<ScannedFile>,
+    allowlist: ReadonlyArray<AllowlistEntry> = FEATURE_WORD_ALLOWLIST,
+    sections: ReadonlyArray<SectionExemption> = SECTION_EXEMPTIONS,
+  ): FeatureWordReport => scanForFeatureWord(synthetic, allowlist, sections);
+
+  it('a seeded use in a source file fails, in camelCase, UPPER_CASE and plain text', () => {
+    const { violations } = scan([{
+      relPath: 'src/core/probe.ts',
+      content: 'export const learningCounts = 1;\nconst LEARNING_OPS = 2;\n// the Learning note\n',
+    }]);
+    expect(violations).toHaveLength(3);
+  });
+
+  it('a seeded use in a doc, a script or a knowledge base fails', () => {
+    for (const relPath of ['docs/probe.md', 'scripts/probe.ts', '.devflow/features/probe/KNOWLEDGE.md', 'README.md']) {
+      expect(scan([{ relPath, content: 'The learning feature.\n' }]).violations, relPath).toHaveLength(1);
+    }
+  });
+
+  it('a file path that carries the word fails, and a file under tests/ is not read', () => {
+    expect(scan([{ relPath: 'src/core/learning-probe.ts', content: 'export {};\n' }]).violations).toHaveLength(1);
+    expect(scan([{ relPath: 'tests/probe.test.ts', content: 'const learningCounts = 1;\n' }]).violations).toEqual([]);
+  });
+
+  it('an entry covers only its own text: the same file with a second use still fails', () => {
+    const entry: AllowlistEntry = {
+      path: 'src/core/probe.ts',
+      pattern: /pre-rename key `learning`/,
+      reason: 'The comment names the pre-rename key the reader still accepts.',
+    };
+    const file = (content: string): ScannedFile => ({ relPath: 'src/core/probe.ts', content });
+    expect(scan([file('// the pre-rename key `learning`\n')], [entry]).violations).toEqual([]);
+    expect(scan([file('// the pre-rename key `learning` and the learning feature\n')], [entry]).violations).toHaveLength(1);
+    expect(scan([{ relPath: 'src/core/other.ts', content: '// the pre-rename key `learning`\n' }], [entry]).violations)
+      .toHaveLength(1);
+  });
+
+  it('a stale entry fails: an entry that covers no hit is reported', () => {
+    const stale: AllowlistEntry = {
+      path: 'src/nowhere.ts',
+      pattern: /learning-nothing/,
+      reason: 'This entry matches nothing in the tree on purpose.',
+    };
+    expect(scan([{ relPath: 'src/core/probe.ts', content: 'export {};\n' }], [stale]).unusedEntries).toHaveLength(1);
+    expect(scan([{ relPath: 'src/nowhere.ts', content: '// learning-nothing\n' }], [stale]).unusedEntries).toEqual([]);
+    const staleSection: SectionExemption = {
+      path: 'CHANGELOG.md',
+      start: /^## \[0\.0\.0\]/,
+      end: /^## /,
+      reason: 'This section matches nothing in the tree on purpose.',
+    };
+    expect(scan([{ relPath: 'CHANGELOG.md', content: '## [Unreleased]\n' }], [], [staleSection]).unusedSections)
+      .toHaveLength(1);
+  });
+
+  it('an entry that covers the bare word is reported as loose', () => {
+    const loose: AllowlistEntry = {
+      path: 'src/',
+      pattern: /learning/,
+      reason: 'This entry would cover every use of the word in the tree.',
+    };
+    expect(looseEntries([loose])).toHaveLength(1);
+  });
+
+  describe('CHANGELOG sections (matched by heading, so they survive the release bump)', () => {
+    const changelog = (content: string): FeatureWordReport => scan([{ relPath: 'CHANGELOG.md', content }]);
+    const upgrade = '### Upgrade notes — Curation rename\n\nthe learning folder moves\n\n';
+
+    it('the upgrade section under [Unreleased] is exempt, and the section after it is not', () => {
+      const { violations } = changelog(
+        `## [Unreleased]\n\n${upgrade}### Upgrade notes — Lint pack\n\nlearning outside\n\n## [3.7.0] - 2026-10-16\n\nlearning released\n`,
+      );
+      expect(violations).toHaveLength(1);
+      expect(violations[0]).toContain('learning outside');
+    });
+
+    it('the same heading under the released 3.8.0 heading is exempt after the bump', () => {
+      const { violations } = changelog(
+        `## [Unreleased]\n\nlearning in the next release\n\n## [3.8.0] - 2026-10-20\n\n${upgrade}### Added\n\nlearning released\n`,
+      );
+      expect(violations).toHaveLength(1);
+      expect(violations[0]).toContain('learning in the next release');
+    });
+
+    it('a changelog with no [Unreleased] heading is accepted', () => {
+      expect(changelog(`## [3.8.0] - 2026-10-20\n\n${upgrade}## [3.6.0] - 2026-10-14\n\nlearning released\n`).violations)
+        .toEqual([]);
+    });
+
+    it('a hit in [Unreleased] outside the upgrade section fails', () => {
+      expect(changelog('## [Unreleased]\n\n### Added\n\n- a learning note\n').violations).toHaveLength(1);
+    });
   });
 });

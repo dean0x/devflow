@@ -39,8 +39,8 @@
 #   for the at-most-one-fork read of both).
 #
 # queue_read_gates <manifest_path> [<root>]
-#   Reads BOTH switches, `memory` and `learning` (the feature being renamed to
-#   curation, so it is read under both keys), in at most ONE subprocess fork
+#   Reads BOTH switches, `memory` and `curation` (curation is read under both of
+#   its keys, the current one and the pre-rename copy), in at most ONE subprocess fork
 #   (AC-P1 -- at most one gate-read fork per capture hook, not two; none when
 #   the fast paths settle it). Sets _QG_MEMORY and _QG_CURATION ("true"/"false")
 #   in the caller's scope. The two values are newline-separated
@@ -279,7 +279,7 @@ queue_read_gates() {
         try { m = JSON.parse(require('fs').readFileSync(process.argv[2], 'utf8')); } catch (_) { m = undefined; }
       }
       const w = S.foldSettings(Object.assign({ manifest: m }, S.readRepoLayers(process.argv[3]))).switches;
-      process.stdout.write(String(w.memory.on) + String.fromCharCode(10) + String(w.learning.on));
+      process.stdout.write(String(w.memory.on) + String.fromCharCode(10) + String(w.curation.on));
     " -- "$_qg_scripts" "$_qg_manifest_arg" "$_qg_root" 2>/dev/null) || _qg_fields=""
   fi
 

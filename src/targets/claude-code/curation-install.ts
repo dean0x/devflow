@@ -2,7 +2,7 @@
  * Curation-variant installer for the Claude Code target.
  *
  * D-LEARNING-VARIANT-INSTALL: the install follows the machine's curation switch
- * (`features.learning` in ~/.devflow/manifest.json) and nothing else. When the
+ * (`features.curation` in ~/.devflow/manifest.json) and nothing else. When the
  * switch is off, every command and agent that has a curation-off variant
  * (dist/curation-off/{commands,agents}, built by D-LEARNING-VARIANTS) is installed
  * from it, and the apply-decisions skill is not installed, so the decisions text
