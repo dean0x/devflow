@@ -44,15 +44,23 @@
 //     commits are the branch's own context. Only a local fork point that is an ancestor
 //     of origin's moves the base to origin.
 //   - Tri-state ancestry (`merge-base --is-ancestor`): exit 0 is true, exit 1 is false,
-//     anything else is unknown. Unknown is never read as false. It gives no-merge-base.
+//     any other exit is unknown. Unknown is never read as false. It gives no-merge-base.
+//   - A local git call that gives no answer (a timeout, a signal kill, a git that does not
+//     start) gives resolver-unavailable, at every call site.
 //   - The fetch is one call with a fixed argv: it writes only refs/remotes/origin/<name>,
 //     writes no FETCH_HEAD, follows no tags, and carries no --filter or --depth. The
-//     repository's hook, fsmonitor and upload-pack settings do not apply to it. Prompts
-//     are off. BatchMode and ConnectTimeout are added only when no SSH command is
-//     configured (GIT_SSH_COMMAND, GIT_SSH or core.sshCommand); a configured command is
-//     never replaced, and host-key checks are never weakened.
+//     repository's hook, fsmonitor and upload-pack settings do not apply to it. Credential
+//     prompts are off: GIT_TERMINAL_PROMPT is 0, GIT_ASKPASS and SSH_ASKPASS are empty, so
+//     git runs no askpass program, and the default SSH command carries BatchMode=yes.
+//     BatchMode and ConnectTimeout are added only when no SSH command is configured
+//     (GIT_SSH_COMMAND, GIT_SSH or core.sshCommand); a configured command is never
+//     replaced, and host-key checks are never weakened.
 //   - The fetch is bounded at FETCH_TIMEOUT_MS. A fetch that does not exit on its own is
 //     followed by a kill of its whole process group (POSIX), so no helper survives.
+//   - One run budget, RUN_BUDGET_MS, stays below the 120 s Bash tool limit. Each call takes
+//     the smaller of its own bound and the time left in the budget. A local call with no
+//     time left is not started and gives resolver-unavailable; the fetch with no time left
+//     gives timeout.
 //   - No retry, including on a held ref lock. A failed fetch with a cached origin ref
 //     applies the rule to the cached ref (REASON fetch-failed or timeout, unverified).
 //   - Git floor: 2.29 (the flag set) is asserted, not probed. An unknown option exits
@@ -122,8 +130,17 @@ const HEX_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 
 /** The wall-clock backstop for the one fetch. */
 const FETCH_TIMEOUT_MS = 45000;
-/** Every other git call is local and short. */
-const LOCAL_TIMEOUT_MS = 15000;
+/**
+ * The bound of every other git call, which is local and short. The bound counts the launch
+ * of git: launch stalls of 14 to 16 s are measured on a loaded macOS machine, so 30 s keeps
+ * about twice that stall and stays below FETCH_TIMEOUT_MS.
+ */
+const LOCAL_TIMEOUT_MS = 30000;
+/**
+ * The budget of one whole run. The prompts call this script under the 120 s Bash tool
+ * limit, and 100 s leaves the rest for the launch of node.
+ */
+const RUN_BUDGET_MS = 100000;
 /** rev-parse, merge-base and config print one short line. */
 const LINE_MAX_BUFFER = 4096;
 /** The fetch's stderr is read for one phrase and discarded. */
@@ -283,8 +300,12 @@ function successReason(f, tip) {
 /**
  * @typedef {{ status: number | null, stdout?: unknown, stderr?: unknown, error?: { code?: unknown } | null, pid?: number }} RawResult
  * @typedef {(file: string, args: string[], opts: Record<string, unknown>) => RawResult} SpawnFn
- * @typedef {{ spawn: SpawnFn, env: NodeJS.ProcessEnv, parentEnv: NodeJS.ProcessEnv, cwd: string, timeoutMs: number, platform: string }} Context
+ * @typedef {{ spawn: SpawnFn, env: NodeJS.ProcessEnv, parentEnv: NodeJS.ProcessEnv, cwd: string, timeoutMs: number, platform: string,
+ *   now: () => number, deadline: number }} Context
+ *   timeoutMs: the bound of the fetch. now: a monotonic clock in ms. deadline: the end of the run budget on that clock.
  * @typedef {{ ok: boolean, answered: boolean, status: number | null, errorCode: string | null, stdout: string, stderr: string, pid: number }} CallResult
+ * @typedef {{ env: NodeJS.ProcessEnv, timeoutMs: number, maxBuffer: number, grouped: boolean }} CallOptions
+ *   grouped: run as the leader of its own process group, killed with SIGKILL on a timeout
  */
 
 /**
@@ -303,8 +324,9 @@ function asText(value) {
 }
 
 /**
- * The environment every git call gets: the caller's, with prompts off and the message
- * language fixed.
+ * The environment every git call gets: the caller's, with every credential prompt off and
+ * the message language fixed. An empty GIT_ASKPASS makes git skip core.askPass and
+ * SSH_ASKPASS too, so it runs no askpass program, and the terminal prompt is off.
  *
  * @param {NodeJS.ProcessEnv} base
  * @returns {NodeJS.ProcessEnv}
@@ -313,17 +335,26 @@ function childEnv(base) {
   return Object.assign({}, base, {
     GIT_TERMINAL_PROMPT: '0',
     GCM_INTERACTIVE: 'never',
+    GIT_ASKPASS: '',
+    SSH_ASKPASS: '',
     SSH_ASKPASS_REQUIRE: 'never',
     LC_ALL: 'C',
   });
 }
 
+/** @returns {number} milliseconds on a clock that never goes back */
+function monotonicMs() {
+  const [seconds, nanoseconds] = process.hrtime();
+  return seconds * 1e3 + nanoseconds / 1e6;
+}
+
 /**
- * @param {{ spawn?: unknown, env?: unknown, cwd?: unknown, timeoutMs?: unknown, platform?: unknown }} [deps]
+ * @param {{ spawn?: unknown, env?: unknown, cwd?: unknown, timeoutMs?: unknown, platform?: unknown, now?: unknown }} [deps]
  * @returns {Context}
  */
 function makeContext(deps) {
   const d = deps || {};
+  const now = typeof d.now === 'function' ? /** @type {() => number} */ (d.now) : monotonicMs;
   const parentEnv = d.env !== null && typeof d.env === 'object' ? /** @type {NodeJS.ProcessEnv} */ (d.env) : process.env;
   const injected = typeof d.timeoutMs === 'number' && Number.isInteger(d.timeoutMs) && d.timeoutMs > 0 ? d.timeoutMs : FETCH_TIMEOUT_MS;
   return {
@@ -333,33 +364,38 @@ function makeContext(deps) {
     cwd: typeof d.cwd === 'string' && d.cwd !== '' ? d.cwd : process.cwd(),
     timeoutMs: Math.min(injected, FETCH_TIMEOUT_MS),
     platform: typeof d.platform === 'string' ? d.platform : process.platform,
+    now,
+    deadline: now() + RUN_BUDGET_MS,
   };
 }
 
 /**
  * One bounded subprocess call, normalized. `answered` is true when the process ran to
- * an exit of its own: a call that never started, timed out or overflowed did not answer.
+ * an exit of its own: a call that never started, timed out, was killed by a signal or
+ * overflowed did not answer. The timeout is the smaller of the call's own bound and the time
+ * left in the run budget; with no time left the call is not started and counts as timed out.
  * The argv array is a fresh copy, so a spawn cannot mutate a caller's constant.
  *
  * @param {Context} ctx
  * @param {string} file
  * @param {readonly string[]} args
- * @param {NodeJS.ProcessEnv} env
- * @param {number} timeout
- * @param {number} maxBuffer
- * @param {boolean} grouped  run as the leader of its own process group, killed with SIGKILL on a timeout
+ * @param {CallOptions} opts
  * @returns {CallResult}
  */
-function runCall(ctx, file, args, env, timeout, maxBuffer, grouped) {
+function runCall(ctx, file, args, opts) {
+  const left = ctx.deadline - ctx.now();
+  if (!(left > 0)) {
+    return { ok: false, answered: false, status: null, errorCode: 'ETIMEDOUT', stdout: '', stderr: '', pid: 0 };
+  }
   const res = ctx.spawn(file, [...args], Object.assign({
     cwd: ctx.cwd,
-    env,
+    env: opts.env,
     stdio: ['ignore', 'pipe', 'pipe'],
-    timeout,
-    maxBuffer,
+    timeout: Math.max(1, Math.min(opts.timeoutMs, Math.floor(left))),
+    maxBuffer: opts.maxBuffer,
     windowsHide: true,
     shell: false,
-  }, grouped ? { detached: ctx.platform !== 'win32', killSignal: 'SIGKILL' } : {}));
+  }, opts.grouped ? { detached: ctx.platform !== 'win32', killSignal: 'SIGKILL' } : {}));
   const raw = res !== null && typeof res === 'object' ? res : /** @type {RawResult} */ ({ status: null });
   const errorCode = raw.error ? String(raw.error.code || 'EUNKNOWN') : null;
   const status = typeof raw.status === 'number' ? raw.status : null;
@@ -382,7 +418,9 @@ function runCall(ctx, file, args, env, timeout, maxBuffer, grouped) {
  * @returns {CallResult}
  */
 function git(ctx, args) {
-  return runCall(ctx, 'git', ['-c', 'core.fsmonitor=false', ...args], ctx.env, LOCAL_TIMEOUT_MS, LINE_MAX_BUFFER, false);
+  return runCall(ctx, 'git', ['-c', 'core.fsmonitor=false', ...args], {
+    env: ctx.env, timeoutMs: LOCAL_TIMEOUT_MS, maxBuffer: LINE_MAX_BUFFER, grouped: false,
+  });
 }
 
 /**
@@ -431,15 +469,16 @@ function fetchArgv(name, platform) {
  * Whether any SSH command is configured: GIT_SSH_COMMAND or GIT_SSH in the caller's
  * environment, or core.sshCommand in the repository's configuration. An answer that cannot
  * be read counts as configured, so a command is never replaced on a guess. No command
- * string is parsed.
+ * string is parsed. null when the configuration read gave no answer at all.
  *
  * @param {Context} ctx
- * @returns {boolean}
+ * @returns {boolean | null}
  */
 function sshCommandConfigured(ctx) {
   if (ctx.parentEnv.GIT_SSH_COMMAND !== undefined || ctx.parentEnv.GIT_SSH !== undefined) return true;
   const r = git(ctx, ['config', '--get', 'core.sshCommand']);
-  return !(r.answered && r.status === 1);
+  if (!r.answered) return null;
+  return r.status !== 1;
 }
 
 /**
@@ -454,12 +493,15 @@ function sshCommandConfigured(ctx) {
  *
  * @param {Context} ctx
  * @param {string} name
+ * @param {boolean} sshConfigured  whether an SSH command is configured, so none is added
  * @returns {FetchOutcome}
  */
-function fetchBase(ctx, name) {
+function fetchBase(ctx, name, sshConfigured) {
   const env = Object.assign({}, ctx.env);
-  if (!sshCommandConfigured(ctx)) env.GIT_SSH_COMMAND = SSH_DEFAULT_COMMAND;
-  const r = runCall(ctx, 'git', fetchArgv(name, ctx.platform), env, ctx.timeoutMs, FETCH_MAX_BUFFER, true);
+  if (!sshConfigured) env.GIT_SSH_COMMAND = SSH_DEFAULT_COMMAND;
+  const r = runCall(ctx, 'git', fetchArgv(name, ctx.platform), {
+    env, timeoutMs: ctx.timeoutMs, maxBuffer: FETCH_MAX_BUFFER, grouped: true,
+  });
   if (!r.answered) killGroup(r.pid, ctx.platform);
   if (r.ok) return { state: 'ok', reason: null };
   if (r.errorCode === 'ETIMEDOUT') return { state: 'failed', reason: 'timeout' };
@@ -499,7 +541,8 @@ function tipOf(ctx, fullRef) {
 
 /**
  * The merge base of a commit and HEAD. It must exit 0 with 40 or 64 hex on stdout;
- * any other answer, such as unrelated or truncated history, is no merge base.
+ * any other answer, such as unrelated or truncated history, is no merge base. A call that
+ * gives no answer is unknown.
  *
  * @param {Context} ctx
  * @param {string} sha
@@ -507,25 +550,26 @@ function tipOf(ctx, fullRef) {
  */
 function mergeBaseOf(ctx, sha) {
   const r = git(ctx, ['merge-base', sha, 'HEAD']);
-  if (!r.answered) return r.errorCode === null ? { kind: 'ok', base: null } : { kind: 'unknown' };
+  if (!r.answered) return { kind: 'unknown' };
   const out = r.status === 0 ? lineOf(r.stdout) : '';
   return { kind: 'ok', base: HEX_RE.test(out) ? out : null };
 }
 
 /**
- * Tri-state ancestry: true (exit 0), false (exit 1), null for anything else.
+ * Tri-state ancestry: true (exit 0), false (exit 1), null for any other exit. A call that
+ * gives no answer is unknown.
  *
  * @param {Context} ctx
  * @param {string} older
  * @param {string} newer
- * @returns {boolean | null}
+ * @returns {{ kind: 'ok', ancestor: boolean | null } | { kind: 'unknown' }}
  */
 function isAncestor(ctx, older, newer) {
   const r = git(ctx, ['merge-base', '--is-ancestor', older, newer]);
-  if (!r.answered) return null;
-  if (r.status === 0) return true;
-  if (r.status === 1) return false;
-  return null;
+  if (!r.answered) return { kind: 'unknown' };
+  if (r.status === 0) return { kind: 'ok', ancestor: true };
+  if (r.status === 1) return { kind: 'ok', ancestor: false };
+  return { kind: 'ok', ancestor: null };
 }
 
 /**
@@ -581,7 +625,9 @@ function resolveBase(req, ctx) {
   /** @type {FetchOutcome} */
   let fetch = { state: 'skipped', reason: null };
   if (skip === null) {
-    fetch = fetchBase(ctx, name);
+    const sshConfigured = sshCommandConfigured(ctx);
+    if (sshConfigured === null) return stop('resolver-unavailable');
+    fetch = fetchBase(ctx, name, sshConfigured);
     fetchState = fetch.state;
   }
 
@@ -612,7 +658,13 @@ function resolveBase(req, ctx) {
   /** @type {boolean | null} */
   let localBehind = null;
   if (req.mode === 'local' && local !== null && remote !== null && local.base !== null && remote.base !== null) {
-    localBehind = local.base === remote.base ? true : isAncestor(ctx, local.base, remote.base);
+    if (local.base === remote.base) {
+      localBehind = true;
+    } else {
+      const ancestry = isAncestor(ctx, local.base, remote.base);
+      if (ancestry.kind === 'unknown') return stop('resolver-unavailable');
+      localBehind = ancestry.ancestor;
+    }
   }
 
   const chosen = select({ mode: req.mode, skip, fetch, local, remote, localBehind });
@@ -626,7 +678,7 @@ function resolveBase(req, ctx) {
 
 /**
  * @typedef {{ spawn?: SpawnFn, env?: NodeJS.ProcessEnv, cwd?: string, timeoutMs?: number, platform?: string,
- *   formatLine?: (r: Selection) => string }} MainDeps  injected by tests only
+ *   now?: () => number, formatLine?: (r: Selection) => string }} MainDeps  injected by tests only
  */
 
 /**
@@ -685,6 +737,8 @@ module.exports = Object.freeze({
   FALLBACK_LINE,
   REASON_NOTES,
   FETCH_TIMEOUT_MS,
+  LOCAL_TIMEOUT_MS,
+  RUN_BUDGET_MS,
   isStrictName,
   parseArgs,
   select,

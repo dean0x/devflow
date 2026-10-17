@@ -8,12 +8,17 @@
  *   AC-12 The exact fetch argv, never --filter or --depth. The repository's hook,
  *         fsmonitor and upload-pack settings do not run for the fetch (each sentinel has a
  *         positive control: a plain git command in the same repository does run it).
- *   AC-13 The fetch environment. Prompts are off. BatchMode and ConnectTimeout are added
- *         only when no SSH command is configured; a configured command is left unchanged;
+ *   AC-13 The fetch environment. Credential prompts are off: the terminal prompt, the
+ *         askpass programs and the SSH prompt. BatchMode and ConnectTimeout are added only
+ *         when no SSH command is configured; a configured command is left unchanged;
  *         host-key checks are never weakened. Read from the stub's calls and, end to end,
  *         from a fake ssh in front of PATH.
  *   AC-14 The 45 s backstop: a hung fetch returns REASON timeout inside the bound and no
  *         process of its group survives (POSIX).
+ *   AC-15 The bounds of the local calls and the run budget. A local git call that gives no
+ *         answer (a timeout or a signal kill) gives resolver-unavailable, at every call
+ *         site, in both modes. Each call takes the smaller of its own bound and the time
+ *         left in the run budget, which stays below the 120 s Bash tool limit.
  *   The source reaches git through argv arrays, with shell false and no exec call.
  *
  * Every spawn names its cwd and takes its environment from scopedEnv(), so the developer's
@@ -39,6 +44,7 @@ interface SpawnResult {
   stdout?: string | Buffer
   stderr?: string | Buffer
   error?: { code?: string }
+  signal?: string | null
   pid?: number
 }
 type SpawnFn = (file: string, args: string[], opts: Record<string, unknown>) => SpawnResult
@@ -48,9 +54,12 @@ interface Deps {
   cwd?: string
   timeoutMs?: number
   platform?: string
+  now?: () => number
 }
 interface ResolveBase {
   readonly FETCH_TIMEOUT_MS: number
+  readonly LOCAL_TIMEOUT_MS: number
+  readonly RUN_BUDGET_MS: number
   readonly LINE_RE: RegExp
   fetchArgv(name: string, platform?: string): string[]
   main(argv: readonly string[], deps?: Deps): { code: number; line: string }
@@ -150,14 +159,16 @@ describe('the fetch argv (AC-12)', () => {
     }
   })
 
-  it('bounds the fetch at the 45 s constant and every local call below it', () => {
+  it('bounds the fetch at the 45 s constant and every local call at the 30 s constant below it', () => {
     expect(RB.FETCH_TIMEOUT_MS).toBe(45_000)
+    expect(RB.LOCAL_TIMEOUT_MS).toBe(30_000)
+    expect(RB.LOCAL_TIMEOUT_MS).toBeLessThan(RB.FETCH_TIMEOUT_MS)
     const { spawn, calls } = stubSpawn()
     run('main', 'local', { spawn, env: { PATH: '/bin' } })
     expect(fetchCall(calls).opts.timeout).toBe(45_000)
-    for (const c of calls.filter(x => !x.args.includes('fetch'))) {
-      expect(c.opts.timeout as number, c.args.join(' ')).toBeLessThan(45_000)
-    }
+    const local = calls.filter(x => !x.args.includes('fetch'))
+    expect(local.length).toBeGreaterThan(5)
+    for (const c of local) expect(c.opts.timeout, c.args.join(' ')).toBe(RB.LOCAL_TIMEOUT_MS)
   })
 
   it('makes one fetch for one run and orders the checks before it', () => {
@@ -177,7 +188,9 @@ describe('the fetch argv (AC-12)', () => {
 
 describe('the fetch environment (AC-13)', () => {
   const BATCH = 'ssh -o BatchMode=yes -o ConnectTimeout=5'
-  const PROMPTS_OFF = { GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', SSH_ASKPASS_REQUIRE: 'never', LC_ALL: 'C' }
+  const PROMPTS_OFF = {
+    GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', SSH_ASKPASS_REQUIRE: 'never', GIT_ASKPASS: '', SSH_ASKPASS: '', LC_ALL: 'C',
+  }
 
   interface Row {
     readonly name: string
@@ -206,10 +219,29 @@ describe('the fetch environment (AC-13)', () => {
     const { spawn, calls } = stubSpawn()
     run('main', 'pr', {
       spawn,
-      env: { PATH: '/bin', GIT_TERMINAL_PROMPT: '1', GCM_INTERACTIVE: 'always', SSH_ASKPASS_REQUIRE: 'force', LC_ALL: 'de_DE.UTF-8' },
+      env: {
+        PATH: '/bin', GIT_TERMINAL_PROMPT: '1', GCM_INTERACTIVE: 'always', SSH_ASKPASS_REQUIRE: 'force',
+        GIT_ASKPASS: '/usr/local/bin/askpass', SSH_ASKPASS: '/opt/ssh-askpass', LC_ALL: 'de_DE.UTF-8',
+      },
     })
     expect(calls.length).toBeGreaterThan(5)
     for (const c of calls) expect(c.opts.env, c.args.join(' ')).toMatchObject(PROMPTS_OFF)
+  })
+
+  interface PromptRow { readonly name: string; readonly env: Record<string, string>; readonly want: Record<string, string> }
+  const PROMPT_ROWS: readonly PromptRow[] = [
+    { name: 'no caller value: GIT_ASKPASS and SSH_ASKPASS are set, to the empty string', env: {}, want: { GIT_ASKPASS: '', SSH_ASKPASS: '' } },
+    { name: 'GIT_ASKPASS set by the caller: empty for the fetch', env: { GIT_ASKPASS: '/usr/local/bin/askpass' }, want: { GIT_ASKPASS: '', SSH_ASKPASS: '' } },
+    { name: 'SSH_ASKPASS set by the caller: empty for the fetch', env: { SSH_ASKPASS: '/opt/ssh-askpass' }, want: { GIT_ASKPASS: '', SSH_ASKPASS: '' } },
+    { name: 'a terminal prompt asked for by the caller: off for the fetch', env: { GIT_TERMINAL_PROMPT: '1' }, want: { GIT_TERMINAL_PROMPT: '0' } },
+    { name: 'an askpass forced by the caller: never for the fetch', env: { SSH_ASKPASS_REQUIRE: 'force' }, want: { SSH_ASKPASS_REQUIRE: 'never' } },
+    { name: 'a configured SSH command keeps its text, and the prompts stay off', env: { GIT_SSH_COMMAND: 'my-ssh -i key', GIT_ASKPASS: '/bin/askpass' }, want: { GIT_SSH_COMMAND: 'my-ssh -i key', GIT_ASKPASS: '' } },
+  ]
+
+  it.each(PROMPT_ROWS.map(r => [r.name, r] as const))('%s', (_name, row) => {
+    const { spawn, calls } = stubSpawn()
+    run('main', 'pr', { spawn, env: { PATH: '/bin', ...row.env } })
+    expect(fetchCall(calls).opts.env).toMatchObject(row.want)
   })
 
   it('gives the other calls no GIT_SSH_COMMAND of their own', () => {
@@ -230,6 +262,158 @@ describe('the fetch environment (AC-13)', () => {
 })
 
 // ---------------------------------------------------------------------------
+// AC-15: the local bounds, the run budget, and a local call that gives no answer
+// ---------------------------------------------------------------------------
+
+type Mode = 'local' | 'pr'
+type Site =
+  | 'check-ref-format' | 'config remote.origin.url' | 'config core.sshCommand'
+  | 'rev-parse local tip' | 'rev-parse origin tip'
+  | 'merge-base local tip' | 'merge-base origin tip' | 'merge-base --is-ancestor'
+  | 'rev-parse chosen base'
+
+const TIP_LOCAL = 'c'.repeat(40)
+const TIP_ORIGIN = 'd'.repeat(40)
+const BASE_LOCAL = 'a'.repeat(40)
+const BASE_ORIGIN = 'b'.repeat(40)
+
+/** Names the call site of one script call from its argv; the local and origin tips have distinct ids. */
+function siteOf(args: readonly string[]): Site | 'fetch' {
+  const rest = [...args]
+  while (rest[0] === '-c') rest.splice(0, 2)
+  const [sub, second] = rest
+  const last = rest[rest.length - 1]
+  if (sub === 'fetch') return 'fetch'
+  if (sub === 'check-ref-format') return 'check-ref-format'
+  if (sub === 'config') return rest.includes('remote.origin.url') ? 'config remote.origin.url' : 'config core.sshCommand'
+  if (sub === 'rev-parse') {
+    if (last === 'refs/heads/main^{commit}') return 'rev-parse local tip'
+    if (last === 'refs/remotes/origin/main^{commit}') return 'rev-parse origin tip'
+    return 'rev-parse chosen base'
+  }
+  if (second === '--is-ancestor') return 'merge-base --is-ancestor'
+  return second === TIP_LOCAL ? 'merge-base local tip' : 'merge-base origin tip'
+}
+
+const ok = (stdout = ''): SpawnResult => ({ status: 0, stdout: Buffer.from(stdout), stderr: Buffer.from('') })
+const HAPPY: Readonly<Record<Site | 'fetch', SpawnResult>> = {
+  'check-ref-format': ok(),
+  'config remote.origin.url': ok('https://example.invalid/r.git\n'),
+  'config core.sshCommand': { status: 1, stdout: Buffer.from(''), stderr: Buffer.from('') },
+  'fetch': ok(),
+  'rev-parse local tip': ok(`${TIP_LOCAL}\n`),
+  'rev-parse origin tip': ok(`${TIP_ORIGIN}\n`),
+  'merge-base local tip': ok(`${BASE_LOCAL}\n`),
+  'merge-base origin tip': ok(`${BASE_ORIGIN}\n`),
+  'merge-base --is-ancestor': ok(),
+  'rev-parse chosen base': ok(`${BASE_ORIGIN}\n`),
+}
+
+/** Answers every call by its site; `unanswered` replaces the answer at one site. Records the sites and the calls. */
+function siteStub(unanswered?: { site: Site; result: SpawnResult }, onCall?: (site: Site | 'fetch') => SpawnResult | undefined): { spawn: SpawnFn; sites: (Site | 'fetch')[]; calls: Call[] } {
+  const sites: (Site | 'fetch')[] = []
+  const calls: Call[] = []
+  const spawn: SpawnFn = (file, args, opts) => {
+    calls.push({ file, args: [...args], opts })
+    const site = siteOf(args)
+    sites.push(site)
+    const timed = onCall?.(site)
+    if (timed !== undefined) return timed
+    return unanswered !== undefined && unanswered.site === site ? unanswered.result : HAPPY[site]
+  }
+  return { spawn, sites, calls }
+}
+
+const FRESH = `BASE_REF=${BASE_ORIGIN} TIP=origin FETCH=ok REASON=fresh NOTE=none`
+
+describe('a local git call that gives no answer (AC-15)', () => {
+  /** Where each local call sits against the fetch decides FETCH in the stop line. */
+  const SITES: readonly { readonly site: Site; readonly modes: readonly Mode[]; readonly fetch: 'skipped' | 'ok' }[] = [
+    { site: 'check-ref-format', modes: ['local', 'pr'], fetch: 'skipped' },
+    { site: 'config remote.origin.url', modes: ['local', 'pr'], fetch: 'skipped' },
+    { site: 'config core.sshCommand', modes: ['local', 'pr'], fetch: 'skipped' },
+    { site: 'rev-parse local tip', modes: ['local', 'pr'], fetch: 'ok' },
+    { site: 'rev-parse origin tip', modes: ['local', 'pr'], fetch: 'ok' },
+    { site: 'merge-base local tip', modes: ['local', 'pr'], fetch: 'ok' },
+    { site: 'merge-base origin tip', modes: ['local', 'pr'], fetch: 'ok' },
+    { site: 'merge-base --is-ancestor', modes: ['local'], fetch: 'ok' },
+    { site: 'rev-parse chosen base', modes: ['local', 'pr'], fetch: 'ok' },
+  ]
+  const KINDS: readonly { readonly kind: string; readonly result: SpawnResult }[] = [
+    { kind: 'times out', result: { status: null, signal: 'SIGTERM', error: { code: 'ETIMEDOUT' } } },
+    { kind: 'is killed by a signal', result: { status: null, signal: 'SIGKILL' } },
+  ]
+
+  it.each(['local', 'pr'] as const)('control: in %s mode every call answers, the stub reaches every listed site and the line is fresh', mode => {
+    const { spawn, sites } = siteStub()
+    expect(run('main', mode, { spawn, env: { PATH: '/bin' } }).line).toBe(FRESH)
+    const expected = SITES.filter(s => s.modes.includes(mode)).map(s => s.site)
+    expect(new Set(sites)).toEqual(new Set([...expected, 'fetch']))
+  })
+
+  const ROWS = SITES.flatMap(s => s.modes.flatMap(mode => KINDS.map(k => ({ mode, site: s.site, fetch: s.fetch, kind: k.kind, result: k.result }))))
+
+  it.each(ROWS.map(r => [`${r.mode} mode: ${r.site} ${r.kind}`, r] as const))('%s', (_name, row) => {
+    const { spawn, sites } = siteStub({ site: row.site, result: row.result })
+    const out = run('main', row.mode, { spawn, env: { PATH: '/bin' } })
+    expect(sites, 'the call site was reached').toContain(row.site)
+    expect(out).toEqual({ code: 0, line: `BASE_REF=none TIP=none FETCH=${row.fetch} REASON=resolver-unavailable NOTE=stop` })
+  })
+
+  it('an answer that is an error exit of git itself keeps its own reason: an ancestry check that exits 128 gives no-merge-base', () => {
+    const { spawn } = siteStub({ site: 'merge-base --is-ancestor', result: { status: 128, stdout: Buffer.from(''), stderr: Buffer.from('') } })
+    expect(run('main', 'local', { spawn, env: { PATH: '/bin' } }).line)
+      .toBe('BASE_REF=none TIP=none FETCH=ok REASON=no-merge-base NOTE=stop')
+  })
+})
+
+describe('the run budget (AC-15)', () => {
+  it('stays below the 120 s Bash tool limit and above the fetch bound', () => {
+    expect(RB.RUN_BUDGET_MS).toBeLessThan(120_000)
+    expect(RB.RUN_BUDGET_MS).toBeGreaterThan(RB.FETCH_TIMEOUT_MS)
+  })
+
+  /** A clock the stub moves forward by `stepMs` per call. */
+  function clocked(stepMs: number, fetchResult?: SpawnResult): { deps: Deps; calls: Call[]; sites: (Site | 'fetch')[] } {
+    let t = 0
+    const { spawn: inner, calls, sites } = siteStub(undefined, site => (site === 'fetch' ? fetchResult : undefined))
+    const spawn: SpawnFn = (file, args, opts) => { const r = inner(file, args, opts); t += stepMs; return r }
+    return { deps: { spawn, env: { PATH: '/bin' }, now: () => t }, calls, sites }
+  }
+  const timeouts = (calls: readonly Call[]): unknown[] => calls.map(c => c.opts.timeout)
+
+  it('gives each call the smaller of its own bound and the time left, and starts no call once the budget is spent', () => {
+    // each call takes 40 s: the third call has 20 s left, the fetch and every call after it have none
+    const { deps, calls } = clocked(40_000)
+    const out = run('main', 'pr', deps)
+    expect(timeouts(calls)).toEqual([30_000, 30_000, 20_000])
+    expect(out.line).toBe('BASE_REF=none TIP=none FETCH=failed REASON=resolver-unavailable NOTE=stop')
+  })
+
+  it('bounds the fetch by the time left when that is less than its own 45 s', () => {
+    // each call takes 30 s: 10 s of the budget are left when the fetch starts, and the fetch uses them
+    const { deps, calls } = clocked(30_000, { status: null, signal: 'SIGKILL', error: { code: 'ETIMEDOUT' } })
+    const out = run('main', 'pr', deps)
+    expect(timeouts(calls)).toEqual([30_000, 30_000, 30_000, 10_000])
+    expect(out.line).toBe('BASE_REF=none TIP=none FETCH=failed REASON=resolver-unavailable NOTE=stop')
+  })
+
+  it('does not start a local call that has no time left and gives resolver-unavailable', () => {
+    // each call takes 13 s: the check of the chosen base would start at 104 s
+    const { deps, calls, sites } = clocked(13_000)
+    const out = run('main', 'pr', deps)
+    expect(sites).not.toContain('rev-parse chosen base')
+    expect(timeouts(calls)).toEqual([30_000, 30_000, 30_000, 45_000, 30_000, 30_000, 22_000, 9_000])
+    expect(out.line).toBe('BASE_REF=none TIP=none FETCH=ok REASON=resolver-unavailable NOTE=stop')
+  })
+
+  it('leaves the line of a run inside the budget unchanged', () => {
+    const { deps } = clocked(1_000)
+    expect(run('main', 'local', deps).line).toBe(FRESH)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Real git fixtures for the end-to-end rows
 // ---------------------------------------------------------------------------
 
@@ -246,6 +430,8 @@ const LOG_SCRIPT = [
   '  printf "env:GIT_TERMINAL_PROMPT=%s\\n" "$GIT_TERMINAL_PROMPT"',
   '  printf "env:GCM_INTERACTIVE=%s\\n" "$GCM_INTERACTIVE"',
   '  printf "env:SSH_ASKPASS_REQUIRE=%s\\n" "$SSH_ASKPASS_REQUIRE"',
+  '  printf "env:GIT_ASKPASS=%s\\n" "$GIT_ASKPASS"',
+  '  printf "env:SSH_ASKPASS=%s\\n" "$SSH_ASKPASS"',
   '  printf "env:LC_ALL=%s\\n" "$LC_ALL"',
   '} >> "$SSH_LOG"',
   'exit 255',
@@ -413,13 +599,15 @@ describe.skipIf(!POSIX)('the SSH rule end to end (AC-13)', SPAWN_BUDGET, () => {
   const sshArgs = (log: readonly string[]): string[] => log.filter(l => l.startsWith('arg:')).map(l => l.slice(4))
 
   it('adds BatchMode and ConnectTimeout, turns prompts off, and keeps the fetch\'s failure a degraded line on the cached ref', () => {
-    const { log, line } = runOverSsh({ GIT_TERMINAL_PROMPT: '1', LC_ALL: 'de_DE.UTF-8' })
+    const { log, line } = runOverSsh({ GIT_TERMINAL_PROMPT: '1', GIT_ASKPASS: '/usr/bin/true', SSH_ASKPASS: '/usr/bin/true', LC_ALL: 'de_DE.UTF-8' })
     const args = sshArgs(log)
     expect(args.join(' ')).toContain('-o BatchMode=yes -o ConnectTimeout=5')
     expect(args.join(' ')).not.toMatch(/StrictHostKeyChecking|UserKnownHostsFile/i)
     expect(log).toContain('env:GIT_TERMINAL_PROMPT=0')
     expect(log).toContain('env:GCM_INTERACTIVE=never')
     expect(log).toContain('env:SSH_ASKPASS_REQUIRE=never')
+    expect(log).toContain('env:GIT_ASKPASS=')
+    expect(log).toContain('env:SSH_ASKPASS=')
     expect(log).toContain('env:LC_ALL=C')
     expect(line).toMatch(/^BASE_REF=[0-9a-f]{40} TIP=origin FETCH=failed REASON=fetch-failed NOTE=degraded$/)
   })
