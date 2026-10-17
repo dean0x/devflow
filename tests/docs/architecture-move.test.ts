@@ -33,9 +33,9 @@ interface MovedParagraph {
  * paragraph, such as an agent rename, re-sets its length and digest in the same commit.
  */
 const MOVED_PARAGRAPHS: readonly MovedParagraph[] = [
-  { lead: 'LLM-vs-plumbing principle', bytes: 739, sha256: 'c5d362ddb9c5115d98fa453427fd4adce8a9e49e6a705c51ee1d29ae7ce34417' },
-  { lead: 'Runtime data', bytes: 2263, sha256: '084cf46ca626aea71e8029c30630048388260407f6140a858dea10373d2594d3' },
-  { lead: 'Feature Knowledge Bases', bytes: 890, sha256: 'ea20f3ff1fdb2d0b9774fe9cf544423d10a6544533582a490ca186d14b02a134' },
+  { lead: 'LLM-vs-plumbing principle', bytes: 739, sha256: '21fc423e27ee801ddb9ef191e0738b02b10e63e2cf5fc925b6a9f16ff57aac2f' },
+  { lead: 'Runtime data', bytes: 2263, sha256: '1f85b67f9e7af66d75f5e2418780fcc746598a408f5bd23d764665467538b6fe' },
+  { lead: 'Feature Knowledge Bases', bytes: 890, sha256: 'dd42a02a5a0163e7e471b3d1610e415b4a0633d1d083e447aaf1362b0ee8512f' },
   { lead: 'Rules', bytes: 319, sha256: 'd6826dc4b431132b12df032831419dd384630b6a9b62244122fcbf6bb15963e9' },
   { lead: 'Selection-scoped Skill Installation', bytes: 532, sha256: '6fb4e7f9edd3e3fadfa766384dfcedffaddb178beff86543823dfe0aa8aec9fb' },
   { lead: 'Compliance', bytes: 1528, sha256: '246b5c7d82448d2cbc46cf846e2b8e185b229336ae6417839db8e52569ac9891' },
