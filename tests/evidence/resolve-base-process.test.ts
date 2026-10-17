@@ -742,12 +742,12 @@ describe.skipIf(!POSIX)('the 45 s backstop (AC-14)', SPAWN_BUDGET, () => {
     const extra = { REAL_GIT: realGitPath, FAKE_PIDS: pidFile }
 
     // spawnSync honors `detached` (the child leads a new process group, as in the production fetch) although SpawnSyncOptions does not declare it
-    const options: SpawnSyncOptions & { detached: boolean } = { cwd: w.root, env: scopedEnv(w.home, extra), stdio: 'ignore', timeout: HUNG_BOUND_MS, killSignal: 'SIGKILL', detached: true }
-    const run = spawnSync(hungGit(), ['fetch'], options)
+    const options: SpawnSyncOptions & { detached: boolean } = { stdio: 'ignore', timeout: HUNG_BOUND_MS, killSignal: 'SIGKILL', detached: true }
+    const run = spawnSync(hungGit(), ['fetch'], { ...options, cwd: w.root, env: scopedEnv(w.home, extra) })
     const [leader, helper] = readPids(pidFile)
     try {
       expect((run.error as NodeJS.ErrnoException | undefined)?.code, 'the timeout ended the leader').toBe('ETIMEDOUT')
-      const group = spawnSync('ps', ['-o', 'pgid=', '-p', String(helper)], { encoding: 'utf8', timeout: SUBPROCESS_TIMEOUT_MS })
+      const group = spawnSync('ps', ['-o', 'pgid=', '-p', String(helper)], { cwd: w.root, env: scopedEnv(w.home), encoding: 'utf8', timeout: SUBPROCESS_TIMEOUT_MS })
       expect(Number(group.stdout.trim()), 'the helper sits in the leader group').toBe(leader)
       expect(alive(helper), 'without a group kill the helper outlives its leader').toBe(true)
     } finally {
