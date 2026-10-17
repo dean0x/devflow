@@ -620,7 +620,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 | No reviews exist | Check bug-analysis fallback (Step 0c-5b); if also absent, error and suggest `/code-review` or `/bug-analysis` |
 | Fix attempt fails | Revert changes, mark BLOCKED, continue others |
 | Issue dependencies | Sequential chain, skip dependents if predecessor blocked |
-| No actionable issues | Report "No issues to resolve" |
+| No issues parsed | Report "No issues to resolve" |
 | Latest review already resolved | Check bug-analysis fallback (Step 0c-5b); if also absent, skip worktree and suggest `/code-review` or `/bug-analysis` |
 | `--review {timestamp}` in multi-worktree mode | Not supported — use `--path` + `--review` to target specific worktree + review |
 | gh/GitHub absent | manage-debt degrades (`TRACEABILITY: DEGRADED ({reason})`); Tracked stays `(pending — TRACEABILITY: DEGRADED ({reason}))` — recorded, not dropped |

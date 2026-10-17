@@ -24,7 +24,7 @@
  *   f. `full` reads nothing: the reference path appears only inside the block, and no Validate fence of
  *      `/resolve` names the level.
  *   g. The report lines that name the level.
- *   h. The two `/resolve` routes that skip phases, and the numbered principles.
+ *   h. The two `/resolve` routes that skip phases, the numbered principles and the edge row that reports an empty parse.
  * The spawn fences of both commands are pinned in `implement-resolve-full-fences.test.ts`.
  *
  * The reference arms (d, e) read the two references. The command arms (a, b, c, f, g, h) read the compiled commands.
@@ -34,7 +34,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import * as path from 'path'
 
-import { ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, isAgentBlock, parseFences, readAgentReference, requireDistFile, resolveLearningOffSource, sectionBetween } from '../helpers.js'
+import { ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, isAgentBlock, parseFences, readAgentReference, requireDistFile, resolveLearningOffSource, sectionBetween, tableRows } from '../helpers.js'
 
 // ---------------------------------------------------------------------------
 // The decided text, written by hand from the issue and the gate decisions
@@ -187,6 +187,8 @@ const RESOLVE_HEADER = '**Command**: /resolve\n**Gate level**: {GATE_LEVEL}\n\n'
 const ROUTE_EMPTY = 'If FIX_NOW list is empty: skip to Phase 5, then run Phases 9, 9b, 9c and 10.'
 const ROUTE_PUSH = '**Route after push:** VERIFICATION_STATUS = PASS → continue to Phase 8 (CI gate). FAILED or SKIPPED → skip Phase 8 and continue with Phase 9 and the later phases in order.'
 const ROUTE_EMPTY_PHASES = ['10', '5', '9', '9b', '9c']
+const EDGE_EMPTY_PARSE_CASE = 'No issues parsed'
+const EDGE_EMPTY_PARSE_HANDLING = 'Report "No issues to resolve"'
 
 // ---------------------------------------------------------------------------
 // Readers
@@ -596,7 +598,12 @@ export function collectReportDefects(body: string, spec: LevelSpec): string[] {
 // h. Cut routes
 // ---------------------------------------------------------------------------
 
-/** A1: the empty-FIX_NOW route and the route after push pass no phase that pushes, the principles are numbered 1 to 3. */
+/**
+ * A1: the empty-FIX_NOW route and the route after push pass no phase that pushes, the principles are numbered 1 to 3.
+ * An all-false-positive run takes the empty-FIX_NOW route, which writes the Phase 5 summary. So the one edge row that
+ * reports "No issues to resolve" names the parse-time case only, and no edge row names an "actionable" case that such a
+ * run could match.
+ */
 export function collectCutRouteDefects(body: string): string[] {
   const out: string[] = []
   const lines = body.split('\n')
@@ -622,6 +629,15 @@ export function collectCutRouteDefects(body: string): string[] {
     const numbers = [...principles.matchAll(/^(\d+)\. /gm)].map(m => m[1])
     if (numbers.join(', ') !== '1, 2, 3') out.push(`the principles are numbered ${numbers.join(', ')}, expected 1, 2, 3`)
     if (!principles.includes('1. **Orchestration only**')) out.push('Principle 1 (**Orchestration only**) is missing')
+  }
+  const edge = sectionBetween(body, '## Edge Cases', '## Principles')
+  if (edge === null) out.push('no "## Edge Cases" section')
+  else {
+    const rows = tableRows(edge)
+    const reports = rows.filter(cells => cells[1] === EDGE_EMPTY_PARSE_HANDLING)
+    if (reports.length !== 1) out.push(`the edge case that reports "No issues to resolve" appears in ${reports.length} rows, expected once`)
+    else if (reports[0][0] !== EDGE_EMPTY_PARSE_CASE) out.push(`the edge row that reports "No issues to resolve" reads "${reports[0][0]}", expected "${EDGE_EMPTY_PARSE_CASE}"`)
+    for (const cells of rows.filter(c => /actionable/i.test(c[0]))) out.push(`the edge case "${cells[0]}" could catch an all-false-positive run, which takes the empty FIX_NOW route`)
   }
   return out
 }
@@ -1113,7 +1129,7 @@ describe('the report names the level (AC-4)', () => {
 // ---------------------------------------------------------------------------
 
 describe('the /resolve routes that skip phases pass no pushing phase (A1)', () => {
-  it.each(BUILDS.filter(b => b.spec === RESOLVE))('$label: the empty FIX_NOW route, the route after push and the numbered principles', ({ body }) => {
+  it.each(BUILDS.filter(b => b.spec === RESOLVE))('$label: the empty FIX_NOW route, the route after push, the numbered principles and the edge row', ({ body }) => {
     expect(collectCutRouteDefects(body)).toEqual([])
   })
 
@@ -1127,5 +1143,21 @@ describe('the /resolve routes that skip phases pass no pushing phase (A1)', () =
     expect(collectCutRouteDefects(seed(body, ' and the later phases in order.', '.'))).toEqual(expect.arrayContaining(['the route after push does not end "and the later phases in order."']))
     expect(collectCutRouteDefects(seed(body, '1. **Orchestration only**', '1. **Only**'))).toContain('Principle 1 (**Orchestration only**) is missing')
     expect(collectCutRouteDefects(seedIn(body, '## Principles', '## Output Artifact', /^3\. \*\*/m, '4. **'))).toContain('the principles are numbered 1, 2, 4, expected 1, 2, 3')
+  })
+
+  it('known-bad probes: an edge row that an all-false-positive run could match is reported', () => {
+    const body = bodyOf(RESOLVE)
+    const parsedRow = `| ${EDGE_EMPTY_PARSE_CASE} | ${EDGE_EMPTY_PARSE_HANDLING} |`
+    expect(body, 'the edge row names the parse-time case').toContain(parsedRow)
+    expect(collectCutRouteDefects(seed(body, parsedRow, `| No actionable issues | ${EDGE_EMPTY_PARSE_HANDLING} |`)))
+      .toEqual(expect.arrayContaining([
+        `the edge row that reports "No issues to resolve" reads "No actionable issues", expected "${EDGE_EMPTY_PARSE_CASE}"`,
+        'the edge case "No actionable issues" could catch an all-false-positive run, which takes the empty FIX_NOW route',
+      ]))
+    expect(collectCutRouteDefects(seed(body, '| Fix attempt fails |', '| No actionable issues | Normal completion |\n| Fix attempt fails |')))
+      .toContain('the edge case "No actionable issues" could catch an all-false-positive run, which takes the empty FIX_NOW route')
+    expect(collectCutRouteDefects(seed(body, parsedRow, '| No issues found | Normal completion |')))
+      .toContain('the edge case that reports "No issues to resolve" appears in 0 rows, expected once')
+    expect(collectCutRouteDefects(seed(body, '## Edge Cases', '## Edge Notes'))).toContain('no "## Edge Cases" section')
   })
 })
