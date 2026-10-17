@@ -296,7 +296,7 @@ export function collectDataFlowDefects(body: string, spec: LevelSpec): string[] 
 // ---------------------------------------------------------------------------
 
 /**
- * The fail-closed bullet of the block: its parts, and none of the retired wording that set the level to `full`.
+ * The fail-closed bullet of the block: its parts, and none of the wording that sets the level to `full`.
  * The exact pin of the bullet in the block collector implies each check here. They stay to name the part that changed.
  */
 export function collectFailClosedBulletDefects(body: string, spec: LevelSpec): string[] {
@@ -1195,13 +1195,13 @@ describe('a failed read applies no row and keeps the level (AC-3, AC-9)', () => 
     expect(collectFailClosedDefects(body, spec, VALIDATE)).toEqual([])
   })
 
-  it.each(SPECS)('$cmd: known-bad probes: the retired wording and a bullet without the header clause are reported', spec => {
+  it.each(SPECS)('$cmd: known-bad probes: wording that sets the level to full and a bullet without the header clause are reported', spec => {
     const body = bodyOf(spec)
     needsBlock(body, spec)
     const defects = (text: string): string[] => collectFailClosedDefects(text, spec, VALIDATE)
     const bullet = `- ${spec.items[1]}`
-    const retired = '- If the Read fails, or a row is missing or malformed, set `GATE_LEVEL` to `full` and say `level reference unreadable: full applied`.'
-    expect(defects(seed(body, bullet, retired))).toEqual(expect.arrayContaining(['the fail-closed bullet holds "full applied"', 'the fail-closed bullet sets GATE_LEVEL']))
+    const setsFull = '- If the Read fails, or a row is missing or malformed, set `GATE_LEVEL` to `full` and say `level reference unreadable: full applied`.'
+    expect(defects(seed(body, bullet, setsFull))).toEqual(expect.arrayContaining(['the fail-closed bullet holds "full applied"', 'the fail-closed bullet sets GATE_LEVEL']))
     expect(defects(seed(body, `or the file ${NO_HEADING}, `, ''))).toContain(`the fail-closed bullet lacks: ${NO_HEADING}`)
     expect(defects(seed(body, `or ${BAD_ROW}, `, ''))).toContain(`the fail-closed bullet lacks: ${BAD_ROW}`)
     expect(defects(seed(body, spec.failClosed[2], 'apply nothing and'))).toContain(`the fail-closed bullet lacks: ${spec.failClosed[2]}`)
@@ -1281,7 +1281,7 @@ describe('the /resolve routes that skip phases pass no pushing phase (A1)', () =
     expect(collectCutRouteDefects(body)).toEqual([])
   })
 
-  it('known-bad probes: a pushing phase in the route, the retired wording and a shortened route are each reported', () => {
+  it('known-bad probes: a pushing phase in the route, a reworded empty route and a shortened route after push are each reported', () => {
     const body = bodyOf(RESOLVE)
     expect(collectCutRouteDefects(body), 'the unmodified routes have no defect').toEqual([])
     expect(collectCutRouteDefects(seed(body, 'Phases 9, 9b', 'Phases 7, 9, 9b'))).toEqual(expect.arrayContaining(['the empty FIX_NOW route names Phase 7']))
