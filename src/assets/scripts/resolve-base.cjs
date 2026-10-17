@@ -244,8 +244,8 @@ function checkLine(line) {
  * @param {'ok' | 'failed' | 'skipped'} [fetch]
  * @returns {Selection}
  */
-function stopWith(reason, fetch) {
-  return { baseRef: 'none', tip: 'none', fetch: fetch === undefined ? 'skipped' : fetch, reason };
+function stopWith(reason, fetch = 'skipped') {
+  return { baseRef: 'none', tip: 'none', fetch, reason };
 }
 
 // ---------------------------------------------------------------------------
