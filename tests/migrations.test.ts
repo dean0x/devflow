@@ -472,6 +472,12 @@ describe('pooled', () => {
     expect(await pooled([], 4, async () => { calls += 1; })).toEqual([]);
     expect(calls).toBe(0);
   });
+
+  it.each([0, -1, 1.5, Number.NaN])('rejects a limit of %s before it runs any item', async limit => {
+    let calls = 0;
+    await expect(pooled([1, 2], limit, async () => { calls += 1; })).rejects.toThrow(RangeError);
+    expect(calls).toBe(0);
+  });
 });
 
 describe('reportMigrationResult', () => {
