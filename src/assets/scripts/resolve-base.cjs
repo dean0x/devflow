@@ -32,9 +32,10 @@
 // one line.
 //
 // Check order: the strict name class (STRICT_NAME_RE), then `git check-ref-format`, then
-// the origin URL, then the cross-repository flag, then the fetch, then the choice of tip,
-// then the merge base, then the verification of BASE_REF. A name that fails either name
-// check makes no further git call.
+// the origin URL, then the cross-repository flag, then the fetch (after the read of
+// core.sshCommand), then the tip of each ref, then the merge base of each tip with HEAD,
+// then the ancestry check (the pre-PR rule only), then the choice of tip, then the
+// verification of BASE_REF. A name that fails either name check makes no further git call.
 //
 // Design constraints (binding):
 //   - Plumbing: every decision here is a fixed comparison of git answers. The ancestry
@@ -45,10 +46,19 @@
 //     of origin's moves the base to origin.
 //   - Tri-state ancestry (`merge-base --is-ancestor`): exit 0 is true, exit 1 is false,
 //     any other exit is unknown. Unknown is never read as false. It gives no-merge-base.
+//     A call that ends with no exit of its own is covered by the next point.
 //   - A local git call that gives no answer (a timeout, a signal kill, a git that does not
-//     start) gives resolver-unavailable, at every call site.
-//   - The fetch is one call with a fixed argv: it writes only refs/remotes/origin/<name>,
-//     writes no FETCH_HEAD, follows no tags, and carries no --filter or --depth. The
+//     start) gives resolver-unavailable, at every call site: the format check, the origin
+//     URL, the core.sshCommand read, the tip of each ref, the merge base of each tip, the
+//     ancestry check and the verification. A call that exits on its own is an answer, and
+//     its result maps by its own rule: a merge base that exits non-zero or is not a commit
+//     ID is no merge base for that tip, and the choice gives no-merge-base when it needs the
+//     tip; an exit that the call site does not accept gives resolver-unavailable. The one answer that is not a stop is the core.sshCommand read:
+//     an exit other than 0 or 1 counts as configured, so a command is never replaced on a
+//     guess.
+//   - The fetch is one call with a fixed argv: it writes only refs/remotes/origin/<name>
+//     (an empty --refmap= keeps the configured fetch refspecs out of the update), writes no
+//     FETCH_HEAD, follows no tags, and carries no --filter or --depth. The
 //     repository's hook, fsmonitor and upload-pack settings do not apply to it. Credential
 //     prompts are off: GIT_TERMINAL_PROMPT is 0, GIT_ASKPASS and SSH_ASKPASS are empty, so
 //     git runs no askpass program, and the default SSH command carries BatchMode=yes.
@@ -56,7 +66,11 @@
 //     (GIT_SSH_COMMAND, GIT_SSH or core.sshCommand); a configured command is never
 //     replaced, and host-key checks are never weakened.
 //   - The fetch is bounded at FETCH_TIMEOUT_MS. A fetch that does not exit on its own is
-//     followed by a kill of its whole process group (POSIX), so no helper survives.
+//     followed by a kill of its whole process group (POSIX), so no helper survives. The kill
+//     is SIGKILL, so git cannot remove the lock of the ref it was updating. A lock file
+//     left at refs/remotes/origin/<name>.lock is read by every later run as fetch-failed,
+//     until the user deletes it. This is rare: git holds the lock only for the short ref
+//     update at the end of the fetch.
 //   - One run budget, RUN_BUDGET_MS, stays below the 120 s Bash tool limit. Each call takes
 //     the smaller of its own bound and the time left in the budget. A local call with no
 //     time left is not started and gives resolver-unavailable; the fetch with no time left
@@ -81,10 +95,12 @@ const childProcess = require('child_process');
 // ---------------------------------------------------------------------------
 
 /**
- * The strict base-name class, one literal. Prompts that check a name copy its `source`
- * exactly, and a test holds each copy equal to this export. In words: 1 to 200 ASCII
- * letters, digits and `._/+@,#-`; not starting with `-`, `#` or `origin/`; no `..`; not
- * the whole name `@`, `HEAD`, `FETCH_HEAD`, `ORIG_HEAD` or `MERGE_HEAD`.
+ * The strict base-name class, one literal. Every prompt that checks a base name copies its
+ * `source` exactly, and a test holds each copy equal to this export. The one deliberate
+ * variant is the dynamic-build helper's BRANCH_NAME: a ticket branch is local, so the helper
+ * holds this class less the `origin/` refusal, and a test holds that relation. In words: 1 to
+ * 200 ASCII letters, digits and `._/+@,#-`; not starting with `-`, `#` or `origin/`; no `..`;
+ * not the whole name `@`, `HEAD`, `FETCH_HEAD`, `ORIG_HEAD` or `MERGE_HEAD`.
  */
 const STRICT_NAME_RE = /^(?![-#]|origin\/|(?:@|(?:FETCH_|ORIG_|MERGE_)?HEAD)$)(?!.*\.\.)[A-Za-z0-9._\/+@,#-]{1,200}$/;
 
@@ -446,8 +462,10 @@ function killGroup(pid, platform) {
 
 /**
  * The exact fetch argv. The null device switches off the repository's hooks, fsmonitor is
- * off, and `--upload-pack` replaces the repository's configured program. Never --filter,
- * never --depth. The name has passed the strict class; this sink holds that precondition.
+ * off, and `--upload-pack` replaces the repository's configured program. The empty `--refmap=`
+ * keeps the configured remote.origin.fetch refspecs out of the update, so the one refspec
+ * given is the only ref written. Never --filter, never --depth. The name has passed the
+ * strict class; this sink holds that precondition.
  *
  * @param {string} name
  * @param {string} [platform]
@@ -460,7 +478,7 @@ function fetchArgv(name, platform) {
     '-c', 'core.fsmonitor=false',
     '-c', 'core.hooksPath=' + nullDevice,
     'fetch', '--no-tags', '--no-write-fetch-head', '--no-recurse-submodules', '--no-auto-maintenance',
-    '--no-show-forced-updates', '--quiet', '--upload-pack=git-upload-pack',
+    '--no-show-forced-updates', '--quiet', '--refmap=', '--upload-pack=git-upload-pack',
     'origin', '+refs/heads/' + name + ':refs/remotes/origin/' + name,
   ];
 }
@@ -593,8 +611,11 @@ function commitResolves(ctx, sha) {
  */
 
 /**
- * Run the checks, the fetch, the choice and the verification for one request. Every path
- * returns a Selection; a git that cannot answer is resolver-unavailable.
+ * Run the checks, the fetch, the choice and the verification for one request, in the order
+ * the header states. Every path returns a Selection. A local git call that gives no answer is
+ * resolver-unavailable at every call site; the fetch has its own outcomes (fetch-failed,
+ * timeout, no-remote-branch). An answered call that cannot be used maps by its call site, as
+ * the header states. The ancestry check runs only in the pre-PR rule.
  *
  * @param {Request} req
  * @param {Context} ctx

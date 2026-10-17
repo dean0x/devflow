@@ -124,7 +124,7 @@ describe('the fetch argv (AC-12)', () => {
       '-c', 'core.fsmonitor=false',
       '-c', `core.hooksPath=${NULL_DEVICE}`,
       'fetch', '--no-tags', '--no-write-fetch-head', '--no-recurse-submodules', '--no-auto-maintenance',
-      '--no-show-forced-updates', '--quiet', '--upload-pack=git-upload-pack',
+      '--no-show-forced-updates', '--quiet', '--refmap=', '--upload-pack=git-upload-pack',
       'origin', '+refs/heads/feature/x:refs/remotes/origin/feature/x',
     ])
   })
@@ -571,6 +571,23 @@ describe.skipIf(!POSIX)('repository settings do not run for the fetch (AC-12)', 
     expect(fs.existsSync(hook), 'the hook did not run').toBe(false)
     expect(fs.existsSync(upload), 'the upload-pack program did not run').toBe(false)
     expect(fs.existsSync(fsmonitor), 'the fsmonitor command did not run').toBe(false)
+  })
+
+  it('writes only refs/remotes/origin/<name> when the configuration maps the remote elsewhere, where a plain fetch writes the mapped ref', () => {
+    const w = newWorld()
+    git(w.work, w.home, 'config', 'remote.origin.fetch', '+refs/heads/*:refs/mirror/*')
+    const mirrored = (): string => git(w.work, w.home, 'for-each-ref', '--format=%(refname)', 'refs/mirror')
+
+    git(w.work, w.home, 'fetch', '-q', 'origin', 'main')
+    expect(mirrored(), 'control: a plain fetch writes the mapped ref').toBe('refs/mirror/main')
+    git(w.work, w.home, 'update-ref', '-d', 'refs/mirror/main')
+    git(w.work, w.home, 'update-ref', '-d', 'refs/remotes/origin/main')
+    const m1 = advanceOrigin(w, 'm1.txt')
+
+    const out = RB.main(['node', 'resolve-base.cjs', 'pr', 'main'], { cwd: w.work, env: cleanEnv(w.home, {}) })
+    expect(out.line).toContain('FETCH=ok')
+    expect(git(w.work, w.home, 'rev-parse', 'refs/remotes/origin/main'), 'the fetch wrote the base ref').toBe(m1)
+    expect(mirrored(), 'no mapped ref was written').toBe('')
   })
 })
 

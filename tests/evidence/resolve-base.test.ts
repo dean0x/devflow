@@ -771,11 +771,20 @@ describe('the fallback (AC-6)', SPAWN_BUDGET, () => {
       .toEqual({ code: 0, line: RB.FALLBACK_LINE })
   })
 
-  it('treats a git that cannot be started as resolver-unavailable', () => {
+  it('treats a git that cannot be started as resolver-unavailable, with the fetch state of the run', () => {
     const w = newWorld()
-    const missing: SpawnFn = () => ({ status: null, error: { code: 'ENOENT' } })
-    expect(RB.main(['node', 'resolve-base.cjs', 'local', 'main'], { cwd: w.work, env: env0(w.home), spawn: missing }))
-      .toEqual({ code: 0, line: RB.FALLBACK_LINE })
+    const { spawn: real } = countingSpawn(w.home)
+    let fetched = false
+    // the real git answers up to and including the fetch; every call after it cannot be started
+    const missingAfterFetch: SpawnFn = (file, args, opts) => {
+      if (fetched) return { status: null, error: { code: 'ENOENT' } }
+      fetched = isFetchCall([file, ...args])
+      return real(file, args, opts)
+    }
+    const out = RB.main(['node', 'resolve-base.cjs', 'local', 'main'], { cwd: w.work, env: env0(w.home), spawn: missingAfterFetch })
+    expect(fetched, 'the fetch ran').toBe(true)
+    expect(out).toEqual({ code: 0, line: 'BASE_REF=none TIP=none FETCH=ok REASON=resolver-unavailable NOTE=stop' })
+    expect(out.line).not.toBe(RB.FALLBACK_LINE)
   })
 })
 
