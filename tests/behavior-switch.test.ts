@@ -34,7 +34,7 @@ function manifestWith(features: Record<string, unknown>): Record<string, unknown
     version: '3.4.0',
     plugins: ['devflow-core-skills'],
     scope: 'user',
-    features: { ambient: true, memory: true, hud: false, knowledge: true, learning: true, rules: true, ...features },
+    features: { ambient: true, memory: true, hud: false, knowledge: true, curation: true, learning: true, rules: true, ...features },
     installedAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
   };

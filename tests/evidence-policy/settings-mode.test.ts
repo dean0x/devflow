@@ -1740,9 +1740,9 @@ describe('parity: the machine layer reads the manifest exactly as the CLI does',
 
   it.each(MANIFESTS)('%s', (_label, manifest) => {
     const s = machineOnly(manifest);
-    for (const feature of ['memory', 'learning', 'knowledge'] as const) {
-      expect(s.switches[feature].on, feature).toBe(isMachineFeatureOn(manifest, feature));
-    }
+    expect(s.switches.memory.on, 'memory').toBe(isMachineFeatureOn(manifest, 'memory'));
+    expect(s.switches.learning.on, 'curation').toBe(isMachineFeatureOn(manifest, 'curation'));
+    expect(s.switches.knowledge.on, 'knowledge').toBe(isMachineFeatureOn(manifest, 'knowledge'));
     const features = (manifest as { features?: { tracker?: unknown; compliance?: unknown } } | null)?.features;
     const rawTracker = typeof features === 'object' && features !== null ? features.tracker : undefined;
     expect(s.tracker).toBe(normalizeTrackerFeature(rawTracker).provider);
