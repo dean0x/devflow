@@ -56,6 +56,10 @@ function _idleSleep50() {
  * call refreshLock(lockDir) periodically to reset the mtime and push the deadline
  * out by another staleMs interval.
  *
+ * A stale lock that cannot be removed (it holds files, it is not a directory, or its
+ * folder refuses the rmdir) is waited on like a live one, so `timeoutMs` bounds the
+ * loop: with a timeout of 0 the call answers false at once.
+ *
  * @param {string} lockDir - path to lock directory
  * @param {number} [timeoutMs=30000] - max wait in milliseconds
  * @param {number} [staleMs=60000] - age after which lock is considered stale
@@ -72,14 +76,27 @@ function acquireMkdirLock(lockDir, timeoutMs = 30000, staleMs = 60000) {
       try {
         const stat = fs.statSync(lockDir);
         const age = Date.now() - stat.mtimeMs;
-        if (age > staleMs) {
-          try { fs.rmdirSync(lockDir); } catch { /* already gone */ }
-          continue;
-        }
+        if (age > staleMs && breakStaleLock(lockDir)) continue;
       } catch { /* lock gone between check and stat */ }
       if (Date.now() - start >= timeoutMs) return false;
       _idleSleep50();
     }
+  }
+}
+
+/**
+ * Remove a stale lock directory. True when it is gone (removed here, or already
+ * removed by another process); false when the rmdir failed for any other reason.
+ *
+ * @param {string} lockDir
+ * @returns {boolean}
+ */
+function breakStaleLock(lockDir) {
+  try {
+    fs.rmdirSync(lockDir);
+    return true;
+  } catch (err) {
+    return Boolean(err) && err.code === 'ENOENT';
   }
 }
 
