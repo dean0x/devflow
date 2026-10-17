@@ -3405,6 +3405,8 @@ describe('git agent: PR ops use a fresh base for branch diffs (#495)', () => {
     expect(collectValidateBranchBaseDefects(sectionValidate.replace('it fetches the base branch at most once (the remote-tracking ref only), lists', 'it is a read-only check, lists'))).toEqual(['the contract says it fetches the base and lists the diff against base_ref']);
     expect(collectValidateBranchBaseDefects(sectionValidate.replace(DEFAULT_BRANCH_PROBE, OLD_DEFAULT_BRANCH_PROBE))).toEqual(['step 6 takes the default branch by symbolic-ref with no pipe, then main, then master']);
     expect(collectValidateBranchBaseDefects(sectionValidate.replace(MAIN_PROBE, 'git -C "{worktree}" rev-parse --verify --quiet master'))).toContain('step 6 takes the default branch by symbolic-ref with no pipe, then main, then master');
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace(MAIN_PROBE, 'git -C "{worktree}" rev-parse --verify --quiet {base_branch}'))).toContain('step 6 probes the default branch without a name placeholder');
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace(MAIN_PROBE, 'git -C "{worktree}" rev-parse --verify --quiet {default}'))).toContain('step 6 probes the default branch without a name placeholder');
     expect(collectValidateBranchBaseDefects(sectionValidate.replace('never an empty `### Diff Scope`', 'an empty `### Diff Scope` is fine'))).toContain('step 6 never gives an empty Diff Scope');
     expect(collectValidateBranchBaseDefects(sectionValidate.replace('diff --name-only {base_ref}...HEAD; echo "exit=$?"', 'diff {base_branch}...HEAD --name-only'))).toContain('step 7 diffs against the hex base ref and echoes the exit status');
   });
