@@ -294,7 +294,6 @@ const describeFinding = (f: Finding): string => `${f.file} [${f.arm}] ${f.rule} 
 const DEFERRED_FILES: readonly string[] = [
   'commands/dynamic-build.md',
   'agents/debug.md',
-  'agents/triage.md',
 ]
 
 /** deferred to a follow-up */

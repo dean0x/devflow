@@ -72,6 +72,7 @@ Pre-flight: make the branch ready for review and open its PR.
 ### Status: READY | BLOCKED
 {BLOCKED reason if applicable}
 {Any `TRACEABILITY: DEGRADED ({reason})` lines from steps 4b/4c — these never change the READY/BLOCKED verdict}
+{`TRACEABILITY: DEGRADED (base {REASON}; fix: {fix})` or `(base name unreadable; fix: re-run)` from step 5; only an invalid base name makes the Status BLOCKED}
 
 ### Uncommitted files
 {only when `COMMIT_UNCOMMITTED` is `false`: one `- {path}` line each, or `none`}
