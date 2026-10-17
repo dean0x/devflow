@@ -17,12 +17,12 @@ Registry-driven CLI tool with 21 plugins (12 core + 9 optional). Plugins are ent
 Invariants:
 
 1. LLM-vs-plumbing: the LLM does all detection, matching and curation. Shell and TypeScript hold no detection or judgment logic.
-2. Read and write learning data only through the learning ops. Never edit those files.
+2. Read and write curation data only through the curation ops. Never edit those files.
 3. Ledger IDs are machine-local. Committed and posted text states a decision in words, never by ID.
 4. One install per machine, no install scope. `DEVFLOW_DIR` is ignored. `init --scope local` exits 1.
 5. devflow never writes `project.json` or `policy.json`. The team commits them.
 6. A git-tracked `.devflow/config.json` counts as absent, with a warning (D-PERSONAL-UNTRACKED).
-7. Repo files only narrow the memory, learning and knowledge switches (D-FEATURES-NARROW-ONLY).
+7. Repo files only narrow the memory, curation and knowledge switches (D-FEATURES-NARROW-ONLY).
 8. `features.behavior` is off unless set (D-BEHAVIOR-OPT-IN).
 9. Prompts never read `project.json` or `config.json`. They take the `resolve-settings.cjs` line (`_partials/_settings.mds`).
 10. Learn `conventions.md` only when `APPLY_CONVENTIONS` is `true`.
@@ -106,7 +106,7 @@ The host and partial rosters are named in `tests/fixtures/mds-manifest.ts` rathe
 - Reference skills via frontmatter, don't duplicate skill content
 - Use `tools` frontmatter to platform-restrict agent tool access (prefer over prompt-level prohibitions)
 - An agent is either a hand-authored `src/assets/agents/{name}.md` or an MDS generator host `{name}.mds` that declares `output-dir: dist/agents` in a leading steering block and compiles to `dist/agents/{name}.md`; an agent never has both
-- Two agents are **hook-spawned, never workflow roster members** — `curate` (the session-start learning directive) and `tracker` (the session-start tracker-setup directive). Neither has a `_roster.mds` row, and no command spawns either; `tracker` sits in `devflow-core-skills`, whose empty `commands: []` is what makes the registry's reverse spawn check skip it structurally rather than by exemption.
+- Two agents are **hook-spawned, never workflow roster members** — `curate` (the session-start curation directive) and `tracker` (the session-start tracker-setup directive). Neither has a `_roster.mds` row, and no command spawns either; `tracker` sits in `devflow-core-skills`, whose empty `commands: []` is what makes the registry's reverse spawn check skip it structurally rather than by exemption.
 - An agent with `omitClaudeMd: true` loads neither CLAUDE.md nor `~/.claude/rules/**`, so its body carries a `## Core rules` digest of exactly the lines its `CORE_RULES_DIGEST` row declares (`tests/fixtures/agent-config.ts`); Curate reads CLAUDE.md and the rule files itself
 - `explore` ships `name: Explore` and overrides Claude Code's built-in Explore machine-wide, plan mode included (exact-name match); install skips it when the user already has an `Explore` agent, and uninstall restores the built-in
 - Code ships as three compiled variants from `src/assets/agents/_partials/_code.mds`: `Code` (implement, issue-fix), `Fix` (validation-fix, alignment-fix, qa-fix, ci-fix) and `Refactor` (edit). A mode lives in exactly one variant, each variant has its own preload and its own `devflow agents` slug, and no variant selects a skill at run time
@@ -115,7 +115,7 @@ The host and partial rosters are named in `tests/fixtures/mds-manifest.ts` rathe
 ### Commands
 
 - Commands are orchestration-only — spawn agents, never do agent work in main session. `/code-review` spawns a language focus only when the installer stamped it into the installed command (re-stamped on every install and `uninstall --plugin`).
-- Author as `.mds` sources in `src/assets/commands/`; compiled output lands in `dist/commands/`. A host or partial that carries learning arms also builds a learning-off variant under `dist/learning-off/`, which a learning-off machine installs and `devflow learning --enable/--disable` converges
+- Author as `.mds` sources in `src/assets/commands/`; compiled output lands in `dist/commands/`. A host or partial that carries curation arms also builds a curation-off variant under `dist/curation-off/`, which a curation-off machine installs and `devflow curation --enable/--disable` converges
 - Register new plugins in `DEVFLOW_PLUGINS` in `src/core/plugins.ts`
 
 ### Commits
@@ -150,6 +150,6 @@ For detailed specifications beyond this overview:
 - **File organization**: `docs/reference/file-organization.md` — source tree, build distribution, install paths, settings
 - **Docs framework skill**: `src/assets/skills/docs-framework/SKILL.md` — documentation naming conventions and templates
 - **Platform assumptions**: `docs/reference/platform-assumptions.md` — Claude Code behavioural assumptions devflow agents and tests rely on, including subagent nesting and concurrency; each entry carries a date stamp and an observable drift symptom
-- **Hooks & background workers**: `docs/reference/hooks.md` — Working Memory, Ambient Mode, Learning pipeline, Debug Tracing (`devflow debug --enable` or `DEVFLOW_HOOK_DEBUG=1`)
+- **Hooks & background workers**: `docs/reference/hooks.md` — Working Memory, Ambient Mode, Curation pipeline, Debug Tracing (`devflow debug --enable` or `DEVFLOW_HOOK_DEBUG=1`)
 - **External model routing**: `docs/reference/proxy.md` — Devflow Proxy relay, routing config, enable/disable lifecycle
 - **Init**: `docs/reference/init.md` — Two-Mode Init, wizard-step gating, state-aware re-init and `--reset`

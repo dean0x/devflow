@@ -25,7 +25,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync } from 'fs'
 import * as path from 'path'
-import { parseFrontmatterSkills, resolveAgentSource, resolveLearningOffSource } from '../helpers.js'
+import { parseFrontmatterSkills, resolveAgentSource, resolveCurationOffSource } from '../helpers.js'
 import { DEVFLOW_PLUGINS, getAllAgentNames, type PluginDefinition } from '../../src/core/plugins.js'
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..')
@@ -148,10 +148,10 @@ export function collectPreloadDefects(
   return out
 }
 
-/** Every agent the registry declares, as installed: the compiled or source body, and each learning-off variant. */
+/** Every agent the registry declares, as installed: the compiled or source body, and each curation-off variant. */
 const liveAgents = (): Array<readonly [string, string]> =>
   getAllAgentNames().flatMap(name => {
-    const off = resolveLearningOffSource('agents', name)
+    const off = resolveCurationOffSource('agents', name)
     const rows: Array<readonly [string, string]> = [[name, resolveAgentSource(name).content]]
     if (off !== null) rows.push([`${name} (learning off)`, off])
     return rows

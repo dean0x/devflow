@@ -67,7 +67,7 @@ describe('getLedgerRoot — the hooks\' ledger rule on real git (D-LEDGER-MAIN-W
     fs.mkdirSync(home);
     main = path.join(base, 'main');
     initRepo(main);
-    fs.mkdirSync(path.join(main, '.devflow', 'learning'), { recursive: true });
+    fs.mkdirSync(path.join(main, '.devflow', 'curation'), { recursive: true });
     sub = path.join(main, 'packages', 'app');
     fs.mkdirSync(sub, { recursive: true });
     wt = path.join(base, 'wt');

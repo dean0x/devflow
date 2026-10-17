@@ -24,7 +24,7 @@ _EDI_LEDGER="${DF_LEDGER_ROOT:-$_EDI_ROOT}"
 # `.git` of its own, so it is refused rather than scaffolded. This is the one gate every capture and
 # memory caller (capture-prompt, capture-turn, capture-question, memory-worker,
 # pre-compact-memory) passes through before it writes, and each of them treats a
-# non-zero return as "stop" (`|| exit 0`), so memory and learning stop together
+# non-zero return as "stop" (`|| exit 0`), so memory and curation stop together
 # in a non-git directory. ensure-root-gitignore itself stays ungated: it is a
 # pure writer its parity suite runs in plain directories, and both of
 # its callers now decide before reaching it. A helper that failed to source is a
@@ -45,19 +45,32 @@ if ! df_no_symlink_below "$_EDI_ROOT" "$_DEVFLOW_DIR"; then
   return 1
 fi
 
-# learning/ is scaffolded only where the ledger lives. In a linked worktree whose
+# The one-time move of the old learning/ ledger folder to curation/ (curation-move):
+# before anything below reads or creates the ledger folder, on the LEDGER root (the
+# main worktree's, in a linked worktree), and whether or not the curation switch is
+# on. A move another process holds, or a refused one, leaves the old folder where it
+# is; the creator rule below then takes the old folder as the ledger folder.
+source "$_EDI_DIR/curation-move" 2>/dev/null || true
+df_curation_move "$_EDI_LEDGER" 2>/dev/null || true
+
+# curation/ is scaffolded only where the ledger lives. In a linked worktree whose
 # main checkout holds the ledger (D-LEDGER-MAIN-WORKTREE, resolve-project-root) a
-# learning/ here would be an empty directory nothing writes to; the capture hooks
-# create the ledger's own learning/ at the ledger root when they append to it.
-_EDI_LEARNING="$_DEVFLOW_DIR/learning"
-[ "$_EDI_LEDGER" = "$_EDI_ROOT" ] || _EDI_LEARNING=""
+# curation/ here would be an empty directory nothing writes to; the capture hooks
+# create the ledger's own curation/ at the ledger root when they append to it.
+# The creator rule (git-marker, df_ledger_folder): the folder made is the new one
+# only when the old learning/ name is absent, so a new folder never hides an old
+# ledger. Either name satisfies the fast path below, so a root whose old folder is
+# still there (held, refused or not yet tried) forks no mkdir.
+df_ledger_folder "$_DEVFLOW_DIR" learning curation || return 1
+_EDI_CURATION="$DF_LEDGER_FOLDER"
+[ "$_EDI_LEDGER" = "$_EDI_ROOT" ] || _EDI_CURATION=""
 
 # Fast-path: if all subdirectories already exist, skip mkdir and gitignore setup.
 # The marker is the CURRENT carve-out version (D-GITIGNORE-V6), bumped with both
 # writers' stamps, so a v5-stamped project misses this once and gains the
 # `!.devflow/project.json` line.
 if [ -d "$_DEVFLOW_DIR/memory" ] && [ -d "$_DEVFLOW_DIR/docs" ] && \
-   { [ -z "$_EDI_LEARNING" ] || [ -d "$_EDI_LEARNING" ]; } && \
+   { [ -z "$_EDI_CURATION" ] || [ -d "$_EDI_CURATION" ]; } && \
    [ -d "$_DEVFLOW_DIR/features" ] && \
    [ -f "$_DEVFLOW_DIR/.root-gitignore-configured-v6" ]; then
   return 0
@@ -66,7 +79,7 @@ fi
 # Create all subdirectories
 mkdir -p \
   "$_DEVFLOW_DIR/memory" \
-  ${_EDI_LEARNING:+"$_EDI_LEARNING"} \
+  ${_EDI_CURATION:+"$_EDI_CURATION"} \
   "$_DEVFLOW_DIR/features" \
   "$_DEVFLOW_DIR/docs" \
   2>/dev/null || return 1

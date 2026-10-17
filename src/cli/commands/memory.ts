@@ -57,7 +57,7 @@ const MEMORY_HOOK_CONFIG: Record<string, string> = {
  *
  * D-EXACT-HOOK-OWNER (hooks.ts): matched as command ENDINGS under any directory —
  * the v1 (≤ v1.2) direct `.sh` scripts, then the retired `run-hook` markers of the
- * prompt-capture, learning, decisions, knowledge-refresh, sidecar and dream
+ * prompt-capture, curation, decisions, knowledge-refresh, sidecar and dream
  * pipelines — never as substrings, so a user's hook that mentions one is theirs.
  */
 const LEGACY_HOOK_SUFFIXES: Record<string, readonly string[]> = {
@@ -200,7 +200,7 @@ export function convergeMemoryHooks(settingsJson: string, enabled: boolean, devf
  * --no-memory` and `devflow memory --disable`. Refused, deleting nothing, when
  * `.devflow` or `.devflow/memory` under `projectRoot` is a symbolic link
  * (D-CLI-NO-SYMLINK). ENOENT-tolerant; any other error propagates to the command
- * boundary, like drainLearningQueue.
+ * boundary, like drainCurationQueue.
  */
 export async function drainMemoryQueue(projectRoot: string): Promise<QueueDrain> {
   const memoryDir = getMemoryDir(projectRoot);

@@ -7,6 +7,128 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes — Curation rename
+
+The learning feature is now called curation ([#529](https://github.com/dean0x/devflow/issues/529)).
+This is a breaking change. It releases as a minor version (3.8.0).
+Devflow keeps no alias for any old name. Read the steps that you must do by hand.
+
+**Superseding statement for 3.6.0:** The 3.6.0 notes say that `devflow learning`, `features.learning`,
+`.devflow/learning/` and the learning ops do not change. That statement is no longer true.
+This release changes all of them. The 3.6.0 text stays as released.
+
+**Renamed names:**
+
+| Old name | New name |
+|----------|----------|
+| `devflow learning` | `devflow curation` |
+| `devflow init --learning` and `--no-learning` | `devflow init --curation` and `--no-curation` |
+| `features.learning` in `~/.devflow/manifest.json` | `features.curation` (the old key stays as a mirror) |
+| `features.learning` in a repository `project.json` or `config.json` | `features.curation` (the old key is still read) |
+| `.devflow/learning/` | `.devflow/curation/` |
+| `learning.json` (in the project folder and in `~/.devflow/`) | `curation.json` |
+| Settings line field `LEARNING=` | `CURATION=` |
+| Prompt markers `<!-- learning:on -->` and the build output `dist/learning-off/` | `<!-- curation:on -->` and `dist/curation-off/` |
+| HUD label `Learning:` | `Curation:` |
+| Session start headers `--- LEARNING MAINTENANCE ---` and `--- LEARNING PAUSED ---` | `--- CURATION MAINTENANCE ---` and `--- CURATION PAUSED ---` |
+| Hook files `learning-lock` and `lib/learning-store.cjs` | `curation-lock` and `lib/curation-store.cjs` (init removes the old files) |
+
+These names do not change: the `self-learning:` source stamp in rendered rows, the design-decision IDs,
+the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-conventions family and the
+`agents.learning.model` key (it stays an older name for the Curate agent model).
+
+**Breaking change:**
+- `devflow learning`, `devflow init --learning` and `devflow init --no-learning` now fail.
+  They give the unknown command or option error, and the exit code is 1.
+- Change every script, alias and note that uses an old name.
+
+**What the migration does:**
+- `devflow init` moves the learning data of each project that it finds, and of the project where you run it.
+  The move takes the ledger files, the queue and the project tuning file. Entry IDs do not change.
+  Devflow renders the index again at the new path.
+- Init also renames `~/.devflow/learning.json` to `curation.json`.
+  If both names exist, the new one wins, the old one stays, and init logs one line.
+- The session start hook makes the same move for the project of each session.
+  It also runs when the curation switch is off.
+- If a project already has both folders, the folder with a non-empty log wins.
+  Devflow keeps the other folder as a backup. It never merges one ledger into the other.
+- After an upgrade, the first `devflow` command (even a read-only one such as `devflow flags --status`)
+  heals `~/.devflow/manifest.json`. The file then carries both `features.curation` and `features.learning`
+  with the same value. Every later write keeps the two keys equal.
+
+**Upgrade, downgrade and re-upgrade:**
+- Upgrade: run `devflow init`. Until you do, the installed hooks and prompts are still the old version.
+- Downgrade to 3.7: 3.7 does not read `.devflow/curation/`. It starts a new empty ledger in `.devflow/learning/`.
+  Your moved data stays in `.devflow/curation/`. The mirror key `features.learning` keeps a 3.8 opt-out in force.
+- Re-upgrade to 3.8: the next init or session start finds both folders and applies the rule above.
+  When the folder `.devflow/curation/` has a non-empty log, it wins.
+  The queue rows of the 3.7 folder merge into the winner. The entries that 3.7 wrote stay in the backup only.
+
+**The machine switch:**
+- If `features.curation` and `features.learning` in the manifest disagree, the switch is off.
+  A reader never treats a disagreement as on.
+- To turn it on again, run `devflow curation --enable`. This writes both keys.
+- A 3.7 toggle writes only the old key. An opt-out made on 3.7 stays in force after you upgrade again.
+  If you ran no 3.7 `devflow init`, an enable made on 3.7 after a 3.8 disable stays off until you run `devflow curation --enable`.
+- A 3.7 `devflow init` removes the key `features.curation`. After that, only the old key carries the opt-out.
+  A 3.7 enable made after that init then takes effect when you upgrade again.
+- Between the package update and `devflow init`, `devflow curation --enable` and `--disable` write both keys
+  and move nothing. Only `--disable` drains the queue among these toggles. The commands `--restore`, `--clear`, `--reset`
+  and `--configure` (project scope) refuse until you run `devflow init`.
+
+**The backup:**
+- Where: `.devflow/learning.backup-<stamp>-<8 hex>` in the project, one folder for each move.
+  A move makes a backup only where a project had both folders.
+- No devflow command deletes a backup, except `devflow uninstall`. It removes the backup with the project data, after you confirm.
+  `devflow curation --reset` and `devflow curation --clear` leave the backup in place.
+  The old queue files and the overflow files stay in it.
+- `devflow curation --status` prints one `Backup:` line for each backup folder.
+  The line shows how many pending rows the backup still holds.
+- Delete a backup folder only when `devflow curation --status` shows 0 pending rows for it.
+  Until then, a later init can still merge the rows.
+
+**The queue cap:**
+- A merge never takes a pending queue above 200 lines.
+- Rows that do not fit wait in overflow files in the backup. A later init merges them as room appears.
+  Status counts them as pending rows, so the delete step waits for zero pending rows.
+- The move itself drops no row. A full queue that receives a capture is trimmed to its newest 100 lines.
+  This is the rule from before, and the move does not cause it.
+- `devflow init` drains the queue of a project where curation is off, as it did before 3.8.0.
+
+**Outcomes that need action:**
+- Busy: another run holds the move lock. Init prints `Ledger move skipped for <root>: a lock is held.`
+  A curation command prints `Another run is moving this project's curation data.`
+  Nothing is written. Wait a moment, then run the command again. A session start retries by itself.
+- Refused: a symbolic link sits on the path, or a private, swept or overflow queue file sits directly in the old folder.
+  Nothing moves. Init prints `Ledger move refused for <root>`.
+  The HUD and `devflow curation --status` print `Curation: move refused, see the hook log`.
+  Remove the cause, then run `devflow init` or start a new session.
+- Not yet moved: `devflow curation --status`, `--list`, `--show` and the HUD print
+  `Curation: open Claude Code in this project once, or run devflow init`.
+  They do not read the old folder.
+- Failed: init prints `Ledger move failed for <root>` and copies nothing. The next init tries again.
+
+**What stays behind:**
+- Reach: a project that neither `devflow init` nor a Claude Code session reaches keeps its old
+  `.devflow/learning/` folder untouched. It moves at its next session start.
+- Linked worktrees: the ledger of a linked worktree is the ledger of the main checkout.
+  Devflow does not move a `.devflow/learning/` folder that sits inside a linked worktree.
+  Delete that leftover folder by hand when you do not need it.
+- First session: the first session start in a project with an old folder runs the move.
+  This adds a short delay to that one start. Later starts add nothing.
+
+**Mixed-version teams:**
+- A 3.7 install reads only `features.learning` in a committed `.devflow/project.json`.
+  A 3.8 install reads both keys and narrows when either key is `false`.
+- Keep the old key in committed files, or set both keys, until every team member runs 3.8.
+
+**What you must do:**
+- Run `devflow init` after you update.
+- Replace `devflow learning` and the old init flags in your scripts.
+- Delete each backup folder after `devflow curation --status` shows 0 pending rows for it.
+- Delete the leftover `.devflow/learning/` folder in each linked worktree, if you have one.
+- Run `devflow curation --enable` if the machine switch is off and you want it on.
+
 ### Upgrade notes — Lint pack
 
 **Stale-install window:**

@@ -19,7 +19,7 @@ Use `--recommended` or `--advanced` flags for non-interactive setup.
 | `--plugin <names>` | Comma-separated plugin names (e.g., `implement,code-review`) |
 | `--ambient` / `--no-ambient` | Enable/disable ambient mode — orchestrator charter + plan handoff (default: on) |
 | `--memory` / `--no-memory` | Enable/disable working memory (default: on) |
-| `--learning` / `--no-learning` | Enable/disable learning (default: on); with learning off, init installs the learning-off prompts and not `devflow:apply-decisions` |
+| `--curation` / `--no-curation` | Enable/disable curation (default: on); with curation off, init installs the curation-off prompts and not `devflow:apply-decisions` |
 | `--knowledge` / `--no-knowledge` | Enable/disable feature knowledge (default: on) |
 | `--rules` / `--no-rules` | Enable/disable rules (default: on) |
 | `--hud` / `--no-hud` | Enable/disable HUD status line (default: on) |
@@ -94,21 +94,27 @@ npx devflow-kit ambient --status     # Show current status (partial state detect
 
 `--enable` registers the hooks under `~/.devflow`, where `init` installs them, and re-points any ambient hook devflow registered under another directory. A hook is devflow's only when its command ends in `/scripts/hooks/run-hook <name>`: your own hooks, and any hooks sharing a matcher group with devflow's, are never removed, even when their commands mention `preamble`.
 
-## Learning
+## Curation
 
 ```bash
-npx devflow-kit learning --enable         # Enable learning (decision + pitfall detection; installs the learning-on prompts and the apply-decisions skill)
-npx devflow-kit learning --disable        # Disable learning (drains the learning queue; installs the learning-off prompts and removes the skill)
-npx devflow-kit learning --status         # Show status and entry counts
-npx devflow-kit learning --list           # List entries, inactive entries with their notes, and observations
-npx devflow-kit learning --show <id>      # Print one entry (ADR-NNN or PF-NNN) or observation as JSON
-npx devflow-kit learning --restore <id>   # Make an inactive entry active again
-npx devflow-kit learning --configure      # Interactive config (model, debug, scope)
-npx devflow-kit learning --clear          # Drop the observations no entry uses; drain the queue
-npx devflow-kit learning --reset          # Remove all learning state files
+npx devflow-kit curation --enable         # Enable curation (decision + pitfall detection; installs the curation-on prompts and the apply-decisions skill)
+npx devflow-kit curation --disable        # Disable curation (drains the curation queue; installs the curation-off prompts and removes the skill)
+npx devflow-kit curation --status         # Show status and entry counts
+npx devflow-kit curation --list           # List entries, inactive entries with their notes, and observations
+npx devflow-kit curation --show <id>      # Print one entry (ADR-NNN or PF-NNN) or observation as JSON
+npx devflow-kit curation --restore <id>   # Make an inactive entry active again
+npx devflow-kit curation --configure      # Interactive config (model, debug, scope)
+npx devflow-kit curation --clear          # Drop the observations no entry uses; drain the queue
+npx devflow-kit curation --reset          # Remove all curation state files
 ```
 
-`learning --status` counts the active entries by type, the inactive ones by status, the active entries still in the v1 format and the observations, and warns when it skipped malformed lines. `--status`, `--list` and `--show` write nothing. `--restore` brings back an entry that was retired, superseded, encoded or deprecated, and maintenance reviews it again. `--clear` keeps every observation an entry uses and drops the rest, then drains the learning queue; when the ledger has a malformed line it writes nothing, leaves the queue in place and exits 1. `--reset` removes `.devflow/learning/`; when there is none it prints `No learning data to reset.`, creates nothing and exits 0. `--restore`, `--clear` and `--reset` wait at most 5 seconds for the learning lock, and when it stays busy they change nothing and exit 1.
+Devflow 3.8 renamed this command from `devflow learning`, and renamed the init flags `--learning` and `--no-learning` to `--curation` and `--no-curation`. The old names are not aliases. They fail with the unknown command or option error and exit 1. The data folder is now `.devflow/curation/`, and the tuning file is `curation.json`. The first `devflow init` or Claude Code session in a project moves the old `.devflow/learning/` folder. See the 3.8.0 upgrade notes in the changelog.
+
+`curation --status` counts the active entries by type, the inactive ones by status, the active entries still in the v1 format and the observations, and warns when it skipped malformed lines. When a move left a backup folder, it prints one `Backup: <path>: N pending rows in the backup` line for each folder. Delete a backup only when its line shows 0 pending rows. `--status`, `--list` and `--show` write nothing. `--restore` brings back an entry that was retired, superseded, encoded or deprecated, and maintenance reviews it again. `--clear` keeps every observation an entry uses and drops the rest, then drains the curation queue; when the ledger has a malformed line it writes nothing, leaves the queue in place and exits 1. `--reset` removes `.devflow/curation/`; when there is none it prints `No curation data to reset.`, creates nothing and exits 0. `--restore`, `--clear` and `--reset` wait at most 5 seconds for the curation lock, and when it stays busy they change nothing and exit 1.
+
+A project that still has the old `.devflow/learning/` folder is not read by `--status`, `--list` and `--show`. They print `Curation: open Claude Code in this project once, or run devflow init`, or `Curation: move refused, see the hook log` when the move was refused. `--restore`, `--clear`, `--reset` and `--configure` (project scope) move the folder first. If another run holds the move lock, they print `Another run is moving this project's curation data.`, change nothing and exit 1. If the move is refused or fails, they print the reason, change nothing and exit 1. They also refuse, with a line that tells them to run `devflow init` first, when the installed scripts come from another version than the CLI.
+
+`--enable` and `--disable` write the machine switch under both manifest keys, `features.curation` and `features.learning`, so a 3.7 install reads the same value. They try the move of the current project once and wait for no lock. Under version skew they write both keys and move nothing. Only `--disable` drains the queue.
 
 ## Feature Knowledge
 
@@ -119,9 +125,9 @@ npx devflow-kit knowledge --disable         # Disable feature knowledge
 npx devflow-kit knowledge --status          # Show current status
 ```
 
-`memory --status`, `learning --status` and `knowledge --status` report the machine-wide switch. A repository can only narrow it: when the switch is on but the current directory's repository turns the feature off — under `features` in the committed `.devflow/project.json`, or in your personal `.devflow/config.json` — the output adds `Effective here: disabled (<file>)`, naming that file. When nothing narrows it, the line is absent and the output is unchanged. `knowledge --status` also prints `Effective here: disabled (<file> is unreadable)` when a repository file exists but is not a JSON object: commands then switch knowledge write-back off, while memory and learning capture carry on as the machine switch says. `--enable` turns a feature on in every project, and says so, but a repository can still opt out this way.
+`memory --status`, `curation --status` and `knowledge --status` report the machine-wide switch. A repository can only narrow it: when the switch is on but the current directory's repository turns the feature off — under `features` in the committed `.devflow/project.json`, or in your personal `.devflow/config.json` — the output adds `Effective here: disabled (<file>)`, naming that file. When nothing narrows it, the line is absent and the output is unchanged. `knowledge --status` also prints `Effective here: disabled (<file> is unreadable)` when a repository file exists but is not a JSON object: commands then switch knowledge write-back off, while memory and curation capture carry on as the machine switch says. `--enable` turns a feature on in every project, and says so, but a repository can still opt out this way.
 
-When the current checkout's `.devflow/config.json` is tracked by git, `memory`, `learning`, `knowledge`, `tracker --status` and `gates --status` also warn that devflow ignores it — the file holds personal settings, and a committed copy would let a branch set them for whoever checks it out — and say how to fix it: untrack the tracked entry with `git rm --cached`, then check or delete the file, because untracking leaves the committed bytes on disk as your personal file. The warning never prints the entry names.
+When the current checkout's `.devflow/config.json` is tracked by git, `memory`, `curation`, `knowledge`, `tracker --status` and `gates --status` also warn that devflow ignores it — the file holds personal settings, and a committed copy would let a branch set them for whoever checks it out — and say how to fix it: untrack the tracked entry with `git rm --cached`, then check or delete the file, because untracking leaves the committed bytes on disk as your personal file. The warning never prints the entry names.
 
 ## Behavior
 
@@ -252,7 +258,7 @@ npx devflow-kit gates               # No flag: print usage and the valid levels
 2. The machine default, `features.gateLevel` in `~/.devflow/manifest.json`.
 3. `standard`.
 
-**Raise or lower.** The memory, learning and knowledge switches are narrow-only: a repository file can turn them off but never on. The gate level is not a switch. Your personal `gateLevel` may raise the level above the machine default as well as lower it. The committed `.devflow/project.json` has no `gateLevel`: a key of that name there is ignored, and there is no team floor, so a repository that declares compliance can still run a lower personal level.
+**Raise or lower.** The memory, curation and knowledge switches are narrow-only: a repository file can turn them off but never on. The gate level is not a switch. Your personal `gateLevel` may raise the level above the machine default as well as lower it. The committed `.devflow/project.json` has no `gateLevel`: a key of that name there is ignored, and there is no team floor, so a repository that declares compliance can still run a lower personal level.
 
 **Set it at init.** `devflow init` asks for the machine default, so you meet the choice during setup. The prompt lists `full`, `standard` and `lean` with a one-line effect each. On a first install it starts on `standard`. On a re-init it shows the current value and starts on it, so Enter keeps it. If the stored value is malformed or `null`, the prompt starts on `full`, the level that every reader gives it, and accepting it writes `full` in its place. The machine level that applies does not change. It runs under the same gate as the tracker question:
 
@@ -290,7 +296,7 @@ The level is matched **exactly**. `--set` rejects `Lean`, `lean ` with a trailin
 - A personal `config.json` or a `project.json` that cannot be read, or a git check that fails, fails the whole settings line closed, and the level is `full`.
 - A corrupt manifest and one over 1 MiB read as no machine default, so the level is `standard`. A manifest that is valid JSON with a `features` object but lacks a field devflow requires keeps its stored level.
 
-**A tracked `config.json`.** A `config.json` that git tracks is ignored as if it were absent, so its `gateLevel` does not apply, and `gates --status` warns with the fix (see the memory, learning and knowledge section above).
+**A tracked `config.json`.** A `config.json` that git tracks is ignored as if it were absent, so its `gateLevel` does not apply, and `gates --status` warns with the fix (see the memory, curation and knowledge section above).
 
 **`--status`.** It resolves the settings once, writes nothing, and exits 0. Beside a valid `--set` it still only shows the status. Beside an invalid `--set` it prints the error and exits 1, as `tracker` and `compliance` do:
 

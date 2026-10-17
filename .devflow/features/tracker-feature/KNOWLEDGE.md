@@ -34,7 +34,7 @@ updated: 2026-10-12
 - **KB-INV-8** A stale conventions file is safe to preserve as user content only because the reader-side mismatch guard removes the silence; dropping the guard requires reclassifying the files as install artifacts in the same change.
 - **KB-INV-9** `src/core/tracker.ts` (pure domain plus lifecycle) never throws and never calls `process.exit()`; it returns `TrackerResult` and callers own rendering.
 - **KB-INV-10** The tracker tool-server list is one flat machine setting (`manifest.features.tracker.servers`), orthogonal to `provider`: absent means `TRACKER_MCP_SERVERS_DEFAULT`, `--servers default` removes the key rather than writing the default out, and a name is accepted byte-exact (`TRACKER_SERVER_NAME_RE`, no `__`, bounded count, never repaired).
-- **KB-INV-11** The installed Git and Tracker agents name exactly the manifest's list (or the default) as whole-server entries, on every write path: install, `convergeTrackerArtifacts`, the learning-variant converge (carries the stamp) and `devflow tracker --servers` (re-stamps at once). The shipped agent sources name no server (`tests/guards/agent-config.test.ts`; the write paths are pinned in `tests/tracker-servers.test.ts`).
+- **KB-INV-11** The installed Git and Tracker agents name exactly the manifest's list (or the default) as whole-server entries, on every write path: install, `convergeTrackerArtifacts`, the curation-variant converge (carries the stamp) and `devflow tracker --servers` (re-stamps at once). The shipped agent sources name no server (`tests/guards/agent-config.test.ts`; the write paths are pinned in `tests/tracker-servers.test.ts`).
 
 ## Overview
 
@@ -187,6 +187,6 @@ export interface FeatureConfig { /* ... */ tracker?: unknown }   // the RAW JSON
 - `.devflow/features/tracker-references/KNOWLEDGE.md`: the contract/mechanics split, the generated references, the installer overlay, the byte-budget discipline this feature's provider dimension sits on
 - `.devflow/features/compliance-feature/KNOWLEDGE.md`: the feature whose `src/core` + `src/cli/commands` + `*-prompts.ts` shape this one copies, and the owner of the traceability semantics the mismatch guard extends
 - `.devflow/features/installer-shadowing/KNOWLEDGE.md`: `resolveSeedFeatures`, `applyCliToggles`, `resolveDevflowDirCleanup`, `enumerateUserDevFlowContent`, `installArtifactPaths`, and the wizard-step seam (`WizardPromptIO`, `shouldRunComplianceStep`) the tracker step mirrors
-- `.devflow/features/learning-capture-system/KNOWLEDGE.md`: hook Sections 1-2 and Learning's own claim-staleness constant
+- `.devflow/features/curation-capture-system/KNOWLEDGE.md`: hook Sections 1-2 and Curation's own claim-staleness constant
 - `.devflow/features/test-harness/KNOWLEDGE.md`: named-collector-plus-known-bad-probe guard conventions, `numeric-floors.json`'s floors-versus-ceilings discipline, the goldens lifecycle
 - `index.md` + `{slug}/KNOWLEDGE.md` are git-tracked while the rest of `.devflow/` stays ignored, so this file and its index line are shared with the team; the feature's runtime state is not

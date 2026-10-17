@@ -21,7 +21,7 @@ import * as path from 'path'
 import * as fs from 'fs'
 import * as os from 'os'
 
-import { makeV2LedgerRow } from './learning-fixtures.js'
+import { makeV2LedgerRow } from './curation-fixtures.js'
 
 const ROOT = path.resolve(import.meta.dirname, '../..')
 const require = createRequire(import.meta.url)
@@ -89,8 +89,8 @@ function makePitfallRow(overrides: Record<string, unknown> = {}): Record<string,
 }
 
 const OPTS = {
-  decisionsFilePath: '/project/.devflow/learning/decisions.md',
-  pitfallsFilePath: '/project/.devflow/learning/pitfalls.md',
+  decisionsFilePath: '/project/.devflow/curation/decisions.md',
+  pitfallsFilePath: '/project/.devflow/curation/pitfalls.md',
 }
 
 // ---------------------------------------------------------------------------
@@ -239,11 +239,11 @@ afterAll(() => {
   }
 })
 
-/** A temporary project root holding an empty `.devflow/learning/`, which renderAndWriteAll requires. */
+/** A temporary project root holding an empty `.devflow/curation/`, which renderAndWriteAll requires. */
 function makeTmp(): string {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'idx-content-test-'))
   tmpDirs.push(d)
-  fs.mkdirSync(path.join(d, '.devflow', 'learning'), { recursive: true })
+  fs.mkdirSync(path.join(d, '.devflow', 'curation'), { recursive: true })
   return d
 }
 
@@ -252,7 +252,7 @@ describe('renderAndWriteAll — index.md integration', () => {
     const tmpDir = makeTmp()
     const rows = [makeDecisionRow(), makePitfallRow()]
     renderAndWriteAll(tmpDir, rows)
-    const indexPath = path.join(tmpDir, '.devflow', 'learning', 'index.md')
+    const indexPath = path.join(tmpDir, '.devflow', 'curation', 'index.md')
     expect(fs.existsSync(indexPath)).toBe(true)
     const content = fs.readFileSync(indexPath, 'utf8')
     expect(content).toContain('ADR-001')
@@ -262,10 +262,33 @@ describe('renderAndWriteAll — index.md integration', () => {
   it('writes index.md with "(none)\\n" for empty corpus', () => {
     const tmpDir = makeTmp()
     renderAndWriteAll(tmpDir, [])
-    const indexPath = path.join(tmpDir, '.devflow', 'learning', 'index.md')
+    const indexPath = path.join(tmpDir, '.devflow', 'curation', 'index.md')
     expect(fs.existsSync(indexPath)).toBe(true)
     const content = fs.readFileSync(indexPath, 'utf8')
     expect(content).toBe('(none)\n')
+  })
+
+  it('every rendered file names the curation ledger as its source, and none names the retired feature word', () => {
+    const tmpDir = makeTmp()
+    renderAndWriteAll(tmpDir, [makeDecisionRow(), makePitfallRow()])
+    const dir = path.join(tmpDir, '.devflow', 'curation')
+    for (const name of ['decisions.md', 'pitfalls.md']) {
+      const content = fs.readFileSync(path.join(dir, name), 'utf8')
+      expect(content, `${name} notice`).toContain(
+        'Generated from the local curation ledger by devflow; do not edit. ' +
+        'Active entries follow; retired ones are listed under Inactive.\n',
+      )
+      expect(content, `${name} carries no retired feature word`).not.toContain('learning ledger')
+    }
+    const index = fs.readFileSync(path.join(dir, 'index.md'), 'utf8')
+    expect(index).not.toMatch(/learning ledger/i)
+  })
+
+  it('the self-learning source stamp is a kept content identifier: a row still renders it byte-identical', () => {
+    const tmpDir = makeTmp()
+    renderAndWriteAll(tmpDir, [makeDecisionRow({ id: 'obs_stamp1' })])
+    const decisions = fs.readFileSync(path.join(tmpDir, '.devflow', 'curation', 'decisions.md'), 'utf8')
+    expect(decisions).toContain('- **Source**: self-learning:obs_stamp1\n')
   })
 
   it('index.md lists no inactive entry, while decisions.md and pitfalls.md list them under Inactive', () => {
@@ -277,7 +300,7 @@ describe('renderAndWriteAll — index.md integration', () => {
       makePitfallRow({ anchor_id: 'PF-005', id: 'obs_pf5', decisions_status: 'Retired' }),
     ]
     renderAndWriteAll(tmpDir, rows)
-    const dir = path.join(tmpDir, '.devflow', 'learning')
+    const dir = path.join(tmpDir, '.devflow', 'curation')
     expect(fs.readFileSync(path.join(dir, 'decisions.md'), 'utf8')).toContain('| ADR-002 | Encoded | encoded in src/core/flags.ts |\n')
     expect(fs.readFileSync(path.join(dir, 'pitfalls.md'), 'utf8')).toContain('| PF-005 | Retired | — |\n')
     const index = fs.readFileSync(path.join(dir, 'index.md'), 'utf8')
@@ -296,7 +319,7 @@ describe('renderAndWriteAll — index.md integration', () => {
     ]
     renderAndWriteAll(tmpDir, rows)
     const content = fs.readFileSync(
-      path.join(tmpDir, '.devflow', 'learning', 'index.md'), 'utf8'
+      path.join(tmpDir, '.devflow', 'curation', 'index.md'), 'utf8'
     )
     expect(content).toContain('ADR-001')
     expect(content).not.toContain('ADR-002')
@@ -306,7 +329,7 @@ describe('renderAndWriteAll — index.md integration', () => {
     const tmpDir = makeTmp()
     const rows = [makeDecisionRow()]
     renderAndWriteAll(tmpDir, rows)
-    const dir = path.join(tmpDir, '.devflow', 'learning')
+    const dir = path.join(tmpDir, '.devflow', 'curation')
     expect(fs.existsSync(path.join(dir, 'decisions.md'))).toBe(true)
     expect(fs.existsSync(path.join(dir, 'pitfalls.md'))).toBe(true)
     expect(fs.existsSync(path.join(dir, 'index.md'))).toBe(true)
@@ -316,7 +339,7 @@ describe('renderAndWriteAll — index.md integration', () => {
     const tmpDir = makeTmp()
     const rows = [makeDecisionRow(), makePitfallRow()]
     renderAndWriteAll(tmpDir, rows)
-    const indexPath = path.join(tmpDir, '.devflow', 'learning', 'index.md')
+    const indexPath = path.join(tmpDir, '.devflow', 'curation', 'index.md')
     const first = fs.readFileSync(indexPath, 'utf8')
     renderAndWriteAll(tmpDir, rows)
     const second = fs.readFileSync(indexPath, 'utf8')
@@ -335,8 +358,8 @@ describe('renderAndWriteAll — index.md integration', () => {
 
 describe('extractEntryFromBlock hijack-safety (Status/Area regex)', () => {
   const OPTS = {
-    decisionsFilePath: '/project/.devflow/learning/decisions.md',
-    pitfallsFilePath:  '/project/.devflow/learning/pitfalls.md',
+    decisionsFilePath: '/project/.devflow/curation/decisions.md',
+    pitfallsFilePath:  '/project/.devflow/curation/pitfalls.md',
   }
 
   it('amendment text containing "- **Status**:" before the real status line does not corrupt extracted status', () => {

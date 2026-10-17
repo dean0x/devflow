@@ -133,3 +133,57 @@ df_file_below() {
   fi
   return 1
 }
+
+# df_ledger_folder <devflow_dir> <old> [<new>] — sets DF_LEDGER_FOLDER to the path of
+# the ledger folder a creator may create or write into: <devflow_dir>/<old> while that
+# name is present (a folder, a file or a link, dangling or not), else
+# <devflow_dir>/<new>. <new> defaults to <old>, so a caller that names only the old
+# folder gets the old folder's path in every state.
+#
+# The creator rule: a creator makes the new folder only when the old name is absent.
+# A new folder made beside a present old one would hide the old ledger from every
+# reader, so the session-start heal, the ensure-devflow-init scaffold and queue
+# append all take their folder from here. It answers a path and creates nothing; the
+# caller checks the path with df_no_symlink_below and creates it.
+#
+# Zero forks: builtin tests and parameter expansion only. It always returns 0; read
+# the answer from DF_LEDGER_FOLDER, not from a command substitution.
+df_ledger_folder() {
+  local _dir="$1" _old="$2" _new="${3:-$2}"
+  if [ -e "$_dir/$_old" ] || [ -L "$_dir/$_old" ]; then
+    DF_LEDGER_FOLDER="$_dir/$_old"
+  else
+    DF_LEDGER_FOLDER="$_dir/$_new"
+  fi
+  return 0
+}
+
+# df_ledger_queue <queue_file> <old> [<new>] — sets DF_LEDGER_QUEUE to the queue file
+# a creator may append to. A queue file whose folder is named <old> or <new> is
+# answered under the folder df_ledger_folder picks for that folder's parent; a queue
+# in any other folder (the memory queue) and a path with fewer than two parts come
+# back unchanged. <new> defaults to <old>. Creates nothing; zero forks; returns 0.
+df_ledger_queue() {
+  local _file="$1" _old="$2" _new="${3:-$2}" _folder="" _parent="" _name=""
+  DF_LEDGER_QUEUE="$_file"
+  case "$_file" in */*/*) ;; *) return 0 ;; esac
+  _folder="${_file%/*}"
+  _parent="${_folder%/*}"
+  _name="${_folder##*/}"
+  case "$_name" in
+    "$_old"|"$_new")
+      df_ledger_folder "$_parent" "$_old" "$_new"
+      DF_LEDGER_QUEUE="$DF_LEDGER_FOLDER/${_file##*/}"
+      ;;
+  esac
+  return 0
+}
+
+# df_global_tuning_file <machine_dir> — sets DF_GLOBAL_TUNING_FILE to the global
+# curate-agent tuning file inside the machine directory (~/.devflow). The shell
+# twin of getGlobalCurateTuningConfigPath in src/core/project-paths.ts: the one
+# place a hook names the file. Zero forks; returns 0.
+df_global_tuning_file() {
+  DF_GLOBAL_TUNING_FILE="$1/curation.json"
+  return 0
+}

@@ -206,5 +206,5 @@ There is no override-confirm prompt: the merge is purely additive (Devflow entri
 - `.devflow/features/external-model-routing-hook/KNOWLEDGE.md` — the hook that starts the relay on SessionStart, the relay `env -i` allowlist and `scrubChildEnv()` it must stay in sync with
 - `.devflow/features/external-model-routing-agent-config/KNOWLEDGE.md` — mapping engine, dormancy, agent state, TUI, discovery and cache; the proxy off-switch rules above feed its dormancy semantics
 - `.devflow/features/installer-shadowing/KNOWLEDGE.md` — `resolveSeedFeatures`, manifest-group feature seeding and uninstall artifact cleanup patterns that the proxy extends
-- `.devflow/features/learning-capture-system-memory-worker/KNOWLEDGE.md` — the memory worker's side of `agents.memory`
+- `.devflow/features/curation-capture-system-memory-worker/KNOWLEDGE.md` — the memory worker's side of `agents.memory`
 - `src/core/` and `src/cli/` — all state I/O and pure logic in core, CLI orchestration in cli; the proxy feature is the canonical multi-module example of the split

@@ -14,7 +14,7 @@
  *
  * What this file holds, each arm through a named collector and a known-bad probe over the same collector:
  *   a. The Gate level block of each command, closed to the read paragraph and the three bullets, in its place,
- *      outside every learning arm of the source.
+ *      outside every curation arm of the source.
  *   b. The data flow: `GATE_LEVEL` in the Produces and Requires lines that carry it.
  *   c. The fail-closed bullet: no row applied, the level kept, and the Phase 6 Validate prompt still carries it.
  *   d. The reference grammar: title, headings, header, closed phase set, cell grammar (a never-skip phase takes no
@@ -36,7 +36,7 @@ import { readFileSync } from 'fs'
 import * as path from 'path'
 
 import { GATE_LEVEL_EFFECT } from '../../src/cli/commands/gates.js'
-import { ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, isAgentBlock, parseFences, readAgentReference, requireDistFile, resolveAgentSource, resolveLearningOffSource, sectionBetween, tableRows } from '../helpers.js'
+import { ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, isAgentBlock, parseFences, readAgentReference, requireDistFile, resolveAgentSource, resolveCurationOffSource, sectionBetween, tableRows } from '../helpers.js'
 
 // ---------------------------------------------------------------------------
 // The decided text, written by hand from the issue and the gate decisions
@@ -262,19 +262,19 @@ export function collectLevelBlockDefects(body: string, spec: LevelSpec): string[
   return out
 }
 
-/** AC-3: in the source, the block sits outside every learning arm, so both builds carry it. */
+/** AC-3: in the source, the block sits outside every curation arm, so both builds carry it. */
 export function collectBlockArmDefects(source: string, spec: LevelSpec): string[] {
   let arm: string | null = null
   let inBlock = false
   let seen = false
   const out: string[] = []
   for (const line of source.split('\n')) {
-    const open = /^<!-- learning:(on|off) -->$/.exec(line)
+    const open = /^<!-- curation:(on|off) -->$/.exec(line)
     if (open !== null) { arm = open[1]; continue }
-    if (line === '<!-- learning:end -->') { arm = null; continue }
+    if (line === '<!-- curation:end -->') { arm = null; continue }
     if (line.startsWith(OPEN)) { inBlock = true; seen = true }
     else if (line.startsWith(spec.nextParagraph)) inBlock = false
-    if (inBlock && arm !== null) { out.push(`the gate-level block sits inside a learning:${arm} arm`); break }
+    if (inBlock && arm !== null) { out.push(`the gate-level block sits inside a curation:${arm} arm`); break }
   }
   if (!seen) out.push('the source has no gate-level block')
   return out
@@ -521,12 +521,12 @@ export function collectRowGrammarDefects(parsed: ParsedRef, spec: LevelSpec, bod
   return parseRows(parsed).flatMap(row => rowGrammarDefects(row, spec, body, compiled, names))
 }
 
-/** AC-5: a reference is read, never run, so it holds no spawn block, `subagent_type` field or learning marker. */
+/** AC-5: a reference is read, never run, so it holds no spawn block, `subagent_type` field or curation marker. */
 export function collectRefMarkerDefects(ref: string): string[] {
   const out: string[] = []
   if (ref.includes('Agent(')) out.push('the reference carries a spawn block')
   if (ref.includes('subagent_type')) out.push('the reference carries a subagent_type field')
-  if (/<!-- learning:/.test(ref)) out.push('the reference carries a learning marker')
+  if (/<!-- curation:/.test(ref)) out.push('the reference carries a curation marker')
   return out
 }
 
@@ -534,7 +534,7 @@ export function collectRefMarkerDefects(ref: string): string[] {
  * AC-5: the shape of one reference, from five collectors: the title and the three headings in order, Rules bullets
  * that open `- **<name>:**`, the exact header and separator, rows whose phase is in the closed set under the compiled
  * heading name with cells in the cell grammar (`apply:` naming one Rules bullet that exists), and no spawn block,
- * `subagent_type` or learning marker. A table with no rows has no defect.
+ * `subagent_type` or curation marker. A table with no rows has no defect.
  */
 export function collectLevelReferenceDefects(ref: string, spec: LevelSpec, body: string): string[] {
   const parsed = parseRef(ref)
@@ -738,7 +738,7 @@ export function collectResolveReportDefects(body: string): string[] {
   if (countOf(body, RESOLVE_DISPLAY) !== 1) out.push('the display lacks the Gate level line between **Total Issues** and ### Results')
   const at = body.indexOf(RESOLVE_HEADER)
   if (at === -1 || countOf(body, RESOLVE_HEADER) !== 1) out.push('the summary template lacks the Gate level line right after **Command**: /resolve')
-  else if (!/^## (?:Decisions Citations|Statistics)\n/.test(body.slice(at + RESOLVE_HEADER.length))) out.push('the Gate level header line is not followed by the learning arm or ## Statistics')
+  else if (!/^## (?:Decisions Citations|Statistics)\n/.test(body.slice(at + RESOLVE_HEADER.length))) out.push('the Gate level header line is not followed by the curation arm or ## Statistics')
   return out
 }
 
@@ -807,11 +807,11 @@ export function collectCutRouteDefects(body: string): string[] {
 interface Build { readonly label: string; readonly spec: LevelSpec; readonly body: string }
 
 const BUILDS: readonly Build[] = SPECS.flatMap(spec => {
-  const off = resolveLearningOffSource('commands', spec.cmd)
-  if (off === null) throw new Error(`dist/learning-off/commands/${spec.cmd}.md is absent: run \`npm run build:mds\``)
+  const off = resolveCurationOffSource('commands', spec.cmd)
+  if (off === null) throw new Error(`dist/curation-off/commands/${spec.cmd}.md is absent: run \`npm run build:mds\``)
   return [
-    { label: `${spec.cmd}, learning on`, spec, body: requireDistFile(`${spec.cmd}.md`) },
-    { label: `${spec.cmd}, learning off`, spec, body: off },
+    { label: `${spec.cmd}, curation on`, spec, body: requireDistFile(`${spec.cmd}.md`) },
+    { label: `${spec.cmd}, curation off`, spec, body: off },
   ]
 })
 const bodyOf = (spec: LevelSpec): string => BUILDS.find(b => b.spec === spec)?.body ?? ''
@@ -930,14 +930,14 @@ describe('the level references hold the fixed grammar and no rows (AC-5)', () =>
     }
   })
 
-  it.each(SPECS)('$cmd: the reference holds no spawn block, no subagent_type and no learning marker, and a seeded one is reported', spec => {
+  it.each(SPECS)('$cmd: the reference holds no spawn block, no subagent_type and no curation marker, and a seeded one is reported', spec => {
     const ref = REFS[spec.cmd]
     expect(ref).not.toContain('Agent(')
     expect(ref).not.toContain('subagent_type')
-    expect(ref).not.toMatch(/<!-- learning:/)
+    expect(ref).not.toMatch(/<!-- curation:/)
     const defects = (text: string): string[] => collectLevelReferenceDefects(text, spec, bodyOf(spec))
     expect(defects(`${ref}\nAgent(subagent_type="Design"):\n`)).toEqual(expect.arrayContaining(['the reference carries a spawn block', 'the reference carries a subagent_type field']))
-    expect(defects(`${ref}\n<!-- learning:on -->\n`)).toContain('the reference carries a learning marker')
+    expect(defects(`${ref}\n<!-- curation:on -->\n`)).toContain('the reference carries a curation marker')
   })
 
   it.each(SPECS)('$cmd: known-bad probes: a missing or swapped heading, a changed title or header, a bad phase, a bad cell and an unknown bullet are each reported', spec => {
@@ -1265,7 +1265,7 @@ describe('the command carries one Gate level block, closed and in its place (AC-
     expect(collectLevelBlockDefects(body, spec)).toEqual([])
   })
 
-  it.each(SPECS)('$cmd: the source holds the block outside every learning arm', spec => {
+  it.each(SPECS)('$cmd: the source holds the block outside every curation arm', spec => {
     expect(collectBlockArmDefects(SOURCES[spec.cmd], spec)).toEqual([])
   })
 
@@ -1312,12 +1312,12 @@ describe('the command carries one Gate level block, closed and in its place (AC-
     expect(collectLevelBlockDefects(`${seed(body, `${block}\n\n`, '')}\n${block}\n\n`, spec), 'the block after its region').toContain(spec.outsideMessage)
   })
 
-  it.each(SPECS)('$cmd: known-bad probes: a block inside a learning arm of the source is reported', spec => {
+  it.each(SPECS)('$cmd: known-bad probes: a block inside a curation arm of the source is reported', spec => {
     const source = SOURCES[spec.cmd]
     expect(source.includes(OPEN), `the ${spec.cmd} source lacks the Gate level block`).toBe(true)
     for (const arm of ['on', 'off']) {
-      const wrapped = seed(seed(source, OPEN, `<!-- learning:${arm} -->\n${OPEN}`), spec.nextParagraph, `<!-- learning:end -->\n${spec.nextParagraph}`)
-      expect(collectBlockArmDefects(wrapped, spec)).toEqual([`the gate-level block sits inside a learning:${arm} arm`])
+      const wrapped = seed(seed(source, OPEN, `<!-- curation:${arm} -->\n${OPEN}`), spec.nextParagraph, `<!-- curation:end -->\n${spec.nextParagraph}`)
+      expect(collectBlockArmDefects(wrapped, spec)).toEqual([`the gate-level block sits inside a curation:${arm} arm`])
     }
     expect(collectBlockArmDefects(seed(source, OPEN, '**Level.**'), spec)).toEqual(['the source has no gate-level block'])
   })
@@ -1425,7 +1425,7 @@ describe('the report names the level (AC-4)', () => {
     expect(collectReportDefects(body, RESOLVE), 'the unmodified display and summary header have no defect').toEqual([])
     expect(collectReportDefects(seed(body, '**Gate level**: {GATE_LEVEL, with any level note}\n', ''), RESOLVE)).toEqual(['the display lacks the Gate level line between **Total Issues** and ### Results'])
     expect(collectReportDefects(seed(body, RESOLVE_HEADER, '**Command**: /resolve\n\n'), RESOLVE)).toEqual(['the summary template lacks the Gate level line right after **Command**: /resolve'])
-    expect(collectReportDefects(seed(body, '**Gate level**: {GATE_LEVEL}\n\n', '**Gate level**: {GATE_LEVEL}\n\n## Extra\n\n'), RESOLVE)).toEqual(['the Gate level header line is not followed by the learning arm or ## Statistics'])
+    expect(collectReportDefects(seed(body, '**Gate level**: {GATE_LEVEL}\n\n', '**Gate level**: {GATE_LEVEL}\n\n## Extra\n\n'), RESOLVE)).toEqual(['the Gate level header line is not followed by the curation arm or ## Statistics'])
   })
 })
 

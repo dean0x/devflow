@@ -497,7 +497,7 @@ describe('installDevflow', () => {
     expect(call.timeout).toBe(INIT_TIMEOUT_MS);
     expect(existsSync(call.cwd)).toBe(false);
     expect(call.args[0]).toBe('init');
-    for (const flag of ['--no-ambient', '--no-memory', '--no-learning', '--no-knowledge', '--no-rules', '--no-proxy']) {
+    for (const flag of ['--no-ambient', '--no-memory', '--no-curation', '--no-knowledge', '--no-rules', '--no-proxy']) {
       expect(call.args).toContain(flag);
     }
     expect(call.args[call.args.indexOf('--security') + 1]).toBe('user');

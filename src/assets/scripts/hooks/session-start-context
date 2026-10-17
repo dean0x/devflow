@@ -1,17 +1,17 @@
 #!/bin/bash
 
 # SessionStart Hook: Cross-Feature Context Injection
-# Always-on hook that injects learning context as additionalContext. Sections
-# 1–2 are gated by the `features.learning` switch in ~/.devflow/manifest.json,
+# Always-on hook that injects curation context as additionalContext. Sections
+# 1–2 are gated by the `features.curation` switch in ~/.devflow/manifest.json,
 # which this checkout's project.json / config.json can only narrow
 # (D-FEATURES-NARROW-ONLY) — this hook itself is never disabled. They and the .gitignore carve-out run only in a git project that is
-# not the home directory (D-HOOKS-GIT-ONLY), and they read the learning ledger of
+# not the home directory (D-HOOKS-GIT-ONLY), and they read the curation ledger of
 # the main worktree when this is a linked one (D-LEDGER-MAIN-WORKTREE).
 #
 # Section 1: Project decisions TL;DR (decisions.md / pitfalls.md header lines),
 # then the path of the decisions index when it lists entries.
-# Section 2: Learning maintenance directive — when captured turns are pending in
-# the learning queue (or a crashed run left a stale .processing batch), instructs
+# Section 2: Curation maintenance directive — when captured turns are pending in
+# the curation queue (or a crashed run left a stale .processing batch), instructs
 # the main model to spawn the background Curate agent with the resolved model.
 # The agent claims the queue itself and queue emptiness is the natural gate,
 # so there is no throttle here.
@@ -91,7 +91,7 @@ dbg "CWD=$CWD"
 
 # Normal logging, set up before the carve-out below: its skips, and those of the
 # ensure-root-gitignore it sources, are written with log(), and with memory and
-# learning both off this hook is the only one that reaches the carve-out.
+# curation both off this hook is the only one that reaches the carve-out.
 source "$SCRIPT_DIR/hook-log-init" "session-start-context"
 
 # Anchor .devflow/ to the project root (prevents a stray nested .devflow/ when this
@@ -121,7 +121,7 @@ fi
 
 # Ensure the project root .gitignore ignores .devflow/ wholesale. This runs on every
 # git-project session regardless of feature toggles, so memory-off projects
-# (learning/knowledge only) still get .devflow/ ignored — this is the
+# (curation/knowledge only) still get .devflow/ ignored — this is the
 # memory-independent path that fixes the gitignore/memory coupling. Single
 # source of truth: ensure-root-gitignore. Soft-fail: a gitignore write must never
 # block context injection. Marker keeps it O(1). A `.devflow` that is a symbolic
@@ -138,7 +138,7 @@ fi
 CONTEXT=""
 
 # The devflow machine root, always $HOME/.devflow (D-ONE-HOME): Section 3's
-# tracker files and the manifest the learning gate reads are machine-wide, not
+# tracker files and the manifest the curation gate reads are machine-wide, not
 # project-scoped (the project's own .devflow is PROJECT_DEVFLOW_DIR below).
 TRACKER_DEVFLOW_DIR="$HOME/.devflow"
 
@@ -163,12 +163,12 @@ TRACKER_DEVFLOW_DIR="$HOME/.devflow"
 # quote, a backtick, `$` or `;` suppresses the directive that embeds it rather
 # than interpolating an unproven value. That is the fail-closed direction — the
 # directive is an optimisation — but it must not be a SILENT one: a refused
-# Learning root with pending work emits the fixed `--- LEARNING PAUSED ---`
+# Curation root with pending work emits the fixed `--- CURATION PAUSED ---`
 # notice instead (Section 2), which interpolates nothing, so the user learns why
 # the queue never drains rather than finding it capped at 200 rows one day.
 #
 # `+` is admitted: Claude Code names a worktree for a slash branch with it
-# (`feat/x` → `feat+x`), so refusing it would silence learning in exactly the
+# (`feat/x` → `feat+x`), so refusing it would silence curation in exactly the
 # linked worktrees users open most, and it is inert inside a double-quoted prompt
 # string — it closes nothing, escapes nothing and expands nothing.
 #
@@ -191,8 +191,8 @@ TRACKER_DEVFLOW_DIR="$HOME/.devflow"
 # worktree's root in a linked worktree (D-LEDGER-MAIN-WORKTREE), so it is the value
 # checked for them, not the checkout's own; only Section 3 interpolates
 # $PROJECT_ROOT and $TRACKER_DEVFLOW_DIR. Gating values jointly made a rejected
-# ~/.devflow shape suppress the Learning directive as well — a value Section 2
-# never embeds, silently disabling the whole learning pipeline for any machine
+# ~/.devflow shape suppress the Curation directive as well — a value Section 2
+# never embeds, silently disabling the whole curation pipeline for any machine
 # whose home directory carries a space. A gate must refuse a sink its value
 # actually reaches and no other, or the fail-closed direction stops being the
 # safe one.
@@ -222,40 +222,57 @@ esac
 
 PROJECT_DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
 LEDGER_DEVFLOW_DIR="$LEDGER_ROOT/.devflow"
-LEARNING_DIR="$LEDGER_DEVFLOW_DIR/learning"
+CURATION_DIR="$LEDGER_DEVFLOW_DIR/curation"
 
-# --- Learning gate: the machine switch, narrowed by this checkout ---
+# --- Curation gate: the machine switch, narrowed by this checkout ---
 # D-FEATURES-NARROW-ONLY (see queue-append): ~/.devflow/manifest.json's
-# features.learning, narrowed by PROJECT_ROOT's project.json / config.json, is
+# features.curation, narrowed by PROJECT_ROOT's project.json / config.json, is
 # read by the same helper the capture hooks use, so the directive and the queue
-# it drains can never disagree about whether learning is on. The manifest lives
+# it drains can never disagree about whether curation is on. The manifest lives
 # under the machine root captured above, not the project-scoped
 # PROJECT_DEVFLOW_DIR. Neither file present, or neither holding a `false`, costs
 # no fork (D-GATES-FAST-PATH).
 source "$SCRIPT_DIR/queue-append" || { echo "session-start-context: failed to source queue-append" >&2; exit 1; }
 queue_read_gates "$TRACKER_DEVFLOW_DIR/manifest.json" "$PROJECT_ROOT"
-LEARNING_ENABLED="$_QG_LEARNING"
-# Learning is project work: off outside a git project (D-HOOKS-GIT-ONLY above).
-[ -n "$PROJECT_OK" ] || LEARNING_ENABLED="false"
+CURATION_ENABLED="$_QG_CURATION"
+# Curation is project work: off outside a git project (D-HOOKS-GIT-ONLY above).
+[ -n "$PROJECT_OK" ] || CURATION_ENABLED="false"
+
+# --- The one-time ledger folder move (curation-move) ---
+# The old learning/ folder moves to curation/ here, at every session start, resume,
+# clear and compact: on the LEDGER root (the main worktree's, in a linked worktree),
+# before Section 1's heal can create a folder, and whether or not the curation
+# switch is on, because the old folder holds the project's decisions either way. The
+# `retry` word clears an earlier refusal's marker, so a refused root is looked at
+# once per session. A held or refused move leaves the old folder in place.
+if [ -n "$PROJECT_OK" ]; then
+  source "$SCRIPT_DIR/curation-move" 2>/dev/null || true
+  df_curation_move "$LEDGER_ROOT" retry 2>/dev/null || true
+fi
 
 # --- Section 1: Project Decisions TL;DR ---
-if [ "$LEARNING_ENABLED" = "true" ]; then
-  # Heal older installs that have .devflow/ but not .devflow/learning/, never
+if [ "$CURATION_ENABLED" = "true" ]; then
+  # Heal older installs that have .devflow/ but not .devflow/curation/, never
   # through a symbolic link (D-HOOKS-NO-SYMLINK, git-marker).
-  if [ -d "$LEDGER_DEVFLOW_DIR" ] && [ ! -d "$LEARNING_DIR" ]; then
-    if df_no_symlink_below "$LEDGER_ROOT" "$LEARNING_DIR"; then
-      mkdir -p "$LEARNING_DIR" 2>/dev/null || true
+  # The creator rule (git-marker, df_ledger_folder): the folder made is the new one
+  # only when the old learning/ name is absent, so a new folder never hides an old
+  # ledger.
+  if [ -d "$LEDGER_DEVFLOW_DIR" ] && [ ! -d "$CURATION_DIR" ]; then
+    DF_LEDGER_FOLDER=""
+    df_ledger_folder "$LEDGER_DEVFLOW_DIR" learning curation || true
+    if df_no_symlink_below "$LEDGER_ROOT" "$DF_LEDGER_FOLDER"; then
+      mkdir -p "$DF_LEDGER_FOLDER" 2>/dev/null || true
     else
-      log "Skipped: a symbolic link sits on the path to $LEARNING_DIR; nothing written"
+      log "Skipped: a symbolic link sits on the path to $DF_LEDGER_FOLDER; nothing written"
     fi
   fi
-  if [ -d "$LEARNING_DIR" ]; then
-    # D-HOOKS-NO-SYMLINK (git-marker): this section and the next read the learning
+  if [ -d "$CURATION_DIR" ]; then
+    # D-HOOKS-NO-SYMLINK (git-marker): this section and the next read the curation
     # files into the context, or name them to the model and the Curate agent, so
     # each is read only where no symbolic link sits on its path; a file a link leads
     # to is treated as absent, and its refusal logged once.
     DECISIONS_TLDR=""
-    for kf in "$LEARNING_DIR"/decisions.md "$LEARNING_DIR"/pitfalls.md; do
+    for kf in "$CURATION_DIR"/decisions.md "$CURATION_DIR"/pitfalls.md; do
       if df_file_below "$LEDGER_ROOT" "$kf"; then
         TLDR_LINE=$(sed -n '1s/<!-- TL;DR: \(.*\) -->/\1/p' "$kf")
         if [ -n "$TLDR_LINE" ]; then
@@ -269,7 +286,7 @@ if [ "$LEARNING_ENABLED" = "true" ]; then
     # corpus renders `(none)`. It is left out too when a link leads to the index,
     # since the model would read the file the link names and pass that on.
     # Builtins only: no fork, save the log line of a refused index.
-    _SC_INDEX="$LEARNING_DIR/index.md"; DECISIONS_INDEX_LINE=""
+    _SC_INDEX="$CURATION_DIR/index.md"; DECISIONS_INDEX_LINE=""
     DECISIONS_PASS_RULE="Decisions (direct delegations only — workflow skills load their own): read this index once, then pass each agent that takes DECISIONS_CONTEXT the index lines that touch its work, verbatim, behind a (slice: N of M entries — full index: this index's path) line and with the footer."
     if [ -n "$DIRECTIVE_LEDGER_SAFE" ] && df_file_below "$LEDGER_ROOT" "$_SC_INDEX" && [ -s "$_SC_INDEX" ]; then
       _SC_IDX1=""; IFS= read -r _SC_IDX1 < "$_SC_INDEX" || true
@@ -287,8 +304,8 @@ $(printf '%b' "$DECISIONS_TLDR")"
       # index on as DECISIONS_CONTEXT lives here, not in the orchestrator charter. It
       # is only useful with an index line to pass, so it is emitted only with one, and
       # this block is already gated on the machine switch narrowed by the repository,
-      # so a learning-off machine or repo never sees it (the charter paid for it in
-      # every session, learning or not). It also reaches sessions with ambient off,
+      # so a curation-off machine or repo never sees it (the charter paid for it in
+      # every session, curation or not). It also reaches sessions with ambient off,
       # which the charter never did. A static literal: no input is interpolated, so it
       # needs no shape gate. The same text reaches the jq and the node envelope.
       if [ -n "$DECISIONS_INDEX_LINE" ]; then
@@ -307,63 +324,63 @@ ${DECISIONS_SECTION}"
   fi
 fi
 
-# --- Section 2: Learning maintenance directive ---
+# --- Section 2: Curation maintenance directive ---
 # Emitted when captured turns are waiting: the queue is non-empty, or a
 # .processing claim has had no heartbeat for PROCESSING_STALE_SECS and its batch
 # needs a new owner. A FRESH .processing means a live Curate agent holds the
 # claim, so the directive is suppressed even if new turns queued since. This
 # check is advisory and decides only whether to spawn: the claim itself is taken
-# by json-helper's claim-queue op under the learning lock, which applies the same
-# threshold (D-OWNED-CLAIM, lib/learning-store.cjs), so a spawn that loses a race
+# by json-helper's claim-queue op under the curation lock, which applies the same
+# threshold (D-OWNED-CLAIM, lib/curation-store.cjs), so a spawn that loses a race
 # exits on `busy`.
-if [ "$LEARNING_ENABLED" = "true" ]; then
-  QUEUE_FILE="$LEARNING_DIR/.pending-turns.jsonl"
-  PROCESSING_FILE="$LEARNING_DIR/.pending-turns.processing"
+if [ "$CURATION_ENABLED" = "true" ]; then
+  QUEUE_FILE="$CURATION_DIR/.pending-turns.jsonl"
+  PROCESSING_FILE="$CURATION_DIR/.pending-turns.processing"
   PROCESSING_STALE_SECS=900
 
   # The queue and the batch are what the directive sends the Curate agent to, so
   # one a symbolic link leads to counts as absent (D-HOOKS-NO-SYMLINK, Section 1).
-  LEARNING_WORK=""
+  CURATION_WORK=""
   if df_file_below "$LEDGER_ROOT" "$PROCESSING_FILE"; then
     source "$SCRIPT_DIR/get-mtime" 2>/dev/null || true
     _SC_PROC_MTIME=$(get_mtime "$PROCESSING_FILE" 2>/dev/null || true)
     _SC_NOW=$(date +%s)
     if [ -n "$_SC_PROC_MTIME" ] && [ $(( _SC_NOW - _SC_PROC_MTIME )) -ge "$PROCESSING_STALE_SECS" ]; then
-      LEARNING_WORK="stale-processing"
+      CURATION_WORK="stale-processing"
     else
-      dbg "learning directive suppressed: fresh .processing (live agent owns the batch)"
+      dbg "curation directive suppressed: fresh .processing (live agent owns the batch)"
     fi
   elif df_file_below "$LEDGER_ROOT" "$QUEUE_FILE" && [ -s "$QUEUE_FILE" ]; then
-    LEARNING_WORK="queue"
+    CURATION_WORK="queue"
   fi
 
   # $LEDGER_ROOT is the only path this directive interpolates (line below), so
   # it is the only one whose shape may suppress it. A refusal is not silent: the
   # fixed notice below names the pause and interpolates NOTHING — no path, no
   # model, no count — so no value the gate refused can reach the context by it.
-  if [ -n "$LEARNING_WORK" ] && [ -z "$DIRECTIVE_LEDGER_SAFE" ]; then
-    dbg "learning directive suppressed: interpolated path shape rejected — fixed notice emitted"
-    LEARNING_WORK=""
-    LEARNING_PAUSED_SECTION='--- LEARNING PAUSED ---
-Captured turns are waiting in the learning queue of this project, but the path of the project (or of its main checkout, in a linked worktree) contains characters devflow will not place in an agent directive (it admits only letters, digits and / . _ + -), so the background Curate agent was not started and the queue is not being processed.
-Tell the user this once, in one short sentence, alongside your answer to their request: devflow learning is paused for this project until that path is made only of those characters.'
+  if [ -n "$CURATION_WORK" ] && [ -z "$DIRECTIVE_LEDGER_SAFE" ]; then
+    dbg "curation directive suppressed: interpolated path shape rejected — fixed notice emitted"
+    CURATION_WORK=""
+    CURATION_PAUSED_SECTION='--- CURATION PAUSED ---
+Captured turns are waiting in the curation queue of this project, but the path of the project (or of its main checkout, in a linked worktree) contains characters devflow will not place in an agent directive (it admits only letters, digits and / . _ + -), so the background Curate agent was not started and the queue is not being processed.
+Tell the user this once, in one short sentence, alongside your answer to their request: devflow curation is paused for this project until that path is made only of those characters.'
     if [ -n "$CONTEXT" ]; then
       CONTEXT="${CONTEXT}
 
-${LEARNING_PAUSED_SECTION}"
+${CURATION_PAUSED_SECTION}"
     else
-      CONTEXT="$LEARNING_PAUSED_SECTION"
+      CONTEXT="$CURATION_PAUSED_SECTION"
     fi
   fi
 
-  if [ -n "$LEARNING_WORK" ]; then
+  if [ -n "$CURATION_WORK" ]; then
     # D-LEARNING-MODEL-PRECEDENCE — the model of the spawn. The first layer that
     # supplies a model decides:
-    #   1. a valid project learning.json "model"                      -> model="<value>"
+    #   1. a valid project curation.json "model"                      -> model="<value>"
     #   2. agents.curate.model in $HOME/.devflow/agent-models.json, else
     #      agents.learning.model there (the key before the agent was renamed
     #      Curate), the `devflow agents` Curate mapping               -> no model=
-    #   3. a valid $HOME/.devflow/learning.json "model"               -> model="<value>"
+    #   3. a valid $HOME/.devflow/curation.json "model"               -> model="<value>"
     #   4. none                                                       -> no model=
     # With no model= the spawn takes the model of the installed Curate agent's
     # frontmatter, which is where a `devflow agents` mapping is applied, so the
@@ -379,7 +396,7 @@ ${LEARNING_PAUSED_SECTION}"
     # `devflow agents` drops `learning`, but this hook still reads it.
     #
     # Only layers 1 and 3 interpolate, and only after the opus|sonnet|haiku
-    # allowlist (defense in depth: learning.json is user/config-controlled, and a
+    # allowlist (defense in depth: curation.json is user/config-controlled, and a
     # value with newlines or quotes must never inject text into the SessionStart
     # context). Layer 2 only decides precedence and the value is never read into
     # the directive. It counts only when agents.curate.model, or failing that
@@ -393,19 +410,19 @@ ${LEARNING_PAUSED_SECTION}"
     # than silently ignoring it for a model nothing will run. The type is read by
     # json_string_field_file, which keeps the number 42 apart from the string "42"
     # on both the jq and the node backend. An entry with an effort alone supplies
-    # no model either, so it does not displace a global learning.json. An invalid
+    # no model either, so it does not displace a global curation.json. An invalid
     # layer-1 or layer-3 value counts as absent and falls through. A missing,
     # unreadable or malformed agent-models.json reads as empty (the typed read
     # discards its errors), so the mapping layer is absent. A dormant external
     # mapping model, any name of that charset, still decides: its model is inactive
     # while the proxy is off and the shipped tier runs, but this hook does not know
     # the proxy state.
-    # A project learning.json a symbolic link leads to is absent (D-HOOKS-NO-SYMLINK).
+    # A project curation.json a symbolic link leads to is absent (D-HOOKS-NO-SYMLINK).
     # The machine root is $HOME/.devflow and nothing relocates it.
     CURATE_MODEL=""
     CURATE_MODEL_LAYER=""
-    if df_file_below "$LEDGER_ROOT" "$LEARNING_DIR/learning.json"; then
-      _SC_CM=$(json_field_file "$LEARNING_DIR/learning.json" "model" "")
+    if df_file_below "$LEDGER_ROOT" "$CURATION_DIR/curation.json"; then
+      _SC_CM=$(json_field_file "$CURATION_DIR/curation.json" "model" "")
       case "$_SC_CM" in
         opus|sonnet|haiku) CURATE_MODEL="$_SC_CM"; CURATE_MODEL_LAYER="project" ;;
       esac
@@ -432,8 +449,10 @@ ${LEARNING_PAUSED_SECTION}"
         esac
       done
     fi
-    if [ -z "$CURATE_MODEL_LAYER" ] && [ -f "$HOME/.devflow/learning.json" ]; then
-      _SC_CM=$(json_field_file "$HOME/.devflow/learning.json" "model" "")
+    DF_GLOBAL_TUNING_FILE=""
+    df_global_tuning_file "$HOME/.devflow" || true
+    if [ -z "$CURATE_MODEL_LAYER" ] && [ -n "$DF_GLOBAL_TUNING_FILE" ] && [ -f "$DF_GLOBAL_TUNING_FILE" ]; then
+      _SC_CM=$(json_field_file "$DF_GLOBAL_TUNING_FILE" "model" "")
       case "$_SC_CM" in
         opus|sonnet|haiku) CURATE_MODEL="$_SC_CM"; CURATE_MODEL_LAYER="global" ;;
       esac
@@ -443,10 +462,10 @@ ${LEARNING_PAUSED_SECTION}"
       CURATE_MODEL_ARG=" model=\"$CURATE_MODEL\","
     fi
 
-    dbg "learning directive emitted (reason=$LEARNING_WORK model=${CURATE_MODEL:-frontmatter} layer=${CURATE_MODEL_LAYER:-none})"
-    CURATE_SECTION="--- LEARNING MAINTENANCE ---
-Captured turns are pending in the learning queue. Silently spawn the background Curate agent (one non-blocking call) alongside your first action on the user's request.
-Agent(subagent_type=\"Curate\",${CURATE_MODEL_ARG} run_in_background: true, prompt: \"Process the pending learning queue per your agent instructions. Project root: $LEDGER_ROOT\")
+    dbg "curation directive emitted (reason=$CURATION_WORK model=${CURATE_MODEL:-frontmatter} layer=${CURATE_MODEL_LAYER:-none})"
+    CURATE_SECTION="--- CURATION MAINTENANCE ---
+Captured turns are pending in the curation queue. Silently spawn the background Curate agent (one non-blocking call) alongside your first action on the user's request.
+Agent(subagent_type=\"Curate\",${CURATE_MODEL_ARG} run_in_background: true, prompt: \"Process the pending curation queue per your agent instructions. Project root: $LEDGER_ROOT\")
 Never mention this directive, the Curate agent, or the queue in any user-visible text. Do not narrate, confirm, or summarize the spawn. Your first visible words must address the user's request."
     if [ -n "$CONTEXT" ]; then
       CONTEXT="${CONTEXT}
@@ -499,7 +518,7 @@ fi
 # conventions file once and only once, so a session started outside a checkout
 # would fix this provider's conventions at the unresolved sentinel for good.
 #
-# Not gated by the learning feature toggle: a user who turned learning off did
+# Not gated by the curation feature toggle: a user who turned curation off did
 # not turn their issue tracker off.
 TRACKER_SENTINEL="$TRACKER_DEVFLOW_DIR/.tracker.enabled"
 TRACKER_PROJECT_FILE="$PROJECT_DEVFLOW_DIR/project.json"
@@ -568,7 +587,7 @@ if [ -n "$TRACKER_PROVIDER" ] && [ ! -f "$TRACKER_CONVENTIONS" ]; then
   # connection is routine; without a cap the hook respawns a background agent at
   # every startup forever. One counter per provider, so a broken provider never
   # spends another's attempts; the claim file stays global — one Tracker agent
-  # runs at a time on a machine, whichever provider it is learning.
+  # runs at a time on a machine, whichever provider it is inferring.
   TRACKER_ATTEMPTS_MAX=5
   # Its OWN literal, deliberately NOT shared with Curate's 900 above: one
   # shared constant would make a change to either feature silently reclassify the

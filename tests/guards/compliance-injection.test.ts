@@ -14,7 +14,7 @@
  *           /code-review and /plan carry `COMPLIANCE_FOCUS_DIRECTIVE`, and gap-analysis's compliance patterns
  *           live in a reference the /plan compliance spawn names by path.
  *
- * Read from the COMPILED prompts a session loads (`dist/commands`, `dist/agents`, `dist/learning-off`) and
+ * Read from the COMPILED prompts a session loads (`dist/commands`, `dist/agents`, `dist/curation-off`) and
  * the shipped skill sources. Every arm runs through a named collector that the live sweep and its known-bad
  * probe both call, over a corpus whose size is asserted first (a sweep that read nothing proves nothing).
  *
@@ -31,7 +31,7 @@ import { existsSync, readFileSync } from 'fs'
 import * as path from 'path'
 
 import {
-  ROOT, collectCodeSpawnSites, requireDistFile, requireDistFiles, resolveAllAgents, resolveLearningOffSource,
+  ROOT, collectCodeSpawnSites, requireDistFile, requireDistFiles, resolveAllAgents, resolveCurationOffSource,
 } from '../helpers.js'
 import type { CodeSpawnSite } from '../helpers.js'
 
@@ -169,16 +169,16 @@ const codeSites = (): CodeSpawnSite[] => requireDistFiles().flatMap(f => collect
 const spawnHosts = (): Array<readonly [string, string]> => Object.keys(CODE_SPAWN_FLOORS).map(f => [f, requireDistFile(f)] as const)
 
 /**
- * The learning-off variant of a compiled command (D-LEARNING-VARIANTS): a learning-off machine installs it in
- * place of `dist/commands/<file>`, and its learning-off arms are text the learning-on sweep never reads.
+ * The curation-off variant of a compiled command (D-LEARNING-VARIANTS): a curation-off machine installs it in
+ * place of `dist/commands/<file>`, and its curation-off arms are text the curation-on sweep never reads.
  */
-const learningOffCommand = (file: string): string => {
-  const text = resolveLearningOffSource('commands', file.replace(/\.md$/, ''))
-  if (text === null) throw new Error(`dist/learning-off/commands/${file} is absent — run \`npm run build\` first`)
+const curationOffCommand = (file: string): string => {
+  const text = resolveCurationOffSource('commands', file.replace(/\.md$/, ''))
+  if (text === null) throw new Error(`dist/curation-off/commands/${file} is absent — run \`npm run build\` first`)
   return text
 }
 const offSpawnHosts = (): Array<readonly [string, string]> =>
-  Object.keys(CODE_SPAWN_FLOORS).map(f => [f, learningOffCommand(f)] as const)
+  Object.keys(CODE_SPAWN_FLOORS).map(f => [f, curationOffCommand(f)] as const)
 
 // ── AC-308 ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -211,7 +211,7 @@ describe('AC-308: no Code-family body carries the compliance skill; each spawn s
     }
   })
 
-  it('the learning-off variants pass the directive at every site and set it behind the lens, like the learning-on ones', () => {
+  it('the curation-off variants pass the directive at every site and set it behind the lens, like the curation-on ones', () => {
     const hosts = offSpawnHosts()
     const sites = hosts.flatMap(([f, t]) => collectCodeSpawnSites(f, t))
     for (const [host, floor] of Object.entries(CODE_SPAWN_FLOORS)) {
@@ -223,16 +223,16 @@ describe('AC-308: no Code-family body carries the compliance skill; each spawn s
     expect(collectUngatedHosts(hosts)).toEqual([])
   })
 
-  it('known-bad probe: a learning-off-only arm that drops the directive or keeps the raw lens is reported', () => {
-    // Each anchor lives in a learning-off arm alone, so only the learning-off sweep can see it change.
+  it('known-bad probe: a curation-off-only arm that drops the directive or keeps the raw lens is reported', () => {
+    // Each anchor lives in a curation-off arm alone, so only the curation-off sweep can see it change.
     const probes: Array<[string, string, string]> = [
       ['implement.md', '`COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES` and `PUSH: false`', '`COMPLIANCE_FRAMEWORKS`, `CI_FAILURES` and `PUSH: false`'],
       ['dynamic-build.md', 'plan + COMPLIANCE_DIRECTIVE + handoff', 'plan + COMPLIANCE_FRAMEWORKS + handoff'],
     ]
     for (const [host, anchor, stale] of probes) {
-      expect(requireDistFile(host), `${host}: the anchor must be learning-off only`).not.toContain(anchor)
-      const real = learningOffCommand(host)
-      expect(real, `${host}: the learning-off anchor must exist`).toContain(anchor)
+      expect(requireDistFile(host), `${host}: the anchor must be curation-off only`).not.toContain(anchor)
+      const real = curationOffCommand(host)
+      expect(real, `${host}: the curation-off anchor must exist`).toContain(anchor)
       const seeded = collectCodeSpawnSites(host, real.replace(anchor, stale))
       expect(collectUndirectedSites(seeded), `${host}: the stale arm drops the directive`).toHaveLength(1)
       expect(collectRawLensSites(seeded), `${host}: the stale arm hands over the raw lens`).toHaveLength(1)
@@ -246,8 +246,8 @@ describe('AC-308: no Code-family body carries the compliance skill; each spawn s
       expect(source, `${slug}: the agent is not in the registry`).toBeDefined()
       expect(source!.content.length, `${slug}: the body is empty — the guard would pass vacuously`).toBeGreaterThan(4_000)
       expect(collectAgentBodyDefects(slug, source!.content), `${slug} (learning on)`).toEqual([])
-      const off = resolveLearningOffSource('agents', slug)
-      expect(off, `dist/learning-off/agents/${slug}.md is absent — run \`npm run build\` first`).not.toBeNull()
+      const off = resolveCurationOffSource('agents', slug)
+      expect(off, `dist/curation-off/agents/${slug}.md is absent — run \`npm run build\` first`).not.toBeNull()
       expect(collectAgentBodyDefects(slug, off!), `${slug} (learning off)`).toEqual([])
     }
   })
@@ -333,8 +333,8 @@ describe('AC-309: no Review or Design body or preload carries compliance-only te
       expect(collectAgentBodyDefects(slug, source.content), `${slug} (learning on)`).toEqual([])
     }
     for (const slug of STRICT_SLUGS) {
-      const off = resolveLearningOffSource('agents', slug)
-      expect(off, `dist/learning-off/agents/${slug}.md is absent — run \`npm run build\` first`).not.toBeNull()
+      const off = resolveCurationOffSource('agents', slug)
+      expect(off, `dist/curation-off/agents/${slug}.md is absent — run \`npm run build\` first`).not.toBeNull()
       expect(collectAgentBodyDefects(slug, off!), `${slug} (learning off)`).toEqual([])
     }
   })
@@ -342,8 +342,8 @@ describe('AC-309: no Review or Design body or preload carries compliance-only te
   it('the /code-review Review spawn and the /plan Design spawn each inject the compliance focus directive, learning on or off', () => {
     expect(collectFocusSpawnDefects('code-review.md', requireDistFile('code-review.md'), 'Review')).toEqual([])
     expect(collectFocusSpawnDefects('plan.md', requireDistFile('plan.md'), 'Design')).toEqual([])
-    expect(collectFocusSpawnDefects('code-review.md', learningOffCommand('code-review.md'), 'Review'), 'learning off').toEqual([])
-    expect(collectFocusSpawnDefects('plan.md', learningOffCommand('plan.md'), 'Design'), 'learning off').toEqual([])
+    expect(collectFocusSpawnDefects('code-review.md', curationOffCommand('code-review.md'), 'Review'), 'learning off').toEqual([])
+    expect(collectFocusSpawnDefects('plan.md', curationOffCommand('plan.md'), 'Design'), 'learning off').toEqual([])
   })
 
   it('gap-analysis keeps its Iron Law and six sections in the preload; the compliance patterns live in a reference', () => {

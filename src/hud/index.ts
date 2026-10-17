@@ -8,7 +8,7 @@ import { codexSessionsDir, gatherCodexUsage } from './codex-usage.js';
 import { parseTranscript } from './transcript.js';
 import { persistSessionCost, aggregateCosts } from './cost-history.js';
 import { gatherConfigCounts } from './components/config-counts.js';
-import { gatherLedgerLearningCounts } from './components/learning-counts.js';
+import { gatherLedgerCurationCounts } from './components/curation-counts.js';
 import { render } from './render.js';
 import type { GatherContext, StdinData, UsageData } from './types.js';
 
@@ -92,18 +92,18 @@ async function run(): Promise<string> {
     components.has('todoProgress') ||
     components.has('configCounts');
   const needsConfigCounts = components.has('configCounts');
-  const needsLearningCounts = components.has('learningCounts');
+  const needsCurationCounts = components.has('curationCounts');
   const needsCodexUsage = components.has('codexQuota');
   const needsSessionCost = components.has('sessionCost');
 
-  // Parallel data gathering — only fetch what's needed. The learning counts
+  // Parallel data gathering — only fetch what's needed. The curation counts
   // ride here because resolving the ledger root is one git call.
-  const [git, transcript, learningCountsData, codexUsage] = await Promise.all([
+  const [git, transcript, curationCountsData, codexUsage] = await Promise.all([
     needsGit ? gatherGitStatus(cwd) : Promise.resolve(null),
     needsTranscript && stdin.transcript_path
       ? parseTranscript(stdin.transcript_path)
       : Promise.resolve(null),
-    needsLearningCounts ? gatherLedgerLearningCounts(cwd) : Promise.resolve(null),
+    needsCurationCounts ? gatherLedgerCurationCounts(cwd) : Promise.resolve(null),
     needsCodexUsage ? gatherCodexUsage(devflowDir, codexSessionsDir(home)) : Promise.resolve(null),
   ]);
 
@@ -146,7 +146,7 @@ async function run(): Promise<string> {
     usage,
     codexUsage,
     configCounts: configCountsData,
-    learningCounts: learningCountsData,
+    curationCounts: curationCountsData,
     costHistory,
     config: { ...config, components: resolved } as GatherContext['config'],
     devflowDir,

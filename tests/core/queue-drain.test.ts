@@ -2,8 +2,8 @@
  * D-CLI-NO-SYMLINK — the queue drains delete nothing through a symbolic link.
  *
  * `devflow learning --disable`, `devflow memory --disable` and `devflow init
- * --no-learning|--no-memory` delete a project's queue files. A repository can commit
- * `.devflow`, `.devflow/learning` or `.devflow/memory` as a link to a folder
+ * --no-curation|--no-memory` delete a project's queue files. A repository can commit
+ * `.devflow`, `.devflow/curation` or `.devflow/memory` as a link to a folder
  * elsewhere, and an unlink through it would delete same-named files wherever it
  * points. A refused drain deletes nothing and names the link.
  */
@@ -11,7 +11,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { drainLearningQueue } from '../../src/core/learning-queue-cleanup.js';
+import { drainCurationQueue } from '../../src/core/curation-queue-cleanup.js';
 import { drainMemoryQueue } from '../../src/cli/commands/memory.js';
 
 const KEEP = 'a file outside the project, which no drain may delete\n';
@@ -45,10 +45,10 @@ async function present(dir: string, files: readonly string[]): Promise<boolean[]
 
 const QUEUES = [
   {
-    name: 'drainLearningQueue',
-    folder: 'learning',
+    name: 'drainCurationQueue',
+    folder: 'curation',
     files: ['.pending-turns.jsonl', '.pending-turns.processing', '.pending-turns.owner'],
-    drain: drainLearningQueue,
+    drain: drainCurationQueue,
   },
   {
     name: 'drainMemoryQueue',
@@ -110,3 +110,55 @@ for (const { name, folder, files, drain } of QUEUES) {
     });
   });
 }
+
+describe('drainCurationQueue drains each ledger folder that exists, the old name and the new (#529)', () => {
+  const FILES = ['.pending-turns.jsonl', '.pending-turns.processing', '.pending-turns.owner'] as const;
+  const newDir = (): string => path.join(root, '.devflow', 'curation');
+  const oldDir = (): string => path.join(root, '.devflow', 'learning');
+
+  it('drains the queue of an old folder that a busy or refused move left in place', async () => {
+    await seed(oldDir(), FILES);
+
+    expect(await drainCurationQueue(root)).toEqual({ drained: true });
+
+    expect(await present(oldDir(), FILES)).toEqual([false, false, false]);
+  });
+
+  it('drains both folders when both exist', async () => {
+    await seed(oldDir(), FILES);
+    await seed(newDir(), FILES);
+
+    expect(await drainCurationQueue(root)).toEqual({ drained: true });
+
+    expect(await present(oldDir(), FILES)).toEqual([false, false, false]);
+    expect(await present(newDir(), FILES)).toEqual([false, false, false]);
+  });
+
+  it('deletes only queue files: the ledger and the tuning file in the old folder stay', async () => {
+    await seed(oldDir(), [...FILES, 'decisions-ledger.jsonl', 'learning.json']);
+
+    await drainCurationQueue(root);
+
+    expect(await present(oldDir(), ['decisions-ledger.jsonl', 'learning.json'])).toEqual([true, true]);
+  });
+
+  it('a linked old folder: deletes nothing in either folder, and names the link', async () => {
+    await seed(outside, FILES);
+    await seed(newDir(), FILES);
+    await fs.symlink(outside, oldDir());
+
+    const result = await drainCurationQueue(root);
+
+    expect(result).toEqual({ drained: false, linkedFolder: oldDir() });
+    expect(await present(outside, FILES), 'nothing is deleted through the link').toEqual([true, true, true]);
+    expect(await present(newDir(), FILES), 'a refused drain deletes nothing').toEqual([true, true, true]);
+  });
+
+  it('a linked .devflow with an old folder behind it: deletes nothing and names .devflow', async () => {
+    await seed(path.join(outside, 'learning'), FILES);
+    await fs.symlink(outside, path.join(root, '.devflow'));
+
+    expect(await drainCurationQueue(root)).toEqual({ drained: false, linkedFolder: path.join(root, '.devflow') });
+    expect(await present(path.join(outside, 'learning'), FILES)).toEqual([true, true, true]);
+  });
+});

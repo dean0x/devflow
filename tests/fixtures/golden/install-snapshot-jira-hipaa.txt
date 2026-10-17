@@ -330,6 +330,8 @@ x .devflow/scripts/hooks/background-memory-update
 x .devflow/scripts/hooks/capture-prompt
 x .devflow/scripts/hooks/capture-question
 x .devflow/scripts/hooks/capture-turn
+x .devflow/scripts/hooks/curation-lock
+x .devflow/scripts/hooks/curation-move
 x .devflow/scripts/hooks/debug-trace
 x .devflow/scripts/hooks/ensure-devflow-init
 x .devflow/scripts/hooks/ensure-proxy
@@ -341,10 +343,9 @@ x .devflow/scripts/hooks/hook-log-init
 x .devflow/scripts/hooks/is-hex-sha
 x .devflow/scripts/hooks/json-helper.cjs
 x .devflow/scripts/hooks/json-parse
-x .devflow/scripts/hooks/learning-lock
 d .devflow/scripts/hooks/lib/
+x .devflow/scripts/hooks/lib/curation-store.cjs
 x .devflow/scripts/hooks/lib/decisions-format.cjs
-x .devflow/scripts/hooks/lib/learning-store.cjs
 x .devflow/scripts/hooks/lib/mkdir-lock.cjs
 x .devflow/scripts/hooks/lib/project-paths.cjs
 x .devflow/scripts/hooks/lib/render-decisions.cjs
@@ -368,11 +369,11 @@ d .devflow/scripts/hud/components/
 - .devflow/scripts/hud/components/codex-quota.js
 - .devflow/scripts/hud/components/config-counts.js
 - .devflow/scripts/hud/components/context-usage.js
+- .devflow/scripts/hud/components/curation-counts.js
 - .devflow/scripts/hud/components/diff-stats.js
 - .devflow/scripts/hud/components/directory.js
 - .devflow/scripts/hud/components/git-ahead-behind.js
 - .devflow/scripts/hud/components/git-branch.js
-- .devflow/scripts/hud/components/learning-counts.js
 - .devflow/scripts/hud/components/model.js
 - .devflow/scripts/hud/components/release-info.js
 - .devflow/scripts/hud/components/session-cost.js
@@ -569,6 +570,7 @@ d sub/
     "memory": true,
     "hud": true,
     "knowledge": true,
+    "curation": true,
     "learning": true,
     "rules": true,
     "flags": {

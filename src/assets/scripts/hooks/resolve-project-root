@@ -8,7 +8,7 @@
 # root, mirroring the TS CLI's getGitRoot() (src/core/git.ts) so the shell
 # side anchors identically.
 #
-# Sourced by: the memory/learning/session hooks and ensure-devflow-init.
+# Sourced by: the memory/curation/session hooks and ensure-devflow-init.
 # Sourced helper: uses `return`-free pure functions; _-prefixed locals (never
 # clobbers caller vars). Safe under `set -e` (git failure is guarded with || true).
 #
@@ -53,7 +53,7 @@ _df_nongit_root() {
 # df_resolve_roots <cwd> sets TWO roots in the caller's scope, from ONE git call:
 #   DF_ROOT        — the checkout's toplevel: where per-checkout data lives
 #                    (memory, the .gitignore carve-out, the knowledge bases).
-#   DF_LEDGER_ROOT — where the learning ledger and its queue live.
+#   DF_LEDGER_ROOT — where the curation ledger and its queue live.
 #
 # D-LEDGER-MAIN-WORKTREE: a linked worktree (`git worktree add`, `claude
 # --worktree`) has its own toplevel, so a ledger anchored there restarts its

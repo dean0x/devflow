@@ -56,7 +56,7 @@
 //   TRACKER=<github|jira|linear> TRACKER_SOURCE=<project|personal|machine|default>
 //   TRACKER_WARN=<none|mismatch|invalid> SITE=<url|none> KEY=<KEY|none>
 //   REVIEW_PUBLICATION=<off|auto|full> COMPLIANCE=<off|generic|id,…>
-//   MEMORY=<on|off> LEARNING=<on|off> KNOWLEDGE=<on|off> GATE_LEVEL=<full|standard|lean>
+//   MEMORY=<on|off> CURATION=<on|off> KNOWLEDGE=<on|off> GATE_LEVEL=<full|standard|lean>
 // (one line on stdout; wrapped here for reading). Every value is a closed token
 // or a SITE/KEY that passed its shape gate, so no other byte of a config file can
 // reach stdout. Whole-file rule: a project.json or config.json that EXISTS but
@@ -114,7 +114,7 @@ const {
 /** @typedef {'off' | 'auto' | 'full'} Publication */
 /** @typedef {'full' | 'standard' | 'lean'} GateLevel */
 /** @typedef {'personal' | 'machine' | 'default'} GateLevelSource */
-/** @typedef {'memory' | 'learning' | 'knowledge'} FeatureSwitch */
+/** @typedef {'memory' | 'curation' | 'knowledge'} FeatureSwitch */
 /** @typedef {'machine' | 'project' | 'personal'} SwitchSource */
 
 /** Who decided TRACKER. `default` is github with no layer naming a provider. */
@@ -175,7 +175,7 @@ const SETTINGS_LINE_RE = new RegExp(
   + ' REVIEW_PUBLICATION=(?<publication>' + PUBLICATIONS.join('|') + ')'
   + ' COMPLIANCE=(?<compliance>off|generic|(?:' + COMPLIANCE_IDS.join('|') + ')(?:,(?:'
   + COMPLIANCE_IDS.join('|') + ')){0,' + String(COMPLIANCE_IDS.length - 1) + '})'
-  + ' MEMORY=(?<memory>on|off) LEARNING=(?<learning>on|off) KNOWLEDGE=(?<knowledge>on|off)'
+  + ' MEMORY=(?<memory>on|off) CURATION=(?<curation>on|off) KNOWLEDGE=(?<knowledge>on|off)'
   + ' GATE_LEVEL=(?<gateLevel>' + GATE_LEVELS.join('|') + ')$',
 );
 
@@ -188,7 +188,7 @@ const SETTINGS_LINE_RE = new RegExp(
  *   REVIEW_PUBLICATION=off   nothing is published (raised to a stub under required)
  *   COMPLIANCE=generic       the review lens still runs
  *   KNOWLEDGE=off            no knowledge write-back commits into the repository
- *   MEMORY/LEARNING=on       the machine switch is the one that turns them off;
+ *   MEMORY/CURATION=on       the machine switch is the one that turns them off;
  *                            hooks never consume this line (their gate folds an
  *                            unreadable file as narrowing nothing)
  *   GATE_LEVEL=full          the most checking applies: a resolver that cannot read
@@ -196,7 +196,7 @@ const SETTINGS_LINE_RE = new RegExp(
  */
 const SETTINGS_FAIL_CLOSED_LINE =
   'TRACKER=github TRACKER_SOURCE=default TRACKER_WARN=invalid SITE=none KEY=none '
-  + 'REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=on LEARNING=on KNOWLEDGE=off GATE_LEVEL=full';
+  + 'REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=on CURATION=on KNOWLEDGE=off GATE_LEVEL=full';
 
 /** Bound on each local git call. */
 const GIT_TIMEOUT_MS = 5000;
@@ -269,7 +269,7 @@ const PROJECT_REL = '.devflow/project.json';
  *   key: string | null,
  *   reviewPublication: Publication,
  *   compliance: { enabled: boolean, frameworks: readonly string[] },
- *   switches: { memory: SwitchState, learning: SwitchState, knowledge: SwitchState },
+ *   switches: { memory: SwitchState, curation: SwitchState, knowledge: SwitchState },
  *   gateLevel: GateLevel,
  *   gateLevelSource: GateLevelSource | null,
  *   gateLevelInvalid: boolean,
@@ -341,7 +341,7 @@ const FAIL_CLOSED_SETTINGS = Object.freeze({
   compliance: Object.freeze({ enabled: true, frameworks: Object.freeze([]) }),
   switches: Object.freeze({
     memory: Object.freeze({ on: true, source: /** @type {SwitchSource} */ ('machine') }),
-    learning: Object.freeze({ on: true, source: /** @type {SwitchSource} */ ('machine') }),
+    curation: Object.freeze({ on: true, source: /** @type {SwitchSource} */ ('machine') }),
     knowledge: Object.freeze({ on: false, source: /** @type {SwitchSource} */ ('machine') }),
   }),
   gateLevel: /** @type {GateLevel} */ ('full'),
@@ -371,13 +371,27 @@ function isPlainObject(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/**
+ * The keys a switch is stored under, current names first (feature-switch.ts
+ * CURRENT_KEYS). `curation` is read under `curation` and its pre-rename copy
+ * `learning` (#529).
+ */
+const CURRENT_SWITCH_KEYS = Object.freeze({
+  memory: Object.freeze(['memory']),
+  curation: Object.freeze(['curation', 'learning']),
+  knowledge: Object.freeze(['knowledge']),
+});
+
 /** The pre-rename key each switch was stored under (feature-switch.ts LEGACY_KEYS). */
-const LEGACY_SWITCH_KEYS = Object.freeze({ learning: 'decisions', knowledge: 'kb' });
+const LEGACY_SWITCH_KEYS = Object.freeze({ curation: 'decisions', knowledge: 'kb' });
 
 /**
- * src/core/feature-switch.ts isMachineFeatureOn exactly: only an explicit
- * boolean `false` is off, the legacy key is read when the current one is not a
- * boolean, and anything that is not a manifest-shaped object is on.
+ * src/core/feature-switch.ts isMachineFeatureOn exactly. Off when any current
+ * key is a boolean `false`; else on when any current key is a boolean `true`;
+ * else, when neither is a boolean, the pre-rename key decides if it is a
+ * boolean; else on. A non-boolean value is ignored for that key only, so a
+ * disagreeing pair resolves to off. Anything that is not a manifest-shaped
+ * object is on.
  *
  * @param {unknown} manifest
  * @param {FeatureSwitch} feature
@@ -387,9 +401,10 @@ function machineSwitchOn(manifest, feature) {
   if (!isPlainObject(manifest)) return true;
   const features = manifest.features;
   if (!isPlainObject(features)) return true;
+  const current = CURRENT_SWITCH_KEYS[feature].map(key => features[key]).filter(value => typeof value === 'boolean');
+  if (current.length > 0) return !current.includes(false);
   const legacy = /** @type {Record<string, string>} */ (LEGACY_SWITCH_KEYS)[feature];
-  const value = legacy !== undefined && typeof features[feature] !== 'boolean' ? features[legacy] : features[feature];
-  return value !== false;
+  return legacy === undefined || features[legacy] !== false;
 }
 
 /**
@@ -425,7 +440,7 @@ function machineCompliance(manifest) {
  * src/core/gate-level.ts machineGateLevel exactly, and total: null when no level
  * is recorded (not an object, `features` not an object, or no own `gateLevel`
  * key), `invalid` when the key is present and is not one of the three words,
- * else the level. The learning-capture hook folds a manifest of any shape, so
+ * else the level. The curation-capture hook folds a manifest of any shape, so
  * this must never throw.
  *
  * @param {unknown} manifest
@@ -625,6 +640,11 @@ function foldCompliance(project, manifest, defaultBranch) {
  * narrows: absent, malformed, duplicated and unreadable all leave the switch as
  * the machine set it. No repo layer can turn on what the machine turned off.
  *
+ * A switch with two current keys (`curation`: `curation` and `learning`, #529)
+ * is a narrow-only union: a literal `false` in either key of a file narrows it,
+ * and each key is classified on its own, so a duplicate or a non-boolean value
+ * in one key leaves the other readable.
+ *
  * @param {any} project
  * @param {any} personal
  * @param {unknown} manifest
@@ -635,7 +655,8 @@ function foldSwitch(project, personal, manifest, feature) {
   /** @param {any} file */
   const narrows = file => {
     const features = fieldIn(file, 'features', 'absent');
-    return features.kind === 'valid' && features.value[feature].kind === 'valid' && features.value[feature].value === false;
+    if (features.kind !== 'valid') return false;
+    return CURRENT_SWITCH_KEYS[feature].some(key => features.value[key].kind === 'valid' && features.value[key].value === false);
   };
   if (!machineSwitchOn(manifest, feature)) return Object.freeze({ on: false, source: 'machine' });
   if (narrows(project)) return Object.freeze({ on: false, source: 'project' });
@@ -724,7 +745,7 @@ function foldSettings(inputs) {
     compliance: lens.compliance,
     switches: Object.freeze({
       memory: foldSwitch(project, personal, manifest, 'memory'),
-      learning: foldSwitch(project, personal, manifest, 'learning'),
+      curation: foldSwitch(project, personal, manifest, 'curation'),
       knowledge: foldSwitch(project, personal, manifest, 'knowledge'),
     }),
     ...foldGateLevel(personal, manifest),
@@ -1003,7 +1024,7 @@ function formatSettingsLine(s) {
     + ' REVIEW_PUBLICATION=' + s.reviewPublication
     + ' COMPLIANCE=' + complianceToken(s.compliance)
     + ' MEMORY=' + onOff(s.switches.memory)
-    + ' LEARNING=' + onOff(s.switches.learning)
+    + ' CURATION=' + onOff(s.switches.curation)
     + ' KNOWLEDGE=' + onOff(s.switches.knowledge)
     + ' GATE_LEVEL=' + s.gateLevel;
 }

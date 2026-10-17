@@ -9,7 +9,7 @@ import { readFileSync, promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { buildHudOnlyManifest, drainDisabledFeatureQueues, formatHudOnlySkew, type DisabledQueueDrainIO } from '../src/cli/commands/init.js';
-import { installedVersionMatches } from '../src/targets/claude-code/learning-install.js';
+import { installedVersionMatches } from '../src/targets/claude-code/curation-install.js';
 import type { ManifestData } from '../src/core/manifest.js';
 
 const NOW = '2026-09-26T00:00:00.000Z';
@@ -21,7 +21,7 @@ function fullInstall(): ManifestData {
     scope: 'user',
     knownPlugins: ['devflow-implement', 'devflow-code-review'],
     features: {
-      ambient: true, memory: true, hud: false, knowledge: true, learning: true, rules: true,
+      ambient: true, memory: true, hud: false, knowledge: true, curation: true, rules: true,
       flags: { tui: true }, security: 'user', proxy: true,
       compliance: { enabled: true, frameworks: ['gdpr'] },
       tracker: { provider: 'jira' },
@@ -57,7 +57,7 @@ describe('buildHudOnlyManifest', () => {
       scope: 'user',
       installedAt: NOW,
       updatedAt: NOW,
-      features: { hud: true, ambient: false, memory: false, learning: false, knowledge: false, rules: false, proxy: false },
+      features: { hud: true, ambient: false, memory: false, curation: false, knowledge: false, rules: false, proxy: false },
     });
     expect(result.features.tracker.provider).toBe('github');
     expect(result.features.compliance).toEqual({ enabled: false, frameworks: [] });
@@ -167,14 +167,14 @@ describe('drainDisabledFeatureQueues (D-INIT-DRAIN-AFTER-SWITCH)', () => {
       calls,
       io: {
         drainMemoryQueue: async (r) => { calls.push(`memory:${r}`); return { drained: true }; },
-        drainLearningQueue: async (r) => { calls.push(`learning:${r}`); return { drained: true }; },
+        drainCurationQueue: async (r) => { calls.push(`learning:${r}`); return { drained: true }; },
       },
     };
   }
 
   it('drains the queue of every feature switched off once the switch is persisted, with nothing to report', async () => {
     const { calls, io } = recorder();
-    const refused = await drainDisabledFeatureQueues({ gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: false, learningEnabled: false, manifestWritten: true }, io);
+    const refused = await drainDisabledFeatureQueues({ gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: false, curationEnabled: false, manifestWritten: true }, io);
     expect(calls).toEqual([`memory:${ROOT}`, `learning:${ROOT}`]);
     expect(refused).toEqual([]);
   });
@@ -182,12 +182,12 @@ describe('drainDisabledFeatureQueues (D-INIT-DRAIN-AFTER-SWITCH)', () => {
   it('returns one warning per drain refused at a linked folder, naming the queue and the link (D-CLI-NO-SYMLINK)', async () => {
     const io: DisabledQueueDrainIO = {
       drainMemoryQueue: async (r) => ({ drained: false, linkedFolder: `${r}/.devflow/memory` }),
-      drainLearningQueue: async (r) => ({ drained: false, linkedFolder: `${r}/.devflow` }),
+      drainCurationQueue: async (r) => ({ drained: false, linkedFolder: `${r}/.devflow` }),
     };
-    const refused = await drainDisabledFeatureQueues({ gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: false, learningEnabled: false, manifestWritten: true }, io);
+    const refused = await drainDisabledFeatureQueues({ gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: false, curationEnabled: false, manifestWritten: true }, io);
     expect(refused).toEqual([
       expect.stringMatching(/memory queue.*\/repo\/\.devflow\/memory is a symbolic link/),
-      expect.stringMatching(/learning queue.*\/repo\/\.devflow is a symbolic link/),
+      expect.stringMatching(/curation queue.*\/repo\/\.devflow is a symbolic link/),
     ]);
   });
 
@@ -202,14 +202,14 @@ describe('drainDisabledFeatureQueues (D-INIT-DRAIN-AFTER-SWITCH)', () => {
       await fs.mkdir(outside);
       await fs.writeFile(queue, 'a file outside the project\n');
       await fs.symlink(outside, path.join(repo, '.devflow', 'memory'));
-      await fs.symlink(outside, path.join(repo, '.devflow', 'learning'));
+      await fs.symlink(outside, path.join(repo, '.devflow', 'curation'));
 
-      const refused = await drainDisabledFeatureQueues({ gitRoot: repo, ledgerRoot: repo, memoryEnabled: false, learningEnabled: false, manifestWritten: true });
+      const refused = await drainDisabledFeatureQueues({ gitRoot: repo, ledgerRoot: repo, memoryEnabled: false, curationEnabled: false, manifestWritten: true });
 
       expect(await fs.readFile(queue, 'utf-8'), 'nothing is deleted through either link').toBe('a file outside the project\n');
       expect(refused).toHaveLength(2);
       expect(refused[0]).toContain(`${path.join(repo, '.devflow', 'memory')} is a symbolic link`);
-      expect(refused[1]).toContain(`${path.join(repo, '.devflow', 'learning')} is a symbolic link`);
+      expect(refused[1]).toContain(`${path.join(repo, '.devflow', 'curation')} is a symbolic link`);
     } finally {
       vi.unstubAllEnvs();
       await fs.rm(tmp, { recursive: true, force: true });
@@ -218,11 +218,11 @@ describe('drainDisabledFeatureQueues (D-INIT-DRAIN-AFTER-SWITCH)', () => {
 
   it('drains only the features that are off', async () => {
     const memOff = recorder();
-    await drainDisabledFeatureQueues({ gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: false, learningEnabled: true, manifestWritten: true }, memOff.io);
+    await drainDisabledFeatureQueues({ gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: false, curationEnabled: true, manifestWritten: true }, memOff.io);
     expect(memOff.calls).toEqual([`memory:${ROOT}`]);
 
     const learnOff = recorder();
-    await drainDisabledFeatureQueues({ gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: true, learningEnabled: false, manifestWritten: true }, learnOff.io);
+    await drainDisabledFeatureQueues({ gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: true, curationEnabled: false, manifestWritten: true }, learnOff.io);
     expect(learnOff.calls).toEqual([`learning:${ROOT}`]);
   });
 
@@ -230,19 +230,19 @@ describe('drainDisabledFeatureQueues (D-INIT-DRAIN-AFTER-SWITCH)', () => {
     // In a linked worktree the hooks queue learning turns into the main
     // checkout's ledger, while working memory stays per checkout.
     const { calls, io } = recorder();
-    await drainDisabledFeatureQueues({ gitRoot: '/repo-wt', ledgerRoot: '/repo', memoryEnabled: false, learningEnabled: false, manifestWritten: true }, io);
+    await drainDisabledFeatureQueues({ gitRoot: '/repo-wt', ledgerRoot: '/repo', memoryEnabled: false, curationEnabled: false, manifestWritten: true }, io);
     expect(calls).toEqual(['memory:/repo-wt', 'learning:/repo']);
   });
 
   it('drains nothing when the manifest was not written — the switch is still on, so the turns are live', async () => {
     const { calls, io } = recorder();
-    await drainDisabledFeatureQueues({ gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: false, learningEnabled: false, manifestWritten: false }, io);
+    await drainDisabledFeatureQueues({ gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: false, curationEnabled: false, manifestWritten: false }, io);
     expect(calls).toEqual([]);
   });
 
   it('drains nothing outside a git repository', async () => {
     const { calls, io } = recorder();
-    await drainDisabledFeatureQueues({ gitRoot: null, ledgerRoot: null, memoryEnabled: false, learningEnabled: false, manifestWritten: true }, io);
+    await drainDisabledFeatureQueues({ gitRoot: null, ledgerRoot: null, memoryEnabled: false, curationEnabled: false, manifestWritten: true }, io);
     expect(calls).toEqual([]);
   });
 
@@ -254,7 +254,7 @@ describe('drainDisabledFeatureQueues (D-INIT-DRAIN-AFTER-SWITCH)', () => {
     expect(drainCalls).toHaveLength(1);
     expect(drainCalls[0]).toBeGreaterThan(persistAt);
     // No direct drain remains in the action body ahead of the manifest write.
-    expect(src.slice(0, persistAt)).not.toMatch(/await drain(Memory|Learning)Queue\(gitRoot\)/);
+    expect(src.slice(0, persistAt)).not.toMatch(/await drain(Memory|Curation)Queue\(gitRoot\)/);
   });
 });
 

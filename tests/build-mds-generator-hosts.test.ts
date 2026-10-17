@@ -58,8 +58,8 @@ import {
   MDS_REFERENCE_MODULES,
   ALL_DISCOVERED_HOSTS,
   DIST_COMMAND_FILES,
-  LEARNING_OFF_FILES,
-  LEARNING_VARIANT_HOSTS,
+  CURATION_OFF_FILES,
+  CURATION_VARIANT_HOSTS,
 } from './fixtures/mds-manifest.js';
 import {
   MCP_BACKED_PROVIDER_SUBDIRS,
@@ -154,13 +154,13 @@ async function hashDistSubtree(
 
 /** Every build destination of a dist/ tree, hashed into one map. */
 async function hashDistTree(root: string): Promise<Map<string, string>> {
-  const [commands, agents, skills, learningOff] = await Promise.all([
+  const [commands, agents, skills, curationOff] = await Promise.all([
     hashDistSubtree(root, 'commands'),
     hashDistSubtree(root, 'agents'),
     hashDistSubtree(root, 'skills'),
-    hashDistSubtree(root, 'learning-off'),
+    hashDistSubtree(root, 'curation-off'),
   ]);
-  return new Map([...commands, ...agents, ...skills, ...learningOff]);
+  return new Map([...commands, ...agents, ...skills, ...curationOff]);
 }
 
 /**
@@ -464,9 +464,9 @@ describe('14 command outputs byte-unchanged (key-only strip retained)', () => {
     for (const key of EXPECTED_REFERENCE_KEYS) {
       expect([...fresh.keys()], `${key} missing from the fresh build`).toContain(key);
     }
-    for (const file of LEARNING_OFF_FILES) {
-      expect([...fresh.keys()], `learning-off/${file} missing from the fresh build`)
-        .toContain(`learning-off/${file}`);
+    for (const file of CURATION_OFF_FILES) {
+      expect([...fresh.keys()], `curation-off/${file} missing from the fresh build`)
+        .toContain(`curation-off/${file}`);
     }
 
     const diff = diffDistTrees(fresh, onDisk);
@@ -474,7 +474,7 @@ describe('14 command outputs byte-unchanged (key-only strip retained)', () => {
     expect(diff.compared, 'no file was byte-compared')
       .toBe(
         DIST_COMMAND_FILES.length + MDS_GENERATOR_HOSTS.length + EXPECTED_REFERENCE_KEYS.length +
-        LEARNING_OFF_FILES.length,
+        CURATION_OFF_FILES.length,
       );
     expect(diff.missingOnDisk, `built from src/ but absent from dist/ — ${remedy}`).toEqual([]);
     expect(diff.orphanOnDisk, `present in dist/ but built by nothing — ${remedy}`).toEqual([]);
@@ -793,7 +793,7 @@ describe('IGNORE_DIRS covers tests/ and coverage/', () => {
 //
 //     {partialCount} partial(s) skipped (no output-dir:)
 //     {hosts.length} host(s) to compile:
-//     {learningOffCount} learning-off variant(s) written
+//     {curationOffCount} curation-off variant(s) written
 //
 // Until now nothing read them: `grep 'partial(s) skipped' tests/` returned zero
 // hits, so a discovery regression that silently dropped a host or reclassified a
@@ -809,11 +809,11 @@ describe('printed host/partial counts agree with the manifest (AC-1.8)', () => {
    */
   function parsePrintedCounts(
     output: string,
-  ): { hosts: number; partials: number; deferred: number; learningOff: number } {
+  ): { hosts: number; partials: number; deferred: number; curationOff: number } {
     const hostMatch = /^\s*(\d+) host\(s\) to compile:/m.exec(output);
     const partialMatch = /^\s*(\d+) partial\(s\) skipped \(no output-dir:\)/m.exec(output);
     const deferredMatch = /^\s*(\d+) reference module\(s\) deferred \(generation gated\)/m.exec(output);
-    const learningOffMatch = /^\s*(\d+) learning-off variant\(s\) written/m.exec(output);
+    const curationOffMatch = /^\s*(\d+) curation-off variant\(s\) written/m.exec(output);
     if (!hostMatch) {
       throw new Error(`build output has no "N host(s) to compile:" line:\n${output}`);
     }
@@ -823,14 +823,14 @@ describe('printed host/partial counts agree with the manifest (AC-1.8)', () => {
     if (!deferredMatch) {
       throw new Error(`build output has no "N reference module(s) deferred" line:\n${output}`);
     }
-    if (!learningOffMatch) {
-      throw new Error(`build output has no "N learning-off variant(s) written" line:\n${output}`);
+    if (!curationOffMatch) {
+      throw new Error(`build output has no "N curation-off variant(s) written" line:\n${output}`);
     }
     return {
       hosts: Number(hostMatch[1]),
       partials: Number(partialMatch[1]),
       deferred: Number(deferredMatch[1]),
-      learningOff: Number(learningOffMatch[1]),
+      curationOff: Number(curationOffMatch[1]),
     };
   }
 
@@ -877,14 +877,14 @@ describe('printed host/partial counts agree with the manifest (AC-1.8)', () => {
       `build printed ${counts.deferred} deferred reference module(s); the manifest names ` +
       `${EXPECTED_DEFERRED} gated module(s) held back by this registry.`,
     ).toBe(EXPECTED_DEFERRED);
-    // The learning-off count is a roster, not a floor: it equals LEARNING_VARIANT_HOSTS
+    // The curation-off count is a roster, not a floor: it equals CURATION_VARIANT_HOSTS
     // at every step, zero included. The files themselves are held to the same roster
-    // by tests/learning/learning-variants-build.test.ts.
+    // by tests/curation/curation-variants-build.test.ts.
     expect(
-      counts.learningOff,
-      `build printed ${counts.learningOff} learning-off variant(s); the manifest names ` +
-      `${LEARNING_VARIANT_HOSTS.length}. Update LEARNING_VARIANT_HOSTS if a host gained or lost an arm.`,
-    ).toBe(LEARNING_VARIANT_HOSTS.length);
+      counts.curationOff,
+      `build printed ${counts.curationOff} curation-off variant(s); the manifest names ` +
+      `${CURATION_VARIANT_HOSTS.length}. Update CURATION_VARIANT_HOSTS if a host gained or lost an arm.`,
+    ).toBe(CURATION_VARIANT_HOSTS.length);
     for (const source of deferredReferenceModuleSources()) {
       expect(
         run.combined,

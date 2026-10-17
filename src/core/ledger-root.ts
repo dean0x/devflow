@@ -1,12 +1,12 @@
 /**
  * @file ledger-root.ts
  *
- * Where the learning ledger lives for a working directory — the TypeScript twin of
+ * Where the curation ledger lives for a working directory — the TypeScript twin of
  * `df_resolve_roots`' DF_LEDGER_ROOT in src/assets/scripts/hooks/resolve-project-root.
  *
  * D-LEDGER-MAIN-WORKTREE: the ledger is one per REPOSITORY, not per checkout. In a
  * linked worktree the hooks queue and render into the main worktree's
- * `.devflow/learning/`, so `devflow learning` and the HUD must read and clear that
+ * `.devflow/curation/`, so `devflow curation` and the HUD must read and clear that
  * same directory — resolving the worktree's own toplevel (getGitRoot) would show an
  * empty ledger and drain a queue nothing writes to. The rule, from ONE git call:
  *
@@ -94,7 +94,7 @@ async function mainHoldsLedger(main: string, home: string): Promise<boolean> {
 }
 
 /**
- * The learning ledger root for `cwd` — the main worktree or this checkout's
+ * The curation ledger root for `cwd` — the main worktree or this checkout's
  * toplevel — or null outside a git work tree.
  */
 export async function getLedgerRoot(
@@ -115,5 +115,34 @@ export async function getLedgerRoot(
       if (main && await mainHoldsLedger(main, options.home ?? os.homedir())) return main;
       return parsed.toplevel;
     }
+  }
+}
+
+/**
+ * The ledger folder a creator may create or write into under `ledgerRoot`: the old
+ * folder while the old name is present (a folder, a file or a link, dangling or not),
+ * else the new one. `newName` defaults to `oldName`, so a caller that names only the
+ * old folder gets the old folder's path in every state.
+ *
+ * The creator rule: a new folder made beside a present old one would hide the old
+ * ledger from every reader, so each creator (the configure writer here, and the three
+ * shell creators through `df_ledger_folder`) makes the new folder only when the old
+ * name is absent. Only ENOENT and ENOTDIR show the old name absent; any other probe
+ * failure leaves the old path, so an unreadable `.devflow` never starts a second
+ * folder. Answers a path and creates nothing.
+ */
+export async function ledgerFolderToCreate(
+  ledgerRoot: string,
+  oldName: string,
+  newName: string = oldName,
+): Promise<string> {
+  const devflowDir = path.join(ledgerRoot, '.devflow');
+  const oldFolder = path.join(devflowDir, oldName);
+  try {
+    await fs.lstat(oldFolder);
+    return oldFolder;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === 'ENOENT' || code === 'ENOTDIR' ? path.join(devflowDir, newName) : oldFolder;
   }
 }

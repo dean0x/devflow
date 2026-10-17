@@ -297,8 +297,8 @@ describe('the --status helpers over the settings layer (D-FEATURES-NARROW-ONLY)'
   });
 
   it('prints nothing when nothing narrows, or the machine switch itself is off', () => {
-    expect(narrowedSwitchLabel(stub(BASE), { dir: tmp }, 'learning')).toBeNull();
-    expect(narrowedSwitchLabel(stub(withSwitch('learning', false, 'machine')), { dir: tmp }, 'learning')).toBeNull();
+    expect(narrowedSwitchLabel(stub(BASE), { dir: tmp }, 'curation')).toBeNull();
+    expect(narrowedSwitchLabel(stub(withSwitch('curation', false, 'machine')), { dir: tmp }, 'curation')).toBeNull();
   });
 
   it('names the file that narrowed it', () => {
@@ -331,7 +331,7 @@ describe('the --status helpers over the settings layer (D-FEATURES-NARROW-ONLY)'
     expect(narrowedSwitchLabel(stub(failed), { dir: repo }, 'knowledge'))
       .toBe('disabled (.devflow/project.json is unreadable)');
     expect(narrowedSwitchLabel(stub(failed), { dir: repo }, 'memory')).toBeNull();
-    expect(narrowedSwitchLabel(stub(failed), { dir: repo }, 'learning')).toBeNull();
+    expect(narrowedSwitchLabel(stub(failed), { dir: repo }, 'curation')).toBeNull();
     expect(repoComplianceStatusLines(stub(failed), { dir: repo }))
       .toEqual(['Repository: generic controls only (.devflow/project.json is unreadable)', 'Effective here: generic controls only (this machine + the default branch + this checkout)']);
 

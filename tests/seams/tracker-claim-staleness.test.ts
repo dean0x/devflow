@@ -36,9 +36,9 @@
  * and the agent's prose is pinned in `tests/tracker-agent.test.ts`, but neither
  * file reads the other side. This is the only place they are compared.
  *
- * This is the Learning-900s gotcha with the parties swapped, and it is why the
+ * This is the Curation-900s gotcha with the parties swapped, and it is why the
  * hook's comment names 600 as "its OWN literal, deliberately NOT shared with
- * Learning's 900": two features must not share the constant, and the two halves of
+ * Curation's 900": two features must not share the constant, and the two halves of
  * ONE feature must not disagree about it.
  *
  * The agent is read through `resolveAgentSource` (dist-preferred, src-fallback,

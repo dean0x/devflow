@@ -65,7 +65,7 @@ describe('the six renamed agents leave no orphan agent file (#466)', () => {
     return { status: result.status, out: `${result.stdout ?? ''}${result.stderr ?? ''}` };
   }
 
-  const OFF = ['--no-ambient', '--no-memory', '--no-learning', '--no-knowledge', '--no-rules'] as const;
+  const OFF = ['--no-ambient', '--no-memory', '--no-curation', '--no-knowledge', '--no-rules'] as const;
 
   /** The files a previous release left, plus the user's own agent of the same name as one of them. */
   async function seedOldAgents(): Promise<void> {

@@ -23,7 +23,7 @@
  * `Agent(...):` line sits outside the parentheses and is never scanned.
  *
  * Hook scripts sit outside the scan by design: the Tracker directive pins its
- * model, and the Learning directive emits one only under the precedence the
+ * model, and the Curation directive emits one only under the precedence the
  * session-start hook documents.
  *
  * Why a green run is not enough on its own (and what backs it)

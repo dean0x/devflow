@@ -42,7 +42,7 @@ function makeCtx(
     usage: null,
     codexUsage: null,
     configCounts: null,
-    learningCounts: null,
+    curationCounts: null,
     costHistory: null,
     config: {
       enabled: true,
@@ -181,14 +181,14 @@ describe('render', () => {
         todos: { completed: 1, total: 3 },
         skills: [],
       },
-      learningCounts: { decisions: 3, pitfalls: 1 },
+      curationCounts: { decisions: 3, pitfalls: 1 },
     });
     const output = await render(ctx);
     const lines = output.split('\n');
 
     expect(lines.length).toBeGreaterThanOrEqual(4);
     expect(lines.every((l) => l.length > 0)).toBe(true);
-    expect(stripAnsi(lines[lines.length - 1])).toBe('Learning: 3 decisions, 1 pitfall');
+    expect(stripAnsi(lines[lines.length - 1])).toBe('Curation: 3 decisions, 1 pitfall');
   });
 });
 

@@ -9,7 +9,7 @@
  *             line their host resolved above. A host expands the block ONCE
  *             (D-SETTINGS-LINE), immediately before the earliest of its consumers:
  *             its decisions gate, compliance lens, publication gate, knowledge
- *             write-back Step 1 or a Skim spawn that takes `LEARNING`.
+ *             write-back Step 1 or a Skim spawn that takes `CURATION`.
  *   grammar   The accepted line written out in the prompt names the fields of the
  *             script's SETTINGS_LINE_RE in the same order, with the same closed
  *             value sets, and the fallback is SETTINGS_FAIL_CLOSED_LINE byte for
@@ -43,12 +43,12 @@ const INVOCATION = 'node "$HOME/.devflow/scripts/resolve-settings.cjs" "{root}" 
 
 /** The consumers of the line, by the sentence each compiles to. A host's block precedes the earliest it carries. */
 const CONSUMER_ANCHORS: ReadonlyArray<readonly [string, string]> = [
-  ['the decisions gate', 'When the settings line says `LEARNING=off`'],
+  ['the decisions gate', 'When the settings line says `CURATION=off`'],
   ['the compliance lens', '**Resolve the compliance lens**'],
   ['the publication gate', '**Resolve `REVIEW_PUBLICATION` per worktree:**'],
   ['the write-back Step 1', 'take the settings line resolved above for that root'],
-  ['a Skim spawn taking LEARNING', '`LEARNING` from the settings line'],
-  ['a fenced Skim spawn taking LEARNING', 'LEARNING: {LEARNING from the settings line}'],
+  ['a Skim spawn taking CURATION', '`CURATION` from the settings line'],
+  ['a fenced Skim spawn taking CURATION', 'CURATION: {CURATION from the settings line}'],
 ]
 
 function source(rel: string): string {
@@ -197,7 +197,7 @@ describe('settings partial wiring', () => {
 
   it('known-bad probes: a second block, a block after its consumer and a host with no block are each reported', () => {
     const block = `${OPENING} once per worktree root`
-    const gate = 'When the settings line says `LEARNING=off`'
+    const gate = 'When the settings line says `CURATION=off`'
     expect(collectBlockProblems('p.md', `${block}\n${gate}\n${block}`)).toEqual(['p.md: 2 settings blocks (expected 1)'])
     expect(collectBlockProblems('p.md', `${gate}\n${block}`)).toEqual(['p.md: the block follows "the decisions gate"'])
     expect(collectBlockProblems('p.md', gate)).toEqual(['p.md: 0 settings blocks (expected 1)'])
@@ -260,8 +260,8 @@ describe('the accepted line is SETTINGS_LINE_RE written out', () => {
 
   it('known-bad probes: a dropped field, a reordered field and a narrowed value set are reported', () => {
     const t = template(body)
-    expect(collectGrammarDrift(t.replace(' LEARNING=<on|off>', ''))).toHaveLength(1)
-    expect(collectGrammarDrift(t.replace('MEMORY=<on|off> LEARNING=<on|off>', 'LEARNING=<on|off> MEMORY=<on|off>'))).toHaveLength(1)
+    expect(collectGrammarDrift(t.replace(' CURATION=<on|off>', ''))).toHaveLength(1)
+    expect(collectGrammarDrift(t.replace('MEMORY=<on|off> CURATION=<on|off>', 'CURATION=<on|off> MEMORY=<on|off>'))).toHaveLength(1)
     expect(collectGrammarDrift(t.replace('TRACKER_WARN=<none|mismatch|invalid>', 'TRACKER_WARN=<none|invalid>'))).toEqual([
       'TRACKER_WARN: <none|invalid> vs (none|mismatch|invalid)',
     ])
@@ -341,14 +341,14 @@ describe('the accept rule keeps its four strict clauses', () => {
 describe('the learning gate keeps its rationale out of the expanded prompt', () => {
   const DECISIONS = 'src/assets/commands/_partials/_decisions.mds'
 
-  it('an unresolvable settings line keeps LEARNING=on, so a failed resolution loads decisions as before', () => {
-    expect(SETTINGS.SETTINGS_FAIL_CLOSED_LINE.split(' ')).toContain('LEARNING=on')
+  it('an unresolvable settings line keeps CURATION=on, so a failed resolution loads decisions as before', () => {
+    expect(SETTINGS.SETTINGS_FAIL_CLOSED_LINE.split(' ')).toContain('CURATION=on')
   })
 
   it('the _decisions.mds header, before its first define, holds the rationale', () => {
     const text = source(DECISIONS)
     const header = text.slice(0, text.indexOf('@define'))
-    for (const phrase of ['D-DECISIONS-LEARNING-GATE', 'D-FEATURES-NARROW-ONLY', '`LEARNING=on`', 'advisory context']) {
+    for (const phrase of ['D-DECISIONS-LEARNING-GATE', 'D-FEATURES-NARROW-ONLY', '`CURATION=on`', 'advisory context']) {
       expect(header, phrase).toContain(phrase)
     }
   })
@@ -356,7 +356,7 @@ describe('the learning gate keeps its rationale out of the expanded prompt', () 
   it('the expanded gate is the one sentence: no rationale, no fail-closed wording', () => {
     const gate = defineBody(source(DECISIONS), 'decisions_gate')
     expect(gate).toBe(
-      'When the settings line says `LEARNING=off`, set `DECISIONS_CONTEXT` to `(none)` and skip this step, locating no ledger and reading no index.',
+      'When the settings line says `CURATION=off`, set `DECISIONS_CONTEXT` to `(none)` and skip this step, locating no ledger and reading no index.',
     )
     expect(gate).not.toMatch(/fail-closed|advisory|NARROW/)
   })

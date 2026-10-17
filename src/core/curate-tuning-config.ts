@@ -1,7 +1,6 @@
 import * as fs from 'fs';
-import * as path from 'path';
 import { getDevFlowDirectory } from '../targets/claude-code/claude-paths.js';
-import { getCurateTuningConfigPath } from './project-paths.js';
+import { getCurateTuningConfigPath, getGlobalCurateTuningConfigPath } from './project-paths.js';
 
 /**
  * Closed set of valid model aliases for the Curate agent.
@@ -19,7 +18,7 @@ function isValidModel(value: unknown): value is CurateModelAlias {
  * Merged curate agent tuning configuration from global and project-level config files.
  *
  * The Curate agent has no daily-run cap or throttle: session-start-context emits
- * its spawn directive only when the learning queue is non-empty (or a stale
+ * its spawn directive only when the curation queue is non-empty (or a stale
  * .processing batch exists), so queue emptiness is the natural gate.
  * session-start-context reads these config files directly (same project →
  * global → default precedence) when resolving the model for the directive.
@@ -95,15 +94,15 @@ function readConfigFile(filePath: string): string | null {
  *
  * Priority (highest wins): project config → global config → defaults.
  *
- * - Global:  `~/.devflow/learning.json`
- * - Project: `<ledgerRoot>/.devflow/learning/learning.json` — pass the ledger root
- *   (getLedgerRoot), where session-start-context reads it and `devflow learning
+ * - Global:  `~/.devflow/curation.json`
+ * - Project: `<ledgerRoot>/.devflow/curation/curation.json` — pass the ledger root
+ *   (getLedgerRoot), where session-start-context reads it and `devflow curation
  *   --configure` writes it (D-LEDGER-MAIN-WORKTREE).
  *
  * Invalid JSON in either file is silently ignored and treated as absent.
  */
 export function loadCurateTuningConfig(ledgerRoot: string): CurateTuningConfig {
-  const globalConfigPath = path.join(getDevFlowDirectory(), 'learning.json');
+  const globalConfigPath = getGlobalCurateTuningConfigPath(getDevFlowDirectory());
   const projectConfigPath = getCurateTuningConfigPath(ledgerRoot);
 
   let config: CurateTuningConfig = { ...DEFAULTS };

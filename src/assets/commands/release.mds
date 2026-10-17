@@ -55,31 +55,31 @@ Read `.release/RELEASE-FLOW.md`:
 
 ### Phase 1b: Load Context
 
-<!-- learning:on -->
+<!-- curation:on -->
 **Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES
-<!-- learning:off -->
+<!-- curation:off -->
 **Produces:** FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES
-<!-- learning:end -->
+<!-- curation:end -->
 
-<!-- learning:on -->
+<!-- curation:on -->
 {{settings.settings_resolve()}}
 
 {{decisions_gate()}}
 
 {{decisions_locate()}}
 
-Read `{ledger}/.devflow/learning/index.md`. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
+Read `{ledger}/.devflow/curation/index.md`. If the file is absent or empty, set `DECISIONS_CONTEXT` to `(none)`; otherwise use the file content as `DECISIONS_CONTEXT`.
 
 {{decisions_slice()}}
 
-<!-- learning:end -->
+<!-- curation:end -->
 {{knowledge_load()}}
 
-<!-- learning:on -->
+<!-- curation:on -->
 Pass `DECISIONS_CONTEXT` and `FEATURE_KNOWLEDGE` only to agents whose contract declares them; the Validate and Git agents this command spawns do not.
-<!-- learning:off -->
+<!-- curation:off -->
 Pass `FEATURE_KNOWLEDGE` only to agents whose contract declares it; the Validate and Git agents this command spawns do not.
-<!-- learning:end -->
+<!-- curation:end -->
 
 ### Phase 1c: Resolve the Evidence Policy
 
@@ -234,11 +234,11 @@ On completion:
 │  └─ Read .release/RELEASE-FLOW.md (learned) or proceed to detect (fresh)
 │
 ├─ Phase 1b: Load Context
-<!-- learning:on -->
+<!-- curation:on -->
 │  └─ Load DECISIONS_CONTEXT and FEATURE_KNOWLEDGE for the agents that declare them
-<!-- learning:off -->
+<!-- curation:off -->
 │  └─ Load FEATURE_KNOWLEDGE for the agents that declare it
-<!-- learning:end -->
+<!-- curation:end -->
 │
 ├─ Phase 2: Detect Release Process (first run only)
 │  └─ Tiered scan: package.json, CI workflows, git history

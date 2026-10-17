@@ -226,7 +226,7 @@ export const BEFORE_ALL_TIMEOUT_MS = 180_000;
 export const INIT_ARGS: readonly string[] = [
   'init',
   '--plugin', 'implement,code-review,resolve,plan,research,bug-analysis',
-  '--no-ambient', '--no-memory', '--no-learning', '--no-knowledge', '--no-rules', '--no-proxy',
+  '--no-ambient', '--no-memory', '--no-curation', '--no-knowledge', '--no-rules', '--no-proxy',
   '--security', 'user',
 ];
 

@@ -18,11 +18,11 @@ Run Polish agent and Harden agent sequentially on changed files for post-impleme
 
 ### Phase 0: Context Gathering
 
-<!-- learning:on -->
+<!-- curation:on -->
 **Produces:** FILES_CHANGED, TASK_DESCRIPTION, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, HEAD_BEFORE
-<!-- learning:off -->
+<!-- curation:off -->
 **Produces:** FILES_CHANGED, TASK_DESCRIPTION, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, HEAD_BEFORE
-<!-- learning:end -->
+<!-- curation:end -->
 
 Detect changed files and build context:
 
@@ -35,19 +35,19 @@ Detect changed files and build context:
 {{settings.settings_resolve()}}
 
 {{decisions_load()}}
-<!-- learning:on -->
+<!-- curation:on -->
 Pass `DECISIONS_CONTEXT` to Harden agent — the compact index lists active ADR/PF entries; Harden agent uses `devflow:apply-decisions` to Read full entry bodies on demand. Known pitfalls help identify reintroduced issues, prior decisions help validate architectural consistency. (Polish agent does not consume decisions — it operates at code-shape level and Harden agent runs after to catch any architectural drift.)
 
-<!-- learning:end -->
+<!-- curation:end -->
 {{knowledge_load()}}
 
 Pass `FEATURE_KNOWLEDGE_RULES` to Harden agent.
 
-<!-- learning:on -->
+<!-- curation:on -->
 **Extract:** FILES_CHANGED (list), TASK_DESCRIPTION (string), DECISIONS_CONTEXT (string, optional), FEATURE_KNOWLEDGE (string, optional), FEATURE_KNOWLEDGE_RULES (string, optional), HEAD_BEFORE (40-hex SHA)
-<!-- learning:off -->
+<!-- curation:off -->
 **Extract:** FILES_CHANGED (list), TASK_DESCRIPTION (string), FEATURE_KNOWLEDGE (string, optional), FEATURE_KNOWLEDGE_RULES (string, optional), HEAD_BEFORE (40-hex SHA)
-<!-- learning:end -->
+<!-- curation:end -->
 
 ### Phase 1: Polish agent (Code Refinement)
 
@@ -67,25 +67,25 @@ Commit any improvements with a conventional-commit message."
 ### Phase 2: Harden agent (9-Pillar Quality Gate)
 
 **Produces:** HARDEN_STATUS
-<!-- learning:on -->
+<!-- curation:on -->
 **Requires:** FILES_CHANGED, TASK_DESCRIPTION, DECISIONS_CONTEXT
-<!-- learning:off -->
+<!-- curation:off -->
 **Requires:** FILES_CHANGED, TASK_DESCRIPTION
-<!-- learning:end -->
+<!-- curation:end -->
 
 Spawn Harden agent for quality evaluation and fixing:
 
 Agent(subagent_type="Harden", run_in_background=false):
 "TASK_DESCRIPTION: {task_description}
 FILES_CHANGED: {files_changed}
-<!-- learning:on -->
+<!-- curation:on -->
 DECISIONS_CONTEXT: {decisions_context}
-<!-- learning:end -->
+<!-- curation:end -->
 FEATURE_KNOWLEDGE: {feature_knowledge_rules}
 Evaluate against 9-pillar framework. Fix P0/P1 issues. Return structured report.
-<!-- learning:on -->
+<!-- curation:on -->
 Follow devflow:apply-decisions to scan DECISIONS_CONTEXT and Read full ADR/PF bodies on demand. Skip if (none).
-<!-- learning:end -->
+<!-- curation:end -->
 Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE. Skip if (none)."
 
 **Wait for completion.** Extract: STATUS (PASS|FIXED|BLOCKED) from the `### Status` line
@@ -147,12 +147,12 @@ Display summary:
 │
 ├─ Phase 0: Context gathering
 │  ├─ Git diff for changed files
-<!-- learning:on -->
+<!-- curation:on -->
 │  ├─ Record HEAD_BEFORE
 │  └─ Read index.md → DECISIONS_CONTEXT
-<!-- learning:off -->
+<!-- curation:off -->
 │  └─ Record HEAD_BEFORE
-<!-- learning:end -->
+<!-- curation:end -->
 │
 ├─ Phase 1: Polish agent
 │  └─ Code refinement (commits directly)

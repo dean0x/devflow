@@ -70,7 +70,7 @@
  * THE CORPUS is the installed prompt surface by class, each with a sentinel and a
  * floor so a class that went missing fails by name: compiled commands, every
  * agent as installed (dist-first), the compiled git references, the hand-authored
- * skills and rules, the learning-off builds of commands and agents, and the
+ * skills and rules, the curation-off builds of commands and agents, and the
  * compaction directive of the session-start hook.
  *
  * THE COMPILED CLASSES MUST BE CURRENT, WITHIN THE LIMITS OF THE CHECK. The first test
@@ -89,7 +89,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import * as os from 'os'
 import * as path from 'path'
 
-import { MIN_COMPILED_PROMPTS, RETIRED_INLINE_EXPANSION, ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, collectStaleOutputs, compactDirectiveFrom, compactDirectiveText, compiledPrompts, requireDistFile, requireDistFiles, resolveAgentSource, resolveAllAgents, resolveLearningOffSource, sectionBetween, walkFiles } from '../helpers.js'
+import { MIN_COMPILED_PROMPTS, RETIRED_INLINE_EXPANSION, ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, collectStaleOutputs, compactDirectiveFrom, compactDirectiveText, compiledPrompts, requireDistFile, requireDistFiles, resolveAgentSource, resolveAllAgents, resolveCurationOffSource, sectionBetween, walkFiles } from '../helpers.js'
 import { DEVFLOW_PLUGINS, buildScopedSkillsMap, getAllAgentNames } from '../../src/core/plugins.js'
 import { installViaFileCopy } from '../../src/targets/claude-code/installer.js'
 import { getClaudeDirectory } from '../../src/targets/claude-code/claude-paths.js'
@@ -207,7 +207,7 @@ export const ALLOWED_RULE_PROSE: readonly AllowedRuleProse[] = [
     binds: CLAUDE_DIR_PLACEHOLDER,
     files: [
       'dist/commands/dynamic-profile.md',
-      'dist/learning-off/commands/dynamic-profile.md',
+      'dist/curation-off/commands/dynamic-profile.md',
       'src/assets/skills/agent-references/SKILL.md',
     ],
   },
@@ -238,11 +238,11 @@ export const SITE_ROWS: SiteRows = {
   'dist/commands/plan.md': 2,
   'dist/commands/implement.md': 3,
   'dist/commands/resolve.md': 1,
-  'dist/learning-off/commands/code-review.md': 1,
-  'dist/learning-off/commands/dynamic-profile.md': 1,
-  'dist/learning-off/commands/plan.md': 2,
-  'dist/learning-off/commands/implement.md': 3,
-  'dist/learning-off/commands/resolve.md': 1,
+  'dist/curation-off/commands/code-review.md': 1,
+  'dist/curation-off/commands/dynamic-profile.md': 1,
+  'dist/curation-off/commands/plan.md': 2,
+  'dist/curation-off/commands/implement.md': 3,
+  'dist/curation-off/commands/resolve.md': 1,
   [SYNTHESIZE_FILE]: 1,
   [CURATE_FILE]: 2,
 }
@@ -404,7 +404,7 @@ function promptSurface(): CorpusClass[] {
     { label: 'references', files: readTree('dist/skills'), sentinel: 'dist/skills/git/references/publication-gate.md', floor: 20 },
     { label: 'skills', files: readTree('src/assets/skills'), sentinel: 'src/assets/skills/worktree-support/SKILL.md', floor: 30 },
     { label: 'rules', files: readTree('src/assets/rules'), sentinel: 'src/assets/rules/security.md', floor: 4 },
-    { label: 'learning-off', files: readTree('dist/learning-off'), sentinel: 'dist/learning-off/commands/code-review.md', floor: 25 },
+    { label: 'curation-off', files: readTree('dist/curation-off'), sentinel: 'dist/curation-off/commands/code-review.md', floor: 25 },
     { label: 'compaction directive', files: [{ name: COMPACTION_ENTRY, content: compactDirectiveText() }], sentinel: COMPACTION_ENTRY, floor: 1 },
   ]
 }
@@ -538,8 +538,8 @@ describe('no prompt reaches the Claude directory outside the CLAUDE_CONFIG_DIR r
     expect(review).toContain('A language focus is spawned only when its file-type condition above fires AND its name appears in that stamped line.')
     expect(review.split('\n').filter(line => line.startsWith('Installed language focuses: '))).toHaveLength(1)
     expect(collectCodeReviewDirReadDefects(review)).toEqual([])
-    const off = resolveLearningOffSource('commands', 'code-review')
-    expect(off, 'dist/learning-off/commands/code-review.md is absent: run `npm run build:mds`').not.toBeNull()
+    const off = resolveCurationOffSource('commands', 'code-review')
+    expect(off, 'dist/curation-off/commands/code-review.md is absent: run `npm run build:mds`').not.toBeNull()
     expect(collectCodeReviewDirReadDefects(off as string)).toEqual([])
 
     // The installed copy, into injected temp directories (never the real home): a selection with
@@ -550,7 +550,7 @@ describe('no prompt reaches the Claude directory outside the CLAUDE_CONFIG_DIR r
       const plugins = ['devflow-core-skills', 'devflow-code-review', 'devflow-typescript']
         .map(name => DEVFLOW_PLUGINS.find(p => p.name === name)!)
       await installViaFileCopy({
-        plugins, claudeDir, devflowDir, learning: true,
+        plugins, claudeDir, devflowDir, curation: true,
         skillsMap: buildScopedSkillsMap(plugins), agentsMap: new Map(), isPartialInstall: false,
         spinner: { start() {}, stop() {}, message() {} },
       })
@@ -615,8 +615,8 @@ describe('no prompt reaches the Claude directory outside the CLAUDE_CONFIG_DIR r
     // two CLAUDE_CONFIG_DIR names and two skills paths, and no {claude_dir} placeholder.
     const plan = requireDistFile('plan.md')
     expect(collectPlanDirReadDefects(plan)).toEqual([])
-    const off = resolveLearningOffSource('commands', 'plan')
-    expect(off, 'dist/learning-off/commands/plan.md is absent: run `npm run build:mds`').not.toBeNull()
+    const off = resolveCurationOffSource('commands', 'plan')
+    expect(off, 'dist/curation-off/commands/plan.md is absent: run `npm run build:mds`').not.toBeNull()
     expect(collectPlanDirReadDefects(off as string)).toEqual([])
     // Non-vacuity: the compiled command holds the levels path and the compliance path the collector expects.
     for (const body of [plan, off as string]) {

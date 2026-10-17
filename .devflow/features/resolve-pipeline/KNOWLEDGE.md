@@ -41,9 +41,9 @@ updated: 2026-10-17
 - **KB-AP-10** Never read an empty `DIFF_FILES` as "all files in scope": it is `""` and the matrix degrades conservatively.
 - **KB-AP-11** Never dedup review-summary on the cycle alone: the key is the cycle+timestamp pair, so `REVIEW_TIMESTAMP` is a load-bearing spawn input.
 - **KB-AP-12** Never write `rm -f` or `rm -rf` in agent instructions: the deny-list blocks them; name a flagless `rm <path>` or `unlink <path>`.
-- **KB-AP-13** Never edit one learning arm and forget its pair: an item rewritten rather than removed needs both arms, and arms cannot nest.
+- **KB-AP-13** Never edit one curation arm and forget its pair: an item rewritten rather than removed needs both arms, and arms cannot nest.
 - **KB-AP-14** Never spawn the Git agent for `update-pr-evidence` or `check-merge-readiness` from /resolve: both are plumbing the script owns end to end (markers, grammar, scrub), and a spawn only adds a model's turns.
-- **KB-AP-15** Never grow `resolve.md` past its byte ceilings (`command-resolve-max`, `command-resolve-learning-off-max`) or reword a line the frozen status-lines fixture samples: new text is paid for by condensing.
+- **KB-AP-15** Never grow `resolve.md` past its byte ceilings (`command-resolve-max`, `command-resolve-curation-off-max`) or reword a line the frozen status-lines fixture samples: new text is paid for by condensing.
 - **KB-AP-16** Never add a line to a Code-family body without cutting one: `CODE_BODY_MAX_BYTES`, `FIX_BODY_MAX_BYTES` and `REFACTOR_BODY_MAX_BYTES` have zero headroom, and the cut duplicate rules do not return.
 
 ## Overview
@@ -105,7 +105,7 @@ An empty FIX_NOW list skips Phases 3-4 and 6-8 but still writes the summary and 
 
 **`RESOLUTION_TS`** is minted once per run in Step 0d for every worktree. Phase 5 writes it as the summary's `**Date**:` and 9b-2 passes it, so the local file and the posted dedup marker agree; a retry of this run stays deduplicated while the next /resolve on the same PR posts.
 
-**Settings and decisions**: `resolve.mds` alias-imports `_partials/_settings.mds` and expands `settings_resolve()` once in Step 0d, ahead of the decisions load, publication gate and compliance lens. Those partials import nothing from it and refer to "the line resolved above", so `REVIEW_PUBLICATION`, `COMPLIANCE_FRAMEWORKS` and `GATE_LEVEL` are still read per worktree. `compliance_inject()` builds each worktree's `COMPLIANCE_DIRECTIVE` from `COMPLIANCE_FRAMEWORKS`, which never reaches an agent (KB-INV-13). `DECISIONS_CONTEXT` (KB-INV-12): `decisions_load()` Step 2 has the main model copy the index lines that touch the work, one shared slice for sibling spawns; it exists only in the learning-on build (`decisions_gate()` sets `(none)` under `LEARNING=off`).
+**Settings and decisions**: `resolve.mds` alias-imports `_partials/_settings.mds` and expands `settings_resolve()` once in Step 0d, ahead of the decisions load, publication gate and compliance lens. Those partials import nothing from it and refer to "the line resolved above", so `REVIEW_PUBLICATION`, `COMPLIANCE_FRAMEWORKS` and `GATE_LEVEL` are still read per worktree. `compliance_inject()` builds each worktree's `COMPLIANCE_DIRECTIVE` from `COMPLIANCE_FRAMEWORKS`, which never reaches an agent (KB-INV-13). `DECISIONS_CONTEXT` (KB-INV-12): `decisions_load()` Step 2 has the main model copy the index lines that touch the work, one shared slice for sibling spawns; it exists only in the curation-on build (`decisions_gate()` sets `(none)` under `CURATION=off`).
 
 **Gate level** (KB-INV-17): the settings line carries `GATE_LEVEL`, kept per worktree. Step 0d's `**Gate level.**` block reads `resolve-levels.md` (`agent-references`) once per run when any worktree is `standard` or `lean`, and applies each row to the phase it names, as the reference says: a worktree reads the column of its own level, except in a global phase; at `full` everywhere nothing is read. The reference holds the fixed grammar and no rows yet, so a read changes nothing. The grammar bars `skip` on Global Triage, Batch FIX_NOW, Fix and Manage Debt (no row leaves a FIX_NOW security finding unfixed, a FIX_SEPARATE item unticketed or the CI gate dropped; a row or Rules bullet that breaks this is malformed, so no row applies in any worktree) and gives a phase with no spawn (Batch FIX_NOW) only `-`. A skipped phase does not stop the run, and its `**Produces:**` names read `SKIPPED`. Global Triage, one spawn for all worktrees, is the global phase: it takes the cell of the strictest level in the run (`full` strictest, then `standard`, `lean`) and at `full` runs as written. Phase 10 shows `**Gate level**: {GATE_LEVEL, with any level note}` after `Total Issues`, and Phase 5 writes `**Gate level**: {GATE_LEVEL}` into each worktree's summary header after `**Command**: /resolve`; the convergence parser reads neither, so it does not change. /implement has the matching block at the start of Phase 3 (guards: `test-harness-prompt-install`).
 
@@ -150,7 +150,7 @@ The ledger gains a `### DUPLICATE` table (`Issue ID | Duplicate Of | File:Line |
 |----------|---------|-----------|-------------------|
 | 0 | SECURITY GATE | Any security finding | Overrides everything; → FIX_NOW or ESCALATED only |
 | 1 | FALSE_POSITIVE | Review agent factually wrong | Cited grep/file:line proving the issue does not exist |
-| 2 | BY_DESIGN | Code is intentional | An ADR whose body was read, stated in words (learning on only), or an inline comment/doc |
+| 2 | BY_DESIGN | Code is intentional | An ADR whose body was read, stated in words (curation on only), or an inline comment/doc |
 | 3 | FIX_NOW | File in DIFF_FILES, OR isolated Standard fix, OR security/correctness in a touched path | Risk tier Standard or Careful |
 | 4 | FIX_SEPARATE | Valid but exceeds the diff blast radius | Must become a tracked manage-debt ticket |
 | 5 | TECH_DEBT | LAST RESORT: complete architectural overhaul only | Not "touches many files" or "changes public API" |
@@ -198,7 +198,7 @@ The rest serve other commands: Code `implement` (default, full implementation wi
 
 - **fp_ratio** = `fp_count / (fp_count + fixed_count + deferred_count)`; the `Deferred` row is FIX_SEPARATE + TECH_DEBT combined; By Design and Escalated sit outside the denominator. `fp_ratio > 0.7` with `CYCLE_NUMBER >= 3` emits a convergence warning that never blocks; a zero denominator or parse failure gives `fp_ratio = 0`.
 - **Counting**: `Total Issues` counts every triaged issue including collapsed duplicates; every row between `Total Issues` and `Duplicates Collapsed` counts unique issues only, so `Total Issues` equals the sum of the rows below it.
-- **Safe additions**: `## Escalations`, `## Blocked`, `## By Design`, `## Third-Party Threads`, the `**Gate level**:` header line, the `| Duplicates Collapsed | {n} |` row, `## Duplicates` (`| Issue | Duplicate Of | File:Line |`), and in the learning-on build `## Decisions Citations`. **Unsafe**: renaming a label above (`Fixed` → `Resolved`), splitting `Deferred`, restructuring the Statistics table.
+- **Safe additions**: `## Escalations`, `## Blocked`, `## By Design`, `## Third-Party Threads`, the `**Gate level**:` header line, the `| Duplicates Collapsed | {n} |` row, `## Duplicates` (`| Issue | Duplicate Of | File:Line |`), and in the curation-on build `## Decisions Citations`. **Unsafe**: renaming a label above (`Fixed` → `Resolved`), splitting `Deferred`, restructuring the Statistics table.
 - **Section exclusivity**: a DUPLICATE appears **only** in `## Duplicates`, never in `## Fixed Issues`, `## False Positives`, `## By Design`, `## Fix Separately`, `## Deferred to Tech Debt`, `## Escalations` or `## Blocked`. A duplicate of a FALSE_POSITIVE primary leaves only the primary in the `False Positive` row and section; the primary's ticket covers the duplicates.
 
 ## Code-Review Phase 3: Sequential Synthesis + Comment
@@ -219,16 +219,16 @@ All PR commenting goes through `post-review-summary` (/code-review Phase 3b) or 
 
 Triage (opus, tools Read/Grep/Glob/Bash) is the sole judgment agent and spawns no sub-agents: its tool list has no spawn tool.
 
-- **Skills** preloaded in frontmatter: `devflow:worktree-support`, `devflow:apply-feature-knowledge`, and `devflow:apply-decisions` in the learning-on build only; the security-finding rule is inline in the body.
+- **Skills** preloaded in frontmatter: `devflow:worktree-support`, `devflow:apply-feature-knowledge`, and `devflow:apply-decisions` in the curation-on build only; the security-finding rule is inline in the body.
 - **`FEATURE_KNOWLEDGE`** is per KB: the Rules bullets most relevant to the issues, the KB path and a heading index (sections are read on demand).
 - Reads 30 lines around each reported file:line, runs the pre-pass first, then the matrix on primaries only. Evidence per verdict is in the matrix table.
 - Output is a verdict ledger over ESCALATED, FIX_NOW, FALSE_POSITIVE, BY_DESIGN, FIX_SEPARATE, TECH_DEBT and DUPLICATE, plus a Summary. The report cap exempts the whole ledger (returned inline in full) because /resolve checks every issue id against it. It goes to the orchestrator, not to Code agents.
 
-## Learning Variants
+## Curation Variants
 
-`resolve.mds`, `triage.mds` and the Code hosts (`code.mds`, `fix.mds`) carry whole-line `<!-- learning:on -->` / `<!-- learning:off -->` / `<!-- learning:end -->` arms. The build compiles each host twice, learning on in `dist/commands/` or `dist/agents/` and learning off under `dist/learning-off/`; The learning-off /resolve drops Step 0d's decisions load, `DECISIONS_CONTEXT` in Produces/Requires and the Triage and Code-family spawns, the apply-decisions instruction, the Reasoning-column collection sentence and the `## Decisions Citations` section of resolution-summary.md; Triage drops the apply-decisions preload, the Apply Decisions responsibility (later numbers become on/off pairs) and the ADR route to BY_DESIGN.
+`resolve.mds`, `triage.mds` and the Code hosts (`code.mds`, `fix.mds`) carry whole-line `<!-- curation:on -->` / `<!-- curation:off -->` / `<!-- curation:end -->` arms. The build compiles each host twice, curation on in `dist/commands/` or `dist/agents/` and curation off under `dist/curation-off/`; The curation-off /resolve drops Step 0d's decisions load, `DECISIONS_CONTEXT` in Produces/Requires and the Triage and Code-family spawns, the apply-decisions instruction, the Reasoning-column collection sentence and the `## Decisions Citations` section of resolution-summary.md; Triage drops the apply-decisions preload, the Apply Decisions responsibility (later numbers become on/off pairs) and the ADR route to BY_DESIGN.
 
-Items rewritten rather than removed (Step 0d's heading and Produces, the Phase 2 and 4 Requires, the `ci-fix` step 6) exist in both arms (KB-AP-13). `tests/learning/learning-variants-arms.test.ts` checks each variant against an independent resolution of the compiled host.
+Items rewritten rather than removed (Step 0d's heading and Produces, the Phase 2 and 4 Requires, the `ci-fix` step 6) exist in both arms (KB-AP-13). `tests/curation/curation-variants-arms.test.ts` checks each variant against an independent resolution of the compiled host.
 
 ## Verification Gate (Phase 7)
 
@@ -282,8 +282,8 @@ Wider seam and guard family: `tests/seams/command-agent-input.test.ts` (spawn-ke
 
 - `.devflow/features/dynamic-workflow-engine/KNOWLEDGE.md` — the Phase 3 per-batch concurrency cap was generalized from the dynamic-build pipeline
 - `.devflow/features/compliance-feature/KNOWLEDGE.md` — source of the settings-line compliance lens, the compliance partial, the traceability Git operations and the `TRACEABILITY: DEGRADED` contract
-- `.devflow/features/feature-knowledge-system/KNOWLEDGE.md` — how `FEATURE_KNOWLEDGE` reaches Triage and the Code issue-fix spawns (Rules plus heading index; Fix spawns take none) and how the learning variants build
-- `.devflow/features/learning-capture-system/KNOWLEDGE.md` — `decisions_load()` and the `DECISIONS_CONTEXT` index
+- `.devflow/features/feature-knowledge-system/KNOWLEDGE.md` — how `FEATURE_KNOWLEDGE` reaches Triage and the Code issue-fix spawns (Rules plus heading index; Fix spawns take none) and how the curation variants build
+- `.devflow/features/curation-capture-system/KNOWLEDGE.md` — `decisions_load()` and the `DECISIONS_CONTEXT` index
 - `.devflow/features/test-harness-prompt-install/KNOWLEDGE.md` — the level guards that pin the Gate level block, report lines and short routes
 - `.devflow/features/test-harness/KNOWLEDGE.md` — the helpers (`resolveAgentSource`, `extractOpSectionFromCorpus`) and guard suites behind Test Guards
 - `.devflow/features/test-harness-goldens-budgets/KNOWLEDGE.md` — the frozen status-lines fixture that samples resolve.mds lines, and the command byte ceilings

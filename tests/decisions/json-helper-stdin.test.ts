@@ -14,7 +14,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { GIT_ENV, JSON_HELPER, makeV2LogRow, seedLearningTree, type HelperRun } from './learning-fixtures.js';
+import { GIT_ENV, JSON_HELPER, makeV2LogRow, seedCurationTree, type HelperRun } from './curation-fixtures.js';
 
 /** How long the writer waits, once the helper has started, before its first chunk. */
 const FIRST_CHUNK_DELAY_MS = 200;
@@ -143,14 +143,14 @@ describe('json-helper reads stdin from descriptor 0, to EOF (D-STDIN-FD0)', { ti
     });
 
     it(`a learning op reads exactly 64 KiB that arrives late, in chunks, on ${socket}`, async () => {
-      seedLearningTree(dir, { log: [makeV2LogRow()] });
+      seedCurationTree(dir, { log: [makeV2LogRow()] });
       expect(await runWithLateStdin(dir, ['put-observation', '--reinforce'], chunksOf(reinforceInputOf(65_536), 4), { nonBlocking })).toEqual({
         code: 0, stdout: 'reinforced obs_store_one 2\n', stderr: '',
       });
     });
 
     it(`a learning op still refuses one byte over 64 KiB that arrives late, in chunks, on ${socket}`, async () => {
-      const paths = seedLearningTree(dir, { log: [makeV2LogRow()] });
+      const paths = seedCurationTree(dir, { log: [makeV2LogRow()] });
       const logBefore = fs.readFileSync(paths.log, 'utf8');
       expect(await runWithLateStdin(dir, ['put-observation', '--reinforce'], chunksOf(reinforceInputOf(65_537), 4), { nonBlocking })).toEqual({
         code: 1, stdout: '', stderr: 'put-observation: stdin holds more than 65536 bytes; it must hold one JSON object\n',
@@ -168,7 +168,7 @@ describe('json-helper reads stdin from descriptor 0, to EOF (D-STDIN-FD0)', { ti
   });
 
   it('a non-blocking stdin that never ends is refused once 10 s of waiting for input run out', async () => {
-    const paths = seedLearningTree(dir, { log: [makeV2LogRow()] });
+    const paths = seedCurationTree(dir, { log: [makeV2LogRow()] });
     const logBefore = fs.readFileSync(paths.log, 'utf8');
     expect(await runWithLateStdin(dir, ['put-observation', '--reinforce'], [], { nonBlocking: true })).toEqual({
       code: 1,
@@ -179,7 +179,7 @@ describe('json-helper reads stdin from descriptor 0, to EOF (D-STDIN-FD0)', { ti
   });
 
   it('a read that fails is refused, not thrown: a learning op names the error', () => {
-    const paths = seedLearningTree(dir, { log: [makeV2LogRow()] });
+    const paths = seedCurationTree(dir, { log: [makeV2LogRow()] });
     const logBefore = fs.readFileSync(paths.log, 'utf8');
     // A directory opens for reading, and every read of it fails with EISDIR.
     const fd = fs.openSync(dir, 'r');

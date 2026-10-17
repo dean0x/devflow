@@ -9,6 +9,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { spawnSync } from 'child_process';
 import * as path from 'path';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
@@ -16,16 +17,17 @@ import { fileURLToPath } from 'url';
 // Import TypeScript module (ESM)
 import {
   getMemoryDir,
-  getLearningDir,
+  getCurationDir,
   getFeaturesDir,
   getDocsDir,
   getFeatureConfigPath,
-  getLearningPendingTurnsPath,
-  getLearningPendingTurnsProcessingPath,
-  getLearningClaimOwnerPath,
+  getCurationPendingTurnsPath,
+  getCurationPendingTurnsProcessingPath,
+  getCurationClaimOwnerPath,
   getDecisionsFilePath,
   getPitfallsFilePath,
   getCurateTuningConfigPath,
+  getGlobalCurateTuningConfigPath,
   getDecisionsLedgerPath,
   getDecisionsLogPath,
   getDecisionsArchivePath,
@@ -40,6 +42,10 @@ import {
   getReviewsDir,
   getDesignDir,
   getResearchDir,
+  LEGACY_NAMES,
+  CURATION_DIR_NAME,
+  CURATION_TUNING_FILE_NAME,
+  curationMoveMarkerKey,
 } from '../src/core/project-paths.js';
 import * as tsPathsNs from '../src/core/project-paths.js';
 
@@ -57,8 +63,8 @@ describe('project-paths TypeScript module', () => {
       expect(getMemoryDir(ROOT)).toBe('/some/project/.devflow/memory');
     });
 
-    it('getLearningDir returns .devflow/learning/', () => {
-      expect(getLearningDir(ROOT)).toBe('/some/project/.devflow/learning');
+    it('getCurationDir returns .devflow/curation/', () => {
+      expect(getCurationDir(ROOT)).toBe('/some/project/.devflow/curation');
     });
 
     it('getFeaturesDir returns .devflow/features/', () => {
@@ -77,46 +83,46 @@ describe('project-paths TypeScript module', () => {
   });
 
   describe('learning queue files', () => {
-    it('getLearningPendingTurnsPath returns .devflow/learning/.pending-turns.jsonl', () => {
-      expect(getLearningPendingTurnsPath(ROOT)).toBe('/some/project/.devflow/learning/.pending-turns.jsonl');
+    it('getCurationPendingTurnsPath returns .devflow/curation/.pending-turns.jsonl', () => {
+      expect(getCurationPendingTurnsPath(ROOT)).toBe('/some/project/.devflow/curation/.pending-turns.jsonl');
     });
 
-    it('getLearningPendingTurnsProcessingPath returns .devflow/learning/.pending-turns.processing', () => {
-      expect(getLearningPendingTurnsProcessingPath(ROOT)).toBe('/some/project/.devflow/learning/.pending-turns.processing');
+    it('getCurationPendingTurnsProcessingPath returns .devflow/curation/.pending-turns.processing', () => {
+      expect(getCurationPendingTurnsProcessingPath(ROOT)).toBe('/some/project/.devflow/curation/.pending-turns.processing');
     });
 
-    it('getLearningClaimOwnerPath returns .devflow/learning/.pending-turns.owner', () => {
-      expect(getLearningClaimOwnerPath(ROOT)).toBe('/some/project/.devflow/learning/.pending-turns.owner');
+    it('getCurationClaimOwnerPath returns .devflow/curation/.pending-turns.owner', () => {
+      expect(getCurationClaimOwnerPath(ROOT)).toBe('/some/project/.devflow/curation/.pending-turns.owner');
     });
   });
 
   describe('learning content files', () => {
-    it('getDecisionsFilePath returns .devflow/learning/decisions.md', () => {
-      expect(getDecisionsFilePath(ROOT)).toBe('/some/project/.devflow/learning/decisions.md');
+    it('getDecisionsFilePath returns .devflow/curation/decisions.md', () => {
+      expect(getDecisionsFilePath(ROOT)).toBe('/some/project/.devflow/curation/decisions.md');
     });
 
-    it('getPitfallsFilePath returns .devflow/learning/pitfalls.md', () => {
-      expect(getPitfallsFilePath(ROOT)).toBe('/some/project/.devflow/learning/pitfalls.md');
+    it('getPitfallsFilePath returns .devflow/curation/pitfalls.md', () => {
+      expect(getPitfallsFilePath(ROOT)).toBe('/some/project/.devflow/curation/pitfalls.md');
     });
 
-    it('getCurateTuningConfigPath returns .devflow/learning/learning.json', () => {
-      expect(getCurateTuningConfigPath(ROOT)).toBe('/some/project/.devflow/learning/learning.json');
+    it('getCurateTuningConfigPath returns .devflow/curation/curation.json', () => {
+      expect(getCurateTuningConfigPath(ROOT)).toBe('/some/project/.devflow/curation/curation.json');
     });
 
-    it('getDecisionsLogPath returns .devflow/learning/decisions-log.jsonl', () => {
-      expect(getDecisionsLogPath(ROOT)).toBe('/some/project/.devflow/learning/decisions-log.jsonl');
+    it('getDecisionsLogPath returns .devflow/curation/decisions-log.jsonl', () => {
+      expect(getDecisionsLogPath(ROOT)).toBe('/some/project/.devflow/curation/decisions-log.jsonl');
     });
 
-    it('getDecisionsHistoryPath returns .devflow/learning/decisions-history.jsonl', () => {
-      expect(getDecisionsHistoryPath(ROOT)).toBe('/some/project/.devflow/learning/decisions-history.jsonl');
+    it('getDecisionsHistoryPath returns .devflow/curation/decisions-history.jsonl', () => {
+      expect(getDecisionsHistoryPath(ROOT)).toBe('/some/project/.devflow/curation/decisions-history.jsonl');
     });
 
-    it('getDecisionsLockDir returns .devflow/learning/.decisions.lock', () => {
-      expect(getDecisionsLockDir(ROOT)).toBe('/some/project/.devflow/learning/.decisions.lock');
+    it('getDecisionsLockDir returns .devflow/curation/.decisions.lock', () => {
+      expect(getDecisionsLockDir(ROOT)).toBe('/some/project/.devflow/curation/.decisions.lock');
     });
 
-    it('getDecisionsIndexPath returns .devflow/learning/index.md', () => {
-      expect(getDecisionsIndexPath(ROOT)).toBe('/some/project/.devflow/learning/index.md');
+    it('getDecisionsIndexPath returns .devflow/curation/index.md', () => {
+      expect(getDecisionsIndexPath(ROOT)).toBe('/some/project/.devflow/curation/index.md');
     });
   });
 
@@ -181,16 +187,17 @@ describe('CJS project-paths parity', () => {
     cjs: (root: string) => string;
   }> = [
     { name: 'getMemoryDir', ts: getMemoryDir, cjs: cjsPaths.getMemoryDir },
-    { name: 'getLearningDir', ts: getLearningDir, cjs: cjsPaths.getLearningDir },
+    { name: 'getCurationDir', ts: getCurationDir, cjs: cjsPaths.getCurationDir },
     { name: 'getFeaturesDir', ts: getFeaturesDir, cjs: cjsPaths.getFeaturesDir },
     { name: 'getDocsDir', ts: getDocsDir, cjs: cjsPaths.getDocsDir },
     { name: 'getFeatureConfigPath', ts: getFeatureConfigPath, cjs: cjsPaths.getFeatureConfigPath },
-    { name: 'getLearningPendingTurnsPath', ts: getLearningPendingTurnsPath, cjs: cjsPaths.getLearningPendingTurnsPath },
-    { name: 'getLearningPendingTurnsProcessingPath', ts: getLearningPendingTurnsProcessingPath, cjs: cjsPaths.getLearningPendingTurnsProcessingPath },
-    { name: 'getLearningClaimOwnerPath', ts: getLearningClaimOwnerPath, cjs: cjsPaths.getLearningClaimOwnerPath },
+    { name: 'getCurationPendingTurnsPath', ts: getCurationPendingTurnsPath, cjs: cjsPaths.getCurationPendingTurnsPath },
+    { name: 'getCurationPendingTurnsProcessingPath', ts: getCurationPendingTurnsProcessingPath, cjs: cjsPaths.getCurationPendingTurnsProcessingPath },
+    { name: 'getCurationClaimOwnerPath', ts: getCurationClaimOwnerPath, cjs: cjsPaths.getCurationClaimOwnerPath },
     { name: 'getDecisionsFilePath', ts: getDecisionsFilePath, cjs: cjsPaths.getDecisionsFilePath },
     { name: 'getPitfallsFilePath', ts: getPitfallsFilePath, cjs: cjsPaths.getPitfallsFilePath },
     { name: 'getCurateTuningConfigPath', ts: getCurateTuningConfigPath, cjs: cjsPaths.getCurateTuningConfigPath },
+    { name: 'getGlobalCurateTuningConfigPath', ts: getGlobalCurateTuningConfigPath, cjs: cjsPaths.getGlobalCurateTuningConfigPath },
     { name: 'getDecisionsLedgerPath', ts: getDecisionsLedgerPath, cjs: cjsPaths.getDecisionsLedgerPath },
     { name: 'getDecisionsLogPath', ts: getDecisionsLogPath, cjs: cjsPaths.getDecisionsLogPath },
     { name: 'getDecisionsArchivePath', ts: getDecisionsArchivePath, cjs: cjsPaths.getDecisionsArchivePath },
@@ -213,10 +220,10 @@ describe('CJS project-paths parity', () => {
     });
   }
 
-  // TS/CJS parity: getLearningDir and getFeatureConfigPath return the correct paths
-  it('getLearningDir returns .devflow/learning/ in both TS and CJS', () => {
-    expect(getLearningDir(ROOT)).toBe('/some/project/.devflow/learning');
-    expect(cjsPaths.getLearningDir(ROOT)).toBe('/some/project/.devflow/learning');
+  // TS/CJS parity: getCurationDir and getFeatureConfigPath return the correct paths
+  it('getCurationDir returns .devflow/curation/ in both TS and CJS', () => {
+    expect(getCurationDir(ROOT)).toBe('/some/project/.devflow/curation');
+    expect(cjsPaths.getCurationDir(ROOT)).toBe('/some/project/.devflow/curation');
   });
 
   it('getFeatureConfigPath returns .devflow/config.json in both TS and CJS', () => {
@@ -227,14 +234,108 @@ describe('CJS project-paths parity', () => {
   // Structural full-export parity: guards against silent drift where a function
   // is added to one module but not the other. The hardcoded list above only
   // covers enumerated functions; this asserts the COMPLETE export sets match so
-  // any future addition to one side without the other fails fast.
+  // any future addition to one side without the other fails fast. The one
+  // exception is named: the marker key is read by the TypeScript status and HUD
+  // readers and written by the shell, so the CJS layer has no use for it.
+  const TS_ONLY_FUNCTIONS = ['curationMoveMarkerKey'];
   it('TypeScript and CJS export the identical set of function names', () => {
     const tsNames = Object.keys(tsPathsNs)
       .filter(k => typeof (tsPathsNs as Record<string, unknown>)[k] === 'function')
+      .filter(k => !TS_ONLY_FUNCTIONS.includes(k))
       .sort();
     const cjsNames = Object.keys(cjsPaths)
       .filter(k => typeof (cjsPaths as Record<string, unknown>)[k] === 'function')
       .sort();
     expect(cjsNames).toEqual(tsNames);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The rename's name blocks: the old names live in one frozen block per mirror,
+// the new folder and tuning file names beside it.
+// ---------------------------------------------------------------------------
+
+describe('curation rename name blocks', () => {
+  it('LEGACY_NAMES lists the old folder, backup prefix and tuning file, in both mirrors', () => {
+    const expected = { folder: 'learning', backupPrefix: 'learning.backup-', tuningFile: 'learning.json' };
+    expect(LEGACY_NAMES).toEqual(expected);
+    expect(cjsPaths.LEGACY_NAMES).toEqual(expected);
+  });
+
+  it('LEGACY_NAMES is frozen in both mirrors, so no caller can rewrite an old name', () => {
+    expect(Object.isFrozen(LEGACY_NAMES)).toBe(true);
+    expect(Object.isFrozen(cjsPaths.LEGACY_NAMES)).toBe(true);
+  });
+
+  it('both mirrors name the curation folder and tuning file the same', () => {
+    expect(CURATION_DIR_NAME).toBe('curation');
+    expect(cjsPaths.CURATION_DIR_NAME).toBe(CURATION_DIR_NAME);
+    expect(CURATION_TUNING_FILE_NAME).toBe('curation.json');
+    expect(cjsPaths.CURATION_TUNING_FILE_NAME).toBe(CURATION_TUNING_FILE_NAME);
+  });
+
+  it('the global tuning-path helper joins the machine directory and the curation tuning file name, in both mirrors', () => {
+    const machineDir = '/home/dean/.devflow';
+    expect(getGlobalCurateTuningConfigPath(machineDir)).toBe(path.join(machineDir, CURATION_TUNING_FILE_NAME));
+    expect(cjsPaths.getGlobalCurateTuningConfigPath(machineDir)).toBe(path.join(machineDir, CURATION_TUNING_FILE_NAME));
+  });
+
+  it('the global tuning-path helper is separate from the project tuning-path helper', () => {
+    expect(getGlobalCurateTuningConfigPath(ROOT)).toBe(path.join(ROOT, CURATION_TUNING_FILE_NAME));
+    expect(getGlobalCurateTuningConfigPath(ROOT)).not.toBe(getCurateTuningConfigPath(ROOT));
+  });
+
+  it('TP-3: the shell shim lists the same old and new names as both mirrors', () => {
+    const shim = path.join(__dirname, '..', 'src', 'assets', 'scripts', 'hooks', 'curation-move');
+    const names = ['DF_CM_OLD_FOLDER', 'DF_CM_OLD_BACKUP_PREFIX', 'DF_CM_OLD_TUNING_FILE', 'DF_CM_NEW_FOLDER', 'DF_CM_NEW_TUNING_FILE'];
+    const res = spawnSync('/bin/bash', ['-c', 'source "$1"; df_curation_move_names; shift; for n in "$@"; do printf "%s\\n" "${!n}"; done', '_', shim, ...names], {
+      encoding: 'utf-8',
+      env: { PATH: '/nonexistent' },
+    });
+
+    expect(res.status, res.stderr).toBe(0);
+    expect(res.stdout.split('\n').slice(0, names.length)).toEqual([
+      LEGACY_NAMES.folder,
+      LEGACY_NAMES.backupPrefix,
+      LEGACY_NAMES.tuningFile,
+      CURATION_DIR_NAME,
+      CURATION_TUNING_FILE_NAME,
+    ]);
+    expect(cjsPaths.LEGACY_NAMES).toEqual(LEGACY_NAMES);
+  });
+
+  it('the project helpers name the curation folder and tuning file', () => {
+    expect(getCurationDir(ROOT)).toBe(path.join(ROOT, '.devflow', CURATION_DIR_NAME));
+    expect(getCurateTuningConfigPath(ROOT)).toBe(path.join(ROOT, '.devflow', CURATION_DIR_NAME, CURATION_TUNING_FILE_NAME));
+  });
+});
+
+describe('curationMoveMarkerKey', () => {
+  // Expected values come from an independent calculation (a 32-bit multiply-by-33
+  // hash from 5381 over every UTF-8 byte, then the last 60 bytes with each byte
+  // outside letters and digits replaced by an underscore), not from this module.
+  it.each([
+    ['/a', '005970b5__a'],
+    ['/some/project', '9d1d3a6e__some_project'],
+    ['/Users/dean/Sandbox/devflow-rename', 'dee293f6__Users_dean_Sandbox_devflow_rename'],
+  ])('a root shorter than 60 bytes keeps all of its bytes: %s', (root, key) => {
+    expect(curationMoveMarkerKey(root)).toBe(key);
+  });
+
+  it('a non-ASCII root hashes and replaces each UTF-8 byte, not each character', () => {
+    expect(curationMoveMarkerKey('/tmp/ünï/projéct')).toBe('44e2d000__tmp___n___proj__ct');
+  });
+
+  it('a root longer than 60 bytes hashes the whole path but names only its last 60 bytes', () => {
+    const root = `/${'x'.repeat(70)}/end`;
+    expect(curationMoveMarkerKey(root)).toBe(`1db2baaa_${'x'.repeat(56)}_end`);
+  });
+
+  it('two roots that share their last 60 bytes still get different keys', () => {
+    expect(curationMoveMarkerKey('/a/same/tail')).not.toBe(curationMoveMarkerKey('/b/same/tail'));
+  });
+
+  it('is safe to use as a file name: lowercase hex, an underscore, then letters, digits and underscores', () => {
+    expect(curationMoveMarkerKey('/we ird/$(touch x)/"q"')).toMatch(/^[0-9a-f]{8}_[A-Za-z0-9_]{1,60}$/);
   });
 });

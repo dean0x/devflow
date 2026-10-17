@@ -1286,12 +1286,12 @@ describe('AC-103 reads and re-reads (D-AUDIT-READS)', () => {
   it('counts ledger reads: the index and the decisions or pitfalls bodies', async () => {
     const read = (n: number, file: string): string => turnLine({ id: `l${n}`, content: [use(`tl${n}`, 'Read', { file_path: file })] });
     const parsed = await signalsOf([
-      read(1, '/w/.devflow/learning/index.md'),
-      read(2, '/w/.devflow/learning/pitfalls.md'),
-      read(3, '/w/.devflow/learning/decisions.md'),
+      read(1, '/w/.devflow/curation/index.md'),
+      read(2, '/w/.devflow/curation/pitfalls.md'),
+      read(3, '/w/.devflow/curation/decisions.md'),
       read(4, '/w/src/index.md'), //            not the ledger
       read(5, '/w/learning/index.md'), //        not under .devflow
-      read(6, '.devflow/learning/index.md'), //   a relative ledger path
+      read(6, '.devflow/learning/index.md'), //   a relative ledger path under the old folder name
     ]);
     expect(parsed.signals.ledgerReads).toEqual({ index: 2, bodies: 2 });
   });

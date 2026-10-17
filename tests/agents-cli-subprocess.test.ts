@@ -57,7 +57,7 @@ describe('devflow agents and init (built CLI, temp HOME)', () => {
   };
 
   const init = (home: string): Run =>
-    cli(home, 'init', '--recommended', '--no-ambient', '--no-memory', '--no-learning', '--no-knowledge', '--no-rules');
+    cli(home, 'init', '--recommended', '--no-ambient', '--no-memory', '--no-curation', '--no-knowledge', '--no-rules');
 
   const mappingFile = (home: string): string => path.join(home, '.devflow', 'agent-models.json');
   const installedAgentsDir = (home: string): string => path.join(home, '.claude', 'agents', 'devflow');

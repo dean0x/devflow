@@ -69,7 +69,7 @@ interface Settings {
   readonly key: string | null;
   readonly reviewPublication: 'off' | 'auto' | 'full';
   readonly compliance: { readonly enabled: boolean; readonly frameworks: readonly string[] };
-  readonly switches: { readonly memory: SwitchState; readonly learning: SwitchState; readonly knowledge: SwitchState };
+  readonly switches: { readonly memory: SwitchState; readonly curation: SwitchState; readonly knowledge: SwitchState };
   readonly gateLevel: 'full' | 'standard' | 'lean';
   readonly gateLevelSource: 'personal' | 'machine' | 'default' | null;
   readonly gateLevelInvalid: boolean;
@@ -115,11 +115,11 @@ const LIB = NODE_REQUIRE(PROJECT_CONFIG_LIB) as LibModule;
 
 const FAIL_CLOSED =
   'TRACKER=github TRACKER_SOURCE=default TRACKER_WARN=invalid SITE=none KEY=none '
-  + 'REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=on LEARNING=on KNOWLEDGE=off GATE_LEVEL=full';
+  + 'REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=on CURATION=on KNOWLEDGE=off GATE_LEVEL=full';
 
 const DEFAULT_LINE =
   'TRACKER=github TRACKER_SOURCE=default TRACKER_WARN=none SITE=none KEY=none '
-  + 'REVIEW_PUBLICATION=auto COMPLIANCE=off MEMORY=on LEARNING=on KNOWLEDGE=on GATE_LEVEL=standard';
+  + 'REVIEW_PUBLICATION=auto COMPLIANCE=off MEMORY=on CURATION=on KNOWLEDGE=on GATE_LEVEL=standard';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -269,14 +269,14 @@ describe('module surface and SETTINGS_LINE_RE', () => {
       + ' SITE=(?<site>none|https:\\/\\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9-]+)+)'
       + ' KEY=(?<key>none|[A-Z][A-Z0-9_]{1,9}) REVIEW_PUBLICATION=(?<publication>off|auto|full)'
       + ` COMPLIANCE=(?<compliance>off|generic|(?:${IDS})(?:,(?:${IDS})){0,5})`
-      + ' MEMORY=(?<memory>on|off) LEARNING=(?<learning>on|off) KNOWLEDGE=(?<knowledge>on|off)'
+      + ' MEMORY=(?<memory>on|off) CURATION=(?<curation>on|off) KNOWLEDGE=(?<knowledge>on|off)'
       + ' GATE_LEVEL=(?<gateLevel>full|standard|lean)$',
     );
     expect(SETTINGS.SETTINGS_LINE_RE.flags).toBe('');
   });
 
   const GOOD = 'TRACKER=jira TRACKER_SOURCE=project TRACKER_WARN=none SITE=https://acme.atlassian.net KEY=ACME '
-    + 'REVIEW_PUBLICATION=full COMPLIANCE=gdpr,hipaa MEMORY=on LEARNING=off KNOWLEDGE=on GATE_LEVEL=lean';
+    + 'REVIEW_PUBLICATION=full COMPLIANCE=gdpr,hipaa MEMORY=on CURATION=off KNOWLEDGE=on GATE_LEVEL=lean';
 
   it('accepts a full line, every compliance id alone and each of the three levels', () => {
     expect(GOOD).toMatch(SETTINGS.SETTINGS_LINE_RE);
@@ -301,7 +301,7 @@ describe('module surface and SETTINGS_LINE_RE', () => {
     ['an empty compliance', GOOD.replace('COMPLIANCE=gdpr,hipaa', 'COMPLIANCE=')],
     ['publication stub', GOOD.replace('REVIEW_PUBLICATION=full', 'REVIEW_PUBLICATION=stub')],
     ['a switch spelled true', GOOD.replace('MEMORY=on', 'MEMORY=true')],
-    ['reordered fields', GOOD.replace('MEMORY=on LEARNING=off', 'LEARNING=off MEMORY=on')],
+    ['reordered fields', GOOD.replace('MEMORY=on CURATION=off', 'CURATION=off MEMORY=on')],
     ['a missing field', GOOD.replace(' KNOWLEDGE=on', '')],
     ['a missing level', GOOD.replace(' GATE_LEVEL=lean', '')],
     ['a capitalised level', GOOD.replace('GATE_LEVEL=lean', 'GATE_LEVEL=Lean')],
@@ -309,7 +309,7 @@ describe('module surface and SETTINGS_LINE_RE', () => {
     ['an empty level', GOOD.replace('GATE_LEVEL=lean', 'GATE_LEVEL=')],
     ['a level with a trailing run', GOOD.replace('GATE_LEVEL=lean', 'GATE_LEVEL=lean2')],
     ['a level with a trailing field', `${GOOD} EXTRA=1`],
-    ['the level before the switches', GOOD.replace('MEMORY=on LEARNING=off KNOWLEDGE=on GATE_LEVEL=lean', 'GATE_LEVEL=lean MEMORY=on LEARNING=off KNOWLEDGE=on')],
+    ['the level before the switches', GOOD.replace('MEMORY=on CURATION=off KNOWLEDGE=on GATE_LEVEL=lean', 'GATE_LEVEL=lean MEMORY=on CURATION=off KNOWLEDGE=on')],
     ['a level group left open', GOOD.replace('GATE_LEVEL=lean', 'GATE_LEVEL=lean full')],
   ])('rejects %s', (_label, line) => {
     expect(line).not.toMatch(SETTINGS.SETTINGS_LINE_RE);
@@ -422,7 +422,7 @@ describe('TP-32 (AC-28): settings mode is local — one grammar line, local git 
     }));
     const r = run([TOPLEVEL(root), ORIGIN_HEAD_UNSET]);
     expect(r.stdout).toBe('TRACKER=jira TRACKER_SOURCE=project TRACKER_WARN=none SITE=https://acme.atlassian.net KEY=ACME '
-      + 'REVIEW_PUBLICATION=off COMPLIANCE=hipaa MEMORY=on LEARNING=off KNOWLEDGE=on GATE_LEVEL=standard\n');
+      + 'REVIEW_PUBLICATION=off COMPLIANCE=hipaa MEMORY=on CURATION=off KNOWLEDGE=on GATE_LEVEL=standard\n');
   });
 
   it('TP-37 (AC-32): a github machine whose project.json selects jira resolves jira from the project', () => {
@@ -443,7 +443,7 @@ describe('TP-32 (AC-28): settings mode is local — one grammar line, local git 
     }));
     const r = run([TOPLEVEL(root), ORIGIN_HEAD_UNSET]);
     expect(r.stdout).toBe('TRACKER=linear TRACKER_SOURCE=machine TRACKER_WARN=none SITE=none KEY=none '
-      + 'REVIEW_PUBLICATION=auto COMPLIANCE=soc2 MEMORY=off LEARNING=on KNOWLEDGE=on GATE_LEVEL=standard\n');
+      + 'REVIEW_PUBLICATION=auto COMPLIANCE=soc2 MEMORY=off CURATION=on KNOWLEDGE=on GATE_LEVEL=standard\n');
   });
 
   it('exit arms: usage prints nothing; an unusable dir and an unanswering git print the fail-closed line', () => {
@@ -983,7 +983,7 @@ describe('D-PERSONAL-UNTRACKED: a tracked .devflow/config.json is ignored, with 
 // ---------------------------------------------------------------------------
 
 describe('TP-33: feature switches = machine AND project AND personal (only a literal false narrows)', () => {
-  const FEATURES: readonly MachineFeature[] = ['memory', 'learning', 'knowledge'];
+  const FEATURES: readonly MachineFeature[] = ['memory', 'curation', 'knowledge'];
   type Layer = 'absent' | 'true' | 'false' | 'malformed';
   const LAYERS: readonly Layer[] = ['absent', 'true', 'false', 'malformed'];
   const fileFor = (feature: MachineFeature, v: Layer): string | undefined => (v === 'absent'
@@ -1016,7 +1016,7 @@ describe('readRepoLayers: the seam the hooks\' one parser fork reads through (D-
       const viaLayers = SETTINGS.foldSettings({ ...SETTINGS.readRepoLayers(dir), manifest: row.manifest, retiredPolicyFile: false });
       expect({
         memory: viaLayers.switches.memory.on,
-        learning: viaLayers.switches.learning.on,
+        curation: viaLayers.switches.curation.on,
         knowledge: viaLayers.switches.knowledge.on,
       }, row.name).toEqual(row.expect);
       const viaResolve = settingsFor({}, row.manifest, dir);
@@ -1075,9 +1075,9 @@ describe('TP-49: the shared switch fixture table (tests/fixtures/settings-switch
     // its `expect` is the fold's answer, which the readRepoLayers test holds.
     expect({
       memory: s.switches.memory.on,
-      learning: s.switches.learning.on,
+      curation: s.switches.curation.on,
       knowledge: s.switches.knowledge.on,
-    }).toEqual(row.unreadable === undefined ? row.expect : { memory: true, learning: true, knowledge: false });
+    }).toEqual(row.unreadable === undefined ? row.expect : { memory: true, curation: true, knowledge: false });
     expect(s.unreadable).toBe(row.unreadable ?? null);
   });
 });
@@ -1505,7 +1505,7 @@ describe('TP-30 (AC-26): a malformed evidence leaves tracker and features in the
       project: '{"evidence":"required","evidence":"standard","tracker":{"provider":"jira","key":"ACME"},"features":{"learning":false}}',
     });
     expect(line).toBe('TRACKER=jira TRACKER_SOURCE=project TRACKER_WARN=none SITE=none KEY=ACME '
-      + 'REVIEW_PUBLICATION=auto COMPLIANCE=off MEMORY=on LEARNING=off KNOWLEDGE=on GATE_LEVEL=standard');
+      + 'REVIEW_PUBLICATION=auto COMPLIANCE=off MEMORY=on CURATION=off KNOWLEDGE=on GATE_LEVEL=standard');
   });
 });
 
@@ -1625,7 +1625,7 @@ describe('whole-file rule: an unreadable project.json or config.json fails its o
     expect(s.ok).toBe(true);
     expect(s.unreadable).toBeNull();
     expect(SETTINGS.formatSettingsLine(s)).toBe('TRACKER=github TRACKER_SOURCE=default TRACKER_WARN=invalid SITE=none '
-      + 'KEY=none REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=on LEARNING=on KNOWLEDGE=on GATE_LEVEL=standard');
+      + 'KEY=none REVIEW_PUBLICATION=off COMPLIANCE=generic MEMORY=on CURATION=on KNOWLEDGE=on GATE_LEVEL=standard');
     expect(settingsFor({}).unreadable).toBeNull();
   });
 
@@ -1716,6 +1716,12 @@ describe('parity: the machine layer reads the manifest exactly as the CLI does',
     ['legacy decisions false', { features: { decisions: false } }],
     ['learning true beats legacy decisions false', { features: { learning: true, decisions: false } }],
     ['learning null falls to legacy decisions false', { features: { learning: null, decisions: false } }],
+    ['curation false', { features: { curation: false } }],
+    ['curation true, learning false resolves off', { features: { curation: true, learning: false } }],
+    ['curation false, learning true resolves off', { features: { curation: false, learning: true } }],
+    ['curation true beats legacy decisions false', { features: { curation: true, decisions: false } }],
+    ['curation "false" falls to legacy decisions false', { features: { curation: 'false', decisions: false } }],
+    ['curation "false" alone is ignored', { features: { curation: 'false' } }],
     ['legacy kb false', { features: { kb: false } }],
     ['knowledge false', { features: { knowledge: false } }],
     ['tracker jira', { features: { tracker: { provider: 'jira' } } }],
@@ -1734,9 +1740,9 @@ describe('parity: the machine layer reads the manifest exactly as the CLI does',
 
   it.each(MANIFESTS)('%s', (_label, manifest) => {
     const s = machineOnly(manifest);
-    for (const feature of ['memory', 'learning', 'knowledge'] as const) {
-      expect(s.switches[feature].on, feature).toBe(isMachineFeatureOn(manifest, feature));
-    }
+    expect(s.switches.memory.on, 'memory').toBe(isMachineFeatureOn(manifest, 'memory'));
+    expect(s.switches.curation.on, 'curation').toBe(isMachineFeatureOn(manifest, 'curation'));
+    expect(s.switches.knowledge.on, 'knowledge').toBe(isMachineFeatureOn(manifest, 'knowledge'));
     const features = (manifest as { features?: { tracker?: unknown; compliance?: unknown } } | null)?.features;
     const rawTracker = typeof features === 'object' && features !== null ? features.tracker : undefined;
     expect(s.tracker).toBe(normalizeTrackerFeature(rawTracker).provider);

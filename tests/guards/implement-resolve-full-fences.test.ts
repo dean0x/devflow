@@ -17,7 +17,7 @@
 import { createHash } from 'crypto'
 import { describe, it, expect } from 'vitest'
 
-import { isAgentBlock, parseFences, requireDistFile, resolveLearningOffSource } from '../helpers.js'
+import { isAgentBlock, parseFences, requireDistFile, resolveCurationOffSource } from '../helpers.js'
 
 const REPIN_COMMAND = 'REPIN_FENCES=1 npx vitest run tests/guards/implement-resolve-full-fences.test.ts --reporter=verbose'
 
@@ -27,15 +27,15 @@ type PinnedFence = readonly [heading: string, agent: string, ordinal: number, sh
 /** The four compiled files, by the label that every failure names. */
 const FILES: ReadonlyArray<{ readonly label: string; readonly text: string }> = (() => {
   const off = (name: string): string => {
-    const text = resolveLearningOffSource('commands', name)
-    if (text === null) throw new Error(`dist/learning-off/commands/${name}.md is absent: run \`npm run build:mds\``)
+    const text = resolveCurationOffSource('commands', name)
+    if (text === null) throw new Error(`dist/curation-off/commands/${name}.md is absent: run \`npm run build:mds\``)
     return text
   }
   return [
     { label: 'dist/commands/implement.md', text: requireDistFile('implement.md') },
     { label: 'dist/commands/resolve.md', text: requireDistFile('resolve.md') },
-    { label: 'dist/learning-off/commands/implement.md', text: off('implement') },
-    { label: 'dist/learning-off/commands/resolve.md', text: off('resolve') },
+    { label: 'dist/curation-off/commands/implement.md', text: off('implement') },
+    { label: 'dist/curation-off/commands/resolve.md', text: off('resolve') },
   ]
 })()
 
@@ -71,7 +71,7 @@ const PINNED_FENCES: Readonly<Record<string, readonly PinnedFence[]>> = {
     ['Phase 9b: Thread Resolution + Resolution Comment', 'Git', 1, '87cc9e0dd74f4a2097179992b522e3f7ce806ab39b73ca5ca9bac8ee3fb95cc5'],
     ['Phase 9b: Thread Resolution + Resolution Comment', 'Git', 2, '5a032e03562856fb39f3d6f0e87621521e4029c39b863cf10b621337f668759d'],
   ],
-  'dist/learning-off/commands/implement.md': [
+  'dist/curation-off/commands/implement.md': [
     ['Phase 1: Setup', 'Git', 1, '033d80248ba18ac74cff5a6ced902d0d04ebdf935379ae0ca3af85a89082354d'],
     ['Phase 2: Implement', 'Code', 1, 'f6d58a82751a6497a28141aa942a8b0397582566eccacfcc32f01c6274f57f36'],
     ['Phase 2: Implement', 'Code', 2, '4beef149677f73ac9f2de73ece65577b1a790970eff0ebf14b8ec6c069aa194e'],
@@ -88,7 +88,7 @@ const PINNED_FENCES: Readonly<Record<string, readonly PinnedFence[]>> = {
     ['Phase 8: Re-Validate (only if a qa-fix committed)', 'Validate', 1, '9d7f60de6e0cfcf226626d8008ad9176948af3e707ba694fafc6505fec1d218f'],
     ['Phase 9: Open PR', 'Git', 1, '41061d9845927a5c1cf1ecfa5b4b56170db5c5b49daccda07d6fc020c8eb254f'],
   ],
-  'dist/learning-off/commands/resolve.md': [
+  'dist/curation-off/commands/resolve.md': [
     ['Step 0b: Per-Worktree Pre-Flight (Git Agent)', 'Git', 1, '3427a65881118757c983e02f39a1bea9024603a96bc39175640f4fe1dc9811bd'],
     ['Phase 1b: Fetch External Review Threads', 'Git', 1, 'b3a3328a3ae352dc08637c75088dfe6fff4d2f94d1bdd29cda71eba29cb12f71'],
     ['Phase 2: Global Triage', 'Triage', 1, 'ac02513f3dbd49a8765e586eb85fc655efd82e25d1e60be640b9d39b7a1d990c'],

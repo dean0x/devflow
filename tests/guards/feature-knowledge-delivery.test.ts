@@ -36,7 +36,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync } from 'fs'
 import * as path from 'path'
 
-import { ROOT, collectCodeSpawnSites, requireDistFile, requireDistFiles, resolveAgentSource, resolveLearningOffSource } from '../helpers.js'
+import { ROOT, collectCodeSpawnSites, requireDistFile, requireDistFiles, resolveAgentSource, resolveCurationOffSource } from '../helpers.js'
 
 const LOAD_HEADING = '### Load Feature Knowledge'
 
@@ -97,15 +97,15 @@ describe('the load text delivers a block per KB (D-KB-DELIVERY-TIERS, D-KB-LEGAC
     expect(defects).toEqual([])
   })
 
-  it('the learning-off variants of the load hosts deliver the same blocks', () => {
+  it('the curation-off variants of the load hosts deliver the same blocks', () => {
     let variants = 0
     for (const name of LOAD_HOSTS) {
-      const off = resolveLearningOffSource('commands', name)
+      const off = resolveCurationOffSource('commands', name)
       if (off === null) continue
       variants++
-      expect(collectLoadDefects(`learning-off/${name}`, off)).toEqual([])
+      expect(collectLoadDefects(`curation-off/${name}`, off)).toEqual([])
     }
-    expect(variants, 'no load host has a learning-off variant').toBeGreaterThanOrEqual(8)
+    expect(variants, 'no load host has a curation-off variant').toBeGreaterThanOrEqual(8)
   })
 
   it('known-bad probe: each missing element, a doubled block and the Grep tool are each reported', () => {
@@ -254,9 +254,9 @@ describe('each spawn names the variable of its recipient tier (D-KB-DELIVERY-TIE
     const total = commands.reduce((sum, [, text]) => sum + collectFkSites(text).length, 0)
     expect(total, 'the table covers every site').toBe(Object.values(TIER_TABLE).reduce((sum, rows) => sum + rows.length, 0))
     for (const name of Object.keys(TIER_TABLE)) {
-      const off = resolveLearningOffSource('commands', name)
-      expect(off, `${name} has a learning-off variant`).not.toBeNull()
-      expect(collectTierDefects(`learning-off/${name}`, off ?? '', TIER_TABLE[name])).toEqual([])
+      const off = resolveCurationOffSource('commands', name)
+      expect(off, `${name} has a curation-off variant`).not.toBeNull()
+      expect(collectTierDefects(`curation-off/${name}`, off ?? '', TIER_TABLE[name])).toEqual([])
     }
   })
 
@@ -310,7 +310,7 @@ describe('every Produces line that lists FEATURE_KNOWLEDGE also lists FEATURE_KN
     let lines = 0
     const defects: string[] = []
     for (const name of LOAD_HOSTS) {
-      const variants: Array<readonly [string, string | null]> = [[name, requireDistFile(`${name}.md`)], [`learning-off/${name}`, resolveLearningOffSource('commands', name)]]
+      const variants: Array<readonly [string, string | null]> = [[name, requireDistFile(`${name}.md`)], [`curation-off/${name}`, resolveCurationOffSource('commands', name)]]
       for (const [label, text] of variants) {
         if (text === null) continue
         lines += text.split('\n').filter(l => l.startsWith('**Produces:**') && /\bFEATURE_KNOWLEDGE\b/.test(l)).length
@@ -446,8 +446,8 @@ describe('Validate, Git and Test take no input, and explore, debug and the hooks
     // Debug loads no feature knowledge, so its one Code spawn has no variable to name. The tier collector
     // reads `{variable}` sites only, and the literal is what keeps debug out of the table.
     for (const [variant, text] of [
-      ['learning-on', requireDistFile('debug.md')],
-      ['learning-off', resolveLearningOffSource('commands', 'debug') ?? ''],
+      ['curation-on', requireDistFile('debug.md')],
+      ['curation-off', resolveCurationOffSource('commands', 'debug') ?? ''],
     ] as const) {
       const sites = collectCodeSpawnSites('debug.md', text)
       expect(sites, `${variant}: debug spawns Code once`).toHaveLength(1)

@@ -51,9 +51,9 @@ updated: 2026-10-13
 
 The dynamic workflow engine is the `devflow-dynamic` plugin: a pipeline that turns a rough initiative into reviewed, merged code on an integration branch, in three sequential stages. Each is a Claude Code dynamic Workflow script that the main session authors inline and passes to the `Workflow` tool: **tickets** (decompose an initiative into a wave-structured ticket slate), **plan** (per-ticket implementation plans with acceptance criteria and a cross-plan conflict audit) and **build** (implement, review and verify each ticket under a bounded gate structure). `dynamic-profile` is a standalone agent that mines session history into a decision-preference profile that `dynamic-plan` consumes.
 
-The commands are MDS sources in `src/assets/commands/`, compiled to `dist/commands/` (with a learning-off variant under `dist/learning-off/commands/`). Shared partials in `src/assets/commands/_partials/` export named blocks that hosts inline at compile time; the compiled `.md` files are the deployed artifacts and the test suite pins exact doctrine literals in them.
+The commands are MDS sources in `src/assets/commands/`, compiled to `dist/commands/` (with a curation-off variant under `dist/curation-off/commands/`). Shared partials in `src/assets/commands/_partials/` export named blocks that hosts inline at compile time; the compiled `.md` files are the deployed artifacts and the test suite pins exact doctrine literals in them.
 
-The knowledge is split across four KBs. This one holds the single-ticket engine doctrine (gates, review pass, factory, plan, roster, runtime contract). `.devflow/features/dynamic-workflow-engine-waves/KNOWLEDGE.md` holds WAVE mode and the wave PR. `.devflow/features/dynamic-workflow-engine-contracts/KNOWLEDGE.md` holds the settings block, decisions step, learning arms, `_tracker.mds`, `COMMAND_INPUT`, issue vocabulary and tracker preflight. `.devflow/features/dynamic-workflow-engine-pins/KNOWLEDGE.md` holds the host/partial count rule, the pinned doctrine literals, marker ownership, the gh-issue exceptions and the `.mds` gotchas. The MDS build pipeline and learning-variant splitter belong to `feature-knowledge-system`, the tracker/git reference-module split to `tracker-references`, and installing or converging a variant to `installer-shadowing`.
+The knowledge is split across four KBs. This one holds the single-ticket engine doctrine (gates, review pass, factory, plan, roster, runtime contract). `.devflow/features/dynamic-workflow-engine-waves/KNOWLEDGE.md` holds WAVE mode and the wave PR. `.devflow/features/dynamic-workflow-engine-contracts/KNOWLEDGE.md` holds the settings block, decisions step, curation arms, `_tracker.mds`, `COMMAND_INPUT`, issue vocabulary and tracker preflight. `.devflow/features/dynamic-workflow-engine-pins/KNOWLEDGE.md` holds the host/partial count rule, the pinned doctrine literals, marker ownership, the gh-issue exceptions and the `.mds` gotchas. The MDS build pipeline and curation-variant splitter belong to `feature-knowledge-system`, the tracker/git reference-module split to `tracker-references`, and installing or converging a variant to `installer-shadowing`.
 
 ## System Context
 
@@ -234,11 +234,11 @@ Each ticket's `setup-task` spawn creates the branch and reports it under its `##
 ## Related
 
 - `.devflow/features/dynamic-workflow-engine-waves/KNOWLEDGE.md`: WAVE mode, quarantine, the wave PR and its evidence refresh.
-- `.devflow/features/dynamic-workflow-engine-contracts/KNOWLEDGE.md`: settings block, decisions step and learning arms, `_tracker.mds`, `COMMAND_INPUT`, issue vocabulary, tracker preflight.
+- `.devflow/features/dynamic-workflow-engine-contracts/KNOWLEDGE.md`: settings block, decisions step and curation arms, `_tracker.mds`, `COMMAND_INPUT`, issue vocabulary, tracker preflight.
 - `.devflow/features/dynamic-workflow-engine-pins/KNOWLEDGE.md`: host and partial counts, pinned doctrine literals, marker ownership, gh-issue exceptions, `.mds` gotchas.
 - `.devflow/features/feature-knowledge-system/KNOWLEDGE.md`: the MDS build pipeline (`scripts/build-mds.ts`), the knowledge host commands and the reference-module host kind that share compilation infrastructure with the dynamic commands.
 - `.devflow/features/tracker-references/KNOWLEDGE.md`: the tracker/git reference-module split and the Git agent's provider-resolution preamble.
 - `.devflow/features/test-harness/KNOWLEDGE.md`: the guard shape (named collector, seeded probe, ratchet manifest) and the known full-suite-load timeouts.
 - `.devflow/features/resolve-pipeline/KNOWLEDGE.md`: `/resolve` also spawns the Code family (Fix for gate failures) under the same every-Code-spawn rule.
-- `.devflow/features/installer-shadowing/KNOWLEDGE.md`: installing the learning variant for the machine's learning switch.
+- `.devflow/features/installer-shadowing/KNOWLEDGE.md`: installing the curation variant for the machine's curation switch.
 - `docs/reference/platform-assumptions.md`: the dated platform facts the foreground doctrine rests on (stall watchdog threshold, timed-out foreground calls, `sleep` refusal, spawn body loading).

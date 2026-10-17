@@ -4,14 +4,14 @@ import { resolveAgentSource, resolveAllAgents } from '../helpers'
 
 /**
  * Named collector: sentences in an agent source that tell the agent to read the
- * learning index (`.devflow/learning/index.md`) for itself. A mention in an input
+ * learning index (`.devflow/curation/index.md`) for itself. A mention in an input
  * description ("pre-rendered to ...") is not an instruction, so the verb must come
  * first in the sentence.
  */
 function collectSelfReadInstructions(agents: ReadonlyArray<readonly [string, string]>): string[] {
   return agents.flatMap(([name, content]) =>
     content.split(/(?<=[.!?])\s+|\n/)
-      .filter(s => /\b[Rr]eads?\b[^.\n]*\.devflow\/learning\/index\.md/.test(s))
+      .filter(s => /\b[Rr]eads?\b[^.\n]*\.devflow\/curation\/index\.md/.test(s))
       .map(s => `${name}: ${s.trim().slice(0, 100)}`),
   )
 }
@@ -36,7 +36,7 @@ describe('Command surfaces — index.md direct read', () => {
     it(`${label} reads index.md (no decisions-index.cjs subprocess)`, () => {
       const content = loadFile(relPath)
       // Must reference the pre-rendered index.md artifact (now under learning/)
-      expect(content).toContain('.devflow/learning/index.md')
+      expect(content).toContain('.devflow/curation/index.md')
       // Must NOT reference decisions-index.cjs in any form (the script is retired)
       expect(content).not.toContain('decisions-index.cjs')
     })
@@ -122,7 +122,7 @@ describe('Consumer agents — devflow:apply-decisions in skills frontmatter', ()
 
 describe('DECISIONS_CONTEXT input declaration — canonical form', () => {
   const CANONICAL_DESCRIPTION =
-    '**DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this repository (pre-rendered to `.devflow/learning/index.md` in its main worktree). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.'
+    '**DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this repository (pre-rendered to `.devflow/curation/index.md` in its main worktree). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.'
 
   const consumerAgents: Array<[string, string]> = [
     ['triage.md', 'triage'],
@@ -188,8 +188,8 @@ describe('consumers read the decisions index from the main worktree', () => {
     expect(content).toContain('An absent key or `(none)` means no decisions context.')
     expect(content).not.toContain('Otherwise read the decisions index')
     expect(content).not.toContain('--git-common-dir')
-    expect(content).not.toContain('.devflow/learning/decisions.md')
-    expect(content).not.toContain('.devflow/learning/pitfalls.md')
+    expect(content).not.toContain('.devflow/curation/decisions.md')
+    expect(content).not.toContain('.devflow/curation/pitfalls.md')
   })
 
   it('no agent is told to read the learning index itself, and the apply-decisions skip guard has no read-it-yourself clause', () => {
@@ -203,11 +203,11 @@ describe('consumers read the decisions index from the main worktree', () => {
 
   it('known-bad probe: the retired Code fallback sentence is reported as a self-read instruction', () => {
     const retired =
-      'Otherwise read the decisions index — `.devflow/learning/index.md` at the repository\'s main worktree ' +
+      'Otherwise read the decisions index — `.devflow/curation/index.md` at the repository\'s main worktree ' +
       '(`git rev-parse --path-format=absolute --git-common-dir`) — and follow `devflow:apply-decisions` on it.'
     expect(collectSelfReadInstructions([['code', retired]])).toHaveLength(1)
     // An input description that names where the index is rendered is not an instruction to read it.
-    expect(collectSelfReadInstructions([['triage', 'pre-rendered to `.devflow/learning/index.md` in its main worktree']])).toEqual([])
+    expect(collectSelfReadInstructions([['triage', 'pre-rendered to `.devflow/curation/index.md` in its main worktree']])).toEqual([])
   })
 
   it('skim.md reads the decisions TL;DR at the main worktree, else the toplevel, else the start directory', () => {
@@ -218,9 +218,9 @@ describe('consumers read the decisions index from the main worktree', () => {
     const tiers = ['the main worktree', 'else the toplevel', 'else `{start}`'].map(tier => step6.indexOf(tier))
     expect(tiers.every(at => at > -1), step6).toBe(true)
     expect([...tiers].sort((a, b) => a - b)).toEqual(tiers)
-    expect(step6).toContain('`{ledger}/.devflow/learning/decisions.md`')
+    expect(step6).toContain('`{ledger}/.devflow/curation/decisions.md`')
     expect(step6).toContain('`<!-- TL;DR: N decisions -->`')
-    expect(step6).not.toContain('If `.devflow/learning/decisions.md` exists')
+    expect(step6).not.toContain('If `.devflow/curation/decisions.md` exists')
   })
 
   it('code.md states applied decisions and pitfalls in words, never by ID', () => {
@@ -247,7 +247,7 @@ describe('consumers read the decisions index from the main worktree', () => {
     expect(source).toMatch(/^@import "\.\/_decisions\.mds" as decisions$/m)
     expect(source).toContain('{{decisions.decisions_locate()}}')
     expect(source).not.toMatch(/@import \{[^}]*\} from "\.\/_decisions\.mds"/)
-    expect(source).toContain('`{ledger}/.devflow/learning/index.md`')
+    expect(source).toContain('`{ledger}/.devflow/curation/index.md`')
   })
 
   it('the decisions step is its own define, authoring_decisions: gate then locator, none of it in authoring_preamble', () => {
@@ -269,7 +269,7 @@ describe('consumers read the decisions index from the main worktree', () => {
   it('the dynamic-build implement bundle passes the DECISIONS_CONTEXT loaded before authoring', () => {
     const content = loadFile('dist/commands/dynamic-build.md')
     expect(content).toContain('relevant DECISIONS_CONTEXT (the index you loaded before authoring)')
-    expect(content).not.toContain('DECISIONS_CONTEXT (from `.devflow/learning/index.md`)')
+    expect(content).not.toContain('DECISIONS_CONTEXT (from `.devflow/curation/index.md`)')
   })
 })
 
@@ -296,13 +296,13 @@ describe('code-review.md — decisions loading phase', () => {
 })
 
 // -------------------------------------------------------------------------
-// Skim — the LEARNING input and the skip rule (D-DECISIONS-LEARNING-GATE)
+// Skim — the CURATION input and the skip rule (D-DECISIONS-LEARNING-GATE)
 // -------------------------------------------------------------------------
 
-describe('Skim takes LEARNING, skips Step 6 when it is off, and its callers pass it', () => {
+describe('Skim takes CURATION, skips Step 6 when it is off, and its callers pass it', () => {
   const SKIM_HOSTS = ['explore', 'plan', 'research'] as const
   const SETTINGS_OPENING = '**Resolve the settings line**'
-  const SKIP_RULE = 'When `LEARNING` is `off`, skip this step'
+  const SKIP_RULE = 'When `CURATION` is `off`, skip this step'
   const TLDR_READ = 'Read the decisions TL;DR'
 
   /** Named collector: the spawn text of every Skim spawn — a fenced payload, else the rest of its line. */
@@ -317,13 +317,13 @@ describe('Skim takes LEARNING, skips Step 6 when it is off, and its callers pass
     return out
   }
 
-  /** Named collector: Skim spawns that do not pass LEARNING, or that precede the host's settings block. */
+  /** Named collector: Skim spawns that do not pass CURATION, or that precede the host's settings block. */
   function collectSkimSpawnDefects(host: string, text: string): string[] {
     const spawns = collectSkimSpawns(text)
     if (spawns.length === 0) return [`${host}: no Skim spawn found`]
     const block = text.indexOf(SETTINGS_OPENING)
     return spawns.flatMap(({ at, span }) => [
-      ...(span.includes('LEARNING') ? [] : [`${host}: a Skim spawn does not pass LEARNING`]),
+      ...(span.includes('CURATION') ? [] : [`${host}: a Skim spawn does not pass CURATION`]),
       ...(block !== -1 && block < at ? [] : [`${host}: a Skim spawn precedes the settings block`]),
     ])
   }
@@ -333,12 +333,12 @@ describe('Skim takes LEARNING, skips Step 6 when it is off, and its callers pass
     const skip = step6.indexOf(SKIP_RULE)
     const read = step6.indexOf(TLDR_READ)
     return [
-      ...(skip === -1 ? ['Step 6 has no LEARNING skip rule'] : []),
+      ...(skip === -1 ? ['Step 6 has no CURATION skip rule'] : []),
       ...(skip !== -1 && read !== -1 && read < skip ? ['Step 6 reads the TL;DR before the skip rule'] : []),
     ]
   }
 
-  it('explore, plan and research pass LEARNING into every Skim spawn, after their settings block', () => {
+  it('explore, plan and research pass CURATION into every Skim spawn, after their settings block', () => {
     for (const host of SKIM_HOSTS) {
       const text = loadFile(`dist/commands/${host}.md`)
       expect(collectSkimSpawns(text).length, `${host}: Skim spawns found`).toBeGreaterThanOrEqual(1)
@@ -346,24 +346,24 @@ describe('Skim takes LEARNING, skips Step 6 when it is off, and its callers pass
     }
   })
 
-  it('known-bad probes: a Skim spawn without LEARNING, and one before the settings block, are reported', () => {
+  it('known-bad probes: a Skim spawn without CURATION, and one before the settings block, are reported', () => {
     expect(collectSkimSpawnDefects('p', `${SETTINGS_OPENING}\nSpawn \`Agent(subagent_type="Skim")\` to orient.`))
-      .toEqual(['p: a Skim spawn does not pass LEARNING'])
-    expect(collectSkimSpawnDefects('p', `Spawn \`Agent(subagent_type="Skim")\` with \`LEARNING\` to orient.\n${SETTINGS_OPENING}`))
+      .toEqual(['p: a Skim spawn does not pass CURATION'])
+    expect(collectSkimSpawnDefects('p', `Spawn \`Agent(subagent_type="Skim")\` with \`CURATION\` to orient.\n${SETTINGS_OPENING}`))
       .toEqual(['p: a Skim spawn precedes the settings block'])
     expect(collectSkimSpawnDefects('p', 'no spawn')).toEqual(['p: no Skim spawn found'])
   })
 
-  it('Skim lists LEARNING in its input context and opens Step 6 with the skip rule', () => {
+  it('Skim lists CURATION in its input context and opens Step 6 with the skip rule', () => {
     const skim = resolveAgentSource('skim').content
-    expect(extractSection(skim, '## Input Context', '**Worktree Support**')).toContain('- **LEARNING** (optional): `on` | `off`')
+    expect(extractSection(skim, '## Input Context', '**Worktree Support**')).toContain('- **CURATION** (optional): `on` | `off`')
     const step6 = extractSection(skim, '### Step 6: Project Knowledge', '### Step 7')
     expect(step6.slice('### Step 6: Project Knowledge'.length).trimStart().startsWith(SKIP_RULE)).toBe(true)
     expect(collectStep6Defects(step6)).toEqual([])
   })
 
   it('known-bad probes: a Step 6 with no skip rule, and one that reads the TL;DR first, are reported', () => {
-    expect(collectStep6Defects(`### Step 6\n${TLDR_READ} at the ledger.`)).toEqual(['Step 6 has no LEARNING skip rule'])
+    expect(collectStep6Defects(`### Step 6\n${TLDR_READ} at the ledger.`)).toEqual(['Step 6 has no CURATION skip rule'])
     expect(collectStep6Defects(`### Step 6\n${TLDR_READ} first. ${SKIP_RULE} after.`)).toEqual(['Step 6 reads the TL;DR before the skip rule'])
   })
 })

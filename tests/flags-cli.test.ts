@@ -62,16 +62,28 @@ import { buildFlagRows } from '../src/cli/flags-view/state.js';
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * A manifest as the writer lays it out on disk: the pre-rename `learning` key sits
+ * right after `curation`, equal to it. A reader finds nothing to heal, so a
+ * zero-write assertion isolates the command under test.
+ */
+function serializeCurrentManifest(m: ReturnType<typeof makeManifest>): string {
+  const features: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(m.features)) {
+    features[key] = value;
+    if (key === 'curation') features.learning = value;
+  }
+  return JSON.stringify({ ...m, features }, null, 2) + '\n';
+}
+
 /** Canonical minimal manifest JSON for flags tests — flags: {} (fresh install). */
 function makeEmptyFlagsManifest(): string {
-  const m = makeManifest({ features: { ...makeManifest().features, flags: {} } });
-  return JSON.stringify(m, null, 2) + '\n';
+  return serializeCurrentManifest(makeManifest({ features: { ...makeManifest().features, flags: {} } }));
 }
 
 /** Manifest with a specific FlagsRecord. */
 function makeManifestWithFlags(flags: FlagsRecord): string {
-  const m = makeManifest({ features: { ...makeManifest().features, flags } });
-  return JSON.stringify(m, null, 2) + '\n';
+  return serializeCurrentManifest(makeManifest({ features: { ...makeManifest().features, flags } }));
 }
 
 /** Parse a manifest JSON string and return features.flags. */

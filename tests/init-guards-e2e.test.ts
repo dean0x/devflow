@@ -43,7 +43,7 @@ const SUBPROCESS_TIMEOUT_MS = 60_000;
  * `none` would reach the real system managed-settings file (D-TESTS-NO-SYSTEM-MANAGED).
  */
 const MINIMAL_INIT = [
-  'init', '--recommended', '--no-ambient', '--no-memory', '--no-learning', '--no-knowledge',
+  'init', '--recommended', '--no-ambient', '--no-memory', '--no-curation', '--no-knowledge',
   '--no-rules', '--no-hud', '--no-proxy', '--no-compliance', '--security', 'user',
 ];
 

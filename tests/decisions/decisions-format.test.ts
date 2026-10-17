@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { createRequire } from 'module';
 import * as path from 'path';
-import { makeV2LedgerRow, makeV2LogRow, requireLearningStore } from './learning-fixtures.js';
+import { makeV2LedgerRow, makeV2LogRow, requireCurationStore } from './curation-fixtures.js';
 import { readAgentReference } from '../helpers.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
@@ -65,7 +65,7 @@ describe('initDecisionsContent', () => {
     expect(result).toBe(
       '<!-- TL;DR: 0 decisions -->\n' +
       '# Architectural Decisions\n\n' +
-      'Generated from the local learning ledger by devflow; do not edit. ' +
+      'Generated from the local curation ledger by devflow; do not edit. ' +
       'Active entries follow; retired ones are listed under Inactive.\n'
     );
   });
@@ -75,7 +75,7 @@ describe('initDecisionsContent', () => {
     expect(result).toBe(
       '<!-- TL;DR: 0 pitfalls -->\n' +
       '# Known Pitfalls\n\n' +
-      'Generated from the local learning ledger by devflow; do not edit. ' +
+      'Generated from the local curation ledger by devflow; do not edit. ' +
       'Active entries follow; retired ones are listed under Inactive.\n'
     );
   });
@@ -689,8 +689,8 @@ describe('buildTldrLine', () => {
 // ---------------------------------------------------------------------------
 
 const OPTS = {
-  decisionsFilePath: '/project/.devflow/learning/decisions.md',
-  pitfallsFilePath:  '/project/.devflow/learning/pitfalls.md',
+  decisionsFilePath: '/project/.devflow/curation/decisions.md',
+  pitfallsFilePath:  '/project/.devflow/curation/pitfalls.md',
 };
 
 function makeAdrRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -929,7 +929,7 @@ describe('formatEntryBodyV2', () => {
 });
 
 describe('formatInactiveTable', () => {
-  const store = requireLearningStore();
+  const store = requireCurationStore();
   const INACTIVE_ROWS = [
     makeV2LedgerRow({
       anchor_id: 'ADR-004',
@@ -1030,8 +1030,8 @@ describe('buildIndexContent — v2 rows', () => {
       '  PF-002  Editing installed scripts directly  [Active]  —  src/assets/scripts/hooks/\n' +
       '  PF-003  Writers refuse a missing learning tree  —  area:learning\n' +
       '\n' +
-      'ADR-NNN entries live in /project/.devflow/learning/decisions.md\n' +
-      'PF-NNN  entries live in /project/.devflow/learning/pitfalls.md\n' +
+      'ADR-NNN entries live in /project/.devflow/curation/decisions.md\n' +
+      'PF-NNN  entries live in /project/.devflow/curation/pitfalls.md\n' +
       'Read the relevant file and locate the matching `## ADR-NNN:` or `## PF-NNN:` heading for the full body.',
     );
     const v1Lines = buildIndexContent([v1Decision], [v1Pitfall], OPTS).split('\n').filter(l => l.startsWith('  '));
@@ -1069,16 +1069,16 @@ describe('json-helper.cjs assign-anchor renders through decisions-format', () =>
   /** Promote `logRow` with assign-anchor in a fresh learning tree; return the minted ledger row and the rendered file. */
   function promote(logRow: Record<string, unknown>, file: 'decisions.md' | 'pitfalls.md'): { ledgerRow: Record<string, unknown>; written: string } {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fmt-compat-test-'));
-    const learningDir = path.join(tmpDir, '.devflow', 'learning');
-    fs.mkdirSync(learningDir, { recursive: true });
+    const curationDir = path.join(tmpDir, '.devflow', 'curation');
+    fs.mkdirSync(curationDir, { recursive: true });
     try {
-      fs.writeFileSync(path.join(learningDir, 'decisions-log.jsonl'), JSON.stringify(logRow) + '\n', 'utf8');
+      fs.writeFileSync(path.join(curationDir, 'decisions-log.jsonl'), JSON.stringify(logRow) + '\n', 'utf8');
       execSync(
         `node "${JSON_HELPER}" assign-anchor ${String(logRow.type)} ${String(logRow.id)}`,
         { cwd: tmpDir, encoding: 'utf8' }
       );
-      const ledgerRow = JSON.parse(fs.readFileSync(path.join(learningDir, 'decisions-ledger.jsonl'), 'utf8')) as Record<string, unknown>;
-      return { ledgerRow, written: fs.readFileSync(path.join(learningDir, file), 'utf8') };
+      const ledgerRow = JSON.parse(fs.readFileSync(path.join(curationDir, 'decisions-ledger.jsonl'), 'utf8')) as Record<string, unknown>;
+      return { ledgerRow, written: fs.readFileSync(path.join(curationDir, file), 'utf8') };
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
