@@ -48,7 +48,7 @@ These defines call nothing, so they capture nothing.
 @define ensure_pr_ready_contract():
 Pre-flight: make the branch ready for review and open its PR.
 
-**Input:** `WORKTREE_PATH` (optional), `BASE_BRANCH` (optional), `TASK_ID` (optional), `ISSUE_NUMBER` (optional), `ISSUE_PR_LINK` (optional), `PR_EXCEPTIONS` (optional), `COMMIT_UNCOMMITTED` (optional), `PR_DESCRIPTION_GUIDANCE` (optional), `PR_TEST_PLAN_BLOCK` (optional), `PR_WAVE_BLOCK` (optional), `APPLY_CONVENTIONS`
+**Input:** `WORKTREE_PATH` (optional), `BASE_BRANCH` (optional), `BASE_REF` (optional), `TASK_ID` (optional), `ISSUE_NUMBER` (optional), `ISSUE_PR_LINK` (optional), `PR_EXCEPTIONS` (optional), `COMMIT_UNCOMMITTED` (optional), `PR_DESCRIPTION_GUIDANCE` (optional), `PR_TEST_PLAN_BLOCK` (optional), `PR_WAVE_BLOCK` (optional), `APPLY_CONVENTIONS`
 
 **Output:**
 ```markdown

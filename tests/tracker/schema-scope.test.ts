@@ -945,8 +945,10 @@ const HOST_COMPOSED_REASONS: readonly string[] = [
   'issue reference "{ref}" does not match any tracker reference grammar',
   'evidence exception does not match its grammar',
   // Step 5b: the PR's base is resolved by the base resolver, and a fetch that failed or timed out,
-  // or a base that could not be resolved, degrades the PR report with the resolver's REASON code.
-  'base {REASON}',
+  // or a base that could not be resolved, degrades the PR report with the resolver's REASON code
+  // and its fix. Step 5a degrades the same way when the PR gives no base name.
+  'base {REASON}; fix: {fix}',
+  'base name unreadable; fix: re-run',
 ];
 
 /** The one provider reference that composes the PR skeleton, under every tracker provider. */
@@ -980,8 +982,8 @@ const PR_HOST_REASONS: readonly string[] = [
   'readiness unavailable',
   // validate-branch step 6 resolves the PR's base with the base resolver, the same call that
   // ensure-pr-ready step 5 makes (HOST_COMPOSED_REASONS): a degraded fetch continues, with the
-  // resolver's REASON code in the line.
-  'base {REASON}',
+  // resolver's REASON code and its fix in the line.
+  'base {REASON}; fix: {fix}',
 ];
 
 /**

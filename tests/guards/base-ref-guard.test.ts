@@ -60,6 +60,7 @@ interface ResolverExports {
   readonly STRICT_NAME_RE: RegExp
   readonly LINE_RE: RegExp
   readonly FALLBACK_LINE: string
+  readonly REASON_NOTES: Readonly<Record<string, string>>
   readonly parseArgs: (args: readonly string[]) => ParsedArgs
 }
 
@@ -262,7 +263,7 @@ function phaseSections(text: string): Array<readonly [number, string]> {
 
 const RULES = [
   'shell-name', 'strict-copy', 'grammar-copy', 'diff-range', 'sink-exit',
-  'resolver-call', 'cross-flag', 'consumer-stop', 'post-capture-check',
+  'resolver-call', 'cross-flag', 'consumer-stop', 'reason-fix-table', 'post-capture-check',
   'produces-base-ref', 'requires-base-ref', 'inline-list', 'return-base-ref',
   'extract-checks', 'channel-line', 'blocked-no-base', 'reviewer-fallback',
 ] as const
@@ -451,6 +452,31 @@ function callFindings(p: Prompt): Unmet[] {
   return out
 }
 
+/** The REASONs that end a base line as degraded or stop with no fix to name. */
+const NO_FIX_REASONS: readonly string[] = ['fetch-failed', 'usage']
+
+/** The reasons a base line can carry that name a fix: every stop or degraded REASON the script defines, less the no-fix ones. */
+const FIX_REASONS: readonly string[] = Object.entries(resolver.REASON_NOTES)
+  .filter(([reason, note]) => (note === 'stop' || note === 'degraded') && !NO_FIX_REASONS.includes(reason))
+  .map(([reason]) => reason)
+
+const FIX_TABLE_RE = /Fix by REASON:[^\n]*?\{fix\}` is left out\./
+
+/** Why the reason-to-fix sentence of a Git op does not cover the script's vocabulary; empty when it does. */
+function fixTableFindings(p: Prompt): Unmet[] {
+  const table = FIX_TABLE_RE.exec(p.text)?.[0]
+  if (table === undefined) return unmet('reason-fix table', 'the file has no reason-to-fix sentence')
+  const missing = FIX_REASONS.filter(reason => !table.includes(reason))
+  const extra = NO_FIX_REASONS.filter(reason => table.includes(reason))
+  const out: Unmet[] = []
+  if (missing.length > 0) out.push({ anchor: 'reason-fix table', detail: `no fix for: ${missing.join(', ')}` })
+  if (extra.length > 0) out.push({ anchor: 'reason-fix table', detail: `a fix for a reason that has none: ${extra.join(', ')}` })
+  if (!/resolver-unavailable `re-run[^`]*devflow init`/.test(table)) out.push({ anchor: 'reason-fix table', detail: 'resolver-unavailable does not say to re-run before devflow init' })
+  return out
+}
+
+const FIX_TABLE_SEED = (reasons: readonly string[]): string => `Fix by REASON: ${reasons.map(r => (r === 'resolver-unavailable' ? `${r} \`re-run; if it repeats, run devflow init\`` : `${r} \`fix\``)).join('; ')}; any other REASON none, and \`; fix: {fix}\` is left out.`
+
 const EXIT_RE = /\bnon-zero\b|\bexit (?:status|code|0)\b|\bexit=/i
 const CHANNEL_RE = /DEGRADED[^\n]*\bbase\b|\bbase\b[^\n]*DEGRADED/i
 
@@ -616,6 +642,17 @@ const REQUIREMENTS: readonly Requirement[] = [
       anchor: 'resolver-unavailable stop',
       bad: 'Any other output is a stop.',
       good: 'Any other output is a stop with REASON resolver-unavailable; the fix is `run devflow init`.',
+    },
+  },
+  {
+    rule: 'reason-fix-table',
+    files: ['git-ops/ensure-pr-ready.md', 'git-ops/validate-branch.md'],
+    check: fixTableFindings,
+    probe: {
+      file: 'git-ops/validate-branch.md',
+      anchor: 'reason-fix table',
+      bad: FIX_TABLE_SEED(FIX_REASONS.filter(r => r !== 'no-ref')),
+      good: FIX_TABLE_SEED(FIX_REASONS),
     },
   },
   {

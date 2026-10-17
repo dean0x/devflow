@@ -3262,6 +3262,9 @@ describe('git agent: text moved out of the always-loaded agent still reaches its
 const BASE_RESOLVER = createRequire(import.meta.url)(RESOLVE_BASE_SCRIPT) as { readonly STRICT_NAME_RE: RegExp };
 const BASE_CHECK = `\`${BASE_RESOLVER.STRICT_NAME_RE.source}\``;
 const PR_MODE_CALL = 'node "$HOME/.devflow/scripts/resolve-base.cjs" pr "${B}" --cross "${X}"; echo "exit=$?"';
+/** The one reason-to-fix sentence: ensure-pr-ready 5b and validate-branch step 6 each carry it byte for byte. */
+const BASE_FIX_TABLE = 'Fix by REASON: no-merge-base `git fetch --unshallow`; no-ref or timeout `git fetch origin <base>` (`<base>` stays as written); resolver-unavailable `re-run; if it repeats, run devflow init`; invalid-name the allowed set, never the name; any other REASON none, and `; fix: {fix}` is left out.';
+const BASE_DEGRADED_LINE = '`TRACEABILITY: DEGRADED (base {REASON}; fix: {fix})`';
 
 /** One top-level numbered step of an op section: its first line and the indented lines under it. */
 function numberedStep(section: string, label: string): string {
@@ -3294,10 +3297,14 @@ function ensurePrReadyBaseDefects(section: string): string[] {
     ['5a reads the cross flag from isCrossRepository', a.includes('isCrossRepository') && a.includes('X=<isCrossRepository')],
     ['5a runs the pr-mode call after the check, in one Bash call', a.includes(PR_MODE_CALL) && a.indexOf(BASE_CHECK) < a.indexOf(PR_MODE_CALL)],
     ['5a keeps the name out of prose', a.includes('only as `${B}`')],
-    ['5b takes the one BASE_REF line and reads other output as resolver-unavailable', b.includes('`BASE_REF=`') && b.includes('`REASON=resolver-unavailable`') && b.includes('run devflow init')],
+    ['5a keeps the PR line and degrades when the PR gives no base name', a.includes('If that call gives no name, keep the PR line') && a.includes('`(unreadable)`') && a.includes('`TRACEABILITY: DEGRADED (base name unreadable; fix: re-run)`') && a.indexOf('gives no name') < a.indexOf(BASE_CHECK)],
+    ['5a skips the resolver for a given hex BASE_REF on the same base name', a.includes('when `BASE_REF` is 40 or 64 lowercase hex and the name equals `BASE_BRANCH`, skip the resolver and 5b: `base_ref` is `BASE_REF`') && a.indexOf(BASE_CHECK) < a.indexOf('when `BASE_REF`') && a.indexOf('when `BASE_REF`') < a.indexOf(PR_MODE_CALL)],
+    ['the Input lists BASE_REF as optional', section.includes('`BASE_BRANCH` (optional), `BASE_REF` (optional)')],
+    ['5b takes the one BASE_REF line only with exit=0 and reads other output as resolver-unavailable', b.includes('`BASE_REF=`') && b.includes('together with `exit=0`') && b.includes('`REASON=resolver-unavailable`') && b.includes('run devflow init')],
     ['5b returns base_ref and prints REASON', b.includes('`base_ref`') && b.includes('print REASON')],
     ['5b stops only on an invalid name', b.includes('Only an invalid name stops this operation')],
-    ['5b prints the DEGRADED base line for degraded and stop', b.includes('`degraded`') && b.includes('`stop`') && b.includes('`TRACEABILITY: DEGRADED (base {REASON})`')],
+    ['5b prints the DEGRADED base line with its fix for degraded and stop', b.includes('`degraded`') && b.includes('`stop`') && b.includes(BASE_DEGRADED_LINE)],
+    ['5b carries the reason-to-fix table', b.includes(BASE_FIX_TABLE)],
   ]);
 }
 
@@ -3310,8 +3317,11 @@ function validateBranchBaseDefects(section: string): string[] {
     ['step 6 reads the cross flag from isCrossRepository', step6.includes('X=<isCrossRepository, else false>')],
     ['step 6 runs the pr-mode call', step6.includes(PR_MODE_CALL)],
     ['step 6 returns BLOCKED when the base ref is none or not hex', /`base_ref` of `none` or not 40 or 64 hex returns BLOCKED/.test(step6)],
-    ['step 6 returns BLOCKED when the resolver is unavailable', step6.includes('`REASON=resolver-unavailable`') && step6.includes('run devflow init')],
-    ['step 6 continues on a degraded base with the DEGRADED line', step6.includes('`TRACEABILITY: DEGRADED (base {REASON})`') && step6.includes('`degraded`')],
+    ['step 6 reads other resolver output as resolver-unavailable', step6.includes('`REASON=resolver-unavailable`') && step6.includes('run devflow init')],
+    ['step 6 takes the BASE_REF line only with exit=0', step6.includes('one `BASE_REF=` line with `exit=0`')],
+    ['step 6 names the fix in its BLOCKED result', /returns BLOCKED naming REASON and its fix/.test(step6)],
+    ['step 6 carries the reason-to-fix table', step6.includes(BASE_FIX_TABLE)],
+    ['step 6 continues on a degraded base with the DEGRADED line and its fix', step6.includes(BASE_DEGRADED_LINE) && step6.includes('`degraded`')],
     ['step 6 never gives an empty Diff Scope', step6.includes('never an empty `### Diff Scope`') && !/intentional empty/i.test(section)],
     ['step 6 probes the default branch without a name placeholder', !/\{(?:default|base_branch)\}/.test(step6.replace(/`base_branch`/g, ''))],
     ['step 7 diffs against the hex base ref and echoes the exit status', step7.includes('git -C "{worktree}" diff --name-only {base_ref}...HEAD; echo "exit=$?"') && step7.includes('40 or 64 hex')],
@@ -3349,7 +3359,15 @@ describe('git agent: PR ops use a fresh base for branch diffs (#495)', () => {
     expect(ensurePrReadyBaseDefects(ensure.replace(BASE_CHECK, '`^[a-z]+$`'))).toContain('5a carries the exact base-name check');
     expect(ensurePrReadyBaseDefects(ensure.replace('X=<isCrossRepository', 'X=<false'))).toContain('5a reads the cross flag from isCrossRepository');
     expect(ensurePrReadyBaseDefects(ensure.replace('Only an invalid name stops this operation', 'Any failure stops this operation'))).toContain('5b stops only on an invalid name');
+    expect(ensurePrReadyBaseDefects(ensure.replace(BASE_FIX_TABLE, ''))).toContain('5b carries the reason-to-fix table');
+    expect(ensurePrReadyBaseDefects(ensure.replace('together with `exit=0`', ''))).toContain('5b takes the one BASE_REF line only with exit=0 and reads other output as resolver-unavailable');
+    expect(ensurePrReadyBaseDefects(ensure.replace('If that call gives no name, keep the PR line', 'If that call gives no name, stop'))).toContain('5a keeps the PR line and degrades when the PR gives no base name');
+    expect(ensurePrReadyBaseDefects(ensure.replace('skip the resolver and 5b', 'run the resolver'))).toContain('5a skips the resolver for a given hex BASE_REF on the same base name');
+    expect(ensurePrReadyBaseDefects(ensure.replace('`BASE_REF` (optional), ', ''))).toEqual(['the Input lists BASE_REF as optional']);
     const sectionValidate = validateSection();
+    expect(validateBranchBaseDefects(sectionValidate.replace(BASE_FIX_TABLE, ''))).toContain('step 6 carries the reason-to-fix table');
+    expect(validateBranchBaseDefects(sectionValidate.replace('with `exit=0`', ''))).toContain('step 6 takes the BASE_REF line only with exit=0');
+    expect(validateBranchBaseDefects(sectionValidate.replace('naming REASON and its fix', 'naming REASON'))).toContain('step 6 names the fix in its BLOCKED result');
     expect(validateBranchBaseDefects(sectionValidate.replace('never an empty `### Diff Scope`', 'an empty `### Diff Scope` is fine'))).toContain('step 6 never gives an empty Diff Scope');
     expect(validateBranchBaseDefects(sectionValidate.replace('diff --name-only {base_ref}...HEAD; echo "exit=$?"', 'diff {base_branch}...HEAD --name-only'))).toContain('step 7 diffs against the hex base ref and echoes the exit status');
   });
