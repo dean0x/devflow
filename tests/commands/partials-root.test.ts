@@ -8,7 +8,9 @@
  * (D-LEDGER-MAIN-WORKTREE), so a command reads the index the Curate agent
  * writes. `knowledge_load`/`knowledge_writeback` (_knowledge.mds) resolve the
  * checkout's toplevel, else the start directory: knowledge bases are committed
- * per branch. `docs_root` (_docs_root.mds, D-DOCS-ROOT) applies the knowledge rule
+ * per branch. A write-back that follows a load in the same command
+ * (`knowledge_writeback_after_load`) takes the `{worktree}` the load resolved.
+ * `docs_root` (_docs_root.mds, D-DOCS-ROOT) applies the knowledge rule
  * to every `.devflow/docs/` artifact a command reads or writes — tests/guards/
  * docs-root.test.ts holds the paths to it, and this file runs its command. Both used to read from cwd, so a session started in `packages/app`
  * loaded `(none)` and a write-back committed `packages/app/.devflow/features`.
@@ -52,6 +54,24 @@ function sectionOf(text: string, heading: string): string {
 function collectGitCommand(section: string): string | null {
   const fence = /```bash\n(git -C "\{start\}" [^\n]+)\n```/.exec(section);
   return fence?.[1] ?? null;
+}
+
+/** The one command every knowledge root block runs. */
+const KNOWLEDGE_ROOT_COMMAND = 'git -C "{start}" rev-parse --show-toplevel';
+
+/**
+ * Named collector: how a command's write-back gets the checkout root, and what is wrong with it.
+ * A write-back that follows the load step in the same command takes the `{worktree}` that step
+ * resolved and carries no copy; a write-back with no load before it resolves the root itself.
+ */
+function collectWritebackRootDefects(text: string): string[] {
+  const writebackAt = text.indexOf(WRITEBACK_HEADING);
+  const loadAt = text.indexOf(KNOWLEDGE_HEADING);
+  const command = collectGitCommand(sectionOf(text, WRITEBACK_HEADING));
+  if (loadAt !== -1 && loadAt < writebackAt) {
+    return command === null ? [] : ['the write-back repeats the root the load step resolved'];
+  }
+  return command === KNOWLEDGE_ROOT_COMMAND ? [] : ['a write-back with no load step before it does not resolve the root'];
 }
 
 /** Run a compiled command line with `{start}` bound to `start`; stdout, or null on failure. */
@@ -212,20 +232,43 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
     expect(ledgerFrom(runFromStart(command as string, wt), wt, outside)).toBe(main);
   });
 
-  it('every compiled knowledge loader and write-back resolves the checkout toplevel', () => {
-    for (const heading of [KNOWLEDGE_HEADING, WRITEBACK_HEADING]) {
-      for (const file of knowledgeHosts(heading)) {
-        const section = sectionOf(requireDistFile(file), heading);
-        expect(collectGitCommand(section), `${file} ${heading}`).toBe('git -C "{start}" rev-parse --show-toplevel');
-        expect(section, `${file}: the retired "no git calls" claim`).not.toContain('no git calls');
-      }
+  it('every compiled knowledge loader resolves the checkout toplevel, and a write-back resolves it once', () => {
+    for (const file of knowledgeHosts(KNOWLEDGE_HEADING)) {
+      const section = sectionOf(requireDistFile(file), KNOWLEDGE_HEADING);
+      expect(collectGitCommand(section), `${file} ${KNOWLEDGE_HEADING}`).toBe(KNOWLEDGE_ROOT_COMMAND);
+      expect(section, `${file}: the retired "no git calls" claim`).not.toContain('no git calls');
     }
+    const writebackHosts = knowledgeHosts(WRITEBACK_HEADING);
+    expect(writebackHosts.length, 'no command carries a write-back, so this guard proves nothing').toBeGreaterThanOrEqual(5);
+    for (const file of writebackHosts) {
+      const text = requireDistFile(file);
+      expect(collectWritebackRootDefects(text), file).toEqual([]);
+      expect(sectionOf(text, WRITEBACK_HEADING), `${file}: the retired "no git calls" claim`).not.toContain('no git calls');
+    }
+    // Non-vacuity: both arms exist, a write-back that follows a load and one that stands alone.
+    const followsLoad = writebackHosts.filter(f => requireDistFile(f).includes(KNOWLEDGE_HEADING));
+    expect(followsLoad.length, 'no write-back follows a load').toBeGreaterThanOrEqual(1);
+    expect(writebackHosts.length - followsLoad.length, 'no write-back stands alone').toBeGreaterThanOrEqual(1);
     const command = collectGitCommand(sectionOf(requireDistFile(knowledgeHosts(KNOWLEDGE_HEADING)[0]), KNOWLEDGE_HEADING));
     // Knowledge bases are per branch: a worktree reads its OWN toplevel, not main's.
     for (const [label, start, expected] of [['root', main, main], ['subdir', sub, main], ['worktree', wt, wt]] as const) {
       expect(worktreeFrom(runFromStart(command as string, start), start), label).toBe(expected);
     }
     expect(worktreeFrom(runFromStart(command as string, outside), outside)).toBe(outside);
+  });
+
+  it('known-bad probes: a write-back that repeats the load step root, and one with no root at all, are reported', () => {
+    const block = `\`\`\`bash\n${KNOWLEDGE_ROOT_COMMAND}\n\`\`\``;
+    const load = `${KNOWLEDGE_HEADING}\n\n${block}\n\n`;
+    const writeback = (body: string) => `${WRITEBACK_HEADING}\n\n${body}\n\n**Step 1**`;
+    const repeated = 'the write-back repeats the root the load step resolved';
+    const missing = 'a write-back with no load step before it does not resolve the root';
+    expect(collectWritebackRootDefects(`${load}${writeback(block)}`)).toEqual([repeated]);
+    expect(collectWritebackRootDefects(`${load}${writeback('')}`)).toEqual([]);
+    expect(collectWritebackRootDefects(writeback(''))).toEqual([missing]);
+    expect(collectWritebackRootDefects(writeback(block))).toEqual([]);
+    // A load that comes after the write-back does not resolve the root for it.
+    expect(collectWritebackRootDefects(`${writeback('')}\n\n${load}`)).toEqual([missing]);
   });
 
   it('every compiled docs root resolves the checkout toplevel, from a root, a subdirectory and a worktree', () => {

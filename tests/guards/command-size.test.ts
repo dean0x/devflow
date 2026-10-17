@@ -28,10 +28,10 @@ type Build = 'on' | 'off'
 
 /** [command, build, ceiling in bytes]. Each row's text is the pattern its numeric-floors.json entry pins. */
 const COMMAND_MAX_BYTES: ReadonlyArray<readonly [string, Build, number]> = [
-  ['bug-analysis', 'on', 24_966],
-  ['bug-analysis', 'off', 21_056],
-  ['code-review', 'on', 34_981],
-  ['code-review', 'off', 32_236],
+  ['bug-analysis', 'on', 24_696],
+  ['bug-analysis', 'off', 20_786],
+  ['code-review', 'on', 34_917],
+  ['code-review', 'off', 32_172],
   ['debug', 'on', 19_885],
   ['debug', 'off', 16_966],
   ['dynamic-build', 'on', 106_923],
@@ -44,18 +44,18 @@ const COMMAND_MAX_BYTES: ReadonlyArray<readonly [string, Build, number]> = [
   ['dynamic-tickets', 'off', 37_129],
   ['explore', 'on', 12_866],
   ['explore', 'off', 9_964],
-  ['implement', 'on', 49_807],
-  ['implement', 'off', 46_953],
+  ['implement', 'on', 49_676],
+  ['implement', 'off', 46_822],
   ['plan', 'on', 37_997],
   ['plan', 'off', 35_029],
   ['release', 'on', 22_825],
   ['release', 'off', 19_609],
   ['research', 'on', 14_894],
   ['research', 'off', 10_838],
-  ['resolve', 'on', 52_287],
-  ['resolve', 'off', 49_087],
-  ['self-review', 'on', 15_691],
-  ['self-review', 'off', 12_619],
+  ['resolve', 'on', 51_824],
+  ['resolve', 'off', 48_624],
+  ['self-review', 'on', 15_228],
+  ['self-review', 'off', 12_156],
 ]
 
 /** The four commands #456 trims, and the sizes main held before wave 4C: [learning-on, learning-off]. */

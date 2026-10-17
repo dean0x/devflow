@@ -1922,6 +1922,95 @@ export function sectionBetween(body: string, start: string, end: string | null):
   return to === -1 ? null : body.slice(from, to)
 }
 
+/** What differs between the commands that build `DIFF_RANGE` from the fresh base and a stored head. */
+export interface DiffRangeShape {
+  /** The stored head's noun in the defect texts: "review" or "analysis". */
+  head: string
+  /** The incremental-detection step as the Extract line names it, such as "Step 0d". */
+  step: string
+  /** The anchors that cut the step out of the command: its heading and the next one. */
+  stepFrom: string
+  stepTo: string
+  /** The reachability command up to its SHA placeholder, such as "cat-file -t {sha}". */
+  reachability: string
+  /** The range the command builds from the stored head. */
+  incrementalRange: string
+  /** The stored head's file name, such as ".last-review-head". */
+  marker: string
+}
+
+/** The parts of the fresh-base text that differ per command. */
+export interface FreshBaseParts {
+  /** Further facts the Extract line states: a pattern it must match, and the defect when it does not. */
+  extractExtras?: ReadonlyArray<readonly [RegExp, string]>
+  /** The check on the one freshness line: a defect, or null when the line sits where the command puts it. */
+  freshness: (line: string) => string | null
+}
+
+/**
+ * The fresh-base facts of `ensure-pr-ready`'s return that /code-review and /bug-analysis state alike:
+ * the Return line carries base_ref; the Extract line tests the Base line and the hex base_ref, carries
+ * no copy of the name class, limits the hex test to a full-range run and names the Git agent's fix;
+ * `DIFF_RANGE` is built from base_ref, never from a base name; one freshness line stands in the report.
+ */
+export function collectFreshBaseDefects(body: string, shape: DiffRangeShape, parts: FreshBaseParts): string[] {
+  const out: string[] = []
+  const spawnAt = body.indexOf('OPERATION: ensure-pr-ready')
+  const ret = spawnAt === -1 ? null : /^Return:[^\n]*/m.exec(body.slice(spawnAt))
+  if (ret === null) out.push('the ensure-pr-ready spawn has no Return line')
+  else if (!/\bbase_ref\b/.test(ret[0])) out.push('the Return line does not carry base_ref')
+  const extract = /^\*\*Extract from response:\*\*[^\n]*/m.exec(body)
+  if (extract === null) out.push('no Extract line')
+  else {
+    const line = extract[0]
+    if (!/`base_ref`/.test(line)) out.push('the Extract line does not take base_ref')
+    if (!/Base line reads \(rejected\)/.test(line)) out.push('the Extract line does not test the Base line for (rejected)')
+    if (!/`base_ref` is not 40 or 64 hex/.test(line)) out.push('the Extract line does not test base_ref for 40 or 64 hex')
+    if (!/Stop with cause and fix/.test(line)) out.push('the Extract line does not stop with the cause and the fix')
+    if (/\{1,200\}|origin\\\//.test(line)) out.push('the Extract line carries a copy of the name class')
+    if (!line.includes(`hex and ${shape.step} takes the full range`)) out.push('the Extract line does not limit the hex test to a full-range run')
+    for (const [pattern, defect] of parts.extractExtras ?? []) if (!pattern.test(line)) out.push(defect)
+    if (!/name the Git agent's fix, never your own/.test(line)) out.push('the Extract line does not name the fix the Git agent returned')
+  }
+  const ranges = [...body.matchAll(/Set `DIFF_RANGE` to `([^`]+)`/g)].map(m => m[1])
+  if (!ranges.includes('{base_ref}...HEAD')) out.push('DIFF_RANGE is not built from base_ref')
+  if (!ranges.includes(shape.incrementalRange)) out.push('the incremental DIFF_RANGE changed')
+  if (ranges.some(r => r.includes('{base_branch}'))) out.push('DIFF_RANGE is built from a base name')
+  const fresh = body.split('\n').filter(l => /DEGRADED/.test(l) && /\bbase\b/.test(l))
+  if (fresh.length !== 1) out.push(`${fresh.length} freshness lines, expected 1`)
+  else {
+    const misplaced = parts.freshness(fresh[0])
+    if (misplaced !== null) out.push(misplaced)
+  }
+  return out
+}
+
+/**
+ * The stored head: git does not track its file, and it is checked as a commit ID, before any git command or
+ * `DIFF_RANGE` takes it. A tracked file is ignored and the run takes the full range.
+ */
+export function collectStoredHeadDefects(body: string, shape: DiffRangeShape): string[] {
+  const s = sectionBetween(body, shape.stepFrom, shape.stepTo)
+  if (s === null) return [`no ${shape.step} (incremental detection)`]
+  const out: string[] = []
+  const line = /^[^\n]*checked as a commit ID[^\n]*/m.exec(s)
+  if (line === null) return [`the stored ${shape.head} head is not checked as a commit ID`]
+  if (!/\bexactly 40 or 64 lowercase hex\b/.test(line[0])) out.push(`the stored ${shape.head} head check does not require exactly 40 or 64 lowercase hex`)
+  if (!/else take the full-range path/.test(line[0])) out.push(`a stored ${shape.head} head that fails the check does not take the full-range path`)
+  const check = s.indexOf('checked as a commit ID')
+  const uses = [shape.reachability, `Set \`DIFF_RANGE\` to \`${shape.incrementalRange}\``].map(use => s.indexOf(use))
+  if (uses.some(at => at === -1)) out.push(`${shape.step} lost the reachability check or the incremental range`)
+  else if (uses.some(at => at < check)) out.push(`the stored ${shape.head} head is used before it is checked`)
+  const tracked = /^[^\n]*ls-files --error-unmatch[^\n]*/m.exec(s)
+  if (tracked === null || !tracked[0].includes(shape.marker)) out.push(`the stored ${shape.head} head is not ignored when git tracks it`)
+  else {
+    if (!tracked[0].includes(`tracked ${shape.head}-head file is ignored, and the ${shape.head} takes the full range`)) out.push(`a tracked ${shape.head} head file does not take the full range`)
+    const trackedAt = s.indexOf('ls-files --error-unmatch')
+    if (trackedAt > check || uses.some(at => at !== -1 && at < trackedAt)) out.push(`the stored ${shape.head} head is used before the tracked-file check`)
+  }
+  return out
+}
+
 /** Table rows of a section, as trimmed cells, separator rows dropped. */
 export function tableRows(section: string): string[][] {
   return section.split('\n')

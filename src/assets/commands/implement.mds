@@ -2,7 +2,7 @@
 description: Execute a single task through implementation, quality gates, and PR creation - accepts plan documents, issues, or task descriptions
 output-dir: dist/commands
 ---
-@import { knowledge_load, knowledge_writeback } from "./_partials/_knowledge.mds"
+@import { knowledge_load, knowledge_writeback_after_load } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
 @import { docs_root } from "./_partials/_docs_root.mds"
 @import { evidence_policy } from "./_partials/_evidence_policy.mds"
@@ -49,12 +49,12 @@ When the user explicitly asks to re-validate, re-check, or re-run quality gates 
 ### Phase 1: Setup
 
 <!-- learning:on -->
-**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION, GATE_LEVEL
+**Produces:** TASK_ID, BASE_BRANCH, BASE_REF, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION, GATE_LEVEL
 <!-- learning:off -->
-**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION, GATE_LEVEL
+**Produces:** TASK_ID, BASE_BRANCH, BASE_REF, EXECUTION_PLAN, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION, GATE_LEVEL
 <!-- learning:end -->
 
-Record the current branch name as `BASE_BRANCH`. Stop the run unless it matches `^[A-Za-z0-9._/+@,#-]{1,200}$`, telling the user it allows only ASCII letters, digits and `._/+@,#-`, at most 200.
+Record the current branch name as `BASE_BRANCH`. Stop the run unless it matches `^(?![-#]|origin\/|(?:@|(?:FETCH_|ORIG_|MERGE_)?HEAD)$)(?!.*\.\.)[A-Za-z0-9._\/+@,#-]{1,200}$`, telling the user it allows only ASCII letters, digits and `._/+@,#-`, at most 200; no leading `-` or `#`, no `origin/` prefix, no `..`, not `@` or a HEAD name.
 
 {{docs_root()}}
 
@@ -88,33 +88,14 @@ Derive branch name from issue or description, create feature branch, and fetch i
 Return the branch setup summary."
 ```
 
-The issue token is forwarded **unclassified**, and the routing is decided by
-SHAPE alone — how many tokens `COMMAND_INPUT` has, and whether it ends in `.md`.
+The issue token is forwarded **unclassified**; routing is by SHAPE alone (the token count of `COMMAND_INPUT`, and whether it ends in `.md`). Only `setup-task` has resolved a provider, so a `starts with #` test here would be a github test under a neutral name: it would reclassify `PROJ-12` and `ENG-12` as task descriptions, so the branch comes from prose, no issue is fetched and nothing reports it. Token COUNT is provider-neutral: every issue spelling is one token and no free-text description is.
 
-`setup-task` is the one step that has resolved a provider, and therefore the only
-one that knows what an issue reference looks like on this machine: `#123`,
-`PROJ-12` and `ENG-12` are three providers' spellings of the same thing. A
-`starts with #` test here would be a github test wearing a neutral name — it
-reclassifies every other provider's reference as a task description, so the
-branch is derived from prose and no issue is ever fetched, with nothing reporting
-a problem. Token COUNT is the gate that stays provider-neutral: every one of
-those spellings is a single token, and no free-text task description is.
-
-The two tests this command does make are its own under every provider:
-
-- **Extension.** A path ending in `.md` is a plan document, never an issue
-  reference — it goes to `PLAN_ARTIFACT_PATH` and neither of the other two keys.
-  `ISSUE_INPUT` then carries the plan's frontmatter `issue` instead, never the
-  path (Plan Document Handling step 4).
-- **Token count.** A single token is an issue reference. Two or more is prose:
-  forwarding only its FIRST token would send `/implement fix the login bug` to
-  the Git agent as `ISSUE_INPUT: fix` with no description at all, and
-  `setup-task` fetches whatever it is handed — so the command would derive a
-  branch from a failed lookup and drop the request on the floor.
+- **Extension.** A path ending in `.md` is a plan document, never an issue reference: it goes to `PLAN_ARTIFACT_PATH` only, and `ISSUE_INPUT` carries the plan's frontmatter `issue`, never the path (Plan Document Handling step 4).
+- **Token count.** One token is an issue reference; two or more is prose. Forwarding the FIRST token alone would send `/implement fix the login bug` as `ISSUE_INPUT: fix` with no description, so the request is dropped.
 
 **Capture from Git agent output** (used throughout flow):
 - `TASK_ID`: The branch name created by Git agent (use as TASK_ID for rest of flow)
-- `BASE_BRANCH`: Branch this feature was created from (for PR target)
+- `BASE_BRANCH`: Branch this feature was created from (for PR target); stop unless it passes the setup check
 - `ISSUE_NUMBER`: the provider-canonical issue identifier for this task — the same value the Git agent emits as `ISSUE_ID` (if provided, or created by the Git agent's issue-first step in setup-task)
 - `branch_slug`: `TASK_ID` with every `/` replaced by `-`. It names `handoff-{branch_slug}.md` and `evidence-{branch_slug}.md` only when it matches `^[A-Za-z0-9._-]{1,200}$`; any other branch name stops the run here, telling the user it cannot name those files.
 
@@ -165,6 +146,8 @@ Pass `DECISIONS_CONTEXT` to Code agent (Phase 2) and Harden agent (Phase 4).
 
 <!-- learning:end -->
 {{knowledge_load()}}
+
+**Fresh base.** Before Phase 2, run `cd "{worktree}" && B="{BASE_BRANCH}" && node "$HOME/.devflow/scripts/resolve-base.cjs" local "${B}"; echo "exit=$?"`. Output other than one `BASE_REF=` line (40 or 64 hex, or `none`) with `exit=0` counts as `NOTE=stop`, `REASON=resolver-unavailable`. Record `BASE_REF`. By `NOTE`: `none` continues; `info` prints one plain line; `degraded` records `TRACEABILITY: DEGRADED (base {REASON}; fix: {fix})`; `stop` (`BASE_REF=none`) stops the run, naming REASON and its fix. Fix by REASON: no-merge-base `git fetch --unshallow`; no-ref or timeout `git fetch origin <base>` (`<base>` stays as written); resolver-unavailable `re-run; if it repeats, run devflow init`; invalid-name the allowed set, never the name; any other REASON none, and `; fix: {fix}` is left out.
 
 ### Phase 2: Implement
 
@@ -246,7 +229,7 @@ HANDOFF_REQUIRED: {true if not last phase}
 HANDOFF_FILE: {worktree}/.devflow/docs/handoff-{branch_slug}.md"
 ```
 
-**Handoff Protocol**: Each sequential Code agent receives the prior Code agent's implementation summary via PRIOR_PHASE_SUMMARY and FILES_FROM_PRIOR_PHASE. The Code agent's built-in branch orientation step handles git log scanning, file reading, and pattern discovery automatically. Each Code agent with HANDOFF_REQUIRED=true appends its own `## Phase {N} Implementation Summary` section, at most 8,192 bytes, to `{worktree}/.devflow/docs/handoff-{branch_slug}.md` (survives context compaction), never rewriting an earlier section and keeping any `## Evidence Exceptions` section byte-identical; the next Code agent reads only the section of the phase immediately before its own through HANDOFF_FILE. The orchestrator writes no phase section. Delete `{worktree}/.devflow/docs/handoff-{branch_slug}.md` once the PR exists — after Phase 9 (cleanup).
+**Handoff Protocol**: Each sequential Code agent receives the prior Code agent's implementation summary via PRIOR_PHASE_SUMMARY and FILES_FROM_PRIOR_PHASE. The Code agent's built-in branch orientation step handles git log scanning, file reading, and pattern discovery automatically. Each Code agent with HANDOFF_REQUIRED=true appends its own `## Phase {N} Implementation Summary` section, at most 8,192 bytes, to `{worktree}/.devflow/docs/handoff-{branch_slug}.md`, never rewriting an earlier section and keeping any `## Evidence Exceptions` section byte-identical; the next Code agent reads only the section of the phase immediately before its own through HANDOFF_FILE. The orchestrator writes no phase section. Delete `{worktree}/.devflow/docs/handoff-{branch_slug}.md` once the PR exists — after Phase 9 (cleanup).
 
 ---
 
@@ -291,9 +274,9 @@ DECISIONS_CONTEXT: {decisions_context}
 ### Phase 3: Polish
 
 **Produces:** POLISH_OUTPUT
-**Requires:** BASE_BRANCH
+**Requires:** BASE_REF
 
-After the Code agent completes, spawn Polish agent to polish the code. The Phase 6 Validate covers its commits. `{branch_diff}` is the output of `git diff --name-only --diff-filter=d {BASE_BRANCH}...HEAD`, run again at each spawn.
+After the Code agent completes, spawn Polish agent to polish the code. The Phase 6 Validate covers its commits. `{branch_diff}` is the output of `git diff --name-only --diff-filter=d {BASE_REF}...HEAD`, run again at each spawn; a non-zero exit stops, and an empty list counts only on exit 0.
 
 ```
 Agent(subagent_type="Polish"):
@@ -307,7 +290,7 @@ Commit any improvements with a conventional-commit message."
 ### Phase 4: Self-Review
 
 **Produces:** HARDEN_OUTPUT
-**Requires:** BASE_BRANCH
+**Requires:** BASE_REF
 
 After Polish agent completes, spawn Harden agent as the quality gate:
 
@@ -327,7 +310,7 @@ Harden agent reports `### Status: PASS | FIXED | BLOCKED`. **If BLOCKED:** repor
 ### Phase 5: Alignment Check
 
 **Produces:** ALIGNMENT_RESULT
-**Requires:** BASE_BRANCH, EXECUTION_PLAN
+**Requires:** BASE_REF, EXECUTION_PLAN
 
 After Harden agent passes, spawn Evaluate agent to validate alignment. Evaluate agent receives `FEATURE_KNOWLEDGE_RULES` as acceptance context only; pattern and anti-pattern judgments belong to Harden agent:
 
@@ -366,14 +349,14 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
 ### Phase 6: Validate
 
 **Produces:** VALIDATION_RESULT, VALIDATED_HEAD
-**Requires:** BASE_BRANCH, GATE_LEVEL
+**Requires:** BASE_REF, GATE_LEVEL
 
 Validate takes the one full-suite slot, after every commit it must cover: Code, Polish, Harden and the alignment fixes. After Evaluate agent passes, spawn Validate agent. `FILES_CHANGED` is the branch diff:
 
 ```
 Agent(subagent_type="Validate"):
 "GATE_LEVEL: {GATE_LEVEL}
-BASE_SHA: {output of `git merge-base {BASE_BRANCH} HEAD`}
+BASE_SHA: {BASE_REF}
 FILES_CHANGED: {branch_diff}
 VALIDATION_SCOPE: full
 Run build, typecheck, lint, test. Report pass/fail with failure details."
@@ -415,7 +398,7 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
 ### Phase 7: QA Testing
 
 **Produces:** QA_RESULT
-**Requires:** BASE_BRANCH, EXECUTION_PLAN, TEST_PLAN, VALIDATED_HEAD
+**Requires:** BASE_REF, EXECUTION_PLAN, TEST_PLAN, VALIDATED_HEAD
 
 After Phase 6 passes, spawn Test agent for scenario-based acceptance testing:
 
@@ -474,15 +457,16 @@ Verify the qa-fix commits did not break anything."
 ### Phase 9: Open PR
 
 **Produces:** PR_NUMBER
-**Requires:** BASE_BRANCH, TASK_ID, ISSUE_NUMBER, ISSUE_PR_LINK, PR_EXCEPTIONS, PR_TEST_PLAN_BLOCK, PR_DESCRIPTION_GUIDANCE, APPLY_CONVENTIONS, CODE_AGENT_OUTPUT
+**Requires:** BASE_BRANCH, BASE_REF, TASK_ID, ISSUE_NUMBER, ISSUE_PR_LINK, PR_EXCEPTIONS, PR_TEST_PLAN_BLOCK, PR_DESCRIPTION_GUIDANCE, APPLY_CONVENTIONS, CODE_AGENT_OUTPUT
 
-Run once, after the gates, under every strategy. This phase sits outside the strategy branches, so no run reaches the end with commits and no PR. No Code agent opens a PR: the Git agent does, and it pastes `ISSUE_PR_LINK`, `PR_EXCEPTIONS` and `PR_TEST_PLAN_BLOCK` through their paste gates and scrubs the body (D11) before `gh pr create`. This command renders no link line and creates no PR itself: the Git agent's Phase-1 rendering is the only one, forwarded verbatim.
+Run once, after the gates, under every strategy. No Code agent opens a PR: the Git agent does, and it pastes `ISSUE_PR_LINK`, `PR_EXCEPTIONS` and `PR_TEST_PLAN_BLOCK` through their paste gates and scrubs the body (D11) before `gh pr create`. This command renders no link line and creates no PR itself: the Git agent's Phase-1 rendering is the only one, forwarded verbatim.
 
 ```
 Agent(subagent_type="Git"):
 "OPERATION: ensure-pr-ready
 WORKTREE_PATH: {worktree}
 BASE_BRANCH: {base branch}
+BASE_REF: {BASE_REF}
 TASK_ID: {task-id}
 ISSUE_NUMBER: {ISSUE_ID captured in Phase 1, or (none)}
 ISSUE_PR_LINK: {ISSUE_PR_LINK captured in Phase 1, or (none)}
@@ -556,13 +540,13 @@ Display completion summary with phase status, Validate's `Lint pack:` line if an
 
 Show the test plan's evidence from Phase 11: `Test plan: {VERIFIED-CI + ATTESTED-LOCAL}/{total} verified (VERIFIED-CI {n}, ATTESTED-LOCAL {n})`, read from the `EVIDENCE` line and never inferred, then its `**Body**:` / `**Comment**:` line verbatim. Without an `EVIDENCE` line, show `Test plan: evidence unavailable`; with no test plan, `Test plan: missing`.
 
-If any Git agent output emitted `TRACEABILITY: DEGRADED ({reason})` lines during the run, or Phase 10's push, Phase 11's push or Phase 11's script output carried one, surface them verbatim in the report under a `### Traceability` subsection so the user can act on them.
+If any Git agent output emitted `TRACEABILITY: DEGRADED ({reason})` lines during the run, or the fresh base step, Phase 10's push, Phase 11's push or Phase 11's script output carried one, surface them verbatim in the report under a `### Traceability` subsection so the user can act on them.
 
 If Phase 9 listed uncommitted files, show them as a `### Uncommitted files` subsection: the user commits them or discards them.
 
 If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lines in the report.
 
-{{knowledge_writeback()}}
+{{knowledge_writeback_after_load()}}
 
 ## Architecture
 
@@ -590,7 +574,7 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 
 ## Principles
 
-1. **Orchestration only** - Command spawns agents, never does work itself; the inline calls are the bounded plumbing the charter allows: the Phase 10 and Phase 11 pushes, the Phase 10 ci-wait call, the Phase 11 evidence publish call and the evidence script checks
+1. **Orchestration only** - Command spawns agents, never does work itself; the inline calls are the bounded plumbing the charter allows: the fresh base step's resolver calls (Phase 1, re-validation), the Phase 10 and 11 pushes, the Phase 10 ci-wait call, the Phase 11 evidence publish call and the evidence script checks
 2. **Honest reporting** - Display agent outputs directly
 3. **Strict delegation** - Never perform agent work in main session. "Spawn X" means call Agent tool with X, not do X's work yourself
 4. **Validate agent owns validation** - Never run `npm test`, `npm run build`, or similar in main session; always delegate to Validate agent

@@ -62,7 +62,7 @@ import {
   type OrderRule,
 } from '../helpers.js'
 import { PROJECT_CONFIG_LIB, SETTINGS_SCRIPT, scopedEnv } from '../evidence-policy/scripted-shim.js'
-import { PR_EVIDENCE_SCRIPT, VERIFY_EVIDENCE_SCRIPT } from './seam.js'
+import { PR_EVIDENCE_SCRIPT, RESOLVE_BASE_SCRIPT, VERIFY_EVIDENCE_SCRIPT } from './seam.js'
 
 /** Transcribed from the script's JSDoc — only what this suite calls. */
 interface VerifyEvidenceApi {
@@ -75,6 +75,12 @@ interface ClaimGrammar {
   readonly CLAIM_LINE_RE: RegExp
 }
 const PE = createRequire(import.meta.url)(PR_EVIDENCE_SCRIPT) as ClaimGrammar
+
+/** Transcribed from resolve-base.cjs's header: the one base-name class the prompts copy. */
+interface ResolveBaseApi {
+  readonly STRICT_NAME_RE: RegExp
+}
+const RB = createRequire(import.meta.url)(RESOLVE_BASE_SCRIPT) as ResolveBaseApi
 
 /** Transcribed from the settings resolver's JSDoc: the project.json serializer the CLI prints from. */
 interface ProjectSuggestionApi {
@@ -403,6 +409,9 @@ const TEST_PLAN_STEP = '**Test plan.** Before any Code spawn'
 const MISSING_ASK = '**Missing test plan, only when `EVIDENCE_POLICY` is `required`:**'
 const OUTPUTS = '**Test-plan outputs**'
 const STANDARD_LINE = 'When `EVIDENCE_POLICY` is `standard`, a missing test plan is never asked about'
+const CAPTURE = '**Capture from Git agent output**'
+/** The one inline resolver call; its script name is unique in the built file. */
+const RESOLVER = 'resolve-base.cjs'
 
 function implementMd(): string {
   return requireDistFile('implement.md')
@@ -426,6 +435,8 @@ const PHASE1_ORDER: readonly OrderRule[] = [
   { label: 'the test plan is checked before it can be missing', before: 'check tp "{worktree}/.devflow/docs/evidence-{branch_slug}.md"', after: MISSING_ASK },
   { label: 'the missing-plan ask precedes the outputs', before: MISSING_ASK, after: OUTPUTS },
   { label: 'the outputs are set before Phase 2', before: OUTPUTS, after: '### Phase 2: Implement' },
+  { label: 'the base name is captured before the base resolves', before: CAPTURE, after: RESOLVER },
+  { label: 'the base resolves before Phase 2', before: RESOLVER, after: '### Phase 2: Implement' },
 ]
 
 /** Named collector: Code spawns that open before `anchor` — every one must follow it, not just the first. */
@@ -447,6 +458,7 @@ describe('AC-9: /implement writes and checks the test plan before any Code spawn
     expect(md.split(CODE_SPAWN).length - 1, 'no Code spawn read').toBeGreaterThanOrEqual(5)
     expect(collectOrderViolations('implement.md', md, PHASE1_ORDER)).toEqual([])
     expect(collectCodeSpawnsBefore(md, OUTPUTS)).toEqual([])
+    expect(collectCodeSpawnsBefore(md, RESOLVER)).toEqual([])
   })
 
   it('known-bad probes: a test-plan step moved above the record and a Code spawn seeded above the outputs are reported', () => {
@@ -455,6 +467,19 @@ describe('AC-9: /implement writes and checks the test plan before any Code spawn
     expect(collectOrderViolations('implement.md', hoisted, PHASE1_ORDER).some(v => v.includes('the ticket exception is recorded before'))).toBe(true)
     const seeded = md.replace(MISSING_ASK, `${CODE_SPAWN}:\n\n${MISSING_ASK}`)
     expect(collectCodeSpawnsBefore(seeded, OUTPUTS)).toHaveLength(1)
+  })
+
+  it('known-bad probes: a base resolved after Phase 2 or before the capture, and a Code spawn above the resolver, are reported', () => {
+    const md = implementMd()
+    const late = md.replace(RESOLVER, 'x.cjs').replace('### Phase 2: Implement', `### Phase 2: Implement\n\n${RESOLVER}`)
+    expect(late, 'the seed must land').not.toBe(md)
+    expect(collectOrderViolations('implement.md', late, PHASE1_ORDER).some(v => v.includes('the base resolves before Phase 2'))).toBe(true)
+    const early = md.replace(RESOLVER, 'x.cjs').replace(CAPTURE, `${RESOLVER}\n\n${CAPTURE}`)
+    expect(early, 'the seed must land').not.toBe(md)
+    expect(collectOrderViolations('implement.md', early, PHASE1_ORDER).some(v => v.includes('the base name is captured before the base resolves'))).toBe(true)
+    const spawned = md.replace('**Fresh base.**', `${CODE_SPAWN}:\n\n**Fresh base.**`)
+    expect(spawned, 'the seed must land').not.toBe(md)
+    expect(collectCodeSpawnsBefore(spawned, RESOLVER)).toHaveLength(1)
   })
 
   it('the check and the render run the installed script over the evidence file', () => {
@@ -743,7 +768,7 @@ describe('0b: Phase 11 pushes the branch before the evidence call', () => {
 
   it('the Report surfaces the push\'s DEGRADED line and Phase 11 says the push never forces and never stops the run', () => {
     const md = implementMd()
-    expect(md).toContain('or Phase 10\'s push, Phase 11\'s push or Phase 11\'s script output carried one, surface them verbatim')
+    expect(md).toContain('or the fresh base step, Phase 10\'s push, Phase 11\'s push or Phase 11\'s script output carried one, surface them verbatim')
     // The diagram's sub-bullet restated this paragraph and was cut; the Phase 11 body is the one statement.
     const phase = md.slice(md.indexOf(PHASE11), md.indexOf('### Phase 12: Report'))
     expect(phase).toContain('push the branch once before the script — never force, and no retry')
@@ -802,7 +827,7 @@ describe('AC-11: Phase 11 runs the evidence script once, after Phase 10, for eve
     expect(collectEvidenceRunDefects(md.replace(' --publication {REVIEW_PUBLICATION resolved in Phase 1, or auto}', ''))).toEqual([
       'the call does not pass REVIEW_PUBLICATION',
     ])
-    expect(collectEvidenceRunDefects(md.replace('cd "{worktree}" && ', ''))).toEqual(['the call does not run from the worktree'])
+    expect(collectEvidenceRunDefects(md.replace('cd "{worktree}" && node "$HOME/.devflow/scripts/verify-evidence.cjs" publish', 'node "$HOME/.devflow/scripts/verify-evidence.cjs" publish'))).toEqual(['the call does not run from the worktree'])
     const back = md.replace('### Phase 12: Report', '```\nAgent(subagent_type="Git"):\n"OPERATION: update-pr-evidence\nPR_NUMBER: {PR_NUMBER}"\n```\n\n### Phase 12: Report')
     expect(collectEvidenceRunDefects(back)).toEqual(['a Git agent is still spawned for update-pr-evidence (1)'])
     expect(collectEvidenceRunDefects(md.replace('Use the Bash tool with `timeout: 180000`', 'Use the Bash tool'))).toEqual([
@@ -1067,8 +1092,10 @@ describe('#421 AC-5: Phase 10 pushes first, unforced and checked, and a failed p
 
 /** What every spawn after Phase 2 names as FILES_CHANGED; Phase 3 defines `{branch_diff}` once. */
 const BRANCH_DIFF = 'FILES_CHANGED: {branch_diff}'
-/** `--diff-filter=d` drops deleted paths: Harden and Evaluate read every path the list names. */
-const BRANCH_DIFF_COMMAND = '`{branch_diff}` is the output of `git diff --name-only --diff-filter=d {BASE_BRANCH}...HEAD`, run again at each spawn.'
+/** `--diff-filter=d` drops deleted paths: Harden and Evaluate read every path the list names. The range starts at the resolved fork point, `BASE_REF`. */
+const BRANCH_DIFF_COMMAND = '`{branch_diff}` is the output of `git diff --name-only --diff-filter=d {BASE_REF}...HEAD`, run again at each spawn'
+/** A failed diff must never read as an empty list. */
+const BRANCH_DIFF_EXIT = '; a non-zero exit stops, and an empty list counts only on exit 0.'
 const CODE_AGENT_LIST = '{list of files from Code agent output}'
 
 /** The spawns that take the branch diff: [phase heading, label, agent type, a line only that spawn carries]. */
@@ -1088,13 +1115,14 @@ function collectFilesChangedDefects(md: string): string[] {
     const spawn = parseFences(section).find(f => isAgentBlock(f, type) && f.includes(marker))
     if (spawn === undefined) return [`${label} has no spawn`]
     const requires = section.split('\n').find(l => l.startsWith('**Requires:**')) ?? ''
-    const declared = !/\bBASE_BRANCH\b/.test(requires)
-      ? [`${label} Requires does not name BASE_BRANCH`]
+    const declared = !/\bBASE_REF\b/.test(requires)
+      ? [`${label} Requires does not name BASE_REF`]
       : /\bFILES_CHANGED\b/.test(requires) ? [`${label} Requires still names the Code agent's FILES_CHANGED`] : []
     return [...(spawn.includes(BRANCH_DIFF) ? [] : [`the ${label} spawn takes the Code agent's file list, not the branch diff`]), ...declared]
   })
   const defined = md.indexOf(BRANCH_DIFF_COMMAND)
-  if (defined === -1) out.push('the branch diff is not defined with git diff --name-only --diff-filter=d {BASE_BRANCH}...HEAD')
+  if (defined === -1) out.push('the branch diff is not defined with git diff --name-only --diff-filter=d {BASE_REF}...HEAD')
+  else if (!md.includes(BRANCH_DIFF_COMMAND + BRANCH_DIFF_EXIT)) out.push('the branch diff does not say that a non-zero exit stops and an empty list counts only on exit 0')
   else if (md.indexOf(BRANCH_DIFF) !== -1 && md.indexOf(BRANCH_DIFF) < defined) out.push('the branch diff is used before it is defined')
   const unfiltered = (md.match(/git diff --name-only (?!--diff-filter=d )/g) ?? []).length
   if (unfiltered > 0) out.push(`${unfiltered} git diff --name-only site(s) list deleted paths: no --diff-filter=d`)
@@ -1102,7 +1130,7 @@ function collectFilesChangedDefects(md: string): string[] {
 }
 
 describe('#421, #452: every spawn after Phase 2 gets the branch diff, not the Code agent\'s list', () => {
-  it('FILES_CHANGED is the one `git diff --name-only --diff-filter=d {BASE_BRANCH}...HEAD` at Polish, Harden, Evaluate, Validate and Test', () => {
+  it('FILES_CHANGED is the one `git diff --name-only --diff-filter=d {BASE_REF}...HEAD` at Polish, Harden, Evaluate, Validate and Test', () => {
     expect(BRANCH_DIFF_SPAWNS.length, 'the site table is empty, so this guard proves nothing').toBe(5)
     expect(collectFilesChangedDefects(implementMd())).toEqual([])
   })
@@ -1128,16 +1156,16 @@ describe('#421, #452: every spawn after Phase 2 gets the branch diff, not the Co
     expect(collectFilesChangedDefects(md.replace(section, section.replace(/```[\s\S]*```/, '')))).toEqual(['Phase 3 Polish has no spawn'])
   })
 
-  it.each(BRANCH_DIFF_SPAWNS.map(([heading, label]) => [label, heading] as const))('known-bad probe: a Requires line that names the Code agent\'s FILES_CHANGED, not BASE_BRANCH, is reported at %s', (label, heading) => {
+  it.each(BRANCH_DIFF_SPAWNS.map(([heading, label]) => [label, heading] as const))('known-bad probe: a Requires line that names the Code agent\'s FILES_CHANGED, not BASE_REF, is reported at %s', (label, heading) => {
     const md = implementMd()
     const section = phaseSection(md, heading)!
     const requires = section.split('\n').find(l => l.startsWith('**Requires:**'))!
-    const old = md.replace(section, section.replace(requires, requires.replace(/\bBASE_BRANCH\b/, 'FILES_CHANGED')))
+    const old = md.replace(section, section.replace(requires, requires.replace(/\bBASE_REF\b/, 'FILES_CHANGED')))
     expect(old, 'the seed must land').not.toBe(md)
-    expect(collectFilesChangedDefects(old)).toEqual([`${label} Requires does not name BASE_BRANCH`])
+    expect(collectFilesChangedDefects(old)).toEqual([`${label} Requires does not name BASE_REF`])
   })
 
-  it.each(BRANCH_DIFF_SPAWNS.map(([heading, label]) => [label, heading] as const))('known-bad probe: a Requires line that names both BASE_BRANCH and the Code agent\'s FILES_CHANGED is reported at %s', (label, heading) => {
+  it.each(BRANCH_DIFF_SPAWNS.map(([heading, label]) => [label, heading] as const))('known-bad probe: a Requires line that names both BASE_REF and the Code agent\'s FILES_CHANGED is reported at %s', (label, heading) => {
     const md = implementMd()
     const section = phaseSection(md, heading)!
     const requires = section.split('\n').find(l => l.startsWith('**Requires:**'))!
@@ -1148,41 +1176,68 @@ describe('#421, #452: every spawn after Phase 2 gets the branch diff, not the Co
 
   it('known-bad probes: a branch diff defined late, one that lists deleted paths and one lost are each reported', () => {
     const md = implementMd()
-    expect(collectFilesChangedDefects(md.replace(BRANCH_DIFF_COMMAND, 'x') + `\n${BRANCH_DIFF_COMMAND}\n`)).toEqual(['the branch diff is used before it is defined'])
+    expect(collectFilesChangedDefects(md.replace(BRANCH_DIFF_COMMAND, 'x') + `\n${BRANCH_DIFF_COMMAND}${BRANCH_DIFF_EXIT}\n`)).toEqual(['the branch diff is used before it is defined'])
     const unfiltered = md.replace('--diff-filter=d VALIDATED_HEAD..HEAD', 'VALIDATED_HEAD..HEAD')
     expect(unfiltered, 'the seed must land').not.toBe(md)
     expect(collectFilesChangedDefects(unfiltered)).toEqual(['1 git diff --name-only site(s) list deleted paths: no --diff-filter=d'])
-    expect(collectFilesChangedDefects(md.replace(BRANCH_DIFF_COMMAND, '`{branch_diff}` is the output of `git diff --name-only {BASE_BRANCH}...HEAD`, run again at each spawn.'))).toEqual([
-      'the branch diff is not defined with git diff --name-only --diff-filter=d {BASE_BRANCH}...HEAD',
+    expect(collectFilesChangedDefects(md.replace(BRANCH_DIFF_COMMAND, '`{branch_diff}` is the output of `git diff --name-only {BASE_REF}...HEAD`, run again at each spawn'))).toEqual([
+      'the branch diff is not defined with git diff --name-only --diff-filter=d {BASE_REF}...HEAD',
       '1 git diff --name-only site(s) list deleted paths: no --diff-filter=d',
     ])
   })
+
+  it('known-bad probes: a branch diff that names the base branch, and one with no exit rule, are each reported', () => {
+    const md = implementMd()
+    const named = md.replace(BRANCH_DIFF_COMMAND, BRANCH_DIFF_COMMAND.replace('{BASE_REF}', '{BASE_BRANCH}'))
+    expect(named, 'the seed must land').not.toBe(md)
+    expect(collectFilesChangedDefects(named)).toEqual(['the branch diff is not defined with git diff --name-only --diff-filter=d {BASE_REF}...HEAD'])
+    const silent = md.replace(BRANCH_DIFF_EXIT, '.')
+    expect(silent, 'the seed must land').not.toBe(md)
+    expect(collectFilesChangedDefects(silent)).toEqual(['the branch diff does not say that a non-zero exit stops and an empty list counts only on exit 0'])
+  })
 })
 
-/** The one pattern a base ref must match before it reaches a shell line. */
-const BASE_BRANCH_PATTERN = '^[A-Za-z0-9._/+@,#-]{1,200}$'
+/** The one class a base name must match before it reaches a shell line: the resolver's exported STRICT_NAME_RE, which each prompt copies. */
+const BASE_BRANCH_PATTERN = RB.STRICT_NAME_RE.source
+/** The allowed set the stop line names: the characters and length, then the shapes the class refuses. */
+const ALLOWED_SET = 'ASCII letters, digits and `._/+@,#-`, at most 200; no leading `-` or `#`, no `origin/` prefix, no `..`, not `@` or a HEAD name'
 /** A branch name that `git check-ref-format --branch` accepts and a shell would run. */
 const HOSTILE_BASE = 'a$(touch$IFS/tmp/x)|sh;b'
-/** How the re-validation step hands the guarded value on: Phases 3-7 run this from `BASE_BRANCH`. */
+/** How the re-validation step hands the guarded value on: Phases 3-7 run this from `BASE_REF`, the fork point. */
 const REVALIDATE_BRANCH_DIFF = 'Phases 3-7 run `{branch_diff}`'
+const REVALIDATE_FORK_POINT = 'from `BASE_REF`, the fork point'
+/** The captured `BASE_BRANCH` is checked again by reference, not by a second copy of the class. */
+const CAPTURED_CHECK = 'stop unless it passes the setup check'
 
-/** Named collector: where the base ref reaches a shell `git diff` with no check, in Setup and in the re-validation path that can skip Setup. */
+/** Named collector: where the base ref reaches a shell line with no check, in Setup, after the capture and in the re-validation path that can skip Setup. */
 function collectBaseBranchGuardDefects(md: string, revalidate: string = revalidateReference()): string[] {
   const out: string[] = []
   const guarded = (line: string | undefined): boolean => line !== undefined && line.includes(`\`${BASE_BRANCH_PATTERN}\``) && /stop the run/i.test(line)
   const record = md.split('\n').find(l => l.startsWith('Record the current branch name as `BASE_BRANCH`'))
   if (!guarded(record)) out.push(`Phase 1 records BASE_BRANCH without stopping the run unless it matches \`${BASE_BRANCH_PATTERN}\``)
   else if (md.indexOf(record!) > md.indexOf('OPERATION: setup-task')) out.push('the BASE_BRANCH guard comes after the setup-task spawn')
+  const captured = md.split('\n').find(l => l.startsWith('- `BASE_BRANCH`: Branch this feature was created from'))
+  if (captured === undefined || !captured.includes(CAPTURED_CHECK)) out.push('the captured BASE_BRANCH is not checked again by the setup check before the base resolves')
   const rerecord = revalidate.split('\n').find(l => l.startsWith('3. **Record BASE_BRANCH**'))
   if (!guarded(rerecord)) out.push(`the re-validation path records BASE_BRANCH without stopping the run unless it matches \`${BASE_BRANCH_PATTERN}\``)
-  else if (!rerecord!.includes(REVALIDATE_BRANCH_DIFF)) out.push('the re-validation path does not say that Phases 3-7 run {branch_diff} from BASE_BRANCH')
+  else if (!rerecord!.includes(REVALIDATE_BRANCH_DIFF)) out.push('the re-validation path does not say that Phases 3-7 run {branch_diff}')
+  else if (!rerecord!.includes(REVALIDATE_FORK_POINT)) out.push('the re-validation path does not say that the branch diff starts at BASE_REF, the fork point')
   else if (rerecord!.indexOf(BASE_BRANCH_PATTERN) > rerecord!.indexOf(REVALIDATE_BRANCH_DIFF)) out.push('the re-validation guard comes after the branch diff')
   else if (!rerecord!.includes('baseRefName')) out.push('the re-validation path does not say where BASE_BRANCH comes from when Phase 1 is skipped')
+  else if (!rerecord!.includes('never the name')) out.push('the re-validation stop line does not say that it never writes the name')
+  const call = revalidate.split('\n').find(l => l.includes(RESOLVER))
+  if (call === undefined || !/ pr "\$\{B\}" --cross "/.test(call) || !call.includes('isCrossRepository')) {
+    out.push('the re-validation path does not run the pr-mode resolver over the checked name with the cross flag from isCrossRepository')
+  } else if (!/ local "\$\{B\}"/.test(call)) {
+    out.push('the re-validation path does not run the local-mode resolver over the checked name when gh returned no PR')
+  } else if (rerecord !== undefined && revalidate.indexOf(call) < revalidate.indexOf(rerecord)) {
+    out.push('the re-validation path resolves the base before it checks the name')
+  }
   return out
 }
 
 describe('#452: BASE_BRANCH is checked before it reaches a shell line', () => {
-  it('Setup and the re-validation path stop the run on a base ref outside the pattern', () => {
+  it('Setup, the capture and the re-validation path stop the run on a base ref outside the pattern', () => {
     expect(collectBaseBranchGuardDefects(implementMd())).toEqual([])
   })
 
@@ -1197,18 +1252,20 @@ describe('#452: BASE_BRANCH is checked before it reaches a shell line', () => {
     // Git accepts these too; the pattern is narrower than git on purpose, and the stop line says so.
     for (const refused of [HOSTILE_BASE, 'café']) { gitAccepts(refused); expect(re.test(refused), refused).toBe(false) }
     for (const bad of ['a;b', 'a b', 'a`id`', '$(id)', 'a|b', '', 'x'.repeat(201)]) expect(re.test(bad), bad).toBe(false)
+    // The shapes the stop line names: a leading `-` or `#`, an `origin/` prefix, `..` and the revision names.
+    for (const bad of ['-x', '#12', 'origin/main', 'a..b', '@', 'HEAD', 'FETCH_HEAD', 'ORIG_HEAD', 'MERGE_HEAD']) expect(re.test(bad), bad).toBe(false)
+    for (const ok of ['origin', 'originx/y', 'HEAD-2', 'feat/HEAD', 'a.b', '@x', 'x@']) expect(re.test(ok), ok).toBe(true)
   })
 
-  it('both stop lines tell the user which characters are allowed', () => {
-    const allowed = 'ASCII letters, digits and `._/+@,#-`, at most 200'
+  it('both stop lines tell the user which names are allowed', () => {
     const record = implementMd().split('\n').find(l => l.startsWith('Record the current branch name as `BASE_BRANCH`'))!
     const rerecord = revalidateReference().split('\n').find(l => l.startsWith('3. **Record BASE_BRANCH**'))!
     for (const [where, line] of [['Phase 1', record], ['the re-validation path', rerecord]] as const) {
-      expect(line, `${where} gives the stop no reason`).toContain(allowed)
+      expect(line, `${where} gives the stop no reason`).toContain(ALLOWED_SET)
     }
   })
 
-  it('known-bad probes: a lost guard, a widened pattern, a late guard and an unguarded re-validation are each reported', () => {
+  it('known-bad probes: a lost guard, a widened pattern, a late guard, an unchecked capture and an unguarded re-validation are each reported', () => {
     const md = implementMd()
     const record = md.split('\n').find(l => l.startsWith('Record the current branch name as `BASE_BRANCH`'))!
     const unguarded = md.replace(record, 'Record the current branch name as `BASE_BRANCH`.')
@@ -1218,22 +1275,44 @@ describe('#452: BASE_BRANCH is checked before it reaches a shell line', () => {
     const widened = md.replace(record, () => record.replace('{1,200}', '+'))
     expect(widened, 'the seed must land').not.toBe(md)
     expect(collectBaseBranchGuardDefects(widened)).toEqual([lost])
+    const stale = md.replace(record, () => record.replace('(?!.*\\.\\.)', ''))
+    expect(stale, 'the seed must land').not.toBe(md)
+    expect(collectBaseBranchGuardDefects(stale)).toEqual([lost])
     expect(collectBaseBranchGuardDefects(md.replace(record, '').replace('OPERATION: setup-task', () => `OPERATION: setup-task\n${record}`))).toEqual(['the BASE_BRANCH guard comes after the setup-task spawn'])
+    const unchecked = md.replace(`; ${CAPTURED_CHECK}`, '')
+    expect(unchecked, 'the seed must land').not.toBe(md)
+    expect(collectBaseBranchGuardDefects(unchecked)).toEqual(['the captured BASE_BRANCH is not checked again by the setup check before the base resolves'])
 
     const reval = revalidateReference()
     const rerecord = reval.split('\n').find(l => l.startsWith('3. **Record BASE_BRANCH**'))!
     const lostReval = `the re-validation path records BASE_BRANCH without stopping the run unless it matches \`${BASE_BRANCH_PATTERN}\``
-    const lateGuard = rerecord.replace(BASE_BRANCH_PATTERN, 'x').replace(' Phases 3-7 run `{branch_diff}` from it.', () => ` Phases 3-7 run \`{branch_diff}\` from it unless it fails the pattern \`${BASE_BRANCH_PATTERN}\`; stop the run.`)
+    const lateGuard = rerecord.replace(BASE_BRANCH_PATTERN, 'x').replace(` Phases 3-7 run \`{branch_diff}\` ${REVALIDATE_FORK_POINT}.`, () => ` Phases 3-7 run \`{branch_diff}\` ${REVALIDATE_FORK_POINT} unless it fails the pattern \`${BASE_BRANCH_PATTERN}\`; stop the run.`)
     expect(lateGuard, 'the seed must land').not.toBe(rerecord)
     expect(collectBaseBranchGuardDefects(md, reval.replace(rerecord, () => rerecord.replace(BASE_BRANCH_PATTERN, 'x')))).toEqual([lostReval])
     expect(collectBaseBranchGuardDefects(md, reval.replace(rerecord, () => lateGuard))).toEqual(['the re-validation guard comes after the branch diff'])
     const unsaid = rerecord.replace(REVALIDATE_BRANCH_DIFF, 'Phases 3-7 run it')
     expect(unsaid, 'the seed must land').not.toBe(rerecord)
-    expect(collectBaseBranchGuardDefects(md, reval.replace(rerecord, () => unsaid))).toEqual(['the re-validation path does not say that Phases 3-7 run {branch_diff} from BASE_BRANCH'])
+    expect(collectBaseBranchGuardDefects(md, reval.replace(rerecord, () => unsaid))).toEqual(['the re-validation path does not say that Phases 3-7 run {branch_diff}'])
+    const fromName = rerecord.replace(REVALIDATE_FORK_POINT, 'from it')
+    expect(fromName, 'the seed must land').not.toBe(rerecord)
+    expect(collectBaseBranchGuardDefects(md, reval.replace(rerecord, () => fromName))).toEqual(['the re-validation path does not say that the branch diff starts at BASE_REF, the fork point'])
     const sourceless = rerecord.replaceAll('baseRefName', 'x')
     expect(sourceless, 'the seed must land').not.toBe(rerecord)
     expect(collectBaseBranchGuardDefects(md, reval.replace(rerecord, () => sourceless))).toEqual(['the re-validation path does not say where BASE_BRANCH comes from when Phase 1 is skipped'])
+    const namesIt = rerecord.replace('never the name', 'the name')
+    expect(namesIt, 'the seed must land').not.toBe(rerecord)
+    expect(collectBaseBranchGuardDefects(md, reval.replace(rerecord, () => namesIt))).toEqual(['the re-validation stop line does not say that it never writes the name'])
     expect(collectBaseBranchGuardDefects(md, reval.replace(rerecord, ''))).toEqual([lostReval])
+
+    const call = reval.split('\n').find(l => l.includes(RESOLVER))!
+    const lostCall = 'the re-validation path does not run the pr-mode resolver over the checked name with the cross flag from isCrossRepository'
+    expect(collectBaseBranchGuardDefects(md, reval.replace(call, ''))).toEqual([lostCall])
+    expect(collectBaseBranchGuardDefects(md, reval.replace(call, () => call.replace(' pr "', ' local "')))).toEqual([lostCall])
+    expect(collectBaseBranchGuardDefects(md, reval.replace(call, () => call.replaceAll('isCrossRepository', 'x')))).toEqual([lostCall])
+    const noLocal = call.replace(' local "', ' pr "')
+    expect(noLocal, 'the seed must land').not.toBe(call)
+    expect(collectBaseBranchGuardDefects(md, reval.replace(call, () => noLocal))).toEqual(['the re-validation path does not run the local-mode resolver over the checked name when gh returned no PR'])
+    expect(collectBaseBranchGuardDefects(md, reval.replace(`${rerecord}\n${call}`, () => `${call}\n${rerecord}`))).toEqual(['the re-validation path resolves the base before it checks the name'])
   })
 })
 
@@ -1252,6 +1331,7 @@ function collectPointerDefects(md: string, revalidate: string = revalidateRefere
   need('the diagram lacks the Phase 6 Validate', md.includes('├─ Phase 6: Validate (the one full-suite slot)'))
   need('the diagram lacks the Phase 8 Re-Validate', md.includes('├─ Phase 8: Re-Validate (only if a qa-fix committed)'))
   need('the Orchestration-only principle does not name the Phase 10 push and the ci-wait call', /\*\*Orchestration only\*\*[^\n]*Phase 10[^\n]*push[^\n]*ci-wait call/.test(md))
+  need('the Orchestration-only principle does not name the resolver calls of the fresh base step', /\*\*Orchestration only\*\*[^\n]*the fresh base step's resolver calls \(Phase 1, re-validation\)/.test(md))
   need('the Loop-limits principle does not carry the CI gate budget', /\*\*Loop limits\*\*[^\n]*at most 3 waits and 2 fixes/.test(md))
   return out
 }
@@ -1270,5 +1350,90 @@ describe('#421 AC-26: the cross-references match the new phase numbers', () => {
       'Phase 1 does not point Harden at Phase 4',
     ]))
     expect(collectPointerDefects(md.replace('the CI gate allows at most 3 waits and 2 fixes', 'the CI gate polls ten times'))).toEqual(['the Loop-limits principle does not carry the CI gate budget'])
+    const unnamed = md.replace("the fresh base step's resolver calls (Phase 1, re-validation), ", '')
+    expect(unnamed, 'the seed must land').not.toBe(md)
+    expect(collectPointerDefects(unnamed)).toEqual(['the Orchestration-only principle does not name the resolver calls of the fresh base step'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #495 — Phase 1 resolves a fresh base once and every later diff starts at it
+// ---------------------------------------------------------------------------
+
+/** The call: the local rule over the checked name, in the worktree, with the exit status echoed. */
+const FRESH_BASE_CALL = 'cd "{worktree}" && B="{BASE_BRANCH}" && node "$HOME/.devflow/scripts/resolve-base.cjs" local "${B}"; echo "exit=$?"'
+
+/** What the fresh-base step states: [what it must say, the text that says it]. */
+const FRESH_BASE_PARTS: ReadonlyArray<readonly [string, string]> = [
+  ['the local-rule call over the checked name, in the worktree, with the exit status echoed', `run \`${FRESH_BASE_CALL}\``],
+  ['the accepted-line test (40 or 64 hex, or none) with exit=0', 'Output other than one `BASE_REF=` line (40 or 64 hex, or `none`) with `exit=0`'],
+  ['unusable output reads as resolver-unavailable', '`REASON=resolver-unavailable`'],
+  ['BASE_REF is recorded', 'Record `BASE_REF`.'],
+  ['info prints one plain line', '`info` prints one plain line'],
+  ['degraded records the base DEGRADED line with its fix', '`degraded` records `TRACEABILITY: DEGRADED (base {REASON}; fix: {fix})`'],
+  ['a stop, with BASE_REF none, names its cause and fix', '`stop` (`BASE_REF=none`) stops the run, naming REASON and its fix'],
+  ['no-merge-base names the unshallow fix', 'no-merge-base `git fetch --unshallow`'],
+  ['no-ref and timeout name the fetch fix', 'no-ref or timeout `git fetch origin <base>`'],
+  ['resolver-unavailable names the re-run, then the install fix', 'resolver-unavailable `re-run; if it repeats, run devflow init`'],
+  ['invalid-name states the allowed set, never the name', 'invalid-name the allowed set, never the name'],
+]
+
+/** Named collector: what the fresh-base step, its channel, its sink and its Validate hand-off fail to state. */
+function collectFreshBaseDefects(md: string): string[] {
+  const out: string[] = []
+  const start = md.indexOf('**Fresh base.**')
+  const end = start === -1 ? -1 : md.indexOf('\n\n', start)
+  if (start === -1 || end === -1) return ['no fresh-base step']
+  const step = md.slice(start, end)
+  for (const [what, text] of FRESH_BASE_PARTS) if (!step.includes(text)) out.push(`the fresh-base step lacks: ${what}`)
+  const traceability = md.split('\n').find(l => l.includes('under a `### Traceability` subsection')) ?? ''
+  if (!traceability.includes('the fresh base step')) out.push('the Traceability section does not name the fresh base step')
+  const phase1 = phaseSection(md, H.p1) ?? ''
+  const produces = phase1.split('\n').filter(l => l.startsWith('**Produces:**'))
+  if (produces.length === 0 || produces.some(l => !/\bBASE_REF\b/.test(l))) out.push('Phase 1 does not produce BASE_REF')
+  const validate = phaseSection(md, H.p6) ?? ''
+  if (!validate.includes('\nBASE_SHA: {BASE_REF}\n')) out.push('the Phase 6 Validate spawn does not take BASE_SHA from BASE_REF')
+  if (md.includes('git merge-base')) out.push('a git merge-base over the base name remains')
+  const openPr = phaseSection(md, H.p9) ?? ''
+  if (!openPr.includes('\nBASE_BRANCH: {base branch}\n')) out.push('the Phase 9 PR target is not the bare base branch name')
+  if (!openPr.includes('\nBASE_REF: {BASE_REF}\n')) out.push('the Phase 9 spawn does not pass BASE_REF to ensure-pr-ready')
+  if (!/^\*\*Requires:\*\*[^\n]*\bBASE_REF\b/m.test(openPr)) out.push('Phase 9 does not require BASE_REF')
+  return out
+}
+
+describe('#495: /implement resolves a fresh base once, before Phase 2, and every diff starts at it', () => {
+  it('the step, its channel, its sink and the Validate hand-off state every part', () => {
+    expect(FRESH_BASE_PARTS.length, 'the table is empty, so this guard proves nothing').toBeGreaterThanOrEqual(10)
+    expect(collectFreshBaseDefects(implementMd())).toEqual([])
+  })
+
+  it.each(FRESH_BASE_PARTS)('known-bad probe: dropping "%s" is reported', (what, text) => {
+    const md = implementMd()
+    const seeded = md.replace(text, '')
+    expect(seeded, 'the seed must land').not.toBe(md)
+    expect(collectFreshBaseDefects(seeded)).toContain(`the fresh-base step lacks: ${what}`)
+  })
+
+  it('known-bad probes: a lost step, a lost channel, a lost product, a bare-name Validate base and a hex PR target are each reported', () => {
+    const md = implementMd()
+    expect(collectFreshBaseDefects(md.replace('**Fresh base.**', '**Base.**'))).toEqual(['no fresh-base step'])
+    const noChannel = md.replace('the fresh base step, ', '')
+    expect(noChannel, 'the seed must land').not.toBe(md)
+    expect(collectFreshBaseDefects(noChannel)).toEqual(['the Traceability section does not name the fresh base step'])
+    const noProduct = md.replace('**Produces:** TASK_ID, BASE_BRANCH, BASE_REF,', '**Produces:** TASK_ID, BASE_BRANCH,')
+    expect(noProduct, 'the seed must land').not.toBe(md)
+    expect(collectFreshBaseDefects(noProduct)).toEqual(['Phase 1 does not produce BASE_REF'])
+    const bareValidate = md.replace('\nBASE_SHA: {BASE_REF}\n', '\nBASE_SHA: {output of `git merge-base {BASE_BRANCH} HEAD`}\n')
+    expect(bareValidate, 'the seed must land').not.toBe(md)
+    expect(collectFreshBaseDefects(bareValidate)).toEqual(['the Phase 6 Validate spawn does not take BASE_SHA from BASE_REF', 'a git merge-base over the base name remains'])
+    const hexTarget = md.replace(/(### Phase 9: Open PR[\s\S]*?)BASE_BRANCH: \{base branch\}/, '$1BASE_BRANCH: {BASE_REF}')
+    expect(hexTarget, 'the seed must land').not.toBe(md)
+    expect(collectFreshBaseDefects(hexTarget)).toEqual(['the Phase 9 PR target is not the bare base branch name'])
+    const noPass = md.replace('BASE_BRANCH: {base branch}\nBASE_REF: {BASE_REF}\n', 'BASE_BRANCH: {base branch}\n')
+    expect(noPass, 'the seed must land').not.toBe(md)
+    expect(collectFreshBaseDefects(noPass)).toEqual(['the Phase 9 spawn does not pass BASE_REF to ensure-pr-ready'])
+    const noRequire = md.replace(/(### Phase 9: Open PR[\s\S]*?\*\*Requires:\*\* BASE_BRANCH), BASE_REF,/, '$1,')
+    expect(noRequire, 'the seed must land').not.toBe(md)
+    expect(collectFreshBaseDefects(noRequire)).toEqual(['Phase 9 does not require BASE_REF'])
   })
 })

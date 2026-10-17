@@ -14,7 +14,7 @@
 // cannot silently remove safety-critical patterns.
 
 import { describe, it, expect } from 'vitest';
-import { loadFile, extractSection, resolveAgentSource } from '../helpers';
+import { loadFile, extractSection, resolveAgentSource, collectFreshBaseDefects, collectStoredHeadDefects, type DiffRangeShape } from '../helpers';
 
 const content = loadFile('dist/commands/bug-analysis.md');
 const agentContent = resolveAgentSource('debug').content;
@@ -126,6 +126,137 @@ describe('bug-analysis.md — incremental detection', () => {
   it('no-new-commits case documented with stop condition', () => {
     // The edge case table or step 2a must document the stop behavior
     expect(content).toMatch(/No new commits since last analysis/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Group 2b: Fresh base for branch diffs (#495)
+//
+// The base ref that ensure-pr-ready returns is the base of DIFF_RANGE. The Extract line tests the
+// Base line and the hex base_ref and carries no copy of the name class (the Git op already stops on
+// a refused name), ends the hex test at a full-range run, and takes the fix from the Git agent. A
+// non-zero diff exit stops; an empty list stops only on exit 0; a degraded base prints one freshness
+// line under Branch in the Phase 7 report. The stored analysis head is checked as a commit ID before
+// it is used. The Debug diff command follows DIFF_RANGE and needs no text change.
+// ---------------------------------------------------------------------------
+
+const ANALYSIS_RANGE: DiffRangeShape = {
+  head: 'analysis',
+  step: 'Step 2a',
+  stepFrom: 'Step 2a:',
+  stepTo: 'Step 2b:',
+  reachability: 'git cat-file -t {sha}',
+  incrementalRange: '{sha}...HEAD',
+  marker: '.last-analysis-head',
+};
+
+// The facts /code-review shares live in the helpers; this adds Step 2b, the stop row, the Phase 7 slot and the Debug command.
+function collectAnalysisFreshBaseDefects(body: string): string[] {
+  const out = collectFreshBaseDefects(body, ANALYSIS_RANGE, {
+    freshness: line => {
+      const at = body.indexOf(line);
+      const branch = body.indexOf('**Branch**: {branch}');
+      const analysis = body.indexOf('**Analysis**: {ANALYSIS_DIR}');
+      if (branch === -1 || analysis === -1 || at < branch || at > analysis) return 'the freshness line is not under Branch in the Phase 7 report';
+      return /from Phase 1, as returned/.test(line) ? null : 'the freshness line is not the Phase 1 line as returned';
+    },
+  });
+  const step2b = extractSection(body, 'Step 2b:', 'Step 2c:');
+  if (!/A non-zero diff exit stops\./.test(step2b)) out.push('Step 2b does not say a non-zero diff exit stops');
+  const row = body.split('\n').find(l => l.startsWith('| Zero changed files in DIFF_RANGE'));
+  if (row === undefined) out.push('no stop row for zero changed files');
+  else if (!/^\| Zero changed files in DIFF_RANGE with exit 0 \|/.test(row)) out.push('the zero-files stop row does not fire only on exit 0');
+  if (!body.includes('DIFF_COMMAND: git diff {DIFF_RANGE}')) out.push('the Debug diff command does not follow DIFF_RANGE');
+  return out;
+}
+
+describe('bug-analysis.md — DIFF_RANGE starts at the fresh base that ensure-pr-ready returns (#495)', () => {
+  const seed = (from: string | RegExp, to: string): string => {
+    const next = content.replace(from, to);
+    expect(next, `the seed ${String(from)} must change the text`).not.toBe(content);
+    return next;
+  };
+
+  it('Return, Extract, DIFF_RANGE, the exit rule, the stop row and the freshness line', () => {
+    expect(collectAnalysisFreshBaseDefects(content)).toEqual([]);
+  });
+
+  it('known-bad probes: each lost or weakened part is reported', () => {
+    expect(collectAnalysisFreshBaseDefects(seed('Return: branch, base_branch, base_ref, branch-slug, PR#', 'Return: branch, base_branch, branch-slug, PR#')))
+      .toContain('the Return line does not carry base_ref');
+    expect(collectAnalysisFreshBaseDefects(seed('Base line reads (rejected) or', 'Base line is fine or')))
+      .toContain('the Extract line does not test the Base line for (rejected)');
+    expect(collectAnalysisFreshBaseDefects(seed('`base_ref` is not 40 or 64 hex', '`base_ref` is empty')))
+      .toContain('the Extract line does not test base_ref for 40 or 64 hex');
+    expect(collectAnalysisFreshBaseDefects(seed('Stop with cause and fix when', 'Warn when')))
+      .toContain('the Extract line does not stop with the cause and the fix');
+    expect(collectAnalysisFreshBaseDefects(seed('Stop with cause and fix when', 'Stop with cause and fix unless it matches `^[A-Za-z0-9._/+@,#-]{1,200}$`, or when')))
+      .toContain('the Extract line carries a copy of the name class');
+    expect(collectAnalysisFreshBaseDefects(seed('Set `DIFF_RANGE` to `{base_ref}...HEAD`', 'Set `DIFF_RANGE` to `{base_branch}...HEAD`')).join('\n'))
+      .toMatch(/DIFF_RANGE is not built from base_ref[\s\S]*DIFF_RANGE is built from a base name/);
+    expect(collectAnalysisFreshBaseDefects(seed('Set `DIFF_RANGE` to `{sha}...HEAD`', 'Set `DIFF_RANGE` to `{sha}..HEAD`')))
+      .toContain('the incremental DIFF_RANGE changed');
+    expect(collectAnalysisFreshBaseDefects(seed(' A non-zero diff exit stops.', '')))
+      .toContain('Step 2b does not say a non-zero diff exit stops');
+    expect(collectAnalysisFreshBaseDefects(seed('| Zero changed files in DIFF_RANGE with exit 0 |', '| Zero changed files in DIFF_RANGE |')))
+      .toContain('the zero-files stop row does not fire only on exit 0');
+    expect(collectAnalysisFreshBaseDefects(seed(' and Step 2a takes the full range', '')))
+      .toContain('the Extract line does not limit the hex test to a full-range run');
+    expect(collectAnalysisFreshBaseDefects(seed("name the Git agent's fix, never your own", 'name a fix')))
+      .toContain('the Extract line does not name the fix the Git agent returned');
+    expect(collectAnalysisFreshBaseDefects(seed(/^\{any base .*\n/m, '')))
+      .toContain('0 freshness lines, expected 1');
+    expect(collectAnalysisFreshBaseDefects(seed('never your own.', 'never your own.\nPrint a returned base `TRACEABILITY: DEGRADED` line once in the header.')))
+      .toContain('2 freshness lines, expected 1');
+    const moved = seed(/^\{any base .*\n/m, '').replace('never your own.', 'never your own.\nPrint a returned base `TRACEABILITY: DEGRADED` line once in the header.');
+    expect(collectAnalysisFreshBaseDefects(moved)).toContain('the freshness line is not under Branch in the Phase 7 report');
+    expect(collectAnalysisFreshBaseDefects(seed('from Phase 1, as returned', 'from Phase 1')))
+      .toContain('the freshness line is not the Phase 1 line as returned');
+    expect(collectAnalysisFreshBaseDefects(seed('DIFF_COMMAND: git diff {DIFF_RANGE}', 'DIFF_COMMAND: git diff main...HEAD')))
+      .toContain('the Debug diff command does not follow DIFF_RANGE');
+  });
+});
+
+describe('bug-analysis.md — the stored analysis head is tracked-free and checked as a commit ID (Step 2a)', () => {
+  const CHECK = ' The stored analysis head is checked as a commit ID: use it only when it is exactly 40 or 64 lowercase hex, else take the full-range path';
+  const TRACKED = 'A tracked analysis-head file is ignored, and the analysis takes the full range (`git -C {worktree}/.devflow/docs/bug-analysis/{branch-slug} ls-files --error-unmatch -- .last-analysis-head >/dev/null 2>&1` exits 0).';
+  const seed = (from: string, to: string): string => {
+    const next = content.replace(from, to);
+    expect(next, `the seed ${from} must change the text`).not.toBe(content);
+    return next;
+  };
+
+  it('the check comes before the reachability test and the incremental range', () => {
+    expect(collectStoredHeadDefects(content, ANALYSIS_RANGE)).toEqual([]);
+  });
+
+  it('known-bad probes: a missing, weakened or late check is reported', () => {
+    expect(collectStoredHeadDefects(seed(CHECK, ''), ANALYSIS_RANGE))
+      .toContain('the stored analysis head is not checked as a commit ID');
+    expect(collectStoredHeadDefects(seed('exactly 40 or 64 lowercase hex', 'hex'), ANALYSIS_RANGE))
+      .toContain('the stored analysis head check does not require exactly 40 or 64 lowercase hex');
+    expect(collectStoredHeadDefects(seed('else take the full-range path', 'else go on'), ANALYSIS_RANGE))
+      .toContain('a stored analysis head that fails the check does not take the full-range path');
+    const late = seed(CHECK, '').replace('git cat-file -t {sha}', `git cat-file -t {sha}${CHECK}`);
+    expect(collectStoredHeadDefects(late, ANALYSIS_RANGE)).toContain('the stored analysis head is used before it is checked');
+  });
+
+  it('known-bad probes: a missing step, reachability check or incremental range is reported', () => {
+    expect(collectStoredHeadDefects(content.replaceAll('Step 2a:', 'Step 2z:'), ANALYSIS_RANGE))
+      .toEqual(['no Step 2a (incremental detection)']);
+    expect(collectStoredHeadDefects(seed('git cat-file -t {sha}', 'git cat-file -t {head}'), ANALYSIS_RANGE))
+      .toContain('Step 2a lost the reachability check or the incremental range');
+    expect(collectStoredHeadDefects(seed('Set `DIFF_RANGE` to `{sha}...HEAD`', 'Set `DIFF_RANGE` to `{sha}..HEAD`'), ANALYSIS_RANGE))
+      .toContain('Step 2a lost the reachability check or the incremental range');
+  });
+
+  it('known-bad probes: a missing, late or fall-back-less tracked-file check is reported', () => {
+    expect(collectStoredHeadDefects(seed(TRACKED, ''), ANALYSIS_RANGE))
+      .toContain('the stored analysis head is not ignored when git tracks it');
+    const late = seed(TRACKED, '').replace('git cat-file -t {sha}', `git cat-file -t {sha}; ${TRACKED}`);
+    expect(collectStoredHeadDefects(late, ANALYSIS_RANGE)).toContain('the stored analysis head is used before the tracked-file check');
+    expect(collectStoredHeadDefects(seed('and the analysis takes the full range', 'and the analysis goes on'), ANALYSIS_RANGE))
+      .toContain('a tracked analysis head file does not take the full range');
   });
 });
 

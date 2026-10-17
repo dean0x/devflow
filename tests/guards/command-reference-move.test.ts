@@ -50,7 +50,7 @@ interface Moved {
   readonly heading: string
   /** UTF-8 length of the removed text without its trailing newline. */
   readonly bytes: number
-  /** SHA-256 of those bytes, taken from `main:src/assets/commands/implement.mds` and `_partials/_evidence_policy.mds`. The continuation path is re-pinned to its edited text: #452 turned its diff step into a guarded `BASE_BRANCH` record that Phases 3-7 read for the branch diff, and the lean lint pack added a step that takes `GATE_LEVEL` from the Phase 1 settings step for Phase 6. */
+  /** SHA-256 of those bytes, taken from `main:src/assets/commands/implement.mds` and `_partials/_evidence_policy.mds`. The continuation path is re-pinned to its edited text: #452 turned its diff step into a guarded `BASE_BRANCH` record that Phases 3-7 read for the branch diff, the lean lint pack added a step that takes `GATE_LEVEL` from the Phase 1 settings step for Phase 6, and #495 added the base resolution (pr mode for a PR, local mode without one), so Phases 3-7 run the branch diff from a fresh base, and tightened the branch-name validation. */
   readonly sha256: string
   readonly was: string
 }
@@ -60,7 +60,7 @@ const MOVED: readonly Moved[] = [
   { reference: 'commands/implement-evidence-asks.md', heading: 'Exception grammar', bytes: 1451, sha256: 'a9ab21080bbe77f0ea187471bf6d3d241cd69b11748cd37b95d119e5dad1260c', was: '_evidence_policy.mds, the body of evidence_exception()' },
   { reference: 'commands/implement-evidence-asks.md', heading: 'Record the exception', bytes: 566, sha256: '458cf3e415744aab954b2686f16d4c9fb5f1f3b9bfed1790e32a6a429d821ba8', was: 'implement.mds, the record paragraph' },
   { reference: 'commands/implement-evidence-asks.md', heading: 'Missing test plan ask', bytes: 1358, sha256: '032972c8f3a0443a7aed0863ce248e68393f26b666a940da80c1b0284558d59d', was: 'implement.mds, the missing-test-plan ask and its two options' },
-  { reference: 'commands/implement-revalidate.md', heading: 'Continuation path', bytes: 1269, sha256: '09fba0f5cedd62212add24b734e7f695157c0488241a15257f06b2fbda731c9d', was: 'implement.mds, the re-validation continuation path' },
+  { reference: 'commands/implement-revalidate.md', heading: 'Continuation path', bytes: 2114, sha256: '4938b0c8267f9b1aa244af568b7115ad130478eca9f131309e74f87027b60b43', was: 'implement.mds, the re-validation continuation path' },
 ]
 
 const digest = (text: string): string => createHash('sha256').update(Buffer.from(text, 'utf-8')).digest('hex')
