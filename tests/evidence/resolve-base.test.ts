@@ -99,8 +99,9 @@ interface ResolveBase {
 const req = createRequire(import.meta.url)
 const RB = req(RESOLVE_BASE_SCRIPT) as ResolveBase
 
-/** Budget for describe blocks that spawn node or real git (slow under full-suite load). */
-const SPAWN_BUDGET = { timeout: 30_000 } as const
+/** The bound of one node or git launch, and the timeout of every test that makes one (slow under full-suite load). */
+const SUBPROCESS_TIMEOUT_MS = 60_000
+const SPAWN_BUDGET = { timeout: SUBPROCESS_TIMEOUT_MS } as const
 
 const HEX_A = 'a'.repeat(40)
 const HEX_B = 'b'.repeat(40)
@@ -349,7 +350,7 @@ function commitFile(dir: string, home: string, rel: string): string {
 
 /** Exit status of a git command that is expected to fail or to answer "absent". */
 function gitStatus(cwd: string, home: string, args: readonly string[]): number | null {
-  return spawnSync('git', [...args], { cwd, env: scopedEnv(home), stdio: 'ignore', timeout: 20_000 }).status
+  return spawnSync('git', [...args], { cwd, env: scopedEnv(home), stdio: 'ignore', timeout: SUBPROCESS_TIMEOUT_MS }).status
 }
 
 beforeAll(() => {
@@ -371,7 +372,7 @@ beforeAll(() => {
   fs.mkdirSync(probe)
   sha256Supported = gitStatus(probe, home, ['init', '-q', '--object-format=sha256']) === 0
   // the first node start after a burst of git processes can take seconds: pay it here, not in a test
-  spawnSync(process.execPath, ['-e', '0'], { cwd: tmp, env: scopedEnv(home), stdio: 'ignore', timeout: 60_000 })
+  spawnSync(process.execPath, ['-e', '0'], { cwd: tmp, env: scopedEnv(home), stdio: 'ignore', timeout: SUBPROCESS_TIMEOUT_MS })
 }, 90_000)
 
 afterAll(() => {
@@ -504,7 +505,7 @@ function expectWant(r: Run, want: Want): void {
 describe('the script under process.execPath (AC-6, AC-7)', SPAWN_BUDGET, () => {
   function runScript(w: World, args: readonly string[], envExtra: Record<string, string> = {}): { stdout: string; stderr: string; status: number | null } {
     const r = spawnSync(process.execPath, [RESOLVE_BASE_SCRIPT, ...args], {
-      cwd: w.work, env: scopedEnv(w.home, envExtra), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000,
+      cwd: w.work, env: scopedEnv(w.home, envExtra), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: SUBPROCESS_TIMEOUT_MS,
     })
     return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', status: r.status }
   }
@@ -528,17 +529,18 @@ describe('the script under process.execPath (AC-6, AC-7)', SPAWN_BUDGET, () => {
     expect(r.stdout).toBe(`BASE_REF=${s.shas.S1} TIP=local FETCH=failed REASON=no-remote-branch NOTE=none\n`)
   })
 
-  it('prints only the refusal line for a name outside the allowed set', () => {
+  // The refused names, the usage cases and the git calls of a refusal are held in process by the
+  // blocks below; these two tests launch node once each for the process contract.
+  it('prints only the refusal line for a name that holds shell syntax, and runs none of it', () => {
     const w = newWorld()
     const marker = path.join(w.root, 'created-by-name')
-    const refused = [`$(touch ${marker})`, 'zz-marker.lock', 'zz marker', '-zz-marker', 'zz-marker..x']
-    for (const name of refused) {
-      const r = runScript(w, ['local', name])
-      expect(r, name).toEqual({ stdout: 'BASE_REF=none TIP=none FETCH=skipped REASON=invalid-name NOTE=stop\n', stderr: '', status: 0 })
-    }
+    expect(runScript(w, ['local', `$(touch ${marker})`]))
+      .toEqual({ stdout: 'BASE_REF=none TIP=none FETCH=skipped REASON=invalid-name NOTE=stop\n', stderr: '', status: 0 })
     expect(fs.existsSync(marker)).toBe(false)
-    expect(runScript(w, ['local'])).toEqual({ stdout: 'BASE_REF=none TIP=none FETCH=skipped REASON=usage NOTE=stop\n', stderr: '', status: 0 })
-    // git cannot be started: the fallback literal, still one line and exit 0
+  })
+
+  it('prints the fallback literal, as one line with exit 0, when git cannot be started', () => {
+    const w = newWorld()
     expect(runScript(w, ['local', 'main'], { PATH: path.join(w.root, 'no-such-dir') }))
       .toEqual({ stdout: `${RB.FALLBACK_LINE}\n`, stderr: '', status: 0 })
   })
@@ -549,7 +551,7 @@ describe('the script under process.execPath (AC-6, AC-7)', SPAWN_BUDGET, () => {
     fs.writeFileSync(preload, "Object.defineProperty(process, 'stdout', { configurable: true, get() { throw new Error('stdout unavailable') } })\n")
     // the usage path makes no git call, so the only failure is the stdout one
     const r = spawnSync(process.execPath, ['--require', preload, RESOLVE_BASE_SCRIPT, 'local'], {
-      cwd: dir, env: scopedEnv(dir), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000,
+      cwd: dir, env: scopedEnv(dir), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: SUBPROCESS_TIMEOUT_MS,
     })
     expect({ stderr: r.stderr, status: r.status }).toEqual({ stderr: '', status: 3 })
   })

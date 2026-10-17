@@ -420,6 +420,10 @@ describe('the run budget (AC-15)', () => {
 let tmp: string
 let fakeBin: string
 let realGitPath: string
+/** The hook directory, the upload-pack program and the fsmonitor command that the AC-12 test points a repository at. */
+let settingsDir: string
+/** Where those three programs leave a file when they run. */
+let marksDir: string
 
 /** A fake ssh that logs how it was started to $SSH_LOG, then fails the connection. */
 const LOG_SCRIPT = [
@@ -468,6 +472,18 @@ beforeAll(() => {
     spawnSync(writeExecutable(path.join(fakeBin, dir, 'ssh'), LOG_SCRIPT), ['warm-up'], { cwd: tmp, env: scopedEnv(tmp, warmExtra), stdio: 'ignore', timeout: 40_000 })
   }
   spawnSync(writeExecutable(path.join(fakeBin, 'hung', 'git'), HUNG_GIT), ['--version'], { cwd: tmp, env: scopedEnv(tmp, warmExtra), stdio: 'ignore', timeout: 40_000 })
+  // the three programs of the AC-12 test: written once, and run once here for the same reason
+  settingsDir = path.join(fakeBin, 'settings')
+  marksDir = path.join(tmp, 'marks')
+  fs.mkdirSync(marksDir)
+  const settingsPrograms = [
+    writeExecutable(path.join(settingsDir, 'hooks', 'reference-transaction'), `#!/bin/sh\ntouch "${path.join(marksDir, 'hook')}"\n`),
+    writeExecutable(path.join(settingsDir, 'upload.sh'), `#!/bin/sh\ntouch "${path.join(marksDir, 'upload-pack')}"\nexec git-upload-pack "$@"\n`),
+    writeExecutable(path.join(settingsDir, 'fsmonitor.sh'), `#!/bin/sh\ntouch "${path.join(marksDir, 'fsmonitor')}"\n`),
+  ]
+  for (const program of settingsPrograms) {
+    spawnSync(program, ['warm-up'], { cwd: tmp, env: scopedEnv(tmp), stdio: 'ignore', timeout: 40_000 })
+  }
 }, 240_000)
 
 afterAll(() => {
@@ -535,22 +551,14 @@ const cleanEnv = (home: string, extra: Record<string, string>): NodeJS.ProcessEn
 describe.skipIf(!POSIX)('repository settings do not run for the fetch (AC-12)', SPAWN_BUDGET, () => {
   it('a hook, an fsmonitor command and an upload-pack program stay silent, where a plain git command runs each', () => {
     const w = newWorld()
-    const sentinels = path.join(w.root, 'sentinels')
-    fs.mkdirSync(sentinels)
-    const hook = path.join(sentinels, 'hook')
-    const upload = path.join(sentinels, 'upload-pack')
-    const fsmonitor = path.join(sentinels, 'fsmonitor')
-    writeExecutable(path.join(w.work, '.git', 'hooks', 'reference-transaction'), `#!/bin/sh\ntouch "${hook}"\n`)
-    writeExecutable(path.join(w.root, 'upload.sh'), `#!/bin/sh\ntouch "${upload}"\nexec git-upload-pack "$@"\n`)
-    writeExecutable(path.join(w.root, 'fsmonitor.sh'), `#!/bin/sh\ntouch "${fsmonitor}"\n`)
-    git(w.work, w.home, 'config', 'remote.origin.uploadpack', path.join(w.root, 'upload.sh'))
-    git(w.work, w.home, 'config', 'core.fsmonitor', path.join(w.root, 'fsmonitor.sh'))
+    const hook = path.join(marksDir, 'hook')
+    const upload = path.join(marksDir, 'upload-pack')
+    const fsmonitor = path.join(marksDir, 'fsmonitor')
+    git(w.work, w.home, 'config', 'core.hooksPath', path.join(settingsDir, 'hooks'))
+    git(w.work, w.home, 'config', 'remote.origin.uploadpack', path.join(settingsDir, 'upload.sh'))
+    git(w.work, w.home, 'config', 'core.fsmonitor', path.join(settingsDir, 'fsmonitor.sh'))
     const m1 = advanceOrigin(w, 'm1.txt')
     const clear = (): void => { for (const f of [hook, upload, fsmonitor]) fs.rmSync(f, { force: true }) }
-    // macOS scans a newly written executable on its first run, which can take seconds: run each once now
-    for (const script of [path.join(w.work, '.git', 'hooks', 'reference-transaction'), path.join(w.root, 'upload.sh'), path.join(w.root, 'fsmonitor.sh')]) {
-      spawnSync(script, ['warm-up'], { cwd: w.root, env: scopedEnv(w.home), stdio: 'ignore', timeout: 40_000 })
-    }
     clear()
 
     // positive controls: the same repository runs all three for ordinary commands
@@ -659,6 +667,8 @@ describe.skipIf(!POSIX)('the SSH rule end to end (AC-13)', SPAWN_BUDGET, () => {
 
 describe.skipIf(!POSIX)('the 45 s backstop (AC-14)', SPAWN_BUDGET, () => {
   const hungGit = (): string => path.join(fakeBin, 'hung', 'git')
+  /** The bound put on the hung fetch: long enough for its shell to start and write the pid file under load. */
+  const HUNG_BOUND_MS = 4_000
 
   const alive = (pid: number): boolean => {
     try { process.kill(pid, 0); return true } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM' }
@@ -680,7 +690,7 @@ describe.skipIf(!POSIX)('the 45 s backstop (AC-14)', SPAWN_BUDGET, () => {
     const env = scopedEnv(w.home, { PATH: `${path.dirname(hungGit())}${path.delimiter}${process.env.PATH ?? ''}`, REAL_GIT: realGitPath, FAKE_PIDS: pidFile })
 
     const started = Date.now()
-    const out = RB.main(['node', 'resolve-base.cjs', 'pr', 'main'], { cwd: w.work, env, timeoutMs: 1_000 })
+    const out = RB.main(['node', 'resolve-base.cjs', 'pr', 'main'], { cwd: w.work, env, timeoutMs: HUNG_BOUND_MS })
     const elapsed = Date.now() - started
 
     expect(out.line).toBe(`BASE_REF=${w.m0} TIP=origin FETCH=failed REASON=timeout NOTE=degraded`)
@@ -695,7 +705,7 @@ describe.skipIf(!POSIX)('the 45 s backstop (AC-14)', SPAWN_BUDGET, () => {
     const pidFile = path.join(w.root, 'pids')
     const extra = { REAL_GIT: realGitPath, FAKE_PIDS: pidFile }
 
-    spawnSync(hungGit(), ['fetch'], { cwd: w.root, env: scopedEnv(w.home, extra), stdio: 'ignore', timeout: 800, killSignal: 'SIGKILL', detached: true })
+    spawnSync(hungGit(), ['fetch'], { cwd: w.root, env: scopedEnv(w.home, extra), stdio: 'ignore', timeout: HUNG_BOUND_MS, killSignal: 'SIGKILL', detached: true })
     const [leader, helper] = readPids(pidFile)
     try {
       expect(alive(helper), 'without a group kill the helper outlives its leader').toBe(true)
