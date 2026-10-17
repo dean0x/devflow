@@ -3286,7 +3286,8 @@ function failed(checks: ReadonlyArray<readonly [string, boolean]>): string[] {
   return checks.filter(([, ok]) => !ok).map(([name]) => name);
 }
 
-function ensurePrReadyBaseDefects(section: string): string[] {
+/** Named collector: the checks the ensure-pr-ready step 5 text fails (the base name, its check, the resolver call and the exits). */
+function collectEnsurePrReadyBaseDefects(section: string): string[] {
   const step5 = numberedStep(section, '5');
   const a = subStep(step5, '5a');
   const b = subStep(step5, '5b');
@@ -3310,7 +3311,8 @@ function ensurePrReadyBaseDefects(section: string): string[] {
   ]);
 }
 
-function validateBranchBaseDefects(section: string): string[] {
+/** Named collector: the checks the validate-branch steps 6 and 7 text fails (the base check, the resolver call and the diff). */
+function collectValidateBranchBaseDefects(section: string): string[] {
   const step6 = numberedStep(section, '6');
   const step7 = numberedStep(section, '7');
   const contract = section.slice(0, section.indexOf('**Input:**'));
@@ -3338,11 +3340,11 @@ describe('git agent: PR ops use a fresh base for branch diffs (#495)', () => {
   const validateSection = (): string => extractOpSection(operationReferencesCorpus(), 'validate-branch', 'sole');
 
   it('ensure-pr-ready returns the base ref, checks the name, resolves it once and stops only on an invalid name', () => {
-    expect(ensurePrReadyBaseDefects(ensureSection())).toEqual([]);
+    expect(collectEnsurePrReadyBaseDefects(ensureSection())).toEqual([]);
   });
 
   it('validate-branch steps 6 and 7 resolve their own base and return BLOCKED when none is usable', () => {
-    expect(validateBranchBaseDefects(validateSection())).toEqual([]);
+    expect(collectValidateBranchBaseDefects(validateSection())).toEqual([]);
   });
 
   it('the cross-repository flag of ensure-pr-ready comes from the same PR field that validate-branch step 6 reads', () => {
@@ -3357,25 +3359,25 @@ describe('git agent: PR ops use a fresh base for branch diffs (#495)', () => {
 
   it('known-bad probes: each defect in seeded text is reported by name', () => {
     const ensure = ensureSection();
-    const validate = validateBranchBaseDefects(validateSection());
+    const validate = collectValidateBranchBaseDefects(validateSection());
     expect(validate).toEqual([]);
-    expect(ensurePrReadyBaseDefects(ensure.replace('- **Base ref**: {base_ref}\n', ''))).toEqual(['the Output returns the base ref right after the Base line']);
-    expect(ensurePrReadyBaseDefects(ensure.replace(BASE_CHECK, '`^[a-z]+$`'))).toContain('5a carries the exact base-name check');
-    expect(ensurePrReadyBaseDefects(ensure.replace('X=<isCrossRepository', 'X=<false'))).toContain('5a reads the cross flag from isCrossRepository');
-    expect(ensurePrReadyBaseDefects(ensure.replace('Only an invalid name stops this operation', 'Any failure stops this operation'))).toContain('5b stops only on an invalid name');
-    expect(ensurePrReadyBaseDefects(ensure.replace(BASE_FIX_TABLE, ''))).toContain('5b carries the reason-to-fix table');
-    expect(ensurePrReadyBaseDefects(ensure.replace('together with `exit=0`', ''))).toContain('5b takes the one BASE_REF line only with exit=0 and reads other output as resolver-unavailable');
-    expect(ensurePrReadyBaseDefects(ensure.replace('If that call gives no name, keep the PR line', 'If that call gives no name, stop'))).toContain('5a keeps the PR line, degrades and skips the rest of step 5 when the PR gives no base name');
-    expect(ensurePrReadyBaseDefects(ensure.replace('and skip the rest of step 5. Stop unless', 'and skip 5b. Stop unless'))).toContain('5a keeps the PR line, degrades and skips the rest of step 5 when the PR gives no base name');
-    expect(ensurePrReadyBaseDefects(ensure.replace('skip the resolver and 5b', 'run the resolver'))).toContain('5a skips the resolver for a given hex BASE_REF on the same base name');
-    expect(ensurePrReadyBaseDefects(ensure.replace('`BASE_REF` (optional), ', ''))).toEqual(['the Input lists BASE_REF as optional']);
-    expect(ensurePrReadyBaseDefects(ensure.replace(' or `(base name unreadable; fix: re-run)`', ''))).toEqual(['the Output names the step-5 DEGRADED lines and an invalid name as the only BLOCKED cause']);
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('- **Base ref**: {base_ref}\n', ''))).toEqual(['the Output returns the base ref right after the Base line']);
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace(BASE_CHECK, '`^[a-z]+$`'))).toContain('5a carries the exact base-name check');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('X=<isCrossRepository', 'X=<false'))).toContain('5a reads the cross flag from isCrossRepository');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('Only an invalid name stops this operation', 'Any failure stops this operation'))).toContain('5b stops only on an invalid name');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace(BASE_FIX_TABLE, ''))).toContain('5b carries the reason-to-fix table');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('together with `exit=0`', ''))).toContain('5b takes the one BASE_REF line only with exit=0 and reads other output as resolver-unavailable');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('If that call gives no name, keep the PR line', 'If that call gives no name, stop'))).toContain('5a keeps the PR line, degrades and skips the rest of step 5 when the PR gives no base name');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('and skip the rest of step 5. Stop unless', 'and skip 5b. Stop unless'))).toContain('5a keeps the PR line, degrades and skips the rest of step 5 when the PR gives no base name');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('skip the resolver and 5b', 'run the resolver'))).toContain('5a skips the resolver for a given hex BASE_REF on the same base name');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('`BASE_REF` (optional), ', ''))).toEqual(['the Input lists BASE_REF as optional']);
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace(' or `(base name unreadable; fix: re-run)`', ''))).toEqual(['the Output names the step-5 DEGRADED lines and an invalid name as the only BLOCKED cause']);
     const sectionValidate = validateSection();
-    expect(validateBranchBaseDefects(sectionValidate.replace(BASE_FIX_TABLE, ''))).toContain('step 6 carries the reason-to-fix table');
-    expect(validateBranchBaseDefects(sectionValidate.replace('with `exit=0`', ''))).toContain('step 6 takes the BASE_REF line only with exit=0');
-    expect(validateBranchBaseDefects(sectionValidate.replace('naming REASON and its fix', 'naming REASON'))).toContain('step 6 names the fix in its BLOCKED result');
-    expect(validateBranchBaseDefects(sectionValidate.replace('it fetches the base branch at most once (the remote-tracking ref only), lists', 'it is a read-only check, lists'))).toEqual(['the contract says it fetches the base and lists the diff against base_ref']);
-    expect(validateBranchBaseDefects(sectionValidate.replace('never an empty `### Diff Scope`', 'an empty `### Diff Scope` is fine'))).toContain('step 6 never gives an empty Diff Scope');
-    expect(validateBranchBaseDefects(sectionValidate.replace('diff --name-only {base_ref}...HEAD; echo "exit=$?"', 'diff {base_branch}...HEAD --name-only'))).toContain('step 7 diffs against the hex base ref and echoes the exit status');
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace(BASE_FIX_TABLE, ''))).toContain('step 6 carries the reason-to-fix table');
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace('with `exit=0`', ''))).toContain('step 6 takes the BASE_REF line only with exit=0');
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace('naming REASON and its fix', 'naming REASON'))).toContain('step 6 names the fix in its BLOCKED result');
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace('it fetches the base branch at most once (the remote-tracking ref only), lists', 'it is a read-only check, lists'))).toEqual(['the contract says it fetches the base and lists the diff against base_ref']);
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace('never an empty `### Diff Scope`', 'an empty `### Diff Scope` is fine'))).toContain('step 6 never gives an empty Diff Scope');
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace('diff --name-only {base_ref}...HEAD; echo "exit=$?"', 'diff {base_branch}...HEAD --name-only'))).toContain('step 7 diffs against the hex base ref and echoes the exit status');
   });
 });
