@@ -3276,9 +3276,26 @@ function numberedStep(section: string, label: string): string {
   return lines.slice(first, last).join('\n');
 }
 
-/** One lettered sub-step (`   5a. ...`) of a step's text. */
+/** One lettered sub-step (`   5a. ...`) of a step's text, with the deeper-indented bullet lines under it. */
 function subStep(step: string, id: string): string {
-  return step.split('\n').find(l => new RegExp(`^\\s+${id}\\. `).test(l)) ?? '';
+  const lines = step.split('\n');
+  const first = lines.findIndex(l => new RegExp(`^\\s+${id}\\. `).test(l));
+  if (first === -1) return '';
+  const indentOf = (l: string): number => l.length - l.trimStart().length;
+  let last = first + 1;
+  while (last < lines.length && indentOf(lines[last]) > indentOf(lines[first])) last++;
+  return lines.slice(first, last).join('\n');
+}
+
+/** The default-branch probe both ops carry: origin/HEAD by symbolic-ref (no pipe), then main, then master. */
+const DEFAULT_BRANCH_PROBE = 'git -C "{worktree}" symbolic-ref --quiet --short refs/remotes/origin/HEAD';
+const MAIN_PROBE = 'git -C "{worktree}" rev-parse --verify --quiet main';
+const OLD_DEFAULT_BRANCH_PROBE = 'git -C "{worktree}" rev-parse --abbrev-ref origin/HEAD 2>/dev/null | sed \'s|origin/||\'';
+
+/** True when `text` reads origin/HEAD with symbolic-ref, strips its `origin/` prefix, then tries main, then master. */
+function probesDefaultBranch(text: string): boolean {
+  const at = [DEFAULT_BRANCH_PROBE, 'minus its `origin/` prefix', MAIN_PROBE, 'else `master` the same way'].map(part => text.indexOf(part));
+  return at.every((i, n) => i >= 0 && (n === 0 || i > at[n - 1])) && !text.includes('abbrev-ref') && !/\| *sed/.test(text);
 }
 
 /** The names of the checks `text` fails; empty when every check holds. */
@@ -3291,16 +3308,20 @@ function collectEnsurePrReadyBaseDefects(section: string): string[] {
   const step5 = numberedStep(section, '5');
   const a = subStep(step5, '5a');
   const b = subStep(step5, '5b');
+  const exits = a.split('\n').filter(l => /^\s+- /.test(l));
+  const [noName = '', refused = '', givenRef = '', resolve = ''] = exits;
   const outputLine = section.split('\n').find(l => l.startsWith('{`TRACEABILITY: DEGRADED (base ')) ?? '';
   return failed([
     ['the Output returns the base ref right after the Base line', section.includes('- **Base**: {base_branch}\n- **Base ref**: {base_ref}\n')],
-    ['5a carries the exact base-name check', a.includes(BASE_CHECK)],
-    ['5a shows the rejected Base line and names only the allowed set', a.includes('`(rejected)`') && a.includes('never the name') && a.includes('ASCII letters, digits and `._/+@,#-`')],
-    ['5a reads the cross flag from isCrossRepository', a.includes('isCrossRepository') && a.includes('X=<isCrossRepository')],
-    ['5a runs the pr-mode call after the check, in one Bash call', a.includes(PR_MODE_CALL) && a.indexOf(BASE_CHECK) < a.indexOf(PR_MODE_CALL)],
-    ['5a keeps the name out of prose', a.includes('only as `${B}`')],
-    ['5a keeps the PR line, degrades and skips the rest of step 5 when the PR gives no base name', a.includes('If that call gives no name, keep the PR line') && a.includes('`(unreadable)`') && a.includes('`TRACEABILITY: DEGRADED (base name unreadable; fix: re-run)`') && a.includes('and skip the rest of step 5. Stop unless') && a.indexOf('gives no name') < a.indexOf(BASE_CHECK)],
-    ['5a skips the resolver for a given hex BASE_REF on the same base name', a.includes('when `BASE_REF` is 40 or 64 lowercase hex and the name equals `BASE_BRANCH`, skip the resolver and 5b: `base_ref` is `BASE_REF`') && a.indexOf(BASE_CHECK) < a.indexOf('when `BASE_REF`') && a.indexOf('when `BASE_REF`') < a.indexOf(PR_MODE_CALL)],
+    ['5a gives each of its four exits its own sub-bullet', exits.length === 4],
+    ['5a takes the default branch when there is no PR, by symbolic-ref then main then master, before any exit', probesDefaultBranch(a) && a.indexOf(DEFAULT_BRANCH_PROBE) < a.indexOf(exits[0] ?? '') && a.includes('finds no PR')],
+    ['5a keeps the PR line, degrades and skips the rest of step 5 when no name is found', noName.includes('keep the PR line') && noName.includes('`(unreadable)`') && noName.includes('`TRACEABILITY: DEGRADED (base name unreadable; fix: re-run)`') && noName.includes('skip the rest of step 5') && noName.includes('no default branch')],
+    ['5a carries the exact base-name check', refused.includes(BASE_CHECK)],
+    ['5a shows the rejected Base line and names only the allowed set', refused.includes('`(rejected)`') && refused.includes('never the name') && refused.includes('ASCII letters, digits and `._/+@,#-`')],
+    ['5a reads the cross flag from isCrossRepository', a.includes('`isCrossRepository`') && resolve.includes('X=<isCrossRepository, else false>')],
+    ['5a skips the resolver for a given hex BASE_REF on the same base name', givenRef.includes('When `BASE_REF` is 40 or 64 lowercase hex and the name equals `BASE_BRANCH`, skip the resolver and 5b: `base_ref` is `BASE_REF`')],
+    ['5a runs the pr-mode call last, after the check, in one Bash call', resolve.includes(PR_MODE_CALL) && resolve.includes('in one Bash call') && a.indexOf(BASE_CHECK) < a.indexOf('When `BASE_REF`') && a.indexOf('When `BASE_REF`') < a.indexOf(PR_MODE_CALL)],
+    ['5a keeps the name out of prose', resolve.includes('only as `${B}`')],
     ['the Input lists BASE_REF as optional', section.includes('`BASE_BRANCH` (optional), `BASE_REF` (optional)')],
     ['5b takes the one BASE_REF line only with exit=0 and reads other output as resolver-unavailable', b.includes('`BASE_REF=`') && b.includes('together with `exit=0`') && b.includes('`REASON=resolver-unavailable`') && b.includes('run devflow init')],
     ['5b returns base_ref and prints REASON', b.includes('`base_ref`') && b.includes('print REASON')],
@@ -3311,7 +3332,7 @@ function collectEnsurePrReadyBaseDefects(section: string): string[] {
   ]);
 }
 
-/** Named collector: the checks the validate-branch steps 6 and 7 text fails (the base check, the resolver call and the diff). */
+/** Named collector: the checks the validate-branch steps 6 and 7 text fails (the default-branch probe, the base check, the resolver call and the diff). */
 function collectValidateBranchBaseDefects(section: string): string[] {
   const step6 = numberedStep(section, '6');
   const step7 = numberedStep(section, '7');
@@ -3328,6 +3349,7 @@ function collectValidateBranchBaseDefects(section: string): string[] {
     ['step 6 carries the reason-to-fix table', step6.includes(BASE_FIX_TABLE)],
     ['step 6 continues on a degraded base with the DEGRADED line and its fix', step6.includes(BASE_DEGRADED_LINE) && step6.includes('`degraded`')],
     ['step 6 never gives an empty Diff Scope', step6.includes('never an empty `### Diff Scope`') && !/intentional empty/i.test(section)],
+    ['step 6 takes the default branch by symbolic-ref with no pipe, then main, then master', probesDefaultBranch(step6)],
     ['step 6 probes the default branch without a name placeholder', !/\{(?:default|base_branch)\}/.test(step6.replace(/`base_branch`/g, ''))],
     ['step 7 diffs against the hex base ref and echoes the exit status', step7.includes('git -C "{worktree}" diff --name-only {base_ref}...HEAD; echo "exit=$?"') && step7.includes('40 or 64 hex')],
     ['step 7 treats a non-zero exit as BLOCKED and an empty list as valid only with exit 0', step7.includes('a non-zero exit is BLOCKED') && step7.includes('empty list counts only with `exit=0`')],
@@ -3367,9 +3389,13 @@ describe('git agent: PR ops use a fresh base for branch diffs (#495)', () => {
     expect(collectEnsurePrReadyBaseDefects(ensure.replace('Only an invalid name stops this operation', 'Any failure stops this operation'))).toContain('5b stops only on an invalid name');
     expect(collectEnsurePrReadyBaseDefects(ensure.replace(BASE_FIX_TABLE, ''))).toContain('5b carries the reason-to-fix table');
     expect(collectEnsurePrReadyBaseDefects(ensure.replace('together with `exit=0`', ''))).toContain('5b takes the one BASE_REF line only with exit=0 and reads other output as resolver-unavailable');
-    expect(collectEnsurePrReadyBaseDefects(ensure.replace('If that call gives no name, keep the PR line', 'If that call gives no name, stop'))).toContain('5a keeps the PR line, degrades and skips the rest of step 5 when the PR gives no base name');
-    expect(collectEnsurePrReadyBaseDefects(ensure.replace('and skip the rest of step 5. Stop unless', 'and skip 5b. Stop unless'))).toContain('5a keeps the PR line, degrades and skips the rest of step 5 when the PR gives no base name');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('keep the PR line', 'drop the PR line'))).toContain('5a keeps the PR line, degrades and skips the rest of step 5 when no name is found');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('skip the rest of step 5', 'skip 5b'))).toContain('5a keeps the PR line, degrades and skips the rest of step 5 when no name is found');
     expect(collectEnsurePrReadyBaseDefects(ensure.replace('skip the resolver and 5b', 'run the resolver'))).toContain('5a skips the resolver for a given hex BASE_REF on the same base name');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace(DEFAULT_BRANCH_PROBE, OLD_DEFAULT_BRANCH_PROBE))).toContain('5a takes the default branch when there is no PR, by symbolic-ref then main then master, before any exit');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace(MAIN_PROBE, 'git -C "{worktree}" rev-parse --verify --quiet master'))).toContain('5a takes the default branch when there is no PR, by symbolic-ref then main then master, before any exit');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('finds no PR', 'finds a PR'))).toContain('5a takes the default branch when there is no PR, by symbolic-ref then main then master, before any exit');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('\n      - No name', '\n         No name'))).toContain('5a gives each of its four exits its own sub-bullet');
     expect(collectEnsurePrReadyBaseDefects(ensure.replace('`BASE_REF` (optional), ', ''))).toEqual(['the Input lists BASE_REF as optional']);
     expect(collectEnsurePrReadyBaseDefects(ensure.replace(' or `(base name unreadable; fix: re-run)`', ''))).toEqual(['the Output names the step-5 DEGRADED lines and an invalid name as the only BLOCKED cause']);
     const sectionValidate = validateSection();
@@ -3377,6 +3403,8 @@ describe('git agent: PR ops use a fresh base for branch diffs (#495)', () => {
     expect(collectValidateBranchBaseDefects(sectionValidate.replace('with `exit=0`', ''))).toContain('step 6 takes the BASE_REF line only with exit=0');
     expect(collectValidateBranchBaseDefects(sectionValidate.replace('naming REASON and its fix', 'naming REASON'))).toContain('step 6 names the fix in its BLOCKED result');
     expect(collectValidateBranchBaseDefects(sectionValidate.replace('it fetches the base branch at most once (the remote-tracking ref only), lists', 'it is a read-only check, lists'))).toEqual(['the contract says it fetches the base and lists the diff against base_ref']);
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace(DEFAULT_BRANCH_PROBE, OLD_DEFAULT_BRANCH_PROBE))).toEqual(['step 6 takes the default branch by symbolic-ref with no pipe, then main, then master']);
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace(MAIN_PROBE, 'git -C "{worktree}" rev-parse --verify --quiet master'))).toContain('step 6 takes the default branch by symbolic-ref with no pipe, then main, then master');
     expect(collectValidateBranchBaseDefects(sectionValidate.replace('never an empty `### Diff Scope`', 'an empty `### Diff Scope` is fine'))).toContain('step 6 never gives an empty Diff Scope');
     expect(collectValidateBranchBaseDefects(sectionValidate.replace('diff --name-only {base_ref}...HEAD; echo "exit=$?"', 'diff {base_branch}...HEAD --name-only'))).toContain('step 7 diffs against the hex base ref and echoes the exit status');
   });
