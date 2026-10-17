@@ -3294,7 +3294,7 @@ const OLD_DEFAULT_BRANCH_PROBE = 'git -C "{worktree}" rev-parse --abbrev-ref ori
 
 /** True when `text` reads origin/HEAD with symbolic-ref, strips its `origin/` prefix, then tries main, then master. */
 function probesDefaultBranch(text: string): boolean {
-  const at = [DEFAULT_BRANCH_PROBE, 'minus its `origin/` prefix', MAIN_PROBE, 'else `master` the same way'].map(part => text.indexOf(part));
+  const at = [DEFAULT_BRANCH_PROBE, 'minus its `origin/` prefix', MAIN_PROBE, 'else `master`'].map(part => text.indexOf(part));
   return at.every((i, n) => i >= 0 && (n === 0 || i > at[n - 1])) && !text.includes('abbrev-ref') && !/\| *sed/.test(text);
 }
 
@@ -3314,7 +3314,8 @@ function collectEnsurePrReadyBaseDefects(section: string): string[] {
   return failed([
     ['the Output returns the base ref right after the Base line', section.includes('- **Base**: {base_branch}\n- **Base ref**: {base_ref}\n')],
     ['5a gives each of its four exits its own sub-bullet', exits.length === 4],
-    ['5a takes the default branch when there is no PR, by symbolic-ref then main then master, before any exit', probesDefaultBranch(a) && a.indexOf(DEFAULT_BRANCH_PROBE) < a.indexOf(exits[0] ?? '') && a.includes('finds no PR')],
+    ['5a takes the default branch when there is no PR, by symbolic-ref then main then master, before any exit', probesDefaultBranch(a) && a.indexOf(DEFAULT_BRANCH_PROBE) < a.indexOf(exits[0] ?? '') && a.includes('no PR applies')],
+    ['5a takes the unreadable exit, not the default branch, on any other gh failure', noName.includes('any other `gh` failure') && !a.split('\n')[0].includes('fails')],
     ['5a keeps the PR line, degrades and skips the rest of step 5 when no name is found', noName.includes('keep the PR line') && noName.includes('`(unreadable)`') && noName.includes('`TRACEABILITY: DEGRADED (base name unreadable; fix: re-run)`') && noName.includes('skip the rest of step 5') && noName.includes('no default branch')],
     ['5a carries the exact base-name check', refused.includes(BASE_CHECK)],
     ['5a shows the rejected Base line and names only the allowed set', refused.includes('`(rejected)`') && refused.includes('never the name') && refused.includes('ASCII letters, digits and `._/+@,#-`')],
@@ -3394,7 +3395,9 @@ describe('git agent: PR ops use a fresh base for branch diffs (#495)', () => {
     expect(collectEnsurePrReadyBaseDefects(ensure.replace('skip the resolver and 5b', 'run the resolver'))).toContain('5a skips the resolver for a given hex BASE_REF on the same base name');
     expect(collectEnsurePrReadyBaseDefects(ensure.replace(DEFAULT_BRANCH_PROBE, OLD_DEFAULT_BRANCH_PROBE))).toContain('5a takes the default branch when there is no PR, by symbolic-ref then main then master, before any exit');
     expect(collectEnsurePrReadyBaseDefects(ensure.replace(MAIN_PROBE, 'git -C "{worktree}" rev-parse --verify --quiet master'))).toContain('5a takes the default branch when there is no PR, by symbolic-ref then main then master, before any exit');
-    expect(collectEnsurePrReadyBaseDefects(ensure.replace('finds no PR', 'finds a PR'))).toContain('5a takes the default branch when there is no PR, by symbolic-ref then main then master, before any exit');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('no PR applies', 'a PR applies'))).toContain('5a takes the default branch when there is no PR, by symbolic-ref then main then master, before any exit');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace(', or any other `gh` failure', ''))).toEqual(['5a takes the unreadable exit, not the default branch, on any other gh failure']);
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('If it shows that no PR applies (', 'If the call fails or finds no PR ('))).toContain('5a takes the unreadable exit, not the default branch, on any other gh failure');
     expect(collectEnsurePrReadyBaseDefects(ensure.replace('\n      - No name', '\n         No name'))).toContain('5a gives each of its four exits its own sub-bullet');
     expect(collectEnsurePrReadyBaseDefects(ensure.replace('`BASE_REF` (optional), ', ''))).toEqual(['the Input lists BASE_REF as optional']);
     expect(collectEnsurePrReadyBaseDefects(ensure.replace(' or `(base name unreadable; fix: re-run)`', ''))).toEqual(['the Output names the step-5 DEGRADED lines and an invalid name as the only BLOCKED cause']);
