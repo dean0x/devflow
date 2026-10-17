@@ -17,8 +17,10 @@
  *      outside every learning arm of the source.
  *   b. The data flow: `GATE_LEVEL` in the Produces and Requires lines that carry it.
  *   c. The fail-closed bullet: no row applied, the level kept, and the Phase 6 Validate prompt still carries it.
- *   d. The reference grammar: title, headings, header, closed phase set, cell grammar and Rules bullets.
- *   e. Row safety, a tripwire: protected phases, floor controls, dispositions and actions no row may carry.
+ *   d. The reference grammar: title, headings, header, closed phase set, cell grammar (a never-skip phase takes no
+ *      `skip`, `pass level` needs a spawn) and Rules bullets.
+ *   e. Row safety, a tripwire: protected phases, never-skip phases, floor controls, dispositions and actions no row
+ *      may carry.
  *   f. `full` reads nothing: the reference path appears only inside the block, and no Validate fence of
  *      `/resolve` names the level.
  *   g. The report lines that name the level.
@@ -44,8 +46,9 @@ const TABLE_HEADER = '| Phase | standard | lean |'
 const TABLE_SEPARATOR = '|-------|----------|------|'
 const RULES_INTRO = 'An `apply:` cell names one bullet of this section. A row names every bullet.'
 
-const GRAMMAR_CELL = "- **Cell:** `-` runs the phase as written; `skip`, alone, skips it; `apply: <name>` applies the `## Rules` bullet `<name>`; `pass level` adds the line `GATE_LEVEL: {GATE_LEVEL}` to the phase's spawn prompt. Join `apply:` and `pass level` with `; `. Each `apply:` names exactly one bullet. Any other cell is malformed."
+const GRAMMAR_CELL = "- **Cell:** `-` runs the phase as written; `skip`, alone, skips it; `apply: <name>` applies the `## Rules` bullet `<name>`; `pass level` adds the line `GATE_LEVEL: {GATE_LEVEL}` to every spawn prompt of the phase, and a phase with no spawn never takes `pass level`. Join `apply:` and `pass level` with `; `. Each `apply:` names exactly one bullet. Any other cell is malformed."
 const GRAMMAR_RULES_BULLET = '- **Rules bullet:** a Rules bullet opens `- **<name>:**`.'
+const GRAMMAR_SKIPPED = '- **Skipped:** a skipped phase counts as passed, so the next phase starts as written. Each name on its `**Produces:**` line reads `skipped`, and a report shows `skipped`, never a pass.'
 const FLOOR_FIRST = 'No row or rule overrides the next two lines.'
 const FAIL_CLOSED_HEAD = 'If the Read fails, or the file has no `## Phases` heading with the `| Phase | standard | lean |` header, or a row breaks its grammar, '
 const UNREADABLE = 'say `level reference unreadable: no level rows applied`.'
@@ -79,7 +82,8 @@ interface LevelSpec {
   readonly moveBefore: string
   /** A phase cell that is in the closed set and carries no floor word, for probe rows. */
   readonly sampleRow: string
-  readonly triageNeverSkips: boolean
+  /** The closed-set phases that never take `skip`: a skip there drops a security fix, a ticket or a gate that follows. */
+  readonly neverSkip: readonly string[]
   /** Each Produces or Requires line that must list `GATE_LEVEL`. */
   readonly dataFlow: ReadonlyArray<{ readonly site: string; readonly kind: 'Produces' | 'Requires'; readonly start: string; readonly end: string | null }>
 }
@@ -95,8 +99,9 @@ const IMPLEMENT: LevelSpec = {
     "- **Phase:** `3 Polish`, `4 Self-Review` or `5 Alignment Check`: the number and the name of the command's `### Phase N:` heading, matched with the colon, without its parenthetical. Any other phase, or a name that is not its number's heading, is malformed.",
     GRAMMAR_CELL,
     GRAMMAR_RULES_BULLET,
+    GRAMMAR_SKIPPED,
     '- **Gate level block:** the command reads this file at the start of Phase 3, before the Polish spawn. A `3 Polish` row with `skip` skips the Polish spawn, never that block.',
-    "- **Scope:** a row changes only its own phase's spawns and prompts. It adds no shell command, file write, push or GitHub action, and removes no security check and not the compliance directive.",
+    "- **Scope:** a row changes only its own phase's spawns and prompts. It adds no shell command, file write, push or GitHub action. It removes no security check, and keeps Validate, the CI gate, the evidence claims and the compliance directive. One exception: a `4 Self-Review` row may skip Harden, and an enabled compliance lens keeps Harden.",
     '- **Malformed:** no `## Phases` heading, no `| Phase | standard | lean |` header, or a row that breaks this grammar. Then the command applies no row.',
   ],
   readParagraph: `${OPEN} At \`standard\` or \`lean\`, once per run, run \`${SANCTIONED_RESOLUTION_PRINT}\` in Bash and Read \`<that directory>/${LEVEL_DIR}/implement-levels.md\` with the Read tool, and apply each row to the phase it names.`,
@@ -120,7 +125,7 @@ const IMPLEMENT: LevelSpec = {
   sourceEnd: 'After the Code agent completes',
   moveBefore: '### Phase 2: Implement',
   sampleRow: '3 Polish',
-  triageNeverSkips: false,
+  neverSkip: [],
   dataFlow: [
     { site: 'Phase 3', kind: 'Requires', start: '### Phase 3: Polish', end: '### Phase 4:' },
     { site: 'Phase 12', kind: 'Requires', start: '### Phase 12: Report', end: null },
@@ -133,12 +138,14 @@ const RESOLVE: LevelSpec = {
   title: '# Resolve: phases by gate level',
   closed: [['2', 'Global Triage'], ['3', 'Batch FIX_NOW Issues'], ['4', 'Fix'], ['6', 'Polish'], ['9', 'Manage Debt']],
   protectedPhases: ['0', '1', '1b', '5', '7', '8', '9b', '9c', '10'],
-  intro: 'At `standard` and `lean`, a row sets its phase at that level. Each worktree reads the column of its own level. A phase with no row runs as written, and a table with no rows is well-formed.',
+  intro: 'At `standard` and `lean`, a row sets its phase at that level. Each worktree reads the column of its own level, except in a global phase. A phase with no row runs as written, and a table with no rows is well-formed.',
   grammar: [
     "- **Phase:** `2 Global Triage`, `3 Batch FIX_NOW Issues`, `4 Fix`, `6 Polish` or `9 Manage Debt`: the number and the name of the command's `### Phase N:` heading, matched with the colon, without its parenthetical. Phase `9` never covers `9b` or `9c`. Any other phase, or a name that is not its number's heading, is malformed.",
     GRAMMAR_CELL,
     GRAMMAR_RULES_BULLET,
-    '- **Triage:** `2 Global Triage` never takes `skip`, and no row changes the Triage security gate: Triage routes each security finding as it does at `full`.',
+    GRAMMAR_SKIPPED,
+    '- **Never skip:** `2 Global Triage`, `3 Batch FIX_NOW Issues`, `4 Fix` and `9 Manage Debt` never take `skip`. Triage routes each security finding as it does at `full`. No row leaves a FIX_NOW security finding unfixed, leaves a FIX_SEPARATE item without a ticket, or drops the CI gate.',
+    "- **Global phase:** a phase that one spawn serves for all worktrees, as `2 Global Triage` does, uses the strictest level in the run, in the order `full`, `standard`, `lean`: it takes that level's cell, and `pass level` passes that level. At `full` it runs as written.",
     "- **Scope:** a row changes only its own phase's spawns and prompts. It adds no shell command, file write, push or GitHub action. It removes no security check, changes neither the Triage security gate nor the ESCALATED route, and keeps the Verification Gate, the CI gate and the compliance directive.",
     '- **Malformed:** no `## Phases` heading, no `| Phase | standard | lean |` header, or a row that breaks this grammar. Then the command applies no row in any worktree.',
   ],
@@ -163,7 +170,7 @@ const RESOLVE: LevelSpec = {
   sourceEnd: '**Mint `RESOLUTION_TS`',
   moveBefore: '### Phase 1: Parse Issues',
   sampleRow: '6 Polish',
-  triageNeverSkips: true,
+  neverSkip: ['2', '3', '4', '9'],
   dataFlow: [
     { site: 'Step 0d', kind: 'Produces', start: '#### Step 0d:', end: '### Phase 1: Parse Issues' },
     { site: 'Phase 5', kind: 'Requires', start: '### Phase 5:', end: '### Phase 6:' },
@@ -205,6 +212,14 @@ function phaseHeadings(body: string): Map<string, string> {
 /** The phase numbers of the compiled headings that are outside the closed set: a new phase is protected by default. */
 function protectedOf(spec: LevelSpec, body: string): string[] {
   return [...body.matchAll(/^### Phase (\d+[a-z]?): /gm)].map(m => m[1]).filter(n => !spec.closed.some(([c]) => c === n))
+}
+
+/** The compiled `### Phase N:` section, up to the next phase heading: where a row's spawns sit. Empty when the phase is absent. */
+function phaseSection(body: string, num: string): string {
+  const from = body.indexOf(`\n### Phase ${num}: `)
+  if (from === -1) return ''
+  const next = body.indexOf('\n### Phase ', from + 1)
+  return next === -1 ? body.slice(from) : body.slice(from, next)
 }
 
 /** The block as the command carries it: the read paragraph, a blank line, then the three bullets. */
@@ -345,14 +360,30 @@ function splitRow(line: string): string[] | null {
 
 const RULE_BULLET = /^- \*\*([A-Za-z0-9][A-Za-z0-9 _-]*):\*\* \S/
 
+/** What a phase lets a cell do: `skip` is barred on a never-skip phase, and `pass level` needs a spawn prompt to carry the line. */
+interface PhaseTraits { readonly num: string; readonly neverSkips: boolean; readonly hasSpawn: boolean }
+
+/** The traits of a closed-set phase, read from the spec and the compiled section. A phase outside the closed set is reported by its own row defect, so it gets neutral traits. */
+function phaseTraits(spec: LevelSpec, body: string, num: string): PhaseTraits {
+  if (!spec.closed.some(([n]) => n === num)) return { num, neverSkips: false, hasSpawn: true }
+  return { num, neverSkips: spec.neverSkip.includes(num), hasSpawn: /\bAgent\(/.test(phaseSection(body, num)) }
+}
+
+/** The tail of the defect for a `skip` cell on a never-skip phase, shared by the grammar and the row-safety check. */
+const takesSkip = (num: string): string => `takes skip, which phase ${num} never takes`
+
 /** What is wrong with one level cell, or null. `names` are the Rules bullets that exist. */
-function cellDefect(cell: string, names: readonly string[]): string | null {
-  if (cell === '-' || cell === 'skip') return null
+function cellDefect(cell: string, names: readonly string[], phase: PhaseTraits): string | null {
+  if (cell === 'skip') return phase.neverSkips ? `the cell ${takesSkip(phase.num)}` : null
+  if (cell === '-') return null
   const seen = new Set<string>()
   for (const part of cell.split('; ')) {
     if (seen.has(part)) return `the cell repeats "${part}"`
     seen.add(part)
-    if (part === 'pass level') continue
+    if (part === 'pass level') {
+      if (!phase.hasSpawn) return `the cell takes pass level, but phase ${phase.num} has no spawn to carry it`
+      continue
+    }
     const applied = /^apply: ([A-Za-z0-9][A-Za-z0-9 _-]*)$/.exec(part)
     if (applied === null) return `the cell holds "${part}", which is not skip, -, apply: <name> or pass level`
     if (!names.includes(applied[1])) return `the cell applies "${applied[1]}", which no Rules bullet names`
@@ -420,7 +451,7 @@ export function collectLevelReferenceDefects(ref: string, spec: LevelSpec, body:
       if (compiled.get(num) !== name) out.push(`phase ${num} "${name}" is not the compiled "### Phase ${num}:" heading ("${compiled.get(num) ?? 'absent'}")`)
     }
     levels.forEach((cell, i) => {
-      const defect = cellDefect(cell, names)
+      const defect = cellDefect(cell, names, phaseTraits(spec, body, num))
       if (defect !== null) out.push(`row ${num} ${i === 0 ? 'standard' : 'lean'}: ${defect}`)
     })
   }
@@ -438,7 +469,7 @@ export function collectLevelReferenceDefects(ref: string, spec: LevelSpec, body:
 /** A removal or deferral word, in its common forms. */
 const REMOVAL = /\b(?:skip|drop|remov|omit|disabl|bypass|ignor|defer)\w*|\b(?:without|no)\b|\bturn(?:s|ed|ing)? off\b/i
 /** A control that no level may remove. */
-const FLOOR_OBJECT = /\b(?:security|ESCALATED|compliance|Validate|the CI gate|the Verification Gate|the evidence claims)\b/i
+const FLOOR_OBJECT = /\b(?:security|ESCALATED|compliance|Validate|Harden|the CI gate|the Verification Gate|the evidence claims)\b/i
 const SECURITY = /\bsecurity\b/i
 const DISPOSITION = /\b(?:TECH_DEBT|FALSE_POSITIVE|BY_DESIGN|FIX_SEPARATE)\b/i
 /** Shell, write, push and GitHub text, which no row may add. */
@@ -482,7 +513,7 @@ export function collectRowSafetyDefects(ref: string, spec: LevelSpec, body: stri
       const column = i === 0 ? 'standard' : 'lean'
       for (const reason of unsafeReasons(cell)) out.push(`row ${num} ${column} cell "${cell}" ${reason}`)
       for (const m of cell.matchAll(/apply: ([^;]+)/g)) applied.add(m[1].trim())
-      if (spec.triageNeverSkips && num === '2' && cell === 'skip') out.push(`row ${num} ${column} cell takes skip, which Global Triage never takes`)
+      if (spec.neverSkip.includes(num) && cell === 'skip') out.push(`row ${num} ${column} cell ${takesSkip(num)}`)
     })
   }
   for (const line of rules.filter(l => l.startsWith('- '))) {
@@ -704,7 +735,7 @@ describe('the level references hold the fixed grammar and no rows (AC-5)', () =>
     expect(res(['| 9 Thread Resolution | skip | skip |'])).toContain('phase 9 is named "Thread Resolution", expected "Manage Debt"')
     expect(res(['| 9b Thread Resolution + Resolution Comment | skip | skip |'])).toContain('a row for phase 9b, which is outside the closed set 2, 3, 4, 6, 9')
     expect(res(['| 9c Merge Readiness | skip | skip |'])).toContain('a row for phase 9c, which is outside the closed set 2, 3, 4, 6, 9')
-    expect(res(['| 9 Manage Debt | skip | skip |'])).toEqual([])
+    expect(res(['| 9 Manage Debt | skip | skip |'])).toEqual(['row 9 standard: the cell takes skip, which phase 9 never takes', 'row 9 lean: the cell takes skip, which phase 9 never takes'])
     const renamed = bodyOf(IMPLEMENT).replace('\n### Phase 3: Polish\n', '\n### Phase 3: Tidy\n')
     expect(renamed, 'the heading seed landed').not.toBe(bodyOf(IMPLEMENT))
     expect(collectClosedSetDefects(IMPLEMENT, renamed)).toContain('the closed set names "3 Polish", but the compiled "### Phase 3:" heading is "Tidy"')
@@ -713,11 +744,34 @@ describe('the level references hold the fixed grammar and no rows (AC-5)', () =>
     expect(collectClosedSetDefects(RESOLVE, grown)).toContain('the protected phases are 0, 1, 1b, 5, 7, 8, 9b, 9c, 10, 11, expected 0, 1, 1b, 5, 7, 8, 9b, 9c, 10')
   })
 
+  it('known-bad probes (/resolve): a skip on a never-skip phase is reported, and Polish alone may skip', () => {
+    const res = (rows: string[]): string[] => collectLevelReferenceDefects(withRows(REFS.resolve, rows), RESOLVE, bodyOf(RESOLVE))
+    const never = RESOLVE.closed.filter(([n]) => RESOLVE.neverSkip.includes(n))
+    expect(never.map(([n]) => n), 'the never-skip phases').toEqual(['2', '3', '4', '9'])
+    for (const [num, name] of never) {
+      expect(res([`| ${num} ${name} | skip | - |`]), `${num} standard`).toEqual([`row ${num} standard: the cell takes skip, which phase ${num} never takes`])
+      expect(res([`| ${num} ${name} | - | skip |`]), `${num} lean`).toEqual([`row ${num} lean: the cell takes skip, which phase ${num} never takes`])
+    }
+    expect(res(['| 3 Batch FIX_NOW Issues | - | skip |'])).toEqual(['row 3 lean: the cell takes skip, which phase 3 never takes'])
+    expect(res(['| 4 Fix | skip | - |'])).toEqual(['row 4 standard: the cell takes skip, which phase 4 never takes'])
+    expect(res(['| 6 Polish | skip | skip |']), 'Polish may skip').toEqual([])
+  })
+
+  it('known-bad probes: pass level needs a spawn prompt to carry the line', () => {
+    const res = (rows: string[]): string[] => collectLevelReferenceDefects(withRows(REFS.resolve, rows), RESOLVE, bodyOf(RESOLVE))
+    expect(phaseSection(bodyOf(RESOLVE), '3'), 'Phase 3 of /resolve spawns no agent').not.toMatch(/\bAgent\(/)
+    expect(res(['| 3 Batch FIX_NOW Issues | pass level | - |'])).toEqual(['row 3 standard: the cell takes pass level, but phase 3 has no spawn to carry it'])
+    expect(res(['| 3 Batch FIX_NOW Issues | - | pass level |'])).toEqual(['row 3 lean: the cell takes pass level, but phase 3 has no spawn to carry it'])
+    const bare = seedIn(bodyOf(IMPLEMENT), '### Phase 3: Polish', '### Phase 4:', 'Agent(subagent_type="Polish"):', 'Run the Polish step:')
+    expect(collectLevelReferenceDefects(withRows(REFS.implement, ['| 3 Polish | pass level | - |']), IMPLEMENT, bare)).toEqual(['row 3 standard: the cell takes pass level, but phase 3 has no spawn to carry it'])
+    expect(collectLevelReferenceDefects(withRows(REFS.implement, ['| 3 Polish | pass level | - |']), IMPLEMENT, bodyOf(IMPLEMENT)), 'the unmodified Phase 3 spawns Polish').toEqual([])
+  })
+
   it.each(SPECS)('$cmd: well-formed rows and bullets pass the grammar and the row-safety check', spec => {
     const body = bodyOf(spec)
     const rows = spec.cmd === 'implement'
-      ? ['| 3 Polish | apply: tidy; pass level | skip |', '| 4 Self-Review | - | pass level |', '| 5 Alignment Check | skip | apply: tidy |']
-      : ['| 2 Global Triage | pass level | pass level |', '| 3 Batch FIX_NOW Issues | pass level | - |', '| 4 Fix | - | pass level |', '| 6 Polish | apply: tidy | skip |', '| 9 Manage Debt | skip | - |']
+      ? ['| 3 Polish | apply: tidy; pass level | skip |', '| 4 Self-Review | - | pass level |', '| 5 Alignment Check | pass level | apply: tidy |']
+      : ['| 2 Global Triage | pass level | pass level |', '| 3 Batch FIX_NOW Issues | apply: tidy | - |', '| 4 Fix | - | pass level |', '| 6 Polish | apply: tidy | skip |', '| 9 Manage Debt | pass level | - |']
     const ref = withRows(REFS[spec.cmd], rows, ['- **tidy:** Polish only the files named in the diff.'])
     expect(collectLevelReferenceDefects(ref, spec, body)).toEqual([])
     expect(collectRowSafetyDefects(ref, spec, body)).toEqual([])
@@ -741,6 +795,10 @@ describe('row safety is a tripwire over the references (AC-6)', () => {
       expect(sectionOf(parsed, '## Grammar')?.lines, `${spec.cmd}: the grammar`).toEqual(spec.grammar)
       expect(sectionOf(parsed, '## Rules')?.lines, `${spec.cmd}: the Rules section`).toEqual([RULES_INTRO])
       expect(protectedOf(spec, bodyOf(spec)), `${spec.cmd}: the protected phases`).toEqual(spec.protectedPhases)
+      const neverLine = spec.grammar.find(line => line.startsWith('- **Never skip:**')) ?? ''
+      for (const [num, name] of spec.closed) {
+        expect(neverLine.includes(`\`${num} ${name}\``), `${spec.cmd}: the Never skip bullet names phase ${num} exactly when the spec lists it`).toBe(spec.neverSkip.includes(num))
+      }
     }
   })
 
@@ -752,7 +810,7 @@ describe('row safety is a tripwire over the references (AC-6)', () => {
     }
   })
 
-  it('known-bad probes (/resolve): a row for a protected phase or a skipped Global Triage is reported', () => {
+  it('known-bad probes (/resolve): a row for a protected phase or a skipped never-skip phase is reported', () => {
     const defects = (rows: string[]): string[] => collectRowSafetyDefects(withRows(REFS.resolve, rows), RESOLVE, bodyOf(RESOLVE))
     expect(defects(['| 7 Verification Gate | skip | skip |'])).toContain('a row for protected phase 7')
     expect(defects(['| 8 CI Status Gate | skip | skip |'])).toContain('a row for protected phase 8')
@@ -761,9 +819,36 @@ describe('row safety is a tripwire over the references (AC-6)', () => {
     expect(defects(['| 9c Merge Readiness | skip | skip |'])).toContain('a row for protected phase 9c')
     expect(defects(['| 0 Worktree Discovery & Pre-Flight | skip | skip |'])).toContain('a row for protected phase 0')
     expect(defects(['| 10 Report | - | skip |'])).toContain('a row for protected phase 10')
-    expect(defects(['| 2 Global Triage | skip | - |'])).toContain('row 2 standard cell takes skip, which Global Triage never takes')
-    expect(defects(['| 2 Global Triage | - | skip |'])).toContain('row 2 lean cell takes skip, which Global Triage never takes')
+    for (const [num, name] of RESOLVE.closed.filter(([n]) => RESOLVE.neverSkip.includes(n))) {
+      expect(defects([`| ${num} ${name} | skip | - |`]), `${num} standard`).toContain(`row ${num} standard cell takes skip, which phase ${num} never takes`)
+      expect(defects([`| ${num} ${name} | - | skip |`]), `${num} lean`).toContain(`row ${num} lean cell takes skip, which phase ${num} never takes`)
+    }
     expect(defects(['| 2 Global Triage | pass level | - |'])).toEqual([])
+    expect(defects(['| 6 Polish | skip | skip |']), 'Polish may skip').toEqual([])
+  })
+
+  it('known-bad probes (/resolve): the global phase takes the strictest level in the run, and the premise, the order and the exception are pinned', () => {
+    const ref = REFS.resolve
+    const defects = (text: string): string[] => collectRowSafetyDefects(text, RESOLVE, bodyOf(RESOLVE))
+    const pinned = ['the "## Grammar" text is not the pinned text']
+    expect(phaseSection(bodyOf(RESOLVE), '2'), 'one Triage spawn serves all worktrees').toContain('Spawn a single global Triage agent for ALL issues')
+    expect(RESOLVE.readParagraph, 'the block applies a row in each worktree at its own level').toContain('in each worktree at its own level')
+    expect(defects(ref), 'the unmodified reference').toEqual([])
+    expect(defects(seed(ref, 'in the order `full`, `standard`, `lean`', 'in the order `lean`, `standard`, `full`')), 'the order reversed').toEqual(pinned)
+    expect(defects(seed(ref, 'uses the strictest level in the run', 'uses its own level')), 'a phase on its own level').toEqual(pinned)
+    expect(defects(seed(ref, ', except in a global phase', '')), 'the intro without the exception').toEqual(['the "## Phases" intro is not the pinned paragraph'])
+  })
+
+  it('known-bad probes (/implement): Harden is a floor word, and a 4 Self-Review skip cell is the one permitted removal', () => {
+    const defects = (rows: string[], bullets: string[] = []): string[] => collectRowSafetyDefects(withRows(REFS.implement, rows, bullets), IMPLEMENT, bodyOf(IMPLEMENT))
+    expect(phaseSection(bodyOf(IMPLEMENT), '4').match(/Agent\(subagent_type="\w+"/g), 'Harden is the only spawn of Phase 4').toEqual(['Agent(subagent_type="Harden"'])
+    // The Scope line lets a 4 Self-Review row skip Harden, and an enabled compliance lens keeps Harden at run time, which a static check cannot see.
+    expect(defects(['| 4 Self-Review | - | skip |'])).toEqual([])
+    expect(defects(['| 4 Self-Review | skip | skip |'])).toEqual([])
+    // Any other way to drop Harden, in a cell name or a Rules bullet, removes a floor control.
+    expect(defects(['| 4 Self-Review | apply: skip-harden | - |'], ['- **skip-harden:** Run the spawn.'])).toContain('row 4 standard cell "apply: skip-harden" removes or defers a floor control')
+    expect(defects(['| 3 Polish | apply: tidy | - |'], ['- **tidy:** Skip Harden after Polish.'])).toContain('Rules bullet "tidy" removes or defers a floor control')
+    expect(defects(['| 3 Polish | apply: tidy | - |'], ['- **tidy:** Polish only the files named in the diff.'])).toEqual([])
   })
 
   it.each(SPECS)('$cmd: known-bad probes: a Rules bullet that removes a floor control, routes security, adds an action or is named by no row is reported', spec => {
@@ -776,6 +861,7 @@ describe('row safety is a tripwire over the references (AC-6)', () => {
       'Turn off ESCALATED routing.',
       'Bypass the compliance directive.',
       'Skip Validate.',
+      'Skip Harden.',
       'Omit the CI gate.',
       'Ignore the Verification Gate.',
       'Defer the evidence claims.',
@@ -806,6 +892,8 @@ describe('row safety is a tripwire over the references (AC-6)', () => {
       .toContain(`row ${num} standard cell "apply: bypass-security" removes or defers a floor control`)
     expect(collectRowSafetyDefects(seed(ref, 'matched with the colon', 'matched with the colon today'), spec, body)).toEqual(['the "## Grammar" text is not the pinned text'])
     expect(collectRowSafetyDefects(seed(ref, 'a table with no rows is well-formed', 'a table with no rows is well formed'), spec, body)).toEqual(['the "## Phases" intro is not the pinned paragraph'])
+    expect(collectRowSafetyDefects(seed(ref, 'reads `skipped`', 'reads `PASS`'), spec, body), 'the Skipped bullet').toEqual(['the "## Grammar" text is not the pinned text'])
+    expect(collectRowSafetyDefects(seed(ref, 'to every spawn prompt of the phase, and a phase with no spawn never takes `pass level`', "to the phase's spawn prompt"), spec, body), 'the pass level target').toEqual(['the "## Grammar" text is not the pinned text'])
     expect(collectRowSafetyDefects(seed(ref, RULES_INTRO, `${RULES_INTRO} Extra.`), spec, body)).toEqual(['the "## Rules" section holds text other than the pinned intro and its bullets'])
     expect(collectRowSafetyDefects(withRows(ref, [], ['- **tidy:** Polish the diff.\ncontinued here']), spec, body)).toContain('the "## Rules" section holds text other than the pinned intro and its bullets')
     expect(collectRowSafetyDefects(seed(ref, '## Phases\n', 'Stray text.\n\n## Phases\n'), spec, body)).toContain('the reference holds text between its title and "## Phases"')
