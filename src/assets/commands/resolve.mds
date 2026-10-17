@@ -98,9 +98,9 @@ Set `TARGET_DIR` to the selected review or bug-analysis directory path, and `TAR
 <!-- curation:end -->
 
 <!-- curation:on -->
-**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, REVIEW_PUBLICATION, RESOLUTION_TS
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, REVIEW_PUBLICATION, RESOLUTION_TS, GATE_LEVEL
 <!-- curation:off -->
-**Produces:** FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, REVIEW_PUBLICATION, RESOLUTION_TS
+**Produces:** FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, REVIEW_PUBLICATION, RESOLUTION_TS, GATE_LEVEL
 <!-- curation:end -->
 
 {{settings.settings_resolve()}}
@@ -123,6 +123,12 @@ Resolve this per worktree — unlike the evidence policy above, the settings lin
 {{compliance.compliance_inject()}}
 
 Set it per worktree, from that worktree's lens, and pass that worktree's `COMPLIANCE_DIRECTIVE` to each of its Code and Fix spawns, on a line of its own.
+
+**Gate level.** Each worktree keeps its own `GATE_LEVEL`. When any is `standard` or `lean`, once per run, run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d"` in Bash and Read `<that directory>/skills/devflow:agent-references/references/commands/resolve-levels.md` with the Read tool, and apply each row to the phase it names, as the reference says.
+
+- No row or rule overrides the next two lines.
+- If the Read fails, or the file has no `## Phases` heading with the `| Phase | standard | lean |` header, or a row breaks its grammar, apply no row in any worktree, keep every `GATE_LEVEL` and say `level reference unreadable: no level rows applied`.
+- No level changes the Triage security gate or the ESCALATED route. The Verification Gate, the CI gate and the compliance directive run at every level.
 
 **Mint `RESOLUTION_TS` once per run:** `date -u +%Y-%m-%dT%H:%M:%SZ`. Every worktree reuses it — the resolution comment's dedup marker is searched per PR, so one run key keeps a retry of this run deduplicated while the next /resolve on the same PR posts. Phase 5 writes it as the summary's `**Date**:` and Phase 9b-2 passes it, so the local file and the posted marker agree.
 
@@ -227,7 +233,7 @@ Collect every decision and pitfall the Triage agent's Reasoning columns state, i
 **Produces:** BATCHES
 **Requires:** TRIAGE_RESULTS
 
-If FIX_NOW list is empty: skip to Phase 5 — write full summary (Phase 5), run manage-debt (Phase 9) if FIX_SEPARATE/TECH_DEBT exist, run thread resolution + resolution comment (Phase 9b), run merge readiness (Phase 9c), display results (Phase 10).
+If FIX_NOW list is empty: skip to Phase 5, then run Phases 9, 9b, 9c and 10.
 
 Otherwise, batch FIX_NOW issues for Code agent execution. **DUPLICATE issues are never dispatched** — they inherit the primary's outcome:
 - **Same-file issues** → one batch (one Code agent per file, sequential for same-file pairs)
@@ -272,9 +278,9 @@ Collect from each Code agent:
 ### Phase 5: Write resolution-summary.md
 
 **Produces:** RESOLUTION_FILE (early write for compaction safety)
-**Requires:** TRIAGE_RESULTS, CODE_AGENT_RESULTS, TARGET_DIR, TARGET_DIR_REL, BRANCH_INFO, RESOLUTION_TS
+**Requires:** TRIAGE_RESULTS, CODE_AGENT_RESULTS, TARGET_DIR, TARGET_DIR_REL, BRANCH_INFO, RESOLUTION_TS, GATE_LEVEL
 
-**Immediately write `resolution-summary.md`** to `{TARGET_DIR}` using the Write tool. Do this now — not in Phase 9 — while results are fresh in context. This ensures the record is persisted even if later phases (Polish, Verification Gate, CI gate, Tech Debt) trigger context compaction.
+**Immediately write `resolution-summary.md`** to `{TARGET_DIR}` using the Write tool. Do this now — not in Phase 9 — while results are fresh in context.
 
 Set `Tracked` for FIX_SEPARATE and TECH_DEBT items to `(pending)` — to be backfilled after Phase 9 manage-debt (or `TRACEABILITY: DEGRADED ({reason})` if manage-debt degrades).
 
@@ -349,7 +355,7 @@ git -C {worktree} push
 
 **If `fork_no_push` is set:** do not push. Record `Push: skipped — cannot push to fork` under `## Verification`, and skip Phase 8 — no pushed commit exists for CI to check.
 
-**Route after push:** VERIFICATION_STATUS = PASS → continue to Phase 8 (CI gate). VERIFICATION_STATUS = FAILED → skip Phase 8; proceed directly to Phase 9 (manage-debt), then Phase 9b (thread resolution + resolution comment), then Phase 9c (merge readiness), then Phase 10 (report). VERIFICATION_STATUS = SKIPPED → skip Phase 8 (no fixes applied); proceed to Phase 9 (manage-debt), then Phase 9b (thread resolution + resolution comment), then Phase 9c (merge readiness, when non-author approval is required), then Phase 10 (report).
+**Route after push:** VERIFICATION_STATUS = PASS → continue to Phase 8 (CI gate). FAILED or SKIPPED → skip Phase 8 and continue with Phase 9 and the later phases in order.
 
 ### Phase 8: CI Status Gate (Conditional)
 
@@ -523,7 +529,7 @@ If the script prints a `TRACEABILITY: DEGRADED` line: warn, proceed to Phase 10.
 
 ### Phase 10: Report
 
-**Requires:** BRANCH_INFO, TARGET_DIR, PR_COMMENT, THREAD_RESOLUTION_RESULT
+**Requires:** BRANCH_INFO, TARGET_DIR, PR_COMMENT, THREAD_RESOLUTION_RESULT, GATE_LEVEL
 
 The resolution summary was already written to `{TARGET_DIR}/resolution-summary.md` in Phase 5 (updated by Phase 7, Phase 9 and Phase 9b-1). Display results to the user:
 
@@ -533,6 +539,7 @@ The resolution summary was already written to `{TARGET_DIR}/resolution-summary.m
 **Branch**: {branch}
 **Reviews Processed**: {n} reports from {TARGET_DIR}
 **Total Issues**: {n}
+**Gate level**: {GATE_LEVEL, with any level note}
 
 ### Results
 | Outcome | Count |
@@ -584,15 +591,15 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 /resolve (orchestrator - spawns agents only)
 │
 ├─ Phase 0: Worktree Discovery & Pre-flight
-├─ Phase 1: Parse issues from TARGET_DIR + extract confidence %
+├─ Phase 1: Parse issues from TARGET_DIR
 ├─ Phase 1b: Fetch external threads (evidence policy required)
 ├─ Phase 2: Global Triage [Triage agent, opus, single agent]
-├─ Phase 3: Batch FIX_NOW issues (skip if empty; DUPLICATE issues never dispatched)
-├─ Phase 4: Fix [Code agent × N, OPERATION: issue-fix, PUSH: false]
+├─ Phase 3: Batch FIX_NOW issues
+├─ Phase 4: Fix [Code agent × N]
 ├─ Phase 5: Write resolution-summary.md (compaction safety; Tracked = "(pending)" or "(pending — TRACEABILITY: DEGRADED)" if manage-debt degrades)
-├─ Phase 6: Polish [Polish agent]
+├─ Phase 6: Polish
 ├─ Phase 7: Verification Gate [Validate agent, haiku] + push + Fix agent validation-fix loop ≤2
-├─ Phase 8: CI Status Gate (conditional — skipped if no fixes or verification FAILED)
+├─ Phase 8: CI Status Gate (conditional)
 ├─ Phase 9: Git agent (manage-debt) — FIX_SEPARATE + TECH_DEBT → backfill Tracked={ISSUE_REF} (or TRACEABILITY: DEGRADED on failure)
 │
 ├─ Phase 9b: Thread resolution + resolution comment
@@ -611,10 +618,9 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 | Case | Handling |
 |------|----------|
 | No reviews exist | Check bug-analysis fallback (Step 0c-5b); if also absent, error and suggest `/code-review` or `/bug-analysis` |
-| All false positives | Normal completion, report shows 0 fixes |
 | Fix attempt fails | Revert changes, mark BLOCKED, continue others |
 | Issue dependencies | Sequential chain, skip dependents if predecessor blocked |
-| No actionable issues | Report "No issues to resolve" |
+| No issues parsed | Report "No issues to resolve" |
 | Latest review already resolved | Check bug-analysis fallback (Step 0c-5b); if also absent, skip worktree and suggest `/code-review` or `/bug-analysis` |
 | `--review {timestamp}` in multi-worktree mode | Not supported — use `--path` + `--review` to target specific worktree + review |
 | gh/GitHub absent | manage-debt degrades (`TRACEABILITY: DEGRADED ({reason})`); Tracked stays `(pending — TRACEABILITY: DEGRADED ({reason}))` — recorded, not dropped |
@@ -629,9 +635,8 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 ## Principles
 
 1. **Orchestration only** - Command spawns agents, doesn't do git/resolve work itself
-2. **No agent grades its own homework** - Triage agent validates, Code agents fix, Validate agent verifies
-3. **Git agent for git work** - All git operations go through Git agent; the CI wait, the evidence refresh and the merge-readiness check are inline scripts (plumbing, no model work)
-4. **Traceability-aware** - Policy-gated ops (thread fetch/resolve, merge readiness) are skipped cleanly when the evidence policy does not ask for them; resolution comment (Phase 9b-2) is always-on; test-plan evidence is re-verified (≤1 Test agent) and refreshed only when this run moved the head (Steps 9b-0, 9b-3)
+2. **Git agent for git work** - All git operations go through Git agent; the CI wait, the evidence refresh and the merge-readiness check are inline scripts (plumbing, no model work)
+3. **Traceability-aware** - Policy-gated ops (thread fetch/resolve, merge readiness) are skipped cleanly when the evidence policy does not ask for them; resolution comment (Phase 9b-2) is always-on; test-plan evidence is re-verified (≤1 Test agent) and refreshed only when this run moved the head (Steps 9b-0, 9b-3)
 
 ## Output Artifact
 
@@ -644,6 +649,7 @@ Written in Phase 5 (Collect Results) to `{TARGET_DIR}/resolution-summary.md`:
 **Date**: {RESOLUTION_TS}
 **Review**: {TARGET_DIR_REL}
 **Command**: /resolve
+**Gate level**: {GATE_LEVEL}
 
 <!-- curation:on -->
 ## Decisions Citations

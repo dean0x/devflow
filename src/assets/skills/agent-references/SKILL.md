@@ -18,7 +18,10 @@ allowed-tools: Read
      /code-review reads commands/code-review-levels.md on its default path (standard or lean), once
      per run; a failed read applies the full sets.
      /plan reads commands/plan-levels.md at standard or lean, once per run; a failed read runs the
-     full shape. -->
+     full shape.
+     /implement reads commands/implement-levels.md at the start of Phase 3 at standard or lean, once
+     per run. /resolve reads commands/resolve-levels.md in Step 0d when any worktree is standard or
+     lean, once per run. A failed read applies no row and keeps the level. -->
 
 ## Iron Law
 

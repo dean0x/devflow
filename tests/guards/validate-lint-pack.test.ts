@@ -91,6 +91,13 @@ function seed(text: string, from: string | RegExp, to: string): string {
   return next
 }
 
+/** Replace `from` with `to` inside the Phase 6 section only: the Phase 3 Requires line carries the same names, so a whole-text seed would land there. */
+function seedPhase6(text: string, from: string | RegExp, to: string): string {
+  const section = sectionBetween(text, '### Phase 6: Validate', '### Phase 7:')
+  if (section === null) throw new Error('the Phase 6 section must be in the text')
+  return text.replace(section, () => seed(section, from, to))
+}
+
 /** The corpus with one doc's text replaced. */
 function withDoc(docs: readonly Doc[], label: string, change: (text: string) => string): Doc[] {
   expect(docs.some(d => d.label === label), `${label} is in the corpus`).toBe(true)
@@ -430,9 +437,9 @@ describe('only the implement Phase 6 Validate spawn passes the level and the bas
       expect(collectDataFlowDefects({ label: doc.label, text: twice }, 1), doc.label)
         .toContain(`${doc.label}: Phase 1 has 2 Produces lines, expected 1`)
       const requires = '**Requires:** BASE_BRANCH, GATE_LEVEL\n'
-      expect(collectDataFlowDefects({ label: doc.label, text: seed(doc.text, requires, `${requires}${requires}`) }, 1), doc.label)
+      expect(collectDataFlowDefects({ label: doc.label, text: seedPhase6(doc.text, requires, `${requires}${requires}`) }, 1), doc.label)
         .toContain(`${doc.label}: Phase 6 has 2 Requires lines, expected 1`)
-      expect(collectDataFlowDefects({ label: doc.label, text: seed(doc.text, requires, '') }, 1), doc.label)
+      expect(collectDataFlowDefects({ label: doc.label, text: seedPhase6(doc.text, requires, '') }, 1), doc.label)
         .toContain(`${doc.label}: Phase 6 has 0 Requires lines, expected 1`)
     }
   })
@@ -447,7 +454,7 @@ describe('only the implement Phase 6 Validate spawn passes the level and the bas
         .toContain(`${doc.label}: a Phase 1 Produces line does not list GATE_LEVEL`)
       for (const name of ['BASE_BRANCH', 'GATE_LEVEL']) {
         const other = name === 'GATE_LEVEL' ? 'BASE_BRANCH' : 'GATE_LEVEL'
-        const dropped = seed(doc.text, '**Requires:** BASE_BRANCH, GATE_LEVEL\n', `**Requires:** ${other}\n`)
+        const dropped = seedPhase6(doc.text, '**Requires:** BASE_BRANCH, GATE_LEVEL\n', `**Requires:** ${other}\n`)
         expect(collectDataFlowDefects({ label: doc.label, text: dropped }, 1), `${doc.label} ${name}`)
           .toContain(`${doc.label}: Phase 6 Requires does not list ${name}`)
       }
