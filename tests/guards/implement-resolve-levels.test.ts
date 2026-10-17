@@ -597,6 +597,8 @@ const FLOOR_TAIL = `(?:\\s+(?:${anyOf(FLOOR_TAIL_WORDS)})\\b)*`
 /** At most this many words may stand between a negation and the control it removes, in one sentence. Farther apart, they are two clauses: "Pass no extra files to Validate". A sentence stop (`.;!?`) also ends the clause. */
 const NEAR_WORDS = 2
 const NEAR = `(?:[^\\w.;!?]+\\w+){0,${NEAR_WORDS}}[^\\w.;!?]+`
+/** The numbers that may stand before a protected phase number in a plural list ("Phases 6, 7 and 8"), each with its separator: a comma with an optional "and" or "or" (the Oxford comma), or "and" or "or" alone. */
+const PHASE_LIST_PREFIX = '(?:\\d+[a-z]?(?:\\s*,\\s*(?:(?:and|or)\\s+)?|\\s+(?:and|or)\\s+))*'
 
 const SECURITY = /\bsecurity\b/i
 const ESCALATED = /\bESCALATED\b/i
@@ -606,7 +608,8 @@ const ACTION = new RegExp(`\`\`\`|${wholeWords(ACTION_WORDS).source}`, 'i')
 
 /**
  * Whether a cell or a Rules bullet removes or defers a floor control, in three ways. A floor control is a floor name, or
- * a protected phase named by its number ("Phase 7"), with the tail words that belong to the name.
+ * a protected phase named by its number ("Phase 7"), with the tail words that belong to the name. A plural list of
+ * numbers joined by a comma, "and" or "or" ("Phases 6, 7 and 8") names the protected number wherever it stands in the list.
  *   - A removal verb (skip, drop, turn off ...) and a floor control anywhere in the same text. A list, another clause or
  *     another sentence does not hide the control.
  *   - A negation (no, not, never, do not ...) within NEAR_WORDS words before a floor control, in one sentence.
@@ -615,7 +618,7 @@ const ACTION = new RegExp(`\`\`\`|${wholeWords(ACTION_WORDS).source}`, 'i')
  */
 function removesFloorControl(text: string, floorPhases: readonly string[]): boolean {
   const names = `\\b(?:${anyOf(FLOOR_NAMES)})\\b`
-  const floor = `(?:${floorPhases.length === 0 ? names : `${names}|\\bPhases?\\s+(?:${anyOf(floorPhases)})\\b`})${FLOOR_TAIL}`
+  const floor = `(?:${floorPhases.length === 0 ? names : `${names}|\\bPhases?\\s+${PHASE_LIST_PREFIX}(?:${anyOf(floorPhases)})\\b`})${FLOOR_TAIL}`
   const verbAndFloor = new RegExp(`(?:${VERB})`, 'i').test(text) && new RegExp(floor, 'i').test(text)
   return verbAndFloor || new RegExp(`(?:${NEGATION})${NEAR}(?:${floor})|(?:${floor})${NEAR}(?:${NEGATION})`, 'i').test(text)
 }
@@ -1184,6 +1187,21 @@ describe('row safety is a tripwire over the references (AC-6)', () => {
     // A floor name alone, with its tail words, is no removal.
     const bare = ['Run the Validate agent on the files named in the diff.', 'Run Harden on the files named in the diff.', 'Fix only the listed issues.', 'Polish only the files named in the diff.']
     for (const text of [...apart, ...stops, ...bare]) expect(defects(text), text).toEqual([])
+  })
+
+  it.each(SPECS)('$cmd: known-bad probes: a plural Phases list counts when any number in it is a floor phase, and a list of skippable phases stays safe', spec => {
+    const defects = (text: string): string[] => bulletDefects(spec, `- **probe:** ${text}`)
+    const floor = 'Rules bullet "probe" removes or defers a floor control'
+    const skippable = spec.closed.map(([n]) => n).filter(n => !spec.neverSkip.includes(n))
+    const first = skippable[0]
+    // Phase 7 is a floor phase in both specs. Each list opens with a skippable number and reaches Phase 7 later, behind "and", "or", a comma or an Oxford comma, so a match on the first number alone misses it.
+    const lists = ['Skip Phases 6 and 7.', 'Skip Phases 6, 7 and 8.', `Skip Phases ${first} and 7.`, `Skip Phases ${first}, 7 and 8.`, `Skip Phases ${first} or 7.`, `Skip Phases ${first}, 7, and 8.`, `Skip Phases ${first} and 7 at lean.`]
+    // A negation reads the list the same way, before it and after it.
+    const negations = [`Do not run Phases ${first} and 7.`, `Phases ${first} and 7 do not run.`]
+    for (const text of [...lists, ...negations]) expect(defects(text), text).toContain(floor)
+    // A plural list of skippable phases alone is no removal. /resolve skips Phase 6 alone, so it holds no such list and no safe probe.
+    if (skippable.length >= 2) expect(defects(`Skip Phases ${skippable.slice(0, -1).join(', ')} and ${skippable[skippable.length - 1]}.`), 'skippable phases only').toEqual([])
+    else expect(skippable, `${spec.cmd} has one skippable phase, so it has no plural list of them`).toHaveLength(1)
   })
 
   it.each(SPECS)('$cmd: known-bad probes: a Rules bullet that drops a fix, an issue, an edit, a commit or a ticket of the fix path is reported', spec => {
