@@ -147,6 +147,7 @@ const ANALYSIS_RANGE: DiffRangeShape = {
   stepTo: 'Step 2b:',
   reachability: 'git cat-file -t {sha}',
   incrementalRange: '{sha}...HEAD',
+  marker: '.last-analysis-head',
 };
 
 // The facts /code-review shares live in the helpers; this adds Step 2b, the stop row, the Phase 7 slot and the Debug command.
@@ -214,8 +215,9 @@ describe('bug-analysis.md — DIFF_RANGE starts at the fresh base that ensure-pr
   });
 });
 
-describe('bug-analysis.md — the stored analysis head is checked as a commit ID (Step 2a)', () => {
+describe('bug-analysis.md — the stored analysis head is tracked-free and checked as a commit ID (Step 2a)', () => {
   const CHECK = ' The stored analysis head is checked as a commit ID: use it only when it is exactly 40 or 64 lowercase hex, else take the full-range path';
+  const TRACKED = 'A tracked analysis-head file is ignored, and the analysis takes the full range (`git -C {worktree}/.devflow/docs/bug-analysis/{branch-slug} ls-files --error-unmatch -- .last-analysis-head >/dev/null 2>&1` exits 0).';
   const seed = (from: string, to: string): string => {
     const next = content.replace(from, to);
     expect(next, `the seed ${from} must change the text`).not.toBe(content);
@@ -235,6 +237,15 @@ describe('bug-analysis.md — the stored analysis head is checked as a commit ID
       .toContain('a stored analysis head that fails the check does not take the full-range path');
     const late = seed(CHECK, '').replace('git cat-file -t {sha}', `git cat-file -t {sha}${CHECK}`);
     expect(collectStoredHeadDefects(late, ANALYSIS_RANGE)).toContain('the stored analysis head is used before it is checked');
+  });
+
+  it('known-bad probes: a missing, late or fall-back-less tracked-file check is reported', () => {
+    expect(collectStoredHeadDefects(seed(TRACKED, ''), ANALYSIS_RANGE))
+      .toContain('the stored analysis head is not ignored when git tracks it');
+    const late = seed(TRACKED, '').replace('git cat-file -t {sha}', `git cat-file -t {sha}; ${TRACKED}`);
+    expect(collectStoredHeadDefects(late, ANALYSIS_RANGE)).toContain('the stored analysis head is used before the tracked-file check');
+    expect(collectStoredHeadDefects(seed('and the analysis takes the full range', 'and the analysis goes on'), ANALYSIS_RANGE))
+      .toContain('a tracked analysis head file does not take the full range');
   });
 });
 

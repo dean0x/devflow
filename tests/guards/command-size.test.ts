@@ -28,10 +28,10 @@ type Build = 'on' | 'off'
 
 /** [command, build, ceiling in bytes]. Each row's text is the pattern its numeric-floors.json entry pins. */
 const COMMAND_MAX_BYTES: ReadonlyArray<readonly [string, Build, number]> = [
-  ['bug-analysis', 'on', 24_755],
-  ['bug-analysis', 'off', 20_845],
-  ['code-review', 'on', 34_970],
-  ['code-review', 'off', 32_225],
+  ['bug-analysis', 'on', 24_696],
+  ['bug-analysis', 'off', 20_786],
+  ['code-review', 'on', 34_917],
+  ['code-review', 'off', 32_172],
   ['debug', 'on', 19_885],
   ['debug', 'off', 16_966],
   ['dynamic-build', 'on', 106_923],

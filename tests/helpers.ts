@@ -1935,6 +1935,8 @@ export interface DiffRangeShape {
   reachability: string
   /** The range the command builds from the stored head. */
   incrementalRange: string
+  /** The stored head's file name, such as ".last-review-head". */
+  marker: string
 }
 
 /** The parts of the fresh-base text that differ per command. */
@@ -1983,7 +1985,10 @@ export function collectFreshBaseDefects(body: string, shape: DiffRangeShape, par
   return out
 }
 
-/** The stored head: checked as a commit ID, before any git command or `DIFF_RANGE` takes it. */
+/**
+ * The stored head: git does not track its file, and it is checked as a commit ID, before any git command or
+ * `DIFF_RANGE` takes it. A tracked file is ignored and the run takes the full range.
+ */
 export function collectStoredHeadDefects(body: string, shape: DiffRangeShape): string[] {
   const s = sectionBetween(body, shape.stepFrom, shape.stepTo)
   if (s === null) return [`no ${shape.step} (incremental detection)`]
@@ -1996,6 +2001,13 @@ export function collectStoredHeadDefects(body: string, shape: DiffRangeShape): s
   const uses = [shape.reachability, `Set \`DIFF_RANGE\` to \`${shape.incrementalRange}\``].map(use => s.indexOf(use))
   if (uses.some(at => at === -1)) out.push(`${shape.step} lost the reachability check or the incremental range`)
   else if (uses.some(at => at < check)) out.push(`the stored ${shape.head} head is used before it is checked`)
+  const tracked = /^[^\n]*ls-files --error-unmatch[^\n]*/m.exec(s)
+  if (tracked === null || !tracked[0].includes(shape.marker)) out.push(`the stored ${shape.head} head is not ignored when git tracks it`)
+  else {
+    if (!tracked[0].includes(`tracked ${shape.head}-head file is ignored, and the ${shape.head} takes the full range`)) out.push(`a tracked ${shape.head} head file does not take the full range`)
+    const trackedAt = s.indexOf('ls-files --error-unmatch')
+    if (trackedAt > check || uses.some(at => at !== -1 && at < trackedAt)) out.push(`the stored ${shape.head} head is used before the tracked-file check`)
+  }
   return out
 }
 

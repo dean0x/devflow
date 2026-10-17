@@ -526,35 +526,35 @@
     },
     {
       "id": "command-bug-analysis-max",
-      "ceiling": 24755,
-      "pattern": "['bug-analysis', 'on', 24_755],",
+      "ceiling": 24696,
+      "pattern": "['bug-analysis', 'on', 24_696],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/bug-analysis.md, the learning-on build, in bytes. Measured 24,755 after #495 (24,966 after #472; 25,065 when #456 closed), with no headroom. Main held 25,361. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/bug-analysis.md, the learning-on build, in bytes. Measured 24,696 after #495 (24,966 after #472; 25,065 when #456 closed), with no headroom. Main held 25,361. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-bug-analysis-learning-off-max",
-      "ceiling": 20845,
-      "pattern": "['bug-analysis', 'off', 20_845],",
+      "ceiling": 20786,
+      "pattern": "['bug-analysis', 'off', 20_786],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/learning-off/commands/bug-analysis.md, the learning-off build, in bytes. Measured 20,845 after #495 (21,056 after #472; 21,077 when #456 closed), with no headroom. Main held 21,389. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/learning-off/commands/bug-analysis.md, the learning-off build, in bytes. Measured 20,786 after #495 (21,056 after #472; 21,077 when #456 closed), with no headroom. Main held 21,389. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-code-review-max",
-      "ceiling": 34970,
-      "pattern": "['code-review', 'on', 34_970],",
+      "ceiling": 34917,
+      "pattern": "['code-review', 'on', 34_917],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/code-review.md, the learning-on build, in bytes. Measured 34,970 after #495 (34,981 when #474 closed), with no headroom. Main held 36,680 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/code-review.md, the learning-on build, in bytes. Measured 34,917 after #495 (34,981 when #474 closed), with no headroom. Main held 36,680 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-code-review-learning-off-max",
-      "ceiling": 32225,
-      "pattern": "['code-review', 'off', 32_225],",
+      "ceiling": 32172,
+      "pattern": "['code-review', 'off', 32_172],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/learning-off/commands/code-review.md, the learning-off build, in bytes. Measured 32,225 after #495 (32,236 when #474 closed), with no headroom. Main held 33,996 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/learning-off/commands/code-review.md, the learning-off build, in bytes. Measured 32,172 after #495 (32,236 when #474 closed), with no headroom. Main held 33,996 before wave 4C; this command is trimmed below it. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-debug-max",

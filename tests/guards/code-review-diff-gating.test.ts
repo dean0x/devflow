@@ -401,6 +401,7 @@ const REVIEW_RANGE: DiffRangeShape = {
   stepTo: '#### Step 0e-i:',
   reachability: 'cat-file -t {sha}',
   incrementalRange: '{last-review-sha}...HEAD',
+  marker: '.last-review-head',
 }
 
 /**
@@ -723,8 +724,9 @@ describe('DIFF_RANGE starts at the fresh base that ensure-pr-ready returns (#495
   })
 })
 
-describe('the stored review head is checked as a commit ID (Step 0d)', () => {
+describe('the stored review head is tracked-free and checked as a commit ID (Step 0d)', () => {
   const CHECK = ' The stored review head is checked as a commit ID: use it only when it is exactly 40 or 64 lowercase hex, else take the full-range path'
+  const TRACKED = 'A tracked review-head file is ignored, and the review takes the full range (`git -C {worktree}/.devflow/docs/reviews/{branch-slug} ls-files --error-unmatch -- .last-review-head >/dev/null 2>&1` exits 0).'
 
   it.each(VARIANTS)('$label: the check comes before the reachability test and the incremental range', ({ body }) => {
     expect(collectStoredHeadDefects(body, REVIEW_RANGE)).toEqual([])
@@ -739,6 +741,15 @@ describe('the stored review head is checked as a commit ID (Step 0d)', () => {
       .toContain('a stored review head that fails the check does not take the full-range path')
     expect(collectStoredHeadDefects(seed(seed(ON, CHECK, ''), 'cat-file -t {sha}`', `cat-file -t {sha}\`${CHECK}`), REVIEW_RANGE))
       .toContain('the stored review head is used before it is checked')
+  })
+
+  it('known-bad probes: a missing, late or fall-back-less tracked-file check is reported', () => {
+    expect(collectStoredHeadDefects(seed(ON, TRACKED, ''), REVIEW_RANGE))
+      .toContain('the stored review head is not ignored when git tracks it')
+    expect(collectStoredHeadDefects(seed(seed(ON, TRACKED, ''), 'cat-file -t {sha}`', `cat-file -t {sha}\`; ${TRACKED}`), REVIEW_RANGE))
+      .toContain('the stored review head is used before the tracked-file check')
+    expect(collectStoredHeadDefects(seed(ON, 'and the review takes the full range', 'and the review goes on'), REVIEW_RANGE))
+      .toContain('a tracked review head file does not take the full range')
   })
 })
 

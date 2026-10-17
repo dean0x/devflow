@@ -69,6 +69,7 @@ If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
 
 1. Check `{worktree}/.devflow/docs/bug-analysis/{branch-slug}/.last-analysis-head`:
    - **If exists AND `--full` NOT set:**
+     - A tracked analysis-head file is ignored, and the analysis takes the full range (`git -C {worktree}/.devflow/docs/bug-analysis/{branch-slug} ls-files --error-unmatch -- .last-analysis-head >/dev/null 2>&1` exits 0).
      - Read the SHA from the file. The stored analysis head is checked as a commit ID: use it only when it is exactly 40 or 64 lowercase hex, else take the full-range path
      - Verify reachable: `git cat-file -t {sha}` — if exit code non-zero (rebase invalidated SHA), fall through to full
      - If SHA == current HEAD → "No new commits since last analysis. Use --full for a full re-analysis." Stop.
@@ -309,11 +310,7 @@ Run `/resolve` to process and fix these findings.
 │  └─ Git agent (ensure-pr-ready)
 │
 ├─ Phase 2: Static Analysis
-│  ├─ Step 2a: Incremental detection + timestamp setup
-│  ├─ Step 2b: Check changed files (stop if none)
-│  ├─ Step 2c: Tool availability check
-│  └─ Step 2d: Tiered static analysis (semgrep → snyk → codeql)
-│              Write static-findings.md
+│  └─ 2a incremental range, 2b changed files (stop if none), 2c tools, 2d semgrep → snyk → codeql
 │
 ├─ Phase 3: Context Loading
 <!-- learning:on -->
@@ -326,10 +323,7 @@ Run `/resolve` to process and fix these findings.
 │  └─ Detect active focuses (security + functional always; integration + usability conditional)
 │
 ├─ Phase 5: Bug Analysis (PARALLEL)
-│  ├─ Debug agent: security (+ STATIC_FINDINGS)
-│  ├─ Debug agent: functional
-│  ├─ Debug agent: integration (conditional)
-│  └─ Debug agent: usability (conditional)
+│  └─ Debug agent per active focus (security also reads STATIC_FINDINGS)
 │
 ├─ Phase 6: Synthesis
 │  └─ Synthesize agent (mode: bug-analysis)

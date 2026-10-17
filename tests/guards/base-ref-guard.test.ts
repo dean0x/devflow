@@ -521,6 +521,7 @@ const SINKS: readonly SinkSpec[] = [
     },
   },
   { file: 'git-ops/validate-branch.md', anchor: 'Diff Scope', region: t => listItem(t, /^7\.\s/) },
+  { file: 'commands/code-review.md', anchor: 'patch writes', region: t => regionAround(t, '> "{REVIEW_DIR}/diff.patch"', 1) },
 ]
 
 function sinkFindings(p: Prompt): Unmet[] {
@@ -903,6 +904,13 @@ describe('known-bad probes: each collector reports the seeded bad text and passe
       expect(reported(good), 'good text').toEqual([])
     })
   }
+
+  it('sink-exit: the code-review patch writes without an exit rule are reported, and with one are not', () => {
+    const write = '```bash\ngit -C "{WORKTREE_PATH}" diff --no-color --no-ext-diff --no-textconv {DIFF_RANGE} > "{REVIEW_DIR}/diff.patch"\n```\n\nIt holds the whole diff of `DIFF_RANGE`.'
+    const anchors = (text: string): string[] => sinkFindings(seeded('commands/code-review.md', text)).map(u => u.anchor).filter(a => a === 'patch writes')
+    expect(anchors(write)).toEqual(['patch writes'])
+    expect(anchors(`${write} A non-zero exit of any patch write stops.`)).toEqual([])
+  })
 
   it('resolver-call: a wrong script path, an unquoted name, a bad mode and a missing exit echo are each reported', () => {
     const errors = (rest: string, script = SCRIPT_REF): string[] => invocationErrors(`node "${script}" ${rest}`)

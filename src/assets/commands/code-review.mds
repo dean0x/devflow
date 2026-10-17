@@ -34,7 +34,7 @@ Run a comprehensive code review of the current branch by spawning parallel revie
    - **More than one listed:** Invoke the `devflow:worktree-support` skill, then Read its `references/discovery.md` from the skill's base directory for the full 7-step algorithm; the canonical protected branch list stays in the skill. Parse the list, filter (skip protected/detached/mid-rebase), dedup by branch, sort by recent commit
    - **Exactly one listed:** load neither the skill nor the reference — that worktree is the only candidate, and Step 0c's Git agent validates its branch
 2. **If `--path` flag provided:** use only that worktree, skip discovery
-   **`--path` validation**: Before proceeding, verify the path exists as a directory and appears in `git worktree list` output. If not: report error and stop.
+   **`--path` validation**: the path must be a directory in `git worktree list` output; if not, report an error and stop.
 3. **If only 1 reviewable worktree**: proceed as single-worktree flow
 4. **If multiple reviewable worktrees:** report "Found N worktrees with reviewable branches: {list with paths and branches}" and proceed with multi-worktree flow
 
@@ -110,6 +110,7 @@ For each worktree:
 2. Create timestamped review directory: `mkdir -p {worktree}/.devflow/docs/reviews/{branch-slug}/{timestamp}/`
 3. Check if `{worktree}/.devflow/docs/reviews/{branch-slug}/.last-review-head` exists:
    - **If yes AND `--full` NOT set:**
+     - A tracked review-head file is ignored, and the review takes the full range (`git -C {worktree}/.devflow/docs/reviews/{branch-slug} ls-files --error-unmatch -- .last-review-head >/dev/null 2>&1` exits 0).
      - Read the SHA from the file. The stored review head is checked as a commit ID: use it only when it is exactly 40 or 64 lowercase hex, else take the full-range path
      - Verify reachable: `git -C {worktree} cat-file -t {sha}` (if unreachable, fallback to full)
      - Check if SHA == current HEAD → if so, skip review: "No new commits since last review. Use --full for a full re-review."
@@ -260,7 +261,7 @@ Write `diff.patch` once per worktree, by redirect:
 git -C "{WORKTREE_PATH}" diff --no-color --no-ext-diff --no-textconv {DIFF_RANGE} > "{REVIEW_DIR}/diff.patch"
 ```
 
-It holds the whole diff of `DIFF_RANGE`. On a `code` diff, add one patch for each language focus in REVIEW_FOCUS_LIST, by the same command with quoted pathspecs from this table:
+It holds the whole diff of `DIFF_RANGE`. A non-zero exit of any patch write stops. On a `code` diff, add one patch for each language focus in REVIEW_FOCUS_LIST, by the same command with quoted pathspecs from this table:
 
 ```bash
 git -C "{WORKTREE_PATH}" diff --no-color --no-ext-diff --no-textconv {DIFF_RANGE} -- '<pathspec>' ... > "{REVIEW_DIR}/diff-{focus}.patch"
@@ -425,17 +426,14 @@ Per worktree, after successful completion:
 ```
 /code-review (orchestrator - spawns agents only)
 │
-├─ Phase 0: Worktree Discovery & Pre-flight
-│  ├─ Step 0a: git worktree list → filter reviewable
+├─ Phase 0: Worktree Discovery & Pre-flight (Git agent ensure-pr-ready per worktree, parallel)
 │  ├─ Step 0b: Resolve the compliance lens and gate level
-│  ├─ Step 0c: Git agent (ensure-pr-ready) per worktree [parallel]
-│  └─ Steps 0d-0f: incremental range, prior resolution, convergence (warn only), publication mode
 │
 ├─ Per worktree (SEQUENTIAL — one worktree at a time):
 │  │
 │  ├─ Phase 1: Analyze changed files
 │  │  ├─ Classify the diff (paths.txt → DIFF_CLASS)
-│  │  ├─ Choose the focuses (file types, language stamp, gate level)
+│  │  ├─ Choose the focuses
 │  │  └─ Write diff.patch and diff-{focus}.patch
 │  │
 │  ├─ Phase 2: Reviews (PARALLEL within worktree), one per REVIEW_FOCUS_LIST focus
@@ -471,7 +469,7 @@ Per worktree, after successful completion:
 
 ## Principles
 
-1. **Orchestration only** - Command spawns agents, doesn't do git/review work itself. The exceptions are the read-only Phase 0 probes (`git worktree list`, `git -C ... branch --show-current`, `git -C ... cat-file -t`), the bounded Phase 1 path listing (a redirect into `paths.txt`, a `wc -l` count and ranged reads) and the redirect-only patch writes (`diff.patch`, `diff-{focus}.patch`). Redirect-only writes print nothing
+1. **Orchestration only** - Command spawns agents, doesn't do git/review work itself. The exceptions are the read-only Phase 0 probes (`git worktree list`, `git -C ... branch --show-current`, `git -C ... cat-file -t`, `git -C ... ls-files`), the bounded Phase 1 path listing and the redirect-only patch writes (`diff.patch`, `diff-{focus}.patch`). Redirect-only writes print nothing
 2. **Parallel, not background** - Multiple agents in one message, but `run_in_background=false` so phases complete before proceeding
 3. **Git agent for git work** - All git operations go through Git agent, except the exceptions named in Principle 1; redirect-only writes print nothing
 4. **Honest reporting** - Display agent outputs directly
