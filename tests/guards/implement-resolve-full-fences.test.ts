@@ -3,14 +3,15 @@
  *
  * `/implement` and `/resolve` read `GATE_LEVEL` and apply the rows of a level reference at `standard` and `lean`.
  * At `full` they read no reference and run as written. This file holds the claim that a change to either command
- * leaves every fenced `Agent(` spawn as it was: the sha256 of each such fence, in both builds of both commands,
- * pinned at the commit the gate-level work started from. A fence that is added, removed or edited by one character
- * fails here, and the failure names the file, the phase heading and the agent type.
+ * leaves every fenced `Agent(` spawn as it was: the sha256 of each such fence, in both builds of both commands, as
+ * last pinned. A fence that is added, removed or edited by one character fails here, and the failure names the file,
+ * the phase heading and the agent type.
  *
  * Scope: fenced spawns only. A spawn written in prose is not covered.
  *
- * A change that edits a fence on purpose repins only that fence: run the repin case, read the printed rows and
- * paste only the rows that changed into `PINNED_FENCES`. The case prints the table and writes no file.
+ * A change that edits a fence on purpose repins only that fence: run the repin case and apply what it prints to
+ * `PINNED_FENCES`. It prints only the rows that changed or were added, to paste over the row with the same heading,
+ * agent type and ordinal, and a `gone` line for each pinned row that has no fence, to delete. It writes no file.
  */
 
 import { createHash } from 'crypto'
@@ -38,7 +39,7 @@ const FILES: ReadonlyArray<{ readonly label: string; readonly text: string }> = 
   ]
 })()
 
-/** The fence table of the four compiled files at the start of the gate-level work, from the parser below. */
+/** The fence table of the four compiled files as last pinned, from the parser below. */
 const PINNED_FENCES: Readonly<Record<string, readonly PinnedFence[]>> = {
   'dist/commands/implement.md': [
     ['Phase 1: Setup', 'Git', 1, '033d80248ba18ac74cff5a6ced902d0d04ebdf935379ae0ca3af85a89082354d'],
@@ -114,7 +115,7 @@ interface SpawnFence {
 
 /** The agent types that a fence spawns, in order: `Agent(subagent_type="X"` and `agentType: "X"`, each confirmed by `isAgentBlock`. */
 function spawnTypes(fence: string): string[] {
-  const found = [...fence.matchAll(/Agent\(subagent_type="([^"]+)"/g)].map(m => m[1])
+  const found = [...fence.matchAll(/Agent\(subagent_type="([^"]+)"|agentType:\s*"([^"]+)"/g)].map(m => m[1] ?? m[2])
   return found.filter(type => isAgentBlock(fence, type))
 }
 
@@ -158,32 +159,77 @@ const keyOf = (heading: string, agent: string, ordinal: number): string => `${he
 
 const where = (heading: string, agent: string, ordinal: number): string => `"${heading}", ${agent} #${ordinal}`
 
-/** What differs between the pinned table and the fences of one compiled file. Each defect ends with the repin command. */
-export function collectFenceDigestDefects(label: string, text: string, pinned: readonly PinnedFence[]): string[] {
-  const out: string[] = []
+/** One way that a compiled file differs from its pinned table. */
+type FenceChange =
+  | { readonly kind: 'changed'; readonly fence: SpawnFence; readonly expected: string; readonly actual: string }
+  | { readonly kind: 'added'; readonly fence: SpawnFence; readonly actual: string }
+  | { readonly kind: 'gone'; readonly pinned: PinnedFence }
+
+/** What differs between the pinned table and the fences of one compiled file: the fences that changed or were added, in order, then the pinned rows that have no fence. The one diff, for the guard and the repin printer. */
+function diffFences(text: string, pinned: readonly PinnedFence[]): { unreadable: string[]; changes: FenceChange[] } {
   const { fences, unreadable } = collectSpawnFences(text)
-  const end = ` Repin: ${REPIN_COMMAND}`
-  for (const line of unreadable) out.push(`${label}: ${line}.${end}`)
   const want = new Map(pinned.map(([heading, agent, ordinal, digest]) => [keyOf(heading, agent, ordinal), digest] as const))
   const got = new Set(fences.map(f => keyOf(f.heading, f.agent, f.ordinal)))
-  for (const f of fences) {
-    const expected = want.get(keyOf(f.heading, f.agent, f.ordinal))
-    const actual = sha256(f.fence)
-    if (expected === undefined) out.push(`${label}: a fence was added under ${where(f.heading, f.agent, f.ordinal)}: ${actual}.${end}`)
-    else if (expected !== actual) out.push(`${label}: the fence under ${where(f.heading, f.agent, f.ordinal)} changed: expected ${expected}, actual ${actual}.${end}`)
+  const changes: FenceChange[] = []
+  for (const fence of fences) {
+    const expected = want.get(keyOf(fence.heading, fence.agent, fence.ordinal))
+    const actual = sha256(fence.fence)
+    if (expected === undefined) changes.push({ kind: 'added', fence, actual })
+    else if (expected !== actual) changes.push({ kind: 'changed', fence, expected, actual })
   }
-  for (const [heading, agent, ordinal] of pinned) {
-    if (!got.has(keyOf(heading, agent, ordinal))) out.push(`${label}: the fence under ${where(heading, agent, ordinal)} is gone.${end}`)
+  for (const row of pinned) {
+    if (!got.has(keyOf(row[0], row[1], row[2]))) changes.push({ kind: 'gone', pinned: row })
   }
-  return out
+  return { unreadable, changes }
 }
 
-/** The current table, as rows to paste into `PINNED_FENCES`. */
-function currentTable(): string {
-  return FILES.map(({ label, text }) => {
-    const rows = collectSpawnFences(text).fences.map(f => `    ['${f.heading}', '${f.agent}', ${f.ordinal}, '${sha256(f.fence)}'],`)
-    return [`  '${label}': [`, ...rows, '  ],'].join('\n')
-  }).join('\n')
+/** What differs between the pinned table and the fences of one compiled file. Each defect ends with the repin command. */
+export function collectFenceDigestDefects(label: string, text: string, pinned: readonly PinnedFence[]): string[] {
+  const { unreadable, changes } = diffFences(text, pinned)
+  const end = ` Repin: ${REPIN_COMMAND}`
+  return [
+    ...unreadable.map(line => `${label}: ${line}.${end}`),
+    ...changes.map(change => {
+      switch (change.kind) {
+        case 'added': return `${label}: a fence was added under ${where(change.fence.heading, change.fence.agent, change.fence.ordinal)}: ${change.actual}.${end}`
+        case 'changed': return `${label}: the fence under ${where(change.fence.heading, change.fence.agent, change.fence.ordinal)} changed: expected ${change.expected}, actual ${change.actual}.${end}`
+        case 'gone': return `${label}: the fence under ${where(change.pinned[0], change.pinned[1], change.pinned[2])} is gone.${end}`
+      }
+    }),
+  ]
+}
+
+/** A row key as source text. The heading is quoted with `JSON.stringify`, so an apostrophe in it stays valid TypeScript. */
+const keyText = (heading: string, agent: string, ordinal: number): string => `${JSON.stringify(heading)}, '${agent}', ${ordinal}`
+
+/**
+ * The repin lines of one compiled file: a row to paste for each fence that changed or was added, and a `gone` line for
+ * each pinned row that has no fence. A fence that holds `Agent(` with no type has no row, so it gets an `unreadable`
+ * line. A table that is current gives no line.
+ */
+export function collectRepinLines(text: string, pinned: readonly PinnedFence[]): string[] {
+  const { unreadable, changes } = diffFences(text, pinned)
+  return [
+    ...unreadable.map(line => `    // unreadable: ${line}`),
+    ...changes.map(change => {
+      switch (change.kind) {
+        case 'added':
+        case 'changed': return `    [${keyText(change.fence.heading, change.fence.agent, change.fence.ordinal)}, '${change.actual}'],`
+        case 'gone': return `    // gone: [${keyText(change.pinned[0], change.pinned[1], change.pinned[2])}]`
+      }
+    }),
+  ]
+}
+
+const REPIN_CURRENT = 'PINNED_FENCES is current: no fence changed, was added or is gone.'
+
+/** The repin report for the compiled files: the lines of each file that differs under its label, or one line when every file is current. */
+export function repinReport(files: ReadonlyArray<{ readonly label: string; readonly text: string }>, pinned: Readonly<Record<string, readonly PinnedFence[]>>): string {
+  const parts = files.flatMap(({ label, text }) => {
+    const lines = collectRepinLines(text, pinned[label])
+    return lines.length === 0 ? [] : [`  '${label}':`, ...lines]
+  })
+  return parts.length === 0 ? REPIN_CURRENT : parts.join('\n')
 }
 
 /** Replace `from` with `to` in `text`, failing the test when the seed did not land. */
@@ -218,7 +264,7 @@ describe('every fenced Agent( spawn equals its pinned sha256 (AC-2)', () => {
     expect(collectFenceDigestDefects(label, text, PINNED_FENCES[label])).toEqual([])
   })
 
-  it('known-bad probes: one edited character, one removed fence and a level line added to a Validate fence are each reported with the heading and the agent type', () => {
+  it('known-bad probes: one edited character, one removed fence, a level line added to a Validate fence, an added fence and an agentType spawn are each reported with the heading and the agent type', () => {
     const [implement, resolve] = FILES
     const polish = fenceOf(implement.text, 'Phase 3: Polish', 'Polish')
     const edited = collectFenceDigestDefects(implement.label, seed(implement.text, polish, polish.replace('Polish recently', 'Polish recentlx')), PINNED_FENCES[implement.label])
@@ -242,6 +288,10 @@ describe('every fenced Agent( spawn equals its pinned sha256 (AC-2)', () => {
     const untyped = collectFenceDigestDefects(implement.label, seed(implement.text, '### Phase 12: Report\n', '### Phase 12: Report\n\n```\nAgent():\n"x"\n```\n'), PINNED_FENCES[implement.label])
     expect(untyped).toHaveLength(1)
     expect(untyped[0]).toMatch(/a fence under "Phase 12: Report" holds "Agent\(" with no subagent_type\./)
+
+    const agentTyped = collectFenceDigestDefects(implement.label, seed(implement.text, '### Phase 12: Report\n', '### Phase 12: Report\n\n```\nagentType: "Polish"\n"x"\n```\n'), PINNED_FENCES[implement.label])
+    expect(agentTyped, 'a fence that spawns with agentType is pinned too').toHaveLength(1)
+    expect(agentTyped[0]).toMatch(/a fence was added under "Phase 12: Report", Polish #1: [0-9a-f]{64}\./)
   })
 
   it('a heading inside a fence is text, and a spawn in prose is not a fence', () => {
@@ -250,7 +300,29 @@ describe('every fenced Agent( spawn equals its pinned sha256 (AC-2)', () => {
     expect(fences.map(f => [f.heading, f.agent, f.ordinal])).toEqual([['Phase 1: A', 'Git', 1]])
   })
 
-  it.skipIf(process.env.REPIN_FENCES !== '1')('prints the current fence table for PINNED_FENCES (set REPIN_FENCES=1; writes no file)', () => {
-    console.log(`\nPINNED_FENCES = {\n${currentTable()}\n}\n`)
+  it('known-bad probes: the repin report holds only the rows that changed or were added and a gone line for each removed row', () => {
+    const [implement, resolve] = FILES
+    expect(repinReport(FILES, PINNED_FENCES), 'every pin is current').toBe(REPIN_CURRENT)
+
+    const polish = fenceOf(implement.text, 'Phase 3: Polish', 'Polish')
+    const edited = polish.replace('Polish recently', 'Polish recentlx')
+    expect(collectRepinLines(seed(implement.text, polish, edited), PINNED_FENCES[implement.label])).toEqual([`    ["Phase 3: Polish", 'Polish', 1, '${sha256(edited)}'],`])
+
+    const harden = fenceOf(implement.text, 'Phase 4: Self-Review', 'Harden')
+    expect(collectRepinLines(seed(implement.text, harden, ''), PINNED_FENCES[implement.label])).toEqual([`    // gone: ["Phase 4: Self-Review", 'Harden', 1]`])
+
+    const quoted = collectRepinLines(seed(implement.text, '### Phase 12: Report\n', '### Phase 12: Don\'t Report\n\n```\nAgent(subagent_type="Polish"):\n"x"\n```\n'), PINNED_FENCES[implement.label])
+    expect(quoted, 'one row').toHaveLength(1)
+    expect(quoted[0]).toMatch(/^ {4}\["Phase 12: Don't Report", 'Polish', 1, '[0-9a-f]{64}'\],$/)
+
+    const untyped = collectRepinLines(seed(implement.text, '### Phase 12: Report\n', '### Phase 12: Report\n\n```\nAgent():\n"x"\n```\n'), PINNED_FENCES[implement.label])
+    expect(untyped).toEqual(['    // unreadable: a fence under "Phase 12: Report" holds "Agent(" with no subagent_type'])
+
+    const report = repinReport([{ label: implement.label, text: seed(implement.text, polish, edited) }, { label: resolve.label, text: resolve.text }], PINNED_FENCES)
+    expect(report).toBe(`  '${implement.label}':\n    ["Phase 3: Polish", 'Polish', 1, '${sha256(edited)}'],`)
+  })
+
+  it.skipIf(process.env.REPIN_FENCES !== '1')('prints the rows to repin in PINNED_FENCES (set REPIN_FENCES=1; writes no file)', () => {
+    console.log(`\n${repinReport(FILES, PINNED_FENCES)}\n`)
   })
 })
