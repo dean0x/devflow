@@ -1,4 +1,4 @@
-// tests/decisions/learning-ops.test.ts
+// tests/decisions/curation-ops.test.ts
 //
 // The entry ops the Curate agent runs through json-helper.cjs, tested through
 // their store functions and their stdout grammar.
@@ -37,22 +37,22 @@ import {
   daysAgoDate,
   git,
   initGitRepo,
-  learningPaths,
+  curationPaths,
   makeV1LedgerRow,
   makeV1LogRow,
   makeV2LedgerRow,
   makeV2LogRow,
-  requireLearningStore,
+  requireCurationStore,
   runJsonHelper,
-  seedLearningTree,
+  seedCurationTree,
   snapshotTree,
   type Citation,
   type HelperRun,
-  type LearningTreePaths,
+  type CurationTreePaths,
   type Row,
-} from './learning-fixtures.js';
+} from './curation-fixtures.js';
 
-const store = requireLearningStore();
+const store = requireCurationStore();
 
 const { renderDecisionsFile } = createRequire(import.meta.url)(
   path.join(ROOT, 'src/assets/scripts/hooks/lib/render-decisions.cjs'),
@@ -117,9 +117,9 @@ function linesOf(file: string): string[] {
   return fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean) : [];
 }
 
-/** A rendered file under the learning directory. */
-function rendered(paths: LearningTreePaths, name: 'decisions.md' | 'pitfalls.md' | 'index.md'): string {
-  return fs.readFileSync(path.join(paths.learningDir, name), 'utf8');
+/** A rendered file under the curation directory. */
+function rendered(paths: CurationTreePaths, name: 'decisions.md' | 'pitfalls.md' | 'index.md'): string {
+  return fs.readFileSync(path.join(paths.curationDir, name), 'utf8');
 }
 
 // ---------------------------------------------------------------------------
@@ -128,11 +128,11 @@ function rendered(paths: LearningTreePaths, name: 'decisions.md' | 'pitfalls.md'
 
 describe('putObservation: create', () => {
   let dir: string;
-  let paths: LearningTreePaths;
+  let paths: CurationTreePaths;
 
   beforeEach(() => {
-    dir = makeTmp('learning-ops-create-');
-    paths = seedLearningTree(dir);
+    dir = makeTmp('curation-ops-create-');
+    paths = seedCurationTree(dir);
   });
 
   afterEach(() => {
@@ -154,7 +154,7 @@ describe('putObservation: create', () => {
   });
 
   it('appends to the log and leaves the rows already there byte for byte', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow(), makeV1LogRow()] });
+    seedCurationTree(dir, { log: [makeV2LogRow(), makeV1LogRow()] });
     const before = linesOf(paths.log);
     put(dir, 'create', putInput({ id: 'obs_new_one' }));
     const after = linesOf(paths.log);
@@ -163,7 +163,7 @@ describe('putObservation: create', () => {
   });
 
   it('refuses an id the log already holds and writes nothing', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow()] });
+    seedCurationTree(dir, { log: [makeV2LogRow()] });
     const before = snapshotTree(dir);
     expect(put(dir, 'create', putInput())).toMatchObject({
       ok: false,
@@ -174,7 +174,7 @@ describe('putObservation: create', () => {
 
   it('repairs an active entry that has no log row: it projects the new row onto the entry and re-renders', () => {
     const prior = makeV1LedgerRow({ id: 'obs_orphan' });
-    seedLearningTree(dir, { ledger: [prior] });
+    seedCurationTree(dir, { ledger: [prior] });
     const input = putInput({ id: 'obs_orphan', type: 'pitfall', title: 'Edit hook sources, not their installed copies' });
 
     expect(put(dir, 'create', input)).toEqual({
@@ -189,7 +189,7 @@ describe('putObservation: create', () => {
   });
 
   it('refuses a type the entry it would re-project does not have, and writes nothing', () => {
-    seedLearningTree(dir, { ledger: [makeV1LedgerRow({ id: 'obs_orphan' })] });
+    seedCurationTree(dir, { ledger: [makeV1LedgerRow({ id: 'obs_orphan' })] });
     const before = snapshotTree(dir);
     expect(put(dir, 'create', putInput({ id: 'obs_orphan', type: 'decision' }))).toEqual({
       ok: false,
@@ -202,7 +202,7 @@ describe('putObservation: create', () => {
   });
 
   it('refuses an entry whose anchor does not name the type it holds, and writes nothing', () => {
-    seedLearningTree(dir, { ledger: [makeV1LedgerRow({ id: 'obs_orphan', anchor_id: 'ADR-004' })] });
+    seedCurationTree(dir, { ledger: [makeV1LedgerRow({ id: 'obs_orphan', anchor_id: 'ADR-004' })] });
     const before = snapshotTree(dir);
     expect(put(dir, 'create', putInput({ id: 'obs_orphan', type: 'pitfall' }))).toMatchObject({
       ok: false,
@@ -218,11 +218,11 @@ describe('putObservation: create', () => {
 
 describe('putObservation: update (D-PUT-NOT-MERGE)', () => {
   let dir: string;
-  let paths: LearningTreePaths;
+  let paths: CurationTreePaths;
 
   beforeEach(() => {
-    dir = makeTmp('learning-ops-update-');
-    paths = seedLearningTree(dir);
+    dir = makeTmp('curation-ops-update-');
+    paths = seedCurationTree(dir);
   });
 
   afterEach(() => {
@@ -230,7 +230,7 @@ describe('putObservation: update (D-PUT-NOT-MERGE)', () => {
   });
 
   it('replaces the whole content and never merges: a key the new content leaves out is gone', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow({ observations: 4 })] });
+    seedCurationTree(dir, { log: [makeV2LogRow({ observations: 4 })] });
     const input = putInput({ rule: 'Every store function returns a Result; none throws.', evidence: undefined });
     expect(put(dir, 'update', input)).toEqual({
       ok: true,
@@ -250,7 +250,7 @@ describe('putObservation: update (D-PUT-NOT-MERGE)', () => {
       amendments: [{ date: '2026-06-01', note: 'kept by the history and the backup, not by the live row' }],
       evidence: Array.from({ length: 7 }, (_, i) => `quote number ${i}`),
     });
-    seedLearningTree(dir, { log: [v1] });
+    seedCurationTree(dir, { log: [v1] });
     const input = putInput({ id: 'obs_legacy_one', type: 'pitfall' });
 
     expect(put(dir, 'update', input)).toMatchObject({ ok: true, value: { outcome: 'updated', observations: 4 } });
@@ -260,7 +260,7 @@ describe('putObservation: update (D-PUT-NOT-MERGE)', () => {
   });
 
   it('refuses a type change and writes nothing', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow()] });
+    seedCurationTree(dir, { log: [makeV2LogRow()] });
     const before = snapshotTree(dir);
     expect(put(dir, 'update', putInput({ type: 'pitfall' }))).toMatchObject({
       ok: false,
@@ -270,7 +270,7 @@ describe('putObservation: update (D-PUT-NOT-MERGE)', () => {
   });
 
   it('refuses an id the log does not hold', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow()] });
+    seedCurationTree(dir, { log: [makeV2LogRow()] });
     expect(put(dir, 'update', putInput({ id: 'obs_absent' }))).toMatchObject({
       ok: false,
       error: { kind: 'invalid-input', problems: [{ field: 'id', message: 'is not in the log' }] },
@@ -278,7 +278,7 @@ describe('putObservation: update (D-PUT-NOT-MERGE)', () => {
   });
 
   it('answers unchanged and writes nothing when the content is what the log already holds', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow({ observations: 2 })], ledger: [makeV2LedgerRow()] });
+    seedCurationTree(dir, { log: [makeV2LogRow({ observations: 2 })], ledger: [makeV2LedgerRow()] });
     const before = snapshotTree(dir);
     expect(put(dir, 'update', putInput())).toEqual({
       ok: true,
@@ -289,7 +289,7 @@ describe('putObservation: update (D-PUT-NOT-MERGE)', () => {
 
   it('converts a v1 row even when its content keys already match', () => {
     const input = putInput({ id: 'obs_legacy_one', type: 'pitfall' });
-    seedLearningTree(dir, { log: [{ ...makeV1LogRow(), ...input }] });
+    seedCurationTree(dir, { log: [{ ...makeV1LogRow(), ...input }] });
     expect(put(dir, 'update', input)).toMatchObject({ ok: true, value: { outcome: 'updated' } });
     expect(rowsOf(paths.log)[0].schema).toBe(2);
   });
@@ -301,11 +301,11 @@ describe('putObservation: update (D-PUT-NOT-MERGE)', () => {
 
 describe('putObservation: reinforce', () => {
   let dir: string;
-  let paths: LearningTreePaths;
+  let paths: CurationTreePaths;
 
   beforeEach(() => {
-    dir = makeTmp('learning-ops-reinforce-');
-    paths = seedLearningTree(dir);
+    dir = makeTmp('curation-ops-reinforce-');
+    paths = seedCurationTree(dir);
   });
 
   afterEach(() => {
@@ -313,7 +313,7 @@ describe('putObservation: reinforce', () => {
   });
 
   it('adds one observation and moves last_seen to now, touching nothing else', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow({ observations: 2 })], ledger: [makeV2LedgerRow()] });
+    seedCurationTree(dir, { log: [makeV2LogRow({ observations: 2 })], ledger: [makeV2LedgerRow()] });
     const ledgerBefore = fs.readFileSync(paths.ledger, 'utf8');
 
     expect(put(dir, 'reinforce', { id: 'obs_store_one' })).toEqual({
@@ -322,13 +322,13 @@ describe('putObservation: reinforce', () => {
     });
     expect(rowsOf(paths.log)).toEqual([makeV2LogRow({ observations: 3, last_seen: NOW_ISO })]);
     expect(fs.readFileSync(paths.ledger, 'utf8')).toBe(ledgerBefore);
-    // No history, no render: the learning directory holds just the two files it held.
-    expect(fs.readdirSync(paths.learningDir).sort()).toEqual(['decisions-ledger.jsonl', 'decisions-log.jsonl']);
+    // No history, no render: the curation directory holds just the two files it held.
+    expect(fs.readdirSync(paths.curationDir).sort()).toEqual(['decisions-ledger.jsonl', 'decisions-log.jsonl']);
   });
 
   it('works on a v1 row: its legacy counters convert and every other key stays', () => {
     const v1 = makeV1LogRow({ observations: undefined, first_seen: undefined, count: 4, created: '2026-05-01T00:00:00.000Z' });
-    seedLearningTree(dir, { log: [v1] });
+    seedCurationTree(dir, { log: [v1] });
 
     expect(put(dir, 'reinforce', { id: 'obs_legacy_one' })).toMatchObject({
       ok: true,
@@ -341,7 +341,7 @@ describe('putObservation: reinforce', () => {
   });
 
   it('takes the id alone', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow()] });
+    seedCurationTree(dir, { log: [makeV2LogRow()] });
     expect(put(dir, 'reinforce', { id: 'obs_store_one', title: 'A new title' })).toMatchObject({
       ok: false,
       error: { kind: 'invalid-input', problems: [{ field: 'title' }] },
@@ -355,11 +355,11 @@ describe('putObservation: reinforce', () => {
 
 describe('putObservation: the entries an observation backs (D-PUT-REPROJECTS)', () => {
   let dir: string;
-  let paths: LearningTreePaths;
+  let paths: CurationTreePaths;
 
   beforeEach(() => {
-    dir = makeTmp('learning-ops-reproject-');
-    paths = seedLearningTree(dir);
+    dir = makeTmp('curation-ops-reproject-');
+    paths = seedCurationTree(dir);
   });
 
   afterEach(() => {
@@ -372,7 +372,7 @@ describe('putObservation: the entries an observation backs (D-PUT-REPROJECTS)', 
       anchor_id: 'ADR-002', decisions_status: 'Superseded', superseded_by: 'ADR-001', title: 'The wording it was retired with',
     });
     const unrelated = makeV1LedgerRow();
-    seedLearningTree(dir, { log: [makeV2LogRow(), makeV1LogRow()], ledger: [active, retired, unrelated] });
+    seedCurationTree(dir, { log: [makeV2LogRow(), makeV1LogRow()], ledger: [active, retired, unrelated] });
     const [, retiredLine, unrelatedLine] = linesOf(paths.ledger);
 
     const input = putInput({ title: 'Store functions return a Result and never throw', rule: 'A sharper rule.' });
@@ -396,7 +396,7 @@ describe('putObservation: the entries an observation backs (D-PUT-REPROJECTS)', 
   it('re-projects every active entry when two carry the same id', () => {
     const first = makeV1LedgerRow({ anchor_id: 'PF-002' });
     const second = makeV1LedgerRow({ anchor_id: 'PF-007', date: '2026-08-01' });
-    seedLearningTree(dir, { log: [makeV1LogRow()], ledger: [second, first] });
+    seedCurationTree(dir, { log: [makeV1LogRow()], ledger: [second, first] });
     const input = putInput({ id: 'obs_legacy_one', type: 'pitfall' });
 
     expect(put(dir, 'update', input)).toMatchObject({ ok: true, value: { reprojected: ['PF-002', 'PF-007'] } });
@@ -405,7 +405,7 @@ describe('putObservation: the entries an observation backs (D-PUT-REPROJECTS)', 
   });
 
   it('rewriting a v1 entry through its observation makes it a v2 entry with its anchor, status and date', () => {
-    seedLearningTree(dir, { log: [makeV1LogRow()], ledger: [makeV1LedgerRow({ date: '2026-06-15' })] });
+    seedCurationTree(dir, { log: [makeV1LogRow()], ledger: [makeV1LedgerRow({ date: '2026-06-15' })] });
     const input = putInput({ id: 'obs_legacy_one', type: 'pitfall', title: 'Edit hook sources, not their installed copies' });
 
     expect(put(dir, 'update', input)).toMatchObject({ ok: true, value: { reprojected: ['PF-001'] } });
@@ -426,13 +426,13 @@ describe('putObservation: the entries an observation backs (D-PUT-REPROJECTS)', 
   });
 
   it('gives an active entry with no status its type\'s active status', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow({ decisions_status: undefined })] });
+    seedCurationTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow({ decisions_status: undefined })] });
     expect(put(dir, 'update', putInput({ rule: 'A sharper rule.' })).ok).toBe(true);
     expect(rowsOf(paths.ledger)[0].decisions_status).toBe('Accepted');
   });
 
   it('refuses with restore first, writing nothing, when every entry carrying the id is inactive', () => {
-    seedLearningTree(dir, {
+    seedCurationTree(dir, {
       log: [makeV2LogRow()],
       ledger: [makeV2LedgerRow({ decisions_status: 'Retired', status_note: 'a one-off' })],
     });
@@ -445,7 +445,7 @@ describe('putObservation: the entries an observation backs (D-PUT-REPROJECTS)', 
     expect(put(dir, 'reinforce', { id: 'obs_store_one' })).toEqual(restoreFirst);
     expect(snapshotTree(dir)).toEqual(before);
 
-    seedLearningTree(dir, { log: [] });
+    seedCurationTree(dir, { log: [] });
     const beforeCreate = snapshotTree(dir);
     expect(put(dir, 'create', putInput())).toEqual(restoreFirst);
     expect(snapshotTree(dir)).toEqual(beforeCreate);
@@ -458,11 +458,11 @@ describe('putObservation: the entries an observation backs (D-PUT-REPROJECTS)', 
 
 describe('putObservation: content history (D-CONTENT-HISTORY)', () => {
   let dir: string;
-  let paths: LearningTreePaths;
+  let paths: CurationTreePaths;
 
   beforeEach(() => {
-    dir = makeTmp('learning-ops-history-');
-    paths = seedLearningTree(dir);
+    dir = makeTmp('curation-ops-history-');
+    paths = seedCurationTree(dir);
   });
 
   afterEach(() => {
@@ -472,13 +472,13 @@ describe('putObservation: content history (D-CONTENT-HISTORY)', () => {
   it('records the prior log row and ledger rows before an update', () => {
     const ledgerRow = makeV2LedgerRow();
     const logRow = makeV2LogRow();
-    seedLearningTree(dir, { log: [logRow], ledger: [ledgerRow] });
+    seedCurationTree(dir, { log: [logRow], ledger: [ledgerRow] });
     put(dir, 'update', putInput({ rule: 'A sharper rule.' }));
     expect(store.historyVersions(dir, 'obs_store_one')).toEqual([{ id: 'obs_store_one', at: NOW_ISO, ledger: [ledgerRow], log: logRow }]);
   });
 
   it('keeps the last three prior versions of an entry, oldest first', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()] });
+    seedCurationTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()] });
     const priorLogs: Row[] = [];
     const priorLedgers: Row[][] = [];
     ['Rule one.', 'Rule two.', 'Rule three.', 'Rule four.'].forEach((rule, i) => {
@@ -502,7 +502,7 @@ describe('putObservation: content history (D-CONTENT-HISTORY)', () => {
       details: 'area: hooks; issue: a detail only the ledger row holds',
       amendments: [{ date: '2026-06-02', note: 'a correction only the ledger row holds' }],
     });
-    seedLearningTree(dir, { log: [v1Log], ledger: [v1Ledger] });
+    seedCurationTree(dir, { log: [v1Log], ledger: [v1Ledger] });
 
     expect(put(dir, 'update', putInput({ id: 'obs_legacy_one', type: 'pitfall' }))).toMatchObject({
       ok: true, value: { outcome: 'updated', reprojected: ['PF-001'] },
@@ -510,19 +510,19 @@ describe('putObservation: content history (D-CONTENT-HISTORY)', () => {
     expect(rowsOf(paths.log)[0]).not.toHaveProperty('amendments');
     expect(rowsOf(paths.ledger)[0]).not.toHaveProperty('details');
     expect(store.historyVersions(dir, 'obs_legacy_one')).toEqual([{ id: 'obs_legacy_one', at: NOW_ISO, ledger: [v1Ledger], log: v1Log }]);
-    expect(rowsOf(path.join(paths.learningDir, 'decisions-log.pre-v2.jsonl'))).toEqual([v1Log]);
-    expect(rowsOf(path.join(paths.learningDir, 'decisions-ledger.pre-v2.jsonl'))).toEqual([v1Ledger]);
+    expect(rowsOf(path.join(paths.curationDir, 'decisions-log.pre-v2.jsonl'))).toEqual([v1Log]);
+    expect(rowsOf(path.join(paths.curationDir, 'decisions-ledger.pre-v2.jsonl'))).toEqual([v1Ledger]);
   });
 
   it('records the entries a create repairs, with no prior log row', () => {
     const prior = makeV1LedgerRow({ id: 'obs_orphan' });
-    seedLearningTree(dir, { ledger: [prior] });
+    seedCurationTree(dir, { ledger: [prior] });
     put(dir, 'create', putInput({ id: 'obs_orphan', type: 'pitfall' }));
     expect(store.historyVersions(dir, 'obs_orphan')).toEqual([{ id: 'obs_orphan', at: NOW_ISO, ledger: [prior], log: null }]);
   });
 
   it('records nothing for a reinforce, an unchanged update or a create no entry carries', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()] });
+    seedCurationTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()] });
     expect(put(dir, 'reinforce', { id: 'obs_store_one' })).toMatchObject({ ok: true, value: { outcome: 'reinforced' } });
     expect(put(dir, 'update', putInput())).toMatchObject({ ok: true, value: { outcome: 'unchanged' } });
     expect(put(dir, 'create', putInput({ id: 'obs_new_one' }))).toMatchObject({ ok: true, value: { outcome: 'created' } });
@@ -536,11 +536,11 @@ describe('putObservation: content history (D-CONTENT-HISTORY)', () => {
 
 describe('putObservation: the pre-v2 backup (D-V1-BACKUP-ONCE)', () => {
   let dir: string;
-  let paths: LearningTreePaths;
+  let paths: CurationTreePaths;
 
   beforeEach(() => {
-    dir = makeTmp('learning-ops-backup-');
-    paths = seedLearningTree(dir);
+    dir = makeTmp('curation-ops-backup-');
+    paths = seedCurationTree(dir);
   });
 
   afterEach(() => {
@@ -548,14 +548,14 @@ describe('putObservation: the pre-v2 backup (D-V1-BACKUP-ONCE)', () => {
   });
 
   it('the first write to a tree holding v1 rows copies the log, the ledger and the archive aside, once', () => {
-    seedLearningTree(dir, {
+    seedCurationTree(dir, {
       log: [makeV1LogRow()],
       ledger: [makeV1LedgerRow()],
       archive: [makeV1LogRow({ id: 'obs_archived' })],
     });
     const originals = [paths.log, paths.ledger, paths.archive].map(file => fs.readFileSync(file, 'utf8'));
     const copies = ['decisions-log.pre-v2.jsonl', 'decisions-ledger.pre-v2.jsonl', 'decisions-log.archive.pre-v2.jsonl']
-      .map(name => path.join(paths.learningDir, name));
+      .map(name => path.join(paths.curationDir, name));
 
     expect(put(dir, 'reinforce', { id: 'obs_legacy_one' }).ok).toBe(true);
     expect(copies.map(file => fs.readFileSync(file, 'utf8'))).toEqual(originals);
@@ -567,9 +567,9 @@ describe('putObservation: the pre-v2 backup (D-V1-BACKUP-ONCE)', () => {
   });
 
   it('a tree holding only v2 rows gets no copy', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()] });
+    seedCurationTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()] });
     expect(put(dir, 'update', putInput({ rule: 'A sharper rule.' })).ok).toBe(true);
-    expect(fs.readdirSync(paths.learningDir).filter(name => name.includes('pre-v2'))).toEqual([]);
+    expect(fs.readdirSync(paths.curationDir).filter(name => name.includes('pre-v2'))).toEqual([]);
   });
 });
 
@@ -579,11 +579,11 @@ describe('putObservation: the pre-v2 backup (D-V1-BACKUP-ONCE)', () => {
 
 describe('putObservation: malformed lines (D-QUARANTINE-MALFORMED)', () => {
   let dir: string;
-  let paths: LearningTreePaths;
+  let paths: CurationTreePaths;
 
   beforeEach(() => {
-    dir = makeTmp('learning-ops-malformed-');
-    paths = seedLearningTree(dir);
+    dir = makeTmp('curation-ops-malformed-');
+    paths = seedCurationTree(dir);
   });
 
   afterEach(() => {
@@ -591,34 +591,34 @@ describe('putObservation: malformed lines (D-QUARANTINE-MALFORMED)', () => {
   });
 
   it('quarantines the log\'s malformed lines before it rewrites the log', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow()] });
+    seedCurationTree(dir, { log: [makeV2LogRow()] });
     fs.appendFileSync(paths.log, '{"id": "obs_cut_off"\n');
     put(dir, 'create', putInput({ id: 'obs_new_one' }));
     expect(linesOf(paths.log).map(line => JSON.parse(line).id)).toEqual(['obs_store_one', 'obs_new_one']);
-    expect(rowsOf(path.join(paths.learningDir, 'decisions-log.rejected.jsonl'))).toEqual([
+    expect(rowsOf(path.join(paths.curationDir, 'decisions-log.rejected.jsonl'))).toEqual([
       { rejected_at: NOW_ISO, source: 'decisions-log.jsonl', line: 2, text: '{"id": "obs_cut_off"' },
     ]);
   });
 
   it('quarantines the ledger\'s malformed lines before it re-projects into the ledger', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()] });
+    seedCurationTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()] });
     fs.appendFileSync(paths.ledger, 'not json\n');
     put(dir, 'update', putInput({ rule: 'A sharper rule.' }));
     expect(linesOf(paths.ledger)).toHaveLength(1);
-    expect(rowsOf(path.join(paths.learningDir, 'decisions-ledger.rejected.jsonl')).map(r => r.text)).toEqual(['not json']);
+    expect(rowsOf(path.join(paths.curationDir, 'decisions-ledger.rejected.jsonl')).map(r => r.text)).toEqual(['not json']);
   });
 
   it('leaves the ledger and its malformed lines alone when it does not rewrite the ledger', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow({ id: 'obs_other' })] });
+    seedCurationTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow({ id: 'obs_other' })] });
     fs.appendFileSync(paths.ledger, 'not json\n');
     const ledgerBefore = fs.readFileSync(paths.ledger, 'utf8');
     expect(put(dir, 'reinforce', { id: 'obs_store_one' }).ok).toBe(true);
     expect(fs.readFileSync(paths.ledger, 'utf8')).toBe(ledgerBefore);
-    expect(fs.existsSync(path.join(paths.learningDir, 'decisions-ledger.rejected.jsonl'))).toBe(false);
+    expect(fs.existsSync(path.join(paths.curationDir, 'decisions-ledger.rejected.jsonl'))).toBe(false);
   });
 
   it('refuses an id the log holds twice, and writes nothing', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow(), makeV2LogRow({ rule: 'A second copy of the same observation.' })] });
+    seedCurationTree(dir, { log: [makeV2LogRow(), makeV2LogRow({ rule: 'A second copy of the same observation.' })] });
     const before = snapshotTree(dir);
     expect(put(dir, 'reinforce', { id: 'obs_store_one' })).toEqual({
       ok: false,
@@ -634,11 +634,11 @@ describe('putObservation: malformed lines (D-QUARANTINE-MALFORMED)', () => {
 
 describe('put-observation op', { timeout: 30_000 }, () => {
   let dir: string;
-  let paths: LearningTreePaths;
+  let paths: CurationTreePaths;
 
   beforeEach(() => {
-    dir = makeTmp('learning-ops-put-');
-    paths = seedLearningTree(dir);
+    dir = makeTmp('curation-ops-put-');
+    paths = seedCurationTree(dir);
   });
 
   afterEach(() => {
@@ -646,7 +646,7 @@ describe('put-observation op', { timeout: 30_000 }, () => {
   });
 
   it('prints created, updated, unchanged and reinforced, then each anchor it re-projected', () => {
-    seedLearningTree(dir, { ledger: [makeV2LedgerRow()] });
+    seedCurationTree(dir, { ledger: [makeV2LedgerRow()] });
     expect(putOp(dir, 'create', putInput())).toEqual({ code: 0, stdout: 'created obs_store_one\nreprojected ADR-001\n', stderr: '' });
     expect(putOp(dir, 'update', putInput({ rule: 'A sharper rule.' }))).toEqual({
       code: 0, stdout: 'updated obs_store_one\nreprojected ADR-001\n', stderr: '',
@@ -658,10 +658,10 @@ describe('put-observation op', { timeout: 30_000 }, () => {
 
   it('refuses every violation of an input in one error and writes nothing', () => {
     initGitRepo(dir, { 'src/app.ts': 'export {};\n' });
-    seedLearningTree(dir, { log: [makeV1LogRow()], ledger: [makeV2LedgerRow()] });
+    seedCurationTree(dir, { log: [makeV1LogRow()], ledger: [makeV2LedgerRow()] });
     // A writer would back this v1 tree up and quarantine this line: neither may happen.
     fs.appendFileSync(paths.log, 'not json\n');
-    const before = snapshotTree(paths.learningDir);
+    const before = snapshotTree(paths.curationDir);
 
     const run = putOp(dir, 'create', {
       id: 'obs_bad_input',
@@ -689,12 +689,12 @@ describe('put-observation op', { timeout: 30_000 }, () => {
         '',
       ].join('\n'),
     });
-    expect(snapshotTree(paths.learningDir)).toEqual(before);
+    expect(snapshotTree(paths.curationDir)).toEqual(before);
   });
 
   it('names a ledger entry, an issue and a file and line in one title as three problems of one refusal, and writes nothing', () => {
-    seedLearningTree(dir, { ledger: [makeV2LedgerRow()] });
-    const before = snapshotTree(paths.learningDir);
+    seedCurationTree(dir, { ledger: [makeV2LedgerRow()] });
+    const before = snapshotTree(paths.curationDir);
     expect(putOp(dir, 'create', putInput({ id: 'obs_three_refs', title: 'Follow ADR-001 until #12 lands at store.cjs:88' }))).toEqual({
       code: 1,
       stdout: '',
@@ -706,11 +706,11 @@ describe('put-observation op', { timeout: 30_000 }, () => {
         '',
       ].join('\n'),
     });
-    expect(snapshotTree(paths.learningDir)).toEqual(before);
+    expect(snapshotTree(paths.curationDir)).toEqual(before);
   });
 
   it('accepts a key from another tracker, an anchor number the ledger does not hold and area scopes', () => {
-    seedLearningTree(dir, { ledger: [makeV2LedgerRow({ id: 'obs_other' })] });
+    seedCurationTree(dir, { ledger: [makeV2LedgerRow({ id: 'obs_other' })] });
     expect(putOp(dir, 'create', putInput({
       id: 'obs_cross_ref',
       title: 'Settled upstream under PROJ-123',
@@ -727,7 +727,7 @@ describe('put-observation op', { timeout: 30_000 }, () => {
   });
 
   it('names a one-problem refusal in the singular', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow()] });
+    seedCurationTree(dir, { log: [makeV2LogRow()] });
     expect(putOp(dir, 'reinforce', { id: 'obs_store_one', title: 'A new title' }).stderr).toBe(
       'put-observation: the input has 1 problem; nothing was written\n'
       + '  title: is not taken by a reinforce, which carries the id alone\n',
@@ -735,7 +735,7 @@ describe('put-observation op', { timeout: 30_000 }, () => {
   });
 
   it('shows an unknown key that is not a plain name as JSON, on one line', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow()] });
+    seedCurationTree(dir, { log: [makeV2LogRow()] });
     expect(putOp(dir, 'reinforce', { id: 'obs_store_one', 'two\nlines': 1 }).stderr).toBe(
       'put-observation: the input has 1 problem; nothing was written\n'
       + '  "two\\nlines": is not a known key\n',
@@ -743,7 +743,7 @@ describe('put-observation op', { timeout: 30_000 }, () => {
   });
 
   it('names restore first for an observation whose entries are all inactive', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow({ decisions_status: 'Retired' })] });
+    seedCurationTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow({ decisions_status: 'Retired' })] });
     expect(putOp(dir, 'reinforce', { id: 'obs_store_one' })).toEqual({
       code: 1,
       stdout: '',
@@ -752,7 +752,7 @@ describe('put-observation op', { timeout: 30_000 }, () => {
   });
 
   it('takes exactly one of --create, --update and --reinforce, and nothing else', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow()] });
+    seedCurationTree(dir, { log: [makeV2LogRow()] });
     const before = snapshotTree(dir);
     for (const args of [
       ['put-observation'],
@@ -772,7 +772,7 @@ describe('put-observation op', { timeout: 30_000 }, () => {
   });
 
   it('refuses stdin that is not exactly one JSON object', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow()] });
+    seedCurationTree(dir, { log: [makeV2LogRow()] });
     const before = snapshotTree(dir);
     for (const stdin of ['', 'not json', '[{"id":"obs_store_one"}]', '"obs_store_one"', 'null', '{"id":"obs_store_one"} {"id":"obs_other"}']) {
       expect(runJsonHelper(dir, ['put-observation', '--reinforce'], stdin), JSON.stringify(stdin)).toEqual({
@@ -783,18 +783,18 @@ describe('put-observation op', { timeout: 30_000 }, () => {
   });
 
   it('refuses stdin over 64 KiB without parsing it', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow()] });
+    seedCurationTree(dir, { log: [makeV2LogRow()] });
     const stdinFile = path.join(dir, 'oversized.json');
     fs.writeFileSync(stdinFile, JSON.stringify({ id: 'obs_store_one', padding: 'x'.repeat(70_000) }));
-    const before = snapshotTree(paths.learningDir);
+    const before = snapshotTree(paths.curationDir);
     expect(runWithStdinFile(dir, ['put-observation', '--reinforce'], stdinFile)).toEqual({
       code: 1, stdout: '', stderr: 'put-observation: stdin holds more than 65536 bytes; it must hold one JSON object\n',
     });
-    expect(snapshotTree(paths.learningDir)).toEqual(before);
+    expect(snapshotTree(paths.curationDir)).toEqual(before);
   });
 
   it('takes stdin at exactly 64 KiB', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow()] });
+    seedCurationTree(dir, { log: [makeV2LogRow()] });
     const body = JSON.stringify({ id: 'obs_store_one' });
     const stdinFile = path.join(dir, 'at-bound.json');
     fs.writeFileSync(stdinFile, body + ' '.repeat(65_536 - body.length));
@@ -804,7 +804,7 @@ describe('put-observation op', { timeout: 30_000 }, () => {
   });
 
   it('accepts the trailing newline a heredoc leaves', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow()] });
+    seedCurationTree(dir, { log: [makeV2LogRow()] });
     expect(runJsonHelper(dir, ['put-observation', '--reinforce'], '{"id": "obs_store_one"}\n')).toEqual({
       code: 0, stdout: 'reinforced obs_store_one 2\n', stderr: '',
     });
@@ -860,11 +860,11 @@ const LISTING: readonly string[] = [
 
 describe('list', { timeout: 30_000 }, () => {
   let dir: string;
-  let paths: LearningTreePaths;
+  let paths: CurationTreePaths;
 
   beforeEach(() => {
-    dir = makeTmp('learning-ops-list-');
-    paths = learningPaths(dir);
+    dir = makeTmp('curation-ops-list-');
+    paths = curationPaths(dir);
   });
 
   afterEach(() => {
@@ -872,12 +872,12 @@ describe('list', { timeout: 30_000 }, () => {
   });
 
   it('prints the active, inactive, observation and integrity sections', () => {
-    seedLearningTree(dir, { ledger: LIST_LEDGER, log: LIST_LOG });
+    seedCurationTree(dir, { ledger: LIST_LEDGER, log: LIST_LOG });
     expect(runJsonHelper(dir, ['list'])).toEqual({ code: 0, stdout: `${LISTING.join('\n')}\n`, stderr: '' });
   });
 
   it('adds a MALFORMED section only when lines were skipped, and writes nothing', () => {
-    seedLearningTree(dir, { ledger: LIST_LEDGER, log: LIST_LOG });
+    seedCurationTree(dir, { ledger: LIST_LEDGER, log: LIST_LOG });
     // A writer would back this v1 tree up and quarantine these lines: list may do neither.
     fs.appendFileSync(paths.ledger, 'not json\n');
     fs.appendFileSync(paths.log, '[1]\n{"cut":\n');
@@ -892,28 +892,28 @@ describe('list', { timeout: 30_000 }, () => {
 
   it('flags an entry whose scope matches no file git tracks', () => {
     initGitRepo(dir, { 'src/app.ts': 'export {};\n' });
-    seedLearningTree(dir, {
+    seedCurationTree(dir, {
       ledger: [makeV2LedgerRow({ scope: ['src/**', 'gone/**'] })],
       log: [makeV2LogRow({ scope: ['src/**', 'gone/**'] })],
     });
     expect(runJsonHelper(dir, ['list']).stdout).toContain('\nINTEGRITY 1\n  ADR-001 obs_store_one scope-matches-nothing\n');
   });
 
-  it('prints every section empty for an empty learning tree', () => {
-    seedLearningTree(dir);
+  it('prints every section empty for an empty curation tree', () => {
+    seedCurationTree(dir);
     expect(runJsonHelper(dir, ['list'])).toEqual({
       code: 0, stdout: 'ACTIVE 0\nINACTIVE 0\nOBSERVATIONS 0\nINTEGRITY 0\n', stderr: '',
     });
   });
 
   it('takes no argument', () => {
-    seedLearningTree(dir);
+    seedCurationTree(dir);
     expect(runJsonHelper(dir, ['list', 'ADR-001'])).toEqual({
       code: 1, stdout: '', stderr: 'list: usage: list (no arguments; run from the project root)\n',
     });
   });
 
-  it('refuses without a learning directory and creates nothing', () => {
+  it('refuses without a curation directory and creates nothing', () => {
     expect(runJsonHelper(dir, ['list'])).toEqual({
       code: 1, stdout: '', stderr: `list: no .devflow/curation/ under ${dir} — run from the project root\n`,
     });
@@ -945,11 +945,11 @@ describe('formatListing', () => {
 
 describe('show', { timeout: 30_000 }, () => {
   let dir: string;
-  let paths: LearningTreePaths;
+  let paths: CurationTreePaths;
 
   beforeEach(() => {
-    dir = makeTmp('learning-ops-show-');
-    paths = learningPaths(dir);
+    dir = makeTmp('curation-ops-show-');
+    paths = curationPaths(dir);
   });
 
   afterEach(() => {
@@ -959,7 +959,7 @@ describe('show', { timeout: 30_000 }, () => {
   it('prints the entry as pretty JSON: its ledger rows, its log row, its history and its flags', () => {
     const ledgerRow = makeV2LedgerRow({ rule: 'An older rule kept only in the ledger.' });
     const logRow = makeV2LogRow();
-    seedLearningTree(dir, { ledger: [ledgerRow], log: [logRow] });
+    seedCurationTree(dir, { ledger: [ledgerRow], log: [logRow] });
     store.appendHistory(dir, { id: 'obs_store_one', ledger: [], log: logRow }, { now: FIXTURE_NOW });
 
     expect(runJsonHelper(dir, ['show', 'ADR-001'])).toEqual({
@@ -976,14 +976,14 @@ describe('show', { timeout: 30_000 }, () => {
   });
 
   it('finds an entry by its observation id, with every entry that carries it', () => {
-    seedLearningTree(dir, { ledger: [makeV1LedgerRow({ anchor_id: 'PF-009' }), makeV1LedgerRow()], log: [makeV1LogRow()] });
+    seedCurationTree(dir, { ledger: [makeV1LedgerRow({ anchor_id: 'PF-009' }), makeV1LedgerRow()], log: [makeV1LogRow()] });
     const shown = JSON.parse(runJsonHelper(dir, ['show', 'obs_legacy_one']).stdout) as { key: string; ledger: Row[] };
     expect(shown.key).toBe('obs_legacy_one');
     expect(shown.ledger.map(row => row.anchor_id)).toEqual(['PF-001', 'PF-009']);
   });
 
   it('adds the skipped-line counts only when lines were skipped, and writes nothing', () => {
-    seedLearningTree(dir, { ledger: [makeV1LedgerRow()], log: [makeV1LogRow()] });
+    seedCurationTree(dir, { ledger: [makeV1LedgerRow()], log: [makeV1LogRow()] });
     expect(JSON.parse(runJsonHelper(dir, ['show', 'PF-001']).stdout)).not.toHaveProperty('malformed');
 
     // A writer would back this v1 tree up and quarantine this line: show may do neither.
@@ -996,7 +996,7 @@ describe('show', { timeout: 30_000 }, () => {
   });
 
   it('exits 1 for an entry neither file holds, and says when skipped lines might hold it', () => {
-    seedLearningTree(dir, { ledger: [makeV2LedgerRow()], log: [makeV2LogRow()] });
+    seedCurationTree(dir, { ledger: [makeV2LedgerRow()], log: [makeV2LogRow()] });
     expect(runJsonHelper(dir, ['show', 'ADR-777'])).toEqual({
       code: 1, stdout: '', stderr: "show: no entry 'ADR-777' in the ledger or the log\n",
     });
@@ -1009,7 +1009,7 @@ describe('show', { timeout: 30_000 }, () => {
   });
 
   it('takes exactly one anchor or observation id', () => {
-    seedLearningTree(dir, { ledger: [makeV2LedgerRow()], log: [makeV2LogRow()] });
+    seedCurationTree(dir, { ledger: [makeV2LedgerRow()], log: [makeV2LogRow()] });
     for (const args of [['show'], ['show', 'ADR-001', 'ADR-001'], ['show', '../etc/passwd'], ['show', 'adr-001'], ['show', '--all']]) {
       expect(runJsonHelper(dir, args), args.join(' ')).toEqual({
         code: 1, stdout: '', stderr: 'show: usage: show <anchor|obs_id> (run from the project root)\n',
@@ -1017,7 +1017,7 @@ describe('show', { timeout: 30_000 }, () => {
     }
   });
 
-  it('refuses without a learning directory and creates nothing', () => {
+  it('refuses without a curation directory and creates nothing', () => {
     expect(runJsonHelper(dir, ['show', 'ADR-001'])).toEqual({
       code: 1, stdout: '', stderr: `show: no .devflow/curation/ under ${dir} — run from the project root\n`,
     });
@@ -1031,11 +1031,11 @@ describe('show', { timeout: 30_000 }, () => {
 
 describe('claim-due (D-DUE-ORDER)', { timeout: 30_000 }, () => {
   let dir: string;
-  let paths: LearningTreePaths;
+  let paths: CurationTreePaths;
 
   beforeEach(() => {
-    dir = makeTmp('learning-ops-due-');
-    paths = learningPaths(dir);
+    dir = makeTmp('curation-ops-due-');
+    paths = curationPaths(dir);
   });
 
   afterEach(() => {
@@ -1068,7 +1068,7 @@ describe('claim-due (D-DUE-ORDER)', { timeout: 30_000 }, () => {
       makeV2LedgerRow({ anchor_id: 'ADR-007', id: 'obs_fresh', last_verified: daysAgoDate(1, now) }),
     ];
     const log = ['obs_old40', 'obs_legacy_a', 'obs_never', 'obs_dup', 'obs_fresh'].map(id => makeV2LogRow({ id }));
-    seedLearningTree(dir, { ledger, log });
+    seedCurationTree(dir, { ledger, log });
 
     expect(runJsonHelper(dir, ['claim-due'])).toEqual({
       code: 0,
@@ -1086,7 +1086,7 @@ describe('claim-due (D-DUE-ORDER)', { timeout: 30_000 }, () => {
   });
 
   it('names origin/HEAD when the repository has one, and none outside a repository', () => {
-    seedLearningTree(dir, { ledger: [] });
+    seedCurationTree(dir, { ledger: [] });
     expect(runJsonHelper(dir, ['claim-due'])).toEqual({ code: 0, stdout: 'ref none\ndue none\n', stderr: '' });
 
     const fetched = initGitRepo(dir, { 'a.txt': 'one\n' });
@@ -1100,7 +1100,7 @@ describe('claim-due (D-DUE-ORDER)', { timeout: 30_000 }, () => {
     const due = makeV1LedgerRow();
     const fresh = makeV2LedgerRow({ last_verified: daysAgoDate(1) });
     const retired = makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_retired', decisions_status: 'Retired' });
-    seedLearningTree(dir, { ledger: [fresh, due, retired], log: [makeV2LogRow(), makeV1LogRow()] });
+    seedCurationTree(dir, { ledger: [fresh, due, retired], log: [makeV2LogRow(), makeV1LogRow()] });
     const [freshLine, , retiredLine] = linesOf(paths.ledger);
 
     expect(store.claimDue(dir, { now: FIXTURE_NOW })).toEqual({
@@ -1113,7 +1113,7 @@ describe('claim-due (D-DUE-ORDER)', { timeout: 30_000 }, () => {
   });
 
   it('skips an entry handed out in the last 24 hours and hands it out again after', () => {
-    seedLearningTree(dir, { ledger: [makeV1LedgerRow()], log: [makeV1LogRow()] });
+    seedCurationTree(dir, { ledger: [makeV1LedgerRow()], log: [makeV1LogRow()] });
     expect(dueAt(FIXTURE_NOW)).toEqual(['PF-001']);
     expect(dueAt(FIXTURE_NOW + 23 * HOUR_MS)).toEqual([]);
     expect(dueAt(FIXTURE_NOW + 25 * HOUR_MS)).toEqual(['PF-001']);
@@ -1121,7 +1121,7 @@ describe('claim-due (D-DUE-ORDER)', { timeout: 30_000 }, () => {
 
   it('hands out at most five entries, and the next run within the day hands out the rest', () => {
     const ledger = Array.from({ length: 7 }, (_, i) => makeV1LedgerRow({ anchor_id: `PF-01${i}`, id: `obs_legacy_${i}` }));
-    seedLearningTree(dir, { ledger, log: ledger.map(row => makeV1LogRow({ id: row.id })) });
+    seedCurationTree(dir, { ledger, log: ledger.map(row => makeV1LogRow({ id: row.id })) });
 
     const first = runJsonHelper(dir, ['claim-due']).stdout.split('\n').filter(Boolean).slice(1);
     expect(first.map(line => line.split(' ')[0])).toEqual(['PF-010', 'PF-011', 'PF-012', 'PF-013', 'PF-014']);
@@ -1133,15 +1133,15 @@ describe('claim-due (D-DUE-ORDER)', { timeout: 30_000 }, () => {
   it('stops before the byte budget, and always hands out at least one entry', () => {
     const big = (anchor: string, id: string, ruleBytes: number): Row =>
       makeV2LedgerRow({ anchor_id: anchor, id, last_verified: undefined, rule: 'r'.repeat(ruleBytes) });
-    seedLearningTree(dir, { ledger: [big('ADR-001', 'obs_one', 25_000), big('ADR-002', 'obs_two', 25_000), big('ADR-003', 'obs_three', 25_000)] });
+    seedCurationTree(dir, { ledger: [big('ADR-001', 'obs_one', 25_000), big('ADR-002', 'obs_two', 25_000), big('ADR-003', 'obs_three', 25_000)] });
     expect(dueAt(FIXTURE_NOW)).toEqual(['ADR-001', 'ADR-002']);
 
-    seedLearningTree(dir, { ledger: [big('ADR-004', 'obs_huge', 70_000)] });
+    seedCurationTree(dir, { ledger: [big('ADR-004', 'obs_huge', 70_000)] });
     expect(dueAt(FIXTURE_NOW)).toEqual(['ADR-004']);
   });
 
   it('puts an entry whose scope matches no tracked file ahead of every other reason', () => {
-    seedLearningTree(dir, {
+    seedCurationTree(dir, {
       ledger: [makeV1LedgerRow(), makeV2LedgerRow({ last_verified: daysAgoDate(1), scope: ['gone/**'] })],
       log: [makeV1LogRow(), makeV2LogRow({ scope: ['gone/**'] })],
     });
@@ -1153,7 +1153,7 @@ describe('claim-due (D-DUE-ORDER)', { timeout: 30_000 }, () => {
   });
 
   it('prints due none and writes nothing when no entry is due', () => {
-    seedLearningTree(dir, { ledger: [makeV2LedgerRow({ last_verified: daysAgoDate(1, Date.now()) })], log: [makeV2LogRow()] });
+    seedCurationTree(dir, { ledger: [makeV2LedgerRow({ last_verified: daysAgoDate(1, Date.now()) })], log: [makeV2LogRow()] });
     // A writer would quarantine this line: with nothing to hand out, claim-due may not.
     fs.appendFileSync(paths.ledger, 'not json\n');
     const before = snapshotTree(dir);
@@ -1162,18 +1162,18 @@ describe('claim-due (D-DUE-ORDER)', { timeout: 30_000 }, () => {
   });
 
   it('copies a v1 tree aside and quarantines the ledger\'s malformed lines before it stamps', () => {
-    seedLearningTree(dir, { ledger: [makeV1LedgerRow()], log: [makeV1LogRow()] });
+    seedCurationTree(dir, { ledger: [makeV1LedgerRow()], log: [makeV1LogRow()] });
     fs.appendFileSync(paths.ledger, 'not json\n');
     const ledgerBefore = fs.readFileSync(paths.ledger, 'utf8');
 
     expect(dueAt(FIXTURE_NOW)).toEqual(['PF-001']);
-    expect(fs.readFileSync(path.join(paths.learningDir, 'decisions-ledger.pre-v2.jsonl'), 'utf8')).toBe(ledgerBefore);
-    expect(rowsOf(path.join(paths.learningDir, 'decisions-ledger.rejected.jsonl')).map(row => row.text)).toEqual(['not json']);
+    expect(fs.readFileSync(path.join(paths.curationDir, 'decisions-ledger.pre-v2.jsonl'), 'utf8')).toBe(ledgerBefore);
+    expect(rowsOf(path.join(paths.curationDir, 'decisions-ledger.rejected.jsonl')).map(row => row.text)).toEqual(['not json']);
     expect(linesOf(paths.ledger)).toHaveLength(1);
   });
 
   it('takes no argument', () => {
-    seedLearningTree(dir);
+    seedCurationTree(dir);
     expect(runJsonHelper(dir, ['claim-due', '--all'])).toEqual({
       code: 1, stdout: '', stderr: 'claim-due: usage: claim-due (no arguments; run from the project root)\n',
     });
@@ -1198,11 +1198,11 @@ const MINTED_KEYS: readonly string[] = [
 
 describe('assignAnchor (D-LEDGER-REGISTRY)', () => {
   let dir: string;
-  let paths: LearningTreePaths;
+  let paths: CurationTreePaths;
 
   beforeEach(() => {
-    dir = makeTmp('learning-ops-assign-');
-    paths = seedLearningTree(dir);
+    dir = makeTmp('curation-ops-assign-');
+    paths = seedCurationTree(dir);
   });
 
   afterEach(() => {
@@ -1216,7 +1216,7 @@ describe('assignAnchor (D-LEDGER-REGISTRY)', () => {
 
   it('mints the number after the highest of its type, inactive entries included, and projects the v2 row stamped today', () => {
     const logRow = makeV2LogRow({ id: 'obs_new_one' });
-    seedLearningTree(dir, {
+    seedCurationTree(dir, {
       log: [logRow],
       ledger: [
         makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_beta' }),
@@ -1245,7 +1245,7 @@ describe('assignAnchor (D-LEDGER-REGISTRY)', () => {
   });
 
   it('numbers pitfalls on their own sequence and gives them the Active status', () => {
-    seedLearningTree(dir, {
+    seedCurationTree(dir, {
       log: [makeV2LogRow({ id: 'obs_lesson', type: 'pitfall' })],
       ledger: [makeV2LedgerRow({ anchor_id: 'ADR-010', id: 'obs_beta' })],
     });
@@ -1254,7 +1254,7 @@ describe('assignAnchor (D-LEDGER-REGISTRY)', () => {
   });
 
   it('never writes the log, and renders the new entry', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow(), makeV2LogRow({ id: 'obs_other' })] });
+    seedCurationTree(dir, { log: [makeV2LogRow(), makeV2LogRow({ id: 'obs_other' })] });
     const logBefore = fs.readFileSync(paths.log, 'utf8');
 
     expect(assign('decision', 'obs_store_one').ok).toBe(true);
@@ -1267,7 +1267,7 @@ describe('assignAnchor (D-LEDGER-REGISTRY)', () => {
 
   it('refuses an observation any ledger row carries, active or retired, and writes nothing', () => {
     for (const carrier of [makeV2LedgerRow(), makeV2LedgerRow({ anchor_id: 'ADR-003', decisions_status: 'Retired' })]) {
-      seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [carrier] });
+      seedCurationTree(dir, { log: [makeV2LogRow()], ledger: [carrier] });
       const before = snapshotTree(dir);
       expect(assign('decision', 'obs_store_one')).toEqual({
         ok: false,
@@ -1281,19 +1281,19 @@ describe('assignAnchor (D-LEDGER-REGISTRY)', () => {
   });
 
   it('promoting one observation twice mints one number: the second call finds the first in the ledger', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow()] });
+    seedCurationTree(dir, { log: [makeV2LogRow()] });
     expect(assign('decision', 'obs_store_one')).toMatchObject({ ok: true, value: { anchor_id: 'ADR-001' } });
     expect(assign('decision', 'obs_store_one')).toMatchObject({ ok: false, error: { kind: 'already-promoted' } });
     expect(rowsOf(paths.ledger).map(row => row.anchor_id)).toEqual(['ADR-001']);
   });
 
   it('an anchor copied onto the log row does not make it promoted: only a ledger row does', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow({ anchor_id: 'ADR-007' })] });
+    seedCurationTree(dir, { log: [makeV2LogRow({ anchor_id: 'ADR-007' })] });
     expect(assign('decision', 'obs_store_one')).toEqual({ ok: true, value: { anchor_id: 'ADR-001', skipped: [] } });
   });
 
   it('refuses a v1 observation, a type the observation does not have, an id the log lacks and one it holds twice, writing nothing', () => {
-    seedLearningTree(dir, {
+    seedCurationTree(dir, {
       log: [makeV1LogRow(), makeV2LogRow(), makeV2LogRow({ id: 'obs_twice' }), makeV2LogRow({ id: 'obs_twice', rule: 'A second copy.' })],
     });
     const before = snapshotTree(dir);
@@ -1318,21 +1318,21 @@ describe('assignAnchor (D-LEDGER-REGISTRY)', () => {
   });
 
   it('copies a v1 tree aside and quarantines the ledger\'s malformed lines before it appends', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [makeV1LedgerRow()] });
+    seedCurationTree(dir, { log: [makeV2LogRow()], ledger: [makeV1LedgerRow()] });
     fs.appendFileSync(paths.ledger, 'not json\n');
     const ledgerBefore = fs.readFileSync(paths.ledger, 'utf8');
 
     expect(assign('decision', 'obs_store_one')).toMatchObject({ ok: true, value: { anchor_id: 'ADR-001' } });
-    expect(fs.readFileSync(path.join(paths.learningDir, 'decisions-ledger.pre-v2.jsonl'), 'utf8')).toBe(ledgerBefore);
-    expect(rowsOf(path.join(paths.learningDir, 'decisions-ledger.rejected.jsonl')).map(row => row.text)).toEqual(['not json']);
+    expect(fs.readFileSync(path.join(paths.curationDir, 'decisions-ledger.pre-v2.jsonl'), 'utf8')).toBe(ledgerBefore);
+    expect(rowsOf(path.join(paths.curationDir, 'decisions-ledger.rejected.jsonl')).map(row => row.text)).toEqual(['not json']);
     expect(rowsOf(paths.ledger).map(row => row.anchor_id)).toEqual(['PF-001', 'ADR-001']);
   });
 
-  it('refuses without a learning directory and creates nothing', () => {
-    fs.rmSync(paths.learningDir, { recursive: true });
+  it('refuses without a curation directory and creates nothing', () => {
+    fs.rmSync(paths.curationDir, { recursive: true });
     expect(store.assignAnchor(dir, 'decision', 'obs_store_one', { now: FIXTURE_NOW })).toEqual({
       ok: false,
-      error: { kind: 'no-learning-dir', message: `assign-anchor: no .devflow/curation/ under ${dir} — run from the project root` },
+      error: { kind: 'no-curation-dir', message: `assign-anchor: no .devflow/curation/ under ${dir} — run from the project root` },
     });
     expect(fs.readdirSync(path.join(dir, '.devflow'))).toEqual([]);
   });
@@ -1344,11 +1344,11 @@ describe('assignAnchor (D-LEDGER-REGISTRY)', () => {
 
 describe('assignAnchor: numbers a tracked file cites (D-E4-SKIP)', () => {
   let dir: string;
-  let paths: LearningTreePaths;
+  let paths: CurationTreePaths;
 
   beforeEach(() => {
-    dir = makeTmp('learning-ops-skip-');
-    paths = seedLearningTree(dir, { log: [makeV2LogRow()] });
+    dir = makeTmp('curation-ops-skip-');
+    paths = seedCurationTree(dir, { log: [makeV2LogRow()] });
   });
 
   afterEach(() => {
@@ -1364,7 +1364,7 @@ describe('assignAnchor: numbers a tracked file cites (D-E4-SKIP)', () => {
   }
 
   it('skips each cited number past the highest anchor, in order, and reports where each is cited', () => {
-    seedLearningTree(dir, { ledger: [makeV2LedgerRow({ id: 'obs_beta' })] });
+    seedCurationTree(dir, { ledger: [makeV2LedgerRow({ id: 'obs_beta' })] });
     const cited = new Map([
       ['ADR-001', { file: 'docs/old.md', line: 1 }],
       ['ADR-002', { file: 'docs/design.md', line: 3 }],
@@ -1411,7 +1411,7 @@ describe('collectCitedAnchorIds (D-E4-SKIP)', { timeout: 30_000 }, () => {
   let dir: string;
 
   beforeEach(() => {
-    dir = makeTmp('learning-ops-cited-');
+    dir = makeTmp('curation-ops-cited-');
   });
 
   afterEach(() => {
@@ -1430,7 +1430,7 @@ describe('collectCitedAnchorIds (D-E4-SKIP)', { timeout: 30_000 }, () => {
     ]));
   });
 
-  it('reads what git tracks, outside the learning tree and the vendored and build directories', () => {
+  it('reads what git tracks, outside the curation tree and the vendored and build directories', () => {
     initGitRepo(dir, {
       '.gitignore': 'ignored/\n',
       'ignored/scratch.md': 'ADR-003\n',
@@ -1448,12 +1448,12 @@ describe('collectCitedAnchorIds (D-E4-SKIP)', { timeout: 30_000 }, () => {
     fs.writeFileSync(path.join(dir, 'docs', 'notes.md'), 'Design number ADR-001 was reserved earlier.\n');
     fs.mkdirSync(path.join(dir, 'node_modules', 'pkg'), { recursive: true });
     fs.writeFileSync(path.join(dir, 'node_modules', 'pkg', 'readme.md'), 'ADR-002\n');
-    seedLearningTree(dir, { ledger: [makeV2LedgerRow({ anchor_id: 'ADR-003' })] });
+    seedCurationTree(dir, { ledger: [makeV2LedgerRow({ anchor_id: 'ADR-003' })] });
     expect(store.collectCitedAnchorIds(dir)).toEqual(new Map([['ADR-001', { file: 'docs/notes.md', line: 1 }]]));
   });
 
   it('reads no binary file, no symbolic link and no file over 5 MB', () => {
-    const outside = makeTmp('learning-ops-cited-outside-');
+    const outside = makeTmp('curation-ops-cited-outside-');
     try {
       fs.writeFileSync(path.join(outside, 'target.md'), 'ADR-002\n');
       fs.mkdirSync(path.join(dir, 'docs'));
@@ -1476,11 +1476,11 @@ describe('collectCitedAnchorIds (D-E4-SKIP)', { timeout: 30_000 }, () => {
 describe('assign-anchor op', { timeout: 30_000 }, () => {
   const USAGE = 'assign-anchor: usage: assign-anchor <decision|pitfall> <obs_id> (run from the project root)\n';
   let dir: string;
-  let paths: LearningTreePaths;
+  let paths: CurationTreePaths;
 
   beforeEach(() => {
-    dir = makeTmp('learning-ops-assign-op-');
-    paths = seedLearningTree(dir);
+    dir = makeTmp('curation-ops-assign-op-');
+    paths = seedCurationTree(dir);
   });
 
   afterEach(() => {
@@ -1489,7 +1489,7 @@ describe('assign-anchor op', { timeout: 30_000 }, () => {
 
   it('prints the minted anchor on stdout and each number it skipped on stderr', () => {
     initGitRepo(dir, { 'docs/design.md': 'See ADR-002 for the rationale.\n' });
-    seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow({ id: 'obs_beta' })] });
+    seedCurationTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow({ id: 'obs_beta' })] });
     expect(runJsonHelper(dir, ['assign-anchor', 'decision', 'obs_store_one'])).toEqual({
       code: 0,
       stdout: 'ADR-003\n',
@@ -1498,12 +1498,12 @@ describe('assign-anchor op', { timeout: 30_000 }, () => {
   });
 
   it('prints only the anchor when no number is skipped', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow({ id: 'obs_lesson', type: 'pitfall' })] });
+    seedCurationTree(dir, { log: [makeV2LogRow({ id: 'obs_lesson', type: 'pitfall' })] });
     expect(runJsonHelper(dir, ['assign-anchor', 'pitfall', 'obs_lesson'])).toEqual({ code: 0, stdout: 'PF-001\n', stderr: '' });
   });
 
   it('prints a refusal on stderr and exits 1', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()] });
+    seedCurationTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()] });
     expect(runJsonHelper(dir, ['assign-anchor', 'decision', 'obs_store_one'])).toEqual({
       code: 1,
       stdout: '',
@@ -1512,7 +1512,7 @@ describe('assign-anchor op', { timeout: 30_000 }, () => {
   });
 
   it('takes exactly a type and an observation id: --allow-collision and every other flag are usage errors', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow()] });
+    seedCurationTree(dir, { log: [makeV2LogRow()] });
     const before = snapshotTree(dir);
     for (const args of [
       ['assign-anchor'],
@@ -1542,11 +1542,11 @@ describe('assign-anchor op', { timeout: 30_000 }, () => {
 
 describe('refreshAnchors: re-projection from the log (D-LOG-CONTENT-AUTHORITY)', () => {
   let dir: string;
-  let paths: LearningTreePaths;
+  let paths: CurationTreePaths;
 
   beforeEach(() => {
-    dir = makeTmp('learning-ops-refresh-');
-    paths = seedLearningTree(dir);
+    dir = makeTmp('curation-ops-refresh-');
+    paths = seedCurationTree(dir);
   });
 
   afterEach(() => {
@@ -1564,7 +1564,7 @@ describe('refreshAnchors: re-projection from the log (D-LOG-CONTENT-AUTHORITY)',
       last_attempt: '2026-10-02T09:00:00.000Z',
     });
     const logRow = makeV2LogRow({ rule: 'Store functions return a Result.' });
-    seedLearningTree(dir, { log: [logRow], ledger: [prior] });
+    seedCurationTree(dir, { log: [logRow], ledger: [prior] });
 
     expect(refresh(['ADR-001'])).toEqual({ ok: true, value: { refreshed: [{ anchor_id: 'ADR-001', state: 'reprojected' }] } });
     const [row] = rowsOf(paths.ledger);
@@ -1576,14 +1576,14 @@ describe('refreshAnchors: re-projection from the log (D-LOG-CONTENT-AUTHORITY)',
   });
 
   it('answers unchanged and writes nothing when the entry already holds its log row\'s content', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()] });
+    seedCurationTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()] });
     const before = snapshotTree(dir);
     expect(refresh(['ADR-001'])).toEqual({ ok: true, value: { refreshed: [{ anchor_id: 'ADR-001', state: 'unchanged' }] } });
     expect(snapshotTree(dir)).toEqual(before);
   });
 
   it('re-projects each anchor of a batch once, in the order given', () => {
-    seedLearningTree(dir, {
+    seedCurationTree(dir, {
       log: [makeV2LogRow({ title: 'A sharper title' }), makeV2LogRow({ id: 'obs_lesson', type: 'pitfall', title: 'A sharper lesson' })],
       ledger: [makeV2LedgerRow(), makeV2LedgerRow({ anchor_id: 'PF-002', id: 'obs_lesson', type: 'pitfall', decisions_status: 'Active' })],
     });
@@ -1597,7 +1597,7 @@ describe('refreshAnchors: re-projection from the log (D-LOG-CONTENT-AUTHORITY)',
   });
 
   it('drops a key the projection does not hold, and gives an entry with no status its type\'s active status', () => {
-    seedLearningTree(dir, {
+    seedCurationTree(dir, {
       log: [makeV2LogRow()],
       ledger: [makeV2LedgerRow({ decisions_status: undefined, confidence: 0.9, observations: 4 })],
     });
@@ -1606,7 +1606,7 @@ describe('refreshAnchors: re-projection from the log (D-LOG-CONTENT-AUTHORITY)',
   });
 
   it('refuses v1, inactive and absent entries, all or nothing, listing every problem', () => {
-    seedLearningTree(dir, {
+    seedCurationTree(dir, {
       log: [makeV2LogRow({ title: 'A sharper title' }), makeV1LogRow()],
       ledger: [
         makeV2LedgerRow(),
@@ -1636,7 +1636,7 @@ describe('refreshAnchors: re-projection from the log (D-LOG-CONTENT-AUTHORITY)',
   });
 
   it('refuses an entry whose log row is missing, doubled, v1 or of the other type, writing nothing', () => {
-    seedLearningTree(dir, {
+    seedCurationTree(dir, {
       log: [
         makeV2LogRow({ id: 'obs_twice' }),
         makeV2LogRow({ id: 'obs_twice', rule: 'A second copy.' }),
@@ -1664,27 +1664,27 @@ describe('refreshAnchors: re-projection from the log (D-LOG-CONTENT-AUTHORITY)',
   });
 
   it('refuses an anchor two ledger rows hold', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow(), makeV2LedgerRow({ id: 'obs_other' })] });
+    seedCurationTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow(), makeV2LedgerRow({ id: 'obs_other' })] });
     const result = refresh(['ADR-001']);
     expect(result.ok === false && result.error.problems).toEqual([{ anchor_id: 'ADR-001', message: 'held by 2 ledger rows' }]);
   });
 
   it('copies a v1 tree aside and quarantines the ledger\'s malformed lines before it rewrites the ledger', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow({ title: 'A sharper title' })], ledger: [makeV2LedgerRow(), makeV1LedgerRow()] });
+    seedCurationTree(dir, { log: [makeV2LogRow({ title: 'A sharper title' })], ledger: [makeV2LedgerRow(), makeV1LedgerRow()] });
     fs.appendFileSync(paths.ledger, 'not json\n');
     const ledgerBefore = fs.readFileSync(paths.ledger, 'utf8');
 
     expect(refresh(['ADR-001']).ok).toBe(true);
-    expect(fs.readFileSync(path.join(paths.learningDir, 'decisions-ledger.pre-v2.jsonl'), 'utf8')).toBe(ledgerBefore);
-    expect(rowsOf(path.join(paths.learningDir, 'decisions-ledger.rejected.jsonl')).map(row => row.text)).toEqual(['not json']);
+    expect(fs.readFileSync(path.join(paths.curationDir, 'decisions-ledger.pre-v2.jsonl'), 'utf8')).toBe(ledgerBefore);
+    expect(rowsOf(path.join(paths.curationDir, 'decisions-ledger.rejected.jsonl')).map(row => row.text)).toEqual(['not json']);
     expect(linesOf(paths.ledger)).toHaveLength(2);
   });
 
-  it('refuses without a learning directory and creates nothing', () => {
-    fs.rmSync(paths.learningDir, { recursive: true });
+  it('refuses without a curation directory and creates nothing', () => {
+    fs.rmSync(paths.curationDir, { recursive: true });
     expect(refresh(['ADR-001'])).toEqual({
       ok: false,
-      error: { kind: 'no-learning-dir', message: `refresh-anchor: no .devflow/curation/ under ${dir} — run from the project root` },
+      error: { kind: 'no-curation-dir', message: `refresh-anchor: no .devflow/curation/ under ${dir} — run from the project root` },
     });
     expect(fs.readdirSync(path.join(dir, '.devflow'))).toEqual([]);
   });
@@ -1696,11 +1696,11 @@ describe('refreshAnchors: re-projection from the log (D-LOG-CONTENT-AUTHORITY)',
 
 describe('refreshAnchors --verified', () => {
   let dir: string;
-  let paths: LearningTreePaths;
+  let paths: CurationTreePaths;
 
   beforeEach(() => {
-    dir = makeTmp('learning-ops-verified-');
-    paths = seedLearningTree(dir);
+    dir = makeTmp('curation-ops-verified-');
+    paths = seedCurationTree(dir);
   });
 
   afterEach(() => {
@@ -1714,7 +1714,7 @@ describe('refreshAnchors --verified', () => {
 
   it('stamps last_verified with today and changes nothing else, not even content the log has moved past', () => {
     const prior = makeV2LedgerRow({ rule: 'A rule the log has since sharpened.', last_attempt: '2026-10-02T09:00:00.000Z' });
-    seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [prior] });
+    seedCurationTree(dir, { log: [makeV2LogRow()], ledger: [prior] });
     const logBefore = fs.readFileSync(paths.log, 'utf8');
 
     expect(verify(['ADR-001'])).toEqual({ ok: true, value: { refreshed: [{ anchor_id: 'ADR-001', state: 'verified' }] } });
@@ -1727,20 +1727,20 @@ describe('refreshAnchors --verified', () => {
   });
 
   it('puts a first last_verified in its place among the ledger fields, and needs no log row', () => {
-    seedLearningTree(dir, { ledger: [makeV2LedgerRow({ last_verified: undefined, last_attempt: '2026-10-02T09:00:00.000Z' })] });
+    seedCurationTree(dir, { ledger: [makeV2LedgerRow({ last_verified: undefined, last_attempt: '2026-10-02T09:00:00.000Z' })] });
     expect(verify(['ADR-001']).ok).toBe(true);
     expect(Object.keys(rowsOf(paths.ledger)[0]).slice(-3)).toEqual(['date', 'last_verified', 'last_attempt']);
   });
 
   it('writes nothing for an entry already verified today', () => {
-    seedLearningTree(dir, { ledger: [makeV2LedgerRow({ last_verified: TODAY })] });
+    seedCurationTree(dir, { ledger: [makeV2LedgerRow({ last_verified: TODAY })] });
     const before = snapshotTree(dir);
     expect(verify(['ADR-001'])).toEqual({ ok: true, value: { refreshed: [{ anchor_id: 'ADR-001', state: 'verified' }] } });
     expect(snapshotTree(dir)).toEqual(before);
   });
 
   it('refuses v1 and inactive entries, all or nothing', () => {
-    seedLearningTree(dir, {
+    seedCurationTree(dir, {
       ledger: [makeV2LedgerRow(), makeV1LedgerRow(), makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_gone', decisions_status: 'Retired' })],
     });
     const before = snapshotTree(dir);
@@ -1762,8 +1762,8 @@ describe('refresh-anchor op', { timeout: 30_000 }, () => {
   let dir: string;
 
   beforeEach(() => {
-    dir = makeTmp('learning-ops-refresh-op-');
-    seedLearningTree(dir);
+    dir = makeTmp('curation-ops-refresh-op-');
+    seedCurationTree(dir);
   });
 
   afterEach(() => {
@@ -1771,7 +1771,7 @@ describe('refresh-anchor op', { timeout: 30_000 }, () => {
   });
 
   it('prints one line per anchor: reprojected or unchanged, or verified under --verified', () => {
-    seedLearningTree(dir, {
+    seedCurationTree(dir, {
       log: [makeV2LogRow({ title: 'A sharper title' }), makeV2LogRow({ id: 'obs_lesson', type: 'pitfall' })],
       ledger: [makeV2LedgerRow(), makeV2LedgerRow({ anchor_id: 'PF-002', id: 'obs_lesson', type: 'pitfall', decisions_status: 'Active' })],
     });
@@ -1784,7 +1784,7 @@ describe('refresh-anchor op', { timeout: 30_000 }, () => {
   });
 
   it('prints every refused anchor on stderr and exits 1', () => {
-    seedLearningTree(dir, { ledger: [makeV1LedgerRow()] });
+    seedCurationTree(dir, { ledger: [makeV1LedgerRow()] });
     expect(runJsonHelper(dir, ['refresh-anchor', 'PF-001', 'ADR-004'])).toEqual({
       code: 1,
       stdout: '',
@@ -1798,7 +1798,7 @@ describe('refresh-anchor op', { timeout: 30_000 }, () => {
   });
 
   it('takes one or more anchors and --verified at most once, and nothing else', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()] });
+    seedCurationTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()] });
     const before = snapshotTree(dir);
     for (const args of [
       ['refresh-anchor'],
@@ -1821,11 +1821,11 @@ describe('refresh-anchor op', { timeout: 30_000 }, () => {
 
 describe('retireAnchor: Retired and Deprecated take a reason', () => {
   let dir: string;
-  let paths: LearningTreePaths;
+  let paths: CurationTreePaths;
 
   beforeEach(() => {
-    dir = makeTmp('learning-ops-retire-');
-    paths = seedLearningTree(dir);
+    dir = makeTmp('curation-ops-retire-');
+    paths = seedCurationTree(dir);
   });
 
   afterEach(() => {
@@ -1839,7 +1839,7 @@ describe('retireAnchor: Retired and Deprecated take a reason', () => {
 
   it('sets the status, keeps the reason as the note, stamps retired_on today and lists the entry under Inactive', () => {
     const prior = makeV2LedgerRow({ last_attempt: '2026-10-02T09:00:00.000Z' });
-    seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [prior, makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_beta' })] });
+    seedCurationTree(dir, { log: [makeV2LogRow()], ledger: [prior, makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_beta' })] });
 
     expect(retire('ADR-001', 'Retired', { reason: 'A one-off, never seen again' })).toEqual({
       ok: true,
@@ -1855,7 +1855,7 @@ describe('retireAnchor: Retired and Deprecated take a reason', () => {
   });
 
   it('takes a reason for Deprecated the same way', () => {
-    seedLearningTree(dir, { ledger: [makeV2LedgerRow()] });
+    seedCurationTree(dir, { ledger: [makeV2LedgerRow()] });
     expect(retire('ADR-001', 'Deprecated', { reason: 'The store moved to Results everywhere' }).ok).toBe(true);
     expect(rowsOf(paths.ledger)[0]).toMatchObject({
       decisions_status: 'Deprecated', status_note: 'The store moved to Results everywhere', retired_on: TODAY,
@@ -1863,7 +1863,7 @@ describe('retireAnchor: Retired and Deprecated take a reason', () => {
   });
 
   it('gives an entry that holds no status key its status right after anchor_id, where the projection puts it', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow({ decisions_status: undefined })] });
+    seedCurationTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow({ decisions_status: undefined })] });
 
     expect(retire('ADR-001', 'Retired', { reason: 'A one-off' }).ok).toBe(true);
     const [row] = rowsOf(paths.ledger);
@@ -1873,17 +1873,17 @@ describe('retireAnchor: Retired and Deprecated take a reason', () => {
 
   it('retires a v1 entry, its content untouched, after copying a v1 tree aside', () => {
     const prior = makeV1LedgerRow();
-    seedLearningTree(dir, { log: [makeV1LogRow()], ledger: [prior] });
+    seedCurationTree(dir, { log: [makeV1LogRow()], ledger: [prior] });
     const ledgerBefore = fs.readFileSync(paths.ledger, 'utf8');
 
     expect(retire('PF-001', 'Deprecated', { reason: 'The hooks moved' }).ok).toBe(true);
     expect(rowsOf(paths.ledger)).toEqual([{ ...prior, decisions_status: 'Deprecated', status_note: 'The hooks moved', retired_on: TODAY }]);
-    expect(fs.readFileSync(path.join(paths.learningDir, 'decisions-ledger.pre-v2.jsonl'), 'utf8')).toBe(ledgerBefore);
+    expect(fs.readFileSync(path.join(paths.curationDir, 'decisions-ledger.pre-v2.jsonl'), 'utf8')).toBe(ledgerBefore);
     expect(rendered(paths, 'pitfalls.md')).toContain('| PF-001 | Deprecated | The hooks moved |\n');
   });
 
   it('refuses a missing or over-long reason, another status\'s keys and unknown keys, listing every problem and writing nothing', () => {
-    seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()] });
+    seedCurationTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()] });
     const before = snapshotTree(dir);
 
     expect(retire('ADR-001', 'Retired', { reason: 'r'.repeat(121), by: 'ADR-002', colour: 'red' })).toEqual({
@@ -1916,7 +1916,7 @@ describe('retireAnchor: Retired and Deprecated take a reason', () => {
   });
 
   it('refuses an entry the ledger does not hold, and one already inactive, writing nothing', () => {
-    seedLearningTree(dir, {
+    seedCurationTree(dir, {
       ledger: [makeV2LedgerRow({ decisions_status: 'Superseded', superseded_by: 'ADR-002' }), makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_beta' })],
     });
     const before = snapshotTree(dir);
@@ -1929,11 +1929,11 @@ describe('retireAnchor: Retired and Deprecated take a reason', () => {
     expect(snapshotTree(dir)).toEqual(before);
   });
 
-  it('refuses without a learning directory and creates nothing', () => {
-    fs.rmSync(paths.learningDir, { recursive: true });
+  it('refuses without a curation directory and creates nothing', () => {
+    fs.rmSync(paths.curationDir, { recursive: true });
     expect(retire('ADR-001', 'Retired', { reason: 'gone' })).toEqual({
       ok: false,
-      error: { kind: 'no-learning-dir', message: `retire-anchor: no .devflow/curation/ under ${dir} — run from the project root` },
+      error: { kind: 'no-curation-dir', message: `retire-anchor: no .devflow/curation/ under ${dir} — run from the project root` },
     });
     expect(fs.readdirSync(path.join(dir, '.devflow'))).toEqual([]);
   });
@@ -1945,11 +1945,11 @@ describe('retireAnchor: Retired and Deprecated take a reason', () => {
 
 describe('retireAnchor: Superseded takes an active successor', () => {
   let dir: string;
-  let paths: LearningTreePaths;
+  let paths: CurationTreePaths;
 
   beforeEach(() => {
-    dir = makeTmp('learning-ops-supersede-');
-    paths = seedLearningTree(dir);
+    dir = makeTmp('curation-ops-supersede-');
+    paths = seedCurationTree(dir);
   });
 
   afterEach(() => {
@@ -1963,7 +1963,7 @@ describe('retireAnchor: Superseded takes an active successor', () => {
 
   it('points the entry at its successor and re-points every entry it had superseded', () => {
     const successor = makeV2LedgerRow({ anchor_id: 'ADR-003', id: 'obs_gamma' });
-    seedLearningTree(dir, {
+    seedCurationTree(dir, {
       ledger: [
         makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_beta' }),
         successor,
@@ -1987,7 +1987,7 @@ describe('retireAnchor: Superseded takes an active successor', () => {
   });
 
   it('takes a successor of the other type', () => {
-    seedLearningTree(dir, {
+    seedCurationTree(dir, {
       ledger: [makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_beta' }), makeV2LedgerRow({ anchor_id: 'PF-001', id: 'obs_lesson', type: 'pitfall', decisions_status: 'Active' })],
     });
     expect(supersede('ADR-002', { by: 'PF-001' })).toMatchObject({ ok: true, value: { repointed: [] } });
@@ -1995,7 +1995,7 @@ describe('retireAnchor: Superseded takes an active successor', () => {
   });
 
   it('refuses the entry itself, a successor that is not an anchor, and one absent or inactive, writing nothing', () => {
-    seedLearningTree(dir, {
+    seedCurationTree(dir, {
       ledger: [makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_beta' }), makeV2LedgerRow({ anchor_id: 'ADR-003', id: 'obs_gamma', decisions_status: 'Retired' })],
     });
     const before = snapshotTree(dir);
@@ -2031,10 +2031,10 @@ describe('retireAnchor: Encoded takes a path and a quote checked at the verify r
   ].join('\n');
   const QUOTE = 'Every store function returns a Result';
   let dir: string;
-  let paths: LearningTreePaths;
+  let paths: CurationTreePaths;
 
   beforeEach(() => {
-    dir = makeTmp('learning-ops-encoded-');
+    dir = makeTmp('curation-ops-encoded-');
   });
 
   afterEach(() => {
@@ -2044,7 +2044,7 @@ describe('retireAnchor: Encoded takes a path and a quote checked at the verify r
   /** One active entry, in a repository whose one commit holds src/store.ts; answers that commit. */
   function seedRepository(): string {
     const head = initGitRepo(dir, { 'src/store.ts': SOURCE });
-    paths = seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()] });
+    paths = seedCurationTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()] });
     return head;
   }
 
@@ -2097,7 +2097,7 @@ describe('retireAnchor: Encoded takes a path and a quote checked at the verify r
 
   it('refuses a path that is no file at the ref, and a tree with no commit to check, writing nothing', () => {
     const head = seedRepository();
-    const before = snapshotTree(paths.learningDir);
+    const before = snapshotTree(paths.curationDir);
     expect(encode({ at: 'src/missing.ts', quote: QUOTE })).toEqual({
       ok: false,
       error: {
@@ -2107,7 +2107,7 @@ describe('retireAnchor: Encoded takes a path and a quote checked at the verify r
     });
     expect(encode({ at: 'src', quote: QUOTE })).toMatchObject({ ok: false, error: { kind: 'not-at-ref' } });
     expect(encode({ at: 'src/store.ts', quote: 'A sentence the file never held' })).toMatchObject({ ok: false, error: { kind: 'quote-not-found' } });
-    expect(snapshotTree(paths.learningDir)).toEqual(before);
+    expect(snapshotTree(paths.curationDir)).toEqual(before);
 
     expect(store.quoteAtRef(dir, 'src/store.ts', QUOTE, { verifyRef: null })).toEqual({
       ok: false,
@@ -2119,7 +2119,7 @@ describe('retireAnchor: Encoded takes a path and a quote checked at the verify r
   });
 
   it('refuses a malformed path or quote before it asks git, listing every problem', () => {
-    paths = seedLearningTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()] });
+    paths = seedCurationTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()] });
     const before = snapshotTree(dir);
     const problemsOf = (input: unknown) => {
       const result = encode(input);
@@ -2152,11 +2152,11 @@ describe('retireAnchor: Encoded takes a path and a quote checked at the verify r
 
 describe('restoreAnchor', () => {
   let dir: string;
-  let paths: LearningTreePaths;
+  let paths: CurationTreePaths;
 
   beforeEach(() => {
-    dir = makeTmp('learning-ops-restore-');
-    paths = seedLearningTree(dir);
+    dir = makeTmp('curation-ops-restore-');
+    paths = seedCurationTree(dir);
   });
 
   afterEach(() => {
@@ -2169,7 +2169,7 @@ describe('restoreAnchor', () => {
   }
 
   it('gives the entry its type\'s active status, clears its notes, last_verified and last_attempt, and renders it again', () => {
-    seedLearningTree(dir, {
+    seedCurationTree(dir, {
       log: [makeV2LogRow()],
       ledger: [makeV2LedgerRow({
         decisions_status: 'Retired', last_attempt: '2026-10-03T11:00:00.000Z', status_note: 'A one-off', retired_on: '2026-09-20',
@@ -2183,7 +2183,7 @@ describe('restoreAnchor', () => {
   });
 
   it('clears superseded_by and encoded_at as well, and restores a pitfall as Active', () => {
-    seedLearningTree(dir, {
+    seedCurationTree(dir, {
       ledger: [
         makeV2LedgerRow({ decisions_status: 'Superseded', superseded_by: 'ADR-002', retired_on: '2026-09-20' }),
         makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_beta' }),
@@ -2201,7 +2201,7 @@ describe('restoreAnchor', () => {
   });
 
   it('makes the entry due next: claim-due hands it out before every verified entry, whatever lease it had', () => {
-    seedLearningTree(dir, {
+    seedCurationTree(dir, {
       log: [makeV2LogRow(), makeV2LogRow({ id: 'obs_beta' })],
       ledger: [
         makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_beta', last_verified: daysAgoDate(40) }),
@@ -2217,16 +2217,16 @@ describe('restoreAnchor', () => {
   });
 
   it('restores a v1 entry after copying a v1 tree aside, and it renders through the v1 formatter again', () => {
-    seedLearningTree(dir, { ledger: [makeV1LedgerRow({ decisions_status: 'Retired', status_note: 'The hooks moved', retired_on: '2026-09-01' })] });
+    seedCurationTree(dir, { ledger: [makeV1LedgerRow({ decisions_status: 'Retired', status_note: 'The hooks moved', retired_on: '2026-09-01' })] });
     const ledgerBefore = fs.readFileSync(paths.ledger, 'utf8');
     expect(restore('PF-001')).toEqual({ ok: true, value: { anchor_id: 'PF-001', status: 'Active' } });
     expect(rowsOf(paths.ledger)).toEqual([makeV1LedgerRow()]);
-    expect(fs.readFileSync(path.join(paths.learningDir, 'decisions-ledger.pre-v2.jsonl'), 'utf8')).toBe(ledgerBefore);
+    expect(fs.readFileSync(path.join(paths.curationDir, 'decisions-ledger.pre-v2.jsonl'), 'utf8')).toBe(ledgerBefore);
     expect(rendered(paths, 'pitfalls.md')).toBe(renderDecisionsFile([makeV1LedgerRow()], 'pitfalls'));
   });
 
   it('refuses an active entry and one the ledger does not hold, writing nothing', () => {
-    seedLearningTree(dir, { ledger: [makeV2LedgerRow()] });
+    seedCurationTree(dir, { ledger: [makeV2LedgerRow()] });
     const before = snapshotTree(dir);
     expect(restore('ADR-001')).toEqual({
       ok: false, error: { kind: 'already-active', message: 'restore-anchor: ADR-001 is already active; nothing was written' },
@@ -2237,11 +2237,11 @@ describe('restoreAnchor', () => {
     expect(snapshotTree(dir)).toEqual(before);
   });
 
-  it('refuses without a learning directory and creates nothing', () => {
-    fs.rmSync(paths.learningDir, { recursive: true });
+  it('refuses without a curation directory and creates nothing', () => {
+    fs.rmSync(paths.curationDir, { recursive: true });
     expect(restore('ADR-001')).toEqual({
       ok: false,
-      error: { kind: 'no-learning-dir', message: `restore-anchor: no .devflow/curation/ under ${dir} — run from the project root` },
+      error: { kind: 'no-curation-dir', message: `restore-anchor: no .devflow/curation/ under ${dir} — run from the project root` },
     });
     expect(fs.readdirSync(path.join(dir, '.devflow'))).toEqual([]);
   });
@@ -2258,8 +2258,8 @@ describe('retire-anchor and restore-anchor ops', { timeout: 30_000 }, () => {
   let dir: string;
 
   beforeEach(() => {
-    dir = makeTmp('learning-ops-retire-op-');
-    seedLearningTree(dir);
+    dir = makeTmp('curation-ops-retire-op-');
+    seedCurationTree(dir);
   });
 
   afterEach(() => {
@@ -2267,7 +2267,7 @@ describe('retire-anchor and restore-anchor ops', { timeout: 30_000 }, () => {
   });
 
   it('retire prints the new status and the entry, then each entry re-pointed to the successor', () => {
-    seedLearningTree(dir, {
+    seedCurationTree(dir, {
       ledger: [
         makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_beta' }),
         makeV2LedgerRow({ anchor_id: 'ADR-003', id: 'obs_gamma' }),
@@ -2283,7 +2283,7 @@ describe('retire-anchor and restore-anchor ops', { timeout: 30_000 }, () => {
   });
 
   it('restore prints the entry it restored', () => {
-    seedLearningTree(dir, { ledger: [makeV2LedgerRow({ decisions_status: 'Deprecated', status_note: 'Moved' })] });
+    seedCurationTree(dir, { ledger: [makeV2LedgerRow({ decisions_status: 'Deprecated', status_note: 'Moved' })] });
     expect(runJsonHelper(dir, ['restore-anchor', 'ADR-001'])).toEqual({ code: 0, stdout: 'restored ADR-001\n', stderr: '' });
     expect(runJsonHelper(dir, ['restore-anchor', 'ADR-001'])).toEqual({
       code: 1, stdout: '', stderr: 'restore-anchor: ADR-001 is already active; nothing was written\n',
@@ -2291,7 +2291,7 @@ describe('retire-anchor and restore-anchor ops', { timeout: 30_000 }, () => {
   });
 
   it('retire prints every input problem on stderr and exits 1', () => {
-    seedLearningTree(dir, { ledger: [makeV2LedgerRow()] });
+    seedCurationTree(dir, { ledger: [makeV2LedgerRow()] });
     expect(runJsonHelper(dir, ['retire-anchor', 'ADR-001', 'Deprecated'], '{"because": "x"}')).toEqual({
       code: 1,
       stdout: '',
@@ -2302,7 +2302,7 @@ describe('retire-anchor and restore-anchor ops', { timeout: 30_000 }, () => {
   });
 
   it('retire refuses stdin that is not one JSON object, writing nothing', () => {
-    seedLearningTree(dir, { ledger: [makeV2LedgerRow()] });
+    seedCurationTree(dir, { ledger: [makeV2LedgerRow()] });
     const before = snapshotTree(dir);
     for (const stdin of ['', 'not json', '["a reason"]', '"a reason"']) {
       expect(runJsonHelper(dir, ['retire-anchor', 'ADR-001', 'Retired'], stdin), JSON.stringify(stdin)).toEqual({
@@ -2313,7 +2313,7 @@ describe('retire-anchor and restore-anchor ops', { timeout: 30_000 }, () => {
   });
 
   it('retire takes an anchor and an inactive status, and nothing else', () => {
-    seedLearningTree(dir, { ledger: [makeV2LedgerRow()] });
+    seedCurationTree(dir, { ledger: [makeV2LedgerRow()] });
     const before = snapshotTree(dir);
     for (const args of [
       ['retire-anchor'],
@@ -2330,7 +2330,7 @@ describe('retire-anchor and restore-anchor ops', { timeout: 30_000 }, () => {
   });
 
   it('restore takes exactly one anchor', () => {
-    seedLearningTree(dir, { ledger: [makeV2LedgerRow({ decisions_status: 'Retired' })] });
+    seedCurationTree(dir, { ledger: [makeV2LedgerRow({ decisions_status: 'Retired' })] });
     const before = snapshotTree(dir);
     for (const args of [['restore-anchor'], ['restore-anchor', 'ADR-001', 'ADR-002'], ['restore-anchor', 'obs_store_one'], ['restore-anchor', '--all']]) {
       expect(runJsonHelper(dir, args), args.join(' ')).toEqual({ code: 1, stdout: '', stderr: RESTORE_USAGE });

@@ -16,7 +16,7 @@ D-COMPLIANCE-INJECT: no variant names the compliance skill or takes a compliance
 injects the compliance directive into a spawn prompt only when the resolved lens is on, so a
 lens-off spawn pays nothing for it (the directive's home is `commands/_partials/_compliance.mds`).
 
-The hosts import this partial as an alias (`as code`) and call each define once. A learning arm
+The hosts import this partial as an alias (`as code`) and call each define once. A curation arm
 inside a define is split by the build like an arm in a host: the markers sit on lines of their own.
 
 @define input_core():

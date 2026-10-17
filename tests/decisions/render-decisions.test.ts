@@ -10,14 +10,14 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-import { makeV2LedgerRow, seedLearningTree, snapshotTree, toJsonl } from './learning-fixtures.js';
+import { makeV2LedgerRow, seedCurationTree, snapshotTree, toJsonl } from './curation-fixtures.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(import.meta.url);
 
 const {
   renderDecisionsFile,
-  renderLearningFiles,
+  renderCurationFiles,
   renderAndWriteAll,
   selectActiveRows,
   selectInactiveRows,
@@ -26,7 +26,7 @@ const {
   anchorNumeric,
 } = require(path.join(ROOT, 'src/assets/scripts/hooks/lib/render-decisions.cjs')) as {
   renderDecisionsFile: (rows: Record<string, unknown>[], kind: 'decisions' | 'pitfalls') => string;
-  renderLearningFiles: (
+  renderCurationFiles: (
     worktreePath: string,
     rows: Record<string, unknown>[],
     outputDir: string,
@@ -259,24 +259,24 @@ describe('renderAndWriteAll', () => {
   });
 
   it('writes the three files into an existing learning directory', () => {
-    const { learningDir } = seedLearningTree(tmpDir);
+    const { curationDir } = seedCurationTree(tmpDir);
     renderAndWriteAll(tmpDir, [makeDecisionRow()]);
-    expect(fs.readdirSync(learningDir).sort()).toEqual(['decisions.md', 'index.md', 'pitfalls.md']);
+    expect(fs.readdirSync(curationDir).sort()).toEqual(['decisions.md', 'index.md', 'pitfalls.md']);
   });
 });
 
 // ---------------------------------------------------------------------------
-// renderLearningFiles — the output folder is an argument, and the index names it
+// renderCurationFiles — the output folder is an argument, and the index names it
 // ---------------------------------------------------------------------------
 
-describe('renderLearningFiles — output folder', () => {
+describe('renderCurationFiles — output folder', () => {
   const root = '/some/project';
   const todaysDir = path.join(root, '.devflow', 'curation');
   const otherDir = path.join(root, '.devflow', 'elsewhere');
   const rows = [makeDecisionRow(), makePitfallRow()];
 
   it('puts the body files first and the index last, all inside the folder it is given', () => {
-    const files = renderLearningFiles(root, rows, otherDir);
+    const files = renderCurationFiles(root, rows, otherDir);
     expect(files.map(file => file.path)).toEqual([
       path.join(otherDir, 'decisions.md'),
       path.join(otherDir, 'pitfalls.md'),
@@ -285,15 +285,15 @@ describe('renderLearningFiles — output folder', () => {
   });
 
   it('writes an index whose footer names the given folder and no other', () => {
-    const index = renderLearningFiles(root, rows, otherDir)[2].content;
+    const index = renderCurationFiles(root, rows, otherDir)[2].content;
     expect(index).toContain(`ADR-NNN entries live in ${path.join(otherDir, 'decisions.md')}`);
     expect(index).toContain(`PF-NNN  entries live in ${path.join(otherDir, 'pitfalls.md')}`);
     expect(index).not.toContain(todaysDir);
   });
 
   it('changes nothing but the folder: the same rows give the same bytes in any folder', () => {
-    const today = renderLearningFiles(root, rows, todaysDir);
-    const other = renderLearningFiles(root, rows, otherDir);
+    const today = renderCurationFiles(root, rows, todaysDir);
+    const other = renderCurationFiles(root, rows, otherDir);
     for (let i = 0; i < today.length; i++) {
       expect(other[i].content).toBe(today[i].content.split(todaysDir).join(otherDir));
     }
@@ -736,28 +736,28 @@ describe('CLI render', { timeout: 30_000 }, () => {
   });
 
   it('writes the empty corpus, headers and "(none)", into a learning directory with no ledger', () => {
-    const { learningDir } = seedLearningTree(tmpDir);
+    const { curationDir } = seedCurationTree(tmpDir);
 
     const run = runRenderer(tmpDir, ['render', tmpDir]);
 
     expect(run.code).toBe(0);
-    expect(fs.readFileSync(path.join(learningDir, 'decisions.md'), 'utf8'))
+    expect(fs.readFileSync(path.join(curationDir, 'decisions.md'), 'utf8'))
       .toBe('<!-- TL;DR: 0 decisions -->\n# Architectural Decisions\n\n' + GENERATED_NOTICE);
-    expect(fs.readFileSync(path.join(learningDir, 'pitfalls.md'), 'utf8'))
+    expect(fs.readFileSync(path.join(curationDir, 'pitfalls.md'), 'utf8'))
       .toBe('<!-- TL;DR: 0 pitfalls -->\n# Known Pitfalls\n\n' + GENERATED_NOTICE);
-    expect(fs.readFileSync(path.join(learningDir, 'index.md'), 'utf8')).toBe('(none)\n');
+    expect(fs.readFileSync(path.join(curationDir, 'index.md'), 'utf8')).toBe('(none)\n');
   });
 
   it('writes the three files from the ledger; index.md lists both entries', () => {
-    const { learningDir } = seedLearningTree(tmpDir, {
+    const { curationDir } = seedCurationTree(tmpDir, {
       ledger: [makeDecisionRow({ anchor_id: 'ADR-001' }), makePitfallRow({ anchor_id: 'PF-002' })],
     });
 
     expect(runRenderer(tmpDir, ['render', tmpDir]).code).toBe(0);
 
-    expect(fs.readFileSync(path.join(learningDir, 'decisions.md'), 'utf8')).toMatch(/^## ADR-001: /m);
-    expect(fs.readFileSync(path.join(learningDir, 'pitfalls.md'), 'utf8')).toMatch(/^## PF-002: /m);
-    const index = fs.readFileSync(path.join(learningDir, 'index.md'), 'utf8');
+    expect(fs.readFileSync(path.join(curationDir, 'decisions.md'), 'utf8')).toMatch(/^## ADR-001: /m);
+    expect(fs.readFileSync(path.join(curationDir, 'pitfalls.md'), 'utf8')).toMatch(/^## PF-002: /m);
+    const index = fs.readFileSync(path.join(curationDir, 'index.md'), 'utf8');
     expect(index).toContain('  ADR-001  ');
     expect(index).toContain('  PF-002  ');
     expect(index).toMatch(/\n$/);
@@ -781,7 +781,7 @@ describe('CLI render', { timeout: 30_000 }, () => {
   });
 
   it('reports malformed ledger lines on stderr, renders the rest and leaves the ledger as it is', () => {
-    const paths = seedLearningTree(tmpDir);
+    const paths = seedCurationTree(tmpDir);
     const ledger =
       JSON.stringify(makeDecisionRow({ anchor_id: 'ADR-001' })) + '\n' +
       '{broken\n' +
@@ -793,11 +793,11 @@ describe('CLI render', { timeout: 30_000 }, () => {
 
     expect(run.code).toBe(0);
     expect(run.stderr).toContain(`[render-decisions] MALFORMED: 2 ledger lines skipped (${fs.realpathSync(paths.ledger)})`);
-    const md = fs.readFileSync(path.join(paths.learningDir, 'decisions.md'), 'utf8');
+    const md = fs.readFileSync(path.join(paths.curationDir, 'decisions.md'), 'utf8');
     expect(md).toMatch(/^## ADR-001: /m);
     expect(md).toMatch(/^## ADR-002: Second decision$/m);
     expect(fs.readFileSync(paths.ledger, 'utf8')).toBe(ledger);
-    expect(fs.readdirSync(paths.learningDir).sort())
+    expect(fs.readdirSync(paths.curationDir).sort())
       .toEqual(['decisions-ledger.jsonl', 'decisions.md', 'index.md', 'pitfalls.md']);
   });
 });
@@ -814,7 +814,7 @@ describe('CLI render reads the ledger only once it holds the lock', { timeout: 6
   });
 
   it('renders a ledger rewritten while it waited for the lock', async () => {
-    const paths = seedLearningTree(tmpDir, { ledger: [makeDecisionRow({ anchor_id: 'ADR-001' })] });
+    const paths = seedCurationTree(tmpDir, { ledger: [makeDecisionRow({ anchor_id: 'ADR-001' })] });
     fs.mkdirSync(paths.lockDir);
     const marker = path.join(tmpDir, 'lock-attempted');
     const preload = path.join(tmpDir, 'mark-lock-attempt.cjs');
@@ -838,7 +838,7 @@ describe('CLI render reads the ledger only once it holds the lock', { timeout: 6
       if (child.exitCode === null) child.kill();
     }
 
-    expect(fs.readFileSync(path.join(paths.learningDir, 'decisions.md'), 'utf8'))
+    expect(fs.readFileSync(path.join(paths.curationDir, 'decisions.md'), 'utf8'))
       .toMatch(/^## ADR-002: Written while render waited$/m);
   });
 });
@@ -858,50 +858,50 @@ describe('CLI worktree argument', { timeout: 30_000 }, () => {
   });
 
   it('takes the current directory given as "."', () => {
-    const { learningDir } = seedLearningTree(tmpDir);
+    const { curationDir } = seedCurationTree(tmpDir);
     expect(runRenderer(tmpDir, ['render', '.']).code).toBe(0);
-    expect(fs.existsSync(path.join(learningDir, 'index.md'))).toBe(true);
+    expect(fs.existsSync(path.join(curationDir, 'index.md'))).toBe(true);
   });
 
   it('takes a symlink that resolves to the current directory', () => {
-    const { learningDir } = seedLearningTree(tmpDir);
+    const { curationDir } = seedCurationTree(tmpDir);
     fs.symlinkSync(tmpDir, path.join(outside, 'alias'));
     expect(runRenderer(tmpDir, ['render', path.join(outside, 'alias')]).code).toBe(0);
-    expect(fs.existsSync(path.join(learningDir, 'index.md'))).toBe(true);
+    expect(fs.existsSync(path.join(curationDir, 'index.md'))).toBe(true);
   });
 
   it('refuses another directory in both modes and writes nothing there', () => {
-    const { learningDir } = seedLearningTree(outside);
+    const { curationDir } = seedCurationTree(outside);
     for (const mode of ['render', '--check']) {
       const run = runRenderer(tmpDir, [mode, outside]);
       expect(run.code).toBe(1);
       expect(run.stderr).toContain('is not the current directory');
     }
-    expect(fs.readdirSync(learningDir)).toEqual([]);
+    expect(fs.readdirSync(curationDir)).toEqual([]);
   });
 
   it('refuses a directory inside the current one: it runs from the project root', () => {
     const project = path.join(tmpDir, 'project');
-    const { learningDir } = seedLearningTree(project);
+    const { curationDir } = seedCurationTree(project);
 
     const run = runRenderer(tmpDir, ['render', project]);
 
     expect(run.code).toBe(1);
     expect(run.stderr).toContain('is not the current directory');
-    expect(fs.readdirSync(learningDir)).toEqual([]);
+    expect(fs.readdirSync(curationDir)).toEqual([]);
   });
 
   it('refuses a symlink in the current directory that leads elsewhere, writing nowhere', () => {
-    const { learningDir } = seedLearningTree(outside);
-    const own = seedLearningTree(tmpDir);
+    const { curationDir } = seedCurationTree(outside);
+    const own = seedCurationTree(tmpDir);
     fs.symlinkSync(outside, path.join(tmpDir, 'alias'));
 
     const run = runRenderer(tmpDir, ['render', path.join(tmpDir, 'alias')]);
 
     expect(run.code).toBe(1);
     expect(run.stderr).toContain('is not the current directory');
-    expect(fs.readdirSync(learningDir)).toEqual([]);
-    expect(fs.readdirSync(own.learningDir)).toEqual([]);
+    expect(fs.readdirSync(curationDir)).toEqual([]);
+    expect(fs.readdirSync(own.curationDir)).toEqual([]);
   });
 
   it('refuses a worktree that does not exist', () => {
@@ -982,7 +982,7 @@ describe('CLI --check', { timeout: 30_000 }, () => {
   });
 
   it('exits 0 on exactly what render wrote, for v1 and v2 entries and an Inactive table', () => {
-    seedLearningTree(tmpDir, {
+    seedCurationTree(tmpDir, {
       ledger: [
         makeDecisionRow({ anchor_id: 'ADR-001' }),
         makeV2LedgerRow({ anchor_id: 'ADR-002', id: 'obs_v2' }),
@@ -999,9 +999,9 @@ describe('CLI --check', { timeout: 30_000 }, () => {
   });
 
   it('exits 1 when decisions.md drifts from the render of the ledger', () => {
-    const { learningDir } = seedLearningTree(tmpDir);
+    const { curationDir } = seedCurationTree(tmpDir);
     expect(runRenderer(tmpDir, ['render', tmpDir]).code).toBe(0);
-    fs.writeFileSync(path.join(learningDir, 'decisions.md'), '<!-- TL;DR: 99 decisions -->\n# Tampered\n', 'utf8');
+    fs.writeFileSync(path.join(curationDir, 'decisions.md'), '<!-- TL;DR: 99 decisions -->\n# Tampered\n', 'utf8');
 
     const run = runRenderer(tmpDir, ['--check', tmpDir]);
 
@@ -1011,9 +1011,9 @@ describe('CLI --check', { timeout: 30_000 }, () => {
   });
 
   it('exits 1 and names index.md when index.md drifts', () => {
-    const { learningDir } = seedLearningTree(tmpDir);
+    const { curationDir } = seedCurationTree(tmpDir);
     expect(runRenderer(tmpDir, ['render', tmpDir]).code).toBe(0);
-    fs.writeFileSync(path.join(learningDir, 'index.md'), 'stale index content\n', 'utf8');
+    fs.writeFileSync(path.join(curationDir, 'index.md'), 'stale index content\n', 'utf8');
 
     const run = runRenderer(tmpDir, ['--check', tmpDir]);
 
@@ -1023,9 +1023,9 @@ describe('CLI --check', { timeout: 30_000 }, () => {
   });
 
   it('exits 1 and names a rendered file that is missing', () => {
-    const { learningDir } = seedLearningTree(tmpDir);
+    const { curationDir } = seedCurationTree(tmpDir);
     expect(runRenderer(tmpDir, ['render', tmpDir]).code).toBe(0);
-    fs.unlinkSync(path.join(learningDir, 'index.md'));
+    fs.unlinkSync(path.join(curationDir, 'index.md'));
 
     const run = runRenderer(tmpDir, ['--check', tmpDir]);
 
@@ -1042,7 +1042,7 @@ describe('CLI --check', { timeout: 30_000 }, () => {
   });
 
   it('reports files never rendered as drift and writes nothing', () => {
-    seedLearningTree(tmpDir, { ledger: [makeDecisionRow()] });
+    seedCurationTree(tmpDir, { ledger: [makeDecisionRow()] });
     const before = snapshotTree(tmpDir);
 
     const run = runRenderer(tmpDir, ['--check', tmpDir]);
@@ -1053,7 +1053,7 @@ describe('CLI --check', { timeout: 30_000 }, () => {
   });
 
   it('prints the malformed-line count on stderr and writes nothing', () => {
-    const paths = seedLearningTree(tmpDir);
+    const paths = seedCurationTree(tmpDir);
     fs.writeFileSync(paths.ledger, JSON.stringify(makeDecisionRow()) + '\n{broken\n', 'utf8');
     expect(runRenderer(tmpDir, ['render', tmpDir]).code).toBe(0);
     const before = snapshotTree(tmpDir);
@@ -1066,7 +1066,7 @@ describe('CLI --check', { timeout: 30_000 }, () => {
   });
 
   it('takes no lock: it runs to completion while the lock is held', () => {
-    const paths = seedLearningTree(tmpDir);
+    const paths = seedCurationTree(tmpDir);
     expect(runRenderer(tmpDir, ['render', tmpDir]).code).toBe(0);
     fs.mkdirSync(paths.lockDir);
 

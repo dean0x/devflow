@@ -269,7 +269,7 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
   // A scoped entry names the prompt files that carry it rather than registering
   // the spelling repo-wide, because the same anchor is legitimate where a
   // maintainer can follow it; each case is classified individually, not swept.
-  // Learning-ledger IDs need no row here: they resolve only on the machine that
+  // Curation-ledger IDs need no row here: they resolve only on the machine that
   // wrote them, and tests/guards/no-ledger-citations.test.ts holds them out of the
   // sources, the docs and test commentary.
   // -------------------------------------------------------------------------
@@ -459,7 +459,7 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
       'docs/reference/file-organization.md',
     justification:
       'The usage scanner counted the anchors each assistant turn cited into .decisions-usage.json, ' +
-      'and assign-anchor registered every new anchor there. Learning v2 maintains entries by their ' +
+      'and assign-anchor registered every new anchor there. Curation v2 maintains entries by their ' +
       'verification age at the default branch, not by citation counts, and committed text no ' +
       'longer cites ledger IDs, so the counts measured nothing. The scanner, its capture-turn call, ' +
       'its project-paths helpers and the registration are gone, and rotate-observations deletes the ' +
@@ -470,7 +470,7 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
     removedFrom: 'src/assets/agents/curate.md',
     justification:
       'The Curate agent left any entry dated within the past week untouched, keyed on the ledger ' +
-      'date with a last_seen fallback for rows that had none. Learning v2 hands out entries for ' +
+      'date with a last_seen fallback for rows that had none. Curation v2 hands out entries for ' +
       'maintenance through claim-due, oldest verification first with a one-day lease, so a new ' +
       'entry is not due until its verification ages, and the window has nothing left to protect.',
   },

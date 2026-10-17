@@ -24,7 +24,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import * as path from 'path'
 
-import { requireDistFile, resolveLearningOffSource } from '../helpers.js'
+import { requireDistFile, resolveCurationOffSource } from '../helpers.js'
 import { MDS_COMMAND_HOSTS } from '../fixtures/mds-manifest.js'
 
 const ROOT = path.resolve(import.meta.dirname, '../..')
@@ -64,7 +64,7 @@ const onTexts = (): Map<string, string> =>
   new Map(MDS_COMMAND_HOSTS.map(h => [h, requireDistFile(`${h}.md`)] as const))
 
 const offTexts = (): Map<string, string> =>
-  new Map(MDS_COMMAND_HOSTS.map(h => [h, resolveLearningOffSource('commands', h) ?? ''] as const))
+  new Map(MDS_COMMAND_HOSTS.map(h => [h, resolveCurationOffSource('commands', h) ?? ''] as const))
 
 // ---------------------------------------------------------------------------
 // Curation-on hosts

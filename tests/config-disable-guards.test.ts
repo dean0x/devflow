@@ -324,9 +324,9 @@ describe('config guard: session-start-context', () => {
     // Section 1.75 removed — LEARNED BEHAVIORS must never appear
     mkMemoryDir(tmpDir);
     // Create a learning log that would have triggered the old section
-    const learningDir = path.join(tmpDir, '.devflow', 'curation');
-    fs.mkdirSync(learningDir, { recursive: true });
-    const logPath = path.join(learningDir, 'learning-log.jsonl');
+    const curationDir = path.join(tmpDir, '.devflow', 'curation');
+    fs.mkdirSync(curationDir, { recursive: true });
+    const logPath = path.join(curationDir, 'learning-log.jsonl');
     fs.writeFileSync(logPath, JSON.stringify({
       id: 'obs_abc123', type: 'workflow', status: 'created',
       artifact_path: '/.claude/commands/self-learning/deploy-flow.md', confidence: 0.95,

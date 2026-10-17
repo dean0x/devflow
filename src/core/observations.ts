@@ -12,7 +12,7 @@
  * the HUD counts; an absent or unknown status counts as active. These lists
  * mirror ACTIVE_STATUSES / INACTIVE_STATUSES in
  * src/assets/scripts/hooks/lib/curation-store.cjs, which the hooks and the
- * renderer use, and the parity test in tests/decisions/learning-store.test.ts
+ * renderer use, and the parity test in tests/decisions/curation-store.test.ts
  * pins the two equal. Reason: the renderer, the HUD and this module each kept a
  * list of their own, so a status added to one counted as active in the others.
  */

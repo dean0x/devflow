@@ -13,7 +13,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { runHook } from '../shell-hooks-helpers.js';
-import { ROOT, JSON_HELPER, initGitRepo, makeV2LogRow, runJsonHelper, seedLearningTree } from './learning-fixtures.js';
+import { ROOT, JSON_HELPER, initGitRepo, makeV2LogRow, runJsonHelper, seedCurationTree } from './curation-fixtures.js';
 
 const requireCjs = createRequire(import.meta.url);
 
@@ -62,7 +62,7 @@ describe('no hook or op counts citations', { timeout: 30_000 }, () => {
     // ran here, and only when the turn named an anchor the usage file had registered.
     fs.mkdirSync(path.join(project, '.git'));
     fs.mkdirSync(path.join(project, '.devflow', 'memory'), { recursive: true });
-    seedLearningTree(project);
+    seedCurationTree(project);
     fs.writeFileSync(usageFilePath(project), USAGE_FILE_BYTES);
     const message = 'The renderer keeps v1 bytes, as ADR-001 requires.';
 
@@ -77,7 +77,7 @@ describe('no hook or op counts citations', { timeout: 30_000 }, () => {
 
   it('assign-anchor promotes an observation and creates no usage file', () => {
     initGitRepo(project);
-    seedLearningTree(project, { log: [makeV2LogRow({ id: 'obs_usage_free' })] });
+    seedCurationTree(project, { log: [makeV2LogRow({ id: 'obs_usage_free' })] });
 
     const run = runJsonHelper(project, ['assign-anchor', 'decision', 'obs_usage_free']);
 
@@ -87,7 +87,7 @@ describe('no hook or op counts citations', { timeout: 30_000 }, () => {
   });
 
   it('rotate-observations deletes the usage file and usage lock an older install left', () => {
-    seedLearningTree(project);
+    seedCurationTree(project);
     const usageLock = path.join(project, '.devflow', 'curation', '.decisions-usage.lock');
     fs.writeFileSync(usageFilePath(project), USAGE_FILE_BYTES);
     fs.mkdirSync(usageLock);

@@ -14,7 +14,7 @@
 #
 # queue_append_row <root> <queue_file> <role> <content> <ts>
 #   Appends one JSONL row {role, content, ts} to <queue_file>, which lies below
-#   <root>: the project root for the memory queue, the ledger root for the learning
+#   <root>: the project root for the memory queue, the ledger root for the curation
 #   queue. When the queue, or a folder between <root> and it, is a symbolic link,
 #   nothing is written: the skip is logged once and the call returns 0, as a
 #   skipped capture does (D-HOOKS-NO-SYMLINK, git-marker). Otherwise it builds the
@@ -32,17 +32,17 @@
 #   the pre-existing memory design -- see the design doc's "Append-vs-claim race"
 #   note).
 #
-# queue_append_both <memory_root> <memory_queue> <learning_root> <learning_queue> <memory_enabled> <learning_enabled> <role> <content> <ts>
+# queue_append_both <memory_root> <memory_queue> <curation_root> <curation_queue> <memory_enabled> <curation_enabled> <role> <content> <ts>
 #   Calls queue_append_row for each queue whose *_enabled flag is "true", with the
 #   root that queue lies below. Each queue is gated independently -- callers
-#   compute memory_enabled/learning_enabled themselves (see queue_read_gates below
+#   compute memory_enabled/curation_enabled themselves (see queue_read_gates below
 #   for the at-most-one-fork read of both).
 #
 # queue_read_gates <manifest_path> [<root>]
 #   Reads BOTH switches, `memory` and `learning` (the feature being renamed to
 #   curation, so it is read under both keys), in at most ONE subprocess fork
 #   (AC-P1 -- at most one gate-read fork per capture hook, not two; none when
-#   the fast paths settle it). Sets _QG_MEMORY and _QG_LEARNING ("true"/"false")
+#   the fast paths settle it). Sets _QG_MEMORY and _QG_CURATION ("true"/"false")
 #   in the caller's scope. The two values are newline-separated
 #   rather than using a control-character delimiter: they are always the literal
 #   strings "true"/"false", never arbitrary content, so a plain newline split is
@@ -52,31 +52,31 @@
 #   machine switch is on AND neither repository file sets `features.<name>` to
 #   the literal `false` -- the rule resolve-settings.cjs folds, held to the same
 #   answers by the shared table tests/fixtures/settings-switch-table.ts (TP-49).
-#   A repository can switch memory or learning off for itself, never back on.
+#   A repository can switch memory or curation off for itself, never back on.
 #     machine   <manifest_path>, the ~/.devflow/manifest.json `devflow init` and
-#               `devflow memory|learning --enable/--disable` write. Only an
+#               `devflow memory|curation --enable/--disable` write. Only an
 #               explicit boolean `false` switches a feature off -- an absent,
 #               unreadable or malformed manifest, a missing key, or a non-boolean
 #               value leaves it ON (fail-open), the rule
 #               isMachineFeatureOn() applies in the CLI.
 #     project   <root>/.devflow/project.json (team-committed) and
 #     personal  <root>/.devflow/config.json (this worktree's own), read ONLY under
-#               `features.memory` and, for learning, `features.curation` or
+#               `features.memory` and, for curation, `features.curation` or
 #               `features.learning` (a narrow-only union: a literal false in
-#               either key turns learning off, and each key is parsed on its
+#               either key turns curation off, and each key is parsed on its
 #               own). The retired top-level keys (`memory`, `curation`,
 #               `learning`, `decisions`) and `features.decisions` narrow nothing
 #               (#378: reading them let a feature run in every repo but one). An
 #               invalid file -- unparseable, over 4096 bytes, a BOM, a symlink, a
 #               duplicated key -- narrows nothing.
 #   <root> is the checkout's toplevel (DF_ROOT, which every caller holds as
-#   $PROJECT_ROOT), for learning too: project.json is committed per branch and
+#   $PROJECT_ROOT), for curation too: project.json is committed per branch and
 #   config.json lives per worktree, so both are read where the session runs, as
 #   resolve-settings.cjs reads them -- never at DF_LEDGER_ROOT, which only says
 #   where the queue lands. Without <root> (or with an empty one) no repository
 #   file is read.
 #
-#   The machine rule for learning (#529), the one isMachineFeatureOn() applies:
+#   The machine rule for curation (#529), the one isMachineFeatureOn() applies:
 #   off when `features.curation` or `features.learning` is a boolean false; else
 #   on when either is a boolean true; else, when neither is a boolean, the
 #   pre-rename `features.decisions` decides if it is a boolean; else on. A
@@ -86,9 +86,9 @@
 #   D-LEARNING-LEGACY-DECISIONS: in the MANIFEST only, the pre-rename
 #   `features.decisions` is read when neither current key is a boolean --
 #   readManifest's migration precedence exactly, so a legacy `decisions: false`
-#   switches learning off before any command has healed the file.
+#   switches curation off before any command has healed the file.
 #
-#   Every hook that gates on memory or learning reads it through here: the
+#   Every hook that gates on memory or curation reads it through here: the
 #   capture hooks, session-start-context (Sections 1-2), memory-worker,
 #   session-start-memory, pre-compact-memory and background-memory-update. The
 #   callers pass <manifest_path> as $HOME/.devflow/manifest.json, the machine
@@ -193,15 +193,15 @@ queue_append_row() {
 
 queue_append_both() {
   local _qab_memory_root="$1" _qab_memory_queue="$2"
-  local _qab_learning_root="$3" _qab_learning_queue="$4"
-  local _qab_memory_enabled="$5" _qab_learning_enabled="$6"
+  local _qab_curation_root="$3" _qab_curation_queue="$4"
+  local _qab_memory_enabled="$5" _qab_curation_enabled="$6"
   local _qab_role="$7" _qab_content="$8" _qab_ts="$9"
 
   if [ "$_qab_memory_enabled" = "true" ]; then
     queue_append_row "$_qab_memory_root" "$_qab_memory_queue" "$_qab_role" "$_qab_content" "$_qab_ts"
   fi
-  if [ "$_qab_learning_enabled" = "true" ]; then
-    queue_append_row "$_qab_learning_root" "$_qab_learning_queue" "$_qab_role" "$_qab_content" "$_qab_ts"
+  if [ "$_qab_curation_enabled" = "true" ]; then
+    queue_append_row "$_qab_curation_root" "$_qab_curation_queue" "$_qab_role" "$_qab_content" "$_qab_ts"
   fi
 }
 
@@ -234,7 +234,7 @@ _qg_repo_file_can_narrow() {
 queue_read_gates() {
   local _qg_manifest="${1:-}" _qg_root="${2:-}" _qg_text="" _qg_parse="false" _qg_repo="false" _qg_fields=""
   _QG_MEMORY="true"
-  _QG_LEARNING="true"
+  _QG_CURATION="true"
 
   if [ -n "$_qg_manifest" ] && [ -f "$_qg_manifest" ]; then
     # D-GATES-FAST-PATH: every capture hook and every session start pays this
@@ -291,7 +291,7 @@ queue_read_gates() {
       # `try` covers a manifest whose top level or `features` is not an object; a
       # parse failure empties the output, which reads as "not switched off". The
       # comma produces two raw-output lines (newline-separated) in one jq process.
-      # Learning (#529): off when a boolean curation or learning is false; else,
+      # Curation (#529): off when a boolean curation or learning is false; else,
       # when neither is a boolean, off when decisions is false (isMachineFeatureOn).
       _qg_fields=$(jq -r '
         (if (try .features.memory catch null) == false then "false" else "true" end),
@@ -318,7 +318,7 @@ queue_read_gates() {
   case "$_qg_fields" in
     true$'\n'true|true$'\n'false|false$'\n'true|false$'\n'false)
       _QG_MEMORY="${_qg_fields%%$'\n'*}"
-      _QG_LEARNING="${_qg_fields#*$'\n'}"
+      _QG_CURATION="${_qg_fields#*$'\n'}"
       ;;
   esac
 

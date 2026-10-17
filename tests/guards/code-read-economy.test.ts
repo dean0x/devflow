@@ -66,7 +66,7 @@ import {
   readAgentReference,
   requireDistFile,
   resolveAgentSource,
-  resolveLearningOffSource,
+  resolveCurationOffSource,
 } from '../helpers.js'
 
 const BLOCK_HEADING = '## Running commands'
@@ -120,7 +120,7 @@ function codeFamilyBodies(): Body[] {
       throw new Error(`${name}: only the source tree was found, run \`npm run build:mds\` first (a generator host has no source body)`)
     }
     out.push({ label: `${name} (learning on)`, content: on.content })
-    const off = resolveLearningOffSource('agents', name)
+    const off = resolveCurationOffSource('agents', name)
     if (off === null) throw new Error(`dist/curation-off/agents/${name}.md is absent, run \`npm run build:mds\` first`)
     out.push({ label: `${name} (learning off)`, content: off })
   }
@@ -141,7 +141,7 @@ function spawningCommands(): Body[] {
   const out: Body[] = []
   for (const name of ['implement', 'resolve']) {
     out.push({ label: `${name} (learning on)`, content: requireDistFile(`${name}.md`) })
-    const off = resolveLearningOffSource('commands', name)
+    const off = resolveCurationOffSource('commands', name)
     if (off === null) throw new Error(`dist/curation-off/commands/${name}.md is absent, run \`npm run build:mds\` first`)
     out.push({ label: `${name} (learning off)`, content: off })
   }
@@ -421,7 +421,7 @@ describe('a long plan splits into sequential phases and a run with no plan is on
 
   it('the compiled /implement, learning on and off, sends a run with no plan to one Code agent and agrees on the trigger', () => {
     const on = requireDistFile('implement.md')
-    const off = resolveLearningOffSource('commands', 'implement')
+    const off = resolveCurationOffSource('commands', 'implement')
     if (off === null) throw new Error('dist/curation-off/commands/implement.md is absent, run `npm run build:mds` first')
     for (const [label, content] of [['learning on', on], ['learning off', off]] as const) {
       expect(content.length, `${label}: nothing read`).toBeGreaterThan(MIN_BODY_BYTES)

@@ -10,7 +10,7 @@ import { isSameLocation, withoutHomeRoots } from '../../core/same-location.js';
 import { pruneHookLogDirs, MAX_HOOK_LOG_DIRS, type LogDirPruneReport } from '../../core/hook-log-dirs.js';
 import { getLedgerRoot } from '../../core/ledger-root.js';
 import { CURATION_DIR_NAME, LEGACY_NAMES } from '../../core/project-paths.js';
-import { formatLearningStoreUnavailable, loadLearningStore } from '../../core/curation-store.js';
+import { formatCurationStoreUnavailable, loadCurationStore } from '../../core/curation-store.js';
 import { runInitCurationMove, type InitCurationMoveReport } from './init-curation-move.js';
 import { realGlobalTuningMoveIO, realProjectLedgerMoveIO } from './curation-move-io.js';
 import { describeEchoedValue } from '../../core/echo-value.js';
@@ -56,7 +56,7 @@ import { convergeFlagsIntoSettings, countActiveFlags, readViewMode, type FlagsRe
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
 import { writeManagedConfig, readConfigIfPresent, DEFAULT_CONFIG, type FeatureConfig, type ManagedConfigWriteError } from '../../core/feature-config.js';
-import { drainLearningQueue } from '../../core/curation-queue-cleanup.js';
+import { drainCurationQueue } from '../../core/curation-queue-cleanup.js';
 import { formatRefusedDrain, type QueueDrain } from '../../core/queue-drain.js';
 import { removeManagedDenyList, describeManagedDenyRemoval } from './security.js';
 import { resolveInitSeed, applyCliToggles, resolveResetGatedInputs, resolvePluginsToInstall } from './init-seed.js';
@@ -141,7 +141,7 @@ export type { MigrationLogger };
  *      migrations are vacuously applied per D37 semantics).
  *
  * Migrations are a one-time cleanup pass over ~/.devflow runtime data
- * (memory, learning, knowledge). They never touch the installer's
+ * (memory, curation, knowledge). They never touch the installer's
  * copy targets (skills, agents, rules, commands, scripts), so ordering
  * relative to installViaFileCopy carries no data dependency.
  *
@@ -671,7 +671,7 @@ export async function moveCurationData(opts: {
   homeDir: string;
   devflowDir: string;
 }): Promise<InitCurationMoveReport> {
-  const loaded = loadLearningStore();
+  const loaded = loadCurationStore();
   return runInitCurationMove(
     {
       projectRoots: projectRoots([...opts.discoveredProjects], opts.gitRoot),
@@ -682,7 +682,7 @@ export async function moveCurationData(opts: {
       newName: CURATION_DIR_NAME,
     },
     {
-      ledger: loaded.ok ? realProjectLedgerMoveIO(loaded.value) : { unavailable: formatLearningStoreUnavailable(loaded.error) },
+      ledger: loaded.ok ? realProjectLedgerMoveIO(loaded.value) : { unavailable: formatCurationStoreUnavailable(loaded.error) },
       tuning: realGlobalTuningMoveIO(),
     },
   );
@@ -691,13 +691,13 @@ export async function moveCurationData(opts: {
 /** The queue drains `drainDisabledFeatureQueues` performs — injected for tests. */
 export interface DisabledQueueDrainIO {
   drainMemoryQueue(projectRoot: string): Promise<QueueDrain>;
-  drainLearningQueue(ledgerRoot: string): Promise<QueueDrain>;
+  drainCurationQueue(ledgerRoot: string): Promise<QueueDrain>;
 }
 
 /**
- * Drain this repo's memory and learning queues for each feature init switched
+ * Drain this repo's memory and curation queues for each feature init switched
  * off, so stale turns are not processed on a future re-enable — the same drains
- * `devflow memory --disable` and `devflow learning --disable` perform. Other
+ * `devflow memory --disable` and `devflow curation --disable` perform. Other
  * repos' queues are inert: every gate reads the machine-wide switch, so nothing
  * appends to or processes them while the feature is off.
  *
@@ -710,7 +710,7 @@ export interface DisabledQueueDrainIO {
  * everywhere, so its queue is live and is left alone.
  *
  * D-LEDGER-MAIN-WORKTREE: each queue drains where the hooks write it — memory at
- * this checkout's toplevel (`gitRoot`), learning at the ledger root (`ledgerRoot`,
+ * this checkout's toplevel (`gitRoot`), curation at the ledger root (`ledgerRoot`,
  * getLedgerRoot), which in a linked worktree is the main checkout.
  *
  * Returns one warning for each drain refused because a folder on the way to its
@@ -721,10 +721,10 @@ export async function drainDisabledFeatureQueues(
     gitRoot: string | null;
     ledgerRoot: string | null;
     memoryEnabled: boolean;
-    learningEnabled: boolean;
+    curationEnabled: boolean;
     manifestWritten: boolean;
   },
-  io: DisabledQueueDrainIO = { drainMemoryQueue, drainLearningQueue },
+  io: DisabledQueueDrainIO = { drainMemoryQueue, drainCurationQueue },
 ): Promise<readonly string[]> {
   if (!opts.manifestWritten) return [];
   const refused: string[] = [];
@@ -732,9 +732,9 @@ export async function drainDisabledFeatureQueues(
     const memory = await io.drainMemoryQueue(opts.gitRoot);
     if (!memory.drained) refused.push(formatRefusedDrain('memory', memory.linkedFolder));
   }
-  if (!opts.learningEnabled && opts.ledgerRoot !== null) {
-    const learning = await io.drainLearningQueue(opts.ledgerRoot);
-    if (!learning.drained) refused.push(formatRefusedDrain('curation', learning.linkedFolder));
+  if (!opts.curationEnabled && opts.ledgerRoot !== null) {
+    const curation = await io.drainCurationQueue(opts.ledgerRoot);
+    if (!curation.drained) refused.push(formatRefusedDrain('curation', curation.linkedFolder));
   }
   return refused;
 }
@@ -746,10 +746,10 @@ export async function drainDisabledFeatureQueues(
  * nothing else, so the manifest keeps every recorded value — plugins, version,
  * installedAt and every feature — and only `features.hud` turns on. The
  * earlier shape rewrote the whole record as a HUD-only fresh install (ambient,
- * memory, learning, knowledge, rules and proxy all `false`, plugins `[]`) while
+ * memory, curation, knowledge, rules and proxy all `false`, plugins `[]`) while
  * leaving those features' artifacts on disk: the record stopped describing the
  * machine, the next re-init seeded every feature off, and with
- * memory/learning/knowledge switched by the manifest alone
+ * memory/curation/knowledge switched by the manifest alone
  * (D-FEATURES-NARROW-ONLY) a HUD install would have really disabled them
  * everywhere. `version` is kept too: --hud-only reinstalls no plugin, and a
  * bumped version would make the next init skip the upgrade it still owes.
@@ -1295,7 +1295,7 @@ export const initCommand = new Command('init')
     let memoryEnabled = seed.features.memory;
     let hudEnabled = seed.features.hud;
     let knowledgeEnabled = seed.features.knowledge;
-    let learningEnabled = seed.features.curation;
+    let curationEnabled = seed.features.curation;
     let rulesEnabled = seed.features.rules;
     // proxy: Advanced-only; Recommended path carries seed value unchanged.
     // Fresh installs → false (FEATURE_DEFAULTS.proxy). Re-inits → prior manifest value.
@@ -1491,7 +1491,7 @@ export const initCommand = new Command('init')
       memoryEnabled = effectiveFeatures.memory;
       hudEnabled = effectiveFeatures.hud;
       knowledgeEnabled = effectiveFeatures.knowledge;
-      learningEnabled = effectiveFeatures.curation;
+      curationEnabled = effectiveFeatures.curation;
       rulesEnabled = effectiveFeatures.rules;
       proxyEnabled = effectiveFeatures.proxy;
       behaviorEnabled = effectiveFeatures.behavior;
@@ -1536,7 +1536,7 @@ export const initCommand = new Command('init')
       const summaryLines = [
         `Ambient mode:    ${ambientEnabled ? 'enabled' : 'disabled'}`,
         `Working memory:  ${memoryEnabled ? 'enabled' : 'disabled'}`,
-        `Curation:        ${learningEnabled ? 'enabled' : 'disabled'}`,
+        `Curation:        ${curationEnabled ? 'enabled' : 'disabled'}`,
         `Rules:           ${rulesEnabled ? 'enabled' : 'disabled'}`,
         `HUD:             ${hudEnabled ? 'enabled' : 'disabled'}`,
         `Knowledge bases: ${knowledgeEnabled ? 'enabled' : 'disabled'}`,
@@ -1649,7 +1649,7 @@ export const initCommand = new Command('init')
       }
 
       if (options.curation !== undefined) {
-        learningEnabled = options.curation;
+        curationEnabled = options.curation;
       } else {
         p.note(
           'Detects architectural decisions and pitfalls from your session\n' +
@@ -1657,15 +1657,15 @@ export const initCommand = new Command('init')
           'additional tokens. Applies to every project.',
           'Curation (Decision/Pitfall Tracking)',
         );
-        const learningChoice = await p.confirm({
+        const curationChoice = await p.confirm({
           message: 'Enable curation? (Recommended)',
           initialValue: seed.features.curation,
         });
-        if (p.isCancel(learningChoice)) {
+        if (p.isCancel(curationChoice)) {
           p.cancel('Installation cancelled.');
           process.exit(0);
         }
-        learningEnabled = learningChoice;
+        curationEnabled = curationChoice;
       }
 
       if (options.rules !== undefined) {
@@ -2122,7 +2122,7 @@ export const initCommand = new Command('init')
         // The SETTLED switch, after the flag, the prompt and the seed have all had
         // their say (D-LEARNING-VARIANT-INSTALL): the files installed here and the
         // manifest written at the end of init cannot disagree about it.
-        curation: learningEnabled,
+        curation: curationEnabled,
         trackerServers,
         // Non-fatal install notices with no other channel (skipped symlinks in the
         // generated reference tree, mode-normalisation failures) reach the user rather
@@ -2135,7 +2135,7 @@ export const initCommand = new Command('init')
       process.exit(1);
     }
 
-    // D-LEARNING-VARIANT-INSTALL: converge the learning variants. The file copy above
+    // D-LEARNING-VARIANT-INSTALL: converge the curation variants. The file copy above
     // installed the variant of everything IT installed; on a `--plugin` install the
     // other plugins' files, already on disk, may still be the other variant (this run
     // may have flipped the switch), and the apply-decisions skill is removed here when
@@ -2143,22 +2143,22 @@ export const initCommand = new Command('init')
     // Warn-not-abort: either mismatch is safe (an on variant is still gated at run
     // time, an off variant loads no decisions). The agent mapping is reapplied below.
     try {
-      const learningConverge = await convergeCurationVariants({
+      const curationConverge = await convergeCurationVariants({
         claudeDir,
         devflowDir,
-        curation: learningEnabled,
+        curation: curationEnabled,
         plugins: effectivePlugins,
         warn: (msg) => installWarnings.push(msg),
       });
-      if (verbose && learningConverge.converged) {
+      if (verbose && curationConverge.converged) {
         p.log.info(
-          `Learning ${learningEnabled ? 'on' : 'off'} variants: ` +
-          `${learningConverge.commandsRewritten.length} command(s) and ${learningConverge.agentsRewritten.length} agent(s) ` +
-          `rewritten, ${learningConverge.unchanged} already current`,
+          `Curation ${curationEnabled ? 'on' : 'off'} variants: ` +
+          `${curationConverge.commandsRewritten.length} command(s) and ${curationConverge.agentsRewritten.length} agent(s) ` +
+          `rewritten, ${curationConverge.unchanged} already current`,
         );
       }
     } catch (err) {
-      installWarnings.push(`Learning variant convergence failed — ${err instanceof Error ? err.message : String(err)}`);
+      installWarnings.push(`Curation variant convergence failed — ${err instanceof Error ? err.message : String(err)}`);
     }
 
     // Converge compliance artifacts (always converge, never short-circuit).
@@ -2577,7 +2577,7 @@ export const initCommand = new Command('init')
     }
 
     // Write .devflow/config.json — facts about this repo. The machine switches for
-    // memory/learning/knowledge are the manifest's; a hand-written `features`
+    // memory/curation/knowledge are the manifest's; a hand-written `features`
     // object here only narrows them and is carried, never written
     // (D-FEATURES-NARROW-ONLY; the managed write drops the retired top-level
     // per-repo keys). A managed
@@ -2842,7 +2842,7 @@ export const initCommand = new Command('init')
         memory: memoryEnabled,
         hud: hudEnabled,
         knowledge: knowledgeEnabled,
-        curation: learningEnabled,
+        curation: curationEnabled,
         rules: rulesEnabled,
         // FlagsRecord written directly — key-presence encodes "known".
         // view-mode is encoded as flags['view-mode'] (the resolved final value).
@@ -2887,9 +2887,9 @@ export const initCommand = new Command('init')
     // Only now that the machine-wide switch is on disk (D-INIT-DRAIN-AFTER-SWITCH).
     const refusedDrains = await drainDisabledFeatureQueues({
       gitRoot,
-      ledgerRoot: learningEnabled || gitRoot === null ? null : await getLedgerRoot(),
+      ledgerRoot: curationEnabled || gitRoot === null ? null : await getLedgerRoot(),
       memoryEnabled,
-      learningEnabled,
+      curationEnabled,
       manifestWritten: trackerLifecycle.manifestWritten,
     });
     for (const line of refusedDrains) p.log.warn(line);

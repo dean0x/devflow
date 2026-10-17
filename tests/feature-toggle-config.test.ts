@@ -1,7 +1,8 @@
 /**
- * `devflow memory|learning|knowledge --enable|--disable`, run through the
+ * `devflow memory|curation|knowledge --enable|--disable`, run through the
  * compiled CLI (D-FEATURES-NARROW-ONLY): each toggle writes the one
- * machine switch, `features.<feature>` in ~/.devflow/manifest.json, and
+ * machine switch, `features.<feature>` in ~/.devflow/manifest.json (curation
+ * is one switch under two keys, `curation` and `learning`), and
  * never the per-repo `.devflow/config.json` — whose top-level
  * memory/learning/knowledge keys are retired. The config file round-trips byte-for-byte (seed,
  * run the toggle, re-read the file), and the manifest changes only in the one
@@ -21,8 +22,8 @@ const CLI = requireBuiltCli();
 const TOGGLES = [
   { feature: 'memory', flag: '--enable', enabled: true },
   { feature: 'memory', flag: '--disable', enabled: false },
-  { feature: 'learning', flag: '--enable', enabled: true },
-  { feature: 'learning', flag: '--disable', enabled: false },
+  { feature: 'curation', flag: '--enable', enabled: true },
+  { feature: 'curation', flag: '--disable', enabled: false },
   { feature: 'knowledge', flag: '--enable', enabled: true },
   { feature: 'knowledge', flag: '--disable', enabled: false },
 ] as const;
@@ -110,7 +111,7 @@ describe('feature toggles write the machine-wide switch, never the per-repo conf
       memory: !enabled, learning: !enabled, curation: !enabled, knowledge: !enabled,
       [feature]: enabled,
       // The curation switch is one setting under two keys: a toggle writes both (#529).
-      ...(feature === 'learning' ? { curation: enabled } : {}),
+      ...(feature === 'curation' ? { learning: enabled } : {}),
     });
     expect(after.teamNote).toBe('kept');
     expect(after.updatedAt).not.toBe('2026-01-01T00:00:00.000Z');
@@ -119,14 +120,14 @@ describe('feature toggles write the machine-wide switch, never the per-repo conf
   it.each([
     { flag: '--enable', enabled: true },
     { flag: '--disable', enabled: false },
-  ] as const)('★ devflow learning $flag leaves a personal features.learning and features.curation opt-out byte-identical (TP-13)', ({ flag, enabled }) => {
+  ] as const)('★ devflow curation $flag leaves a personal features.learning and features.curation opt-out byte-identical (TP-13)', ({ flag, enabled }) => {
     seedManifest({ memory: true, learning: !enabled, knowledge: true });
     const configBody = '{\n  "reviewPublication": "full",\n  "features": { "learning": false, "curation": false }\n}\n';
     seedConfig(configBody);
 
-    const result = runToggle('learning', flag);
+    const result = runToggle('curation', flag);
 
-    expect(result.status, `devflow learning ${flag} failed:\n${result.out}`).toBe(0);
+    expect(result.status, `devflow curation ${flag} failed:\n${result.out}`).toBe(0);
     expect(fs.readFileSync(configPath(), 'utf-8')).toBe(configBody);
     expect(readManifest().features.learning).toBe(enabled);
     expect(readManifest().features.curation).toBe(enabled);
@@ -135,12 +136,12 @@ describe('feature toggles write the machine-wide switch, never the per-repo conf
   it.each([
     { flag: '--enable', enabled: true },
     { flag: '--disable', enabled: false },
-  ] as const)('devflow learning $flag on a manifest that holds only the old key writes both keys equal (TP-11)', ({ flag, enabled }) => {
+  ] as const)('devflow curation $flag on a manifest that holds only the old key writes both keys equal (TP-11)', ({ flag, enabled }) => {
     seedManifest({ memory: true, learning: !enabled, knowledge: true });
 
-    const result = runToggle('learning', flag);
+    const result = runToggle('curation', flag);
 
-    expect(result.status, `devflow learning ${flag} failed:\n${result.out}`).toBe(0);
+    expect(result.status, `devflow curation ${flag} failed:\n${result.out}`).toBe(0);
     expect(readManifest().features).toMatchObject({ learning: enabled, curation: enabled });
   }, 60_000);
 

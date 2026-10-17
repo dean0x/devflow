@@ -32,7 +32,7 @@ import { existsSync, readFileSync } from 'fs'
 import * as path from 'path'
 
 import { GATE_LEVELS } from '../../src/core/gate-level.js'
-import { BUILT_IN_SPAWN_TYPES, ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, agentReferencePath, readAgentReference, requireDistFile, resolveAllAgents, resolveLearningOffSource, sectionBetween, tableRows } from '../helpers.js'
+import { BUILT_IN_SPAWN_TYPES, ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, agentReferencePath, readAgentReference, requireDistFile, resolveAllAgents, resolveCurationOffSource, sectionBetween, tableRows } from '../helpers.js'
 
 // ---------------------------------------------------------------------------
 // Independent oracle: written by hand from the issue and the gate decisions, never parsed
@@ -847,7 +847,7 @@ export function collectReportDefects(body: string): string[] {
 // ---------------------------------------------------------------------------
 
 const VARIANTS: ReadonlyArray<{ label: string; body: string }> = (() => {
-  const off = resolveLearningOffSource('commands', 'plan')
+  const off = resolveCurationOffSource('commands', 'plan')
   if (off === null) throw new Error('dist/curation-off/commands/plan.md is absent: run `npm run build:mds`')
   return [
     { label: 'learning on', body: requireDistFile('plan.md') },

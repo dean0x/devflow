@@ -69,7 +69,7 @@ export interface SwitchRow {
 }
 
 const ALL_ON = { memory: true, learning: true, knowledge: true } as const;
-const LEARNING_OFF = { memory: true, learning: false, knowledge: true } as const;
+const CURATION_OFF = { memory: true, learning: false, knowledge: true } as const;
 
 /** A manifest with every switch on, as `devflow init` writes it. */
 export const MANIFEST_ON = { version: '2.5.0', features: { memory: true, learning: true, knowledge: true } };
@@ -282,7 +282,7 @@ export const SETTINGS_SWITCH_TABLE: readonly SwitchRow[] = [
     manifest: { features: { curation: false } },
     project: null,
     personal: null,
-    expect: LEARNING_OFF,
+    expect: CURATION_OFF,
   },
   {
     name: 'machine curation:true alone leaves learning on',
@@ -296,21 +296,21 @@ export const SETTINGS_SWITCH_TABLE: readonly SwitchRow[] = [
     manifest: { features: { curation: true, learning: false } },
     project: null,
     personal: null,
-    expect: LEARNING_OFF,
+    expect: CURATION_OFF,
   },
   {
     name: 'machine pair curation:false learning:true resolves off',
     manifest: { features: { curation: false, learning: true } },
     project: null,
     personal: null,
-    expect: LEARNING_OFF,
+    expect: CURATION_OFF,
   },
   {
     name: 'machine pair curation:false learning:false is off',
     manifest: { features: { curation: false, learning: false } },
     project: null,
     personal: null,
-    expect: LEARNING_OFF,
+    expect: CURATION_OFF,
   },
   {
     name: 'machine pair curation:true learning:true is on',
@@ -338,14 +338,14 @@ export const SETTINGS_SWITCH_TABLE: readonly SwitchRow[] = [
     manifest: { features: { curation: 'true', learning: false } },
     project: null,
     personal: null,
-    expect: LEARNING_OFF,
+    expect: CURATION_OFF,
   },
   {
     name: 'machine non-boolean current keys let the pre-rename decisions:false decide',
     manifest: { features: { curation: 'x', learning: 0, decisions: false } },
     project: null,
     personal: null,
-    expect: LEARNING_OFF,
+    expect: CURATION_OFF,
   },
   {
     name: 'machine non-boolean curation alone is ignored: learning stays on',
@@ -359,14 +359,14 @@ export const SETTINGS_SWITCH_TABLE: readonly SwitchRow[] = [
     manifest: { features: { memory: true, curation: false, knowledge: true } },
     project: null,
     personal: null,
-    expect: LEARNING_OFF,
+    expect: CURATION_OFF,
   },
   {
     name: 'a literal true in either repository key never widens a machine curation:false',
     manifest: { features: { curation: false } },
     project: '{"features":{"curation":true,"learning":true}}',
     personal: '{"features":{"curation":true}}',
-    expect: LEARNING_OFF,
+    expect: CURATION_OFF,
   },
   // Repository layer (project.json and config.json).
   {
@@ -374,28 +374,28 @@ export const SETTINGS_SWITCH_TABLE: readonly SwitchRow[] = [
     manifest: MANIFEST_ON,
     project: '{"version":1,"features":{"curation":false}}',
     personal: null,
-    expect: LEARNING_OFF,
+    expect: CURATION_OFF,
   },
   {
     name: 'personal curation:false narrows learning',
     manifest: MANIFEST_ON,
     project: null,
     personal: '{"reviewPublication":"auto","features":{"curation":false}}',
-    expect: LEARNING_OFF,
+    expect: CURATION_OFF,
   },
   {
     name: 'project curation:true with learning:false narrows learning',
     manifest: MANIFEST_ON,
     project: '{"features":{"curation":true,"learning":false}}',
     personal: null,
-    expect: LEARNING_OFF,
+    expect: CURATION_OFF,
   },
   {
     name: 'project curation:false with learning:true narrows learning',
     manifest: MANIFEST_ON,
     project: '{"features":{"curation":false,"learning":true}}',
     personal: null,
-    expect: LEARNING_OFF,
+    expect: CURATION_OFF,
   },
   {
     name: 'project curation:true and learning:true narrow nothing',
@@ -416,7 +416,7 @@ export const SETTINGS_SWITCH_TABLE: readonly SwitchRow[] = [
     manifest: MANIFEST_ON,
     project: '{"features":{"curation":"false","learning":false}}',
     personal: null,
-    expect: LEARNING_OFF,
+    expect: CURATION_OFF,
   },
   {
     name: 'a non-boolean curation alone narrows nothing',
@@ -437,35 +437,35 @@ export const SETTINGS_SWITCH_TABLE: readonly SwitchRow[] = [
     manifest: MANIFEST_ON,
     project: '{"features":{"curation":true,"curation":true,"learning":false}}',
     personal: null,
-    expect: LEARNING_OFF,
+    expect: CURATION_OFF,
   },
   {
     name: 'a duplicated learning does not hide a curation:false',
     manifest: MANIFEST_ON,
     project: '{"features":{"learning":false,"learning":false,"curation":false}}',
     personal: null,
-    expect: LEARNING_OFF,
+    expect: CURATION_OFF,
   },
   {
     name: 'a \\u-escaped curation key still narrows',
     manifest: MANIFEST_ON,
     project: '{"f\\u0065atures":{"cur\\u0061tion":false}}',
     personal: null,
-    expect: LEARNING_OFF,
+    expect: CURATION_OFF,
   },
   {
     name: 'a \\u-escaped learning key beside curation:true still narrows',
     manifest: MANIFEST_ON,
     project: '{"features":{"curation":true,"le\\u0061rning":false}}',
     personal: null,
-    expect: LEARNING_OFF,
+    expect: CURATION_OFF,
   },
   {
     name: 'a \\u-escaped learning key beside curation:true in config.json still narrows',
     manifest: MANIFEST_ON,
     project: null,
     personal: '{"features":{"curation":true,"le\\u0061rning":false}}',
-    expect: LEARNING_OFF,
+    expect: CURATION_OFF,
   },
   {
     name: 'a top-level curation key narrows nothing, in either file',
@@ -486,14 +486,14 @@ export const SETTINGS_SWITCH_TABLE: readonly SwitchRow[] = [
     manifest: MANIFEST_ON,
     project: '{ "features" : { "curation" :\n false , "learning" : true } }',
     personal: null,
-    expect: LEARNING_OFF,
+    expect: CURATION_OFF,
   },
   {
     name: 'a nested object before curation:false still narrows',
     manifest: MANIFEST_ON,
     project: '{"features":{"future":{"a":{"b":1}},"curation":false}}',
     personal: null,
-    expect: LEARNING_OFF,
+    expect: CURATION_OFF,
   },
   {
     name: 'a "false" inside an unrelated curation string narrows nothing',

@@ -1,15 +1,15 @@
 /**
- * The CLI's view of the learning store — a typed seam onto the package's own
+ * The CLI's view of the curation store — a typed seam onto the package's own
  * `hooks/lib/curation-store.cjs`, never a second implementation of it.
  *
- * D-LEARNING-STORE-SEAM: `devflow learning` reads and writes the learning tree only
+ * D-LEARNING-STORE-SEAM: `devflow curation` reads and writes the curation tree only
  * through the store module json-helper's ops and the hooks run, loaded with the
  * evidence-policy seam's `loadScript` from the package's own scripts directory and
- * shape-checked against LEARNING_STORE_SURFACE; the interfaces below are
+ * shape-checked against CURATION_STORE_SURFACE; the interfaces below are
  * TRANSCRIBED from the store's JSDoc and are this side's only shape authority.
  * Reason: the CLI's own TypeScript reader judged every row by the v1 shape, so it
  * counted v2 observations as invalid, and its `--clear` truncated the log without
- * the lock every learning writer takes.
+ * the lock every curation writer takes.
  *
  * As with the evidence resolver (D-POLICY-CJS-SEAM), the CLI loads the package
  * copy, which `npm` installs with this CLI, not `~/.devflow/scripts`, which
@@ -26,7 +26,7 @@ export const CURATION_STORE_SCRIPT_NAME = join('hooks', 'lib', 'curation-store.c
 // ── Transcribed shapes (curation-store.cjs JSDoc) ──────────────────────────────
 
 /** A ledger or log row as the store read it: one JSON object, any keys. */
-export type LearningRow = Readonly<Record<string, unknown>>;
+export type CurationRow = Readonly<Record<string, unknown>>;
 
 /** A line the store read and skipped because it is not one JSON object. */
 export interface RejectedLine {
@@ -34,10 +34,10 @@ export interface RejectedLine {
   readonly text: string;
 }
 
-/** `readLearningState`'s answer: both files' rows, and their malformed lines. */
-export interface LearningState {
-  readonly ledgerRows: readonly LearningRow[];
-  readonly logRows: readonly LearningRow[];
+/** `readCurationState`'s answer: both files' rows, and their malformed lines. */
+export interface CurationState {
+  readonly ledgerRows: readonly CurationRow[];
+  readonly logRows: readonly CurationRow[];
   readonly rejected: { readonly ledger: readonly RejectedLine[]; readonly log: readonly RejectedLine[] };
 }
 
@@ -78,7 +78,7 @@ export interface IntegrityEntry {
 }
 
 /** `buildListing`'s answer. */
-export interface LearningListing {
+export interface CurationListing {
   readonly active: readonly ListingEntry[];
   readonly inactive: readonly ListingEntry[];
   readonly observations: readonly ListingObservation[];
@@ -89,20 +89,20 @@ export interface LearningListing {
 /** `showByKey`'s answer: `malformed` is present only when lines were skipped. */
 export interface ShownEntry {
   readonly key: string;
-  readonly ledger: readonly LearningRow[];
-  readonly log: LearningRow | null;
-  readonly history_versions: readonly LearningRow[];
+  readonly ledger: readonly CurationRow[];
+  readonly log: CurationRow | null;
+  readonly history_versions: readonly CurationRow[];
   readonly flags: ReadonlyArray<{ readonly anchor_id: string; readonly flag: string; readonly fields: readonly string[] }>;
   readonly malformed?: { readonly ledger: number; readonly log: number };
 }
 
 /** Why a store function refused. `kind` names the case; `message` names the op and says what was written. */
-export interface LearningStoreError {
+export interface CurationStoreError {
   readonly kind: string;
   readonly message: string;
 }
 
-export type LearningStoreResult<T> = Result<T, LearningStoreError>;
+export type CurationStoreResult<T> = Result<T, CurationStoreError>;
 
 /** The names and directories a ledger move takes; the last three default to the machine's own. */
 export interface LedgerMoveOptions {
@@ -145,99 +145,112 @@ export interface LedgerSweepOutcome {
   readonly notes: readonly string[];
 }
 
+/** One backup folder a move left under `.devflow`, with the rows its unswept queue files still hold. */
+export interface LedgerBackupRows {
+  readonly name: string;
+  readonly pendingRows: number;
+}
+
 /**
  * The part of the store's `module.exports` the CLI calls. Each function refuses
- * without `.devflow/curation/` (error kind `no-learning-dir`); the writers refuse a
+ * without `.devflow/curation/` (error kind `no-curation-dir`); the writers refuse a
  * `.devflow` or `.devflow/curation` that is a symbolic link, changing nothing (error
- * kind `not-a-directory`), and wait at most `timeoutMs` for the learning lock
+ * kind `not-a-directory`), and wait at most `timeoutMs` for the curation lock
  * (error kind `busy`).
  */
-export interface LearningStoreModule {
+export interface CurationStoreModule {
   /** The inactive entry statuses, in the store's order. */
   readonly INACTIVE_STATUSES: readonly string[];
   /** An entry id: ADR-NNN or PF-NNN. */
   readonly ANCHOR_ID_RE: RegExp;
   /** Both files' rows, read-only; an absent file, or one that is a symbolic link or not a regular file, reads as empty. */
-  readLearningState(root: string): LearningState;
+  readCurationState(root: string): CurationState;
   /** The listing of rows already read; without `scopeMatches` no scope is checked. */
   buildListing(
-    ledger: readonly LearningRow[],
-    log: readonly LearningRow[],
+    ledger: readonly CurationRow[],
+    log: readonly CurationRow[],
     opts?: {
       readonly scopeMatches?: (glob: string) => boolean;
       readonly rejected?: { readonly ledger?: readonly unknown[]; readonly log?: readonly unknown[] };
     },
-  ): LearningListing;
+  ): CurationListing;
   /** The listing behind `list`, read-only, every glob scope checked against the tracked files. */
-  readListing(root: string, opts?: { readonly scopeMatches?: (glob: string) => boolean }): LearningStoreResult<LearningListing>;
+  readListing(root: string, opts?: { readonly scopeMatches?: (glob: string) => boolean }): CurationStoreResult<CurationListing>;
   /** The text `list` prints, with no final newline. */
-  formatListing(listing: LearningListing): string;
+  formatListing(listing: CurationListing): string;
   /** The entry behind `show <anchor|obs_id>`, read-only. */
-  showByKey(root: string, key: string): LearningStoreResult<ShownEntry>;
+  showByKey(root: string, key: string): CurationStoreResult<ShownEntry>;
   /** Make an inactive entry active again and re-render; throws TypeError for a malformed anchor id. */
   restoreAnchor(
     root: string,
     anchorId: string,
     opts?: { readonly now?: number; readonly timeoutMs?: number },
-  ): LearningStoreResult<{ readonly anchor_id: string; readonly status: string }>;
+  ): CurationStoreResult<{ readonly anchor_id: string; readonly status: string }>;
   /** Drop the log rows no ledger row carries (D-CLEAR-UNREFERENCED). */
   clearUnreferenced(
     root: string,
     opts?: { readonly now?: number; readonly timeoutMs?: number },
-  ): LearningStoreResult<{ readonly cleared: number; readonly kept: number }>;
-  /** Remove every learning file, then the emptied learning directory (D-RESET-UNDER-LOCK). */
-  resetLearning(
+  ): CurationStoreResult<{ readonly cleared: number; readonly kept: number }>;
+  /** Remove every curation file, then the emptied curation directory (D-RESET-UNDER-LOCK). */
+  resetCuration(
     root: string,
     opts?: { readonly timeoutMs?: number },
-  ): LearningStoreResult<{ readonly removed: number }>;
+  ): CurationStoreResult<{ readonly removed: number }>;
   /**
    * Move the old ledger folder to the new name, once, or merge it into a new folder
    * that already exists. Never waits on a lock. Error kinds: `invalid-input`, `refused`
    * (the root or a link among the set is unsafe; nothing was changed), `io-error`.
    */
-  moveLedger(root: string, opts: LedgerMoveOptions): LearningStoreResult<LedgerMoveOutcome>;
+  moveLedger(root: string, opts: LedgerMoveOptions): CurationStoreResult<LedgerMoveOutcome>;
   /** Merge what the backups a move left hold into the new folder's pending queue; same error kinds as `moveLedger`. */
-  sweepLedgerBackups(root: string, opts: LedgerMoveOptions): LearningStoreResult<LedgerSweepOutcome>;
+  sweepLedgerBackups(root: string, opts: LedgerMoveOptions): CurationStoreResult<LedgerSweepOutcome>;
+  /**
+   * The backup folders under `.devflow`, in name order, each with the count of rows its pending, processing,
+   * private and overflow files still hold (swept files count for nothing). Read-only: takes no lock, writes
+   * nothing, follows no link. Error kinds: `refused` (the root is not an absolute path), `io-error`.
+   */
+  backupPendingRows(root: string): CurationStoreResult<{ readonly backups: readonly LedgerBackupRows[] }>;
 }
 
 /**
- * Every key of LearningStoreModule and the runtime kind the loader requires of
+ * Every key of CurationStoreModule and the runtime kind the loader requires of
  * it. `satisfies` makes the compiler reject an interface key missing here.
  */
-export const LEARNING_STORE_SURFACE = Object.freeze({
+export const CURATION_STORE_SURFACE = Object.freeze({
   INACTIVE_STATUSES: 'string-array',
   ANCHOR_ID_RE: 'regexp',
-  readLearningState: 'function',
+  readCurationState: 'function',
   buildListing: 'function',
   readListing: 'function',
   formatListing: 'function',
   showByKey: 'function',
   restoreAnchor: 'function',
   clearUnreferenced: 'function',
-  resetLearning: 'function',
+  resetCuration: 'function',
   moveLedger: 'function',
   sweepLedgerBackups: 'function',
-} as const satisfies Record<keyof LearningStoreModule, SurfaceKind>);
+  backupPendingRows: 'function',
+} as const satisfies Record<keyof CurationStoreModule, SurfaceKind>);
 
-export type LearningStoreLoad = Result<LearningStoreModule, EvidencePolicyLoadError>;
+export type CurationStoreLoad = Result<CurationStoreModule, EvidencePolicyLoadError>;
 
 /**
- * Load the learning store from `dir` (default: the package's own scripts
+ * Load the curation store from `dir` (default: the package's own scripts
  * directory) and shape-check its surface. Never throws: a missing file is
  * `not-found`; a module that throws on load or lacks a surface key is `unusable`.
  */
-export function loadLearningStore(dir: string = scriptsDir()): LearningStoreLoad {
-  return loadScript<LearningStoreModule>(join(dir, CURATION_STORE_SCRIPT_NAME), LEARNING_STORE_SURFACE);
+export function loadCurationStore(dir: string = scriptsDir()): CurationStoreLoad {
+  return loadScript<CurationStoreModule>(join(dir, CURATION_STORE_SCRIPT_NAME), CURATION_STORE_SURFACE);
 }
 
 /**
  * Why the store cannot be used, and the remedy: a package reinstall, since the
  * CLI loads the package's own copy, which `devflow init` does not restore.
  */
-export function formatLearningStoreUnavailable(error: EvidencePolicyLoadError): string {
+export function formatCurationStoreUnavailable(error: EvidencePolicyLoadError): string {
   switch (error.kind) {
-    case 'not-found': return 'learning store not found — reinstall devflow-kit';
-    case 'unusable': return 'learning store failed to load — reinstall devflow-kit';
+    case 'not-found': return 'curation store not found — reinstall devflow-kit';
+    case 'unusable': return 'curation store failed to load — reinstall devflow-kit';
     default: {
       const exhaustive: never = error;
       return exhaustive;

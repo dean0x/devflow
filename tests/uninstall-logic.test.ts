@@ -9,7 +9,7 @@ import { DEVFLOW_PLUGINS, getAllAgentNames, parsePluginSelection, skillsOf, type
 import { TRACKER_ATTEMPTS_NAMES, TRACKER_PROVIDER_IDS, TRACKER_STAGED_PREFIX } from '../src/core/tracker.js';
 import { modelCacheDir } from '../src/core/cache.js';
 import { CLAUDE_MD_AUDIT_STAMP_FILE, CLAUDE_MD_AUDIT_STAMP_TMP_PREFIX } from '../src/core/claude-md-audit.js';
-import { loadLearningStore } from '../src/core/curation-store.js';
+import { loadCurationStore } from '../src/core/curation-store.js';
 import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
 import { DEVFLOW_GITIGNORE_BLOCK, DEVFLOW_TRACKED_PATHS } from '../src/targets/claude-code/post-install.js';
 
@@ -912,7 +912,7 @@ describe('the move-lock family (installArtifactPaths and resolveInstallArtifactP
   });
 
   it('the lock name the store builds has the shape the artifact list matches', () => {
-    const loaded = loadLearningStore();
+    const loaded = loadCurationStore();
     if (!loaded.ok) throw new Error('the store must load');
     const key = (loaded.value as unknown as { curationMoveLockKey(root: string): string }).curationMoveLockKey('/some/ledger/root');
     expect(key).toMatch(/^[0-9a-f]{16}$/);

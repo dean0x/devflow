@@ -122,7 +122,7 @@ export interface ParsedSignals {
     /** Calls that gave an `offset` or a `limit`. */
     readonly ranged: number;
   };
-  /** Read calls that opened the learning ledger: `index.md`, and `decisions.md` or `pitfalls.md`. */
+  /** Read calls that opened the curation ledger: `index.md`, and `decisions.md` or `pitfalls.md`. */
   readonly ledgerReads: { readonly index: number; readonly bodies: number };
   /** ADR/PF ids in assistant text. */
   readonly citations: { readonly total: number; readonly distinct: number };

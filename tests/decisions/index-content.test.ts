@@ -21,7 +21,7 @@ import * as path from 'path'
 import * as fs from 'fs'
 import * as os from 'os'
 
-import { makeV2LedgerRow } from './learning-fixtures.js'
+import { makeV2LedgerRow } from './curation-fixtures.js'
 
 const ROOT = path.resolve(import.meta.dirname, '../..')
 const require = createRequire(import.meta.url)

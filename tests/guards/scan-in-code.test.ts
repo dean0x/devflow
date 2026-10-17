@@ -35,7 +35,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { CODE_AGENT_TYPES, codeSlugOf, resolveAgentSource, resolveLearningOffSource, splitFrontmatter } from '../helpers.js';
+import { CODE_AGENT_TYPES, codeSlugOf, resolveAgentSource, resolveCurationOffSource, splitFrontmatter } from '../helpers.js';
 
 // ---------------------------------------------------------------------------
 // The pinned text
@@ -134,8 +134,8 @@ function bodyOf(text: string, where: string): string {
 }
 
 /** The curation-off variant of an agent; absent means the build did not run. */
-function learningOffBody(name: string): string {
-  const text = resolveLearningOffSource('agents', name);
+function curationOffBody(name: string): string {
+  const text = resolveCurationOffSource('agents', name);
   if (text === null) {
     throw new Error(`dist/curation-off/agents/${name}.md is absent — run \`npm run build\` first`);
   }
@@ -164,7 +164,7 @@ describe('Code carries one conditional, vendor-neutral scan block (D-SCAN-IN-COD
 
   it('the curation-off prompt of each Code variant holds the same block', () => {
     for (const agentType of CODE_AGENT_TYPES) {
-      expect(collectScanBlockDefects(learningOffBody(codeSlugOf(agentType))), agentType).toEqual([]);
+      expect(collectScanBlockDefects(curationOffBody(codeSlugOf(agentType))), agentType).toEqual([]);
     }
   });
 
@@ -242,7 +242,7 @@ describe('Harden and Polish say scanning runs in the Code agent (D-SCAN-IN-CODE)
   it('Harden, curation-on and curation-off, carries the line once', () => {
     expect(resolveAgentSource('harden').origin).toBe('dist');
     expect(collectNoScanLineDefects(agentBody('harden'))).toEqual([]);
-    expect(collectNoScanLineDefects(learningOffBody('harden'))).toEqual([]);
+    expect(collectNoScanLineDefects(curationOffBody('harden'))).toEqual([]);
   });
 
   it('Polish carries the line once', () => {

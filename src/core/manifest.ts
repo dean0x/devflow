@@ -89,7 +89,7 @@ export interface ManifestData {
      * Behavior rule switch (D-BEHAVIOR-OPT-IN): OPT-IN, default off. The feature-owned
      * rule `rules/devflow/behavior.md` is installed only while this is true AND `rules`
      * is true. Absent or malformed (anything but a boolean) in the manifest reads as
-     * false — unlike knowledge and learning, whose absent key reads as on.
+     * false — unlike knowledge and curation, whose absent key reads as on.
      *
      * NEVER add `behavior` to the hard-null validation set below: every existing install
      * lacks the key, and a manifest that fails validation reads as "no prior install".
@@ -237,7 +237,7 @@ export async function readManifest(
     const features = data.features as Record<string, unknown>;
 
     // D-FEATURES-ABSENT-ON (a sub-decision of D-FEATURES-NARROW-ONLY,
-    // src/core/feature-switch.ts): knowledge and learning are machine-wide
+    // src/core/feature-switch.ts): knowledge and curation are machine-wide
     // switches, and every runtime gate — queue_read_gates in the hooks,
     // isMachineFeatureOn in the CLI, the knowledge write-back prose gate — reads
     // an ABSENT key as ON. This reader must agree: init seeds from it and every

@@ -17,7 +17,7 @@
  * curation variants (D-LEARNING-VARIANT-INSTALL), so their allowlist is the manifest
  * plus that surface and nothing wider: the command and agent files of the variant
  * roster (the files under dist/curation-off, the converge's own roster source) and
- * the learning-gated skill directories. The roster is read from the build, not typed
+ * the curation-gated skill directories. The roster is read from the build, not typed
  * here, so a new arm is admitted with no edit; it is matched file by file, never as a
  * `commands/**` or `agents/**` subtree, so a stray write to any other agent, command
  * or skill still fails the fence. In a row the surface is the one entry
@@ -51,7 +51,7 @@ import { skillsCommand } from '../src/cli/commands/skills.js'
 import { hudCommand } from '../src/cli/commands/hud.js'
 import { flagsCommand } from '../src/cli/commands/flags.js'
 import { knowledgeCommand } from '../src/cli/commands/knowledge/index.js'
-import { learningCommand } from '../src/cli/commands/learning.js'
+import { curationCommand } from '../src/cli/commands/curation.js'
 import { rulesCommand } from '../src/cli/commands/rules.js'
 import { debugCommand } from '../src/cli/commands/debug.js'
 import { securityCommand } from '../src/cli/commands/security.js'
@@ -96,16 +96,16 @@ const TRACKER_SENTINEL = '<HOME>/.devflow/.tracker.enabled'
 const SKILL_SHADOWS = '<HOME>/.devflow/skills/**'
 const AGENT_MODELS = '<HOME>/.devflow/agent-models.json'
 const REPO_MEMORY = '<REPO>/.devflow/memory/**'
-const REPO_LEARNING = '<REPO>/.devflow/curation/**'
+const REPO_CURATION = '<REPO>/.devflow/curation/**'
 
 const NONE: readonly string[] = []
 
-/** The prompt kinds the learning converge rewrites, installed at `<HOME>/.claude/<kind>/devflow/<file>`. */
+/** The prompt kinds the curation converge rewrites, installed at `<HOME>/.claude/<kind>/devflow/<file>`. */
 const CURATION_VARIANT_KINDS = ['commands', 'agents'] as const
 
 /**
- * The surfaces a learning toggle's converge may write (D-LEARNING-VARIANT-FENCE):
- * each roster file's installed path, and each learning-gated skill directory.
+ * The surfaces a curation toggle's converge may write (D-LEARNING-VARIANT-FENCE):
+ * each roster file's installed path, and each curation-gated skill directory.
  *
  * The roster is the `.md` files under dist/curation-off/<kind>, read through the
  * converge's own `curationOffDir`. An absent directory throws rather than yielding an
@@ -145,7 +145,7 @@ function seedFile(sb: Sandbox, rel: string, content: string): void {
 const seedMemoryQueue = (sb: Sandbox): void =>
   seedFile(sb, '.devflow/memory/.pending-turns.jsonl', `${JSON.stringify({ role: 'user', content: 'fence', ts: 1 })}\n`)
 
-const seedLearningState = (sb: Sandbox): void => {
+const seedCurationState = (sb: Sandbox): void => {
   seedFile(sb, '.devflow/curation/decisions-log.jsonl', `${JSON.stringify({ id: 'obs_fence', type: 'decision' })}\n`)
   seedFile(sb, '.devflow/curation/.pending-turns.jsonl', `${JSON.stringify({ role: 'user', content: 'fence', ts: 1 })}\n`)
 }
@@ -155,7 +155,7 @@ const FENCE_ENTRY = 'PF-001'
 const FENCE_CONTENT = {
   type: 'pitfall',
   title: 'Fenced entry',
-  rule: 'A learning command writes only inside the learning directory.',
+  rule: 'A curation command writes only inside the curation directory.',
   why: 'A write anywhere else is a write nothing reads back.',
   scope: ['area:fence'],
   provenance: 'write-set fence',
@@ -217,16 +217,16 @@ export const FENCE_ROWS: readonly FenceRow[] = [
   { args: ['memory', '--clear'], allow: [REPO_MEMORY], mustWrite: true, seed: seedMemoryQueue },
   { args: ['memory', '--status'], allow: NONE, mustWrite: false },
 
-  { args: ['learning', '--disable'], allow: [MANIFEST, CURATION_VARIANT_SURFACE], mustWrite: true },
-  { args: ['learning', '--enable'], allow: [MANIFEST, CURATION_VARIANT_SURFACE], mustWrite: true },
-  { args: ['learning', '--restore', FENCE_ENTRY], allow: [REPO_LEARNING], mustWrite: true, seed: seedRetiredEntry },
-  { args: ['learning', '--list'], allow: NONE, mustWrite: false },
-  { args: ['learning', '--show', FENCE_ENTRY], allow: NONE, mustWrite: false },
-  { args: ['learning', '--clear'], allow: [REPO_LEARNING], mustWrite: true, seed: seedLearningState },
-  { args: ['learning', '--reset'], allow: [REPO_LEARNING], mustWrite: true, seed: seedLearningState },
-  // The reset above left no learning directory: a reset with nothing to reset writes nothing.
-  { args: ['learning', '--reset'], allow: NONE, mustWrite: false, label: 'with no learning data' },
-  { args: ['learning', '--status'], allow: NONE, mustWrite: false },
+  { args: ['curation', '--disable'], allow: [MANIFEST, CURATION_VARIANT_SURFACE], mustWrite: true },
+  { args: ['curation', '--enable'], allow: [MANIFEST, CURATION_VARIANT_SURFACE], mustWrite: true },
+  { args: ['curation', '--restore', FENCE_ENTRY], allow: [REPO_CURATION], mustWrite: true, seed: seedRetiredEntry },
+  { args: ['curation', '--list'], allow: NONE, mustWrite: false },
+  { args: ['curation', '--show', FENCE_ENTRY], allow: NONE, mustWrite: false },
+  { args: ['curation', '--clear'], allow: [REPO_CURATION], mustWrite: true, seed: seedCurationState },
+  { args: ['curation', '--reset'], allow: [REPO_CURATION], mustWrite: true, seed: seedCurationState },
+  // The reset above left no curation directory: a reset with nothing to reset writes nothing.
+  { args: ['curation', '--reset'], allow: NONE, mustWrite: false, label: 'with no curation data' },
+  { args: ['curation', '--status'], allow: NONE, mustWrite: false },
 
   { args: ['knowledge', '--disable'], allow: [MANIFEST], mustWrite: true },
   { args: ['knowledge', '--enable'], allow: [MANIFEST], mustWrite: true },
@@ -328,7 +328,7 @@ export const UNFENCED_ACTIONS: Readonly<Record<string, string>> = {
 /** The command objects the CLI registers, for their option definitions. */
 const COMMANDS: readonly Command[] = [
   initCommand, uninstallCommand, ambientCommand, memoryCommand, skillsCommand, hudCommand, flagsCommand,
-  knowledgeCommand, learningCommand, rulesCommand, debugCommand, securityCommand, safeDeleteCommand,
+  knowledgeCommand, curationCommand, rulesCommand, debugCommand, securityCommand, safeDeleteCommand,
   proxyCommand, agentsCommand, complianceCommand, trackerCommand, behaviorCommand, gatesCommand,
 ]
 
@@ -411,7 +411,7 @@ describe('write-set fence: the curation-variant allowlist', () => {
   const roster = (kind: 'commands' | 'agents'): string[] =>
     CURATION_VARIANT_PATHS.filter(entry => entry.startsWith(`<HOME>/.claude/${kind}/devflow/`))
 
-  it('is the dist/curation-off roster, file by file, plus the learning-gated skill directory', () => {
+  it('is the dist/curation-off roster, file by file, plus the curation-gated skill directory', () => {
     // Non-vacuity: the roster really was read, and carries both kinds.
     expect(roster('commands').length).toBeGreaterThan(0)
     expect(roster('agents').length).toBeGreaterThan(0)
@@ -516,10 +516,10 @@ describe('write-set fence coverage', () => {
   })
 
   it('counts the curation-variant surface once, and every hand-written entry once each', () => {
-    const learningRows = FENCE_ROWS.filter(row => row.allow.includes(CURATION_VARIANT_SURFACE))
-    // Non-vacuity: the surface really is in the table, in both learning toggles.
-    expect(learningRows.map(rowName)).toEqual(['devflow learning --disable', 'devflow learning --enable'])
-    expect(allowlistSize(learningRows)).toBe(2) // the manifest and the surface
+    const curationRows = FENCE_ROWS.filter(row => row.allow.includes(CURATION_VARIANT_SURFACE))
+    // Non-vacuity: the surface really is in the table, in both curation toggles.
+    expect(curationRows.map(rowName)).toEqual(['devflow curation --disable', 'devflow curation --enable'])
+    expect(allowlistSize(curationRows)).toBe(2) // the manifest and the surface
     // Red probe: a second hand-written entry takes the footprint to 13, over the ceiling.
     const extra: FenceRow = { args: ['hud', '--status'], allow: ['<HOME>/.claude/hand-written.json'], mustWrite: false }
     expect(allowlistSize([...FENCE_ROWS, extra])).toBe(allowlistSize(FENCE_ROWS) + 1)

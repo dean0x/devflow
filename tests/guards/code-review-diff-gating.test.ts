@@ -28,7 +28,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import * as path from 'path'
 
-import { ROOT, readAgentReference, requireDistFile, requireDistFiles, resolveAgentSource, resolveLearningOffSource } from '../helpers.js'
+import { ROOT, readAgentReference, requireDistFile, requireDistFiles, resolveAgentSource, resolveCurationOffSource } from '../helpers.js'
 
 const CORE = ['security', 'architecture', 'performance', 'complexity', 'consistency', 'regression', 'testing', 'reliability'] as const
 const LANGUAGE = ['typescript', 'react', 'accessibility', 'ui-design', 'go', 'java', 'python', 'rust'] as const
@@ -393,7 +393,7 @@ export function collectReviewAgentDefects(review: string): string[] {
 // ---------------------------------------------------------------------------
 
 const VARIANTS: ReadonlyArray<{ label: string; body: string }> = (() => {
-  const off = resolveLearningOffSource('commands', 'code-review')
+  const off = resolveCurationOffSource('commands', 'code-review')
   if (off === null) throw new Error('dist/curation-off/commands/code-review.md is absent: run `npm run build:mds`')
   return [
     { label: 'learning on', body: requireDistFile('code-review.md') },
@@ -402,7 +402,7 @@ const VARIANTS: ReadonlyArray<{ label: string; body: string }> = (() => {
 })()
 
 const REVIEW_VARIANTS: ReadonlyArray<{ label: string; body: string }> = (() => {
-  const off = resolveLearningOffSource('agents', 'review')
+  const off = resolveCurationOffSource('agents', 'review')
   if (off === null) throw new Error('dist/curation-off/agents/review.md is absent: run `npm run build:mds`')
   return [
     { label: 'learning on', body: resolveAgentSource('review').content },

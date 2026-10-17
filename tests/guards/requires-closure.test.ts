@@ -406,7 +406,7 @@ describe('requires structure', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Learning-gated skills: the closure reasons over the curation-on variant
+// Curation-gated skills: the closure reasons over the curation-on variant
 // ---------------------------------------------------------------------------
 
 /**
@@ -426,7 +426,7 @@ describe('requires structure', () => {
  */
 
 /** Named collector: references in the prompts a curation-off machine installs. */
-async function collectLearningOffInstalledRefs(): Promise<RawRef[]> {
+async function collectCurationOffInstalledRefs(): Promise<RawRef[]> {
   const files: string[] = [];
   const commandNames = new Set(DEVFLOW_PLUGINS.flatMap(p => p.commands.map(c => c.replace(/^\//, ''))));
   for (const name of commandNames) {
@@ -446,7 +446,7 @@ async function collectLearningOffInstalledRefs(): Promise<RawRef[]> {
 }
 
 /** Named predicate: the references that point at a skill a curation-off machine does not install. */
-function danglingUnderLearningOff(refs: readonly RawRef[]): string[] {
+function danglingUnderCurationOff(refs: readonly RawRef[]): string[] {
   const gated = new Set<string>(CURATION_GATED_SKILLS);
   return refs.filter(r => gated.has(r.token)).map(r => `${r.raw} in ${r.file}`);
 }
@@ -470,10 +470,10 @@ describe('learning-gated skills (AC-148)', () => {
   });
 
   it('no prompt a curation-off machine installs references a skill it does not install', async () => {
-    const refs = await collectLearningOffInstalledRefs();
+    const refs = await collectCurationOffInstalledRefs();
     expect(refs.length, 'the off corpus was read (non-vacuity)').toBeGreaterThan(50);
     expect(
-      danglingUnderLearningOff(refs),
+      danglingUnderCurationOff(refs),
       'A prompt installed with learning off must not point at a learning-gated skill: ' +
       'give the host a curation arm so its off variant drops the reference.',
     ).toEqual([]);
@@ -481,8 +481,8 @@ describe('learning-gated skills (AC-148)', () => {
 
   it('known-bad probe: a curation-off corpus naming the skill is reported', () => {
     const refs = collectSkillRefs(`Load via Skill(skill="${NS}${CURATION_GATED_SKILLS[0]}").`, 'synthetic-off.md');
-    expect(danglingUnderLearningOff(refs)).toEqual([`${NS}${CURATION_GATED_SKILLS[0]} in synthetic-off.md`]);
-    expect(danglingUnderLearningOff(collectSkillRefs(`Load via Skill(skill="${NS}security").`, 'synthetic-off.md'))).toEqual([]);
+    expect(danglingUnderCurationOff(refs)).toEqual([`${NS}${CURATION_GATED_SKILLS[0]} in synthetic-off.md`]);
+    expect(danglingUnderCurationOff(collectSkillRefs(`Load via Skill(skill="${NS}security").`, 'synthetic-off.md'))).toEqual([]);
   });
 
   it('a gated skill is neither feature-owned nor presence-gated: its plugins own and require it normally', () => {

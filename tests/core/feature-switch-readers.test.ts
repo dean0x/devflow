@@ -249,7 +249,7 @@ describe('shell gates: queue_read_gates', { timeout: 120_000 }, () => {
         for f in "${dir}"/m-*.json; do
           queue_read_gates "$f"
           b="\${f##*/}"
-          echo "\${b%.json} $_QG_LEARNING"
+          echo "\${b%.json} $_QG_CURATION"
         done
       `));
       expect(out.size).toBe(backend.cases.length);
@@ -271,7 +271,7 @@ describe('shell gates: queue_read_gates', { timeout: 120_000 }, () => {
     const out = parseLines(runShell(`
       for d in ${cases.map((c) => `"${path.join(root, c.name)}"`).join(' ')}; do
         queue_read_gates "${path.join(root, 'manifest.json')}" "$d"
-        echo "\${d##*/} $_QG_LEARNING"
+        echo "\${d##*/} $_QG_CURATION"
       done
     `));
     expect(out.size).toBe(cases.length);

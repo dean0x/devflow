@@ -23,17 +23,17 @@ import * as os from 'os';
 import {
   FIXTURE_NOW,
   daysAgoIso,
-  learningPaths,
+  curationPaths,
   makeV1LedgerRow,
   makeV1LogRow,
   makeV2LedgerRow,
   makeV2LogRow,
-  requireLearningStore,
+  requireCurationStore,
   runJsonHelper,
-  seedLearningTree,
+  seedCurationTree,
   snapshotTree,
   type Row,
-} from './learning-fixtures.js';
+} from './curation-fixtures.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(import.meta.url);
@@ -42,7 +42,7 @@ const require = createRequire(import.meta.url);
 // Helpers: load the modules under test
 // ---------------------------------------------------------------------------
 
-const store = requireLearningStore();
+const store = requireCurationStore();
 
 const {
   renderDecisionsFile,
@@ -495,11 +495,11 @@ describe('AC-F7: number stability — retired number is never reused', { timeout
 describe('rotateObservations (D-ROTATE-UNREFERENCED)', () => {
   const DAY_MS = 24 * 60 * 60 * 1000;
   let tmpDir: string;
-  let paths: ReturnType<typeof learningPaths>;
+  let paths: ReturnType<typeof curationPaths>;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rotate-obs-test-'));
-    paths = learningPaths(tmpDir);
+    paths = curationPaths(tmpDir);
   });
 
   afterEach(() => {
@@ -508,7 +508,7 @@ describe('rotateObservations (D-ROTATE-UNREFERENCED)', () => {
 
   /** Seed the learning tree, rotate at FIXTURE_NOW and return the counts. */
   function rotate(seed: { log?: Row[]; ledger?: Row[]; archive?: Row[] }): { rotated: number; appended: number } {
-    seedLearningTree(tmpDir, seed);
+    seedCurationTree(tmpDir, seed);
     const result = store.rotateObservations(tmpDir, { now: FIXTURE_NOW });
     if (!result.ok) throw new Error(result.error.message);
     return result.value;
@@ -597,7 +597,7 @@ describe('rotateObservations (D-ROTATE-UNREFERENCED)', () => {
   });
 
   it('writes nothing when no row is due', () => {
-    seedLearningTree(tmpDir, {
+    seedCurationTree(tmpDir, {
       ledger: [makeV1LedgerRow()],
       log: [makeV1LogRow(), makeV1LogRow({ id: 'obs_fresh_one', last_seen: daysAgoIso(3) })],
     });
@@ -612,11 +612,11 @@ describe('rotateObservations (D-ROTATE-UNREFERENCED)', () => {
     const due = makeV1LogRow({ id: 'obs_due', last_seen: daysAgoIso(60) });
     const fresh = makeV1LogRow({ id: 'obs_fresh', last_seen: daysAgoIso(2) });
     const original = `${JSON.stringify(due)}\nnot json\n${JSON.stringify(fresh)}\n`;
-    fs.mkdirSync(paths.learningDir, { recursive: true });
+    fs.mkdirSync(paths.curationDir, { recursive: true });
     fs.writeFileSync(paths.log, original);
 
     expect(store.rotateObservations(tmpDir, { now: FIXTURE_NOW })).toEqual({ ok: true, value: { rotated: 1, appended: 1 } });
-    expect(fs.readFileSync(path.join(paths.learningDir, 'decisions-log.pre-v2.jsonl'), 'utf8')).toBe(original);
+    expect(fs.readFileSync(path.join(paths.curationDir, 'decisions-log.pre-v2.jsonl'), 'utf8')).toBe(original);
     expect(rowsOf(store.rejectedPathFor(paths.log)).map(record => record.text)).toEqual(['not json']);
     expect(fs.readFileSync(paths.log, 'utf8')).toBe(`${JSON.stringify(fresh)}\n`);
   });
@@ -625,7 +625,7 @@ describe('rotateObservations (D-ROTATE-UNREFERENCED)', () => {
     expect(store.rotateObservations(tmpDir, { now: FIXTURE_NOW })).toEqual({
       ok: false,
       error: {
-        kind: 'no-learning-dir',
+        kind: 'no-curation-dir',
         message: `rotate-observations: no .devflow/curation/ under ${tmpDir} — run from the project root`,
       },
     });
@@ -892,7 +892,7 @@ describe('refresh-anchor quarantines malformed ledger lines (D-QUARANTINE-MALFOR
   it('moves a malformed ledger line aside before it rewrites the ledger, and keeps every row', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rf-quarantine-test-'));
     try {
-      const { ledger, learningDir } = seedLearningTree(tmpDir, {
+      const { ledger, curationDir } = seedCurationTree(tmpDir, {
         log: [makeV2LogRow({ id: 'obs_q_001', rule: 'A sharper rule.' }), makeV2LogRow({ id: 'obs_q_002', rule: 'A sharper rule.' })],
         ledger: [makeV2LedgerRow({ id: 'obs_q_001' }), makeV2LedgerRow({ id: 'obs_q_002', anchor_id: 'ADR-002' })],
       });
@@ -904,7 +904,7 @@ describe('refresh-anchor quarantines malformed ledger lines (D-QUARANTINE-MALFOR
         ['ADR-001', 'A sharper rule.'],
         ['ADR-002', 'A sharper rule.'],
       ]);
-      const rejected = store.readJsonl(path.join(learningDir, 'decisions-ledger.rejected.jsonl')).rows;
+      const rejected = store.readJsonl(path.join(curationDir, 'decisions-ledger.rejected.jsonl')).rows;
       expect(rejected.map(record => record.text)).toEqual(['{"anchor_id": "ADR-003", "cut off']);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -948,7 +948,7 @@ describe('rotate-observations CLI op', () => {
   });
 
   it('prints "rotated N observations" and exits 0', () => {
-    seedLearningTree(tmpDir, {
+    seedCurationTree(tmpDir, {
       log: [
         makeV1LogRow({ id: 'obs_cli_due', last_seen: '2026-01-01T00:00:00.000Z' }),
         makeV1LogRow({ id: 'obs_cli_fresh', last_seen: new Date().toISOString() }),
@@ -958,7 +958,7 @@ describe('rotate-observations CLI op', () => {
     const result = runJsonHelper(tmpDir, ['rotate-observations']);
 
     expect(result).toEqual({ code: 0, stdout: 'rotated 1 observations\n', stderr: '' });
-    expect(store.readJsonl(learningPaths(tmpDir).archive).rows.map(row => row.id)).toEqual(['obs_cli_due']);
+    expect(store.readJsonl(curationPaths(tmpDir).archive).rows.map(row => row.id)).toEqual(['obs_cli_due']);
   });
 
   it('prints "rotated 0 observations" for an empty learning tree', () => {
@@ -1772,7 +1772,7 @@ describe('D-LEDGER-MAIN-WORKTREE: a worktree session mints into the main ledger 
     fs.rmSync(base, { recursive: true, force: true });
   });
 
-  /** The "Project root:" the Learning directive names for a session started in `cwd`. */
+  /** The "Project root:" the Curation directive names for a session started in `cwd`. */
   function directiveRoot(cwd: string): string {
     const stdout = execSync(`bash "${CONTEXT_HOOK}"`, {
       input: JSON.stringify({ cwd, source: 'startup' }),

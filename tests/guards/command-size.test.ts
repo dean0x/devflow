@@ -22,7 +22,7 @@
 import { describe, it, expect } from 'vitest'
 
 import { MDS_COMMAND_HOSTS } from '../fixtures/mds-manifest.js'
-import { requireDistFile, resolveLearningOffSource } from '../helpers.js'
+import { requireDistFile, resolveCurationOffSource } from '../helpers.js'
 
 type Build = 'on' | 'off'
 
@@ -70,7 +70,7 @@ const key = (command: string, build: Build): string => `${command}/${build}`
 
 /** The compiled size of one command in one build, or null when the build has no such file. */
 function builtBytes(command: string, build: Build): number | null {
-  const text = build === 'on' ? requireDistFile(`${command}.md`) : resolveLearningOffSource('commands', command)
+  const text = build === 'on' ? requireDistFile(`${command}.md`) : resolveCurationOffSource('commands', command)
   return text === null ? null : Buffer.byteLength(text, 'utf-8')
 }
 

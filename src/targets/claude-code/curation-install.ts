@@ -16,7 +16,7 @@
  *     installViaFileCopy leaves the skill out when curation is off;
  *   - {@link convergeCurationVariants}, below: the converge that makes an
  *     ALREADY-installed tree match the switch, run by `devflow init` after the
- *     file copy and by `devflow learning --enable/--disable` after the switch is
+ *     file copy and by `devflow curation --enable/--disable` after the switch is
  *     written ({@link applyCurationToggle}).
  *
  * The converge, decided in turn:
@@ -571,7 +571,7 @@ export async function installedScriptsSkew(devflowDir: string, packageRoot?: str
 }
 
 /**
- * What `devflow learning --enable/--disable` does after the switch is written:
+ * What `devflow curation --enable/--disable` does after the switch is written:
  * converge the installed tree onto the new value, then reapply the saved agent
  * model and effort mapping.
  *

@@ -26,9 +26,9 @@ import {
   type ProjectLedgerMoveReport,
   type ProjectLedgerMoveResult,
 } from '../src/cli/commands/init-curation-move.js';
-import { loadLearningStore } from '../src/core/curation-store.js';
+import { loadCurationStore } from '../src/core/curation-store.js';
 import type {
-  LearningStoreResult,
+  CurationStoreResult,
   LedgerMoveOptions,
   LedgerMoveOutcome,
   LedgerSweepOutcome,
@@ -45,8 +45,8 @@ const BUSY: LedgerMoveOutcome = { state: 'busy', notes: [] };
 const MOVED: LedgerMoveOutcome = { state: 'moved', mode: 'whole-folder', backup: null, rendered: true, notes: [] };
 const SWEPT: LedgerSweepOutcome = { state: 'swept', files: 1, merged: 2, overflowed: 0, notes: [] };
 
-const ok = <T>(value: T): LearningStoreResult<T> => ({ ok: true, value });
-const fail = <T>(kind: string, message: string): LearningStoreResult<T> => ({ ok: false, error: { kind, message } });
+const ok = <T>(value: T): CurationStoreResult<T> => ({ ok: true, value });
+const fail = <T>(kind: string, message: string): CurationStoreResult<T> => ({ ok: false, error: { kind, message } });
 
 function options(overrides: Partial<ProjectLedgerMoveOptions> = {}): ProjectLedgerMoveOptions {
   return {
@@ -68,8 +68,8 @@ interface FakeConfig {
   /** Ledger root -> entries of its .devflow folder; a missing key lists nothing. */
   readonly devflowEntries?: Readonly<Record<string, readonly string[]>>;
   /** Ledger root -> the move answer, or a function that answers per call; a missing key answers `none`. */
-  readonly moves?: Readonly<Record<string, LearningStoreResult<LedgerMoveOutcome> | (() => LearningStoreResult<LedgerMoveOutcome>)>>;
-  readonly sweeps?: Readonly<Record<string, LearningStoreResult<LedgerSweepOutcome> | (() => LearningStoreResult<LedgerSweepOutcome>)>>;
+  readonly moves?: Readonly<Record<string, CurationStoreResult<LedgerMoveOutcome> | (() => CurationStoreResult<LedgerMoveOutcome>)>>;
+  readonly sweeps?: Readonly<Record<string, CurationStoreResult<LedgerSweepOutcome> | (() => CurationStoreResult<LedgerSweepOutcome>)>>;
 }
 
 interface Recorder {
@@ -82,7 +82,7 @@ interface Recorder {
 
 function fakeIO(config: FakeConfig = {}): { io: ProjectLedgerMoveIO; rec: Recorder } {
   const rec: Recorder = { order: [], moveArgs: [], sweepArgs: [], physicalAsked: [] };
-  const answer = <T>(table: Readonly<Record<string, LearningStoreResult<T> | (() => LearningStoreResult<T>)>> | undefined, root: string, fallback: T) => {
+  const answer = <T>(table: Readonly<Record<string, CurationStoreResult<T> | (() => CurationStoreResult<T>)>> | undefined, root: string, fallback: T) => {
     const entry = table?.[root];
     if (entry === undefined) return ok(fallback);
     return typeof entry === 'function' ? entry() : entry;
@@ -637,7 +637,7 @@ describe('moveProjectLedgers with the real store: init and a session start meet 
   });
 
   it('skips a root whose move lock another mover holds, reached through a link spelling, with no wait', async () => {
-    const loaded = loadLearningStore();
+    const loaded = loadCurationStore();
     if (!loaded.ok) throw new Error('the store must load');
     const store = loaded.value;
     tmp = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'df-move-tp37-')));

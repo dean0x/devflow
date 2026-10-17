@@ -26,7 +26,7 @@
 
 import { describe, it, expect } from 'vitest'
 
-import { requireDistFile, resolveLearningOffSource } from '../helpers.js'
+import { requireDistFile, resolveCurationOffSource } from '../helpers.js'
 
 interface Build {
   readonly label: string
@@ -34,7 +34,7 @@ interface Build {
 }
 
 function builds(): Build[] {
-  const off = resolveLearningOffSource('commands', 'plan')
+  const off = resolveCurationOffSource('commands', 'plan')
   if (off === null) throw new Error('dist/curation-off/commands/plan.md is absent — run `npm run build` first')
   return [
     { label: 'curation-on', content: requireDistFile('plan.md') },

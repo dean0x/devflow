@@ -43,7 +43,7 @@ MEMORY_DIR="$PROJECT_DEVFLOW_DIR/memory"
 
 # Memory gate: the machine switch, narrowed by this checkout's project.json /
 # config.json `features.memory`, gates this hook entirely -- read by the helper
-# every memory/learning gate shares (D-FEATURES-NARROW-ONLY, see queue-append).
+# every memory/curation gate shares (D-FEATURES-NARROW-ONLY, see queue-append).
 source "$SCRIPT_DIR/queue-append" || { echo "memory-worker: failed to source queue-append" >&2; exit 1; }
 queue_read_gates "$DEVFLOW_MANIFEST" "$PROJECT_ROOT"
 MEMORY_ENABLED="$_QG_MEMORY"

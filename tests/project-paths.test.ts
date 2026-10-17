@@ -17,13 +17,13 @@ import { fileURLToPath } from 'url';
 // Import TypeScript module (ESM)
 import {
   getMemoryDir,
-  getLearningDir,
+  getCurationDir,
   getFeaturesDir,
   getDocsDir,
   getFeatureConfigPath,
-  getLearningPendingTurnsPath,
-  getLearningPendingTurnsProcessingPath,
-  getLearningClaimOwnerPath,
+  getCurationPendingTurnsPath,
+  getCurationPendingTurnsProcessingPath,
+  getCurationClaimOwnerPath,
   getDecisionsFilePath,
   getPitfallsFilePath,
   getCurateTuningConfigPath,
@@ -63,8 +63,8 @@ describe('project-paths TypeScript module', () => {
       expect(getMemoryDir(ROOT)).toBe('/some/project/.devflow/memory');
     });
 
-    it('getLearningDir returns .devflow/curation/', () => {
-      expect(getLearningDir(ROOT)).toBe('/some/project/.devflow/curation');
+    it('getCurationDir returns .devflow/curation/', () => {
+      expect(getCurationDir(ROOT)).toBe('/some/project/.devflow/curation');
     });
 
     it('getFeaturesDir returns .devflow/features/', () => {
@@ -83,16 +83,16 @@ describe('project-paths TypeScript module', () => {
   });
 
   describe('learning queue files', () => {
-    it('getLearningPendingTurnsPath returns .devflow/curation/.pending-turns.jsonl', () => {
-      expect(getLearningPendingTurnsPath(ROOT)).toBe('/some/project/.devflow/curation/.pending-turns.jsonl');
+    it('getCurationPendingTurnsPath returns .devflow/curation/.pending-turns.jsonl', () => {
+      expect(getCurationPendingTurnsPath(ROOT)).toBe('/some/project/.devflow/curation/.pending-turns.jsonl');
     });
 
-    it('getLearningPendingTurnsProcessingPath returns .devflow/curation/.pending-turns.processing', () => {
-      expect(getLearningPendingTurnsProcessingPath(ROOT)).toBe('/some/project/.devflow/curation/.pending-turns.processing');
+    it('getCurationPendingTurnsProcessingPath returns .devflow/curation/.pending-turns.processing', () => {
+      expect(getCurationPendingTurnsProcessingPath(ROOT)).toBe('/some/project/.devflow/curation/.pending-turns.processing');
     });
 
-    it('getLearningClaimOwnerPath returns .devflow/curation/.pending-turns.owner', () => {
-      expect(getLearningClaimOwnerPath(ROOT)).toBe('/some/project/.devflow/curation/.pending-turns.owner');
+    it('getCurationClaimOwnerPath returns .devflow/curation/.pending-turns.owner', () => {
+      expect(getCurationClaimOwnerPath(ROOT)).toBe('/some/project/.devflow/curation/.pending-turns.owner');
     });
   });
 
@@ -187,13 +187,13 @@ describe('CJS project-paths parity', () => {
     cjs: (root: string) => string;
   }> = [
     { name: 'getMemoryDir', ts: getMemoryDir, cjs: cjsPaths.getMemoryDir },
-    { name: 'getLearningDir', ts: getLearningDir, cjs: cjsPaths.getLearningDir },
+    { name: 'getCurationDir', ts: getCurationDir, cjs: cjsPaths.getCurationDir },
     { name: 'getFeaturesDir', ts: getFeaturesDir, cjs: cjsPaths.getFeaturesDir },
     { name: 'getDocsDir', ts: getDocsDir, cjs: cjsPaths.getDocsDir },
     { name: 'getFeatureConfigPath', ts: getFeatureConfigPath, cjs: cjsPaths.getFeatureConfigPath },
-    { name: 'getLearningPendingTurnsPath', ts: getLearningPendingTurnsPath, cjs: cjsPaths.getLearningPendingTurnsPath },
-    { name: 'getLearningPendingTurnsProcessingPath', ts: getLearningPendingTurnsProcessingPath, cjs: cjsPaths.getLearningPendingTurnsProcessingPath },
-    { name: 'getLearningClaimOwnerPath', ts: getLearningClaimOwnerPath, cjs: cjsPaths.getLearningClaimOwnerPath },
+    { name: 'getCurationPendingTurnsPath', ts: getCurationPendingTurnsPath, cjs: cjsPaths.getCurationPendingTurnsPath },
+    { name: 'getCurationPendingTurnsProcessingPath', ts: getCurationPendingTurnsProcessingPath, cjs: cjsPaths.getCurationPendingTurnsProcessingPath },
+    { name: 'getCurationClaimOwnerPath', ts: getCurationClaimOwnerPath, cjs: cjsPaths.getCurationClaimOwnerPath },
     { name: 'getDecisionsFilePath', ts: getDecisionsFilePath, cjs: cjsPaths.getDecisionsFilePath },
     { name: 'getPitfallsFilePath', ts: getPitfallsFilePath, cjs: cjsPaths.getPitfallsFilePath },
     { name: 'getCurateTuningConfigPath', ts: getCurateTuningConfigPath, cjs: cjsPaths.getCurateTuningConfigPath },
@@ -220,10 +220,10 @@ describe('CJS project-paths parity', () => {
     });
   }
 
-  // TS/CJS parity: getLearningDir and getFeatureConfigPath return the correct paths
-  it('getLearningDir returns .devflow/curation/ in both TS and CJS', () => {
-    expect(getLearningDir(ROOT)).toBe('/some/project/.devflow/curation');
-    expect(cjsPaths.getLearningDir(ROOT)).toBe('/some/project/.devflow/curation');
+  // TS/CJS parity: getCurationDir and getFeatureConfigPath return the correct paths
+  it('getCurationDir returns .devflow/curation/ in both TS and CJS', () => {
+    expect(getCurationDir(ROOT)).toBe('/some/project/.devflow/curation');
+    expect(cjsPaths.getCurationDir(ROOT)).toBe('/some/project/.devflow/curation');
   });
 
   it('getFeatureConfigPath returns .devflow/config.json in both TS and CJS', () => {
@@ -305,7 +305,7 @@ describe('curation rename name blocks', () => {
   });
 
   it('the project helpers name the curation folder and tuning file', () => {
-    expect(getLearningDir(ROOT)).toBe(path.join(ROOT, '.devflow', CURATION_DIR_NAME));
+    expect(getCurationDir(ROOT)).toBe(path.join(ROOT, '.devflow', CURATION_DIR_NAME));
     expect(getCurateTuningConfigPath(ROOT)).toBe(path.join(ROOT, '.devflow', CURATION_DIR_NAME, CURATION_TUNING_FILE_NAME));
   });
 });

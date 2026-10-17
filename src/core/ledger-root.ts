@@ -1,12 +1,12 @@
 /**
  * @file ledger-root.ts
  *
- * Where the learning ledger lives for a working directory — the TypeScript twin of
+ * Where the curation ledger lives for a working directory — the TypeScript twin of
  * `df_resolve_roots`' DF_LEDGER_ROOT in src/assets/scripts/hooks/resolve-project-root.
  *
  * D-LEDGER-MAIN-WORKTREE: the ledger is one per REPOSITORY, not per checkout. In a
  * linked worktree the hooks queue and render into the main worktree's
- * `.devflow/curation/`, so `devflow learning` and the HUD must read and clear that
+ * `.devflow/curation/`, so `devflow curation` and the HUD must read and clear that
  * same directory — resolving the worktree's own toplevel (getGitRoot) would show an
  * empty ledger and drain a queue nothing writes to. The rule, from ONE git call:
  *
@@ -94,7 +94,7 @@ async function mainHoldsLedger(main: string, home: string): Promise<boolean> {
 }
 
 /**
- * The learning ledger root for `cwd` — the main worktree or this checkout's
+ * The curation ledger root for `cwd` — the main worktree or this checkout's
  * toplevel — or null outside a git work tree.
  */
 export async function getLedgerRoot(

@@ -11,7 +11,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { drainLearningQueue } from '../../src/core/curation-queue-cleanup.js';
+import { drainCurationQueue } from '../../src/core/curation-queue-cleanup.js';
 import { drainMemoryQueue } from '../../src/cli/commands/memory.js';
 
 const KEEP = 'a file outside the project, which no drain may delete\n';
@@ -45,10 +45,10 @@ async function present(dir: string, files: readonly string[]): Promise<boolean[]
 
 const QUEUES = [
   {
-    name: 'drainLearningQueue',
+    name: 'drainCurationQueue',
     folder: 'curation',
     files: ['.pending-turns.jsonl', '.pending-turns.processing', '.pending-turns.owner'],
-    drain: drainLearningQueue,
+    drain: drainCurationQueue,
   },
   {
     name: 'drainMemoryQueue',
@@ -111,7 +111,7 @@ for (const { name, folder, files, drain } of QUEUES) {
   });
 }
 
-describe('drainLearningQueue drains each ledger folder that exists, the old name and the new (#529)', () => {
+describe('drainCurationQueue drains each ledger folder that exists, the old name and the new (#529)', () => {
   const FILES = ['.pending-turns.jsonl', '.pending-turns.processing', '.pending-turns.owner'] as const;
   const newDir = (): string => path.join(root, '.devflow', 'curation');
   const oldDir = (): string => path.join(root, '.devflow', 'learning');
@@ -119,7 +119,7 @@ describe('drainLearningQueue drains each ledger folder that exists, the old name
   it('drains the queue of an old folder that a busy or refused move left in place', async () => {
     await seed(oldDir(), FILES);
 
-    expect(await drainLearningQueue(root)).toEqual({ drained: true });
+    expect(await drainCurationQueue(root)).toEqual({ drained: true });
 
     expect(await present(oldDir(), FILES)).toEqual([false, false, false]);
   });
@@ -128,7 +128,7 @@ describe('drainLearningQueue drains each ledger folder that exists, the old name
     await seed(oldDir(), FILES);
     await seed(newDir(), FILES);
 
-    expect(await drainLearningQueue(root)).toEqual({ drained: true });
+    expect(await drainCurationQueue(root)).toEqual({ drained: true });
 
     expect(await present(oldDir(), FILES)).toEqual([false, false, false]);
     expect(await present(newDir(), FILES)).toEqual([false, false, false]);
@@ -137,7 +137,7 @@ describe('drainLearningQueue drains each ledger folder that exists, the old name
   it('deletes only queue files: the ledger and the tuning file in the old folder stay', async () => {
     await seed(oldDir(), [...FILES, 'decisions-ledger.jsonl', 'learning.json']);
 
-    await drainLearningQueue(root);
+    await drainCurationQueue(root);
 
     expect(await present(oldDir(), ['decisions-ledger.jsonl', 'learning.json'])).toEqual([true, true]);
   });
@@ -147,7 +147,7 @@ describe('drainLearningQueue drains each ledger folder that exists, the old name
     await seed(newDir(), FILES);
     await fs.symlink(outside, oldDir());
 
-    const result = await drainLearningQueue(root);
+    const result = await drainCurationQueue(root);
 
     expect(result).toEqual({ drained: false, linkedFolder: oldDir() });
     expect(await present(outside, FILES), 'nothing is deleted through the link').toEqual([true, true, true]);
@@ -158,7 +158,7 @@ describe('drainLearningQueue drains each ledger folder that exists, the old name
     await seed(path.join(outside, 'learning'), FILES);
     await fs.symlink(outside, path.join(root, '.devflow'));
 
-    expect(await drainLearningQueue(root)).toEqual({ drained: false, linkedFolder: path.join(root, '.devflow') });
+    expect(await drainCurationQueue(root)).toEqual({ drained: false, linkedFolder: path.join(root, '.devflow') });
     expect(await present(path.join(outside, 'learning'), FILES)).toEqual([true, true, true]);
   });
 });

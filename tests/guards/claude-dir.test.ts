@@ -89,7 +89,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import * as os from 'os'
 import * as path from 'path'
 
-import { MIN_COMPILED_PROMPTS, RETIRED_INLINE_EXPANSION, ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, collectStaleOutputs, compactDirectiveFrom, compactDirectiveText, compiledPrompts, requireDistFile, requireDistFiles, resolveAgentSource, resolveAllAgents, resolveLearningOffSource, sectionBetween, walkFiles } from '../helpers.js'
+import { MIN_COMPILED_PROMPTS, RETIRED_INLINE_EXPANSION, ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, collectStaleOutputs, compactDirectiveFrom, compactDirectiveText, compiledPrompts, requireDistFile, requireDistFiles, resolveAgentSource, resolveAllAgents, resolveCurationOffSource, sectionBetween, walkFiles } from '../helpers.js'
 import { DEVFLOW_PLUGINS, buildScopedSkillsMap, getAllAgentNames } from '../../src/core/plugins.js'
 import { installViaFileCopy } from '../../src/targets/claude-code/installer.js'
 import { getClaudeDirectory } from '../../src/targets/claude-code/claude-paths.js'
@@ -536,7 +536,7 @@ describe('no prompt reaches the Claude directory outside the CLAUDE_CONFIG_DIR r
     expect(review).toContain('A language focus is spawned only when its file-type condition above fires AND its name appears in that stamped line.')
     expect(review.split('\n').filter(line => line.startsWith('Installed language focuses: '))).toHaveLength(1)
     expect(collectCodeReviewDirReadDefects(review)).toEqual([])
-    const off = resolveLearningOffSource('commands', 'code-review')
+    const off = resolveCurationOffSource('commands', 'code-review')
     expect(off, 'dist/curation-off/commands/code-review.md is absent: run `npm run build:mds`').not.toBeNull()
     expect(collectCodeReviewDirReadDefects(off as string)).toEqual([])
 
@@ -613,7 +613,7 @@ describe('no prompt reaches the Claude directory outside the CLAUDE_CONFIG_DIR r
     // two CLAUDE_CONFIG_DIR names and two skills paths, and no {claude_dir} placeholder.
     const plan = requireDistFile('plan.md')
     expect(collectPlanDirReadDefects(plan)).toEqual([])
-    const off = resolveLearningOffSource('commands', 'plan')
+    const off = resolveCurationOffSource('commands', 'plan')
     expect(off, 'dist/curation-off/commands/plan.md is absent: run `npm run build:mds`').not.toBeNull()
     expect(collectPlanDirReadDefects(off as string)).toEqual([])
     // Non-vacuity: the compiled command holds the levels path and the compliance path the collector expects.

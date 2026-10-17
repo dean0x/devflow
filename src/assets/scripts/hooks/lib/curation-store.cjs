@@ -1,12 +1,12 @@
 // src/assets/scripts/hooks/lib/curation-store.cjs
 //
-// The v2 learning store: the one place the learning plumbing reads, validates,
+// The v2 curation store: the one place the curation plumbing reads, validates,
 // projects and writes the decisions log, the ledger and their side files.
 //
 // DESIGN: plumbing only. No function here prints or calls process.exit. Work that
 // can fail on its input or on the lock returns a Result — { ok: true, value } or
 // { ok: false, error: { kind, message } } — and its caller prints it: json-helper.cjs
-// for the ops, or the `devflow learning` CLI through src/core/curation-store.ts. A throw
+// for the ops, or the `devflow curation` CLI through src/core/curation-store.ts. A throw
 // means a broken invariant or an I/O failure, never an expected outcome; a lock
 // held by withDecisionsLock is released on every path, the throw included.
 //
@@ -15,7 +15,8 @@
 // the status list and the one-line and inactive-note text they share with `list`.
 //
 // The module also holds the one-time move of the old ledger folder to its new name
-// (moveLedger, sweepLedgerBackups): the one place that names both folders.
+// (moveLedger, sweepLedgerBackups, and the read-only backupPendingRows that status uses):
+// the one place that names both folders.
 //
 // Files under <root>/.devflow/curation/:
 //   decisions-log.jsonl          observation rows — the content authority
@@ -24,7 +25,7 @@
 //   decisions-history.jsonl      prior content versions (D-CONTENT-HISTORY)
 //   *.rejected.jsonl             quarantined malformed lines (D-QUARANTINE-MALFORMED)
 //   *.pre-v2.jsonl               one-time copies of the v1 files (D-V1-BACKUP-ONCE)
-//   .decisions.lock/             the one learning lock (D-ONE-LEARNING-LOCK)
+//   .decisions.lock/             the one curation lock (D-ONE-LEARNING-LOCK)
 //   .pending-turns.jsonl         the queue the capture hooks append to
 //   .pending-turns.processing    the claimed batch, and .pending-turns.owner its
 //                                owner's token (D-OWNED-CLAIM)
@@ -44,10 +45,10 @@ const { execFileSync } = require('child_process');
 const {
   LEGACY_NAMES,
   CURATION_TUNING_FILE_NAME,
-  getLearningDir,
-  getLearningPendingTurnsPath,
-  getLearningPendingTurnsProcessingPath,
-  getLearningClaimOwnerPath,
+  getCurationDir,
+  getCurationPendingTurnsPath,
+  getCurationPendingTurnsProcessingPath,
+  getCurationClaimOwnerPath,
   getDecisionsLedgerPath,
   getDecisionsLogPath,
   getDecisionsArchivePath,
@@ -410,17 +411,17 @@ function readTextUnlinked(file, { maxBytes = Infinity } = {}) {
  * delete them without a trace, and a reader that quarantined would make list,
  * show and the HUD write files.
  *
- * D-NO-LINKED-READ: a learning file that is itself a symbolic link reads as
+ * D-NO-LINKED-READ: a curation file that is itself a symbolic link reads as
  * missing, and nothing is read through it; the pre-v2 backup skips one the same
  * way (ensurePreV2Backup), and release-claim reads the claim's owner file the same
  * way, and only up to CLAIM_OWNER_MAX_BYTES (readClaimOwner). readJsonl and
  * readClaimOwner read a regular file alone (readTextUnlinked): a directory, a FIFO
  * or a device where the file belongs reads as missing too, and neither waits on
- * one. Reason: a repository can commit any learning file as a link to a file
+ * one. Reason: a repository can commit any curation file as a link to a file
  * elsewhere on the machine, and a read that followed it would put that file's
  * lines into list and show and, through a rewrite, the quarantine or a render,
- * into the project's learning folder; a read that followed one to a FIFO or to
- * /dev/zero would wait forever or fill memory, holding the learning lock when a
+ * into the project's curation folder; a read that followed one to a FIFO or to
+ * /dev/zero would wait forever or fill memory, holding the curation lock when a
  * writer or release-claim reads. The writers never write through a link either:
  * a rename replaces one, and an append refuses one.
  *
@@ -565,9 +566,9 @@ function writeJsonlAtomic(file, rows) {
  * @param {string} root - project root
  * @returns {boolean}
  */
-function hasLearningDir(root) {
+function hasCurationDir(root) {
   try {
-    return fs.statSync(getLearningDir(root)).isDirectory();
+    return fs.statSync(getCurationDir(root)).isDirectory();
   } catch (err) {
     if (err && (err.code === 'ENOENT' || err.code === 'ENOTDIR')) return false;
     throw err;
@@ -580,12 +581,12 @@ function hasLearningDir(root) {
  *
  * @param {string} opName - operation name, for the message
  * @param {string} root - project root
- * @returns {{ ok: false, error: { kind: 'no-learning-dir', message: string } }}
+ * @returns {{ ok: false, error: { kind: 'no-curation-dir', message: string } }}
  */
-function noLearningDir(opName, root) {
+function noCurationDir(opName, root) {
   return {
     ok: false,
-    error: { kind: 'no-learning-dir', message: `${opName}: no .devflow/curation/ under ${root} — run from the project root` },
+    error: { kind: 'no-curation-dir', message: `${opName}: no .devflow/curation/ under ${root} — run from the project root` },
   };
 }
 
@@ -606,9 +607,9 @@ function isSymbolicLink(file) {
  * @param {string} root - project root
  * @returns {string|null}
  */
-function linkedLearningFolder(root) {
-  const learningDir = getLearningDir(root);
-  for (const dir of [path.dirname(learningDir), learningDir]) {
+function linkedCurationFolder(root) {
+  const curationDir = getCurationDir(root);
+  for (const dir of [path.dirname(curationDir), curationDir]) {
     if (isSymbolicLink(dir)) return dir;
   }
   return null;
@@ -639,23 +640,23 @@ function isResult(value) {
  * The lock is released on every path, a throw from `fn` included; the throw then
  * reaches the caller.
  *
- * D-ONE-LEARNING-LOCK: learning writers take one lock, `.decisions.lock`, through
+ * D-ONE-LEARNING-LOCK: curation writers take one lock, `.decisions.lock`, through
  * this wrapper — every write to the log, the ledger, their side files and the
  * rendered files happens under it. Reason: two writers under two locks can each
  * read one file, change it and rename their copy over it, and the second rename
  * silently discards the first one's change.
  *
- * D-NO-STRAY-TREE: a learning writer refuses with `no-learning-dir` when
+ * D-NO-STRAY-TREE: a curation writer refuses with `no-curation-dir` when
  * `.devflow/curation/` is absent under its root, and the store never creates that
  * directory or its parent — the lock directory is the only thing made inside it.
- * Reason: a writer run from the wrong directory would otherwise create a learning
+ * Reason: a writer run from the wrong directory would otherwise create a curation
  * tree there and write a ledger that no session ever reads.
  *
  * An unfinished ledger move (a `.curation-move.journal` in the old ledger folder, see
  * moveLedger) makes every writer answer `busy` without taking the lock, so no write
  * lands between two renames of the move's ledger set.
  *
- * D-NO-LINKED-TREE: a learning writer refuses with `not-a-directory`, changing
+ * D-NO-LINKED-TREE: a curation writer refuses with `not-a-directory`, changing
  * nothing, when `.devflow` or `.devflow/curation` under its root is a symbolic
  * link. Reason: a repository can commit either one as a link to a folder elsewhere
  * on the machine, and a writer that followed it would take its lock there and
@@ -668,10 +669,10 @@ function isResult(value) {
  * @param {() => { ok: boolean }} fn - the locked body; it must return a Result
  * @param {{ timeoutMs?: number, staleMs?: number }} [opts]
  * @returns {{ ok: true, value?: unknown } | { ok: false, error: { kind: string, message: string } }}
- *   fn's Result, or an error of kind `not-a-directory`, `no-learning-dir` or `busy`.
+ *   fn's Result, or an error of kind `not-a-directory`, `no-curation-dir` or `busy`.
  */
 function withDecisionsLock(opName, root, fn, { timeoutMs = LOCK_ACQUIRE_TIMEOUT_MS, staleMs = LOCK_STALE_MS } = {}) {
-  const linked = linkedLearningFolder(root);
+  const linked = linkedCurationFolder(root);
   if (linked !== null) return linkedFolder(opName, linked);
   const journal = moveJournalPath(root);
   if (lstatOrNull(journal) !== null) {
@@ -680,14 +681,14 @@ function withDecisionsLock(opName, root, fn, { timeoutMs = LOCK_ACQUIRE_TIMEOUT_
       error: { kind: 'busy', message: `${opName}: an unfinished ledger move is recorded at ${journal}; it finishes at the next session start or devflow init` },
     };
   }
-  if (!hasLearningDir(root)) return noLearningDir(opName, root);
+  if (!hasCurationDir(root)) return noCurationDir(opName, root);
   const lockDir = getDecisionsLockDir(root);
   let acquired;
   try {
     acquired = acquireMkdirLock(lockDir, timeoutMs, staleMs);
   } catch (err) {
-    // The learning directory went away between the check and the mkdir.
-    if (err && err.code === 'ENOENT') return noLearningDir(opName, root);
+    // The curation directory went away between the check and the mkdir.
+    if (err && err.code === 'ENOENT') return noCurationDir(opName, root);
     throw err;
   }
   if (!acquired) {
@@ -716,7 +717,7 @@ function withDecisionsLock(opName, root, fn, { timeoutMs = LOCK_ACQUIRE_TIMEOUT_
  * @param {string} root - project root
  * @returns {{ ledgerRows: object[], logRows: object[], rejected: { ledger: Array<{ line: number, text: string }>, log: Array<{ line: number, text: string }> } }}
  */
-function readLearningState(root) {
+function readCurationState(root) {
   const ledger = readJsonl(getDecisionsLedgerPath(root));
   const log = readJsonl(getDecisionsLogPath(root));
   return {
@@ -1217,7 +1218,7 @@ function ensurePreV2Backup(root, { logRows = [], ledgerRows = [] } = {}) {
 /** Days of inactivity after which an observation no ledger row carries leaves the log (D-ROTATE-UNREFERENCED). */
 const ROTATE_AGE_DAYS = 30;
 
-/** What an older install's usage telemetry left in the learning directory: a file and a lock directory. */
+/** What an older install's usage telemetry left in the curation directory: a file and a lock directory. */
 const USAGE_LEFTOVERS = Object.freeze(['.decisions-usage.json', '.decisions-usage.lock']);
 
 /**
@@ -1247,7 +1248,7 @@ function lastActivityMs(row) {
  * anchor_id copied onto a log row can say what to keep, and a dedup by id dropped
  * the newer version of a row whose older version was already archived.
  *
- * Under the learning lock it first deletes the usage leftovers. When no row is
+ * Under the curation lock it first deletes the usage leftovers. When no row is
  * due it writes nothing else. When rows are due it backs up a v1 tree
  * (D-V1-BACKUP-ONCE) and quarantines the log's malformed lines
  * (D-QUARANTINE-MALFORMED) before it appends to the archive and rewrites the log;
@@ -1258,12 +1259,12 @@ function lastActivityMs(row) {
  * @param {{ now?: number, timeoutMs?: number }} [opts] - now: epoch ms (default Date.now())
  * @returns {{ ok: true, value: { rotated: number, appended: number } } | { ok: false, error: { kind: string, message: string } }}
  *   rotated: rows removed from the log; appended: rows added to the archive.
- *   Errors are withDecisionsLock's not-a-directory, no-learning-dir and busy.
+ *   Errors are withDecisionsLock's not-a-directory, no-curation-dir and busy.
  */
 function rotateObservations(root, { now = Date.now(), timeoutMs } = {}) {
   return withDecisionsLock('rotate-observations', root, () => {
     for (const name of USAGE_LEFTOVERS) {
-      fs.rmSync(path.join(getLearningDir(root), name), { recursive: true, force: true });
+      fs.rmSync(path.join(getCurationDir(root), name), { recursive: true, force: true });
     }
 
     const logPath = getDecisionsLogPath(root);
@@ -1302,7 +1303,7 @@ function rotateObservations(root, { now = Date.now(), timeoutMs } = {}) {
 // ---------------------------------------------------------------------------
 
 /**
- * Drop the observations no entry uses — `devflow learning --clear`.
+ * Drop the observations no entry uses — `devflow curation --clear`.
  *
  * D-CLEAR-UNREFERENCED: clearing removes from the log exactly the rows no ledger
  * row carries (D-LEDGER-REGISTRY), whatever their age or status, and keeps every
@@ -1312,7 +1313,7 @@ function rotateObservations(root, { now = Date.now(), timeoutMs } = {}) {
  * row that is its content authority, and refresh then refused them all — and a
  * malformed ledger line may be the one carrying a row clearing would drop.
  *
- * It runs under the learning lock (D-ONE-LEARNING-LOCK). When a row is dropped it
+ * It runs under the curation lock (D-ONE-LEARNING-LOCK). When a row is dropped it
  * backs up a v1 tree (D-V1-BACKUP-ONCE) and quarantines the log's malformed lines
  * (D-QUARANTINE-MALFORMED) before it rewrites the log; with nothing to drop it
  * writes nothing.
@@ -1321,7 +1322,7 @@ function rotateObservations(root, { now = Date.now(), timeoutMs } = {}) {
  * @param {{ now?: number, timeoutMs?: number }} [opts] - now: epoch ms (default Date.now())
  * @returns {{ ok: true, value: { cleared: number, kept: number } } | { ok: false, error: { kind: string, message: string } }}
  *   cleared: rows removed from the log; kept: rows left in it. Error kinds:
- *   ledger-malformed, and withDecisionsLock's not-a-directory, no-learning-dir and busy.
+ *   ledger-malformed, and withDecisionsLock's not-a-directory, no-curation-dir and busy.
  */
 function clearUnreferenced(root, { now = Date.now(), timeoutMs } = {}) {
   return withDecisionsLock('clear', root, () => {
@@ -1366,11 +1367,11 @@ function removeEmptyDir(dir) {
 }
 
 /**
- * Remove every learning file — `devflow learning --reset`: the log, the ledger
+ * Remove every curation file — `devflow curation --reset`: the log, the ledger
  * and their side files, the rendered files, the tuning config, and the queue
- * with its claim and owner file — and then the learning directory itself.
+ * with its claim and owner file — and then the curation directory itself.
  *
- * D-RESET-UNDER-LOCK: reset empties the learning directory under the learning
+ * D-RESET-UNDER-LOCK: reset empties the curation directory under the curation
  * lock, sparing only the lock directory, and removes the emptied directory once
  * the lock is released, and only if nothing has arrived in it. Reason: the lock
  * is released by its path, so removing it with the directory would let this
@@ -1378,8 +1379,8 @@ function removeEmptyDir(dir) {
  * and what arrives once the lock is free — a captured turn, or the next writer's
  * lock — belongs to the next run.
  *
- * Like every learning writer it refuses without `.devflow/curation/` and creates
- * nothing (D-NO-STRAY-TREE), refuses a learning directory or a `.devflow` that is a
+ * Like every curation writer it refuses without `.devflow/curation/` and creates
+ * nothing (D-NO-STRAY-TREE), refuses a curation directory or a `.devflow` that is a
  * symbolic link and removes nothing (D-NO-LINKED-TREE), since emptying it would
  * empty whatever directory the link leads to, and waits at most `timeoutMs` for the
  * lock, breaking one a crashed run left behind (D-ONE-LEARNING-LOCK). A symbolic
@@ -1388,18 +1389,18 @@ function removeEmptyDir(dir) {
  * @param {string} root - project root
  * @param {{ timeoutMs?: number }} [opts]
  * @returns {{ ok: true, value: { removed: number } } | { ok: false, error: { kind: string, message: string } }}
- *   removed: the entries removed from the learning directory. Errors are
- *   withDecisionsLock's not-a-directory, no-learning-dir and busy.
+ *   removed: the entries removed from the curation directory. Errors are
+ *   withDecisionsLock's not-a-directory, no-curation-dir and busy.
  */
-function resetLearning(root, { timeoutMs } = {}) {
-  const learningDir = getLearningDir(root);
+function resetCuration(root, { timeoutMs } = {}) {
+  const curationDir = getCurationDir(root);
   const lockName = path.basename(getDecisionsLockDir(root));
   const reset = withDecisionsLock('reset', root, () => {
-    const entries = fs.readdirSync(learningDir).filter(name => name !== lockName);
-    for (const name of entries) fs.rmSync(path.join(learningDir, name), { recursive: true, force: true });
+    const entries = fs.readdirSync(curationDir).filter(name => name !== lockName);
+    for (const name of entries) fs.rmSync(path.join(curationDir, name), { recursive: true, force: true });
     return { ok: true, value: { removed: entries.length } };
   }, { timeoutMs });
-  if (reset.ok) removeEmptyDir(learningDir);
+  if (reset.ok) removeEmptyDir(curationDir);
   return reset;
 }
 
@@ -1488,7 +1489,7 @@ function removeIfPresent(file) {
  * larger than CLAIM_OWNER_MAX_BYTES reads as absent (D-NO-LINKED-READ, at readJsonl).
  */
 function readClaimOwner(root) {
-  const text = readTextUnlinked(getLearningClaimOwnerPath(root), { maxBytes: CLAIM_OWNER_MAX_BYTES });
+  const text = readTextUnlinked(getCurationClaimOwnerPath(root), { maxBytes: CLAIM_OWNER_MAX_BYTES });
   if (text === null) return null;
   const token = text.trim();
   return CLAIM_TOKEN_RE.test(token) ? token : null;
@@ -1499,7 +1500,7 @@ function readClaimOwner(root) {
  * queue-append's overflow truncation takes, so a truncation can never rewrite the
  * queue from rows already claimed. link(2) refuses an existing claim; on a
  * filesystem without hard links a rename stands in, which is safe because the
- * caller found the claim path empty under the learning lock. A row a capture hook
+ * caller found the claim path empty under the curation lock. A row a capture hook
  * appends meanwhile lands in the claimed batch or in the queue formed after it,
  * never in neither.
  *
@@ -1542,17 +1543,17 @@ function moveQueueToClaim(queuePath, claimPath) {
 }
 
 /**
- * Claim the learning queue for one Curate run.
+ * Claim the curation queue for one Curate run.
  *
- * D-OWNED-CLAIM: the learning queue is claimed and released only through the
- * claim-queue and release-claim ops, under the learning lock. A claim moves the
+ * D-OWNED-CLAIM: the curation queue is claimed and released only through the
+ * claim-queue and release-claim ops, under the curation lock. A claim moves the
  * queue to .pending-turns.processing by link(2), under the queue's own lock (a
  * rename stands in only where the filesystem has no hard links), sets the claim's
  * mtime to now and records a fresh random token in .pending-turns.owner. A claim
  * younger than CLAIM_STALE_SECS is busy to every other claimant; an older one is
  * taken over with a new token, and the waiting queue is left for the next claim.
  * Release deletes the claim only for the token that owns it, and every json-helper
- * learning op refreshes an existing claim's mtime before it runs, without ever
+ * curation op refreshes an existing claim's mtime before it runs, without ever
  * creating one. Reason: a check-then-mv claim let two runs claim at once and
  * clobber a batch, mv kept the queue's old mtime so a fresh claim could look stale
  * at once, and an unconditional final unlink deleted another run's claim.
@@ -1568,17 +1569,17 @@ function moveQueueToClaim(queuePath, claimPath) {
  */
 function claimQueue(root, { now = Date.now(), token = newClaimToken(), timeoutMs } = {}) {
   assertClaimToken('claimQueue', token);
-  if (!hasLearningDir(root)) return { ok: true, value: { state: 'none' } };
+  if (!hasCurationDir(root)) return { ok: true, value: { state: 'none' } };
   return withDecisionsLock('claim-queue', root, () => {
-    const claimPath = getLearningPendingTurnsProcessingPath(root);
-    const queuePath = getLearningPendingTurnsPath(root);
+    const claimPath = getCurationPendingTurnsProcessingPath(root);
+    const queuePath = getCurationPendingTurnsPath(root);
     const at = new Date(now);
 
     const claim = regularFileStat(claimPath);
     if (claim === false) return notRegularFile('claim-queue', claimPath);
     if (claim !== null) {
       if (now - claim.mtimeMs < CLAIM_STALE_SECS * 1000) return { ok: true, value: { state: 'busy' } };
-      writeFileAtomic(getLearningClaimOwnerPath(root), `${token}\n`);
+      writeFileAtomic(getCurationClaimOwnerPath(root), `${token}\n`);
       fs.utimesSync(claimPath, at, at);
       return { ok: true, value: { state: 'claimed', token, takeover: true } };
     }
@@ -1590,7 +1591,7 @@ function claimQueue(root, { now = Date.now(), token = newClaimToken(), timeoutMs
     const moved = moveQueueToClaim(queuePath, claimPath);
     if (moved !== 'moved') return { ok: true, value: { state: moved } };
     fs.utimesSync(claimPath, at, at);
-    writeFileAtomic(getLearningClaimOwnerPath(root), `${token}\n`);
+    writeFileAtomic(getCurationClaimOwnerPath(root), `${token}\n`);
     return { ok: true, value: { state: 'claimed', token, takeover: false } };
   }, { timeoutMs });
 }
@@ -1607,14 +1608,14 @@ function claimQueue(root, { now = Date.now(), token = newClaimToken(), timeoutMs
  * @param {string} token
  * @param {{ timeoutMs?: number }} [opts]
  * @returns {{ ok: true, value: { state: 'released'|'not-owner'|'gone' } } | { ok: false, error: { kind: string, message: string } }}
- *   errors include withDecisionsLock's not-a-directory, no-learning-dir and busy
+ *   errors include withDecisionsLock's not-a-directory, no-curation-dir and busy
  * @throws {TypeError} when `token` is not a claim token
  */
 function releaseClaim(root, token, { timeoutMs } = {}) {
   assertClaimToken('releaseClaim', token);
   return withDecisionsLock('release-claim', root, () => {
-    const claimPath = getLearningPendingTurnsProcessingPath(root);
-    const ownerPath = getLearningClaimOwnerPath(root);
+    const claimPath = getCurationPendingTurnsProcessingPath(root);
+    const ownerPath = getCurationClaimOwnerPath(root);
     const owned = readClaimOwner(root) === token;
 
     const claim = regularFileStat(claimPath);
@@ -1633,8 +1634,8 @@ function releaseClaim(root, token, { timeoutMs } = {}) {
 /**
  * The claim heartbeat (D-OWNED-CLAIM): set an existing claim's mtime to now. It
  * never creates a claim and never follows a symlink at the claim path, and it
- * takes no lock — json-helper sends it before each learning op runs. A claim in a
- * learning tree reached through a symbolic link is left alone (D-NO-LINKED-TREE):
+ * takes no lock — json-helper sends it before each curation op runs. A claim in a
+ * curation tree reached through a symbolic link is left alone (D-NO-LINKED-TREE):
  * `lutimes` follows a linked folder above the claim, and the op that follows
  * refuses that tree anyway.
  *
@@ -1643,8 +1644,8 @@ function releaseClaim(root, token, { timeoutMs } = {}) {
  * @returns {{ ok: true, value: { touched: boolean } } | { ok: false, error: { kind: 'heartbeat-failed', message: string } }}
  */
 function touchClaim(root, { now = Date.now() } = {}) {
-  if (linkedLearningFolder(root) !== null) return { ok: true, value: { touched: false } };
-  const claimPath = getLearningPendingTurnsProcessingPath(root);
+  if (linkedCurationFolder(root) !== null) return { ok: true, value: { touched: false } };
+  const claimPath = getCurationPendingTurnsProcessingPath(root);
   const at = new Date(now);
   try {
     fs.lutimesSync(claimPath, at, at);
@@ -1709,9 +1710,9 @@ const SET_MEMBERS = Object.freeze([
 ].map(nameOfHelper));
 const LEDGER_NAME = SET_MEMBERS[SET_MEMBERS.length - 1];
 
-const QUEUE_NAME = nameOfHelper(getLearningPendingTurnsPath);
-const CLAIM_NAME = nameOfHelper(getLearningPendingTurnsProcessingPath);
-const OWNER_NAME = nameOfHelper(getLearningClaimOwnerPath);
+const QUEUE_NAME = nameOfHelper(getCurationPendingTurnsPath);
+const CLAIM_NAME = nameOfHelper(getCurationPendingTurnsProcessingPath);
+const OWNER_NAME = nameOfHelper(getCurationClaimOwnerPath);
 const STORE_LOCK_NAME = nameOfHelper(getDecisionsLockDir);
 const QUEUE_LOCK_NAME = `${QUEUE_NAME}.lock`;
 
@@ -2631,6 +2632,55 @@ function backupProblem(dir) {
   return null;
 }
 
+/** True for the names in a backup folder that hold rows a later sweep would still merge. */
+function holdsPendingRows(name) {
+  if (name === QUEUE_NAME || name === CLAIM_NAME) return true;
+  const record = queueFormOf(name);
+  return record !== null && (record.form === 'private' || record.form === 'overflow');
+}
+
+/**
+ * Count the rows still waiting in the backup folders a move left, for the status
+ * command: per backup, the non-blank lines of the pending and processing files and of
+ * the unswept private and overflow files (an unfinished last line counts, because the
+ * sweep has not merged it). A swept file counts for nothing. Read-only: no lock is
+ * taken and nothing is written, no link is followed (a backup that is a link, and a
+ * queue file that is a link, read as absent), and the read is bounded by the sweep's
+ * limits on backup folders and on queue files per folder.
+ *
+ * @param {unknown} root - the ledger root, an absolute path
+ * @returns {{ ok: true, value: { backups: Array<{ name: string, pendingRows: number }> } }
+ *   | { ok: false, error: { kind: 'refused'|'io-error', message: string } }}
+ */
+function backupPendingRows(root) {
+  if (typeof root !== 'string' || root === '' || root.includes('\0') || !path.isAbsolute(root)) {
+    return { ok: false, error: { kind: 'refused', message: 'backup-rows: the ledger root must be an absolute path' } };
+  }
+  try {
+    const devflowDir = path.join(path.resolve(root), '.devflow');
+    const devflowStat = lstatOrNull(devflowDir);
+    if (devflowStat === null || !devflowStat.isDirectory()) return { ok: true, value: { backups: [] } };
+    const names = fs.readdirSync(devflowDir).filter(name => name.startsWith(LEGACY_NAMES.backupPrefix)).sort().slice(0, MOVE_MAX_BACKUPS);
+    const backups = [];
+    for (const name of names) {
+      const dir = path.join(devflowDir, name);
+      const stat = lstatOrNull(dir);
+      if (stat === null || !stat.isDirectory()) continue;
+      const files = fs.readdirSync(dir).filter(holdsPendingRows).sort().slice(0, MOVE_MAX_QUEUE_FILES);
+      let pendingRows = 0;
+      for (const file of files) {
+        const text = readQueueText(path.join(dir, file));
+        if (text !== null) pendingRows += completeLines(text).length;
+      }
+      backups.push({ name, pendingRows });
+    }
+    return { ok: true, value: { backups } };
+  } catch (err) {
+    if (!err || typeof err.code !== 'string') throw err;
+    return { ok: false, error: { kind: 'io-error', message: `backup-rows: ${err.code}: ${err.message}` } };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Integrity, listing, due selection and show — all read-only
 // ---------------------------------------------------------------------------
@@ -2949,17 +2999,17 @@ function resolveVerifyRef(root) {
 /**
  * Render decisions.md, pitfalls.md and index.md from `ledgerRows` and write each
  * atomically, the index last. The caller holds .decisions.lock
- * (D-ONE-LEARNING-LOCK), so the learning directory exists. render-decisions.cjs
+ * (D-ONE-LEARNING-LOCK), so the curation directory exists. render-decisions.cjs
  * requires this module at load time, so it is required here, on first use. Prints
  * nothing.
  *
  * @param {string} root - project root
  * @param {object[]} ledgerRows - every ledger row
- * @param {string} [outputDir] - the folder the files belong in (default: the learning folder)
+ * @param {string} [outputDir] - the folder the files belong in (default: the curation folder)
  */
-function renderAll(root, ledgerRows, outputDir = getLearningDir(root)) {
-  const { renderLearningFiles } = require('./render-decisions.cjs');
-  for (const file of renderLearningFiles(root, ledgerRows, outputDir)) writeFileAtomic(file.path, file.content);
+function renderAll(root, ledgerRows, outputDir = getCurationDir(root)) {
+  const { renderCurationFiles } = require('./render-decisions.cjs');
+  for (const file of renderCurationFiles(root, ledgerRows, outputDir)) writeFileAtomic(file.path, file.content);
 }
 
 // ---------------------------------------------------------------------------
@@ -3118,7 +3168,7 @@ function restoreFirst(id, carriers) {
  *   observations: the count the log row holds afterwards; reprojected: the
  *   anchors re-projected, in anchor order. Error kinds: invalid-input (with
  *   problems), duplicate-log-id, restore-first, cannot-reproject, and
- *   withDecisionsLock's not-a-directory, no-learning-dir and busy.
+ *   withDecisionsLock's not-a-directory, no-curation-dir and busy.
  * @throws {TypeError} when `mode` is not a put mode
  */
 function putObservation(root, mode, input, { now = Date.now(), timeoutMs, scopeMatches } = {}) {
@@ -3195,11 +3245,11 @@ function putUnderLock(root, mode, input, { now, scopeMatches }) {
  * @param {string} root - project root
  * @param {{ scopeMatches?: (glob: string) => boolean }} [opts] - default gitScopeMatcher(root)
  * @returns {{ ok: true, value: { active: object[], inactive: object[], observations: object[], integrity: object[], malformed: { ledger: number, log: number } } }
- *   | { ok: false, error: { kind: 'no-learning-dir', message: string } }}
+ *   | { ok: false, error: { kind: 'no-curation-dir', message: string } }}
  */
 function readListing(root, { scopeMatches } = {}) {
-  if (!hasLearningDir(root)) return noLearningDir('list', root);
-  const { ledgerRows, logRows, rejected } = readLearningState(root);
+  if (!hasCurationDir(root)) return noCurationDir('list', root);
+  const { ledgerRows, logRows, rejected } = readCurationState(root);
   return {
     ok: true,
     value: buildListing(ledgerRows, logRows, { scopeMatches: scopeMatches || gitScopeMatcher(root), rejected }),
@@ -3285,11 +3335,11 @@ function formatListing(listing) {
  * @param {string} root - project root
  * @param {string} key - an anchor id or an observation id
  * @returns {{ ok: true, value: { key: string, ledger: object[], log: object|null, history_versions: object[], flags: object[], malformed?: { ledger: number, log: number } } }
- *   | { ok: false, error: { kind: 'no-learning-dir'|'invalid-key'|'not-found', message: string } }}
+ *   | { ok: false, error: { kind: 'no-curation-dir'|'invalid-key'|'not-found', message: string } }}
  */
 function showByKey(root, key) {
-  if (!hasLearningDir(root)) return noLearningDir('show', root);
-  const { ledgerRows, logRows, rejected } = readLearningState(root);
+  if (!hasCurationDir(root)) return noCurationDir('show', root);
+  const { ledgerRows, logRows, rejected } = readCurationState(root);
   const shown = showEntry(key, ledgerRows, logRows, { historyVersions: id => historyVersions(root, id) });
   const malformed = { ledger: rejected.ledger.length, log: rejected.log.length };
   const skipped = malformed.ledger + malformed.log;
@@ -3320,7 +3370,7 @@ function warmScopeMatcher(ledgerRows, scopeMatches) {
 /**
  * Hand out the entries maintenance works on next, and lease them.
  *
- * Under the learning lock it flags integrity problems and selects the due
+ * Under the curation lock it flags integrity problems and selects the due
  * entries (D-DUE-ORDER), then stamps each entry it hands out with
  * `last_attempt` = now: claim-due is the one writer of the field the lease
  * reads. A hand-out backs up a v1 tree first (D-V1-BACKUP-ONCE) and quarantines
@@ -3336,10 +3386,10 @@ function warmScopeMatcher(ledgerRows, scopeMatches) {
  * @returns {{ ok: true, value: { ref: { ref: 'origin/HEAD'|'HEAD', commit: string } | null, due: Array<{ anchor_id: string, reason: string, bytes: number }> } }
  *   | { ok: false, error: { kind: string, message: string } }}
  *   due is selectDue's answer; errors are withDecisionsLock's not-a-directory,
- *   no-learning-dir and busy
+ *   no-curation-dir and busy
  */
 function claimDue(root, { now = Date.now(), timeoutMs, scopeMatches } = {}) {
-  if (!hasLearningDir(root)) return noLearningDir('claim-due', root);
+  if (!hasCurationDir(root)) return noCurationDir('claim-due', root);
   const matches = scopeMatches || gitScopeMatcher(root);
   const ref = resolveVerifyRef(root);
   warmScopeMatcher(readJsonl(getDecisionsLedgerPath(root)).rows, matches);
@@ -3413,7 +3463,7 @@ function nextAnchorFromLedger(ledgerRows, type) {
 
 /**
  * True when a project-relative path is one the cited-number scan never reads: the
- * learning tree, where every entry cites itself, or anything under an excluded
+ * curation tree, where every entry cites itself, or anything under an excluded
  * directory segment.
  *
  * @param {string} relPath - relative to the project root, either separator style
@@ -3432,7 +3482,7 @@ function isCitedScanExcluded(relPath) {
  * command a repository's config names in `core.fsmonitor` — code chosen by the
  * repository this hook runs inside. The call turns it off for itself
  * (`-c core.fsmonitor=false`), so the listing stays a pure read. Reason: the
- * learning ops run inside any repository a session opens, and a read that ran
+ * curation ops run inside any repository a session opens, and a read that ran
  * the repository's command would execute it with the user's privileges.
  *
  * @param {string} root - project root
@@ -3512,7 +3562,7 @@ function readScannedText(file) {
  * Every anchor the project's files cite as a whole word, each mapped to its first
  * citation: the scan behind D-E4-SKIP. It reads the files git tracks under `root`
  * (D-NO-FSMONITOR) or, outside a git working tree, the files a directory walk
- * finds — never the learning tree, an excluded directory, a symbolic link, a
+ * finds — never the curation tree, an excluded directory, a symbolic link, a
  * binary file or a file over the size cap. A file it cannot read is passed over.
  * It writes nothing and takes no lock.
  *
@@ -3584,10 +3634,10 @@ function mintAnchor(ledgerRows, type, citedAnchors) {
  * Promote a v2 observation to a new ledger entry of `type` — the assign-anchor op.
  *
  * D-E4-SKIP: assign-anchor scans the project's tracked files once, before it takes
- * the learning lock, for every anchor they cite as a whole word, and mints the
+ * the curation lock, for every anchor they cite as a whole word, and mints the
  * first number past the type's highest anchored number that no file cites; it
  * reports each number it skips, skips at most E4_MAX_SKIPS of them and refuses
- * when the next one is cited too. The scan reads neither the learning tree nor
+ * when the next one is cited too. The scan reads neither the curation tree nor
  * .git or a vendored or build directory (node_modules, target, dist), nor a
  * symbolic link, a binary file or a file over 5 MB. Reason: a document can cite a
  * number the ledger has not minted yet, and minting over it silently binds that
@@ -3598,7 +3648,7 @@ function mintAnchor(ledgerRows, type, citedAnchors) {
  * whatever its status (D-LEDGER-REGISTRY). The new row is its projection
  * (toLedgerRowV2) with the type's active status and today as both date and
  * last_verified; it is appended to the ledger and the files are re-rendered, all
- * under the learning lock. The log is never written. Like every writer it backs
+ * under the curation lock. The log is never written. Like every writer it backs
  * up a v1 tree first (D-V1-BACKUP-ONCE) and quarantines the ledger's malformed
  * lines before it rewrites the ledger (D-QUARANTINE-MALFORMED); a refusal writes
  * nothing.
@@ -3612,13 +3662,13 @@ function mintAnchor(ledgerRows, type, citedAnchors) {
  *   | { ok: false, error: { kind: string, message: string } }}
  *   Error kinds: not-in-log, duplicate-log-id, already-promoted, v1-observation,
  *   type-mismatch, cited-numbers-exhausted, and withDecisionsLock's
- *   not-a-directory, no-learning-dir and busy.
+ *   not-a-directory, no-curation-dir and busy.
  * @throws {TypeError} for a type other than decision or pitfall, or a malformed obsId
  */
 function assignAnchor(root, type, obsId, { now = Date.now(), timeoutMs, citedAnchors } = {}) {
   if (anchorPrefixFor(type) === null) throw new TypeError(`assignAnchor: type must be 'decision' or 'pitfall', got '${type}'`);
   if (typeof obsId !== 'string' || !OBS_ID_RE.test(obsId)) throw new TypeError('assignAnchor: obsId must be an observation id');
-  if (!hasLearningDir(root)) return noLearningDir('assign-anchor', root);
+  if (!hasCurationDir(root)) return noCurationDir('assign-anchor', root);
   const cited = citedAnchors || collectCitedAnchorIds(root);
   return withDecisionsLock('assign-anchor', root, () => assignUnderLock(root, type, obsId, { now, cited }), { timeoutMs });
 }
@@ -3760,7 +3810,7 @@ function recordRefreshHistory(root, plans, ledgerRows, { now }) {
  * an inactive entry or a v1 one, and — when re-projecting — an entry with no
  * observation id or whose log row is missing, doubled, v1 or of a type it cannot
  * take refuses the whole batch, every refused anchor listed, nothing written. A
- * batch that changes no row writes nothing. Otherwise, under the learning lock,
+ * batch that changes no row writes nothing. Otherwise, under the curation lock,
  * it backs up a v1 tree (D-V1-BACKUP-ONCE), quarantines the ledger's malformed
  * lines (D-QUARANTINE-MALFORMED), then writes the ledger once and renders once.
  *
@@ -3771,7 +3821,7 @@ function recordRefreshHistory(root, plans, ledgerRows, { now }) {
  * @returns {{ ok: true, value: { refreshed: Array<{ anchor_id: string, state: 'verified'|'reprojected'|'unchanged' }> } }
  *   | { ok: false, error: { kind: string, message: string, problems?: Array<{ anchor_id: string, message: string }> } }}
  *   refreshed: each anchor once, in the order given. Error kinds: refused (with
- *   problems), and withDecisionsLock's not-a-directory, no-learning-dir and busy.
+ *   problems), and withDecisionsLock's not-a-directory, no-curation-dir and busy.
  * @throws {TypeError} when anchorIds is empty or holds anything but anchor ids
  */
 function refreshAnchors(root, anchorIds, { verified = false, now = Date.now(), timeoutMs } = {}) {
@@ -3991,7 +4041,7 @@ function quoteAtRef(root, at, quote, { verifyRef } = {}) {
  * Each also sets retired_on to today and clears the other notes; the rest of the
  * row stays as it is, so a v1 entry stays v1. An entry already inactive, an
  * anchor the ledger does not hold or holds twice, and a successor absent or
- * inactive are refused. The input and the quote are checked before the learning
+ * inactive are refused. The input and the quote are checked before the curation
  * lock is taken; under it the ledger is written once and the files are rendered,
  * after a v1 tree is backed up (D-V1-BACKUP-ONCE) and malformed ledger lines are
  * quarantined (D-QUARANTINE-MALFORMED). A refusal writes nothing.
@@ -4008,7 +4058,7 @@ function quoteAtRef(root, at, quote, { verifyRef } = {}) {
  *   kinds: invalid-input (with problems), quoteAtRef's, not-found,
  *   duplicate-anchor, already-inactive, successor-not-found,
  *   successor-duplicate-anchor, successor-inactive, and withDecisionsLock's
- *   not-a-directory, no-learning-dir and busy.
+ *   not-a-directory, no-curation-dir and busy.
  * @throws {TypeError} for a malformed anchorId or a status that is not inactive
  */
 function retireAnchor(root, anchorId, status, input, { now = Date.now(), timeoutMs, verifyRef } = {}) {
@@ -4016,7 +4066,7 @@ function retireAnchor(root, anchorId, status, input, { now = Date.now(), timeout
   if (!INACTIVE_STATUSES.includes(status)) {
     throw new TypeError(`retireAnchor: status must be one of ${INACTIVE_STATUSES.join(', ')}, got '${status}'`);
   }
-  if (!hasLearningDir(root)) return noLearningDir('retire-anchor', root);
+  if (!hasCurationDir(root)) return noCurationDir('retire-anchor', root);
   const problems = retireInputProblems(anchorId, status, input);
   if (problems.length > 0) return invalidInput('retire-anchor', problems);
   let note;
@@ -4078,7 +4128,7 @@ function retireUnderLock(root, anchorId, status, note, { now }) {
  * claim-due hands it out ahead of every verified entry (D-DUE-ORDER); its content
  * and its date stay, and the files are re-rendered. An entry already active, an
  * anchor the ledger does not hold or holds twice, and a row whose type its anchor
- * does not name are refused. It writes as retireAnchor does, under the learning
+ * does not name are refused. It writes as retireAnchor does, under the curation
  * lock; a refusal writes nothing.
  *
  * @param {string} root - project root
@@ -4087,7 +4137,7 @@ function retireUnderLock(root, anchorId, status, note, { now }) {
  * @returns {{ ok: true, value: { anchor_id: string, status: 'Accepted'|'Active' } }
  *   | { ok: false, error: { kind: string, message: string } }}
  *   Error kinds: not-found, duplicate-anchor, already-active, type-mismatch, and
- *   withDecisionsLock's not-a-directory, no-learning-dir and busy.
+ *   withDecisionsLock's not-a-directory, no-curation-dir and busy.
  * @throws {TypeError} for a malformed anchorId
  */
 function restoreAnchor(root, anchorId, { now = Date.now(), timeoutMs } = {}) {
@@ -4154,10 +4204,10 @@ module.exports = {
   writeFileAtomic,
   writeJsonlAtomic,
   // Locking
-  hasLearningDir,
+  hasCurationDir,
   withDecisionsLock,
   // State and the ledger registry
-  readLearningState,
+  readCurationState,
   ledgerRegistry,
   // Validation
   validateObservationInput,
@@ -4172,7 +4222,7 @@ module.exports = {
   // Rotation, clearing and resetting
   rotateObservations,
   clearUnreferenced,
-  resetLearning,
+  resetCuration,
   // The queue claim
   CLAIM_STALE_SECS,
   CLAIM_TOKEN_RE,
@@ -4194,6 +4244,7 @@ module.exports = {
   curationMoveFinish,
   curationMoveSweepBackup,
   sweepLedgerBackups,
+  backupPendingRows,
   // Integrity, listing, due selection and show
   integrityFlags,
   buildListing,

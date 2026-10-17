@@ -39,7 +39,7 @@ const {
 } = require('./decisions-format.cjs');
 
 const {
-  getLearningDir,
+  getCurationDir,
   getDecisionsFilePath,
   getPitfallsFilePath,
   getDecisionsIndexPath,
@@ -50,7 +50,7 @@ const {
   isActive,
   isV2,
   readJsonl,
-  hasLearningDir,
+  hasCurationDir,
   withDecisionsLock,
   writeFileAtomic,
 } = require('./curation-store.cjs');
@@ -229,7 +229,7 @@ function renderDecisionsFile(rows, kind) {
 /**
  * Render decisions.md, pitfalls.md and index.md from the ledger rows, in memory,
  * in the order they are written: the body files first, the index last. `render`
- * and the learning store's writers write exactly these contents, and `--check`
+ * and the curation store's writers write exactly these contents, and `--check`
  * compares exactly these.
  *
  * The files belong in `outputDir`, which the caller names: the index lists the
@@ -242,9 +242,9 @@ function renderDecisionsFile(rows, kind) {
  * @returns {Array<{ path: string, content: string }>}
  * @throws {TypeError} when `outputDir` is not an absolute path
  */
-function renderLearningFiles(worktreePath, rows, outputDir) {
+function renderCurationFiles(worktreePath, rows, outputDir) {
   if (typeof outputDir !== 'string' || !path.isAbsolute(outputDir)) {
-    throw new TypeError('renderLearningFiles: outputDir must be an absolute path');
+    throw new TypeError('renderCurationFiles: outputDir must be an absolute path');
   }
   const inOutputDir = file => path.join(outputDir, path.basename(file));
   const decisionsFilePath = inOutputDir(getDecisionsFilePath(worktreePath));
@@ -293,10 +293,10 @@ function renderLearningFiles(worktreePath, rows, outputDir) {
  * @throws when `<worktreePath>/.devflow/curation/` does not exist, or a write fails
  */
 function renderAndWriteAll(worktreePath, rows) {
-  if (!hasLearningDir(worktreePath)) {
+  if (!hasCurationDir(worktreePath)) {
     throw new Error(`renderAndWriteAll: no .devflow/curation/ under ${worktreePath}`);
   }
-  const [decisions, pitfalls, index] = renderLearningFiles(worktreePath, rows, getLearningDir(worktreePath));
+  const [decisions, pitfalls, index] = renderCurationFiles(worktreePath, rows, getCurationDir(worktreePath));
 
   // Write body files first; index last. On a crash between body writes and the
   // index write: on the FIRST render the index is absent (reader falls back to
@@ -377,7 +377,7 @@ function readIfPresent(file) {
 /**
  * `render`: read the ledger under .decisions.lock and write the three files from
  * what it read (D-ONE-LEARNING-LOCK), so a ledger write that lands while it waits
- * is rendered rather than overwritten. Refuses without the learning directory
+ * is rendered rather than overwritten. Refuses without the curation directory
  * (D-NO-STRAY-TREE), and when it or `.devflow` is a symbolic link (D-NO-LINKED-TREE).
  *
  * @param {string} root
@@ -397,18 +397,18 @@ function renderCommand(root) {
  * `--check`: render in memory and compare with the files on disk, naming each
  * file that differs or is missing; exit 1 on any drift. It writes nothing and
  * takes no lock — taking it would create the lock directory — and refuses
- * without the learning directory (D-NO-STRAY-TREE).
+ * without the curation directory (D-NO-STRAY-TREE).
  *
  * @param {string} root
  * @returns {number} exit code
  */
 function checkCommand(root) {
-  if (!hasLearningDir(root)) {
+  if (!hasCurationDir(root)) {
     process.stderr.write(`${CLI_NAME}: no .devflow/curation/ under ${root} — run from the project root\n`);
     return 1;
   }
   let drift = false;
-  for (const file of renderLearningFiles(root, readLedgerRows(root), getLearningDir(root))) {
+  for (const file of renderCurationFiles(root, readLedgerRows(root), getCurationDir(root))) {
     const onDisk = readIfPresent(file.path);
     if (onDisk !== file.content) {
       process.stderr.write(`[render-decisions] DRIFT: ${file.path}${onDisk === null ? ' (missing)' : ''}\n`);
@@ -420,7 +420,7 @@ function checkCommand(root) {
 
 /**
  * Run the CLI on its arguments and return the exit code. Neither mode creates the
- * learning directory (D-NO-STRAY-TREE).
+ * curation directory (D-NO-STRAY-TREE).
  *
  * @param {string[]} argv - the arguments after the script path
  * @returns {number}
@@ -458,7 +458,7 @@ if (require.main === module) {
 
 module.exports = {
   renderDecisionsFile,
-  renderLearningFiles,
+  renderCurationFiles,
   renderAndWriteAll,
   selectActiveRows,
   selectInactiveRows,

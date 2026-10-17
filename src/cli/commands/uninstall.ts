@@ -1258,7 +1258,7 @@ export async function runSelectivePhaseForScope(opts: {
  * FULL PHASE (per scope): revert agent model overrides, remove all Devflow
  * assets from the scope, then perform scope-appropriate devflowDir cleanup.
  *
- * Local scope: remove only install artifacts — project data (memory, learning,
+ * Local scope: remove only install artifacts — project data (memory, curation,
  *   docs, features) is always preserved under the git root.
  * User scope: interactive TTY with user-authored content → confirm before wiping
  *   ~/.devflow/; non-interactive or no user content → artifacts-only.
@@ -1309,11 +1309,11 @@ export async function runFullPhaseForScope(opts: {
 
   if (scope === 'local') {
     // Local scope: devflowDir is gitRoot/.devflow/ which holds project data
-    // (memory, learning, features, docs, config.json). Never remove those —
+    // (memory, curation, features, docs, config.json). Never remove those —
     // only remove install artifacts: scripts/ (done above) + manifest.json and
     // the other Devflow-generated artifacts (see removeDevFlowInstallArtifacts).
     await removeDevFlowInstallArtifacts(devflowDir, verbose, mayChange);
-    p.log.info('Local project data (memory, learning, features, docs) preserved');
+    p.log.info('Local project data (memory, curation, features, docs) preserved');
   } else {
     // User scope (devflowDir = ~/.devflow/): offer full cleanup behind a confirm gate
     // that enumerates user-authored content worth backing up before wiping the dir.

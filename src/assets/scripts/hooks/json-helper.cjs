@@ -2,10 +2,10 @@
 
 // src/assets/scripts/hooks/json-helper.cjs
 // Provides jq-equivalent operations for hooks when jq is not installed, and the
-// learning ops the Curate agent runs from the project root.
+// curation ops the Curate agent runs from the project root.
 // SECURITY: This is a local CLI helper invoked only by shell hooks and the
 // Curate agent with controlled arguments. No operation takes a file path: a
-// file's content arrives on stdin (json-parse redirects it), and the learning ops
+// file's content arrives on stdin (json-parse redirects it), and the curation ops
 // build every path from the current directory.
 // Usage: node json-helper.cjs <operation> [args...]
 //
@@ -37,14 +37,14 @@
 //   show <anchor|obs_id>                  Read-only: print one entry as pretty JSON
 //   claim-due                             Hand out the entries due for maintenance, leased
 //                                          for a day, after the ref their claims are checked at
-//   claim-queue                           Claim the learning queue for this run; prints
+//   claim-queue                           Claim the curation queue for this run; prints
 //                                          claimed <token>[ takeover] | busy | none
 //   release-claim <token>                 Release the claim the token owns; prints
 //                                          released | not-owner | gone
 //   move-ledger <root> <old> <new>        Move a project's old ledger folder to the new name,
 //                                          once; prints none | busy | moved <mode> and notes
 //
-// Every learning op above except claim-queue, release-claim and move-ledger first
+// Every curation op above except claim-queue, release-claim and move-ledger first
 // refreshes the mtime of an existing queue claim — the heartbeat (D-OWNED-CLAIM).
 
 'use strict';
@@ -55,21 +55,21 @@ const { constants: { MAX_STRING_LENGTH } } = require('buffer');
 const op = process.argv[2];
 const args = process.argv.slice(3);
 
-/** The learning modules, once loaded; see learning(). */
-let learningModules = null;
+/** The curation modules, once loaded; see curation(). */
+let curationModules = null;
 
 /**
- * The learning store, loaded on first use and memoized. The generic ops never
+ * The curation store, loaded on first use and memoized. The generic ops never
  * call it, so a hook that falls back from jq to node never pays for loading it,
  * and the store loads the renderer only when an op renders.
  *
  * @returns {{ store: object }}
  */
-function learning() {
-  if (learningModules === null) {
-    learningModules = { store: require('./lib/curation-store.cjs') };
+function curation() {
+  if (curationModules === null) {
+    curationModules = { store: require('./lib/curation-store.cjs') };
   }
-  return learningModules;
+  return curationModules;
 }
 
 /** The bytes each read of stdin asks for. */
@@ -86,7 +86,7 @@ const STDIN_WAIT_CELL = new Int32Array(new SharedArrayBuffer(4));
 
 /**
  * Read stdin to its end, keeping at most `maxBytes`. Every op that reads stdin
- * reads it here, so the generic ops and the learning ops cannot read it two ways.
+ * reads it here, so the generic ops and the curation ops cannot read it two ways.
  * Never throws: a failure is a refusal.
  *
  * D-STDIN-FD0: stdin is read from file descriptor 0 itself, in reads repeated
@@ -170,11 +170,11 @@ function parseArgs(argList) {
 }
 
 // ---------------------------------------------------------------------------
-// Learning-op adapter
+// Curation-op adapter
 // ---------------------------------------------------------------------------
 
 /**
- * Print a learning op's Result: `format(value)` and a newline on stdout, or the
+ * Print a curation op's Result: `format(value)` and a newline on stdout, or the
  * error message and a newline on stderr. Returns the exit code for the op to set
  * as process.exitCode, so the process exits once, after the op has returned and
  * every lock it took is released.
@@ -204,11 +204,11 @@ function exitWithUsage(usage) {
   process.exit(1);
 }
 
-/** The most stdin a learning op reads: far above any valid input, so a runaway writer is refused, not parsed. */
+/** The most stdin a curation op reads: far above any valid input, so a runaway writer is refused, not parsed. */
 const STDIN_JSON_MAX_BYTES = 64 * 1024;
 
 /**
- * A learning op's stdin as one JSON object: the one way text reaches a learning
+ * A curation op's stdin as one JSON object: the one way text reaches a curation
  * op, so no field of it ever passes through argv or a shell word. Never throws.
  *
  * @param {string} opName - for the message
@@ -237,30 +237,30 @@ const PUT_MODES = new Map([['--create', 'create'], ['--update', 'update'], ['--r
 const ENTRY_TYPES = new Set(['decision', 'pitfall']);
 
 /**
- * The learning ops whose run sends the claim heartbeat first (D-OWNED-CLAIM).
+ * The curation ops whose run sends the claim heartbeat first (D-OWNED-CLAIM).
  * claim-queue and release-claim manage the claim themselves, and the generic ops
- * never touch it. A new learning op joins this set.
+ * never touch it. A new curation op joins this set.
  */
-const LEARNING_OPS = new Set([
+const CURATION_OPS = new Set([
   'assign-anchor', 'retire-anchor', 'restore-anchor', 'refresh-anchor', 'rotate-observations',
   'put-observation', 'list', 'show', 'claim-due',
 ]);
 
 /** Send the claim heartbeat; a failure is reported on stderr and never stops the op. */
 function heartbeat(root) {
-  const beat = learning().store.touchClaim(root);
+  const beat = curation().store.touchClaim(root);
   if (!beat.ok) process.stderr.write(`${beat.error.message}\n`);
 }
 
-// The learning ops run from the project root and take no path to a learning file:
+// The curation ops run from the project root and take no path to a curation file:
 // each builds its paths from the current directory. Every op that writes takes the
-// store's one learning lock through withDecisionsLock (D-ONE-LEARNING-LOCK) and
+// store's one curation lock through withDecisionsLock (D-ONE-LEARNING-LOCK) and
 // refuses, creating nothing, when .devflow/curation/ is absent (D-NO-STRAY-TREE)
 // or when it, or .devflow, is a symbolic link (D-NO-LINKED-TREE).
 // A locked body returns its Result; emit prints it once the lock is released.
 if (require.main === module) {
 try {
-  if (LEARNING_OPS.has(op)) heartbeat(process.cwd());
+  if (CURATION_OPS.has(op)) heartbeat(process.cwd());
   switch (op) {
     case 'get-field': {
       const input = JSON.parse(readStdin());
@@ -360,7 +360,7 @@ try {
     // <path>:<line>` for each number skipped
     // -------------------------------------------------------------------------
     case 'assign-anchor': {
-      const { store } = learning();
+      const { store } = curation();
       if (args.length !== 2 || !ENTRY_TYPES.has(args[0]) || !store.OBS_ID_RE.test(args[1])) {
         exitWithUsage('assign-anchor <decision|pitfall> <obs_id> (run from the project root)');
       }
@@ -384,7 +384,7 @@ try {
     // <anchor>` for each entry re-pointed to the successor
     // -------------------------------------------------------------------------
     case 'retire-anchor': {
-      const { store } = learning();
+      const { store } = curation();
       if (args.length !== 2 || !store.ANCHOR_ID_RE.test(args[0]) || !store.INACTIVE_STATUSES.includes(args[1])) {
         exitWithUsage('retire-anchor <anchor> <Encoded|Superseded|Retired|Deprecated> (one JSON object on stdin; run from the project root)');
       }
@@ -406,7 +406,7 @@ try {
     // stdout: restored <anchor>
     // -------------------------------------------------------------------------
     case 'restore-anchor': {
-      const { store } = learning();
+      const { store } = curation();
       if (args.length !== 1 || !store.ANCHOR_ID_RE.test(args[0])) {
         exitWithUsage('restore-anchor <anchor> (run from the project root)');
       }
@@ -422,7 +422,7 @@ try {
     // `verified <anchor>` under --verified, in the order given
     // -------------------------------------------------------------------------
     case 'refresh-anchor': {
-      const { store } = learning();
+      const { store } = curation();
       const verifiedFlags = args.filter(arg => arg === '--verified').length;
       const anchors = args.filter(arg => arg !== '--verified');
       if (verifiedFlags > 1 || anchors.length === 0 || !anchors.every(arg => store.ANCHOR_ID_RE.test(arg))) {
@@ -443,7 +443,7 @@ try {
     // -------------------------------------------------------------------------
     case 'rotate-observations': {
       if (args.length > 0) exitWithUsage('rotate-observations (no arguments; run from the project root)');
-      const result = learning().store.rotateObservations(process.cwd());
+      const result = curation().store.rotateObservations(process.cwd());
       process.exitCode = emit(result, ({ rotated }) => `rotated ${rotated} observations`);
       break;
     }
@@ -461,7 +461,7 @@ try {
         exitWithUsage('put-observation --create|--update|--reinforce (one JSON object on stdin; run from the project root)');
       }
       const input = readStdinJson('put-observation');
-      const result = input.ok ? learning().store.putObservation(process.cwd(), mode, input.value) : input;
+      const result = input.ok ? curation().store.putObservation(process.cwd(), mode, input.value) : input;
       process.exitCode = emit(result, put => [
         put.outcome === 'reinforced' ? `reinforced ${put.id} ${put.observations}` : `${put.outcome} ${put.id}`,
         ...put.reprojected.map(anchorId => `reprojected ${anchorId}`),
@@ -478,7 +478,7 @@ try {
     // -------------------------------------------------------------------------
     case 'list': {
       if (args.length > 0) exitWithUsage('list (no arguments; run from the project root)');
-      const { store } = learning();
+      const { store } = curation();
       process.exitCode = emit(store.readListing(process.cwd()), store.formatListing);
       break;
     }
@@ -490,7 +490,7 @@ try {
     // malformed when lines were skipped
     // -------------------------------------------------------------------------
     case 'show': {
-      const { store } = learning();
+      const { store } = curation();
       if (args.length !== 1 || !(store.ANCHOR_ID_RE.test(args[0]) || store.OBS_ID_RE.test(args[0]))) {
         exitWithUsage('show <anchor|obs_id> (run from the project root)');
       }
@@ -507,7 +507,7 @@ try {
     // -------------------------------------------------------------------------
     case 'claim-due': {
       if (args.length > 0) exitWithUsage('claim-due (no arguments; run from the project root)');
-      const { store } = learning();
+      const { store } = curation();
       process.exitCode = emit(store.claimDue(process.cwd()), ({ ref, due }) => [
         ref === null ? 'ref none' : `ref ${ref.ref} ${ref.commit.slice(0, 12)}`,
         ...(due.length > 0 ? due.map(entry => `${store.singleLine(entry.anchor_id)} ${entry.reason} ${entry.bytes}`) : ['due none']),
@@ -517,13 +517,13 @@ try {
 
     // -------------------------------------------------------------------------
     // claim-queue
-    // Claim the learning queue for this run (D-OWNED-CLAIM, curation-store.cjs).
+    // Claim the curation queue for this run (D-OWNED-CLAIM, curation-store.cjs).
     // Takes no argument; mints the token itself.
     // stdout: claimed <token> | claimed <token> takeover | busy | none
     // -------------------------------------------------------------------------
     case 'claim-queue': {
       if (args.length > 0) exitWithUsage('claim-queue (no arguments; run from the project root)');
-      const result = learning().store.claimQueue(process.cwd());
+      const result = curation().store.claimQueue(process.cwd());
       process.exitCode = emit(result, claim => (claim.state === 'claimed'
         ? `claimed ${claim.token}${claim.takeover ? ' takeover' : ''}`
         : claim.state));
@@ -536,7 +536,7 @@ try {
     // stdout: released | not-owner | gone
     // -------------------------------------------------------------------------
     case 'release-claim': {
-      const { store } = learning();
+      const { store } = curation();
       if (args.length !== 1 || !store.CLAIM_TOKEN_RE.test(args[0])) {
         exitWithUsage('release-claim <token> (the 16 hex characters claim-queue printed)');
       }
@@ -547,16 +547,16 @@ try {
     // -------------------------------------------------------------------------
     // move-ledger <root> <old> <new>
     // Move the project's old ledger folder to the new name, once (moveLedger,
-    // curation-store.cjs). Not a learning op: it sends no heartbeat, because a
+    // curation-store.cjs). Not a curation op: it sends no heartbeat, because a
     // heartbeat would refresh a claim the move has to judge stale. Unlike the
-    // learning ops it takes its paths as arguments, so a caller outside the project
+    // curation ops it takes its paths as arguments, so a caller outside the project
     // root can name the root; every path stays one argv word, never a shell word.
     // stdout: none | busy | moved <mode>, then `backup <name>` when a backup was made
     // and one `note <text>` line for each note
     // -------------------------------------------------------------------------
     case 'move-ledger': {
       if (args.length !== 3) exitWithUsage('move-ledger <root> <old-folder> <new-folder> (the root is an absolute path)');
-      const { store } = learning();
+      const { store } = curation();
       process.exitCode = emit(store.moveLedger(args[0], { oldName: args[1], newName: args[2] }), moved => [
         moved.state === 'moved' ? `moved ${moved.mode}` : moved.state,
         ...(moved.state === 'moved' && moved.backup !== null ? [`backup ${store.singleLine(moved.backup)}`] : []),

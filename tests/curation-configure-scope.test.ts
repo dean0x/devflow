@@ -1,5 +1,5 @@
 /**
- * `devflow learning --configure` offers a project and a global scope for the
+ * `devflow curation --configure` offers a project and a global scope for the
  * Curate model. D-LEARNING-MODEL-PRECEDENCE puts a `devflow agents` Curate
  * mapping between the project file and the global file, so choosing Global does
  * nothing for a user who has such a mapping. The hint has to say so, or the
@@ -7,10 +7,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { CONFIGURE_SCOPE_OPTIONS, curateModelOptions } from '../src/cli/commands/learning.js';
+import { CONFIGURE_SCOPE_OPTIONS, curateModelOptions } from '../src/cli/commands/curation.js';
 import { AGENT_CONFIG } from './fixtures/agent-config.js';
 
-describe('devflow learning --configure scope options', () => {
+describe('devflow curation --configure scope options', () => {
   const hintOf = (value: string): string => {
     const option = CONFIGURE_SCOPE_OPTIONS.find(o => o.value === value);
     if (option === undefined) throw new Error(`no ${value} scope option`);
@@ -38,11 +38,11 @@ describe('devflow learning --configure scope options', () => {
 });
 
 /**
- * `devflow learning --configure` recommends the model the Curate agent ships with
+ * `devflow curation --configure` recommends the model the Curate agent ships with
  * (D-LEARNING-SHIPPED-ROW). The recommendation is derived from the shipped row, so a
  * change of the shipped tier moves it without an edit here.
  */
-describe('devflow learning --configure model options', () => {
+describe('devflow curation --configure model options', () => {
   const recommended = (shipped: string | undefined): string[] =>
     curateModelOptions(shipped).filter(o => o.hint.startsWith('Recommended')).map(o => o.value);
 

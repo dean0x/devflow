@@ -365,7 +365,7 @@ describe('queue_append_both', () => {
     expect(readJsonl(learning)).toHaveLength(1);
   });
 
-  it('writes only to the memory queue when learning_enabled is false', () => {
+  it('writes only to the memory queue when curation_enabled is false', () => {
     const mem = path.join(tmpDir, 'mem.jsonl');
     const learning = path.join(tmpDir, 'learning.jsonl');
     runWithQueueAppend(`queue_append_both "${tmpDir}" "${mem}" "${tmpDir}" "${learning}" "true" "false" "user" "hi" "1"`);
@@ -770,11 +770,11 @@ describe('queue_read_gates', { timeout: GATE_READ_TEST_BUDGET_MS }, () => {
       ${opts.noJq ? '_HAS_JQ=false' : ''}
       queue_read_gates "${manifestPath}"
       echo "MEMORY=$_QG_MEMORY"
-      echo "LEARNING=$_QG_LEARNING"
+      echo "CURATION=$_QG_CURATION"
     `);
     return {
       memory: stdout.match(/MEMORY=(\S*)/)?.[1] ?? '',
-      learning: stdout.match(/LEARNING=(\S*)/)?.[1] ?? '',
+      learning: stdout.match(/CURATION=(\S*)/)?.[1] ?? '',
       exitCode,
     };
   }
@@ -875,7 +875,7 @@ describe('queue_read_gates', { timeout: GATE_READ_TEST_BUDGET_MS }, () => {
             ${backend.noJq ? '_HAS_JQ=false' : ''}
             ${parser}() { echo fork >> "${forkLog}"; command ${parser} "$@"; }
             queue_read_gates "${manifestPath}"
-            echo "MEMORY=$_QG_MEMORY LEARNING=$_QG_LEARNING"
+            echo "MEMORY=$_QG_MEMORY CURATION=$_QG_CURATION"
           `);
           const forks = fs.existsSync(forkLog) ? fs.readFileSync(forkLog, 'utf-8').trim().split('\n').length : 0;
           return { stdout, exitCode, forks };
@@ -888,16 +888,16 @@ describe('queue_read_gates', { timeout: GATE_READ_TEST_BUDGET_MS }, () => {
           features: { ambient: true, memory: true, curation: true, learning: true, proxy: false, compliance: { enabled: false } },
         }, null, 2));
         expect(on).toMatchObject({ exitCode: 0, forks: 0 });
-        expect(on.stdout).toContain('MEMORY=true LEARNING=true');
+        expect(on.stdout).toContain('MEMORY=true CURATION=true');
 
         const off = probe(JSON.stringify({ features: { memory: false } }, null, 2));
         expect(off).toMatchObject({ exitCode: 0, forks: 1 });
-        expect(off.stdout).toContain('MEMORY=false LEARNING=true');
+        expect(off.stdout).toContain('MEMORY=false CURATION=true');
 
         // The curation key is a switch too: one fork, and learning reads off.
         const curationOff = probe(JSON.stringify({ features: { memory: true, curation: false } }, null, 2));
         expect(curationOff).toMatchObject({ exitCode: 0, forks: 1 });
-        expect(curationOff.stdout).toContain('MEMORY=true LEARNING=false');
+        expect(curationOff.stdout).toContain('MEMORY=true CURATION=false');
       });
     });
   }
@@ -910,9 +910,9 @@ describe('queue_read_gates', { timeout: GATE_READ_TEST_BUDGET_MS }, () => {
     fs.writeFileSync(configPath, JSON.stringify({ memory: false, learning: false }));
     const { stdout } = runWithQueueAppend(`
       queue_read_gates "${path.join(tmpDir, 'manifest.json')}"
-      echo "MEMORY=$_QG_MEMORY LEARNING=$_QG_LEARNING"
+      echo "MEMORY=$_QG_MEMORY CURATION=$_QG_CURATION"
     `);
-    expect(stdout).toContain('MEMORY=true LEARNING=true');
+    expect(stdout).toContain('MEMORY=true CURATION=true');
   });
 
   it('never exits non-zero (set -e safety)', () => {
@@ -955,11 +955,11 @@ describe('queue_read_gates <manifest> <root>: the repository narrows, never wide
       ${opts.noJq ? '_HAS_JQ=false' : ''}
       queue_read_gates "${manifestPath}" "${root}"
       echo "MEMORY=$_QG_MEMORY"
-      echo "LEARNING=$_QG_LEARNING"
+      echo "CURATION=$_QG_CURATION"
     `, opts.env);
     return {
       memory: stdout.match(/MEMORY=(\S*)/)?.[1] ?? '',
-      learning: stdout.match(/LEARNING=(\S*)/)?.[1] ?? '',
+      learning: stdout.match(/CURATION=(\S*)/)?.[1] ?? '',
       exitCode,
     };
   }
@@ -997,9 +997,9 @@ describe('queue_read_gates <manifest> <root>: the repository narrows, never wide
     writeLayers({ manifest: undefined, project: '{"features":{"memory":false}}', personal: null });
     const { stdout } = runWithQueueAppend(`
       queue_read_gates "${manifestPath}" ""
-      echo "MEMORY=$_QG_MEMORY LEARNING=$_QG_LEARNING"
+      echo "MEMORY=$_QG_MEMORY CURATION=$_QG_CURATION"
     `);
-    expect(stdout).toContain('MEMORY=true LEARNING=true');
+    expect(stdout).toContain('MEMORY=true CURATION=true');
   });
 
   it('never exits non-zero with a narrowing file (set -e safety)', () => {

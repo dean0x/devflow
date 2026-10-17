@@ -1,24 +1,24 @@
 /**
  * @file curation-queue-cleanup.ts
  *
- * `drainLearningQueue`, the curation queue drain shared by `devflow learning
- * --clear` and `--disable` (src/cli/commands/learning.ts) and by the drain
+ * `drainCurationQueue`, the curation queue drain shared by `devflow curation
+ * --clear` and `--disable` (src/cli/commands/curation.ts) and by the drain
  * `devflow init` runs when curation is switched off (src/cli/commands/init.ts).
  */
 
 import * as path from 'path';
 import {
   LEGACY_NAMES,
-  getLearningClaimOwnerPath,
-  getLearningDir,
-  getLearningPendingTurnsPath,
-  getLearningPendingTurnsProcessingPath,
+  getCurationClaimOwnerPath,
+  getCurationDir,
+  getCurationPendingTurnsPath,
+  getCurationPendingTurnsProcessingPath,
 } from './project-paths.js';
 import { drainQueueFiles, type QueueDrain } from './queue-drain.js';
 
 /** The same queue file under the old ledger folder name: the new path with its folder swapped. */
 function underOldFolder(gitRoot: string, newPath: string): string {
-  return path.join(path.dirname(getLearningDir(gitRoot)), LEGACY_NAMES.folder, path.basename(newPath));
+  return path.join(path.dirname(getCurationDir(gitRoot)), LEGACY_NAMES.folder, path.basename(newPath));
 }
 
 /**
@@ -36,15 +36,15 @@ function underOldFolder(gitRoot: string, newPath: string): string {
  * folder under `gitRoot` is a symbolic link (D-CLI-NO-SYMLINK). ENOENT-tolerant;
  * other errors propagate.
  */
-export async function drainLearningQueue(gitRoot: string): Promise<QueueDrain> {
-  const learningDir = getLearningDir(gitRoot);
+export async function drainCurationQueue(gitRoot: string): Promise<QueueDrain> {
+  const curationDir = getCurationDir(gitRoot);
   const queueFiles = [
-    getLearningPendingTurnsPath(gitRoot),
-    getLearningPendingTurnsProcessingPath(gitRoot),
-    getLearningClaimOwnerPath(gitRoot),
+    getCurationPendingTurnsPath(gitRoot),
+    getCurationPendingTurnsProcessingPath(gitRoot),
+    getCurationClaimOwnerPath(gitRoot),
   ];
   return drainQueueFiles(
-    [path.dirname(learningDir), learningDir, path.join(path.dirname(learningDir), LEGACY_NAMES.folder)],
+    [path.dirname(curationDir), curationDir, path.join(path.dirname(curationDir), LEGACY_NAMES.folder)],
     [...queueFiles, ...queueFiles.map(file => underOldFolder(gitRoot, file))],
   );
 }

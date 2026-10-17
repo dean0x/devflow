@@ -31,7 +31,7 @@ import { existsSync, readFileSync } from 'fs'
 import * as path from 'path'
 
 import {
-  ROOT, collectCodeSpawnSites, requireDistFile, requireDistFiles, resolveAllAgents, resolveLearningOffSource,
+  ROOT, collectCodeSpawnSites, requireDistFile, requireDistFiles, resolveAllAgents, resolveCurationOffSource,
 } from '../helpers.js'
 import type { CodeSpawnSite } from '../helpers.js'
 
@@ -172,13 +172,13 @@ const spawnHosts = (): Array<readonly [string, string]> => Object.keys(CODE_SPAW
  * The curation-off variant of a compiled command (D-LEARNING-VARIANTS): a curation-off machine installs it in
  * place of `dist/commands/<file>`, and its curation-off arms are text the curation-on sweep never reads.
  */
-const learningOffCommand = (file: string): string => {
-  const text = resolveLearningOffSource('commands', file.replace(/\.md$/, ''))
+const curationOffCommand = (file: string): string => {
+  const text = resolveCurationOffSource('commands', file.replace(/\.md$/, ''))
   if (text === null) throw new Error(`dist/curation-off/commands/${file} is absent — run \`npm run build\` first`)
   return text
 }
 const offSpawnHosts = (): Array<readonly [string, string]> =>
-  Object.keys(CODE_SPAWN_FLOORS).map(f => [f, learningOffCommand(f)] as const)
+  Object.keys(CODE_SPAWN_FLOORS).map(f => [f, curationOffCommand(f)] as const)
 
 // ── AC-308 ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -231,7 +231,7 @@ describe('AC-308: no Code-family body carries the compliance skill; each spawn s
     ]
     for (const [host, anchor, stale] of probes) {
       expect(requireDistFile(host), `${host}: the anchor must be curation-off only`).not.toContain(anchor)
-      const real = learningOffCommand(host)
+      const real = curationOffCommand(host)
       expect(real, `${host}: the curation-off anchor must exist`).toContain(anchor)
       const seeded = collectCodeSpawnSites(host, real.replace(anchor, stale))
       expect(collectUndirectedSites(seeded), `${host}: the stale arm drops the directive`).toHaveLength(1)
@@ -246,7 +246,7 @@ describe('AC-308: no Code-family body carries the compliance skill; each spawn s
       expect(source, `${slug}: the agent is not in the registry`).toBeDefined()
       expect(source!.content.length, `${slug}: the body is empty — the guard would pass vacuously`).toBeGreaterThan(4_000)
       expect(collectAgentBodyDefects(slug, source!.content), `${slug} (learning on)`).toEqual([])
-      const off = resolveLearningOffSource('agents', slug)
+      const off = resolveCurationOffSource('agents', slug)
       expect(off, `dist/curation-off/agents/${slug}.md is absent — run \`npm run build\` first`).not.toBeNull()
       expect(collectAgentBodyDefects(slug, off!), `${slug} (learning off)`).toEqual([])
     }
@@ -333,7 +333,7 @@ describe('AC-309: no Review or Design body or preload carries compliance-only te
       expect(collectAgentBodyDefects(slug, source.content), `${slug} (learning on)`).toEqual([])
     }
     for (const slug of STRICT_SLUGS) {
-      const off = resolveLearningOffSource('agents', slug)
+      const off = resolveCurationOffSource('agents', slug)
       expect(off, `dist/curation-off/agents/${slug}.md is absent — run \`npm run build\` first`).not.toBeNull()
       expect(collectAgentBodyDefects(slug, off!), `${slug} (learning off)`).toEqual([])
     }
@@ -342,8 +342,8 @@ describe('AC-309: no Review or Design body or preload carries compliance-only te
   it('the /code-review Review spawn and the /plan Design spawn each inject the compliance focus directive, learning on or off', () => {
     expect(collectFocusSpawnDefects('code-review.md', requireDistFile('code-review.md'), 'Review')).toEqual([])
     expect(collectFocusSpawnDefects('plan.md', requireDistFile('plan.md'), 'Design')).toEqual([])
-    expect(collectFocusSpawnDefects('code-review.md', learningOffCommand('code-review.md'), 'Review'), 'learning off').toEqual([])
-    expect(collectFocusSpawnDefects('plan.md', learningOffCommand('plan.md'), 'Design'), 'learning off').toEqual([])
+    expect(collectFocusSpawnDefects('code-review.md', curationOffCommand('code-review.md'), 'Review'), 'learning off').toEqual([])
+    expect(collectFocusSpawnDefects('plan.md', curationOffCommand('plan.md'), 'Design'), 'learning off').toEqual([])
   })
 
   it('gap-analysis keeps its Iron Law and six sections in the preload; the compliance patterns live in a reference', () => {

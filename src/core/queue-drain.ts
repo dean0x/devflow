@@ -1,7 +1,7 @@
 /**
  * @file queue-drain.ts
  *
- * `drainQueueFiles`, the delete the queue drains share — `drainLearningQueue`
+ * `drainQueueFiles`, the delete the queue drains share — `drainCurationQueue`
  * (curation-queue-cleanup.ts) and `drainMemoryQueue` (cli/commands/memory.ts) —
  * and `formatRefusedDrain`, the line the CLI prints for a drain it refused.
  */

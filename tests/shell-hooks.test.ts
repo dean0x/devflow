@@ -9,7 +9,7 @@ import { HANDOFF_TEMPLATE, REMINDER_TEMPLATE } from './fixtures/ambient-template
 import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
 import { buildRoutingConfigJson } from '../src/core/proxy-state.js';
 import { CURATION_DIR_NAME, LEGACY_NAMES, curationMoveMarkerKey } from '../src/core/project-paths.js';
-import { LEARNING_STORE, makeV2LedgerRow, makeV2LogRow, toJsonl } from './decisions/learning-fixtures.js';
+import { CURATION_STORE, makeV2LedgerRow, makeV2LogRow, toJsonl } from './decisions/curation-fixtures.js';
 import * as p from '@clack/prompts';
 import {
   DEVFLOW_GITIGNORE_BLOCK,
@@ -350,7 +350,7 @@ describe('json-helper.js operations', () => {
         `process.on('exit', () => fs.writeFileSync(${JSON.stringify(record)}, Object.keys(require.cache).join('\\n')));`,
         '',
       ].join('\n'));
-      const learningModulesLoadedBy = (args: readonly string[], input: string): string[] => {
+      const curationModulesLoadedBy = (args: readonly string[], input: string): string[] => {
         const run = spawnSync(process.execPath, ['--require', preload, JSON_HELPER, ...args], {
           cwd: probeDir,
           input,
@@ -364,17 +364,17 @@ describe('json-helper.js operations', () => {
           .sort();
       };
 
-      expect(learningModulesLoadedBy(['get-field', 'cwd'], '{"cwd":"/tmp"}')).toEqual([]);
+      expect(curationModulesLoadedBy(['get-field', 'cwd'], '{"cwd":"/tmp"}')).toEqual([]);
       // claim-queue answers none outside a learning tree, so it exits 0 here, and renders nothing.
-      expect(learningModulesLoadedBy(['claim-queue'], '')).toEqual(['curation-store.cjs', 'mkdir-lock.cjs', 'project-paths.cjs']);
+      expect(curationModulesLoadedBy(['claim-queue'], '')).toEqual(['curation-store.cjs', 'mkdir-lock.cjs', 'project-paths.cjs']);
       // restore-anchor renders the entry it restores.
-      const learningDir = path.join(probeDir, '.devflow', 'curation');
-      fs.mkdirSync(learningDir, { recursive: true });
+      const curationDir = path.join(probeDir, '.devflow', 'curation');
+      fs.mkdirSync(curationDir, { recursive: true });
       fs.writeFileSync(
-        path.join(learningDir, 'decisions-ledger.jsonl'),
+        path.join(curationDir, 'decisions-ledger.jsonl'),
         `${JSON.stringify({ id: 'obs_lazy_one', type: 'decision', anchor_id: 'ADR-001', decisions_status: 'Retired' })}\n`,
       );
-      expect(learningModulesLoadedBy(['restore-anchor', 'ADR-001'], '')).toEqual([
+      expect(curationModulesLoadedBy(['restore-anchor', 'ADR-001'], '')).toEqual([
         'curation-store.cjs', 'decisions-format.cjs', 'mkdir-lock.cjs', 'project-paths.cjs', 'render-decisions.cjs',
       ]);
     } finally {
@@ -933,8 +933,8 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
   // DECISIONS_CONTEXT. The path is the ledger's — the main checkout's in a linked
   // worktree — so it is named only when the ledger root passed the shape gate.
   const SESSION_CONTEXT = path.join(HOOKS_DIR, 'session-start-context');
-  const learningOf = (root: string) => path.join(root, '.devflow', 'curation');
-  const indexOf = (root: string) => path.join(learningOf(root), 'index.md');
+  const curationOf = (root: string) => path.join(root, '.devflow', 'curation');
+  const indexOf = (root: string) => path.join(curationOf(root), 'index.md');
 
   /**
    * The pass rule the section ends with (D-DECISIONS-CHARTER-HANDOFF). It lived in the
@@ -960,9 +960,9 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
 
   /** A rendered ledger at `root`: both TL;DR headers, and the index when given. */
   function seedRendered(root: string, index?: string): void {
-    fs.mkdirSync(learningOf(root), { recursive: true });
-    fs.writeFileSync(path.join(learningOf(root), 'decisions.md'), '<!-- TL;DR: 3 decisions -->\n# Architectural Decisions\n');
-    fs.writeFileSync(path.join(learningOf(root), 'pitfalls.md'), '<!-- TL;DR: 2 pitfalls -->\n# Known Pitfalls\n');
+    fs.mkdirSync(curationOf(root), { recursive: true });
+    fs.writeFileSync(path.join(curationOf(root), 'decisions.md'), '<!-- TL;DR: 3 decisions -->\n# Architectural Decisions\n');
+    fs.writeFileSync(path.join(curationOf(root), 'pitfalls.md'), '<!-- TL;DR: 2 pitfalls -->\n# Known Pitfalls\n');
     if (index !== undefined) fs.writeFileSync(indexOf(root), index);
   }
 
@@ -975,7 +975,7 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
   });
 
   it('PROJECT DECISIONS carries the index line and the pass rule alone when no TL;DR is rendered', () => {
-    fs.mkdirSync(learningOf(main), { recursive: true });
+    fs.mkdirSync(curationOf(main), { recursive: true });
     fs.writeFileSync(indexOf(main), 'Pitfalls (1):\n  PF-001  Main pitfall  [Active]\n');
 
     expect(decisionsSection(wt)).toBe(`--- PROJECT DECISIONS (TL;DR) ---\nIndex: ${indexOf(main)}\n${PASS_RULE}`);
@@ -997,8 +997,8 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
     expect(decisionsSection(wt)).toBe('--- PROJECT DECISIONS (TL;DR) ---\n3 decisions\n2 pitfalls');
 
     // With no TL;DR either, there is no section at all.
-    fs.rmSync(path.join(learningOf(main), 'decisions.md'));
-    fs.rmSync(path.join(learningOf(main), 'pitfalls.md'));
+    fs.rmSync(path.join(curationOf(main), 'decisions.md'));
+    fs.rmSync(path.join(curationOf(main), 'pitfalls.md'));
     fs.writeFileSync(indexOf(main), '(none)\n');
     expect(decisionsSection(wt)).toBe('');
   });
@@ -4155,7 +4155,7 @@ describe('session-start-context root .gitignore (memory-independent)', () => {
 });
 
 // =============================================================================
-// session-start-context Section 2: Learning maintenance directive
+// session-start-context Section 2: Curation maintenance directive
 // =============================================================================
 //
 // When the learning queue holds captured turns (or a crashed run left a stale
@@ -4178,7 +4178,7 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-learning-'));
-    // Learning is project work, active only inside a git project (D-HOOKS-GIT-ONLY).
+    // Curation is project work, active only inside a git project (D-HOOKS-GIT-ONLY).
     // An empty `.git` is a marker, not a repository, so the root stays tmpDir.
     fs.mkdirSync(path.join(tmpDir, '.git'));
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-learning-home-'));
@@ -4336,14 +4336,14 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
   //   4. none                                              -> no model=
   // ---------------------------------------------------------------------------
   describe('model resolution (D-LEARNING-MODEL-PRECEDENCE)', () => {
-    const projectLearningJson = () => path.join(tmpDir, '.devflow', 'curation', 'curation.json');
-    const globalLearningJson = () => path.join(homeDir, '.devflow', 'curation.json');
+    const projectCurationJson = () => path.join(tmpDir, '.devflow', 'curation', 'curation.json');
+    const globalCurationJson = () => path.join(homeDir, '.devflow', 'curation.json');
     const agentModelsJson = () => path.join(homeDir, '.devflow', 'agent-models.json');
 
     const setProject = (model: unknown) =>
-      fs.writeFileSync(projectLearningJson(), JSON.stringify({ model, debug: false }));
+      fs.writeFileSync(projectCurationJson(), JSON.stringify({ model, debug: false }));
     const setGlobal = (model: unknown) =>
-      fs.writeFileSync(globalLearningJson(), JSON.stringify({ model }));
+      fs.writeFileSync(globalCurationJson(), JSON.stringify({ model }));
     const setMapping = (agents: unknown) =>
       fs.writeFileSync(agentModelsJson(), JSON.stringify({ version: 1, agents }));
 
@@ -4714,17 +4714,17 @@ describe('session-start-context never reads through a symbolic link under .devfl
 
   let tmpDir: string;
   let homeDir: string;
-  let learningDir: string;
+  let curationDir: string;
   let outsideDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-nolink-'));
-    // Learning is project work, active only inside a git project (D-HOOKS-GIT-ONLY).
+    // Curation is project work, active only inside a git project (D-HOOKS-GIT-ONLY).
     fs.mkdirSync(path.join(tmpDir, '.git'));
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-nolink-home-'));
     fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
-    learningDir = path.join(tmpDir, '.devflow', 'curation');
-    fs.mkdirSync(learningDir, { recursive: true });
+    curationDir = path.join(tmpDir, '.devflow', 'curation');
+    fs.mkdirSync(curationDir, { recursive: true });
     outsideDir = path.join(homeDir, 'outside');
     fs.mkdirSync(outsideDir);
   });
@@ -4749,7 +4749,7 @@ describe('session-start-context never reads through a symbolic link under .devfl
   const linkOutside = (name: string, content: string): string => {
     const target = path.join(outsideDir, name);
     fs.writeFileSync(target, content);
-    fs.symlinkSync(target, path.join(learningDir, name));
+    fs.symlinkSync(target, path.join(curationDir, name));
     return target;
   };
 
@@ -4761,7 +4761,7 @@ describe('session-start-context never reads through a symbolic link under .devfl
   ] as const) {
     it(`a linked ${linked} puts no TL;DR line, and nothing of the file it names, into the context`, () => {
       linkOutside(linked, `<!-- TL;DR: ${MARKER} -->\n# ${MARKER}\n`);
-      fs.writeFileSync(path.join(learningDir, kept), `<!-- TL;DR: ${keptLine} -->\n# Rendered\n`);
+      fs.writeFileSync(path.join(curationDir, kept), `<!-- TL;DR: ${keptLine} -->\n# Rendered\n`);
 
       const { stdout, exitCode } = run();
 
@@ -4774,7 +4774,7 @@ describe('session-start-context never reads through a symbolic link under .devfl
 
   it('a linked index.md gets no Index line, so the model is never pointed at the file it names', () => {
     linkOutside('index.md', `Decisions (1):\n  ${MARKER}\n`);
-    fs.writeFileSync(path.join(learningDir, 'decisions.md'), '<!-- TL;DR: 1 decisions -->\n# Rendered\n');
+    fs.writeFileSync(path.join(curationDir, 'decisions.md'), '<!-- TL;DR: 1 decisions -->\n# Rendered\n');
 
     const { stdout, exitCode } = run();
 
@@ -4787,7 +4787,7 @@ describe('session-start-context never reads through a symbolic link under .devfl
   });
 
   it('a linked curation.json does not choose the Curate agent\'s model', () => {
-    fs.writeFileSync(path.join(learningDir, '.pending-turns.jsonl'), '{"role":"user","content":"we chose X over Y","ts":1}\n');
+    fs.writeFileSync(path.join(curationDir, '.pending-turns.jsonl'), '{"role":"user","content":"we chose X over Y","ts":1}\n');
     linkOutside('curation.json', JSON.stringify({ model: 'haiku' }));
 
     const { stdout, exitCode } = run();
@@ -4809,13 +4809,13 @@ describe('session-start-context never reads through a symbolic link under .devfl
     expect(refusals(), 'the refusal is logged once').toHaveLength(1);
 
     // Non-vacuity: the same queue, as a real file, does send the agent.
-    fs.unlinkSync(path.join(learningDir, '.pending-turns.jsonl'));
-    fs.writeFileSync(path.join(learningDir, '.pending-turns.jsonl'), '{"role":"user","content":"we chose X over Y","ts":1}\n');
+    fs.unlinkSync(path.join(curationDir, '.pending-turns.jsonl'));
+    fs.writeFileSync(path.join(curationDir, '.pending-turns.jsonl'), '{"role":"user","content":"we chose X over Y","ts":1}\n');
     expect(contextOf(run().stdout)).toContain('--- LEARNING MAINTENANCE ---');
   });
 
   it('a linked stale batch sends no Curate agent to it', () => {
-    const batch = path.join(learningDir, '.pending-turns.processing');
+    const batch = path.join(curationDir, '.pending-turns.processing');
     linkOutside('.pending-turns.processing', `{"role":"user","content":"${MARKER}","ts":1}\n`);
     // The age check reads the link's own mtime (`stat` without -L), so the link is
     // what is made stale.
@@ -4835,11 +4835,11 @@ describe('session-start-context never reads through a symbolic link under .devfl
   });
 
   it('a linked learning folder: no TL;DR, no Index line, no directive, and each file read from it refused once', () => {
-    fs.rmSync(learningDir, { recursive: true });
+    fs.rmSync(curationDir, { recursive: true });
     fs.writeFileSync(path.join(outsideDir, 'decisions.md'), `<!-- TL;DR: ${MARKER} -->\n`);
     fs.writeFileSync(path.join(outsideDir, 'index.md'), `Decisions (1):\n  ${MARKER}\n`);
     fs.writeFileSync(path.join(outsideDir, '.pending-turns.jsonl'), `{"role":"user","content":"${MARKER}","ts":1}\n`);
-    fs.symlinkSync(outsideDir, learningDir);
+    fs.symlinkSync(outsideDir, curationDir);
 
     const { stdout, exitCode } = run();
 
@@ -4848,7 +4848,7 @@ describe('session-start-context never reads through a symbolic link under .devfl
     expect(stdout).not.toContain(MARKER);
     const refused = refusals();
     for (const name of ['decisions.md', 'index.md', '.pending-turns.jsonl']) {
-      expect(refused.filter((l) => l.includes(path.join(learningDir, name))), `${name} is refused once`).toHaveLength(1);
+      expect(refused.filter((l) => l.includes(path.join(curationDir, name))), `${name} is refused once`).toHaveLength(1);
     }
     expect(refused).toHaveLength(3);
   });
@@ -5760,7 +5760,7 @@ describe('ensure-proxy behavioral tests', () => {
 
 describe('curation-move: the shim that moves the old ledger folder (#529)', { timeout: GIT_FIXTURE_TIMEOUT_MS }, () => {
   const SHIM = path.join(HOOKS_DIR, 'curation-move');
-  const store = createRequire(import.meta.url)(LEARNING_STORE) as { curationMoveLockKey(realRoot: string): string };
+  const store = createRequire(import.meta.url)(CURATION_STORE) as { curationMoveLockKey(realRoot: string): string };
   const OLD = LEGACY_NAMES.folder;
   const NEW = CURATION_DIR_NAME;
   const QUEUE = '.pending-turns.jsonl';
@@ -6109,7 +6109,7 @@ describe('TP-9: the hooks move the old ledger folder before any creator makes th
   const NEW = CURATION_DIR_NAME;
   const QUEUE = '.pending-turns.jsonl';
   const SEED_ROW = '{"role":"user","content":"seeded turn","ts":1}';
-  const store = createRequire(import.meta.url)(LEARNING_STORE) as { curationMoveLockKey(realRoot: string): string };
+  const store = createRequire(import.meta.url)(CURATION_STORE) as { curationMoveLockKey(realRoot: string): string };
   const writeFakeExecutable = useWarmFakeExecutables();
 
   let base: string;

@@ -27,7 +27,7 @@ export function getMemoryDir(projectRoot: string): string {
 }
 
 /** .devflow/curation/ — curation state root */
-export function getLearningDir(projectRoot: string): string {
+export function getCurationDir(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'curation');
 }
 
@@ -116,26 +116,26 @@ export function getFeatureConfigPath(projectRoot: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Learning queue files
+// Curation queue files
 // ---------------------------------------------------------------------------
 
 /** .devflow/curation/.pending-turns.jsonl — decisions detection queue */
-export function getLearningPendingTurnsPath(projectRoot: string): string {
+export function getCurationPendingTurnsPath(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'curation', '.pending-turns.jsonl');
 }
 
 /** .devflow/curation/.pending-turns.processing — the claimed batch a Curate run holds while it processes it */
-export function getLearningPendingTurnsProcessingPath(projectRoot: string): string {
+export function getCurationPendingTurnsProcessingPath(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'curation', '.pending-turns.processing');
 }
 
 /** .devflow/curation/.pending-turns.owner — the token of the run that holds the claim (curation-store.cjs) */
-export function getLearningClaimOwnerPath(projectRoot: string): string {
+export function getCurationClaimOwnerPath(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'curation', '.pending-turns.owner');
 }
 
 // ---------------------------------------------------------------------------
-// Learning content files
+// Curation content files
 // ---------------------------------------------------------------------------
 
 /** .devflow/curation/decisions.md */

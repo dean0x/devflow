@@ -79,7 +79,7 @@ async function stampCarriers(): Promise<string[]> {
 }
 
 /** The curation-off variant of a command when the host has an arm, else null. */
-async function learningOffBytes(name: string): Promise<string | null> {
+async function curationOffBytes(name: string): Promise<string | null> {
   try { return await fs.readFile(path.join(ROOT, 'dist', 'curation-off', 'commands', `${name}.md`), 'utf-8'); } catch { return null; }
 }
 
@@ -172,13 +172,13 @@ describe('a learning toggle keeps the stamp (the composition with the variant co
     const onBytes = await fs.readFile(installedCommand('code-review'), 'utf-8');
     expect(await stampOf('code-review')).toBe('typescript, go');
 
-    okCli('learning', '--disable');
+    okCli('curation', '--disable');
     const off = await fs.readFile(installedCommand('code-review'), 'utf-8');
     expect(off, 'the curation-off variant of the command').not.toBe(onBytes);
-    expect(off).toBe((await learningOffBytes('code-review') as string).replace(`${STAMP_PREFIX}(none)`, `${STAMP_PREFIX}typescript, go`));
+    expect(off).toBe((await curationOffBytes('code-review') as string).replace(`${STAMP_PREFIX}(none)`, `${STAMP_PREFIX}typescript, go`));
     expect(await stampOf('code-review')).toBe('typescript, go');
 
-    okCli('learning', '--enable');
+    okCli('curation', '--enable');
     expect(await fs.readFile(installedCommand('code-review'), 'utf-8'), 'back to the stamped curation-on file').toBe(onBytes);
   }, SCENARIO_TIMEOUT_MS);
 
@@ -188,7 +188,7 @@ describe('a learning toggle keeps the stamp (the composition with the variant co
     init('--no-curation');
     const content = await fs.readFile(installedCommand('code-review'), 'utf-8');
     expect(content.split('\n')).toContain(`${STAMP_PREFIX}typescript`);
-    expect(content, 'the curation-off variant, stamped').toBe((await learningOffBytes('code-review') as string).replace(`${STAMP_PREFIX}(none)`, `${STAMP_PREFIX}typescript`));
+    expect(content, 'the curation-off variant, stamped').toBe((await curationOffBytes('code-review') as string).replace(`${STAMP_PREFIX}(none)`, `${STAMP_PREFIX}typescript`));
 
     init('--no-curation');
 

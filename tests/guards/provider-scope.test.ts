@@ -723,9 +723,9 @@ describe('provider-scope: no vendor tool literal in loadable text (§14.5)', () 
   });
 
   it('known-bad probe: the allowlist admits one exact line in two files and nothing else', () => {
-    const [compiled, learningOff] = VENDOR_ALLOWLIST.files;
+    const [compiled, curationOff] = VENDOR_ALLOWLIST.files;
     const entry = (path: string, content: string): CorpusEntry => ({ path, content });
-    expect(collectVendorTokens([entry(compiled, '  - mcp__*\n'), entry(learningOff, '  - mcp__*\n')])).toEqual([]);
+    expect(collectVendorTokens([entry(compiled, '  - mcp__*\n'), entry(curationOff, '  - mcp__*\n')])).toEqual([]);
     // The same line anywhere else, and any other mcp__ literal in an allowlisted file, are reported.
     expect(collectVendorTokens([entry('dist/agents/git.md', '  - mcp__*\n')]).length).toBe(1);
     expect(collectVendorTokens([entry('dist/agents/code.md', '  - mcp__*\n')]).length).toBe(1);

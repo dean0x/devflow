@@ -440,7 +440,7 @@ function machineCompliance(manifest) {
  * src/core/gate-level.ts machineGateLevel exactly, and total: null when no level
  * is recorded (not an object, `features` not an object, or no own `gateLevel`
  * key), `invalid` when the key is present and is not one of the three words,
- * else the level. The learning-capture hook folds a manifest of any shape, so
+ * else the level. The curation-capture hook folds a manifest of any shape, so
  * this must never throw.
  *
  * @param {unknown} manifest

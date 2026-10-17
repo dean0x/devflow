@@ -1,5 +1,5 @@
 /**
- * D-LEDGER-MAIN-WORKTREE — `devflow learning` run from a linked worktree reads,
+ * D-LEDGER-MAIN-WORKTREE — `devflow curation` run from a linked worktree reads,
  * clears, resets and drains the ledger the hooks write: the main checkout's
  * `.devflow/curation/`, not the worktree's own (getLedgerRoot, not getGitRoot).
  *
@@ -30,14 +30,19 @@ vi.mock('@clack/prompts', () => ({
 }));
 
 import { getDevFlowDirectory } from '../../src/targets/claude-code/claude-paths.js';
-import { learningCommand } from '../../src/cli/commands/learning.js';
+import { curationCommand } from '../../src/cli/commands/curation.js';
 import * as p from '@clack/prompts';
 import {
   getDecisionsLogPath,
-  getLearningDir,
-  getLearningPendingTurnsPath,
+  getCurationDir,
+  getCurationPendingTurnsPath,
   getCurateTuningConfigPath,
 } from '../../src/core/project-paths.js';
+
+/** The version of the package under test: a manifest that records it is not skewed against this CLI. */
+const RUNNING_VERSION = (JSON.parse(
+  fs.readFileSync(path.join(import.meta.dirname, '../../package.json'), 'utf-8'),
+) as { version: string }).version;
 
 const OBS = JSON.stringify({
   id: 'obs_decision_001', type: 'decision', pattern: 'Use Result types', confidence: 0.8,
@@ -46,18 +51,18 @@ const OBS = JSON.stringify({
 }) + '\n';
 
 function seedLedger(root: string): void {
-  fs.mkdirSync(getLearningDir(root), { recursive: true });
+  fs.mkdirSync(getCurationDir(root), { recursive: true });
   fs.writeFileSync(getDecisionsLogPath(root), OBS);
-  fs.writeFileSync(getLearningPendingTurnsPath(root), '{"role":"user"}\n');
+  fs.writeFileSync(getCurationPendingTurnsPath(root), '{"role":"user"}\n');
 }
 
 function resetCommand(): void {
   // Commander keeps option values across parseAsync() calls on one instance.
-  (learningCommand as unknown as { _optionValues: Record<string, unknown> })._optionValues = {};
+  (curationCommand as unknown as { _optionValues: Record<string, unknown> })._optionValues = {};
 }
 
 // Real git fixture per case (init + commit + worktree add): budgeted past the 5 s default.
-describe('devflow learning in a linked worktree acts on the main checkout\'s ledger', { timeout: 30_000 }, () => {
+describe('devflow curation in a linked worktree acts on the main checkout\'s ledger', { timeout: 30_000 }, () => {
   let base: string;
   let main: string;
   let wt: string;
@@ -76,7 +81,7 @@ describe('devflow learning in a linked worktree acts on the main checkout\'s led
     devflowDir = path.join(base, 'machine-devflow');
     fs.mkdirSync(devflowDir);
     fs.writeFileSync(path.join(devflowDir, 'manifest.json'), JSON.stringify({
-      version: '2.0.0', plugins: [], scope: 'user', features: { ambient: true, memory: true, learning: true },
+      version: RUNNING_VERSION, plugins: [], scope: 'user', features: { ambient: true, memory: true, curation: true, learning: true },
       installedAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
     }));
     vi.mocked(getDevFlowDirectory).mockReturnValue(devflowDir);
@@ -93,7 +98,7 @@ describe('devflow learning in a linked worktree acts on the main checkout\'s led
   });
 
   it('--status counts the main checkout\'s observations', async () => {
-    await learningCommand.parseAsync(['--status'], { from: 'user' });
+    await curationCommand.parseAsync(['--status'], { from: 'user' });
     const shown = vi.mocked(p.log.info).mock.calls.map(c => String(c[0])).join('\n');
     expect(shown).toContain('Observations: 1 in the log, 1 not yet promoted');
   });
@@ -104,21 +109,21 @@ describe('devflow learning in a linked worktree acts on the main checkout\'s led
       stdout += String(chunk);
       return true;
     });
-    await learningCommand.parseAsync(['--list'], { from: 'user' });
+    await curationCommand.parseAsync(['--list'], { from: 'user' });
     vi.mocked(process.stdout.write).mockRestore();
     expect(stdout).toContain('OBSERVATIONS 1\n  obs_decision_001 decision v1 observed 5 Use Result types');
   });
 
   it('--clear drops the main checkout\'s unpromoted observations and drains its queue', async () => {
-    await learningCommand.parseAsync(['--clear'], { from: 'user' });
+    await curationCommand.parseAsync(['--clear'], { from: 'user' });
     expect(fs.readFileSync(getDecisionsLogPath(main), 'utf-8')).toBe('');
-    expect(fs.existsSync(getLearningPendingTurnsPath(main))).toBe(false);
+    expect(fs.existsSync(getCurationPendingTurnsPath(main))).toBe(false);
     expect(fs.existsSync(path.join(wt, '.devflow'))).toBe(false);
   });
 
-  it('--reset removes the main checkout\'s learning state', async () => {
-    await learningCommand.parseAsync(['--reset'], { from: 'user' });
-    expect(fs.existsSync(getLearningDir(main))).toBe(false);
+  it('--reset removes the main checkout\'s curation state', async () => {
+    await curationCommand.parseAsync(['--reset'], { from: 'user' });
+    expect(fs.existsSync(getCurationDir(main))).toBe(false);
     expect(fs.existsSync(path.join(wt, '.devflow'))).toBe(false);
   });
 
@@ -126,7 +131,7 @@ describe('devflow learning in a linked worktree acts on the main checkout\'s led
     // The hook resolves the Curate agent's model from $LEDGER_ROOT/.devflow/curation/curation.json.
     vi.mocked(p.select).mockResolvedValueOnce('sonnet').mockResolvedValueOnce('project');
     vi.mocked(p.confirm).mockResolvedValueOnce(false);
-    await learningCommand.parseAsync(['--configure'], { from: 'user' });
+    await curationCommand.parseAsync(['--configure'], { from: 'user' });
     expect(JSON.parse(fs.readFileSync(getCurateTuningConfigPath(main), 'utf-8'))).toEqual({ model: 'sonnet', debug: false });
     expect(fs.existsSync(path.join(wt, '.devflow'))).toBe(false);
   });
@@ -137,13 +142,13 @@ describe('devflow learning in a linked worktree acts on the main checkout\'s led
     vi.spyOn(process, 'cwd').mockReturnValue(plain);
     vi.mocked(p.select).mockResolvedValueOnce('haiku').mockResolvedValueOnce('project');
     vi.mocked(p.confirm).mockResolvedValueOnce(true);
-    await learningCommand.parseAsync(['--configure'], { from: 'user' });
+    await curationCommand.parseAsync(['--configure'], { from: 'user' });
     expect(JSON.parse(fs.readFileSync(getCurateTuningConfigPath(plain), 'utf-8'))).toEqual({ model: 'haiku', debug: true });
   });
 
   it('--disable drains the main checkout\'s learning queue', async () => {
-    await learningCommand.parseAsync(['--disable'], { from: 'user' });
-    expect(fs.existsSync(getLearningPendingTurnsPath(main))).toBe(false);
+    await curationCommand.parseAsync(['--disable'], { from: 'user' });
+    expect(fs.existsSync(getCurationPendingTurnsPath(main))).toBe(false);
     expect(fs.existsSync(getDecisionsLogPath(main))).toBe(true);
   });
 });

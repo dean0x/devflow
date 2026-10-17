@@ -122,7 +122,7 @@ async function promptDigest(): Promise<Map<string, string>> {
 const manifestFile = (): string => path.join(devflowDir(), 'manifest.json');
 
 /** The machine switch as the manifest records it. */
-async function manifestLearning(): Promise<boolean | undefined> {
+async function manifestCuration(): Promise<boolean | undefined> {
   const manifest = JSON.parse(await fs.readFile(manifestFile(), 'utf-8')) as {
     features: { learning?: boolean };
   };
@@ -159,7 +159,7 @@ describe('init follows the machine switch (AC-139, AC-148)', () => {
 
     await expectAll('off');
     expect(await exists(skillDir()), 'the skill has no reader on a curation-off machine').toBe(false);
-    expect(await manifestLearning()).toBe(false);
+    expect(await manifestCuration()).toBe(false);
   }, SCENARIO_TIMEOUT_MS);
 
   it('init with learning on installs the curation-on prompts and the skill, byte for byte', async () => {
@@ -167,7 +167,7 @@ describe('init follows the machine switch (AC-139, AC-148)', () => {
 
     await expectAll('on');
     expect(await fs.readFile(path.join(skillDir(), 'SKILL.md'), 'utf-8')).toBe(await fs.readFile(SKILL_SOURCE, 'utf-8'));
-    expect(await manifestLearning()).toBe(true);
+    expect(await manifestCuration()).toBe(true);
   }, SCENARIO_TIMEOUT_MS);
 
   it('a prompt with no curation-off file is installed once, the same on both sides of the switch', async () => {
@@ -191,7 +191,7 @@ describe('init follows the machine switch (AC-139, AC-148)', () => {
 
     await expectAll('off');
     expect(await exists(skillDir())).toBe(false);
-    expect(await manifestLearning()).toBe(false);
+    expect(await manifestCuration()).toBe(false);
   }, SCENARIO_TIMEOUT_MS);
 
   it('a re-init on the same switch moves nothing: every installed prompt and the file list are identical', async () => {
@@ -215,16 +215,16 @@ describe('devflow learning --enable/--disable converges the install (AC-140, AC-
     init('--recommended', '--no-curation');
     await expectAll('off');
 
-    const enabled = okCli(os.tmpdir(), 'learning', '--enable');
+    const enabled = okCli(os.tmpdir(), 'curation', '--enable');
     await expectAll('on');
     expect(await fs.readFile(path.join(skillDir(), 'SKILL.md'), 'utf-8')).toBe(await fs.readFile(SKILL_SOURCE, 'utf-8'));
-    expect(await manifestLearning()).toBe(true);
+    expect(await manifestCuration()).toBe(true);
     expect(enabled).toContain('Installed prompts');
 
-    okCli(os.tmpdir(), 'learning', '--disable');
+    okCli(os.tmpdir(), 'curation', '--disable');
     await expectAll('off');
     expect(await exists(skillDir())).toBe(false);
-    expect(await manifestLearning()).toBe(false);
+    expect(await manifestCuration()).toBe(false);
   }, SCENARIO_TIMEOUT_MS);
 
   it('a toggle to the value already installed prints nothing about prompts and writes nothing', async () => {
@@ -232,7 +232,7 @@ describe('devflow learning --enable/--disable converges the install (AC-140, AC-
     const tree = await installedTree();
     const manifest = await fs.readFile(manifestFile());
 
-    const again = okCli(os.tmpdir(), 'learning', '--disable');
+    const again = okCli(os.tmpdir(), 'curation', '--disable');
 
     expect(again).not.toContain('Installed prompts');
     expect(await installedTree()).toEqual(tree);
@@ -243,17 +243,17 @@ describe('devflow learning --enable/--disable converges the install (AC-140, AC-
   it('--enable on an enabled machine and --disable on a disabled one leave manifest.json byte-identical (D-NOOP-TOGGLE)', async () => {
     init('--recommended');
     const enabledManifest = await fs.readFile(manifestFile());
-    expect(await manifestLearning(), 'non-vacuity: learning is recorded on').toBe(true);
+    expect(await manifestCuration(), 'non-vacuity: learning is recorded on').toBe(true);
 
-    okCli(os.tmpdir(), 'learning', '--enable');
+    okCli(os.tmpdir(), 'curation', '--enable');
     expect((await fs.readFile(manifestFile())).equals(enabledManifest), 'enable over enabled').toBe(true);
 
-    okCli(os.tmpdir(), 'learning', '--disable');
-    expect(await manifestLearning(), 'a real toggle is still recorded').toBe(false);
+    okCli(os.tmpdir(), 'curation', '--disable');
+    expect(await manifestCuration(), 'a real toggle is still recorded').toBe(false);
     const disabledManifest = await fs.readFile(manifestFile());
     expect(disabledManifest.equals(enabledManifest), 'a real toggle changes the manifest').toBe(false);
 
-    okCli(os.tmpdir(), 'learning', '--disable');
+    okCli(os.tmpdir(), 'curation', '--disable');
     expect((await fs.readFile(manifestFile())).equals(disabledManifest), 'disable over disabled').toBe(true);
   }, SCENARIO_TIMEOUT_MS);
 
@@ -263,12 +263,12 @@ describe('devflow learning --enable/--disable converges the install (AC-140, AC-
     const frontmatterOf = async (): Promise<string> => (await fs.readFile(installedPrompt('agents', 'code.md'), 'utf-8')).split('\n---\n')[0];
     expect(await frontmatterOf(), 'the override is in the installed file before the toggle').toMatch(/^effort: low$/m);
 
-    okCli(os.tmpdir(), 'learning', '--disable');
+    okCli(os.tmpdir(), 'curation', '--disable');
     const off = await fs.readFile(installedPrompt('agents', 'code.md'), 'utf-8');
     expect(off, 'still the override').toMatch(/^effort: low$/m);
     expect(off, 'and the curation-off body, with no apply-decisions preload').not.toContain('apply-decisions');
 
-    okCli(os.tmpdir(), 'learning', '--enable');
+    okCli(os.tmpdir(), 'curation', '--enable');
     const on = await fs.readFile(installedPrompt('agents', 'code.md'), 'utf-8');
     expect(on).toMatch(/^effort: low$/m);
     expect(on, 'back to the curation-on body').toContain('devflow:apply-decisions');
@@ -280,12 +280,12 @@ describe('devflow learning --enable/--disable converges the install (AC-140, AC-
     expect(installed, 'a partial install carries one plugin\'s command').toContain('commands/implement.md');
     expect(installed).not.toContain('commands/research.md');
 
-    okCli(os.tmpdir(), 'learning', '--disable');
+    okCli(os.tmpdir(), 'curation', '--disable');
     expect(await installedTree(), 'no file added; the skill removed').toEqual(installed.filter(f => f !== 'skills/devflow:apply-decisions'));
     expect(await variantOf('commands', 'implement.md')).toBe('off');
     expect(await variantOf('agents', 'code.md')).toBe('off');
 
-    okCli(os.tmpdir(), 'learning', '--enable');
+    okCli(os.tmpdir(), 'curation', '--enable');
     expect(await installedTree(), 'enabling restores exactly what the install carried').toEqual(installed);
     expect(await variantOf('commands', 'implement.md')).toBe('on');
   }, SCENARIO_TIMEOUT_MS);
@@ -299,10 +299,10 @@ describe('devflow learning --enable/--disable converges the install (AC-140, AC-
     okCli(repo, 'init', ...QUIET, '--recommended');
 
     // Non-vacuity: the repository really does narrow learning off here.
-    expect(okCli(repo, 'learning', '--status')).toContain('Effective here: disabled');
+    expect(okCli(repo, 'curation', '--status')).toContain('Effective here: disabled');
     await expectAll('on');
     expect(await exists(skillDir())).toBe(true);
-    expect(await manifestLearning()).toBe(true);
+    expect(await manifestCuration()).toBe(true);
   }, SCENARIO_TIMEOUT_MS);
 
   it('a manifest from another version skips the converge with a run-devflow-init message (AC-145)', async () => {
@@ -311,13 +311,13 @@ describe('devflow learning --enable/--disable converges the install (AC-140, AC-
     const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf-8')) as { version: string };
     await fs.writeFile(manifestPath, JSON.stringify({ ...manifest, version: '0.0.1' }, null, 2));
 
-    const out = okCli(os.tmpdir(), 'learning', '--disable');
+    const out = okCli(os.tmpdir(), 'curation', '--disable');
 
     expect(out).toContain('devflow init');
     expect(out).toContain('0.0.1');
     await expectAll('on');
     expect(await exists(skillDir())).toBe(true);
-    expect(await manifestLearning(), 'the switch itself is still recorded').toBe(false);
+    expect(await manifestCuration(), 'the switch itself is still recorded').toBe(false);
   }, SCENARIO_TIMEOUT_MS);
 
   it('a converge failure only warns: the toggle exits 0, records the switch and converges the rest (AC-146)', async () => {
@@ -326,11 +326,11 @@ describe('devflow learning --enable/--disable converges the install (AC-140, AC-
     await fs.rm(installedPrompt('agents', 'code.md'));
     await fs.mkdir(installedPrompt('agents', 'code.md'));
 
-    const { status, out } = runCli(os.tmpdir(), 'learning', '--disable');
+    const { status, out } = runCli(os.tmpdir(), 'curation', '--disable');
 
     expect(status, out).toBe(0);
     expect(out).toContain('code.md');
-    expect(await manifestLearning()).toBe(false);
+    expect(await manifestCuration()).toBe(false);
     expect(await variantOf('commands', 'implement.md'), 'the rest of the fan-out still converged').toBe('off');
     expect(await exists(skillDir())).toBe(false);
   }, SCENARIO_TIMEOUT_MS);
@@ -350,10 +350,10 @@ describe('a skill shadow follows the switch', () => {
     expect(await exists(skillDir()), 'not installed with learning off').toBe(false);
     expect(await fs.readFile(shadow, 'utf-8'), 'a shadow is user content').toContain('my own apply-decisions');
 
-    okCli(os.tmpdir(), 'learning', '--enable');
+    okCli(os.tmpdir(), 'curation', '--enable');
     expect(await fs.readFile(path.join(skillDir(), 'SKILL.md'), 'utf-8')).toContain('my own apply-decisions');
 
-    okCli(os.tmpdir(), 'learning', '--disable');
+    okCli(os.tmpdir(), 'curation', '--disable');
     expect(await exists(skillDir())).toBe(false);
     expect(await exists(shadow)).toBe(true);
   }, SCENARIO_TIMEOUT_MS);

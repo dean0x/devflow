@@ -1,12 +1,13 @@
 import { Command } from 'commander';
 import { promises as fs } from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import {
   CURATION_DIR_NAME,
   LEGACY_NAMES,
-  getLearningDir,
+  getCurationDir,
   getCurateTuningConfigPath,
   getGlobalCurateTuningConfigPath,
 } from '../../core/project-paths.js';
@@ -21,17 +22,18 @@ import {
   readRunningVersion,
 } from '../../targets/claude-code/curation-install.js';
 import { getLedgerRoot, ledgerFolderToCreate } from '../../core/ledger-root.js';
-import { drainLearningQueue } from '../../core/curation-queue-cleanup.js';
+import { drainCurationQueue } from '../../core/curation-queue-cleanup.js';
 import { firstSymbolicLink } from '../../core/linked-path.js';
 import { formatRefusedDrain } from '../../core/queue-drain.js';
 import { describeOutcome } from './init-curation-move.js';
+import { formatMoveNotice, gatherMoveNotice } from '../../hud/components/curation-counts.js';
 import { runSharedMove, type SharedMoveResult } from './curation-move-io.js';
 import {
-  formatLearningStoreUnavailable,
-  loadLearningStore,
-  type LearningListing,
-  type LearningStoreError,
-  type LearningStoreModule,
+  formatCurationStoreUnavailable,
+  loadCurationStore,
+  type CurationListing,
+  type CurationStoreError,
+  type CurationStoreModule,
 } from '../../core/curation-store.js';
 
 // ---------------------------------------------------------------------------
@@ -39,10 +41,10 @@ import {
 // ---------------------------------------------------------------------------
 
 /** What the read and restore commands say about a project with no `.devflow/curation/`. */
-const NO_LEARNING_DATA = 'No learning data in this project yet.';
+const NO_CURATION_DATA = 'No curation data in this project yet.';
 
 /**
- * How long a writer here (--restore, --clear, --reset) waits for the learning lock
+ * How long a writer here (--restore, --clear, --reset) waits for the curation lock
  * before it refuses as busy. An op holds the lock for milliseconds, so a longer
  * wait means a stuck holder, and the store's own 30 s wait would leave the command
  * looking hung.
@@ -84,22 +86,22 @@ function counted(count: number, noun: string): string {
 }
 
 /**
- * The learning store (D-LEARNING-STORE-SEAM), or null after reporting why it
+ * The curation store (D-LEARNING-STORE-SEAM), or null after reporting why it
  * cannot be used and setting exit code 1.
  */
-function requireStore(): LearningStoreModule | null {
-  const loaded = loadLearningStore();
+function requireStore(): CurationStoreModule | null {
+  const loaded = loadCurationStore();
   if (loaded.ok) return loaded.value;
-  p.log.error(`Learning: ${formatLearningStoreUnavailable(loaded.error)}`);
+  p.log.error(`Curation: ${formatCurationStoreUnavailable(loaded.error)}`);
   process.exitCode = 1;
   return null;
 }
 
 /** What a writer says when the store refused; `undone` completes "Nothing was …". */
-function storeRefusal(error: LearningStoreError, undone: string): string {
+function storeRefusal(error: CurationStoreError, undone: string): string {
   switch (error.kind) {
-    case 'no-learning-dir': return NO_LEARNING_DATA;
-    case 'busy': return `The learning store is busy: another run holds its lock. Nothing was ${undone}; try again in a moment.`;
+    case 'no-curation-dir': return NO_CURATION_DATA;
+    case 'busy': return `The curation store is busy: another run holds its lock. Nothing was ${undone}; try again in a moment.`;
     default: return error.message;
   }
 }
@@ -153,22 +155,61 @@ function moveProblemLines(outcome: SharedMoveResult): string[] {
     : describeOutcome(outcome);
 }
 
+/**
+ * The line a read-only command prints instead of reading, for a project whose ledger
+ * still sits in the old folder: the pointer, or the refused line when the hook's move
+ * left a marker for this root. The HUD makes the same two existence tests and prints the
+ * same words (`gatherMoveNotice`). Null when the new folder is there, or the old one is
+ * not. The old ledger is never opened.
+ */
+async function pendingMoveLine(ledgerRoot: string): Promise<string | null> {
+  const newFolderPresent = await isDirectory(getCurationDir(ledgerRoot)).catch(() => false);
+  if (newFolderPresent) return null;
+  const notice = gatherMoveNotice(ledgerRoot, os.homedir());
+  return notice === null ? null : formatMoveNotice(notice);
+}
+
+/**
+ * The gate every writing subcommand passes first (--restore, --clear, --reset and the
+ * project scope of --configure). Installed scripts of another version read and create
+ * another ledger folder, so they refuse with the skew line. Then, where the old folder
+ * is present, the shared move runs with no wait: a busy lock prints a retry message,
+ * and a refused or failed move prints its reason; either way nothing is written.
+ * `undone` completes "Nothing was …". Answers true when the caller may write.
+ */
+async function prepareToWrite(ledgerRoot: string, undone: string): Promise<boolean> {
+  const skew = await installedScriptsSkew(getDevFlowDirectory());
+  if (skew !== null) {
+    p.log.error(skew);
+    process.exitCode = 1;
+    return false;
+  }
+  if (!(await oldLedgerFolderPresent(ledgerRoot))) return true;
+  const moved = await runSharedMove(ledgerRoot);
+  if (moved.kind === 'moved' || moved.kind === 'unchanged') return true;
+  p.log.error(moved.kind === 'busy'
+    ? `Another run is moving this project's curation data. Nothing was ${undone}; try again in a moment.`
+    : `${moveProblemLines(moved).join(' ')} Nothing was ${undone}.`);
+  process.exitCode = 1;
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Sub-command handlers
 // ---------------------------------------------------------------------------
 
 function printUsage(): void {
-  p.intro(color.bgCyan(color.black(' Learning ')));
+  p.intro(color.bgCyan(color.black(' Curation ')));
   p.note(
-    `${color.cyan('devflow learning --enable')}        Enable learning in every project (a repository can opt out)\n` +
-    `${color.cyan('devflow learning --disable')}       Disable learning in every project (drains this project's queue)\n` +
-    `${color.cyan('devflow learning --status')}        Show learning status and entry counts\n` +
-    `${color.cyan('devflow learning --list')}          List entries, inactive entries and observations\n` +
-    `${color.cyan('devflow learning --show <id>')}     Print one entry or observation as JSON\n` +
-    `${color.cyan('devflow learning --restore <id>')}  Make an inactive entry active again\n` +
-    `${color.cyan('devflow learning --configure')}     Configuration wizard\n` +
-    `${color.cyan('devflow learning --clear')}         Drop the observations no entry uses, and drain the queue\n` +
-    `${color.cyan('devflow learning --reset')}         Remove all learning state files`,
+    `${color.cyan('devflow curation --enable')}        Enable curation in every project (a repository can opt out)\n` +
+    `${color.cyan('devflow curation --disable')}       Disable curation in every project (drains this project's queue)\n` +
+    `${color.cyan('devflow curation --status')}        Show curation status and entry counts\n` +
+    `${color.cyan('devflow curation --list')}          List entries, inactive entries and observations\n` +
+    `${color.cyan('devflow curation --show <id>')}     Print one entry or observation as JSON\n` +
+    `${color.cyan('devflow curation --restore <id>')}  Make an inactive entry active again\n` +
+    `${color.cyan('devflow curation --configure')}     Configuration wizard\n` +
+    `${color.cyan('devflow curation --clear')}         Drop the observations no entry uses, and drain the queue\n` +
+    `${color.cyan('devflow curation --reset')}         Remove all curation state files`,
     'Usage',
   );
   p.outro(color.dim('Detects architectural decisions and known pitfalls from your sessions'));
@@ -196,7 +237,7 @@ async function requireLedgerRoot(actionSuffix: string): Promise<string | null> {
  * the store's order, each status present), the active entries still in the v1
  * format — the migration still to do — and the observations.
  */
-function entryCountLines(listing: LearningListing, logRowCount: number, inactiveStatuses: readonly string[]): string[] {
+function entryCountLines(listing: CurationListing, logRowCount: number, inactiveStatuses: readonly string[]): string[] {
   const active = listing.active;
   const decisions = active.filter(entry => entry.type === 'decision').length;
   const pitfalls = active.filter(entry => entry.type === 'pitfall').length;
@@ -214,8 +255,23 @@ function entryCountLines(listing: LearningListing, logRowCount: number, inactive
 }
 
 /**
+ * The `--status` backup lines: one per backup folder a move left under `.devflow`, with
+ * the rows its unswept queue files still hold. A backup is inert, so the count tells the
+ * user when deleting it loses nothing. A count that fails is a warning, not an error.
+ */
+function backupLines(store: CurationStoreModule, ledgerRoot: string): { lines: string[]; warning: string | null } {
+  const rows = store.backupPendingRows(ledgerRoot);
+  if (!rows.ok) return { lines: [], warning: `Backup rows were not counted: ${rows.error.message}` };
+  const lines = rows.value.backups.map(({ name, pendingRows }) =>
+    `Backup: ${path.join(ledgerRoot, '.devflow', name)}: ${counted(pendingRows, 'pending row')} in the backup`);
+  return { lines, warning: null };
+}
+
+/**
  * `--status`: the machine switch, then the counts the store reads. Reads only:
- * malformed lines are counted, never quarantined, and no scope is checked.
+ * malformed lines are counted, never quarantined, and no scope is checked. A project
+ * whose ledger still sits in the old folder gets the HUD's pointer (or refused line)
+ * in place of the counts; a project with backup folders gets one line for each.
  */
 async function handleStatus(): Promise<void> {
   // D-FEATURES-NARROW-ONLY: the machine switch is the manifest's and reads the
@@ -224,7 +280,7 @@ async function handleStatus(): Promise<void> {
   const enabled = await readMachineFeature(getDevFlowDirectory(), 'curation');
   const settingsModule = loadSettingsModule();
   const narrowed = enabled ? narrowedSwitchLabel(settingsModule, { dir: process.cwd() }, 'learning') : null;
-  const stateLine = `Learning: ${enabled ? 'enabled' : 'disabled'}`
+  const stateLine = `Curation: ${enabled ? 'enabled' : 'disabled'}`
     + (narrowed === null ? '' : `\nEffective here: ${narrowed}`);
   const trackedWarning = personalConfigTrackedWarning(settingsModule, { dir: process.cwd() });
   if (trackedWarning !== null) p.log.warn(trackedWarning);
@@ -233,15 +289,22 @@ async function handleStatus(): Promise<void> {
     p.log.info(`${stateLine}\nEntries: not in a git project`);
     return;
   }
-  const loaded = loadLearningStore();
+  const pending = await pendingMoveLine(ledgerRoot);
+  if (pending !== null) {
+    p.log.info(`${stateLine}\n${pending}`);
+    return;
+  }
+  const loaded = loadCurationStore();
   if (!loaded.ok) {
-    p.log.info(`${stateLine}\nEntries: unavailable (${formatLearningStoreUnavailable(loaded.error)})`);
+    p.log.info(`${stateLine}\nEntries: unavailable (${formatCurationStoreUnavailable(loaded.error)})`);
     return;
   }
   const store = loaded.value;
-  const { ledgerRows, logRows, rejected } = store.readLearningState(ledgerRoot);
+  const { ledgerRows, logRows, rejected } = store.readCurationState(ledgerRoot);
   const listing = store.buildListing(ledgerRows, logRows, { rejected });
-  p.log.info([stateLine, ...entryCountLines(listing, logRows.length, store.INACTIVE_STATUSES)].join('\n'));
+  const backups = backupLines(store, ledgerRoot);
+  p.log.info([stateLine, ...entryCountLines(listing, logRows.length, store.INACTIVE_STATUSES), ...backups.lines].join('\n'));
+  if (backups.warning !== null) p.log.warn(backups.warning);
   const { ledger, log } = listing.malformed;
   if (ledger + log > 0) {
     p.log.warn(
@@ -253,16 +316,22 @@ async function handleStatus(): Promise<void> {
 
 /**
  * `--list`: the store's listing — the same text json-helper's `list` op prints —
- * on stdout. Read-only. Outside a git project it reads the current directory.
+ * on stdout. Read-only. Outside a git project it reads the current directory. Where
+ * the ledger still sits in the old folder it prints the pointer or the refused line.
  */
 async function handleList(): Promise<void> {
   const root = (await getLedgerRoot()) ?? process.cwd();
+  const pending = await pendingMoveLine(root);
+  if (pending !== null) {
+    p.log.info(pending);
+    return;
+  }
   const store = requireStore();
   if (!store) return;
   const listed = store.readListing(root);
   if (!listed.ok) {
-    if (listed.error.kind === 'no-learning-dir') {
-      p.log.info(NO_LEARNING_DATA);
+    if (listed.error.kind === 'no-curation-dir') {
+      p.log.info(NO_CURATION_DATA);
       return;
     }
     p.log.error(listed.error.message);
@@ -275,15 +344,22 @@ async function handleList(): Promise<void> {
 /**
  * `--show <id>`: one entry, by its anchor or its observation id, as the JSON
  * json-helper's `show` op prints, made terminal-safe. Read-only. Outside a git
- * project it reads the current directory.
+ * project it reads the current directory. Where the ledger still sits in the old
+ * folder it prints the pointer or the refused line as the refusal.
  */
 async function handleShow(key: string): Promise<void> {
   const root = (await getLedgerRoot()) ?? process.cwd();
+  const pending = await pendingMoveLine(root);
+  if (pending !== null) {
+    p.log.error(pending);
+    process.exitCode = 1;
+    return;
+  }
   const store = requireStore();
   if (!store) return;
   const shown = store.showByKey(root, key);
   if (!shown.ok) {
-    p.log.error(shown.error.kind === 'no-learning-dir' ? NO_LEARNING_DATA : shown.error.message);
+    p.log.error(shown.error.kind === 'no-curation-dir' ? NO_CURATION_DATA : shown.error.message);
     process.exitCode = 1;
     return;
   }
@@ -293,7 +369,8 @@ async function handleShow(key: string): Promise<void> {
 /**
  * `--restore <id>`: make an inactive entry active again through the store's
  * restoreAnchor, which clears its notes and its verification so maintenance
- * reviews it again, and re-renders the files. A refusal writes nothing.
+ * reviews it again, and re-renders the files. It writes through the store lock, so
+ * it moves the old folder first (prepareToWrite). A refusal writes nothing.
  */
 async function handleRestore(anchor: string): Promise<void> {
   const ledgerRoot = await requireLedgerRoot('restore not performed');
@@ -308,6 +385,7 @@ async function handleRestore(anchor: string): Promise<void> {
     process.exitCode = 1;
     return;
   }
+  if (!(await prepareToWrite(ledgerRoot, 'restored'))) return;
   const restored = store.restoreAnchor(ledgerRoot, anchor, { timeoutMs: LOCK_WAIT_MS });
   if (!restored.ok) {
     p.log.error(storeRefusal(restored.error, 'restored'));
@@ -318,7 +396,7 @@ async function handleRestore(anchor: string): Promise<void> {
 }
 
 /**
- * The scope choices of `devflow learning --configure`.
+ * The scope choices of `devflow curation --configure`.
  *
  * D-LEARNING-MODEL-PRECEDENCE: the session-start hook takes the first layer that
  * supplies a model — the project file, then a `devflow agents` Curate mapping,
@@ -334,7 +412,7 @@ export const CONFIGURE_SCOPE_OPTIONS = [
   },
 ] as const;
 
-/** The models `devflow learning --configure` offers, each with what it is good for. */
+/** The models `devflow curation --configure` offers, each with what it is good for. */
 const CURATE_MODEL_CHOICES = [
   { value: 'opus', label: 'Opus', note: 'highest quality for detection + curation judgment' },
   { value: 'sonnet', label: 'Sonnet', note: 'good balance of quality and speed' },
@@ -361,7 +439,7 @@ export function curateModelOptions(
 }
 
 async function handleConfigure(): Promise<void> {
-  p.intro(color.bgCyan(color.black(' Learning Configuration ')));
+  p.intro(color.bgCyan(color.black(' Curation Configuration ')));
 
   const shippedModel = (await loadShippedAgentDefaults()).curate?.model;
   const model = await p.select({
@@ -409,37 +487,21 @@ async function handleConfigure(): Promise<void> {
     // from the ledger ($LEDGER_ROOT/.devflow/curation/), so write it there — the
     // main checkout in a linked worktree; the current directory outside git.
     const projectRoot = (await getLedgerRoot()) ?? process.cwd();
-    // Installed scripts of another version read and create another ledger folder: write nothing.
-    const skew = await installedScriptsSkew(getDevFlowDirectory());
-    if (skew !== null) {
-      p.log.error(skew);
-      process.exitCode = 1;
-      return;
-    }
-    // The shared move runs first. A busy lock, a link or a failed move refuses the write,
-    // so the config never lands in a folder the readers do not use.
-    if (await oldLedgerFolderPresent(projectRoot)) {
-      const moved = await runSharedMove(projectRoot);
-      if (moved.kind !== 'moved' && moved.kind !== 'unchanged') {
-        p.log.error(moved.kind === 'busy'
-          ? 'Another run is moving this project\'s curation data. Nothing was written; try again in a moment.'
-          : `${moveProblemLines(moved).join(' ')} Nothing was written.`);
-        process.exitCode = 1;
-        return;
-      }
-    }
+    // Skew or a move that cannot run (busy, refused, failed) writes nothing, so the
+    // config never lands in a folder the readers do not use.
+    if (!(await prepareToWrite(projectRoot, 'written'))) return;
     // The creator rule: the new folder is made only when the old name is absent.
-    const learningDir = await ledgerFolderToCreate(projectRoot, LEGACY_NAMES.folder, CURATION_DIR_NAME);
+    const curationDir = await ledgerFolderToCreate(projectRoot, LEGACY_NAMES.folder, CURATION_DIR_NAME);
     const projectConfigPath = getCurateTuningConfigPath(projectRoot);
     // D-CLI-NO-SYMLINK (core/linked-path.ts): nothing is written through a .devflow,
-    // a learning folder or a learning.json that is a symbolic link.
-    const linked = await firstSymbolicLink([path.dirname(learningDir), learningDir, projectConfigPath]);
+    // a curation folder or a curation.json that is a symbolic link.
+    const linked = await firstSymbolicLink([path.dirname(curationDir), curationDir, projectConfigPath]);
     if (linked !== null) {
       p.log.error(`Project config not written: ${linked} is a symbolic link, and devflow writes nothing through one`);
       process.exitCode = 1;
       return;
     }
-    await fs.mkdir(learningDir, { recursive: true });
+    await fs.mkdir(curationDir, { recursive: true });
     await fs.writeFile(projectConfigPath, configJson, 'utf-8');
     p.log.success(`Project config written to ${color.dim(projectConfigPath)}`);
   }
@@ -448,29 +510,32 @@ async function handleConfigure(): Promise<void> {
 }
 
 /**
- * `--reset`: remove all learning state — entries, observations, rendered files,
+ * `--reset`: remove all curation state — entries, observations, rendered files,
  * the tuning config, and the queue with its claim — through the store's
- * resetLearning, under the learning lock every learning writer takes
- * (D-ONE-LEARNING-LOCK, D-RESET-UNDER-LOCK). A project with no learning directory
- * has nothing to reset, and nothing is created there (D-NO-STRAY-TREE).
+ * resetCuration, under the curation lock every curation writer takes
+ * (D-ONE-LEARNING-LOCK, D-RESET-UNDER-LOCK). The old folder moves first
+ * (prepareToWrite), so the reset reaches the data the hooks use; a backup folder a
+ * move left stays in place. A project with no curation directory has nothing to
+ * reset, and nothing is created there (D-NO-STRAY-TREE).
  */
 async function handleReset(): Promise<void> {
   const ledgerRoot = await requireLedgerRoot('reset not performed');
   if (!ledgerRoot) return;
   const store = requireStore();
   if (!store) return;
-  if (!(await isDirectory(getLearningDir(ledgerRoot)))) {
-    p.log.info('No learning data to reset.');
+  if (!(await prepareToWrite(ledgerRoot, 'reset'))) return;
+  if (!(await isDirectory(getCurationDir(ledgerRoot)))) {
+    p.log.info('No curation data to reset.');
     return;
   }
 
-  const proceed = await confirmOnTerminal('Remove all learning state files? This cannot be undone.', 'Reset cancelled.');
+  const proceed = await confirmOnTerminal('Remove all curation state files? This cannot be undone.', 'Reset cancelled.');
   if (!proceed) return;
 
-  const reset = store.resetLearning(ledgerRoot, { timeoutMs: LOCK_WAIT_MS });
+  const reset = store.resetCuration(ledgerRoot, { timeoutMs: LOCK_WAIT_MS });
   if (!reset.ok) {
-    if (reset.error.kind === 'no-learning-dir') {
-      p.log.info('No learning data to reset.');
+    if (reset.error.kind === 'no-curation-dir') {
+      p.log.info('No curation data to reset.');
       return;
     }
     p.log.error(storeRefusal(reset.error, 'reset'));
@@ -482,17 +547,20 @@ async function handleReset(): Promise<void> {
 
 /**
  * `--clear`: drop the observations no entry uses (D-CLEAR-UNREFERENCED), then
- * drain the learning queue. The queue is drained only once the clear succeeded:
+ * drain the curation queue. The queue is drained only once the clear succeeded:
  * a busy lock or a refusal leaves both the log and the queue as they were, so a
- * failed clear changes nothing.
+ * failed clear changes nothing. The old folder moves first (prepareToWrite), so the
+ * clear and the drain reach the data the hooks use; a backup folder a move left
+ * stays in place.
  */
 async function handleClear(): Promise<void> {
   const ledgerRoot = await requireLedgerRoot('clear not performed');
   if (!ledgerRoot) return;
   const store = requireStore();
   if (!store) return;
-  if (!(await isDirectory(getLearningDir(ledgerRoot)))) {
-    p.log.info('No learning data to clear.');
+  if (!(await prepareToWrite(ledgerRoot, 'cleared'))) return;
+  if (!(await isDirectory(getCurationDir(ledgerRoot)))) {
+    p.log.info('No curation data to clear.');
     return;
   }
 
@@ -504,8 +572,8 @@ async function handleClear(): Promise<void> {
 
   const cleared = store.clearUnreferenced(ledgerRoot, { timeoutMs: LOCK_WAIT_MS });
   if (!cleared.ok) {
-    if (cleared.error.kind === 'no-learning-dir') {
-      p.log.info('No learning data to clear.');
+    if (cleared.error.kind === 'no-curation-dir') {
+      p.log.info('No curation data to clear.');
       return;
     }
     p.log.error(storeRefusal(cleared.error, 'cleared'));
@@ -515,18 +583,18 @@ async function handleClear(): Promise<void> {
 
   // A mid-run Curate agent whose claimed batch vanishes stops without further
   // writes — the desired outcome of clearing.
-  const drain = await drainLearningQueue(ledgerRoot);
+  const drain = await drainCurationQueue(ledgerRoot);
 
   p.log.success(
     `Cleared ${counted(cleared.value.cleared, 'observation')} no entry uses and kept ${cleared.value.kept} ` +
-    `that entries use${drain.drained ? '; drained the learning queue.' : '.'}`,
+    `that entries use${drain.drained ? '; drained the curation queue.' : '.'}`,
   );
   if (!drain.drained) p.log.warn(formatRefusedDrain('curation', drain.linkedFolder));
 }
 
 /**
  * Make the installed prompts match the switch just written
- * (D-LEARNING-VARIANT-INSTALL): the learning-on or learning-off commands and
+ * (D-LEARNING-VARIANT-INSTALL): the curation-on or curation-off commands and
  * agents, and the apply-decisions skill. The same convergence `devflow init` runs,
  * followed by reapplying the saved agent model mapping so `devflow agents`
  * overrides survive.
@@ -556,7 +624,7 @@ async function convergeInstalledVariants(enabled: boolean): Promise<'converged' 
     if (changed !== null) p.log.info(color.dim(`Installed prompts: ${changed}`));
     return 'converged';
   } catch (err) {
-    p.log.warn(`Could not update the installed prompts for the new learning setting — run ${color.cyan('devflow init')}: ${String(err)}`);
+    p.log.warn(`Could not update the installed prompts for the new curation setting — run ${color.cyan('devflow init')}: ${String(err)}`);
     return 'not-converged';
   }
 }
@@ -601,7 +669,7 @@ async function handleToggle(enabled: boolean): Promise<void> {
   if (converged === 'converged' && ledgerRoot) await tryMoveForToggle(ledgerRoot);
 
   if (enabled) {
-    p.log.success('Learning enabled in every project (a repository can opt out)');
+    p.log.success('Curation enabled in every project (a repository can opt out)');
     p.log.info(color.dim('Architectural decisions and pitfalls will be detected from your sessions'));
     return;
   }
@@ -611,17 +679,17 @@ async function handleToggle(enabled: boolean): Promise<void> {
   // agent whose claimed batch vanishes aborts without changes — the desired outcome
   // of disabling.
   if (ledgerRoot) {
-    const drain = await drainLearningQueue(ledgerRoot);
+    const drain = await drainCurationQueue(ledgerRoot);
     if (!drain.drained) p.log.warn(formatRefusedDrain('curation', drain.linkedFolder));
   }
-  p.log.success('Learning disabled in every project');
+  p.log.success('Curation disabled in every project');
 }
 
 // ---------------------------------------------------------------------------
 // Command
 // ---------------------------------------------------------------------------
 
-interface LearningOptions {
+interface CurationOptions {
   enable?: boolean;
   disable?: boolean;
   status?: boolean;
@@ -633,19 +701,19 @@ interface LearningOptions {
   reset?: boolean;
 }
 
-export const learningCommand = new Command('learning')
-  .description('Enable or disable learning (decision/pitfall detection) in every project')
-  .option('--enable', 'Enable learning in every project (a repository can opt out)')
-  .option('--disable', 'Disable learning in every project')
-  .option('--status', 'Show learning status and entry counts')
+export const curationCommand = new Command('curation')
+  .description('Enable or disable curation (decision/pitfall detection) in every project')
+  .option('--enable', 'Enable curation in every project (a repository can opt out)')
+  .option('--disable', 'Disable curation in every project')
+  .option('--status', 'Show curation status and entry counts')
   .option('--list', 'List entries, inactive entries with their notes, and observations')
   .option('--show <id>', 'Print one entry (ADR-NNN or PF-NNN) or observation (obs_...) as JSON')
   .option('--restore <id>', 'Make an inactive entry active again')
-  .option('--configure', 'Interactive configuration wizard for learning.json')
-  .option('--clear', 'Drop the observations no entry uses, and drain the learning queue')
-  .option('--reset', 'Remove all learning state files and artifacts')
-  .action(async (options: LearningOptions) => {
-    const knownFlags: (keyof LearningOptions)[] = [
+  .option('--configure', 'Interactive configuration wizard for curation.json')
+  .option('--clear', 'Drop the observations no entry uses, and drain the curation queue')
+  .option('--reset', 'Remove all curation state files and artifacts')
+  .action(async (options: CurationOptions) => {
+    const knownFlags: (keyof CurationOptions)[] = [
       'enable', 'disable', 'status', 'list', 'show', 'restore', 'configure',
       'clear', 'reset',
     ];

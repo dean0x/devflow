@@ -19,7 +19,7 @@ import * as path from 'path';
 
 import { spawnSync } from 'child_process';
 
-import { GIT_ENV, JSON_HELPER, LEARNING_STORE, makeV2LedgerRow, makeV2LogRow, toJsonl } from './learning-fixtures.js';
+import { GIT_ENV, JSON_HELPER, CURATION_STORE, makeV2LedgerRow, makeV2LogRow, toJsonl } from './curation-fixtures.js';
 
 // ---------------------------------------------------------------------------
 // The store's move surface, as the tests call it
@@ -58,7 +58,7 @@ interface Store {
 }
 
 const nodeRequire = createRequire(import.meta.url);
-const store = nodeRequire(LEARNING_STORE) as Store;
+const store = nodeRequire(CURATION_STORE) as Store;
 /** The fs module object the store calls into: a spy on it reaches the store. */
 const nodeFs = nodeRequire('fs') as typeof fs;
 

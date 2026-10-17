@@ -1,7 +1,7 @@
 // src/assets/scripts/hooks/lib/mkdir-lock.cjs
 //
 // Shared mkdir-based locking helpers used by curation-store.cjs — whose
-// withDecisionsLock every learning op that writes and the render CLI take, and
+// withDecisionsLock every curation op that writes and the render CLI take, and
 // whose queue claim also takes the queue's own lock — and any other CJS hook that
 // needs exclusive access to a shared resource.
 //
@@ -50,7 +50,7 @@ function _idleSleep50() {
  * (default 60 s) is forcibly removed and the caller retries. This protects against
  * crashed holders but creates a narrow TOCTOU window: if a holder is actively
  * working and takes longer than 60 s, its lock can be stolen — leading to concurrent
- * ledger writes. Current callers (the learning ops through withDecisionsLock, and the
+ * ledger writes. Current callers (the curation ops through withDecisionsLock, and the
  * render CLI) perform only synchronous file I/O + JSON parse and complete well under 60 s in practice,
  * so this window is not reachable under normal operation. For long-running callers
  * call refreshLock(lockDir) periodically to reset the mtime and push the deadline

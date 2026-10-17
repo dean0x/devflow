@@ -82,7 +82,7 @@ const TRACKER_PROVIDER_IDS = Object.freeze(['github', 'jira', 'linear']);
 const COMPLIANCE_IDS = Object.freeze(['gdpr', 'hipaa', 'pci-dss', 'soc2', 'iso-27001', 'sox']);
 
 /**
- * The feature keys a repo layer may narrow with. `curation` is the learning
+ * The feature keys a repo layer may narrow with. `curation` is the curation
  * feature's current name and `learning` its pre-rename one (#529): both are read,
  * each on its own, and a literal false in either turns the feature off.
  */

@@ -75,7 +75,7 @@ const DEVFLOW_PROJECT_LINE = '!.devflow/project.json';
 
 /**
  * The shared .devflow/ gitignore block. Everything under .devflow/ is local
- * (memory, learning, docs, locks) EXCEPT:
+ * (memory, curation, docs, locks) EXCEPT:
  * - Feature knowledge bases: index.md and every {slug}/KNOWLEDGE.md are tracked
  *   + committed (the Knowledge agent commits them at workflow end).
  * - conventions.md: naming-convention authority written by the Git learn-conventions

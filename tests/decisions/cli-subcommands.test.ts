@@ -1,15 +1,15 @@
 /**
- * `devflow learning` on the v2 learning store (D-LEARNING-STORE-SEAM).
+ * `devflow curation` on the v2 curation store (D-LEARNING-STORE-SEAM).
  *
  * --status, --list and --show read the ledger and the log through the store and
  * write nothing. --restore makes an inactive entry active again through the
  * store's restoreAnchor. --clear drops only the observations no entry uses, under
- * the learning lock, and drains the queue only once that clear succeeded
- * (D-CLEAR-UNREFERENCED). --reset removes the whole learning directory through
- * the store's resetLearning, under the same lock and wait (D-RESET-UNDER-LOCK),
+ * the curation lock, and drains the queue only once that clear succeeded
+ * (D-CLEAR-UNREFERENCED). --reset removes the whole curation directory through
+ * the store's resetCuration, under the same lock and wait (D-RESET-UNDER-LOCK),
  * and creates nothing where there is none. --disable keeps its drain.
  *
- * Each case seeds a real learning tree under a temp root that getLedgerRoot is
+ * Each case seeds a real curation tree under a temp root that getLedgerRoot is
  * mocked to resolve; only the prompts, the tuning config and the machine devflow
  * directory are stubbed.
  */
@@ -57,30 +57,31 @@ vi.mock('@clack/prompts', () => ({
 // ---------------------------------------------------------------------------
 import { getLedgerRoot } from '../../src/core/ledger-root.js';
 import { getDevFlowDirectory } from '../../src/targets/claude-code/claude-paths.js';
-import { learningCommand } from '../../src/cli/commands/learning.js';
-import { loadLearningStore } from '../../src/core/curation-store.js';
+import { curationCommand } from '../../src/cli/commands/curation.js';
+import { loadCurationStore } from '../../src/core/curation-store.js';
 import * as p from '@clack/prompts';
 import {
-  getLearningPendingTurnsPath,
-  getLearningPendingTurnsProcessingPath,
-  getLearningClaimOwnerPath,
+  curationMoveMarkerKey,
+  getCurationPendingTurnsPath,
+  getCurationPendingTurnsProcessingPath,
+  getCurationClaimOwnerPath,
   getPendingTurnsPath,
 } from '../../src/core/project-paths.js';
 import {
-  learningPaths,
+  curationPaths,
   makeV1LedgerRow,
   makeV1LogRow,
   makeV2LedgerRow,
   makeV2LogRow,
-  requireLearningStore,
-  seedLearningTree,
+  requireCurationStore,
+  seedCurationTree,
   snapshotTree,
   toJsonl,
-  type LearningTreePaths,
+  type CurationTreePaths,
   type Row,
-} from './learning-fixtures.js';
+} from './curation-fixtures.js';
 
-const store = requireLearningStore();
+const store = requireCurationStore();
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -91,7 +92,7 @@ function makeTmpDir(): string {
 }
 
 /** What one `devflow learning …` run printed, by channel, and the exit code it set. */
-interface LearningRun {
+interface CurationRun {
   stdout: string;
   info: string;
   success: string;
@@ -110,8 +111,8 @@ function logged(fn: (message: string) => void): string {
  * option values across parseAsync() calls on one instance, so they are cleared
  * first. stdout is captured; the clack log calls are read from their mocks.
  */
-async function runLearning(args: readonly string[]): Promise<LearningRun> {
-  (learningCommand as unknown as { _optionValues: Record<string, unknown> })._optionValues = {};
+async function runCuration(args: readonly string[]): Promise<CurationRun> {
+  (curationCommand as unknown as { _optionValues: Record<string, unknown> })._optionValues = {};
   for (const fn of [p.log.info, p.log.success, p.log.warn, p.log.error]) vi.mocked(fn).mockClear();
   let stdout = '';
   const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: string | Uint8Array) => {
@@ -119,7 +120,7 @@ async function runLearning(args: readonly string[]): Promise<LearningRun> {
     return true;
   });
   try {
-    await learningCommand.parseAsync([...args], { from: 'user' });
+    await curationCommand.parseAsync([...args], { from: 'user' });
   } finally {
     spy.mockRestore();
   }
@@ -157,18 +158,18 @@ const LEDGER: readonly Row[] = [
   }),
 ];
 
-function seedCorpus(root: string): LearningTreePaths {
-  return seedLearningTree(root, { log: LOG, ledger: LEDGER });
+function seedCorpus(root: string): CurationTreePaths {
+  return seedCurationTree(root, { log: LOG, ledger: LEDGER });
 }
 
 function seedQueue(root: string): void {
-  fs.writeFileSync(getLearningPendingTurnsPath(root), '{"role":"user"}\n');
-  fs.writeFileSync(getLearningPendingTurnsProcessingPath(root), '{"role":"user"}\n');
-  fs.writeFileSync(getLearningClaimOwnerPath(root), '0123456789abcdef\n');
+  fs.writeFileSync(getCurationPendingTurnsPath(root), '{"role":"user"}\n');
+  fs.writeFileSync(getCurationPendingTurnsProcessingPath(root), '{"role":"user"}\n');
+  fs.writeFileSync(getCurationClaimOwnerPath(root), '0123456789abcdef\n');
 }
 
 function queueFilesPresent(root: string): boolean[] {
-  return [getLearningPendingTurnsPath(root), getLearningPendingTurnsProcessingPath(root), getLearningClaimOwnerPath(root)]
+  return [getCurationPendingTurnsPath(root), getCurationPendingTurnsProcessingPath(root), getCurationClaimOwnerPath(root)]
     .map(file => fs.existsSync(file));
 }
 
@@ -219,7 +220,7 @@ function seedOldFolder(dir: string, claimed = false): string {
 
 /** Hold the move lock of `dir` as another mover would, under the machine directory. */
 function holdMoveLock(machineDir: string, dir: string): string {
-  const loaded = loadLearningStore();
+  const loaded = loadCurationStore();
   if (!loaded.ok) throw new Error('the store must load');
   const lock = path.join(machineDir, `.curation-move-${loaded.value.curationMoveLockKey(fs.realpathSync(dir))}.lock`);
   fs.mkdirSync(lock);
@@ -255,20 +256,20 @@ afterEach(() => {
 // Usage and dispatch
 // ---------------------------------------------------------------------------
 
-describe('learning: usage and dispatch', () => {
+describe('curation: usage and dispatch', () => {
   it('prints the usage, naming every flag, when no flag is given', async () => {
     vi.mocked(p.note).mockClear();
-    await runLearning([]);
+    await runCuration([]);
     const usage = vi.mocked(p.note).mock.calls.map(call => String(call[0])).join('\n');
     for (const flag of ['--enable', '--disable', '--status', '--list', '--show <id>', '--restore <id>', '--configure', '--clear', '--reset']) {
-      expect(usage, flag).toContain(`devflow learning ${flag}`);
+      expect(usage, flag).toContain(`devflow curation ${flag}`);
     }
   });
 
   it('a flag that takes a value dispatches on the value alone', async () => {
     seedCorpus(root);
     vi.mocked(p.note).mockClear();
-    const run = await runLearning(['--show', 'ADR-001']);
+    const run = await runCuration(['--show', 'ADR-001']);
     expect(p.note).not.toHaveBeenCalled();
     expect(JSON.parse(run.stdout).key).toBe('ADR-001');
   });
@@ -278,7 +279,7 @@ describe('learning: usage and dispatch', () => {
 // --status
 // ---------------------------------------------------------------------------
 
-describe('learning --status', { timeout: 30_000 }, () => {
+describe('curation --status', { timeout: 30_000 }, () => {
   // The settings layer reads the repository files of the current directory; a
   // directory that is no repository narrows nothing, so the lines are the store's.
   beforeEach(() => { vi.spyOn(process, 'cwd').mockReturnValue(root); });
@@ -287,10 +288,10 @@ describe('learning --status', { timeout: 30_000 }, () => {
     seedCorpus(root);
     const before = snapshotTree(root);
 
-    const run = await runLearning(['--status']);
+    const run = await runCuration(['--status']);
 
     expect(run.info).toBe([
-      'Learning: enabled',
+      'Curation: enabled',
       'Entries: 3 active (1 decision, 2 pitfalls), 1 inactive (Retired 1)',
       'Legacy v1 entries: 2 of 3 active',
       'Observations: 4 in the log, 1 not yet promoted',
@@ -300,7 +301,7 @@ describe('learning --status', { timeout: 30_000 }, () => {
   });
 
   it('lists each inactive status it finds, in the store\'s order', async () => {
-    seedLearningTree(root, {
+    seedCurationTree(root, {
       ledger: [
         makeV2LedgerRow({ id: 'obs_a', anchor_id: 'ADR-001', decisions_status: 'Superseded', superseded_by: 'ADR-002' }),
         makeV2LedgerRow({ id: 'obs_b', anchor_id: 'ADR-002' }),
@@ -308,7 +309,7 @@ describe('learning --status', { timeout: 30_000 }, () => {
         makeV1LedgerRow({ id: 'obs_d', anchor_id: 'PF-002', decisions_status: 'Encoded' }),
       ],
     });
-    const run = await runLearning(['--status']);
+    const run = await runCuration(['--status']);
     expect(run.info).toContain('Entries: 1 active (1 decision, 0 pitfalls), 3 inactive (Encoded 1, Superseded 1, Deprecated 1)');
   });
 
@@ -319,7 +320,7 @@ describe('learning --status', { timeout: 30_000 }, () => {
     fs.appendFileSync(paths.log, '[]\n');
     const before = snapshotTree(root);
 
-    const run = await runLearning(['--status']);
+    const run = await runCuration(['--status']);
 
     expect(run.warn).toBe(
       'Malformed lines skipped: 1 in the ledger, 2 in the log. The next op that rewrites a file moves its malformed lines to a .rejected.jsonl file beside it.',
@@ -328,9 +329,9 @@ describe('learning --status', { timeout: 30_000 }, () => {
   });
 
   it('reports zero counts for a project with no learning data, and creates nothing', async () => {
-    const run = await runLearning(['--status']);
+    const run = await runCuration(['--status']);
     expect(run.info).toBe([
-      'Learning: enabled',
+      'Curation: enabled',
       'Entries: 0 active (0 decisions, 0 pitfalls), 0 inactive',
       'Legacy v1 entries: 0 of 0 active',
       'Observations: 0 in the log, 0 not yet promoted',
@@ -340,8 +341,8 @@ describe('learning --status', { timeout: 30_000 }, () => {
 
   it('says so outside a git project', async () => {
     vi.mocked(getLedgerRoot).mockResolvedValue(null);
-    const run = await runLearning(['--status']);
-    expect(run.info).toBe('Learning: enabled\nEntries: not in a git project');
+    const run = await runCuration(['--status']);
+    expect(run.info).toBe('Curation: enabled\nEntries: not in a git project');
   });
 });
 
@@ -349,12 +350,12 @@ describe('learning --status', { timeout: 30_000 }, () => {
 // --list
 // ---------------------------------------------------------------------------
 
-describe('learning --list', { timeout: 30_000 }, () => {
+describe('curation --list', { timeout: 30_000 }, () => {
   it('prints the entries, the inactive entries with their notes, the observations and the integrity flags, and writes nothing', async () => {
     seedCorpus(root);
     const before = snapshotTree(root);
 
-    const run = await runLearning(['--list']);
+    const run = await runCuration(['--list']);
 
     expect(run.stdout).toBe([
       'ACTIVE 3',
@@ -376,8 +377,8 @@ describe('learning --list', { timeout: 30_000 }, () => {
   });
 
   it('says there is no learning data when the project has no learning directory, and creates nothing', async () => {
-    const run = await runLearning(['--list']);
-    expect(run.info).toBe('No learning data in this project yet.');
+    const run = await runCuration(['--list']);
+    expect(run.info).toBe('No curation data in this project yet.');
     expect(run.stdout).toBe('');
     expect(fs.readdirSync(root)).toEqual([]);
   });
@@ -385,7 +386,7 @@ describe('learning --list', { timeout: 30_000 }, () => {
   it('reads the ledger root getLedgerRoot resolves, not process.cwd() (a subdirectory or a linked worktree)', async () => {
     seedCorpus(root);
     vi.spyOn(process, 'cwd').mockReturnValue('/nonexistent-cwd-decoy-path');
-    const run = await runLearning(['--list']);
+    const run = await runCuration(['--list']);
     expect(run.stdout).toContain('ACTIVE 3');
   });
 
@@ -393,7 +394,7 @@ describe('learning --list', { timeout: 30_000 }, () => {
     vi.mocked(getLedgerRoot).mockResolvedValue(null);
     seedCorpus(root);
     vi.spyOn(process, 'cwd').mockReturnValue(root);
-    const run = await runLearning(['--list']);
+    const run = await runCuration(['--list']);
     expect(run.stdout).toContain('OBSERVATIONS 1');
   });
 });
@@ -402,12 +403,12 @@ describe('learning --list', { timeout: 30_000 }, () => {
 // --show
 // ---------------------------------------------------------------------------
 
-describe('learning --show', { timeout: 30_000 }, () => {
+describe('curation --show', { timeout: 30_000 }, () => {
   it('prints the entry as JSON — every ledger row carrying its observation, the log row, history and flags — and writes nothing', async () => {
     seedCorpus(root);
     const before = snapshotTree(root);
 
-    const run = await runLearning(['--show', 'PF-002']);
+    const run = await runCuration(['--show', 'PF-002']);
 
     const shown = JSON.parse(run.stdout) as Record<string, unknown>;
     expect(Object.keys(shown)).toEqual(['key', 'ledger', 'log', 'history_versions', 'flags']);
@@ -422,7 +423,7 @@ describe('learning --show', { timeout: 30_000 }, () => {
 
   it('shows an observation no entry carries by its id', async () => {
     seedCorpus(root);
-    const run = await runLearning(['--show', 'obs_cli_waiting']);
+    const run = await runCuration(['--show', 'obs_cli_waiting']);
     const shown = JSON.parse(run.stdout) as { ledger: Row[]; log: Row };
     expect(shown.ledger).toEqual([]);
     expect(shown.log).toEqual(LOG[3]);
@@ -437,9 +438,9 @@ describe('learning --show', { timeout: 30_000 }, () => {
       id: 'obs_cli_pitfall', anchor_id: 'PF-001',
       details: `area: x; issue: csi${csi}2J and ${rlo}reversed${pop} text; resolution:${lineSeparator}next`,
     });
-    seedLearningTree(root, { log: [LOG[1]], ledger: [hostile] });
+    seedCurationTree(root, { log: [LOG[1]], ledger: [hostile] });
 
-    const run = await runLearning(['--show', 'PF-001']);
+    const run = await runCuration(['--show', 'PF-001']);
 
     for (const ch of unsafe) expect(run.stdout.includes(ch), `U+${ch.charCodeAt(0).toString(16)}`).toBe(false);
     expect((JSON.parse(run.stdout) as { ledger: Row[] }).ledger[0]).toEqual(hostile);
@@ -448,7 +449,7 @@ describe('learning --show', { timeout: 30_000 }, () => {
   it('refuses an entry the ledger and the log do not hold: exit 1, nothing printed or written', async () => {
     seedCorpus(root);
     const before = snapshotTree(root);
-    const run = await runLearning(['--show', 'PF-099']);
+    const run = await runCuration(['--show', 'PF-099']);
     expect(run.error).toBe('show: no entry \'PF-099\' in the ledger or the log');
     expect(run.stdout).toBe('');
     expect(run.exitCode).toBe(1);
@@ -457,14 +458,14 @@ describe('learning --show', { timeout: 30_000 }, () => {
 
   it('refuses a value that is neither an entry id nor an observation id', async () => {
     seedCorpus(root);
-    const run = await runLearning(['--show', 'not an id']);
+    const run = await runCuration(['--show', 'not an id']);
     expect(run.error).toBe('show: "not an id" is neither an anchor id nor an observation id');
     expect(run.exitCode).toBe(1);
   });
 
   it('refuses in a project with no learning directory, and creates nothing', async () => {
-    const run = await runLearning(['--show', 'ADR-001']);
-    expect(run.error).toBe('No learning data in this project yet.');
+    const run = await runCuration(['--show', 'ADR-001']);
+    expect(run.error).toBe('No curation data in this project yet.');
     expect(run.exitCode).toBe(1);
     expect(fs.readdirSync(root)).toEqual([]);
   });
@@ -474,11 +475,13 @@ describe('learning --show', { timeout: 30_000 }, () => {
 // --restore
 // ---------------------------------------------------------------------------
 
-describe('learning --restore', { timeout: 30_000 }, () => {
+describe('curation --restore', { timeout: 30_000 }, () => {
+  beforeEach(useMatchingInstall);
+
   it('makes an inactive entry active again, its notes cleared, and renders it', async () => {
     const paths = seedCorpus(root);
 
-    const run = await runLearning(['--restore', 'PF-003']);
+    const run = await runCuration(['--restore', 'PF-003']);
 
     expect(run.success).toBe('Restored PF-003 (Active); it is due for review again.');
     expect(run.exitCode).toBe(0);
@@ -486,13 +489,13 @@ describe('learning --restore', { timeout: 30_000 }, () => {
     expect(restored?.decisions_status).toBe('Active');
     expect(restored).not.toHaveProperty('status_note');
     expect(restored).not.toHaveProperty('retired_on');
-    expect(fs.readFileSync(path.join(paths.learningDir, 'pitfalls.md'), 'utf8')).toContain('## PF-003: A pitfall seen once');
+    expect(fs.readFileSync(path.join(paths.curationDir, 'pitfalls.md'), 'utf8')).toContain('## PF-003: A pitfall seen once');
   });
 
   it('refuses an entry that is already active: exit 1, nothing written', async () => {
     seedCorpus(root);
     const before = snapshotTree(root);
-    const run = await runLearning(['--restore', 'ADR-001']);
+    const run = await runCuration(['--restore', 'ADR-001']);
     expect(run.error).toBe('restore-anchor: ADR-001 is already active; nothing was written');
     expect(run.exitCode).toBe(1);
     expect(snapshotTree(root)).toEqual(before);
@@ -501,22 +504,22 @@ describe('learning --restore', { timeout: 30_000 }, () => {
   it('refuses a value that is not an entry id: exit 1, nothing written', async () => {
     seedCorpus(root);
     const before = snapshotTree(root);
-    const run = await runLearning(['--restore', 'obs_cli_retired']);
+    const run = await runCuration(['--restore', 'obs_cli_retired']);
     expect(run.error).toBe('--restore takes an entry id (ADR-NNN or PF-NNN), not "obs_cli_retired"');
     expect(run.exitCode).toBe(1);
     expect(snapshotTree(root)).toEqual(before);
   });
 
   it('refuses in a project with no learning directory, and creates nothing', async () => {
-    const run = await runLearning(['--restore', 'PF-003']);
-    expect(run.error).toBe('No learning data in this project yet.');
+    const run = await runCuration(['--restore', 'PF-003']);
+    expect(run.error).toBe('No curation data in this project yet.');
     expect(run.exitCode).toBe(1);
     expect(fs.readdirSync(root)).toEqual([]);
   });
 
   it('refuses outside a git project', async () => {
     vi.mocked(getLedgerRoot).mockResolvedValue(null);
-    const run = await runLearning(['--restore', 'PF-003']);
+    const run = await runCuration(['--restore', 'PF-003']);
     expect(run.warn).toBe('Could not resolve git root — restore not performed');
     expect(run.exitCode).toBe(1);
   });
@@ -526,15 +529,17 @@ describe('learning --restore', { timeout: 30_000 }, () => {
 // --clear (D-CLEAR-UNREFERENCED)
 // ---------------------------------------------------------------------------
 
-describe('learning --clear', { timeout: 30_000 }, () => {
+describe('curation --clear', { timeout: 30_000 }, () => {
+  beforeEach(useMatchingInstall);
+
   it('drops only the observations no entry uses, keeps every entry\'s log row, then drains the queue', async () => {
     const paths = seedCorpus(root);
     seedQueue(root);
     const ledgerBefore = fs.readFileSync(paths.ledger, 'utf8');
 
-    const run = await runLearning(['--clear']);
+    const run = await runCuration(['--clear']);
 
-    expect(run.success).toBe('Cleared 1 observation no entry uses and kept 3 that entries use; drained the learning queue.');
+    expect(run.success).toBe('Cleared 1 observation no entry uses and kept 3 that entries use; drained the curation queue.');
     expect(run.exitCode).toBe(0);
     expect(fs.readFileSync(paths.log, 'utf8')).toBe(toJsonl(LOG.slice(0, 3)));
     expect(fs.readFileSync(paths.ledger, 'utf8')).toBe(ledgerBefore);
@@ -548,10 +553,10 @@ describe('learning --clear', { timeout: 30_000 }, () => {
     const before = snapshotTree(root);
 
     const started = Date.now();
-    const run = await runLearning(['--clear']);
+    const run = await runCuration(['--clear']);
 
     expect(Date.now() - started).toBeLessThan(15_000);
-    expect(run.error).toBe('The learning store is busy: another run holds its lock. Nothing was cleared; try again in a moment.');
+    expect(run.error).toBe('The curation store is busy: another run holds its lock. Nothing was cleared; try again in a moment.');
     expect(run.exitCode).toBe(1);
     expect(snapshotTree(root)).toEqual(before);
     expect(queueFilesPresent(root)).toEqual([true, true, true]);
@@ -563,7 +568,7 @@ describe('learning --clear', { timeout: 30_000 }, () => {
     fs.appendFileSync(paths.ledger, '{torn ledger line\n');
     const before = snapshotTree(root);
 
-    const run = await runLearning(['--clear']);
+    const run = await runCuration(['--clear']);
 
     expect(run.error).toBe('clear: the ledger has 1 malformed line, which may carry an observation this would drop; nothing was cleared');
     expect(run.exitCode).toBe(1);
@@ -571,8 +576,8 @@ describe('learning --clear', { timeout: 30_000 }, () => {
   });
 
   it('says there is nothing to clear in a project with no learning directory, and creates nothing', async () => {
-    const run = await runLearning(['--clear']);
-    expect(run.info).toBe('No learning data to clear.');
+    const run = await runCuration(['--clear']);
+    expect(run.info).toBe('No curation data to clear.');
     expect(run.exitCode).toBe(0);
     expect(fs.readdirSync(root)).toEqual([]);
   });
@@ -580,7 +585,7 @@ describe('learning --clear', { timeout: 30_000 }, () => {
   it('acts on the resolved ledger root, never process.cwd()', async () => {
     const paths = seedCorpus(root);
     vi.spyOn(process, 'cwd').mockReturnValue('/nonexistent-cwd-decoy-path');
-    await runLearning(['--clear']);
+    await runCuration(['--clear']);
     expect(store.readJsonl(paths.log).rows.map(row => row.id)).toEqual(['obs_cli_decision', 'obs_cli_pitfall', 'obs_cli_retired']);
   });
 });
@@ -590,7 +595,9 @@ describe('learning --clear', { timeout: 30_000 }, () => {
 // (D-ONE-LEARNING-LOCK, D-NO-STRAY-TREE, D-RESET-UNDER-LOCK)
 // ---------------------------------------------------------------------------
 
-describe('learning --reset', { timeout: 30_000 }, () => {
+describe('curation --reset', { timeout: 30_000 }, () => {
+  beforeEach(useMatchingInstall);
+
   it('removes .devflow/curation/ — entries, observations, the queue and its claim — and leaves the rest of .devflow/ alone', async () => {
     seedCorpus(root);
     seedQueue(root);
@@ -598,12 +605,12 @@ describe('learning --reset', { timeout: 30_000 }, () => {
     fs.mkdirSync(path.join(root, '.devflow', 'memory'));
     fs.writeFileSync(getPendingTurnsPath(root), '{"role":"user"}\n');
 
-    const run = await runLearning(['--reset']);
+    const run = await runCuration(['--reset']);
 
     expect(run.success).toBe('Reset complete — removed .devflow/curation/ state.');
     expect(run.exitCode).toBe(0);
     expect(queueFilesPresent(root)).toEqual([false, false, false]);
-    expect(fs.existsSync(learningPaths(root).learningDir)).toBe(false);
+    expect(fs.existsSync(curationPaths(root).curationDir)).toBe(false);
     expect(fs.readFileSync(path.join(root, '.devflow', 'config.json'), 'utf8')).toBe('{"features":{}}\n');
     expect(fs.existsSync(getPendingTurnsPath(root))).toBe(true);
   });
@@ -614,12 +621,12 @@ describe('learning --reset', { timeout: 30_000 }, () => {
     const abandoned = new Date(Date.now() - store.LOCK_STALE_MS - 60_000);
     fs.utimesSync(paths.lockDir, abandoned, abandoned);
 
-    const run = await runLearning(['--reset']);
+    const run = await runCuration(['--reset']);
 
     expect(run.error).toBe('');
     expect(run.success).toBe('Reset complete — removed .devflow/curation/ state.');
     expect(run.exitCode).toBe(0);
-    expect(fs.existsSync(paths.learningDir)).toBe(false);
+    expect(fs.existsSync(paths.curationDir)).toBe(false);
   });
 
   it('while another run holds the learning lock: exit 1 within the CLI\'s wait, nothing written', async () => {
@@ -629,28 +636,28 @@ describe('learning --reset', { timeout: 30_000 }, () => {
     const before = snapshotTree(root);
 
     const started = Date.now();
-    const run = await runLearning(['--reset']);
+    const run = await runCuration(['--reset']);
 
     expect(Date.now() - started).toBeLessThan(15_000);
-    expect(run.error).toBe('The learning store is busy: another run holds its lock. Nothing was reset; try again in a moment.');
+    expect(run.error).toBe('The curation store is busy: another run holds its lock. Nothing was reset; try again in a moment.');
     expect(run.success).toBe('');
     expect(run.exitCode).toBe(1);
     expect(snapshotTree(root)).toEqual(before);
   });
 
   it('when .devflow/curation is a symbolic link: exit 1, and nothing the link leads to is removed', async () => {
-    const { learningDir } = learningPaths(root);
+    const { curationDir } = curationPaths(root);
     const elsewhere = path.join(root, 'elsewhere');
     fs.mkdirSync(path.join(elsewhere, 'sub'), { recursive: true });
     fs.writeFileSync(path.join(elsewhere, 'notes.txt'), 'kept\n');
     fs.writeFileSync(path.join(elsewhere, 'sub', 'deep.txt'), 'kept\n');
     fs.mkdirSync(path.join(root, '.devflow'));
-    fs.symlinkSync(elsewhere, learningDir);
+    fs.symlinkSync(elsewhere, curationDir);
     const before = snapshotTree(elsewhere);
 
-    const run = await runLearning(['--reset']);
+    const run = await runCuration(['--reset']);
 
-    expect(run.error).toBe(`reset: ${learningDir} is a symbolic link, not a directory; nothing was changed`);
+    expect(run.error).toBe(`reset: ${curationDir} is a symbolic link, not a directory; nothing was changed`);
     expect(run.success).toBe('');
     expect(run.exitCode).toBe(1);
     expect(snapshotTree(elsewhere)).toEqual(before);
@@ -665,7 +672,7 @@ describe('learning --reset', { timeout: 30_000 }, () => {
     fs.symlinkSync(elsewhere, linkedDevflow);
     const before = snapshotTree(elsewhere);
 
-    const run = await runLearning(['--reset']);
+    const run = await runCuration(['--reset']);
 
     expect(run.error).toBe(`reset: ${linkedDevflow} is a symbolic link, not a directory; nothing was changed`);
     expect(run.success).toBe('');
@@ -674,9 +681,9 @@ describe('learning --reset', { timeout: 30_000 }, () => {
   });
 
   it('in a project that never had learning data: says so, exits 0 and creates nothing, neither .devflow/ nor .devflow/curation/', async () => {
-    const run = await runLearning(['--reset']);
+    const run = await runCuration(['--reset']);
 
-    expect(run.info).toBe('No learning data to reset.');
+    expect(run.info).toBe('No curation data to reset.');
     expect(run.success).toBe('');
     expect(run.error).toBe('');
     expect(run.exitCode).toBe(0);
@@ -685,12 +692,12 @@ describe('learning --reset', { timeout: 30_000 }, () => {
 
   it('a second reset finds nothing to reset: no contention error, and nothing created under .devflow/', async () => {
     seedCorpus(root);
-    await runLearning(['--reset']);
+    await runCuration(['--reset']);
 
-    const run = await runLearning(['--reset']);
+    const run = await runCuration(['--reset']);
 
     expect(run.error).toBe('');
-    expect(run.info).toBe('No learning data to reset.');
+    expect(run.info).toBe('No curation data to reset.');
     expect(run.exitCode).toBe(0);
     expect(fs.readdirSync(path.join(root, '.devflow'))).toEqual([]);
   });
@@ -700,7 +707,7 @@ describe('learning --reset', { timeout: 30_000 }, () => {
     seedCorpus(root);
     const before = snapshotTree(root);
 
-    const run = await runLearning(['--reset']);
+    const run = await runCuration(['--reset']);
 
     expect(run.warn).toBe('Could not resolve git root — reset not performed');
     expect(run.exitCode).toBe(0);
@@ -714,9 +721,9 @@ describe('learning --reset', { timeout: 30_000 }, () => {
 // claimed batch vanishes stops, which is the desired outcome of disabling.
 // ---------------------------------------------------------------------------
 
-describe('learning --disable drains the learning pending-turns queue', () => {
+describe('curation --disable drains the curation pending-turns queue', () => {
   /** The machine-wide switch, as the command left it. */
-  function readLearningSwitch(): unknown {
+  function readCurationSwitch(): unknown {
     // Both keys always agree after a toggle (the manifest mirror): one answer for both.
     const keys = readSwitchKeys(devflowDir);
     expect(keys.learning, 'the pre-rename copy equals the curation key').toBe(keys.curation);
@@ -732,42 +739,42 @@ describe('learning --disable drains the learning pending-turns queue', () => {
     fs.mkdirSync(path.join(root, '.devflow', 'memory'), { recursive: true });
     fs.writeFileSync(getPendingTurnsPath(root), '{"role":"user"}\n');
 
-    await runLearning(['--disable']);
+    await runCuration(['--disable']);
 
     expect(queueFilesPresent(root)).toEqual([false, false, false]);
-    expect(readLearningSwitch()).toBe(false);
+    expect(readCurationSwitch()).toBe(false);
     // The retired per-repo key is never written.
     expect(fs.existsSync(path.join(root, '.devflow', 'config.json'))).toBe(false);
     expect(fs.existsSync(getPendingTurnsPath(root))).toBe(true);
   });
 
   it('does not create a .disabled sentinel (the gate is the manifest)', async () => {
-    await runLearning(['--disable']);
+    await runCuration(['--disable']);
     expect(fs.existsSync(path.join(root, '.devflow', 'curation', '.disabled'))).toBe(false);
   });
 
   it('drains unconditionally — a leftover .worker.lock dir from an old install does not block it', async () => {
     fs.mkdirSync(path.join(root, '.devflow', 'dream', '.worker.lock'), { recursive: true });
-    await runLearning(['--disable']);
+    await runCuration(['--disable']);
     expect(queueFilesPresent(root).slice(0, 2)).toEqual([false, false]);
-    expect(readLearningSwitch()).toBe(false);
+    expect(readCurationSwitch()).toBe(false);
   });
 
   it('does not delete anything on --enable', async () => {
-    await runLearning(['--enable']);
+    await runCuration(['--enable']);
     expect(queueFilesPresent(root)).toEqual([true, true, true]);
-    expect(readLearningSwitch()).toBe(true);
+    expect(readCurationSwitch()).toBe(true);
   });
 
   it('switches learning off outside a git project too (the switch is not per-project)', async () => {
     vi.mocked(getLedgerRoot).mockResolvedValue(null);
-    await runLearning(['--disable']);
-    expect(readLearningSwitch()).toBe(false);
+    await runCuration(['--disable']);
+    expect(readCurationSwitch()).toBe(false);
   });
 
   it('drains the resolved git-root paths, not process.cwd()', async () => {
     vi.spyOn(process, 'cwd').mockReturnValue('/nonexistent-cwd-decoy-path');
-    await runLearning(['--disable']);
+    await runCuration(['--disable']);
     expect(queueFilesPresent(root).slice(0, 2)).toEqual([false, false]);
   });
 
@@ -785,12 +792,12 @@ describe('learning --disable drains the learning pending-turns queue', () => {
         fs.rmSync(path.join(root, linked), { recursive: true, force: true });
         fs.symlinkSync(outside, path.join(root, linked));
 
-        const run = await runLearning(['--disable']);
+        const run = await runCuration(['--disable']);
 
         expect(files.map(file => fs.existsSync(file)), 'nothing is deleted through the link').toEqual([true, true, true]);
         expect(run.warn).toContain(`${path.join(root, linked)} is a symbolic link`);
-        expect(readLearningSwitch()).toBe(false);
-        expect(run.success).toBe('Learning disabled in every project');
+        expect(readCurationSwitch()).toBe(false);
+        expect(run.success).toBe('Curation disabled in every project');
         expect(run.exitCode).toBe(0);
       } finally {
         fs.rmSync(outside, { recursive: true, force: true });
@@ -806,7 +813,7 @@ describe('learning --disable drains the learning pending-turns queue', () => {
 // exits 1 (D-CLI-NO-SYMLINK).
 // ---------------------------------------------------------------------------
 
-describe('learning --configure never writes the project config through a symbolic link (D-CLI-NO-SYMLINK)', () => {
+describe('curation --configure never writes the project config through a symbolic link (D-CLI-NO-SYMLINK)', () => {
   const KEEP = 'a file outside the project\n';
   let outside: string;
 
@@ -820,10 +827,10 @@ describe('learning --configure never writes the project config through a symboli
   });
 
   /** Answer the wizard: Sonnet, no debug logging, Project scope. */
-  async function configureProject(): Promise<LearningRun> {
+  async function configureProject(): Promise<CurationRun> {
     vi.mocked(p.select).mockResolvedValueOnce('sonnet').mockResolvedValueOnce('project');
     vi.mocked(p.confirm).mockResolvedValueOnce(false);
-    return runLearning(['--configure']);
+    return runCuration(['--configure']);
   }
 
   const LAYOUTS: ReadonlyArray<readonly [string, () => string]> = [
@@ -873,7 +880,7 @@ describe('learning --configure never writes the project config through a symboli
 // move is not an error; only --disable drains, each ledger folder that exists.
 // ---------------------------------------------------------------------------
 
-describe('learning --enable/--disable: the curation switch and the folder move (#529)', () => {
+describe('curation --enable/--disable: the curation switch and the folder move (#529)', () => {
   const OLD = (): string => path.join(root, '.devflow', 'learning');
   const NEW = (): string => path.join(root, '.devflow', 'curation');
   const queueIn = (dir: string): boolean[] =>
@@ -886,7 +893,7 @@ describe('learning --enable/--disable: the curation switch and the folder move (
       manifest.features = { ...manifest.features, ...before };
       fs.writeFileSync(path.join(devflowDir, 'manifest.json'), JSON.stringify(manifest));
 
-      await runLearning([flag]);
+      await runCuration([flag]);
 
       expect(readSwitchKeys(devflowDir)).toEqual({ curation: value, learning: value });
     });
@@ -896,7 +903,7 @@ describe('learning --enable/--disable: the curation switch and the folder move (
         const manifest = JSON.parse(fs.readFileSync(path.join(devflowDir, 'manifest.json'), 'utf-8')) as { features: Record<string, unknown> };
         manifest.features = { ...manifest.features, curation: !value, learning: value };
         fs.writeFileSync(path.join(devflowDir, 'manifest.json'), JSON.stringify(manifest));
-        await runLearning([flag]);
+        await runCuration([flag]);
         expect(readSwitchKeys(devflowDir)).toEqual({ curation: value, learning: value });
       }
     });
@@ -904,13 +911,13 @@ describe('learning --enable/--disable: the curation switch and the folder move (
     it('a toggle to the value both keys already hold leaves manifest.json byte-identical (D-NOOP-TOGGLE)', async () => {
       const file = path.join(devflowDir, 'manifest.json');
       const before = fs.readFileSync(file, 'utf-8');
-      await runLearning(['--enable']);
+      await runCuration(['--enable']);
       expect(fs.readFileSync(file, 'utf-8')).toBe(before);
     });
 
     it('writes the keys with no git root (the switch is not per-project)', async () => {
       vi.mocked(getLedgerRoot).mockResolvedValue(null);
-      await runLearning(['--disable']);
+      await runCuration(['--disable']);
       expect(readSwitchKeys(devflowDir)).toEqual({ curation: false, learning: false });
     });
   });
@@ -918,7 +925,7 @@ describe('learning --enable/--disable: the curation switch and the folder move (
   describe('under version skew the toggle records the switch and moves nothing', () => {
     it('--enable leaves the old folder where it was and prints the run-init hint', async () => {
       const old = seedOldFolder(root);
-      const run = await runLearning(['--enable']);
+      const run = await runCuration(['--enable']);
       expect(readSwitchKeys(devflowDir)).toEqual({ curation: true, learning: true });
       expect(fs.existsSync(old)).toBe(true);
       expect(fs.existsSync(NEW())).toBe(false);
@@ -928,19 +935,19 @@ describe('learning --enable/--disable: the curation switch and the folder move (
 
     it('--disable drains the old folder\'s queue, keeps its ledger, and moves nothing', async () => {
       const old = seedOldFolder(root, true);
-      const run = await runLearning(['--disable']);
+      const run = await runCuration(['--disable']);
       expect(readSwitchKeys(devflowDir)).toEqual({ curation: false, learning: false });
       expect(queueIn(old)).toEqual([false, false, false]);
       expect(fs.existsSync(path.join(old, 'decisions-ledger.jsonl'))).toBe(true);
       expect(fs.existsSync(NEW())).toBe(false);
-      expect(run.success).toBe('Learning disabled in every project');
+      expect(run.success).toBe('Curation disabled in every project');
     });
 
     it('--disable drains the queue of both folders when both exist', async () => {
       const old = seedOldFolder(root, true);
       fs.mkdirSync(NEW(), { recursive: true });
       seedQueue(root);
-      await runLearning(['--disable']);
+      await runCuration(['--disable']);
       expect(queueIn(old)).toEqual([false, false, false]);
       expect(queueFilesPresent(root)).toEqual([false, false, false]);
     });
@@ -953,19 +960,19 @@ describe('learning --enable/--disable: the curation switch and the folder move (
       const old = seedOldFolder(root);
       const queueBody = fs.readFileSync(path.join(old, '.pending-turns.jsonl'), 'utf-8');
 
-      const run = await runLearning(['--enable']);
+      const run = await runCuration(['--enable']);
 
       expect(fs.existsSync(old)).toBe(false);
       expect(fs.readFileSync(path.join(NEW(), '.pending-turns.jsonl'), 'utf-8')).toBe(queueBody);
       expect(fs.existsSync(path.join(NEW(), 'decisions-ledger.jsonl'))).toBe(true);
       expect(run.exitCode).toBe(0);
-      expect(run.success).toContain('Learning enabled');
+      expect(run.success).toContain('Curation enabled');
     });
 
     it('--disable moves the folder, then drains the queue in the folder it moved to', async () => {
       // The seeded folder holds only the pending queue (no claim), so the move is not deferred.
       const old = seedOldFolder(root);
-      await runLearning(['--disable']);
+      await runCuration(['--disable']);
       expect(fs.existsSync(old)).toBe(false);
       expect(queueIn(NEW())).toEqual([false, false, false]);
       expect(fs.existsSync(path.join(NEW(), 'decisions-ledger.jsonl'))).toBe(true);
@@ -977,7 +984,7 @@ describe('learning --enable/--disable: the curation switch and the folder move (
       const lock = holdMoveLock(devflowDir, root);
       const started = Date.now();
 
-      const run = await runLearning(['--enable']);
+      const run = await runCuration(['--enable']);
 
       expect(Date.now() - started, 'the toggle takes the lock with no wait').toBeLessThan(5000);
       expect(fs.existsSync(lock)).toBe(true);
@@ -991,13 +998,13 @@ describe('learning --enable/--disable: the curation switch and the folder move (
     it('--disable with a busy move still drains the old folder\'s queue', async () => {
       const old = seedOldFolder(root, true);
       holdMoveLock(devflowDir, root);
-      await runLearning(['--disable']);
+      await runCuration(['--disable']);
       expect(queueIn(old)).toEqual([false, false, false]);
       expect(fs.existsSync(path.join(old, 'decisions-ledger.jsonl'))).toBe(true);
     });
 
     it('with no old folder nothing is moved and no store is needed', async () => {
-      const run = await runLearning(['--enable']);
+      const run = await runCuration(['--enable']);
       expect(fs.existsSync(OLD())).toBe(false);
       expect(fs.existsSync(NEW())).toBe(false);
       expect(run.exitCode).toBe(0);
@@ -1008,7 +1015,7 @@ describe('learning --enable/--disable: the curation switch and the folder move (
       try {
         fs.mkdirSync(path.join(root, '.devflow'), { recursive: true });
         fs.symlinkSync(outside, OLD());
-        const run = await runLearning(['--enable']);
+        const run = await runCuration(['--enable']);
         expect(readSwitchKeys(devflowDir)).toEqual({ curation: true, learning: true });
         expect(run.warn).toContain('refused');
         expect(run.exitCode).toBe(0);
@@ -1026,14 +1033,14 @@ describe('learning --enable/--disable: the curation switch and the folder move (
 // folder is created only when the old name is absent.
 // ---------------------------------------------------------------------------
 
-describe('learning --configure with the old folder present (#529)', () => {
+describe('curation --configure with the old folder present (#529)', () => {
   const OLD = (): string => path.join(root, '.devflow', 'learning');
   const NEW = (): string => path.join(root, '.devflow', 'curation');
 
-  async function configure(scope: 'project' | 'global' = 'project'): Promise<LearningRun> {
+  async function configure(scope: 'project' | 'global' = 'project'): Promise<CurationRun> {
     vi.mocked(p.select).mockResolvedValueOnce('sonnet').mockResolvedValueOnce(scope);
     vi.mocked(p.confirm).mockResolvedValueOnce(false);
-    return runLearning(['--configure']);
+    return runCuration(['--configure']);
   }
 
   describe('with matching installed scripts', () => {
@@ -1126,15 +1133,394 @@ describe('learning --configure with the old folder present (#529)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// `devflow decisions` is not a registered command: the surface is `learning`.
+// The read-only commands before the move (TP-17, CLI half): when only the old folder
+// exists they print the HUD's pointer, or its refused line when the move left a marker
+// for this root. They never open the old ledger and never move it.
 // ---------------------------------------------------------------------------
 
-describe('devflow decisions is no longer a registered subcommand', () => {
-  it('learningCommand is registered under the "learning" name, not "decisions"', () => {
-    expect(learningCommand.name()).toBe('learning');
+const POINTER = 'Curation: open Claude Code in this project once, or run devflow init';
+const REFUSED = 'Curation: move refused, see the hook log';
+
+/** The refusal marker the shell writes for `dir` under the (test) home. */
+function markerFor(dir: string): string {
+  return path.join(os.homedir(), '.devflow', 'logs', `curation-move.${curationMoveMarkerKey(dir)}.skip`);
+}
+
+describe('curation --status/--list/--show with only the old folder (#529)', { timeout: 30_000 }, () => {
+  beforeEach(() => {
+    vi.spyOn(process, 'cwd').mockReturnValue(root);
+    fs.mkdirSync(path.dirname(markerFor(root)), { recursive: true });
+  });
+  afterEach(() => {
+    fs.rmSync(markerFor(root), { force: true });
   });
 
-  it('learningCommand does not carry "decisions" as an alias', () => {
-    expect(learningCommand.aliases()).not.toContain('decisions');
+  describe('--status', () => {
+    it('prints the machine switch, then the pointer, and moves and writes nothing', async () => {
+      seedOldFolder(root);
+      const before = snapshotTree(root);
+
+      const run = await runCuration(['--status']);
+
+      expect(run.info).toBe(`Curation: enabled\n${POINTER}`);
+      expect(run.exitCode).toBe(0);
+      expect(snapshotTree(root)).toEqual(before);
+    });
+
+    it('prints the refused line instead when a marker exists for this root', async () => {
+      seedOldFolder(root);
+      fs.writeFileSync(markerFor(root), '');
+      const before = snapshotTree(root);
+
+      const run = await runCuration(['--status']);
+
+      expect(run.info).toBe(`Curation: enabled\n${REFUSED}`);
+      expect(snapshotTree(root)).toEqual(before);
+    });
+
+    it('a marker for another root does not make this root refused', async () => {
+      seedOldFolder(root);
+      const other = path.join(root, 'elsewhere');
+      fs.writeFileSync(markerFor(other), '');
+      try {
+        expect((await runCuration(['--status'])).info).toBe(`Curation: enabled\n${POINTER}`);
+      } finally {
+        fs.rmSync(markerFor(other), { force: true });
+      }
+    });
+
+    it('prints neither line when the old folder is absent, whatever the marker says', async () => {
+      fs.writeFileSync(markerFor(root), '');
+      const run = await runCuration(['--status']);
+      expect(run.info).toContain('Entries: 0 active');
+      expect(run.info).not.toContain('move refused');
+      expect(run.info).not.toContain('open Claude Code');
+    });
+
+    it('reads the new folder and prints no pointer when both folders exist', async () => {
+      seedCorpus(root);
+      seedOldFolder(root);
+      const run = await runCuration(['--status']);
+      expect(run.info).toContain('Entries: 3 active');
+      expect(run.info).not.toContain('open Claude Code');
+    });
+  });
+
+  describe('--list', () => {
+    it('prints the pointer and no listing, and exits 0', async () => {
+      seedOldFolder(root);
+      const before = snapshotTree(root);
+
+      const run = await runCuration(['--list']);
+
+      expect(run.info).toBe(POINTER);
+      expect(run.stdout).toBe('');
+      expect(run.exitCode).toBe(0);
+      expect(snapshotTree(root)).toEqual(before);
+    });
+
+    it('prints the refused line when a marker exists for this root', async () => {
+      seedOldFolder(root);
+      fs.writeFileSync(markerFor(root), '');
+      expect((await runCuration(['--list'])).info).toBe(REFUSED);
+    });
+  });
+
+  describe('--show', () => {
+    it('prints the pointer as the refusal and exits 1', async () => {
+      seedOldFolder(root);
+      const before = snapshotTree(root);
+
+      const run = await runCuration(['--show', 'ADR-001']);
+
+      expect(run.error).toBe(POINTER);
+      expect(run.stdout).toBe('');
+      expect(run.exitCode).toBe(1);
+      expect(snapshotTree(root)).toEqual(before);
+    });
+
+    it('prints the refused line when a marker exists for this root', async () => {
+      seedOldFolder(root);
+      fs.writeFileSync(markerFor(root), '');
+      expect((await runCuration(['--show', 'ADR-001'])).error).toBe(REFUSED);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// --status shows each backup folder and its pending rows (TP-17, TP-19 support): the
+// rows of the pending, processing, private and overflow files that are not swept.
+// ---------------------------------------------------------------------------
+
+describe('curation --status shows the backup a move left (#529)', { timeout: 30_000 }, () => {
+  const STAMP = '20261017T020304Z-ab12cd34';
+  const backupPath = (suffix = STAMP): string => path.join(root, '.devflow', `learning.backup-${suffix}`);
+  const rows = (count: number): string => '{"role":"user"}\n'.repeat(count);
+
+  beforeEach(() => {
+    vi.spyOn(process, 'cwd').mockReturnValue(root);
+    seedCorpus(root);
+  });
+
+  function seedBackup(files: Record<string, string>, suffix = STAMP): string {
+    const dir = backupPath(suffix);
+    fs.mkdirSync(dir, { recursive: true });
+    for (const [name, body] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), body);
+    return dir;
+  }
+
+  it('prints nothing about a backup when there is none', async () => {
+    expect((await runCuration(['--status'])).info).not.toContain('Backup');
+  });
+
+  it('counts the unswept rows of the pending, processing, private and overflow files, and writes nothing', async () => {
+    const dir = seedBackup({
+      '.pending-turns.jsonl': rows(2),
+      '.pending-turns.processing': rows(1),
+      '.pending-turns.jsonl.merging-20261017T020304Z-00000001': rows(1),
+      '.pending-turns.processing.merging-20261017T020304Z-00000002': rows(1),
+      '.pending-turns.jsonl.overflow-20261017T020304Z-00000003': rows(3),
+      '.pending-turns.jsonl.swept-20261017T020304Z-00000004': rows(5),
+      '.pending-turns.processing.swept-20261017T020304Z-00000005': rows(4),
+      '.pending-turns.owner': '0123456789abcdef\n',
+      'decisions-ledger.jsonl': rows(9),
+    });
+    const before = snapshotTree(root);
+
+    const run = await runCuration(['--status']);
+
+    expect(run.info.split('\n').pop()).toBe(`Backup: ${dir}: 8 pending rows in the backup`);
+    expect(run.warn).toBe('');
+    expect(snapshotTree(root)).toEqual(before);
+  });
+
+  it('says 0 pending rows when every file in the backup is swept, so the delete step is allowed', async () => {
+    const dir = seedBackup({ '.pending-turns.jsonl.swept-20261017T020304Z-00000004': rows(5), 'decisions-ledger.jsonl': rows(2) });
+    expect((await runCuration(['--status'])).info.split('\n').pop()).toBe(`Backup: ${dir}: 0 pending rows in the backup`);
+  });
+
+  it('counts a trailing unfinished line as a pending row and skips blank lines', async () => {
+    const dir = seedBackup({ '.pending-turns.jsonl': `${rows(1)}\n   \n{"role":"us` });
+    expect((await runCuration(['--status'])).info.split('\n').pop()).toBe(`Backup: ${dir}: 2 pending rows in the backup`);
+  });
+
+  it('says "1 pending row" for one row', async () => {
+    const dir = seedBackup({ '.pending-turns.jsonl': rows(1) });
+    expect((await runCuration(['--status'])).info.split('\n').pop()).toBe(`Backup: ${dir}: 1 pending row in the backup`);
+  });
+
+  it('lists each backup folder in name order', async () => {
+    const second = seedBackup({ '.pending-turns.jsonl': rows(2) }, '20261018T000000Z-00000002');
+    const first = seedBackup({ '.pending-turns.jsonl': rows(1) }, '20261017T000000Z-00000001');
+    const lines = (await runCuration(['--status'])).info.split('\n');
+    expect(lines.slice(-2)).toEqual([
+      `Backup: ${first}: 1 pending row in the backup`,
+      `Backup: ${second}: 2 pending rows in the backup`,
+    ]);
+  });
+
+  it('does not follow a backup that is a symbolic link, and does not list it', async () => {
+    const outside = makeTmpDir();
+    try {
+      fs.writeFileSync(path.join(outside, '.pending-turns.jsonl'), rows(4));
+      fs.symlinkSync(outside, backupPath());
+      const run = await runCuration(['--status']);
+      expect(run.info).not.toContain('Backup');
+      expect(fs.readFileSync(path.join(outside, '.pending-turns.jsonl'), 'utf8')).toBe(rows(4));
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('does not read a queue file that is a symbolic link', async () => {
+    const outside = makeTmpDir();
+    try {
+      fs.writeFileSync(path.join(outside, 'queue'), rows(4));
+      const dir = seedBackup({});
+      fs.symlinkSync(path.join(outside, 'queue'), path.join(dir, '.pending-turns.jsonl'));
+      expect((await runCuration(['--status'])).info.split('\n').pop()).toBe(`Backup: ${dir}: 0 pending rows in the backup`);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('shows no backup line outside a git project', async () => {
+    seedBackup({ '.pending-turns.jsonl': rows(1) });
+    vi.mocked(getLedgerRoot).mockResolvedValue(null);
+    expect((await runCuration(['--status'])).info).toBe('Curation: enabled\nEntries: not in a git project');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The mutating commands move first (TP-17, CLI half): --restore, --clear, --reset and
+// --configure run the shared move before they write. A busy move prints a retry message
+// and writes nothing; installed scripts of another version refuse with the skew line.
+// --clear and --reset leave a backup in place.
+// ---------------------------------------------------------------------------
+
+describe('curation --restore/--clear/--reset move the old folder first (#529)', { timeout: 30_000 }, () => {
+  const OLD = (): string => path.join(root, '.devflow', 'learning');
+  const NEW = (): string => path.join(root, '.devflow', 'curation');
+
+  const WRITERS = [
+    ['--restore', ['--restore', 'PF-003'], 'restored'],
+    ['--clear', ['--clear'], 'cleared'],
+    ['--reset', ['--reset'], 'reset'],
+  ] as const;
+
+  describe('with matching installed scripts', () => {
+    beforeEach(useMatchingInstall);
+
+    it('--restore moves the folder, then restores the entry in the new folder', async () => {
+      seedOldFolder(root);
+
+      const run = await runCuration(['--restore', 'PF-003']);
+
+      expect(run.success).toBe('Restored PF-003 (Active); it is due for review again.');
+      expect(run.exitCode).toBe(0);
+      expect(fs.existsSync(OLD())).toBe(false);
+      const rowsNow = store.readJsonl(path.join(NEW(), 'decisions-ledger.jsonl')).rows;
+      expect(rowsNow.find(row => row.anchor_id === 'PF-003')?.decisions_status).toBe('Active');
+    });
+
+    it('--clear moves the folder, then clears the new folder and drains its queue', async () => {
+      seedOldFolder(root);
+
+      const run = await runCuration(['--clear']);
+
+      expect(run.success).toBe('Cleared 1 observation no entry uses and kept 3 that entries use; drained the curation queue.');
+      expect(run.exitCode).toBe(0);
+      expect(fs.existsSync(OLD())).toBe(false);
+      expect(fs.readFileSync(path.join(NEW(), 'decisions-log.jsonl'), 'utf8')).toBe(toJsonl(LOG.slice(0, 3)));
+      expect(fs.existsSync(path.join(NEW(), '.pending-turns.jsonl'))).toBe(false);
+    });
+
+    it('--reset moves the folder, then removes the new folder', async () => {
+      seedOldFolder(root);
+
+      const run = await runCuration(['--reset']);
+
+      expect(run.success).toBe('Reset complete — removed .devflow/curation/ state.');
+      expect(run.exitCode).toBe(0);
+      expect(fs.existsSync(OLD())).toBe(false);
+      expect(fs.existsSync(NEW())).toBe(false);
+    });
+
+    it.each(WRITERS)('%s with a busy move prints a retry message, writes nothing and exits 1', async (_flag, args, undone) => {
+      const old = seedOldFolder(root);
+      const lock = holdMoveLock(devflowDir, root);
+      const before = snapshotTree(root);
+
+      const started = Date.now();
+      const run = await runCuration(args);
+
+      expect(Date.now() - started, 'the move takes its lock with no wait').toBeLessThan(5000);
+      expect(run.error).toBe(`Another run is moving this project's curation data. Nothing was ${undone}; try again in a moment.`);
+      expect(run.success).toBe('');
+      expect(run.exitCode).toBe(1);
+      expect(fs.existsSync(lock)).toBe(true);
+      expect(fs.existsSync(old)).toBe(true);
+      expect(fs.existsSync(NEW())).toBe(false);
+      expect(snapshotTree(root)).toEqual(before);
+    });
+
+    it.each(WRITERS)('%s with a refused move (the old folder is a link) writes nothing and exits 1', async (_flag, args) => {
+      const outside = makeTmpDir();
+      try {
+        fs.mkdirSync(path.join(root, '.devflow'), { recursive: true });
+        fs.symlinkSync(outside, OLD());
+
+        const run = await runCuration(args);
+
+        expect(run.error).toContain('refused');
+        expect(run.error).toContain('Nothing was');
+        expect(run.exitCode).toBe(1);
+        expect(fs.readdirSync(outside)).toEqual([]);
+        expect(fs.existsSync(NEW())).toBe(false);
+      } finally {
+        fs.rmSync(outside, { recursive: true, force: true });
+      }
+    });
+
+    it.each(WRITERS)('%s with no old folder runs no move', async (_flag, args) => {
+      seedCorpus(root);
+      const lock = holdMoveLock(devflowDir, root);
+
+      const run = await runCuration(args);
+
+      expect(run.error, 'a held move lock is no obstacle where there is nothing to move').toBe('');
+      expect(fs.existsSync(lock)).toBe(true);
+    });
+
+    it.each([['--clear', ['--clear']], ['--reset', ['--reset']]] as const)('%s leaves a backup folder in place, untouched', async (_flag, args) => {
+      seedCorpus(root);
+      const backup = path.join(root, '.devflow', 'learning.backup-20261017T020304Z-ab12cd34');
+      fs.mkdirSync(backup, { recursive: true });
+      fs.writeFileSync(path.join(backup, '.pending-turns.jsonl'), '{"role":"user"}\n');
+      fs.writeFileSync(path.join(backup, 'decisions-ledger.jsonl'), toJsonl(LEDGER));
+      const before = snapshotTree(backup);
+
+      const run = await runCuration(args);
+
+      expect(run.exitCode).toBe(0);
+      expect(snapshotTree(backup)).toEqual(before);
+    });
+  });
+
+  describe('under version skew', () => {
+    it.each(WRITERS)('%s refuses with the skew line, writes nothing and exits 1', async (_flag, args) => {
+      seedOldFolder(root);
+      const before = snapshotTree(root);
+
+      const run = await runCuration(args);
+
+      expect(run.error).toContain('devflow init');
+      expect(run.error).toContain('2.0.0');
+      expect(run.success).toBe('');
+      expect(run.exitCode).toBe(1);
+      expect(snapshotTree(root)).toEqual(before);
+      expect(fs.existsSync(NEW())).toBe(false);
+    });
+
+    it.each(WRITERS)('%s refuses with no old folder too: the installed hooks would not read the new folder', async (_flag, args) => {
+      seedCorpus(root);
+      const before = snapshotTree(root);
+
+      const run = await runCuration(args);
+
+      expect(run.exitCode).toBe(1);
+      expect(snapshotTree(root)).toEqual(before);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The store's refusal for a project with no curation directory has one kind, on both
+// sides of the seam: the store answers it and the CLI branches on it.
+// ---------------------------------------------------------------------------
+
+describe('the no-curation-dir error kind', () => {
+  it('is what the store answers for a root with no .devflow/curation/, and what the CLI says in words', async () => {
+    const refused = store.clearUnreferenced(root, { timeoutMs: 100 });
+    expect(refused).toEqual({
+      ok: false,
+      error: { kind: 'no-curation-dir', message: `clear: no .devflow/curation/ under ${root} — run from the project root` },
+    });
+    useMatchingInstall();
+    expect((await runCuration(['--list'])).info).toBe('No curation data in this project yet.');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `devflow decisions` and `devflow learning` are not registered commands: the surface is `curation`.
+// ---------------------------------------------------------------------------
+
+describe('devflow decisions and devflow learning are not registered subcommands', () => {
+  it('curationCommand is registered under the "curation" name, not "decisions" or "learning"', () => {
+    expect(curationCommand.name()).toBe('curation');
+  });
+
+  it('curationCommand carries no alias: neither "decisions" nor "learning"', () => {
+    expect(curationCommand.aliases()).toEqual([]);
   });
 });

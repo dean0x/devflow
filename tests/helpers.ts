@@ -421,7 +421,7 @@ export function resolveAgentSource(name: string, root: string = ROOT): AgentSour
  *
  * @param root - Repository root to resolve paths against (default: ROOT).
  */
-export function resolveLearningOffSource(kind: CurationVariantKind, name: string, root: string = ROOT): string | null {
+export function resolveCurationOffSource(kind: CurationVariantKind, name: string, root: string = ROOT): string | null {
   try {
     return readFileSync(path.join(root, curationOffRelPath(kind, `${name}.md`)), 'utf-8')
   } catch {

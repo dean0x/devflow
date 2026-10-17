@@ -31,7 +31,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import * as path from 'path'
 
-import { CODE_AGENT_TYPES, codeSlugOf, parseFrontmatterSkills, resolveAgentSource, resolveLearningOffSource } from '../helpers.js'
+import { CODE_AGENT_TYPES, codeSlugOf, parseFrontmatterSkills, resolveAgentSource, resolveCurationOffSource } from '../helpers.js'
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..')
 const SKILLS_DIR = path.join(ROOT, 'src', 'assets', 'skills')
@@ -118,7 +118,7 @@ export function collectOffPreloadDefects(agentType: string, skills: readonly str
 }
 
 const on = (agentType: string): string => resolveAgentSource(codeSlugOf(agentType)).content
-const off = (agentType: string): string => resolveLearningOffSource('agents', codeSlugOf(agentType)) as string
+const off = (agentType: string): string => resolveCurationOffSource('agents', codeSlugOf(agentType)) as string
 const frontmatterOf = (text: string): string => text.slice(0, text.indexOf('\n---\n', 4))
 const bodyOf = (text: string): string => text.slice(text.indexOf('\n---\n', 4) + 5)
 

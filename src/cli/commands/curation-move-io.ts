@@ -16,9 +16,9 @@ import { getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
 import { getLedgerRoot } from '../../core/ledger-root.js';
 import { CURATION_DIR_NAME, LEGACY_NAMES } from '../../core/project-paths.js';
 import {
-  formatLearningStoreUnavailable,
-  loadLearningStore,
-  type LearningStoreModule,
+  formatCurationStoreUnavailable,
+  loadCurationStore,
+  type CurationStoreModule,
 } from '../../core/curation-store.js';
 import {
   moveLedgerRoot,
@@ -29,7 +29,7 @@ import {
 } from './init-curation-move.js';
 
 /** The store seam the move uses: the two operations, nothing else. */
-export type MoveStore = Pick<LearningStoreModule, 'moveLedger' | 'sweepLedgerBackups'>;
+export type MoveStore = Pick<CurationStoreModule, 'moveLedger' | 'sweepLedgerBackups'>;
 
 /** The real I/O of the per-project move, over `store`. */
 export function realProjectLedgerMoveIO(store: MoveStore): ProjectLedgerMoveIO {
@@ -102,9 +102,9 @@ export type SharedMoveResult =
  * with no wait. Never throws.
  */
 export async function runSharedMove(root: string): Promise<SharedMoveResult> {
-  const loaded = loadLearningStore();
+  const loaded = loadCurationStore();
   if (!loaded.ok) {
-    return { kind: 'unavailable', root, message: formatLearningStoreUnavailable(loaded.error) };
+    return { kind: 'unavailable', root, message: formatCurationStoreUnavailable(loaded.error) };
   }
   return moveLedgerRoot(
     root,

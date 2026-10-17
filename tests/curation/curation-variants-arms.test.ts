@@ -40,7 +40,7 @@ import {
   requireDistFile,
   requireDistFiles,
   resolveAgentSource,
-  resolveLearningOffSource,
+  resolveCurationOffSource,
   walkFiles,
 } from '../helpers.js'
 import {
@@ -227,7 +227,7 @@ describe('parity: each variant is the compiled host with its arms resolved (AC-1
   it('the curation-off file of every arm-bearing host equals the body with every arm resolved off', () => {
     const hosts = collectHosts().filter(h => CURATION_VARIANT_HOSTS.includes(`${h.kind}/${h.name}`))
     for (const host of hosts) {
-      const off = resolveLearningOffSource(host.kind, host.name)
+      const off = resolveCurationOffSource(host.kind, host.name)
       expect(off, `${host.kind}/${host.name} has a curation-off file`).not.toBeNull()
       expect(comparable(host, off as string), `${host.kind}/${host.name} curation-off`).toBe(expectedVariant(rawBody(host), 'off'))
     }
@@ -239,7 +239,7 @@ describe('parity: each variant is the compiled host with its arms resolved (AC-1
     const on = comparable(host, onFile(host))
     expect(on).toBe(expectedVariant(raw, 'on'))
     expect(`${on}\nstray`).not.toBe(expectedVariant(raw, 'on'))
-    const off = comparable(host, resolveLearningOffSource('commands', 'research') as string)
+    const off = comparable(host, resolveCurationOffSource('commands', 'research') as string)
     const leaked = off.replace('### Phase 1: Load Context (Orchestrator-Local)', '### Phase 1: Load Decisions (Orchestrator-Local)')
     expect(leaked).not.toBe(off)
     expect(leaked).not.toBe(expectedVariant(raw, 'off'))
@@ -385,17 +385,17 @@ describe('an off agent\'s frontmatter is its on frontmatter minus the preload li
   it('holds for the eight agents that preload the skill, and Skim\'s frontmatter is unchanged', () => {
     for (const name of AGENTS_WITH_PRELOAD) {
       const on = resolveAgentSource(name).content
-      const off = resolveLearningOffSource('agents', name) as string
+      const off = resolveCurationOffSource('agents', name) as string
       expect(frontmatterOf(on), `${name} on frontmatter`).toContain(`- ${PRELOAD}`)
       expect(collectFrontmatterDefects(name, on, off), name).toEqual([])
     }
     const skimOn = resolveAgentSource('skim').content
-    expect(frontmatterOf(resolveLearningOffSource('agents', 'skim') as string)).toBe(frontmatterOf(skimOn))
+    expect(frontmatterOf(resolveCurationOffSource('agents', 'skim') as string)).toBe(frontmatterOf(skimOn))
   })
 
   it('known-bad probes: a model change in the off frontmatter, and a kept preload, are reported', () => {
     const on = resolveAgentSource('triage').content
-    const off = resolveLearningOffSource('agents', 'triage') as string
+    const off = resolveCurationOffSource('agents', 'triage') as string
     expect(collectFrontmatterDefects('triage', on, off.replace(/^model: \w+$/m, 'model: haiku'))).toHaveLength(1)
     expect(collectFrontmatterDefects('triage', on, on)).toHaveLength(1)
   })
@@ -412,7 +412,7 @@ describe('settings blocks per variant (AC-138)', () => {
   })
 
   it('the curation-off build carries it in the 8 hosts with a consumer other than curation, and the other six sit in the on arm', () => {
-    const off = carrying(h => resolveLearningOffSource('commands', h))
+    const off = carrying(h => resolveCurationOffSource('commands', h))
     expect(off).toEqual([...SETTINGS_BLOCK_HOSTS_CURATION_OFF].sort())
     expect(off).toHaveLength(OFF_BLOCK_COUNT)
     const sixOnly = SETTINGS_BLOCK_HOSTS.filter(h => !(SETTINGS_BLOCK_HOSTS_CURATION_OFF as readonly string[]).includes(h))
@@ -420,13 +420,13 @@ describe('settings blocks per variant (AC-138)', () => {
     for (const h of sixOnly) {
       const group = collectArmGroups(rawBody({ kind: 'commands', name: h, source: '' })).find(g => g.on !== null && g.on.includes(SETTINGS_OPENING))
       expect(group, `${h}: the block sits inside a curation-on arm`).toBeDefined()
-      expect(resolveLearningOffSource('commands', h), `${h} (curation-off)`).not.toContain(SETTINGS_OPENING)
+      expect(resolveCurationOffSource('commands', h), `${h} (curation-off)`).not.toContain(SETTINGS_OPENING)
     }
   })
 
   it('each off host that keeps the block has a consumer left that is not curation', () => {
     for (const h of SETTINGS_BLOCK_HOSTS_CURATION_OFF) {
-      const text = resolveLearningOffSource('commands', h) as string
+      const text = resolveCurationOffSource('commands', h) as string
       const consumers = ['**Resolve the compliance lens**', '**Resolve `REVIEW_PUBLICATION` per worktree:**', 'take the settings line resolved above for that root']
       expect(consumers.some(c => text.includes(c)), `${h}: a surviving consumer of the settings line`).toBe(true)
     }
@@ -435,10 +435,10 @@ describe('settings blocks per variant (AC-138)', () => {
   it('the runtime gate and Skim\'s CURATION skip live in the curation-on build only', () => {
     for (const h of MDS_COMMAND_HOSTS) {
       expect(requireDistFile(`${h}.md`), `${h} (curation-on)`).toContain('When the settings line says `CURATION=off`')
-      expect(resolveLearningOffSource('commands', h), `${h} (curation-off)`).not.toContain('When the settings line says `CURATION=off`')
+      expect(resolveCurationOffSource('commands', h), `${h} (curation-off)`).not.toContain('When the settings line says `CURATION=off`')
     }
     expect(resolveAgentSource('skim').content).toContain('When `CURATION` is `off`, skip this step')
-    const skimOff = resolveLearningOffSource('agents', 'skim') as string
+    const skimOff = resolveCurationOffSource('agents', 'skim') as string
     expect(skimOff).not.toContain('CURATION')
     expect(skimOff).not.toContain('### Step 6: Project Knowledge')
     expect(skimOff).toContain('### Step 6: Generate Summary')
@@ -496,7 +496,7 @@ describe('no status-line anchor sits inside an arm, and no off arm repeats one (
   it('no curation-off file repeats an anchor line, so the sampler reading the on variant meets each once', () => {
     for (const { target, anchor } of collectSamplerAnchors()) {
       if (target === 'prReady') continue // a reference has no curation-off variant
-      const off = resolveLearningOffSource('commands', target === 'dynamicBuild' ? 'dynamic-build' : 'resolve')
+      const off = resolveCurationOffSource('commands', target === 'dynamicBuild' ? 'dynamic-build' : 'resolve')
       const copies = (off ?? '').split('\n').filter(l => l.includes(anchor)).length
       expect(copies, `"${anchor.slice(0, 50)}" in the curation-off build`).toBeLessThanOrEqual(1)
     }

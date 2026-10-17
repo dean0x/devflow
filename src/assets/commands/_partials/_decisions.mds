@@ -2,7 +2,7 @@ A partial: the decisions-index steps the knowledge-workflow commands and the
 dynamic commands share.
 
 D-DECISIONS-LEARNING-GATE: a decisions load is gated on the settings line's
-`CURATION`. Learning can be narrowed by the repository or the machine, and neither
+`CURATION`. Curation can be narrowed by the repository or the machine, and neither
 can turn it back on (D-FEATURES-NARROW-ONLY), so `decisions_gate()` is the one
 sentence every decisions host carries: with `CURATION=off` the step is skipped
 before it locates a ledger or reads an index. An unresolvable settings line keeps
@@ -12,8 +12,8 @@ gate. The gate reads the line the host's settings block resolved above; this
 partial imports nothing from `_settings.mds`. In a multi-worktree run the line is the start
 root's: the root the ledger is located from.
 
-D-LEARNING-VARIANTS: the gate guards a repository that narrows learning off on a machine
-where it is on. On a machine with learning off the decisions text is absent altogether: the
+D-LEARNING-VARIANTS: the gate guards a repository that narrows curation off on a machine
+where it is on. On a machine with curation off the decisions text is absent altogether: the
 whole of `decisions_load()` is a curation-on arm, so every expansion of it exists only in the
 curation-on build. `decisions_gate()` and `decisions_locate()` are leaves, reached only from
 inside an arm (`decisions_load()`, `authoring_decisions()`, or a host's own on arm), and carry
@@ -47,7 +47,7 @@ Line 1 is the checkout's toplevel, line 2 the common git directory. A git older 
 2. **The toplevel** — line 1, or on an older git the line after the echoed flag.
 3. **The start directory itself** — when the command failed or printed no absolute toplevel (outside a git repository).
 
-This is the rule the learning hooks apply, so you read the index the Curate agent writes.
+This is the rule the curation hooks apply, so you read the index the Curate agent writes.
 @end
 
 @define decisions_slice():

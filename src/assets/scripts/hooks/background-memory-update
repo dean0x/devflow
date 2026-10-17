@@ -152,7 +152,7 @@ OK_FILE="$MEMORY_DIR/.last-refresh-ok"
 
 # --- Re-check the memory switch at runtime (defense-in-depth: the feature may
 # have been disabled since spawn, or narrowed by a checkout that now carries a
-# `features.memory: false`). Same helper as every other memory/learning gate
+# `features.memory: false`). Same helper as every other memory/curation gate
 # (D-FEATURES-NARROW-ONLY, see queue-append).
 source "$SCRIPT_DIR/queue-append" || { echo "background-memory-update: failed to source queue-append" >&2; exit 1; }
 queue_read_gates "$DEVFLOW_MANIFEST" "$PROJECT_ROOT"

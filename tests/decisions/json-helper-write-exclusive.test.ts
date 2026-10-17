@@ -12,9 +12,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { JSON_HELPER, requireLearningStore } from './learning-fixtures.js';
+import { JSON_HELPER, requireCurationStore } from './curation-fixtures.js';
 
-const store = requireLearningStore();
+const store = requireCurationStore();
 
 describe('json-helper writes only through the learning store', () => {
   it('exports no writer of its own', () => {

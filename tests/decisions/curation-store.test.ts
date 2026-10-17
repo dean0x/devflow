@@ -1,6 +1,6 @@
-// tests/decisions/learning-store.test.ts
+// tests/decisions/curation-store.test.ts
 //
-// Tests for src/assets/scripts/hooks/lib/curation-store.cjs — the v2 learning
+// Tests for src/assets/scripts/hooks/lib/curation-store.cjs — the v2 curation
 // store: frozen constants, the one status list (and its TypeScript mirror),
 // strict JSONL reads with quarantine, the atomic writers, the lock wrapper,
 // observation validation, the ledger projection, content history, the pre-v2
@@ -26,23 +26,23 @@ import {
   daysAgoIso,
   git,
   initGitRepo,
-  learningPaths,
+  curationPaths,
   makeV1LedgerRow,
   makeV1LogRow,
   makeV2LedgerRow,
   makeV2LogRow,
-  requireLearningStore,
+  requireCurationStore,
   runJsonHelper,
   runJsonHelperBounded,
-  seedLearningTree,
+  seedCurationTree,
   snapshotTree,
   toJsonl,
   type Row,
   type ValidationResult,
-} from './learning-fixtures.js';
+} from './curation-fixtures.js';
 import { FIFO_RUN_BOUND_MS, FIFO_TEST_TIMEOUT_MS, makeFifo } from '../shell-hooks-helpers.js';
 
-const store = requireLearningStore();
+const store = requireCurationStore();
 
 const RENDER_DECISIONS = path.join(ROOT, 'src/assets/scripts/hooks/lib/render-decisions.cjs');
 
@@ -168,7 +168,7 @@ describe('the status list is one list across the hooks and TypeScript', () => {
 
 describe('readJsonl (D-QUARANTINE-MALFORMED)', () => {
   let tmp: string;
-  beforeEach(() => { tmp = makeTmp('learning-store-jsonl-'); });
+  beforeEach(() => { tmp = makeTmp('curation-store-jsonl-'); });
   afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
   it('reports a missing file as missing with no rows', () => {
@@ -211,8 +211,8 @@ describe('readJsonl (D-QUARANTINE-MALFORMED)', () => {
 });
 
 describe('rejectedPathFor', () => {
-  it('names the sibling .rejected.jsonl of each learning file', () => {
-    const p = learningPaths('/repo');
+  it('names the sibling .rejected.jsonl of each curation file', () => {
+    const p = curationPaths('/repo');
     expect(store.rejectedPathFor(p.log)).toBe('/repo/.devflow/curation/decisions-log.rejected.jsonl');
     expect(store.rejectedPathFor(p.ledger)).toBe('/repo/.devflow/curation/decisions-ledger.rejected.jsonl');
     expect(store.rejectedPathFor(p.archive)).toBe('/repo/.devflow/curation/decisions-log.archive.rejected.jsonl');
@@ -224,7 +224,7 @@ describe('quarantine', () => {
   let tmp: string;
   let file: string;
   beforeEach(() => {
-    tmp = makeTmp('learning-store-quarantine-');
+    tmp = makeTmp('curation-store-quarantine-');
     file = path.join(tmp, 'decisions-log.jsonl');
   });
   afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
@@ -278,7 +278,7 @@ describe('quarantine', () => {
 
 describe('atomic writers', () => {
   let tmp: string;
-  beforeEach(() => { tmp = makeTmp('learning-store-writers-'); });
+  beforeEach(() => { tmp = makeTmp('curation-store-writers-'); });
   afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
   it('writeFileAtomic writes and overwrites the target and leaves no temp file', () => {
@@ -319,34 +319,34 @@ describe('atomic writers', () => {
 // Locking
 // ---------------------------------------------------------------------------
 
-describe('hasLearningDir', () => {
+describe('hasCurationDir', () => {
   let tmp: string;
-  beforeEach(() => { tmp = makeTmp('learning-store-hasdir-'); });
+  beforeEach(() => { tmp = makeTmp('curation-store-hasdir-'); });
   afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
   it('is true only when .devflow/curation is a directory', () => {
-    expect(store.hasLearningDir(tmp)).toBe(false);
+    expect(store.hasCurationDir(tmp)).toBe(false);
     fs.mkdirSync(path.join(tmp, '.devflow'));
     fs.writeFileSync(path.join(tmp, '.devflow', 'curation'), 'a file, not a directory');
-    expect(store.hasLearningDir(tmp)).toBe(false);
+    expect(store.hasCurationDir(tmp)).toBe(false);
     fs.rmSync(path.join(tmp, '.devflow', 'curation'));
     fs.mkdirSync(path.join(tmp, '.devflow', 'curation'));
-    expect(store.hasLearningDir(tmp)).toBe(true);
+    expect(store.hasCurationDir(tmp)).toBe(true);
   });
 });
 
 describe('withDecisionsLock (D-ONE-LEARNING-LOCK, D-NO-STRAY-TREE)', () => {
   let tmp: string;
-  beforeEach(() => { tmp = makeTmp('learning-store-lock-'); });
+  beforeEach(() => { tmp = makeTmp('curation-store-lock-'); });
   afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
-  it('refuses with no-learning-dir and creates nothing in a bare directory', () => {
+  it('refuses with no-curation-dir and creates nothing in a bare directory', () => {
     let ran = false;
     const result = store.withDecisionsLock('put-observation', tmp, () => { ran = true; return { ok: true, value: 1 }; });
     expect(result).toEqual({
       ok: false,
       error: {
-        kind: 'no-learning-dir',
+        kind: 'no-curation-dir',
         message: `put-observation: no .devflow/curation/ under ${tmp} — run from the project root`,
       },
     });
@@ -354,7 +354,7 @@ describe('withDecisionsLock (D-ONE-LEARNING-LOCK, D-NO-STRAY-TREE)', () => {
     expect(fs.readdirSync(tmp)).toEqual([]);
   });
 
-  it('creates nothing under an existing .devflow that has no learning directory', () => {
+  it('creates nothing under an existing .devflow that has no curation directory', () => {
     fs.mkdirSync(path.join(tmp, '.devflow'));
     const result = store.withDecisionsLock('list', tmp, () => ({ ok: true, value: 1 }));
     expect(result.ok).toBe(false);
@@ -362,7 +362,7 @@ describe('withDecisionsLock (D-ONE-LEARNING-LOCK, D-NO-STRAY-TREE)', () => {
   });
 
   it('reports busy when another holder keeps the lock, and leaves that lock in place', () => {
-    const { lockDir } = seedLearningTree(tmp);
+    const { lockDir } = seedCurationTree(tmp);
     fs.mkdirSync(lockDir);
     let ran = false;
     const result = store.withDecisionsLock('claim-due', tmp, () => { ran = true; return { ok: true, value: 1 }; }, { timeoutMs: 0 });
@@ -376,7 +376,7 @@ describe('withDecisionsLock (D-ONE-LEARNING-LOCK, D-NO-STRAY-TREE)', () => {
   });
 
   it('runs fn while holding the lock and returns its Result unchanged', () => {
-    const { lockDir } = seedLearningTree(tmp);
+    const { lockDir } = seedCurationTree(tmp);
     const value = { written: true };
     const result = store.withDecisionsLock('list', tmp, () => {
       expect(fs.existsSync(lockDir)).toBe(true);
@@ -387,21 +387,21 @@ describe('withDecisionsLock (D-ONE-LEARNING-LOCK, D-NO-STRAY-TREE)', () => {
   });
 
   it('passes an error Result from fn through and releases the lock', () => {
-    const { lockDir } = seedLearningTree(tmp);
+    const { lockDir } = seedCurationTree(tmp);
     const failure = { ok: false as const, error: { kind: 'not-found', message: 'show: no such entry' } };
     expect(store.withDecisionsLock('show', tmp, () => failure)).toEqual(failure);
     expect(fs.existsSync(lockDir)).toBe(false);
   });
 
   it('releases the lock when fn throws, and the throw reaches the caller', () => {
-    const { lockDir } = seedLearningTree(tmp);
+    const { lockDir } = seedCurationTree(tmp);
     expect(() => store.withDecisionsLock('refresh-anchor', tmp, () => { throw new Error('boom'); })).toThrow('boom');
     expect(fs.existsSync(lockDir)).toBe(false);
     expect(store.withDecisionsLock('refresh-anchor', tmp, () => ({ ok: true, value: 'again' }))).toEqual({ ok: true, value: 'again' });
   });
 
   it('rejects a fn that returns something other than a Result, and still releases the lock', () => {
-    const { lockDir } = seedLearningTree(tmp);
+    const { lockDir } = seedCurationTree(tmp);
     const notAResult = (() => 42) as unknown as () => { ok: true; value: number };
     expect(() => store.withDecisionsLock('list', tmp, notAResult)).toThrow(/Result/);
     expect(fs.existsSync(lockDir)).toBe(false);
@@ -409,21 +409,21 @@ describe('withDecisionsLock (D-ONE-LEARNING-LOCK, D-NO-STRAY-TREE)', () => {
 });
 
 // A repository can commit .devflow, or .devflow/curation, as a symbolic link to a
-// folder elsewhere on the machine. Every learning writer refuses such a tree in the
+// folder elsewhere on the machine. Every curation writer refuses such a tree in the
 // lock wrapper, before it takes the lock, and the claim heartbeat leaves it alone:
 // nothing in the folder the link names is created, changed, moved or removed, its
 // mtimes included.
-describe('a learning tree reached through a symbolic link (D-NO-LINKED-TREE)', { timeout: 60_000 }, () => {
+describe('a curation tree reached through a symbolic link (D-NO-LINKED-TREE)', { timeout: 60_000 }, () => {
   const TOKEN = 'aaaaaaaaaaaaaaaa';
   let tmp: string;
   let elsewhere: string;
   beforeEach(() => {
-    tmp = makeTmp('learning-store-linked-');
+    tmp = makeTmp('curation-store-linked-');
     elsewhere = path.join(tmp, 'elsewhere');
   });
   afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
-  /** A learning tree in `dir` with an entry, an observation, a queue, and a claim and its owner. */
+  /** A curation tree in `dir` with an entry, an observation, a queue, and a claim and its owner. */
   function seedTreeIn(dir: string): void {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'decisions-log.jsonl'), toJsonl([makeV2LogRow(), makeV2LogRow({ id: 'obs_store_two' })]));
@@ -476,7 +476,7 @@ describe('a learning tree reached through a symbolic link (D-NO-LINKED-TREE)', {
 
   const refusal = (op: string, link: string): string => `${op}: ${link} is a symbolic link, not a directory; nothing was changed`;
 
-  /** Every learning op that writes, as the Curate agent runs it. */
+  /** Every curation op that writes, as the Curate agent runs it. */
   const WRITER_RUNS: ReadonlyArray<{ args: readonly string[]; input?: string }> = [
     {
       args: ['put-observation', '--create'],
@@ -517,7 +517,7 @@ describe('a learning tree reached through a symbolic link (D-NO-LINKED-TREE)', {
       expect(fingerprint(elsewhere)).toEqual(before);
     });
 
-    it(`every learning op that writes refuses a ${label} that is a symbolic link, and leaves the folder it names untouched`, () => {
+    it(`every curation op that writes refuses a ${label} that is a symbolic link, and leaves the folder it names untouched`, () => {
       const link = linkTree(which);
       backdate(elsewhere);
       const before = fingerprint(elsewhere);
@@ -537,26 +537,26 @@ describe('a learning tree reached through a symbolic link (D-NO-LINKED-TREE)', {
       const render = spawnSync(process.execPath, [RENDER_DECISIONS, 'render', tmp], { cwd: tmp, env: GIT_ENV, encoding: 'utf8' });
       expect({ code: render.status, stderr: render.stderr }).toEqual({ code: 1, stderr: `${refusal('render-decisions', link)}\n` });
       expect(store.clearUnreferenced(tmp)).toEqual({ ok: false, error: { kind: 'not-a-directory', message: refusal('clear', link) } });
-      expect(store.resetLearning(tmp, { timeoutMs: 0 })).toEqual({ ok: false, error: { kind: 'not-a-directory', message: refusal('reset', link) } });
+      expect(store.resetCuration(tmp, { timeoutMs: 0 })).toEqual({ ok: false, error: { kind: 'not-a-directory', message: refusal('reset', link) } });
       expect(store.touchClaim(tmp)).toEqual({ ok: true, value: { touched: false } });
       expect(fingerprint(elsewhere)).toEqual(before);
     });
   }
 });
 
-// A repository can commit any learning file as a symbolic link to a file elsewhere
-// on the machine. The store reads a learning file only when the file is not itself a
+// A repository can commit any curation file as a symbolic link to a file elsewhere
+// on the machine. The store reads a curation file only when the file is not itself a
 // link: a linked log, ledger, archive or history reads as absent, so list and show
-// print nothing from it, and no write copies its lines into the project's learning
+// print nothing from it, and no write copies its lines into the project's curation
 // folder, whether by rewriting the file, quarantining its malformed lines, rendering
 // or the one-time pre-v2 backup. The file the link names is never changed.
-describe('a learning file that is a symbolic link reads as absent (D-NO-LINKED-READ)', () => {
+describe('a curation file that is a symbolic link reads as absent (D-NO-LINKED-READ)', () => {
   // A made-up marker standing in for the linked file's content.
   const MARKER = 'made-up-marker-7f3e2b';
   let tmp: string;
   let outside: string;
   beforeEach(() => {
-    tmp = makeTmp('learning-store-linked-file-');
+    tmp = makeTmp('curation-store-linked-file-');
     outside = path.join(tmp, 'outside');
     fs.mkdirSync(outside);
   });
@@ -582,7 +582,7 @@ describe('a learning file that is a symbolic link reads as absent (D-NO-LINKED-R
   const rowsWithMarker = (rows: readonly Row[]): string => `${toJsonl(rows)}{${MARKER}\n`;
 
   it('readJsonl reads a linked file as missing, and leaves the file it names as it was', () => {
-    const { log } = seedLearningTree(tmp);
+    const { log } = seedCurationTree(tmp);
     const target = linkToOutside(log, rowsWithMarker([makeV2LogRow({ title: MARKER })]));
     const before = fs.readFileSync(target, 'utf8');
 
@@ -591,7 +591,7 @@ describe('a learning file that is a symbolic link reads as absent (D-NO-LINKED-R
   });
 
   it('list prints nothing from a linked ledger or log', () => {
-    const p = seedLearningTree(tmp);
+    const p = seedCurationTree(tmp);
     linkToOutside(p.ledger, rowsWithMarker([makeV2LedgerRow({ title: MARKER })]));
     linkToOutside(p.log, rowsWithMarker([makeV2LogRow({ id: 'obs_store_two', title: MARKER })]));
 
@@ -605,7 +605,7 @@ describe('a learning file that is a symbolic link reads as absent (D-NO-LINKED-R
   });
 
   it('show prints nothing from a linked log or history', () => {
-    const p = seedLearningTree(tmp, { ledger: [makeV2LedgerRow()] });
+    const p = seedCurationTree(tmp, { ledger: [makeV2LedgerRow()] });
     linkToOutside(p.log, rowsWithMarker([makeV2LogRow({ rule: MARKER })]));
     linkToOutside(p.history, rowsWithMarker([{ id: 'obs_store_one', at: daysAgoIso(1), ledger: [], log: makeV2LogRow({ rule: MARKER }) }]));
 
@@ -620,7 +620,7 @@ describe('a learning file that is a symbolic link reads as absent (D-NO-LINKED-R
   });
 
   it('a put copies no row or malformed line of a linked log into the project', () => {
-    const p = seedLearningTree(tmp, { ledger: [] });
+    const p = seedCurationTree(tmp, { ledger: [] });
     const target = linkToOutside(p.log, rowsWithMarker([makeV2LogRow({ id: 'obs_store_two', title: MARKER })]));
     const before = fs.readFileSync(target, 'utf8');
 
@@ -631,12 +631,12 @@ describe('a learning file that is a symbolic link reads as absent (D-NO-LINKED-R
 
     expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(fs.readFileSync(target, 'utf8'), 'the file the link names is byte-identical').toBe(before);
-    expect(filesHoldingMarker(p.learningDir), 'nothing of it is rewritten or quarantined into the learning folder').toEqual([]);
+    expect(filesHoldingMarker(p.curationDir), 'nothing of it is rewritten or quarantined into the curation folder').toEqual([]);
     expect(store.readJsonl(p.log).rows.map(row => row.id), 'the log holds the new observation alone').toEqual(['obs_store_three']);
   });
 
   it('assigning an anchor copies no row or malformed line of a linked ledger into the project', () => {
-    const p = seedLearningTree(tmp, { log: [makeV2LogRow({ id: 'obs_store_two' })] });
+    const p = seedCurationTree(tmp, { log: [makeV2LogRow({ id: 'obs_store_two' })] });
     const target = linkToOutside(p.ledger, rowsWithMarker([makeV2LedgerRow({ title: MARKER })]));
     const before = fs.readFileSync(target, 'utf8');
 
@@ -644,12 +644,12 @@ describe('a learning file that is a symbolic link reads as absent (D-NO-LINKED-R
 
     expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(fs.readFileSync(target, 'utf8'), 'the file the link names is byte-identical').toBe(before);
-    expect(filesHoldingMarker(p.learningDir), 'nothing of it is rewritten, quarantined or rendered into the learning folder').toEqual([]);
+    expect(filesHoldingMarker(p.curationDir), 'nothing of it is rewritten, quarantined or rendered into the curation folder').toEqual([]);
     expect(store.readJsonl(p.ledger).rows.map(row => row.anchor_id), 'the ledger holds the new entry alone').toEqual(['ADR-001']);
   });
 
   it('a history append copies no record or malformed line of a linked history into the project', () => {
-    const p = seedLearningTree(tmp);
+    const p = seedCurationTree(tmp);
     const outsideRecord = { id: 'obs_other', at: daysAgoIso(1), ledger: [], log: makeV2LogRow({ id: 'obs_other', title: MARKER }) };
     const target = linkToOutside(p.history, rowsWithMarker([outsideRecord]));
     const before = fs.readFileSync(target, 'utf8');
@@ -657,13 +657,13 @@ describe('a learning file that is a symbolic link reads as absent (D-NO-LINKED-R
     expect(store.appendHistory(tmp, { id: 'obs_store_one', ledger: [], log: makeV2LogRow() }, { now: FIXTURE_NOW })).toBe(1);
 
     expect(fs.readFileSync(target, 'utf8'), 'the file the link names is byte-identical').toBe(before);
-    expect(filesHoldingMarker(p.learningDir), 'nothing of it is rewritten or quarantined into the learning folder').toEqual([]);
+    expect(filesHoldingMarker(p.curationDir), 'nothing of it is rewritten or quarantined into the curation folder').toEqual([]);
     expect(store.readJsonl(p.history).rows.map(row => row.id), 'the history holds the new record alone').toEqual(['obs_store_one']);
   });
 
   it('rotation never takes the lines of a linked archive for rows already archived, so it drops no due row', () => {
     const due = makeV2LogRow({ id: 'obs_store_idle', first_seen: daysAgoIso(60), last_seen: daysAgoIso(60) });
-    const p = seedLearningTree(tmp, { log: [due], ledger: [] });
+    const p = seedCurationTree(tmp, { log: [due], ledger: [] });
     // The linked file holds the due row byte for byte, as though it were already archived.
     const target = linkToOutside(p.archive, toJsonl([due]));
     const before = fs.readFileSync(target, 'utf8');
@@ -678,7 +678,7 @@ describe('a learning file that is a symbolic link reads as absent (D-NO-LINKED-R
 
   for (const which of ['log', 'ledger', 'archive'] as const) {
     it(`the one-time pre-v2 backup copies no linked ${which}`, () => {
-      const p = seedLearningTree(tmp, {
+      const p = seedCurationTree(tmp, {
         log: which === 'log' ? undefined : [makeV1LogRow()],
         ledger: which === 'ledger' ? undefined : [makeV1LedgerRow()],
         archive: which === 'archive' ? undefined : [makeV1LogRow({ id: 'obs_old' })],
@@ -692,30 +692,30 @@ describe('a learning file that is a symbolic link reads as absent (D-NO-LINKED-R
         [p.log, p.ledger, p.archive].filter(file => file !== p[which]).map(preV2),
       );
       expect(fs.existsSync(preV2(p[which])), 'no copy is made of the linked file').toBe(false);
-      expect(filesHoldingMarker(p.learningDir)).toEqual([]);
+      expect(filesHoldingMarker(p.curationDir)).toEqual([]);
       expect(fs.readFileSync(target, 'utf8')).toContain(MARKER);
     });
   }
 });
 
-// A FIFO or a directory can stand where a learning file belongs. A learning file is
+// A FIFO or a directory can stand where a curation file belongs. A curation file is
 // read only when lstat shows a regular file and fstat, after the open, confirms it:
 // anything else reads as absent, and no read waits on a FIFO. Each run that meets a
 // FIFO is bounded, so one that waits is killed at the bound and fails the test.
-describe('a learning file that is not a regular file reads as absent (D-NO-LINKED-READ)', () => {
+describe('a curation file that is not a regular file reads as absent (D-NO-LINKED-READ)', () => {
   let tmp: string;
-  beforeEach(() => { tmp = makeTmp('learning-store-not-regular-'); });
+  beforeEach(() => { tmp = makeTmp('curation-store-not-regular-'); });
   afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
   it('readJsonl reads a directory as missing', () => {
-    const { log } = seedLearningTree(tmp);
+    const { log } = seedCurationTree(tmp);
     fs.mkdirSync(log);
 
     expect(store.readJsonl(log)).toEqual({ rows: [], rejected: [], missing: true });
   });
 
   it('list returns at once with a FIFO at the ledger path and a directory at the log path, reading both as absent', { timeout: FIFO_TEST_TIMEOUT_MS }, () => {
-    const p = seedLearningTree(tmp);
+    const p = seedCurationTree(tmp);
     makeFifo(p.ledger);
     fs.mkdirSync(p.log);
 
@@ -732,17 +732,17 @@ describe('a learning file that is not a regular file reads as absent (D-NO-LINKE
 // Reading state and the ledger registry
 // ---------------------------------------------------------------------------
 
-describe('readLearningState', () => {
+describe('readCurationState', () => {
   let tmp: string;
-  beforeEach(() => { tmp = makeTmp('learning-store-state-'); });
+  beforeEach(() => { tmp = makeTmp('curation-store-state-'); });
   afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
   it('returns both files\' rows and their malformed lines, and writes nothing', () => {
-    const paths = seedLearningTree(tmp, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()] });
+    const paths = seedCurationTree(tmp, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()] });
     fs.appendFileSync(paths.ledger, '{not a row\n');
     const before = snapshotTree(tmp);
 
-    const state = store.readLearningState(tmp);
+    const state = store.readCurationState(tmp);
 
     expect(state.ledgerRows).toEqual([makeV2LedgerRow()]);
     expect(state.logRows).toEqual([makeV2LogRow()]);
@@ -751,7 +751,7 @@ describe('readLearningState', () => {
   });
 
   it('reads an absent tree as empty without creating it', () => {
-    expect(store.readLearningState(tmp)).toEqual({ ledgerRows: [], logRows: [], rejected: { ledger: [], log: [] } });
+    expect(store.readCurationState(tmp)).toEqual({ ledgerRows: [], logRows: [], rejected: { ledger: [], log: [] } });
     expect(fs.readdirSync(tmp)).toEqual([]);
   });
 });
@@ -790,12 +790,12 @@ function createInput(overrides: Row = {}): Row {
   const base: Row = {
     id: 'obs_new_entry',
     type: 'pitfall',
-    title: 'Writers refuse a missing learning tree',
-    rule: 'A learning writer refuses when the learning directory is absent and never creates it.',
+    title: 'Writers refuse a missing curation tree',
+    rule: 'A curation writer refuses when the curation directory is absent and never creates it.',
     why: 'Run from the wrong directory, a writer that creates the tree writes a ledger nobody reads.',
     scope: ['area:learning', 'src/**'],
     provenance: 'learning v2 design review',
-    evidence: ['an empty nested learning tree appeared in the main checkout'],
+    evidence: ['an empty nested curation tree appeared in the main checkout'],
   };
   const row: Row = { ...base, ...overrides };
   for (const [key, value] of Object.entries(overrides)) if (value === undefined) delete row[key];
@@ -1127,7 +1127,7 @@ describe('validateObservationInput: every violation at once', () => {
 describe('gitScopeMatcher', { timeout: 30_000 }, () => {
   let tmp: string;
   beforeEach(() => {
-    tmp = makeTmp('learning-store-scope-');
+    tmp = makeTmp('curation-store-scope-');
     initGitRepo(tmp, {
       '.gitignore': 'ignored/\n',
       'src/a.ts': 'export {};\n',
@@ -1162,7 +1162,7 @@ describe('gitScopeMatcher', { timeout: 30_000 }, () => {
   });
 
   it('matches nothing outside a git repository', () => {
-    const plain = makeTmp('learning-store-scope-plain-');
+    const plain = makeTmp('curation-store-scope-plain-');
     try {
       fs.writeFileSync(path.join(plain, 'a.ts'), 'x\n');
       expect(store.gitScopeMatcher(plain)('*.ts')).toBe(false);
@@ -1172,7 +1172,7 @@ describe('gitScopeMatcher', { timeout: 30_000 }, () => {
   });
 
   it('lists tracked files without running the repository\'s core.fsmonitor hook (D-NO-FSMONITOR)', () => {
-    const outside = makeTmp('learning-store-fsmonitor-');
+    const outside = makeTmp('curation-store-fsmonitor-');
     try {
       const marker = path.join(outside, 'fsmonitor-ran');
       const hook = path.join(outside, 'fsmonitor-hook.sh');
@@ -1328,8 +1328,8 @@ describe('toV2Counters', () => {
 describe('content history (D-CONTENT-HISTORY)', () => {
   let tmp: string;
   beforeEach(() => {
-    tmp = makeTmp('learning-store-history-');
-    seedLearningTree(tmp);
+    tmp = makeTmp('curation-store-history-');
+    seedCurationTree(tmp);
   });
   afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
@@ -1371,7 +1371,7 @@ describe('content history (D-CONTENT-HISTORY)', () => {
   });
 
   it('quarantines a malformed history line before rewriting the file', () => {
-    const { history } = learningPaths(tmp);
+    const { history } = curationPaths(tmp);
     fs.writeFileSync(history, '{torn line\n');
     store.appendHistory(tmp, { id: 'obs_alpha', ledger: [], log: null }, { now: FIXTURE_NOW });
     expect(store.readJsonl(history).rejected).toEqual([]);
@@ -1381,7 +1381,7 @@ describe('content history (D-CONTENT-HISTORY)', () => {
 
 describe('ensurePreV2Backup (D-V1-BACKUP-ONCE)', () => {
   let tmp: string;
-  beforeEach(() => { tmp = makeTmp('learning-store-backup-'); });
+  beforeEach(() => { tmp = makeTmp('curation-store-backup-'); });
   afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
   function preV2(file: string): string {
@@ -1389,9 +1389,9 @@ describe('ensurePreV2Backup (D-V1-BACKUP-ONCE)', () => {
   }
 
   it('copies the log, the ledger and the archive once, and never overwrites a copy', () => {
-    const p = seedLearningTree(tmp, { log: [makeV1LogRow()], ledger: [makeV1LedgerRow()], archive: [makeV1LogRow({ id: 'obs_old' })] });
+    const p = seedCurationTree(tmp, { log: [makeV1LogRow()], ledger: [makeV1LedgerRow()], archive: [makeV1LogRow({ id: 'obs_old' })] });
     const originals = [p.log, p.ledger, p.archive].map(f => fs.readFileSync(f, 'utf8'));
-    const state = store.readLearningState(tmp);
+    const state = store.readCurationState(tmp);
 
     const written = store.ensurePreV2Backup(tmp, state);
     expect(written).toEqual([preV2(p.log), preV2(p.ledger), preV2(p.archive)]);
@@ -1403,29 +1403,29 @@ describe('ensurePreV2Backup (D-V1-BACKUP-ONCE)', () => {
   });
 
   it('writes no backup for an all-v2 tree', () => {
-    const p = seedLearningTree(tmp, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()], archive: [] });
-    expect(store.ensurePreV2Backup(tmp, store.readLearningState(tmp))).toEqual([]);
+    const p = seedCurationTree(tmp, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()], archive: [] });
+    expect(store.ensurePreV2Backup(tmp, store.readCurationState(tmp))).toEqual([]);
     for (const f of [p.log, p.ledger, p.archive]) expect(fs.existsSync(preV2(f))).toBe(false);
   });
 
   it('backs up only the files that exist', () => {
-    const p = seedLearningTree(tmp, { log: [makeV1LogRow()] });
+    const p = seedCurationTree(tmp, { log: [makeV1LogRow()] });
     expect(store.ensurePreV2Backup(tmp, { logRows: [makeV1LogRow()], ledgerRows: [] })).toEqual([preV2(p.log)]);
   });
 
   it('a v1 ledger row alone is enough to trigger the backup', () => {
-    const p = seedLearningTree(tmp, { log: [makeV2LogRow()], ledger: [makeV1LedgerRow()] });
-    expect(store.ensurePreV2Backup(tmp, store.readLearningState(tmp))).toEqual([preV2(p.log), preV2(p.ledger)]);
+    const p = seedCurationTree(tmp, { log: [makeV2LogRow()], ledger: [makeV1LedgerRow()] });
+    expect(store.ensurePreV2Backup(tmp, store.readCurationState(tmp))).toEqual([preV2(p.log), preV2(p.ledger)]);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Clearing the observations no entry uses (devflow learning --clear)
+// Clearing the observations no entry uses (devflow curation --clear)
 // ---------------------------------------------------------------------------
 
 describe('clearUnreferenced (D-CLEAR-UNREFERENCED)', () => {
   let tmp: string;
-  beforeEach(() => { tmp = makeTmp('learning-store-clear-'); });
+  beforeEach(() => { tmp = makeTmp('curation-store-clear-'); });
   afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
   /** A log row no ledger row carries, a v2 one an active entry carries, and a v1 one a retired entry carries. */
@@ -1439,7 +1439,7 @@ describe('clearUnreferenced (D-CLEAR-UNREFERENCED)', () => {
 
   it('drops every log row no ledger row carries, a fresh one and one with no id included, and keeps every carried row in order', () => {
     const idless = makeV1LogRow({ id: undefined, last_seen: daysAgoIso(2) });
-    const p = seedLearningTree(tmp, { log: [unreferenced, carriedActive, idless, carriedRetired], ledger });
+    const p = seedCurationTree(tmp, { log: [unreferenced, carriedActive, idless, carriedRetired], ledger });
 
     expect(store.clearUnreferenced(tmp, { now: FIXTURE_NOW })).toEqual({ ok: true, value: { cleared: 2, kept: 2 } });
     expect(store.readJsonl(p.log).rows).toEqual([carriedActive, carriedRetired]);
@@ -1447,9 +1447,9 @@ describe('clearUnreferenced (D-CLEAR-UNREFERENCED)', () => {
 
   it('leaves the ledger, the archive and the rendered files byte for byte as they were', () => {
     const archived = makeV1LogRow({ id: 'obs_archived_before', last_seen: daysAgoIso(90) });
-    const p = seedLearningTree(tmp, { log: [unreferenced, carriedActive, carriedRetired], ledger, archive: [archived] });
-    fs.writeFileSync(path.join(p.learningDir, 'decisions.md'), 'rendered decisions\n');
-    const untouched = [p.ledger, p.archive, path.join(p.learningDir, 'decisions.md')];
+    const p = seedCurationTree(tmp, { log: [unreferenced, carriedActive, carriedRetired], ledger, archive: [archived] });
+    fs.writeFileSync(path.join(p.curationDir, 'decisions.md'), 'rendered decisions\n');
+    const untouched = [p.ledger, p.archive, path.join(p.curationDir, 'decisions.md')];
     const before = untouched.map(file => fs.readFileSync(file, 'utf8'));
 
     expect(store.clearUnreferenced(tmp, { now: FIXTURE_NOW }).ok).toBe(true);
@@ -1457,7 +1457,7 @@ describe('clearUnreferenced (D-CLEAR-UNREFERENCED)', () => {
   });
 
   it('writes nothing at all when every log row is carried', () => {
-    seedLearningTree(tmp, { log: [carriedActive, carriedRetired], ledger });
+    seedCurationTree(tmp, { log: [carriedActive, carriedRetired], ledger });
     const before = snapshotTree(tmp);
 
     expect(store.clearUnreferenced(tmp, { now: FIXTURE_NOW })).toEqual({ ok: true, value: { cleared: 0, kept: 2 } });
@@ -1465,7 +1465,7 @@ describe('clearUnreferenced (D-CLEAR-UNREFERENCED)', () => {
   });
 
   it('backs up a v1 tree once and quarantines the log\'s malformed lines before it rewrites the log (D-V1-BACKUP-ONCE, D-QUARANTINE-MALFORMED)', () => {
-    const p = seedLearningTree(tmp, { log: [unreferenced, carriedRetired], ledger });
+    const p = seedCurationTree(tmp, { log: [unreferenced, carriedRetired], ledger });
     fs.appendFileSync(p.log, '{torn line\n');
     const original = fs.readFileSync(p.log, 'utf8');
 
@@ -1477,7 +1477,7 @@ describe('clearUnreferenced (D-CLEAR-UNREFERENCED)', () => {
   });
 
   it('refuses while the ledger holds a malformed line, which may carry a row it would drop, and writes nothing', () => {
-    const p = seedLearningTree(tmp, { log: [unreferenced, carriedActive], ledger: [ledger[0]] });
+    const p = seedCurationTree(tmp, { log: [unreferenced, carriedActive], ledger: [ledger[0]] });
     fs.appendFileSync(p.ledger, '{"id":"obs_waiting","anchor_id":"ADR-002"\n');
     const before = snapshotTree(tmp);
 
@@ -1498,13 +1498,13 @@ describe('clearUnreferenced (D-CLEAR-UNREFERENCED)', () => {
     const result = store.clearUnreferenced(tmp, { now: FIXTURE_NOW });
     expect(result).toEqual({
       ok: false,
-      error: { kind: 'no-learning-dir', message: `clear: no .devflow/curation/ under ${tmp} — run from the project root` },
+      error: { kind: 'no-curation-dir', message: `clear: no .devflow/curation/ under ${tmp} — run from the project root` },
     });
     expect(fs.readdirSync(path.join(tmp, '.devflow'))).toEqual([]);
   });
 
-  it('reports busy while another holder keeps the learning lock, and writes nothing (D-ONE-LEARNING-LOCK)', () => {
-    const p = seedLearningTree(tmp, { log: [unreferenced, carriedActive], ledger: [ledger[0]] });
+  it('reports busy while another holder keeps the curation lock, and writes nothing (D-ONE-LEARNING-LOCK)', () => {
+    const p = seedCurationTree(tmp, { log: [unreferenced, carriedActive], ledger: [ledger[0]] });
     fs.mkdirSync(p.lockDir);
     const before = snapshotTree(tmp);
 
@@ -1516,40 +1516,40 @@ describe('clearUnreferenced (D-CLEAR-UNREFERENCED)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Resetting the learning tree (devflow learning --reset)
+// Resetting the curation tree (devflow curation --reset)
 // ---------------------------------------------------------------------------
 
-describe('resetLearning (D-RESET-UNDER-LOCK)', () => {
+describe('resetCuration (D-RESET-UNDER-LOCK)', () => {
   let tmp: string;
-  beforeEach(() => { tmp = makeTmp('learning-store-reset-'); });
+  beforeEach(() => { tmp = makeTmp('curation-store-reset-'); });
   afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
-  /** Every kind of learning file, fourteen entries in all, beside the rest of a .devflow/. */
-  function seedFullTree(): ReturnType<typeof learningPaths> {
-    const p = seedLearningTree(tmp, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()], archive: [makeV1LogRow()] });
+  /** Every kind of curation file, fourteen entries in all, beside the rest of a .devflow/. */
+  function seedFullTree(): ReturnType<typeof curationPaths> {
+    const p = seedCurationTree(tmp, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow()], archive: [makeV1LogRow()] });
     for (const file of [
       p.history, store.rejectedPathFor(p.log), p.log.replace(/\.jsonl$/, '.pre-v2.jsonl'),
-      path.join(p.learningDir, 'decisions.md'), path.join(p.learningDir, 'pitfalls.md'), path.join(p.learningDir, 'index.md'),
-      path.join(p.learningDir, 'curation.json'),
-      path.join(p.learningDir, '.pending-turns.jsonl'), path.join(p.learningDir, '.pending-turns.processing'),
-      path.join(p.learningDir, '.pending-turns.owner'),
+      path.join(p.curationDir, 'decisions.md'), path.join(p.curationDir, 'pitfalls.md'), path.join(p.curationDir, 'index.md'),
+      path.join(p.curationDir, 'curation.json'),
+      path.join(p.curationDir, '.pending-turns.jsonl'), path.join(p.curationDir, '.pending-turns.processing'),
+      path.join(p.curationDir, '.pending-turns.owner'),
     ]) {
       fs.writeFileSync(file, `${path.basename(file)}\n`);
     }
-    fs.mkdirSync(path.join(p.learningDir, '.decisions-usage.lock'));
+    fs.mkdirSync(path.join(p.curationDir, '.decisions-usage.lock'));
     fs.writeFileSync(path.join(tmp, '.devflow', 'config.json'), '{"features":{}}\n');
     fs.mkdirSync(path.join(tmp, '.devflow', 'memory'));
     fs.writeFileSync(path.join(tmp, '.devflow', 'memory', '.pending-turns.jsonl'), '{"role":"user"}\n');
     return p;
   }
 
-  it('removes every learning file and the directory itself, and leaves the rest of .devflow/ byte for byte', () => {
+  it('removes every curation file and the directory itself, and leaves the rest of .devflow/ byte for byte', () => {
     const p = seedFullTree();
     const memory = snapshotTree(path.join(tmp, '.devflow', 'memory'));
 
-    expect(store.resetLearning(tmp)).toEqual({ ok: true, value: { removed: 14 } });
+    expect(store.resetCuration(tmp)).toEqual({ ok: true, value: { removed: 14 } });
 
-    expect(fs.existsSync(p.learningDir)).toBe(false);
+    expect(fs.existsSync(p.curationDir)).toBe(false);
     expect(fs.readdirSync(path.join(tmp, '.devflow')).sort()).toEqual(['config.json', 'memory']);
     expect(fs.readFileSync(path.join(tmp, '.devflow', 'config.json'), 'utf8')).toBe('{"features":{}}\n');
     expect(snapshotTree(path.join(tmp, '.devflow', 'memory'))).toEqual(memory);
@@ -1558,22 +1558,22 @@ describe('resetLearning (D-RESET-UNDER-LOCK)', () => {
   it('refuses without .devflow/curation/ and creates nothing, in a bare directory or under an existing .devflow/ (D-NO-STRAY-TREE)', () => {
     const refusal = {
       ok: false,
-      error: { kind: 'no-learning-dir', message: `reset: no .devflow/curation/ under ${tmp} — run from the project root` },
+      error: { kind: 'no-curation-dir', message: `reset: no .devflow/curation/ under ${tmp} — run from the project root` },
     };
-    expect(store.resetLearning(tmp)).toEqual(refusal);
+    expect(store.resetCuration(tmp)).toEqual(refusal);
     expect(fs.readdirSync(tmp)).toEqual([]);
 
     fs.mkdirSync(path.join(tmp, '.devflow'));
-    expect(store.resetLearning(tmp)).toEqual(refusal);
+    expect(store.resetCuration(tmp)).toEqual(refusal);
     expect(fs.readdirSync(path.join(tmp, '.devflow'))).toEqual([]);
   });
 
-  it('reports busy while another run holds the learning lock, and removes nothing (D-ONE-LEARNING-LOCK)', () => {
+  it('reports busy while another run holds the curation lock, and removes nothing (D-ONE-LEARNING-LOCK)', () => {
     const p = seedFullTree();
     fs.mkdirSync(p.lockDir);
     const before = snapshotTree(tmp);
 
-    expect(store.resetLearning(tmp, { timeoutMs: 0 })).toEqual({
+    expect(store.resetCuration(tmp, { timeoutMs: 0 })).toEqual({
       ok: false,
       error: { kind: 'busy', message: `reset: timeout acquiring lock at ${p.lockDir}` },
     });
@@ -1586,48 +1586,48 @@ describe('resetLearning (D-RESET-UNDER-LOCK)', () => {
     const abandoned = new Date(Date.now() - store.LOCK_STALE_MS - 60_000);
     fs.utimesSync(p.lockDir, abandoned, abandoned);
 
-    expect(store.resetLearning(tmp, { timeoutMs: 0 })).toEqual({ ok: true, value: { removed: 14 } });
-    expect(fs.existsSync(p.learningDir)).toBe(false);
+    expect(store.resetCuration(tmp, { timeoutMs: 0 })).toEqual({ ok: true, value: { removed: 14 } });
+    expect(fs.existsSync(p.curationDir)).toBe(false);
   });
 
-  it('removes a symbolic link in the learning directory, never what it points to', () => {
-    const p = seedLearningTree(tmp, { ledger: [makeV2LedgerRow()] });
+  it('removes a symbolic link in the curation directory, never what it points to', () => {
+    const p = seedCurationTree(tmp, { ledger: [makeV2LedgerRow()] });
     const outsideFile = path.join(tmp, 'outside.jsonl');
     const outsideDir = path.join(tmp, 'outside-dir');
     fs.writeFileSync(outsideFile, 'kept\n');
     fs.mkdirSync(outsideDir);
     fs.writeFileSync(path.join(outsideDir, 'kept.txt'), 'kept\n');
     fs.symlinkSync(outsideFile, p.log);
-    fs.symlinkSync(outsideDir, path.join(p.learningDir, 'linked-dir'));
+    fs.symlinkSync(outsideDir, path.join(p.curationDir, 'linked-dir'));
 
-    expect(store.resetLearning(tmp)).toEqual({ ok: true, value: { removed: 3 } });
+    expect(store.resetCuration(tmp)).toEqual({ ok: true, value: { removed: 3 } });
 
-    expect(fs.existsSync(p.learningDir)).toBe(false);
+    expect(fs.existsSync(p.curationDir)).toBe(false);
     expect(fs.readFileSync(outsideFile, 'utf8')).toBe('kept\n');
     expect(fs.readFileSync(path.join(outsideDir, 'kept.txt'), 'utf8')).toBe('kept\n');
   });
 
-  it('refuses a learning directory that is itself a symbolic link, and removes nothing it leads to', () => {
-    const p = learningPaths(tmp);
+  it('refuses a curation directory that is itself a symbolic link, and removes nothing it leads to', () => {
+    const p = curationPaths(tmp);
     const elsewhere = path.join(tmp, 'elsewhere');
     fs.mkdirSync(path.join(elsewhere, 'sub'), { recursive: true });
     fs.writeFileSync(path.join(elsewhere, 'notes.txt'), 'kept\n');
     fs.writeFileSync(path.join(elsewhere, 'sub', 'deep.txt'), 'kept\n');
     fs.mkdirSync(path.join(tmp, '.devflow'));
-    fs.symlinkSync(elsewhere, p.learningDir);
+    fs.symlinkSync(elsewhere, p.curationDir);
     const before = snapshotTree(elsewhere);
 
-    expect(store.resetLearning(tmp, { timeoutMs: 0 })).toEqual({
+    expect(store.resetCuration(tmp, { timeoutMs: 0 })).toEqual({
       ok: false,
-      error: { kind: 'not-a-directory', message: `reset: ${p.learningDir} is a symbolic link, not a directory; nothing was changed` },
+      error: { kind: 'not-a-directory', message: `reset: ${p.curationDir} is a symbolic link, not a directory; nothing was changed` },
     });
     expect(snapshotTree(elsewhere)).toEqual(before);
-    expect(fs.lstatSync(p.learningDir).isSymbolicLink()).toBe(true);
+    expect(fs.lstatSync(p.curationDir).isSymbolicLink()).toBe(true);
   });
 
   it('keeps what arrives once the lock is released, and leaves no lock behind', () => {
     const p = seedFullTree();
-    const arrived = path.join(p.learningDir, '.pending-turns.jsonl');
+    const arrived = path.join(p.curationDir, '.pending-turns.jsonl');
     // The lock is released by removing its directory; a capture hook appends a
     // turn at that moment, after the reset and before the directory is removed.
     const nodeFs = createRequire(import.meta.url)('fs') as { rmdirSync: (target: fs.PathLike) => void };
@@ -1637,11 +1637,11 @@ describe('resetLearning (D-RESET-UNDER-LOCK)', () => {
       if (target === p.lockDir) fs.writeFileSync(arrived, '{"role":"user"}\n');
     };
     try {
-      expect(store.resetLearning(tmp)).toEqual({ ok: true, value: { removed: 14 } });
+      expect(store.resetCuration(tmp)).toEqual({ ok: true, value: { removed: 14 } });
     } finally {
       nodeFs.rmdirSync = rmdirSync;
     }
-    expect(fs.readdirSync(p.learningDir)).toEqual(['.pending-turns.jsonl']);
+    expect(fs.readdirSync(p.curationDir)).toEqual(['.pending-turns.jsonl']);
   });
 });
 
@@ -1913,7 +1913,7 @@ describe('showEntry', () => {
 
 describe('resolveVerifyRef (D-VERIFY-REF)', { timeout: 30_000 }, () => {
   let tmp: string;
-  beforeEach(() => { tmp = makeTmp('learning-store-ref-'); });
+  beforeEach(() => { tmp = makeTmp('curation-store-ref-'); });
   afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
   it('resolves origin/HEAD when the repository has one, ahead of a newer HEAD', () => {
@@ -1940,7 +1940,7 @@ describe('resolveVerifyRef (D-VERIFY-REF)', { timeout: 30_000 }, () => {
   it('is null in a repository with no commit, and outside a repository', () => {
     git(tmp, ['-c', 'init.defaultBranch=main', 'init', '-q']);
     expect(store.resolveVerifyRef(tmp)).toBeNull();
-    const plain = makeTmp('learning-store-ref-plain-');
+    const plain = makeTmp('curation-store-ref-plain-');
     try {
       expect(store.resolveVerifyRef(plain)).toBeNull();
     } finally {
@@ -1953,9 +1953,9 @@ describe('resolveVerifyRef (D-VERIFY-REF)', { timeout: 30_000 }, () => {
 // Fixtures
 // ---------------------------------------------------------------------------
 
-describe('learning fixtures', { timeout: 30_000 }, () => {
+describe('curation fixtures', { timeout: 30_000 }, () => {
   let tmp: string;
-  beforeEach(() => { tmp = makeTmp('learning-store-fixtures-'); });
+  beforeEach(() => { tmp = makeTmp('curation-store-fixtures-'); });
   afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
   it('runJsonHelper reports the exit code and both streams of an op', () => {
@@ -1965,9 +1965,9 @@ describe('learning fixtures', { timeout: 30_000 }, () => {
     expect(unknown.stderr).toContain('unknown operation');
   });
 
-  it('seedLearningTree writes only the files it is given', () => {
-    const p = seedLearningTree(tmp, { log: [makeV2LogRow()] });
-    expect(fs.readdirSync(p.learningDir)).toEqual(['decisions-log.jsonl']);
+  it('seedCurationTree writes only the files it is given', () => {
+    const p = seedCurationTree(tmp, { log: [makeV2LogRow()] });
+    expect(fs.readdirSync(p.curationDir)).toEqual(['decisions-log.jsonl']);
     expect(store.readJsonl(p.log).rows).toEqual([makeV2LogRow()]);
   });
 

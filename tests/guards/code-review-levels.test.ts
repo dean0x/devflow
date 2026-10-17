@@ -28,7 +28,7 @@ import { readFileSync } from 'fs'
 import * as path from 'path'
 
 import { GATE_LEVELS } from '../../src/core/gate-level.js'
-import { ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, readAgentReference, requireDistFile, resolveLearningOffSource, sectionBetween, tableRows } from '../helpers.js'
+import { ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, readAgentReference, requireDistFile, resolveCurationOffSource, sectionBetween, tableRows } from '../helpers.js'
 
 // ---------------------------------------------------------------------------
 // Independent oracle: written by hand from the issue and the gate decisions, never parsed
@@ -669,7 +669,7 @@ export function collectSummaryDefects(cr: string, syn: string): string[] {
 // ---------------------------------------------------------------------------
 
 const VARIANTS: ReadonlyArray<{ label: string; body: string }> = (() => {
-  const off = resolveLearningOffSource('commands', 'code-review')
+  const off = resolveCurationOffSource('commands', 'code-review')
   if (off === null) throw new Error('dist/curation-off/commands/code-review.md is absent: run `npm run build:mds`')
   return [
     { label: 'learning on', body: requireDistFile('code-review.md') },

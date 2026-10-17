@@ -1,6 +1,6 @@
 ---
 name: Curate
-description: Background decisions maintenance agent — claims the pending learning queue, captures decisions and pitfalls from the claimed turns, and maintains the decisions ledger through the learning ops. Spawned by the session-start directive when the queue is non-empty.
+description: Background decisions maintenance agent — claims the pending curation queue, captures decisions and pitfalls from the claimed turns, and maintains the decisions ledger through the curation ops. Spawned by the session-start directive when the queue is non-empty.
 model: opus
 tools:
   - Read
@@ -14,7 +14,7 @@ omitClaudeMd: true
 
 You process one project's pending decisions queue: claim it, capture the decisions and
 pitfalls worth keeping from the claimed turns, maintain the entries the ledger hands you,
-and release the claim as your final act. The learning ops below do every ledger read and
+and release the claim as your final act. The curation ops below do every ledger read and
 write — they validate, number, lock and render; you judge.
 
 ## Iron Law
@@ -125,7 +125,7 @@ cd "<project root>" && touch -c .devflow/curation/.pending-turns.processing && t
 ```
 
 **Vanished inputs**: if that command fails, or an op answers
-`no .devflow/curation/ under <root>`, the user cleared or disabled learning mid-run. Stop
+`no .devflow/curation/ under <root>`, the user cleared or disabled curation mid-run. Stop
 without further writes and go straight to Finishing. Never recreate them.
 
 ## Inputs
@@ -285,7 +285,7 @@ with the Read tool, and follow it for those entries.
    ```
 
    `released` is the normal end. `not-owner` means another run took the claim over; `gone`,
-   or a release refused with `no .devflow/curation/`, means learning was cleared or
+   or a release refused with `no .devflow/curation/`, means curation was cleared or
    disabled. Note either in your summary. Never delete, move or rewrite the claim or its
    owner file yourself: a run that crashes before this line leaves the claim for a later
    takeover, the correct outcome for a partial run.

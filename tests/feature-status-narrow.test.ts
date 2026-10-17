@@ -1,5 +1,5 @@
 /**
- * `devflow memory|learning|knowledge --status` over the per-repository layer
+ * `devflow memory|curation|knowledge --status` over the per-repository layer
  * (D-FEATURES-NARROW-ONLY), run through the compiled CLI from a temp HOME and a
  * temp git repository.
  *
@@ -61,13 +61,14 @@ function makeRepo(files: { project?: string; personal?: string } = {}): string {
 
 function status(feature: Feature, cwd: string): string {
   assertTempHome(tmpHome);
-  const r = spawnSync(process.execPath, [CLI, feature, '--status'], {
+  const command = feature === 'learning' ? 'curation' : feature;
+  const r = spawnSync(process.execPath, [CLI, command, '--status'], {
     encoding: 'utf-8',
     timeout: 60_000,
     cwd,
     env: { ...process.env, HOME: tmpHome, FORCE_COLOR: '0', NO_COLOR: '1', CI: '1' },
   });
-  expect(r.status, `${feature} --status failed:\n${r.stdout}${r.stderr}`).toBe(0);
+  expect(r.status, `${command} --status failed:\n${r.stdout}${r.stderr}`).toBe(0);
   return `${r.stdout ?? ''}${r.stderr ?? ''}`;
 }
 
@@ -78,9 +79,9 @@ function withoutEffective(out: string): string {
   const lines = out.split('\n');
   const at = lines.findIndex(l => EFFECTIVE.test(l));
   if (at === -1) return out;
-  // p.log.info emits the message line preceded by a `│` spacer line; learning's
+  // p.log.info emits the message line preceded by a `│` spacer line; curation's
   // state is one multi-line message, so there only the message line goes.
-  const spacer = at > 0 && /^│\s*$/.test(lines[at - 1]) && !/Learning:/.test(lines[at - 1]) ? 1 : 0;
+  const spacer = at > 0 && /^│\s*$/.test(lines[at - 1]) && !/Curation:/.test(lines[at - 1]) ? 1 : 0;
   return [...lines.slice(0, at - spacer), ...lines.slice(at + 1)].join('\n');
 }
 

@@ -34,7 +34,7 @@ import * as path from 'path'
 
 import {
   CODE_AGENT_TYPES, ROOT, codeSlugOf, collectCodeSpawnSites, parseFrontmatterSkills,
-  requireDistFile, requireDistFiles, resolveAgentSource, resolveLearningOffSource,
+  requireDistFile, requireDistFiles, resolveAgentSource, resolveCurationOffSource,
 } from '../helpers.js'
 import { CURATION_OFF_FILES, MDS_GENERATOR_HOSTS, CURATION_VARIANT_HOSTS } from '../fixtures/mds-manifest.js'
 
@@ -48,7 +48,7 @@ type Variant = 'on' | 'off'
 function compiled(agentType: string, variant: Variant): string {
   const slug = codeSlugOf(agentType)
   if (variant === 'on') return resolveAgentSource(slug).content
-  const text = resolveLearningOffSource('agents', slug)
+  const text = resolveCurationOffSource('agents', slug)
   if (text === null) throw new Error(`dist/curation-off/agents/${slug}.md is absent — run \`npm run build\` first`)
   return text
 }
@@ -191,7 +191,7 @@ describe('every Code variant keeps the scan and apply-decisions; only Code takes
     const lost = code.replace('  - devflow:apply-feature-knowledge\n', '')
     expect(lost, 'the seed must land').not.toBe(code)
     expect(collectSharedKeepDefects(lost, 'on', true)).toEqual(['does not preload apply-feature-knowledge'])
-    // Learning off: a decisions token that survives the arm is reported.
+    // Curation off: a decisions token that survives the arm is reported.
     const off = compiled('Refactor', 'off')
     expect(collectSharedKeepDefects(off, 'off', false)).toEqual([])
     expect(collectSharedKeepDefects(`${off}\nDECISIONS_CONTEXT: x\n`, 'off', false)).toEqual(['names DECISIONS_CONTEXT under learning off'])

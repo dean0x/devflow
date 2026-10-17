@@ -146,7 +146,7 @@ ensure_docs_dir() { mkdir -p "$(get_docs_root)/.devflow/docs/$1"; }
 - **Research**: the Research agents write `{type}.md`, and the Synthesize agent (research mode) writes `research-summary.md` through `RESEARCH_BASE_DIR`, both into `research/{topic-slug}/{timestamp}/`.
 - **Design**: `/plan` writes the design document; `/dynamic-plan` writes `design/{slug}/{timestamp}/`, `/dynamic-tickets` `tickets/{slug}/{timestamp}/`, `/dynamic-build` `waves/{slug}/{timestamp}/` and `evidence-wave-{slug}.md`.
 - **Handoff and evidence**: `/implement` writes `evidence-{branch-slug}.md`, which stays after the PR, and the handoff file, to which each Code agent appends one phase section and which is deleted once the PR exists.
-- **Memory and learning**: the Stop hook overwrites `.devflow/memory/WORKING-MEMORY.md`; `decisions.md` and `pitfalls.md` are rendered from `decisions-ledger.jsonl` (active entries in full, inactive ones in an Inactive table).
+- **Memory and curation**: the Stop hook overwrites `.devflow/memory/WORKING-MEMORY.md`; `decisions.md` and `pitfalls.md` are rendered from `decisions-ledger.jsonl` (active entries in full, inactive ones in an Inactive table).
 
 ### Agents That Don't Persist
 

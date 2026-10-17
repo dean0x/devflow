@@ -1,4 +1,4 @@
-// tests/decisions/learning-curation.test.ts
+// tests/decisions/curation-retire.test.ts
 //
 // Phase 6 tests for the curation skill rewrite and retire-by-status model.
 //
@@ -19,7 +19,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-import { makeV2LogRow, requireLearningStore, runJsonHelper } from './learning-fixtures.js';
+import { makeV2LogRow, requireCurationStore, runJsonHelper } from './curation-fixtures.js';
 import { readAgentReference } from '../helpers.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
@@ -35,7 +35,7 @@ const {
   parseLedger: (ledgerPath: string) => Record<string, unknown>[];
 };
 
-const store = requireLearningStore();
+const store = requireCurationStore();
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -95,7 +95,7 @@ function readDecisionsMd(dir: string): string {
 // The Curate agent (src/assets/agents/curate.md) is the sole decisions processor:
 // it claims the queue through claim-queue, reads the claimed turns directly,
 // reads the ledger and the log only through list and show, and writes only
-// through the learning ops. These describe pins hold the curation contract
+// through the curation ops. These describe pins hold the curation contract
 // strings in place — the same Iron-Law contract the ledger ops enforce at runtime.
 // ---------------------------------------------------------------------------
 
@@ -126,7 +126,7 @@ describe('Curate agent curation contract (AC-C3)', () => {
     expect(agentContent).toMatch(/Ledger\s+and\s+log\s+data\s+come\s+only\s+through\s+`list`\s+and\s+`show`/);
   });
 
-  it('routes every ledger write through the learning ops', () => {
+  it('routes every ledger write through the curation ops', () => {
     for (const op of [
       'put-observation', 'assign-anchor', 'retire-anchor', 'restore-anchor', 'refresh-anchor',
       'rotate-observations', 'claim-due',

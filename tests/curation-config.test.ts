@@ -80,7 +80,7 @@ describe('readConfig', () => {
 });
 
 describe('writeManagedConfig', () => {
-  it('creates .devflow/config.json (neutral root, not inside learning/)', async () => {
+  it('creates .devflow/config.json (neutral root, not inside curation/)', async () => {
     await writeManagedConfig(tmpDir, { reviewPublication: 'full' });
     expect(readRaw(tmpDir)).toEqual({ reviewPublication: 'full' });
     expect(fs.existsSync(path.join(tmpDir, '.devflow', 'curation', 'config.json'))).toBe(false);

@@ -124,7 +124,7 @@ function writtenKeys(feature: MachineFeature | OptInMachineFeature): readonly st
  * the legacy `features.decisions` is read only when neither current key is a
  * boolean — readManifest's migration precedence exactly. The legacy key is
  * otherwise honoured only once some command happens to run readManifest and
- * heal it, so a `decisions: false` would keep learning running until then.
+ * heal it, so a `decisions: false` would keep curation running until then.
  * queue_read_gates applies the same precedence.
  *
  * D-KNOWLEDGE-LEGACY-KB (the same sub-decision for the other renamed key):
@@ -251,7 +251,7 @@ export async function readOptInFeature(devflowDir: string, feature: OptInMachine
  * D-NOOP-TOGGLE: a toggle to the value the manifest already records writes
  * nothing. The only bytes such a write could change are `updatedAt`, and that
  * field means "the manifest's content last changed", so a no-op must not move
- * it. This is the one write point of `devflow memory|learning|knowledge|behavior
+ * it. This is the one write point of `devflow memory|curation|knowledge|behavior
  * --enable/--disable`, so the rule holds for all four at once.
  */
 export async function writeMachineFeature(

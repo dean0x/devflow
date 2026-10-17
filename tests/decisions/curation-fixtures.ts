@@ -1,8 +1,8 @@
-// tests/decisions/learning-fixtures.ts
+// tests/decisions/curation-fixtures.ts
 //
-// Shared fixtures for the v2 learning tests: row factories for the v2 and v1
-// shapes, a learning-tree seeder, a git repository builder and a json-helper
-// runner. Every learning test that seeds a `.devflow/curation/` tree, builds a
+// Shared fixtures for the v2 curation tests: row factories for the v2 and v1
+// shapes, a curation-tree seeder, a git repository builder and a json-helper
+// runner. Every curation test that seeds a `.devflow/curation/` tree, builds a
 // repository or spawns json-helper.cjs takes them from here, so the row shapes
 // the store, the ops and the renderer are tested on stay one definition.
 //
@@ -17,7 +17,7 @@ import * as path from 'path';
 
 export const ROOT = path.resolve(import.meta.dirname, '../..');
 export const JSON_HELPER = path.join(ROOT, 'src/assets/scripts/hooks/json-helper.cjs');
-export const LEARNING_STORE = path.join(ROOT, 'src/assets/scripts/hooks/lib/curation-store.cjs');
+export const CURATION_STORE = path.join(ROOT, 'src/assets/scripts/hooks/lib/curation-store.cjs');
 
 export type Row = Record<string, unknown>;
 
@@ -127,11 +127,11 @@ export function makeV1LedgerRow(overrides: Row = {}): Row {
 }
 
 // ---------------------------------------------------------------------------
-// Learning tree
+// Curation tree
 // ---------------------------------------------------------------------------
 
-export interface LearningTreePaths {
-  learningDir: string;
+export interface CurationTreePaths {
+  curationDir: string;
   log: string;
   ledger: string;
   archive: string;
@@ -139,16 +139,16 @@ export interface LearningTreePaths {
   lockDir: string;
 }
 
-/** The learning-tree paths under project root `dir` (nothing is created). */
-export function learningPaths(dir: string): LearningTreePaths {
-  const learningDir = path.join(dir, '.devflow', 'curation');
+/** The curation-tree paths under project root `dir` (nothing is created). */
+export function curationPaths(dir: string): CurationTreePaths {
+  const curationDir = path.join(dir, '.devflow', 'curation');
   return {
-    learningDir,
-    log: path.join(learningDir, 'decisions-log.jsonl'),
-    ledger: path.join(learningDir, 'decisions-ledger.jsonl'),
-    archive: path.join(learningDir, 'decisions-log.archive.jsonl'),
-    history: path.join(learningDir, 'decisions-history.jsonl'),
-    lockDir: path.join(learningDir, '.decisions.lock'),
+    curationDir,
+    log: path.join(curationDir, 'decisions-log.jsonl'),
+    ledger: path.join(curationDir, 'decisions-ledger.jsonl'),
+    archive: path.join(curationDir, 'decisions-log.archive.jsonl'),
+    history: path.join(curationDir, 'decisions-history.jsonl'),
+    lockDir: path.join(curationDir, '.decisions.lock'),
   };
 }
 
@@ -161,12 +161,12 @@ export function toJsonl(rows: readonly Row[]): string {
  * Create `<dir>/.devflow/curation/` and write each given file as JSONL. A file
  * left out is not created, so a test can seed a tree with no ledger or no archive.
  */
-export function seedLearningTree(
+export function seedCurationTree(
   dir: string,
   { log, ledger, archive }: { log?: readonly Row[]; ledger?: readonly Row[]; archive?: readonly Row[] } = {},
-): LearningTreePaths {
-  const paths = learningPaths(dir);
-  fs.mkdirSync(paths.learningDir, { recursive: true });
+): CurationTreePaths {
+  const paths = curationPaths(dir);
+  fs.mkdirSync(paths.curationDir, { recursive: true });
   if (log !== undefined) fs.writeFileSync(paths.log, toJsonl(log), 'utf8');
   if (ledger !== undefined) fs.writeFileSync(paths.ledger, toJsonl(ledger), 'utf8');
   if (archive !== undefined) fs.writeFileSync(paths.archive, toJsonl(archive), 'utf8');
@@ -425,8 +425,8 @@ export type InputResult<T> =
   | { ok: true; value: T }
   | { ok: false; error: { kind: string; message: string; problems?: ValidationError[] } };
 
-/** The learning store's surface as the tests use it. */
-export interface LearningStoreApi {
+/** The curation store's surface as the tests use it. */
+export interface CurationStoreApi {
   SCHEMA_VERSION: number;
   FIELD_LIMITS: Readonly<Record<string, number>>;
   ACTIVE_STATUSES: readonly string[];
@@ -451,14 +451,14 @@ export interface LearningStoreApi {
   writeExclusive(tmp: string, content: string): void;
   writeFileAtomic(file: string, content: string): void;
   writeJsonlAtomic(file: string, rows: readonly Row[]): void;
-  hasLearningDir(root: string): boolean;
+  hasCurationDir(root: string): boolean;
   withDecisionsLock<T>(
     opName: string,
     root: string,
     fn: () => Result<T>,
     opts?: { timeoutMs?: number; staleMs?: number },
   ): Result<T>;
-  readLearningState(root: string): {
+  readCurationState(root: string): {
     ledgerRows: Row[];
     logRows: Row[];
     rejected: { ledger: Array<{ line: number; text: string }>; log: Array<{ line: number; text: string }> };
@@ -550,10 +550,11 @@ export interface LearningStoreApi {
   ): InputResult<RetireAnswer>;
   restoreAnchor(root: string, anchorId: string, opts?: { now?: number; timeoutMs?: number }): Result<{ anchor_id: string; status: string }>;
   clearUnreferenced(root: string, opts?: { now?: number; timeoutMs?: number }): Result<{ cleared: number; kept: number }>;
-  resetLearning(root: string, opts?: { timeoutMs?: number }): Result<{ removed: number }>;
+  resetCuration(root: string, opts?: { timeoutMs?: number }): Result<{ removed: number }>;
+  backupPendingRows(root: string): Result<{ backups: Array<{ name: string; pendingRows: number }> }>;
 }
 
-/** Load the learning store CommonJS module. */
-export function requireLearningStore(): LearningStoreApi {
-  return createRequire(import.meta.url)(LEARNING_STORE) as LearningStoreApi;
+/** Load the curation store CommonJS module. */
+export function requireCurationStore(): CurationStoreApi {
+  return createRequire(import.meta.url)(CURATION_STORE) as CurationStoreApi;
 }

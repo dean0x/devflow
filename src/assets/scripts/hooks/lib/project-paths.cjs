@@ -25,7 +25,7 @@ function getMemoryDir(projectRoot) {
 }
 
 /** .devflow/curation/ — curation state root */
-function getLearningDir(projectRoot) {
+function getCurationDir(projectRoot) {
   return path.join(projectRoot, '.devflow', 'curation');
 }
 
@@ -83,26 +83,26 @@ function getFeatureConfigPath(projectRoot) {
 }
 
 // ---------------------------------------------------------------------------
-// Learning queue files
+// Curation queue files
 // ---------------------------------------------------------------------------
 
 /** .devflow/curation/.pending-turns.jsonl — decisions detection queue */
-function getLearningPendingTurnsPath(projectRoot) {
+function getCurationPendingTurnsPath(projectRoot) {
   return path.join(projectRoot, '.devflow', 'curation', '.pending-turns.jsonl');
 }
 
 /** .devflow/curation/.pending-turns.processing — the claimed batch a Curate run holds while it processes it */
-function getLearningPendingTurnsProcessingPath(projectRoot) {
+function getCurationPendingTurnsProcessingPath(projectRoot) {
   return path.join(projectRoot, '.devflow', 'curation', '.pending-turns.processing');
 }
 
 /** .devflow/curation/.pending-turns.owner — the token of the run that holds the claim (curation-store.cjs) */
-function getLearningClaimOwnerPath(projectRoot) {
+function getCurationClaimOwnerPath(projectRoot) {
   return path.join(projectRoot, '.devflow', 'curation', '.pending-turns.owner');
 }
 
 // ---------------------------------------------------------------------------
-// Learning content files
+// Curation content files
 // ---------------------------------------------------------------------------
 
 /** .devflow/curation/decisions.md */
@@ -205,16 +205,16 @@ module.exports = {
   CURATION_TUNING_FILE_NAME,
   // Core directories
   getMemoryDir,
-  getLearningDir,
+  getCurationDir,
   getFeaturesDir,
   getDocsDir,
   // Feature config
   getFeatureConfigPath,
-  // Learning queue files
-  getLearningPendingTurnsPath,
-  getLearningPendingTurnsProcessingPath,
-  getLearningClaimOwnerPath,
-  // Learning content files
+  // Curation queue files
+  getCurationPendingTurnsPath,
+  getCurationPendingTurnsProcessingPath,
+  getCurationClaimOwnerPath,
+  // Curation content files
   getDecisionsFilePath,
   getPitfallsFilePath,
   getCurateTuningConfigPath,

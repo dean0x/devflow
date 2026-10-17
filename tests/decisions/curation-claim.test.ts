@@ -1,13 +1,13 @@
-// tests/decisions/learning-claim.test.ts
+// tests/decisions/curation-claim.test.ts
 //
-// The learning queue claim (D-OWNED-CLAIM). claim-queue moves the queue to
-// .pending-turns.processing under the learning lock and the queue's own lock,
+// The curation queue claim (D-OWNED-CLAIM). claim-queue moves the queue to
+// .pending-turns.processing under the curation lock and the queue's own lock,
 // stamps the claim's mtime and records a fresh token as its owner; a live claim
 // is busy to every other claimant and a stale one is taken over with a new token;
 // release-claim deletes the claim only for the token that owns it, reading the
 // owner file only when it is a regular file of at most CLAIM_OWNER_MAX_BYTES, so
 // a link, a FIFO or an outsized file there reads as no owner file at all
-// (D-NO-LINKED-READ); and every learning op refreshes an existing claim's mtime,
+// (D-NO-LINKED-READ); and every curation op refreshes an existing claim's mtime,
 // while no op but claim-queue ever creates one.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -19,23 +19,23 @@ import * as path from 'path';
 import {
   GIT_ENV,
   JSON_HELPER,
-  requireLearningStore,
+  requireCurationStore,
   runJsonHelper,
   runJsonHelperBounded,
-  seedLearningTree,
+  seedCurationTree,
   snapshotTree,
   type HelperRun,
-} from './learning-fixtures.js';
+} from './curation-fixtures.js';
 import { FIFO_RUN_BOUND_MS, FIFO_TEST_TIMEOUT_MS, makeFifo } from '../shell-hooks-helpers.js';
 
-const store = requireLearningStore();
+const store = requireCurationStore();
 
 const TOKEN_A = 'aaaaaaaaaaaaaaaa';
 const TOKEN_B = 'bbbbbbbbbbbbbbbb';
 const STALE_MS = store.CLAIM_STALE_SECS * 1000;
 
 interface ClaimPaths {
-  learningDir: string;
+  curationDir: string;
   queue: string;
   claim: string;
   owner: string;
@@ -43,13 +43,13 @@ interface ClaimPaths {
 }
 
 function claimPaths(dir: string): ClaimPaths {
-  const learningDir = path.join(dir, '.devflow', 'curation');
-  const queue = path.join(learningDir, '.pending-turns.jsonl');
+  const curationDir = path.join(dir, '.devflow', 'curation');
+  const queue = path.join(curationDir, '.pending-turns.jsonl');
   return {
-    learningDir,
+    curationDir,
     queue,
-    claim: path.join(learningDir, '.pending-turns.processing'),
-    owner: path.join(learningDir, '.pending-turns.owner'),
+    claim: path.join(curationDir, '.pending-turns.processing'),
+    owner: path.join(curationDir, '.pending-turns.owner'),
     queueLock: `${queue}.lock`,
   };
 }
@@ -77,7 +77,7 @@ describe('claimQueue', { timeout: 30_000 }, () => {
   let paths: ClaimPaths;
 
   beforeEach(() => {
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'learning-claim-'));
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'curation-claim-'));
     paths = claimPaths(dir);
   });
 
@@ -86,7 +86,7 @@ describe('claimQueue', { timeout: 30_000 }, () => {
   });
 
   it('claims a waiting queue: the claim holds its rows, the queue is gone and the token owns the claim', () => {
-    seedLearningTree(dir);
+    seedCurationTree(dir);
     fs.writeFileSync(paths.queue, turns(0, 3));
 
     expect(store.claimQueue(dir, { token: TOKEN_A })).toEqual({
@@ -99,7 +99,7 @@ describe('claimQueue', { timeout: 30_000 }, () => {
   });
 
   it('stamps the claim with the time of the claim, not the queue\'s old mtime', () => {
-    seedLearningTree(dir);
+    seedCurationTree(dir);
     fs.writeFileSync(paths.queue, turns(0, 1));
     const now = Date.now();
     setMtime(paths.queue, now - 2 * STALE_MS);
@@ -110,7 +110,7 @@ describe('claimQueue', { timeout: 30_000 }, () => {
   });
 
   it('answers busy while a fresh claim is held, and leaves the claim and the queue byte-identical', () => {
-    seedLearningTree(dir);
+    seedCurationTree(dir);
     fs.writeFileSync(paths.claim, turns(0, 2));
     fs.writeFileSync(paths.owner, `${TOKEN_A}\n`);
     fs.writeFileSync(paths.queue, turns(2, 3));
@@ -123,7 +123,7 @@ describe('claimQueue', { timeout: 30_000 }, () => {
   });
 
   it('takes over a claim with no heartbeat for the stale interval, with a new token, leaving its rows and the queue in place', () => {
-    seedLearningTree(dir);
+    seedCurationTree(dir);
     fs.writeFileSync(paths.claim, turns(0, 2));
     fs.writeFileSync(paths.owner, `${TOKEN_A}\n`);
     fs.writeFileSync(paths.queue, turns(2, 3));
@@ -141,7 +141,7 @@ describe('claimQueue', { timeout: 30_000 }, () => {
   });
 
   it('leaves a claim with no owner file, as a run on the old protocol left it, byte-identical while it is fresh', () => {
-    seedLearningTree(dir);
+    seedCurationTree(dir);
     fs.writeFileSync(paths.claim, turns(0, 4));
     const before = snapshotTree(dir);
 
@@ -149,11 +149,11 @@ describe('claimQueue', { timeout: 30_000 }, () => {
     expect(snapshotTree(dir)).toEqual(before);
   });
 
-  it('answers none, creating nothing, without a queue, with an empty queue and without a learning directory', () => {
+  it('answers none, creating nothing, without a queue, with an empty queue and without a curation directory', () => {
     expect(store.claimQueue(dir, { token: TOKEN_A })).toEqual({ ok: true, value: { state: 'none' } });
     expect(fs.readdirSync(dir)).toEqual([]);
 
-    seedLearningTree(dir);
+    seedCurationTree(dir);
     const bare = snapshotTree(dir);
     expect(store.claimQueue(dir, { token: TOKEN_A })).toEqual({ ok: true, value: { state: 'none' } });
     expect(snapshotTree(dir)).toEqual(bare);
@@ -165,7 +165,7 @@ describe('claimQueue', { timeout: 30_000 }, () => {
   });
 
   it('answers busy and moves nothing while the queue\'s own lock is held', () => {
-    seedLearningTree(dir);
+    seedCurationTree(dir);
     fs.writeFileSync(paths.queue, turns(0, 3));
     fs.mkdirSync(paths.queueLock);
 
@@ -177,7 +177,7 @@ describe('claimQueue', { timeout: 30_000 }, () => {
   });
 
   it('refuses a claim path that is not a regular file', () => {
-    seedLearningTree(dir);
+    seedCurationTree(dir);
     fs.writeFileSync(paths.queue, turns(0, 1));
     fs.mkdirSync(paths.claim);
 
@@ -200,9 +200,9 @@ describe('releaseClaim', { timeout: 30_000 }, () => {
   let paths: ClaimPaths;
 
   beforeEach(() => {
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'learning-release-'));
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'curation-release-'));
     paths = claimPaths(dir);
-    seedLearningTree(dir);
+    seedCurationTree(dir);
   });
 
   afterEach(() => {
@@ -241,7 +241,7 @@ describe('releaseClaim', { timeout: 30_000 }, () => {
   // a well-formed token. The link reads as no owner file at all: a live claim is
   // not-owner and stays, a vanished one is gone, and nothing is removed.
   it('reads an owner file that is a symbolic link as absent: the token behind it owns nothing, and the link and the file it names stay as they were', () => {
-    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'learning-release-outside-'));
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'curation-release-outside-'));
     try {
       const target = path.join(outside, 'owner');
       fs.writeFileSync(target, `${TOKEN_A}\n`);
@@ -283,11 +283,11 @@ describe('releaseClaim', { timeout: 30_000 }, () => {
     expect(fs.readFileSync(paths.claim, 'utf8')).toBe(turns(0, 2));
   });
 
-  it('refuses without a learning directory and creates nothing', () => {
-    const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'learning-release-bare-'));
+  it('refuses without a curation directory and creates nothing', () => {
+    const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'curation-release-bare-'));
     try {
       const result = store.releaseClaim(bare, TOKEN_A);
-      expect(result.ok ? '' : result.error.kind).toBe('no-learning-dir');
+      expect(result.ok ? '' : result.error.kind).toBe('no-curation-dir');
       expect(fs.readdirSync(bare)).toEqual([]);
     } finally {
       fs.rmSync(bare, { recursive: true, force: true });
@@ -300,9 +300,9 @@ describe('touchClaim', () => {
   let paths: ClaimPaths;
 
   beforeEach(() => {
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'learning-touch-'));
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'curation-touch-'));
     paths = claimPaths(dir);
-    seedLearningTree(dir);
+    seedCurationTree(dir);
   });
 
   afterEach(() => {
@@ -366,7 +366,7 @@ describe('claim-queue and release-claim ops', { timeout: 30_000 }, () => {
   let paths: ClaimPaths;
 
   beforeEach(() => {
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'learning-claim-ops-'));
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'curation-claim-ops-'));
     paths = claimPaths(dir);
   });
 
@@ -375,7 +375,7 @@ describe('claim-queue and release-claim ops', { timeout: 30_000 }, () => {
   });
 
   it('claim-queue prints claimed and a token; release-claim with that token prints released', () => {
-    seedLearningTree(dir);
+    seedCurationTree(dir);
     fs.writeFileSync(paths.queue, turns(0, 2));
 
     const claim = runJsonHelper(dir, ['claim-queue']);
@@ -388,11 +388,11 @@ describe('claim-queue and release-claim ops', { timeout: 30_000 }, () => {
     expect(fs.existsSync(paths.claim)).toBe(false);
   });
 
-  it('claim-queue prints busy for a live claim and none for an empty queue or a missing learning tree', () => {
+  it('claim-queue prints busy for a live claim and none for an empty queue or a missing curation tree', () => {
     expect(runJsonHelper(dir, ['claim-queue'])).toEqual({ code: 0, stdout: 'none\n', stderr: '' });
     expect(fs.readdirSync(dir)).toEqual([]);
 
-    seedLearningTree(dir);
+    seedCurationTree(dir);
     expect(runJsonHelper(dir, ['claim-queue'])).toEqual({ code: 0, stdout: 'none\n', stderr: '' });
 
     fs.writeFileSync(paths.claim, turns(0, 1));
@@ -400,7 +400,7 @@ describe('claim-queue and release-claim ops', { timeout: 30_000 }, () => {
   });
 
   it('a takeover prints a new token, and the token it replaced is refused at release', () => {
-    seedLearningTree(dir);
+    seedCurationTree(dir);
     fs.writeFileSync(paths.queue, turns(0, 2));
     store.claimQueue(dir, { token: TOKEN_A });
     setMtime(paths.claim, Date.now() - STALE_MS - 1000);
@@ -416,17 +416,17 @@ describe('claim-queue and release-claim ops', { timeout: 30_000 }, () => {
   });
 
   it('release-claim prints gone when the claim has vanished', () => {
-    seedLearningTree(dir);
+    seedCurationTree(dir);
     expect(runJsonHelper(dir, ['release-claim', TOKEN_A])).toEqual({ code: 0, stdout: 'gone\n', stderr: '' });
   });
 
-  // release-claim reads the owner file under the learning lock, so a read that
+  // release-claim reads the owner file under the curation lock, so a read that
   // waited on a FIFO would hold the lock for as long as it waited. Each run is
   // bounded: one that waits is killed at the bound and fails the test.
   it('release-claim returns at once, as for an absent owner file, when the owner file is a symbolic link to a FIFO', { timeout: FIFO_TEST_TIMEOUT_MS }, () => {
-    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'learning-claim-ops-outside-'));
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'curation-claim-ops-outside-'));
     try {
-      seedLearningTree(dir);
+      seedCurationTree(dir);
       fs.writeFileSync(paths.claim, turns(0, 2));
       const fifo = path.join(outside, 'owner');
       makeFifo(fifo);
@@ -442,7 +442,7 @@ describe('claim-queue and release-claim ops', { timeout: 30_000 }, () => {
   });
 
   it('release-claim returns at once, as for an absent owner file, when a FIFO sits at the owner path', { timeout: FIFO_TEST_TIMEOUT_MS }, () => {
-    seedLearningTree(dir);
+    seedCurationTree(dir);
     fs.writeFileSync(paths.claim, turns(0, 2));
     makeFifo(paths.owner);
 
@@ -452,7 +452,7 @@ describe('claim-queue and release-claim ops', { timeout: 30_000 }, () => {
   });
 
   it('claim-queue takes no argument and release-claim takes exactly one token, refusing anything else', () => {
-    seedLearningTree(dir);
+    seedCurationTree(dir);
     fs.writeFileSync(paths.queue, turns(0, 1));
     const before = snapshotTree(dir);
 
@@ -464,7 +464,7 @@ describe('claim-queue and release-claim ops', { timeout: 30_000 }, () => {
     expect(snapshotTree(dir)).toEqual(before);
   });
 
-  it('release-claim refuses without a learning directory and creates nothing', () => {
+  it('release-claim refuses without a curation directory and creates nothing', () => {
     const run = runJsonHelper(dir, ['release-claim', TOKEN_A]);
     expect(run.code).toBe(1);
     expect(run.stderr).toBe(`release-claim: no .devflow/curation/ under ${fs.realpathSync(dir)} — run from the project root\n`);
@@ -472,7 +472,7 @@ describe('claim-queue and release-claim ops', { timeout: 30_000 }, () => {
   });
 
   it('five concurrent claimants: exactly one claims, four answer busy, and no queued row is lost', async () => {
-    seedLearningTree(dir);
+    seedCurationTree(dir);
     fs.writeFileSync(paths.queue, turns(0, 20));
 
     const [appended, ...claims] = await Promise.all([
@@ -491,8 +491,8 @@ describe('claim-queue and release-claim ops', { timeout: 30_000 }, () => {
   });
 });
 
-describe('heartbeat: learning ops refresh the claim, other ops never touch it', { timeout: 30_000 }, () => {
-  const LEARNING_OP_RUNS: ReadonlyArray<{ args: readonly string[]; input?: string }> = [
+describe('heartbeat: curation ops refresh the claim, other ops never touch it', { timeout: 30_000 }, () => {
+  const CURATION_OP_RUNS: ReadonlyArray<{ args: readonly string[]; input?: string }> = [
     { args: ['assign-anchor', 'decision', 'obs_heartbeat'] },
     { args: ['retire-anchor', 'ADR-001', 'Retired'], input: '{"reason":"test"}' },
     { args: ['restore-anchor', 'ADR-001'] },
@@ -507,16 +507,16 @@ describe('heartbeat: learning ops refresh the claim, other ops never touch it', 
   let paths: ClaimPaths;
 
   beforeEach(() => {
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'learning-heartbeat-'));
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'curation-heartbeat-'));
     paths = claimPaths(dir);
-    seedLearningTree(dir);
+    seedCurationTree(dir);
   });
 
   afterEach(() => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  for (const { args, input } of LEARNING_OP_RUNS) {
+  for (const { args, input } of CURATION_OP_RUNS) {
     it(`${args[0]} refreshes an existing claim's mtime and leaves its bytes as they were`, () => {
       fs.writeFileSync(paths.claim, turns(0, 2));
       const started = Date.now();
@@ -541,8 +541,8 @@ describe('heartbeat: learning ops refresh the claim, other ops never touch it', 
     expect(Math.abs(fs.statSync(paths.claim).mtimeMs - backdated)).toBeLessThan(1000);
   });
 
-  it('no learning op and no generic op creates a claim', () => {
-    for (const { args, input } of [...LEARNING_OP_RUNS, { args: ['get-field', 'a'], input: '{"a":"b"}' }]) {
+  it('no curation op and no generic op creates a claim', () => {
+    for (const { args, input } of [...CURATION_OP_RUNS, { args: ['get-field', 'a'], input: '{"a":"b"}' }]) {
       runJsonHelper(dir, args, input);
       expect(fs.existsSync(paths.claim), `${args[0]} created no claim`).toBe(false);
     }

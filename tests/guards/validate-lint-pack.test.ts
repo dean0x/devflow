@@ -25,7 +25,7 @@ import * as path from 'path'
 
 import {
   ROOT, agentReferencePath, isAgentBlock, parseFences, requireDistFile, requireDistFiles, resolveAgentSource,
-  resolveAllAgents, resolveLearningOffSource, sectionBetween, walkFiles,
+  resolveAllAgents, resolveCurationOffSource, sectionBetween, walkFiles,
 } from '../helpers.js'
 
 /** The Validate agent body, as resolveAgentSource reads it, in bytes. Registered as `validate-body-max`; lowered, never raised. */
@@ -50,7 +50,7 @@ function commandDocs(): Doc[] {
   const docs: Doc[] = []
   for (const file of requireDistFiles()) {
     docs.push({ label: `dist/commands/${file}`, text: requireDistFile(file) })
-    const off = resolveLearningOffSource('commands', file.replace(/\.md$/, ''))
+    const off = resolveCurationOffSource('commands', file.replace(/\.md$/, ''))
     if (off !== null) docs.push({ label: `dist/curation-off/commands/${file}`, text: off })
   }
   return docs

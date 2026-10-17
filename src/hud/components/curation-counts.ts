@@ -61,7 +61,7 @@ function readBoundedLedger(ledgerPath: string): string | null {
  * the rendered decisions.md/pitfalls.md, so the HUD never couples to markdown
  * format. A row counts when anchor_id is set and isActiveDecisionsStatus calls
  * its decisions_status active — the one status list, which core/observations.ts
- * shares with the hooks' learning store and the renderer — so the numbers always
+ * shares with the hooks' curation store and the renderer — so the numbers always
  * equal the entries visible in the rendered files.
  */
 interface LedgerCountRow {
@@ -151,7 +151,7 @@ function exists(target: string): boolean {
  * refusal marker, which the shell writes at `<home>/.devflow/logs/curation-move.<key>.skip`
  * under the key of this same root. The old ledger itself is never opened or counted.
  */
-function gatherMoveNotice(ledgerRoot: string, home: string): CurationMoveNotice | null {
+export function gatherMoveNotice(ledgerRoot: string, home: string): CurationMoveNotice | null {
   if (!exists(path.join(ledgerRoot, '.devflow', LEGACY_NAMES.folder))) return null;
   const marker = path.join(home, '.devflow', 'logs', `curation-move.${curationMoveMarkerKey(ledgerRoot)}.skip`);
   return exists(marker) ? 'refused' : 'pointer';
@@ -161,6 +161,14 @@ const MOVE_NOTICE_TEXT: Readonly<Record<CurationMoveNotice, string>> = {
   pointer: 'open Claude Code in this project once, or run devflow init',
   refused: 'move refused, see the hook log',
 };
+
+/**
+ * The one line the HUD and `devflow curation` print for a project whose ledger still sits in
+ * the old folder. Both come through here, so they say the same words.
+ */
+export function formatMoveNotice(notice: CurationMoveNotice): string {
+  return `Curation: ${MOVE_NOTICE_TEXT[notice]}`;
+}
 
 /**
  * HUD component: decisions/pitfalls counts.
@@ -177,7 +185,7 @@ export default async function curationCounts(
   const { decisions, pitfalls } = data;
   if (decisions + pitfalls === 0) {
     if (data.move === undefined) return null;
-    const notice = `Curation: ${MOVE_NOTICE_TEXT[data.move]}`;
+    const notice = formatMoveNotice(data.move);
     return { text: dim(notice), raw: notice };
   }
 

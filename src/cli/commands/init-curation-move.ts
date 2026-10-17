@@ -34,7 +34,7 @@ import * as path from 'path';
 import { pooled } from '../../core/migrations.js';
 import { CURATION_DIR_NAME, CURATION_TUNING_FILE_NAME, LEGACY_NAMES, getGlobalCurateTuningConfigPath } from '../../core/project-paths.js';
 import type {
-  LearningStoreModule,
+  CurationStoreModule,
   LedgerMoveOptions,
   LedgerMoveOutcome,
   LedgerSweepOutcome,
@@ -74,7 +74,7 @@ export interface ProjectLedgerMoveIO {
   /** The names directly inside a directory, or null when it cannot be listed. */
   readdir(dir: string): Promise<readonly string[] | null>;
   /** The store's two move operations. */
-  readonly store: Pick<LearningStoreModule, 'moveLedger' | 'sweepLedgerBackups'>;
+  readonly store: Pick<CurationStoreModule, 'moveLedger' | 'sweepLedgerBackups'>;
   /** Epoch milliseconds. */
   now(): number;
 }
