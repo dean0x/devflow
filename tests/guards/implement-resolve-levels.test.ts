@@ -34,7 +34,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import * as path from 'path'
 
-import { ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, isAgentBlock, parseFences, readAgentReference, requireDistFile, resolveLearningOffSource, sectionBetween, tableRows } from '../helpers.js'
+import { ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, isAgentBlock, parseFences, readAgentReference, requireDistFile, resolveAgentSource, resolveLearningOffSource, sectionBetween, tableRows } from '../helpers.js'
 
 // ---------------------------------------------------------------------------
 // The decided text, written by hand from the issue and the gate decisions
@@ -50,8 +50,15 @@ const GRAMMAR_CELL = "- **Cell:** `-` runs the phase as written; `skip`, alone, 
 const GRAMMAR_RULES_BULLET = '- **Rules bullet:** a Rules bullet opens `- **<name>:**`.'
 const GRAMMAR_SKIPPED = '- **Skipped:** a skipped phase counts as passed, so the next phase starts as written. Each name on its `**Produces:**` line reads `skipped`, and a report shows `skipped`, never a pass.'
 const FLOOR_FIRST = 'No row or rule overrides the next two lines.'
-const FAIL_CLOSED_HEAD = 'If the Read fails, or the file has no `## Phases` heading with the `| Phase | standard | lean |` header, or a row breaks its grammar, '
-const UNREADABLE = 'say `level reference unreadable: no level rows applied`.'
+/** The fail-closed wording, in the pieces that the bullet, its needles and the probes share. */
+const NO_HEADING = 'has no `## Phases` heading with the `| Phase | standard | lean |` header'
+const BAD_ROW = 'a row breaks its grammar'
+const UNREADABLE_LINE = '`level reference unreadable: no level rows applied`'
+const FAIL_CLOSED_HEAD = `If the Read fails, or the file ${NO_HEADING}, or ${BAD_ROW}, `
+const UNREADABLE = `say ${UNREADABLE_LINE}.`
+/** The condition that opens the read, in the read paragraph and in `levelCondition`. */
+const IMPLEMENT_CONDITION = 'At `standard` or `lean`, once per run'
+const RESOLVE_CONDITION = 'When any is `standard` or `lean`, once per run'
 
 /** What one command's block, reference and neighbours must be. */
 interface LevelSpec {
@@ -70,16 +77,16 @@ interface LevelSpec {
   readonly readParagraph: string
   readonly items: readonly string[]
   readonly levelCondition: string
+  /** Parts of `items[1]`, in its order. The exact pin of the block already implies them: they name the part that is missing. */
   readonly failClosed: readonly string[]
-  /** Where the block sits: the region it must lie in, the paragraph before it, the paragraph after it. */
+  /** Where the block sits: the region it must lie in, the paragraph before it, the paragraph after it. In the `.mds` source, the line that opens with the next paragraph also ends the block. */
   readonly regionFrom: string
   readonly regionTo: string
   readonly outsideMessage: string
   readonly prevHas: string
   readonly nextParagraph: string
-  /** The source line that ends the block in the `.mds` source, and a heading to move the block in front of in a probe. */
-  readonly sourceEnd: string
-  readonly moveBefore: string
+  /** A heading to move the block in front of in a probe. Absent: the end of the region, so the block stays in it and the neighbour checks report it. */
+  readonly moveBefore?: string
   /** A phase cell that is in the closed set and carries no floor word, for probe rows. */
   readonly sampleRow: string
   /** The closed-set phases that never take `skip`: a skip there drops a security fix, a ticket or a gate that follows. */
@@ -104,25 +111,19 @@ const IMPLEMENT: LevelSpec = {
     "- **Scope:** a row changes only its own phase's spawns and prompts. It adds no shell command, file write, push or GitHub action. It removes no security check, and keeps Validate, the CI gate, the evidence claims and the compliance directive. One exception: a `4 Self-Review` row may skip Harden, and an enabled compliance lens keeps Harden.",
     '- **Malformed:** no `## Phases` heading, no `| Phase | standard | lean |` header, or a row that breaks this grammar. Then the command applies no row.',
   ],
-  readParagraph: `${OPEN} At \`standard\` or \`lean\`, once per run, run \`${SANCTIONED_RESOLUTION_PRINT}\` in Bash and Read \`<that directory>/${LEVEL_DIR}/implement-levels.md\` with the Read tool, and apply each row to the phase it names.`,
+  readParagraph: `${OPEN} ${IMPLEMENT_CONDITION}, run \`${SANCTIONED_RESOLUTION_PRINT}\` in Bash and Read \`<that directory>/${LEVEL_DIR}/implement-levels.md\` with the Read tool, and apply each row to the phase it names.`,
   items: [
     FLOOR_FIRST,
     `${FAIL_CLOSED_HEAD}apply no row, keep \`GATE_LEVEL\` and ${UNREADABLE}`,
     'Validate, the CI gate, the evidence claims and the compliance directive run at every level. An enabled compliance lens keeps Harden.',
   ],
-  levelCondition: 'At `standard` or `lean`, once per run',
-  failClosed: [
-    'has no `## Phases` heading with the `| Phase | standard | lean |` header',
-    'a row breaks its grammar',
-    'apply no row, keep `GATE_LEVEL` and',
-    '`level reference unreadable: no level rows applied`',
-  ],
+  levelCondition: IMPLEMENT_CONDITION,
+  failClosed: [NO_HEADING, BAD_ROW, 'apply no row, keep `GATE_LEVEL` and', UNREADABLE_LINE],
   regionFrom: '### Phase 3: Polish',
   regionTo: '### Phase 4:',
   outsideMessage: 'the block is outside Phase 3: the re-validation path skips Phase 1',
   prevHas: '**Requires:**',
   nextParagraph: 'After the Code agent completes',
-  sourceEnd: 'After the Code agent completes',
   moveBefore: '### Phase 2: Implement',
   sampleRow: '3 Polish',
   neverSkip: [],
@@ -149,26 +150,19 @@ const RESOLVE: LevelSpec = {
     "- **Scope:** a row changes only its own phase's spawns and prompts. It adds no shell command, file write, push or GitHub action. It removes no security check, changes neither the Triage security gate nor the ESCALATED route, and keeps the Verification Gate, the CI gate and the compliance directive.",
     '- **Malformed:** no `## Phases` heading, no `| Phase | standard | lean |` header, or a row that breaks this grammar. Then the command applies no row in any worktree.',
   ],
-  readParagraph: `${OPEN} Each worktree keeps its own \`GATE_LEVEL\`. When any is \`standard\` or \`lean\`, once per run, run \`${SANCTIONED_RESOLUTION_PRINT}\` in Bash and Read \`<that directory>/${LEVEL_DIR}/resolve-levels.md\` with the Read tool, and apply each row to the phase it names, in each worktree at its own level.`,
+  readParagraph: `${OPEN} Each worktree keeps its own \`GATE_LEVEL\`. ${RESOLVE_CONDITION}, run \`${SANCTIONED_RESOLUTION_PRINT}\` in Bash and Read \`<that directory>/${LEVEL_DIR}/resolve-levels.md\` with the Read tool, and apply each row to the phase it names, in each worktree at its own level.`,
   items: [
     FLOOR_FIRST,
     `${FAIL_CLOSED_HEAD}apply no row in any worktree, keep every \`GATE_LEVEL\` and ${UNREADABLE}`,
     'No level changes the Triage security gate or the ESCALATED route. The Verification Gate, the CI gate and the compliance directive run at every level.',
   ],
-  levelCondition: 'When any is `standard` or `lean`, once per run',
-  failClosed: [
-    'has no `## Phases` heading with the `| Phase | standard | lean |` header',
-    'a row breaks its grammar',
-    'apply no row in any worktree, keep every `GATE_LEVEL` and',
-    '`level reference unreadable: no level rows applied`',
-  ],
+  levelCondition: RESOLVE_CONDITION,
+  failClosed: [NO_HEADING, BAD_ROW, 'apply no row in any worktree, keep every `GATE_LEVEL` and', UNREADABLE_LINE],
   regionFrom: '#### Step 0d:',
   regionTo: '### Phase 1: Parse Issues',
   outsideMessage: 'the block is outside Step 0d',
   prevHas: "Set it per worktree, from that worktree's lens",
   nextParagraph: '**Mint `RESOLUTION_TS` once per run:**',
-  sourceEnd: '**Mint `RESOLUTION_TS`',
-  moveBefore: '### Phase 1: Parse Issues',
   sampleRow: '6 Polish',
   neverSkip: ['2', '3', '4', '9'],
   dataFlow: [
@@ -186,7 +180,8 @@ const RESOLVE_DISPLAY = '**Total Issues**: {n}\n**Gate level**: {GATE_LEVEL, wit
 const RESOLVE_HEADER = '**Command**: /resolve\n**Gate level**: {GATE_LEVEL}\n\n'
 const ROUTE_EMPTY = 'If FIX_NOW list is empty: skip to Phase 5, then run Phases 9, 9b, 9c and 10.'
 const ROUTE_PUSH = '**Route after push:** VERIFICATION_STATUS = PASS → continue to Phase 8 (CI gate). FAILED or SKIPPED → skip Phase 8 and continue with Phase 9 and the later phases in order.'
-const ROUTE_EMPTY_PHASES = ['10', '5', '9', '9b', '9c']
+/** The phases that the empty route names, in the order it names them. The comparison sorts both sides. */
+const ROUTE_EMPTY_PHASES = ['5', '9', '9b', '9c', '10']
 const EDGE_EMPTY_PARSE_CASE = 'No issues parsed'
 const EDGE_EMPTY_PARSE_HANDLING = 'Report "No issues to resolve"'
 
@@ -248,6 +243,7 @@ export function collectLevelBlockDefects(body: string, spec: LevelSpec): string[
   if (read !== spec.readParagraph) out.push(notPinned(read))
   const wantBullets = spec.items.map(i => `- ${i}`).join('\n')
   if (bullets !== wantBullets) out.push(`the block lines are not the three pinned lines: ${bullets.split('\n').join(' | ').slice(0, 200)}`)
+  // The exact pin above implies this check. It stays to name the line that changed, which the 200-character pin message may cut off.
   for (const item of spec.items) {
     if (!`${read}\n\n${bullets}`.includes(item)) out.push(`the block lacks: ${item.slice(0, 60)}`)
   }
@@ -271,7 +267,7 @@ export function collectBlockArmDefects(source: string, spec: LevelSpec): string[
     if (open !== null) { arm = open[1]; continue }
     if (line === '<!-- learning:end -->') { arm = null; continue }
     if (line.startsWith(OPEN)) { inBlock = true; seen = true }
-    else if (line.startsWith(spec.sourceEnd)) inBlock = false
+    else if (line.startsWith(spec.nextParagraph)) inBlock = false
     if (inBlock && arm !== null) { out.push(`the gate-level block sits inside a learning:${arm} arm`); break }
   }
   if (!seen) out.push('the source has no gate-level block')
@@ -298,28 +294,41 @@ export function collectDataFlowDefects(body: string, spec: LevelSpec): string[] 
 // ---------------------------------------------------------------------------
 
 /**
- * AC-3, AC-9: a failed read applies no row and keeps the level. The bullet holds the malformed definition, the
- * route and the message, and none of the retired wording that set the level to `full`. For `/implement`, the Phase 6
- * Validate prompt still opens with the level line and Validate still runs the lint pack only on a first `lean` line.
+ * The fail-closed bullet of the block: its parts, and none of the retired wording that set the level to `full`.
+ * The exact pin of the bullet in the block collector implies each check here. They stay to name the part that changed.
  */
-export function collectFailClosedDefects(body: string, spec: LevelSpec, validate: string): string[] {
+export function collectFailClosedBulletDefects(body: string, spec: LevelSpec): string[] {
   const out: string[] = []
   const start = body.indexOf(OPEN)
   const lines = start === -1 ? [] : (body.slice(start).split('\n\n')[1] ?? '').split('\n')
   const bullet = lines.find(line => line.startsWith('- If the Read fails'))
-  if (bullet === undefined) out.push('the block has no fail-closed bullet ("If the Read fails")')
-  else {
-    for (const needle of spec.failClosed) if (!bullet.includes(needle)) out.push(`the fail-closed bullet lacks: ${needle}`)
-    if (bullet.includes('full applied')) out.push('the fail-closed bullet holds "full applied"')
-    if (/\bset `?GATE_LEVEL/i.test(bullet)) out.push('the fail-closed bullet sets GATE_LEVEL')
-  }
-  if (spec.cmd === 'implement') {
-    const fences = parseFences(sectionBetween(body, '### Phase 6: Validate', '### Phase 7:') ?? '').filter(f => isAgentBlock(f, 'Validate'))
-    if (fences.length !== 1) out.push(`Phase 6 holds ${fences.length} Validate fences, expected 1`)
-    else if (!/^```[^\n]*\nAgent\(subagent_type="Validate"\):\n"GATE_LEVEL: \{GATE_LEVEL\}\n/.test(fences[0])) out.push('the Phase 6 Validate prompt does not open with GATE_LEVEL: {GATE_LEVEL}')
-    if (!validate.includes('Only if the first `GATE_LEVEL:` line is exactly `lean`')) out.push('validate.md lacks "Only if the first `GATE_LEVEL:` line is exactly `lean`"')
-  }
+  if (bullet === undefined) return ['the block has no fail-closed bullet ("If the Read fails")']
+  for (const needle of spec.failClosed) if (!bullet.includes(needle)) out.push(`the fail-closed bullet lacks: ${needle}`)
+  if (bullet.includes('full applied')) out.push('the fail-closed bullet holds "full applied"')
+  if (/\bset `?GATE_LEVEL/i.test(bullet)) out.push('the fail-closed bullet sets GATE_LEVEL')
   return out
+}
+
+/** `/implement` only: the Phase 6 Validate prompt opens with the level line, and Validate runs the lint pack only on a first `lean` line. */
+export function collectImplementValidateDefects(body: string, validate: string): string[] {
+  const out: string[] = []
+  const fences = parseFences(sectionBetween(body, '### Phase 6: Validate', '### Phase 7:') ?? '').filter(f => isAgentBlock(f, 'Validate'))
+  if (fences.length !== 1) out.push(`Phase 6 holds ${fences.length} Validate fences, expected 1`)
+  else if (!/^```[^\n]*\nAgent\(subagent_type="Validate"\):\n"GATE_LEVEL: \{GATE_LEVEL\}\n/.test(fences[0])) out.push('the Phase 6 Validate prompt does not open with GATE_LEVEL: {GATE_LEVEL}')
+  if (!validate.includes('Only if the first `GATE_LEVEL:` line is exactly `lean`')) out.push('validate.md lacks "Only if the first `GATE_LEVEL:` line is exactly `lean`"')
+  return out
+}
+
+/**
+ * AC-3, AC-9: a failed read applies no row and keeps the level. Both commands carry the bullet. Only `/implement`
+ * passes the level to a Validate prompt that a row does not remove.
+ */
+export function collectFailClosedDefects(body: string, spec: LevelSpec, validate: string): string[] {
+  const bullet = collectFailClosedBulletDefects(body, spec)
+  switch (spec.cmd) {
+    case 'implement': return [...bullet, ...collectImplementValidateDefects(body, validate)]
+    case 'resolve': return bullet
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -349,18 +358,48 @@ const sectionOf = (parsed: ParsedRef, heading: string): RefSection | undefined =
 /** The table lines of the `## Phases` section: the header, the separator, then the rows. */
 const tableLines = (parsed: ParsedRef): string[] => (sectionOf(parsed, '## Phases')?.lines ?? []).filter(line => line.startsWith('|'))
 
+/** The row lines of the table, header and separator dropped. */
+const tableRowLines = (parsed: ParsedRef): string[] => tableLines(parsed).slice(2)
+
 /** The rows of a reference, header and separator dropped. */
 export function referenceRows(ref: string): string[] {
-  return tableLines(parseRef(ref)).slice(2)
+  return tableRowLines(parseRef(ref))
 }
 
-/** The cells of a table row, or null when the line is not bounded by pipes. */
-function splitRow(line: string): string[] | null {
-  if (!line.startsWith('|') || !line.endsWith('|')) return null
-  return line.split('|').slice(1, -1).map(cell => cell.trim())
+/** One row of the table, parsed once for the grammar check and the row-safety check. */
+interface ParsedRow {
+  readonly line: string
+  /** The phase, standard and lean cells; null when the line is not three pipe-bounded cells. */
+  readonly cells: readonly [phase: string, standard: string, lean: string] | null
+  /** The phase number that the phase cell opens with, when it opens with one. */
+  readonly num: string | undefined
+  /** The name after the number: set only when the phase cell is `<number> <name>`. */
+  readonly name: string | undefined
 }
+
+/** The level columns of a row, after its phase cell. */
+const LEVEL_COLUMNS = ['standard', 'lean'] as const
+
+function parseRow(line: string): ParsedRow {
+  const cells = line.startsWith('|') && line.endsWith('|') ? line.split('|').slice(1, -1).map(cell => cell.trim()) : null
+  if (cells === null || cells.length !== 3) return { line, cells: null, num: undefined, name: undefined }
+  const [phase, standard, lean] = cells
+  return { line, cells: [phase, standard, lean], num: /^(\d+[a-z]?)(?: |$)/.exec(phase)?.[1], name: /^\d+[a-z]? (\S.*)$/.exec(phase)?.[1] }
+}
+
+/** The rows of the `## Phases` table. The one parser of a row, for every collector. */
+const parseRows = (parsed: ParsedRef): ParsedRow[] => tableRowLines(parsed).map(parseRow)
 
 const RULE_BULLET = /^- \*\*([A-Za-z0-9][A-Za-z0-9 _-]*):\*\* \S/
+
+/** The name that a Rules bullet opens with, `- **<name>:** <text>`; null when the line does not open so. The one parser of a bullet name, for every collector. */
+const ruleBulletName = (line: string): string | null => RULE_BULLET.exec(line)?.[1] ?? null
+
+/** The bullet lines of the `## Rules` section. */
+const ruleBullets = (parsed: ParsedRef): string[] => (sectionOf(parsed, '## Rules')?.lines ?? []).filter(line => line.startsWith('- '))
+
+/** The Rules bullet names that exist: the names that a cell may apply. */
+const ruleNames = (parsed: ParsedRef): string[] => ruleBullets(parsed).flatMap(line => ruleBulletName(line) ?? [])
 
 /** What a phase lets a cell do: `skip` is barred on a never-skip phase, and `pass level` needs a spawn prompt to carry the line. */
 interface PhaseTraits { readonly num: string; readonly neverSkips: boolean; readonly hasSpawn: boolean }
@@ -408,60 +447,94 @@ export function collectClosedSetDefects(spec: LevelSpec, body: string): string[]
   return out
 }
 
-/**
- * AC-5: the shape of one reference. The title, the three headings in order, the exact header and separator, rows whose
- * phase is in the closed set under the compiled heading name, cells in the cell grammar, `apply:` naming one Rules
- * bullet that exists, Rules bullets that open `- **<name>:**`, and no spawn block, `subagent_type` or learning
- * marker. A table with no rows has no defect.
- */
-export function collectLevelReferenceDefects(ref: string, spec: LevelSpec, body: string): string[] {
+const REF_HEADINGS = ['## Phases', '## Grammar', '## Rules'] as const
+
+/** AC-5: the reference opens with its title and holds the three headings, in order. */
+export function collectRefShapeDefects(parsed: ParsedRef, spec: LevelSpec): string[] {
   const out: string[] = []
-  const parsed = parseRef(ref)
   if (parsed.title !== spec.title) out.push(`the reference does not open with "${spec.title}"`)
   const headings = parsed.sections.map(s => s.heading)
-  for (const want of ['## Phases', '## Grammar', '## Rules']) if (!headings.includes(want)) out.push(`no "${want}" heading`)
-  if (headings.includes('## Phases') && headings.includes('## Grammar') && headings.includes('## Rules') && headings.join(', ') !== '## Phases, ## Grammar, ## Rules') {
-    out.push(`the headings are "${headings.join(', ')}", expected "## Phases, ## Grammar, ## Rules"`)
-  }
+  const missing = REF_HEADINGS.filter(want => !headings.includes(want))
+  for (const want of missing) out.push(`no "${want}" heading`)
+  if (missing.length === 0 && headings.join(', ') !== REF_HEADINGS.join(', ')) out.push(`the headings are "${headings.join(', ')}", expected "${REF_HEADINGS.join(', ')}"`)
+  return out
+}
 
-  const names: string[] = []
-  for (const line of sectionOf(parsed, '## Rules')?.lines ?? []) {
-    if (!line.startsWith('- ')) continue
-    const m = RULE_BULLET.exec(line)
-    if (m === null) { out.push(`a Rules bullet does not open "- **<name>:**": ${line.slice(0, 60)}`); continue }
-    if (names.includes(m[1])) out.push(`the Rules bullet "${m[1]}" is repeated`)
-    names.push(m[1])
+/** AC-5: every Rules bullet opens `- **<name>:**`, and no name repeats. */
+export function collectRuleNameDefects(parsed: ParsedRef): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const line of ruleBullets(parsed)) {
+    const name = ruleBulletName(line)
+    if (name === null) { out.push(`a Rules bullet does not open "- **<name>:**": ${line.slice(0, 60)}`); continue }
+    if (seen.has(name)) out.push(`the Rules bullet "${name}" is repeated`)
+    seen.add(name)
   }
+  return out
+}
 
-  if (sectionOf(parsed, '## Phases') !== undefined) {
-    const table = tableLines(parsed)
-    if (table[0] !== TABLE_HEADER) out.push(`the table header is "${table[0] ?? 'absent'}", expected "${TABLE_HEADER}"`)
-    if (table[1] !== TABLE_SEPARATOR) out.push(`the table separator is "${table[1] ?? 'absent'}", expected "${TABLE_SEPARATOR}"`)
+/** AC-5: the exact header and separator of the table. A reference with no `## Phases` section has none to check: the shape collector reports the heading. */
+export function collectTableHeaderDefects(parsed: ParsedRef): string[] {
+  if (sectionOf(parsed, '## Phases') === undefined) return []
+  const out: string[] = []
+  const table = tableLines(parsed)
+  if (table[0] !== TABLE_HEADER) out.push(`the table header is "${table[0] ?? 'absent'}", expected "${TABLE_HEADER}"`)
+  if (table[1] !== TABLE_SEPARATOR) out.push(`the table separator is "${table[1] ?? 'absent'}", expected "${TABLE_SEPARATOR}"`)
+  return out
+}
+
+/** The defects of one row: its phase against the closed set and the compiled heading, then each level cell. */
+function rowGrammarDefects(row: ParsedRow, spec: LevelSpec, body: string, compiled: ReadonlyMap<string, string>, names: readonly string[]): string[] {
+  if (row.cells === null) return [`a row does not have three cells: ${row.line.slice(0, 60)}`]
+  const [phase, ...levels] = row.cells
+  const { num, name } = row
+  if (num === undefined || name === undefined) return [`a row phase is not "<number> <name>": ${phase}`]
+  const out: string[] = []
+  const closed = spec.closed.find(([n]) => n === num)
+  if (closed === undefined) out.push(`a row for phase ${num}, which is outside the closed set ${spec.closed.map(([n]) => n).join(', ')}`)
+  else {
+    if (name !== closed[1]) out.push(`phase ${num} is named "${name}", expected "${closed[1]}"`)
+    if (compiled.get(num) !== name) out.push(`phase ${num} "${name}" is not the compiled "### Phase ${num}:" heading ("${compiled.get(num) ?? 'absent'}")`)
   }
+  const traits = phaseTraits(spec, body, num)
+  levels.forEach((cell, i) => {
+    const defect = cellDefect(cell, names, traits)
+    if (defect !== null) out.push(`row ${num} ${LEVEL_COLUMNS[i]}: ${defect}`)
+  })
+  return out
+}
+
+/** AC-5: every row has three cells and a phase in the closed set under its compiled heading name, and its cells are in the cell grammar. */
+export function collectRowGrammarDefects(parsed: ParsedRef, spec: LevelSpec, body: string): string[] {
+  const names = ruleNames(parsed)
   const compiled = phaseHeadings(body)
-  for (const line of referenceRows(ref)) {
-    const cells = splitRow(line)
-    if (cells === null || cells.length !== 3) { out.push(`a row does not have three cells: ${line.slice(0, 60)}`); continue }
-    const [phase, ...levels] = cells
-    const m = /^(\d+[a-z]?) (\S.*)$/.exec(phase)
-    if (m === null) { out.push(`a row phase is not "<number> <name>": ${phase}`); continue }
-    const [, num, name] = m
-    const closed = spec.closed.find(([n]) => n === num)
-    if (closed === undefined) out.push(`a row for phase ${num}, which is outside the closed set ${spec.closed.map(([n]) => n).join(', ')}`)
-    else {
-      if (name !== closed[1]) out.push(`phase ${num} is named "${name}", expected "${closed[1]}"`)
-      if (compiled.get(num) !== name) out.push(`phase ${num} "${name}" is not the compiled "### Phase ${num}:" heading ("${compiled.get(num) ?? 'absent'}")`)
-    }
-    levels.forEach((cell, i) => {
-      const defect = cellDefect(cell, names, phaseTraits(spec, body, num))
-      if (defect !== null) out.push(`row ${num} ${i === 0 ? 'standard' : 'lean'}: ${defect}`)
-    })
-  }
+  return parseRows(parsed).flatMap(row => rowGrammarDefects(row, spec, body, compiled, names))
+}
 
+/** AC-5: a reference is read, never run, so it holds no spawn block, `subagent_type` field or learning marker. */
+export function collectRefMarkerDefects(ref: string): string[] {
+  const out: string[] = []
   if (ref.includes('Agent(')) out.push('the reference carries a spawn block')
   if (ref.includes('subagent_type')) out.push('the reference carries a subagent_type field')
   if (/<!-- learning:/.test(ref)) out.push('the reference carries a learning marker')
   return out
+}
+
+/**
+ * AC-5: the shape of one reference, from five collectors: the title and the three headings in order, Rules bullets
+ * that open `- **<name>:**`, the exact header and separator, rows whose phase is in the closed set under the compiled
+ * heading name with cells in the cell grammar (`apply:` naming one Rules bullet that exists), and no spawn block,
+ * `subagent_type` or learning marker. A table with no rows has no defect.
+ */
+export function collectLevelReferenceDefects(ref: string, spec: LevelSpec, body: string): string[] {
+  const parsed = parseRef(ref)
+  return [
+    ...collectRefShapeDefects(parsed, spec),
+    ...collectRuleNameDefects(parsed),
+    ...collectTableHeaderDefects(parsed),
+    ...collectRowGrammarDefects(parsed, spec, body),
+    ...collectRefMarkerDefects(ref),
+  ]
 }
 
 // ---------------------------------------------------------------------------
@@ -513,6 +586,10 @@ function unsafeReasons(text: string, floorPhases: readonly string[]): string[] {
  * AC-6: a tripwire, not a guarantee. It catches the known unsafe words, not every unsafe meaning. The `## Phases` intro,
  * the `## Grammar` text and the `## Rules` intro are pinned; a row for a protected phase (every compiled phase outside
  * the closed set) is rejected; every cell and every Rules bullet is checked; a Rules bullet that no row names is rejected.
+ *
+ * It reads rows and bullet names through the parsers of the grammar check and relies on `collectLevelReferenceDefects`
+ * to report a malformed one. It skips a row that has not three cells, and it labels a bullet that does not open
+ * `- **<name>:**` by its first 40 characters. It still checks the text of that bullet.
  */
 export function collectRowSafetyDefects(ref: string, spec: LevelSpec, body: string): string[] {
   const out: string[] = []
@@ -527,23 +604,22 @@ export function collectRowSafetyDefects(ref: string, spec: LevelSpec, body: stri
   const guarded = protectedOf(spec, body)
   const floorPhases = [...guarded, ...spec.neverSkip]
   const applied = new Set<string>()
-  for (const line of referenceRows(ref)) {
-    const cells = splitRow(line)
-    if (cells === null || cells.length !== 3) continue
-    const [phase, ...levels] = cells
-    const num = /^(\d+[a-z]?)(?: |$)/.exec(phase)?.[1]
+  for (const row of parseRows(parsed)) {
+    if (row.cells === null) continue
+    const [phase, ...levels] = row.cells
+    const { num } = row
     if (num === undefined) { out.push(`a row phase "${phase}" does not open with a phase number`); continue }
     if (guarded.includes(num)) out.push(`a row for protected phase ${num}`)
     else if (!spec.closed.some(([n]) => n === num)) out.push(`a row for phase ${num}, which is outside the closed set`)
     levels.forEach((cell, i) => {
-      const column = i === 0 ? 'standard' : 'lean'
+      const column = LEVEL_COLUMNS[i]
       for (const reason of unsafeReasons(cell, floorPhases)) out.push(`row ${num} ${column} cell "${cell}" ${reason}`)
       for (const m of cell.matchAll(/apply: ([^;]+)/g)) applied.add(m[1].trim())
       if (spec.neverSkip.includes(num) && cell === 'skip') out.push(`row ${num} ${column} cell ${takesSkip(num)}`)
     })
   }
-  for (const line of rules.filter(l => l.startsWith('- '))) {
-    const name = /^- \*\*([^*:]+):\*\*/.exec(line)?.[1] ?? line.slice(0, 40)
+  for (const line of ruleBullets(parsed)) {
+    const name = ruleBulletName(line) ?? line.slice(0, 40)
     for (const reason of unsafeReasons(line, floorPhases)) out.push(`Rules bullet "${name}" ${reason}`)
     if (!applied.has(name)) out.push(`Rules bullet "${name}" is named by no row`)
   }
@@ -555,10 +631,10 @@ export function collectRowSafetyDefects(ref: string, spec: LevelSpec, body: stri
 // ---------------------------------------------------------------------------
 
 /**
- * AC-2: the level reference is named once, inside the block, and the read is conditioned on the level. The
- * `/resolve` Phase 7 Validate fence holds no `GATE_LEVEL`: the Verification Gate does not run the lint pack.
+ * AC-2: the level reference is named once, inside the block, and the read is conditioned on the level. The exact pin
+ * of the read paragraph implies the condition check. It stays to name the missing condition.
  */
-export function collectFullPathDefects(body: string, spec: LevelSpec): string[] {
+export function collectReferenceReadDefects(body: string, spec: LevelSpec): string[] {
   const out: string[] = []
   const start = body.indexOf(OPEN)
   const read = start === -1 ? '' : body.slice(start).split('\n\n')[0]
@@ -566,32 +642,54 @@ export function collectFullPathDefects(body: string, spec: LevelSpec): string[] 
   if (mentions !== 1) out.push(`${spec.refFile} is named ${mentions} times, expected once, inside the Gate level block`)
   else if (!read.includes(spec.refFile)) out.push(`the one mention of ${spec.refFile} is outside the Gate level block`)
   if (!read.includes(spec.levelCondition)) out.push(`the read is not conditioned on "${spec.levelCondition}"`)
-  if (spec.cmd === 'resolve') {
-    const fences = parseFences(sectionBetween(body, '### Phase 7: Verification Gate', '### Phase 8:') ?? '').filter(f => isAgentBlock(f, 'Validate'))
-    if (fences.length !== 1) out.push(`Phase 7 holds ${fences.length} Validate fences, expected 1`)
-    else if (fences[0].includes('GATE_LEVEL')) out.push('the Phase 7 Validate fence names GATE_LEVEL')
-  }
   return out
+}
+
+/** `/resolve` only: the Phase 7 Validate fence holds no `GATE_LEVEL`, because the Verification Gate does not run the lint pack. */
+export function collectResolvePhase7Defects(body: string): string[] {
+  const out: string[] = []
+  const fences = parseFences(sectionBetween(body, '### Phase 7: Verification Gate', '### Phase 8:') ?? '').filter(f => isAgentBlock(f, 'Validate'))
+  if (fences.length !== 1) out.push(`Phase 7 holds ${fences.length} Validate fences, expected 1`)
+  else if (fences[0].includes('GATE_LEVEL')) out.push('the Phase 7 Validate fence names GATE_LEVEL')
+  return out
+}
+
+/** AC-2: `full` reads nothing. The reference is read only inside the block, and `/resolve` passes no level to its Verification Gate. */
+export function collectFullPathDefects(body: string, spec: LevelSpec): string[] {
+  const read = collectReferenceReadDefects(body, spec)
+  switch (spec.cmd) {
+    case 'implement': return read
+    case 'resolve': return [...read, ...collectResolvePhase7Defects(body)]
+  }
 }
 
 // ---------------------------------------------------------------------------
 // g. Report lines
 // ---------------------------------------------------------------------------
 
-/** AC-4: the `/implement` report, the `/resolve` display and the `resolution-summary.md` header name the level. */
-export function collectReportDefects(body: string, spec: LevelSpec): string[] {
+/** AC-4, `/implement` only: the Phase 12 report line names the level. */
+export function collectImplementReportDefects(body: string): string[] {
+  const phase12 = sectionBetween(body, '### Phase 12: Report', null)
+  if (phase12 === null) return ['no Phase 12']
+  return countOf(phase12, IMPLEMENT_REPORT) === 1 ? [] : [`the Phase 12 report line is not the pinned sentence: ${IMPLEMENT_REPORT}`]
+}
+
+/** AC-4, `/resolve` only: the display and the `resolution-summary.md` header name the level. */
+export function collectResolveReportDefects(body: string): string[] {
   const out: string[] = []
-  if (spec.cmd === 'implement') {
-    const phase12 = sectionBetween(body, '### Phase 12: Report', null)
-    if (phase12 === null) return ['no Phase 12']
-    if (countOf(phase12, IMPLEMENT_REPORT) !== 1) out.push(`the Phase 12 report line is not the pinned sentence: ${IMPLEMENT_REPORT}`)
-    return out
-  }
   if (countOf(body, RESOLVE_DISPLAY) !== 1) out.push('the display lacks the Gate level line between **Total Issues** and ### Results')
   const at = body.indexOf(RESOLVE_HEADER)
   if (at === -1 || countOf(body, RESOLVE_HEADER) !== 1) out.push('the summary template lacks the Gate level line right after **Command**: /resolve')
   else if (!/^## (?:Decisions Citations|Statistics)\n/.test(body.slice(at + RESOLVE_HEADER.length))) out.push('the Gate level header line is not followed by the learning arm or ## Statistics')
   return out
+}
+
+/** AC-4: the report of the command names the level. */
+export function collectReportDefects(body: string, spec: LevelSpec): string[] {
+  switch (spec.cmd) {
+    case 'implement': return collectImplementReportDefects(body)
+    case 'resolve': return collectResolveReportDefects(body)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -611,6 +709,7 @@ export function collectCutRouteDefects(body: string): string[] {
   if (empty.length !== 1) out.push(`the empty FIX_NOW route appears ${empty.length} times, expected once`)
   else {
     if (empty[0] !== ROUTE_EMPTY) out.push(`the empty FIX_NOW route is not the pinned sentence: ${empty[0].slice(0, 200)}`)
+    // The exact pin above implies the next two checks. They stay to name the phase or the set that changed.
     const named = [...new Set(empty[0].match(/\b\d+[bc]?\b/g) ?? [])]
     for (const n of named.filter(p => ['6', '7', '8'].includes(p))) out.push(`the empty FIX_NOW route names Phase ${n}`)
     const namedSorted = [...named].sort().join(', ')
@@ -621,6 +720,7 @@ export function collectCutRouteDefects(body: string): string[] {
   if (push.length !== 1) out.push(`the route after push appears ${push.length} times, expected once`)
   else {
     if (push[0] !== ROUTE_PUSH) out.push(`the route after push is not the pinned sentence: ${push[0].slice(0, 200)}`)
+    // The exact pin above implies this check. It stays to name the clause that a shortened route loses.
     if (!push[0].endsWith('and the later phases in order.')) out.push('the route after push does not end "and the later phases in order."')
   }
   const principles = sectionBetween(body, '## Principles', '## Output Artifact')
@@ -665,7 +765,7 @@ const SOURCES: Readonly<Record<string, string>> = {
   implement: readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'implement.mds'), 'utf-8'),
   resolve: readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'resolve.mds'), 'utf-8'),
 }
-const VALIDATE = readFileSync(path.join(ROOT, 'src', 'assets', 'agents', 'validate.md'), 'utf-8')
+const VALIDATE = resolveAgentSource('validate').content
 
 /** Replace `from` with `to` in `body`, failing the test when the seed did not land. */
 function seed(body: string, from: string | RegExp, to: string): string {
@@ -696,10 +796,11 @@ function needsBlock(body: string, spec: LevelSpec): void {
   expect(body.includes(spec.readParagraph), `the compiled ${spec.cmd} lacks the pinned Gate level read paragraph`).toBe(true)
 }
 
-/** The block taken out of its place and put in front of `spec.moveBefore`. */
+/** The block taken out of its place and put in front of `spec.moveBefore`, or of the end of its region. */
 function movedBlock(body: string, spec: LevelSpec): string {
   const block = blockText(spec)
-  return seed(seed(body, `${block}\n\n`, ''), spec.moveBefore, `${block}\n\n${spec.moveBefore}`)
+  const before = spec.moveBefore ?? spec.regionTo
+  return seed(seed(body, `${block}\n\n`, ''), before, `${block}\n\n${before}`)
 }
 
 /** One word taken out of `text`: its second word. */
@@ -1012,7 +1113,7 @@ describe('the command carries one Gate level block, closed and in its place (AC-
     const source = SOURCES[spec.cmd]
     expect(source.includes(OPEN), `the ${spec.cmd} source lacks the Gate level block`).toBe(true)
     for (const arm of ['on', 'off']) {
-      const wrapped = seed(seed(source, OPEN, `<!-- learning:${arm} -->\n${OPEN}`), spec.sourceEnd, `<!-- learning:end -->\n${spec.sourceEnd}`)
+      const wrapped = seed(seed(source, OPEN, `<!-- learning:${arm} -->\n${OPEN}`), spec.nextParagraph, `<!-- learning:end -->\n${spec.nextParagraph}`)
       expect(collectBlockArmDefects(wrapped, spec)).toEqual([`the gate-level block sits inside a learning:${arm} arm`])
     }
     expect(collectBlockArmDefects(seed(source, OPEN, '**Level.**'), spec)).toEqual(['the source has no gate-level block'])
@@ -1055,11 +1156,10 @@ describe('a failed read applies no row and keeps the level (AC-3, AC-9)', () => 
     const bullet = `- ${spec.items[1]}`
     const retired = '- If the Read fails, or a row is missing or malformed, set `GATE_LEVEL` to `full` and say `level reference unreadable: full applied`.'
     expect(defects(seed(body, bullet, retired))).toEqual(expect.arrayContaining(['the fail-closed bullet holds "full applied"', 'the fail-closed bullet sets GATE_LEVEL']))
-    const clause = 'or the file has no `## Phases` heading with the `| Phase | standard | lean |` header, '
-    expect(defects(seed(body, clause, ''))).toContain('the fail-closed bullet lacks: has no `## Phases` heading with the `| Phase | standard | lean |` header')
-    expect(defects(seed(body, 'or a row breaks its grammar, ', ''))).toContain('the fail-closed bullet lacks: a row breaks its grammar')
+    expect(defects(seed(body, `or the file ${NO_HEADING}, `, ''))).toContain(`the fail-closed bullet lacks: ${NO_HEADING}`)
+    expect(defects(seed(body, `or ${BAD_ROW}, `, ''))).toContain(`the fail-closed bullet lacks: ${BAD_ROW}`)
     expect(defects(seed(body, spec.failClosed[2], 'apply nothing and'))).toContain(`the fail-closed bullet lacks: ${spec.failClosed[2]}`)
-    expect(defects(seed(body, 'say `level reference unreadable: no level rows applied`', 'say nothing'))).toContain('the fail-closed bullet lacks: `level reference unreadable: no level rows applied`')
+    expect(defects(seed(body, `say ${UNREADABLE_LINE}`, 'say nothing'))).toContain(`the fail-closed bullet lacks: ${UNREADABLE_LINE}`)
     expect(defects(seed(body, bullet, '- Something else.'))).toContain('the block has no fail-closed bullet ("If the Read fails")')
   })
 
