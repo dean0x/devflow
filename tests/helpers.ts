@@ -1926,7 +1926,7 @@ export function sectionBetween(body: string, start: string, end: string | null):
 export interface DiffRangeShape {
   /** The stored head's noun in the defect texts: "review" or "analysis". */
   head: string
-  /** The incremental-detection step as the Extract line names it, such as "Step 0d". */
+  /** The incremental-detection step as the defect texts name it, such as "Step 0d". */
   step: string
   /** The anchors that cut the step out of the command: its heading and the next one. */
   stepFrom: string
@@ -1948,10 +1948,28 @@ export interface FreshBaseParts {
 }
 
 /**
+ * The full-range path of the incremental-detection step: named once, the one place every other fall-back
+ * enters, and the one place that tests base_ref (a stop unless 40 or 64 hex) before `DIFF_RANGE` takes it.
+ */
+function collectFullRangeDefects(body: string, shape: DiffRangeShape): string[] {
+  const s = sectionBetween(body, shape.stepFrom, shape.stepTo)
+  if (s === null) return [`no ${shape.step} (incremental detection)`]
+  const lines = s.split('\n')
+  const named = lines.flatMap((l, i) => (/^\s*- \*\*Full-range path\b/.test(l) ? [i] : []))
+  if (named.length !== 1) return [`${shape.step} names the full-range path ${named.length} times, expected once`]
+  const out: string[] = []
+  if (/\bfall(?:-?back| back| through) to full\b|\btakes? the full range\b/i.test(s)) out.push(`${shape.step} names the full-range path a second way`)
+  if (!/unless `base_ref` is 40 or 64 hex/.test(lines[named[0] + 1] ?? '')) out.push('the full-range path does not stop unless base_ref is 40 or 64 hex')
+  if (!(lines[named[0] + 2] ?? '').includes('Set `DIFF_RANGE` to `{base_ref}...HEAD`')) out.push('the full-range path does not build DIFF_RANGE from base_ref right after the hex test')
+  return out
+}
+
+/**
  * The fresh-base facts of `ensure-pr-ready`'s return that /code-review and /bug-analysis state alike:
- * the Return line carries base_ref; the Extract line tests the Base line and the hex base_ref, carries
- * no copy of the name class, limits the hex test to a full-range run and names the Git agent's fix;
- * `DIFF_RANGE` is built from base_ref, never from a base name; one freshness line stands in the report.
+ * the Return line carries base_ref; the Extract line tests the Base line, carries no copy of the name
+ * class and no hex test, and names the Git agent's fix; the one full-range path, named once, stops unless
+ * base_ref is 40 or 64 hex right before it builds `DIFF_RANGE` from base_ref, never from a base name;
+ * one freshness line stands in the report.
  */
 export function collectFreshBaseDefects(body: string, shape: DiffRangeShape, parts: FreshBaseParts): string[] {
   const out: string[] = []
@@ -1965,13 +1983,13 @@ export function collectFreshBaseDefects(body: string, shape: DiffRangeShape, par
     const line = extract[0]
     if (!/`base_ref`/.test(line)) out.push('the Extract line does not take base_ref')
     if (!/Base line reads \(rejected\)/.test(line)) out.push('the Extract line does not test the Base line for (rejected)')
-    if (!/`base_ref` is not 40 or 64 hex/.test(line)) out.push('the Extract line does not test base_ref for 40 or 64 hex')
+    if (/40 or 64/.test(line)) out.push('the Extract line carries the hex test; it sits on the full-range path')
     if (!/Stop with cause and fix/.test(line)) out.push('the Extract line does not stop with the cause and the fix')
     if (/\{1,200\}|origin\\\//.test(line)) out.push('the Extract line carries a copy of the name class')
-    if (!line.includes(`hex and ${shape.step} takes the full range`)) out.push('the Extract line does not limit the hex test to a full-range run')
     for (const [pattern, defect] of parts.extractExtras ?? []) if (!pattern.test(line)) out.push(defect)
     if (!/name the Git agent's fix, never your own/.test(line)) out.push('the Extract line does not name the fix the Git agent returned')
   }
+  out.push(...collectFullRangeDefects(body, shape))
   const ranges = [...body.matchAll(/Set `DIFF_RANGE` to `([^`]+)`/g)].map(m => m[1])
   if (!ranges.includes('{base_ref}...HEAD')) out.push('DIFF_RANGE is not built from base_ref')
   if (!ranges.includes(shape.incrementalRange)) out.push('the incremental DIFF_RANGE changed')
@@ -1986,8 +2004,9 @@ export function collectFreshBaseDefects(body: string, shape: DiffRangeShape, par
 }
 
 /**
- * The stored head: git does not track its file, and it is checked as a commit ID, before any git command or
- * `DIFF_RANGE` takes it. A tracked file is ignored and the run takes the full range.
+ * The stored head: the file counts only when git reports it untracked (exit 1, the `-C` path double-quoted;
+ * any other exit takes the full-range path), and it is checked as a commit ID, before any git command or
+ * `DIFF_RANGE` takes it.
  */
 export function collectStoredHeadDefects(body: string, shape: DiffRangeShape): string[] {
   const s = sectionBetween(body, shape.stepFrom, shape.stepTo)
@@ -2004,10 +2023,49 @@ export function collectStoredHeadDefects(body: string, shape: DiffRangeShape): s
   const tracked = /^[^\n]*ls-files --error-unmatch[^\n]*/m.exec(s)
   if (tracked === null || !tracked[0].includes(shape.marker)) out.push(`the stored ${shape.head} head is not ignored when git tracks it`)
   else {
-    if (!tracked[0].includes(`tracked ${shape.head}-head file is ignored, and the ${shape.head} takes the full range`)) out.push(`a tracked ${shape.head} head file does not take the full range`)
+    if (!/git -C "[^"]+" ls-files --error-unmatch/.test(tracked[0])) out.push(`the tracked-file check of the ${shape.head} head does not double-quote its -C path`)
+    if (!/ exits 1\b/.test(tracked[0]) || !tracked[0].includes('any other exit takes the full-range path')) out.push(`the ${shape.head} head counts as untracked on more than exit 1`)
     const trackedAt = s.indexOf('ls-files --error-unmatch')
     if (trackedAt > check || uses.some(at => at !== -1 && at < trackedAt)) out.push(`the stored ${shape.head} head is used before the tracked-file check`)
   }
+  return out
+}
+
+/** The shape of a valid branch slug, stated once in each review command. */
+const SLUG_PATTERN = '^[A-Za-z0-9._-]{1,200}$'
+
+/**
+ * The lines that put the branch slug, or a directory under it, into command text. The evidence render is
+ * left out: it runs only for a valid slug (the gate is the slug collector's), before the Git agent spawn.
+ */
+export function slugSinkLines(body: string): Array<{ at: number; line: string }> {
+  const sinks: Array<{ at: number; line: string }> = []
+  let at = 0
+  for (const line of body.split('\n')) {
+    if (/\{(?:branch-slug|branch_slug|REVIEW_DIR|ANALYSIS_DIR)\}/.test(line) && !line.includes('verify-evidence.cjs')) sinks.push({ at, line })
+    at += line.length + 1
+  }
+  return sinks
+}
+
+/**
+ * The branch slug is checked once, before any command text carries it: the pattern is stated once, ahead of
+ * the Extract line; the evidence render and the Extract line both test the slug against it; the Extract
+ * line names the allowed characters, never the slug; and every slug sink follows the Extract line.
+ */
+export function collectSlugCheckDefects(body: string): string[] {
+  const extract = /^\*\*Extract from response:\*\*[^\n]*/m.exec(body)
+  if (extract === null) return ['no Extract line']
+  const out: string[] = []
+  const copies = body.split(SLUG_PATTERN).length - 1
+  if (copies !== 1) out.push(`the slug pattern is stated ${copies} times, expected once`)
+  else if (body.indexOf(SLUG_PATTERN) > extract.index) out.push('the slug pattern is stated after the Extract line')
+  if (!body.includes(`Only when \`branch_slug\` matches \`${SLUG_PATTERN}\` and the file exists`)) out.push('the evidence render is not gated on a branch_slug that matches the slug pattern')
+  if (!/Stop with cause and fix when[^.\n]*`branch_slug` does not match the slug pattern above/.test(extract[0])) out.push('the Extract line does not stop on a branch_slug that does not match the slug pattern')
+  if (!/the allowed characters, never its value/.test(extract[0])) out.push('the Extract line does not name the allowed characters, never the slug')
+  const sinks = slugSinkLines(body)
+  if (sinks.length === 0) out.push('no slug sink found')
+  for (const sink of sinks) if (sink.at < extract.index) out.push(`a slug sink comes before the Extract line: ${sink.line.trim().slice(0, 60)}`)
   return out
 }
 

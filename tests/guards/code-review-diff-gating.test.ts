@@ -28,7 +28,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import * as path from 'path'
 
-import { ROOT, collectFreshBaseDefects, collectStoredHeadDefects, readAgentReference, requireDistFile, requireDistFiles, resolveAgentSource, resolveLearningOffSource, type DiffRangeShape } from '../helpers.js'
+import { ROOT, collectFreshBaseDefects, collectSlugCheckDefects, collectStoredHeadDefects, readAgentReference, requireDistFile, requireDistFiles, resolveAgentSource, resolveLearningOffSource, slugSinkLines, type DiffRangeShape } from '../helpers.js'
 
 const CORE = ['security', 'architecture', 'performance', 'complexity', 'consistency', 'regression', 'testing', 'reliability'] as const
 const LANGUAGE = ['typescript', 'react', 'accessibility', 'ui-design', 'go', 'java', 'python', 'rust'] as const
@@ -358,6 +358,7 @@ export function collectDocsOfBehaviourDefects(body: string): string[] {
   if (!/Classify the diff/.test(tree)) out.push('the Architecture tree does not show the classification')
   if (!/docs-only \/ tests-only \/ lockfile-only/.test(tree)) out.push('the Architecture tree does not show the reduced classes')
   if (!/diff\.patch/.test(tree)) out.push('the Architecture tree does not show the diff files')
+  if (!/Phase 0:[^\n]*Steps 0a-0f/.test(tree)) out.push('the Architecture tree does not show the Phase 0 step range')
   return out
 }
 
@@ -399,16 +400,16 @@ const REVIEW_RANGE: DiffRangeShape = {
   step: 'Step 0d',
   stepFrom: '#### Step 0d:',
   stepTo: '#### Step 0e-i:',
-  reachability: 'cat-file -t {sha}',
+  reachability: 'git -C "{worktree}" cat-file -t {sha}',
   incrementalRange: '{last-review-sha}...HEAD',
   marker: '.last-review-head',
 }
 
 /**
  * #495 (use a fresh base for branch diffs): the base ref that ensure-pr-ready returns is the base of
- * DIFF_RANGE. The Extract line tests the Base line and the hex base_ref and carries no copy of the name
- * class (the Git op already stops on a refused name), ends the stop at the worktree, and tests the hex
- * base_ref only for a full-range run; a non-zero diff exit stops at the first diff and the `exit=` line
+ * DIFF_RANGE. The Extract line tests the Base line and carries no copy of the name class (the Git op
+ * already stops on a refused name) and no hex test, and ends the stop at the worktree; the hex base_ref is
+ * tested only on the full-range path; a non-zero diff exit stops at the first diff and the `exit=` line
  * after the listing is the diff's own; a degraded base prints one freshness line, a Phase 4 item.
  * The facts the two diff commands share live in the helpers; this adds the listing step's.
  */
@@ -693,8 +694,10 @@ describe('DIFF_RANGE starts at the fresh base that ensure-pr-ready returns (#495
       .toContain('the Return line does not carry base_ref')
     expect(collectReviewFreshBaseDefects(seed(ON, 'Base line reads (rejected) or', 'Base line is fine or')))
       .toContain('the Extract line does not test the Base line for (rejected)')
-    expect(collectReviewFreshBaseDefects(seed(ON, '`base_ref` is not 40 or 64 hex', '`base_ref` is empty')))
-      .toContain('the Extract line does not test base_ref for 40 or 64 hex')
+    expect(collectReviewFreshBaseDefects(seed(ON, 'unless `base_ref` is 40 or 64 hex', 'unless `base_ref` is set')))
+      .toContain('the full-range path does not stop unless base_ref is 40 or 64 hex')
+    expect(collectReviewFreshBaseDefects(seed(ON, 'Base line reads (rejected) or', 'Base line reads (rejected) or `base_ref` is not 40 or 64 hex or')))
+      .toContain('the Extract line carries the hex test; it sits on the full-range path')
     expect(collectReviewFreshBaseDefects(seed(ON, 'Stop with cause and fix when', 'Warn when')))
       .toContain('the Extract line does not stop with the cause and the fix')
     expect(collectReviewFreshBaseDefects(seed(ON, 'Stop with cause and fix when', 'Stop with cause and fix unless it matches `^[A-Za-z0-9._/+@,#-]{1,200}$`, or when')))
@@ -703,8 +706,14 @@ describe('DIFF_RANGE starts at the fresh base that ensure-pr-ready returns (#495
       .toMatch(/DIFF_RANGE is not built from base_ref[\s\S]*DIFF_RANGE is built from a base name/)
     expect(collectReviewFreshBaseDefects(seed(ON, 'Set `DIFF_RANGE` to `{last-review-sha}...HEAD`', 'Set `DIFF_RANGE` to `{last-review-sha}..HEAD`')))
       .toContain('the incremental DIFF_RANGE changed')
-    expect(collectReviewFreshBaseDefects(seed(ON, ' and Step 0d takes the full range', '')))
-      .toContain('the Extract line does not limit the hex test to a full-range run')
+    expect(collectReviewFreshBaseDefects(seed(ON, '(if unreachable, take the full-range path)', '(if unreachable, fall back to full)')))
+      .toContain('Step 0d names the full-range path a second way')
+    expect(collectReviewFreshBaseDefects(seed(ON, /^ *- \*\*Full-range path\b.*\n/m, '')))
+      .toContain('Step 0d names the full-range path 0 times, expected once')
+    expect(collectReviewFreshBaseDefects(seed(ON, /^( *- \*\*Full-range path\b.*\n)/m, '$1$1')))
+      .toContain('Step 0d names the full-range path 2 times, expected once')
+    expect(collectReviewFreshBaseDefects(seed(ON, /^( *- Set `DIFF_RANGE` to `\{base_ref\}\.\.\.HEAD`\n)/m, '- Read the log.\n$1')))
+      .toContain('the full-range path does not build DIFF_RANGE from base_ref right after the hex test')
     expect(collectReviewFreshBaseDefects(seed(ON, ' In multi-worktree mode this blocks only that worktree.', '')))
       .toContain('the Extract line does not end the stop at one worktree')
     expect(collectReviewFreshBaseDefects(seed(ON, "name the Git agent's fix, never your own", 'name a fix')))
@@ -728,7 +737,7 @@ describe('DIFF_RANGE starts at the fresh base that ensure-pr-ready returns (#495
 
 describe('the stored review head is tracked-free and checked as a commit ID (Step 0d)', () => {
   const CHECK = ' The stored review head is checked as a commit ID: use it only when it is exactly 40 or 64 lowercase hex, else take the full-range path'
-  const TRACKED = 'A tracked review-head file is ignored, and the review takes the full range (`git -C {worktree}/.devflow/docs/reviews/{branch-slug} ls-files --error-unmatch -- .last-review-head >/dev/null 2>&1` exits 0).'
+  const TRACKED = 'The review head counts only when `git -C "{worktree}/.devflow/docs/reviews/{branch-slug}" ls-files --error-unmatch -- .last-review-head >/dev/null 2>&1` exits 1; any other exit takes the full-range path.'
 
   it.each(VARIANTS)('$label: the check comes before the reachability test and the incremental range', ({ body }) => {
     expect(collectStoredHeadDefects(body, REVIEW_RANGE)).toEqual([])
@@ -754,13 +763,49 @@ describe('the stored review head is tracked-free and checked as a commit ID (Ste
       .toContain('Step 0d lost the reachability check or the incremental range')
   })
 
-  it('known-bad probes: a missing, late or fall-back-less tracked-file check is reported', () => {
+  it('known-bad probes: a missing, late, unquoted or wider-than-exit-1 tracked-file check is reported', () => {
     expect(collectStoredHeadDefects(seed(ON, TRACKED, ''), REVIEW_RANGE))
       .toContain('the stored review head is not ignored when git tracks it')
     expect(collectStoredHeadDefects(seed(seed(ON, TRACKED, ''), 'cat-file -t {sha}`', `cat-file -t {sha}\`; ${TRACKED}`), REVIEW_RANGE))
       .toContain('the stored review head is used before the tracked-file check')
-    expect(collectStoredHeadDefects(seed(ON, 'and the review takes the full range', 'and the review goes on'), REVIEW_RANGE))
-      .toContain('a tracked review head file does not take the full range')
+    expect(collectStoredHeadDefects(seed(ON, 'exits 1; any other exit takes the full-range path', 'exits 1; any other exit goes on'), REVIEW_RANGE))
+      .toContain('the review head counts as untracked on more than exit 1')
+    expect(collectStoredHeadDefects(seed(ON, ' exits 1;', ' exits 0;'), REVIEW_RANGE))
+      .toContain('the review head counts as untracked on more than exit 1')
+    expect(collectStoredHeadDefects(seed(ON, 'git -C "{worktree}/.devflow/docs/reviews/{branch-slug}" ls-files', 'git -C {worktree}/.devflow/docs/reviews/{branch-slug} ls-files'), REVIEW_RANGE))
+      .toContain('the tracked-file check of the review head does not double-quote its -C path')
+    expect(collectStoredHeadDefects(seed(ON, 'git -C "{worktree}" cat-file -t {sha}', 'git -C {worktree} cat-file -t {sha}'), REVIEW_RANGE))
+      .toContain('Step 0d lost the reachability check or the incremental range')
+  })
+})
+
+describe('the branch slug is checked once, before any command text carries it (Extract line)', () => {
+  const PATTERN = '`^[A-Za-z0-9._-]{1,200}$`'
+  // `$` followed by a backtick would be a replacement pattern in `String.replace`, so the seeded copy escapes it.
+  const PATTERN_COPY = PATTERN.replaceAll('$', '$$$$')
+
+  it.each(VARIANTS)('$label: the check comes before every slug sink', ({ body }) => {
+    expect(collectSlugCheckDefects(body)).toEqual([])
+    // Non-vacuity: the directory create, the marker reads and the report paths are sinks.
+    expect(slugSinkLines(body).length).toBeGreaterThanOrEqual(8)
+  })
+
+  it('known-bad probes: a lost, doubled, late or ungated check is reported', () => {
+    expect(collectSlugCheckDefects(seed(ON, ' or `branch_slug` does not match the slug pattern above', '')))
+      .toContain('the Extract line does not stop on a branch_slug that does not match the slug pattern')
+    expect(collectSlugCheckDefects(seed(ON, ', and for the slug the allowed characters, never its value', '')))
+      .toContain('the Extract line does not name the allowed characters, never the slug')
+    expect(collectSlugCheckDefects(seed(ON, 'Only when `branch_slug` matches ' + PATTERN + ' and the file exists', 'Only when the file exists')))
+      .toContain('the evidence render is not gated on a branch_slug that matches the slug pattern')
+    expect(collectSlugCheckDefects(seed(ON, 'Stop with cause and fix when', `Stop with cause and fix unless it matches ${PATTERN_COPY}, or when`)))
+      .toContain('the slug pattern is stated 2 times, expected once')
+    expect(collectSlugCheckDefects(seed(ON, PATTERN, 'a pattern')))
+      .toContain('the slug pattern is stated 0 times, expected once')
+    const late = seed(seed(ON, PATTERN, 'a pattern'), 'Stop with cause and fix when', `Stop with cause and fix unless it matches ${PATTERN_COPY}, or when`)
+    expect(collectSlugCheckDefects(late)).toContain('the slug pattern is stated after the Extract line')
+    expect(collectSlugCheckDefects(seed(ON, '**If BLOCKED:**', 'Run `mkdir -p {worktree}/.devflow/docs/reviews/{branch-slug}`.\n\n**If BLOCKED:**')))
+      .toEqual([expect.stringContaining('a slug sink comes before the Extract line')])
+    expect(collectSlugCheckDefects('no slug text')).toEqual(['no Extract line'])
   })
 })
 
@@ -811,6 +856,7 @@ describe('the command text and the Architecture tree describe the new behaviour'
     expect(collectDocsOfBehaviourDefects(seed(ON, /^\| A path matching no class pattern, or an empty path list \|.*$/m, '')))
       .toContain('Edge Cases has no a fail-safe row')
     expect(collectDocsOfBehaviourDefects(seed(ON, /Classify the diff/g, 'Detect file types'))).toContain('the Architecture tree does not show the classification')
+    expect(collectDocsOfBehaviourDefects(seed(ON, ', Steps 0a-0f', ''))).toContain('the Architecture tree does not show the Phase 0 step range')
   })
 })
 

@@ -91,13 +91,13 @@ In multi-worktree mode, spawn all pre-flight agents **in a single message**.
 
 **If BLOCKED:** In single-worktree mode, stop and report. In multi-worktree mode, report the failure but continue with other worktrees.
 
-**Extract from response:** `branch`, `base_branch`, `base_ref`, `branch_slug`, `pr_number` per worktree. Stop with cause and fix when the Base line reads (rejected) or `base_ref` is not 40 or 64 hex and Step 0d takes the full range; name the Git agent's fix, never your own. In multi-worktree mode this blocks only that worktree.
+**Extract from response:** `branch`, `base_branch`, `base_ref`, `branch_slug`, `pr_number` per worktree. Stop with cause and fix when the Base line reads (rejected) or `branch_slug` does not match the slug pattern above; name the Git agent's fix, never your own, and for the slug the allowed characters, never its value. In multi-worktree mode this blocks only that worktree.
 
 **Fetch PR body** (after extracting `pr_number`):
 ```bash
 PR_DESCRIPTION=$(gh pr view {pr_number} --json body --jq '.body' 2>/dev/null || echo "(none)")
 ```
-If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
+If `pr_number` is absent, set `PR_DESCRIPTION` to `(none)`.
 
 #### Step 0d: Incremental Detection & Timestamp Setup
 
@@ -110,12 +110,13 @@ For each worktree:
 2. Create timestamped review directory: `mkdir -p {worktree}/.devflow/docs/reviews/{branch-slug}/{timestamp}/`
 3. Check if `{worktree}/.devflow/docs/reviews/{branch-slug}/.last-review-head` exists:
    - **If yes AND `--full` NOT set:**
-     - A tracked review-head file is ignored, and the review takes the full range (`git -C {worktree}/.devflow/docs/reviews/{branch-slug} ls-files --error-unmatch -- .last-review-head >/dev/null 2>&1` exits 0).
+     - The review head counts only when `git -C "{worktree}/.devflow/docs/reviews/{branch-slug}" ls-files --error-unmatch -- .last-review-head >/dev/null 2>&1` exits 1; any other exit takes the full-range path.
      - Read the SHA from the file. The stored review head is checked as a commit ID: use it only when it is exactly 40 or 64 lowercase hex, else take the full-range path
-     - Verify reachable: `git -C {worktree} cat-file -t {sha}` (if unreachable, fallback to full)
+     - Verify reachable: `git -C "{worktree}" cat-file -t {sha}` (if unreachable, take the full-range path)
      - Check if SHA == current HEAD → if so, skip review: "No new commits since last review. Use --full for a full re-review."
      - Set `DIFF_RANGE` to `{last-review-sha}...HEAD`
-   - **If no (first review), or `--full`:**
+   - **Full-range path (no marker, or `--full`):**
+     - Stop as for a (rejected) Base line unless `base_ref` is 40 or 64 hex.
      - Set `DIFF_RANGE` to `{base_ref}...HEAD`
 
 #### Step 0e-i: Load Prior Resolution and Count Cycles
@@ -341,7 +342,7 @@ Spawn Review agents **in a single message**, one per focus in REVIEW_FOCUS_LIST 
 | documentation | conditional | devflow:documentation | diff.patch |
 | compliance | diff-driven | devflow:compliance | diff.patch |
 
-Review agent count: at `full`, `code` runs 8 core +1-12; `standard` runs up to 2 fewer; lean `code` runs 3-4; a reduced class or a mix runs 2-6.
+Review agent count: `code` runs 8 core +1-12 at `full`, up to 2 fewer at `standard`, 3-4 at lean; a reduced class or a mix runs 2-6.
 
 {{compliance_focus_inject()}}
 
@@ -369,7 +370,7 @@ Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE — feature-specifi
 IMPORTANT: Write report to {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/{focus}.md using Write tool"
 ```
 
-In multi-worktree mode, process worktrees **sequentially**: complete Phases 1-4 for one worktree before starting the next.
+In multi-worktree mode, process worktrees **sequentially**: Phases 1-4 for one worktree, then the next.
 
 ### Phase 3: Synthesis → Review Comment (Sequential)
 
@@ -426,10 +427,10 @@ Per worktree, after successful completion:
 ```
 /code-review (orchestrator - spawns agents only)
 │
-├─ Phase 0: Worktree Discovery & Pre-flight (Git agent ensure-pr-ready per worktree, parallel)
+├─ Phase 0: Worktree Discovery & Pre-flight, Steps 0a-0f (Git agent per worktree, parallel)
 │  ├─ Step 0b: Resolve the compliance lens and gate level
 │
-├─ Per worktree (SEQUENTIAL — one worktree at a time):
+├─ Per worktree (SEQUENTIAL):
 │  │
 │  ├─ Phase 1: Analyze changed files
 │  │  ├─ Classify the diff (paths.txt → DIFF_CLASS)
@@ -452,7 +453,7 @@ Per worktree, after successful completion:
 | Case | Handling |
 |------|----------|
 | `--full` in multi-worktree mode | Applies to all worktrees (global modifier). It sets the diff range, never the gate level |
-| Review comment already posted | Git agent matches its own marker on the `{cycle, timestamp}` pair → skip silently (D7); a re-review in the same cycle (different timestamp) posts its own comment. The marker's format belongs to the operation; this caller passes the pair and never restates the literal |
+| Review comment already posted | Git agent matches its own marker on the `{cycle, timestamp}` pair → skip silently (D7); a re-review in the same cycle (different timestamp) posts its own comment. The marker's format belongs to the operation |
 | Docs-only diff | Its Step 1.1 set, narrowed by level |
 | Tests-only diff | Its Step 1.1 set, narrowed by level |
 | Lockfile-only diff | Its Step 1.1 set, narrowed by level |

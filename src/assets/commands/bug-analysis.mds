@@ -50,13 +50,13 @@ Validate branch, commit if needed, push, create PR if needed.
 Return: branch, base_branch, base_ref, branch-slug, PR#"
 ```
 
-**Extract from response:** `branch`, `base_branch`, `base_ref`, `branch_slug`, `pr_number`. Stop with cause and fix when the Base line reads (rejected) or `base_ref` is not 40 or 64 hex and Step 2a takes the full range; name the Git agent's fix, never your own.
+**Extract from response:** `branch`, `base_branch`, `base_ref`, `branch_slug`, `pr_number`. Stop with cause and fix when the Base line reads (rejected) or `branch_slug` does not match the slug pattern above; name the Git agent's fix, never your own, and for the slug the allowed characters, never its value.
 
 **Fetch PR body** (after extracting `pr_number`):
 ```bash
 PR_DESCRIPTION=$(gh pr view {pr_number} --json body --jq '.body' 2>/dev/null || echo "(none)")
 ```
-If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
+If `pr_number` is absent, set `PR_DESCRIPTION` to `(none)`.
 
 ### Phase 2: Static Analysis
 
@@ -69,12 +69,13 @@ If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
 
 1. Check `{worktree}/.devflow/docs/bug-analysis/{branch-slug}/.last-analysis-head`:
    - **If exists AND `--full` NOT set:**
-     - A tracked analysis-head file is ignored, and the analysis takes the full range (`git -C {worktree}/.devflow/docs/bug-analysis/{branch-slug} ls-files --error-unmatch -- .last-analysis-head >/dev/null 2>&1` exits 0).
+     - The analysis head counts only when `git -C "{worktree}/.devflow/docs/bug-analysis/{branch-slug}" ls-files --error-unmatch -- .last-analysis-head >/dev/null 2>&1` exits 1; any other exit takes the full-range path.
      - Read the SHA from the file. The stored analysis head is checked as a commit ID: use it only when it is exactly 40 or 64 lowercase hex, else take the full-range path
-     - Verify reachable: `git cat-file -t {sha}` — if exit code non-zero (rebase invalidated SHA), fall through to full
+     - Verify reachable: `git cat-file -t {sha}` — if exit code non-zero (rebase invalidated SHA), take the full-range path
      - If SHA == current HEAD → "No new commits since last analysis. Use --full for a full re-analysis." Stop.
      - Set `DIFF_RANGE` to `{sha}...HEAD`
-   - **If not exists, unreachable SHA, or `--full`:**
+   - **Full-range path (no marker, or `--full`):**
+     - Stop as for a (rejected) Base line unless `base_ref` is 40 or 64 hex.
      - Set `DIFF_RANGE` to `{base_ref}...HEAD`
 2. Generate timestamp: `YYYY-MM-DD_HHMM`. If directory already exists (same-minute collision), append seconds (`YYYY-MM-DD_HHMMSS`).
 3. Create timestamped analysis directory: `mkdir -p "{worktree}/.devflow/docs/bug-analysis/{branch-slug}/{timestamp}/"`
@@ -128,11 +129,9 @@ Parse SARIF output → extract findings.
 
 **Snyk Code** (if available):
 ```bash
-# Run a single project-level scan; filter SARIF results programmatically to CHANGED_FILES before LLM processing.
-# Per-file invocation via xargs would invoke snyk O(n) times and --file is for dependency scanning, not source code.
+# One project-level scan (a per-file xargs run would invoke snyk O(n) times; --file is for dependency scans).
 SNYK_SARIF=$(timeout 300 snyk code test --sarif 2>/dev/null)
-# Programmatic filter: keep only results whose file path appears in CHANGED_FILES.
-# This is defense-in-depth — filtering at the data layer before the LLM agent sees any output.
+# Programmatic filter: keep only results whose file path is in CHANGED_FILES — defense-in-depth, before the LLM agent sees any output.
 SNYK_FILTERED=$(echo "$SNYK_SARIF" | jq --argjson files "$(echo "$CHANGED_FILES" | jq -R . | jq -s .)" \
   '.runs[].results |= map(select(.locations[].physicalLocation.artifactLocation.uri as $uri | $files | index($uri) != null))' \
   2>/dev/null || echo "$SNYK_SARIF")

@@ -697,15 +697,16 @@ const REQUIREMENTS: readonly Requirement[] = [
     check: p => {
       const line = firstLine(p.text, /^\*\*Extract from response:\*\*[^\n]*/m)
       if (line === null) return unmet('Extract', 'the Extract line was not found')
-      const missing = [['base_ref', /\bbase_ref\b/], ['the (rejected) Base line test', /\(rejected\)/], ['the 40 or 64 hex test', /40 or 64/]]
+      const missing = [['base_ref', /\bbase_ref\b/], ['the (rejected) Base line test', /\(rejected\)/]]
         .filter(([, re]) => !(re as RegExp).test(line)).map(([what]) => what)
-      return missing.length === 0 ? [] : unmet('Extract', `the Extract line lacks: ${missing.join(', ')}`)
+      if (missing.length > 0) return unmet('Extract', `the Extract line lacks: ${missing.join(', ')}`)
+      return /unless `base_ref` is 40 or 64 hex/.test(p.text.slice(p.text.indexOf(line) + line.length)) ? [] : unmet('Extract', 'no full-range path after the Extract line stops unless base_ref is 40 or 64 hex')
     },
     probe: {
       file: 'commands/bug-analysis.md',
       anchor: 'Extract',
-      bad: '**Extract from response:** `branch`, `base_branch`, `branch_slug`, `pr_number`.',
-      good: '**Extract from response:** `branch`, `base_branch`, `base_ref`, `pr_number`. Stop when the Base line reads (rejected) or base_ref is not 40 or 64 hex.',
+      bad: '**Extract from response:** `branch`, `base_branch`, `base_ref`, `pr_number`. Stop when the Base line reads (rejected).',
+      good: '**Extract from response:** `branch`, `base_branch`, `base_ref`, `pr_number`. Stop when the Base line reads (rejected).\n\n- **Full-range path (no marker):**\n  - Stop unless `base_ref` is 40 or 64 hex.',
     },
   },
   {
