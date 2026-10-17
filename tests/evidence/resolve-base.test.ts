@@ -79,7 +79,7 @@ interface Deps {
   spawn?: SpawnFn
   env?: NodeJS.ProcessEnv
   cwd?: string
-  timeoutMs?: number
+  fetchTimeoutMs?: number
   formatLine?: (r: Selection) => string
 }
 interface ResolveBase {

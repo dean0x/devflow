@@ -52,7 +52,7 @@ interface Deps {
   spawn?: SpawnFn
   env?: NodeJS.ProcessEnv
   cwd?: string
-  timeoutMs?: number
+  fetchTimeoutMs?: number
   platform?: string
   now?: () => number
 }
@@ -726,7 +726,7 @@ describe.skipIf(!POSIX)('the 45 s backstop (AC-14)', SPAWN_BUDGET, () => {
     const env = scopedEnv(w.home, { PATH: `${path.dirname(hungGit())}${path.delimiter}${process.env.PATH ?? ''}`, REAL_GIT: realGitPath, FAKE_PIDS: pidFile })
 
     const started = Date.now()
-    const out = RB.main(['node', 'resolve-base.cjs', 'pr', 'main'], { cwd: w.work, env, timeoutMs: HUNG_BOUND_MS })
+    const out = RB.main(['node', 'resolve-base.cjs', 'pr', 'main'], { cwd: w.work, env, fetchTimeoutMs: HUNG_BOUND_MS })
     const elapsed = Date.now() - started
 
     expect(out.line).toBe(`BASE_REF=${w.m0} TIP=origin FETCH=failed REASON=timeout NOTE=degraded`)

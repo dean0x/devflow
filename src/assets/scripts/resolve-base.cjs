@@ -53,9 +53,9 @@
 //     ancestry check and the verification. A call that exits on its own is an answer, and
 //     its result maps by its own rule: a merge base that exits non-zero or is not a commit
 //     ID is no merge base for that tip, and the choice gives no-merge-base when it needs the
-//     tip; an exit that the call site does not accept gives resolver-unavailable. The one answer that is not a stop is the core.sshCommand read:
-//     an exit other than 0 or 1 counts as configured, so a command is never replaced on a
-//     guess.
+//     tip; an exit that the call site does not accept gives resolver-unavailable, except at
+//     the core.sshCommand read, where an exit other than 0 or 1 counts as configured, so a
+//     command is never replaced on a guess.
 //   - The fetch is one call with a fixed argv: it writes only refs/remotes/origin/<name>
 //     (an empty --refmap= keeps the configured fetch refspecs out of the update), writes no
 //     FETCH_HEAD, follows no tags, and carries no --filter or --depth. The
@@ -148,8 +148,8 @@ const HEX_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const FETCH_TIMEOUT_MS = 45000;
 /**
  * The bound of every other git call, which is local and short. The bound counts the launch
- * of git: launch stalls of 14 to 16 s are measured on a loaded macOS machine, so 30 s keeps
- * about twice that stall and stays below FETCH_TIMEOUT_MS.
+ * of git. The launch of node stalled 14 to 16 s on a loaded macOS machine, and git launches
+ * did not stall. 30 s keeps about twice that stall and stays below FETCH_TIMEOUT_MS.
  */
 const LOCAL_TIMEOUT_MS = 30000;
 /**
@@ -267,6 +267,29 @@ function stopWith(reason, fetch = 'skipped') {
  */
 
 /**
+ * Whether both refs are present and each has a fork point with HEAD. Both the ancestry
+ * question and the pre-PR choice need this.
+ *
+ * @param {Side | null} local
+ * @param {Side | null} remote
+ * @returns {boolean}
+ */
+function bothForkPoints(local, remote) {
+  return local !== null && remote !== null && local.base !== null && remote.base !== null;
+}
+
+/**
+ * Whether the remote reported that it has no such branch. A cached origin ref is then
+ * ignored: it is not read, and the choice does not use it.
+ *
+ * @param {FetchOutcome} fetch
+ * @returns {boolean}
+ */
+function remoteLacksBranch(fetch) {
+  return fetch.reason === 'no-remote-branch';
+}
+
+/**
  * Choose the tip from observed facts. No I/O.
  *
  * pr: origin whenever it resolves, otherwise local. local: origin only when the local fork
@@ -278,7 +301,7 @@ function stopWith(reason, fetch = 'skipped') {
  */
 function select(f) {
   const fetch = f.fetch.state;
-  const remote = f.fetch.reason === 'no-remote-branch' ? null : f.remote;
+  const remote = remoteLacksBranch(f.fetch) ? null : f.remote;
   const local = f.local;
   if (local === null && remote === null) return stopWith('no-ref', fetch);
 
@@ -288,7 +311,7 @@ function select(f) {
   else if (remote === null) tip = 'local';
   else if (f.mode === 'pr') tip = 'origin';
   else {
-    if (local.base === null || remote.base === null || f.localBehind === null) return stopWith('no-merge-base', fetch);
+    if (!bothForkPoints(local, remote) || f.localBehind === null) return stopWith('no-merge-base', fetch);
     tip = f.localBehind ? 'origin' : 'local';
   }
 
@@ -365,14 +388,14 @@ function monotonicMs() {
 }
 
 /**
- * @param {{ spawn?: unknown, env?: unknown, cwd?: unknown, timeoutMs?: unknown, platform?: unknown, now?: unknown }} [deps]
+ * @param {{ spawn?: unknown, env?: unknown, cwd?: unknown, fetchTimeoutMs?: unknown, platform?: unknown, now?: unknown }} [deps]
  * @returns {Context}
  */
 function makeContext(deps) {
   const d = deps || {};
   const now = typeof d.now === 'function' ? /** @type {() => number} */ (d.now) : monotonicMs;
   const parentEnv = d.env !== null && typeof d.env === 'object' ? /** @type {NodeJS.ProcessEnv} */ (d.env) : process.env;
-  const injected = typeof d.timeoutMs === 'number' && Number.isInteger(d.timeoutMs) && d.timeoutMs > 0 ? d.timeoutMs : FETCH_TIMEOUT_MS;
+  const injected = typeof d.fetchTimeoutMs === 'number' && Number.isInteger(d.fetchTimeoutMs) && d.fetchTimeoutMs > 0 ? d.fetchTimeoutMs : FETCH_TIMEOUT_MS;
   return {
     spawn: typeof d.spawn === 'function' ? /** @type {SpawnFn} */ (d.spawn) : defaultSpawn,
     env: childEnv(parentEnv),
@@ -684,11 +707,12 @@ function sidesOf(ctx, name, readRemote) {
  * @returns {{ kind: 'ok', behind: boolean | null } | { kind: 'unknown' }}
  */
 function localBehindOf(ctx, mode, local, remote) {
-  if (mode !== 'local' || local === null || remote === null || local.base === null || remote.base === null) {
-    return { kind: 'ok', behind: null };
-  }
-  if (local.base === remote.base) return { kind: 'ok', behind: true };
-  const ancestry = isAncestor(ctx, local.base, remote.base);
+  if (mode !== 'local' || !bothForkPoints(local, remote)) return { kind: 'ok', behind: null };
+  // bothForkPoints leaves both fork points present.
+  const older = /** @type {string} */ (/** @type {Side} */ (local).base);
+  const newer = /** @type {string} */ (/** @type {Side} */ (remote).base);
+  if (older === newer) return { kind: 'ok', behind: true };
+  const ancestry = isAncestor(ctx, older, newer);
   return ancestry.kind === 'unknown' ? ancestry : { kind: 'ok', behind: ancestry.ancestor };
 }
 
@@ -734,7 +758,7 @@ function resolveBase(req, ctx) {
     fetchState = fetch.state;
   }
 
-  const sides = sidesOf(ctx, name, skip === null && fetch.reason !== 'no-remote-branch');
+  const sides = sidesOf(ctx, name, skip === null && !remoteLacksBranch(fetch));
   if (sides.kind === 'unknown') return stop('resolver-unavailable');
   const behind = localBehindOf(ctx, req.mode, sides.local, sides.remote);
   if (behind.kind === 'unknown') return stop('resolver-unavailable');
@@ -749,7 +773,7 @@ function resolveBase(req, ctx) {
 // ---------------------------------------------------------------------------
 
 /**
- * @typedef {{ spawn?: SpawnFn, env?: NodeJS.ProcessEnv, cwd?: string, timeoutMs?: number, platform?: string,
+ * @typedef {{ spawn?: SpawnFn, env?: NodeJS.ProcessEnv, cwd?: string, fetchTimeoutMs?: number, platform?: string,
  *   now?: () => number, formatLine?: (r: Selection) => string }} MainDeps  injected by tests only
  */
 
@@ -817,7 +841,5 @@ module.exports = Object.freeze({
   formatLine,
   checkLine,
   fetchArgv,
-  childEnv,
-  resolveBase,
   main,
 });
