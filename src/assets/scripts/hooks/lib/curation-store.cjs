@@ -654,7 +654,9 @@ function isResult(value) {
  *
  * An unfinished ledger move (a `.curation-move.journal` in the old ledger folder, see
  * moveLedger) makes every writer answer `busy` without taking the lock, so no write
- * lands between two renames of the move's ledger set.
+ * lands between two renames of the move's ledger set. The journal is checked again
+ * once the lock is held: a move can start, and stop part way through the set, while
+ * the writer waits for the lock.
  *
  * D-NO-LINKED-TREE: a curation writer refuses with `not-a-directory`, changing
  * nothing, when `.devflow` or `.devflow/curation` under its root is a symbolic
@@ -675,12 +677,7 @@ function withDecisionsLock(opName, root, fn, { timeoutMs = LOCK_ACQUIRE_TIMEOUT_
   const linked = linkedCurationFolder(root);
   if (linked !== null) return linkedFolder(opName, linked);
   const journal = moveJournalPath(root);
-  if (lstatOrNull(journal) !== null) {
-    return {
-      ok: false,
-      error: { kind: 'busy', message: `${opName}: an unfinished ledger move is recorded at ${journal}; it finishes at the next session start or devflow init` },
-    };
-  }
+  if (lstatOrNull(journal) !== null) return unfinishedMove(opName, journal);
   if (!hasCurationDir(root)) return noCurationDir(opName, root);
   const lockDir = getDecisionsLockDir(root);
   let acquired;
@@ -695,6 +692,7 @@ function withDecisionsLock(opName, root, fn, { timeoutMs = LOCK_ACQUIRE_TIMEOUT_
     return { ok: false, error: { kind: 'busy', message: `${opName}: timeout acquiring lock at ${lockDir}` } };
   }
   try {
+    if (lstatOrNull(journal) !== null) return unfinishedMove(opName, journal);
     const result = fn();
     if (!isResult(result)) {
       throw new TypeError(`${opName}: the locked body must return a Result ({ ok: true, value } or { ok: false, error })`);
@@ -703,6 +701,14 @@ function withDecisionsLock(opName, root, fn, { timeoutMs = LOCK_ACQUIRE_TIMEOUT_
   } finally {
     releaseLock(lockDir);
   }
+}
+
+/** The `busy` Result of a writer that finds an unfinished ledger move's journal. */
+function unfinishedMove(opName, journal) {
+  return {
+    ok: false,
+    error: { kind: 'busy', message: `${opName}: an unfinished ledger move is recorded at ${journal}; it finishes at the next session start or devflow init` },
+  };
 }
 
 // ---------------------------------------------------------------------------

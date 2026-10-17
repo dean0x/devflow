@@ -849,6 +849,26 @@ describe('moveLedger — an interrupted set move resumes from its journal (TP-40
     expect(after.ok).toBe(true);
   });
 
+  it('a writer that took the lock after a move stopped part way through the set is busy, and runs nothing', () => {
+    // The writer finds no journal, then waits on the lock while a move starts and
+    // stops after its first rename: the journal appears just before the lock is taken.
+    const lockDir = path.join(site.newDir, '.decisions.lock');
+    const journal = path.join(site.oldDir, JOURNAL);
+    const real = nodeFs.mkdirSync;
+    vi.spyOn(nodeFs, 'mkdirSync').mockImplementation(((target: fs.PathLike, opts?: fs.MakeDirectoryOptions) => {
+      if (String(target) === lockDir && !exists(journal)) fs.writeFileSync(journal, '{"version":1,"steps":[]}');
+      return real(target, opts);
+    }) as typeof nodeFs.mkdirSync);
+    let ran = false;
+    const write = store.withDecisionsLock('put-observation', site.root, () => { ran = true; return { ok: true, value: null }; });
+    vi.restoreAllMocks();
+    expect(write.ok).toBe(false);
+    expect(!write.ok && write.error.kind).toBe('busy');
+    expect(!write.ok && write.error.message).toMatch(/unfinished/);
+    expect(ran).toBe(false);
+    expect(exists(lockDir)).toBe(false);
+  });
+
   it('a resume does not decide the winner again: the log that moved in does not make the new folder win', () => {
     failAfterSetRenames(5);
     failure();
