@@ -1368,7 +1368,8 @@ describe('capture hooks while the ledger move is held (TP-30)', { timeout: 2 * (
     tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cap-held-move-')));
     projectDir = path.join(tmp, 'repo');
     homeDir = path.join(tmp, 'home');
-    fs.mkdirSync(path.join(projectDir, '.git'), { recursive: true });
+    fs.mkdirSync(projectDir, { recursive: true });
+    execFileSync('git', ['init', '-q'], { cwd: projectDir, stdio: 'ignore' });
     fs.mkdirSync(homeDir);
     fs.mkdirSync(path.join(projectDir, '.devflow', 'learning'), { recursive: true });
     fs.writeFileSync(path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl'), `${SEED_ROW}\n`, { mode: 0o600 });
