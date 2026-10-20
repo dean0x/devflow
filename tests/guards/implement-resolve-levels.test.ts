@@ -1,5 +1,6 @@
 /**
- * /implement and /resolve phases per gate level (#480, part of epic #468).
+ * /implement and /resolve phases per gate level (#480 and #481, part of epic #468). A bare `AC-n` is an acceptance
+ * criterion of #480. A criterion of #481 names its issue, as in `#481 AC-3`.
  *
  * `GATE_LEVEL` comes from the accepted settings line. At `standard` and `lean`, each command reads its own level
  * reference once per run and applies the rows of that reference to the phases the rows name. At `full` it reads
@@ -577,7 +578,7 @@ function surplus(have: readonly string[], want: readonly string[]): string[] {
 }
 
 /**
- * AC-1, AC-5: the table holds exactly the decided rows and the Rules section exactly the decided bullets, as the lines of
+ * AC-5, #481 AC-1: the table holds exactly the decided rows and the Rules section exactly the decided bullets, as the lines of
  * the file. A decided row or bullet that is missing and an undecided one that is present are each reported. A change to
  * one cell of a decided row reports both.
  */
@@ -612,7 +613,7 @@ const ROW_EFFECTS: ReadonlyMap<string, RegExp> = new Map([
 interface DocSite { readonly label: string; readonly text: string; readonly cmds: ReadonlyArray<LevelSpec['cmd']> }
 
 /**
- * AC-6: every shipped row has an entry in `effects`, and each site that covers the command of a shipped row states the
+ * #481 AC-6: every shipped row has an entry in `effects`, and each site that covers the command of a shipped row states the
  * effect of that row exactly once. Once any table has a row, no site keeps a retired claim. While no table has a row, no
  * site owes an effect and none is barred a retired claim. The match is on a phrase: it does not tell which command the
  * phrase names, so a site that covers both commands and names one satisfies the check for both.
@@ -901,7 +902,7 @@ function readersFrom(body: string, from: string, name: string): string[] | null 
   return numbers.slice(at).filter(num => dataFlowNames(phaseSection(body, num), 'Requires').includes(name))
 }
 
-/** AC-3, `/implement`: the branch diff is defined once, in Phase 3 prose before the Polish fence, and Harden takes it. */
+/** #481 AC-3, `/implement`: the branch diff is defined once, in Phase 3 prose before the Polish fence, and Harden takes it. */
 export function collectImplementPolishInputDefects(body: string): string[] {
   const out: string[] = []
   const defined = countOf(body, BRANCH_DIFF_DEFINITION)
@@ -920,7 +921,7 @@ export function collectImplementPolishInputDefects(body: string): string[] {
   return out
 }
 
-/** AC-3: no Requires line after the Polish phase names its output, because a skipped phase gives it no value. */
+/** #481 AC-3: no Requires line after the Polish phase names its output, because a skipped phase gives it no value. */
 export function collectPolishOutputReaderDefects(body: string, spec: LevelSpec): string[] {
   const { name, from } = POLISH_OUTPUT_NAMES[spec.cmd]
   const readers = readersFrom(body, from, name)
@@ -928,7 +929,7 @@ export function collectPolishOutputReaderDefects(body: string, spec: LevelSpec):
   return readers.map(num => `Phase ${num} Requires names ${name}, which a skipped Polish phase sets to SKIPPED`)
 }
 
-/** AC-3: the inputs and outputs of the Polish phase that a skip must leave whole, in one compiled build. */
+/** #481 AC-3: the inputs and outputs of the Polish phase that a skip must leave whole, in one compiled build. */
 export function collectPolishSkipDefects(body: string, spec: LevelSpec): string[] {
   switch (spec.cmd) {
     case 'implement': return [...collectImplementPolishInputDefects(body), ...collectPolishOutputReaderDefects(body, spec)]
@@ -964,7 +965,7 @@ function polishSpawnTexts(body: string): string[] {
   return out
 }
 
-/** AC-5: the command spawns Polish as often as it does today, names no level reference and puts no `GATE_LEVEL:` line in a Polish spawn. */
+/** #481 AC-5: the command spawns Polish as often as it does today, names no level reference and puts no `GATE_LEVEL:` line in a Polish spawn. */
 export function collectPolishKeeperDefects(body: string, keeper: KeeperSpec): string[] {
   const out: string[] = []
   const spawns = countOf(body, 'subagent_type="Polish"') + countOf(body, 'agentType: "Polish"')
@@ -1261,7 +1262,7 @@ describe('the level references hold the fixed grammar and the decided rows (AC-5
   })
 })
 
-describe('the doc sites state the effect of each shipped row and keep no retired claim (AC-6)', () => {
+describe('the doc sites state the effect of each shipped row and keep no retired claim (#481 AC-6)', () => {
   /** Test-only sites: the probes do not depend on what the real docs say, so they hold before and after the rows ship. */
   const effect = 'At standard and lean they skip Polish, and full keeps it.'
   const site = (text: string, cmds: DocSite['cmds'] = BOTH_COMMANDS): DocSite => ({ label: 'the probe site', text, cmds })
@@ -1599,7 +1600,7 @@ describe('row safety is a tripwire over the references (AC-6)', () => {
     expect(collectRowSafetyDefects(seed(ref, '## Phases\n', 'Stray text.\n\n## Phases\n'), spec, body)).toContain('the reference holds text between its title and "## Phases"')
   })
 
-  it('known-bad probe (/implement): a Gate level block bullet that stops keeping the branch diff definition on a Polish skip is reported (AC-3)', () => {
+  it('known-bad probe (/implement): a Gate level block bullet that stops keeping the branch diff definition on a Polish skip is reported (#481 AC-3)', () => {
     const cut = seed(REFS.implement, ' or the `{branch_diff}` definition', '')
     expect(collectRowSafetyDefects(cut, IMPLEMENT, bodyOf(IMPLEMENT))).toEqual(['the "## Grammar" text is not the pinned text'])
   })
@@ -1826,7 +1827,7 @@ describe('the /resolve routes that skip phases pass no pushing phase (A1)', () =
 // i. What a skipped Polish phase leaves alone
 // ---------------------------------------------------------------------------
 
-describe('a skipped Polish phase leaves the branch diff and the readers of its output alone (AC-3)', () => {
+describe('a skipped Polish phase leaves the branch diff and the readers of its output alone (#481 AC-3)', () => {
   it.each(BUILDS)('$label: the branch diff is defined once before the Polish fence, Harden takes it, and no later phase reads the Polish output', ({ spec, body }) => {
     expect(collectPolishSkipDefects(body, spec)).toEqual([])
   })
@@ -1878,7 +1879,7 @@ describe('a skipped Polish phase leaves the branch diff and the readers of its o
   })
 })
 
-describe('/self-review, /debug and /dynamic-build keep Polish and read no level (AC-5)', () => {
+describe('/self-review, /debug and /dynamic-build keep Polish and read no level (#481 AC-5)', () => {
   it('the commands that keep Polish spawn it 1, 1 and 2 times', () => {
     expect(KEEPERS.map(k => `${k.cmd}: ${k.spawns}`)).toEqual(['self-review: 1', 'debug: 1', 'dynamic-build: 2'])
   })
