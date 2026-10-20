@@ -101,7 +101,8 @@ export type BackupSweepReport =
  * What happened to one project. `moved`: the folder moved (`mode`), or the new folder
  * won and the old one became the backup; `rendered` is false when the index was not
  * rebuilt after the rename, and the move stays done. `unchanged`: no old folder, so
- * nothing moved. `busy`: a lock is held; the project moves at its next event.
+ * nothing moved. `busy`: a lock is held and the project moves at its next event, or, with
+ * `reason` `claim`, a queue claim holds the move and it runs after Curate finishes.
  * `refused`: a link or another unsafe state; nothing changed. `error`: an I/O failure;
  * nothing was copied and the old folder is whole. `skipped`: the project's git root
  * lookup did not answer in time, so its ledger root is unknown and nothing was tried;
@@ -118,7 +119,7 @@ export type ProjectMoveOutcome =
     readonly sweep: BackupSweepReport | null;
   }
   | { readonly kind: 'unchanged'; readonly root: string; readonly sweep: BackupSweepReport | null }
-  | { readonly kind: 'busy'; readonly root: string }
+  | { readonly kind: 'busy'; readonly root: string; readonly reason?: 'claim' }
   | { readonly kind: 'refused'; readonly root: string; readonly message: string }
   | { readonly kind: 'error'; readonly root: string; readonly message: string }
   | { readonly kind: 'skipped'; readonly root: string; readonly reason: 'git-root-timed-out' };
@@ -267,7 +268,7 @@ async function moveOne(root: string, opts: SharedMoveOptions, io: SharedMoveIO):
       : { kind: 'error', root, message: moved.error.message };
   }
   const answer: LedgerMoveOutcome = moved.value;
-  if (answer.state === 'busy') return { kind: 'busy', root };
+  if (answer.state === 'busy') return answer.reason === 'claim' ? { kind: 'busy', root, reason: 'claim' } : { kind: 'busy', root };
 
   const sweep = await sweepIfBackup(root, io, storeOpts);
   if (answer.state === 'moved') {
@@ -328,7 +329,9 @@ export function describeOutcome(outcome: ProjectMoveOutcome): string[] {
   const lines: string[] = [];
   switch (outcome.kind) {
     case 'busy':
-      lines.push(`Ledger move skipped for ${describeMoveText(outcome.root)}: a lock is held. The project moves at its next session.`);
+      lines.push(outcome.reason === 'claim'
+        ? `Ledger move skipped for ${describeMoveText(outcome.root)}: a queue claim holds the move. The project moves after Curate finishes.`
+        : `Ledger move skipped for ${describeMoveText(outcome.root)}: a lock is held. The project moves at its next session.`);
       break;
     case 'refused':
       lines.push(`Ledger move refused for ${describeMoveText(outcome.root)}: ${describeMoveText(outcome.message)}. Nothing was changed.`);

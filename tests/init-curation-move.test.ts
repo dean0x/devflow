@@ -49,6 +49,7 @@ const NOW = 1_700_000_000_000;
 
 const NONE: LedgerMoveOutcome = { state: 'none', notes: [] };
 const BUSY: LedgerMoveOutcome = { state: 'busy', notes: [] };
+const BUSY_CLAIM: LedgerMoveOutcome = { state: 'busy', reason: 'claim', notes: [] };
 const MOVED: LedgerMoveOutcome = { state: 'moved', mode: 'whole-folder', backup: null, rendered: true, notes: [] };
 const SWEPT: LedgerSweepOutcome = { state: 'swept', files: 1, merged: 2, overflowed: 0, notes: [] };
 
@@ -311,6 +312,13 @@ describe('moveProjectLedgers: the outcome of each project', () => {
     expect(report.lines).toEqual([]);
   });
 
+  it('a project held by a queue claim is busy with that reason, and its line says a claim holds the move', async () => {
+    const { io } = fakeIO({ moves: { '/w/a': ok(BUSY_CLAIM) } });
+    const report = reportOf(await moveProjectLedgers(options({ projectRoots: ['/w/a'] }), io));
+    expect(report.outcomes[0]).toEqual({ kind: 'busy', root: '/w/a', reason: 'claim' });
+    expect(report.lines).toEqual(['Ledger move skipped for /w/a: a queue claim holds the move. The project moves after Curate finishes.']);
+  });
+
   it('prints one line for a busy project and moves it at its next event', async () => {
     const { io } = fakeIO({ moves: { '/w/a': ok(BUSY) } });
     const report = reportOf(await moveProjectLedgers(options({ projectRoots: ['/w/a'] }), io));
@@ -510,7 +518,12 @@ describe('moveLedgerRoot: the move one root gets from configure and the toggles'
   });
 
   it('describeOutcome gives a busy, refused or failed root one line and a clean move none', () => {
-    expect(describeOutcome({ kind: 'busy', root: '/w/a' })).toHaveLength(1);
+    expect(describeOutcome({ kind: 'busy', root: '/w/a' })).toEqual([
+      'Ledger move skipped for /w/a: a lock is held. The project moves at its next session.',
+    ]);
+    expect(describeOutcome({ kind: 'busy', root: '/w/a', reason: 'claim' })).toEqual([
+      'Ledger move skipped for /w/a: a queue claim holds the move. The project moves after Curate finishes.',
+    ]);
     expect(describeOutcome({ kind: 'refused', root: '/w/a', message: 'a link' })).toEqual([expect.stringContaining('refused')]);
     expect(describeOutcome({ kind: 'error', root: '/w/a', message: 'x' })).toHaveLength(1);
     expect(describeOutcome({ kind: 'unchanged', root: '/w/a', sweep: null })).toEqual([]);

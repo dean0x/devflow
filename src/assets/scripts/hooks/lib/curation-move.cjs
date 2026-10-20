@@ -1223,12 +1223,11 @@ function movePass(ctx, { newExisted }) {
   if (!newExisted) {
     const whole = curationMoveWhole(ctx);
     if (!whole.ok) return whole;
-    // One rename carries the whole set, so a journal left by an earlier pass has nothing to finish.
-    removeIfPresent(ctx.journal);
+    const journalNotes = curationMoveDropJournal(ctx);
     const finish = curationMoveFinish(ctx, { whole: true });
     return {
       ok: true,
-      value: { state: 'moved', mode: 'whole-folder', backup: null, rendered: finish.rendered, notes: [...whole.value.notes, ...finish.notes] },
+      value: { state: 'moved', mode: 'whole-folder', backup: null, rendered: finish.rendered, notes: [...whole.value.notes, ...journalNotes, ...finish.notes] },
     };
   }
 
@@ -1259,6 +1258,25 @@ function movePass(ctx, { newExisted }) {
       notes: [verdict, ...notes, ...finish.notes],
     },
   };
+}
+
+/**
+ * After a whole-folder rename, remove the machine-side journal an earlier pass left: one
+ * rename carried the whole set, so the journal has nothing to finish. It never throws,
+ * because the folder is already renamed and a throw would release the locks at their old
+ * paths (locksAfter). A journal that stays is stale, because its old folder is gone, and
+ * the next store write drops it.
+ *
+ * @param {{ journal: string }} ctx
+ * @returns {string[]} one note when the journal could not be removed, else none
+ */
+function curationMoveDropJournal(ctx) {
+  try {
+    removeIfPresent(ctx.journal);
+    return [];
+  } catch (err) {
+    return [`the move journal could not be removed (${err && err.code}: ${err && err.message}); the next store write drops it`];
+  }
 }
 
 /** True when `file` is a regular file written to within CLAIM_STALE_SECS before `now`: a live claim. */

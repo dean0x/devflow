@@ -1119,6 +1119,26 @@ describe('moveLedger — an interrupted set move resumes from its journal (TP-40
     expect(store.withDecisionsLock('put-observation', site.root, () => ({ ok: true, value: null })).ok).toBe(true);
   });
 
+  it('a journal that cannot be removed after the folder rename is a note, not a failure, and no lock is left', () => {
+    fs.rmSync(site.newDir, { recursive: true });
+    fs.mkdirSync(site.machineDir, { recursive: true });
+    fs.writeFileSync(moveJournalFile(), '{"version":1,"steps":[]}');
+    failCall('unlinkSync', 'EACCES', ([file]) => String(file) === moveJournalFile());
+
+    const value = movedValue();
+
+    expect(value.mode).toBe('whole-folder');
+    expect(exists(site.oldDir)).toBe(false);
+    expect(value.notes.filter(note => note.includes('journal') && note.includes('EACCES'))).toHaveLength(1);
+    expect(exists(moveJournalFile()), 'the journal stays, and the next store write drops it').toBe(true);
+    expect(names(site.newDir).filter(entry => entry.endsWith('.lock'))).toEqual([]);
+    expect(names(site.machineDir).filter(entry => entry.endsWith('.lock'))).toEqual([]);
+
+    vi.restoreAllMocks();
+    expect(store.withDecisionsLock('put-observation', site.root, () => ({ ok: true, value: null })).ok).toBe(true);
+    expect(exists(moveJournalFile())).toBe(false);
+  });
+
   it('a journal counts only while the old folder exists: with it gone, the next store write removes the journal and goes on', () => {
     failAfterSetRenames(2);
     expect(failure().kind).toBe('io-error');
@@ -1328,7 +1348,7 @@ function seedKeptNew(oldQueue: string | null, newQueue: string | null): void {
 }
 
 /** Simulate a bounded I/O failure of one fs call by name, on the calls `when` accepts. */
-function failCall(method: 'openSync' | 'linkSync' | 'renameSync', code: string, when: (args: unknown[]) => boolean): void {
+function failCall(method: 'openSync' | 'linkSync' | 'renameSync' | 'unlinkSync', code: string, when: (args: unknown[]) => boolean): void {
   const real = nodeFs[method] as (...args: unknown[]) => unknown;
   vi.spyOn(nodeFs, method as 'openSync').mockImplementation(((...args: unknown[]) => {
     if (when(args)) throw Object.assign(new Error(`${code}: simulated`), { code });
