@@ -18,6 +18,8 @@ const store = requireCurationMove();
 
 const STAMP = '20261017T020304Z';
 const rows = (count: number): string => '{"role":"user"}\n'.repeat(count);
+/** The answer's count of backups past the listing limit, when there are none. */
+const NO_MORE = { backups: 0, pendingRows: 0 };
 
 let root: string;
 
@@ -40,10 +42,10 @@ function seedBackup(name: string, files: Record<string, string> = {}): string {
 
 describe('backupPendingRows', () => {
   it('answers no backups when .devflow is absent or holds none', () => {
-    expect(store.backupPendingRows(root)).toEqual({ ok: true, value: { backups: [] } });
+    expect(store.backupPendingRows(root)).toEqual({ ok: true, value: { backups: [], beyondLimit: NO_MORE } });
     fs.mkdirSync(path.join(devflow(), 'curation'), { recursive: true });
     fs.mkdirSync(path.join(devflow(), 'learning'), { recursive: true });
-    expect(store.backupPendingRows(root)).toEqual({ ok: true, value: { backups: [] } });
+    expect(store.backupPendingRows(root)).toEqual({ ok: true, value: { backups: [], beyondLimit: NO_MORE } });
   });
 
   it('counts the rows of the pending, processing, private and overflow files, and no swept file', () => {
@@ -62,7 +64,7 @@ describe('backupPendingRows', () => {
 
     expect(store.backupPendingRows(root)).toEqual({
       ok: true,
-      value: { backups: [{ name: `learning.backup-${STAMP}-ab12cd34`, pendingRows: 8 }] },
+      value: { backups: [{ name: `learning.backup-${STAMP}-ab12cd34`, pendingRows: 8 }], beyondLimit: NO_MORE },
     });
   });
 
@@ -81,6 +83,7 @@ describe('backupPendingRows', () => {
           { name: `learning.backup-${STAMP}-aaaaaaaa`, pendingRows: 0 },
           { name: `learning.backup-${STAMP}-bbbbbbbb`, pendingRows: 0 },
         ],
+        beyondLimit: NO_MORE,
       },
     });
   });
@@ -113,7 +116,7 @@ describe('backupPendingRows', () => {
         fs.writeFileSync(path.join(outside, '.pending-turns.jsonl'), rows(4));
         fs.mkdirSync(devflow(), { recursive: true });
         fs.symlinkSync(outside, path.join(devflow(), `learning.backup-${STAMP}-ab12cd34`));
-        expect(store.backupPendingRows(root)).toEqual({ ok: true, value: { backups: [] } });
+        expect(store.backupPendingRows(root)).toEqual({ ok: true, value: { backups: [], beyondLimit: NO_MORE } });
       } finally {
         fs.rmSync(outside, { recursive: true, force: true });
       }
@@ -136,7 +139,7 @@ describe('backupPendingRows', () => {
       try {
         fs.mkdirSync(path.join(outside, `learning.backup-${STAMP}-ab12cd34`));
         fs.symlinkSync(outside, devflow());
-        expect(store.backupPendingRows(root)).toEqual({ ok: true, value: { backups: [] } });
+        expect(store.backupPendingRows(root)).toEqual({ ok: true, value: { backups: [], beyondLimit: NO_MORE } });
       } finally {
         fs.rmSync(outside, { recursive: true, force: true });
       }
@@ -144,10 +147,20 @@ describe('backupPendingRows', () => {
   });
 
   describe('is bounded', () => {
-    it('reads at most 50 backup folders', () => {
+    it('lists at most 50 backup folders and counts the others in one total', () => {
       for (let i = 0; i < 55; i++) seedBackup(`learning.backup-${STAMP}-${String(i).padStart(8, '0')}`);
       const answer = store.backupPendingRows(root);
       expect(answer.ok && answer.value.backups).toHaveLength(50);
+      expect(answer.ok && answer.value.beyondLimit).toEqual({ backups: 5, pendingRows: 0 });
+    });
+
+    it('accounts for every backup: the rows of those past the listing limit are summed, whatever their position', () => {
+      for (let i = 0; i < 52; i++) {
+        seedBackup(`learning.backup-${STAMP}-${String(i).padStart(8, '0')}`, i >= 50 ? { '.pending-turns.jsonl': rows(i - 48) } : {});
+      }
+      const answer = store.backupPendingRows(root);
+      expect(answer.ok && answer.value.backups.map(entry => entry.pendingRows)).toEqual(new Array(50).fill(0));
+      expect(answer.ok && answer.value.beyondLimit).toEqual({ backups: 2, pendingRows: 2 + 3 });
     });
 
     it('reads at most 200 queue files in one backup', () => {

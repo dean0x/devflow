@@ -21,7 +21,7 @@ import * as path from 'path';
 import { spawnSync } from 'child_process';
 
 import {
-  GIT_ENV, JSON_HELPER, CURATION_STORE, CURATION_MOVE, PROJECT_PATHS, makeV2LedgerRow, makeV2LogRow, toJsonl,
+  GIT_ENV, JSON_HELPER, CURATION_STORE, CURATION_MOVE, PROJECT_PATHS, git, makeV2LedgerRow, makeV2LogRow, toJsonl,
 } from './curation-fixtures.js';
 
 // ---------------------------------------------------------------------------
@@ -68,6 +68,8 @@ const store = nodeRequire(CURATION_STORE) as Store;
 const { curationMoveLockKey } = nodeRequire(PROJECT_PATHS) as { curationMoveLockKey(realRoot: string): string };
 /** The fs module object the store calls into: a spy on it reaches the store. */
 const nodeFs = nodeRequire('fs') as typeof fs;
+/** The child_process module object the move calls git through: a spy on it reaches the move. */
+const nodeChildProcess = nodeRequire('child_process') as typeof import('child_process');
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -277,6 +279,29 @@ describe('moveLedger — entry and probe', () => {
     const before = snapshotTree(site.root);
     expect(move()).toEqual({ ok: true, value: { state: 'none', notes: [] } });
     expect(snapshotTree(site.root)).toEqual(before);
+  });
+
+  it('answers none for a project whose old folder is gone without a realpath or a directory read', () => {
+    seed(site.newDir, ledgerSet('one'));
+    seed(path.join(site.devflow, 'learning.backup-20261017T020304Z-0a1b2c3d'), {});
+    const before = snapshotTree(site.root);
+    const realpath = vi.spyOn(nodeFs, 'realpathSync');
+    const readdir = vi.spyOn(nodeFs, 'readdirSync');
+    expect(move()).toEqual({ ok: true, value: { state: 'none', notes: [] } });
+    expect(realpath).not.toHaveBeenCalled();
+    expect(readdir).not.toHaveBeenCalled();
+    expect(snapshotTree(site.root)).toEqual(before);
+    expect(exists(site.machineDir)).toBe(false);
+  });
+
+  it('still refuses a root that is missing, a link or not absolute when it has no old folder', () => {
+    const alias = path.join(site.tmp, 'alias');
+    fs.symlinkSync(site.root, alias);
+    for (const root of ['relative/project', alias, path.join(site.tmp, 'missing')]) {
+      const result = mover.moveLedger(root, opts());
+      expect(result.ok, root).toBe(false);
+      expect(!result.ok && result.error.kind, root).toBe('refused');
+    }
   });
 
   it('takes both folder names from the path helpers: names in the options redirect nothing', () => {
@@ -932,8 +957,27 @@ describe('moveLedger — an interrupted set move resumes from its journal (TP-40
     expect(exists(moveJournalFile())).toBe(false);
     expect(exists(path.join(backup, JOURNAL))).toBe(false);
     expect(exists(path.join(site.newDir, JOURNAL))).toBe(false);
+    expect(value.notes.join('\n'), 'a normal resume has no split set to report').not.toMatch(/left in place/);
     const after = store.withDecisionsLock('put-observation', site.root, () => ({ ok: true, value: null }));
     expect(after.ok).toBe(true);
+  });
+
+  it('a resumed move step whose member sits in both folders leaves both in place and names the member', () => {
+    failAfterSetRenames(SET.length);
+    expect(failure().kind).toBe('io-error');
+    vi.restoreAllMocks();
+    expect(exists(path.join(site.newDir, LOG))).toBe(false);
+    fs.writeFileSync(path.join(site.newDir, LOG), 'arrived while the move was stopped\n');
+
+    const value = movedValue();
+
+    expect(value.mode).toBe('moved-in');
+    expect(value.notes.filter(note => note.includes(LOG) && /left in place/.test(note))).toHaveLength(1);
+    expect(read(path.join(site.newDir, LOG))).toBe('arrived while the move was stopped\n');
+    expect(read(path.join(backupOf(value), LOG))).toBe(ledgerSet('old')[LOG]);
+    for (const name of [ARCHIVE, HISTORY, LEDGER]) {
+      expect(read(path.join(site.newDir, name)), name).toBe(ledgerSet('old')[name]);
+    }
   });
 
   it('a writer that took the lock after a move stopped part way through the set is busy, and runs nothing', () => {
@@ -1034,20 +1078,18 @@ describe('moveLedger — an interrupted set move resumes from its journal (TP-40
     expect(exists(moveJournalFile())).toBe(false);
   });
 
-  it('a move finds the same stale journal: it removes it, says so once, and answers none', () => {
+  it('a move with the old folder gone answers none and leaves a stale journal for the next store write to drop', () => {
     failAfterSetRenames(2);
     expect(failure().kind).toBe('io-error');
     vi.restoreAllMocks();
     fs.rmSync(site.oldDir, { recursive: true });
 
-    const result = move();
-
-    expect(result).toEqual({
-      ok: true,
-      value: { state: 'none', notes: ['removed a move journal that no old folder was left to finish'] },
-    });
-    expect(exists(moveJournalFile())).toBe(false);
     expect(move()).toEqual({ ok: true, value: { state: 'none', notes: [] } });
+    expect(exists(moveJournalFile())).toBe(true);
+
+    const write = store.withDecisionsLock('put-observation', site.root, () => ({ ok: true, value: null }));
+    expect(write.ok).toBe(true);
+    expect(exists(moveJournalFile())).toBe(false);
   });
 
   it('a stale journal that is a link is not followed or removed, and the write goes on', () => {
@@ -1588,6 +1630,51 @@ describe('the finish — the backup and the race-close sweep', () => {
     expect(exists(path.join(backupOf(value), QUEUE))).toBe(false);
   });
 
+  describe('a ledger above the render cap', () => {
+    const CAP = 64 * 1024 * 1024;
+    const RENDERED = { 'decisions.md': 'rendered before\n', 'pitfalls.md': 'rendered before\n', 'index.md': 'rendered before\n' };
+    const snapshotRendered = (): Record<string, string> =>
+      Object.fromEntries(Object.keys(RENDERED).map(name => [name, read(path.join(site.newDir, name))]));
+
+    it('is not read by the whole-folder move: rendered is false, the note names the cap, the rendered files stay', () => {
+      seedOld({ ...ledgerSet('one'), ...RENDERED });
+      fs.truncateSync(path.join(site.oldDir, LEDGER), CAP + 1);
+      const readFile = vi.spyOn(nodeFs, 'readFileSync');
+
+      const value = movedValue();
+
+      expect(value.mode).toBe('whole-folder');
+      expect(value.rendered).toBe(false);
+      expect(value.notes.filter(note => note.includes(String(CAP)))).toHaveLength(1);
+      expect(snapshotRendered()).toEqual(RENDERED);
+      expect(readFile.mock.calls.filter(([file]) => String(file).endsWith(LEDGER))).toEqual([]);
+    });
+
+    it('is not read by the per-entry move either, and the backup is still made', () => {
+      seedOld({ ...ledgerSet('old'), ...RENDERED });
+      seedNew({ [LOG]: '' });
+      fs.truncateSync(path.join(site.oldDir, LEDGER), CAP + 1);
+
+      const value = movedValue();
+
+      expect(value.mode).toBe('moved-in');
+      expect(value.rendered).toBe(false);
+      expect(value.notes.join('\n')).toContain(String(CAP));
+      expect(value.backup).toMatch(BACKUP_RE);
+      expect(exists(site.oldDir)).toBe(false);
+      // Nothing was rendered from the skipped read: the new folder holds no empty rendered file.
+      for (const name of Object.keys(RENDERED)) expect(exists(path.join(site.newDir, name)), name).toBe(false);
+    });
+
+    it('a ledger exactly at the cap is still rendered', () => {
+      seedOld(ledgerSet('one'));
+      fs.truncateSync(path.join(site.oldDir, LEDGER), CAP);
+      const value = movedValue();
+      expect(value.rendered).toBe(true);
+      expect(exists(path.join(site.newDir, 'decisions.md'))).toBe(true);
+    });
+  });
+
   it('keeps the move when the backup sweep fails, and says so', () => {
     seedKeptNew(turns(1, 3), turns(10, 11));
     const real = nodeFs.renameSync;
@@ -1625,6 +1712,39 @@ describe('sweepLedgerBackups', () => {
     expect(exists(path.join(backup, private1))).toBe(true);
   });
 
+  it('reaches a backup with rows past the per-pass limit, because a backup with nothing to merge does not count', () => {
+    seedNew({ [LOG]: '' });
+    const stamp = (i: number): string => `learning.backup-20261001T0000${String(i).padStart(2, '0')}Z-${String(i).padStart(8, '0')}`;
+    for (let i = 0; i < 51; i++) {
+      seed(path.join(site.devflow, stamp(i)), i % 2 === 0 ? {} : { [`${QUEUE}.swept-20261001T000000Z-${String(i).padStart(8, '0')}`]: turns(1, 3) });
+    }
+    seed(path.join(site.devflow, stamp(51)), { [QUEUE]: turns(7, 10) });
+
+    const result = mover.sweepLedgerBackups(site.root, opts());
+
+    expect(result.ok && result.value).toMatchObject({ state: 'swept', files: 1, merged: 3 });
+    expect(linesOf(path.join(site.newDir, QUEUE))).toEqual([turn(7), turn(8), turn(9)]);
+    expect(matching(path.join(site.devflow, stamp(51)), SWEPT_RE)).toHaveLength(1);
+  });
+
+  it('merges at most 50 backups that hold rows in one pass, oldest first, and the next pass takes the rest', () => {
+    seedNew({ [LOG]: '' });
+    const stamp = (i: number): string => `learning.backup-20261001T0000${String(i).padStart(2, '0')}Z-${String(i).padStart(8, '0')}`;
+    for (let i = 0; i < 52; i++) seed(path.join(site.devflow, stamp(i)), { [QUEUE]: `${turn(1000 + i)}\n` });
+    const swept = (i: number): boolean => matching(path.join(site.devflow, stamp(i)), SWEPT_RE).length > 0;
+
+    const first = mover.sweepLedgerBackups(site.root, opts());
+    expect(first.ok && first.value).toMatchObject({ state: 'swept', files: 50, merged: 50 });
+    expect(swept(0)).toBe(true);
+    expect(swept(49)).toBe(true);
+    expect(swept(50)).toBe(false);
+    expect(swept(51)).toBe(false);
+
+    const second = mover.sweepLedgerBackups(site.root, opts());
+    expect(second.ok && second.value).toMatchObject({ state: 'swept', files: 2, merged: 2 });
+    expect(swept(50) && swept(51)).toBe(true);
+  });
+
   it('refuses a linked root or backup, changing nothing', () => {
     seedKeptNew(turns(1, 3), null);
     const backup = backupOf(movedValue());
@@ -1634,6 +1754,165 @@ describe('sweepLedgerBackups', () => {
     const result = mover.sweepLedgerBackups(site.root, opts());
     expect(result.ok).toBe(false);
     expect(snapshotTree(site.devflow)).toEqual(before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Queue files a repository supplies: a file git tracks is not merged
+// ---------------------------------------------------------------------------
+
+describe('the queue rule — a queue file that git tracks is not merged', () => {
+  const TRACKED_OLD_QUEUE = `.devflow/${OLD}/${QUEUE}`;
+
+  /** Make the project a git repository with `rels` (paths relative to the root, written if absent) committed. */
+  function commitInRepo(...rels: string[]): void {
+    git(site.root, ['-c', 'init.defaultBranch=main', 'init', '-q']);
+    for (const rel of rels) {
+      const file = path.join(site.root, rel);
+      if (!exists(file)) {
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, 'supplied by the repository\n');
+      }
+    }
+    git(site.root, ['add', '-f', '--', ...rels]);
+    git(site.root, ['commit', '-q', '-m', 'supply files']);
+  }
+
+  /** The git calls the move made: every spawnSync call whose command is git. */
+  const gitCalls = (spy: { mock: { calls: unknown[][] } }): unknown[][] => spy.mock.calls.filter(([command]) => command === 'git');
+
+  const newQueue = (): string[] => linesOf(path.join(site.newDir, QUEUE));
+
+  it('skips a committed pending queue in the old folder: it stays in the backup under its name and a note counts it', () => {
+    seedKeptNew(turns(1, 4), turns(10, 11));
+    commitInRepo(TRACKED_OLD_QUEUE);
+
+    const value = movedValue();
+
+    expect(newQueue()).toEqual([turn(10)]);
+    const backup = backupOf(value);
+    expect(read(path.join(backup, QUEUE))).toBe(turns(1, 4));
+    expect(matching(backup, SWEPT_RE)).toEqual([]);
+    expect(matching(backup, PRIVATE_RE)).toEqual([]);
+    const notes = value.notes.filter(note => /tracked by git/.test(note));
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatch(/^1 queue file tracked by git stayed in learning, not merged: \.pending-turns\.jsonl$/);
+  });
+
+  it('skips a tracked overflow or private file but merges an untracked one beside it', () => {
+    const tail = '20261001T000000Z-deadbeef';
+    const tracked = `${QUEUE}.overflow-${tail}`;
+    const untracked = `${QUEUE}.merging-20261001T000000Z-cafebabe`;
+    seedKeptNew(null, null);
+    fs.writeFileSync(path.join(site.oldDir, tracked), turns(1, 3));
+    fs.writeFileSync(path.join(site.oldDir, untracked), turns(5, 7));
+    commitInRepo(`.devflow/${OLD}/${tracked}`);
+
+    const value = movedValue();
+
+    expect(newQueue()).toEqual([turn(5), turn(6)]);
+    expect(read(path.join(backupOf(value), tracked))).toBe(turns(1, 3));
+    expect(value.notes.some(note => note.includes(tracked))).toBe(true);
+  });
+
+  it('merges an untracked queue in a repository that tracks other files', () => {
+    seedKeptNew(turns(1, 4), turns(10, 11));
+    commitInRepo('README.txt');
+
+    const value = movedValue();
+
+    expect(newQueue()).toEqual([turn(10), turn(1), turn(2), turn(3)]);
+    expect(value.notes.some(note => /tracked by git/.test(note))).toBe(false);
+  });
+
+  it('merges as before when the project is not a git repository', () => {
+    seedKeptNew(turns(1, 4), turns(10, 11));
+    const calls = vi.spyOn(nodeChildProcess, 'spawnSync');
+
+    const value = movedValue();
+
+    expect(gitCalls(calls)).toHaveLength(1);
+    expect(newQueue()).toEqual([turn(10), turn(1), turn(2), turn(3)]);
+    expect(value.notes.some(note => /git/.test(note))).toBe(false);
+  });
+
+  it.each([
+    ['git is not installed', 'git is not installed', { error: Object.assign(new Error('spawn git ENOENT'), { code: 'ENOENT' }), status: null }],
+    ['git times out', 'git timed out', { error: Object.assign(new Error('spawnSync git ETIMEDOUT'), { code: 'ETIMEDOUT' }), status: null }],
+    ['git fails', 'git ls-files exited with 1', { error: undefined, status: 1, stdout: '', stderr: 'fatal: something else\n' }],
+    ['git is refused for the repository owner', 'git ls-files exited with 128', { error: undefined, status: 128, stdout: '', stderr: 'fatal: detected dubious ownership in repository\n' }],
+  ])('merges nothing from the folder when %s, says so, and the next pass retries', (_name, reason, answer) => {
+    seedKeptNew(turns(1, 4), turns(10, 11));
+    const real = nodeChildProcess.spawnSync;
+    vi.spyOn(nodeChildProcess, 'spawnSync').mockImplementation(((command: string, ...rest: unknown[]) => {
+      if (command === 'git') return { pid: 0, output: [], stdout: '', stderr: '', signal: null, ...answer };
+      return (real as (...a: unknown[]) => unknown)(command, ...rest);
+    }) as never);
+
+    const value = movedValue();
+
+    expect(newQueue()).toEqual([turn(10)]);
+    const backup = backupOf(value);
+    expect(matching(backup, SWEPT_RE)).toEqual([]);
+    expect(read(path.join(backup, QUEUE))).toBe(turns(1, 4));
+    const notes = value.notes.filter(note => /could not tell/.test(note));
+    expect(notes.length).toBeGreaterThan(0);
+    for (const note of notes) expect(note).toContain(reason);
+
+    vi.restoreAllMocks();
+    const sweep = mover.sweepLedgerBackups(site.root, opts());
+    expect(sweep.ok && sweep.value.merged).toBe(3);
+    expect(newQueue()).toEqual([turn(10), turn(1), turn(2), turn(3)]);
+  });
+
+  it('asks git once for the whole pass, with a bound, an argv and no shell', () => {
+    seedKeptNew(turns(1, 3), turns(10, 11));
+    const real = nodeFs.renameSync;
+    vi.spyOn(nodeFs, 'renameSync').mockImplementation((from, to) => {
+      real(from, to);
+      if (String(from) === site.oldDir) fs.appendFileSync(path.join(String(to), QUEUE), turn(77) + '\n');
+    });
+    const calls = vi.spyOn(nodeChildProcess, 'spawnSync');
+
+    movedValue();
+
+    expect(newQueue()).toContain(turn(77));
+    const made = gitCalls(calls);
+    expect(made).toHaveLength(1);
+    const [, args, options] = made[0] as [string, string[], { cwd: string; timeout: number; shell?: boolean; maxBuffer: number }];
+    expect(args).toEqual(['-c', 'core.fsmonitor=false', 'ls-files', '-z', '--', '.devflow']);
+    expect(options.cwd).toBe(site.root);
+    expect(options.timeout).toBeGreaterThan(0);
+    expect(options.timeout).toBeLessThanOrEqual(10_000);
+    expect(options.maxBuffer).toBeGreaterThan(0);
+    expect(options.shell).toBeFalsy();
+  });
+
+  it('does not run git when the pass has no queue file to merge', () => {
+    seedKeptNew(null, null);
+    const calls = vi.spyOn(nodeChildProcess, 'spawnSync');
+    movedValue();
+    expect(gitCalls(calls)).toEqual([]);
+  });
+
+  it('the backup sweep skips a file git tracks under the old folder\'s name, merges the rest, and asks git once', () => {
+    seedNew({ [LOG]: '' });
+    const first = path.join(site.devflow, 'learning.backup-20261001T000001Z-00000001');
+    const second = path.join(site.devflow, 'learning.backup-20261001T000002Z-00000002');
+    seed(first, { [QUEUE]: turns(1, 3) });
+    seed(second, { [`${QUEUE}.merging-20261001T000000Z-cafebabe`]: turns(5, 7) });
+    commitInRepo(TRACKED_OLD_QUEUE);
+    fs.rmSync(path.join(site.root, TRACKED_OLD_QUEUE));
+    fs.rmdirSync(site.oldDir);
+    const calls = vi.spyOn(nodeChildProcess, 'spawnSync');
+
+    const result = mover.sweepLedgerBackups(site.root, opts());
+
+    expect(gitCalls(calls)).toHaveLength(1);
+    expect(result.ok && result.value.merged).toBe(2);
+    expect(newQueue()).toEqual([turn(5), turn(6)]);
+    expect(read(path.join(first, QUEUE))).toBe(turns(1, 3));
+    expect(result.ok && result.value.notes.filter(note => /tracked by git/.test(note))).toHaveLength(1);
   });
 });
 

@@ -21,6 +21,7 @@
 
 'use strict';
 
+const childProcess = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -60,7 +61,6 @@ const {
   lstatOrNull,
   physicalPath,
   homeDirOrNull,
-  dropStaleMoveJournal,
 } = require('./curation-store.cjs');
 
 // ---------------------------------------------------------------------------
@@ -101,8 +101,14 @@ const MOVE_JOURNAL_MAX_BYTES = 64 * 1024;
 /** The most entries of a folder the move reads: past it the move refuses. */
 const MOVE_MAX_ENTRIES = 5000;
 
-/** The most backup folders one sweep reads. */
+/** The most backup folders one sweep merges from, and one status lists by name. */
 const MOVE_MAX_BACKUPS = 50;
+
+/**
+ * The most backup folders one sweep or one status looks into, to find those that still
+ * hold rows. A backup past it is not read: the sweep leaves it and status counts it by name.
+ */
+const MOVE_MAX_BACKUPS_SCANNED = 500;
 
 /** The name of a path helper's file, whichever project it names. */
 const nameOfHelper = helper => path.basename(helper(path.sep));
@@ -448,6 +454,93 @@ const MOVE_MAX_QUEUE_FILES = 200;
 /** The most unknown entry names a note lists. */
 const MOVE_MAX_NAMES_LISTED = 20;
 
+/** The largest ledger the move's re-render reads, in bytes: far above a ledger the store grows. */
+const LEDGER_RENDER_MAX_BYTES = 64 * 1024 * 1024;
+
+/** The longest one `git ls-files` call may run (ms). */
+const MOVE_GIT_TIMEOUT_MS = 5000;
+
+/** The most output one `git ls-files` call may return, in bytes. */
+const MOVE_GIT_MAX_BUFFER = 16 * 1024 * 1024;
+
+/** The folder under the ledger root that holds both ledger folders and the backups. */
+const DEVFLOW_DIR_NAME = '.devflow';
+
+/**
+ * The files git tracks under the ledger root's `.devflow` folder, as '/'-separated
+ * paths relative to the root: one `git ls-files` call, with a bound on its time and its
+ * output, an argv and no shell. Reading the index makes git run the command a
+ * repository's config names in `core.fsmonitor`, so the call turns that off for itself,
+ * as every git read of the curation store does: the call is a pure read.
+ *
+ * A directory that is not in a git working tree has no tracked file, and answers an
+ * empty set. Every other failure (git missing, a timeout, a full buffer, a non-zero
+ * exit) answers a reason: the caller cannot tell what git tracks and must merge nothing.
+ *
+ * @param {string} root - the ledger root, an absolute path
+ * @returns {{ ok: true, tracked: Set<string> } | { ok: false, reason: string }}
+ */
+function listTrackedDevflowFiles(root) {
+  const run = childProcess.spawnSync('git', ['-c', 'core.fsmonitor=false', 'ls-files', '-z', '--', DEVFLOW_DIR_NAME], {
+    cwd: root,
+    timeout: MOVE_GIT_TIMEOUT_MS,
+    maxBuffer: MOVE_GIT_MAX_BUFFER,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    encoding: 'utf8',
+    env: { ...process.env, LC_ALL: 'C', GIT_OPTIONAL_LOCKS: '0' },
+  });
+  if (run.error) {
+    const code = run.error.code;
+    if (code === 'ENOENT') return { ok: false, reason: 'git is not installed' };
+    if (code === 'ETIMEDOUT') return { ok: false, reason: 'git timed out' };
+    return { ok: false, reason: `git could not run (${code || 'unknown error'})` };
+  }
+  if (run.status === 128 && /not a git repository/i.test(run.stderr || '')) return { ok: true, tracked: new Set() };
+  if (run.status !== 0) return { ok: false, reason: `git ls-files exited with ${run.status}` };
+  return { ok: true, tracked: new Set(String(run.stdout).split('\0').filter(Boolean)) };
+}
+
+/**
+ * @typedef {{ ok: true, tracked: Set<string> } | { ok: false, reason: string }} TrackedFiles
+ * @typedef {{ files: () => TrackedFiles, firstReport: (key: string) => boolean }} GitLookup
+ */
+
+/**
+ * What one pass knows about git: the tracked files, asked once, and which findings it
+ * has reported. `files()` runs listTrackedDevflowFiles on the first call and answers the
+ * same result after that, so a pass that merges the old folder and then sweeps the backup
+ * it made asks git once. `firstReport(key)` is true the first time it sees a key, so the
+ * sweep of that backup does not repeat a note the merge of the old folder made.
+ *
+ * @param {string} root - the ledger root, an absolute path
+ * @returns {GitLookup}
+ */
+function gitLookup(root) {
+  let answer = null;
+  const reported = new Set();
+  return {
+    files: () => {
+      if (answer === null) answer = listTrackedDevflowFiles(root);
+      return answer;
+    },
+    firstReport: key => {
+      if (reported.has(key)) return false;
+      reported.add(key);
+      return true;
+    },
+  };
+}
+
+/**
+ * True when git tracks the queue file `name` of the folder `dirName`, or the file of
+ * that name in the old folder. A backup is the old folder renamed, so a repository's
+ * committed file still stands in the index under the old folder's name until the user
+ * commits its removal.
+ */
+function isTrackedQueueFile(tracked, dirName, name) {
+  return tracked.has(`${DEVFLOW_DIR_NAME}/${dirName}/${name}`) || tracked.has(`${DEVFLOW_DIR_NAME}/${LEGACY_NAMES.folder}/${name}`);
+}
+
 /** `YYYYMMDDTHHMMSSZ` for an epoch ms. */
 function utcStamp(now) {
   return new Date(now).toISOString().replace(/\.\d+Z$/, 'Z').replace(/[-:]/g, '');
@@ -633,7 +726,16 @@ function mergeQueueFile(ctx, file, targetDir) {
  * create a fresh queue that the next run catches, and the private file goes through
  * mergeQueueFile. With `overflow` set, overflow files are merged too.
  *
- * @param {{ now: number }} ctx
+ * A queue file that git tracks is never merged: the repository supplied it. It stays in
+ * the folder under its own name, and one note counts it. The index is read once per pass
+ * (ctx.git) and a file counts as tracked under the folder's own name or under
+ * the old folder's name, because a backup is the old folder renamed. When git cannot say
+ * what it tracks (not installed, a timeout, a failure), nothing from the folder is merged
+ * and one note says why: the files stay, and the next pass asks again. A folder outside a
+ * git working tree has no tracked file. A finding is noted once for the pass, so the sweep
+ * of the backup that a merge just made does not repeat the merge's notes.
+ *
+ * @param {{ now: number, git: GitLookup }} ctx
  * @param {{ dir: string, targetDir: string, bases: string[], overflow?: boolean }} opts
  *   dir: the folder holding the files; targetDir: the folder whose queue receives the
  *   lines; bases: the live queue files to rename and merge, in order
@@ -641,6 +743,23 @@ function mergeQueueFile(ctx, file, targetDir) {
  */
 function curationMoveMergeQueue(ctx, { dir, targetDir, bases, overflow = false }) {
   const total = { files: 0, merged: 0, overflowed: 0, notes: [] };
+  const dirName = path.basename(dir);
+  const tracked = [];
+  let unknown = null;
+  // A queue file a repository committed is content the repository supplied, not rows a
+  // capture hook wrote: it stays where it is. When git cannot say which files it tracks,
+  // nothing from this folder is merged, and a later pass asks again.
+  const mayMerge = name => {
+    if (unknown !== null) return false;
+    const answer = ctx.git.files();
+    if (!answer.ok) {
+      unknown = answer.reason;
+      return false;
+    }
+    if (!isTrackedQueueFile(answer.tracked, dirName, name)) return true;
+    tracked.push(name);
+    return false;
+  };
   const take = file => {
     const result = mergeQueueFile(ctx, file, targetDir);
     total.merged += result.merged;
@@ -653,15 +772,23 @@ function curationMoveMergeQueue(ctx, { dir, targetDir, bases, overflow = false }
     return record !== null && (record.form === 'private' || (overflow && record.form === 'overflow'));
   };
   const waiting = fs.readdirSync(dir).filter(isWanted).sort().slice(0, MOVE_MAX_QUEUE_FILES);
-  for (const name of waiting) take(path.join(dir, name));
+  for (const name of waiting) if (mayMerge(name)) take(path.join(dir, name));
 
   for (const base of bases) {
     const live = path.join(dir, base);
     const stat = lstatOrNull(live);
-    if (stat === null || !stat.isFile()) continue;
+    if (stat === null || !stat.isFile() || !mayMerge(base)) continue;
     const privateFile = path.join(dir, `${base}.merging-${uniqueTail(ctx.now)}`);
     renameNoReplace(live, privateFile);
     take(privateFile);
+  }
+  if (unknown !== null && ctx.git.firstReport('unknown')) {
+    total.notes.push(`queue files in ${dirName} were not merged: git could not tell which of them it tracks (${unknown}); they stay for the next pass`);
+  }
+  const held = tracked.filter(name => ctx.git.firstReport(`tracked:${name}`));
+  if (held.length > 0) {
+    const shown = held.slice(0, MOVE_MAX_NAMES_LISTED).join(', ');
+    total.notes.push(`${held.length} queue ${held.length === 1 ? 'file' : 'files'} tracked by git stayed in ${dirName}, not merged: ${shown}${held.length > MOVE_MAX_NAMES_LISTED ? ', ...' : ''}`);
   }
   return total;
 }
@@ -673,7 +800,7 @@ function curationMoveMergeQueue(ctx, { dir, targetDir, bases, overflow = false }
  * folder absent it does nothing. The caller holds the move lock and the new folder's
  * queue lock.
  *
- * @param {{ now: number, newDir: string }} ctx
+ * @param {{ now: number, newDir: string, git: GitLookup }} ctx
  * @param {string} backupDir
  * @returns {{ files: number, merged: number, overflowed: number, notes: string[] }}
  */
@@ -729,13 +856,27 @@ function readMoveJournal(file) {
   return steps;
 }
 
-/** Carry out one journal step when its source still exists and its target does not. Returns whether it renamed. */
+/**
+ * Carry out one journal step when its source still exists and its target does not.
+ * A step whose source and target both exist is left undone and nothing is overwritten.
+ * For a move step that is a split set, a member present in both folders, and it is
+ * reported by name. For a displace step it is the normal state of a resumed move (the
+ * member that was displaced has since moved in), so it is not reported.
+ *
+ * @returns {{ renamed: boolean, note: string|null }}
+ */
 function applyMoveStep(ctx, step) {
   const from = step.op === 'move' ? path.join(ctx.oldDir, step.name) : path.join(ctx.newDir, step.name);
   const to = step.op === 'move' ? path.join(ctx.newDir, step.name) : path.join(ctx.oldDir, step.to);
-  if (lstatOrNull(from) === null || lstatOrNull(to) !== null) return false;
+  if (lstatOrNull(from) === null) return { renamed: false, note: null };
+  if (lstatOrNull(to) !== null) {
+    const note = step.op === 'move'
+      ? `${step.name} exists in both ${path.basename(ctx.newDir)} and ${path.basename(ctx.oldDir)}; both were left in place`
+      : null;
+    return { renamed: false, note };
+  }
   fs.renameSync(from, to);
-  return true;
+  return { renamed: true, note: null };
 }
 
 /**
@@ -790,7 +931,11 @@ function curationMoveSetWithJournal(ctx) {
   }
   let renamed = 0;
   try {
-    for (const step of steps) if (applyMoveStep(ctx, step)) renamed++;
+    for (const step of steps) {
+      const applied = applyMoveStep(ctx, step);
+      if (applied.renamed) renamed++;
+      if (applied.note !== null) notes.push(applied.note);
+    }
   } catch (err) {
     if (!resumed && renamed === 0) removeIfPresent(journal);
     throw err;
@@ -849,9 +994,12 @@ function curationMoveEntries(ctx) {
  * is still there, rename it to the backup name (the legacy prefix, a UTC stamp and a
  * random suffix) and run the race-close sweep over it, which merges an append that
  * landed in the old folder before the rename. A rebuild or a sweep that fails is
- * reported and does not undo or stop the rest: the move stays done.
+ * reported and does not undo or stop the rest: the move stays done. A ledger larger
+ * than LEDGER_RENDER_MAX_BYTES is not read: the rebuild is skipped with a note, the
+ * rendered files stay as they are, and `rendered` is false. The size is read from the
+ * file before anything is rendered, so a render never starts from a partial read.
  *
- * @param {{ root: string, oldDir: string, newDir: string, devflowDir: string, now: number }} ctx
+ * @param {{ root: string, oldDir: string, newDir: string, devflowDir: string, now: number, git: GitLookup }} ctx
  * @param {{ whole: boolean }} opts - whole: the folder itself was renamed, so there is no backup
  * @returns {{ notes: string[], rendered: boolean, backup: string|null }}
  * @throws when the backup rename fails
@@ -860,7 +1008,13 @@ function curationMoveFinish(ctx, { whole }) {
   const notes = [];
   let rendered = true;
   try {
-    renderAll(ctx.root, readJsonl(path.join(ctx.newDir, LEDGER_NAME)).rows, ctx.newDir);
+    const ledger = lstatOrNull(path.join(ctx.newDir, LEDGER_NAME));
+    if (ledger !== null && ledger.isFile() && ledger.size > LEDGER_RENDER_MAX_BYTES) {
+      rendered = false;
+      notes.push(`the rendered files were not rebuilt: ${LEDGER_NAME} is larger than ${LEDGER_RENDER_MAX_BYTES} bytes`);
+    } else {
+      renderAll(ctx.root, readJsonl(path.join(ctx.newDir, LEDGER_NAME)).rows, ctx.newDir);
+    }
   } catch (err) {
     rendered = false;
     notes.push(`the rendered files could not be rebuilt (re-render failed: ${err && err.message})`);
@@ -888,8 +1042,9 @@ function curationMoveFinish(ctx, { whole }) {
  * Move a project's old ledger folder to the new name, once.
  *
  * The root must be a real ledger root (curationMoveRefusal). With no old folder the
- * answer is `none` and nothing is locked or created; a journal that is left in the
- * machine directory is stale then and is removed, with one note. Otherwise the machine
+ * answer is `none`, from two lstat calls, and nothing is locked, created or read; a
+ * journal that is left in the machine directory is stale then, and the next store write
+ * on the root removes it (moveJournalHoldsWriters). Otherwise the machine
  * directory is made if absent, and every lock the pass needs is taken with no wait: the
  * move lock, the old folder's store lock and queue lock, and, when the new folder
  * exists, its two. Any busy lock releases what was taken and answers `busy`; a fresh
@@ -914,36 +1069,61 @@ function moveLedger(root, options = {}) {
 }
 
 /**
+ * True when `root` is an absolute path to a plain directory (two lstat calls: the root
+ * itself, never a link) and holds no old ledger folder. It reads nothing else.
+ *
+ * @param {unknown} root
+ * @returns {boolean}
+ */
+function oldFolderAbsent(root) {
+  if (!isAbsoluteRoot(root)) return false;
+  const resolved = path.resolve(root);
+  const rootStat = lstatOrNull(resolved);
+  if (rootStat === null || !rootStat.isDirectory()) return false;
+  return lstatOrNull(path.join(resolved, DEVFLOW_DIR_NAME, LEGACY_NAMES.folder)) === null;
+}
+
+/**
  * The setup both ops share, before either reads or changes anything: the machine
  * directory, the checks on the ledger root (curationMoveRefusal) and the context the
  * pass runs on. The old and new folders are the two names the path helpers hold. An
  * unknown machine directory answers an `io-error`, a refused root a `refused`, and an
  * I/O failure in the checks an `io-error`, each starting with `opName`.
  *
+ * The checks read the whole root (a real path, the folder's entries, a link check on
+ * each), and a project that is already moved pays for them at every init. With
+ * `stopIfOldFolderAbsent` set, a root that is a plain directory with no old folder
+ * answers `value: null` from two lstat calls, before those checks run. A root that is
+ * not an absolute path, is missing, is a link or is not a directory still goes through
+ * them and is refused.
+ *
  * @param {string} opName - the op, which starts every message
  * @param {unknown} root - the ledger root, an absolute path
  * @param {{ machineDir?: string, homeDir?: string, now?: number }} [options]
+ * @param {{ stopIfOldFolderAbsent?: boolean }} [flags]
  * @returns {{ ok: true, value: { root: string, realRoot: string, devflowDir: string, oldDir: string,
- *   newDir: string, machineDir: string, journal: string, now: number } }
+ *   newDir: string, machineDir: string, journal: string, now: number, git: GitLookup } | null }
  *   | { ok: false, error: { kind: 'refused'|'io-error', message: string } }}
  */
-function moveContext(opName, root, { machineDir, homeDir, now = Date.now() } = {}) {
+function moveContext(opName, root, { machineDir, homeDir, now = Date.now() } = {}, { stopIfOldFolderAbsent = false } = {}) {
   const home = homeDir === undefined ? homeDirOrNull() : homeDir;
   const machine = machineDir === undefined ? (home === null ? null : path.join(home, '.devflow')) : machineDir;
   if (machine === null) {
     return { ok: false, error: { kind: 'io-error', message: `${opName}: no home directory is set, so the machine directory is unknown` } };
   }
   try {
+    if (stopIfOldFolderAbsent && oldFolderAbsent(root)) return { ok: true, value: null };
     const refusal = curationMoveRefusal(opName, root, { machineDir: machine, homeDir: home });
     if (!refusal.ok) return refusal;
     const { realRoot } = refusal.value;
-    const devflowDir = path.join(path.resolve(root), '.devflow');
+    const devflowDir = path.join(path.resolve(root), DEVFLOW_DIR_NAME);
     return {
       ok: true,
       value: {
         root: path.resolve(root), realRoot, devflowDir,
         oldDir: path.join(devflowDir, LEGACY_NAMES.folder), newDir: path.join(devflowDir, CURATION_DIR_NAME),
         machineDir: machine, journal: curationMoveJournalPath(machine, realRoot), now,
+        git: gitLookup(path.resolve(root)),
       },
     };
   } catch (err) {
@@ -953,12 +1133,13 @@ function moveContext(opName, root, { machineDir, homeDir, now = Date.now() } = {
 
 /** moveLedger before its messages and notes are made single-line. */
 function moveLedgerUnscrubbed(root, options = {}) {
-  const opened = moveContext(MOVE_OP, root, options);
+  const opened = moveContext(MOVE_OP, root, options, { stopIfOldFolderAbsent: true });
   if (!opened.ok) return opened;
+  if (opened.value === null) return { ok: true, value: { state: 'none', notes: [] } };
   const ctx = opened.value;
   const { machineDir: machine, realRoot } = ctx;
   try {
-    if (lstatOrNull(ctx.oldDir) === null) return { ok: true, value: { state: 'none', notes: dropStaleMoveJournal(ctx.journal) } };
+    if (lstatOrNull(ctx.oldDir) === null) return { ok: true, value: { state: 'none', notes: [] } };
 
     fs.mkdirSync(machine, { recursive: true, mode: 0o700 });
     let newExisted = lstatOrNull(ctx.newDir) !== null;
@@ -1082,8 +1263,10 @@ function claimIsFresh(file, now) {
  * move lock and the new folder's queue lock with no wait (busy answers `busy`), merges
  * the pending and processing files, and the unswept private and overflow files, of
  * each backup by the queue rule, and marks each merged file swept. A merged file is
- * never read again, so a repeated sweep adds nothing. With the new folder absent or no
- * backup it answers `none`.
+ * never read again, so a repeated sweep adds nothing. A backup that holds nothing to
+ * merge is passed over before the limit of MOVE_MAX_BACKUPS backups per pass applies,
+ * and the pass looks into at most MOVE_MAX_BACKUPS_SCANNED backups. With the new
+ * folder absent or no backup it answers `none`.
  *
  * @param {unknown} root - the ledger root, an absolute path
  * @param {{ machineDir?: string, homeDir?: string, now?: number }} [options]
@@ -1105,7 +1288,8 @@ function sweepLedgerBackupsUnscrubbed(root, options = {}) {
   const { devflowDir } = ctx;
   try {
     if (lstatOrNull(ctx.newDir) === null) return idle('none');
-    const backups = fs.readdirSync(devflowDir).filter(name => name.startsWith(LEGACY_NAMES.backupPrefix)).sort().slice(0, MOVE_MAX_BACKUPS);
+    const backups = backupNames(devflowDir).slice(0, MOVE_MAX_BACKUPS_SCANNED)
+      .filter(name => backupMayHoldRows(path.join(devflowDir, name))).slice(0, MOVE_MAX_BACKUPS);
     if (backups.length === 0) return idle('none');
     for (const name of backups) {
       const problem = backupProblem(path.join(devflowDir, name));
@@ -1136,6 +1320,25 @@ function sweepLedgerBackupsUnscrubbed(root, options = {}) {
   }
 }
 
+/** The names of the backup folders under `devflowDir`, oldest first (the stamp sorts by time). */
+function backupNames(devflowDir) {
+  return fs.readdirSync(devflowDir).filter(name => name.startsWith(LEGACY_NAMES.backupPrefix)).sort();
+}
+
+/**
+ * True unless `dir` is a backup folder with nothing for the sweep to merge: a folder
+ * that holds no pending, processing, private or overflow file (a swept file counts for
+ * nothing) is skipped before the per-pass limit applies, so a backup past the limit
+ * is reached once the older ones are done. Anything that is not a plain folder is kept,
+ * so that backupProblem refuses it as before; a folder that has gone is skipped.
+ */
+function backupMayHoldRows(dir) {
+  const stat = lstatOrNull(dir);
+  if (stat === null) return false;
+  if (!stat.isDirectory()) return true;
+  return fs.readdirSync(dir).some(holdsPendingRows);
+}
+
 /** What is wrong with a backup folder the sweep would read, or null: a link, or a link among its queue files. */
 function backupProblem(dir) {
   const stat = lstatOrNull(dir);
@@ -1160,6 +1363,25 @@ function holdsPendingRows(name) {
 }
 
 /**
+ * The rows a backup folder still holds for a later sweep: the non-blank lines of the files
+ * holdsPendingRows names, at most MOVE_MAX_QUEUE_FILES of them. Null for a path that is
+ * not a plain folder (a link, a file or nothing), which is never read.
+ *
+ * @param {string} dir
+ * @returns {number|null}
+ */
+function pendingRowsOf(dir) {
+  const stat = lstatOrNull(dir);
+  if (stat === null || !stat.isDirectory()) return null;
+  let pendingRows = 0;
+  for (const file of fs.readdirSync(dir).filter(holdsPendingRows).sort().slice(0, MOVE_MAX_QUEUE_FILES)) {
+    const text = readQueueText(path.join(dir, file));
+    if (text !== null) pendingRows += completeLines(text).length;
+  }
+  return pendingRows;
+}
+
+/**
  * Count the rows still waiting in the backup folders a move left, for the status
  * command: per backup, the non-blank lines of the pending and processing files and of
  * the unswept private and overflow files (an unfinished last line counts, because the
@@ -1170,8 +1392,14 @@ function holdsPendingRows(name) {
  * display: its control characters are collapsed to a space (singleLine), so it may differ
  * from the folder's own name.
  *
+ * The first MOVE_MAX_BACKUPS backups, in name order, are listed. The others are counted
+ * in `beyondLimit`: how many there are by name, and the rows the first
+ * MOVE_MAX_BACKUPS_SCANNED backups hold in all, so that no backup is left out of the
+ * account.
+ *
  * @param {unknown} root - the ledger root, an absolute path
- * @returns {{ ok: true, value: { backups: Array<{ name: string, pendingRows: number }> } }
+ * @returns {{ ok: true, value: { backups: Array<{ name: string, pendingRows: number }>,
+ *   beyondLimit: { backups: number, pendingRows: number } } }
  *   | { ok: false, error: { kind: 'refused'|'io-error', message: string } }}
  */
 function backupPendingRows(root) {
@@ -1181,22 +1409,18 @@ function backupPendingRows(root) {
   try {
     const devflowDir = path.join(path.resolve(root), '.devflow');
     const devflowStat = lstatOrNull(devflowDir);
-    if (devflowStat === null || !devflowStat.isDirectory()) return { ok: true, value: { backups: [] } };
-    const names = fs.readdirSync(devflowDir).filter(name => name.startsWith(LEGACY_NAMES.backupPrefix)).sort().slice(0, MOVE_MAX_BACKUPS);
+    if (devflowStat === null || !devflowStat.isDirectory()) return { ok: true, value: { backups: [], beyondLimit: { backups: 0, pendingRows: 0 } } };
+    const names = backupNames(devflowDir);
     const backups = [];
-    for (const name of names) {
-      const dir = path.join(devflowDir, name);
-      const stat = lstatOrNull(dir);
-      if (stat === null || !stat.isDirectory()) continue;
-      const files = fs.readdirSync(dir).filter(holdsPendingRows).sort().slice(0, MOVE_MAX_QUEUE_FILES);
-      let pendingRows = 0;
-      for (const file of files) {
-        const text = readQueueText(path.join(dir, file));
-        if (text !== null) pendingRows += completeLines(text).length;
-      }
-      backups.push({ name: singleLine(name), pendingRows });
+    for (const name of names.slice(0, MOVE_MAX_BACKUPS)) {
+      const rows = pendingRowsOf(path.join(devflowDir, name));
+      if (rows !== null) backups.push({ name: singleLine(name), pendingRows: rows });
     }
-    return { ok: true, value: { backups } };
+    let beyondRows = 0;
+    for (const name of names.slice(MOVE_MAX_BACKUPS, MOVE_MAX_BACKUPS_SCANNED)) {
+      beyondRows += pendingRowsOf(path.join(devflowDir, name)) || 0;
+    }
+    return { ok: true, value: { backups, beyondLimit: { backups: Math.max(0, names.length - MOVE_MAX_BACKUPS), pendingRows: beyondRows } } };
   } catch (err) {
     return scrubMoveResult(moveIoFailure(ROWS_OP, err));
   }

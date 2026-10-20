@@ -675,13 +675,11 @@ function moveJournalPathOrNull(root) {
  * is followed.
  *
  * @param {string} journal
- * @returns {string[]} one note when a journal was removed, else none
  */
 function dropStaleMoveJournal(journal) {
   const stat = lstatOrNull(journal);
-  if (stat === null || !stat.isFile()) return [];
+  if (stat === null || !stat.isFile()) return;
   removeIfPresent(journal);
-  return ['removed a move journal that no old folder was left to finish'];
 }
 
 /**
@@ -3300,7 +3298,6 @@ module.exports = {
   lstatOrNull,
   physicalPath,
   homeDirOrNull,
-  dropStaleMoveJournal,
   // Integrity, listing, due selection and show
   integrityFlags,
   buildListing,

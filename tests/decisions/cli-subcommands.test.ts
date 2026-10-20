@@ -1319,6 +1319,22 @@ describe('curation --status shows the backup a move left (#529)', { timeout: 30_
     ]);
   });
 
+  it('adds one line for the backups past the listing limit, with the rows they still hold', async () => {
+    const suffix = (i: number): string => `20261017T0203${String(i).padStart(2, '0')}Z-${String(i).padStart(8, '0')}`;
+    for (let i = 0; i < 52; i++) seedBackup(i >= 50 ? { '.pending-turns.jsonl': rows(i - 48) } : {}, suffix(i));
+
+    const lines = (await runCuration(['--status'])).info.split('\n');
+
+    expect(lines.filter(line => line.startsWith('Backup: ')).length).toBe(51);
+    expect(lines.pop()).toBe('Backup: 2 more backup folders are not listed above: 5 pending rows in them');
+  });
+
+  it('says "1 more backup folder" for one backup past the limit', async () => {
+    const suffix = (i: number): string => `20261017T0203${String(i).padStart(2, '0')}Z-${String(i).padStart(8, '0')}`;
+    for (let i = 0; i < 51; i++) seedBackup(i === 50 ? { '.pending-turns.jsonl': rows(1) } : {}, suffix(i));
+    expect((await runCuration(['--status'])).info.split('\n').pop()).toBe('Backup: 1 more backup folder is not listed above: 1 pending row in it');
+  });
+
   it('does not follow a backup that is a symbolic link, and does not list it', async () => {
     const outside = makeTmpDir();
     try {

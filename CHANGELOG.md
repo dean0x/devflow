@@ -84,8 +84,14 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
   The old queue files and the overflow files stay in it.
 - `devflow curation --status` prints one `Backup:` line for each backup folder.
   The line shows how many pending rows the backup still holds.
+  For the first 50 folders it prints one line each. One more line counts the folders after the first 50 and their pending rows.
 - Delete a backup folder only when `devflow curation --status` shows 0 pending rows for it.
   Until then, a later init can still merge the rows.
+- An init merges rows from at most 50 backup folders in one run. It passes over a folder that holds no pending rows,
+  so a later folder is reached when the earlier ones are done.
+- A queue file that git tracks is never merged, because the repository supplied it.
+  It stays in the old folder or the backup under its own name, and a note says how many files stayed.
+  If git is missing, times out or fails, the move merges nothing from that folder and says so. A later init tries again.
 
 **The queue cap:**
 - A merge fills a pending queue up to 100 lines and no further.

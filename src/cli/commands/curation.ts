@@ -257,7 +257,8 @@ function entryCountLines(listing: CurationListing, logRowCount: number, inactive
 
 /**
  * The `--status` backup lines: one per backup folder a move left under `.devflow`, with
- * the rows its unswept queue files still hold. A backup is inert, so the count tells the
+ * the rows its unswept queue files still hold, and one more line for the folders past
+ * the listing limit. A backup is inert, so the count tells the
  * user when deleting it loses nothing. A count that fails is a warning, not an error.
  */
 function backupLines(ledgerRoot: string): { lines: string[]; warning: string | null } {
@@ -267,6 +268,12 @@ function backupLines(ledgerRoot: string): { lines: string[]; warning: string | n
   if (!rows.ok) return { lines: [], warning: `Backup rows were not counted: ${describeMoveText(rows.error.message)}` };
   const lines = rows.value.backups.map(({ name, pendingRows }) =>
     `Backup: ${describeMoveText(path.join(ledgerRoot, '.devflow', name))}: ${counted(pendingRows, 'pending row')} in the backup`);
+  const beyond = rows.value.beyondLimit;
+  if (beyond.backups > 0) {
+    const one = beyond.backups === 1;
+    lines.push(`Backup: ${counted(beyond.backups, 'more backup folder')} ${one ? 'is' : 'are'} not listed above: `
+      + `${counted(beyond.pendingRows, 'pending row')} in ${one ? 'it' : 'them'}`);
+  }
   return { lines, warning: null };
 }
 

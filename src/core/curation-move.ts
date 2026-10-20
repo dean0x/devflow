@@ -65,6 +65,15 @@ export interface LedgerBackupRows {
 }
 
 /**
+ * The backup folders past the listing limit, counted in one total: how many there are,
+ * and the rows the first 500 backups hold in all, so that no backup is left out of the account.
+ */
+export interface LedgerBackupsBeyondLimit {
+  readonly backups: number;
+  readonly pendingRows: number;
+}
+
+/**
  * The part of the move module's `module.exports` the CLI calls. Each function answers
  * a Result and never throws on an expected outcome.
  */
@@ -78,11 +87,15 @@ export interface CurationMoveModule {
   /** Merge what the backups a move left hold into the new folder's pending queue; same error kinds as `moveLedger`. */
   sweepLedgerBackups(root: string, opts?: LedgerMoveOptions): CurationStoreResult<LedgerSweepOutcome>;
   /**
-   * The backup folders under `.devflow`, in name order, each with the count of rows its pending, processing,
-   * private and overflow files still hold (swept files count for nothing). Read-only: takes no lock, writes
-   * nothing, follows no link. Error kinds: `refused` (the root is not an absolute path), `io-error`.
+   * The first 50 backup folders under `.devflow`, in name order, each with the count of rows its pending,
+   * processing, private and overflow files still hold (swept files count for nothing), and the others in
+   * `beyondLimit`. Read-only: takes no lock, writes nothing, follows no link. Error kinds: `refused` (the
+   * root is not an absolute path), `io-error`.
    */
-  backupPendingRows(root: string): CurationStoreResult<{ readonly backups: readonly LedgerBackupRows[] }>;
+  backupPendingRows(root: string): CurationStoreResult<{
+    readonly backups: readonly LedgerBackupRows[];
+    readonly beyondLimit: LedgerBackupsBeyondLimit;
+  }>;
 }
 
 /**
