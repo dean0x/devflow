@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
+import { withManifestLock } from './manifest-lock.js';
 
 /**
  * The features that are switched on or off for the WHOLE MACHINE, and that a
@@ -253,8 +254,24 @@ export async function readOptInFeature(devflowDir: string, feature: OptInMachine
  * field means "the manifest's content last changed", so a no-op must not move
  * it. This is the one write point of `devflow memory|curation|knowledge|behavior
  * --enable/--disable`, so the rule holds for all four at once.
+ *
+ * The read and the write run under the manifest lock (manifest-lock.ts), so the
+ * heal in readManifest cannot write an older snapshot over this write. The wait is
+ * bounded, and longer than the stale age, so a lock left by a dead process is broken
+ * inside it. A lock that is still not taken after that wait cannot be broken, and
+ * the lock then protects nothing: the toggle goes ahead without it, as it did before
+ * the lock existed, rather than refuse an explicit switch.
  */
 export async function writeMachineFeature(
+  devflowDir: string,
+  feature: MachineFeature | OptInMachineFeature,
+  enabled: boolean,
+): Promise<Result<void, MachineFeatureWriteError>> {
+  const locked = await withManifestLock(devflowDir, {}, () => recordMachineFeature(devflowDir, feature, enabled));
+  return locked.ok ? locked.value : recordMachineFeature(devflowDir, feature, enabled);
+}
+
+async function recordMachineFeature(
   devflowDir: string,
   feature: MachineFeature | OptInMachineFeature,
   enabled: boolean,

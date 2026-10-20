@@ -12,6 +12,7 @@ import { normalizeComplianceFeature, type ComplianceFeatureState } from './compl
 import { normalizeTrackerFeature, type TrackerFeatureState } from './tracker.js';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
 import { isMachineFeatureOn } from './feature-switch.js';
+import { withManifestLock } from './manifest-lock.js';
 
 /**
  * Where the Devflow security deny list is installed.
@@ -224,6 +225,12 @@ export function hasRequiredManifestFields(data: Record<string, unknown>): boolea
  *
  * D39: heal-write failure returns the migrated in-memory manifest (not null).
  * The on-disk format remains unhealed; next read triggers another attempt.
+ *
+ * The heal is a read-modify-write and takes the manifest lock (manifest-lock.ts) like
+ * the toggle write does. It never waits for it: when the lock is held, it skips the
+ * write, because the next read heals. Under the lock it reads the file again and
+ * writes only when those bytes are the bytes it parsed, so a toggle that landed after
+ * the parse is never written over with the older snapshot.
  */
 export async function readManifest(
   devflowDir: string,
@@ -350,7 +357,14 @@ export async function readManifest(
       // propagate to the caller. The migrated in-memory manifest is returned even
       // when the on-disk heal fails. The next read will retry the heal.
       try {
-        await writeManifest(devflowDir, manifest);
+        // No wait: a held lock means a toggle is writing, and the next read heals.
+        // Under the lock the write goes ahead only while the file still holds the
+        // bytes parsed above; any other writer's result stands.
+        await withManifestLock(devflowDir, { timeoutMs: 0 }, async () => {
+          if ((await fs.readFile(manifestPath, 'utf-8')) === content) {
+            await writeManifest(devflowDir, manifest);
+          }
+        });
       } catch {
         // heal-write failed — return migrated in-memory manifest unchanged
       }

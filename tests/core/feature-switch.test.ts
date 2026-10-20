@@ -7,7 +7,7 @@
  * boolean `false` switches a feature off — the same rule the shell hooks apply
  * in queue_read_gates — and a write touches only that one key.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -17,6 +17,7 @@ import {
   readMachineFeature,
   writeMachineFeature,
 } from '../../src/core/feature-switch.js';
+import { getManifestLockPath, MANIFEST_LOCK_STALE_MS, MANIFEST_LOCK_WAIT_MS } from '../../src/core/manifest-lock.js';
 
 describe('isMachineFeatureOn (pure)', () => {
   it('is off only for an explicit boolean false', () => {
@@ -359,5 +360,93 @@ describe('readMachineFeature / writeMachineFeature (I/O)', () => {
     await writeManifest('{ not json');
     expect(await writeMachineFeature(devflowDir, 'memory', true)).toEqual({ ok: false, error: 'not-installed' });
     expect(await fs.readFile(manifestPath(), 'utf-8')).toBe('{ not json');
+  });
+
+  describe('a toggle writes under the manifest lock (no lost update against the heal)', () => {
+    const lockDir = (): string => getManifestLockPath(devflowDir);
+    const enabledBody = (): string => JSON.stringify({ features: { curation: true, learning: true } });
+    const exists = async (p: string): Promise<boolean> => fs.stat(p).then(() => true, () => false);
+
+    it('waits for a lock another writer holds, and writes only after it is released', async () => {
+      await writeManifest(enabledBody());
+      await fs.mkdir(lockDir());
+
+      const toggled = writeMachineFeature(devflowDir, 'curation', false);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      // Still waiting: nothing is written while the other writer holds the lock.
+      expect((await readRaw()).features).toEqual({ curation: true, learning: true });
+
+      await fs.rmdir(lockDir());
+      expect(await toggled).toEqual({ ok: true, value: undefined });
+      expect((await readRaw()).features).toEqual({ curation: false, learning: false });
+    });
+
+    it('breaks a lock a dead process left behind, and writes', async () => {
+      await writeManifest(enabledBody());
+      await fs.mkdir(lockDir());
+      const old = new Date(Date.now() - 10 * MANIFEST_LOCK_STALE_MS);
+      await fs.utimes(lockDir(), old, old);
+
+      expect(await writeMachineFeature(devflowDir, 'curation', false)).toEqual({ ok: true, value: undefined });
+      expect((await readRaw()).features).toEqual({ curation: false, learning: false });
+      expect(await exists(lockDir())).toBe(false);
+    });
+
+    it('leaves no lock behind after a write, a no-op or a refusal', async () => {
+      await writeManifest(enabledBody());
+      await writeMachineFeature(devflowDir, 'curation', false);
+      await writeMachineFeature(devflowDir, 'curation', false);
+      await writeMachineFeature(devflowDir, 'curation', true);
+      expect(await exists(lockDir())).toBe(false);
+      await fs.rm(manifestPath());
+      await writeMachineFeature(devflowDir, 'curation', true);
+      expect(await exists(lockDir())).toBe(false);
+    });
+
+    it('two toggles at once end with one value in both keys', async () => {
+      await writeManifest(enabledBody());
+      await Promise.all([
+        writeMachineFeature(devflowDir, 'curation', false),
+        writeMachineFeature(devflowDir, 'curation', true),
+        writeMachineFeature(devflowDir, 'curation', false),
+      ]);
+      const { features } = await readRaw();
+      expect(features.curation).toBe(features.learning);
+      expect(typeof features.curation).toBe('boolean');
+    });
+
+    it('goes ahead without the lock when the wait ends and the lock cannot be broken', async () => {
+      await writeManifest(enabledBody());
+      // A stale lock whose directory cannot be moved: the wait runs out.
+      await fs.mkdir(lockDir());
+      const old = new Date(Date.now() - 10 * MANIFEST_LOCK_STALE_MS);
+      await fs.utimes(lockDir(), old, old);
+      const realRename = fs.rename.bind(fs);
+      vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+        if (String(from) === lockDir()) throw Object.assign(new Error('not permitted'), { code: 'EPERM' });
+        return realRename(from, to);
+      });
+
+      vi.useFakeTimers({ toFake: ['setTimeout'] });
+      try {
+        let settled = false;
+        const toggled = writeMachineFeature(devflowDir, 'curation', false).finally(() => { settled = true; });
+        // Each try ends in one 25 ms sleep. Let real file I/O run until that sleep is
+        // set, then move the fake clock past it. Bounded, so a hang fails the test.
+        const maxSleeps = Math.ceil(MANIFEST_LOCK_WAIT_MS / 25) * 2;
+        for (let sleeps = 0; sleeps < maxSleeps && !settled; sleeps++) {
+          for (let turn = 0; turn < 200 && !settled && vi.getTimerCount() === 0; turn++) {
+            await fs.stat(devflowDir);
+            await new Promise((resolve) => setImmediate(resolve));
+          }
+          await vi.advanceTimersByTimeAsync(25);
+        }
+        expect(settled).toBe(true);
+        expect(await toggled).toEqual({ ok: true, value: undefined });
+      } finally {
+        vi.useRealTimers();
+      }
+      expect((await readRaw()).features).toEqual({ curation: false, learning: false });
+    });
   });
 });

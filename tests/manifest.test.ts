@@ -3,6 +3,8 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { readManifest, writeManifest, mergeManifestPlugins, resolvePluginList, detectUpgrade, syncManifestFeature, withoutManifestPlugins, removeManifestPlugins, type ManifestData } from '../src/core/manifest.js';
+import { writeMachineFeature } from '../src/core/feature-switch.js';
+import { getManifestLockPath } from '../src/core/manifest-lock.js';
 import { makeManifest } from './helpers.js';
 
 describe('readManifest', () => {
@@ -286,6 +288,71 @@ describe('readManifest', () => {
       } finally {
         await fs.chmod(tmpDir, 0o700);
       }
+    });
+
+    describe('the heal and a toggle share one lock (no lost update)', () => {
+      const manifestFile = (): string => path.join(tmpDir, 'manifest.json');
+
+      it('a --disable that lands between the heal\'s read and its write survives, both keys false', async () => {
+        await fs.writeFile(manifestFile(), rawOf({ curation: true, learning: true, decisions: true }), 'utf-8');
+
+        // The first read of the manifest is the heal's parse. Land the disable right
+        // after it, so the heal holds the snapshot from before the disable.
+        const realReadFile = fs.readFile.bind(fs);
+        let injected = false;
+        vi.spyOn(fs, 'readFile').mockImplementation((async (...args: Parameters<typeof fs.readFile>) => {
+          const content = await realReadFile(...args);
+          if (!injected && String(args[0]) === manifestFile()) {
+            injected = true;
+            expect((await writeMachineFeature(tmpDir, 'curation', false)).ok).toBe(true);
+          }
+          return content;
+        }) as typeof fs.readFile);
+
+        await readManifest(tmpDir);
+
+        expect(injected).toBe(true);
+        const onDisk = await featuresOnDisk();
+        expect(onDisk.curation).toBe(false);
+        expect(onDisk.learning).toBe(false);
+      });
+
+      it('a read that skipped the heal leaves the next read to heal it, once', async () => {
+        const body = rawOf({ curation: false, learning: true });
+        await fs.writeFile(manifestFile(), body, 'utf-8');
+        await fs.mkdir(getManifestLockPath(tmpDir));
+
+        // The lock is held: the read returns the resolved switch and writes nothing.
+        expect((await readManifest(tmpDir))!.features.curation).toBe(false);
+        expect(await fs.readFile(manifestFile(), 'utf-8')).toBe(body);
+
+        await fs.rmdir(getManifestLockPath(tmpDir));
+        await readManifest(tmpDir);
+        const healed = await featuresOnDisk();
+        expect(healed.curation).toBe(false);
+        expect(healed.learning).toBe(false);
+
+        const first = await fs.readFile(manifestFile(), 'utf-8');
+        const firstStat = await fs.stat(manifestFile());
+        await readManifest(tmpDir);
+        expect(await fs.readFile(manifestFile(), 'utf-8')).toBe(first);
+        expect((await fs.stat(manifestFile())).mtimeMs).toBe(firstStat.mtimeMs);
+      });
+
+      it('a heal that waited for nobody leaves no lock behind', async () => {
+        await fs.writeFile(manifestFile(), rawOf({ curation: true, learning: false }), 'utf-8');
+        await readManifest(tmpDir);
+        await expect(fs.stat(getManifestLockPath(tmpDir))).rejects.toMatchObject({ code: 'ENOENT' });
+        expect((await fs.readdir(tmpDir)).sort()).toEqual(['manifest.json']);
+      });
+
+      it('a heal still writes both keys to the resolved value when the bytes did not change', async () => {
+        await fs.writeFile(manifestFile(), rawOf({ curation: true, learning: false }), 'utf-8');
+        expect((await readManifest(tmpDir))!.features.curation).toBe(false);
+        const healed = await featuresOnDisk();
+        expect(healed.curation).toBe(false);
+        expect(healed.learning).toBe(false);
+      });
     });
   });
 
