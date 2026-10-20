@@ -10,6 +10,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'child_process';
+import * as fs from 'fs';
 import * as path from 'path';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
@@ -45,6 +46,9 @@ import {
   LEGACY_NAMES,
   CURATION_DIR_NAME,
   CURATION_TUNING_FILE_NAME,
+  MOVE_LOCK_PREFIX,
+  MOVE_LOCK_SUFFIX,
+  MOVE_JOURNAL_SUFFIX,
   curationMoveMarkerKey,
 } from '../src/core/project-paths.js';
 import * as tsPathsNs from '../src/core/project-paths.js';
@@ -289,9 +293,9 @@ describe('curation rename name blocks', () => {
     expect(getGlobalCurateTuningConfigPath(ROOT)).not.toBe(getCurateTuningConfigPath(ROOT));
   });
 
-  it('TP-3: the shell shim lists the same old and new names as both mirrors', () => {
+  it('TP-3: the shell shim holds the same folder and tuning-file names as both mirrors', () => {
     const shim = path.join(__dirname, '..', 'src', 'assets', 'scripts', 'hooks', 'curation-move');
-    const names = ['DF_CM_OLD_FOLDER', 'DF_CM_OLD_BACKUP_PREFIX', 'DF_CM_OLD_TUNING_FILE', 'DF_CM_NEW_FOLDER', 'DF_CM_NEW_TUNING_FILE'];
+    const names = ['DF_CM_OLD_FOLDER', 'DF_CM_NEW_FOLDER', 'DF_CM_NEW_TUNING_FILE'];
     const res = spawnSync('/bin/bash', ['-c', 'source "$1"; df_curation_move_names; shift; for n in "$@"; do printf "%s\\n" "${!n}"; done', '_', shim, ...names], {
       encoding: 'utf-8',
       env: { PATH: '/nonexistent' },
@@ -300,8 +304,6 @@ describe('curation rename name blocks', () => {
     expect(res.status, res.stderr).toBe(0);
     expect(res.stdout.split('\n').slice(0, names.length)).toEqual([
       LEGACY_NAMES.folder,
-      LEGACY_NAMES.backupPrefix,
-      LEGACY_NAMES.tuningFile,
       CURATION_DIR_NAME,
       CURATION_TUNING_FILE_NAME,
     ]);
@@ -358,5 +360,84 @@ describe('the machine-side move names (CJS only)', () => {
     const key = cjsPaths.curationMoveLockKey('/some/ledger/root');
     expect(cjsPaths.curationMoveLockDir(MACHINE, '/some/ledger/root')).toBe(`${MACHINE}/.curation-move-${key}.lock`);
     expect(cjsPaths.curationMoveJournalPath(MACHINE, '/some/ledger/root')).toBe(`${MACHINE}/.curation-move-${key}.journal`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// One source per name (ARCH-5): every helper builds its path from the name constants,
+// and every shell site takes the folder names from the shim.
+// ---------------------------------------------------------------------------
+
+describe('one source per name', () => {
+  const ROOT_DIR = path.join(__dirname, '..');
+  const HOOKS = path.join(ROOT_DIR, 'src', 'assets', 'scripts', 'hooks');
+  const MIRRORS = [
+    ['src/core/project-paths.ts', path.join(ROOT_DIR, 'src', 'core', 'project-paths.ts')],
+    ['hooks/lib/project-paths.cjs', path.join(HOOKS, 'lib', 'project-paths.cjs')],
+  ] as const;
+  const read = (file: string): string => fs.readFileSync(file, 'utf-8');
+
+  /** The lines of `text` that hold `literal`, as `n: line`. */
+  const linesWith = (text: string, literal: string): string[] =>
+    text.split('\n').flatMap((line, i) => (line.includes(literal) ? [`${i + 1}: ${line.trim()}`] : []));
+
+  for (const [label, file] of MIRRORS) {
+    it(`${label}: the 'curation' literal stands only at CURATION_DIR_NAME`, () => {
+      expect(linesWith(read(file), "'curation'")).toEqual([expect.stringMatching(/const CURATION_DIR_NAME = 'curation';$/)]);
+    });
+
+    it(`${label}: the 'curation.json' literal stands only at CURATION_TUNING_FILE_NAME`, () => {
+      expect(linesWith(read(file), "'curation.json'")).toEqual([expect.stringMatching(/const CURATION_TUNING_FILE_NAME = 'curation\.json';$/)]);
+    });
+
+    it(`${label}: an old name stands only in the LEGACY_NAMES block, which keeps all three`, () => {
+      expect(linesWith(read(file), "'learning")).toEqual([
+        expect.stringContaining("folder: 'learning',"),
+        expect.stringContaining("backupPrefix: 'learning.backup-',"),
+        expect.stringContaining("tuningFile: 'learning.json',"),
+      ]);
+    });
+  }
+
+  it('the move lock and journal names are the same in both mirrors, and uninstall holds no copy of the prefix', () => {
+    expect([MOVE_LOCK_PREFIX, MOVE_LOCK_SUFFIX, MOVE_JOURNAL_SUFFIX]).toEqual(['.curation-move-', '.lock', '.journal']);
+    expect([cjsPaths.MOVE_LOCK_PREFIX, cjsPaths.MOVE_LOCK_SUFFIX, cjsPaths.MOVE_JOURNAL_SUFFIX]).toEqual([MOVE_LOCK_PREFIX, MOVE_LOCK_SUFFIX, MOVE_JOURNAL_SUFFIX]);
+    const uninstallCode = read(path.join(ROOT_DIR, 'src', 'cli', 'commands', 'uninstall.ts'))
+      .split('\n')
+      .filter((line) => !/^\s*(\*|\/\*|\/\/)/.test(line))
+      .join('\n');
+    expect(linesWith(uninstallCode, 'curation-move-'), 'non-vacuity: the scan reads code').toEqual([]);
+    expect(uninstallCode).toContain('MOVE_LOCK_PREFIX');
+  });
+
+  describe('the shell sites that apply the creator rule', () => {
+    const SITES = ['queue-append', 'ensure-devflow-init', 'session-start-context'] as const;
+    /** The code lines (no comments) that name a ledger folder: the creator calls, the queue names and the folder variable. */
+    const folderLines = (text: string): string[] =>
+      text.split('\n').filter((line) => !/^\s*#/.test(line) && /\b(df_ledger_folder|df_ledger_queue|df_make_ledger_folder)\b|_qar_(old|new)=|^CURATION_DIR=/.test(line));
+
+    for (const name of SITES) {
+      it(`${name} takes the folder names from the shim and holds no bare folder literal`, () => {
+        const text = read(path.join(HOOKS, name));
+        const lines = folderLines(text);
+        expect(lines.length, 'non-vacuity: the scan finds the sites').toBeGreaterThanOrEqual(2);
+        for (const line of lines) expect(line, line).not.toMatch(/\b(learning|curation)\b/);
+        expect(text).toMatch(/\bdf_curation_move_names\b/);
+        expect(text).toMatch(/\$DF_CM_NEW_FOLDER|"\$DF_CM_NEW_FOLDER"/);
+      });
+    }
+  });
+
+  it('every name the shim sets is read by some hook', () => {
+    const shim = read(path.join(HOOKS, 'curation-move'));
+    const set = [...shim.matchAll(/^ {2}(DF_CM_[A-Z_]+)=/gm)].map((m) => m[1]);
+    expect(set.length, 'non-vacuity: the shim sets names').toBeGreaterThan(0);
+    const hookFiles = fs.readdirSync(HOOKS).filter((f) => fs.statSync(path.join(HOOKS, f)).isFile());
+    for (const variable of set) {
+      const readers = hookFiles.flatMap((f) =>
+        read(path.join(HOOKS, f)).split('\n').filter((line) => !/^\s*#/.test(line) && (line.includes(`$${variable}`) || line.includes(`\${${variable}`))),
+      );
+      expect(readers, `${variable} is set and never read`).not.toEqual([]);
+    }
   });
 });

@@ -18,30 +18,6 @@
 import * as path from 'path';
 
 // ---------------------------------------------------------------------------
-// Core directories
-// ---------------------------------------------------------------------------
-
-/** .devflow/memory/ — working memory root */
-export function getMemoryDir(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'memory');
-}
-
-/** .devflow/curation/ — curation state root */
-export function getCurationDir(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'curation');
-}
-
-/** .devflow/features/ — per-feature knowledge bases */
-export function getFeaturesDir(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'features');
-}
-
-/** .devflow/docs/ — generated documentation artifacts */
-export function getDocsDir(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'docs');
-}
-
-// ---------------------------------------------------------------------------
 // The rename's names: the old names in one frozen block, the new ones beside it
 // ---------------------------------------------------------------------------
 
@@ -64,6 +40,40 @@ export const CURATION_DIR_NAME = 'curation';
 
 /** The new project tuning file, inside the new folder. */
 export const CURATION_TUNING_FILE_NAME = 'curation.json';
+
+/**
+ * The names of the ledger move's lock and journal in the machine directory (`~/.devflow`):
+ * `<prefix><16 hex characters of the root key><suffix>`. Uninstall matches them by these
+ * constants, and the CJS mirror builds the paths from its own copy of the same three
+ * values (tests/project-paths.test.ts pins both).
+ */
+export const MOVE_LOCK_PREFIX = '.curation-move-';
+export const MOVE_LOCK_SUFFIX = '.lock';
+export const MOVE_JOURNAL_SUFFIX = '.journal';
+
+// ---------------------------------------------------------------------------
+// Core directories
+// ---------------------------------------------------------------------------
+
+/** .devflow/memory/ — working memory root */
+export function getMemoryDir(projectRoot: string): string {
+  return path.join(projectRoot, '.devflow', 'memory');
+}
+
+/** .devflow/curation/ — curation state root */
+export function getCurationDir(projectRoot: string): string {
+  return path.join(projectRoot, '.devflow', CURATION_DIR_NAME);
+}
+
+/** .devflow/features/ — per-feature knowledge bases */
+export function getFeaturesDir(projectRoot: string): string {
+  return path.join(projectRoot, '.devflow', 'features');
+}
+
+/** .devflow/docs/ — generated documentation artifacts */
+export function getDocsDir(projectRoot: string): string {
+  return path.join(projectRoot, '.devflow', 'docs');
+}
 
 /**
  * The global curate-agent tuning file inside the machine directory (`~/.devflow`).
@@ -121,17 +131,17 @@ export function getFeatureConfigPath(projectRoot: string): string {
 
 /** .devflow/curation/.pending-turns.jsonl — decisions detection queue */
 export function getCurationPendingTurnsPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'curation', '.pending-turns.jsonl');
+  return path.join(getCurationDir(projectRoot), '.pending-turns.jsonl');
 }
 
 /** .devflow/curation/.pending-turns.processing — the claimed batch a Curate run holds while it processes it */
 export function getCurationPendingTurnsProcessingPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'curation', '.pending-turns.processing');
+  return path.join(getCurationDir(projectRoot), '.pending-turns.processing');
 }
 
 /** .devflow/curation/.pending-turns.owner — the token of the run that holds the claim (curation-store.cjs) */
 export function getCurationClaimOwnerPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'curation', '.pending-turns.owner');
+  return path.join(getCurationDir(projectRoot), '.pending-turns.owner');
 }
 
 // ---------------------------------------------------------------------------
@@ -140,47 +150,47 @@ export function getCurationClaimOwnerPath(projectRoot: string): string {
 
 /** .devflow/curation/decisions.md */
 export function getDecisionsFilePath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'curation', 'decisions.md');
+  return path.join(getCurationDir(projectRoot), 'decisions.md');
 }
 
 /** .devflow/curation/pitfalls.md */
 export function getPitfallsFilePath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'curation', 'pitfalls.md');
+  return path.join(getCurationDir(projectRoot), 'pitfalls.md');
 }
 
 /** .devflow/curation/curation.json — project-level curate agent tuning config */
 export function getCurateTuningConfigPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'curation', 'curation.json');
+  return path.join(getCurationDir(projectRoot), CURATION_TUNING_FILE_NAME);
 }
 
 /** .devflow/curation/decisions-ledger.jsonl — anchored ledger rows (single source of truth for rendering) */
 export function getDecisionsLedgerPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'curation', 'decisions-ledger.jsonl');
+  return path.join(getCurationDir(projectRoot), 'decisions-ledger.jsonl');
 }
 
 /** .devflow/curation/decisions-log.jsonl */
 export function getDecisionsLogPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'curation', 'decisions-log.jsonl');
+  return path.join(getCurationDir(projectRoot), 'decisions-log.jsonl');
 }
 
 /** .devflow/curation/decisions-log.archive.jsonl — rotated-out stale observing rows (gitignored) */
 export function getDecisionsArchivePath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'curation', 'decisions-log.archive.jsonl');
+  return path.join(getCurationDir(projectRoot), 'decisions-log.archive.jsonl');
 }
 
 /** .devflow/curation/decisions-history.jsonl — prior content versions of rewritten entries (curation-store.cjs) */
 export function getDecisionsHistoryPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'curation', 'decisions-history.jsonl');
+  return path.join(getCurationDir(projectRoot), 'decisions-history.jsonl');
 }
 
 /** .devflow/curation/.decisions.lock — mkdir-based lock directory */
 export function getDecisionsLockDir(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'curation', '.decisions.lock');
+  return path.join(getCurationDir(projectRoot), '.decisions.lock');
 }
 
 /** .devflow/curation/index.md — pre-rendered compact index written by render-decisions.cjs */
 export function getDecisionsIndexPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'curation', 'index.md');
+  return path.join(getCurationDir(projectRoot), 'index.md');
 }
 
 // ---------------------------------------------------------------------------

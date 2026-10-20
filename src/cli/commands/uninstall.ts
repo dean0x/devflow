@@ -42,7 +42,7 @@ import { stripFlags } from '../../core/flags.js';
 import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-cleanup.js';
 import { getPackageRoot, isContainedIn } from '../../core/paths.js';
 import { firstSymbolicLink } from '../../core/linked-path.js';
-import { CURATION_TUNING_FILE_NAME, LEGACY_NAMES } from '../../core/project-paths.js';
+import { CURATION_TUNING_FILE_NAME, LEGACY_NAMES, MOVE_JOURNAL_SUFFIX, MOVE_LOCK_PREFIX, MOVE_LOCK_SUFFIX } from '../../core/project-paths.js';
 import { restampInstalledCommands } from '../../targets/claude-code/language-stamp.js';
 import { installCommandsAndAgents } from '../../targets/claude-code/installer.js';
 
@@ -660,13 +660,18 @@ export interface InstallArtifactEntry {
   realFileOnly?: boolean;
 }
 
+/** `text` as a regular-expression source, every character literal. */
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
  * The curation move's lock, one directory per ledger root, taken directly in the machine
  * directory: `.curation-move-<16 lowercase hex>.lock`. The store builds the name from a
- * hash of the real ledger root, so the names exist only on disk.
+ * hash of the real ledger root, so the names exist only on disk. The prefix and the
+ * suffix are the ones the path helpers hold (project-paths.ts).
  */
-const CURATION_MOVE_LOCK_PREFIX = '.curation-move-';
-const CURATION_MOVE_LOCK_SHAPE = /^\.curation-move-[0-9a-f]{16}\.lock$/;
+const CURATION_MOVE_LOCK_SHAPE = new RegExp(`^${escapeRegExp(MOVE_LOCK_PREFIX)}[0-9a-f]{16}${escapeRegExp(MOVE_LOCK_SUFFIX)}$`);
 
 /**
  * The curation move's journal, one regular file per ledger root, beside the lock:
@@ -675,7 +680,7 @@ const CURATION_MOVE_LOCK_SHAPE = /^\.curation-move-[0-9a-f]{16}\.lock$/;
  * `.curation-move.journal` inside a project's old ledger folder is no journal of the
  * move and is not matched here.
  */
-const CURATION_MOVE_JOURNAL_SHAPE = /^\.curation-move-[0-9a-f]{16}\.journal$/;
+const CURATION_MOVE_JOURNAL_SHAPE = new RegExp(`^${escapeRegExp(MOVE_LOCK_PREFIX)}[0-9a-f]{16}${escapeRegExp(MOVE_JOURNAL_SUFFIX)}$`);
 
 /** Whether `child` of `devflowDir` is a real directory (a link is not followed). */
 async function isRealDirectory(devflowDir: string, child: string): Promise<boolean> {
@@ -800,10 +805,10 @@ export function installArtifactPaths(devflowDir: string): ReadonlyArray<InstallA
     // releasing it leaves one behind, and its name carries a hash that exists only on disk.
     // Only a real directory of exactly that shape goes; the move's skip markers sit under
     // logs/ and go with it.
-    { relPath: CURATION_MOVE_LOCK_PREFIX, isPrefix: true, isDir: true, shape: CURATION_MOVE_LOCK_SHAPE, realDirOnly: true },
+    { relPath: MOVE_LOCK_PREFIX, isPrefix: true, isDir: true, shape: CURATION_MOVE_LOCK_SHAPE, realDirOnly: true },
     // The move's journal beside it. A crash between two renames of the ledger set leaves
     // one behind. Only a regular file of exactly that shape goes.
-    { relPath: CURATION_MOVE_LOCK_PREFIX, isPrefix: true, shape: CURATION_MOVE_JOURNAL_SHAPE, realFileOnly: true },
+    { relPath: MOVE_LOCK_PREFIX, isPrefix: true, shape: CURATION_MOVE_JOURNAL_SHAPE, realFileOnly: true },
     // per-project hook logs (logs/{project-slug}/) AND global logs — remove the
     // whole logs/ tree; covers proxy.log, debug logs, and any project-slug dirs.
     { relPath: 'logs', isDir: true },

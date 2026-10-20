@@ -424,8 +424,8 @@ ${CURATION_PAUSED_SECTION}"
     # The machine root is $HOME/.devflow and nothing relocates it.
     CURATE_MODEL=""
     CURATE_MODEL_LAYER=""
-    if df_file_below "$LEDGER_ROOT" "$CURATION_DIR/curation.json"; then
-      _SC_CM=$(json_field_file "$CURATION_DIR/curation.json" "model" "")
+    if df_file_below "$LEDGER_ROOT" "$CURATION_DIR/$DF_CM_NEW_TUNING_FILE"; then
+      _SC_CM=$(json_field_file "$CURATION_DIR/$DF_CM_NEW_TUNING_FILE" "model" "")
       case "$_SC_CM" in
         opus|sonnet|haiku) CURATE_MODEL="$_SC_CM"; CURATE_MODEL_LAYER="project" ;;
       esac

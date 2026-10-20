@@ -59,10 +59,14 @@
 #   text, whatever the locale, is kept.
 #
 # df_curation_move_names
-#   Sets the names the rename retires and their replacements, the shell mirror of
-#   LEGACY_NAMES and the curation names in src/core/project-paths.ts and
-#   hooks/lib/project-paths.cjs (tests/project-paths.test.ts holds all three to the
-#   same values).
+#   Sets the names the shell reads: DF_CM_OLD_FOLDER and DF_CM_NEW_FOLDER (the ledger
+#   folder before and after the rename) and DF_CM_NEW_TUNING_FILE. They mirror
+#   LEGACY_NAMES.folder, CURATION_DIR_NAME and CURATION_TUNING_FILE_NAME in
+#   src/core/project-paths.ts and hooks/lib/project-paths.cjs (tests/project-paths.test.ts
+#   holds all three to the same values). The old backup prefix and the old tuning file
+#   are read only by the node move, so the shell holds no copy of them. Every hook that
+#   names a ledger folder (queue-append, ensure-devflow-init, session-start-context)
+#   takes the name from here.
 #
 # Source-order requirement: none. This file sources its sibling git-marker itself,
 # for df_no_symlink_below; one that failed to source is a command not found, which
@@ -73,8 +77,6 @@ source "${BASH_SOURCE[0]%/*}/git-marker" 2>/dev/null || true
 
 df_curation_move_names() {
   DF_CM_OLD_FOLDER="learning"
-  DF_CM_OLD_BACKUP_PREFIX="learning.backup-"
-  DF_CM_OLD_TUNING_FILE="learning.json"
   DF_CM_NEW_FOLDER="curation"
   DF_CM_NEW_TUNING_FILE="curation.json"
   return 0

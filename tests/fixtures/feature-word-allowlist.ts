@@ -107,10 +107,10 @@ export const FEATURE_WORD_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
   },
   {
     path: `${HOOKS}curation-move`,
-    pattern: /DF_CM_OLD_(?:FOLDER|BACKUP_PREFIX|TUNING_FILE)="learning(?:\.backup-|\.json)?"|\.devflow\/learning(?= to \.devflow\/curation)/,
+    pattern: /DF_CM_OLD_FOLDER="learning"|\.devflow\/learning(?= to \.devflow\/curation)/,
     reason:
-      'The shell shim holds the same legacy names as the LEGACY_NAMES block, so the session-start ' +
-      'move finds the old folder, its backups and the old tuning file.',
+      'The shell shim holds the old folder name that the LEGACY_NAMES block holds, so the ' +
+      'session-start move finds the old folder.',
   },
   {
     path: HOOKS,
