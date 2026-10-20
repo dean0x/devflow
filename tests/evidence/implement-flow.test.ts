@@ -1346,6 +1346,39 @@ describe('#452: BASE_BRANCH is checked before it reaches a shell line', () => {
   })
 })
 
+/** The checkout-root command Phase 1's docs root runs; the re-validation path runs the same one when Phase 1 does not. */
+const REVALIDATE_ROOT_COMMAND = 'git -C "{start}" rev-parse --show-toplevel'
+
+/** Named collector: whether the re-validation path resolves `{worktree}` before its first use, as Phase 1 does, when Phase 1 does not run. */
+function collectRevalidateRootDefects(revalidate: string): string[] {
+  const out: string[] = []
+  const root = revalidate.indexOf(REVALIDATE_ROOT_COMMAND)
+  const firstUse = revalidate.indexOf('"{worktree}"')
+  if (firstUse === -1) return ['the re-validation path no longer uses {worktree}, so this guard proves nothing']
+  if (root === -1) out.push('the re-validation path uses {worktree} without resolving it by the checkout-root command')
+  else if (root > firstUse) out.push('the re-validation path resolves {worktree} after its first use')
+  else if (!/else the start directory/.test(revalidate.slice(root, firstUse))) out.push('the re-validation path does not fall back to the start directory outside a git repository')
+  return out
+}
+
+describe('#495: the re-validation path resolves {worktree} when Phase 1 does not run', () => {
+  it('resolves it by the checkout-root rule of Phase 1 before the first use', () => {
+    expect(collectRevalidateRootDefects(revalidateReference())).toEqual([])
+  })
+
+  it('known-bad probes: a lost resolution, a late one and a lost fallback are each reported', () => {
+    const reval = revalidateReference()
+    const lost = reval.replace(REVALIDATE_ROOT_COMMAND, () => 'git rev-parse --show-toplevel')
+    expect(lost, 'the seed must land').not.toBe(reval)
+    expect(collectRevalidateRootDefects(lost)).toEqual(['the re-validation path uses {worktree} without resolving it by the checkout-root command'])
+    const late = `${reval.replace(REVALIDATE_ROOT_COMMAND, () => 'x')}\n${REVALIDATE_ROOT_COMMAND}`
+    expect(collectRevalidateRootDefects(late)).toEqual(['the re-validation path resolves {worktree} after its first use'])
+    const noFallback = reval.replace('else the start directory', () => 'else stop')
+    expect(noFallback, 'the seed must land').not.toBe(reval)
+    expect(collectRevalidateRootDefects(noFallback)).toEqual(['the re-validation path does not fall back to the start directory outside a git repository'])
+  })
+})
+
 /** The pointers the renumbering retires, and the ones that replace them. */
 const RETIRED_POINTERS = ['Harden agent (Phase 5)', 'Phase 3 or Phase 6 PASS', 'Phase 3\'s **Evidence claims**', 'after every Phase 8 run'] as const
 
