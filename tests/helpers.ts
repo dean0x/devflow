@@ -1965,6 +1965,18 @@ function collectFullRangeDefects(body: string, shape: DiffRangeShape): string[] 
 }
 
 /**
+ * A copy of the base-name check, in any width: a `^...$` pattern whose character class opens with `A-Za-z0-9` and
+ * holds the `+@,#` run that only the base-name class has. The branch-slug pattern has no such run, so it is not a copy.
+ * A longer length, more characters or a `+` in place of the length all stay inside the shape.
+ */
+const NAME_CLASS_COPY_RE = /\^[^`\s]*\[A-Za-z0-9[^\]`]*\+@,#[^\]`]*\][^`\s]*\$/g
+
+/** Every copy of the base-name check in a text, exact or widened. */
+export function findNameClassCopies(text: string): string[] {
+  return [...text.matchAll(NAME_CLASS_COPY_RE)].map(m => m[0])
+}
+
+/**
  * The fresh-base facts of `ensure-pr-ready`'s return that /code-review and /bug-analysis state alike:
  * the Return line carries base_ref; the Extract line tests the Base line, carries no copy of the name
  * class and no hex test, and names the Git agent's fix; the one full-range path, named once, stops unless
@@ -1985,7 +1997,7 @@ export function collectFreshBaseDefects(body: string, shape: DiffRangeShape, par
     if (!/Base line reads \(rejected\)/.test(line)) out.push('the Extract line does not test the Base line for (rejected)')
     if (/40 or 64/.test(line)) out.push('the Extract line carries the hex test; it sits on the full-range path')
     if (!/Stop with cause and fix/.test(line)) out.push('the Extract line does not stop with the cause and the fix')
-    if (/\{1,200\}|origin\\\//.test(line)) out.push('the Extract line carries a copy of the name class')
+    if (findNameClassCopies(line).length > 0 || /\{1,200\}|origin\\\//.test(line)) out.push('the Extract line carries a copy of the name class')
     for (const [pattern, defect] of parts.extractExtras ?? []) if (!pattern.test(line)) out.push(defect)
     if (!/name the Git agent's fix, never your own/.test(line)) out.push('the Extract line does not name the fix the Git agent returned')
   }

@@ -704,6 +704,11 @@ describe('DIFF_RANGE starts at the fresh base that ensure-pr-ready returns (#495
       .toContain('the Extract line does not stop with the cause and the fix')
     expect(collectReviewFreshBaseDefects(seed(ON, 'Stop with cause and fix when', 'Stop with cause and fix unless it matches `^[A-Za-z0-9._/+@,#-]{1,200}$`, or when')))
       .toContain('the Extract line carries a copy of the name class')
+    // The copy sits in parentheses: a `$` before a backtick is a replacement pattern of String.replace.
+    for (const widened of ['^[A-Za-z0-9._/+@,#-]{1,255}$', '^[A-Za-z0-9._/+@,#~-]+$', '^[A-Za-z0-9._/+@,#-]+$']) {
+      expect(collectReviewFreshBaseDefects(seed(ON, 'Stop with cause and fix when', `Stop with cause and fix unless it matches (${widened}), or when`)), widened)
+        .toContain('the Extract line carries a copy of the name class')
+    }
     expect(collectReviewFreshBaseDefects(seed(ON, 'Set `DIFF_RANGE` to `{base_ref}...HEAD`', 'Set `DIFF_RANGE` to `{base_branch}...HEAD`')).join('\n'))
       .toMatch(/DIFF_RANGE is not built from base_ref[\s\S]*DIFF_RANGE is built from a base name/)
     expect(collectReviewFreshBaseDefects(seed(ON, 'Set `DIFF_RANGE` to `{last-review-sha}...HEAD`', 'Set `DIFF_RANGE` to `{last-review-sha}..HEAD`')))

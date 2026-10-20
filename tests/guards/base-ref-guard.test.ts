@@ -47,6 +47,7 @@ import {
   collectStaleOutputs,
   compiledPrompts,
   ensurePrReadyReference,
+  findNameClassCopies,
   gitOperationReferenceCorpus,
   readAgentReference,
   requireDistFile,
@@ -165,8 +166,11 @@ function commandSpans(line: SourceLine): string[] {
   return spans
 }
 
-/** The placeholders that stand for a base NAME (the default-branch probe value is one). */
-const NAME_PATTERN = '\\{(?:BASE_BRANCH|base_branch|base|base branch|default)\\}'
+/**
+ * The placeholders that stand for a base NAME (the default-branch probe value is one): the brace forms, and the
+ * angle-bracket forms that the `B=` binding of a resolver call uses. The literal `<base>` stays as written.
+ */
+const NAME_PATTERN = '(?:\\{(?:BASE_BRANCH|base_branch|base|base branch|default)\\}|<(?:name|base_branch)>)'
 const hasName = (s: string): boolean => new RegExp(NAME_PATTERN).test(s)
 const nameHits = (s: string): RegExpMatchArray[] => [...s.matchAll(new RegExp(NAME_PATTERN, 'g'))]
 const HEX_PATTERN = '\\{(?:BASE_REF|base_ref)\\}'
@@ -285,13 +289,13 @@ const describeFinding = (f: Finding): string => `${f.file} [${f.arm}] ${f.rule} 
 // Deferred scope: kept outside the name-site collectors
 // ---------------------------------------------------------------------------
 
-/** deferred to a follow-up */
+/** These prompts take the resolved base in a later change; until then their base sites stay out of the name-site collectors. */
 const DEFERRED_FILES: readonly string[] = [
   'commands/dynamic-build.md',
   'agents/debug.md',
 ]
 
-/** deferred to a follow-up */
+/** The review-focus skill files keep their literal range wording until #545 (review-focus skills read the base from DIFF_RANGE) lands. */
 const DEFERRED_SKILL_FILES: readonly string[] = [
   'src/assets/skills/consistency/references/detection.md',
   'src/assets/skills/regression/references/detection.md',
@@ -307,9 +311,8 @@ const LITERAL_BASE_RANGE_RE = /(?:\b(?:main|master|develop|BASE)|\$BASE_BRANCH)\
 // Collector 1: base names in shell lines, and class copies anywhere
 // ---------------------------------------------------------------------------
 
-/** The strict class as a prompt copies it (the slash may or may not carry an escape). */
-const CLASS_COPY_RE = /\^\S*\[A-Za-z0-9\._\\?\/\+@,#-\]\{1,200\}\$/g
-const hasClassCopy = (text: string): boolean => new RegExp(CLASS_COPY_RE.source).test(text)
+/** Any copy of the base-name check, exact or widened (the detector the review-command Extract check shares). */
+const hasClassCopy = (text: string): boolean => findNameClassCopies(text).length > 0
 
 /** The files whose check line is a required base source: file label to the site label. */
 const CHECKED_SOURCES: Readonly<Record<string, string>> = {
@@ -345,10 +348,9 @@ function collectNameSites(p: Prompt, includeDeferred = false): Finding[] {
       if (guardAt === -1 || guardAt > line.offset) reasons.push('no exact base-name check precedes it')
       if (reasons.length > 0) found.push({ rule: 'shell-name', file: p.file, arm: p.arm, anchor: squash(span), detail: reasons.join('; ') })
     }
-    if (p.file in CHECKED_SOURCES) continue
-    for (const copy of line.text.matchAll(CLASS_COPY_RE)) {
-      if (copy[0] === STRICT) continue
-      found.push({ rule: 'strict-copy', file: p.file, arm: p.arm, anchor: `copy ${copy[0].slice(0, 60)}`, detail: 'a copy of the class differs from STRICT_NAME_RE.source' })
+    for (const copy of findNameClassCopies(line.text)) {
+      if (copy === STRICT) continue
+      found.push({ rule: 'strict-copy', file: p.file, arm: p.arm, anchor: `copy ${copy.slice(0, 60)}`, detail: 'a copy of the class differs from STRICT_NAME_RE.source' })
     }
   }
   return found
@@ -481,18 +483,34 @@ function fixTableFindings(p: Prompt): Unmet[] {
   return out
 }
 
-const EXIT_RE = /\bnon-zero\b|\bexit (?:status|code|0)\b|\bexit=/i
-
 interface SinkSpec {
   readonly file: string
   readonly anchor: string
   /** The text that must read the exit status of the diff: the sink and the text right after it. */
   readonly region: (text: string) => string | null
+  /** The sink's own stop fact: a non-zero diff exit stops the step. An `exit=` echo alone does not state it. */
+  readonly stop: RegExp
+  /** The sink's own empty-list fact, for a sink that states the rule: an empty list counts only with exit 0. */
+  readonly empty?: RegExp
 }
 
+const STOP_UNMET = 'the sink does not say that a non-zero diff exit stops the step'
+const EMPTY_UNMET = 'the sink does not say that an empty list counts only with exit 0'
+
 const SINKS: readonly SinkSpec[] = [
-  { file: 'commands/implement.md', anchor: 'branch_diff', region: t => regionAround(t, '`{branch_diff}` is the output of', 1) },
-  { file: 'commands/code-review.md', anchor: 'paths listing', region: t => regionAround(t, 'diff --name-only --no-renames {DIFF_RANGE}', 1) },
+  {
+    file: 'commands/implement.md',
+    anchor: 'branch_diff',
+    region: t => regionAround(t, '`{branch_diff}` is the output of', 1),
+    stop: /a non-zero exit stops\b/,
+    empty: /an empty list counts only on exit 0\b/,
+  },
+  {
+    file: 'commands/code-review.md',
+    anchor: 'paths listing',
+    region: t => regionAround(t, 'diff --name-only --no-renames {DIFF_RANGE}', 1),
+    stop: /A non-zero diff exit stops\b/,
+  },
   {
     file: 'commands/bug-analysis.md',
     anchor: 'CHANGED_FILES',
@@ -501,16 +519,37 @@ const SINKS: readonly SinkSpec[] = [
       const row = t.split('\n').find(l => l.includes('Zero changed files in DIFF_RANGE')) ?? ''
       return listing === null ? null : `${listing}\n${row}`
     },
+    stop: /A non-zero diff exit stops\b/,
+    empty: /Zero changed files in DIFF_RANGE with exit 0\b/,
   },
-  { file: 'git-ops/validate-branch.md', anchor: 'Diff Scope', region: t => listItem(t, /^7\.\s/) },
-  { file: 'commands/code-review.md', anchor: 'patch writes', region: t => regionAround(t, '> "{REVIEW_DIR}/diff.patch"', 1) },
+  {
+    file: 'git-ops/validate-branch.md',
+    anchor: 'Diff Scope',
+    region: t => listItem(t, /^7\.\s/),
+    stop: /a non-zero exit is BLOCKED\b/,
+    empty: /an empty list counts only with `exit=0`/,
+  },
+  {
+    file: 'commands/code-review.md',
+    anchor: 'patch writes',
+    region: t => regionAround(t, '> "{REVIEW_DIR}/diff.patch"', 1),
+    stop: /A non-zero exit of any patch write stops\b/,
+  },
 ]
+
+/** The facts a sink region lacks: its own stop fact, and its own empty-list fact when the sink states that rule. */
+function sinkFacts(sink: SinkSpec, region: string): string[] {
+  const lacking: string[] = []
+  if (!sink.stop.test(region)) lacking.push(STOP_UNMET)
+  if (sink.empty !== undefined && !sink.empty.test(region)) lacking.push(EMPTY_UNMET)
+  return lacking
+}
 
 function sinkFindings(p: Prompt): Unmet[] {
   return SINKS.filter(s => s.file === p.file).flatMap(s => {
     const region = s.region(p.text)
     if (region === null) return unmet(s.anchor, 'the sink text was not found')
-    return EXIT_RE.test(region) ? [] : unmet(s.anchor, 'the text does not say that a non-zero exit stops and an empty list counts only with exit 0')
+    return sinkFacts(s, region).map(detail => ({ anchor: s.anchor, detail }))
   })
 }
 
@@ -583,7 +622,7 @@ const REQUIREMENTS: readonly Requirement[] = [
       file: 'commands/implement.md',
       anchor: 'branch_diff',
       bad: '`{branch_diff}` is the output of `git diff --name-only {BASE_REF}...HEAD`, run again at each spawn.\n\nNext paragraph.',
-      good: '`{branch_diff}` is the output of `git diff --name-only {BASE_REF}...HEAD`, run again at each spawn. A non-zero exit stops the run; an empty list counts only with exit 0.\n\nNext paragraph.',
+      good: '`{branch_diff}` is the output of `git diff --name-only {BASE_REF}...HEAD`, run again at each spawn; a non-zero exit stops, and an empty list counts only on exit 0.\n\nNext paragraph.',
     },
   },
 ]
@@ -633,6 +672,13 @@ describe('the corpus the guard reads', () => {
     expect([...named].filter(file => !present.has(file))).toEqual([])
   })
 
+  it('the shell-name collector matches every resolver call span, whatever spelling binds the name', () => {
+    const spans = prompts.flatMap(callSpans)
+    const budgeted = prompts.reduce((total, p) => total + (CALL_BUDGET[p.file]?.direct ?? 0), 0)
+    expect(spans.length, 'the resolver call spans differ from the call budget').toBe(budgeted)
+    expect(spans.filter(span => !hasName(span)).map(squash), 'a resolver call span that the name pattern does not match').toEqual([])
+  })
+
   it('the shell-line collector sees base-value lines: names and BASE_REF uses', () => {
     const spans = prompts
       .filter(p => !DEFERRED_FILES.includes(p.file))
@@ -677,9 +723,62 @@ describe('known-bad probes: each collector reports the seeded bad text and passe
     expect(nameSites('git-ops/validate-branch.md', '```markdown\n{list of files, from git diff {base}...HEAD --name-only}\n```')).toEqual([])
   })
 
+  /** A resolver call as the Git ops and the re-validation reference write it: the name is bound to `B` first. */
+  const bound = (value: string): string => `\`cd "{worktree}" && B=${value} && X=false && ${CALL_SEED('pr "${B}" --cross "${X}"; echo "exit=$?"')}\``
+
+  it('shell-name: an unquoted angle-bracket name binding in a resolver call is reported, the double-quoted binding is not', () => {
+    for (const placeholder of ['<name>', '<base_branch>']) {
+      expect(nameSites('git-ops/ensure-pr-ready.md', `${CHECKED}${bound(placeholder)}`), `B=${placeholder}`).toHaveLength(1)
+      expect(nameSites('git-ops/ensure-pr-ready.md', `${CHECKED}${bound(`"${placeholder}"`)}`), `B="${placeholder}"`).toEqual([])
+    }
+  })
+
+  it('shell-name: an angle-bracket name binding without its check before it is reported', () => {
+    for (const placeholder of ['<name>', '<base_branch>']) {
+      expect(nameSites('git-ops/validate-branch.md', bound(`"${placeholder}"`)), `B="${placeholder}"`).toHaveLength(1)
+    }
+  })
+
   it('strict-copy: a stale copy outside a base source is reported, the exact copy is not', () => {
     expect(nameSites('agents/seeded.md', STALE_CHECK_SEED)).toHaveLength(1)
     expect(nameSites('agents/seeded.md', CHECKED)).toEqual([])
+  })
+
+  describe('strict-copy: any other check of the class is reported, in a base source as much as outside one', () => {
+    const copySites = (file: string, text: string): string[] => collectNameSites(seeded(file, text)).filter(f => f.rule === 'strict-copy').map(f => f.anchor)
+    const files = ['agents/seeded.md', ...Object.keys(CHECKED_SOURCES)]
+    const widened: ReadonlyArray<readonly [string, string]> = [
+      ['a longer length', STRICT.replace('{1,200}', '{1,255}')],
+      ['an extra character', STRICT.replace('#-]', '#~-]')],
+      ['a plus sign for the length', STRICT.replace('{1,200}', '+')],
+    ]
+
+    for (const [label, copy] of widened) {
+      it(`${label}`, () => {
+        expect(copy, 'the widened copy equals the strict source').not.toBe(STRICT)
+        for (const file of files) expect(copySites(file, `${CHECKED}Check again: \`${copy}\`.`), `${label} in ${file}`).toHaveLength(1)
+      })
+    }
+
+    it('a second, different check in a base source', () => {
+      expect(copySites('git-ops/validate-branch.md', `${CHECKED}${STALE_CHECK_SEED}`)).toHaveLength(1)
+    })
+
+    it('the exact check alone, in every file, and the branch-slug pattern are not copies', () => {
+      for (const file of files) expect(copySites(file, CHECKED), file).toEqual([])
+      expect(copySites('commands/implement.md', `${CHECKED}Slug: \`^[A-Za-z0-9._-]{1,200}$\`.`)).toEqual([])
+    })
+
+    it('a widened copy in a review command is reported, and so is the exact one', () => {
+      const reviewCopies = (file: string, text: string): string[] =>
+        collectRequirements(seeded(file, text)).filter(f => f.rule === 'strict-copy').map(f => f.anchor)
+      for (const file of REVIEW_COMMANDS) {
+        for (const [label, copy] of [...widened, ['the literal class with an extra character', '^[A-Za-z0-9._/+@,#~-]+$'] as const]) {
+          expect(reviewCopies(file, `Extract: stop unless it matches \`${copy}\`.`), `${label} in ${file}`).toEqual(['no copy in the review commands'])
+        }
+        expect(reviewCopies(file, 'Extract: check the Base line and the hex base_ref.'), file).toEqual([])
+      }
+    })
   })
 
   for (const r of REQUIREMENTS) {
@@ -706,6 +805,33 @@ describe('known-bad probes: each collector reports the seeded bad text and passe
     const anchors = (text: string): string[] => sinkFindings(seeded('commands/code-review.md', text)).map(u => u.anchor).filter(a => a === 'patch writes')
     expect(anchors(write)).toEqual(['patch writes'])
     expect(anchors(`${write} A non-zero exit of any patch write stops.`)).toEqual([])
+  })
+
+  describe('sink-exit: each sink states its own stop fact, and its own empty-list fact when it states the rule', () => {
+    for (const sink of SINKS) {
+      it(`${sink.anchor} (${sink.file}): dropping its stop clause or its empty-list clause is reported, and an exit= echo does not stand in`, () => {
+        const built = prompts.find(p => p.file === sink.file && p.arm === 'on')
+        const region = built === undefined ? null : sink.region(built.text)
+        expect(region, 'the sink text was not found in the built prompt').not.toBeNull()
+        const text = region ?? ''
+        expect(sinkFacts(sink, text), 'the built sink').toEqual([])
+
+        const withoutStop = text.replace(sink.stop, '')
+        expect(withoutStop, 'the stop clause was not found in the sink').not.toBe(text)
+        expect(sinkFacts(sink, withoutStop)).toEqual([STOP_UNMET])
+        expect(sinkFacts(sink, `${withoutStop}\necho "exit=$?"`), 'an exit= echo alone').toEqual([STOP_UNMET])
+
+        if (sink.empty === undefined) return
+        const withoutEmpty = text.replace(sink.empty, '')
+        expect(withoutEmpty, 'the empty-list clause was not found in the sink').not.toBe(text)
+        expect(sinkFacts(sink, withoutEmpty)).toEqual([EMPTY_UNMET])
+      })
+    }
+
+    it('a sink that echoes only exit=$? is reported for both facts', () => {
+      const echoOnly = '7. Compute diff scope: `git -C "{worktree}" diff --name-only {base_ref}...HEAD; echo "exit=$?"` → newline-separated file list'
+      expect(sinkFindings(seeded('git-ops/validate-branch.md', echoOnly)).map(u => u.detail)).toEqual([STOP_UNMET, EMPTY_UNMET])
+    })
   })
 
   it('resolver-call: a wrong script path, an unquoted name, a bad mode and a missing exit echo are each reported', () => {
