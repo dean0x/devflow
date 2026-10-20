@@ -20,7 +20,7 @@ The hosts import this partial as an alias (`as code`) and call each define once.
 inside a define is split by the build like an arm in a host: the markers sit on lines of their own.
 
 @define input_core():
-- **TASK_ID**: Unique identifier (e.g., "task-2025-01-15_1430")
+- **TASK_ID**: Unique identifier
 - **TASK_DESCRIPTION**: What to do
 - **PUSH** (optional): `true` (default) | `false` — when false, commit only; orchestrator owns push/CI gate
 <!-- learning:on -->
