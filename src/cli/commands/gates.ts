@@ -69,10 +69,11 @@ export const GATE_LEVEL_MEANINGS: Readonly<Record<GateLevel, string>> = Object.f
  * One test pins the exact text of both tables, so a change to either fails it until you
  * check the other table and update the pin; further rows check the clauses the two tables
  * share (the lint pack level, the levels that run fewer review focuses and the levels that
- * skip Polish).
+ * skip Polish). The clause that lean skips Harden on a docs-only diff has no row here: the
+ * docs guard checks it at each doc site, against the row in the /implement level reference.
  */
 export const GATE_LEVEL_EFFECT =
-  '/code-review and /plan read the level: standard and lean run fewer review focuses and fewer planning agents. At lean, /implement has Validate run the project\'s lint pack. /implement and /resolve also read the level and name it in their report; at standard and lean they skip Polish, and full keeps it.';
+  '/code-review and /plan read the level: standard and lean run fewer review focuses and fewer planning agents. At lean, /implement has Validate run the project\'s lint pack. /implement and /resolve also read the level and name it in their report; at standard and lean they skip Polish, and full keeps it. At lean, /implement skips Harden on a docs-only diff.';
 
 const MACHINE_MANIFEST_NAME = 'manifest.json';
 const MACHINE_INVALID_LINE = `invalid (${MACHINE_MANIFEST_NAME}; reads as ${MALFORMED_GATE_LEVEL_READS_AS})`;
