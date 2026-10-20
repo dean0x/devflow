@@ -14,10 +14,10 @@ exit 0
 A home/.devflow/logs/
 A home/.devflow/logs/<SANDBOX>-repo/
 A home/.devflow/logs/<SANDBOX>-repo/.capture-prompt.log
+A repo/.devflow/curation/
+A repo/.devflow/curation/.pending-turns.jsonl
 A repo/.devflow/docs/
 A repo/.devflow/features/
-A repo/.devflow/learning/
-A repo/.devflow/learning/.pending-turns.jsonl
 A repo/.devflow/memory/
 A repo/.devflow/memory/.pending-turns.jsonl
 
@@ -26,10 +26,10 @@ exit 0
 A home/.devflow/logs/
 A home/.devflow/logs/<SANDBOX>-repo/
 A home/.devflow/logs/<SANDBOX>-repo/.capture-turn.log
+A repo/.devflow/curation/
+A repo/.devflow/curation/.pending-turns.jsonl
 A repo/.devflow/docs/
 A repo/.devflow/features/
-A repo/.devflow/learning/
-A repo/.devflow/learning/.pending-turns.jsonl
 A repo/.devflow/memory/
 A repo/.devflow/memory/.pending-turns.jsonl
 
@@ -51,17 +51,17 @@ A home/.devflow/logs/<SANDBOX>-repo/
 exit 0
 A home/.devflow/logs/
 A home/.devflow/logs/<SANDBOX>-repo/
-A repo/.devflow/learning/
+A repo/.devflow/curation/
 
 ## root · capture-question (PostToolUse AskUserQuestion)
 exit 0
 A home/.devflow/logs/
 A home/.devflow/logs/<SANDBOX>-repo/
 A home/.devflow/logs/<SANDBOX>-repo/.capture-question.log
+A repo/.devflow/curation/
+A repo/.devflow/curation/.pending-turns.jsonl
 A repo/.devflow/docs/
 A repo/.devflow/features/
-A repo/.devflow/learning/
-A repo/.devflow/learning/.pending-turns.jsonl
 A repo/.devflow/memory/
 A repo/.devflow/memory/.pending-turns.jsonl
 
@@ -70,9 +70,9 @@ exit 0
 A home/.devflow/logs/
 A home/.devflow/logs/<SANDBOX>-repo/
 A home/.devflow/logs/<SANDBOX>-repo/.pre-compact-memory.log
+A repo/.devflow/curation/
 A repo/.devflow/docs/
 A repo/.devflow/features/
-A repo/.devflow/learning/
 A repo/.devflow/memory/
 A repo/.devflow/memory/WORKING-MEMORY.md
 A repo/.devflow/memory/backup.json
@@ -86,10 +86,10 @@ exit 0
 A home/.devflow/logs/
 A home/.devflow/logs/<SANDBOX>-repo-sub/
 A home/.devflow/logs/<SANDBOX>-repo-sub/.capture-prompt.log
+A repo/.devflow/curation/
+A repo/.devflow/curation/.pending-turns.jsonl
 A repo/.devflow/docs/
 A repo/.devflow/features/
-A repo/.devflow/learning/
-A repo/.devflow/learning/.pending-turns.jsonl
 A repo/.devflow/memory/
 A repo/.devflow/memory/.pending-turns.jsonl
 
@@ -98,10 +98,10 @@ exit 0
 A home/.devflow/logs/
 A home/.devflow/logs/<SANDBOX>-repo-sub/
 A home/.devflow/logs/<SANDBOX>-repo-sub/.capture-turn.log
+A repo/.devflow/curation/
+A repo/.devflow/curation/.pending-turns.jsonl
 A repo/.devflow/docs/
 A repo/.devflow/features/
-A repo/.devflow/learning/
-A repo/.devflow/learning/.pending-turns.jsonl
 A repo/.devflow/memory/
 A repo/.devflow/memory/.pending-turns.jsonl
 
@@ -123,17 +123,17 @@ A home/.devflow/logs/<SANDBOX>-repo-sub/
 exit 0
 A home/.devflow/logs/
 A home/.devflow/logs/<SANDBOX>-repo-sub/
-A repo/.devflow/learning/
+A repo/.devflow/curation/
 
 ## subdir · capture-question (PostToolUse AskUserQuestion)
 exit 0
 A home/.devflow/logs/
 A home/.devflow/logs/<SANDBOX>-repo-sub/
 A home/.devflow/logs/<SANDBOX>-repo-sub/.capture-question.log
+A repo/.devflow/curation/
+A repo/.devflow/curation/.pending-turns.jsonl
 A repo/.devflow/docs/
 A repo/.devflow/features/
-A repo/.devflow/learning/
-A repo/.devflow/learning/.pending-turns.jsonl
 A repo/.devflow/memory/
 A repo/.devflow/memory/.pending-turns.jsonl
 
@@ -142,9 +142,9 @@ exit 0
 A home/.devflow/logs/
 A home/.devflow/logs/<SANDBOX>-repo-sub/
 A home/.devflow/logs/<SANDBOX>-repo-sub/.pre-compact-memory.log
+A repo/.devflow/curation/
 A repo/.devflow/docs/
 A repo/.devflow/features/
-A repo/.devflow/learning/
 A repo/.devflow/memory/
 A repo/.devflow/memory/WORKING-MEMORY.md
 A repo/.devflow/memory/backup.json
@@ -158,8 +158,8 @@ exit 0
 A home/.devflow/logs/
 A home/.devflow/logs/<SANDBOX>-wt/
 A home/.devflow/logs/<SANDBOX>-wt/.capture-prompt.log
-A repo/.devflow/learning/
-A repo/.devflow/learning/.pending-turns.jsonl
+A repo/.devflow/curation/
+A repo/.devflow/curation/.pending-turns.jsonl
 A wt/.devflow/
 A wt/.devflow/.root-gitignore-configured-v6
 A wt/.devflow/docs/
@@ -173,8 +173,8 @@ exit 0
 A home/.devflow/logs/
 A home/.devflow/logs/<SANDBOX>-wt/
 A home/.devflow/logs/<SANDBOX>-wt/.capture-turn.log
-A repo/.devflow/learning/
-A repo/.devflow/learning/.pending-turns.jsonl
+A repo/.devflow/curation/
+A repo/.devflow/curation/.pending-turns.jsonl
 A wt/.devflow/
 A wt/.devflow/.root-gitignore-configured-v6
 A wt/.devflow/docs/
@@ -202,7 +202,7 @@ exit 0
 M home/.devflow/.claude-md-audit
 A home/.devflow/logs/
 A home/.devflow/logs/<SANDBOX>-wt/
-A repo/.devflow/learning/
+A repo/.devflow/curation/
 A wt/.devflow/
 A wt/.devflow/.root-gitignore-configured-v6
 A wt/.gitignore
@@ -212,8 +212,8 @@ exit 0
 A home/.devflow/logs/
 A home/.devflow/logs/<SANDBOX>-wt/
 A home/.devflow/logs/<SANDBOX>-wt/.capture-question.log
-A repo/.devflow/learning/
-A repo/.devflow/learning/.pending-turns.jsonl
+A repo/.devflow/curation/
+A repo/.devflow/curation/.pending-turns.jsonl
 A wt/.devflow/
 A wt/.devflow/.root-gitignore-configured-v6
 A wt/.devflow/docs/
