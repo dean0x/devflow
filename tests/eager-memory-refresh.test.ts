@@ -450,30 +450,53 @@ describe('S2: AC-F4 — session-start-memory injection states', () => {
     expect(ctx).not.toContain('abc..xyz123');
   });
 
-  it('a backup.json that does not parse is read as no snapshot, and the working memory is still injected', () => {
+  it('ignores valid or malformed legacy backups without changing current memory context', () => {
     const headSha = execSync('git rev-parse HEAD', { cwd: projectDir, encoding: 'utf-8' }).trim();
     const branch = execSync('git branch --show-current', { cwd: projectDir, encoding: 'utf-8' }).trim() || 'main';
     writeMemoryWithStamp(projectDir, headSha, branch);
     const withoutBackup = getCtx(projectDir, homeDir);
     expect(withoutBackup, 'non-vacuity: the memory is injected with no backup at all').toContain('synced @');
 
-    // A truncated write, and a whole object followed by garbage: jq prints the
-    // object's fields before failing on the rest, so a guard that kept partial
-    // output would inject this snapshot. Its future timestamp would make it win.
     const backup = path.join(projectDir, '.devflow', 'memory', 'backup.json');
     const snapshot = JSON.stringify({ timestamp: '2099-01-01T00:00:00Z', memory_snapshot: 'stale snapshot' });
-    for (const corrupt of [snapshot.slice(0, 30), `${snapshot}\nnot-json{{{`]) {
-      fs.writeFileSync(backup, corrupt);
+    for (const contents of [snapshot, snapshot.slice(0, 30), `${snapshot}\nnot-json{{{`]) {
+      fs.writeFileSync(backup, contents);
       const run = runHook(SESSION_START_MEMORY_HOOK, { cwd: projectDir }, homeDir);
-      expect(run.exitCode, `${corrupt}\n${run.stderr}`).toBe(0);
+      expect(run.exitCode, run.stderr).toBe(0);
       const ctx = (JSON.parse(run.stdout.trim()) as { hookSpecificOutput: { additionalContext: string } })
         .hookSpecificOutput.additionalContext;
-      expect(ctx, corrupt).toBe(withoutBackup);
+      expect(ctx).toBe(withoutBackup);
+      expect(fs.readFileSync(backup, 'utf-8'), 'legacy backups are not deleted or rewritten on restore').toBe(contents);
     }
+  });
 
-    // The red probe: the same snapshot, whole, is injected.
-    fs.writeFileSync(backup, snapshot);
-    expect(getCtx(projectDir, homeDir)).toContain('PRE-COMPACT SNAPSHOT');
+  it.each(['identical', 'divergent', 'oversized'] as const)('ignores a newer %s legacy backup body', (kind) => {
+    const headSha = execSync('git rev-parse HEAD', { cwd: projectDir, encoding: 'utf-8' }).trim();
+    const branch = execSync('git branch --show-current', { cwd: projectDir, encoding: 'utf-8' }).trim() || 'main';
+    writeMemoryWithStamp(projectDir, headSha, branch);
+    const memoryFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+    const current = fs.readFileSync(memoryFile, 'utf-8');
+    const withoutBackup = getCtx(projectDir, homeDir);
+    const body = kind === 'identical' ? current : kind === 'oversized' ? 'backup-only-marker\n'.repeat(8192) : 'backup-only-marker';
+    const backup = path.join(projectDir, '.devflow', 'memory', 'backup.json');
+    const contents = JSON.stringify({ timestamp: '2099-01-01T00:00:00Z', memory_snapshot: body });
+    fs.writeFileSync(backup, contents);
+
+    expect(getCtx(projectDir, homeDir)).toBe(withoutBackup);
+    expect(fs.readFileSync(memoryFile, 'utf-8')).toBe(current);
+    expect(fs.readFileSync(backup, 'utf-8')).toBe(contents);
+  });
+
+  it('ignores a legacy backup when current working memory is missing', () => {
+    const backup = path.join(projectDir, '.devflow', 'memory', 'backup.json');
+    const contents = JSON.stringify({ timestamp: '2099-01-01T00:00:00Z', memory_snapshot: 'backup-only-marker' });
+    fs.writeFileSync(backup, contents);
+
+    const run = runHook(SESSION_START_MEMORY_HOOK, { cwd: projectDir }, homeDir);
+    expect(run.exitCode, run.stderr).toBe(0);
+    expect(run.stdout.trim()).toBe('');
+    expect(fs.readFileSync(backup, 'utf-8')).toBe(contents);
+    expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md'))).toBe(false);
   });
 
   it('raw UNPROCESSED TURNS dump is absent from all output (legacy format gone)', () => {
@@ -2128,6 +2151,34 @@ describe('S22: pre-compact bootstrap stamp and canonical sections (B2)', () => {
     fs.rmSync(homeDir, { recursive: true, force: true });
   });
 
+  it.each(['available', 'node-only'] as const)('preserves Git backup evidence without copying memory (%s parser)', (backend) => {
+    initGitRepo(projectDir);
+    fs.appendFileSync(path.join(projectDir, 'README.md'), 'pending change\n');
+    const branch = execSync('git branch --show-current', { cwd: projectDir, encoding: 'utf-8' }).trim();
+    const memoryFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+    const memory = '## Now\n- current-memory-only-marker\n';
+    fs.writeFileSync(memoryFile, memory);
+    const extraEnv = backend === 'node-only' ? { PATH: buildToolFarm([], { node: process.execPath }) } : {};
+
+    const run = runHook(PRE_COMPACT_HOOK, { cwd: projectDir }, homeDir, extraEnv);
+
+    expect(run.exitCode, run.stderr).toBe(0);
+    const backupFile = path.join(projectDir, '.devflow', 'memory', 'backup.json');
+    const backup = JSON.parse(fs.readFileSync(backupFile, 'utf-8'));
+    expect(backup).toEqual({
+      timestamp: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/),
+      trigger: 'pre-compact',
+      git: {
+        branch,
+        status: expect.stringContaining('README.md'),
+        log: expect.stringContaining('init'),
+        diff_stat: expect.stringContaining('README.md'),
+      },
+    });
+    expect(fs.readFileSync(memoryFile, 'utf-8')).toBe(memory);
+    if (process.platform !== 'win32') expect(fs.statSync(backupFile).mode & 0o777).toBe(0o600);
+  });
+
   it('git repo + no existing WORKING-MEMORY.md: bootstrap creates file with 40-hex stamp on line 1', () => {
     initGitRepo(projectDir);
     const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
@@ -2711,7 +2762,7 @@ exit 0
 // =============================================================================
 // S26 — pre-compact backup.json is replaced by a rename (D-BACKUP-RENAME)
 //
-// session-start-memory reads backup.json twice, so a read must never meet the
+// A backup reader must never meet the
 // file between a truncate and the write that refills it. pre-compact-memory
 // writes a copy beside the backup and renames it over the backup. A hard link
 // to the previous backup's inode is the witness: a rewrite in place changes what
@@ -2765,7 +2816,7 @@ describe('S26: pre-compact backup.json is replaced by a rename, never rewritten 
     const written = JSON.parse(fs.readFileSync(backup, 'utf-8')) as { trigger?: string; git?: { branch?: string } };
     expect(written.trigger).toBe('pre-compact');
     expect(written.git?.branch).toBe(execSync('git branch --show-current', { cwd: projectDir, encoding: 'utf-8' }).trim());
-    expect((fs.statSync(backup).mode & 0o777).toString(8), 'the backup holds working memory, so it is owner-only').toBe('600');
+    expect((fs.statSync(backup).mode & 0o777).toString(8), 'the Git-state backup remains owner-only').toBe('600');
     expect(leftovers(), 'no copy is left beside the backup').toEqual([]);
   });
 
@@ -3043,7 +3094,8 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
     }
     expect(fs.readlinkSync(memoryFile), 'the link is left as it was').toBe(fifo);
     const backup = JSON.parse(fs.readFileSync(path.join(memoryDir, 'backup.json'), 'utf-8'));
-    expect(backup.memory_snapshot, 'non-vacuity: the hook carried on and wrote its backup').toBe('');
+    expect(backup, 'non-vacuity: the hook carried on and wrote its Git backup').toHaveProperty('git');
+    expect(backup).not.toHaveProperty('memory_snapshot');
     expect(refusals('pre-compact-memory'), 'the skipped bootstrap is logged once').toHaveLength(1);
   }, FIFO_TEST_TIMEOUT_MS);
 
@@ -3318,9 +3370,8 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
 // S28 — D-HOOKS-NO-SYMLINK: no memory hook reads through a symbolic link into
 // the session, the backup or the prompt
 //
-// session-start-memory injects the working memory, the pre-compact backup and a
-// count of the turns waiting; pre-compact-memory copies the working memory into
-// that backup; the worker sends it to `claude -p`. A repository can commit any of
+// session-start-memory injects the working memory and a count of the turns
+// waiting; the worker sends the working memory to `claude -p`. A repository can commit any of
 // these, or the memory folder, as a link to a file elsewhere on the machine, so a
 // file a link leads to is treated as absent: nothing of it reaches the session,
 // the backup or the prompt, each refusal is logged once, and the hook exits 0.
@@ -3329,7 +3380,7 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
 describe('S28: the memory hooks never read through a symbolic link into the session, the backup or the prompt (D-HOOKS-NO-SYMLINK)', { timeout: HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS }, () => {
   const MARKER = 'made-up-marker-4c8d1a';
   const OUTSIDE = `## Now\n- ${MARKER}\n`;
-  // Far in the future, so a backup carrying it is offered whatever the time zone.
+  // A legacy backup must stay ignored even with a future timestamp.
   const BACKUP_TIMESTAMP = '2099-01-01T00:00:00Z';
   let tmp: string;
   let projectDir: string;
@@ -3396,7 +3447,7 @@ describe('S28: the memory hooks never read through a symbolic link into the sess
     expect(run.stdout, 'non-vacuity: the real working memory is injected').toContain('the real working memory');
     expect(run.stdout).not.toContain('PRE-COMPACT SNAPSHOT');
     expect(run.stdout).not.toContain(MARKER);
-    expect(refusals('session-start-memory'), 'the refusal is logged once').toHaveLength(1);
+    expect(refusals('session-start-memory'), 'backup.json is no longer read').toHaveLength(0);
   });
 
   for (const name of ['.pending-turns.jsonl', '.pending-turns.processing']) {
@@ -3427,7 +3478,7 @@ describe('S28: the memory hooks never read through a symbolic link into the sess
 
     expect(run.kind, run.stderr).toBe('clean');
     expect(run.stdout).not.toContain(MARKER);
-    expect(refusals('session-start-memory'), 'each file read from the folder is refused once').toHaveLength(2);
+    expect(refusals('session-start-memory'), 'only the working memory is considered for injection').toHaveLength(1);
   });
 
   it('pre-compact-memory: a linked WORKING-MEMORY.md is not copied into the backup', () => {
@@ -3437,14 +3488,13 @@ describe('S28: the memory hooks never read through a symbolic link into the sess
 
     expect(run.kind, run.stderr).toBe('clean');
     const backup = fs.readFileSync(path.join(memoryDir, 'backup.json'), 'utf-8');
-    expect(JSON.parse(backup).memory_snapshot, 'non-vacuity: the backup is written, with no snapshot').toBe('');
+    expect(JSON.parse(backup), 'non-vacuity: the Git backup is still written').toHaveProperty('git');
+    expect(JSON.parse(backup)).not.toHaveProperty('memory_snapshot');
     expect(backup).not.toContain(MARKER);
     expect(isLink(memoryFile), 'the link is left as it was').toBe(true);
     expect(fs.readFileSync(outsideFile, 'utf-8')).toBe(OUTSIDE);
-    // The same link refuses two things, each logged once: the snapshot's read and
-    // the working-memory bootstrap's create.
-    expect(refusals('pre-compact-memory'), 'the read and the bootstrap are each refused once').toEqual([
-      expect.stringContaining('treated as absent'),
+    // PreCompact no longer reads memory; only its bootstrap refuses the link.
+    expect(refusals('pre-compact-memory'), 'only bootstrap considers the memory path').toEqual([
       expect.stringContaining('not bootstrapped'),
     ]);
   });
