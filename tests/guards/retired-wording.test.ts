@@ -46,6 +46,7 @@ import {
   type AllowlistEntry,
   type SectionExemption,
 } from '../fixtures/feature-word-allowlist.js';
+import { LEGACY_NAMES } from '../../src/core/project-paths.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 
@@ -1171,6 +1172,23 @@ describe('feature-word guard — non-vacuity probes (the same collector as the g
     expect(scan([file('// the pre-rename key `learning` and the learning feature\n')], [entry]).violations).toHaveLength(1);
     expect(scan([{ relPath: 'src/core/other.ts', content: '// the pre-rename key `learning`\n' }], [entry]).violations)
       .toHaveLength(1);
+  });
+
+  it('the compiled declaration of the legacy names is covered, in the form the compiler emits', () => {
+    const declaration = 'dist/core/project-paths.d.ts';
+    const emitted = Object.entries(LEGACY_NAMES).map(([key, value]) => `    ${key}: ${JSON.stringify(value)};`);
+    expect(emitted).toHaveLength(3);
+    for (const line of emitted) {
+      expect(scan([{ relPath: declaration, content: `${line}\n` }]).violations, line).toEqual([]);
+    }
+  });
+
+  it('the compiled declaration covers only its own text: a second use or another file still fails', () => {
+    const declaration = 'dist/core/project-paths.d.ts';
+    const line = '    backupPrefix: "learning.backup-";';
+    expect(scan([{ relPath: declaration, content: `${line} // the learning feature\n` }]).violations).toHaveLength(1);
+    expect(scan([{ relPath: declaration, content: '    other: "learning";\n' }]).violations).toHaveLength(1);
+    expect(scan([{ relPath: 'dist/core/other.d.ts', content: `${line}\n` }]).violations).toHaveLength(1);
   });
 
   it('a stale entry fails: an entry that covers no hit is reported', () => {

@@ -102,11 +102,12 @@ export const FEATURE_WORD_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
 
   // ── Migration: the legacy names the move reads, and the shim that probes them ──
   {
-    path: /^src\/(?:core\/project-paths\.ts|assets\/scripts\/hooks\/lib\/project-paths\.cjs)$/,
-    pattern: /(?:folder|backupPrefix|tuningFile): 'learning(?:\.backup-|\.json)?',/,
+    path: /^(?:src\/(?:core\/project-paths\.ts|assets\/scripts\/hooks\/lib\/project-paths\.cjs)|dist\/core\/project-paths\.d\.ts)$/,
+    pattern: /(?:folder|backupPrefix|tuningFile): (['"])learning(?:\.backup-|\.json)?\1[,;]/,
     reason:
       'The LEGACY_NAMES block holds the pre-rename folder, backup prefix and tuning file. The ' +
-      'move reads them to find old data. The TypeScript and CJS copies list the same names.',
+      'move reads them to find old data. The TypeScript and CJS copies list the same names. ' +
+      'The compiled declaration in dist/ holds them too, with double quotes and a semicolon.',
   },
   {
     path: `${HOOKS}curation-move`,
