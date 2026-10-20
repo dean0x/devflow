@@ -32,7 +32,7 @@ Executes a single task through the complete development lifecycle. Accepts plan 
 
 1. **Setup** — Auto-create feature branch, parse plan document or fetch issue, and write the task's test plan (copied from the plan, or one TP line per stated acceptance criterion) to `.devflow/docs/evidence-{branch-slug}.md`. Under a `required` evidence policy, a missing ticket link or test plan is recorded as a self-attested exception or stops the run, before any code is written
 2. **Implementation** — Write code on the feature branch
-3. **Refinement** — Polish (code clarity) + Harden (9-pillar quality; reports PASS, FIXED or BLOCKED)
+3. **Refinement** — Polish (code clarity; at `full` only) + Harden (9-pillar quality; reports PASS, FIXED or BLOCKED)
 4. **Alignment** — Evaluate verifies implementation matches the original request
 5. **Validation** — One full build, typecheck, lint, and test run over the branch diff, after the code is final. At `lean` ([gate level](cli-reference.md#gate-level)), and at no other level, Validate then runs the project's `lint-pack` script last, if it has one, to find faults that a linter does not; matches go to Fix, and an allow glob in `.lint-pack.conf` clears a match that you accept
 6. **QA Testing** — Test executes scenario-based acceptance tests and records one claim per TP line
@@ -41,7 +41,7 @@ Executes a single task through the complete development lifecycle. Accepts plan 
 9. **CI Gate** — Push, then wait for CI on the pushed head and fix failures
 10. **Evidence** — Push, then refresh the PR's test-plan block and post its evidence comment
 
-**Gate level.** `/implement` names the [gate level](cli-reference.md#gate-level) in its report. At `standard` and `lean`, it also reads its level reference once, at the start of the Refinement step, and applies each row to the phase that the row names. The reference has no rows yet, so it changes no phase. If the reference cannot be read, `/implement` applies no row, keeps the level and says `level reference unreadable: no level rows applied`. The level still goes to Validate, so at `lean` the lint pack still runs. Validate, the CI gate, the evidence claims and the compliance directive run at every level. An enabled compliance lens keeps Harden.
+**Gate level.** `/implement` names the [gate level](cli-reference.md#gate-level) in its report. At `standard` and `lean`, it also reads its level reference once, at the start of the Refinement step, and applies each row to the phase that the row names. At `standard` and `lean`, the reference skips Polish; Harden still reads the whole branch diff, and `full` keeps Polish. If the reference cannot be read, `/implement` applies no row, keeps the level and says `level reference unreadable: no level rows applied`. The level still goes to Validate, so at `lean` the lint pack still runs. Validate, the CI gate, the evidence claims and the compliance directive run at every level. An enabled compliance lens keeps Harden.
 
 ```
 /implement .devflow/docs/design/42-jwt-auth.2026-04-07_1430.md  # From plan document
@@ -96,7 +96,7 @@ Processes all issues from `/code-review` reports through a validation/fix split:
 9. **Merge Readiness** — Under a `required` evidence policy, a report-only check: no unresolved threads, an approving review, passing CI, every TP verified (or a test-plan exception) and a trusted non-author approval
 10. **Report** — Write resolution summary with Verification, By Design, Fix Separately, and Escalations sections; duplicate findings reported by multiple Review agents are collapsed via the DUPLICATE verdict so Statistics counts reflect unique issues
 
-**Gate level.** Each worktree keeps its own [gate level](cli-reference.md#gate-level). When any worktree is at `standard` or `lean`, `/resolve` reads its level reference once per run and applies each row at that worktree's level. Global Triage is one spawn for all worktrees, so it uses the strictest level in the run. The reference has no rows yet, so it changes no phase. The display and `resolution-summary.md` name the level. If the reference cannot be read, `/resolve` applies no row in any worktree, keeps every level and says `level reference unreadable: no level rows applied`. No level changes the Triage security gate or the ESCALATED route. The Verification Gate, the CI gate and the compliance directive run at every level.
+**Gate level.** Each worktree keeps its own [gate level](cli-reference.md#gate-level). When any worktree is at `standard` or `lean`, `/resolve` reads its level reference once per run and applies each row at that worktree's level. Global Triage is one spawn for all worktrees, so it uses the strictest level in the run. At `standard` and `lean`, the reference skips Polish (Phase 6) in that worktree; `full` keeps it. The display and `resolution-summary.md` name the level. If the reference cannot be read, `/resolve` applies no row in any worktree, keeps every level and says `level reference unreadable: no level rows applied`. No level changes the Triage security gate or the ESCALATED route. The Verification Gate, the CI gate and the compliance directive run at every level.
 
 ```
 /resolve                     # Resolve latest review (or all worktrees)
