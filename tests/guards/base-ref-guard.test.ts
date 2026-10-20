@@ -22,12 +22,18 @@
  *          call carries a name word, a shell variable bound to the name or an extra positional
  *          word. Every resolver call is counted per file (the call budget).
  *   AC-16  No built prompt carries a flagged base site: every collector finds nothing.
+ *   Review ranges  Every review spawn of the ticket workflow in dynamic-build takes
+ *          `DIFF_RANGE: {base commit}...HEAD` on its own line. The base commit is the 40 or 64
+ *          lowercase hex commit that the setup spawn reports, and a ticket without one stops with
+ *          `base-missing` before the implement phase. The changed-files list of the wave evidence step
+ *          starts at the hex Base ref, filters deletions and checks the diff exit. The review-pass
+ *          description states the same source (the `review-range` rule).
  *
  * This file holds the sweeps that find a new site anywhere in the corpus. The text one command
  * or one Git op states alone belongs to its own guard: the review commands' Return, Extract,
  * full-range, DIFF_RANGE and freshness text (`collectFreshBaseDefects` in tests/helpers.ts, driven
  * by tests/guards/code-review-diff-gating.test.ts and tests/bug-analysis/structural.test.ts), the
- * review agent's DIFF_RANGE fallback (code-review-diff-gating), /implement's Phase 1 and
+ * review agent's DIFF_RANGE rule (code-review-diff-gating), /implement's Phase 1 and
  * re-validation text (tests/evidence/implement-flow.test.ts) and the Git ops' steps 5 to 7
  * (tests/git-agent.test.ts).
  *
@@ -56,6 +62,7 @@ import {
   ensurePrReadyReference,
   findNameClassCopies,
   gitOperationReferenceCorpus,
+  parseFences,
   readAgentReference,
   requireDistFile,
   requireDistFiles,
@@ -271,7 +278,7 @@ function listItem(text: string, start: RegExp): string | null {
 // Findings
 // ---------------------------------------------------------------------------
 
-const RULES = ['shell-name', 'strict-copy', 'grammar-copy', 'diff-range', 'sink-exit', 'resolver-call', 'file-removal', 'reason-fix-table'] as const
+const RULES = ['shell-name', 'strict-copy', 'grammar-copy', 'diff-range', 'sink-exit', 'resolver-call', 'file-removal', 'reason-fix-table', 'review-range'] as const
 
 type Rule = typeof RULES[number]
 
@@ -295,9 +302,11 @@ const describeFinding = (f: Finding): string => `${f.file} [${f.arm}] ${f.rule} 
 // Deferred scope: kept outside the name-site collectors
 // ---------------------------------------------------------------------------
 
-/** These prompts take the resolved base in a later change; until then their base sites stay out of the name-site collectors. */
+/** These prompts stay out of the name-site collectors while they hold a site those collectors would report; the test at the end checks that each still does. */
 const DEFERRED_FILES: readonly string[] = [
+  // Its review ranges are read by the review-range rule.
   'commands/dynamic-build.md',
+  // Its caller passes the resolved range.
   'agents/debug.md',
 ]
 
@@ -387,7 +396,7 @@ const CALL_BUDGET: Readonly<Record<string, CallBudget>> = {
   'commands/code-review.md': { direct: 0, spawns: 1 },
   // One call per run.
   'commands/bug-analysis.md': { direct: 0, spawns: 1 },
-  // One ensure-pr-ready call per wave PR; counted here, the file is not edited.
+  // One ensure-pr-ready call per wave PR.
   'commands/dynamic-build.md': { direct: 0, spawns: 1 },
   'git-ops/ensure-pr-ready.md': { direct: 1, mode: 'pr' },
   // One call per validate-branch run.
@@ -580,6 +589,121 @@ function sinkFindings(p: Prompt): Unmet[] {
   })
 }
 
+// ---------------------------------------------------------------------------
+// Collector: review ranges start at the commit that setup reported
+// ---------------------------------------------------------------------------
+
+const TICKET_WORKFLOW_MARKER = 'name: "devflow-dynamic-build"'
+/** The line every review spawn of a ticket carries: the commit that setup reported, to HEAD. */
+const RANGE_LINE = 'DIFF_RANGE: ${BASE_SHA}...HEAD'
+const RANGE_LINE_RE = /^DIFF_RANGE: \$\{BASE_SHA\}\.\.\.HEAD$/m
+/** The end of the review-scope string: the range line on its own line, and a newline after it. */
+const SCOPE_TAIL = `\\n${RANGE_LINE}\\n`
+const BASE_BINDING = 'const BASE_SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(String(setup?.baseSha ?? "")) ? setup.baseSha : "(none)";'
+const SETUP_BASE_RETURN = '"baseSha": "<the 40 or 64 hex git rev-parse HEAD prints before step 4>"'
+const BASE_STOP = 'if (BASE_SHA === "(none)") {'
+
+/** The parts the review-scope description of the engine states: the range, its source and the stop. */
+const SCOPE_LINE_PARTS: readonly string[] = [
+  '`DIFF_RANGE: {base commit}...HEAD`',
+  'the base commit is the 40 or 64 hex commit that the ticket branch was forked from',
+  'as the setup step reported it',
+  'a ticket with none stops `base-missing`',
+]
+
+/** The parts of the changed-files step of the wave evidence: its source, its command and its stop. */
+const CHANGED_FILES_PARTS: ReadonlyArray<readonly [string, string]> = [
+  ['Take `{base_ref}` from step 6\'s `- **Base ref**:` line', 'the list does not start from the Base ref that step 6 returned'],
+  ['git -C "{integration worktree root}" diff --name-only --diff-filter=d {base_ref}...HEAD; echo "exit=$?"', 'the command is not the name-only diff that starts at {base_ref}, filters deletions and echoes its exit status'],
+  ['Unless `{base_ref}` is 40 or 64 lowercase hex and the diff prints `exit=0`', 'the step does not require a 40 or 64 lowercase hex {base_ref} and a zero diff exit'],
+  ['record `TRACEABILITY: DEGRADED (wave base unusable)` and skip this step.', 'the step does not record one degraded line and skip'],
+]
+
+/** The one fence of a command that holds the ticket workflow, or null. */
+function ticketWorkflow(text: string): string | null {
+  const hits = parseFences(text).filter(f => f.includes(TICKET_WORKFLOW_MARKER))
+  return hits.length === 1 ? hits[0] : null
+}
+
+/** The text of each Review spawn: from its `agent(` to its `agentType: "Review"`. */
+function reviewSpawns(workflow: string): string[] {
+  return [...workflow.matchAll(/agentType: "Review"/g)].map(m => {
+    const from = workflow.lastIndexOf('agent(', m.index)
+    return from === -1 ? '' : workflow.slice(from, m.index)
+  })
+}
+
+/** The block of a text that opens with `marker`, or null unless the marker occurs once. */
+function blockOf(text: string, marker: string): string | null {
+  const at = text.indexOf(marker)
+  if (at === -1 || text.indexOf(marker, at + marker.length) !== -1) return null
+  const block = splitBlocks(text).find(b => at >= b.start && at <= b.end)
+  return block === undefined ? null : text.slice(block.start, block.end)
+}
+
+/** Why the setup spawn, the base binding and the base stop do not give every later spawn a hex base commit; empty when they do. */
+function baseCommitFindings(workflow: string): Unmet[] {
+  const out: Unmet[] = []
+  const setupAt = workflow.indexOf('OPERATION: setup-task')
+  const setupEnd = setupAt === -1 ? -1 : workflow.indexOf('agentType: "Git"', setupAt)
+  if (setupEnd === -1 || !workflow.slice(setupAt, setupEnd).includes(SETUP_BASE_RETURN)) {
+    out.push(...unmet('setup Return', 'the setup spawn does not ask for baseSha: the 40 or 64 hex that git rev-parse HEAD prints before the branch is made'))
+  }
+  const bindings = workflow.match(/^const BASE_SHA = .*$/gm) ?? []
+  if (bindings.length !== 1) out.push(...unmet('BASE_SHA binding', `${bindings.length} const BASE_SHA bindings, expected 1`))
+  else if (!bindings[0].startsWith(BASE_BINDING)) out.push(...unmet('BASE_SHA binding', 'BASE_SHA is not the 40 or 64 lowercase hex commit that setup reported, else "(none)"'))
+  if ((workflow.match(/\bBASE_SHA\s*=(?!=)/g) ?? []).length > 1) out.push(...unmet('BASE_SHA binding', 'BASE_SHA is assigned more than once'))
+  const stopAt = workflow.indexOf(BASE_STOP)
+  if (stopAt === -1) return [...out, ...unmet('base stop', 'no stop on a missing base commit')]
+  const stopEnd = workflow.indexOf('\n}', stopAt)
+  const stop = workflow.slice(stopAt, stopEnd === -1 ? stopAt : stopEnd)
+  if (!stop.includes('verdict: "ESCALATED"') || !stop.includes('type: "base-missing"')) out.push(...unmet('base stop', 'the stop does not escalate with type base-missing'))
+  const implementAt = workflow.indexOf('phase("implement"')
+  if (implementAt === -1 || implementAt < stopAt) out.push(...unmet('base stop', 'the base stop does not come before the implement phase'))
+  const bindingAt = workflow.search(/^const BASE_SHA = /m)
+  if (bindingAt !== -1 && bindingAt < stopAt && /\b(?:agent|phase)\(/.test(workflow.slice(bindingAt, stopAt))) {
+    out.push(...unmet('base stop', 'a spawn or a phase runs between the base binding and the base stop'))
+  }
+  return out
+}
+
+/** Why a Review spawn, or the string that two of them share, does not carry the range from the base commit; empty when each does. */
+function reviewSpawnFindings(workflow: string): Unmet[] {
+  const out: Unmet[] = []
+  const spawns = reviewSpawns(workflow)
+  if (spawns.length === 0) out.push(...unmet('Review call', 'the ticket workflow holds no Review spawn'))
+  for (const spawn of spawns) {
+    if (!spawn.includes('${reviewScope}') && !RANGE_LINE_RE.test(spawn)) {
+      out.push(...unmet('Review call', `a Review spawn that carries no range from the resolved base commit: ${squash(spawn).slice(0, 60)}`))
+    }
+  }
+  const scope = /^\s*const reviewScope = `([^`]*)`;/m.exec(workflow)
+  if (scope === null) out.push(...unmet('reviewScope', 'the ticket workflow holds no reviewScope string'))
+  else if (!scope[1].endsWith(SCOPE_TAIL)) out.push(...unmet('reviewScope', `reviewScope does not end with ${RANGE_LINE} on its own line and a newline`))
+  return out
+}
+
+/** Why the prose that states the review range source, and the changed-files step of the wave evidence, differ from the spawns; empty when they agree. */
+function rangeSourceFindings(text: string): Unmet[] {
+  const out: Unmet[] = []
+  const lines = text.split('\n').filter(l => l.startsWith('**Review scope:**'))
+  if (lines.length !== 1) out.push(...unmet('review scope description', `${lines.length} Review scope lines, expected 1`))
+  else out.push(...SCOPE_LINE_PARTS.filter(part => !lines[0].includes(part)).flatMap(part => unmet('review scope description', `the description does not state: ${part}`)))
+  if (!/"type": "[^"\n]*\bbase-missing\b[^"\n]*"/.test(text)) out.push(...unmet('escalation types', 'the escalation type list does not name base-missing'))
+  const changed = blockOf(text, '**Changed files.**')
+  if (changed === null) return [...out, ...unmet('changed files', 'the wave evidence step has no single Changed files paragraph')]
+  out.push(...CHANGED_FILES_PARTS.filter(([part]) => !changed.includes(part)).flatMap(([, detail]) => unmet('changed files', detail)))
+  if (!text.includes('FILES_CHANGED: {the file list that diff printed}')) out.push(...unmet('changed files', 'the Test spawn does not take the list that diff printed'))
+  return out
+}
+
+/** The review-range rule: every review spawn takes its range from the commit that setup reported, and the prose states the same source. */
+function reviewRangeFindings(p: Prompt): Unmet[] {
+  const workflow = ticketWorkflow(p.text)
+  if (workflow === null) return unmet('ticket workflow', 'the command holds no single ticket workflow fence')
+  return [...baseCommitFindings(workflow), ...reviewSpawnFindings(workflow), ...rangeSourceFindings(p.text)]
+}
+
 const CALL_SEED = (rest: string, script: string = SCRIPT_REF): string => `node "${script}" ${rest}`
 /** What a resolver call span holds before the script: the name file bound and removed by a plain-rm trap, the worktree and the cross value. */
 const CALL_PREFIX = `F="{name file}"; trap 'rm -- "$F"' EXIT; cd "{worktree}" && X=false && `
@@ -589,6 +713,50 @@ const PR_REST = 'pr --name-stdin --cross "${X}" < "$F"; echo "exit=$?"'
 const LOCAL_REST = 'local --name-stdin < "$F"; echo "exit=$?"'
 const CHECK_SEED = `Stop the run unless it matches \`${STRICT}\`, telling the user it allows ASCII letters, digits and \`._/+@,#-\`, at most 200; no leading \`-\` or \`#\`, no \`origin/\` prefix, no \`..\`.`
 const STALE_CHECK_SEED = 'Stop the run unless it matches `^[A-Za-z0-9._/+@,#-]{1,200}$`, telling the user it allows only ASCII letters, digits and `._/+@,#-`, at most 200.'
+
+/** `text` with the one occurrence of `from` replaced by `to`; it throws unless there is exactly one, so no seed is inert. */
+function withOnce(text: string, from: string, to: string): string {
+  const first = text.indexOf(from)
+  if (first === -1 || text.indexOf(from, first + from.length) !== -1) throw new Error(`withOnce: expected exactly one "${from.slice(0, 80)}"`)
+  return text.slice(0, first) + to + text.slice(first + from.length)
+}
+
+const BUILT_TICKET_COMMAND = requireDistFile('dynamic-build.md')
+const SCOPE_DEFINITION_TAIL = `${SCOPE_TAIL}\`;`
+const PANEL_RANGE = `${RANGE_LINE}\nLens `
+
+/** A defect seeded into the built ticket command: its label, the text it replaces, the replacement and the finding it must give. */
+type RangeSeed = readonly [label: string, from: string, to: string, detail: string]
+
+const NO_RANGE = 'a Review spawn that carries no range from the resolved base commit'
+const REVIEW_RANGE_SEEDS: readonly RangeSeed[] = [
+  ['the focus spawns carry no scope', ' review. ${reviewScope}\nFocus discipline', ' review.\nFocus discipline', NO_RANGE],
+  ['the retry carries no scope', ' review. ${reviewScope} Focus: ${focus} discipline.', ' review. Focus: ${focus} discipline.', NO_RANGE],
+  ['the panel carries no range line', PANEL_RANGE, 'Lens ', NO_RANGE],
+  ['the panel range shares its line with other text', PANEL_RANGE, `Range ${PANEL_RANGE}`, NO_RANGE],
+  ['the panel range starts at a base branch', PANEL_RANGE, PANEL_RANGE.replace('BASE_SHA', 'BASE_BRANCH'), NO_RANGE],
+  ['a new Review spawn carries no range', '// Phase 5: Review', 'await agent("Review once more.", { agentType: "Review" });\n// Phase 5: Review', NO_RANGE],
+  ['the scope range starts at the branch', SCOPE_DEFINITION_TAIL, SCOPE_DEFINITION_TAIL.replace('BASE_SHA', 'BRANCH'), 'reviewScope does not end with'],
+  ['the scope string has no final newline', SCOPE_DEFINITION_TAIL, `\\n${RANGE_LINE}\`;`, 'reviewScope does not end with'],
+  ['the hex test admits uppercase', 'const BASE_SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/', 'const BASE_SHA = /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/', 'BASE_SHA is not the 40 or 64 lowercase hex commit'],
+  ['the base commit has no hex test', BASE_BINDING, 'const BASE_SHA = setup?.baseSha || "(none)";', 'BASE_SHA is not the 40 or 64 lowercase hex commit'],
+  ['the base commit is assigned twice', BASE_STOP, `BASE_SHA = "HEAD";\n${BASE_STOP}`, 'BASE_SHA is assigned more than once'],
+  ['the setup spawn does not ask for baseSha', `, ${SETUP_BASE_RETURN}`, '', 'the setup spawn does not ask for baseSha'],
+  ['there is no base stop', BASE_STOP, 'if (false) {', 'no stop on a missing base commit'],
+  ['the base stop does not escalate with base-missing', 'type: "base-missing", description: "setup-task', 'type: "branch-missing", description: "setup-task', 'the stop does not escalate with type base-missing'],
+  ['the base stop comes after the implement phase', '// Base stop: every review range', 'await phase("implement", () => agent("x", { agentType: "Code" }));\n// Base stop: every review range', 'the base stop does not come before the implement phase'],
+  ['a spawn runs between the base binding and the base stop', '// Base stop: every review range', 'await agent("x", { agentType: "Git" });\n// Base stop: every review range', 'a spawn or a phase runs between the base binding and the base stop'],
+  ['the changed-files diff keeps deletions', '--diff-filter=d {base_ref}...HEAD', '{base_ref}...HEAD', 'the command is not the name-only diff'],
+  ['the changed-files diff starts at a branch', '--diff-filter=d {base_ref}...HEAD', '--diff-filter=d main...HEAD', 'the command is not the name-only diff'],
+  ['the changed-files diff does not echo its exit status', '{base_ref}...HEAD; echo "exit=$?"', '{base_ref}...HEAD', 'the command is not the name-only diff'],
+  ['the changed-files step takes any base ref', 'Unless `{base_ref}` is 40 or 64 lowercase hex and the diff prints `exit=0`', 'Unless the diff prints `exit=0`', 'the step does not require a 40 or 64 lowercase hex {base_ref}'],
+  ['the changed-files step does not skip with one degraded line', 'record `TRACEABILITY: DEGRADED (wave base unusable)` and skip this step.', 'skip this step.', 'the step does not record one degraded line and skip'],
+  ['the changed-files step reads another base', 'Take `{base_ref}` from step 6\'s `- **Base ref**:` line', 'Take `{base_ref}` from the branch', 'the list does not start from the Base ref that step 6 returned'],
+  ['the Test spawn takes another list', 'FILES_CHANGED: {the file list that diff printed}', 'FILES_CHANGED: {the branch diff}', 'the Test spawn does not take the list that diff printed'],
+  ['the review-pass description names no stop', '; a ticket with none stops `base-missing`.', '.', 'the description does not state: a ticket with none stops `base-missing`'],
+  ['the review-pass description names another range', '`DIFF_RANGE: {base commit}...HEAD`', '`DIFF_RANGE: {base branch}...HEAD`', 'the description does not state: `DIFF_RANGE: {base commit}...HEAD`'],
+  ['the escalation types omit base-missing', ' | base-missing"', '"', 'the escalation type list does not name base-missing'],
+]
 
 const REQUIREMENTS: readonly Requirement[] = [
   {
@@ -669,6 +837,17 @@ const REQUIREMENTS: readonly Requirement[] = [
       good: '`{branch_diff}` is the output of `git diff --name-only {BASE_REF}...HEAD`, run again at each spawn; a non-zero exit stops, and an empty list counts only on exit 0.\n\nNext paragraph.',
     },
   },
+  {
+    rule: 'review-range',
+    files: ['commands/dynamic-build.md'],
+    check: reviewRangeFindings,
+    probe: {
+      file: 'commands/dynamic-build.md',
+      anchor: 'Review call',
+      bad: withOnce(BUILT_TICKET_COMMAND, REVIEW_RANGE_SEEDS[0][1], REVIEW_RANGE_SEEDS[0][2]),
+      good: BUILT_TICKET_COMMAND,
+    },
+  },
 ]
 
 function appliesTo(r: Requirement, file: string): boolean {
@@ -722,6 +901,20 @@ describe('the corpus the guard reads', () => {
     expect(spans.length, 'the resolver call spans differ from the call budget').toBe(budgeted)
     expect(spans.filter(hasName).map(squash), 'a resolver call span that holds a name word').toEqual([])
     expect(spans.filter(span => !/ --name-stdin\b[^;]*< "\$F"; echo "exit=\$\?"/.test(span)).map(squash), 'a resolver call span that does not read the name file').toEqual([])
+  })
+
+  it('both learning variants of the ticket command hold the ticket workflow with its three Review spawns: the focus spawns, the retry and the panel', () => {
+    const variants = prompts.filter(p => p.file === 'commands/dynamic-build.md')
+    expect(variants.map(p => p.arm).sort()).toEqual(['off', 'on'])
+    for (const p of variants) {
+      const workflow = ticketWorkflow(p.text)
+      expect(workflow, `${p.arm}: the ticket workflow fence was not found`).not.toBeNull()
+      const spawns = reviewSpawns(workflow ?? '')
+      expect(spawns, `${p.arm}: the Review spawns`).toHaveLength(3)
+      expect(spawns[0], `${p.arm}: the focus spawns`).toContain('Focus discipline')
+      expect(spawns[1], `${p.arm}: the retry`).toContain('Retry ${focus} review.')
+      expect(spawns[2], `${p.arm}: the panel`).toContain('Adversarially verify')
+    }
   })
 
   it('the shell-line collector sees base-value lines: names and BASE_REF uses', () => {
@@ -988,6 +1181,34 @@ describe('known-bad probes: each collector reports the seeded bad text and passe
     expect(details(`${pr} when gh returned a PR, else ${local}`)).toEqual([])
     expect(details(`${pr} when gh returned a PR, else ${pr}`)).toEqual(['modes pr,pr where local,pr are expected'])
     expect(details(pr)).toEqual(['found 1 direct call(s), expected 2', 'modes pr where local,pr are expected'])
+  })
+
+  describe('review-range: each defect seeded into the built ticket command is reported for its own defect', () => {
+    const variants = prompts.filter(p => p.file === 'commands/dynamic-build.md')
+    const details = (p: Prompt): string => reviewRangeFindings(p).map(u => u.detail).join('\n')
+
+    it('the built command in both learning variants has no finding', () => {
+      expect(variants).toHaveLength(2)
+      for (const p of variants) expect(reviewRangeFindings(p), p.arm).toEqual([])
+    })
+
+    it('a command with no ticket workflow fence is reported', () => {
+      expect(reviewRangeFindings(seeded('commands/dynamic-build.md', 'Review the diff.\n')).map(u => u.anchor)).toEqual(['ticket workflow'])
+    })
+
+    it.each(REVIEW_RANGE_SEEDS)('%s', (_label, from, to, detail) => {
+      for (const p of variants) {
+        expect(from, `${p.arm}: the seed replaces itself`).not.toBe(to)
+        expect(details({ ...p, text: withOnce(p.text, from, to) }), p.arm).toContain(detail)
+      }
+    })
+
+    it('a seeded defect is reported by the requirement, with the rule name, on top of the corpus findings', () => {
+      const [, from, to] = REVIEW_RANGE_SEEDS[0]
+      const found = variants.flatMap(p => collectRequirements({ ...p, text: withOnce(p.text, from, to) }))
+      expect(found.map(f => f.rule)).toEqual(['review-range', 'review-range'])
+      expect(found.map(f => f.arm).sort()).toEqual(['off', 'on'])
+    })
   })
 
   it('reason-fix-table: a copy that differs from the ensure-pr-ready sentence, or lacks the re-run, is reported', () => {

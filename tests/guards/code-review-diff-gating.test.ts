@@ -362,6 +362,32 @@ export function collectDocsOfBehaviourDefects(body: string): string[] {
   return out
 }
 
+/** The start of the range rule: it covers a diff review with no DIFF_FILE and names the hex commit the range starts with. */
+const RANGE_RULE_START = 'A diff review with no `DIFF_FILE` reviews only a `DIFF_RANGE` that starts with a 40 or 64 lowercase hex commit'
+
+/**
+ * A diff review with no DIFF_FILE reviews only a range that starts with a 40 or 64 lowercase hex commit, and returns
+ * `reviewed: false` when there is none, when `git cat-file -t {sha}` does not print `commit`, or when
+ * `git diff {DIFF_RANGE}` exits non-zero. The rule sits in the DIFF_RANGE bullet alone: a review with a DIFF_FILE, and
+ * a review with no diff, take no part in it.
+ */
+function collectRangeRuleDefects(review: string, rangeBullet: string, fileBullet: string | null): string[] {
+  const out: string[] = []
+  const at = rangeBullet.indexOf(RANGE_RULE_START)
+  if (at === -1) out.push('the DIFF_RANGE bullet does not limit a diff review with no DIFF_FILE to a range that starts with a 40 or 64 lowercase hex commit')
+  else {
+    const rule = rangeBullet.slice(at)
+    if (!/\bwith none\b/.test(rule)) out.push('the DIFF_RANGE rule does not cover a missing range')
+    if (!rule.includes('`git cat-file -t {sha}` does not print `commit`')) out.push('the DIFF_RANGE rule does not check that `git cat-file -t {sha}` prints `commit`')
+    if (!rule.includes('`git diff {DIFF_RANGE}` exits non-zero')) out.push('the DIFF_RANGE rule does not report a non-zero exit of `git diff {DIFF_RANGE}`')
+    if (!/it returns `reviewed: false`\.$/.test(rule)) out.push('the DIFF_RANGE rule does not end in the result `reviewed: false`')
+  }
+  if (fileBullet !== null && fileBullet.includes('reviewed: false')) out.push('the DIFF_FILE bullet carries the range rule; a review with a DIFF_FILE is unaffected')
+  const outside = (review.match(/reviewed: false/g) ?? []).length - (rangeBullet.match(/reviewed: false/g) ?? []).length - (fileBullet?.match(/reviewed: false/g) ?? []).length
+  if (outside > 0) out.push('`reviewed: false` appears outside the DIFF_RANGE bullet; a review with no diff is unaffected')
+  return out
+}
+
 /** AC-308: review.md's Input, Responsibilities 3 and 9. */
 export function collectReviewAgentDefects(review: string): string[] {
   const out: string[] = []
@@ -375,7 +401,10 @@ export function collectReviewAgentDefects(review: string): string[] {
   }
   const range = /^- \*\*DIFF_RANGE\*\* \(optional\): [^\n]*$/m.exec(review)
   if (range === null) out.push('review.md Input does not declare DIFF_RANGE')
-  else if (!/information only/.test(range[0])) out.push('DIFF_RANGE is not marked information only')
+  else {
+    if (!/information only/.test(range[0])) out.push('DIFF_RANGE is not marked information only')
+    out.push(...collectRangeRuleDefects(review, range[0], file === null ? null : file[0]))
+  }
   const identify = review.match(/^\d+\. \*\*Identify changed lines\*\*[^\n]*$/gm) ?? []
   if (identify.length === 0) out.push('no Identify changed lines responsibility')
   for (const line of identify) if (!line.includes('`DIFF_FILE`')) out.push(`Identify changed lines does not read DIFF_FILE: ${line.slice(0, 60)}`)
@@ -676,6 +705,46 @@ describe('review.md reads DIFF_FILE and verifies with ranged reads (AC-308)', ()
       .toMatch(/Identify changed lines does not fall back to DIFF_RANGE/)
     expect(collectReviewAgentDefects(seed(review, /\*\*Identify changed lines\*\* - Read the diff from `DIFF_FILE`/, '**Identify changed lines** - Read the diff from the base')).join('\n'))
       .toMatch(/Identify changed lines does not read DIFF_FILE/)
+  })
+
+  describe('a diff review with no DIFF_FILE reviews only a range that starts with a resolved hex commit, else it reports that it did not review', () => {
+    const review = REVIEW_VARIANTS[0].body
+    const rule = 'A diff review with no `DIFF_FILE` reviews only a `DIFF_RANGE` that starts with a 40 or 64 lowercase hex commit; with none, or when `git cat-file -t {sha}` does not print `commit` or `git diff {DIFF_RANGE}` exits non-zero, it returns `reviewed: false`.'
+
+    it.each(REVIEW_VARIANTS)('$label: the DIFF_RANGE bullet states the whole rule on its one line', ({ body }) => {
+      const bullet = /^- \*\*DIFF_RANGE\*\* \(optional\): [^\n]*$/m.exec(body)
+      expect(bullet, 'the DIFF_RANGE bullet is one line').not.toBeNull()
+      expect(bullet?.[0]).toContain(rule)
+      expect(collectReviewAgentDefects(body)).toEqual([])
+    })
+
+    it('a spawn that receives no usable range reports that it did not review: the missing-range clause is required', () => {
+      expect(collectReviewAgentDefects(seed(review, '; with none, or when', '; when')))
+        .toContain('the DIFF_RANGE rule does not cover a missing range')
+      expect(collectReviewAgentDefects(seed(review, rule, 'A diff review reviews the `DIFF_RANGE`.')))
+        .toContain('the DIFF_RANGE bullet does not limit a diff review with no DIFF_FILE to a range that starts with a 40 or 64 lowercase hex commit')
+      expect(collectReviewAgentDefects(seed(review, 'starts with a 40 or 64 lowercase hex commit', 'starts with a commit')))
+        .toContain('the DIFF_RANGE bullet does not limit a diff review with no DIFF_FILE to a range that starts with a 40 or 64 lowercase hex commit')
+    })
+
+    it('a range that names no commit, or whose diff exits non-zero, reports that it did not review: both clauses are required', () => {
+      expect(collectReviewAgentDefects(seed(review, ' or when `git cat-file -t {sha}` does not print `commit`', '')))
+        .toContain('the DIFF_RANGE rule does not check that `git cat-file -t {sha}` prints `commit`')
+      expect(collectReviewAgentDefects(seed(review, 'does not print `commit` or `git diff {DIFF_RANGE}` exits non-zero', 'does not print `commit`')))
+        .toContain('the DIFF_RANGE rule does not report a non-zero exit of `git diff {DIFF_RANGE}`')
+      expect(collectReviewAgentDefects(seed(review, 'it returns `reviewed: false`.', 'it carries on.')))
+        .toContain('the DIFF_RANGE rule does not end in the result `reviewed: false`')
+    })
+
+    it('a review with a DIFF_FILE, or with no diff, keeps its spawns unchanged: the rule sits in the DIFF_RANGE bullet alone', () => {
+      expect(review.match(/reviewed: false/g) ?? []).toHaveLength(1)
+      expect(collectReviewAgentDefects(seed(review, 'Page a `DIFF_FILE` larger than one Read with offset/limit. ', 'Page a `DIFF_FILE` larger than one Read with offset/limit. Without a hex range it returns `reviewed: false`. ')))
+        .toContain('the DIFF_FILE bullet carries the range rule; a review with a DIFF_FILE is unaffected')
+      expect(collectReviewAgentDefects(`${review}\nWith no diff to review it returns \`reviewed: false\`.\n`))
+        .toContain('`reviewed: false` appears outside the DIFF_RANGE bullet; a review with no diff is unaffected')
+      expect(collectReviewAgentDefects(seed(review, 'A diff review with no `DIFF_FILE` reviews only', 'A review reviews only')))
+        .toContain('the DIFF_RANGE bullet does not limit a diff review with no DIFF_FILE to a range that starts with a 40 or 64 lowercase hex commit')
+    })
   })
 
   it('the DIFF_COMMAND of /bug-analysis (a Debug input) is untouched', () => {
