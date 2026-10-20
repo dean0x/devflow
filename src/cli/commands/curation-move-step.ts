@@ -6,8 +6,7 @@
  * `moveLedgerRoot(root, opts, io)`, the one-root move the curation command runs, with
  * the lines each outcome prints (`describeOutcome`). Init and the curation command share
  * it, so neither owns it. It lives in its own module, not in init.ts, so the
- * ordering tests inject their own I/O (the shape of `drainDisabledFeatureQueues`)
- * and so the golden-red commit that wires it does not also move it.
+ * ordering tests inject their own I/O (the shape of `drainDisabledFeatureQueues`).
  *
  * The step is purity-bounded like init-seed.ts: it imports no `fs`, no `os` and no
  * store. It reaches the machine only through the `io` it is given, so it has no

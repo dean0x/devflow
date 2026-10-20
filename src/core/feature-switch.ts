@@ -259,8 +259,8 @@ export async function readOptInFeature(devflowDir: string, feature: OptInMachine
  * heal in readManifest cannot write an older snapshot over this write. The wait is
  * bounded, and longer than the stale age, so a lock left by a dead process is broken
  * inside it. A lock that is still not taken after that wait cannot be broken, and
- * the lock then protects nothing: the toggle goes ahead without it, as it did before
- * the lock existed, rather than refuse an explicit switch.
+ * the lock then protects nothing: the toggle goes ahead without it rather than refuse
+ * an explicit switch.
  */
 export async function writeMachineFeature(
   devflowDir: string,

@@ -1,7 +1,3 @@
-import { promises as fs } from 'fs';
-import { randomBytes } from 'crypto';
-import * as path from 'path';
-
 /**
  * @file manifest-lock.ts
  *
@@ -23,6 +19,10 @@ import * as path from 'path';
  * waiter can move it, and then checks that the directory it moved really was stale.
  * A waiter that moved a fresh lock gives it back and counts the lock as busy.
  */
+
+import { promises as fs } from 'fs';
+import { randomBytes } from 'crypto';
+import * as path from 'path';
 
 type Result<T, E> = { ok: true; value: T } | { ok: false; error: E };
 

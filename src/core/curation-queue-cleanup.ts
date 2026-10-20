@@ -20,22 +20,19 @@ import { loadCurationMove } from './curation-move.js';
 import { formatCurationStoreUnavailable } from './curation-store.js';
 import { drainQueueFiles, type QueueDrain } from './queue-drain.js';
 
-/** The same queue file under the old ledger folder name: the new path with its folder swapped. */
-function underOldFolder(gitRoot: string, newPath: string): string {
-  return path.join(path.dirname(getCurationDir(gitRoot)), LEGACY_NAMES.folder, path.basename(newPath));
-}
-
 /** The folders to check for links, and the queue files to delete, in the live and the old ledger folder of `gitRoot`. */
 function liveQueueTargets(gitRoot: string): { readonly folders: readonly string[]; readonly files: readonly string[] } {
   const curationDir = getCurationDir(gitRoot);
+  const devflowDir = path.dirname(curationDir);
+  const oldDir = path.join(devflowDir, LEGACY_NAMES.folder);
   const queueFiles = [
     getCurationPendingTurnsPath(gitRoot),
     getCurationPendingTurnsProcessingPath(gitRoot),
     getCurationClaimOwnerPath(gitRoot),
   ];
   return {
-    folders: [path.dirname(curationDir), curationDir, path.join(path.dirname(curationDir), LEGACY_NAMES.folder)],
-    files: [...queueFiles, ...queueFiles.map(file => underOldFolder(gitRoot, file))],
+    folders: [devflowDir, curationDir, oldDir],
+    files: [...queueFiles, ...queueFiles.map(file => path.join(oldDir, path.basename(file)))],
   };
 }
 

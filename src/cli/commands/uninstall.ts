@@ -665,13 +665,18 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/** The name of a move lock or journal: the shared prefix, a 16-digit lowercase hex key, then `suffix`. */
+function moveFileShape(suffix: string): RegExp {
+  return new RegExp(`^${escapeRegExp(MOVE_LOCK_PREFIX)}[0-9a-f]{16}${escapeRegExp(suffix)}$`);
+}
+
 /**
  * The curation move's lock, one directory per ledger root, taken directly in the machine
  * directory: `.curation-move-<16 lowercase hex>.lock`. The store builds the name from a
  * hash of the real ledger root, so the names exist only on disk. The prefix and the
  * suffix are the ones the path helpers hold (project-paths.ts).
  */
-const CURATION_MOVE_LOCK_SHAPE = new RegExp(`^${escapeRegExp(MOVE_LOCK_PREFIX)}[0-9a-f]{16}${escapeRegExp(MOVE_LOCK_SUFFIX)}$`);
+const CURATION_MOVE_LOCK_SHAPE = moveFileShape(MOVE_LOCK_SUFFIX);
 
 /**
  * The curation move's journal, one regular file per ledger root, beside the lock:
@@ -680,7 +685,7 @@ const CURATION_MOVE_LOCK_SHAPE = new RegExp(`^${escapeRegExp(MOVE_LOCK_PREFIX)}[
  * `.curation-move.journal` inside a project's old ledger folder is no journal of the
  * move and is not matched here.
  */
-const CURATION_MOVE_JOURNAL_SHAPE = new RegExp(`^${escapeRegExp(MOVE_LOCK_PREFIX)}[0-9a-f]{16}${escapeRegExp(MOVE_JOURNAL_SUFFIX)}$`);
+const CURATION_MOVE_JOURNAL_SHAPE = moveFileShape(MOVE_JOURNAL_SUFFIX);
 
 /** Whether `child` of `devflowDir` is a real directory (a link is not followed). */
 async function isRealDirectory(devflowDir: string, child: string): Promise<boolean> {
