@@ -989,7 +989,8 @@ describe('the init prompt and devflow gates describe the same levels', () => {
         `GATE_LEVEL_EFFECT changed. ${UPDATE_BOTH}`,
       ).toBe(
         '/code-review and /plan read the level: standard and lean run fewer review focuses and fewer planning agents. '
-        + 'At lean, /implement has Validate run the project\'s lint pack. Other commands read it once issue #480 lands.',
+        + 'At lean, /implement has Validate run the project\'s lint pack. '
+        + '/implement and /resolve also read the level and name it in their report; their level references hold no phase rules yet.',
       );
     });
 

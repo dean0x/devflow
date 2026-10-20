@@ -720,7 +720,7 @@ describe('devflow gates (help and usage)', () => {
     expect(await snapshot(tmpHome)).toEqual(before);
   }, SUBPROCESS_TIMEOUT_MS);
 
-  it('lists the three levels with a meaning each, and says /code-review, /plan and the Validate lint pack read the level', () => {
+  it('lists the three levels with a meaning each, and says /code-review, /plan, /implement and /resolve read the level', () => {
     const run = runCli(['gates', '--help']);
     expect(run.status, run.out).toBe(0);
     expect(run.out).toMatch(/full\s+the most checking/);
@@ -728,6 +728,9 @@ describe('devflow gates (help and usage)', () => {
     expect(run.out).toMatch(/lean\s+the least checking/);
     expect(run.out).toContain('/code-review and /plan read the level');
     expect(run.out).toContain("At lean, /implement has Validate run the project's lint pack.");
+    expect(run.out).toContain('/implement and /resolve also read the level and name it in their report');
+    expect(run.out).toContain('their level references hold no phase rules yet');
+    expect(run.out).not.toContain('#480');
     expect(run.out).not.toContain('#473');
     expect(run.out).not.toContain('#474');
     expect(run.out).not.toContain('#475');
