@@ -81,7 +81,11 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
   A move makes a backup only where a project had both folders.
 - No devflow command deletes a backup, except `devflow uninstall`. It removes the backup with the project data, after you confirm.
   `devflow curation --reset` and `devflow curation --clear` leave the backup in place.
-  The old queue files and the overflow files stay in it.
+- A disable drains the queue files in the backups. `devflow curation --disable`, and `devflow init` with curation switched off,
+  remove the queue, claim, private and overflow files in each backup folder (at most 500 folders, and 200 files in each).
+  The ledger files, the swept files and the claim owner file stay in the backup.
+  Without this drain, a later `--enable` and init would merge those rows into the live queue.
+  The drain deletes nothing when a backup folder, or one of its queue files, is a symbolic link, and it says so.
 - `devflow curation --status` prints one `Backup:` line for each backup folder.
   The line shows how many pending rows the backup still holds.
   For the first 50 folders it prints one line each. One more line counts the folders after the first 50 and their pending rows.

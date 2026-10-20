@@ -21,7 +21,7 @@ import {
   readRunningVersion,
 } from '../../targets/claude-code/curation-install.js';
 import { getLedgerRoot } from '../../core/ledger-root.js';
-import { drainCurationQueue } from '../../core/curation-queue-cleanup.js';
+import { drainCurationQueue, drainDisabledCurationQueue } from '../../core/curation-queue-cleanup.js';
 import { firstSymbolicLink } from '../../core/linked-path.js';
 import { formatRefusedDrain } from '../../core/queue-drain.js';
 import { describeMoveText, describeOutcome } from './init-curation-move.js';
@@ -672,7 +672,8 @@ async function tryMoveForToggle(ledgerRoot: string): Promise<void> {
  * converged exactly as `devflow init --curation / --no-curation` converges it —
  * the manifest value (both machine keys, written first), the installed prompt
  * variants and skill (D-LEARNING-VARIANT-INSTALL), the current project's ledger
- * folder move, and on disable a drained queue in every ledger folder that exists.
+ * folder move, and on disable a drained queue in every ledger folder that exists and
+ * in the backups a move left.
  * Never requires a git root: the switch is not a per-project setting.
  *
  * Under version skew the toggle records the switch and moves nothing; otherwise it
@@ -697,11 +698,11 @@ async function handleToggle(enabled: boolean): Promise<void> {
   }
 
   // Drain the current project's curation (decisions-detection) queue, in each ledger
-  // folder that exists, so stale turns don't process on re-enable. A mid-run Curate
-  // agent whose claimed batch vanishes aborts without changes — the desired outcome
-  // of disabling.
+  // folder that exists and in the backups a move left, so stale turns don't process on
+  // re-enable. A mid-run Curate agent whose claimed batch vanishes aborts without
+  // changes — the desired outcome of disabling.
   if (ledgerRoot) {
-    const drain = await drainCurationQueue(ledgerRoot);
+    const drain = await drainDisabledCurationQueue(ledgerRoot);
     if (!drain.drained) p.log.warn(formatRefusedDrain('curation', drain.linkedFolder));
   }
   p.log.success('Curation disabled in every project');

@@ -220,6 +220,62 @@ describe('init and the drain meet the old folder (TP-8)', () => {
   });
 });
 
+describe('a disable drains the pending rows of the backups a move left', () => {
+  const STAMP = '20261017T020304Z';
+  const ROW = '{"role":"user","content":"stale","ts":1}\n';
+  const backupDir = (): string => path.join(repo, '.devflow', `learning.backup-${STAMP}-ab12cd34`);
+  const PENDING = ['.pending-turns.jsonl', '.pending-turns.processing', `.pending-turns.jsonl.overflow-${STAMP}-00000001`] as const;
+
+  async function seedBackup(): Promise<void> {
+    await fs.mkdir(backupDir(), { recursive: true });
+    for (const name of PENDING) await fs.writeFile(path.join(backupDir(), name), ROW.repeat(3), 'utf-8');
+    await fs.writeFile(path.join(backupDir(), LEDGER_FILE), LEDGER, 'utf-8');
+  }
+
+  it('--no-curation removes the queue, claim and overflow rows of a backup, and keeps its ledger', { timeout: MULTI_RUN_TIMEOUT_MS }, async () => {
+    await seedOldFolder();
+    runInit(repo, '--curation');
+    await seedBackup();
+
+    runInit(repo, '--no-curation');
+
+    for (const name of PENDING) expect(await exists(path.join(backupDir(), name)), `${name} is drained`).toBe(false);
+    expect(await fs.readFile(path.join(backupDir(), LEDGER_FILE), 'utf-8'), 'the backup ledger stays').toBe(LEDGER);
+  });
+
+  it('--disable, then --enable and init: no backup row reaches the live queue, and status counts 0 pending rows', { timeout: MULTI_RUN_TIMEOUT_MS }, async () => {
+    await seedOldFolder();
+    runInit(repo, '--curation');
+    await seedBackup();
+
+    expect(runCli(repo, 'curation', '--disable').status).toBe(0);
+    expect(runCli(repo, 'curation', '--enable').status).toBe(0);
+    runInit(repo, '--curation');
+
+    const live = path.join(newDir(), '.pending-turns.jsonl');
+    expect(await exists(live) ? await fs.readFile(live, 'utf-8') : '', 'no backup row reaches the live queue').toBe('');
+    const status = runCli(repo, 'curation', '--status');
+    expect(status.status, status.out).toBe(0);
+    expect(status.out).toContain(`learning.backup-${STAMP}-ab12cd34: 0 pending rows in the backup`);
+  });
+
+  it('a backup queue file that is a link: init with curation off deletes nothing and says so', { timeout: MULTI_RUN_TIMEOUT_MS }, async () => {
+    await seedOldFolder();
+    runInit(repo, '--curation');
+    await seedBackup();
+    const outside = path.join(base, 'outside-queue');
+    await fs.writeFile(outside, ROW, 'utf-8');
+    await fs.rm(path.join(backupDir(), PENDING[0]));
+    await fs.symlink(outside, path.join(backupDir(), PENDING[0]));
+
+    const out = runInit(repo, '--no-curation');
+
+    expect(out).toContain(`${path.join(backupDir(), PENDING[0])} is a symbolic link`);
+    expect(await fs.readFile(outside, 'utf-8')).toBe(ROW);
+    expect(await exists(path.join(backupDir(), PENDING[1])), 'a refused drain deletes nothing').toBe(true);
+  });
+});
+
 describe('init renames the global tuning file (TP-14)', () => {
   it('renames learning.json to curation.json', { timeout: MULTI_RUN_TIMEOUT_MS }, async () => {
     await fs.mkdir(devflowDir(), { recursive: true });

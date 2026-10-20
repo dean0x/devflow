@@ -176,3 +176,131 @@ describe('backupPendingRows', () => {
     expect(store.backupPendingRows('')).toMatchObject({ ok: false, error: { kind: 'refused' } });
   });
 });
+
+// ---------------------------------------------------------------------------
+// backupQueueFiles: the files a disable's drain removes from the backups
+// ---------------------------------------------------------------------------
+
+describe('backupQueueFiles', () => {
+  const NAME = `learning.backup-${STAMP}-ab12cd34`;
+  const listed = (): string[] => {
+    const answer = store.backupQueueFiles(root);
+    if (!answer.ok) throw new Error(`refused: ${answer.error.message}`);
+    return answer.value.files;
+  };
+
+  it('answers no files when .devflow is absent or holds no backup', () => {
+    expect(store.backupQueueFiles(root)).toEqual({ ok: true, value: { files: [] } });
+    seedBackup('learning.old', { '.pending-turns.jsonl': rows(1) });
+    expect(store.backupQueueFiles(root)).toEqual({ ok: true, value: { files: [] } });
+  });
+
+  it('names exactly the files the status count counts, and no other file', () => {
+    const counted = [
+      '.pending-turns.jsonl',
+      '.pending-turns.processing',
+      `.pending-turns.jsonl.merging-${STAMP}-00000001`,
+      `.pending-turns.processing.merging-${STAMP}-00000002`,
+      `.pending-turns.jsonl.overflow-${STAMP}-00000003`,
+    ];
+    const kept = [
+      `.pending-turns.jsonl.swept-${STAMP}-00000004`,
+      `.pending-turns.processing.swept-${STAMP}-00000005`,
+      '.pending-turns.owner',
+      'decisions-ledger.jsonl',
+      'learning.json',
+      'unknown.txt',
+    ];
+    const files: Record<string, string> = {};
+    for (const file of [...counted, ...kept]) files[file] = rows(1);
+    const dir = seedBackup(NAME, files);
+
+    expect(listed().sort()).toEqual(counted.map(file => path.join(dir, file)).sort());
+  });
+
+  it('names the files of every backup, by absolute path, and none of a backup that holds no rows', () => {
+    const first = seedBackup('learning.backup-20261017T000000Z-00000001', { '.pending-turns.jsonl': rows(1) });
+    const second = seedBackup('learning.backup-20261018T000000Z-00000002', { [`.pending-turns.jsonl.overflow-${STAMP}-00000001`]: rows(2) });
+    seedBackup('learning.backup-20261019T000000Z-00000003', { 'decisions-ledger.jsonl': rows(1) });
+
+    expect(listed()).toEqual([
+      path.join(first, '.pending-turns.jsonl'),
+      path.join(second, `.pending-turns.jsonl.overflow-${STAMP}-00000001`),
+    ]);
+  });
+
+  it('writes nothing and takes no lock', () => {
+    seedBackup(NAME, { '.pending-turns.jsonl': rows(2) });
+    const before = snapshotTree(root);
+    store.backupQueueFiles(root);
+    expect(snapshotTree(root)).toEqual(before);
+  });
+
+  it('passes over a backup name that is a file, and a backup that went away', () => {
+    fs.mkdirSync(devflow(), { recursive: true });
+    fs.writeFileSync(path.join(devflow(), `learning.backup-${STAMP}-00000009`), rows(3));
+    expect(store.backupQueueFiles(root)).toEqual({ ok: true, value: { files: [] } });
+  });
+
+  describe('refuses at a link, and names it', () => {
+    let outside: string;
+    beforeEach(() => {
+      outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'backup-files-out-')));
+    });
+    afterEach(() => {
+      fs.rmSync(outside, { recursive: true, force: true });
+    });
+
+    it('a backup folder that is a symbolic link', () => {
+      fs.writeFileSync(path.join(outside, '.pending-turns.jsonl'), rows(4));
+      fs.mkdirSync(devflow(), { recursive: true });
+      const link = path.join(devflow(), NAME);
+      fs.symlinkSync(outside, link);
+
+      expect(store.backupQueueFiles(root)).toMatchObject({ ok: false, error: { kind: 'refused', path: link } });
+    });
+
+    it.each([
+      ['pending', '.pending-turns.jsonl'],
+      ['processing', '.pending-turns.processing'],
+      ['private', `.pending-turns.jsonl.merging-${STAMP}-00000001`],
+      ['overflow', `.pending-turns.jsonl.overflow-${STAMP}-00000003`],
+    ])('a %s queue file that is a symbolic link', (_label, file) => {
+      fs.writeFileSync(path.join(outside, 'queue'), rows(4));
+      const dir = seedBackup(NAME, { 'decisions-ledger.jsonl': rows(1) });
+      fs.symlinkSync(path.join(outside, 'queue'), path.join(dir, file));
+
+      expect(store.backupQueueFiles(root)).toMatchObject({ ok: false, error: { kind: 'refused', path: path.join(dir, file) } });
+    });
+
+    it('one linked file among the backups: nothing is listed from any of them', () => {
+      seedBackup('learning.backup-20261017T000000Z-00000001', { '.pending-turns.jsonl': rows(1) });
+      const dir = seedBackup('learning.backup-20261018T000000Z-00000002');
+      fs.writeFileSync(path.join(outside, 'queue'), rows(4));
+      fs.symlinkSync(path.join(outside, 'queue'), path.join(dir, '.pending-turns.jsonl'));
+
+      expect(store.backupQueueFiles(root)).toMatchObject({ ok: false, error: { kind: 'refused' } });
+    });
+  });
+
+  describe('is bounded like the status count', () => {
+    it('names at most 200 queue files of one backup', () => {
+      const files: Record<string, string> = {};
+      for (let i = 0; i < 210; i++) files[`.pending-turns.jsonl.overflow-${STAMP}-${String(i).padStart(8, '0')}`] = rows(1);
+      seedBackup(NAME, files);
+      expect(listed()).toHaveLength(200);
+    });
+
+    it('looks into at most 500 backup folders', () => {
+      for (let i = 0; i < 502; i++) {
+        seedBackup(`learning.backup-${STAMP}-${String(i).padStart(8, '0')}`, i >= 500 ? { '.pending-turns.jsonl': rows(1) } : {});
+      }
+      expect(listed()).toEqual([]);
+    });
+  });
+
+  it('refuses a root that is not an absolute path', () => {
+    expect(store.backupQueueFiles('relative/path')).toMatchObject({ ok: false, error: { kind: 'refused' } });
+    expect(store.backupQueueFiles('')).toMatchObject({ ok: false, error: { kind: 'refused' } });
+  });
+});

@@ -560,9 +560,10 @@ export function requireCurationStore(): CurationStoreApi {
   return createRequire(import.meta.url)(CURATION_STORE) as CurationStoreApi;
 }
 
-/** The move module's read-only status count, as the tests call it. */
+/** The move module's read-only status count and drain listing, as the tests call them. */
 export interface CurationMoveApi {
   backupPendingRows(root: string): Result<{ backups: Array<{ name: string; pendingRows: number }> }>;
+  backupQueueFiles(root: string): Result<{ files: string[] }>;
 }
 
 /** Load the curation move CommonJS module. */

@@ -120,7 +120,7 @@ describe('formatCurationStoreUnavailable', () => {
   });
 });
 
-const MOVE_OPS = ['moveLedger', 'sweepLedgerBackups', 'backupPendingRows'];
+const MOVE_OPS = ['moveLedger', 'sweepLedgerBackups', 'backupPendingRows', 'backupQueueFiles'];
 
 describe('the one-time ledger move is its own module', () => {
   it('the store no longer exports the move ops, and the move module does', () => {

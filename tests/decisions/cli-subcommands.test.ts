@@ -175,6 +175,27 @@ function queueFilesPresent(root: string): boolean[] {
     .map(file => fs.existsSync(file));
 }
 
+const BACKUP_NAME = 'learning.backup-20261017T020304Z-ab12cd34';
+const BACKUP_PENDING = [
+  '.pending-turns.jsonl',
+  '.pending-turns.processing',
+  '.pending-turns.jsonl.merging-20261017T020304Z-00000001',
+  '.pending-turns.jsonl.overflow-20261017T020304Z-00000002',
+] as const;
+
+/** A backup folder a move left, with its pending-row files and a ledger file. */
+function seedBackup(dir: string): string {
+  const backup = path.join(dir, '.devflow', BACKUP_NAME);
+  fs.mkdirSync(backup, { recursive: true });
+  for (const file of BACKUP_PENDING) fs.writeFileSync(path.join(backup, file), '{"role":"user"}\n');
+  fs.writeFileSync(path.join(backup, 'decisions-ledger.jsonl'), toJsonl(LEDGER));
+  return backup;
+}
+
+function backupPendingPresent(backup: string): boolean[] {
+  return BACKUP_PENDING.map(file => fs.existsSync(path.join(backup, file)));
+}
+
 /** The version of the package under test: a manifest that records it is not skewed against this CLI. */
 const RUNNING_VERSION = (JSON.parse(
   fs.readFileSync(path.join(import.meta.dirname, '../../package.json'), 'utf-8'),
@@ -546,6 +567,17 @@ describe('curation --clear', { timeout: 30_000 }, () => {
     expect(queueFilesPresent(root)).toEqual([false, false, false]);
   });
 
+  it('leaves the backups a move left as they are: a clear never deletes backup rows', async () => {
+    seedCorpus(root);
+    seedQueue(root);
+    const backup = seedBackup(root);
+
+    await runCuration(['--clear']);
+
+    expect(queueFilesPresent(root)).toEqual([false, false, false]);
+    expect(backupPendingPresent(backup)).toEqual([true, true, true, true]);
+  });
+
   it('while the learning lock is held: exit 1 within the CLI\'s wait, nothing written, the queue left in place', async () => {
     const paths = seedCorpus(root);
     seedQueue(root);
@@ -746,6 +778,34 @@ describe('curation --disable drains the curation pending-turns queue', () => {
     // The retired per-repo key is never written.
     expect(fs.existsSync(path.join(root, '.devflow', 'config.json'))).toBe(false);
     expect(fs.existsSync(getPendingTurnsPath(root))).toBe(true);
+  });
+
+  it('removes the pending rows of the backups a move left, and keeps their ledger files', async () => {
+    const backup = seedBackup(root);
+
+    const run = await runCuration(['--disable']);
+
+    expect(backupPendingPresent(backup)).toEqual([false, false, false, false]);
+    expect(fs.existsSync(path.join(backup, 'decisions-ledger.jsonl'))).toBe(true);
+    expect(queueFilesPresent(root)).toEqual([false, false, false]);
+    expect(run.success).toBe('Curation disabled in every project');
+    expect(readCurationSwitch()).toBe(false);
+  });
+
+  it('a backup queue file that is a link: nothing is deleted, the drain says so, and the switch is still off', async () => {
+    const backup = seedBackup(root);
+    const outside = makeTmpDir();
+    fs.writeFileSync(path.join(outside, 'queue'), 'a file outside the project\n');
+    fs.rmSync(path.join(backup, '.pending-turns.jsonl'));
+    fs.symlinkSync(path.join(outside, 'queue'), path.join(backup, '.pending-turns.jsonl'));
+
+    const run = await runCuration(['--disable']);
+
+    expect(run.warn).toContain(`${path.join(backup, '.pending-turns.jsonl')} is a symbolic link`);
+    expect(fs.readFileSync(path.join(outside, 'queue'), 'utf-8')).toBe('a file outside the project\n');
+    expect(BACKUP_PENDING.slice(1).map(file => fs.existsSync(path.join(backup, file)))).toEqual([true, true, true]);
+    expect(queueFilesPresent(root)).toEqual([true, true, true]);
+    expect(readCurationSwitch()).toBe(false);
   });
 
   it('does not create a .disabled sentinel (the gate is the manifest)', async () => {

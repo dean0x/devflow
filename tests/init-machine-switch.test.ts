@@ -216,6 +216,26 @@ describe('drainDisabledFeatureQueues (D-INIT-DRAIN-AFTER-SWITCH)', () => {
     }
   });
 
+  it('with the real drains: curation off also removes the pending rows of the backups a move left, and keeps their ledger', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-init-drain-backup-'));
+    vi.stubEnv('HOME', path.join(tmp, 'home'));
+    try {
+      const repo = path.join(tmp, 'repo');
+      const backup = path.join(repo, '.devflow', 'learning.backup-20261017T020304Z-ab12cd34');
+      await fs.mkdir(backup, { recursive: true });
+      const pending = ['.pending-turns.jsonl', '.pending-turns.jsonl.overflow-20261017T020304Z-00000001'];
+      for (const file of [...pending, 'decisions-ledger.jsonl']) await fs.writeFile(path.join(backup, file), '{"role":"user"}\n');
+
+      const refused = await drainDisabledFeatureQueues({ gitRoot: repo, ledgerRoot: repo, memoryEnabled: true, curationEnabled: false, manifestWritten: true });
+
+      expect(refused).toEqual([]);
+      expect(await fs.readdir(backup)).toEqual(['decisions-ledger.jsonl']);
+    } finally {
+      vi.unstubAllEnvs();
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('drains only the features that are off', async () => {
     const memOff = recorder();
     await drainDisabledFeatureQueues({ gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: false, curationEnabled: true, manifestWritten: true }, memOff.io);

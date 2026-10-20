@@ -13,7 +13,7 @@
 import { join } from 'path';
 import { scriptsDir } from './assets.js';
 import { loadScript, type EvidencePolicyLoadError, type Result, type SurfaceKind } from './evidence-policy.js';
-import type { CurationStoreResult } from './curation-store.js';
+import type { CurationStoreError, CurationStoreResult } from './curation-store.js';
 
 /** The move module, relative to src/assets/scripts/ (and ~/.devflow/scripts/). */
 export const CURATION_MOVE_SCRIPT_NAME = join('hooks', 'lib', 'curation-move.cjs');
@@ -76,6 +76,9 @@ export interface LedgerBackupsBeyondLimit {
   readonly pendingRows: number;
 }
 
+/** `backupQueueFiles`'s refusal: `path` is the symbolic link it stopped at, on one line. */
+export type BackupQueueFilesError = CurationStoreError & { readonly path?: string };
+
 /**
  * The part of the move module's `module.exports` the CLI calls. Each function answers
  * a Result and never throws on an expected outcome.
@@ -99,6 +102,14 @@ export interface CurationMoveModule {
     readonly backups: readonly LedgerBackupRows[];
     readonly beyondLimit: LedgerBackupsBeyondLimit;
   }>;
+  /**
+   * The queue files the backups still hold, as absolute paths: the files `backupPendingRows` counts, within
+   * its limits (500 backup folders, 200 files in each), for the drain of a disable to delete. Read-only: takes
+   * no lock and writes nothing. Refused, listing no file and naming the link in `error.path`, when a backup
+   * folder or one of its queue files is a symbolic link. Other error kinds: `refused` (the root is not an
+   * absolute path), `io-error`.
+   */
+  backupQueueFiles(root: string): Result<{ readonly files: readonly string[] }, BackupQueueFilesError>;
 }
 
 /**
@@ -109,6 +120,7 @@ export const CURATION_MOVE_SURFACE = Object.freeze({
   moveLedger: 'function',
   sweepLedgerBackups: 'function',
   backupPendingRows: 'function',
+  backupQueueFiles: 'function',
 } as const satisfies Record<keyof CurationMoveModule, SurfaceKind>);
 
 export type CurationMoveLoad = Result<CurationMoveModule, EvidencePolicyLoadError>;

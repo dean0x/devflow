@@ -56,7 +56,7 @@ import { convergeFlagsIntoSettings, countActiveFlags, readViewMode, type FlagsRe
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
 import { writeManagedConfig, readConfigIfPresent, DEFAULT_CONFIG, type FeatureConfig, type ManagedConfigWriteError } from '../../core/feature-config.js';
-import { drainCurationQueue } from '../../core/curation-queue-cleanup.js';
+import { drainDisabledCurationQueue } from '../../core/curation-queue-cleanup.js';
 import { formatRefusedDrain, type QueueDrain } from '../../core/queue-drain.js';
 import { removeManagedDenyList, describeManagedDenyRemoval } from './security.js';
 import { resolveInitSeed, applyCliToggles, resolveResetGatedInputs, resolvePluginsToInstall } from './init-seed.js';
@@ -695,7 +695,8 @@ export interface DisabledQueueDrainIO {
 /**
  * Drain this repo's memory and curation queues for each feature init switched
  * off, so stale turns are not processed on a future re-enable — the same drains
- * `devflow memory --disable` and `devflow curation --disable` perform. Other
+ * `devflow memory --disable` and `devflow curation --disable` perform (the curation
+ * drain also removes the pending rows of the backups a move left). Other
  * repos' queues are inert: every gate reads the machine-wide switch, so nothing
  * appends to or processes them while the feature is off.
  *
@@ -722,7 +723,7 @@ export async function drainDisabledFeatureQueues(
     curationEnabled: boolean;
     manifestWritten: boolean;
   },
-  io: DisabledQueueDrainIO = { drainMemoryQueue, drainCurationQueue },
+  io: DisabledQueueDrainIO = { drainMemoryQueue, drainCurationQueue: drainDisabledCurationQueue },
 ): Promise<readonly string[]> {
   if (!opts.manifestWritten) return [];
   const refused: string[] = [];

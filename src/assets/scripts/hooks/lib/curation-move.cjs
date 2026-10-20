@@ -1,8 +1,10 @@
 // src/assets/scripts/hooks/lib/curation-move.cjs
 //
 // The one-time move of a project's old ledger folder to its new name: moveLedger, the
-// backup sweep (sweepLedgerBackups) and the read-only backup count (backupPendingRows)
-// that `devflow curation --status` uses. The one place that names both folders.
+// backup sweep (sweepLedgerBackups), the read-only backup count (backupPendingRows) that
+// `devflow curation --status` uses, and the read-only list of the backups' queue files
+// (backupQueueFiles) that the drain of a disable deletes. The one place that names both
+// folders.
 //
 // DESIGN: plumbing only, like the store it builds on. No function here prints or calls
 // process.exit. Work that can fail on its input or on a lock returns a Result, { ok:
@@ -239,6 +241,7 @@ const isLeftBehind = cls => MOVE_ENTRY_CLASSES[cls].leftBehind;
 const MOVE_OP = 'move-ledger';
 const SWEEP_OP = 'sweep-backups';
 const ROWS_OP = 'backup-rows';
+const QUEUE_FILES_OP = 'backup-queue-files';
 
 /** True for a ledger root the ops accept before they look at the disk: a non-empty absolute path with no NUL. */
 const isAbsoluteRoot = root => typeof root === 'string' && root !== '' && !root.includes('\0') && path.isAbsolute(root);
@@ -1317,8 +1320,7 @@ function sweepLedgerBackupsUnscrubbed(root, options = {}) {
   const { devflowDir } = ctx;
   try {
     if (lstatOrNull(ctx.newDir) === null) return idle('none');
-    const backups = backupNames(devflowDir).slice(0, MOVE_MAX_BACKUPS_SCANNED)
-      .filter(name => backupMayHoldRows(path.join(devflowDir, name))).slice(0, MOVE_MAX_BACKUPS);
+    const backups = backupsHoldingRows(devflowDir).slice(0, MOVE_MAX_BACKUPS);
     if (backups.length === 0) return idle('none');
     for (const name of backups) {
       const problem = backupProblem(path.join(devflowDir, name));
@@ -1352,6 +1354,15 @@ function sweepLedgerBackupsUnscrubbed(root, options = {}) {
 /** The names of the backup folders under `devflowDir`, oldest first (the stamp sorts by time). */
 function backupNames(devflowDir) {
   return fs.readdirSync(devflowDir).filter(name => name.startsWith(LEGACY_NAMES.backupPrefix)).sort();
+}
+
+/**
+ * The backups the sweep and the drain look into: of the first MOVE_MAX_BACKUPS_SCANNED
+ * backup folders, in name order, those that may hold rows (backupMayHoldRows).
+ */
+function backupsHoldingRows(devflowDir) {
+  return backupNames(devflowDir).slice(0, MOVE_MAX_BACKUPS_SCANNED)
+    .filter(name => backupMayHoldRows(path.join(devflowDir, name)));
 }
 
 /**
@@ -1392,6 +1403,15 @@ function holdsPendingRows(name) {
 }
 
 /**
+ * The names of the files of the plain folder `dir` that hold rows a later sweep would
+ * still merge (holdsPendingRows), in name order, at most MOVE_MAX_QUEUE_FILES of them:
+ * the files the status count reads and the drain removes.
+ */
+function pendingFilesOf(dir) {
+  return fs.readdirSync(dir).filter(holdsPendingRows).sort().slice(0, MOVE_MAX_QUEUE_FILES);
+}
+
+/**
  * The rows a backup folder still holds for a later sweep: the non-blank lines of the files
  * holdsPendingRows names, at most MOVE_MAX_QUEUE_FILES of them. Null for a path that is
  * not a plain folder (a link, a file or nothing), which is never read.
@@ -1403,7 +1423,7 @@ function pendingRowsOf(dir) {
   const stat = lstatOrNull(dir);
   if (stat === null || !stat.isDirectory()) return null;
   let pendingRows = 0;
-  for (const file of fs.readdirSync(dir).filter(holdsPendingRows).sort().slice(0, MOVE_MAX_QUEUE_FILES)) {
+  for (const file of pendingFilesOf(dir)) {
     const text = readQueueText(path.join(dir, file));
     if (text !== null) pendingRows += completeLines(text).length;
   }
@@ -1455,6 +1475,67 @@ function backupPendingRows(root) {
   }
 }
 
+/**
+ * The first symbolic link a drain of the backup `dir` would act through: the folder
+ * itself, or one of its queue files (the entries backupProblem link-checks). Null when
+ * there is none, and for a path that is no folder: it holds no queue file.
+ */
+function backupLinkedPath(dir) {
+  const stat = lstatOrNull(dir);
+  if (stat === null) return null;
+  if (stat.isSymbolicLink()) return dir;
+  if (!stat.isDirectory()) return null;
+  for (const entry of fs.readdirSync(dir)) {
+    const cls = moveEntryClass(entry);
+    if ((cls === ENTRY.QUEUE || cls === ENTRY.QUEUE_FORM) && moveEntryProblem(path.join(dir, entry)) !== null) {
+      return path.join(dir, entry);
+    }
+  }
+  return null;
+}
+
+/**
+ * The queue files the backup folders still hold, for the drain a disable runs: the
+ * files backupPendingRows counts (holdsPendingRows), as absolute paths, never a swept
+ * file, the claim's owner file or a ledger file. Read-only: it takes no lock and writes
+ * nothing. It is bounded by the sweep's limits: at most MOVE_MAX_BACKUPS_SCANNED backup
+ * folders, and MOVE_MAX_QUEUE_FILES files in each. The caller deletes.
+ *
+ * Refused, naming the path in `error.path`, when a backup folder that may hold rows is
+ * a symbolic link or has a link among its queue files (the sweep's own refusal): the
+ * answer then lists no file at all, so a caller that deletes what it is told deletes
+ * nothing. A path that is no folder holds no file and is passed over.
+ *
+ * @param {unknown} root - the ledger root, an absolute path
+ * @returns {{ ok: true, value: { files: string[] } }
+ *   | { ok: false, error: { kind: 'refused'|'io-error', message: string, path?: string } }}
+ */
+function backupQueueFiles(root) {
+  if (!isAbsoluteRoot(root)) return moveRefused(QUEUE_FILES_OP, 'the ledger root must be an absolute path');
+  try {
+    const devflowDir = path.join(path.resolve(root), '.devflow');
+    const devflowStat = lstatOrNull(devflowDir);
+    if (devflowStat === null || !devflowStat.isDirectory()) return { ok: true, value: { files: [] } };
+    const dirs = backupsHoldingRows(devflowDir).map(name => path.join(devflowDir, name));
+    for (const dir of dirs) {
+      const linked = backupLinkedPath(dir);
+      if (linked !== null) {
+        const refused = moveRefused(QUEUE_FILES_OP, `${linked} is a symbolic link`);
+        return scrubMoveResult({ ok: false, error: { ...refused.error, path: singleLine(linked) } });
+      }
+    }
+    const files = [];
+    for (const dir of dirs) {
+      const stat = lstatOrNull(dir);
+      if (stat === null || !stat.isDirectory()) continue;
+      for (const file of pendingFilesOf(dir)) files.push(path.join(dir, file));
+    }
+    return { ok: true, value: { files } };
+  } catch (err) {
+    return scrubMoveResult(moveIoFailure(QUEUE_FILES_OP, err));
+  }
+}
+
 module.exports = {
   moveLedger,
   QUEUE_MERGE_CAP_LINES,
@@ -1472,4 +1553,5 @@ module.exports = {
   MOVE_ENTRY_CLASSES,
   sweepLedgerBackups,
   backupPendingRows,
+  backupQueueFiles,
 };

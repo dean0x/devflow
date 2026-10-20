@@ -98,7 +98,7 @@ npx devflow-kit ambient --status     # Show current status (partial state detect
 
 ```bash
 npx devflow-kit curation --enable         # Enable curation (decision + pitfall detection; installs the curation-on prompts and the apply-decisions skill)
-npx devflow-kit curation --disable        # Disable curation (drains the curation queue; installs the curation-off prompts and removes the skill)
+npx devflow-kit curation --disable        # Disable curation (drains the curation queue and the pending rows in the backups; installs the curation-off prompts and removes the skill)
 npx devflow-kit curation --status         # Show status and entry counts
 npx devflow-kit curation --list           # List entries, inactive entries with their notes, and observations
 npx devflow-kit curation --show <id>      # Print one entry (ADR-NNN or PF-NNN) or observation as JSON
