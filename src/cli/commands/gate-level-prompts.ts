@@ -62,8 +62,8 @@ export const GATE_LEVEL_SELECT_MESSAGE = 'Gate level for this machine';
  */
 export const GATE_LEVEL_HINTS: Readonly<Record<GateLevel, string>> = Object.freeze({
   full: 'the most checking: every review focus, the full planning shape and Polish',
-  standard: 'fewer review focuses and planning agents, and no Polish (the default)',
-  lean: 'the least checking, and no Polish; /implement also has Validate run the project lint pack',
+  standard: 'fewer review focuses and planning agents, and no Polish in /implement and /resolve (the default)',
+  lean: 'the least checking, and no Polish in /implement and /resolve; /implement also has Validate run the project lint pack',
 });
 
 /** Build clack select options for the gate level list, most to least checking. */
@@ -73,7 +73,7 @@ export function gateLevelChoices(): Array<{ value: GateLevel; label: string; hin
 
 /**
  * Format a padded level catalogue suitable for a clack note body.
- * Produces: `  standard  fewer review focuses and planning agents, and no Polish (the default)`
+ * Produces: `  standard  fewer review focuses and planning agents, and no Polish in /implement and /resolve (the default)`
  */
 export function formatGateLevelCatalogue(): string {
   const width = Math.max(...GATE_LEVELS.map(level => level.length));

@@ -979,8 +979,8 @@ describe('the init prompt and devflow gates describe the same levels', () => {
     it('GATE_LEVEL_HINTS', () => {
       expect({ ...GATE_LEVEL_HINTS }, `GATE_LEVEL_HINTS changed. ${UPDATE_BOTH}`).toEqual({
         full: 'the most checking: every review focus, the full planning shape and Polish',
-        standard: 'fewer review focuses and planning agents, and no Polish (the default)',
-        lean: 'the least checking, and no Polish; /implement also has Validate run the project lint pack',
+        standard: 'fewer review focuses and planning agents, and no Polish in /implement and /resolve (the default)',
+        lean: 'the least checking, and no Polish in /implement and /resolve; /implement also has Validate run the project lint pack',
       });
     });
 
