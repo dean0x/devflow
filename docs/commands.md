@@ -32,7 +32,7 @@ Executes a single task through the complete development lifecycle. Accepts plan 
 
 1. **Setup** — Auto-create feature branch, parse plan document or fetch issue, and write the task's test plan (copied from the plan, or one TP line per stated acceptance criterion) to `.devflow/docs/evidence-{branch-slug}.md`. Under a `required` evidence policy, a missing ticket link or test plan is recorded as a self-attested exception or stops the run, before any code is written
 2. **Implementation** — Write code on the feature branch
-3. **Refinement** — Polish (code clarity; at `full` only) + Harden (9-pillar quality; reports PASS, FIXED or BLOCKED)
+3. **Refinement** — Polish (code clarity; at `full` only) + Harden (9-pillar quality; reports PASS, FIXED or BLOCKED; at `lean`, SKIPPED on a docs-only diff)
 4. **Alignment** — Evaluate verifies implementation matches the original request
 5. **Validation** — One full build, typecheck, lint, and test run over the branch diff, after the code is final. At `lean` ([gate level](cli-reference.md#gate-level)), and at no other level, Validate then runs the project's `lint-pack` script last, if it has one, to find faults that a linter does not; matches go to Fix, and an allow glob in `.lint-pack.conf` clears a match that you accept
 6. **QA Testing** — Test executes scenario-based acceptance tests and records one claim per TP line
@@ -41,7 +41,7 @@ Executes a single task through the complete development lifecycle. Accepts plan 
 9. **CI Gate** — Push, then wait for CI on the pushed head and fix failures
 10. **Evidence** — Push, then refresh the PR's test-plan block and post its evidence comment
 
-**Gate level.** `/implement` names the [gate level](cli-reference.md#gate-level) in its report. At `standard` and `lean`, it also reads its level reference once, at the start of the Refinement step, and applies each row to the phase that the row names. At `standard` and `lean`, `/implement` skips Polish; Harden still reads the whole branch diff, and `full` keeps Polish. If the reference cannot be read, `/implement` applies no row, keeps the level and says `level reference unreadable: no level rows applied`. The level still goes to Validate, so at `lean` the lint pack still runs. Validate, the CI gate, the evidence claims and the compliance directive run at every level. An enabled compliance lens keeps Harden.
+**Gate level.** `/implement` names the [gate level](cli-reference.md#gate-level) in its report. At `standard` and `lean`, it also reads its level reference once, at the start of the Refinement step, and applies each row to the phase that the row names. At `standard` and `lean`, `/implement` skips Polish, and `full` keeps Polish. When Harden runs, it reads the whole branch diff. At `lean`, `/implement` skips Harden on a docs-only diff: the diff is not empty, every changed path is the root `README.md` or `CHANGELOG.md` or a `.md` file under `docs/` that no agent loads as instructions, the compliance lens is `off`, and no Code report names a deleted, renamed or moved path. The report then says `Harden: SKIPPED (docs-only diff)`, and otherwise `Harden: ran`. If the reference cannot be read, `/implement` applies no row, keeps the level and says `level reference unreadable: no level rows applied`. The level still goes to Validate, so at `lean` the lint pack still runs. Validate, the CI gate, the evidence claims and the compliance directive run at every level. An enabled compliance lens keeps Harden.
 
 ```
 /implement .devflow/docs/design/42-jwt-auth.2026-04-07_1430.md  # From plan document
