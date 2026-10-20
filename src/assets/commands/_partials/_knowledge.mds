@@ -12,9 +12,12 @@ index, writes the two files directly and commits them is held by its own body
 (knowledge.mds steps 6-8, Direct Write Protocol, Commit Protocol), so the spawn no
 longer restates it.
 
-@define knowledge_load():
-### Load Feature Knowledge
+The checkout-root block lives once, in `knowledge_root()`. `knowledge_load()` carries it,
+and so does `knowledge_writeback()`, which a host with no load step uses. A host that renders
+`knowledge_load()` earlier in the same command calls `knowledge_writeback_after_load()`, whose
+Step 1 and Step 3 take the `{worktree}` that the load step resolved.
 
+@define knowledge_root():
 Resolve `{worktree}` as the checkout's toplevel, because feature knowledge bases are committed with the branch (D-PROMPT-ROOT): from the start directory — `WORKTREE_PATH` if provided, otherwise cwd (`devflow:worktree-support`) — run
 
 ```bash
@@ -22,6 +25,12 @@ git -C "{start}" rev-parse --show-toplevel
 ```
 
 and use its one-line output. If the command fails (outside a git repository), `{worktree}` is the start directory itself. All paths below are relative to `{worktree}`.
+@end
+
+@define knowledge_load():
+### Load Feature Knowledge
+
+{{knowledge_root()}}
 
 **Step 1 — Read the index cache:**
 
@@ -71,17 +80,7 @@ A KB with no Rules section labels its entries `Rules ({section name}):` and give
 
 @export knowledge_load
 
-@define knowledge_writeback():
-### Feature Knowledge Write-Back (Conditional)
-
-Resolve `{worktree}` as the checkout's toplevel, because feature knowledge bases are committed with the branch (D-PROMPT-ROOT): from the start directory — `WORKTREE_PATH` if provided, otherwise cwd (`devflow:worktree-support`) — run
-
-```bash
-git -C "{start}" rev-parse --show-toplevel
-```
-
-and use its one-line output. If the command fails (outside a git repository), `{worktree}` is the start directory itself. All paths below are relative to `{worktree}`.
-
+@define knowledge_writeback_steps():
 **Step 1 — Check the opt-out gate, with `{root}` = `{worktree}`:** take the settings line resolved above for that root, resolving it with the settings block when this run has not yet.
 
 If the settings line says `KNOWLEDGE=off`, skip write-back entirely. The machine switch (`devflow knowledge --disable`), the repository and the personal settings can each turn knowledge off, and none can turn it back on (D-FEATURES-NARROW-ONLY). The fail-closed line says `KNOWLEDGE=off` too, so an unresolvable line skips write-back.
@@ -126,4 +125,19 @@ When the Knowledge agent reports `KB_COMMIT: skipped (detached HEAD)`, the files
 **Failure handling**: Non-blocking. If the Knowledge agent fails, log the failure and continue — the workflow outcome is not affected by write-back success.
 @end
 
+@define knowledge_writeback():
+### Feature Knowledge Write-Back (Conditional)
+
+{{knowledge_root()}}
+
+{{knowledge_writeback_steps()}}
+@end
+
+@define knowledge_writeback_after_load():
+### Feature Knowledge Write-Back (Conditional)
+
+{{knowledge_writeback_steps()}}
+@end
+
 @export knowledge_writeback
+@export knowledge_writeback_after_load

@@ -21,3 +21,9 @@ export const RELEASE_TRACE_SCRIPT = path.join(ROOT, 'src', 'assets', 'scripts', 
 
 /** The CI wait for one pushed head: gh in, one status line out (D-CI-WAIT-INLINE). */
 export const CI_WAIT_SCRIPT = path.join(ROOT, 'src', 'assets', 'scripts', 'ci-wait.cjs')
+
+/** The base resolver: fetches the base once, picks the fork point, prints one line. */
+export const RESOLVE_BASE_SCRIPT = path.join(ROOT, 'src', 'assets', 'scripts', 'resolve-base.cjs')
+
+/** The bound of one node or git launch, and the timeout of every test that makes one (a launch can stall 14 to 16 s under full-suite load). */
+export const SUBPROCESS_TIMEOUT_MS = 60_000
