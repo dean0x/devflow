@@ -8,7 +8,7 @@
 #
 # df_curation_move <ledger_root> [retry]
 #   Moves <ledger_root>/.devflow/learning to .devflow/curation, once, by running the
-#   move op of json-helper.cjs (moveLedger in lib/curation-store.cjs). <ledger_root>
+#   move op of json-helper.cjs (moveLedger in lib/curation-move.cjs). <ledger_root>
 #   is the repository's ledger root (DF_LEDGER_ROOT), never the checkout's own.
 #   Always returns 0, and never waits: a move another process holds is skipped and
 #   tried again at the next event.

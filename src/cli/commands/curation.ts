@@ -35,6 +35,7 @@ import {
   type CurationStoreError,
   type CurationStoreModule,
 } from '../../core/curation-store.js';
+import { loadCurationMove } from '../../core/curation-move.js';
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -259,8 +260,10 @@ function entryCountLines(listing: CurationListing, logRowCount: number, inactive
  * the rows its unswept queue files still hold. A backup is inert, so the count tells the
  * user when deleting it loses nothing. A count that fails is a warning, not an error.
  */
-function backupLines(store: CurationStoreModule, ledgerRoot: string): { lines: string[]; warning: string | null } {
-  const rows = store.backupPendingRows(ledgerRoot);
+function backupLines(ledgerRoot: string): { lines: string[]; warning: string | null } {
+  const mover = loadCurationMove();
+  if (!mover.ok) return { lines: [], warning: `Backup rows were not counted: ${formatCurationStoreUnavailable(mover.error)}` };
+  const rows = mover.value.backupPendingRows(ledgerRoot);
   if (!rows.ok) return { lines: [], warning: `Backup rows were not counted: ${describeMoveText(rows.error.message)}` };
   const lines = rows.value.backups.map(({ name, pendingRows }) =>
     `Backup: ${describeMoveText(path.join(ledgerRoot, '.devflow', name))}: ${counted(pendingRows, 'pending row')} in the backup`);
@@ -302,7 +305,7 @@ async function handleStatus(): Promise<void> {
   const store = loaded.value;
   const { ledgerRows, logRows, rejected } = store.readCurationState(ledgerRoot);
   const listing = store.buildListing(ledgerRows, logRows, { rejected });
-  const backups = backupLines(store, ledgerRoot);
+  const backups = backupLines(ledgerRoot);
   p.log.info([stateLine, ...entryCountLines(listing, logRows.length, store.INACTIVE_STATUSES), ...backups.lines].join('\n'));
   if (backups.warning !== null) p.log.warn(backups.warning);
   const { ledger, log } = listing.malformed;

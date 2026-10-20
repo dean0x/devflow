@@ -18,6 +18,8 @@ import * as path from 'path';
 export const ROOT = path.resolve(import.meta.dirname, '../..');
 export const JSON_HELPER = path.join(ROOT, 'src/assets/scripts/hooks/json-helper.cjs');
 export const CURATION_STORE = path.join(ROOT, 'src/assets/scripts/hooks/lib/curation-store.cjs');
+export const CURATION_MOVE = path.join(ROOT, 'src/assets/scripts/hooks/lib/curation-move.cjs');
+export const PROJECT_PATHS = path.join(ROOT, 'src/assets/scripts/hooks/lib/project-paths.cjs');
 
 export type Row = Record<string, unknown>;
 
@@ -551,10 +553,19 @@ export interface CurationStoreApi {
   restoreAnchor(root: string, anchorId: string, opts?: { now?: number; timeoutMs?: number }): Result<{ anchor_id: string; status: string }>;
   clearUnreferenced(root: string, opts?: { now?: number; timeoutMs?: number }): Result<{ cleared: number; kept: number }>;
   resetCuration(root: string, opts?: { timeoutMs?: number }): Result<{ removed: number }>;
-  backupPendingRows(root: string): Result<{ backups: Array<{ name: string; pendingRows: number }> }>;
 }
 
 /** Load the curation store CommonJS module. */
 export function requireCurationStore(): CurationStoreApi {
   return createRequire(import.meta.url)(CURATION_STORE) as CurationStoreApi;
+}
+
+/** The move module's read-only status count, as the tests call it. */
+export interface CurationMoveApi {
+  backupPendingRows(root: string): Result<{ backups: Array<{ name: string; pendingRows: number }> }>;
+}
+
+/** Load the curation move CommonJS module. */
+export function requireCurationMove(): CurationMoveApi {
+  return createRequire(import.meta.url)(CURATION_MOVE) as CurationMoveApi;
 }

@@ -3,7 +3,7 @@
 // The one-time ledger move: moveLedger renames a project's old ledger folder to
 // the new name, or merges it into a new folder that already exists, and
 // sweepLedgerBackups merges what is left in the backup the move leaves behind.
-// Both live in the learning store (hooks/lib/curation-store.cjs) and take the
+// Both live in the move module (hooks/lib/curation-move.cjs) and take the
 // folder names as arguments, so nothing here depends on the path helpers' current
 // folder. Every test builds its own project and its own machine directory in a
 // temp tree: nothing reads or writes the real HOME or a real project.
@@ -19,10 +19,12 @@ import * as path from 'path';
 
 import { spawnSync } from 'child_process';
 
-import { GIT_ENV, JSON_HELPER, CURATION_STORE, makeV2LedgerRow, makeV2LogRow, toJsonl } from './curation-fixtures.js';
+import {
+  GIT_ENV, JSON_HELPER, CURATION_STORE, CURATION_MOVE, PROJECT_PATHS, makeV2LedgerRow, makeV2LogRow, toJsonl,
+} from './curation-fixtures.js';
 
 // ---------------------------------------------------------------------------
-// The store's move surface, as the tests call it
+// The move module's surface, and the store's guard, as the tests call them
 // ---------------------------------------------------------------------------
 
 type Res<T> = { ok: true; value: T } | { ok: false; error: { kind: string; message: string } };
@@ -49,18 +51,22 @@ interface SweepValue {
   notes: string[];
 }
 
-interface Store {
+interface Mover {
   moveLedger(root: unknown, opts: MoveOpts): Res<MoveValue>;
   sweepLedgerBackups(root: string, opts: MoveOpts): Res<SweepValue>;
-  curationMoveLockKey(realRoot: string): string;
-  withDecisionsLock(opName: string, root: string, fn: () => Res<null>): Res<null>;
   backupPendingRows(root: string): Res<{ backups: Array<{ name: string; pendingRows: number }> }>;
-  CLAIM_STALE_SECS: number;
   QUEUE_MERGE_CAP_LINES: number;
 }
 
+interface Store {
+  withDecisionsLock(opName: string, root: string, fn: () => Res<null>): Res<null>;
+  CLAIM_STALE_SECS: number;
+}
+
 const nodeRequire = createRequire(import.meta.url);
+const mover = nodeRequire(CURATION_MOVE) as Mover;
 const store = nodeRequire(CURATION_STORE) as Store;
+const { curationMoveLockKey } = nodeRequire(PROJECT_PATHS) as { curationMoveLockKey(realRoot: string): string };
 /** The fs module object the store calls into: a spy on it reaches the store. */
 const nodeFs = nodeRequire('fs') as typeof fs;
 
@@ -123,7 +129,7 @@ function opts(extra: MoveOpts = {}): MoveOpts {
 }
 
 function move(extra: MoveOpts = {}): Res<MoveValue> {
-  return store.moveLedger(site.root, opts(extra));
+  return mover.moveLedger(site.root, opts(extra));
 }
 
 /** A move that must succeed. */
@@ -217,14 +223,14 @@ function ledgerSet(tag: string): Record<string, string> {
 
 /** The lock directory the move takes under the machine directory. */
 const moveLockDir = (): string =>
-  path.join(site.machineDir, `.curation-move-${store.curationMoveLockKey(fs.realpathSync(site.root))}.lock`);
+  path.join(site.machineDir, `.curation-move-${curationMoveLockKey(fs.realpathSync(site.root))}.lock`);
 
 /**
  * The machine-side journal of an unfinished set move: next to the move lock, keyed
  * the same way. A journal in the repository's old folder is never this file.
  */
 const moveJournalFile = (): string =>
-  path.join(site.machineDir, `.curation-move-${store.curationMoveLockKey(fs.realpathSync(site.root))}.journal`);
+  path.join(site.machineDir, `.curation-move-${curationMoveLockKey(fs.realpathSync(site.root))}.journal`);
 
 /** Hold a lock directory, optionally aged so it counts as abandoned. */
 function holdLock(dir: string, ageMs = 0): void {
@@ -291,7 +297,7 @@ describe('moveLedger — the root is a real ledger root', () => {
 
   it('refuses a missing, empty or relative root', () => {
     for (const root of [null, undefined, '', 'relative/project', path.join(site.tmp, 'missing')]) {
-      const result = store.moveLedger(root, opts());
+      const result = mover.moveLedger(root, opts());
       expect(result.ok, String(root)).toBe(false);
       expect(!result.ok && result.error.kind, String(root)).toBe('refused');
     }
@@ -301,7 +307,7 @@ describe('moveLedger — the root is a real ledger root', () => {
     const alias = path.join(site.tmp, 'alias');
     fs.symlinkSync(site.root, alias);
     const before = snapshotTree(site.root);
-    const result = store.moveLedger(alias, opts());
+    const result = mover.moveLedger(alias, opts());
     expect(result.ok).toBe(false);
     expect(!result.ok && result.error.kind).toBe('refused');
     expect(snapshotTree(site.root)).toEqual(before);
@@ -312,7 +318,7 @@ describe('moveLedger — the root is a real ledger root', () => {
     fs.symlinkSync(site.tmp, parent);
     for (const root of [site.home, path.join(parent, 'home')]) {
       fs.mkdirSync(path.join(root, '.devflow', OLD), { recursive: true });
-      const result = store.moveLedger(root, opts());
+      const result = mover.moveLedger(root, opts());
       expect(result.ok, root).toBe(false);
       expect(!result.ok && result.error.message, root).toMatch(/home directory/);
     }
@@ -321,7 +327,7 @@ describe('moveLedger — the root is a real ledger root', () => {
 
   it('refuses the machine directory as a root', () => {
     seed(path.join(site.machineDir, '.devflow'), { [OLD]: null });
-    const result = store.moveLedger(site.machineDir, opts());
+    const result = mover.moveLedger(site.machineDir, opts());
     expect(result.ok).toBe(false);
     expect(!result.ok && result.error.message).toMatch(/machine directory/);
   });
@@ -431,8 +437,8 @@ describe('the lock key', () => {
   it('is the first 16 hex characters of the sha256 of the root path', async () => {
     const { createHash } = await import('crypto');
     const real = fs.realpathSync(site.root);
-    expect(store.curationMoveLockKey(real)).toBe(createHash('sha256').update(real).digest('hex').slice(0, 16));
-    expect(store.curationMoveLockKey(real)).toMatch(/^[0-9a-f]{16}$/);
+    expect(curationMoveLockKey(real)).toBe(createHash('sha256').update(real).digest('hex').slice(0, 16));
+    expect(curationMoveLockKey(real)).toMatch(/^[0-9a-f]{16}$/);
   });
 
   it('is the same for two spellings of one root, so two movers meet at one lock (TP-37)', () => {
@@ -442,7 +448,7 @@ describe('the lock key', () => {
     const spelled = path.join(alias, 'project');
     // Hold the lock under the physical spelling's key; the other spelling must find it busy.
     holdLock(moveLockDir());
-    const result = store.moveLedger(spelled, opts());
+    const result = mover.moveLedger(spelled, opts());
     expect(result).toEqual({ ok: true, value: { state: 'busy', notes: [] } });
     expect(exists(site.oldDir)).toBe(true);
   });
@@ -1212,7 +1218,7 @@ describe('the queue rule — private names, no deletes (TP-39)', () => {
     const backup = backupOf(movedValue());
     const queueBefore = read(path.join(site.newDir, QUEUE));
     const sweptBefore = matching(backup, SWEPT_RE);
-    const sweep = store.sweepLedgerBackups(site.root, opts());
+    const sweep = mover.sweepLedgerBackups(site.root, opts());
     expect(sweep.ok && sweep.value.merged).toBe(0);
     expect(matching(backup, SWEPT_RE)).toEqual(sweptBefore);
     expect(read(path.join(backup, sweptBefore[0]))).toBe(turns(1, 3));
@@ -1270,7 +1276,7 @@ describe('the queue rule — a crash, an append, a rerun (TP-32)', () => {
     expect(matching(backup, SWEPT_RE)).toHaveLength(2);
     expect(matching(backup, PRIVATE_RE)).toEqual([]);
 
-    const again = store.sweepLedgerBackups(site.root, opts());
+    const again = mover.sweepLedgerBackups(site.root, opts());
     expect(again.ok && again.value.merged).toBe(0);
     expect(linesOf(path.join(site.newDir, QUEUE))).toHaveLength(4);
   });
@@ -1281,13 +1287,13 @@ describe('the queue rule — a crash, an append, a rerun (TP-32)', () => {
     const privateFile = path.join(backup, matching(backup, PRIVATE_RE)[0]);
     age(privateFile, 2 * 60 * 1000);
 
-    const first = store.sweepLedgerBackups(site.root, opts());
+    const first = mover.sweepLedgerBackups(site.root, opts());
     expect(first.ok && first.value.files).toBe(1);
     const rejected = linesOf(path.join(backup, REJECTED)).map(line => JSON.parse(line) as { text: string });
     expect(rejected.map(record => record.text)).toEqual(['half a li']);
     expect(matching(backup, SWEPT_RE)).toHaveLength(1);
 
-    store.sweepLedgerBackups(site.root, opts());
+    mover.sweepLedgerBackups(site.root, opts());
     expect(linesOf(path.join(backup, REJECTED))).toHaveLength(1);
     expect(linesOf(path.join(site.newDir, QUEUE))).toEqual([turn(1)]);
   });
@@ -1295,7 +1301,7 @@ describe('the queue rule — a crash, an append, a rerun (TP-32)', () => {
   it('leaves a fragment touched within the last 60 s for the next run', () => {
     seedKeptNew(`${turns(1, 2)}half a li`, null);
     const backup = backupOf(movedValue());
-    store.sweepLedgerBackups(site.root, opts());
+    mover.sweepLedgerBackups(site.root, opts());
     expect(exists(path.join(backup, REJECTED))).toBe(false);
     expect(matching(backup, PRIVATE_RE)).toHaveLength(1);
   });
@@ -1328,7 +1334,7 @@ describe('the queue rule — the merge cap (the size a capture trim keeps)', () 
     const queueAppend = read(path.join(HOOKS_DIR, 'queue-append'));
     const keep = /tail -(\d+) "\$_qar_file"/.exec(queueAppend);
     expect(keep, 'queue-append keeps the newest lines with tail').not.toBeNull();
-    expect(store.QUEUE_MERGE_CAP_LINES).toBe(Number(keep?.[1]));
+    expect(mover.QUEUE_MERGE_CAP_LINES).toBe(Number(keep?.[1]));
     const triggers = [...queueAppend.matchAll(/"\$_qar_lines" -gt (\d+)/g)].map(match => Number(match[1]));
     expect(triggers).toEqual([200, 200]);
   });
@@ -1356,7 +1362,7 @@ describe('the queue rule — the merge cap (the size a capture trim keeps)', () 
     const overflow = matching(backup, OVERFLOW_RE);
     expect(overflow).toHaveLength(1);
     expect(linesOf(path.join(backup, overflow[0]))).toEqual(rows(41, 151));
-    const status = store.backupPendingRows(site.root);
+    const status = mover.backupPendingRows(site.root);
     expect(status.ok && status.value.backups).toEqual([{ name: value.backup, pendingRows: 110 }]);
 
     captureThroughHook(path.join(site.newDir, QUEUE), 'after the move', 5000);
@@ -1380,17 +1386,17 @@ describe('the queue rule — the merge cap (the size a capture trim keeps)', () 
     const backup = backupOf(movedValue());
     const overflow = matching(backup, OVERFLOW_RE)[0];
 
-    const blocked = store.sweepLedgerBackups(site.root, opts());
+    const blocked = mover.sweepLedgerBackups(site.root, opts());
     expect(blocked.ok && blocked.value.merged).toBe(0);
     expect(exists(path.join(backup, overflow))).toBe(true);
 
     fs.writeFileSync(path.join(site.newDir, QUEUE), turns(100, 190));
-    const swept = store.sweepLedgerBackups(site.root, opts());
+    const swept = mover.sweepLedgerBackups(site.root, opts());
     expect(swept.ok && swept.value.merged).toBe(5);
     expect(linesOf(path.join(site.newDir, QUEUE)).slice(90)).toEqual(rows(6, 11));
     expect(exists(path.join(backup, overflow))).toBe(false);
 
-    const again = store.sweepLedgerBackups(site.root, opts());
+    const again = mover.sweepLedgerBackups(site.root, opts());
     expect(again.ok && again.value.merged).toBe(0);
     expect(linesOf(path.join(site.newDir, QUEUE))).toHaveLength(95);
   });
@@ -1400,7 +1406,7 @@ describe('the queue rule — the merge cap (the size a capture trim keeps)', () 
     const backup = backupOf(movedValue());
     const first = matching(backup, OVERFLOW_RE)[0];
     fs.writeFileSync(path.join(site.newDir, QUEUE), turns(100, 197));
-    const swept = store.sweepLedgerBackups(site.root, opts());
+    const swept = mover.sweepLedgerBackups(site.root, opts());
     expect(swept.ok && swept.value.merged).toBe(3);
     expect(swept.ok && swept.value.overflowed).toBe(2);
     expect(linesOf(path.join(site.newDir, QUEUE))).toHaveLength(100);
@@ -1415,7 +1421,7 @@ describe('the queue rule — the merge cap (the size a capture trim keeps)', () 
     const backup = path.join(site.devflow, 'learning.backup-20261001T000000Z-abcdef12');
     seed(backup, { '.pending-turns.jsonl.overflow-20261001T000000Z-deadbeef': turns(1, 51) });
 
-    const swept = store.sweepLedgerBackups(site.root, opts());
+    const swept = mover.sweepLedgerBackups(site.root, opts());
     expect(swept.ok && swept.value.merged).toBe(10);
     expect(swept.ok && swept.value.overflowed).toBe(40);
     const queue = linesOf(path.join(site.newDir, QUEUE));
@@ -1423,7 +1429,7 @@ describe('the queue rule — the merge cap (the size a capture trim keeps)', () 
     const rest = matching(backup, OVERFLOW_RE);
     expect(rest).toHaveLength(1);
     expect(linesOf(path.join(backup, rest[0]))).toEqual(rows(11, 51));
-    const status = store.backupPendingRows(site.root);
+    const status = mover.backupPendingRows(site.root);
     expect(status.ok && status.value.backups).toEqual([{ name: path.basename(backup), pendingRows: 40 }]);
 
     captureThroughHook(path.join(site.newDir, QUEUE), 'after the sweep', 6000);
@@ -1538,11 +1544,11 @@ describe('the finish — the backup and the race-close sweep', () => {
 describe('sweepLedgerBackups', () => {
   it('answers none when there is no backup, and none when the new folder is absent', () => {
     seedNew({ [LOG]: '' });
-    expect(store.sweepLedgerBackups(site.root, opts())).toEqual({ ok: true, value: { state: 'none', files: 0, merged: 0, overflowed: 0, notes: [] } });
+    expect(mover.sweepLedgerBackups(site.root, opts())).toEqual({ ok: true, value: { state: 'none', files: 0, merged: 0, overflowed: 0, notes: [] } });
     fs.rmSync(site.newDir, { recursive: true });
     fs.mkdirSync(path.join(site.devflow, 'learning.backup-20261001T000000Z-abcdef12'));
-    expect(store.sweepLedgerBackups(site.root, opts()).ok).toBe(true);
-    const result = store.sweepLedgerBackups(site.root, opts());
+    expect(mover.sweepLedgerBackups(site.root, opts()).ok).toBe(true);
+    const result = mover.sweepLedgerBackups(site.root, opts());
     expect(result.ok && result.value.state).toBe('none');
   });
 
@@ -1552,7 +1558,7 @@ describe('sweepLedgerBackups', () => {
     const private1 = '.pending-turns.jsonl.merging-20261001T000000Z-deadbeef';
     fs.writeFileSync(path.join(backup, private1), turns(7, 8));
     holdLock(path.join(site.newDir, '.pending-turns.jsonl.lock'));
-    expect(store.sweepLedgerBackups(site.root, opts())).toEqual({ ok: true, value: { state: 'busy', files: 0, merged: 0, overflowed: 0, notes: [] } });
+    expect(mover.sweepLedgerBackups(site.root, opts())).toEqual({ ok: true, value: { state: 'busy', files: 0, merged: 0, overflowed: 0, notes: [] } });
     expect(exists(path.join(backup, private1))).toBe(true);
   });
 
@@ -1562,7 +1568,7 @@ describe('sweepLedgerBackups', () => {
     fs.writeFileSync(path.join(backup, '.pending-turns.jsonl.merging-20261001T000000Z-deadbeef'), turns(7, 8));
     fs.symlinkSync(outsideFile(), path.join(backup, QUEUE));
     const before = snapshotTree(site.devflow);
-    const result = store.sweepLedgerBackups(site.root, opts());
+    const result = mover.sweepLedgerBackups(site.root, opts());
     expect(result.ok).toBe(false);
     expect(snapshotTree(site.devflow)).toEqual(before);
   });
@@ -1716,7 +1722,7 @@ describe('moveLedger — a name read from the repository is one clean line in ev
     const elsewhere = path.join(site.tmp, 'elsewhere');
     fs.mkdirSync(elsewhere);
     fs.symlinkSync(elsewhere, path.join(site.devflow, `learning.backup-${HOSTILE}`));
-    const result = store.sweepLedgerBackups(site.root, opts());
+    const result = mover.sweepLedgerBackups(site.root, opts());
     expect(result.ok).toBe(false);
     expect(!result.ok && result.error.kind).toBe('refused');
     expectOneCleanLine(!result.ok ? result.error.message : '', 'sweep refusal');
@@ -1725,7 +1731,7 @@ describe('moveLedger — a name read from the repository is one clean line in ev
   it('the status count carries a backup folder name as one clean line', () => {
     seedNew({ [LOG]: '' });
     seed(path.join(site.devflow, `learning.backup-${HOSTILE}`), { [QUEUE]: turns(1, 3) });
-    const result = store.backupPendingRows(site.root);
+    const result = mover.backupPendingRows(site.root);
     expect(result.ok).toBe(true);
     const backups = result.ok ? result.value.backups : [];
     expect(backups).toHaveLength(1);

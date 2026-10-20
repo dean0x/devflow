@@ -72,6 +72,20 @@ function curation() {
   return curationModules;
 }
 
+/** The ledger move module, once loaded; see curationMove(). */
+let curationMoveModule = null;
+
+/**
+ * The ledger move module, loaded on first use and memoized. Only the move op calls
+ * it, so no other curation op loads the move code.
+ *
+ * @returns {object}
+ */
+function curationMove() {
+  if (curationMoveModule === null) curationMoveModule = require('./lib/curation-move.cjs');
+  return curationMoveModule;
+}
+
 /** The bytes each read of stdin asks for. */
 const STDIN_READ_BYTES = 64 * 1024;
 
@@ -548,7 +562,7 @@ try {
     // -------------------------------------------------------------------------
     // move-ledger <root> <old> <new>
     // Move the project's old ledger folder to the new name, once (moveLedger,
-    // curation-store.cjs). Not a curation op: it sends no heartbeat, because a
+    // curation-move.cjs). Not a curation op: it sends no heartbeat, because a
     // heartbeat would refresh a claim the move has to judge stale. Unlike the
     // curation ops it takes its paths as arguments, so a caller outside the project
     // root can name the root; every path stays one argv word, never a shell word.
@@ -560,7 +574,7 @@ try {
     case 'move-ledger': {
       if (args.length !== 3) exitWithUsage('move-ledger <root> <old-folder> <new-folder> (the root is an absolute path)');
       const { store } = curation();
-      process.exitCode = emit(store.moveLedger(args[0], { oldName: args[1], newName: args[2] }), moved => [
+      process.exitCode = emit(curationMove().moveLedger(args[0], { oldName: args[1], newName: args[2] }), moved => [
         moved.state === 'moved' ? `moved ${moved.mode}` : moved.state,
         ...(moved.state === 'moved' && moved.backup !== null ? [`backup ${moved.backup}`] : []),
         ...moved.notes.map(note => `note ${note}`),

@@ -344,6 +344,7 @@ x .devflow/scripts/hooks/is-hex-sha
 x .devflow/scripts/hooks/json-helper.cjs
 x .devflow/scripts/hooks/json-parse
 d .devflow/scripts/hooks/lib/
+x .devflow/scripts/hooks/lib/curation-move.cjs
 x .devflow/scripts/hooks/lib/curation-store.cjs
 x .devflow/scripts/hooks/lib/decisions-format.cjs
 x .devflow/scripts/hooks/lib/mkdir-lock.cjs

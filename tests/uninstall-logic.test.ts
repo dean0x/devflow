@@ -9,9 +9,14 @@ import { DEVFLOW_PLUGINS, getAllAgentNames, parsePluginSelection, skillsOf, type
 import { TRACKER_ATTEMPTS_NAMES, TRACKER_PROVIDER_IDS, TRACKER_STAGED_PREFIX } from '../src/core/tracker.js';
 import { modelCacheDir } from '../src/core/cache.js';
 import { CLAUDE_MD_AUDIT_STAMP_FILE, CLAUDE_MD_AUDIT_STAMP_TMP_PREFIX } from '../src/core/claude-md-audit.js';
-import { loadCurationStore } from '../src/core/curation-store.js';
+import { createRequire } from 'module';
+import { PROJECT_PATHS } from './decisions/curation-fixtures.js';
 import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
 import { DEVFLOW_GITIGNORE_BLOCK, DEVFLOW_TRACKED_PATHS } from '../src/targets/claude-code/post-install.js';
+
+/** The machine-side path helpers the hooks and the move share (the move lock and journal names). */
+const projectPaths = (): { curationMoveLockKey(root: string): string; curationMoveJournalPath(machineDir: string, realRoot: string): string } =>
+  createRequire(import.meta.url)(PROJECT_PATHS);
 
 describe('computeAssetsToRemove: the retained set comes from what is INSTALLED', () => {
   const byName = (name: string) => DEVFLOW_PLUGINS.find(p => p.name === name)!;
@@ -912,9 +917,7 @@ describe('the move-lock family (installArtifactPaths and resolveInstallArtifactP
   });
 
   it('the lock name the store builds has the shape the artifact list matches', () => {
-    const loaded = loadCurationStore();
-    if (!loaded.ok) throw new Error('the store must load');
-    const key = (loaded.value as unknown as { curationMoveLockKey(root: string): string }).curationMoveLockKey('/some/ledger/root');
+    const key = projectPaths().curationMoveLockKey('/some/ledger/root');
     expect(key).toMatch(/^[0-9a-f]{16}$/);
     expect(path.basename(path.join(tmpDir, lockName(key)))).toBe(lockName(key));
   });
@@ -1014,10 +1017,7 @@ describe('the move-journal family (installArtifactPaths and resolveInstallArtifa
   });
 
   it('the journal name the store builds has the shape the artifact list matches', async () => {
-    const loaded = loadCurationStore();
-    if (!loaded.ok) throw new Error('the store must load');
-    const store = loaded.value as unknown as { curationMoveJournalPath(machineDir: string, realRoot: string): string };
-    const built = store.curationMoveJournalPath(tmpDir, '/some/ledger/root');
+    const built = projectPaths().curationMoveJournalPath(tmpDir, '/some/ledger/root');
     expect(path.dirname(built)).toBe(tmpDir);
     await fs.writeFile(built, '{}', 'utf-8');
     expect((await resolveInstallArtifactPaths(tmpDir)).map(e => e.relPath)).toContain(path.basename(built));

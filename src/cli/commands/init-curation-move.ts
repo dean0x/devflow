@@ -38,11 +38,11 @@ import { describeEchoedValue } from '../../core/echo-value.js';
 import type { LedgerRootLookup } from '../../core/ledger-root.js';
 import { CURATION_DIR_NAME, CURATION_TUNING_FILE_NAME, LEGACY_NAMES, getGlobalCurateTuningConfigPath } from '../../core/project-paths.js';
 import type {
-  CurationStoreModule,
+  CurationMoveModule,
   LedgerMoveOptions,
   LedgerMoveOutcome,
   LedgerSweepOutcome,
-} from '../../core/curation-store.js';
+} from '../../core/curation-move.js';
 
 /** At most this many projects are probed or moved at once (the migration runner's pool). */
 export const MOVE_POOL_LIMIT = 16;
@@ -93,7 +93,7 @@ export interface ProjectLedgerMoveIO {
   /** The names directly inside a directory, or null when it cannot be listed. */
   readdir(dir: string): Promise<readonly string[] | null>;
   /** The store's two move operations. */
-  readonly store: Pick<CurationStoreModule, 'moveLedger' | 'sweepLedgerBackups'>;
+  readonly store: Pick<CurationMoveModule, 'moveLedger' | 'sweepLedgerBackups'>;
   /** Epoch milliseconds. */
   now(): number;
 }

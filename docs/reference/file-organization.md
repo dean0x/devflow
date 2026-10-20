@@ -32,6 +32,7 @@ devflow/
 │   │   ├── git.ts                    # getGitRoot
 │   │   ├── project-paths.ts          # Per-project .devflow/ path construction
 │   │   ├── curation-store.ts         # Typed seam onto hooks/lib/curation-store.cjs, the store `devflow curation` runs
+│   │   ├── curation-move.ts          # Typed seam onto hooks/lib/curation-move.cjs, the one-time move of the old ledger folder
 │   │   └── ...                       # feature-config.ts, curate-tuning-config.ts, …
 │   ├── hud/                          # HUD module (TypeScript source)
 │   │   ├── index.ts                  # Entry point: stdin → gather → render → stdout
@@ -125,6 +126,7 @@ devflow/
 │               └── lib/                  # Node.js helper modules
 │                   ├── decisions-format.cjs # Entry body, Inactive table and index line formatters
 │                   ├── curation-store.cjs  # The curation store: validation, projection, history, the lock; every curation read and write
+│                   ├── curation-move.cjs   # The one-time move of the old ledger folder to its new name, the backup sweep and the backup row count
 │                   ├── mkdir-lock.cjs      # mkdir-based lock helpers
 │                   ├── project-paths.cjs   # Project slug + path resolution
 │                   ├── render-decisions.cjs # Renders decisions.md, pitfalls.md and index.md from the ledger (render / --check CLI)

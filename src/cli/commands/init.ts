@@ -10,7 +10,8 @@ import { isSameLocation, withoutHomeRoots } from '../../core/same-location.js';
 import { pruneHookLogDirs, MAX_HOOK_LOG_DIRS, type LogDirPruneReport } from '../../core/hook-log-dirs.js';
 import { getLedgerRoot } from '../../core/ledger-root.js';
 import { CURATION_DIR_NAME, LEGACY_NAMES } from '../../core/project-paths.js';
-import { formatCurationStoreUnavailable, loadCurationStore } from '../../core/curation-store.js';
+import { formatCurationStoreUnavailable } from '../../core/curation-store.js';
+import { loadCurationMove } from '../../core/curation-move.js';
 import { describeMoveText, runInitCurationMove, type InitCurationMoveReport } from './init-curation-move.js';
 import { realGlobalTuningMoveIO, realProjectLedgerMoveIO } from './curation-move-io.js';
 import { describeEchoedValue } from '../../core/echo-value.js';
@@ -671,7 +672,7 @@ export async function moveCurationData(opts: {
   homeDir: string;
   devflowDir: string;
 }): Promise<InitCurationMoveReport> {
-  const loaded = loadCurationStore();
+  const loaded = loadCurationMove();
   return runInitCurationMove(
     {
       projectRoots: projectRoots([...opts.discoveredProjects], opts.gitRoot),

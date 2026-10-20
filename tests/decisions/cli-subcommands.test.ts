@@ -17,6 +17,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { createRequire } from 'module';
 
 // ---------------------------------------------------------------------------
 // Mocks — all set up before any imports from the module under test.
@@ -58,7 +59,6 @@ vi.mock('@clack/prompts', () => ({
 import { getLedgerRoot } from '../../src/core/ledger-root.js';
 import { getDevFlowDirectory } from '../../src/targets/claude-code/claude-paths.js';
 import { curationCommand } from '../../src/cli/commands/curation.js';
-import { loadCurationStore } from '../../src/core/curation-store.js';
 import * as p from '@clack/prompts';
 import {
   curationMoveMarkerKey,
@@ -73,6 +73,7 @@ import {
   makeV1LogRow,
   makeV2LedgerRow,
   makeV2LogRow,
+  PROJECT_PATHS,
   requireCurationStore,
   seedCurationTree,
   snapshotTree,
@@ -82,6 +83,7 @@ import {
 } from './curation-fixtures.js';
 
 const store = requireCurationStore();
+const { curationMoveLockKey } = createRequire(import.meta.url)(PROJECT_PATHS) as { curationMoveLockKey(realRoot: string): string };
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -220,9 +222,7 @@ function seedOldFolder(dir: string, claimed = false): string {
 
 /** Hold the move lock of `dir` as another mover would, under the machine directory. */
 function holdMoveLock(machineDir: string, dir: string): string {
-  const loaded = loadCurationStore();
-  if (!loaded.ok) throw new Error('the store must load');
-  const lock = path.join(machineDir, `.curation-move-${loaded.value.curationMoveLockKey(fs.realpathSync(dir))}.lock`);
+  const lock = path.join(machineDir, `.curation-move-${curationMoveLockKey(fs.realpathSync(dir))}.lock`);
   fs.mkdirSync(lock);
   return lock;
 }

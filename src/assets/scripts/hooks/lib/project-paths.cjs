@@ -13,6 +13,7 @@
 
 'use strict';
 
+const crypto = require('crypto');
 const path = require('path');
 
 // ---------------------------------------------------------------------------
@@ -198,6 +199,48 @@ function getResearchDir(projectRoot) {
   return path.join(projectRoot, '.devflow', 'docs', 'research');
 }
 
+// ---------------------------------------------------------------------------
+// The ledger move's machine-side names
+// ---------------------------------------------------------------------------
+//
+// Not project paths: the move lock and the move journal stand in the machine
+// directory (`$HOME/.devflow`), keyed by the ledger root, never inside a repository.
+// They sit here, and not in curation-move.cjs, because the store's write guard reads
+// the journal and must not load the move module to do it. CJS only: no TypeScript code
+// builds them (a named exception of the export parity test).
+
+/** A move lock is `<prefix><16 hex characters of the root key><suffix>` in the machine directory. */
+const MOVE_LOCK_PREFIX = '.curation-move-';
+const MOVE_LOCK_SUFFIX = '.lock';
+
+/** A move journal is `<prefix><16 hex characters of the root key><suffix>` in the machine directory, next to the move lock. */
+const MOVE_JOURNAL_SUFFIX = '.journal';
+
+/**
+ * The key of a ledger root's move lock: the first 16 hex characters of the sha256 of
+ * the root's physical path. Two spellings of one root give one key, so two movers
+ * meet at one lock.
+ *
+ * @param {string} realRoot - the root's realpath
+ * @returns {string}
+ */
+function curationMoveLockKey(realRoot) {
+  return crypto.createHash('sha256').update(realRoot).digest('hex').slice(0, 16);
+}
+
+/** The move lock's directory, under the machine directory. */
+function curationMoveLockDir(machineDir, realRoot) {
+  return path.join(machineDir, `${MOVE_LOCK_PREFIX}${curationMoveLockKey(realRoot)}${MOVE_LOCK_SUFFIX}`);
+}
+
+/**
+ * The move journal's file, under the machine directory and keyed exactly like the move
+ * lock. While it exists every store write on the root returns busy.
+ */
+function curationMoveJournalPath(machineDir, realRoot) {
+  return path.join(machineDir, `${MOVE_LOCK_PREFIX}${curationMoveLockKey(realRoot)}${MOVE_JOURNAL_SUFFIX}`);
+}
+
 module.exports = {
   // The rename's names
   LEGACY_NAMES,
@@ -235,4 +278,8 @@ module.exports = {
   getReviewsDir,
   getDesignDir,
   getResearchDir,
+  // The ledger move's machine-side names
+  curationMoveLockKey,
+  curationMoveLockDir,
+  curationMoveJournalPath,
 };

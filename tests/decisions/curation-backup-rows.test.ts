@@ -12,9 +12,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { requireCurationStore, snapshotTree } from './curation-fixtures.js';
+import { requireCurationMove, snapshotTree } from './curation-fixtures.js';
 
-const store = requireCurationStore();
+const store = requireCurationMove();
 
 const STAMP = '20261017T020304Z';
 const rows = (count: number): string => '{"role":"user"}\n'.repeat(count);

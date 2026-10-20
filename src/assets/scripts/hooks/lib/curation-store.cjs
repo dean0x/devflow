@@ -14,9 +14,10 @@
 // decisions-format.cjs or render-decisions.cjs at load time: both require it, for
 // the status list and the one-line and inactive-note text they share with `list`.
 //
-// The module also holds the one-time move of the old ledger folder to its new name
-// (moveLedger, sweepLedgerBackups, and the read-only backupPendingRows that status uses):
-// the one place that names both folders.
+// The one-time move of the old ledger folder to its new name is not here: it lives in
+// curation-move.cjs, which requires this module. The store holds only the guard that
+// keeps its writers off an unfinished move (withDecisionsLock reads the move journal),
+// so a store write loads no move code.
 //
 // Files under <root>/.devflow/curation/:
 //   decisions-log.jsonl          observation rows — the content authority
@@ -44,7 +45,6 @@ const { execFileSync } = require('child_process');
 
 const {
   LEGACY_NAMES,
-  CURATION_TUNING_FILE_NAME,
   getCurationDir,
   getCurationPendingTurnsPath,
   getCurationPendingTurnsProcessingPath,
@@ -54,9 +54,7 @@ const {
   getDecisionsArchivePath,
   getDecisionsHistoryPath,
   getDecisionsLockDir,
-  getDecisionsFilePath,
-  getPitfallsFilePath,
-  getDecisionsIndexPath,
+  curationMoveJournalPath,
 } = require('./project-paths.cjs');
 const { acquireMkdirLock, releaseLock } = require('./mkdir-lock.cjs');
 const { safePath } = require('./safe-path.cjs');
@@ -630,6 +628,78 @@ function linkedFolder(opName, dir) {
   };
 }
 
+/** The Stats of `file` without following a link, or null when nothing is there. */
+function lstatOrNull(file) {
+  try {
+    return fs.lstatSync(file);
+  } catch (err) {
+    if (err && (err.code === 'ENOENT' || err.code === 'ENOTDIR')) return null;
+    throw err;
+  }
+}
+
+/** The physical path of `target`, or its resolved path when it does not exist yet. */
+function physicalPath(target) {
+  try {
+    return fs.realpathSync(target);
+  } catch (err) {
+    if (err && (err.code === 'ENOENT' || err.code === 'ENOTDIR')) return path.resolve(target);
+    throw err;
+  }
+}
+
+/** The home directory: `HOME`, else the passwd entry, else null. */
+function homeDirOrNull() {
+  if (process.env.HOME) return process.env.HOME;
+  try {
+    return os.homedir() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Where a root's move journal is, resolved the way moveLedger resolves its machine
+ * directory (`$HOME/.devflow`) and the root's key (the root's physical path); null when
+ * no home directory is known.
+ */
+function moveJournalPathOrNull(root) {
+  const home = homeDirOrNull();
+  if (home === null) return null;
+  return curationMoveJournalPath(path.join(home, '.devflow'), physicalPath(path.resolve(root)));
+}
+
+/**
+ * Remove a machine-side journal whose old folder is gone: it has no set left to
+ * finish. Only a regular file is removed, never a link or any other entry, and nothing
+ * is followed.
+ *
+ * @param {string} journal
+ * @returns {string[]} one note when a journal was removed, else none
+ */
+function dropStaleMoveJournal(journal) {
+  const stat = lstatOrNull(journal);
+  if (stat === null || !stat.isFile()) return [];
+  removeIfPresent(journal);
+  return ['removed a move journal that no old folder was left to finish'];
+}
+
+/**
+ * Whether the journal at `journal` holds store writers off: it exists and the old
+ * folder it belongs to still exists. A journal whose old folder is gone is stale and is
+ * dropped (dropStaleMoveJournal), and the writer goes on.
+ *
+ * @param {string} journal
+ * @param {string} oldFolder
+ * @returns {boolean}
+ */
+function moveJournalHoldsWriters(journal, oldFolder) {
+  if (lstatOrNull(journal) === null) return false;
+  if (lstatOrNull(oldFolder) !== null) return true;
+  dropStaleMoveJournal(journal);
+  return false;
+}
+
 /** True for a Result: `{ ok: true, … }` or `{ ok: false, error: { … } }`. */
 function isResult(value) {
   return isPlainObject(value) && (value.ok === true || (value.ok === false && isPlainObject(value.error)));
@@ -653,7 +723,7 @@ function isResult(value) {
  * tree there and write a ledger that no session ever reads.
  *
  * An unfinished ledger move (a move journal in the machine directory, next to the move
- * lock, see moveLedger) makes every writer answer `busy` without taking the lock, so no
+ * lock, see moveLedger in curation-move.cjs) makes every writer answer `busy` without taking the lock, so no
  * write lands between two renames of the move's ledger set. The journal is checked
  * again once the lock is held: a move can start, and stop part way through the set,
  * while the writer waits for the lock. Only the machine-side file counts, and only
@@ -1668,1160 +1738,6 @@ function touchClaim(root, { now = Date.now() } = {}) {
     };
   }
   return { ok: true, value: { touched: true } };
-}
-
-// ---------------------------------------------------------------------------
-// The one-time ledger move
-// ---------------------------------------------------------------------------
-//
-// moveLedger renames a project's old ledger folder to the new name once, or, when
-// the new folder already exists, merges the old one into it. The two folder names
-// are arguments, so the move does not depend on which folder the path helpers name.
-// The move takes its locks without waiting, because a hook that waited on a crashed
-// mover would stall every event; it never copies (a failed rename is an error, never
-// a fallback to a copy); and it moves no ledger row across the two folders: a losing
-// set goes to the backup whole.
-//
-// D-ONE-LEARNING-LOCK holds for every other writer. The move is the one exception
-// to "one lock": it takes the move lock under the machine directory (keyed by the
-// ledger root, never inside a repository) together with each folder's own store
-// lock and queue lock, all with no wait, so a busy writer makes the move busy
-// instead of the move waiting on it.
-
-/** Age after which a move lock counts as abandoned (ms). */
-const MOVE_LOCK_STALE_MS = 60000;
-
-/** A move lock is `<prefix><16 hex characters of the root key><suffix>` in the machine directory. */
-const MOVE_LOCK_PREFIX = '.curation-move-';
-const MOVE_LOCK_SUFFIX = '.lock';
-
-/** A move journal is `<prefix><16 hex characters of the root key><suffix>` in the machine directory, next to the move lock. */
-const MOVE_JOURNAL_SUFFIX = '.journal';
-
-/**
- * The name a journal would have inside the old folder. The move never writes one
- * there and never reads one: a file of this name is repository content, an unknown
- * entry that stays in the backup. It never refuses a move, and it never steers one;
- * it only takes a move that would rename the whole folder onto the per-entry path,
- * so that the file stays in a backup and does not reach the live folder.
- */
-const OLD_FOLDER_JOURNAL_NAME = '.curation-move.journal';
-
-/** The most the journal is read at: far above any journal this module writes. */
-const MOVE_JOURNAL_MAX_BYTES = 64 * 1024;
-
-/** The most entries of a folder the move reads: past it the move refuses. */
-const MOVE_MAX_ENTRIES = 5000;
-
-/** The most backup folders one sweep reads. */
-const MOVE_MAX_BACKUPS = 50;
-
-/** The name of a path helper's file, whichever project it names. */
-const nameOfHelper = helper => path.basename(helper(path.sep));
-
-/** The four files of the ledger set, in the order the move renames them: the ledger last. */
-const SET_MEMBERS = Object.freeze([
-  getDecisionsLogPath, getDecisionsArchivePath, getDecisionsHistoryPath, getDecisionsLedgerPath,
-].map(nameOfHelper));
-const LEDGER_NAME = SET_MEMBERS[SET_MEMBERS.length - 1];
-
-const QUEUE_NAME = nameOfHelper(getCurationPendingTurnsPath);
-const CLAIM_NAME = nameOfHelper(getCurationPendingTurnsProcessingPath);
-const OWNER_NAME = nameOfHelper(getCurationClaimOwnerPath);
-const STORE_LOCK_NAME = nameOfHelper(getDecisionsLockDir);
-const QUEUE_LOCK_NAME = `${QUEUE_NAME}.lock`;
-
-/** Recovery files the store makes next to its files: quarantined lines, one-time v1 copies. */
-const RECOVERY_FILE_RE = /\.(?:rejected|pre-v2)\.jsonl$/;
-
-/** The names the move knows and handles by a rule of their own. */
-const MOVE_KNOWN_NAMES = new Set([
-  ...SET_MEMBERS, QUEUE_NAME, CLAIM_NAME, OWNER_NAME, STORE_LOCK_NAME, QUEUE_LOCK_NAME,
-  LEGACY_NAMES.tuningFile, CURATION_TUNING_FILE_NAME,
-]);
-
-/** The tail of a private, swept or overflow queue file's name: a UTC stamp and eight random hex characters. */
-const MOVE_UNIQUE_TAIL_RE = '\\d{8}T\\d{6}Z-[0-9a-f]{8}';
-
-/** `text` with every character that means something in a regular expression escaped. */
-const escapeRegExp = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-/** The name of a queue file in one of the forms the move makes: `<base>.<word>-<stamp>-<hex>`. */
-const queueFormRe = (base, word) => new RegExp(`^${escapeRegExp(base)}\\.${word}-${MOVE_UNIQUE_TAIL_RE}$`);
-
-/**
- * The forms of queue file the move makes. A private file is the queue (or a stale
- * claim's batch) renamed to a unique name before it is read; a swept file is a private
- * or overflow file whose lines are all merged; an overflow file holds the lines that
- * did not fit under the queue's cap. Only the queue and the claim file themselves are
- * ever renamed to a private name, and swept files are never read again.
- */
-const QUEUE_FORMS = Object.freeze([
-  { form: 'private', base: QUEUE_NAME, re: queueFormRe(QUEUE_NAME, 'merging') },
-  { form: 'private', base: CLAIM_NAME, re: queueFormRe(CLAIM_NAME, 'merging') },
-  { form: 'swept', base: QUEUE_NAME, re: queueFormRe(QUEUE_NAME, 'swept') },
-  { form: 'swept', base: CLAIM_NAME, re: queueFormRe(CLAIM_NAME, 'swept') },
-  { form: 'overflow', base: QUEUE_NAME, re: queueFormRe(QUEUE_NAME, 'overflow') },
-]);
-
-/** The form record of a queue file's name, or null when the name is none of the forms. */
-function queueFormOf(name) {
-  return QUEUE_FORMS.find(entry => entry.re.test(name)) || null;
-}
-
-/** True for a folder name the move accepts: one plain name, never a path. */
-const isFolderName = name => typeof name === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(name);
-
-/** The Stats of `file` without following a link, or null when nothing is there. */
-function lstatOrNull(file) {
-  try {
-    return fs.lstatSync(file);
-  } catch (err) {
-    if (err && (err.code === 'ENOENT' || err.code === 'ENOTDIR')) return null;
-    throw err;
-  }
-}
-
-/** The physical path of `target`, or its resolved path when it does not exist yet. */
-function physicalPath(target) {
-  try {
-    return fs.realpathSync(target);
-  } catch (err) {
-    if (err && (err.code === 'ENOENT' || err.code === 'ENOTDIR')) return path.resolve(target);
-    throw err;
-  }
-}
-
-/** The home directory: `HOME`, else the passwd entry, else null. */
-function homeDirOrNull() {
-  if (process.env.HOME) return process.env.HOME;
-  try {
-    return os.homedir() || null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * The key of a ledger root's move lock: the first 16 hex characters of the sha256 of
- * the root's physical path. Two spellings of one root give one key, so two movers
- * meet at one lock.
- *
- * @param {string} realRoot - the root's realpath
- * @returns {string}
- */
-function curationMoveLockKey(realRoot) {
-  return crypto.createHash('sha256').update(realRoot).digest('hex').slice(0, 16);
-}
-
-/** The move lock's directory, under the machine directory. */
-function curationMoveLockDir(machineDir, realRoot) {
-  return path.join(machineDir, `${MOVE_LOCK_PREFIX}${curationMoveLockKey(realRoot)}${MOVE_LOCK_SUFFIX}`);
-}
-
-/**
- * The move journal's file, under the machine directory and keyed exactly like the move
- * lock. While it exists every store write on the root returns busy.
- */
-function curationMoveJournalPath(machineDir, realRoot) {
-  return path.join(machineDir, `${MOVE_LOCK_PREFIX}${curationMoveLockKey(realRoot)}${MOVE_JOURNAL_SUFFIX}`);
-}
-
-/**
- * Where a root's move journal is, resolved the way moveLedger resolves its machine
- * directory (`$HOME/.devflow`) and the root's key (the root's physical path); null when
- * no home directory is known.
- */
-function moveJournalPathOrNull(root) {
-  const home = homeDirOrNull();
-  if (home === null) return null;
-  return curationMoveJournalPath(path.join(home, '.devflow'), physicalPath(path.resolve(root)));
-}
-
-/**
- * Remove a machine-side journal whose old folder is gone: it has no set left to
- * finish. Only a regular file is removed, never a link or any other entry, and nothing
- * is followed.
- *
- * @param {string} journal
- * @returns {string[]} one note when a journal was removed, else none
- */
-function dropStaleMoveJournal(journal) {
-  const stat = lstatOrNull(journal);
-  if (stat === null || !stat.isFile()) return [];
-  removeIfPresent(journal);
-  return ['removed a move journal that no old folder was left to finish'];
-}
-
-/**
- * Whether the journal at `journal` holds store writers off: it exists and the old
- * folder it belongs to still exists. A journal whose old folder is gone is stale and is
- * dropped (dropStaleMoveJournal), and the writer goes on.
- *
- * @param {string} journal
- * @param {string} oldFolder
- * @returns {boolean}
- */
-function moveJournalHoldsWriters(journal, oldFolder) {
-  if (lstatOrNull(journal) === null) return false;
-  if (lstatOrNull(oldFolder) !== null) return true;
-  dropStaleMoveJournal(journal);
-  return false;
-}
-
-/**
- * The error Result of a move that was refused before it changed anything.
- *
- * @param {string} message
- */
-function moveRefused(message) {
-  return { ok: false, error: { kind: 'refused', message: `move-ledger: ${message}; nothing was changed` } };
-}
-
-/**
- * The error Result of an I/O failure during a move, or a rethrow for anything else.
- * A failure that carries an fs error code is an expected outcome the caller reports;
- * one without a code is a broken invariant and reaches the caller as a throw.
- *
- * @param {unknown} err
- */
-function moveIoFailure(err) {
-  if (!err || typeof err.code !== 'string') throw err;
-  return { ok: false, error: { kind: 'io-error', message: `move-ledger: ${err.code}: ${err.message}` } };
-}
-
-/**
- * `result` with every message and note on one line (singleLine). A name that a
- * repository holds (an entry, a backup folder) reaches a message through a path, and a
- * name may carry a terminal escape sequence or a newline, so no message leaves the move
- * ops with one. Answers a new Result and leaves `result` as it is.
- *
- * @param {{ ok: true, value: { notes?: string[] } } | { ok: false, error: { message: string } }} result
- */
-function scrubMoveResult(result) {
-  if (!result.ok) return { ok: false, error: { ...result.error, message: singleLine(result.error.message) } };
-  const { notes } = result.value;
-  return Array.isArray(notes) ? { ok: true, value: { ...result.value, notes: notes.map(singleLine) } } : result;
-}
-
-/**
- * What is wrong with an entry the move will read or rename, or null when nothing is:
- * a link is, and so is anything but an empty directory where a lock belongs, because
- * a lock path holding a file, or a directory with something in it, can never be taken
- * or broken, and acquireMkdirLock would retry it for ever. An absent entry is fine.
- *
- * @param {string} file
- * @param {{ lock?: boolean }} [opts]
- * @returns {string|null}
- */
-function moveEntryProblem(file, { lock = false } = {}) {
-  const stat = lstatOrNull(file);
-  if (stat === null) return null;
-  if (stat.isSymbolicLink()) return `${file} is a symbolic link`;
-  if (lock && !stat.isDirectory()) return `${file} is not a lock directory`;
-  if (lock && fs.readdirSync(file).length > 0) return `${file} is a lock directory that holds files`;
-  return null;
-}
-
-/**
- * Check a ledger root before the move reads or changes anything in it, and answer
- * its physical path. The root must be a real ledger root: an absolute path to a
- * directory that is not a link, not the home directory and not the machine
- * directory. If any entry below the root that the move touches is a link, the move
- * is refused: the root's `.devflow` directory, the old and new folders, each lock,
- * and each allowlisted entry of both folders; in the whole-folder case every entry
- * directly inside the old folder, because the single rename carries any link with
- * it. The machine directory itself is not checked: a dotfile manager may link it, but
- * the move lock and the journal that stand in it must not be links, and the journal
- * must be a regular file. A file named like a journal in the old folder is no journal:
- * it is an unknown entry.
- * Nothing is created and nothing is locked here.
- *
- * @param {unknown} root
- * @param {{ oldName: string, newName: string, machineDir: string, homeDir: string|null }} names
- * @returns {{ ok: true, value: { realRoot: string } } | { ok: false, error: { kind: 'refused', message: string } }}
- */
-function curationMoveRefusal(root, { oldName, newName, machineDir, homeDir }) {
-  if (typeof root !== 'string' || root === '' || root.includes('\0') || !path.isAbsolute(root)) {
-    return moveRefused('the ledger root must be an absolute path');
-  }
-  const rootPath = path.resolve(root);
-  const rootStat = lstatOrNull(rootPath);
-  if (rootStat === null || !(rootStat.isDirectory() || rootStat.isSymbolicLink())) {
-    return moveRefused(`${rootPath} is not a directory`);
-  }
-  if (rootStat.isSymbolicLink()) return moveRefused(`the ledger root ${rootPath} is a symbolic link`);
-  const realRoot = fs.realpathSync(rootPath);
-  if (homeDir && physicalPath(homeDir) === realRoot) return moveRefused('the ledger root is the home directory');
-  if (physicalPath(machineDir) === realRoot) return moveRefused('the ledger root is the machine directory');
-
-  const devflowDir = path.join(rootPath, '.devflow');
-  const oldDir = path.join(devflowDir, oldName);
-  const newDir = path.join(devflowDir, newName);
-  const dirs = [];
-  for (const dir of [devflowDir, oldDir, newDir]) {
-    const stat = lstatOrNull(dir);
-    if (stat === null) continue;
-    if (stat.isSymbolicLink()) return moveRefused(`${dir} is a symbolic link`);
-    if (!stat.isDirectory()) return moveRefused(`${dir} is not a directory`);
-    dirs.push(dir);
-  }
-
-  const lockProblem = moveEntryProblem(curationMoveLockDir(machineDir, realRoot), { lock: true });
-  if (lockProblem !== null) return moveRefused(lockProblem);
-  const journal = curationMoveJournalPath(machineDir, realRoot);
-  const journalStat = lstatOrNull(journal);
-  if (journalStat !== null && !journalStat.isFile()) return moveRefused(`${journal} is not a regular file`);
-
-  const wholeFolder = dirs.includes(oldDir) && !dirs.includes(newDir);
-  for (const dir of dirs.filter(d => d !== devflowDir)) {
-    const entries = fs.readdirSync(dir);
-    if (entries.length > MOVE_MAX_ENTRIES) return moveRefused(`${dir} holds more than ${MOVE_MAX_ENTRIES} entries`);
-    for (const entry of entries) {
-      const checked = (wholeFolder && dir === oldDir) || MOVE_KNOWN_NAMES.has(entry)
-        || RECOVERY_FILE_RE.test(entry) || queueFormOf(entry) !== null || DISPLACED_RES.some(re => re.test(entry));
-      if (!checked) continue;
-      const problem = moveEntryProblem(path.join(dir, entry), { lock: entry === STORE_LOCK_NAME || entry === QUEUE_LOCK_NAME });
-      if (problem !== null) return moveRefused(problem);
-    }
-  }
-  return { ok: true, value: { realRoot } };
-}
-
-/**
- * Take every lock in `specs`, in order, each with no wait: a lock that is held and
- * younger than its own stale age makes the whole attempt busy, and the locks already
- * taken are released first. Locks are plain mkdir locks (acquireMkdirLock).
- *
- * @param {Array<{ name: string, dir: string, staleMs: number }>} specs
- * @returns {{ busy: string|null, held: Array<{ name: string, dir: string }> }}
- *   busy: the name of the lock that was busy, else null; held: the locks taken
- *   (empty when busy)
- * @throws on any other I/O failure, after releasing the locks it took
- */
-function curationMoveLockAll(specs) {
-  const held = [];
-  try {
-    for (const spec of specs) {
-      if (!acquireMkdirLock(spec.dir, 0, spec.staleMs)) {
-        curationMoveReleaseAll(held);
-        return { busy: spec.name, held: [] };
-      }
-      held.push({ name: spec.name, dir: spec.dir });
-    }
-  } catch (err) {
-    curationMoveReleaseAll(held);
-    throw err;
-  }
-  return { busy: null, held };
-}
-
-/**
- * Release the locks `curationMoveLockAll` took, newest first, each at the path it is
- * given. A lock that is already gone is fine.
- *
- * @param {Array<{ dir: string }>} held
- */
-function curationMoveReleaseAll(held) {
-  for (let i = held.length - 1; i >= 0; i--) releaseLock(held[i].dir);
-}
-
-/** `held` with every lock that sits under `from` now under `to`, after a rename of that folder. */
-function relocateLocks(held, from, to) {
-  return held.map(lock => (lock.dir.startsWith(from + path.sep)
-    ? { ...lock, dir: path.join(to, lock.dir.slice(from.length + 1)) }
-    : lock));
-}
-
-/**
- * The whole-folder case: the new folder is absent, so the old folder is renamed to
- * it. The project tuning file is renamed first, inside the old folder, so a crash
- * between the two renames leaves only a renamed tuning file, and a rerun renames just
- * the folder; a `curation.json` already there stays the tuning file. No per-entry rule
- * applies: one rename(2) carries the whole folder, its locks included. A private,
- * swept or overflow queue file sitting directly in the old folder refuses the move,
- * because the rename would carry it into the live folder, where no sweep reads it. A
- * file named like a journal never gets here: moveLedger takes the per-entry path for it.
- *
- * @param {{ oldDir: string, newDir: string }} ctx
- * @returns {{ ok: true, value: { notes: string[] } } | { ok: false, error: { kind: string, message: string } }}
- * @throws on an I/O failure
- */
-function curationMoveWhole(ctx) {
-  const stray = fs.readdirSync(ctx.oldDir).filter(name => queueFormOf(name) !== null);
-  if (stray.length > 0) {
-    return moveRefused(`${path.basename(ctx.oldDir)} holds ${stray.join(', ')}, which must not move into the live folder`);
-  }
-  const tuningFrom = path.join(ctx.oldDir, LEGACY_NAMES.tuningFile);
-  const tuningTo = path.join(ctx.oldDir, CURATION_TUNING_FILE_NAME);
-  const tuning = lstatOrNull(tuningFrom);
-  if (tuning !== null && tuning.isFile() && lstatOrNull(tuningTo) === null) fs.renameSync(tuningFrom, tuningTo);
-  fs.renameSync(ctx.oldDir, ctx.newDir);
-  return { ok: true, value: { notes: [`moved ${path.basename(ctx.oldDir)} to ${path.basename(ctx.newDir)}`] } };
-}
-
-/** Names of the files the renderer writes: the move never carries them, the new folder rebuilds its own. */
-const RENDERED_NAMES = new Set([getDecisionsFilePath, getPitfallsFilePath, getDecisionsIndexPath].map(nameOfHelper));
-
-/** The name a displaced copy of a set member takes: the member, a UTC stamp and a random suffix. */
-const displacedRe = member => new RegExp(`^${escapeRegExp(member)}\\.displaced-${MOVE_UNIQUE_TAIL_RE}$`);
-const DISPLACED_RES = Object.freeze(SET_MEMBERS.map(displacedRe));
-
-/**
- * The most lines a merge fills a pending queue to. It equals the number of lines the
- * capture hooks' trim keeps (`tail -100` in queue-append). That trim starts only above
- * 200 lines, so a merge never takes a queue within reach of it, and no merged row can
- * be dropped by it. A row that does not fit goes to an overflow file.
- */
-const QUEUE_MERGE_CAP_LINES = 100;
-
-/** The largest queue file the move reads, in bytes: far above a queue the cap allows. */
-const QUEUE_FILE_MAX_BYTES = 64 * 1024 * 1024;
-
-/** Age past which an unfinished last line counts as written by a dead writer (ms). */
-const DEAD_FRAGMENT_AGE_MS = 60000;
-
-/** The most queue files one pass merges from one folder. */
-const MOVE_MAX_QUEUE_FILES = 200;
-
-/** The most unknown entry names a note lists. */
-const MOVE_MAX_NAMES_LISTED = 20;
-
-/** `YYYYMMDDTHHMMSSZ` for an epoch ms. */
-function utcStamp(now) {
-  return new Date(now).toISOString().replace(/\.\d+Z$/, 'Z').replace(/[-:]/g, '');
-}
-
-/** The unique tail of a name the move makes: a UTC stamp and eight random hex characters. */
-function uniqueTail(now) {
-  return `${utcStamp(now)}-${crypto.randomBytes(4).toString('hex')}`;
-}
-
-/**
- * Rename `from` to `to` without ever replacing an existing `to`: link(2) to the new
- * name, which fails when the name exists, then unlink(2) of the old one. If the
- * unlink fails after the link, the same file is under two names; a later run merges
- * it again and the dedupe keeps that harmless. On a filesystem without hard links
- * (EPERM or ENOTSUP) it renames instead, only where lstat shows the new name free,
- * as the claim does. Any other link failure leaves `from` where it is and throws.
- *
- * @param {string} from
- * @param {string} to
- */
-function renameNoReplace(from, to) {
-  try {
-    fs.linkSync(from, to);
-  } catch (err) {
-    if (!err || !NO_HARD_LINK_CODES.includes(err.code)) throw err;
-    if (lstatOrNull(to) !== null) throw Object.assign(new Error(`${path.basename(to)} already exists`), { code: 'EEXIST' });
-    fs.renameSync(from, to);
-    return;
-  }
-  fs.unlinkSync(from);
-}
-
-/**
- * The text of a queue file, or null when nothing readable is there: a link, a folder
- * or any other non-regular file reads as absent (D-NO-LINKED-READ, at readJsonl).
- *
- * @param {string} file
- * @returns {string|null}
- * @throws on a queue file larger than QUEUE_FILE_MAX_BYTES, or any other read error
- */
-function readQueueText(file) {
-  const stat = lstatOrNull(file);
-  if (stat === null || !stat.isFile()) return null;
-  if (stat.size > QUEUE_FILE_MAX_BYTES) {
-    throw Object.assign(new Error(`${path.basename(file)} is larger than ${QUEUE_FILE_MAX_BYTES} bytes`), { code: 'EFBIG' });
-  }
-  return readTextUnlinked(file, { maxBytes: QUEUE_FILE_MAX_BYTES });
-}
-
-/** Create `file` exclusively, without following a link, at mode 0600, holding `content`. */
-function writeNewPrivateFile(file, content) {
-  const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0);
-  const fd = fs.openSync(file, flags, 0o600);
-  try {
-    fs.writeFileSync(fd, content);
-    fs.fsyncSync(fd);
-  } finally {
-    fs.closeSync(fd);
-  }
-}
-
-/**
- * The pending queue of a target folder, read once: its line count and its non-blank
- * lines. The count is the number of line ends, as the capture hooks' trim counts.
- *
- * @param {string} targetDir
- * @returns {{ count: number, lines: string[] }}
- */
-function readPendingQueue(targetDir) {
-  const text = readQueueText(path.join(targetDir, QUEUE_NAME)) || '';
-  return { count: text.split('\n').length - 1, lines: text.split('\n').filter(line => line.trim() !== '') };
-}
-
-/**
- * The lines a merge must not append again: every non-blank line of the target's
- * processing file, read once for the whole merged file. The pending lines join the set
- * as each merge step reads them (mergeQueueLines).
- *
- * @param {string} targetDir
- * @returns {Set<string>}
- */
-function readClaimedLines(targetDir) {
-  const text = readQueueText(path.join(targetDir, CLAIM_NAME)) || '';
-  return new Set(text.split('\n').filter(line => line.trim() !== ''));
-}
-
-/**
- * Merge the complete `lines` of a queue file into the target folder's pending queue:
- * only the lines it does not already hold verbatim, appended in one write at mode
- * 0600, and only while the queue stays within QUEUE_MERGE_CAP_LINES. The lines that do
- * not fit go to a new overflow file in `fromDir`. The target queue is appended to,
- * never replaced, because a replace would drop an append that lands during the merge.
- * The pending queue is read again before each append, so a capture that landed since
- * the last step counts against the cap.
- *
- * @param {{ now: number }} ctx
- * @param {string[]} lines
- * @param {string} targetDir
- * @param {string} fromDir
- * @param {Set<string>} seen - the lines the target already holds; the step adds what it reads and appends
- * @returns {{ merged: number, overflowed: number }}
- */
-function mergeQueueLines(ctx, lines, targetDir, fromDir, seen) {
-  if (lines.length === 0) return { merged: 0, overflowed: 0 };
-  const pending = readPendingQueue(targetDir);
-  for (const line of pending.lines) seen.add(line);
-  const fresh = lines.filter(line => !seen.has(line));
-  const room = Math.max(0, QUEUE_MERGE_CAP_LINES - pending.count);
-  const fit = fresh.slice(0, room);
-  const over = fresh.slice(room);
-  if (fit.length > 0) {
-    appendNoFollow(path.join(targetDir, QUEUE_NAME), `${fit.join('\n')}\n`, 0o600);
-    for (const line of fit) seen.add(line);
-  }
-  if (over.length > 0) writeNewPrivateFile(path.join(fromDir, `${QUEUE_NAME}.overflow-${uniqueTail(ctx.now)}`), `${over.join('\n')}\n`);
-  return { merged: fit.length, overflowed: over.length };
-}
-
-/** The non-blank lines of `text`, which ends at a line end. */
-const completeLines = text => text.split('\n').filter(line => line.trim() !== '');
-
-/**
- * Merge one private or overflow queue file into the target folder's pending queue,
- * then mark it swept. It reads the file, merges its newline-terminated lines, reads
- * it again and merges whatever a writer appended meanwhile, and renames it to a swept
- * name: a swept file is never unlinked and never read again. A trailing fragment
- * stays unmerged and the file stays unswept for the next run, unless its writer is
- * taken to be dead: the fragment is unchanged across the re-read and the file is
- * older than DEAD_FRAGMENT_AGE_MS, and then it goes to the queue's rejected file
- * through the store's quarantine rule and the file is swept. An overflow file is
- * merged only while the target has room. The target's processing file is read once
- * for the whole merged file.
- *
- * @param {{ now: number }} ctx
- * @param {string} file - the queue file, in a form queueFormOf names
- * @param {string} targetDir - the folder whose pending queue receives the lines
- * @returns {{ merged: number, overflowed: number, swept: boolean, note: string|null }}
- */
-function mergeQueueFile(ctx, file, targetDir) {
-  const dir = path.dirname(file);
-  const record = queueFormOf(path.basename(file));
-  const idle = { merged: 0, overflowed: 0, swept: false, note: null };
-  if (record.form === 'overflow' && readPendingQueue(targetDir).count >= QUEUE_MERGE_CAP_LINES) return idle;
-
-  const first = readQueueText(file);
-  if (first === null) return idle;
-  const seen = readClaimedLines(targetDir);
-  const complete = first.slice(0, first.lastIndexOf('\n') + 1);
-  const fragment = first.slice(complete.length);
-  const one = mergeQueueLines(ctx, completeLines(complete), targetDir, dir, seen);
-
-  const second = readQueueText(file);
-  if (second === null) return { ...one, swept: false, note: null };
-  const rest = second.startsWith(complete) ? second.slice(complete.length) : second;
-  const appended = rest.slice(0, rest.lastIndexOf('\n') + 1);
-  const trailing = rest.slice(appended.length);
-  const two = mergeQueueLines(ctx, completeLines(appended), targetDir, dir, seen);
-  const total = { merged: one.merged + two.merged, overflowed: one.overflowed + two.overflowed };
-
-  let note = null;
-  if (trailing.trim() !== '') {
-    const stat = lstatOrNull(file);
-    const dead = stat !== null && stat.isFile() && trailing === fragment && ctx.now - stat.mtimeMs > DEAD_FRAGMENT_AGE_MS;
-    if (!dead) {
-      return { ...total, swept: false, note: `${path.basename(file)} ends in an unfinished line and stays for the next sweep` };
-    }
-    const line = second.slice(0, second.length - trailing.length).split('\n').length;
-    quarantineRejected(path.join(dir, QUEUE_NAME), [{ line, text: trailing }], { now: ctx.now, mode: 0o600 });
-    note = `${path.basename(file)} ended in an unfinished line from a writer that is gone; it went to the rejected file`;
-  }
-  renameNoReplace(file, path.join(dir, `${record.base}.swept-${uniqueTail(ctx.now)}`));
-  return { ...total, swept: true, note };
-}
-
-/**
- * The queue rule: merge a folder's pending queue (and, for a stale claim, its
- * processing batch) into the target folder's pending queue.
- *
- * Every private file already in the folder (left by a crash or an earlier error) is
- * merged first, before a new private name is made. Then each live queue file in
- * `bases` is renamed, no-replace, to a new private name, so later appends by path
- * create a fresh queue that the next run catches, and the private file goes through
- * mergeQueueFile. With `overflow` set, overflow files are merged too.
- *
- * @param {{ now: number }} ctx
- * @param {{ dir: string, targetDir: string, bases: string[], overflow?: boolean }} opts
- *   dir: the folder holding the files; targetDir: the folder whose queue receives the
- *   lines; bases: the live queue files to rename and merge, in order
- * @returns {{ files: number, merged: number, overflowed: number, notes: string[] }}
- */
-function curationMoveMergeQueue(ctx, { dir, targetDir, bases, overflow = false }) {
-  const total = { files: 0, merged: 0, overflowed: 0, notes: [] };
-  const take = file => {
-    const result = mergeQueueFile(ctx, file, targetDir);
-    total.merged += result.merged;
-    total.overflowed += result.overflowed;
-    if (result.swept) total.files++;
-    if (result.note !== null) total.notes.push(result.note);
-  };
-  const isWanted = name => {
-    const record = queueFormOf(name);
-    return record !== null && (record.form === 'private' || (overflow && record.form === 'overflow'));
-  };
-  const waiting = fs.readdirSync(dir).filter(isWanted).sort().slice(0, MOVE_MAX_QUEUE_FILES);
-  for (const name of waiting) take(path.join(dir, name));
-
-  for (const base of bases) {
-    const live = path.join(dir, base);
-    const stat = lstatOrNull(live);
-    if (stat === null || !stat.isFile()) continue;
-    const privateFile = path.join(dir, `${base}.merging-${uniqueTail(ctx.now)}`);
-    renameNoReplace(live, privateFile);
-    take(privateFile);
-  }
-  return total;
-}
-
-/**
- * The backup sweep, shared by the race close at the end of a move and by init: run the
- * queue rule over a backup folder's pending and processing files and over every unswept
- * private and overflow file in it, into the new folder's pending queue. With the new
- * folder absent it does nothing. The caller holds the move lock and the new folder's
- * queue lock.
- *
- * @param {{ now: number, newDir: string }} ctx
- * @param {string} backupDir
- * @returns {{ files: number, merged: number, overflowed: number, notes: string[] }}
- */
-function curationMoveSweepBackup(ctx, backupDir) {
-  if (lstatOrNull(ctx.newDir) === null) return { files: 0, merged: 0, overflowed: 0, notes: [] };
-  return curationMoveMergeQueue(ctx, { dir: backupDir, targetDir: ctx.newDir, bases: [QUEUE_NAME, CLAIM_NAME], overflow: true });
-}
-
-/** True when the new folder's observation log holds data: it is a regular file with bytes in it. */
-function newFolderHasData(ctx) {
-  const stat = lstatOrNull(path.join(ctx.newDir, SET_MEMBERS[0]));
-  return stat !== null && stat.isFile() && stat.size > 0;
-}
-
-/**
- * What a journal records: a step is either the displacement of the new folder's copy
- * of a set member into the old folder under a displaced name, or the move of the old
- * folder's member into the new folder.
- *
- * @typedef {{ op: 'displace', name: string, to: string } | { op: 'move', name: string }} MoveStep
- */
-
-/**
- * The steps of a journal file, or null when the file is not a journal this module
- * wrote: unreadable, not JSON, or naming anything but a set member and a displaced
- * name of that member. A journal is trusted only that far, and only the machine-side
- * file is ever read: the folders can hold a file a repository committed.
- *
- * @param {string} file
- * @returns {MoveStep[]|null}
- */
-function readMoveJournal(file) {
-  const text = readTextUnlinked(file, { maxBytes: MOVE_JOURNAL_MAX_BYTES });
-  if (text === null) return null;
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return null;
-  }
-  if (!isPlainObject(parsed) || parsed.version !== 1 || !Array.isArray(parsed.steps)) return null;
-  if (parsed.steps.length > SET_MEMBERS.length * 2) return null;
-  const steps = [];
-  for (const step of parsed.steps) {
-    if (!isPlainObject(step)) return null;
-    const index = SET_MEMBERS.indexOf(step.name);
-    if (index === -1) return null;
-    if (step.op === 'move') steps.push({ op: 'move', name: step.name });
-    else if (step.op === 'displace' && typeof step.to === 'string' && DISPLACED_RES[index].test(step.to)) {
-      steps.push({ op: 'displace', name: step.name, to: step.to });
-    } else return null;
-  }
-  return steps;
-}
-
-/** Carry out one journal step when its source still exists and its target does not. Returns whether it renamed. */
-function applyMoveStep(ctx, step) {
-  const from = step.op === 'move' ? path.join(ctx.oldDir, step.name) : path.join(ctx.newDir, step.name);
-  const to = step.op === 'move' ? path.join(ctx.newDir, step.name) : path.join(ctx.oldDir, step.to);
-  if (lstatOrNull(from) === null || lstatOrNull(to) !== null) return false;
-  fs.renameSync(from, to);
-  return true;
-}
-
-/**
- * The set move: the old folder's ledger set moves into the new folder, which has no
- * log data to lose, in a journalled order that a crash cannot leave half done.
- *
- * For each set member the old folder holds, the new folder's copy (empty or not) is
- * first displaced into the old folder under a displaced name, never overwritten; then
- * the members are renamed in, in the fixed order: log, archive, history, and the
- * ledger last. The plan is written first to the root's journal in the machine
- * directory, `ctx.journal` (mode 0600, created exclusively, never through a link), and
- * the journal is removed once the set is complete. Only that file is a journal: one in
- * the old folder is repository content and is never read. If a journal exists when the
- * op starts, the op completes each listed step whose source still exists and whose
- * target does not, and does not decide the winner again. An error before the first
- * rename removes the journal; after one the journal stays and the next run completes
- * it. While a journal exists every store write on the root returns busy.
- *
- * @param {{ oldDir: string, newDir: string, journal: string, now: number }} ctx
- * @returns {{ notes: string[] }}
- * @throws on an I/O failure
- */
-function curationMoveSetWithJournal(ctx) {
-  const notes = [];
-  const journal = ctx.journal;
-  let steps = null;
-  if (lstatOrNull(journal) !== null) {
-    steps = readMoveJournal(journal);
-    if (steps === null) {
-      removeIfPresent(journal);
-      notes.push('removed an unreadable move journal; no rename had been recorded');
-    }
-  }
-  const resumed = steps !== null;
-  if (!resumed) {
-    const members = SET_MEMBERS.filter(name => {
-      const stat = lstatOrNull(path.join(ctx.oldDir, name));
-      return stat !== null && stat.isFile();
-    });
-    steps = [
-      ...members.filter(name => lstatOrNull(path.join(ctx.newDir, name)) !== null)
-        .map(name => ({ op: 'displace', name, to: `${name}.displaced-${uniqueTail(ctx.now)}` })),
-      ...members.map(name => ({ op: 'move', name })),
-    ];
-    if (steps.length === 0) return { notes };
-    try {
-      writeNewPrivateFile(journal, JSON.stringify({ version: 1, steps }));
-    } catch (err) {
-      removeIfPresent(journal);
-      throw err;
-    }
-  }
-  let renamed = 0;
-  try {
-    for (const step of steps) if (applyMoveStep(ctx, step)) renamed++;
-  } catch (err) {
-    if (!resumed && renamed === 0) removeIfPresent(journal);
-    throw err;
-  }
-  removeIfPresent(journal);
-  return { notes };
-}
-
-/**
- * The entries of the old folder other than the ledger set and the queue: the project
- * tuning file moves in under its curation name when the new folder lacks one, and a
- * recovery file (`*.rejected.jsonl`, `*.pre-v2.jsonl`) moves when the new folder lacks
- * a file of that name; otherwise the old one stays in the old folder, which becomes
- * the backup, with one note. Rendered files, locks, claim state and queue forms are
- * never moved. An unknown entry stays and is listed in a note.
- *
- * @param {{ oldDir: string, newDir: string }} ctx
- * @returns {{ notes: string[] }}
- * @throws on an I/O failure
- */
-function curationMoveEntries(ctx) {
-  const notes = [];
-  const entries = fs.readdirSync(ctx.oldDir).sort();
-  const unknown = [];
-  const move = name => {
-    const targetName = name === LEGACY_NAMES.tuningFile ? CURATION_TUNING_FILE_NAME : name;
-    if (lstatOrNull(path.join(ctx.newDir, targetName)) !== null) {
-      notes.push(`${targetName} already exists in ${path.basename(ctx.newDir)}; ${name} stays in the backup`);
-      return;
-    }
-    fs.renameSync(path.join(ctx.oldDir, name), path.join(ctx.newDir, targetName));
-  };
-
-  const tuning = [CURATION_TUNING_FILE_NAME, LEGACY_NAMES.tuningFile]
-    .find(name => { const stat = lstatOrNull(path.join(ctx.oldDir, name)); return stat !== null && stat.isFile(); });
-  if (tuning !== undefined) move(tuning);
-  for (const name of entries) {
-    if (RECOVERY_FILE_RE.test(name)) {
-      const stat = lstatOrNull(path.join(ctx.oldDir, name));
-      if (stat !== null && stat.isFile()) move(name);
-    } else if (!MOVE_KNOWN_NAMES.has(name) && !RENDERED_NAMES.has(name) && queueFormOf(name) === null
-      && !DISPLACED_RES.some(re => re.test(name))) {
-      unknown.push(name);
-    }
-  }
-  if (unknown.length > 0) {
-    const shown = unknown.slice(0, MOVE_MAX_NAMES_LISTED).join(', ');
-    notes.push(`left in the backup, not moved: ${shown}${unknown.length > MOVE_MAX_NAMES_LISTED ? ', ...' : ''}`);
-  }
-  return { notes };
-}
-
-/**
- * The end of a pass, while it holds the new folder's store lock: rebuild the new
- * folder's rendered files, so no index names the old folder; then, when the old folder
- * is still there, rename it to the backup name (the legacy prefix, a UTC stamp and a
- * random suffix) and run the race-close sweep over it, which merges an append that
- * landed in the old folder before the rename. A rebuild or a sweep that fails is
- * reported and does not undo or stop the rest: the move stays done.
- *
- * @param {{ root: string, oldDir: string, newDir: string, devflowDir: string, now: number }} ctx
- * @param {{ whole: boolean }} opts - whole: the folder itself was renamed, so there is no backup
- * @returns {{ notes: string[], rendered: boolean, backup: string|null }}
- * @throws when the backup rename fails
- */
-function curationMoveFinish(ctx, { whole }) {
-  const notes = [];
-  let rendered = true;
-  try {
-    renderAll(ctx.root, readJsonl(path.join(ctx.newDir, LEDGER_NAME)).rows, ctx.newDir);
-  } catch (err) {
-    rendered = false;
-    notes.push(`the rendered files could not be rebuilt (re-render failed: ${err && err.message})`);
-  }
-  if (whole) return { notes, rendered, backup: null };
-
-  let backup = null;
-  for (let attempt = 0; attempt < 5 && backup === null; attempt++) {
-    const name = `${LEGACY_NAMES.backupPrefix}${uniqueTail(ctx.now)}`;
-    if (lstatOrNull(path.join(ctx.devflowDir, name)) === null) backup = name;
-  }
-  if (backup === null) throw Object.assign(new Error('no free backup name'), { code: 'EEXIST' });
-  const backupDir = path.join(ctx.devflowDir, backup);
-  fs.renameSync(ctx.oldDir, backupDir);
-  try {
-    const swept = curationMoveSweepBackup(ctx, backupDir);
-    notes.push(...swept.notes);
-  } catch (err) {
-    notes.push(`the backup sweep stopped (${err && err.code}: ${err && err.message}); the next init finishes it`);
-  }
-  return { notes, rendered, backup };
-}
-
-/**
- * Move a project's old ledger folder to the new name, once.
- *
- * The root must be a real ledger root (curationMoveRefusal). With no old folder the
- * answer is `none` and nothing is locked or created; a journal that is left in the
- * machine directory is stale then and is removed, with one note. Otherwise the machine
- * directory is made if absent, and every lock the pass needs is taken with no wait: the
- * move lock, the old folder's store lock and queue lock, and, when the new folder
- * exists, its two. Any busy lock releases what was taken and answers `busy`; a fresh
- * claim in either folder is busy too. With the new folder absent the whole folder is
- * renamed (curationMoveWhole), unless the old folder holds a file named like a journal:
- * then an empty new folder is made and the pass takes the per-entry path. Errors
- * (EXDEV, EBUSY, EACCES, EROFS, any other I/O failure) answer an `io-error` Result and
- * copy nothing: the old folder stays whole.
- *
- * @param {unknown} root - the ledger root, an absolute path
- * @param {{ oldName: string, newName: string, machineDir?: string, homeDir?: string, now?: number }} opts
- *   oldName, newName: the two folder names under `.devflow`; machineDir: the machine
- *   root (default `$HOME/.devflow`); homeDir: the home directory (default `$HOME`);
- *   now: epoch ms (default Date.now())
- * Every message and note is one line with no control character (scrubMoveResult).
- *
- * @returns {{ ok: true, value: { state: 'none'|'busy', notes: string[] }
- *   | { state: 'moved', mode: 'whole-folder'|'kept-new'|'moved-in', backup: string|null, rendered: boolean, notes: string[] } }
- *   | { ok: false, error: { kind: 'invalid-input'|'refused'|'io-error', message: string } }}
- */
-function moveLedger(root, options = {}) {
-  return scrubMoveResult(moveLedgerUnscrubbed(root, options));
-}
-
-/** moveLedger before its messages and notes are made single-line. */
-function moveLedgerUnscrubbed(root, { oldName, newName, machineDir, homeDir, now = Date.now() } = {}) {
-  if (!isFolderName(oldName) || !isFolderName(newName) || oldName === newName) {
-    return { ok: false, error: { kind: 'invalid-input', message: 'move-ledger: the old and new folder names must be two different plain names' } };
-  }
-  const home = homeDir === undefined ? homeDirOrNull() : homeDir;
-  const machine = machineDir === undefined ? (home === null ? null : path.join(home, '.devflow')) : machineDir;
-  if (machine === null) {
-    return { ok: false, error: { kind: 'io-error', message: 'move-ledger: no home directory is set, so the machine directory is unknown' } };
-  }
-  try {
-    const refusal = curationMoveRefusal(root, { oldName, newName, machineDir: machine, homeDir: home });
-    if (!refusal.ok) return refusal;
-    const { realRoot } = refusal.value;
-    const devflowDir = path.join(path.resolve(root), '.devflow');
-    const ctx = {
-      root: path.resolve(root), devflowDir, oldDir: path.join(devflowDir, oldName), newDir: path.join(devflowDir, newName),
-      machineDir: machine, journal: curationMoveJournalPath(machine, realRoot), now,
-    };
-    if (lstatOrNull(ctx.oldDir) === null) return { ok: true, value: { state: 'none', notes: dropStaleMoveJournal(ctx.journal) } };
-
-    fs.mkdirSync(machine, { recursive: true, mode: 0o700 });
-    let newExisted = lstatOrNull(ctx.newDir) !== null;
-    if (!newExisted && lstatOrNull(path.join(ctx.oldDir, OLD_FOLDER_JOURNAL_NAME)) !== null) {
-      // The one rename of the whole-folder case would carry that file into the live folder.
-      // An empty new folder puts the pass on the per-entry path, where the file stays in the
-      // backup. A busy or failed pass leaves the empty folder, and the next pass takes the
-      // same path to the same result.
-      fs.mkdirSync(ctx.newDir, { recursive: true });
-      newExisted = true;
-    }
-    const specs = [
-      { name: 'move', dir: curationMoveLockDir(machine, realRoot), staleMs: MOVE_LOCK_STALE_MS },
-      { name: 'old-store', dir: path.join(ctx.oldDir, STORE_LOCK_NAME), staleMs: LOCK_STALE_MS },
-      { name: 'old-queue', dir: path.join(ctx.oldDir, QUEUE_LOCK_NAME), staleMs: QUEUE_LOCK_STALE_MS },
-      ...(newExisted ? [
-        { name: 'new-store', dir: path.join(ctx.newDir, STORE_LOCK_NAME), staleMs: LOCK_STALE_MS },
-        { name: 'new-queue', dir: path.join(ctx.newDir, QUEUE_LOCK_NAME), staleMs: QUEUE_LOCK_STALE_MS },
-      ] : []),
-    ];
-    const taken = curationMoveLockAll(specs);
-    if (taken.busy !== null) return { ok: true, value: { state: 'busy', notes: [] } };
-    let result;
-    try {
-      result = movePass(ctx, { newExisted });
-      return result;
-    } finally {
-      curationMoveReleaseAll(locksAfter(taken.held, ctx, result));
-    }
-  } catch (err) {
-    return moveIoFailure(err);
-  }
-}
-
-/**
- * Where the locks a pass took are once the pass is over: a lock is released at the
- * path it has after the pass's last rename. A whole-folder move carries the old
- * folder's locks to the new folder; a merge turns the old folder into the backup and
- * carries them there. A pass that renamed nothing leaves them where they were.
- */
-function locksAfter(held, ctx, result) {
-  if (!result || !result.ok || result.value.state !== 'moved') return held;
-  if (result.value.mode === 'whole-folder') return relocateLocks(held, ctx.oldDir, ctx.newDir);
-  return relocateLocks(held, ctx.oldDir, path.join(ctx.devflowDir, result.value.backup));
-}
-
-/**
- * The body of a move, run under the locks. It re-probes both folders first: a folder
- * that changed since the locks were chosen makes the pass busy, to try again at the
- * next event, because a lock it does not hold would not protect it.
- *
- * With the new folder absent the whole folder is renamed. With it present: if its
- * observation log has data it wins and the old folder becomes the backup whole;
- * otherwise the old ledger set moves in (curationMoveSetWithJournal), and the old
- * folder becomes the backup with what is left. Only the machine-side journal can
- * override the winner rule. Either way the pending queue (and a
- * stale claim's batch) merges into the winner's queue and the rendered files are
- * rebuilt. A fresh claim in either folder is busy.
- *
- * @param {object} ctx
- * @param {{ newExisted: boolean }} state
- */
-function movePass(ctx, { newExisted }) {
-  const busy = { ok: true, value: { state: 'busy', notes: [] } };
-  if (lstatOrNull(ctx.oldDir) === null) return { ok: true, value: { state: 'none', notes: [] } };
-  if ((lstatOrNull(ctx.newDir) !== null) !== newExisted) return busy;
-  if (claimIsFresh(path.join(ctx.oldDir, CLAIM_NAME), ctx.now) || (newExisted && claimIsFresh(path.join(ctx.newDir, CLAIM_NAME), ctx.now))) {
-    return busy;
-  }
-  if (!newExisted) {
-    const whole = curationMoveWhole(ctx);
-    if (!whole.ok) return whole;
-    // One rename carries the whole set, so a journal left by an earlier pass has nothing to finish.
-    removeIfPresent(ctx.journal);
-    const finish = curationMoveFinish(ctx, { whole: true });
-    return {
-      ok: true,
-      value: { state: 'moved', mode: 'whole-folder', backup: null, rendered: finish.rendered, notes: [...whole.value.notes, ...finish.notes] },
-    };
-  }
-
-  const notes = [];
-  const journalPresent = lstatOrNull(ctx.journal) !== null;
-  const keptNew = !journalPresent && newFolderHasData(ctx);
-  if (!keptNew) notes.push(...curationMoveSetWithJournal(ctx).notes);
-  notes.push(...curationMoveEntries(ctx).notes);
-
-  const staleClaim = lstatOrNull(path.join(ctx.oldDir, CLAIM_NAME)) !== null;
-  const merged = curationMoveMergeQueue(ctx, {
-    dir: ctx.oldDir, targetDir: ctx.newDir, bases: staleClaim ? [CLAIM_NAME, QUEUE_NAME] : [QUEUE_NAME],
-  });
-  if (staleClaim) removeIfPresent(path.join(ctx.oldDir, OWNER_NAME));
-  notes.push(...merged.notes);
-
-  const finish = curationMoveFinish(ctx, { whole: false });
-  const verdict = keptNew
-    ? `kept ${path.basename(ctx.newDir)}, whose log has data; ${path.basename(ctx.oldDir)} is now ${finish.backup}`
-    : `moved the ledger set of ${path.basename(ctx.oldDir)} into ${path.basename(ctx.newDir)}; ${path.basename(ctx.oldDir)} is now ${finish.backup}`;
-  return {
-    ok: true,
-    value: {
-      state: 'moved',
-      mode: keptNew ? 'kept-new' : 'moved-in',
-      backup: finish.backup,
-      rendered: finish.rendered,
-      notes: [verdict, ...notes, ...finish.notes],
-    },
-  };
-}
-
-/** True when `file` is a regular file written to within CLAIM_STALE_SECS before `now`: a live claim. */
-function claimIsFresh(file, now) {
-  const stat = lstatOrNull(file);
-  return stat !== null && stat.isFile() && now - stat.mtimeMs < CLAIM_STALE_SECS * 1000;
-}
-
-/**
- * Merge what is left in the backup folders a move left behind into the new folder's
- * pending queue: init runs it once per project per run, whenever a backup exists. A
- * backup is `<legacy prefix><stamp>-<random>` under `.devflow`. The sweep takes the
- * move lock and the new folder's queue lock with no wait (busy answers `busy`), merges
- * the pending and processing files, and the unswept private and overflow files, of
- * each backup by the queue rule, and marks each merged file swept. A merged file is
- * never read again, so a repeated sweep adds nothing. With the new folder absent or no
- * backup it answers `none`.
- *
- * @param {unknown} root - the ledger root, an absolute path
- * @param {{ oldName: string, newName: string, machineDir?: string, homeDir?: string, now?: number }} opts
- * Every message and note is one line with no control character (scrubMoveResult).
- *
- * @returns {{ ok: true, value: { state: 'none'|'busy'|'swept', files: number, merged: number, overflowed: number, notes: string[] } }
- *   | { ok: false, error: { kind: 'invalid-input'|'refused'|'io-error', message: string } }}
- */
-function sweepLedgerBackups(root, options = {}) {
-  return scrubMoveResult(sweepLedgerBackupsUnscrubbed(root, options));
-}
-
-/** sweepLedgerBackups before its messages and notes are made single-line. */
-function sweepLedgerBackupsUnscrubbed(root, { oldName, newName, machineDir, homeDir, now = Date.now() } = {}) {
-  const idle = state => ({ ok: true, value: { state, files: 0, merged: 0, overflowed: 0, notes: [] } });
-  if (!isFolderName(oldName) || !isFolderName(newName) || oldName === newName) {
-    return { ok: false, error: { kind: 'invalid-input', message: 'sweep-backups: the old and new folder names must be two different plain names' } };
-  }
-  const home = homeDir === undefined ? homeDirOrNull() : homeDir;
-  const machine = machineDir === undefined ? (home === null ? null : path.join(home, '.devflow')) : machineDir;
-  if (machine === null) {
-    return { ok: false, error: { kind: 'io-error', message: 'sweep-backups: no home directory is set, so the machine directory is unknown' } };
-  }
-  try {
-    const refusal = curationMoveRefusal(root, { oldName, newName, machineDir: machine, homeDir: home });
-    if (!refusal.ok) return refusal;
-    const devflowDir = path.join(path.resolve(root), '.devflow');
-    const ctx = { root: path.resolve(root), devflowDir, newDir: path.join(devflowDir, newName), machineDir: machine, now };
-    if (lstatOrNull(ctx.newDir) === null) return idle('none');
-    const backups = fs.readdirSync(devflowDir).filter(name => name.startsWith(LEGACY_NAMES.backupPrefix)).sort().slice(0, MOVE_MAX_BACKUPS);
-    if (backups.length === 0) return idle('none');
-    for (const name of backups) {
-      const problem = backupProblem(path.join(devflowDir, name));
-      if (problem !== null) return moveRefused(problem);
-    }
-
-    fs.mkdirSync(machine, { recursive: true, mode: 0o700 });
-    const taken = curationMoveLockAll([
-      { name: 'move', dir: curationMoveLockDir(machine, refusal.value.realRoot), staleMs: MOVE_LOCK_STALE_MS },
-      { name: 'new-queue', dir: path.join(ctx.newDir, QUEUE_LOCK_NAME), staleMs: QUEUE_LOCK_STALE_MS },
-    ]);
-    if (taken.busy !== null) return idle('busy');
-    try {
-      const total = { state: 'swept', files: 0, merged: 0, overflowed: 0, notes: [] };
-      for (const name of backups) {
-        const swept = curationMoveSweepBackup(ctx, path.join(devflowDir, name));
-        total.files += swept.files;
-        total.merged += swept.merged;
-        total.overflowed += swept.overflowed;
-        total.notes.push(...swept.notes);
-      }
-      return { ok: true, value: total };
-    } finally {
-      curationMoveReleaseAll(taken.held);
-    }
-  } catch (err) {
-    return moveIoFailure(err);
-  }
-}
-
-/** What is wrong with a backup folder the sweep would read, or null: a link, or a link among its queue files. */
-function backupProblem(dir) {
-  const stat = lstatOrNull(dir);
-  if (stat === null) return null;
-  if (stat.isSymbolicLink()) return `${dir} is a symbolic link`;
-  if (!stat.isDirectory()) return `${dir} is not a directory`;
-  for (const entry of fs.readdirSync(dir)) {
-    if (entry === QUEUE_NAME || entry === CLAIM_NAME || queueFormOf(entry) !== null) {
-      const problem = moveEntryProblem(path.join(dir, entry));
-      if (problem !== null) return problem;
-    }
-  }
-  return null;
-}
-
-/** True for the names in a backup folder that hold rows a later sweep would still merge. */
-function holdsPendingRows(name) {
-  if (name === QUEUE_NAME || name === CLAIM_NAME) return true;
-  const record = queueFormOf(name);
-  return record !== null && (record.form === 'private' || record.form === 'overflow');
-}
-
-/**
- * Count the rows still waiting in the backup folders a move left, for the status
- * command: per backup, the non-blank lines of the pending and processing files and of
- * the unswept private and overflow files (an unfinished last line counts, because the
- * sweep has not merged it). A swept file counts for nothing. Read-only: no lock is
- * taken and nothing is written, no link is followed (a backup that is a link, and a
- * queue file that is a link, read as absent), and the read is bounded by the sweep's
- * limits on backup folders and on queue files per folder. A backup's `name` is for
- * display: its control characters are collapsed to a space (singleLine), so it may differ
- * from the folder's own name.
- *
- * @param {unknown} root - the ledger root, an absolute path
- * @returns {{ ok: true, value: { backups: Array<{ name: string, pendingRows: number }> } }
- *   | { ok: false, error: { kind: 'refused'|'io-error', message: string } }}
- */
-function backupPendingRows(root) {
-  if (typeof root !== 'string' || root === '' || root.includes('\0') || !path.isAbsolute(root)) {
-    return { ok: false, error: { kind: 'refused', message: 'backup-rows: the ledger root must be an absolute path' } };
-  }
-  try {
-    const devflowDir = path.join(path.resolve(root), '.devflow');
-    const devflowStat = lstatOrNull(devflowDir);
-    if (devflowStat === null || !devflowStat.isDirectory()) return { ok: true, value: { backups: [] } };
-    const names = fs.readdirSync(devflowDir).filter(name => name.startsWith(LEGACY_NAMES.backupPrefix)).sort().slice(0, MOVE_MAX_BACKUPS);
-    const backups = [];
-    for (const name of names) {
-      const dir = path.join(devflowDir, name);
-      const stat = lstatOrNull(dir);
-      if (stat === null || !stat.isDirectory()) continue;
-      const files = fs.readdirSync(dir).filter(holdsPendingRows).sort().slice(0, MOVE_MAX_QUEUE_FILES);
-      let pendingRows = 0;
-      for (const file of files) {
-        const text = readQueueText(path.join(dir, file));
-        if (text !== null) pendingRows += completeLines(text).length;
-      }
-      backups.push({ name: singleLine(name), pendingRows });
-    }
-    return { ok: true, value: { backups } };
-  } catch (err) {
-    if (!err || typeof err.code !== 'string') throw err;
-    return { ok: false, error: { kind: 'io-error', message: singleLine(`backup-rows: ${err.code}: ${err.message}`) } };
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -4374,22 +3290,17 @@ module.exports = {
   claimQueue,
   releaseClaim,
   touchClaim,
-  // The one-time ledger move
-  moveLedger,
-  QUEUE_MERGE_CAP_LINES,
-  curationMoveRefusal,
-  curationMoveLockKey,
-  curationMoveJournalPath,
-  curationMoveLockAll,
-  curationMoveReleaseAll,
-  curationMoveWhole,
-  curationMoveSetWithJournal,
-  curationMoveEntries,
-  curationMoveMergeQueue,
-  curationMoveFinish,
-  curationMoveSweepBackup,
-  sweepLedgerBackups,
-  backupPendingRows,
+  // Primitives curation-move.cjs builds on
+  QUEUE_LOCK_STALE_MS,
+  NO_HARD_LINK_CODES,
+  isPlainObject,
+  readTextUnlinked,
+  removeIfPresent,
+  renderAll,
+  lstatOrNull,
+  physicalPath,
+  homeDirOrNull,
+  dropStaleMoveJournal,
   // Integrity, listing, due selection and show
   integrityFlags,
   buildListing,

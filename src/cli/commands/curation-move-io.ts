@@ -15,11 +15,8 @@ import * as os from 'os';
 import { getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
 import { LEDGER_ROOT_TIMEOUT_MS, lookupLedgerRoot } from '../../core/ledger-root.js';
 import { CURATION_DIR_NAME, LEGACY_NAMES } from '../../core/project-paths.js';
-import {
-  formatCurationStoreUnavailable,
-  loadCurationStore,
-  type CurationStoreModule,
-} from '../../core/curation-store.js';
+import { formatCurationStoreUnavailable } from '../../core/curation-store.js';
+import { loadCurationMove, type CurationMoveModule } from '../../core/curation-move.js';
 import {
   describeFailure,
   moveLedgerRoot,
@@ -29,8 +26,8 @@ import {
   type TuningPathKind,
 } from './init-curation-move.js';
 
-/** The store seam the move uses: the two operations, nothing else. */
-export type MoveStore = Pick<CurationStoreModule, 'moveLedger' | 'sweepLedgerBackups'>;
+/** The move seam the move uses: the two operations, nothing else. */
+export type MoveStore = Pick<CurationMoveModule, 'moveLedger' | 'sweepLedgerBackups'>;
 
 /** The real I/O of the per-project move, over `store`. */
 export function realProjectLedgerMoveIO(store: MoveStore): ProjectLedgerMoveIO {
@@ -103,7 +100,7 @@ export type SharedMoveResult =
  * with no wait. Never throws.
  */
 export async function runSharedMove(root: string): Promise<SharedMoveResult> {
-  const loaded = loadCurationStore();
+  const loaded = loadCurationMove();
   if (!loaded.ok) {
     return { kind: 'unavailable', root, message: formatCurationStoreUnavailable(loaded.error) };
   }

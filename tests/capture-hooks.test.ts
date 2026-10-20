@@ -17,7 +17,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { createRequire } from 'module';
-import { CURATION_STORE } from './decisions/curation-fixtures.js';
+import { PROJECT_PATHS } from './decisions/curation-fixtures.js';
 import { waitForWorkerToFinish } from './helpers/poll-for-terminal-line.js';
 import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
 import { HOOK_RUN_ALLOWANCE_MS, NODE_EXEC_STALL_MS, answersVersion, resolveOnPath, runHook as runSharedHook, spawnWithStdin } from './shell-hooks-helpers.js';
@@ -1356,7 +1356,7 @@ describe('capture hooks never write through a symbolic link under .devflow (D-HO
 // the folder with every row in it once.
 // =============================================================================
 describe('capture hooks while the ledger move is held (TP-30)', { timeout: 2 * (HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS) }, () => {
-  const store = createRequire(import.meta.url)(CURATION_STORE) as { curationMoveLockKey(realRoot: string): string };
+  const store = createRequire(import.meta.url)(PROJECT_PATHS) as { curationMoveLockKey(realRoot: string): string };
   const SEED_ROW = '{"role":"user","content":"seeded turn","ts":1}';
   let tmp: string;
   let projectDir: string;

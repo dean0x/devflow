@@ -8,6 +8,7 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { execFileSync } from 'child_process';
+import { createRequire } from 'module';
 import { promises as fs, accessSync, constants as fsConstants } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -29,16 +30,16 @@ import {
   type ProjectLedgerMoveResult,
   type ProjectMoveOutcome,
 } from '../src/cli/commands/init-curation-move.js';
-import { loadCurationStore } from '../src/core/curation-store.js';
+import { loadCurationMove } from '../src/core/curation-move.js';
 import { LEDGER_ROOT_TIMEOUT_MS, type LedgerRootLookup } from '../src/core/ledger-root.js';
 import { realProjectLedgerMoveIO } from '../src/cli/commands/curation-move-io.js';
 import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
-import type {
-  CurationStoreResult,
-  LedgerMoveOptions,
-  LedgerMoveOutcome,
-  LedgerSweepOutcome,
-} from '../src/core/curation-store.js';
+import { PROJECT_PATHS } from './decisions/curation-fixtures.js';
+import type { CurationStoreResult } from '../src/core/curation-store.js';
+import type { LedgerMoveOptions, LedgerMoveOutcome, LedgerSweepOutcome } from '../src/core/curation-move.js';
+
+/** The key of a root's move lock, from the machine-side path helpers the hooks and the move share. */
+const { curationMoveLockKey } = createRequire(import.meta.url)(PROJECT_PATHS) as { curationMoveLockKey(realRoot: string): string };
 
 const HOME = '/home/dean';
 const MACHINE = '/home/dean/.devflow';
@@ -716,8 +717,8 @@ describe('moveProjectLedgers with the real store: init and a session start meet 
   });
 
   it('skips a root whose move lock another mover holds, reached through a link spelling, with no wait', async () => {
-    const loaded = loadCurationStore();
-    if (!loaded.ok) throw new Error('the store must load');
+    const loaded = loadCurationMove();
+    if (!loaded.ok) throw new Error('the move module must load');
     const store = loaded.value;
     tmp = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'df-move-tp37-')));
     const home = path.join(tmp, 'home');
@@ -733,7 +734,7 @@ describe('moveProjectLedgers with the real store: init and a session start meet 
     const spelling = path.join(parentLink, 'repo');
 
     // The other mover (a session start) holds the lock under the physical spelling.
-    const key = store.curationMoveLockKey(repo);
+    const key = curationMoveLockKey(repo);
     const lockDir = path.join(machine, `.curation-move-${key}.lock`);
     await fs.mkdir(lockDir);
 

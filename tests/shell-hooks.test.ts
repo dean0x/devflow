@@ -9,7 +9,7 @@ import { HANDOFF_TEMPLATE, REMINDER_TEMPLATE } from './fixtures/ambient-template
 import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
 import { buildRoutingConfigJson } from '../src/core/proxy-state.js';
 import { CURATION_DIR_NAME, LEGACY_NAMES, curationMoveMarkerKey } from '../src/core/project-paths.js';
-import { CURATION_STORE, makeV2LedgerRow, makeV2LogRow, toJsonl } from './decisions/curation-fixtures.js';
+import { PROJECT_PATHS, makeV2LedgerRow, makeV2LogRow, toJsonl } from './decisions/curation-fixtures.js';
 import * as p from '@clack/prompts';
 import {
   DEVFLOW_GITIGNORE_BLOCK,
@@ -336,10 +336,10 @@ describe('json-helper.js operations', () => {
     expect(parsed.hookSpecificOutput.additionalContext).toBe('test preamble');
   });
 
-  it('a generic op loads none of the learning modules; a learning op loads the store, and the renderer only to render', () => {
+  it('a generic op loads none of the learning modules; a learning op loads the store, the renderer only to render, the move module only to move', () => {
     // Every hook that falls back from jq to node runs a generic op, so the learning
-    // store loads only for a learning op, and the renderer and formatter only when
-    // that op renders.
+    // store loads only for a learning op, the renderer and formatter only when that
+    // op renders, and the move module only for the move op.
     const probeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'json-helper-lazy-'));
     try {
       const record = path.join(probeDir, 'loaded.txt');
@@ -350,17 +350,18 @@ describe('json-helper.js operations', () => {
         `process.on('exit', () => fs.writeFileSync(${JSON.stringify(record)}, Object.keys(require.cache).join('\\n')));`,
         '',
       ].join('\n'));
-      const curationModulesLoadedBy = (args: readonly string[], input: string): string[] => {
+      const curationModulesLoadedBy = (args: readonly string[], input: string, env: NodeJS.ProcessEnv = process.env): string[] => {
         const run = spawnSync(process.execPath, ['--require', preload, JSON_HELPER, ...args], {
           cwd: probeDir,
           input,
+          env,
           encoding: 'utf8',
           timeout: 60_000,
         });
         expect(run.status, run.stderr).toBe(0);
         return fs.readFileSync(record, 'utf8').split('\n')
           .map(file => path.basename(file))
-          .filter(name => /^(?:curation-store|render-decisions|decisions-format|mkdir-lock|project-paths)\.cjs$/.test(name))
+          .filter(name => /^(?:curation-store|curation-move|render-decisions|decisions-format|mkdir-lock|project-paths)\.cjs$/.test(name))
           .sort();
       };
 
@@ -376,6 +377,12 @@ describe('json-helper.js operations', () => {
       );
       expect(curationModulesLoadedBy(['restore-anchor', 'ADR-001'], '')).toEqual([
         'curation-store.cjs', 'decisions-format.cjs', 'mkdir-lock.cjs', 'project-paths.cjs', 'render-decisions.cjs',
+      ]);
+      // Only the move op loads the move module, which then builds on the store.
+      const home = path.join(probeDir, 'home');
+      fs.mkdirSync(home);
+      expect(curationModulesLoadedBy(['move-ledger', probeDir, LEGACY_NAMES.folder, CURATION_DIR_NAME], '', { ...process.env, HOME: home })).toEqual([
+        'curation-move.cjs', 'curation-store.cjs', 'mkdir-lock.cjs', 'project-paths.cjs',
       ]);
     } finally {
       fs.rmSync(probeDir, { recursive: true, force: true });
@@ -5805,7 +5812,7 @@ describe('ensure-proxy behavioral tests', () => {
 
 describe('curation-move: the shim that moves the old ledger folder (#529)', { timeout: GIT_FIXTURE_TIMEOUT_MS }, () => {
   const SHIM = path.join(HOOKS_DIR, 'curation-move');
-  const store = createRequire(import.meta.url)(CURATION_STORE) as { curationMoveLockKey(realRoot: string): string };
+  const store = createRequire(import.meta.url)(PROJECT_PATHS) as { curationMoveLockKey(realRoot: string): string };
   const OLD = LEGACY_NAMES.folder;
   const NEW = CURATION_DIR_NAME;
   const QUEUE = '.pending-turns.jsonl';
@@ -6210,7 +6217,7 @@ describe('TP-9: the hooks move the old ledger folder before any creator makes th
   const NEW = CURATION_DIR_NAME;
   const QUEUE = '.pending-turns.jsonl';
   const SEED_ROW = '{"role":"user","content":"seeded turn","ts":1}';
-  const store = createRequire(import.meta.url)(CURATION_STORE) as { curationMoveLockKey(realRoot: string): string };
+  const store = createRequire(import.meta.url)(PROJECT_PATHS) as { curationMoveLockKey(realRoot: string): string };
   const writeFakeExecutable = useWarmFakeExecutables();
 
   let base: string;

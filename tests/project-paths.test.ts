@@ -234,10 +234,13 @@ describe('CJS project-paths parity', () => {
   // Structural full-export parity: guards against silent drift where a function
   // is added to one module but not the other. The hardcoded list above only
   // covers enumerated functions; this asserts the COMPLETE export sets match so
-  // any future addition to one side without the other fails fast. The one
-  // exception is named: the marker key is read by the TypeScript status and HUD
-  // readers and written by the shell, so the CJS layer has no use for it.
+  // any future addition to one side without the other fails fast. The
+  // exceptions are named. The marker key is read by the TypeScript status and HUD
+  // readers and written by the shell, so the CJS layer has no use for it. The move
+  // lock and journal names sit under the machine directory, not under a project: the
+  // store's write guard and the move module build them, and no TypeScript code does.
   const TS_ONLY_FUNCTIONS = ['curationMoveMarkerKey'];
+  const CJS_ONLY_FUNCTIONS = ['curationMoveLockKey', 'curationMoveLockDir', 'curationMoveJournalPath'];
   it('TypeScript and CJS export the identical set of function names', () => {
     const tsNames = Object.keys(tsPathsNs)
       .filter(k => typeof (tsPathsNs as Record<string, unknown>)[k] === 'function')
@@ -245,6 +248,7 @@ describe('CJS project-paths parity', () => {
       .sort();
     const cjsNames = Object.keys(cjsPaths)
       .filter(k => typeof (cjsPaths as Record<string, unknown>)[k] === 'function')
+      .filter(k => !CJS_ONLY_FUNCTIONS.includes(k))
       .sort();
     expect(cjsNames).toEqual(tsNames);
   });
@@ -337,5 +341,22 @@ describe('curationMoveMarkerKey', () => {
 
   it('is safe to use as a file name: lowercase hex, an underscore, then letters, digits and underscores', () => {
     expect(curationMoveMarkerKey('/we ird/$(touch x)/"q"')).toMatch(/^[0-9a-f]{8}_[A-Za-z0-9_]{1,60}$/);
+  });
+});
+
+describe('the machine-side move names (CJS only)', () => {
+  const MACHINE = '/home/dean/.devflow';
+
+  it('the key is the first 16 hex characters of the sha256 of the root path', () => {
+    const key = cjsPaths.curationMoveLockKey('/some/ledger/root');
+    expect(key).toMatch(/^[0-9a-f]{16}$/);
+    expect(cjsPaths.curationMoveLockKey('/some/ledger/root')).toBe(key);
+    expect(cjsPaths.curationMoveLockKey('/some/other/root')).not.toBe(key);
+  });
+
+  it('the lock directory and the journal file sit in the machine directory under one key', () => {
+    const key = cjsPaths.curationMoveLockKey('/some/ledger/root');
+    expect(cjsPaths.curationMoveLockDir(MACHINE, '/some/ledger/root')).toBe(`${MACHINE}/.curation-move-${key}.lock`);
+    expect(cjsPaths.curationMoveJournalPath(MACHINE, '/some/ledger/root')).toBe(`${MACHINE}/.curation-move-${key}.journal`);
   });
 });
