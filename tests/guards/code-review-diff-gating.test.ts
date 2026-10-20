@@ -28,7 +28,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import * as path from 'path'
 
-import { ROOT, collectFreshBaseDefects, collectSlugCheckDefects, collectStoredHeadDefects, readAgentReference, requireDistFile, requireDistFiles, resolveAgentSource, resolveLearningOffSource, slugSinkLines, type DiffRangeShape } from '../helpers.js'
+import { ROOT, collectFreshBaseDefects, collectSlugCheckDefects, collectStoredHeadDefects, readAgentReference, requireDistFile, requireDistFiles, resolveAgentSource, resolveLearningOffSource, slugSinkLines, EVIDENCE_RENDER_LINE, type DiffRangeShape } from '../helpers.js'
 
 const CORE = ['security', 'architecture', 'performance', 'complexity', 'consistency', 'regression', 'testing', 'reliability'] as const
 const LANGUAGE = ['typescript', 'react', 'accessibility', 'ui-design', 'go', 'java', 'python', 'rust'] as const
@@ -891,6 +891,16 @@ describe('the branch slug is checked once, before any command text carries it (E
     expect(collectSlugCheckDefects(seed(ON, '**If BLOCKED:**', 'Run `mkdir -p {worktree}/.devflow/docs/reviews/{branch-slug}`.\n\n**If BLOCKED:**')))
       .toEqual([expect.stringContaining('a slug sink comes before the Extract line')])
     expect(collectSlugCheckDefects('no slug text')).toEqual(['no Extract line'])
+  })
+
+  it.each(VARIANTS)('$label: only the evidence render line is exempt from the sink scan', ({ body }) => {
+    expect(body.split('\n')).toContain(EVIDENCE_RENDER_LINE)
+    expect(slugSinkLines(body).map(sink => sink.line)).not.toContain(EVIDENCE_RENDER_LINE)
+  })
+
+  it('known-bad probe: a verify-evidence line that carries the slug before the Extract line is reported', () => {
+    expect(collectSlugCheckDefects(seed(ON, 'render --plan "{worktree}/.devflow/docs/evidence-{branch_slug}.md";', 'render --plan "{worktree}/.devflow/docs/evidence-{branch_slug}.md" --out "{worktree}/.devflow/docs/reviews/{branch-slug}/x.md";')))
+      .toEqual([expect.stringContaining('a slug sink comes before the Extract line')])
   })
 })
 

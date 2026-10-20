@@ -14,7 +14,7 @@
 // cannot silently remove safety-critical patterns.
 
 import { describe, it, expect } from 'vitest';
-import { loadFile, extractSection, resolveAgentSource, resolveLearningOffSource, collectFreshBaseDefects, collectSlugCheckDefects, collectStoredHeadDefects, slugSinkLines, type DiffRangeShape } from '../helpers';
+import { loadFile, extractSection, resolveAgentSource, resolveLearningOffSource, collectFreshBaseDefects, collectSlugCheckDefects, collectStoredHeadDefects, slugSinkLines, EVIDENCE_RENDER_LINE, type DiffRangeShape } from '../helpers';
 
 const content = loadFile('dist/commands/bug-analysis.md');
 const agentContent = resolveAgentSource('debug').content;
@@ -326,6 +326,16 @@ describe('bug-analysis.md — the branch slug is checked once, before any comman
     expect(collectSlugCheckDefects(seed('Spawn Git agent:', 'Run `mkdir -p {worktree}/.devflow/docs/bug-analysis/{branch-slug}`.\n\nSpawn Git agent:')))
       .toEqual([expect.stringContaining('a slug sink comes before the Extract line')]);
     expect(collectSlugCheckDefects('no slug text')).toEqual(['no Extract line']);
+  });
+
+  it('only the evidence render line is exempt from the sink scan', () => {
+    expect(content.split('\n')).toContain(EVIDENCE_RENDER_LINE);
+    expect(slugSinkLines(content).map(sink => sink.line)).not.toContain(EVIDENCE_RENDER_LINE);
+  });
+
+  it('known-bad probe: a verify-evidence line that carries the slug before the Extract line is reported', () => {
+    expect(collectSlugCheckDefects(seed('render --plan "{worktree}/.devflow/docs/evidence-{branch_slug}.md";', 'render --plan "{worktree}/.devflow/docs/evidence-{branch_slug}.md" --out "{worktree}/.devflow/docs/bug-analysis/{branch-slug}/x.md";')))
+      .toEqual([expect.stringContaining('a slug sink comes before the Extract line')]);
   });
 });
 

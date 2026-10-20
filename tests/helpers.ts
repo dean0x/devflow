@@ -2061,15 +2061,19 @@ export function collectStoredHeadDefects(body: string, shape: DiffRangeShape): s
 /** The shape of a valid branch slug, stated once in each review command. */
 const SLUG_PATTERN = '^[A-Za-z0-9._-]{1,200}$'
 
+/** The one evidence render line of /code-review and /bug-analysis: it carries the slug and runs before the Extract line. */
+export const EVIDENCE_RENDER_LINE = 'node "$HOME/.devflow/scripts/verify-evidence.cjs" render --plan "{worktree}/.devflow/docs/evidence-{branch_slug}.md"; echo "exit=$?"'
+
 /**
- * The lines that put the branch slug, or a directory under it, into command text. The evidence render is
- * left out: it runs only for a valid slug (the gate is the slug collector's), before the Git agent spawn.
+ * The lines that put the branch slug, or a directory under it, into command text. Only the exact evidence
+ * render line is left out: it runs only for a valid slug (the gate is the slug collector's), before the Git
+ * agent spawn. Any other line, a verify-evidence line included, is a sink.
  */
 export function slugSinkLines(body: string): Array<{ at: number; line: string }> {
   const sinks: Array<{ at: number; line: string }> = []
   let at = 0
   for (const line of body.split('\n')) {
-    if (/\{(?:branch-slug|branch_slug|REVIEW_DIR|ANALYSIS_DIR)\}/.test(line) && !line.includes('verify-evidence.cjs')) sinks.push({ at, line })
+    if (/\{(?:branch-slug|branch_slug|REVIEW_DIR|ANALYSIS_DIR)\}/.test(line) && line !== EVIDENCE_RENDER_LINE) sinks.push({ at, line })
     at += line.length + 1
   }
   return sinks
