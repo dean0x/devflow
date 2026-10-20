@@ -900,6 +900,13 @@ function collectProcessDefects(source: string): string[] {
 describe.skipIf(!POSIX)('the name on standard input, through the real script', SPAWN_BUDGET, () => {
   interface Outcome { readonly stdout: string; readonly stderr: string; readonly status: number | null }
 
+  /** The hook's work: 12 fixture git calls, each bounded at 20 s by the fixture helper, and one node launch at the launch bound. */
+  const SHARED_HOOK_BUDGET_MS = 12 * 20_000 + SUBPROCESS_TIMEOUT_MS
+  /** How long a run may take to end on its own while its standard input stays open. */
+  const OPEN_STDIN_WINDOW_MS = SUBPROCESS_TIMEOUT_MS / 2
+  /** Two windows (the run with open input, then the run with closed input) inside twice the launch bound. */
+  const OPEN_STDIN_CASE_BUDGET_MS = 2 * SUBPROCESS_TIMEOUT_MS
+
   // one fixture repository for every case here: the script only reads it, so the cases share it
   let shared: World
   beforeAll(() => {
@@ -908,7 +915,7 @@ describe.skipIf(!POSIX)('the name on standard input, through the real script', S
     // security daemons settle after the files the earlier groups wrote: launch node once here, so
     // no case's budget absorbs the wait
     spawnSync(process.execPath, ['--version'], { cwd: shared.root, env: scopedEnv(shared.home), stdio: 'ignore', timeout: SUBPROCESS_TIMEOUT_MS })
-  }, SUBPROCESS_TIMEOUT_MS)
+  }, SHARED_HOOK_BUDGET_MS)
   afterAll(() => { fs.rmSync(shared.root, { recursive: true, force: true }) })
 
   /** Start the script with its standard input opened on a file (the carrier the prompts use). */
@@ -932,17 +939,18 @@ describe.skipIf(!POSIX)('the name on standard input, through the real script', S
 
   const stopLine = (reason: string): string => `BASE_REF=none TIP=none FETCH=skipped REASON=${reason} NOTE=stop\n`
 
+  // four launches, each of which can stall up to 16 s under full-suite load (seam.ts): 64 s of stall inside 120 s
   it('reads a name file on standard input and prints one conforming line, exit 0, nothing on stderr', () => {
     const w = shared
     const want = `BASE_REF=${w.m0} TIP=origin FETCH=ok REASON=fresh NOTE=none\n`
-    for (const content of ['main\n', 'main\r\n', 'main']) {
-      for (const mode of ['pr', 'local']) {
-        const r = runWithFile(w, [mode, '--name-stdin'], content)
-        expect(r, `${mode} ${JSON.stringify(content)}`).toEqual({ stdout: want, stderr: '', status: 0 })
-        expect(r.stdout.trimEnd()).toMatch(RB.LINE_RE)
-      }
+    // the mode does not touch the read: each line end in one mode, and one launch in the other mode
+    const launches: ReadonlyArray<readonly [string, string]> = [['pr', 'main\n'], ['pr', 'main\r\n'], ['pr', 'main'], ['local', 'main\n']]
+    for (const [mode, content] of launches) {
+      const r = runWithFile(w, [mode, '--name-stdin'], content)
+      expect(r, `${mode} ${JSON.stringify(content)}`).toEqual({ stdout: want, stderr: '', status: 0 })
+      expect(r.stdout.trimEnd()).toMatch(RB.LINE_RE)
     }
-  })
+  }, 2 * SUBPROCESS_TIMEOUT_MS)
 
   it('gives the same line from a pipe, and honours --cross', () => {
     const w = shared
@@ -985,14 +993,18 @@ describe.skipIf(!POSIX)('the name on standard input, through the real script', S
     }
   })
 
-  /** Run the script with a standard input that stays open and never ends; true when it ended on its own. */
-  async function endsWithOpenStdin(w: World, args: readonly string[]): Promise<{ ended: boolean; stdout: string }> {
-    const child = spawnAsync(process.execPath, [RESOLVE_BASE_SCRIPT, ...args], { cwd: w.work, env: scopedEnv(w.home), stdio: ['pipe', 'pipe', 'pipe'] })
+  interface Run { readonly ended: boolean; readonly stdout: string }
+  type StdinMode = 'pipe' | 'ignore'
+  type OpenStdinVerdict = 'ended' | 'waited-for-input' | 'launch-too-slow'
+
+  /** Start the script with its standard input as `stdin`; the run has ended when it exits on its own inside the window. */
+  async function runInWindow(w: World, args: readonly string[], stdin: StdinMode): Promise<Run> {
+    const child = spawnAsync(process.execPath, [RESOLVE_BASE_SCRIPT, ...args], { cwd: w.work, env: scopedEnv(w.home), stdio: [stdin, 'pipe', 'pipe'] })
     let stdout = ''
-    child.stdout.on('data', (d: Buffer) => { stdout += d.toString('utf8') })
-    child.stderr.resume()
+    child.stdout?.on('data', (d: Buffer) => { stdout += d.toString('utf8') })
+    child.stderr?.resume()
     const ended = await new Promise<boolean>(resolve => {
-      const timer = setTimeout(() => resolve(false), SUBPROCESS_TIMEOUT_MS / 2)
+      const timer = setTimeout(() => resolve(false), OPEN_STDIN_WINDOW_MS)
       child.on('error', () => { clearTimeout(timer); resolve(false) })
       child.on('close', () => { clearTimeout(timer); resolve(true) })
     })
@@ -1000,19 +1012,48 @@ describe.skipIf(!POSIX)('the name on standard input, through the real script', S
     return { ended, stdout }
   }
 
+  /**
+   * Run with a standard input that stays open and never ends. When that run does not end inside
+   * the window, run again with the standard input closed: if that run ends, only the read of input
+   * kept the first one waiting; if it does not end either, the launch is too slow for the window.
+   */
+  async function verdictOnOpenStdin(run: (stdin: StdinMode) => Promise<Run>): Promise<{ verdict: OpenStdinVerdict; stdout: string }> {
+    const open = await run('pipe')
+    if (open.ended) return { verdict: 'ended', stdout: open.stdout }
+    const closed = await run('ignore')
+    return { verdict: closed.ended ? 'waited-for-input' : 'launch-too-slow', stdout: open.stdout }
+  }
+
+  const endsWithOpenStdin = (w: World, args: readonly string[]) => verdictOnOpenStdin(stdin => runInWindow(w, args, stdin))
+
+  const VERDICT_MESSAGE: Record<OpenStdinVerdict, string> = {
+    'ended': 'the script ended while standard input stayed open',
+    'waited-for-input': 'the script waited for input it must not read: it ended with standard input closed',
+    'launch-too-slow': `the script ended in neither run inside ${OPEN_STDIN_WINDOW_MS} ms: a timing failure, not a standard-input defect`,
+  }
+
+  it('the open-input verdict tells a wait for input from a launch that is too slow', async () => {
+    const ended: Run = { ended: true, stdout: 'line\n' }
+    const running: Run = { ended: false, stdout: '' }
+    const verdictOf = async (byMode: Record<StdinMode, Run>) => (await verdictOnOpenStdin(async stdin => byMode[stdin])).verdict
+    expect(await verdictOf({ pipe: ended, ignore: running })).toBe('ended')
+    expect(await verdictOf({ pipe: running, ignore: ended })).toBe('waited-for-input')
+    expect(await verdictOf({ pipe: running, ignore: running })).toBe('launch-too-slow')
+  })
+
   it('the argument form never reads standard input: it ends while standard input stays open and silent', async () => {
     const w = shared
     const r = await endsWithOpenStdin(w, ['pr', 'main'])
-    expect(r.ended, 'the script waited for input it must not read').toBe(true)
+    expect(r.verdict, VERDICT_MESSAGE[r.verdict]).toBe('ended')
     expect(r.stdout).toBe(`BASE_REF=${w.m0} TIP=origin FETCH=ok REASON=fresh NOTE=none\n`)
-  })
+  }, OPEN_STDIN_CASE_BUDGET_MS)
 
   it('a usage stop never reads standard input either', async () => {
     const w = shared
     const r = await endsWithOpenStdin(w, ['pr', 'main', '--name-stdin'])
-    expect(r.ended).toBe(true)
+    expect(r.verdict, VERDICT_MESSAGE[r.verdict]).toBe('ended')
     expect(r.stdout).toBe(stopLine('usage'))
-  })
+  }, OPEN_STDIN_CASE_BUDGET_MS)
 
   it('never writes the name to stdout or stderr, whatever the outcome', () => {
     const w = shared

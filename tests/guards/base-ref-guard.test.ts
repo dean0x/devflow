@@ -75,7 +75,7 @@ import {
   resolveCurationOffSource,
   seedOnce,
 } from '../helpers.js'
-import { RESOLVE_BASE_SCRIPT } from '../evidence/seam.js'
+import { RESOLVE_BASE_SCRIPT, SUBPROCESS_TIMEOUT_MS } from '../evidence/seam.js'
 
 // ---------------------------------------------------------------------------
 // The script seam: the exported constants are the one source of truth
@@ -1176,18 +1176,20 @@ describe('accepted names reach the PR target as one literal word read from the n
   it('each admitted name read from the name file is one word with every character literal', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'base-ref-guard-'))
     try {
-      const bad: string[] = []
-      for (const name of acceptedNames()) {
-        const file = path.join(dir, 'name')
+      const names = acceptedNames()
+      const files = names.map((name, i) => {
+        const file = path.join(dir, `name-${i}`)
         writeFileSync(file, `${name}\n`)
-        const out = execFileSync('/bin/sh', ['-c', `F="$1"; set -- ${PR_TARGET}; printf '%s' "$#:$1"`, 'sh', file], { encoding: 'utf-8' })
-        if (out !== `1:--base=${name}`) bad.push(`${name}: read back as ${out}`)
-      }
-      expect(bad).toEqual([])
+        return file
+      })
+      // one shell reads every name file in turn, each through the PR target text, and prints the word count and the first word
+      const script = `read_back() { F="$1"; set -- ${PR_TARGET}; printf '%s\\n' "$#:$1"; }; for f in "$@"; do read_back "$f"; done`
+      const out = execFileSync('/bin/sh', ['-c', script, 'sh', ...files], { encoding: 'utf-8', timeout: SUBPROCESS_TIMEOUT_MS })
+      expect(out.split('\n').slice(0, -1)).toEqual(names.map(name => `1:--base=${name}`))
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
-  })
+  }, 2 * SUBPROCESS_TIMEOUT_MS)
 
   it('known-bad probe: a name outside the class is refused, and an unquoted use does not keep it as a quoted word', () => {
     expect(resolver.STRICT_NAME_RE.test('a b')).toBe(false)
