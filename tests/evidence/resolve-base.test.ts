@@ -532,7 +532,10 @@ function runBase(w: World, mode: Mode, name: string, o: { cross?: boolean; spawn
   return checkedRun(RB.main(argv, { cwd: w.work, env: scopedEnv(w.home, o.env ?? {}), spawn: o.spawn }))
 }
 
-/** A fake file descriptor 0: hands `input` out in reads of at most `chunk` bytes, then reports the end. */
+/**
+ * A fake file descriptor 0: hands `input` out in reads of at most `chunk` bytes, then reports the end.
+ * With `clock`, each wait moves the clock by `advance` ms (by the wait's own ms when `advance` is absent).
+ */
 interface FakeStdin {
   readonly port: StdinPort
   /** The length each read asked for, in order. */
@@ -545,7 +548,7 @@ interface FakeStdin {
 
 function fakeStdin(
   input: string | Buffer,
-  o: { tty?: boolean; chunk?: number; eagainFirst?: number; failWith?: string; clock?: { t: number } } = {},
+  o: { tty?: boolean; chunk?: number; eagainFirst?: number; failWith?: string; clock?: { t: number }; advance?: number } = {},
 ): FakeStdin {
   const bytes = typeof input === 'string' ? Buffer.from(input, 'utf8') : input
   let pos = 0
@@ -567,7 +570,7 @@ function fakeStdin(
       pos += n
       return n
     },
-    wait: ms => { waits.push(ms); if (o.clock !== undefined) o.clock.t += ms },
+    wait: ms => { waits.push(ms); if (o.clock !== undefined) o.clock.t += o.advance ?? ms },
   }
   return { port, asked, waits, handed: () => pos, ttyChecks: () => ttyChecks }
 }
@@ -1068,6 +1071,11 @@ describe('the name on standard input', () => {
   })
 
   describe('a wait for input counts inside the run budget', () => {
+    /** The script's STDIN_WAIT_MS: how long one wait for input sleeps. */
+    const WAIT_MS = 10
+    /** The script's STDIN_MAX_WAITS: the run budget spent in waits of WAIT_MS. */
+    const MAX_WAITS = RB.RUN_BUDGET_MS / WAIT_MS
+
     it('gives resolver-unavailable, with no git call, when a descriptor never has input', () => {
       const clock = { t: 0 }
       const fd = fakeStdin('', { eagainFirst: Infinity, clock })
@@ -1077,7 +1085,30 @@ describe('the name on standard input', () => {
       expect(calls).toEqual([])
       expect(fd.waits.length).toBeGreaterThan(0)
       expect(fd.waits.reduce((a, b) => a + b, 0), 'the waits never pass the run budget').toBeLessThanOrEqual(RB.RUN_BUDGET_MS)
-      expect(fd.asked.length, 'the number of reads is bounded').toBeLessThanOrEqual(RB.RUN_BUDGET_MS)
+      expect(fd.asked.length, 'one read before the first wait, then one after each wait').toBe(fd.waits.length + 1)
+    })
+
+    it('stops at the wait count when the clock never moves', () => {
+      // The input runs dry after MAX_WAITS + 2 failed reads, so a loop with no wait-count stop ends in the assertions below.
+      const fd = fakeStdin('', { eagainFirst: MAX_WAITS + 2 })
+      const { spawn, calls } = refusingGit()
+      const out = RB.main(STDIN_ARGV, { cwd: NODE_CWD, env: ENV, spawn, now: () => 0, stdin: fd.port })
+      expect(out).toEqual({ code: 0, line: UNAVAILABLE })
+      expect(calls).toEqual([])
+      expect(fd.waits).toHaveLength(MAX_WAITS)
+      expect(new Set(fd.waits)).toEqual(new Set([WAIT_MS]))
+      expect(fd.asked, 'one read before the first wait, then one after each wait').toHaveLength(MAX_WAITS + 1)
+    })
+
+    it('stops at the run deadline, after 3 waits, when each wait moves the clock past 40% of the budget', () => {
+      const clock = { t: 0 }
+      const fd = fakeStdin('', { eagainFirst: Infinity, clock, advance: RB.RUN_BUDGET_MS * 0.4 })
+      const { spawn, calls } = refusingGit()
+      const out = RB.main(STDIN_ARGV, { cwd: NODE_CWD, env: ENV, spawn, now: () => clock.t, stdin: fd.port })
+      expect(out).toEqual({ code: 0, line: UNAVAILABLE })
+      expect(calls).toEqual([])
+      expect(fd.waits).toEqual([WAIT_MS, WAIT_MS, WAIT_MS])
+      expect(fd.asked, 'one read before the first wait, then one after each wait').toHaveLength(4)
     })
 
     it('waits out a descriptor that has no input yet, then reads the name', () => {
