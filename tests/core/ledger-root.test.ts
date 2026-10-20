@@ -8,12 +8,13 @@
  * non-git directory. The parity case runs the hook helper itself on the same
  * fixtures and compares its DF_LEDGER_ROOT with the TypeScript answer.
  */
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { execSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { getLedgerRoot, parseLedgerRootOutput } from '../../src/core/ledger-root.js';
+import { getLedgerRoot, lookupLedgerRoot, parseLedgerRootOutput, LEDGER_ROOT_TIMEOUT_MS } from '../../src/core/ledger-root.js';
+import { useWarmFakeExecutables } from '../helpers/warm-fake-executable.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..');
 const RESOLVE_HELPER = path.join(ROOT, 'src', 'assets', 'scripts', 'hooks', 'resolve-project-root');
@@ -114,5 +115,91 @@ describe('getLedgerRoot — the hooks\' ledger rule on real git (D-LEDGER-MAIN-W
     for (const [cwd, h] of [[main, home], [sub, home], [wt, home], [bareWt, home], [wt, main]] as const) {
       expect(await getLedgerRoot(cwd, { home: h }), cwd).toBe(hookLedgerRoot(cwd, h));
     }
+  });
+});
+
+// A hung git (a stalled mount) must not hold a caller for ever. The fake `git` is first on PATH
+// for the length of one test only; HOME is never touched.
+describe('getLedgerRoot — a git that hangs is bounded', { timeout: 30_000 }, () => {
+  const writeFakeExecutable = useWarmFakeExecutables();
+  /** Budget handed to the lookups here: short, so the tests stay fast. */
+  const BUDGET_MS = 300;
+  /** What a lookup may take beyond its budget: the kill grace plus a loaded machine. */
+  const MARGIN_MS = 3_000;
+  let base: string;
+  let work: string;
+  let savedPath: string | undefined;
+
+  beforeEach(() => {
+    base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ledger-root-hang-')));
+    work = path.join(base, 'work');
+    fs.mkdirSync(work);
+    fs.mkdirSync(path.join(base, 'bin'));
+    savedPath = process.env.PATH;
+  });
+
+  afterEach(() => {
+    if (savedPath === undefined) delete process.env.PATH;
+    else process.env.PATH = savedPath;
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+
+  /** Put a `git` that runs `body` first on PATH, for the rest of this test. */
+  function fakeGit(body: string): void {
+    writeFakeExecutable(path.join(base, 'bin', 'git'), `#!/bin/bash\n${body}\n`);
+    process.env.PATH = `${path.join(base, 'bin')}${path.delimiter}${savedPath ?? ''}`;
+  }
+
+  async function timed<T>(run: () => Promise<T>): Promise<{ value: T; ms: number }> {
+    const started = Date.now();
+    const value = await run();
+    return { value, ms: Date.now() - started };
+  }
+
+  it('shares the HUD\'s one-second budget', () => {
+    expect(LEDGER_ROOT_TIMEOUT_MS).toBe(1000);
+  });
+
+  it('answers timed-out within the budget when git sleeps, and getLedgerRoot answers null', async () => {
+    fakeGit('exec sleep 30');
+
+    const lookup = await timed(() => lookupLedgerRoot(work, { timeoutMs: BUDGET_MS }));
+    expect(lookup.value).toEqual({ kind: 'timed-out' });
+    expect(lookup.ms).toBeLessThan(BUDGET_MS + MARGIN_MS);
+
+    const root = await timed(() => getLedgerRoot(work, { timeoutMs: BUDGET_MS }));
+    expect(root.value).toBeNull();
+    expect(root.ms).toBeLessThan(BUDGET_MS + MARGIN_MS);
+  });
+
+  it('answers within the budget even when git ignores the polite kill', async () => {
+    fakeGit("trap '' TERM\nsleep 3");
+
+    const lookup = await timed(() => lookupLedgerRoot(work, { timeoutMs: BUDGET_MS }));
+
+    expect(lookup.value).toEqual({ kind: 'timed-out' });
+    expect(lookup.ms).toBeLessThan(BUDGET_MS + MARGIN_MS);
+  });
+
+  it('bounds the fallback call too: a first answer that is not recognised, then a git that sleeps', async () => {
+    fakeGit('case "$*" in\n  *--git-common-dir*) echo "not a path"; exit 0 ;;\n  *) exec sleep 30 ;;\nesac');
+
+    const lookup = await timed(() => lookupLedgerRoot(work, { timeoutMs: BUDGET_MS }));
+
+    expect(lookup.value).toEqual({ kind: 'timed-out' });
+    expect(lookup.ms).toBeLessThan(BUDGET_MS + MARGIN_MS);
+  });
+
+  it('answers the toplevel from the fallback when the first answer is not recognised', async () => {
+    fakeGit('case "$*" in\n  *--git-common-dir*) echo "not a path"; exit 0 ;;\n  *) echo /some/where/else; exit 0 ;;\nesac');
+
+    expect(await lookupLedgerRoot(work, { timeoutMs: BUDGET_MS })).toEqual({ kind: 'root', root: '/some/where/else' });
+  });
+
+  it('answers no-root, not timed-out, when git fails fast (not a work tree)', async () => {
+    fakeGit('echo "fatal: not a git repository" >&2\nexit 128');
+
+    expect(await lookupLedgerRoot(work, { timeoutMs: BUDGET_MS })).toEqual({ kind: 'no-root' });
+    expect(await getLedgerRoot(work, { timeoutMs: BUDGET_MS })).toBeNull();
   });
 });

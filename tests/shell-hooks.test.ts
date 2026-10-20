@@ -6084,6 +6084,62 @@ describe('curation-move: the shim that moves the old ledger folder (#529)', { ti
     });
   });
 
+  describe('the log line holds no control character, whatever node printed', () => {
+    // A name read from the repository can reach node's answer. The json-helper scrubs it; the
+    // shim strips again with builtin expansion, so a node that did not scrub still cannot put an
+    // escape sequence in the hook log. The fake node prints raw bytes with printf octal escapes:
+    // ESC (033), the C1 control U+009B as its UTF-8 bytes (302 233), BEL (007) and DEL (177).
+    // eslint-disable-next-line no-control-regex
+    const CONTROL_CHARACTER = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/;
+    const RAW = String.raw`\033[31m\302\2332J\007\177`;
+
+    /** Run the shim with a node that prints `printfFormat` and exits `code`. */
+    function runWithNode(printfFormat: string, code: number): void {
+      seedOld(root);
+      const shimDir = path.join(base, 'shim');
+      fs.mkdirSync(shimDir);
+      writeFakeExecutable(path.join(shimDir, 'node'), `#!/bin/bash\nprintf '${printfFormat}'\nexit ${code}\n`);
+      const res = run('set -e; df_curation_move "$ROOT"; echo after', { PATH: `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}` });
+      expect(res).toEqual({ status: 0, stdout: 'after\n', stderr: '' });
+    }
+
+    it('a refusal line is logged without control characters, and keeps its readable text', () => {
+      runWithNode(`move-ledger: evil${RAW}name is a symbolic link; nothing was changed\\nsecond line\\n`, 1);
+
+      const lines = logLines();
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).not.toMatch(CONTROL_CHARACTER);
+      expect(lines[0]).toContain('Curation move skipped: move-ledger: evil');
+      expect(lines[0]).toContain('name is a symbolic link; nothing was changed');
+      expect(lines[0]).not.toContain('second line');
+    });
+
+    it('a move line with a backup folder and notes is logged without control characters', () => {
+      runWithNode(`moved moved-in\\nbackup learning.backup-evil${RAW}\\nnote left in the backup, not moved: evil${RAW}.txt\\n`, 0);
+
+      const lines = logLines();
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).not.toMatch(CONTROL_CHARACTER);
+      expect(lines[0]).toContain('Curation move (moved-in), backup folder learning.backup-evil');
+      expect(lines[0]).toContain('left in the backup, not moved: evil');
+    });
+
+    it('keeps UTF-8 text outside the C1 range, in a name or in a note', () => {
+      runWithNode(String.raw`moved moved-in\nbackup learning.backup-\342\202\254\303\251\nnote caf\303\251 \342\202\254 \303\240\n`, 0);
+
+      const lines = logLines();
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain('learning.backup-€é');
+      expect(lines[0]).toContain('café € à');
+    });
+
+    it('puts the locale back as it was', () => {
+      seedOld(root);
+      const res = run('LC_ALL=en_US.UTF-8; df_curation_move "$ROOT"; printf "%s" "$LC_ALL"', { LC_ALL: undefined });
+      expect(res.stdout).toBe('en_US.UTF-8');
+    });
+  });
+
   describe('the marker key matches the TypeScript function (TP-27)', () => {
     const ROOTS = [
       '/a',

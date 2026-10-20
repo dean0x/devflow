@@ -177,7 +177,8 @@ function parseArgs(argList) {
  * Print a curation op's Result: `format(value)` and a newline on stdout, or the
  * error message and a newline on stderr. Returns the exit code for the op to set
  * as process.exitCode, so the process exits once, after the op has returned and
- * every lock it took is released.
+ * every lock it took is released. The error message is one line with no control
+ * character: it may name a file the repository holds.
  *
  * @param {{ ok: true, value: unknown } | { ok: false, error: { message: string } }} result
  * @param {(value: any) => string} format - the stdout text for the value
@@ -188,7 +189,7 @@ function emit(result, format) {
     process.stdout.write(`${format(result.value)}\n`);
     return 0;
   }
-  process.stderr.write(`${result.error.message}\n`);
+  process.stderr.write(`${curation().store.singleLine(result.error.message)}\n`);
   return 1;
 }
 
@@ -552,16 +553,18 @@ try {
     // curation ops it takes its paths as arguments, so a caller outside the project
     // root can name the root; every path stays one argv word, never a shell word.
     // stdout: none | busy | moved <mode>, then `backup <name>` when a backup was made
-    // and one `note <text>` line for each note
+    // and one `note <text>` line for each note. Every line is scrubbed here (singleLine):
+    // a note may name a file the repository holds, and no line may carry a control
+    // character or break into two.
     // -------------------------------------------------------------------------
     case 'move-ledger': {
       if (args.length !== 3) exitWithUsage('move-ledger <root> <old-folder> <new-folder> (the root is an absolute path)');
       const { store } = curation();
       process.exitCode = emit(store.moveLedger(args[0], { oldName: args[1], newName: args[2] }), moved => [
         moved.state === 'moved' ? `moved ${moved.mode}` : moved.state,
-        ...(moved.state === 'moved' && moved.backup !== null ? [`backup ${store.singleLine(moved.backup)}`] : []),
-        ...moved.notes.map(note => `note ${store.singleLine(note)}`),
-      ].join('\n'));
+        ...(moved.state === 'moved' && moved.backup !== null ? [`backup ${moved.backup}`] : []),
+        ...moved.notes.map(note => `note ${note}`),
+      ].map(line => store.singleLine(line)).join('\n'));
       break;
     }
 
@@ -570,7 +573,8 @@ try {
       process.exit(1);
   }
 } catch (err) {
-  process.stderr.write(`json-helper error: ${err && err.message ? err.message : String(err)}\n`);
+  const reason = err && err.message ? err.message : String(err);
+  process.stderr.write(`json-helper error: ${curationModules === null ? reason : curationModules.store.singleLine(reason)}\n`);
   process.exit(1);
 }
 } // end if (require.main === module)

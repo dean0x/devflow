@@ -169,6 +169,42 @@ describe('init moves the project ledger folder (TP-7, TP-8, TP-14)', () => {
   });
 });
 
+// A name a repository holds can carry a terminal escape sequence (an OSC title change, a
+// C1 control, a bell) and a newline. No line init or status prints may carry one.
+describe('a name read from the repository prints as one clean line', () => {
+  /** ESC ] 0 ; pwn BEL, then the C1 control U+009B, then a newline: a title change, a CSI and a line break. */
+  const HOSTILE_PART = 'evil\u001b]0;pwn\u0007\u009b31m\nname';
+  /** What the printed line holds in its place: each run of control characters is one space. */
+  const PRINTED_PART = 'evil ]0;pwn 31m name';
+  /** The hostile bytes. A bare ESC is not one: the spinner of the prompts library prints cursor sequences with it. */
+  const RAW_ESCAPES = ['\u001b]', '\u0007', '\u009b'] as const;
+
+  it('init: a refused move names the link with no raw control byte', { timeout: MULTI_RUN_TIMEOUT_MS }, async () => {
+    await seedOldFolder();
+    await fs.symlink(path.join(base, 'elsewhere.txt'), path.join(oldDir(), `${HOSTILE_PART}.txt`));
+
+    const out = runInit(repo, '--curation');
+
+    expect(out).toContain(`Ledger move refused for ${repo}`);
+    expect(out).toContain(`${PRINTED_PART}.txt is a symbolic link`);
+    for (const raw of RAW_ESCAPES) expect(out.includes(raw), JSON.stringify(raw)).toBe(false);
+    expect(await exists(newDir()), 'a refused move changes nothing').toBe(false);
+  });
+
+  it('curation --status: a backup folder named with control characters prints as one clean line', { timeout: MULTI_RUN_TIMEOUT_MS }, async () => {
+    runInit(repo, '--curation');
+    const backup = path.join(repo, '.devflow', `learning.backup-${HOSTILE_PART}`);
+    await fs.mkdir(backup);
+    await fs.writeFile(path.join(backup, '.pending-turns.jsonl'), '{"role":"user","content":"x","ts":1}\n{"role":"user","content":"y","ts":2}\n', 'utf-8');
+
+    const { status, out } = runCli(repo, 'curation', '--status');
+
+    expect(status, out).toBe(0);
+    expect(out).toContain(`Backup: ${path.join(repo, '.devflow', 'learning.backup-')}${PRINTED_PART}: 2 pending rows in the backup`);
+    for (const raw of RAW_ESCAPES) expect(out.includes(raw), JSON.stringify(raw)).toBe(false);
+  });
+});
+
 describe('init and the drain meet the old folder (TP-8)', () => {
   it('--no-curation drains the queue of an old folder whose move was deferred, and keeps the ledger', { timeout: MULTI_RUN_TIMEOUT_MS }, async () => {
     await seedOldFolder(repo, true);

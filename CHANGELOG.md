@@ -109,6 +109,9 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
   `Curation: open Claude Code in this project once, or run devflow init`.
   They do not read the old folder.
 - Failed: init prints `Ledger move failed for <root>` and copies nothing. The next init tries again.
+- Skipped: git did not name the project's repository within one second, for example on a hung mount.
+  Init prints `Ledger move skipped for <root>: git did not answer in time.` and does not count the project as moved.
+  The other projects move. The next init tries again, and a session start in the project moves it too.
 
 **What stays behind:**
 - Reach: a project that neither `devflow init` nor a Claude Code session reaches keeps its old

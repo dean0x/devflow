@@ -4,11 +4,8 @@ import * as path from 'node:path';
 import type { ComponentResult, GatherContext, CurationCountsData, CurationMoveNotice } from '../types.js';
 import { dim } from '../colors.js';
 import { curationMoveMarkerKey, getDecisionsLedgerPath, LEGACY_NAMES } from '../../core/project-paths.js';
-import { getLedgerRoot, type LedgerRootOptions } from '../../core/ledger-root.js';
+import { getLedgerRoot, LEDGER_ROOT_TIMEOUT_MS, type LedgerRootOptions } from '../../core/ledger-root.js';
 import { isActiveDecisionsStatus } from '../../core/observations.js';
-
-/** The HUD's per-git-command budget (src/hud/git.ts GIT_TIMEOUT). */
-const LEDGER_ROOT_TIMEOUT_MS = 1000;
 
 /**
  * The largest ledger the statusline reads: 8 MiB, far above the roughly 0.5 MB

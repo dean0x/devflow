@@ -13,7 +13,7 @@
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import { getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
-import { getLedgerRoot } from '../../core/ledger-root.js';
+import { LEDGER_ROOT_TIMEOUT_MS, lookupLedgerRoot } from '../../core/ledger-root.js';
 import { CURATION_DIR_NAME, LEGACY_NAMES } from '../../core/project-paths.js';
 import {
   formatCurationStoreUnavailable,
@@ -35,7 +35,7 @@ export type MoveStore = Pick<CurationStoreModule, 'moveLedger' | 'sweepLedgerBac
 /** The real I/O of the per-project move, over `store`. */
 export function realProjectLedgerMoveIO(store: MoveStore): ProjectLedgerMoveIO {
   return {
-    ledgerRootOf: (project) => getLedgerRoot(project),
+    ledgerRootOf: (project) => lookupLedgerRoot(project, { timeoutMs: LEDGER_ROOT_TIMEOUT_MS }),
     realpath: (target) => fs.realpath(target).catch(() => null),
     readdir: (dir) => fs.readdir(dir).catch(() => null),
     store,

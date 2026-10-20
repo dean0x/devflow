@@ -45,6 +45,14 @@
 #   the HUD read the marker through it (tests/shell-hooks.test.ts holds both to the
 #   same answers). Returns 1, setting nothing, for a root of more than 4096 bytes.
 #
+# df_curation_move_plain <text>
+#   Sets DF_CURATION_MOVE_PLAIN to <text> with every control character replaced by a
+#   space: C0 and DEL, and the C1 controls U+0080-U+009F (the bytes C2 80 to C2 9F in
+#   UTF-8). Builtin expansion only, so it forks nothing. node's answer can carry a name
+#   the repository holds, and no log line may carry an escape sequence or break in two.
+#   It works bytewise under LC_ALL=C, which it puts back as it was, so other UTF-8
+#   text, whatever the locale, is kept.
+#
 # df_curation_move_names
 #   Sets the names the rename retires and their replacements, the shell mirror of
 #   LEGACY_NAMES and the curation names in src/core/project-paths.ts and
@@ -91,6 +99,17 @@ df_curation_move_key() {
   return 0
 }
 
+df_curation_move_plain() {
+  local _text="$1" _lc_set=0 _lc_old=""
+  if [ "${LC_ALL+set}" = "set" ]; then _lc_set=1; _lc_old="$LC_ALL"; fi
+  LC_ALL=C
+  _text="${_text//$'\xc2'[$'\x80'-$'\x9f']/ }"
+  _text="${_text//[[:cntrl:]]/ }"
+  if [ "$_lc_set" = 1 ]; then LC_ALL="$_lc_old"; else unset LC_ALL; fi
+  DF_CURATION_MOVE_PLAIN="$_text"
+  return 0
+}
+
 df_curation_move() {
   local _root="$1" _retry="${2:-}"
   local _devflow="" _back="$PWD" _real="" _home_real="" _machine_real=""
@@ -131,7 +150,8 @@ df_curation_move() {
   # 4. The one fork. 2>&1 so a refusal's message reaches the log line.
   _helper="${BASH_SOURCE[0]%/*}/json-helper.cjs"
   _out=$(node "$_helper" move-ledger "$_root" "$DF_CM_OLD_FOLDER" "$DF_CM_NEW_FOLDER" 2>&1) || _rc=$?
-  _first="${_out%%$'\n'*}"
+  df_curation_move_plain "${_out%%$'\n'*}"
+  _first="$DF_CURATION_MOVE_PLAIN"
 
   if [ "$_rc" -eq 0 ]; then
     case "$_first" in
@@ -142,8 +162,8 @@ df_curation_move() {
         while [ -n "$_rest" ] && [ "$_n" -lt 32 ]; do
           _line="${_rest%%$'\n'*}"
           case "$_line" in
-            "backup "*) _backup=", backup folder ${_line#backup }" ;;
-            "note "*) _notes="${_notes:+$_notes; }${_line#note }" ;;
+            "backup "*) df_curation_move_plain "${_line#backup }"; _backup=", backup folder $DF_CURATION_MOVE_PLAIN" ;;
+            "note "*) df_curation_move_plain "${_line#note }"; _notes="${_notes:+$_notes; }$DF_CURATION_MOVE_PLAIN" ;;
           esac
           if [ "$_line" = "$_rest" ]; then _rest=""; else _rest="${_rest#*$'\n'}"; fi
           _n=$((_n + 1))

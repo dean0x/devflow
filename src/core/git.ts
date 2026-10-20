@@ -28,13 +28,28 @@ export function isTrunkBranch(branch: string): boolean {
 }
 
 /**
- * Get git repository root directory (async, non-blocking)
- * Returns null if not in a git repository
+ * The repository root named by the output of `git rev-parse --show-toplevel`, or null
+ * when the output is not one clean absolute path.
  *
- * Security: Validates output to prevent command injection
+ * Security: validates output to prevent command injection
  * - Rejects paths with injection characters (newlines, semicolons, shell operators)
  * - Ensures path is absolute
  * - Resolves path canonically
+ */
+export function parseGitToplevel(stdout: string): string | null {
+  const gitRootRaw = stdout.trim();
+
+  if (!gitRootRaw || gitRootRaw.includes('\n') || gitRootRaw.includes(';') || gitRootRaw.includes('&&')) {
+    return null;
+  }
+
+  const gitRoot = path.resolve(gitRootRaw);
+  return path.isAbsolute(gitRoot) ? gitRoot : null;
+}
+
+/**
+ * Get git repository root directory (async, non-blocking)
+ * Returns null if not in a git repository
  *
  * @param cwd - Directory to resolve the git root from. Defaults to process.cwd().
  *   Callers that already carry an explicit working directory must pass it, otherwise
@@ -46,21 +61,7 @@ export async function getGitRoot(cwd: string = process.cwd()): Promise<string | 
       cwd,
       encoding: 'utf-8'
     });
-
-    const gitRootRaw = stdout.trim();
-
-    // Validate git root path (security: prevent injection)
-    if (!gitRootRaw || gitRootRaw.includes('\n') || gitRootRaw.includes(';') || gitRootRaw.includes('&&')) {
-      return null;
-    }
-
-    // Validate it's an absolute path
-    const gitRoot = path.resolve(gitRootRaw);
-    if (!path.isAbsolute(gitRoot)) {
-      return null;
-    }
-
-    return gitRoot;
+    return parseGitToplevel(stdout);
   } catch {
     return null;
   }

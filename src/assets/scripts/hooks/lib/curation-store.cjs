@@ -1891,6 +1891,20 @@ function moveIoFailure(err) {
 }
 
 /**
+ * `result` with every message and note on one line (singleLine). A name that a
+ * repository holds (an entry, a backup folder) reaches a message through a path, and a
+ * name may carry a terminal escape sequence or a newline, so no message leaves the move
+ * ops with one. Answers a new Result and leaves `result` as it is.
+ *
+ * @param {{ ok: true, value: { notes?: string[] } } | { ok: false, error: { message: string } }} result
+ */
+function scrubMoveResult(result) {
+  if (!result.ok) return { ok: false, error: { ...result.error, message: singleLine(result.error.message) } };
+  const { notes } = result.value;
+  return Array.isArray(notes) ? { ok: true, value: { ...result.value, notes: notes.map(singleLine) } } : result;
+}
+
+/**
  * What is wrong with an entry the move will read or rename, or null when nothing is:
  * a link is, and so is anything but an empty directory where a lock belongs, because
  * a lock path holding a file, or a directory with something in it, can never be taken
@@ -2529,11 +2543,18 @@ function curationMoveFinish(ctx, { whole }) {
  *   oldName, newName: the two folder names under `.devflow`; machineDir: the machine
  *   root (default `$HOME/.devflow`); homeDir: the home directory (default `$HOME`);
  *   now: epoch ms (default Date.now())
+ * Every message and note is one line with no control character (scrubMoveResult).
+ *
  * @returns {{ ok: true, value: { state: 'none'|'busy', notes: string[] }
  *   | { state: 'moved', mode: 'whole-folder'|'kept-new'|'moved-in', backup: string|null, rendered: boolean, notes: string[] } }
  *   | { ok: false, error: { kind: 'invalid-input'|'refused'|'io-error', message: string } }}
  */
-function moveLedger(root, { oldName, newName, machineDir, homeDir, now = Date.now() } = {}) {
+function moveLedger(root, options = {}) {
+  return scrubMoveResult(moveLedgerUnscrubbed(root, options));
+}
+
+/** moveLedger before its messages and notes are made single-line. */
+function moveLedgerUnscrubbed(root, { oldName, newName, machineDir, homeDir, now = Date.now() } = {}) {
   if (!isFolderName(oldName) || !isFolderName(newName) || oldName === newName) {
     return { ok: false, error: { kind: 'invalid-input', message: 'move-ledger: the old and new folder names must be two different plain names' } };
   }
@@ -2680,10 +2701,17 @@ function claimIsFresh(file, now) {
  *
  * @param {unknown} root - the ledger root, an absolute path
  * @param {{ oldName: string, newName: string, machineDir?: string, homeDir?: string, now?: number }} opts
+ * Every message and note is one line with no control character (scrubMoveResult).
+ *
  * @returns {{ ok: true, value: { state: 'none'|'busy'|'swept', files: number, merged: number, overflowed: number, notes: string[] } }
  *   | { ok: false, error: { kind: 'invalid-input'|'refused'|'io-error', message: string } }}
  */
-function sweepLedgerBackups(root, { oldName, newName, machineDir, homeDir, now = Date.now() } = {}) {
+function sweepLedgerBackups(root, options = {}) {
+  return scrubMoveResult(sweepLedgerBackupsUnscrubbed(root, options));
+}
+
+/** sweepLedgerBackups before its messages and notes are made single-line. */
+function sweepLedgerBackupsUnscrubbed(root, { oldName, newName, machineDir, homeDir, now = Date.now() } = {}) {
   const idle = state => ({ ok: true, value: { state, files: 0, merged: 0, overflowed: 0, notes: [] } });
   if (!isFolderName(oldName) || !isFolderName(newName) || oldName === newName) {
     return { ok: false, error: { kind: 'invalid-input', message: 'sweep-backups: the old and new folder names must be two different plain names' } };
@@ -2759,7 +2787,9 @@ function holdsPendingRows(name) {
  * sweep has not merged it). A swept file counts for nothing. Read-only: no lock is
  * taken and nothing is written, no link is followed (a backup that is a link, and a
  * queue file that is a link, read as absent), and the read is bounded by the sweep's
- * limits on backup folders and on queue files per folder.
+ * limits on backup folders and on queue files per folder. A backup's `name` is for
+ * display: its control characters are collapsed to a space (singleLine), so it may differ
+ * from the folder's own name.
  *
  * @param {unknown} root - the ledger root, an absolute path
  * @returns {{ ok: true, value: { backups: Array<{ name: string, pendingRows: number }> } }
@@ -2785,12 +2815,12 @@ function backupPendingRows(root) {
         const text = readQueueText(path.join(dir, file));
         if (text !== null) pendingRows += completeLines(text).length;
       }
-      backups.push({ name, pendingRows });
+      backups.push({ name: singleLine(name), pendingRows });
     }
     return { ok: true, value: { backups } };
   } catch (err) {
     if (!err || typeof err.code !== 'string') throw err;
-    return { ok: false, error: { kind: 'io-error', message: `backup-rows: ${err.code}: ${err.message}` } };
+    return { ok: false, error: { kind: 'io-error', message: singleLine(`backup-rows: ${err.code}: ${err.message}`) } };
   }
 }
 

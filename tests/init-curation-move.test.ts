@@ -7,7 +7,8 @@
 // to it; no test touches the real HOME or a real project.
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { promises as fs } from 'fs';
+import { execFileSync } from 'child_process';
+import { promises as fs, accessSync, constants as fsConstants } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import {
@@ -16,6 +17,7 @@ import {
   moveGlobalTuningFile,
   runInitCurationMove,
   describeOutcome,
+  describeMoveText,
   moveNotice,
   MOVE_POOL_LIMIT,
   type GlobalTuningMoveIO,
@@ -25,8 +27,12 @@ import {
   type ProjectLedgerMoveOptions,
   type ProjectLedgerMoveReport,
   type ProjectLedgerMoveResult,
+  type ProjectMoveOutcome,
 } from '../src/cli/commands/init-curation-move.js';
 import { loadCurationStore } from '../src/core/curation-store.js';
+import { LEDGER_ROOT_TIMEOUT_MS, type LedgerRootLookup } from '../src/core/ledger-root.js';
+import { realProjectLedgerMoveIO } from '../src/cli/commands/curation-move-io.js';
+import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
 import type {
   CurationStoreResult,
   LedgerMoveOptions,
@@ -44,6 +50,13 @@ const NONE: LedgerMoveOutcome = { state: 'none', notes: [] };
 const BUSY: LedgerMoveOutcome = { state: 'busy', notes: [] };
 const MOVED: LedgerMoveOutcome = { state: 'moved', mode: 'whole-folder', backup: null, rendered: true, notes: [] };
 const SWEPT: LedgerSweepOutcome = { state: 'swept', files: 1, merged: 2, overflowed: 0, notes: [] };
+
+/** A name a repository can hold: an escape sequence, a C1 control, a bell and a newline. */
+const HOSTILE = 'evil\u001b[31m\u009b2J\u0007\nname';
+
+/** Any character a terminal acts on: C0 (the newline too), DEL and C1. */
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f]/;
 
 const ok = <T>(value: T): CurationStoreResult<T> => ({ ok: true, value });
 const fail = <T>(kind: string, message: string): CurationStoreResult<T> => ({ ok: false, error: { kind, message } });
@@ -63,6 +76,8 @@ function options(overrides: Partial<ProjectLedgerMoveOptions> = {}): ProjectLedg
 interface FakeConfig {
   /** Project root -> ledger root; a missing key is its own ledger root, null is "git root is null". */
   readonly ledgerRoots?: Readonly<Record<string, string | null>>;
+  /** Project roots whose ledger-root lookup timed out. */
+  readonly timedOut?: readonly string[];
   /** Path -> physical path; a missing key is its own physical path. */
   readonly physical?: Readonly<Record<string, string>>;
   /** Ledger root -> entries of its .devflow folder; a missing key lists nothing. */
@@ -88,7 +103,11 @@ function fakeIO(config: FakeConfig = {}): { io: ProjectLedgerMoveIO; rec: Record
     return typeof entry === 'function' ? entry() : entry;
   };
   const io: ProjectLedgerMoveIO = {
-    ledgerRootOf: async (project) => (project in (config.ledgerRoots ?? {}) ? config.ledgerRoots![project] : project),
+    ledgerRootOf: async (project): Promise<LedgerRootLookup> => {
+      if (config.timedOut?.includes(project)) return { kind: 'timed-out' };
+      const root = project in (config.ledgerRoots ?? {}) ? config.ledgerRoots![project] : project;
+      return root === null ? { kind: 'no-root' } : { kind: 'root', root };
+    },
     realpath: async (target) => {
       rec.physicalAsked.push(target);
       return config.physical?.[target] ?? target;
@@ -176,12 +195,35 @@ describe('moveProjectLedgers: the targets', () => {
       ...io,
       ledgerRootOf: async (project) => {
         if (project === '/w/bad') throw new Error('git is gone');
-        return project;
+        return { kind: 'root', root: project };
       },
     };
     const report = reportOf(await moveProjectLedgers(options({ projectRoots: ['/w/bad', '/w/a'] }), throwing));
     expect(movedRoots(rec)).toEqual(['/w/a']);
     expect(report.outcomes).toHaveLength(1);
+  });
+
+  it('skips a project whose ledger-root lookup timed out, names it, and never counts it as moved', async () => {
+    const { io, rec } = fakeIO({ timedOut: ['/w/stalled'], moves: { '/w/a': ok(MOVED), '/w/b': ok(MOVED) } });
+    const report = reportOf(await moveProjectLedgers(options({ projectRoots: ['/w/a', '/w/stalled', '/w/b'] }), io));
+
+    expect(movedRoots(rec)).toEqual(['/w/a', '/w/b']);
+    expect(report.movedCount).toBe(2);
+    expect(report.outcomes.map(o => `${o.kind}:${o.root}`)).toEqual(['moved:/w/a', 'moved:/w/b', 'skipped:/w/stalled']);
+    expect(report.lines).toHaveLength(1);
+    expect(report.lines[0]).toContain('/w/stalled');
+    expect(report.lines[0]).toMatch(/skipped/);
+    expect(report.lines[0]).toMatch(/did not answer in time/);
+    expect(report.lines[0]).toMatch(/next init tries again/);
+  });
+
+  it('prints a line for a timed-out project even when nothing else moves', async () => {
+    const { io, rec } = fakeIO({ timedOut: ['/w/stalled'] });
+    const report = reportOf(await moveProjectLedgers(options({ projectRoots: ['/w/stalled'] }), io));
+
+    expect(rec.order).toEqual([]);
+    expect(report.movedCount).toBe(0);
+    expect(report.lines).toHaveLength(1);
   });
 });
 
@@ -392,7 +434,7 @@ describe('moveProjectLedgers: the bound and the arguments', () => {
         peak = Math.max(peak, inFlight);
         await new Promise<void>(resolve => setTimeout(resolve, 1));
         inFlight -= 1;
-        return project;
+        return { kind: 'root', root: project };
       },
     };
     const projects = Array.from({ length: 50 }, (_, i) => `/w/p${i}`);
@@ -488,6 +530,35 @@ describe('moveLedgerRoot: the move one root gets from configure and the toggles'
     expect(describeOutcome({ kind: 'refused', root: '/w/a', message: 'a link' })).toEqual([expect.stringContaining('refused')]);
     expect(describeOutcome({ kind: 'error', root: '/w/a', message: 'x' })).toHaveLength(1);
     expect(describeOutcome({ kind: 'unchanged', root: '/w/a', sweep: null })).toEqual([]);
+  });
+
+  it('describeOutcome prints a root and a message from the repository as one clean line', () => {
+    const root = `/w/${HOSTILE}`;
+    const message = `${root}/${HOSTILE}.txt is a symbolic link`;
+    const outcomes: ProjectMoveOutcome[] = [
+      { kind: 'busy', root },
+      { kind: 'refused', root, message },
+      { kind: 'error', root, message },
+      { kind: 'skipped', root, reason: 'git-root-timed-out' },
+      { kind: 'unchanged', root, sweep: { state: 'failed', message } },
+      { kind: 'unchanged', root, sweep: { state: 'busy' } },
+      { kind: 'moved', root, mode: 'moved-in', backup: null, rendered: false, notes: [], sweep: { state: 'failed', message } },
+    ];
+    for (const outcome of outcomes) {
+      const lines = describeOutcome(outcome);
+      expect(lines.length, outcome.kind).toBeGreaterThan(0);
+      for (const line of lines) {
+        expect(line, outcome.kind).not.toMatch(CONTROL_CHARACTER);
+        expect(line, outcome.kind).toContain('evil');
+      }
+    }
+  });
+
+  it('describeMoveText strips C0, DEL and C1 and keeps a long message whole', () => {
+    expect(describeMoveText(`a${HOSTILE}b`)).toBe('aevil?[31m?2J??nameb');
+    const long = `/w/${'x'.repeat(300)}`;
+    expect(describeMoveText(long)).toBe(long);
+    expect(describeMoveText(null)).toBe('<null>');
   });
 });
 
@@ -588,6 +659,14 @@ describe('runInitCurationMove: the lines and the notice init prints', () => {
     expect(report.lines).toEqual([]);
   });
 
+  it('prints the line for a project whose lookup timed out, and no notice', async () => {
+    const { io } = fakeIO({ timedOut: ['/w/stalled'] });
+    const report = await runInitCurationMove(options({ projectRoots: ['/w/stalled'] }), { ledger: io, tuning: quietTuning });
+    expect(report.movedCount).toBe(0);
+    expect(report.notice).toBeNull();
+    expect(report.lines).toEqual([expect.stringContaining('/w/stalled')]);
+  });
+
   it('says "1 project" for one', () => {
     expect(moveNotice(1)).toContain('1 project ');
     expect(moveNotice(1)).not.toContain('projects');
@@ -659,7 +738,7 @@ describe('moveProjectLedgers with the real store: init and a session start meet 
     await fs.mkdir(lockDir);
 
     const io: ProjectLedgerMoveIO = {
-      ledgerRootOf: async (project) => project,
+      ledgerRootOf: async (project) => ({ kind: 'root', root: project }),
       realpath: async (target) => fs.realpath(target).catch(() => null),
       readdir: async (dir) => fs.readdir(dir).catch(() => null),
       store,
@@ -690,5 +769,67 @@ describe('moveProjectLedgers with the real store: init and a session start meet 
       io,
     );
     expect(reportOf(again).outcomes.map(o => o.kind)).toEqual(['unchanged']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A git that hangs (REL-2)
+// ---------------------------------------------------------------------------
+
+/** The first `git` on PATH, found before any fake is put in front of it. */
+function findGitOnPath(): string {
+  for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
+    const candidate = path.join(dir, 'git');
+    try {
+      accessSync(candidate, fsConstants.X_OK);
+      return candidate;
+    } catch {
+      // not here
+    }
+  }
+  throw new Error('git is not on PATH');
+}
+
+describe('moveProjectLedgers with the real I/O: a project whose git hangs (REL-2)', { timeout: 60_000 }, () => {
+  const writeFakeExecutable = useWarmFakeExecutables();
+  let tmp: string | null = null;
+  let savedPath: string | undefined;
+
+  afterEach(async () => {
+    if (savedPath === undefined) delete process.env.PATH;
+    else process.env.PATH = savedPath;
+    if (tmp !== null) await fs.rm(tmp, { recursive: true, force: true });
+    tmp = null;
+  });
+
+  it('skips the stalled project within the budget, names it, and moves the others', async () => {
+    tmp = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'df-move-hang-')));
+    const stalled = path.join(tmp, 'stalled');
+    const good = path.join(tmp, 'good');
+    for (const repo of [stalled, good]) {
+      await fs.mkdir(repo);
+      execFileSync('git', ['init', '-q'], { cwd: repo });
+    }
+    // A git that sleeps in the stalled project and is the real git everywhere else. Only this
+    // test puts it on PATH, and only for its length; HOME is not touched.
+    const realGit = findGitOnPath();
+    const bin = path.join(tmp, 'bin');
+    await fs.mkdir(bin);
+    writeFakeExecutable(path.join(bin, 'git'), `#!/bin/bash\ncase "$PWD" in\n  */stalled) exec sleep 30 ;;\nesac\nexec "${realGit}" "$@"\n`);
+    savedPath = process.env.PATH;
+    process.env.PATH = `${bin}${path.delimiter}${savedPath ?? ''}`;
+
+    const { io: fake, rec } = fakeIO({ moves: { [good]: ok(MOVED) } });
+    const started = Date.now();
+    const report = reportOf(await moveProjectLedgers(
+      options({ projectRoots: [stalled, good] }),
+      realProjectLedgerMoveIO(fake.store),
+    ));
+
+    expect(Date.now() - started, 'the stalled project costs one budget, not a hang').toBeLessThan(LEDGER_ROOT_TIMEOUT_MS + 5_000);
+    expect(movedRoots(rec)).toEqual([good]);
+    expect(report.movedCount).toBe(1);
+    expect(report.outcomes.map(o => `${o.kind}:${path.basename(o.root)}`)).toEqual(['moved:good', 'skipped:stalled']);
+    expect(report.lines).toEqual([expect.stringContaining(stalled)]);
   });
 });

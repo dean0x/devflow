@@ -19,7 +19,9 @@
  * root, each mapped to its ledger root (a linked worktree keeps its ledger in the
  * main checkout) and listed once by physical path. The home directory and the
  * machine directory are never targets, and neither is a project whose git root is
- * null: init writes no repository file at HOME.
+ * null: init writes no repository file at HOME. A project whose git root lookup does
+ * not answer in time (a hung mount) is skipped, named in the lines init prints and
+ * never counted as moved.
  *
  * Per target the step runs the move, then, when a backup folder exists, the backup
  * sweep. The store takes every lock with no wait, so a busy project is reported and
@@ -32,6 +34,8 @@
 
 import * as path from 'path';
 import { pooled } from '../../core/migrations.js';
+import { describeEchoedValue } from '../../core/echo-value.js';
+import type { LedgerRootLookup } from '../../core/ledger-root.js';
 import { CURATION_DIR_NAME, CURATION_TUNING_FILE_NAME, LEGACY_NAMES, getGlobalCurateTuningConfigPath } from '../../core/project-paths.js';
 import type {
   CurationStoreModule,
@@ -45,6 +49,18 @@ export const MOVE_POOL_LIMIT = 16;
 
 /** The folder-name rule the store applies: a plain name of at most 64 characters. */
 const FOLDER_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+/** The most code points of one name, message or line the step echoes. A path of 4096 bytes fits. */
+const MAX_MOVE_TEXT = 4096;
+
+/**
+ * A name, a message or a line from a project's repository, made safe to print: control
+ * characters (terminal escapes, a newline) become `?`, C1 included, and the text is cut
+ * at MAX_MOVE_TEXT. Every echoed root, store message and entry name goes through it.
+ */
+export function describeMoveText(raw: unknown): string {
+  return describeEchoedValue(raw, MAX_MOVE_TEXT);
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -67,8 +83,11 @@ export interface ProjectLedgerMoveOptions {
 
 /** The I/O the step uses. Every member is total: it answers a value and does not throw. */
 export interface ProjectLedgerMoveIO {
-  /** The ledger root of a project (the main checkout for a linked worktree), or null when it has no git root. */
-  ledgerRootOf(projectRoot: string): Promise<string | null>;
+  /**
+   * The ledger root of a project (the main checkout for a linked worktree): `no-root` when
+   * it has no git root, `timed-out` when git did not answer in time.
+   */
+  ledgerRootOf(projectRoot: string): Promise<LedgerRootLookup>;
   /** The physical path of a path, or null when it cannot be resolved. */
   realpath(target: string): Promise<string | null>;
   /** The names directly inside a directory, or null when it cannot be listed. */
@@ -91,7 +110,9 @@ export type BackupSweepReport =
  * rebuilt after the rename, and the move stays done. `unchanged`: no old folder, so
  * nothing moved. `busy`: a lock is held; the project moves at its next event.
  * `refused`: a link or another unsafe state; nothing changed. `error`: an I/O failure;
- * nothing was copied and the old folder is whole.
+ * nothing was copied and the old folder is whole. `skipped`: the project's git root
+ * lookup did not answer in time, so its ledger root is unknown and nothing was tried;
+ * `root` is the project root init was given.
  */
 export type ProjectMoveOutcome =
   | {
@@ -106,7 +127,8 @@ export type ProjectMoveOutcome =
   | { readonly kind: 'unchanged'; readonly root: string; readonly sweep: BackupSweepReport | null }
   | { readonly kind: 'busy'; readonly root: string }
   | { readonly kind: 'refused'; readonly root: string; readonly message: string }
-  | { readonly kind: 'error'; readonly root: string; readonly message: string };
+  | { readonly kind: 'error'; readonly root: string; readonly message: string }
+  | { readonly kind: 'skipped'; readonly root: string; readonly reason: 'git-root-timed-out' };
 
 export interface ProjectLedgerMoveReport {
   /** One outcome per target, in target order. */
@@ -142,12 +164,14 @@ export async function moveProjectLedgers(
   const invalid = checkOptions(opts);
   if (invalid !== null) return { ok: false, error: { kind: 'invalid-input', message: invalid } };
 
-  const targets = await resolveTargets(opts, io);
+  const { targets, stalled } = await resolveTargets(opts, io);
   const settled = await pooled([...targets], MOVE_POOL_LIMIT, root => moveOne(root, opts, io));
-  const outcomes = settled.map((entry, index): ProjectMoveOutcome =>
+  const moves = settled.map((entry, index): ProjectMoveOutcome =>
     entry.status === 'fulfilled'
       ? entry.value
       : { kind: 'error', root: targets[index], message: describeFailure(entry.reason) });
+  const skipped = stalled.map((root): ProjectMoveOutcome => ({ kind: 'skipped', root, reason: 'git-root-timed-out' }));
+  const outcomes = [...moves, ...skipped];
 
   return {
     ok: true,
@@ -169,17 +193,28 @@ function checkOptions(opts: SharedMoveOptions): string | null {
   return null;
 }
 
+/** The ledger roots init moves, and the projects whose lookup timed out. */
+interface ResolvedTargets {
+  readonly targets: readonly string[];
+  /** The project roots whose git root lookup did not answer in time, in the order given. */
+  readonly stalled: readonly string[];
+}
+
 /**
  * The ledger roots init moves, once each. The current repository comes first, then
  * the projects in the order given. A root is listed once by its physical path, and
- * the home directory and the machine directory are dropped by the same test.
+ * the home directory and the machine directory are dropped by the same test. A project
+ * whose lookup timed out has no known ledger root: it is no target, and is listed apart.
  */
-async function resolveTargets(opts: ProjectLedgerMoveOptions, io: ProjectLedgerMoveIO): Promise<readonly string[]> {
+async function resolveTargets(opts: ProjectLedgerMoveOptions, io: ProjectLedgerMoveIO): Promise<ResolvedTargets> {
   const mapped = await pooled([...opts.projectRoots], MOVE_POOL_LIMIT, project => io.ledgerRootOf(project));
   const candidates: string[] = opts.ownLedgerRoot === null ? [] : [opts.ownLedgerRoot];
-  for (const entry of mapped) {
-    if (entry.status === 'fulfilled' && entry.value !== null) candidates.push(entry.value);
-  }
+  const stalled: string[] = [];
+  mapped.forEach((entry, index) => {
+    if (entry.status !== 'fulfilled') return;
+    if (entry.value.kind === 'root') candidates.push(entry.value.root);
+    else if (entry.value.kind === 'timed-out') stalled.push(opts.projectRoots[index]);
+  });
 
   const [homeReal, machineReal] = await Promise.all([physicalOf(opts.homeDir, io), physicalOf(opts.machineDir, io)]);
   const physicals = await pooled(candidates, MOVE_POOL_LIMIT, candidate => physicalOf(candidate, io));
@@ -193,7 +228,7 @@ async function resolveTargets(opts: ProjectLedgerMoveOptions, io: ProjectLedgerM
     seen.add(real);
     targets.push(candidate);
   });
-  return targets;
+  return { targets, stalled };
 }
 
 /** The physical path of a path, or the path itself when it cannot be resolved. */
@@ -305,17 +340,26 @@ export function describeOutcome(outcome: ProjectMoveOutcome): string[] {
   const lines: string[] = [];
   switch (outcome.kind) {
     case 'busy':
-      lines.push(`Ledger move skipped for ${outcome.root}: a lock is held. The project moves at its next session.`);
+      lines.push(`Ledger move skipped for ${describeMoveText(outcome.root)}: a lock is held. The project moves at its next session.`);
       break;
     case 'refused':
-      lines.push(`Ledger move refused for ${outcome.root}: ${outcome.message}. Nothing was changed.`);
+      lines.push(`Ledger move refused for ${describeMoveText(outcome.root)}: ${describeMoveText(outcome.message)}. Nothing was changed.`);
       break;
     case 'error':
-      lines.push(`Ledger move failed for ${outcome.root}: ${outcome.message}. Nothing was copied. The next init tries again.`);
+      lines.push(
+        `Ledger move failed for ${describeMoveText(outcome.root)}: ${describeMoveText(outcome.message)}. ` +
+        'Nothing was copied. The next init tries again.',
+      );
+      break;
+    case 'skipped':
+      lines.push(
+        `Ledger move skipped for ${describeMoveText(outcome.root)}: git did not answer in time. ` +
+        'Nothing was moved. The next init tries again.',
+      );
       break;
     case 'moved':
       if (!outcome.rendered) {
-        lines.push(`Ledger moved for ${outcome.root}, but the index was not rebuilt. The next ledger write rebuilds it.`);
+        lines.push(`Ledger moved for ${describeMoveText(outcome.root)}, but the index was not rebuilt. The next ledger write rebuilds it.`);
       }
       break;
     case 'unchanged':
@@ -328,9 +372,9 @@ export function describeOutcome(outcome: ProjectMoveOutcome): string[] {
   if (outcome.kind === 'moved' || outcome.kind === 'unchanged') {
     const sweep = outcome.sweep;
     if (sweep?.state === 'failed') {
-      lines.push(`Backup merge stopped for ${outcome.root}: ${sweep.message}. The next init finishes it.`);
+      lines.push(`Backup merge stopped for ${describeMoveText(outcome.root)}: ${describeMoveText(sweep.message)}. The next init finishes it.`);
     } else if (sweep?.state === 'busy') {
-      lines.push(`Backup merge skipped for ${outcome.root}: a lock is held. The next init tries again.`);
+      lines.push(`Backup merge skipped for ${describeMoveText(outcome.root)}: a lock is held. The next init tries again.`);
     }
   }
   return lines;
@@ -487,7 +531,7 @@ export async function runInitCurationMove(
       lines.push(`The ledger move did not run: ${result.error.message}.`);
     }
   } catch (error) {
-    lines.push(`The ledger move did not run: ${describeFailure(error)}.`);
+    lines.push(`The ledger move did not run: ${describeMoveText(describeFailure(error))}.`);
   }
   return { lines, notice: movedCount > 0 ? moveNotice(movedCount) : null, movedCount };
 }

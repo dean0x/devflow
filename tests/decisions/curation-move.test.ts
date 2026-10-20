@@ -1668,3 +1668,93 @@ describe('json-helper move-ledger (TP-36, argument half)', () => {
     expect(snapshotTree(site.root)).toEqual(before);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Names read from the repository reach no message raw
+// ---------------------------------------------------------------------------
+
+/**
+ * A name a repository can hold: an escape sequence, a C1 control (U+009B is the
+ * one-character CSI), a bell and a newline. The test file spells it with escapes.
+ */
+const HOSTILE = 'evil\u001b[31m\u009b2J\u0007\nname';
+
+/** Any character a terminal acts on: C0 (the newline too), DEL and C1. */
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f]/;
+
+/** Assert `text` is one line with no control character, and that the name's printable part survived. */
+function expectOneCleanLine(text: string, label: string): void {
+  expect(text, label).not.toMatch(CONTROL_CHARACTER);
+  expect(text, label).toContain('evil');
+}
+
+describe('moveLedger — a name read from the repository is one clean line in every message', () => {
+  it('a link named with control characters refuses with one clean line', () => {
+    seedOld(ledgerSet('one'));
+    fs.symlinkSync(outsideFile(), path.join(site.oldDir, `${HOSTILE}.txt`));
+    const error = failure();
+    expect(error.kind).toBe('refused');
+    expectOneCleanLine(error.message, 'refusal');
+  });
+
+  it('the notes for an unknown entry and for a kept recovery file are clean lines', () => {
+    seedOld(ledgerSet('old'));
+    seedNew({ [LOG]: '' });
+    fs.writeFileSync(path.join(site.oldDir, `${HOSTILE}.txt`), 'mine\n');
+    fs.writeFileSync(path.join(site.oldDir, `${HOSTILE}.rejected.jsonl`), 'old\n');
+    fs.writeFileSync(path.join(site.newDir, `${HOSTILE}.rejected.jsonl`), 'new\n');
+    const value = movedValue();
+    expect(value.notes.length).toBeGreaterThan(0);
+    for (const note of value.notes) expect(note, note).not.toMatch(CONTROL_CHARACTER);
+    expect(value.notes.some(note => /^left in the backup, not moved: .*evil/.test(note))).toBe(true);
+    expect(value.notes.some(note => / already exists in curation; .*evil.* stays in the backup$/.test(note))).toBe(true);
+  });
+
+  it('a backup folder named with control characters is refused with one clean line by the sweep', () => {
+    seedNew({ [LOG]: '' });
+    const elsewhere = path.join(site.tmp, 'elsewhere');
+    fs.mkdirSync(elsewhere);
+    fs.symlinkSync(elsewhere, path.join(site.devflow, `learning.backup-${HOSTILE}`));
+    const result = store.sweepLedgerBackups(site.root, opts());
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.error.kind).toBe('refused');
+    expectOneCleanLine(!result.ok ? result.error.message : '', 'sweep refusal');
+  });
+
+  it('the status count carries a backup folder name as one clean line', () => {
+    seedNew({ [LOG]: '' });
+    seed(path.join(site.devflow, `learning.backup-${HOSTILE}`), { [QUEUE]: turns(1, 3) });
+    const result = store.backupPendingRows(site.root);
+    expect(result.ok).toBe(true);
+    const backups = result.ok ? result.value.backups : [];
+    expect(backups).toHaveLength(1);
+    expectOneCleanLine(backups[0].name, 'backup name');
+    expect(backups[0].pendingRows).toBe(2);
+  });
+});
+
+describe('json-helper move-ledger — a name read from the repository is one clean line', () => {
+  it('a refusal on stderr is one clean line', () => {
+    seedOld(ledgerSet('one'));
+    fs.symlinkSync(outsideFile(), path.join(site.oldDir, `${HOSTILE}.txt`));
+    const run = runMoveLedger([site.root, OLD, NEW]);
+    expect(run.code).toBe(1);
+    expect(run.stdout).toBe('');
+    expectOneCleanLine(run.stderr.replace(/\n$/, ''), 'stderr');
+  });
+
+  it('every line on stdout is a state, a backup or a note, and none holds a control character', () => {
+    seedOld(ledgerSet('old'));
+    seedNew({ [LOG]: '' });
+    fs.writeFileSync(path.join(site.oldDir, `${HOSTILE}.txt`), 'mine\n');
+    const run = runMoveLedger([site.root, OLD, NEW]);
+    expect(run.code).toBe(0);
+    const lines = run.stdout.replace(/\n$/, '').split('\n');
+    for (const line of lines) {
+      expect(line).toMatch(/^(moved |backup |note )/);
+      expect(line).not.toMatch(CONTROL_CHARACTER);
+    }
+    expect(lines.some(line => /^note left in the backup, not moved: .*evil/.test(line))).toBe(true);
+  });
+});

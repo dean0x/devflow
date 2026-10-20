@@ -25,7 +25,7 @@ import { getLedgerRoot, ledgerFolderToCreate } from '../../core/ledger-root.js';
 import { drainCurationQueue } from '../../core/curation-queue-cleanup.js';
 import { firstSymbolicLink } from '../../core/linked-path.js';
 import { formatRefusedDrain } from '../../core/queue-drain.js';
-import { describeOutcome } from './init-curation-move.js';
+import { describeMoveText, describeOutcome } from './init-curation-move.js';
 import { formatMoveNotice, gatherMoveNotice } from '../../hud/components/curation-counts.js';
 import { runSharedMove, type SharedMoveResult } from './curation-move-io.js';
 import {
@@ -151,7 +151,7 @@ async function oldLedgerFolderPresent(root: string): Promise<boolean> {
 /** The lines a move that did not complete says: its own, or the store's reason when it could not load. */
 function moveProblemLines(outcome: SharedMoveResult): string[] {
   return outcome.kind === 'unavailable'
-    ? [`The curation data was not moved: ${outcome.message}.`]
+    ? [`The curation data was not moved: ${describeMoveText(outcome.message)}.`]
     : describeOutcome(outcome);
 }
 
@@ -189,7 +189,7 @@ async function prepareToWrite(ledgerRoot: string, undone: string): Promise<boole
   if (moved.kind === 'moved' || moved.kind === 'unchanged') return true;
   p.log.error(moved.kind === 'busy'
     ? `Another run is moving this project's curation data. Nothing was ${undone}; try again in a moment.`
-    : `${moveProblemLines(moved).join(' ')} Nothing was ${undone}.`);
+    : describeMoveText(`${moveProblemLines(moved).join(' ')} Nothing was ${undone}.`));
   process.exitCode = 1;
   return false;
 }
@@ -261,9 +261,9 @@ function entryCountLines(listing: CurationListing, logRowCount: number, inactive
  */
 function backupLines(store: CurationStoreModule, ledgerRoot: string): { lines: string[]; warning: string | null } {
   const rows = store.backupPendingRows(ledgerRoot);
-  if (!rows.ok) return { lines: [], warning: `Backup rows were not counted: ${rows.error.message}` };
+  if (!rows.ok) return { lines: [], warning: `Backup rows were not counted: ${describeMoveText(rows.error.message)}` };
   const lines = rows.value.backups.map(({ name, pendingRows }) =>
-    `Backup: ${path.join(ledgerRoot, '.devflow', name)}: ${counted(pendingRows, 'pending row')} in the backup`);
+    `Backup: ${describeMoveText(path.join(ledgerRoot, '.devflow', name))}: ${counted(pendingRows, 'pending row')} in the backup`);
   return { lines, warning: null };
 }
 
@@ -640,8 +640,8 @@ async function tryMoveForToggle(ledgerRoot: string): Promise<void> {
   const outcome = await runSharedMove(ledgerRoot);
   if (outcome.kind === 'moved' || outcome.kind === 'unchanged') return;
   for (const line of moveProblemLines(outcome)) {
-    if (outcome.kind === 'busy') p.log.info(color.dim(line));
-    else p.log.warn(line);
+    if (outcome.kind === 'busy') p.log.info(color.dim(describeMoveText(line)));
+    else p.log.warn(describeMoveText(line));
   }
 }
 

@@ -11,7 +11,7 @@ import { pruneHookLogDirs, MAX_HOOK_LOG_DIRS, type LogDirPruneReport } from '../
 import { getLedgerRoot } from '../../core/ledger-root.js';
 import { CURATION_DIR_NAME, LEGACY_NAMES } from '../../core/project-paths.js';
 import { formatCurationStoreUnavailable, loadCurationStore } from '../../core/curation-store.js';
-import { runInitCurationMove, type InitCurationMoveReport } from './init-curation-move.js';
+import { describeMoveText, runInitCurationMove, type InitCurationMoveReport } from './init-curation-move.js';
 import { realGlobalTuningMoveIO, realProjectLedgerMoveIO } from './curation-move-io.js';
 import { describeEchoedValue } from '../../core/echo-value.js';
 import { installViaFileCopy, composeScripts, type InstallReport } from '../../targets/claude-code/installer.js';
@@ -2786,7 +2786,7 @@ export const initCommand = new Command('init')
     logSummaryLines(formatSkillScopeSummary(installReport, pluginListUnchanged));
 
     for (const warning of installWarnings) p.log.warn(warning);
-    for (const line of curationMove.lines) p.log.warn(line);
+    for (const line of curationMove.lines) p.log.warn(describeMoveText(line));
     if (curationMove.notice !== null) p.log.info(curationMove.notice);
 
     const installedSet = new Set(pluginsToInstall.flatMap(p => p.commands).filter(c => c.length > 0));
