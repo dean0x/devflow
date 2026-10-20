@@ -2,7 +2,7 @@ import { describe, it, expect, afterAll } from 'vitest'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
-import { ROOT, buildCommittedTree, cleanupCommittedTree, collectCodeSpawnSites, collectOrderViolations, ensurePrReadyReference, gitOperationReferenceCorpus, JUDGE_BY_READING, requireDistFile, walkFiles, WRITE_FAILURE } from '../helpers.js'
+import { ROOT, buildCommittedTree, cleanupCommittedTree, collectCodeSpawnSites, collectOrderViolations, ensurePrReadyReference, gitOperationReferenceCorpus, JUDGE_BY_READING, NAME_FILE_REMOVAL, requireDistFile, walkFiles, WRITE_FAILURE } from '../helpers.js'
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
 
 /** The generated `devflow:git` reference tree — the providers' own mechanics. */
@@ -1029,7 +1029,7 @@ describe('ensure-pr-ready opens the PR (D-LINK-VERBATIM, D-COMMIT-EXPLICIT, D-PR
     need('a failed Write is a missing value, never a shell write', ref.split(WRITE_FAILURE).length - 1 >= 3)
     need('the base reaches gh pr create only from the name file', ref.includes('`test -s "$F" && gh pr create … --base="$(cat -- "$F")"`') && (ref.match(/gh pr create[^\n`]*--base\S*/g) ?? []).every(call => call.endsWith('--base="$(cat')))
     need('the name file is removed after the last create attempt, so a scrubber failure still opens the PR with the given base',
-      ref.includes('in that same shell and after the last create attempt, `rm -- "$F"`, which runs on every path'))
+      ref.includes(`${NAME_FILE_REMOVAL}.`))
     need('the D11 trap is unchanged and no second exit trap is armed for the base', ref.includes('The D11 trap stays unchanged: its rm list does not gain the name file, and no second EXIT trap is armed.'))
     need('exactly one test-plan check', ref.split('check block').length - 1 === 1)
     return out

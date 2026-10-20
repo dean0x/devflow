@@ -27,7 +27,7 @@ import {
   VARIANT_MODULES,
   operationReferenceRel,
 } from '../src/core/mds-variants.js';
-import { ROOT, resolveAgentSource, resolveAllAgents, gitAgentSinkCorpus, gitOperationReferenceCorpus, extractOpSectionFromCorpus, collectUnfencedH2, loadFile, requireDistFile, walkFiles, isPrHostEntryPath, NAME_FILE_TRAP, WRITE_FAILURE, JUDGE_BY_READING, SHELL_WRITE_PROBES, countShellWritesIntoF, DEFAULT_BRANCH_PROBE, PRODUCER_STATUS_CAPTURE, PRODUCER_NAME_TAIL, GH_FAILED_RULE, NO_PR_CLAUSE, NO_PR_DEFINITION, OTHER_GH_FAILURE_CLAUSE, ORIGIN_HEAD_READ, MAIN_PROBE, MASTER_FALLBACK, DEFAULT_BRANCH_FILL, type CorpusEntry } from './helpers.js';
+import { ROOT, resolveAgentSource, resolveAllAgents, gitAgentSinkCorpus, gitOperationReferenceCorpus, extractOpSectionFromCorpus, collectUnfencedH2, loadFile, requireDistFile, walkFiles, isPrHostEntryPath, NAME_FILE_TRAP, NAME_FILE_REMOVAL, WRITE_FAILURE, JUDGE_BY_READING, SHELL_WRITE_PROBES, countShellWritesIntoF, DEFAULT_BRANCH_PROBE, PRODUCER_STATUS_CAPTURE, PRODUCER_NAME_TAIL, GH_FAILED_RULE, NO_PR_CLAUSE, NO_PR_DEFINITION, OTHER_GH_FAILURE_CLAUSE, ORIGIN_HEAD_READ, MAIN_PROBE, MASTER_FALLBACK, DEFAULT_BRANCH_FILL, type CorpusEntry } from './helpers.js';
 import { RESOLVE_BASE_SCRIPT } from './evidence/seam.js';
 
 /**
@@ -3338,7 +3338,7 @@ const ENSURE_FILE_PARTS: readonly FilePart[] = [
   ['4a', '4a treats a failed Write as a missing value', WRITE_FAILURE],
   ['4a', '4a opens no PR when the name file reads back empty, and removes it', 'An empty file ends with Status BLOCKED and no PR, after `rm -- "{name file}"`.'],
   ['4a', '4a passes the base to gh pr create only from the name file, after test -s', 'then `test -s "$F" && gh pr create … --base="$(cat -- "$F")"`'],
-  ['4a', '4a removes the name file after the last create attempt, on every path', 'in that same shell and after the last create attempt, `rm -- "$F"`, which runs on every path'],
+  ['4a', '4a removes the name file after the last create attempt, and says an INT or TERM signal skips that removal', `${NAME_FILE_REMOVAL}.`],
   ['4a', '4a keeps the D11 trap unchanged and arms no second exit trap', 'The D11 trap stays unchanged: its rm list does not gain the name file, and no second EXIT trap is armed.'],
   ['4a', '4a opens no PR when test -s fails', 'A failed `test -s` ends with Status BLOCKED and no PR.'],
   ['4c', '4c judges the title by reading and keeps its deny-list', `Skip the retitle (leave the PR title as-is, no error) if the composed title contains any of \`\` $ \` \\ " ' ; | & < > \`\` or a newline; ${JUDGE_BY_READING}.`],
