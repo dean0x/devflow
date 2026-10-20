@@ -2,7 +2,7 @@
 description: Process review issues - validate with Triage agent, fix with Code agent, verify with Validate agent
 output-dir: dist/commands
 ---
-@import { knowledge_load, knowledge_writeback } from "./_partials/_knowledge.mds"
+@import { knowledge_load, knowledge_writeback_after_load } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
 @import { evidence_policy } from "./_partials/_evidence_policy.mds"
 @import { publication_gate } from "./_partials/_publication.mds"
@@ -583,7 +583,7 @@ Final gate: {PASS | FAILED after N attempts}
 
 In multi-worktree mode, report results per worktree with aggregate summary.
 
-{{knowledge_writeback()}}
+{{knowledge_writeback_after_load()}}
 
 ## Architecture
 

@@ -34,7 +34,7 @@ The orchestrator provides:
 - **Focus**: Which review type to perform
 - **Branch context**: What changes to review
 - **Output path**: Where to save findings (e.g., `.devflow/docs/reviews/{branch}/{timestamp}/{focus}.md`)
-- **DIFF_FILE** (optional): Absolute path of the patch to review; read changed lines from it. Page a `DIFF_FILE` larger than one Read with offset/limit. If not provided, default to `git diff {base_branch}...HEAD`.
+- **DIFF_FILE** (optional): Absolute path of the patch to review; read changed lines from it. Page a `DIFF_FILE` larger than one Read with offset/limit. If not provided, default to `git diff {DIFF_RANGE}`.
 - **DIFF_RANGE** (optional): The git range the patch covers, for information only; any extra git read uses this range.
 <!-- learning:on -->
 - **DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this repository (pre-rendered to `.devflow/learning/index.md` in its main worktree). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.
@@ -88,9 +88,9 @@ Apply the `devflow:apply-decisions` algorithm — scan the `DECISIONS_CONTEXT` i
 2. **Apply Decisions** - Follow `devflow:apply-decisions` (see section above) to scan the index and state relevant entries in words in findings.
 <!-- learning:end -->
 <!-- learning:on -->
-3. **Identify changed lines** - Read the diff from `DIFF_FILE` when passed, else get it against the base branch (main/master/develop/integration/trunk)
+3. **Identify changed lines** - Read the diff from `DIFF_FILE` when passed, else run `git diff {DIFF_RANGE}`
 <!-- learning:off -->
-2. **Identify changed lines** - Read the diff from `DIFF_FILE` when passed, else get it against the base branch (main/master/develop/integration/trunk)
+2. **Identify changed lines** - Read the diff from `DIFF_FILE` when passed, else run `git diff {DIFF_RANGE}`
 <!-- learning:end -->
 <!-- learning:on -->
 4. **Apply 3-category classification** - Sort issues by where they occur

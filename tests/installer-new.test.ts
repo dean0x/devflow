@@ -22,6 +22,7 @@ import type { PluginDefinition } from '../src/core/plugins.js';
 import { agentsDir, compiledAgentsDir, type AgentSourceDirs } from '../src/core/assets.js';
 import { resolveAgentSource, splitFrontmatter } from './helpers.js';
 import { RESOLVER_SCRIPT, SETTINGS_SCRIPT, buildScriptedShim, createFakeBin, runResolver } from './evidence-policy/scripted-shim.js';
+import { RESOLVE_BASE_SCRIPT, SUBPROCESS_TIMEOUT_MS } from './evidence/seam.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -185,7 +186,37 @@ describe('composeScripts', () => {
     expect(lines[0]).toMatch(OUTPUT_LINE_RE);
     // Budget: a directory copy plus a node + bash-fake spawn — well under 5 s alone,
     // but spawns slow to seconds under full-suite load (same as the resolver suite).
-  }, 20_000);
+  }, SUBPROCESS_TIMEOUT_MS);
+
+  it('copies resolve-base.cjs to the top level, and the INSTALLED copy runs under the composed {"type":"module"} package (install path pin)', async () => {
+    // A verbatim copy with no sibling to load, so no installer code exists to pin — and
+    // composeScripts swallows a failed copy, so this is the only thing that notices a
+    // missing one. The prompts invoke exactly this path; running the installed copy (not the
+    // src one) is what proves the `.cjs` extension keeps it CommonJS next to package.json's
+    // {"type":"module"}.
+    const target = path.join(tmpDir, 'scripts');
+    await composeScripts(target);
+
+    const installed = path.join(target, 'resolve-base.cjs');
+    await expect(
+      fs.access(installed),
+      'resolve-base.cjs not found in compose output — must land at top level of scripts dir',
+    ).resolves.toBeUndefined();
+    const content = await fs.readFile(installed, 'utf-8');
+    expect(content.length, 'resolve-base.cjs must be non-empty after install').toBeGreaterThan(0);
+    const pkg = JSON.parse(await fs.readFile(path.join(target, 'package.json'), 'utf-8')) as { type?: string };
+    expect(pkg.type, 'the pin is only meaningful under the ESM package marker').toBe('module');
+
+    // A refused name makes no git call, so the run needs no repository and no network. HOME is tmp.
+    const home = path.join(tmpDir, 'home');
+    await fs.mkdir(home, { recursive: true });
+    const run = runResolver({ home, args: ['local', '-x'], script: installed });
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stdout).toBe('BASE_REF=none TIP=none FETCH=skipped REASON=invalid-name NOTE=stop\n');
+    // The grammar comes from the package copy — the single authority for it.
+    const { LINE_RE } = createRequire(import.meta.url)(RESOLVE_BASE_SCRIPT) as { LINE_RE: RegExp };
+    expect(run.stdout.trimEnd()).toMatch(LINE_RE);
+  }, SUBPROCESS_TIMEOUT_MS);
 
   it('copies resolve-settings.cjs to the top level and lib/project-config.cjs beside it, and the INSTALLED settings resolver loads its parser (install path pin)', async () => {
     // Both resolvers require ./lib/project-config.cjs through __dirname, so the
@@ -211,7 +242,7 @@ describe('composeScripts', () => {
     expect(lines, 'exactly one \\n-terminated line').toHaveLength(2);
     const { SETTINGS_LINE_RE } = createRequire(import.meta.url)(SETTINGS_SCRIPT) as { SETTINGS_LINE_RE: RegExp };
     expect(lines[0]).toMatch(SETTINGS_LINE_RE);
-  }, 20_000);
+  }, SUBPROCESS_TIMEOUT_MS);
 
   it('copies pr-evidence.cjs and verify-evidence.cjs to the top level, and the INSTALLED verify-evidence.cjs loads its sibling under the composed {"type":"module"} package (install path pin)', async () => {
     // verify-evidence.cjs requires pr-evidence.cjs through __dirname, so the pair
@@ -242,7 +273,7 @@ describe('composeScripts', () => {
       MARKERS: { BLOCK_START: string; BLOCK_END: string };
     };
     expect(run.stdout).toBe(`${[MARKERS.BLOCK_START, '## Test Plan', tp, MARKERS.BLOCK_END].join('\n')}\n`);
-  }, 20_000);
+  }, SUBPROCESS_TIMEOUT_MS);
 });
 
 // ---------------------------------------------------------------------------
