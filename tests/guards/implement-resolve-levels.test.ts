@@ -23,11 +23,11 @@
  *      `skip`, and a phase with no spawn takes only `-`) and Rules bullets, and the decided rows and bullets.
  *   e. Row safety, a tripwire: protected phases, never-skip phases, floor controls, dispositions and actions no row
  *      may carry. One exemption exists (#482): a spec may name one Rules bullet that skips Harden (`exemptRemoval`); the
- *      `/implement` spec names `harden-scope`, which row 4 of its reference applies at lean. The
- *      exemption waives one floor name, and only from the removal-verb arm. It holds only when the bullet has that name,
- *      is that exact line, and is applied by the rows of the one named phase and no other. The negation arm, the action
- *      check and every other floor name stay active. Every cell of that phase is `-` or `apply: <name>`: a bare `skip`
- *      there would skip Harden with no condition at all.
+ *      `/implement` spec names `harden-scope`, which row 4 of its reference applies at lean. The exemption waives one
+ *      floor name, and only from the removal-verb arm. It holds only when the bullet has that name, is that exact line,
+ *      and is applied by the rows of the one named phase and no other. The negation arm, the action check and every
+ *      other floor name stay active. Every cell of that phase is `-` or `apply: <name>`: a bare `skip` there would skip
+ *      Harden with no condition at all.
  *   f. `full` reads nothing: the reference path appears only inside the block, and no Validate fence of
  *      `/resolve` names the level.
  *   g. The report lines that name the level.
@@ -1123,7 +1123,7 @@ describe('the level references hold the fixed grammar and the decided rows (AC-5
   })
 
   // Row 4 of /implement applies the one bullet that skips Harden, which the spec exempts.
-  it.each([IMPLEMENT, RESOLVE])('$cmd: well-formed rows and bullets pass the grammar and the row-safety check', spec => {
+  it.each(SPECS)('$cmd: well-formed rows and bullets pass the grammar and the row-safety check', spec => {
     const body = bodyOf(spec)
     const tidy = '- **tidy:** Polish only the files named in the diff.'
     const rows = spec.cmd === 'implement'
