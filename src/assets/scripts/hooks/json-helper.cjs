@@ -388,7 +388,6 @@ try {
       console.log(JSON.stringify({
         timestamp: data.ts || '',
         trigger: 'pre-compact',
-        memory_snapshot: data.memory || '',
         git: {
           branch: data.branch || '',
           status: data.status || '',
