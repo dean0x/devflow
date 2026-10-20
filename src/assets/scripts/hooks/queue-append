@@ -282,6 +282,7 @@ _qg_repo_file_can_narrow() {
 
 queue_read_gates() {
   local _qg_manifest="${1:-}" _qg_root="${2:-}" _qg_text="" _qg_parse="false" _qg_repo="false" _qg_fields=""
+  local _qg_scripts="${BASH_SOURCE[0]%/*}/.."
   _QG_MEMORY="true"
   _QG_CURATION="true"
 
@@ -319,7 +320,7 @@ queue_read_gates() {
     # manifest too, read only when the fast path above flagged it (an unflagged
     # manifest is both-on), so a false in all three layers still costs one fork.
     # jq cannot see duplicate keys, so this path is node whatever _HAS_JQ says.
-    local _qg_scripts="${BASH_SOURCE[0]%/*}/.." _qg_manifest_arg=""
+    local _qg_manifest_arg=""
     [ "$_qg_parse" = "true" ] && _qg_manifest_arg="$_qg_manifest"
     _qg_fields=$(node -e "
       const S = require(require('path').resolve(process.argv[1], 'resolve-settings.cjs'));
@@ -351,15 +352,13 @@ queue_read_gates() {
           then "false" else "true" end)
       ' "$_qg_manifest" 2>/dev/null) || _qg_fields=""
     else
+      # No jq: the fold is the resolver's own machineSwitchOn (resolve-settings.cjs),
+      # so the machine rule is not copied here. One node fork, as for jq's one process.
       _qg_fields=$(node -e "
+        const S = require(require('path').resolve(process.argv[2], 'resolve-settings.cjs'));
         const m = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
-        const f = m !== null && typeof m === 'object' ? m.features : undefined;
-        const isObj = f !== null && typeof f === 'object';
-        const on = (k) => !(isObj && f[k] === false);
-        const cur = isObj ? ['curation', 'learning'].filter((k) => typeof f[k] === 'boolean') : [];
-        const learnOn = cur.length > 0 ? cur.every(on) : on('decisions');
-        process.stdout.write(String(on('memory')) + String.fromCharCode(10) + String(learnOn));
-      " -- "$_qg_manifest" 2>/dev/null) || _qg_fields=""
+        process.stdout.write(String(S.machineSwitchOn(m, 'memory')) + String.fromCharCode(10) + String(S.machineSwitchOn(m, 'curation')));
+      " -- "$_qg_manifest" "$_qg_scripts" 2>/dev/null) || _qg_fields=""
     fi
   fi
 

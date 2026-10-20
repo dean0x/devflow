@@ -1206,3 +1206,92 @@ describe('feature-word guard — non-vacuity probes (the same collector as the g
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// The DERIVED-STEM guard. The feature-word guard above reads the whole old word,
+// so an identifier built on the stem alone (`learnOn`, `learn_on`, `isLearnOn`,
+// `LEARN_ON`) slips through a rename: a sweep for the word never sees it. The
+// shipped scripts hold no such identifier, and one may not come back. Plain
+// words that merely start with the stem (`learned`, `re-learn`, `learn-conventions`)
+// are not identifiers built on it and are not hits.
+//
+// Like the feature-word guard, it is a named collector that the guard and its
+// planted-hit probes both run.
+// ---------------------------------------------------------------------------
+
+/** The folder the stem guard reads: the hook scripts, the resolver and the libraries they load. */
+const DERIVED_STEM_SCOPE = 'src/assets/scripts/';
+
+/** An identifier built on the stem: `learnOn`, `learn_on`, `isLearn`, `isLearnOn`, `LEARN_ON`, `IS_LEARN`. */
+const DERIVED_STEM = /\blearn[A-Z_]|[a-z0-9]Learn(?:[A-Z_]|\b)|\bLEARN_|_LEARN\b/;
+
+/** `path:line: text` for each line of a file under the scope that holds an identifier built on the stem. */
+function collectDerivedStemHits(files: ReadonlyArray<ScannedFile>): string[] {
+  const hits: string[] = [];
+  for (const { relPath, content } of files) {
+    if (!relPath.startsWith(DERIVED_STEM_SCOPE)) continue;
+    content.split('\n').forEach((line, index) => {
+      if (DERIVED_STEM.test(line)) hits.push(`${relPath}:${index + 1}: ${line.trim().slice(0, MAX_REPORTED_LINE)}`);
+    });
+  }
+  return hits;
+}
+
+describe('derived-stem guard — no identifier built on the old feature stem in the shipped scripts', () => {
+  const files = trackedFilesOutsideTests().filter(file => file.relPath.startsWith(DERIVED_STEM_SCOPE));
+
+  it('reads the hook scripts, the resolver and the libraries (non-vacuity)', () => {
+    for (const relPath of [
+      'src/assets/scripts/hooks/queue-append',
+      'src/assets/scripts/hooks/session-start-context',
+      'src/assets/scripts/resolve-settings.cjs',
+    ]) {
+      expect(files.some(file => file.relPath === relPath), `${relPath} is not in the scan`).toBe(true);
+    }
+  });
+
+  it('no identifier built on the stem sits in the scripts', () => {
+    const hits = collectDerivedStemHits(files);
+    expect(hits, `an identifier built on the old feature stem is back. Rename it to the current word:\n  ${hits.join('\n  ')}`)
+      .toEqual([]);
+  });
+
+  describe('planted hits (the same collector as the guard)', () => {
+    const hitsIn = (content: string, relPath = 'src/assets/scripts/hooks/probe'): string[] =>
+      collectDerivedStemHits([{ relPath, content }]);
+
+    it('a planted identifier fails, in camelCase, snake_case and UPPER_SNAKE', () => {
+      for (const planted of [
+        "const learnOn = cur.length > 0 ? cur.every(on) : on('decisions');",
+        'local learn_on="true"',
+        'const isLearnOn = true;',
+        'const shouldLearn = true;',
+        'LEARN_ON=1',
+        'IS_LEARN=1',
+      ]) {
+        expect(hitsIn(`${planted}\n`), planted).toHaveLength(1);
+      }
+    });
+
+    it('the hit names the file and the line', () => {
+      expect(hitsIn('ok\nconst learnOn = 1;\n', 'src/assets/scripts/resolve-settings.cjs'))
+        .toEqual(['src/assets/scripts/resolve-settings.cjs:2: const learnOn = 1;']);
+    });
+
+    it('plain words and the current name are not hits', () => {
+      for (const clean of [
+        'const curationOn = true;',
+        '# re-learn the conventions from the branch names',
+        '# learn-conventions writes the file',
+        'the model learned the pattern',
+        'learn more in the docs',
+      ]) {
+        expect(hitsIn(`${clean}\n`), clean).toEqual([]);
+      }
+    });
+
+    it('a file outside the scope is not read', () => {
+      expect(hitsIn('const learnOn = 1;\n', 'src/core/probe.ts')).toEqual([]);
+    });
+  });
+});

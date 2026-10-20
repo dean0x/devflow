@@ -11,7 +11,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { execSync } from 'child_process';
+import { execSync, spawnSync } from 'child_process';
+import { createRequire } from 'module';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -1065,6 +1066,71 @@ describe('queue_read_gates', { timeout: GATE_READ_TEST_BUDGET_MS }, () => {
 // ---------------------------------------------------------------------------
 // The repository layer: queue_read_gates <manifest> <root> (D-FEATURES-NARROW-ONLY)
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// The gate read with no jq folds the manifest in node. That fold is the resolver's
+// own machineSwitchOn, required from resolve-settings.cjs (a sibling of hooks/), so
+// the machine rule is held in one place and cannot drift from the resolver's.
+// ---------------------------------------------------------------------------
+
+describe('queue_read_gates without jq: the manifest read is the resolver machine rule', { timeout: GATE_READ_TEST_BUDGET_MS }, () => {
+  interface Resolver {
+    machineSwitchOn(manifest: unknown, feature: 'memory' | 'curation' | 'knowledge'): boolean;
+  }
+  const resolver = createRequire(import.meta.url)(path.join(HOOKS_DIR, '..', 'resolve-settings.cjs')) as Resolver;
+  let tmpDir: string;
+  let manifestPath: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'queue-read-gates-node-'));
+    manifestPath = path.join(tmpDir, 'manifest.json');
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  /** `queue_read_gates <manifest>` with jq hidden and no root, from the copy of the hooks folder at `hooksDir`. */
+  function gatesFrom(hooksDir: string): { memory: string; curation: string } {
+    const script = [
+      'set -e', 'log() { :; }', 'dbg() { :; }', '_HAS_JQ=false',
+      `source "${path.join(hooksDir, 'queue-append')}"`,
+      `queue_read_gates "${manifestPath}"`,
+      'echo "MEMORY=$_QG_MEMORY CURATION=$_QG_CURATION"',
+    ].join('\n');
+    const run = spawnSync('bash', ['-c', script], { encoding: 'utf-8' });
+    expect(run.status, run.stderr).toBe(0);
+    return {
+      memory: run.stdout.match(/MEMORY=(\S*)/)?.[1] ?? '',
+      curation: run.stdout.match(/CURATION=(\S*)/)?.[1] ?? '',
+    };
+  }
+
+  it.each(SETTINGS_SWITCH_TABLE.map((r) => [r.name, r] as const))('the node branch and the resolver agree on the machine layer of: %s', (_name, row) => {
+    if (row.manifest !== undefined) fs.writeFileSync(manifestPath, JSON.stringify(row.manifest));
+
+    expect(gatesFrom(HOOKS_DIR)).toEqual({
+      memory: String(resolver.machineSwitchOn(row.manifest, 'memory')),
+      curation: String(resolver.machineSwitchOn(row.manifest, 'curation')),
+    });
+  });
+
+  it('the answer comes from the resolver the hook finds beside it, not from a copy of the rule', () => {
+    // A hooks folder and a resolver of its own: the resolver answers memory on and
+    // curation off whatever the manifest says. The hook must report exactly that.
+    const scripts = path.join(tmpDir, 'scripts');
+    const hooks = path.join(scripts, 'hooks');
+    fs.mkdirSync(hooks, { recursive: true });
+    for (const name of ['queue-append', 'git-marker']) fs.copyFileSync(path.join(HOOKS_DIR, name), path.join(hooks, name));
+    fs.writeFileSync(
+      path.join(scripts, 'resolve-settings.cjs'),
+      "module.exports = { machineSwitchOn: (manifest, feature) => feature === 'memory' };\n",
+    );
+    fs.writeFileSync(manifestPath, JSON.stringify({ features: { memory: false, curation: true } }));
+
+    expect(gatesFrom(hooks)).toEqual({ memory: 'true', curation: 'false' });
+  });
+});
 
 describe('queue_read_gates <manifest> <root>: the repository narrows, never widens', { timeout: GATE_READ_TEST_BUDGET_MS }, () => {
   let tmpDir: string;

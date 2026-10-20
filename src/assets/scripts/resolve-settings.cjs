@@ -391,7 +391,8 @@ const LEGACY_SWITCH_KEYS = Object.freeze({ curation: 'decisions', knowledge: 'kb
  * else, when neither is a boolean, the pre-rename key decides if it is a
  * boolean; else on. A non-boolean value is ignored for that key only, so a
  * disagreeing pair resolves to off. Anything that is not a manifest-shaped
- * object is on.
+ * object is on. The capture hooks' gate read without jq calls this one, so the
+ * rule is held here alone.
  *
  * @param {unknown} manifest
  * @param {FeatureSwitch} feature
@@ -1221,7 +1222,8 @@ if (require.main === module) {
 }
 
 // ---------------------------------------------------------------------------
-// Exports — the CLI seam (src/core/evidence-policy.ts) and the unit tests
+// Exports — the CLI seam (src/core/evidence-policy.ts), the capture hooks' gate read
+// without jq (hooks/queue-append requires machineSwitchOn) and the unit tests
 // ---------------------------------------------------------------------------
 
 module.exports = Object.freeze({
@@ -1235,6 +1237,7 @@ module.exports = Object.freeze({
   foldGateLevel,
   foldSettings,
   readRepoLayers,
+  machineSwitchOn,
   resolveSettings,
   formatSettingsLine,
   isCoherentSettingsLine,
