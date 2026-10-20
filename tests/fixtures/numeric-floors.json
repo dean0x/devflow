@@ -747,6 +747,14 @@
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
       "description": "D-CMD-SIZE: dist/learning-off/commands/self-review.md, the learning-off build, in bytes. Measured 12,156 after #495 (12,619 after #472; 12,801 when #456 closed), with no headroom. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+    },
+    {
+      "id": "quality-cut-bullet-max-bytes",
+      "ceiling": 240,
+      "pattern": "const QUALITY_CUT_BULLET_CEILING = 240;",
+      "occurrences": 1,
+      "sourceFile": "tests/rules.test.ts",
+      "description": "The cleanup bullet of the quality rule, the line of src/assets/rules/quality.md that opens `- Cut `, in bytes. The bullet is billed in every session that loads the rules, and it tells the Code agent what to remove while it writes, because /implement and /resolve skip Polish at standard and lean. It measures 240 today, which is the ceiling. May be LOWERED, never raised: a later addition funds itself with a cut."
     }
   ]
 }

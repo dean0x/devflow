@@ -6,8 +6,7 @@
  * `GATE_LEVEL` comes from the accepted settings line. At `standard` and `lean`, each command reads its own level
  * reference once per run and applies the rows of that reference to the phases the rows name. At `full` it reads
  * nothing. Both references ship with the fixed row grammar. The rows they hold are the decided ones (`expectedRows`),
- * so this file holds what a row may say, where the command reads it, what no row may touch and where the docs state
- * what a row does.
+ * so this file holds what a row may say, where the command reads it and what no row may touch.
  *   - `/implement`: one Gate level block at the start of Phase 3. The normal path and the re-validation path
  *     (Phases 3-8) both reach it. A failed read applies no row and keeps `GATE_LEVEL`, so at `lean` Phase 6 still
  *     passes the level to Validate and the lint pack still runs.

@@ -889,16 +889,33 @@ export function collectQualityCutBulletDefects(text: string): string[] {
   }
   const clauses = bullet.split(';');
   const debugClauses = clauses.filter(clause => clause.includes('debug statements'));
-  const checkClauses = clauses.filter(clause => clause.includes('checks') && clause.includes('catches'));
+  const checkClauses = clauses.filter(clause => /checks|catches/.test(clause));
   if (debugClauses.length === 0) out.push('the cut bullet does not name debug statements');
   if (checkClauses.length === 0) out.push('the cut bullet does not name checks and catches');
   if (debugClauses.some(clause => QUALITY_QUALIFIER.test(clause))) {
     out.push('the trust-boundary qualifier binds to debug statements');
   }
-  if (checkClauses.length > 0 && !checkClauses.some(clause => QUALITY_QUALIFIER.test(clause))) {
+  if (checkClauses.some(clause => !QUALITY_QUALIFIER.test(clause))) {
     out.push('the trust-boundary qualifier does not bind to the checks and catches');
   }
   return out;
+}
+
+const OVER_CEILING = new RegExp(`^the cut bullet is \\d+ bytes, over the ${QUALITY_CUT_BULLET_CEILING} ceiling$`);
+
+/** A well-formed cut bullet with no padding. It does not depend on the shipped bullet. */
+const BASE_CUT_BULLET =
+  '- Cut leftover debug statements; cut checks and catches around code that cannot throw, never at a trust boundary or fail-closed path';
+
+/**
+ * The base bullet padded to exactly CEILING - 1 characters, plus one last character. With an
+ * ASCII `last` the bullet is CEILING bytes. With a multibyte `last` it is CEILING characters and
+ * more than CEILING bytes, so only a collector that counts bytes reports it.
+ */
+function cutBulletAtCeiling(last: string): string {
+  const room = QUALITY_CUT_BULLET_CEILING - 1 - BASE_CUT_BULLET.length;
+  expect(room, 'the base bullet must fit under the ceiling with room to pad').toBeGreaterThan(0);
+  return BASE_CUT_BULLET.replace('debug statements', `debug statements${'x'.repeat(room)}${last}`);
 }
 
 /** The bullet as first shipped: one sentence, so the qualifier also covers debug statements. */
@@ -920,13 +937,15 @@ describe('quality rule cleanup bullet', () => {
       'the trust-boundary qualifier binds to debug statements',
     );
     expect(collectQualityCutBulletDefects(real.replace(bullet, `${bullet} ${'padding '.repeat(10)}`))).toEqual(
-      expect.arrayContaining([expect.stringMatching(/^the cut bullet is \d+ bytes, over the 240 ceiling$/)]),
+      expect.arrayContaining([expect.stringMatching(OVER_CEILING)]),
     );
-    const widened = bullet.replace(',', '—');
-    expect(widened.length).toBeLessThanOrEqual(QUALITY_CUT_BULLET_CEILING);
-    expect(collectQualityCutBulletDefects(real.replace(bullet, widened))).toEqual(
-      expect.arrayContaining([expect.stringMatching(/^the cut bullet is \d+ bytes, over the 240 ceiling$/)]),
-    );
+    expect(collectQualityCutBulletDefects(real.replace(bullet, cutBulletAtCeiling('x')))).toEqual([]);
+    const widened = cutBulletAtCeiling('—');
+    expect(widened.length).toBe(QUALITY_CUT_BULLET_CEILING);
+    expect(Buffer.byteLength(widened, 'utf-8')).toBeGreaterThan(QUALITY_CUT_BULLET_CEILING);
+    expect(collectQualityCutBulletDefects(real.replace(bullet, widened))).toEqual([
+      `the cut bullet is ${Buffer.byteLength(widened, 'utf-8')} bytes, over the ${QUALITY_CUT_BULLET_CEILING} ceiling`,
+    ]);
     expect(collectQualityCutBulletDefects(real.replace(bullet, bullet.replace(/, never at a trust boundary or fail-closed path$/, '')))).toEqual(
       expect.arrayContaining([
         'the cut bullet lost "trust boundary"',
@@ -938,6 +957,10 @@ describe('quality rule cleanup bullet', () => {
     expect(collectQualityCutBulletDefects(real.replace(bullet, moved))).toContain(
       'the trust-boundary qualifier binds to debug statements',
     );
+    const unqualifiedCheck = '- Cut leftover debug statements, checks the types enforce; cut checks and catches around code that cannot throw, never at a trust boundary or fail-closed path';
+    expect(collectQualityCutBulletDefects(real.replace(bullet, unqualifiedCheck))).toEqual([
+      'the trust-boundary qualifier does not bind to the checks and catches',
+    ]);
     expect(collectQualityCutBulletDefects(real.replace(bullet, ''))).toEqual([
       'expected one bullet that opens "- Cut ", found 0',
     ]);
