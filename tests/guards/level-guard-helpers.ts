@@ -68,6 +68,14 @@ export const tableLines = (parsed: ParsedRef): string[] => (sectionOf(parsed, '#
 /** The row lines of the table, header and separator dropped. */
 export const tableRowLines = (parsed: ParsedRef): string[] => tableLines(parsed).slice(2)
 
+/**
+ * The trimmed cells of one table line, or null when the line is not pipe-bounded. The one cell parser of the level guards.
+ * For a row of a level reference the cells are the phase, the standard cell and the lean cell, in that order.
+ */
+export function rowCells(line: string): string[] | null {
+  return line.startsWith('|') && line.endsWith('|') ? line.split('|').slice(1, -1).map(cell => cell.trim()) : null
+}
+
 /** The rows of a reference, header and separator dropped. */
 export function referenceRows(ref: string): string[] {
   return tableRowLines(parseRef(ref))
