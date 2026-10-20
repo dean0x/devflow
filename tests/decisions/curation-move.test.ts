@@ -1638,6 +1638,105 @@ describe('sweepLedgerBackups', () => {
 });
 
 // ---------------------------------------------------------------------------
+// One classifier: what the move does with each entry of an old or a backup folder
+// ---------------------------------------------------------------------------
+
+interface EntryClassifier {
+  moveEntryClass(name: string): string;
+  isLinkChecked(cls: string): boolean;
+  MOVE_ENTRY_CLASSES: Record<string, { linkChecked: boolean; leftBehind: boolean }>;
+}
+const classifier = mover as unknown as EntryClassifier;
+
+describe('moveEntryClass — one sample name per class', () => {
+  const TAIL = '20261001T000000Z-deadbeef';
+  const SAMPLES: Array<[cls: string, name: string]> = [
+    ['set-member', LOG], ['set-member', ARCHIVE], ['set-member', HISTORY], ['set-member', LEDGER],
+    ['queue', QUEUE], ['queue', CLAIM],
+    ['known', OWNER], ['known', 'learning.json'], ['known', 'curation.json'],
+    ['lock', '.decisions.lock'], ['lock', '.pending-turns.jsonl.lock'],
+    ['recovery', 'decisions-log.rejected.jsonl'], ['recovery', 'old.pre-v2.jsonl'],
+    ['queue-form', `${QUEUE}.merging-${TAIL}`], ['queue-form', `${CLAIM}.merging-${TAIL}`],
+    ['queue-form', `${QUEUE}.swept-${TAIL}`], ['queue-form', `${QUEUE}.overflow-${TAIL}`],
+    ['displaced', `${LOG}.displaced-${TAIL}`], ['displaced', `${LEDGER}.displaced-${TAIL}`],
+    ['rendered', 'decisions.md'], ['rendered', 'pitfalls.md'], ['rendered', 'index.md'],
+    ['journal', JOURNAL],
+    ['unknown', 'notes.txt'], ['unknown', `${QUEUE}.merging-not-a-stamp`], ['unknown', `${LOG}.displaced-`],
+    ['unknown', `${JOURNAL}.bak`], ['unknown', '.decisions.lock.old'], ['unknown', `${LOG}.bak`],
+  ];
+
+  it.each(SAMPLES)('classes %s: %s', (cls, name) => {
+    expect(classifier.moveEntryClass(name)).toBe(cls);
+  });
+
+  it('has a sample for every class the table names, and the table names every sampled class', () => {
+    expect(Object.keys(classifier.MOVE_ENTRY_CLASSES).sort()).toEqual([...new Set(SAMPLES.map(([cls]) => cls))].sort());
+  });
+});
+
+describe('the link refusal covers every class a move path renames', () => {
+  const TAIL = '20261001T000000Z-deadbeef';
+  const CASES: Array<[cls: string, name: string, lockDir: boolean]> = [
+    ['set-member', LEDGER, false], ['set-member', ARCHIVE, false],
+    ['queue', QUEUE, false], ['queue', CLAIM, false],
+    ['known', OWNER, false], ['known', 'learning.json', false],
+    ['lock', '.decisions.lock', true], ['lock', '.pending-turns.jsonl.lock', true],
+    ['recovery', 'decisions-log.rejected.jsonl', false],
+    ['queue-form', `${QUEUE}.merging-${TAIL}`, false], ['queue-form', `${QUEUE}.swept-${TAIL}`, false],
+    ['queue-form', `${QUEUE}.overflow-${TAIL}`, false],
+    ['displaced', `${LOG}.displaced-${TAIL}`, false],
+    ['rendered', 'decisions.md', false],
+    ['journal', JOURNAL, false],
+    ['unknown', 'notes.txt', false],
+  ];
+
+  /** The old folder with a ledger and `name` as a regular file with rows (a stale claim where it is one), the new folder empty. */
+  function seedRegular(name: string): void {
+    seedOld({ [LEDGER]: ledgerSet('old')[LEDGER], [name]: name === LEDGER ? ledgerSet('old')[LEDGER] : turns(1, 3) });
+    seedNew({});
+    if (name === CLAIM) age(path.join(site.oldDir, name), 20 * 60 * 1000);
+  }
+
+  /** The same, with `name` a link to a file outside the project (a link takes the place of a regular ledger). */
+  function seedLinked(name: string, target: string): void {
+    seedOld(name === LEDGER ? {} : { [LEDGER]: ledgerSet('old')[LEDGER] });
+    seedNew({});
+    fs.symlinkSync(target, path.join(site.oldDir, name));
+  }
+
+  it.each(CASES)('%s: %s is refused as a link exactly when its class is link-checked, and when a move renames it', (cls, name, lockDir) => {
+    const checked = classifier.isLinkChecked(classifier.moveEntryClass(name));
+    expect(classifier.moveEntryClass(name)).toBe(cls);
+
+    // Pass 1: a regular entry. Is it renamed out of the old folder by some move path?
+    let renamed = false;
+    if (!lockDir) {
+      seedRegular(name);
+      const backup = backupOf(movedValue());
+      renamed = !exists(path.join(backup, name));
+    }
+    if (renamed) expect(checked, `a move renames a ${cls} entry`).toBe(true);
+
+    // Pass 2: the same name as a link. A link-checked entry refuses the move and changes nothing;
+    // any other entry never blocks it.
+    fs.rmSync(site.devflow, { recursive: true, force: true });
+    fs.rmSync(site.machineDir, { recursive: true, force: true });
+    const target = outsideFile(`behind-${cls}.txt`);
+    seedLinked(name, target);
+    const before = snapshotTree(site.root);
+    const result = move();
+    if (checked) {
+      expect(result.ok).toBe(false);
+      expect(!result.ok && result.error.kind).toBe('refused');
+      expect(snapshotTree(site.root)).toEqual(before);
+    } else {
+      expect(result.ok).toBe(true);
+    }
+    expect(read(target)).toBe('{"secret":true}\n');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // The json-helper case (TP-36, argument half)
 // ---------------------------------------------------------------------------
 

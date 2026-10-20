@@ -87,10 +87,11 @@ const MOVE_LOCK_STALE_MS = 60000;
 
 /**
  * The name a journal would have inside the old folder. The move never writes one
- * there and never reads one: a file of this name is repository content, an unknown
- * entry that stays in the backup. It never refuses a move, and it never steers one;
- * it only takes a move that would rename the whole folder onto the per-entry path,
- * so that the file stays in a backup and does not reach the live folder.
+ * there and never reads one: a file of this name is repository content, an entry of
+ * the journal class (moveEntryClass) that stays in the backup. It never refuses a move,
+ * and it never steers one; it only takes a move that would rename the whole folder onto
+ * the per-entry path, so that the file stays in a backup and does not reach the live
+ * folder.
  */
 const OLD_FOLDER_JOURNAL_NAME = '.curation-move.journal';
 
@@ -121,11 +122,8 @@ const QUEUE_LOCK_NAME = `${QUEUE_NAME}.lock`;
 /** Recovery files the store makes next to its files: quarantined lines, one-time v1 copies. */
 const RECOVERY_FILE_RE = /\.(?:rejected|pre-v2)\.jsonl$/;
 
-/** The names the move knows and handles by a rule of their own. */
-const MOVE_KNOWN_NAMES = new Set([
-  ...SET_MEMBERS, QUEUE_NAME, CLAIM_NAME, OWNER_NAME, STORE_LOCK_NAME, QUEUE_LOCK_NAME,
-  LEGACY_NAMES.tuningFile, CURATION_TUNING_FILE_NAME,
-]);
+/** The names, besides the set, the queue and the locks, that the move handles by a rule of its own: the owner file and the tuning files. */
+const KNOWN_NAMES = new Set([OWNER_NAME, LEGACY_NAMES.tuningFile, CURATION_TUNING_FILE_NAME]);
 
 /** The tail of a private, swept or overflow queue file's name: a UTC stamp and eight random hex characters. */
 const MOVE_UNIQUE_TAIL_RE = '\\d{8}T\\d{6}Z-[0-9a-f]{8}';
@@ -155,6 +153,81 @@ const QUEUE_FORMS = Object.freeze([
 function queueFormOf(name) {
   return QUEUE_FORMS.find(entry => entry.re.test(name)) || null;
 }
+
+/** Names of the files the renderer writes: the move never carries them, the new folder rebuilds its own. */
+const RENDERED_NAMES = new Set([getDecisionsFilePath, getPitfallsFilePath, getDecisionsIndexPath].map(nameOfHelper));
+
+/** The name a displaced copy of a set member takes: the member, a UTC stamp and a random suffix. */
+const displacedRe = member => new RegExp(`^${escapeRegExp(member)}\\.displaced-${MOVE_UNIQUE_TAIL_RE}$`);
+const DISPLACED_RES = Object.freeze(SET_MEMBERS.map(displacedRe));
+
+/** The classes of entry in an old folder or a backup folder (moveEntryClass). */
+const ENTRY = Object.freeze({
+  SET_MEMBER: 'set-member',
+  QUEUE: 'queue',
+  KNOWN: 'known',
+  LOCK: 'lock',
+  RECOVERY: 'recovery',
+  QUEUE_FORM: 'queue-form',
+  DISPLACED: 'displaced',
+  RENDERED: 'rendered',
+  JOURNAL: 'journal',
+  UNKNOWN: 'unknown',
+});
+
+/**
+ * What the move does with each class of entry, defined once.
+ *
+ * linkChecked: the refusal looks at an entry of the class before the move reads or
+ * changes anything, and refuses a link (a lock path must also be an empty directory).
+ * It holds for every class some move path renames or takes: the set members (renamed
+ * into the new folder), the queue files and the queue forms (renamed to a private and
+ * then a swept name), the owner file and the tuning files, the recovery files (moved),
+ * the two lock directories (taken) and the displaced copies (made, then left in the old
+ * folder). A rendered file, a journal-named file and an unknown entry are never read
+ * or renamed: a link among them never refuses a move.
+ *
+ * leftBehind: the entry stays in the backup, and one note lists it.
+ */
+const MOVE_ENTRY_CLASSES = Object.freeze({
+  [ENTRY.SET_MEMBER]: Object.freeze({ linkChecked: true, leftBehind: false }),
+  [ENTRY.QUEUE]: Object.freeze({ linkChecked: true, leftBehind: false }),
+  [ENTRY.KNOWN]: Object.freeze({ linkChecked: true, leftBehind: false }),
+  [ENTRY.LOCK]: Object.freeze({ linkChecked: true, leftBehind: false }),
+  [ENTRY.RECOVERY]: Object.freeze({ linkChecked: true, leftBehind: false }),
+  [ENTRY.QUEUE_FORM]: Object.freeze({ linkChecked: true, leftBehind: false }),
+  [ENTRY.DISPLACED]: Object.freeze({ linkChecked: true, leftBehind: false }),
+  [ENTRY.RENDERED]: Object.freeze({ linkChecked: false, leftBehind: false }),
+  [ENTRY.JOURNAL]: Object.freeze({ linkChecked: false, leftBehind: true }),
+  [ENTRY.UNKNOWN]: Object.freeze({ linkChecked: false, leftBehind: true }),
+});
+
+/**
+ * The class of an entry of an old folder or a backup folder, by its name: the one
+ * place that says what the move knows. The refusal, the whole-folder stray check, the
+ * entry listing and the backup checks all ask it, so no two of them can disagree.
+ *
+ * @param {string} name
+ * @returns {string} one of the ENTRY classes
+ */
+function moveEntryClass(name) {
+  if (SET_MEMBERS.includes(name)) return ENTRY.SET_MEMBER;
+  if (name === QUEUE_NAME || name === CLAIM_NAME) return ENTRY.QUEUE;
+  if (KNOWN_NAMES.has(name)) return ENTRY.KNOWN;
+  if (name === STORE_LOCK_NAME || name === QUEUE_LOCK_NAME) return ENTRY.LOCK;
+  if (RECOVERY_FILE_RE.test(name)) return ENTRY.RECOVERY;
+  if (queueFormOf(name) !== null) return ENTRY.QUEUE_FORM;
+  if (DISPLACED_RES.some(re => re.test(name))) return ENTRY.DISPLACED;
+  if (RENDERED_NAMES.has(name)) return ENTRY.RENDERED;
+  if (name === OLD_FOLDER_JOURNAL_NAME) return ENTRY.JOURNAL;
+  return ENTRY.UNKNOWN;
+}
+
+/** True for a class the refusal link-checks (MOVE_ENTRY_CLASSES). */
+const isLinkChecked = cls => MOVE_ENTRY_CLASSES[cls].linkChecked;
+
+/** True for a class that stays in the backup and is listed in a note (MOVE_ENTRY_CLASSES). */
+const isLeftBehind = cls => MOVE_ENTRY_CLASSES[cls].leftBehind;
 
 /** The op names that start every message an op answers. */
 const MOVE_OP = 'move-ledger';
@@ -274,10 +347,9 @@ function curationMoveRefusal(opName, root, { machineDir, homeDir }) {
     const entries = fs.readdirSync(dir);
     if (entries.length > MOVE_MAX_ENTRIES) return moveRefused(opName, `${dir} holds more than ${MOVE_MAX_ENTRIES} entries`);
     for (const entry of entries) {
-      const checked = (wholeFolder && dir === oldDir) || MOVE_KNOWN_NAMES.has(entry)
-        || RECOVERY_FILE_RE.test(entry) || queueFormOf(entry) !== null || DISPLACED_RES.some(re => re.test(entry));
-      if (!checked) continue;
-      const problem = moveEntryProblem(path.join(dir, entry), { lock: entry === STORE_LOCK_NAME || entry === QUEUE_LOCK_NAME });
+      const cls = moveEntryClass(entry);
+      if (!(wholeFolder && dir === oldDir) && !isLinkChecked(cls)) continue;
+      const problem = moveEntryProblem(path.join(dir, entry), { lock: cls === ENTRY.LOCK });
       if (problem !== null) return moveRefused(opName, problem);
     }
   }
@@ -344,7 +416,7 @@ function relocateLocks(held, from, to) {
  * @throws on an I/O failure
  */
 function curationMoveWhole(ctx) {
-  const stray = fs.readdirSync(ctx.oldDir).filter(name => queueFormOf(name) !== null);
+  const stray = fs.readdirSync(ctx.oldDir).filter(name => moveEntryClass(name) === ENTRY.QUEUE_FORM);
   if (stray.length > 0) {
     return moveRefused(MOVE_OP, `${path.basename(ctx.oldDir)} holds ${stray.join(', ')}, which must not move into the live folder`);
   }
@@ -355,13 +427,6 @@ function curationMoveWhole(ctx) {
   fs.renameSync(ctx.oldDir, ctx.newDir);
   return { ok: true, value: { notes: [`moved ${path.basename(ctx.oldDir)} to ${path.basename(ctx.newDir)}`] } };
 }
-
-/** Names of the files the renderer writes: the move never carries them, the new folder rebuilds its own. */
-const RENDERED_NAMES = new Set([getDecisionsFilePath, getPitfallsFilePath, getDecisionsIndexPath].map(nameOfHelper));
-
-/** The name a displaced copy of a set member takes: the member, a UTC stamp and a random suffix. */
-const displacedRe = member => new RegExp(`^${escapeRegExp(member)}\\.displaced-${MOVE_UNIQUE_TAIL_RE}$`);
-const DISPLACED_RES = Object.freeze(SET_MEMBERS.map(displacedRe));
 
 /**
  * The most lines a merge fills a pending queue to. It equals the number of lines the
@@ -740,7 +805,7 @@ function curationMoveSetWithJournal(ctx) {
  * recovery file (`*.rejected.jsonl`, `*.pre-v2.jsonl`) moves when the new folder lacks
  * a file of that name; otherwise the old one stays in the old folder, which becomes
  * the backup, with one note. Rendered files, locks, claim state and queue forms are
- * never moved. An unknown entry stays and is listed in a note.
+ * never moved. An entry of an unknown or journal class stays and is listed in a note.
  *
  * @param {{ oldDir: string, newDir: string }} ctx
  * @returns {{ notes: string[] }}
@@ -749,7 +814,7 @@ function curationMoveSetWithJournal(ctx) {
 function curationMoveEntries(ctx) {
   const notes = [];
   const entries = fs.readdirSync(ctx.oldDir).sort();
-  const unknown = [];
+  const leftBehind = [];
   const move = name => {
     const targetName = name === LEGACY_NAMES.tuningFile ? CURATION_TUNING_FILE_NAME : name;
     if (lstatOrNull(path.join(ctx.newDir, targetName)) !== null) {
@@ -763,17 +828,17 @@ function curationMoveEntries(ctx) {
     .find(name => { const stat = lstatOrNull(path.join(ctx.oldDir, name)); return stat !== null && stat.isFile(); });
   if (tuning !== undefined) move(tuning);
   for (const name of entries) {
-    if (RECOVERY_FILE_RE.test(name)) {
+    const cls = moveEntryClass(name);
+    if (cls === ENTRY.RECOVERY) {
       const stat = lstatOrNull(path.join(ctx.oldDir, name));
       if (stat !== null && stat.isFile()) move(name);
-    } else if (!MOVE_KNOWN_NAMES.has(name) && !RENDERED_NAMES.has(name) && queueFormOf(name) === null
-      && !DISPLACED_RES.some(re => re.test(name))) {
-      unknown.push(name);
+    } else if (isLeftBehind(cls)) {
+      leftBehind.push(name);
     }
   }
-  if (unknown.length > 0) {
-    const shown = unknown.slice(0, MOVE_MAX_NAMES_LISTED).join(', ');
-    notes.push(`left in the backup, not moved: ${shown}${unknown.length > MOVE_MAX_NAMES_LISTED ? ', ...' : ''}`);
+  if (leftBehind.length > 0) {
+    const shown = leftBehind.slice(0, MOVE_MAX_NAMES_LISTED).join(', ');
+    notes.push(`left in the backup, not moved: ${shown}${leftBehind.length > MOVE_MAX_NAMES_LISTED ? ', ...' : ''}`);
   }
   return { notes };
 }
@@ -1078,7 +1143,8 @@ function backupProblem(dir) {
   if (stat.isSymbolicLink()) return `${dir} is a symbolic link`;
   if (!stat.isDirectory()) return `${dir} is not a directory`;
   for (const entry of fs.readdirSync(dir)) {
-    if (entry === QUEUE_NAME || entry === CLAIM_NAME || queueFormOf(entry) !== null) {
+    const cls = moveEntryClass(entry);
+    if (cls === ENTRY.QUEUE || cls === ENTRY.QUEUE_FORM) {
       const problem = moveEntryProblem(path.join(dir, entry));
       if (problem !== null) return problem;
     }
@@ -1088,7 +1154,7 @@ function backupProblem(dir) {
 
 /** True for the names in a backup folder that hold rows a later sweep would still merge. */
 function holdsPendingRows(name) {
-  if (name === QUEUE_NAME || name === CLAIM_NAME) return true;
+  if (moveEntryClass(name) === ENTRY.QUEUE) return true;
   const record = queueFormOf(name);
   return record !== null && (record.form === 'private' || record.form === 'overflow');
 }
@@ -1148,6 +1214,9 @@ module.exports = {
   curationMoveMergeQueue,
   curationMoveFinish,
   curationMoveSweepBackup,
+  moveEntryClass,
+  isLinkChecked,
+  MOVE_ENTRY_CLASSES,
   sweepLedgerBackups,
   backupPendingRows,
 };
