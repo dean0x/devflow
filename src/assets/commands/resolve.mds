@@ -291,7 +291,7 @@ Use the template from the Output Artifact section below.
 ### Phase 6: Polish
 
 **Produces:** POLISH_RESULT
-**Requires:** CODE_AGENT_RESULTS
+**Requires:** CODE_AGENT_RESULTS, GATE_LEVEL
 
 If any fixes were made, spawn Polish agent to refine the changed code:
 

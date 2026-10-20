@@ -188,6 +188,7 @@ const RESOLVE: LevelSpec = {
   dataFlow: [
     { site: 'Step 0d', kind: 'Produces', start: '#### Step 0d:', end: '### Phase 1: Parse Issues' },
     { site: 'Phase 5', kind: 'Requires', start: '### Phase 5:', end: '### Phase 6:' },
+    { site: 'Phase 6', kind: 'Requires', start: '### Phase 6: Polish', end: '### Phase 7:' },
     { site: 'Phase 10', kind: 'Requires', start: '### Phase 10:', end: null },
   ],
   expectedRows: ['| 6 Polish | skip | skip |'],
