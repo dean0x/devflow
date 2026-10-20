@@ -866,20 +866,51 @@ function newFolderHasData(ctx) {
  */
 
 /**
- * What identifies a folder across passes: the device and inode that lstat reports. A
- * folder that was deleted and made again is another folder, whatever its name.
+ * What identifies a folder across passes: the device, the inode and the creation time
+ * that a bigint lstat reports, each as a decimal string. A folder that was deleted and
+ * made again is another folder, whatever its name. The inode number alone does not say
+ * so: Linux file systems often give the freed inode number of a deleted folder to the
+ * next one made, so the creation time (birthtimeNs) is the part that tells them apart.
+ * Where the file system reports no creation time (zero), `birth` is null, and such an
+ * identity confirms no folder: a journal that holds one is dropped, and the move decides
+ * afresh. A folder made again within one kernel clock tick of the first, with the same
+ * inode number, is the one case that stays unseen.
  *
- * @typedef {{ dev: number, ino: number }} FolderIdentity
+ * @typedef {{ dev: string, ino: string, birth: string|null }} FolderIdentity
  */
 
-/** @param {import('fs').Stats} stat @returns {FolderIdentity} */
-const folderIdentity = stat => ({ dev: stat.dev, ino: stat.ino });
+/** The bigint lstat of `file`, or null when nothing is there. @param {string} file @returns {import('fs').BigIntStats|null} @throws on another I/O failure */
+function lstatBigintOrNull(file) {
+  try {
+    return fs.lstatSync(file, { bigint: true });
+  } catch (err) {
+    if (err && (err.code === 'ENOENT' || err.code === 'ENOTDIR')) return null;
+    throw err;
+  }
+}
 
-/** True when `identity` is the identity of the folder `stat` describes. */
-const isSameFolder = (identity, stat) => stat !== null && identity.dev === stat.dev && identity.ino === stat.ino;
+/** @param {import('fs').BigIntStats} stat @returns {FolderIdentity} */
+const folderIdentity = stat => ({
+  dev: String(stat.dev),
+  ino: String(stat.ino),
+  birth: stat.birthtimeNs > 0n ? String(stat.birthtimeNs) : null,
+});
 
-/** True for a number that a journal can hold as a device or inode: a finite, non-negative number. */
-const isIdentityNumber = value => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+/**
+ * True when `identity` is the identity of the folder `stat` describes. False when either
+ * side has no creation time: the inode number alone is not enough to say it is the same folder.
+ *
+ * @param {FolderIdentity} identity
+ * @param {import('fs').BigIntStats|null} stat
+ */
+function isSameFolder(identity, stat) {
+  if (stat === null || identity.birth === null) return false;
+  const now = folderIdentity(stat);
+  return now.birth !== null && identity.dev === now.dev && identity.ino === now.ino && identity.birth === now.birth;
+}
+
+/** True for a string that a journal can hold as a device, an inode or a creation time: decimal digits. */
+const isIdentityDigits = value => typeof value === 'string' && /^[0-9]{1,24}$/.test(value);
 
 /**
  * The steps of a journal file and the identity of the old folder it was planned for, or
@@ -902,7 +933,9 @@ function readMoveJournal(file) {
   }
   if (!isPlainObject(parsed) || parsed.version !== 1 || !Array.isArray(parsed.steps)) return null;
   if (parsed.steps.length > SET_MEMBERS.length * 2) return null;
-  if (!isPlainObject(parsed.oldDir) || !isIdentityNumber(parsed.oldDir.dev) || !isIdentityNumber(parsed.oldDir.ino)) return null;
+  const recordedDir = parsed.oldDir;
+  if (!isPlainObject(recordedDir) || !isIdentityDigits(recordedDir.dev) || !isIdentityDigits(recordedDir.ino)) return null;
+  if (recordedDir.birth !== null && !isIdentityDigits(recordedDir.birth)) return null;
   const steps = [];
   for (const step of parsed.steps) {
     if (!isPlainObject(step)) return null;
@@ -913,12 +946,12 @@ function readMoveJournal(file) {
       steps.push({ op: 'displace', name: step.name, to: step.to });
     } else return null;
   }
-  return { steps, oldDir: { dev: parsed.oldDir.dev, ino: parsed.oldDir.ino } };
+  return { steps, oldDir: { dev: recordedDir.dev, ino: recordedDir.ino, birth: recordedDir.birth } };
 }
 
 /**
  * Drop a machine-side journal that was planned for an old folder other than the one that
- * stands now. The journal lives in the machine directory and the old folder can be
+ * stands now, or whose old folder cannot be confirmed to be this one. The journal lives in the machine directory and the old folder can be
  * deleted and made again (a downgrade that starts a new one, a manual delete), so a
  * journal that outlives its folder would replay its steps against another folder's files
  * and move the live set into the backup. A journal that cannot be read is left for
@@ -933,9 +966,9 @@ function curationMoveDropStaleJournal(ctx) {
   const stat = lstatOrNull(ctx.journal);
   if (stat === null || !stat.isFile()) return [];
   const journal = readMoveJournal(ctx.journal);
-  if (journal === null || isSameFolder(journal.oldDir, lstatOrNull(ctx.oldDir))) return [];
+  if (journal === null || isSameFolder(journal.oldDir, lstatBigintOrNull(ctx.oldDir))) return [];
   removeIfPresent(ctx.journal);
-  return [`dropped a move journal that was planned for an earlier ${path.basename(ctx.oldDir)} folder; the move decides afresh`];
+  return [`dropped a move journal that was not confirmed to belong to this ${path.basename(ctx.oldDir)} folder; the move decides afresh`];
 }
 
 /**
@@ -970,7 +1003,7 @@ function applyMoveStep(ctx, step) {
  * the members are renamed in, in the fixed order: log, archive, history, and the
  * ledger last. The plan is written first to the root's journal in the machine
  * directory, `ctx.journal` (mode 0600, created exclusively, never through a link), with
- * the identity (device and inode) of the old folder it was planned for, and the journal
+ * the identity (device, inode and creation time) of the old folder it was planned for, and the journal
  * is removed once the set is complete. Only that file is a journal: one in
  * the old folder is repository content and is never read. If a journal exists when the
  * op starts, the op completes each listed step whose source still exists and whose
@@ -1007,7 +1040,7 @@ function curationMoveSetWithJournal(ctx) {
     ];
     if (steps.length === 0) return { notes };
     try {
-      writeNewPrivateFile(journal, JSON.stringify({ version: 1, oldDir: folderIdentity(fs.lstatSync(ctx.oldDir)), steps }));
+      writeNewPrivateFile(journal, JSON.stringify({ version: 1, oldDir: folderIdentity(fs.lstatSync(ctx.oldDir, { bigint: true })), steps }));
     } catch (err) {
       removeIfPresent(journal);
       throw err;

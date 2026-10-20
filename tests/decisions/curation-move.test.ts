@@ -1200,13 +1200,40 @@ describe('moveLedger — an interrupted set move resumes from its journal (TP-40
   });
 
   describe('a journal of an old folder that is gone, with a new old folder in its place', () => {
+    /**
+     * Make lstat report one fixed device and inode for the old folder, as a Linux file
+     * system does when it gives the freed inode number of a deleted folder to the next
+     * folder made. Only the creation time can then tell the folders apart.
+     */
+    function pinOldFolderNumbers(): void {
+      const realLstat = nodeFs.lstatSync;
+      vi.spyOn(nodeFs, 'lstatSync').mockImplementation(((target: fs.PathLike, options?: { bigint?: boolean }) => {
+        const stat = (realLstat as (t: fs.PathLike, o?: unknown) => fs.Stats | fs.BigIntStats | undefined)(target, options);
+        if (stat === undefined || String(target) !== site.oldDir) return stat;
+        return new Proxy(stat, {
+          get(inner, key) {
+            if (key === 'dev' || key === 'ino') return options?.bigint === true ? 7n : 7;
+            const value = Reflect.get(inner, key) as unknown;
+            return typeof value === 'function' ? value.bind(inner) : value;
+          },
+        });
+      }) as unknown as typeof nodeFs.lstatSync);
+    }
+
+    /** A pause longer than one kernel clock tick, so a folder made after it has a later creation time. */
+    const pauseOneClockTick = (): void => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30); };
+
     /** A move that stopped after two renames, then the old folder deleted and a later one made, and a live write in the new folder. */
-    function staleJournalSetup(): void {
+    function staleJournalSetup(options: { sameNumbers?: boolean } = {}): void {
+      const pin = (): void => { if (options.sameNumbers === true) pinOldFolderNumbers(); };
+      pin();
       failAfterSetRenames(2);
       expect(failure().kind).toBe('io-error');
       vi.restoreAllMocks();
+      pin();
       expect(exists(moveJournalFile())).toBe(true);
       fs.rmSync(site.oldDir, { recursive: true });
+      pauseOneClockTick();
       seedOld(ledgerSet('later'));
       fs.writeFileSync(path.join(site.newDir, LOG), ledgerSet('live')[LOG]);
     }
@@ -1223,6 +1250,28 @@ describe('moveLedger — an interrupted set move resumes from its journal (TP-40
       expect(names(backup).filter(name => name.startsWith(`${LOG}.displaced-`) && read(path.join(backup, name)) === ledgerSet('live')[LOG])).toEqual([]);
       expect(value.notes.filter(note => /journal/.test(note) && /dropped/.test(note))).toHaveLength(1);
       expect(exists(moveJournalFile())).toBe(false);
+    });
+
+    it('is dropped when the later old folder has the same device and inode numbers as the earlier one', () => {
+      staleJournalSetup({ sameNumbers: true });
+
+      const value = movedValue();
+
+      expect(value.mode).toBe('kept-new');
+      expect(read(path.join(site.newDir, LOG))).toBe(ledgerSet('live')[LOG]);
+      expect(value.notes.filter(note => /journal/.test(note) && /dropped/.test(note))).toHaveLength(1);
+      expect(exists(moveJournalFile())).toBe(false);
+    });
+
+    it('a journal of the same old folder still resumes when the file system reports the same numbers for every folder', () => {
+      pinOldFolderNumbers();
+      failAfterSetRenames(2);
+      expect(failure().kind).toBe('io-error');
+      vi.restoreAllMocks();
+      pinOldFolderNumbers();
+      const value = movedValue();
+      expect(value.mode).toBe('moved-in');
+      expect(value.notes.filter(note => /dropped/.test(note))).toEqual([]);
     });
 
     it('is dropped once, and the next pass has nothing left to drop', () => {
