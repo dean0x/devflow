@@ -363,8 +363,8 @@ describe('each variant states the mode contract it owns (D-CODE-OPERATION-MODES,
 // no input, no paste gate, no D11 PR-body paragraph, no mode. What each keeps is the commit and push of its
 // commit step, one check of the staged diff of every committed file for secrets or tokens in debug output on
 // that line ahead of the security-scan block, and the block itself (D-SCAN-IN-CODE). The compiled body of each
-// variant is held under its ceiling, registered in tests/fixtures/numeric-floors.json as `code-body-max`, `fix-body-max` and
-// `refactor-body-max`: lowered by a pass that cut the artifact, never raised to fit one that grew.
+// variant is held under its ceiling, registered in tests/fixtures/numeric-floors.json as `code-body-max`,
+// `fix-body-max` and `refactor-body-max`: lowered by a pass that cut the artifact, never raised to fit one that grew.
 
 /** The compiled Code agent body, in bytes. Registered as `code-body-max`; lowered, never raised. */
 const CODE_BODY_MAX_BYTES = 10_735
