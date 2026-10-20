@@ -6,8 +6,10 @@ so the build skips it and it reaches an artifact only through the hosts that imp
 D-CODE-VARIANTS: a spawn runs exactly one mode, so one agent for every mode would pay for every
 mode's text and skills on every spawn. Each host carries its own mode sections, its own `OPERATION:`
 line and its own preload (D-CODE-PRELOADS); what every mode needs is written once here. The
-security-scan block lives in `commit_push()`, so every variant keeps it, and the Running
-commands block lives in `tail()`, so the three carry one byte-identical copy.
+Commit and push line lives in `commit_push()`. It ends with one check of the staged diff of every
+committed file for secrets or tokens in debug output, and the security-scan block follows it, so
+every variant keeps both. The Running commands block lives in `tail()`, so the three carry one
+byte-identical copy.
 
 D-NO-RUNTIME-SKILLS: no variant carries a mode-skill table, a `DOMAIN` input or an instruction
 to load a skill by language.
@@ -20,7 +22,7 @@ The hosts import this partial as an alias (`as code`) and call each define once.
 inside a define is split by the build like an arm in a host: the markers sit on lines of their own.
 
 @define input_core():
-- **TASK_ID**: Unique identifier (e.g., "task-2025-01-15_1430")
+- **TASK_ID**: Unique identifier
 - **TASK_DESCRIPTION**: What to do
 - **PUSH** (optional): `true` (default) | `false` — when false, commit only; orchestrator owns push/CI gate
 <!-- learning:on -->
@@ -36,7 +38,7 @@ inside a define is split by the build like an arm in a host: the markers sit on 
 @end
 
 @define commit_push():
-**Commit and push**: Create atomic commits with clear messages. Reference TASK_ID. Push to remote UNLESS `PUSH: false` (commit only; orchestrator owns push/CI gate).
+**Commit and push**: Create atomic commits with clear messages. Reference TASK_ID. Push to remote UNLESS `PUSH: false`. Before you commit, check the staged diff of every file you commit: no secrets or tokens in logs or debug output.
    **Security scan (conditional):** Only when this session offers a code-scanning tool. Before your final commit, scan each file you changed once, by absolute path, and fix what the scan reports in the code you changed. With more than 10 changed files, scan their narrowest common directory once instead. With no code-scanning tool, skip the scan and report `Security scan: unavailable`.
 @end
 
@@ -63,8 +65,6 @@ Run builds, typechecks, lints and tests in the foreground, each with an explicit
 - Never print a large file whole; page it with offset and limit, and cap any output you print. Before printing search matches, list or count them.
 
 ## Output
-
-Return structured completion status:
 
 ```markdown
 ## Implementation Report: {TASK_ID}
