@@ -6,6 +6,7 @@ At `standard` and `lean`, a row sets its phase at that level. Each worktree read
 
 | Phase | standard | lean |
 |-------|----------|------|
+| 6 Polish | skip | skip |
 
 ## Grammar
 

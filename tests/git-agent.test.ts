@@ -14,6 +14,7 @@
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'fs';
+import { createRequire } from 'module';
 import * as path from 'path';
 import { skillsDir, rulesDir, commandsDir, compiledSkillRefsDir } from '../src/core/assets.js';
 import { getAllAgentNames } from '../src/core/plugins.js';
@@ -27,6 +28,7 @@ import {
   operationReferenceRel,
 } from '../src/core/mds-variants.js';
 import { ROOT, resolveAgentSource, resolveAllAgents, gitAgentSinkCorpus, gitOperationReferenceCorpus, extractOpSectionFromCorpus, collectUnfencedH2, loadFile, requireDistFile, walkFiles, isPrHostEntryPath, type CorpusEntry } from './helpers.js';
+import { RESOLVE_BASE_SCRIPT } from './evidence/seam.js';
 
 /**
  * How many corpus files declare a `## Operation:` section for a TRACKER op: one
@@ -2432,8 +2434,9 @@ describe('git agent — static content guards', () => {
   });
 
   it('every REQUIRED_OP with remote I/O carries **Degradation (D4):** (AC-0.6b)', () => {
-    // "Does remote I/O": the op set is derived from REQUIRED_OPS, but the 12 remote-I/O
-    // indicators below are an explicit list (not derived from op text).
+    // "Does remote I/O": the op set is derived from REQUIRED_OPS, but the remote-I/O
+    // indicators below are an explicit list (not derived from op text). The base resolver
+    // is one of them: it fetches from the remote.
     // D4 scope: all ops that call gh CLI or a remote tracker (posting, mutation, or read-only fetch).
     // G1 added D4 to fetch-issue (~:268) and fetch-issues-batch (~:314) — both fetch remotely via gh.
     // Two corpora, one per question, and the split is the point:
@@ -2465,7 +2468,8 @@ describe('git agent — static content guards', () => {
         sec.includes('gh issue view') ||
         sec.includes('gh issue list') ||
         /graphql/i.test(sec) ||
-        sec.includes('`gh`');
+        sec.includes('`gh`') ||
+        sec.includes('resolve-base.cjs');
       if (!doesRemoteIO) continue;
       // D4 evidence: either the formal `**Degradation (D4):**` label or an inline
       // TRACEABILITY: DEGRADED site (ops that carry the degradation concept but use
@@ -3241,5 +3245,184 @@ describe('git agent: text moved out of the always-loaded agent still reaches its
         : entry,
     );
     expect(collectUnreachedObligations(seeded, [target])).toEqual([`${rel}: ${target.literal}`]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PR ops use a fresh base for branch diffs (#495)
+//
+// `ensure-pr-ready` (step 5) and `validate-branch` (steps 6 and 7) are the two Git ops that
+// read a base. Each checks the PR's base name in the prompt, binds it to a shell variable,
+// runs the base resolver once in `pr` mode, and keeps the commit id it prints. Every
+// later diff takes that id and never the name. Both ops are read from their single
+// GitHub reference; `ensure-pr-ready` step 5 is the same text under every provider, which
+// tests/guards/base-ref-guard.test.ts compares.
+// ---------------------------------------------------------------------------
+
+const BASE_RESOLVER = createRequire(import.meta.url)(RESOLVE_BASE_SCRIPT) as { readonly STRICT_NAME_RE: RegExp };
+const BASE_CHECK = `\`${BASE_RESOLVER.STRICT_NAME_RE.source}\``;
+const PR_MODE_CALL = 'node "$HOME/.devflow/scripts/resolve-base.cjs" pr "${B}" --cross "${X}"; echo "exit=$?"';
+/** The one reason-to-fix sentence: ensure-pr-ready 5b and validate-branch step 6 each carry it byte for byte. */
+const BASE_FIX_TABLE = 'Fix by REASON: no-merge-base `git fetch --unshallow`; no-ref or timeout `git fetch origin <base>` (`<base>` stays as written); resolver-unavailable `re-run; if it repeats, run devflow init`; invalid-name the allowed set, never the name; any other REASON none, and `; fix: {fix}` is left out.';
+const BASE_DEGRADED_LINE = '`TRACEABILITY: DEGRADED (base {REASON}; fix: {fix})`';
+
+/** One top-level numbered step of an op section: its first line and the indented lines under it. */
+function numberedStep(section: string, label: string): string {
+  const lines = section.split('\n');
+  const first = lines.findIndex(l => l.startsWith(`${label}. `));
+  if (first === -1) return '';
+  let last = first + 1;
+  while (last < lines.length && /^\s+\S/.test(lines[last])) last++;
+  return lines.slice(first, last).join('\n');
+}
+
+/** One lettered sub-step (`   5a. ...`) of a step's text, with the deeper-indented bullet lines under it. */
+function subStep(step: string, id: string): string {
+  const lines = step.split('\n');
+  const first = lines.findIndex(l => new RegExp(`^\\s+${id}\\. `).test(l));
+  if (first === -1) return '';
+  const indentOf = (l: string): number => l.length - l.trimStart().length;
+  let last = first + 1;
+  while (last < lines.length && indentOf(lines[last]) > indentOf(lines[first])) last++;
+  return lines.slice(first, last).join('\n');
+}
+
+/** The default-branch probe both ops carry: origin/HEAD by symbolic-ref (no pipe), then main, then master. */
+const DEFAULT_BRANCH_PROBE = 'git -C "{worktree}" symbolic-ref --quiet --short refs/remotes/origin/HEAD';
+const MAIN_PROBE = 'git -C "{worktree}" rev-parse --verify --quiet main';
+const OLD_DEFAULT_BRANCH_PROBE = 'git -C "{worktree}" rev-parse --abbrev-ref origin/HEAD 2>/dev/null | sed \'s|origin/||\'';
+
+/** The `master` fallback in both ops: it is tried only after `main`, and checked the same way, so a repository with neither has no default branch. */
+const MASTER_FALLBACK = 'else `master` the same way';
+
+/** True when `text` reads origin/HEAD with symbolic-ref, strips its `origin/` prefix, then tries main, then master (checked the same way as main). */
+function probesDefaultBranch(text: string): boolean {
+  const at = [DEFAULT_BRANCH_PROBE, 'minus its `origin/` prefix', MAIN_PROBE, MASTER_FALLBACK].map(part => text.indexOf(part));
+  return at.every((i, n) => i >= 0 && (n === 0 || i > at[n - 1])) && !text.includes('abbrev-ref') && !/\| *sed/.test(text);
+}
+
+/** The names of the checks `text` fails; empty when every check holds. */
+function failed(checks: ReadonlyArray<readonly [string, boolean]>): string[] {
+  return checks.filter(([, ok]) => !ok).map(([name]) => name);
+}
+
+/** Named collector: the checks the ensure-pr-ready step 5 text fails (the base name, its check, the resolver call and the exits). */
+function collectEnsurePrReadyBaseDefects(section: string): string[] {
+  const step5 = numberedStep(section, '5');
+  const a = subStep(step5, '5a');
+  const b = subStep(step5, '5b');
+  const exits = a.split('\n').filter(l => /^\s+- /.test(l));
+  const [noName = '', refused = '', givenRef = '', resolve = ''] = exits;
+  const outputLine = section.split('\n').find(l => l.startsWith('{`TRACEABILITY: DEGRADED (base ')) ?? '';
+  return failed([
+    ['the Output returns the base ref right after the Base line', section.includes('- **Base**: {base_branch}\n- **Base ref**: {base_ref}\n')],
+    ['5a gives each of its four exits its own sub-bullet', exits.length === 4],
+    ['5a takes the default branch when there is no PR, by symbolic-ref then main then master, before any exit', probesDefaultBranch(a) && a.indexOf(DEFAULT_BRANCH_PROBE) < a.indexOf(exits[0] ?? '') && a.includes('no PR applies')],
+    ['5a takes the unreadable exit, not the default branch, on any other gh failure', noName.includes('any other `gh` failure') && !a.split('\n')[0].includes('fails')],
+    ['5a keeps the PR line, degrades and skips the rest of step 5 when no name is found', noName.includes('keep the PR line') && noName.includes('`(unreadable)`') && noName.includes('`TRACEABILITY: DEGRADED (base name unreadable; fix: re-run)`') && noName.includes('skip the rest of step 5') && noName.includes('no default branch')],
+    ['5a carries the exact base-name check', refused.includes(BASE_CHECK)],
+    ['5a shows the rejected Base line and names only the allowed set', refused.includes('`(rejected)`') && refused.includes('never the name') && refused.includes('ASCII letters, digits and `._/+@,#-`')],
+    ['5a reads the cross flag from isCrossRepository', a.includes('`isCrossRepository`') && resolve.includes('X=<isCrossRepository, else false>')],
+    ['5a skips the resolver for a given hex BASE_REF on the same base name', givenRef.includes('When `BASE_REF` is 40 or 64 lowercase hex and the name equals `BASE_BRANCH`, skip the resolver and 5b: `base_ref` is `BASE_REF`')],
+    ['5a runs the pr-mode call last, after the check, in one Bash call', resolve.includes(PR_MODE_CALL) && resolve.includes('in one Bash call') && a.indexOf(BASE_CHECK) < a.indexOf('When `BASE_REF`') && a.indexOf('When `BASE_REF`') < a.indexOf(PR_MODE_CALL)],
+    ['5a keeps the name out of prose', resolve.includes('only as `${B}`')],
+    ['the Input lists BASE_REF as optional', section.includes('`BASE_BRANCH` (optional), `BASE_REF` (optional)')],
+    ['5b takes the one BASE_REF line only with exit=0 and reads other output as resolver-unavailable', b.includes('`BASE_REF=`') && b.includes('together with `exit=0`') && b.includes('`REASON=resolver-unavailable`') && b.includes('run devflow init')],
+    ['5b returns base_ref and prints REASON', b.includes('`base_ref`') && b.includes('print REASON')],
+    ['5b stops only on an invalid name', b.includes('Only an invalid name stops this operation')],
+    ['5b prints the DEGRADED base line with its fix for degraded and stop', b.includes('`degraded`') && b.includes('`stop`') && b.includes(BASE_DEGRADED_LINE)],
+    ['5b carries the reason-to-fix table', b.includes(BASE_FIX_TABLE)],
+    ['the Output names the step-5 DEGRADED lines and an invalid name as the only BLOCKED cause', outputLine.includes(BASE_DEGRADED_LINE) && outputLine.includes('`(base name unreadable; fix: re-run)`') && outputLine.includes('only an invalid base name makes the Status BLOCKED')],
+  ]);
+}
+
+/** Named collector: the checks the validate-branch steps 6 and 7 text fails (the default-branch probe, the base check, the resolver call and the diff). */
+function collectValidateBranchBaseDefects(section: string): string[] {
+  const step6 = numberedStep(section, '6');
+  const step7 = numberedStep(section, '7');
+  const contract = section.slice(0, section.indexOf('**Input:**'));
+  return failed([
+    ['step 6 carries the exact base-name check', step6.includes(BASE_CHECK)],
+    ['step 6 returns BLOCKED with the allowed set on a refused name', /BLOCKED with that allowed set, never the name/.test(step6)],
+    ['step 6 reads the cross flag from isCrossRepository', step6.includes('X=<isCrossRepository, else false>')],
+    ['step 6 runs the pr-mode call', step6.includes(PR_MODE_CALL)],
+    ['step 6 returns BLOCKED when the base ref is none or not hex', /`base_ref` of `none` or not 40 or 64 hex returns BLOCKED/.test(step6)],
+    ['step 6 reads other resolver output as resolver-unavailable', step6.includes('`REASON=resolver-unavailable`') && step6.includes('run devflow init')],
+    ['step 6 takes the BASE_REF line only with exit=0', step6.includes('one `BASE_REF=` line with `exit=0`')],
+    ['step 6 names the fix in its BLOCKED result', /returns BLOCKED naming REASON and its fix/.test(step6)],
+    ['step 6 carries the reason-to-fix table', step6.includes(BASE_FIX_TABLE)],
+    ['step 6 continues on a degraded base with the DEGRADED line and its fix', step6.includes(BASE_DEGRADED_LINE) && step6.includes('`degraded`')],
+    ['step 6 never gives an empty Diff Scope', step6.includes('never an empty `### Diff Scope`') && !/intentional empty/i.test(section)],
+    ['step 6 takes the default branch by symbolic-ref with no pipe, then main, then master', probesDefaultBranch(step6)],
+    ['step 6 probes the default branch without a name placeholder', !/\{(?:default|base_branch)\}/.test(step6.replace(/`base_branch`/g, ''))],
+    ['step 7 diffs against the hex base ref and echoes the exit status', step7.includes('git -C "{worktree}" diff --name-only {base_ref}...HEAD; echo "exit=$?"') && step7.includes('40 or 64 hex')],
+    ['step 7 treats a non-zero exit as BLOCKED and an empty list as valid only with exit 0', step7.includes('a non-zero exit is BLOCKED') && step7.includes('empty list counts only with `exit=0`')],
+    ['the contract says it fetches the base and lists the diff against base_ref', contract.includes('it fetches the base branch at most once (the remote-tracking ref only), lists the diff against `base_ref`') && !/read-only/i.test(contract)],
+  ]);
+}
+
+describe('git agent: PR ops use a fresh base for branch diffs (#495)', () => {
+  const ensureSection = (): string => extractOpSection(operationReferencesCorpus(), 'ensure-pr-ready', 'sole');
+  const validateSection = (): string => extractOpSection(operationReferencesCorpus(), 'validate-branch', 'sole');
+
+  it('ensure-pr-ready returns the base ref, checks the name, resolves it once and stops only on an invalid name', () => {
+    expect(collectEnsurePrReadyBaseDefects(ensureSection())).toEqual([]);
+  });
+
+  it('validate-branch steps 6 and 7 resolve their own base and return BLOCKED when none is usable', () => {
+    expect(collectValidateBranchBaseDefects(validateSection())).toEqual([]);
+  });
+
+  it('the cross-repository flag of ensure-pr-ready comes from the same PR field that validate-branch step 6 reads', () => {
+    expect(numberedStep(validateSection(), '6')).toContain('`isCrossRepository`');
+    expect(subStep(numberedStep(ensureSection(), '5'), '5a')).toContain('`isCrossRepository`');
+  });
+
+  it('the remote-I/O sweep counts the resolver: both ops that run it name its script', () => {
+    const naming = GIT_OPERATION_ROSTER.filter(op => extractOpSection(operationReferencesCorpus(), op, 'sole').includes('resolve-base.cjs'));
+    expect(naming).toEqual(['ensure-pr-ready', 'validate-branch']);
+  });
+
+  it('known-bad probes: each defect in seeded text is reported by name', () => {
+    const ensure = ensureSection();
+    const validate = collectValidateBranchBaseDefects(validateSection());
+    expect(validate).toEqual([]);
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('- **Base ref**: {base_ref}\n', ''))).toEqual(['the Output returns the base ref right after the Base line']);
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace(BASE_CHECK, '`^[a-z]+$`'))).toContain('5a carries the exact base-name check');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('X=<isCrossRepository', 'X=<false'))).toContain('5a reads the cross flag from isCrossRepository');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('Only an invalid name stops this operation', 'Any failure stops this operation'))).toContain('5b stops only on an invalid name');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace(BASE_FIX_TABLE, ''))).toContain('5b carries the reason-to-fix table');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('together with `exit=0`', ''))).toContain('5b takes the one BASE_REF line only with exit=0 and reads other output as resolver-unavailable');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('keep the PR line', 'drop the PR line'))).toContain('5a keeps the PR line, degrades and skips the rest of step 5 when no name is found');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('skip the rest of step 5', 'skip 5b'))).toContain('5a keeps the PR line, degrades and skips the rest of step 5 when no name is found');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('skip the resolver and 5b', 'run the resolver'))).toContain('5a skips the resolver for a given hex BASE_REF on the same base name');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace(DEFAULT_BRANCH_PROBE, OLD_DEFAULT_BRANCH_PROBE))).toContain('5a takes the default branch when there is no PR, by symbolic-ref then main then master, before any exit');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace(MAIN_PROBE, 'git -C "{worktree}" rev-parse --verify --quiet master'))).toContain('5a takes the default branch when there is no PR, by symbolic-ref then main then master, before any exit');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace(MASTER_FALLBACK, 'else `master`'))).toContain('5a takes the default branch when there is no PR, by symbolic-ref then main then master, before any exit');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('no PR applies', 'a PR applies'))).toContain('5a takes the default branch when there is no PR, by symbolic-ref then main then master, before any exit');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace(', or any other `gh` failure', ''))).toEqual(['5a takes the unreadable exit, not the default branch, on any other gh failure']);
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('If it shows that no PR applies (', 'If the call fails or finds no PR ('))).toContain('5a takes the unreadable exit, not the default branch, on any other gh failure');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('\n      - No name', '\n         No name'))).toContain('5a gives each of its four exits its own sub-bullet');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('`BASE_REF` (optional), ', ''))).toEqual(['the Input lists BASE_REF as optional']);
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace(' or `(base name unreadable; fix: re-run)`', ''))).toEqual(['the Output names the step-5 DEGRADED lines and an invalid name as the only BLOCKED cause']);
+    const sectionValidate = validateSection();
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace(BASE_FIX_TABLE, ''))).toContain('step 6 carries the reason-to-fix table');
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace('with `exit=0`', ''))).toContain('step 6 takes the BASE_REF line only with exit=0');
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace('naming REASON and its fix', 'naming REASON'))).toContain('step 6 names the fix in its BLOCKED result');
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace('it fetches the base branch at most once (the remote-tracking ref only), lists', 'it is a read-only check, lists'))).toEqual(['the contract says it fetches the base and lists the diff against base_ref']);
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace(DEFAULT_BRANCH_PROBE, OLD_DEFAULT_BRANCH_PROBE))).toEqual(['step 6 takes the default branch by symbolic-ref with no pipe, then main, then master']);
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace(MAIN_PROBE, 'git -C "{worktree}" rev-parse --verify --quiet master'))).toContain('step 6 takes the default branch by symbolic-ref with no pipe, then main, then master');
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace(MASTER_FALLBACK, 'else `master`'))).toContain('step 6 takes the default branch by symbolic-ref with no pipe, then main, then master');
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace(MAIN_PROBE, 'git -C "{worktree}" rev-parse --verify --quiet {base_branch}'))).toContain('step 6 probes the default branch without a name placeholder');
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace(MAIN_PROBE, 'git -C "{worktree}" rev-parse --verify --quiet {default}'))).toContain('step 6 probes the default branch without a name placeholder');
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace('never an empty `### Diff Scope`', 'an empty `### Diff Scope` is fine'))).toContain('step 6 never gives an empty Diff Scope');
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace('diff --name-only {base_ref}...HEAD; echo "exit=$?"', 'diff {base_branch}...HEAD --name-only'))).toContain('step 7 diffs against the hex base ref and echoes the exit status');
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace('X=<isCrossRepository', 'X=<false'))).toContain('step 6 reads the cross flag from isCrossRepository');
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace(PR_MODE_CALL, () => PR_MODE_CALL.replace(' pr "', ' local "')))).toContain('step 6 runs the pr-mode call');
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace('`REASON=resolver-unavailable`', 'a stop'))).toContain('step 6 reads other resolver output as resolver-unavailable');
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace('`base_ref` of `none` or not 40 or 64 hex returns BLOCKED', '`base_ref` of `none` goes on'))).toContain('step 6 returns BLOCKED when the base ref is none or not hex');
+    expect(collectValidateBranchBaseDefects(`${sectionValidate}\nWhen the base cannot be determined, emit an intentional empty \`### Diff Scope\` block.`)).toContain('step 6 never gives an empty Diff Scope');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('`REASON=resolver-unavailable`', 'a stop'))).toContain('5b takes the one BASE_REF line only with exit=0 and reads other output as resolver-unavailable');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replaceAll(BASE_DEGRADED_LINE, '`x`'))).toContain('5b prints the DEGRADED base line with its fix for degraded and stop');
   });
 });

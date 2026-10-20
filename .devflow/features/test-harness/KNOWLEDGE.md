@@ -3,9 +3,9 @@ feature: test-harness
 name: Test Harness (core - agent-source resolver, fence-aware extraction, guard conventions, isolation helpers)
 description: "Use when adding a guard, seam or golden test, changing the agent-source resolver or fence-aware section extraction, or isolating a test's HOME and dist. Keywords: guard, non-vacuity, resolveAgentSource, sandboxEnv."
 category: conventions
-directories: [tests/helpers.ts, tests/git-agent.test.ts, tests/seams, tests/goldens, tests/guards, tests/fixtures, scripts/update-golden.ts, tests/integration, tests/tracker, tests/dynamic, tests/installer, tests/evidence, tests/provider-literals.test.ts, tests/tracker-agent.test.ts, tests/commands, tests/install-bound-input.test.ts, tests/curation, tests/decisions]
+directories: [tests/helpers.ts, tests/git-agent.test.ts, tests/seams, tests/goldens, tests/guards, tests/fixtures, scripts/update-golden.ts, tests/integration, tests/tracker, tests/dynamic, tests/installer, tests/evidence, tests/provider-literals.test.ts, tests/tracker-agent.test.ts, tests/commands, tests/install-bound-input.test.ts, tests/curation, tests/decisions, tests/bug-analysis]
 created: 2026-09-06
-updated: 2026-10-15
+updated: 2026-10-17
 ---
 
 # Test Harness
@@ -21,7 +21,8 @@ updated: 2026-10-15
 - **KB-INV-7** Every `extractOpSectionFromCorpus` call names its mode with a one-line why: `'sole'` where one file is the authority (throws on a duplicate anchor), `'union'` where the literal may live in any sink-corpus file.
 - **KB-INV-8** A missing build artifact throws (`requireBuiltCli`, `requireDistFile(s)`, `loadGolden`, the resolver's build hint); only an external binary the repo cannot produce is a `skipIf` capability gate.
 - **KB-INV-9** `resolveAgentSource` is dist-first through `agentSourceDirs` (the one owner of that policy): generator-host agents resolve `origin: 'dist'`, hand-authored ones `origin: 'src'`, and neither existing throws with a build hint.
-- **KB-INV-10** Every CLI-spawning test file names one `SUBPROCESS_TIMEOUT_MS` and uses it for the `spawnSync` timeout AND every `it()` timeout.
+- **KB-INV-10** Every CLI-spawning test file names one `SUBPROCESS_TIMEOUT_MS` and uses it for the `spawnSync` timeout AND every `it()` timeout, directly or through a describe-level `{ timeout }` option.
+- **KB-INV-11** `/code-review` and `/bug-analysis` check their fresh-base and stored-head text through the shared `collectFreshBaseDefects` / `collectStoredHeadDefects` in `tests/helpers.ts` (shaped by a `DiffRangeShape`); a fact only one command states goes in that guard's wrapper collector or its `FreshBaseParts`, never a copy of the shared checks.
 - **KB-AP-1** `scanned > 0` over a corpus is necessary, not sufficient: assert completeness against a named set (`getAllAgentNames()`, a manifest) and, for a scan of two sources, by provenance that both contributed.
 - **KB-AP-2** A probe that reimplements the collector inline, or names one member of a set the gate ranges over, stays green after the guard breaks: call the real collector and loop the probe over the whole set.
 - **KB-AP-3** Never write into the real `dist/` or `src/` from a test, nor rebuild the repo's own `dist/`: parallel workers read those paths and an unscoped build repairs staleness mid-suite; use `buildCommittedTree()` or a temp root.
@@ -32,6 +33,7 @@ updated: 2026-10-15
 - **KB-AP-8** A CLI-spawning test that times the spawn but leaves `it()` on vitest's default timeout reintroduces the flake one level up.
 - **KB-AP-9** Fixtures are built from real runtime shapes, never invented; a stand-in name for a registry entry must be deliberately unregisterable.
 - **KB-AP-10** `agent-name-guards.test.ts` (GAP-5) sweeps `.devflow/features/**` for two retired role-noun spellings with no trailing boundary, even in prose: paraphrase them in a KB.
+- **KB-AP-11** /implement's one-argument fresh-base collector is `collectImplementFreshBaseDefects` in `tests/evidence/implement-flow.test.ts`: never rename it to the shared name or merge the two.
 
 ## Overview
 
@@ -94,9 +96,9 @@ The need is real: `tracker/github/manage-debt.md`'s `## Items` is the literal bo
 
 All three throw with a build hint when the artifact is absent: `requireDistFile`/`requireDistFiles` for `dist/commands/`, `requireBuiltCli(root = ROOT)` for `dist/cli.js`. The injectable `root` enables hermetic throw-behaviour tests without touching the real dist.
 
-**Doctrine: build artifact -> throw (fail-loud); external binary the repo cannot produce -> `skipIf` capability gate.** A missing build artifact (anything `npm run build` produces) must fail the suite loudly. A missing external binary the repo has no way to produce (the `claude` CLI) is a legitimate `skipIf` gate. Every subprocess-CLI test file calls `requireBuiltCli()` at module scope, so an unbuilt tree is a collection error (exit 1), not a green SKIP.
+**Doctrine: build artifact -> throw (fail-loud); external binary the repo cannot produce -> `skipIf` capability gate.** A build artifact is anything `npm run build` produces; the `claude` CLI is the external-binary case. Every subprocess-CLI test file calls `requireBuiltCli()` at module scope, so an unbuilt tree is a collection error (exit 1), not a green SKIP.
 
-**Every CLI-spawning test file names its own `SUBPROCESS_TIMEOUT_MS` constant.** A real `devflow init` (or a feature toggle) spawn under load runs past vitest's 5 s default (about 6.5 s was observed for `init-review-publication.test.ts`). One constant per file is shared between the `spawnSync` `timeout` option and every `it(...)`'s own third-argument timeout, so the two ceilings cannot drift apart: the `init-*` e2e files and `init-review-publication.test.ts` use `60_000`, and `scoped-install-e2e.test.ts` uses `120_000` for its heavier three-`$HOME` install. `feature-toggle-config.test.ts` carries the same `60_000` as literals on its spawn and its `it`s.
+**Every CLI-spawning test file names one `SUBPROCESS_TIMEOUT_MS` constant.** A real `devflow init` (or a feature toggle) spawn under load runs past vitest's 5 s default. The constant feeds the `spawnSync` `timeout` and every `it(...)` timeout, so the two ceilings cannot drift apart: the `init-*` e2e files and `init-review-publication.test.ts` use `60_000`, and `scoped-install-e2e.test.ts` uses `120_000` for its heavier three-`$HOME` install. `feature-toggle-config.test.ts` carries the same `60_000` as literals on its spawn and its `it`s. A file that launches `node` or `git` instead of the CLI follows the same rule: the two resolver suites (`resolve-base.test.ts`, `resolve-base-process.test.ts` in `tests/evidence/`) share the `SUBPROCESS_TIMEOUT_MS` that `seam.ts` exports and pass `SPAWN_BUDGET = { timeout: SUBPROCESS_TIMEOUT_MS }` as the options of every spawning `describe`, so a test added to a block inherits it.
 
 ### walkFiles
 
@@ -123,6 +125,12 @@ Builds the D11 sink-class corpus: `git.md` (via `resolveAgentSource('git', root)
 ### Isolated MDS builds (buildCommittedTree / runMdsBuild / copyCommittedSources)
 
 A test that needs real compiled artifacts must never get them by rebuilding the repo's own `dist/`: vitest runs other files in parallel workers that read those same paths, so an unscoped build silently REPAIRS a stale `dist/` mid-suite. Every build spawned from `helpers.ts` is redirected to a throwaway root via `DEVFLOW_MDS_ROOT`, over a COPY of the committed `src/assets/{commands,agents,mds}` trees (`copyCommittedSources`). `buildCommittedTree()` compiles the committed corpus once per test file (memoised) and returns `{ run, root }`; pair it with `cleanupCommittedTree()` in an `afterAll`. `collectSpawnScoping(source)` is a named collector every build-spawning test file runs against its own source, so a future `spawnSync(` site added without `DEVFLOW_MDS_ROOT` fails loud. The spawn timeouts are pinned by `slow-test-timeout-ms` and `mds-build-spawn-timeout-ms` in `numeric-floors.json`.
+
+### Shared diff-range collectors (collectFreshBaseDefects / collectStoredHeadDefects)
+
+`/code-review` and `/bug-analysis` build `DIFF_RANGE` from the `base_ref` that `ensure-pr-ready` returns, so the facts both prompts state are checked once, in `tests/helpers.ts`. A `DiffRangeShape` holds what differs: the stored head's noun (`head`), the incremental-detection step (`step`, cut out by `stepFrom` / `stepTo`), the reachability command up to its SHA placeholder, and the incremental range. `collectFreshBaseDefects(body, shape, parts)` checks the Return line, the Extract line (the Base-line `(rejected)` test, the hex test limited to a full-range run, no copy of the name class, the Git agent's own fix named), the `Set DIFF_RANGE` lines (from `base_ref`, never a base name) and that exactly one base freshness line exists. `FreshBaseParts` is what stays per command: `extractExtras` (a pattern and its defect text for the Extract line) and `freshness(line)`, which places that line. `collectStoredHeadDefects(body, shape)` requires the stored head to be "checked as a commit ID" (exactly 40 or 64 lowercase hex, else the full-range path) before the reachability command or the incremental range uses it.
+
+Each guard wraps the helper in its own named collector (`collectReviewFreshBaseDefects` in `code-review-diff-gating.test.ts`, `collectAnalysisFreshBaseDefects` in `tests/bug-analysis/structural.test.ts`) that adds the facts only its command states; its probes seed the real prompt text and drive that wrapper. /implement's guard has its own collector of the same name over a `FRESH_BASE_PARTS` table.
 
 ## Guard Conventions
 
@@ -172,7 +180,7 @@ Guard 10 reads each operation in `GIT_OPERATIONS` through `opSection = extractOp
 
 ## Key Files
 
-- `tests/helpers.ts` - shared helper API: `resolveAgentSource`, `resolveAllAgents`, `resolveCurationOffSource`, `collectCodeSpawnSites(file, text, agentType?)` (no type reads the whole Code family) with `CODE_OPERATIONS` / `CODE_AGENT_TYPES` / `CODE_MODES`, `agentReferencePath` / `readAgentReference` / `SYNTHESIZE_MODES`, `collectUnfencedH2`, `collectUnfencedLines`/`collectUnclosedFences`, `extractOpSectionFromCorpus`, `walkFiles`, `splitFrontmatter`, `gitAgentSinkCorpus`, `gitOperationReferenceCorpus`, `ensurePrReadyReference`, `withoutHostSteps`, `collectTrackerNamingLines`, `loadGolden`, `extractStatusLines` and its closed reference list, `parseFences`, `isAgentBlock`, `requireDistFile`, `requireDistFiles`, `requireBuiltCli`, `sandboxEnv`/`SANDBOX_ENV_ALLOWLIST`, `prHostRel`/`isPrHostEntryPath` (the one spelling of the `pr/` path grammar), `makeManifest`, `computeFpRatio`, the isolated-build set, and the tracker schema and mechanics collectors (see `test-harness-tracker-guards`)
+- `tests/helpers.ts` - shared helper API: `resolveAgentSource`, `resolveAllAgents`, `resolveCurationOffSource`, `collectCodeSpawnSites(file, text, agentType?)` (no type reads the whole Code family) with `CODE_OPERATIONS` / `CODE_AGENT_TYPES` / `CODE_MODES`, `agentReferencePath` / `readAgentReference` / `SYNTHESIZE_MODES`, `collectUnfencedH2`, `collectUnfencedLines`/`collectUnclosedFences`, `extractOpSectionFromCorpus`, `walkFiles`, `splitFrontmatter`, `gitAgentSinkCorpus`, `gitOperationReferenceCorpus`, `ensurePrReadyReference`, `withoutHostSteps`, `collectTrackerNamingLines`, `collectFreshBaseDefects` / `collectStoredHeadDefects` (with `DiffRangeShape`), `loadGolden`, `extractStatusLines` and its closed reference list, `parseFences`, `isAgentBlock`, `requireDistFile`, `requireDistFiles`, `requireBuiltCli`, `sandboxEnv`/`SANDBOX_ENV_ALLOWLIST`, `prHostRel`/`isPrHostEntryPath` (the one spelling of the `pr/` path grammar), `makeManifest`, `computeFpRatio`, the isolated-build set, and the tracker schema and mechanics collectors (see `test-harness-tracker-guards`)
 - `tests/setup/isolate-env.ts` / `tests/setup/home-isolation.ts` - the unit suite's per-file temp HOME setup file and its pure half; `tests/setup/isolate-env.test.ts` is its canary and red probe
 - `tests/fixtures/mds-manifest.ts` - the build-ownership name manifests (`test-harness-goldens-budgets`)
 - `tests/guards/dist-agents.test.ts` - dist/agents parity for every generator host, frontmatter-shape guard, AC-1.2 absence guard; `tests/guards/agent-source-resolver.test.ts` - resolver unit tests and the `extractOpSectionFromCorpus` sole/union mode tests; `agent-roster-count` is its floor

@@ -9,7 +9,7 @@ output-dir: dist/commands
 @import "./_partials/_settings.mds" as settings
 # Bug Analysis Command
 
-Run a proactive bug analysis on the current branch by combining static analysis tools with parallel semantic analyzers, then synthesizing results into an actionable bug report. Supports incremental analysis, timestamped report directories, and `/resolve` compatibility.
+Run a proactive bug analysis on the current branch by combining static analysis tools with parallel semantic analyzers, then synthesizing results into an actionable bug report.
 
 ## Usage
 
@@ -47,16 +47,16 @@ Agent(subagent_type="Git", run_in_background=false):
 PR_TEST_PLAN_BLOCK: {PR_TEST_PLAN_BLOCK verbatim, or (none)}
 APPLY_CONVENTIONS: {APPLY_CONVENTIONS}
 Validate branch, commit if needed, push, create PR if needed.
-Return: branch, base_branch, branch-slug, PR#"
+Return: branch, base_branch, base_ref, branch-slug, PR#"
 ```
 
-**Extract from response:** `branch`, `base_branch`, `branch_slug`, `pr_number`.
+**Extract from response:** `branch`, `base_branch`, `base_ref`, `branch_slug`, `pr_number`. Stop with cause and fix when the Base line reads (rejected) or `branch_slug` does not match the slug pattern above; name the Git agent's fix, never your own, and for the slug the allowed characters, never its value.
 
 **Fetch PR body** (after extracting `pr_number`):
 ```bash
 PR_DESCRIPTION=$(gh pr view {pr_number} --json body --jq '.body' 2>/dev/null || echo "(none)")
 ```
-If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
+If `pr_number` is absent, set `PR_DESCRIPTION` to `(none)`.
 
 ### Phase 2: Static Analysis
 
@@ -69,12 +69,14 @@ If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
 
 1. Check `{worktree}/.devflow/docs/bug-analysis/{branch-slug}/.last-analysis-head`:
    - **If exists AND `--full` NOT set:**
-     - Read the SHA from the file
-     - Verify reachable: `git cat-file -t {sha}` — if exit code non-zero (rebase invalidated SHA), fall through to full
+     - The analysis head counts only when `git -C "{worktree}/.devflow/docs/bug-analysis/{branch-slug}" ls-files --error-unmatch -- .last-analysis-head >/dev/null 2>&1` exits 1; any other exit takes the full-range path.
+     - Read the SHA from the file. The stored analysis head is checked as a commit ID: use it only when it is exactly 40 or 64 lowercase hex, else take the full-range path
+     - Verify reachable: `git cat-file -t {sha}` — if exit code non-zero (rebase invalidated SHA), take the full-range path
      - If SHA == current HEAD → "No new commits since last analysis. Use --full for a full re-analysis." Stop.
      - Set `DIFF_RANGE` to `{sha}...HEAD`
-   - **If not exists, unreachable SHA, or `--full`:**
-     - Set `DIFF_RANGE` to `{base_branch}...HEAD`
+   - **Full-range path (no marker, or `--full`):**
+     - Stop as for a (rejected) Base line unless `base_ref` is 40 or 64 hex.
+     - Set `DIFF_RANGE` to `{base_ref}...HEAD`
 2. Generate timestamp: `YYYY-MM-DD_HHMM`. If directory already exists (same-minute collision), append seconds (`YYYY-MM-DD_HHMMSS`).
 3. Create timestamped analysis directory: `mkdir -p "{worktree}/.devflow/docs/bug-analysis/{branch-slug}/{timestamp}/"`
 4. Set `ANALYSIS_DIR` to that path.
@@ -87,7 +89,7 @@ If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
 CHANGED_FILES=$(git diff --name-only {DIFF_RANGE})
 ```
 
-Store result as `CHANGED_FILES` — used throughout Steps 2d and Phase 4 to avoid repeated git invocations and ensure consistency.
+Store as `CHANGED_FILES`; Steps 2d and Phase 4 read it. A non-zero diff exit stops.
 
 If output is empty → "No changes to analyze." Stop.
 
@@ -116,7 +118,7 @@ Skip if `--no-static` flag provided or all tools unavailable.
 
 Run available tools on the changed files (from `CHANGED_FILES` computed in Step 2b).
 
-**Semgrep and Snyk run in parallel** — launch both in the background, then wait for both before proceeding to CodeQL. CodeQL is conditional and sequential (it needs Semgrep/Snyk results to decide whether to run).
+**Semgrep and Snyk run in parallel** — launch both in the background, then wait for both before proceeding to CodeQL. CodeQL is conditional and sequential.
 
 **Semgrep** (if available):
 ```bash
@@ -127,11 +129,9 @@ Parse SARIF output → extract findings.
 
 **Snyk Code** (if available):
 ```bash
-# Run a single project-level scan; filter SARIF results programmatically to CHANGED_FILES before LLM processing.
-# Per-file invocation via xargs would invoke snyk O(n) times and --file is for dependency scanning, not source code.
+# One project-level scan (a per-file xargs run would invoke snyk O(n) times; --file is for dependency scans).
 SNYK_SARIF=$(timeout 300 snyk code test --sarif 2>/dev/null)
-# Programmatic filter: keep only results whose file path appears in CHANGED_FILES.
-# This is defense-in-depth — filtering at the data layer before the LLM agent sees any output.
+# Programmatic filter: keep only results whose file path is in CHANGED_FILES — defense-in-depth, before the LLM agent sees any output.
 SNYK_FILTERED=$(echo "$SNYK_SARIF" | jq --argjson files "$(echo "$CHANGED_FILES" | jq -R . | jq -s .)" \
   '.runs[].results |= map(select(.locations[].physicalLocation.artifactLocation.uri as $uri | $files | index($uri) != null))' \
   2>/dev/null || echo "$SNYK_SARIF")
@@ -157,7 +157,7 @@ trap - EXIT INT TERM
 ```
 Parse `CODEQL_SARIF` → extract findings. If database creation fails, `CODEQL_EXIT` is non-zero — skip CodeQL findings and note it. The `trap` guarantees cleanup on SIGTERM/SIGINT/EXIT so orphaned temp directories do not accumulate across interrupted sessions.
 
-**Normalize** all findings to unified table, cap at top 50 by severity. Truncate each Description entry to 200 characters maximum to bound the serialized size of `STATIC_FINDINGS`:
+**Normalize** all findings to unified table, cap at top 50 by severity. Truncate each Description entry to 200 characters maximum:
 
 | Tool | File:Line | CWE | Severity | Title | Description |
 |------|-----------|-----|----------|-------|-------------|
@@ -273,6 +273,7 @@ Output: {ANALYSIS_DIR}/bug-analysis-summary.md"
 ## Bug Analysis Complete
 
 **Branch**: {branch} -> {base_branch}
+{any base `TRACEABILITY: DEGRADED` line from Phase 1, as returned}
 **Analysis**: {ANALYSIS_DIR}
 
 ### Risk Assessment: {risk_level}
@@ -308,11 +309,7 @@ Run `/resolve` to process and fix these findings.
 │  └─ Git agent (ensure-pr-ready)
 │
 ├─ Phase 2: Static Analysis
-│  ├─ Step 2a: Incremental detection + timestamp setup
-│  ├─ Step 2b: Check changed files (stop if none)
-│  ├─ Step 2c: Tool availability check
-│  └─ Step 2d: Tiered static analysis (semgrep → snyk → codeql)
-│              Write static-findings.md
+│  └─ 2a incremental range, 2b changed files (stop if none), 2c tools, 2d semgrep → snyk → codeql
 │
 ├─ Phase 3: Context Loading
 <!-- curation:on -->
@@ -325,10 +322,7 @@ Run `/resolve` to process and fix these findings.
 │  └─ Detect active focuses (security + functional always; integration + usability conditional)
 │
 ├─ Phase 5: Bug Analysis (PARALLEL)
-│  ├─ Debug agent: security (+ STATIC_FINDINGS)
-│  ├─ Debug agent: functional
-│  ├─ Debug agent: integration (conditional)
-│  └─ Debug agent: usability (conditional)
+│  └─ Debug agent per active focus (security also reads STATIC_FINDINGS)
 │
 ├─ Phase 6: Synthesis
 │  └─ Synthesize agent (mode: bug-analysis)
@@ -344,16 +338,12 @@ Run `/resolve` to process and fix these findings.
 |------|----------|
 | No new commits since last analysis | Stop: "No new commits since last analysis. Use --full for a full re-analysis." |
 | Rebase invalidates `.last-analysis-head` SHA | `git cat-file -t` check fails → fallback to full diff |
-| Zero changed files in DIFF_RANGE | Stop: "No changes to analyze." |
+| Zero changed files in DIFF_RANGE with exit 0 | Stop: "No changes to analyze." |
 | Same-minute analysis collision | `mkdir` with seconds suffix (`YYYY-MM-DD_HHMMSS`) |
 | All static tools unavailable | Warn, proceed with semantic-only analysis |
 | `--no-static` flag | Skip Phase 2c and 2d entirely; `STATIC_FINDINGS=(none)` |
 | `--full` flag | Bypass incremental detection (Step 2a), run full diff from base |
 | CodeQL database creation fails | Skip CodeQL, note in output, continue with other tools |
-| Static tool produces no findings | `STATIC_FINDINGS=(none)` — normal, proceed with semantic analysis |
-| No plan artifact found | `PLAN_CONTEXT=(none)`, `ACCEPTANCE_RULES=(none)` — proceed without acceptance criteria |
-| `integration` focus skipped | Not spawned when only 1 directory changed |
-| `usability` focus skipped | Not spawned when no UI files changed |
 
 ## Resolve Compatibility
 

@@ -964,8 +964,9 @@ describe('formatGateLevelSummary', () => {
  *     other tables are checked and the pin is updated. It cannot tell which change is
  *     right; it makes every change a deliberate one.
  *   - the facet rows: the level sets, the level a malformed value reads as, the lint pack
- *     level and the levels that run fewer review focuses. They fail when the tables
- *     disagree on those facets, and they do not read any other clause.
+ *     level, the levels that run fewer review focuses and the levels that skip Polish.
+ *     They fail when the tables disagree on those facets, and they do not read any
+ *     other clause.
  */
 describe('the init prompt and devflow gates describe the same levels', () => {
   const sorted = (keys: readonly string[]): string[] => [...keys].sort();
@@ -977,9 +978,9 @@ describe('the init prompt and devflow gates describe the same levels', () => {
 
     it('GATE_LEVEL_HINTS', () => {
       expect({ ...GATE_LEVEL_HINTS }, `GATE_LEVEL_HINTS changed. ${UPDATE_BOTH}`).toEqual({
-        full: 'the most checking: every review focus and the full planning shape',
-        standard: 'fewer review focuses and planning agents (the default)',
-        lean: 'the least checking; /implement also has Validate run the project lint pack',
+        full: 'the most checking: every review focus, the full planning shape and Polish',
+        standard: 'fewer review focuses and planning agents, and no Polish in /implement and /resolve (the default)',
+        lean: 'the least checking, and no Polish in /implement and /resolve; /implement also has Validate run the project lint pack',
       });
     });
 
@@ -990,7 +991,7 @@ describe('the init prompt and devflow gates describe the same levels', () => {
       ).toBe(
         '/code-review and /plan read the level: standard and lean run fewer review focuses and fewer planning agents. '
         + 'At lean, /implement has Validate run the project\'s lint pack. '
-        + '/implement and /resolve also read the level and name it in their report; their level references hold no phase rules yet.',
+        + '/implement and /resolve also read the level and name it in their report; at standard and lean they skip Polish, and full keeps it.',
       );
     });
 
@@ -1049,6 +1050,19 @@ describe('the init prompt and devflow gates describe the same levels', () => {
     for (const level of fewerInHints) expect(clause, `the effect text names ${level}`).toContain(level);
     expect(clause).not.toContain(strictest);
     expect(GATE_LEVEL_HINTS[strictest]).not.toContain('fewer');
+  });
+
+  it('both say the same levels run no Polish, and the strictest level keeps it', () => {
+    const [strictest] = GATE_LEVELS;
+    const noPolishInHints = GATE_LEVELS.filter(level => GATE_LEVEL_HINTS[level].includes('no Polish'));
+    const clause = /; at (.+?) they skip Polish/.exec(GATE_LEVEL_EFFECT)?.[1] ?? '';
+    expect(clause, 'GATE_LEVEL_EFFECT names the levels that skip Polish').not.toBe('');
+    const namedInEffect = GATE_LEVELS.filter(level => clause.includes(level));
+    expect(noPolishInHints.length).toBeGreaterThan(0);
+    expect(sorted(namedInEffect), 'the levels GATE_LEVEL_EFFECT says skip Polish').toEqual(sorted(noPolishInHints));
+    expect(noPolishInHints).not.toContain(strictest);
+    expect(GATE_LEVEL_EFFECT).toContain(`${strictest} keeps it`);
+    expect(GATE_LEVEL_HINTS[strictest]).toContain('Polish');
   });
 });
 

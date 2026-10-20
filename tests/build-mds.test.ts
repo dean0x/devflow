@@ -35,6 +35,7 @@ import { promises as fs, readFileSync } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { spawnSync } from 'child_process';
+import { createRequire } from 'module';
 import { init, compile, isMdsError } from '@mdscript/mds';
 import {
   KNOWLEDGE_COMMAND_HOSTS,
@@ -59,6 +60,7 @@ import {
   collectBackslashBraceLeaks,
   type EmittedFile,
 } from './helpers.js';
+import { RESOLVE_BASE_SCRIPT } from './evidence/seam.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const COMMANDS_DIR = path.join(ROOT, 'src', 'assets', 'commands');
@@ -1396,8 +1398,20 @@ function collectMergeHelperDefects(text: string): string[] {
   return out;
 }
 
-/** The repo's ref allowlist, as implement.mds states it for BASE_BRANCH. */
+/** The strict base-name class the resolver exports and implement.mds copies for BASE_BRANCH. */
+const STRICT_NAME_SOURCE = (createRequire(import.meta.url)(RESOLVE_BASE_SCRIPT) as { STRICT_NAME_RE: RegExp }).STRICT_NAME_RE.source;
+
+/** The repo's ref allowlist, as the helper's regex literal states it: a character class takes the slash unescaped. */
 const REF_ALLOWLIST_CLASS = '[A-Za-z0-9._/+@,#-]{1,200}';
+
+/** The part of the strict class the helper shares: the same refusals, less the `origin/` prefix, written as a regex literal. */
+const HELPER_SHARED_SHAPE = `/${STRICT_NAME_SOURCE.replace('origin\\/|', '').replace('._\\/+', '._/+')}/`;
+
+/** Named collector: the helper's `BRANCH_NAME` literal when it is not the shared part of implement's strict class. */
+function collectSharedShapeDefects(text: string): string[] {
+  const shape = /const BRANCH_NAME = (\/.*\/);/.exec(text)?.[1];
+  return shape === HELPER_SHARED_SHAPE ? [] : ["BRANCH_NAME is not the shared part of implement's strict class"];
+}
 
 /**
  * Named collector: where the helper lets a Git-reported ticket branch into a git line unchecked.
@@ -1459,7 +1473,19 @@ describe('dynamic-build: the wave merge arm stays flat and lives in one helper (
     expect(collectBranchCheckDefects(compiled)).toEqual([]);
     expect(collectBranchCheckDefects(source)).toEqual([]);
     const implement = await fs.readFile(path.join(BUILT_COMMANDS, 'implement.md'), 'utf-8');
-    expect(implement, 'implement no longer states the allowlist the wave copies').toContain(REF_ALLOWLIST_CLASS);
+    expect(implement, 'implement no longer states the strict class the wave helper shares').toContain(STRICT_NAME_SOURCE);
+  });
+
+  it("the helper's BRANCH_NAME is the strict class less the origin/ prefix refusal", () => {
+    expect(collectSharedShapeDefects(compiled)).toEqual([]);
+    expect(collectSharedShapeDefects(source)).toEqual([]);
+    const narrower = compiled.replace('(?!.*\\.\\.)', '');
+    expect(narrower, 'the seed must land').not.toBe(compiled);
+    expect(collectSharedShapeDefects(narrower)).toEqual(["BRANCH_NAME is not the shared part of implement's strict class"]);
+    const withPrefix = compiled.replace('(?![-#]|', '(?![-#]|origin\\/|');
+    expect(withPrefix, 'the seed must land').not.toBe(compiled);
+    expect(collectSharedShapeDefects(withPrefix)).toEqual(["BRANCH_NAME is not the shared part of implement's strict class"]);
+    expect(collectSharedShapeDefects('nothing')).toEqual(["BRANCH_NAME is not the shared part of implement's strict class"]);
   });
 
   it('known-bad probes: a missing check, a late check, an untyped value, a loose allowlist and a missing leading, revision or double-dot guard are each reported', () => {
@@ -2912,6 +2938,57 @@ describe('implement.md forwards the issue argument unclassified (§23)', () => {
       source.slice(issueAt, descAt),
       'the two keys must sit in one contiguous spawn payload',
     ).not.toContain('\n\n');
+  });
+
+  /**
+   * The prose after the setup-task spawn fence, up to the capture block: the text that
+   * says why each routing rule exists. Scoped there so a reason cannot be satisfied by
+   * the same words elsewhere in the command.
+   */
+  function routingProse(source: string): string {
+    const at = source.indexOf('OPERATION: setup-task');
+    const fenceEnd = at === -1 ? -1 : source.indexOf('```', at);
+    const end = fenceEnd === -1 ? -1 : source.indexOf('**Capture from Git agent output**', fenceEnd);
+    expect(end, 'the routing prose was not found between the setup-task spawn and the capture block').toBeGreaterThan(fenceEnd);
+    return source.slice(fenceEnd + 3, end);
+  }
+
+  /**
+   * Each routing rule and the failure its text names. Every fragment of a reason must be
+   * present, so condensing the text cannot drop a reason and keep the rule.
+   */
+  const ROUTING_REASONS: ReadonlyArray<readonly [string, readonly RegExp[]]> = [
+    ['routing is by shape alone', [/forwarded \*\*unclassified\*\*/, /SHAPE alone/]],
+    ['a `starts with #` test is a github test that reclassifies the other providers\' references as prose', [/`starts with #` test/, /github test/, /`PROJ-12`/, /`ENG-12`/, /task descriptions/]],
+    ['a misrouted reference takes its branch from prose, fetches no issue and reports nothing', [/branch comes from prose/, /no issue is fetched/, /nothing reports it/]],
+    ['the token count is the provider-neutral gate', [/Token COUNT is provider-neutral/, /every issue spelling is one token/, /no free-text description is/]],
+    ['a `.md` path is a plan document, never an issue reference', [/\*\*Extension\.\*\*/, /never an issue reference/, /`PLAN_ARTIFACT_PATH`/, /frontmatter `issue`, never the path/]],
+    ['forwarding the first token alone sends `ISSUE_INPUT: fix` with no description and drops the request', [/\*\*Token count\.\*\*/, /FIRST token/, /`ISSUE_INPUT: fix`/, /no description/, /request is dropped/]],
+  ];
+
+  /** Named collector: the routing rules whose reason is no longer fully stated. */
+  function collectRoutingReasonDefects(prose: string): string[] {
+    return ROUTING_REASONS.filter(([, fragments]) => fragments.some(f => !f.test(prose))).map(([label]) => label);
+  }
+
+  it('the routing text keeps the reason for each rule', async () => {
+    const source = await fs.readFile(path.join(BUILT_COMMANDS, 'implement.md'), 'utf-8');
+    expect(ROUTING_REASONS.length, 'the reason table is empty, so this guard proves nothing').toBe(6);
+    expect(collectRoutingReasonDefects(routingProse(source))).toEqual([]);
+  });
+
+  it('known-bad probes: dropping any one fragment of a reason reports that reason', async () => {
+    const prose = routingProse(await fs.readFile(path.join(BUILT_COMMANDS, 'implement.md'), 'utf-8'));
+    for (const [label, fragments] of ROUTING_REASONS) {
+      for (const fragment of fragments) {
+        const hit = fragment.exec(prose)?.[0];
+        expect(hit, `${fragment} does not match the routing prose`).toBeDefined();
+        const cut = prose.replace(hit as string, '');
+        expect(cut, 'the seed must land').not.toBe(prose);
+        expect(collectRoutingReasonDefects(cut), `${fragment} dropped`).toContain(label);
+      }
+    }
+    expect(collectRoutingReasonDefects('')).toHaveLength(ROUTING_REASONS.length);
   });
 
   it('known-bad probe: EVERY classifier rule fires on its own shape', async () => {

@@ -2,7 +2,7 @@
 description: Self-review workflow - Polish agent (code clarity) then Harden agent (9-pillar quality gate)
 output-dir: dist/commands
 ---
-@import { knowledge_load, knowledge_writeback } from "./_partials/_knowledge.mds"
+@import { knowledge_load, knowledge_writeback_after_load } from "./_partials/_knowledge.mds"
 @import { decisions_load } from "./_partials/_decisions.mds"
 @import "./_partials/_settings.mds" as settings
 # Self-Review Command
@@ -139,7 +139,7 @@ Display summary:
 
 {If BLOCKED: ### Blocking Issue\n{description}}
 
-{{knowledge_writeback()}}
+{{knowledge_writeback_after_load()}}
 
 ## Architecture
 

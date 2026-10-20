@@ -1,6 +1,6 @@
 # install-snapshot golden — config: all-off (#388 AC-2, AC-3, AC-4)
 # Records TODAY's behaviour, bugs included: a later PR that changes a section says why in its fixture-only test(snapshot): commit.
-# argv: devflow init --no-ambient --no-memory --no-hud --no-knowledge --no-curation --no-rules --no-proxy --no-behavior --no-compliance --security user  (cwd <REPO>, HOME <HOME>, stdin not a TTY), run twice; then devflow uninstall
+# argv: devflow init --no-ambient --no-memory --no-hud --no-knowledge --no-learning --no-rules --no-proxy --no-behavior --no-compliance --security user  (cwd <REPO>, HOME <HOME>, stdin not a TTY), run twice; then devflow uninstall
 # Regenerate: npm run test:golden:update -- install-snapshot  (fixture-only test(snapshot): commit)
 # Normalised: sandbox paths (logical + realpath), ISO timestamps, the package version. Walk lines: d dir/, x executable, - file, l link.
 
@@ -305,7 +305,6 @@ x .devflow/scripts/claude-md-audit.cjs
 d .devflow/scripts/core/
 - .devflow/scripts/core/ansi.js
 - .devflow/scripts/core/cache.js
-- .devflow/scripts/core/curation-move-notice.js
 - .devflow/scripts/core/fs-atomic.js
 - .devflow/scripts/core/git.js
 - .devflow/scripts/core/ledger-root.js
@@ -319,8 +318,6 @@ x .devflow/scripts/hooks/background-memory-update
 x .devflow/scripts/hooks/capture-prompt
 x .devflow/scripts/hooks/capture-question
 x .devflow/scripts/hooks/capture-turn
-x .devflow/scripts/hooks/curation-lock
-x .devflow/scripts/hooks/curation-move
 x .devflow/scripts/hooks/debug-trace
 x .devflow/scripts/hooks/ensure-devflow-init
 x .devflow/scripts/hooks/ensure-proxy
@@ -332,10 +329,10 @@ x .devflow/scripts/hooks/hook-log-init
 x .devflow/scripts/hooks/is-hex-sha
 x .devflow/scripts/hooks/json-helper.cjs
 x .devflow/scripts/hooks/json-parse
+x .devflow/scripts/hooks/learning-lock
 d .devflow/scripts/hooks/lib/
-x .devflow/scripts/hooks/lib/curation-move.cjs
-x .devflow/scripts/hooks/lib/curation-store.cjs
 x .devflow/scripts/hooks/lib/decisions-format.cjs
+x .devflow/scripts/hooks/lib/learning-store.cjs
 x .devflow/scripts/hooks/lib/mkdir-lock.cjs
 x .devflow/scripts/hooks/lib/project-paths.cjs
 x .devflow/scripts/hooks/lib/render-decisions.cjs
@@ -359,11 +356,11 @@ d .devflow/scripts/hud/components/
 - .devflow/scripts/hud/components/codex-quota.js
 - .devflow/scripts/hud/components/config-counts.js
 - .devflow/scripts/hud/components/context-usage.js
-- .devflow/scripts/hud/components/curation-counts.js
 - .devflow/scripts/hud/components/diff-stats.js
 - .devflow/scripts/hud/components/directory.js
 - .devflow/scripts/hud/components/git-ahead-behind.js
 - .devflow/scripts/hud/components/git-branch.js
+- .devflow/scripts/hud/components/learning-counts.js
 - .devflow/scripts/hud/components/model.js
 - .devflow/scripts/hud/components/release-info.js
 - .devflow/scripts/hud/components/session-cost.js
@@ -385,6 +382,7 @@ x .devflow/scripts/lib/project-config.cjs
 x .devflow/scripts/pr-evidence.cjs
 x .devflow/scripts/redact-secrets.cjs
 x .devflow/scripts/release-trace.cjs
+x .devflow/scripts/resolve-base.cjs
 x .devflow/scripts/resolve-evidence-policy.cjs
 x .devflow/scripts/resolve-settings.cjs
 x .devflow/scripts/verify-evidence.cjs
@@ -508,7 +506,6 @@ d sub/
     "memory": false,
     "hud": false,
     "knowledge": false,
-    "curation": false,
     "learning": false,
     "rules": false,
     "flags": {

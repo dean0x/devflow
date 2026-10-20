@@ -95,6 +95,7 @@ const EXEMPT_MARKERS: Readonly<Record<string, readonly string[]>> = {
     '`## PR Evidence`',
     '`branch`',
     '`base_branch`',
+    '`base_ref`',
     '`branch_slug`',
     '`pr_number`',
     '`review_count`',

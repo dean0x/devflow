@@ -588,7 +588,7 @@ const results = {};  // ticketId → its row of the workflow's return
 const rowOf = (ticketId, r, merged, treeEqual = null) => ({ ticket: ticketId, ran: true, verdict: r?.verdict || r?.overallVerdict || null, merged, treeEqual, issuePrLink: r?.issuePrLink || "(none)", evaluateVerdict: r?.gate2?.evaluateVerdict, testVerdict: r?.gate2?.testVerdict, surviving: r?.survivingFindings?.length, coverageComplete: r?.reviewCoverage?.complete });
 const MAX_ROUNDS = Math.max(10, remainingTickets.length * 2 + 5);  // heuristic; always finite
 const MERGE_SHA = /^[0-9a-f]{40}$/;  // a SHA as git prints it; with the checked branch, the only Git-reported values that reach a merge, Validate or undo prompt
-const BRANCH_NAME = /^(?![-#]|(?:@|(?:FETCH_|ORIG_|MERGE_)?HEAD)$)(?!.*\.\.)[A-Za-z0-9._/+@,#-]{1,200}$/;  // implement's ref allowlist; no leading - or #, no revision name, no ..: the name enters git lines
+const BRANCH_NAME = /^(?![-#]|(?:@|(?:FETCH_|ORIG_|MERGE_)?HEAD)$)(?!.*\.\.)[A-Za-z0-9._/+@,#-]{1,200}$/;  // STRICT_NAME_RE's deliberate variant, less its origin/ refusal; the name enters git lines
 // One ticket's merge, post-merge Validate and undo (D-WAVE-MERGE-VALIDATE: Git validates nothing).
 const mergeValidateUndo = async (ticketId, engineResult) => {
   if (typeof engineResult.branch !== "string" || !BRANCH_NAME.test(engineResult.branch)) return { kept: false, reason: "ticket branch name refused: not a plain git ref name", halted: null, treeEqual: null };

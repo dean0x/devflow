@@ -1,10 +1,12 @@
 /**
- * /implement and /resolve phases per gate level (#480, part of epic #468).
+ * /implement and /resolve phases per gate level (#480 and #481, part of epic #468). A bare `AC-n` is an acceptance
+ * criterion of #480. `TP-n` is item n of the test plan of PR #574, which implements #481. Issue #481 lists five
+ * criteria, and the `TP-n` numbers are not the numbers of that list.
  *
  * `GATE_LEVEL` comes from the accepted settings line. At `standard` and `lean`, each command reads its own level
  * reference once per run and applies the rows of that reference to the phases the rows name. At `full` it reads
- * nothing. Both references ship with the fixed row grammar and no rows: later issues add the rows, so this file
- * holds what a row may say, where the command reads it and what no row may touch.
+ * nothing. Both references ship with the fixed row grammar. The rows they hold are the decided ones (`expectedRows`),
+ * so this file holds what a row may say, where the command reads it and what no row may touch.
  *   - `/implement`: one Gate level block at the start of Phase 3. The normal path and the re-validation path
  *     (Phases 3-8) both reach it. A failed read applies no row and keeps `GATE_LEVEL`, so at `lean` Phase 6 still
  *     passes the level to Validate and the lint pack still runs.
@@ -18,35 +20,36 @@
  *   b. The data flow: `GATE_LEVEL` in the Produces and Requires lines that carry it.
  *   c. The fail-closed bullet: no row applied, the level kept, and the Phase 6 Validate prompt still carries it.
  *   d. The reference grammar: title, headings, header, closed phase set, cell grammar (a never-skip phase takes no
- *      `skip`, and a phase with no spawn takes only `-`) and Rules bullets. The `devflow gates` text, README.md and
- *      docs/cli-reference.md say the references hold no phase rules exactly while no table has a row.
+ *      `skip`, and a phase with no spawn takes only `-`) and Rules bullets, and the decided rows and bullets.
  *   e. Row safety, a tripwire: protected phases, never-skip phases, floor controls, dispositions and actions no row
  *      may carry.
  *   f. `full` reads nothing: the reference path appears only inside the block, and no Validate fence of
  *      `/resolve` names the level.
  *   g. The report lines that name the level.
  *   h. The two `/resolve` routes that skip phases, the numbered principles and the edge row that reports an empty parse.
- * The spawn fences of both commands are pinned in `implement-resolve-full-fences.test.ts`.
+ *   i. What a skipped Polish phase leaves alone: the branch diff definition and the readers of the Polish output in
+ *      both builds of both commands.
+ * The spawn fences of both commands are pinned in `implement-resolve-full-fences.test.ts`. The doc sites that state the
+ * effect of each shipped row are checked in `implement-resolve-level-docs.test.ts`. The three commands that keep Polish
+ * and read no level are checked in `implement-resolve-level-keepers.test.ts`. The three guards share
+ * `level-guard-helpers.ts`.
  *
- * The reference arms (d, e) read the two references. The command arms (a, b, c, f, g, h) read the compiled commands.
+ * The reference arms (d, e) read the two references. The command arms (a, b, c, f, g, h, i) read the compiled commands.
  */
 
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import * as path from 'path'
 
-import { GATE_LEVEL_EFFECT } from '../../src/cli/commands/gates.js'
-import { ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, isAgentBlock, parseFences, readAgentReference, requireDistFile, resolveAgentSource, resolveCurationOffSource, sectionBetween, tableRows } from '../helpers.js'
+import { ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, isAgentBlock, parseFences, requireDistFile, resolveAgentSource, resolveCurationOffSource, sectionBetween, tableRows } from '../helpers.js'
+import { DECIDED_ROWS, OPEN, POLISH_SPAWN, REFS, RULES_INTRO, TABLE_SEPARATOR, countOf, parseRef, referenceRows, sectionOf, seed, tableLines, tableRowLines, withRows, type LevelCmd, type ParsedRef } from './level-guard-helpers.js'
 
 // ---------------------------------------------------------------------------
 // The decided text, written by hand from the issue and the gate decisions
 // ---------------------------------------------------------------------------
 
 const LEVEL_DIR = 'skills/devflow:agent-references/references/commands'
-const OPEN = '**Gate level.**'
 const TABLE_HEADER = '| Phase | standard | lean |'
-const TABLE_SEPARATOR = '|-------|----------|------|'
-const RULES_INTRO = 'An `apply:` cell names one bullet of this section. At least one row names each bullet.'
 
 const GRAMMAR_CELL = "- **Cell:** `-` runs the phase as written; `skip`, alone, skips it; `apply: <name>` applies the `## Rules` bullet `<name>`; `pass level` adds the line `GATE_LEVEL: {GATE_LEVEL}` to every spawn prompt of the phase. A phase with no spawn takes only `-`. Join `apply:` and `pass level` with `; `. Each `apply:` names exactly one bullet. Any other cell is malformed."
 const GRAMMAR_RULES_BULLET = '- **Rules bullet:** a Rules bullet opens `- **<name>:**`.'
@@ -64,7 +67,7 @@ const RESOLVE_CONDITION = 'When any is `standard` or `lean`, once per run'
 
 /** What one command's block, reference and neighbours must be. */
 interface LevelSpec {
-  readonly cmd: 'implement' | 'resolve'
+  readonly cmd: LevelCmd
   /** The reference file name and the title it opens with. */
   readonly refFile: string
   readonly title: string
@@ -97,6 +100,9 @@ interface LevelSpec {
   readonly triage: readonly string[]
   /** Each Produces or Requires line that must list `GATE_LEVEL`. */
   readonly dataFlow: ReadonlyArray<{ readonly site: string; readonly kind: 'Produces' | 'Requires'; readonly start: string; readonly end: string | null }>
+  /** The rows and the Rules bullets that the reference holds, as the lines of the file. A row or bullet joins the list in the change that decides it. */
+  readonly expectedRows: readonly string[]
+  readonly expectedBullets: readonly string[]
 }
 
 const IMPLEMENT: LevelSpec = {
@@ -111,7 +117,7 @@ const IMPLEMENT: LevelSpec = {
     GRAMMAR_CELL,
     GRAMMAR_RULES_BULLET,
     GRAMMAR_SKIPPED,
-    '- **Gate level block:** the command reads this file at the start of Phase 3, before the Polish spawn. A `3 Polish` row with `skip` skips the Polish spawn, never that block.',
+    '- **Gate level block:** the command reads this file at the start of Phase 3, before the Polish spawn. A `3 Polish` row with `skip` skips the Polish spawn, never that block or the `{branch_diff}` definition.',
     "- **Scope:** a row changes only its own phase's spawns and prompts. It adds no shell command, file write, push or GitHub action. It removes no security check, except that a `4 Self-Review` row may skip Harden. It keeps Validate, the CI gate, the evidence claims and the compliance directive. An enabled compliance lens keeps Harden.",
     '- **Malformed:** no `## Phases` heading, no `| Phase | standard | lean |` header, or a row that breaks this grammar. Then the command applies no row.',
   ],
@@ -136,6 +142,8 @@ const IMPLEMENT: LevelSpec = {
     { site: 'Phase 3', kind: 'Requires', start: '### Phase 3: Polish', end: '### Phase 4:' },
     { site: 'Phase 12', kind: 'Requires', start: '### Phase 12: Report', end: null },
   ],
+  expectedRows: DECIDED_ROWS.implement,
+  expectedBullets: [],
 }
 
 const RESOLVE: LevelSpec = {
@@ -174,8 +182,11 @@ const RESOLVE: LevelSpec = {
   dataFlow: [
     { site: 'Step 0d', kind: 'Produces', start: '#### Step 0d:', end: '### Phase 1: Parse Issues' },
     { site: 'Phase 5', kind: 'Requires', start: '### Phase 5:', end: '### Phase 6:' },
+    { site: 'Phase 6', kind: 'Requires', start: '### Phase 6: Polish', end: '### Phase 7:' },
     { site: 'Phase 10', kind: 'Requires', start: '### Phase 10:', end: null },
   ],
+  expectedRows: DECIDED_ROWS.resolve,
+  expectedBullets: [],
 }
 
 const SPECS: readonly LevelSpec[] = [IMPLEMENT, RESOLVE]
@@ -195,13 +206,14 @@ const EDGE_EMPTY_PARSE_HANDLING = 'Report "No issues to resolve"'
 // Readers
 // ---------------------------------------------------------------------------
 
-const countOf = (text: string, needle: string): number => text.split(needle).length - 1
-
 /** The names on a section's `**Produces:**` or `**Requires:**` line, parentheticals dropped. */
 function dataFlowNames(section: string | null, kind: 'Produces' | 'Requires'): string[] {
   const line = new RegExp(`^\\*\\*${kind}:\\*\\* (.+)$`, 'm').exec(section ?? '')?.[1] ?? ''
   return line.replace(/\([^)]*\)/g, '').split(',').map(n => n.trim()).filter(n => n !== '')
 }
+
+/** The `### Phase N:` numbers of a compiled command, in heading order. */
+const phaseNumbers = (body: string): string[] => [...body.matchAll(/^### Phase (\d+[a-z]?): /gm)].map(m => m[1])
 
 /** The `### Phase N:` headings of a compiled command, as number to name with the parenthetical dropped. */
 function phaseHeadings(body: string): Map<string, string> {
@@ -214,7 +226,7 @@ function phaseHeadings(body: string): Map<string, string> {
 
 /** The phase numbers of the compiled headings that are outside the closed set: a new phase is protected by default. */
 function protectedOf(spec: LevelSpec, body: string): string[] {
-  return [...body.matchAll(/^### Phase (\d+[a-z]?): /gm)].map(m => m[1]).filter(n => !spec.closed.some(([c]) => c === n))
+  return phaseNumbers(body).filter(n => !spec.closed.some(([c]) => c === n))
 }
 
 /** The compiled `### Phase N:` section, up to the next phase heading: where a row's spawns sit. Empty when the phase is absent. */
@@ -340,37 +352,6 @@ export function collectFailClosedDefects(body: string, spec: LevelSpec, validate
 // ---------------------------------------------------------------------------
 // d. The reference grammar
 // ---------------------------------------------------------------------------
-
-interface RefSection { readonly heading: string; readonly lines: readonly string[] }
-interface ParsedRef { readonly title: string; readonly preamble: readonly string[]; readonly sections: readonly RefSection[] }
-
-/** A reference as its title line, the text before its first heading and its `## ` sections, blank lines dropped. */
-function parseRef(ref: string): ParsedRef {
-  const lines = ref.split('\n')
-  const sections: Array<{ heading: string; lines: string[] }> = []
-  const preamble: string[] = []
-  for (const line of lines.slice(1)) {
-    if (line.startsWith('## ')) { sections.push({ heading: line, lines: [] }); continue }
-    if (line.trim() === '') continue
-    const current = sections[sections.length - 1]
-    if (current === undefined) preamble.push(line)
-    else current.lines.push(line)
-  }
-  return { title: lines[0] ?? '', preamble, sections }
-}
-
-const sectionOf = (parsed: ParsedRef, heading: string): RefSection | undefined => parsed.sections.find(s => s.heading === heading)
-
-/** The table lines of the `## Phases` section: the header, the separator, then the rows. */
-const tableLines = (parsed: ParsedRef): string[] => (sectionOf(parsed, '## Phases')?.lines ?? []).filter(line => line.startsWith('|'))
-
-/** The row lines of the table, header and separator dropped. */
-const tableRowLines = (parsed: ParsedRef): string[] => tableLines(parsed).slice(2)
-
-/** The rows of a reference, header and separator dropped. */
-export function referenceRows(ref: string): string[] {
-  return tableRowLines(parseRef(ref))
-}
 
 /** One row of the table, parsed once for the grammar check and the row-safety check. */
 interface ParsedRow {
@@ -547,24 +528,32 @@ export function collectLevelReferenceDefects(ref: string, spec: LevelSpec, body:
   ]
 }
 
-/** The clause that the `devflow gates` level text, README.md and docs/cli-reference.md carry while both tables are empty. */
-const NO_RULES_CLAIM = 'no phase rules yet'
-
-/** One text that carries the clause, named as a defect names it. */
-interface ClaimSite { readonly label: string; readonly text: string }
+/** The entries of `have` that `want` does not hold, one per copy: a second copy of a row is a surplus. */
+function surplus(have: readonly string[], want: readonly string[]): string[] {
+  const left = [...want]
+  return have.filter(item => {
+    const at = left.indexOf(item)
+    if (at === -1) return true
+    left.splice(at, 1)
+    return false
+  })
+}
 
 /**
- * AC-5: each site says the references hold "no phase rules yet" exactly while no table has a row. The first change that
- * adds a row fails here until it also updates every site.
+ * AC-5, TP-1: the table holds exactly the decided rows and the Rules section exactly the decided bullets, as the lines of
+ * the file. A decided row or bullet that is missing and an undecided one that is present are each reported. A change to
+ * one cell of a decided row reports both.
  */
-export function collectCliClaimDefects(sites: readonly ClaimSite[], refs: Readonly<Record<string, string>>): string[] {
-  const withRows = SPECS.filter(spec => referenceRows(refs[spec.cmd]).length > 0).map(spec => spec.cmd)
-  return sites.flatMap(({ label, text }) => {
-    const says = text.includes(NO_RULES_CLAIM)
-    if (withRows.length === 0 && !says) return [`no table has a row, but ${label} does not say "${NO_RULES_CLAIM}"`]
-    if (withRows.length > 0 && says) return [`a table has a row (${withRows.join(', ')}), but ${label} still says "${NO_RULES_CLAIM}"`]
-    return []
-  })
+export function collectDecidedRowDefects(ref: string, spec: LevelSpec): string[] {
+  const parsed = parseRef(ref)
+  const rows = referenceRows(ref)
+  const bullets = ruleBullets(parsed)
+  return [
+    ...surplus(spec.expectedRows, rows).map(row => `the ${spec.cmd} table lacks the decided row ${row}`),
+    ...surplus(rows, spec.expectedRows).map(row => `the ${spec.cmd} table holds the undecided row ${row}`),
+    ...surplus(spec.expectedBullets, bullets).map(bullet => `the ${spec.cmd} Rules section lacks the decided bullet ${bullet}`),
+    ...surplus(bullets, spec.expectedBullets).map(bullet => `the ${spec.cmd} Rules section holds the undecided bullet ${bullet}`),
+  ]
 }
 
 // ---------------------------------------------------------------------------
@@ -801,6 +790,73 @@ export function collectCutRouteDefects(body: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
+// i. What a skipped Polish phase leaves alone
+// ---------------------------------------------------------------------------
+
+/** The sentence that defines `{branch_diff}`. It opens so, whatever base name the rest of the sentence uses. */
+const BRANCH_DIFF_DEFINITION = '`{branch_diff}` is the output of'
+/** The Polish output that the skipped phase sets to `SKIPPED`, per command. */
+const POLISH_OUTPUT_NAMES: Readonly<Record<LevelSpec['cmd'], { readonly name: string; readonly from: string }>> = {
+  implement: { name: 'POLISH_OUTPUT', from: '4' },
+  resolve: { name: 'POLISH_RESULT', from: '7' },
+}
+
+/** The text without its code fences. */
+const outsideFences = (text: string): string => text.replace(/```[^\n]*\n[\s\S]*?```/g, '')
+
+/**
+ * The phases from `from` on whose Requires line names `name`, or null when the command has no `from` heading. A skipped
+ * Polish phase sets its output to `SKIPPED`, so no later phase may read it.
+ */
+function readersFrom(body: string, from: string, name: string): string[] | null {
+  const numbers = phaseNumbers(body)
+  const at = numbers.indexOf(from)
+  if (at === -1) return null
+  return numbers.slice(at).filter(num => dataFlowNames(phaseSection(body, num), 'Requires').includes(name))
+}
+
+/** The first defect in where the branch diff is defined, or null: once, in Phase 3 prose, before the Polish spawn. */
+function branchDiffDefinitionDefect(body: string): string | null {
+  const defined = countOf(body, BRANCH_DIFF_DEFINITION)
+  if (defined !== 1) return `the branch diff definition appears ${defined} times, expected once`
+  const phase3 = phaseSection(body, '3')
+  const at = phase3.indexOf(BRANCH_DIFF_DEFINITION)
+  if (at === -1) return 'the branch diff definition is not in Phase 3'
+  if (!outsideFences(phase3).includes(BRANCH_DIFF_DEFINITION)) return 'the branch diff definition is inside a fence of Phase 3: a skipped Polish phase drops it'
+  const spawn = phase3.indexOf(POLISH_SPAWN)
+  if (spawn === -1) return 'Phase 3 has no Polish spawn'
+  return at > spawn ? 'the branch diff definition is after the Polish fence' : null
+}
+
+/** The first defect in the Harden prompt of Phase 4, or null: one Harden fence that takes `FILES_CHANGED: {branch_diff}`. */
+function hardenInputDefect(body: string): string | null {
+  const harden = parseFences(phaseSection(body, '4')).filter(f => isAgentBlock(f, 'Harden'))
+  if (harden.length !== 1) return `Phase 4 holds ${harden.length} Harden fences, expected 1`
+  return harden[0].includes('\nFILES_CHANGED: {branch_diff}\n') ? null : 'the Phase 4 Harden prompt does not take FILES_CHANGED: {branch_diff}'
+}
+
+/** TP-3, `/implement`: the branch diff is defined once, in Phase 3 prose before the Polish fence, and Harden takes it. */
+export function collectImplementPolishInputDefects(body: string): string[] {
+  return [branchDiffDefinitionDefect(body), hardenInputDefect(body)].flatMap(defect => defect ?? [])
+}
+
+/** TP-3: no Requires line after the Polish phase names its output, because a skipped phase gives it no value. */
+export function collectPolishOutputReaderDefects(body: string, spec: LevelSpec): string[] {
+  const { name, from } = POLISH_OUTPUT_NAMES[spec.cmd]
+  const readers = readersFrom(body, from, name)
+  if (readers === null) return [`no "### Phase ${from}:" heading`]
+  return readers.map(num => `Phase ${num} Requires names ${name}, which a skipped Polish phase sets to SKIPPED`)
+}
+
+/** TP-3: the inputs and outputs of the Polish phase that a skip must leave whole, in one compiled build. */
+export function collectPolishSkipDefects(body: string, spec: LevelSpec): string[] {
+  switch (spec.cmd) {
+    case 'implement': return [...collectImplementPolishInputDefects(body), ...collectPolishOutputReaderDefects(body, spec)]
+    case 'resolve': return collectPolishOutputReaderDefects(body, spec)
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Corpus
 // ---------------------------------------------------------------------------
 
@@ -815,28 +871,11 @@ const BUILDS: readonly Build[] = SPECS.flatMap(spec => {
   ]
 })
 const bodyOf = (spec: LevelSpec): string => BUILDS.find(b => b.spec === spec)?.body ?? ''
-const REFS: Readonly<Record<string, string>> = {
-  implement: readAgentReference('commands/implement-levels.md'),
-  resolve: readAgentReference('commands/resolve-levels.md'),
-}
 const SOURCES: Readonly<Record<string, string>> = {
   implement: readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'implement.mds'), 'utf-8'),
   resolve: readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'resolve.mds'), 'utf-8'),
 }
 const VALIDATE = resolveAgentSource('validate').content
-/** The three texts that say the level references hold no phase rules yet; a missing file throws at import, so the guard never skips. */
-const CLAIM_SITES: readonly ClaimSite[] = [
-  { label: 'the devflow gates text', text: GATE_LEVEL_EFFECT },
-  { label: 'README.md', text: readFileSync(path.join(ROOT, 'README.md'), 'utf-8') },
-  { label: 'docs/cli-reference.md', text: readFileSync(path.join(ROOT, 'docs', 'cli-reference.md'), 'utf-8') },
-]
-
-/** Replace `from` with `to` in `body`, failing the test when the seed did not land. */
-function seed(body: string, from: string | RegExp, to: string): string {
-  const next = typeof from === 'string' ? body.replace(from, () => to) : body.replace(from, to)
-  expect(next, `the seed ${String(from).slice(0, 60)} must change the text`).not.toBe(body)
-  return next
-}
 
 /** Replace `from` with `to` inside the section between two anchors only, and splice the section back. */
 function seedIn(body: string, start: string, end: string | null, from: string | RegExp, to: string): string {
@@ -845,14 +884,6 @@ function seedIn(body: string, start: string, end: string | null, from: string | 
   const text = section as string
   const at = body.indexOf(text)
   return body.slice(0, at) + seed(text, from, to) + body.slice(at + text.length)
-}
-
-/** The reference with rows after its separator and bullets after its Rules intro. */
-function withRows(ref: string, rows: readonly string[], bullets: readonly string[] = []): string {
-  let next = ref
-  if (rows.length > 0) next = seed(next, `${TABLE_SEPARATOR}\n`, `${TABLE_SEPARATOR}\n${rows.join('\n')}\n`)
-  if (bullets.length > 0) next = seed(next, RULES_INTRO, `${RULES_INTRO}\n\n${bullets.join('\n')}`)
-  return next
 }
 
 /** The row-safety defects of a reference whose one row applies the Rules bullet `line`. A line that does not open `- **<name>:**` gets no row. `phase` is the row's phase cell. */
@@ -895,7 +926,6 @@ describe('the corpus is real', () => {
       expect(SOURCES[spec.cmd].length, `${spec.cmd}: the command source is empty`).toBeGreaterThan(5000)
     }
     expect(VALIDATE.length, 'the Validate agent is empty').toBeGreaterThan(1000)
-    for (const { label, text } of CLAIM_SITES) expect(text.length, `${label}: nothing read`).toBeGreaterThan(100)
   })
 })
 
@@ -903,31 +933,45 @@ describe('the corpus is real', () => {
 // d. The reference grammar
 // ---------------------------------------------------------------------------
 
-describe('the level references hold the fixed grammar and no rows (AC-5)', () => {
+describe('the level references hold the fixed grammar and the decided rows (AC-5)', () => {
   it.each(BUILDS)('$label: the reference is well formed against the compiled command, and the closed set matches its headings', ({ spec, body }) => {
     expect(collectLevelReferenceDefects(REFS[spec.cmd], spec, body)).toEqual([])
     expect(collectClosedSetDefects(spec, body)).toEqual([])
   })
 
-  it.each(SPECS)('$cmd: the table has no rows, and the Rules section has no bullets', spec => {
-    expect(referenceRows(REFS[spec.cmd])).toEqual([])
-    expect((sectionOf(parseRef(REFS[spec.cmd]), '## Rules')?.lines ?? []).filter(line => line.startsWith('- '))).toEqual([])
+  it.each(SPECS)('$cmd: the table holds exactly the decided rows and the Rules section the decided bullets', spec => {
+    expect(collectDecidedRowDefects(REFS[spec.cmd], spec)).toEqual([])
   })
 
-  it('the devflow gates text, README.md and docs/cli-reference.md each say "no phase rules yet" exactly while no table has a row, and a table with a row or a text without the clause is reported', () => {
-    expect(CLAIM_SITES.map(site => site.label), 'the three sites of the claim').toEqual(['the devflow gates text', 'README.md', 'docs/cli-reference.md'])
-    expect(collectCliClaimDefects(CLAIM_SITES, REFS)).toEqual([])
-    const stillSays = (sites: readonly ClaimSite[], rows: string): string[] => sites.map(site => `a table has a row (${rows}), but ${site.label} still says "${NO_RULES_CLAIM}"`)
-    const withRow = { ...REFS, resolve: withRows(REFS.resolve, ['| 6 Polish | skip | - |']) }
-    expect(collectCliClaimDefects(CLAIM_SITES, withRow)).toEqual(stillSays(CLAIM_SITES, 'resolve'))
-    const bothRows = { implement: withRows(REFS.implement, ['| 3 Polish | skip | - |']), resolve: withRow.resolve }
-    expect(collectCliClaimDefects(CLAIM_SITES, bothRows)).toEqual(stillSays(CLAIM_SITES, 'implement, resolve'))
-    for (const site of CLAIM_SITES) {
-      expect(countOf(site.text, NO_RULES_CLAIM), `${site.label}: the clause appears once, so the seed below removes all of it`).toBe(1)
-      const dropped = CLAIM_SITES.map(other => (other === site ? { ...other, text: seed(other.text, NO_RULES_CLAIM, 'phase rules') } : other))
-      expect(collectCliClaimDefects(dropped, REFS), `${site.label} without the clause`).toEqual([`no table has a row, but ${site.label} does not say "${NO_RULES_CLAIM}"`])
-      expect(collectCliClaimDefects(dropped, withRow), `${site.label} without the clause fits a table with a row`).toEqual(stillSays(CLAIM_SITES.filter(other => other !== site), 'resolve'))
-    }
+  it.each(SPECS)('$cmd: known-bad probes: a missing decided row or bullet and an undecided row or bullet are each reported', spec => {
+    const ref = REFS[spec.cmd]
+    const decided = collectDecidedRowDefects
+    // A row and a bullet that no change decides, so the probes hold whatever rows the reference ships.
+    const row = '| 99 Synthetic | skip | skip |'
+    const bullet = '- **synthetic:** Polish the diff.'
+    expect(decided(withRows(ref, spec.expectedRows, spec.expectedBullets), spec), 'the decided rows and bullets alone').toEqual([])
+    expect(decided(ref, { ...spec, expectedRows: [...spec.expectedRows, row] }), 'a decided row the table lacks').toEqual([`the ${spec.cmd} table lacks the decided row ${row}`])
+    expect(decided(withRows(ref, [...spec.expectedRows, row], spec.expectedBullets), spec), 'an undecided row').toEqual([`the ${spec.cmd} table holds the undecided row ${row}`])
+    expect(decided(ref, { ...spec, expectedBullets: [...spec.expectedBullets, bullet] }), 'a decided bullet the Rules section lacks').toEqual([`the ${spec.cmd} Rules section lacks the decided bullet ${bullet}`])
+    expect(decided(withRows(ref, spec.expectedRows, [...spec.expectedBullets, bullet]), spec), 'an undecided bullet').toEqual([`the ${spec.cmd} Rules section holds the undecided bullet ${bullet}`])
+    // A second copy of a decided row is a surplus, and one changed cell is a missing row and an undecided row.
+    expect(decided(withRows(ref, [row, row]), { ...spec, expectedRows: [row] }), 'a decided row twice').toEqual([`the ${spec.cmd} table holds the undecided row ${row}`])
+    const changed = '| 99 Synthetic | skip | - |'
+    expect(decided(withRows(ref, [changed]), { ...spec, expectedRows: [row] }), 'a decided row with one cell changed').toEqual([`the ${spec.cmd} table lacks the decided row ${row}`, `the ${spec.cmd} table holds the undecided row ${changed}`])
+  })
+
+  it.each(SPECS)('$cmd: known-bad probes: withRows replaces the rows and bullets it finds, keeps a $ literal and fails on a reference without its anchors', spec => {
+    const ref = REFS[spec.cmd]
+    const held = withRows(ref, ['| 3 Held | skip | skip |'], ['- **held:** one.'])
+    expect(referenceRows(held), 'the first call put its row in').toEqual(['| 3 Held | skip | skip |'])
+    expect(ruleBullets(parseRef(held)), 'the first call put its bullet in').toEqual(['- **held:** one.'])
+    // The second call states `$&` in a row and in a bullet. A string replacer would put the matched text there.
+    const next = withRows(held, ['| 4 Cost$& | - | - |'], ['- **next:** $& two.'])
+    expect(referenceRows(next), 'the second call replaced the row, not appended').toEqual(['| 4 Cost$& | - | - |'])
+    expect(ruleBullets(parseRef(next)), 'the second call replaced the bullet, not appended').toEqual(['- **next:** $& two.'])
+    expect(withRows(next, [], []), 'the empty call leaves the bare reference').toBe(withRows(ref, [], []))
+    expect(() => withRows(seed(ref, TABLE_SEPARATOR, ''), [], []), 'a reference without the table separator').toThrow('the reference holds the table separator')
+    expect(() => withRows(seed(ref, RULES_INTRO, ''), [], []), 'a reference without the Rules intro').toThrow('the reference holds the Rules intro')
   })
 
   it.each(SPECS)('$cmd: the reference holds no spawn block, no subagent_type and no curation marker, and a seeded one is reported', spec => {
@@ -1041,7 +1085,7 @@ describe('the level references hold the fixed grammar and no rows (AC-5)', () =>
 // ---------------------------------------------------------------------------
 
 describe('row safety is a tripwire over the references (AC-6)', () => {
-  it.each(BUILDS)('$label: the empty tables and empty Rules sections pass, and the pinned text is the file', ({ spec, body }) => {
+  it.each(BUILDS)('$label: the shipped rows and Rules sections pass, and the pinned text is the file', ({ spec, body }) => {
     expect(collectRowSafetyDefects(REFS[spec.cmd], spec, body)).toEqual([])
   })
 
@@ -1050,7 +1094,7 @@ describe('row safety is a tripwire over the references (AC-6)', () => {
       const parsed = parseRef(REFS[spec.cmd])
       expect(sectionOf(parsed, '## Phases')?.lines.filter(line => !line.startsWith('|')), `${spec.cmd}: the intro`).toEqual([spec.intro])
       expect(sectionOf(parsed, '## Grammar')?.lines, `${spec.cmd}: the grammar`).toEqual(spec.grammar)
-      expect(sectionOf(parsed, '## Rules')?.lines, `${spec.cmd}: the Rules section`).toEqual([RULES_INTRO])
+      expect(sectionOf(parsed, '## Rules')?.lines, `${spec.cmd}: the Rules section`).toEqual([RULES_INTRO, ...spec.expectedBullets])
       expect(protectedOf(spec, bodyOf(spec)), `${spec.cmd}: the protected phases`).toEqual(spec.protectedPhases)
       const neverLine = spec.grammar.find(line => line.startsWith('- **Never skip:**')) ?? ''
       for (const [num, name] of spec.closed) {
@@ -1247,6 +1291,11 @@ describe('row safety is a tripwire over the references (AC-6)', () => {
     expect(collectRowSafetyDefects(seed(ref, RULES_INTRO, `${RULES_INTRO} Extra.`), spec, body)).toEqual(['the "## Rules" section holds text other than the pinned intro and its bullets'])
     expect(collectRowSafetyDefects(withRows(ref, [], ['- **tidy:** Polish the diff.\ncontinued here']), spec, body)).toContain('the "## Rules" section holds text other than the pinned intro and its bullets')
     expect(collectRowSafetyDefects(seed(ref, '## Phases\n', 'Stray text.\n\n## Phases\n'), spec, body)).toContain('the reference holds text between its title and "## Phases"')
+  })
+
+  it('known-bad probe (/implement): a Gate level block bullet that stops keeping the branch diff definition on a Polish skip is reported (TP-3)', () => {
+    const cut = seed(REFS.implement, ' or the `{branch_diff}` definition', '')
+    expect(collectRowSafetyDefects(cut, IMPLEMENT, bodyOf(IMPLEMENT))).toEqual(['the "## Grammar" text is not the pinned text'])
   })
 
   it('known-bad probes: a phase added to the command is protected by default, and a phase renamed in the closed set is reported', () => {
@@ -1464,5 +1513,61 @@ describe('the /resolve routes that skip phases pass no pushing phase (A1)', () =
     expect(collectCutRouteDefects(seed(body, parsedRow, '| No issues found | Normal completion |')))
       .toContain('the edge case that reports "No issues to resolve" appears in 0 rows, expected once')
     expect(collectCutRouteDefects(seed(body, '## Edge Cases', '## Edge Notes'))).toContain('no "## Edge Cases" section')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// i. What a skipped Polish phase leaves alone
+// ---------------------------------------------------------------------------
+
+describe('a skipped Polish phase leaves the branch diff and the readers of its output alone (TP-3)', () => {
+  it.each(BUILDS)('$label: the branch diff is defined once before the Polish fence, Harden takes it, and no later phase reads the Polish output', ({ spec, body }) => {
+    expect(collectPolishSkipDefects(body, spec)).toEqual([])
+  })
+
+  /** The heading that follows Phase `num`, so a probe seeds inside that phase only. */
+  const nextPhaseHeading = (body: string, num: string): string | null => {
+    const numbers = phaseNumbers(body)
+    const next = numbers[numbers.indexOf(num) + 1]
+    return next === undefined ? null : `### Phase ${next}:`
+  }
+  /** The Requires line of Phase `num` with `name` added. */
+  const withReader = (body: string, num: string, name: string): string => seedIn(body, `### Phase ${num}:`, nextPhaseHeading(body, num), /^\*\*Requires:\*\* .+$/m, `$&, ${name}`)
+
+  it.each(BUILDS.filter(b => b.spec === IMPLEMENT))('$label: known-bad probes (/implement): a branch diff definition that is gone, moved or repeated, and a Harden prompt without the diff, are each reported', ({ spec, body }) => {
+    const defects = (text: string): string[] => collectPolishSkipDefects(text, spec)
+    expect(countOf(body, BRANCH_DIFF_DEFINITION), 'the definition appears once in the unmodified command').toBe(1)
+    const gone = seed(body, BRANCH_DIFF_DEFINITION, 'The branch diff is the output of')
+    expect(defects(gone), 'the definition removed').toEqual(['the branch diff definition appears 0 times, expected once'])
+    const inFence = seedIn(gone, '### Phase 3: Polish', '### Phase 4:', 'FILES_CHANGED: {branch_diff}\n', `FILES_CHANGED: {branch_diff}\n${BRANCH_DIFF_DEFINITION} the changed files.\n`)
+    expect(defects(inFence), 'the definition moved into the Polish fence').toEqual(['the branch diff definition is inside a fence of Phase 3: a skipped Polish phase drops it'])
+    const afterFence = seed(gone, '\n### Phase 4: ', `\n${BRANCH_DIFF_DEFINITION} the changed files.\n\n### Phase 4: `)
+    expect(defects(afterFence), 'the definition after the Polish fence').toEqual(['the branch diff definition is after the Polish fence'])
+    const inPhase4 = seedIn(gone, '### Phase 4:', '### Phase 5:', 'After Phase 3, spawn Harden agent', `${BRANCH_DIFF_DEFINITION} the changed files. After Phase 3, spawn Harden agent`)
+    expect(defects(inPhase4), 'the definition moved to Phase 4').toEqual(['the branch diff definition is not in Phase 3'])
+    const twice = seed(body, '\n### Phase 4: ', `\n${BRANCH_DIFF_DEFINITION} the changed files.\n\n### Phase 4: `)
+    expect(defects(twice), 'the definition twice').toEqual(['the branch diff definition appears 2 times, expected once'])
+    const noSpawn = seedIn(body, '### Phase 3: Polish', '### Phase 4:', POLISH_SPAWN, 'Agent(subagent_type="Harden"')
+    expect(defects(noSpawn), 'Phase 3 without a Polish spawn').toEqual(['Phase 3 has no Polish spawn'])
+    const codeFiles = seedIn(body, '### Phase 4:', '### Phase 5:', 'FILES_CHANGED: {branch_diff}', 'FILES_CHANGED: {code_agent_files}')
+    expect(defects(codeFiles), 'a Harden prompt that takes the Code agent file list').toEqual(['the Phase 4 Harden prompt does not take FILES_CHANGED: {branch_diff}'])
+    const noHarden = seedIn(body, '### Phase 4:', '### Phase 5:', 'Agent(subagent_type="Harden"', 'Agent(subagent_type="Evaluate"')
+    expect(defects(noHarden), 'Phase 4 without a Harden fence').toEqual(['Phase 4 holds 0 Harden fences, expected 1'])
+  })
+
+  it.each(BUILDS.filter(b => b.spec === IMPLEMENT))('$label: known-bad probes (/implement): POLISH_OUTPUT on the Requires line of any phase from Phase 4 on is reported', ({ spec, body }) => {
+    // Phase 4 is the first reader, Phase 6 is the Validate phase, and Phase 12 is the last phase of the command.
+    for (const num of ['4', '6', '12']) {
+      expect(collectPolishSkipDefects(withReader(body, num, 'POLISH_OUTPUT'), spec), `Phase ${num}`).toEqual([`Phase ${num} Requires names POLISH_OUTPUT, which a skipped Polish phase sets to SKIPPED`])
+    }
+    expect(dataFlowNames(phaseSection(body, '3'), 'Produces'), 'Phase 3 produces the output that no later phase reads').toEqual(['POLISH_OUTPUT'])
+  })
+
+  it.each(BUILDS.filter(b => b.spec === RESOLVE))('$label: known-bad probes (/resolve): POLISH_RESULT on the Requires line of any phase from Phase 7 on is reported', ({ spec, body }) => {
+    for (const num of ['7', '9b', '10']) {
+      expect(collectPolishSkipDefects(withReader(body, num, 'POLISH_RESULT'), spec), `Phase ${num}`).toEqual([`Phase ${num} Requires names POLISH_RESULT, which a skipped Polish phase sets to SKIPPED`])
+    }
+    expect(dataFlowNames(phaseSection(body, '6'), 'Produces'), 'Phase 6 produces the output that no later phase reads').toEqual(['POLISH_RESULT'])
+    expect(collectPolishSkipDefects(seed(body, '\n### Phase 7: ', '\n### Step 7: '), spec), 'a command without the Phase 7 heading').toEqual(['no "### Phase 7:" heading'])
   })
 })

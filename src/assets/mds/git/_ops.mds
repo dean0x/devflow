@@ -48,7 +48,7 @@ These defines call nothing, so they capture nothing.
 @define ensure_pr_ready_contract():
 Pre-flight: make the branch ready for review and open its PR.
 
-**Input:** `WORKTREE_PATH` (optional), `BASE_BRANCH` (optional), `TASK_ID` (optional), `ISSUE_NUMBER` (optional), `ISSUE_PR_LINK` (optional), `PR_EXCEPTIONS` (optional), `COMMIT_UNCOMMITTED` (optional), `PR_DESCRIPTION_GUIDANCE` (optional), `PR_TEST_PLAN_BLOCK` (optional), `PR_WAVE_BLOCK` (optional), `APPLY_CONVENTIONS`
+**Input:** `WORKTREE_PATH` (optional), `BASE_BRANCH` (optional), `BASE_REF` (optional), `TASK_ID` (optional), `ISSUE_NUMBER` (optional), `ISSUE_PR_LINK` (optional), `PR_EXCEPTIONS` (optional), `COMMIT_UNCOMMITTED` (optional), `PR_DESCRIPTION_GUIDANCE` (optional), `PR_TEST_PLAN_BLOCK` (optional), `PR_WAVE_BLOCK` (optional), `APPLY_CONVENTIONS`
 
 **Output:**
 ```markdown
@@ -57,6 +57,7 @@ Pre-flight: make the branch ready for review and open its PR.
 ### Branch
 - **Current**: {branch}
 - **Base**: {base_branch}
+- **Base ref**: {base_ref}
 - **Branch Slug**: {branch-slug}
 - **PR**: #{number}
 
@@ -71,6 +72,7 @@ Pre-flight: make the branch ready for review and open its PR.
 ### Status: READY | BLOCKED
 {BLOCKED reason if applicable}
 {Any `TRACEABILITY: DEGRADED ({reason})` lines from steps 4b/4c — these never change the READY/BLOCKED verdict}
+{`TRACEABILITY: DEGRADED (base {REASON}; fix: {fix})` or `(base name unreadable; fix: re-run)` from step 5; only an invalid base name makes the Status BLOCKED}
 
 ### Uncommitted files
 {only when `COMMIT_UNCOMMITTED` is `false`: one `- {path}` line each, or `none`}
