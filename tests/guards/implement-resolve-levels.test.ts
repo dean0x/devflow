@@ -921,23 +921,29 @@ function readersFrom(body: string, from: string, name: string): string[] | null 
   return numbers.slice(at).filter(num => dataFlowNames(phaseSection(body, num), 'Requires').includes(name))
 }
 
+/** The first defect in where the branch diff is defined, or null: once, in Phase 3 prose, before the Polish spawn. */
+function branchDiffDefinitionDefect(body: string): string | null {
+  const defined = countOf(body, BRANCH_DIFF_DEFINITION)
+  if (defined !== 1) return `the branch diff definition appears ${defined} times, expected once`
+  const phase3 = phaseSection(body, '3')
+  const at = phase3.indexOf(BRANCH_DIFF_DEFINITION)
+  if (at === -1) return 'the branch diff definition is not in Phase 3'
+  if (!outsideFences(phase3).includes(BRANCH_DIFF_DEFINITION)) return 'the branch diff definition is inside a fence of Phase 3: a skipped Polish phase drops it'
+  const spawn = phase3.indexOf(POLISH_SPAWN)
+  if (spawn === -1) return 'Phase 3 has no Polish spawn'
+  return at > spawn ? 'the branch diff definition is after the Polish fence' : null
+}
+
+/** The first defect in the Harden prompt of Phase 4, or null: one Harden fence that takes `FILES_CHANGED: {branch_diff}`. */
+function hardenInputDefect(body: string): string | null {
+  const harden = parseFences(phaseSection(body, '4')).filter(f => isAgentBlock(f, 'Harden'))
+  if (harden.length !== 1) return `Phase 4 holds ${harden.length} Harden fences, expected 1`
+  return harden[0].includes('\nFILES_CHANGED: {branch_diff}\n') ? null : 'the Phase 4 Harden prompt does not take FILES_CHANGED: {branch_diff}'
+}
+
 /** TP-3, `/implement`: the branch diff is defined once, in Phase 3 prose before the Polish fence, and Harden takes it. */
 export function collectImplementPolishInputDefects(body: string): string[] {
-  const out: string[] = []
-  const defined = countOf(body, BRANCH_DIFF_DEFINITION)
-  if (defined !== 1) out.push(`the branch diff definition appears ${defined} times, expected once`)
-  else {
-    const phase3 = phaseSection(body, '3')
-    const at = phase3.indexOf(BRANCH_DIFF_DEFINITION)
-    if (at === -1) out.push('the branch diff definition is not in Phase 3')
-    else if (!outsideFences(phase3).includes(BRANCH_DIFF_DEFINITION)) out.push('the branch diff definition is inside a fence of Phase 3: a skipped Polish phase drops it')
-    else if (phase3.indexOf(POLISH_SPAWN) === -1) out.push('Phase 3 has no Polish spawn')
-    else if (at > phase3.indexOf(POLISH_SPAWN)) out.push('the branch diff definition is after the Polish fence')
-  }
-  const harden = parseFences(phaseSection(body, '4')).filter(f => isAgentBlock(f, 'Harden'))
-  if (harden.length !== 1) out.push(`Phase 4 holds ${harden.length} Harden fences, expected 1`)
-  else if (!harden[0].includes('\nFILES_CHANGED: {branch_diff}\n')) out.push('the Phase 4 Harden prompt does not take FILES_CHANGED: {branch_diff}')
-  return out
+  return [branchDiffDefinitionDefect(body), hardenInputDefect(body)].flatMap(defect => defect ?? [])
 }
 
 /** TP-3: no Requires line after the Polish phase names its output, because a skipped phase gives it no value. */
