@@ -129,17 +129,23 @@ describe('init moves the project ledger folder (TP-7, TP-8, TP-14)', () => {
     expect(await fs.readFile(path.join(newDir(), LEDGER_FILE), 'utf-8')).toBe(ledger);
   });
 
-  it('keeps the old folder as a backup when both folders held a ledger', { timeout: MULTI_RUN_TIMEOUT_MS }, async () => {
+  it('when both folders held a ledger, the old ledger goes live and one backup holds the displaced copy of the new folder\'s ledger', { timeout: MULTI_RUN_TIMEOUT_MS }, async () => {
+    const newFolderLedger = LEDGER.split('\n')[0] + '\n';
     await seedOldFolder();
     await fs.mkdir(newDir(), { recursive: true });
-    await fs.writeFile(path.join(newDir(), LEDGER_FILE), LEDGER.split('\n')[0] + '\n', 'utf-8');
+    await fs.writeFile(path.join(newDir(), LEDGER_FILE), newFolderLedger, 'utf-8');
 
     const out = runInit(repo, '--curation');
 
     expect(out).not.toMatch(/Ledger move (failed|refused)/);
     expect(await exists(oldDir()), 'the old folder is not left under its name').toBe(false);
-    expect(readdirSync(path.join(repo, '.devflow')).filter(name => name.startsWith('learning.backup-')).length)
-      .toBeLessThanOrEqual(1);
+    expect(await fs.readFile(path.join(newDir(), LEDGER_FILE), 'utf-8'), 'the live ledger is the old two-row ledger').toBe(LEDGER);
+    const backups = readdirSync(path.join(repo, '.devflow')).filter(name => name.startsWith('learning.backup-'));
+    expect(backups, 'exactly one backup folder').toHaveLength(1);
+    const backup = path.join(repo, '.devflow', backups[0]);
+    const displaced = readdirSync(backup).filter(name => name.startsWith(`${LEDGER_FILE}.displaced-`));
+    expect(displaced, 'one displaced copy of the ledger file').toHaveLength(1);
+    expect(await fs.readFile(path.join(backup, displaced[0]), 'utf-8'), 'the copy holds the new folder\'s one-row ledger').toBe(newFolderLedger);
   });
 
   it('refuses a linked old folder, names the root, exits 0 and touches nothing it points at (TP-27)', { timeout: MULTI_RUN_TIMEOUT_MS }, async () => {
@@ -206,17 +212,18 @@ describe('a name read from the repository prints as one clean line', () => {
 });
 
 describe('init and the drain meet the old folder (TP-8)', () => {
-  it('--no-curation drains the queue of an old folder whose move was deferred, and keeps the ledger', { timeout: MULTI_RUN_TIMEOUT_MS }, async () => {
+  it('--no-curation drains the queue of an old folder whose move a fresh queue claim defers, and keeps the ledger there', { timeout: MULTI_RUN_TIMEOUT_MS }, async () => {
     await seedOldFolder(repo, true);
 
-    runInit(repo, '--no-curation');
+    const out = runInit(repo, '--no-curation');
 
+    expect(out, 'the claim defers the move').toContain(`Ledger move skipped for ${repo}: a queue claim holds the move.`);
+    expect(await exists(oldDir()), 'the old folder stays').toBe(true);
+    expect(await exists(newDir()), 'the new folder is not made').toBe(false);
+    expect(await fs.readFile(path.join(oldDir(), LEDGER_FILE), 'utf-8'), 'the ledger is never drained').toBe(LEDGER);
     for (const name of QUEUE) {
       expect(await exists(path.join(oldDir(), name)), `${name} is drained from the old folder`).toBe(false);
-      expect(await exists(path.join(newDir(), name)), `${name} is not in the new folder`).toBe(false);
     }
-    const ledgerHome = (await exists(path.join(oldDir(), LEDGER_FILE))) ? oldDir() : newDir();
-    expect(await fs.readFile(path.join(ledgerHome, LEDGER_FILE), 'utf-8'), 'the ledger is never drained').toBe(LEDGER);
   });
 });
 

@@ -280,14 +280,19 @@ describe('readManifest', () => {
       expect('decisions' in (await featuresOnDisk())).toBe(false);
     });
 
-    it('a heal-write failure still returns the resolved switch', async () => {
-      await fs.writeFile(path.join(tmpDir, 'manifest.json'), rawOf({ curation: false, learning: true }), 'utf-8');
-      await fs.chmod(tmpDir, 0o500);
+    it('a heal-write failure still returns the resolved switch and leaves the file as it was', async () => {
+      const body = rawOf({ curation: false, learning: true });
+      await fs.writeFile(path.join(tmpDir, 'manifest.json'), body, 'utf-8');
+      // Reject the atomic rename at the seam. A read-only directory does not stop a write
+      // under root, so a chmod would leave the failure path unexercised on a root runner.
+      const renameSpy = vi.spyOn(fs, 'rename').mockRejectedValue(new Error('ENOSPC: no space left on device'));
       try {
         expect((await readManifest(tmpDir))!.features.curation).toBe(false);
+        expect(renameSpy, 'the heal tried to write').toHaveBeenCalled();
       } finally {
-        await fs.chmod(tmpDir, 0o700);
+        renameSpy.mockRestore();
       }
+      expect(await fs.readFile(path.join(tmpDir, 'manifest.json'), 'utf-8'), 'the failed heal changed nothing on disk').toBe(body);
     });
 
     describe('the heal and a toggle share one lock (no lost update)', () => {

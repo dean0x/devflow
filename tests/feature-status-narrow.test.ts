@@ -105,6 +105,14 @@ describe('--status prints the effective state only when a repo layer narrows (D-
     expect(withoutEffective(narrowed)).toBe(bare);
   }, 120_000);
 
+  it('curation: a project.json features.curation:false adds exactly the effective line (the current key)', () => {
+    seedManifest({});
+    const bare = status('learning', makeRepo());
+    const narrowed = status('learning', makeRepo({ project: '{"features":{"curation":false}}' }));
+    expect(narrowed).toContain('Effective here: disabled (.devflow/project.json)');
+    expect(withoutEffective(narrowed)).toBe(bare);
+  }, 120_000);
+
   it.each(FEATURES)('%s: a config.json features:false names the personal file', (feature) => {
     seedManifest({});
     const narrowed = status(feature, makeRepo({ personal: `{"features":{"${feature}":false}}` }));
