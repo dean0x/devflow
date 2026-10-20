@@ -61,6 +61,7 @@ import { getDevFlowDirectory } from '../../src/targets/claude-code/claude-paths.
 import { curationCommand } from '../../src/cli/commands/curation.js';
 import * as p from '@clack/prompts';
 import { getCurationMoveMarkerPath } from '../../src/core/curation-move-notice.js';
+import { MOVE_SKIP_NOTICE } from '../../src/core/curation-move-skip.js';
 import {
   getCurationPendingTurnsPath,
   getCurationPendingTurnsProcessingPath,
@@ -69,6 +70,8 @@ import {
 } from '../../src/core/project-paths.js';
 import {
   curationPaths,
+  git,
+  initGitRepo,
   makeV1LedgerRow,
   makeV1LogRow,
   makeV2LedgerRow,
@@ -248,6 +251,25 @@ function holdMoveLock(machineDir: string, dir: string): string {
   return lock;
 }
 
+/** Make `dir` a git repository that tracks `rel` (a path below it, written if absent). */
+function trackInGit(dir: string, rel: string): void {
+  const file = path.join(dir, rel);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  if (!fs.existsSync(file)) fs.writeFileSync(file, 'content of the repository\n');
+  initGitRepo(dir);
+  git(dir, ['add', '-f', '--', rel]);
+}
+
+/** A PATH that holds a `git` which always exits non-zero, and nothing else. */
+function pathWithFailingGit(dir: string): string {
+  const bin = path.join(dir, 'failing-git-bin');
+  fs.mkdirSync(bin, { recursive: true });
+  const failing = ['/usr/bin/false', '/bin/false'].find(candidate => fs.existsSync(candidate));
+  if (failing === undefined) throw new Error('no false program on this machine');
+  fs.symlinkSync(failing, path.join(bin, 'git'));
+  return bin;
+}
+
 let root: string;
 let devflowDir: string;
 
@@ -268,6 +290,7 @@ beforeEach(() => {
 
 afterEach(() => {
   process.exitCode = 0;
+  vi.unstubAllEnvs();
   vi.mocked(getDevFlowDirectory).mockReturnValue('/home/user/.devflow');
   fs.rmSync(root, { recursive: true, force: true });
   fs.rmSync(devflowDir, { recursive: true, force: true });
@@ -1086,6 +1109,25 @@ describe('curation --enable/--disable: the curation switch and the folder move (
       expect(run.exitCode).toBe(0);
     });
 
+    it.each(['tracked', 'unknown'] as const)('a move skipped for the reason %s is reported as a warning with the fixed notice, never a failure', async (reason) => {
+      const old = seedOldFolder(root);
+      if (reason === 'tracked') trackInGit(root, '.devflow/learning/decisions-ledger.jsonl');
+      else {
+        initGitRepo(root);
+        vi.stubEnv('PATH', pathWithFailingGit(devflowDir));
+      }
+      const before = snapshotTree(path.join(root, '.devflow'));
+
+      const run = await runCuration(['--enable']);
+
+      expect(readSwitchKeys(devflowDir)).toEqual({ curation: true, learning: true });
+      expect(run.warn).toContain(MOVE_SKIP_NOTICE[reason]);
+      expect(run.exitCode).toBe(0);
+      expect(fs.existsSync(old)).toBe(true);
+      expect(fs.existsSync(NEW())).toBe(false);
+      expect(snapshotTree(path.join(root, '.devflow'))).toEqual(before);
+    });
+
     it('a refused move (the old folder is a link) is reported as a warning, never a failure', async () => {
       const outside = makeTmpDir();
       try {
@@ -1252,6 +1294,21 @@ describe('curation --status/--list/--show with only the old folder (#529)', { ti
 
       expect(run.info).toBe(`Curation: enabled\n${REFUSED}`);
       expect(snapshotTree(root)).toEqual(before);
+    });
+
+    it.each(['tracked', 'unknown'] as const)('prints the whole fixed notice when the %s marker exists for this root', async (reason) => {
+      seedOldFolder(root);
+      fs.writeFileSync(getCurationMoveMarkerPath(os.homedir(), root, reason), '');
+      const before = snapshotTree(root);
+
+      try {
+        const run = await runCuration(['--status']);
+
+        expect(run.info).toBe(`Curation: enabled\nCuration: ${MOVE_SKIP_NOTICE[reason]}`);
+        expect(snapshotTree(root)).toEqual(before);
+      } finally {
+        fs.rmSync(getCurationMoveMarkerPath(os.homedir(), root, reason), { force: true });
+      }
     });
 
     it('a marker for another root does not make this root refused', async () => {
@@ -1558,6 +1615,36 @@ describe('curation --restore/--clear/--reset move the old folder first (#529)', 
       } finally {
         fs.rmSync(outside, { recursive: true, force: true });
       }
+    });
+
+    it.each(WRITERS)('%s with a project whose old folder git tracks writes nothing, prints the fixed notice and exits 1', async (_flag, args, undone) => {
+      const old = seedOldFolder(root);
+      trackInGit(root, '.devflow/learning/decisions-ledger.jsonl');
+      const before = snapshotTree(path.join(root, '.devflow'));
+
+      const run = await runCuration(args);
+
+      expect(run.error).toContain(MOVE_SKIP_NOTICE.tracked);
+      expect(run.error).toContain(`Nothing was ${undone}.`);
+      expect(run.success).toBe('');
+      expect(run.exitCode).toBe(1);
+      expect(fs.existsSync(old)).toBe(true);
+      expect(fs.existsSync(NEW())).toBe(false);
+      expect(snapshotTree(path.join(root, '.devflow'))).toEqual(before);
+    });
+
+    it.each(WRITERS)('%s with a project where git does not answer writes nothing, prints the fixed notice and exits 1', async (_flag, args, undone) => {
+      seedOldFolder(root);
+      initGitRepo(root);
+      vi.stubEnv('PATH', pathWithFailingGit(devflowDir));
+      const before = snapshotTree(path.join(root, '.devflow'));
+
+      const run = await runCuration(args);
+
+      expect(run.error).toContain(MOVE_SKIP_NOTICE.unknown);
+      expect(run.error).toContain(`Nothing was ${undone}.`);
+      expect(run.exitCode).toBe(1);
+      expect(snapshotTree(path.join(root, '.devflow'))).toEqual(before);
     });
 
     it.each(WRITERS)('%s with no old folder runs no move', async (_flag, args) => {

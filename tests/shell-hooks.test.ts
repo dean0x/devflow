@@ -10,6 +10,7 @@ import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
 import { buildRoutingConfigJson } from '../src/core/proxy-state.js';
 import { CURATION_DIR_NAME, LEGACY_NAMES, curationMoveMarkerKey } from '../src/core/project-paths.js';
 import { getCurationMoveMarkerPath } from '../src/core/curation-move-notice.js';
+import { MOVE_SKIP_NOTICE } from '../src/core/curation-move-skip.js';
 import { PROJECT_PATHS, makeV2LedgerRow, makeV2LogRow, toJsonl } from './decisions/curation-fixtures.js';
 import * as p from '@clack/prompts';
 import {
@@ -6229,6 +6230,159 @@ describe('curation-move: the shim that moves the old ledger folder (#529)', { ti
     });
   });
 
+  describe('a move that git blocks: tracked files or no answer from git', () => {
+    const CLEAN = { status: 0, stdout: '', stderr: '' };
+    const TRACKED_LOG = 'Curation move skipped: git tracks files in .devflow/learning/ or .devflow/curation/; not tried again until the next session start';
+    const UNKNOWN_LOG = 'Curation move skipped: git did not answer; not tried again until the next session start';
+    const trackedMarkerOf = (at: string): string => getCurationMoveMarkerPath(homeDir, at, 'tracked');
+    const unknownMarkerOf = (at: string): string => getCurationMoveMarkerPath(homeDir, at, 'unknown');
+
+    /** Run git in `at`, with an identity and no global configuration. */
+    function gitIn(at: string, args: string[]): void {
+      const res = spawnSync('git', ['-c', 'init.defaultBranch=main', '-c', 'user.email=t@t', '-c', 'user.name=t', ...args], {
+        cwd: at,
+        encoding: 'utf-8',
+        env: { ...process.env, HOME: homeDir, GIT_CONFIG_NOSYSTEM: '1' },
+      });
+      if (res.status !== 0) throw new Error(`git ${args.join(' ')} failed: ${res.stderr}`);
+    }
+
+    /** Make `at` a repository that tracks `.devflow/learning/notes.txt`, which `seedOld` wrote. */
+    function trackNotes(at: string): void {
+      gitIn(at, ['init', '-q']);
+      gitIn(at, ['add', '-f', '--', `.devflow/${OLD}/notes.txt`]);
+    }
+
+    /** A PATH with the real node and a `git` that always exits non-zero, and no other command. */
+    function pathWithFailingGit(): string {
+      const bin = path.join(base, 'failing-git-bin');
+      fs.mkdirSync(bin);
+      const failing = ['/usr/bin/false', '/bin/false'].find((candidate) => fs.existsSync(candidate));
+      if (failing === undefined) throw new Error('no false program on this machine');
+      fs.symlinkSync(failing, path.join(bin, 'git'));
+      fs.symlinkSync(process.execPath, path.join(bin, 'node'));
+      return bin;
+    }
+
+    /** The project as the move could change it: every path below the root with its bytes, `.git` left out. */
+    function projectTree(at: string): Record<string, string> {
+      const tree: Record<string, string> = {};
+      const walk = (dir: string): void => {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          if (dir === at && entry.name === '.git') continue;
+          const abs = path.join(dir, entry.name);
+          tree[path.relative(at, abs)] = entry.isDirectory() ? '' : fs.readFileSync(abs, 'latin1');
+          if (entry.isDirectory()) walk(abs);
+        }
+      };
+      walk(at);
+      return tree;
+    }
+
+    it('git tracks a file of the old folder: one fixed log line, the tracked marker, the reason set, nothing in the project changed', () => {
+      seedOld(root);
+      trackNotes(root);
+      const before = projectTree(root);
+
+      const res = run('set -e; df_curation_move "$ROOT"; printf "%s" "$DF_CURATION_MOVE_SKIPPED"');
+
+      expect(res).toEqual({ status: 0, stdout: 'tracked', stderr: '' });
+      expect(logLines()).toEqual([TRACKED_LOG]);
+      expect(fs.existsSync(trackedMarkerOf(root)), 'the marker key is the TypeScript key').toBe(true);
+      expect(fs.existsSync(markerOf(root)), 'a skip is not a refusal').toBe(false);
+      expect(fs.existsSync(unknownMarkerOf(root))).toBe(false);
+      expect(projectTree(root)).toEqual(before);
+      expect(fs.existsSync(path.join(homeDir, '.devflow', `.curation-move-${store.curationMoveLockKey(root)}.lock`))).toBe(false);
+    });
+
+    it('a marked root forks nothing and logs nothing at the next event, and a session start looks once more', () => {
+      seedOld(root);
+      trackNotes(root);
+      run('df_curation_move "$ROOT"');
+
+      expect(run('df_curation_move "$ROOT"; printf "%s" "$DF_CURATION_MOVE_SKIPPED"', NO_FORK)).toEqual({ status: 0, stdout: '', stderr: '' });
+      expect(logLines()).toEqual([TRACKED_LOG]);
+
+      expect(run('df_curation_move "$ROOT" retry; printf "%s" "$DF_CURATION_MOVE_SKIPPED"').stdout).toBe('tracked');
+      expect(logLines()).toEqual([TRACKED_LOG, TRACKED_LOG]);
+      expect(fs.existsSync(trackedMarkerOf(root))).toBe(true);
+    });
+
+    it('a session start moves the folder once git tracks nothing in it', () => {
+      seedOld(root);
+      trackNotes(root);
+      run('df_curation_move "$ROOT"');
+      gitIn(root, ['rm', '-q', '--cached', '--', `.devflow/${OLD}/notes.txt`]);
+
+      expect(run('df_curation_move "$ROOT" retry; printf "%s" "$DF_CURATION_MOVE_SKIPPED"')).toEqual(CLEAN);
+
+      expect(fs.existsSync(trackedMarkerOf(root))).toBe(false);
+      expect(fs.existsSync(oldOf(root))).toBe(false);
+      expect(fs.readFileSync(path.join(newOf(root), 'notes.txt'), 'utf-8')).toBe(SEEDED['notes.txt']);
+    });
+
+    it('a .git entry stands and git does not answer: one fixed log line, the unknown marker, the reason set, nothing changed', () => {
+      seedOld(root);
+      fs.mkdirSync(path.join(root, '.git'));
+      const before = projectTree(root);
+
+      const res = run('set -e; df_curation_move "$ROOT"; printf "%s" "$DF_CURATION_MOVE_SKIPPED"', { PATH: pathWithFailingGit() });
+
+      expect(res).toEqual({ status: 0, stdout: 'unknown', stderr: '' });
+      expect(logLines()).toEqual([UNKNOWN_LOG]);
+      expect(fs.existsSync(unknownMarkerOf(root))).toBe(true);
+      expect(fs.existsSync(trackedMarkerOf(root))).toBe(false);
+      expect(fs.existsSync(markerOf(root))).toBe(false);
+      expect(projectTree(root)).toEqual(before);
+
+      expect(run('df_curation_move "$ROOT"', NO_FORK)).toEqual(CLEAN);
+      expect(logLines()).toEqual([UNKNOWN_LOG]);
+    });
+
+    it('a project with no .git entry moves as before and runs no git', () => {
+      seedOld(root);
+      const gitLog = path.join(base, 'git.log');
+      const shimDir = path.join(base, 'shim');
+      fs.mkdirSync(shimDir);
+      writeFakeExecutable(path.join(shimDir, 'git'), `#!/bin/bash\necho git >> "${gitLog}"\nexit 2\n`);
+
+      const res = run('df_curation_move "$ROOT"; printf "%s" "$DF_CURATION_MOVE_SKIPPED"', { PATH: `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}` });
+
+      expect(res).toEqual(CLEAN);
+      expect(fs.existsSync(gitLog)).toBe(false);
+      expect(fs.existsSync(oldOf(root))).toBe(false);
+      expect(fs.existsSync(newOf(root))).toBe(true);
+    });
+
+    it('the reason is empty at the start of every call', () => {
+      expect(run('DF_CURATION_MOVE_SKIPPED=stale; df_curation_move "$ROOT"; printf "[%s]" "$DF_CURATION_MOVE_SKIPPED"', NO_FORK).stdout).toBe('[]');
+      seedOld(root);
+      expect(run('DF_CURATION_MOVE_SKIPPED=stale; df_curation_move "$ROOT"; printf "[%s]" "$DF_CURATION_MOVE_SKIPPED"').stdout).toBe('[]');
+    });
+
+    it('a link at a skip marker name counts as a marker: nothing is forked and nothing is written through it', () => {
+      seedOld(root);
+      trackNotes(root);
+      const outside = path.join(base, 'outside.txt');
+      fs.writeFileSync(outside, 'untouched\n');
+      fs.symlinkSync(outside, trackedMarkerOf(root));
+
+      expect(run('df_curation_move "$ROOT"', NO_FORK)).toEqual(CLEAN);
+
+      expect(fs.readFileSync(outside, 'utf-8')).toBe('untouched\n');
+      expect(logLines()).toEqual([]);
+    });
+
+    it('a skip marker that cannot be written (no logs folder) is ignored', () => {
+      seedOld(root);
+      trackNotes(root);
+      fs.rmSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+
+      expect(run('set -e; df_curation_move "$ROOT"; echo after')).toEqual({ status: 0, stdout: 'after\n', stderr: '' });
+      expect(logLines()).toEqual([TRACKED_LOG]);
+    });
+  });
+
   describe('the log line holds no control character, whatever node printed', () => {
     // A name read from the repository can reach node's answer. The json-helper scrubs it; the
     // shim strips again with builtin expansion, so a node that did not scrub still cannot put an
@@ -6319,6 +6473,19 @@ describe('curation-move: the shim that moves the old ledger folder (#529)', { ti
         for (const at of ROOTS) {
           const res = run('df_curation_move_key "$ROOT" && _df_cm_markers && printf %s "$DF_CM_SKIP_MARKER"', { ...env, ROOT: at, ...NO_FORK });
           expect({ at, marker: res.stdout, status: res.status }).toEqual({ at, marker: getCurationMoveMarkerPath(homeDir, at), status: 0 });
+        }
+      });
+    }
+
+    for (const [label, env] of LOCALES) {
+      it(`the shim's skip markers are the files getCurationMoveMarkerPath names, under ${label}`, () => {
+        for (const at of ROOTS) {
+          const res = run('df_curation_move_key "$ROOT" && _df_cm_markers && printf "%s\\n%s" "$DF_CM_TRACKED_MARKER" "$DF_CM_UNKNOWN_MARKER"', { ...env, ROOT: at, ...NO_FORK });
+          expect({ at, markers: res.stdout, status: res.status }).toEqual({
+            at,
+            markers: `${getCurationMoveMarkerPath(homeDir, at, 'tracked')}\n${getCurationMoveMarkerPath(homeDir, at, 'unknown')}`,
+            status: 0,
+          });
         }
       });
     }
@@ -6656,3 +6823,116 @@ describe('TP-9: the hooks move the old ledger folder before any creator makes th
     }
   });
 });
+
+// =============================================================================
+// The session start tells the user when the move of the old folder is skipped
+//
+// The move leaves a project alone when git tracks files in `.devflow/learning/` or
+// `.devflow/curation/`, or when git does not answer. The user cannot see the hook log, so
+// the session start puts one fixed notice into the context of a session that starts fresh.
+// =============================================================================
+
+describe('session-start-context: the notice of a skipped move', { timeout: GIT_FIXTURE_TIMEOUT_MS }, () => {
+  const SESSION_CONTEXT = path.join(HOOKS_DIR, 'session-start-context');
+  const OLD = LEGACY_NAMES.folder;
+  const NEW = CURATION_DIR_NAME;
+  const writeFakeExecutable = useWarmFakeExecutables();
+
+  let base: string;
+  let homeDir: string;
+  let main: string;
+
+  beforeEach(() => {
+    base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-cmove-notice-')));
+    homeDir = path.join(base, 'home');
+    fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+    main = path.join(base, 'main');
+    initCommittedRepo(main);
+    fs.mkdirSync(path.join(main, '.devflow', OLD), { recursive: true });
+    fs.writeFileSync(path.join(main, '.devflow', OLD, 'notes.txt'), 'kept\n');
+    fs.writeFileSync(path.join(main, '.devflow', OLD, '.pending-turns.jsonl'), '{"role":"user","content":"a","ts":1}\n');
+  });
+
+  afterEach(() => {
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+
+  const trackNotes = (): void => {
+    execSync(`git add -f -- .devflow/${OLD}/notes.txt`, { cwd: main, stdio: 'pipe' });
+  };
+
+  /** A PATH whose `git` fails for `ls-files` and runs the real git for everything else. */
+  function pathWithGitThatFailsToList(): string {
+    const realGit = execSync('command -v git', { encoding: 'utf-8', shell: '/bin/bash' }).trim();
+    const shimDir = path.join(base, 'git-shim');
+    fs.mkdirSync(shimDir);
+    writeFakeExecutable(path.join(shimDir, 'git'), `#!/bin/bash\nfor a in "$@"; do\n  if [ "$a" = ls-files ]; then exit 2; fi\ndone\nexec "${realGit}" "$@"\n`);
+    return `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}`;
+  }
+
+  /** The additionalContext a session of `source` starts with. */
+  function contextOf(source: string, extraEnv: Record<string, string> = {}): string {
+    const res = runHook(SESSION_CONTEXT, { cwd: main, source }, homeDir, extraEnv);
+    expect(res.exitCode, res.stderr).toBe(0);
+    return res.stdout.trim() === '' ? '' : (JSON.parse(res.stdout).hookSpecificOutput.additionalContext as string);
+  }
+
+  const oldFolderIntact = (): void => {
+    expect(fs.readFileSync(path.join(main, '.devflow', OLD, 'notes.txt'), 'utf-8')).toBe('kept\n');
+    expect(fs.existsSync(path.join(main, '.devflow', NEW)), 'no new folder beside the old one').toBe(false);
+  };
+
+  it('git tracks a file of the old folder: the context holds the fixed notice, and the old folder stays', () => {
+    trackNotes();
+
+    const context = contextOf('startup');
+
+    expect(context).toContain(`Devflow notice: tell the user once, in one short message alongside your answer: ${MOVE_SKIP_NOTICE.tracked}`);
+    expect(context).not.toContain(MOVE_SKIP_NOTICE.unknown);
+    oldFolderIntact();
+  });
+
+  it('git does not answer: the context holds the other fixed notice, and the old folder stays', () => {
+    const context = contextOf('startup', { PATH: pathWithGitThatFailsToList() });
+
+    expect(context).toContain(`Devflow notice: tell the user once, in one short message alongside your answer: ${MOVE_SKIP_NOTICE.unknown}`);
+    oldFolderIntact();
+  });
+
+  it.each(['resume', 'clear'])('a session that %s gets the notice', (source) => {
+    trackNotes();
+    expect(contextOf(source)).toContain(MOVE_SKIP_NOTICE.tracked);
+  });
+
+  it('a compaction repeats nothing', () => {
+    trackNotes();
+    expect(contextOf('compact')).not.toContain('did not move the curation data');
+  });
+
+  it('a project that moves cleanly gets no notice', () => {
+    const context = contextOf('startup');
+
+    expect(context).not.toContain('did not move the curation data');
+    expect(fs.existsSync(path.join(main, '.devflow', OLD))).toBe(false);
+    expect(fs.existsSync(path.join(main, '.devflow', NEW))).toBe(true);
+  });
+
+  it('a session start looks again after the files are untracked, and moves the folder', () => {
+    trackNotes();
+    expect(contextOf('startup')).toContain(MOVE_SKIP_NOTICE.tracked);
+    execSync(`git rm -q --cached -- .devflow/${OLD}/notes.txt`, { cwd: main, stdio: 'pipe' });
+
+    const context = contextOf('startup');
+
+    expect(context).not.toContain('did not move the curation data');
+    expect(fs.existsSync(path.join(main, '.devflow', OLD))).toBe(false);
+    expect(fs.readFileSync(path.join(main, '.devflow', NEW, 'notes.txt'), 'utf-8')).toBe('kept\n');
+  });
+
+  it('holds the same words as the TypeScript notice, with nothing interpolated', () => {
+    const hook = fs.readFileSync(SESSION_CONTEXT, 'utf-8');
+    expect(hook).toContain(MOVE_SKIP_NOTICE.tracked);
+    expect(hook).toContain(MOVE_SKIP_NOTICE.unknown);
+  });
+});
+

@@ -301,6 +301,19 @@ describe('the old ledger folder: the pointer and the refused line, only in the e
     expect(await rendered(data)).toBe(REFUSED);
   });
 
+  it.each([
+    ['tracked', 'Curation: move skipped, git tracks files in .devflow/learning/ or .devflow/curation/'],
+    ['unknown', 'Curation: move skipped, git did not answer'],
+  ] as const)('shows the skipped line when the shim left the %s marker for this root', async (reason, line) => {
+    fs.mkdirSync(oldDir(), { recursive: true });
+    fs.writeFileSync(getCurationMoveMarkerPath(home, root, reason), '');
+
+    const data = await gatherLedgerCurationCounts(root, { home });
+
+    expect(data).toEqual({ decisions: 0, pitfalls: 0, move: reason });
+    expect(await rendered(data)).toBe(line);
+  });
+
   it('a busy marker is not a refusal: the HUD still shows the pointer', async () => {
     fs.mkdirSync(oldDir(), { recursive: true });
     fs.writeFileSync(path.join(home, '.devflow', 'logs', `curation-move.${curationMoveMarkerKey(root)}.busy`), '');

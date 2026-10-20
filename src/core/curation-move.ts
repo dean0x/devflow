@@ -35,7 +35,10 @@ export interface LedgerMoveOptions {
  * `moveLedger`'s answer. `none`: no old folder, nothing was locked or created.
  * `busy`: a lock or a fresh claim is held, try again at the next event; `reason` is
  * `claim` when a fresh queue claim held it, which can last 15 minutes, and is absent
- * when a lock or a folder that changed held it. `moved`: the
+ * when a lock or a folder that changed held it. `skipped`: the move left the project
+ * alone and changed nothing, because git tracks files in one of the two folders
+ * (`reason` `tracked`) or because a `.git` entry stands and git did not answer
+ * (`reason` `unknown`). `moved`: the
  * folder was renamed whole (`whole-folder`), the new folder won and the old one is
  * the backup (`kept-new`), or the old ledger set moved into the new folder and the
  * old one is the backup (`moved-in`); `backup` names the backup folder under
@@ -44,6 +47,7 @@ export interface LedgerMoveOptions {
 export type LedgerMoveOutcome =
   | { readonly state: 'none'; readonly notes: readonly string[] }
   | { readonly state: 'busy'; readonly reason?: 'claim'; readonly notes: readonly string[] }
+  | { readonly state: 'skipped'; readonly reason: 'tracked' | 'unknown'; readonly notes: readonly string[] }
   | {
     readonly state: 'moved';
     readonly mode: 'whole-folder' | 'kept-new' | 'moved-in';
@@ -89,7 +93,7 @@ export type BackupQueueFilesError = CurationStoreError & { readonly path?: strin
 export interface CurationMoveModule {
   /**
    * Move the old ledger folder to the new name, once, or merge it into a new folder
-   * that already exists. Never waits on a lock. Error kinds: `refused` (the root or a
+   * that already exists, or leave the project alone when git tracks files in either folder. Never waits on a lock. Error kinds: `refused` (the root or a
    * link among the set is unsafe; nothing was changed), `io-error`.
    */
   moveLedger(root: string, opts?: LedgerMoveOptions): CurationStoreResult<LedgerMoveOutcome>;

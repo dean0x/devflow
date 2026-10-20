@@ -31,6 +31,7 @@ import {
   type ProjectMoveOutcome,
 } from '../src/cli/commands/curation-move-step.js';
 import { loadCurationMove } from '../src/core/curation-move.js';
+import { MOVE_SKIP_NOTICE } from '../src/core/curation-move-skip.js';
 import { LEDGER_ROOT_TIMEOUT_MS, type LedgerRootLookup } from '../src/core/ledger-root.js';
 import { realGlobalTuningMoveIO, realProjectLedgerMoveIO } from '../src/cli/commands/curation-move-io.js';
 import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
@@ -50,6 +51,8 @@ const NOW = 1_700_000_000_000;
 const NONE: LedgerMoveOutcome = { state: 'none', notes: [] };
 const BUSY: LedgerMoveOutcome = { state: 'busy', notes: [] };
 const BUSY_CLAIM: LedgerMoveOutcome = { state: 'busy', reason: 'claim', notes: [] };
+const SKIPPED_TRACKED: LedgerMoveOutcome = { state: 'skipped', reason: 'tracked', notes: [] };
+const SKIPPED_UNKNOWN: LedgerMoveOutcome = { state: 'skipped', reason: 'unknown', notes: [] };
 const MOVED: LedgerMoveOutcome = { state: 'moved', mode: 'whole-folder', backup: null, rendered: true, notes: [] };
 const SWEPT: LedgerSweepOutcome = { state: 'swept', files: 1, merged: 2, overflowed: 0, notes: [] };
 
@@ -327,6 +330,35 @@ describe('moveProjectLedgers: the outcome of each project', () => {
     expect(report.lines[0]).toContain('/w/a');
   });
 
+  it.each([
+    ['tracked', SKIPPED_TRACKED],
+    ['unknown', SKIPPED_UNKNOWN],
+  ] as const)('a project that the store skipped for the reason %s is skipped, is not swept, and its line is the fixed notice', async (reason, answer) => {
+    const { io, rec } = fakeIO({ moves: { '/w/a': ok(answer) }, devflowEntries: { '/w/a': ['learning.backup-20260101'] } });
+    const report = reportOf(await moveProjectLedgers(options({ projectRoots: ['/w/a'] }), io));
+    expect(report.outcomes[0]).toEqual({ kind: 'skipped', root: '/w/a', reason });
+    expect(report.movedCount).toBe(0);
+    expect(report.lines).toEqual([`Ledger move skipped for /w/a: ${MOVE_SKIP_NOTICE[reason]}`]);
+    expect(rec.order, 'a skipped project is not swept').toEqual(['move:/w/a']);
+  });
+
+  it('runs the other projects when one is skipped, and tells the move notice only for those that moved', async () => {
+    const { io } = fakeIO({ moves: { '/w/a': ok(SKIPPED_TRACKED), '/w/b': ok(MOVED), '/w/c': ok(SKIPPED_UNKNOWN) } });
+    const quiet: GlobalTuningMoveIO = { kindOf: async () => 'absent', renameIfAbsent: async () => ({ state: 'renamed' }) };
+    const report = await runInitCurationMove(options({ projectRoots: ['/w/a', '/w/b', '/w/c'] }), { ledger: io, tuning: quiet });
+    expect(report.movedCount).toBe(1);
+    expect(report.notice).toBe(moveNotice(1));
+    expect(report.lines).toEqual([
+      `Ledger move skipped for /w/a: ${MOVE_SKIP_NOTICE.tracked}`,
+      `Ledger move skipped for /w/c: ${MOVE_SKIP_NOTICE.unknown}`,
+    ]);
+  });
+
+  it('moveLedgerRoot answers the skip, for the curation command', async () => {
+    const { io } = fakeIO({ moves: { '/w/a': ok(SKIPPED_TRACKED) } });
+    expect(await moveLedgerRoot('/w/a', { homeDir: HOME, machineDir: MACHINE }, io)).toEqual({ kind: 'skipped', root: '/w/a', reason: 'tracked' });
+  });
+
   it('prints one line for a refused project and names the reason', async () => {
     const { io } = fakeIO({ moves: { '/w/a': fail('refused', '/w/a/.devflow/learning is a symbolic link') } });
     const report = reportOf(await moveProjectLedgers(options({ projectRoots: ['/w/a'] }), io));
@@ -525,6 +557,12 @@ describe('moveLedgerRoot: the move one root gets from configure and the toggles'
       'Ledger move skipped for /w/a: a queue claim holds the move. The project moves after Curate finishes.',
     ]);
     expect(describeOutcome({ kind: 'refused', root: '/w/a', message: 'a link' })).toEqual([expect.stringContaining('refused')]);
+    expect(describeOutcome({ kind: 'skipped', root: '/w/a', reason: 'git-root-timed-out' })).toEqual([
+      'Ledger move skipped for /w/a: git did not answer in time. Nothing was moved. The next init tries again.',
+    ]);
+    expect(describeOutcome({ kind: 'skipped', root: '/w/a', reason: 'tracked' })).toEqual([
+      `Ledger move skipped for /w/a: ${MOVE_SKIP_NOTICE.tracked}`,
+    ]);
     expect(describeOutcome({ kind: 'error', root: '/w/a', message: 'x' })).toHaveLength(1);
     expect(describeOutcome({ kind: 'unchanged', root: '/w/a', sweep: null })).toEqual([]);
   });
@@ -537,6 +575,8 @@ describe('moveLedgerRoot: the move one root gets from configure and the toggles'
       { kind: 'refused', root, message },
       { kind: 'error', root, message },
       { kind: 'skipped', root, reason: 'git-root-timed-out' },
+      { kind: 'skipped', root, reason: 'tracked' },
+      { kind: 'skipped', root, reason: 'unknown' },
       { kind: 'unchanged', root, sweep: { state: 'failed', message } },
       { kind: 'unchanged', root, sweep: { state: 'busy' } },
       { kind: 'moved', root, mode: 'moved-in', backup: null, rendered: false, notes: [], sweep: { state: 'failed', message } },

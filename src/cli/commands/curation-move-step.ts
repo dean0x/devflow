@@ -38,6 +38,7 @@ import * as path from 'path';
 import { pooled } from '../../core/pool.js';
 import { describeEchoedValue } from '../../core/echo-value.js';
 import type { LedgerRootLookup } from '../../core/ledger-root.js';
+import { MOVE_SKIP_NOTICE, type MoveSkipReason } from '../../core/curation-move-skip.js';
 import { CURATION_DIR_NAME, CURATION_TUNING_FILE_NAME, LEGACY_NAMES, getGlobalCurateTuningConfigPath } from '../../core/project-paths.js';
 import type {
   CurationMoveModule,
@@ -106,9 +107,11 @@ export type BackupSweepReport =
  * nothing moved. `busy`: a lock is held and the project moves at its next event, or, with
  * `reason` `claim`, a queue claim holds the move and it runs after Curate finishes.
  * `refused`: a link or another unsafe state; nothing changed. `error`: an I/O failure;
- * nothing was copied and the old folder is whole. `skipped`: the project's git root
- * lookup did not answer in time, so its ledger root is unknown and nothing was tried;
- * `root` is the project root init was given.
+ * nothing was copied and the old folder is whole. `skipped`: nothing was moved or changed.
+ * With `reason` `git-root-timed-out`, the project's git root lookup did not answer in
+ * time, so its ledger root is unknown and nothing was tried, and `root` is the project
+ * root init was given. With `reason` `tracked`, git tracks files in one of the two data
+ * folders. With `reason` `unknown`, a `.git` entry stands and git did not answer.
  */
 export type ProjectMoveOutcome =
   | {
@@ -124,7 +127,7 @@ export type ProjectMoveOutcome =
   | { readonly kind: 'busy'; readonly root: string; readonly reason?: 'claim' }
   | { readonly kind: 'refused'; readonly root: string; readonly message: string }
   | { readonly kind: 'error'; readonly root: string; readonly message: string }
-  | { readonly kind: 'skipped'; readonly root: string; readonly reason: 'git-root-timed-out' };
+  | { readonly kind: 'skipped'; readonly root: string; readonly reason: 'git-root-timed-out' | MoveSkipReason };
 
 export interface ProjectLedgerMoveReport {
   /** One outcome per target, in target order. */
@@ -271,6 +274,7 @@ async function moveOne(root: string, opts: SharedMoveOptions, io: SharedMoveIO):
   }
   const answer: LedgerMoveOutcome = moved.value;
   if (answer.state === 'busy') return answer.reason === 'claim' ? { kind: 'busy', root, reason: 'claim' } : { kind: 'busy', root };
+  if (answer.state === 'skipped') return { kind: 'skipped', root, reason: answer.reason };
 
   const sweep = await sweepIfBackup(root, io, storeOpts);
   if (answer.state === 'moved') {
@@ -345,10 +349,10 @@ export function describeOutcome(outcome: ProjectMoveOutcome): string[] {
       );
       break;
     case 'skipped':
-      lines.push(
-        `Ledger move skipped for ${describeMoveText(outcome.root)}: git did not answer in time. ` +
-        'Nothing was moved. The next init tries again.',
-      );
+      lines.push(outcome.reason === 'git-root-timed-out'
+        ? `Ledger move skipped for ${describeMoveText(outcome.root)}: git did not answer in time. ` +
+          'Nothing was moved. The next init tries again.'
+        : `Ledger move skipped for ${describeMoveText(outcome.root)}: ${MOVE_SKIP_NOTICE[outcome.reason]}`);
       break;
     case 'moved':
       if (!outcome.rendered) {

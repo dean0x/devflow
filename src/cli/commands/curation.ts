@@ -25,7 +25,7 @@ import { drainCurationQueue, drainDisabledCurationQueue } from '../../core/curat
 import { firstSymbolicLink } from '../../core/linked-path.js';
 import { formatRefusedDrain } from '../../core/queue-drain.js';
 import { describeMoveText, describeOutcome } from './curation-move-step.js';
-import { formatMoveNotice, gatherMoveNotice } from '../../core/curation-move-notice.js';
+import { describeMoveNotice, gatherMoveNotice } from '../../core/curation-move-notice.js';
 import { runSharedMove, type SharedMoveResult } from './curation-move-io.js';
 import {
   formatCurationStoreUnavailable,
@@ -157,16 +157,16 @@ function moveProblemLines(outcome: SharedMoveResult): string[] {
 
 /**
  * The line a read-only command prints instead of reading, for a project whose ledger
- * still sits in the old folder: the pointer, or the refused line when the hook's move
- * left a marker for this root. The HUD makes the same two existence tests and prints the
- * same words (`gatherMoveNotice`). Null when the new folder is there, or the old one is
- * not. The old ledger is never opened.
+ * still sits in the old folder: the pointer, the refused line when the hook's move left
+ * a marker for this root, or the notice of a skipped move. The HUD makes the same
+ * existence tests and prints the same words, in its short form (`gatherMoveNotice`).
+ * Null when the new folder is there, or the old one is not. The old ledger is never opened.
  */
 async function pendingMoveLine(ledgerRoot: string): Promise<string | null> {
   const newFolderPresent = await isDirectory(getCurationDir(ledgerRoot)).catch(() => false);
   if (newFolderPresent) return null;
   const notice = gatherMoveNotice(ledgerRoot, os.homedir());
-  return notice === null ? null : formatMoveNotice(notice);
+  return notice === null ? null : describeMoveNotice(notice);
 }
 
 /**

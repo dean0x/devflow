@@ -229,6 +229,8 @@ describe('checkTrackedAreas', () => {
 
   it('answers unknown when a .git entry stands and is not a repository', () => {
     fs.mkdirSync(path.join(root, '.git'));
+    // No repository above the temp tree can answer in its place.
+    vi.stubEnv('GIT_CEILING_DIRECTORIES', tmp);
     expect(leaf.checkTrackedAreas(root)).toBe('unknown');
   });
 

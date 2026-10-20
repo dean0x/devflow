@@ -259,7 +259,9 @@ CURATION_ENABLED="$_QG_CURATION"
 # switch is on, because the old folder holds the project's decisions either way. The
 # `retry` word clears an earlier refusal's marker and an earlier busy marker (a fresh
 # queue claim held the move), so a refused or claimed root is looked at once per
-# session. A held or refused move leaves the old folder in place.
+# session. A held, refused or skipped move leaves the old folder in place. A skipped
+# move (git tracks files in a data folder, or git did not answer) sets
+# DF_CURATION_MOVE_SKIPPED, and Section 4b tells the user.
 if [ -n "$PROJECT_OK" ]; then
   df_curation_move "$LEDGER_ROOT" retry 2>/dev/null || true
 fi
@@ -862,6 +864,39 @@ ${LEGACY_SECTION}"
       esac
     fi
   fi
+fi
+
+# --- Section 4b: Curation move skipped notice ---
+# The move of the old curation folder leaves a project alone when git tracks files in
+# `.devflow/learning/` or `.devflow/curation/`, or when git does not answer
+# (curation-move sets DF_CURATION_MOVE_SKIPPED at the call above). The user cannot see the
+# hook log, so one fixed line goes into the context on a session that starts fresh, and the
+# model tells the user once. Each line is a constant: a single-quoted string that
+# interpolates nothing, so no repository content reaches the model through it. Its words
+# are MOVE_SKIP_NOTICE in src/core/curation-move-skip.ts (tests/shell-hooks.test.ts holds
+# the two equal). A compaction repeats nothing.
+MOVE_SKIP_SECTION=""
+case "${DF_CURATION_MOVE_SKIPPED:-}" in
+  tracked)
+    MOVE_SKIP_SECTION='Devflow notice: tell the user once, in one short message alongside your answer: devflow did not move the curation data of this project from .devflow/learning/ to .devflow/curation/, because git tracks files in one of these folders. To find them, run `git ls-files .devflow`. Untrack them with `git rm --cached`, and delete them if you did not make them. Run these commands in the main checkout.'
+    ;;
+  unknown)
+    MOVE_SKIP_SECTION='Devflow notice: tell the user once, in one short message alongside your answer: devflow did not move the curation data of this project from .devflow/learning/ to .devflow/curation/, because git did not answer. The move runs again at the next session start.'
+    ;;
+esac
+if [ -n "$MOVE_SKIP_SECTION" ]; then
+  case "$SESSION_SOURCE" in
+    startup|resume|clear)
+      dbg "curation move skipped notice emitted"
+      if [ -n "$CONTEXT" ]; then
+        CONTEXT="${CONTEXT}
+
+${MOVE_SKIP_SECTION}"
+      else
+        CONTEXT="$MOVE_SKIP_SECTION"
+      fi
+      ;;
+  esac
 fi
 
 # --- Section 5: Compaction resume directive ---
