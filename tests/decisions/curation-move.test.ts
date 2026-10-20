@@ -1976,8 +1976,8 @@ describe('the queue rule — a queue file that git tracks is not merged', () => 
   it.each([
     ['git is not installed', 'git is not installed', { error: Object.assign(new Error('spawn git ENOENT'), { code: 'ENOENT' }), status: null }],
     ['git times out', 'git timed out', { error: Object.assign(new Error('spawnSync git ETIMEDOUT'), { code: 'ETIMEDOUT' }), status: null }],
-    ['git fails', 'git ls-files exited with 1', { error: undefined, status: 1, stdout: '', stderr: 'fatal: something else\n' }],
-    ['git is refused for the repository owner', 'git ls-files exited with 128', { error: undefined, status: 128, stdout: '', stderr: 'fatal: detected dubious ownership in repository\n' }],
+    ['git fails', 'git exited with 1 when it listed the tracked files', { error: undefined, status: 1, stdout: '', stderr: 'fatal: something else\n' }],
+    ['git is refused for the repository owner', 'git exited with 128 when it listed the tracked files', { error: undefined, status: 128, stdout: '', stderr: 'fatal: detected dubious ownership in repository\n' }],
   ])('merges nothing from the folder when %s, says so, and the next pass retries', (_name, reason, answer) => {
     seedKeptNew(turns(1, 4), turns(10, 11));
     const real = nodeChildProcess.spawnSync;

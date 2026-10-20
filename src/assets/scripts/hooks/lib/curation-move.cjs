@@ -499,7 +499,7 @@ function listTrackedDevflowFiles(root) {
     return { ok: false, reason: `git could not run (${code || 'unknown error'})` };
   }
   if (run.status === 128 && /not a git repository/i.test(run.stderr || '')) return { ok: true, tracked: new Set() };
-  if (run.status !== 0) return { ok: false, reason: `git ls-files exited with ${run.status}` };
+  if (run.status !== 0) return { ok: false, reason: `git exited with ${run.status} when it listed the tracked files` };
   return { ok: true, tracked: new Set(String(run.stdout).split('\0').filter(Boolean)) };
 }
 

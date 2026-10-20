@@ -742,6 +742,34 @@ describe('put-observation op', { timeout: 30_000 }, () => {
     );
   });
 
+  it('prints no control byte from an unknown key, an escape sequence or a newline, and keeps one problem per line', () => {
+    seedCurationTree(dir, { log: [makeV2LogRow()] });
+    const run = putOp(dir, 'reinforce', { id: 'obs_store_one', '\u001b[31mred\u001b[0m': 1, 'two\nlines\u0007': 2 });
+
+    expect(run.code).toBe(1);
+    // eslint-disable-next-line no-control-regex
+    expect(run.stderr).not.toMatch(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/);
+    const lines = run.stderr.split('\n');
+    expect(lines).toHaveLength(4);
+    expect(lines[0]).toBe('put-observation: the input has 2 problems; nothing was written');
+    expect(lines[1]).toMatch(/^ {2}".*red.*": is not a known key$/);
+    expect(lines[2]).toMatch(/^ {2}".*lines.*": is not a known key$/);
+    expect(lines[3]).toBe('');
+  });
+
+  it('prints at most 200 lines of a long refusal and counts the rest in one last line', () => {
+    seedCurationTree(dir, { log: [makeV2LogRow()] });
+    const unknown = Object.fromEntries(Array.from({ length: 300 }, (_, i) => [`key_${i}`, i]));
+    const run = putOp(dir, 'reinforce', { id: 'obs_store_one', ...unknown });
+
+    expect(run.code).toBe(1);
+    const lines = run.stderr.split('\n');
+    expect(lines).toHaveLength(202);
+    expect(lines[0]).toBe('put-observation: the input has 300 problems; nothing was written');
+    expect(lines[200]).toBe('... 101 more lines');
+    expect(lines[201]).toBe('');
+  });
+
   it('names restore first for an observation whose entries are all inactive', () => {
     seedCurationTree(dir, { log: [makeV2LogRow()], ledger: [makeV2LedgerRow({ decisions_status: 'Retired' })] });
     expect(putOp(dir, 'reinforce', { id: 'obs_store_one' })).toEqual({

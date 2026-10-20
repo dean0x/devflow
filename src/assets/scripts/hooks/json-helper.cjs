@@ -192,8 +192,9 @@ function parseArgs(argList) {
  * Print a curation op's Result: `format(value)` and a newline on stdout, or the
  * error message and a newline on stderr. Returns the exit code for the op to set
  * as process.exitCode, so the process exits once, after the op has returned and
- * every lock it took is released. The error message is one line with no control
- * character: it may name a file the repository holds.
+ * every lock it took is released. The error message keeps its line structure (a
+ * refusal lists one problem per line), and each line has no control character, as it
+ * may name a file the repository holds. At most REFUSAL_MAX_LINES lines print.
  *
  * @param {{ ok: true, value: unknown } | { ok: false, error: { message: string } }} result
  * @param {(value: any) => string} format - the stdout text for the value
@@ -204,8 +205,26 @@ function emit(result, format) {
     process.stdout.write(`${format(result.value)}\n`);
     return 0;
   }
-  process.stderr.write(`${curation().store.singleLine(result.error.message)}\n`);
+  process.stderr.write(`${refusalText(result.error.message)}\n`);
   return 1;
+}
+
+/** The most lines of one refusal message that print. */
+const REFUSAL_MAX_LINES = 200;
+
+/**
+ * A refusal message with each line scrubbed (singleLine) and the line structure kept.
+ * Past REFUSAL_MAX_LINES lines, the rest become one `... N more lines` line.
+ *
+ * @param {string} message
+ * @returns {string}
+ */
+function refusalText(message) {
+  const { singleLine } = curation().store;
+  const lines = String(message).split('\n');
+  if (lines.length <= REFUSAL_MAX_LINES) return lines.map(line => singleLine(line)).join('\n');
+  const shown = lines.slice(0, REFUSAL_MAX_LINES).map(line => singleLine(line));
+  return [...shown, `... ${lines.length - REFUSAL_MAX_LINES} more lines`].join('\n');
 }
 
 /**
