@@ -96,9 +96,50 @@ export interface ShownEntry {
   readonly malformed?: { readonly ledger: number; readonly log: number };
 }
 
+/**
+ * Every kind a store or move function can refuse with: the `kind` literals in
+ * curation-store.cjs and curation-move.cjs, the refusal builders' kinds, and the
+ * `successor-` kinds the retire op derives from the kind of its successor lookup.
+ * A test keeps this list equal to the kinds those modules name.
+ */
+export const CURATION_STORE_ERROR_KINDS = [
+  'no-curation-dir',
+  'not-a-directory',
+  'not-a-file',
+  'busy',
+  'refused',
+  'io-error',
+  'invalid-input',
+  'invalid-key',
+  'not-found',
+  'duplicate-anchor',
+  'ledger-malformed',
+  'heartbeat-failed',
+  'restore-first',
+  'duplicate-log-id',
+  'cannot-reproject',
+  'not-in-log',
+  'already-promoted',
+  'v1-observation',
+  'type-mismatch',
+  'cited-numbers-exhausted',
+  'no-verify-ref',
+  'not-at-ref',
+  'git-failed',
+  'quote-not-found',
+  'already-inactive',
+  'already-active',
+  'successor-not-found',
+  'successor-duplicate-anchor',
+  'successor-inactive',
+] as const;
+
+/** The case a store function refused with. */
+export type CurationStoreErrorKind = (typeof CURATION_STORE_ERROR_KINDS)[number];
+
 /** Why a store function refused. `kind` names the case; `message` names the op and says what was written. */
 export interface CurationStoreError {
-  readonly kind: string;
+  readonly kind: CurationStoreErrorKind;
   readonly message: string;
 }
 

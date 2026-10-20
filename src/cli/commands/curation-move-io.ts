@@ -39,6 +39,13 @@ export function realProjectLedgerMoveIO(store: MoveStore): ProjectLedgerMoveIO {
   };
 }
 
+/**
+ * link(2) errors of a file system without hard links, where a rename stands in for the
+ * link. The store's claim and move code hold the same list as NO_HARD_LINK_CODES in
+ * curation-store.cjs; a test keeps the two equal.
+ */
+export const NO_HARD_LINK_CODES: readonly string[] = Object.freeze(['EPERM', 'ENOTSUP']);
+
 /** What sits at `target`, without following a link. */
 async function kindOf(target: string): Promise<TuningPathKind> {
   try {
@@ -52,8 +59,9 @@ async function kindOf(target: string): Promise<TuningPathKind> {
 /**
  * The real I/O of the global tuning file's rename. The rename never replaces a file:
  * a hard link makes the new name only when it is absent (EEXIST otherwise), then the
- * old name is removed. A file system that cannot link falls back to a rename after an
- * absence check, as the claim code does.
+ * old name is removed. A file system that cannot link (the NO_HARD_LINK_CODES errors)
+ * falls back to a rename after an absence check, as the claim code does. Any other
+ * link error fails the rename, EXDEV included: a rename fails the same way.
  */
 export function realGlobalTuningMoveIO(): GlobalTuningMoveIO {
   return {
@@ -64,7 +72,7 @@ export function realGlobalTuningMoveIO(): GlobalTuningMoveIO {
       } catch (error) {
         const code = (error as NodeJS.ErrnoException).code;
         if (code === 'EEXIST') return { state: 'exists' };
-        if (code !== 'EPERM' && code !== 'ENOTSUP' && code !== 'EXDEV') {
+        if (code === undefined || !NO_HARD_LINK_CODES.includes(code)) {
           return { state: 'failed', message: describeFailure(error) };
         }
         if ((await kindOf(to)) !== 'absent') return { state: 'exists' };
