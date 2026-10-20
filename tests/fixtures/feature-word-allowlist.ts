@@ -130,13 +130,6 @@ export const FEATURE_WORD_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
       'and the current one, so the user sees which folders git tracks.',
   },
   {
-    path: `${HOOKS}lib/tracked-areas.cjs`,
-    pattern: /\['learning', 'curation'\]/,
-    reason:
-      'The check lists the pre-rename data folder beside the current one, because git can track ' +
-      'either one and the move skips both.',
-  },
-  {
     path: HOOKS,
     pattern: /\bold learning\/ (?:ledger )?(?:folder|name)/,
     reason:

@@ -2,16 +2,19 @@
 //
 // Does git track any entry under one of devflow's data folders at a root? One
 // `git ls-files` call over a fixed set of pathspecs answers `tracked`, `untracked` or
-// `unknown`. The one-time ledger move asks it before it locks, reads or renames
-// anything: a folder that git tracks is the repository's content, so the move leaves
+// `unknown`. The one-time ledger move and the backup sweep ask it before they lock, read
+// or rename anything: a folder that git tracks is the repository's content, so they leave
 // it alone.
 //
-// DESIGN: a leaf. It loads node built-ins only and requires neither the store nor the
-// move module (the move requires the store; the store never requires the move), so
-// either of them, and a later check for another folder, can use it. No function here
-// prints or exits, and nothing throws: every failure is the answer `unknown`.
+// DESIGN: a leaf. It loads node built-ins and project-paths.cjs (which loads node
+// built-ins only) and requires neither the store nor the move module (the move requires
+// the store; the store never requires the move), so either of them, and a check for
+// another folder, can use it. No function here prints or exits, and nothing throws:
+// every failure is the answer `unknown`.
 //
-// The folders are listed once, in AREA_FOLDERS. A later change adds a folder there.
+// The folder names come from project-paths.cjs, which owns them: AREA_FOLDERS lists the
+// data folders and the backup prefix names the folders the move leaves behind. To cover
+// another folder, add its name to AREA_FOLDERS.
 //
 // The decision is the repository's index, never the disk. A root with no `.git` entry
 // (a file or a folder) is not a git working tree and gets no git call. A root with one
@@ -25,8 +28,10 @@ const childProcess = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-/** The folders under `.devflow` that the check covers. */
-const AREA_FOLDERS = Object.freeze(['learning', 'curation']);
+const { LEGACY_NAMES, CURATION_DIR_NAME } = require('./project-paths.cjs');
+
+/** The data folders under `.devflow` that the check covers, by the names the path helpers hold. */
+const AREA_FOLDERS = Object.freeze([LEGACY_NAMES.folder, CURATION_DIR_NAME]);
 
 /**
  * The spellings a case-folding file system opens as `.devflow` beyond ASCII letter case.
@@ -41,6 +46,9 @@ const DEVFLOW_SPELLINGS = Object.freeze(['.devflow', '.dev\u{FB02}ow']);
  * the file system or `core.ignorecase`, and each spelled every way DEVFLOW_SPELLINGS lists:
  *   - each folder of AREA_FOLDERS, as a literal path: an index entry at the folder, or
  *     anywhere below it, matches
+ *   - an entry named like a backup folder (`<backup prefix>*`), and every entry below one
+ *     (`<backup prefix>*` + `/**`): the move leaves its old folder there, and the sweep
+ *     merges the queue files in it into the new folder. The prefix has no glob character.
  *   - an index entry named `.devflow` ITSELF, which git records only for a symlink, a
  *     gitlink (submodule) or a plain file, never for a directory: the character class
  *     keeps `glob` from matching as a leading directory, so the many files under a
@@ -48,7 +56,11 @@ const DEVFLOW_SPELLINGS = Object.freeze(['.devflow', '.dev\u{FB02}ow']);
  *     the folders are opened.
  */
 const TRACKED_AREA_PATHSPECS = Object.freeze([
-  ...DEVFLOW_SPELLINGS.flatMap(dir => AREA_FOLDERS.map(area => ':(icase,literal)' + dir + '/' + area)),
+  ...DEVFLOW_SPELLINGS.flatMap(dir => [
+    ...AREA_FOLDERS.map(area => ':(icase,literal)' + dir + '/' + area),
+    ':(icase,glob)' + dir + '/' + LEGACY_NAMES.backupPrefix + '*',
+    ':(icase,glob)' + dir + '/' + LEGACY_NAMES.backupPrefix + '*/**',
+  ]),
   ...DEVFLOW_SPELLINGS.map(dir => ':(icase,glob)[.]' + dir.slice(1)),
 ]);
 
@@ -81,16 +93,21 @@ const GIT_REDIRECT_VARIABLES = Object.freeze([
 
 /**
  * The environment of the git call: the process environment without the redirecting
- * variables, with a fixed locale and no optional lock. Answers a new object.
+ * variables, with a fixed locale, no optional lock and a ceiling directory. Answers a new
+ * object. The ceiling is the folder that holds the root: git reads the root's own `.git`
+ * and never looks in a folder above it, so an empty or broken `.git` at the root is not
+ * answered from a work tree around the project.
  *
  * @param {NodeJS.ProcessEnv} base
+ * @param {string} ceiling - an absolute path with no list separator in it
  * @returns {NodeJS.ProcessEnv}
  */
-function trackedAreasGitEnv(base) {
+function trackedAreasGitEnv(base, ceiling) {
   const env = { ...base };
   for (const name of GIT_REDIRECT_VARIABLES) delete env[name];
   env.LC_ALL = 'C';
   env.GIT_OPTIONAL_LOCKS = '0';
+  env.GIT_CEILING_DIRECTORIES = ceiling;
   return env;
 }
 
@@ -140,26 +157,32 @@ function entryExists(target) {
  *   untracked  no `.git` entry at the root (no git call is made), or git listed nothing
  *   tracked    git listed an entry
  *   unknown    a `.git` entry stands and git did not answer (see classifyTrackedAreas),
- *              or the `.git` entry could not be probed
+ *              the `.git` entry could not be probed, or the root is not an absolute path
+ *              string (no git call is made)
  *
  * The call is `git --no-literal-pathspecs -c core.fsmonitor=false ls-files -z -- <paths>`
  * with the root as its working directory: an argv with no shell, a time bound and an
  * output bound. `--no-literal-pathspecs` leads the argv, so a forced literal-pathspec
  * setting cannot turn the magic off and hide an entry. Reading the index makes git run
  * the command a repository's config names in `core.fsmonitor`, so the call turns that off
- * for itself and stays a pure read.
+ * for itself and stays a pure read. The folder above the root's real path is a ceiling
+ * directory (trackedAreasGitEnv); a parent path that holds the list separator can not be
+ * named as one, and answers `unknown`.
  *
- * @param {string} root - an absolute path
+ * @param {unknown} root - an absolute path
  * @returns {'tracked' | 'untracked' | 'unknown'}
  */
 function checkTrackedAreas(root) {
-  const gitEntry = entryExists(path.join(root, '.git'));
-  if (gitEntry === null) return 'unknown';
-  if (gitEntry === false) return 'untracked';
+  if (typeof root !== 'string' || !path.isAbsolute(root)) return 'unknown';
   try {
+    const gitEntry = entryExists(path.join(root, '.git'));
+    if (gitEntry === null) return 'unknown';
+    if (gitEntry === false) return 'untracked';
+    const ceiling = path.dirname(fs.realpathSync(root));
+    if (ceiling.includes(path.delimiter)) return 'unknown';
     const result = childProcess.spawnSync('git', ['--no-literal-pathspecs', '-c', 'core.fsmonitor=false', 'ls-files', '-z', '--', ...TRACKED_AREA_PATHSPECS], {
       cwd: root,
-      env: trackedAreasGitEnv(process.env),
+      env: trackedAreasGitEnv(process.env, ceiling),
       stdio: ['ignore', 'pipe', 'ignore'],
       timeout: TRACKED_AREAS_GIT_TIMEOUT_MS,
       maxBuffer: TRACKED_AREAS_GIT_MAX_BUFFER,

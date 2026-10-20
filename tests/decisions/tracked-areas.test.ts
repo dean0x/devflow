@@ -1,9 +1,10 @@
 // tests/decisions/tracked-areas.test.ts
 //
 // The tracked-areas check (hooks/lib/tracked-areas.cjs): does git track any entry under
-// `.devflow/learning` or `.devflow/curation` at a root? One `git ls-files` call over a
-// fixed set of pathspecs answers `tracked`, `untracked` or `unknown`. A root with no
-// `.git` entry makes no git call. Every test builds its own project in a temp tree.
+// the old data folder, the new data folder or a backup folder the move leaves, at a root?
+// One `git ls-files` call over a fixed set of pathspecs answers `tracked`, `untracked` or
+// `unknown`. A root with no `.git` entry makes no git call. Every test builds its own
+// project in a temp tree.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createRequire } from 'module';
@@ -11,7 +12,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { git, initGitRepo } from './curation-fixtures.js';
+import { git, initGitRepo, PROJECT_PATHS } from './curation-fixtures.js';
 
 type TrackedAnswer = 'tracked' | 'untracked' | 'unknown';
 
@@ -32,6 +33,17 @@ const nodeRequire = createRequire(import.meta.url);
 const leaf = nodeRequire(LEAF) as TrackedAreas;
 /** The child_process module object the leaf calls git through: a spy on it reaches the leaf. */
 const nodeChildProcess = nodeRequire('child_process') as typeof import('child_process');
+const { LEGACY_NAMES, CURATION_DIR_NAME } = nodeRequire(PROJECT_PATHS) as {
+  LEGACY_NAMES: { folder: string; backupPrefix: string };
+  CURATION_DIR_NAME: string;
+};
+
+/** The folder names the check covers, read from the path helpers that own them. */
+const OLD_FOLDER = LEGACY_NAMES.folder;
+const NEW_FOLDER = CURATION_DIR_NAME;
+const BACKUP_PREFIX = LEGACY_NAMES.backupPrefix;
+/** A backup folder name as the move writes it: the prefix, a UTC stamp, a random tail. */
+const BACKUP = `${BACKUP_PREFIX}20261001T000001Z-00000001`;
 
 const LIGATURE = '\u{FB02}';
 const errorWith = (code: string): Error & { code: string } => Object.assign(new Error(code), { code });
@@ -63,15 +75,18 @@ describe('classifyTrackedAreas — the answer of one git ls-files call', () => {
 });
 
 describe('TRACKED_AREA_PATHSPECS', () => {
-  it('names both folders under both spellings of .devflow, case-folded, and the .devflow entry itself', () => {
-    expect([...leaf.TRACKED_AREA_PATHSPECS].sort()).toEqual([
-      ':(icase,glob)[.]devflow',
-      `:(icase,glob)[.]dev${LIGATURE}ow`,
-      ':(icase,literal).devflow/curation',
-      ':(icase,literal).devflow/learning',
-      `:(icase,literal).dev${LIGATURE}ow/curation`,
-      `:(icase,literal).dev${LIGATURE}ow/learning`,
-    ].sort());
+  it('names both folders, the backup folders and the .devflow entry, under both spellings of .devflow, case-folded', () => {
+    const spellings = ['.devflow', `.dev${LIGATURE}ow`];
+    const expected = [
+      ...spellings.flatMap(dir => [
+        `:(icase,literal)${dir}/${OLD_FOLDER}`,
+        `:(icase,literal)${dir}/${NEW_FOLDER}`,
+        `:(icase,glob)${dir}/${BACKUP_PREFIX}*`,
+        `:(icase,glob)${dir}/${BACKUP_PREFIX}*/**`,
+      ]),
+      ...spellings.map(dir => `:(icase,glob)[.]${dir.slice(1)}`),
+    ];
+    expect([...leaf.TRACKED_AREA_PATHSPECS].sort()).toEqual(expected.sort());
   });
 
   it('is frozen', () => {
@@ -80,9 +95,10 @@ describe('TRACKED_AREA_PATHSPECS', () => {
 });
 
 describe('the leaf module', () => {
-  it('requires neither the store nor the move module', () => {
+  it('requires the node built-ins it calls and the path helpers, and neither the store nor the move module', () => {
     const source = fs.readFileSync(LEAF, 'utf8');
-    expect(source).not.toMatch(/require\(\s*['"][^'"]*curation-(store|move)(\.cjs)?['"]\s*\)/);
+    const required = [...source.matchAll(/require\(\s*['"]([^'"]+)['"]\s*\)/g)].map(match => match[1]);
+    expect(required.sort()).toEqual(['./project-paths.cjs', 'child_process', 'fs', 'path']);
   });
 });
 
@@ -149,8 +165,7 @@ describe('checkTrackedAreas', () => {
     fs.writeFileSync(path.join(root, '.git'), 'gitdir: ' + path.join(tmp, 'elsewhere') + '\n');
     const calls = vi.spyOn(nodeChildProcess, 'spawnSync');
 
-    leaf.checkTrackedAreas(root);
-
+    expect(leaf.checkTrackedAreas(root)).toBe('unknown');
     expect(gitCalls(calls)).toHaveLength(1);
   });
 
@@ -197,6 +212,120 @@ describe('checkTrackedAreas', () => {
     expect(leaf.checkTrackedAreas(root)).toBe('tracked');
   });
 
+  it.each([
+    ['a file in a backup folder', `.devflow/${BACKUP}/.pending-turns.jsonl`],
+    ['a file deep in a backup folder', `.devflow/${BACKUP}/a/b/c.txt`],
+    ['a backup entry that is a plain file', `.devflow/${BACKUP}`],
+    ['a file under another case of the backup name', `.devflow/${BACKUP.replace('learning', 'Learning').replace('backup', 'BACKUP')}/q.jsonl`],
+    ['a backup file under an upper-case .DEVFLOW', `.DEVFLOW/${BACKUP}/q.jsonl`],
+    ['a backup file under the ligature spelling of .devflow', `.dev${LIGATURE}ow/${BACKUP}/q.jsonl`],
+  ])('answers tracked for %s', (_name, rel) => {
+    commitRepo({ [rel]: 'content\n' });
+    expect(leaf.checkTrackedAreas(root)).toBe('tracked');
+  });
+
+  it('answers tracked for a backup entry that is a link', () => {
+    commitRepo({ 'README.md': 'readme\n' });
+    fs.mkdirSync(path.join(root, '.devflow'));
+    fs.symlinkSync('shared', path.join(root, '.devflow', BACKUP));
+    git(root, ['add', '-f', '--', `.devflow/${BACKUP}`]);
+
+    expect(leaf.checkTrackedAreas(root)).toBe('tracked');
+  });
+
+  it.each([
+    ['a name that only resembles a backup', `.devflow/${OLD_FOLDER}.backupx/a.txt`],
+    ['a backup-like name with another stem', `.devflow/other.backup-20261001T000001Z-00000001/a.txt`],
+    ['a name that joins the stem with another mark', `.devflow/${OLD_FOLDER}-backup-x/a.txt`],
+    ['another file of .devflow', '.devflow/project.json'],
+  ])('answers untracked for %s', (_name, rel) => {
+    commitRepo({ [rel]: 'content\n' });
+    expect(leaf.checkTrackedAreas(root)).toBe('untracked');
+  });
+
+  it('is not misled by a backup folder that exists on disk and is not tracked', () => {
+    commitRepo({ 'README.md': 'readme\n' });
+    fs.mkdirSync(path.join(root, '.devflow', BACKUP), { recursive: true });
+    fs.writeFileSync(path.join(root, '.devflow', BACKUP, '.pending-turns.jsonl'), 'row\n');
+
+    expect(leaf.checkTrackedAreas(root)).toBe('untracked');
+  });
+
+  describe('a gitlink entry (mode 160000)', () => {
+    /** Record a gitlink at `rel` in the index, with no checkout behind it. */
+    function trackGitlink(rel: string): void {
+      const sha = git(root, ['rev-parse', 'HEAD']);
+      git(root, ['update-index', '--add', '--cacheinfo', `160000,${sha},${rel}`]);
+      expect(git(root, ['ls-files', '-s', '--', rel])).toMatch(/^160000 /);
+    }
+
+    it.each([
+      ['.devflow itself', '.devflow'],
+      ['the old folder', `.devflow/${OLD_FOLDER}`],
+      ['the new folder', `.devflow/${NEW_FOLDER}`],
+      ['a path below the old folder', `.devflow/${OLD_FOLDER}/vendor`],
+      ['a backup folder', `.devflow/${BACKUP}`],
+      ['a path below a backup folder', `.devflow/${BACKUP}/vendor`],
+    ])('answers tracked for a gitlink at %s', (_name, rel) => {
+      commitRepo({ 'README.md': 'readme\n' });
+      trackGitlink(rel);
+
+      expect(leaf.checkTrackedAreas(root)).toBe('tracked');
+    });
+
+    it('answers untracked for a gitlink at another path of .devflow', () => {
+      commitRepo({ 'README.md': 'readme\n' });
+      trackGitlink('.devflow/vendor');
+
+      expect(leaf.checkTrackedAreas(root)).toBe('untracked');
+    });
+  });
+
+  it.each([
+    ['no root', undefined],
+    ['a null root', null],
+    ['a number', 42],
+    ['an object', {}],
+    ['an empty string', ''],
+    ['a relative path', 'project'],
+    ['a dot', '.'],
+    ['a path with a NUL byte', '/tmp/a\u0000b'],
+  ])('answers unknown, with no git call and no throw, for %s', (_name, badRoot) => {
+    const calls = vi.spyOn(nodeChildProcess, 'spawnSync');
+
+    expect(leaf.checkTrackedAreas(badRoot as never)).toBe('unknown');
+    expect(gitCalls(calls)).toEqual([]);
+  });
+
+  it('answers unknown, with no git call, when the folder above the root holds the list separator', () => {
+    const colonRoot = path.join(tmp, `a${path.delimiter}b`, 'project');
+    fs.mkdirSync(colonRoot, { recursive: true });
+    initGitRepo(colonRoot);
+    const calls = vi.spyOn(nodeChildProcess, 'spawnSync');
+
+    expect(leaf.checkTrackedAreas(colonRoot)).toBe('unknown');
+    expect(gitCalls(calls)).toEqual([]);
+  });
+
+  it('answers unknown for an empty .git at a root inside another repository', () => {
+    initGitRepo(tmp);
+    fs.mkdirSync(path.join(root, '.git'));
+
+    expect(leaf.checkTrackedAreas(root)).toBe('unknown');
+  });
+
+  it('answers unknown for an empty .git at a root reached through a link, inside another repository', () => {
+    initGitRepo(tmp);
+    const real = path.join(tmp, 'work', 'project');
+    fs.mkdirSync(path.join(real, '.git'), { recursive: true });
+    const linkDir = path.join(tmp, 'elsewhere');
+    fs.mkdirSync(linkDir);
+    const linked = path.join(linkDir, 'project');
+    fs.symlinkSync(real, linked);
+
+    expect(leaf.checkTrackedAreas(linked)).toBe('unknown');
+  });
+
   it('answers tracked when the listing is longer than the buffer', () => {
     const files: Record<string, string> = {};
     for (let i = 0; i < 200; i++) files[`.devflow/learning/${'n'.repeat(40)}-${i}.txt`] = 'x\n';
@@ -229,8 +358,6 @@ describe('checkTrackedAreas', () => {
 
   it('answers unknown when a .git entry stands and is not a repository', () => {
     fs.mkdirSync(path.join(root, '.git'));
-    // No repository above the temp tree can answer in its place.
-    vi.stubEnv('GIT_CEILING_DIRECTORIES', tmp);
     expect(leaf.checkTrackedAreas(root)).toBe('unknown');
   });
 
@@ -282,6 +409,7 @@ describe('checkTrackedAreas', () => {
     vi.stubEnv('GIT_GLOB_PATHSPECS', '1');
     vi.stubEnv('GIT_ICASE_PATHSPECS', '1');
     vi.stubEnv('GIT_OPTIONAL_LOCKS', '1');
+    vi.stubEnv('GIT_CEILING_DIRECTORIES', '/nonexistent');
     vi.stubEnv('LC_ALL', 'de_DE.UTF-8');
     const calls = vi.spyOn(nodeChildProcess, 'spawnSync');
 
@@ -307,6 +435,7 @@ describe('checkTrackedAreas', () => {
     ]) expect(options.env, name).not.toHaveProperty(name);
     expect(options.env.LC_ALL).toBe('C');
     expect(options.env.GIT_OPTIONAL_LOCKS).toBe('0');
+    expect(options.env.GIT_CEILING_DIRECTORIES).toBe(path.dirname(root));
     expect(options.env.PATH).toBe(process.env.PATH);
   });
 
