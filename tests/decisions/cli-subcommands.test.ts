@@ -1389,6 +1389,17 @@ describe('curation --status shows the backup a move left (#529)', { timeout: 30_
     expect(lines.pop()).toBe('Backup: 2 more backup folders are not listed above: 5 pending rows in them');
   });
 
+  it('past 500 backups, adds a line for the folders that are not read, so the rows line counts only folders it read', async () => {
+    const suffix = (i: number): string => `20261017T020304Z-${String(i).padStart(8, '0')}`;
+    for (let i = 0; i < 502; i++) seedBackup(i === 60 ? { '.pending-turns.jsonl': rows(3) } : {}, suffix(i));
+
+    const lines = (await runCuration(['--status'])).info.split('\n').filter(line => line.startsWith('Backup: '));
+
+    expect(lines.length).toBe(52);
+    expect(lines[50]).toBe('Backup: 450 more backup folders are not listed above: 3 pending rows in them');
+    expect(lines[51]).toBe('Backup: 2 more backup folders past the first 500 are not read: their pending rows are not counted');
+  });
+
   it('says "1 more backup folder" for one backup past the limit', async () => {
     const suffix = (i: number): string => `20261017T0203${String(i).padStart(2, '0')}Z-${String(i).padStart(8, '0')}`;
     for (let i = 0; i < 51; i++) seedBackup(i === 50 ? { '.pending-turns.jsonl': rows(1) } : {}, suffix(i));

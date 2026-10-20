@@ -1308,6 +1308,64 @@ describe('moveLedger — a journal in the repository\'s old folder is never read
   });
 });
 
+describe('moveLedger — the empty new folder of the per-entry path is made for a pass that runs', () => {
+  const seedJournalNamed = (): void => seedOld({ ...ledgerSet('old'), [JOURNAL]: '{"version":1,"steps":[]}' });
+
+  it('a busy lock leaves no new folder', () => {
+    seedJournalNamed();
+    holdLock(moveLockDir());
+
+    expect(move()).toEqual({ ok: true, value: { state: 'busy', notes: [] } });
+
+    expect(exists(site.newDir)).toBe(false);
+    expect(read(path.join(site.oldDir, LEDGER))).toBe(ledgerSet('old')[LEDGER]);
+  });
+
+  it('a busy lock of the old folder leaves no new folder either', () => {
+    seedJournalNamed();
+    holdLock(path.join(site.oldDir, '.pending-turns.jsonl.lock'));
+
+    expect(move()).toMatchObject({ ok: true, value: { state: 'busy' } });
+
+    expect(exists(site.newDir)).toBe(false);
+  });
+
+  it('a fresh claim leaves no new folder, and the answer keeps the reason', () => {
+    seedJournalNamed();
+    fs.writeFileSync(path.join(site.oldDir, CLAIM), turns(1, 3));
+
+    expect(move()).toEqual({ ok: true, value: { state: 'busy', reason: 'claim', notes: [] } });
+
+    expect(exists(site.newDir)).toBe(false);
+  });
+
+  it('an error that changed nothing leaves no new folder', () => {
+    seedJournalNamed();
+    failCall('renameSync', 'EIO', ([from]) => SET.includes(path.basename(String(from))));
+
+    expect(failure().kind).toBe('io-error');
+    vi.restoreAllMocks();
+
+    expect(exists(site.newDir)).toBe(false);
+    expect(movedValue().mode).toBe('moved-in');
+  });
+
+  it('a new folder that a writer filled in the meantime is never removed', () => {
+    seedJournalNamed();
+    holdLock(moveLockDir());
+    const real = nodeFs.mkdirSync;
+    vi.spyOn(nodeFs, 'mkdirSync').mockImplementation(((target: fs.PathLike, options?: fs.MakeDirectoryOptions) => {
+      const made = real(target, options);
+      if (String(target) === site.newDir) fs.writeFileSync(path.join(site.newDir, LOG), ledgerSet('live')[LOG]);
+      return made;
+    }) as typeof nodeFs.mkdirSync);
+
+    expect(move()).toMatchObject({ ok: true, value: { state: 'busy' } });
+
+    expect(read(path.join(site.newDir, LOG))).toBe(ledgerSet('live')[LOG]);
+  });
+});
+
 describe('moveLedger — other entries follow the per-entry rule', () => {
   beforeEach(() => {
     seedOld(ledgerSet('old'));

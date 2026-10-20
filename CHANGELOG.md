@@ -97,7 +97,8 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
   The drain deletes nothing when a backup folder, or one of its queue files, is a symbolic link, and it says so.
 - `devflow curation --status` prints one `Backup:` line for each backup folder.
   The line shows how many pending rows the backup still holds.
-  For the first 50 folders it prints one line each. One more line counts the folders after the first 50 and their pending rows.
+  For the first 50 folders it prints one line each. One more line counts the folders from the 51st to the 500th and their pending rows.
+  If there are more than 500 backup folders, a last line counts the folders after the 500th. Status does not read them, and no init or drain reaches them.
 - Delete a backup folder only when `devflow curation --status` shows 0 pending rows for it.
   Until then, a later init can still merge the rows.
   A backup made on re-upgrade can hold the only copy of entries that 3.7 wrote. Check them before you delete it.

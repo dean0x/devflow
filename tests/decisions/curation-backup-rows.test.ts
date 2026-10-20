@@ -19,7 +19,7 @@ const store = requireCurationMove();
 const STAMP = '20261017T020304Z';
 const rows = (count: number): string => '{"role":"user"}\n'.repeat(count);
 /** The answer's count of backups past the listing limit, when there are none. */
-const NO_MORE = { backups: 0, pendingRows: 0 };
+const NO_MORE = { backups: 0, pendingRows: 0, unread: 0 };
 
 let root: string;
 
@@ -151,7 +151,7 @@ describe('backupPendingRows', () => {
       for (let i = 0; i < 55; i++) seedBackup(`learning.backup-${STAMP}-${String(i).padStart(8, '0')}`);
       const answer = store.backupPendingRows(root);
       expect(answer.ok && answer.value.backups).toHaveLength(50);
-      expect(answer.ok && answer.value.beyondLimit).toEqual({ backups: 5, pendingRows: 0 });
+      expect(answer.ok && answer.value.beyondLimit).toEqual({ backups: 5, pendingRows: 0, unread: 0 });
     });
 
     it('accounts for every backup: the rows of those past the listing limit are summed, whatever their position', () => {
@@ -160,7 +160,19 @@ describe('backupPendingRows', () => {
       }
       const answer = store.backupPendingRows(root);
       expect(answer.ok && answer.value.backups.map(entry => entry.pendingRows)).toEqual(new Array(50).fill(0));
-      expect(answer.ok && answer.value.beyondLimit).toEqual({ backups: 2, pendingRows: 2 + 3 });
+      expect(answer.ok && answer.value.beyondLimit).toEqual({ backups: 2, pendingRows: 2 + 3, unread: 0 });
+    });
+
+    it('past 500 backups: the folder count and the rows describe the same set, and the folders that are not read are counted apart', () => {
+      const rowsOf = new Map([[50, 1], [499, 2], [500, 4], [501, 8]]);
+      for (let i = 0; i < 502; i++) {
+        const queue = rowsOf.has(i) ? { '.pending-turns.jsonl': rows(rowsOf.get(i) as number) } : {};
+        seedBackup(`learning.backup-${STAMP}-${String(i).padStart(8, '0')}`, queue);
+      }
+      const answer = store.backupPendingRows(root);
+      expect(answer.ok && answer.value.backups).toHaveLength(50);
+      // Backups 51 to 500 are read: 450 folders and the 1 + 2 rows they hold. The last two are only counted.
+      expect(answer.ok && answer.value.beyondLimit).toEqual({ backups: 450, pendingRows: 1 + 2, unread: 2 });
     });
 
     it('reads at most 200 queue files in one backup', () => {

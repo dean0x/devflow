@@ -1140,7 +1140,8 @@ function curationMoveFinish(ctx, { whole }) {
  * claim in either folder answers `busy` with the reason `claim`. With the new folder absent the whole folder is
  * renamed (curationMoveWhole), unless the old folder holds a file named like a journal
  * or a queue file that git tracks (oldFolderNeedsEntryPath): then an empty new folder is
- * made and the pass takes the per-entry path. Errors
+ * made and the pass takes the per-entry path. A pass that then answers busy, or fails
+ * before it changes anything, removes that empty folder again. Errors
  * (EXDEV, EBUSY, EACCES, EROFS, any other I/O failure) answer an `io-error` Result and
  * copy nothing: the old folder stays whole.
  *
@@ -1229,6 +1230,8 @@ function moveLedgerUnscrubbed(root, options = {}) {
   if (opened.value === null) return { ok: true, value: { state: 'none', notes: [] } };
   const ctx = opened.value;
   const { machineDir: machine, realRoot } = ctx;
+  let madeNewDir = false;
+  let result = null;
   try {
     if (lstatOrNull(ctx.oldDir) === null) return { ok: true, value: { state: 'none', notes: [] } };
 
@@ -1237,9 +1240,10 @@ function moveLedgerUnscrubbed(root, options = {}) {
     if (!newExisted && oldFolderNeedsEntryPath(ctx)) {
       // The one rename of the whole-folder case would carry that file into the live folder.
       // An empty new folder puts the pass on the per-entry path, where the file stays in the
-      // backup. A busy or failed pass leaves the empty folder, and the next pass takes the
-      // same path to the same result.
-      fs.mkdirSync(ctx.newDir, { recursive: true });
+      // backup. The folder is made before the locks, so a pass that does not run (busy, or a
+      // failure) takes it away again (finally below), and no empty live folder is left for a
+      // store write to fill and so change which folder wins.
+      madeNewDir = fs.mkdirSync(ctx.newDir, { recursive: true }) !== undefined;
       newExisted = true;
     }
     const specs = [
@@ -1253,7 +1257,6 @@ function moveLedgerUnscrubbed(root, options = {}) {
     ];
     const taken = curationMoveLockAll(specs);
     if (taken.busy !== null) return { ok: true, value: { state: 'busy', notes: [] } };
-    let result;
     try {
       result = movePass(ctx, { newExisted });
       return result;
@@ -1262,6 +1265,8 @@ function moveLedgerUnscrubbed(root, options = {}) {
     }
   } catch (err) {
     return moveIoFailure(MOVE_OP, err);
+  } finally {
+    if (madeNewDir && !(result !== null && result.ok && result.value.state === 'moved')) removeEmptyDir(ctx.newDir);
   }
 }
 
@@ -1286,6 +1291,15 @@ function oldFolderNeedsEntryPath(ctx) {
   if (queueFiles.length === 0) return false;
   const answer = ctx.git.files();
   return !answer.ok || queueFiles.some(name => isTrackedQueueFile(answer.tracked, path.basename(ctx.oldDir), name));
+}
+
+/** Remove `dir` when it is empty; any other outcome (it holds something, it is gone) leaves it, and nothing throws. */
+function removeEmptyDir(dir) {
+  try {
+    fs.rmdirSync(dir);
+  } catch {
+    // A folder that holds an entry now is a live folder, and stays.
+  }
 }
 
 /**
@@ -1547,14 +1561,16 @@ function pendingRowsOf(dir) {
  * display: its control characters are collapsed to a space (singleLine), so it may differ
  * from the folder's own name.
  *
- * The first MOVE_MAX_BACKUPS backups, in name order, are listed. The others are counted
- * in `beyondLimit`: how many there are by name, and the rows the first
- * MOVE_MAX_BACKUPS_SCANNED backups hold in all, so that no backup is left out of the
- * account.
+ * The first MOVE_MAX_BACKUPS backups, in name order, are listed. Those after them, up to
+ * the MOVE_MAX_BACKUPS_SCANNED-th, are read and counted in `beyondLimit`: `backups` is how
+ * many there are and `pendingRows` the rows they hold in all, so the two describe one set.
+ * A backup past the MOVE_MAX_BACKUPS_SCANNED-th is not read, and no sweep or drain
+ * reaches it: `beyondLimit.unread` counts those by name only, so none is left out of
+ * the account.
  *
  * @param {unknown} root - the ledger root, an absolute path
  * @returns {{ ok: true, value: { backups: Array<{ name: string, pendingRows: number }>,
- *   beyondLimit: { backups: number, pendingRows: number } } }
+ *   beyondLimit: { backups: number, pendingRows: number, unread: number } } }
  *   | { ok: false, error: { kind: 'refused'|'io-error', message: string } }}
  */
 function backupPendingRows(root) {
@@ -1564,18 +1580,18 @@ function backupPendingRows(root) {
   try {
     const devflowDir = path.join(path.resolve(root), '.devflow');
     const devflowStat = lstatOrNull(devflowDir);
-    if (devflowStat === null || !devflowStat.isDirectory()) return { ok: true, value: { backups: [], beyondLimit: { backups: 0, pendingRows: 0 } } };
+    if (devflowStat === null || !devflowStat.isDirectory()) return { ok: true, value: { backups: [], beyondLimit: { backups: 0, pendingRows: 0, unread: 0 } } };
     const names = backupNames(devflowDir);
     const backups = [];
     for (const name of names.slice(0, MOVE_MAX_BACKUPS)) {
       const rows = pendingRowsOf(path.join(devflowDir, name));
       if (rows !== null) backups.push({ name: singleLine(name), pendingRows: rows });
     }
+    const beyond = names.slice(MOVE_MAX_BACKUPS, MOVE_MAX_BACKUPS_SCANNED);
     let beyondRows = 0;
-    for (const name of names.slice(MOVE_MAX_BACKUPS, MOVE_MAX_BACKUPS_SCANNED)) {
-      beyondRows += pendingRowsOf(path.join(devflowDir, name)) || 0;
-    }
-    return { ok: true, value: { backups, beyondLimit: { backups: Math.max(0, names.length - MOVE_MAX_BACKUPS), pendingRows: beyondRows } } };
+    for (const name of beyond) beyondRows += pendingRowsOf(path.join(devflowDir, name)) || 0;
+    const unread = Math.max(0, names.length - MOVE_MAX_BACKUPS_SCANNED);
+    return { ok: true, value: { backups, beyondLimit: { backups: beyond.length, pendingRows: beyondRows, unread } } };
   } catch (err) {
     return scrubMoveResult(moveIoFailure(ROWS_OP, err));
   }

@@ -562,7 +562,10 @@ export function requireCurationStore(): CurationStoreApi {
 
 /** The move module's read-only status count and drain listing, as the tests call them. */
 export interface CurationMoveApi {
-  backupPendingRows(root: string): Result<{ backups: Array<{ name: string; pendingRows: number }> }>;
+  backupPendingRows(root: string): Result<{
+    backups: Array<{ name: string; pendingRows: number }>;
+    beyondLimit: { backups: number; pendingRows: number; unread: number };
+  }>;
   backupQueueFiles(root: string): Result<{ files: string[] }>;
 }
 

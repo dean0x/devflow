@@ -68,12 +68,15 @@ export interface LedgerBackupRows {
 }
 
 /**
- * The backup folders past the listing limit, counted in one total: how many there are,
- * and the rows the first 500 backups hold in all, so that no backup is left out of the account.
+ * The backup folders past the listing limit. `backups` is how many of the 51st to the 500th
+ * there are, and `pendingRows` the rows those folders hold in all: one set, read in full.
+ * `unread` is how many there are past the 500th: they are counted by name only, never read,
+ * and no sweep or drain reaches them, so no backup is left out of the account.
  */
 export interface LedgerBackupsBeyondLimit {
   readonly backups: number;
   readonly pendingRows: number;
+  readonly unread: number;
 }
 
 /** `backupQueueFiles`'s refusal: `path` is the symbolic link it stopped at, on one line. */
