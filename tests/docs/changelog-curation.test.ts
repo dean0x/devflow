@@ -92,7 +92,7 @@ const CHECKLIST: ReadonlyArray<{ readonly item: string; readonly patterns: reado
   { item: 'no alias', patterns: [/no alias/i] },
   { item: 'init migration', patterns: [/`devflow init` moves/, /Entry IDs do not change/] },
   { item: 'session start move', patterns: [/session start hook makes the same move/] },
-  { item: 'both-folder rule', patterns: [/both folders/, /non-empty log wins/, /never merges one ledger into the other/] },
+  { item: 'both-folder rule', patterns: [/both folders/, /has a non-empty log, it wins/, /never merges one ledger into the other/] },
   { item: 'manifest heal', patterns: [/first `devflow` command/, /heals `~\/\.devflow\/manifest\.json`/, /both `features\.curation` and `features\.learning`/] },
   { item: 'upgrade effect', patterns: [/Upgrade: run `devflow init`/] },
   { item: 'downgrade effect', patterns: [/Downgrade to 3\.7/, /mirror key `features\.learning`/] },
@@ -166,6 +166,17 @@ function withReleaseBump(changelog: string): string {
 // Tests
 // ---------------------------------------------------------------------------
 
+/** The blank-line block of the entry that opens with `lead`, its line breaks folded to spaces. */
+function blockOf(entry: string, lead: string): string {
+  const block = entry.split(/\n\n+/).find(part => part.startsWith(lead))
+  return (block ?? '').replace(/\s+/g, ' ')
+}
+
+/** The release section that holds the entry, and the entry's text. */
+function currentEntry(): string {
+  return entryOf(releaseSections(CHANGELOG).find(section => entryOf(section) !== null) ?? { label: '', text: '' }) ?? ''
+}
+
 describe('CHANGELOG curation rename entry', () => {
   const entry = entryOf(releaseSections(CHANGELOG).find(section => entryOf(section) !== null) ?? { label: '', text: '' });
 
@@ -230,6 +241,68 @@ describe('CHANGELOG curation rename entry', () => {
     expect(README).toMatch(/every (team )?member runs 3\.8/);
   });
 });
+
+describe('CHANGELOG curation rename entry: the points a reader acts on', () => {
+  const entry = currentEntry()
+
+  it('says what a downgrade does to the Curate model setting, and which file wins on re-upgrade', () => {
+    const block = blockOf(entry, '**Upgrade, downgrade and re-upgrade:**')
+    expect(block).toContain('`~/.devflow/learning.json`')
+    expect(block).toContain('`~/.devflow/curation.json`')
+    expect(block).toContain('3.7 reads only the old name')
+    expect(block).toContain('set the Curate model again with `devflow learning --configure`')
+    expect(block).toContain('an existing `curation.json` wins and init logs one line')
+    expect(block).toContain('To keep a value that you set on 3.7, delete `curation.json` first.')
+  })
+
+  it('the global tuning file rule it states is the one init applies', () => {
+    const step = readFileSync(path.join(ROOT, 'src/cli/commands/curation-move-step.ts'), 'utf8')
+    expect(step).toContain('is used, and ${LEGACY_NAMES.tuningFile} was left in place')
+  })
+
+  it('puts the main-checkout condition on the linked-worktree note and on the delete step', () => {
+    const behind = blockOf(entry, '**What stays behind:**')
+    const todo = blockOf(entry, '**What you must do:**')
+    const condition = /main checkout has a `\.devflow\/` folder and is not your home folder/
+    expect(behind).toMatch(condition)
+    expect(todo).toMatch(condition)
+    expect(behind).toContain('is a live ledger')
+    expect(todo).toContain('keeps a live ledger')
+    expect(behind).toContain('moves like any project')
+    expect(todo).toContain('moves like any project')
+  })
+
+  it('the condition it states is the one the ledger root applies', () => {
+    const root = readFileSync(path.join(ROOT, 'src/core/ledger-root.ts'), 'utf8')
+    expect(root).toContain("path.join(main, '.devflow')")
+    expect(root).toContain('mainReal !== homeReal')
+  })
+
+  it('states the two-branch rule for a project with both folders', () => {
+    const block = blockOf(entry, '**What the migration does:**')
+    expect(block).toContain(
+      'If `.devflow/curation/` has a non-empty log, it wins and the old folder becomes the backup. '
+      + 'If not, the old ledger set moves in and the rest of the old folder becomes the backup.',
+    )
+  })
+
+  it('says which commands heal the manifest and which write nothing', () => {
+    const block = blockOf(entry, '**What the migration does:**')
+    expect(block).toContain(
+      'the first `devflow` command that loads the whole manifest '
+      + '(for example `devflow init` or `devflow flags --status`) heals `~/.devflow/manifest.json`.',
+    )
+    expect(block).toContain('The `--status` commands of curation, memory, knowledge and gates write nothing.')
+    expect(block).not.toContain('even a read-only one')
+  })
+
+  it('says that a failed move at session start shows the refused line', () => {
+    const block = blockOf(entry, '**Outcomes that need action:**')
+    expect(block).toContain('Failed: init prints `Ledger move failed for <root>` and copies nothing. The next init tries again.')
+    expect(block).toContain('A move that fails at session start shows the same `Curation: move refused, see the hook log` line as a refusal.')
+    expect(block).toContain('The hook log names the cause.')
+  })
+})
 
 describe('CHANGELOG guard is live (seeded known-bad input)', () => {
   it('fails on an entry below 3.8.0', () => {

@@ -50,11 +50,15 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
   If both names exist, the new one wins, the old one stays, and init logs one line.
 - The session start hook makes the same move for the project of each session.
   It also runs when the curation switch is off.
-- If a project already has both folders, the folder with a non-empty log wins.
-  Devflow keeps the other folder as a backup. It never merges one ledger into the other.
-- After an upgrade, the first `devflow` command (even a read-only one such as `devflow flags --status`)
-  heals `~/.devflow/manifest.json`. The file then carries both `features.curation` and `features.learning`
-  with the same value. Every later write keeps the two keys equal.
+- If a project already has both folders, one rule decides which folder stays.
+  If `.devflow/curation/` has a non-empty log, it wins and the old folder becomes the backup.
+  If not, the old ledger set moves in and the rest of the old folder becomes the backup.
+  Devflow never merges one ledger into the other.
+- After an upgrade, the first `devflow` command that loads the whole manifest
+  (for example `devflow init` or `devflow flags --status`) heals `~/.devflow/manifest.json`.
+  The file then carries both `features.curation` and `features.learning` with the same value.
+  Every later write keeps the two keys equal.
+  The `--status` commands of curation, memory, knowledge and gates write nothing.
 
 **Upgrade, downgrade and re-upgrade:**
 - Upgrade: run `devflow init`. Until you do, the installed hooks and prompts are still the old version.
@@ -63,6 +67,10 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
 - Re-upgrade to 3.8: the next init or session start finds both folders and applies the rule above.
   When the folder `.devflow/curation/` has a non-empty log, it wins.
   The queue rows of the 3.7 folder merge into the winner. The entries that 3.7 wrote stay in the backup only.
+- The Curate model in the global tuning file: init renames `~/.devflow/learning.json` to `~/.devflow/curation.json`,
+  and 3.7 reads only the old name. After a downgrade, set the Curate model again with `devflow learning --configure`.
+  Choose the global scope. On re-upgrade, an existing `curation.json` wins and init logs one line.
+  To keep a value that you set on 3.7, delete `curation.json` first.
 
 **The machine switch:**
 - If `features.curation` and `features.learning` in the manifest disagree, the switch is off.
@@ -121,6 +129,8 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
   `Curation: run devflow init, or open Claude Code in this project after it`.
   They do not read the old folder.
 - Failed: init prints `Ledger move failed for <root>` and copies nothing. The next init tries again.
+  A move that fails at session start shows the same `Curation: move refused, see the hook log` line as a refusal.
+  The hook log names the cause. The next session start tries again.
 - Skipped: git did not name the project's repository within one second, for example on a hung mount.
   Init prints `Ledger move skipped for <root>: git did not answer in time.` and does not count the project as moved.
   The other projects move. The next init tries again, and a session start in the project moves it too.
@@ -128,9 +138,12 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
 **What stays behind:**
 - Reach: a project that neither `devflow init` nor a Claude Code session reaches keeps its old
   `.devflow/learning/` folder untouched. It moves at its next session start.
-- Linked worktrees: the ledger of a linked worktree is the ledger of the main checkout.
-  Devflow does not move a `.devflow/learning/` folder that sits inside a linked worktree.
+- Linked worktrees: if the main checkout has a `.devflow/` folder and is not your home folder,
+  the ledger of a linked worktree is the ledger of the main checkout.
+  Devflow does not move a `.devflow/learning/` folder that sits inside that worktree.
   Delete that leftover folder by hand when you do not need it.
+  If the main checkout does not meet this condition, the `.devflow/learning/` folder of the worktree is a live ledger.
+  It moves like any project.
 - First session: the first session start in a project with an old folder runs the move.
   This adds a short delay to that one start. Later starts add nothing.
 
@@ -143,7 +156,10 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
 - Run `devflow init` after you update.
 - Replace `devflow learning` and the old init flags in your scripts.
 - Delete each backup folder after `devflow curation --status` shows 0 pending rows for it.
-- Delete the leftover `.devflow/learning/` folder in each linked worktree, if you have one.
+- Delete the leftover `.devflow/learning/` folder in each linked worktree whose main checkout has a `.devflow/` folder
+  and is not your home folder.
+  A worktree whose main checkout has no `.devflow/` folder, or is your home folder, keeps a live ledger.
+  That ledger moves like any project.
 - Run `devflow curation --enable` if the machine switch is off and you want it on.
 
 ### Upgrade notes — Lint pack

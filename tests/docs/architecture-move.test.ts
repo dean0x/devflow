@@ -13,12 +13,20 @@
  *
  * Non-vacuity: the paragraph table is checked for size, every digest must hit a
  * line of architecture.md, and a seeded one-word edit is shown to miss.
+ *
+ * The curation paragraphs of architecture.md and the curation section of hooks.md
+ * are not pinned by digest. They change with the code, so a second block of checks
+ * holds the rules that the two docs must state in the same words.
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
+import { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { createHash } from 'crypto';
+import * as os from 'os';
 import * as path from 'path';
+import { readManifest } from '../../src/core/manifest.js';
+import { readMachineFeature } from '../../src/core/feature-switch.js';
+import { readGateManifest } from '../../src/core/gate-level.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 
@@ -90,5 +98,84 @@ describe('Architecture Overview paragraphs moved to docs/reference/architecture.
     expect(sha256(line)).toBe(first.sha256);
     expect(sha256(line.replace(/\s\S+$/, ' changed'))).not.toBe(first.sha256);
     expect(findParagraph(['**Other**: text'], first.lead)).toBeUndefined();
+  });
+});
+
+const HOOKS_LINES = readFileSync(path.join(ROOT, 'docs/reference/hooks.md'), 'utf8').split('\n');
+
+/** A line of text with its runs of white space folded to one space. */
+function flat(text: string | undefined): string {
+  return (text ?? '').replace(/\s+/g, ' ');
+}
+
+function lineStarting(lines: readonly string[], start: string): string {
+  const line = lines.find(candidate => candidate.startsWith(start));
+  expect(line, `no line starts with ${start}`).toBeDefined();
+  return flat(line);
+}
+
+describe('the curation move and switch paragraphs state the same rules', () => {
+  const dataMove = lineStarting(ARCHITECTURE_LINES, '**Curation data move**');
+  const switchRule = lineStarting(ARCHITECTURE_LINES, '**Curation switch**');
+  const hooksPipeline = lineStarting(HOOKS_LINES, '**Curation pipeline**');
+  const hooksMove = lineStarting(HOOKS_LINES, '**The ledger folder move**');
+  const hooksBoth = lineStarting(HOOKS_LINES, 'When a project already has both folders');
+  const hooksPointer = lineStarting(HOOKS_LINES, 'Until a project moves');
+
+  const winner = '`.devflow/curation/` has a non-empty log, it wins and the old folder becomes the backup';
+  const loser = 'the old ledger set moves in and the rest of the old folder becomes the backup';
+
+  it('names the winner of a project with both folders by the new folder log alone', () => {
+    for (const text of [dataMove, hooksBoth]) {
+      expect(text).toContain(winner);
+      expect(text).toContain(loser);
+      expect(text).not.toContain('the folder with a non-empty log wins');
+      expect(text).not.toContain('the folder whose log is non-empty wins');
+    }
+  });
+
+  it('says which commands heal the manifest and which write nothing', () => {
+    const heals = 'The first `devflow` command that loads the whole manifest (for example `devflow init` or `devflow flags --status`) heals it.';
+    const quiet = 'The `--status` commands of curation, memory, knowledge and gates write nothing.';
+    for (const text of [switchRule, hooksPipeline]) {
+      expect(text).toContain(heals);
+      expect(text).toContain(quiet);
+      expect(text).not.toContain('The first read of an older manifest rewrites it once');
+    }
+  });
+
+  it('says that a refusal and a failed move both leave the marker that the HUD shows', () => {
+    expect(hooksMove).toContain('A refusal or a failed move leaves a marker');
+    expect(hooksMove).toContain('A busy marker is a separate file, and the HUD does not show it.');
+    expect(hooksPointer).toContain('when the move was refused or failed');
+    expect(dataMove).toContain('a refused line after a refusal or a failed move');
+  });
+});
+
+describe('the manifest heal that the docs describe holds in code', () => {
+  const unhealed = JSON.stringify({
+    version: '3.7.0', plugins: [], scope: 'user', installedAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+    features: { ambient: true, memory: true, hud: false, knowledge: true, rules: true, flags: {}, proxy: false, learning: false },
+  });
+
+  it('the status readers of curation, memory, knowledge and gates leave an unhealed manifest as it is, and the full reader heals it', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'devflow-heal-doc-'));
+    const file = path.join(dir, 'manifest.json');
+    try {
+      writeFileSync(file, unhealed, 'utf8');
+      await readMachineFeature(dir, 'curation');
+      await readMachineFeature(dir, 'memory');
+      await readMachineFeature(dir, 'knowledge');
+      await readGateManifest(dir);
+      expect(readFileSync(file, 'utf8')).toBe(unhealed);
+
+      const manifest = await readManifest(dir);
+      expect(manifest?.features.curation).toBe(false);
+      const healed = (JSON.parse(readFileSync(file, 'utf8')) as { features: Record<string, unknown> }).features;
+      expect(healed.curation).toBe(false);
+      expect(healed.learning).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
