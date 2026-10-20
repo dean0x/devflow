@@ -31,12 +31,16 @@ const RETIRED_CLAIMS = ['no phase rules yet', 'no rows yet'] as const
 /** What a doc site says when it states that Polish is skipped: "skip Polish", "skips Polish" or "no Polish". */
 const POLISH_SKIP = /\b(?:skips?|no) Polish\b/
 
+/** What a doc site says when it states the lean Harden skip: "skip Harden on a docs-only diff" or "skips Harden on a docs-only diff". */
+const HARDEN_DOCS_SKIP = /\bskips? Harden on a docs-only diff\b/
+
 /**
  * What a doc site must say for each shipped row, keyed by `${cmd}:` plus the full row line. A change to one cell is a new
  * key, so it sends someone back to the docs. A row with no entry here is reported.
  */
 const ROW_EFFECTS: ReadonlyMap<string, RegExp> = new Map([
   ['implement:| 3 Polish | skip | skip |', POLISH_SKIP],
+  ['implement:| 4 Self-Review | - | apply: harden-scope |', HARDEN_DOCS_SKIP],
   ['resolve:| 6 Polish | skip | skip |', POLISH_SKIP],
 ])
 
@@ -173,6 +177,11 @@ describe('the doc sites state the effect of each shipped row and keep no retired
     for (const text of ['Polish is skipped', 'keeps Polish', 'the full plan shape and Polish', 'noPolish']) expect(POLISH_SKIP.test(text), text).toBe(false)
   })
 
+  it('HARDEN_DOCS_SKIP reads a skip of Harden on a docs-only diff, and nothing less', () => {
+    for (const text of ['skips Harden on a docs-only diff', 'skip Harden on a docs-only diff', 'lean skips Harden on a docs-only diff.']) expect(HARDEN_DOCS_SKIP.test(text), text).toBe(true)
+    for (const text of ['SKIPPED on a docs-only diff', 'skips Harden', 'runs Harden on a docs-only diff', 'skips Harden on a docs only diff']) expect(HARDEN_DOCS_SKIP.test(text), text).toBe(false)
+  })
+
   it('known-bad probes (test-only sites): while no table has a row, no effect is owed and a retired claim is allowed', () => {
     expect(collectDocSiteDefects([site('Nothing about the levels.')], none)).toEqual([])
     expect(collectDocSiteDefects([site(RETIRED_CLAIMS.join(' and '))], none)).toEqual([])
@@ -255,7 +264,7 @@ describe('the doc sites state the effect of each shipped row and keep no retired
   const withRowCmds = LEVEL_CMDS.filter(cmd => DECIDED_ROWS[cmd].length > 0)
 
   it('known-bad probes (real sites): the decided rows are the ones the probes loop over', () => {
-    expect(shippedRows.map(({ cmd, row }) => `${cmd}:${row}`)).toEqual(['implement:| 3 Polish | skip | skip |', 'resolve:| 6 Polish | skip | skip |'])
+    expect(shippedRows.map(({ cmd, row }) => `${cmd}:${row}`)).toEqual(['implement:| 3 Polish | skip | skip |', 'implement:| 4 Self-Review | - | apply: harden-scope |', 'resolve:| 6 Polish | skip | skip |'])
     expect(withRowCmds).toEqual(['implement', 'resolve'])
   })
 
@@ -288,15 +297,30 @@ describe('the doc sites state the effect of each shipped row and keep no retired
     expect(covered.size, 'every shipped row was probed at a real site').toBe(shippedRows.length)
   })
 
+  const atLevel = (level: NonNullable<DocSite['level']>): DocSite => {
+    const found = DOC_SITES.filter(s => s.level === level)
+    expect(found.length, `one real site is read as ${level}`).toBe(1)
+    return found[0]
+  }
+
+  it('known-bad probes (real sites): the shipped Harden row is stated at the init hint for lean and not at the one for standard', () => {
+    const row = '| 4 Self-Review | - | apply: harden-scope |'
+    expect(DECIDED_ROWS.implement, 'the shipped /implement table holds the Harden row').toContain(row)
+    expect(rowCells(row)?.[LEVEL_CELL_INDEX.standard], 'the standard cell of the Harden row').toBe('-')
+    const standard = atLevel('standard')
+    const lean = atLevel('lean')
+    expect(collectDocSiteDefects([{ ...standard, text: `${standard.text} It also skips Harden on a docs-only diff.` }], REFS), 'the standard hint with the phrase').toEqual([
+      `the init hint at standard states the effect of the implement row ${row}, whose standard cell is -`,
+    ])
+    expect(collectDocSiteDefects([{ ...lean, text: seed(lean.text, HARDEN_DOCS_SKIP, 'does nothing special') }], REFS), 'the lean hint with the phrase taken out').toEqual([
+      `the init hint at lean does not state the effect of the implement row ${row}: it must match ${HARDEN_DOCS_SKIP}`,
+    ])
+  })
+
   it('known-bad probes (real sites): a row whose standard cell is - is not stated at the init hint for standard, and is stated at the one for lean', () => {
     const row = '| 3 Polish | - | skip |'
     const refs = { ...REFS, implement: withRows(REFS.implement, [row]) }
     const effects = new Map<string, RegExp>([...ROW_EFFECTS, [`implement:${row}`, POLISH_SKIP]])
-    const atLevel = (level: NonNullable<DocSite['level']>): DocSite => {
-      const found = DOC_SITES.filter(s => s.level === level)
-      expect(found.length, `one real site is read as ${level}`).toBe(1)
-      return found[0]
-    }
     expect(collectDocSiteDefects([atLevel('standard')], refs, effects)).toEqual([
       `the init hint at standard states the effect of the implement row ${row}, whose standard cell is -`,
     ])
