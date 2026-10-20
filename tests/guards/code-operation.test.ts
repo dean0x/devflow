@@ -482,5 +482,7 @@ describe('no Code variant opens a PR and each body stays under its ceiling (D-PR
     expect(collectCodeBodyDefects(doubled, roomy)).toEqual(['the Code body carries the diff check 2 times'])
     const moved = `${removed}\n${COMMIT_CHECK}\n`
     expect(collectCodeBodyDefects(moved, roomy)).toEqual(['the diff check is not on the Commit and push line ahead of the security scan'])
+    const scanFirst = `${SCAN_MARKER}\n${real}`
+    expect(collectCodeBodyDefects(scanFirst, roomy)).toEqual(['the diff check is not on the Commit and push line ahead of the security scan'])
   })
 })
