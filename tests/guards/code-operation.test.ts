@@ -390,7 +390,7 @@ const PR_ONLY_PHRASES: readonly string[] = [
 const DEBUG_OUTPUT_PHRASE = 'no secrets or tokens in logs or debug output'
 
 /** The sentence each Code-family body carries on its commit line, ahead of the scan block. */
-const COMMIT_CHECK = `Before you commit, check your diff: ${DEBUG_OUTPUT_PHRASE}.`
+const COMMIT_CHECK = `Before you commit, check the staged diff of every file you commit: ${DEBUG_OUTPUT_PHRASE}.`
 
 const COMMIT_MARKER = '**Commit and push**'
 const SCAN_MARKER = '**Security scan (conditional):**'

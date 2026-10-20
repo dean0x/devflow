@@ -36,7 +36,7 @@ inside a define is split by the build like an arm in a host: the markers sit on 
 @end
 
 @define commit_push():
-**Commit and push**: Create atomic commits with clear messages. Reference TASK_ID. Push to remote UNLESS `PUSH: false`. Before you commit, check your diff: no secrets or tokens in logs or debug output.
+**Commit and push**: Create atomic commits with clear messages. Reference TASK_ID. Push to remote UNLESS `PUSH: false`. Before you commit, check the staged diff of every file you commit: no secrets or tokens in logs or debug output.
    **Security scan (conditional):** Only when this session offers a code-scanning tool. Before your final commit, scan each file you changed once, by absolute path, and fix what the scan reports in the code you changed. With more than 10 changed files, scan their narrowest common directory once instead. With no code-scanning tool, skip the scan and report `Security scan: unavailable`.
 @end
 
