@@ -6546,6 +6546,11 @@ describe('TP-9: the hooks move the old ledger folder before any creator makes th
   // 0, does its other work, and no creator makes a ledger folder beside the old one.
   describe('a missing curation-move shim stops no hook (bash 3.2 under set -e)', () => {
     const BASH = '/bin/bash';
+    /** True when this bash ends a `set -e` shell at a `source` of a missing file, even inside `|| true`. */
+    const BASH_ENDS_AT_MISSING_SOURCE = ((): boolean => {
+      const probe = spawnSync(BASH, ['-c', 'set -e; source ./missing-shim 2>/dev/null || true; echo after'], { encoding: 'utf-8', cwd: os.tmpdir() });
+      return probe.stdout === '' && probe.status === 1;
+    })();
     const GATE = { version: '2.0.0', features: { learning: true, curation: true, memory: true } };
 
     /** A copy of the scripts folder without the shim, and its hooks folder. */
@@ -6589,10 +6594,20 @@ describe('TP-9: the hooks move the old ledger folder before any creator makes th
       fs.writeFileSync(path.join(homeDir, '.devflow', 'manifest.json'), JSON.stringify(GATE));
     });
 
-    it('non-vacuity: the copy has no shim, and bash 3.2 ends a set -e shell at a source of a missing file', () => {
+    it('non-vacuity: the copy has no shim', () => {
       expect(fs.existsSync(path.join(hooksWithoutShim(), 'curation-move'))).toBe(false);
+    });
+
+    // Only a bash 3.2 shell ends a `set -e` shell at a `source` of a missing file. A newer
+    // bash (the Linux /bin/bash is 5.x) returns 1 from it, so `|| true` works there, and the
+    // fault half of this check runs only where the bash shows the fault.
+    it.skipIf(!BASH_ENDS_AT_MISSING_SOURCE)('non-vacuity: this bash ends a set -e shell at a source of a missing file', () => {
       const res = spawnSync(BASH, ['-c', 'set -e; source ./missing-shim 2>/dev/null || true; echo after'], { encoding: 'utf-8', cwd: base });
       expect({ stdout: res.stdout, status: res.status }, 'this is the fault the guard avoids').toEqual({ stdout: '', status: 1 });
+    });
+
+    it.runIf(process.platform === 'darwin')('non-vacuity: the macOS /bin/bash shows the fault, so the guard tests below are not vacuous there', () => {
+      expect(BASH_ENDS_AT_MISSING_SOURCE).toBe(true);
     });
 
     it('queue-append sourced under set -e: it sources, and an append is refused and logged, not an exit', () => {
