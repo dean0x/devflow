@@ -54,7 +54,7 @@ When the user explicitly asks to re-validate, re-check, or re-run quality gates 
 **Produces:** TASK_ID, BASE_BRANCH, BASE_REF, EXECUTION_PLAN, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION, GATE_LEVEL
 <!-- learning:end -->
 
-Record the current branch name as `BASE_BRANCH`. Stop the run unless it matches `^(?![-#]|origin\/|(?:@|(?:FETCH_|ORIG_|MERGE_)?HEAD)$)(?!.*\.\.)[A-Za-z0-9._\/+@,#-]{1,200}$`, telling the user it allows only ASCII letters, digits and `._/+@,#-`, at most 200; no leading `-` or `#`, no `origin/` prefix, no `..`, not `@` or a HEAD name.
+Record the current branch name as `BASE_BRANCH`. Stop the run unless it matches `^(?![-#]|origin\/|(?:@|(?:FETCH_|ORIG_|MERGE_)?HEAD)$)(?!.*\.\.)[A-Za-z0-9._\/+@,#-]{1,200}$` (judge the match by reading; never pass the value to a command), telling the user it allows only ASCII letters, digits and `._/+@,#-`, at most 200; no leading `-` or `#`, no `origin/` prefix, no `..`, not `@` or a HEAD name.
 
 {{docs_root()}}
 
@@ -88,7 +88,7 @@ Derive branch name from issue or description, create feature branch, and fetch i
 Return the branch setup summary."
 ```
 
-The issue token is forwarded **unclassified**; routing is by SHAPE alone (the token count of `COMMAND_INPUT`, and whether it ends in `.md`). Only `setup-task` has resolved a provider, so a `starts with #` test here would be a github test under a neutral name: it would reclassify `PROJ-12` and `ENG-12` as task descriptions, so the branch comes from prose, no issue is fetched and nothing reports it. Token COUNT is provider-neutral: every issue spelling is one token and no free-text description is.
+The issue token is forwarded **unclassified**; routing is by SHAPE alone (the token count of `COMMAND_INPUT` and a `.md` ending). Only `setup-task` has resolved a provider, so a `starts with #` test would be a github test that reclassifies `PROJ-12` and `ENG-12` as task descriptions: the branch comes from prose, no issue is fetched and nothing reports it. Token COUNT is provider-neutral: every issue spelling is one token and no free-text description is.
 
 - **Extension.** A path ending in `.md` is a plan document, never an issue reference: it goes to `PLAN_ARTIFACT_PATH` only, and `ISSUE_INPUT` carries the plan's frontmatter `issue`, never the path (Plan Document Handling step 4).
 - **Token count.** One token is an issue reference; two or more is prose. Forwarding the FIRST token alone would send `/implement fix the login bug` as `ISSUE_INPUT: fix` with no description, so the request is dropped.
@@ -147,7 +147,7 @@ Pass `DECISIONS_CONTEXT` to Code agent (Phase 2) and Harden agent (Phase 4).
 <!-- learning:end -->
 {{knowledge_load()}}
 
-**Fresh base.** Before Phase 2, run `cd "{worktree}" && B="{BASE_BRANCH}" && node "$HOME/.devflow/scripts/resolve-base.cjs" local "${B}"; echo "exit=$?"`. Output other than one `BASE_REF=` line (40 or 64 hex, or `none`) with `exit=0` counts as `NOTE=stop`, `REASON=resolver-unavailable`. Record `BASE_REF`. By `NOTE`: `none` continues; `info` prints one plain line; `degraded` records `TRACEABILITY: DEGRADED (base {REASON}; fix: {fix})`; `stop` (`BASE_REF=none`) stops the run, naming REASON and its fix. Fix by REASON: no-merge-base `git fetch --unshallow`; no-ref or timeout `git fetch origin <base>` (`<base>` stays as written); resolver-unavailable `re-run; if it repeats, run devflow init`; invalid-name the allowed set, never the name; any other REASON none, and `; fix: {fix}` is left out.
+**Fresh base.** Before Phase 2, write `BASE_BRANCH` with the Write tool to the file that `F="$(mktemp)" && echo "F=$F"` prints, after one Read of it. If the Write tool fails, treat the value as missing; never write it with a shell command. Then run `F="{name file}"; trap 'rm -- "$F"' EXIT; cd "{worktree}" && node "$HOME/.devflow/scripts/resolve-base.cjs" local --name-stdin < "$F"; echo "exit=$?"`. Output other than one `BASE_REF=` line (40 or 64 hex, or `none`) with `exit=0` counts as `NOTE=stop`, `REASON=resolver-unavailable`. Record `BASE_REF`. By `NOTE`: `none` continues; `info` prints one plain line; `degraded` records `TRACEABILITY: DEGRADED (base {REASON}; fix: {fix})`; `stop` (`BASE_REF=none`) stops the run, naming REASON and its fix. Fix by REASON: no-merge-base `git fetch --unshallow`; no-ref or timeout `git fetch origin <base>` (`<base>` stays as written); resolver-unavailable `re-run; if it repeats, run devflow init`; invalid-name the allowed set, never the name; any other REASON none, and `; fix: {fix}` is left out.
 
 ### Phase 2: Implement
 
