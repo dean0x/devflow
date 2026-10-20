@@ -46,7 +46,8 @@ type MoveValue =
   | { state: 'moved'; mode: MovedMode; backup: string | null; rendered: boolean; notes: string[] };
 
 interface SweepValue {
-  state: 'none' | 'busy' | 'swept';
+  state: 'none' | 'busy' | 'swept' | 'skipped';
+  reason?: 'tracked' | 'unknown';
   files: number;
   merged: number;
   overflowed: number;
@@ -2338,16 +2339,109 @@ describe('the move leaves a project alone when git tracks files in its data fold
     expect(linesOf(path.join(site.newDir, QUEUE))).toEqual([turn(10), turn(1), turn(2), turn(3)]);
   });
 
-  it('makes no git call when it sweeps backups', () => {
-    seedNew({ [LOG]: '' });
-    seed(path.join(site.devflow, 'learning.backup-20261001T000001Z-00000001'), { [QUEUE]: turns(1, 3) });
-    commitInRepo('README.md');
-    const calls = vi.spyOn(nodeChildProcess, 'spawnSync');
+  describe('the backup sweep', () => {
+    const BACKUP_NAME = 'learning.backup-20261001T000001Z-00000001';
+    const SKIPPED_TRACKED = { ok: true, value: { state: 'skipped', reason: 'tracked', files: 0, merged: 0, overflowed: 0, notes: [] } };
+    const SKIPPED_UNKNOWN = { ok: true, value: { state: 'skipped', reason: 'unknown', files: 0, merged: 0, overflowed: 0, notes: [] } };
 
-    const result = mover.sweepLedgerBackups(site.root, opts());
+    /** A backup folder that holds queue rows, beside an empty new folder. */
+    function seedBackup(): string {
+      seedNew({ [LOG]: '' });
+      const backup = path.join(site.devflow, BACKUP_NAME);
+      seed(backup, { [QUEUE]: turns(1, 3) });
+      return backup;
+    }
 
-    expect(result.ok && result.value.merged).toBe(2);
-    expect(gitCalls(calls)).toEqual([]);
+    it('skips and changes nothing when git tracks a queue file of a backup folder', () => {
+      seedBackup();
+      commitInRepo(`.devflow/${BACKUP_NAME}/${QUEUE}`);
+      const before = areas();
+
+      expect(mover.sweepLedgerBackups(site.root, opts())).toEqual(SKIPPED_TRACKED);
+      expect(areas()).toEqual(before);
+      expect(exists(site.machineDir)).toBe(false);
+    });
+
+    it('skips and changes nothing when git tracks the new folder, beside a backup that holds rows', () => {
+      seedBackup();
+      commitInRepo(TRACKED_NEW_FILE);
+      const before = areas();
+
+      expect(mover.sweepLedgerBackups(site.root, opts())).toEqual(SKIPPED_TRACKED);
+      expect(areas()).toEqual(before);
+      expect(exists(site.machineDir)).toBe(false);
+    });
+
+    it('skips with the reason unknown, and changes nothing, when a .git entry stands and git fails', () => {
+      seedBackup();
+      commitInRepo('README.md');
+      vi.stubEnv('PATH', onlyPath(true));
+      const before = areas();
+
+      expect(mover.sweepLedgerBackups(site.root, opts())).toEqual(SKIPPED_UNKNOWN);
+      expect(areas()).toEqual(before);
+      expect(exists(site.machineDir)).toBe(false);
+    });
+
+    it('skips before it takes a lock: a held move lock does not make it busy', () => {
+      seedBackup();
+      commitInRepo(`.devflow/${BACKUP_NAME}/${QUEUE}`);
+      fs.mkdirSync(site.machineDir);
+      holdLock(moveLockDir());
+
+      expect(mover.sweepLedgerBackups(site.root, opts())).toEqual(SKIPPED_TRACKED);
+      expect(exists(moveLockDir())).toBe(true);
+    });
+
+    it('merges the rows as before when git tracks nothing under the folders', () => {
+      seedBackup();
+      commitInRepo('README.md', '.devflow/project.json');
+
+      const result = mover.sweepLedgerBackups(site.root, opts());
+
+      expect(result.ok && result.value.state).toBe('swept');
+      expect(result.ok && result.value.merged).toBe(2);
+    });
+
+    it('merges the rows as before, and starts no git, when the project has no .git entry', () => {
+      seedBackup();
+      const calls = vi.spyOn(nodeChildProcess, 'spawnSync');
+
+      const result = mover.sweepLedgerBackups(site.root, opts());
+
+      expect(result.ok && result.value.merged).toBe(2);
+      expect(gitCalls(calls)).toEqual([]);
+    });
+
+    it('asks git once, before it makes any folder or lock', () => {
+      seedBackup();
+      commitInRepo('README.md');
+      const calls = vi.spyOn(nodeChildProcess, 'spawnSync');
+      const real = nodeFs.mkdirSync;
+      const folderMakers: string[] = [];
+      vi.spyOn(nodeFs, 'mkdirSync').mockImplementation(((target: fs.PathLike, ...rest: unknown[]) => {
+        folderMakers.push(`after ${gitCalls(calls).length} git call(s): ${String(target)}`);
+        return (real as (...a: unknown[]) => unknown)(target, ...rest);
+      }) as never);
+
+      mover.sweepLedgerBackups(site.root, opts());
+
+      expect(gitCalls(calls)).toHaveLength(1);
+      expect(folderMakers.length).toBeGreaterThan(0);
+      for (const entry of folderMakers) expect(entry).toMatch(/^after 1 git call/);
+    });
+
+    it('asks git nothing when there is no backup that holds rows, or no new folder', () => {
+      seedNew({ [LOG]: '' });
+      commitInRepo(TRACKED_NEW_FILE);
+      const calls = vi.spyOn(nodeChildProcess, 'spawnSync');
+
+      expect(mover.sweepLedgerBackups(site.root, opts())).toEqual({ ok: true, value: { state: 'none', files: 0, merged: 0, overflowed: 0, notes: [] } });
+      fs.rmSync(site.newDir, { recursive: true });
+      seed(path.join(site.devflow, BACKUP_NAME), { [QUEUE]: turns(1, 3) });
+      expect(mover.sweepLedgerBackups(site.root, opts())).toEqual({ ok: true, value: { state: 'none', files: 0, merged: 0, overflowed: 0, notes: [] } });
+      expect(gitCalls(calls)).toEqual([]);
+    });
   });
 });
 
@@ -2495,6 +2589,8 @@ describe('json-helper move-ledger (TP-36, argument half)', { timeout: HOOK_RUN_A
 
   it('prints skipped unknown, exit 0, and changes nothing, when git does not answer', () => {
     seedOld(ledgerSet('one'));
+    // A work tree around the project: its empty .git is not answered from the outside.
+    git(site.tmp, ['-c', 'init.defaultBranch=main', 'init', '-q']);
     fs.mkdirSync(path.join(site.root, '.git'));
     const before = snapshotTree(site.root);
 

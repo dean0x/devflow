@@ -100,6 +100,9 @@ export type BackupSweepReport =
   | { readonly state: 'busy' }
   | { readonly state: 'failed'; readonly message: string };
 
+/** What the sweep answers beyond a report: it left the project alone (git tracks a folder, or did not answer). */
+type SweepSkip = { readonly state: 'skipped'; readonly reason: MoveSkipReason };
+
 /**
  * What happened to one project. `moved`: the folder moved (`mode`), or the new folder
  * won and the old one became the backup; `rendered` is false when the index was not
@@ -276,11 +279,14 @@ async function moveOne(root: string, opts: SharedMoveOptions, io: SharedMoveIO):
   if (answer.state === 'busy') return answer.reason === 'claim' ? { kind: 'busy', root, reason: 'claim' } : { kind: 'busy', root };
   if (answer.state === 'skipped') return { kind: 'skipped', root, reason: answer.reason };
 
-  const sweep = await sweepIfBackup(root, io, storeOpts);
+  const swept = await sweepIfBackup(root, io, storeOpts);
   if (answer.state === 'moved') {
+    // A sweep that skips right after a move left the project alone; the next init says why.
+    const sweep = swept?.state === 'skipped' ? null : swept;
     return { kind: 'moved', root, mode: answer.mode, backup: answer.backup, rendered: answer.rendered, notes: answer.notes, sweep };
   }
-  return { kind: 'unchanged', root, sweep };
+  if (swept?.state === 'skipped') return { kind: 'skipped', root, reason: swept.reason };
+  return { kind: 'unchanged', root, sweep: swept };
 }
 
 /** Run the backup sweep when `.devflow` holds a backup folder; answer null when there is nothing to report. */
@@ -288,7 +294,7 @@ async function sweepIfBackup(
   root: string,
   io: SharedMoveIO,
   storeOpts: () => LedgerMoveOptions,
-): Promise<BackupSweepReport | null> {
+): Promise<BackupSweepReport | SweepSkip | null> {
   let entries: readonly string[] | null;
   try {
     entries = await io.readdir(path.join(root, '.devflow'));
@@ -307,16 +313,18 @@ async function sweepIfBackup(
   return reportSweep(swept.value);
 }
 
-function reportSweep(swept: LedgerSweepOutcome): BackupSweepReport | null {
+function reportSweep(swept: LedgerSweepOutcome): BackupSweepReport | SweepSkip | null {
   switch (swept.state) {
     case 'none':
       return null;
     case 'busy':
       return { state: 'busy' };
+    case 'skipped':
+      return { state: 'skipped', reason: swept.reason };
     case 'swept':
       return { state: 'swept', files: swept.files, merged: swept.merged, overflowed: swept.overflowed, notes: swept.notes };
     default: {
-      const unreachable: never = swept.state;
+      const unreachable: never = swept;
       return unreachable;
     }
   }

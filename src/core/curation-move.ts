@@ -56,14 +56,28 @@ export type LedgerMoveOutcome =
     readonly notes: readonly string[];
   };
 
-/** `sweepLedgerBackups`'s answer: the queue files merged out of the backups a move left. */
-export interface LedgerSweepOutcome {
-  readonly state: 'none' | 'busy' | 'swept';
-  readonly files: number;
-  readonly merged: number;
-  readonly overflowed: number;
-  readonly notes: readonly string[];
-}
+/**
+ * `sweepLedgerBackups`'s answer: the queue files merged out of the backups a move left.
+ * `skipped`: the sweep left the project alone and changed nothing, because git tracks
+ * files in a data folder or a backup folder (`reason` `tracked`) or because a `.git`
+ * entry stands and git did not answer (`reason` `unknown`); the counts are zero.
+ */
+export type LedgerSweepOutcome =
+  | {
+    readonly state: 'none' | 'busy' | 'swept';
+    readonly files: number;
+    readonly merged: number;
+    readonly overflowed: number;
+    readonly notes: readonly string[];
+  }
+  | {
+    readonly state: 'skipped';
+    readonly reason: 'tracked' | 'unknown';
+    readonly files: number;
+    readonly merged: number;
+    readonly overflowed: number;
+    readonly notes: readonly string[];
+  };
 
 /** One backup folder a move left under `.devflow`, with the rows its unswept queue files still hold. */
 export interface LedgerBackupRows {

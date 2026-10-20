@@ -196,7 +196,6 @@ const ENTRY = Object.freeze({
  * folder). A rendered file, a journal-named file and an unknown entry are never read
  * or renamed: a link among them never refuses a move.
  *
- *
  * leftBehind: the entry stays in the backup, and one note lists it.
  */
 const MOVE_ENTRY_CLASSES = Object.freeze({
@@ -1303,11 +1302,20 @@ function claimIsFresh(file, now) {
  * and the pass looks into at most MOVE_MAX_BACKUPS_SCANNED backups. With the new
  * folder absent or no backup it answers `none`.
  *
+ * Before it makes, locks or merges anything, the sweep asks the same question the move
+ * asks (checkTrackedAreas), which covers the backup folders too. If git tracks any
+ * entry under a data folder or a backup folder, or if a `.git` entry stands and git
+ * does not answer, the answer is `skipped` with the reason `tracked` or `unknown` and
+ * zero counts, and nothing changes: the folders, the machine directory and the locks
+ * stay as they are. A root with no `.git` entry makes no git call, and neither does a
+ * pass that finds nothing to merge.
+ *
  * @param {unknown} root - the ledger root, an absolute path
  * @param {{ machineDir?: string, homeDir?: string, now?: number }} [options]
  * Every message and note is one line with no control character (scrubMoveResult).
  *
- * @returns {{ ok: true, value: { state: 'none'|'busy'|'swept', files: number, merged: number, overflowed: number, notes: string[] } }
+ * @returns {{ ok: true, value: { state: 'none'|'busy'|'swept', files: number, merged: number, overflowed: number, notes: string[] }
+ *   | { state: 'skipped', reason: 'tracked'|'unknown', files: number, merged: number, overflowed: number, notes: string[] } }
  *   | { ok: false, error: { kind: 'refused'|'io-error', message: string } }}
  */
 function sweepLedgerBackups(root, options = {}) {
@@ -1316,7 +1324,7 @@ function sweepLedgerBackups(root, options = {}) {
 
 /** sweepLedgerBackups before its messages and notes are made single-line. */
 function sweepLedgerBackupsUnscrubbed(root, options = {}) {
-  const idle = state => ({ ok: true, value: { state, files: 0, merged: 0, overflowed: 0, notes: [] } });
+  const idle = (state, extra = {}) => ({ ok: true, value: { state, ...extra, files: 0, merged: 0, overflowed: 0, notes: [] } });
   const opened = moveContext(SWEEP_OP, root, options);
   if (!opened.ok) return opened;
   const ctx = opened.value;
@@ -1325,6 +1333,11 @@ function sweepLedgerBackupsUnscrubbed(root, options = {}) {
     if (lstatOrNull(ctx.newDir) === null) return idle('none');
     const backups = backupsHoldingRows(devflowDir).slice(0, MOVE_MAX_BACKUPS);
     if (backups.length === 0) return idle('none');
+
+    // Git's index decides, before this pass makes a folder, takes a lock or merges a row.
+    const tracking = checkTrackedAreas(ctx.root);
+    if (tracking !== 'untracked') return idle('skipped', { reason: tracking });
+
     for (const name of backups) {
       const problem = backupProblem(path.join(devflowDir, name));
       if (problem !== null) return moveRefused(SWEEP_OP, problem);

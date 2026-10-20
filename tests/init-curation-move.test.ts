@@ -354,6 +354,32 @@ describe('moveProjectLedgers: the outcome of each project', () => {
     ]);
   });
 
+  it.each([
+    ['tracked'],
+    ['unknown'],
+  ] as const)('a project whose backup sweep skipped for the reason %s is skipped, with the fixed notice', async (reason) => {
+    const { io, rec } = fakeIO({
+      devflowEntries: { '/w/a': ['learning.backup-20260101'] },
+      sweeps: { '/w/a': ok({ state: 'skipped', reason, files: 0, merged: 0, overflowed: 0, notes: [] }) },
+    });
+    const report = reportOf(await moveProjectLedgers(options({ projectRoots: ['/w/a'] }), io));
+    expect(report.outcomes[0]).toEqual({ kind: 'skipped', root: '/w/a', reason });
+    expect(report.movedCount).toBe(0);
+    expect(report.lines).toEqual([`Ledger move skipped for /w/a: ${MOVE_SKIP_NOTICE[reason]}`]);
+    expect(rec.order).toEqual(['move:/w/a', 'sweep:/w/a']);
+  });
+
+  it('keeps a move that happened when the backup sweep right after it skips', async () => {
+    const { io } = fakeIO({
+      devflowEntries: { '/w/a': ['learning.backup-20260101'] },
+      moves: { '/w/a': ok(MOVED) },
+      sweeps: { '/w/a': ok({ state: 'skipped', reason: 'tracked', files: 0, merged: 0, overflowed: 0, notes: [] }) },
+    });
+    const report = reportOf(await moveProjectLedgers(options({ projectRoots: ['/w/a'] }), io));
+    expect(report.outcomes[0]).toMatchObject({ kind: 'moved', sweep: null });
+    expect(report.movedCount).toBe(1);
+  });
+
   it('moveLedgerRoot answers the skip, for the curation command', async () => {
     const { io } = fakeIO({ moves: { '/w/a': ok(SKIPPED_TRACKED) } });
     expect(await moveLedgerRoot('/w/a', { homeDir: HOME, machineDir: MACHINE }, io)).toEqual({ kind: 'skipped', root: '/w/a', reason: 'tracked' });
