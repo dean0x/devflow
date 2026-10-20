@@ -28,7 +28,10 @@
  *          own; the base commit is the 40 or 64 lowercase hex commit setup-task
  *          reports as `baseSha`, and a ticket without one stops (ESCALATED
  *          `base-missing`) before any other spawn. A focus that twice answers
- *          `reviewed: false` is a coverage gap, and the ticket does not pass.
+ *          `reviewed: false` is a coverage gap, and the ticket does not pass. The
+ *          review-scope description and the changed-files step of the wave
+ *          evidence state the same source: the list starts at the hex Base ref,
+ *          filters deletions and checks the diff exit.
  *   W3     (#376) with a tracking issue, the rendered wave block leads with its
  *          `Refs` line, and `check wave` admits it.
  *   W1     (#376) after the wave PR opens, step 7 runs one Test agent on the
@@ -55,7 +58,7 @@ import * as os from 'os'
 import * as path from 'path'
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
-import { CODE_AGENT_TYPES, ROOT, parseFences, requireDistFile } from '../helpers.js'
+import { CODE_AGENT_TYPES, ROOT, parseFences, requireDistFile, resolveCurationOffSource } from '../helpers.js'
 import { PR_EVIDENCE_SCRIPT, VERIFY_EVIDENCE_SCRIPT } from '../evidence/seam.js'
 
 const BUILT = requireDistFile('dynamic-build.md')
@@ -784,6 +787,9 @@ const BASE_LINE = 'const BASE_SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(Strin
 const BASE_STOP_LINE = 'if (BASE_SHA === "(none)") {'
 /** The review scope's range, and the line the verification panel carries. */
 const RANGE_TEXT = 'DIFF_RANGE: ${BASE_SHA}...HEAD'
+/** The Return field through which the setup-task spawn is asked for the base commit, and the Return it closes. */
+const SETUP_BASE_FIELD = '"baseSha": "<the 40 or 64 hex git rev-parse HEAD prints before step 4>"'
+const SETUP_BASE_RETURN = `${SETUP_BASE_FIELD}}`
 const HEX_40 = 'a'.repeat(40)
 const HEX_64 = '0123456789abcdef'.repeat(4)
 
@@ -862,6 +868,55 @@ export async function collectReviewRangeViolations(body: string | null): Promise
   return [...new Set(out)]
 }
 
+/** Whether the setup-task spawn of an engine body asks for the base commit in its Return. */
+function setupAsksForBaseSha(script: string): boolean {
+  const from = script.indexOf('OPERATION: setup-task')
+  const to = from === -1 ? -1 : script.indexOf('agentType: "Git"', from)
+  return to !== -1 && script.slice(from, to).includes(SETUP_BASE_RETURN)
+}
+
+/** The parts of the review-scope description of the command: the range, its source and the stop. */
+const SCOPE_LINE_PARTS: readonly string[] = [
+  '`DIFF_RANGE: {base commit}...HEAD`',
+  'the base commit is the 40 or 64 hex commit that the ticket branch was forked from',
+  'as the setup step reported it',
+  'a ticket with none stops `base-missing`',
+]
+
+/** The parts of the changed-files step of the wave evidence, each with the violation it reports when the step lacks it. */
+const CHANGED_FILES_PARTS: ReadonlyArray<readonly [string, string]> = [
+  ['Take `{base_ref}` from step 6\'s `- **Base ref**:` line', 'the list does not start from the Base ref that step 6 returned'],
+  ['git -C "{integration worktree root}" diff --name-only --diff-filter=d {base_ref}...HEAD; echo "exit=$?"', 'the command is not the name-only diff that starts at {base_ref}, filters deletions and echoes its exit status'],
+  ['; only when it is 40 or 64 lowercase hex, run `git -C', 'the step does not require a 40 or 64 lowercase hex {base_ref} before the diff runs'],
+  ['Unless it ran and printed `exit=0`', 'the step does not require a zero diff exit'],
+  ['record `TRACEABILITY: DEGRADED (wave base unusable)` and skip this step.', 'the step does not record one degraded line and skip'],
+]
+
+/** The blank-line separated paragraph of `text` that holds `marker`, or null unless the marker occurs once. */
+function paragraphOf(text: string, marker: string): string | null {
+  if (offsetsOf(text, marker).length !== 1) return null
+  return text.split(/\n(?:[ \t]*\n)+/).find(p => p.includes(marker)) ?? null
+}
+
+/**
+ * Named collector: where the prose of a built ticket command states a range source other than the engine's. The
+ * review-scope description carries the range, the hex base commit and the stop; the escalation types name
+ * `base-missing`; the changed-files step of the wave evidence starts at the hex Base ref, filters deletions, checks
+ * the diff exit and skips with one degraded line.
+ */
+export function collectRangeSourceViolations(built: string): string[] {
+  const out: string[] = []
+  const lines = built.split('\n').filter(l => l.startsWith('**Review scope:**'))
+  if (lines.length !== 1) out.push(`${lines.length} Review scope lines, expected 1`)
+  else out.push(...SCOPE_LINE_PARTS.filter(part => !lines[0].includes(part)).map(part => `the description does not state: ${part}`))
+  if (!/"type": "[^"\n]*\bbase-missing\b[^"\n]*"/.test(built)) out.push('the escalation type list does not name base-missing')
+  const changed = paragraphOf(built, '**Changed files.**')
+  if (changed === null) return [...out, 'the wave evidence step has no single Changed files paragraph']
+  out.push(...CHANGED_FILES_PARTS.filter(([part]) => !changed.includes(part)).map(([, violation]) => violation))
+  if (!built.includes('FILES_CHANGED: {the file list that diff printed}')) out.push('the Test spawn does not take the list that diff printed')
+  return out
+}
+
 describe('AC-9: a ticket reviews from the commit its branch was forked from, and stops when setup reports none', () => {
   it('the table covers both outcomes, and a 40-hex and a 64-hex commit are both admitted', () => {
     expect(new Set(BASE_TABLE.map(c => c.stops))).toEqual(new Set([true, false]))
@@ -882,7 +937,7 @@ describe('AC-9: a ticket reviews from the commit its branch was forked from, and
     expect(stop, 'the base stop follows the branch stop').toBeGreaterThan(branchStop)
     expect(implement, 'and precedes the implement phase').toBeGreaterThan(stop)
     expect(offsetsOf(script, 'const BASE_SHA = '), 'one binding: the reported commit').toHaveLength(1)
-    expect(script, 'setup-task is asked for its baseSha').toContain('"baseSha": "<the 40 or 64 hex git rev-parse HEAD prints before step 4>"}')
+    expect(setupAsksForBaseSha(script), 'setup-task is asked for its baseSha').toBe(true)
   })
 
   it('executed: every review spawn, the retry and the verification panel included, takes its range on a line of its own', async () => {
@@ -957,6 +1012,108 @@ describe('AC-9: a ticket reviews from the commit its branch was forked from, and
     ])
     expect(run.quarantined.map(q => q.ticket)).toEqual(['#12'])
     expect(run.quarantined[0].reason).toContain('setup-task reported no base commit')
+  })
+})
+
+describe('AC-9: each defect seeded into the ticket command\'s engine or prose is reported for its own defect', () => {
+  it('known-bad probe: a command with no ticket workflow fence is reported by both executed collectors', async () => {
+    const none = singleEngineBody('Review the diff.\n')
+    expect(none).toBeNull()
+    expect(await collectBaseStopViolations(none)).toEqual(['the SINGLE engine body was not found'])
+    expect(await collectReviewRangeViolations(none)).toEqual(['the SINGLE engine body was not found'])
+  })
+
+  it('known-bad probe: a setup-task spawn that does not ask for the base commit is reported', () => {
+    expect(setupAsksForBaseSha(SINGLE!)).toBe(true)
+    expect(setupAsksForBaseSha(seedOnce(SINGLE!, `, ${SETUP_BASE_FIELD}`, ''))).toBe(false)
+  })
+
+  it('known-bad probe: a second assignment of the base commit stops the run, because the binding is a const', async () => {
+    const reassigned = seedOnce(SINGLE!, BASE_STOP_LINE, `BASE_SHA = "HEAD";\n${BASE_STOP_LINE}`)
+    await expect(collectBaseStopViolations(reassigned)).rejects.toThrow('constant')
+  })
+
+  const NOT_STOPPED = 'expected ESCALATED base-missing before any other spawn'
+  const BASE_STOP_COMMENT = '// Base stop: every review range'
+  /** A defect seeded into the built command: its label, the text it replaces, the replacement and what the collector reports. */
+  type TextSeed = readonly [label: string, from: string, to: string, reported: string]
+
+  const BASE_SEEDS: readonly TextSeed[] = [
+    ['the hex test admits uppercase', 'const BASE_SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/', 'const BASE_SHA = /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/', `an uppercase commit (issueRequired true): ${NOT_STOPPED}`],
+    ['the base stop escalates with another type', 'type: "base-missing", description: "setup-task', 'type: "branch-missing", description: "setup-task', NOT_STOPPED],
+    ['the implement phase runs before the base stop', BASE_STOP_COMMENT, `await phase("implement", () => agent("x", { agentType: "Code" }));\n${BASE_STOP_COMMENT}`, NOT_STOPPED],
+    ['a spawn runs between the base binding and the base stop', BASE_STOP_COMMENT, `await agent("x", { agentType: "Git" });\n${BASE_STOP_COMMENT}`, NOT_STOPPED],
+  ]
+
+  it.each(BASE_SEEDS)('known-bad probe, executed: %s', async (_label, from, to, reported) => {
+    expect(from, 'the seed replaces itself').not.toBe(to)
+    expect((await collectBaseStopViolations(seedOnce(SINGLE!, from, to))).join('\n')).toContain(reported)
+  })
+
+  /** The panel spawn opens its range line; the review scope ends with it. */
+  const PANEL_RANGE = `${RANGE_TEXT}\nLens `
+  const SCOPE_RANGE = `\\n${RANGE_TEXT}\\n\`;`
+  /** A review-range seed also names the kinds of Review spawn that the executed collector reports, in order. */
+  type RangeSeed = readonly [label: string, from: string, to: string, kinds: readonly string[]]
+
+  const RANGE_SEEDS: readonly RangeSeed[] = [
+    ['the focus spawns carry no scope', ' review. ${reviewScope}\nFocus discipline', ' review.\nFocus discipline', ['focus']],
+    ['the retry carries no scope', ' review. ${reviewScope} Focus: ${focus} discipline.', ' review. Focus: ${focus} discipline.', ['retry']],
+    ['the panel range shares its line with other text', PANEL_RANGE, `Range ${PANEL_RANGE}`, ['panel']],
+    ['the panel range starts at the ticket branch', PANEL_RANGE, PANEL_RANGE.replace('BASE_SHA', 'BRANCH'), ['panel']],
+    ['the scope range starts at the ticket branch', SCOPE_RANGE, SCOPE_RANGE.replace('BASE_SHA', 'BRANCH'), ['focus', 'retry']],
+    ['a new Review spawn carries no range', '// Phase 5: Review', 'await agent("Review once more.", { agentType: "Review" });\n// Phase 5: Review', ['focus']],
+  ]
+
+  it.each(RANGE_SEEDS)('known-bad probe, executed: %s', async (_label, from, to, kinds) => {
+    expect(from, 'the seed replaces itself').not.toBe(to)
+    expect((await collectReviewRangeViolations(seedOnce(SINGLE!, from, to))).map(f => f.split(':')[0])).toEqual(kinds)
+  })
+
+  const BUILT_OFF = resolveCurationOffSource('commands', 'dynamic-build')
+
+  it('executed: the curation-off command stops and reviews exactly as the curation-on one does', async () => {
+    expect(BUILT_OFF, 'the curation-off build of the ticket command was not found').not.toBeNull()
+    const body = singleEngineBody(BUILT_OFF ?? '')
+    expect(await collectBaseStopViolations(body)).toEqual([])
+    expect(await collectReviewRangeViolations(body)).toEqual([])
+  })
+
+  /** Defects seeded into the prose of the built ticket command: the review-scope description, the escalation types and the changed-files step. */
+  const PROSE_SEEDS: readonly TextSeed[] = [
+    ['the changed-files diff keeps deletions', '--diff-filter=d {base_ref}...HEAD', '{base_ref}...HEAD', 'the command is not the name-only diff'],
+    ['the changed-files diff starts at a branch', '--diff-filter=d {base_ref}...HEAD', '--diff-filter=d main...HEAD', 'the command is not the name-only diff'],
+    ['the changed-files diff does not echo its exit status', '{base_ref}...HEAD; echo "exit=$?"', '{base_ref}...HEAD', 'the command is not the name-only diff'],
+    ['the changed-files step takes any base ref', '; only when it is 40 or 64 lowercase hex, run `git -C', ' and run `git -C', 'the step does not require a 40 or 64 lowercase hex {base_ref}'],
+    ['the changed-files step ignores the diff exit', 'Unless it ran and printed `exit=0`, record', 'Then record', 'the step does not require a zero diff exit'],
+    ['the changed-files step does not skip with one degraded line', 'record `TRACEABILITY: DEGRADED (wave base unusable)` and skip this step.', 'skip this step.', 'the step does not record one degraded line and skip'],
+    ['the changed-files step reads another base', 'Take `{base_ref}` from step 6\'s `- **Base ref**:` line', 'Take `{base_ref}` from the branch', 'the list does not start from the Base ref that step 6 returned'],
+    ['the Test spawn takes another list', 'FILES_CHANGED: {the file list that diff printed}', 'FILES_CHANGED: {the branch diff}', 'the Test spawn does not take the list that diff printed'],
+    ['the review-scope description names no stop', '; a ticket with none stops `base-missing`.', '.', 'the description does not state: a ticket with none stops `base-missing`'],
+    ['the review-scope description names another range', '`DIFF_RANGE: {base commit}...HEAD`', '`DIFF_RANGE: {base branch}...HEAD`', 'the description does not state: `DIFF_RANGE: {base commit}...HEAD`'],
+    ['the escalation types omit base-missing', ' | base-missing"', '"', 'the escalation type list does not name base-missing'],
+  ]
+
+  const PROSE_VARIANTS: ReadonlyArray<readonly [arm: string, text: string]> = [['curation on', BUILT], ['curation off', BUILT_OFF ?? '']]
+
+  it('the prose of the command states the range source the spawns use, in both curation variants', () => {
+    expect(BUILT_OFF, 'the curation-off build of the ticket command was not found').not.toBeNull()
+    for (const [arm, text] of PROSE_VARIANTS) expect(collectRangeSourceViolations(text), arm).toEqual([])
+  })
+
+  it('known-bad probe: a command with no Review scope line, escalation type or Changed files paragraph is reported for each', () => {
+    expect(collectRangeSourceViolations('Review the diff.\n')).toEqual([
+      '0 Review scope lines, expected 1',
+      'the escalation type list does not name base-missing',
+      'the wave evidence step has no single Changed files paragraph',
+    ])
+  })
+
+  it.each(PROSE_SEEDS)('known-bad probe: %s', (_label, from, to, reported) => {
+    for (const [arm, text] of PROSE_VARIANTS) {
+      expect(from, `${arm}: the seed replaces itself`).not.toBe(to)
+      expect(collectRangeSourceViolations(seedOnce(text, from, to)).join('\n'), arm).toContain(reported)
+    }
   })
 })
 
