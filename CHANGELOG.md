@@ -22,10 +22,10 @@ Do the step below after you update.
 
 **New stops:**
 - `/implement` stops when no usable base exists, for example in a shallow clone without the base history. `/code-review` and `/bug-analysis` stop in that case on a full-range run. The message names the cause and the fix: `git fetch --unshallow`, `git fetch origin <base>`, or a re-run (and `devflow init` if the re-run repeats the stop).
-- The same three commands stop on a base branch name outside the allowed set. The message states the set.
+- The same three commands stop on a base branch name outside the allowed set, or one that git refuses. The message states the set.
 - In `/code-review` multi-worktree mode, a rejected base blocks only that worktree.
 - The Git agent's `validate-branch` returns BLOCKED in the same cases. `/resolve` takes its branch diff from it.
-- The Git agent's `ensure-pr-ready` stops only on a base name outside the allowed set. For any other base stop it prints `TRACEABILITY: DEGRADED (base {REASON}; fix: {fix})` and goes on.
+- The Git agent's `ensure-pr-ready` stops only on a base name outside the allowed set, or one that git refuses. For any other base stop it prints `TRACEABILITY: DEGRADED (base {REASON}; fix: {fix})` and goes on.
 
 **New resolver call:**
 - `ensure-pr-ready` calls `resolve-base.cjs` in `pr` mode with the base branch of the PR. The call makes at most one fetch of the base branch.
@@ -37,6 +37,8 @@ Do the step below after you update.
 
 **Known limits:**
 - A fetch that stops at its 45-second bound can leave a `refs/remotes/origin/<name>.lock` file in the git directory. Later runs then report `fetch-failed` until you delete the file.
+- The fetch needs git 2.29 or newer. With an older git, every run reports `fetch-failed` and prints the base warning.
+- The fetch runs no askpass program. Where an askpass program is the only credential source, a remote that needs credentials gives `fetch-failed` on every run, with the base warning.
 
 ### Added
 
@@ -45,7 +47,7 @@ Do the step below after you update.
 
 ### Fixed
 
-- **`/implement`, `/code-review`, `/bug-analysis` and `/resolve` use a fresh base for branch diffs, and branch-name validation is tighter** ([#495](https://github.com/dean0x/devflow/issues/495)). A new script, `resolve-base.cjs`, makes at most one fetch of the base branch, picks the base by one stated rule and prints one status line. The fetch updates only the remote-tracking ref of the base branch, and credential prompts are off for it. The branch diff starts at the fork point of that base and `HEAD`. The fetch stops after 45 seconds, each local git call stops after 30 seconds, and one run has a budget of 100 seconds. A local git call that gives no answer reports `resolver-unavailable`. When the fetch fails or times out, `/implement`, `/code-review` and `/bug-analysis` use the best base they have and print a warning. Known limit: `/resolve` uses that base without a warning. When no usable base exists, for example in a shallow clone without the base history, `/implement` stops, and `/code-review` and `/bug-analysis` stop on a full-range run. Each names the cause and a fix. `/resolve` takes its branch diff from the Git agent's `validate-branch`, which returns BLOCKED in that case. A normal `/implement` run fetches the base branch once, and a re-validation that you ask for can add one more fetch. A base branch name is checked against a stricter allowed set, and the refusal message states that set. In `/code-review` multi-worktree mode, a rejected base blocks only that worktree. `/code-review` and `/bug-analysis` use the stored review head of an incremental run only when it is a commit ID of 40 or 64 lowercase hex digits. Any other value takes the full range. A tracked review-head file is ignored, and the review takes the full range. A failed patch write in `/code-review` stops the run. Run `devflow init` after you update, to install the script and the updated commands.
+- **`/implement`, `/code-review`, `/bug-analysis` and `/resolve` use a fresh base for branch diffs, and branch-name validation is tighter** ([#495](https://github.com/dean0x/devflow/issues/495)). A new script, `resolve-base.cjs`, makes at most one fetch of the base branch, picks the base by one stated rule and prints one status line. The fetch updates only the remote-tracking ref of the base branch, and credential prompts are off for it. The branch diff starts at the fork point of that base and `HEAD`. The fetch stops after 45 seconds, each local git call stops after 30 seconds, and one run has a budget of 100 seconds. A local git call that gives no answer reports `resolver-unavailable`. When the fetch fails or times out, `/implement`, `/code-review` and `/bug-analysis` use the best base they have and print a warning. Known limit: `/resolve` uses that base without a warning. When no usable base exists, for example in a shallow clone without the base history, `/implement` stops, and `/code-review` and `/bug-analysis` stop on a full-range run. Each names the cause and a fix. `/resolve` takes its branch diff from the Git agent's `validate-branch`, which returns BLOCKED in that case. A normal `/implement` run fetches the base branch once, and a re-validation that you ask for can add one more fetch. A base branch name is checked against a stricter allowed set and against git's own name rules, so a name outside the set, or one that git refuses, stops the run, and the refusal message states the set. In `/code-review` multi-worktree mode, a rejected base blocks only that worktree. `/code-review` and `/bug-analysis` use the stored review head of an incremental run only when it is a commit ID of 40 or 64 lowercase hex digits. Any other value takes the full range. A tracked review-head file is ignored, and the review takes the full range. A failed patch write in `/code-review` stops the run. Run `devflow init` after you update, to install the script and the updated commands.
 
 ---
 
