@@ -23,6 +23,9 @@
  *         site, in both modes. Each call takes the smaller of its own bound and the time
  *         left in the run budget, which stays below the 120 s Bash tool limit.
  *   The source reaches git through argv arrays, with shell false and no exec call.
+ *   The name on standard input (--name-stdin): a name file or a pipe on the real descriptor 0, the
+ *         refusals of an empty, unreadable or oversized input, the argument form and a usage stop
+ *         that never read, and a name that never reaches stdout or stderr.
  *
  * Every spawn names its cwd and takes its environment from scopedEnv(), so the developer's
  * HOME, git config and ssh settings never reach a fixture.
@@ -30,7 +33,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { createRequire } from 'module'
-import { spawnSync, type SpawnSyncOptions } from 'child_process'
+import { spawn as spawnAsync, spawnSync, type SpawnSyncOptions } from 'child_process'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
@@ -889,6 +892,138 @@ function collectProcessDefects(source: string): string[] {
   }
   return defects
 }
+
+// ---------------------------------------------------------------------------
+// The name on standard input, through the real script
+// ---------------------------------------------------------------------------
+
+describe.skipIf(!POSIX)('the name on standard input, through the real script', SPAWN_BUDGET, () => {
+  interface Outcome { readonly stdout: string; readonly stderr: string; readonly status: number | null }
+
+  /** Start the script with its standard input opened on a file (the carrier the prompts use). */
+  function runWithFile(w: World, args: readonly string[], content: string | Buffer): Outcome {
+    const file = path.join(w.root, `name-${fs.readdirSync(w.root).length}.txt`)
+    fs.writeFileSync(file, content)
+    const fd = fs.openSync(file, 'r')
+    try {
+      return runWithStdio(w, args, fd)
+    } finally {
+      fs.closeSync(fd)
+    }
+  }
+
+  function runWithStdio(w: World, args: readonly string[], stdin: number | 'ignore' | 'pipe', input?: string): Outcome {
+    const r = spawnSync(process.execPath, [RESOLVE_BASE_SCRIPT, ...args], {
+      cwd: w.work, env: cleanEnv(w.home, {}), encoding: 'utf8', stdio: [stdin, 'pipe', 'pipe'], timeout: SUBPROCESS_TIMEOUT_MS, input,
+    })
+    return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', status: r.status }
+  }
+
+  const stopLine = (reason: string): string => `BASE_REF=none TIP=none FETCH=skipped REASON=${reason} NOTE=stop\n`
+
+  it('reads a name file on standard input and prints one conforming line, exit 0, nothing on stderr', () => {
+    const w = newWorld()
+    const want = `BASE_REF=${w.m0} TIP=origin FETCH=ok REASON=fresh NOTE=none\n`
+    for (const content of ['main\n', 'main\r\n', 'main']) {
+      for (const mode of ['pr', 'local']) {
+        const r = runWithFile(w, [mode, '--name-stdin'], content)
+        expect(r, `${mode} ${JSON.stringify(content)}`).toEqual({ stdout: want, stderr: '', status: 0 })
+        expect(r.stdout.trimEnd()).toMatch(RB.LINE_RE)
+      }
+    }
+  })
+
+  it('gives the same line from a pipe, and honours --cross', () => {
+    const w = newWorld()
+    const viaPipe = runWithStdio(w, ['pr', '--name-stdin'], 'pipe', 'main\n')
+    expect(viaPipe).toEqual({ stdout: `BASE_REF=${w.m0} TIP=origin FETCH=ok REASON=fresh NOTE=none\n`, stderr: '', status: 0 })
+    const cross = runWithFile(w, ['pr', '--name-stdin', '--cross', 'true'], 'main\n')
+    expect(cross).toEqual({ stdout: `BASE_REF=${w.m0} TIP=local FETCH=skipped REASON=fork-origin NOTE=info\n`, stderr: '', status: 0 })
+  })
+
+  it('gives resolver-unavailable for empty input, a null device and a descriptor that cannot be read', () => {
+    const w = newWorld()
+    expect(runWithFile(w, ['pr', '--name-stdin'], '')).toEqual({ stdout: stopLine('resolver-unavailable'), stderr: '', status: 0 })
+    expect(runWithStdio(w, ['pr', '--name-stdin'], 'ignore')).toEqual({ stdout: stopLine('resolver-unavailable'), stderr: '', status: 0 })
+    const dir = fs.openSync(w.root, 'r')
+    try {
+      expect(runWithStdio(w, ['pr', '--name-stdin'], dir)).toEqual({ stdout: stopLine('resolver-unavailable'), stderr: '', status: 0 })
+    } finally {
+      fs.closeSync(dir)
+    }
+  })
+
+  it('gives invalid-name for input over the cap, NUL, CR, non-ASCII bytes and a second line', () => {
+    const w = newWorld()
+    const bad: Array<string | Buffer> = ['a'.repeat(257), 'main\n' + 'x'.repeat(400), 'ma\0in\n', 'ma\rin\n', Buffer.from('mäin\n'), 'main\nmain\n', ' main\n', '\n']
+    for (const content of bad) {
+      const r = runWithFile(w, ['pr', '--name-stdin'], content)
+      expect(r, JSON.stringify(Buffer.from(content).toString('latin1').slice(0, 24))).toEqual({ stdout: stopLine('invalid-name'), stderr: '', status: 0 })
+    }
+  })
+
+  it('gives usage for a positional name next to --name-stdin, and reads nothing from a descriptor that would fail', () => {
+    const w = newWorld()
+    const dir = fs.openSync(w.root, 'r')
+    try {
+      for (const args of [['pr', 'main', '--name-stdin'], ['pr', '--name-stdin', 'main'], ['pr', 'main', '--cross', 'true', '--name-stdin']]) {
+        expect(runWithStdio(w, args, dir), JSON.stringify(args)).toEqual({ stdout: stopLine('usage'), stderr: '', status: 0 })
+      }
+    } finally {
+      fs.closeSync(dir)
+    }
+  })
+
+  /** Run the script with a standard input that stays open and never ends; true when it ended on its own. */
+  async function endsWithOpenStdin(w: World, args: readonly string[]): Promise<{ ended: boolean; stdout: string }> {
+    const child = spawnAsync(process.execPath, [RESOLVE_BASE_SCRIPT, ...args], { cwd: w.work, env: cleanEnv(w.home, {}), stdio: ['pipe', 'pipe', 'pipe'] })
+    let stdout = ''
+    child.stdout.on('data', (d: Buffer) => { stdout += d.toString('utf8') })
+    child.stderr.resume()
+    const ended = await new Promise<boolean>(resolve => {
+      const timer = setTimeout(() => resolve(false), SUBPROCESS_TIMEOUT_MS / 2)
+      child.on('close', () => { clearTimeout(timer); resolve(true) })
+    })
+    if (!ended) child.kill('SIGKILL')
+    return { ended, stdout }
+  }
+
+  it('the argument form never reads standard input: it ends while standard input stays open and silent', async () => {
+    const w = newWorld()
+    const r = await endsWithOpenStdin(w, ['pr', 'main'])
+    expect(r.ended, 'the script waited for input it must not read').toBe(true)
+    expect(r.stdout).toBe(`BASE_REF=${w.m0} TIP=origin FETCH=ok REASON=fresh NOTE=none\n`)
+  })
+
+  it('a usage stop never reads standard input either', async () => {
+    const w = newWorld()
+    const r = await endsWithOpenStdin(w, ['pr', 'main', '--name-stdin'])
+    expect(r.ended).toBe(true)
+    expect(r.stdout).toBe(stopLine('usage'))
+  })
+
+  it('never writes the name to stdout or stderr, whatever the outcome', () => {
+    const w = newWorld()
+    const names: Array<string | Buffer> = [
+      'zz-unknown-branch\n',        // admitted, no such branch: no-ref
+      'zz-unknown-branch.lock\n',   // refused by check-ref-format
+      'zz$(touch zz-created)\n',    // outside the class
+      'zz-first\nzz-second\n',      // second line
+      'zz-' + 'x'.repeat(400),      // over the cap
+      Buffer.from('zz-é\n'),        // non-ASCII
+      'main\n',                     // success
+    ]
+    for (const content of names) {
+      const r = runWithFile(w, ['pr', '--name-stdin'], content)
+      expect(r.stdout.endsWith('\n') && !r.stdout.slice(0, -1).includes('\n'), 'one line').toBe(true)
+      expect(r.stdout.trimEnd()).toMatch(RB.LINE_RE)
+      expect(r.stdout).not.toContain('zz')
+      expect(r.stderr).toBe('')
+      expect(r.status).toBe(0)
+    }
+    expect(fs.existsSync(path.join(w.work, 'zz-created'))).toBe(false)
+  })
+})
 
 describe('how the script starts a process', () => {
   it('has spawn sites to inspect', () => {
