@@ -118,11 +118,7 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
   A backup made on re-upgrade can hold the only copy of entries that 3.7 wrote. Check them before you delete it.
 - An init merges rows from at most 50 backup folders in one run. It passes over a folder that holds no pending rows,
   so a later folder is reached when the earlier ones are done.
-- A queue file that git tracks is never merged, because the repository supplied it.
-  The move does not carry it into the new folder, not even in a whole-folder move.
-  The pass that finds it renames it in the backup to `<name>.tracked-<stamp>-<8 hex>`, and a note says how many files stayed and under what names.
-  No later init, status count or drain reads that file, so it stays inert also after you commit its deletion.
-  If git is missing, times out or fails, the move merges nothing from that folder and says so. A later init tries again.
+- The move skips a project when git tracks files in `.devflow/learning/` or `.devflow/curation/`, or when git does not answer. devflow then shows what to do.
 
 **The queue cap:**
 - A merge fills a pending queue up to 100 lines and no further.
@@ -145,6 +141,11 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
   Nothing moves. Init prints `Ledger move refused for <root>`.
   The HUD and `devflow curation --status` print `Curation: move refused, see the hook log`.
   Remove the cause, then run `devflow init` or start a new session.
+- Skipped by git: git tracks files in `.devflow/learning/` or `.devflow/curation/`, or git does not answer.
+  Nothing in the project changes. Init prints `Ledger move skipped for <root>` and the reason.
+  A curation command that writes prints the same reason and writes nothing. The HUD prints `Curation: move skipped`.
+  The notice tells you to run `git ls-files .devflow`, and to run `git rm --cached` in the main checkout.
+  A session start tries again.
 - Not yet moved: `devflow curation --status`, `--list`, `--show` and the HUD print
   `Curation: run devflow init, or open Claude Code in this project after it`.
   They do not read the old folder.
