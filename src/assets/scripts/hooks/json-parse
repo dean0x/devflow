@@ -170,7 +170,7 @@ json_prompt_output() {
 # Build pre-compact backup JSON. Usage: json_backup_construct --arg ts X --arg branch Y ...
 json_backup_construct() {
   if [ "$_HAS_JQ" = "true" ]; then
-    jq -n "$@" '{timestamp: $ts, trigger: "pre-compact", memory_snapshot: $memory, git: {branch: $branch, status: $status, log: $log, diff_stat: $diff}}'
+    jq -n "$@" '{timestamp: $ts, trigger: "pre-compact", git: {branch: $branch, status: $status, log: $log, diff_stat: $diff}}'
   else
     node "$_JSON_HELPER" backup-construct "$@"
   fi

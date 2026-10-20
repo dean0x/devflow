@@ -336,7 +336,7 @@ describe('no compiled prompt reads .devflow/project.json or .devflow/config.json
     // One marker per emitter, so an extractor that stopped reading one fails by name.
     for (const marker of [
       '--- TRACKER SETUP ---', '--- CURATION MAINTENANCE ---', '--- CURATION PAUSED ---',
-      '--- PRE-COMPACT SNAPSHOT', 'Orchestrator reminder:', 'The user\'s prompt is a plan handoff',
+      '--- WORKING MEMORY (', 'Orchestrator reminder:', 'The user\'s prompt is a plan handoff',
       'You are a working memory updater',
     ]) {
       expect(text, `hook directive text is missing ${marker}`).toContain(marker)
