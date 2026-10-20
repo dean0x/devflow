@@ -966,7 +966,7 @@ describe('known-bad probes: each collector reports the seeded bad text and passe
 
   const BOUND_PREFIX = (value: string): string => `cd "{worktree}" && B=${value} && X=false && `
 
-  it('shell-name: a variable bound to an angle-bracket name is reported, quoted or not, in the old positional call', () => {
+  it('shell-name: a variable bound to an angle-bracket name is reported, quoted or not, in the argument-form call', () => {
     for (const placeholder of ['<name>', '<base_branch>']) {
       for (const value of [placeholder, `"${placeholder}"`]) {
         expect(nameSites('git-ops/ensure-pr-ready.md', `\`${callOf('pr "${B}" --cross "${X}"; echo "exit=$?"', BOUND_PREFIX(value))}\``), `B=${value}`).toHaveLength(1)
@@ -1084,11 +1084,11 @@ describe('known-bad probes: each collector reports the seeded bad text and passe
   })
 
   describe('resolver-call: each seeded bad call is reported for its own defect', () => {
-    const OLD_PREFIX = BOUND_PREFIX('"<name>"')
+    const ARGUMENT_FORM_PREFIX = BOUND_PREFIX('"<name>"')
     const bad: ReadonlyArray<readonly [string, string, string]> = [
-      ['the old positional call: a bound variable, its expansion and no stdin', callOf('pr "${B}" --cross "${X}"; echo "exit=$?"', OLD_PREFIX), 'a shell variable is bound before the call: B'],
-      ['the old positional call: the expansion of the bound variable', callOf('pr "${B}" --cross "${X}"; echo "exit=$?"', OLD_PREFIX), 'a shell variable is expanded in the call: B'],
-      ['the old positional call: the name slot', callOf('pr "${B}" --cross "${X}"; echo "exit=$?"', OLD_PREFIX), 'the name slot does not hold --name-stdin'],
+      ['the argument-form call: a bound variable, its expansion and no stdin', callOf('pr "${B}" --cross "${X}"; echo "exit=$?"', ARGUMENT_FORM_PREFIX), 'a shell variable is bound before the call: B'],
+      ['the argument-form call: the expansion of the bound variable', callOf('pr "${B}" --cross "${X}"; echo "exit=$?"', ARGUMENT_FORM_PREFIX), 'a shell variable is expanded in the call: B'],
+      ['the argument-form call: the name slot', callOf('pr "${B}" --cross "${X}"; echo "exit=$?"', ARGUMENT_FORM_PREFIX), 'the name slot does not hold --name-stdin'],
       ['a literal name in the name slot, with the file on stdin', callOf('local main < "$F"; echo "exit=$?"'), 'the name slot does not hold --name-stdin'],
       ['a missing --name-stdin in pr mode', callOf('pr --cross "${X}" < "$F"; echo "exit=$?"'), 'the name slot does not hold --name-stdin'],
       ['a missing --name-stdin in local mode', callOf('local < "$F"; echo "exit=$?"'), 'the name slot does not hold --name-stdin'],
