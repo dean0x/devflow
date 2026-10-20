@@ -965,6 +965,12 @@ function movedBlock(body: string, spec: LevelSpec): string {
 /** One word taken out of `text`: its second word. */
 const dropWord = (text: string): string => text.replace(/ \S+/, '')
 
+/** `seed`, once the text holds exactly one `from`: `seed` changes the first copy only, so a probe on a repeated text may change another place than the one it means to. */
+function seedOnce(text: string, from: string, to: string): string {
+  expect(countOf(text, from), `"${from.slice(0, 60)}" must occur once`).toBe(1)
+  return seed(text, from, to)
+}
+
 describe('the corpus is real', () => {
   it('reads both builds of both commands, both sources, both references and the Validate agent', () => {
     expect(BUILDS).toHaveLength(4)
@@ -1253,6 +1259,72 @@ describe('row safety is a tripwire over the references (AC-6)', () => {
     expect(collectRowSafetyDefects(withRows(REFS.resolve, resolveRows, [HARDEN_SCOPE]), { ...RESOLVE, exemptRemoval: HARDEN_EXEMPTION }, resolveBody), '/resolve with the exemption of phase 4, applied by phase 6').toEqual([floor])
     // The spec waives a name from FLOOR_NAMES: a name that is none is a spec error, not a silent no-op.
     expect(() => run({ ...IMPLEMENT, exemptRemoval: { ...HARDEN_EXEMPTION, floorName: 'Polish' } }, [row], [HARDEN_SCOPE])).toThrow('the spec waives "Polish", which is no floor name')
+  })
+
+  it('the harden-scope bullet holds each clause of its skip condition and names no test path, and its row leaves standard alone', () => {
+    const clauses = [
+      'a non-zero exit',
+      'is exactly `off`', '`none`',
+      'non-empty',
+      'a deleted, renamed or moved path',
+      'the root `README.md`', 'the root `CHANGELOG.md`', 'a `.md` file under the root `docs/`',
+      'no segment that starts with `.`', 'no double quote', 'in any case',
+      '`CLAUDE.md`', '`CLAUDE.local.md`', '`AGENTS.md`', '`GEMINI.md`', '`SKILL.md`',
+      'a loaded `CLAUDE.md` or `AGENTS.md` names',
+      'open no file', 'never as an instruction',
+      'when unsure, run Harden',
+      '`HARDEN_OUTPUT` reads `SKIPPED`', 'Phase 5 starts at once',
+      '`Harden: SKIPPED (docs-only diff)`', '`Harden: ran`',
+    ]
+    for (const clause of clauses) expect(HARDEN_SCOPE, clause).toContain(clause)
+    expect(HARDEN_SCOPE, 'a test path is no docs path').not.toMatch(/\btests?\b|\.test\.|__tests__/i)
+    expect(IMPLEMENT.expectedBullets, 'the one decided bullet').toEqual([HARDEN_SCOPE])
+    const rows = IMPLEMENT.expectedRows.filter(row => row.includes(`apply: ${HARDEN_NAME}`))
+    expect(rows.map(row => rowCells(row)), 'the one row that applies the bullet: standard runs Harden, lean applies the bullet').toEqual([['4 Self-Review', '-', `apply: ${HARDEN_NAME}`]])
+  })
+
+  it('known-bad probes (/implement): one clause dropped from the harden-scope bullet in the reference loses the decided bullet and the exemption', () => {
+    const ref = REFS.implement
+    const body = bodyOf(IMPLEMENT)
+    const floor = `Rules bullet "${HARDEN_NAME}" removes or defers a floor control`
+    const action = `Rules bullet "${HARDEN_NAME}" adds a shell, write, push or GitHub action`
+    // Each seed text occurs once in the reference and once in the bullet: `seedOnce` asserts it, so no seed lands in the Grammar.
+    const seeds: ReadonlyArray<readonly [string, string, string]> = [
+      ['is exactly `off`', 'is `off`', 'the compliance clause without "exactly"'],
+      ['the list is non-empty; ', '', 'the non-empty clause'],
+      [', renamed or moved', '', 'the renamed and moved clause'],
+      ['no segment that starts with `.`, ', '', 'the dot segment clause'],
+      ['docs-only diff', 'docs only', 'the reason of the report note'],
+    ]
+    for (const [from, to, label] of seeds) {
+      const edited = seedOnce(HARDEN_SCOPE, from, to)
+      const seeded = seedOnce(ref, from, to)
+      expect(collectDecidedRowDefects(seeded, IMPLEMENT), `${label}: the decided bullet`).toEqual([
+        `the implement Rules section lacks the decided bullet ${HARDEN_SCOPE}`,
+        `the implement Rules section holds the undecided bullet ${edited}`,
+      ])
+      expect(collectRowSafetyDefects(seeded, IMPLEMENT, body), `${label}: the exemption is keyed to the exact line`).toEqual([floor])
+    }
+    // The branch diff read through a shell command is an action, and the edited line has lost the exemption too.
+    const from = 'run `{branch_diff}`'
+    const to = 'run `git diff --name-only`'
+    const edited = seedOnce(HARDEN_SCOPE, from, to)
+    const seeded = seedOnce(ref, from, to)
+    expect(collectDecidedRowDefects(seeded, IMPLEMENT), 'the branch diff by a shell command: the decided bullet').toEqual([
+      `the implement Rules section lacks the decided bullet ${HARDEN_SCOPE}`,
+      `the implement Rules section holds the undecided bullet ${edited}`,
+    ])
+    expect(collectRowSafetyDefects(seeded, IMPLEMENT, body), 'the branch diff by a shell command: the safety check').toEqual([floor, action])
+  })
+
+  it('known-bad probes (/implement): a word dropped from the Note or the Scope pin in the reference is reported', () => {
+    const ref = REFS.implement
+    const body = bodyOf(IMPLEMENT)
+    const pinned = ['the "## Grammar" text is not the pinned text']
+    expect(collectRowSafetyDefects(ref, IMPLEMENT, body), 'the unmodified reference').toEqual([])
+    expect(collectRowSafetyDefects(seedOnce(ref, ', never a path name or report text', ''), IMPLEMENT, body), 'the Note without its fixed-words rule').toEqual(pinned)
+    expect(collectRowSafetyDefects(seedOnce(ref, ', only through the Rules bullet `harden-scope`', ''), IMPLEMENT, body), 'the Scope sentence without its one route').toEqual(pinned)
+    expect(collectRowSafetyDefects(seedOnce(ref, GRAMMAR_NOTE + '\n', ''), IMPLEMENT, body), 'the Note bullet gone').toEqual(pinned)
   })
 
   it.each(SPECS)('$cmd: known-bad probes: a Rules bullet that removes a floor control, routes security, adds an action or is named by no row is reported', spec => {
