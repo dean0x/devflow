@@ -59,9 +59,11 @@
 //   - The fetch is one call with a fixed argv: it writes only refs/remotes/origin/<name>
 //     (an empty --refmap= keeps the configured fetch refspecs out of the update), writes no
 //     FETCH_HEAD, follows no tags, and carries no --filter or --depth. The
-//     repository's hook, fsmonitor and upload-pack settings do not apply to it. Credential
-//     prompts are off: GIT_TERMINAL_PROMPT is 0, GIT_ASKPASS and SSH_ASKPASS are empty, so
-//     git runs no askpass program, and the default SSH command carries BatchMode=yes.
+//     repository's hook, fsmonitor and upload-pack settings do not apply to it. An HTTP
+//     transfer under 1 byte/s for FETCH_STALL_SECONDS ends by itself (http.lowSpeedLimit and
+//     http.lowSpeedTime). Credential prompts are off: GIT_TERMINAL_PROMPT is 0, GIT_ASKPASS
+//     and SSH_ASKPASS are empty, so git runs no askpass program, and the default SSH command
+//     carries BatchMode=yes.
 //     BatchMode and ConnectTimeout are added only when no SSH command is configured
 //     (GIT_SSH_COMMAND, GIT_SSH or core.sshCommand); a configured command is never
 //     replaced, and host-key checks are never weakened.
@@ -70,7 +72,9 @@
 //     is SIGKILL, so git cannot remove the lock of the ref it was updating. A lock file
 //     left at refs/remotes/origin/<name>.lock is read by every later run as fetch-failed,
 //     until the user deletes it. This is rare: git holds the lock only for the short ref
-//     update at the end of the fetch.
+//     update at the end of the fetch. The fetch runs in its own session. If the resolver is
+//     interrupted before its timer fires, the stall bound in the argv still ends an HTTP
+//     fetch that gets no answer.
 //   - One run budget, RUN_BUDGET_MS, stays below the 120 s Bash tool limit. Each call takes
 //     the smaller of its own bound and the time left in the budget. A local call with no
 //     time left is not started and gives resolver-unavailable; the fetch with no time left
@@ -146,6 +150,12 @@ const HEX_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 
 /** The wall-clock backstop for the one fetch. */
 const FETCH_TIMEOUT_MS = 45000;
+/**
+ * The git-side stall bound of the fetch, in seconds: an HTTP transfer under 1 byte/s for this
+ * long ends by itself. It equals the fetch bound, so while the resolver runs its own timer
+ * ends a stalled fetch first and the reason stays `timeout`.
+ */
+const FETCH_STALL_SECONDS = FETCH_TIMEOUT_MS / 1000;
 /**
  * The bound of every other git call, which is local and short. The bound counts the launch
  * of git. The launch of node stalled 14 to 16 s on a loaded macOS machine, and git launches
@@ -485,7 +495,8 @@ function killGroup(pid, platform) {
 
 /**
  * The exact fetch argv. The null device switches off the repository's hooks, fsmonitor is
- * off, and `--upload-pack` replaces the repository's configured program. The empty `--refmap=`
+ * off, and `--upload-pack` replaces the repository's configured program. The two http.lowSpeed
+ * options end a stalled HTTP transfer after FETCH_STALL_SECONDS. The empty `--refmap=`
  * keeps the configured remote.origin.fetch refspecs out of the update, so the one refspec
  * given is the only ref written. Never --filter, never --depth. The name has passed the
  * strict class; this sink holds that precondition.
@@ -500,6 +511,7 @@ function fetchArgv(name, platform) {
   return [
     '-c', 'core.fsmonitor=false',
     '-c', 'core.hooksPath=' + nullDevice,
+    '-c', 'http.lowSpeedLimit=1', '-c', 'http.lowSpeedTime=' + FETCH_STALL_SECONDS,
     'fetch', '--no-tags', '--no-write-fetch-head', '--no-recurse-submodules', '--no-auto-maintenance',
     '--no-show-forced-updates', '--quiet', '--refmap=', '--upload-pack=git-upload-pack',
     'origin', '+refs/heads/' + name + ':refs/remotes/origin/' + name,

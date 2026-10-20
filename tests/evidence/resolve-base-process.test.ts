@@ -123,10 +123,24 @@ describe('the fetch argv (AC-12)', () => {
     expect(fetchCall(calls).args).toEqual([
       '-c', 'core.fsmonitor=false',
       '-c', `core.hooksPath=${NULL_DEVICE}`,
+      '-c', 'http.lowSpeedLimit=1', '-c', 'http.lowSpeedTime=45',
       'fetch', '--no-tags', '--no-write-fetch-head', '--no-recurse-submodules', '--no-auto-maintenance',
       '--no-show-forced-updates', '--quiet', '--refmap=', '--upload-pack=git-upload-pack',
       'origin', '+refs/heads/feature/x:refs/remotes/origin/feature/x',
     ])
+  })
+
+  it('carries its own HTTP stall bound, no longer than the fetch bound, so a fetch that outlives its caller ends by itself', () => {
+    const argv = RB.fetchArgv('main')
+    const valueOf = (key: string): string | undefined => argv.find(a => a.startsWith(`${key}=`))?.slice(key.length + 1)
+    expect(valueOf('http.lowSpeedLimit')).toBe('1')
+    const seconds = Number(valueOf('http.lowSpeedTime'))
+    expect(Number.isInteger(seconds) && seconds > 0, 'a positive whole number of seconds').toBe(true)
+    expect(seconds * 1000).toBeLessThanOrEqual(RB.FETCH_TIMEOUT_MS)
+    for (const key of ['http.lowSpeedLimit', 'http.lowSpeedTime']) {
+      expect(argv[argv.indexOf(`${key}=${valueOf(key)}`) - 1], `${key} is a -c option`).toBe('-c')
+      expect(argv.indexOf(`${key}=${valueOf(key)}`), `${key} comes before the subcommand`).toBeLessThan(argv.indexOf('fetch'))
+    }
   })
 
   it('uses the null device of the platform for the hooks path', () => {
