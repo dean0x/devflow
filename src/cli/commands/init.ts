@@ -763,7 +763,8 @@ export interface DisabledQueueDrainIO {
  * lookupOwnLedgerRoot), which in a linked worktree is the main checkout.
  *
  * Returns one warning for each drain refused because a folder on the way to its
- * queue is a symbolic link (D-CLI-NO-SYMLINK); the caller prints them.
+ * queue is a symbolic link (D-CLI-NO-SYMLINK), and one for a curation drain that
+ * could not list the backups (the live queue is drained then); the caller prints them.
  */
 export async function drainDisabledFeatureQueues(
   opts: {
@@ -784,6 +785,7 @@ export async function drainDisabledFeatureQueues(
   if (!opts.curationEnabled && opts.ledgerRoot !== null) {
     const curation = await io.drainCurationQueue(opts.ledgerRoot);
     if (!curation.drained) refused.push(formatRefusedDrain('curation', curation.linkedFolder));
+    else if (curation.warning !== undefined) refused.push(curation.warning);
   }
   return refused;
 }

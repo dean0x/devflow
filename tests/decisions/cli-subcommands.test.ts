@@ -808,6 +808,22 @@ describe('curation --disable drains the curation pending-turns queue', () => {
     expect(readCurationSwitch()).toBe(false);
   });
 
+  it.skipIf(process.getuid?.() === 0)('a backup folder that cannot be read: the live queue is still drained, the command warns and finishes, and the switch is off', async () => {
+    const backup = seedBackup(root);
+    fs.chmodSync(backup, 0o000);
+    try {
+      const run = await runCuration(['--disable']);
+
+      expect(run.warn).toMatch(/backup folders were not drained/);
+      expect(queueFilesPresent(root)).toEqual([false, false, false]);
+      expect(run.success).toBe('Curation disabled in every project');
+      expect(run.exitCode).toBe(0);
+      expect(readCurationSwitch()).toBe(false);
+    } finally {
+      fs.chmodSync(backup, 0o755);
+    }
+  });
+
   it('does not create a .disabled sentinel (the gate is the manifest)', async () => {
     await runCuration(['--disable']);
     expect(fs.existsSync(path.join(root, '.devflow', 'curation', '.disabled'))).toBe(false);

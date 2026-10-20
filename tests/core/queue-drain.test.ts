@@ -12,6 +12,7 @@ import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { drainCurationQueue, drainDisabledCurationQueue } from '../../src/core/curation-queue-cleanup.js';
+import { loadCurationMove, type CurationMoveLoad } from '../../src/core/curation-move.js';
 import { drainMemoryQueue } from '../../src/cli/commands/memory.js';
 
 const KEEP = 'a file outside the project, which no drain may delete\n';
@@ -263,7 +264,76 @@ describe('drainDisabledCurationQueue also drains the pending rows of the backups
     expect(await present(path.join(outside, `learning.backup-${STAMP}-00000001`), PENDING)).toEqual([true, true, true, true, true]);
   });
 
-  it('a root the backups cannot be listed for is an error the command reports, not a silent skip', async () => {
-    await expect(drainDisabledCurationQueue('relative/path')).rejects.toThrow(/absolute/);
+  describe('a backup list that cannot be made never stops the drain of the live and the old folder', () => {
+    const oldDir = (): string => path.join(root, '.devflow', 'learning');
+    const seedLive = async (): Promise<void> => {
+      await seed(newDir(), FILES);
+      await seed(oldDir(), FILES);
+    };
+    const bothDrained = async (): Promise<void> => {
+      expect(await present(newDir(), FILES), 'the live queue is drained').toEqual([false, false, false]);
+      expect(await present(oldDir(), FILES), 'the old folder queue is drained').toEqual([false, false, false]);
+    };
+
+    it('a move module that cannot be loaded: drains both folders and returns a warning, never a throw', async () => {
+      await seedLive();
+      await seed(backup(), PENDING);
+
+      const result = await drainDisabledCurationQueue(root, () => ({ ok: false, error: { kind: 'not-found', path: '/pkg/curation-move.cjs' } }));
+
+      await bothDrained();
+      expect(result).toEqual({ drained: true, warning: expect.stringMatching(/backup.*not drained.*curation store not found/) });
+      expect(await present(backup(), PENDING), 'a backup that could not be listed is left as it is').toEqual([true, true, true, true, true]);
+    });
+
+    it('an io-error from the backup list: drains both folders and returns a warning with the reason, never a throw', async () => {
+      await seedLive();
+      const failing: CurationMoveLoad = {
+        ok: true,
+        value: {
+          ...(loadCurationMove() as Extract<CurationMoveLoad, { ok: true }>).value,
+          backupQueueFiles: () => ({ ok: false, error: { kind: 'io-error', message: 'EACCES: permission denied, scandir backup' } }),
+        },
+      };
+
+      const result = await drainDisabledCurationQueue(root, () => failing);
+
+      await bothDrained();
+      expect(result).toEqual({ drained: true, warning: expect.stringContaining('EACCES: permission denied, scandir backup') });
+    });
+
+    it.skipIf(process.getuid?.() === 0)('a backup folder that cannot be read: drains both folders and returns a warning', async () => {
+      await seedLive();
+      await seed(backup(), PENDING);
+      await fs.chmod(backup(), 0o000);
+      try {
+        const result = await drainDisabledCurationQueue(root);
+
+        await bothDrained();
+        expect(result.drained).toBe(true);
+        expect(result.drained && result.warning).toMatch(/backup.*not drained/);
+      } finally {
+        await fs.chmod(backup(), 0o755);
+      }
+    });
+
+    it('a link is still a refusal: nothing is drained, and no warning is returned', async () => {
+      await seedLive();
+      await seed(outside, PENDING);
+      await fs.symlink(outside, backup());
+
+      expect(await drainDisabledCurationQueue(root)).toEqual({ drained: false, linkedFolder: backup() });
+      expect(await present(newDir(), FILES)).toEqual([true, true, true]);
+    });
+
+    it('a drain that listed every backup returns no warning', async () => {
+      await seed(newDir(), FILES);
+      expect(await drainDisabledCurationQueue(root)).toEqual({ drained: true });
+    });
+
+    it('a root that is not absolute: the list is refused without a link, and the answer is a warning, not a throw', async () => {
+      const result = await drainDisabledCurationQueue('relative/path');
+      expect(result).toEqual({ drained: true, warning: expect.stringMatching(/absolute/) });
+    });
   });
 });

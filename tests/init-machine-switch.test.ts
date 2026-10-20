@@ -200,6 +200,42 @@ describe('drainDisabledFeatureQueues (D-INIT-DRAIN-AFTER-SWITCH)', () => {
     ]);
   });
 
+  it('returns the warning of a curation drain that could not list the backups, and still drains memory first', async () => {
+    const calls: string[] = [];
+    const io: DisabledQueueDrainIO = {
+      drainMemoryQueue: async (r) => { calls.push(`memory:${r}`); return { drained: true }; },
+      drainCurationQueue: async (r) => { calls.push(`curation:${r}`); return { drained: true, warning: 'The queue files of the backup folders were not drained: EACCES' }; },
+    };
+    const refused = await drainDisabledFeatureQueues({ gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: false, curationEnabled: false, manifestWritten: true }, io);
+    expect(calls).toEqual([`memory:${ROOT}`, `curation:${ROOT}`]);
+    expect(refused).toEqual(['The queue files of the backup folders were not drained: EACCES']);
+  });
+
+  it.skipIf(process.getuid?.() === 0)('with the real drains: a backup folder that cannot be read gives a warning, and the live queue is still drained', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-init-drain-unreadable-'));
+    vi.stubEnv('HOME', path.join(tmp, 'home'));
+    const backup = path.join(tmp, 'repo', '.devflow', 'learning.backup-20261017T020304Z-ab12cd34');
+    try {
+      const repo = path.join(tmp, 'repo');
+      const live = path.join(repo, '.devflow', 'curation', '.pending-turns.jsonl');
+      await fs.mkdir(backup, { recursive: true });
+      await fs.writeFile(path.join(backup, '.pending-turns.jsonl'), '{"role":"user"}\n');
+      await fs.mkdir(path.dirname(live), { recursive: true });
+      await fs.writeFile(live, '{"role":"user"}\n');
+      await fs.chmod(backup, 0o000);
+
+      const refused = await drainDisabledFeatureQueues({ gitRoot: repo, ledgerRoot: repo, memoryEnabled: true, curationEnabled: false, manifestWritten: true });
+
+      expect(refused).toHaveLength(1);
+      expect(refused[0]).toMatch(/backup folders were not drained/);
+      await expect(fs.lstat(live), 'the live queue is drained').rejects.toThrow(/ENOENT/);
+    } finally {
+      await fs.chmod(backup, 0o755).catch(() => undefined);
+      vi.unstubAllEnvs();
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('with the real drains: linked memory and curation folders lose nothing, and both refusals are returned (D-CLI-NO-SYMLINK)', async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-init-drain-linked-'));
     vi.stubEnv('HOME', path.join(tmp, 'home'));

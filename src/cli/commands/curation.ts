@@ -710,6 +710,7 @@ async function handleToggle(enabled: boolean): Promise<void> {
   if (ledgerRoot) {
     const drain = await drainDisabledCurationQueue(ledgerRoot);
     if (!drain.drained) p.log.warn(formatRefusedDrain('curation', drain.linkedFolder));
+    else if (drain.warning !== undefined) p.log.warn(drain.warning);
   }
   p.log.success('Curation disabled in every project');
 }

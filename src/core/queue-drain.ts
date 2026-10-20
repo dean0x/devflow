@@ -12,10 +12,11 @@ import { firstSymbolicLink } from './linked-path.js';
 /**
  * What a queue drain did: drained the queue, every file of which is gone whether or
  * not it was there; or refused, naming the folder on the way to the queue that is a
- * symbolic link, and deleted nothing (D-CLI-NO-SYMLINK).
+ * symbolic link, and deleted nothing (D-CLI-NO-SYMLINK). A drain that did its main work
+ * and could not do a part of it says which part in `warning`, one line the caller prints.
  */
 export type QueueDrain =
-  | { readonly drained: true }
+  | { readonly drained: true; readonly warning?: string }
   | { readonly drained: false; readonly linkedFolder: string };
 
 /**

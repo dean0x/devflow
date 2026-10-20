@@ -16,7 +16,7 @@ import {
   getCurationPendingTurnsPath,
   getCurationPendingTurnsProcessingPath,
 } from './project-paths.js';
-import { loadCurationMove } from './curation-move.js';
+import { loadCurationMove, type CurationMoveLoad } from './curation-move.js';
 import { formatCurationStoreUnavailable } from './curation-store.js';
 import { drainQueueFiles, type QueueDrain } from './queue-drain.js';
 
@@ -68,19 +68,30 @@ export async function drainCurationQueue(gitRoot: string): Promise<QueueDrain> {
  *
  * Refused, deleting nothing anywhere, when a link is in the way: `.devflow`, either
  * ledger folder, a backup folder that may hold rows, or one of a backup's queue files.
- * The answer names the link. ENOENT-tolerant. A backup list that cannot be made throws,
- * as any other failure does, so the command reports it.
+ * The answer names the link. ENOENT-tolerant. Any other failure of the backup list, a
+ * move module that does not load or a folder that cannot be read, never stops the
+ * drain of the live and the old folder: those drain as usual, and the answer carries
+ * a `warning` that the backups were not drained, which the caller prints.
+ *
+ * `load` is the move module's loader; the default is the package's own copy.
  */
-export async function drainDisabledCurationQueue(gitRoot: string): Promise<QueueDrain> {
+export async function drainDisabledCurationQueue(
+  gitRoot: string,
+  load: () => CurationMoveLoad = loadCurationMove,
+): Promise<QueueDrain> {
   const { folders, files } = liveQueueTargets(gitRoot);
-  const loaded = loadCurationMove();
-  if (!loaded.ok) throw new Error(`The backup folders could not be checked for queue files: ${formatCurationStoreUnavailable(loaded.error)}`);
-  const listed = loaded.value.backupQueueFiles(gitRoot);
-  if (!listed.ok) {
-    if (listed.error.kind === 'refused' && listed.error.path !== undefined) {
-      return { drained: false, linkedFolder: listed.error.path };
-    }
-    throw new Error(listed.error.message);
+  const loaded = load();
+  const listed = loaded.ok ? loaded.value.backupQueueFiles(gitRoot) : null;
+  if (listed !== null && !listed.ok && listed.error.kind === 'refused' && listed.error.path !== undefined) {
+    return { drained: false, linkedFolder: listed.error.path };
   }
-  return drainQueueFiles(folders, [...files, ...listed.value.files]);
+  const drain = await drainQueueFiles(folders, [...files, ...(listed !== null && listed.ok ? listed.value.files : [])]);
+  if (!drain.drained) return drain;
+  const failure = !loaded.ok ? formatCurationStoreUnavailable(loaded.error) : listed !== null && !listed.ok ? listed.error.message : null;
+  return failure === null ? drain : { drained: true, warning: formatBackupsNotDrained(failure) };
+}
+
+/** The warning for a disable drain that could not list the backups: the live queue is drained, the backups are not. */
+function formatBackupsNotDrained(reason: string): string {
+  return `The queue files of the backup folders were not drained: ${reason}. The live curation queue was drained.`;
 }

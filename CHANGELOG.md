@@ -95,6 +95,7 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
   The ledger files, the swept files and the claim owner file stay in the backup.
   Without this drain, a later `--enable` and init would merge those rows into the live queue.
   The drain deletes nothing when a backup folder, or one of its queue files, is a symbolic link, and it says so.
+  If the backups cannot be listed for another reason, the drain still removes the queue files of the live and the old folder, and prints a warning that the backups were not drained.
 - `devflow curation --status` prints one `Backup:` line for each backup folder.
   The line shows how many pending rows the backup still holds.
   For the first 50 folders it prints one line each. One more line counts the folders from the 51st to the 500th and their pending rows.
