@@ -982,7 +982,7 @@ describe('the name on standard input', () => {
     it('gives invalid-name for NUL, CR, non-ASCII bytes and a second line', () => {
       const bad: Array<string | Buffer> = [
         'ma\0in', 'main\0', 'main\0\n', 'ma\rin', 'main\r', 'main\r\r\n',
-        Buffer.from('mäin\n', 'utf8'), Buffer.from([0x6d, 0xff, 0x0a]), Buffer.from('main‮\n', 'utf8'),
+        Buffer.from('mäin\n', 'utf8'), Buffer.from([0x6d, 0xff, 0x0a]), Buffer.from('main\u202E\n', 'utf8'),
         'main\nother\n', 'main\n\n', 'main\r\n\r\n', 'main\nmain', '\nmain', 'a\nb',
       ]
       for (const text of bad) {
