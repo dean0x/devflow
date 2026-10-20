@@ -24,11 +24,12 @@ Do the step below after you update.
 - `/implement` stops when no usable base exists, for example in a shallow clone without the base history. `/code-review` and `/bug-analysis` stop in that case on a full-range run. The message names the cause and the fix: `git fetch --unshallow`, `git fetch origin <base>`, or a re-run (and `devflow init` if the re-run repeats the stop).
 - The same three commands stop on a base branch name outside the allowed set, or one that git refuses. The message states the set.
 - In `/code-review` multi-worktree mode, a rejected base blocks only that worktree.
+- `/code-review` and `/bug-analysis` stop when the branch name, with `/` replaced by `-`, holds characters outside ASCII letters, digits and `._-`, or is longer than 200 characters. The message states the allowed characters. In `/code-review` multi-worktree mode, this blocks only that worktree.
 - The Git agent's `validate-branch` returns BLOCKED in the same cases. `/resolve` takes its branch diff from it.
 - The Git agent's `ensure-pr-ready` stops only on a base name outside the allowed set, or one that git refuses. For any other base stop it prints `TRACEABILITY: DEGRADED (base {REASON}; fix: {fix})` and goes on.
 
 **New resolver call:**
-- `ensure-pr-ready` calls `resolve-base.cjs` in `pr` mode with the base branch of the PR. The call makes at most one fetch of the base branch.
+- `ensure-pr-ready` calls `resolve-base.cjs` in `pr` mode with the base branch of the PR, or with the default branch when no PR applies. The call makes at most one fetch of the base branch.
 - `/implement` passes the base ref that it resolved in Phase 1, so a normal `/implement` run makes one fetch.
 - The `/dynamic-build` wave PR step runs `ensure-pr-ready` with no base ref, so that step makes this call.
 
