@@ -27,11 +27,13 @@ Do the step below after you update.
 - `/code-review` and `/bug-analysis` stop when the branch name, with `/` replaced by `-`, holds characters outside ASCII letters, digits and `._-`, or is longer than 200 characters. The message states the allowed characters. In `/code-review` multi-worktree mode, this blocks only that worktree.
 - The Git agent's `validate-branch` returns BLOCKED in the same cases. `/resolve` takes its branch diff from it.
 - The Git agent's `ensure-pr-ready` stops only on a base name outside the allowed set, or one that git refuses. For any other base stop it prints `TRACEABILITY: DEGRADED (base {REASON}; fix: {fix})` and goes on.
+- A ticket whose setup reports no base commit stops with the `base-missing` escalation: check the setup output, then re-run.
 
 **New resolver call:**
 - `ensure-pr-ready` calls `resolve-base.cjs` in `pr` mode with the base branch of the PR, or with the default branch when no PR applies. The call makes at most one fetch of the base branch.
 - `/implement` passes the base ref that it resolved in Phase 1, so a normal `/implement` run makes one fetch.
 - The `/dynamic-build` wave PR step runs `ensure-pr-ready` with no base ref, so that step makes this call.
+- The base resolver reads the base name from standard input (`--name-stdin`), so the name is not part of shell command text.
 
 **Stale-install window:**
 - Until you run `devflow init`, the installed commands and Git agent do not call the resolver, so the new stops do not apply.
@@ -40,6 +42,12 @@ Do the step below after you update.
 - A fetch that stops at its 45-second bound can leave a `refs/remotes/origin/<name>.lock` file in the git directory. Later runs then report `fetch-failed` until you delete the file.
 - The fetch needs git 2.29 or newer. With an older git, every run reports `fetch-failed` and prints the base warning.
 - The fetch runs no askpass program. Where an askpass program is the only credential source, a remote that needs credentials gives `fetch-failed` on every run, with the base warning.
+- In single-ticket mode the review covers the diff from the commit the ticket branch was forked from to HEAD. On a non-default start branch, that is the ticket's own commits.
+
+### Upgrade notes — Review markers
+
+**What changes:**
+- Incremental review and analysis markers are stored under the git directory of each worktree; the first run after the update covers the full branch.
 
 ### Upgrade notes — Level readers
 
