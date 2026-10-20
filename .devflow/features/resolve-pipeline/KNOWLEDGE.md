@@ -1,7 +1,7 @@
 ---
 feature: resolve-pipeline
 name: Resolve Pipeline (Triage → Fix → Verify)
-description: "Use when changing /resolve triage, DUPLICATE collapsing, Code-family bodies, the resolution-summary.md parser, thread resolution or the base resolver. Keywords: resolve, triage, FIX_NOW, BASE_REF."
+description: "Use when changing /resolve triage, DUPLICATE collapsing, Code-family bodies, issue-fix mode, the resolution-summary.md parser, Verification Gate, thread resolution or base resolver. Keywords: resolve, FIX_NOW, BASE_REF."
 category: architecture
 directories: [src/assets/commands/resolve.mds, src/assets/agents/triage.mds, src/assets/agents/code.mds, src/assets/agents/fix.mds, src/assets/agents/refactor.mds, src/assets/agents/_partials/_code.mds, src/assets/commands/implement.mds, src/core/plugins.ts, src/assets/commands/code-review.mds, src/assets/scripts/resolve-base.cjs, src/assets/mds/git/]
 created: 2026-07-08
@@ -115,7 +115,7 @@ Step 0c takes, per worktree, the newest of the 10 most recent timestamped direct
 
 ### Base Resolver Contract
 
-`resolve-base.cjs` prints one status line per run (`BASE_REF=… REASON=… NOTE=…`) in `local` mode (no PR: /implement Phase 1 and its re-validation without a PR) or `pr` mode (`ensure-pr-ready` 5b, `validate-branch` 6, and re-validation when gh returned a PR). What no single file shows:
+`resolve-base.cjs` prints one status line per run (`BASE_REF=… REASON=… NOTE=…`) in `local` mode (no PR: /implement Phase 1 and its re-validation without a PR) or `pr` mode (`ensure-pr-ready` 5a, which takes the default branch as the name when gh shows no PR applies; `validate-branch` 6; and re-validation when gh returned a PR). What no single file shows:
 - **One reason-to-fix table** serves `ensure-pr-ready` 5b, `validate-branch` 6 and /implement's fresh-base step: no-merge-base, no-ref or timeout, resolver-unavailable (re-run, then `devflow init`) and invalid-name (the allowed set, never the name). The `reason-fix-table` rule of `tests/guards/base-ref-guard.test.ts` holds the three copies equal, so edit them together.
 - **An unanswered local git call** (timeout, signal kill, git that will not start) is `resolver-unavailable` at every call site. `LOCAL_TIMEOUT_MS` (30 s per local call) and `RUN_BUDGET_MS` (100 s per run, under the 120 s Bash limit) are exported and pinned by `tests/evidence/resolve-base-process.test.ts`.
 - **One run per /implement**: Phase 9 passes the Phase 1 `BASE_REF` to `ensure-pr-ready`, which skips its own resolver run and 5b when it is 40 or 64 lowercase hex and the PR's base name equals `BASE_BRANCH`, else runs `pr` mode.
@@ -274,7 +274,7 @@ Static guards fail loudly when a literal changes. Wider families: `tests/seams/c
 - `src/assets/agents/git.mds` — Git agent; each operation loads one reference. Contracts and steps live in `src/assets/mds/git/` (`_ops.mds`, `_ops_steps.mds`, `_pr.mds`, `_ops_pr.mds`; the base-resolver steps of `ensure-pr-ready` and `validate-branch` included), PR-host mechanics and the D9 gate in `references/pr/`, the marker legend in `references/decision-markers.md`
 - `src/assets/commands/_partials/_settings.mds`, `_compliance.mds` — `settings_resolve()`; `compliance_frameworks()` (/resolve) and `compliance_gate()` (adds `COMPLIANCE_ACTIVE`; /code-review and /plan)
 - `src/assets/scripts/verify-evidence.cjs` — the evidence script /resolve runs inline (`verify --stale-out`, `publish`, `readiness`)
-- `src/assets/scripts/resolve-base.cjs` — the base resolver for branch diffs (Base Resolver Contract): /implement runs it inline in `local` mode and hands `BASE_REF` to `ensure-pr-ready`; the Git agent otherwise runs it in `pr` mode; /code-review and /bug-analysis read `base_ref` from `ensure-pr-ready`
+- `src/assets/scripts/resolve-base.cjs` — the base resolver for branch diffs (Base Resolver Contract): /implement runs it inline (`local` mode, or `pr` mode on re-validation when gh returned a PR, per `implement-revalidate.md`) and hands `BASE_REF` to `ensure-pr-ready`; the Git agent otherwise runs it in `pr` mode; /code-review and /bug-analysis read `base_ref` from `ensure-pr-ready`
 - `src/core/plugins.ts` — the `devflow-resolve` entry of `DEVFLOW_PLUGINS`
 - `src/assets/commands/code-review.mds` — convergence parser (Step 0e-ii), Phase 3 synthesis, Step 0b compliance lens, `REVIEW_TIMESTAMP` input
 - Guards: see Test Guards
