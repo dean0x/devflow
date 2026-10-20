@@ -35,7 +35,7 @@ The orchestrator provides:
 - **Branch context**: What changes to review
 - **Output path**: Where to save findings (e.g., `.devflow/docs/reviews/{branch}/{timestamp}/{focus}.md`)
 - **DIFF_FILE** (optional): Absolute path of the patch to review; read changed lines from it. Page a `DIFF_FILE` larger than one Read with offset/limit. If not provided, default to `git diff {DIFF_RANGE}`.
-- **DIFF_RANGE** (optional): The git range the patch covers, for information only; any extra git read uses this range.
+- **DIFF_RANGE** (optional): The git range the patch covers, for information only; any extra git read uses this range. A diff review with no `DIFF_FILE` reviews only a `DIFF_RANGE` that starts with a 40 or 64 lowercase hex commit; with none, or when `git cat-file -t {sha}` does not print `commit` or `git diff {DIFF_RANGE}` exits non-zero, it returns `reviewed: false`.
 <!-- learning:on -->
 - **DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries for this repository (pre-rendered to `.devflow/learning/index.md` in its main worktree). `(none)` when absent. Use `devflow:apply-decisions` to Read full bodies on demand.
 <!-- learning:end -->

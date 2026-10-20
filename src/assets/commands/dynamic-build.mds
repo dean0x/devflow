@@ -175,7 +175,7 @@ TASK_DESCRIPTION: ${TICKET}
 ISSUE_REQUIRED: ${ISSUE_REQUIRED}
 APPLY_CONVENTIONS: ${APPLY_CONVENTIONS}
 ${ISSUE_INPUT !== "(none)" ? "ISSUE_INPUT: " + ISSUE_INPUT : ""}
-Return: {"branch": "<the - **Branch name**: value under your ### Branch, or (none)>", "issueId": "<the - **Issue ID**: value under your ### Handoff Values, or (none)>", "prLinkLine": "<the - **PR link line**: value, or (none)>"}`, { agentType: "Git" })
+Return: {"branch": "<the - **Branch name**: value under your ### Branch, or (none)>", "issueId": "<the - **Issue ID**: value under your ### Handoff Values, or (none)>", "prLinkLine": "<the - **PR link line**: value, or (none)>", "baseSha": "<the 40 or 64 hex git rev-parse HEAD prints before step 4>"}`, { agentType: "Git" })
 );
 
 // The ticket's own Handoff Values, read from setup-task's Output — never derived from ISSUE_INPUT.
@@ -185,6 +185,7 @@ const ISSUE_NUMBER = ISSUE_ID_SHAPE.test(String(setup?.issueId ?? "")) ? setup.i
 const ISSUE_PR_LINK = setup?.prLinkLine || "(none)";  // "(none)" ⇒ the wave PR carries no closing reference for this ticket
 // The branch setup-task created, as it reported it: every later phase and the merge use it. The engine never names one.
 const BRANCH = typeof setup?.branch === "string" && setup.branch.trim() !== "" && setup.branch.trim() !== "(none)" ? setup.branch : "(none)";
+const BASE_SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(String(setup?.baseSha ?? "")) ? setup.baseSha : "(none)";  // the commit the ticket branch was forked from
 
 // Ticket-link stop, before implement. The workflow cannot ask, so it never records an exception: it stops.
 if (ISSUE_REQUIRED === "true" && ISSUE_NUMBER === "(none)") {
@@ -194,6 +195,11 @@ if (ISSUE_REQUIRED === "true" && ISSUE_NUMBER === "(none)") {
 // Branch stop, before implement: with no branch there is nothing to build on or merge — a correctness stop, not a shape gate.
 if (BRANCH === "(none)") {
   return { ticket: TICKET, branch: BRANCH, verdict: "ESCALATED", issueId: ISSUE_NUMBER, issuePrLink: ISSUE_PR_LINK, escalations: [{ type: "branch-missing", description: "setup-task reported no branch name — check its Output, then re-run" }] };
+}
+
+// Base stop: every review range starts at the commit the ticket branch was forked from.
+if (BASE_SHA === "(none)") {
+  return { ticket: TICKET, branch: BRANCH, verdict: "ESCALATED", issueId: ISSUE_NUMBER, issuePrLink: ISSUE_PR_LINK, escalations: [{ type: "base-missing", description: "setup-task reported no base commit — check its Output, then re-run" }] };
 }
 
 // Phase 2: Implement
@@ -323,10 +329,9 @@ Self-verify your fix compiles and the scenarios pass, following your Running com
 
 // Phase 5: Review → verify → fix (single pass)
 const reviewResult = await phase("review", async () => {
-  // Review scope: the entire branch diff from the base branch to HEAD. No base SHA is tracked —
-  // Review agents diff the branch against its merge-base with the default branch.
+  // Review scope: the entire branch diff, from the commit the ticket branch was forked from to HEAD.
   // The pass runs exactly ONCE.
-  const reviewScope = `Review the full branch diff on branch ${BRANCH}. Diff the branch against its merge-base with the default branch (do not guess a base SHA — compute the merge-base from git).`;
+  const reviewScope = `Review the full branch diff on branch ${BRANCH}.\nDIFF_RANGE: ${BASE_SHA}...HEAD\n`;
 
   // Review agent focus list (order = index mapping for dead-reviewer detection)
   const reviewFocuses = ["security", "architecture", "performance", "complexity", "consistency", "regression", "testing", "reliability"];
@@ -375,6 +380,7 @@ Focus discipline: ${focus}. Return: {"focus": "${focus}", "reviewed": true, "fil
   const panels = await parallel(
     Array.from({ length: VERIFY_PANEL }, (_, lens) => () =>
       agent(`Adversarially verify all ${allFindings.length} findings on branch ${BRANCH}.
+DIFF_RANGE: ${BASE_SHA}...HEAD
 Lens ${lens + 1} of ${VERIFY_PANEL}:
 ${["Does each finding actually reproduce in the current code? Hunt for findings that describe patterns not present in the diff.",
    "Is each finding a real issue or a false positive in context? Consider intent, surrounding code, and project conventions.",
@@ -754,12 +760,14 @@ Do NOT ask questions mid-workflow — that is impossible (F4). The workflow only
 
 7. **Wave PR evidence** — only when step 6 reported the wave PR, after it; it never blocks, and every outcome below goes into the run summary. Take `{n}` from step 6's `- **PR**: #{n}` line when `{n}` matches `^[1-9][0-9]{0,9}$` as a whole; no such line ⇒ record `TRACEABILITY: DEGRADED (wave PR number not captured)` and skip this step. `PR_TEST_PLAN_BLOCK` `(none)` ⇒ record `Wave evidence: skipped (no wave test plan)` and skip it.
 
+   **Changed files.** Take `{base_ref}` from step 6's `- **Base ref**:` line and run `git -C "{integration worktree root}" diff --name-only --diff-filter=d {base_ref}...HEAD; echo "exit=$?"`. Unless `{base_ref}` is 40 or 64 lowercase hex and the diff prints `exit=0`, record `TRACEABILITY: DEGRADED (wave base unusable)` and skip this step.
+
    **(a) Test the wave.** Spawn one Test agent on the integration worktree with the wave test plan — the TP lines of the `## Test Plan` section step 3(b) wrote to `{integration worktree root}/.devflow/docs/evidence-wave-{slug}.md`:
 
 ```
 Agent(subagent_type="Test"):
 "ORIGINAL_REQUEST: the merged tickets of wave/{slug}, as the wave test plan names them
-FILES_CHANGED: {the files wave/{slug} changes against the - **Base**: branch step 6 reported}
+FILES_CHANGED: {the file list that diff printed}
 TEST_PLAN: {the TP lines of the wave evidence file's ## Test Plan section}
 WORKTREE_PATH: {integration worktree root}
 Cover every TEST_PLAN line on the integration branch as it stands. Report PASS or FAIL with evidence."

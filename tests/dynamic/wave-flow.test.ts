@@ -23,6 +23,12 @@
  *          verbatim in every phase and the merge; it mints no name, and a
  *          setup-task that reports none stops the ticket (ESCALATED
  *          `branch-missing`) — a correctness stop, not a shape gate.
+ *   AC-9   every review spawn of a ticket, the retry and the verification panel
+ *          included, takes `DIFF_RANGE: <base commit>...HEAD` on a line of its
+ *          own; the base commit is the 40 or 64 lowercase hex commit setup-task
+ *          reports as `baseSha`, and a ticket without one stops (ESCALATED
+ *          `base-missing`) before any other spawn. A focus that twice answers
+ *          `reviewed: false` is a coverage gap, and the ticket does not pass.
  *   W3     (#376) with a tracking issue, the rendered wave block leads with its
  *          `Refs` line, and `check wave` admits it.
  *   W1     (#376) after the wave PR opens, step 7 runs one Test agent on the
@@ -133,6 +139,11 @@ interface TicketScript {
   readonly issueId?: string
   /** `- **PR link line**:` — absent ⇒ none. */
   readonly prLinkLine?: string
+  /**
+   * The `baseSha` setup-task reports — absent ⇒ the commit a real setup-task forks
+   * from (forkShaOf); null ⇒ it reports none; a string ⇒ exactly that.
+   */
+  readonly baseSha?: string | null
   /** FAIL ⇒ fixed and recorded FAIL-FIXED ⇒ the run is UNVERIFIED. */
   readonly test?: 'PASS' | 'FAIL'
 }
@@ -175,6 +186,13 @@ interface World {
   readonly evaluateFail?: readonly string[]
   /** Ready IDs the reader adds that are not in the remaining set — an invented or injected ticket. */
   readonly injectReady?: readonly string[]
+  /**
+   * Per ticket, per review focus: how many consecutive attempts answer `reviewed: false`.
+   * One makes the retry succeed; two leave the focus a coverage gap.
+   */
+  readonly reviewFalse?: Readonly<Record<string, Readonly<Record<string, number>>>>
+  /** Tickets whose first review focus reports one finding, so the verification panel runs (and rejects it). */
+  readonly reviewFindings?: readonly string[]
 }
 
 /**
@@ -189,6 +207,17 @@ function createdBranch(ref: string): string {
 /** The integration head a stub Git records as baseSha before merging `ticket`. */
 function baseShaOf(ticket: string): string {
   return createHash('sha1').update(`base:${ticket}`).digest('hex')
+}
+
+/** The commit a stub setup-task forked `ref`'s branch from: the `baseSha` it reports unless the script says otherwise. */
+function forkShaOf(ref: string): string {
+  return createHash('sha256').update(`fork:${ref}`).digest('hex').slice(0, 40)
+}
+
+/** The `baseSha` a stub setup-task reports for `ref`: its script's, else forkShaOf's; undefined ⇒ none. */
+function reportedBase(world: World, ref: string): string | undefined {
+  const b = world.tickets[ref]?.baseSha
+  return b === undefined ? forkShaOf(ref) : b ?? undefined
 }
 
 /** The `- **Branch name**:` a stub setup-task reports for `ref`: its script's, else createdBranch's; undefined ⇒ none. */
@@ -210,6 +239,8 @@ function stubAgent(world: World, spawns: Spawn[]): Agent {
   const mergedBy = new Map<string, string>()
   /** Harden spawns seen per ticket: the second one is the final Gate 1. */
   const hardened = new Map<string, number>()
+  /** Review attempts seen per ticket and focus: the retry is the second. */
+  const reviewed = new Map<string, number>()
   return async (prompt, opts) => {
     spawns.push({ agentType: opts.agentType, prompt })
     if (opts.agentType === 'Design') {
@@ -223,7 +254,7 @@ function stubAgent(world: World, spawns: Spawn[]): Agent {
       const ref = /^ISSUE_INPUT: (.*)$/m.exec(prompt)?.[1] ?? '(none)'
       currentRef = ref
       current = world.tickets[ref] ?? {}
-      return { branch: reportedBranch(world, ref), issueId: current.issueId, prLinkLine: current.prLinkLine }
+      return { branch: reportedBranch(world, ref), issueId: current.issueId, prLinkLine: current.prLinkLine, baseSha: reportedBase(world, ref) }
     }
     if (opts.agentType === 'Git' && prompt.startsWith('Merge ')) {
       // The ticket is the ID the merge prompt names, never parsed back out of the branch spelling.
@@ -251,7 +282,16 @@ function stubAgent(world: World, spawns: Spawn[]): Agent {
     }
     if (opts.agentType === 'Validate' && world.gate1Red?.includes(currentRef)) return { verdict: 'FAIL', details: 'tests red' }
     if (opts.agentType === 'Test') return { verdict: current.test ?? 'PASS', failures: 'TP-1 failed' }
-    if (opts.agentType === 'Review') return { focus: 'x', reviewed: true, filesExamined: [], findings: [] }
+    if (opts.agentType === 'Review') {
+      const panel = /^Adversarially verify all (\d+) findings/.exec(prompt)
+      if (panel !== null) return { verdicts: Array.from({ length: Number(panel[1]) }, (_, index) => ({ index, verdict: 'FALSE_POSITIVE', rationale: 'not in the diff' })) }
+      const focus = /^(?:Retry )?([a-z]+) review\./i.exec(prompt)?.[1].toLowerCase() ?? ''
+      const attempt = (reviewed.get(`${currentRef}/${focus}`) ?? 0) + 1
+      reviewed.set(`${currentRef}/${focus}`, attempt)
+      if (attempt <= (world.reviewFalse?.[currentRef]?.[focus] ?? 0)) return { focus, reviewed: false, filesExamined: [], findings: [] }
+      const finding = { file: 'src/a.ts', line: 1, description: 'a finding', severity: 'low' }
+      return { focus, reviewed: true, filesExamined: [], findings: focus === 'security' && world.reviewFindings?.includes(currentRef) ? [finding] : [] }
+    }
     if (opts.agentType === 'Harden') {
       const nth = (hardened.get(currentRef) ?? 0) + 1
       hardened.set(currentRef, nth)
@@ -731,6 +771,192 @@ describe('W2: a setup-task that reports no branch stops the ticket; the engine m
     expect(run.quarantined.map(q => q.ticket)).toEqual(['#12'])
     expect(run.quarantined[0].reason).toContain('setup-task reported no branch')
     expect(run.spawns.some(s => s.prompt.startsWith('Merge (none)'))).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AC-9 — every review range starts at the commit the ticket branch was forked from
+// ---------------------------------------------------------------------------
+
+/** The engine's one BASE_SHA binding: the commit setup-task reported when it is 40 or 64 lowercase hex, else "(none)". */
+const BASE_LINE = 'const BASE_SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(String(setup?.baseSha ?? "")) ? setup.baseSha : "(none)";'
+/** The engine's base stop. */
+const BASE_STOP_LINE = 'if (BASE_SHA === "(none)") {'
+/** The review scope's range, and the line the verification panel carries. */
+const RANGE_TEXT = 'DIFF_RANGE: ${BASE_SHA}...HEAD'
+const HEX_40 = 'a'.repeat(40)
+const HEX_64 = '0123456789abcdef'.repeat(4)
+
+interface BaseCase {
+  readonly label: string
+  /** What setup-task reports as `baseSha`; null ⇒ no such value at all. */
+  readonly baseSha: string | null
+  readonly stops: boolean
+}
+
+/** Only a 40 or 64 lowercase hex commit is a base: anything else, a name or a revision included, stops the ticket. */
+const BASE_TABLE: readonly BaseCase[] = [
+  { label: 'a 40-hex commit', baseSha: HEX_40, stops: false },
+  { label: 'a 64-hex commit', baseSha: HEX_64, stops: false },
+  { label: 'no base commit at all', baseSha: null, stops: true },
+  { label: 'an uppercase commit', baseSha: HEX_40.toUpperCase(), stops: true },
+  { label: 'a 39-hex value', baseSha: HEX_40.slice(1), stops: true },
+  { label: 'a 41-hex value', baseSha: `${HEX_40}a`, stops: true },
+  { label: 'a revision name', baseSha: 'HEAD', stops: true },
+  { label: 'a branch name', baseSha: 'main', stops: true },
+]
+
+/**
+ * Named collector: every base case the executed engine decides wrongly — a stop that
+ * is not ESCALATED `base-missing` before any other spawn, or a run that does not
+ * review from exactly the reported commit. Each case runs under both policies with a
+ * captured Issue ID, so the ticket-link stop never decides it.
+ */
+export async function collectBaseStopViolations(body: string | null): Promise<string[]> {
+  if (body === null) return ['the SINGLE engine body was not found']
+  const out: string[] = []
+  for (const c of BASE_TABLE) {
+    for (const issueRequired of ['true', 'false']) {
+      const spawns: Spawn[] = []
+      const world: World = { tickets: { '#7': { baseSha: c.baseSha, issueId: '7', prLinkLine: 'Closes #7' } } }
+      const result = await runEngine(body, { ticket: 'x', issueNumber: '#7', issueRequired }, stubAgent(world, spawns))
+      const beyondSetup = spawns.filter(s => !s.prompt.startsWith('OPERATION: setup-task')).length
+      const where = `${c.label} (issueRequired ${issueRequired})`
+      if (c.stops) {
+        const stopped = result?.verdict === 'ESCALATED' && result.escalations?.[0]?.type === 'base-missing' && result.branch === createdBranch('#7')
+        if (!(stopped && beyondSetup === 0)) out.push(`${where}: expected ESCALATED base-missing before any other spawn, got ${result?.verdict} after ${beyondSetup} more spawn(s)`)
+      } else {
+        const review = spawns.find(s => s.agentType === 'Review')
+        if (spawns.find(s => s.agentType === 'Code') === undefined || review === undefined || !review.prompt.includes(`DIFF_RANGE: ${c.baseSha}...HEAD`)) {
+          out.push(`${where}: expected the ticket reviewed from ${c.baseSha}, got ${result?.verdict}`)
+        }
+      }
+    }
+  }
+  return out
+}
+
+/**
+ * Named collector: which kinds of Review spawn (focus, retry, verification panel) do not
+ * carry `DIFF_RANGE: <fork commit>...HEAD` on a line of their own. The world makes one
+ * focus fail once, so the retry spawns, and reports a finding, so the panel spawns.
+ */
+export async function collectReviewRangeViolations(body: string | null): Promise<string[]> {
+  if (body === null) return ['the SINGLE engine body was not found']
+  const spawns: Spawn[] = []
+  const world: World = {
+    tickets: { '#7': { issueId: '7', prLinkLine: 'Closes #7' } },
+    reviewFalse: { '#7': { security: 1 } },
+    reviewFindings: ['#7'],
+  }
+  await runEngine(body, { ticket: 'x', issueNumber: '#7', issueRequired: 'true' }, stubAgent(world, spawns))
+  const reviews = spawns.filter(s => s.agentType === 'Review')
+  const kind = (s: Spawn): string => (s.prompt.startsWith('Retry ') ? 'retry' : s.prompt.startsWith('Adversarially verify') ? 'panel' : 'focus')
+  const out: string[] = []
+  for (const k of ['focus', 'retry', 'panel']) if (!reviews.some(s => kind(s) === k)) out.push(`no ${k} review spawn ran`)
+  const want = `DIFF_RANGE: ${forkShaOf('#7')}...HEAD`
+  for (const s of reviews) {
+    const lines = s.prompt.split('\n').filter(l => l.includes('DIFF_RANGE'))
+    if (lines.length !== 1 || lines[0] !== want) out.push(`${kind(s)}: expected the line "${want}" alone, found ${JSON.stringify(lines)}`)
+  }
+  return [...new Set(out)]
+}
+
+describe('AC-9: a ticket reviews from the commit its branch was forked from, and stops when setup reports none', () => {
+  it('the table covers both outcomes, and a 40-hex and a 64-hex commit are both admitted', () => {
+    expect(new Set(BASE_TABLE.map(c => c.stops))).toEqual(new Set([true, false]))
+    expect(BASE_TABLE.filter(c => !c.stops).map(c => c.baseSha?.length)).toEqual([40, 64])
+  })
+
+  it('executed: the engine stops, or reviews from the reported commit, exactly as the table says', async () => {
+    expect(await collectBaseStopViolations(SINGLE)).toEqual([])
+  })
+
+  it('the binding follows the branch binding, and the stop follows the branch stop and precedes phase("implement")', () => {
+    const script = SINGLE!
+    const binding = script.indexOf(BASE_LINE)
+    const branchStop = script.indexOf(BRANCH_STOP_LINE)
+    const stop = script.indexOf(BASE_STOP_LINE)
+    const implement = script.indexOf('phase("implement"')
+    expect(binding, 'BASE_SHA is bound from setup-task\'s Output after BRANCH').toBeGreaterThan(script.indexOf(BRANCH_LINE))
+    expect(stop, 'the base stop follows the branch stop').toBeGreaterThan(branchStop)
+    expect(implement, 'and precedes the implement phase').toBeGreaterThan(stop)
+    expect(offsetsOf(script, 'const BASE_SHA = '), 'one binding: the reported commit').toHaveLength(1)
+    expect(script, 'setup-task is asked for its baseSha').toContain('"baseSha": "<the 40 or 64 hex git rev-parse HEAD prints before step 4>"}')
+  })
+
+  it('executed: every review spawn, the retry and the verification panel included, takes its range on a line of its own', async () => {
+    expect(await collectReviewRangeViolations(SINGLE)).toEqual([])
+  })
+
+  it('the range is stated in two places only: the review scope the focus and retry spawns share, and the verification panel', () => {
+    expect(offsetsOf(SINGLE!, RANGE_TEXT)).toHaveLength(2)
+  })
+
+  it('known-bad probe: an engine without the base stop reviews a ticket that has no base commit', async () => {
+    const unstopped = seedOnce(SINGLE!, BASE_STOP_LINE, 'if (false) {')
+    const found = await collectBaseStopViolations(unstopped)
+    expect(found.map(f => f.split(' (issueRequired')[0])).toEqual(BASE_TABLE.filter(c => c.stops).flatMap(c => [c.label, c.label]))
+  })
+
+  it('known-bad probe: a binding that admits any value lets a revision name and a short commit through', async () => {
+    const loose = seedOnce(SINGLE!, BASE_LINE, 'const BASE_SHA = String(setup?.baseSha ?? "") !== "" ? setup.baseSha : "(none)";')
+    const found = await collectBaseStopViolations(loose)
+    expect(found.map(f => f.split(' (issueRequired')[0])).toEqual(
+      ['an uppercase commit', 'a 39-hex value', 'a 41-hex value', 'a revision name', 'a branch name'].flatMap(l => [l, l]),
+    )
+  })
+
+  it('known-bad probe: a range that is not ended by a newline runs into the retry prompt\'s next word', async () => {
+    const joined = seedOnce(SINGLE!, `${RANGE_TEXT}\\n\`;`, `${RANGE_TEXT}\`;`)
+    expect(await collectReviewRangeViolations(joined)).toEqual([expect.stringContaining('retry: expected the line')])
+  })
+
+  it('known-bad probe: a verification panel without the range line is reported', async () => {
+    const bare = seedOnce(SINGLE!, `${RANGE_TEXT}\nLens`, 'Lens')
+    expect(await collectReviewRangeViolations(bare)).toEqual([expect.stringContaining('panel: expected the line')])
+  })
+
+  it('known-bad probe: a review scope that states no range is reported for the focus and the retry', async () => {
+    const unranged = seedOnce(SINGLE!, `\\n${RANGE_TEXT}\\n\``, '`')
+    expect((await collectReviewRangeViolations(unranged)).map(f => f.split(':')[0])).toEqual(['focus', 'retry'])
+  })
+
+  it('executed: a focus that answers "did not review" twice is a coverage gap, and the ticket does not pass', async () => {
+    const spawns: Spawn[] = []
+    const world: World = { tickets: { '#7': { issueId: '7', prLinkLine: 'Closes #7' } }, reviewFalse: { '#7': { security: 2 } } }
+    const result = await runEngine(SINGLE!, { ticket: 'x', issueNumber: '#7', issueRequired: 'true' }, stubAgent(world, spawns))
+    expect(spawns.filter(s => s.agentType === 'Review' && /^(?:Retry )?security review\./i.test(s.prompt))).toHaveLength(2)
+    expect(result.verdict).toBe('PARTIAL')
+    expect(result.reviewCoverage).toEqual({ failedFocuses: ['security'], complete: false })
+    expect(result.escalations?.map(e => e.type)).toContain('review-coverage-incomplete')
+  })
+
+  it('executed: a focus that answers "did not review" once is covered by its retry', async () => {
+    const spawns: Spawn[] = []
+    const world: World = { tickets: { '#7': { issueId: '7', prLinkLine: 'Closes #7' } }, reviewFalse: { '#7': { security: 1 } } }
+    const result = await runEngine(SINGLE!, { ticket: 'x', issueNumber: '#7', issueRequired: 'true' }, stubAgent(world, spawns))
+    expect(result.verdict).toBe('PASS')
+    expect(result.reviewCoverage).toEqual({ failedFocuses: [], complete: true })
+  })
+
+  it('executed: a wave quarantines the ticket with no base commit, cascades to its dependent, and runs its independent sibling', async () => {
+    const world: World = {
+      tickets: {
+        '#12': { baseSha: null, issueId: '12', prLinkLine: 'Closes #12' },
+        '#13': { issueId: '13', prLinkLine: 'Closes #13' },
+        '#14': { issueId: '14', prLinkLine: 'Closes #14' },
+      },
+      deps: { '#13': ['#12'] },
+    }
+    const run = await runWave(WAVE!, SINGLE!, world, {}, 'true')
+    expect(run.tickets.map(t => [t.ticket, t.ran, t.verdict, t.merged])).toEqual([
+      ['#12', true, 'ESCALATED', false],
+      ['#13', false, null, false],
+      ['#14', true, 'PASS', true],
+    ])
+    expect(run.quarantined.map(q => q.ticket)).toEqual(['#12'])
+    expect(run.quarantined[0].reason).toContain('setup-task reported no base commit')
   })
 })
 

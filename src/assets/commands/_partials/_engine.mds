@@ -85,7 +85,7 @@ The review pass runs exactly ONCE per ticket. One full-branch review → one adv
 
 **Step 1 — Spawn Review agents in parallel (one agent() per focus)**
 
-**Review scope:** the entire branch diff from the base branch to HEAD (no base SHA is tracked — the reviewing agent diffs the branch against its merge-base with the default branch).
+**Review scope:** the entire branch diff, `DIFF_RANGE: {base commit}...HEAD`; the base commit is the 40 or 64 hex commit that the ticket branch was forked from, as the setup step reported it; a ticket with none stops `base-missing`.
 
 Core Review agents (always, 8 total): security, architecture, performance, complexity, consistency, regression, testing, reliability
 
@@ -199,7 +199,7 @@ Each ticket engine run returns a structured result. The Synthesize agent or the 
   },
   "escalations": [
     {
-      "type": "merge-conflict | gate2-fail | validation-exhausted | harden-blocked | ambiguous-resolution | review-coverage-incomplete | dependency-blocked | engine-crash | ticket-link-missing | branch-missing",
+      "type": "merge-conflict | gate2-fail | validation-exhausted | harden-blocked | ambiguous-resolution | review-coverage-incomplete | dependency-blocked | engine-crash | ticket-link-missing | branch-missing | base-missing",
       "description": "string"
     }
   ],
