@@ -70,6 +70,8 @@ const { curationMoveLockKey } = nodeRequire(PROJECT_PATHS) as { curationMoveLock
 const nodeFs = nodeRequire('fs') as typeof fs;
 /** The child_process module object the move calls git through: a spy on it reaches the move. */
 const nodeChildProcess = nodeRequire('child_process') as typeof import('child_process');
+/** The crypto module object the move draws its name tails from: a spy on it reaches the move. */
+const nodeCrypto = nodeRequire('crypto') as typeof import('crypto');
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -634,6 +636,49 @@ describe('moveLedger — locks (TP-31, TP-38)', () => {
     age(path.join(site.newDir, CLAIM), 10_000);
     expect(move()).toEqual({ ok: true, value: { state: 'busy', notes: [] } });
     expect(exists(path.join(site.oldDir, LEDGER))).toBe(true);
+  });
+
+  describe('a folder that changes between the choice of the locks and the move (the re-probe)', () => {
+    const lockEntries = (dir: string): string[] => names(dir).filter(entry => entry.endsWith('.lock'));
+
+    /** Run `change` once, when the mkdir of `lockDir` is called: `before` the call is forwarded or after it. */
+    function changeAtLock(lockDir: string, when: 'before' | 'after', change: () => void): void {
+      const real = nodeFs.mkdirSync;
+      vi.spyOn(nodeFs, 'mkdirSync').mockImplementation(((...args: Parameters<typeof fs.mkdirSync>) => {
+        if (String(args[0]) !== lockDir) return real(...args);
+        if (when === 'before') change();
+        const made = real(...args);
+        if (when === 'after') change();
+        return made;
+      }) as never);
+    }
+
+    it('a new folder that appears after the locks were chosen makes the move busy: no rename, every lock released', () => {
+      changeAtLock(moveLockDir(), 'before', () => nodeFs.mkdirSync(site.newDir));
+      const renames = vi.spyOn(nodeFs, 'renameSync');
+
+      expect(move()).toEqual({ ok: true, value: { state: 'busy', notes: [] } });
+
+      expect(renames.mock.calls).toEqual([]);
+      expect(exists(path.join(site.oldDir, LEDGER))).toBe(true);
+      expect(names(site.newDir)).toEqual([]);
+      expect(exists(moveLockDir())).toBe(false);
+      expect(lockEntries(site.oldDir)).toEqual([]);
+      expect(lockEntries(site.machineDir)).toEqual([]);
+    });
+
+    it('an old folder that is gone once the locks are held answers none: no rename, every lock released', () => {
+      changeAtLock(path.join(site.oldDir, '.pending-turns.jsonl.lock'), 'after', () => fs.rmSync(site.oldDir, { recursive: true }));
+      const renames = vi.spyOn(nodeFs, 'renameSync');
+
+      expect(move()).toEqual({ ok: true, value: { state: 'none', notes: [] } });
+
+      expect(renames.mock.calls).toEqual([]);
+      expect(exists(site.oldDir)).toBe(false);
+      expect(exists(site.newDir)).toBe(false);
+      expect(exists(moveLockDir())).toBe(false);
+      expect(lockEntries(site.machineDir)).toEqual([]);
+    });
   });
 });
 
@@ -1688,6 +1733,69 @@ describe('the finish — the backup and the race-close sweep', () => {
     const value = movedValue();
     expect(value.backup).toMatch(BACKUP_RE);
     expect(value.notes.join('\n')).toMatch(/sweep/);
+  });
+
+  describe('a backup rename that fails, and the rerun (TP-32)', () => {
+    const lockEntries = (dir: string): string[] => names(dir).filter(entry => entry.endsWith('.lock'));
+    const backupsUnder = (): string[] => names(site.devflow).filter(entry => entry.startsWith('learning.backup-'));
+    const seedMovedIn = (): void => {
+      seedOld({ ...ledgerSet('old'), [QUEUE]: turns(1, 3) });
+      seedNew({ [LOG]: '', [QUEUE]: turns(10, 11) });
+    };
+
+    it.each([
+      ['kept-new', () => seedKeptNew(turns(1, 3), turns(10, 11)), ledgerSet('new')[LEDGER]],
+      ['moved-in', seedMovedIn, ledgerSet('old')[LEDGER]],
+    ] as const)('%s: an I/O error is an io-error that leaves the old folder and no lock, and a rerun makes one backup', (_mode, arrange, winnerLedger) => {
+      arrange();
+      failCall('renameSync', 'EIO', ([from]) => String(from) === site.oldDir);
+
+      expect(failure().kind).toBe('io-error');
+
+      expect(exists(site.oldDir)).toBe(true);
+      expect(backupsUnder()).toEqual([]);
+      expect(lockEntries(site.oldDir)).toEqual([]);
+      expect(lockEntries(site.newDir)).toEqual([]);
+      expect(lockEntries(site.machineDir)).toEqual([]);
+      expect(read(path.join(site.newDir, LEDGER))).toBe(winnerLedger);
+
+      vi.restoreAllMocks();
+      const value = movedValue();
+
+      expect(backupsUnder()).toEqual([value.backup]);
+      expect(exists(site.oldDir)).toBe(false);
+      expect(linesOf(path.join(site.newDir, QUEUE))).toEqual([turn(10), turn(1), turn(2)]);
+      expect(read(path.join(site.newDir, LEDGER))).toBe(winnerLedger);
+      expect(lockEntries(site.newDir)).toEqual([]);
+      expect(lockEntries(site.machineDir)).toEqual([]);
+    });
+
+    it('with no free backup name in 5 tries, the pass is an io-error that leaves the old folder and no lock, and a rerun succeeds', () => {
+      seedKeptNew(turns(1, 3), turns(10, 11));
+      const taken = 'learning.backup-20261016T123045Z-deadbeef';
+      seed(path.join(site.devflow, taken), {});
+      vi.spyOn(nodeCrypto, 'randomBytes').mockReturnValue(Buffer.from('deadbeef', 'hex') as never);
+      const probes = vi.spyOn(nodeFs, 'lstatSync');
+
+      const error = failure({ now: Date.parse('2026-10-16T12:30:45Z') });
+
+      expect(error.kind).toBe('io-error');
+      expect(error.message).toContain('no free backup name');
+      expect(probes.mock.calls.filter(([file]) => String(file) === path.join(site.devflow, taken))).toHaveLength(5);
+      expect(exists(site.oldDir)).toBe(true);
+      expect(backupsUnder()).toEqual([taken]);
+      expect(lockEntries(site.oldDir)).toEqual([]);
+      expect(lockEntries(site.newDir)).toEqual([]);
+      expect(lockEntries(site.machineDir)).toEqual([]);
+
+      vi.restoreAllMocks();
+      const value = movedValue();
+
+      expect(value.backup).not.toBe(taken);
+      expect(backupsUnder()).toEqual([taken, value.backup].sort());
+      expect(exists(site.oldDir)).toBe(false);
+      expect(linesOf(path.join(site.newDir, QUEUE))).toEqual([turn(10), turn(1), turn(2)]);
+    });
   });
 });
 

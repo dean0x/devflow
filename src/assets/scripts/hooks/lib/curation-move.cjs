@@ -999,6 +999,11 @@ function curationMoveEntries(ctx) {
  * rendered files stay as they are, and `rendered` is false. The size is read from the
  * file before anything is rendered, so a render never starts from a partial read.
  *
+ * Rule: no step after a folder rename may throw before the locks are released at their
+ * new path (locksAfter). In this function the rename of the old folder to its backup is
+ * the last step that may throw. A step added after it must not throw, or must update
+ * locksAfter.
+ *
  * @param {{ root: string, oldDir: string, newDir: string, devflowDir: string, now: number, git: GitLookup }} ctx
  * @param {{ whole: boolean }} opts - whole: the folder itself was renamed, so there is no backup
  * @returns {{ notes: string[], rendered: boolean, backup: string|null }}
@@ -1179,6 +1184,10 @@ function moveLedgerUnscrubbed(root, options = {}) {
  * path it has after the pass's last rename. A whole-folder move carries the old
  * folder's locks to the new folder; a merge turns the old folder into the backup and
  * carries them there. A pass that renamed nothing leaves them where they were.
+ *
+ * This holds only while no step after a folder rename throws: a throw leaves `result`
+ * unset, and the locks are then released at the paths they had before the rename. A new
+ * step after a rename must not throw, or must update this function.
  */
 function locksAfter(held, ctx, result) {
   if (!result || !result.ok || result.value.state !== 'moved') return held;
