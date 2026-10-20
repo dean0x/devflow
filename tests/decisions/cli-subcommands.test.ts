@@ -1527,6 +1527,21 @@ describe('curation --restore/--clear/--reset move the old folder first (#529)', 
       expect(snapshotTree(root)).toEqual(before);
     });
 
+    it.each(WRITERS)('%s with a queue claim that holds the move says a Curate run holds it, writes nothing and exits 1', async (_flag, args, undone) => {
+      const old = seedOldFolder(root, true);
+      const before = snapshotTree(root);
+
+      const run = await runCuration(args);
+
+      expect(run.error).toBe(`A Curate run holds this project's curation queue, and the move waits for it. Nothing was ${undone}; try again after the run finishes (up to 15 minutes).`);
+      expect(run.error, 'no other run moves anything').not.toContain('Another run');
+      expect(run.success).toBe('');
+      expect(run.exitCode).toBe(1);
+      expect(fs.existsSync(old)).toBe(true);
+      expect(fs.existsSync(NEW())).toBe(false);
+      expect(snapshotTree(root)).toEqual(before);
+    });
+
     it.each(WRITERS)('%s with a refused move (the old folder is a link) writes nothing and exits 1', async (_flag, args) => {
       const outside = makeTmpDir();
       try {

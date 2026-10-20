@@ -126,7 +126,8 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
   A curation command prints `Another run is moving this project's curation data.`
   Nothing is written. Wait a moment, then run the command again. A session start retries by itself.
   When a queue claim holds the move, init prints `Ledger move skipped for <root>: a queue claim holds the move.`
-  The move runs after Curate finishes.
+  A curation command prints `A Curate run holds this project's curation queue, and the move waits for it.`
+  The move runs after Curate finishes, which can take up to 15 minutes. Run the command again after that.
 - Refused: a symbolic link sits on the path, or a private, swept or overflow queue file sits directly in the old folder.
   Nothing moves. Init prints `Ledger move refused for <root>`.
   The HUD and `devflow curation --status` print `Curation: move refused, see the hook log`.

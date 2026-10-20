@@ -174,7 +174,8 @@ async function pendingMoveLine(ledgerRoot: string): Promise<string | null> {
  * project scope of --configure). Installed scripts of another version read and create
  * another ledger folder, so they refuse with the skew line. Then, where the old folder
  * is present, the shared move runs with no wait: a busy lock prints a retry message,
- * and a refused or failed move prints its reason; either way nothing is written.
+ * a queue claim that holds the move prints its own message, and a refused or failed move
+ * prints its reason; either way nothing is written.
  * `undone` completes "Nothing was …". Answers true when the caller may write.
  */
 async function prepareToWrite(ledgerRoot: string, undone: string): Promise<boolean> {
@@ -188,15 +189,23 @@ async function prepareToWrite(ledgerRoot: string, undone: string): Promise<boole
   const moved = await runSharedMove(ledgerRoot);
   if (moved.kind === 'moved' || moved.kind === 'unchanged') return true;
   p.log.error(moved.kind === 'busy'
-    ? movingLine(undone)
+    ? (moved.reason === 'claim' ? claimHoldsMoveLine(undone) : movingLine(undone))
     : describeMoveText(`${moveProblemLines(moved).join(' ')} Nothing was ${undone}.`));
   process.exitCode = 1;
   return false;
 }
 
-/** The line a writer prints when the move of the old folder is not done. `undone` completes "Nothing was …". */
+/** The line a writer prints when a lock holds the move of the old folder. `undone` completes "Nothing was …". */
 function movingLine(undone: string): string {
   return `Another run is moving this project's curation data. Nothing was ${undone}; try again in a moment.`;
+}
+
+/**
+ * The line a writer prints when a Curate run holds the queue claim, which holds the move:
+ * no other run moves anything, and the claim lasts up to 15 minutes. `undone` completes "Nothing was …".
+ */
+function claimHoldsMoveLine(undone: string): string {
+  return `A Curate run holds this project's curation queue, and the move waits for it. Nothing was ${undone}; try again after the run finishes (up to 15 minutes).`;
 }
 
 // ---------------------------------------------------------------------------

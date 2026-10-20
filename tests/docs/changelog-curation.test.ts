@@ -216,6 +216,8 @@ describe('CHANGELOG curation rename entry', () => {
     }
     expect(entry).toContain("Another run is moving this project's curation data.");
     expect(curation).toContain("Another run is moving this project's curation data.");
+    expect(entry).toContain("A Curate run holds this project's curation queue, and the move waits for it.");
+    expect(curation).toContain("A Curate run holds this project's curation queue, and the move waits for it.");
     for (const quoted of [
       'Curation: move refused, see the hook log',
       'Curation: run devflow init, or open Claude Code in this project after it',

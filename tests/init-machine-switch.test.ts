@@ -380,30 +380,36 @@ describe("init asks for its own repository's ledger root within the shared budge
   describe('lookupDrainLedgerRoot', () => {
     it('asks nothing while curation is on: there is nothing to drain', async () => {
       const lookup = vi.fn(timedOut);
-      expect(await lookupDrainLedgerRoot({ gitRoot: '/repo', curationEnabled: true }, lookup)).toEqual({ ledgerRoot: null, warning: null });
+      expect(await lookupDrainLedgerRoot({ gitRoot: '/repo', curationEnabled: true, manifestWritten: true }, lookup)).toEqual({ ledgerRoot: null, warning: null });
+      expect(lookup).not.toHaveBeenCalled();
+    });
+
+    it('asks nothing, and prints nothing, when the manifest was not written: the drain does not run', async () => {
+      const lookup = vi.fn(timedOut);
+      expect(await lookupDrainLedgerRoot({ gitRoot: '/repo', curationEnabled: false, manifestWritten: false }, lookup)).toEqual({ ledgerRoot: null, warning: null });
       expect(lookup).not.toHaveBeenCalled();
     });
 
     it('asks nothing outside a git repository', async () => {
       const lookup = vi.fn(timedOut);
-      expect(await lookupDrainLedgerRoot({ gitRoot: null, curationEnabled: false }, lookup)).toEqual({ ledgerRoot: null, warning: null });
+      expect(await lookupDrainLedgerRoot({ gitRoot: null, curationEnabled: false, manifestWritten: true }, lookup)).toEqual({ ledgerRoot: null, warning: null });
       expect(lookup).not.toHaveBeenCalled();
     });
 
     it('answers the ledger root, with the shared timeout', async () => {
       const lookup = vi.fn(async (): Promise<LedgerRootLookup> => ({ kind: 'root', root: '/main' }));
-      expect(await lookupDrainLedgerRoot({ gitRoot: '/repo-wt', curationEnabled: false }, lookup)).toEqual({ ledgerRoot: '/main', warning: null });
+      expect(await lookupDrainLedgerRoot({ gitRoot: '/repo-wt', curationEnabled: false, manifestWritten: true }, lookup)).toEqual({ ledgerRoot: '/main', warning: null });
       expect(lookup.mock.calls[0][1]).toEqual({ timeoutMs: LEDGER_ROOT_TIMEOUT_MS });
     });
 
     it('a timeout drains nothing and prints one line that names the repository', async () => {
-      const answer = await lookupDrainLedgerRoot({ gitRoot: '/repo', curationEnabled: false }, timedOut);
+      const answer = await lookupDrainLedgerRoot({ gitRoot: '/repo', curationEnabled: false, manifestWritten: true }, timedOut);
       expect(answer.ledgerRoot).toBeNull();
       expect(answer.warning).toBe('The curation queue was not drained for /repo: git did not answer in time. The next init tries again.');
     });
 
     it('prints the repository name with its control characters replaced', async () => {
-      const answer = await lookupDrainLedgerRoot({ gitRoot: '/re\u001b[31mpo\n', curationEnabled: false }, timedOut);
+      const answer = await lookupDrainLedgerRoot({ gitRoot: '/re\u001b[31mpo\n', curationEnabled: false, manifestWritten: true }, timedOut);
       expect([...(answer.warning ?? '')].some((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f)).toBe(false);
     });
   });

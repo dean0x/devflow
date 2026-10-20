@@ -721,14 +721,16 @@ export async function lookupOwnLedgerRoot(
 
 /**
  * The ledger root init's disabled-feature drain acts on, and the one line to print when
- * there is none because git did not answer in time. Asks only when curation is off in a
- * git repository: with curation on there is nothing to drain.
+ * there is none because git did not answer in time. Asks only when the drain can run: curation
+ * is off, in a git repository, and the manifest holding the switch was written. With curation
+ * on there is nothing to drain, and with no manifest written the drain does not run, so a
+ * line that says it was not drained for want of the root would name the wrong cause.
  */
 export async function lookupDrainLedgerRoot(
-  opts: { readonly gitRoot: string | null; readonly curationEnabled: boolean },
+  opts: { readonly gitRoot: string | null; readonly curationEnabled: boolean; readonly manifestWritten: boolean },
   lookup: LedgerRootLookupFn = lookupLedgerRoot,
 ): Promise<{ readonly ledgerRoot: string | null; readonly warning: string | null }> {
-  if (opts.curationEnabled || opts.gitRoot === null) return { ledgerRoot: null, warning: null };
+  if (opts.curationEnabled || opts.gitRoot === null || !opts.manifestWritten) return { ledgerRoot: null, warning: null };
   const own = await lookupOwnLedgerRoot(opts.gitRoot, lookup);
   const warning = own.timedOut
     ? `The curation queue was not drained for ${describeMoveText(opts.gitRoot)}: git did not answer in time. The next init tries again.`
@@ -2936,7 +2938,7 @@ export const initCommand = new Command('init')
     }
 
     // Only now that the machine-wide switch is on disk (D-INIT-DRAIN-AFTER-SWITCH).
-    const drainRoot = await lookupDrainLedgerRoot({ gitRoot, curationEnabled });
+    const drainRoot = await lookupDrainLedgerRoot({ gitRoot, curationEnabled, manifestWritten: trackerLifecycle.manifestWritten });
     if (drainRoot.warning !== null) p.log.warn(drainRoot.warning);
     const refusedDrains = await drainDisabledFeatureQueues({
       gitRoot,
