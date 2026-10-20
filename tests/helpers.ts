@@ -1998,6 +1998,41 @@ export const JUDGE_BY_READING = 'judge the match by reading; never pass the valu
 export const WRITE_FAILURE = 'If the Write tool fails, treat the value as missing; never write it with a shell command.'
 
 /**
+ * The one text of the name-file procedure that three prompts carry: `ensure-pr-ready` step 5a, `validate-branch` step 6 and the
+ * /implement re-validation step. Each constant below is written as is in all three; the `name-file-procedure` rule of
+ * tests/guards/base-ref-guard.test.ts holds them equal, and the per-prompt tests import these instead of spelling them again.
+ */
+
+/** The producer's tail: the status of the first `gh` call is kept in `G` and echoed with the status of the call that writes the name file. */
+export const PRODUCER_STATUS_CAPTURE = 'G=$?; gh pr view'
+export const PRODUCER_NAME_TAIL = '--json baseRefName --jq .baseRefName > "$F"; echo "gh=$G,$?"'
+
+/** What a failed `gh` means: either printed status is not 0. */
+export const GH_FAILED_RULE = '`gh` failed when either status printed in `gh=` is not 0'
+
+/** What "no PR applies" covers: a checkout without a PR, without `gh` or without a GitHub remote takes the default branch. */
+export const NO_PR_DEFINITION = '(none for the branch, `gh` missing or logged out, or no GitHub remote)'
+
+/** A failed `gh` that shows there is no PR: the default branch is the base. */
+export const NO_PR_CLAUSE = `\`gh\` failed and its output shows that no PR applies ${NO_PR_DEFINITION}`
+
+/** A failed `gh` that does not show that: no name can be trusted. */
+export const OTHER_GH_FAILURE_CLAUSE = '`gh` failed and its output does not show that no PR applies'
+
+/** The command that prints the remote default branch: for-each-ref with no pipe. It prints one empty line when origin/HEAD is not a symbolic ref. */
+export const DEFAULT_BRANCH_PROBE = 'git -C "{worktree}" for-each-ref --format=\'%(symref:lstrip=3)\' refs/remotes/origin/HEAD'
+
+/** The origin read that fills the name file by redirect. */
+export const ORIGIN_HEAD_READ = `F="{name file}"; ${DEFAULT_BRANCH_PROBE} > "$F"`
+
+/** The `main` probe of the fallback, and the `master` fallback that follows it. */
+export const MAIN_PROBE = 'git -C "{worktree}" rev-parse --verify --quiet main'
+export const MASTER_FALLBACK = 'otherwise `master` the same way'
+
+/** The default-branch fill, from the origin read to the Write-failure rule. A file whose only content is an empty line counts as empty. */
+export const DEFAULT_BRANCH_FILL = `\`${ORIGIN_HEAD_READ}\`; when the file reads as empty (a file whose only content is an empty line is empty), \`main\` if \`${MAIN_PROBE}\` succeeds, ${MASTER_FALLBACK}; write a literal name with the Write tool, after a Read of the file. ${WRITE_FAILURE}`
+
+/**
  * A shell write into the name or title file `$F`: a `>` or `>>` redirect, spaced or not, quoted or not, or a `tee`
  * with any flags that names it. A `<` read and a longer variable such as `$FILE` are not one.
  */

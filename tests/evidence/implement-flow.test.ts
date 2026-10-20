@@ -51,11 +51,20 @@ import * as path from 'path'
 import {
   CODE_AGENT_TYPES,
   collectOrderViolations,
+  DEFAULT_BRANCH_FILL,
   ensurePrReadyReference,
+  GH_FAILED_RULE,
   isAgentBlock,
   JUDGE_BY_READING,
+  MAIN_PROBE,
+  MASTER_FALLBACK,
   NAME_FILE_TRAP,
+  NO_PR_CLAUSE,
+  ORIGIN_HEAD_READ,
+  OTHER_GH_FAILURE_CLAUSE,
   parseFences,
+  PRODUCER_NAME_TAIL,
+  PRODUCER_STATUS_CAPTURE,
   readAgentReference,
   requireDistFile,
   resolveAgentSource,
@@ -1414,12 +1423,10 @@ describe('#452: BASE_BRANCH is checked before it reaches a shell line', () => {
 })
 
 /** The one Bash call that starts the re-validation base step: the fork flag to stdout, the PR base name to a fresh temp file, the gh status echoed. */
-const REVALIDATE_PRODUCER = 'cd "{worktree}" && F="$(mktemp)" && echo "F=$F" && gh pr view --json isCrossRepository --jq .isCrossRepository; gh pr view --json baseRefName --jq .baseRefName > "$F"; echo "gh=$?"'
-/** The origin default-branch read that fills the name file when gh shows that no PR applies. */
-const REVALIDATE_ORIGIN_HEAD_READ = `F="{name file}"; git -C "{worktree}" for-each-ref --format='%(symref:lstrip=3)' refs/remotes/origin/HEAD > "$F"`
+const REVALIDATE_PRODUCER = `cd "{worktree}" && F="$(mktemp)" && echo "F=$F" && gh pr view --json isCrossRepository --jq .isCrossRepository; ${PRODUCER_STATUS_CAPTURE} ${PRODUCER_NAME_TAIL}`
 /** The no-PR default branch, in the order the step takes it: the origin read, then main, then master, each checked by the same rev-parse. */
-const REVALIDATE_NO_PR_CHAIN = ['shows that no PR applies', REVALIDATE_ORIGIN_HEAD_READ, 'rev-parse --verify --quiet main', 'otherwise `master` the same way'] as const
-const REVALIDATE_STOP_ON_GH = 'Stop the run, after `rm -- "{name file}"`, if gh failed and its output does not show that no PR applies, or the file is empty after every fallback.'
+const REVALIDATE_NO_PR_CHAIN = [NO_PR_CLAUSE, ORIGIN_HEAD_READ, MAIN_PROBE, MASTER_FALLBACK] as const
+const REVALIDATE_STOP_ON_GH = `Stop the run, after \`rm -- "{name file}"\`, if ${OTHER_GH_FAILURE_CLAUSE}, or the file is empty after every fallback.`
 const REVALIDATE_STOP_ON_CLASS = 'Stop the run, after `rm -- "{name file}"`, unless the name matches'
 
 /** Named collector: how the re-validation base step gets the name into a file, takes the no-PR default branch and removes the file on its stops. */
@@ -1432,7 +1439,8 @@ function collectRevalidateNameFileDefects(revalidate: string): string[] {
   need('the fork flag and the PR base name are read in one Bash call, the name going to a fresh temp file', step.includes(`\`${REVALIDATE_PRODUCER}\``) && step.includes('`{name file}` is the printed `F=` path'))
   need('a gh failure that shows no PR takes the default branch by for-each-ref, then main, then master, before any stop line', chainAt.every((at, n) => at >= 0 && (n === 0 || at > chainAt[n - 1])) && chainAt[chainAt.length - 1] < step.indexOf('Stop the run'))
   need('the default branch is read with for-each-ref, never by symbolic-ref, abbrev-ref or a pipe', !/symbolic-ref|abbrev-ref|\| *sed/.test(step))
-  need('a given or literal name is written with the Write tool after a Read, and a failed Write is a missing value', step.includes('written with the Write tool after a Read of the file') && step.includes(WRITE_FAILURE))
+  need('a gh failure is read from either printed status', step.includes(GH_FAILED_RULE))
+  need('the default branch is filled by the origin read, main, master and the Write tool, an empty line counts as empty, and a failed Write is a missing value', step.includes(DEFAULT_BRANCH_FILL))
   need('only the two reads redirect into the name file', countShellWritesIntoF(step) === 2)
   need('the name file is read with the Read tool', step.includes('Read `{name file}` with the Read tool: its one line is the name.'))
   need('a gh failure that shows no missing PR, or an empty file, stops the run after removing the name file', step.includes(REVALIDATE_STOP_ON_GH))
@@ -1458,11 +1466,14 @@ describe('#561: the re-validation base step passes the name through a file', () 
     expect(collectRevalidateNameFileDefects(seeded(REVALIDATE_PRODUCER, 'gh pr view --json baseRefName,isCrossRepository'))).toContain('the fork flag and the PR base name are read in one Bash call, the name going to a fresh temp file')
     const noProbe = 'a gh failure that shows no PR takes the default branch by for-each-ref, then main, then master, before any stop line'
     expect(collectRevalidateNameFileDefects(seeded('shows that no PR applies', 'shows a PR'))).toContain(noProbe)
-    expect(collectRevalidateNameFileDefects(seeded('rev-parse --verify --quiet main', 'rev-parse --verify --quiet trunk'))).toEqual([noProbe])
-    expect(collectRevalidateNameFileDefects(seeded('otherwise `master` the same way', 'otherwise `master`'))).toEqual([noProbe])
-    expect(collectRevalidateNameFileDefects(seeded("for-each-ref --format='%(symref:lstrip=3)' refs/remotes/origin/HEAD", 'symbolic-ref --quiet --short refs/remotes/origin/HEAD'))).toEqual([noProbe, 'the default branch is read with for-each-ref, never by symbolic-ref, abbrev-ref or a pipe'])
-    expect(collectRevalidateNameFileDefects(seeded(WRITE_FAILURE, ''))).toEqual(['a given or literal name is written with the Write tool after a Read, and a failed Write is a missing value'])
-    expect(collectRevalidateNameFileDefects(seeded('written with the Write tool after a Read of the file', 'written with a shell command'))).toEqual(['a given or literal name is written with the Write tool after a Read, and a failed Write is a missing value'])
+    const filled = 'the default branch is filled by the origin read, main, master and the Write tool, an empty line counts as empty, and a failed Write is a missing value'
+    expect(collectRevalidateNameFileDefects(seeded('rev-parse --verify --quiet main', 'rev-parse --verify --quiet trunk'))).toEqual([noProbe, filled])
+    expect(collectRevalidateNameFileDefects(seeded(MASTER_FALLBACK, 'otherwise `master`'))).toEqual([noProbe, filled])
+    expect(collectRevalidateNameFileDefects(seeded("for-each-ref --format='%(symref:lstrip=3)' refs/remotes/origin/HEAD", 'symbolic-ref --quiet --short refs/remotes/origin/HEAD'))).toEqual([noProbe, 'the default branch is read with for-each-ref, never by symbolic-ref, abbrev-ref or a pipe', filled])
+    expect(collectRevalidateNameFileDefects(seeded(WRITE_FAILURE, ''))).toEqual([filled])
+    expect(collectRevalidateNameFileDefects(seeded('write a literal name with the Write tool, after a Read of the file', 'write a literal name with a shell command'))).toEqual([filled])
+    expect(collectRevalidateNameFileDefects(seeded(' (a file whose only content is an empty line is empty)', ''))).toEqual([filled])
+    expect(collectRevalidateNameFileDefects(seeded(GH_FAILED_RULE, '`gh` failed when its first status is not 0'))).toEqual(['a gh failure is read from either printed status'])
     expect(collectRevalidateNameFileDefects(seeded('Read `{name file}` with the Read tool: its one line is the name.', ''))).toEqual(['the name file is read with the Read tool'])
     expect(collectRevalidateNameFileDefects(seeded(REVALIDATE_STOP_ON_GH, 'Stop the run if gh failed.'))).toEqual(['a gh failure that shows no missing PR, or an empty file, stops the run after removing the name file'])
     expect(collectRevalidateNameFileDefects(seeded(REVALIDATE_STOP_ON_CLASS, 'Stop the run unless the name matches'))).toEqual(['a name outside the class stops the run after removing the name file'])

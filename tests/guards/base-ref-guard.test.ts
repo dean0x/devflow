@@ -54,9 +54,18 @@ import { tmpdir } from 'os'
 import * as path from 'path'
 
 import {
+  DEFAULT_BRANCH_FILL,
+  DEFAULT_BRANCH_PROBE,
   FLAGGED_RM,
+  GH_FAILED_RULE,
+  MASTER_FALLBACK,
   MIN_COMPILED_PROMPTS,
   NAME_FILE_TRAP,
+  NO_PR_CLAUSE,
+  NO_PR_DEFINITION,
+  OTHER_GH_FAILURE_CLAUSE,
+  PRODUCER_NAME_TAIL,
+  PRODUCER_STATUS_CAPTURE,
   ROOT,
   collectStaleOutputs,
   compiledPrompts,
@@ -280,7 +289,7 @@ function listItem(text: string, start: RegExp): string | null {
 // Findings
 // ---------------------------------------------------------------------------
 
-const RULES = ['shell-name', 'strict-copy', 'grammar-copy', 'diff-range', 'sink-exit', 'resolver-call', 'file-removal', 'reason-fix-table', 'review-range'] as const
+const RULES = ['shell-name', 'strict-copy', 'grammar-copy', 'diff-range', 'sink-exit', 'resolver-call', 'file-removal', 'reason-fix-table', 'name-file-procedure', 'review-range'] as const
 
 type Rule = typeof RULES[number]
 
@@ -520,6 +529,40 @@ function fixTableFindings(p: Prompt): Unmet[] {
   else if (table !== CANONICAL_FIX_TABLE) out.push({ anchor: 'reason-fix table', detail: 'the sentence differs from the ensure-pr-ready step 5b sentence' })
   return out
 }
+
+/** The prompts that write the name file for a base: each carries the one text of the name-file procedure. */
+const PROCEDURE_FILES: readonly string[] = ['git-ops/ensure-pr-ready.md', 'git-ops/validate-branch.md', 'references/implement-revalidate.md']
+
+/** The default-branch fill as a copy writes it: from the origin read to the Write-failure rule, inside one line. */
+const DEFAULT_FILL_RE = /`F="\{name file\}"; git -C[^\n]*?never write it with a shell command\./
+
+/** The producer's tail without the status of the first `gh` call. */
+const UNCAPTURED_PRODUCER_TAIL = '--jq .baseRefName > "$F"; echo "gh=$?"'
+
+const occurrences = (text: string, part: string): number => text.split(part).length - 1
+
+/**
+ * Why a copy of the name-file procedure differs from the one text (the exports of tests/helpers.ts); empty when it equals
+ * it. The producer keeps the status of both `gh` calls, the two `gh` failure splits are written once each, with the
+ * definition of "no PR applies", and the default-branch fill is equal to the one text, an empty line counting as empty.
+ */
+function nameFileProcedureFindings(p: Prompt): Unmet[] {
+  const out: Unmet[] = []
+  const flag = (anchor: string, detail: string): void => { out.push({ anchor, detail }) }
+  if (occurrences(p.text, PRODUCER_STATUS_CAPTURE) !== 1) flag('producer status', 'the producer does not keep the status of the first gh call before the call that writes the name file')
+  if (occurrences(p.text, PRODUCER_NAME_TAIL) !== 1) flag('producer status', 'the producer does not echo the statuses of both gh calls')
+  if (p.text.includes(UNCAPTURED_PRODUCER_TAIL)) flag('producer status', 'the producer echoes only the status of the second gh call')
+  if (occurrences(p.text, GH_FAILED_RULE) !== 1) flag('gh-failed rule', 'the text does not say once that either printed status makes gh fail')
+  if (occurrences(p.text, 'shows that no PR applies') !== 1 || occurrences(p.text, NO_PR_CLAUSE) !== 1) flag('no-PR clause', 'the default-branch trigger is not written once, with the definition of "no PR applies"')
+  if (occurrences(p.text, 'does not show that no PR applies') !== 1 || occurrences(p.text, OTHER_GH_FAILURE_CLAUSE) !== 1) flag('other-failure clause', 'the gh failure that leaves no name is not written once as the one text')
+  const fill = DEFAULT_FILL_RE.exec(p.text)?.[0]
+  if (fill === undefined) flag('default-branch fill', 'the text has no default-branch fill')
+  else if (fill !== DEFAULT_BRANCH_FILL) flag('default-branch fill', 'the default-branch fill differs from the one text')
+  return out
+}
+
+/** A text that holds the whole procedure once, as the probes seed it. */
+const PROCEDURE_TEXT = `\`cd "{worktree}" && ${PRODUCER_STATUS_CAPTURE} ${PRODUCER_NAME_TAIL}\`. ${GH_FAILED_RULE}. If ${NO_PR_CLAUSE}, take the default branch: ${DEFAULT_BRANCH_FILL} Stop if ${OTHER_GH_FAILURE_CLAUSE}.`
 
 interface SinkSpec {
   readonly file: string
@@ -808,6 +851,17 @@ const REQUIREMENTS: readonly Requirement[] = [
       anchor: 'reason-fix table',
       bad: (CANONICAL_FIX_TABLE ?? '').replace('no-ref or timeout', 'timeout'),
       good: CANONICAL_FIX_TABLE ?? '',
+    },
+  },
+  {
+    rule: 'name-file-procedure',
+    files: PROCEDURE_FILES,
+    check: nameFileProcedureFindings,
+    probe: {
+      file: 'git-ops/validate-branch.md',
+      anchor: 'default-branch fill',
+      bad: PROCEDURE_TEXT.replace(MASTER_FALLBACK, 'else `master` the same way'),
+      good: PROCEDURE_TEXT,
     },
   },
   {
@@ -1223,6 +1277,56 @@ describe('known-bad probes: each collector reports the seeded bad text and passe
       'resolver-unavailable does not say to re-run before devflow init',
       'the sentence differs from the ensure-pr-ready step 5b sentence',
     ])
+  })
+})
+
+describe('the name-file procedure is one text in the Git ops and the re-validation step', () => {
+  const details = (text: string): string[] => nameFileProcedureFindings(seeded('git-ops/validate-branch.md', text)).map(u => u.detail)
+  const SECOND_STATUS_ONLY = 'the producer echoes only the status of the second gh call'
+  const FILL_DIFFERS = 'the default-branch fill differs from the one text'
+
+  it('each of the three prompts is in the corpus and carries the one text', () => {
+    for (const file of PROCEDURE_FILES) {
+      const copy = prompts.find(p => p.file === file)
+      expect(copy, `${file} is not in the corpus`).toBeDefined()
+      expect(nameFileProcedureFindings(copy ?? seeded(file, '')).map(u => u.detail), file).toEqual([])
+    }
+  })
+
+  it('the seeded one text is accepted', () => {
+    expect(details(PROCEDURE_TEXT)).toEqual([])
+  })
+
+  it('the origin read prints one empty line when origin/HEAD is not a symbolic ref, and nothing when it is absent', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'base-ref-guard-'))
+    try {
+      const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }
+      const git = (...args: string[]): string => execFileSync('git', ['-C', dir, ...args], { env, encoding: 'utf-8' })
+      const originRead = (): string => execFileSync('sh', ['-c', DEFAULT_BRANCH_PROBE.replace('"{worktree}"', '"$1"'), 'sh', dir], { env, encoding: 'utf-8' })
+      git('init', '-q')
+      git('-c', 'user.name=probe', '-c', 'user.email=probe@example.invalid', 'commit', '-q', '--allow-empty', '-m', 'probe')
+      expect(originRead(), 'no origin/HEAD').toBe('')
+      git('update-ref', 'refs/remotes/origin/HEAD', 'HEAD')
+      expect(originRead(), 'origin/HEAD is a direct ref').toBe('\n')
+      git('update-ref', 'refs/remotes/origin/main', 'HEAD')
+      git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main')
+      expect(originRead(), 'origin/HEAD is a symbolic ref').toBe('main\n')
+    } finally {
+      rmSync(dir, { recursive: true })
+    }
+  })
+
+  it('a copy that drifts from the one text is reported by part', () => {
+    const drifted = (from: string, to: string): string => seedOnce(PROCEDURE_TEXT, from, to)
+    expect(details(drifted(MASTER_FALLBACK, 'else `master` the same way'))).toEqual([FILL_DIFFERS])
+    expect(details(drifted(' (a file whose only content is an empty line is empty)', ''))).toEqual([FILL_DIFFERS])
+    expect(details(drifted('write a literal name with the Write tool, after a Read of the file', 'written with the Write tool after a Read of the file'))).toEqual([FILL_DIFFERS])
+    expect(details(drifted(PRODUCER_STATUS_CAPTURE, 'gh pr view'))).toEqual(['the producer does not keep the status of the first gh call before the call that writes the name file'])
+    expect(details(drifted(PRODUCER_NAME_TAIL, UNCAPTURED_PRODUCER_TAIL))).toEqual(['the producer does not echo the statuses of both gh calls', SECOND_STATUS_ONLY])
+    expect(details(drifted(GH_FAILED_RULE, '`gh` failed when its status is not 0'))).toEqual(['the text does not say once that either printed status makes gh fail'])
+    expect(details(drifted(` ${NO_PR_DEFINITION}`, ''))).toEqual(['the default-branch trigger is not written once, with the definition of "no PR applies"'])
+    expect(details(drifted(OTHER_GH_FAILURE_CLAUSE, '`gh` failed'))).toEqual(['the gh failure that leaves no name is not written once as the one text'])
+    expect(details('No fill is written here.')).toContain('the text has no default-branch fill')
   })
 })
 
