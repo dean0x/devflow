@@ -301,11 +301,13 @@ export function collectPrincipleDefects(body: string): string[] {
     if (!/redirect-only/.test(p) || !/print nothing/.test(p)) out.push(`principle ${n} does not say redirect-only writes print nothing`)
   }
   const p1 = line(1)
-  for (const probe of ['git worktree list', 'branch --show-current', 'cat-file -t']) {
+  for (const probe of ['git worktree list', 'branch --show-current', 'cat-file -t', 'rev-parse']) {
     if (!p1.includes(probe)) out.push(`principle 1 does not name the Phase 0 probe ${probe}`)
   }
+  if (/ls-files/.test(p1)) out.push('principle 1 still names the tracked-file probe')
   if (!/bounded Phase 1 path listing/.test(p1)) out.push('principle 1 does not name the bounded path listing')
   if (!/`diff\.patch`/.test(p1) || !/`diff-\{focus\}\.patch`/.test(p1)) out.push('principle 1 does not name the patch writes')
+  if (!/redirect-only writes \(`diff\.patch`, `diff-\{focus\}\.patch`, the marker\)/.test(p1)) out.push('principle 1 does not name the marker among the redirect-only writes')
   if (!/exceptions? named in Principle 1/.test(line(3))) out.push('principle 3 does not point at the exceptions of Principle 1')
   return out
 }
@@ -429,9 +431,10 @@ const REVIEW_RANGE: DiffRangeShape = {
   step: 'Step 0d',
   stepFrom: '#### Step 0d:',
   stepTo: '#### Step 0e-i:',
-  reachability: 'git -C "{worktree}" cat-file -t {sha}',
+  reachability: 'git -C "{worktree}" cat-file -t {sha}` must print `commit`',
   incrementalRange: '{last-review-sha}...HEAD',
   marker: '.last-review-head',
+  dir: 'reviews',
 }
 
 /**
@@ -782,7 +785,7 @@ describe('DIFF_RANGE starts at the fresh base that ensure-pr-ready returns (#495
       .toMatch(/DIFF_RANGE is not built from base_ref[\s\S]*DIFF_RANGE is built from a base name/)
     expect(collectReviewFreshBaseDefects(seed(ON, 'Set `DIFF_RANGE` to `{last-review-sha}...HEAD`', 'Set `DIFF_RANGE` to `{last-review-sha}..HEAD`')))
       .toContain('the incremental DIFF_RANGE changed')
-    expect(collectReviewFreshBaseDefects(seed(ON, '(if unreachable, take the full-range path)', '(if unreachable, fall back to full)')))
+    expect(collectReviewFreshBaseDefects(seed(ON, '(else take the full-range path)', '(else fall back to full)')))
       .toContain('Step 0d names the full-range path a second way')
     expect(collectReviewFreshBaseDefects(seed(ON, /^ *- \*\*Full-range path\b.*\n/m, '')))
       .toContain('Step 0d names the full-range path 0 times, expected once')
@@ -813,19 +816,28 @@ describe('DIFF_RANGE starts at the fresh base that ensure-pr-ready returns (#495
   it('known-bad probe: a directory made before the head and base checks is reported', () => {
     const made = /^3\. Create timestamped review directory:[^\n]*\n/m.exec(ON)
     expect(made, 'Step 0d creates the review directory as its step 3').not.toBeNull()
-    const early = seed(seed(ON, (made as RegExpExecArray)[0], ''), '2. Check if `{worktree}/.devflow/docs/reviews/{branch-slug}/.last-review-head` exists:', `${(made as RegExpExecArray)[0]}2. Check if \`{worktree}/.devflow/docs/reviews/{branch-slug}/.last-review-head\` exists:`)
+    const early = seed(seed(ON, (made as RegExpExecArray)[0], ''), '2. Check if `{gd}/devflow/reviews/{branch-slug}/.last-review-head` exists,', `${(made as RegExpExecArray)[0]}2. Check if \`{gd}/devflow/reviews/{branch-slug}/.last-review-head\` exists,`)
     expect(collectReviewFreshBaseDefects(early)).toContain('Step 0d does not create the directory after the head and base checks')
     expect(collectReviewFreshBaseDefects(seed(ON, 'mkdir -p {worktree}', 'mkdir {worktree}')))
       .toContain('Step 0d does not create the directory after the head and base checks')
   })
 })
 
-describe('the stored review head is tracked-free and checked as a commit ID (Step 0d)', () => {
+describe('the stored review head sits under the git directory and is checked as a commit ID (Step 0d)', () => {
   const CHECK = ' The stored review head is checked as a commit ID: use it only when it is exactly 40 or 64 lowercase hex, else take the full-range path'
-  const TRACKED = 'The review head counts only when `git -C "{worktree}/.devflow/docs/reviews/{branch-slug}" ls-files --error-unmatch -- .last-review-head >/dev/null 2>&1` exits 1; any other exit takes the full-range path.'
+  const READ = '`{gd}/devflow/reviews/{branch-slug}/.last-review-head`'
+  const GD = ' exists, `{gd}` being what `git -C "{worktree}" rev-parse --absolute-git-dir` prints'
+  const WRITE = 'In one Bash call run `M="$(git -C "{worktree_path}" rev-parse --absolute-git-dir)/devflow/reviews/{branch-slug}" && mkdir -p "$M" && git -C "{worktree_path}" rev-parse HEAD > "$M/.last-review-head"`.'
+  const NEVER_STOPS = ' A failed or refused write never stops the run and is not retried another way.'
 
   it.each(VARIANTS)('$label: the check comes before the reachability test and the incremental range', ({ body }) => {
     expect(collectStoredHeadDefects(body, REVIEW_RANGE)).toEqual([])
+  })
+
+  it.each(VARIANTS)('$label: no marker path sits in the docs tree, and the reader takes none from there', ({ body }) => {
+    expect(body).not.toMatch(/\.devflow\/docs\/[^\s`"]*\.last-review-head/)
+    expect(body).toContain(READ)
+    expect(body).toContain(WRITE + NEVER_STOPS)
   })
 
   it('known-bad probes: a missing, weakened or late check is reported', () => {
@@ -835,7 +847,7 @@ describe('the stored review head is tracked-free and checked as a commit ID (Ste
       .toContain('the stored review head check does not require exactly 40 or 64 lowercase hex')
     expect(collectStoredHeadDefects(seed(ON, 'else take the full-range path', 'else go on'), REVIEW_RANGE))
       .toContain('a stored review head that fails the check does not take the full-range path')
-    expect(collectStoredHeadDefects(seed(seed(ON, CHECK, ''), 'cat-file -t {sha}`', `cat-file -t {sha}\`${CHECK}`), REVIEW_RANGE))
+    expect(collectStoredHeadDefects(seed(seed(ON, CHECK, ''), 'must print `commit`', `must print \`commit\`${CHECK}`), REVIEW_RANGE))
       .toContain('the stored review head is used before it is checked')
   })
 
@@ -846,21 +858,42 @@ describe('the stored review head is tracked-free and checked as a commit ID (Ste
       .toContain('Step 0d lost the reachability check or the incremental range')
     expect(collectStoredHeadDefects(seed(ON, 'Set `DIFF_RANGE` to `{last-review-sha}...HEAD`', 'Set `DIFF_RANGE` to `{last-review-sha}..HEAD`'), REVIEW_RANGE))
       .toContain('Step 0d lost the reachability check or the incremental range')
-  })
-
-  it('known-bad probes: a missing, late, unquoted or wider-than-exit-1 tracked-file check is reported', () => {
-    expect(collectStoredHeadDefects(seed(ON, TRACKED, ''), REVIEW_RANGE))
-      .toContain('the stored review head is not ignored when git tracks it')
-    expect(collectStoredHeadDefects(seed(seed(ON, TRACKED, ''), 'cat-file -t {sha}`', `cat-file -t {sha}\`; ${TRACKED}`), REVIEW_RANGE))
-      .toContain('the stored review head is used before the tracked-file check')
-    expect(collectStoredHeadDefects(seed(ON, 'exits 1; any other exit takes the full-range path', 'exits 1; any other exit goes on'), REVIEW_RANGE))
-      .toContain('the review head counts as untracked on more than exit 1')
-    expect(collectStoredHeadDefects(seed(ON, ' exits 1;', ' exits 0;'), REVIEW_RANGE))
-      .toContain('the review head counts as untracked on more than exit 1')
-    expect(collectStoredHeadDefects(seed(ON, 'git -C "{worktree}/.devflow/docs/reviews/{branch-slug}" ls-files', 'git -C {worktree}/.devflow/docs/reviews/{branch-slug} ls-files'), REVIEW_RANGE))
-      .toContain('the tracked-file check of the review head does not double-quote its -C path')
     expect(collectStoredHeadDefects(seed(ON, 'git -C "{worktree}" cat-file -t {sha}', 'git -C {worktree} cat-file -t {sha}'), REVIEW_RANGE))
       .toContain('Step 0d lost the reachability check or the incremental range')
+  })
+
+  it('known-bad probe: a reachability check that does not require the type commit is reported', () => {
+    expect(collectStoredHeadDefects(seed(ON, ' must print `commit` (else take the full-range path)', ' (else take the full-range path)'), REVIEW_RANGE))
+      .toContain('Step 0d lost the reachability check or the incremental range')
+    expect(collectStoredHeadDefects(seed(ON, ' must print `commit` (else take the full-range path)', ' must exit 0 (else take the full-range path)'), REVIEW_RANGE))
+      .toContain('Step 0d lost the reachability check or the incremental range')
+  })
+
+  it('known-bad probes: a marker read from the docs tree, an unnamed git directory or a kept tracked-file check is reported', () => {
+    expect(collectStoredHeadDefects(seed(ON, READ + GD, '`{worktree}/.devflow/docs/reviews/{branch-slug}/.last-review-head`'), REVIEW_RANGE))
+      .toEqual(expect.arrayContaining(['the stored review head is not read under the absolute git directory', 'the review head marker sits in the docs tree']))
+    expect(collectStoredHeadDefects(seed(ON, GD, ''), REVIEW_RANGE))
+      .toEqual(['Step 0d does not say what {gd} is'])
+    expect(collectStoredHeadDefects(seed(ON, '`{gd}/devflow/reviews/', '`{gd}/reviews/'), REVIEW_RANGE))
+      .toContain('the stored review head is not read under the absolute git directory')
+    expect(collectStoredHeadDefects(seed(ON, CHECK, `${CHECK}\n     - The review head counts only when \`git -C "{worktree}" ls-files --error-unmatch -- .last-review-head\` exits 1.`), REVIEW_RANGE))
+      .toContain('Step 0d keeps a tracked-file check of the review head')
+  })
+
+  it('known-bad probes: a marker write that is split, kept in the docs tree, missing or allowed to stop the run is reported', () => {
+    const NOT_ONE_CALL = 'the review head is not written in one Bash call that makes the directory and then lets git write the SHA'
+    expect(collectStoredHeadDefects(seed(ON, NEVER_STOPS, ''), REVIEW_RANGE))
+      .toEqual(['the review head writer does not say a failed write never stops the run'])
+    expect(collectStoredHeadDefects(seed(ON, ' && mkdir -p "$M" &&', ' &&'), REVIEW_RANGE))
+      .toEqual([NOT_ONE_CALL])
+    expect(collectStoredHeadDefects(seed(ON, 'In one Bash call run', 'Run'), REVIEW_RANGE))
+      .toEqual([NOT_ONE_CALL])
+    expect(collectStoredHeadDefects(seed(ON, 'rev-parse HEAD > "$M/.last-review-head"', 'rev-parse HEAD > "{worktree_path}/.devflow/docs/reviews/{branch-slug}/.last-review-head"'), REVIEW_RANGE))
+      .toEqual(expect.arrayContaining([NOT_ONE_CALL, 'the review head marker sits in the docs tree']))
+    expect(collectStoredHeadDefects(seed(ON, 'rev-parse HEAD > "$M/.last-review-head"', 'rev-parse HEAD'), REVIEW_RANGE))
+      .toEqual(['the review head is written 0 times, expected once'])
+    expect(collectStoredHeadDefects(`${ON}\n${WRITE}${NEVER_STOPS}\n`, REVIEW_RANGE))
+      .toEqual(['the review head is written 2 times, expected once'])
   })
 })
 
@@ -932,6 +965,10 @@ describe('the main thread never prints or reads diff contents (AC-320, AC-326)',
       .toMatch(/principle 3 does not say redirect-only writes print nothing/)
     expect(collectPrincipleDefects(seed(ON, 'bounded Phase 1 path listing', 'Phase 1 listing')))
       .toContain('principle 1 does not name the bounded path listing')
+    expect(collectPrincipleDefects(seed(ON, '`git -C ... rev-parse`', '`git -C ... ls-files`')))
+      .toEqual(['principle 1 does not name the Phase 0 probe rev-parse', 'principle 1 still names the tracked-file probe'])
+    expect(collectPrincipleDefects(seed(ON, ', the marker)', ')')))
+      .toContain('principle 1 does not name the marker among the redirect-only writes')
   })
 
   it('the orchestrator charter still carries its ad-hoc rule: the command states its own exceptions instead of amending it', () => {

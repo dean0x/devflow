@@ -1936,12 +1936,14 @@ export interface DiffRangeShape {
   /** The anchors that cut the step out of the command: its heading and the next one. */
   stepFrom: string
   stepTo: string
-  /** The reachability command up to its SHA placeholder, such as "cat-file -t {sha}". */
+  /** The reachability rule as the step states it: the command with its SHA placeholder, then what it must print. */
   reachability: string
   /** The range the command builds from the stored head. */
   incrementalRange: string
   /** The stored head's file name, such as ".last-review-head". */
   marker: string
+  /** The directory under `{gd}/devflow/` that holds the marker: "reviews" or "bug-analysis". */
+  dir: string
 }
 
 /** The parts of the fresh-base text that differ per command. */
@@ -2031,8 +2033,10 @@ export function collectFreshBaseDefects(body: string, shape: DiffRangeShape, par
 }
 
 /**
- * The stored head: the file counts only when git reports it untracked (exit 1, the `-C` path double-quoted;
- * any other exit takes the full-range path), and it is checked as a commit ID, before any git command or
+ * The stored head: read from `{gd}/devflow/{dir}/{branch-slug}/{marker}`, where `{gd}` is what `rev-parse
+ * --absolute-git-dir` prints, and written there in one Bash call that a failed write never stops; no path
+ * of the marker sits in the docs tree and no tracked-file check remains. The head is checked as a commit
+ * ID (exactly 40 or 64 lowercase hex) and `cat-file -t` must print `commit`, before any git command or
  * `DIFF_RANGE` takes it.
  */
 export function collectStoredHeadDefects(body: string, shape: DiffRangeShape): string[] {
@@ -2047,13 +2051,19 @@ export function collectStoredHeadDefects(body: string, shape: DiffRangeShape): s
   const uses = [shape.reachability, `Set \`DIFF_RANGE\` to \`${shape.incrementalRange}\``].map(use => s.indexOf(use))
   if (uses.some(at => at === -1)) out.push(`${shape.step} lost the reachability check or the incremental range`)
   else if (uses.some(at => at < check)) out.push(`the stored ${shape.head} head is used before it is checked`)
-  const tracked = /^[^\n]*ls-files --error-unmatch[^\n]*/m.exec(s)
-  if (tracked === null || !tracked[0].includes(shape.marker)) out.push(`the stored ${shape.head} head is not ignored when git tracks it`)
+  const read = s.split('\n').filter(l => l.includes(shape.marker))
+  const readPath = `\`{gd}/devflow/${shape.dir}/{branch-slug}/${shape.marker}\``
+  if (read.length !== 1 || !read[0].includes(readPath)) out.push(`the stored ${shape.head} head is not read under the absolute git directory`)
+  else if (!read[0].includes(`\`{gd}\` being what \`git -C "{worktree}" rev-parse --absolute-git-dir\` prints:`)) out.push(`${shape.step} does not say what {gd} is`)
+  if (new RegExp(`\\.devflow/docs/[^\\s\`"]*${escapeRe(shape.marker)}`).test(body)) out.push(`the ${shape.head} head marker sits in the docs tree`)
+  if (/ls-files/.test(s)) out.push(`${shape.step} keeps a tracked-file check of the ${shape.head} head`)
+  const writes = body.split('\n').filter(l => l.includes(shape.marker) && l.includes('rev-parse HEAD'))
+  if (writes.length !== 1) out.push(`the ${shape.head} head is written ${writes.length} times, expected once`)
   else {
-    if (!/git -C "[^"]+" ls-files --error-unmatch/.test(tracked[0])) out.push(`the tracked-file check of the ${shape.head} head does not double-quote its -C path`)
-    if (!/ exits 1\b/.test(tracked[0]) || !tracked[0].includes('any other exit takes the full-range path')) out.push(`the ${shape.head} head counts as untracked on more than exit 1`)
-    const trackedAt = s.indexOf('ls-files --error-unmatch')
-    if (trackedAt > check || uses.some(at => at !== -1 && at < trackedAt)) out.push(`the stored ${shape.head} head is used before the tracked-file check`)
+    const tree = /git -C "([^"]+)" rev-parse --absolute-git-dir/.exec(writes[0])?.[1]
+    const call = `In one Bash call run \`M="$(git -C "${tree}" rev-parse --absolute-git-dir)/devflow/${shape.dir}/{branch-slug}" && mkdir -p "$M" && git -C "${tree}" rev-parse HEAD > "$M/${shape.marker}"\`.`
+    if (tree === undefined || !writes[0].includes(call)) out.push(`the ${shape.head} head is not written in one Bash call that makes the directory and then lets git write the SHA`)
+    if (!writes[0].endsWith(' A failed or refused write never stops the run and is not retried another way.')) out.push(`the ${shape.head} head writer does not say a failed write never stops the run`)
   }
   return out
 }
