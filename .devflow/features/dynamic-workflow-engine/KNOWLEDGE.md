@@ -18,7 +18,7 @@ directories:
   - dist/commands
   - tests/dynamic
 created: 2026-07-07
-updated: 2026-10-20
+updated: 2026-10-21
 ---
 
 # Dynamic Workflow Engine
@@ -48,7 +48,7 @@ updated: 2026-10-20
 - **KB-AP-5** Never re-add `--dry-run` to dynamic-build, dynamic-plan or dynamic-tickets; it belongs to dynamic-profile only.
 - **KB-AP-6** Never reuse the `node --check` scratch path: it is run-unique, `/tmp/df-wf-check-<meta.name>-<epoch-seconds>.js`, and `node --check` catches syntax errors only.
 - **KB-AP-7** Never accept a criterion that is vague, implementation-coupled or untestable, and always include a negative criterion per ticket: Gate 2 has no other source of truth.
-- **KB-AP-8** Never send a diff Review spawn without a usable `DIFF_RANGE`: the Review agent reviews only a range that starts with a hex commit that `git cat-file -t` reports as `commit` and whose `git diff` exits 0, else it returns `reviewed: false`, which is a dead agent and a coverage gap.
+- **KB-AP-8** Never send a diff Review spawn without a usable `DIFF_RANGE`: the Review agent with no `DIFF_FILE` reviews only `{sha}...HEAD`, with `{sha}` 40 or 64 lowercase hex that `git cat-file -t` reports as `commit` and `git diff {DIFF_RANGE}` exiting 0, else it returns `reviewed: false`, which is a dead agent and a coverage gap.
 
 ## Overview
 
@@ -125,7 +125,7 @@ setup (Git setup-task: branch, issueId, prLinkLine, baseSha)
 
 The pass runs exactly once per ticket; budget scales roster size and verification votes, never pass count.
 
-1. **Scope**: the entire branch diff, from the commit the ticket branch was forked from to HEAD. The script builds `reviewScope` once, `Review the full branch diff on branch ${BRANCH}.` followed by `DIFF_RANGE: ${BASE_SHA}...HEAD` on its own line, and every Review spawn carries it: each focus spawn, its retry and each verification panel lens (the panel prompt states the same `DIFF_RANGE` line). The Review agent takes `DIFF_RANGE` as information and as the range for any extra git read; with no `DIFF_FILE` it reviews only a range that starts with a 40 or 64 lowercase hex commit, and returns `reviewed: false` when there is none, when `git cat-file -t {sha}` does not print `commit`, or when `git diff {DIFF_RANGE}` exits non-zero. Full branch, no delta scoping. `_engine.mds` states the same source on its one `**Review scope:**` line and lists `base-missing` among the escalation types.
+1. **Scope**: the entire branch diff, from the commit the ticket branch was forked from to HEAD. The script builds `reviewScope` once, `Review the full branch diff on branch ${BRANCH}.` followed by `DIFF_RANGE: ${BASE_SHA}...HEAD` on its own line, and every Review spawn carries it: each focus spawn, its retry and each verification panel lens (the panel prompt states the same `DIFF_RANGE` line). The Review agent takes `DIFF_RANGE` as information and as the range for any extra git read; with no `DIFF_FILE` it reviews only `{sha}...HEAD`, with `{sha}` 40 or 64 lowercase hex, and returns `reviewed: false` for any other range or none, when `git cat-file -t {sha}` does not print `commit`, or when `git diff {DIFF_RANGE}` exits non-zero. Full branch, no delta scoping. `_engine.mds` states the same source on its one `**Review scope:**` line and lists `base-missing` among the escalation types.
 2. Spawn Review agents in staggered chunks (`chunkSize` in the script; `review_pass()` states the 4-6 band), sequential groups of parallel spawns, to avoid 429 batch death. The full roster is preserved, only paced.
 3. The core focuses always run (security, architecture, performance, complexity, consistency, regression, testing, reliability); focuses for detected file types are added. **The roster is not diff-class gated.** `/dynamic-build` sits outside `/code-review`'s diff-class work: `review_pass()` and the inline script spawn every focus and drop none, with no reduced docs-only, tests-only or lockfile-only set, no language-focus suppression and no diff file or installed-language stamp.
 4. **Dead-Review-agent handling**: a result is dead if null, thrown, a guard string, or `reviewed !== true`. Retry once sequentially; if still dead, record it in `coverageGaps`. Gaps block the PASS verdict downstream and do not block the early exit (which triggers on zero findings alone).
@@ -224,7 +224,7 @@ Each ticket's `setup-task` spawn creates the branch and reports it under its `##
 
 ### KB-INV-16, KB-AP-8: the review range comes from the setup spawn, and the Review agent re-checks it
 
-The base commit is read once, by the setup spawn, before it creates the branch, and the workflow validates only its shape (40 or 64 lowercase hex). The Review agent validates the rest: `git cat-file -t` must report a commit and `git diff {DIFF_RANGE}` must exit 0, otherwise it returns `reviewed: false`. A bad range therefore reaches the workflow as a dead Review agent: the retry carries the same `reviewScope`, fails the same way, and the focus lands in `coverageGaps`, which blocks PASS. A Review spawn added without `reviewScope` (or without the `DIFF_RANGE` line) fails the same way for every focus. The rule applies only to a diff review with no `DIFF_FILE`; a review given a patch file is untouched, and `reviewed: false` appears nowhere else in the agent body.
+The base commit is read once, by the setup spawn, before it creates the branch, and the workflow validates only its shape (40 or 64 lowercase hex). The Review agent validates the rest: the range must be `{sha}...HEAD`, `git cat-file -t` must report a commit and `git diff {DIFF_RANGE}` must exit 0, otherwise it returns `reviewed: false`. A bad range therefore reaches the workflow as a dead Review agent: the retry carries the same `reviewScope`, fails the same way, and the focus lands in `coverageGaps`, which blocks PASS. A Review spawn added without `reviewScope` (or without the `DIFF_RANGE` line) fails the same way for every focus. The rule applies only to a diff review with no `DIFF_FILE`; a review given a patch file is untouched, and `reviewed: false` appears nowhere else in the agent body.
 
 ## Key Files
 
@@ -236,7 +236,7 @@ The base commit is read once, by the setup spawn, before it creates the branch, 
 - `src/assets/commands/dynamic-build.mds`: the build command with inline SINGLE and WAVE workflow scripts; `dist/commands/dynamic-build.md` is the compiled artifact the suite pins.
 - `src/assets/agents/code.mds`, `fix.mds`, `refactor.mds` (generator hosts importing the shared `_partials/_code.mds`, compiled to `dist/agents/`), `validate.md`, `test.md`: each carries the `## Running commands` block and its `**Gate ownership:**` row.
 - `tests/dynamic/wave-flow.test.ts`: executes the shipped SINGLE script with stub agents (branch binding, the ESCALATED stops including every `BASE_SHA` case the base table holds, verdict arms).
-- `src/assets/agents/review.mds`: the Review agent; its `DIFF_RANGE` input bullet carries the range rule (`reviewed: false` without a usable hex-commit range). `tests/guards/code-review-diff-gating.test.ts` pins that rule's wording and `tests/guards/base-ref-guard.test.ts` pins that every review spawn takes its range from the setup-reported commit and that the prose states the same source.
+- `src/assets/agents/review.mds`: the Review agent; its `DIFF_RANGE` input bullet carries the range rule (`reviewed: false` without a usable hex-commit range). `tests/guards/code-review-diff-gating.test.ts` pins that rule's wording and `tests/dynamic/wave-flow.test.ts` pins that every review spawn takes its range from the setup-reported commit and that the prose states the same source.
 - `tests/guards/running-commands-parity.test.ts`, `tests/guards/gate-ownership.test.ts`, `tests/guards/spawn-no-hardcoded-model.test.ts`: the block, the gate rows and the no-`model=` rule.
 
 ## Related
