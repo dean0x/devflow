@@ -60,7 +60,7 @@ const MOVED: readonly Moved[] = [
   { reference: 'commands/implement-evidence-asks.md', heading: 'Exception grammar', bytes: 1451, sha256: 'a9ab21080bbe77f0ea187471bf6d3d241cd69b11748cd37b95d119e5dad1260c', was: '_evidence_policy.mds, the body of evidence_exception()' },
   { reference: 'commands/implement-evidence-asks.md', heading: 'Record the exception', bytes: 566, sha256: '458cf3e415744aab954b2686f16d4c9fb5f1f3b9bfed1790e32a6a429d821ba8', was: 'implement.mds, the record paragraph' },
   { reference: 'commands/implement-evidence-asks.md', heading: 'Missing test plan ask', bytes: 1358, sha256: '032972c8f3a0443a7aed0863ce248e68393f26b666a940da80c1b0284558d59d', was: 'implement.mds, the missing-test-plan ask and its two options' },
-  { reference: 'commands/implement-revalidate.md', heading: 'Continuation path', bytes: 1269, sha256: '09fba0f5cedd62212add24b734e7f695157c0488241a15257f06b2fbda731c9d', was: 'implement.mds, the re-validation continuation path' },
+  { reference: 'commands/implement-revalidate.md', heading: 'Continuation path', bytes: 1281, sha256: '182e5d9d84be0cf778dc9a578042d3c60416a9ae605cf6a6697be5cb689b07b8', was: 'implement.mds, the re-validation continuation path' },
 ]
 
 const digest = (text: string): string => createHash('sha256').update(Buffer.from(text, 'utf-8')).digest('hex')
