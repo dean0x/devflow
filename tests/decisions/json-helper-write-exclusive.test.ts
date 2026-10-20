@@ -1,7 +1,7 @@
 // tests/decisions/json-helper-write-exclusive.test.ts
 //
-// TOCTOU hardening of the learning writers. json-helper.cjs holds no writer of its
-// own: every learning op writes through the learning store's writeFileAtomic, whose
+// TOCTOU hardening of the curation writers. json-helper.cjs holds no writer of its
+// own: every curation op writes through the curation store's writeFileAtomic, whose
 // writeExclusive opens the PID-scoped .tmp with O_EXCL (wx), so the kernel rejects
 // the open when a file or symlink already sits at that path; on EEXIST it unlinks
 // and retries once.
@@ -12,11 +12,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { JSON_HELPER, requireLearningStore } from './learning-fixtures.js';
+import { JSON_HELPER, requireCurationStore } from './curation-fixtures.js';
 
-const store = requireLearningStore();
+const store = requireCurationStore();
 
-describe('json-helper writes only through the learning store', () => {
+describe('json-helper writes only through the curation store', () => {
   it('exports no writer of its own', () => {
     const helper = createRequire(import.meta.url)(JSON_HELPER) as Record<string, unknown>;
     expect(Object.keys(helper).filter(name => /write/i.test(name))).toEqual([]);

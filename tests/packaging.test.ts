@@ -29,7 +29,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import {
   DIST_COMMAND_FILES,
-  LEARNING_OFF_FILES,
+  CURATION_OFF_FILES,
   MDS_COMMAND_HOSTS,
   MDS_GENERATOR_HOSTS,
   MDS_REFERENCE_MODULES,
@@ -40,6 +40,7 @@ import {
   GATED_REFERENCE_MODULE_SOURCES,
   generatedReferenceManifest,
 } from '../src/core/mds-variants.js';
+import { LEGACY_OFF_OUTPUT_DIR } from '../src/core/curation-variants.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
@@ -438,8 +439,8 @@ describe('Guard 5 (files[] coverage): package.json includes required directories
  *      only shipping form of each of those agents.
  *  (d) Carry all src/assets/**\/*.mds generator sources, at the pinned count.
  *      Shipping them is decision D-A(a), accepted at Gate 2.
- *  (e) Carry exactly the learning-off variants named in LEARNING_VARIANT_HOSTS
- *      (dist/learning-off/), the files a learning-off machine installs in place of
+ *  (e) Carry exactly the curation-off variants named in CURATION_VARIANT_HOSTS
+ *      (dist/curation-off/), the files a curation-off machine installs in place of
  *      the dist/commands/ and dist/agents/ prompts.
  *
  * Assert on parsed `npm pack --dry-run --json` output (structured
@@ -544,18 +545,18 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
   });
 
   /**
-   * Named collector: the learning-off variants a file list carries, relative to
-   * dist/learning-off/. Used by the live assertion AND its probe, so the probe
+   * Named collector: the curation-off variants a file list carries, relative to
+   * dist/curation-off/. Used by the live assertion AND its probe, so the probe
    * cannot pass against a re-implementation of the filter.
    */
-  function collectLearningOffFiles(files: readonly string[]): string[] {
+  function collectCurationOffFiles(files: readonly string[]): string[] {
     return files
-      .filter(f => /^dist\/learning-off\/.+\.md$/.test(f))
-      .map(f => f.replace(/^dist\/learning-off\//, ''))
+      .filter(f => /^dist\/curation-off\/.+\.md$/.test(f))
+      .map(f => f.replace(/^dist\/curation-off\//, ''))
       .sort();
   }
 
-  it('tarball carries exactly the manifest\'s learning-off variants (dist/learning-off/)', () => {
+  it('tarball carries exactly the manifest\'s curation-off variants (dist/curation-off/)', () => {
     const files = getPackFiles();
     expect(
       files.length,
@@ -564,24 +565,60 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
     // Set equality against the roster, so it holds at every step: an arm added
     // without a row, or a row left after its arm is gone, moves the tarball off it.
     expect(
-      collectLearningOffFiles(files),
-      'Tarball dist/learning-off/*.md set does not match LEARNING_VARIANT_HOSTS in ' +
-      'tests/fixtures/mds-manifest.ts. A learning-off machine installs these files; one missing ' +
-      'ships the learning-on prompt there.',
-    ).toEqual([...LEARNING_OFF_FILES].sort());
+      collectCurationOffFiles(files),
+      'Tarball dist/curation-off/*.md set does not match CURATION_VARIANT_HOSTS in ' +
+      'tests/fixtures/mds-manifest.ts. A curation-off machine installs these files; one missing ' +
+      'ships the curation-on prompt there.',
+    ).toEqual([...CURATION_OFF_FILES].sort());
   });
 
-  it('known-bad probe: the collector reports a stray and a nested learning-off file, and ignores other dist files', () => {
+  /**
+   * Named collector: the entries a file list carries under the retired off tree.
+   * Used by the live assertion AND its probe, so the probe cannot pass against a
+   * re-implementation of the filter.
+   */
+  function collectRetiredOffTreeFiles(files: readonly string[]): string[] {
+    return files.filter(f => f.startsWith(`${LEGACY_OFF_OUTPUT_DIR}/`)).sort();
+  }
+
+  it('tarball carries no entry of the retired off tree', () => {
+    const files = getPackFiles();
+    expect(
+      files.length,
+      'npm pack --dry-run produced no files — run `npm run build` first (guard cannot verify)',
+    ).toBeGreaterThan(0);
+    // The build removes LEGACY_OFF_OUTPUT_DIR whole, so a checkout that built before the
+    // rename ships nothing from it. Nothing reads it, and an old prompt there is dead weight.
+    expect(
+      collectRetiredOffTreeFiles(files),
+      `Tarball carries entries under ${LEGACY_OFF_OUTPUT_DIR}/. Run \`npm run build:mds\`: the build removes that folder.`,
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: the retired-tree collector reports its entries and ignores the current off tree', () => {
     const seeded = [
-      'dist/learning-off/commands/x.md',
-      'dist/learning-off/agents/y.md',
-      'dist/learning-off/agents/notes.txt',
+      `${LEGACY_OFF_OUTPUT_DIR}/commands/x.md`,
+      `${LEGACY_OFF_OUTPUT_DIR}/agents/y.md`,
+      'dist/curation-off/commands/x.md',
       'dist/commands/x.md',
     ];
-    expect(collectLearningOffFiles(seeded)).toEqual(['agents/y.md', 'commands/x.md']);
+    expect(collectRetiredOffTreeFiles(seeded)).toEqual([
+      `${LEGACY_OFF_OUTPUT_DIR}/agents/y.md`,
+      `${LEGACY_OFF_OUTPUT_DIR}/commands/x.md`,
+    ]);
   });
 
-  it('package.json files[] ships dist/ wholesale and excludes nothing under dist/learning-off/', async () => {
+  it('known-bad probe: the collector reports a stray and a nested curation-off file, and ignores other dist files', () => {
+    const seeded = [
+      'dist/curation-off/commands/x.md',
+      'dist/curation-off/agents/y.md',
+      'dist/curation-off/agents/notes.txt',
+      'dist/commands/x.md',
+    ];
+    expect(collectCurationOffFiles(seeded)).toEqual(['agents/y.md', 'commands/x.md']);
+  });
+
+  it('package.json files[] ships dist/ wholesale and excludes nothing under dist/curation-off/', async () => {
     // The tarball arm above is a roster comparison and so holds with an empty
     // roster; this one is the presence arm. It reads the packaging contract itself:
     // `dist/` ships whole, and no negated pattern can take the variants back out.
@@ -591,7 +628,7 @@ describe('Guard 6 (tarball contents): npm pack --dry-run output excludes source 
     const excluded = patterns.filter(p => p.startsWith('!') && !/^!dist\/\*\*\/\*\.(map|d\.ts)$/.test(p));
     expect(
       excluded,
-      'a negated files[] pattern other than the map and declaration excludes must be checked against dist/learning-off/',
+      'a negated files[] pattern other than the map and declaration excludes must be checked against dist/curation-off/',
     ).toEqual([]);
   });
 

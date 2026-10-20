@@ -57,7 +57,7 @@ import {
   readAgentReference,
   requireDistFile,
   resolveAgentSource,
-  resolveLearningOffSource,
+  resolveCurationOffSource,
   ROOT,
   walkFiles,
   type OrderRule,
@@ -418,10 +418,10 @@ function implementMd(): string {
   return requireDistFile('implement.md')
 }
 
-/** The learning-off build of /implement: it states the same fresh-base text as the learning-on build. */
+/** The curation-off build of /implement: it states the same fresh-base text as the curation-on build. */
 function implementMdOff(): string {
-  const off = resolveLearningOffSource('commands', 'implement')
-  if (off === null) throw new Error('dist/learning-off/commands/implement.md is absent: run `npm run build:mds`')
+  const off = resolveCurationOffSource('commands', 'implement')
+  if (off === null) throw new Error('dist/curation-off/commands/implement.md is absent: run `npm run build:mds`')
   return off
 }
 
@@ -1508,10 +1508,10 @@ describe('#495: /implement resolves a fresh base once, before Phase 2, and every
   })
 })
 
-describe('#495: the learning-off build of /implement states the same fresh-base text', () => {
+describe('#495: the curation-off build of /implement states the same fresh-base text', () => {
   it('the order, the step, the branch diff, the base check and the principle hold in both builds', () => {
     const off = implementMdOff()
-    expect(off, 'the learning-off build is the learning-on build, so this proves nothing').not.toBe(implementMd())
+    expect(off, 'the curation-off build is the curation-on build, so this proves nothing').not.toBe(implementMd())
     expect(collectOrderViolations('implement.md', off, PHASE1_ORDER)).toEqual([])
     expect(collectImplementFreshBaseDefects(off)).toEqual([])
     expect(collectFilesChangedDefects(off)).toEqual([])

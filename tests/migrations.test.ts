@@ -257,8 +257,8 @@ describe('runMigrations', () => {
     const fakeHome = path.join(tmpDir, 'home', '.devflow');
     const project1 = path.join(tmpDir, 'ok-project');
     const project2 = path.join(tmpDir, 'fail-project');
-    await fs.mkdir(path.join(project1, '.devflow', 'learning'), { recursive: true });
-    await fs.mkdir(path.join(project2, '.devflow', 'learning'), { recursive: true });
+    await fs.mkdir(path.join(project1, '.devflow', 'curation'), { recursive: true });
+    await fs.mkdir(path.join(project2, '.devflow', 'curation'), { recursive: true });
 
     // Create a custom per-project migration that always throws for project2
     const failingPerProjectMigration: Migration = {

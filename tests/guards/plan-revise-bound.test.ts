@@ -16,8 +16,8 @@
  *   AC-206  The Architecture diagram shows the Git spawns of Phase 1 and Phase 14 and
  *           the bounded Revise loop.
  *
- * Both builds are read: the learning-on command and the learning-off variant, because
- * the bound sits beside learning arms and a build that dropped it would lose it
+ * Both builds are read: the curation-on command and the curation-off variant, because
+ * the bound sits beside curation arms and a build that dropped it would lose it
  * silently on one machine.
  *
  * Every guard has a named collector, a non-empty-corpus assertion and a known-bad probe
@@ -26,7 +26,7 @@
 
 import { describe, it, expect } from 'vitest'
 
-import { requireDistFile, resolveLearningOffSource } from '../helpers.js'
+import { requireDistFile, resolveCurationOffSource } from '../helpers.js'
 
 interface Build {
   readonly label: string
@@ -34,11 +34,11 @@ interface Build {
 }
 
 function builds(): Build[] {
-  const off = resolveLearningOffSource('commands', 'plan')
-  if (off === null) throw new Error('dist/learning-off/commands/plan.md is absent — run `npm run build` first')
+  const off = resolveCurationOffSource('commands', 'plan')
+  if (off === null) throw new Error('dist/curation-off/commands/plan.md is absent — run `npm run build` first')
   return [
-    { label: 'learning-on', content: requireDistFile('plan.md') },
-    { label: 'learning-off', content: off },
+    { label: 'curation-on', content: requireDistFile('plan.md') },
+    { label: 'curation-off', content: off },
   ]
 }
 
@@ -106,7 +106,7 @@ export function collectDiagramDefects(content: string): string[] {
   return out
 }
 
-for (const kind of ['learning-on', 'learning-off'] as const) {
+for (const kind of ['curation-on', 'curation-off'] as const) {
   describe(`AC-201: /plan Revise is bounded at 2 (${kind} build)`, () => {
     const build = builds().find(b => b.label === kind)!
 
@@ -163,7 +163,7 @@ for (const kind of ['learning-on', 'learning-off'] as const) {
 }
 
 describe('both builds carry the same bound', () => {
-  it('the Gate 2 menu and the Error Handling rule are byte-identical across the learning builds', () => {
+  it('the Gate 2 menu and the Error Handling rule are byte-identical across the curation builds', () => {
     const [on, off] = builds()
     expect(gate2Menu(on.content)).toBe(gate2Menu(off.content))
     expect(errorHandlingRule(on.content)).toBe(errorHandlingRule(off.content))

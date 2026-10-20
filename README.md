@@ -60,7 +60,7 @@ This is the **orchestrated flow** — you stay in the loop between every step. W
 
 **Memory that persists.** Session context survives restarts, `/clear`, and context compaction. Your agent picks up exactly where it left off.
 
-**Self learning.** A background agent detects architectural decisions and known pitfalls from your session dialogs and writes them to `.devflow/learning/decisions.md` and `.devflow/learning/pitfalls.md` — informing every future review and implementation session without any manual bookkeeping.
+**Decisions and pitfalls.** A background agent detects architectural decisions and known pitfalls from your session dialogs and writes them to `.devflow/curation/decisions.md` and `.devflow/curation/pitfalls.md` — informing every future review and implementation session without any manual bookkeeping.
 
 **Feature knowledge bases.** Curated `KNOWLEDGE.md` files per feature area — patterns, conventions, and gotchas — git-tracked and shared with your team. Planning, implementation, and review workflows load them automatically and refresh them after changes.
 
@@ -128,14 +128,14 @@ Graph runs trade tokens for autonomy: you make your calls at each wave's decisio
 npx devflow-kit init
 ```
 
-That's it. The interactive wizard offers Recommended defaults or an Advanced flow — plugin selection, feature configuration, compliance frameworks, the gate level, and security settings. Ambient mode, working memory, and learning are on by default. Non-interactive: `npx devflow-kit init --recommended`.
+That's it. The interactive wizard offers Recommended defaults or an Advanced flow — plugin selection, feature configuration, compliance frameworks, the gate level, and security settings. Ambient mode, working memory, and curation are on by default. Non-interactive: `npx devflow-kit init --recommended`.
 
 ## Privacy & Sharing
 
 Everything Devflow generates lives under `.devflow/` — working memory, decisions and pitfalls, feature knowledge bases, naming conventions, docs and transient locks. On first use Devflow appends one block to your project's root `.gitignore`. It keeps per-developer runtime state on your machine and shares three things through git: the feature knowledge bases, the learned naming conventions and the team's settings in `.devflow/project.json`, which carry its [evidence policy](#evidence-policy):
 
 ```gitignore
-# Devflow runtime data — local by default (memory, learning, docs, locks).
+# Devflow runtime data — local by default (memory, curation, docs, locks).
 # Shared via git: feature knowledge bases under .devflow/features/ (index.md and
 # every {slug}/KNOWLEDGE.md), .devflow/conventions.md (naming authority),
 # .devflow/policy.json (retired; presence only) and .devflow/project.json (team settings).
@@ -188,19 +188,19 @@ A repository can commit `.devflow/project.json` to settle team-wide choices. Eve
 ```json
 {"version":1,"evidence":"required","compliance":["hipaa"],
  "tracker":{"provider":"jira","site":"https://acme.atlassian.net","key":"ACME"},
- "reviewPublication":"auto","features":{"learning":false}}
+ "reviewPublication":"auto","features":{"curation":false}}
 ```
 
 - `evidence` is the [evidence policy](#evidence-policy); `compliance` names the regulatory frameworks the repository answers to, and its presence raises the evidence floor to `required`.
 - `tracker` selects the repository's issue tracker. Your personal `.devflow/config.json` may only narrow it, to `github` or to the same provider.
 - `reviewPublication` is a ceiling only: it can lower your personal value, never raise it. With no personal value you get at most `auto` — a team `off` still lowers it — so a branch that commits `full` cannot switch off the visibility gate for whoever reviews it.
-- `features` can switch memory, learning or knowledge off for this repository, never back on. Your personal `config.json` can do the same for you.
+- `features` can switch memory, curation or knowledge off for this repository, never back on. Your personal `config.json` can do the same for you. The key is `features.curation`. Devflow 3.8 reads the old key `features.learning` too, and the repository turns the feature off when either key is `false`. A 3.7 install reads only `features.learning`. In a team with mixed versions, keep the old key in the committed file, or set both keys, until every member runs 3.8.
 
 **Adopting it.** Commit `project.json` on the default branch. `evidence` is always read from the default branch, so a feature branch cannot lower the bar it is judged by. Every other key — `tracker` with its `site` and `key`, `features` and the `reviewPublication` ceiling — is read from the branch you have checked out, so a branch that edits them sees the change at once. `compliance` is read from both and joined with your machine's frameworks: a branch can add a framework, never remove one, so a pull request that deletes `"compliance":["hipaa"]` is still reviewed under HIPAA. The default branch's copy is read from your clone's tracking branch, as fresh as your last fetch, never over the network, so a framework added on the default branch reaches the lens once your checkout has fetched it.
 
-Each key is checked on its own, so one bad value never disables the rest: a bad `evidence` resolves to `required`, a bad `reviewPublication` to `off`, a bad `compliance` list to the generic lens. A `project.json` or `config.json` that exists but is not a JSON object is never read as absent: the settings fail closed (publication off, knowledge write-back off, the tracker reported as invalid). The compliance lens is the exception, because it only adds scrutiny: it keeps every framework a readable layer declares, and an unreadable `project.json` counts as the generic lens. Memory and learning capture fail open instead: the hooks read an unreadable file as narrowing nothing, so capture runs as your machine's switch says.
+Each key is checked on its own, so one bad value never disables the rest: a bad `evidence` resolves to `required`, a bad `reviewPublication` to `off`, a bad `compliance` list to the generic lens. A `project.json` or `config.json` that exists but is not a JSON object is never read as absent: the settings fail closed (publication off, knowledge write-back off, the tracker reported as invalid). The compliance lens is the exception, because it only adds scrutiny: it keeps every framework a readable layer declares, and an unreadable `project.json` counts as the generic lens. Memory and curation capture fail open instead: the hooks read an unreadable file as narrowing nothing, so capture runs as your machine's switch says.
 
-`config.json` is personal, so it must not be committed. A `config.json` that git tracks is ignored as if it were absent — otherwise a branch could commit `"reviewPublication":"full"` for whoever reviews it — and `devflow tracker|memory|learning|knowledge|gates --status` say so, with the fix: untrack the tracked entry with `git rm --cached`, then check or delete the file, because untracking leaves the committed bytes on disk as your personal file. Commands never read the file themselves — one local resolver folds it with your `config.json` and the machine settings, without touching the network.
+`config.json` is personal, so it must not be committed. A `config.json` that git tracks is ignored as if it were absent — otherwise a branch could commit `"reviewPublication":"full"` for whoever reviews it — and `devflow tracker|memory|curation|knowledge|gates --status` say so, with the fix: untrack the tracked entry with `git rm --cached`, then check or delete the file, because untracking leaves the committed bytes on disk as your personal file. Commands never read the file themselves — one local resolver folds it with your `config.json` and the machine settings, without touching the network.
 
 **Gate level.** The gate level (`full`, `standard` or `lean`) is not a narrow-only switch: your personal `.devflow/config.json` may carry a top-level `"gateLevel"` key that raises or lowers the machine default, which sits in `~/.devflow/manifest.json`, and `standard` applies when neither is set. `devflow init` asks for the machine default (an interactive run only; `devflow init --gate-level <full|standard|lean>` sets it with no prompt, and `--recommended` or a non-interactive init keeps the stored value), and `devflow gates --set <level>` changes it later. A `gateLevel` in `project.json` is ignored, and no command writes the personal key. A malformed value reads as `full`. `/code-review` and `/plan` read the level: `standard` and `lean` run fewer review focuses and fewer planning agents. The security checks and, in `/plan`, the design review run at every level. The compliance gap agent runs on its own trigger at every level. At `lean` and at no other level, `/implement` has Validate run your project's `lint-pack` script last (template in `templates/lint-pack/`). The script finds the faults a linter does not, such as a removed flag that a doc still names. To clear a match that you accept, add an allow glob to `.lint-pack.conf`. Run `devflow gates --set full` to keep the full `/plan` shape and Polish. `/implement` and `/resolve` also read the level and name it in their report. At `standard` and `lean` they skip Polish, and `full` keeps it. A level reference that cannot be read applies no row and keeps the level. After updating, run `devflow init`. See the [CLI reference](https://github.com/dean0x/devflow/blob/main/docs/cli-reference.md#gate-level).
 
@@ -282,7 +282,7 @@ For deep dives: [Working Memory](https://github.com/dean0x/devflow/blob/main/doc
 npx devflow-kit init                    # Install (interactive wizard)
 npx devflow-kit init --plugin=implement # Install specific plugin
 npx devflow-kit ambient --enable        # Toggle ambient mode (orchestrator)
-npx devflow-kit learning --enable       # Toggle decision/pitfall tracking (all projects)
+npx devflow-kit curation --enable       # Toggle decision/pitfall tracking (all projects)
 npx devflow-kit compliance --enable     # Enable compliance (pick frameworks); prints the keys to add to .devflow/project.json
 npx devflow-kit compliance --status     # Show compliance state and this repo's evidence policy
 npx devflow-kit tracker --set jira       # Pick the machine's default tracker (github | jira | linear)
@@ -307,7 +307,7 @@ See [docs/cli-reference.md](https://github.com/dean0x/devflow/blob/main/docs/cli
 | Tool | Role | What It Does |
 |------|------|-------------|
 | **[Skim](https://github.com/dean0x/skim)** | Context Optimization | Code-aware AST parsing, command rewriting, output compression |
-| **Devflow** | Meta-Harness | Orchestrated + graph workflows, parallel review, memory, self-learning |
+| **Devflow** | Meta-Harness | Orchestrated + graph workflows, parallel review, memory, curated decisions |
 | **[MDS](https://github.com/dean0x/mdscript)** | Prompt Engineering | Composable template language for prompts — variables, loops, conditionals, imports, compiled to clean Markdown |
 
 ## Building from Source

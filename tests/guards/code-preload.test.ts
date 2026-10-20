@@ -31,12 +31,12 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import * as path from 'path'
 
-import { CODE_AGENT_TYPES, codeSlugOf, parseFrontmatterSkills, resolveAgentSource, resolveLearningOffSource } from '../helpers.js'
+import { CODE_AGENT_TYPES, codeSlugOf, parseFrontmatterSkills, resolveAgentSource, resolveCurationOffSource } from '../helpers.js'
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..')
 const SKILLS_DIR = path.join(ROOT, 'src', 'assets', 'skills')
 
-/** The skills each variant preloads, in the order its frontmatter lists them (apply-decisions, last, is the learning arm). */
+/** The skills each variant preloads, in the order its frontmatter lists them (apply-decisions, last, is the curation arm). */
 export const CODE_PRELOADS: Readonly<Record<string, readonly string[]>> = {
   'Code': ['git', 'testing', 'test-driven-development', 'worktree-support', 'apply-feature-knowledge', 'apply-decisions'],
   'Fix': ['git', 'testing', 'worktree-support', 'apply-decisions'],
@@ -104,21 +104,21 @@ export function collectPreloadSizeDefects(agentType: string, bytes: Readonly<Rec
   return out
 }
 
-/** The skills a variant preloads under learning off: its set minus `apply-decisions`. */
+/** The skills a variant preloads under curation off: its set minus `apply-decisions`. */
 const offPreload = (agentType: string): readonly string[] => CODE_PRELOADS[agentType].filter(name => name !== 'apply-decisions')
 
-/** Named collector: how a learning-off preload list differs from the variant's set minus apply-decisions. */
+/** Named collector: how a curation-off preload list differs from the variant's set minus apply-decisions. */
 export function collectOffPreloadDefects(agentType: string, skills: readonly string[]): string[] {
   const expected = offPreload(agentType)
   const out: string[] = []
-  if (skills.includes('apply-decisions')) out.push('apply-decisions is preloaded under learning off')
+  if (skills.includes('apply-decisions')) out.push('apply-decisions is preloaded under curation off')
   for (const name of expected) if (!skills.includes(name)) out.push(`missing ${name}`)
   for (const name of skills) if (name !== 'apply-decisions' && !expected.includes(name)) out.push(`unexpected ${name}`)
   return out
 }
 
 const on = (agentType: string): string => resolveAgentSource(codeSlugOf(agentType)).content
-const off = (agentType: string): string => resolveLearningOffSource('agents', codeSlugOf(agentType)) as string
+const off = (agentType: string): string => resolveCurationOffSource('agents', codeSlugOf(agentType)) as string
 const frontmatterOf = (text: string): string => text.slice(0, text.indexOf('\n---\n', 4))
 const bodyOf = (text: string): string => text.slice(text.indexOf('\n---\n', 4) + 5)
 
@@ -206,17 +206,17 @@ describe('the preloaded SKILL.md files of each variant stay within their caps (D
   })
 })
 
-// ── The learning-off variants (D-LEARNING-VARIANTS, AC-150, AC-307) ──────────────────────────────────────
+// ── The curation-off variants (D-LEARNING-VARIANTS, AC-150, AC-307) ──────────────────────────────────────
 //
-// A machine with learning off installs dist/learning-off/agents/{code,fix,refactor}.md, each of which
-// loses the `devflow:apply-decisions` preload line with the rest of its decisions text. The learning-on file
-// above stays the file each total is measured against; a learning-off variant preloads the same list minus
+// A machine with curation off installs dist/curation-off/agents/{code,fix,refactor}.md, each of which
+// loses the `devflow:apply-decisions` preload line with the rest of its decisions text. The curation-on file
+// above stays the file each total is measured against; a curation-off variant preloads the same list minus
 // that skill, so its total is the on total less the skill's bytes.
 
-describe('each learning-off Code variant preloads its set minus apply-decisions (AC-150, AC-307)', () => {
-  it('each learning-off file exists, and its skills: list is the set without apply-decisions', () => {
+describe('each curation-off Code variant preloads its set minus apply-decisions (AC-150, AC-307)', () => {
+  it('each curation-off file exists, and its skills: list is the set without apply-decisions', () => {
     for (const agentType of CODE_AGENT_TYPES) {
-      expect(off(agentType), `dist/learning-off/agents/${codeSlugOf(agentType)}.md is built`).not.toBeNull()
+      expect(off(agentType), `dist/curation-off/agents/${codeSlugOf(agentType)}.md is built`).not.toBeNull()
       const skills = parseFrontmatterSkills(off(agentType))
       expect(skills.length, `${agentType}: the skills block was not read`).toBeGreaterThan(0)
       expect(collectOffPreloadDefects(agentType, skills), agentType).toEqual([])
@@ -227,18 +227,18 @@ describe('each learning-off Code variant preloads its set minus apply-decisions 
     for (const agentType of CODE_AGENT_TYPES) {
       const onTotal = totalBytes(parseFrontmatterSkills(on(agentType)))
       const offTotal = totalBytes(parseFrontmatterSkills(off(agentType)))
-      expect(onTotal, `${agentType}: the learning-on total`).toBeLessThanOrEqual(PRELOAD_MAX_BYTES[agentType])
+      expect(onTotal, `${agentType}: the curation-on total`).toBeLessThanOrEqual(PRELOAD_MAX_BYTES[agentType])
       expect(offTotal, agentType).toBe(onTotal - skillBytes('apply-decisions'))
       expect(offTotal, agentType).toBeLessThan(onTotal)
     }
   })
 
-  it('each learning-off body drops every decisions instruction and keeps its commit step and scan', () => {
+  it('each curation-off body drops every decisions instruction and keeps its commit step and scan', () => {
     for (const agentType of CODE_AGENT_TYPES) {
       expect(off(agentType), agentType).not.toContain('DECISIONS_CONTEXT')
       expect(off(agentType), agentType).not.toContain('apply-decisions')
       expect(off(agentType), agentType).toContain('**Security scan (conditional):**')
-      expect(off(agentType).length, `${agentType}: the learning-off body is shorter`).toBeLessThan(on(agentType).length)
+      expect(off(agentType).length, `${agentType}: the curation-off body is shorter`).toBeLessThan(on(agentType).length)
     }
   })
 
@@ -246,7 +246,7 @@ describe('each learning-off Code variant preloads its set minus apply-decisions 
     for (const agentType of CODE_AGENT_TYPES) {
       const real = offPreload(agentType)
       expect(collectOffPreloadDefects(agentType, real), agentType).toEqual([])
-      expect(collectOffPreloadDefects(agentType, [...real, 'apply-decisions'])).toEqual(['apply-decisions is preloaded under learning off'])
+      expect(collectOffPreloadDefects(agentType, [...real, 'apply-decisions'])).toEqual(['apply-decisions is preloaded under curation off'])
       expect(collectOffPreloadDefects(agentType, real.filter(n => n !== 'git'))).toEqual(['missing git'])
       expect(collectOffPreloadDefects(agentType, [...real, 'security'])).toEqual(['unexpected security'])
     }

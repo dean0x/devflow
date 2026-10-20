@@ -34,7 +34,7 @@ import * as path from 'path'
 
 import {
   CODE_AGENT_TYPES, CODE_MODES, CODE_OPERATIONS, codeSlugOf, collectCodeSpawnSites,
-  requireDistFile, requireDistFiles, resolveAgentSource, resolveLearningOffSource,
+  requireDistFile, requireDistFiles, resolveAgentSource, resolveCurationOffSource,
 } from '../helpers.js'
 import type { CodeSpawnSite } from '../helpers.js'
 
@@ -443,13 +443,13 @@ describe('no Code variant opens a PR, each body checks its staged diff once befo
     }
   })
 
-  it('each learning-off body holds the same rules under the same ceiling', () => {
+  it('each curation-off body holds the same rules under the same ceiling', () => {
     for (const agentType of CODE_AGENT_TYPES) {
       const slug = codeSlugOf(agentType)
-      const off = resolveLearningOffSource('agents', slug)
-      expect(off, `dist/learning-off/agents/${slug}.md is absent — run \`npm run build\` first`).not.toBeNull()
-      expect(Buffer.byteLength(off!), `${agentType}: the learning-off body is empty — the guard would pass vacuously`).toBeGreaterThan(4_000)
-      expect(collectCodeBodyDefects(off!, BODY_CEILINGS[agentType]), `${agentType} (learning off)`).toEqual([])
+      const off = resolveCurationOffSource('agents', slug)
+      expect(off, `dist/curation-off/agents/${slug}.md is absent — run \`npm run build\` first`).not.toBeNull()
+      expect(Buffer.byteLength(off!), `${agentType}: the curation-off body is empty — the guard would pass vacuously`).toBeGreaterThan(4_000)
+      expect(collectCodeBodyDefects(off!, BODY_CEILINGS[agentType]), `${agentType} (curation off)`).toEqual([])
     }
   })
 

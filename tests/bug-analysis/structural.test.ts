@@ -14,7 +14,7 @@
 // cannot silently remove safety-critical patterns.
 
 import { describe, it, expect } from 'vitest';
-import { loadFile, extractSection, resolveAgentSource, resolveLearningOffSource, collectFreshBaseDefects, collectSlugCheckDefects, collectStoredHeadDefects, slugSinkLines, type DiffRangeShape } from '../helpers';
+import { loadFile, extractSection, resolveAgentSource, resolveCurationOffSource, collectFreshBaseDefects, collectSlugCheckDefects, collectStoredHeadDefects, slugSinkLines, type DiffRangeShape } from '../helpers';
 
 const content = loadFile('dist/commands/bug-analysis.md');
 const agentContent = resolveAgentSource('debug').content;
@@ -181,10 +181,10 @@ describe('bug-analysis.md — DIFF_RANGE starts at the fresh base that ensure-pr
     expect(collectAnalysisFreshBaseDefects(content)).toEqual([]);
   });
 
-  it('the learning-off build states the same parts', () => {
-    const off = resolveLearningOffSource('commands', 'bug-analysis');
-    expect(off, 'dist/learning-off/commands/bug-analysis.md is absent: run `npm run build:mds`').not.toBeNull();
-    expect(off, 'the learning-off build is the learning-on build, so this proves nothing').not.toBe(content);
+  it('the curation-off build states the same parts', () => {
+    const off = resolveCurationOffSource('commands', 'bug-analysis');
+    expect(off, 'dist/curation-off/commands/bug-analysis.md is absent: run `npm run build:mds`').not.toBeNull();
+    expect(off, 'the curation-off build is the curation-on build, so this proves nothing').not.toBe(content);
     expect(collectAnalysisFreshBaseDefects(off ?? '')).toEqual([]);
   });
 

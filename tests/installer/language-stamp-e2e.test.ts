@@ -12,7 +12,7 @@
  * exits 0 at Claude Code detection before reaching the code under test. The first assertion of each scenario
  * is on installed bytes, never on an exit code a short-circuit also returns.
  *
- * Requires a build (`npm run build`): the spawned CLI reads dist/ and dist/learning-off.
+ * Requires a build (`npm run build`): the spawned CLI reads dist/ and dist/curation-off.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -78,9 +78,9 @@ async function stampCarriers(): Promise<string[]> {
   return out;
 }
 
-/** The learning-off variant of a command when the host has an arm, else null. */
-async function learningOffBytes(name: string): Promise<string | null> {
-  try { return await fs.readFile(path.join(ROOT, 'dist', 'learning-off', 'commands', `${name}.md`), 'utf-8'); } catch { return null; }
+/** The curation-off variant of a command when the host has an arm, else null. */
+async function curationOffBytes(name: string): Promise<string | null> {
+  try { return await fs.readFile(path.join(ROOT, 'dist', 'curation-off', 'commands', `${name}.md`), 'utf-8'); } catch { return null; }
 }
 
 beforeEach(async () => {
@@ -164,7 +164,7 @@ describe('selective uninstall re-stamps the remaining selection (AC-311)', () =>
   }, SCENARIO_TIMEOUT_MS);
 });
 
-describe('a learning toggle keeps the stamp (the composition with the variant converge)', () => {
+describe('a curation toggle keeps the stamp (the composition with the variant converge)', () => {
   it('--disable then --enable switches the variant of code-review and keeps the list, byte for byte', async () => {
     init();
     init('--plugin=devflow-typescript');
@@ -172,25 +172,25 @@ describe('a learning toggle keeps the stamp (the composition with the variant co
     const onBytes = await fs.readFile(installedCommand('code-review'), 'utf-8');
     expect(await stampOf('code-review')).toBe('typescript, go');
 
-    okCli('learning', '--disable');
+    okCli('curation', '--disable');
     const off = await fs.readFile(installedCommand('code-review'), 'utf-8');
-    expect(off, 'the learning-off variant of the command').not.toBe(onBytes);
-    expect(off).toBe((await learningOffBytes('code-review') as string).replace(`${STAMP_PREFIX}(none)`, `${STAMP_PREFIX}typescript, go`));
+    expect(off, 'the curation-off variant of the command').not.toBe(onBytes);
+    expect(off).toBe((await curationOffBytes('code-review') as string).replace(`${STAMP_PREFIX}(none)`, `${STAMP_PREFIX}typescript, go`));
     expect(await stampOf('code-review')).toBe('typescript, go');
 
-    okCli('learning', '--enable');
-    expect(await fs.readFile(installedCommand('code-review'), 'utf-8'), 'back to the stamped learning-on file').toBe(onBytes);
+    okCli('curation', '--enable');
+    expect(await fs.readFile(installedCommand('code-review'), 'utf-8'), 'back to the stamped curation-on file').toBe(onBytes);
   }, SCENARIO_TIMEOUT_MS);
 
-  it('a re-init on the same switch leaves the stamped learning-off file identical', async () => {
+  it('a re-init on the same switch leaves the stamped curation-off file identical', async () => {
     init();
     init('--plugin=devflow-typescript');
-    init('--no-learning');
+    init('--no-curation');
     const content = await fs.readFile(installedCommand('code-review'), 'utf-8');
     expect(content.split('\n')).toContain(`${STAMP_PREFIX}typescript`);
-    expect(content, 'the learning-off variant, stamped').toBe((await learningOffBytes('code-review') as string).replace(`${STAMP_PREFIX}(none)`, `${STAMP_PREFIX}typescript`));
+    expect(content, 'the curation-off variant, stamped').toBe((await curationOffBytes('code-review') as string).replace(`${STAMP_PREFIX}(none)`, `${STAMP_PREFIX}typescript`));
 
-    init('--no-learning');
+    init('--no-curation');
 
     expect(await fs.readFile(installedCommand('code-review'), 'utf-8')).toBe(content);
   }, SCENARIO_TIMEOUT_MS);

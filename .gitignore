@@ -36,7 +36,7 @@ install.log
 # Claude Code project-local state (settings.local.json, worktrees) and legacy Devflow local-scope installs
 .claude/
 
-# Devflow runtime data — local by default (memory, learning, docs, locks).
+# Devflow runtime data — local by default (memory, curation, docs, locks).
 # Shared via git: feature knowledge bases under .devflow/features/ (index.md and
 # every {slug}/KNOWLEDGE.md), .devflow/conventions.md (naming authority) and
 # .devflow/policy.json (evidence policy). To stop sharing the first two, re-add

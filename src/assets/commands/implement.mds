@@ -48,11 +48,11 @@ When the user explicitly asks to re-validate, re-check, or re-run quality gates 
 
 ### Phase 1: Setup
 
-<!-- learning:on -->
+<!-- curation:on -->
 **Produces:** TASK_ID, BASE_BRANCH, BASE_REF, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION, GATE_LEVEL
-<!-- learning:off -->
+<!-- curation:off -->
 **Produces:** TASK_ID, BASE_BRANCH, BASE_REF, EXECUTION_PLAN, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PR_DESCRIPTION_GUIDANCE, ISSUE_NUMBER, ISSUE_PR_LINK, EVIDENCE_POLICY, ISSUE_REQUIRED, APPLY_CONVENTIONS, REQUIRE_NON_AUTHOR_APPROVAL, PR_EXCEPTIONS, TEST_PLAN, EVIDENCE_FILE, PR_TEST_PLAN_BLOCK, REVIEW_PUBLICATION, GATE_LEVEL
-<!-- learning:end -->
+<!-- curation:end -->
 
 Record the current branch name as `BASE_BRANCH`. Stop the run unless it matches `^(?![-#]|origin\/|(?:@|(?:FETCH_|ORIG_|MERGE_)?HEAD)$)(?!.*\.\.)[A-Za-z0-9._\/+@,#-]{1,200}$`, telling the user it allows only ASCII letters, digits and `._/+@,#-`, at most 200; no leading `-` or `#`, no `origin/` prefix, no `..`, not `@` or a HEAD name.
 
@@ -141,10 +141,10 @@ Phase 11 passes the resolved value to the evidence script (`publish`), which dec
 Pass `COMPLIANCE_DIRECTIVE` to every Code and Fix spawn, on a line of its own.
 
 {{decisions_load()}}
-<!-- learning:on -->
+<!-- curation:on -->
 Pass `DECISIONS_CONTEXT` to Code agent (Phase 2) and Harden agent (Phase 4).
 
-<!-- learning:end -->
+<!-- curation:end -->
 {{knowledge_load()}}
 
 **Fresh base.** Before Phase 2, run `cd "{worktree}" && B="{BASE_BRANCH}" && node "$HOME/.devflow/scripts/resolve-base.cjs" local "${B}"; echo "exit=$?"`. Output other than one `BASE_REF=` line (40 or 64 hex, or `none`) with `exit=0` counts as `NOTE=stop`, `REASON=resolver-unavailable`. Record `BASE_REF`. By `NOTE`: `none` continues; `info` prints one plain line; `degraded` records `TRACEABILITY: DEGRADED (base {REASON}; fix: {fix})`; `stop` (`BASE_REF=none`) stops the run, naming REASON and its fix. Fix by REASON: no-merge-base `git fetch --unshallow`; no-ref or timeout `git fetch origin <base>` (`<base>` stays as written); resolver-unavailable `re-run; if it repeats, run devflow init`; invalid-name the allowed set, never the name; any other REASON none, and `; fix: {fix}` is left out.
@@ -179,9 +179,9 @@ BASE_BRANCH: {base branch}
 EXECUTION_PLAN: {full plan from setup context}
 PATTERNS: {patterns from plan document or empty}
 FEATURE_KNOWLEDGE: {feature_knowledge}
-<!-- learning:on -->
+<!-- curation:on -->
 DECISIONS_CONTEXT: {decisions_context}
-<!-- learning:end -->
+<!-- curation:end -->
 {COMPLIANCE_DIRECTIVE}"
 ```
 
@@ -201,9 +201,9 @@ BASE_BRANCH: {base branch}
 EXECUTION_PLAN: {phase 1 steps}
 PATTERNS: {patterns from plan document or empty}
 FEATURE_KNOWLEDGE: {feature_knowledge}
-<!-- learning:on -->
+<!-- curation:on -->
 DECISIONS_CONTEXT: {decisions_context}
-<!-- learning:end -->
+<!-- curation:end -->
 {COMPLIANCE_DIRECTIVE}
 HANDOFF_REQUIRED: true
 HANDOFF_FILE: {worktree}/.devflow/docs/handoff-{branch_slug}.md"
@@ -221,9 +221,9 @@ PATTERNS: {patterns from plan document or empty}
 PRIOR_PHASE_SUMMARY: {summary from previous Code agent}
 FILES_FROM_PRIOR_PHASE: {list of files created}
 FEATURE_KNOWLEDGE: {feature_knowledge}
-<!-- learning:on -->
+<!-- curation:on -->
 DECISIONS_CONTEXT: {decisions_context}
-<!-- learning:end -->
+<!-- curation:end -->
 {COMPLIANCE_DIRECTIVE}
 HANDOFF_REQUIRED: {true if not last phase}
 HANDOFF_FILE: {worktree}/.devflow/docs/handoff-{branch_slug}.md"
@@ -246,9 +246,9 @@ BASE_BRANCH: {base branch}
 EXECUTION_PLAN: {subtask 1 steps}
 PATTERNS: {patterns}
 FEATURE_KNOWLEDGE: {feature_knowledge}
-<!-- learning:on -->
+<!-- curation:on -->
 DECISIONS_CONTEXT: {decisions_context}
-<!-- learning:end -->
+<!-- curation:end -->
 {COMPLIANCE_DIRECTIVE}"
 
 Agent(subagent_type="Code"):  # Code agent 2 (same message)
@@ -259,9 +259,9 @@ BASE_BRANCH: {base branch}
 EXECUTION_PLAN: {subtask 2 steps}
 PATTERNS: {patterns}
 FEATURE_KNOWLEDGE: {feature_knowledge}
-<!-- learning:on -->
+<!-- curation:on -->
 DECISIONS_CONTEXT: {decisions_context}
-<!-- learning:end -->
+<!-- curation:end -->
 {COMPLIANCE_DIRECTIVE}"
 ```
 
@@ -300,9 +300,9 @@ After Phase 3, spawn Harden agent as the quality gate:
 Agent(subagent_type="Harden"):
 "TASK_DESCRIPTION: {task description}
 FILES_CHANGED: {branch_diff}
-<!-- learning:on -->
+<!-- curation:on -->
 DECISIONS_CONTEXT: {decisions_context}
-<!-- learning:end -->
+<!-- curation:end -->
 FEATURE_KNOWLEDGE: {feature_knowledge_rules}
 Evaluate 9 pillars, fix P0/P1 issues, report status"
 ```
@@ -340,9 +340,9 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
    TASK_DESCRIPTION: Fix alignment issues
    MISALIGNMENTS: {structured misalignments from Evaluate agent}
    SCOPE: Fix only the listed misalignments, no other changes
-   <!-- learning:on -->
+   <!-- curation:on -->
    DECISIONS_CONTEXT: {decisions_context}
-   <!-- learning:end -->
+   <!-- curation:end -->
    {COMPLIANCE_DIRECTIVE}"
    ```
    - Loop back to Phase 5 (re-check alignment). The fix is not validated here: the Phase 6 run covers it.
@@ -376,9 +376,9 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
    TASK_DESCRIPTION: Fix validation failures
    VALIDATION_FAILURES: {parsed failures from Validate agent}
    SCOPE: Fix only the listed failures, no other changes
-   <!-- learning:on -->
+   <!-- curation:on -->
    DECISIONS_CONTEXT: {decisions_context}
-   <!-- learning:end -->
+   <!-- curation:end -->
    {COMPLIANCE_DIRECTIVE}"
    ```
    - Loop back to Phase 6 (re-validate at the new HEAD, full scope)
@@ -430,9 +430,9 @@ After every Test agent run — PASS or FAIL, first run or retry — append its T
    TASK_DESCRIPTION: Fix QA test failures
    QA_FAILURES: {structured failures from Test agent}
    SCOPE: Fix only the listed failures, no other changes
-   <!-- learning:on -->
+   <!-- curation:on -->
    DECISIONS_CONTEXT: {decisions_context}
-   <!-- learning:end -->
+   <!-- curation:end -->
    {COMPLIANCE_DIRECTIVE}"
    ```
    - Loop back to Phase 7 (re-run Test agent). The fix is not validated here: Phase 8 covers it.
@@ -503,11 +503,11 @@ git push origin HEAD; echo "exit=$?"
 3. **If NO_PR or NO_CI** → skip: "No PR/CI configured, skipping CI validation." Proceed to Phase 11.
 4. **If PENDING** and fewer than 3 waits have run → wait again (step 1). After the third wait → report "CI still running — verify manually before merging" and proceed.
 5. **If INDETERMINATE** and fewer than 3 waits have run → wait again (step 1). After the third wait → report "CI status unknown — verify manually before merging" and proceed.
-<!-- learning:on -->
+<!-- curation:on -->
 6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES`, `DECISIONS_CONTEXT` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Fix agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
-<!-- learning:off -->
+<!-- curation:off -->
 6. **If FAILING** and fewer than 2 fixes have run → report the failing checks from the line. Spawn `Agent(subagent_type="Fix")` whose prompt opens with `OPERATION: ci-fix`, with `COMPLIANCE_DIRECTIVE` (when it is not empty), `CI_FAILURES` and `PUSH: false`; `CI_FAILURES` holds the failing-check names from the line and nothing else, because the Fix agent fetches the full names and reads the logs itself and this command reads none. After a fix, push with the command above and, if a wait remains, wait again (step 1); a failed push records `TRACEABILITY: DEGRADED (ci push failed)`, reports "CI status unknown — verify manually before merging" and stops waiting. After the second fix still FAILING → report the failing checks and proceed.
-<!-- learning:end -->
+<!-- curation:end -->
 7. **Budget**: at most 3 waits and 2 fixes in all. When one is spent, report the current status and proceed.
 <!-- /PATTERN: ci-status-gate -->
 

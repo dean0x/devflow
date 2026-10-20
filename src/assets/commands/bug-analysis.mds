@@ -169,18 +169,18 @@ If no tool produced findings: set `STATIC_FINDINGS` to `(none)`.
 
 ### Phase 3: Context Loading
 
-<!-- learning:on -->
+<!-- curation:on -->
 **Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PLAN_CONTEXT, ACCEPTANCE_RULES
-<!-- learning:off -->
+<!-- curation:off -->
 **Produces:** FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, PLAN_CONTEXT, ACCEPTANCE_RULES
-<!-- learning:end -->
+<!-- curation:end -->
 
-<!-- learning:on -->
+<!-- curation:on -->
 #### Decisions Index
 
 {{settings.settings_resolve()}}
 
-<!-- learning:end -->
+<!-- curation:end -->
 {{decisions_load()}}
 #### Feature Knowledge
 
@@ -211,11 +211,11 @@ Determine which focus analyzers to run using `CHANGED_FILES` (already computed i
 ### Phase 5: Parallel Bug Analysis
 
 **Produces:** ANALYZER_OUTPUTS
-<!-- learning:on -->
+<!-- curation:on -->
 **Requires:** DIFF_RANGE, ANALYSIS_DIR, ACTIVE_FOCUSES, STATIC_FINDINGS, ACCEPTANCE_RULES, PLAN_CONTEXT, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
-<!-- learning:off -->
+<!-- curation:off -->
 **Requires:** DIFF_RANGE, ANALYSIS_DIR, ACTIVE_FOCUSES, STATIC_FINDINGS, ACCEPTANCE_RULES, PLAN_CONTEXT, FEATURE_KNOWLEDGE
-<!-- learning:end -->
+<!-- curation:end -->
 
 Spawn ALL active Debug agents **in a single message** (parallel, NOT background):
 
@@ -228,15 +228,15 @@ DIFF_COMMAND: git diff {DIFF_RANGE}
 ACCEPTANCE_RULES: {ACCEPTANCE_RULES filtered to this focus type, or (none)}
 PLAN_CONTEXT: {PLAN_CONTEXT}
 STATIC_FINDINGS: {STATIC_FINDINGS if focus == security, else (none)}
-<!-- learning:on -->
+<!-- curation:on -->
 DECISIONS_CONTEXT: {DECISIONS_CONTEXT}
-<!-- learning:end -->
+<!-- curation:end -->
 FEATURE_KNOWLEDGE: {FEATURE_KNOWLEDGE}
 PR_DESCRIPTION: <pr-description>{PR_DESCRIPTION}</pr-description>
 OUTPUT_PATH: {ANALYSIS_DIR}/{focus}.md
-<!-- learning:on -->
+<!-- curation:on -->
 Follow devflow:apply-decisions to Read full ADR/PF bodies on demand.
-<!-- learning:end -->
+<!-- curation:end -->
 Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE.
 IMPORTANT: Write report to {ANALYSIS_DIR}/{focus}.md using Write tool"
 ```
@@ -312,9 +312,9 @@ Run `/resolve` to process and fix these findings.
 │  └─ 2a incremental range, 2b changed files (stop if none), 2c tools, 2d semgrep → snyk → codeql
 │
 ├─ Phase 3: Context Loading
-<!-- learning:on -->
+<!-- curation:on -->
 │  ├─ index.md (pre-rendered) → DECISIONS_CONTEXT
-<!-- learning:end -->
+<!-- curation:end -->
 │  ├─ Feature knowledge load → FEATURE_KNOWLEDGE
 │  └─ {worktree}/.devflow/docs/design/*.md → PLAN_CONTEXT + ACCEPTANCE_RULES
 │
@@ -364,11 +364,11 @@ Before reporting results, verify every phase was executed:
 
 - [ ] Phase 1: Pre-flight → BRANCH_INFO captured, PR_DESCRIPTION fetched (or `(none)`)
 - [ ] Phase 2: Static Analysis → STATIC_FINDINGS captured (or `(none)` if skipped/no tools/no findings); ANALYSIS_DIR created; CHANGED_FILES populated
-<!-- learning:on -->
+<!-- curation:on -->
 - [ ] Phase 3: Context Loading → DECISIONS_CONTEXT captured, FEATURE_KNOWLEDGE loaded (or `(none)`), PLAN_CONTEXT and ACCEPTANCE_RULES captured (or `(none)`)
-<!-- learning:off -->
+<!-- curation:off -->
 - [ ] Phase 3: Context Loading → FEATURE_KNOWLEDGE loaded (or `(none)`), PLAN_CONTEXT and ACCEPTANCE_RULES captured (or `(none)`)
-<!-- learning:end -->
+<!-- curation:end -->
 - [ ] Phase 4: File Analysis → ACTIVE_FOCUSES determined (security + functional always present)
 - [ ] Phase 5: Parallel Bug Analysis → ANALYZER_OUTPUTS captured per active focus; all reports written to ANALYSIS_DIR
 - [ ] Phase 6: Synthesis → BUG_ANALYSIS_SUMMARY written to `{ANALYSIS_DIR}/bug-analysis-summary.md`

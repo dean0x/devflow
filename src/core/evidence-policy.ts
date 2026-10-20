@@ -140,7 +140,7 @@ export interface RepoSettings {
   readonly compliance: { readonly enabled: boolean; readonly frameworks: readonly string[] };
   readonly switches: {
     readonly memory: SettingsSwitchState;
-    readonly learning: SettingsSwitchState;
+    readonly curation: SettingsSwitchState;
     readonly knowledge: SettingsSwitchState;
   };
   /** The gate level that applies. `full` for a fail-closed result or a malformed deciding value. */
@@ -307,7 +307,7 @@ function surfaceMismatches(value: unknown, surface: Readonly<Record<string, Surf
  * throws: a missing file is `not-found`; a module that throws on load or lacks a
  * surface key is `unusable`. The caller's type parameter is justified by the
  * surface check, which `satisfies` ties to the interface's keys. Exported for
- * src/core/learning-store.ts, which loads the learning store the same way.
+ * src/core/curation-store.ts, which loads the curation store the same way.
  */
 export function loadScript<T>(scriptPath: string, surface: Readonly<Record<string, SurfaceKind>>): Result<T, EvidencePolicyLoadError> {
   let loaded: unknown;

@@ -34,16 +34,16 @@ $ARGUMENTS
 
 ## Phases
 
-<!-- learning:on -->
+<!-- curation:on -->
 ### Phase 1: Load Decisions Index (Orchestrator-Local)
-<!-- learning:off -->
+<!-- curation:off -->
 ### Phase 1: Resolve Settings
-<!-- learning:end -->
+<!-- curation:end -->
 
-<!-- learning:on -->
+<!-- curation:on -->
 **Produces:** DECISIONS_CONTEXT
 
-<!-- learning:end -->
+<!-- curation:end -->
 {{settings.settings_resolve()}}
 
 From the same line: {{compliance.compliance_frameworks()}}
@@ -53,18 +53,18 @@ From the same line: {{compliance.compliance_frameworks()}}
 Phase 7 passes `COMPLIANCE_DIRECTIVE` to the Code agent that implements the fix, on a line of its own.
 
 {{decisions_load()}}
-<!-- learning:on -->
+<!-- curation:on -->
 The orchestrator uses `DECISIONS_CONTEXT` locally when generating hypotheses (Phase 2) — prior pitfalls and decisions can suggest specific root causes to investigate. Follow `devflow:apply-decisions` to Read full entry bodies on demand. **Do NOT pass `DECISIONS_CONTEXT` to Explore investigators** — decisions context stays in the orchestrator; investigators examine code directly.
 
-<!-- learning:end -->
+<!-- curation:end -->
 **No up-front feature knowledge load** — debug investigation workers read code directly to avoid confirmation bias. Feature knowledge is only written back at the end if the investigation surfaced durable, cross-cutting knowledge.
 
 ### Phase 2: Context Gathering
 
 **Produces:** HYPOTHESES, BUG_CONTEXT
-<!-- learning:on -->
+<!-- curation:on -->
 **Requires:** DECISIONS_CONTEXT
-<!-- learning:end -->
+<!-- curation:end -->
 
 If `COMMAND_INPUT` opens with a candidate issue reference, fetch the issue:
 
@@ -211,9 +211,9 @@ Ask user via AskUserQuestion: "Want me to implement this fix?"
   TASK_DESCRIPTION: Implement the fix for this root cause: {bug description}
   EXECUTION_PLAN: {Root Cause, Key Findings and Recommended Fix from Phase 6, with their file:line references}
   PUSH: false
-  <!-- learning:on -->
+  <!-- curation:on -->
   DECISIONS_CONTEXT: {decisions_context}
-  <!-- learning:end -->
+  <!-- curation:end -->
   FEATURE_KNOWLEDGE: (none)
   {COMPLIANCE_DIRECTIVE}"
   ```
@@ -227,11 +227,11 @@ Ask user via AskUserQuestion: "Want me to implement this fix?"
 ```
 /debug (orchestrator)
 │
-<!-- learning:on -->
+<!-- curation:on -->
 ├─ Phase 1: Load Decisions Index (Orchestrator-Local)
-<!-- learning:off -->
+<!-- curation:off -->
 ├─ Phase 1: Resolve Settings
-<!-- learning:end -->
+<!-- curation:end -->
 │  └─ No up-front feature knowledge load (avoids confirmation bias in investigators)
 │
 ├─ Phase 2: Context gathering

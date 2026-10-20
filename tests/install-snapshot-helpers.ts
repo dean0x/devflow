@@ -77,7 +77,7 @@ export const INSTALL_CONFIGS: readonly InstallConfig[] = [
   {
     name: 'all-off',
     initArgs: [
-      '--no-ambient', '--no-memory', '--no-hud', '--no-knowledge', '--no-learning',
+      '--no-ambient', '--no-memory', '--no-hud', '--no-knowledge', '--no-curation',
       '--no-rules', '--no-proxy', '--no-behavior', '--no-compliance', '--security', 'user',
     ],
   },

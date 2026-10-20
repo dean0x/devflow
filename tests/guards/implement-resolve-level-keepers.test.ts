@@ -10,7 +10,7 @@
 
 import { describe, it, expect } from 'vitest'
 
-import { escapeRe, requireDistFile, resolveLearningOffSource } from '../helpers.js'
+import { escapeRe, requireDistFile, resolveCurationOffSource } from '../helpers.js'
 import { POLISH_MARKERS, POLISH_SPAWN, countOf } from './level-guard-helpers.js'
 
 /** A command that keeps Polish at every level and reads no level: how many times it spawns Polish. */
@@ -67,11 +67,11 @@ export function collectPolishKeeperDefects(body: string, keeper: KeeperSpec): st
 
 interface KeeperBuild { readonly label: string; readonly keeper: KeeperSpec; readonly body: string }
 const KEEPER_BUILDS: readonly KeeperBuild[] = KEEPERS.flatMap(keeper => {
-  const off = resolveLearningOffSource('commands', keeper.cmd)
-  if (off === null) throw new Error(`dist/learning-off/commands/${keeper.cmd}.md is absent: run \`npm run build:mds\``)
+  const off = resolveCurationOffSource('commands', keeper.cmd)
+  if (off === null) throw new Error(`dist/curation-off/commands/${keeper.cmd}.md is absent: run \`npm run build:mds\``)
   return [
-    { label: `${keeper.cmd}, learning on`, keeper, body: requireDistFile(`${keeper.cmd}.md`) },
-    { label: `${keeper.cmd}, learning off`, keeper, body: off },
+    { label: `${keeper.cmd}, curation on`, keeper, body: requireDistFile(`${keeper.cmd}.md`) },
+    { label: `${keeper.cmd}, curation off`, keeper, body: off },
   ]
 })
 

@@ -12,11 +12,11 @@
 // Filtering rules (must match AC-F3):
 //   - anchor_id must be set (unanchored observing rows are excluded)
 //   - type must match kind: 'decision' rows → decisions.md; 'pitfall' rows → pitfalls.md
-//   - an active row (isActive from learning-store.cjs, the one status list) renders
+//   - an active row (isActive from curation-store.cjs, the one status list) renders
 //     its body; an inactive one is listed in the file's Inactive table instead
 //
-// Row shape: a v2 ledger row (schema 2) or a v1 one; see learning-store.cjs.
-// Ledger file: .devflow/learning/decisions-ledger.jsonl (anchored rows only).
+// Row shape: a v2 ledger row (schema 2) or a v1 one; see curation-store.cjs.
+// Ledger file: .devflow/curation/decisions-ledger.jsonl (anchored rows only).
 // If absent, treat as empty corpus.
 //
 // Byte-compat: formatDecisionBody / formatPitfallBody / formatEntryBodyV2 /
@@ -26,6 +26,7 @@
 'use strict';
 
 const fs = require('fs');
+const path = require('path');
 
 const {
   initDecisionsContent,
@@ -38,6 +39,7 @@ const {
 } = require('./decisions-format.cjs');
 
 const {
+  getCurationDir,
   getDecisionsFilePath,
   getPitfallsFilePath,
   getDecisionsIndexPath,
@@ -48,10 +50,10 @@ const {
   isActive,
   isV2,
   readJsonl,
-  hasLearningDir,
+  hasCurationDir,
   withDecisionsLock,
   writeFileAtomic,
-} = require('./learning-store.cjs');
+} = require('./curation-store.cjs');
 
 // ---------------------------------------------------------------------------
 // Ledger parsing
@@ -227,16 +229,26 @@ function renderDecisionsFile(rows, kind) {
 /**
  * Render decisions.md, pitfalls.md and index.md from the ledger rows, in memory,
  * in the order they are written: the body files first, the index last. `render`
- * and the learning store's writers write exactly these contents, and `--check`
+ * and the curation store's writers write exactly these contents, and `--check`
  * compares exactly these.
+ *
+ * The files belong in `outputDir`, which the caller names: the index lists the
+ * absolute path of the decisions and pitfalls files, so it names the folder it is
+ * rendered for and no other. The file names are the path helpers'.
  *
  * @param {string} worktreePath - Absolute path to the worktree root.
  * @param {object[]} rows - All rows from the ledger (unfiltered).
+ * @param {string} outputDir - Absolute path of the folder the three files belong in.
  * @returns {Array<{ path: string, content: string }>}
+ * @throws {TypeError} when `outputDir` is not an absolute path
  */
-function renderLearningFiles(worktreePath, rows) {
-  const decisionsFilePath = getDecisionsFilePath(worktreePath);
-  const pitfallsFilePath = getPitfallsFilePath(worktreePath);
+function renderCurationFiles(worktreePath, rows, outputDir) {
+  if (typeof outputDir !== 'string' || !path.isAbsolute(outputDir)) {
+    throw new TypeError('renderCurationFiles: outputDir must be an absolute path');
+  }
+  const inOutputDir = file => path.join(outputDir, path.basename(file));
+  const decisionsFilePath = inOutputDir(getDecisionsFilePath(worktreePath));
+  const pitfallsFilePath = inOutputDir(getPitfallsFilePath(worktreePath));
 
   // Hoist active-row selection: computed once per kind, reused for both the
   // body render and the index build — avoids two redundant selectActiveRows passes.
@@ -259,7 +271,7 @@ function renderLearningFiles(worktreePath, rows) {
     },
     {
       // Compact index: a write-time artifact consumed via plain Read.
-      path: getDecisionsIndexPath(worktreePath),
+      path: inOutputDir(getDecisionsIndexPath(worktreePath)),
       content: buildIndexContent(activeDecisionRows, activePitfallRows, {
         decisionsFilePath,
         pitfallsFilePath,
@@ -273,18 +285,18 @@ function renderLearningFiles(worktreePath, rows) {
 /**
  * Render decisions.md, pitfalls.md and index.md from the given ledger rows and
  * write them atomically. It takes no lock: the caller holds .decisions.lock
- * (D-ONE-LEARNING-LOCK). It writes only into an existing `.devflow/learning/`:
+ * (D-ONE-LEARNING-LOCK). It writes only into an existing `.devflow/curation/`:
  * without one it throws before writing anything (D-NO-STRAY-TREE).
  *
  * @param {string} worktreePath - Absolute path to the worktree root.
  * @param {object[]} rows - All rows from the ledger (unfiltered).
- * @throws when `<worktreePath>/.devflow/learning/` does not exist, or a write fails
+ * @throws when `<worktreePath>/.devflow/curation/` does not exist, or a write fails
  */
 function renderAndWriteAll(worktreePath, rows) {
-  if (!hasLearningDir(worktreePath)) {
-    throw new Error(`renderAndWriteAll: no .devflow/learning/ under ${worktreePath}`);
+  if (!hasCurationDir(worktreePath)) {
+    throw new Error(`renderAndWriteAll: no .devflow/curation/ under ${worktreePath}`);
   }
-  const [decisions, pitfalls, index] = renderLearningFiles(worktreePath, rows);
+  const [decisions, pitfalls, index] = renderCurationFiles(worktreePath, rows, getCurationDir(worktreePath));
 
   // Write body files first; index last. On a crash between body writes and the
   // index write: on the FIRST render the index is absent (reader falls back to
@@ -365,7 +377,7 @@ function readIfPresent(file) {
 /**
  * `render`: read the ledger under .decisions.lock and write the three files from
  * what it read (D-ONE-LEARNING-LOCK), so a ledger write that lands while it waits
- * is rendered rather than overwritten. Refuses without the learning directory
+ * is rendered rather than overwritten. Refuses without the curation directory
  * (D-NO-STRAY-TREE), and when it or `.devflow` is a symbolic link (D-NO-LINKED-TREE).
  *
  * @param {string} root
@@ -385,18 +397,18 @@ function renderCommand(root) {
  * `--check`: render in memory and compare with the files on disk, naming each
  * file that differs or is missing; exit 1 on any drift. It writes nothing and
  * takes no lock — taking it would create the lock directory — and refuses
- * without the learning directory (D-NO-STRAY-TREE).
+ * without the curation directory (D-NO-STRAY-TREE).
  *
  * @param {string} root
  * @returns {number} exit code
  */
 function checkCommand(root) {
-  if (!hasLearningDir(root)) {
-    process.stderr.write(`${CLI_NAME}: no .devflow/learning/ under ${root} — run from the project root\n`);
+  if (!hasCurationDir(root)) {
+    process.stderr.write(`${CLI_NAME}: no .devflow/curation/ under ${root} — run from the project root\n`);
     return 1;
   }
   let drift = false;
-  for (const file of renderLearningFiles(root, readLedgerRows(root))) {
+  for (const file of renderCurationFiles(root, readLedgerRows(root), getCurationDir(root))) {
     const onDisk = readIfPresent(file.path);
     if (onDisk !== file.content) {
       process.stderr.write(`[render-decisions] DRIFT: ${file.path}${onDisk === null ? ' (missing)' : ''}\n`);
@@ -408,7 +420,7 @@ function checkCommand(root) {
 
 /**
  * Run the CLI on its arguments and return the exit code. Neither mode creates the
- * learning directory (D-NO-STRAY-TREE).
+ * curation directory (D-NO-STRAY-TREE).
  *
  * @param {string[]} argv - the arguments after the script path
  * @returns {number}
@@ -446,7 +458,7 @@ if (require.main === module) {
 
 module.exports = {
   renderDecisionsFile,
-  renderLearningFiles,
+  renderCurationFiles,
   renderAndWriteAll,
   selectActiveRows,
   selectInactiveRows,

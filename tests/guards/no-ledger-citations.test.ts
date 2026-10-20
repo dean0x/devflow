@@ -1,7 +1,7 @@
 /**
- * no-ledger-citations — no learning-ledger ID reaches committed text.
+ * no-ledger-citations — no curation-ledger ID reaches committed text.
  *
- * The learning ledger under `.devflow/learning/` is gitignored and numbered per
+ * The curation ledger under `.devflow/curation/` is gitignored and numbered per
  * machine, so an `ADR-NNN` or `PF-NNN` resolves on no other clone, and numbers
  * have been reused: a citation that named the right entry when it was written
  * can name an unrelated one later. An ID may appear only in what stays inside a
@@ -33,7 +33,7 @@
  *
  * Excluded everywhere: `CHANGELOG.md` (released history is not rewritten), the
  * golden fixtures under `tests/fixtures/golden/` and any install-snapshot golden
- * (frozen bytes), and `.devflow/learning/**` (the ledger itself). Placeholders
+ * (frozen bytes), and `.devflow/curation/**` (the ledger itself). Placeholders
  * such as `ADR-NNN` carry no three digits and pass by construction.
  *
  * Test files are read strings first: quoted strings, template literals (and the
@@ -70,7 +70,7 @@ import { ROOT, type CorpusEntry } from '../helpers.js';
 // The rule
 // ---------------------------------------------------------------------------
 
-/** Any learning-ledger ID: the full ban. */
+/** Any curation-ledger ID: the full ban. */
 const LEDGER_ID = /\b(?:ADR|PF)-\d{3}\b/g;
 
 /**
@@ -108,7 +108,7 @@ function isExcluded(rel: string): boolean {
   return rel === 'CHANGELOG.md'
     || rel.startsWith('tests/fixtures/golden/')
     || /(?:^|\/)install-snapshot-[^/]*\.txt$/.test(rel)
-    || rel.startsWith('.devflow/learning/');
+    || rel.startsWith('.devflow/curation/');
 }
 
 /** The arm a repo-relative path belongs to, or undefined when no arm reads it. */
@@ -535,7 +535,7 @@ function violationsIn(area: Area): LedgerViolation[] {
 // Live arms
 // ---------------------------------------------------------------------------
 
-describe('no learning-ledger ID in committed text', () => {
+describe('no curation-ledger ID in committed text', () => {
   for (const area of SCANNED_AREAS) {
     const claim = area.id === 'tests' ? 'carry no ledger citation' : 'carries no ledger ID';
     it(`${area.label} ${claim}`, () => {
@@ -670,7 +670,7 @@ describe('no-ledger-citations guard: seeded probes', () => {
       { path: 'CHANGELOG.md', content: '- Fixed the rule (PF-123).\n' },
       { path: 'tests/fixtures/golden/example.ts', content: '// see PF-123\n' },
       { path: 'tests/fixtures/golden/install-snapshot-example.txt', content: 'see PF-123\n' },
-      { path: '.devflow/learning/decisions.md', content: '## ADR-123: a decision\n' },
+      { path: '.devflow/curation/decisions.md', content: '## ADR-123: a decision\n' },
       { path: '.github/workflows/example.yml', content: '# see PF-123\n' },
     ];
     expect(collectLedgerViolations(ignored).map(formatViolation)).toEqual([]);

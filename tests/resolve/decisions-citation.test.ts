@@ -42,8 +42,8 @@ const { buildIndexContent } = require(
 };
 
 const OPTS = {
-  decisionsFilePath: '/project/.devflow/learning/decisions.md',
-  pitfallsFilePath: '/project/.devflow/learning/pitfalls.md',
+  decisionsFilePath: '/project/.devflow/curation/decisions.md',
+  pitfallsFilePath: '/project/.devflow/curation/pitfalls.md',
 };
 
 const NOW = '2026-01-01T00:00:00Z';

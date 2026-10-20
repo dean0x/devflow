@@ -11,6 +11,8 @@ import {
 import { normalizeComplianceFeature, type ComplianceFeatureState } from './compliance.js';
 import { normalizeTrackerFeature, type TrackerFeatureState } from './tracker.js';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
+import { isMachineFeatureOn } from './feature-switch.js';
+import { withManifestLock } from './manifest-lock.js';
 
 /**
  * Where the Devflow security deny list is installed.
@@ -50,10 +52,13 @@ export interface ManifestData {
     /** Absent (with no legacy `kb`) reads as true — D-FEATURES-ABSENT-ON in readManifest */
     knowledge: boolean;
     /**
-     * Renamed from decisions — self-healed from features.decisions on read.
-     * Absent (with no legacy `decisions`) reads as true — D-FEATURES-ABSENT-ON.
+     * The curation switch, renamed from learning (and, before that, decisions).
+     * Absent (with no legacy key) reads as true — D-FEATURES-ABSENT-ON. On disk it is
+     * stored under TWO keys, `curation` and its pre-rename copy `learning`; a false in
+     * either reads off, and {@link writeManifest} writes both equal. The data model
+     * carries the one resolved value.
      */
-    learning: boolean;
+    curation: boolean;
     rules: boolean;
     /**
      * Typed flag state record (keyed by flag id).
@@ -85,7 +90,7 @@ export interface ManifestData {
      * Behavior rule switch (D-BEHAVIOR-OPT-IN): OPT-IN, default off. The feature-owned
      * rule `rules/devflow/behavior.md` is installed only while this is true AND `rules`
      * is true. Absent or malformed (anything but a boolean) in the manifest reads as
-     * false — unlike knowledge and learning, whose absent key reads as on.
+     * false — unlike knowledge and curation, whose absent key reads as on.
      *
      * NEVER add `behavior` to the hard-null validation set below: every existing install
      * lacks the key, and a manifest that fails validation reads as "no prior install".
@@ -203,7 +208,11 @@ export function hasRequiredManifestFields(data: Record<string, unknown>): boolea
  *
  * Self-heals the following on-disk inconsistencies:
  * - features.kb → features.knowledge rename (both absent → true, D-FEATURES-ABSENT-ON)
- * - features.decisions → features.learning rename (both absent → true, D-FEATURES-ABSENT-ON)
+ * - the curation switch (features.curation beside its pre-rename copy features.learning,
+ *   and the oldest features.decisions) resolves by the machine rule — false in either
+ *   current key wins, both absent → true (D-FEATURES-ABSENT-ON) — and the heal writes
+ *   both current keys to the resolved value and drops `decisions`; a second read writes
+ *   nothing
  * - features.flags as string[] → FlagsRecord (via migrateLegacyFlagsToRecord)
  * - features.viewMode folded into flags['view-mode'] and stripped from result
  * - features.knownFlags stripped from result (folded into FlagsRecord key-presence)
@@ -216,6 +225,12 @@ export function hasRequiredManifestFields(data: Record<string, unknown>): boolea
  *
  * D39: heal-write failure returns the migrated in-memory manifest (not null).
  * The on-disk format remains unhealed; next read triggers another attempt.
+ *
+ * The heal is a read-modify-write and takes the manifest lock (manifest-lock.ts) like
+ * the toggle write does. It never waits for it: when the lock is held, it skips the
+ * write, because the next read heals. Under the lock it reads the file again and
+ * writes only when those bytes are the bytes it parsed, so a toggle that landed after
+ * the parse is never written over with the older snapshot.
  */
 export async function readManifest(
   devflowDir: string,
@@ -229,7 +244,7 @@ export async function readManifest(
     const features = data.features as Record<string, unknown>;
 
     // D-FEATURES-ABSENT-ON (a sub-decision of D-FEATURES-NARROW-ONLY,
-    // src/core/feature-switch.ts): knowledge and learning are machine-wide
+    // src/core/feature-switch.ts): knowledge and curation are machine-wide
     // switches, and every runtime gate — queue_read_gates in the hooks,
     // isMachineFeatureOn in the CLI, the knowledge write-back prose gate — reads
     // an ABSENT key as ON. This reader must agree: init seeds from it and every
@@ -248,13 +263,15 @@ export async function readManifest(
     const knowledge = typeof features.knowledge === 'boolean' ? features.knowledge
       : typeof features.kb === 'boolean' ? features.kb as boolean
       : true;
-    // Self-heal: rename features.decisions → features.learning on disk.
-    // Coalesce: features.learning wins; fall back to features.decisions; default ON.
-    // D-LEARNING-LEGACY-DECISIONS: isMachineFeatureOn and queue_read_gates apply
-    // this exact precedence, so the legacy key is honoured before the heal lands.
-    const learning = typeof features.learning === 'boolean' ? features.learning
-      : typeof features.decisions === 'boolean' ? features.decisions as boolean
-      : true;
+    // Self-heal: the curation switch is stored under two current keys, `curation`
+    // and its pre-rename copy `learning` (#529). A boolean false in either is off, a
+    // boolean true in either is on when neither is false, and the pre-rename
+    // features.decisions decides only when neither current key is a boolean;
+    // default ON. isMachineFeatureOn IS that rule (D-LEARNING-LEGACY-DECISIONS),
+    // and queue_read_gates and resolve-settings.cjs mirror it, so the legacy key
+    // is honoured before the heal lands and a disagreeing pair reads off. The heal
+    // (needsHeal below) writes the resolved value to both current keys once.
+    const curation = isMachineFeatureOn(data, 'curation');
 
     // Self-heal: non-string-array or absent knownFlags/knownPlugins → undefined (never partial/garbage)
     const asStringArray = (val: unknown): string[] | undefined =>
@@ -274,10 +291,15 @@ export async function readManifest(
     // D39: sanitize all values; block prototype pollution keys.
     const sanitizedFlags = sanitizeFlagsRecord(parsedFlags);
 
-    // needsHeal when any legacy artifact is present on disk
+    // needsHeal when any legacy artifact is present on disk. The curation pair is a
+    // defect unless BOTH current keys are present and equal to the resolved value
+    // (a disagreeing pair, one key alone and neither key all heal); once healed,
+    // the pair holds and a second read writes nothing.
     const needsHeal =
       features.kb !== undefined ||
       features.decisions !== undefined ||
+      features.curation !== curation ||
+      features.learning !== curation ||
       flagsWereLegacy ||
       features.knownFlags !== undefined ||
       features.viewMode !== undefined ||
@@ -298,7 +320,7 @@ export async function readManifest(
         memory: features.memory as boolean,
         hud: typeof features.hud === 'boolean' ? features.hud : false,
         knowledge,
-        learning,
+        curation,
         rules: typeof features.rules === 'boolean' ? features.rules : true,
         flags: sanitizedFlags,
         // knownFlags and viewMode are NOT carried into the result.
@@ -314,7 +336,7 @@ export async function readManifest(
         proxy: typeof features.proxy === 'boolean' ? features.proxy : false,
         // Self-heal: absent/malformed compliance → {enabled:false, frameworks:[]}
         compliance: normalizeComplianceFeature(features.compliance),
-        // D-BEHAVIOR-OPT-IN: absent/malformed → false (opt-in; the inverse of knowledge/learning).
+        // D-BEHAVIOR-OPT-IN: absent/malformed → false (opt-in; the inverse of knowledge/curation).
         behavior: features.behavior === true,
         // Self-heal: absent/malformed/unknown tracker → {provider:'github'} (AC-3.21).
         // Deliberately NOT in the hard-null set above — see the field's doc comment.
@@ -335,7 +357,15 @@ export async function readManifest(
       // propagate to the caller. The migrated in-memory manifest is returned even
       // when the on-disk heal fails. The next read will retry the heal.
       try {
-        await writeManifest(devflowDir, manifest);
+        // No wait: a held lock means a toggle is writing, and the next read heals.
+        // Under the lock the write goes ahead only while the file still holds the
+        // bytes parsed above and the lock directory is still this heal's own; any
+        // other writer's result stands, and a skipped heal is made by the next read.
+        await withManifestLock(devflowDir, { timeoutMs: 0 }, async (lock) => {
+          if ((await fs.readFile(manifestPath, 'utf-8')) === content && (await lock.stillHeld())) {
+            await writeManifest(devflowDir, manifest);
+          }
+        });
       } catch {
         // heal-write failed — return migrated in-memory manifest unchanged
       }
@@ -357,8 +387,24 @@ export async function writeManifest(devflowDir: string, data: ManifestData): Pro
   await fs.mkdir(devflowDir, { recursive: true });
   const manifestPath = path.join(devflowDir, 'manifest.json');
   // D-MANIFEST-SCOPE-PINNED: every write records 'user', whatever the caller holds.
-  const pinned: ManifestData = { ...data, scope: 'user' };
+  // The manifest mirror (#529): the pre-rename key `learning` is written equal to
+  // `curation`, right after it, so every typed writer keeps the copy a 3.7.0 CLI reads.
+  const pinned = { ...data, scope: 'user' as const, features: withCurationMirror(data.features) };
   await writeFileAtomicExclusive(manifestPath, JSON.stringify(pinned, null, 2) + '\n');
+}
+
+/**
+ * `features` with the pre-rename key `learning` set equal to `curation`, placed right
+ * after it. Pure. Any `learning` the input carried is replaced, never kept.
+ */
+function withCurationMirror(features: ManifestData['features']): Record<string, unknown> {
+  const mirrored: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(features)) {
+    if (key === 'learning') continue;
+    mirrored[key] = value;
+    if (key === 'curation') mirrored.learning = value;
+  }
+  return mirrored;
 }
 
 /**

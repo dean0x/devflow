@@ -21,8 +21,8 @@ describe('statusline entry point', () => {
     });
     vi.doMock('../src/hud/stdin.js', () => ({ readStdin: async () => ({}) }));
     vi.doMock('../src/hud/git.js', () => ({ gatherGitStatus: async () => null }));
-    vi.doMock('../src/hud/components/learning-counts.js', () => ({
-      gatherLedgerLearningCounts: async () => null,
+    vi.doMock('../src/hud/components/curation-counts.js', () => ({
+      gatherLedgerCurationCounts: async () => null,
     }));
   });
 

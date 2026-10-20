@@ -14,6 +14,7 @@
     "tests/build-mds.test.ts",
     "tests/build-mds-compile-time.test.ts",
     "tests/token-audit.test.ts",
+    "tests/core/curation-store-error-kind.test.ts",
     "tests/integration/helpers.ts",
     "tests/integration/helpers.test.ts"
   ],

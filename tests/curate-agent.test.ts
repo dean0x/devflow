@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { promises as fs } from 'fs';
 import * as fsSync from 'fs';
 import { createRequire } from 'module';
+import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { AGENT_CONFIG } from './fixtures/agent-config.js';
@@ -11,7 +12,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const AGENT_PATH = path.resolve(__dirname, '../src/assets/agents/curate.md');
 const ROOT = path.resolve(__dirname, '..');
-const LEARNING_STORE = path.resolve(ROOT, 'src/assets/scripts/hooks/lib/learning-store.cjs');
+const CURATION_STORE = path.resolve(ROOT, 'src/assets/scripts/hooks/lib/curation-store.cjs');
 
 /** Recursively find all files matching an extension under a directory. */
 function findFiles(dir: string, exts: string[]): string[] {
@@ -93,7 +94,7 @@ describe('curate agent', () => {
       else expect(frontmatter).toMatch(new RegExp(`^effort: ${row.effort}$`, 'm'));
     });
 
-    it('has exactly the read-and-run tool set: every write goes through the learning ops', () => {
+    it('has exactly the read-and-run tool set: every write goes through the curation ops', () => {
       const tools = parseYamlList(frontmatter, 'tools');
       expect(tools.sort()).toEqual(['Bash', 'Glob', 'Grep', 'Read']);
     });
@@ -173,14 +174,14 @@ describe('curate agent', () => {
     });
 
     it('never makes, moves or deletes the claim by hand', () => {
-      expect(content).not.toContain('mv .devflow/learning/.pending-turns.jsonl');
-      expect(content).not.toContain('unlink .devflow/learning/.pending-turns.processing');
-      expect(content).not.toContain('cat .devflow/learning/.pending-turns.jsonl >>');
+      expect(content).not.toContain('mv .devflow/curation/.pending-turns.jsonl');
+      expect(content).not.toContain('unlink .devflow/curation/.pending-turns.processing');
+      expect(content).not.toContain('cat .devflow/curation/.pending-turns.jsonl >>');
       expect(content).not.toMatch(/\brm -[rf]+[^\n]*\.pending-turns\.processing/);
     });
 
     it('heartbeats with touch -c at the Part 1 → Part 2 boundary and after each maintained entry', () => {
-      expect(content).toContain('touch -c .devflow/learning/.pending-turns.processing');
+      expect(content).toContain('touch -c .devflow/curation/.pending-turns.processing');
       expect(content).toMatch(inOrder(['Heartbeat', 'Part 1 → Part 2 boundary']));
       expect(maintain).toMatch(phrase('After each maintained entry, refresh the claim'));
     });
@@ -202,6 +203,23 @@ describe('curate agent', () => {
       expect(content).toContain('assign-anchor OWNS NUMBERING');
       expect(content).toContain('render OWNS THE .md');
       expect(content).toContain('NEVER HAND-EDIT decisions.md, pitfalls.md, or index.md');
+    });
+
+    it('quotes the store\'s no-curation-dir refusal byte for byte (the inputs vanished, Step 0)', () => {
+      // The store answers this refusal from a root with no `.devflow/curation/`.
+      const tmp = fsSync.mkdtempSync(path.join(os.tmpdir(), 'curate-no-dir-'));
+      try {
+        const { restoreAnchor } = createRequire(import.meta.url)(CURATION_STORE) as {
+          restoreAnchor: (root: string, anchor: string) => { ok: boolean; error: { kind: string; message: string } };
+        };
+        const refused = restoreAnchor(tmp, 'ADR-001');
+        expect(refused.error.kind).toBe('no-curation-dir');
+        const generic = refused.error.message.replace('restore-anchor', '<op>').replace(tmp, '<root>');
+        expect(generic).toBe('<op>: no .devflow/curation/ under <root> — run from the project root');
+        expect(content).toContain(`\`${generic}\``);
+      } finally {
+        fsSync.rmSync(tmp, { recursive: true, force: true });
+      }
     });
 
     it('runs every op through json-helper from the project root', () => {
@@ -246,7 +264,7 @@ describe('curate agent', () => {
     it('quotes an ACTIVE line field for field as the store prints it, the title last', () => {
       const template = '<anchor> <obs_id> v<1|2> verified <date|never> observed <count|?> last-seen <last_seen|-> scope <scope|-> <title>';
       expect(content).toContain(`    ${template}\n`);
-      const { buildListing, formatListing } = createRequire(import.meta.url)(LEARNING_STORE) as {
+      const { buildListing, formatListing } = createRequire(import.meta.url)(CURATION_STORE) as {
         buildListing: (ledger: object[], log: object[]) => unknown;
         formatListing: (listing: unknown) => string;
       };
@@ -269,7 +287,7 @@ describe('curate agent', () => {
     });
 
     it('names every reason claim-due can hand an entry out for, as the store spells it', () => {
-      const store = fsSync.readFileSync(LEARNING_STORE, 'utf-8');
+      const store = fsSync.readFileSync(CURATION_STORE, 'utf-8');
       for (const reason of ['duplicate-obs-id', 'ledger-without-log', 'scope-matches-nothing', 'legacy-v1', 'verify-age']) {
         expect(store, `the store produces ${reason}`).toContain(`'${reason}'`);
         expect(maintain, `the maintain step names ${reason}`).toContain(`\`${reason}\``);
@@ -532,7 +550,7 @@ describe('curate agent', () => {
       expect(prompt).not.toMatch(/low-confidence/i);
       expect(prompt).not.toContain('"confidence"');
       expect(prompt).not.toContain('quality_ok');
-      expect(prompt).not.toContain('cat >> .devflow/learning/decisions-log.jsonl');
+      expect(prompt).not.toContain('cat >> .devflow/curation/decisions-log.jsonl');
     });
 
     it('carries no usage grounding, citation re-pointing or collision stop', () => {
@@ -572,7 +590,7 @@ describe('lockstep: the claim staleness threshold', () => {
 
   it('the claim-queue op takes over a claim at the same threshold the directive treats as stale', async () => {
     const hookContent = await fs.readFile(SESSION_START_CONTEXT, 'utf-8');
-    const { CLAIM_STALE_SECS } = createRequire(import.meta.url)(LEARNING_STORE) as { CLAIM_STALE_SECS: number };
+    const { CLAIM_STALE_SECS } = createRequire(import.meta.url)(CURATION_STORE) as { CLAIM_STALE_SECS: number };
     expect(CLAIM_STALE_SECS).toBe(900);
     expect(hookContent).toContain(`PROCESSING_STALE_SECS=${CLAIM_STALE_SECS}`);
   });
@@ -658,9 +676,9 @@ describe('AC-C9: decisions_load() (none) fallback for both absent and empty inde
     expect(content).toMatch(/absent or empty.*\(none\)/s);
   });
 
-  it('_decisions.mds reads from .devflow/learning/index.md (not the old decisions/ path)', async () => {
+  it('_decisions.mds reads from .devflow/curation/index.md (not the old decisions/ path)', async () => {
     const content = await fs.readFile(DECISIONS_MDS, 'utf-8');
-    expect(content).toContain('.devflow/learning/index.md');
+    expect(content).toContain('.devflow/curation/index.md');
     expect(content).not.toContain('.devflow/decisions/index.md');
   });
 });

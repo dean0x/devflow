@@ -43,7 +43,7 @@ Two small init-time side artifacts share this KB because both are written by ini
 
 **Fast path.** Marker file `.devflow/.root-gitignore-configured-v6` (project-local, NOT `~/.devflow/`) AND the v3 sentinel AND every completion line present. The marker is a claim, not proof; bumping the version forces one re-run per install. A change to a block whose marker version has not yet shipped in a release edits it in place with no bump (the in-block insert and the comment wording were done that way); once shipped, a change needs a bump. **Legacy marker cleanup runs on every path:** `removeLegacyGitignoreMarkers` (TS, looping `LEGACY_GITIGNORE_MARKERS`) and the shell's `_erg_drop_legacy_markers` remove every older marker — `-v5` / `-v4` / `-v3` / `-v2` / unversioned — from both the fast-path hit and the on-success stamp.
 
-**Links.** A linked root `.gitignore` is written only when it resolves inside the project and outside any `.git`, in any letter case (`D-GITIGNORE-LINK-INSIDE`; `resolveGitignoreTarget`, shell twin `_erg_resolve_inside`). init creates the marker exclusively (`wx`) and writes or removes nothing under a `.devflow` or marker that is a symbolic link (`D-CLI-NO-SYMLINK`); each skip is reported (link rules: `learning-capture-system` KB).
+**Links.** A linked root `.gitignore` is written only when it resolves inside the project and outside any `.git`, in any letter case (`D-GITIGNORE-LINK-INSIDE`; `resolveGitignoreTarget`, shell twin `_erg_resolve_inside`). init creates the marker exclusively (`wx`) and writes or removes nothing under a `.devflow` or marker that is a symbolic link (`D-CLI-NO-SYMLINK`); each skip is reported (link rules: `curation-capture-system` KB).
 
 ## CLAUDE.md Import Audit Step (`init.ts`, `D-CLAUDE-MD-IMPORT-AUDIT`, `D-AUDIT-STAMP`)
 
@@ -85,4 +85,4 @@ Two small init-time side artifacts share this KB because both are written by ini
 - `.devflow/features/ambient-orchestrator/KNOWLEDGE.md` — the SessionStart hook (`session-start-context`) that reads and refreshes the audit stamp init writes; this KB covers only init's after-install call, the stamp's creation mode and the uninstall artifact entries
 - `.devflow/features/feature-knowledge-system/KNOWLEDGE.md` — the Knowledge agent writes to `.devflow/features/`, tracked in git through this same carve-out
 - `.devflow/features/test-harness/KNOWLEDGE.md` — the residue test that motivated the `.claudeignore` line, and the parity-table conventions
-- `.devflow/features/learning-capture-system/KNOWLEDGE.md` — link rules under `.devflow/`
+- `.devflow/features/curation-capture-system/KNOWLEDGE.md` — link rules under `.devflow/`

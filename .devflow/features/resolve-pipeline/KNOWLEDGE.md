@@ -42,9 +42,9 @@ updated: 2026-10-20
 - **KB-AP-10** Never read an empty `DIFF_FILES` as "all files in scope": it is `""` and the matrix degrades conservatively.
 - **KB-AP-11** Never dedup review-summary on the cycle alone: the key is the cycle+timestamp pair, so `REVIEW_TIMESTAMP` is a load-bearing spawn input.
 - **KB-AP-12** Never write `rm -f` or `rm -rf` in agent instructions: the deny-list blocks them; name a flagless `rm <path>` or `unlink <path>`.
-- **KB-AP-13** Never edit one learning arm and forget its pair: an item rewritten rather than removed needs both arms, and arms cannot nest.
+- **KB-AP-13** Never edit one curation arm and forget its pair: an item rewritten rather than removed needs both arms, and arms cannot nest.
 - **KB-AP-14** Never spawn the Git agent for `update-pr-evidence` or `check-merge-readiness` from /resolve: the script owns both end to end (markers, grammar, scrub), and a spawn only adds a model's turns.
-- **KB-AP-15** Never grow `resolve.md` past its byte ceilings (`command-resolve-max`, `command-resolve-learning-off-max`) or reword a line the frozen status-lines fixture samples: new text is paid for by condensing.
+- **KB-AP-15** Never grow `resolve.md` past its byte ceilings (`command-resolve-max`, `command-resolve-curation-off-max`) or reword a line the frozen status-lines fixture samples: new text is paid for by condensing.
 - **KB-AP-16** Never add a line to a Code-family body without cutting one: `CODE_BODY_MAX_BYTES`, `FIX_BODY_MAX_BYTES` and `REFACTOR_BODY_MAX_BYTES` have zero headroom, and the cut duplicate rules do not return.
 
 ## Overview
@@ -104,7 +104,7 @@ An empty FIX_NOW list skips Phases 3-4 and 6-8 but still writes the summary and 
 
 **`RESOLUTION_TS`** is minted once per run in Step 0d. Phase 5 writes it as the summary's `**Date**:` and 9b-2 passes it, so the local file and the posted dedup marker agree; a retry of this run stays deduplicated; the next /resolve on the same PR posts.
 
-**Settings and decisions**: `resolve.mds` alias-imports `_partials/_settings.mds` and expands `settings_resolve()` once in Step 0d, ahead of the decisions load, publication gate and compliance lens. Those partials import nothing from it and refer to "the line resolved above", so `REVIEW_PUBLICATION`, `COMPLIANCE_FRAMEWORKS` and `GATE_LEVEL` stay per worktree. `compliance_inject()` builds each worktree's `COMPLIANCE_DIRECTIVE` (KB-INV-13). `DECISIONS_CONTEXT` (KB-INV-12): `decisions_load()` Step 2 has the main model copy the index lines that touch the work, one shared slice for sibling spawns; it exists only in the learning-on build (`decisions_gate()` sets `(none)` under `LEARNING=off`).
+**Settings and decisions**: `resolve.mds` alias-imports `_partials/_settings.mds` and expands `settings_resolve()` once in Step 0d, ahead of the decisions load, publication gate and compliance lens. Those partials import nothing from it and refer to "the line resolved above", so `REVIEW_PUBLICATION`, `COMPLIANCE_FRAMEWORKS` and `GATE_LEVEL` stay per worktree. `compliance_inject()` builds each worktree's `COMPLIANCE_DIRECTIVE` (KB-INV-13). `DECISIONS_CONTEXT` (KB-INV-12): `decisions_load()` Step 2 has the main model copy the index lines that touch the work, one shared slice for sibling spawns; it exists only in the curation-on build (`decisions_gate()` sets `(none)` under `CURATION=off`).
 
 **Gate level** (KB-INV-17): the per-worktree settings line carries `GATE_LEVEL`. Step 0d's `**Gate level.**` block reads `resolve-levels.md` once per run when any worktree is `standard` or `lean` and applies each row to the phase it names: a worktree reads its own level's column; Global Triage (one spawn for all worktrees) takes the cell of the run's strictest level (`full`, then `standard`, `lean`). The reference holds the fixed grammar and one row, `| 6 Polish | skip | skip |`, so Polish runs at `full` only (its cleanup is one bullet of `rules/quality.md`, and the Code-family commit step checks the diff for secrets or tokens in logs or debug output). The grammar bars `skip` on the phases KB-INV-17 names (no level row leaves a FIX_NOW security finding unfixed, a FIX_SEPARATE item unticketed or the CI gate dropped) and gives spawnless Batch FIX_NOW only `-`. A skipped phase does not stop the run; its `**Produces:**` names read `SKIPPED` (nothing later reads `POLISH_RESULT`). Phase 10 shows `**Gate level**: {GATE_LEVEL, with any level note}` after `Total Issues`; Phase 5 writes `**Gate level**: {GATE_LEVEL}` into each summary header after `**Command**: /resolve`; the convergence parser reads neither. /implement has the matching block at Phase 3's start.
 
@@ -157,7 +157,7 @@ The ledger gains a `### DUPLICATE` table (`Issue ID | Duplicate Of | File:Line |
 |----------|---------|-----------|-------------------|
 | 0 | SECURITY GATE | Any security finding | Overrides everything; → FIX_NOW or ESCALATED only |
 | 1 | FALSE_POSITIVE | Review agent factually wrong | Cited grep/file:line proving the issue does not exist |
-| 2 | BY_DESIGN | Code is intentional | An ADR whose body was read, stated in words (learning on only), or an inline comment/doc |
+| 2 | BY_DESIGN | Code is intentional | An ADR whose body was read, stated in words (curation on only), or an inline comment/doc |
 | 3 | FIX_NOW | File in DIFF_FILES, OR isolated Standard fix, OR security/correctness in a touched path | Risk tier Standard or Careful |
 | 4 | FIX_SEPARATE | Valid but exceeds the diff blast radius | Must become a tracked manage-debt ticket |
 | 5 | TECH_DEBT | LAST RESORT: complete architectural overhaul only | Not "touches many files" or "changes public API" |
@@ -205,7 +205,7 @@ Other commands use Code `implement` (default; /implement), Fix `alignment-fix` (
 
 - **fp_ratio** = `fp_count / (fp_count + fixed_count + deferred_count)`; the `Deferred` row is FIX_SEPARATE + TECH_DEBT combined; By Design and Escalated sit outside the denominator. `fp_ratio > 0.7` with `CYCLE_NUMBER >= 3` emits a convergence warning that never blocks; a zero denominator or parse failure gives `fp_ratio = 0`.
 - **Counting**: `Total Issues` counts every triaged issue including collapsed duplicates; every row between it and `Duplicates Collapsed` counts unique issues only, so `Total Issues` equals the sum of the rows below it.
-- **Safe additions**: `## Escalations`, `## Blocked`, `## By Design`, `## Third-Party Threads`, the `**Gate level**:` header line, the `| Duplicates Collapsed | {n} |` row, `## Duplicates` (`| Issue | Duplicate Of | File:Line |`), and in the learning-on build `## Decisions Citations`. **Unsafe**: renaming a label above (`Fixed` → `Resolved`), splitting `Deferred`, restructuring the Statistics table.
+- **Safe additions**: `## Escalations`, `## Blocked`, `## By Design`, `## Third-Party Threads`, the `**Gate level**:` header line, the `| Duplicates Collapsed | {n} |` row, `## Duplicates` (`| Issue | Duplicate Of | File:Line |`), and in the curation-on build `## Decisions Citations`. **Unsafe**: renaming a label above (`Fixed` → `Resolved`), splitting `Deferred`, restructuring the Statistics table.
 - **Section exclusivity**: a DUPLICATE appears **only** in `## Duplicates`, never in `## Fixed Issues`, `## False Positives`, `## By Design`, `## Fix Separately`, `## Deferred to Tech Debt`, `## Escalations` or `## Blocked`. This also keeps manage-debt from ticketing duplicates: the primary's ticket covers them.
 
 ## Code-Review Phase 3: Sequential Synthesis + Comment
@@ -226,15 +226,15 @@ All PR commenting goes through `post-review-summary` (/code-review Phase 3b) or 
 
 Triage (opus, tools Read/Grep/Glob/Bash) is the sole judgment agent and spawns no sub-agents.
 
-- **Skills** preload from frontmatter (`devflow:worktree-support`, `devflow:apply-feature-knowledge`; `devflow:apply-decisions` in the learning-on build only); the security-finding rule is inline in the body. **`FEATURE_KNOWLEDGE`** is per KB: the Rules bullets most relevant to the issues, the KB path and a heading index (sections are read on demand).
+- **Skills** preload from frontmatter (`devflow:worktree-support`, `devflow:apply-feature-knowledge`; `devflow:apply-decisions` in the curation-on build only); the security-finding rule is inline in the body. **`FEATURE_KNOWLEDGE`** is per KB: the Rules bullets most relevant to the issues, the KB path and a heading index (sections are read on demand).
 - Reads 30 lines around each reported file:line, runs the pre-pass first, then the matrix on primaries only.
 - Output is a verdict ledger over the seven verdicts plus a Summary. The report cap exempts the whole ledger (returned inline in full) because /resolve checks every issue id against it. It goes to the orchestrator, not to Code agents.
 
-## Learning Variants
+## Curation Variants
 
-`resolve.mds`, `triage.mds` and the Code hosts (`code.mds`, `fix.mds`) carry whole-line `<!-- learning:on -->` / `<!-- learning:off -->` / `<!-- learning:end -->` arms; the build compiles each host twice (learning-on in `dist/commands/` or `dist/agents/`, learning-off under `dist/learning-off/`), and install and the learning toggle pick one from the machine's learning switch. The learning-off /resolve drops the decisions load and every `DECISIONS_CONTEXT` use (Produces/Requires, the Triage and Code-family spawns), the apply-decisions instruction, the Reasoning-column collection sentence and the `## Decisions Citations` section; Triage drops the apply-decisions preload and responsibility and the ADR route to BY_DESIGN, leaving the inline comment/doc.
+`resolve.mds`, `triage.mds` and the Code hosts (`code.mds`, `fix.mds`) carry whole-line `<!-- curation:on -->` / `<!-- curation:off -->` / `<!-- curation:end -->` arms; the build compiles each host twice (curation-on in `dist/commands/` or `dist/agents/`, curation-off under `dist/curation-off/`), and install and the curation toggle pick one from the machine's curation switch. The curation-off /resolve drops the decisions load and every `DECISIONS_CONTEXT` use (Produces/Requires, the Triage and Code-family spawns), the apply-decisions instruction, the Reasoning-column collection sentence and the `## Decisions Citations` section; Triage drops the apply-decisions preload and responsibility and the ADR route to BY_DESIGN, leaving the inline comment/doc.
 
-Items rewritten rather than removed (Step 0d's heading and Produces, the Phase 2 and 4 Requires, the `ci-fix` step 6) exist in both arms (KB-AP-13). `tests/learning/learning-variants-arms.test.ts` checks each variant against an independent resolution of the compiled host.
+Items rewritten rather than removed (Step 0d's heading and Produces, the Phase 2 and 4 Requires, the `ci-fix` step 6) exist in both arms (KB-AP-13). `tests/curation/curation-variants-arms.test.ts` checks each variant against an independent resolution of the compiled host.
 
 ## Verification Gate (Phase 7)
 
@@ -250,7 +250,7 @@ Other guards: `tests/seams/command-agent-input.test.ts` (spawn-key seam), `tests
 
 **`tests/build-mds.test.ts`** (build-gated): §15 compiled code-review.md references `post-review-summary`, passes `REVIEW_TIMESTAMP` and has no `comment-pr`; §16 compiled resolve.md carries the traceability ops and the KB-INV-9 gating; §16b (DUPLICATE, consumer) pins the bucket, `duplicate_of`, the `| Duplicates Collapsed | ` row and the `## Duplicates` heading. **`tests/resolve/duplicate-verdict.test.ts`** (producer) guards the pre-pass order, the chaining prohibition, security-primary election, the "primary only" matrix scope, the `### DUPLICATE` table and tally, and the section-exclusivity sentence.
 
-**`tests/guards/code-read-economy.test.ts`** (build-gated) holds, in the compiled Code, Fix and Refactor bodies (`CODE_AGENT_TYPES`), the Read-once marker (`READ_ONCE_FRAGMENTS`) and the quiet-output line, each outside `## Running commands`, plus the split wording (`SPLIT_FRAGMENTS`) in the planning reference and compiled `/implement`. `collectFullSuiteBriefDefects` fails a Code-family spawn in compiled `/implement` or `/resolve` that asks for the full suite (a Validate spawn may). Green proves wording, not obedience. `core-rules-digest.test.ts` admits only `CODE_FAMILY_SHARED_OUTPUT_LINE` as a digest line in those bodies, and `code-operation.test.ts` holds the body ceilings and the commit-line diff check (once, ahead of the scan block, in all six bodies, learning on and off).
+**`tests/guards/code-read-economy.test.ts`** (build-gated) holds, in the compiled Code, Fix and Refactor bodies (`CODE_AGENT_TYPES`), the Read-once marker (`READ_ONCE_FRAGMENTS`) and the quiet-output line, each outside `## Running commands`, plus the split wording (`SPLIT_FRAGMENTS`) in the planning reference and compiled `/implement`. `collectFullSuiteBriefDefects` fails a Code-family spawn in compiled `/implement` or `/resolve` that asks for the full suite (a Validate spawn may). Green proves wording, not obedience. `core-rules-digest.test.ts` admits only `CODE_FAMILY_SHARED_OUTPUT_LINE` as a digest line in those bodies, and `code-operation.test.ts` holds the body ceilings and the commit-line diff check (once, ahead of the scan block, in all six bodies, curation on and off).
 
 **The inline evidence scripts** are pinned by `tests/evidence/resolve-refresh.test.ts` (Phase 9b order, the inline call shape, no Git spawn; it also keeps unique the resolve.mds lines the frozen status-lines fixture samples by first match), `update-pr-evidence.test.ts` (`publish` under the `gh` fake in `pr-shim.ts`, scrub before post) and `merge-readiness-script.test.ts` with `merge-readiness.test.ts` (the ladder). `tests/guards/command-size.test.ts` holds the command byte ceilings.
 
@@ -285,8 +285,8 @@ Other guards: `tests/seams/command-agent-input.test.ts` (spawn-key seam), `tests
 
 - `.devflow/features/dynamic-workflow-engine/KNOWLEDGE.md` — the dynamic-build pipeline the Phase 3 batch cap came from
 - `.devflow/features/compliance-feature/KNOWLEDGE.md` — the settings-line compliance lens, the traceability Git operations and the `TRACEABILITY: DEGRADED` contract
-- `.devflow/features/feature-knowledge-system/KNOWLEDGE.md` — how `FEATURE_KNOWLEDGE` reaches Triage and the issue-fix spawns, and how the learning variants build
-- `.devflow/features/learning-capture-system/KNOWLEDGE.md` — `decisions_load()` and the `DECISIONS_CONTEXT` index
+- `.devflow/features/feature-knowledge-system/KNOWLEDGE.md` — how `FEATURE_KNOWLEDGE` reaches Triage and the issue-fix spawns, and how the curation variants build
+- `.devflow/features/curation-capture-system/KNOWLEDGE.md` — `decisions_load()` and the `DECISIONS_CONTEXT` index
 - `.devflow/features/test-harness-prompt-install/KNOWLEDGE.md` — the level guards that pin the Gate level block, report lines and short routes
 - `.devflow/features/test-harness/KNOWLEDGE.md` — the helpers (`resolveAgentSource`, `extractOpSectionFromCorpus`) and guard suites behind Test Guards
 - `.devflow/features/test-harness-goldens-budgets/KNOWLEDGE.md` — the frozen status-lines fixture and the command byte ceilings

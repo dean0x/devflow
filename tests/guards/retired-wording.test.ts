@@ -23,11 +23,31 @@
  * dynamic constraint. `scope` narrows an entry to the trees it is retired FROM;
  * `pattern` replaces the substring test for residue whose spellings cannot be
  * enumerated in advance.
+ *
+ * The last describe blocks are a different kind of guard, and they do not use the
+ * denylist: the FEATURE-WORD guard (AC-1 of the curation rename) reads every tracked
+ * file outside tests/ for the old feature word and lets a hit through only when an
+ * entry of tests/fixtures/feature-word-allowlist.ts covers its exact text. The
+ * TEST-TITLE guard reads the title of every test under tests/ the same way, against
+ * its own allowlist in that fixture. The DERIVED-STEM guard reads the shipped scripts
+ * for identifiers built on the old stem. Each is an allowlist over one word, where
+ * the denylist above is a list of many literals, so they keep their own fixture.
  */
 
 import { describe, it, expect } from 'vitest';
-import { readdirSync, readFileSync, existsSync } from 'fs';
+import { readdirSync, readFileSync, existsSync, lstatSync } from 'fs';
+import { execFileSync } from 'child_process';
 import * as path from 'path';
+import {
+  FEATURE_WORD,
+  FEATURE_WORD_ALLOWLIST,
+  SECTION_EXEMPTIONS,
+  TEST_TITLE_ALLOWLIST,
+  type AllowlistEntry,
+  type SectionExemption,
+} from '../fixtures/feature-word-allowlist.js';
+import { LEGACY_NAMES } from '../../src/core/project-paths.js';
+import { MCP_CONTRACT_MODULE, VARIANT_MODULES } from '../../src/core/mds-variants.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 
@@ -269,7 +289,7 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
   // A scoped entry names the prompt files that carry it rather than registering
   // the spelling repo-wide, because the same anchor is legitimate where a
   // maintainer can follow it; each case is classified individually, not swept.
-  // Learning-ledger IDs need no row here: they resolve only on the machine that
+  // Curation-ledger IDs need no row here: they resolve only on the machine that
   // wrote them, and tests/guards/no-ledger-citations.test.ts holds them out of the
   // sources, the docs and test commentary.
   // -------------------------------------------------------------------------
@@ -459,7 +479,7 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
       'docs/reference/file-organization.md',
     justification:
       'The usage scanner counted the anchors each assistant turn cited into .decisions-usage.json, ' +
-      'and assign-anchor registered every new anchor there. Learning v2 maintains entries by their ' +
+      'and assign-anchor registered every new anchor there. Curation v2 maintains entries by their ' +
       'verification age at the default branch, not by citation counts, and committed text no ' +
       'longer cites ledger IDs, so the counts measured nothing. The scanner, its capture-turn call, ' +
       'its project-paths helpers and the registration are gone, and rotate-observations deletes the ' +
@@ -470,7 +490,7 @@ const RETIRED_LITERALS: ReadonlyArray<RetiredEntry> = [
     removedFrom: 'src/assets/agents/curate.md',
     justification:
       'The Curate agent left any entry dated within the past week untouched, keyed on the ledger ' +
-      'date with a last_seen fallback for rows that had none. Learning v2 hands out entries for ' +
+      'date with a last_seen fallback for rows that had none. Curation v2 hands out entries for ' +
       'maintenance through claim-due, oldest verification first with a one-day lease, so a new ' +
       'entry is not due until its verification ages, and the window has nothing left to protect.',
   },
@@ -905,5 +925,819 @@ describe('retired-wording guard — CHANGELOG.md across the release bump', () =>
         `"${literal}" in a fresh [Unreleased] After-half must still be caught`,
       ).toHaveLength(1);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The FEATURE-WORD guard (AC-1 of the curation rename)
+//
+// The feature was called "learning" before 3.8 and is called "curation" now. The
+// word may not come back: every tracked file outside tests/ is read, and every
+// occurrence of the word (any case, inside any word, so `learningCounts` and
+// `LEARNING_OPS` count) must sit inside text that an entry of the allowlist
+// covers, or inside a section the allowlist exempts by its heading.
+//
+// The bodies of the tests are out of scope on purpose. They name the old word to pin
+// the migration and the legacy readers, and a guard that read them would only force
+// each such test to carry a second copy of its own reason. Their titles are read by
+// the test-title guard below.
+//
+// The scan is a named collector so the main guard and the non-vacuity probes run
+// the SAME logic: a probe that re-implemented the loop would prove the probe.
+// ---------------------------------------------------------------------------
+
+interface ScannedFile {
+  readonly relPath: string;
+  readonly content: string;
+}
+
+interface FeatureWordReport {
+  /** `path:line: text` for each line with an uncovered hit, and each path that carries the word. */
+  readonly violations: string[];
+  /** Entries that covered no hit. */
+  readonly unusedEntries: string[];
+  /** Section exemptions that exempted no hit. */
+  readonly unusedSections: string[];
+}
+
+const FEATURE_WORD_ALL = new RegExp(FEATURE_WORD.source, 'gi');
+const MAX_REPORTED_LINE = 200;
+/** Words an entry must never cover alone: an entry that does covers every use of the word. */
+const BARE_SAMPLES: readonly string[] = [
+  'learning', 'Learning', 'LEARNING', 'learningCounts', 'LEARNING_OPS', ' learning ', 'the learning curve',
+];
+
+function entryApplies(scope: string | RegExp, relPath: string): boolean {
+  if (typeof scope !== 'string') return scope.test(relPath);
+  return scope.endsWith('/') ? relPath.startsWith(scope) : relPath === scope;
+}
+
+/** `[start, end)` of every non-empty match of `re` on `line`. */
+function spansOf(re: RegExp, line: string): Array<readonly [number, number]> {
+  const flags = re.flags.includes('g') ? re.flags : `${re.flags}g`;
+  const spans: Array<readonly [number, number]> = [];
+  for (const m of line.matchAll(new RegExp(re.source, flags))) {
+    if (m[0].length > 0) spans.push([m.index ?? 0, (m.index ?? 0) + m[0].length]);
+  }
+  return spans;
+}
+
+function describeEntry(entry: AllowlistEntry): string {
+  return `${String(entry.path)}  ${String(entry.pattern)}`;
+}
+
+function describeSection(section: SectionExemption): string {
+  return `${section.path}  ${String(section.start)} .. ${String(section.end)}`;
+}
+
+/**
+ * True when some use of the old word in `text` sits outside every span that an entry of
+ * `entries` covers. Each entry that covers a use of the word is added to `used`.
+ */
+function hasUncoveredWord(
+  text: string,
+  entries: ReadonlyArray<AllowlistEntry>,
+  used: Set<AllowlistEntry>,
+): boolean {
+  const covering: Array<readonly [number, number]> = [];
+  for (const entry of entries) {
+    for (const span of spansOf(entry.pattern, text)) {
+      if (!FEATURE_WORD.test(text.slice(span[0], span[1]))) continue;
+      used.add(entry);
+      covering.push(span);
+    }
+  }
+  return [...text.matchAll(FEATURE_WORD_ALL)].some(hit => {
+    const at = hit.index ?? 0;
+    return !covering.some(([from, to]) => from <= at && at + hit[0].length <= to);
+  });
+}
+
+function scanForFeatureWord(
+  files: ReadonlyArray<ScannedFile>,
+  allowlist: ReadonlyArray<AllowlistEntry>,
+  sections: ReadonlyArray<SectionExemption>,
+): FeatureWordReport {
+  const violations: string[] = [];
+  const usedEntries = new Set<AllowlistEntry>();
+  const usedSections = new Set<SectionExemption>();
+
+  for (const { relPath, content } of files) {
+    if (relPath.startsWith('tests/')) continue;
+    if (FEATURE_WORD.test(relPath)) violations.push(`${relPath}: the file path carries the feature word`);
+
+    const fileEntries = allowlist.filter(entry => entryApplies(entry.path, relPath));
+    const fileSections = sections.filter(section => section.path === relPath);
+    const open = new Set<SectionExemption>();
+
+    content.split('\n').forEach((line, index) => {
+      for (const section of fileSections) {
+        if (open.has(section) && section.end.test(line)) open.delete(section);
+        if (!open.has(section) && section.start.test(line)) open.add(section);
+      }
+      if (!FEATURE_WORD.test(line)) return;
+      if (open.size > 0) {
+        for (const section of open) usedSections.add(section);
+        return;
+      }
+
+      if (hasUncoveredWord(line, fileEntries, usedEntries)) {
+        violations.push(`${relPath}:${index + 1}: ${line.trim().slice(0, MAX_REPORTED_LINE)}`);
+      }
+    });
+  }
+
+  return {
+    violations,
+    unusedEntries: allowlist.filter(entry => !usedEntries.has(entry)).map(describeEntry),
+    unusedSections: sections.filter(section => !usedSections.has(section)).map(describeSection),
+  };
+}
+
+/** Entries whose pattern covers the word with no context around it. */
+function looseEntries(allowlist: ReadonlyArray<AllowlistEntry>): string[] {
+  return allowlist
+    .filter(entry => BARE_SAMPLES.some(sample => spansOf(entry.pattern, sample).length > 0))
+    .map(describeEntry);
+}
+
+/** Every tracked text file that `keep` accepts, as the working tree holds it. */
+function trackedFiles(keep: (relPath: string) => boolean): ScannedFile[] {
+  const listed = execFileSync('git', ['ls-files', '-z'], {
+    cwd: ROOT,
+    encoding: 'utf-8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  const files: ScannedFile[] = [];
+  for (const relPath of listed.split('\0')) {
+    if (relPath === '' || !keep(relPath)) continue;
+    const abs = path.join(ROOT, relPath);
+    let stat;
+    try {
+      stat = lstatSync(abs);
+    } catch {
+      continue; // listed and deleted in this working tree
+    }
+    if (!stat.isFile()) continue; // a symbolic link or a submodule
+    const bytes = readFileSync(abs);
+    if (bytes.includes(0)) continue; // binary
+    files.push({ relPath, content: bytes.toString('utf-8') });
+  }
+  return files;
+}
+
+/** Every tracked text file outside tests/. */
+const trackedFilesOutsideTests = (): ScannedFile[] => trackedFiles(relPath => !relPath.startsWith('tests/'));
+
+/** Every tracked TypeScript file under tests/. */
+const trackedTestSources = (): ScannedFile[] =>
+  trackedFiles(relPath => relPath.startsWith('tests/') && relPath.endsWith('.ts'));
+
+// ---------------------------------------------------------------------------
+// The DIST scan. dist/ is git-ignored, so the tracked-file scan above never sees the
+// built output. When dist/ exists, every built text file is read as a copy of the
+// source file it is built from, and a hit passes only when an entry that covers THAT
+// source file matches the line. A built copy of an allowed line passes; any other use
+// of the word in the build is a leftover in the source. A built file with no source
+// file is itself a violation.
+//
+// The build maps source to output in three ways:
+//   tsc            src/<x>.ts                        -> dist/<x>.js, <x>.d.ts and their .map files
+//   command/agent  src/assets/{commands,agents}/<n>.mds -> dist/{,curation-off/}{commands,agents}/<n>.md
+//   references     the module of VARIANT_MODULES / MCP_CONTRACT_MODULE -> dist/skills/git/references/**
+// ---------------------------------------------------------------------------
+
+const DIST_DIR = 'dist';
+const REFERENCES_PREFIX = 'dist/skills/git/references/';
+const MAX_DIST_DEPTH = 12;
+const MAX_DIST_FILES = 5000;
+
+const COMPILED_TS = /^dist\/(.+?)(?:\.d\.ts\.map|\.d\.ts|\.js\.map|\.js)$/;
+const BUILT_HOST = /^dist\/(?:curation-off\/)?(commands|agents)\/([^/]+)\.md$/;
+
+/** The source file that the build makes `distRel` from, or null when none is known. */
+function distSourceOf(distRel: string): string | null {
+  const compiled = COMPILED_TS.exec(distRel);
+  if (compiled !== null) {
+    const source = `src/${compiled[1]}.ts`;
+    return existsSync(path.join(ROOT, source)) ? source : null;
+  }
+
+  const host = BUILT_HOST.exec(distRel);
+  if (host !== null) {
+    const source = `src/assets/${host[1]}/${host[2]}.mds`;
+    return existsSync(path.join(ROOT, source)) ? source : null;
+  }
+
+  if (distRel.startsWith(REFERENCES_PREFIX) && distRel.endsWith('.md')) {
+    const rel = distRel.slice(REFERENCES_PREFIX.length);
+    for (const module of [...VARIANT_MODULES, MCP_CONTRACT_MODULE]) {
+      const dir = module.subdir === '' ? '' : `${module.subdir}/`;
+      const covers = module.kind === 'fanout'
+        ? rel.startsWith(dir) && !rel.slice(dir.length).includes('/')
+        : (module.ops as readonly string[]).some(op => rel === `${dir}${op}.md`);
+      if (covers) return module.source;
+    }
+  }
+  return null;
+}
+
+/**
+ * The same collector as the tracked scan, run over built files. Each file is scanned as
+ * its source file, and a violation names the built file. Entries and sections that
+ * cover nothing here are not reported: the tracked scan owns that check.
+ */
+function scanDistForFeatureWord(
+  files: ReadonlyArray<ScannedFile>,
+  allowlist: ReadonlyArray<AllowlistEntry>,
+): string[] {
+  const violations: string[] = [];
+  for (const { relPath, content } of files) {
+    if (FEATURE_WORD.test(relPath)) violations.push(`${relPath}: the file path carries the feature word`);
+    const source = distSourceOf(relPath);
+    if (source === null) {
+      if (FEATURE_WORD.test(content)) violations.push(`${relPath}: no source file is known for this built file`);
+      continue;
+    }
+    const report = scanForFeatureWord([{ relPath: source, content }], allowlist, []);
+    for (const violation of report.violations) {
+      if (violation.startsWith(`${source}: `)) continue; // the source path, not the built one
+      violations.push(`${relPath} (built from ${source}) line ${violation.slice(source.length + 1).trim()}`);
+    }
+  }
+  return violations;
+}
+
+/** Every built text file under dist/, or null when dist/ is absent. Bounded in depth and count. */
+function distFiles(): ScannedFile[] | null {
+  const root = path.join(ROOT, DIST_DIR);
+  if (!existsSync(root)) return null;
+  const files: ScannedFile[] = [];
+  const walk = (dir: string, rel: string, depth: number): void => {
+    if (depth > MAX_DIST_DEPTH) return;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (files.length >= MAX_DIST_FILES) return;
+      const entryRel = `${rel}/${entry.name}`;
+      if (entry.isDirectory()) {
+        walk(path.join(dir, entry.name), entryRel, depth + 1);
+      } else if (entry.isFile()) {
+        const bytes = readFileSync(path.join(dir, entry.name));
+        if (!bytes.includes(0)) files.push({ relPath: entryRel, content: bytes.toString('utf-8') });
+      }
+    }
+  };
+  walk(root, DIST_DIR, 0);
+  return files;
+}
+
+const wordsIn = (text: string): number => text.trim().split(/\s+/).length;
+
+describe('feature-word guard — the old feature word stays out of the tree (AC-1)', () => {
+  const files = trackedFilesOutsideTests();
+  const report = scanForFeatureWord(files, FEATURE_WORD_ALLOWLIST, SECTION_EXEMPTIONS);
+
+  it('reads the whole tracked tree outside tests/ (non-vacuity)', () => {
+    expect(files.length, 'the scan reached almost no files').toBeGreaterThan(100);
+    const reached = new Set(files.map(file => file.relPath.split('/')[0]));
+    for (const top of ['src', 'docs', 'scripts', 'CHANGELOG.md', 'README.md', 'CLAUDE.md', 'package.json']) {
+      expect(reached.has(top), `${top} is not in the scan`).toBe(true);
+    }
+    expect(files.some(file => file.relPath.startsWith('tests/'))).toBe(false);
+  });
+
+  it('every entry and every section exemption carries a reason in words', () => {
+    expect(FEATURE_WORD_ALLOWLIST.length).toBeGreaterThan(0);
+    expect(SECTION_EXEMPTIONS.length).toBeGreaterThan(0);
+    for (const entry of FEATURE_WORD_ALLOWLIST) {
+      expect(wordsIn(entry.reason), `${describeEntry(entry)} has no reason`).toBeGreaterThanOrEqual(6);
+    }
+    for (const section of SECTION_EXEMPTIONS) {
+      expect(wordsIn(section.reason), `${describeSection(section)} has no reason`).toBeGreaterThanOrEqual(6);
+    }
+  });
+
+  it('no entry covers the bare word: each pins the words around its hit', () => {
+    expect(looseEntries(FEATURE_WORD_ALLOWLIST)).toEqual([]);
+  });
+
+  it('no use of the old feature word sits outside the allowlist', () => {
+    expect(
+      report.violations,
+      `the old feature word is back. Rename it, or add an allowlist entry with a reason:\n  ${report.violations.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('no entry and no section exemption is stale (each covers a real hit)', () => {
+    expect(report.unusedEntries, `entries that cover no hit:\n  ${report.unusedEntries.join('\n  ')}`).toEqual([]);
+    expect(report.unusedSections, `sections that exempt no hit:\n  ${report.unusedSections.join('\n  ')}`).toEqual([]);
+  });
+});
+
+describe('feature-word guard — non-vacuity probes (the same collector as the guard)', () => {
+  const scan = (
+    synthetic: ReadonlyArray<ScannedFile>,
+    allowlist: ReadonlyArray<AllowlistEntry> = FEATURE_WORD_ALLOWLIST,
+    sections: ReadonlyArray<SectionExemption> = SECTION_EXEMPTIONS,
+  ): FeatureWordReport => scanForFeatureWord(synthetic, allowlist, sections);
+
+  it('a seeded use in a source file fails, in camelCase, UPPER_CASE and plain text', () => {
+    const { violations } = scan([{
+      relPath: 'src/core/probe.ts',
+      content: 'export const learningCounts = 1;\nconst LEARNING_OPS = 2;\n// the Learning note\n',
+    }]);
+    expect(violations).toHaveLength(3);
+  });
+
+  it('a seeded use in a doc, a script or a knowledge base fails', () => {
+    for (const relPath of ['docs/probe.md', 'scripts/probe.ts', '.devflow/features/probe/KNOWLEDGE.md', 'README.md']) {
+      expect(scan([{ relPath, content: 'The learning feature.\n' }]).violations, relPath).toHaveLength(1);
+    }
+  });
+
+  it('a file path that carries the word fails, and a file under tests/ is not read', () => {
+    expect(scan([{ relPath: 'src/core/learning-probe.ts', content: 'export {};\n' }]).violations).toHaveLength(1);
+    expect(scan([{ relPath: 'tests/probe.test.ts', content: 'const learningCounts = 1;\n' }]).violations).toEqual([]);
+  });
+
+  it('an entry covers only its own text: the same file with a second use still fails', () => {
+    const entry: AllowlistEntry = {
+      path: 'src/core/probe.ts',
+      pattern: /pre-rename key `learning`/,
+      reason: 'The comment names the pre-rename key the reader still accepts.',
+    };
+    const file = (content: string): ScannedFile => ({ relPath: 'src/core/probe.ts', content });
+    expect(scan([file('// the pre-rename key `learning`\n')], [entry]).violations).toEqual([]);
+    expect(scan([file('// the pre-rename key `learning` and the learning feature\n')], [entry]).violations).toHaveLength(1);
+    expect(scan([{ relPath: 'src/core/other.ts', content: '// the pre-rename key `learning`\n' }], [entry]).violations)
+      .toHaveLength(1);
+  });
+
+  it('a stale entry fails: an entry that covers no hit is reported', () => {
+    const stale: AllowlistEntry = {
+      path: 'src/nowhere.ts',
+      pattern: /learning-nothing/,
+      reason: 'This entry matches nothing in the tree on purpose.',
+    };
+    expect(scan([{ relPath: 'src/core/probe.ts', content: 'export {};\n' }], [stale]).unusedEntries).toHaveLength(1);
+    expect(scan([{ relPath: 'src/nowhere.ts', content: '// learning-nothing\n' }], [stale]).unusedEntries).toEqual([]);
+    const staleSection: SectionExemption = {
+      path: 'CHANGELOG.md',
+      start: /^## \[0\.0\.0\]/,
+      end: /^## /,
+      reason: 'This section matches nothing in the tree on purpose.',
+    };
+    expect(scan([{ relPath: 'CHANGELOG.md', content: '## [Unreleased]\n' }], [], [staleSection]).unusedSections)
+      .toHaveLength(1);
+  });
+
+  it('an entry that covers the bare word is reported as loose', () => {
+    const loose: AllowlistEntry = {
+      path: 'src/',
+      pattern: /learning/,
+      reason: 'This entry would cover every use of the word in the tree.',
+    };
+    expect(looseEntries([loose])).toHaveLength(1);
+  });
+
+  describe('CHANGELOG sections (matched by heading, so they survive the release bump)', () => {
+    const changelog = (content: string): FeatureWordReport => scan([{ relPath: 'CHANGELOG.md', content }]);
+    const upgrade = '### Upgrade notes — Curation rename\n\nthe learning folder moves\n\n';
+
+    it('the upgrade section under [Unreleased] is exempt, and the section after it is not', () => {
+      const { violations } = changelog(
+        `## [Unreleased]\n\n${upgrade}### Upgrade notes — Lint pack\n\nlearning outside\n\n## [3.7.0] - 2026-10-16\n\nlearning released\n`,
+      );
+      expect(violations).toHaveLength(1);
+      expect(violations[0]).toContain('learning outside');
+    });
+
+    it('the same heading under the released 3.8.0 heading is exempt after the bump', () => {
+      const { violations } = changelog(
+        `## [Unreleased]\n\nlearning in the next release\n\n## [3.8.0] - 2026-10-20\n\n${upgrade}### Added\n\nlearning released\n`,
+      );
+      expect(violations).toHaveLength(1);
+      expect(violations[0]).toContain('learning in the next release');
+    });
+
+    it('a changelog with no [Unreleased] heading is accepted', () => {
+      expect(changelog(`## [3.8.0] - 2026-10-20\n\n${upgrade}## [3.6.0] - 2026-10-14\n\nlearning released\n`).violations)
+        .toEqual([]);
+    });
+
+    it('a hit in [Unreleased] outside the upgrade section fails', () => {
+      expect(changelog('## [Unreleased]\n\n### Added\n\n- a learning note\n').violations).toHaveLength(1);
+    });
+  });
+});
+
+const builtFiles = distFiles();
+
+describe.skipIf(builtFiles === null)('feature-word guard — the built output in dist/ (AC-1)', () => {
+  // CI builds before it tests. A machine without dist/ skips this block: run `npm run build`.
+  const built = builtFiles ?? [];
+  const violations = scanDistForFeatureWord(built, FEATURE_WORD_ALLOWLIST);
+
+  it('reads the compiled code, the built commands and agents, and the built references (non-vacuity)', () => {
+    expect(built.length, 'the dist scan reached almost no files').toBeGreaterThan(100);
+    for (const prefix of ['dist/core/', 'dist/cli/', 'dist/commands/', 'dist/agents/', 'dist/curation-off/', REFERENCES_PREFIX]) {
+      expect(built.some(file => file.relPath.startsWith(prefix)), `${prefix} is not in the dist scan`).toBe(true);
+    }
+  });
+
+  it('every built file has a known source file', () => {
+    const orphans = built
+      .filter(file => distSourceOf(file.relPath) === null && !file.relPath.endsWith('.map'))
+      .map(file => file.relPath);
+    expect(orphans, `built files with no mapped source:\n  ${orphans.join('\n  ')}`).toEqual([]);
+  });
+
+  it('every use of the old feature word in the build is a copy of an allowed source line', () => {
+    expect(
+      violations,
+      `the old feature word is in the build. Rename it in the source, or add an allowlist entry:\n  ${violations.join('\n  ')}`,
+    ).toEqual([]);
+  });
+});
+
+describe('feature-word guard — dist mapping and probes (the same collector as the dist scan)', () => {
+  const scanDist = (relPath: string, content: string): string[] =>
+    scanDistForFeatureWord([{ relPath, content }], FEATURE_WORD_ALLOWLIST);
+
+  it('maps built files to their sources', () => {
+    expect(distSourceOf('dist/core/project-paths.d.ts')).toBe('src/core/project-paths.ts');
+    expect(distSourceOf('dist/core/project-paths.js.map')).toBe('src/core/project-paths.ts');
+    expect(distSourceOf('dist/cli/commands/init.js')).toBe('src/cli/commands/init.ts');
+    expect(distSourceOf('dist/commands/implement.md')).toBe('src/assets/commands/implement.mds');
+    expect(distSourceOf('dist/curation-off/agents/code.md')).toBe('src/assets/agents/code.mds');
+    expect(distSourceOf('dist/skills/git/references/decision-markers.md')).toBe('src/assets/mds/git/_references.mds');
+    expect(distSourceOf('dist/skills/git/references/pr/create.md')).toBe('src/assets/mds/git/_pr.mds');
+    expect(distSourceOf('dist/skills/git/references/tracker/_mcp.md')).toBe('src/assets/mds/tracker/_mcp.mds');
+    expect(distSourceOf('dist/core/not-a-real-module.js')).toBeNull();
+    expect(distSourceOf('dist/stray.txt')).toBeNull();
+  });
+
+  it('a built copy of an allowed source line passes, in the form the compiler emits', () => {
+    const emitted = Object.entries(LEGACY_NAMES).map(([key, value]) => `    ${key}: ${JSON.stringify(value)};`);
+    expect(emitted).toHaveLength(3);
+    for (const line of emitted) {
+      expect(scanDist('dist/core/project-paths.d.ts', `${line}\n`), line).toEqual([]);
+    }
+    expect(scanDist('dist/core/curation-variants.d.ts', 'export declare const LEGACY_OFF_OUTPUT_DIR = "dist/learning-off";\n'))
+      .toEqual([]);
+    expect(scanDist('dist/core/curation-variants.js', "export const LEGACY_OFF_OUTPUT_DIR = 'dist/learning-off';\n"))
+      .toEqual([]);
+  });
+
+  it('a built line that is not a copy of an allowed source line fails', () => {
+    const planted = scanDist('dist/core/project-paths.js', "    folder: 'learning',\n    other: 'the learning feature',\n");
+    expect(planted).toHaveLength(1);
+    expect(planted[0]).toContain('dist/core/project-paths.js');
+    expect(scanDist('dist/core/curation-store.js', 'export const learningCounts = 1;\n')).toHaveLength(1);
+    expect(scanDist('dist/commands/implement.md', 'Run the learning step.\n')).toHaveLength(1);
+  });
+
+  it('an allowed line covers only its own source file: the same line in another built file fails', () => {
+    const line = '    backupPrefix: "learning.backup-";';
+    expect(scanDist('dist/core/other.d.ts', `${line}\n`)).toHaveLength(1);
+    expect(scanDist('dist/core/project-paths.d.ts', `${line} // the learning feature\n`)).toHaveLength(1);
+    expect(scanDist('dist/core/project-paths.d.ts', '    other: "learning";\n')).toHaveLength(1);
+  });
+
+  it('a built file with no source file, or a path that carries the word, fails', () => {
+    expect(scanDist('dist/core/ghost.js', 'export const learning = 1;\n')).toHaveLength(1);
+    expect(scanDist('dist/core/learning-store.js', 'export {};\n')).toHaveLength(1);
+    expect(scanDist('dist/core/ghost.js', 'export {};\n')).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The TEST-TITLE guard. The feature-word guard above does not read tests/, because a
+// test body names the old word to pin the migration and the legacy readers. A title
+// is different: it states what the test is about, and a title that says "learning"
+// for the current feature is a rename left half done. So the title of every
+// `describe`, `it` and `test` call under tests/ is read, and a title that carries the
+// word passes only when an entry of TEST_TITLE_ALLOWLIST covers its exact words (a
+// legacy key, file, command or hook that the test names on purpose).
+//
+// A title is read from the source: the first string literal of the call, after the
+// table of an `.each(...)` or the condition of a `.skipIf(...)`. A title that is a
+// variable is not read here; its words sit in a table or a constant that the sweep
+// reviews by hand. The scan is a named collector, so the guard and its planted-title
+// probes run the same logic.
+// ---------------------------------------------------------------------------
+
+/** A call of `describe`, `it` or `test`, not a method of another object (`regex.test(`). */
+const TEST_CALL = /(?<![.\w$])(?:describe|it|test)\b/g;
+/** A modifier chained to the call: `.each`, `.skip`, `.skipIf`, `.concurrent`. */
+const TEST_MODIFIER = /\.\w+/y;
+/** The most modifiers one call chains. */
+const MAX_TEST_MODIFIERS = 4;
+/** The most parenthesised groups tried after a call: a table, a condition, then the call that holds the title. */
+const MAX_TITLE_GROUPS = 3;
+
+/** The title of one test call: the offset of its opening quote and the text between the quotes. */
+interface TestTitle {
+  readonly index: number;
+  readonly text: string;
+}
+
+interface TitleReport {
+  /** `path:line: title` for each title with an uncovered use of the word. */
+  readonly violations: string[];
+  /** Entries that covered no title. */
+  readonly unusedEntries: string[];
+  /** How many titles were read, in all. */
+  readonly titlesRead: number;
+}
+
+/** The offset of the quote that closes the string literal opened at `start`, or -1 when it never closes. */
+function closingQuote(src: string, start: number): number {
+  for (let i = start + 1; i < src.length; i++) {
+    if (src[i] === '\\') i++;
+    else if (src[i] === src[start]) return i;
+  }
+  return -1;
+}
+
+/** The offset after the `)` that closes the `(` at `open`, or -1 when it never closes. */
+function afterBalancedParens(src: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    const c = src[i];
+    if (c === "'" || c === '"' || c === '`') {
+      i = closingQuote(src, i);
+      if (i < 0) return -1;
+    } else if (c === '(') {
+      depth++;
+    } else if (c === ')') {
+      depth--;
+      if (depth === 0) return i + 1;
+    }
+  }
+  return -1;
+}
+
+function skipSpace(src: string, from: number): number {
+  let at = from;
+  while (at < src.length && /\s/.test(src[at])) at++;
+  return at;
+}
+
+/** The title of every `describe`, `it` and `test` call in `src`, in source order. */
+function extractTestTitles(src: string): TestTitle[] {
+  const titles: TestTitle[] = [];
+  for (const call of src.matchAll(TEST_CALL)) {
+    let pos = (call.index ?? 0) + call[0].length;
+    TEST_MODIFIER.lastIndex = pos;
+    for (let chained = 0; chained < MAX_TEST_MODIFIERS && TEST_MODIFIER.exec(src) !== null; chained++) {
+      pos = TEST_MODIFIER.lastIndex;
+    }
+    for (let group = 0; group < MAX_TITLE_GROUPS; group++) {
+      pos = skipSpace(src, pos);
+      if (src[pos] !== '(') break;
+      const at = skipSpace(src, pos + 1);
+      if (src[at] === "'" || src[at] === '"' || src[at] === '`') {
+        const end = closingQuote(src, at);
+        if (end > at) titles.push({ index: at, text: src.slice(at + 1, end) });
+        break;
+      }
+      pos = afterBalancedParens(src, pos);
+      if (pos < 0) break;
+    }
+  }
+  return titles;
+}
+
+/** The 1-based line of the character at `index`. */
+const lineAt = (content: string, index: number): number => content.slice(0, index).split('\n').length;
+
+function scanTestTitles(
+  files: ReadonlyArray<ScannedFile>,
+  allowlist: ReadonlyArray<AllowlistEntry>,
+): TitleReport {
+  const violations: string[] = [];
+  const used = new Set<AllowlistEntry>();
+  let titlesRead = 0;
+
+  for (const { relPath, content } of files) {
+    if (!relPath.startsWith('tests/')) continue;
+    const fileEntries = allowlist.filter(entry => entryApplies(entry.path, relPath));
+    for (const { index, text } of extractTestTitles(content)) {
+      titlesRead++;
+      if (!FEATURE_WORD.test(text)) continue;
+      if (hasUncoveredWord(text, fileEntries, used)) {
+        violations.push(`${relPath}:${lineAt(content, index)}: ${text.slice(0, MAX_REPORTED_LINE)}`);
+      }
+    }
+  }
+
+  return {
+    violations,
+    unusedEntries: allowlist.filter(entry => !used.has(entry)).map(describeEntry),
+    titlesRead,
+  };
+}
+
+describe('test-title guard — no test title uses the old feature word for the current feature', () => {
+  const files = trackedTestSources();
+  const report = scanTestTitles(files, TEST_TITLE_ALLOWLIST);
+
+  it('reads the titles of the whole tests/ tree (non-vacuity)', () => {
+    expect(files.length, 'the scan reached almost no test files').toBeGreaterThan(200);
+    expect(report.titlesRead, 'the scan read almost no titles').toBeGreaterThan(5000);
+    for (const relPath of ['tests/guards/retired-wording.test.ts', 'tests/queue-append.test.ts', 'tests/manifest.test.ts']) {
+      expect(files.some(file => file.relPath === relPath), `${relPath} is not in the scan`).toBe(true);
+    }
+  });
+
+  it('every entry carries a reason in words', () => {
+    expect(TEST_TITLE_ALLOWLIST.length).toBeGreaterThan(0);
+    for (const entry of TEST_TITLE_ALLOWLIST) {
+      expect(wordsIn(entry.reason), `${describeEntry(entry)} has no reason`).toBeGreaterThanOrEqual(6);
+    }
+  });
+
+  it('no entry covers the bare word: each pins the words around its hit', () => {
+    expect(looseEntries(TEST_TITLE_ALLOWLIST)).toEqual([]);
+  });
+
+  it('no test title uses the old feature word outside the allowlist', () => {
+    expect(
+      report.violations,
+      `a test title uses the old feature word. Rename it to the current word, or add an allowlist entry with a reason:\n  ${report.violations.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('no entry is stale (each covers a real title)', () => {
+    expect(report.unusedEntries, `entries that cover no title:\n  ${report.unusedEntries.join('\n  ')}`).toEqual([]);
+  });
+
+  describe('planted titles (the same collector as the guard)', () => {
+    // Built from two halves, so this file holds no title of its own that uses the word.
+    const WORD = 'learn' + 'ing';
+    const PLANTED = `a planted ${WORD} title`;
+
+    const scan = (
+      content: string,
+      relPath = 'tests/probe.test.ts',
+      allowlist: ReadonlyArray<AllowlistEntry> = TEST_TITLE_ALLOWLIST,
+    ): TitleReport => scanTestTitles([{ relPath, content }], allowlist);
+
+    it('a planted title fails, in every call form', () => {
+      for (const form of [
+        "it('TITLE', () => {});",
+        'describe("TITLE", () => {});',
+        'test(`TITLE ${name}`, () => {});',
+        "it.each([[1, 2]])('TITLE %s', () => {});",
+        "it.each(Object.entries(table))('TITLE', () => {});",
+        "describe.skip('TITLE', () => {});",
+        "it.skipIf(process.getuid?.() === 0)('TITLE', () => {});",
+        "it(\n  'TITLE',\n  () => {},\n);",
+        "it('it\\'s a TITLE', () => {});",
+      ]) {
+        const planted = form.replace('TITLE', PLANTED);
+        expect(scan(`${planted}\n`).violations, planted).toHaveLength(1);
+      }
+    });
+
+    it('the violation names the file and the line', () => {
+      expect(scan(`describe('ok', () => {\n  it('${PLANTED}', () => {});\n});\n`).violations)
+        .toEqual([`tests/probe.test.ts:2: ${PLANTED}`]);
+    });
+
+    it('a title that is not about the old feature, a variable title and a method call are not hits', () => {
+      for (const clean of [
+        "it('the curation queue holds a turn', () => {});",
+        'it(title, () => {});',
+        `expect(/${WORD}/.test('the ${WORD} queue')).toBe(true);`,
+        `const text = edit('${WORD}');`,
+        `const where = { test: '${WORD}' };`,
+      ]) {
+        expect(scan(`${clean}\n`).violations, clean).toEqual([]);
+      }
+    });
+
+    it('an entry covers its own words only: a second use in the same title still fails', () => {
+      expect(scan(`it('the legacy ${WORD} key beside curation', () => {});\n`).violations).toEqual([]);
+      expect(scan(`it('the legacy ${WORD} key and the ${WORD} queue', () => {});\n`).violations).toHaveLength(1);
+    });
+
+    it('an entry applies to its own files only', () => {
+      const title = `it('devflow ${WORD} exits 1', () => {});\n`;
+      expect(scan(title, 'tests/probe.test.ts').violations).toHaveLength(1);
+      expect(scan(title, 'tests/cli-unknown-command.test.ts').violations).toEqual([]);
+    });
+
+    it('a file outside tests/ is not read', () => {
+      expect(scan(`it('${PLANTED}', () => {});\n`, 'src/core/probe.ts').violations).toEqual([]);
+    });
+
+    it('a stale entry is reported, and one that covers a title is not', () => {
+      const entry: AllowlistEntry = {
+        path: /^tests\//,
+        pattern: new RegExp(`\\bthe legacy ${WORD} key\\b`),
+        reason: 'This entry covers one phrase that a title of the probe uses.',
+      };
+      expect(scan('it("an unrelated title", () => {});\n', 'tests/probe.test.ts', [entry]).unusedEntries).toHaveLength(1);
+      expect(scan(`it('the legacy ${WORD} key', () => {});\n`, 'tests/probe.test.ts', [entry]).unusedEntries).toEqual([]);
+    });
+
+    it('an entry that covers the bare word is reported as loose', () => {
+      const loose: AllowlistEntry = {
+        path: /^tests\//,
+        pattern: new RegExp(WORD),
+        reason: 'This entry would cover every use of the word in a title.',
+      };
+      expect(looseEntries([loose])).toHaveLength(1);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The DERIVED-STEM guard. The feature-word guard above reads the whole old word,
+// so an identifier built on the stem alone (`learnOn`, `learn_on`, `isLearnOn`,
+// `LEARN_ON`) slips through a rename: a sweep for the word never sees it. The
+// shipped scripts hold no such identifier, and one may not come back. Plain
+// words that merely start with the stem (`learned`, `re-learn`, `learn-conventions`)
+// are not identifiers built on it and are not hits.
+//
+// Like the feature-word guard, it is a named collector that the guard and its
+// planted-hit probes both run.
+// ---------------------------------------------------------------------------
+
+/** The folder the stem guard reads: the hook scripts, the resolver and the libraries they load. */
+const DERIVED_STEM_SCOPE = 'src/assets/scripts/';
+
+/** An identifier built on the stem: `learnOn`, `learn_on`, `isLearn`, `isLearnOn`, `LEARN_ON`, `IS_LEARN`. */
+const DERIVED_STEM = /\blearn[A-Z_]|[a-z0-9]Learn(?:[A-Z_]|\b)|\bLEARN_|_LEARN\b/;
+
+/** `path:line: text` for each line of a file under the scope that holds an identifier built on the stem. */
+function collectDerivedStemHits(files: ReadonlyArray<ScannedFile>): string[] {
+  const hits: string[] = [];
+  for (const { relPath, content } of files) {
+    if (!relPath.startsWith(DERIVED_STEM_SCOPE)) continue;
+    content.split('\n').forEach((line, index) => {
+      if (DERIVED_STEM.test(line)) hits.push(`${relPath}:${index + 1}: ${line.trim().slice(0, MAX_REPORTED_LINE)}`);
+    });
+  }
+  return hits;
+}
+
+describe('derived-stem guard — no identifier built on the old feature stem in the shipped scripts', () => {
+  const files = trackedFilesOutsideTests().filter(file => file.relPath.startsWith(DERIVED_STEM_SCOPE));
+
+  it('reads the hook scripts, the resolver and the libraries (non-vacuity)', () => {
+    for (const relPath of [
+      'src/assets/scripts/hooks/queue-append',
+      'src/assets/scripts/hooks/session-start-context',
+      'src/assets/scripts/resolve-settings.cjs',
+    ]) {
+      expect(files.some(file => file.relPath === relPath), `${relPath} is not in the scan`).toBe(true);
+    }
+  });
+
+  it('no identifier built on the stem sits in the scripts', () => {
+    const hits = collectDerivedStemHits(files);
+    expect(hits, `an identifier built on the old feature stem is back. Rename it to the current word:\n  ${hits.join('\n  ')}`)
+      .toEqual([]);
+  });
+
+  describe('planted hits (the same collector as the guard)', () => {
+    const hitsIn = (content: string, relPath = 'src/assets/scripts/hooks/probe'): string[] =>
+      collectDerivedStemHits([{ relPath, content }]);
+
+    it('a planted identifier fails, in camelCase, snake_case and UPPER_SNAKE', () => {
+      for (const planted of [
+        "const learnOn = cur.length > 0 ? cur.every(on) : on('decisions');",
+        'local learn_on="true"',
+        'const isLearnOn = true;',
+        'const shouldLearn = true;',
+        'LEARN_ON=1',
+        'IS_LEARN=1',
+      ]) {
+        expect(hitsIn(`${planted}\n`), planted).toHaveLength(1);
+      }
+    });
+
+    it('the hit names the file and the line', () => {
+      expect(hitsIn('ok\nconst learnOn = 1;\n', 'src/assets/scripts/resolve-settings.cjs'))
+        .toEqual(['src/assets/scripts/resolve-settings.cjs:2: const learnOn = 1;']);
+    });
+
+    it('plain words and the current name are not hits', () => {
+      for (const clean of [
+        'const curationOn = true;',
+        '# re-learn the conventions from the branch names',
+        '# learn-conventions writes the file',
+        'the model learned the pattern',
+        'learn more in the docs',
+      ]) {
+        expect(hitsIn(`${clean}\n`), clean).toEqual([]);
+      }
+    });
+
+    it('a file outside the scope is not read', () => {
+      expect(hitsIn('const learnOn = 1;\n', 'src/core/probe.ts')).toEqual([]);
+    });
   });
 });

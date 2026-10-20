@@ -65,7 +65,7 @@ describe('the six renamed agents leave no orphan agent file (#466)', () => {
     return { status: result.status, out: `${result.stdout ?? ''}${result.stderr ?? ''}` };
   }
 
-  const OFF = ['--no-ambient', '--no-memory', '--no-learning', '--no-knowledge', '--no-rules'] as const;
+  const OFF = ['--no-ambient', '--no-memory', '--no-curation', '--no-knowledge', '--no-rules'] as const;
 
   /** The files a previous release left, plus the user's own agent of the same name as one of them. */
   async function seedOldAgents(): Promise<void> {
@@ -229,7 +229,7 @@ describe('the six renamed agents leave no orphan agent file (#466)', () => {
   it('a partial init with no retired agent file leaves the other plugins\' files alone', async () => {
     const installRun = cli('init', '--plugin=implement,code-review', ...OFF);
     expect(installRun.status, installRun.out).toBe(0);
-    // polish belongs to implement, which this run does not name, and has no learning variant that
+    // polish belongs to implement, which this run does not name, and has no curation variant that
     // an install would converge back.
     const polishAgent = path.join(agentsDir(), 'polish.md');
     await fs.writeFile(polishAgent, '# my edit\n', 'utf-8');

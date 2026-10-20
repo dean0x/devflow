@@ -184,7 +184,7 @@ describe('installViaFileCopy: devflow\'s Explore against a user-owned one (AC-30
   const install = (): Promise<unknown> => {
     const { skillsMap, agentsMap } = buildAssetMaps(plugins);
     return installViaFileCopy({
-      learning: true,
+      curation: true,
       plugins,
       effectivePlugins: plugins,
       claudeDir,

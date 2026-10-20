@@ -16,6 +16,8 @@ import { execFileSync, execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { createRequire } from 'module';
+import { PROJECT_PATHS } from './decisions/curation-fixtures.js';
 import { waitForWorkerToFinish } from './helpers/poll-for-terminal-line.js';
 import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
 import { HOOK_RUN_ALLOWANCE_MS, NODE_EXEC_STALL_MS, answersVersion, resolveOnPath, runHook as runSharedHook, spawnWithStdin } from './shell-hooks-helpers.js';
@@ -159,9 +161,9 @@ describe('capture-prompt', () => {
   it('AC-F1: both features enabled (no config) -> one {role:"user"} row to BOTH queues', () => {
     runHook(CAPTURE_PROMPT, { cwd: projectDir, prompt: 'hello world' }, homeDir);
     const mem = readJsonl(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'));
-    const learning = readJsonl(path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl'));
+    const curationRows = readJsonl(path.join(projectDir, '.devflow', 'curation', '.pending-turns.jsonl'));
     expect(mem).toEqual([{ role: 'user', content: 'hello world', ts: expect.any(Number) }]);
-    expect(learning).toEqual([{ role: 'user', content: 'hello world', ts: expect.any(Number) }]);
+    expect(curationRows).toEqual([{ role: 'user', content: 'hello world', ts: expect.any(Number) }]);
   });
 
   it('AC-F1: long prompt passes through whole (no truncation)', () => {
@@ -176,25 +178,25 @@ describe('capture-prompt', () => {
     expect(fs.existsSync(path.join(projectDir, '.devflow'))).toBe(false);
   });
 
-  it('AC-F4: memory switched off -> no memory-queue append (learning append unaffected)', () => {
+  it('AC-F4: memory switched off -> no memory-queue append (curation append unaffected)', () => {
     writeMachineFeatures(homeDir, { memory: false });
     runHook(CAPTURE_PROMPT, { cwd: projectDir, prompt: 'test' }, homeDir);
     expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
-    expect(readJsonl(path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl'))).toHaveLength(1);
+    expect(readJsonl(path.join(projectDir, '.devflow', 'curation', '.pending-turns.jsonl'))).toHaveLength(1);
   });
 
-  it('AC-F4: learning switched off -> no learning-queue append (memory unaffected)', () => {
+  it('AC-F4: curation switched off -> no curation-queue append (memory unaffected)', () => {
     writeMachineFeatures(homeDir, { learning: false });
     runHook(CAPTURE_PROMPT, { cwd: projectDir, prompt: 'test' }, homeDir);
     expect(readJsonl(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toHaveLength(1);
-    expect(fs.existsSync(path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl'))).toBe(false);
+    expect(fs.existsSync(path.join(projectDir, '.devflow', 'curation', '.pending-turns.jsonl'))).toBe(false);
   });
 
   it('both disabled -> zero appends, no scaffolding', () => {
     writeMachineFeatures(homeDir, { memory: false, learning: false });
     runHook(CAPTURE_PROMPT, { cwd: projectDir, prompt: 'test' }, homeDir);
     expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
-    expect(fs.existsSync(path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl'))).toBe(false);
+    expect(fs.existsSync(path.join(projectDir, '.devflow', 'curation', '.pending-turns.jsonl'))).toBe(false);
   });
 
   it('AC-F14: DEVFLOW_BG_UPDATER=1 -> exit 0, zero filesystem writes', () => {
@@ -226,7 +228,7 @@ describe('capture-turn', () => {
     expect(readJsonl(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toEqual([
       { role: 'assistant', content: 'response text', ts: expect.any(Number) },
     ]);
-    expect(readJsonl(path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl'))).toEqual([
+    expect(readJsonl(path.join(projectDir, '.devflow', 'curation', '.pending-turns.jsonl'))).toEqual([
       { role: 'assistant', content: 'response text', ts: expect.any(Number) },
     ]);
   });
@@ -265,11 +267,11 @@ describe('capture-turn', () => {
     expect(fs.existsSync(logFile)).toBe(false);
   });
 
-  it('AC-F4: gating independent per queue (memory:false, learning enabled)', () => {
+  it('AC-F4: gating independent per queue (memory:false, curation enabled)', () => {
     writeMachineFeatures(homeDir, { memory: false });
     runHook(CAPTURE_TURN, { cwd: projectDir, session_id: 't', last_assistant_message: 'x' }, homeDir);
     expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
-    expect(readJsonl(path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl'))).toHaveLength(1);
+    expect(readJsonl(path.join(projectDir, '.devflow', 'curation', '.pending-turns.jsonl'))).toHaveLength(1);
   });
 
   it('AC-F14: DEVFLOW_BG_UPDATER=1 -> exit 0, zero filesystem writes', () => {
@@ -369,9 +371,9 @@ describe('capture-question', () => {
   it('AC-F3: one {role:"qa"} row PER QUESTION, to both queues', () => {
     runHook(CAPTURE_QUESTION, { ...REAL_MULTI_QUESTION_PAYLOAD, cwd: projectDir }, homeDir);
     const mem = readJsonl(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'));
-    const learning = readJsonl(path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl'));
+    const curationRows = readJsonl(path.join(projectDir, '.devflow', 'curation', '.pending-turns.jsonl'));
     expect(mem).toHaveLength(2);
-    expect(learning).toHaveLength(2);
+    expect(curationRows).toHaveLength(2);
     expect(mem[0]).toMatchObject({
       role: 'qa',
       content: 'Q: How should I handle the Phase 5 Harden review?\nA: Re-run, inert probes only',
@@ -458,11 +460,11 @@ describe('capture-question', () => {
     expect(mem[0].content).toBe(`Q: proceed?\nA: ${hostileAnswer}`);
   });
 
-  it('AC-F4: gating independent per queue (learning disabled, memory enabled)', () => {
+  it('AC-F4: gating independent per queue (curation disabled, memory enabled)', () => {
     writeMachineFeatures(homeDir, { learning: false });
     runHook(CAPTURE_QUESTION, { ...REAL_MULTI_QUESTION_PAYLOAD, cwd: projectDir }, homeDir);
     expect(readJsonl(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toHaveLength(2);
-    expect(fs.existsSync(path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl'))).toBe(false);
+    expect(fs.existsSync(path.join(projectDir, '.devflow', 'curation', '.pending-turns.jsonl'))).toBe(false);
   });
 
   it('AC-F14: DEVFLOW_BG_UPDATER=1 -> exit 0, zero writes', () => {
@@ -485,7 +487,7 @@ describe('memory-worker', () => {
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mem-worker-home-'));
     shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mem-worker-shim-'));
     fs.mkdirSync(path.join(projectDir, '.devflow', 'memory'), { recursive: true });
-    fs.mkdirSync(path.join(projectDir, '.devflow', 'learning'), { recursive: true });
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'curation'), { recursive: true });
   });
 
   afterEach(() => {
@@ -836,7 +838,7 @@ describe('capture-prompt + capture-turn integration', () => {
     runHook(CAPTURE_PROMPT, { cwd: projectDir, session_id: 'integ', prompt: 'implement feature X' }, homeDir);
     runHook(CAPTURE_TURN, { cwd: projectDir, session_id: 'integ', last_assistant_message: 'done' }, homeDir);
 
-    for (const queue of ['memory', 'learning'] as const) {
+    for (const queue of ['memory', 'curation'] as const) {
       const rows = readJsonl(path.join(projectDir, '.devflow', queue, '.pending-turns.jsonl'));
       expect(rows).toEqual([
         { role: 'user', content: 'implement feature X', ts: expect.any(Number) },
@@ -862,12 +864,14 @@ const NARROWING_TEST_BUDGET_MS = HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS;
 // =============================================================================
 // D-FEATURES-NARROW-ONLY — the machine layer, and the retired per-repo keys
 // =============================================================================
-// `devflow init --no-learning` / `--no-memory` (and `devflow learning|memory
-// --disable`) record features.learning:false / features.memory:false in
-// ~/.devflow/manifest.json. Every capture hook must honour them in EVERY repo,
-// and must ignore the retired per-repo keys either way: a stale `true` an
-// earlier init wrote cannot keep a feature on, a stale `false` cannot turn it off.
-describe('capture hooks read the machine-wide memory and learning switches only', () => {
+// `devflow init --no-curation` / `--no-memory` (and `devflow curation|memory
+// --disable`) record features.curation:false (with its pre-rename copy
+// features.learning) / features.memory:false in ~/.devflow/manifest.json. Every
+// capture hook must honour them in EVERY repo, and must ignore the retired
+// per-repo keys either way: a stale `true` an earlier init wrote cannot keep a
+// feature on, a stale `false` cannot turn it off. The fixtures below record the
+// switch under the pre-rename `learning` key alone, which a reader still honours.
+describe('capture hooks read the machine-wide memory and curation switches only', () => {
   let projectDir: string;
   let homeDir: string;
 
@@ -883,7 +887,7 @@ describe('capture hooks read the machine-wide memory and learning switches only'
 
   // These assertions are about which manifest is read; HOME alone decides it.
   const ENV = {};
-  const learningQueue = () => path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl');
+  const curationQueue = () => path.join(projectDir, '.devflow', 'curation', '.pending-turns.jsonl');
   const memoryQueue = () => path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl');
 
   /**
@@ -913,37 +917,37 @@ describe('capture hooks read the machine-wide memory and learning switches only'
   ];
 
   for (const [name, hook, input, rows] of HOOKS) {
-    it(`${name}: switched off machine-wide → no learning append although the repo config says true`, () => {
+    it(`${name}: switched off machine-wide → no curation append although the repo config says true`, () => {
       writeFeatureConfig(projectDir, { memory: true, learning: true });
       writeManifestFeatures(path.join(homeDir, '.devflow'), { learning: false });
 
       const { exitCode } = runHook(hook, input(), homeDir, ENV);
       expect(exitCode).toBe(0);
-      expect(fs.existsSync(learningQueue())).toBe(false);
+      expect(fs.existsSync(curationQueue())).toBe(false);
       // Each switch clears only its own gate: memory keeps capturing.
       expect(readJsonl(memoryQueue())).toHaveLength(rows);
     });
 
-    it(`${name}: switched off machine-wide → no learning append in a repo with no config`, () => {
+    it(`${name}: switched off machine-wide → no curation append in a repo with no config`, () => {
       writeManifestFeatures(path.join(homeDir, '.devflow'), { learning: false });
 
       runHook(hook, input(), homeDir, ENV);
-      expect(fs.existsSync(learningQueue())).toBe(false);
+      expect(fs.existsSync(curationQueue())).toBe(false);
     });
 
-    it(`${name}: a manifest without the key leaves learning on (fail-open)`, () => {
+    it(`${name}: a manifest without the key leaves curation on (fail-open)`, () => {
       writeManifestFeatures(path.join(homeDir, '.devflow'), { ambient: true });
 
       runHook(hook, input(), homeDir, ENV);
-      expect(readJsonl(learningQueue())).toHaveLength(rows);
+      expect(readJsonl(curationQueue())).toHaveLength(rows);
     });
 
-    it(`${name}: a stale repo config learning:false does not switch learning off`, () => {
+    it(`${name}: a stale repo config with the legacy learning key false does not switch curation off`, () => {
       writeFeatureConfig(projectDir, { memory: false, learning: false });
       writeManifestFeatures(path.join(homeDir, '.devflow'), { memory: true, learning: true });
 
       runHook(hook, input(), homeDir, ENV);
-      expect(readJsonl(learningQueue())).toHaveLength(rows);
+      expect(readJsonl(curationQueue())).toHaveLength(rows);
       expect(readJsonl(memoryQueue())).toHaveLength(rows);
     });
 
@@ -957,8 +961,8 @@ describe('capture hooks read the machine-wide memory and learning switches only'
       const { exitCode } = runHook(hook, input(), homeDir, ENV);
       expect(exitCode).toBe(0);
       expect(fs.existsSync(memoryQueue())).toBe(false);
-      // Each switch clears only its own gate: learning keeps capturing.
-      expect(readJsonl(learningQueue())).toHaveLength(rows);
+      // Each switch clears only its own gate: curation keeps capturing.
+      expect(readJsonl(curationQueue())).toHaveLength(rows);
     });
 
     it(`${name}: memory switched off machine-wide → no memory append in a repo with no config`, () => {
@@ -978,16 +982,16 @@ describe('capture hooks read the machine-wide memory and learning switches only'
     it(`${name}: no config and no manifest → both queues capture (fail-open)`, () => {
       runHook(hook, input(), homeDir, ENV);
       expect(readJsonl(memoryQueue())).toHaveLength(rows);
-      expect(readJsonl(learningQueue())).toHaveLength(rows);
+      expect(readJsonl(curationQueue())).toHaveLength(rows);
     });
 
     // The gate folds the repository's files and the manifest through the settings
     // resolver, whose fold now also computes the gate level. It must stay total for
     // the odd manifest shapes below: a repository file that narrows memory forces that
     // fold, so memory stays off (the fold ran, not the manifest-only fallback) and
-    // learning keeps capturing.
+    // curation keeps capturing.
     for (const [label, manifestText] of ODD_MANIFESTS) {
-      it(`${name}: ${label} → the repository still narrows memory and learning keeps capturing`, () => {
+      it(`${name}: ${label} → the repository still narrows memory and curation keeps capturing`, () => {
         writeRepoFile(projectDir, 'config.json', '{"features":{"memory":false}}');
         fs.mkdirSync(path.join(homeDir, '.devflow'), { recursive: true });
         fs.writeFileSync(path.join(homeDir, '.devflow', 'manifest.json'), manifestText);
@@ -995,7 +999,7 @@ describe('capture hooks read the machine-wide memory and learning switches only'
         const { exitCode } = runHook(hook, input(), homeDir, ENV);
         expect(exitCode).toBe(0);
         expect(fs.existsSync(memoryQueue())).toBe(false);
-        expect(readJsonl(learningQueue())).toHaveLength(rows);
+        expect(readJsonl(curationQueue())).toHaveLength(rows);
       }, NARROWING_TEST_BUDGET_MS);
     }
   }
@@ -1008,7 +1012,7 @@ describe('capture hooks read the machine-wide memory and learning switches only'
       writeManifestFeatures(path.join(homeDir, '.devflow'), { learning: true });
 
       runHook(CAPTURE_PROMPT, { cwd: projectDir, prompt: 'hello' }, homeDir, { DEVFLOW_DIR: overrideDir });
-      expect(readJsonl(learningQueue())).toHaveLength(1);
+      expect(readJsonl(curationQueue())).toHaveLength(1);
       expect(readJsonl(memoryQueue())).toHaveLength(1);
       expect(fs.readdirSync(overrideDir).sort()).toEqual(['manifest.json']);
     } finally {
@@ -1037,7 +1041,7 @@ describe('capture hooks honour a repository narrowing (D-FEATURES-NARROW-ONLY)',
     fs.rmSync(homeDir, { recursive: true, force: true });
   });
 
-  const learningQueue = () => path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl');
+  const curationQueue = () => path.join(projectDir, '.devflow', 'curation', '.pending-turns.jsonl');
   const memoryQueue = () => path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl');
 
   const HOOKS: ReadonlyArray<readonly [string, string, () => object]> = [
@@ -1056,20 +1060,20 @@ describe('capture hooks honour a repository narrowing (D-FEATURES-NARROW-ONLY)',
   ];
 
   for (const [name, hook, input] of HOOKS) {
-    it(`${name}: project.json features.learning false silences learning capture; memory keeps capturing`, () => {
+    it(`${name}: the legacy project.json features.learning false silences curation capture; memory keeps capturing`, () => {
       writeRepoFile(projectDir, 'project.json', '{"version":1,"features":{"learning":false}}');
 
       expect(runHook(hook, input(), homeDir).exitCode).toBe(0);
-      expect(fs.existsSync(learningQueue())).toBe(false);
+      expect(fs.existsSync(curationQueue())).toBe(false);
       expect(readJsonl(memoryQueue())).toHaveLength(1);
     });
 
-    it(`${name}: config.json features.memory false silences memory capture; learning keeps capturing`, () => {
+    it(`${name}: config.json features.memory false silences memory capture; curation keeps capturing`, () => {
       writeRepoFile(projectDir, 'config.json', '{"features":{"memory":false}}');
 
       expect(runHook(hook, input(), homeDir).exitCode).toBe(0);
       expect(fs.existsSync(memoryQueue())).toBe(false);
-      expect(readJsonl(learningQueue())).toHaveLength(1);
+      expect(readJsonl(curationQueue())).toHaveLength(1);
     });
 
     it(`${name}: a repository true never widens a machine off`, () => {
@@ -1077,7 +1081,7 @@ describe('capture hooks honour a repository narrowing (D-FEATURES-NARROW-ONLY)',
       writeRepoFile(projectDir, 'project.json', '{"features":{"learning":true,"memory":true}}');
 
       runHook(hook, input(), homeDir);
-      expect(fs.existsSync(learningQueue())).toBe(false);
+      expect(fs.existsSync(curationQueue())).toBe(false);
       expect(readJsonl(memoryQueue())).toHaveLength(1);
     });
 
@@ -1086,7 +1090,7 @@ describe('capture hooks honour a repository narrowing (D-FEATURES-NARROW-ONLY)',
 
       runHook(hook, input(), homeDir);
       expect(readJsonl(memoryQueue())).toHaveLength(1);
-      expect(readJsonl(learningQueue())).toHaveLength(1);
+      expect(readJsonl(curationQueue())).toHaveLength(1);
     });
   }
 
@@ -1101,7 +1105,7 @@ describe('capture hooks honour a repository narrowing (D-FEATURES-NARROW-ONLY)',
       writeRepoFile(repo, 'project.json', '{"features":{"learning":false}}');
 
       expect(runHook(CAPTURE_PROMPT, { cwd: sub, prompt: 'hello' }, homeDir).exitCode).toBe(0);
-      expect(fs.existsSync(path.join(repo, '.devflow', 'learning', '.pending-turns.jsonl'))).toBe(false);
+      expect(fs.existsSync(path.join(repo, '.devflow', 'curation', '.pending-turns.jsonl'))).toBe(false);
       expect(readJsonl(path.join(repo, '.devflow', 'memory', '.pending-turns.jsonl'))).toHaveLength(1);
       expect(fs.existsSync(path.join(sub, '.devflow'))).toBe(false);
     } finally {
@@ -1171,7 +1175,7 @@ describe('capture hooks never write through a symbolic link under .devflow (D-HO
   });
 
   const memoryQueue = (root = projectDir): string => path.join(root, '.devflow', 'memory', '.pending-turns.jsonl');
-  const learningQueue = (root = projectDir): string => path.join(root, '.devflow', 'learning', '.pending-turns.jsonl');
+  const curationQueue = (root = projectDir): string => path.join(root, '.devflow', 'curation', '.pending-turns.jsonl');
   const isLink = (file: string): boolean => fs.lstatSync(file).isSymbolicLink();
   const modeOf = (file: string): string => (fs.statSync(file).mode & 0o777).toString(8);
 
@@ -1197,7 +1201,7 @@ describe('capture hooks never write through a symbolic link under .devflow (D-HO
   ];
 
   for (const [name, hook, input] of HOOKS) {
-    it(`${name}: a link at the memory queue path leaves its target byte-identical; the learning queue still captures`, () => {
+    it(`${name}: a link at the memory queue path leaves its target byte-identical; the curation queue still captures`, () => {
       fs.mkdirSync(path.dirname(memoryQueue()), { recursive: true });
       fs.symlinkSync(outsideFile, memoryQueue());
 
@@ -1205,18 +1209,18 @@ describe('capture hooks never write through a symbolic link under .devflow (D-HO
 
       expect(fs.readFileSync(outsideFile, 'utf-8'), 'the link target is byte-identical').toBe(UNTOUCHED);
       expect(isLink(memoryQueue()), 'the link is left as it was').toBe(true);
-      expect(readJsonl(learningQueue()), 'the other queue still captures').toHaveLength(1);
+      expect(readJsonl(curationQueue()), 'the other queue still captures').toHaveLength(1);
       expect(refusals(name), 'the refusal is logged once').toHaveLength(1);
     });
 
-    it(`${name}: a link at the learning queue path leaves its target byte-identical; the memory queue still captures`, () => {
-      fs.mkdirSync(path.dirname(learningQueue()), { recursive: true });
-      fs.symlinkSync(outsideFile, learningQueue());
+    it(`${name}: a link at the curation queue path leaves its target byte-identical; the memory queue still captures`, () => {
+      fs.mkdirSync(path.dirname(curationQueue()), { recursive: true });
+      fs.symlinkSync(outsideFile, curationQueue());
 
       expect(runHook(hook, input(), homeDir).exitCode).toBe(0);
 
       expect(fs.readFileSync(outsideFile, 'utf-8'), 'the link target is byte-identical').toBe(UNTOUCHED);
-      expect(isLink(learningQueue()), 'the link is left as it was').toBe(true);
+      expect(isLink(curationQueue()), 'the link is left as it was').toBe(true);
       expect(readJsonl(memoryQueue()), 'the other queue still captures').toHaveLength(1);
       expect(refusals(name), 'the refusal is logged once').toHaveLength(1);
     });
@@ -1228,14 +1232,14 @@ describe('capture hooks never write through a symbolic link under .devflow (D-HO
       expect(runHook(hook, input(), homeDir).exitCode).toBe(0);
 
       expect(fs.readdirSync(outsideDir), 'nothing is created in the folder the link names').toEqual([]);
-      expect(readJsonl(learningQueue()), 'the other queue still captures').toHaveLength(1);
+      expect(readJsonl(curationQueue()), 'the other queue still captures').toHaveLength(1);
       expect(refusals(name), 'the refusal is logged once').toHaveLength(1);
     });
   }
 
-  it('a linked .devflow/learning folder is refused the same way; the memory queue still captures', () => {
+  it('a linked .devflow/curation folder is refused the same way; the memory queue still captures', () => {
     fs.mkdirSync(path.join(projectDir, '.devflow'));
-    fs.symlinkSync(outsideDir, path.join(projectDir, '.devflow', 'learning'));
+    fs.symlinkSync(outsideDir, path.join(projectDir, '.devflow', 'curation'));
 
     expect(runHook(CAPTURE_PROMPT, { cwd: projectDir, prompt: 'we chose X over Y' }, homeDir).exitCode).toBe(0);
 
@@ -1260,7 +1264,7 @@ describe('capture hooks never write through a symbolic link under .devflow (D-HO
     });
 
     expect(run.kind, run.stderr).toBe('clean');
-    for (const queue of [memoryQueue(), learningQueue()]) {
+    for (const queue of [memoryQueue(), curationQueue()]) {
       expect(readJsonl(queue), `${queue} captured the turn`).toEqual([{ role: 'user', content: 'we chose X over Y', ts: expect.any(Number) }]);
       expect(modeOf(queue), `${queue} holds conversation text, so it is owner-only`).toBe('600');
     }
@@ -1280,7 +1284,7 @@ describe('capture hooks never write through a symbolic link under .devflow (D-HO
     expect(runHook(CAPTURE_PROMPT, { cwd, prompt: 'we chose X over Y' }, homeDir).exitCode).toBe(0);
 
     expect(readJsonl(memoryQueue(cwd))).toHaveLength(1);
-    expect(readJsonl(learningQueue(cwd))).toHaveLength(1);
+    expect(readJsonl(curationQueue(cwd))).toHaveLength(1);
     expect(refusals('capture-prompt', cwd), 'nothing was refused').toEqual([]);
   });
 
@@ -1309,11 +1313,11 @@ describe('capture hooks never write through a symbolic link under .devflow (D-HO
       expect(runHook(CAPTURE_PROMPT, { cwd, prompt: 'we chose X over Y' }, homeDir).exitCode).toBe(0);
 
       expect(readJsonl(memoryQueue(path.join(realParent, 'main')))).toHaveLength(1);
-      expect(readJsonl(learningQueue(path.join(realParent, 'main')))).toHaveLength(1);
+      expect(readJsonl(curationQueue(path.join(realParent, 'main')))).toHaveLength(1);
       expect(refusals('capture-prompt', cwd), 'nothing was refused').toEqual([]);
     });
 
-    it('a linked worktree captures memory to its own queue and learning to the main checkout\'s', () => {
+    it('a linked worktree captures memory to its own queue and curation to the main checkout\'s', () => {
       const main = path.join(realParent, 'main');
       git(main, 'commit', '-q', '--allow-empty', '-m', 'init');
       fs.mkdirSync(path.join(main, '.devflow'));
@@ -1323,8 +1327,8 @@ describe('capture hooks never write through a symbolic link under .devflow (D-HO
       expect(runHook(CAPTURE_PROMPT, { cwd, prompt: 'we chose X over Y' }, homeDir).exitCode).toBe(0);
 
       expect(readJsonl(memoryQueue(path.join(realParent, 'wt')))).toHaveLength(1);
-      expect(readJsonl(learningQueue(main)), 'the ledger is the repository\'s: the main checkout\'s').toHaveLength(1);
-      expect(fs.existsSync(learningQueue(path.join(realParent, 'wt'))), 'no learning queue in the worktree').toBe(false);
+      expect(readJsonl(curationQueue(main)), 'the ledger is the repository\'s: the main checkout\'s').toHaveLength(1);
+      expect(fs.existsSync(curationQueue(path.join(realParent, 'wt'))), 'no curation queue in the worktree').toBe(false);
       expect(refusals('capture-prompt', cwd), 'nothing was refused').toEqual([]);
     });
   });
@@ -1343,4 +1347,78 @@ describe('capture hooks never write through a symbolic link under .devflow (D-HO
     expect(refusals('memory-worker'), 'the refusal is logged once').toHaveLength(1);
     expect(fs.readFileSync(workerLogPath(projectDir, homeDir, 'memory-worker'), 'utf-8')).not.toContain('Spawned background-memory-update');
   });
+});
+
+// =============================================================================
+// TP-30 (#529): a held ledger move never makes a capture wait, drop a row or make a folder
+//
+// The capture hooks reach the move through ensure-devflow-init. A move another process
+// holds is skipped (the shim never waits), the row goes to the old folder, and no
+// creator makes the new folder beside it. The next event, once the lock is gone, moves
+// the folder with every row in it once.
+// =============================================================================
+describe('capture hooks while the ledger move is held (TP-30)', { timeout: 2 * (HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS) }, () => {
+  const store = createRequire(import.meta.url)(PROJECT_PATHS) as { curationMoveLockKey(realRoot: string): string };
+  const SEED_ROW = '{"role":"user","content":"seeded turn","ts":1}';
+  let tmp: string;
+  let projectDir: string;
+  let homeDir: string;
+
+  beforeEach(() => {
+    tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cap-held-move-')));
+    projectDir = path.join(tmp, 'repo');
+    homeDir = path.join(tmp, 'home');
+    fs.mkdirSync(path.join(projectDir, '.git'), { recursive: true });
+    fs.mkdirSync(homeDir);
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'learning'), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, '.devflow', 'learning', '.pending-turns.jsonl'), `${SEED_ROW}\n`, { mode: 0o600 });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const folder = (name: string): string => path.join(projectDir, '.devflow', name);
+  const queue = (name: string): string => path.join(folder(name), '.pending-turns.jsonl');
+  const moveLock = (): string => path.join(homeDir, '.devflow', `.curation-move-${store.curationMoveLockKey(projectDir)}.lock`);
+
+  const HOOKS: ReadonlyArray<readonly [string, string, () => object]> = [
+    ['capture-prompt', CAPTURE_PROMPT, () => ({ cwd: projectDir, prompt: 'we chose X over Y' })],
+    ['capture-turn', CAPTURE_TURN, () => ({ cwd: projectDir, session_id: 's', last_assistant_message: 'done' })],
+    [
+      'capture-question',
+      CAPTURE_QUESTION,
+      () => ({
+        cwd: projectDir,
+        tool_name: 'AskUserQuestion',
+        tool_input: { questions: [{ question: 'Proceed?' }] },
+        tool_response: { answers: { 'Proceed?': 'yes' } },
+      }),
+    ],
+  ];
+
+  for (const [name, hook, input] of HOOKS) {
+    it(`${name}: returns at once, appends to the old folder and makes no new one; the next event moves every row once`, () => {
+      fs.mkdirSync(moveLock(), { recursive: true });
+      const started = Date.now();
+
+      const held = runHook(hook, input(), homeDir);
+
+      expect(held.exitCode, held.stderr).toBe(0);
+      // The lock is fresh for 60 s, so a hook that waited on it could not have returned in this time.
+      expect(Date.now() - started, 'the hook does not wait for the held move').toBeLessThan(HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS);
+      expect(fs.existsSync(folder('curation')), 'no creator makes the new folder beside the old one').toBe(false);
+      expect(readJsonl(queue('learning')), 'the row is not dropped').toHaveLength(2);
+      expect(fs.existsSync(moveLock()), 'the held lock is left as it was').toBe(true);
+
+      fs.rmdirSync(moveLock());
+      const next = runHook(hook, input(), homeDir);
+
+      expect(next.exitCode, next.stderr).toBe(0);
+      expect(fs.existsSync(folder('learning')), 'the next event moves the folder').toBe(false);
+      const rows = readJsonl(queue('curation'));
+      expect(rows, 'every row is in the new queue once').toHaveLength(3);
+      expect(rows[0]).toEqual(JSON.parse(SEED_ROW));
+    });
+  }
 });

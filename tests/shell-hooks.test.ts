@@ -4,9 +4,13 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as net from 'net';
+import { createRequire } from 'module';
 import { HANDOFF_TEMPLATE, REMINDER_TEMPLATE } from './fixtures/ambient-templates.js';
 import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
 import { buildRoutingConfigJson } from '../src/core/proxy-state.js';
+import { CURATION_DIR_NAME, LEGACY_NAMES, curationMoveMarkerKey } from '../src/core/project-paths.js';
+import { getCurationMoveMarkerPath } from '../src/core/curation-move-notice.js';
+import { PROJECT_PATHS, makeV2LedgerRow, makeV2LogRow, toJsonl } from './decisions/curation-fixtures.js';
 import * as p from '@clack/prompts';
 import {
   DEVFLOW_GITIGNORE_BLOCK,
@@ -55,7 +59,8 @@ const HOOK_SCRIPTS = [
   'resolve-project-root',
   'queue-append',
   'memory-permission',
-  'learning-lock',
+  'curation-lock',
+  'curation-move',
   'capture-prompt',
   'capture-turn',
   'capture-question',
@@ -332,10 +337,10 @@ describe('json-helper.js operations', () => {
     expect(parsed.hookSpecificOutput.additionalContext).toBe('test preamble');
   });
 
-  it('a generic op loads none of the learning modules; a learning op loads the store, and the renderer only to render', () => {
-    // Every hook that falls back from jq to node runs a generic op, so the learning
-    // store loads only for a learning op, and the renderer and formatter only when
-    // that op renders.
+  it('a generic op loads none of the curation modules; a curation op loads the store, the renderer only to render, the move module only to move', () => {
+    // Every hook that falls back from jq to node runs a generic op, so the curation
+    // store loads only for a curation op, the renderer and formatter only when that
+    // op renders, and the move module only for the move op.
     const probeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'json-helper-lazy-'));
     try {
       const record = path.join(probeDir, 'loaded.txt');
@@ -346,32 +351,39 @@ describe('json-helper.js operations', () => {
         `process.on('exit', () => fs.writeFileSync(${JSON.stringify(record)}, Object.keys(require.cache).join('\\n')));`,
         '',
       ].join('\n'));
-      const learningModulesLoadedBy = (args: readonly string[], input: string): string[] => {
+      const curationModulesLoadedBy = (args: readonly string[], input: string, env: NodeJS.ProcessEnv = process.env): string[] => {
         const run = spawnSync(process.execPath, ['--require', preload, JSON_HELPER, ...args], {
           cwd: probeDir,
           input,
+          env,
           encoding: 'utf8',
           timeout: 60_000,
         });
         expect(run.status, run.stderr).toBe(0);
         return fs.readFileSync(record, 'utf8').split('\n')
           .map(file => path.basename(file))
-          .filter(name => /^(?:learning-store|render-decisions|decisions-format|mkdir-lock|project-paths)\.cjs$/.test(name))
+          .filter(name => /^(?:curation-store|curation-move|render-decisions|decisions-format|mkdir-lock|project-paths)\.cjs$/.test(name))
           .sort();
       };
 
-      expect(learningModulesLoadedBy(['get-field', 'cwd'], '{"cwd":"/tmp"}')).toEqual([]);
-      // claim-queue answers none outside a learning tree, so it exits 0 here, and renders nothing.
-      expect(learningModulesLoadedBy(['claim-queue'], '')).toEqual(['learning-store.cjs', 'mkdir-lock.cjs', 'project-paths.cjs']);
+      expect(curationModulesLoadedBy(['get-field', 'cwd'], '{"cwd":"/tmp"}')).toEqual([]);
+      // claim-queue answers none outside a curation tree, so it exits 0 here, and renders nothing.
+      expect(curationModulesLoadedBy(['claim-queue'], '')).toEqual(['curation-store.cjs', 'mkdir-lock.cjs', 'project-paths.cjs']);
       // restore-anchor renders the entry it restores.
-      const learningDir = path.join(probeDir, '.devflow', 'learning');
-      fs.mkdirSync(learningDir, { recursive: true });
+      const curationDir = path.join(probeDir, '.devflow', 'curation');
+      fs.mkdirSync(curationDir, { recursive: true });
       fs.writeFileSync(
-        path.join(learningDir, 'decisions-ledger.jsonl'),
+        path.join(curationDir, 'decisions-ledger.jsonl'),
         `${JSON.stringify({ id: 'obs_lazy_one', type: 'decision', anchor_id: 'ADR-001', decisions_status: 'Retired' })}\n`,
       );
-      expect(learningModulesLoadedBy(['restore-anchor', 'ADR-001'], '')).toEqual([
-        'decisions-format.cjs', 'learning-store.cjs', 'mkdir-lock.cjs', 'project-paths.cjs', 'render-decisions.cjs',
+      expect(curationModulesLoadedBy(['restore-anchor', 'ADR-001'], '')).toEqual([
+        'curation-store.cjs', 'decisions-format.cjs', 'mkdir-lock.cjs', 'project-paths.cjs', 'render-decisions.cjs',
+      ]);
+      // Only the move op loads the move module, which then builds on the store.
+      const home = path.join(probeDir, 'home');
+      fs.mkdirSync(home);
+      expect(curationModulesLoadedBy(['move-ledger', probeDir], '', { ...process.env, HOME: home })).toEqual([
+        'curation-move.cjs', 'curation-store.cjs', 'mkdir-lock.cjs', 'project-paths.cjs',
       ]);
     } finally {
       fs.rmSync(probeDir, { recursive: true, force: true });
@@ -811,7 +823,7 @@ describe('D-HOOKS-GIT-ONLY: no project scaffolding outside a git project or at H
     runSessionAndPrompt(project, homeDir);
 
     expect(fs.existsSync(path.join(project, '.gitignore'))).toBe(true);
-    expect(fs.existsSync(path.join(project, '.devflow', 'learning', '.pending-turns.jsonl'))).toBe(true);
+    expect(fs.existsSync(path.join(project, '.devflow', 'curation', '.pending-turns.jsonl'))).toBe(true);
     expect(fs.existsSync(path.join(project, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(true);
   });
 });
@@ -842,7 +854,7 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
     fs.rmSync(base, { recursive: true, force: true });
   });
 
-  const queueOf = (root: string) => path.join(root, '.devflow', 'learning', '.pending-turns.jsonl');
+  const queueOf = (root: string) => path.join(root, '.devflow', 'curation', '.pending-turns.jsonl');
   const rowsOf = (file: string): string[] =>
     fs.existsSync(file) ? fs.readFileSync(file, 'utf-8').split('\n').filter(Boolean) : [];
 
@@ -854,7 +866,7 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
   }
 
   it('TP-17: capture in the worktree appends to the main queue; memory stays in the worktree', () => {
-    fs.mkdirSync(path.join(main, '.devflow', 'learning'), { recursive: true });
+    fs.mkdirSync(path.join(main, '.devflow', 'curation'), { recursive: true });
 
     const { exitCode } = runHook(path.join(HOOKS_DIR, 'capture-prompt'), { cwd: wt, prompt: 'we chose X over Y' }, homeDir);
     expect(exitCode).toBe(0);
@@ -863,9 +875,9 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
     expect(rowsOf(queueOf(wt)), 'the worktree must not start a ledger queue of its own').toHaveLength(0);
     expect(rowsOf(path.join(wt, '.devflow', 'memory', '.pending-turns.jsonl'))).toHaveLength(1);
     expect(fs.existsSync(path.join(main, '.devflow', 'memory')), 'memory is per checkout').toBe(false);
-    // ensure-devflow-init scaffolds per-checkout data only: a learning/ in the
+    // ensure-devflow-init scaffolds per-checkout data only: a curation/ in the
     // worktree would be an empty directory nothing ever writes to.
-    expect(fs.existsSync(path.join(wt, '.devflow', 'learning')), 'no dead ledger dir in the worktree').toBe(false);
+    expect(fs.existsSync(path.join(wt, '.devflow', 'curation')), 'no dead ledger dir in the worktree').toBe(false);
     expect(fs.existsSync(path.join(wt, '.devflow', 'features'))).toBe(true);
   });
 
@@ -884,7 +896,7 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
     expect(resolveRoots(dotWt, { ...process.env, HOME: dotHome })).toEqual({ root: dotWtReal, ledger: dotWtReal });
 
     runHook(path.join(HOOKS_DIR, 'capture-prompt'), { cwd: dotWt, prompt: 'we chose X over Y' }, dotHome);
-    expect(fs.existsSync(path.join(dotHome, '.devflow', 'learning')), 'nothing lands in the machine root').toBe(false);
+    expect(fs.existsSync(path.join(dotHome, '.devflow', 'curation')), 'nothing lands in the machine root').toBe(false);
     expect(rowsOf(queueOf(dotWtReal))).toHaveLength(1);
 
     const { stdout } = runHook(path.join(HOOKS_DIR, 'session-start-context'), { cwd: dotWt, source: 'startup' }, dotHome);
@@ -912,14 +924,14 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
   });
 
   it('TP-17: the directive and the TL;DR in the worktree come from the main ledger', () => {
-    fs.mkdirSync(path.join(main, '.devflow', 'learning'), { recursive: true });
-    fs.writeFileSync(path.join(main, '.devflow', 'learning', 'decisions.md'), '<!-- TL;DR: 3 decisions. Key: ADR-003 Main -->\n# Decisions\n');
+    fs.mkdirSync(path.join(main, '.devflow', 'curation'), { recursive: true });
+    fs.writeFileSync(path.join(main, '.devflow', 'curation', 'decisions.md'), '<!-- TL;DR: 3 decisions. Key: ADR-003 Main -->\n# Decisions\n');
     fs.writeFileSync(queueOf(main), '{"role":"user","content":"we chose X over Y","ts":1}\n');
 
     const { stdout } = runHook(path.join(HOOKS_DIR, 'session-start-context'), { cwd: wt, source: 'startup' }, homeDir);
     const ctx = JSON.parse(stdout).hookSpecificOutput.additionalContext as string;
 
-    expect(ctx).toContain('--- LEARNING MAINTENANCE ---');
+    expect(ctx).toContain('--- CURATION MAINTENANCE ---');
     expect(ctx).toContain(`Project root: ${main}")`);
     expect(ctx).not.toContain(`Project root: ${wt}`);
     expect(ctx).toContain('ADR-003 Main');
@@ -929,8 +941,8 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
   // DECISIONS_CONTEXT. The path is the ledger's — the main checkout's in a linked
   // worktree — so it is named only when the ledger root passed the shape gate.
   const SESSION_CONTEXT = path.join(HOOKS_DIR, 'session-start-context');
-  const learningOf = (root: string) => path.join(root, '.devflow', 'learning');
-  const indexOf = (root: string) => path.join(learningOf(root), 'index.md');
+  const curationOf = (root: string) => path.join(root, '.devflow', 'curation');
+  const indexOf = (root: string) => path.join(curationOf(root), 'index.md');
 
   /**
    * The pass rule the section ends with (D-DECISIONS-CHARTER-HANDOFF). It lived in the
@@ -956,9 +968,9 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
 
   /** A rendered ledger at `root`: both TL;DR headers, and the index when given. */
   function seedRendered(root: string, index?: string): void {
-    fs.mkdirSync(learningOf(root), { recursive: true });
-    fs.writeFileSync(path.join(learningOf(root), 'decisions.md'), '<!-- TL;DR: 3 decisions -->\n# Architectural Decisions\n');
-    fs.writeFileSync(path.join(learningOf(root), 'pitfalls.md'), '<!-- TL;DR: 2 pitfalls -->\n# Known Pitfalls\n');
+    fs.mkdirSync(curationOf(root), { recursive: true });
+    fs.writeFileSync(path.join(curationOf(root), 'decisions.md'), '<!-- TL;DR: 3 decisions -->\n# Architectural Decisions\n');
+    fs.writeFileSync(path.join(curationOf(root), 'pitfalls.md'), '<!-- TL;DR: 2 pitfalls -->\n# Known Pitfalls\n');
     if (index !== undefined) fs.writeFileSync(indexOf(root), index);
   }
 
@@ -971,7 +983,7 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
   });
 
   it('PROJECT DECISIONS carries the index line and the pass rule alone when no TL;DR is rendered', () => {
-    fs.mkdirSync(learningOf(main), { recursive: true });
+    fs.mkdirSync(curationOf(main), { recursive: true });
     fs.writeFileSync(indexOf(main), 'Pitfalls (1):\n  PF-001  Main pitfall  [Active]\n');
 
     expect(decisionsSection(wt)).toBe(`--- PROJECT DECISIONS (TL;DR) ---\nIndex: ${indexOf(main)}\n${PASS_RULE}`);
@@ -993,8 +1005,8 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
     expect(decisionsSection(wt)).toBe('--- PROJECT DECISIONS (TL;DR) ---\n3 decisions\n2 pitfalls');
 
     // With no TL;DR either, there is no section at all.
-    fs.rmSync(path.join(learningOf(main), 'decisions.md'));
-    fs.rmSync(path.join(learningOf(main), 'pitfalls.md'));
+    fs.rmSync(path.join(curationOf(main), 'decisions.md'));
+    fs.rmSync(path.join(curationOf(main), 'pitfalls.md'));
     fs.writeFileSync(indexOf(main), '(none)\n');
     expect(decisionsSection(wt)).toBe('');
   });
@@ -1019,7 +1031,7 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
     expect(hook).toContain('--- PROJECT DECISIONS (TL;DR) ---');
     expect(hook).toContain('DECISIONS_INDEX_LINE="Index: $_SC_INDEX"');
     expect(hook).toContain(PASS_RULE);
-    // The charter is paid for in every ambient session, learning or not; the section is
+    // The charter is paid for in every ambient session, curation or not; the section is
     // gated on the machine switch narrowed by the repository.
     expect(charter).not.toContain('DECISIONS_CONTEXT');
     expect(charter).not.toContain('PROJECT DECISIONS');
@@ -1039,7 +1051,7 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
   ] as const)('the section reaches the model unchanged through the $name envelope', ({ name, prelude }) => {
     const hasJq = spawnSync('jq', ['--version'], { encoding: 'utf8' }).status === 0;
     it.skipIf(name === 'jq' && !hasJq)('em dashes and newlines in the pass rule survive json_session_output', () => {
-      const section = `--- PROJECT DECISIONS (TL;DR) ---\nIndex: /x/.devflow/learning/index.md\n${PASS_RULE}`;
+      const section = `--- PROJECT DECISIONS (TL;DR) ---\nIndex: /x/.devflow/curation/index.md\n${PASS_RULE}`;
       const run = spawnSync('bash', [
         '-c', `source "$1" && ${prelude} json_session_output "$2"`,
         '_', path.join(HOOKS_DIR, 'json-parse'), section,
@@ -1788,7 +1800,7 @@ describe('git-marker helper: df_no_symlink_below (D-HOOKS-NO-SYMLINK)', () => {
     expect(status(root, queue()), 'a file not created yet').toBe(0);
     fs.writeFileSync(queue(), '');
     expect(status(root, queue()), 'an existing file').toBe(0);
-    expect(status(root, path.join(root, '.devflow', 'learning', '.pending-turns.jsonl')), 'a folder not created yet').toBe(0);
+    expect(status(root, path.join(root, '.devflow', 'curation', '.pending-turns.jsonl')), 'a folder not created yet').toBe(0);
   });
 
   it('refuses a path that is itself a link, dangling or resolving', () => {
@@ -2270,7 +2282,7 @@ describe('ensure-devflow-init behavioral', () => {
 
   it('returns non-zero and creates nothing where the link points when .devflow is a symbolic link (D-HOOKS-NO-SYMLINK)', () => {
     // A repository can commit .devflow itself as a link; `mkdir -p` would then create
-    // memory/, learning/, features/ and docs/ inside the folder the link names, and
+    // memory/, features/ and docs/ inside the folder the link names, and
     // the carve-out marker would land there too. The refusal is logged once.
     const outsideDir = path.join(tmpDir, 'outside');
     fs.mkdirSync(outsideDir);
@@ -3131,6 +3143,12 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
 
   const wholeLines = (content: string): string[] => content.split('\n').map(l => l.trim());
 
+  /** The comment word moved with the feature name; it is comment text, never a block sentinel. */
+  const CURATION_COMMENT = '# Devflow runtime data — local by default (memory, curation, docs, locks).';
+  const OLD_COMMENT = '# Devflow runtime data — local by default (memory, learning, docs, locks).';
+  /** The shipped current block as a user's .gitignore holds it from before the rename. */
+  const OLD_COMMENT_BLOCK = DEVFLOW_GITIGNORE_BLOCK.replace(CURATION_COMMENT, OLD_COMMENT);
+
   const PARITY_CASES: Array<{
     label: string;
     input: string | null;
@@ -3538,6 +3556,17 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
       projectLinePresent: true,
       blockPresent: false,
     },
+    {
+      label: '(z) current block carrying the pre-curation comment — no-op in both twins, no duplicate block, no stamp work',
+      input: `node_modules/\n\n${OLD_COMMENT_BLOCK}\n`,
+      expected: `node_modules/\n\n${OLD_COMMENT_BLOCK}\n`,
+      changed: false,
+      devflowSentinelPresent: true,
+      claudeignoreLinePresent: true,
+      policyLinePresent: true,
+      projectLinePresent: true,
+      blockPresent: false,
+    },
 ];
 
   it('PARITY_CASES covers every v5 and v6 upgrade row and keeps the completion lines out of every no-sentinel row', () => {
@@ -3545,10 +3574,10 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
     // and D-GITIGNORE-V6 migrations depend on exist, and the only row with no block
     // sentinel in its result is the user opt-out.
     const labels = PARITY_CASES.map(r => r.label);
-    for (const tag of ['(g)', '(h)', '(i)', '(j)', '(k)', '(l)', '(m)', '(n)', '(o)', '(p)', '(q)', '(r)', '(s)', '(t)', '(u)', '(v)', '(w)', '(x)', '(y)']) {
+    for (const tag of ['(g)', '(h)', '(i)', '(j)', '(k)', '(l)', '(m)', '(n)', '(o)', '(p)', '(q)', '(r)', '(s)', '(t)', '(u)', '(v)', '(w)', '(x)', '(y)', '(z)']) {
       expect(labels.filter(l => l.startsWith(tag)), `row ${tag}`).toHaveLength(1);
     }
-    expect(PARITY_CASES.length).toBeGreaterThanOrEqual(33);
+    expect(PARITY_CASES.length).toBeGreaterThanOrEqual(34);
     // The v5 history literal really is v5: the policy line, no project line.
     expect(V5_BLOCK_SEED_LINES).toContain(POLICY_LINE);
     expect(V5_BLOCK_SEED_LINES).not.toContain(PROJECT_LINE);
@@ -3558,6 +3587,19 @@ describe('ensure-root-gitignore × computeDevflowGitignore cross-implementation 
     expect(current.slice(-3)).toEqual([POLICY_LINE, PROJECT_LINE, CLAUDEIGNORE_LINE]);
     expect(PARITY_CASES.filter(r => !r.devflowSentinelPresent).map(r => r.label))
       .toEqual(['user-authored /.devflow/ entry (no carve-out forced)']);
+  });
+
+  it('both writers open a fresh block with the curation comment, and the old-comment fixture differs from it in that line alone', () => {
+    const shellResult = runShell(null);
+    const tsResult = applyTs(null);
+    expect(shellResult.split('\n')[0], 'shell: first line').toBe(CURATION_COMMENT);
+    expect(tsResult.split('\n')[0], 'ts: first line').toBe(CURATION_COMMENT);
+    expect(shellResult, 'shell: the retired comment word is gone').not.toContain(OLD_COMMENT);
+    expect(tsResult, 'ts: the retired comment word is gone').not.toContain(OLD_COMMENT);
+    expect(OLD_COMMENT_BLOCK).not.toBe(DEVFLOW_GITIGNORE_BLOCK);
+    expect(OLD_COMMENT_BLOCK.split('\n').slice(1)).toEqual(DEVFLOW_GITIGNORE_BLOCK.split('\n').slice(1));
+    // Same length: the swap moves no byte count.
+    expect(OLD_COMMENT_BLOCK.length).toBe(DEVFLOW_GITIGNORE_BLOCK.length);
   });
 
   for (const row of PARITY_CASES) {
@@ -4088,7 +4130,7 @@ describe('session-start-context root .gitignore (memory-independent)', () => {
     expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v6'))).toBe(true);
   });
 
-  it('a linked .devflow gets no carve-out marker and no learning folder where the link points (D-HOOKS-NO-SYMLINK)', () => {
+  it('a linked .devflow gets no carve-out marker and no curation folder where the link points (D-HOOKS-NO-SYMLINK)', () => {
     const outsideDir = path.join(homeDir, 'outside');
     fs.mkdirSync(outsideDir);
     fs.symlinkSync(outsideDir, path.join(tmpDir, '.devflow'));
@@ -4099,7 +4141,7 @@ describe('session-start-context root .gitignore (memory-independent)', () => {
     expect(fs.readdirSync(outsideDir), 'nothing is created in the folder the link names').toEqual([]);
   });
 
-  // With memory and learning both off, this hook is the only one that reaches the
+  // With memory and curation both off, this hook is the only one that reaches the
   // carve-out, so its log is the only record of a skip there: the log must be set
   // up before the carve-out runs, and the skip written with log(), not dbg().
   describe('each link skip at the carve-out is logged once per run (D-HOOKS-NO-SYMLINK, D-GITIGNORE-LINK-INSIDE)', () => {
@@ -4151,35 +4193,36 @@ describe('session-start-context root .gitignore (memory-independent)', () => {
 });
 
 // =============================================================================
-// session-start-context Section 2: Learning maintenance directive
+// session-start-context Section 2: Curation maintenance directive
 // =============================================================================
 //
-// When the learning queue holds captured turns (or a crashed run left a stale
-// .processing batch), session-start-context emits a "--- LEARNING MAINTENANCE ---"
+// When the curation queue holds captured turns (or a crashed run left a stale
+// .processing batch), session-start-context emits a "--- CURATION MAINTENANCE ---"
 // directive instructing the main model to spawn the background Curate agent with
-// the resolved model: a valid project learning.json, then a `devflow agents`
+// the resolved model: a valid project curation.json, then a `devflow agents`
 // Curate mapping (agents.curate.model, else the pre-rename agents.learning.model; it
 // omits the model so the installed frontmatter decides),
-// then a valid global ~/.devflow/learning.json, then none
+// then a valid global ~/.devflow/curation.json, then none
 // (D-LEARNING-MODEL-PRECEDENCE). A FRESH .processing (younger than 900s) means a live agent already
 // owns the batch, so the directive is suppressed. Gate is the machine
-// `features.learning` in ~/.devflow/manifest.json, which the checkout's
-// project.json / config.json can only narrow (D-FEATURES-NARROW-ONLY).
+// `features.curation` (and its pre-rename copy `features.learning`) in
+// ~/.devflow/manifest.json, which the checkout's project.json / config.json can
+// only narrow (D-FEATURES-NARROW-ONLY).
 
-describe('session-start-context: learning maintenance directive (Section 2)', () => {
+describe('session-start-context: curation maintenance directive (Section 2)', () => {
   const CONTEXT_HOOK = path.join(HOOKS_DIR, 'session-start-context');
 
   let tmpDir: string;
   let homeDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-learning-'));
-    // Learning is project work, active only inside a git project (D-HOOKS-GIT-ONLY).
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-curation-'));
+    // Curation is project work, active only inside a git project (D-HOOKS-GIT-ONLY).
     // An empty `.git` is a marker, not a repository, so the root stays tmpDir.
     fs.mkdirSync(path.join(tmpDir, '.git'));
-    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-learning-home-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-curation-home-'));
     fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'curation'), { recursive: true });
   });
 
   afterEach(() => {
@@ -4187,8 +4230,8 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
     fs.rmSync(homeDir, { recursive: true, force: true });
   });
 
-  const queuePath = (dir: string) => path.join(dir, '.devflow', 'learning', '.pending-turns.jsonl');
-  const processingPath = (dir: string) => path.join(dir, '.devflow', 'learning', '.pending-turns.processing');
+  const queuePath = (dir: string) => path.join(dir, '.devflow', 'curation', '.pending-turns.jsonl');
+  const processingPath = (dir: string) => path.join(dir, '.devflow', 'curation', '.pending-turns.processing');
 
   function seedQueue(dir: string): void {
     fs.writeFileSync(queuePath(dir), '{"role":"user","content":"we chose X over Y","ts":1}\n');
@@ -4205,7 +4248,7 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
     expect(exitCode).toBe(0);
 
     const ctx = contextOf(stdout);
-    expect(ctx).toContain('--- LEARNING MAINTENANCE ---');
+    expect(ctx).toContain('--- CURATION MAINTENANCE ---');
     expect(ctx).toContain('subagent_type="Curate"');
     expect(ctx, 'the installed frontmatter decides the model').not.toContain('model=');
     expect(ctx, 'there is no opus fallback in the directive').not.toMatch(/\bopus\b/);
@@ -4220,25 +4263,40 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
     expect(fs.existsSync(queuePath(tmpDir))).toBe(true);
   });
 
+  it('the directive says curation throughout: the header and both body lines, never the retired feature word', () => {
+    seedQueue(tmpDir);
+
+    const { stdout } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
+
+    const ctx = contextOf(stdout);
+    const section = ctx.slice(ctx.indexOf('--- CURATION MAINTENANCE ---'));
+    expect(section.startsWith('--- CURATION MAINTENANCE ---\n')).toBe(true);
+    expect(section).toContain('Captured turns are pending in the curation queue.');
+    expect(section).toContain('Process the pending curation queue per your agent instructions.');
+    // The project root is the test's own temp dir, whose name this check must not read.
+    expect(section.split(tmpDir).join('<root>')).not.toMatch(/learning/i);
+    expect(ctx).not.toContain('LEARNING MAINTENANCE');
+  });
+
   it('no directive when the queue is empty or absent', () => {
     // Zero-byte queue file (the -s test) + a TL;DR so there is JSON output to inspect.
     fs.writeFileSync(queuePath(tmpDir), '');
     fs.writeFileSync(
-      path.join(tmpDir, '.devflow', 'learning', 'decisions.md'),
+      path.join(tmpDir, '.devflow', 'curation', 'decisions.md'),
       '<!-- TL;DR: 1 decision. Key: ADR-001 Test -->\n# Architectural Decisions',
     );
 
     const { stdout, exitCode } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
     expect(exitCode).toBe(0);
-    expect(contextOf(stdout)).not.toContain('LEARNING MAINTENANCE');
+    expect(contextOf(stdout)).not.toContain('CURATION MAINTENANCE');
   });
 
-  // D-FEATURES-NARROW-ONLY: `devflow init --no-learning` / `devflow learning
-  // --disable` write features.learning:false to ~/.devflow/manifest.json; that
-  // switches the directive (and the TL;DR) off in every repo, and no repository
-  // file can switch it back on — the retired per-repo `learning` key decides
-  // nothing either way.
-  describe('machine-wide learning switch (manifest only)', () => {
+  // D-FEATURES-NARROW-ONLY: `devflow init --no-curation` / `devflow curation
+  // --disable` write features.curation:false (and its pre-rename copy
+  // features.learning) to ~/.devflow/manifest.json; that switches the directive
+  // (and the TL;DR) off in every repo, and no repository file can switch it back
+  // on — the retired per-repo `learning` key decides nothing either way.
+  describe('machine-wide curation switch (manifest only)', () => {
     const ENV = {};
     const TLDR = '<!-- TL;DR: 1 decision. Key: ADR-001 Test -->\n# Architectural Decisions';
 
@@ -4249,10 +4307,10 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
       );
     }
 
-    it('learning:false in the manifest suppresses the directive and the TL;DR although the repo config says true', () => {
+    it('the legacy learning key false in the manifest suppresses the directive and the TL;DR although the repo config says true', () => {
       seedQueue(tmpDir);
       fs.writeFileSync(path.join(tmpDir, '.devflow', 'config.json'), JSON.stringify({ learning: true }));
-      fs.writeFileSync(path.join(tmpDir, '.devflow', 'learning', 'decisions.md'), TLDR);
+      fs.writeFileSync(path.join(tmpDir, '.devflow', 'curation', 'decisions.md'), TLDR);
       writeManifestFeatures({ learning: false });
 
       const { stdout, exitCode } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir, ENV);
@@ -4260,7 +4318,7 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
       expect(stdout.trim()).toBe('');
     });
 
-    it('learning:false in the manifest suppresses the directive where the repo has no config', () => {
+    it('the legacy learning key false in the manifest suppresses the directive where the repo has no config', () => {
       seedQueue(tmpDir);
       writeManifestFeatures({ learning: false });
 
@@ -4269,22 +4327,22 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
       expect(stdout.trim()).toBe('');
     });
 
-    it('a manifest without the learning key leaves the directive on (fail-open)', () => {
+    it('a manifest without a curation switch key leaves the directive on (fail-open)', () => {
       seedQueue(tmpDir);
       writeManifestFeatures({ ambient: true });
 
       const { stdout } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir, ENV);
-      expect(contextOf(stdout)).toContain('--- LEARNING MAINTENANCE ---');
+      expect(contextOf(stdout)).toContain('--- CURATION MAINTENANCE ---');
     });
 
-    it('a stale repo config learning:false does not suppress the directive or the TL;DR', () => {
+    it('a stale repo config with the legacy learning key false does not suppress the directive or the TL;DR', () => {
       seedQueue(tmpDir);
       fs.writeFileSync(path.join(tmpDir, '.devflow', 'config.json'), JSON.stringify({ learning: false }));
-      fs.writeFileSync(path.join(tmpDir, '.devflow', 'learning', 'decisions.md'), TLDR);
+      fs.writeFileSync(path.join(tmpDir, '.devflow', 'curation', 'decisions.md'), TLDR);
       writeManifestFeatures({ learning: true });
 
       const ctx = contextOf(runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir, ENV).stdout);
-      expect(ctx).toContain('--- LEARNING MAINTENANCE ---');
+      expect(ctx).toContain('--- CURATION MAINTENANCE ---');
       expect(ctx).toContain('PROJECT DECISIONS');
     });
   });
@@ -4304,7 +4362,7 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
 
     const { stdout, exitCode } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
     expect(exitCode).toBe(0);
-    expect(stdout.trim() === '' || !contextOf(stdout).includes('LEARNING MAINTENANCE')).toBe(true);
+    expect(stdout.trim() === '' || !contextOf(stdout).includes('CURATION MAINTENANCE')).toBe(true);
   });
 
   it('stale .processing (older than 900s) emits the directive even with an empty queue', () => {
@@ -4315,31 +4373,31 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
     const { stdout, exitCode } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
     expect(exitCode).toBe(0);
     const ctx = contextOf(stdout);
-    expect(ctx).toContain('--- LEARNING MAINTENANCE ---');
+    expect(ctx).toContain('--- CURATION MAINTENANCE ---');
     expect(ctx).toContain('subagent_type="Curate"');
   });
 
   // ---------------------------------------------------------------------------
   // D-LEARNING-MODEL-PRECEDENCE: the first layer that supplies a model decides.
-  //   1. a valid project learning.json "model"            -> model="<value>"
+  //   1. a valid project curation.json "model"            -> model="<value>"
   //   2. agents.curate.model in ~/.devflow/agent-models.json, else the pre-rename
   //      agents.learning.model there -> no model= (the
   //      installed frontmatter decides). It counts only as a JSON string that is a
   //      valid model name (the rule `readAgentMapping` keeps a model by); any other
   //      type or shape reads as absent, and the lookup falls through to layer 3.
   //      The value only decides precedence and is never interpolated.
-  //   3. a valid ~/.devflow/learning.json "model"          -> model="<value>"
+  //   3. a valid ~/.devflow/curation.json "model"          -> model="<value>"
   //   4. none                                              -> no model=
   // ---------------------------------------------------------------------------
   describe('model resolution (D-LEARNING-MODEL-PRECEDENCE)', () => {
-    const projectLearningJson = () => path.join(tmpDir, '.devflow', 'learning', 'learning.json');
-    const globalLearningJson = () => path.join(homeDir, '.devflow', 'learning.json');
+    const projectCurationJson = () => path.join(tmpDir, '.devflow', 'curation', 'curation.json');
+    const globalCurationJson = () => path.join(homeDir, '.devflow', 'curation.json');
     const agentModelsJson = () => path.join(homeDir, '.devflow', 'agent-models.json');
 
     const setProject = (model: unknown) =>
-      fs.writeFileSync(projectLearningJson(), JSON.stringify({ model, debug: false }));
+      fs.writeFileSync(projectCurationJson(), JSON.stringify({ model, debug: false }));
     const setGlobal = (model: unknown) =>
-      fs.writeFileSync(globalLearningJson(), JSON.stringify({ model }));
+      fs.writeFileSync(globalCurationJson(), JSON.stringify({ model }));
     const setMapping = (agents: unknown) =>
       fs.writeFileSync(agentModelsJson(), JSON.stringify({ version: 1, agents }));
 
@@ -4355,7 +4413,7 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
       return line as string;
     }
 
-    it('layer 1: a valid project learning.json outranks the mapping and the global file', () => {
+    it('layer 1: a valid project curation.json outranks the mapping and the global file', () => {
       setProject('haiku');
       setMapping({ curate: { model: 'opus' } });
       setGlobal('sonnet');
@@ -4385,7 +4443,7 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
         expect(line).not.toContain('sonnet');
       });
 
-      it('still yields to a valid project learning.json', () => {
+      it('still yields to a valid project curation.json', () => {
         setProject('haiku');
         setMapping({ learning: { model: 'opus' } });
 
@@ -4419,7 +4477,7 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
       expect(spawnLine()).not.toContain('model=');
     });
 
-    it('layer 3: only a global ~/.devflow/learning.json emits model="sonnet"', () => {
+    it('layer 3: only a global ~/.devflow/curation.json emits model="sonnet"', () => {
       setGlobal('sonnet');
 
       expect(spawnLine()).toContain('model="sonnet"');
@@ -4499,7 +4557,7 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
 
       expect(exitCode).toBe(0);
       const ctx = contextOf(stdout);
-      expect(ctx, 'non-vacuity: the directive is emitted').toContain('--- LEARNING MAINTENANCE ---');
+      expect(ctx, 'non-vacuity: the directive is emitted').toContain('--- CURATION MAINTENANCE ---');
       expect(ctx, 'out of the model-name charset, so the mapping is absent and the global file decides').toContain('model="sonnet"');
       expect(ctx).not.toContain('evil');
       expect(ctx).not.toContain('$(');
@@ -4658,7 +4716,7 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
     });
 
     it('reads $HOME/.devflow only: DEVFLOW_DIR is ignored', () => {
-      const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-learning-elsewhere-'));
+      const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-curation-elsewhere-'));
       try {
         fs.writeFileSync(
           path.join(elsewhere, 'agent-models.json'),
@@ -4696,7 +4754,7 @@ describe('session-start-context: learning maintenance directive (Section 2)', ()
 // the session or an agent directive (D-HOOKS-NO-SYMLINK)
 // =============================================================================
 //
-// Sections 1 and 2 read the learning folder's files into the session context
+// Sections 1 and 2 read the curation folder's files into the session context
 // (the TL;DR lines and the Curate model), name the index the model is told to
 // read and pass on to the agents it delegates to, and send the Curate agent to
 // the queue when it holds turns. A repository can commit any of these, or the
@@ -4710,17 +4768,17 @@ describe('session-start-context never reads through a symbolic link under .devfl
 
   let tmpDir: string;
   let homeDir: string;
-  let learningDir: string;
+  let curationDir: string;
   let outsideDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-nolink-'));
-    // Learning is project work, active only inside a git project (D-HOOKS-GIT-ONLY).
+    // Curation is project work, active only inside a git project (D-HOOKS-GIT-ONLY).
     fs.mkdirSync(path.join(tmpDir, '.git'));
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-nolink-home-'));
     fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
-    learningDir = path.join(tmpDir, '.devflow', 'learning');
-    fs.mkdirSync(learningDir, { recursive: true });
+    curationDir = path.join(tmpDir, '.devflow', 'curation');
+    fs.mkdirSync(curationDir, { recursive: true });
     outsideDir = path.join(homeDir, 'outside');
     fs.mkdirSync(outsideDir);
   });
@@ -4741,11 +4799,11 @@ describe('session-start-context never reads through a symbolic link under .devfl
     return fs.existsSync(log) ? fs.readFileSync(log, 'utf-8').split('\n').filter((l) => l.includes('symbolic link')) : [];
   };
 
-  /** Write `content` to a file outside the project and link `name` in the learning folder to it. */
+  /** Write `content` to a file outside the project and link `name` in the curation folder to it. */
   const linkOutside = (name: string, content: string): string => {
     const target = path.join(outsideDir, name);
     fs.writeFileSync(target, content);
-    fs.symlinkSync(target, path.join(learningDir, name));
+    fs.symlinkSync(target, path.join(curationDir, name));
     return target;
   };
 
@@ -4757,7 +4815,7 @@ describe('session-start-context never reads through a symbolic link under .devfl
   ] as const) {
     it(`a linked ${linked} puts no TL;DR line, and nothing of the file it names, into the context`, () => {
       linkOutside(linked, `<!-- TL;DR: ${MARKER} -->\n# ${MARKER}\n`);
-      fs.writeFileSync(path.join(learningDir, kept), `<!-- TL;DR: ${keptLine} -->\n# Rendered\n`);
+      fs.writeFileSync(path.join(curationDir, kept), `<!-- TL;DR: ${keptLine} -->\n# Rendered\n`);
 
       const { stdout, exitCode } = run();
 
@@ -4770,7 +4828,7 @@ describe('session-start-context never reads through a symbolic link under .devfl
 
   it('a linked index.md gets no Index line, so the model is never pointed at the file it names', () => {
     linkOutside('index.md', `Decisions (1):\n  ${MARKER}\n`);
-    fs.writeFileSync(path.join(learningDir, 'decisions.md'), '<!-- TL;DR: 1 decisions -->\n# Rendered\n');
+    fs.writeFileSync(path.join(curationDir, 'decisions.md'), '<!-- TL;DR: 1 decisions -->\n# Rendered\n');
 
     const { stdout, exitCode } = run();
 
@@ -4782,15 +4840,15 @@ describe('session-start-context never reads through a symbolic link under .devfl
     expect(refusals(), 'the refusal is logged once').toHaveLength(1);
   });
 
-  it('a linked learning.json does not choose the Curate agent\'s model', () => {
-    fs.writeFileSync(path.join(learningDir, '.pending-turns.jsonl'), '{"role":"user","content":"we chose X over Y","ts":1}\n');
-    linkOutside('learning.json', JSON.stringify({ model: 'haiku' }));
+  it('a linked curation.json does not choose the Curate agent\'s model', () => {
+    fs.writeFileSync(path.join(curationDir, '.pending-turns.jsonl'), '{"role":"user","content":"we chose X over Y","ts":1}\n');
+    linkOutside('curation.json', JSON.stringify({ model: 'haiku' }));
 
     const { stdout, exitCode } = run();
 
     expect(exitCode).toBe(0);
     const ctx = contextOf(stdout);
-    expect(ctx, 'non-vacuity: the directive is emitted').toContain('--- LEARNING MAINTENANCE ---');
+    expect(ctx, 'non-vacuity: the directive is emitted').toContain('--- CURATION MAINTENANCE ---');
     expect(ctx, 'the linked file is absent, so no layer supplies a model').not.toContain('model=');
     expect(ctx).not.toContain('haiku');
     expect(refusals(), 'the refusal is logged once').toHaveLength(1);
@@ -4801,17 +4859,17 @@ describe('session-start-context never reads through a symbolic link under .devfl
 
     const linked = run();
     expect(linked.exitCode).toBe(0);
-    expect(contextOf(linked.stdout)).not.toContain('LEARNING MAINTENANCE');
+    expect(contextOf(linked.stdout)).not.toContain('CURATION MAINTENANCE');
     expect(refusals(), 'the refusal is logged once').toHaveLength(1);
 
     // Non-vacuity: the same queue, as a real file, does send the agent.
-    fs.unlinkSync(path.join(learningDir, '.pending-turns.jsonl'));
-    fs.writeFileSync(path.join(learningDir, '.pending-turns.jsonl'), '{"role":"user","content":"we chose X over Y","ts":1}\n');
-    expect(contextOf(run().stdout)).toContain('--- LEARNING MAINTENANCE ---');
+    fs.unlinkSync(path.join(curationDir, '.pending-turns.jsonl'));
+    fs.writeFileSync(path.join(curationDir, '.pending-turns.jsonl'), '{"role":"user","content":"we chose X over Y","ts":1}\n');
+    expect(contextOf(run().stdout)).toContain('--- CURATION MAINTENANCE ---');
   });
 
   it('a linked stale batch sends no Curate agent to it', () => {
-    const batch = path.join(learningDir, '.pending-turns.processing');
+    const batch = path.join(curationDir, '.pending-turns.processing');
     linkOutside('.pending-turns.processing', `{"role":"user","content":"${MARKER}","ts":1}\n`);
     // The age check reads the link's own mtime (`stat` without -L), so the link is
     // what is made stale.
@@ -4820,22 +4878,22 @@ describe('session-start-context never reads through a symbolic link under .devfl
 
     const linked = run();
     expect(linked.exitCode).toBe(0);
-    expect(contextOf(linked.stdout)).not.toContain('LEARNING MAINTENANCE');
+    expect(contextOf(linked.stdout)).not.toContain('CURATION MAINTENANCE');
     expect(refusals(), 'the refusal is logged once').toHaveLength(1);
 
     // Non-vacuity: the same stale batch, as a real file, does send the agent.
     fs.unlinkSync(batch);
     fs.writeFileSync(batch, '{"role":"user","content":"orphaned","ts":1}\n');
     fs.utimesSync(batch, stale, stale);
-    expect(contextOf(run().stdout)).toContain('--- LEARNING MAINTENANCE ---');
+    expect(contextOf(run().stdout)).toContain('--- CURATION MAINTENANCE ---');
   });
 
-  it('a linked learning folder: no TL;DR, no Index line, no directive, and each file read from it refused once', () => {
-    fs.rmSync(learningDir, { recursive: true });
+  it('a linked curation folder: no TL;DR, no Index line, no directive, and each file read from it refused once', () => {
+    fs.rmSync(curationDir, { recursive: true });
     fs.writeFileSync(path.join(outsideDir, 'decisions.md'), `<!-- TL;DR: ${MARKER} -->\n`);
     fs.writeFileSync(path.join(outsideDir, 'index.md'), `Decisions (1):\n  ${MARKER}\n`);
     fs.writeFileSync(path.join(outsideDir, '.pending-turns.jsonl'), `{"role":"user","content":"${MARKER}","ts":1}\n`);
-    fs.symlinkSync(outsideDir, learningDir);
+    fs.symlinkSync(outsideDir, curationDir);
 
     const { stdout, exitCode } = run();
 
@@ -4844,9 +4902,22 @@ describe('session-start-context never reads through a symbolic link under .devfl
     expect(stdout).not.toContain(MARKER);
     const refused = refusals();
     for (const name of ['decisions.md', 'index.md', '.pending-turns.jsonl']) {
-      expect(refused.filter((l) => l.includes(path.join(learningDir, name))), `${name} is refused once`).toHaveLength(1);
+      expect(refused.filter((l) => l.includes(path.join(curationDir, name))), `${name} is refused once`).toHaveLength(1);
     }
     expect(refused).toHaveLength(3);
+  });
+
+  it('a dangling link at the curation folder: the heal refuses it, logs the refusal once, and makes nothing where it points', () => {
+    fs.rmSync(curationDir, { recursive: true });
+    const pointsAt = path.join(outsideDir, 'absent');
+    fs.symlinkSync(pointsAt, curationDir);
+
+    const { exitCode } = run();
+
+    expect(exitCode).toBe(0);
+    expect(fs.existsSync(pointsAt), 'nothing is made where the link points').toBe(false);
+    expect(fs.lstatSync(curationDir).isSymbolicLink(), 'the link is left in place').toBe(true);
+    expect(refusals()).toEqual([expect.stringContaining(`a symbolic link sits on the path to ${curationDir}`)]);
   });
 });
 
@@ -5742,5 +5813,846 @@ describe('ensure-proxy behavioral tests', () => {
       const log = fs.readFileSync(path.join(homeDir, '.devflow', 'logs', 'proxy.log'), 'utf-8');
       expect(log).toContain(`re-resolved binPath via command -v subswitch: ${fakeSubswitch}`);
     });
+  });
+});
+
+// =============================================================================
+// curation-move: the shim that moves the old ledger folder (#529)
+//
+// TP-3 (the shim half is in tests/project-paths.test.ts), TP-9, TP-15 (log half),
+// TP-27 (shim half), TP-33 (the steady states) and TP-36. The shim is a file of
+// sourced functions; each test sources it in /bin/bash (3.2 on macOS) in a temp
+// tree with a temp HOME, so nothing reads or writes the real machine directory.
+// =============================================================================
+
+describe('curation-move: the shim that moves the old ledger folder (#529)', { timeout: GIT_FIXTURE_TIMEOUT_MS }, () => {
+  const SHIM = path.join(HOOKS_DIR, 'curation-move');
+  const store = createRequire(import.meta.url)(PROJECT_PATHS) as { curationMoveLockKey(realRoot: string): string };
+  const OLD = LEGACY_NAMES.folder;
+  const NEW = CURATION_DIR_NAME;
+  const QUEUE = '.pending-turns.jsonl';
+  const writeFakeExecutable = useWarmFakeExecutables();
+
+  /** The environment of a run that can fork nothing: bash builtins only. */
+  const NO_FORK = { PATH: '/nonexistent' };
+  const SEEDED: Record<string, string> = { [QUEUE]: '{"role":"user","content":"a","ts":1}\n', 'notes.txt': 'kept\n' };
+
+  let base: string;
+  let homeDir: string;
+  let root: string;
+  let logFile: string;
+
+  beforeEach(() => {
+    base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-cmove-')));
+    homeDir = path.join(base, 'home');
+    root = path.join(base, 'project');
+    logFile = path.join(base, 'hook.log');
+    fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+    fs.mkdirSync(root);
+  });
+
+  afterEach(() => {
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+
+  const markerOf = (at: string): string => getCurationMoveMarkerPath(homeDir, at);
+  const busyMarkerOf = (at: string): string => path.join(homeDir, '.devflow', 'logs', `curation-move.${curationMoveMarkerKey(at)}.busy`);
+  const lockOf = (at: string): string => path.join(homeDir, '.devflow', `.curation-move-${store.curationMoveLockKey(at)}.lock`);
+  const logLines = (): string[] => (fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8').split('\n').filter(Boolean) : []);
+  const oldOf = (at: string): string => path.join(at, '.devflow', OLD);
+  const newOf = (at: string): string => path.join(at, '.devflow', NEW);
+
+  /** Write the old ledger folder under `at`, with `files` in it. */
+  function seedOld(at: string, files: Record<string, string> = SEEDED): string {
+    const dir = oldOf(at);
+    fs.mkdirSync(dir, { recursive: true });
+    for (const [name, content] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), content, { mode: 0o600 });
+    return dir;
+  }
+
+  /**
+   * Source the shim, with a log() that writes to the log file, then run `body`. `ROOT` and the
+   * other values reach the script as environment, never as script text. An undefined value
+   * removes the variable.
+   */
+  function run(body: string, env: Record<string, string | undefined> = {}, cwd: string = base): { status: number | null; stdout: string; stderr: string } {
+    const script = `log() { printf '%s\\n' "$1" >> "$LOG_FILE"; }\nsource "$SHIM"\n${body}`;
+    const full: Record<string, string | undefined> = { ...process.env, HOME: homeDir, LOG_FILE: logFile, SHIM, ROOT: root, ...env };
+    for (const key of Object.keys(full)) if (full[key] === undefined) delete full[key];
+    const res = spawnSync('/bin/bash', ['-c', script, '_'], { cwd, encoding: 'utf-8', env: full as NodeJS.ProcessEnv });
+    return { status: res.status, stdout: res.stdout, stderr: res.stderr };
+  }
+
+  describe('the steady state and the refusals fork nothing and write nothing (TP-27, TP-33)', () => {
+    const CLEAN = { status: 0, stdout: '', stderr: '' };
+
+    it('no old folder: it returns at once, with no command run, no log line and no marker', () => {
+      fs.mkdirSync(newOf(root), { recursive: true });
+
+      expect(run('df_curation_move "$ROOT"', NO_FORK)).toEqual(CLEAN);
+
+      expect(logLines()).toEqual([]);
+      expect(fs.existsSync(markerOf(root))).toBe(false);
+    });
+
+    it('only a backup folder: the same, because the backup is the init sweep\'s and not a hook\'s', () => {
+      fs.mkdirSync(path.join(root, '.devflow', `${LEGACY_NAMES.backupPrefix}20261016T123045Z-0123abcd`), { recursive: true });
+
+      expect(run('df_curation_move "$ROOT"', NO_FORK)).toEqual(CLEAN);
+
+      expect(logLines()).toEqual([]);
+    });
+
+    it('no .devflow at all: the same', () => {
+      expect(run('df_curation_move "$ROOT" retry', NO_FORK)).toEqual(CLEAN);
+      expect(fs.existsSync(path.join(root, '.devflow'))).toBe(false);
+    });
+
+    it('an empty root argument does nothing', () => {
+      expect(run('df_curation_move ""', NO_FORK)).toEqual(CLEAN);
+    });
+
+    const refused: Array<[string, () => string]> = [
+      ['the ledger root is the home directory', () => {
+        seedOld(homeDir);
+        return homeDir;
+      }],
+      ['the ledger root is the home directory reached through a link', () => {
+        seedOld(homeDir);
+        const linkedHome = path.join(base, 'linked-home');
+        fs.symlinkSync(homeDir, linkedHome);
+        return linkedHome;
+      }],
+      ['the ledger root is the machine directory', () => {
+        const machine = path.join(homeDir, '.devflow');
+        seedOld(machine);
+        return machine;
+      }],
+      ['the ledger root is a link', () => {
+        seedOld(root);
+        const link = path.join(base, 'linked-root');
+        fs.symlinkSync(root, link);
+        return link;
+      }],
+      ['the root\'s .devflow is a link', () => {
+        const elsewhere = path.join(base, 'elsewhere');
+        seedOld(elsewhere);
+        fs.symlinkSync(path.join(elsewhere, '.devflow'), path.join(root, '.devflow'));
+        return root;
+      }],
+    ];
+
+    for (const [name, arrange] of refused) {
+      it(`${name}: nothing is forked, logged, marked or moved`, () => {
+        const at = arrange();
+        const env = name.includes('through a link') ? { ...NO_FORK, HOME: path.join(base, 'linked-home') } : NO_FORK;
+
+        expect(run('df_curation_move "$ROOT" retry', { ROOT: at, ...env })).toEqual(CLEAN);
+
+        expect(logLines()).toEqual([]);
+        expect(fs.existsSync(markerOf(at))).toBe(false);
+        expect(fs.readdirSync(path.join(at, '.devflow')).filter((n) => n === NEW || n.startsWith('learning.backup-'))).toEqual([]);
+        expect(fs.existsSync(path.join(fs.realpathSync(path.join(at, '.devflow')), OLD)), 'the old folder stays where it was').toBe(true);
+      });
+    }
+  });
+
+  describe('a move that runs', () => {
+    it('moves the folder, logs one line, leaves no marker, and costs nothing at the next event', () => {
+      seedOld(root);
+
+      const res = run('df_curation_move "$ROOT"');
+
+      expect(res.status, res.stderr).toBe(0);
+      expect(res.stdout).toBe('');
+      expect(fs.existsSync(oldOf(root))).toBe(false);
+      expect(fs.readFileSync(path.join(newOf(root), QUEUE), 'utf-8')).toBe(SEEDED[QUEUE]);
+      expect(fs.readFileSync(path.join(newOf(root), 'notes.txt'), 'utf-8')).toBe(SEEDED['notes.txt']);
+      expect(logLines()).toHaveLength(1);
+      expect(logLines()[0]).toContain('Curation move');
+      expect(fs.existsSync(markerOf(root))).toBe(false);
+
+      expect(run('df_curation_move "$ROOT"', NO_FORK)).toEqual({ status: 0, stdout: '', stderr: '' });
+      expect(logLines()).toHaveLength(1);
+    });
+
+    it('passes only the root to node as an argument, and the scripts under set -e go on', () => {
+      seedOld(root);
+      const nodeLog = path.join(base, 'node.log');
+      const shimDir = path.join(base, 'shim');
+      fs.mkdirSync(shimDir);
+      writeFakeExecutable(path.join(shimDir, 'node'), `#!/bin/bash\nprintf '%s|' "$@" >> "${nodeLog}"\nexec "${process.execPath}" "$@"\n`);
+
+      const res = run('set -e; df_curation_move "$ROOT"; echo after', { PATH: `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}` });
+
+      expect(res.stdout).toBe('after\n');
+      expect(fs.readFileSync(nodeLog, 'utf-8')).toBe(`${path.join(HOOKS_DIR, 'json-helper.cjs')}|move-ledger|${root}|`);
+    });
+
+    it('TP-15: a new folder with a non-empty log wins, and the one log line names the backup folder', () => {
+      const ledgerSet = (tag: string): Record<string, string> => ({
+        'decisions-log.jsonl': toJsonl([makeV2LogRow({ id: `obs_${tag}` })]),
+        'decisions-ledger.jsonl': toJsonl([makeV2LedgerRow({ id: `obs_${tag}`, anchor_id: 'ADR-001', title: `Decision ${tag}` })]),
+      });
+      seedOld(root, { ...ledgerSet('old'), [QUEUE]: '{"role":"user","content":"old turn","ts":1}\n' });
+      const newDir = newOf(root);
+      fs.mkdirSync(newDir, { recursive: true });
+      for (const [name, content] of Object.entries({ ...ledgerSet('new'), [QUEUE]: '{"role":"user","content":"new turn","ts":2}\n' })) {
+        fs.writeFileSync(path.join(newDir, name), content, { mode: 0o600 });
+      }
+
+      const res = run('df_curation_move "$ROOT"');
+
+      expect(res.status, res.stderr).toBe(0);
+      const backups = fs.readdirSync(path.join(root, '.devflow')).filter((n) => n.startsWith(LEGACY_NAMES.backupPrefix));
+      expect(backups).toHaveLength(1);
+      expect(fs.existsSync(oldOf(root))).toBe(false);
+      expect(fs.readFileSync(path.join(newDir, 'decisions-log.jsonl'), 'utf-8')).toBe(ledgerSet('new')['decisions-log.jsonl']);
+      expect(fs.readFileSync(path.join(newDir, QUEUE), 'utf-8').split('\n').filter(Boolean)).toEqual([
+        '{"role":"user","content":"new turn","ts":2}',
+        '{"role":"user","content":"old turn","ts":1}',
+      ]);
+      expect(logLines()).toHaveLength(1);
+      expect(logLines()[0]).toContain(backups[0]);
+    });
+  });
+
+  describe('a move that is held, refused or failed', () => {
+    it('busy: no log line, no marker, nothing changed, no wait, and exactly one node attempt', () => {
+      seedOld(root);
+      fs.mkdirSync(lockOf(root));
+      const nodeLog = path.join(base, 'node.log');
+      const shimDir = path.join(base, 'shim');
+      fs.mkdirSync(shimDir);
+      writeFakeExecutable(path.join(shimDir, 'node'), `#!/bin/bash\necho node >> "${nodeLog}"\nexec "${process.execPath}" "$@"\n`);
+      const started = Date.now();
+
+      const res = run('set -e; df_curation_move "$ROOT"; echo after', { PATH: `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}` });
+
+      expect(res.stdout).toBe('after\n');
+      expect(Date.now() - started, 'a held lock is never waited on').toBeLessThan(NODE_RUN_MS);
+      expect(fs.readFileSync(nodeLog, 'utf-8').trim().split('\n')).toEqual(['node']);
+      expect(logLines()).toEqual([]);
+      expect(fs.existsSync(markerOf(root))).toBe(false);
+      expect(fs.readFileSync(path.join(oldOf(root), QUEUE), 'utf-8')).toBe(SEEDED[QUEUE]);
+      expect(fs.existsSync(newOf(root))).toBe(false);
+    });
+
+    describe('a fresh queue claim holds the move: one fork, then a busy marker, then no fork until a session start', () => {
+      const CLEAN = { status: 0, stdout: '', stderr: '' };
+      const CLAIM = '.pending-turns.processing';
+      const OWNER = '.pending-turns.owner';
+      const seedClaimed = (): string => seedOld(root, { ...SEEDED, [CLAIM]: '{"role":"user","content":"c","ts":1}\n', [OWNER]: 'aaaaaaaaaaaaaaaa\n' });
+      const makeStale = (): void => {
+        const long = new Date(Date.now() - 3_600_000);
+        fs.utimesSync(path.join(oldOf(root), CLAIM), long, long);
+      };
+
+      /** A PATH whose node counts each call in a file, then runs the real node. */
+      function countingNode(): { env: { PATH: string }; forks: () => number } {
+        const nodeLog = path.join(base, 'node.log');
+        const shimDir = path.join(base, 'shim');
+        fs.mkdirSync(shimDir, { recursive: true });
+        writeFakeExecutable(path.join(shimDir, 'node'), `#!/bin/bash\necho node >> "${nodeLog}"\nexec "${process.execPath}" "$@"\n`);
+        return {
+          env: { PATH: `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}` },
+          forks: () => (fs.existsSync(nodeLog) ? fs.readFileSync(nodeLog, 'utf-8').split('\n').filter(Boolean).length : 0),
+        };
+      }
+
+      it('the first event forks node once and writes the busy marker; the second forks nothing; no log line and no refusal marker (TP-33)', () => {
+        seedClaimed();
+        const node = countingNode();
+
+        expect(run('set -e; df_curation_move "$ROOT"; echo after', node.env)).toEqual({ status: 0, stdout: 'after\n', stderr: '' });
+        expect(node.forks()).toBe(1);
+        expect(fs.existsSync(busyMarkerOf(root))).toBe(true);
+        expect(fs.existsSync(markerOf(root)), 'busy is not a refusal').toBe(false);
+        expect(logLines()).toEqual([]);
+
+        expect(run('df_curation_move "$ROOT"', node.env)).toEqual(CLEAN);
+        expect(node.forks(), 'the second event forks nothing').toBe(1);
+        expect(run('df_curation_move "$ROOT"', NO_FORK), 'and needs no command at all').toEqual(CLEAN);
+        expect(logLines()).toEqual([]);
+        expect(fs.existsSync(markerOf(root))).toBe(false);
+        expect(fs.existsSync(path.join(oldOf(root), QUEUE))).toBe(true);
+        expect(fs.existsSync(newOf(root))).toBe(false);
+      });
+
+      it('a session start clears the marker, and the move runs once the claim is stale', () => {
+        seedClaimed();
+        expect(run('df_curation_move "$ROOT"').status).toBe(0);
+        expect(fs.existsSync(busyMarkerOf(root))).toBe(true);
+        makeStale();
+
+        expect(run('df_curation_move "$ROOT"', NO_FORK), 'an ordinary event does not look again').toEqual(CLEAN);
+        expect(fs.existsSync(oldOf(root))).toBe(true);
+
+        const res = run('df_curation_move "$ROOT" retry');
+
+        expect(res).toEqual(CLEAN);
+        expect(fs.existsSync(busyMarkerOf(root))).toBe(false);
+        expect(fs.existsSync(oldOf(root))).toBe(false);
+        expect(fs.readFileSync(path.join(newOf(root), QUEUE), 'utf-8')).toBe(SEEDED[QUEUE]);
+        expect(logLines()).toHaveLength(1);
+        expect(logLines()[0]).toContain('Curation move');
+      });
+
+      it('a session start while the claim is still fresh looks once more and marks again', () => {
+        seedClaimed();
+        const node = countingNode();
+        run('df_curation_move "$ROOT"', node.env);
+        expect(node.forks()).toBe(1);
+
+        expect(run('df_curation_move "$ROOT" retry', node.env)).toEqual(CLEAN);
+
+        expect(node.forks()).toBe(2);
+        expect(fs.existsSync(busyMarkerOf(root))).toBe(true);
+        expect(fs.existsSync(oldOf(root))).toBe(true);
+        expect(logLines()).toEqual([]);
+      });
+
+      it('a held lock is not marked: every event forks node again', () => {
+        seedOld(root);
+        fs.mkdirSync(lockOf(root));
+        const node = countingNode();
+
+        run('df_curation_move "$ROOT"', node.env);
+        run('df_curation_move "$ROOT"', node.env);
+
+        expect(node.forks()).toBe(2);
+        expect(fs.existsSync(busyMarkerOf(root))).toBe(false);
+        expect(fs.existsSync(markerOf(root))).toBe(false);
+        expect(logLines()).toEqual([]);
+      });
+
+      it('a link at the busy marker name counts as a marker: nothing is forked and nothing is written through it', () => {
+        seedClaimed();
+        const outside = path.join(base, 'outside.txt');
+        fs.writeFileSync(outside, 'untouched\n');
+        fs.symlinkSync(outside, busyMarkerOf(root));
+
+        expect(run('df_curation_move "$ROOT"', NO_FORK)).toEqual(CLEAN);
+
+        expect(fs.readFileSync(outside, 'utf-8')).toBe('untouched\n');
+        expect(logLines()).toEqual([]);
+        expect(fs.existsSync(markerOf(root))).toBe(false);
+      });
+
+      it('the busy marker is written under noclobber, and the option is put back as it was', () => {
+        seedClaimed();
+        const report = 'case $- in *C*) echo C_ON;; *) echo C_OFF;; esac';
+
+        expect(run(`set -o noclobber; df_curation_move "$ROOT"; ${report}`).stdout).toBe('C_ON\n');
+        expect(fs.existsSync(busyMarkerOf(root))).toBe(true);
+
+        fs.rmSync(busyMarkerOf(root));
+        expect(run(`df_curation_move "$ROOT"; ${report}`).stdout).toBe('C_OFF\n');
+        expect(fs.existsSync(busyMarkerOf(root))).toBe(true);
+      });
+
+      it('a busy marker that cannot be written (no logs folder) is ignored', () => {
+        seedClaimed();
+        fs.rmSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+
+        expect(run('set -e; df_curation_move "$ROOT"; echo after')).toEqual({ status: 0, stdout: 'after\n', stderr: '' });
+        expect(logLines()).toEqual([]);
+      });
+    });
+
+    it('an old folder that is a link is refused once: one log line and a marker, then no fork at the next event, then one more look at a session start', () => {
+      const target = path.join(base, 'elsewhere');
+      fs.mkdirSync(target);
+      fs.mkdirSync(path.join(root, '.devflow'));
+      fs.symlinkSync(target, oldOf(root));
+
+      const first = run('set -e; df_curation_move "$ROOT"; echo after');
+      expect(first).toEqual({ status: 0, stdout: 'after\n', stderr: '' });
+      expect(logLines()).toHaveLength(1);
+      expect(fs.existsSync(markerOf(root)), 'the marker key is the TypeScript key').toBe(true);
+
+      expect(run('df_curation_move "$ROOT"', NO_FORK)).toEqual({ status: 0, stdout: '', stderr: '' });
+      expect(logLines(), 'a marked root logs nothing more').toHaveLength(1);
+
+      expect(run('df_curation_move "$ROOT" retry').status).toBe(0);
+      expect(logLines(), 'a session start looks again').toHaveLength(2);
+      expect(fs.existsSync(markerOf(root))).toBe(true);
+      expect(fs.readlinkSync(oldOf(root))).toBe(target);
+      expect(fs.readdirSync(target)).toEqual([]);
+    });
+
+    it('a failed node call is logged once and marked, and the hook goes on', () => {
+      seedOld(root);
+
+      const res = run('set -e; df_curation_move "$ROOT"; echo after', NO_FORK);
+
+      expect(res).toEqual({ status: 0, stdout: 'after\n', stderr: '' });
+      expect(logLines()).toHaveLength(1);
+      expect(fs.existsSync(markerOf(root))).toBe(true);
+      expect(fs.existsSync(oldOf(root))).toBe(true);
+    });
+
+    it('a marker that cannot be written (no logs folder) is ignored', () => {
+      seedOld(root);
+      fs.rmSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+
+      const res = run('set -e; df_curation_move "$ROOT"; echo after', NO_FORK);
+
+      expect(res).toEqual({ status: 0, stdout: 'after\n', stderr: '' });
+      expect(logLines()).toHaveLength(1);
+    });
+
+    it('the marker is written under noclobber, and the option is put back as it was', () => {
+      seedOld(root);
+      const report = 'case $- in *C*) echo C_ON;; *) echo C_OFF;; esac';
+
+      const on = run(`set -o noclobber; df_curation_move "$ROOT"; ${report}`, NO_FORK);
+      expect(on.stdout).toBe('C_ON\n');
+      expect(fs.existsSync(markerOf(root))).toBe(true);
+
+      fs.rmSync(markerOf(root));
+      const off = run(`df_curation_move "$ROOT"; ${report}`, NO_FORK);
+      expect(off.stdout).toBe('C_OFF\n');
+      expect(fs.existsSync(markerOf(root))).toBe(true);
+    });
+
+    it('a link at the marker name counts as a marker: nothing is forked and nothing is written through it', () => {
+      seedOld(root);
+      const outside = path.join(base, 'outside.txt');
+      fs.writeFileSync(outside, 'untouched\n');
+      fs.symlinkSync(outside, markerOf(root));
+
+      expect(run('df_curation_move "$ROOT"', NO_FORK)).toEqual({ status: 0, stdout: '', stderr: '' });
+
+      expect(fs.readFileSync(outside, 'utf-8')).toBe('untouched\n');
+      expect(logLines()).toEqual([]);
+    });
+  });
+
+  describe('the log line holds no control character, whatever node printed', () => {
+    // A name read from the repository can reach node's answer. The json-helper scrubs it; the
+    // shim strips again with builtin expansion, so a node that did not scrub still cannot put an
+    // escape sequence in the hook log. The fake node prints raw bytes with printf octal escapes:
+    // ESC (033), the C1 control U+009B as its UTF-8 bytes (302 233), BEL (007) and DEL (177).
+    // eslint-disable-next-line no-control-regex
+    const CONTROL_CHARACTER = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/;
+    const RAW = String.raw`\033[31m\302\2332J\007\177`;
+
+    /** Run the shim with a node that prints `printfFormat` and exits `code`. */
+    function runWithNode(printfFormat: string, code: number): void {
+      seedOld(root);
+      const shimDir = path.join(base, 'shim');
+      fs.mkdirSync(shimDir);
+      writeFakeExecutable(path.join(shimDir, 'node'), `#!/bin/bash\nprintf '${printfFormat}'\nexit ${code}\n`);
+      const res = run('set -e; df_curation_move "$ROOT"; echo after', { PATH: `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}` });
+      expect(res).toEqual({ status: 0, stdout: 'after\n', stderr: '' });
+    }
+
+    it('a refusal line is logged without control characters, and keeps its readable text', () => {
+      runWithNode(`move-ledger: evil${RAW}name is a symbolic link; nothing was changed\\nsecond line\\n`, 1);
+
+      const lines = logLines();
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).not.toMatch(CONTROL_CHARACTER);
+      expect(lines[0]).toContain('Curation move skipped: move-ledger: evil');
+      expect(lines[0]).toContain('name is a symbolic link; nothing was changed');
+      expect(lines[0]).not.toContain('second line');
+    });
+
+    it('a move line with a backup folder and notes is logged without control characters', () => {
+      runWithNode(`moved moved-in\\nbackup learning.backup-evil${RAW}\\nnote left in the backup, not moved: evil${RAW}.txt\\n`, 0);
+
+      const lines = logLines();
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).not.toMatch(CONTROL_CHARACTER);
+      expect(lines[0]).toContain('Curation move (moved-in), backup folder learning.backup-evil');
+      expect(lines[0]).toContain('left in the backup, not moved: evil');
+    });
+
+    it('keeps UTF-8 text outside the C1 range, in a name or in a note', () => {
+      runWithNode(String.raw`moved moved-in\nbackup learning.backup-\342\202\254\303\251\nnote caf\303\251 \342\202\254 \303\240\n`, 0);
+
+      const lines = logLines();
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain('learning.backup-€é');
+      expect(lines[0]).toContain('café € à');
+    });
+
+    it('puts the locale back as it was', () => {
+      seedOld(root);
+      const res = run('LC_ALL=en_US.UTF-8; df_curation_move "$ROOT"; printf "%s" "$LC_ALL"', { LC_ALL: undefined });
+      expect(res.stdout).toBe('en_US.UTF-8');
+    });
+  });
+
+  describe('the marker key matches the TypeScript function (TP-27)', () => {
+    const ROOTS = [
+      '/a',
+      '/some/project',
+      '/Users/dean/Sandbox/devflow-rename',
+      `/${'x'.repeat(70)}/end`,
+      `/${'y'.repeat(59)}`,
+      `/${'z'.repeat(60)}`,
+      '/tmp/ünï/projéct',
+      '/日本語/プロジェクト/日本語日本語日本語日本語',
+      '/we ird/$(touch x)/"q"',
+      "/it's/`id`/\\back",
+    ];
+    const LOCALES: Array<[string, Record<string, string | undefined>]> = [
+      ['the default locale', {}],
+      ['LC_ALL=en_US.UTF-8', { LC_ALL: 'en_US.UTF-8' }],
+      ['LANG=en_US.UTF-8', { LANG: 'en_US.UTF-8', LC_ALL: undefined }],
+      ['LC_ALL=C', { LC_ALL: 'C' }],
+    ];
+
+    for (const [label, env] of LOCALES) {
+      it(`agrees on short, long and non-ASCII roots under ${label}`, () => {
+        for (const at of ROOTS) {
+          const res = run('df_curation_move_key "$ROOT" && printf %s "$DF_CURATION_MOVE_KEY"', { ...env, ROOT: at, ...NO_FORK });
+          expect({ at, key: res.stdout, status: res.status }).toEqual({ at, key: curationMoveMarkerKey(at), status: 0 });
+        }
+      });
+    }
+
+    for (const [label, env] of LOCALES) {
+      it(`the shim's refusal marker is the file getCurationMoveMarkerPath names, under ${label}`, () => {
+        for (const at of ROOTS) {
+          const res = run('df_curation_move_key "$ROOT" && _df_cm_markers && printf %s "$DF_CM_SKIP_MARKER"', { ...env, ROOT: at, ...NO_FORK });
+          expect({ at, marker: res.stdout, status: res.status }).toEqual({ at, marker: getCurationMoveMarkerPath(homeDir, at), status: 0 });
+        }
+      });
+    }
+
+    it('puts LC_ALL back as it was, set or unset', () => {
+      expect(run('LC_ALL=en_US.UTF-8; df_curation_move_key "$ROOT"; printf %s "$LC_ALL"', { LC_ALL: undefined, ...NO_FORK }).stdout).toBe('en_US.UTF-8');
+      expect(run('df_curation_move_key "$ROOT"; printf %s "${LC_ALL-unset}"', { LC_ALL: undefined, ...NO_FORK }).stdout).toBe('unset');
+      expect(run('df_curation_move_key "$ROOT"; printf %s "${LC_ALL-unset}"', { LC_ALL: '', ...NO_FORK }).stdout).toBe('');
+    });
+
+    it('refuses a root of more than 4096 bytes and sets no key', () => {
+      const res = run('DF_CURATION_MOVE_KEY=none; df_curation_move_key "$ROOT"; printf "%s|%s" "$?" "$DF_CURATION_MOVE_KEY"', { ROOT: `/${'a'.repeat(5000)}`, ...NO_FORK });
+      expect(res.stdout).toBe('1|none');
+    });
+  });
+
+  it('TP-36: a root whose name holds command-substitution characters runs nothing and moves normally', () => {
+    const evil = path.join(base, 'p$(touch pwned-sub)`touch pwned-tick`"q"\'r\' ;touch pwned-semi');
+    fs.mkdirSync(evil);
+    seedOld(evil);
+
+    const res = run('df_curation_move "$ROOT"', { ROOT: evil });
+
+    expect(res.status, res.stderr).toBe(0);
+    expect(fs.readdirSync(base).filter((n) => n.startsWith('pwned')), 'no name in the root path was run as a command').toEqual([]);
+    expect(fs.existsSync(oldOf(evil))).toBe(false);
+    expect(fs.readFileSync(path.join(newOf(evil), 'notes.txt'), 'utf-8')).toBe(SEEDED['notes.txt']);
+    expect(logLines()).toHaveLength(1);
+  });
+});
+
+// =============================================================================
+// TP-9: the hooks move the old folder before any creator makes the new one
+//
+// Session start and the capture hooks (through ensure-devflow-init) call the shim on
+// the LEDGER root, in the root, subdirectory and linked-worktree cells, with the
+// curation switch off as well as on. While a move is held, no creator makes the new
+// folder beside the old one.
+// =============================================================================
+
+describe('TP-9: the hooks move the old ledger folder before any creator makes the new one (#529)', { timeout: GIT_FIXTURE_TIMEOUT_MS }, () => {
+  const OLD = LEGACY_NAMES.folder;
+  const NEW = CURATION_DIR_NAME;
+  const QUEUE = '.pending-turns.jsonl';
+  const SEED_ROW = '{"role":"user","content":"seeded turn","ts":1}';
+  const store = createRequire(import.meta.url)(PROJECT_PATHS) as { curationMoveLockKey(realRoot: string): string };
+  const writeFakeExecutable = useWarmFakeExecutables();
+
+  let base: string;
+  let homeDir: string;
+  let main: string;
+  let wt: string;
+
+  beforeEach(() => {
+    base = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-cmove-hooks-'));
+    homeDir = path.join(base, 'home');
+    fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+    main = path.join(base, 'main');
+    initCommittedRepo(main);
+    execSync(`git worktree add -q "${path.join(base, 'wt')}" -b feat`, { cwd: main, stdio: 'pipe' });
+    main = fs.realpathSync(main);
+    wt = fs.realpathSync(path.join(base, 'wt'));
+    fs.mkdirSync(path.join(main, 'src', 'deep'), { recursive: true });
+    fs.mkdirSync(path.join(main, '.devflow', OLD), { recursive: true });
+    fs.writeFileSync(path.join(main, '.devflow', OLD, QUEUE), `${SEED_ROW}\n`, { mode: 0o600 });
+    fs.writeFileSync(path.join(main, '.devflow', OLD, 'notes.txt'), 'kept\n', { mode: 0o600 });
+  });
+
+  afterEach(() => {
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+
+  const rowsOf = (file: string): string[] => (fs.existsSync(file) ? fs.readFileSync(file, 'utf-8').split('\n').filter(Boolean) : []);
+  const switchOff = (): void => {
+    fs.writeFileSync(path.join(homeDir, '.devflow', 'manifest.json'), JSON.stringify({ version: '2.0.0', features: { learning: false, curation: false } }));
+  };
+
+  const CELLS: ReadonlyArray<readonly [string, () => string]> = [
+    ['the root', () => main],
+    ['a subdirectory', () => path.join(main, 'src', 'deep')],
+    ['a linked worktree', () => wt],
+  ];
+  const HOOKS: ReadonlyArray<readonly [string, string, (cwd: string) => object]> = [
+    ['session-start-context', path.join(HOOKS_DIR, 'session-start-context'), (cwd) => ({ cwd, source: 'startup' })],
+    ['capture-prompt', path.join(HOOKS_DIR, 'capture-prompt'), (cwd) => ({ cwd, prompt: 'we chose X over Y' })],
+  ];
+
+  for (const [cellName, cwdOf] of CELLS) {
+    for (const [hookName, hook, input] of HOOKS) {
+      for (const switchState of ['on', 'off'] as const) {
+        it(`${hookName} in ${cellName}, curation ${switchState}: the old folder is moved, and no second folder is made`, () => {
+          if (switchState === 'off') switchOff();
+          const cwd = cwdOf();
+
+          const res = runHook(hook, input(cwd), homeDir);
+
+          expect(res.exitCode, res.stderr).toBe(0);
+          expect(fs.existsSync(path.join(main, '.devflow', OLD)), 'the old folder is gone').toBe(false);
+          expect(fs.readFileSync(path.join(main, '.devflow', NEW, 'notes.txt'), 'utf-8')).toBe('kept\n');
+          const queued = rowsOf(path.join(main, '.devflow', NEW, QUEUE));
+          expect(queued[0], 'the seeded row came along').toBe(SEED_ROW);
+          expect(queued, hookName === 'capture-prompt' && switchState === 'on' ? 'the captured row follows it' : 'nothing else is queued')
+            .toHaveLength(hookName === 'capture-prompt' && switchState === 'on' ? 2 : 1);
+          if (cwd === wt) {
+            expect(fs.existsSync(path.join(wt, '.devflow', NEW)), 'no dead folder in the worktree').toBe(false);
+            expect(fs.existsSync(path.join(wt, '.devflow', OLD))).toBe(false);
+          }
+        });
+      }
+    }
+  }
+
+  for (const [hookName, hook, input] of HOOKS) {
+    it(`${hookName} while a move is held: the old folder stays, and no creator makes the new one`, () => {
+      fs.mkdirSync(path.join(homeDir, '.devflow', `.curation-move-${store.curationMoveLockKey(main)}.lock`));
+
+      const res = runHook(hook, input(main), homeDir);
+
+      expect(res.exitCode, res.stderr).toBe(0);
+      expect(fs.existsSync(path.join(main, '.devflow', NEW)), 'no new folder beside the old one').toBe(false);
+      expect(fs.readFileSync(path.join(main, '.devflow', OLD, 'notes.txt'), 'utf-8')).toBe('kept\n');
+      expect(rowsOf(path.join(main, '.devflow', OLD, QUEUE))).toHaveLength(hookName === 'capture-prompt' ? 2 : 1);
+    });
+  }
+
+  describe('ensure-devflow-init sourced on its own', () => {
+    const ENSURE = path.join(HOOKS_DIR, 'ensure-devflow-init');
+    /** Source ensure-devflow-init for `main` under `set -e`, the way the capture hooks do. */
+    const source = (env: NodeJS.ProcessEnv = { ...process.env, HOME: homeDir }): { stdout: string; stderr: string } => {
+      const res = spawnSync('bash', ['-c', 'set -e; source "$0" "$1"; echo after', ENSURE, main], { encoding: 'utf-8', env });
+      return { stdout: res.stdout, stderr: res.stderr };
+    };
+
+    it('moves the old folder before the scaffold, and makes the other folders', () => {
+      expect(source().stdout).toBe('after\n');
+
+      expect(fs.existsSync(path.join(main, '.devflow', OLD))).toBe(false);
+      expect(fs.readFileSync(path.join(main, '.devflow', NEW, QUEUE), 'utf-8')).toBe(`${SEED_ROW}\n`);
+      for (const folder of ['memory', 'features', 'docs']) expect(fs.existsSync(path.join(main, '.devflow', folder)), folder).toBe(true);
+    });
+
+    it('a held move: the scaffold makes the other folders and no new ledger folder, and a repeat run forks no mkdir', () => {
+      fs.mkdirSync(path.join(homeDir, '.devflow', `.curation-move-${store.curationMoveLockKey(main)}.lock`));
+      const mkdirLog = path.join(base, 'mkdir.log');
+      const shimDir = path.join(base, 'shim');
+      fs.mkdirSync(shimDir);
+      const realMkdir = ['/bin/mkdir', '/usr/bin/mkdir'].find((p) => fs.existsSync(p)) ?? 'mkdir';
+      writeFakeExecutable(path.join(shimDir, 'mkdir'), `#!/bin/bash\necho "$@" >> "${mkdirLog}"\nexec "${realMkdir}" "$@"\n`);
+      const env = { ...process.env, HOME: homeDir, PATH: `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}` };
+
+      expect(source(env).stdout).toBe('after\n');
+      expect(fs.existsSync(path.join(main, '.devflow', NEW)), 'no new ledger folder beside the old one').toBe(false);
+      expect(fs.existsSync(path.join(main, '.devflow', OLD, QUEUE))).toBe(true);
+      expect(fs.existsSync(path.join(main, '.devflow', 'memory'))).toBe(true);
+      fs.rmSync(mkdirLog, { force: true });
+
+      expect(source(env).stdout).toBe('after\n');
+      expect(fs.existsSync(mkdirLog), 'the old folder satisfies the fast path: no mkdir is forked').toBe(false);
+    });
+
+    it('no old folder: the scaffold makes the new folder and not the old one', () => {
+      fs.rmSync(path.join(main, '.devflow', OLD), { recursive: true });
+
+      expect(source().stdout).toBe('after\n');
+
+      expect(fs.existsSync(path.join(main, '.devflow', NEW))).toBe(true);
+      expect(fs.existsSync(path.join(main, '.devflow', OLD))).toBe(false);
+    });
+  });
+
+  describe('a creator never makes the old folder, whichever way a move races it', () => {
+    /**
+     * A copy of the scripts folder whose git-marker answers the creator probe as it
+     * is, then takes the old folder away, as a move would between the probe and the
+     * make. The probe log shows that the stub ran.
+     */
+    const probedScripts = (): { hooks: string; probeLog: string } => {
+      const scripts = path.join(base, 'scripts');
+      fs.cpSync(path.dirname(HOOKS_DIR), scripts, { recursive: true });
+      const hooks = path.join(scripts, 'hooks');
+      const probeLog = path.join(base, 'probe.log');
+      fs.appendFileSync(path.join(hooks, 'git-marker'), [
+        '',
+        'eval "_real_$(declare -f df_ledger_folder)"',
+        `df_ledger_folder() { _real_df_ledger_folder "$@"; echo probed >> "${probeLog}"; rm -rf "$1/${OLD}"; }`,
+        '',
+      ].join('\n'));
+      return { hooks, probeLog };
+    };
+    /** Hold the move, so the old folder is still there at the probe. */
+    const holdMove = (): void => {
+      fs.mkdirSync(path.join(homeDir, '.devflow', `.curation-move-${store.curationMoveLockKey(main)}.lock`));
+    };
+
+    it('ensure-devflow-init: the old folder is gone after the probe, and the scaffold makes no old folder', () => {
+      const { hooks, probeLog } = probedScripts();
+      holdMove();
+
+      const res = spawnSync('bash', ['-c', 'set -e; source "$0" "$1"; echo after', path.join(hooks, 'ensure-devflow-init'), main], {
+        encoding: 'utf-8',
+        env: { ...process.env, HOME: homeDir },
+      });
+
+      expect({ stdout: res.stdout, stderr: res.stderr }).toEqual({ stdout: 'after\n', stderr: '' });
+      expect(fs.existsSync(probeLog), 'non-vacuity: the probe stub ran').toBe(true);
+      expect(fs.existsSync(path.join(main, '.devflow', OLD)), 'no old folder is made again').toBe(false);
+      for (const folder of ['memory', 'features', 'docs']) expect(fs.existsSync(path.join(main, '.devflow', folder)), folder).toBe(true);
+    });
+
+    it('session-start-context: the old folder is gone after the probe, and the heal makes no old folder', () => {
+      const { hooks, probeLog } = probedScripts();
+      holdMove();
+
+      const res = runHook(path.join(hooks, 'session-start-context'), { cwd: main, source: 'startup' }, homeDir);
+
+      expect(res.exitCode, res.stderr).toBe(0);
+      expect(fs.existsSync(probeLog), 'non-vacuity: the probe stub ran').toBe(true);
+      expect(fs.existsSync(path.join(main, '.devflow', OLD)), 'no old folder is made again').toBe(false);
+    });
+  });
+
+  // macOS /bin/bash 3.2 ends a `set -e` shell when `source` fails on a missing file, even
+  // inside `|| true`, `if` or an outer `|| { ...; exit 1; }`. A broken install without the
+  // shim must still cost a hook no more than the move and the creator step: the hook exits
+  // 0, does its other work, and no creator makes a ledger folder beside the old one.
+  describe('a missing curation-move shim stops no hook (bash 3.2 under set -e)', () => {
+    const BASH = '/bin/bash';
+    /** True when this bash ends a `set -e` shell at a `source` of a missing file, even inside `|| true`. */
+    const BASH_ENDS_AT_MISSING_SOURCE = ((): boolean => {
+      const probe = spawnSync(BASH, ['-c', 'set -e; source ./missing-shim 2>/dev/null || true; echo after'], { encoding: 'utf-8', cwd: os.tmpdir() });
+      return probe.stdout === '' && probe.status === 1;
+    })();
+    const GATE = { version: '2.0.0', features: { learning: true, curation: true, memory: true } };
+
+    /** A copy of the scripts folder without the shim, and its hooks folder. */
+    const hooksWithoutShim = (): string => {
+      const scripts = path.join(base, 'scripts-no-shim');
+      fs.cpSync(path.dirname(HOOKS_DIR), scripts, { recursive: true });
+      fs.rmSync(path.join(scripts, 'hooks', 'curation-move'));
+      return path.join(scripts, 'hooks');
+    };
+    const env = (): NodeJS.ProcessEnv => ({ ...process.env, HOME: homeDir });
+    const runHookNoShim = (name: string, input: object): { stdout: string; stderr: string; status: number | null } => {
+      const res = spawnSync(BASH, [path.join(hooksWithoutShim(), name)], { encoding: 'utf-8', input: JSON.stringify(input), env: env() });
+      return { stdout: res.stdout, stderr: res.stderr, status: res.status };
+    };
+    /** Source `file` of the shim-less hooks folder under `set -e`, then run `after`. */
+    const sourceNoShim = (file: string, args: string, after: string): { stdout: string; stderr: string; status: number | null } => {
+      const hooks = hooksWithoutShim();
+      const script = `set -e; log() { echo "log: $1" >&2; }; dbg() { :; }; source "${hooks}/json-parse"; source "${hooks}/get-mtime"; source "${hooks}/curation-lock"; source "${hooks}/${file}" ${args}; ${after}`;
+      const res = spawnSync(BASH, ['-c', script], { encoding: 'utf-8', env: env() });
+      return { stdout: res.stdout, stderr: res.stderr, status: res.status };
+    };
+    /** Every hook log line written under the machine folder. */
+    const hookLogs = (): string => {
+      const lines: string[] = [];
+      const walk = (dir: string): void => {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          if (entry.isDirectory()) walk(path.join(dir, entry.name));
+          else if (entry.isFile()) lines.push(fs.readFileSync(path.join(dir, entry.name), 'utf-8'));
+        }
+      };
+      walk(path.join(homeDir, '.devflow', 'logs'));
+      return lines.join('\n');
+    };
+    const oldFolderIntact = (): void => {
+      expect(fs.readFileSync(path.join(main, '.devflow', OLD, 'notes.txt'), 'utf-8'), 'the old folder is as it was').toBe('kept\n');
+      expect(rowsOf(path.join(main, '.devflow', OLD, QUEUE)), 'no row is added to the old queue').toEqual([SEED_ROW]);
+      expect(fs.existsSync(path.join(main, '.devflow', NEW)), 'no creator makes a ledger folder beside the old one').toBe(false);
+    };
+
+    beforeEach(() => {
+      fs.writeFileSync(path.join(homeDir, '.devflow', 'manifest.json'), JSON.stringify(GATE));
+    });
+
+    it('non-vacuity: the copy has no shim', () => {
+      expect(fs.existsSync(path.join(hooksWithoutShim(), 'curation-move'))).toBe(false);
+    });
+
+    // Only a bash 3.2 shell ends a `set -e` shell at a `source` of a missing file. A newer
+    // bash (the Linux /bin/bash is 5.x) returns 1 from it, so `|| true` works there, and the
+    // fault half of this check runs only where the bash shows the fault.
+    it.skipIf(!BASH_ENDS_AT_MISSING_SOURCE)('non-vacuity: this bash ends a set -e shell at a source of a missing file', () => {
+      const res = spawnSync(BASH, ['-c', 'set -e; source ./missing-shim 2>/dev/null || true; echo after'], { encoding: 'utf-8', cwd: base });
+      expect({ stdout: res.stdout, status: res.status }, 'this is the fault the guard avoids').toEqual({ stdout: '', status: 1 });
+    });
+
+    it.runIf(process.platform === 'darwin')('non-vacuity: the macOS /bin/bash shows the fault, so the guard tests below are not vacuous there', () => {
+      expect(BASH_ENDS_AT_MISSING_SOURCE).toBe(true);
+    });
+
+    it('queue-append sourced under set -e: it sources, and an append is refused and logged, not an exit', () => {
+      const res = sourceNoShim('queue-append', '', `queue_append_row "${main}" "${path.join(main, '.devflow', 'memory', QUEUE)}" user hi 1; echo after`);
+
+      expect(res.status, res.stderr).toBe(0);
+      expect(res.stdout).toBe('after\n');
+      expect(res.stderr, 'the documented refusal ran').toContain('Queue skipped: the ledger folder names are unavailable; nothing written');
+      expect(fs.existsSync(path.join(main, '.devflow', 'memory', QUEUE)), 'nothing is written without the names').toBe(false);
+      oldFolderIntact();
+    });
+
+    it('ensure-devflow-init sourced under set -e: it scaffolds the memory folders, and makes no ledger folder', () => {
+      const res = sourceNoShim('ensure-devflow-init', `"${main}"`, 'echo after');
+
+      expect({ stdout: res.stdout, status: res.status }, res.stderr).toEqual({ stdout: 'after\n', status: 0 });
+      for (const folder of ['memory', 'features', 'docs']) expect(fs.existsSync(path.join(main, '.devflow', folder)), folder).toBe(true);
+      oldFolderIntact();
+    });
+
+    it('session-start-context: exits 0, still does its other work, and curation is skipped', () => {
+      const res = runHookNoShim('session-start-context', { cwd: main, source: 'startup' });
+
+      expect(res.status, res.stderr).toBe(0);
+      expect(res.stderr).not.toContain('failed to source');
+      expect(hookLogs(), 'the hook went on past the shim and said why curation is skipped').toContain('Curation skipped: the ledger folder names are unavailable');
+      expect(fs.existsSync(path.join(main, '.devflow', '.root-gitignore-configured-v6')), 'the gitignore step still ran').toBe(true);
+      expect(res.stdout, 'no curation directive without a ledger folder name').not.toContain('CURATION MAINTENANCE');
+      oldFolderIntact();
+    });
+
+    const CAPTURES: ReadonlyArray<readonly [string, () => object]> = [
+      ['capture-prompt', () => ({ cwd: main, prompt: 'we chose X over Y' })],
+      ['capture-turn', () => ({ cwd: main, session_id: 't', last_assistant_message: 'a response' })],
+      ['capture-question', () => ({ cwd: main, session_id: 't', tool_name: 'AskUserQuestion', tool_input: { questions: [{ question: 'Q?' }] }, tool_response: { answers: { 'Q?': 'A' } } })],
+    ];
+    for (const [name, input] of CAPTURES) {
+      it(`${name}: exits 0, and writes no row and no ledger folder`, () => {
+        const res = runHookNoShim(name, input());
+
+        expect({ status: res.status, stderr: res.stderr }).toEqual({ status: 0, stderr: '' });
+        expect(hookLogs(), 'the hook reached the append and took the documented refusal').toContain('Queue skipped: the ledger folder names are unavailable; nothing written');
+        expect(fs.existsSync(path.join(main, '.devflow', 'memory', QUEUE)), 'no memory row without the names').toBe(false);
+        oldFolderIntact();
+      });
+    }
   });
 });

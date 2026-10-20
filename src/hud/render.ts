@@ -18,7 +18,7 @@ import usageQuota from './components/usage-quota.js';
 import codexQuota from './components/codex-quota.js';
 import todoProgress from './components/todo-progress.js';
 import configCounts from './components/config-counts.js';
-import learningCounts from './components/learning-counts.js';
+import curationCounts from './components/curation-counts.js';
 import sessionCost from './components/session-cost.js';
 import releaseInfo from './components/release-info.js';
 import worktreeCount from './components/worktree-count.js';
@@ -36,7 +36,7 @@ const COMPONENT_MAP: Record<ComponentId, ComponentFn> = {
   codexQuota,
   todoProgress,
   configCounts,
-  learningCounts,
+  curationCounts,
   sessionCost,
   releaseInfo,
   worktreeCount,
@@ -50,7 +50,7 @@ const LINE_GROUPS: ComponentId[][] = [
   ['directory', 'gitBranch', 'gitAheadBehind', 'releaseInfo', 'worktreeCount', 'diffStats'],
   ['contextUsage', 'usageQuota', 'codexQuota', 'todoProgress'],
   ['model', 'configCounts', 'sessionCost'],
-  ['learningCounts'],
+  ['curationCounts'],
   ['versionBadge'],
 ];
 

@@ -28,7 +28,7 @@ function mkTmpDir(): string {
 
 function mkMemoryDir(base: string): void {
   fs.mkdirSync(path.join(base, '.devflow', 'memory'), { recursive: true });
-  fs.mkdirSync(path.join(base, '.devflow', 'learning'), { recursive: true });
+  fs.mkdirSync(path.join(base, '.devflow', 'curation'), { recursive: true });
 }
 
 function sessionInput(tmpDir: string, extra: Record<string, unknown> = {}): string {
@@ -38,7 +38,7 @@ function sessionInput(tmpDir: string, extra: Record<string, unknown> = {}): stri
 /**
  * Seed a temp HOME that stands in for `~/.devflow` (AC-3.22).
  *
- * `session-start-context` reads user-scope state — the global learning.json and,
+ * `session-start-context` reads user-scope state — the global curation.json and,
  * since Section 3, the tracker manifest and its `.tracker.enabled` sentinel — out
  * of `$HOME/.devflow`. Every hook in this file additionally
  * sources `hook-log-init`, whose `devflow_log_dir` does an unconditional
@@ -58,7 +58,7 @@ function mkTmpHome(): string {
 }
 
 /**
- * A user-scope manifest holding `features` — where memory, learning and
+ * A user-scope manifest holding `features` — where memory, curation and
  * knowledge are switched for the machine (D-FEATURES-NARROW-ONLY).
  */
 function writeManifest(home: string, features: Record<string, unknown>): void {
@@ -238,9 +238,9 @@ describe('config guard: session-start-context', () => {
     expect(runContextHook(input)).toBe('');
   });
 
-  it('outputs decisions TL;DR when learning enabled and decisions.md exists', () => {
+  it('outputs decisions TL;DR when curation is enabled and decisions.md exists', () => {
     mkMemoryDir(tmpDir);
-    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
+    const decisionsDir = path.join(tmpDir, '.devflow', 'curation');
     fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), '<!-- TL;DR: 1 decisions. Key: ADR-001 -->\n# Decisions\n');
     const output = runContextHook(sessionInput(tmpDir));
     expect(output.length).toBeGreaterThan(0);
@@ -248,19 +248,19 @@ describe('config guard: session-start-context', () => {
     expect(additionalContext).toContain('PROJECT DECISIONS');
   });
 
-  it('skips decisions TL;DR when learning is switched off machine-wide', () => {
+  it('skips decisions TL;DR when curation is switched off machine-wide', () => {
     mkMemoryDir(tmpDir);
-    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
+    const decisionsDir = path.join(tmpDir, '.devflow', 'curation');
     fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), '<!-- TL;DR: 1 decisions. Key: ADR-001 -->\n# Decisions\n');
     writeManifest(tmpHome, { learning: false });
     // No output (nothing else to inject in this minimal test)
     expect(runContextHook(sessionInput(tmpDir))).toBe('');
   });
 
-  it('a stale repo config learning:false does not skip the decisions TL;DR', () => {
+  it('a stale repo config with the legacy learning key false does not skip the decisions TL;DR', () => {
     mkMemoryDir(tmpDir);
     fs.writeFileSync(
-      path.join(tmpDir, '.devflow', 'learning', 'decisions.md'),
+      path.join(tmpDir, '.devflow', 'curation', 'decisions.md'),
       '<!-- TL;DR: 1 decisions. Key: ADR-001 -->\n# Decisions\n',
     );
     writeRepoConfig(tmpDir, { learning: false });
@@ -277,14 +277,15 @@ describe('config guard: session-start-context', () => {
   // no devflow install — stayed green. The temp HOME above is the fix; the two
   // cases below are what keeps it honest.
 
-  it('AC-3.22: the learning:false emptiness assertion survives a HOME with provider jira', () => {
+  it('AC-3.22: the curation-off emptiness assertion survives a HOME with provider jira', () => {
     // The seeded HOME is the hostile one: manifest provider jira AND the presence
     // sentinel, i.e. exactly the machine state that used to break this file.
-    // learning:false rides in the same manifest — it is the machine-wide switch.
+    // The curation switch rides in the same manifest (here as its pre-rename
+    // `learning` key) — it is the machine-wide switch.
     seedTrackerProvider(tmpHome, 'jira', { learning: false });
     mkMemoryDir(tmpDir);
     fs.writeFileSync(
-      path.join(tmpDir, '.devflow', 'learning', 'decisions.md'),
+      path.join(tmpDir, '.devflow', 'curation', 'decisions.md'),
       '<!-- TL;DR: 1 decisions. Key: ADR-001 -->\n# Decisions\n',
     );
     // The SessionStart event these guards send carries no `source`, and Section 3
@@ -320,13 +321,13 @@ describe('config guard: session-start-context', () => {
     }
   });
 
-  it('session-start-context does not output LEARNED BEHAVIORS (learning pipeline removed)', () => {
+  it('session-start-context does not output LEARNED BEHAVIORS (the old pipeline is removed)', () => {
     // Section 1.75 removed — LEARNED BEHAVIORS must never appear
     mkMemoryDir(tmpDir);
-    // Create a learning log that would have triggered the old section
-    const learningDir = path.join(tmpDir, '.devflow', 'learning');
-    fs.mkdirSync(learningDir, { recursive: true });
-    const logPath = path.join(learningDir, 'learning-log.jsonl');
+    // Create an old learning log that would have triggered the old section
+    const curationDir = path.join(tmpDir, '.devflow', 'curation');
+    fs.mkdirSync(curationDir, { recursive: true });
+    const logPath = path.join(curationDir, 'learning-log.jsonl');
     fs.writeFileSync(logPath, JSON.stringify({
       id: 'obs_abc123', type: 'workflow', status: 'created',
       artifact_path: '/.claude/commands/self-learning/deploy-flow.md', confidence: 0.95,
@@ -344,7 +345,7 @@ describe('config guard: session-start-context', () => {
   it('session-start-memory no longer outputs decisions TL;DR', () => {
     const SESSION_START_MEMORY = path.join(HOOKS_DIR, 'session-start-memory');
     mkMemoryDir(tmpDir);
-    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
+    const decisionsDir = path.join(tmpDir, '.devflow', 'curation');
     fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), '<!-- TL;DR: 1 decisions. Key: ADR-001 -->\n# Decisions\n');
     fs.writeFileSync(path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md'), '## Now\n- testing');
     const input = sessionInput(tmpDir);
@@ -577,7 +578,7 @@ describe('re-entrancy guard: session-start-context DEVFLOW_BG_UPDATER', () => {
 
   it('outputs nothing when DEVFLOW_BG_UPDATER=1, even with a decisions TL;DR present', () => {
     mkMemoryDir(tmpDir);
-    const decisionsDir = path.join(tmpDir, '.devflow', 'learning');
+    const decisionsDir = path.join(tmpDir, '.devflow', 'curation');
     fs.mkdirSync(decisionsDir, { recursive: true });
     fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), '<!-- TL;DR: 1 decisions. Key: ADR-001 -->\n# Decisions\n');
     const input = sessionInput(tmpDir);

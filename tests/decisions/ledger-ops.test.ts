@@ -23,17 +23,17 @@ import * as os from 'os';
 import {
   FIXTURE_NOW,
   daysAgoIso,
-  learningPaths,
+  curationPaths,
   makeV1LedgerRow,
   makeV1LogRow,
   makeV2LedgerRow,
   makeV2LogRow,
-  requireLearningStore,
+  requireCurationStore,
   runJsonHelper,
-  seedLearningTree,
+  seedCurationTree,
   snapshotTree,
   type Row,
-} from './learning-fixtures.js';
+} from './curation-fixtures.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(import.meta.url);
@@ -42,7 +42,7 @@ const require = createRequire(import.meta.url);
 // Helpers: load the modules under test
 // ---------------------------------------------------------------------------
 
-const store = requireLearningStore();
+const store = requireCurationStore();
 
 const {
   renderDecisionsFile,
@@ -98,26 +98,26 @@ function makeLedgerRow(overrides: Record<string, unknown> = {}): Record<string, 
 }
 
 function writeLedger(dir: string, rows: Record<string, unknown>[]): string {
-  const ledgerPath = path.join(dir, '.devflow', 'learning', 'decisions-ledger.jsonl');
+  const ledgerPath = path.join(dir, '.devflow', 'curation', 'decisions-ledger.jsonl');
   fs.mkdirSync(path.dirname(ledgerPath), { recursive: true });
   fs.writeFileSync(ledgerPath, rows.map(r => JSON.stringify(r)).join('\n') + '\n', 'utf8');
   return ledgerPath;
 }
 
 function writeLog(dir: string, rows: Record<string, unknown>[]): string {
-  const logPath = path.join(dir, '.devflow', 'learning', 'decisions-log.jsonl');
+  const logPath = path.join(dir, '.devflow', 'curation', 'decisions-log.jsonl');
   fs.mkdirSync(path.dirname(logPath), { recursive: true });
   fs.writeFileSync(logPath, rows.map(r => JSON.stringify(r)).join('\n') + '\n', 'utf8');
   return logPath;
 }
 
 function readLedger(dir: string): Record<string, unknown>[] {
-  const ledgerPath = path.join(dir, '.devflow', 'learning', 'decisions-ledger.jsonl');
+  const ledgerPath = path.join(dir, '.devflow', 'curation', 'decisions-ledger.jsonl');
   return parseLedger(ledgerPath);
 }
 
 function readLog(dir: string): Record<string, unknown>[] {
-  const logPath = path.join(dir, '.devflow', 'learning', 'decisions-log.jsonl');
+  const logPath = path.join(dir, '.devflow', 'curation', 'decisions-log.jsonl');
   return parseLedger(logPath);
 }
 
@@ -216,7 +216,7 @@ describe('assign-anchor CLI op', { timeout: 30_000 }, () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'assign-anchor-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'curation'), { recursive: true });
   });
 
   afterEach(() => {
@@ -305,7 +305,7 @@ describe('assign-anchor CLI op', { timeout: 30_000 }, () => {
   it('re-renders decisions.md with the new entry', () => {
     writeLog(tmpDir, [makeV2LogRow({ id: 'obs_render_01' })]);
     runHelper('assign-anchor decision obs_render_01', tmpDir);
-    const decisionsPath = path.join(tmpDir, '.devflow', 'learning', 'decisions.md');
+    const decisionsPath = path.join(tmpDir, '.devflow', 'curation', 'decisions.md');
     expect(fs.existsSync(decisionsPath)).toBe(true);
     const content = fs.readFileSync(decisionsPath, 'utf8');
     expect(content).toContain('## ADR-001:');
@@ -334,7 +334,7 @@ describe('retire-anchor CLI op', { timeout: 30_000 }, () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'retire-anchor-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'curation'), { recursive: true });
   });
 
   afterEach(() => {
@@ -403,7 +403,7 @@ describe('retire-anchor CLI op', { timeout: 30_000 }, () => {
       makeLedgerRow({ anchor_id: 'ADR-002', id: 'obs_002', pattern: 'To be retired', decisions_status: 'Accepted' }),
     ]);
     expect(retire('ADR-002 Retired', { reason: 'A one-off' }).code).toBe(0);
-    const decisionsPath = path.join(tmpDir, '.devflow', 'learning', 'decisions.md');
+    const decisionsPath = path.join(tmpDir, '.devflow', 'curation', 'decisions.md');
     const content = fs.readFileSync(decisionsPath, 'utf8');
     expect(content).toMatch(/^## ADR-001: /m);
     expect(content).not.toMatch(/^## ADR-002:/m);
@@ -448,7 +448,7 @@ describe('AC-F7: number stability — retired number is never reused', { timeout
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'num-stability-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'curation'), { recursive: true });
   });
 
   afterEach(() => {
@@ -495,20 +495,20 @@ describe('AC-F7: number stability — retired number is never reused', { timeout
 describe('rotateObservations (D-ROTATE-UNREFERENCED)', () => {
   const DAY_MS = 24 * 60 * 60 * 1000;
   let tmpDir: string;
-  let paths: ReturnType<typeof learningPaths>;
+  let paths: ReturnType<typeof curationPaths>;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rotate-obs-test-'));
-    paths = learningPaths(tmpDir);
+    paths = curationPaths(tmpDir);
   });
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  /** Seed the learning tree, rotate at FIXTURE_NOW and return the counts. */
+  /** Seed the curation tree, rotate at FIXTURE_NOW and return the counts. */
   function rotate(seed: { log?: Row[]; ledger?: Row[]; archive?: Row[] }): { rotated: number; appended: number } {
-    seedLearningTree(tmpDir, seed);
+    seedCurationTree(tmpDir, seed);
     const result = store.rotateObservations(tmpDir, { now: FIXTURE_NOW });
     if (!result.ok) throw new Error(result.error.message);
     return result.value;
@@ -597,7 +597,7 @@ describe('rotateObservations (D-ROTATE-UNREFERENCED)', () => {
   });
 
   it('writes nothing when no row is due', () => {
-    seedLearningTree(tmpDir, {
+    seedCurationTree(tmpDir, {
       ledger: [makeV1LedgerRow()],
       log: [makeV1LogRow(), makeV1LogRow({ id: 'obs_fresh_one', last_seen: daysAgoIso(3) })],
     });
@@ -612,21 +612,21 @@ describe('rotateObservations (D-ROTATE-UNREFERENCED)', () => {
     const due = makeV1LogRow({ id: 'obs_due', last_seen: daysAgoIso(60) });
     const fresh = makeV1LogRow({ id: 'obs_fresh', last_seen: daysAgoIso(2) });
     const original = `${JSON.stringify(due)}\nnot json\n${JSON.stringify(fresh)}\n`;
-    fs.mkdirSync(paths.learningDir, { recursive: true });
+    fs.mkdirSync(paths.curationDir, { recursive: true });
     fs.writeFileSync(paths.log, original);
 
     expect(store.rotateObservations(tmpDir, { now: FIXTURE_NOW })).toEqual({ ok: true, value: { rotated: 1, appended: 1 } });
-    expect(fs.readFileSync(path.join(paths.learningDir, 'decisions-log.pre-v2.jsonl'), 'utf8')).toBe(original);
+    expect(fs.readFileSync(path.join(paths.curationDir, 'decisions-log.pre-v2.jsonl'), 'utf8')).toBe(original);
     expect(rowsOf(store.rejectedPathFor(paths.log)).map(record => record.text)).toEqual(['not json']);
     expect(fs.readFileSync(paths.log, 'utf8')).toBe(`${JSON.stringify(fresh)}\n`);
   });
 
-  it('refuses without a learning directory and creates nothing', () => {
+  it('refuses without a curation directory and creates nothing', () => {
     expect(store.rotateObservations(tmpDir, { now: FIXTURE_NOW })).toEqual({
       ok: false,
       error: {
-        kind: 'no-learning-dir',
-        message: `rotate-observations: no .devflow/learning/ under ${tmpDir} — run from the project root`,
+        kind: 'no-curation-dir',
+        message: `rotate-observations: no .devflow/curation/ under ${tmpDir} — run from the project root`,
       },
     });
     expect(fs.readdirSync(tmpDir)).toEqual([]);
@@ -642,7 +642,7 @@ describe('refresh-anchor CLI op', { timeout: 30_000 }, () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'refresh-anchor-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'curation'), { recursive: true });
   });
 
   afterEach(() => {
@@ -676,7 +676,7 @@ describe('refresh-anchor CLI op', { timeout: 30_000 }, () => {
     writeLedger(tmpDir, [makeV2LedgerRow({ id: 'obs_ra_003', anchor_id: 'ADR-003', title: 'Refreshed decision', rule: 'A stale rule.' })]);
     expect(runHelper('refresh-anchor ADR-003', tmpDir).code).toBe(0);
 
-    const content = fs.readFileSync(path.join(tmpDir, '.devflow', 'learning', 'decisions.md'), 'utf8');
+    const content = fs.readFileSync(path.join(tmpDir, '.devflow', 'curation', 'decisions.md'), 'utf8');
     expect(content).toContain('## ADR-003: Refreshed decision');
     expect(content).toContain('- **Decision**: The refreshed rule.\n');
     expect(content).not.toContain('A stale rule.');
@@ -692,12 +692,12 @@ describe('refresh-anchor CLI op', { timeout: 30_000 }, () => {
     })]);
     expect(runHelper('refresh-anchor PF-001', tmpDir).code).toBe(0);
 
-    const pitfallsContent = fs.readFileSync(path.join(tmpDir, '.devflow', 'learning', 'pitfalls.md'), 'utf8');
+    const pitfallsContent = fs.readFileSync(path.join(tmpDir, '.devflow', 'curation', 'pitfalls.md'), 'utf8');
     expect(pitfallsContent).toContain('## PF-001: Unbounded retries in hooks');
     expect(pitfallsContent).toContain('- **Rule**: Cap every retry loop at three attempts.\n');
     expect(pitfallsContent).not.toContain('An initial mitigation.');
 
-    const indexContent = fs.readFileSync(path.join(tmpDir, '.devflow', 'learning', 'index.md'), 'utf8');
+    const indexContent = fs.readFileSync(path.join(tmpDir, '.devflow', 'curation', 'index.md'), 'utf8');
     expect(indexContent).toContain('  PF-001  Unbounded retries in hooks');
   });
 
@@ -733,7 +733,7 @@ describe('refresh-anchor CLI op', { timeout: 30_000 }, () => {
     expect(result.stderr).toContain('ADR-001: not in the ledger');
   });
 
-  it('a learning tree with no ledger refuses the anchor as not in the ledger', () => {
+  it('a curation tree with no ledger refuses the anchor as not in the ledger', () => {
     writeLog(tmpDir, [makeV2LogRow()]);
     expect(runJsonHelper(tmpDir, ['refresh-anchor', 'ADR-001'])).toEqual({
       code: 1,
@@ -761,7 +761,7 @@ describe('refresh-anchor CLI op', { timeout: 30_000 }, () => {
     writeLedger(tmpDir, [makeV2LedgerRow({ id: 'obs_ra_lock' })]);
     const result = runHelper('refresh-anchor ADR-001', tmpDir);
     expect(result.code).toBe(0);
-    const lockDir = path.join(tmpDir, '.devflow', 'learning', '.decisions.lock');
+    const lockDir = path.join(tmpDir, '.devflow', 'curation', '.decisions.lock');
     expect(fs.existsSync(lockDir)).toBe(false);
   });
 
@@ -783,7 +783,7 @@ describe('refresh-anchor rewrites an entry in place (D-CONTENT-HISTORY)', { time
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rf-divguard-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'curation'), { recursive: true });
   });
 
   afterEach(() => {
@@ -802,7 +802,7 @@ describe('refresh-anchor rewrites an entry in place (D-CONTENT-HISTORY)', { time
     expect(result.code).toBe(0);
     expect(readLedger(tmpDir)[0].rule).toBe(newRule);
     expect(store.historyVersions(tmpDir, 'obs_divg_001').map(version => version.ledger)).toEqual([[prior]]);
-    const decisionsMd = fs.readFileSync(path.join(tmpDir, '.devflow', 'learning', 'decisions.md'), 'utf8');
+    const decisionsMd = fs.readFileSync(path.join(tmpDir, '.devflow', 'curation', 'decisions.md'), 'utf8');
     expect(decisionsMd).toContain(`- **Decision**: ${newRule}\n`);
     expect(decisionsMd).not.toContain('AMENDMENT');
   });
@@ -815,7 +815,7 @@ describe('refresh-anchor rewrites an entry in place (D-CONTENT-HISTORY)', { time
     expect(runHelper('refresh-anchor ADR-002', tmpDir).code).toBe(0);
 
     expect(readLedger(tmpDir)[0].title).toBe(newTitle);
-    const decisionsMd = fs.readFileSync(path.join(tmpDir, '.devflow', 'learning', 'decisions.md'), 'utf8');
+    const decisionsMd = fs.readFileSync(path.join(tmpDir, '.devflow', 'curation', 'decisions.md'), 'utf8');
     expect(decisionsMd).toContain(`## ADR-002: ${newTitle}`);
     expect(decisionsMd).not.toContain(oldTitle);
   });
@@ -824,7 +824,7 @@ describe('refresh-anchor rewrites an entry in place (D-CONTENT-HISTORY)', { time
     writeLog(tmpDir, [makeV2LogRow({ id: 'obs_divg_004' })]);
     writeLedger(tmpDir, [makeV2LedgerRow({ id: 'obs_divg_004', anchor_id: 'ADR-004' })]);
     expect(runHelper('refresh-anchor ADR-004', tmpDir).code).toBe(0);
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'learning', 'decisions-history.jsonl'))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'curation', 'decisions-history.jsonl'))).toBe(false);
   });
 });
 
@@ -837,7 +837,7 @@ describe('refresh-anchor variadic multi-anchor — PERF-1', { timeout: 30_000 },
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rf-variadic-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'curation'), { recursive: true });
   });
 
   afterEach(() => {
@@ -860,9 +860,9 @@ describe('refresh-anchor variadic multi-anchor — PERF-1', { timeout: 30_000 },
     const rows = readLedger(tmpDir);
     expect(rows.find(r => r.anchor_id === 'ADR-001')?.title).toBe('Updated decision title');
     expect(rows.find(r => r.anchor_id === 'PF-001')?.title).toBe('Updated pitfall title');
-    const decisionsMd = fs.readFileSync(path.join(tmpDir, '.devflow', 'learning', 'decisions.md'), 'utf8');
+    const decisionsMd = fs.readFileSync(path.join(tmpDir, '.devflow', 'curation', 'decisions.md'), 'utf8');
     expect(decisionsMd).toContain('## ADR-001: Updated decision title');
-    const pitfallsMd = fs.readFileSync(path.join(tmpDir, '.devflow', 'learning', 'pitfalls.md'), 'utf8');
+    const pitfallsMd = fs.readFileSync(path.join(tmpDir, '.devflow', 'curation', 'pitfalls.md'), 'utf8');
     expect(pitfallsMd).toContain('## PF-001: Updated pitfall title');
   });
 
@@ -892,7 +892,7 @@ describe('refresh-anchor quarantines malformed ledger lines (D-QUARANTINE-MALFOR
   it('moves a malformed ledger line aside before it rewrites the ledger, and keeps every row', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rf-quarantine-test-'));
     try {
-      const { ledger, learningDir } = seedLearningTree(tmpDir, {
+      const { ledger, curationDir } = seedCurationTree(tmpDir, {
         log: [makeV2LogRow({ id: 'obs_q_001', rule: 'A sharper rule.' }), makeV2LogRow({ id: 'obs_q_002', rule: 'A sharper rule.' })],
         ledger: [makeV2LedgerRow({ id: 'obs_q_001' }), makeV2LedgerRow({ id: 'obs_q_002', anchor_id: 'ADR-002' })],
       });
@@ -904,7 +904,7 @@ describe('refresh-anchor quarantines malformed ledger lines (D-QUARANTINE-MALFOR
         ['ADR-001', 'A sharper rule.'],
         ['ADR-002', 'A sharper rule.'],
       ]);
-      const rejected = store.readJsonl(path.join(learningDir, 'decisions-ledger.rejected.jsonl')).rows;
+      const rejected = store.readJsonl(path.join(curationDir, 'decisions-ledger.rejected.jsonl')).rows;
       expect(rejected.map(record => record.text)).toEqual(['{"anchor_id": "ADR-003", "cut off']);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -919,7 +919,7 @@ describe('refresh-anchor quarantines malformed ledger lines (D-QUARANTINE-MALFOR
 describe('retire-anchor stdout echo — CON-P1', () => {
   it('retire-anchor prints the status it set and the anchor, as refresh-anchor and restore-anchor print theirs', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'retire-stdout-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'curation'), { recursive: true });
     try {
       writeLedger(tmpDir, [makeLedgerRow({ anchor_id: 'ADR-001', decisions_status: 'Accepted' })]);
       expect(runJsonHelper(tmpDir, ['retire-anchor', 'ADR-001', 'Retired'], '{"reason":"test"}')).toEqual({
@@ -940,7 +940,7 @@ describe('rotate-observations CLI op', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rotate-cli-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'curation'), { recursive: true });
   });
 
   afterEach(() => {
@@ -948,7 +948,7 @@ describe('rotate-observations CLI op', () => {
   });
 
   it('prints "rotated N observations" and exits 0', () => {
-    seedLearningTree(tmpDir, {
+    seedCurationTree(tmpDir, {
       log: [
         makeV1LogRow({ id: 'obs_cli_due', last_seen: '2026-01-01T00:00:00.000Z' }),
         makeV1LogRow({ id: 'obs_cli_fresh', last_seen: new Date().toISOString() }),
@@ -958,10 +958,10 @@ describe('rotate-observations CLI op', () => {
     const result = runJsonHelper(tmpDir, ['rotate-observations']);
 
     expect(result).toEqual({ code: 0, stdout: 'rotated 1 observations\n', stderr: '' });
-    expect(store.readJsonl(learningPaths(tmpDir).archive).rows.map(row => row.id)).toEqual(['obs_cli_due']);
+    expect(store.readJsonl(curationPaths(tmpDir).archive).rows.map(row => row.id)).toEqual(['obs_cli_due']);
   });
 
-  it('prints "rotated 0 observations" for an empty learning tree', () => {
+  it('prints "rotated 0 observations" for an empty curation tree', () => {
     expect(runJsonHelper(tmpDir, ['rotate-observations'])).toEqual({ code: 0, stdout: 'rotated 0 observations\n', stderr: '' });
   });
 
@@ -989,7 +989,7 @@ describe('assign-anchor: the ledger alone records promotion (D-LEDGER-REGISTRY)'
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-precond-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'curation'), { recursive: true });
   });
 
   afterEach(() => {
@@ -999,7 +999,7 @@ describe('assign-anchor: the ledger alone records promotion (D-LEDGER-REGISTRY)'
   it('refuses an observation a ledger row already carries, naming that entry, though the log row names no anchor', () => {
     writeLog(tmpDir, [makeV2LogRow({ id: 'obs_already_anchored', type: 'pitfall' })]);
     writeLedger(tmpDir, [makeV2LedgerRow({ id: 'obs_already_anchored', type: 'pitfall', anchor_id: 'PF-007', decisions_status: 'Active' })]);
-    const ledgerPath = path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl');
+    const ledgerPath = path.join(tmpDir, '.devflow', 'curation', 'decisions-ledger.jsonl');
     const before = fs.readFileSync(ledgerPath, 'utf8');
 
     const result = runHelper('assign-anchor pitfall obs_already_anchored', tmpDir);
@@ -1024,7 +1024,7 @@ describe('assign-anchor: the ledger alone records promotion (D-LEDGER-REGISTRY)'
     writeLog(tmpDir, [makeObsRow({ id: 'obs_v1_row', type: 'decision' }), makeV2LogRow({ id: 'obs_v2_row' })]);
     expect(runHelper('assign-anchor decision obs_v1_row', tmpDir).stderr).toContain("'obs_v1_row' is a v1 observation");
     expect(runHelper('assign-anchor pitfall obs_v2_row', tmpDir).stderr).toContain("'obs_v2_row' is a decision observation, not a pitfall");
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl'))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'curation', 'decisions-ledger.jsonl'))).toBe(false);
   });
 });
 
@@ -1056,7 +1056,7 @@ describe('D-E4-SKIP: assign-anchor skips a number a tracked file cites', { timeo
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-collision-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'curation'), { recursive: true });
   });
 
   afterEach(() => {
@@ -1162,15 +1162,15 @@ describe('D-E4-SKIP: assign-anchor skips a number a tracked file cites', { timeo
     const result = runHelper('assign-anchor decision obs_override --allow-collision', tmpDir);
     expect(result.code).not.toBe(0);
     expect(result.stderr).toContain('assign-anchor: usage');
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl'))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'curation', 'decisions-ledger.jsonl'))).toBe(false);
   });
 
-  it('ignores a self-citation inside .devflow/learning (mints normally)', () => {
+  it('ignores a self-citation inside .devflow/curation (mints normally)', () => {
     writeLog(tmpDir, [makeV2LogRow({ id: 'obs_selfcite' })]);
     // A rendered .md file already containing "ADR-001" is the ledger's own
     // territory (self-citation) and must never count as a citation.
     fs.writeFileSync(
-      path.join(tmpDir, '.devflow', 'learning', 'decisions.md'),
+      path.join(tmpDir, '.devflow', 'curation', 'decisions.md'),
       '## ADR-001: Some prior entry\n'
     );
 
@@ -1183,7 +1183,7 @@ describe('D-E4-SKIP: assign-anchor skips a number a tracked file cites', { timeo
     const result = runHelper('next-anchor decision', tmpDir);
     expect(result.code).not.toBe(0);
     expect(result.stderr).toContain('unknown operation "next-anchor"');
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.jsonl'))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'curation', 'decisions-ledger.jsonl'))).toBe(false);
   });
 });
 
@@ -1280,7 +1280,7 @@ describe('AC-P2b: assign-anchor full write-path performance (CLI-level)', { time
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'assign-anchor-perf-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'curation'), { recursive: true });
   });
 
   afterEach(() => {
@@ -1308,7 +1308,7 @@ describe('AC-P2b: assign-anchor full write-path performance (CLI-level)', { time
     function timeAssignAnchor(n: number): number {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), `aa-perf-${n}-`));
       try {
-        fs.mkdirSync(path.join(dir, '.devflow', 'learning'), { recursive: true });
+        fs.mkdirSync(path.join(dir, '.devflow', 'curation'), { recursive: true });
         seedLedger(dir, n);
         seedLog(dir, 'obs_time_target');
         const start = performance.now();
@@ -1359,7 +1359,7 @@ describe('locking discipline: assign-anchor and render under single .decisions.l
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lock-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'curation'), { recursive: true });
   });
 
   afterEach(() => {
@@ -1372,7 +1372,7 @@ describe('locking discipline: assign-anchor and render under single .decisions.l
     expect(result.code).toBe(0);
 
     // Lock dir should be released
-    const lockDir = path.join(tmpDir, '.devflow', 'learning', '.decisions.lock');
+    const lockDir = path.join(tmpDir, '.devflow', 'curation', '.decisions.lock');
     expect(fs.existsSync(lockDir)).toBe(false);
   });
 
@@ -1381,13 +1381,13 @@ describe('locking discipline: assign-anchor and render under single .decisions.l
     const result = runJsonHelper(tmpDir, ['retire-anchor', 'ADR-001', 'Retired'], '{"reason":"test"}');
     expect(result.code).toBe(0);
 
-    const lockDir = path.join(tmpDir, '.devflow', 'learning', '.decisions.lock');
+    const lockDir = path.join(tmpDir, '.devflow', 'curation', '.decisions.lock');
     expect(fs.existsSync(lockDir)).toBe(false);
   });
 });
 
 // ---------------------------------------------------------------------------
-// D-ONE-LEARNING-LOCK: every learning writer takes .decisions.lock, and no
+// D-ONE-LEARNING-LOCK: every curation writer takes .decisions.lock, and no
 // writer takes a second lock over the same files.
 // ---------------------------------------------------------------------------
 
@@ -1406,7 +1406,7 @@ function recordMkdirPreload(record: string): string {
   ].join('\n');
 }
 
-describe('D-ONE-LEARNING-LOCK: every learning writer takes the one learning lock', { timeout: 30_000 }, () => {
+describe('D-ONE-LEARNING-LOCK: every curation writer takes the one curation lock', { timeout: 30_000 }, () => {
   let tmpDir: string;
   let probeDir: string;
 
@@ -1475,11 +1475,11 @@ describe('D-ONE-LEARNING-LOCK: every learning writer takes the one learning lock
 });
 
 // ---------------------------------------------------------------------------
-// D-NO-STRAY-TREE: a learning writer refuses outside a learning tree and
-// creates nothing there — no .devflow/, no .devflow/learning/, no lock.
+// D-NO-STRAY-TREE: a curation writer refuses outside a curation tree and
+// creates nothing there — no .devflow/, no .devflow/curation/, no lock.
 // ---------------------------------------------------------------------------
 
-describe('D-NO-STRAY-TREE: a learning writer refuses outside a learning tree', { timeout: 30_000 }, () => {
+describe('D-NO-STRAY-TREE: a curation writer refuses outside a curation tree', { timeout: 30_000 }, () => {
   const WRITERS: ReadonlyArray<{ args: readonly string[]; input?: string }> = [
     { args: ['assign-anchor', 'decision', 'obs_stray_one'] },
     { args: ['retire-anchor', 'ADR-001', 'Retired'], input: '{"reason":"test"}' },
@@ -1517,25 +1517,25 @@ describe('D-NO-STRAY-TREE: a learning writer refuses outside a learning tree', {
       const before = snapshotTree(dir);
       const run = runJsonHelper(dir, args, input);
       expect(run.code).toBe(1);
-      expect(run.stderr).toBe(`${op}: no .devflow/learning/ under ${fs.realpathSync(dir)} — run from the project root\n`);
+      expect(run.stderr).toBe(`${op}: no .devflow/curation/ under ${fs.realpathSync(dir)} — run from the project root\n`);
       expect(snapshotTree(dir)).toEqual(before);
     });
 
-    it(`${op} under a .devflow/ with no learning directory exits 1 and creates nothing`, () => {
+    it(`${op} under a .devflow/ with no curation directory exits 1 and creates nothing`, () => {
       fs.mkdirSync(path.join(dir, '.devflow'));
       const before = snapshotTree(dir);
       const run = runJsonHelper(dir, args, input);
       expect(run.code).toBe(1);
-      expect(run.stderr).toContain('no .devflow/learning/ under');
+      expect(run.stderr).toContain('no .devflow/curation/ under');
       expect(snapshotTree(dir)).toEqual(before);
     });
   }
 
   it('assign-anchor success path never creates .devflow/decisions/ (legacy dir must not appear)', () => {
-    // Normal setup — .devflow/learning/ pre-exists; verifies the legacy mkdir is gone
+    // Normal setup — .devflow/curation/ pre-exists; verifies the legacy mkdir is gone
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-no-decisions-'));
     try {
-      fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+      fs.mkdirSync(path.join(tmpDir, '.devflow', 'curation'), { recursive: true });
       writeLog(tmpDir, [makeV2LogRow({ id: 'obs_nodec_01' })]);
       const result = runHelper('assign-anchor decision obs_nodec_01', tmpDir);
       expect(result.code).toBe(0);
@@ -1562,7 +1562,7 @@ describe('lock release on early-exit error paths', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lock-release-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'curation'), { recursive: true });
   });
 
   afterEach(() => {
@@ -1573,7 +1573,7 @@ describe('lock release on early-exit error paths', () => {
     // No log file: the observation is not in the log, a refusal made under the lock
     const result = runHelper('assign-anchor decision obs_missing_log', tmpDir);
     expect(result.code).not.toBe(0);
-    const lockDir = path.join(tmpDir, '.devflow', 'learning', '.decisions.lock');
+    const lockDir = path.join(tmpDir, '.devflow', 'curation', '.decisions.lock');
     expect(fs.existsSync(lockDir)).toBe(false);
   });
 
@@ -1582,7 +1582,7 @@ describe('lock release on early-exit error paths', () => {
     writeLog(tmpDir, [makeObsRow({ id: 'obs_real', type: 'decision', status: 'ready' })]);
     const result = runHelper('assign-anchor decision obs_nonexistent', tmpDir);
     expect(result.code).not.toBe(0);
-    const lockDir = path.join(tmpDir, '.devflow', 'learning', '.decisions.lock');
+    const lockDir = path.join(tmpDir, '.devflow', 'curation', '.decisions.lock');
     expect(fs.existsSync(lockDir)).toBe(false);
   });
 
@@ -1591,7 +1591,7 @@ describe('lock release on early-exit error paths', () => {
     const result = runJsonHelper(tmpDir, ['retire-anchor', 'ADR-001', 'Retired'], '{"reason":"test"}');
     expect(result.code).not.toBe(0);
     expect(result.stderr).toContain('ADR-001 is not in the ledger');
-    const lockDir = path.join(tmpDir, '.devflow', 'learning', '.decisions.lock');
+    const lockDir = path.join(tmpDir, '.devflow', 'curation', '.decisions.lock');
     expect(fs.existsSync(lockDir)).toBe(false);
   });
 
@@ -1601,7 +1601,7 @@ describe('lock release on early-exit error paths', () => {
     const result = runJsonHelper(tmpDir, ['retire-anchor', 'ADR-999', 'Retired'], '{"reason":"test"}');
     expect(result.code).not.toBe(0);
     expect(result.stderr).toContain('ADR-999 is not in the ledger');
-    const lockDir = path.join(tmpDir, '.devflow', 'learning', '.decisions.lock');
+    const lockDir = path.join(tmpDir, '.devflow', 'curation', '.decisions.lock');
     expect(fs.existsSync(lockDir)).toBe(false);
   });
 
@@ -1610,7 +1610,7 @@ describe('lock release on early-exit error paths', () => {
     const result = runJsonHelper(tmpDir, ['restore-anchor', 'ADR-001']);
     expect(result.code).not.toBe(0);
     expect(result.stderr).toContain('ADR-001 is already active');
-    const lockDir = path.join(tmpDir, '.devflow', 'learning', '.decisions.lock');
+    const lockDir = path.join(tmpDir, '.devflow', 'curation', '.decisions.lock');
     expect(fs.existsSync(lockDir)).toBe(false);
   });
 
@@ -1620,7 +1620,7 @@ describe('lock release on early-exit error paths', () => {
     const result = runHelper('refresh-anchor ADR-001', tmpDir);
     expect(result.code).not.toBe(0);
     expect(result.stderr).toContain("ADR-001: no log row has id 'obs_test001'");
-    const lockDir = path.join(tmpDir, '.devflow', 'learning', '.decisions.lock');
+    const lockDir = path.join(tmpDir, '.devflow', 'curation', '.decisions.lock');
     expect(fs.existsSync(lockDir)).toBe(false);
   });
 
@@ -1631,7 +1631,7 @@ describe('lock release on early-exit error paths', () => {
     const result = runHelper('refresh-anchor ADR-001', tmpDir);
     expect(result.code).not.toBe(0);
     expect(result.stderr).toContain('ADR-001: not in the ledger');
-    const lockDir = path.join(tmpDir, '.devflow', 'learning', '.decisions.lock');
+    const lockDir = path.join(tmpDir, '.devflow', 'curation', '.decisions.lock');
     expect(fs.existsSync(lockDir)).toBe(false);
   });
 });
@@ -1639,7 +1639,7 @@ describe('lock release on early-exit error paths', () => {
 // ---------------------------------------------------------------------------
 // Pre-existing corpus fixture — REG-S1 (fixtures derived from real corpus)
 //
-// Frozen copies of actual anchored rows from .devflow/learning/decisions-ledger.jsonl
+// Frozen copies of actual anchored rows from .devflow/curation/decisions-ledger.jsonl
 // at time of authoring. They pin that refresh-anchor refuses a real-world v1 entry
 // and writes nothing, and that put-observation --update is how such an entry
 // becomes a v2 entry refresh-anchor accepts.
@@ -1653,7 +1653,7 @@ describe('refresh-anchor — pre-existing corpus fixture (REG-S1)', { timeout: 3
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rf-corpus-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'curation'), { recursive: true });
   });
 
   afterEach(() => {
@@ -1721,7 +1721,7 @@ describe('refresh-anchor — pre-existing corpus fixture (REG-S1)', { timeout: 3
     expect(converted).toMatchObject({ schema: 2, anchor_id: 'ADR-001', decisions_status: 'Accepted', date: '2026-06-30', title: rewrite.title });
     expect(converted.details).toBeUndefined();
     // The v1 rows survive in the pre-v2 backup and in history.
-    expect(fs.readFileSync(path.join(tmpDir, '.devflow', 'learning', 'decisions-ledger.pre-v2.jsonl'), 'utf8')).toBe(ledgerBefore);
+    expect(fs.readFileSync(path.join(tmpDir, '.devflow', 'curation', 'decisions-ledger.pre-v2.jsonl'), 'utf8')).toBe(ledgerBefore);
     expect(store.historyVersions(tmpDir, 'obs_cleanbrk1').map(version => version.ledger)).toEqual([[CORPUS_ADR_001]]);
 
     expect(runJsonHelper(tmpDir, ['refresh-anchor', 'ADR-001'])).toEqual({ code: 0, stdout: 'unchanged ADR-001\n', stderr: '' });
@@ -1763,7 +1763,7 @@ describe('D-LEDGER-MAIN-WORKTREE: a worktree session mints into the main ledger 
     writeLedger(main, [1, 2, 3].map(n => makeLedgerRow({ id: `obs_main_${n}`, anchor_id: `ADR-00${n}` })));
     writeLog(main, [makeV2LogRow({ id: 'obs_wt_new' })]);
     fs.writeFileSync(
-      path.join(main, '.devflow', 'learning', '.pending-turns.jsonl'),
+      path.join(main, '.devflow', 'curation', '.pending-turns.jsonl'),
       '{"role":"user","content":"we chose X over Y","ts":1}\n',
     );
   });
@@ -1772,7 +1772,7 @@ describe('D-LEDGER-MAIN-WORKTREE: a worktree session mints into the main ledger 
     fs.rmSync(base, { recursive: true, force: true });
   });
 
-  /** The "Project root:" the Learning directive names for a session started in `cwd`. */
+  /** The "Project root:" the Curation directive names for a session started in `cwd`. */
   function directiveRoot(cwd: string): string {
     const stdout = execSync(`bash "${CONTEXT_HOOK}"`, {
       input: JSON.stringify({ cwd, source: 'startup' }),

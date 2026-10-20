@@ -20,7 +20,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { parseFrontmatterSkills, readAgentReference, requireDistFile, requireDistFiles, resolveAgentSource, resolveLearningOffSource } from '../helpers.js'
+import { parseFrontmatterSkills, readAgentReference, requireDistFile, requireDistFiles, resolveAgentSource, resolveCurationOffSource } from '../helpers.js'
 
 /** Skills each agent no longer preloads, in unprefixed form. */
 const DROPPED: ReadonlyArray<readonly [string, string]> = [
@@ -80,8 +80,8 @@ export function collectSynthesizeCategoryDefects(body: string): string[] {
 }
 
 describe('agents drop the preloads their bodies never read (D-PRELOAD-CLEANUP)', () => {
-  it.each(Object.keys(KEPT))('%s keeps exactly its remaining preload, in both learning variants', (agent) => {
-    const variants = [resolveAgentSource(agent).content, resolveLearningOffSource('agents', agent) ?? resolveAgentSource(agent).content]
+  it.each(Object.keys(KEPT))('%s keeps exactly its remaining preload, in both curation variants', (agent) => {
+    const variants = [resolveAgentSource(agent).content, resolveCurationOffSource('agents', agent) ?? resolveAgentSource(agent).content]
     for (const content of variants) {
       expect(collectRestoredPreloads(agent, content)).toEqual([])
       const declared = parseFrontmatterSkills(content)
@@ -90,7 +90,7 @@ describe('agents drop the preloads their bodies never read (D-PRELOAD-CLEANUP)',
     }
   })
 
-  it('the learning-on variants keep every preload the cleanup left, in order', () => {
+  it('the curation-on variants keep every preload the cleanup left, in order', () => {
     for (const [agent, kept] of Object.entries(KEPT)) {
       expect(parseFrontmatterSkills(resolveAgentSource(agent).content), agent).toEqual(kept)
     }
@@ -108,10 +108,10 @@ describe('agents drop the preloads their bodies never read (D-PRELOAD-CLEANUP)',
 })
 
 describe('Triage states the security rule inline (D-TRIAGE-SECURITY-INLINE, AC-503)', () => {
-  it('both learning variants carry the definition and the live-secret rule within the byte ceiling', () => {
+  it('both curation variants carry the definition and the live-secret rule within the byte ceiling', () => {
     const on = resolveAgentSource('triage').content
-    const off = resolveLearningOffSource('agents', 'triage')
-    expect(off, 'triage has a learning-off variant').not.toBeNull()
+    const off = resolveCurationOffSource('agents', 'triage')
+    expect(off, 'triage has a curation-off variant').not.toBeNull()
     expect(collectTriageSecurityDefects(on)).toEqual([])
     expect(collectTriageSecurityDefects(off ?? '')).toEqual([])
   })
@@ -161,7 +161,7 @@ describe('Synthesize carries the review categories inline (D-PRELOAD-CLEANUP)', 
 describe('Knowledge still says to verify what it keeps (D-PRELOAD-CLEANUP)', () => {
   it('both variants tell it to check an EXISTING_KB assertion against current code and to trust the code', () => {
     const on = resolveAgentSource('knowledge').content
-    const off = resolveLearningOffSource('agents', 'knowledge') ?? ''
+    const off = resolveCurationOffSource('agents', 'knowledge') ?? ''
     for (const body of [on, off]) {
       expect(body).toContain('EXISTING_KB is a snapshot: keep an assertion only after checking it against current code, and trust the code where they differ')
       expect(body).not.toContain('devflow:apply-feature-knowledge')

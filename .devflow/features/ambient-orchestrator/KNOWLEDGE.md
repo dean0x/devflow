@@ -16,7 +16,7 @@ updated: 2026-10-14
 - **KB-AP-2** Never interpolate prompt content into hook output: `json_prompt_output` takes fixed literals only (fuzz test in `tests/shell-hooks.test.ts`).
 - **KB-AP-3** Never call `git` on the UserPromptSubmit path: use the pure-bash `df_has_git_marker`, not a subprocess per prompt.
 - **KB-AP-4** Never grow the charter or add text that applies only sometimes: every ambient session pays for it and `charter-char-max` is a ratchet.
-- **KB-AP-5** Never put a decisions rule in the charter: it lives in `session-start-context` Section 1, behind the learning switch and the `Index:` line (a `shell-hooks` test fails otherwise).
+- **KB-AP-5** Never put a decisions rule in the charter: it lives in `session-start-context` Section 1, behind the curation switch and the `Index:` line (a `shell-hooks` test fails otherwise).
 - **KB-AP-6** Never pin a model in the charter's routing: dispatch is by kind of work. Keep `docs/commands.md` in sync.
 - **KB-AP-7** Never swap the SessionStart channels: the resume directive is model-facing `additionalContext`, the audit message user-facing `systemMessage`.
 - **KB-AP-8** Never keep a second copy of the audit grammar, bounds or thresholds outside `claude-md-audit.cjs`; the hook runs that script.
@@ -77,7 +77,7 @@ A static file read at runtime by `session-start-orchestrator`. It holds:
 
 **The Feature knowledge rule** (direct delegations only; workflow skills handle their own): before delegating non-trivial code work, match the task area against `.devflow/features/index.md` and pass each matching KB's one to three most relevant `## Rules` bullets (verbatim, IDs included; for a KB without Rules, its Anti-Patterns or Gotchas entries, cited by section), the KB's path and its `##` heading index as `FEATURE_KNOWLEDGE`; the delegation Reads further sections itself. After delegated changes to a covered area, spawn Knowledge to refresh that KB. `collectCharterKnowledgeDefects` (`tests/agent-name-guards.test.ts`) holds the limits, the Rules delivery and the legacy fallback, and rejects a bullet that passes whole `KNOWLEDGE.md` content.
 
-**No Decisions bullet** (D-DECISIONS-CHARTER-HANDOFF). The charter is paid for in every ambient session, learning on or off, and a decisions rule matters only with an index to pass, so the rule follows the `Index:` line of `session-start-context` Section 1. `docs/commands.md`'s "Orchestrator charter" line mirrors the kind-of-work, no-model-pinning framing; keep both in sync when routing changes. Length limits are under Constraints.
+**No Decisions bullet** (D-DECISIONS-CHARTER-HANDOFF). The charter is paid for in every ambient session, curation on or off, and a decisions rule matters only with an index to pass, so the rule follows the `Index:` line of `session-start-context` Section 1. `docs/commands.md`'s "Orchestrator charter" line mirrors the kind-of-work, no-model-pinning framing; keep both in sync when routing changes. Length limits are under Constraints.
 
 ### git-marker (sourced helper)
 
@@ -87,11 +87,11 @@ It also exports `df_is_project_root <root>` (D-HOOKS-GIT-ONLY, D-HOOKS-TOPLEVEL-
 
 ### session-start-context: pass rule, Section 5 and Section 6 (SessionStart, timeout 10, always-on)
 
-Registered unconditionally by `addContextHook` (`src/cli/commands/context.ts`), outside the ambient toggle. Sections 1–4 belong to `learning-capture-system` and `tracker-feature`; the pieces below couple to the charter and to compaction. With neither jq nor node the hook returns before Section 5, so there is no directive then (accepted).
+Registered unconditionally by `addContextHook` (`src/cli/commands/context.ts`), outside the ambient toggle. Sections 1–4 belong to `curation-capture-system` and `tracker-feature`; the pieces below couple to the charter and to compaction. With neither jq nor node the hook returns before Section 5, so there is no directive then (accepted).
 
 **`source` is parsed per section.** One top-level `json_extract_cwd_field "source"` returns `cwd` and `source` (`startup|resume|clear|compact`) in a single subprocess, so Section 5 costs no fork. Sections 3 and 4 still read `source` with `json_field` and gate on `startup|clear` (a resume or compact never spawns the Tracker agent or prints the legacy notice); Section 5 gates on `compact`; Section 6 ignores `source`.
 
-**Decisions pass rule (D-DECISIONS-CHARTER-HANDOFF).** The `--- PROJECT DECISIONS (TL;DR) ---` block ends with the `Index:` line and, directly after it, the static `DECISIONS_PASS_RULE`: for direct delegations only (workflow skills load their own), read the index once, then pass each agent that takes `DECISIONS_CONTEXT` the index lines that touch its work, verbatim, behind a `(slice: N of M entries — full index: <path>)` line and with the footer (D-DECISIONS-SLICE; the `PASS_RULE` literal in `tests/shell-hooks.test.ts` pins the sentence). It sits inside the same `if` as the `Index:` line (shape-gated ledger root; a non-empty regular file that is not `(none)`, no symlink on its path), and the block is gated on the learning switch: a learning-off machine or repo never pays for the rule, an ambient-off session still gets it. The text is identical through the jq and node envelopes.
+**Decisions pass rule (D-DECISIONS-CHARTER-HANDOFF).** The `--- PROJECT DECISIONS (TL;DR) ---` block ends with the `Index:` line and, directly after it, the static `DECISIONS_PASS_RULE`: for direct delegations only (workflow skills load their own), read the index once, then pass each agent that takes `DECISIONS_CONTEXT` the index lines that touch its work, verbatim, behind a `(slice: N of M entries — full index: <path>)` line and with the footer (D-DECISIONS-SLICE; the `PASS_RULE` literal in `tests/shell-hooks.test.ts` pins the sentence). It sits inside the same `if` as the `Index:` line (shape-gated ledger root; a non-empty regular file that is not `(none)`, no symlink on its path), and the block is gated on the curation switch: a curation-off machine or repo never pays for the rule, an ambient-off session still gets it. The text is identical through the jq and node envelopes.
 
 **Section 5, compaction resume directive (D-COMPACT-RESUME-DIRECTIVE).** After a compaction nothing tells the model to re-read the devflow command it was running (Claude Code is believed to re-inject a long command only in part; unverified here). On a `compact` start one fixed line is appended to `CONTEXT`, never sent as a `systemMessage`:
 
@@ -142,7 +142,7 @@ session-start-orchestrator and preamble: BG_UPDATER guard → (hook-bootstrap) �
 session-start-context (always-on, not under the toggle):
   stdin drained → BG_UPDATER guard → json-parse (exit 0 without jq and node)
   → json_extract_cwd_field "source" → Sections 1–4 (decisions block with pass rule,
-  learning, tracker, legacy notice) → Section 5 on compact → Section 6
+  curation, tracker, legacy notice) → Section 5 on compact → Section 6
   (stamp fresh | no root | one node process) → json_session_output "$CONTEXT"
   "$SYSTEM_MESSAGE" (exit 0 when both empty) → record the stamp → exit "$_SC_OUT_RC"
 ```
@@ -210,8 +210,8 @@ The system can land in two kinds of partial state, both repaired by `--enable`.
 
 ## Related
 
-- Feature knowledge: `learning-capture-system` — the memory worker fires UserPromptSubmit and SessionStart hooks too, with the `DEVFLOW_BG_UPDATER` guard as the coupling point; also covers `session-start-context` Sections 1–4 and the decisions index the pass rule points at
-- Feature knowledge: `learning-capture-system-delivery` — how `DECISIONS_CONTEXT` reaches agents, including the slice rule the pass rule restates
+- Feature knowledge: `curation-capture-system` — the memory worker fires UserPromptSubmit and SessionStart hooks too, with the `DEVFLOW_BG_UPDATER` guard as the coupling point; also covers `session-start-context` Sections 1–4 and the decisions index the pass rule points at
+- Feature knowledge: `curation-capture-system-delivery` — how `DECISIONS_CONTEXT` reaches agents, including the slice rule the pass rule restates
 - Feature knowledge: `tracker-feature` — Section 3 of `session-start-context`, the tracker setup directive that gates on `startup|clear`
 - Feature knowledge: `dynamic-workflow-engine` — the bind-once `COMMAND_INPUT` convention that makes a no-argument plan handoff safe, and the guards that hold it
 - Feature knowledge: `feature-knowledge-system` — how the entries the charter's Feature knowledge rule passes (Rules bullets, heading index) are written and consumed

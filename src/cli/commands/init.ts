@@ -8,7 +8,11 @@ import { resolveInstallationPaths } from '../../targets/claude-code/claude-paths
 import { getGitRoot } from '../../core/git.js';
 import { isSameLocation, withoutHomeRoots } from '../../core/same-location.js';
 import { pruneHookLogDirs, MAX_HOOK_LOG_DIRS, type LogDirPruneReport } from '../../core/hook-log-dirs.js';
-import { getLedgerRoot } from '../../core/ledger-root.js';
+import { LEDGER_ROOT_TIMEOUT_MS, lookupLedgerRoot } from '../../core/ledger-root.js';
+import { formatCurationStoreUnavailable } from '../../core/curation-store.js';
+import { loadCurationMove } from '../../core/curation-move.js';
+import { describeMoveText, describeOutcome, runInitCurationMove, type InitCurationMoveReport } from './curation-move-step.js';
+import { realGlobalTuningMoveIO, realProjectLedgerMoveIO } from './curation-move-io.js';
 import { describeEchoedValue } from '../../core/echo-value.js';
 import { installViaFileCopy, composeScripts, type InstallReport } from '../../targets/claude-code/installer.js';
 import { formatOverlaySummary, formatSkillScopeSummary, formatTrackerAssetSummary, isPluginListUnchanged, type SummaryLine } from './install-report.js';
@@ -52,7 +56,7 @@ import { convergeFlagsIntoSettings, countActiveFlags, readViewMode, type FlagsRe
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
 import { writeManagedConfig, readConfigIfPresent, DEFAULT_CONFIG, type FeatureConfig, type ManagedConfigWriteError } from '../../core/feature-config.js';
-import { drainLearningQueue } from '../../core/learning-queue-cleanup.js';
+import { drainDisabledCurationQueue } from '../../core/curation-queue-cleanup.js';
 import { formatRefusedDrain, type QueueDrain } from '../../core/queue-drain.js';
 import { removeManagedDenyList, describeManagedDenyRemoval } from './security.js';
 import { resolveInitSeed, applyCliToggles, resolveResetGatedInputs, resolvePluginsToInstall } from './init-seed.js';
@@ -104,7 +108,7 @@ import {
   attributionSeedFrom,
 } from './attribution-prompts.js';
 import { convergeFromManifest } from '../../targets/claude-code/compliance-install.js';
-import { convergeLearningVariants, installedVersionMatches, readRunningVersion } from '../../targets/claude-code/learning-install.js';
+import { convergeCurationVariants, installedVersionMatches, readRunningVersion } from '../../targets/claude-code/curation-install.js';
 import {
   auditAndRecordClaudeMd,
   formatClaudeMdAuditNote,
@@ -137,7 +141,7 @@ export type { MigrationLogger };
  *      migrations are vacuously applied per D37 semantics).
  *
  * Migrations are a one-time cleanup pass over ~/.devflow runtime data
- * (memory, learning, knowledge). They never touch the installer's
+ * (memory, curation, knowledge). They never touch the installer's
  * copy targets (skills, agents, rules, commands, scripts), so ordering
  * relative to installViaFileCopy carries no data dependency.
  *
@@ -615,7 +619,7 @@ interface InitOptions {
   memory?: boolean;
   hud?: boolean;
   knowledge?: boolean;
-  learning?: boolean;
+  curation?: boolean;
   rules?: boolean;
   /** External model routing. Advanced-only; never part of Recommended defaults. */
   proxy?: boolean;
@@ -651,16 +655,100 @@ interface InitOptions {
   reset?: boolean;
 }
 
-/** The queue drains `drainDisabledFeatureQueues` performs — injected for tests. */
-export interface DisabledQueueDrainIO {
-  drainMemoryQueue(projectRoot: string): Promise<QueueDrain>;
-  drainLearningQueue(ledgerRoot: string): Promise<QueueDrain>;
+/**
+ * The curation move step (#529): rename the global tuning file, then move each target
+ * project's ledger folder from the old name to the new one. The targets are the
+ * discovered projects (else the current repository) plus the current repository's own
+ * ledger root, which the step lists once. State-checked on every run, with no run-once
+ * record. Never throws: a project that cannot move is a line, not an exit code.
+ *
+ * Init runs it after the legacy sweep and BEFORE the manifest is persisted and the
+ * disabled-feature queues drain, so the drain sees the moved folder.
+ *
+ * The own ledger root is looked up within the shared budget (`lookupOwnLedgerRoot`). A
+ * lookup that times out is no ledger root: the step moves the other targets, and one
+ * skipped line names the repository, unless the repository is itself a project root,
+ * where the step's own lookup reports it.
+ */
+export async function moveCurationData(
+  opts: {
+    discoveredProjects: readonly string[];
+    gitRoot: string | null;
+    homeDir: string;
+    devflowDir: string;
+  },
+  lookup: LedgerRootLookupFn = lookupLedgerRoot,
+): Promise<InitCurationMoveReport> {
+  const loaded = loadCurationMove();
+  const roots = projectRoots([...opts.discoveredProjects], opts.gitRoot);
+  const own = await lookupOwnLedgerRoot(opts.gitRoot, lookup);
+  const report = await runInitCurationMove(
+    {
+      projectRoots: roots,
+      ownLedgerRoot: own.root,
+      homeDir: opts.homeDir,
+      machineDir: opts.devflowDir,
+    },
+    {
+      ledger: loaded.ok ? realProjectLedgerMoveIO(loaded.value) : { unavailable: formatCurationStoreUnavailable(loaded.error) },
+      tuning: realGlobalTuningMoveIO(),
+    },
+  );
+  if (!own.timedOut || opts.gitRoot === null || roots.includes(opts.gitRoot)) return report;
+  const skipped = describeOutcome({ kind: 'skipped', root: opts.gitRoot, reason: 'git-root-timed-out' });
+  return { ...report, lines: [...report.lines, ...skipped] };
+}
+
+/** The ledger root lookup init takes, injectable for tests. */
+export type LedgerRootLookupFn = typeof lookupLedgerRoot;
+
+/**
+ * The ledger root of the current repository for init's own move and drain
+ * (D-LEDGER-MAIN-WORKTREE): one lookup from the working directory, bounded by
+ * LEDGER_ROOT_TIMEOUT_MS like the HUD's and the step's lookups, so a repository on a
+ * hung mount costs a bounded wait and never stalls init. A lookup that timed out is no
+ * root (`root` null, `timedOut` true), so the caller acts on nothing and says so.
+ * Outside a git repository (`gitRoot` null) nothing is asked.
+ */
+export async function lookupOwnLedgerRoot(
+  gitRoot: string | null,
+  lookup: LedgerRootLookupFn = lookupLedgerRoot,
+): Promise<{ readonly root: string | null; readonly timedOut: boolean }> {
+  if (gitRoot === null) return { root: null, timedOut: false };
+  const found = await lookup(undefined, { timeoutMs: LEDGER_ROOT_TIMEOUT_MS });
+  return { root: found.kind === 'root' ? found.root : null, timedOut: found.kind === 'timed-out' };
 }
 
 /**
- * Drain this repo's memory and learning queues for each feature init switched
+ * The ledger root init's disabled-feature drain acts on, and the one line to print when
+ * there is none because git did not answer in time. Asks only when the drain can run: curation
+ * is off, in a git repository, and the manifest holding the switch was written. With curation
+ * on there is nothing to drain, and with no manifest written the drain does not run, so a
+ * line that says it was not drained for want of the root would name the wrong cause.
+ */
+export async function lookupDrainLedgerRoot(
+  opts: { readonly gitRoot: string | null; readonly curationEnabled: boolean; readonly manifestWritten: boolean },
+  lookup: LedgerRootLookupFn = lookupLedgerRoot,
+): Promise<{ readonly ledgerRoot: string | null; readonly warning: string | null }> {
+  if (opts.curationEnabled || opts.gitRoot === null || !opts.manifestWritten) return { ledgerRoot: null, warning: null };
+  const own = await lookupOwnLedgerRoot(opts.gitRoot, lookup);
+  const warning = own.timedOut
+    ? `The curation queue was not drained for ${describeMoveText(opts.gitRoot)}: git did not answer in time. The next init tries again.`
+    : null;
+  return { ledgerRoot: own.root, warning };
+}
+
+/** The queue drains `drainDisabledFeatureQueues` performs — injected for tests. */
+export interface DisabledQueueDrainIO {
+  drainMemoryQueue(projectRoot: string): Promise<QueueDrain>;
+  drainCurationQueue(ledgerRoot: string): Promise<QueueDrain>;
+}
+
+/**
+ * Drain this repo's memory and curation queues for each feature init switched
  * off, so stale turns are not processed on a future re-enable — the same drains
- * `devflow memory --disable` and `devflow learning --disable` perform. Other
+ * `devflow memory --disable` and `devflow curation --disable` perform (the curation
+ * drain also removes the pending rows of the backups a move left). Other
  * repos' queues are inert: every gate reads the machine-wide switch, so nothing
  * appends to or processes them while the feature is off.
  *
@@ -673,21 +761,22 @@ export interface DisabledQueueDrainIO {
  * everywhere, so its queue is live and is left alone.
  *
  * D-LEDGER-MAIN-WORKTREE: each queue drains where the hooks write it — memory at
- * this checkout's toplevel (`gitRoot`), learning at the ledger root (`ledgerRoot`,
- * getLedgerRoot), which in a linked worktree is the main checkout.
+ * this checkout's toplevel (`gitRoot`), curation at the ledger root (`ledgerRoot`,
+ * lookupOwnLedgerRoot), which in a linked worktree is the main checkout.
  *
  * Returns one warning for each drain refused because a folder on the way to its
- * queue is a symbolic link (D-CLI-NO-SYMLINK); the caller prints them.
+ * queue is a symbolic link (D-CLI-NO-SYMLINK), and one for a curation drain that
+ * could not list the backups (the live queue is drained then); the caller prints them.
  */
 export async function drainDisabledFeatureQueues(
   opts: {
     gitRoot: string | null;
     ledgerRoot: string | null;
     memoryEnabled: boolean;
-    learningEnabled: boolean;
+    curationEnabled: boolean;
     manifestWritten: boolean;
   },
-  io: DisabledQueueDrainIO = { drainMemoryQueue, drainLearningQueue },
+  io: DisabledQueueDrainIO = { drainMemoryQueue, drainCurationQueue: drainDisabledCurationQueue },
 ): Promise<readonly string[]> {
   if (!opts.manifestWritten) return [];
   const refused: string[] = [];
@@ -695,9 +784,10 @@ export async function drainDisabledFeatureQueues(
     const memory = await io.drainMemoryQueue(opts.gitRoot);
     if (!memory.drained) refused.push(formatRefusedDrain('memory', memory.linkedFolder));
   }
-  if (!opts.learningEnabled && opts.ledgerRoot !== null) {
-    const learning = await io.drainLearningQueue(opts.ledgerRoot);
-    if (!learning.drained) refused.push(formatRefusedDrain('learning', learning.linkedFolder));
+  if (!opts.curationEnabled && opts.ledgerRoot !== null) {
+    const curation = await io.drainCurationQueue(opts.ledgerRoot);
+    if (!curation.drained) refused.push(formatRefusedDrain('curation', curation.linkedFolder));
+    else if (curation.warning !== undefined) refused.push(curation.warning);
   }
   return refused;
 }
@@ -709,10 +799,10 @@ export async function drainDisabledFeatureQueues(
  * nothing else, so the manifest keeps every recorded value — plugins, version,
  * installedAt and every feature — and only `features.hud` turns on. The
  * earlier shape rewrote the whole record as a HUD-only fresh install (ambient,
- * memory, learning, knowledge, rules and proxy all `false`, plugins `[]`) while
+ * memory, curation, knowledge, rules and proxy all `false`, plugins `[]`) while
  * leaving those features' artifacts on disk: the record stopped describing the
  * machine, the next re-init seeded every feature off, and with
- * memory/learning/knowledge switched by the manifest alone
+ * memory/curation/knowledge switched by the manifest alone
  * (D-FEATURES-NARROW-ONLY) a HUD install would have really disabled them
  * everywhere. `version` is kept too: --hud-only reinstalls no plugin, and a
  * bumped version would make the next init skip the upgrade it still owes.
@@ -744,7 +834,7 @@ export function buildHudOnlyManifest(
     scope: 'user',
     features: {
       ambient: false, memory: false, hud: true, knowledge: false,
-      learning: false, rules: false, flags: {}, proxy: false,
+      curation: false, rules: false, flags: {}, proxy: false,
       behavior: false,
       compliance: { enabled: false, frameworks: [] },
       // The exported default, not a literal — the one constant every other
@@ -870,8 +960,8 @@ export const initCommand = new Command('init')
   .option('--no-hud', 'Disable HUD status line')
   .option('--knowledge', 'Enable feature knowledge bases')
   .option('--no-knowledge', 'Disable feature knowledge bases')
-  .option('--learning', 'Enable learning (decision/pitfall tracking)')
-  .option('--no-learning', 'Disable learning (decision/pitfall tracking)')
+  .option('--curation', 'Enable curation (decision/pitfall tracking)')
+  .option('--no-curation', 'Disable curation (decision/pitfall tracking)')
   .option('--rules', 'Enable rules (always-on engineering principles)')
   .option('--no-rules', 'Disable rules')
   .option('--proxy', 'Enable external model routing (GPT models via your OpenAI/Codex subscription)')
@@ -1258,7 +1348,7 @@ export const initCommand = new Command('init')
     let memoryEnabled = seed.features.memory;
     let hudEnabled = seed.features.hud;
     let knowledgeEnabled = seed.features.knowledge;
-    let learningEnabled = seed.features.learning;
+    let curationEnabled = seed.features.curation;
     let rulesEnabled = seed.features.rules;
     // proxy: Advanced-only; Recommended path carries seed value unchanged.
     // Fresh installs → false (FEATURE_DEFAULTS.proxy). Re-inits → prior manifest value.
@@ -1442,7 +1532,7 @@ export const initCommand = new Command('init')
         memory: options.memory,
         hud: options.hud,
         knowledge: options.knowledge,
-        learning: options.learning,
+        curation: options.curation,
         rules: options.rules,
         proxy: options.proxy,
         behavior: options.behavior,
@@ -1454,7 +1544,7 @@ export const initCommand = new Command('init')
       memoryEnabled = effectiveFeatures.memory;
       hudEnabled = effectiveFeatures.hud;
       knowledgeEnabled = effectiveFeatures.knowledge;
-      learningEnabled = effectiveFeatures.learning;
+      curationEnabled = effectiveFeatures.curation;
       rulesEnabled = effectiveFeatures.rules;
       proxyEnabled = effectiveFeatures.proxy;
       behaviorEnabled = effectiveFeatures.behavior;
@@ -1499,7 +1589,7 @@ export const initCommand = new Command('init')
       const summaryLines = [
         `Ambient mode:    ${ambientEnabled ? 'enabled' : 'disabled'}`,
         `Working memory:  ${memoryEnabled ? 'enabled' : 'disabled'}`,
-        `Learning:        ${learningEnabled ? 'enabled' : 'disabled'}`,
+        `Curation:        ${curationEnabled ? 'enabled' : 'disabled'}`,
         `Rules:           ${rulesEnabled ? 'enabled' : 'disabled'}`,
         `HUD:             ${hudEnabled ? 'enabled' : 'disabled'}`,
         `Knowledge bases: ${knowledgeEnabled ? 'enabled' : 'disabled'}`,
@@ -1611,24 +1701,24 @@ export const initCommand = new Command('init')
         knowledgeEnabled = knowledgeChoice;
       }
 
-      if (options.learning !== undefined) {
-        learningEnabled = options.learning;
+      if (options.curation !== undefined) {
+        curationEnabled = options.curation;
       } else {
         p.note(
           'Detects architectural decisions and pitfalls from your session\n' +
           'dialogs. Runs a background agent on session stop that consumes\n' +
           'additional tokens. Applies to every project.',
-          'Learning (Decision/Pitfall Tracking)',
+          'Curation (Decision/Pitfall Tracking)',
         );
-        const learningChoice = await p.confirm({
-          message: 'Enable learning? (Recommended)',
-          initialValue: seed.features.learning,
+        const curationChoice = await p.confirm({
+          message: 'Enable curation? (Recommended)',
+          initialValue: seed.features.curation,
         });
-        if (p.isCancel(learningChoice)) {
+        if (p.isCancel(curationChoice)) {
           p.cancel('Installation cancelled.');
           process.exit(0);
         }
-        learningEnabled = learningChoice;
+        curationEnabled = curationChoice;
       }
 
       if (options.rules !== undefined) {
@@ -2085,7 +2175,7 @@ export const initCommand = new Command('init')
         // The SETTLED switch, after the flag, the prompt and the seed have all had
         // their say (D-LEARNING-VARIANT-INSTALL): the files installed here and the
         // manifest written at the end of init cannot disagree about it.
-        learning: learningEnabled,
+        curation: curationEnabled,
         trackerServers,
         // Non-fatal install notices with no other channel (skipped symlinks in the
         // generated reference tree, mode-normalisation failures) reach the user rather
@@ -2098,7 +2188,7 @@ export const initCommand = new Command('init')
       process.exit(1);
     }
 
-    // D-LEARNING-VARIANT-INSTALL: converge the learning variants. The file copy above
+    // D-LEARNING-VARIANT-INSTALL: converge the curation variants. The file copy above
     // installed the variant of everything IT installed; on a `--plugin` install the
     // other plugins' files, already on disk, may still be the other variant (this run
     // may have flipped the switch), and the apply-decisions skill is removed here when
@@ -2106,22 +2196,22 @@ export const initCommand = new Command('init')
     // Warn-not-abort: either mismatch is safe (an on variant is still gated at run
     // time, an off variant loads no decisions). The agent mapping is reapplied below.
     try {
-      const learningConverge = await convergeLearningVariants({
+      const curationConverge = await convergeCurationVariants({
         claudeDir,
         devflowDir,
-        learning: learningEnabled,
+        curation: curationEnabled,
         plugins: effectivePlugins,
         warn: (msg) => installWarnings.push(msg),
       });
-      if (verbose && learningConverge.converged) {
+      if (verbose && curationConverge.converged) {
         p.log.info(
-          `Learning ${learningEnabled ? 'on' : 'off'} variants: ` +
-          `${learningConverge.commandsRewritten.length} command(s) and ${learningConverge.agentsRewritten.length} agent(s) ` +
-          `rewritten, ${learningConverge.unchanged} already current`,
+          `Curation ${curationEnabled ? 'on' : 'off'} variants: ` +
+          `${curationConverge.commandsRewritten.length} command(s) and ${curationConverge.agentsRewritten.length} agent(s) ` +
+          `rewritten, ${curationConverge.unchanged} already current`,
         );
       }
     } catch (err) {
-      installWarnings.push(`Learning variant convergence failed — ${err instanceof Error ? err.message : String(err)}`);
+      installWarnings.push(`Curation variant convergence failed — ${err instanceof Error ? err.message : String(err)}`);
     }
 
     // Converge compliance artifacts (always converge, never short-circuit).
@@ -2275,12 +2365,19 @@ export const initCommand = new Command('init')
       'lib/staleness.cjs',
       'dream-lock',
       'decisions-usage-scan.cjs',
+      'learning-lock',
+      'lib/learning-store.cjs',
     ];
     const hooksDir = path.join(devflowDir, 'scripts', 'hooks');
     for (const legacy of LEGACY_HOOK_FILES) {
       const legacyPath = path.join(hooksDir, legacy);
       try { await fs.rm(legacyPath); } catch { /* doesn't exist */ }
     }
+
+    // The curation move (#529): after the legacy sweep, before the manifest persist and
+    // the disabled-feature drain below, so the drain sees the moved folder. Its lines
+    // and its one notice print with the install warnings, after the spinner stops.
+    const curationMove = await moveCurationData({ discoveredProjects, gitRoot, homeDir, devflowDir });
 
     // === Settings & hooks (all automatic based on collected choices) ===
     s.message('Configuring settings');
@@ -2533,7 +2630,7 @@ export const initCommand = new Command('init')
     }
 
     // Write .devflow/config.json — facts about this repo. The machine switches for
-    // memory/learning/knowledge are the manifest's; a hand-written `features`
+    // memory/curation/knowledge are the manifest's; a hand-written `features`
     // object here only narrows them and is carried, never written
     // (D-FEATURES-NARROW-ONLY; the managed write drops the retired top-level
     // per-repo keys). A managed
@@ -2742,6 +2839,8 @@ export const initCommand = new Command('init')
     logSummaryLines(formatSkillScopeSummary(installReport, pluginListUnchanged));
 
     for (const warning of installWarnings) p.log.warn(warning);
+    for (const line of curationMove.lines) p.log.warn(describeMoveText(line));
+    if (curationMove.notice !== null) p.log.info(curationMove.notice);
 
     const installedSet = new Set(pluginsToInstall.flatMap(p => p.commands).filter(c => c.length > 0));
     const orderedCommands = WORKFLOW_ORDER.filter(cmd => installedSet.has(cmd));
@@ -2796,7 +2895,7 @@ export const initCommand = new Command('init')
         memory: memoryEnabled,
         hud: hudEnabled,
         knowledge: knowledgeEnabled,
-        learning: learningEnabled,
+        curation: curationEnabled,
         rules: rulesEnabled,
         // FlagsRecord written directly — key-presence encodes "known".
         // view-mode is encoded as flags['view-mode'] (the resolved final value).
@@ -2839,11 +2938,13 @@ export const initCommand = new Command('init')
     }
 
     // Only now that the machine-wide switch is on disk (D-INIT-DRAIN-AFTER-SWITCH).
+    const drainRoot = await lookupDrainLedgerRoot({ gitRoot, curationEnabled, manifestWritten: trackerLifecycle.manifestWritten });
+    if (drainRoot.warning !== null) p.log.warn(drainRoot.warning);
     const refusedDrains = await drainDisabledFeatureQueues({
       gitRoot,
-      ledgerRoot: learningEnabled || gitRoot === null ? null : await getLedgerRoot(),
+      ledgerRoot: drainRoot.ledgerRoot,
       memoryEnabled,
-      learningEnabled,
+      curationEnabled,
       manifestWritten: trackerLifecycle.manifestWritten,
     });
     for (const line of refusedDrains) p.log.warn(line);

@@ -323,7 +323,7 @@ describe('installViaFileCopy rules report', () => {
       await fs.mkdir(path.join(localClaudeDir, 'rules', 'devflow'), { recursive: true });
 
       const report = await installViaFileCopy({
-        learning: true,
+        curation: true,
         plugins: [],
         claudeDir: localClaudeDir,
         devflowDir: localDevflowDir,
@@ -358,7 +358,7 @@ describe('installViaFileCopy rules report', () => {
       await fs.mkdir(path.join(localClaudeDir, 'rules', 'devflow'), { recursive: true });
 
       const report = await installViaFileCopy({
-        learning: true,
+        curation: true,
         plugins: [],
         claudeDir: localClaudeDir,
         devflowDir: localDevflowDir,
@@ -390,7 +390,7 @@ describe('installViaFileCopy rules report', () => {
       await fs.mkdir(path.join(localClaudeDir, 'rules', 'devflow'), { recursive: true });
 
       const report = await installViaFileCopy({
-        learning: true,
+        curation: true,
         plugins: [],
         claudeDir: localClaudeDir,
         devflowDir: localDevflowDir,
@@ -427,7 +427,7 @@ describe('installViaFileCopy rules report', () => {
 
       await expect(
         installViaFileCopy({
-          learning: true,
+          curation: true,
           plugins: [],
           claudeDir: localClaudeDir,
           devflowDir: localDevflowDir,

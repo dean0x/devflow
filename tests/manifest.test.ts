@@ -3,6 +3,8 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { readManifest, writeManifest, mergeManifestPlugins, resolvePluginList, detectUpgrade, syncManifestFeature, withoutManifestPlugins, removeManifestPlugins, type ManifestData } from '../src/core/manifest.js';
+import { writeMachineFeature } from '../src/core/feature-switch.js';
+import { getManifestLockPath } from '../src/core/manifest-lock.js';
 import { makeManifest } from './helpers.js';
 
 describe('readManifest', () => {
@@ -80,13 +82,16 @@ describe('readManifest', () => {
       version: '1.4.0',
       plugins: ['devflow-core-skills', 'devflow-implement'],
       scope: 'user',
-      features: { ambient: true, memory: true, hud: false, knowledge: false, learning: false, rules: true, flags: {}, proxy: false, behavior: false, compliance: { enabled: false, frameworks: [] }, tracker: { provider: 'github' } },
+      features: { ambient: true, memory: true, hud: false, knowledge: false, curation: false, rules: true, flags: {}, proxy: false, behavior: false, compliance: { enabled: false, frameworks: [] }, tracker: { provider: 'github' } },
       installedAt: '2026-03-01T00:00:00.000Z',
       updatedAt: '2026-03-13T00:00:00.000Z',
     };
-    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(data), 'utf-8');
+    // The file holds both current keys, as every manifest this version writes does, so the read is heal-free.
+    const onDisk = { ...data, features: { ...data.features, learning: false } };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(onDisk), 'utf-8');
     const result = await readManifest(tmpDir);
     expect(result).toEqual(data);
+    expect(JSON.parse(await fs.readFile(path.join(tmpDir, 'manifest.json'), 'utf-8'))).toEqual(onDisk);
   });
 
   it('parses legacy manifest WITH teams field (key ignored, not rejected)', async () => {
@@ -139,7 +144,7 @@ describe('readManifest', () => {
     expect(result!.features.hud).toBe(false);
     // D-FEATURES-ABSENT-ON: an absent machine-wide switch reads as ON, as every gate reads it.
     expect(result!.features.knowledge).toBe(true);
-    expect(result!.features.learning).toBe(true);
+    expect(result!.features.curation).toBe(true);
     expect(result!.features.rules).toBe(true);
     // Phase 2: flags migrated from absent (no flags in old JSON) → empty FlagsRecord
     expect(result!.features.flags).toEqual({});
@@ -147,7 +152,7 @@ describe('readManifest', () => {
     expect((result!.features as Record<string, unknown>).learn).toBeUndefined();
   });
 
-  it('normalizes old manifest without learning or decisions to ON (D-FEATURES-ABSENT-ON)', async () => {
+  it('normalizes an old manifest without the legacy learning key or the decisions key to ON (D-FEATURES-ABSENT-ON)', async () => {
     const oldData = {
       version: '2.0.0',
       plugins: ['devflow-core-skills'],
@@ -159,9 +164,9 @@ describe('readManifest', () => {
     await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(oldData), 'utf-8');
     const result = await readManifest(tmpDir);
     expect(result).not.toBeNull();
-    // 'decisions' was renamed to 'learning' — both absent reads as ON, the value
+    // 'decisions' was renamed to 'learning', then to 'curation' — all absent reads as ON, the value
     // every runtime gate (queue_read_gates, isMachineFeatureOn) already applies.
-    expect(result!.features.learning).toBe(true);
+    expect(result!.features.curation).toBe(true);
   });
 
   it('normalizes old manifest without knowledge or kb to ON (D-FEATURES-ABSENT-ON)', async () => {
@@ -179,14 +184,14 @@ describe('readManifest', () => {
     expect(result!.features.knowledge).toBe(true);
   });
 
-  it('keeps explicit learning/knowledge values, and a legacy decisions:false still reads as learning off', async () => {
+  it('keeps explicit curation/knowledge values, and a legacy decisions:false still reads as curation off', async () => {
     const base = { version: '2.0.0', plugins: ['devflow-core-skills'], scope: 'user', installedAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' };
-    const cases: Array<[Record<string, unknown>, { learning: boolean; knowledge: boolean }]> = [
-      [{ learning: false, knowledge: false }, { learning: false, knowledge: false }],
-      [{ learning: true, knowledge: true }, { learning: true, knowledge: true }],
-      [{ decisions: false }, { learning: false, knowledge: true }],
-      [{ decisions: false, learning: true }, { learning: true, knowledge: true }],
-      [{ kb: false }, { learning: true, knowledge: false }],
+    const cases: Array<[Record<string, unknown>, { curation: boolean; knowledge: boolean }]> = [
+      [{ learning: false, knowledge: false }, { curation: false, knowledge: false }],
+      [{ learning: true, knowledge: true }, { curation: true, knowledge: true }],
+      [{ decisions: false }, { curation: false, knowledge: true }],
+      [{ decisions: false, learning: true }, { curation: true, knowledge: true }],
+      [{ kb: false }, { curation: true, knowledge: false }],
     ];
     for (const [extra, expected] of cases) {
       await fs.writeFile(
@@ -196,13 +201,263 @@ describe('readManifest', () => {
       );
       const result = await readManifest(tmpDir);
       expect(result, JSON.stringify(extra)).not.toBeNull();
-      expect({ learning: result!.features.learning, knowledge: result!.features.knowledge }, JSON.stringify(extra)).toEqual(expected);
+      expect({ curation: result!.features.curation, knowledge: result!.features.knowledge }, JSON.stringify(extra)).toEqual(expected);
     }
   });
 
-  it('a toggle through syncManifestFeature never writes an absent learning/knowledge key back as false', async () => {
+  it('reads the curation switch under curation and the legacy learning key: false wins, and the pre-rename key decides only when neither is a boolean (TP-10)', async () => {
+    const base = { version: '2.0.0', plugins: ['devflow-core-skills'], scope: 'user', installedAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' };
+    const cases: Array<[Record<string, unknown>, boolean]> = [
+      [{ curation: false }, false],
+      [{ curation: true }, true],
+      [{ curation: true, learning: false }, false],
+      [{ curation: false, learning: true }, false],
+      [{ curation: false, learning: false }, false],
+      [{ curation: true, learning: true }, true],
+      [{ curation: true, decisions: false }, true],
+      [{ learning: true, decisions: false }, true],
+      [{ curation: 'x', decisions: false }, false],
+      [{ curation: 'false' }, true],
+      [{ curation: 'true', learning: false }, false],
+    ];
+    for (const [extra, expected] of cases) {
+      await fs.writeFile(
+        path.join(tmpDir, 'manifest.json'),
+        JSON.stringify({ ...base, features: { ambient: true, memory: true, flags: {}, ...extra } }),
+        'utf-8',
+      );
+      const result = await readManifest(tmpDir);
+      expect(result, JSON.stringify(extra)).not.toBeNull();
+      expect(result!.features.curation, JSON.stringify(extra)).toBe(expected);
+    }
+  });
+
+  describe('the curation mirror heal (TP-10, heal half)', () => {
+    const rawOf = (features: Record<string, unknown>): string => JSON.stringify({
+      version: '2.0.0', plugins: [], scope: 'user', installedAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+      features: { ambient: true, memory: true, hud: false, knowledge: true, rules: true, flags: {}, proxy: false, ...features },
+    });
+    const featuresOnDisk = async (): Promise<Record<string, unknown>> =>
+      (JSON.parse(await fs.readFile(path.join(tmpDir, 'manifest.json'), 'utf-8')) as { features: Record<string, unknown> }).features;
+
+    it.each([
+      ['a disagreeing pair', { curation: false, learning: true }, false],
+      ['a disagreeing pair, the other way', { curation: true, learning: false }, false],
+      ['the pre-rename key alone (a 3.7.0 manifest)', { learning: false }, false],
+      ['the pre-rename key alone, on', { learning: true }, true],
+      ['the new key alone', { curation: false }, false],
+      ['neither key (an absent switch reads on)', {}, true],
+      ['the oldest key alone', { decisions: false }, false],
+    ] as const)('%s: one read writes both keys to the resolved value, and drops decisions', async (_label, extra, resolved) => {
+      await fs.writeFile(path.join(tmpDir, 'manifest.json'), rawOf(extra), 'utf-8');
+      expect((await readManifest(tmpDir))!.features.curation).toBe(resolved);
+      const healed = await featuresOnDisk();
+      expect(healed.curation).toBe(resolved);
+      expect(healed.learning).toBe(resolved);
+      expect('decisions' in healed).toBe(false);
+    });
+
+    it('a second read writes nothing', async () => {
+      await fs.writeFile(path.join(tmpDir, 'manifest.json'), rawOf({ curation: true, learning: false }), 'utf-8');
+      await readManifest(tmpDir);
+      const first = await fs.readFile(path.join(tmpDir, 'manifest.json'), 'utf-8');
+      const firstStat = await fs.stat(path.join(tmpDir, 'manifest.json'));
+      await readManifest(tmpDir);
+      expect(await fs.readFile(path.join(tmpDir, 'manifest.json'), 'utf-8')).toBe(first);
+      expect((await fs.stat(path.join(tmpDir, 'manifest.json'))).mtimeMs).toBe(firstStat.mtimeMs);
+    });
+
+    it('a pair that is present and equal needs no heal: the file is left byte-identical', async () => {
+      const body = rawOf({ curation: false, learning: false });
+      await fs.writeFile(path.join(tmpDir, 'manifest.json'), body, 'utf-8');
+      expect((await readManifest(tmpDir))!.features.curation).toBe(false);
+      expect(await fs.readFile(path.join(tmpDir, 'manifest.json'), 'utf-8')).toBe(body);
+    });
+
+    it('a present decisions key alone is a defect even when the pair is equal', async () => {
+      await fs.writeFile(path.join(tmpDir, 'manifest.json'), rawOf({ curation: true, learning: true, decisions: false }), 'utf-8');
+      expect((await readManifest(tmpDir))!.features.curation).toBe(true);
+      expect('decisions' in (await featuresOnDisk())).toBe(false);
+    });
+
+    it('a heal-write failure still returns the resolved switch and leaves the file as it was', async () => {
+      const body = rawOf({ curation: false, learning: true });
+      await fs.writeFile(path.join(tmpDir, 'manifest.json'), body, 'utf-8');
+      // Reject the atomic rename at the seam. A read-only directory does not stop a write
+      // under root, so a chmod would leave the failure path unexercised on a root runner.
+      const renameSpy = vi.spyOn(fs, 'rename').mockRejectedValue(new Error('ENOSPC: no space left on device'));
+      try {
+        expect((await readManifest(tmpDir))!.features.curation).toBe(false);
+        expect(renameSpy, 'the heal tried to write').toHaveBeenCalled();
+      } finally {
+        renameSpy.mockRestore();
+      }
+      expect(await fs.readFile(path.join(tmpDir, 'manifest.json'), 'utf-8'), 'the failed heal changed nothing on disk').toBe(body);
+    });
+
+    describe('the heal and a toggle share one lock (no lost update)', () => {
+      const manifestFile = (): string => path.join(tmpDir, 'manifest.json');
+
+      it('a --disable that lands between the heal\'s read and its write survives, both keys false', async () => {
+        await fs.writeFile(manifestFile(), rawOf({ curation: true, learning: true, decisions: true }), 'utf-8');
+
+        // The first read of the manifest is the heal's parse. Land the disable right
+        // after it, so the heal holds the snapshot from before the disable.
+        const realReadFile = fs.readFile.bind(fs);
+        let injected = false;
+        vi.spyOn(fs, 'readFile').mockImplementation((async (...args: Parameters<typeof fs.readFile>) => {
+          const content = await realReadFile(...args);
+          if (!injected && String(args[0]) === manifestFile()) {
+            injected = true;
+            expect((await writeMachineFeature(tmpDir, 'curation', false)).ok).toBe(true);
+          }
+          return content;
+        }) as typeof fs.readFile);
+
+        await readManifest(tmpDir);
+
+        expect(injected).toBe(true);
+        const onDisk = await featuresOnDisk();
+        expect(onDisk.curation).toBe(false);
+        expect(onDisk.learning).toBe(false);
+      });
+
+      it('a heal whose lock directory was replaced before its write skips the write, and the next read heals', async () => {
+        const body = rawOf({ curation: false, learning: true });
+        await fs.writeFile(manifestFile(), body, 'utf-8');
+        const lockDir = getManifestLockPath(tmpDir);
+
+        // The first read is the heal's parse; the second is its check under the lock.
+        // After the second, another caller takes the path: a new directory is made
+        // before the heal's own is moved away, so the two never share an inode.
+        const realReadFile = fs.readFile.bind(fs);
+        let reads = 0;
+        vi.spyOn(fs, 'readFile').mockImplementation((async (...args: Parameters<typeof fs.readFile>) => {
+          const content = await realReadFile(...args);
+          if (String(args[0]) === manifestFile() && ++reads === 2) {
+            await fs.mkdir(`${lockDir}.other`);
+            await fs.rename(lockDir, `${lockDir}.gone`);
+            await fs.rename(`${lockDir}.other`, lockDir);
+            await fs.rm(`${lockDir}.gone`, { recursive: true });
+          }
+          return content;
+        }) as typeof fs.readFile);
+
+        expect((await readManifest(tmpDir))!.features.curation, 'the read still answers the resolved switch').toBe(false);
+        expect(reads).toBe(2);
+        expect(await fs.readFile(manifestFile(), 'utf-8'), 'the heal wrote nothing').toBe(body);
+        expect((await fs.stat(lockDir)).isDirectory(), 'the lock of the other caller stands').toBe(true);
+
+        vi.restoreAllMocks();
+        await fs.rmdir(lockDir);
+        await readManifest(tmpDir);
+        const healed = await featuresOnDisk();
+        expect(healed.curation).toBe(false);
+        expect(healed.learning).toBe(false);
+      });
+
+      it('a read that skipped the heal leaves the next read to heal it, once', async () => {
+        const body = rawOf({ curation: false, learning: true });
+        await fs.writeFile(manifestFile(), body, 'utf-8');
+        await fs.mkdir(getManifestLockPath(tmpDir));
+
+        // The lock is held: the read returns the resolved switch and writes nothing.
+        expect((await readManifest(tmpDir))!.features.curation).toBe(false);
+        expect(await fs.readFile(manifestFile(), 'utf-8')).toBe(body);
+
+        await fs.rmdir(getManifestLockPath(tmpDir));
+        await readManifest(tmpDir);
+        const healed = await featuresOnDisk();
+        expect(healed.curation).toBe(false);
+        expect(healed.learning).toBe(false);
+
+        const first = await fs.readFile(manifestFile(), 'utf-8');
+        const firstStat = await fs.stat(manifestFile());
+        await readManifest(tmpDir);
+        expect(await fs.readFile(manifestFile(), 'utf-8')).toBe(first);
+        expect((await fs.stat(manifestFile())).mtimeMs).toBe(firstStat.mtimeMs);
+      });
+
+      it('a heal that waited for nobody leaves no lock behind', async () => {
+        await fs.writeFile(manifestFile(), rawOf({ curation: true, learning: false }), 'utf-8');
+        await readManifest(tmpDir);
+        await expect(fs.stat(getManifestLockPath(tmpDir))).rejects.toMatchObject({ code: 'ENOENT' });
+        expect((await fs.readdir(tmpDir)).sort()).toEqual(['manifest.json']);
+      });
+
+      it('a heal still writes both keys to the resolved value when the bytes did not change', async () => {
+        await fs.writeFile(manifestFile(), rawOf({ curation: true, learning: false }), 'utf-8');
+        expect((await readManifest(tmpDir))!.features.curation).toBe(false);
+        const healed = await featuresOnDisk();
+        expect(healed.curation).toBe(false);
+        expect(healed.learning).toBe(false);
+      });
+    });
+  });
+
+  describe('writeManifest keeps the pre-rename key as a copy of the curation key (TP-11)', () => {
+    const dataWith = (curation: boolean): ManifestData => ({
+      version: '3.8.0', plugins: [], scope: 'user',
+      features: {
+        ambient: true, memory: true, hud: false, knowledge: true, curation, rules: true, flags: {}, proxy: false,
+        behavior: false, compliance: { enabled: false, frameworks: [] }, tracker: { provider: 'github' },
+      },
+      installedAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    it.each([true, false])('curation=%s is written under both current keys', async (value) => {
+      await writeManifest(tmpDir, dataWith(value));
+      const onDisk = JSON.parse(await fs.readFile(path.join(tmpDir, 'manifest.json'), 'utf-8')) as { features: Record<string, unknown> };
+      expect(onDisk.features.curation).toBe(value);
+      expect(onDisk.features.learning).toBe(value);
+    });
+
+    it('a round trip through write and read is heal-free and keeps the value', async () => {
+      await writeManifest(tmpDir, dataWith(false));
+      const body = await fs.readFile(path.join(tmpDir, 'manifest.json'), 'utf-8');
+      expect((await readManifest(tmpDir))!.features.curation).toBe(false);
+      expect(await fs.readFile(path.join(tmpDir, 'manifest.json'), 'utf-8')).toBe(body);
+    });
+
+    it('never writes a decisions key', async () => {
+      await writeManifest(tmpDir, dataWith(true));
+      const onDisk = JSON.parse(await fs.readFile(path.join(tmpDir, 'manifest.json'), 'utf-8')) as { features: Record<string, unknown> };
+      expect('decisions' in onDisk.features).toBe(false);
+    });
+
+    it('a toggle through syncManifestFeature keeps both keys equal', async () => {
+      await writeManifest(tmpDir, dataWith(false));
+      await syncManifestFeature(tmpDir, 'hud', true);
+      const onDisk = JSON.parse(await fs.readFile(path.join(tmpDir, 'manifest.json'), 'utf-8')) as { features: Record<string, unknown> };
+      expect(onDisk.features).toMatchObject({ hud: true, curation: false, learning: false });
+    });
+
+    it('syncManifestFeature of the curation key writes the new value to both keys', async () => {
+      await writeManifest(tmpDir, dataWith(false));
+      await syncManifestFeature(tmpDir, 'curation', true);
+      const onDisk = JSON.parse(await fs.readFile(path.join(tmpDir, 'manifest.json'), 'utf-8')) as { features: Record<string, unknown> };
+      expect(onDisk.features).toMatchObject({ curation: true, learning: true });
+    });
+  });
+
+  it('a toggle through syncManifestFeature keeps a disagreeing curation key and legacy learning key pair off', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'manifest.json'),
+      JSON.stringify({
+        version: '2.0.0', plugins: [], scope: 'user', installedAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+        features: { ambient: true, memory: true, hud: false, curation: false, learning: true, flags: {} },
+      }),
+      'utf-8',
+    );
+    await syncManifestFeature(tmpDir, 'hud', true);
+    const onDisk = JSON.parse(await fs.readFile(path.join(tmpDir, 'manifest.json'), 'utf-8')) as { features: Record<string, unknown> };
+    expect(onDisk.features).toMatchObject({ hud: true, curation: false, learning: false });
+    expect((await readManifest(tmpDir))!.features.curation).toBe(false);
+  });
+
+  it('a toggle through syncManifestFeature never writes an absent curation/knowledge key back as false', async () => {
     // Pre-fix, `devflow hud --enable` on an older manifest persisted the reader's
-    // `false` default — silently switching learning and knowledge off machine-wide.
+    // `false` default — silently switching curation and knowledge off machine-wide.
     await fs.writeFile(
       path.join(tmpDir, 'manifest.json'),
       JSON.stringify({ version: '2.0.0', plugins: [], scope: 'user', features: { ambient: true, memory: true, hud: false, flags: {} }, installedAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }),
@@ -210,7 +465,7 @@ describe('readManifest', () => {
     );
     await syncManifestFeature(tmpDir, 'hud', true);
     const onDisk = JSON.parse(await fs.readFile(path.join(tmpDir, 'manifest.json'), 'utf-8')) as { features: Record<string, unknown> };
-    expect(onDisk.features).toMatchObject({ hud: true, learning: true, knowledge: true });
+    expect(onDisk.features).toMatchObject({ hud: true, curation: true, learning: true, knowledge: true });
   });
 
   it('heals features.kb to features.knowledge on disk', async () => {
@@ -496,7 +751,7 @@ describe('manifest scope is pinned to user (D-MANIFEST-SCOPE-PINNED, TP-11)', ()
       expect(result!.scope).toBe('user');
       expect(result!.plugins).toEqual(['devflow-implement']);
       expect(result!.features).toMatchObject({
-        ambient: false, memory: false, hud: true, knowledge: false, learning: false, rules: false,
+        ambient: false, memory: false, hud: true, knowledge: false, curation: false, rules: false,
         proxy: true, tracker: { provider: 'jira' },
       });
     });
