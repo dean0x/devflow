@@ -59,8 +59,8 @@ export const GATE_LEVEL_SELECT_MESSAGE = 'Gate level for this machine';
  * either fails it until you check the other table and update the pin; further rows check
  * the clauses the two tables share (the lint pack level, the levels that run fewer review
  * focuses and the levels that skip Polish). The clause that lean skips Harden on a
- * docs-only diff has no row here: the docs guard checks it at each doc site, against the
- * row in the /implement level reference.
+ * docs-only diff has no facet row in `tests/gate-level-prompts.test.ts`: the docs guard
+ * checks it at each doc site, against the row in the /implement level reference.
  */
 export const GATE_LEVEL_HINTS: Readonly<Record<GateLevel, string>> = Object.freeze({
   full: 'the most checking: every review focus, the full planning shape and Polish',
