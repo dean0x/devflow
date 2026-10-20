@@ -218,7 +218,7 @@ describe('devflow init installs every provider (D-INSTALL-ALL-PROVIDERS)', () =>
     expect(init().status).toBe(0);
     // Plus the feature-owned compliance skill, which converge installs on every
     // machine (D-COMPLIANCE-INSTALL-ALWAYS) — it belongs to no plugin. Minus the
-    // learning-gated skills: this install runs with learning off (D-LEARNING-VARIANT-INSTALL).
+    // curation-gated skills: this install runs with curation off (D-LEARNING-VARIANT-INSTALL).
     const gated: readonly string[] = CURATION_GATED_SKILLS;
     const expected = [...skillsOf(DEVFLOW_PLUGINS.filter(p => !p.optional)), ...FEATURE_OWNED_SKILLS]
       .filter(skill => !gated.includes(skill))

@@ -61,7 +61,7 @@ describe('readConfig', () => {
     }
   });
 
-  it('never surfaces a retired feature key — a stale learning:false decides nothing', async () => {
+  it('never surfaces a retired feature key — a stale legacy learning key false decides nothing', async () => {
     writeDevflowConfig(tmpDir, { memory: false, learning: false, knowledge: false, decisions: false, autoCommit: true });
     const config = await readConfig(tmpDir) as unknown as Record<string, unknown>;
     for (const key of RETIRED) {

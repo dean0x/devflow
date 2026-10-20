@@ -229,7 +229,7 @@ describe('the six renamed agents leave no orphan agent file (#466)', () => {
   it('a partial init with no retired agent file leaves the other plugins\' files alone', async () => {
     const installRun = cli('init', '--plugin=implement,code-review', ...OFF);
     expect(installRun.status, installRun.out).toBe(0);
-    // polish belongs to implement, which this run does not name, and has no learning variant that
+    // polish belongs to implement, which this run does not name, and has no curation variant that
     // an install would converge back.
     const polishAgent = path.join(agentsDir(), 'polish.md');
     await fs.writeFile(polishAgent, '# my edit\n', 'utf-8');

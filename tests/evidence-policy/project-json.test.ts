@@ -356,7 +356,7 @@ describe('parseProjectBytes — per-key classification', () => {
       .toEqual(valid({ memory: ABSENT, curation: ABSENT, learning: ABSENT, knowledge: ABSENT }));
   });
 
-  it('features: curation and learning are two keys of one feature, each classified on its own (#529)', () => {
+  it('features: curation and the legacy learning key are two keys of one feature, each classified on its own (#529)', () => {
     expect(parsed('{"features":{"curation":false,"learning":true}}').features)
       .toEqual(valid({ memory: ABSENT, curation: valid(false), learning: valid(true), knowledge: ABSENT }));
     expect(parsed('{"features":{"curation":"false","learning":false}}').features)

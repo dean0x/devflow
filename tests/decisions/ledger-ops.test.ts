@@ -506,7 +506,7 @@ describe('rotateObservations (D-ROTATE-UNREFERENCED)', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  /** Seed the learning tree, rotate at FIXTURE_NOW and return the counts. */
+  /** Seed the curation tree, rotate at FIXTURE_NOW and return the counts. */
   function rotate(seed: { log?: Row[]; ledger?: Row[]; archive?: Row[] }): { rotated: number; appended: number } {
     seedCurationTree(tmpDir, seed);
     const result = store.rotateObservations(tmpDir, { now: FIXTURE_NOW });
@@ -621,7 +621,7 @@ describe('rotateObservations (D-ROTATE-UNREFERENCED)', () => {
     expect(fs.readFileSync(paths.log, 'utf8')).toBe(`${JSON.stringify(fresh)}\n`);
   });
 
-  it('refuses without a learning directory and creates nothing', () => {
+  it('refuses without a curation directory and creates nothing', () => {
     expect(store.rotateObservations(tmpDir, { now: FIXTURE_NOW })).toEqual({
       ok: false,
       error: {
@@ -733,7 +733,7 @@ describe('refresh-anchor CLI op', { timeout: 30_000 }, () => {
     expect(result.stderr).toContain('ADR-001: not in the ledger');
   });
 
-  it('a learning tree with no ledger refuses the anchor as not in the ledger', () => {
+  it('a curation tree with no ledger refuses the anchor as not in the ledger', () => {
     writeLog(tmpDir, [makeV2LogRow()]);
     expect(runJsonHelper(tmpDir, ['refresh-anchor', 'ADR-001'])).toEqual({
       code: 1,
@@ -961,7 +961,7 @@ describe('rotate-observations CLI op', () => {
     expect(store.readJsonl(curationPaths(tmpDir).archive).rows.map(row => row.id)).toEqual(['obs_cli_due']);
   });
 
-  it('prints "rotated 0 observations" for an empty learning tree', () => {
+  it('prints "rotated 0 observations" for an empty curation tree', () => {
     expect(runJsonHelper(tmpDir, ['rotate-observations'])).toEqual({ code: 0, stdout: 'rotated 0 observations\n', stderr: '' });
   });
 
@@ -1387,7 +1387,7 @@ describe('locking discipline: assign-anchor and render under single .decisions.l
 });
 
 // ---------------------------------------------------------------------------
-// D-ONE-LEARNING-LOCK: every learning writer takes .decisions.lock, and no
+// D-ONE-LEARNING-LOCK: every curation writer takes .decisions.lock, and no
 // writer takes a second lock over the same files.
 // ---------------------------------------------------------------------------
 
@@ -1406,7 +1406,7 @@ function recordMkdirPreload(record: string): string {
   ].join('\n');
 }
 
-describe('D-ONE-LEARNING-LOCK: every learning writer takes the one learning lock', { timeout: 30_000 }, () => {
+describe('D-ONE-LEARNING-LOCK: every curation writer takes the one curation lock', { timeout: 30_000 }, () => {
   let tmpDir: string;
   let probeDir: string;
 
@@ -1475,11 +1475,11 @@ describe('D-ONE-LEARNING-LOCK: every learning writer takes the one learning lock
 });
 
 // ---------------------------------------------------------------------------
-// D-NO-STRAY-TREE: a learning writer refuses outside a learning tree and
+// D-NO-STRAY-TREE: a curation writer refuses outside a curation tree and
 // creates nothing there — no .devflow/, no .devflow/curation/, no lock.
 // ---------------------------------------------------------------------------
 
-describe('D-NO-STRAY-TREE: a learning writer refuses outside a learning tree', { timeout: 30_000 }, () => {
+describe('D-NO-STRAY-TREE: a curation writer refuses outside a curation tree', { timeout: 30_000 }, () => {
   const WRITERS: ReadonlyArray<{ args: readonly string[]; input?: string }> = [
     { args: ['assign-anchor', 'decision', 'obs_stray_one'] },
     { args: ['retire-anchor', 'ADR-001', 'Retired'], input: '{"reason":"test"}' },
@@ -1521,7 +1521,7 @@ describe('D-NO-STRAY-TREE: a learning writer refuses outside a learning tree', {
       expect(snapshotTree(dir)).toEqual(before);
     });
 
-    it(`${op} under a .devflow/ with no learning directory exits 1 and creates nothing`, () => {
+    it(`${op} under a .devflow/ with no curation directory exits 1 and creates nothing`, () => {
       fs.mkdirSync(path.join(dir, '.devflow'));
       const before = snapshotTree(dir);
       const run = runJsonHelper(dir, args, input);

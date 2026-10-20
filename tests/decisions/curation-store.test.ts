@@ -794,7 +794,7 @@ function createInput(overrides: Row = {}): Row {
     rule: 'A curation writer refuses when the curation directory is absent and never creates it.',
     why: 'Run from the wrong directory, a writer that creates the tree writes a ledger nobody reads.',
     scope: ['area:learning', 'src/**'],
-    provenance: 'learning v2 design review',
+    provenance: 'curation v2 design review',
     evidence: ['an empty nested curation tree appeared in the main checkout'],
   };
   const row: Row = { ...base, ...overrides };

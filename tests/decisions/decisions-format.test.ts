@@ -863,8 +863,8 @@ const V2_PITFALL = makeV2LedgerRow({
   type: 'pitfall',
   anchor_id: 'PF-003',
   decisions_status: 'Active',
-  title: 'Writers refuse a missing learning tree',
-  rule: 'A learning writer refuses when the learning directory is absent and never creates it.',
+  title: 'Writers refuse a missing curation tree',
+  rule: 'A curation writer refuses when the curation directory is absent and never creates it.',
   why: 'Run from the wrong directory, a writer that creates the tree writes a ledger nobody reads.',
   scope: ['area:learning'],
   provenance: 'a stray nested tree in the main checkout',
@@ -877,18 +877,18 @@ describe('formatEntryBodyV2', () => {
       '\n## ADR-002: Store functions return a Result\n\n' +
       '- **Status**: Accepted · verified 2026-09-01\n' +
       '- **Scope**: `area:learning`, `src/**/*.cjs`\n' +
-      '- **Decision**: Every learning store function returns a Result and never exits or prints.\n' +
+      '- **Decision**: Every curation store function returns a Result and never exits or prints.\n' +
       '- **Why**: An exit inside the lock skips its release, and printing ties the store to one caller.\n' +
-      '- **Source**: learning v2 design review\n',
+      '- **Source**: curation v2 design review\n',
     );
   });
 
   it('renders a pitfall with Active and a Rule line, and no verified suffix without last_verified', () => {
     expect(formatEntryBodyV2(V2_PITFALL)).toBe(
-      '\n## PF-003: Writers refuse a missing learning tree\n\n' +
+      '\n## PF-003: Writers refuse a missing curation tree\n\n' +
       '- **Status**: Active\n' +
       '- **Scope**: `area:learning`\n' +
-      '- **Rule**: A learning writer refuses when the learning directory is absent and never creates it.\n' +
+      '- **Rule**: A curation writer refuses when the curation directory is absent and never creates it.\n' +
       '- **Why**: Run from the wrong directory, a writer that creates the tree writes a ledger nobody reads.\n' +
       '- **Source**: a stray nested tree in the main checkout\n',
     );
@@ -957,7 +957,7 @@ describe('formatInactiveTable', () => {
     );
   });
 
-  it('shows the note the learning list shows for the same entry', () => {
+  it('shows the note the curation list shows for the same entry', () => {
     for (const row of INACTIVE_ROWS) {
       const listed = store.buildListing([row], []).inactive[0].note || '—';
       expect(formatInactiveTable([row])).toContain(`| ${listed} |\n`);
@@ -1028,7 +1028,7 @@ describe('buildIndexContent — v2 rows', () => {
       '\n' +
       'Pitfalls (2):\n' +
       '  PF-002  Editing installed scripts directly  [Active]  —  src/assets/scripts/hooks/\n' +
-      '  PF-003  Writers refuse a missing learning tree  —  area:learning\n' +
+      '  PF-003  Writers refuse a missing curation tree  —  area:learning\n' +
       '\n' +
       'ADR-NNN entries live in /project/.devflow/curation/decisions.md\n' +
       'PF-NNN  entries live in /project/.devflow/curation/pitfalls.md\n' +
@@ -1066,7 +1066,7 @@ import * as os from 'os';
 const JSON_HELPER = path.join(ROOT, 'src/assets/scripts/hooks/json-helper.cjs');
 
 describe('json-helper.cjs assign-anchor renders through decisions-format', () => {
-  /** Promote `logRow` with assign-anchor in a fresh learning tree; return the minted ledger row and the rendered file. */
+  /** Promote `logRow` with assign-anchor in a fresh curation tree; return the minted ledger row and the rendered file. */
   function promote(logRow: Record<string, unknown>, file: 'decisions.md' | 'pitfalls.md'): { ledgerRow: Record<string, unknown>; written: string } {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fmt-compat-test-'));
     const curationDir = path.join(tmpDir, '.devflow', 'curation');

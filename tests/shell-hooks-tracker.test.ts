@@ -423,7 +423,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
   });
 
   it('a truncated manifest takes nothing else down: Section 1 still emits (EC-09)', () => {
-    // Section 1 reads the manifest's learning switch; garbage there must not take
+    // Section 1 reads the manifest's curation switch; garbage there must not take
     // the rest of the hook down with it.
     seedTracker(homeDir, { rawManifest: '{' });
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'curation'), { recursive: true });
@@ -680,7 +680,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
 
     // Baseline: a machine that never chose a tracker — no sentinel, and a
     // manifest with no tracker key. The manifest must be PRESENT in the baseline
-    // too: Sections 1–2 read its machine learning switch
+    // too: Sections 1–2 read its machine curation switch
     // (D-FEATURES-NARROW-ONLY) on every installed machine, so a manifest-free
     // baseline would charge that read to Section 3.
     const bareHome = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-tracker-bare-'));
@@ -1210,11 +1210,11 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
 
     const ctx = contextOf(run().stdout);
     const decisions = ctx.indexOf('--- PROJECT DECISIONS (TL;DR) ---');
-    const learning = ctx.indexOf('--- CURATION MAINTENANCE ---');
+    const curation = ctx.indexOf('--- CURATION MAINTENANCE ---');
     const tracker = ctx.indexOf(BANNER);
     expect(decisions).toBeGreaterThanOrEqual(0);
-    expect(learning).toBeGreaterThan(decisions);
-    expect(tracker).toBeGreaterThan(learning);
+    expect(curation).toBeGreaterThan(decisions);
+    expect(tracker).toBeGreaterThan(curation);
     // The 6-line append idiom, not a second envelope: all three sections arrive
     // inside ONE hookSpecificOutput, separated by a blank line.
     const stdout = run().stdout;
@@ -1222,9 +1222,9 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     expect(ctx).toContain(`\n\n${BANNER}`);
   });
 
-  it('the tracker directive is NOT gated by the learning feature toggle', () => {
-    // learning:false silences Sections 1 and 2. Section 3 is a different feature
-    // and must survive: a user who turned learning off did not turn their tracker off.
+  it('the tracker directive is NOT gated by the curation feature toggle', () => {
+    // Switching curation off silences Sections 1 and 2. Section 3 is a different feature
+    // and must survive: a user who turned curation off did not turn their tracker off.
     // The machine switch (D-FEATURES-NARROW-ONLY) rides in the same manifest
     // that names the provider.
     seedTracker(homeDir, { provider: 'jira' });
@@ -1944,7 +1944,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     expect(viaHome).toContain(`Devflow directory: ${cleanDevflow}`);
   });
 
-  it('the same guard suppresses the LEARNING directive — one control, both sinks', () => {
+  it('the same guard suppresses the CURATION directive — one control, both sinks', () => {
     const hostile = path.join(tmpDir, `proj\n${PATH_PAYLOAD}`);
     // Its own `.git`: a project root is a toplevel (D-HOOKS-TOPLEVEL-ONLY).
     fs.mkdirSync(path.join(hostile, '.git'), { recursive: true });
@@ -1964,7 +1964,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
     expect(stdout).not.toContain(PATH_PAYLOAD);
 
     // Non-vacuity: the identical fixture under a clean root does emit it.
-    const clean = path.join(tmpDir, 'proj-learning-clean');
+    const clean = path.join(tmpDir, 'proj-curation-clean');
     fs.mkdirSync(path.join(clean, '.git'), { recursive: true });
     fs.mkdirSync(path.join(clean, '.devflow', 'curation'), { recursive: true });
     fs.writeFileSync(
@@ -2106,7 +2106,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
       .not.toContain('until it is opened from a path');
   });
 
-  it('a `feat+x` root — the slash-branch worktree name — gets the learning directive', () => {
+  it('a `feat+x` root — the slash-branch worktree name — gets the curation directive', () => {
     // Claude Code names the worktree for `feat/x` as `feat+x`; the gate admits `+`.
     const plus = path.join(tmpDir, 'feat+extend-flags-registry');
     // Its own `.git`: a project root is a toplevel (D-HOOKS-TOPLEVEL-ONLY).
@@ -2188,7 +2188,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
       `${ROOT_FLAG}="yes"`,
       `${GUARD_FLAG}="$${ROOT_FLAG}"`,
       '# --- Section 1: decisions ---',
-      '# --- Section 2: learning ---',
+      '# --- Section 2: curation ---',
       `  if [ -z "$${GUARD_FLAG}" ]; then CURATION_WORK=""; fi`,
       '# --- Section 3: tracker ---',
       `  if [ -z "$${GUARD_FLAG}" ]; then return 1; fi`,
@@ -2203,7 +2203,7 @@ describe('session-start-context: tracker setup directive (Section 3)', () => {
       `${ROOT_FLAG}="yes"`,
       `${GUARD_FLAG}="$${ROOT_FLAG}"`,
       '# --- Section 1: decisions ---',
-      '# --- Section 2: learning ---',
+      '# --- Section 2: curation ---',
       `  if [ -z "$${LEDGER_FLAG}" ]; then CURATION_WORK=""; fi`,
       '# --- Section 3: tracker ---',
       '  TRACKER_SECTION="Project root: $PROJECT_ROOT"',

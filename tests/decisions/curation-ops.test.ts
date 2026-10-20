@@ -1560,7 +1560,7 @@ describe('refreshAnchors: re-projection from the log (D-LOG-CONTENT-AUTHORITY)',
 
   it('rewrites an entry in place: a shorter rule that does not contain the old one replaces it, and history keeps the prior row', () => {
     const prior = makeV2LedgerRow({
-      rule: 'Every learning store function returns a Result, never exits, never prints, and every caller checks ok before it reads the value.',
+      rule: 'Every curation store function returns a Result, never exits, never prints, and every caller checks ok before it reads the value.',
       last_attempt: '2026-10-02T09:00:00.000Z',
     });
     const logRow = makeV2LogRow({ rule: 'Store functions return a Result.' });

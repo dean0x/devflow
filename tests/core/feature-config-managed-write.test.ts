@@ -369,7 +369,7 @@ describe('a personal opt-out under the pre-rename key (#529, TP-13)', () => {
     expect(readRaw().features).toEqual({ learning: false, curation: false });
   });
 
-  it('a top-level curation or learning key is no switch: the parser reads only features.*', () => {
+  it('a top-level curation or legacy learning key is no switch: the parser reads only features.*', () => {
     expect(lib.parsePersonalBytes(Buffer.from(JSON.stringify({ curation: false, learning: false })))).toMatchObject({
       kind: 'parsed', features: { kind: 'absent' },
     });

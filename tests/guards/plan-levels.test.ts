@@ -22,7 +22,7 @@
  *      counts only from the `FULL_SPAWNS` and focus tables. The expected runs come only from the hand-written
  *      oracle below, so a wrong reference or a wrong full table fails the assertions instead of agreeing with them.
  *   4. The gate-level block of the command, closed to the read paragraph and the three floor lines, with no
- *      gate-skip text: read paragraph, floor lines, data flow, learning-arm position.
+ *      gate-skip text: read paragraph, floor lines, data flow, curation-arm position.
  *   5. Full is today: the spawn counts, the focus tables and the Revise menu, with no skip text in the command.
  *   6. The gates and the run report.
  */
@@ -850,8 +850,8 @@ const VARIANTS: ReadonlyArray<{ label: string; body: string }> = (() => {
   const off = resolveCurationOffSource('commands', 'plan')
   if (off === null) throw new Error('dist/curation-off/commands/plan.md is absent: run `npm run build:mds`')
   return [
-    { label: 'learning on', body: requireDistFile('plan.md') },
-    { label: 'learning off', body: off },
+    { label: 'curation on', body: requireDistFile('plan.md') },
+    { label: 'curation off', body: off },
   ]
 })()
 const ON = VARIANTS[0].body

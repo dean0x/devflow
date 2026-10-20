@@ -1500,7 +1500,7 @@ describe('tracker: project selects, personal narrows, machine then github', () =
 });
 
 describe('TP-30 (AC-26): a malformed evidence leaves tracker and features in the same file applying', () => {
-  it('duplicate evidence beside a jira tracker and a learning:false switch', () => {
+  it('duplicate evidence beside a jira tracker and the legacy features.learning false', () => {
     const line = lineFor({
       project: '{"evidence":"required","evidence":"standard","tracker":{"provider":"jira","key":"ACME"},"features":{"learning":false}}',
     });
@@ -1714,11 +1714,11 @@ describe('parity: the machine layer reads the manifest exactly as the CLI does',
     ['memory false', { features: { memory: false } }],
     ['memory "false"', { features: { memory: 'false' } }],
     ['legacy decisions false', { features: { decisions: false } }],
-    ['learning true beats legacy decisions false', { features: { learning: true, decisions: false } }],
-    ['learning null falls to legacy decisions false', { features: { learning: null, decisions: false } }],
+    ['legacy learning key true beats legacy decisions key false', { features: { learning: true, decisions: false } }],
+    ['legacy learning key null falls to legacy decisions key false', { features: { learning: null, decisions: false } }],
     ['curation false', { features: { curation: false } }],
-    ['curation true, learning false resolves off', { features: { curation: true, learning: false } }],
-    ['curation false, learning true resolves off', { features: { curation: false, learning: true } }],
+    ['curation true, legacy learning key false resolves off', { features: { curation: true, learning: false } }],
+    ['curation false, legacy learning key true resolves off', { features: { curation: false, learning: true } }],
     ['curation true beats legacy decisions false', { features: { curation: true, decisions: false } }],
     ['curation "false" falls to legacy decisions false', { features: { curation: 'false', decisions: false } }],
     ['curation "false" alone is ignored', { features: { curation: 'false' } }],

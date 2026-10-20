@@ -153,7 +153,7 @@ const liveAgents = (): Array<readonly [string, string]> =>
   getAllAgentNames().flatMap(name => {
     const off = resolveCurationOffSource('agents', name)
     const rows: Array<readonly [string, string]> = [[name, resolveAgentSource(name).content]]
-    if (off !== null) rows.push([`${name} (learning off)`, off])
+    if (off !== null) rows.push([`${name} (curation off)`, off])
     return rows
   })
 

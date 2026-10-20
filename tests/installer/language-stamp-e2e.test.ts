@@ -164,7 +164,7 @@ describe('selective uninstall re-stamps the remaining selection (AC-311)', () =>
   }, SCENARIO_TIMEOUT_MS);
 });
 
-describe('a learning toggle keeps the stamp (the composition with the variant converge)', () => {
+describe('a curation toggle keeps the stamp (the composition with the variant converge)', () => {
   it('--disable then --enable switches the variant of code-review and keeps the list, byte for byte', async () => {
     init();
     init('--plugin=devflow-typescript');

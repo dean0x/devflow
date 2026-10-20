@@ -1,7 +1,7 @@
 /**
  * D-CLI-NO-SYMLINK — the queue drains delete nothing through a symbolic link.
  *
- * `devflow learning --disable`, `devflow memory --disable` and `devflow init
+ * `devflow curation --disable`, `devflow memory --disable` and `devflow init
  * --no-curation|--no-memory` delete a project's queue files. A repository can commit
  * `.devflow`, `.devflow/curation` or `.devflow/memory` as a link to a folder
  * elsewhere, and an unlink through it would delete same-named files wherever it

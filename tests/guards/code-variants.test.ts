@@ -10,7 +10,7 @@
  *           variant carries a `Skill(...)` call at all (D-COMPLIANCE-INJECT: the compliance skill's load
  *           reaches a spawn through the command's directive, never through a variant body; the guard in
  *           compliance-injection.test.ts holds that side).
- *   AC-306  Every variant keeps the security-scan block and, with learning on, `apply-decisions` (preload,
+ *   AC-306  Every variant keeps the security-scan block and, with curation on, `apply-decisions` (preload,
  *           input and the instruction to state a decision in words). Only Code preloads
  *           `apply-feature-knowledge` and takes `FEATURE_KNOWLEDGE`: only the implement and issue-fix
  *           spawns pass it.
@@ -44,7 +44,7 @@ const SCAN_UNAVAILABLE = 'report `Security scan: unavailable`'
 
 type Variant = 'on' | 'off'
 
-/** A compiled variant body: learning on, or learning off. */
+/** A compiled variant body: curation on, or curation off. */
 function compiled(agentType: string, variant: Variant): string {
   const slug = codeSlugOf(agentType)
   if (variant === 'on') return resolveAgentSource(slug).content
@@ -92,8 +92,8 @@ export function collectSharedKeepDefects(text: string, variant: Variant, takesKn
     if (!/^- \*\*DECISIONS_CONTEXT\*\*/m.test(text)) out.push('declares no DECISIONS_CONTEXT input')
     if (!text.includes('State every decision or pitfall you apply in words')) out.push('does not say to state a decision in words')
   } else {
-    if (skills.includes('apply-decisions')) out.push('preloads apply-decisions under learning off')
-    if (text.includes('DECISIONS_CONTEXT')) out.push('names DECISIONS_CONTEXT under learning off')
+    if (skills.includes('apply-decisions')) out.push('preloads apply-decisions under curation off')
+    if (text.includes('DECISIONS_CONTEXT')) out.push('names DECISIONS_CONTEXT under curation off')
   }
   const knowledgeSkill = skills.includes('apply-feature-knowledge')
   const knowledgeInput = /^- \*\*FEATURE_KNOWLEDGE\*\*/m.test(text)
@@ -109,11 +109,11 @@ export function collectSharedKeepDefects(text: string, variant: Variant, takesKn
 
 describe('no Code variant carries a Step 0 table, a DOMAIN input or a runtime skill load (AC-305, D-NO-RUNTIME-SKILLS)', () => {
   for (const variant of ['on', 'off'] as const) {
-    it(`each learning-${variant} variant is free of all three`, () => {
+    it(`each curation-${variant} variant is free of all three`, () => {
       for (const agentType of CODE_AGENT_TYPES) {
         const text = compiled(agentType, variant)
         expect(text.length, `${agentType}: the body is empty — the guard would pass vacuously`).toBeGreaterThan(4_000)
-        expect(collectRuntimeSkillDefects(text), `${agentType} (learning ${variant})`).toEqual([])
+        expect(collectRuntimeSkillDefects(text), `${agentType} (curation ${variant})`).toEqual([])
       }
     })
   }
@@ -122,7 +122,7 @@ describe('no Code variant carries a Step 0 table, a DOMAIN input or a runtime sk
     for (const variant of ['on', 'off'] as const) {
       for (const agentType of CODE_AGENT_TYPES) {
         const calls = [...compiled(agentType, variant).matchAll(/Skill\(skill="([^"]*)"\)/g)].map(m => m[1])
-        expect(calls, `${agentType} (learning ${variant})`).toEqual([])
+        expect(calls, `${agentType} (curation ${variant})`).toEqual([])
       }
     }
   })
@@ -161,9 +161,9 @@ describe('no Code variant carries a Step 0 table, a DOMAIN input or a runtime sk
 
 describe('every Code variant keeps the scan and apply-decisions; only Code takes feature knowledge (AC-306)', () => {
   for (const variant of ['on', 'off'] as const) {
-    it(`each learning-${variant} variant holds its shared text and exactly its own knowledge input`, () => {
+    it(`each curation-${variant} variant holds its shared text and exactly its own knowledge input`, () => {
       for (const agentType of CODE_AGENT_TYPES) {
-        expect(collectSharedKeepDefects(compiled(agentType, variant), variant, agentType === 'Code'), `${agentType} (learning ${variant})`).toEqual([])
+        expect(collectSharedKeepDefects(compiled(agentType, variant), variant, agentType === 'Code'), `${agentType} (curation ${variant})`).toEqual([])
       }
     })
   }
@@ -194,7 +194,7 @@ describe('every Code variant keeps the scan and apply-decisions; only Code takes
     // Curation off: a decisions token that survives the arm is reported.
     const off = compiled('Refactor', 'off')
     expect(collectSharedKeepDefects(off, 'off', false)).toEqual([])
-    expect(collectSharedKeepDefects(`${off}\nDECISIONS_CONTEXT: x\n`, 'off', false)).toEqual(['names DECISIONS_CONTEXT under learning off'])
+    expect(collectSharedKeepDefects(`${off}\nDECISIONS_CONTEXT: x\n`, 'off', false)).toEqual(['names DECISIONS_CONTEXT under curation off'])
   })
 })
 
@@ -213,7 +213,7 @@ describe('each Code variant is a host with a curation-off build (AC-307)', () =>
   it('each variant is named for its slug, so the agent type a spawn names resolves to its file', () => {
     for (const agentType of CODE_AGENT_TYPES) {
       expect(/^name: (\S+)$/m.exec(compiled(agentType, 'on'))?.[1], agentType).toBe(agentType)
-      expect(/^name: (\S+)$/m.exec(compiled(agentType, 'off'))?.[1], `${agentType} (learning off)`).toBe(agentType)
+      expect(/^name: (\S+)$/m.exec(compiled(agentType, 'off'))?.[1], `${agentType} (curation off)`).toBe(agentType)
     }
   })
 })

@@ -90,10 +90,10 @@ const { curationMoveLockKey } = createRequire(import.meta.url)(PROJECT_PATHS) as
 // ---------------------------------------------------------------------------
 
 function makeTmpDir(): string {
-  return fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'learning-cli-test-')));
+  return fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'curation-cli-test-')));
 }
 
-/** What one `devflow learning …` run printed, by channel, and the exit code it set. */
+/** What one `devflow curation …` run printed, by channel, and the exit code it set. */
 interface CurationRun {
   stdout: string;
   info: string;
@@ -109,7 +109,7 @@ function logged(fn: (message: string) => void): string {
 }
 
 /**
- * Run `devflow learning <args…>` once, as a fresh process would: Commander keeps
+ * Run `devflow curation <args…>` once, as a fresh process would: Commander keeps
  * option values across parseAsync() calls on one instance, so they are cleared
  * first. stdout is captured; the clack log calls are read from their mocks.
  */
@@ -137,7 +137,7 @@ async function runCuration(args: readonly string[]): Promise<CurationRun> {
 }
 
 /**
- * A learning tree with every kind of row the listing tells apart:
+ * A curation tree with every kind of row the listing tells apart:
  *   ADR-001  an active v2 decision
  *   PF-001   an active v1 pitfall, and PF-002 its twin carrying the same
  *            observation with details its log row lacks
@@ -349,7 +349,7 @@ describe('curation --status', { timeout: 30_000 }, () => {
     expect(snapshotTree(root)).toEqual(before);
   });
 
-  it('reports zero counts for a project with no learning data, and creates nothing', async () => {
+  it('reports zero counts for a project with no curation data, and creates nothing', async () => {
     const run = await runCuration(['--status']);
     expect(run.info).toBe([
       'Curation: enabled',
@@ -397,7 +397,7 @@ describe('curation --list', { timeout: 30_000 }, () => {
     expect(snapshotTree(root)).toEqual(before);
   });
 
-  it('says there is no learning data when the project has no learning directory, and creates nothing', async () => {
+  it('says there is no curation data when the project has no curation directory, and creates nothing', async () => {
     const run = await runCuration(['--list']);
     expect(run.info).toBe('No curation data in this project yet.');
     expect(run.stdout).toBe('');
@@ -484,7 +484,7 @@ describe('curation --show', { timeout: 30_000 }, () => {
     expect(run.exitCode).toBe(1);
   });
 
-  it('refuses in a project with no learning directory, and creates nothing', async () => {
+  it('refuses in a project with no curation directory, and creates nothing', async () => {
     const run = await runCuration(['--show', 'ADR-001']);
     expect(run.error).toBe('No curation data in this project yet.');
     expect(run.exitCode).toBe(1);
@@ -531,7 +531,7 @@ describe('curation --restore', { timeout: 30_000 }, () => {
     expect(snapshotTree(root)).toEqual(before);
   });
 
-  it('refuses in a project with no learning directory, and creates nothing', async () => {
+  it('refuses in a project with no curation directory, and creates nothing', async () => {
     const run = await runCuration(['--restore', 'PF-003']);
     expect(run.error).toBe('No curation data in this project yet.');
     expect(run.exitCode).toBe(1);
@@ -578,7 +578,7 @@ describe('curation --clear', { timeout: 30_000 }, () => {
     expect(backupPendingPresent(backup)).toEqual([true, true, true, true]);
   });
 
-  it('while the learning lock is held: exit 1 within the CLI\'s wait, nothing written, the queue left in place', async () => {
+  it('while the curation lock is held: exit 1 within the CLI\'s wait, nothing written, the queue left in place', async () => {
     const paths = seedCorpus(root);
     seedQueue(root);
     fs.mkdirSync(paths.lockDir);
@@ -607,7 +607,7 @@ describe('curation --clear', { timeout: 30_000 }, () => {
     expect(snapshotTree(root)).toEqual(before);
   });
 
-  it('says there is nothing to clear in a project with no learning directory, and creates nothing', async () => {
+  it('says there is nothing to clear in a project with no curation directory, and creates nothing', async () => {
     const run = await runCuration(['--clear']);
     expect(run.info).toBe('No curation data to clear.');
     expect(run.exitCode).toBe(0);
@@ -623,7 +623,7 @@ describe('curation --clear', { timeout: 30_000 }, () => {
 });
 
 // ---------------------------------------------------------------------------
-// --reset: the whole learning directory, under the learning lock
+// --reset: the whole curation directory, under the curation lock
 // (D-ONE-LEARNING-LOCK, D-NO-STRAY-TREE, D-RESET-UNDER-LOCK)
 // ---------------------------------------------------------------------------
 
@@ -647,7 +647,7 @@ describe('curation --reset', { timeout: 30_000 }, () => {
     expect(fs.existsSync(getPendingTurnsPath(root))).toBe(true);
   });
 
-  it('breaks a learning lock a crashed run left behind, then resets', async () => {
+  it('breaks a curation lock a crashed run left behind, then resets', async () => {
     const paths = seedCorpus(root);
     fs.mkdirSync(paths.lockDir);
     const abandoned = new Date(Date.now() - store.LOCK_STALE_MS - 60_000);
@@ -661,7 +661,7 @@ describe('curation --reset', { timeout: 30_000 }, () => {
     expect(fs.existsSync(paths.curationDir)).toBe(false);
   });
 
-  it('while another run holds the learning lock: exit 1 within the CLI\'s wait, nothing written', async () => {
+  it('while another run holds the curation lock: exit 1 within the CLI\'s wait, nothing written', async () => {
     const paths = seedCorpus(root);
     seedQueue(root);
     fs.mkdirSync(paths.lockDir);
@@ -695,7 +695,7 @@ describe('curation --reset', { timeout: 30_000 }, () => {
     expect(snapshotTree(elsewhere)).toEqual(before);
   });
 
-  it('when .devflow is a symbolic link: exit 1, and nothing in the learning folder the link leads to is removed', async () => {
+  it('when .devflow is a symbolic link: exit 1, and nothing in the curation folder the link leads to is removed', async () => {
     const linkedDevflow = path.join(root, '.devflow');
     const elsewhere = path.join(root, 'elsewhere');
     fs.mkdirSync(path.join(elsewhere, 'curation'), { recursive: true });
@@ -712,7 +712,7 @@ describe('curation --reset', { timeout: 30_000 }, () => {
     expect(snapshotTree(elsewhere)).toEqual(before);
   });
 
-  it('in a project that never had learning data: says so, exits 0 and creates nothing, neither .devflow/ nor .devflow/curation/', async () => {
+  it('in a project that never had curation data: says so, exits 0 and creates nothing, neither .devflow/ nor .devflow/curation/', async () => {
     const run = await runCuration(['--reset']);
 
     expect(run.info).toBe('No curation data to reset.');
@@ -748,8 +748,8 @@ describe('curation --reset', { timeout: 30_000 }, () => {
 });
 
 // ---------------------------------------------------------------------------
-// --disable switches learning off machine-wide (D-FEATURES-NARROW-ONLY) and
-// drains the current project's learning queue — a mid-run Curate agent whose
+// --disable switches curation off machine-wide (D-FEATURES-NARROW-ONLY) and
+// drains the current project's curation queue — a mid-run Curate agent whose
 // claimed batch vanishes stops, which is the desired outcome of disabling.
 // ---------------------------------------------------------------------------
 
@@ -767,7 +767,7 @@ describe('curation --disable drains the curation pending-turns queue', () => {
     seedQueue(root);
   });
 
-  it('deletes the queue, the claim and its owner file, and switches learning off machine-wide (memory queue untouched)', async () => {
+  it('deletes the queue, the claim and its owner file, and switches curation off machine-wide (memory queue untouched)', async () => {
     fs.mkdirSync(path.join(root, '.devflow', 'memory'), { recursive: true });
     fs.writeFileSync(getPendingTurnsPath(root), '{"role":"user"}\n');
 
@@ -826,7 +826,7 @@ describe('curation --disable drains the curation pending-turns queue', () => {
     expect(readCurationSwitch()).toBe(true);
   });
 
-  it('switches learning off outside a git project too (the switch is not per-project)', async () => {
+  it('switches curation off outside a git project too (the switch is not per-project)', async () => {
     vi.mocked(getLedgerRoot).mockResolvedValue(null);
     await runCuration(['--disable']);
     expect(readCurationSwitch()).toBe(false);
@@ -842,7 +842,7 @@ describe('curation --disable drains the curation pending-turns queue', () => {
   // to a folder elsewhere; the drain then deletes nothing, says so, and the switch is
   // still turned off.
   for (const linked of ['.devflow', path.join('.devflow', 'curation')]) {
-    it(`a linked ${linked}: deletes nothing where it points, says so, and still switches learning off (D-CLI-NO-SYMLINK)`, async () => {
+    it(`a linked ${linked}: deletes nothing where it points, says so, and still switches curation off (D-CLI-NO-SYMLINK)`, async () => {
       const outside = makeTmpDir();
       try {
         const queueDir = linked === '.devflow' ? path.join(outside, 'curation') : outside;
@@ -868,7 +868,7 @@ describe('curation --disable drains the curation pending-turns queue', () => {
 
 // ---------------------------------------------------------------------------
 // --configure writes the project tuning config, curation.json, under the ledger's
-// .devflow/curation. A repository can commit .devflow, the learning folder or
+// .devflow/curation. A repository can commit .devflow, the curation folder or
 // curation.json itself as a link; the command then writes nothing, says why and
 // exits 1 (D-CLI-NO-SYMLINK).
 // ---------------------------------------------------------------------------
@@ -947,7 +947,7 @@ describe('curation --enable/--disable: the curation switch and the folder move (
     ['.pending-turns.jsonl', '.pending-turns.processing', '.pending-turns.owner'].map(f => fs.existsSync(path.join(dir, f)));
 
   describe('the two machine keys', () => {
-    it.each([['--disable', false], ['--enable', true]] as const)('%s writes curation and learning to %s', async (flag, value) => {
+    it.each([['--disable', false], ['--enable', true]] as const)('%s writes curation and the legacy learning key to %s', async (flag, value) => {
       const before = flag === '--enable' ? { curation: false, learning: false } : { curation: true, learning: true };
       const manifest = JSON.parse(fs.readFileSync(path.join(devflowDir, 'manifest.json'), 'utf-8')) as { features: Record<string, unknown> };
       manifest.features = { ...manifest.features, ...before };

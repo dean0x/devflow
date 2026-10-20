@@ -152,7 +152,7 @@ describe('readManifest', () => {
     expect((result!.features as Record<string, unknown>).learn).toBeUndefined();
   });
 
-  it('normalizes old manifest without learning or decisions to ON (D-FEATURES-ABSENT-ON)', async () => {
+  it('normalizes an old manifest without the legacy learning key or the decisions key to ON (D-FEATURES-ABSENT-ON)', async () => {
     const oldData = {
       version: '2.0.0',
       plugins: ['devflow-core-skills'],
@@ -205,7 +205,7 @@ describe('readManifest', () => {
     }
   });
 
-  it('reads the curation switch under curation and learning: false wins, and the pre-rename key decides only when neither is a boolean (TP-10)', async () => {
+  it('reads the curation switch under curation and the legacy learning key: false wins, and the pre-rename key decides only when neither is a boolean (TP-10)', async () => {
     const base = { version: '2.0.0', plugins: ['devflow-core-skills'], scope: 'user', installedAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' };
     const cases: Array<[Record<string, unknown>, boolean]> = [
       [{ curation: false }, false],
@@ -406,7 +406,7 @@ describe('readManifest', () => {
     });
   });
 
-  it('a toggle through syncManifestFeature keeps a disagreeing curation and learning pair off', async () => {
+  it('a toggle through syncManifestFeature keeps a disagreeing curation key and legacy learning key pair off', async () => {
     await fs.writeFile(
       path.join(tmpDir, 'manifest.json'),
       JSON.stringify({

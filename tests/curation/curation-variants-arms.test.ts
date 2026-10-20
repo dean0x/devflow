@@ -364,7 +364,7 @@ describe('completeness: every artifact that holds a token has an off counterpart
   it('known-bad probes: an artifact with a token and no variant is reported, and the Curate agent is not', () => {
     const probe = [
       { rel: 'agents/triage.md', text: 'Use DECISIONS_CONTEXT.' },
-      { rel: EXEMPT, text: 'Reads learning/decisions.md.' },
+      { rel: EXEMPT, text: 'Reads curation/decisions.md.' },
       { rel: 'agents/validate.md', text: 'No token here.' },
     ]
     expect(collectMissingCounterparts(probe, () => false)).toEqual(['agents/triage.md holds a curation token and has no curation-off variant'])

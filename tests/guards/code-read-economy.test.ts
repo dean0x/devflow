@@ -111,7 +111,7 @@ interface Body {
   readonly content: string
 }
 
-/** Code, Fix and Refactor, learning on and learning off: six compiled bodies, each read or the run fails. */
+/** Code, Fix and Refactor, curation on and curation off: six compiled bodies, each read or the run fails. */
 function codeFamilyBodies(): Body[] {
   const out: Body[] = []
   for (const name of AGENTS) {
@@ -119,10 +119,10 @@ function codeFamilyBodies(): Body[] {
     if (on.origin !== 'dist') {
       throw new Error(`${name}: only the source tree was found, run \`npm run build:mds\` first (a generator host has no source body)`)
     }
-    out.push({ label: `${name} (learning on)`, content: on.content })
+    out.push({ label: `${name} (curation on)`, content: on.content })
     const off = resolveCurationOffSource('agents', name)
     if (off === null) throw new Error(`dist/curation-off/agents/${name}.md is absent, run \`npm run build:mds\` first`)
-    out.push({ label: `${name} (learning off)`, content: off })
+    out.push({ label: `${name} (curation off)`, content: off })
   }
   return out
 }
@@ -136,14 +136,14 @@ function sharedOutputLine(): string {
   return line
 }
 
-/** The compiled /implement and /resolve, learning on and off: four commands, each read or the run fails. */
+/** The compiled /implement and /resolve, curation on and off: four commands, each read or the run fails. */
 function spawningCommands(): Body[] {
   const out: Body[] = []
   for (const name of ['implement', 'resolve']) {
-    out.push({ label: `${name} (learning on)`, content: requireDistFile(`${name}.md`) })
+    out.push({ label: `${name} (curation on)`, content: requireDistFile(`${name}.md`) })
     const off = resolveCurationOffSource('commands', name)
     if (off === null) throw new Error(`dist/curation-off/commands/${name}.md is absent, run \`npm run build:mds\` first`)
-    out.push({ label: `${name} (learning off)`, content: off })
+    out.push({ label: `${name} (curation off)`, content: off })
   }
   return out
 }
@@ -323,12 +323,12 @@ export function collectRecordDefects(header: string, records: ReadonlyArray<read
 // ---------------------------------------------------------------------------
 
 describe('Code, Fix and Refactor read a file once and cap their output, in both builds (D-CODE-READ-ONCE, D-CODE-QUIET)', () => {
-  it('reads six compiled bodies: three agents, learning on and off', () => {
+  it('reads six compiled bodies: three agents, curation on and off', () => {
     const bodies = codeFamilyBodies()
     expect(bodies.map(b => b.label)).toEqual([
-      'code (learning on)', 'code (learning off)',
-      'fix (learning on)', 'fix (learning off)',
-      'refactor (learning on)', 'refactor (learning off)',
+      'code (curation on)', 'code (curation off)',
+      'fix (curation on)', 'fix (curation off)',
+      'refactor (curation on)', 'refactor (curation off)',
     ])
     for (const { label, content } of bodies) expect(content.length, `${label}: nothing read`).toBeGreaterThan(MIN_BODY_BYTES)
   })
@@ -419,11 +419,11 @@ describe('a long plan splits into sequential phases and a run with no plan is on
     expect(collectSplitRuleDefects(text)).toEqual([])
   })
 
-  it('the compiled /implement, learning on and off, sends a run with no plan to one Code agent and agrees on the trigger', () => {
+  it('the compiled /implement, curation on and off, sends a run with no plan to one Code agent and agrees on the trigger', () => {
     const on = requireDistFile('implement.md')
     const off = resolveCurationOffSource('commands', 'implement')
     if (off === null) throw new Error('dist/curation-off/commands/implement.md is absent, run `npm run build:mds` first')
-    for (const [label, content] of [['learning on', on], ['learning off', off]] as const) {
+    for (const [label, content] of [['curation on', on], ['curation off', off]] as const) {
       expect(content.length, `${label}: nothing read`).toBeGreaterThan(MIN_BODY_BYTES)
       expect(collectNoPlanDefects(content), label).toEqual([])
     }
@@ -499,8 +499,8 @@ describe('the /implement and /resolve spawn prompts never ask a Code-family agen
   it('reads four compiled commands, each with Code and Fix spawns', () => {
     const commands = spawningCommands()
     expect(commands.map(c => c.label)).toEqual([
-      'implement (learning on)', 'implement (learning off)',
-      'resolve (learning on)', 'resolve (learning off)',
+      'implement (curation on)', 'implement (curation off)',
+      'resolve (curation on)', 'resolve (curation off)',
     ])
     for (const { label, content } of commands) {
       expect(content.length, `${label}: nothing read`).toBeGreaterThan(MIN_BODY_BYTES)

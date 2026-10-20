@@ -338,7 +338,7 @@ describe('the accept rule keeps its four strict clauses', () => {
   })
 })
 
-describe('the learning gate keeps its rationale out of the expanded prompt', () => {
+describe('the curation gate keeps its rationale out of the expanded prompt', () => {
   const DECISIONS = 'src/assets/commands/_partials/_decisions.mds'
 
   it('an unresolvable settings line keeps CURATION=on, so a failed resolution loads decisions as before', () => {

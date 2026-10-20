@@ -1,9 +1,9 @@
 /**
- * The learning switch under its two current keys, read by every reader (#529).
+ * The curation switch under its two current keys, read by every reader (#529).
  *
- * The learning feature is being renamed to curation, so for now a machine
- * manifest and a repository file can both name it `curation` or `learning`. Four
- * readers decide the switch, and they must reach the same answer on every input:
+ * A machine manifest and a repository file can both name the switch `curation`
+ * or `learning` (its pre-rename key). Four readers decide the switch, and they
+ * must reach the same answer on every input:
  *
  *   - TypeScript:  isMachineFeatureOn (src/core/feature-switch.ts) and
  *                  readManifest (src/core/manifest.ts), the machine layer
@@ -127,7 +127,7 @@ const NODE_BACKEND_NAMES: ReadonlySet<string> = new Set([
   'm-true-false-absent', // a disagreeing pair resolves off
   'm-false-true-absent', // the same pair, the other way round
   'm-false-absent-absent', // curation alone
-  'm-absent-false-absent', // learning alone
+  'm-absent-false-absent', // the pre-rename `learning` key alone
   'm-true-true-false', // a current key beats the pre-rename key
   'm-absent-absent-false', // the pre-rename key decides when neither is a boolean
   'm-text-text-false', // non-boolean current keys fall through to the pre-rename key
@@ -309,7 +309,7 @@ describe('the settings resolver, through the evidence-policy seam', { timeout: 1
       const s = settings.resolveSettings({ dir: repo, manifest: MACHINE_ON });
       expect(s.ok, c.name).toBe(true);
       expect(s.switches.curation.on, c.name).toBe(c.expected);
-      // memory and knowledge are untouched by a curation or learning key.
+      // memory and knowledge are untouched by a curation or pre-rename `learning` key.
       expect(s.switches.memory.on, c.name).toBe(true);
       expect(s.switches.knowledge.on, c.name).toBe(true);
     }

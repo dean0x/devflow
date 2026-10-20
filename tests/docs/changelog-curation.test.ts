@@ -1,7 +1,7 @@
 /**
  * CHANGELOG guard for the curation rename (TP-23, TP-24).
  *
- * The release that renames the learning feature to curation carries one upgrade
+ * The release that renames the feature to curation carries one upgrade
  * entry, headed "Upgrade notes — Curation rename". The entry must state every
  * item the plan lists (the renamed names, the breaking change, the migration,
  * the upgrade, downgrade and re-upgrade effects, the machine-switch rule, the

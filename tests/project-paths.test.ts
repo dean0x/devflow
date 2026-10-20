@@ -86,7 +86,7 @@ describe('project-paths TypeScript module', () => {
     });
   });
 
-  describe('learning queue files', () => {
+  describe('curation queue files', () => {
     it('getCurationPendingTurnsPath returns .devflow/curation/.pending-turns.jsonl', () => {
       expect(getCurationPendingTurnsPath(ROOT)).toBe('/some/project/.devflow/curation/.pending-turns.jsonl');
     });
@@ -100,7 +100,7 @@ describe('project-paths TypeScript module', () => {
     });
   });
 
-  describe('learning content files', () => {
+  describe('curation content files', () => {
     it('getDecisionsFilePath returns .devflow/curation/decisions.md', () => {
       expect(getDecisionsFilePath(ROOT)).toBe('/some/project/.devflow/curation/decisions.md');
     });

@@ -29,29 +29,29 @@ afterEach(async () => {
 });
 
 const devflow = (): string => path.join(root, '.devflow');
-const learning = (): string => path.join(root, '.devflow', 'curation');
+const curationDir = (): string => path.join(root, '.devflow', 'curation');
 
 describe('firstSymbolicLink (D-CLI-NO-SYMLINK)', () => {
   it('is null when nothing stands at any path', async () => {
-    expect(await firstSymbolicLink([devflow(), learning()])).toBeNull();
+    expect(await firstSymbolicLink([devflow(), curationDir()])).toBeNull();
   });
 
   it('is null for real folders and files', async () => {
-    await fs.mkdir(learning(), { recursive: true });
-    await fs.writeFile(path.join(learning(), 'queue'), '');
-    expect(await firstSymbolicLink([devflow(), learning(), path.join(learning(), 'queue')])).toBeNull();
+    await fs.mkdir(curationDir(), { recursive: true });
+    await fs.writeFile(path.join(curationDir(), 'queue'), '');
+    expect(await firstSymbolicLink([devflow(), curationDir(), path.join(curationDir(), 'queue')])).toBeNull();
   });
 
   it('names a linked .devflow, the outermost link, before anything below it', async () => {
-    await fs.mkdir(path.join(outside, 'learning'));
+    await fs.mkdir(path.join(outside, 'curation'));
     await fs.symlink(outside, devflow());
-    expect(await firstSymbolicLink([devflow(), learning()])).toBe(devflow());
+    expect(await firstSymbolicLink([devflow(), curationDir()])).toBe(devflow());
   });
 
   it('names a linked folder below a real .devflow', async () => {
     await fs.mkdir(devflow());
-    await fs.symlink(outside, learning());
-    expect(await firstSymbolicLink([devflow(), learning()])).toBe(learning());
+    await fs.symlink(outside, curationDir());
+    expect(await firstSymbolicLink([devflow(), curationDir()])).toBe(curationDir());
   });
 
   it('names a dangling link too: it is seen, never followed', async () => {
@@ -61,16 +61,16 @@ describe('firstSymbolicLink (D-CLI-NO-SYMLINK)', () => {
 
   it('is null when a file stands where a folder was expected on the way', async () => {
     await fs.writeFile(devflow(), 'a file, not a folder\n');
-    expect(await firstSymbolicLink([devflow(), learning()])).toBeNull();
+    expect(await firstSymbolicLink([devflow(), curationDir()])).toBeNull();
   });
 
   // Root ignores permission bits, so there the check can always look: skipped, never
   // silently green.
   it.skipIf(process.getuid?.() === 0)('throws when a path cannot be checked, so the caller acts on nothing', async () => {
-    await fs.mkdir(learning(), { recursive: true });
+    await fs.mkdir(curationDir(), { recursive: true });
     await fs.chmod(root, 0o000);
     try {
-      await expect(firstSymbolicLink([learning()])).rejects.toMatchObject({ code: 'EACCES' });
+      await expect(firstSymbolicLink([curationDir()])).rejects.toMatchObject({ code: 'EACCES' });
     } finally {
       await fs.chmod(root, 0o755);
     }

@@ -337,9 +337,9 @@ describe('json-helper.js operations', () => {
     expect(parsed.hookSpecificOutput.additionalContext).toBe('test preamble');
   });
 
-  it('a generic op loads none of the learning modules; a learning op loads the store, the renderer only to render, the move module only to move', () => {
-    // Every hook that falls back from jq to node runs a generic op, so the learning
-    // store loads only for a learning op, the renderer and formatter only when that
+  it('a generic op loads none of the curation modules; a curation op loads the store, the renderer only to render, the move module only to move', () => {
+    // Every hook that falls back from jq to node runs a generic op, so the curation
+    // store loads only for a curation op, the renderer and formatter only when that
     // op renders, and the move module only for the move op.
     const probeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'json-helper-lazy-'));
     try {
@@ -367,7 +367,7 @@ describe('json-helper.js operations', () => {
       };
 
       expect(curationModulesLoadedBy(['get-field', 'cwd'], '{"cwd":"/tmp"}')).toEqual([]);
-      // claim-queue answers none outside a learning tree, so it exits 0 here, and renders nothing.
+      // claim-queue answers none outside a curation tree, so it exits 0 here, and renders nothing.
       expect(curationModulesLoadedBy(['claim-queue'], '')).toEqual(['curation-store.cjs', 'mkdir-lock.cjs', 'project-paths.cjs']);
       // restore-anchor renders the entry it restores.
       const curationDir = path.join(probeDir, '.devflow', 'curation');
@@ -875,7 +875,7 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
     expect(rowsOf(queueOf(wt)), 'the worktree must not start a ledger queue of its own').toHaveLength(0);
     expect(rowsOf(path.join(wt, '.devflow', 'memory', '.pending-turns.jsonl'))).toHaveLength(1);
     expect(fs.existsSync(path.join(main, '.devflow', 'memory')), 'memory is per checkout').toBe(false);
-    // ensure-devflow-init scaffolds per-checkout data only: a learning/ in the
+    // ensure-devflow-init scaffolds per-checkout data only: a curation/ in the
     // worktree would be an empty directory nothing ever writes to.
     expect(fs.existsSync(path.join(wt, '.devflow', 'curation')), 'no dead ledger dir in the worktree').toBe(false);
     expect(fs.existsSync(path.join(wt, '.devflow', 'features'))).toBe(true);
@@ -1031,7 +1031,7 @@ describe('D-LEDGER-MAIN-WORKTREE: one ledger per repository (TP-17, TP-18, TP-19
     expect(hook).toContain('--- PROJECT DECISIONS (TL;DR) ---');
     expect(hook).toContain('DECISIONS_INDEX_LINE="Index: $_SC_INDEX"');
     expect(hook).toContain(PASS_RULE);
-    // The charter is paid for in every ambient session, learning or not; the section is
+    // The charter is paid for in every ambient session, curation or not; the section is
     // gated on the machine switch narrowed by the repository.
     expect(charter).not.toContain('DECISIONS_CONTEXT');
     expect(charter).not.toContain('PROJECT DECISIONS');
@@ -2282,7 +2282,7 @@ describe('ensure-devflow-init behavioral', () => {
 
   it('returns non-zero and creates nothing where the link points when .devflow is a symbolic link (D-HOOKS-NO-SYMLINK)', () => {
     // A repository can commit .devflow itself as a link; `mkdir -p` would then create
-    // memory/, learning/, features/ and docs/ inside the folder the link names, and
+    // memory/, features/ and docs/ inside the folder the link names, and
     // the carve-out marker would land there too. The refusal is logged once.
     const outsideDir = path.join(tmpDir, 'outside');
     fs.mkdirSync(outsideDir);
@@ -4130,7 +4130,7 @@ describe('session-start-context root .gitignore (memory-independent)', () => {
     expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v6'))).toBe(true);
   });
 
-  it('a linked .devflow gets no carve-out marker and no learning folder where the link points (D-HOOKS-NO-SYMLINK)', () => {
+  it('a linked .devflow gets no carve-out marker and no curation folder where the link points (D-HOOKS-NO-SYMLINK)', () => {
     const outsideDir = path.join(homeDir, 'outside');
     fs.mkdirSync(outsideDir);
     fs.symlinkSync(outsideDir, path.join(tmpDir, '.devflow'));
@@ -4141,7 +4141,7 @@ describe('session-start-context root .gitignore (memory-independent)', () => {
     expect(fs.readdirSync(outsideDir), 'nothing is created in the folder the link names').toEqual([]);
   });
 
-  // With memory and learning both off, this hook is the only one that reaches the
+  // With memory and curation both off, this hook is the only one that reaches the
   // carve-out, so its log is the only record of a skip there: the log must be set
   // up before the carve-out runs, and the skip written with log(), not dbg().
   describe('each link skip at the carve-out is logged once per run (D-HOOKS-NO-SYMLINK, D-GITIGNORE-LINK-INSIDE)', () => {
@@ -4196,7 +4196,7 @@ describe('session-start-context root .gitignore (memory-independent)', () => {
 // session-start-context Section 2: Curation maintenance directive
 // =============================================================================
 //
-// When the learning queue holds captured turns (or a crashed run left a stale
+// When the curation queue holds captured turns (or a crashed run left a stale
 // .processing batch), session-start-context emits a "--- CURATION MAINTENANCE ---"
 // directive instructing the main model to spawn the background Curate agent with
 // the resolved model: a valid project curation.json, then a `devflow agents`
@@ -4205,8 +4205,9 @@ describe('session-start-context root .gitignore (memory-independent)', () => {
 // then a valid global ~/.devflow/curation.json, then none
 // (D-LEARNING-MODEL-PRECEDENCE). A FRESH .processing (younger than 900s) means a live agent already
 // owns the batch, so the directive is suppressed. Gate is the machine
-// `features.learning` in ~/.devflow/manifest.json, which the checkout's
-// project.json / config.json can only narrow (D-FEATURES-NARROW-ONLY).
+// `features.curation` (and its pre-rename copy `features.learning`) in
+// ~/.devflow/manifest.json, which the checkout's project.json / config.json can
+// only narrow (D-FEATURES-NARROW-ONLY).
 
 describe('session-start-context: curation maintenance directive (Section 2)', () => {
   const CONTEXT_HOOK = path.join(HOOKS_DIR, 'session-start-context');
@@ -4215,11 +4216,11 @@ describe('session-start-context: curation maintenance directive (Section 2)', ()
   let homeDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-learning-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-curation-'));
     // Curation is project work, active only inside a git project (D-HOOKS-GIT-ONLY).
     // An empty `.git` is a marker, not a repository, so the root stays tmpDir.
     fs.mkdirSync(path.join(tmpDir, '.git'));
-    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-learning-home-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-curation-home-'));
     fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'curation'), { recursive: true });
   });
@@ -4290,12 +4291,12 @@ describe('session-start-context: curation maintenance directive (Section 2)', ()
     expect(contextOf(stdout)).not.toContain('CURATION MAINTENANCE');
   });
 
-  // D-FEATURES-NARROW-ONLY: `devflow init --no-curation` / `devflow learning
-  // --disable` write features.learning:false to ~/.devflow/manifest.json; that
-  // switches the directive (and the TL;DR) off in every repo, and no repository
-  // file can switch it back on — the retired per-repo `learning` key decides
-  // nothing either way.
-  describe('machine-wide learning switch (manifest only)', () => {
+  // D-FEATURES-NARROW-ONLY: `devflow init --no-curation` / `devflow curation
+  // --disable` write features.curation:false (and its pre-rename copy
+  // features.learning) to ~/.devflow/manifest.json; that switches the directive
+  // (and the TL;DR) off in every repo, and no repository file can switch it back
+  // on — the retired per-repo `learning` key decides nothing either way.
+  describe('machine-wide curation switch (manifest only)', () => {
     const ENV = {};
     const TLDR = '<!-- TL;DR: 1 decision. Key: ADR-001 Test -->\n# Architectural Decisions';
 
@@ -4306,7 +4307,7 @@ describe('session-start-context: curation maintenance directive (Section 2)', ()
       );
     }
 
-    it('learning:false in the manifest suppresses the directive and the TL;DR although the repo config says true', () => {
+    it('the legacy learning key false in the manifest suppresses the directive and the TL;DR although the repo config says true', () => {
       seedQueue(tmpDir);
       fs.writeFileSync(path.join(tmpDir, '.devflow', 'config.json'), JSON.stringify({ learning: true }));
       fs.writeFileSync(path.join(tmpDir, '.devflow', 'curation', 'decisions.md'), TLDR);
@@ -4317,7 +4318,7 @@ describe('session-start-context: curation maintenance directive (Section 2)', ()
       expect(stdout.trim()).toBe('');
     });
 
-    it('learning:false in the manifest suppresses the directive where the repo has no config', () => {
+    it('the legacy learning key false in the manifest suppresses the directive where the repo has no config', () => {
       seedQueue(tmpDir);
       writeManifestFeatures({ learning: false });
 
@@ -4326,7 +4327,7 @@ describe('session-start-context: curation maintenance directive (Section 2)', ()
       expect(stdout.trim()).toBe('');
     });
 
-    it('a manifest without the learning key leaves the directive on (fail-open)', () => {
+    it('a manifest without a curation switch key leaves the directive on (fail-open)', () => {
       seedQueue(tmpDir);
       writeManifestFeatures({ ambient: true });
 
@@ -4334,7 +4335,7 @@ describe('session-start-context: curation maintenance directive (Section 2)', ()
       expect(contextOf(stdout)).toContain('--- CURATION MAINTENANCE ---');
     });
 
-    it('a stale repo config learning:false does not suppress the directive or the TL;DR', () => {
+    it('a stale repo config with the legacy learning key false does not suppress the directive or the TL;DR', () => {
       seedQueue(tmpDir);
       fs.writeFileSync(path.join(tmpDir, '.devflow', 'config.json'), JSON.stringify({ learning: false }));
       fs.writeFileSync(path.join(tmpDir, '.devflow', 'curation', 'decisions.md'), TLDR);
@@ -4715,7 +4716,7 @@ describe('session-start-context: curation maintenance directive (Section 2)', ()
     });
 
     it('reads $HOME/.devflow only: DEVFLOW_DIR is ignored', () => {
-      const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-learning-elsewhere-'));
+      const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-curation-elsewhere-'));
       try {
         fs.writeFileSync(
           path.join(elsewhere, 'agent-models.json'),
@@ -4753,7 +4754,7 @@ describe('session-start-context: curation maintenance directive (Section 2)', ()
 // the session or an agent directive (D-HOOKS-NO-SYMLINK)
 // =============================================================================
 //
-// Sections 1 and 2 read the learning folder's files into the session context
+// Sections 1 and 2 read the curation folder's files into the session context
 // (the TL;DR lines and the Curate model), name the index the model is told to
 // read and pass on to the agents it delegates to, and send the Curate agent to
 // the queue when it holds turns. A repository can commit any of these, or the
@@ -4798,7 +4799,7 @@ describe('session-start-context never reads through a symbolic link under .devfl
     return fs.existsSync(log) ? fs.readFileSync(log, 'utf-8').split('\n').filter((l) => l.includes('symbolic link')) : [];
   };
 
-  /** Write `content` to a file outside the project and link `name` in the learning folder to it. */
+  /** Write `content` to a file outside the project and link `name` in the curation folder to it. */
   const linkOutside = (name: string, content: string): string => {
     const target = path.join(outsideDir, name);
     fs.writeFileSync(target, content);
@@ -4887,7 +4888,7 @@ describe('session-start-context never reads through a symbolic link under .devfl
     expect(contextOf(run().stdout)).toContain('--- CURATION MAINTENANCE ---');
   });
 
-  it('a linked learning folder: no TL;DR, no Index line, no directive, and each file read from it refused once', () => {
+  it('a linked curation folder: no TL;DR, no Index line, no directive, and each file read from it refused once', () => {
     fs.rmSync(curationDir, { recursive: true });
     fs.writeFileSync(path.join(outsideDir, 'decisions.md'), `<!-- TL;DR: ${MARKER} -->\n`);
     fs.writeFileSync(path.join(outsideDir, 'index.md'), `Decisions (1):\n  ${MARKER}\n`);

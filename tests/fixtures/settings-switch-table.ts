@@ -4,21 +4,21 @@
  * THE shared fixture table for the narrow-only feature switches
  * (D-FEATURES-NARROW-ONLY, src/core/feature-switch.ts). Each row is a machine
  * manifest plus the raw bytes of a worktree's `.devflow/project.json` and
- * `.devflow/config.json`, and the memory/learning/knowledge result every
+ * `.devflow/config.json`, and the memory/curation/knowledge result every
  * implementation of the rule must reach:
  *
  *   - resolve-settings.cjs resolveSettings — tests/evidence-policy/settings-mode.test.ts
  *   - the shell gates (queue_read_gates and its per-file fast path) —
  *     tests/queue-append.test.ts; knowledge has no shell gate, so that runner
- *     reads memory and learning only
+ *     reads memory and curation only
  *
  * A switch is on iff the machine switch is on AND neither file's
  * `features.<name>` is the literal `false`. Only a literal `false` narrows; the
  * retired top-level keys (`memory`, `learning`, `knowledge`, `decisions`) never
  * do, in either file (TP-49).
  *
- * The `learning` column is the feature being renamed to curation (#529), so it
- * is read under TWO current keys, `curation` and `learning`:
+ * The `curation` column is read under TWO current keys, `curation` and its
+ * pre-rename copy `learning` (#529):
  *
  *   - machine: off when either current key is a boolean false; on when either is
  *     a boolean true and neither is false; when neither is a boolean, the
@@ -85,7 +85,7 @@ export const SETTINGS_SWITCH_TABLE: readonly SwitchRow[] = [
     expect: { memory: false, curation: false, knowledge: false },
   },
   {
-    name: 'project narrows learning',
+    name: 'project narrows curation through the legacy learning key',
     manifest: MANIFEST_ON,
     project: '{"version":1,"features":{"learning":false}}',
     personal: null,
@@ -180,7 +180,7 @@ export const SETTINGS_SWITCH_TABLE: readonly SwitchRow[] = [
     unreadable: 'project',
   },
   {
-    name: 'the machine legacy decisions:false switches learning off',
+    name: 'the machine legacy decisions:false switches curation off',
     manifest: { features: { decisions: false } },
     project: null,
     personal: null,
@@ -275,17 +275,17 @@ export const SETTINGS_SWITCH_TABLE: readonly SwitchRow[] = [
     expect: { memory: false, curation: false, knowledge: false },
   },
 
-  // ── The learning switch under its two current keys, curation and learning (#529) ──
+  // ── The curation switch under its two current keys, curation and learning (#529) ──
   // Machine layer (the manifest).
   {
-    name: 'machine curation:false alone switches learning off',
+    name: 'machine curation:false alone switches curation off',
     manifest: { features: { curation: false } },
     project: null,
     personal: null,
     expect: CURATION_OFF,
   },
   {
-    name: 'machine curation:true alone leaves learning on',
+    name: 'machine curation:true alone leaves curation on',
     manifest: { features: { curation: true } },
     project: null,
     personal: null,
@@ -348,7 +348,7 @@ export const SETTINGS_SWITCH_TABLE: readonly SwitchRow[] = [
     expect: CURATION_OFF,
   },
   {
-    name: 'machine non-boolean curation alone is ignored: learning stays on',
+    name: 'machine non-boolean curation alone is ignored: the switch stays on',
     manifest: { features: { curation: 'false' } },
     project: null,
     personal: null,
@@ -370,28 +370,28 @@ export const SETTINGS_SWITCH_TABLE: readonly SwitchRow[] = [
   },
   // Repository layer (project.json and config.json).
   {
-    name: 'project curation:false narrows learning',
+    name: 'project curation:false narrows curation',
     manifest: MANIFEST_ON,
     project: '{"version":1,"features":{"curation":false}}',
     personal: null,
     expect: CURATION_OFF,
   },
   {
-    name: 'personal curation:false narrows learning',
+    name: 'personal curation:false narrows curation',
     manifest: MANIFEST_ON,
     project: null,
     personal: '{"reviewPublication":"auto","features":{"curation":false}}',
     expect: CURATION_OFF,
   },
   {
-    name: 'project curation:true with learning:false narrows learning',
+    name: 'project curation:true with learning:false narrows curation',
     manifest: MANIFEST_ON,
     project: '{"features":{"curation":true,"learning":false}}',
     personal: null,
     expect: CURATION_OFF,
   },
   {
-    name: 'project curation:false with learning:true narrows learning',
+    name: 'project curation:false with learning:true narrows curation',
     manifest: MANIFEST_ON,
     project: '{"features":{"curation":false,"learning":true}}',
     personal: null,

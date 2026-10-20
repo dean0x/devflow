@@ -1,5 +1,5 @@
 /**
- * End-to-end: memory, learning and knowledge are MACHINE-WIDE features (#378,
+ * End-to-end: memory, curation and knowledge are MACHINE-WIDE features (#378,
  * D-FEATURES-NARROW-ONLY). `devflow init --[no-]<feature>` and `devflow
  * <feature> --enable/--disable` write the one switch — `features.<feature>` in
  * ~/.devflow/manifest.json — and every runtime gate reads that switch; a
@@ -161,7 +161,7 @@ afterEach(async () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('init --no-<feature> switches the feature off in every project', () => {
-  it('learning: silences a second repo and a non-git cwd, drains the cwd queue, and init --curation restores every repo', async () => {
+  it('curation: silences a second repo and a non-git cwd, drains the cwd queue, and init --curation restores every repo', async () => {
     // Repo B carries the stale `true` an earlier init wrote — the reported case.
     await writeRepoConfig(repoB, STALE_ON);
     await seedCurationQueue(repoA);
@@ -173,18 +173,18 @@ describe('init --no-<feature> switches the feature off in every project', () => 
     expect(out).toMatch(/Curation:\s+disabled/);
     expect(await readManifestFeatures()).toMatchObject({ curation: false, learning: false, knowledge: false });
 
-    // The cwd repo's pending learning queue (and a claimed batch) is drained.
+    // The cwd repo's pending curation queue (and a claimed batch) is drained.
     expect(existsSync(curationQueue(repoA))).toBe(false);
     expect(existsSync(curationProcessing(repoA))).toBe(false);
 
     // No Curation directive in the other repo or a non-git cwd…
     expect(sessionContext(repoB)).not.toContain('CURATION MAINTENANCE');
     expect(sessionContext(nonGit)).not.toContain('CURATION MAINTENANCE');
-    // …and the capture hooks append nothing to their learning queues.
+    // …and the capture hooks append nothing to their curation queues.
     for (const dir of [repoB, nonGit]) {
       const before = queueLines(dir);
       captureTurn(dir);
-      expect(queueLines(dir), `learning captured in ${dir} after a machine-wide disable`).toBe(before);
+      expect(queueLines(dir), `curation captured in ${dir} after a machine-wide disable`).toBe(before);
     }
 
     // The status of a repo whose config still says true reports the truth.
@@ -209,7 +209,7 @@ describe('init --no-<feature> switches the feature off in every project', () => 
 
     captureTurn(repoB);
     expect(linesOf(memoryQueue(repoB)), 'memory captured in a second repo after init --no-memory').toBe(0);
-    // Non-vacuity: the hooks ran and learning (still on) captured the turn.
+    // Non-vacuity: the hooks ran and curation (still on) captured the turn.
     expect(queueLines(repoB), 'the capture hooks did not run in the second repo').toBe(2);
     // A non-git cwd captures nothing at all, whatever the switches say (D-HOOKS-GIT-ONLY).
     captureTurn(nonGit);
@@ -224,8 +224,8 @@ describe('init --no-<feature> switches the feature off in every project', () => 
     expect(linesOf(memoryQueue(repoB))).toBe(2);
   }, MULTI_RUN_TIMEOUT_MS);
 
-  it('from a linked worktree: drains the main checkout\'s learning queue and this checkout\'s memory queue (D-LEDGER-MAIN-WORKTREE)', async () => {
-    // The hooks queue learning turns into the main checkout's ledger (DF_LEDGER_ROOT)
+  it('from a linked worktree: drains the main checkout\'s curation queue and this checkout\'s memory queue (D-LEDGER-MAIN-WORKTREE)', async () => {
+    // The hooks queue curation turns into the main checkout's ledger (DF_LEDGER_ROOT)
     // but keep working memory per checkout, so init drains each where it is written.
     execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: repoA });
     const wtParent = await fs.mkdtemp(path.join(os.tmpdir(), 'df-switch-wt-'));
@@ -240,7 +240,7 @@ describe('init --no-<feature> switches the feature off in every project', () => 
 
       runInit(wt, '--recommended', '--no-curation', '--no-memory');
 
-      expect(existsSync(curationQueue(repoA)), 'the main checkout\'s learning queue survived init --no-curation').toBe(false);
+      expect(existsSync(curationQueue(repoA)), 'the main checkout\'s curation queue survived init --no-curation').toBe(false);
       expect(existsSync(memoryQueue(wt)), 'this checkout\'s memory queue survived init --no-memory').toBe(false);
       // Memory is per checkout: the main checkout's own queue is not this run's to drain.
       expect(existsSync(memoryQueue(repoA))).toBe(true);
@@ -283,8 +283,8 @@ describe('init --no-<feature> switches the feature off in every project', () => 
 // The feature commands are the same machine-wide switch
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('devflow memory|learning|knowledge --enable/--disable are machine-wide', () => {
-  it('learning --disable from one repo silences every repo and drains that repo; --enable from a non-git cwd restores', async () => {
+describe('devflow memory|curation|knowledge --enable/--disable are machine-wide', () => {
+  it('curation --disable from one repo silences every repo and drains that repo; --enable from a non-git cwd restores', async () => {
     runInit(repoA, '--recommended');
     await seedCurationQueue(repoA);
     await seedCurationQueue(repoB);
@@ -418,7 +418,7 @@ async function editManifestVersion(version: string): Promise<void> {
 }
 
 describe('older manifests agree with the runtime gates', () => {
-  it('a manifest without learning/knowledge keys: a plain re-init keeps both enabled (D-FEATURES-ABSENT-ON)', async () => {
+  it('a manifest without the curation key, the legacy learning key and the knowledge key: a plain re-init keeps both enabled (D-FEATURES-ABSENT-ON)', async () => {
     runInit(repoA, '--recommended');
     await editManifestFeatures(['curation', 'learning', 'knowledge']);
     // The gates already read the absent keys as on…
@@ -432,7 +432,7 @@ describe('older manifests agree with the runtime gates', () => {
     expect(sessionContext(repoA)).toContain('--- CURATION MAINTENANCE ---');
   }, MULTI_RUN_TIMEOUT_MS);
 
-  it('a manifest holding only the legacy decisions:false: learning is off in the hooks and the CLI status (D-LEARNING-LEGACY-DECISIONS)', async () => {
+  it('a manifest holding only the legacy decisions:false: curation is off in the hooks and the CLI status (D-LEARNING-LEGACY-DECISIONS)', async () => {
     runInit(repoA, '--recommended');
     await editManifestFeatures(['curation', 'learning'], { decisions: false });
     await seedCurationQueue(repoB);
@@ -440,12 +440,12 @@ describe('older manifests agree with the runtime gates', () => {
     expect(sessionContext(repoB)).not.toContain('CURATION MAINTENANCE');
     const before = queueLines(repoB);
     captureTurn(repoB);
-    expect(queueLines(repoB), 'learning captured under a legacy decisions:false').toBe(before);
+    expect(queueLines(repoB), 'curation captured under a legacy decisions:false').toBe(before);
     // Non-vacuity: the capture hooks ran — memory (still on) captured the turn.
     expect(linesOf(memoryQueue(repoB))).toBe(2);
     expect(runCli(repoA, 'curation', '--status').out).toContain('Curation: disabled');
 
-    // An explicit learning value wins over the legacy key.
+    // An explicit value for the current key and its pre-rename copy wins over the legacy decisions key.
     await editManifestFeatures([], { curation: true, learning: true });
     expect(sessionContext(repoB)).toContain('--- CURATION MAINTENANCE ---');
     expect(runCli(repoA, 'curation', '--status').out).toContain('Curation: enabled');
@@ -480,7 +480,7 @@ describe('init --hud-only over a full install (D-HUD-ONLY-PRESERVE)', () => {
     expect(after.plugins).toEqual(prior.plugins);
     expect(after.version).toBe(prior.version);
     expect(after.installedAt).toBe(prior.installedAt);
-    // With learning a machine-wide switch, a HUD install must not disable it.
+    // With curation a machine-wide switch, a HUD install must not disable it.
     await seedCurationQueue(repoB);
     expect(sessionContext(repoB)).toContain('--- CURATION MAINTENANCE ---');
   }, MULTI_RUN_TIMEOUT_MS);
@@ -534,7 +534,7 @@ describe('init --hud-only over a full install (D-HUD-ONLY-PRESERVE)', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('init on→off re-init transitions', () => {
-  it('memory, ambient, HUD, rules, learning and knowledge all turn off on re-init', async () => {
+  it('memory, ambient, HUD, rules, curation and knowledge all turn off on re-init', async () => {
     runInit(repoA, '--recommended', '--ambient', '--memory', '--hud', '--rules', '--curation', '--knowledge');
     const on = await readSettings();
     expect(hasMemoryHooks(on)).toBe(true);
@@ -542,11 +542,11 @@ describe('init on→off re-init transitions', () => {
     expect(hasHudStatusLine(on)).toBe(true);
     expect(existsSync(path.join(claudeDir(), 'rules', 'devflow'))).toBe(true);
     expect(await readManifestFeatures()).toMatchObject({ learning: true, knowledge: true });
-    // Pending memory and learning queues that the off re-init must drain.
+    // Pending memory and curation queues that the off re-init must drain.
     await fs.mkdir(path.dirname(memoryQueue(repoA)), { recursive: true });
     await fs.writeFile(memoryQueue(repoA), '{"role":"user","content":"x","ts":1}\n');
     await seedCurationQueue(repoA);
-    // Non-vacuity: learning is really on for the seeded queue before the re-init.
+    // Non-vacuity: curation is really on for the seeded queue before the re-init.
     expect(sessionContext(repoA)).toContain('--- CURATION MAINTENANCE ---');
 
     runInit(repoA, '--recommended', '--no-ambient', '--no-memory', '--no-hud', '--no-rules', '--no-curation', '--no-knowledge');
@@ -561,7 +561,7 @@ describe('init on→off re-init transitions', () => {
     // init never writes a feature switch into the per-repo config (D-FEATURES-NARROW-ONLY).
     expect(await readRepoConfig(repoA)).toEqual({ reviewPublication: 'auto' });
     expect(existsSync(memoryQueue(repoA))).toBe(false);
-    expect(existsSync(curationQueue(repoA)), 'the curation-off re-init drains the repo learning queue').toBe(false);
+    expect(existsSync(curationQueue(repoA)), 'the curation-off re-init drains the repo curation queue').toBe(false);
     expect(sessionContext(repoA)).not.toContain('CURATION MAINTENANCE');
     expect(runCli(repoA, 'knowledge', '--status').out).toContain('Status: disabled');
     expect(JSON.parse(await fs.readFile(path.join(devflowDir(), 'hud.json'), 'utf-8')).enabled).toBe(false);

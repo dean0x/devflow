@@ -1,5 +1,5 @@
 /**
- * End to end: the machine's learning switch decides which prompts and which skill
+ * End to end: the machine's curation switch decides which prompts and which skill
  * the install carries (D-LEARNING-VARIANT-INSTALL, plan section 3.B).
  *
  * Drives the REAL compiled CLI (`node dist/cli.js`) against isolated temp HOMEs, because
@@ -162,7 +162,7 @@ describe('init follows the machine switch (AC-139, AC-148)', () => {
     expect(await manifestCuration()).toBe(false);
   }, SCENARIO_TIMEOUT_MS);
 
-  it('init with learning on installs the curation-on prompts and the skill, byte for byte', async () => {
+  it('init with curation on installs the curation-on prompts and the skill, byte for byte', async () => {
     init('--recommended');
 
     await expectAll('on');
@@ -207,10 +207,10 @@ describe('init follows the machine switch (AC-139, AC-148)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// devflow learning --enable / --disable
+// devflow curation --enable / --disable
 // ---------------------------------------------------------------------------
 
-describe('devflow learning --enable/--disable converges the install (AC-140, AC-141)', () => {
+describe('devflow curation --enable/--disable converges the install (AC-140, AC-141)', () => {
   it('--enable brings back the curation-on prompts and the skill, and --disable reverses it', async () => {
     init('--recommended', '--no-curation');
     await expectAll('off');
@@ -243,7 +243,7 @@ describe('devflow learning --enable/--disable converges the install (AC-140, AC-
   it('--enable on an enabled machine and --disable on a disabled one leave manifest.json byte-identical (D-NOOP-TOGGLE)', async () => {
     init('--recommended');
     const enabledManifest = await fs.readFile(manifestFile());
-    expect(await manifestCuration(), 'non-vacuity: learning is recorded on').toBe(true);
+    expect(await manifestCuration(), 'non-vacuity: curation is recorded on').toBe(true);
 
     okCli(os.tmpdir(), 'curation', '--enable');
     expect((await fs.readFile(manifestFile())).equals(enabledManifest), 'enable over enabled').toBe(true);
@@ -290,7 +290,7 @@ describe('devflow learning --enable/--disable converges the install (AC-140, AC-
     expect(await variantOf('commands', 'implement.md')).toBe('on');
   }, SCENARIO_TIMEOUT_MS);
 
-  it('a repository that narrows learning off changes nothing installed on a curation-on machine (AC-144)', async () => {
+  it('a repository that narrows curation off changes nothing installed on a curation-on machine (AC-144)', async () => {
     const repo = path.join(tmpHome, 'repo');
     await fs.mkdir(path.join(repo, '.devflow'), { recursive: true });
     await fs.writeFile(path.join(repo, '.devflow', 'project.json'), '{"features":{"learning":false}}\n');
@@ -298,7 +298,7 @@ describe('devflow learning --enable/--disable converges the install (AC-140, AC-
 
     okCli(repo, 'init', ...QUIET, '--recommended');
 
-    // Non-vacuity: the repository really does narrow learning off here.
+    // Non-vacuity: the repository really does narrow curation off here.
     expect(okCli(repo, 'curation', '--status')).toContain('Effective here: disabled');
     await expectAll('on');
     expect(await exists(skillDir())).toBe(true);
@@ -341,13 +341,13 @@ describe('devflow learning --enable/--disable converges the install (AC-140, AC-
 // ---------------------------------------------------------------------------
 
 describe('a skill shadow follows the switch', () => {
-  it('stays dormant under learning off, is never deleted, and is installed again on enable', async () => {
+  it('stays dormant under curation off, is never deleted, and is installed again on enable', async () => {
     const shadow = path.join(devflowDir(), 'skills', 'apply-decisions', 'SKILL.md');
     await fs.mkdir(path.dirname(shadow), { recursive: true });
     await fs.writeFile(shadow, '---\nname: apply-decisions\ndescription: mine\n---\nmy own apply-decisions\n');
 
     init('--recommended', '--no-curation');
-    expect(await exists(skillDir()), 'not installed with learning off').toBe(false);
+    expect(await exists(skillDir()), 'not installed with curation off').toBe(false);
     expect(await fs.readFile(shadow, 'utf-8'), 'a shadow is user content').toContain('my own apply-decisions');
 
     okCli(os.tmpdir(), 'curation', '--enable');

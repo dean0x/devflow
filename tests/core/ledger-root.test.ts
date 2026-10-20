@@ -1,7 +1,7 @@
 /**
  * D-LEDGER-MAIN-WORKTREE — the TypeScript side (CLI and HUD) resolves the
- * learning ledger root with the rule the hooks' df_resolve_roots applies
- * (src/assets/scripts/hooks/resolve-project-root), so `devflow learning` and the
+ * curation ledger root with the rule the hooks' df_resolve_roots applies
+ * (src/assets/scripts/hooks/resolve-project-root), so `devflow curation` and the
  * HUD read the ledger the hooks write in a linked worktree.
  *
  * Real git fixtures: a main checkout, a subdirectory, a linked worktree, a

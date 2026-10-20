@@ -1316,7 +1316,7 @@ describe('GAP-5: no retired agent names in any shipped artifact (fail-loud when 
     expect(missed, `Retired spellings the collector did not flag:\n${missed.join('\n')}`).toEqual([])
   })
 
-  it('known-bad probe: ordinary words and the learning feature are not retired agent names', () => {
+  it('known-bad probe: ordinary words and the pre-rename feature name are not retired agent names', () => {
     const benign = [
       '---\nfeature: curation-capture-system\nname: Curation capture system\n---',
       '---\nname: Learning store, ops and rendering\n---',

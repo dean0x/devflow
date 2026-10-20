@@ -176,7 +176,7 @@ describe('drainDisabledFeatureQueues (D-INIT-DRAIN-AFTER-SWITCH)', () => {
       calls,
       io: {
         drainMemoryQueue: async (r) => { calls.push(`memory:${r}`); return { drained: true }; },
-        drainCurationQueue: async (r) => { calls.push(`learning:${r}`); return { drained: true }; },
+        drainCurationQueue: async (r) => { calls.push(`curation:${r}`); return { drained: true }; },
       },
     };
   }
@@ -184,7 +184,7 @@ describe('drainDisabledFeatureQueues (D-INIT-DRAIN-AFTER-SWITCH)', () => {
   it('drains the queue of every feature switched off once the switch is persisted, with nothing to report', async () => {
     const { calls, io } = recorder();
     const refused = await drainDisabledFeatureQueues({ gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: false, curationEnabled: false, manifestWritten: true }, io);
-    expect(calls).toEqual([`memory:${ROOT}`, `learning:${ROOT}`]);
+    expect(calls).toEqual([`memory:${ROOT}`, `curation:${ROOT}`]);
     expect(refused).toEqual([]);
   });
 
@@ -200,7 +200,7 @@ describe('drainDisabledFeatureQueues (D-INIT-DRAIN-AFTER-SWITCH)', () => {
     ]);
   });
 
-  it('with the real drains: linked memory and learning folders lose nothing, and both refusals are returned (D-CLI-NO-SYMLINK)', async () => {
+  it('with the real drains: linked memory and curation folders lose nothing, and both refusals are returned (D-CLI-NO-SYMLINK)', async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-init-drain-linked-'));
     vi.stubEnv('HOME', path.join(tmp, 'home'));
     try {
@@ -250,17 +250,17 @@ describe('drainDisabledFeatureQueues (D-INIT-DRAIN-AFTER-SWITCH)', () => {
     await drainDisabledFeatureQueues({ gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: false, curationEnabled: true, manifestWritten: true }, memOff.io);
     expect(memOff.calls).toEqual([`memory:${ROOT}`]);
 
-    const learnOff = recorder();
-    await drainDisabledFeatureQueues({ gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: true, curationEnabled: false, manifestWritten: true }, learnOff.io);
-    expect(learnOff.calls).toEqual([`learning:${ROOT}`]);
+    const curationOff = recorder();
+    await drainDisabledFeatureQueues({ gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: true, curationEnabled: false, manifestWritten: true }, curationOff.io);
+    expect(curationOff.calls).toEqual([`curation:${ROOT}`]);
   });
 
-  it('drains learning at the ledger root and memory at this checkout (D-LEDGER-MAIN-WORKTREE)', async () => {
-    // In a linked worktree the hooks queue learning turns into the main
+  it('drains curation at the ledger root and memory at this checkout (D-LEDGER-MAIN-WORKTREE)', async () => {
+    // In a linked worktree the hooks queue curation turns into the main
     // checkout's ledger, while working memory stays per checkout.
     const { calls, io } = recorder();
     await drainDisabledFeatureQueues({ gitRoot: '/repo-wt', ledgerRoot: '/repo', memoryEnabled: false, curationEnabled: false, manifestWritten: true }, io);
-    expect(calls).toEqual(['memory:/repo-wt', 'learning:/repo']);
+    expect(calls).toEqual(['memory:/repo-wt', 'curation:/repo']);
   });
 
   it('drains nothing when the manifest was not written — the switch is still on, so the turns are live', async () => {

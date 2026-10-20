@@ -23,6 +23,9 @@
  * feature, ordinary English, and the prose of the docs that names the old names so
  * a reader can find them. The released CHANGELOG sections and the 3.8.0 upgrade
  * section are exempt by their headings (SECTION_EXEMPTIONS).
+ *
+ * The titles of the tests under tests/ are read by a second guard, with its own allowlist
+ * (TEST_TITLE_ALLOWLIST) at the end of this file.
  */
 
 /** The retired feature word. Matched anywhere inside a word, in any case. */
@@ -295,5 +298,68 @@ export const FEATURE_WORD_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     reason:
       'The format example quotes the scope tag that the ledger fixtures use. The rename keeps ' +
       'that tag as data (it is a free-form area label).',
+  },
+];
+
+/** Any test file. */
+const TEST_FILES = /^tests\/.*\.test\.ts$/;
+
+/**
+ * The allowlist behind the test-title guard in tests/guards/retired-wording.test.ts. The guard
+ * reads the title of every `describe`, `it` and `test` call under tests/ for the old feature word.
+ * A title passes only when an entry covers the exact words around the hit, so a title that uses
+ * the word for the current feature fails. The rules of FEATURE_WORD_ALLOWLIST hold here: `pattern`
+ * pins words around the hit and never the bare word, `reason` says why the name stays, and an
+ * entry that covers no title fails the guard.
+ */
+export const TEST_TITLE_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
+  {
+    path: TEST_FILES,
+    pattern: /\bD-(?:[A-Z0-9]+-)*LEARNING(?:-[A-Z0-9]+)*/,
+    reason: 'The design decision names keep the old word, so a title that cites one carries it.',
+  },
+  {
+    path: TEST_FILES,
+    pattern: /\blegacy learning key\b/,
+    reason:
+      'The title names the pre-rename key `learning`, which every reader still accepts beside ' +
+      '`curation`. The phrase pins the key, so the bare word never passes.',
+  },
+  {
+    path: TEST_FILES,
+    pattern: /\bfeatures\.learning\b/,
+    reason: 'The title names the pre-rename key path `features.learning` that a reader still honours.',
+  },
+  {
+    path: /^tests\/(?:init-curation-move-e2e|init-curation-move|uninstall-logic|decisions\/curation-move)\.test\.ts$/,
+    pattern: /\blearning\.json\b/,
+    reason:
+      'The title names the pre-rename tuning file, which init renames, the move keeps beside ' +
+      'the new one and the uninstall removes.',
+  },
+  {
+    path: /^tests\/(?:cli-unknown-command|decisions\/cli-subcommands)\.test\.ts$/,
+    pattern: /\bdevflow learning\b/,
+    reason: 'The title names the retired command, which the CLI no longer registers and rejects as unknown.',
+  },
+  {
+    path: 'tests/decisions/cli-subcommands.test.ts',
+    pattern: /"learning"/,
+    reason: 'The title quotes the retired command name that the curation command must not register or alias.',
+  },
+  {
+    path: 'tests/shell-hooks.test.ts',
+    pattern: /\bagents\.learning\b/,
+    reason: 'The title names the pre-rename agent key that the model lookup still reads as a fallback.',
+  },
+  {
+    path: 'tests/memory.test.ts',
+    pattern: /\b(?:stop-update|session-end)-learning\b/,
+    reason: 'The title names the retired hook files that the memory command removes from the settings.',
+  },
+  {
+    path: 'tests/decisions/index-content.test.ts',
+    pattern: /\bself-learning source stamp\b/,
+    reason: 'The title names the `self-learning:` source stamp, a kept content identifier.',
   },
 ];

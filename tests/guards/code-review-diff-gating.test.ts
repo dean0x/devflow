@@ -396,8 +396,8 @@ const VARIANTS: ReadonlyArray<{ label: string; body: string }> = (() => {
   const off = resolveCurationOffSource('commands', 'code-review')
   if (off === null) throw new Error('dist/curation-off/commands/code-review.md is absent: run `npm run build:mds`')
   return [
-    { label: 'learning on', body: requireDistFile('code-review.md') },
-    { label: 'learning off', body: off },
+    { label: 'curation on', body: requireDistFile('code-review.md') },
+    { label: 'curation off', body: off },
   ]
 })()
 
@@ -405,8 +405,8 @@ const REVIEW_VARIANTS: ReadonlyArray<{ label: string; body: string }> = (() => {
   const off = resolveCurationOffSource('agents', 'review')
   if (off === null) throw new Error('dist/curation-off/agents/review.md is absent: run `npm run build:mds`')
   return [
-    { label: 'learning on', body: resolveAgentSource('review').content },
-    { label: 'learning off', body: off },
+    { label: 'curation on', body: resolveAgentSource('review').content },
+    { label: 'curation off', body: off },
   ]
 })()
 

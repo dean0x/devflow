@@ -58,7 +58,7 @@ describe('no hook or op counts citations', { timeout: 30_000 }, () => {
   });
 
   it('capture-turn queues a turn that names an anchor and leaves the usage file as it was', () => {
-    // A git project whose memory and learning trees both exist: the retired scanner
+    // A git project whose memory and curation trees both exist: the retired scanner
     // ran here, and only when the turn named an anchor the usage file had registered.
     fs.mkdirSync(path.join(project, '.git'));
     fs.mkdirSync(path.join(project, '.devflow', 'memory'), { recursive: true });

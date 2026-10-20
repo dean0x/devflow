@@ -94,7 +94,7 @@ describe('curate agent', () => {
       else expect(frontmatter).toMatch(new RegExp(`^effort: ${row.effort}$`, 'm'));
     });
 
-    it('has exactly the read-and-run tool set: every write goes through the learning ops', () => {
+    it('has exactly the read-and-run tool set: every write goes through the curation ops', () => {
       const tools = parseYamlList(frontmatter, 'tools');
       expect(tools.sort()).toEqual(['Bash', 'Glob', 'Grep', 'Read']);
     });

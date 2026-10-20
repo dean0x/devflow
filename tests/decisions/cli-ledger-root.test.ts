@@ -146,7 +146,7 @@ describe('devflow curation in a linked worktree acts on the main checkout\'s led
     expect(JSON.parse(fs.readFileSync(getCurateTuningConfigPath(plain), 'utf-8'))).toEqual({ model: 'haiku', debug: true });
   });
 
-  it('--disable drains the main checkout\'s learning queue', async () => {
+  it('--disable drains the main checkout\'s curation queue', async () => {
     await curationCommand.parseAsync(['--disable'], { from: 'user' });
     expect(fs.existsSync(getCurationPendingTurnsPath(main))).toBe(false);
     expect(fs.existsSync(getDecisionsLogPath(main))).toBe(true);

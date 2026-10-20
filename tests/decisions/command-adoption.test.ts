@@ -4,7 +4,7 @@ import { resolveAgentSource, resolveAllAgents } from '../helpers'
 
 /**
  * Named collector: sentences in an agent source that tell the agent to read the
- * learning index (`.devflow/curation/index.md`) for itself. A mention in an input
+ * curation index (`.devflow/curation/index.md`) for itself. A mention in an input
  * description ("pre-rendered to ...") is not an instruction, so the verb must come
  * first in the sentence.
  */
@@ -35,7 +35,7 @@ describe('Command surfaces — index.md direct read', () => {
   for (const [label, relPath] of surfaces) {
     it(`${label} reads index.md (no decisions-index.cjs subprocess)`, () => {
       const content = loadFile(relPath)
-      // Must reference the pre-rendered index.md artifact (now under learning/)
+      // Must reference the pre-rendered index.md artifact (under curation/)
       expect(content).toContain('.devflow/curation/index.md')
       // Must NOT reference decisions-index.cjs in any form (the script is retired)
       expect(content).not.toContain('decisions-index.cjs')
@@ -192,7 +192,7 @@ describe('consumers read the decisions index from the main worktree', () => {
     expect(content).not.toContain('.devflow/curation/pitfalls.md')
   })
 
-  it('no agent is told to read the learning index itself, and the apply-decisions skip guard has no read-it-yourself clause', () => {
+  it('no agent is told to read the curation index itself, and the apply-decisions skip guard has no read-it-yourself clause', () => {
     const agents = [...resolveAllAgents().entries()]
     expect(agents.length, 'the agent corpus').toBeGreaterThanOrEqual(16)
     expect(collectSelfReadInstructions(agents.map(([name, a]) => [name, a.content] as const))).toEqual([])

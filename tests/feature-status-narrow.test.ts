@@ -20,8 +20,15 @@ import { assertTempHome } from './setup/home-isolation.js';
 
 const CLI = requireBuiltCli();
 
-const FEATURES = ['memory', 'learning', 'knowledge'] as const;
+const FEATURES = ['memory', 'curation', 'knowledge'] as const;
 type Feature = (typeof FEATURES)[number];
+
+/**
+ * The key each feature carries in a manifest or a repository file. Curation is keyed by its
+ * pre-rename key `learning` in the rows below, which a reader still honours; the one row for
+ * the current key `curation` is named as such.
+ */
+const KEY: Record<Feature, string> = { memory: 'memory', curation: 'learning', knowledge: 'knowledge' };
 
 let tmpHome: string;
 let tmpRoot: string;
@@ -61,14 +68,13 @@ function makeRepo(files: { project?: string; personal?: string } = {}): string {
 
 function status(feature: Feature, cwd: string): string {
   assertTempHome(tmpHome);
-  const command = feature === 'learning' ? 'curation' : feature;
-  const r = spawnSync(process.execPath, [CLI, command, '--status'], {
+  const r = spawnSync(process.execPath, [CLI, feature, '--status'], {
     encoding: 'utf-8',
     timeout: 60_000,
     cwd,
     env: { ...process.env, HOME: tmpHome, FORCE_COLOR: '0', NO_COLOR: '1', CI: '1' },
   });
-  expect(r.status, `${command} --status failed:\n${r.stdout}${r.stderr}`).toBe(0);
+  expect(r.status, `${feature} --status failed:\n${r.stdout}${r.stderr}`).toBe(0);
   return `${r.stdout ?? ''}${r.stderr ?? ''}`;
 }
 
@@ -100,29 +106,29 @@ describe('--status prints the effective state only when a repo layer narrows (D-
   it.each(FEATURES)('%s: a project.json features:false adds exactly the effective line', (feature) => {
     seedManifest({});
     const bare = status(feature, makeRepo());
-    const narrowed = status(feature, makeRepo({ project: `{"features":{"${feature}":false}}` }));
+    const narrowed = status(feature, makeRepo({ project: `{"features":{"${KEY[feature]}":false}}` }));
     expect(narrowed).toContain('Effective here: disabled (.devflow/project.json)');
     expect(withoutEffective(narrowed)).toBe(bare);
   }, 120_000);
 
   it('curation: a project.json features.curation:false adds exactly the effective line (the current key)', () => {
     seedManifest({});
-    const bare = status('learning', makeRepo());
-    const narrowed = status('learning', makeRepo({ project: '{"features":{"curation":false}}' }));
+    const bare = status('curation', makeRepo());
+    const narrowed = status('curation', makeRepo({ project: '{"features":{"curation":false}}' }));
     expect(narrowed).toContain('Effective here: disabled (.devflow/project.json)');
     expect(withoutEffective(narrowed)).toBe(bare);
   }, 120_000);
 
   it.each(FEATURES)('%s: a config.json features:false names the personal file', (feature) => {
     seedManifest({});
-    const narrowed = status(feature, makeRepo({ personal: `{"features":{"${feature}":false}}` }));
+    const narrowed = status(feature, makeRepo({ personal: `{"features":{"${KEY[feature]}":false}}` }));
     expect(narrowed).toContain('Effective here: disabled (.devflow/config.json)');
   }, 120_000);
 
   it.each(FEATURES)('%s: with the machine switch off, a repo layer changes nothing', (feature) => {
-    seedManifest({ [feature]: false });
+    seedManifest({ [KEY[feature]]: false });
     const bare = status(feature, makeRepo());
-    const layered = status(feature, makeRepo({ project: `{"features":{"${feature}":false}}` }));
+    const layered = status(feature, makeRepo({ project: `{"features":{"${KEY[feature]}":false}}` }));
     expect(bare).not.toMatch(EFFECTIVE);
     expect(layered).toBe(bare);
   }, 120_000);
@@ -131,7 +137,7 @@ describe('--status prints the effective state only when a repo layer narrows (D-
 describe('--status warns about a tracked .devflow/config.json (D-PERSONAL-UNTRACKED)', () => {
   it.each(FEATURES)('%s: a tracked config.json is named as ignored, with the untrack command', (feature) => {
     seedManifest({});
-    const repo = makeRepo({ personal: `{"features":{"${feature}":false}}` });
+    const repo = makeRepo({ personal: `{"features":{"${KEY[feature]}":false}}` });
     execFileSync('git', ['add', '-f', '.devflow/config.json'], { cwd: repo, stdio: 'ignore' });
 
     const out = status(feature, repo);

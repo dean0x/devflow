@@ -3,8 +3,8 @@
  * from the right root, whatever directory the session started in.
  *
  * `decisions_load` (src/assets/commands/_partials/_decisions.mds) reads the
- * learning index from the MAIN worktree's ledger, else the checkout's toplevel,
- * else the start directory — the rule the learning hooks apply
+ * curation index from the MAIN worktree's ledger, else the checkout's toplevel,
+ * else the start directory — the rule the curation hooks apply
  * (D-LEDGER-MAIN-WORKTREE), so a command reads the index the Curate agent
  * writes. `knowledge_load`/`knowledge_writeback` (_knowledge.mds) resolve the
  * checkout's toplevel, else the start directory: knowledge bases are committed
@@ -265,7 +265,7 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
     expect(ledgerFrom(runFromStart(command as string, wt), wt)).toBe(main)
   })
 
-  it('release.md expands the decisions locate rule behind the learning gate and reads the index from the ledger it names', () => {
+  it('release.md expands the decisions locate rule behind the curation gate and reads the index from the ledger it names', () => {
     // release.mds imports the two defines, so the compiled section is the define bodies.
     const partial = fs.readFileSync(
       path.resolve(import.meta.dirname, '..', '..', 'src', 'assets', 'commands', '_partials', '_decisions.mds'),

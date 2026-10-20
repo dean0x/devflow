@@ -13,7 +13,7 @@
  * stopped writing fails too, and the table leaves every toggle flipped
  * back to its installed state, so each row starts from a known one.
  *
- * D-LEARNING-VARIANT-FENCE: `learning --enable` / `--disable` converge the installed
+ * D-LEARNING-VARIANT-FENCE: `curation --enable` / `--disable` converge the installed
  * curation variants (D-LEARNING-VARIANT-INSTALL), so their allowlist is the manifest
  * plus that surface and nothing wider: the command and agent files of the variant
  * roster (the files under dist/curation-off, the converge's own roster source) and

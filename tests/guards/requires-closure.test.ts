@@ -421,7 +421,7 @@ describe('requires structure', () => {
  *     exists, the one file otherwise, in the installer's own source order) reference
  *     no gated skill, so the skill's absence there leaves no dangling reference.
  *
- * The skill being ABSENT under learning off is therefore explicit rather than an
+ * The skill being ABSENT under curation off is therefore explicit rather than an
  * accident of the closure: it is a machine-switch condition on top of the selection.
  */
 
@@ -451,7 +451,7 @@ function danglingUnderCurationOff(refs: readonly RawRef[]): string[] {
   return refs.filter(r => gated.has(r.token)).map(r => `${r.raw} in ${r.file}`);
 }
 
-describe('learning-gated skills (AC-148)', () => {
+describe('curation-gated skills (AC-148)', () => {
   it('every gated skill is a registry skill that a plugin requires, and the curation-on corpus references it', async () => {
     expect(CURATION_GATED_SKILLS.length, 'the gated set is not empty').toBeGreaterThan(0);
     const known = new Set(getAllSkillNames());
@@ -474,7 +474,7 @@ describe('learning-gated skills (AC-148)', () => {
     expect(refs.length, 'the off corpus was read (non-vacuity)').toBeGreaterThan(50);
     expect(
       danglingUnderCurationOff(refs),
-      'A prompt installed with learning off must not point at a learning-gated skill: ' +
+      'A prompt installed with curation off must not point at a curation-gated skill: ' +
       'give the host a curation arm so its off variant drops the reference.',
     ).toEqual([]);
   });

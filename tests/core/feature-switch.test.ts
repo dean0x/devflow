@@ -1,7 +1,7 @@
 /**
  * The machine-wide feature switch (D-FEATURES-NARROW-ONLY).
  *
- * memory, learning and knowledge are switched for the whole machine by
+ * memory, curation and knowledge are switched for the whole machine by
  * `features.<x>` in ~/.devflow/manifest.json; a repository can only narrow that
  * (resolve-settings.cjs, queue_read_gates), never widen it. Only an explicit
  * boolean `false` switches a feature off — the same rule the shell hooks apply
@@ -39,17 +39,17 @@ describe('isMachineFeatureOn (pure)', () => {
     }
   });
 
-  it('learning honours the legacy features.decisions key exactly as readManifest migrates it (D-LEARNING-LEGACY-DECISIONS)', () => {
-    // learning if boolean, else decisions if boolean, else on.
+  it('the curation switch honours the legacy features.decisions key exactly as readManifest migrates it (D-LEARNING-LEGACY-DECISIONS)', () => {
+    // the legacy `learning` key if boolean, else `decisions` if boolean, else on.
     expect(isMachineFeatureOn({ features: { decisions: false } }, 'curation')).toBe(false);
     expect(isMachineFeatureOn({ features: { decisions: true } }, 'curation')).toBe(true);
     expect(isMachineFeatureOn({ features: { decisions: false, learning: true } }, 'curation')).toBe(true);
     expect(isMachineFeatureOn({ features: { decisions: true, learning: false } }, 'curation')).toBe(false);
-    // A non-boolean learning is not a value, so the legacy key still decides.
+    // A non-boolean `learning` key is not a value, so the legacy `decisions` key still decides.
     expect(isMachineFeatureOn({ features: { decisions: false, learning: 'yes' } }, 'curation')).toBe(false);
     // A non-boolean decisions decides nothing.
     expect(isMachineFeatureOn({ features: { decisions: 'false' } }, 'curation')).toBe(true);
-    // The legacy key belongs to learning alone.
+    // The legacy key belongs to the curation switch alone.
     expect(isMachineFeatureOn({ features: { decisions: false } }, 'memory')).toBe(true);
     expect(isMachineFeatureOn({ features: { decisions: false } }, 'knowledge')).toBe(true);
   });
@@ -76,8 +76,8 @@ describe('isMachineFeatureOn (pure)', () => {
     expect(isMachineFeatureOn(raw, 'memory')).toBe(true);
   });
 
-  describe('the curation key beside the learning key: false wins (TP-10, readers half)', () => {
-    // Every cell of the grid: curation x learning in {absent, true, false, non-boolean}.
+  describe('the curation key beside the legacy learning key: false wins (TP-10, readers half)', () => {
+    // Every cell of the grid: curation x the legacy learning key in {absent, true, false, non-boolean}.
     // The machine switch is off when either current key is a boolean false, on when
     // either is a boolean true and neither is false, and a non-boolean value is
     // ignored for that key only.
@@ -87,17 +87,17 @@ describe('isMachineFeatureOn (pure)', () => {
       if (cell === 'absent') return {};
       return { [key]: cell === 'text' ? 'false' : cell === 'true' };
     };
-    const featuresOf = (curation: Cell, learning: Cell): Record<string, unknown> => ({
+    const featuresOf = (curation: Cell, legacy: Cell): Record<string, unknown> => ({
       ...entry('curation', curation),
-      ...entry('learning', learning),
+      ...entry('learning', legacy),
     });
 
     for (const curation of CELLS) {
-      for (const learning of CELLS) {
-        it(`curation ${curation} x learning ${learning}`, () => {
-          const booleans = [curation, learning].filter((c) => c === 'true' || c === 'false');
+      for (const legacy of CELLS) {
+        it(`curation ${curation} x legacy learning key ${legacy}`, () => {
+          const booleans = [curation, legacy].filter((c) => c === 'true' || c === 'false');
           const expected = booleans.length === 0 ? true : !booleans.includes('false');
-          expect(isMachineFeatureOn({ features: featuresOf(curation, learning) }, 'curation')).toBe(expected);
+          expect(isMachineFeatureOn({ features: featuresOf(curation, legacy) }, 'curation')).toBe(expected);
         });
       }
     }
@@ -118,7 +118,7 @@ describe('isMachineFeatureOn (pure)', () => {
       expect(isMachineFeatureOn({ features: { decisions: 'false' } }, 'curation')).toBe(true);
     });
 
-    it('the curation key belongs to the learning feature alone', () => {
+    it('the curation key belongs to the curation switch alone', () => {
       expect(isMachineFeatureOn({ features: { curation: false } }, 'memory')).toBe(true);
       expect(isMachineFeatureOn({ features: { curation: false } }, 'knowledge')).toBe(true);
     });
@@ -157,7 +157,7 @@ describe('setMachineFeature (pure)', () => {
   });
 
   describe('the curation feature writes both current keys (the manifest mirror, TP-11)', () => {
-    it.each([true, false])('curation=%s sets curation and learning to the same value and nothing else', (value) => {
+    it.each([true, false])('curation=%s sets curation and the legacy learning key to the same value and nothing else', (value) => {
       const raw = { version: '3.0.0', features: { ambient: true, memory: true } };
       const next = setMachineFeature(raw, 'curation', value, NOW) as { features: Record<string, unknown>; updatedAt: string };
       expect(next.features).toEqual({ ambient: true, memory: true, curation: value, learning: value });
@@ -228,7 +228,7 @@ describe('readMachineFeature / writeMachineFeature (I/O)', () => {
   });
 
   it('reads the raw key, not a healed default — a manifest lacking the key stays on', async () => {
-    // readManifest() heals an absent learning key to false; the switch must not.
+    // A manifest lacking the key reads on: the switch never applies a healed default.
     await writeManifest(JSON.stringify({ version: '1', features: { ambient: true, memory: true } }));
     expect(await readMachineFeature(devflowDir, 'curation')).toBe(true);
   });
@@ -240,14 +240,14 @@ describe('readMachineFeature / writeMachineFeature (I/O)', () => {
     expect(await fs.readFile(manifestPath(), 'utf-8')).toBe(body);
   });
 
-  it('a manifest holding a disagreeing curation and learning pair reads off, and a read writes nothing (TP-10)', async () => {
+  it('a manifest holding a disagreeing curation key and legacy learning key pair reads off, and a read writes nothing (TP-10)', async () => {
     const body = JSON.stringify({ version: '1', features: { curation: true, learning: false } });
     await writeManifest(body);
     expect(await readMachineFeature(devflowDir, 'curation')).toBe(false);
     expect(await fs.readFile(manifestPath(), 'utf-8')).toBe(body);
   });
 
-  it('a manifest holding only curation:false reads learning as off', async () => {
+  it('a manifest holding only curation:false reads curation as off', async () => {
     await writeManifest(JSON.stringify({ version: '1', features: { ambient: true, curation: false } }));
     expect(await readMachineFeature(devflowDir, 'curation')).toBe(false);
   });
@@ -309,7 +309,7 @@ describe('readMachineFeature / writeMachineFeature (I/O)', () => {
       expect((await readRaw()).features).toEqual({ ambient: true, curation: true, learning: true });
     });
 
-    it('a manifest holding only the pre-rename learning key is not "already recorded": the curation key is added', async () => {
+    it('a manifest holding only the legacy learning key is not "already recorded": the curation key is added', async () => {
       await writeManifest(recorded({ learning: false }));
       await writeMachineFeature(devflowDir, 'curation', false);
       expect((await readRaw()).features).toEqual({ curation: false, learning: false });

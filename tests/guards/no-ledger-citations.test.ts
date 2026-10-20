@@ -1,7 +1,7 @@
 /**
- * no-ledger-citations — no learning-ledger ID reaches committed text.
+ * no-ledger-citations — no curation-ledger ID reaches committed text.
  *
- * The learning ledger under `.devflow/curation/` is gitignored and numbered per
+ * The curation ledger under `.devflow/curation/` is gitignored and numbered per
  * machine, so an `ADR-NNN` or `PF-NNN` resolves on no other clone, and numbers
  * have been reused: a citation that named the right entry when it was written
  * can name an unrelated one later. An ID may appear only in what stays inside a
@@ -70,7 +70,7 @@ import { ROOT, type CorpusEntry } from '../helpers.js';
 // The rule
 // ---------------------------------------------------------------------------
 
-/** Any learning-ledger ID: the full ban. */
+/** Any curation-ledger ID: the full ban. */
 const LEDGER_ID = /\b(?:ADR|PF)-\d{3}\b/g;
 
 /**
@@ -535,7 +535,7 @@ function violationsIn(area: Area): LedgerViolation[] {
 // Live arms
 // ---------------------------------------------------------------------------
 
-describe('no learning-ledger ID in committed text', () => {
+describe('no curation-ledger ID in committed text', () => {
   for (const area of SCANNED_AREAS) {
     const claim = area.id === 'tests' ? 'carry no ledger citation' : 'carries no ledger ID';
     it(`${area.label} ${claim}`, () => {

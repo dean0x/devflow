@@ -142,7 +142,7 @@ describe('isActive', () => {
     expect(isActive({ decisions_status: 'SomeFutureStatus' })).toBe(true);
   });
 
-  it('is the learning store\'s isActive, re-exported', () => {
+  it('is the curation store\'s isActive, re-exported', () => {
     const store = require(path.join(ROOT, 'src/assets/scripts/hooks/lib/curation-store.cjs')) as {
       isActive: (row: Record<string, unknown>) => boolean;
     };
@@ -235,7 +235,7 @@ describe('parseLedger', () => {
 });
 
 // ---------------------------------------------------------------------------
-// renderAndWriteAll — needs the learning directory, never makes it
+// renderAndWriteAll — needs the curation directory, never makes it
 // ---------------------------------------------------------------------------
 
 describe('renderAndWriteAll', () => {
@@ -258,7 +258,7 @@ describe('renderAndWriteAll', () => {
     expect(fs.readdirSync(path.join(tmpDir, '.devflow'))).toEqual([]);
   });
 
-  it('writes the three files into an existing learning directory', () => {
+  it('writes the three files into an existing curation directory', () => {
     const { curationDir } = seedCurationTree(tmpDir);
     renderAndWriteAll(tmpDir, [makeDecisionRow()]);
     expect(fs.readdirSync(curationDir).sort()).toEqual(['decisions.md', 'index.md', 'pitfalls.md']);
@@ -594,8 +594,8 @@ describe('renderDecisionsFile — v1 and v2 entries side by side', () => {
     type: 'pitfall',
     anchor_id: 'PF-001',
     decisions_status: 'Active',
-    title: 'Writers refuse a missing learning tree',
-    rule: 'A learning writer refuses when the learning directory is absent and never creates it.',
+    title: 'Writers refuse a missing curation tree',
+    rule: 'A curation writer refuses when the curation directory is absent and never creates it.',
     why: 'A writer that creates the tree writes a ledger nobody reads.',
     scope: ['area:learning', 'src/assets/scripts/hooks/**'],
     provenance: 'a stray nested tree in the main checkout',
@@ -624,9 +624,9 @@ describe('renderDecisionsFile — v1 and v2 entries side by side', () => {
       '\n## ADR-002: Store functions return a Result\n\n' +
       '- **Status**: Accepted · verified 2026-09-01\n' +
       '- **Scope**: `area:learning`\n' +
-      '- **Decision**: Every learning store function returns a Result and never exits or prints.\n' +
+      '- **Decision**: Every curation store function returns a Result and never exits or prints.\n' +
       '- **Why**: An exit inside the lock skips its release, and printing ties the store to one caller.\n' +
-      '- **Source**: learning v2 design review\n' +
+      '- **Source**: curation v2 design review\n' +
       v1RawThird.raw_body +
       '\n## Inactive\n\n' +
       '| ID | Status | Note |\n' +
@@ -638,10 +638,10 @@ describe('renderDecisionsFile — v1 and v2 entries side by side', () => {
 
   it('renders pitfalls the same way: v1 blocks unchanged, v2 blocks from the template, then Inactive', () => {
     expect(bodyOf(renderDecisionsFile(pitfallRows, 'pitfalls'))).toBe(
-      '\n## PF-001: Writers refuse a missing learning tree\n\n' +
+      '\n## PF-001: Writers refuse a missing curation tree\n\n' +
       '- **Status**: Active\n' +
       '- **Scope**: `area:learning`, `src/assets/scripts/hooks/**`\n' +
-      '- **Rule**: A learning writer refuses when the learning directory is absent and never creates it.\n' +
+      '- **Rule**: A curation writer refuses when the curation directory is absent and never creates it.\n' +
       '- **Why**: A writer that creates the tree writes a ledger nobody reads.\n' +
       '- **Source**: a stray nested tree in the main checkout\n' +
       formatPitfallBody(v1SecondPitfall) +
@@ -703,7 +703,7 @@ async function waitFor(condition: () => boolean, timeoutMs: number): Promise<voi
 }
 
 /**
- * A preload that drops `marker` whenever the renderer tries to create the learning
+ * A preload that drops `marker` whenever the renderer tries to create the curation
  * lock directory: the moment it starts waiting for a lock someone else holds.
  */
 function markLockAttemptPreload(marker: string): string {
@@ -735,7 +735,7 @@ describe('CLI render', { timeout: 30_000 }, () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('writes the empty corpus, headers and "(none)", into a learning directory with no ledger', () => {
+  it('writes the empty corpus, headers and "(none)", into a curation directory with no ledger', () => {
     const { curationDir } = seedCurationTree(tmpDir);
 
     const run = runRenderer(tmpDir, ['render', tmpDir]);
@@ -771,7 +771,7 @@ describe('CLI render', { timeout: 30_000 }, () => {
     expect(fs.readdirSync(tmpDir)).toEqual([]);
   });
 
-  it('refuses a .devflow/ that has no learning/ and creates no learning directory', () => {
+  it('refuses a .devflow/ that has no curation/ and creates no curation directory', () => {
     fs.mkdirSync(path.join(tmpDir, '.devflow'));
 
     const run = runRenderer(tmpDir, ['render', tmpDir]);

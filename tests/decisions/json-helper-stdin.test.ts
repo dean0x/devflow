@@ -2,9 +2,9 @@
 //
 // json-helper reads its stdin from file descriptor 0, to EOF, through the one
 // reader every op shares: the generic ops a hook falls back to without jq, and the
-// learning ops. A node parent's 'pipe' hands the child a socket, which Linux will
+// curation ops. A node parent's 'pipe' hands the child a socket, which Linux will
 // not reopen as /dev/stdin. Input that is not there yet when the helper first
-// reads is waited for, on a non-blocking descriptor too. A learning op keeps its
+// reads is waited for, on a non-blocking descriptor too. A curation op keeps its
 // 64 KiB cap however its input arrives, and a generic op is not held to it.
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
@@ -142,14 +142,14 @@ describe('json-helper reads stdin from descriptor 0, to EOF (D-STDIN-FD0)', { ti
       });
     });
 
-    it(`a learning op reads exactly 64 KiB that arrives late, in chunks, on ${socket}`, async () => {
+    it(`a curation op reads exactly 64 KiB that arrives late, in chunks, on ${socket}`, async () => {
       seedCurationTree(dir, { log: [makeV2LogRow()] });
       expect(await runWithLateStdin(dir, ['put-observation', '--reinforce'], chunksOf(reinforceInputOf(65_536), 4), { nonBlocking })).toEqual({
         code: 0, stdout: 'reinforced obs_store_one 2\n', stderr: '',
       });
     });
 
-    it(`a learning op still refuses one byte over 64 KiB that arrives late, in chunks, on ${socket}`, async () => {
+    it(`a curation op still refuses one byte over 64 KiB that arrives late, in chunks, on ${socket}`, async () => {
       const paths = seedCurationTree(dir, { log: [makeV2LogRow()] });
       const logBefore = fs.readFileSync(paths.log, 'utf8');
       expect(await runWithLateStdin(dir, ['put-observation', '--reinforce'], chunksOf(reinforceInputOf(65_537), 4), { nonBlocking })).toEqual({
@@ -159,7 +159,7 @@ describe('json-helper reads stdin from descriptor 0, to EOF (D-STDIN-FD0)', { ti
     });
   }
 
-  it('a generic op is not held to the learning cap: it reads 256 KiB that arrives in chunks', async () => {
+  it('a generic op is not held to the curation cap: it reads 256 KiB that arrives in chunks', async () => {
     // A hook's input — a Stop hook's last assistant message — can pass 64 KiB.
     const input = JSON.stringify({ cwd: '/tmp', last_assistant_message: 'm'.repeat(256 * 1024) });
     expect(await runWithLateStdin(dir, ['get-field', 'cwd'], chunksOf(input, 8))).toEqual({
@@ -178,7 +178,7 @@ describe('json-helper reads stdin from descriptor 0, to EOF (D-STDIN-FD0)', { ti
     expect(fs.readFileSync(paths.log, 'utf8')).toBe(logBefore);
   });
 
-  it('a read that fails is refused, not thrown: a learning op names the error', () => {
+  it('a read that fails is refused, not thrown: a curation op names the error', () => {
     const paths = seedCurationTree(dir, { log: [makeV2LogRow()] });
     const logBefore = fs.readFileSync(paths.log, 'utf8');
     // A directory opens for reading, and every read of it fails with EISDIR.

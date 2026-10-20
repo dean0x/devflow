@@ -15,7 +15,7 @@
  *   1. The reference: its table form, closed vocabulary, subset-by-construction, manifest list and rules.
  *   2. A simulator that reads its rules only from the parsed reference. The expected sets come only from
  *      the hand-written oracle below, so a wrong reference fails the assertions instead of agreeing with them.
- *   3. The gate-level block of the command: read paragraph, invariants, fallback, learning-arm position.
+ *   3. The gate-level block of the command: read paragraph, invariants, fallback, curation-arm position.
  *   4. Full is today: the Step 1.1 reduced sets, the rule-1 manifests and the Step 1.2 trigger rows.
  *   5. No second cycle: Step 0e-ii only warns, and nothing restarts a phase or starts /resolve.
  *   6. The summary: the Synthesize spawn passes the level and the planned focuses, and the summary template
@@ -672,8 +672,8 @@ const VARIANTS: ReadonlyArray<{ label: string; body: string }> = (() => {
   const off = resolveCurationOffSource('commands', 'code-review')
   if (off === null) throw new Error('dist/curation-off/commands/code-review.md is absent: run `npm run build:mds`')
   return [
-    { label: 'learning on', body: requireDistFile('code-review.md') },
-    { label: 'learning off', body: off },
+    { label: 'curation on', body: requireDistFile('code-review.md') },
+    { label: 'curation off', body: off },
   ]
 })()
 const ON = VARIANTS[0].body

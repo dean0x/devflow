@@ -58,7 +58,7 @@ function mkTmpHome(): string {
 }
 
 /**
- * A user-scope manifest holding `features` — where memory, learning and
+ * A user-scope manifest holding `features` — where memory, curation and
  * knowledge are switched for the machine (D-FEATURES-NARROW-ONLY).
  */
 function writeManifest(home: string, features: Record<string, unknown>): void {
@@ -238,7 +238,7 @@ describe('config guard: session-start-context', () => {
     expect(runContextHook(input)).toBe('');
   });
 
-  it('outputs decisions TL;DR when learning enabled and decisions.md exists', () => {
+  it('outputs decisions TL;DR when curation is enabled and decisions.md exists', () => {
     mkMemoryDir(tmpDir);
     const decisionsDir = path.join(tmpDir, '.devflow', 'curation');
     fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), '<!-- TL;DR: 1 decisions. Key: ADR-001 -->\n# Decisions\n');
@@ -248,7 +248,7 @@ describe('config guard: session-start-context', () => {
     expect(additionalContext).toContain('PROJECT DECISIONS');
   });
 
-  it('skips decisions TL;DR when learning is switched off machine-wide', () => {
+  it('skips decisions TL;DR when curation is switched off machine-wide', () => {
     mkMemoryDir(tmpDir);
     const decisionsDir = path.join(tmpDir, '.devflow', 'curation');
     fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), '<!-- TL;DR: 1 decisions. Key: ADR-001 -->\n# Decisions\n');
@@ -257,7 +257,7 @@ describe('config guard: session-start-context', () => {
     expect(runContextHook(sessionInput(tmpDir))).toBe('');
   });
 
-  it('a stale repo config learning:false does not skip the decisions TL;DR', () => {
+  it('a stale repo config with the legacy learning key false does not skip the decisions TL;DR', () => {
     mkMemoryDir(tmpDir);
     fs.writeFileSync(
       path.join(tmpDir, '.devflow', 'curation', 'decisions.md'),
@@ -277,10 +277,11 @@ describe('config guard: session-start-context', () => {
   // no devflow install — stayed green. The temp HOME above is the fix; the two
   // cases below are what keeps it honest.
 
-  it('AC-3.22: the learning:false emptiness assertion survives a HOME with provider jira', () => {
+  it('AC-3.22: the curation-off emptiness assertion survives a HOME with provider jira', () => {
     // The seeded HOME is the hostile one: manifest provider jira AND the presence
     // sentinel, i.e. exactly the machine state that used to break this file.
-    // learning:false rides in the same manifest — it is the machine-wide switch.
+    // The curation switch rides in the same manifest (here as its pre-rename
+    // `learning` key) — it is the machine-wide switch.
     seedTrackerProvider(tmpHome, 'jira', { learning: false });
     mkMemoryDir(tmpDir);
     fs.writeFileSync(
@@ -320,10 +321,10 @@ describe('config guard: session-start-context', () => {
     }
   });
 
-  it('session-start-context does not output LEARNED BEHAVIORS (learning pipeline removed)', () => {
+  it('session-start-context does not output LEARNED BEHAVIORS (the old pipeline is removed)', () => {
     // Section 1.75 removed — LEARNED BEHAVIORS must never appear
     mkMemoryDir(tmpDir);
-    // Create a learning log that would have triggered the old section
+    // Create an old learning log that would have triggered the old section
     const curationDir = path.join(tmpDir, '.devflow', 'curation');
     fs.mkdirSync(curationDir, { recursive: true });
     const logPath = path.join(curationDir, 'learning-log.jsonl');

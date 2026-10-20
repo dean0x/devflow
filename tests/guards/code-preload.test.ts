@@ -104,14 +104,14 @@ export function collectPreloadSizeDefects(agentType: string, bytes: Readonly<Rec
   return out
 }
 
-/** The skills a variant preloads under learning off: its set minus `apply-decisions`. */
+/** The skills a variant preloads under curation off: its set minus `apply-decisions`. */
 const offPreload = (agentType: string): readonly string[] => CODE_PRELOADS[agentType].filter(name => name !== 'apply-decisions')
 
 /** Named collector: how a curation-off preload list differs from the variant's set minus apply-decisions. */
 export function collectOffPreloadDefects(agentType: string, skills: readonly string[]): string[] {
   const expected = offPreload(agentType)
   const out: string[] = []
-  if (skills.includes('apply-decisions')) out.push('apply-decisions is preloaded under learning off')
+  if (skills.includes('apply-decisions')) out.push('apply-decisions is preloaded under curation off')
   for (const name of expected) if (!skills.includes(name)) out.push(`missing ${name}`)
   for (const name of skills) if (name !== 'apply-decisions' && !expected.includes(name)) out.push(`unexpected ${name}`)
   return out
@@ -208,7 +208,7 @@ describe('the preloaded SKILL.md files of each variant stay within their caps (D
 
 // ── The curation-off variants (D-LEARNING-VARIANTS, AC-150, AC-307) ──────────────────────────────────────
 //
-// A machine with learning off installs dist/curation-off/agents/{code,fix,refactor}.md, each of which
+// A machine with curation off installs dist/curation-off/agents/{code,fix,refactor}.md, each of which
 // loses the `devflow:apply-decisions` preload line with the rest of its decisions text. The curation-on file
 // above stays the file each total is measured against; a curation-off variant preloads the same list minus
 // that skill, so its total is the on total less the skill's bytes.
@@ -246,7 +246,7 @@ describe('each curation-off Code variant preloads its set minus apply-decisions 
     for (const agentType of CODE_AGENT_TYPES) {
       const real = offPreload(agentType)
       expect(collectOffPreloadDefects(agentType, real), agentType).toEqual([])
-      expect(collectOffPreloadDefects(agentType, [...real, 'apply-decisions'])).toEqual(['apply-decisions is preloaded under learning off'])
+      expect(collectOffPreloadDefects(agentType, [...real, 'apply-decisions'])).toEqual(['apply-decisions is preloaded under curation off'])
       expect(collectOffPreloadDefects(agentType, real.filter(n => n !== 'git'))).toEqual(['missing git'])
       expect(collectOffPreloadDefects(agentType, [...real, 'security'])).toEqual(['unexpected security'])
     }

@@ -163,7 +163,7 @@ for (const kind of ['curation-on', 'curation-off'] as const) {
 }
 
 describe('both builds carry the same bound', () => {
-  it('the Gate 2 menu and the Error Handling rule are byte-identical across the learning builds', () => {
+  it('the Gate 2 menu and the Error Handling rule are byte-identical across the curation builds', () => {
     const [on, off] = builds()
     expect(gate2Menu(on.content)).toBe(gate2Menu(off.content))
     expect(errorHandlingRule(on.content)).toBe(errorHandlingRule(off.content))

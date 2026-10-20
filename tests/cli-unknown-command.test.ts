@@ -80,7 +80,7 @@ describe('CLI: real subcommands are unaffected', () => {
 // fail with the argument parser's own unknown error, and say nothing more.
 // ---------------------------------------------------------------------------
 
-describe('CLI: the retired learning command and flags fail with the parser\'s unknown error (#529)', () => {
+describe('CLI: the retired devflow learning command and flags fail with the parser\'s unknown error (#529)', () => {
   it('devflow learning exits 1 with an unknown command error naming it', () => {
     const result = runCli('learning');
     expect(result.status).toBe(1);
@@ -108,7 +108,7 @@ describe('CLI: the retired learning command and flags fail with the parser\'s un
     expect(result.stderr).toContain(`unknown option '${flag}'`);
   });
 
-  it('the root help lists curation and not learning', () => {
+  it('the root help lists curation and not devflow learning', () => {
     const result = runCli('--help');
     expect(result.status).toBe(0);
     expect(result.stdout).toMatch(/^\s+curation\b/m);

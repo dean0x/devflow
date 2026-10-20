@@ -1,5 +1,5 @@
 /**
- * End-to-end: `devflow init` moves the learning data to the curation names (#529).
+ * End-to-end: `devflow init` moves the pre-rename ledger data to the curation names (#529).
  *
  * These drive the REAL compiled CLI with a temp HOME and a temp git repository, so the
  * assertions are about what a user's machine ends up holding: the project's ledger

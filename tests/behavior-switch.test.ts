@@ -1,6 +1,6 @@
 /**
  * The behavior rule is an OPT-IN machine switch (D-BEHAVIOR-OPT-IN): `features.behavior`
- * in ~/.devflow/manifest.json, default OFF. The memory, learning and knowledge switches
+ * in ~/.devflow/manifest.json, default OFF. The memory, curation and knowledge switches
  * read an absent key as ON; this one reads it as OFF, and a malformed value heals to OFF
  * without making the manifest read as missing.
  *

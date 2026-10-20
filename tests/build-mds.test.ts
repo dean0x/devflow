@@ -667,7 +667,7 @@ describe('decisions_load adoption in compiled knowledge command outputs', () => 
   });
 
   // D-DECISIONS-LEARNING-GATE: the CURATION=off sentence must come before the
-  // ledger-locate git call and before the index read, so learning off locates no
+  // ledger-locate git call and before the index read, so curation off locates no
   // ledger and reads no index. Every one of the 14 hosts loads decisions behind it.
   // Named collector, shared by the live scan and the known-bad probe below.
   const GATE_SENTENCE = 'When the settings line says `CURATION=off`';

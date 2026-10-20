@@ -216,7 +216,7 @@ describe('AC-308: no Code-family body carries the compliance skill; each spawn s
     const sites = hosts.flatMap(([f, t]) => collectCodeSpawnSites(f, t))
     for (const [host, floor] of Object.entries(CODE_SPAWN_FLOORS)) {
       const n = sites.filter(s => s.file === host).length
-      expect(n, `${host} (learning off): ${n} Code-family spawn site(s), floor ${floor}`).toBeGreaterThanOrEqual(floor)
+      expect(n, `${host} (curation off): ${n} Code-family spawn site(s), floor ${floor}`).toBeGreaterThanOrEqual(floor)
     }
     expect(collectUndirectedSites(sites)).toEqual([])
     expect(collectRawLensSites(sites)).toEqual([])
@@ -239,16 +239,16 @@ describe('AC-308: no Code-family body carries the compliance skill; each spawn s
     }
   })
 
-  it('no Code-family body, learning on or off, names the compliance skill or the lens', () => {
+  it('no Code-family body, curation on or off, names the compliance skill or the lens', () => {
     const agents = resolveAllAgents()
     for (const slug of ['code', 'fix', 'refactor']) {
       const source = agents.get(slug)
       expect(source, `${slug}: the agent is not in the registry`).toBeDefined()
       expect(source!.content.length, `${slug}: the body is empty — the guard would pass vacuously`).toBeGreaterThan(4_000)
-      expect(collectAgentBodyDefects(slug, source!.content), `${slug} (learning on)`).toEqual([])
+      expect(collectAgentBodyDefects(slug, source!.content), `${slug} (curation on)`).toEqual([])
       const off = resolveCurationOffSource('agents', slug)
       expect(off, `dist/curation-off/agents/${slug}.md is absent — run \`npm run build\` first`).not.toBeNull()
-      expect(collectAgentBodyDefects(slug, off!), `${slug} (learning off)`).toEqual([])
+      expect(collectAgentBodyDefects(slug, off!), `${slug} (curation off)`).toEqual([])
     }
   })
 
@@ -327,23 +327,23 @@ describe('AC-309: no Review or Design body or preload carries compliance-only te
     }
   })
 
-  it('no agent names the compliance skill or the lens, and the strict set carries no compliance text, learning on or off', () => {
+  it('no agent names the compliance skill or the lens, and the strict set carries no compliance text, curation on or off', () => {
     const agents = resolveAllAgents()
     for (const [slug, source] of agents) {
-      expect(collectAgentBodyDefects(slug, source.content), `${slug} (learning on)`).toEqual([])
+      expect(collectAgentBodyDefects(slug, source.content), `${slug} (curation on)`).toEqual([])
     }
     for (const slug of STRICT_SLUGS) {
       const off = resolveCurationOffSource('agents', slug)
       expect(off, `dist/curation-off/agents/${slug}.md is absent — run \`npm run build\` first`).not.toBeNull()
-      expect(collectAgentBodyDefects(slug, off!), `${slug} (learning off)`).toEqual([])
+      expect(collectAgentBodyDefects(slug, off!), `${slug} (curation off)`).toEqual([])
     }
   })
 
-  it('the /code-review Review spawn and the /plan Design spawn each inject the compliance focus directive, learning on or off', () => {
+  it('the /code-review Review spawn and the /plan Design spawn each inject the compliance focus directive, curation on or off', () => {
     expect(collectFocusSpawnDefects('code-review.md', requireDistFile('code-review.md'), 'Review')).toEqual([])
     expect(collectFocusSpawnDefects('plan.md', requireDistFile('plan.md'), 'Design')).toEqual([])
-    expect(collectFocusSpawnDefects('code-review.md', curationOffCommand('code-review.md'), 'Review'), 'learning off').toEqual([])
-    expect(collectFocusSpawnDefects('plan.md', curationOffCommand('plan.md'), 'Design'), 'learning off').toEqual([])
+    expect(collectFocusSpawnDefects('code-review.md', curationOffCommand('code-review.md'), 'Review'), 'curation off').toEqual([])
+    expect(collectFocusSpawnDefects('plan.md', curationOffCommand('plan.md'), 'Design'), 'curation off').toEqual([])
   })
 
   it('gap-analysis keeps its Iron Law and six sections in the preload; the compliance patterns live in a reference', () => {

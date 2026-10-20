@@ -191,19 +191,19 @@ describe('queue_append_row', () => {
       expect(fs.existsSync(`${q}.lock`)).toBe(false);
     });
 
-    it('keeps the memory and the learning queue at mode 0600 through the trim, whatever the caller umask', () => {
+    it('keeps the memory and the curation queue at mode 0600 through the trim, whatever the caller umask', () => {
       // A queue holds captured conversation text, so it is created 0600. The trim
       // replaces it with a renamed copy, and from then on the file has the copy's
       // mode. Both queues take this path (queue_append_both -> queue_append_row),
       // and a hook runs under its parent's umask, typically 022.
       const mem = path.join(tmpDir, 'mem.jsonl');
-      const learning = path.join(tmpDir, 'learning.jsonl');
+      const curation = path.join(tmpDir, 'curation.jsonl');
       const modeOf = (file: string): string => (fs.statSync(file).mode & 0o777).toString(8);
       const rowsOf = (file: string): number => readJsonl(file).length;
       const append = (content: string, ts: number): void => {
         const { exitCode, stderr } = runWithQueueAppend(`
           umask 022
-          queue_append_both "${tmpDir}" "${mem}" "${tmpDir}" "${learning}" "true" "true" "user" "${content}" "${ts}"
+          queue_append_both "${tmpDir}" "${mem}" "${tmpDir}" "${curation}" "true" "true" "user" "${content}" "${ts}"
         `);
         expect(exitCode, stderr).toBe(0);
       };
@@ -213,7 +213,7 @@ describe('queue_append_row', () => {
       append('row-1', 1);
       const rest = Array.from({ length: 199 }, (_, i) =>
         JSON.stringify({ role: 'user', content: `row-${i + 2}`, ts: i + 2 }) + '\n').join('');
-      for (const q of [mem, learning]) {
+      for (const q of [mem, curation]) {
         fs.appendFileSync(q, rest);
         expect(rowsOf(q), `${path.basename(q)} must sit at the cap before the trim`).toBe(200);
         expect(modeOf(q), `${path.basename(q)} must start at 0600`).toBe('600');
@@ -221,13 +221,13 @@ describe('queue_append_row', () => {
 
       append('row-201', 201);
 
-      for (const q of [mem, learning]) {
+      for (const q of [mem, curation]) {
         const rows = readJsonl(q);
         expect(rows, `${path.basename(q)} must have been trimmed`).toHaveLength(100);
         expect(rows[rows.length - 1].content).toBe('row-201');
         expect(modeOf(q), `${path.basename(q)} must keep 0600 after the trim`).toBe('600');
       }
-      expect(fs.readdirSync(tmpDir).sort(), 'no temporary copy or lock is left behind').toEqual(['learning.jsonl', 'mem.jsonl']);
+      expect(fs.readdirSync(tmpDir).sort(), 'no temporary copy or lock is left behind').toEqual(['curation.jsonl', 'mem.jsonl']);
     });
   });
 
@@ -360,34 +360,34 @@ describe('queue_append_both', () => {
 
   it('writes to both queues when both flags are true', () => {
     const mem = path.join(tmpDir, 'mem.jsonl');
-    const learning = path.join(tmpDir, 'learning.jsonl');
-    runWithQueueAppend(`queue_append_both "${tmpDir}" "${mem}" "${tmpDir}" "${learning}" "true" "true" "user" "hi" "1"`);
+    const curation = path.join(tmpDir, 'curation.jsonl');
+    runWithQueueAppend(`queue_append_both "${tmpDir}" "${mem}" "${tmpDir}" "${curation}" "true" "true" "user" "hi" "1"`);
     expect(readJsonl(mem)).toHaveLength(1);
-    expect(readJsonl(learning)).toHaveLength(1);
+    expect(readJsonl(curation)).toHaveLength(1);
   });
 
   it('writes only to the memory queue when curation_enabled is false', () => {
     const mem = path.join(tmpDir, 'mem.jsonl');
-    const learning = path.join(tmpDir, 'learning.jsonl');
-    runWithQueueAppend(`queue_append_both "${tmpDir}" "${mem}" "${tmpDir}" "${learning}" "true" "false" "user" "hi" "1"`);
+    const curation = path.join(tmpDir, 'curation.jsonl');
+    runWithQueueAppend(`queue_append_both "${tmpDir}" "${mem}" "${tmpDir}" "${curation}" "true" "false" "user" "hi" "1"`);
     expect(readJsonl(mem)).toHaveLength(1);
-    expect(fs.existsSync(learning)).toBe(false);
+    expect(fs.existsSync(curation)).toBe(false);
   });
 
-  it('writes only to the learning queue when memory_enabled is false', () => {
+  it('writes only to the curation queue when memory_enabled is false', () => {
     const mem = path.join(tmpDir, 'mem.jsonl');
-    const learning = path.join(tmpDir, 'learning.jsonl');
-    runWithQueueAppend(`queue_append_both "${tmpDir}" "${mem}" "${tmpDir}" "${learning}" "false" "true" "user" "hi" "1"`);
+    const curation = path.join(tmpDir, 'curation.jsonl');
+    runWithQueueAppend(`queue_append_both "${tmpDir}" "${mem}" "${tmpDir}" "${curation}" "false" "true" "user" "hi" "1"`);
     expect(fs.existsSync(mem)).toBe(false);
-    expect(readJsonl(learning)).toHaveLength(1);
+    expect(readJsonl(curation)).toHaveLength(1);
   });
 
   it('writes to neither queue when both flags are false', () => {
     const mem = path.join(tmpDir, 'mem.jsonl');
-    const learning = path.join(tmpDir, 'learning.jsonl');
-    runWithQueueAppend(`queue_append_both "${tmpDir}" "${mem}" "${tmpDir}" "${learning}" "false" "false" "user" "hi" "1"`);
+    const curation = path.join(tmpDir, 'curation.jsonl');
+    runWithQueueAppend(`queue_append_both "${tmpDir}" "${mem}" "${tmpDir}" "${curation}" "false" "false" "user" "hi" "1"`);
     expect(fs.existsSync(mem)).toBe(false);
-    expect(fs.existsSync(learning)).toBe(false);
+    expect(fs.existsSync(curation)).toBe(false);
   });
 });
 
@@ -902,7 +902,7 @@ describe('queue_read_gates', { timeout: GATE_READ_TEST_BUDGET_MS }, () => {
   // contents (not objects) so malformed JSON is expressible.
   type Raw = string | null;
 
-  function readGates(manifest: Raw, opts: { noJq?: boolean } = {}): { memory: string; learning: string; exitCode: number } {
+  function readGates(manifest: Raw, opts: { noJq?: boolean } = {}): { memory: string; curation: string; exitCode: number } {
     const manifestPath = path.join(tmpDir, 'manifest.json');
     if (manifest !== null) fs.writeFileSync(manifestPath, manifest);
     const { stdout, exitCode } = runWithQueueAppend(`
@@ -913,7 +913,7 @@ describe('queue_read_gates', { timeout: GATE_READ_TEST_BUDGET_MS }, () => {
     `);
     return {
       memory: stdout.match(/MEMORY=(\S*)/)?.[1] ?? '',
-      learning: stdout.match(/CURATION=(\S*)/)?.[1] ?? '',
+      curation: stdout.match(/CURATION=(\S*)/)?.[1] ?? '',
       exitCode,
     };
   }
@@ -927,76 +927,76 @@ describe('queue_read_gates', { timeout: GATE_READ_TEST_BUDGET_MS }, () => {
 
       it('reads both switches in one pass', () => {
         expect(gates(manifestWith({ memory: true, learning: false }))).toMatchObject({
-          memory: 'true', learning: 'false', exitCode: 0,
+          memory: 'true', curation: 'false', exitCode: 0,
         });
         expect(gates(manifestWith({ memory: false, learning: true }))).toMatchObject({
-          memory: 'false', learning: 'true', exitCode: 0,
+          memory: 'false', curation: 'true', exitCode: 0,
         });
       });
 
       it('each switch clears only its own gate', () => {
-        expect(gates(manifestWith({ memory: false, learning: false }))).toMatchObject({ memory: 'false', learning: 'false' });
-        expect(gates(manifestWith({ learning: false }))).toMatchObject({ memory: 'true', learning: 'false' });
-        expect(gates(manifestWith({ memory: false }))).toMatchObject({ memory: 'false', learning: 'true' });
+        expect(gates(manifestWith({ memory: false, learning: false }))).toMatchObject({ memory: 'false', curation: 'false' });
+        expect(gates(manifestWith({ learning: false }))).toMatchObject({ memory: 'true', curation: 'false' });
+        expect(gates(manifestWith({ memory: false }))).toMatchObject({ memory: 'false', curation: 'true' });
       });
 
       it('no manifest file → both on (fail-open)', () => {
-        expect(gates(null)).toMatchObject({ memory: 'true', learning: 'true', exitCode: 0 });
+        expect(gates(null)).toMatchObject({ memory: 'true', curation: 'true', exitCode: 0 });
       });
 
       it('a manifest without the keys → both on (fail-open)', () => {
-        expect(gates(manifestWith({ ambient: true }))).toMatchObject({ memory: 'true', learning: 'true' });
+        expect(gates(manifestWith({ ambient: true }))).toMatchObject({ memory: 'true', curation: 'true' });
       });
 
       it('a malformed manifest fails open', () => {
         for (const raw of ['{ not json', '[1, 2]', JSON.stringify({ features: 'nope' }), JSON.stringify({ features: [false] })]) {
-          expect(gates(raw), raw).toMatchObject({ memory: 'true', learning: 'true', exitCode: 0 });
+          expect(gates(raw), raw).toMatchObject({ memory: 'true', curation: 'true', exitCode: 0 });
         }
       });
 
       it('only an explicit boolean false is the switch (a string "false" is not)', () => {
-        expect(gates(manifestWith({ memory: 'false', learning: 0 }))).toMatchObject({ memory: 'true', learning: 'true' });
+        expect(gates(manifestWith({ memory: 'false', learning: 0 }))).toMatchObject({ memory: 'true', curation: 'true' });
       });
 
-      it('learning falls back to the legacy decisions key, mirroring readManifest (D-LEARNING-LEGACY-DECISIONS)', () => {
-        expect(gates(manifestWith({ memory: true, decisions: false }))).toMatchObject({ memory: 'true', learning: 'false', exitCode: 0 });
-        expect(gates(manifestWith({ decisions: true }))).toMatchObject({ memory: 'true', learning: 'true' });
-        // An explicit boolean learning wins over the legacy key, either way.
-        expect(gates(manifestWith({ decisions: false, learning: true }))).toMatchObject({ learning: 'true' });
-        expect(gates(manifestWith({ decisions: true, learning: false }))).toMatchObject({ learning: 'false' });
-        // A non-boolean learning is not a value, so the legacy key decides; a
+      it('the curation gate falls back to the legacy decisions key, mirroring readManifest (D-LEARNING-LEGACY-DECISIONS)', () => {
+        expect(gates(manifestWith({ memory: true, decisions: false }))).toMatchObject({ memory: 'true', curation: 'false', exitCode: 0 });
+        expect(gates(manifestWith({ decisions: true }))).toMatchObject({ memory: 'true', curation: 'true' });
+        // An explicit boolean `learning` key wins over the legacy `decisions` key, either way.
+        expect(gates(manifestWith({ decisions: false, learning: true }))).toMatchObject({ curation: 'true' });
+        expect(gates(manifestWith({ decisions: true, learning: false }))).toMatchObject({ curation: 'false' });
+        // A non-boolean `learning` key is not a value, so the legacy `decisions` key decides; a
         // non-boolean decisions decides nothing.
-        expect(gates(manifestWith({ decisions: false, learning: 'yes' }))).toMatchObject({ learning: 'false' });
-        expect(gates(manifestWith({ decisions: 'false' }))).toMatchObject({ learning: 'true' });
+        expect(gates(manifestWith({ decisions: false, learning: 'yes' }))).toMatchObject({ curation: 'false' });
+        expect(gates(manifestWith({ decisions: 'false' }))).toMatchObject({ curation: 'true' });
       }, 15000);
 
-      it('learning is read under curation and learning: a false in either is off, a disagreeing pair resolves off (TP-10)', () => {
-        expect(gates(manifestWith({ memory: true, curation: false }))).toMatchObject({ memory: 'true', learning: 'false', exitCode: 0 });
-        expect(gates(manifestWith({ curation: true, learning: false }))).toMatchObject({ learning: 'false' });
-        expect(gates(manifestWith({ curation: false, learning: true }))).toMatchObject({ learning: 'false' });
-        expect(gates(manifestWith({ curation: true, learning: true }))).toMatchObject({ learning: 'true' });
-        expect(gates(manifestWith({ curation: true }))).toMatchObject({ learning: 'true' });
+      it('the curation gate is read under `curation` and the legacy learning key: a false in either is off, a disagreeing pair resolves off (TP-10)', () => {
+        expect(gates(manifestWith({ memory: true, curation: false }))).toMatchObject({ memory: 'true', curation: 'false', exitCode: 0 });
+        expect(gates(manifestWith({ curation: true, learning: false }))).toMatchObject({ curation: 'false' });
+        expect(gates(manifestWith({ curation: false, learning: true }))).toMatchObject({ curation: 'false' });
+        expect(gates(manifestWith({ curation: true, learning: true }))).toMatchObject({ curation: 'true' });
+        expect(gates(manifestWith({ curation: true }))).toMatchObject({ curation: 'true' });
         // The pre-rename key is read only when neither current key is a boolean.
-        expect(gates(manifestWith({ curation: true, decisions: false }))).toMatchObject({ learning: 'true' });
-        expect(gates(manifestWith({ curation: 'x', learning: 0, decisions: false }))).toMatchObject({ learning: 'false' });
+        expect(gates(manifestWith({ curation: true, decisions: false }))).toMatchObject({ curation: 'true' });
+        expect(gates(manifestWith({ curation: 'x', learning: 0, decisions: false }))).toMatchObject({ curation: 'false' });
         // A non-boolean value is ignored for that key only.
-        expect(gates(manifestWith({ curation: 'false' }))).toMatchObject({ learning: 'true' });
-        expect(gates(manifestWith({ curation: 'true', learning: false }))).toMatchObject({ learning: 'false' });
-        // curation belongs to learning alone.
+        expect(gates(manifestWith({ curation: 'false' }))).toMatchObject({ curation: 'true' });
+        expect(gates(manifestWith({ curation: 'true', learning: false }))).toMatchObject({ curation: 'false' });
+        // The curation key belongs to the curation gate alone.
         expect(gates(manifestWith({ curation: false }))).toMatchObject({ memory: 'true' });
       }, 30000);
 
-      it('an escaped curation key still switches learning off', () => {
-        expect(gates('{"features":{"cur\\u0061tion":false}}')).toMatchObject({ memory: 'true', learning: 'false', exitCode: 0 });
-        expect(gates('{"features":{"curation":true,"le\\u0061rning":false}}')).toMatchObject({ learning: 'false' });
+      it('an escaped curation key still switches curation off', () => {
+        expect(gates('{"features":{"cur\\u0061tion":false}}')).toMatchObject({ memory: 'true', curation: 'false', exitCode: 0 });
+        expect(gates('{"features":{"curation":true,"le\\u0061rning":false}}')).toMatchObject({ curation: 'false' });
       });
 
       it('an escaped key still switches off (a \\u escape always takes the full parse)', () => {
         // JSON.parse and jq decode "memory" to "memory"; the builtin fast
         // path cannot see through an escape, so it must never decide such a file.
         const raw = '{"features":{"m\\u0065mory":false,"le\\u0061rning":false}}';
-        expect(gates(raw)).toMatchObject({ memory: 'false', learning: 'false', exitCode: 0 });
-        expect(gates('{"features":{"d\\u0065cisions":false}}')).toMatchObject({ memory: 'true', learning: 'false' });
+        expect(gates(raw)).toMatchObject({ memory: 'false', curation: 'false', exitCode: 0 });
+        expect(gates('{"features":{"d\\u0065cisions":false}}')).toMatchObject({ memory: 'true', curation: 'false' });
       });
 
       it('forks no parser when no switch can be off, and exactly one when one can (D-GATES-FAST-PATH)', () => {
@@ -1033,7 +1033,7 @@ describe('queue_read_gates', { timeout: GATE_READ_TEST_BUDGET_MS }, () => {
         expect(off).toMatchObject({ exitCode: 0, forks: 1 });
         expect(off.stdout).toContain('MEMORY=false CURATION=true');
 
-        // The curation key is a switch too: one fork, and learning reads off.
+        // The curation key is a switch too: one fork, and curation reads off.
         const curationOff = probe(JSON.stringify({ features: { memory: true, curation: false } }, null, 2));
         expect(curationOff).toMatchObject({ exitCode: 0, forks: 1 });
         expect(curationOff.stdout).toContain('MEMORY=true CURATION=false');
@@ -1154,7 +1154,7 @@ describe('queue_read_gates <manifest> <root>: the repository narrows, never wide
     if (row.personal !== null) fs.writeFileSync(path.join(root, '.devflow', 'config.json'), row.personal);
   }
 
-  function gatesAt(opts: { noJq?: boolean; env?: NodeJS.ProcessEnv } = {}): { memory: string; learning: string; exitCode: number } {
+  function gatesAt(opts: { noJq?: boolean; env?: NodeJS.ProcessEnv } = {}): { memory: string; curation: string; exitCode: number } {
     const { stdout, exitCode } = runWithQueueAppend(`
       ${opts.noJq ? '_HAS_JQ=false' : ''}
       queue_read_gates "${manifestPath}" "${root}"
@@ -1163,7 +1163,7 @@ describe('queue_read_gates <manifest> <root>: the repository narrows, never wide
     `, opts.env);
     return {
       memory: stdout.match(/MEMORY=(\S*)/)?.[1] ?? '',
-      learning: stdout.match(/CURATION=(\S*)/)?.[1] ?? '',
+      curation: stdout.match(/CURATION=(\S*)/)?.[1] ?? '',
       exitCode,
     };
   }
@@ -1177,7 +1177,7 @@ describe('queue_read_gates <manifest> <root>: the repository narrows, never wide
         writeLayers(row);
         expect(gatesAt({ noJq: backend.noJq })).toEqual({
           memory: String(row.expect.memory),
-          learning: String(row.expect.curation),
+          curation: String(row.expect.curation),
           exitCode: 0,
         });
       });
@@ -1188,13 +1188,13 @@ describe('queue_read_gates <manifest> <root>: the repository narrows, never wide
     const target = path.join(tmpDir, 'elsewhere.json');
     fs.writeFileSync(target, '{"features":{"memory":false,"learning":false}}');
     fs.symlinkSync(target, path.join(root, '.devflow', 'project.json'));
-    expect(gatesAt()).toEqual({ memory: 'true', learning: 'true', exitCode: 0 });
+    expect(gatesAt()).toEqual({ memory: 'true', curation: 'true', exitCode: 0 });
   });
 
   it('a directory or FIFO where a file belongs is skipped without blocking', () => {
     fs.mkdirSync(path.join(root, '.devflow', 'project.json'));
     execSync(`mkfifo "${path.join(root, '.devflow', 'config.json')}"`);
-    expect(gatesAt()).toEqual({ memory: 'true', learning: 'true', exitCode: 0 });
+    expect(gatesAt()).toEqual({ memory: 'true', curation: 'true', exitCode: 0 });
   });
 
   it('an empty <root> reads no repository file', () => {
@@ -1208,7 +1208,7 @@ describe('queue_read_gates <manifest> <root>: the repository narrows, never wide
 
   it('never exits non-zero with a narrowing file (set -e safety)', () => {
     writeLayers({ manifest: undefined, project: '{"features":{"memory":false,"learning":false}}', personal: null });
-    expect(gatesAt()).toEqual({ memory: 'false', learning: 'false', exitCode: 0 });
+    expect(gatesAt()).toEqual({ memory: 'false', curation: 'false', exitCode: 0 });
   });
 
   // TP-34 (AC-30): the fork budget. Every capture hook and session start pays
@@ -1244,7 +1244,7 @@ describe('queue_read_gates <manifest> <root>: the repository narrows, never wide
 
         it('no repository files: zero forks', () => {
           writeLayers({ manifest: MANIFEST, project: null, personal: null });
-          expect(probe()).toEqual({ memory: 'true', learning: 'true', exitCode: 0 });
+          expect(probe()).toEqual({ memory: 'true', curation: 'true', exitCode: 0 });
           expect(forks()).toEqual([]);
         });
 
@@ -1258,11 +1258,11 @@ describe('queue_read_gates <manifest> <root>: the repository narrows, never wide
             }, null, 2),
             personal: '{"reviewPublication":"full","tracker":"github"}',
           });
-          expect(probe()).toEqual({ memory: 'true', learning: 'true', exitCode: 0 });
+          expect(probe()).toEqual({ memory: 'true', curation: 'true', exitCode: 0 });
           expect(forks()).toEqual([]);
         });
 
-        it('a false that is not a memory or learning switch: zero forks', () => {
+        it('a false that is not a memory or curation switch: zero forks', () => {
           // The legacy top-level keys sit before `features`, and knowledge and
           // decisions have no shell gate: none of them can narrow a queue.
           writeLayers({
@@ -1270,25 +1270,25 @@ describe('queue_read_gates <manifest> <root>: the repository narrows, never wide
             project: '{"memory":false,"curation":false,"learning":false,"decisions":false,"features":{"knowledge":false,"decisions":false}}',
             personal: '{"memory":false,"features":{"knowledge":false}}',
           });
-          expect(probe()).toEqual({ memory: 'true', learning: 'true', exitCode: 0 });
+          expect(probe()).toEqual({ memory: 'true', curation: 'true', exitCode: 0 });
           expect(forks()).toEqual([]);
         });
 
-        it('project.json features.learning false: exactly one fork, learning off', () => {
+        it('the legacy project.json features.learning false: exactly one fork, curation off', () => {
           writeLayers({ manifest: MANIFEST, project: '{"version":1,"features":{"learning":false}}', personal: null });
-          expect(probe()).toEqual({ memory: 'true', learning: 'false', exitCode: 0 });
+          expect(probe()).toEqual({ memory: 'true', curation: 'false', exitCode: 0 });
           expect(forks()).toEqual(['node']);
         });
 
-        it('project.json features.curation false: exactly one fork, learning off (TP-33)', () => {
+        it('project.json features.curation false: exactly one fork, curation off (TP-33)', () => {
           writeLayers({ manifest: MANIFEST, project: '{"version":1,"features":{"curation":false}}', personal: null });
-          expect(probe()).toEqual({ memory: 'true', learning: 'false', exitCode: 0 });
+          expect(probe()).toEqual({ memory: 'true', curation: 'false', exitCode: 0 });
           expect(forks()).toEqual(['node']);
         });
 
-        it('config.json features.curation false: exactly one fork, learning off', () => {
+        it('config.json features.curation false: exactly one fork, curation off', () => {
           writeLayers({ manifest: MANIFEST, project: null, personal: '{"features":{"curation":false}}' });
-          expect(probe()).toEqual({ memory: 'true', learning: 'false', exitCode: 0 });
+          expect(probe()).toEqual({ memory: 'true', curation: 'false', exitCode: 0 });
           expect(forks()).toEqual(['node']);
         });
 
@@ -1300,14 +1300,14 @@ describe('queue_read_gates <manifest> <root>: the repository narrows, never wide
           ]) {
             fs.rmSync(forkLog, { force: true });
             writeLayers({ manifest: MANIFEST, project: `{"version":1,"features":${features}}`, personal: null });
-            expect(probe(), features).toEqual({ memory: 'true', learning: 'false', exitCode: 0 });
+            expect(probe(), features).toEqual({ memory: 'true', curation: 'false', exitCode: 0 });
             expect(forks(), features).toEqual(['node']);
           }
         });
 
         it('a repository file with both keys true: zero forks', () => {
           writeLayers({ manifest: MANIFEST, project: '{"version":1,"features":{"curation":true,"learning":true}}', personal: null });
-          expect(probe()).toEqual({ memory: 'true', learning: 'true', exitCode: 0 });
+          expect(probe()).toEqual({ memory: 'true', curation: 'true', exitCode: 0 });
           expect(forks()).toEqual([]);
         });
 
@@ -1317,7 +1317,7 @@ describe('queue_read_gates <manifest> <root>: the repository narrows, never wide
             project: '{"features":{"curation":false,"learning":false}}',
             personal: '{"features":{"curation":false}}',
           });
-          expect(probe()).toEqual({ memory: 'true', learning: 'false', exitCode: 0 });
+          expect(probe()).toEqual({ memory: 'true', curation: 'false', exitCode: 0 });
           expect(forks()).toEqual(['node']);
         });
 
@@ -1327,7 +1327,7 @@ describe('queue_read_gates <manifest> <root>: the repository narrows, never wide
             project: '{"features":{"learning":false}}',
             personal: '{"features":{"memory":false}}',
           });
-          expect(probe()).toEqual({ memory: 'false', learning: 'false', exitCode: 0 });
+          expect(probe()).toEqual({ memory: 'false', curation: 'false', exitCode: 0 });
           expect(forks()).toEqual(['node']);
         });
 
@@ -1337,7 +1337,7 @@ describe('queue_read_gates <manifest> <root>: the repository narrows, never wide
             project: '{"features":{"memory":false},"pad":"' + 'x'.repeat(5000) + '"}',
             personal: '{"features":{"learning":false}}\u0000',
           });
-          expect(probe()).toEqual({ memory: 'true', learning: 'true', exitCode: 0 });
+          expect(probe()).toEqual({ memory: 'true', curation: 'true', exitCode: 0 });
           expect(forks()).toEqual([]);
         });
       });

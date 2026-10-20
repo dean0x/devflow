@@ -24,12 +24,14 @@
  * `pattern` replaces the substring test for residue whose spellings cannot be
  * enumerated in advance.
  *
- * The last two describe blocks are a different kind of guard, and they do not use
- * the denylist: the FEATURE-WORD guard (AC-1 of the curation rename) reads every
- * tracked file outside tests/ for the old feature word and lets a hit through only
- * when an entry of tests/fixtures/feature-word-allowlist.ts covers its exact text.
- * It is an allowlist over one word, where the denylist above is a list of many
- * literals, so it keeps its own fixture.
+ * The last describe blocks are a different kind of guard, and they do not use the
+ * denylist: the FEATURE-WORD guard (AC-1 of the curation rename) reads every tracked
+ * file outside tests/ for the old feature word and lets a hit through only when an
+ * entry of tests/fixtures/feature-word-allowlist.ts covers its exact text. The
+ * TEST-TITLE guard reads the title of every test under tests/ the same way, against
+ * its own allowlist in that fixture. The DERIVED-STEM guard reads the shipped scripts
+ * for identifiers built on the old stem. Each is an allowlist over one word, where
+ * the denylist above is a list of many literals, so they keep their own fixture.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -40,6 +42,7 @@ import {
   FEATURE_WORD,
   FEATURE_WORD_ALLOWLIST,
   SECTION_EXEMPTIONS,
+  TEST_TITLE_ALLOWLIST,
   type AllowlistEntry,
   type SectionExemption,
 } from '../fixtures/feature-word-allowlist.js';
@@ -932,9 +935,10 @@ describe('retired-wording guard — CHANGELOG.md across the release bump', () =>
 // `LEARNING_OPS` count) must sit inside text that an entry of the allowlist
 // covers, or inside a section the allowlist exempts by its heading.
 //
-// Tests are out of scope on purpose. They name the old word to pin the migration
-// and the legacy readers, and a guard that read them would only force each such
-// test to carry a second copy of its own reason.
+// The bodies of the tests are out of scope on purpose. They name the old word to pin
+// the migration and the legacy readers, and a guard that read them would only force
+// each such test to carry a second copy of its own reason. Their titles are read by
+// the test-title guard below.
 //
 // The scan is a named collector so the main guard and the non-vacuity probes run
 // the SAME logic: a probe that re-implemented the loop would prove the probe.
@@ -984,6 +988,29 @@ function describeSection(section: SectionExemption): string {
   return `${section.path}  ${String(section.start)} .. ${String(section.end)}`;
 }
 
+/**
+ * True when some use of the old word in `text` sits outside every span that an entry of
+ * `entries` covers. Each entry that covers a use of the word is added to `used`.
+ */
+function hasUncoveredWord(
+  text: string,
+  entries: ReadonlyArray<AllowlistEntry>,
+  used: Set<AllowlistEntry>,
+): boolean {
+  const covering: Array<readonly [number, number]> = [];
+  for (const entry of entries) {
+    for (const span of spansOf(entry.pattern, text)) {
+      if (!FEATURE_WORD.test(text.slice(span[0], span[1]))) continue;
+      used.add(entry);
+      covering.push(span);
+    }
+  }
+  return [...text.matchAll(FEATURE_WORD_ALL)].some(hit => {
+    const at = hit.index ?? 0;
+    return !covering.some(([from, to]) => from <= at && at + hit[0].length <= to);
+  });
+}
+
 function scanForFeatureWord(
   files: ReadonlyArray<ScannedFile>,
   allowlist: ReadonlyArray<AllowlistEntry>,
@@ -1012,19 +1039,9 @@ function scanForFeatureWord(
         return;
       }
 
-      const covering: Array<readonly [number, number]> = [];
-      for (const entry of fileEntries) {
-        for (const span of spansOf(entry.pattern, line)) {
-          if (!FEATURE_WORD.test(line.slice(span[0], span[1]))) continue;
-          usedEntries.add(entry);
-          covering.push(span);
-        }
+      if (hasUncoveredWord(line, fileEntries, usedEntries)) {
+        violations.push(`${relPath}:${index + 1}: ${line.trim().slice(0, MAX_REPORTED_LINE)}`);
       }
-      const uncovered = [...line.matchAll(FEATURE_WORD_ALL)].some(hit => {
-        const at = hit.index ?? 0;
-        return !covering.some(([from, to]) => from <= at && at + hit[0].length <= to);
-      });
-      if (uncovered) violations.push(`${relPath}:${index + 1}: ${line.trim().slice(0, MAX_REPORTED_LINE)}`);
     });
   }
 
@@ -1042,8 +1059,8 @@ function looseEntries(allowlist: ReadonlyArray<AllowlistEntry>): string[] {
     .map(describeEntry);
 }
 
-/** Every tracked text file outside tests/, as the working tree holds it. */
-function trackedFilesOutsideTests(): ScannedFile[] {
+/** Every tracked text file that `keep` accepts, as the working tree holds it. */
+function trackedFiles(keep: (relPath: string) => boolean): ScannedFile[] {
   const listed = execFileSync('git', ['ls-files', '-z'], {
     cwd: ROOT,
     encoding: 'utf-8',
@@ -1051,7 +1068,7 @@ function trackedFilesOutsideTests(): ScannedFile[] {
   });
   const files: ScannedFile[] = [];
   for (const relPath of listed.split('\0')) {
-    if (relPath === '' || relPath.startsWith('tests/')) continue;
+    if (relPath === '' || !keep(relPath)) continue;
     const abs = path.join(ROOT, relPath);
     let stat;
     try {
@@ -1066,6 +1083,13 @@ function trackedFilesOutsideTests(): ScannedFile[] {
   }
   return files;
 }
+
+/** Every tracked text file outside tests/. */
+const trackedFilesOutsideTests = (): ScannedFile[] => trackedFiles(relPath => !relPath.startsWith('tests/'));
+
+/** Every tracked TypeScript file under tests/. */
+const trackedTestSources = (): ScannedFile[] =>
+  trackedFiles(relPath => relPath.startsWith('tests/') && relPath.endsWith('.ts'));
 
 const wordsIn = (text: string): number => text.trim().split(/\s+/).length;
 
@@ -1203,6 +1227,249 @@ describe('feature-word guard — non-vacuity probes (the same collector as the g
 
     it('a hit in [Unreleased] outside the upgrade section fails', () => {
       expect(changelog('## [Unreleased]\n\n### Added\n\n- a learning note\n').violations).toHaveLength(1);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The TEST-TITLE guard. The feature-word guard above does not read tests/, because a
+// test body names the old word to pin the migration and the legacy readers. A title
+// is different: it states what the test is about, and a title that says "learning"
+// for the current feature is a rename left half done. So the title of every
+// `describe`, `it` and `test` call under tests/ is read, and a title that carries the
+// word passes only when an entry of TEST_TITLE_ALLOWLIST covers its exact words (a
+// legacy key, file, command or hook that the test names on purpose).
+//
+// A title is read from the source: the first string literal of the call, after the
+// table of an `.each(...)` or the condition of a `.skipIf(...)`. A title that is a
+// variable is not read here; its words sit in a table or a constant that the sweep
+// reviews by hand. The scan is a named collector, so the guard and its planted-title
+// probes run the same logic.
+// ---------------------------------------------------------------------------
+
+/** A call of `describe`, `it` or `test`, not a method of another object (`regex.test(`). */
+const TEST_CALL = /(?<![.\w$])(?:describe|it|test)\b/g;
+/** A modifier chained to the call: `.each`, `.skip`, `.skipIf`, `.concurrent`. */
+const TEST_MODIFIER = /\.\w+/y;
+/** The most modifiers one call chains. */
+const MAX_TEST_MODIFIERS = 4;
+/** The most parenthesised groups tried after a call: a table, a condition, then the call that holds the title. */
+const MAX_TITLE_GROUPS = 3;
+
+/** The title of one test call: the offset of its opening quote and the text between the quotes. */
+interface TestTitle {
+  readonly index: number;
+  readonly text: string;
+}
+
+interface TitleReport {
+  /** `path:line: title` for each title with an uncovered use of the word. */
+  readonly violations: string[];
+  /** Entries that covered no title. */
+  readonly unusedEntries: string[];
+  /** How many titles were read, in all. */
+  readonly titlesRead: number;
+}
+
+/** The offset of the quote that closes the string literal opened at `start`, or -1 when it never closes. */
+function closingQuote(src: string, start: number): number {
+  for (let i = start + 1; i < src.length; i++) {
+    if (src[i] === '\\') i++;
+    else if (src[i] === src[start]) return i;
+  }
+  return -1;
+}
+
+/** The offset after the `)` that closes the `(` at `open`, or -1 when it never closes. */
+function afterBalancedParens(src: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    const c = src[i];
+    if (c === "'" || c === '"' || c === '`') {
+      i = closingQuote(src, i);
+      if (i < 0) return -1;
+    } else if (c === '(') {
+      depth++;
+    } else if (c === ')') {
+      depth--;
+      if (depth === 0) return i + 1;
+    }
+  }
+  return -1;
+}
+
+function skipSpace(src: string, from: number): number {
+  let at = from;
+  while (at < src.length && /\s/.test(src[at])) at++;
+  return at;
+}
+
+/** The title of every `describe`, `it` and `test` call in `src`, in source order. */
+function extractTestTitles(src: string): TestTitle[] {
+  const titles: TestTitle[] = [];
+  for (const call of src.matchAll(TEST_CALL)) {
+    let pos = (call.index ?? 0) + call[0].length;
+    TEST_MODIFIER.lastIndex = pos;
+    for (let chained = 0; chained < MAX_TEST_MODIFIERS && TEST_MODIFIER.exec(src) !== null; chained++) {
+      pos = TEST_MODIFIER.lastIndex;
+    }
+    for (let group = 0; group < MAX_TITLE_GROUPS; group++) {
+      pos = skipSpace(src, pos);
+      if (src[pos] !== '(') break;
+      const at = skipSpace(src, pos + 1);
+      if (src[at] === "'" || src[at] === '"' || src[at] === '`') {
+        const end = closingQuote(src, at);
+        if (end > at) titles.push({ index: at, text: src.slice(at + 1, end) });
+        break;
+      }
+      pos = afterBalancedParens(src, pos);
+      if (pos < 0) break;
+    }
+  }
+  return titles;
+}
+
+/** The 1-based line of the character at `index`. */
+const lineAt = (content: string, index: number): number => content.slice(0, index).split('\n').length;
+
+function scanTestTitles(
+  files: ReadonlyArray<ScannedFile>,
+  allowlist: ReadonlyArray<AllowlistEntry>,
+): TitleReport {
+  const violations: string[] = [];
+  const used = new Set<AllowlistEntry>();
+  let titlesRead = 0;
+
+  for (const { relPath, content } of files) {
+    if (!relPath.startsWith('tests/')) continue;
+    const fileEntries = allowlist.filter(entry => entryApplies(entry.path, relPath));
+    for (const { index, text } of extractTestTitles(content)) {
+      titlesRead++;
+      if (!FEATURE_WORD.test(text)) continue;
+      if (hasUncoveredWord(text, fileEntries, used)) {
+        violations.push(`${relPath}:${lineAt(content, index)}: ${text.slice(0, MAX_REPORTED_LINE)}`);
+      }
+    }
+  }
+
+  return {
+    violations,
+    unusedEntries: allowlist.filter(entry => !used.has(entry)).map(describeEntry),
+    titlesRead,
+  };
+}
+
+describe('test-title guard — no test title uses the old feature word for the current feature', () => {
+  const files = trackedTestSources();
+  const report = scanTestTitles(files, TEST_TITLE_ALLOWLIST);
+
+  it('reads the titles of the whole tests/ tree (non-vacuity)', () => {
+    expect(files.length, 'the scan reached almost no test files').toBeGreaterThan(200);
+    expect(report.titlesRead, 'the scan read almost no titles').toBeGreaterThan(5000);
+    for (const relPath of ['tests/guards/retired-wording.test.ts', 'tests/queue-append.test.ts', 'tests/manifest.test.ts']) {
+      expect(files.some(file => file.relPath === relPath), `${relPath} is not in the scan`).toBe(true);
+    }
+  });
+
+  it('every entry carries a reason in words', () => {
+    expect(TEST_TITLE_ALLOWLIST.length).toBeGreaterThan(0);
+    for (const entry of TEST_TITLE_ALLOWLIST) {
+      expect(wordsIn(entry.reason), `${describeEntry(entry)} has no reason`).toBeGreaterThanOrEqual(6);
+    }
+  });
+
+  it('no entry covers the bare word: each pins the words around its hit', () => {
+    expect(looseEntries(TEST_TITLE_ALLOWLIST)).toEqual([]);
+  });
+
+  it('no test title uses the old feature word outside the allowlist', () => {
+    expect(
+      report.violations,
+      `a test title uses the old feature word. Rename it to the current word, or add an allowlist entry with a reason:\n  ${report.violations.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('no entry is stale (each covers a real title)', () => {
+    expect(report.unusedEntries, `entries that cover no title:\n  ${report.unusedEntries.join('\n  ')}`).toEqual([]);
+  });
+
+  describe('planted titles (the same collector as the guard)', () => {
+    // Built from two halves, so this file holds no title of its own that uses the word.
+    const WORD = 'learn' + 'ing';
+    const PLANTED = `a planted ${WORD} title`;
+
+    const scan = (
+      content: string,
+      relPath = 'tests/probe.test.ts',
+      allowlist: ReadonlyArray<AllowlistEntry> = TEST_TITLE_ALLOWLIST,
+    ): TitleReport => scanTestTitles([{ relPath, content }], allowlist);
+
+    it('a planted title fails, in every call form', () => {
+      for (const form of [
+        "it('TITLE', () => {});",
+        'describe("TITLE", () => {});',
+        'test(`TITLE ${name}`, () => {});',
+        "it.each([[1, 2]])('TITLE %s', () => {});",
+        "it.each(Object.entries(table))('TITLE', () => {});",
+        "describe.skip('TITLE', () => {});",
+        "it.skipIf(process.getuid?.() === 0)('TITLE', () => {});",
+        "it(\n  'TITLE',\n  () => {},\n);",
+        "it('it\\'s a TITLE', () => {});",
+      ]) {
+        const planted = form.replace('TITLE', PLANTED);
+        expect(scan(`${planted}\n`).violations, planted).toHaveLength(1);
+      }
+    });
+
+    it('the violation names the file and the line', () => {
+      expect(scan(`describe('ok', () => {\n  it('${PLANTED}', () => {});\n});\n`).violations)
+        .toEqual([`tests/probe.test.ts:2: ${PLANTED}`]);
+    });
+
+    it('a title that is not about the old feature, a variable title and a method call are not hits', () => {
+      for (const clean of [
+        "it('the curation queue holds a turn', () => {});",
+        'it(title, () => {});',
+        `expect(/${WORD}/.test('the ${WORD} queue')).toBe(true);`,
+        `const text = edit('${WORD}');`,
+        `const where = { test: '${WORD}' };`,
+      ]) {
+        expect(scan(`${clean}\n`).violations, clean).toEqual([]);
+      }
+    });
+
+    it('an entry covers its own words only: a second use in the same title still fails', () => {
+      expect(scan(`it('the legacy ${WORD} key beside curation', () => {});\n`).violations).toEqual([]);
+      expect(scan(`it('the legacy ${WORD} key and the ${WORD} queue', () => {});\n`).violations).toHaveLength(1);
+    });
+
+    it('an entry applies to its own files only', () => {
+      const title = `it('devflow ${WORD} exits 1', () => {});\n`;
+      expect(scan(title, 'tests/probe.test.ts').violations).toHaveLength(1);
+      expect(scan(title, 'tests/cli-unknown-command.test.ts').violations).toEqual([]);
+    });
+
+    it('a file outside tests/ is not read', () => {
+      expect(scan(`it('${PLANTED}', () => {});\n`, 'src/core/probe.ts').violations).toEqual([]);
+    });
+
+    it('a stale entry is reported, and one that covers a title is not', () => {
+      const entry: AllowlistEntry = {
+        path: /^tests\//,
+        pattern: new RegExp(`\\bthe legacy ${WORD} key\\b`),
+        reason: 'This entry covers one phrase that a title of the probe uses.',
+      };
+      expect(scan('it("an unrelated title", () => {});\n', 'tests/probe.test.ts', [entry]).unusedEntries).toHaveLength(1);
+      expect(scan(`it('the legacy ${WORD} key', () => {});\n`, 'tests/probe.test.ts', [entry]).unusedEntries).toEqual([]);
+    });
+
+    it('an entry that covers the bare word is reported as loose', () => {
+      const loose: AllowlistEntry = {
+        path: /^tests\//,
+        pattern: new RegExp(WORD),
+        reason: 'This entry would cover every use of the word in a title.',
+      };
+      expect(looseEntries([loose])).toHaveLength(1);
     });
   });
 });
