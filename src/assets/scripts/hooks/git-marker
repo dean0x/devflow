@@ -133,3 +133,84 @@ df_file_below() {
   fi
   return 1
 }
+
+# df_ledger_folder <devflow_dir> <old> [<new>] — sets DF_LEDGER_FOLDER to the path of
+# the ledger folder a creator may create or write into: <devflow_dir>/<old> while that
+# name is present (a folder, a file or a link, dangling or not), else
+# <devflow_dir>/<new>. <new> defaults to <old>, so a caller that names only the old
+# folder gets the old folder's path in every state.
+#
+# The creator rule: a creator makes the new folder only when the old name is absent.
+# A new folder made beside a present old one would hide the old ledger from every
+# reader, so the session-start heal, the ensure-devflow-init scaffold and queue
+# append all take their folder from here. It answers a path and creates nothing; the
+# caller checks the path with df_no_symlink_below and creates it.
+#
+# Zero forks: builtin tests and parameter expansion only. It always returns 0; read
+# the answer from DF_LEDGER_FOLDER, not from a command substitution.
+df_ledger_folder() {
+  local _dir="$1" _old="$2" _new="${3:-$2}"
+  if [ -e "$_dir/$_old" ] || [ -L "$_dir/$_old" ]; then
+    DF_LEDGER_FOLDER="$_dir/$_old"
+  else
+    DF_LEDGER_FOLDER="$_dir/$_new"
+  fi
+  return 0
+}
+
+# df_ledger_queue <queue_file> <old> [<new>] — sets DF_LEDGER_QUEUE to the queue file
+# a creator may append to. A queue file whose folder is named <old> or <new> is
+# answered under the folder df_ledger_folder picks for that folder's parent; a queue
+# in any other folder (the memory queue) and a path with fewer than two parts come
+# back unchanged. <new> defaults to <old>. Creates nothing; zero forks; returns 0.
+df_ledger_queue() {
+  local _file="$1" _old="$2" _new="${3:-$2}" _folder="" _parent="" _name=""
+  DF_LEDGER_QUEUE="$_file"
+  case "$_file" in */*/*) ;; *) return 0 ;; esac
+  _folder="${_file%/*}"
+  _parent="${_folder%/*}"
+  _name="${_folder##*/}"
+  case "$_name" in
+    "$_old"|"$_new")
+      df_ledger_folder "$_parent" "$_old" "$_new"
+      DF_LEDGER_QUEUE="$DF_LEDGER_FOLDER/${_file##*/}"
+      ;;
+  esac
+  return 0
+}
+
+# df_make_ledger_folder <root> <devflow_dir> <old> <new> — the one creator of the
+# ledger folder for a hook. It sets DF_LEDGER_FOLDER as df_ledger_folder does, then
+# makes the NEW folder and only the new one, and only where the old name is absent at
+# the probe and no link sits on the way down from <root> (df_no_symlink_below). Where
+# the old name is present it makes nothing, so a creator never makes the old folder:
+# a `mkdir -p` on it would bring back an empty old folder beside the new one after a
+# move had renamed it away. It logs nothing, so each hook words its own skip once.
+# A predicate: it returns 0 when nothing is left to make or the folder was made, 2 for
+# a link on the path (nothing is made), and 1 for an empty argument or a failed mkdir.
+# Call it in an `if` or an `||` list, never as a plain statement under `set -e`.
+#
+# The remaining window is the gap between the probe and the mkdir. A move that
+# finishes inside it leaves no folder this time, and the next event makes the new one.
+# An old folder that appears inside it, from an older install or by hand, leaves the
+# new folder beside it, and the next move merges the two. No data is lost either way:
+# the helper only ever makes an empty folder, and never writes into or removes one.
+df_make_ledger_folder() {
+  local _root="$1" _dir="$2" _old="$3" _new="$4"
+  [ -n "$_root" ] && [ -n "$_dir" ] && [ -n "$_old" ] && [ -n "$_new" ] || return 1
+  df_ledger_folder "$_dir" "$_old" "$_new"
+  [ "$DF_LEDGER_FOLDER" = "$_dir/$_new" ] || return 0
+  if ! df_no_symlink_below "$_root" "$DF_LEDGER_FOLDER"; then return 2; fi
+  if [ -d "$DF_LEDGER_FOLDER" ]; then return 0; fi
+  mkdir -p "$DF_LEDGER_FOLDER" 2>/dev/null || return 1
+  return 0
+}
+
+# df_global_tuning_file <machine_dir> — sets DF_GLOBAL_TUNING_FILE to the global
+# curate-agent tuning file inside the machine directory (~/.devflow). The shell
+# twin of getGlobalCurateTuningConfigPath in src/core/project-paths.ts: the one
+# place a hook names the file. Zero forks; returns 0.
+df_global_tuning_file() {
+  DF_GLOBAL_TUNING_FILE="$1/curation.json"
+  return 0
+}

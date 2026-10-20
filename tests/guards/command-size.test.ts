@@ -4,15 +4,15 @@
  * A command is the main session's standing context: its whole text is read on the first turn and
  * re-read from cache on every later one, so a command that grows pays on every turn of every run.
  * The ceilings sit at the sizes measured when #456 closed (zero headroom) and are registered in
- * tests/fixtures/numeric-floors.json as `command-<name>-max` (the learning-on build, the one an
- * installation with learning on reads) and `command-<name>-learning-off-max` (the learning-off build).
+ * tests/fixtures/numeric-floors.json as `command-<name>-max` (the curation-on build, the one an
+ * installation with curation on reads) and `command-<name>-curation-off-max` (the curation-off build).
  * A ceiling is lowered by a pass that cuts text and never raised to fit text that grew back: a command
  * that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a
  * line of the same command already states.
  *
  *   - AC-402. All 14 compiled commands have a ceiling in each build, and nothing else does.
  *   - AC-401. /implement, /resolve, /plan and /code-review end below the size main held, in both builds.
- *   - A learning-off build never exceeds its learning-on build: it is the same host with its learning
+ *   - A curation-off build never exceeds its curation-on build: it is the same host with its curation
  *     arms removed.
  *
  * Every guard has a named collector, a non-empty-corpus assertion and a known-bad probe run through the
@@ -22,7 +22,7 @@
 import { describe, it, expect } from 'vitest'
 
 import { MDS_COMMAND_HOSTS } from '../fixtures/mds-manifest.js'
-import { requireDistFile, resolveLearningOffSource } from '../helpers.js'
+import { requireDistFile, resolveCurationOffSource } from '../helpers.js'
 
 type Build = 'on' | 'off'
 
@@ -58,7 +58,7 @@ const COMMAND_MAX_BYTES: ReadonlyArray<readonly [string, Build, number]> = [
   ['self-review', 'off', 12_156],
 ]
 
-/** The four commands #456 trims, and the sizes main held before wave 4C: [learning-on, learning-off]. */
+/** The four commands #456 trims, and the sizes main held before wave 4C: [curation-on, curation-off]. */
 const MAIN_BYTES: Readonly<Record<string, readonly [number, number]>> = {
   'implement': [57_212, 54_369],
   'resolve': [54_899, 51_692],
@@ -70,7 +70,7 @@ const key = (command: string, build: Build): string => `${command}/${build}`
 
 /** The compiled size of one command in one build, or null when the build has no such file. */
 function builtBytes(command: string, build: Build): number | null {
-  const text = build === 'on' ? requireDistFile(`${command}.md`) : resolveLearningOffSource('commands', command)
+  const text = build === 'on' ? requireDistFile(`${command}.md`) : resolveCurationOffSource('commands', command)
   return text === null ? null : Buffer.byteLength(text, 'utf-8')
 }
 
@@ -102,12 +102,12 @@ export function collectOversize(
   return out
 }
 
-/** Named collector: the commands whose learning-off figure exceeds the learning-on figure. */
+/** Named collector: the commands whose curation-off figure exceeds the curation-on figure. */
 export function collectOffAboveOn(figure: (command: string, build: Build) => number | null, commands: readonly string[]): string[] {
   return commands.flatMap(command => {
     const on = figure(command, 'on')
     const off = figure(command, 'off')
-    return on === null || off === null || off > on ? [`${command}: learning-off ${off} bytes, learning-on ${on}`] : []
+    return on === null || off === null || off > on ? [`${command}: curation-off ${off} bytes, curation-on ${on}`] : []
   })
 }
 
@@ -155,14 +155,14 @@ describe('AC-401: the four trimmed commands end below main in both builds', () =
   })
 })
 
-describe('a learning-off build never exceeds its learning-on build', () => {
+describe('a curation-off build never exceeds its curation-on build', () => {
   it('holds for the built commands and for their ceilings', () => {
     expect(collectOffAboveOn(builtBytes, MDS_COMMAND_HOSTS)).toEqual([])
     expect(collectOffAboveOn(ceilingOf, MDS_COMMAND_HOSTS)).toEqual([])
   })
 
   it('known-bad probe: an off build above its on build is reported', () => {
-    expect(collectOffAboveOn((c, b) => (c === 'plan' ? (b === 'on' ? 10 : 11) : 5), ['plan', 'debug'])).toEqual(['plan: learning-off 11 bytes, learning-on 10'])
-    expect(collectOffAboveOn(() => null, ['plan'])).toEqual(['plan: learning-off null bytes, learning-on null'])
+    expect(collectOffAboveOn((c, b) => (c === 'plan' ? (b === 'on' ? 10 : 11) : 5), ['plan', 'debug'])).toEqual(['plan: curation-off 11 bytes, curation-on 10'])
+    expect(collectOffAboveOn(() => null, ['plan'])).toEqual(['plan: curation-off null bytes, curation-on null'])
   })
 })

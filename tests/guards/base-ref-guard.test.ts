@@ -3,7 +3,7 @@
  *
  * The base-ref guard for #495 (use a fresh base for branch diffs, tighten branch-name
  * validation). It reads the BUILT prompts: the commands, the agents and the Git-op
- * references, in both learning variants, plus the hand-authored /implement re-validation
+ * references, in both curation variants, plus the hand-authored /implement re-validation
  * reference. It collects every shell line that names a base value and checks each site
  * against the rules below.
  *
@@ -37,7 +37,7 @@
  * re-validation text (tests/evidence/implement-flow.test.ts) and the Git ops' steps 5 to 7
  * (tests/git-agent.test.ts).
  *
- * How a site is identified. Every collector returns Findings: a file label, the learning
+ * How a site is identified. Every collector returns Findings: a file label, the curation
  * arm, a rule and an anchor. For a shell line the anchor is the command text. For a
  * required text the anchor is a fixed site label (the requirement table names it).
  *
@@ -67,7 +67,7 @@ import {
   requireDistFile,
   requireDistFiles,
   resolveAllAgents,
-  resolveLearningOffSource,
+  resolveCurationOffSource,
 } from '../helpers.js'
 import { RESOLVE_BASE_SCRIPT } from '../evidence/seam.js'
 
@@ -114,12 +114,12 @@ function builtPrompts(): Prompt[] {
   const prompts: Prompt[] = []
   for (const name of requireDistFiles()) {
     prompts.push(seeded(`commands/${name}`, requireDistFile(name)))
-    const off = resolveLearningOffSource('commands', name.replace(/\.md$/, ''))
+    const off = resolveCurationOffSource('commands', name.replace(/\.md$/, ''))
     if (off !== null) prompts.push(seeded(`commands/${name}`, off, 'off'))
   }
   for (const [name, source] of resolveAllAgents()) {
     prompts.push(seeded(`agents/${name}.md`, source.content))
-    const off = resolveLearningOffSource('agents', name)
+    const off = resolveCurationOffSource('agents', name)
     if (off !== null) prompts.push(seeded(`agents/${name}.md`, off, 'off'))
   }
   for (const entry of gitOperationReferenceCorpus('github')) {
@@ -878,12 +878,12 @@ describe('the corpus the guard reads', () => {
     expect(collectStaleOutputs(), 'dist/ is older than its sources, run `npm run build:mds`').toEqual([])
   })
 
-  it('holds both learning variants of the commands and the review agent, the Git ops and the re-validation reference', () => {
+  it('holds both curation variants of the commands and the review agent, the Git ops and the re-validation reference', () => {
     expect(prompts.length).toBeGreaterThanOrEqual(MIN_COMPILED_PROMPTS)
     const have = (file: string, arm: Arm): boolean => prompts.some(p => p.file === file && p.arm === arm)
     for (const file of ['commands/implement.md', 'commands/code-review.md', 'commands/bug-analysis.md', 'agents/review.md']) {
-      expect(have(file, 'on'), `${file} learning-on`).toBe(true)
-      expect(have(file, 'off'), `${file} learning-off`).toBe(true)
+      expect(have(file, 'on'), `${file} curation-on`).toBe(true)
+      expect(have(file, 'off'), `${file} curation-off`).toBe(true)
     }
     for (const file of Object.keys(CHECKED_SOURCES)) expect(have(file, 'on'), file).toBe(true)
   })
@@ -905,7 +905,7 @@ describe('the corpus the guard reads', () => {
     expect(spans.filter(span => !/ --name-stdin\b[^;]*< "\$F"; echo "exit=\$\?"/.test(span)).map(squash), 'a resolver call span that does not read the name file').toEqual([])
   })
 
-  it('both learning variants of the ticket command hold the ticket workflow with its three Review spawns: the focus spawns, the retry and the panel', () => {
+  it('both curation variants of the ticket command hold the ticket workflow with its three Review spawns: the focus spawns, the retry and the panel', () => {
     const variants = prompts.filter(p => p.file === 'commands/dynamic-build.md')
     expect(variants.map(p => p.arm).sort()).toEqual(['off', 'on'])
     for (const p of variants) {
@@ -1189,7 +1189,7 @@ describe('known-bad probes: each collector reports the seeded bad text and passe
     const variants = prompts.filter(p => p.file === 'commands/dynamic-build.md')
     const details = (p: Prompt): string => reviewRangeFindings(p).map(u => u.detail).join('\n')
 
-    it('the built command in both learning variants has no finding', () => {
+    it('the built command in both curation variants has no finding', () => {
       expect(variants).toHaveLength(2)
       for (const p of variants) expect(reviewRangeFindings(p), p.arm).toEqual([])
     })

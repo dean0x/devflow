@@ -1,7 +1,7 @@
 ---
 feature: dynamic-workflow-engine-contracts
 name: Dynamic Workflow Engine Shared Contracts
-description: "Use when changing the settings block, decisions step, learning arms, _tracker.mds, COMMAND_INPUT or ISSUE_REF vocabulary in dynamic-* hosts. Keywords: declared receivers, authoring_decisions."
+description: "Use when changing the settings block, decisions step, curation arms, _tracker.mds, COMMAND_INPUT or ISSUE_REF vocabulary in dynamic-* hosts. Keywords: declared receivers, authoring_decisions."
 category: architecture
 directories:
   - src/assets/commands/dynamic-build.mds
@@ -14,9 +14,9 @@ directories:
   - src/assets/commands/_partials/_tracker.mds
   - src/assets/commands/_partials/_ticket_template.mds
   - dist/commands
-  - dist/learning-off/commands
+  - dist/curation-off/commands
   - tests/decisions
-  - tests/learning
+  - tests/curation
   - tests/dynamic
   - tests/seams
 created: 2026-10-10
@@ -28,10 +28,10 @@ updated: 2026-10-13
 ## Rules
 
 - **KB-INV-1** Each dynamic host expands `settings.settings_resolve()` exactly once, under `### Settings line`, between `authoring_preamble()` and `authoring_decisions()`; no partial imports `_settings.mds`, partials say "the settings line resolved above".
-- **KB-INV-2** The decisions step is its own define (`authoring_decisions()`), wholly a learning-on arm; its gate sentence (`LEARNING=off` means `DECISIONS_CONTEXT` is `(none)`, no ledger located, no index read) precedes the ledger-locate call and the index read, and `decisions_slice()` follows the read.
+- **KB-INV-2** The decisions step is its own define (`authoring_decisions()`), wholly a curation-on arm; its gate sentence (`CURATION=off` means `DECISIONS_CONTEXT` is `(none)`, no ledger located, no index read) precedes the ledger-locate call and the index read, and `decisions_slice()` follows the read.
 - **KB-INV-3** The decisions index goes only to agent types whose contract declares `DECISIONS_CONTEXT` among the valid `agentType`s: the Code family (Code, Fix), Design, Knowledge, Review, Harden. Evaluate, Synthesize, Validate, Polish, Test and Git get none.
-- **KB-INV-4** Every Code-family spawn in a dynamic host passes `DECISIONS_CONTEXT` in the learning-on build (Fix spawns, the conflict resolver and the engine pseudo-line included), since no Code variant has a fallback that reads the index. No operation is exempt: no Code variant opens a PR, so no Code spawn is keyless.
-- **KB-INV-5** Decisions text lives only inside `<!-- learning:on -->` arms; the learning-off build holds none. Arms are whole-line marker triples, cannot nest, and an arm owns the blank line after its content.
+- **KB-INV-4** Every Code-family spawn in a dynamic host passes `DECISIONS_CONTEXT` in the curation-on build (Fix spawns, the conflict resolver and the engine pseudo-line included), since no Code variant has a fallback that reads the index. No operation is exempt: no Code variant opens a PR, so no Code spawn is keyless.
+- **KB-INV-5** Decisions text lives only inside `<!-- curation:on -->` arms; the curation-off build holds none. Arms are whole-line marker triples, cannot nest, and an arm owns the blank line after its content.
 - **KB-INV-6** Bind the command input once: one `$ARGUMENTS` per host, alone on its line between `<command-input>` lines; every later step and partial says `COMMAND_INPUT` (`arguments-once-max` only lowers).
 - **KB-INV-7** `_tracker.mds` declares exactly two defines, `issue_ref_grammar` and `issue_capture_contract`, both exported; the adopters are the named set `TRACKER_PARTIAL_ADOPTERS`, and `dynamic-tickets` is not one.
 - **KB-INV-8** The command layer forwards issue tokens to the Git agent verbatim as `ISSUE_REFS`: it never renders, normalises, pads, strips, coerces or rules out a token. Whether a bare digit run is a reference is the Git agent's provider adjudication.
@@ -43,27 +43,27 @@ updated: 2026-10-13
 - **KB-INV-14** Every dynamic command that reads or files issues carries the provider-neutral `**Tracker paths:**` preflight item and checks no tracker CLI (`gh` included) at the command layer.
 - **KB-INV-15** The script carries one `DECISIONS_CONTEXT` for every agent, so the main model cuts ONE slice of the index over the whole run (`decisions_slice()`, expanded inside the `authoring_decisions()` arm) and injects that value; no script cuts it.
 - **KB-AP-1** Never give the decisions index to an undeclared receiver, nor write a pass sentence that names no receiver ("to all subsequent agents"): the seam guard fails both.
-- **KB-AP-2** Never leave a `DECISIONS_CONTEXT` line, a recorded-decisions sentence or an `apply-decisions` mention outside a learning arm: it survives into the learning-off build.
+- **KB-AP-2** Never leave a `DECISIONS_CONTEXT` line, a recorded-decisions sentence or an `apply-decisions` mention outside a curation arm: it survives into the curation-off build.
 - **KB-AP-3** Never restate the command input (a second `$ARGUMENTS`, or the bound text pasted into a later step): each copy re-enters the main-thread context.
 - **KB-AP-4** Never re-derive `ISSUE_ID`, `ISSUE_PR_LINK` or `ISSUE_BRANCH_TOKEN` from another value or a batch heading; a batch flow needing them re-fetches with `fetch-issue`.
 - **KB-AP-5** Never add a producer-side grammar check, or coerce or silently drop a foreign-shaped token, at the grammar site; no operation emits DEGRADED for it there.
 - **KB-AP-6** Never pin only one side of `**Depends on:**`: a writer-only guard stays green when the wave reader stops parsing the field, and the wave then schedules everything at once.
-- **KB-AP-7** Never add a settings-line consumer to dynamic-plan, dynamic-tickets or dynamic-profile without moving its block out of the learning arm and adding the host to `SETTINGS_BLOCK_HOSTS_LEARNING_OFF`.
+- **KB-AP-7** Never add a settings-line consumer to dynamic-plan, dynamic-tickets or dynamic-profile without moving its block out of the curation arm and adding the host to `SETTINGS_BLOCK_HOSTS_CURATION_OFF`.
 - **KB-AP-8** Never add a feature-knowledge load or variable to a dynamic host or spawn: `/dynamic-build` gets none by decision.
 - **KB-AP-9** Never name a capability in the round-refresh doctrine that is not a live Git-agent roster operation: a noun in the text proves no agent can act on it.
 - **KB-AP-10** Never pin a `_tracker.mds` define by presence alone: a placeholder body compiles cleanly, so each define needs a required phrase plus a byte floor.
 
 ## Overview
 
-The dynamic hosts (`dynamic-build`, `dynamic-plan`, `dynamic-tickets`, `dynamic-profile`) share contracts that wire a run to the repository's settings, the decisions ledger, the issue tracker's vocabulary and the bound command input. Each lives in a shared MDS partial (`_settings`, `_decisions`, `_preamble`, `_tracker`, `_ticket_template`) that hosts expand at compile time, and the test suite pins the compiled text. Every dynamic prompt compiles twice, so decisions text sits in learning arms and a learning-off variant lands at `dist/learning-off/commands/{name}.md`.
+The dynamic hosts (`dynamic-build`, `dynamic-plan`, `dynamic-tickets`, `dynamic-profile`) share contracts that wire a run to the repository's settings, the decisions ledger, the issue tracker's vocabulary and the bound command input. Each lives in a shared MDS partial (`_settings`, `_decisions`, `_preamble`, `_tracker`, `_ticket_template`) that hosts expand at compile time, and the test suite pins the compiled text. Every dynamic prompt compiles twice, so decisions text sits in curation arms and a curation-off variant lands at `dist/curation-off/commands/{name}.md`.
 
-This KB owns where those contracts sit in the dynamic sources and what each variant of a dynamic command must say. Engine doctrine (gates, review pass) is in `.devflow/features/dynamic-workflow-engine/KNOWLEDGE.md`, WAVE mode in `.devflow/features/dynamic-workflow-engine-waves/KNOWLEDGE.md`, and compiled-output counts, doctrine-literal pins and MDS authoring gotchas in `.devflow/features/dynamic-workflow-engine-pins/KNOWLEDGE.md`. The splitter (`src/core/learning-variants.ts`) and the `dist/learning-off/` build belong to the MDS build pipeline (`feature-knowledge-system`); installing or converging a variant belongs to `installer-shadowing`.
+This KB owns where those contracts sit in the dynamic sources and what each variant of a dynamic command must say. Engine doctrine (gates, review pass) is in `.devflow/features/dynamic-workflow-engine/KNOWLEDGE.md`, WAVE mode in `.devflow/features/dynamic-workflow-engine-waves/KNOWLEDGE.md`, and compiled-output counts, doctrine-literal pins and MDS authoring gotchas in `.devflow/features/dynamic-workflow-engine-pins/KNOWLEDGE.md`. The splitter (`src/core/curation-variants.ts`) and the `dist/curation-off/` build belong to the MDS build pipeline (`feature-knowledge-system`); installing or converging a variant belongs to `installer-shadowing`.
 
-## Settings line, decisions step and learning arms
+## Settings line, decisions step and curation arms
 
-**One settings block per host.** Each of the four hosts imports `_settings.mds` as an alias (`@import "./_partials/_settings.mds" as settings`) and expands `{{settings.settings_resolve()}}` once. dynamic-build already resolved the line for its compliance lens and publication gate. dynamic-plan, dynamic-tickets and dynamic-profile carry the block so the decisions gate that follows reads a resolved line. `_decisions`, `_compliance`, `_publication` and `_knowledge` keep each gate's own condition inside its own step. `SETTINGS_BLOCK_HOSTS` names every command host with a block; `SETTINGS_BLOCK_HOSTS_LEARNING_OFF` names those that keep it with learning off. The latter is smaller because in dynamic-plan, dynamic-tickets and dynamic-profile the decisions gate is the block's only consumer, so their block sits in a learning-on arm; dynamic-build's does not (KB-AP-7). The two variants come from one `npm run build:mds`, which writes `dist/commands/` and `dist/learning-off/commands/` together; `npm run build:cli` produces neither.
+**One settings block per host.** Each of the four hosts imports `_settings.mds` as an alias (`@import "./_partials/_settings.mds" as settings`) and expands `{{settings.settings_resolve()}}` once. dynamic-build already resolved the line for its compliance lens and publication gate. dynamic-plan, dynamic-tickets and dynamic-profile carry the block so the decisions gate that follows reads a resolved line. `_decisions`, `_compliance`, `_publication` and `_knowledge` keep each gate's own condition inside its own step. `SETTINGS_BLOCK_HOSTS` names every command host with a block; `SETTINGS_BLOCK_HOSTS_CURATION_OFF` names those that keep it with curation off. The latter is smaller because in dynamic-plan, dynamic-tickets and dynamic-profile the decisions gate is the block's only consumer, so their block sits in a curation-on arm; dynamic-build's does not (KB-AP-7). The two variants come from one `npm run build:mds`, which writes `dist/commands/` and `dist/curation-off/commands/` together; `npm run build:cli` produces neither.
 
-**The decisions step is its own define.** `authoring_decisions()` is separate from `authoring_preamble()`, which carries no decisions text, and all four hosts expand it right after their settings block (dynamic-profile included, though its single Knowledge spawn passes no decisions context). The step is a leading `decisions_gate()` sentence (an unresolvable line keeps `LEARNING=on`, as the fail-closed line does), then `decisions_locate()` (one git call finds the main worktree's ledger `{ledger}`), then the read of `{ledger}/.devflow/learning/index.md`, then `decisions_slice()` (the main model cuts one slice over the whole run, because the script carries one `DECISIONS_CONTEXT` for every agent; the paragraph is expanded as `decisions.decisions_slice()` through the alias import). `_decisions.mds` imports nothing from `_settings.mds`; the dynamic hosts reach it only through `_preamble.mds` (alias import). The gate-before-locate order is held by `tests/decisions/decisions-seam.test.ts`; `tests/commands/partials-root.test.ts` runs the locate command from a subdirectory and a linked worktree. The main model reads the index before authoring the script, because the script body has no filesystem access, and injects the slice into the declared receivers' prompts, whose agents follow `devflow:apply-decisions` (and read the full index at the path the slice's marker names only when their work leaves it).
+**The decisions step is its own define.** `authoring_decisions()` is separate from `authoring_preamble()`, which carries no decisions text, and all four hosts expand it right after their settings block (dynamic-profile included, though its single Knowledge spawn passes no decisions context). The step is a leading `decisions_gate()` sentence (an unresolvable line keeps `CURATION=on`, as the fail-closed line does), then `decisions_locate()` (one git call finds the main worktree's ledger `{ledger}`), then the read of `{ledger}/.devflow/curation/index.md`, then `decisions_slice()` (the main model cuts one slice over the whole run, because the script carries one `DECISIONS_CONTEXT` for every agent; the paragraph is expanded as `decisions.decisions_slice()` through the alias import). `_decisions.mds` imports nothing from `_settings.mds`; the dynamic hosts reach it only through `_preamble.mds` (alias import). The gate-before-locate order is held by `tests/decisions/decisions-seam.test.ts`; `tests/commands/partials-root.test.ts` runs the locate command from a subdirectory and a linked worktree. The main model reads the index before authoring the script, because the script body has no filesystem access, and injects the slice into the declared receivers' prompts, whose agents follow `devflow:apply-decisions` (and read the full index at the path the slice's marker names only when their work leaves it).
 
 **Declared receivers only.** The index is the largest single input a command can give an agent, so the step names as receivers only Code, Fix, Design, Knowledge, Review and Harden (KB-INV-3), and hands them a slice rather than the whole index (KB-INV-15). Consequences in the sources:
 - dynamic-plan's Evaluate (plan-challenge) and Synthesize (preference-resolve, write-artifacts) prompts carry no index, leaving its two Design spawns (plan-parallel, cross-plan-critic) as its only decisions lines; Pre-authoring step 1 injects into Design prompts only. The plan-parallel prompt tells Design to state every decision in words, never by ID, because a plan file can be posted to the tracker.
@@ -74,13 +74,13 @@ This KB owns where those contracts sit in the dynamic sources and what each vari
 
 **Code spawns carry the key.** No Code variant has a fallback that reads the decisions index (and `apply-decisions`' Skip Guard has no clause letting an instruction tell an agent to read it), so a Code-family spawn without `DECISIONS_CONTEXT` leaves the agent with no decisions context. In dynamic-build every Code and Fix template spawn carries it beside `COMPLIANCE_DIRECTIVE`: the Code implement prompt and review-batch issue-fix, and on Fix the validation-fix after Gate 1 #1, alignment-fix, qa-fix and the final validation-fix after Gate 1 #2. The merge-conflict resolver sentence in `_wave.mds` and the `implement_bundle` pseudo-line in `_engine.mds` name both keys too. `collectCodeSpawnSites(file, text, agentType?)` in `tests/helpers.ts` is the one collector the decisions-seam, OPERATION (`tests/guards/code-operation.test.ts`) and compliance-lens guards share; with no type it reads the whole Code family (`CODE_AGENT_TYPES`), so they count the same sites, each guard holding its own floor (`CODE_SITE_FLOOR` in the seam test). No spawn is exempt, and a known-bad probe seeds a keyless Code spawn to prove the collector would report it.
 
-**Learning arms in the dynamic sources.** An arm is a whole-line marker triple: `<!-- learning:on -->`, optional `<!-- learning:off -->` (that arm's else), `<!-- learning:end -->`. They are interim devflow-side build markers (MDS has no fence- or indent-aware `@if` yet); they pass through the MDS compile and the splitter cuts the compiled body into the two variants. Where the dynamic sources put them:
+**Curation arms in the dynamic sources.** An arm is a whole-line marker triple: `<!-- curation:on -->`, optional `<!-- curation:off -->` (that arm's else), `<!-- curation:end -->`. The old spelling `<!-- learning:... -->` is refused by the splitter (the `legacy-marker` error), never read as an arm. They are interim devflow-side build markers (MDS has no fence- or indent-aware `@if` yet); they pass through the MDS compile and the splitter cuts the compiled body into the two variants. Where the dynamic sources put them:
 - `authoring_decisions()` is one arm over its whole body; `decisions_gate()`, `decisions_locate()` and `decisions_slice()` are leaves with no arm of their own, since an arm cannot nest.
 - In the hosts: Pre-authoring step "Apply decisions context" (dynamic-build, -plan, -tickets), the `const DECISIONS_CONTEXT = args.decisionsContext` script line, every `DECISIONS_CONTEXT` prompt line, and in dynamic-plan the ADR-naming wording of its write prompt (an on/off pair). The wave's `runSingleTicketEngine({...})` call is an on/off pair whose off form drops `decisionsContext`. A vanished step leaves a numbering gap; later steps keep their numbers.
 - In `_engine.mds`: the `implement_bundle` pseudo-line and the "Every Code-family agent prompt opens with `OPERATION: <mode>`" paragraph are on/off pairs; the off form drops `DECISIONS_CONTEXT` and keeps `COMPLIANCE_DIRECTIVE`.
 - In `_wave.mds`: the resolver sentence is an on/off pair (off drops `DECISIONS_CONTEXT`); the "relevant ADRs" bullet and the "new decisions surfaced during resolution" write-back note are on-only.
 
-`tests/learning/learning-variants-arms.test.ts` holds: the hosts that carry an arm equal the hosts that have a learning-off file, both directions; each variant is checked against an independent resolution of the compiled host; every on arm holds learning text (or is a renumbering pair) and no off arm does; the settings blocks per variant equal the two `SETTINGS_BLOCK_HOSTS*` rosters; the learning-off dynamic-build keeps exactly one learning token, the settings grammar line naming `LEARNING=<on|off>` (the guards exempt that line by its `TRACKER=<github|jira|linear>` template), and the other three learning-off dynamic commands hold none. The doctrine literals pinned in the sibling KB are read from the learning-on build.
+`tests/curation/curation-variants-arms.test.ts` holds: the hosts that carry an arm equal the hosts that have a curation-off file, both directions; each variant is checked against an independent resolution of the compiled host; every on arm holds curation text (or is a renumbering pair) and no off arm does; the settings blocks per variant equal the two `SETTINGS_BLOCK_HOSTS*` rosters; the curation-off dynamic-build keeps exactly one curation token, the settings grammar line naming `CURATION=<on|off>` (the guards exempt that line by its `TRACKER=<github|jira|linear>` template), and the other three curation-off dynamic commands hold none. The doctrine literals pinned in the sibling KB are read from the curation-on build.
 
 ## `_tracker.mds`: issue-reference grammar and Git-output capture contract
 
@@ -117,7 +117,7 @@ A provider-neutral vocabulary replaced the old GitHub-bound `#issue-number` plac
 
 ## Decisions loading and the no-knowledge decision
 
-The step is `authoring_decisions()`, expanded by all four hosts after their settings block and behind the `LEARNING=off` gate sentence; it is absent from the learning-off build. The returned index is cut into one slice for the run and injected, only into the declared receivers, whose agents follow `devflow:apply-decisions`. `tests/decisions/decisions-slice.test.ts` holds that every learning-on host states the slice rule and none of a learning-off host does, and that every expansion of `decisions_slice()` sits inside an on arm.
+The step is `authoring_decisions()`, expanded by all four hosts after their settings block and behind the `CURATION=off` gate sentence; it is absent from the curation-off build. The returned index is cut into one slice for the run and injected, only into the declared receivers, whose agents follow `devflow:apply-decisions`. `tests/decisions/decisions-slice.test.ts` holds that every curation-on host states the slice rule and none of a curation-off host does, and that every expansion of `decisions_slice()` sits inside an on arm.
 
 The four hosts expand neither `knowledge_load()` nor `knowledge_writeback()` and pass no `FEATURE_KNOWLEDGE` or `FEATURE_KNOWLEDGE_RULES` to any spawn; the compiled commands contain no feature-knowledge text. For dynamic-build this is a decision, not a gap: when feature-knowledge delivery was reshaped into Rules plus a heading index, the open question of whether `/dynamic-build` should get a load was answered no, so its Code, Harden and Evaluate spawns take no knowledge variable (unlike `/implement`). Revisit that decision before adding one.
 
@@ -125,30 +125,30 @@ The four hosts expand neither `knowledge_load()` nor `knowledge_writeback()` and
 
 **KB-AP-1.** The index is the biggest input a command hands over. A pass sentence that names no receiver fails the seam guard just as a named undeclared one does, so every giving-away sentence names its receiver.
 
-**KB-AP-2.** The arms guard fails an off arm that still holds a learning token, so a stray decisions line outside an arm is caught only by the learning-off check, not by the learning-on pins.
+**KB-AP-2.** The arms guard fails an off arm that still holds a curation token, so a stray decisions line outside an arm is caught only by the curation-off check, not by the curation-on pins.
 
 **KB-AP-3.** The bind-once rule exists because the substitution is per occurrence; the bound text is referred to as `COMMAND_INPUT` everywhere, partials included.
 
 **KB-AP-6.** When touching `_ticket_template.mds`'s field or `_wave.mds`'s parse of it, update and re-check both sides together; a stalled reader looks like a clean run, not a failure.
 
-**KB-AP-7.** A new consumer of the settings line in dynamic-plan, dynamic-tickets or dynamic-profile (a compliance lens, a publication gate, a knowledge write-back) would otherwise refer to a block the learning-off command no longer carries.
+**KB-AP-7.** A new consumer of the settings line in dynamic-plan, dynamic-tickets or dynamic-profile (a compliance lens, a publication gate, a knowledge write-back) would otherwise refer to a block the curation-off command no longer carries.
 
 ## Key Files
 
 - `src/assets/commands/_partials/_settings.mds`: `settings_resolve()`, the one settings-line block each host expands once.
-- `src/assets/commands/_partials/_decisions.mds`: `decisions_gate()`, `decisions_locate()`, `decisions_slice()`, `decisions_load()`; the `LEARNING=off` gate, the main-worktree ledger rule and the slice rule shared with the knowledge-workflow commands and `release`.
+- `src/assets/commands/_partials/_decisions.mds`: `decisions_gate()`, `decisions_locate()`, `decisions_slice()`, `decisions_load()`; the `CURATION=off` gate, the main-worktree ledger rule and the slice rule shared with the knowledge-workflow commands and `release`.
 - `src/assets/commands/_partials/_preamble.mds`: `authoring_decisions()`, the declared-receivers step that cuts one slice per run (the rest of the file is engine-side, in the hub KB).
 - `src/assets/commands/_partials/_tracker.mds`: `issue_ref_grammar()` and `issue_capture_contract()`; owned in detail by `tracker-references`, adopted here by dynamic-build and dynamic-plan.
 - `src/assets/commands/_partials/_ticket_template.mds`: canonical ticket body, the `Depends on: {ISSUE_REF}` writer.
 - `tests/decisions/decisions-seam.test.ts`: declared-receivers seam over the compiled commands, gate-before-locate order, the no-exemption rule for Code spawns.
-- `tests/decisions/decisions-slice.test.ts`: the slice rule and marker in every learning-on host, none in a learning-off one, and the leaf expanded only inside on arms.
-- `tests/learning/learning-variants-arms.test.ts`: arm roster, variants against independent resolution, on arms hold learning text and off arms none, settings blocks per variant.
+- `tests/decisions/decisions-slice.test.ts`: the slice rule and marker in every curation-on host, none in a curation-off one, and the leaf expanded only inside on arms.
+- `tests/curation/curation-variants-arms.test.ts`: arm roster, variants against independent resolution, on arms hold curation text and off arms none, settings blocks per variant.
 - `tests/dynamic/depends-on-grammar.test.ts`: the `{ISSUE_REF}` / `{ISSUE_ID}` writer-reader pairs, the rendering battery and the round-refresh operation-naming guard.
 - `tests/seams/pr-link-handoff.test.ts`: the link reaches each capturing command's PR-opening Git spawn (floor `issue-pr-link-pr-open-sites`), and no Code spawn carries a PR input.
 - `tests/guards/arguments-once.test.ts` and `tests/install-bound-input.test.ts`: the bind-once input, compiled and installed.
 - `tests/guards/provider-scope.test.ts`: `collectHostIssueLiterals` and the wider provider-neutrality guards.
 - `tests/helpers.ts`: `collectCodeSpawnSites` and `CODE_OPERATIONS`, the shared Code-family spawn collector and the mode-to-variant map.
-- `tests/fixtures/mds-manifest.ts`: `TRACKER_PARTIAL_ADOPTERS`, `SETTINGS_BLOCK_HOSTS`, `SETTINGS_BLOCK_HOSTS_LEARNING_OFF`, `LEARNING_VARIANT_HOSTS`.
+- `tests/fixtures/mds-manifest.ts`: `TRACKER_PARTIAL_ADOPTERS`, `SETTINGS_BLOCK_HOSTS`, `SETTINGS_BLOCK_HOSTS_CURATION_OFF`, `CURATION_VARIANT_HOSTS`.
 
 ## Related
 
@@ -156,9 +156,9 @@ The four hosts expand neither `knowledge_load()` nor `knowledge_writeback()` and
 - `.devflow/features/dynamic-workflow-engine-waves/KNOWLEDGE.md`: the wave reader that parses `Depends on:` and the wave block that consumes `issuePrLink`.
 - `.devflow/features/dynamic-workflow-engine-pins/KNOWLEDGE.md`: host and partial counts, doctrine-literal pins and MDS authoring gotchas.
 - `.devflow/features/tracker-references/KNOWLEDGE.md`: the tracker and git reference-module split, `_tracker.mds`'s relationship to the Git agent's provider-resolution preamble, and the byte-budget and containment guards under `tests/tracker/`.
-- `.devflow/features/learning-capture-system/KNOWLEDGE.md`: the decisions ledger and the rendered `.devflow/learning/index.md` that `authoring_decisions()` reads.
-- `.devflow/features/learning-capture-system-delivery/KNOWLEDGE.md`: the slice rule itself, `DECISIONS_PASS_RULE` and the other hosts that expand it.
-- `.devflow/features/installer-shadowing/KNOWLEDGE.md`: installing the learning-on or learning-off variant for the machine's learning switch and converging it when the switch toggles.
+- `.devflow/features/curation-capture-system/KNOWLEDGE.md`: the decisions ledger and the rendered `.devflow/curation/index.md` that `authoring_decisions()` reads.
+- `.devflow/features/curation-capture-system-delivery/KNOWLEDGE.md`: the slice rule itself, `DECISIONS_PASS_RULE` and the other hosts that expand it.
+- `.devflow/features/installer-shadowing/KNOWLEDGE.md`: installing the curation-on or curation-off variant for the machine's curation switch and converging it when the switch toggles.
 - `.devflow/features/feature-knowledge-system/KNOWLEDGE.md`: the MDS build pipeline, the splitter and the knowledge host commands.
 - `.devflow/features/resolve-pipeline/KNOWLEDGE.md`: `/resolve` also spawns the Code family (Fix for gate failures) and carries the decisions key on its validation-fix and ci-fix spawns, under the same every-Code-spawn rule.
 - `.devflow/features/ambient-orchestrator/KNOWLEDGE.md`: a plan handoff invokes `devflow:implement` with no arguments, so `COMMAND_INPUT` is empty there.

@@ -3,8 +3,8 @@
  * from the right root, whatever directory the session started in.
  *
  * `decisions_load` (src/assets/commands/_partials/_decisions.mds) reads the
- * learning index from the MAIN worktree's ledger, else the checkout's toplevel,
- * else the start directory — the rule the learning hooks apply
+ * curation index from the MAIN worktree's ledger, else the checkout's toplevel,
+ * else the start directory — the rule the curation hooks apply
  * (D-LEDGER-MAIN-WORKTREE), so a command reads the index the Curate agent
  * writes. `knowledge_load`/`knowledge_writeback` (_knowledge.mds) resolve the
  * checkout's toplevel, else the start directory: knowledge bases are committed
@@ -133,7 +133,7 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
     fs.mkdirSync(main);
     execSync('git init -q', { cwd: main, stdio: 'pipe' });
     execSync('git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init', { cwd: main, stdio: 'pipe' });
-    fs.mkdirSync(path.join(main, '.devflow', 'learning'), { recursive: true });
+    fs.mkdirSync(path.join(main, '.devflow', 'curation'), { recursive: true });
     sub = path.join(main, 'packages', 'app');
     fs.mkdirSync(sub, { recursive: true });
     wt = path.join(base, 'wt');
@@ -168,7 +168,7 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
       expect(command, `${file}: the resolution command`).toBe(
         'git -C "{start}" rev-parse --path-format=absolute --show-toplevel --git-common-dir',
       );
-      expect(section, `${file}: the index path`).toContain('`{ledger}/.devflow/learning/index.md`');
+      expect(section, `${file}: the index path`).toContain('`{ledger}/.devflow/curation/index.md`');
       expect(section, `${file}: the retired "no subprocess" claim`).not.toContain('No subprocess');
       // The rule's three arms, in order.
       const order = ['**The main worktree**', '**The toplevel**', '**The start directory itself**']
@@ -298,7 +298,7 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
       expect(collectGitCommand(section), `${file}: the resolution command`).toBe(
         'git -C "{start}" rev-parse --path-format=absolute --show-toplevel --git-common-dir',
       )
-      expect(section, `${file}: the index path`).toContain('`{ledger}/.devflow/learning/index.md`')
+      expect(section, `${file}: the index path`).toContain('`{ledger}/.devflow/curation/index.md`')
       expect(section, `${file}: the retired checkout-relative read`).not.toContain('for the current worktree')
       for (const arm of ['**The main worktree**', '**The toplevel**', '**The start directory itself**']) {
         expect(section, `${file}: ${arm}`).toContain(arm)
@@ -308,7 +308,7 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
     expect(ledgerFrom(runFromStart(command as string, wt), wt)).toBe(main)
   })
 
-  it('release.md expands the decisions locate rule behind the learning gate and reads the index from the ledger it names', () => {
+  it('release.md expands the decisions locate rule behind the curation gate and reads the index from the ledger it names', () => {
     // release.mds imports the two defines, so the compiled section is the define bodies.
     const partial = fs.readFileSync(
       path.resolve(import.meta.dirname, '..', '..', 'src', 'assets', 'commands', '_partials', '_decisions.mds'),
@@ -317,13 +317,13 @@ describe('compiled loaders resolve the repository root, not cwd (D-PROMPT-ROOT, 
     const locate = /^@define decisions_locate\(\):\n([\s\S]*?)\n@end$/m.exec(partial)?.[1] ?? ''
     expect(locate, 'the locate define body').toContain('**The main worktree**')
     const gate = /^@define decisions_gate\(\):\n([\s\S]*?)\n@end$/m.exec(partial)?.[1] ?? ''
-    expect(gate, 'the gate define body').toContain('`LEARNING=off`')
+    expect(gate, 'the gate define body').toContain('`CURATION=off`')
     const release = sectionOf(requireDistFile('release.md'), RELEASE_CONTEXT_HEADING)
     expect(release).toContain(locate)
     expect(release.indexOf(gate), 'the gate sentence comes first').toBeGreaterThan(-1)
     expect(release.indexOf(gate), 'the gate precedes the locate call').toBeLessThan(release.indexOf(locate))
     expect(release.indexOf(locate), 'the locate call precedes the index read')
-      .toBeLessThan(release.indexOf('Read `{ledger}/.devflow/learning/index.md`.'))
+      .toBeLessThan(release.indexOf('Read `{ledger}/.devflow/curation/index.md`.'))
     expect(ledgerFrom(runFromStart(collectGitCommand(release) as string, wt), wt)).toBe(main)
   })
 

@@ -42,6 +42,8 @@ import { stripFlags } from '../../core/flags.js';
 import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-cleanup.js';
 import { getPackageRoot, isContainedIn } from '../../core/paths.js';
 import { firstSymbolicLink } from '../../core/linked-path.js';
+import { MANIFEST_LOCK_NAME, MANIFEST_LOCK_STALE_MARK } from '../../core/manifest-lock.js';
+import { CURATION_TUNING_FILE_NAME, LEGACY_NAMES, MOVE_JOURNAL_SUFFIX, MOVE_LOCK_PREFIX, MOVE_LOCK_SUFFIX } from '../../core/project-paths.js';
 import { restampInstalledCommands } from '../../targets/claude-code/language-stamp.js';
 import { installCommandsAndAgents } from '../../targets/claude-code/installer.js';
 
@@ -589,8 +591,10 @@ export function userContentPaths(devflowDir: string): ReadonlyArray<UserContentE
       const name = `${TRACKER_LEGACY_CONVENTIONS_FILE}.${id}.bak`;
       return { relPath: name, label: `${name} (previous issue tracker conventions)` };
     }),
-    // learning.json — global curate agent tuning config
-    { relPath: 'learning.json', label: 'learning.json' },
+    // The global curate agent tuning config, under both its names: the new name on an
+    // upgraded machine, and the old name, which a downgraded machine can still hold.
+    { relPath: CURATION_TUNING_FILE_NAME, label: CURATION_TUNING_FILE_NAME },
+    { relPath: LEGACY_NAMES.tuningFile, label: LEGACY_NAMES.tuningFile },
     // hud.json — user HUD enable/disable preference and display config
     { relPath: 'hud.json', label: 'hud.json (HUD configuration)' },
   ];
@@ -640,6 +644,76 @@ export interface InstallArtifactEntry {
    * `mktemp` name, where the set of paths exists only on disk.
    */
   isPrefix?: boolean;
+  /**
+   * For a prefix entry: the whole basename must also match this shape. A child that
+   * starts with the prefix but has another shape is not a Devflow artifact.
+   */
+  shape?: RegExp;
+  /**
+   * For a prefix entry: the child must be a real directory. A link or a file with a
+   * matching name is left alone, whatever it points at.
+   */
+  realDirOnly?: boolean;
+  /**
+   * For a prefix entry: the child must be a regular file. A link or a directory with a
+   * matching name is left alone, whatever it points at.
+   */
+  realFileOnly?: boolean;
+}
+
+/** `text` as a regular-expression source, every character literal. */
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** The name of a move lock or journal: the shared prefix, a 16-digit lowercase hex key, then `suffix`. */
+function moveFileShape(suffix: string): RegExp {
+  return new RegExp(`^${escapeRegExp(MOVE_LOCK_PREFIX)}[0-9a-f]{16}${escapeRegExp(suffix)}$`);
+}
+
+/**
+ * The curation move's lock, one directory per ledger root, taken directly in the machine
+ * directory: `.curation-move-<16 lowercase hex>.lock`. The store builds the name from a
+ * hash of the real ledger root, so the names exist only on disk. The prefix and the
+ * suffix are the ones the path helpers hold (project-paths.ts).
+ */
+const CURATION_MOVE_LOCK_SHAPE = moveFileShape(MOVE_LOCK_SUFFIX);
+
+/**
+ * The curation move's journal, one regular file per ledger root, beside the lock:
+ * `.curation-move-<16 lowercase hex>.journal`, with the same key as the lock. It exists
+ * only while a set move is unfinished, and a crash leaves it behind. A file named
+ * `.curation-move.journal` inside a project's old ledger folder is no journal of the
+ * move and is not matched here.
+ */
+const CURATION_MOVE_JOURNAL_SHAPE = moveFileShape(MOVE_JOURNAL_SUFFIX);
+
+/**
+ * The manifest lock, a directory in the machine directory (manifest-lock.ts), and the
+ * directory a stale break moves aside: `manifest.json.lock` and
+ * `manifest.json.lock.stale-<digits>-<12 lowercase hex>`. A holder that dies in its
+ * critical section leaves the first, a break whose removal failed leaves the second.
+ */
+const MANIFEST_LOCK_SHAPE = new RegExp(
+  `^${escapeRegExp(MANIFEST_LOCK_NAME)}(?:${escapeRegExp(MANIFEST_LOCK_STALE_MARK)}[0-9]+-[0-9a-f]{12})?$`,
+);
+
+/** Whether `child` of `devflowDir` is a real directory (a link is not followed). */
+async function isRealDirectory(devflowDir: string, child: string): Promise<boolean> {
+  try {
+    return (await fs.lstat(path.join(devflowDir, child))).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/** Whether `child` of `devflowDir` is a regular file (a link is not followed). */
+async function isRegularFile(devflowDir: string, child: string): Promise<boolean> {
+  try {
+    return (await fs.lstat(path.join(devflowDir, child))).isFile();
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -670,7 +744,11 @@ export async function resolveInstallArtifactPaths(
       }
     }
     for (const child of children) {
-      if (child.startsWith(entry.relPath)) resolved.push({ relPath: child, isDir: entry.isDir });
+      if (!child.startsWith(entry.relPath)) continue;
+      if (entry.shape !== undefined && !entry.shape.test(child)) continue;
+      if (entry.realDirOnly === true && !(await isRealDirectory(devflowDir, child))) continue;
+      if (entry.realFileOnly === true && !(await isRegularFile(devflowDir, child))) continue;
+      resolved.push({ relPath: child, isDir: entry.isDir });
     }
   }
 
@@ -739,6 +817,18 @@ export function installArtifactPaths(devflowDir: string): ReadonlyArray<InstallA
     // A prefix, because the names exist only on disk. Content is a scrubbed copy
     // that was never placed, so it is machine state like the three above.
     { relPath: TRACKER_STAGED_PREFIX, isPrefix: true },
+    // The curation move's per-root lock directory. A crash between taking the lock and
+    // releasing it leaves one behind, and its name carries a hash that exists only on disk.
+    // Only a real directory of exactly that shape goes; the move's skip markers sit under
+    // logs/ and go with it.
+    { relPath: MOVE_LOCK_PREFIX, isPrefix: true, isDir: true, shape: CURATION_MOVE_LOCK_SHAPE, realDirOnly: true },
+    // The move's journal beside it. A crash between two renames of the ledger set leaves
+    // one behind. Only a regular file of exactly that shape goes.
+    { relPath: MOVE_LOCK_PREFIX, isPrefix: true, shape: CURATION_MOVE_JOURNAL_SHAPE, realFileOnly: true },
+    // The manifest lock, and the directory a stale break moved aside. A crash inside the
+    // critical section leaves the first; a failed cleanup leaves the second, whose name
+    // carries a pid and a random suffix. Only a real directory of exactly that shape goes.
+    { relPath: MANIFEST_LOCK_NAME, isPrefix: true, isDir: true, shape: MANIFEST_LOCK_SHAPE, realDirOnly: true },
     // per-project hook logs (logs/{project-slug}/) AND global logs — remove the
     // whole logs/ tree; covers proxy.log, debug logs, and any project-slug dirs.
     { relPath: 'logs', isDir: true },
@@ -763,7 +853,8 @@ export function installArtifactPaths(devflowDir: string): ReadonlyArray<InstallA
  * so an entry here is deleted even when the user answers "no" to the full wipe.
  * User-authored state (everything in `userContentPaths`: skill/rule shadows,
  * preference-profile.md, the tracker conventions with the legacy tracker.md and
- * its backups, learning.json, hud.json) is removed only by the confirmed full-dir rm.
+ * its backups, the global tuning file under both names, hud.json) is removed only by
+ * the confirmed full-dir rm.
  * agent-models.json is an INSTALL ARTIFACT (stale per-agent overrides silently
  * re-apply to renamed/deleted agents on reinstall — AC-P1-F4) and therefore
  * belongs in this list, not in enumerateUserDevFlowContent.
@@ -1083,7 +1174,7 @@ export async function refreshRetainedCommandsAndAgents(opts: {
       plugins: retained,
       agentsMap: buildAssetMaps(retained).agentsMap,
       claudeDir,
-      learning: manifest.features.learning,
+      curation: manifest.features.curation,
       trackerServers: effectiveTrackerServers(manifest.features.tracker),
       warn: (msg) => p.log.warn(msg),
     });
@@ -1219,7 +1310,7 @@ export async function runSelectivePhaseForScope(opts: {
  * FULL PHASE (per scope): revert agent model overrides, remove all Devflow
  * assets from the scope, then perform scope-appropriate devflowDir cleanup.
  *
- * Local scope: remove only install artifacts — project data (memory, learning,
+ * Local scope: remove only install artifacts — project data (memory, curation,
  *   docs, features) is always preserved under the git root.
  * User scope: interactive TTY with user-authored content → confirm before wiping
  *   ~/.devflow/; non-interactive or no user content → artifacts-only.
@@ -1270,11 +1361,11 @@ export async function runFullPhaseForScope(opts: {
 
   if (scope === 'local') {
     // Local scope: devflowDir is gitRoot/.devflow/ which holds project data
-    // (memory, learning, features, docs, config.json). Never remove those —
+    // (memory, curation, features, docs, config.json). Never remove those —
     // only remove install artifacts: scripts/ (done above) + manifest.json and
     // the other Devflow-generated artifacts (see removeDevFlowInstallArtifacts).
     await removeDevFlowInstallArtifacts(devflowDir, verbose, mayChange);
-    p.log.info('Local project data (memory, learning, features, docs) preserved');
+    p.log.info('Local project data (memory, curation, features, docs) preserved');
   } else {
     // User scope (devflowDir = ~/.devflow/): offer full cleanup behind a confirm gate
     // that enumerates user-authored content worth backing up before wiping the dir.

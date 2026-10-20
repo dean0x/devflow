@@ -18,7 +18,7 @@
  *                         runs in the Code agent and not there.
  *
  * Code and Harden are generator hosts, so their prompt exists only as compiled output, in a
- * learning-on and a learning-off variant. Polish is hand-authored and read as installed.
+ * curation-on and a curation-off variant. Polish is hand-authored and read as installed.
  *
  * Every arm runs through a named collector, and each known-bad probe feeds the same collector a
  * mutated body, so a collector that stopped seeing a defect fails its own probe instead of
@@ -35,7 +35,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { CODE_AGENT_TYPES, codeSlugOf, resolveAgentSource, resolveLearningOffSource, splitFrontmatter } from '../helpers.js';
+import { CODE_AGENT_TYPES, codeSlugOf, resolveAgentSource, resolveCurationOffSource, splitFrontmatter } from '../helpers.js';
 
 // ---------------------------------------------------------------------------
 // The pinned text
@@ -133,13 +133,13 @@ function bodyOf(text: string, where: string): string {
   return split.body;
 }
 
-/** The learning-off variant of an agent; absent means the build did not run. */
-function learningOffBody(name: string): string {
-  const text = resolveLearningOffSource('agents', name);
+/** The curation-off variant of an agent; absent means the build did not run. */
+function curationOffBody(name: string): string {
+  const text = resolveCurationOffSource('agents', name);
   if (text === null) {
-    throw new Error(`dist/learning-off/agents/${name}.md is absent — run \`npm run build\` first`);
+    throw new Error(`dist/curation-off/agents/${name}.md is absent — run \`npm run build\` first`);
   }
-  return bodyOf(text, `dist/learning-off/agents/${name}.md`);
+  return bodyOf(text, `dist/curation-off/agents/${name}.md`);
 }
 
 function agentBody(name: string): string {
@@ -156,15 +156,15 @@ describe('Code carries one conditional, vendor-neutral scan block (D-SCAN-IN-COD
   });
 
   // D-CODE-VARIANTS: the block lives in the shared partial's commit step, so every variant keeps it (AC-306).
-  it('the learning-on prompt of each Code variant holds the block', () => {
+  it('the curation-on prompt of each Code variant holds the block', () => {
     for (const agentType of CODE_AGENT_TYPES) {
       expect(collectScanBlockDefects(agentBody(codeSlugOf(agentType))), agentType).toEqual([]);
     }
   });
 
-  it('the learning-off prompt of each Code variant holds the same block', () => {
+  it('the curation-off prompt of each Code variant holds the same block', () => {
     for (const agentType of CODE_AGENT_TYPES) {
-      expect(collectScanBlockDefects(learningOffBody(codeSlugOf(agentType))), agentType).toEqual([]);
+      expect(collectScanBlockDefects(curationOffBody(codeSlugOf(agentType))), agentType).toEqual([]);
     }
   });
 
@@ -239,10 +239,10 @@ describe('Code carries one conditional, vendor-neutral scan block (D-SCAN-IN-COD
 });
 
 describe('Harden and Polish say scanning runs in the Code agent (D-SCAN-IN-CODE)', () => {
-  it('Harden, learning-on and learning-off, carries the line once', () => {
+  it('Harden, curation-on and curation-off, carries the line once', () => {
     expect(resolveAgentSource('harden').origin).toBe('dist');
     expect(collectNoScanLineDefects(agentBody('harden'))).toEqual([]);
-    expect(collectNoScanLineDefects(learningOffBody('harden'))).toEqual([]);
+    expect(collectNoScanLineDefects(curationOffBody('harden'))).toEqual([]);
   });
 
   it('Polish carries the line once', () => {

@@ -1,0 +1,235 @@
+#!/bin/bash
+# curation-move -- the one-time ledger folder move for hooks (sourced, not executed).
+#
+# Sourcing it only defines functions -- no side effects until they are called. It is
+# installed with the other hooks and is NOT gated on the curation switch: the old
+# folder holds the project's decisions whether the feature is on or off, and a
+# creator that ran before the move would hide it.
+#
+# df_curation_move <ledger_root> [retry]
+#   Moves <ledger_root>/.devflow/learning to .devflow/curation, once, by running the
+#   move op of json-helper.cjs (moveLedger in lib/curation-move.cjs). <ledger_root>
+#   is the repository's ledger root (DF_LEDGER_ROOT), never the checkout's own.
+#   Always returns 0, and never waits: a move another process holds is skipped and
+#   tried again at the next event.
+#
+#   1. Probe the old folder with a builtin test. Absent is the steady state: nothing
+#      is forked, no key is computed, nothing is logged.
+#   2. Builtin refusals, which do nothing else: the root is not a directory, is a
+#      link, is the home directory or the machine directory (~/.devflow), or a link
+#      sits on the way down to its .devflow. The op refuses the same set.
+#   3. Compute the marker key (df_curation_move_key) with builtins only, and test the
+#      two markers, files at the logs root: curation-move.<key>.skip (an earlier attempt
+#      was refused or failed) and curation-move.<key>.busy (a fresh queue claim held the
+#      move, and a claim can last 15 minutes). A marker means return, with no fork and
+#      no log line. A second argument `retry` (session start) removes both markers
+#      first, so a refusal and a claim are looked at again once per session; that
+#      removal forks only when a marker exists. The HUD and status read only the skip
+#      marker: a busy move is not a refusal.
+#   4. Fork node once, with the root as one argv word (no path is ever part of the
+#      script text); the op knows the two folder names itself. The op answers on its first line:
+#        moved <mode>   one log line (the mode, then the backup folder and the notes
+#                       the op reports, when any);
+#        busy           nothing: no log line and no marker, the next event retries (a
+#                       lock is held, which does not last);
+#        busy claim     nothing is logged, and the busy marker is written, so no event
+#                       forks node again until the next session start;
+#        none           nothing (the folder went away after the probe);
+#        anything else, or a non-zero exit (a refusal or an I/O error): one log line,
+#                       and the skip marker is written.
+#   Hooks that run under `set -e` call it as a plain statement: every path ends in
+#   `return 0`, the marker write and the node call are guarded.
+#
+# df_curation_move_key <root>
+#   Sets DF_CURATION_MOVE_KEY to the marker key of <root>: a 32-bit hash over every
+#   byte of the root under LC_ALL=C (each step: hash = 33 * hash + (byte & 255),
+#   masked to 32 bits, starting from 5381) as eight lowercase hex characters, an
+#   underscore, then the last 60 bytes of the root (all of them when it is shorter)
+#   with every byte outside letters and digits replaced by an underscore. The
+#   TypeScript twin is curationMoveMarkerKey in src/core/project-paths.ts; status and
+#   the HUD read the marker through it (tests/shell-hooks.test.ts holds both to the
+#   same answers). Returns 1, setting nothing, for a root of more than 4096 bytes.
+#
+# df_curation_move_plain <text>
+#   Sets DF_CURATION_MOVE_PLAIN to <text> with every control character replaced by a
+#   space: C0 and DEL, and the C1 controls U+0080-U+009F (the bytes C2 80 to C2 9F in
+#   UTF-8). Builtin expansion only, so it forks nothing. node's answer can carry a name
+#   the repository holds, and no log line may carry an escape sequence or break in two.
+#   It works bytewise under LC_ALL=C, which it puts back as it was, so other UTF-8
+#   text, whatever the locale, is kept.
+#
+# df_curation_move_names
+#   Sets the names the shell reads: DF_CM_OLD_FOLDER and DF_CM_NEW_FOLDER (the ledger
+#   folder before and after the rename) and DF_CM_NEW_TUNING_FILE. They mirror
+#   LEGACY_NAMES.folder, CURATION_DIR_NAME and CURATION_TUNING_FILE_NAME in
+#   src/core/project-paths.ts and hooks/lib/project-paths.cjs (tests/project-paths.test.ts
+#   holds all three to the same values). The old backup prefix and the old tuning file
+#   are read only by the node move, so the shell holds no copy of them. Every hook that
+#   names a ledger folder (queue-append, ensure-devflow-init, session-start-context)
+#   takes the name from here.
+#
+# Source-order requirement: none. This file sources its sibling git-marker itself,
+# for df_no_symlink_below; one that failed to source is a command not found, which
+# the refusal below reads as "a link may sit on the path". The caller defines log()
+# to have the move reported; without it the move is silent.
+
+source "${BASH_SOURCE[0]%/*}/git-marker" 2>/dev/null || true
+
+df_curation_move_names() {
+  DF_CM_OLD_FOLDER="learning"
+  DF_CM_NEW_FOLDER="curation"
+  DF_CM_NEW_TUNING_FILE="curation.json"
+  return 0
+}
+
+df_curation_move_key() {
+  local _root="$1" _hash=5381 _i=0 _len=0 _char="" _byte=0 _start=0 _hex="" _tail="" _lc_set=0 _lc_old=""
+  if [ "${LC_ALL+set}" = "set" ]; then _lc_set=1; _lc_old="$LC_ALL"; fi
+  LC_ALL=C
+  _len=${#_root}
+  if [ "$_len" -gt 4096 ]; then
+    if [ "$_lc_set" = 1 ]; then LC_ALL="$_lc_old"; else unset LC_ALL; fi
+    return 1
+  fi
+  while [ "$_i" -lt "$_len" ]; do
+    _char="${_root:$_i:1}"
+    printf -v _byte '%d' "'$_char"
+    _hash=$(( (_hash * 33 + (_byte & 255)) & 4294967295 ))
+    _i=$((_i + 1))
+  done
+  printf -v _hex '%08x' "$_hash"
+  if [ "$_len" -gt 60 ]; then _start=$((_len - 60)); fi
+  _tail="${_root:$_start}"
+  _tail="${_tail//[^A-Za-z0-9]/_}"
+  if [ "$_lc_set" = 1 ]; then LC_ALL="$_lc_old"; else unset LC_ALL; fi
+  DF_CURATION_MOVE_KEY="${_hex}_${_tail}"
+  return 0
+}
+
+df_curation_move_plain() {
+  local _text="$1" _lc_set=0 _lc_old=""
+  if [ "${LC_ALL+set}" = "set" ]; then _lc_set=1; _lc_old="$LC_ALL"; fi
+  LC_ALL=C
+  _text="${_text//$'\xc2'[$'\x80'-$'\x9f']/ }"
+  _text="${_text//[[:cntrl:]]/ }"
+  if [ "$_lc_set" = 1 ]; then LC_ALL="$_lc_old"; else unset LC_ALL; fi
+  DF_CURATION_MOVE_PLAIN="$_text"
+  return 0
+}
+
+# The two marker paths of the key in DF_CURATION_MOVE_KEY, built here and nowhere else.
+_df_cm_markers() {
+  local _stem="$HOME/.devflow/logs/curation-move.${DF_CURATION_MOVE_KEY}"
+  DF_CM_SKIP_MARKER="${_stem}.skip"
+  DF_CM_BUSY_MARKER="${_stem}.busy"
+  return 0
+}
+
+# True when anything stands at $1. A link counts as a marker and is never followed.
+_df_cm_present() {
+  [ -e "$1" ] || [ -L "$1" ]
+}
+
+# Remove the marker at $1. It forks only when one stands there.
+_df_cm_clear() {
+  if _df_cm_present "$1"; then rm -f "$1" 2>/dev/null || true; fi
+  return 0
+}
+
+# Create the marker at $1 under noclobber, which is put back as it was. A marker that
+# cannot be written is ignored: the next event looks again.
+_df_cm_mark() {
+  local _noclobber=0
+  case $- in *C*) _noclobber=1 ;; esac
+  if ! _df_cm_present "$1"; then
+    set -o noclobber
+    { : > "$1"; } 2>/dev/null || true
+    if [ "$_noclobber" = 0 ]; then set +o noclobber; fi
+  fi
+  return 0
+}
+
+# Log the one line for a move: $1 is the op's whole answer, $2 its first line (`moved <mode>`).
+# The lines after it are `backup <name>` and `note <text>`; at most 32 are read.
+_df_cm_report_moved() {
+  local _out="$1" _first="$2" _rest="" _line="" _backup="" _notes="" _n=0
+  _rest="${_out#*$'\n'}"
+  if [ "$_rest" = "$_out" ]; then _rest=""; fi
+  while [ -n "$_rest" ] && [ "$_n" -lt 32 ]; do
+    _line="${_rest%%$'\n'*}"
+    case "$_line" in
+      "backup "*) df_curation_move_plain "${_line#backup }"; _backup=", backup folder $DF_CURATION_MOVE_PLAIN" ;;
+      "note "*) df_curation_move_plain "${_line#note }"; _notes="${_notes:+$_notes; }$DF_CURATION_MOVE_PLAIN" ;;
+    esac
+    if [ "$_line" = "$_rest" ]; then _rest=""; else _rest="${_rest#*$'\n'}"; fi
+    _n=$((_n + 1))
+  done
+  if declare -F log >/dev/null 2>&1; then
+    log "Curation move (${_first#moved })${_backup}${_notes:+: $_notes}"
+  fi
+  return 0
+}
+
+# Log the refusal in $1 (the op's first line) and write the skip marker.
+_df_cm_mark_refused() {
+  if declare -F log >/dev/null 2>&1; then
+    log "Curation move skipped: ${1:0:200}; not tried again until the next session start"
+  fi
+  _df_cm_mark "$DF_CM_SKIP_MARKER"
+  return 0
+}
+
+df_curation_move() {
+  local _root="$1" _retry="${2:-}"
+  local _devflow="" _back="$PWD" _real="" _home_real="" _machine_real=""
+  local _helper="" _out="" _rc=0 _first=""
+
+  [ -n "$_root" ] || return 0
+  [ -n "${HOME:-}" ] || return 0
+  df_curation_move_names
+  _devflow="$_root/.devflow"
+
+  # 1. The steady state: no old folder (a link or a file at its name counts as
+  # present, so the op can refuse it).
+  if [ ! -e "$_devflow/$DF_CM_OLD_FOLDER" ] && [ ! -L "$_devflow/$DF_CM_OLD_FOLDER" ]; then
+    return 0
+  fi
+
+  # 2. The refusals that need no fork. The physical paths are compared, because the
+  # root, HOME and a repository's toplevel reach here by different routes (on macOS
+  # /var is /private/var): cd -P publishes the resolved path in $PWD.
+  [ -d "$_root" ] || return 0
+  if [ -L "$_root" ]; then return 0; fi
+  if cd -P "$_root" 2>/dev/null; then _real="$PWD"; fi
+  if cd -P "$HOME" 2>/dev/null; then _home_real="$PWD"; fi
+  if cd -P "$HOME/.devflow" 2>/dev/null; then _machine_real="$PWD"; fi
+  cd "$_back" 2>/dev/null || true
+  [ -n "$_real" ] || return 0
+  if [ "$_real" = "$_home_real" ] || [ "$_real" = "$_machine_real" ]; then return 0; fi
+  if ! df_no_symlink_below "$_root" "$_devflow"; then return 0; fi
+
+  # 3. The markers.
+  df_curation_move_key "$_root" || return 0
+  _df_cm_markers
+  if [ "$_retry" = "retry" ]; then
+    _df_cm_clear "$DF_CM_SKIP_MARKER"
+    _df_cm_clear "$DF_CM_BUSY_MARKER"
+  fi
+  if _df_cm_present "$DF_CM_SKIP_MARKER" || _df_cm_present "$DF_CM_BUSY_MARKER"; then return 0; fi
+
+  # 4. The one fork. 2>&1 so a refusal's message reaches the log line.
+  _helper="${BASH_SOURCE[0]%/*}/json-helper.cjs"
+  _out=$(node "$_helper" move-ledger "$_root" 2>&1) || _rc=$?
+  df_curation_move_plain "${_out%%$'\n'*}"
+  _first="$DF_CURATION_MOVE_PLAIN"
+
+  if [ "$_rc" -eq 0 ]; then
+    case "$_first" in
+      busy|none) return 0 ;;
+      "busy claim") _df_cm_mark "$DF_CM_BUSY_MARKER"; return 0 ;;
+      "moved "*) _df_cm_report_moved "$_out" "$_first"; return 0 ;;
+    esac
+  fi
+  _df_cm_mark_refused "$_first"
+  return 0
+}

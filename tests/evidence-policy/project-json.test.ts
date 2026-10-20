@@ -47,6 +47,7 @@ type Field<T> = { readonly kind: 'absent' } | { readonly kind: 'malformed' } | {
 
 interface FeatureFields {
   readonly memory: Field<boolean>;
+  readonly curation: Field<boolean>;
   readonly learning: Field<boolean>;
   readonly knowledge: Field<boolean>;
 }
@@ -270,7 +271,7 @@ describe('parseProjectBytes — per-key classification', () => {
       provider: valid('jira'), site: valid('https://acme.atlassian.net'), key: valid('ACME'),
     }));
     expect(r.reviewPublication).toEqual(valid('off'));
-    expect(r.features).toEqual(valid({ memory: valid(true), learning: valid(false), knowledge: valid(false) }));
+    expect(r.features).toEqual(valid({ memory: valid(true), curation: ABSENT, learning: valid(false), knowledge: valid(false) }));
   });
 
   it('unknown keys are ignored', () => {
@@ -350,8 +351,24 @@ describe('parseProjectBytes — per-key classification', () => {
 
   it('features: each switch is boolean-only and classified on its own', () => {
     expect(parsed('{"features":{"memory":"false","learning":false,"knowledge":0}}').features)
-      .toEqual(valid({ memory: MALFORMED, learning: valid(false), knowledge: MALFORMED }));
-    expect(parsed('{"features":{}}').features).toEqual(valid({ memory: ABSENT, learning: ABSENT, knowledge: ABSENT }));
+      .toEqual(valid({ memory: MALFORMED, curation: ABSENT, learning: valid(false), knowledge: MALFORMED }));
+    expect(parsed('{"features":{}}').features)
+      .toEqual(valid({ memory: ABSENT, curation: ABSENT, learning: ABSENT, knowledge: ABSENT }));
+  });
+
+  it('features: curation and the legacy learning key are two keys of one feature, each classified on its own (#529)', () => {
+    expect(parsed('{"features":{"curation":false,"learning":true}}').features)
+      .toEqual(valid({ memory: ABSENT, curation: valid(false), learning: valid(true), knowledge: ABSENT }));
+    expect(parsed('{"features":{"curation":"false","learning":false}}').features)
+      .toEqual(valid({ memory: ABSENT, curation: MALFORMED, learning: valid(false), knowledge: ABSENT }));
+    expect(parsed('{"features":{"curation":false,"curation":false,"learning":false}}').features)
+      .toEqual(valid({ memory: ABSENT, curation: MALFORMED, learning: valid(false), knowledge: ABSENT }));
+    // An escaped spelling is the same key.
+    expect(parsed('{"features":{"cur\\u0061tion":false}}').features)
+      .toEqual(valid({ memory: ABSENT, curation: valid(false), learning: ABSENT, knowledge: ABSENT }));
+    // The pre-rename decisions key stays inert: it is not a field of the result.
+    expect(parsed('{"features":{"decisions":false}}').features)
+      .toEqual(valid({ memory: ABSENT, curation: ABSENT, learning: ABSENT, knowledge: ABSENT }));
   });
 });
 
@@ -375,7 +392,7 @@ describe('parseProjectBytes — strict keys (D-PROJECT-STRICT-KEYS)', () => {
     const r = parsed('{"tracker":{"provider":"jira","provider":"linear","key":"ACME"},'
       + '"features":{"learning":false,"learning":true,"memory":false}}');
     expect(r.tracker).toEqual(valid({ provider: MALFORMED, site: ABSENT, key: valid('ACME') }));
-    expect(r.features).toEqual(valid({ memory: valid(false), learning: MALFORMED, knowledge: ABSENT }));
+    expect(r.features).toEqual(valid({ memory: valid(false), curation: ABSENT, learning: MALFORMED, knowledge: ABSENT }));
   });
 
   it('a duplicated object is malformed as a whole', () => {
@@ -422,11 +439,11 @@ describe('parsePersonalBytes — the personal .devflow/config.json', () => {
   it('reads reviewPublication and features', () => {
     const r = personal('{"reviewPublication":"full","features":{"knowledge":false}}');
     expect(r.reviewPublication).toEqual(valid('full'));
-    expect(r.features).toEqual(valid({ memory: ABSENT, learning: ABSENT, knowledge: valid(false) }));
+    expect(r.features).toEqual(valid({ memory: ABSENT, curation: ABSENT, learning: ABSENT, knowledge: valid(false) }));
   });
 
   it('never reads the retired top-level switches — features is a new namespace', () => {
-    const r = personal('{"memory":false,"learning":false,"knowledge":false,"decisions":false,"autoCommit":true}');
+    const r = personal('{"memory":false,"curation":false,"learning":false,"knowledge":false,"decisions":false,"autoCommit":true}');
     expect(r.features).toEqual(ABSENT);
     expect(Object.keys(r).sort()).toEqual(['features', 'gateLevel', 'kind', 'reviewPublication', 'tracker']);
   });
@@ -763,7 +780,7 @@ describe('TP-30 (AC-26): malformed or duplicated evidence gives required', () =>
       + '"features":{"learning":false}}');
     expect(r.evidence).toEqual(MALFORMED);
     expect(r.tracker).toEqual(valid({ provider: valid('jira'), site: ABSENT, key: valid('ACME') }));
-    expect(r.features).toEqual(valid({ memory: ABSENT, learning: valid(false), knowledge: ABSENT }));
+    expect(r.features).toEqual(valid({ memory: ABSENT, curation: ABSENT, learning: valid(false), knowledge: ABSENT }));
   });
 
   it.each([

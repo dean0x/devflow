@@ -38,7 +38,7 @@ export interface FeatureSeed {
   memory: boolean;
   hud: boolean;
   knowledge: boolean;
-  learning: boolean;
+  curation: boolean;
   rules: boolean;
   /** External model routing. Advanced-init only; never part of Recommended defaults. */
   proxy: boolean;
@@ -76,7 +76,7 @@ export const FEATURE_DEFAULTS: FeatureSeed = {
   memory: true,
   hud: true,
   knowledge: true,
-  learning: true,
+  curation: true,
   rules: true,
   proxy: false,
   behavior: false,
@@ -101,7 +101,7 @@ export interface InitSeed {
  * manifest.features, with registry defaults when the manifest is absent.
  *
  * D-FEATURES-NARROW-ONLY (src/core/feature-switch.ts): the machine switches for
- * memory, learning and knowledge are recorded in the manifest alone (a repository
+ * memory, curation and knowledge are recorded in the manifest alone (a repository
  * only narrows them at read time), so the seed takes no per-repo input at all. Seeding from whatever repo init happens to run in
  * would flip the switch for EVERY repo as a side effect — a stale per-repo
  * `true` would silently re-enable a feature the user turned off. State-aware
@@ -127,13 +127,13 @@ export function resolveSeedFeatures(manifest: ManifestData | null): FeatureSeed 
 
   const memory = manifest?.features.memory ?? FEATURE_DEFAULTS.memory;
   const knowledge = manifest?.features.knowledge ?? FEATURE_DEFAULTS.knowledge;
-  const learning = manifest?.features.learning ?? FEATURE_DEFAULTS.learning;
+  const curation = manifest?.features.curation ?? FEATURE_DEFAULTS.curation;
   // The raw stored level, with no default operator: `??` would turn a stored `null`
   // into the default, and init would then write the default over a value the
   // fold reads as the strictest level.
   const gateLevel = manifest?.features.gateLevel;
 
-  return { ambient, memory, hud, knowledge, learning, rules, proxy, behavior, compliance, tracker, gateLevel };
+  return { ambient, memory, hud, knowledge, curation, rules, proxy, behavior, compliance, tracker, gateLevel };
 }
 
 /**
@@ -432,7 +432,7 @@ export function applyCliToggles(
     memory: toggles.memory ?? base.memory,
     hud: toggles.hud ?? base.hud,
     knowledge: toggles.knowledge ?? base.knowledge,
-    learning: toggles.learning ?? base.learning,
+    curation: toggles.curation ?? base.curation,
     rules: toggles.rules ?? base.rules,
     proxy: toggles.proxy ?? base.proxy,
     behavior: toggles.behavior ?? base.behavior,

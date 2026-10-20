@@ -13,7 +13,7 @@
  *      the paragraph run most likely to absorb every new tracker detail, and a
  *      paragraph that grows a sentence per change has no natural stopping point.
  *   3. The Tracker block names no INTERNAL identifier. `ADR-NNN`, `PF-NNN`,
- *      `DR-10`, `OD-15` and `§14.2` address entries in the learning ledger, in
+ *      `DR-10`, `OD-15` and `§14.2` address entries in the curation ledger, in
  *      a design artifact or in a phase brief — none of which a reader of
  *      the doc has open. A citation that cannot be followed is decoration,
  *      and a mis-numbered one is worse than none.

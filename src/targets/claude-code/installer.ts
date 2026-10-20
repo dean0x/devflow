@@ -2,7 +2,7 @@ import { promises as fs, type Dirent } from 'fs';
 import { existsSync } from 'fs';
 import * as path from 'path';
 import type { PluginDefinition } from '../../core/plugins.js';
-import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, buildAssetMaps, prefixSkillName, unprefixSkillName, getAllSkillNames, getAllAgentNames, getAllCommandNames, FEATURE_OWNED_SKILLS, resolveSkillInstallPlan, omitLearningGatedSkills } from '../../core/plugins.js';
+import { DEVFLOW_PLUGINS, SKILL_NAMESPACE, buildAssetMaps, prefixSkillName, unprefixSkillName, getAllSkillNames, getAllAgentNames, getAllCommandNames, FEATURE_OWNED_SKILLS, resolveSkillInstallPlan, omitCurationGatedSkills } from '../../core/plugins.js';
 import { skillsDir, agentSourceDirs, rulesDir, commandSourceDirs, scriptsDir, compiledSkillRefsDir, type AgentSourceDirs } from '../../core/assets.js';
 import { getPackageRoot, isContainedIn } from '../../core/paths.js';
 import { sweepOrphanedAssets, mdFileName, mdEntryName, type SweepResult } from '../../core/orphan-sweep.js';
@@ -1685,20 +1685,20 @@ export interface FileCopyOptions {
   isPartialInstall: boolean;
   spinner: Spinner;
   /**
-   * The machine's SETTLED learning switch — required, with no default, because a
+   * The machine's SETTLED curation switch — required, with no default, because a
    * caller that forgot it would install the wrong variant without any error.
    *
-   * D-LEARNING-VARIANT-INSTALL: false installs the learning-off variant of every
-   * command and agent that has one (dist/learning-off first, then the normal
+   * D-LEARNING-VARIANT-INSTALL: false installs the curation-off variant of every
+   * command and agent that has one (dist/curation-off first, then the normal
    * order) and leaves the apply-decisions skill out; true installs the
-   * learning-on files and the skill. `devflow init` passes the value it has
+   * curation-on files and the skill. `devflow init` passes the value it has
    * already settled from its flag, prompt and seed, never the raw seed, so the
    * files and the manifest it writes afterwards cannot disagree. A repository
-   * that narrows learning off (`features.learning: false` in its project.json)
+   * that narrows curation off (`features.curation: false` in its project.json)
    * does not reach this option: the variant follows the machine switch alone, and
    * the on variant's runtime gate covers the narrowed repository.
    */
-  learning: boolean;
+  curation: boolean;
   /**
    * Agent source directories, most-preferred first — see agentSourceDirs(),
    * which owns the ordering convention and supplies the default. Injectable so
@@ -1818,7 +1818,7 @@ export interface ResolvedSkillSource {
  * installed in its place).
  *
  * The ONE spelling of that decision: the install loop and
- * convergeLearningVariants both call it, so a skill the learning toggle installs
+ * convergeCurationVariants both call it, so a skill the curation toggle installs
  * later is shadowed exactly as one the install installed.
  *
  * The shipped source is stat-checked FIRST, even under a valid shadow, so an
@@ -1925,8 +1925,8 @@ export interface CommandsAndAgentsOptions {
   /** Agent name to owning plugin for `plugins` (buildAssetMaps), so a shared agent is copied once. */
   agentsMap: Map<string, string>;
   claudeDir: string;
-  /** The machine's settled learning switch — picks the command and agent variant (D-LEARNING-VARIANT-INSTALL). */
-  learning: boolean;
+  /** The machine's settled curation switch — picks the command and agent variant (D-LEARNING-VARIANT-INSTALL). */
+  curation: boolean;
   /** The tracker tool servers stamped onto the Git agent's `tools:` line (D-TRACKER-SERVER-ALLOWLIST). */
   trackerServers: readonly string[];
   /** Agent source directories, most-preferred first; see {@link FileCopyOptions.agentSourceDirs}. */
@@ -1940,8 +1940,8 @@ export interface CommandsAndAgentsOptions {
  * the selective uninstall, which rewrites the files of the plugins that stay installed
  * after it removed a retired agent.
  *
- * Commands come from dist/commands/{name}.md, or — with learning off — the learning-off
- * variant dist/learning-off/commands/{name}.md when the host has one
+ * Commands come from dist/commands/{name}.md, or — with curation off — the curation-off
+ * variant dist/curation-off/commands/{name}.md when the host has one
  * (D-LEARNING-VARIANT-INSTALL; commandSourceDirs owns the order). A declared command
  * with no compiled source file is a hard error, not a skip.
  *
@@ -1960,10 +1960,10 @@ export interface CommandsAndAgentsOptions {
  * known and leaves it alone.
  */
 export async function installCommandsAndAgents(opts: CommandsAndAgentsOptions): Promise<void> {
-  const { plugins, agentsMap, claudeDir, learning, trackerServers, warn } = opts;
+  const { plugins, agentsMap, claudeDir, curation, trackerServers, warn } = opts;
 
   const commandsTarget = path.join(claudeDir, 'commands', 'devflow');
-  const commandDirs = commandSourceDirs(learning);
+  const commandDirs = commandSourceDirs(curation);
   const commandsSourceNames = new Set<string>();
   for (const plugin of plugins) {
     for (const cmd of plugin.commands) {
@@ -1976,8 +1976,8 @@ export async function installCommandsAndAgents(opts: CommandsAndAgentsOptions): 
     for (const name of commandsSourceNames) {
       const srcFile = await firstExisting(commandDirs.map(dir => path.join(dir, mdFileName(name))));
       if (srcFile === undefined) {
-        // The error names the learning-ON path: that file exists for every declared
-        // command, while a learning-off file exists only for a host with an arm.
+        // The error names the curation-ON path: that file exists for every declared
+        // command, while a curation-off file exists only for a host with an arm.
         throw new Error(
           `Command source not found for declared command "${name}": ${path.join(commandSourceDirs(true)[0], mdFileName(name))}. ` +
           `Ensure build:mds ran successfully before install.`,
@@ -1988,8 +1988,8 @@ export async function installCommandsAndAgents(opts: CommandsAndAgentsOptions): 
   }
 
   const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
-  // Learning-aware (D-LEARNING-VARIANT-INSTALL). An injected list wins as given.
-  const agentDirs = opts.agentSourceDirs ?? agentSourceDirs(undefined, learning);
+  // Curation-aware (D-LEARNING-VARIANT-INSTALL). An injected list wins as given.
+  const agentDirs = opts.agentSourceDirs ?? agentSourceDirs(undefined, curation);
   const allAgentNames = new Set<string>();
   for (const plugin of plugins) {
     for (const agent of plugin.agents) {
@@ -2039,7 +2039,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     rulesMap = new Map<string, string>(),
     isPartialInstall,
     spinner,
-    learning,
+    curation,
     trackerServers = TRACKER_MCP_SERVERS_DEFAULT,
     warn = () => { /* no-op: callers without a logger still get the full InstallReport */ },
   } = options;
@@ -2222,7 +2222,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
     plugins: commandAgentPlugins,
     agentsMap: commandAgentMap,
     claudeDir,
-    learning,
+    curation,
     trackerServers,
     agentSourceDirs: options.agentSourceDirs,
     warn,
@@ -2255,12 +2255,12 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<Inst
   // A declared skill whose source directory is absent is a build/packaging failure
   // and throws rather than silently skipping (matches command pattern).
   //
-  // D-LEARNING-VARIANT-INSTALL: a learning-off machine skips the learning-gated
+  // D-LEARNING-VARIANT-INSTALL: a curation-off machine skips the curation-gated
   // skills here. The pre-clean above walked the UNFILTERED map, so on a full
   // install a leftover copy is already gone; a partial install leaves removal to
-  // convergeLearningVariants, which init runs straight after this call.
+  // convergeCurationVariants, which init runs straight after this call.
   spinner.message('Installing skills...');
-  for (const [skillName] of omitLearningGatedSkills(skillsMap, learning)) {
+  for (const [skillName] of omitCurationGatedSkills(skillsMap, curation)) {
     const resolved = await resolveSkillSource(skillName, devflowDir);
     const skillTarget = path.join(claudeDir, 'skills', prefixSkillName(skillName));
 

@@ -16,7 +16,7 @@
  *
  * D-LANGUAGE-FOCUS-STAMP: the language gate is one fixed-prefix line the installer rewrites, not a
  * run-time `test -f` probe. The installer side is held by tests/installer/language-stamp*.test.ts;
- * this file holds the prompt side, in both learning variants.
+ * this file holds the prompt side, in both curation variants.
  *
  * Decision 1 of the plan keeps /dynamic-build out: its sources carry none of this.
  *
@@ -28,7 +28,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import * as path from 'path'
 
-import { ROOT, collectFreshBaseDefects, collectSlugCheckDefects, collectStoredHeadDefects, readAgentReference, requireDistFile, requireDistFiles, resolveAgentSource, resolveLearningOffSource, slugSinkLines, EVIDENCE_RENDER_LINE, type DiffRangeShape } from '../helpers.js'
+import { ROOT, collectFreshBaseDefects, collectSlugCheckDefects, collectStoredHeadDefects, readAgentReference, requireDistFile, requireDistFiles, resolveAgentSource, resolveCurationOffSource, slugSinkLines, EVIDENCE_RENDER_LINE, type DiffRangeShape } from '../helpers.js'
 
 const CORE = ['security', 'architecture', 'performance', 'complexity', 'consistency', 'regression', 'testing', 'reliability'] as const
 const LANGUAGE = ['typescript', 'react', 'accessibility', 'ui-design', 'go', 'java', 'python', 'rust'] as const
@@ -326,7 +326,7 @@ export function collectProbeDefects(files: ReadonlyArray<{ name: string; content
   return out
 }
 
-/** The stamp line itself: one per variant, a fixed prefix, no braces, outside any learning arm. */
+/** The stamp line itself: one per variant, a fixed prefix, no braces, outside any curation arm. */
 export function collectStampLineDefects(body: string): string[] {
   const lines = body.split('\n').filter(l => l.startsWith(STAMP_PREFIX))
   const out: string[] = []
@@ -465,20 +465,20 @@ function collectReviewFreshBaseDefects(body: string): string[] {
 }
 
 const VARIANTS: ReadonlyArray<{ label: string; body: string }> = (() => {
-  const off = resolveLearningOffSource('commands', 'code-review')
-  if (off === null) throw new Error('dist/learning-off/commands/code-review.md is absent: run `npm run build:mds`')
+  const off = resolveCurationOffSource('commands', 'code-review')
+  if (off === null) throw new Error('dist/curation-off/commands/code-review.md is absent: run `npm run build:mds`')
   return [
-    { label: 'learning on', body: requireDistFile('code-review.md') },
-    { label: 'learning off', body: off },
+    { label: 'curation on', body: requireDistFile('code-review.md') },
+    { label: 'curation off', body: off },
   ]
 })()
 
 const REVIEW_VARIANTS: ReadonlyArray<{ label: string; body: string }> = (() => {
-  const off = resolveLearningOffSource('agents', 'review')
-  if (off === null) throw new Error('dist/learning-off/agents/review.md is absent: run `npm run build:mds`')
+  const off = resolveCurationOffSource('agents', 'review')
+  if (off === null) throw new Error('dist/curation-off/agents/review.md is absent: run `npm run build:mds`')
   return [
-    { label: 'learning on', body: resolveAgentSource('review').content },
-    { label: 'learning off', body: off },
+    { label: 'curation on', body: resolveAgentSource('review').content },
+    { label: 'curation off', body: off },
   ]
 })()
 
@@ -566,7 +566,7 @@ describe('Phase 1 chooses focuses by trigger AND stamp (AC-312, AC-318)', () => 
       .toContain('2 stamp lines in Step 1.2, expected 1')
   })
 
-  it('the stamp line is one per variant, braces-free, the (none) default, and outside any learning arm', () => {
+  it('the stamp line is one per variant, braces-free, the (none) default, and outside any curation arm', () => {
     for (const { label, body } of VARIANTS) {
       expect(collectStampLineDefects(body), label).toEqual([])
     }

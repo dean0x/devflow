@@ -265,9 +265,9 @@ describe('session-start-context: Sections 5 and 6', () => {
       expect(text).not.toMatch(/read (it|the file|the command) (in full|fully)/i);
     }, NODE_RUN_MS);
 
-    it('AC-404: shares one valid additionalContext envelope with the Section 1 decisions block when learning is on', () => {
-      fs.mkdirSync(path.join(repo, '.devflow', 'learning'), { recursive: true });
-      fs.writeFileSync(path.join(repo, '.devflow', 'learning', 'decisions.md'), '<!-- TL;DR: 2 decisions. Key: ADR-001 -->\n# Decisions\n');
+    it('AC-404: shares one valid additionalContext envelope with the Section 1 decisions block when curation is on', () => {
+      fs.mkdirSync(path.join(repo, '.devflow', 'curation'), { recursive: true });
+      fs.writeFileSync(path.join(repo, '.devflow', 'curation', 'decisions.md'), '<!-- TL;DR: 2 decisions. Key: ADR-001 -->\n# Decisions\n');
       const { stdout } = run(repo, 'compact');
       const ctx = contextOf(stdout);
       expect(ctx).toContain('--- PROJECT DECISIONS (TL;DR) ---');

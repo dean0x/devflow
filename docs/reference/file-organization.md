@@ -9,7 +9,7 @@ devflow/
 ├── src/
 │   ├── cli.ts                        # CLI entry point
 │   ├── cli/                          # CLI command modules
-│   │   ├── commands/                 # init.ts, init-seed.ts, memory.ts, learning.ts, ambient.ts,
+│   │   ├── commands/                 # init.ts, init-seed.ts, curation-move-step.ts, curation-move-io.ts, memory.ts, curation.ts, ambient.ts,
 │   │   │                             #   flags.ts, rules.ts, skills.ts, context.ts, hud.ts,
 │   │   │                             #   uninstall.ts, safe-delete.ts, security.ts, debug.ts,
 │   │   │                             #   capture.ts, legacy-hooks.ts, compliance.ts,
@@ -29,9 +29,12 @@ devflow/
 │   │   ├── claude-md-audit.ts        # Typed seam onto scripts/claude-md-audit.cjs: roots, the one init note, the stamp write (lstat-checked)
 │   │   ├── manifest.ts               # Manifest read/write
 │   │   ├── migrations.ts             # Run-once migration registry (2.x entries only; first: canonicalise-agent-keys-v1)
+│   │   ├── pool.ts                   # pooled: bounded concurrency over an array, settled in input order
 │   │   ├── git.ts                    # getGitRoot
 │   │   ├── project-paths.ts          # Per-project .devflow/ path construction
-│   │   ├── learning-store.ts         # Typed seam onto hooks/lib/learning-store.cjs, the store `devflow learning` runs
+│   │   ├── curation-store.ts         # Typed seam onto hooks/lib/curation-store.cjs, the store `devflow curation` runs
+│   │   ├── curation-move.ts          # Typed seam onto hooks/lib/curation-move.cjs, the one-time move of the old ledger folder
+│   │   ├── curation-move-notice.ts   # The pointer and refused lines for a project still on the old ledger folder, and the refusal marker's path; the HUD and `devflow curation` share it
 │   │   └── ...                       # feature-config.ts, curate-tuning-config.ts, …
 │   ├── hud/                          # HUD module (TypeScript source)
 │   │   ├── index.ts                  # Entry point: stdin → gather → render → stdout
@@ -95,15 +98,16 @@ devflow/
 │           ├── ci-wait.cjs           # Bounded CI wait for one pushed head: reads gh only, prints one status line; /implement and /resolve call it inline
 │           ├── resolve-base.cjs      # Base resolver for branch diffs: at most one bounded fetch of the base per run (none with no origin or a cross-repository PR), one status line (`BASE_REF=<hex|none> …`); /implement calls it inline in `local` mode, where a local base ahead of origin stays the base (keep-local policy), and in `pr` mode on re-validation when `gh` returned a PR; the Git agent's PR operations call it in `pr` mode, where origin's tip wins when it resolves; a fetch killed at its bound can leave a `refs/remotes/origin/<name>.lock` file, which later runs read as fetch-failed until the file is deleted
 │           ├── lib/project-config.cjs # The one parser of .devflow/project.json and .devflow/config.json (installed beside its two callers)
-│           └── hooks/                # Capture + memory + learning + ambient hooks
-│               ├── capture-prompt        # UserPromptSubmit hook: appends user turn to memory + learning queues (independently gated)
-│               ├── capture-turn          # Stop hook: appends assistant turn to memory + learning queues; never spawns
+│           └── hooks/                # Capture + memory + curation + ambient hooks
+│               ├── capture-prompt        # UserPromptSubmit hook: appends user turn to memory + curation queues (independently gated)
+│               ├── capture-turn          # Stop hook: appends assistant turn to memory + curation queues; never spawns
 │               ├── capture-question      # PostToolUse hook (matcher: AskUserQuestion): appends answered questions to both queues
 │               ├── queue-append          # Shared helper: queue_append_row / queue_append_both / queue_read_gates
 │               ├── memory-permission     # Sourced helper: the memory worker's staged-path check, allow and deny rule settings JSON, guarded removal at the staged path, result line and one-time notice
 │               ├── memory-worker         # Stop hook (runs in parallel with capture-turn): 120s throttle, spawns background-memory-update
 │               ├── background-memory-update # Detached claude -p worker on agents.memory (default claude-sonnet-5-5, high effort; `devflow agents` overrides it): drains queue → staged write → CAS swap to WORKING-MEMORY.md (spawned by memory-worker)
-│               ├── learning-lock         # Shared helper: mkdir-based locking
+│               ├── curation-lock         # Shared helper: mkdir-based locking
+│               ├── curation-move         # Sourced helper: df_curation_move — the one-time move of the old ledger folder, run by session-start-context and ensure-devflow-init before any folder is created
 │               ├── session-start-memory  # SessionStart hook: injects memory + git state; recovers orphaned .pending-turns.processing itself
 │               ├── session-start-context # SessionStart hook: injects the decisions TL;DR counts and index path + the Curate agent spawn directive when the queue is pending
 │               ├── session-start-orchestrator # SessionStart hook (ambient, presence-gated): injects orchestrator charter (git repos only)
@@ -124,7 +128,8 @@ devflow/
 │               │   └── orchestrator-charter.md  # Static charter asset: injected by session-start-orchestrator
 │               └── lib/                  # Node.js helper modules
 │                   ├── decisions-format.cjs # Entry body, Inactive table and index line formatters
-│                   ├── learning-store.cjs  # The learning store: validation, projection, history, the lock; every learning read and write
+│                   ├── curation-store.cjs  # The curation store: validation, projection, history, the lock; every curation read and write
+│                   ├── curation-move.cjs   # The one-time move of the old ledger folder to its new name, the backup sweep, the backup row count and the list of the backups' queue files
 │                   ├── mkdir-lock.cjs      # mkdir-based lock helpers
 │                   ├── project-paths.cjs   # Project slug + path resolution
 │                   ├── render-decisions.cjs # Renders decisions.md, pitfalls.md and index.md from the ledger (render / --check CLI)
@@ -196,7 +201,7 @@ Assets live once in `src/assets/` and install to the user's `~/.claude/` — no 
 | Agents (generator host) | `src/assets/agents/{name}.mds` → `dist/agents/{name}.md` | `~/.claude/agents/devflow/{name}.md` | `npm run build:mds` |
 | Rules | `src/assets/rules/{name}.md` | `~/.claude/rules/devflow/{name}.md` | None — edit → init |
 | Commands | `src/assets/commands/{name}.mds` → `dist/commands/{name}.md` | `~/.claude/commands/devflow/{name}.md` | `npm run build:mds` |
-| Learning-off variants | `dist/learning-off/{commands,agents}/{name}.md`, built only for a host or partial with a learning arm | `~/.claude/{commands,agents}/devflow/{name}.md`, in place of the file above, on a learning-off machine | `npm run build:mds` |
+| Curation-off variants | `dist/curation-off/{commands,agents}/{name}.md`, built only for a host or partial with a curation arm | `~/.claude/{commands,agents}/devflow/{name}.md`, in place of the file above, on a curation-off machine | `npm run build:mds` |
 | Skill references (generated) | `src/assets/mds/**/*.mds` → `dist/skills/git/references/**` | `~/.claude/skills/devflow:git/references/**` | `npm run build:mds` |
 | Scripts (root) | `src/assets/scripts/*.cjs`, `lib/`, `hud.sh` | `~/.devflow/scripts/` | None — edit → init |
 | Scripts (hooks) | `src/assets/scripts/hooks/` | `~/.devflow/scripts/hooks/` | None — edit → init |
@@ -205,7 +210,7 @@ Assets live once in `src/assets/` and install to the user's `~/.claude/` — no 
 
 ### Packaging
 
-`npm pack` ships `dist/` (compiled JS, commands, compiled agents, learning-off variants, and generated skill references), `src/assets/` (skills, agents — hand-authored `.md` and `.mds` generator hosts alike — rules, scripts), `src/targets/claude-code/templates/` (the install templates) and `templates/lint-pack/` (the lint pack template: a script, an example config and a README). No `plugins/` or `shared/` directories are included.
+`npm pack` ships `dist/` (compiled JS, commands, compiled agents, curation-off variants, and generated skill references), `src/assets/` (skills, agents — hand-authored `.md` and `.mds` generator hosts alike — rules, scripts), `src/targets/claude-code/templates/` (the install templates) and `templates/lint-pack/` (the lint pack template: a script, an example config and a README). No `plugins/` or `shared/` directories are included.
 
 ### Adding a Skill to a Plugin
 
@@ -226,7 +231,7 @@ All 20 agents (`git`, `synthesize`, `skim`, `polish`, `code`, `fix`, `refactor`,
 
 The installer resolves each declared agent over `agentSourceDirs()` in `src/core/assets.ts` — `dist/agents/`, then `src/assets/agents/` — and copies the first hit, so a compiled artifact supersedes a hand-authored file of the same name. When neither directory has the agent, the install throws naming both candidate paths and `npm run build:mds` rather than silently skipping it. `npm run build:cli` alone (TypeScript) does not produce installable agents; `npm run build` runs both steps.
 
-The learning switch (`features.learning` in `~/.devflow/manifest.json`) picks the variant. With learning off, the installer reads `dist/learning-off/{commands,agents}/` ahead of the normal order and leaves `devflow:apply-decisions` out. `devflow init` passes its settled value, and `devflow learning --enable/--disable` converges what is already installed: it rewrites only the commands and agents already on disk (a `--plugin` install gains nothing), compares bytes and writes atomically, installs or removes the skill, reapplies the `devflow agents` mapping, and skips with a "run `devflow init`" message when the manifest version differs from the running one. A failure only warns. A repository that narrows learning off changes nothing installed; the learning-on prompts gate that at run time.
+The curation switch (`features.curation` in `~/.devflow/manifest.json`) picks the variant. With curation off, the installer reads `dist/curation-off/{commands,agents}/` ahead of the normal order and leaves `devflow:apply-decisions` out. `devflow init` passes its settled value, and `devflow curation --enable/--disable` converges what is already installed: it rewrites only the commands and agents already on disk (a `--plugin` install gains nothing), compares bytes and writes atomically, installs or removes the skill, reapplies the `devflow agents` mapping, and skips with a "run `devflow init`" message when the manifest version differs from the running one. A failure only warns. A repository that narrows curation off changes nothing installed; the curation-on prompts gate that at run time.
 
 ## Settings
 
@@ -234,38 +239,40 @@ The learning switch (`features.learning` in `~/.devflow/manifest.json`) picks th
 
 Included settings:
 - `statusLine` - Configurable HUD with presets (replaces legacy statusline.sh)
-- `hooks` - Capture + Learning hooks (UserPromptSubmit, PostToolUse, Stop, SessionStart, PreCompact)
+- `hooks` - Capture + Curation hooks (UserPromptSubmit, PostToolUse, Stop, SessionStart, PreCompact)
 - `env.ENABLE_TOOL_SEARCH` - Deferred MCP tool loading (~85% token savings)
 - `env.ENABLE_LSP_TOOL` - Language Server Protocol support
 - `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` - Agent Teams (not in settings template by default; enabled on demand via the optional `agent-teams` Claude Code flag — `devflow flags --enable agent-teams`)
 - `permissions.deny` - Security deny list: 170 entries (145 blocked `Bash` operations + 25 sensitive-file `Read` patterns)
 
-## Capture + Learning Hooks
+## Capture + Curation Hooks
 
-A capture/spawn split across always-on shell-script hooks. Queue-append (`capture-prompt`/`capture-turn`/`capture-question`) is unconditional; each queue write is independently gated by its machine-wide switch in `~/.devflow/manifest.json` (`features.memory` / `features.learning`; a missing manifest or key means on), which the checkout's `.devflow/project.json` or `.devflow/config.json` can narrow with a literal `features.<name>: false` but never widen (D-FEATURES-NARROW-ONLY). Memory refresh is toggleable via `devflow memory --enable/--disable/--status` or `devflow init --memory/--no-memory`; learning detection/curation via `devflow learning --enable/--disable/--status` or `devflow init --learning/--no-learning`.
+A capture/spawn split across always-on shell-script hooks. Queue-append (`capture-prompt`/`capture-turn`/`capture-question`) is unconditional; each queue write is independently gated by its machine-wide switch in `~/.devflow/manifest.json` (`features.memory` / `features.curation`, where devflow keeps the old key `features.learning` equal to `features.curation`, and two disagreeing keys mean off; a missing manifest or key means on), which the checkout's `.devflow/project.json` or `.devflow/config.json` can narrow with a literal `features.<name>: false` but never widen (D-FEATURES-NARROW-ONLY). Memory refresh is toggleable via `devflow memory --enable/--disable/--status` or `devflow init --memory/--no-memory`; curation (decision and pitfall detection) via `devflow curation --enable/--disable/--status` or `devflow init --curation/--no-curation`.
 
 | Hook / Worker | Event | Purpose |
 |---------------|-------|---------|
-| `capture-prompt` | UserPromptSubmit | Appends the user turn to `.devflow/memory/.pending-turns.jsonl` and `.devflow/learning/.pending-turns.jsonl` (each gated independently); emits no directive |
+| `capture-prompt` | UserPromptSubmit | Appends the user turn to `.devflow/memory/.pending-turns.jsonl` and `.devflow/curation/.pending-turns.jsonl` (each gated independently); emits no directive |
 | `capture-turn` | Stop | Appends the assistant turn to both queues; never spawns anything |
 | `capture-question` | PostToolUse (matcher: `AskUserQuestion`) | Appends each answered question as a `{role:"qa"}` row to both queues |
 | `memory-worker` | Stop (runs in parallel with `capture-turn`; the worker leaves a queue holding only user rows for its next run) | After the 120s throttle (keyed by `.working-memory-last-trigger` mtime), spawns `background-memory-update` as a detached `nohup` worker, a `claude -p` run on `agents.memory` (default `claude-sonnet-5-5`, high effort; `devflow agents` overrides it) |
 | `background-memory-update` | Detached worker (spawned by `memory-worker`) | Drains `.pending-turns.jsonl` → calls `claude -p` on `agents.memory` (default `claude-sonnet-5-5`, high effort; `devflow agents` overrides it; prompt on stdin, reconciliation-aware: bounded git evidence since last stamp, DONE definition) → model writes to `WORKING-MEMORY.md.new` only. CAS verify-and-swap: if `WORKING-MEMORY.md` is byte-identical to the pre-run snapshot, renames `.new` → `WORKING-MEMORY.md` (UPDATED), removes `.processing`, touches `.last-refresh-ok`. CONFLICT (human edited file during run): keeps human's version, discards `.new`, leaves `.processing` for retry. FAIL (staged file absent or un-stamped): leaves `.processing` for crash recovery at next SessionStart. |
 | `session-start-memory` | SessionStart | Reads the already-fresh `WORKING-MEMORY.md` and injects it as `additionalContext` with a git-reconciled 3-state header (A in-sync / B drifted / C refresh-failing banner); also recovers an orphaned `.pending-turns.processing` itself (self-contained cold path). When the worker left a notice (`path` or `denied`), `session-start-memory` also returns that notice once as `systemMessage`, beside the context and never in it. It shows even when no working memory exists |
-| `session-start-context` | SessionStart | Injects the decisions TL;DR counts and the path of `index.md` and, when the learning queue is non-empty (or a crashed run left a stale `.processing` batch), a `--- LEARNING MAINTENANCE ---` directive instructing the main model to **silently** spawn the background Curate agent with the resolved model (a valid project `.devflow/learning/learning.json` → the `devflow agents` Curate mapping in `~/.devflow/agent-models.json`, which sends no model so the installed frontmatter decides → a valid global `~/.devflow/learning.json` → none; the first layer that supplies a model decides) |
+| `session-start-context` | SessionStart | Injects the decisions TL;DR counts and the path of `index.md` and, when the curation queue is non-empty (or a crashed run left a stale `.processing` batch), a `--- CURATION MAINTENANCE ---` directive instructing the main model to **silently** spawn the background Curate agent with the resolved model (a valid project `.devflow/curation/curation.json` → the `devflow agents` Curate mapping in `~/.devflow/agent-models.json`, which sends no model so the installed frontmatter decides → a valid global `~/.devflow/curation.json` → none; the first layer that supplies a model decides) |
 | `pre-compact-memory` | PreCompact | Saves git state + WORKING-MEMORY.md snapshot; bootstraps a minimal WORKING-MEMORY.md (with `<!-- memory-head: <40-hex sha> branch: <name> -->` stamp on line 1 and 5 canonical sections) when absent — requires both a non-empty branch name and a 40-hex HEAD sha (detached HEAD and unborn branch skip bootstrap) |
 | `session-start-orchestrator` | SessionStart (ambient, presence-gated) | Injects the orchestrator charter as `additionalContext`; silent outside git repos |
 | `preamble` | UserPromptSubmit (ambient, presence-gated) | Plan-handoff fast-path (`Implement the following plan:` → `devflow:implement`), slash skip, and orchestrator reminder; silent outside git repos |
 
-**Flow**: User sends prompt → `capture-prompt` appends the user turn to both queues → session ends → `capture-turn` appends the assistant turn to both queues, then `memory-worker` spawns `background-memory-update` (if the 120s throttle has expired) which drains the queue, calls `claude -p` with the prompt on stdin, and writes the result via staged CAS to `WORKING-MEMORY.md`. On `/clear` or new session → `session-start-memory` injects the already-written `WORKING-MEMORY.md` as `additionalContext` (3-state git-reconciled header); `session-start-context` injects the decisions TL;DR counts and the index path and, when the learning queue has pending turns, the Learning maintenance directive — the main model silently spawns the Curate agent in the background, which claims the queue with the `claim-queue` op, detects decisions and pitfalls and maintains the entries through the learning ops, releases the claim as its final act, and reports a 1–3 line summary.
+**Flow**: User sends prompt → `capture-prompt` appends the user turn to both queues → session ends → `capture-turn` appends the assistant turn to both queues, then `memory-worker` spawns `background-memory-update` (if the 120s throttle has expired) which drains the queue, calls `claude -p` with the prompt on stdin, and writes the result via staged CAS to `WORKING-MEMORY.md`. On `/clear` or new session → `session-start-memory` injects the already-written `WORKING-MEMORY.md` as `additionalContext` (3-state git-reconciled header); `session-start-context` injects the decisions TL;DR counts and the index path and, when the curation queue has pending turns, the Curation maintenance directive — the main model silently spawns the Curate agent in the background, which claims the queue with the `claim-queue` op, detects decisions and pitfalls and maintains the entries through the curation ops, releases the claim as its final act, and reports a 1–3 line summary.
 
-`devflow memory --disable` writes `features.memory: false` to `~/.devflow/manifest.json`, removes the three memory hooks and drains the current repo's memory queue; the always-on capture hooks stay registered (shared with learning) and stop appending to the memory queue. Use `devflow memory --clear` to clean up pending memory queue files across all projects, or `devflow learning --clear`/`--reset` for the learning queue and learning state.
+`devflow memory --disable` writes `features.memory: false` to `~/.devflow/manifest.json`, removes the three memory hooks and drains the current repo's memory queue; the always-on capture hooks stay registered (shared with curation) and stop appending to the memory queue. Use `devflow memory --clear` to clean up pending memory queue files across all projects, or `devflow curation --clear`/`--reset` for the curation queue and curation state.
 
 Hooks auto-create `.devflow/` on first run — no manual setup needed per project.
 
+Before 3.8 the folder was `.devflow/learning/`. A project that still has it moves it to `.devflow/curation/` at the next `devflow init` or session start, and a move that finds both folders keeps the loser as `.devflow/learning.backup-<stamp>-<8 hex>` (see the Curation Pipeline section of `docs/reference/hooks.md`). No devflow command deletes a backup, except `devflow uninstall`. It removes the backup with the project data, after you confirm. `devflow curation --reset` and `devflow curation --clear` leave the backup in place. `devflow curation --status` prints its pending rows, and you delete it by hand when it shows none.
+
 ## Project Knowledge
 
-Knowledge files in `.devflow/learning/` capture decisions and pitfalls that agents can't rediscover at runtime. Three are rendered:
+Knowledge files in `.devflow/curation/` capture decisions and pitfalls that agents can't rediscover at runtime. Three are rendered:
 
 | File | Format | Source | Purpose |
 |------|--------|--------|---------|
@@ -273,7 +280,7 @@ Knowledge files in `.devflow/learning/` capture decisions and pitfalls that agen
 | `pitfalls.md` | PF-NNN (sequential) | Rendered by `render-decisions.cjs` from `decisions-ledger.jsonl` after every ledger write | Known gotchas, fragile areas, past bugs |
 | `index.md` | Compact ADR/PF index | Rendered by `render-decisions.cjs` from `decisions-ledger.jsonl` alongside `decisions.md`/`pitfalls.md` | Compact write-time index consumed by workflow commands via plain Read |
 
-The data behind them is gitignored. Apart from the queue, which the capture hooks append to and `devflow learning` can drain or reset, only the learning store (`src/assets/scripts/hooks/lib/learning-store.cjs`) writes it, under the one `.decisions.lock` (D-ONE-LEARNING-LOCK):
+The data behind them is gitignored. Apart from the queue, which the capture hooks append to and `devflow curation` can drain or reset, only the curation store (`src/assets/scripts/hooks/lib/curation-store.cjs`) writes it, under the one `.decisions.lock` (D-ONE-LEARNING-LOCK):
 
 | File | Holds |
 |------|-------|
@@ -285,7 +292,7 @@ The data behind them is gitignored. Apart from the queue, which the capture hook
 | `*.pre-v2.jsonl` | Copies of the log, the ledger and the archive, made once by the first write to a tree that still held v1 rows (D-V1-BACKUP-ONCE) |
 | `.pending-turns.jsonl`, `.pending-turns.processing`, `.pending-turns.owner` | The queue, the claimed batch and its owner's token (D-OWNED-CLAIM) |
 
-The Curate agent writes only through `json-helper.cjs` ops. Each runs from the project root, takes any text it needs as one JSON object on stdin, and never creates `.devflow/learning/`: where it is absent, a writer refuses (D-NO-STRAY-TREE):
+The Curate agent writes only through `json-helper.cjs` ops. Each runs from the project root, takes any text it needs as one JSON object on stdin, and never creates `.devflow/curation/`: where it is absent, a writer refuses (D-NO-STRAY-TREE):
 
 - `put-observation --create|--update|--reinforce` validates and stores an observation. An update carries the whole content and never merges (D-PUT-NOT-MERGE), and the active entries the observation backs are re-projected and re-rendered under the same lock (D-PUT-REPROJECTS).
 - `assign-anchor <decision|pitfall> <obs_id>` promotes an observation the ledger does not carry yet, numbering by the ledger registry and skipping any number a tracked file cites (D-LEDGER-REGISTRY, D-E4-SKIP).
@@ -300,7 +307,7 @@ An entry's content changes only by re-projection from its log row (D-LOG-CONTENT
 
 ## HUD (Heads-Up Display)
 
-The HUD (`dist/hud/index.js`) is a configurable TypeScript status line. The fixed component list is defined in `HUD_COMPONENTS` in `src/hud/config.ts` and includes: directory, git branch, git ahead/behind, diff stats, release info, worktree count, model, context usage, version badge, session cost, usage quota, Codex quota, todo progress, config counts, and learning counts.
+The HUD (`dist/hud/index.js`) is a configurable TypeScript status line. The fixed component list is defined in `HUD_COMPONENTS` in `src/hud/config.ts` and includes: directory, git branch, git ahead/behind, diff stats, release info, worktree count, model, context usage, version badge, session cost, usage quota, Codex quota, todo progress, config counts, and curation counts.
 
 Configuration: `~/.devflow/hud.json` (`{ enabled, detail }`). Manage via `devflow hud --status | --enable | --disable | --detail | --no-detail`.
 
@@ -378,5 +385,6 @@ Skills are removed individually rather than by namespace directory, because `~/.
 | Costs | `~/.devflow/costs/` | Session cost history |
 | Cache | `~/.devflow/cache/` | Model-discovery and HUD component caches |
 | Proxy state | `~/.devflow/proxy.json`, `proxy-routing.json`, `proxy.pid`, `.proxy-spawn.lock/` | Relay runtime state |
+| Manifest lock | `~/.devflow/manifest.json.lock/`, `manifest.json.lock.stale-<pid>-<12 hex>/` | A lock directory (it holds one `holder` token file) that a crash, or a failed cleanup of a stale break, leaves behind. Only a real directory of exactly that name goes |
 
-User-authored files (`~/.devflow/skills/`, `~/.devflow/rules/`, `preference-profile.md`, the per-provider tracker conventions in `~/.devflow/tracker/`, an earlier release's `tracker.md` and its `tracker.md.{provider}.bak` copies, `learning.json`, `hud.json`) are **never** removed by `removeDevFlowInstallArtifacts` — only by a confirmed full `~/.devflow/` wipe in an interactive session.
+User-authored files (`~/.devflow/skills/`, `~/.devflow/rules/`, `preference-profile.md`, the per-provider tracker conventions in `~/.devflow/tracker/`, an earlier release's `tracker.md` and its `tracker.md.{provider}.bak` copies, `curation.json` and the older `learning.json`, `hud.json`) are **never** removed by `removeDevFlowInstallArtifacts` — only by a confirmed full `~/.devflow/` wipe in an interactive session.

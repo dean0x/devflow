@@ -1,6 +1,6 @@
 /**
  * The behavior rule is an OPT-IN machine switch (D-BEHAVIOR-OPT-IN): `features.behavior`
- * in ~/.devflow/manifest.json, default OFF. The memory, learning and knowledge switches
+ * in ~/.devflow/manifest.json, default OFF. The memory, curation and knowledge switches
  * read an absent key as ON; this one reads it as OFF, and a malformed value heals to OFF
  * without making the manifest read as missing.
  *
@@ -34,7 +34,7 @@ function manifestWith(features: Record<string, unknown>): Record<string, unknown
     version: '3.4.0',
     plugins: ['devflow-core-skills'],
     scope: 'user',
-    features: { ambient: true, memory: true, hud: false, knowledge: true, learning: true, rules: true, ...features },
+    features: { ambient: true, memory: true, hud: false, knowledge: true, curation: true, learning: true, rules: true, ...features },
     installedAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
   };

@@ -32,7 +32,7 @@ Pick entries whose title, area or scope overlaps the files you touch (a matching
 Find the entry's heading in the file the footer names:
 
 ```bash
-command grep -nF '## ADR-NNN:' "{worktree-from-footer}/.devflow/learning/decisions.md"
+command grep -nF '## ADR-NNN:' "{worktree-from-footer}/.devflow/curation/decisions.md"
 ```
 
 For a pitfall use `## PF-NNN:` and `pitfalls.md`. Read with `offset` at the printed line and a `limit` of about 25, stopping at the next `## `. The footer is the single source of truth for paths; the ledger is git-ignored, so search by shell. A `verified` date is the last confirmation; none means unconfirmed.

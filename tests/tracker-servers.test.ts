@@ -34,7 +34,7 @@ import {
 } from '../src/core/tracker.js';
 import { runTrackerServers, runTrackerSet, type TrackerServersIO } from '../src/cli/commands/tracker.js';
 import { installViaFileCopy, type Spinner } from '../src/targets/claude-code/installer.js';
-import { convergeLearningVariants } from '../src/targets/claude-code/learning-install.js';
+import { convergeCurationVariants } from '../src/targets/claude-code/curation-install.js';
 import { convergeTrackerArtifacts } from '../src/targets/claude-code/tracker-install.js';
 import { restampTrackerAgents } from '../src/targets/claude-code/tracker-servers.js';
 import { requireBuiltCli, resolveAgentSource, sandboxEnv } from './helpers.js';
@@ -291,7 +291,7 @@ describe('the installed agents wear the stamp, whichever path wrote them', () =>
     const plugins = names.map(plugin);
     const { skillsMap, agentsMap } = buildAssetMaps(plugins);
     return installViaFileCopy({
-      learning: true,
+      curation: true,
       plugins,
       effectivePlugins: plugins,
       claudeDir,
@@ -379,8 +379,8 @@ describe('the installed agents wear the stamp, whichever path wrote them', () =>
     });
   });
 
-  describe('convergeLearningVariants carries the stamp instead of dropping it', () => {
-    // The shipped roster holds neither Git nor Tracker today (neither has a learning arm), so a
+  describe('convergeCurationVariants carries the stamp instead of dropping it', () => {
+    // The shipped roster holds neither Git nor Tracker today (neither has a curation arm), so a
     // temp package root gives the converge a Git variant to write: the path a future arm would take.
     let packageRoot: string;
 
@@ -390,23 +390,23 @@ describe('the installed agents wear the stamp, whichever path wrote them', () =>
       packageRoot = path.join(root, 'pkg');
       await fs.mkdir(path.join(packageRoot, 'dist', 'agents'), { recursive: true });
       await fs.mkdir(path.join(packageRoot, 'dist', 'commands'), { recursive: true });
-      await fs.mkdir(path.join(packageRoot, 'dist', 'learning-off', 'agents'), { recursive: true });
-      await fs.mkdir(path.join(packageRoot, 'dist', 'learning-off', 'commands'), { recursive: true });
-      await fs.writeFile(path.join(packageRoot, 'dist', 'agents', 'git.md'), variant('LEARNING-ON'));
-      await fs.writeFile(path.join(packageRoot, 'dist', 'learning-off', 'agents', 'git.md'), variant('LEARNING-OFF'));
+      await fs.mkdir(path.join(packageRoot, 'dist', 'curation-off', 'agents'), { recursive: true });
+      await fs.mkdir(path.join(packageRoot, 'dist', 'curation-off', 'commands'), { recursive: true });
+      await fs.writeFile(path.join(packageRoot, 'dist', 'agents', 'git.md'), variant('CURATION-ON'));
+      await fs.writeFile(path.join(packageRoot, 'dist', 'curation-off', 'agents', 'git.md'), variant('CURATION-OFF'));
     });
 
-    const run = (learning: boolean) =>
-      convergeLearningVariants({ claudeDir, devflowDir, learning, plugins: [plugin('devflow-plan')], warn: m => warnings.push(m), packageRoot });
+    const run = (curation: boolean) =>
+      convergeCurationVariants({ claudeDir, devflowDir, curation, plugins: [plugin('devflow-plan')], warn: m => warnings.push(m), packageRoot });
 
     it('keeps the list across an on to off to on switch, and a repeat run writes nothing', async () => {
       await fs.mkdir(path.dirname(installed('git')), { recursive: true });
       const stamp = trackerServerTools(['corp_tracker', 'github']);
-      await fs.writeFile(installed('git'), stamped(variant('LEARNING-ON'), stamp));
+      await fs.writeFile(installed('git'), stamped(variant('CURATION-ON'), stamp));
 
       const off = await run(false);
       expect(off.agentsRewritten).toEqual(['git.md']);
-      expect(await read('git')).toContain('LEARNING-OFF');
+      expect(await read('git')).toContain('CURATION-OFF');
       expect(readStampedTools(await read('git'))).toEqual({ ok: true, value: stamp });
 
       const offAgain = await run(false);
@@ -414,7 +414,7 @@ describe('the installed agents wear the stamp, whichever path wrote them', () =>
 
       const on = await run(true);
       expect(on.agentsRewritten).toEqual(['git.md']);
-      expect(await read('git')).toContain('LEARNING-ON');
+      expect(await read('git')).toContain('CURATION-ON');
       expect(readStampedTools(await read('git'))).toEqual({ ok: true, value: stamp });
       // The temp root ships no skills, so the converge's skill step warns; nothing about the agent does.
       expect(warnings.filter(w => !w.includes('apply-decisions'))).toEqual([]);
@@ -596,7 +596,7 @@ describe('AC-401: install under each provider, then --servers (subprocess, temp 
     return { status: result.status, out: `${result.stdout ?? ''}${result.stderr ?? ''}` };
   }
   const init = (provider: string) =>
-    cli(['init', '--recommended', '--no-ambient', '--no-memory', '--no-learning', '--no-knowledge', '--no-rules', '--tracker', provider]);
+    cli(['init', '--recommended', '--no-ambient', '--no-memory', '--no-curation', '--no-knowledge', '--no-rules', '--tracker', provider]);
   const agent = (name: string): Promise<string> => fs.readFile(path.join(home, '.claude', 'agents', 'devflow', `${name}.md`), 'utf-8');
   const manifestTracker = async (): Promise<Record<string, unknown>> =>
     (JSON.parse(await fs.readFile(path.join(home, '.devflow', 'manifest.json'), 'utf-8')) as { features: { tracker: Record<string, unknown> } }).features.tracker;

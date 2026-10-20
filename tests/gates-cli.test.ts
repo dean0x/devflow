@@ -50,7 +50,7 @@ const BASE_SETTINGS: RepoSettings = {
   compliance: { enabled: false, frameworks: [] },
   switches: {
     memory: { on: true, source: 'machine' },
-    learning: { on: true, source: 'machine' },
+    curation: { on: true, source: 'machine' },
     knowledge: { on: true, source: 'machine' },
   },
   gateLevel: 'standard',

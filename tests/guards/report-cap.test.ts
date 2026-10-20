@@ -38,7 +38,7 @@ import { DEVFLOW_PLUGINS } from '../../src/core/plugins.js'
 
 /** Agents outside the roster, with the reason each is out. */
 const EXCLUDED: Readonly<Record<string, string>> = {
-  curate: 'hook-spawned by the session-start learning directive, never a roster member',
+  curate: 'hook-spawned by the session-start curation directive, never a roster member',
   tracker: 'hook-spawned by the session-start tracker-setup directive, never a roster member',
 }
 

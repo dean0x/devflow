@@ -279,39 +279,39 @@ git -C "{WORKTREE_PATH}" diff --no-color --no-ext-diff --no-textconv {DIFF_RANGE
 
 The core, database, dependencies, documentation and compliance focuses, and every reduced-class focus, read `diff.patch`. A language focus sees only its own extensions and reaches anything else through `DIFF_RANGE`. Set `DIFF_FILES` to the files written. They live in `REVIEW_DIR`, under the gitignored `.devflow/` tree, with `paths.txt`: never committed, posted or passed to the Git agent.
 
-<!-- learning:on -->
+<!-- curation:on -->
 ### Phase 1b: Load Decisions Index
-<!-- learning:off -->
+<!-- curation:off -->
 ### Phase 1b: Load Context
-<!-- learning:end -->
+<!-- curation:end -->
 
-<!-- learning:on -->
+<!-- curation:on -->
 **Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, COMPLIANCE_FRAMEWORKS (carried from Step 0b)
-<!-- learning:off -->
+<!-- curation:off -->
 **Produces:** FEATURE_KNOWLEDGE, FEATURE_KNOWLEDGE_RULES, COMPLIANCE_FRAMEWORKS (carried from Step 0b)
-<!-- learning:end -->
+<!-- curation:end -->
 
 {{decisions_load()}}
-<!-- learning:on -->
+<!-- curation:on -->
 This produces a compact index of active ADR/PF entries. Pass `DECISIONS_CONTEXT` to all Review agents as one shared slice, cut over the diff's files. Review agents use `devflow:apply-decisions` to Read full entry bodies on demand.
 
-<!-- learning:end -->
+<!-- curation:end -->
 {{knowledge_load()}}
 
-<!-- learning:on -->
+<!-- curation:on -->
 Pass `FEATURE_KNOWLEDGE` to all Review agents alongside `DECISIONS_CONTEXT`.
-<!-- learning:off -->
+<!-- curation:off -->
 Pass `FEATURE_KNOWLEDGE` to all Review agents.
-<!-- learning:end -->
+<!-- curation:end -->
 
 ### Phase 2: Run Reviews (Parallel)
 
 **Produces:** REVIEW_FOCUS_OUTPUTS
-<!-- learning:on -->
+<!-- curation:on -->
 **Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION, PRIOR_RESOLUTIONS, REVIEW_FOCUS_LIST, DIFF_CLASS, DIFF_FILES
-<!-- learning:off -->
+<!-- curation:off -->
 **Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, FEATURE_KNOWLEDGE, PR_DESCRIPTION, PRIOR_RESOLUTIONS, REVIEW_FOCUS_LIST, DIFF_CLASS, DIFF_FILES
-<!-- learning:end -->
+<!-- curation:end -->
 
 Spawn Review agents **in a single message**, one per focus in REVIEW_FOCUS_LIST (max 20 per worktree):
 
@@ -354,17 +354,17 @@ PR: #{pr_number}, Base: {base_branch}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 DIFF_FILE: {diff_file}  (absolute: {REVIEW_DIR}/diff.patch, or {REVIEW_DIR}/diff-{focus}.patch for a language focus, per the table)
 DIFF_RANGE: {DIFF_RANGE}  (information only)
-<!-- learning:on -->
+<!-- curation:on -->
 DECISIONS_CONTEXT: {decisions_context}
-<!-- learning:end -->
+<!-- curation:end -->
 FEATURE_KNOWLEDGE: {feature_knowledge}
 PR_DESCRIPTION: <pr-description>{pr_description}</pr-description>
 PRIOR_RESOLUTIONS: <prior-resolution-summary>{prior_resolutions}</prior-resolution-summary>
 {COMPLIANCE_FOCUS_DIRECTIVE}  (compliance focus only)
 If PRIOR_RESOLUTIONS is not (none), follow Cross-Cycle Awareness in review.md.
-<!-- learning:on -->
+<!-- curation:on -->
 Follow devflow:apply-decisions to scan the index and Read full ADR/PF bodies on demand.
-<!-- learning:end -->
+<!-- curation:end -->
 Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE — feature-specific patterns and anti-patterns inform findings.
 IMPORTANT: Write report to {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/{focus}.md using Write tool"
 ```

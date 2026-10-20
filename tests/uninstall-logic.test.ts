@@ -9,8 +9,14 @@ import { DEVFLOW_PLUGINS, getAllAgentNames, parsePluginSelection, skillsOf, type
 import { TRACKER_ATTEMPTS_NAMES, TRACKER_PROVIDER_IDS, TRACKER_STAGED_PREFIX } from '../src/core/tracker.js';
 import { modelCacheDir } from '../src/core/cache.js';
 import { CLAUDE_MD_AUDIT_STAMP_FILE, CLAUDE_MD_AUDIT_STAMP_TMP_PREFIX } from '../src/core/claude-md-audit.js';
+import { createRequire } from 'module';
+import { PROJECT_PATHS } from './decisions/curation-fixtures.js';
 import { LEGACY_SKILL_NAMES } from '../src/targets/claude-code/legacy.js';
 import { DEVFLOW_GITIGNORE_BLOCK, DEVFLOW_TRACKED_PATHS } from '../src/targets/claude-code/post-install.js';
+
+/** The machine-side path helpers the hooks and the move share (the move lock and journal names). */
+const projectPaths = (): { curationMoveLockKey(root: string): string; curationMoveJournalPath(machineDir: string, realRoot: string): string } =>
+  createRequire(import.meta.url)(PROJECT_PATHS);
 
 describe('computeAssetsToRemove: the retained set comes from what is INSTALLED', () => {
   const byName = (name: string) => DEVFLOW_PLUGINS.find(p => p.name === name)!;
@@ -505,6 +511,41 @@ describe('enumerateUserDevFlowContent (WS5)', () => {
     expect(result.some(s => s.includes('learning.json'))).toBe(false);
   });
 
+  // === curation.json: the new global tuning name, listed beside the old one ===
+  //
+  // A downgraded machine can still hold the old name, and an upgraded one holds the
+  // new name, so the list names both until a later release retires the old one.
+
+  it('includes curation.json when it exists', async () => {
+    await fs.writeFile(path.join(tmpDir, 'curation.json'), '{"model":"opus"}', 'utf-8');
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    expect(result.some(s => s.includes('curation.json'))).toBe(true);
+    expect(result.some(s => s.includes('learning.json'))).toBe(false);
+  });
+
+  it('does not include curation.json when it is absent', async () => {
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    expect(result.some(s => s.includes('curation.json'))).toBe(false);
+  });
+
+  it('lists the old and the new tuning file separately when both exist', async () => {
+    await fs.writeFile(path.join(tmpDir, 'learning.json'), '{}', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, 'curation.json'), '{}', 'utf-8');
+    const result = await enumerateUserDevFlowContent(tmpDir);
+    expect(result).toHaveLength(2);
+    expect(result.some(s => s.includes('learning.json'))).toBe(true);
+    expect(result.some(s => s.includes('curation.json'))).toBe(true);
+  });
+
+  it('keeps curation.json through an artifacts-only removal, as it keeps learning.json', async () => {
+    await fs.writeFile(path.join(tmpDir, 'curation.json'), '{}', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, 'learning.json'), '{}', 'utf-8');
+    const before = await enumerateUserDevFlowContent(tmpDir);
+    await removeDevFlowInstallArtifacts(tmpDir, false);
+    expect(await enumerateUserDevFlowContent(tmpDir)).toEqual(before);
+    expect(await fs.readdir(tmpDir)).toEqual(expect.arrayContaining(['curation.json', 'learning.json']));
+  });
+
   // === combined ===
 
   it('returns all four entries when all user-authored items exist', async () => {
@@ -842,6 +883,386 @@ describe('resolveInstallArtifactPaths (the staged-file family)', () => {
     // The preview and the removal read one resolver, so a path removed without
     // being previewed is not reachable.
     expect(extras).toContain(orphan);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The curation move's machine state (#529, TP-11)
+// ---------------------------------------------------------------------------
+//
+// The move takes one lock per ledger root, a directory `.curation-move-<16 hex>.lock`
+// directly in ~/.devflow. Its name exists only on disk, so the artifact list names it
+// by shape, and the resolver expands the shape against the real directory. Only a real
+// directory of exactly that shape goes: a link, a file or a near miss stays.
+
+describe('the move-lock family (installArtifactPaths and resolveInstallArtifactPaths)', () => {
+  let tmpDir: string;
+  const lockName = (hex: string): string => `.curation-move-${hex}.lock`;
+  const HEX = '0123456789abcdef';
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-movelock-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('declares the lock family as a directory prefix entry, and it is not user content', () => {
+    const entry = installArtifactPaths(tmpDir).find(e => e.relPath === '.curation-move-');
+    expect(entry, 'the move lock must be an install artifact').toBeDefined();
+    expect(entry?.isPrefix).toBe(true);
+    expect(entry?.isDir).toBe(true);
+    expect(userContentPaths(tmpDir).map(e => e.relPath).filter(r => r.startsWith('.curation-move-'))).toEqual([]);
+  });
+
+  it('the lock name the store builds has the shape the artifact list matches', () => {
+    const key = projectPaths().curationMoveLockKey('/some/ledger/root');
+    expect(key).toMatch(/^[0-9a-f]{16}$/);
+    expect(path.basename(path.join(tmpDir, lockName(key)))).toBe(lockName(key));
+  });
+
+  it('expands to each real lock directory of exactly the shape, and to nothing else', async () => {
+    await fs.mkdir(path.join(tmpDir, lockName(HEX)));
+    await fs.mkdir(path.join(tmpDir, lockName('fedcba9876543210')));
+    await fs.writeFile(path.join(tmpDir, lockName(HEX)) + '/pid', '42', 'utf-8');
+    const nearMisses = [
+      lockName('0123456789abcde'),        // fifteen characters
+      lockName('0123456789abcdef0'),      // seventeen characters
+      lockName('AAAAAAAAAAAAAAAA'),       // upper case
+      lockName('0123456789abcdeg'),       // not hex
+      `.curation-move-${HEX}.lock.bak`,   // a suffix after the lock suffix
+      `curation-move-${HEX}.lock`,        // no leading dot
+      `..curation-move-${HEX}.lock`,
+      `.curation-move-${HEX}.lockx`,
+      '.curation-move.journal',
+      '.curation-move-',
+    ];
+    for (const name of nearMisses) await fs.mkdir(path.join(tmpDir, name));
+
+    const resolved = (await resolveInstallArtifactPaths(tmpDir)).map(e => e.relPath);
+
+    expect(resolved).toContain(lockName(HEX));
+    expect(resolved).toContain(lockName('fedcba9876543210'));
+    for (const name of nearMisses) expect(resolved, name).not.toContain(name);
+    expect(resolved).not.toContain('.curation-move-');
+  });
+
+  it('leaves a link and a file that are named like a lock', async () => {
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-movelock-outside-'));
+    try {
+      await fs.writeFile(path.join(outside, 'precious'), 'keep', 'utf-8');
+      await fs.symlink(outside, path.join(tmpDir, lockName(HEX)));
+      await fs.writeFile(path.join(tmpDir, lockName('fedcba9876543210')), 'a file', 'utf-8');
+
+      const resolved = (await resolveInstallArtifactPaths(tmpDir)).map(e => e.relPath);
+      expect(resolved).not.toContain(lockName(HEX));
+      expect(resolved).not.toContain(lockName('fedcba9876543210'));
+
+      await removeDevFlowInstallArtifacts(tmpDir, false);
+      expect(await fs.readFile(path.join(outside, 'precious'), 'utf-8')).toBe('keep');
+      await expect(fs.lstat(path.join(tmpDir, lockName(HEX)))).resolves.toBeDefined();
+      await expect(fs.lstat(path.join(tmpDir, lockName('fedcba9876543210')))).resolves.toBeDefined();
+    } finally {
+      await fs.rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('an artifacts-only removal takes a lock directory with its contents, and leaves user content', async () => {
+    const lock = path.join(tmpDir, lockName(HEX));
+    await fs.mkdir(lock);
+    await fs.writeFile(path.join(lock, 'pid'), '42', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, 'tracker.md'), 'user content', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, 'curation.json'), '{}', 'utf-8');
+
+    await removeDevFlowInstallArtifacts(tmpDir, false);
+
+    await expect(fs.lstat(lock)).rejects.toThrow();
+    expect(await fs.readFile(path.join(tmpDir, 'tracker.md'), 'utf-8')).toBe('user content');
+    expect(await fs.readFile(path.join(tmpDir, 'curation.json'), 'utf-8')).toBe('{}');
+  });
+
+  it('the dry-run preview names a lock it is about to remove', async () => {
+    const lock = path.join(tmpDir, lockName(HEX));
+    await fs.mkdir(lock);
+    const claudeDir = path.join(tmpDir, 'claude-home');
+    await fs.mkdir(claudeDir, { recursive: true });
+
+    expect(await enumerateDryRunExtras(claudeDir, tmpDir)).toContain(lock);
+  });
+});
+
+// The move's journal is a regular file `.curation-move-<16 hex>.journal` beside the lock,
+// written only while a set move is unfinished. A crash leaves it behind, so the artifact
+// list names it by exact shape too. A link, a directory or a near miss stays.
+
+describe('the move-journal family (installArtifactPaths and resolveInstallArtifactPaths)', () => {
+  let tmpDir: string;
+  const journalName = (hex: string): string => `.curation-move-${hex}.journal`;
+  const HEX = '0123456789abcdef';
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-movejournal-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('declares the journal family as a file prefix entry, and it is not user content', () => {
+    const entry = installArtifactPaths(tmpDir).find(e => e.relPath === '.curation-move-' && e.isDir !== true);
+    expect(entry, 'the move journal must be an install artifact').toBeDefined();
+    expect(entry?.isPrefix).toBe(true);
+    expect(userContentPaths(tmpDir).map(e => e.relPath).filter(r => r.startsWith('.curation-move-'))).toEqual([]);
+  });
+
+  it('the journal name the store builds has the shape the artifact list matches', async () => {
+    const built = projectPaths().curationMoveJournalPath(tmpDir, '/some/ledger/root');
+    expect(path.dirname(built)).toBe(tmpDir);
+    await fs.writeFile(built, '{}', 'utf-8');
+    expect((await resolveInstallArtifactPaths(tmpDir)).map(e => e.relPath)).toContain(path.basename(built));
+  });
+
+  it('expands to each regular journal file of exactly the shape, and to nothing else', async () => {
+    await fs.writeFile(path.join(tmpDir, journalName(HEX)), '{}', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, journalName('fedcba9876543210')), '{}', 'utf-8');
+    const nearMisses = [
+      journalName('0123456789abcde'),       // fifteen characters
+      journalName('0123456789abcdef0'),     // seventeen characters
+      journalName('AAAAAAAAAAAAAAAA'),      // upper case
+      journalName('0123456789abcdeg'),      // not hex
+      `.curation-move-${HEX}.journal.bak`,  // a suffix after the journal suffix
+      `curation-move-${HEX}.journal`,       // no leading dot
+      `..curation-move-${HEX}.journal`,
+      `.curation-move-${HEX}.journalx`,
+      '.curation-move.journal',             // the name a repository can plant in an old folder
+      '.curation-move-',
+    ];
+    for (const name of nearMisses) await fs.writeFile(path.join(tmpDir, name), '{}', 'utf-8');
+
+    const resolved = (await resolveInstallArtifactPaths(tmpDir)).map(e => e.relPath);
+
+    expect(resolved).toContain(journalName(HEX));
+    expect(resolved).toContain(journalName('fedcba9876543210'));
+    for (const name of nearMisses) expect(resolved, name).not.toContain(name);
+  });
+
+  it('leaves a link and a directory that are named like a journal', async () => {
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-movejournal-outside-'));
+    try {
+      await fs.writeFile(path.join(outside, 'precious'), 'keep', 'utf-8');
+      await fs.symlink(path.join(outside, 'precious'), path.join(tmpDir, journalName(HEX)));
+      await fs.mkdir(path.join(tmpDir, journalName('fedcba9876543210')));
+
+      const resolved = (await resolveInstallArtifactPaths(tmpDir)).map(e => e.relPath);
+      expect(resolved).not.toContain(journalName(HEX));
+      expect(resolved).not.toContain(journalName('fedcba9876543210'));
+
+      await removeDevFlowInstallArtifacts(tmpDir, false);
+      expect(await fs.readFile(path.join(outside, 'precious'), 'utf-8')).toBe('keep');
+      await expect(fs.lstat(path.join(tmpDir, journalName(HEX)))).resolves.toBeDefined();
+      await expect(fs.lstat(path.join(tmpDir, journalName('fedcba9876543210')))).resolves.toBeDefined();
+    } finally {
+      await fs.rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('an artifacts-only removal takes a journal and leaves user content', async () => {
+    const journal = path.join(tmpDir, journalName(HEX));
+    await fs.writeFile(journal, '{"version":1,"steps":[]}', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, 'tracker.md'), 'user content', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, 'curation.json'), '{}', 'utf-8');
+
+    await removeDevFlowInstallArtifacts(tmpDir, false);
+
+    await expect(fs.lstat(journal)).rejects.toThrow();
+    expect(await fs.readFile(path.join(tmpDir, 'tracker.md'), 'utf-8')).toBe('user content');
+    expect(await fs.readFile(path.join(tmpDir, 'curation.json'), 'utf-8')).toBe('{}');
+  });
+
+  it('the dry-run preview names a journal it is about to remove', async () => {
+    const journal = path.join(tmpDir, journalName(HEX));
+    await fs.writeFile(journal, '{}', 'utf-8');
+    const claudeDir = path.join(tmpDir, 'claude-home');
+    await fs.mkdir(claudeDir, { recursive: true });
+
+    expect(await enumerateDryRunExtras(claudeDir, tmpDir)).toContain(journal);
+  });
+});
+
+// The manifest lock (`manifest.json.lock`, a directory) is machine state the toggles and the
+// heal take. A holder that dies inside its critical section leaves it behind, and a break
+// whose cleanup failed leaves `manifest.json.lock.stale-<pid>-<12 hex>`. The artifact list
+// names both by exact shape. A link, a file or a near miss stays.
+
+describe('the manifest-lock family (installArtifactPaths and resolveInstallArtifactPaths)', () => {
+  let tmpDir: string;
+  const STALE = 'manifest.json.lock.stale-4242-0123456789ab';
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-manifestlock-'));
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('declares the lock family as a real-directory entry, and it is not user content', () => {
+    const entry = installArtifactPaths(tmpDir).find(e => e.relPath === 'manifest.json.lock');
+    expect(entry, 'the manifest lock must be an install artifact').toBeDefined();
+    expect(entry?.isPrefix).toBe(true);
+    expect(entry?.isDir).toBe(true);
+    expect(entry?.realDirOnly).toBe(true);
+    expect(userContentPaths(tmpDir).map(e => e.relPath).filter(r => r.startsWith('manifest.json'))).toEqual([]);
+  });
+
+  it('expands to the lock directory and to each stale directory of exactly the shape, and to nothing else', async () => {
+    await fs.mkdir(path.join(tmpDir, 'manifest.json.lock'));
+    await fs.mkdir(path.join(tmpDir, STALE));
+    await fs.mkdir(path.join(tmpDir, 'manifest.json.lock.stale-7-fedcba987654'));
+    const nearMisses = [
+      'manifest.json.lock.stale-',
+      'manifest.json.lock.stale-abc-0123456789ab',   // a pid that is not digits
+      'manifest.json.lock.stale-42-0123456789a',     // eleven characters
+      'manifest.json.lock.stale-42-0123456789abc',   // thirteen characters
+      'manifest.json.lock.stale-42-0123456789AB',    // upper case
+      'manifest.json.lock.stale-42-0123456789ab.bak',
+      'manifest.json.lockx',
+      'manifest.json.lock.bak',
+      'manifest.json.locks',
+      'x.manifest.json.lock',
+    ];
+    for (const name of nearMisses) await fs.mkdir(path.join(tmpDir, name));
+
+    const resolved = (await resolveInstallArtifactPaths(tmpDir)).map(e => e.relPath);
+
+    expect(resolved).toContain('manifest.json.lock');
+    expect(resolved).toContain(STALE);
+    expect(resolved).toContain('manifest.json.lock.stale-7-fedcba987654');
+    for (const name of nearMisses) expect(resolved, name).not.toContain(name);
+  });
+
+  it('a stale directory that the lock module leaves behind has the shape the list matches', async () => {
+    const { acquireManifestLock, getManifestLockPath, MANIFEST_LOCK_STALE_MS } = await import('../src/core/manifest-lock.js');
+    const lockDir = getManifestLockPath(tmpDir);
+    await fs.mkdir(lockDir);
+    const old = new Date(Date.now() - 10 * MANIFEST_LOCK_STALE_MS);
+    await fs.utimes(lockDir, old, old);
+    // The break moves the dead lock aside and removes it. Fail the remove, so the moved directory stays.
+    vi.spyOn(fs, 'rm').mockRejectedValue(new Error('not permitted'));
+    const lock = await acquireManifestLock(tmpDir, { timeoutMs: 0 });
+    expect(lock.ok).toBe(true);
+    vi.restoreAllMocks();
+    if (lock.ok) await lock.value.release();
+
+    const left = (await fs.readdir(tmpDir)).filter(name => name.startsWith('manifest.json.lock.stale-'));
+    expect(left).toHaveLength(1);
+    expect((await resolveInstallArtifactPaths(tmpDir)).map(e => e.relPath)).toContain(left[0]);
+  });
+
+  it('leaves a link and a file that are named like the lock, and the file the link names', async () => {
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-manifestlock-outside-'));
+    try {
+      await fs.writeFile(path.join(outside, 'precious'), 'keep', 'utf-8');
+      await fs.symlink(outside, path.join(tmpDir, 'manifest.json.lock'));
+      await fs.writeFile(path.join(tmpDir, STALE), 'a file', 'utf-8');
+
+      const resolved = (await resolveInstallArtifactPaths(tmpDir)).map(e => e.relPath);
+      expect(resolved).not.toContain('manifest.json.lock');
+      expect(resolved).not.toContain(STALE);
+
+      await removeDevFlowInstallArtifacts(tmpDir, false);
+      expect(await fs.readFile(path.join(outside, 'precious'), 'utf-8')).toBe('keep');
+      await expect(fs.lstat(path.join(tmpDir, 'manifest.json.lock'))).resolves.toBeDefined();
+      await expect(fs.lstat(path.join(tmpDir, STALE))).resolves.toBeDefined();
+    } finally {
+      await fs.rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('an artifacts-only removal takes the manifest, the lock directory and a stale one, and leaves user content', async () => {
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), '{}', 'utf-8');
+    await fs.mkdir(path.join(tmpDir, 'manifest.json.lock'));
+    await fs.mkdir(path.join(tmpDir, STALE));
+    await fs.writeFile(path.join(tmpDir, STALE, 'owner'), 'dead', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, 'tracker.md'), 'user content', 'utf-8');
+
+    await removeDevFlowInstallArtifacts(tmpDir, false);
+
+    await expect(fs.lstat(path.join(tmpDir, 'manifest.json'))).rejects.toThrow();
+    await expect(fs.lstat(path.join(tmpDir, 'manifest.json.lock'))).rejects.toThrow();
+    await expect(fs.lstat(path.join(tmpDir, STALE))).rejects.toThrow();
+    expect(await fs.readFile(path.join(tmpDir, 'tracker.md'), 'utf-8')).toBe('user content');
+  });
+
+  it('the dry-run preview names a lock it is about to remove', async () => {
+    const lock = path.join(tmpDir, 'manifest.json.lock');
+    await fs.mkdir(lock);
+    const claudeDir = path.join(tmpDir, 'claude-home');
+    await fs.mkdir(claudeDir, { recursive: true });
+
+    expect(await enumerateDryRunExtras(claudeDir, tmpDir)).toContain(lock);
+  });
+});
+
+describe('uninstall and the curation data (#529, TP-11)', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-curation-uninstall-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('deletes manifest.json whole, with both machine keys in it', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'manifest.json'),
+      JSON.stringify({ version: '3.8.0', features: { curation: false, learning: false } }),
+      'utf-8',
+    );
+
+    await removeDevFlowInstallArtifacts(tmpDir, false);
+
+    await expect(fs.lstat(path.join(tmpDir, 'manifest.json'))).rejects.toThrow();
+  });
+
+  it('removes the logs folder with the skip markers in it, and no step lists the markers', async () => {
+    const logs = path.join(tmpDir, 'logs');
+    await fs.mkdir(logs);
+    await fs.writeFile(path.join(logs, 'curation-move.0123abcd_work_repo.skip'), '', 'utf-8');
+    await fs.writeFile(path.join(logs, '.hook.log'), 'x', 'utf-8');
+
+    await removeDevFlowInstallArtifacts(tmpDir, false);
+
+    await expect(fs.lstat(logs)).rejects.toThrow();
+    expect(installArtifactPaths(tmpDir).some(e => e.relPath.includes('curation-move.') && e.relPath.endsWith('.skip'))).toBe(false);
+  });
+
+  it('keeps the global tuning file under both names through an artifacts-only removal, and names both', async () => {
+    await fs.writeFile(path.join(tmpDir, 'curation.json'), '{}', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, 'learning.json'), '{}', 'utf-8');
+
+    await removeDevFlowInstallArtifacts(tmpDir, false);
+
+    await expect(fs.lstat(path.join(tmpDir, 'curation.json'))).resolves.toBeDefined();
+    await expect(fs.lstat(path.join(tmpDir, 'learning.json'))).resolves.toBeDefined();
+    expect(await enumerateUserDevFlowContent(tmpDir)).toEqual(expect.arrayContaining(['curation.json', 'learning.json']));
+  });
+
+  it('the confirmed project-data removal takes the old folder, the new folder and every backup folder', () => {
+    const entries = [
+      { name: 'learning', isDir: true },
+      { name: 'curation', isDir: true },
+      { name: 'learning.backup-20261017T020304Z-ab12cd', isDir: true },
+      { name: 'memory', isDir: true },
+      { name: 'features', isDir: true },
+    ];
+    const { remove, keep } = partitionProjectData(entries);
+    expect(remove.map(e => e.name)).toEqual(expect.arrayContaining(['learning', 'curation', 'learning.backup-20261017T020304Z-ab12cd']));
+    expect(keep.map(e => e.name)).toEqual(['features']);
   });
 });
 

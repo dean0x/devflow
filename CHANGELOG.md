@@ -7,6 +7,169 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes — Curation rename
+
+The learning feature is now called curation ([#529](https://github.com/dean0x/devflow/issues/529)).
+This is a breaking change. It releases as a minor version (3.8.0).
+Devflow keeps no alias for any old name. Read the steps that you must do by hand.
+
+**Superseding statement for 3.6.0:** The 3.6.0 notes say that `devflow learning`, `features.learning`,
+`.devflow/learning/` and the learning ops do not change. That statement is no longer true.
+This release changes all of them. The 3.6.0 text stays as released.
+
+**Renamed names:**
+
+| Old name | New name |
+|----------|----------|
+| `devflow learning` | `devflow curation` |
+| `devflow init --learning` and `--no-learning` | `devflow init --curation` and `--no-curation` |
+| `features.learning` in `~/.devflow/manifest.json` | `features.curation` (the old key stays as a mirror) |
+| `features.learning` in a repository `project.json` or `config.json` | `features.curation` (the old key is still read) |
+| `.devflow/learning/` | `.devflow/curation/` |
+| `learning.json` (in the project folder and in `~/.devflow/`) | `curation.json` |
+| Settings line field `LEARNING=` | `CURATION=` |
+| Prompt markers `<!-- learning:on -->` and the build output `dist/learning-off/` | `<!-- curation:on -->` and `dist/curation-off/` |
+| HUD label `Learning:` | `Curation:` |
+| Session start headers `--- LEARNING MAINTENANCE ---` and `--- LEARNING PAUSED ---` | `--- CURATION MAINTENANCE ---` and `--- CURATION PAUSED ---` |
+| Hook files `learning-lock` and `lib/learning-store.cjs` | `curation-lock` and `lib/curation-store.cjs` (init removes the old files) |
+
+These names do not change: the `self-learning:` source stamp in rendered rows, the design-decision IDs,
+the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-conventions family and the
+`agents.learning.model` key (it stays an older name for the Curate agent model).
+
+**Breaking change:**
+- `devflow learning`, `devflow init --learning` and `devflow init --no-learning` now fail.
+  They give the unknown command or option error, and the exit code is 1.
+- Change every script, alias and note that uses an old name.
+
+**What the migration does:**
+- `devflow init` moves the learning data of each project that it finds, and of the project where you run it.
+  The move takes the ledger files, the queue and the project tuning file. Entry IDs do not change.
+  Devflow renders the index again at the new path.
+- Init also renames `~/.devflow/learning.json` to `curation.json`.
+  If both names exist, the new one wins, the old one stays, and init logs one line.
+- The session start hook makes the same move for the project of each session.
+  It also runs when the curation switch is off.
+- If a project already has both folders, one rule decides which folder stays.
+  If `.devflow/curation/` has a non-empty log, it wins and the old folder becomes the backup.
+  If not, the old ledger set moves in and the rest of the old folder becomes the backup.
+  Devflow never merges one ledger into the other.
+- After an upgrade, the first `devflow` command that loads the whole manifest
+  (for example `devflow init` or `devflow flags --status`) heals `~/.devflow/manifest.json`.
+  The file then carries both `features.curation` and `features.learning` with the same value.
+  Every later write keeps the two keys equal.
+  The `--status` commands of curation, memory, knowledge and gates write nothing.
+
+**Upgrade, downgrade and re-upgrade:**
+- Upgrade: run `devflow init`. Until you do, the installed hooks and prompts are still the old version.
+- Downgrade to 3.7: 3.7 does not read `.devflow/curation/`. It starts a new empty ledger in `.devflow/learning/`.
+  Your moved data stays in `.devflow/curation/`. The mirror key `features.learning` keeps a 3.8 opt-out in force.
+- Re-upgrade to 3.8: the next init or session start finds both folders and applies the rule above.
+  When the folder `.devflow/curation/` has a non-empty log, it wins.
+  The queue rows of the 3.7 folder merge into the winner. The entries that 3.7 wrote stay in the backup only.
+- The Curate model in the global tuning file: init renames `~/.devflow/learning.json` to `~/.devflow/curation.json`,
+  and 3.7 reads only the old name. After a downgrade, set the Curate model again with `devflow learning --configure`.
+  Choose the global scope. On re-upgrade, an existing `curation.json` wins and init logs one line.
+  To keep a value that you set on 3.7, delete `curation.json` first.
+
+**The machine switch:**
+- If `features.curation` and `features.learning` in the manifest disagree, the switch is off.
+  A reader never treats a disagreement as on.
+- To turn it on again, run `devflow curation --enable`. This writes both keys.
+- A 3.7 toggle writes only the old key. An opt-out made on 3.7 stays in force after you upgrade again.
+  If you ran no 3.7 `devflow init`, an enable made on 3.7 after a 3.8 disable stays off until you run `devflow curation --enable`.
+- A 3.7 `devflow init` removes the key `features.curation`. After that, only the old key carries the opt-out.
+  A 3.7 enable made after that init then takes effect when you upgrade again.
+- Between the package update and `devflow init`, `devflow curation --enable` and `--disable` write both keys
+  and move nothing. Only `--disable` drains the queue among these toggles. The commands `--restore`, `--clear`, `--reset`
+  and `--configure` (project scope) refuse until you run `devflow init`.
+
+**The backup:**
+- Where: `.devflow/learning.backup-<stamp>-<8 hex>` in the project, one folder for each move.
+  A move makes a backup only where a project had both folders.
+- No devflow command deletes a backup, except `devflow uninstall`.
+  Uninstall removes the backups of the project at the git root of your current directory, with that project's data, after you confirm.
+  `devflow curation --reset` and `devflow curation --clear` leave the backup in place.
+- A disable drains the queue files in the backups. `devflow curation --disable`, and `devflow init` with curation switched off,
+  remove the queue, claim, private and overflow files in each backup folder (at most 500 folders, and 200 files in each).
+  The ledger files, the swept files and the claim owner file stay in the backup.
+  Without this drain, a later `--enable` and init would merge those rows into the live queue.
+  The drain deletes nothing when a backup folder, or one of its queue files, is a symbolic link, and it says so.
+  If the backups cannot be listed for another reason, the drain still removes the queue files of the live and the old folder, and prints a warning that the backups were not drained.
+- `devflow curation --status` prints one `Backup:` line for each backup folder.
+  The line shows how many pending rows the backup still holds.
+  For the first 50 folders it prints one line each. One more line counts the folders from the 51st to the 500th and their pending rows.
+  If there are more than 500 backup folders, a last line counts the folders after the 500th. Status does not read them, and no init or drain reaches them.
+- Delete a backup folder only when `devflow curation --status` shows 0 pending rows for it.
+  Until then, a later init can still merge the rows.
+  A backup made on re-upgrade can hold the only copy of entries that 3.7 wrote. Check them before you delete it.
+- An init merges rows from at most 50 backup folders in one run. It passes over a folder that holds no pending rows,
+  so a later folder is reached when the earlier ones are done.
+- A queue file that git tracks is never merged, because the repository supplied it.
+  The move does not carry it into the new folder, not even in a whole-folder move.
+  The pass that finds it renames it in the backup to `<name>.tracked-<stamp>-<8 hex>`, and a note says how many files stayed and under what names.
+  No later init, status count or drain reads that file, so it stays inert also after you commit its deletion.
+  If git is missing, times out or fails, the move merges nothing from that folder and says so. A later init tries again.
+
+**The queue cap:**
+- A merge fills a pending queue up to 100 lines and no further.
+  A capture trim keeps the newest 100 lines and starts only above 200 lines, so a merge never causes a trim.
+- Rows that do not fit wait in overflow files in the backup. A later init merges them as room appears.
+  Status counts them as pending rows, so the delete step waits for zero pending rows.
+- The move drops no row, and it never causes a trim.
+  A queue that holds more than 200 lines is still trimmed to its newest 100 lines when a capture arrives.
+  This is the rule from before 3.8.0, and the move does not change it.
+- `devflow init` drains the queue of a project where curation is off, as it did before 3.8.0.
+
+**Outcomes that need action:**
+- Busy: another run holds the move lock. Init prints `Ledger move skipped for <root>: a lock is held.`
+  A curation command prints `Another run is moving this project's curation data.`
+  Nothing is written. Wait a moment, then run the command again. A session start retries by itself.
+  When a queue claim holds the move, init prints `Ledger move skipped for <root>: a queue claim holds the move.`
+  A curation command prints `A Curate run holds this project's curation queue, and the move waits for it.`
+  The move runs after Curate finishes, which can take up to 15 minutes. Run the command again after that.
+- Refused: a symbolic link sits on the path, or a private, swept or overflow queue file sits directly in the old folder.
+  Nothing moves. Init prints `Ledger move refused for <root>`.
+  The HUD and `devflow curation --status` print `Curation: move refused, see the hook log`.
+  Remove the cause, then run `devflow init` or start a new session.
+- Not yet moved: `devflow curation --status`, `--list`, `--show` and the HUD print
+  `Curation: run devflow init, or open Claude Code in this project after it`.
+  They do not read the old folder.
+- Failed: init prints `Ledger move failed for <root>` and copies nothing. The next init tries again.
+  A move that fails at session start shows the same `Curation: move refused, see the hook log` line as a refusal.
+  The hook log names the cause. The next session start tries again.
+- Skipped: git did not name the project's repository within one second, for example on a hung mount.
+  Init prints `Ledger move skipped for <root>: git did not answer in time.` and does not count the project as moved.
+  The other projects move. The next init tries again, and a session start in the project moves it too.
+
+**What stays behind:**
+- Reach: a project that neither `devflow init` nor a Claude Code session reaches keeps its old
+  `.devflow/learning/` folder untouched. It moves at its next session start.
+- Linked worktrees: if the main checkout has a `.devflow/` folder and is not your home folder,
+  the ledger of a linked worktree is the ledger of the main checkout.
+  Devflow does not move a `.devflow/learning/` folder that sits inside that worktree.
+  Delete that leftover folder by hand when you do not need it.
+  If the main checkout does not meet this condition, the `.devflow/learning/` folder of the worktree is a live ledger.
+  It moves like any project.
+- First session: the first session start in a project with an old folder runs the move.
+  This adds a short delay to that one start. Later starts add nothing.
+
+**Mixed-version teams:**
+- A 3.7 install reads only `features.learning` in a committed `.devflow/project.json`.
+  A 3.8 install reads both keys and narrows when either key is `false`.
+- Keep the old key in committed files, or set both keys, until every team member runs 3.8.
+
+**What you must do:**
+- Run `devflow init` after you update.
+- Replace `devflow learning` and the old init flags in your scripts.
+- Delete each backup folder after `devflow curation --status` shows 0 pending rows for it.
+  A backup made on re-upgrade can hold the only copy of entries that 3.7 wrote. Check them before you delete it.
+- Delete the leftover `.devflow/learning/` folder in each linked worktree whose main checkout has a `.devflow/` folder
+  and is not your home folder.
+  A worktree whose main checkout has no `.devflow/` folder, or is your home folder, keeps a live ledger.
+  That ledger moves like any project.
+- Run `devflow curation --enable` if the machine switch is off and you want it on.
+
 ### Upgrade notes — Lint pack
 
 **Stale-install window:**
@@ -70,12 +233,13 @@ Do the step below after you update.
 
 ### Changed
 
-- **`/implement` and `/resolve` skip Polish at `standard` and `lean`** ([#481](https://github.com/dean0x/devflow/issues/481)). At `standard` and `lean`, `/implement` skips Phase 3 Polish, and `/resolve` skips Phase 6 Polish in each worktree at that level. At `full`, both spawn Polish as before. `/self-review`, `/debug` and `/dynamic-build` keep Polish at every level and read no level. Harden still reads the whole branch diff, and Validate does not depend on Polish. The quality rule gains one bullet that holds a subset of Polish's cleanup list: leftover debug statements, unused imports, unnecessary variables used once right after assignment, nested ternaries, checks the types enforce and catches around code that cannot throw. The bullet cuts debug statements everywhere, but it keeps checks and catches at a trust boundary or a fail-closed path. The Code agent applies it while it writes. At `full` and `standard`, `/code-review` can report these items. `devflow gates`, the `devflow init` level hints, the README, `docs/cli-reference.md` and `docs/commands.md` state the new effect. Accepted risk: at `standard` and `lean`, no `/implement` agent grades naming and consistency, and Harden reports both as `SKIP (Polish agent)`. No rule now holds two other Polish items: language-behavior tests and verbose names. Harden's test pillar partly covers language-behavior tests. At `standard` and `lean`, `/resolve` fix commits get no later check for debug output, because `/resolve` never spawns Harden. Only the quality rule and the review cover them. At `lean`, `/code-review` does not report the cleanup items. Ticket [#568](https://github.com/dean0x/devflow/issues/568) tracks the Harden wording. Run `devflow gates --set full` to keep Polish.
+- **`/implement` and `/resolve` skip Polish at `standard` and `lean`** ([#481](https://github.com/dean0x/devflow/issues/481)). At `standard` and `lean`, `/implement` skips Phase 3 Polish, and `/resolve` skips Phase 6 Polish in each worktree at that level. At `full`, both spawn Polish as before. `/self-review`, `/debug` and `/dynamic-build` keep Polish at every level and read no level. Harden still reads the whole branch diff, and Validate does not depend on Polish. The quality rule gains one bullet that holds a subset of Polish's cleanup list: leftover debug statements, unused imports, unnecessary variables used once right after assignment, nested ternaries, checks the types enforce and catches around code that cannot throw. The bullet cuts debug statements everywhere, but it keeps checks and catches at a trust boundary or a fail-closed path. The Code agent applies it while it writes. At `full` and `standard`, `/code-review` can report these items. `devflow gates`, the `devflow init` level hints, the README, `docs/cli-reference.md` and `docs/commands.md` state the new effect. Accepted risk: at `standard` and `lean`, no `/implement` agent grades naming and consistency, and Harden reports both as `SKIP (Polish agent)`. No rule now holds two other Polish items: language-behavior tests and verbose names. Harden's test pillar partly covers language-behavior tests. At `standard` and `lean`, `/resolve` skips Polish and never spawns Harden, so debug statements in its fixes that hold no secret or token get no later pass beyond the quality rule and the review. At `lean`, `/code-review` does not report the cleanup items. Ticket [#568](https://github.com/dean0x/devflow/issues/568) tracks the Harden wording. Run `devflow gates --set full` to keep Polish.
 - **`/implement` and `/resolve` read the gate level** ([#480](https://github.com/dean0x/devflow/issues/480)). At `standard` and `lean`, each command reads its level reference one time for each run. At `full`, it reads no reference. `/implement` reads it at the start of Phase 3. `/resolve` reads it in Step 0d when any worktree is at `standard` or `lean`. The references hold the phase rows, and the [#481](https://github.com/dean0x/devflow/issues/481) entry lists the first two. The `/implement` report and the `/resolve` display name the level at every level. `/resolve` also names it in `resolution-summary.md`. If a reference cannot be read, the command says `level reference unreadable: no level rows applied`. It applies no row and keeps the level, so at `lean` the lint pack still runs. No level removes Validate, the CI gate, the evidence claims, the Verification Gate or the compliance directive. No level changes the Triage security gate or the ESCALATED route. `devflow gates` says that `/implement` and `/resolve` read the level.
 
 ### Fixed
 
 - **`/implement`, `/code-review`, `/bug-analysis` and `/resolve` use a fresh base for branch diffs, and branch-name validation is tighter** ([#495](https://github.com/dean0x/devflow/issues/495)). A new script, `resolve-base.cjs`, makes at most one fetch of the base branch, picks the base by one stated rule and prints one status line. The fetch updates only the remote-tracking ref of the base branch, and credential prompts are off for it. The branch diff starts at the fork point of that base and `HEAD`. The fetch stops after 45 seconds, each local git call stops after 30 seconds, and one run has a budget of 100 seconds. A local git call that gives no answer reports `resolver-unavailable`. When the fetch fails or times out, `/implement`, `/code-review` and `/bug-analysis` use the best base they have and print a warning. Known limit: `/resolve` uses that base without a warning. When no usable base exists, for example in a shallow clone without the base history, `/implement` stops, and `/code-review` and `/bug-analysis` stop on a full-range run. Each names the cause and a fix. `/resolve` takes its branch diff from the Git agent's `validate-branch`, which returns BLOCKED in that case. A normal `/implement` run fetches the base branch once, and a re-validation that you ask for can add one more fetch. A base branch name is checked against a stricter allowed set and against git's own name rules, so a name outside the set, or one that git refuses, stops the run, and the refusal message states the set. In `/code-review` multi-worktree mode, a rejected base blocks only that worktree. `/code-review` and `/bug-analysis` use the stored review head of an incremental run only when it is a commit ID of 40 or 64 lowercase hex digits. Any other value takes the full range. A tracked review-head file is ignored, and the review takes the full range. A failed patch write in `/code-review` stops the run. Run `devflow init` after you update, to install the script and the updated commands.
+- **Code, Fix and Refactor check the staged diff of every file they commit for secrets or tokens in logs or debug output** ([#584](https://github.com/dean0x/devflow/issues/584)). Each of these agents makes the check before each commit. The check runs at every level, wherever `/resolve`, `/implement`, `/debug`, `/dynamic-build` (and dynamic workflows that spawn them) or ambient mode spawn these agents. Run `devflow init` to install the updated agents.
 
 ---
 

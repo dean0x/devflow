@@ -2,20 +2,20 @@ A partial: the decisions-index steps the knowledge-workflow commands and the
 dynamic commands share.
 
 D-DECISIONS-LEARNING-GATE: a decisions load is gated on the settings line's
-`LEARNING`. Learning can be narrowed by the repository or the machine, and neither
+`CURATION`. Curation can be narrowed by the repository or the machine, and neither
 can turn it back on (D-FEATURES-NARROW-ONLY), so `decisions_gate()` is the one
-sentence every decisions host carries: with `LEARNING=off` the step is skipped
+sentence every decisions host carries: with `CURATION=off` the step is skipped
 before it locates a ledger or reads an index. An unresolvable settings line keeps
-`LEARNING=on`, as the fail-closed line does — decisions are advisory context, not a
+`CURATION=on`, as the fail-closed line does — decisions are advisory context, not a
 safety control, so a failed resolution loads them exactly as it did before the
 gate. The gate reads the line the host's settings block resolved above; this
 partial imports nothing from `_settings.mds`. In a multi-worktree run the line is the start
 root's: the root the ledger is located from.
 
-D-LEARNING-VARIANTS: the gate guards a repository that narrows learning off on a machine
-where it is on. On a machine with learning off the decisions text is absent altogether: the
-whole of `decisions_load()` is a learning-on arm, so every expansion of it exists only in the
-learning-on build. `decisions_gate()` and `decisions_locate()` are leaves, reached only from
+D-LEARNING-VARIANTS: the gate guards a repository that narrows curation off on a machine
+where it is on. On a machine with curation off the decisions text is absent altogether: the
+whole of `decisions_load()` is a curation-on arm, so every expansion of it exists only in the
+curation-on build. `decisions_gate()` and `decisions_locate()` are leaves, reached only from
 inside an arm (`decisions_load()`, `authoring_decisions()`, or a host's own on arm), and carry
 no arm of their own: an arm cannot nest.
 
@@ -27,11 +27,11 @@ that scope. Siblings over one diff share ONE slice, so their prompts stay identi
 it: the index stays a pre-rendered file read, never built on demand, and matching a line to a task is
 judgment, which stays with the model. When unsure, include the line: a slice that misses costs one
 full-index read, a slice that over-includes costs only its bytes. `decisions_slice()` is a leaf like
-the gate and the locator, reached only from inside a learning-on arm, so a learning-off build carries
+the gate and the locator, reached only from inside a curation-on arm, so a curation-off build carries
 none of the rule (D-LEARNING-VARIANTS).
 
 @define decisions_gate():
-When the settings line says `LEARNING=off`, set `DECISIONS_CONTEXT` to `(none)` and skip this step, locating no ledger and reading no index.
+When the settings line says `CURATION=off`, set `DECISIONS_CONTEXT` to `(none)` and skip this step, locating no ledger and reading no index.
 @end
 
 @define decisions_locate():
@@ -47,7 +47,7 @@ Line 1 is the checkout's toplevel, line 2 the common git directory. A git older 
 2. **The toplevel** — line 1, or on an older git the line after the echoed flag.
 3. **The start directory itself** — when the command failed or printed no absolute toplevel (outside a git repository).
 
-This is the rule the learning hooks apply, so you read the index the Curate agent writes.
+This is the rule the curation hooks apply, so you read the index the Curate agent writes.
 @end
 
 @define decisions_slice():
@@ -55,7 +55,7 @@ Hand each agent that takes `DECISIONS_CONTEXT` a slice, not the whole index: the
 @end
 
 @define decisions_load():
-<!-- learning:on -->
+<!-- curation:on -->
 ### Load DECISIONS_CONTEXT
 
 {{decisions_gate()}}
@@ -64,7 +64,7 @@ Hand each agent that takes `DECISIONS_CONTEXT` a slice, not the whole index: the
 
 **Step 1 — Read the pre-rendered index:**
 
-Attempt to read `{ledger}/.devflow/learning/index.md`.
+Attempt to read `{ledger}/.devflow/curation/index.md`.
 
 - If the file exists and contains non-empty content: use that content as `DECISIONS_CONTEXT`.
 - If the file is absent or empty: set `DECISIONS_CONTEXT` to `(none)`.
@@ -79,7 +79,7 @@ When `DECISIONS_CONTEXT` is not `(none)`, hand it only to the agents whose contr
 
 Those agents follow `devflow:apply-decisions`. A host that uses the index in its own thread says so in its own step.
 
-<!-- learning:end -->
+<!-- curation:end -->
 @end
 
 @export decisions_gate

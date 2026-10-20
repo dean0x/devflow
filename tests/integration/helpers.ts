@@ -219,14 +219,14 @@ export const BEFORE_ALL_TIMEOUT_MS = 180_000;
 
 /**
  * The init arguments for a live run: the plugins whose agents and skills the tests use,
- * with ambient, memory, learning, knowledge, rules and proxy off, and the security deny
+ * with ambient, memory, curation, knowledge, rules and proxy off, and the security deny
  * list in the (temp) user settings. `--security user` keeps init away from the
  * machine-wide managed settings file, which no temp HOME redirects.
  */
 export const INIT_ARGS: readonly string[] = [
   'init',
   '--plugin', 'implement,code-review,resolve,plan,research,bug-analysis',
-  '--no-ambient', '--no-memory', '--no-learning', '--no-knowledge', '--no-rules', '--no-proxy',
+  '--no-ambient', '--no-memory', '--no-curation', '--no-knowledge', '--no-rules', '--no-proxy',
   '--security', 'user',
 ];
 
@@ -294,7 +294,7 @@ const tail = (text: string): string => text.slice(Math.max(0, text.length - TAIL
  * Install devflow into `ctx.home` with the built CLI.
  *
  * `init` runs in a second new temp directory that is not a repository: it drains the memory
- * and learning queues of the repository it starts in, and the checkout must stay untouched.
+ * and curation queues of the repository it starts in, and the checkout must stay untouched.
  * The child env carries no credential. After the install the call checks that the Validate
  * and Test agent files exist, that no path init writes ({@link INIT_WRITTEN_PATHS}) changed in
  * the checkout, and that settings.json holds no memory hook and no capture hook. `init`

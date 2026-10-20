@@ -10,7 +10,7 @@
  *   - Read semantics. The sections are found by a fence-aware reader (the exception grammar's template
  *     fence holds a `## ` line), so a moved block is read back through the extractor the guards use, not
  *     only compared as bytes.
- *   - Scope of the move. Only text with no learning arm and no Git-spawn fence moves: a learning arm cannot
+ *   - Scope of the move. Only text with no curation arm and no Git-spawn fence moves: a curation arm cannot
  *     be split across files, and a Git fence is read by guards that scan the command.
  *   - Read paths. Every path a command names exists in the skill sources, every reference is named by a
  *     command, the read resolves the config directory in Bash first, and the compiled command carries it.
@@ -216,13 +216,13 @@ describe('AC-406: every read path exists, is read, and resolves the config direc
   })
 })
 
-describe('the moved text carries no learning arm and no Git spawn (D-10)', () => {
-  it('no reference holds a learning marker or a Git agent fence', () => {
+describe('the moved text carries no curation arm and no Git spawn (D-10)', () => {
+  it('no reference holds a curation marker or a Git agent fence', () => {
     const files = referenceFiles()
     expect(files.length).toBeGreaterThanOrEqual(2)
     for (const f of files) {
       const text = readAgentReference(`${REFERENCE_DIR}/${f}`)
-      expect(text, `${f}: a learning arm cannot be split across files`).not.toMatch(/<!-- learning:/)
+      expect(text, `${f}: a curation arm cannot be split across files`).not.toMatch(/<!-- curation:/)
       expect(text, `${f}: a Git spawn fence is read by guards that scan the command`).not.toMatch(/Agent\(subagent_type="Git"\)/)
     }
   })

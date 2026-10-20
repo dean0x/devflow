@@ -7,7 +7,7 @@ directories:
   - src/assets/commands
   - src/assets/commands/_partials
   - dist/commands
-  - dist/learning-off/commands
+  - dist/curation-off/commands
   - scripts/build-mds.ts
   - tests/build-mds.test.ts
   - tests/fixtures/mds-manifest.ts
@@ -36,18 +36,18 @@ updated: 2026-10-13
 - **KB-AP-2** Never accept a guard that finds nothing: every guard needs a non-empty-target assertion (a scanned-file counter) and a known-bad probe seeded in a temp copy, never in the committed tree.
 - **KB-AP-3** Never weaken an occurrence-equality pin to `toContain`: a moved, duplicated and removed rendering must each fail differently.
 - **KB-AP-4** Never read the marker negative guard alone as a deletion guard: it is a relocation guard, and its positive arm keeps the literals alive in the Git agent's sink corpus.
-- **KB-AP-5** Never run `npm run build:cli` expecting installable commands, agents or learning-off variants: only `npm run build:mds` writes them.
+- **KB-AP-5** Never run `npm run build:cli` expecting installable commands, agents or curation-off variants: only `npm run build:mds` writes them.
 - **KB-AP-6** Never loosen an exception with a wider regex: recorded exceptions are explicit file sets.
 
 ## Overview
 
 The dynamic commands are compiled MDS hosts, and the test suite pins their compiled text. This KB covers the build-side facts a dynamic-command author trips over: which host/partial number counts what, which doctrine literals the suite pins, who owns a dedup marker, which `gh` exceptions are deliberate, and the `.mds` authoring gotchas. It owns the count rule: the `feature-knowledge-system` and `tracker-references` KBs point here rather than restating it, so there is one place to correct when a roster moves.
 
-It does not own the MDS build pipeline itself (discovery, destination validation, frontmatter stripping, the reference-module host kind), which is `feature-knowledge-system`, nor the tracker/git reference-module split and byte-budget guards (`tracker-references`). Engine doctrine is in `.devflow/features/dynamic-workflow-engine/KNOWLEDGE.md`, WAVE mode in `.devflow/features/dynamic-workflow-engine-waves/KNOWLEDGE.md`, and the settings, decisions, learning-arm and tracker-vocabulary contracts in `.devflow/features/dynamic-workflow-engine-contracts/KNOWLEDGE.md`.
+It does not own the MDS build pipeline itself (discovery, destination validation, frontmatter stripping, the reference-module host kind), which is `feature-knowledge-system`, nor the tracker/git reference-module split and byte-budget guards (`tracker-references`). Engine doctrine is in `.devflow/features/dynamic-workflow-engine/KNOWLEDGE.md`, WAVE mode in `.devflow/features/dynamic-workflow-engine-waves/KNOWLEDGE.md`, and the settings, decisions, curation-arm and tracker-vocabulary contracts in `.devflow/features/dynamic-workflow-engine-contracts/KNOWLEDGE.md`.
 
 ## Compiled output: the count rule
 
-Read `tests/fixtures/mds-manifest.ts` for the canonical rosters; every count is derived from it, not pinned as a bare literal. The same manifest names `TRACKER_PARTIAL_ADOPTERS`, `SETTINGS_BLOCK_HOSTS` and `SETTINGS_BLOCK_HOSTS_LEARNING_OFF`.
+Read `tests/fixtures/mds-manifest.ts` for the canonical rosters; every count is derived from it, not pinned as a bare literal. The same manifest names `TRACKER_PARTIAL_ADOPTERS`, `SETTINGS_BLOCK_HOSTS` and `SETTINGS_BLOCK_HOSTS_CURATION_OFF`.
 
 | Constant | The set it counts | Why it differs from the others |
 |---|---|---|
@@ -57,7 +57,7 @@ Read `tests/fixtures/mds-manifest.ts` for the canonical rosters; every count is 
 | `ALL_MDS_HOSTS` | The command hosts plus the generator hosts: every host whose basename becomes an output filename | Reference modules are excluded: their filenames come from an operation registry (`src/core/mds-variants.ts`), and `_github` would not even pass `validateOutputName` |
 | `DIST_COMMAND_FILES` (`DIST_FILES`) | The compiled command outputs, one per command host | Every command is a compiled host, so no file in `dist/commands/` is copied rather than compiled |
 
-`DIST_COMMAND_FILES` and `COMMAND_HOSTS` share a length because they are the same roster seen from two ends (hosts in, files out). `ALL_MDS_HOSTS` adds the agents the build writes to `dist/agents/`, and `ALL_DISCOVERED_HOSTS` is total build-time discovery across all three host kinds. `numeric-floors.json` registers `partial-count` as a floor on `ALL_MDS_PARTIALS`, and `dist-host-count` and `dist-files-count` on the command-host roster (`dist-files-count` is spelled at several sites, including the marker negative guard, which asserts both the built file count and its own scanned counter). The learning-off tree is a separate roster, `LEARNING_VARIANT_HOSTS`: every command host plus the agent hosts that carry an arm (every generator host but `git`), one `dist/learning-off/` file per entry.
+`DIST_COMMAND_FILES` and `COMMAND_HOSTS` share a length because they are the same roster seen from two ends (hosts in, files out). `ALL_MDS_HOSTS` adds the agents the build writes to `dist/agents/`, and `ALL_DISCOVERED_HOSTS` is total build-time discovery across all three host kinds. `numeric-floors.json` registers `partial-count` as a floor on `ALL_MDS_PARTIALS`, and `dist-host-count` and `dist-files-count` on the command-host roster (`dist-files-count` is spelled at several sites, including the marker negative guard, which asserts both the built file count and its own scanned counter). The curation-off tree is a separate roster, `CURATION_VARIANT_HOSTS`: every command host plus the agent hosts that carry an arm (every generator host but `git`), one `dist/curation-off/` file per entry.
 
 ## What the suite pins
 
@@ -90,7 +90,7 @@ The operation owns its marker format. A caller that restates the literal is a se
 
 - **Flat `_partials/`.** No subdirectories at any depth: a nested partial would be invisible to any flat reader (`tests/build-mds.test.ts` "commands/_partials/ is flat", with a seeded known-bad nested-partial probe). Partials declare no `output-dir:`; hosts declare it as the LAST frontmatter key, and no non-blank line may follow it inside the block.
 - **Braces and templates.** Under `@mdscript/mds` 0.4.4 literal `{...}` is plain text and only `{{name}}` / `{{helper()}}` interpolate. There is no `\{` escape, so a backslash ships verbatim (caught by the backslash-leak guard). `${...}` is literal text in prose and inside a `js` fence alike. Every fence kind (column-0, indented, tilde, blockquote) is passthrough, so nothing in a fence is interpolated.
-- **Which build.** `npm run build:mds` compiles command hosts, agent generator hosts and reference modules, and writes `dist/learning-off/` alongside; `npm run build:cli` produces none of them (KB-AP-5). Rebuild after editing any `.mds`.
+- **Which build.** `npm run build:mds` compiles command hosts, agent generator hosts and reference modules, and writes `dist/curation-off/` alongside; `npm run build:cli` produces none of them (KB-AP-5). Rebuild after editing any `.mds`.
 
 ## Guard patterns
 
@@ -109,7 +109,7 @@ The operation owns its marker format. A caller that restates the literal is a se
 ## Key Files
 
 - `tests/build-mds.test.ts`: doctrine-literal pinning (sections for single-pass review, post-wave-report, `--dry-run` removal, gh-issue scope, `_tracker.mds` adoption, marker ownership).
-- `tests/fixtures/mds-manifest.ts`: the shared name manifest: `MDS_COMMAND_HOSTS`, `MDS_GENERATOR_HOSTS`, `MDS_PARTIALS`, `MDS_REFERENCE_PARTIALS`, `ALL_MDS_PARTIALS`, `MDS_REFERENCE_MODULES`, `LEARNING_VARIANT_HOSTS`, `DIST_COMMAND_FILES`, `ALL_MDS_HOSTS`, `ALL_DISCOVERED_HOSTS`.
+- `tests/fixtures/mds-manifest.ts`: the shared name manifest: `MDS_COMMAND_HOSTS`, `MDS_GENERATOR_HOSTS`, `MDS_PARTIALS`, `MDS_REFERENCE_PARTIALS`, `ALL_MDS_PARTIALS`, `MDS_REFERENCE_MODULES`, `CURATION_VARIANT_HOSTS`, `DIST_COMMAND_FILES`, `ALL_MDS_HOSTS`, `ALL_DISCOVERED_HOSTS`.
 - `tests/fixtures/numeric-floors.json`: the ratchet manifest (`partial-count`, `dist-host-count`, `dist-files-count`, `arguments-once-max`, `gate-ownership-body-count`, `running-commands-site-count`, `issue-pr-link-pr-open-sites`); floors raise, ceilings lower.
 - `tests/guards/code-review-diff-gating.test.ts`: beside `/code-review`'s diff-class gating, the block that holds the engine, wave and dynamic-build sources free of any gating token.
 - `scripts/build-mds.ts`: the unified MDS compiler for all three host kinds (command hosts to `dist/commands/`, generator hosts to `dist/agents/`, reference modules to `dist/skills/git/references/`).

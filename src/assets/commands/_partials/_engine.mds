@@ -60,20 +60,20 @@ It returns `{"verdict": "PASS" | "FAIL", "rationale": "..."}`: FAIL when either 
 The standard implementation unit for one ticket. Run in order:
 
 ```
-<!-- learning:on -->
+<!-- curation:on -->
 Code(agentType:"Code", prompt: "OPERATION: implement" first line, then full task + plan + DECISIONS_CONTEXT + COMPLIANCE_DIRECTIVE + handoff if sequential)
-<!-- learning:off -->
+<!-- curation:off -->
 Code(agentType:"Code", prompt: "OPERATION: implement" first line, then full task + plan + COMPLIANCE_DIRECTIVE + handoff if sequential)
-<!-- learning:end -->
+<!-- curation:end -->
   → gate1_postcode()
   → gate2_acceptance()   ← Gate 2 runs HERE — before the review pass, not after
 ```
 
-<!-- learning:on -->
+<!-- curation:on -->
 Every Code-family agent prompt opens with `OPERATION: <mode>` as its first line: `implement` and `issue-fix` go to `agentType:"Code"`, `validation-fix`, `alignment-fix` and `qa-fix` go to `agentType:"Fix"`. It must include: task description, implementation plan (if one exists), relevant DECISIONS_CONTEXT (the index you loaded before authoring), the compliance directive (`COMPLIANCE_DIRECTIVE` — every Code prompt carries it when it is not empty, fix prompts included), and any PRIOR_PHASE_SUMMARY / HANDOFF_FILE for sequential multi-phase tickets.
-<!-- learning:off -->
+<!-- curation:off -->
 Every Code-family agent prompt opens with `OPERATION: <mode>` as its first line: `implement` and `issue-fix` go to `agentType:"Code"`, `validation-fix`, `alignment-fix` and `qa-fix` go to `agentType:"Fix"`. It must include: task description, implementation plan (if one exists), the compliance directive (`COMPLIANCE_DIRECTIVE` — every Code prompt carries it when it is not empty, fix prompts included), and any PRIOR_PHASE_SUMMARY / HANDOFF_FILE for sequential multi-phase tickets.
-<!-- learning:end -->
+<!-- curation:end -->
 
 Gate 2 runs at implementation acceptance — this matches devflow's deliberate placement: "evaluation is part of implementation acceptance, not post-review" (§6.1).
 @end

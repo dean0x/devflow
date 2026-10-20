@@ -1,7 +1,7 @@
 // src/assets/scripts/hooks/lib/mkdir-lock.cjs
 //
-// Shared mkdir-based locking helpers used by learning-store.cjs — whose
-// withDecisionsLock every learning op that writes and the render CLI take, and
+// Shared mkdir-based locking helpers used by curation-store.cjs — whose
+// withDecisionsLock every curation op that writes and the render CLI take, and
 // whose queue claim also takes the queue's own lock — and any other CJS hook that
 // needs exclusive access to a shared resource.
 //
@@ -50,11 +50,15 @@ function _idleSleep50() {
  * (default 60 s) is forcibly removed and the caller retries. This protects against
  * crashed holders but creates a narrow TOCTOU window: if a holder is actively
  * working and takes longer than 60 s, its lock can be stolen — leading to concurrent
- * ledger writes. Current callers (the learning ops through withDecisionsLock, and the
+ * ledger writes. Current callers (the curation ops through withDecisionsLock, and the
  * render CLI) perform only synchronous file I/O + JSON parse and complete well under 60 s in practice,
  * so this window is not reachable under normal operation. For long-running callers
  * call refreshLock(lockDir) periodically to reset the mtime and push the deadline
  * out by another staleMs interval.
+ *
+ * A stale lock that cannot be removed (it holds files, it is not a directory, or its
+ * folder refuses the rmdir) is waited on like a live one, so `timeoutMs` bounds the
+ * loop: with a timeout of 0 the call answers false at once.
  *
  * @param {string} lockDir - path to lock directory
  * @param {number} [timeoutMs=30000] - max wait in milliseconds
@@ -72,14 +76,27 @@ function acquireMkdirLock(lockDir, timeoutMs = 30000, staleMs = 60000) {
       try {
         const stat = fs.statSync(lockDir);
         const age = Date.now() - stat.mtimeMs;
-        if (age > staleMs) {
-          try { fs.rmdirSync(lockDir); } catch { /* already gone */ }
-          continue;
-        }
+        if (age > staleMs && breakStaleLock(lockDir)) continue;
       } catch { /* lock gone between check and stat */ }
       if (Date.now() - start >= timeoutMs) return false;
       _idleSleep50();
     }
+  }
+}
+
+/**
+ * Remove a stale lock directory. True when it is gone (removed here, or already
+ * removed by another process); false when the rmdir failed for any other reason.
+ *
+ * @param {string} lockDir
+ * @returns {boolean}
+ */
+function breakStaleLock(lockDir) {
+  try {
+    fs.rmdirSync(lockDir);
+    return true;
+  } catch (err) {
+    return Boolean(err) && err.code === 'ENOENT';
   }
 }
 

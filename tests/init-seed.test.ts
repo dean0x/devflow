@@ -33,7 +33,7 @@ function makeManifest(overrides: Partial<ManifestData> = {}): ManifestData {
       memory: true,
       hud: true,
       knowledge: true,
-      learning: true,
+      curation: true,
       rules: true,
       proxy: false,
       // Phase 2: FlagsRecord (was string[]); no deprecated viewMode field
@@ -61,14 +61,14 @@ describe('resolveSeedFeatures', () => {
     expect(result).toEqual(FEATURE_DEFAULTS);
   });
 
-  it('manifest present, no config → reads ambient/hud/rules/proxy and memory/knowledge/learning from manifest', () => {
+  it('manifest present, no config → reads ambient/hud/rules/proxy and memory/knowledge/curation from manifest', () => {
     const manifest = makeManifest({
       features: {
         ambient: false,
         memory: false,
         hud: false,
         knowledge: false,
-        learning: false,
+        curation: false,
         rules: false,
         proxy: false,
         flags: [],
@@ -80,7 +80,7 @@ describe('resolveSeedFeatures', () => {
       memory: false,
       hud: false,
       knowledge: false,
-      learning: false,
+      curation: false,
       rules: false,
       proxy: false,
       behavior: false,
@@ -89,14 +89,14 @@ describe('resolveSeedFeatures', () => {
     });
   });
 
-  it('memory, learning and knowledge come from the manifest like every other feature (D-FEATURES-NARROW-ONLY)', () => {
+  it('memory, curation and knowledge come from the manifest like every other feature (D-FEATURES-NARROW-ONLY)', () => {
     const manifest = makeManifest({
       features: {
         ambient: false,
         memory: false,
         hud: false,
         knowledge: false,
-        learning: true,
+        curation: true,
         rules: false,
         proxy: true,
         flags: [],
@@ -104,17 +104,17 @@ describe('resolveSeedFeatures', () => {
     });
     const result = resolveSeedFeatures(manifest);
     expect(result).toMatchObject({
-      ambient: false, memory: false, hud: false, knowledge: false, learning: true, rules: false, proxy: true,
+      ambient: false, memory: false, hud: false, knowledge: false, curation: true, rules: false, proxy: true,
     });
   });
 
   it('a machine-wide off is re-seeded as off — a re-init never re-enables it (#378)', () => {
     const manifest = makeManifest({
-      features: { ...makeManifest().features, memory: false, learning: false, knowledge: false },
+      features: { ...makeManifest().features, memory: false, curation: false, knowledge: false },
     });
     const result = resolveSeedFeatures(manifest);
     expect(result.memory).toBe(false);
-    expect(result.learning).toBe(false);
+    expect(result.curation).toBe(false);
     expect(result.knowledge).toBe(false);
   });
 });
@@ -386,7 +386,7 @@ describe('resolveInitSeed', () => {
         memory: true,
         hud: true,
         knowledge: false,
-        learning: true,
+        curation: true,
         rules: false,
         proxy: false,
         flags: { tui: true, lsp: true, 'view-mode': 'verbose' },
@@ -414,7 +414,7 @@ describe('applyCliToggles', () => {
     memory: true,
     hud: true,
     knowledge: true,
-    learning: true,
+    curation: true,
     rules: true,
     proxy: false,
     behavior: false,
@@ -443,13 +443,13 @@ describe('applyCliToggles', () => {
     expect(result.memory).toBe(false);
     // other keys untouched
     expect(result.hud).toBe(true);
-    expect(result.learning).toBe(true);
+    expect(result.curation).toBe(true);
   });
 
   it('explicit true overrides base false', () => {
     const allFalse: FeatureSeed = {
       ambient: false, memory: false, hud: false, knowledge: false,
-      learning: false, rules: false, proxy: false,
+      curation: false, rules: false, proxy: false,
       compliance: { enabled: false, frameworks: [] },
       tracker: { provider: 'jira' },
     };
@@ -563,7 +563,7 @@ describe('resolveInitSeed — re-init composability (WS1)', () => {
     // Other seed fields preserved — pin to hard-coded defaults (FEATURE_DEFAULTS)
     // rather than re-deriving from seed to ensure the assertion is non-tautological.
     expect(result.ambient).toBe(true);
-    expect(result.learning).toBe(true);
+    expect(result.curation).toBe(true);
     expect(result.knowledge).toBe(true);
   });
 });

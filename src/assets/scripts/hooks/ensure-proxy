@@ -22,7 +22,7 @@
 dbg() { :; }
 
 # Re-entrancy guard — must come before hook-bootstrap to minimize overhead
-# in background worker sessions (claude -p for memory / learning workers fire hooks too)
+# in background worker sessions (claude -p for memory / curation workers fire hooks too)
 if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then exit 0; fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -266,11 +266,11 @@ fi
 # Acquire spawn lock — prevents concurrent sessions from double-spawning the relay
 # Stale break: 30s (lock abandoned by crashed hook)
 source "$SCRIPT_DIR/get-mtime" 2>/dev/null || true
-source "$SCRIPT_DIR/learning-lock" 2>/dev/null || true
+source "$SCRIPT_DIR/curation-lock" 2>/dev/null || true
 
 SPAWN_LOCK="$MACHINE_DEVFLOW_DIR/.proxy-spawn.lock"
 
-if ! learning_lock_acquire "$SPAWN_LOCK" 2 2>/dev/null; then
+if ! curation_lock_acquire "$SPAWN_LOCK" 2 2>/dev/null; then
   # Another session is racing to start the proxy — give it a moment then re-probe
   log "spawn lock busy — another session may be starting proxy"
   sleep 1
@@ -339,7 +339,7 @@ while [ "$_i" -lt 80 ]; do
   _i=$(( _i + 1 ))
 done
 
-learning_lock_release "$SPAWN_LOCK"
+curation_lock_release "$SPAWN_LOCK"
 
 if [ "$_RELAY_UP" = "true" ]; then
   log "relay ready after $(( _i + 1 )) probe(s)"

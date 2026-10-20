@@ -1,3 +1,5 @@
+import type { CurationMoveNotice } from '../core/curation-move-notice.js';
+
 /**
  * StdinData — the JSON that Claude Code pipes to statusLine commands.
  */
@@ -34,7 +36,7 @@ export type ComponentId =
   | 'codexQuota'
   | 'todoProgress'
   | 'configCounts'
-  | 'learningCounts'
+  | 'curationCounts'
   | 'sessionCost'
   | 'releaseInfo'
   | 'worktreeCount';
@@ -138,11 +140,15 @@ export interface ConfigCountsData {
 }
 
 /**
- * Decisions/pitfalls counts data for the learningCounts component.
+ * Decisions/pitfalls counts data for the curationCounts component. `move` is set only
+ * when both counts are zero and the old folder exists: a pointer to a session start or
+ * `devflow init` (the move has not run), or the refused line (the move was tried and
+ * refused).
  */
-export interface LearningCountsData {
+export interface CurationCountsData {
   decisions: number;
   pitfalls: number;
+  move?: CurationMoveNotice;
 }
 
 /**
@@ -155,7 +161,7 @@ export interface GatherContext {
   usage: UsageData | null;
   codexUsage: CodexUsage | null;
   configCounts: ConfigCountsData | null;
-  learningCounts: LearningCountsData | null;
+  curationCounts: CurationCountsData | null;
   costHistory: CostAggregation | null;
   config: HudConfig & { components: ComponentId[] };
   devflowDir: string;

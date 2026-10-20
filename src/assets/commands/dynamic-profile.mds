@@ -7,12 +7,12 @@ output-dir: dist/commands
 @import "./_partials/_settings.mds" as settings
 {{authoring_preamble()}}
 
-<!-- learning:on -->
+<!-- curation:on -->
 ### Settings line
 
 {{settings.settings_resolve()}}
 
-<!-- learning:end -->
+<!-- curation:end -->
 {{authoring_decisions()}}
 ---
 

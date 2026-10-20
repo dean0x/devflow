@@ -16,9 +16,9 @@ effort: high
 skills:
   - devflow:git
   - devflow:worktree-support
-<!-- learning:on -->
+<!-- curation:on -->
   - devflow:apply-decisions
-<!-- learning:end -->
+<!-- curation:end -->
 disallowedTools:
   - Agent
   - SendMessage

@@ -30,7 +30,7 @@
  * Counts here are test-local constants beside the assertion that uses them (a count
  * kept in the manifest is a second place to keep in step).
  *
- * Also held here (AC-105): in every decisions-loading host the `LEARNING=off` gate
+ * Also held here (AC-105): in every decisions-loading host the `CURATION=off` gate
  * sentence comes before the ledger-locate git call and the index read.
  */
 import { describe, it, expect } from 'vitest'
@@ -202,9 +202,9 @@ function collectBadSentences(
 
 // ── Gate order (AC-105) ─────────────────────────────────────────────────────
 
-const GATE = 'When the settings line says `LEARNING=off`'
+const GATE = 'When the settings line says `CURATION=off`'
 const LOCATE = 'rev-parse --path-format=absolute --show-toplevel --git-common-dir'
-const INDEX_READ = '/.devflow/learning/index.md`'
+const INDEX_READ = '/.devflow/curation/index.md`'
 
 /** Named collector: how a decisions-loading host orders its gate sentence, its locate call and its index read. */
 function collectGateOrderDefects(host: string, text: string): string[] {
@@ -212,7 +212,7 @@ function collectGateOrderDefects(host: string, text: string): string[] {
   const locate = text.indexOf(LOCATE)
   const read = text.indexOf(INDEX_READ)
   const out: string[] = []
-  if (gate === -1) out.push(`${host}: no LEARNING=off gate sentence`)
+  if (gate === -1) out.push(`${host}: no CURATION=off gate sentence`)
   if (locate === -1) out.push(`${host}: no ledger-locate call`)
   if (read === -1) out.push(`${host}: no index read`)
   if (gate !== -1 && locate !== -1 && gate > locate) out.push(`${host}: the gate follows the ledger-locate call`)
@@ -463,7 +463,7 @@ describe('the authoring step names declared receivers only (AC-125)', () => {
   })
 })
 
-describe('the LEARNING gate precedes the ledger-locate call and the index read (AC-105)', () => {
+describe('the CURATION gate precedes the ledger-locate call and the index read (AC-105)', () => {
   it('holds in every decisions-loading host', () => {
     const hosts = compiled().filter(([, text]) => text.includes(LOCATE))
     expect(hosts.length, 'decisions-loading hosts').toBe(DECISIONS_HOST_COUNT)
@@ -482,7 +482,7 @@ describe('the LEARNING gate precedes the ledger-locate call and the index read (
       `${host}: the gate follows the ledger-locate call`,
       `${host}: the gate follows the index read`,
     ])
-    expect(collectGateOrderDefects(host, without)).toEqual([`${host}: no LEARNING=off gate sentence`])
+    expect(collectGateOrderDefects(host, without)).toEqual([`${host}: no CURATION=off gate sentence`])
     const beforeLocate = without.replace('The decisions ledger belongs', `${gateLine}\n\nThe decisions ledger belongs`)
     expect(collectGateOrderDefects(host, beforeLocate)).toEqual([])
   })

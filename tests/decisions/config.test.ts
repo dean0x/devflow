@@ -140,7 +140,7 @@ describe('loadCurateTuningConfig', () => {
     devflowDir = path.join(home, '.devflow');
     ensureDir(devflowDir);
     projectCwd = makeTmpDir();
-    ensureDir(path.join(projectCwd, '.devflow', 'learning'));
+    ensureDir(path.join(projectCwd, '.devflow', 'curation'));
 
     // Point HOME at a temp dir so the global layer is read from its .devflow.
     originalHome = process.env.HOME;
@@ -162,18 +162,18 @@ describe('loadCurateTuningConfig', () => {
   });
 
   it('global config overrides defaults', () => {
-    writeJson(devflowDir, 'learning.json', { model: 'haiku' });
+    writeJson(devflowDir, 'curation.json', { model: 'haiku' });
     const config = loadCurateTuningConfig(projectCwd);
     expect(config.model).toBe('haiku');
     expect(config.debug).toBe(false); // default preserved
   });
 
   it('project config overrides global config', () => {
-    writeJson(devflowDir, 'learning.json', {
+    writeJson(devflowDir, 'curation.json', {
       model: 'haiku',
       debug: true,
     });
-    writeJson(path.join(projectCwd, '.devflow', 'learning'), 'learning.json', {
+    writeJson(path.join(projectCwd, '.devflow', 'curation'), 'curation.json', {
       model: 'sonnet',
     });
     const config = loadCurateTuningConfig(projectCwd);
@@ -182,7 +182,7 @@ describe('loadCurateTuningConfig', () => {
   });
 
   it('project config alone overrides defaults', () => {
-    writeJson(path.join(projectCwd, '.devflow', 'learning'), 'learning.json', {
+    writeJson(path.join(projectCwd, '.devflow', 'curation'), 'curation.json', {
       model: 'sonnet',
     });
     const config = loadCurateTuningConfig(projectCwd);
@@ -192,7 +192,7 @@ describe('loadCurateTuningConfig', () => {
 
   it('invalid JSON in global config returns defaults without crashing', () => {
     fs.writeFileSync(
-      path.join(devflowDir, 'learning.json'),
+      path.join(devflowDir, 'curation.json'),
       'not json',
       'utf-8',
     );
@@ -201,9 +201,9 @@ describe('loadCurateTuningConfig', () => {
   });
 
   it('invalid JSON in project config falls back to global + defaults', () => {
-    writeJson(devflowDir, 'learning.json', { model: 'haiku' });
+    writeJson(devflowDir, 'curation.json', { model: 'haiku' });
     fs.writeFileSync(
-      path.join(projectCwd, '.devflow', 'learning', 'learning.json'),
+      path.join(projectCwd, '.devflow', 'curation', 'curation.json'),
       'bad json',
       'utf-8',
     );
@@ -212,10 +212,10 @@ describe('loadCurateTuningConfig', () => {
   });
 
   it('partial project override preserves global fields', () => {
-    writeJson(devflowDir, 'learning.json', {
+    writeJson(devflowDir, 'curation.json', {
       model: 'haiku',
     });
-    writeJson(path.join(projectCwd, '.devflow', 'learning'), 'learning.json', {
+    writeJson(path.join(projectCwd, '.devflow', 'curation'), 'curation.json', {
       debug: true,
     });
     const config = loadCurateTuningConfig(projectCwd);
@@ -235,7 +235,7 @@ describe('loadCurateTuningConfig', () => {
   });
 
   it('on-disk config still containing dropped max_daily_runs/throttle_minutes loads without error', () => {
-    writeJson(path.join(projectCwd, '.devflow', 'learning'), 'learning.json', {
+    writeJson(path.join(projectCwd, '.devflow', 'curation'), 'curation.json', {
       max_daily_runs: 3,
       throttle_minutes: 5,
       model: 'haiku',

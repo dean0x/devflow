@@ -18,13 +18,13 @@
  *       "14 command outputs byte-…"     — the dist/-vs-src/ byte compare is non-vacuous
  *   - tests/packaging.test.ts
  *       Guard 6                         — the same output set, the generator hosts' compiled
- *                                         agents, the learning-off variants and the shipped
+ *                                         agents, the curation-off variants and the shipped
  *                                         .mds sources, inside the tarball
- *   - tests/learning/learning-variants-build.test.ts
- *       LEARNING_VARIANT_HOSTS          — the learning-off files on disk, both directions
- *   - tests/learning/learning-variants-arms.test.ts
- *       LEARNING_VARIANT_HOSTS          — the hosts whose compiled body carries an arm, both directions
- *       SETTINGS_BLOCK_HOSTS_LEARNING_OFF — the commands that keep the settings block with learning off
+ *   - tests/curation/curation-variants-build.test.ts
+ *       CURATION_VARIANT_HOSTS          — the curation-off files on disk, both directions
+ *   - tests/curation/curation-variants-arms.test.ts
+ *       CURATION_VARIANT_HOSTS          — the hosts whose compiled body carries an arm, both directions
+ *       SETTINGS_BLOCK_HOSTS_CURATION_OFF — the commands that keep the settings block with curation off
  *   - tests/mds-variants.test.ts
  *       "validateOutputName"            — every basename the build owns is accepted by the name rule
  *   - tests/commands/settings-partial.test.ts
@@ -185,7 +185,7 @@ export const EVIDENCE_POLICY_PARTIAL_ADOPTERS = [
  * above: the provider-scope guard allowlists the block's closed provider set in exactly
  * these files, and tests/commands/settings-partial.test.ts holds the set to the build.
  *
- * The block count (14) and the learning-off count (8) are test-local constants beside
+ * The block count (14) and the curation-off count (8) are test-local constants beside
  * their assertions, not manifest rows: a count held here would be a second place to
  * keep in step with this set.
  */
@@ -207,15 +207,15 @@ export const SETTINGS_BLOCK_HOSTS = [
 ] as const
 
 /**
- * The hosts whose learning-OFF build still carries the settings block: the ones with
- * a consumer other than learning (a compliance lens, a publication gate or a knowledge
+ * The hosts whose curation-OFF build still carries the settings block: the ones with
+ * a consumer other than curation (a compliance lens, a publication gate or a knowledge
  * write-back). The other six of SETTINGS_BLOCK_HOSTS (bug-analysis, dynamic-plan,
  * dynamic-profile, dynamic-tickets, release, research) only read the line for the
- * decisions gate or a Skim spawn, so the block sits inside their learning-on arm.
- * Named as a set; the learning-off count (8) is a test-local constant beside its
+ * decisions gate or a Skim spawn, so the block sits inside their curation-on arm.
+ * Named as a set; the curation-off count (8) is a test-local constant beside its
  * assertion.
  */
-export const SETTINGS_BLOCK_HOSTS_LEARNING_OFF = [
+export const SETTINGS_BLOCK_HOSTS_CURATION_OFF = [
   'code-review',
   'debug',
   'dynamic-build',
@@ -230,8 +230,8 @@ export const SETTINGS_BLOCK_HOSTS_LEARNING_OFF = [
  * Generator hosts: .mds sources outside src/assets/commands/ that compile to a
  * destination other than dist/commands. Twelve today, all agents:
  * src/assets/agents/{name}.mds → dist/agents/{name}.md. Git is the first; the other
- * eleven (the agents that declare learning input, plus Skim) are hosts so their
- * learning arms can be built into the learning-off variant. Code is three hosts
+ * eleven (the agents that declare curation input, plus Skim) are hosts so their
+ * curation arms can be built into the curation-off variant. Code is three hosts
  * (D-CODE-VARIANTS): `code`, `fix` and `refactor`, which share
  * `src/assets/agents/_partials/_code.mds`. The rest of the agents stay hand-authored,
  * and an agent never has both an .md and an .mds source.
@@ -252,22 +252,22 @@ export const MDS_GENERATOR_HOSTS = [
 ] as const;
 
 /**
- * The hosts whose compiled body carries a learning arm, and therefore have a
- * learning-off variant: each is `<kind>/<name>`, the path under
- * `dist/learning-off/` without its `.md`. Named as a set, not a count, for the
+ * The hosts whose compiled body carries a curation arm, and therefore have a
+ * curation-off variant: each is `<kind>/<name>`, the path under
+ * `dist/curation-off/` without its `.md`. Named as a set, not a count, for the
  * same reason as every other roster here: a count stays green when one host
  * loses its arm and another gains one in the same commit.
  *
  * All 14 command hosts (each loads decisions, or hands them on, behind an arm)
  * and the eleven agent hosts that declare `DECISIONS_CONTEXT` (ten, the three Code
- * variants among them) or take the `LEARNING` input (Skim). The Curate agent, `curate.md`, is hand-authored
- * and runs only when learning is on, so it has no variant. The assertions over
+ * variants among them) or take the `CURATION` input (Skim). The Curate agent, `curate.md`, is hand-authored
+ * and runs only when curation is on, so it has no variant. The assertions over
  * this set hold at every step: the printed variant count and the files under
- * `dist/learning-off/` both equal it in both directions, the packed tarball
+ * `dist/curation-off/` both equal it in both directions, the packed tarball
  * carries exactly these files, and an arm added without a row (or a row left
  * after its arm goes) turns one of them red.
  */
-export const LEARNING_VARIANT_HOSTS: readonly string[] = [
+export const CURATION_VARIANT_HOSTS: readonly string[] = [
   ...MDS_COMMAND_HOSTS.map(h => `commands/${h}`),
   ...[
     'code',
@@ -284,8 +284,8 @@ export const LEARNING_VARIANT_HOSTS: readonly string[] = [
   ].map(h => `agents/${h}`),
 ];
 
-/** The `dist/learning-off/`-relative file of every host in LEARNING_VARIANT_HOSTS. */
-export const LEARNING_OFF_FILES: readonly string[] = LEARNING_VARIANT_HOSTS.map(h => `${h}.md`);
+/** The `dist/curation-off/`-relative file of every host in CURATION_VARIANT_HOSTS. */
+export const CURATION_OFF_FILES: readonly string[] = CURATION_VARIANT_HOSTS.map(h => `${h}.md`);
 
 /**
  * Reference modules: .mds sources under src/assets/mds/ that the build COMPILES,

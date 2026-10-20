@@ -36,7 +36,7 @@ import { spawnSync } from 'child_process';
 import { requireBuiltCli } from './helpers.js';
 import { assertTempHome } from './setup/home-isolation.js';
 import { installedReferenceManifest } from '../src/core/mds-variants.js';
-import { DEVFLOW_PLUGINS, FEATURE_OWNED_SKILLS, LEARNING_GATED_SKILLS, prefixSkillName, skillsOf, getAllSkillNames } from '../src/core/plugins.js';
+import { DEVFLOW_PLUGINS, FEATURE_OWNED_SKILLS, CURATION_GATED_SKILLS, prefixSkillName, skillsOf, getAllSkillNames } from '../src/core/plugins.js';
 import { ALWAYS_PRESENT_REFS, COMPLIANCE_FRAMEWORKS } from '../src/core/compliance.js';
 
 const CLI_PATH = requireBuiltCli();
@@ -67,7 +67,7 @@ function run(args: string[]): { status: number | null; stdout: string; stderr: s
 function init(extraArgs: string[] = []) {
   return run([
     'init', '--recommended',
-    '--no-ambient', '--no-memory', '--no-learning', '--no-knowledge', '--no-rules',
+    '--no-ambient', '--no-memory', '--no-curation', '--no-knowledge', '--no-rules',
     ...extraArgs,
   ]);
 }
@@ -218,8 +218,8 @@ describe('devflow init installs every provider (D-INSTALL-ALL-PROVIDERS)', () =>
     expect(init().status).toBe(0);
     // Plus the feature-owned compliance skill, which converge installs on every
     // machine (D-COMPLIANCE-INSTALL-ALWAYS) — it belongs to no plugin. Minus the
-    // learning-gated skills: this install runs with learning off (D-LEARNING-VARIANT-INSTALL).
-    const gated: readonly string[] = LEARNING_GATED_SKILLS;
+    // curation-gated skills: this install runs with curation off (D-LEARNING-VARIANT-INSTALL).
+    const gated: readonly string[] = CURATION_GATED_SKILLS;
     const expected = [...skillsOf(DEVFLOW_PLUGINS.filter(p => !p.optional)), ...FEATURE_OWNED_SKILLS]
       .filter(skill => !gated.includes(skill))
       .map(prefixSkillName).sort();
@@ -312,7 +312,7 @@ describe('partial install and selective uninstall', () => {
 
     const partial = run([
       'init', '--recommended', '--plugin=devflow-typescript',
-      '--no-ambient', '--no-memory', '--no-learning', '--no-knowledge', '--no-rules',
+      '--no-ambient', '--no-memory', '--no-curation', '--no-knowledge', '--no-rules',
     ]);
     expect(partial.status, `--plugin install failed:\n${partial.stdout}\n${partial.stderr}`).toBe(0);
 

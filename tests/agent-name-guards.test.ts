@@ -155,8 +155,8 @@ const RETIRED_AGENT_FORM_B: readonly RetiredForm[] = [
   verbForm('Scrutinize'),    // → Harden
   verbForm('Simplify'),      // → Polish
   verbForm('Diagnose'),      // → Debug
-  // Learning is also the name of the learning feature (the learning-capture KBs, the learning
-  // switch, "Learning-aware"), so only the agent-specific spellings are retired.
+  // Learning is also the pre-rename name of the curation feature (old KB titles, the mirror
+  // switch key, "Learning-aware"), so only the agent-specific spellings are retired.
   {
     name: 'Learning agent',                // → Curate agent
     patterns: [/\bLearning agents?\b/],
@@ -555,7 +555,7 @@ const RETIRED_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     contexts: ['agents.learning.model'],
   },
   {
-    path: '.devflow/features/learning-capture-system-agent/KNOWLEDGE.md',
+    path: '.devflow/features/curation-capture-system-agent/KNOWLEDGE.md',
     name: 'agents.learning',
     reason:
       'CONTRACT: documents the same fallback to the pre-rename agents.learning.model entry',
@@ -1316,9 +1316,9 @@ describe('GAP-5: no retired agent names in any shipped artifact (fail-loud when 
     expect(missed, `Retired spellings the collector did not flag:\n${missed.join('\n')}`).toEqual([])
   })
 
-  it('known-bad probe: ordinary words and the learning feature are not retired agent names', () => {
+  it('known-bad probe: ordinary words and the pre-rename feature name are not retired agent names', () => {
     const benign = [
-      '---\nfeature: learning-capture-system\nname: Learning capture system\n---',
+      '---\nfeature: curation-capture-system\nname: Curation capture system\n---',
       '---\nname: Learning store, ops and rendering\n---',
       '---\nname: Learning-aware Install & Language-focus Stamp\n---',
       '# Learning-aware Install & Language-focus Stamp',

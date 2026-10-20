@@ -547,6 +547,47 @@ describe('ensureDevflowGitignore — v6 carve-out (.claudeignore + retired polic
 
     expect(contentAfterSecondRun).toBe(contentAfterFirstRun);
   });
+
+  // The comment word moved with the feature name. It is comment text, not a block
+  // sentinel, so no stamp moves and a block written before the rename stays as it is.
+  const CURATION_COMMENT = '# Devflow runtime data — local by default (memory, curation, docs, locks).';
+  const OLD_COMMENT = '# Devflow runtime data — local by default (memory, learning, docs, locks).';
+
+  it('writes the curation comment as the first line of the block, in the same stamp (no marker bump)', async () => {
+    expect(DEVFLOW_GITIGNORE_BLOCK.split('\n')[0]).toBe(CURATION_COMMENT);
+    expect(DEVFLOW_GITIGNORE_BLOCK_WITHOUT_CLAUDEIGNORE.split('\n')[0]).toBe(CURATION_COMMENT);
+
+    await ensureDevflowGitignore(tmpDir, false);
+
+    expect(await read()).toBe(`${DEVFLOW_GITIGNORE_BLOCK}\n`);
+    expect(lines(await read())).not.toContain(OLD_COMMENT);
+    await expect(fs.access(markerV6())).resolves.toBeUndefined();
+  });
+
+  it('a current block carrying the old comment is recognised: untouched, not duplicated, stamped v6', async () => {
+    const oldBlock = DEVFLOW_GITIGNORE_BLOCK.replace(CURATION_COMMENT, OLD_COMMENT);
+    expect(oldBlock, 'the fixture really differs from the shipped block in the comment alone').not.toBe(DEVFLOW_GITIGNORE_BLOCK);
+    const seeded = `node_modules/\n\n${oldBlock}\n`;
+    await fs.writeFile(path.join(tmpDir, '.gitignore'), seeded);
+
+    expect(computeDevflowGitignore(seeded), 'the pure function sees nothing to do').toBeNull();
+    await ensureDevflowGitignore(tmpDir, false);
+
+    expect(await read(), 'byte-identical: the old comment is not rewritten').toBe(seeded);
+    expect(lines(await read()).filter(l => l === '.devflow/*')).toHaveLength(1);
+    expect(lines(await read())).not.toContain(CURATION_COMMENT);
+    await expect(fs.access(markerV6())).resolves.toBeUndefined();
+
+    await fs.rm(markerV6());
+    await ensureDevflowGitignore(tmpDir, false);
+    expect(await read(), 'a second run without the marker is still a byte no-op').toBe(seeded);
+  });
+
+  it('this repository\'s own .gitignore carries the same comment line as the shipped block', async () => {
+    const own = await fs.readFile(path.join(import.meta.dirname, '..', '.gitignore'), 'utf-8');
+    const comment = lines(own).filter(l => l.startsWith('# Devflow runtime data'));
+    expect(comment).toEqual([CURATION_COMMENT]);
+  });
 });
 
 // D-GITIGNORE-LINK-INSIDE: a repository can commit its root .gitignore as a symbolic
@@ -1955,7 +1996,7 @@ describe('installViaFileCopy cleanup (isPartialInstall)', () => {
 
   it('full install (isPartialInstall=false) removes stale commands and agents', async () => {
     await installViaFileCopy({
-      learning: true,
+      curation: true,
       plugins: [],
       claudeDir,
       devflowDir,
@@ -1974,7 +2015,7 @@ describe('installViaFileCopy cleanup (isPartialInstall)', () => {
     // 'stale' is absent from getAllCommandNames() and getAllAgentNames() — the
     // registry-diff sweep should remove it on every install shape, not just full installs.
     await installViaFileCopy({
-      learning: true,
+      curation: true,
       plugins: [],
       claudeDir,
       devflowDir,
@@ -2027,7 +2068,7 @@ describe('init LEGACY_SKILL_NAMES cleanup pass (init.ts:1149-1153)', () => {
 
     const devflowDir = path.join(tmpDir, 'devflow');
     await installViaFileCopy({
-      learning: true,
+      curation: true,
       plugins: [],
       claudeDir,
       devflowDir,
@@ -2052,7 +2093,7 @@ describe('init LEGACY_SKILL_NAMES cleanup pass (init.ts:1149-1153)', () => {
 
     const devflowDir = path.join(tmpDir, 'devflow');
     await installViaFileCopy({
-      learning: true,
+      curation: true,
       plugins: [],
       claudeDir,
       devflowDir,
@@ -2129,7 +2170,7 @@ describe('partial install registry-diff sweep correctness', () => {
 
     // --- Act ---
     await installViaFileCopy({
-      learning: true,
+      curation: true,
       plugins: [],          // no plugins selected — pure partial install
       claudeDir,
       devflowDir,

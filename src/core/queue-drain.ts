@@ -1,8 +1,8 @@
 /**
  * @file queue-drain.ts
  *
- * `drainQueueFiles`, the delete the queue drains share — `drainLearningQueue`
- * (learning-queue-cleanup.ts) and `drainMemoryQueue` (cli/commands/memory.ts) —
+ * `drainQueueFiles`, the delete the queue drains share — `drainCurationQueue`
+ * (curation-queue-cleanup.ts) and `drainMemoryQueue` (cli/commands/memory.ts) —
  * and `formatRefusedDrain`, the line the CLI prints for a drain it refused.
  */
 
@@ -12,10 +12,11 @@ import { firstSymbolicLink } from './linked-path.js';
 /**
  * What a queue drain did: drained the queue, every file of which is gone whether or
  * not it was there; or refused, naming the folder on the way to the queue that is a
- * symbolic link, and deleted nothing (D-CLI-NO-SYMLINK).
+ * symbolic link, and deleted nothing (D-CLI-NO-SYMLINK). A drain that did its main work
+ * and could not do a part of it says which part in `warning`, one line the caller prints.
  */
 export type QueueDrain =
-  | { readonly drained: true }
+  | { readonly drained: true; readonly warning?: string }
   | { readonly drained: false; readonly linkedFolder: string };
 
 /**
@@ -35,6 +36,6 @@ export async function drainQueueFiles(folders: readonly string[], files: readonl
 }
 
 /** The warning for a drain refused at `linkedFolder`: which queue kept its files, and why. */
-export function formatRefusedDrain(queue: 'learning' | 'memory', linkedFolder: string): string {
+export function formatRefusedDrain(queue: 'curation' | 'memory', linkedFolder: string): string {
   return `The ${queue} queue was not drained: ${linkedFolder} is a symbolic link, and devflow deletes nothing through one`;
 }
