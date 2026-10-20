@@ -914,7 +914,7 @@ describe.skipIf(!POSIX)('the name on standard input, through the real script', S
 
   function runWithStdio(w: World, args: readonly string[], stdin: number | 'ignore' | 'pipe', input?: string): Outcome {
     const r = spawnSync(process.execPath, [RESOLVE_BASE_SCRIPT, ...args], {
-      cwd: w.work, env: cleanEnv(w.home, {}), encoding: 'utf8', stdio: [stdin, 'pipe', 'pipe'], timeout: SUBPROCESS_TIMEOUT_MS, input,
+      cwd: w.work, env: scopedEnv(w.home), encoding: 'utf8', stdio: [stdin, 'pipe', 'pipe'], timeout: SUBPROCESS_TIMEOUT_MS, input,
     })
     return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', status: r.status }
   }
@@ -976,7 +976,7 @@ describe.skipIf(!POSIX)('the name on standard input, through the real script', S
 
   /** Run the script with a standard input that stays open and never ends; true when it ended on its own. */
   async function endsWithOpenStdin(w: World, args: readonly string[]): Promise<{ ended: boolean; stdout: string }> {
-    const child = spawnAsync(process.execPath, [RESOLVE_BASE_SCRIPT, ...args], { cwd: w.work, env: cleanEnv(w.home, {}), stdio: ['pipe', 'pipe', 'pipe'] })
+    const child = spawnAsync(process.execPath, [RESOLVE_BASE_SCRIPT, ...args], { cwd: w.work, env: scopedEnv(w.home), stdio: ['pipe', 'pipe', 'pipe'] })
     let stdout = ''
     child.stdout.on('data', (d: Buffer) => { stdout += d.toString('utf8') })
     child.stderr.resume()
