@@ -8,7 +8,16 @@ import { describe, it, expect, vi } from 'vitest';
 import { readFileSync, promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { buildHudOnlyManifest, drainDisabledFeatureQueues, formatHudOnlySkew, type DisabledQueueDrainIO } from '../src/cli/commands/init.js';
+import {
+  buildHudOnlyManifest,
+  drainDisabledFeatureQueues,
+  formatHudOnlySkew,
+  lookupDrainLedgerRoot,
+  lookupOwnLedgerRoot,
+  moveCurationData,
+  type DisabledQueueDrainIO,
+} from '../src/cli/commands/init.js';
+import { LEDGER_ROOT_TIMEOUT_MS, type LedgerRootLookup } from '../src/core/ledger-root.js';
 import { installedVersionMatches } from '../src/targets/claude-code/curation-install.js';
 import type { ManifestData } from '../src/core/manifest.js';
 
@@ -303,5 +312,120 @@ describe('init --security none clears the managed deny list too', () => {
   it('the detection guard is set from the managed file\'s parse-safe deny state', () => {
     expect(src).toMatch(/detectDenyState\(userSettingsJson, managedExists, managedContentJson\)/);
     expect(src).toContain('managedDenyDetected = detected.managed;');
+  });
+});
+
+describe("init asks for its own repository's ledger root within the shared budget", () => {
+  const timedOut = async (): Promise<LedgerRootLookup> => ({ kind: 'timed-out' });
+
+  describe('lookupOwnLedgerRoot', () => {
+    it('asks nothing outside a git repository', async () => {
+      const lookup = vi.fn(async (): Promise<LedgerRootLookup> => ({ kind: 'root', root: '/repo' }));
+      expect(await lookupOwnLedgerRoot(null, lookup)).toEqual({ root: null, timedOut: false });
+      expect(lookup).not.toHaveBeenCalled();
+    });
+
+    it('passes the shared timeout to the lookup, so a hung mount cannot stall init', async () => {
+      const lookup = vi.fn(async (): Promise<LedgerRootLookup> => ({ kind: 'root', root: '/main' }));
+      expect(await lookupOwnLedgerRoot('/repo-wt', lookup)).toEqual({ root: '/main', timedOut: false });
+      expect(lookup).toHaveBeenCalledTimes(1);
+      expect(lookup.mock.calls[0][1]).toEqual({ timeoutMs: LEDGER_ROOT_TIMEOUT_MS });
+    });
+
+    it('a timeout is no ledger root, and says it timed out', async () => {
+      expect(await lookupOwnLedgerRoot('/repo', timedOut)).toEqual({ root: null, timedOut: true });
+    });
+
+    it('an answer of no work tree is no ledger root, and no timeout', async () => {
+      expect(await lookupOwnLedgerRoot('/repo', async () => ({ kind: 'no-root' }))).toEqual({ root: null, timedOut: false });
+    });
+  });
+
+  describe('lookupDrainLedgerRoot', () => {
+    it('asks nothing while curation is on: there is nothing to drain', async () => {
+      const lookup = vi.fn(timedOut);
+      expect(await lookupDrainLedgerRoot({ gitRoot: '/repo', curationEnabled: true }, lookup)).toEqual({ ledgerRoot: null, warning: null });
+      expect(lookup).not.toHaveBeenCalled();
+    });
+
+    it('asks nothing outside a git repository', async () => {
+      const lookup = vi.fn(timedOut);
+      expect(await lookupDrainLedgerRoot({ gitRoot: null, curationEnabled: false }, lookup)).toEqual({ ledgerRoot: null, warning: null });
+      expect(lookup).not.toHaveBeenCalled();
+    });
+
+    it('answers the ledger root, with the shared timeout', async () => {
+      const lookup = vi.fn(async (): Promise<LedgerRootLookup> => ({ kind: 'root', root: '/main' }));
+      expect(await lookupDrainLedgerRoot({ gitRoot: '/repo-wt', curationEnabled: false }, lookup)).toEqual({ ledgerRoot: '/main', warning: null });
+      expect(lookup.mock.calls[0][1]).toEqual({ timeoutMs: LEDGER_ROOT_TIMEOUT_MS });
+    });
+
+    it('a timeout drains nothing and prints one line that names the repository', async () => {
+      const answer = await lookupDrainLedgerRoot({ gitRoot: '/repo', curationEnabled: false }, timedOut);
+      expect(answer.ledgerRoot).toBeNull();
+      expect(answer.warning).toBe('The curation queue was not drained for /repo: git did not answer in time. The next init tries again.');
+    });
+
+    it('prints the repository name with its control characters replaced', async () => {
+      const answer = await lookupDrainLedgerRoot({ gitRoot: '/re\u001b[31mpo\n', curationEnabled: false }, timedOut);
+      expect([...(answer.warning ?? '')].some((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f)).toBe(false);
+    });
+  });
+
+  describe('moveCurationData', () => {
+    async function withDirs<T>(body: (dirs: { base: string; home: string; devflowDir: string }) => Promise<T>): Promise<T> {
+      const base = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-init-own-root-'));
+      try {
+        const home = path.join(base, 'home');
+        const devflowDir = path.join(home, '.devflow');
+        await fs.mkdir(devflowDir, { recursive: true });
+        return await body({ base, home, devflowDir });
+      } finally {
+        await fs.rm(base, { recursive: true, force: true });
+      }
+    }
+
+    it('an own-root lookup that times out moves nothing, and prints one skipped line for the repository', async () => {
+      await withDirs(async ({ base, home, devflowDir }) => {
+        const repo = path.join(base, 'repo');
+        const other = path.join(base, 'other');
+        await fs.mkdir(path.join(repo, '.devflow', 'learning'), { recursive: true });
+        await fs.mkdir(other);
+
+        const report = await moveCurationData({ discoveredProjects: [other], gitRoot: repo, homeDir: home, devflowDir }, timedOut);
+
+        expect(report.movedCount).toBe(0);
+        expect(report.lines.filter((line) => line.includes(repo))).toEqual([
+          `Ledger move skipped for ${repo}: git did not answer in time. Nothing was moved. The next init tries again.`,
+        ]);
+        await expect(fs.stat(path.join(repo, '.devflow', 'learning'))).resolves.toBeTruthy();
+      });
+    });
+
+    it('does not print the line twice when the step already covers the repository as a project root', async () => {
+      await withDirs(async ({ base, home, devflowDir }) => {
+        const repo = path.join(base, 'repo');
+        await fs.mkdir(repo);
+
+        const report = await moveCurationData({ discoveredProjects: [], gitRoot: repo, homeDir: home, devflowDir }, timedOut);
+
+        expect(report.lines.filter((line) => line.includes('git did not answer in time'))).toHaveLength(0);
+      });
+    });
+
+    it('asks for no own root outside a git repository', async () => {
+      await withDirs(async ({ home, devflowDir }) => {
+        const lookup = vi.fn(timedOut);
+        const report = await moveCurationData({ discoveredProjects: [], gitRoot: null, homeDir: home, devflowDir }, lookup);
+        expect(lookup).not.toHaveBeenCalled();
+        expect(report.lines).toEqual([]);
+      });
+    });
+  });
+
+  it('init.ts never asks for a ledger root without a time budget', () => {
+    const src = readFileSync(path.resolve(import.meta.dirname, '..', 'src', 'cli', 'commands', 'init.ts'), 'utf-8');
+    expect(src).not.toMatch(/\bgetLedgerRoot\(\s*\)/);
+    expect(src).toMatch(/timeoutMs:\s*LEDGER_ROOT_TIMEOUT_MS/);
   });
 });

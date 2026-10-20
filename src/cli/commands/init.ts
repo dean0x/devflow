@@ -8,10 +8,10 @@ import { resolveInstallationPaths } from '../../targets/claude-code/claude-paths
 import { getGitRoot } from '../../core/git.js';
 import { isSameLocation, withoutHomeRoots } from '../../core/same-location.js';
 import { pruneHookLogDirs, MAX_HOOK_LOG_DIRS, type LogDirPruneReport } from '../../core/hook-log-dirs.js';
-import { getLedgerRoot } from '../../core/ledger-root.js';
+import { LEDGER_ROOT_TIMEOUT_MS, lookupLedgerRoot } from '../../core/ledger-root.js';
 import { formatCurationStoreUnavailable } from '../../core/curation-store.js';
 import { loadCurationMove } from '../../core/curation-move.js';
-import { describeMoveText, runInitCurationMove, type InitCurationMoveReport } from './curation-move-step.js';
+import { describeMoveText, describeOutcome, runInitCurationMove, type InitCurationMoveReport } from './curation-move-step.js';
 import { realGlobalTuningMoveIO, realProjectLedgerMoveIO } from './curation-move-io.js';
 import { describeEchoedValue } from '../../core/echo-value.js';
 import { installViaFileCopy, composeScripts, type InstallReport } from '../../targets/claude-code/installer.js';
@@ -664,18 +664,28 @@ interface InitOptions {
  *
  * Init runs it after the legacy sweep and BEFORE the manifest is persisted and the
  * disabled-feature queues drain, so the drain sees the moved folder.
+ *
+ * The own ledger root is looked up within the shared budget (`lookupOwnLedgerRoot`). A
+ * lookup that times out is no ledger root: the step moves the other targets, and one
+ * skipped line names the repository, unless the repository is itself a project root,
+ * where the step's own lookup reports it.
  */
-export async function moveCurationData(opts: {
-  discoveredProjects: readonly string[];
-  gitRoot: string | null;
-  homeDir: string;
-  devflowDir: string;
-}): Promise<InitCurationMoveReport> {
+export async function moveCurationData(
+  opts: {
+    discoveredProjects: readonly string[];
+    gitRoot: string | null;
+    homeDir: string;
+    devflowDir: string;
+  },
+  lookup: LedgerRootLookupFn = lookupLedgerRoot,
+): Promise<InitCurationMoveReport> {
   const loaded = loadCurationMove();
-  return runInitCurationMove(
+  const roots = projectRoots([...opts.discoveredProjects], opts.gitRoot);
+  const own = await lookupOwnLedgerRoot(opts.gitRoot, lookup);
+  const report = await runInitCurationMove(
     {
-      projectRoots: projectRoots([...opts.discoveredProjects], opts.gitRoot),
-      ownLedgerRoot: opts.gitRoot === null ? null : await getLedgerRoot(),
+      projectRoots: roots,
+      ownLedgerRoot: own.root,
       homeDir: opts.homeDir,
       machineDir: opts.devflowDir,
     },
@@ -684,6 +694,46 @@ export async function moveCurationData(opts: {
       tuning: realGlobalTuningMoveIO(),
     },
   );
+  if (!own.timedOut || opts.gitRoot === null || roots.includes(opts.gitRoot)) return report;
+  const skipped = describeOutcome({ kind: 'skipped', root: opts.gitRoot, reason: 'git-root-timed-out' });
+  return { ...report, lines: [...report.lines, ...skipped] };
+}
+
+/** The ledger root lookup init takes, injectable for tests. */
+export type LedgerRootLookupFn = typeof lookupLedgerRoot;
+
+/**
+ * The ledger root of the current repository for init's own move and drain
+ * (D-LEDGER-MAIN-WORKTREE): one lookup from the working directory, bounded by
+ * LEDGER_ROOT_TIMEOUT_MS like the HUD's and the step's lookups, so a repository on a
+ * hung mount costs a bounded wait and never stalls init. A lookup that timed out is no
+ * root (`root` null, `timedOut` true), so the caller acts on nothing and says so.
+ * Outside a git repository (`gitRoot` null) nothing is asked.
+ */
+export async function lookupOwnLedgerRoot(
+  gitRoot: string | null,
+  lookup: LedgerRootLookupFn = lookupLedgerRoot,
+): Promise<{ readonly root: string | null; readonly timedOut: boolean }> {
+  if (gitRoot === null) return { root: null, timedOut: false };
+  const found = await lookup(undefined, { timeoutMs: LEDGER_ROOT_TIMEOUT_MS });
+  return { root: found.kind === 'root' ? found.root : null, timedOut: found.kind === 'timed-out' };
+}
+
+/**
+ * The ledger root init's disabled-feature drain acts on, and the one line to print when
+ * there is none because git did not answer in time. Asks only when curation is off in a
+ * git repository: with curation on there is nothing to drain.
+ */
+export async function lookupDrainLedgerRoot(
+  opts: { readonly gitRoot: string | null; readonly curationEnabled: boolean },
+  lookup: LedgerRootLookupFn = lookupLedgerRoot,
+): Promise<{ readonly ledgerRoot: string | null; readonly warning: string | null }> {
+  if (opts.curationEnabled || opts.gitRoot === null) return { ledgerRoot: null, warning: null };
+  const own = await lookupOwnLedgerRoot(opts.gitRoot, lookup);
+  const warning = own.timedOut
+    ? `The curation queue was not drained for ${describeMoveText(opts.gitRoot)}: git did not answer in time. The next init tries again.`
+    : null;
+  return { ledgerRoot: own.root, warning };
 }
 
 /** The queue drains `drainDisabledFeatureQueues` performs — injected for tests. */
@@ -710,7 +760,7 @@ export interface DisabledQueueDrainIO {
  *
  * D-LEDGER-MAIN-WORKTREE: each queue drains where the hooks write it — memory at
  * this checkout's toplevel (`gitRoot`), curation at the ledger root (`ledgerRoot`,
- * getLedgerRoot), which in a linked worktree is the main checkout.
+ * lookupOwnLedgerRoot), which in a linked worktree is the main checkout.
  *
  * Returns one warning for each drain refused because a folder on the way to its
  * queue is a symbolic link (D-CLI-NO-SYMLINK); the caller prints them.
@@ -2884,9 +2934,11 @@ export const initCommand = new Command('init')
     }
 
     // Only now that the machine-wide switch is on disk (D-INIT-DRAIN-AFTER-SWITCH).
+    const drainRoot = await lookupDrainLedgerRoot({ gitRoot, curationEnabled });
+    if (drainRoot.warning !== null) p.log.warn(drainRoot.warning);
     const refusedDrains = await drainDisabledFeatureQueues({
       gitRoot,
-      ledgerRoot: curationEnabled || gitRoot === null ? null : await getLedgerRoot(),
+      ledgerRoot: drainRoot.ledgerRoot,
       memoryEnabled,
       curationEnabled,
       manifestWritten: trackerLifecycle.manifestWritten,
