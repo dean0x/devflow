@@ -982,6 +982,7 @@ describe.skipIf(!POSIX)('the name on standard input, through the real script', S
     child.stderr.resume()
     const ended = await new Promise<boolean>(resolve => {
       const timer = setTimeout(() => resolve(false), SUBPROCESS_TIMEOUT_MS / 2)
+      child.on('error', () => { clearTimeout(timer); resolve(false) })
       child.on('close', () => { clearTimeout(timer); resolve(true) })
     })
     if (!ended) child.kill('SIGKILL')

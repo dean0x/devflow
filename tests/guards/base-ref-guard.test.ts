@@ -615,7 +615,8 @@ const SCOPE_LINE_PARTS: readonly string[] = [
 const CHANGED_FILES_PARTS: ReadonlyArray<readonly [string, string]> = [
   ['Take `{base_ref}` from step 6\'s `- **Base ref**:` line', 'the list does not start from the Base ref that step 6 returned'],
   ['git -C "{integration worktree root}" diff --name-only --diff-filter=d {base_ref}...HEAD; echo "exit=$?"', 'the command is not the name-only diff that starts at {base_ref}, filters deletions and echoes its exit status'],
-  ['Unless `{base_ref}` is 40 or 64 lowercase hex and the diff prints `exit=0`', 'the step does not require a 40 or 64 lowercase hex {base_ref} and a zero diff exit'],
+  ['; only when it is 40 or 64 lowercase hex, run `git -C', 'the step does not require a 40 or 64 lowercase hex {base_ref} before the diff runs'],
+  ['Unless it ran and printed `exit=0`', 'the step does not require a zero diff exit'],
   ['record `TRACEABILITY: DEGRADED (wave base unusable)` and skip this step.', 'the step does not record one degraded line and skip'],
 ]
 
@@ -749,7 +750,8 @@ const REVIEW_RANGE_SEEDS: readonly RangeSeed[] = [
   ['the changed-files diff keeps deletions', '--diff-filter=d {base_ref}...HEAD', '{base_ref}...HEAD', 'the command is not the name-only diff'],
   ['the changed-files diff starts at a branch', '--diff-filter=d {base_ref}...HEAD', '--diff-filter=d main...HEAD', 'the command is not the name-only diff'],
   ['the changed-files diff does not echo its exit status', '{base_ref}...HEAD; echo "exit=$?"', '{base_ref}...HEAD', 'the command is not the name-only diff'],
-  ['the changed-files step takes any base ref', 'Unless `{base_ref}` is 40 or 64 lowercase hex and the diff prints `exit=0`', 'Unless the diff prints `exit=0`', 'the step does not require a 40 or 64 lowercase hex {base_ref}'],
+  ['the changed-files step takes any base ref', '; only when it is 40 or 64 lowercase hex, run `git -C', ' and run `git -C', 'the step does not require a 40 or 64 lowercase hex {base_ref}'],
+  ['the changed-files step ignores the diff exit', 'Unless it ran and printed `exit=0`, record', 'Then record', 'the step does not require a zero diff exit'],
   ['the changed-files step does not skip with one degraded line', 'record `TRACEABILITY: DEGRADED (wave base unusable)` and skip this step.', 'skip this step.', 'the step does not record one degraded line and skip'],
   ['the changed-files step reads another base', 'Take `{base_ref}` from step 6\'s `- **Base ref**:` line', 'Take `{base_ref}` from the branch', 'the list does not start from the Base ref that step 6 returned'],
   ['the Test spawn takes another list', 'FILES_CHANGED: {the file list that diff printed}', 'FILES_CHANGED: {the branch diff}', 'the Test spawn does not take the list that diff printed'],

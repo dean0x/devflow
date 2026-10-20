@@ -25,8 +25,10 @@
 // bytes are read, in a loop of repeated reads of descriptor 0 that stops one byte past the
 // cap, so a name is never cut short. A terminal is never read. Empty, unreadable or terminal
 // input gives REASON resolver-unavailable. Input over the cap, or holding a NUL, a CR, a
-// non-ASCII byte or a second line, gives REASON invalid-name. A descriptor with no input yet
-// is waited for inside RUN_BUDGET_MS. No new REASON exists.
+// non-ASCII byte or a second line, gives REASON invalid-name. A non-blocking descriptor with
+// no input yet is waited for inside RUN_BUDGET_MS. A read of a blocking pipe returns only when
+// input arrives or the writer closes the pipe, and RUN_BUDGET_MS does not bound that read, so
+// a caller passes a file (`< "$F"`) or a pipe whose writer ends. No new REASON exists.
 //
 // stdout is exactly one line, ending in a newline, exit 0 on every handled path:
 //   BASE_REF=<40hex|64hex|none> TIP=<origin|local|none> FETCH=<ok|failed|skipped> REASON=<code> NOTE=<none|info|degraded|stop>
@@ -814,7 +816,8 @@ const STDIN_INVALID = Object.freeze({ kind: 'refused', reason: 'invalid-name' })
  * cap is told from input at it and is never cut short. A read that fails with EAGAIN (a
  * non-blocking descriptor with no input yet) waits and reads again, and every wait counts
  * inside the run budget. Each pass takes at least one byte, ends the loop, or spends one of
- * the STDIN_MAX_WAITS waits, so the loop has a fixed upper bound.
+ * the STDIN_MAX_WAITS waits, so the loop has a fixed upper bound. One read of a blocking pipe
+ * returns only when input arrives or the writer closes the pipe; the callers pass a file.
  *
  * Empty input and an unreadable descriptor give resolver-unavailable. Input over the cap gives
  * invalid-name. Exactly one trailing LF or CRLF is removed and nothing is trimmed. The bytes

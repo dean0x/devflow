@@ -760,7 +760,7 @@ Do NOT ask questions mid-workflow — that is impossible (F4). The workflow only
 
 7. **Wave PR evidence** — only when step 6 reported the wave PR, after it; it never blocks, and every outcome below goes into the run summary. Take `{n}` from step 6's `- **PR**: #{n}` line when `{n}` matches `^[1-9][0-9]{0,9}$` as a whole; no such line ⇒ record `TRACEABILITY: DEGRADED (wave PR number not captured)` and skip this step. `PR_TEST_PLAN_BLOCK` `(none)` ⇒ record `Wave evidence: skipped (no wave test plan)` and skip it.
 
-   **Changed files.** Take `{base_ref}` from step 6's `- **Base ref**:` line and run `git -C "{integration worktree root}" diff --name-only --diff-filter=d {base_ref}...HEAD; echo "exit=$?"`. Unless `{base_ref}` is 40 or 64 lowercase hex and the diff prints `exit=0`, record `TRACEABILITY: DEGRADED (wave base unusable)` and skip this step.
+   **Changed files.** Take `{base_ref}` from step 6's `- **Base ref**:` line; only when it is 40 or 64 lowercase hex, run `git -C "{integration worktree root}" diff --name-only --diff-filter=d {base_ref}...HEAD; echo "exit=$?"`. Unless it ran and printed `exit=0`, record `TRACEABILITY: DEGRADED (wave base unusable)` and skip this step.
 
    **(a) Test the wave.** Spawn one Test agent on the integration worktree with the wave test plan — the TP lines of the `## Test Plan` section step 3(b) wrote to `{integration worktree root}/.devflow/docs/evidence-wave-{slug}.md`:
 

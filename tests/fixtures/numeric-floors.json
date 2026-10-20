@@ -574,19 +574,19 @@
     },
     {
       "id": "command-dynamic-build-max",
-      "ceiling": 106872,
-      "pattern": "['dynamic-build', 'on', 106_872],",
+      "ceiling": 106869,
+      "pattern": "['dynamic-build', 'on', 106_869],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/commands/dynamic-build.md, the learning-on build, in bytes. Measured 106,872 after #561 (106,923 after #486 lowered it), with no headroom. Main held 106,526. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/commands/dynamic-build.md, the learning-on build, in bytes. Measured 106,869 after #561 (106,923 after #486 lowered it), with no headroom. Main held 106,526. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-dynamic-build-learning-off-max",
-      "ceiling": 103485,
-      "pattern": "['dynamic-build', 'off', 103_485],",
+      "ceiling": 103482,
+      "pattern": "['dynamic-build', 'off', 103_482],",
       "occurrences": 1,
       "sourceFile": "tests/guards/command-size.test.ts",
-      "description": "D-CMD-SIZE: dist/learning-off/commands/dynamic-build.md, the learning-off build, in bytes. Measured 103,485 after #561 (103,536 after #486 lowered it), with no headroom. Main held 103,373. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
+      "description": "D-CMD-SIZE: dist/learning-off/commands/dynamic-build.md, the learning-off build, in bytes. Measured 103,482 after #561 (103,536 after #486 lowered it), with no headroom. Main held 103,373. The command is the main session's standing context, read on the first turn and re-read from cache on every later one. May be LOWERED, never raised: a command that needs more bytes first moves a rare branch to a reference (D-CMD-REF-HAND) or condenses text a line of the same command already states."
     },
     {
       "id": "command-dynamic-plan-max",
