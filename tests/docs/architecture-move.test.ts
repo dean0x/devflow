@@ -152,6 +152,22 @@ describe('the curation move and switch paragraphs state the same rules', () => {
   });
 });
 
+describe('the CLI reference agrees with the upgrade notes on backups and a failed move', () => {
+  const cliLines = readFileSync(path.join(ROOT, 'docs/cli-reference.md'), 'utf8').split('\n');
+  const status = lineStarting(cliLines, '`curation --status` counts the active entries');
+  const oldFolder = lineStarting(cliLines, 'A project that still has the old `.devflow/learning/` folder');
+
+  it('warns that a backup made on re-upgrade can hold the only copy of 3.7 entries', () => {
+    expect(status).toContain('Delete a backup only when its line shows 0 pending rows.');
+    expect(status).toContain('A backup made on re-upgrade can hold the only copy of entries that 3.7 wrote. Check them before you delete it.');
+  });
+
+  it('says the refused line also shows after a failed move, and that the hook log names the cause', () => {
+    expect(oldFolder).toContain('`Curation: move refused, see the hook log` when the move was refused or failed.');
+    expect(oldFolder).toContain('The hook log names the cause.');
+  });
+});
+
 describe('the docs name whose backups uninstall removes', () => {
   const scope = 'removes the backups of the project at the git root of the current directory';
 
