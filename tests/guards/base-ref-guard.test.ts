@@ -751,6 +751,9 @@ describe('known-bad probes: each collector reports the seeded bad text and passe
       ['a longer length', STRICT.replace('{1,200}', '{1,255}')],
       ['an extra character', STRICT.replace('#-]', '#~-]')],
       ['a plus sign for the length', STRICT.replace('{1,200}', '+')],
+      ['a reordered class', STRICT.replace('+@,#', '@+,#')],
+      ['an extra character inside the +@,# run', STRICT.replace('+@,#', '+~@,#')],
+      ['a lowercase-first class', STRICT.replace('A-Za-z0-9', 'a-zA-Z0-9')],
     ]
 
     for (const [label, copy] of widened) {

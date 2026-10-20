@@ -1961,15 +1961,18 @@ function collectFullRangeDefects(body: string, shape: DiffRangeShape): string[] 
   if (/\bfall(?:-?back| back| through) to full\b|\btakes? the full range\b/i.test(s)) out.push(`${shape.step} names the full-range path a second way`)
   if (!/unless `base_ref` is 40 or 64 hex/.test(lines[named[0] + 1] ?? '')) out.push('the full-range path does not stop unless base_ref is 40 or 64 hex')
   if (!(lines[named[0] + 2] ?? '').includes('Set `DIFF_RANGE` to `{base_ref}...HEAD`')) out.push('the full-range path does not build DIFF_RANGE from base_ref right after the hex test')
+  const checksEnd = Math.max(s.indexOf('unless `base_ref` is 40 or 64 hex'), s.indexOf('No new commits since last'))
+  if (checksEnd === -1 || s.indexOf('mkdir -p') < checksEnd) out.push(`${shape.step} does not create the directory after the head and base checks`)
   return out
 }
 
 /**
- * A copy of the base-name check, in any width: a `^...$` pattern whose character class opens with `A-Za-z0-9` and
- * holds the `+@,#` run that only the base-name class has. The branch-slug pattern has no such run, so it is not a copy.
- * A longer length, more characters or a `+` in place of the length all stay inside the shape.
+ * A copy of the base-name check, in any width and any order: a `^...$` pattern with a character class that holds
+ * all four of `+`, `@`, `,` and `#`, the characters that only the base-name class has. The branch-slug pattern has
+ * none of them, so it is not a copy. A longer length, more characters, a reordered class or a `+` in place of the
+ * length all stay inside the shape.
  */
-const NAME_CLASS_COPY_RE = /\^[^`\s]*\[A-Za-z0-9[^\]`]*\+@,#[^\]`]*\][^`\s]*\$/g
+const NAME_CLASS_COPY_RE = /\^[^`\s]*\[(?=[^\]`]*\+)(?=[^\]`]*@)(?=[^\]`]*,)(?=[^\]`]*#)[^\]`]*\][^`\s]*\$/g
 
 /** Every copy of the base-name check in a text, exact or widened. */
 export function findNameClassCopies(text: string): string[] {

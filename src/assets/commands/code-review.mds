@@ -107,8 +107,7 @@ If `pr_number` is absent, set `PR_DESCRIPTION` to `(none)`.
 For each worktree:
 
 1. Generate timestamp: `YYYY-MM-DD_HHMM`. If directory already exists (same-minute collision), append seconds (`YYYY-MM-DD_HHMMSS`).
-2. Create timestamped review directory: `mkdir -p {worktree}/.devflow/docs/reviews/{branch-slug}/{timestamp}/`
-3. Check if `{worktree}/.devflow/docs/reviews/{branch-slug}/.last-review-head` exists:
+2. Check if `{worktree}/.devflow/docs/reviews/{branch-slug}/.last-review-head` exists:
    - **If yes AND `--full` NOT set:**
      - The review head counts only when `git -C "{worktree}/.devflow/docs/reviews/{branch-slug}" ls-files --error-unmatch -- .last-review-head >/dev/null 2>&1` exits 1; any other exit takes the full-range path.
      - Read the SHA from the file. The stored review head is checked as a commit ID: use it only when it is exactly 40 or 64 lowercase hex, else take the full-range path
@@ -118,6 +117,7 @@ For each worktree:
    - **Full-range path (no marker, or `--full`):**
      - Stop as for a (rejected) Base line unless `base_ref` is 40 or 64 hex.
      - Set `DIFF_RANGE` to `{base_ref}...HEAD`
+3. Create timestamped review directory: `mkdir -p {worktree}/.devflow/docs/reviews/{branch-slug}/{timestamp}/`
 
 #### Step 0e-i: Load Prior Resolution and Count Cycles
 

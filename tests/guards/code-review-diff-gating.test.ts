@@ -705,7 +705,7 @@ describe('DIFF_RANGE starts at the fresh base that ensure-pr-ready returns (#495
     expect(collectReviewFreshBaseDefects(seed(ON, 'Stop with cause and fix when', 'Stop with cause and fix unless it matches `^[A-Za-z0-9._/+@,#-]{1,200}$`, or when')))
       .toContain('the Extract line carries a copy of the name class')
     // The copy sits in parentheses: a `$` before a backtick is a replacement pattern of String.replace.
-    for (const widened of ['^[A-Za-z0-9._/+@,#-]{1,255}$', '^[A-Za-z0-9._/+@,#~-]+$', '^[A-Za-z0-9._/+@,#-]+$']) {
+    for (const widened of ['^[A-Za-z0-9._/+@,#-]{1,255}$', '^[A-Za-z0-9._/+@,#~-]+$', '^[A-Za-z0-9._/+@,#-]+$', '^[A-Za-z0-9._/@+,#-]{1,255}$', '^[A-Za-z0-9._/+~@,#-]{1,255}$', '^[a-zA-Z0-9._/+@,#-]+$']) {
       expect(collectReviewFreshBaseDefects(seed(ON, 'Stop with cause and fix when', `Stop with cause and fix unless it matches (${widened}), or when`)), widened)
         .toContain('the Extract line carries a copy of the name class')
     }
@@ -739,6 +739,15 @@ describe('DIFF_RANGE starts at the fresh base that ensure-pr-ready returns (#495
     expect(collectReviewFreshBaseDefects(moved)).toContain('the freshness line is not a Phase 4 item')
     expect(collectReviewFreshBaseDefects(seed(ON, 'from Step 0c, as returned', 'from Step 0c')))
       .toContain('the freshness line is not the Step 0c line as returned')
+  })
+
+  it('known-bad probe: a directory made before the head and base checks is reported', () => {
+    const made = /^3\. Create timestamped review directory:[^\n]*\n/m.exec(ON)
+    expect(made, 'Step 0d creates the review directory as its step 3').not.toBeNull()
+    const early = seed(seed(ON, (made as RegExpExecArray)[0], ''), '2. Check if `{worktree}/.devflow/docs/reviews/{branch-slug}/.last-review-head` exists:', `${(made as RegExpExecArray)[0]}2. Check if \`{worktree}/.devflow/docs/reviews/{branch-slug}/.last-review-head\` exists:`)
+    expect(collectReviewFreshBaseDefects(early)).toContain('Step 0d does not create the directory after the head and base checks')
+    expect(collectReviewFreshBaseDefects(seed(ON, 'mkdir -p {worktree}', 'mkdir {worktree}')))
+      .toContain('Step 0d does not create the directory after the head and base checks')
   })
 })
 

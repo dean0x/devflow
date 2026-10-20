@@ -204,7 +204,7 @@ describe('bug-analysis.md — DIFF_RANGE starts at the fresh base that ensure-pr
     expect(collectAnalysisFreshBaseDefects(seed('Stop with cause and fix when', 'Stop with cause and fix unless it matches `^[A-Za-z0-9._/+@,#-]{1,200}$`, or when')))
       .toContain('the Extract line carries a copy of the name class');
     // The copy sits in parentheses: a `$` before a backtick is a replacement pattern of String.replace.
-    for (const widened of ['^[A-Za-z0-9._/+@,#-]{1,255}$', '^[A-Za-z0-9._/+@,#~-]+$', '^[A-Za-z0-9._/+@,#-]+$']) {
+    for (const widened of ['^[A-Za-z0-9._/+@,#-]{1,255}$', '^[A-Za-z0-9._/+@,#~-]+$', '^[A-Za-z0-9._/+@,#-]+$', '^[A-Za-z0-9._/@+,#-]{1,255}$', '^[A-Za-z0-9._/+~@,#-]{1,255}$', '^[a-zA-Z0-9._/+@,#-]+$']) {
       expect(collectAnalysisFreshBaseDefects(seed('Stop with cause and fix when', `Stop with cause and fix unless it matches (${widened}), or when`)), widened)
         .toContain('the Extract line carries a copy of the name class');
     }
@@ -236,6 +236,14 @@ describe('bug-analysis.md — DIFF_RANGE starts at the fresh base that ensure-pr
       .toContain('the freshness line is not the Phase 1 line as returned');
     expect(collectAnalysisFreshBaseDefects(seed('DIFF_COMMAND: git diff {DIFF_RANGE}', 'DIFF_COMMAND: git diff main...HEAD')))
       .toContain('the Debug diff command does not follow DIFF_RANGE');
+  });
+
+  it('known-bad probe: a directory made before the head and base checks is reported', () => {
+    const made = /^3\. Create timestamped analysis directory:[^\n]*\n/m.exec(content);
+    expect(made, 'Step 2a creates the analysis directory as its step 3').not.toBeNull();
+    const early = content.replace(made?.[0] ?? '', '').replace('1. Check `{worktree}/.devflow/docs/bug-analysis/{branch-slug}/.last-analysis-head`', `${made?.[0] ?? ''}1. Check \`{worktree}/.devflow/docs/bug-analysis/{branch-slug}/.last-analysis-head\``);
+    expect(early, 'the probe must move the directory step').not.toBe(content);
+    expect(collectAnalysisFreshBaseDefects(early)).toContain('Step 2a does not create the directory after the head and base checks');
   });
 });
 
