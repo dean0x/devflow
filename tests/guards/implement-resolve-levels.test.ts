@@ -23,8 +23,8 @@
  *      `skip`, and a phase with no spawn takes only `-`) and Rules bullets, and the decided rows and bullets. The doc
  *      sites (the `devflow gates` text, the init hints, README.md, docs/cli-reference.md and docs/commands.md) state
  *      the effect of each shipped row, and none keeps a retired "no rows" claim. The check proves each site carries
- *      the effect phrase once. It does not prove which command the phrase names: a site that covers both commands
- *      and names one satisfies the check for both.
+ *      the effect phrase once. It does not prove which command or which level the phrase names: a site that covers
+ *      both commands and names one satisfies the check for both, and a line that names only `lean` passes.
  *   e. Row safety, a tripwire: protected phases, never-skip phases, floor controls, dispositions and actions no row
  *      may carry.
  *   f. `full` reads nothing: the reference path appears only inside the block, and no Validate fence of
@@ -645,7 +645,8 @@ function collectEffectCountDefects(site: DocSite, shipped: readonly ShippedRows[
  * #481 AC-6: every shipped row has an entry in `effects`, and each site that covers the command of a shipped row states the
  * effect of that row exactly once. Once any table has a row, no site keeps a retired claim. While no table has a row, no
  * site owes an effect and none is barred a retired claim. The match is on a phrase: it does not tell which command the
- * phrase names, so a site that covers both commands and names one satisfies the check for both.
+ * phrase names, so a site that covers both commands and names one satisfies the check for both. It does not tell which
+ * level the phrase names either, so a README line that names only `lean` passes.
  * The defects come in this order: the unregistered rows, then for each site its retired claims and its effect counts.
  */
 export function collectDocSiteDefects(sites: readonly DocSite[], refs: Readonly<Record<string, string>>, effects: ReadonlyMap<string, RegExp> = ROW_EFFECTS): string[] {
@@ -1313,14 +1314,14 @@ describe('the doc sites state the effect of each shipped row and keep no retired
   const onlyResolve = { implement: none.implement, resolve: both.resolve }
 
   it('the sites are the registered ones, each read from the product, and the shipped tables leave no defect', () => {
-    expect(DOC_SITES.map(s => s.label)).toEqual([
-      'the devflow gates text',
-      'the standard init hint',
-      'the lean init hint',
-      'the README.md Gate level paragraph',
-      'the docs/cli-reference.md What reads it paragraph',
-      'the docs/commands.md /implement section',
-      'the docs/commands.md /resolve section',
+    expect(DOC_SITES.map(s => `${s.label}: ${s.cmds.join(', ')}`)).toEqual([
+      'the devflow gates text: implement, resolve',
+      'the standard init hint: implement, resolve',
+      'the lean init hint: implement, resolve',
+      'the README.md Gate level paragraph: implement, resolve',
+      'the docs/cli-reference.md What reads it paragraph: implement, resolve',
+      'the docs/commands.md /implement section: implement',
+      'the docs/commands.md /resolve section: resolve',
     ])
     expect(collectDocSiteDefects(DOC_SITES, REFS)).toEqual([])
   })
