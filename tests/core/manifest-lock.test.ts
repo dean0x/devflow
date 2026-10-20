@@ -176,17 +176,55 @@ describe('manifest lock', () => {
     it('stillHeld is false when the lock directory is gone, and when another directory stands at the path', async () => {
       const lock = await acquireManifestLock(devflowDir, { timeoutMs: 0 });
       if (!lock.ok) throw new Error('lock not taken');
-      await fs.rmdir(lockDir);
+      await fs.rm(lockDir, { recursive: true });
       expect(await lock.value.stillHeld()).toBe(false);
       await fs.mkdir(lockDir);
       expect(await lock.value.stillHeld()).toBe(false);
+    });
+
+    it('stillHeld is false for another directory even when the file system gives it the same device and inode numbers', async () => {
+      // Linux file systems often hand a freed inode number to the next directory made.
+      // The stat of the lock path is made to answer with one fixed device and inode, as
+      // that reuse would, so the check cannot rely on those two numbers.
+      const realLstat = fs.lstat.bind(fs);
+      vi.spyOn(fs, 'lstat').mockImplementation((async (target: Parameters<typeof fs.lstat>[0], options?: Parameters<typeof fs.lstat>[1]) => {
+        const stat = await realLstat(target, options as never);
+        if (String(target) !== lockDir) return stat;
+        return new Proxy(stat, {
+          get(inner, key) {
+            if (key === 'dev' || key === 'ino') return typeof inner[key] === 'bigint' ? 1n : 1;
+            const value = Reflect.get(inner, key) as unknown;
+            return typeof value === 'function' ? value.bind(inner) : value;
+          },
+        });
+      }) as typeof fs.lstat);
+      try {
+        const lock = await acquireManifestLock(devflowDir, { timeoutMs: 0 });
+        if (!lock.ok) throw new Error('lock not taken');
+        await fs.rm(lockDir, { recursive: true });
+        await fs.mkdir(lockDir);
+        expect(await lock.value.stillHeld(), 'an empty directory at the path').toBe(false);
+        const other = await acquireManifestLock(devflowDir, { timeoutMs: 0 });
+        expect(other.ok, 'the path is taken by a directory without a holder token').toBe(false);
+        await fs.rm(lockDir, { recursive: true });
+        const next = await acquireManifestLock(devflowDir, { timeoutMs: 0 });
+        if (!next.ok) throw new Error('second lock not taken');
+        expect(await lock.value.stillHeld(), 'a second holder\'s directory at the path').toBe(false);
+        expect(await next.value.stillHeld()).toBe(true);
+        await lock.value.release();
+        expect(await exists(lockDir), 'the first holder\'s release leaves the second holder\'s lock').toBe(true);
+        await next.value.release();
+        expect(await exists(lockDir)).toBe(false);
+      } finally {
+        vi.restoreAllMocks();
+      }
     });
 
     it('withManifestLock hands its work the same check', async () => {
       const seen: boolean[] = [];
       await withManifestLock(devflowDir, { timeoutMs: 0 }, async (lock) => {
         seen.push(await lock.stillHeld());
-        await fs.rmdir(lockDir);
+        await fs.rm(lockDir, { recursive: true });
         seen.push(await lock.stillHeld());
       });
       expect(seen).toEqual([true, false]);

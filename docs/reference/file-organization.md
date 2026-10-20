@@ -385,6 +385,6 @@ Skills are removed individually rather than by namespace directory, because `~/.
 | Costs | `~/.devflow/costs/` | Session cost history |
 | Cache | `~/.devflow/cache/` | Model-discovery and HUD component caches |
 | Proxy state | `~/.devflow/proxy.json`, `proxy-routing.json`, `proxy.pid`, `.proxy-spawn.lock/` | Relay runtime state |
-| Manifest lock | `~/.devflow/manifest.json.lock/`, `manifest.json.lock.stale-<pid>-<12 hex>/` | A lock directory that a crash, or a failed cleanup of a stale break, leaves behind. Only a real directory of exactly that name goes |
+| Manifest lock | `~/.devflow/manifest.json.lock/`, `manifest.json.lock.stale-<pid>-<12 hex>/` | A lock directory (it holds one `holder` token file) that a crash, or a failed cleanup of a stale break, leaves behind. Only a real directory of exactly that name goes |
 
 User-authored files (`~/.devflow/skills/`, `~/.devflow/rules/`, `preference-profile.md`, the per-provider tracker conventions in `~/.devflow/tracker/`, an earlier release's `tracker.md` and its `tracker.md.{provider}.bak` copies, `curation.json` and the older `learning.json`, `hud.json`) are **never** removed by `removeDevFlowInstallArtifacts` — only by a confirmed full `~/.devflow/` wipe in an interactive session.

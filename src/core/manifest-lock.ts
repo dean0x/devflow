@@ -26,14 +26,15 @@
  * A waiter that moved a fresh lock gives it back and counts the lock as busy.
  *
  * The give-back leaves a short time in which the live holder's directory is not at the
- * path, and a third caller can make a directory there. So a holder records the identity
- * (device and inode) of the directory it made, and `stillHeld()` tells it whether that
- * directory is still the one at the path. A holder calls it just before its write. When
- * it answers false, the holder does not write: the heal skips, and the toggle takes the
- * lock again. A release removes the directory only while it is still the holder's own.
- * The check narrows the window to the time between the check and the write itself; a
- * directory lock cannot close it. A fourth caller that makes a directory which reuses the
- * freed inode number of the first holder's directory would also pass the check.
+ * path, and a third caller can make a directory there. So a holder writes a random
+ * token into a file inside the directory it made, and `stillHeld()` tells it whether the
+ * directory at the path still holds that token. A holder calls it just before its write.
+ * When it answers false, the holder does not write: the heal skips, and the toggle takes
+ * the lock again. A release removes the directory only while it still holds the holder's
+ * own token. A token tells two directories apart on every file system. The device and
+ * inode numbers of a directory do not: Linux file systems often give the freed inode
+ * number of a removed directory to the next one made. The check narrows the window to
+ * the time between the check and the write itself; a directory lock cannot close it.
  */
 
 import { promises as fs } from 'fs';
@@ -58,6 +59,9 @@ export const MANIFEST_LOCK_STALE_MARK = '.stale-';
  */
 export const MANIFEST_LOCK_STALE_MS = 5_000;
 
+/** The file inside the lock directory that holds the holder's token. */
+export const MANIFEST_LOCK_TOKEN_NAME = 'holder';
+
 /**
  * The longest a toggle waits for the lock. It is longer than the stale age, so a lock
  * left by a dead holder is always broken inside the wait.
@@ -71,12 +75,12 @@ export type ManifestLockError = 'not-acquired';
 
 export interface ManifestLock {
   /**
-   * True while the directory at the lock path is the one this holder made. A holder
+   * True while the directory at the lock path holds the token this holder wrote. A holder
    * calls it just before its write, and does not write when it answers false.
    */
   readonly stillHeld: () => Promise<boolean>;
   /**
-   * Remove the lock directory, only while it is the one this holder made. Safe to call
+   * Remove the lock directory, only while it holds this holder's token. Safe to call
    * again, and when the lock is already gone.
    */
   readonly release: () => Promise<void>;
@@ -85,11 +89,8 @@ export interface ManifestLock {
 /** What a holder asks of its lock while it works. */
 export type ManifestLockCheck = Pick<ManifestLock, 'stillHeld'>;
 
-/** The device and inode of a lock directory: the identity of one directory, which a rename keeps. */
-interface DirectoryIdentity {
-  readonly dev: bigint;
-  readonly ino: bigint;
-}
+/** The token of a lock: a random value that its holder wrote inside the lock directory. */
+type LockToken = string;
 
 export interface ManifestLockOptions {
   /** Longest wait in milliseconds. 0 tries once and never waits. Default {@link MANIFEST_LOCK_WAIT_MS}. */
@@ -111,30 +112,34 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** `made`: this call made the directory, with its identity. `exists`: another caller has it, or it was taken away at once. `unusable`: the folder cannot hold it. */
-async function makeLockDir(lockDir: string): Promise<{ readonly made: DirectoryIdentity } | 'exists' | 'unusable'> {
+/** `made`: this call made the directory, with its token. `exists`: another caller has it, or it was taken away at once. `unusable`: the folder cannot hold it. */
+async function makeLockDir(lockDir: string): Promise<{ readonly made: LockToken } | 'exists' | 'unusable'> {
   try {
     await fs.mkdir(lockDir, { recursive: false });
   } catch (err) {
     return errorCode(err) === 'EEXIST' ? 'exists' : 'unusable';
   }
-  const identity = await identityOf(lockDir);
-  return identity === null ? 'exists' : { made: identity };
-}
-
-/** The identity of the directory at `lockDir`, or null when nothing, or something that is not a directory, is there. */
-async function identityOf(lockDir: string): Promise<DirectoryIdentity | null> {
+  const token: LockToken = randomBytes(16).toString('hex');
   try {
-    const stat = await fs.lstat(lockDir, { bigint: true });
-    return stat.isDirectory() ? { dev: stat.dev, ino: stat.ino } : null;
-  } catch {
-    return null;
+    await fs.writeFile(path.join(lockDir, MANIFEST_LOCK_TOKEN_NAME), token, { flag: 'wx', mode: 0o600 });
+  } catch (err) {
+    // ENOENT: the directory was taken away at once. Another failure: the directory is
+    // empty or another's, so `rmdir` removes only an empty one of ours.
+    if (errorCode(err) === 'ENOENT') return 'exists';
+    await fs.rmdir(lockDir).catch(() => undefined);
+    return 'unusable';
   }
+  return { made: token };
 }
 
-async function isSameDirectory(lockDir: string, identity: DirectoryIdentity): Promise<boolean> {
-  const now = await identityOf(lockDir);
-  return now !== null && now.dev === identity.dev && now.ino === identity.ino;
+/** True when the directory at `lockDir` is a real directory (not a link) that holds `token`. */
+async function holdsToken(lockDir: string, token: LockToken): Promise<boolean> {
+  try {
+    if (!(await fs.lstat(lockDir)).isDirectory()) return false;
+    return (await fs.readFile(path.join(lockDir, MANIFEST_LOCK_TOKEN_NAME), 'utf-8')) === token;
+  } catch {
+    return false;
+  }
 }
 
 async function removeQuietly(dir: string): Promise<void> {
@@ -200,7 +205,7 @@ async function breakStaleLock(lockDir: string, staleMs: number): Promise<boolean
 }
 
 /** One try: make the lock, or break a stale one and make it once more. */
-async function tryOnce(lockDir: string, staleMs: number): Promise<DirectoryIdentity | 'busy' | 'unusable'> {
+async function tryOnce(lockDir: string, staleMs: number): Promise<LockToken | 'busy' | 'unusable'> {
   const first = await makeLockDir(lockDir);
   if (typeof first === 'object') return first.made;
   if (first === 'unusable') return 'unusable';
@@ -228,14 +233,17 @@ export async function acquireManifestLock(
 
   for (let attempt = 0; attempt < tries; attempt++) {
     const outcome = await tryOnce(lockDir, staleMs);
-    if (typeof outcome === 'object') {
+    if (outcome !== 'busy' && outcome !== 'unusable') {
       return {
         ok: true,
         value: {
-          stillHeld: () => isSameDirectory(lockDir, outcome),
+          stillHeld: () => holdsToken(lockDir, outcome),
           release: async () => {
-            if (!(await isSameDirectory(lockDir, outcome))) return;
-            try { await fs.rmdir(lockDir); } catch { /* already released */ }
+            if (!(await holdsToken(lockDir, outcome))) return;
+            try {
+              await fs.rm(path.join(lockDir, MANIFEST_LOCK_TOKEN_NAME), { force: true });
+              await fs.rmdir(lockDir);
+            } catch { /* already released */ }
           },
         },
       };

@@ -338,7 +338,7 @@ describe('readManifest', () => {
             await fs.mkdir(`${lockDir}.other`);
             await fs.rename(lockDir, `${lockDir}.gone`);
             await fs.rename(`${lockDir}.other`, lockDir);
-            await fs.rmdir(`${lockDir}.gone`);
+            await fs.rm(`${lockDir}.gone`, { recursive: true });
           }
           return content;
         }) as typeof fs.readFile);
