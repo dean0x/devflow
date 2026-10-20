@@ -36,7 +36,7 @@ inside a define is split by the build like an arm in a host: the markers sit on 
 @end
 
 @define commit_push():
-**Commit and push**: Create atomic commits with clear messages. Reference TASK_ID. Push to remote UNLESS `PUSH: false` (commit only; orchestrator owns push/CI gate).
+**Commit and push**: Create atomic commits with clear messages. Reference TASK_ID. Push to remote UNLESS `PUSH: false`.
    **Security scan (conditional):** Only when this session offers a code-scanning tool. Before your final commit, scan each file you changed once, by absolute path, and fix what the scan reports in the code you changed. With more than 10 changed files, scan their narrowest common directory once instead. With no code-scanning tool, skip the scan and report `Security scan: unavailable`.
 @end
 
@@ -63,8 +63,6 @@ Run builds, typechecks, lints and tests in the foreground, each with an explicit
 - Never print a large file whole; page it with offset and limit, and cap any output you print. Before printing search matches, list or count them.
 
 ## Output
-
-Return structured completion status:
 
 ```markdown
 ## Implementation Report: {TASK_ID}
