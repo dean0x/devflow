@@ -33,14 +33,17 @@ export interface LedgerMoveOptions {
 
 /**
  * `moveLedger`'s answer. `none`: no old folder, nothing was locked or created.
- * `busy`: a lock or a fresh claim is held, try again at the next event. `moved`: the
+ * `busy`: a lock or a fresh claim is held, try again at the next event; `reason` is
+ * `claim` when a fresh queue claim held it, which can last 15 minutes, and is absent
+ * when a lock or a folder that changed held it. `moved`: the
  * folder was renamed whole (`whole-folder`), the new folder won and the old one is
  * the backup (`kept-new`), or the old ledger set moved into the new folder and the
  * old one is the backup (`moved-in`); `backup` names the backup folder under
  * `.devflow`, null for a whole-folder rename.
  */
 export type LedgerMoveOutcome =
-  | { readonly state: 'none' | 'busy'; readonly notes: readonly string[] }
+  | { readonly state: 'none'; readonly notes: readonly string[] }
+  | { readonly state: 'busy'; readonly reason?: 'claim'; readonly notes: readonly string[] }
   | {
     readonly state: 'moved';
     readonly mode: 'whole-folder' | 'kept-new' | 'moved-in';

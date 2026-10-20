@@ -39,7 +39,8 @@ interface MoveOpts {
 type MovedMode = 'whole-folder' | 'kept-new' | 'moved-in';
 
 type MoveValue =
-  | { state: 'none' | 'busy'; notes: string[] }
+  | { state: 'none'; notes: string[] }
+  | { state: 'busy'; reason?: 'claim'; notes: string[] }
   | { state: 'moved'; mode: MovedMode; backup: string | null; rendered: boolean; notes: string[] };
 
 interface SweepValue {
@@ -570,7 +571,9 @@ describe('moveLedger — locks (TP-31, TP-38)', () => {
     holdLock(moveLockDir());
     const before = snapshotTree(site.root);
     const started = Date.now();
-    expect(move()).toEqual({ ok: true, value: { state: 'busy', notes: [] } });
+    const result = move();
+    expect(result).toEqual({ ok: true, value: { state: 'busy', notes: [] } });
+    expect(result.ok && 'reason' in result.value, 'a held lock keeps the plain busy answer').toBe(false);
     expect(Date.now() - started).toBeLessThan(1000);
     expect(snapshotTree(site.root)).toEqual(before);
   });
@@ -623,19 +626,25 @@ describe('moveLedger — locks (TP-31, TP-38)', () => {
     expect(made.map(p => path.basename(p))).toContainEqual(expect.stringMatching(/^\.curation-move-[0-9a-f]{16}\.lock$/));
   });
 
-  it('a fresh claim in the old folder makes the move busy (TP-31)', () => {
+  it('a fresh claim in the old folder makes the move busy, with its own reason (TP-31)', () => {
     seedOld({ [CLAIM]: turns(1, 2), [OWNER]: 'aaaaaaaaaaaaaaaa\n' });
     age(path.join(site.oldDir, CLAIM), 10_000);
-    expect(move()).toEqual({ ok: true, value: { state: 'busy', notes: [] } });
+    expect(move()).toEqual({ ok: true, value: { state: 'busy', reason: 'claim', notes: [] } });
     expect(exists(site.newDir)).toBe(false);
     expect(exists(moveLockDir())).toBe(false);
   });
 
-  it('a fresh claim in the new folder makes the move busy (TP-31)', () => {
+  it('a fresh claim in the new folder makes the move busy, with its own reason (TP-31)', () => {
     seedNew({ [CLAIM]: turns(1, 2), [OWNER]: 'bbbbbbbbbbbbbbbb\n' });
     age(path.join(site.newDir, CLAIM), 10_000);
-    expect(move()).toEqual({ ok: true, value: { state: 'busy', notes: [] } });
+    expect(move()).toEqual({ ok: true, value: { state: 'busy', reason: 'claim', notes: [] } });
     expect(exists(path.join(site.oldDir, LEDGER))).toBe(true);
+  });
+
+  it('a claim that is stale does not make the move busy', () => {
+    seedOld({ [CLAIM]: turns(1, 2), [OWNER]: 'aaaaaaaaaaaaaaaa\n' });
+    age(path.join(site.oldDir, CLAIM), (store.CLAIM_STALE_SECS + 60) * 1000);
+    expect(movedValue().mode).toBe('whole-folder');
   });
 
   describe('a folder that changes between the choice of the locks and the move (the re-probe)', () => {
@@ -2160,6 +2169,16 @@ describe('json-helper move-ledger (TP-36, argument half)', () => {
     holdLock(moveLockDir());
     expect(runMoveLedger([site.root])).toEqual({ code: 0, stdout: 'busy\n', stderr: '' });
     expect(exists(site.oldDir)).toBe(true);
+  });
+
+  it.each([
+    ['the old folder', () => seedOld({ ...ledgerSet('one'), [CLAIM]: turns(1, 2), [OWNER]: 'aaaaaaaaaaaaaaaa\n' })],
+    ['the new folder', () => { seedOld(ledgerSet('one')); seedNew({ [CLAIM]: turns(1, 2), [OWNER]: 'bbbbbbbbbbbbbbbb\n' }); }],
+  ])('prints busy claim, exit 0, while a fresh claim is held in %s', (_label, arrange) => {
+    arrange();
+    expect(runMoveLedger([site.root])).toEqual({ code: 0, stdout: 'busy claim\n', stderr: '' });
+    expect(exists(site.oldDir)).toBe(true);
+    expect(names(site.machineDir).filter(entry => entry.endsWith('.lock'))).toEqual([]);
   });
 
   it('prints the backup name and a note for each note when a merge made a backup', () => {

@@ -1053,7 +1053,7 @@ function curationMoveFinish(ctx, { whole }) {
  * directory is made if absent, and every lock the pass needs is taken with no wait: the
  * move lock, the old folder's store lock and queue lock, and, when the new folder
  * exists, its two. Any busy lock releases what was taken and answers `busy`; a fresh
- * claim in either folder is busy too. With the new folder absent the whole folder is
+ * claim in either folder answers `busy` with the reason `claim`. With the new folder absent the whole folder is
  * renamed (curationMoveWhole), unless the old folder holds a file named like a journal:
  * then an empty new folder is made and the pass takes the per-entry path. Errors
  * (EXDEV, EBUSY, EACCES, EROFS, any other I/O failure) answer an `io-error` Result and
@@ -1065,7 +1065,8 @@ function curationMoveFinish(ctx, { whole }) {
  *   (default `$HOME`); now: epoch ms (default Date.now())
  * Every message and note is one line with no control character (scrubMoveResult).
  *
- * @returns {{ ok: true, value: { state: 'none'|'busy', notes: string[] }
+ * @returns {{ ok: true, value: { state: 'none', notes: string[] }
+ *   | { state: 'busy', reason?: 'claim', notes: string[] }
  *   | { state: 'moved', mode: 'whole-folder'|'kept-new'|'moved-in', backup: string|null, rendered: boolean, notes: string[] } }
  *   | { ok: false, error: { kind: 'refused'|'io-error', message: string } }}
  */
@@ -1206,17 +1207,18 @@ function locksAfter(held, ctx, result) {
  * folder becomes the backup with what is left. Only the machine-side journal can
  * override the winner rule. Either way the pending queue (and a
  * stale claim's batch) merges into the winner's queue and the rendered files are
- * rebuilt. A fresh claim in either folder is busy.
+ * rebuilt. A fresh claim in either folder is busy too, with the reason `claim`: it can
+ * last as long as CLAIM_STALE_SECS, so the caller may stop asking until its next session
+ * start. A folder that changed is busy with no reason, and the next event asks again.
  *
  * @param {object} ctx
  * @param {{ newExisted: boolean }} state
  */
 function movePass(ctx, { newExisted }) {
-  const busy = { ok: true, value: { state: 'busy', notes: [] } };
   if (lstatOrNull(ctx.oldDir) === null) return { ok: true, value: { state: 'none', notes: [] } };
-  if ((lstatOrNull(ctx.newDir) !== null) !== newExisted) return busy;
+  if ((lstatOrNull(ctx.newDir) !== null) !== newExisted) return { ok: true, value: { state: 'busy', notes: [] } };
   if (claimIsFresh(path.join(ctx.oldDir, CLAIM_NAME), ctx.now) || (newExisted && claimIsFresh(path.join(ctx.newDir, CLAIM_NAME), ctx.now))) {
-    return busy;
+    return { ok: true, value: { state: 'busy', reason: 'claim', notes: [] } };
   }
   if (!newExisted) {
     const whole = curationMoveWhole(ctx);

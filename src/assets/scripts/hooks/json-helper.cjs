@@ -42,7 +42,8 @@
 //   release-claim <token>                 Release the claim the token owns; prints
 //                                          released | not-owner | gone
 //   move-ledger <root>                    Move a project's old ledger folder to the new name,
-//                                          once; prints none | busy | moved <mode> and notes
+//                                          once; prints none | busy | busy claim | moved <mode>
+//                                          and notes
 //
 // Every curation op above except claim-queue, release-claim and move-ledger first
 // refreshes the mtime of an existing queue claim — the heartbeat (D-OWNED-CLAIM).
@@ -205,6 +206,19 @@ function emit(result, format) {
   }
   process.stderr.write(`${curation().store.singleLine(result.error.message)}\n`);
   return 1;
+}
+
+/**
+ * The first line of move-ledger's answer: the state, with `moved` followed by its mode,
+ * and `busy` followed by `claim` when a fresh queue claim holds the move.
+ *
+ * @param {{ state: string, mode?: string, reason?: string }} moved
+ * @returns {string}
+ */
+function moveAnswerWord(moved) {
+  if (moved.state === 'moved') return `moved ${moved.mode}`;
+  if (moved.state === 'busy' && moved.reason === 'claim') return 'busy claim';
+  return moved.state;
 }
 
 /**
@@ -567,8 +581,10 @@ try {
     // curation ops it takes the root as an argument, so a caller outside the project
     // root can name it; the root stays one argv word, never a shell word. The two
     // folder names are the path helpers' own: no argument names them.
-    // stdout: none | busy | moved <mode>, then `backup <name>` when a backup was made
-    // and one `note <text>` line for each note. Every line is scrubbed here (singleLine):
+    // stdout: none | busy | busy claim | moved <mode>, then `backup <name>` when a backup
+    // was made and one `note <text>` line for each note. `busy claim` means a fresh queue
+    // claim holds the move, which can last 15 minutes; plain `busy` means a lock does.
+    // Every line is scrubbed here (singleLine):
     // a note may name a file the repository holds, and no line may carry a control
     // character or break into two.
     // -------------------------------------------------------------------------
@@ -576,7 +592,7 @@ try {
       if (args.length !== 1) exitWithUsage('move-ledger <root> (the root is an absolute path)');
       const { store } = curation();
       process.exitCode = emit(curationMove().moveLedger(args[0]), moved => [
-        moved.state === 'moved' ? `moved ${moved.mode}` : moved.state,
+        moveAnswerWord(moved),
         ...(moved.state === 'moved' && moved.backup !== null ? [`backup ${moved.backup}`] : []),
         ...moved.notes.map(note => `note ${note}`),
       ].map(line => store.singleLine(line)).join('\n'));

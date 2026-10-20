@@ -5841,6 +5841,7 @@ describe('curation-move: the shim that moves the old ledger folder (#529)', { ti
   });
 
   const markerOf = (at: string): string => path.join(homeDir, '.devflow', 'logs', `curation-move.${curationMoveMarkerKey(at)}.skip`);
+  const busyMarkerOf = (at: string): string => path.join(homeDir, '.devflow', 'logs', `curation-move.${curationMoveMarkerKey(at)}.busy`);
   const lockOf = (at: string): string => path.join(homeDir, '.devflow', `.curation-move-${store.curationMoveLockKey(at)}.lock`);
   const logLines = (): string[] => (fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8').split('\n').filter(Boolean) : []);
   const oldOf = (at: string): string => path.join(at, '.devflow', OLD);
@@ -6020,6 +6021,128 @@ describe('curation-move: the shim that moves the old ledger folder (#529)', { ti
       expect(fs.existsSync(markerOf(root))).toBe(false);
       expect(fs.readFileSync(path.join(oldOf(root), QUEUE), 'utf-8')).toBe(SEEDED[QUEUE]);
       expect(fs.existsSync(newOf(root))).toBe(false);
+    });
+
+    describe('a fresh queue claim holds the move: one fork, then a busy marker, then no fork until a session start', () => {
+      const CLEAN = { status: 0, stdout: '', stderr: '' };
+      const CLAIM = '.pending-turns.processing';
+      const OWNER = '.pending-turns.owner';
+      const seedClaimed = (): string => seedOld(root, { ...SEEDED, [CLAIM]: '{"role":"user","content":"c","ts":1}\n', [OWNER]: 'aaaaaaaaaaaaaaaa\n' });
+      const makeStale = (): void => {
+        const long = new Date(Date.now() - 3_600_000);
+        fs.utimesSync(path.join(oldOf(root), CLAIM), long, long);
+      };
+
+      /** A PATH whose node counts each call in a file, then runs the real node. */
+      function countingNode(): { env: { PATH: string }; forks: () => number } {
+        const nodeLog = path.join(base, 'node.log');
+        const shimDir = path.join(base, 'shim');
+        fs.mkdirSync(shimDir, { recursive: true });
+        writeFakeExecutable(path.join(shimDir, 'node'), `#!/bin/bash\necho node >> "${nodeLog}"\nexec "${process.execPath}" "$@"\n`);
+        return {
+          env: { PATH: `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}` },
+          forks: () => (fs.existsSync(nodeLog) ? fs.readFileSync(nodeLog, 'utf-8').split('\n').filter(Boolean).length : 0),
+        };
+      }
+
+      it('the first event forks node once and writes the busy marker; the second forks nothing; no log line and no refusal marker (TP-33)', () => {
+        seedClaimed();
+        const node = countingNode();
+
+        expect(run('set -e; df_curation_move "$ROOT"; echo after', node.env)).toEqual({ status: 0, stdout: 'after\n', stderr: '' });
+        expect(node.forks()).toBe(1);
+        expect(fs.existsSync(busyMarkerOf(root))).toBe(true);
+        expect(fs.existsSync(markerOf(root)), 'busy is not a refusal').toBe(false);
+        expect(logLines()).toEqual([]);
+
+        expect(run('df_curation_move "$ROOT"', node.env)).toEqual(CLEAN);
+        expect(node.forks(), 'the second event forks nothing').toBe(1);
+        expect(run('df_curation_move "$ROOT"', NO_FORK), 'and needs no command at all').toEqual(CLEAN);
+        expect(logLines()).toEqual([]);
+        expect(fs.existsSync(markerOf(root))).toBe(false);
+        expect(fs.existsSync(path.join(oldOf(root), QUEUE))).toBe(true);
+        expect(fs.existsSync(newOf(root))).toBe(false);
+      });
+
+      it('a session start clears the marker, and the move runs once the claim is stale', () => {
+        seedClaimed();
+        expect(run('df_curation_move "$ROOT"').status).toBe(0);
+        expect(fs.existsSync(busyMarkerOf(root))).toBe(true);
+        makeStale();
+
+        expect(run('df_curation_move "$ROOT"', NO_FORK), 'an ordinary event does not look again').toEqual(CLEAN);
+        expect(fs.existsSync(oldOf(root))).toBe(true);
+
+        const res = run('df_curation_move "$ROOT" retry');
+
+        expect(res).toEqual(CLEAN);
+        expect(fs.existsSync(busyMarkerOf(root))).toBe(false);
+        expect(fs.existsSync(oldOf(root))).toBe(false);
+        expect(fs.readFileSync(path.join(newOf(root), QUEUE), 'utf-8')).toBe(SEEDED[QUEUE]);
+        expect(logLines()).toHaveLength(1);
+        expect(logLines()[0]).toContain('Curation move');
+      });
+
+      it('a session start while the claim is still fresh looks once more and marks again', () => {
+        seedClaimed();
+        const node = countingNode();
+        run('df_curation_move "$ROOT"', node.env);
+        expect(node.forks()).toBe(1);
+
+        expect(run('df_curation_move "$ROOT" retry', node.env)).toEqual(CLEAN);
+
+        expect(node.forks()).toBe(2);
+        expect(fs.existsSync(busyMarkerOf(root))).toBe(true);
+        expect(fs.existsSync(oldOf(root))).toBe(true);
+        expect(logLines()).toEqual([]);
+      });
+
+      it('a held lock is not marked: every event forks node again', () => {
+        seedOld(root);
+        fs.mkdirSync(lockOf(root));
+        const node = countingNode();
+
+        run('df_curation_move "$ROOT"', node.env);
+        run('df_curation_move "$ROOT"', node.env);
+
+        expect(node.forks()).toBe(2);
+        expect(fs.existsSync(busyMarkerOf(root))).toBe(false);
+        expect(fs.existsSync(markerOf(root))).toBe(false);
+        expect(logLines()).toEqual([]);
+      });
+
+      it('a link at the busy marker name counts as a marker: nothing is forked and nothing is written through it', () => {
+        seedClaimed();
+        const outside = path.join(base, 'outside.txt');
+        fs.writeFileSync(outside, 'untouched\n');
+        fs.symlinkSync(outside, busyMarkerOf(root));
+
+        expect(run('df_curation_move "$ROOT"', NO_FORK)).toEqual(CLEAN);
+
+        expect(fs.readFileSync(outside, 'utf-8')).toBe('untouched\n');
+        expect(logLines()).toEqual([]);
+        expect(fs.existsSync(markerOf(root))).toBe(false);
+      });
+
+      it('the busy marker is written under noclobber, and the option is put back as it was', () => {
+        seedClaimed();
+        const report = 'case $- in *C*) echo C_ON;; *) echo C_OFF;; esac';
+
+        expect(run(`set -o noclobber; df_curation_move "$ROOT"; ${report}`).stdout).toBe('C_ON\n');
+        expect(fs.existsSync(busyMarkerOf(root))).toBe(true);
+
+        fs.rmSync(busyMarkerOf(root));
+        expect(run(`df_curation_move "$ROOT"; ${report}`).stdout).toBe('C_OFF\n');
+        expect(fs.existsSync(busyMarkerOf(root))).toBe(true);
+      });
+
+      it('a busy marker that cannot be written (no logs folder) is ignored', () => {
+        seedClaimed();
+        fs.rmSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+
+        expect(run('set -e; df_curation_move "$ROOT"; echo after')).toEqual({ status: 0, stdout: 'after\n', stderr: '' });
+        expect(logLines()).toEqual([]);
+      });
     });
 
     it('an old folder that is a link is refused once: one log line and a marker, then no fork at the next event, then one more look at a session start', () => {

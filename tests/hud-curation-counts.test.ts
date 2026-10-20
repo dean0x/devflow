@@ -300,6 +300,16 @@ describe('the old ledger folder: the pointer and the refused line, only in the e
     expect(await rendered(data)).toBe(REFUSED);
   });
 
+  it('a busy marker is not a refusal: the HUD still shows the pointer', async () => {
+    fs.mkdirSync(oldDir(), { recursive: true });
+    fs.writeFileSync(path.join(home, '.devflow', 'logs', `curation-move.${curationMoveMarkerKey(root)}.busy`), '');
+
+    const data = await gatherLedgerCurationCounts(root, { home });
+
+    expect(data).toEqual({ decisions: 0, pitfalls: 0, move: 'pointer' });
+    expect(await rendered(data)).toBe(POINTER);
+  });
+
   it('a marker for another root does not make this root refused', async () => {
     fs.mkdirSync(oldDir(), { recursive: true });
     fs.writeFileSync(

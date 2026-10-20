@@ -243,8 +243,9 @@ CURATION_ENABLED="$_QG_CURATION"
 # clear and compact: on the LEDGER root (the main worktree's, in a linked worktree),
 # before Section 1's heal can create a folder, and whether or not the curation
 # switch is on, because the old folder holds the project's decisions either way. The
-# `retry` word clears an earlier refusal's marker, so a refused root is looked at
-# once per session. A held or refused move leaves the old folder in place.
+# `retry` word clears an earlier refusal's marker and an earlier busy marker (a fresh
+# queue claim held the move), so a refused or claimed root is looked at once per
+# session. A held or refused move leaves the old folder in place.
 if [ -n "$PROJECT_OK" ]; then
   source "$SCRIPT_DIR/curation-move" 2>/dev/null || true
   df_curation_move "$LEDGER_ROOT" retry 2>/dev/null || true
