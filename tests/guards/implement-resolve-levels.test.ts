@@ -1184,6 +1184,20 @@ describe('the level references hold the fixed grammar and the decided rows (AC-5
     expect(decided(withRows(ref, [changed]), { ...spec, expectedRows: [row] }), 'a decided row with one cell changed').toEqual([`the ${spec.cmd} table lacks the decided row ${row}`, `the ${spec.cmd} table holds the undecided row ${changed}`])
   })
 
+  it.each(SPECS)('$cmd: known-bad probes: withRows replaces the rows and bullets it finds, keeps a $ literal and fails on a reference without its anchors', spec => {
+    const ref = REFS[spec.cmd]
+    const held = withRows(ref, ['| 3 Held | skip | skip |'], ['- **held:** one.'])
+    expect(referenceRows(held), 'the first call put its row in').toEqual(['| 3 Held | skip | skip |'])
+    expect(ruleBullets(parseRef(held)), 'the first call put its bullet in').toEqual(['- **held:** one.'])
+    // The second call states `$&` in a row and in a bullet. A string replacer would put the matched text there.
+    const next = withRows(held, ['| 4 Cost$& | - | - |'], ['- **next:** $& two.'])
+    expect(referenceRows(next), 'the second call replaced the row, not appended').toEqual(['| 4 Cost$& | - | - |'])
+    expect(ruleBullets(parseRef(next)), 'the second call replaced the bullet, not appended').toEqual(['- **next:** $& two.'])
+    expect(withRows(next, [], []), 'the empty call leaves the bare reference').toBe(withRows(ref, [], []))
+    expect(() => withRows(seed(ref, TABLE_SEPARATOR, ''), [], []), 'a reference without the table separator').toThrow('the reference holds the table separator')
+    expect(() => withRows(seed(ref, RULES_INTRO, ''), [], []), 'a reference without the Rules intro').toThrow('the reference holds the Rules intro')
+  })
+
   it.each(SPECS)('$cmd: the reference holds no spawn block, no subagent_type and no learning marker, and a seeded one is reported', spec => {
     const ref = REFS[spec.cmd]
     expect(ref).not.toContain('Agent(')
