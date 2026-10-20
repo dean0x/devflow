@@ -1850,7 +1850,7 @@ describe('a skipped Polish phase leaves the branch diff and the readers of its o
     expect(defects(inFence), 'the definition moved into the Polish fence').toEqual(['the branch diff definition is inside a fence of Phase 3: a skipped Polish phase drops it'])
     const afterFence = seed(gone, '\n### Phase 4: ', `\n${BRANCH_DIFF_DEFINITION} the changed files.\n\n### Phase 4: `)
     expect(defects(afterFence), 'the definition after the Polish fence').toEqual(['the branch diff definition is after the Polish fence'])
-    const inPhase4 = seedIn(gone, '### Phase 4:', '### Phase 5:', 'After Polish agent completes', `${BRANCH_DIFF_DEFINITION} the changed files. After Polish agent completes`)
+    const inPhase4 = seedIn(gone, '### Phase 4:', '### Phase 5:', 'After Phase 3, spawn Harden agent', `${BRANCH_DIFF_DEFINITION} the changed files. After Phase 3, spawn Harden agent`)
     expect(defects(inPhase4), 'the definition moved to Phase 4').toEqual(['the branch diff definition is not in Phase 3'])
     const twice = seed(body, '\n### Phase 4: ', `\n${BRANCH_DIFF_DEFINITION} the changed files.\n\n### Phase 4: `)
     expect(defects(twice), 'the definition twice').toEqual(['the branch diff definition appears 2 times, expected once'])

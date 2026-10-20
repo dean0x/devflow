@@ -306,7 +306,7 @@ Commit any improvements with a conventional-commit message."
 **Produces:** HARDEN_OUTPUT
 **Requires:** BASE_BRANCH
 
-After Polish agent completes, spawn Harden agent as the quality gate:
+After Phase 3, spawn Harden agent as the quality gate:
 
 ```
 Agent(subagent_type="Harden"):

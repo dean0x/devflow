@@ -990,7 +990,7 @@ describe('#421 AC-3: no Validate inside the alignment loop, the QA loop or on a 
     expect(collectLoopValidateDefects(qa)).toEqual([`${H.p7}: 1 Validate spawn(s) inside the phase`])
     const fixed = md.replace('starts no Validate of its own', 'spawns the Validate agent')
     expect(collectLoopValidateDefects(fixed)).toContain('Phase 4 does not say a FIXED status starts no Validate')
-    const refire = md.replace('After Polish agent completes, spawn Harden agent', 'After Polish agent completes, spawn Harden agent')
+    const refire = md
       .replace('**If PASS or FIXED:** continue to Phase 5.', `If Harden agent made changes (status: FIXED), spawn Validate agent:\n${validate}\n**If PASS or FIXED:** continue to Phase 5.`)
     expect(refire, 'the seed must land').not.toBe(md)
     expect(collectLoopValidateDefects(refire).some(d => d.includes('Validate spawn(s) inside the phase'))).toBe(true)
