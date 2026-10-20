@@ -222,7 +222,12 @@ esac
 
 PROJECT_DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
 LEDGER_DEVFLOW_DIR="$LEDGER_ROOT/.devflow"
-CURATION_DIR="$LEDGER_DEVFLOW_DIR/curation"
+# The ledger folder's names come from the move shim (curation-move), the one shell place
+# that holds them. Sourcing it only defines functions. Without it the hook cannot name
+# the folder, so it stops, as it does for a queue-append that failed to source.
+source "$SCRIPT_DIR/curation-move" || { echo "session-start-context: failed to source curation-move" >&2; exit 1; }
+df_curation_move_names
+CURATION_DIR="$LEDGER_DEVFLOW_DIR/$DF_CM_NEW_FOLDER"
 
 # --- Curation gate: the machine switch, narrowed by this checkout ---
 # D-FEATURES-NARROW-ONLY (see queue-append): ~/.devflow/manifest.json's
@@ -247,7 +252,6 @@ CURATION_ENABLED="$_QG_CURATION"
 # queue claim held the move), so a refused or claimed root is looked at once per
 # session. A held or refused move leaves the old folder in place.
 if [ -n "$PROJECT_OK" ]; then
-  source "$SCRIPT_DIR/curation-move" 2>/dev/null || true
   df_curation_move "$LEDGER_ROOT" retry 2>/dev/null || true
 fi
 
@@ -255,15 +259,13 @@ fi
 if [ "$CURATION_ENABLED" = "true" ]; then
   # Heal older installs that have .devflow/ but not .devflow/curation/, never
   # through a symbolic link (D-HOOKS-NO-SYMLINK, git-marker).
-  # The creator rule (git-marker, df_ledger_folder): the folder made is the new one
-  # only when the old learning/ name is absent, so a new folder never hides an old
-  # ledger.
+  # The creator rule (git-marker, df_make_ledger_folder): the folder made is the new one
+  # only when the old name is absent, so a new folder never hides an old ledger, and a
+  # creator never makes the old folder. A link on the path is the one refusal logged.
   if [ -d "$LEDGER_DEVFLOW_DIR" ] && [ ! -d "$CURATION_DIR" ]; then
-    DF_LEDGER_FOLDER=""
-    df_ledger_folder "$LEDGER_DEVFLOW_DIR" learning curation || true
-    if df_no_symlink_below "$LEDGER_ROOT" "$DF_LEDGER_FOLDER"; then
-      mkdir -p "$DF_LEDGER_FOLDER" 2>/dev/null || true
-    else
+    _SC_MAKE_RC=0
+    df_make_ledger_folder "$LEDGER_ROOT" "$LEDGER_DEVFLOW_DIR" "$DF_CM_OLD_FOLDER" "$DF_CM_NEW_FOLDER" || _SC_MAKE_RC=$?
+    if [ "$_SC_MAKE_RC" -eq 2 ]; then
       log "Skipped: a symbolic link sits on the path to $DF_LEDGER_FOLDER; nothing written"
     fi
   fi

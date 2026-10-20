@@ -5,10 +5,9 @@ import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import {
-  CURATION_DIR_NAME,
+  CURATION_TUNING_FILE_NAME,
   LEGACY_NAMES,
   getCurationDir,
-  getCurateTuningConfigPath,
   getGlobalCurateTuningConfigPath,
 } from '../../core/project-paths.js';
 import { loadShippedAgentDefaults } from '../../core/agent-models.js';
@@ -21,7 +20,7 @@ import {
   installedScriptsSkew,
   readRunningVersion,
 } from '../../targets/claude-code/curation-install.js';
-import { getLedgerRoot, ledgerFolderToCreate } from '../../core/ledger-root.js';
+import { getLedgerRoot } from '../../core/ledger-root.js';
 import { drainCurationQueue } from '../../core/curation-queue-cleanup.js';
 import { firstSymbolicLink } from '../../core/linked-path.js';
 import { formatRefusedDrain } from '../../core/queue-drain.js';
@@ -189,10 +188,15 @@ async function prepareToWrite(ledgerRoot: string, undone: string): Promise<boole
   const moved = await runSharedMove(ledgerRoot);
   if (moved.kind === 'moved' || moved.kind === 'unchanged') return true;
   p.log.error(moved.kind === 'busy'
-    ? `Another run is moving this project's curation data. Nothing was ${undone}; try again in a moment.`
+    ? movingLine(undone)
     : describeMoveText(`${moveProblemLines(moved).join(' ')} Nothing was ${undone}.`));
   process.exitCode = 1;
   return false;
+}
+
+/** The line a writer prints when the move of the old folder is not done. `undone` completes "Nothing was …". */
+function movingLine(undone: string): string {
+  return `Another run is moving this project's curation data. Nothing was ${undone}; try again in a moment.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -500,9 +504,17 @@ async function handleConfigure(): Promise<void> {
     // Skew or a move that cannot run (busy, refused, failed) writes nothing, so the
     // config never lands in a folder the readers do not use.
     if (!(await prepareToWrite(projectRoot, 'written'))) return;
-    // The creator rule: the new folder is made only when the old name is absent.
-    const curationDir = await ledgerFolderToCreate(projectRoot, LEGACY_NAMES.folder, CURATION_DIR_NAME);
-    const projectConfigPath = getCurateTuningConfigPath(projectRoot);
+    // The creator rule: this writer makes the new folder only when the old name is
+    // absent, so it looks once more. A folder of the old name can stand again after the
+    // move, and the new folder made beside it would hide its ledger from every reader.
+    if (await oldLedgerFolderPresent(projectRoot)) {
+      p.log.error(movingLine('written'));
+      process.exitCode = 1;
+      return;
+    }
+    // The folder that is checked is the folder that is written.
+    const curationDir = getCurationDir(projectRoot);
+    const projectConfigPath = path.join(curationDir, CURATION_TUNING_FILE_NAME);
     // D-CLI-NO-SYMLINK (core/linked-path.ts): nothing is written through a .devflow,
     // a curation folder or a curation.json that is a symbolic link.
     const linked = await firstSymbolicLink([path.dirname(curationDir), curationDir, projectConfigPath]);

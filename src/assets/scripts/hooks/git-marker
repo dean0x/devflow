@@ -179,6 +179,33 @@ df_ledger_queue() {
   return 0
 }
 
+# df_make_ledger_folder <root> <devflow_dir> <old> <new> — the one creator of the
+# ledger folder for a hook. It sets DF_LEDGER_FOLDER as df_ledger_folder does, then
+# makes the NEW folder and only the new one, and only where the old name is absent at
+# the probe and no link sits on the way down from <root> (df_no_symlink_below). Where
+# the old name is present it makes nothing, so a creator never makes the old folder:
+# a `mkdir -p` on it would bring back an empty old folder beside the new one after a
+# move had renamed it away. It logs nothing, so each hook words its own skip once.
+# A predicate: it returns 0 when nothing is left to make or the folder was made, 2 for
+# a link on the path (nothing is made), and 1 for an empty argument or a failed mkdir.
+# Call it in an `if` or an `||` list, never as a plain statement under `set -e`.
+#
+# The remaining window is the gap between the probe and the mkdir. A move that
+# finishes inside it leaves no folder this time, and the next event makes the new one.
+# An old folder that appears inside it, from an older install or by hand, leaves the
+# new folder beside it, and the next move merges the two. No data is lost either way:
+# the helper only ever makes an empty folder, and never writes into or removes one.
+df_make_ledger_folder() {
+  local _root="$1" _dir="$2" _old="$3" _new="$4"
+  [ -n "$_root" ] && [ -n "$_dir" ] && [ -n "$_old" ] && [ -n "$_new" ] || return 1
+  df_ledger_folder "$_dir" "$_old" "$_new"
+  [ "$DF_LEDGER_FOLDER" = "$_dir/$_new" ] || return 0
+  if ! df_no_symlink_below "$_root" "$DF_LEDGER_FOLDER"; then return 2; fi
+  if [ -d "$DF_LEDGER_FOLDER" ]; then return 0; fi
+  mkdir -p "$DF_LEDGER_FOLDER" 2>/dev/null || return 1
+  return 0
+}
+
 # df_global_tuning_file <machine_dir> — sets DF_GLOBAL_TUNING_FILE to the global
 # curate-agent tuning file inside the machine directory (~/.devflow). The shell
 # twin of getGlobalCurateTuningConfigPath in src/core/project-paths.ts: the one

@@ -1121,7 +1121,7 @@ describe('queue_read_gates without jq: the manifest read is the resolver machine
     const scripts = path.join(tmpDir, 'scripts');
     const hooks = path.join(scripts, 'hooks');
     fs.mkdirSync(hooks, { recursive: true });
-    for (const name of ['queue-append', 'git-marker']) fs.copyFileSync(path.join(HOOKS_DIR, name), path.join(hooks, name));
+    for (const name of ['queue-append', 'git-marker', 'curation-move']) fs.copyFileSync(path.join(HOOKS_DIR, name), path.join(hooks, name));
     fs.writeFileSync(
       path.join(scripts, 'resolve-settings.cjs'),
       "module.exports = { machineSwitchOn: (manifest, feature) => feature === 'memory' };\n",

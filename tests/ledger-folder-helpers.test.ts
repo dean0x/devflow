@@ -1,15 +1,16 @@
 // tests/ledger-folder-helpers.test.ts
 //
 // The creator helpers and the global tuning-file helper, which take the old and the
-// new ledger folder names as arguments. The four places that create the ledger
-// folder (the session-start heal, the ensure-devflow-init scaffold, queue append and
-// the configure writer) create the new folder only when the old name is absent at the
-// ledger root. They call these helpers with the old and the new name. The helpers take
-// the names as arguments, so the tests below run on made-up names.
+// new ledger folder names as arguments. The places that create the ledger folder (the
+// session-start heal, the ensure-devflow-init scaffold, queue append and the configure
+// writer) create the new folder only when the old name is absent at the ledger root,
+// and never the old folder. The shell creators call these helpers with the old and the
+// new name. The helpers take the names as arguments, so the tests below run on made-up
+// names.
 //
-// The shell half runs the helpers from the hooks' git-marker library in a bash
-// process with an empty PATH, so a helper that forked any external command would fail:
-// the hot-path hooks stay fork-free. The TypeScript half runs on temp folders.
+// The probe helpers run from the hooks' git-marker library in a bash process with an
+// empty PATH, so a helper that forked any external command would fail: the hot-path
+// hooks stay fork-free. The creator, which makes a folder, runs with the system PATH.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSync } from 'child_process';
@@ -17,7 +18,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { ledgerFolderToCreate } from '../src/core/ledger-root.js';
 import { getGlobalCurateTuningConfigPath } from '../src/core/project-paths.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -174,58 +174,101 @@ describe('df_global_tuning_file (shell) and getGlobalCurateTuningConfigPath (Typ
   });
 });
 
-describe('ledgerFolderToCreate (TypeScript)', () => {
+describe('df_make_ledger_folder (shell)', () => {
   const devflow = () => path.join(tmp, '.devflow');
 
-  it('answers the old folder while the old name is present', async () => {
-    fs.mkdirSync(path.join(devflow(), 'oldname'), { recursive: true });
-    expect(await ledgerFolderToCreate(tmp, 'oldname', 'newname')).toBe(path.join(devflow(), 'oldname'));
-  });
+  /** Run the creator with the system PATH (it makes a folder). Prints its status and DF_LEDGER_FOLDER, and whatever it logged. */
+  const make = (...args: string[]): { stdout: string; status: number | null } => {
+    const res = spawnSync(BASH, ['-c', 'source "$1"; shift; log() { printf "LOG:%s\\n" "$1"; }; df_make_ledger_folder "$@"; rc=$?; printf "RC:%s\\nFOLDER:%s\\n" "$rc" "$DF_LEDGER_FOLDER"', '_', GIT_MARKER, ...args], {
+      encoding: 'utf-8',
+    });
+    return { stdout: res.stdout, status: res.status };
+  };
 
-  it('answers the new folder when the old name is absent', async () => {
+  it('makes the new folder, and not the old one, when the old name is absent', () => {
     fs.mkdirSync(devflow());
-    expect(await ledgerFolderToCreate(tmp, 'oldname', 'newname')).toBe(path.join(devflow(), 'newname'));
+
+    const res = make(tmp, devflow(), 'oldname', 'newname');
+
+    expect(res.stdout).toBe(`RC:0\nFOLDER:${path.join(devflow(), 'newname')}\n`);
+    expect(fs.readdirSync(devflow())).toEqual(['newname']);
   });
 
-  it('answers the new folder when .devflow itself is absent', async () => {
-    expect(await ledgerFolderToCreate(tmp, 'oldname', 'newname')).toBe(path.join(devflow(), 'newname'));
-  });
-
-  it('answers the old folder when called with the old name only', async () => {
-    expect(await ledgerFolderToCreate(tmp, 'oldname')).toBe(path.join(devflow(), 'oldname'));
+  it('makes nothing while the old name is present, and answers the old folder', () => {
     fs.mkdirSync(path.join(devflow(), 'oldname'), { recursive: true });
-    expect(await ledgerFolderToCreate(tmp, 'oldname')).toBe(path.join(devflow(), 'oldname'));
+
+    const res = make(tmp, devflow(), 'oldname', 'newname');
+
+    expect(res.stdout).toBe(`RC:0\nFOLDER:${path.join(devflow(), 'oldname')}\n`);
+    expect(fs.readdirSync(devflow())).toEqual(['oldname']);
   });
 
-  it('keeps the old name when both folders exist', async () => {
-    fs.mkdirSync(path.join(devflow(), 'oldname'), { recursive: true });
-    fs.mkdirSync(path.join(devflow(), 'newname'));
-    expect(await ledgerFolderToCreate(tmp, 'oldname', 'newname')).toBe(path.join(devflow(), 'oldname'));
-  });
-
-  it('counts a dangling link at the old name as present', async () => {
+  it('makes nothing where a dangling link stands at the old name, and nothing where it points', () => {
+    const created = path.join(tmp, 'created-through-the-link');
     fs.mkdirSync(devflow());
-    fs.symlinkSync(path.join(tmp, 'nowhere'), path.join(devflow(), 'oldname'));
-    expect(await ledgerFolderToCreate(tmp, 'oldname', 'newname')).toBe(path.join(devflow(), 'oldname'));
+    fs.symlinkSync(created, path.join(devflow(), 'oldname'));
+
+    const res = make(tmp, devflow(), 'oldname', 'newname');
+
+    expect(res.stdout).toBe(`RC:0\nFOLDER:${path.join(devflow(), 'oldname')}\n`);
+    expect(fs.existsSync(created)).toBe(false);
+    expect(fs.existsSync(path.join(devflow(), 'newname'))).toBe(false);
   });
 
-  it('answers the new folder when .devflow is a file, so the old name is absent', async () => {
-    fs.writeFileSync(devflow(), '');
-    expect(await ledgerFolderToCreate(tmp, 'oldname', 'newname')).toBe(path.join(devflow(), 'newname'));
+  it('leaves an existing new folder and its files as they are', () => {
+    fs.mkdirSync(path.join(devflow(), 'newname'), { recursive: true });
+    fs.writeFileSync(path.join(devflow(), 'newname', 'kept.txt'), 'kept\n');
+
+    const res = make(tmp, devflow(), 'oldname', 'newname');
+
+    expect(res.stdout).toBe(`RC:0\nFOLDER:${path.join(devflow(), 'newname')}\n`);
+    expect(fs.readFileSync(path.join(devflow(), 'newname', 'kept.txt'), 'utf-8')).toBe('kept\n');
   });
 
-  it.skipIf(process.getuid?.() === 0)('answers the old folder when the probe cannot tell, so it never starts a second folder', async () => {
-    fs.mkdirSync(devflow());
-    fs.chmodSync(devflow(), 0o000);
+  it('refuses a link at the new name with status 2, makes nothing through it, and logs nothing itself', () => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'ledger-folder-outside-'));
     try {
-      expect(await ledgerFolderToCreate(tmp, 'oldname', 'newname')).toBe(path.join(devflow(), 'oldname'));
+      fs.mkdirSync(devflow());
+      fs.symlinkSync(path.join(outside, 'absent'), path.join(devflow(), 'newname'));
+
+      const res = make(tmp, devflow(), 'oldname', 'newname');
+
+      expect(res.stdout).toBe(`RC:2\nFOLDER:${path.join(devflow(), 'newname')}\n`);
+      expect(fs.readdirSync(outside)).toEqual([]);
     } finally {
-      fs.chmodSync(devflow(), 0o700);
+      fs.rmSync(outside, { recursive: true, force: true });
     }
   });
 
-  it('creates nothing', async () => {
-    await ledgerFolderToCreate(tmp, 'oldname', 'newname');
-    expect(fs.readdirSync(tmp)).toEqual([]);
+  it('refuses a linked .devflow and makes nothing in the folder it names', () => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'ledger-folder-outside-'));
+    try {
+      fs.symlinkSync(outside, devflow());
+
+      const res = make(tmp, devflow(), 'oldname', 'newname');
+
+      expect(res.stdout).toMatch(/^RC:2\n/);
+      expect(fs.readdirSync(outside)).toEqual([]);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a call with an empty name or root, and makes nothing', () => {
+    fs.mkdirSync(devflow());
+
+    for (const args of [[tmp, devflow(), '', 'newname'], [tmp, devflow(), 'oldname', ''], ['', devflow(), 'oldname', 'newname'], [tmp, '', 'oldname', 'newname']]) {
+      expect(make(...args).stdout, JSON.stringify(args)).toMatch(/^RC:1\n/);
+    }
+    expect(fs.readdirSync(devflow())).toEqual([]);
+  });
+
+  it('under set -e, a caller that ends the call with || true keeps running after a refusal', () => {
+    fs.mkdirSync(devflow());
+    fs.symlinkSync(path.join(tmp, 'absent'), path.join(devflow(), 'newname'));
+
+    const res = spawnSync(BASH, ['-c', 'set -e; source "$1"; df_make_ledger_folder "$2" "$3" oldname newname || true; echo after', '_', GIT_MARKER, tmp, devflow()], { encoding: 'utf-8' });
+
+    expect(res.stdout).toBe('after\n');
   });
 });

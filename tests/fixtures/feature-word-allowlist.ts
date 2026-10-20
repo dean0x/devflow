@@ -113,13 +113,6 @@ export const FEATURE_WORD_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
       'move finds the old folder, its backups and the old tuning file.',
   },
   {
-    path: /^src\/assets\/scripts\/hooks\/(?:ensure-devflow-init|session-start-context)$/,
-    pattern: /df_ledger_folder "\$\w+" learning curation/,
-    reason:
-      'The probe line asks the shim to move the old folder to the new one. It must name the old ' +
-      'folder to find it.',
-  },
-  {
     path: HOOKS,
     pattern: /\bold learning\/ (?:ledger )?(?:folder|name)/,
     reason:
@@ -134,13 +127,6 @@ export const FEATURE_WORD_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     reason:
       'The comments name the pre-rename key that the gate still reads as a narrow-only union ' +
       'with the current key.',
-  },
-  {
-    path: `${HOOKS}queue-append`,
-    pattern: /_qar_old="learning"/,
-    reason:
-      'The append rewrites a queue path from the old folder name to the new one, so it must ' +
-      'know the old name.',
   },
   {
     path: `${HOOKS}queue-append`,

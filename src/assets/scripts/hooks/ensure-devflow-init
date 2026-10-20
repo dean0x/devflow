@@ -57,11 +57,14 @@ df_curation_move "$_EDI_LEDGER" 2>/dev/null || true
 # main checkout holds the ledger (D-LEDGER-MAIN-WORKTREE, resolve-project-root) a
 # curation/ here would be an empty directory nothing writes to; the capture hooks
 # create the ledger's own curation/ at the ledger root when they append to it.
-# The creator rule (git-marker, df_ledger_folder): the folder made is the new one
-# only when the old learning/ name is absent, so a new folder never hides an old
-# ledger. Either name satisfies the fast path below, so a root whose old folder is
-# still there (held, refused or not yet tried) forks no mkdir.
-df_ledger_folder "$_DEVFLOW_DIR" learning curation || return 1
+# The creator rule (git-marker, df_make_ledger_folder): the folder made is the new one
+# only when the old name is absent, so a new folder never hides an old ledger, and a
+# creator never makes the old folder. The names come from the move shim
+# (df_curation_move_names), the one shell place that holds them. Either name satisfies
+# the fast path below, so a root whose old folder is still there (held, refused or not
+# yet tried) forks no mkdir.
+df_curation_move_names || return 1
+df_ledger_folder "$_DEVFLOW_DIR" "$DF_CM_OLD_FOLDER" "$DF_CM_NEW_FOLDER" || return 1
 _EDI_CURATION="$DF_LEDGER_FOLDER"
 [ "$_EDI_LEDGER" = "$_EDI_ROOT" ] || _EDI_CURATION=""
 
@@ -76,13 +79,20 @@ if [ -d "$_DEVFLOW_DIR/memory" ] && [ -d "$_DEVFLOW_DIR/docs" ] && \
   return 0
 fi
 
-# Create all subdirectories
+# Create all subdirectories. The ledger folder is made by its own guarded creator, never
+# by this mkdir: a probe that saw the old folder must not bring it back after a move.
 mkdir -p \
   "$_DEVFLOW_DIR/memory" \
-  ${_EDI_CURATION:+"$_EDI_CURATION"} \
   "$_DEVFLOW_DIR/features" \
   "$_DEVFLOW_DIR/docs" \
   2>/dev/null || return 1
+
+# A ledger folder that could not be made (a link on its path, a failed mkdir) leaves
+# the memory scaffold as it is: the capture hooks refuse its queue, and the next event
+# looks again.
+if [ -n "$_EDI_CURATION" ]; then
+  df_make_ledger_folder "$_EDI_ROOT" "$_DEVFLOW_DIR" "$DF_CM_OLD_FOLDER" "$DF_CM_NEW_FOLDER" || true
+fi
 
 # One-time root .gitignore setup — delegated to the sibling ensure-root-gitignore
 # helper (single source of truth) so the always-on, memory-independent

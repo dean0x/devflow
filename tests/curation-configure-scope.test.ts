@@ -6,8 +6,45 @@
  * Global option is silently ineffective for them.
  */
 
-import { describe, it, expect } from 'vitest';
-import { CONFIGURE_SCOPE_OPTIONS, curateModelOptions } from '../src/cli/commands/curation.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+
+// The project scope of --configure, run for real on a temp project. The prompts, the
+// ledger root, the version-skew gate and the move are the only things stubbed: the
+// move answers as a finished one, so a test can put the old folder back after it.
+vi.mock('@clack/prompts', () => ({
+  intro: vi.fn(),
+  outro: vi.fn(),
+  log: { info: vi.fn(), success: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  note: vi.fn(),
+  confirm: vi.fn(async () => false),
+  select: vi.fn(async () => 'cancel'),
+  isCancel: vi.fn(() => false),
+  cancel: vi.fn(),
+}));
+
+vi.mock('../src/core/ledger-root.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/core/ledger-root.js')>()),
+  getLedgerRoot: vi.fn(),
+}));
+
+vi.mock('../src/targets/claude-code/curation-install.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/targets/claude-code/curation-install.js')>()),
+  installedScriptsSkew: vi.fn(async () => null),
+}));
+
+vi.mock('../src/cli/commands/curation-move-io.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/cli/commands/curation-move-io.js')>()),
+  runSharedMove: vi.fn(),
+}));
+
+import * as p from '@clack/prompts';
+import { getLedgerRoot } from '../src/core/ledger-root.js';
+import { runSharedMove } from '../src/cli/commands/curation-move-io.js';
+import { CONFIGURE_SCOPE_OPTIONS, curateModelOptions, curationCommand } from '../src/cli/commands/curation.js';
+import { CURATION_DIR_NAME, LEGACY_NAMES } from '../src/core/project-paths.js';
 import { AGENT_CONFIG } from './fixtures/agent-config.js';
 
 describe('devflow curation --configure scope options', () => {
@@ -72,5 +109,89 @@ describe('devflow curation --configure model options', () => {
       sonnet: 'Good balance of quality and speed',
       haiku: 'Fastest, lowest cost',
     });
+  });
+});
+
+/**
+ * The project scope of --configure writes into the folder it checked. The move has
+ * run (prepareToWrite) when the write starts, and a folder of the old name can stand
+ * again by then, so the writer looks once more: where the old name is present it
+ * writes nothing and says the move is not done, and otherwise it makes only the new
+ * folder, after checking `.devflow`, that folder and the file for links.
+ */
+describe('devflow curation --configure writes only into the folder it checked', () => {
+  const KEEP = 'a file outside the project\n';
+  let root: string;
+  let outside: string;
+
+  /** Answer the wizard: Sonnet, no debug logging, Project scope. */
+  const configureProject = async (): Promise<{ error: string; exitCode: number | string | null | undefined }> => {
+    (curationCommand as unknown as { _optionValues: Record<string, unknown> })._optionValues = {};
+    vi.mocked(p.select).mockResolvedValueOnce('sonnet').mockResolvedValueOnce('project');
+    vi.mocked(p.confirm).mockResolvedValueOnce(false);
+    vi.mocked(p.log.error).mockClear();
+    await curationCommand.parseAsync(['--configure'], { from: 'user' });
+    return {
+      error: vi.mocked(p.log.error).mock.calls.map(call => String(call[0])).join('\n'),
+      exitCode: process.exitCode,
+    };
+  };
+
+  /** Every path under `dir` with its file text, so two trees compare equal only when nothing changed. */
+  const treeOf = (dir: string): string[] =>
+    (fs.readdirSync(dir, { recursive: true, encoding: 'utf-8' }) as string[]).sort().map(rel => {
+      const full = path.join(dir, rel);
+      return fs.lstatSync(full).isFile() ? `${rel}=${fs.readFileSync(full, 'utf-8')}` : rel;
+    });
+
+  beforeEach(() => {
+    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'configure-scope-root-')));
+    outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'configure-scope-outside-')));
+    process.exitCode = 0;
+    vi.mocked(getLedgerRoot).mockResolvedValue(root);
+    vi.mocked(runSharedMove).mockResolvedValue({ kind: 'unchanged', root, sweep: null });
+  });
+
+  afterEach(() => {
+    process.exitCode = 0;
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  });
+
+  it('(a) the old folder stands again after the move: nothing is written, and the busy line prints', async () => {
+    const old = path.join(root, '.devflow', LEGACY_NAMES.folder);
+    fs.mkdirSync(old, { recursive: true });
+    fs.writeFileSync(path.join(old, 'decisions.md'), 'an old decision\n');
+    const before = treeOf(root);
+
+    const run = await configureProject();
+
+    expect(vi.mocked(runSharedMove), 'non-vacuity: the move ran first').toHaveBeenCalledTimes(1);
+    expect(run.error).toMatch(/moving this project's curation data/);
+    expect(run.error).toMatch(/try again/i);
+    expect(run.exitCode).toBe(1);
+    expect(treeOf(root), 'the old folder is as it was, and no new folder is made').toEqual(before);
+    expect(fs.existsSync(path.join(root, '.devflow', CURATION_DIR_NAME))).toBe(false);
+  });
+
+  it('(b) a linked curation folder: the write is refused, and nothing is written where it points', async () => {
+    fs.writeFileSync(path.join(outside, 'curation.json'), KEEP);
+    fs.mkdirSync(path.join(root, '.devflow'));
+    fs.symlinkSync(outside, path.join(root, '.devflow', CURATION_DIR_NAME));
+
+    const run = await configureProject();
+
+    expect(run.error).toContain(`${path.join(root, '.devflow', CURATION_DIR_NAME)} is a symbolic link`);
+    expect(run.exitCode).toBe(1);
+    expect(fs.readdirSync(outside), 'nothing is added where the link points').toEqual(['curation.json']);
+    expect(fs.readFileSync(path.join(outside, 'curation.json'), 'utf-8')).toBe(KEEP);
+  });
+
+  it('with no old folder it makes the new folder and writes the config there', async () => {
+    const run = await configureProject();
+
+    expect(run.exitCode).toBe(0);
+    expect(JSON.parse(fs.readFileSync(path.join(root, '.devflow', CURATION_DIR_NAME, 'curation.json'), 'utf-8'))).toEqual({ model: 'sonnet', debug: false });
+    expect(fs.existsSync(path.join(root, '.devflow', LEGACY_NAMES.folder))).toBe(false);
   });
 });

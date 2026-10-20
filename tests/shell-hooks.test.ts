@@ -4904,6 +4904,19 @@ describe('session-start-context never reads through a symbolic link under .devfl
     }
     expect(refused).toHaveLength(3);
   });
+
+  it('a dangling link at the curation folder: the heal refuses it, logs the refusal once, and makes nothing where it points', () => {
+    fs.rmSync(curationDir, { recursive: true });
+    const pointsAt = path.join(outsideDir, 'absent');
+    fs.symlinkSync(pointsAt, curationDir);
+
+    const { exitCode } = run();
+
+    expect(exitCode).toBe(0);
+    expect(fs.existsSync(pointsAt), 'nothing is made where the link points').toBe(false);
+    expect(fs.lstatSync(curationDir).isSymbolicLink(), 'the link is left in place').toBe(true);
+    expect(refusals()).toEqual([expect.stringContaining(`a symbolic link sits on the path to ${curationDir}`)]);
+  });
 });
 
 // =============================================================================
@@ -6462,6 +6475,57 @@ describe('TP-9: the hooks move the old ledger folder before any creator makes th
 
       expect(fs.existsSync(path.join(main, '.devflow', NEW))).toBe(true);
       expect(fs.existsSync(path.join(main, '.devflow', OLD))).toBe(false);
+    });
+  });
+
+  describe('a creator never makes the old folder, whichever way a move races it', () => {
+    /**
+     * A copy of the scripts folder whose git-marker answers the creator probe as it
+     * is, then takes the old folder away, as a move would between the probe and the
+     * make. The probe log shows that the stub ran.
+     */
+    const probedScripts = (): { hooks: string; probeLog: string } => {
+      const scripts = path.join(base, 'scripts');
+      fs.cpSync(path.dirname(HOOKS_DIR), scripts, { recursive: true });
+      const hooks = path.join(scripts, 'hooks');
+      const probeLog = path.join(base, 'probe.log');
+      fs.appendFileSync(path.join(hooks, 'git-marker'), [
+        '',
+        'eval "_real_$(declare -f df_ledger_folder)"',
+        `df_ledger_folder() { _real_df_ledger_folder "$@"; echo probed >> "${probeLog}"; rm -rf "$1/${OLD}"; }`,
+        '',
+      ].join('\n'));
+      return { hooks, probeLog };
+    };
+    /** Hold the move, so the old folder is still there at the probe. */
+    const holdMove = (): void => {
+      fs.mkdirSync(path.join(homeDir, '.devflow', `.curation-move-${store.curationMoveLockKey(main)}.lock`));
+    };
+
+    it('ensure-devflow-init: the old folder is gone after the probe, and the scaffold makes no old folder', () => {
+      const { hooks, probeLog } = probedScripts();
+      holdMove();
+
+      const res = spawnSync('bash', ['-c', 'set -e; source "$0" "$1"; echo after', path.join(hooks, 'ensure-devflow-init'), main], {
+        encoding: 'utf-8',
+        env: { ...process.env, HOME: homeDir },
+      });
+
+      expect({ stdout: res.stdout, stderr: res.stderr }).toEqual({ stdout: 'after\n', stderr: '' });
+      expect(fs.existsSync(probeLog), 'non-vacuity: the probe stub ran').toBe(true);
+      expect(fs.existsSync(path.join(main, '.devflow', OLD)), 'no old folder is made again').toBe(false);
+      for (const folder of ['memory', 'features', 'docs']) expect(fs.existsSync(path.join(main, '.devflow', folder)), folder).toBe(true);
+    });
+
+    it('session-start-context: the old folder is gone after the probe, and the heal makes no old folder', () => {
+      const { hooks, probeLog } = probedScripts();
+      holdMove();
+
+      const res = runHook(path.join(hooks, 'session-start-context'), { cwd: main, source: 'startup' }, homeDir);
+
+      expect(res.exitCode, res.stderr).toBe(0);
+      expect(fs.existsSync(probeLog), 'non-vacuity: the probe stub ran').toBe(true);
+      expect(fs.existsSync(path.join(main, '.devflow', OLD)), 'no old folder is made again').toBe(false);
     });
   });
 });

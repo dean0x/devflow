@@ -193,32 +193,3 @@ export async function getLedgerRoot(
   const lookup = await lookupLedgerRoot(cwd, options);
   return lookup.kind === 'root' ? lookup.root : null;
 }
-
-/**
- * The ledger folder a creator may create or write into under `ledgerRoot`: the old
- * folder while the old name is present (a folder, a file or a link, dangling or not),
- * else the new one. `newName` defaults to `oldName`, so a caller that names only the
- * old folder gets the old folder's path in every state.
- *
- * The creator rule: a new folder made beside a present old one would hide the old
- * ledger from every reader, so each creator (the configure writer here, and the three
- * shell creators through `df_ledger_folder`) makes the new folder only when the old
- * name is absent. Only ENOENT and ENOTDIR show the old name absent; any other probe
- * failure leaves the old path, so an unreadable `.devflow` never starts a second
- * folder. Answers a path and creates nothing.
- */
-export async function ledgerFolderToCreate(
-  ledgerRoot: string,
-  oldName: string,
-  newName: string = oldName,
-): Promise<string> {
-  const devflowDir = path.join(ledgerRoot, '.devflow');
-  const oldFolder = path.join(devflowDir, oldName);
-  try {
-    await fs.lstat(oldFolder);
-    return oldFolder;
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    return code === 'ENOENT' || code === 'ENOTDIR' ? path.join(devflowDir, newName) : oldFolder;
-  }
-}
