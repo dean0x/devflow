@@ -1,3 +1,5 @@
+import type { CurationMoveNotice } from '../core/curation-move-notice.js';
+
 /**
  * StdinData — the JSON that Claude Code pipes to statusLine commands.
  */
@@ -138,15 +140,10 @@ export interface ConfigCountsData {
 }
 
 /**
- * What the empty branch says about a project whose ledger folder still has the old name:
- * `pointer` asks for a session start or `devflow init` (the move has not run), `refused`
- * says the move was tried and refused (a marker exists for the root).
- */
-export type CurationMoveNotice = 'pointer' | 'refused';
-
-/**
  * Decisions/pitfalls counts data for the curationCounts component. `move` is set only
- * when both counts are zero and the old folder exists.
+ * when both counts are zero and the old folder exists: a pointer to a session start or
+ * `devflow init` (the move has not run), or the refused line (the move was tried and
+ * refused).
  */
 export interface CurationCountsData {
   decisions: number;

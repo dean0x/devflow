@@ -1,13 +1,13 @@
 /**
  * @file curation-move-io.ts
  *
- * The real I/O behind the curation folder move: the seam init-curation-move.ts takes
+ * The real I/O behind the curation folder move: the seam curation-move-step.ts takes
  * as parameters, built from the file system, git and the package's own store. Init
  * wires it to the init step; the curation command wires it to the move that
  * configure and the toggles run for the current project.
  *
  * Every function answers a value and never throws. The module holds no policy: what
- * to move, in what order and what to print are decided in init-curation-move.ts.
+ * to move, in what order and what to print are decided in curation-move-step.ts.
  */
 
 import { promises as fs } from 'fs';
@@ -23,7 +23,7 @@ import {
   type ProjectLedgerMoveIO,
   type ProjectMoveOutcome,
   type TuningPathKind,
-} from './init-curation-move.js';
+} from './curation-move-step.js';
 
 /** The move seam the move uses: the two operations, nothing else. */
 export type MoveStore = Pick<CurationMoveModule, 'moveLedger' | 'sweepLedgerBackups'>;

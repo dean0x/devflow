@@ -1,8 +1,11 @@
 /**
- * @file init-curation-move.ts
+ * @file curation-move-step.ts
  *
- * The init step that moves each project's ledger folder to the curation name:
- * `moveProjectLedgers(opts, io)`. It lives in its own module, not in init.ts, so the
+ * The move of a project's ledger folder to the curation name, as steps over injected
+ * I/O: `moveProjectLedgers(opts, io)`, the init step for every project, and
+ * `moveLedgerRoot(root, opts, io)`, the one-root move the curation command runs, with
+ * the lines each outcome prints (`describeOutcome`). Init and the curation command share
+ * it, so neither owns it. It lives in its own module, not in init.ts, so the
  * ordering tests inject their own I/O (the shape of `drainDisabledFeatureQueues`)
  * and so the golden-red commit that wires it does not also move it.
  *

@@ -60,8 +60,8 @@ import { getLedgerRoot } from '../../src/core/ledger-root.js';
 import { getDevFlowDirectory } from '../../src/targets/claude-code/claude-paths.js';
 import { curationCommand } from '../../src/cli/commands/curation.js';
 import * as p from '@clack/prompts';
+import { getCurationMoveMarkerPath } from '../../src/core/curation-move-notice.js';
 import {
-  curationMoveMarkerKey,
   getCurationPendingTurnsPath,
   getCurationPendingTurnsProcessingPath,
   getCurationClaimOwnerPath,
@@ -1203,7 +1203,7 @@ const REFUSED = 'Curation: move refused, see the hook log';
 
 /** The refusal marker the shell writes for `dir` under the (test) home. */
 function markerFor(dir: string): string {
-  return path.join(os.homedir(), '.devflow', 'logs', `curation-move.${curationMoveMarkerKey(dir)}.skip`);
+  return getCurationMoveMarkerPath(os.homedir(), dir);
 }
 
 describe('curation --status/--list/--show with only the old folder (#529)', { timeout: 30_000 }, () => {

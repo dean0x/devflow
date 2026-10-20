@@ -1,7 +1,7 @@
 // tests/init-curation-move.test.ts
 //
 // The init step that moves each project's ledger folder to the curation name
-// (src/cli/commands/init-curation-move.ts). The step takes its path probes, its
+// (src/cli/commands/curation-move-step.ts). The step takes its path probes, its
 // store seam and its clock as parameters, so most tests here inject fakes. The one
 // group that uses the real store (TP-37) works in a temp directory and sets HOME
 // to it; no test touches the real HOME or a real project.
@@ -29,7 +29,7 @@ import {
   type ProjectLedgerMoveReport,
   type ProjectLedgerMoveResult,
   type ProjectMoveOutcome,
-} from '../src/cli/commands/init-curation-move.js';
+} from '../src/cli/commands/curation-move-step.js';
 import { loadCurationMove } from '../src/core/curation-move.js';
 import { LEDGER_ROOT_TIMEOUT_MS, type LedgerRootLookup } from '../src/core/ledger-root.js';
 import { realProjectLedgerMoveIO } from '../src/cli/commands/curation-move-io.js';

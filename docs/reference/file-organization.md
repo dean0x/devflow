@@ -9,7 +9,7 @@ devflow/
 ├── src/
 │   ├── cli.ts                        # CLI entry point
 │   ├── cli/                          # CLI command modules
-│   │   ├── commands/                 # init.ts, init-seed.ts, init-curation-move.ts, curation-move-io.ts, memory.ts, curation.ts, ambient.ts,
+│   │   ├── commands/                 # init.ts, init-seed.ts, curation-move-step.ts, curation-move-io.ts, memory.ts, curation.ts, ambient.ts,
 │   │   │                             #   flags.ts, rules.ts, skills.ts, context.ts, hud.ts,
 │   │   │                             #   uninstall.ts, safe-delete.ts, security.ts, debug.ts,
 │   │   │                             #   capture.ts, legacy-hooks.ts, compliance.ts,
@@ -33,6 +33,7 @@ devflow/
 │   │   ├── project-paths.ts          # Per-project .devflow/ path construction
 │   │   ├── curation-store.ts         # Typed seam onto hooks/lib/curation-store.cjs, the store `devflow curation` runs
 │   │   ├── curation-move.ts          # Typed seam onto hooks/lib/curation-move.cjs, the one-time move of the old ledger folder
+│   │   ├── curation-move-notice.ts   # The pointer and refused lines for a project still on the old ledger folder, and the refusal marker's path; the HUD and `devflow curation` share it
 │   │   └── ...                       # feature-config.ts, curate-tuning-config.ts, …
 │   ├── hud/                          # HUD module (TypeScript source)
 │   │   ├── index.ts                  # Entry point: stdin → gather → render → stdout
@@ -126,7 +127,7 @@ devflow/
 │               └── lib/                  # Node.js helper modules
 │                   ├── decisions-format.cjs # Entry body, Inactive table and index line formatters
 │                   ├── curation-store.cjs  # The curation store: validation, projection, history, the lock; every curation read and write
-│                   ├── curation-move.cjs   # The one-time move of the old ledger folder to its new name, the backup sweep and the backup row count
+│                   ├── curation-move.cjs   # The one-time move of the old ledger folder to its new name, the backup sweep, the backup row count and the list of the backups' queue files
 │                   ├── mkdir-lock.cjs      # mkdir-based lock helpers
 │                   ├── project-paths.cjs   # Project slug + path resolution
 │                   ├── render-decisions.cjs # Renders decisions.md, pitfalls.md and index.md from the ledger (render / --check CLI)

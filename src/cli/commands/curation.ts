@@ -24,8 +24,8 @@ import { getLedgerRoot } from '../../core/ledger-root.js';
 import { drainCurationQueue, drainDisabledCurationQueue } from '../../core/curation-queue-cleanup.js';
 import { firstSymbolicLink } from '../../core/linked-path.js';
 import { formatRefusedDrain } from '../../core/queue-drain.js';
-import { describeMoveText, describeOutcome } from './init-curation-move.js';
-import { formatMoveNotice, gatherMoveNotice } from '../../hud/components/curation-counts.js';
+import { describeMoveText, describeOutcome } from './curation-move-step.js';
+import { formatMoveNotice, gatherMoveNotice } from '../../core/curation-move-notice.js';
 import { runSharedMove, type SharedMoveResult } from './curation-move-io.js';
 import {
   formatCurationStoreUnavailable,

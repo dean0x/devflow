@@ -11,7 +11,7 @@ import { pruneHookLogDirs, MAX_HOOK_LOG_DIRS, type LogDirPruneReport } from '../
 import { getLedgerRoot } from '../../core/ledger-root.js';
 import { formatCurationStoreUnavailable } from '../../core/curation-store.js';
 import { loadCurationMove } from '../../core/curation-move.js';
-import { describeMoveText, runInitCurationMove, type InitCurationMoveReport } from './init-curation-move.js';
+import { describeMoveText, runInitCurationMove, type InitCurationMoveReport } from './curation-move-step.js';
 import { realGlobalTuningMoveIO, realProjectLedgerMoveIO } from './curation-move-io.js';
 import { describeEchoedValue } from '../../core/echo-value.js';
 import { installViaFileCopy, composeScripts, type InstallReport } from '../../targets/claude-code/installer.js';

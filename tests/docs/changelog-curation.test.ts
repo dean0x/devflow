@@ -196,9 +196,9 @@ describe('CHANGELOG curation rename entry', () => {
   });
 
   it('quotes the messages the built CLI and HUD print', () => {
-    const initMove = readFileSync(path.join(ROOT, 'src/cli/commands/init-curation-move.ts'), 'utf8');
+    const initMove = readFileSync(path.join(ROOT, 'src/cli/commands/curation-move-step.ts'), 'utf8');
     const curation = readFileSync(path.join(ROOT, 'src/cli/commands/curation.ts'), 'utf8');
-    const hud = readFileSync(path.join(ROOT, 'src/hud/components/curation-counts.ts'), 'utf8');
+    const notice = readFileSync(path.join(ROOT, 'src/core/curation-move-notice.ts'), 'utf8');
     for (const quoted of ['Ledger move skipped for', 'Ledger move refused for', 'Ledger move failed for']) {
       expect(entry).toContain(quoted);
       expect(initMove).toContain(quoted);
@@ -210,7 +210,7 @@ describe('CHANGELOG curation rename entry', () => {
       'Curation: open Claude Code in this project once, or run devflow init',
     ]) {
       expect(entry).toContain(quoted);
-      expect(hud).toContain(quoted.replace(/^Curation: /, ''));
+      expect(notice).toContain(quoted.replace(/^Curation: /, ''));
     }
   });
 

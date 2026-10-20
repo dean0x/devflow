@@ -1,9 +1,9 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
-import * as path from 'node:path';
-import type { ComponentResult, GatherContext, CurationCountsData, CurationMoveNotice } from '../types.js';
+import type { ComponentResult, GatherContext, CurationCountsData } from '../types.js';
 import { dim } from '../colors.js';
-import { curationMoveMarkerKey, getDecisionsLedgerPath, LEGACY_NAMES } from '../../core/project-paths.js';
+import { getDecisionsLedgerPath } from '../../core/project-paths.js';
+import { formatMoveNotice, gatherMoveNotice } from '../../core/curation-move-notice.js';
 import { getLedgerRoot, LEDGER_ROOT_TIMEOUT_MS, type LedgerRootOptions } from '../../core/ledger-root.js';
 import { isActiveDecisionsStatus } from '../../core/observations.js';
 
@@ -130,41 +130,6 @@ export async function gatherLedgerCurationCounts(
   const move = gatherMoveNotice(ledgerRoot, options.home ?? os.homedir());
   if (move === null) return counts;
   return { decisions: counts?.decisions ?? 0, pitfalls: counts?.pitfalls ?? 0, move };
-}
-
-/** Whether anything, a link included, sits at `target`. One lstat, never followed. */
-function exists(target: string): boolean {
-  try {
-    fs.lstatSync(target);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * The empty branch's one extra question: does the project still have the old ledger
- * folder? One existence test. If it does, a second existence test looks for the move's
- * refusal marker, which the shell writes at `<home>/.devflow/logs/curation-move.<key>.skip`
- * under the key of this same root. The old ledger itself is never opened or counted.
- */
-export function gatherMoveNotice(ledgerRoot: string, home: string): CurationMoveNotice | null {
-  if (!exists(path.join(ledgerRoot, '.devflow', LEGACY_NAMES.folder))) return null;
-  const marker = path.join(home, '.devflow', 'logs', `curation-move.${curationMoveMarkerKey(ledgerRoot)}.skip`);
-  return exists(marker) ? 'refused' : 'pointer';
-}
-
-const MOVE_NOTICE_TEXT: Readonly<Record<CurationMoveNotice, string>> = {
-  pointer: 'open Claude Code in this project once, or run devflow init',
-  refused: 'move refused, see the hook log',
-};
-
-/**
- * The one line the HUD and `devflow curation` print for a project whose ledger still sits in
- * the old folder. Both come through here, so they say the same words.
- */
-export function formatMoveNotice(notice: CurationMoveNotice): string {
-  return `Curation: ${MOVE_NOTICE_TEXT[notice]}`;
 }
 
 /**

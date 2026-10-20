@@ -9,6 +9,7 @@ import { HANDOFF_TEMPLATE, REMINDER_TEMPLATE } from './fixtures/ambient-template
 import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
 import { buildRoutingConfigJson } from '../src/core/proxy-state.js';
 import { CURATION_DIR_NAME, LEGACY_NAMES, curationMoveMarkerKey } from '../src/core/project-paths.js';
+import { getCurationMoveMarkerPath } from '../src/core/curation-move-notice.js';
 import { PROJECT_PATHS, makeV2LedgerRow, makeV2LogRow, toJsonl } from './decisions/curation-fixtures.js';
 import * as p from '@clack/prompts';
 import {
@@ -5853,7 +5854,7 @@ describe('curation-move: the shim that moves the old ledger folder (#529)', { ti
     fs.rmSync(base, { recursive: true, force: true });
   });
 
-  const markerOf = (at: string): string => path.join(homeDir, '.devflow', 'logs', `curation-move.${curationMoveMarkerKey(at)}.skip`);
+  const markerOf = (at: string): string => getCurationMoveMarkerPath(homeDir, at);
   const busyMarkerOf = (at: string): string => path.join(homeDir, '.devflow', 'logs', `curation-move.${curationMoveMarkerKey(at)}.busy`);
   const lockOf = (at: string): string => path.join(homeDir, '.devflow', `.curation-move-${store.curationMoveLockKey(at)}.lock`);
   const logLines = (): string[] => (fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8').split('\n').filter(Boolean) : []);
@@ -6308,6 +6309,15 @@ describe('curation-move: the shim that moves the old ledger folder (#529)', { ti
         for (const at of ROOTS) {
           const res = run('df_curation_move_key "$ROOT" && printf %s "$DF_CURATION_MOVE_KEY"', { ...env, ROOT: at, ...NO_FORK });
           expect({ at, key: res.stdout, status: res.status }).toEqual({ at, key: curationMoveMarkerKey(at), status: 0 });
+        }
+      });
+    }
+
+    for (const [label, env] of LOCALES) {
+      it(`the shim's refusal marker is the file getCurationMoveMarkerPath names, under ${label}`, () => {
+        for (const at of ROOTS) {
+          const res = run('df_curation_move_key "$ROOT" && _df_cm_markers && printf %s "$DF_CM_SKIP_MARKER"', { ...env, ROOT: at, ...NO_FORK });
+          expect({ at, marker: res.stdout, status: res.status }).toEqual({ at, marker: getCurationMoveMarkerPath(homeDir, at), status: 0 });
         }
       });
     }

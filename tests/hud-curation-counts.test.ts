@@ -17,6 +17,7 @@ import curationCounts, {
 import { stripAnsi } from '../src/hud/colors.js';
 import type { CurationCountsData, GatherContext } from '../src/hud/types.js';
 import { curationMoveMarkerKey } from '../src/core/project-paths.js';
+import { getCurationMoveMarkerPath } from '../src/core/curation-move-notice.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const require = createRequire(import.meta.url);
@@ -260,7 +261,7 @@ describe('the old ledger folder: the pointer and the refused line, only in the e
 
   const oldDir = (): string => path.join(root, '.devflow', 'learning');
   const newDir = (): string => path.join(root, '.devflow', 'curation');
-  const markerPath = (): string => path.join(home, '.devflow', 'logs', `curation-move.${curationMoveMarkerKey(root)}.skip`);
+  const markerPath = (): string => getCurationMoveMarkerPath(home, root);
   const POINTER = 'Curation: open Claude Code in this project once, or run devflow init';
   const REFUSED = 'Curation: move refused, see the hook log';
 
@@ -312,10 +313,7 @@ describe('the old ledger folder: the pointer and the refused line, only in the e
 
   it('a marker for another root does not make this root refused', async () => {
     fs.mkdirSync(oldDir(), { recursive: true });
-    fs.writeFileSync(
-      path.join(home, '.devflow', 'logs', `curation-move.${curationMoveMarkerKey(path.join(base, 'other'))}.skip`),
-      '',
-    );
+    fs.writeFileSync(getCurationMoveMarkerPath(home, path.join(base, 'other')), '');
 
     expect((await gatherLedgerCurationCounts(root, { home }))?.move).toBe('pointer');
   });
