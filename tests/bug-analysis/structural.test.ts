@@ -14,7 +14,7 @@
 // cannot silently remove safety-critical patterns.
 
 import { describe, it, expect } from 'vitest';
-import { loadFile, extractSection, resolveAgentSource, collectFreshBaseDefects, collectSlugCheckDefects, collectStoredHeadDefects, slugSinkLines, type DiffRangeShape } from '../helpers';
+import { loadFile, extractSection, resolveAgentSource, resolveLearningOffSource, collectFreshBaseDefects, collectSlugCheckDefects, collectStoredHeadDefects, slugSinkLines, type DiffRangeShape } from '../helpers';
 
 const content = loadFile('dist/commands/bug-analysis.md');
 const agentContent = resolveAgentSource('debug').content;
@@ -181,9 +181,18 @@ describe('bug-analysis.md — DIFF_RANGE starts at the fresh base that ensure-pr
     expect(collectAnalysisFreshBaseDefects(content)).toEqual([]);
   });
 
+  it('the learning-off build states the same parts', () => {
+    const off = resolveLearningOffSource('commands', 'bug-analysis');
+    expect(off, 'dist/learning-off/commands/bug-analysis.md is absent: run `npm run build:mds`').not.toBeNull();
+    expect(off, 'the learning-off build is the learning-on build, so this proves nothing').not.toBe(content);
+    expect(collectAnalysisFreshBaseDefects(off ?? '')).toEqual([]);
+  });
+
   it('known-bad probes: each lost or weakened part is reported', () => {
     expect(collectAnalysisFreshBaseDefects(seed('Return: branch, base_branch, base_ref, branch-slug, PR#', 'Return: branch, base_branch, branch-slug, PR#')))
       .toContain('the Return line does not carry base_ref');
+    expect(collectAnalysisFreshBaseDefects(seed('`base_branch`, `base_ref`, `branch_slug`', '`base_branch`, `branch_slug`')))
+      .toContain('the Extract line does not take base_ref');
     expect(collectAnalysisFreshBaseDefects(seed('Base line reads (rejected) or', 'Base line is fine or')))
       .toContain('the Extract line does not test the Base line for (rejected)');
     expect(collectAnalysisFreshBaseDefects(seed('unless `base_ref` is 40 or 64 hex', 'unless `base_ref` is set')))

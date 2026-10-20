@@ -57,6 +57,7 @@ import {
   readAgentReference,
   requireDistFile,
   resolveAgentSource,
+  resolveLearningOffSource,
   ROOT,
   walkFiles,
   type OrderRule,
@@ -415,6 +416,13 @@ const RESOLVER = 'resolve-base.cjs'
 
 function implementMd(): string {
   return requireDistFile('implement.md')
+}
+
+/** The learning-off build of /implement: it states the same fresh-base text as the learning-on build. */
+function implementMdOff(): string {
+  const off = resolveLearningOffSource('commands', 'implement')
+  if (off === null) throw new Error('dist/learning-off/commands/implement.md is absent: run `npm run build:mds`')
+  return off
 }
 
 /** D-CMD-REF-HAND: the ticket-link and missing-test-plan steps /implement reads on demand. */
@@ -1120,6 +1128,13 @@ function collectFilesChangedDefects(md: string): string[] {
       : /\bFILES_CHANGED\b/.test(requires) ? [`${label} Requires still names the Code agent's FILES_CHANGED`] : []
     return [...(spawn.includes(BRANCH_DIFF) ? [] : [`the ${label} spawn takes the Code agent's file list, not the branch diff`]), ...declared]
   })
+  const listed = BRANCH_DIFF_SPAWNS.map(([heading]) => heading)
+  for (const [, heading, phase] of md.matchAll(/^(### (Phase \d+):[^\n]*)$/gm)) {
+    if (listed.includes(heading)) continue
+    const section = phaseSection(md, heading) ?? ''
+    const requires = section.split('\n').find(l => l.startsWith('**Requires:**')) ?? ''
+    if (section.includes('{branch_diff}') && !/\bBASE_REF\b/.test(requires)) out.push(`${phase} names {branch_diff} but its Requires does not name BASE_REF`)
+  }
   const defined = md.indexOf(BRANCH_DIFF_COMMAND)
   if (defined === -1) out.push('the branch diff is not defined with git diff --name-only --diff-filter=d {BASE_REF}...HEAD')
   else if (!md.includes(BRANCH_DIFF_COMMAND + BRANCH_DIFF_EXIT)) out.push('the branch diff does not say that a non-zero exit stops and an empty list counts only on exit 0')
@@ -1148,6 +1163,13 @@ describe('#421, #452: every spawn after Phase 2 gets the branch diff, not the Co
     const old = md.replace(section, section.replace(BRANCH_DIFF, `FILES_CHANGED: ${CODE_AGENT_LIST}`))
     expect(old, 'the seed must land').not.toBe(md)
     expect(collectFilesChangedDefects(old)).toEqual([`the ${label} spawn takes the Code agent's file list, not the branch diff`, "a spawn still takes the Code agent's file list"])
+  })
+
+  it('known-bad probe: a phase outside the five that names the branch diff without requiring BASE_REF is reported', () => {
+    const md = implementMd()
+    const seeded = md.replace(H.p8, `${H.p8}\n\nFILES_CHANGED: {branch_diff}`)
+    expect(seeded, 'the seed must land').not.toBe(md)
+    expect(collectFilesChangedDefects(seeded)).toEqual(['Phase 8 names {branch_diff} but its Requires does not name BASE_REF'])
   })
 
   it('known-bad probe: a lost site is reported', () => {
@@ -1206,6 +1228,8 @@ const HOSTILE_BASE = 'a$(touch$IFS/tmp/x)|sh;b'
 /** How the re-validation step hands the guarded value on: Phases 3-7 run this from `BASE_REF`, the fork point. */
 const REVALIDATE_BRANCH_DIFF = 'Phases 3-7 run `{branch_diff}`'
 const REVALIDATE_FORK_POINT = 'from `BASE_REF`, the fork point'
+/** The fix a consumer names when the resolver gives no usable line. */
+const RESOLVER_FIX = 're-run; if it repeats, run devflow init'
 /** The captured `BASE_BRANCH` is checked again by reference, not by a second copy of the class. */
 const CAPTURED_CHECK = 'stop unless it passes the setup check'
 
@@ -1232,6 +1256,9 @@ function collectBaseBranchGuardDefects(md: string, revalidate: string = revalida
     out.push('the re-validation path does not run the local-mode resolver over the checked name when gh returned no PR')
   } else if (rerecord !== undefined && revalidate.indexOf(call) < revalidate.indexOf(rerecord)) {
     out.push('the re-validation path resolves the base before it checks the name')
+  }
+  if (call !== undefined && !(call.includes('`REASON=resolver-unavailable`') && call.includes(`\`${RESOLVER_FIX}\``))) {
+    out.push('the re-validation path does not read other resolver output as resolver-unavailable with the re-run, then devflow init fix')
   }
   return out
 }
@@ -1313,11 +1340,21 @@ describe('#452: BASE_BRANCH is checked before it reaches a shell line', () => {
     expect(noLocal, 'the seed must land').not.toBe(call)
     expect(collectBaseBranchGuardDefects(md, reval.replace(call, () => noLocal))).toEqual(['the re-validation path does not run the local-mode resolver over the checked name when gh returned no PR'])
     expect(collectBaseBranchGuardDefects(md, reval.replace(`${rerecord}\n${call}`, () => `${call}\n${rerecord}`))).toEqual(['the re-validation path resolves the base before it checks the name'])
+    const lostUnavailable = 'the re-validation path does not read other resolver output as resolver-unavailable with the re-run, then devflow init fix'
+    expect(collectBaseBranchGuardDefects(md, reval.replace('`REASON=resolver-unavailable`', 'a stop'))).toEqual([lostUnavailable])
+    expect(collectBaseBranchGuardDefects(md, reval.replace(`\`${RESOLVER_FIX}\``, '`run devflow init`'))).toEqual([lostUnavailable])
   })
 })
 
 /** The pointers the renumbering retires, and the ones that replace them. */
 const RETIRED_POINTERS = ['Harden agent (Phase 5)', 'Phase 3 or Phase 6 PASS', 'Phase 3\'s **Evidence claims**', 'after every Phase 8 run'] as const
+
+/** Named collector: the Orchestration-only principle names the resolver calls that the fresh base step runs inline. */
+function collectInlineResolverDefects(md: string): string[] {
+  return /\*\*Orchestration only\*\*[^\n]*the fresh base step's resolver calls \(Phase 1, re-validation\)/.test(md)
+    ? []
+    : ['the Orchestration-only principle does not name the resolver calls of the fresh base step']
+}
 
 /** Named collector: cross-references that still use the numbers before #421, and the new ones that are absent. */
 function collectPointerDefects(md: string, revalidate: string = revalidateReference()): string[] {
@@ -1331,7 +1368,7 @@ function collectPointerDefects(md: string, revalidate: string = revalidateRefere
   need('the diagram lacks the Phase 6 Validate', md.includes('├─ Phase 6: Validate (the one full-suite slot)'))
   need('the diagram lacks the Phase 8 Re-Validate', md.includes('├─ Phase 8: Re-Validate (only if a qa-fix committed)'))
   need('the Orchestration-only principle does not name the Phase 10 push and the ci-wait call', /\*\*Orchestration only\*\*[^\n]*Phase 10[^\n]*push[^\n]*ci-wait call/.test(md))
-  need('the Orchestration-only principle does not name the resolver calls of the fresh base step', /\*\*Orchestration only\*\*[^\n]*the fresh base step's resolver calls \(Phase 1, re-validation\)/.test(md))
+  out.push(...collectInlineResolverDefects(md))
   need('the Loop-limits principle does not carry the CI gate budget', /\*\*Loop limits\*\*[^\n]*at most 3 waits and 2 fixes/.test(md))
   return out
 }
@@ -1379,7 +1416,7 @@ const FRESH_BASE_PARTS: ReadonlyArray<readonly [string, string]> = [
 ]
 
 /** Named collector: what the fresh-base step, its channel, its sink and its Validate hand-off fail to state. */
-function collectFreshBaseDefects(md: string): string[] {
+function collectImplementFreshBaseDefects(md: string): string[] {
   const out: string[] = []
   const start = md.indexOf('**Fresh base.**')
   const end = start === -1 ? -1 : md.indexOf('\n\n', start)
@@ -1404,36 +1441,48 @@ function collectFreshBaseDefects(md: string): string[] {
 describe('#495: /implement resolves a fresh base once, before Phase 2, and every diff starts at it', () => {
   it('the step, its channel, its sink and the Validate hand-off state every part', () => {
     expect(FRESH_BASE_PARTS.length, 'the table is empty, so this guard proves nothing').toBeGreaterThanOrEqual(10)
-    expect(collectFreshBaseDefects(implementMd())).toEqual([])
+    expect(collectImplementFreshBaseDefects(implementMd())).toEqual([])
   })
 
   it.each(FRESH_BASE_PARTS)('known-bad probe: dropping "%s" is reported', (what, text) => {
     const md = implementMd()
     const seeded = md.replace(text, '')
     expect(seeded, 'the seed must land').not.toBe(md)
-    expect(collectFreshBaseDefects(seeded)).toContain(`the fresh-base step lacks: ${what}`)
+    expect(collectImplementFreshBaseDefects(seeded)).toContain(`the fresh-base step lacks: ${what}`)
   })
 
   it('known-bad probes: a lost step, a lost channel, a lost product, a bare-name Validate base and a hex PR target are each reported', () => {
     const md = implementMd()
-    expect(collectFreshBaseDefects(md.replace('**Fresh base.**', '**Base.**'))).toEqual(['no fresh-base step'])
+    expect(collectImplementFreshBaseDefects(md.replace('**Fresh base.**', '**Base.**'))).toEqual(['no fresh-base step'])
     const noChannel = md.replace('the fresh base step, ', '')
     expect(noChannel, 'the seed must land').not.toBe(md)
-    expect(collectFreshBaseDefects(noChannel)).toEqual(['the Traceability section does not name the fresh base step'])
+    expect(collectImplementFreshBaseDefects(noChannel)).toEqual(['the Traceability section does not name the fresh base step'])
     const noProduct = md.replace('**Produces:** TASK_ID, BASE_BRANCH, BASE_REF,', '**Produces:** TASK_ID, BASE_BRANCH,')
     expect(noProduct, 'the seed must land').not.toBe(md)
-    expect(collectFreshBaseDefects(noProduct)).toEqual(['Phase 1 does not produce BASE_REF'])
+    expect(collectImplementFreshBaseDefects(noProduct)).toEqual(['Phase 1 does not produce BASE_REF'])
     const bareValidate = md.replace('\nBASE_SHA: {BASE_REF}\n', '\nBASE_SHA: {output of `git merge-base {BASE_BRANCH} HEAD`}\n')
     expect(bareValidate, 'the seed must land').not.toBe(md)
-    expect(collectFreshBaseDefects(bareValidate)).toEqual(['the Phase 6 Validate spawn does not take BASE_SHA from BASE_REF', 'a git merge-base over the base name remains'])
+    expect(collectImplementFreshBaseDefects(bareValidate)).toEqual(['the Phase 6 Validate spawn does not take BASE_SHA from BASE_REF', 'a git merge-base over the base name remains'])
     const hexTarget = md.replace(/(### Phase 9: Open PR[\s\S]*?)BASE_BRANCH: \{base branch\}/, '$1BASE_BRANCH: {BASE_REF}')
     expect(hexTarget, 'the seed must land').not.toBe(md)
-    expect(collectFreshBaseDefects(hexTarget)).toEqual(['the Phase 9 PR target is not the bare base branch name'])
+    expect(collectImplementFreshBaseDefects(hexTarget)).toEqual(['the Phase 9 PR target is not the bare base branch name'])
     const noPass = md.replace('BASE_BRANCH: {base branch}\nBASE_REF: {BASE_REF}\n', 'BASE_BRANCH: {base branch}\n')
     expect(noPass, 'the seed must land').not.toBe(md)
-    expect(collectFreshBaseDefects(noPass)).toEqual(['the Phase 9 spawn does not pass BASE_REF to ensure-pr-ready'])
+    expect(collectImplementFreshBaseDefects(noPass)).toEqual(['the Phase 9 spawn does not pass BASE_REF to ensure-pr-ready'])
     const noRequire = md.replace(/(### Phase 9: Open PR[\s\S]*?\*\*Requires:\*\* BASE_BRANCH), BASE_REF,/, '$1,')
     expect(noRequire, 'the seed must land').not.toBe(md)
-    expect(collectFreshBaseDefects(noRequire)).toEqual(['Phase 9 does not require BASE_REF'])
+    expect(collectImplementFreshBaseDefects(noRequire)).toEqual(['Phase 9 does not require BASE_REF'])
+  })
+})
+
+describe('#495: the learning-off build of /implement states the same fresh-base text', () => {
+  it('the order, the step, the branch diff, the base check and the principle hold in both builds', () => {
+    const off = implementMdOff()
+    expect(off, 'the learning-off build is the learning-on build, so this proves nothing').not.toBe(implementMd())
+    expect(collectOrderViolations('implement.md', off, PHASE1_ORDER)).toEqual([])
+    expect(collectImplementFreshBaseDefects(off)).toEqual([])
+    expect(collectFilesChangedDefects(off)).toEqual([])
+    expect(collectBaseBranchGuardDefects(off)).toEqual([])
+    expect(collectInlineResolverDefects(off)).toEqual([])
   })
 })

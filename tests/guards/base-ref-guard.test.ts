@@ -11,15 +11,21 @@
  *          target, double-quoted and after its base-name check. Every other command takes
  *          the BASE_REF value (a commit id).
  *   AC-9   Every base source carries a check that equals the exported STRICT_NAME_RE and
- *          states the allowed set. The code-review and bug-analysis Extract lines carry no
- *          copy; they test the Base line and the hex base ref. No prompt copies LINE_RE or
- *          FALLBACK_LINE.
+ *          states the allowed set. The code-review and bug-analysis commands carry no copy
+ *          of it. No prompt copies LINE_RE or FALLBACK_LINE.
  *   AC-10  Diff sinks take the BASE_REF value. A non-zero diff exit stops the step, and an
- *          empty list counts only with exit 0. The reviewer fallback reads DIFF_RANGE.
- *   AC-15  The invocation text is accepted by the script's own argument parser. /implement
- *          calls once, before Phase 2; every other call is counted per file (the call
- *          budget), and the channel lines exist.
+ *          empty list counts only with exit 0.
+ *   AC-15  The invocation text is accepted by the script's own argument parser. Every
+ *          resolver call is counted per file (the call budget).
  *   AC-16  No built prompt carries a flagged base site: every collector finds nothing.
+ *
+ * This file holds the sweeps that find a new site anywhere in the corpus. The text one command
+ * or one Git op states alone belongs to its own guard: the review commands' Return, Extract,
+ * full-range, DIFF_RANGE and freshness text (`collectFreshBaseDefects` in tests/helpers.ts, driven
+ * by tests/guards/code-review-diff-gating.test.ts and tests/bug-analysis/structural.test.ts), the
+ * review agent's DIFF_RANGE fallback (code-review-diff-gating), /implement's Phase 1 and
+ * re-validation text (tests/evidence/implement-flow.test.ts) and the Git ops' steps 5 to 7
+ * (tests/git-agent.test.ts).
  *
  * How a site is identified. Every collector returns Findings: a file label, the learning
  * arm, a rule and an anchor. For a shell line the anchor is the command text. For a
@@ -251,22 +257,11 @@ function listItem(text: string, start: RegExp): string | null {
   return lines.slice(first, last).join('\n')
 }
 
-/** `### Phase N: ...` sections of /implement as `[number, body]`. */
-function phaseSections(text: string): Array<readonly [number, string]> {
-  const heads = [...text.matchAll(/^### Phase (\d+):[^\n]*$/gm)]
-  return heads.map((m, i) => [Number(m[1]), text.slice(m.index, heads[i + 1]?.index ?? text.length)] as const)
-}
-
 // ---------------------------------------------------------------------------
 // Findings
 // ---------------------------------------------------------------------------
 
-const RULES = [
-  'shell-name', 'strict-copy', 'grammar-copy', 'diff-range', 'sink-exit',
-  'resolver-call', 'cross-flag', 'consumer-stop', 'reason-fix-table', 'post-capture-check',
-  'produces-base-ref', 'requires-base-ref', 'inline-list', 'return-base-ref',
-  'extract-checks', 'channel-line', 'channel-slot', 'blocked-no-base', 'reviewer-fallback',
-] as const
+const RULES = ['shell-name', 'strict-copy', 'grammar-copy', 'diff-range', 'sink-exit', 'resolver-call', 'reason-fix-table'] as const
 
 type Rule = typeof RULES[number]
 
@@ -402,11 +397,8 @@ const CALL_BUDGET: Readonly<Record<string, CallBudget>> = {
   'references/implement-revalidate.md': { direct: 2, modes: ['pr', 'local'] },
 }
 
-const DIRECT_CALLERS: readonly string[] = ['commands/implement.md', 'references/implement-revalidate.md', 'git-ops/ensure-pr-ready.md', 'git-ops/validate-branch.md']
-const PR_MODE_FILES: readonly string[] = ['references/implement-revalidate.md', 'git-ops/ensure-pr-ready.md', 'git-ops/validate-branch.md']
-
-function callSpans(p: Prompt): Array<{ readonly span: string; readonly line: SourceLine }> {
-  return sourceLines(p.text).flatMap(line => commandSpans(line).filter(s => s.includes('resolve-base.cjs')).map(span => ({ span, line })))
+function callSpans(p: Prompt): string[] {
+  return sourceLines(p.text).flatMap(line => commandSpans(line).filter(s => s.includes('resolve-base.cjs')))
 }
 
 /** Why a resolver call is not the invocation the script accepts; empty when it is. */
@@ -437,22 +429,16 @@ function callFindings(p: Prompt): Unmet[] {
   const calls = callSpans(p)
   const out: Unmet[] = []
   if (calls.length !== budget.direct) out.push({ anchor: 'call count', detail: `found ${calls.length} direct call(s), expected ${budget.direct}` })
-  for (const { span } of calls) {
+  for (const span of calls) {
     const errors = invocationErrors(span)
     if (errors.length > 0) out.push({ anchor: 'invocation', detail: errors.join('; ') })
     const mode = modeOf(span)
     if (budget.mode !== undefined && mode !== budget.mode) out.push({ anchor: 'invocation', detail: `mode ${mode} where ${budget.mode} is expected` })
   }
   if (budget.modes !== undefined) {
-    const got = calls.map(({ span }) => modeOf(span)).sort().join()
+    const got = calls.map(modeOf).sort().join()
     const want = [...budget.modes].sort().join()
     if (got !== want) out.push({ anchor: 'invocation', detail: `modes ${got} where ${want} are expected` })
-  }
-  if (p.file === 'commands/implement.md' && calls.length > 0) {
-    const call = calls[0].line.offset
-    const capture = p.text.indexOf('**Capture from Git agent output**')
-    const phase2 = p.text.indexOf('### Phase 2')
-    if (capture === -1 || phase2 === -1 || call < capture || call > phase2) out.push({ anchor: 'call position', detail: 'the call is not between the base capture and Phase 2' })
   }
   if (budget.spawns !== undefined) {
     const spawns = p.text.split('OPERATION: ensure-pr-ready').length - 1
@@ -473,9 +459,6 @@ const FIX_TABLE_RE = /Fix by REASON:[^\n]*?\{fix\}` is left out\./
 
 /** The fix a consumer names when the resolver gives no usable line. */
 const RESOLVER_FIX = 're-run; if it repeats, run devflow init'
-
-/** The reason a consumer reads when the resolver gives no usable line, as the prompts write it. */
-const RESOLVER_UNAVAILABLE_TOKEN = '`REASON=resolver-unavailable`'
 
 /** The reason-to-fix sentence of ensure-pr-ready step 5b: the one text every other copy equals. */
 const CANONICAL_FIX_TABLE: string | null = (() => {
@@ -499,10 +482,6 @@ function fixTableFindings(p: Prompt): Unmet[] {
 }
 
 const EXIT_RE = /\bnon-zero\b|\bexit (?:status|code|0)\b|\bexit=/i
-const CHANNEL_RE = /DEGRADED[^\n]*\bbase\b|\bbase\b[^\n]*DEGRADED/i
-
-/** The heading where each review command reports its result: the base DEGRADED line is an item from there on. */
-const REPORT_HEADINGS: Readonly<Record<string, string>> = { 'commands/code-review.md': '### Phase 4:', 'commands/bug-analysis.md': '### Phase 7:' }
 
 interface SinkSpec {
   readonly file: string
@@ -535,11 +514,6 @@ function sinkFindings(p: Prompt): Unmet[] {
   })
 }
 
-function firstLine(text: string, re: RegExp): string | null {
-  return re.exec(text)?.[0] ?? null
-}
-
-const SPAWN_SEED = (returns: string): string => `\`\`\`\nAgent(subagent_type="Git"):\n"OPERATION: ensure-pr-ready\nAPPLY_CONVENTIONS: true\nReturn: ${returns}"\n\`\`\`\n`
 const CALL_SEED = (rest: string): string => `node "${SCRIPT_REF}" ${rest}`
 const CHECK_SEED = `Stop the run unless it matches \`${STRICT}\`, telling the user it allows ASCII letters, digits and \`._/+@,#-\`, at most 200; no leading \`-\` or \`#\`, no \`origin/\` prefix, no \`..\`.`
 const STALE_CHECK_SEED = 'Stop the run unless it matches `^[A-Za-z0-9._/+@,#-]{1,200}$`, telling the user it allows only ASCII letters, digits and `._/+@,#-`, at most 200.'
@@ -567,69 +541,6 @@ const REQUIREMENTS: readonly Requirement[] = [
     probe: { file: 'commands/implement.md', anchor: 'output grammar', bad: `Accept \`${resolver.FALLBACK_LINE}\` as the fallback.`, good: 'Accept only a line that starts `BASE_REF=`.' },
   },
   {
-    rule: 'post-capture-check',
-    files: ['commands/implement.md'],
-    check: p => {
-      const start = p.text.indexOf('**Capture from Git agent output**')
-      const end = p.text.indexOf("**Capture from the Git agent's Output block", start)
-      if (start === -1 || end === -1) return unmet('post-capture check', 'the capture block was not found')
-      const block = p.text.slice(start, end)
-      return block.includes(STRICT) || /\bsetup check\b/i.test(block) ? [] : unmet('post-capture check', 'the captured BASE_BRANCH is not checked by reference to the setup check')
-    },
-    probe: {
-      file: 'commands/implement.md',
-      anchor: 'post-capture check',
-      bad: "**Capture from Git agent output**:\n- `BASE_BRANCH`: Branch this feature was created from\n\n**Capture from the Git agent's Output block, as written:** x",
-      good: "**Capture from Git agent output**:\n- `BASE_BRANCH`: Branch this feature was created from; it passes the setup check again.\n\n**Capture from the Git agent's Output block, as written:** x",
-    },
-  },
-  {
-    rule: 'produces-base-ref',
-    files: ['commands/implement.md'],
-    check: p => {
-      const produces = /^### Phase 1: Setup\s*\n+\*\*Produces:\*\*([^\n]*)/m.exec(p.text)?.[1]
-      if (produces === undefined) return unmet('Phase 1 Produces', 'the Phase 1 Produces line was not found')
-      return /\bBASE_REF\b/.test(produces) ? [] : unmet('Phase 1 Produces', 'Phase 1 does not produce BASE_REF')
-    },
-    probe: {
-      file: 'commands/implement.md',
-      anchor: 'Phase 1 Produces',
-      bad: '### Phase 1: Setup\n\n**Produces:** TASK_ID, BASE_BRANCH\n',
-      good: '### Phase 1: Setup\n\n**Produces:** TASK_ID, BASE_BRANCH, BASE_REF\n',
-    },
-  },
-  {
-    rule: 'requires-base-ref',
-    files: ['commands/implement.md'],
-    check: p => phaseSections(p.text)
-      .filter(([, body]) => body.includes('{branch_diff}'))
-      .flatMap(([n, body]) => {
-        const requires = firstLine(body, /^\*\*Requires:\*\*[^\n]*/m)
-        return requires !== null && /\bBASE_REF\b/.test(requires) ? [] : unmet(`Phase ${n} Requires`, 'a phase that reads the branch diff does not require BASE_REF')
-      }),
-    probe: {
-      file: 'commands/implement.md',
-      anchor: 'Phase 3 Requires',
-      bad: '### Phase 3: Polish\n\n**Requires:** BASE_BRANCH\n\nFILES_CHANGED: {branch_diff}\n',
-      good: '### Phase 3: Polish\n\n**Requires:** BASE_BRANCH, BASE_REF\n\nFILES_CHANGED: {branch_diff}\n',
-    },
-  },
-  {
-    rule: 'inline-list',
-    files: ['commands/implement.md'],
-    check: p => {
-      const line = p.text.split('\n').find(l => l.includes('the inline calls are the bounded plumbing'))
-      if (line === undefined) return unmet('charter inline list', 'the allowed-inline list was not found')
-      return /fresh base step's resolver calls \(Phase 1, re-validation\)/.test(line) ? [] : unmet('charter inline list', 'the allowed-inline list does not name the resolver calls of the fresh base step, in Phase 1 and in re-validation')
-    },
-    probe: {
-      file: 'commands/implement.md',
-      anchor: 'charter inline list',
-      bad: '1. **Orchestration only** - the inline calls are the bounded plumbing the charter allows: the Phase 1 resolver call, the Phase 10 push.',
-      good: "1. **Orchestration only** - the inline calls are the bounded plumbing the charter allows: the fresh base step's resolver calls (Phase 1, re-validation), the Phase 10 push.",
-    },
-  },
-  {
     rule: 'resolver-call',
     files: '*',
     check: callFindings,
@@ -638,35 +549,6 @@ const REQUIREMENTS: readonly Requirement[] = [
       anchor: 'invocation',
       bad: `5a. ${'`'}${CALL_SEED('pr "${B}" --cross maybe; echo "exit=$?"')}${'`'}`,
       good: `5a. ${'`'}${CALL_SEED('pr "${B}" --cross "${C}"; echo "exit=$?"')}${'`'}`,
-    },
-  },
-  {
-    rule: 'cross-flag',
-    files: PR_MODE_FILES,
-    check: p => {
-      const lines = p.text.split('\n')
-      const ok = callSpans(p).some(({ span, line }) => {
-        if (!span.includes(' --cross ')) return false
-        return lines.slice(Math.max(0, line.index - 8), line.index + 9).some(l => l.includes('isCrossRepository'))
-      })
-      return ok ? [] : unmet('cross flag', 'the pr-mode call does not pass --cross from the isCrossRepository field')
-    },
-    probe: {
-      file: 'git-ops/validate-branch.md',
-      anchor: 'cross flag',
-      bad: `6. Read the PR.\n   ${'`'}${CALL_SEED('pr "${B}"; echo "exit=$?"')}${'`'}`,
-      good: `6. Read \`isCrossRepository\` into C.\n   ${'`'}${CALL_SEED('pr "${B}" --cross "${C}"; echo "exit=$?"')}${'`'}`,
-    },
-  },
-  {
-    rule: 'consumer-stop',
-    files: DIRECT_CALLERS,
-    check: p => (p.text.includes(RESOLVER_UNAVAILABLE_TOKEN) && p.text.includes(`\`${RESOLVER_FIX}\``) ? [] : unmet('resolver-unavailable stop', 'the consumer does not read other output as REASON=resolver-unavailable with the re-run, then devflow init fix')),
-    probe: {
-      file: 'git-ops/validate-branch.md',
-      anchor: 'resolver-unavailable stop',
-      bad: `Any other output is a stop with REASON resolver-unavailable; the fix is \`${RESOLVER_FIX}\`.`,
-      good: `Any other output reads as ${RESOLVER_UNAVAILABLE_TOKEN}; the fix is \`${RESOLVER_FIX}\`.`,
     },
   },
   {
@@ -681,91 +563,6 @@ const REQUIREMENTS: readonly Requirement[] = [
     },
   },
   {
-    rule: 'return-base-ref',
-    files: REVIEW_COMMANDS,
-    check: p => {
-      const at = p.text.indexOf('OPERATION: ensure-pr-ready')
-      const line = at === -1 ? null : firstLine(p.text.slice(at), /^Return:[^\n]*/m)
-      if (line === null) return unmet('Return', 'the ensure-pr-ready Return line was not found')
-      return /\bbase_ref\b/.test(line) ? [] : unmet('Return', 'the Return line does not carry base_ref')
-    },
-    probe: { file: 'commands/code-review.md', anchor: 'Return', bad: SPAWN_SEED('branch, base_branch, branch-slug, PR#'), good: SPAWN_SEED('branch, base_branch, base_ref, branch-slug, PR#') },
-  },
-  {
-    rule: 'extract-checks',
-    files: REVIEW_COMMANDS,
-    check: p => {
-      const line = firstLine(p.text, /^\*\*Extract from response:\*\*[^\n]*/m)
-      if (line === null) return unmet('Extract', 'the Extract line was not found')
-      const missing = [['base_ref', /\bbase_ref\b/], ['the (rejected) Base line test', /\(rejected\)/]]
-        .filter(([, re]) => !(re as RegExp).test(line)).map(([what]) => what)
-      if (missing.length > 0) return unmet('Extract', `the Extract line lacks: ${missing.join(', ')}`)
-      return /unless `base_ref` is 40 or 64 hex/.test(p.text.slice(p.text.indexOf(line) + line.length)) ? [] : unmet('Extract', 'no full-range path after the Extract line stops unless base_ref is 40 or 64 hex')
-    },
-    probe: {
-      file: 'commands/bug-analysis.md',
-      anchor: 'Extract',
-      bad: '**Extract from response:** `branch`, `base_branch`, `base_ref`, `pr_number`. Stop when the Base line reads (rejected).',
-      good: '**Extract from response:** `branch`, `base_branch`, `base_ref`, `pr_number`. Stop when the Base line reads (rejected).\n\n- **Full-range path (no marker):**\n  - Stop unless `base_ref` is 40 or 64 hex.',
-    },
-  },
-  {
-    rule: 'channel-line',
-    files: ['commands/implement.md', 'commands/code-review.md', 'commands/bug-analysis.md', 'git-ops/ensure-pr-ready.md'],
-    check: p => (p.text.split('\n').some(l => CHANNEL_RE.test(l)) ? [] : unmet('freshness line', 'no line carries the base freshness DEGRADED line')),
-    probe: {
-      file: 'commands/code-review.md',
-      anchor: 'freshness line',
-      bad: 'Review comment status: POSTED / DEGRADED (from Git)',
-      good: 'Any base `TRACEABILITY: DEGRADED` line from Step 0c, as returned',
-    },
-  },
-  {
-    rule: 'channel-slot',
-    files: REVIEW_COMMANDS,
-    check: p => {
-      const heading = REPORT_HEADINGS[p.file]
-      const at = heading === undefined ? -1 : p.text.indexOf(heading)
-      const slot = at === -1 ? '' : p.text.slice(at)
-      return slot.split('\n').some(l => CHANNEL_RE.test(l)) ? [] : unmet('freshness slot', `no line from ${heading} on carries the base freshness DEGRADED line`)
-    },
-    probe: {
-      file: 'commands/code-review.md',
-      anchor: 'freshness slot',
-      bad: 'Print a returned base `TRACEABILITY: DEGRADED` line once in the header.\n\n### Phase 4: Write Review Head Marker & Report\n   - Artifact paths',
-      good: '### Phase 4: Write Review Head Marker & Report\n   - Any base `TRACEABILITY: DEGRADED` line from Step 0c, as returned',
-    },
-  },
-  {
-    rule: 'blocked-no-base',
-    files: ['git-ops/validate-branch.md'],
-    check: p => {
-      const blocks = p.text.split('\n').some(l => /BLOCKED/.test(l) && /base ref|base_ref/i.test(l))
-      return blocks && !/intentional empty/i.test(p.text) ? [] : unmet('Diff Scope BLOCKED', 'an unresolved base ref must give BLOCKED, never an empty Diff Scope')
-    },
-    probe: {
-      file: 'git-ops/validate-branch.md',
-      anchor: 'Diff Scope BLOCKED',
-      bad: 'If the base cannot be determined, emit an intentional empty `### Diff Scope` block.',
-      good: 'If the base ref is none or not hex, the status is BLOCKED.',
-    },
-  },
-  {
-    rule: 'reviewer-fallback',
-    files: ['agents/review.md'],
-    check: p => {
-      const lines = p.text.split('\n').filter(l => l.includes('**Identify changed lines**'))
-      if (lines.length === 0) return unmet('Identify changed lines', 'the fallback step was not found')
-      return lines.every(l => l.includes('DIFF_RANGE')) ? [] : unmet('Identify changed lines', 'the fallback reads the base branch instead of DIFF_RANGE')
-    },
-    probe: {
-      file: 'agents/review.md',
-      anchor: 'Identify changed lines',
-      bad: '3. **Identify changed lines** - Read the diff from `DIFF_FILE` when passed, else get it against the base branch',
-      good: '3. **Identify changed lines** - Read the diff from `DIFF_FILE` when passed, else read `DIFF_RANGE`',
-    },
-  },
-  {
     rule: 'diff-range',
     files: '*',
     check: p => [...p.text.matchAll(/Set `DIFF_RANGE` to `([^`]+)`/g)]
@@ -776,20 +573,6 @@ const REQUIREMENTS: readonly Requirement[] = [
       anchor: 'DIFF_RANGE {base_branch}...HEAD',
       bad: 'Set `DIFF_RANGE` to `{base_branch}...HEAD`',
       good: 'Set `DIFF_RANGE` to `{base_ref}...HEAD`; the incremental range `{sha}...HEAD` is unchanged',
-    },
-  },
-  {
-    rule: 'diff-range',
-    files: ['commands/bug-analysis.md'],
-    check: p => {
-      const line = firstLine(p.text, /^DIFF_COMMAND:[^\n]*/m)
-      return line !== null && line.includes('{DIFF_RANGE}') && !hasName(line) ? [] : unmet('Debug DIFF_COMMAND', 'the Debug diff command follows DIFF_RANGE')
-    },
-    probe: {
-      file: 'commands/bug-analysis.md',
-      anchor: 'Debug DIFF_COMMAND',
-      bad: 'DIFF_COMMAND: git diff {base_branch}...HEAD',
-      good: 'DIFF_COMMAND: git diff {DIFF_RANGE}',
     },
   },
   {
@@ -843,7 +626,7 @@ describe('the corpus the guard reads', () => {
 
   it('every file a rule names is in the corpus, so no rule passes by reading nothing', () => {
     const named = new Set<string>([
-      ...Object.keys(CHECKED_SOURCES), ...Object.keys(CALL_BUDGET), ...DIRECT_CALLERS, ...PR_MODE_FILES, ...REVIEW_COMMANDS,
+      ...Object.keys(CHECKED_SOURCES), ...Object.keys(CALL_BUDGET), ...REVIEW_COMMANDS,
       ...SINKS.map(s => s.file), ...REQUIREMENTS.flatMap(r => (r.files === '*' ? [] : r.files)), ...DEFERRED_FILES,
     ])
     const present = new Set(prompts.map(p => p.file))
@@ -942,14 +725,6 @@ describe('known-bad probes: each collector reports the seeded bad text and passe
     expect(anchors('commands/dynamic-build.md', 'OPERATION: ensure-pr-ready')).toEqual([])
     expect(anchors('commands/dynamic-build.md', 'OPERATION: ensure-pr-ready\nOPERATION: ensure-pr-ready')).toContain('ensure-pr-ready spawns')
     expect(anchors('commands/dynamic-build.md', 'no spawn')).toContain('ensure-pr-ready spawns')
-  })
-
-  it('resolver-call: the /implement call must sit between the base capture and Phase 2', () => {
-    const call = `\`${CALL_SEED('local "{BASE_BRANCH}"; echo "exit=$?"')}\`\nOPERATION: ensure-pr-ready\n`
-    const early = `${call}**Capture from Git agent output**\n### Phase 2: Implement\n`
-    const placed = `**Capture from Git agent output**\n${call}### Phase 2: Implement\n`
-    expect(callFindings(seeded('commands/implement.md', early)).map(u => u.anchor)).toContain('call position')
-    expect(callFindings(seeded('commands/implement.md', placed))).toEqual([])
   })
 
   it('resolver-call: the re-validation reference makes one pr call and one local call, never two of a mode', () => {

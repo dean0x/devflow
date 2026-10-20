@@ -692,6 +692,8 @@ describe('DIFF_RANGE starts at the fresh base that ensure-pr-ready returns (#495
   it('known-bad probes: each lost or weakened part is reported', () => {
     expect(collectReviewFreshBaseDefects(seed(ON, 'Return: branch, base_branch, base_ref, branch-slug, PR#', 'Return: branch, base_branch, branch-slug, PR#')))
       .toContain('the Return line does not carry base_ref')
+    expect(collectReviewFreshBaseDefects(seed(ON, '`base_branch`, `base_ref`, `branch_slug`', '`base_branch`, `branch_slug`')))
+      .toContain('the Extract line does not take base_ref')
     expect(collectReviewFreshBaseDefects(seed(ON, 'Base line reads (rejected) or', 'Base line is fine or')))
       .toContain('the Extract line does not test the Base line for (rejected)')
     expect(collectReviewFreshBaseDefects(seed(ON, 'unless `base_ref` is 40 or 64 hex', 'unless `base_ref` is set')))

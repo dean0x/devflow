@@ -3412,5 +3412,12 @@ describe('git agent: PR ops use a fresh base for branch diffs (#495)', () => {
     expect(collectValidateBranchBaseDefects(sectionValidate.replace(MAIN_PROBE, 'git -C "{worktree}" rev-parse --verify --quiet {default}'))).toContain('step 6 probes the default branch without a name placeholder');
     expect(collectValidateBranchBaseDefects(sectionValidate.replace('never an empty `### Diff Scope`', 'an empty `### Diff Scope` is fine'))).toContain('step 6 never gives an empty Diff Scope');
     expect(collectValidateBranchBaseDefects(sectionValidate.replace('diff --name-only {base_ref}...HEAD; echo "exit=$?"', 'diff {base_branch}...HEAD --name-only'))).toContain('step 7 diffs against the hex base ref and echoes the exit status');
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace('X=<isCrossRepository', 'X=<false'))).toContain('step 6 reads the cross flag from isCrossRepository');
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace(PR_MODE_CALL, () => PR_MODE_CALL.replace(' pr "', ' local "')))).toContain('step 6 runs the pr-mode call');
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace('`REASON=resolver-unavailable`', 'a stop'))).toContain('step 6 reads other resolver output as resolver-unavailable');
+    expect(collectValidateBranchBaseDefects(sectionValidate.replace('`base_ref` of `none` or not 40 or 64 hex returns BLOCKED', '`base_ref` of `none` goes on'))).toContain('step 6 returns BLOCKED when the base ref is none or not hex');
+    expect(collectValidateBranchBaseDefects(`${sectionValidate}\nWhen the base cannot be determined, emit an intentional empty \`### Diff Scope\` block.`)).toContain('step 6 never gives an empty Diff Scope');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replace('`REASON=resolver-unavailable`', 'a stop'))).toContain('5b takes the one BASE_REF line only with exit=0 and reads other output as resolver-unavailable');
+    expect(collectEnsurePrReadyBaseDefects(ensure.replaceAll(BASE_DEGRADED_LINE, '`x`'))).toContain('5b prints the DEGRADED base line with its fix for degraded and stop');
   });
 });
