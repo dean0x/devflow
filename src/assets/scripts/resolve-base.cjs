@@ -277,15 +277,16 @@ function stopWith(reason, fetch = 'skipped') {
  */
 
 /**
- * Whether both refs are present and each has a fork point with HEAD. Both the ancestry
- * question and the pre-PR choice need this.
+ * The fork points of both refs, or null when a ref is absent or has no fork point. Both the
+ * ancestry question and the pre-PR choice need them.
  *
  * @param {Side | null} local
  * @param {Side | null} remote
- * @returns {boolean}
+ * @returns {{ local: string, remote: string } | null}
  */
-function bothForkPoints(local, remote) {
-  return local !== null && remote !== null && local.base !== null && remote.base !== null;
+function forkPointsOf(local, remote) {
+  if (local === null || remote === null || local.base === null || remote.base === null) return null;
+  return { local: local.base, remote: remote.base };
 }
 
 /**
@@ -321,7 +322,7 @@ function select(f) {
   else if (remote === null) tip = 'local';
   else if (f.mode === 'pr') tip = 'origin';
   else {
-    if (!bothForkPoints(local, remote) || f.localBehind === null) return stopWith('no-merge-base', fetch);
+    if (forkPointsOf(local, remote) === null || f.localBehind === null) return stopWith('no-merge-base', fetch);
     tip = f.localBehind ? 'origin' : 'local';
   }
 
@@ -719,12 +720,10 @@ function sidesOf(ctx, name, readRemote) {
  * @returns {{ kind: 'ok', behind: boolean | null } | { kind: 'unknown' }}
  */
 function localBehindOf(ctx, mode, local, remote) {
-  if (mode !== 'local' || !bothForkPoints(local, remote)) return { kind: 'ok', behind: null };
-  // bothForkPoints leaves both fork points present.
-  const older = /** @type {string} */ (/** @type {Side} */ (local).base);
-  const newer = /** @type {string} */ (/** @type {Side} */ (remote).base);
-  if (older === newer) return { kind: 'ok', behind: true };
-  const ancestry = isAncestor(ctx, older, newer);
+  const points = mode === 'local' ? forkPointsOf(local, remote) : null;
+  if (points === null) return { kind: 'ok', behind: null };
+  if (points.local === points.remote) return { kind: 'ok', behind: true };
+  const ancestry = isAncestor(ctx, points.local, points.remote);
   return ancestry.kind === 'unknown' ? ancestry : { kind: 'ok', behind: ancestry.ancestor };
 }
 
