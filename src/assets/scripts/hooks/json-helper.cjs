@@ -42,7 +42,8 @@
 //   release-claim <token>                 Release the claim the token owns; prints
 //                                          released | not-owner | gone
 //   move-ledger <root>                    Move a project's old ledger folder to the new name,
-//                                          once; prints none | busy | busy claim | moved <mode>
+//                                          once; prints none | busy | busy claim |
+//                                          skipped tracked | skipped unknown | moved <mode>
 //                                          and notes
 //
 // Every curation op above except claim-queue, release-claim and move-ledger first
@@ -229,14 +230,15 @@ function refusalText(message) {
 
 /**
  * The first line of move-ledger's answer: the state, with `moved` followed by its mode,
- * and `busy` followed by `claim` when a fresh queue claim holds the move.
+ * `busy` followed by `claim` when a fresh queue claim holds the move, and `skipped`
+ * followed by its reason (`tracked` or `unknown`).
  *
  * @param {{ state: string, mode?: string, reason?: string }} moved
  * @returns {string}
  */
 function moveAnswerWord(moved) {
   if (moved.state === 'moved') return `moved ${moved.mode}`;
-  if (moved.state === 'busy' && moved.reason === 'claim') return 'busy claim';
+  if ((moved.state === 'busy' && moved.reason === 'claim') || moved.state === 'skipped') return `${moved.state} ${moved.reason}`;
   return moved.state;
 }
 
@@ -599,9 +601,11 @@ try {
     // curation ops it takes the root as an argument, so a caller outside the project
     // root can name it; the root stays one argv word, never a shell word. The two
     // folder names are the path helpers' own: no argument names them.
-    // stdout: none | busy | busy claim | moved <mode>, then `backup <name>` when a backup
-    // was made and one `note <text>` line for each note. `busy claim` means a fresh queue
-    // claim holds the move, which can last 15 minutes; plain `busy` means a lock does.
+    // stdout: none | busy | busy claim | skipped tracked | skipped unknown | moved <mode>,
+    // then `backup <name>` when a backup was made and one `note <text>` line for each
+    // note. `busy claim` means a fresh queue claim holds the move, which can last 15
+    // minutes; plain `busy` means a lock does. `skipped tracked` means git tracks files in
+    // one of the two folders, `skipped unknown` that git did not answer: nothing changed.
     // Every line is scrubbed here (singleLine):
     // a note may name a file the repository holds, and no line may carry a control
     // character or break into two.
