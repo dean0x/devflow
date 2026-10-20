@@ -57,13 +57,13 @@ export const GATE_LEVEL_SELECT_MESSAGE = 'Gate level for this machine';
  * level and has no rule that changes a phase leaves the hints true, so it changes
  * GATE_LEVEL_EFFECT alone. One test pins the exact text of both tables, so a change to
  * either fails it until you check the other table and update the pin; further rows check
- * the clauses the two tables share (the lint pack level and the levels that run fewer
- * review focuses).
+ * the clauses the two tables share (the lint pack level, the levels that run fewer review
+ * focuses and the levels that skip Polish).
  */
 export const GATE_LEVEL_HINTS: Readonly<Record<GateLevel, string>> = Object.freeze({
-  full: 'the most checking: every review focus and the full planning shape',
-  standard: 'fewer review focuses and planning agents (the default)',
-  lean: 'the least checking; /implement also has Validate run the project lint pack',
+  full: 'the most checking: every review focus, the full planning shape and Polish',
+  standard: 'fewer review focuses and planning agents, and no Polish (the default)',
+  lean: 'the least checking, and no Polish; /implement also has Validate run the project lint pack',
 });
 
 /** Build clack select options for the gate level list, most to least checking. */
@@ -73,7 +73,7 @@ export function gateLevelChoices(): Array<{ value: GateLevel; label: string; hin
 
 /**
  * Format a padded level catalogue suitable for a clack note body.
- * Produces: `  standard  fewer review focuses and planning agents (the default)`
+ * Produces: `  standard  fewer review focuses and planning agents, and no Polish (the default)`
  */
 export function formatGateLevelCatalogue(): string {
   const width = Math.max(...GATE_LEVELS.map(level => level.length));

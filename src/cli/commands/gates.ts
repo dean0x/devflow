@@ -68,10 +68,11 @@ export const GATE_LEVEL_MEANINGS: Readonly<Record<GateLevel, string>> = Object.f
  * has no rule that changes a phase leaves the hints true, so it changes this text alone.
  * One test pins the exact text of both tables, so a change to either fails it until you
  * check the other table and update the pin; further rows check the clauses the two tables
- * share (the lint pack level and the levels that run fewer review focuses).
+ * share (the lint pack level, the levels that run fewer review focuses and the levels that
+ * skip Polish).
  */
 export const GATE_LEVEL_EFFECT =
-  '/code-review and /plan read the level: standard and lean run fewer review focuses and fewer planning agents. At lean, /implement has Validate run the project\'s lint pack. /implement and /resolve also read the level and name it in their report; their level references hold no phase rules yet.';
+  '/code-review and /plan read the level: standard and lean run fewer review focuses and fewer planning agents. At lean, /implement has Validate run the project\'s lint pack. /implement and /resolve also read the level and name it in their report; at standard and lean they skip Polish, and full keeps it.';
 
 const MACHINE_MANIFEST_NAME = 'manifest.json';
 const MACHINE_INVALID_LINE = `invalid (${MACHINE_MANIFEST_NAME}; reads as ${MALFORMED_GATE_LEVEL_READS_AS})`;
