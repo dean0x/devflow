@@ -190,13 +190,16 @@ Do the step below after you update.
 - `/code-review` and `/bug-analysis` stop when the branch name, with `/` replaced by `-`, holds characters outside ASCII letters, digits and `._-`, or is longer than 200 characters. The message states the allowed characters. In `/code-review` multi-worktree mode, this blocks only that worktree.
 - The Git agent's `validate-branch` returns BLOCKED in the same cases. `/resolve` takes its branch diff from it.
 - The Git agent's `ensure-pr-ready` stops only on a base name outside the allowed set, or one that git refuses. For any other base stop it prints `TRACEABILITY: DEGRADED (base {REASON}; fix: {fix})` and goes on.
-- A ticket whose setup reports no base commit stops with the `base-missing` escalation: check the setup output, then re-run.
+- `/dynamic-build`: a ticket whose setup reports no base commit stops with the `base-missing` escalation. Check the setup output, then re-run.
 
 **New resolver call:**
 - `ensure-pr-ready` calls `resolve-base.cjs` in `pr` mode with the base branch of the PR, or with the default branch when no PR applies. The call makes at most one fetch of the base branch.
 - `/implement` passes the base ref that it resolved in Phase 1, so a normal `/implement` run makes one fetch.
 - The `/dynamic-build` wave PR step runs `ensure-pr-ready` with no base ref, so that step makes this call.
-- The base resolver reads the base name from standard input (`--name-stdin`), so the name is not part of shell command text.
+- The base resolver reads the base name from standard input (`--name-stdin`), so the name is not part of shell command text ([#561](https://github.com/dean0x/devflow/issues/561)).
+- The Git agent's `ensure-pr-ready` and `validate-branch` write the base name to a file. The step checks the status of both `gh` calls. It treats `gh` as failed when either status is not 0.
+- In `ensure-pr-ready` and `validate-branch`, a name file whose only content is an empty line counts as empty. The default-branch path then takes `main`, or else `master`.
+- `validate-branch` takes the default branch as the base when no PR applies: the branch has none, `gh` is missing or logged out, or the repository has no GitHub remote.
 
 **Stale-install window:**
 - Until you run `devflow init`, the installed commands and Git agent do not call the resolver, so the new stops do not apply.
@@ -205,12 +208,18 @@ Do the step below after you update.
 - A fetch that stops at its 45-second bound can leave a `refs/remotes/origin/<name>.lock` file in the git directory. Later runs then report `fetch-failed` until you delete the file.
 - The fetch needs git 2.29 or newer. With an older git, every run reports `fetch-failed` and prints the base warning.
 - The fetch runs no askpass program. Where an askpass program is the only credential source, a remote that needs credentials gives `fetch-failed` on every run, with the base warning.
-- In single-ticket mode the review covers the diff from the commit the ticket branch was forked from to HEAD. On a non-default start branch, that is the ticket's own commits.
 
 ### Upgrade notes — Review markers
 
 **What changes:**
 - Incremental review and analysis markers are stored under the git directory of each worktree; the first run after the update covers the full branch.
+
+### Upgrade notes — Review ranges
+
+**What changes:**
+- `/dynamic-build`: in single-ticket mode, the review covers the diff from the commit the ticket branch was forked from to HEAD. On a non-default start branch, that is the ticket's own commits.
+- `/dynamic-build`: the wave evidence step lists the changed files with a diff from the base ref of the wave PR. The base ref must be a commit ID of 40 or 64 lowercase hex digits, and the diff must exit 0. If not, the step is skipped, and the run summary holds `TRACEABILITY: DEGRADED (wave base unusable)`.
+- A Review agent with no patch file and no usable diff range returns `reviewed: false`. After one retry, the engine records a coverage gap, and the run verdict is never PASS.
 
 ### Upgrade notes — Level readers
 
@@ -238,7 +247,7 @@ Do the step below after you update.
 
 ### Fixed
 
-- **`/implement`, `/code-review`, `/bug-analysis` and `/resolve` use a fresh base for branch diffs, and branch-name validation is tighter** ([#495](https://github.com/dean0x/devflow/issues/495)). A new script, `resolve-base.cjs`, makes at most one fetch of the base branch, picks the base by one stated rule and prints one status line. The fetch updates only the remote-tracking ref of the base branch, and credential prompts are off for it. The branch diff starts at the fork point of that base and `HEAD`. The fetch stops after 45 seconds, each local git call stops after 30 seconds, and one run has a budget of 100 seconds. A local git call that gives no answer reports `resolver-unavailable`. When the fetch fails or times out, `/implement`, `/code-review` and `/bug-analysis` use the best base they have and print a warning. Known limit: `/resolve` uses that base without a warning. When no usable base exists, for example in a shallow clone without the base history, `/implement` stops, and `/code-review` and `/bug-analysis` stop on a full-range run. Each names the cause and a fix. `/resolve` takes its branch diff from the Git agent's `validate-branch`, which returns BLOCKED in that case. A normal `/implement` run fetches the base branch once, and a re-validation that you ask for can add one more fetch. A base branch name is checked against a stricter allowed set and against git's own name rules, so a name outside the set, or one that git refuses, stops the run, and the refusal message states the set. In `/code-review` multi-worktree mode, a rejected base blocks only that worktree. `/code-review` and `/bug-analysis` use the stored review head of an incremental run only when it is a commit ID of 40 or 64 lowercase hex digits. Any other value takes the full range. A tracked review-head file is ignored, and the review takes the full range. A failed patch write in `/code-review` stops the run. Run `devflow init` after you update, to install the script and the updated commands.
+- **`/implement`, `/code-review`, `/bug-analysis` and `/resolve` use a fresh base for branch diffs, and branch-name validation is tighter** ([#495](https://github.com/dean0x/devflow/issues/495)). A new script, `resolve-base.cjs`, makes at most one fetch of the base branch, picks the base by one stated rule and prints one status line. The fetch updates only the remote-tracking ref of the base branch, and credential prompts are off for it. The branch diff starts at the fork point of that base and `HEAD`. The fetch stops after 45 seconds, each local git call stops after 30 seconds, and one run has a budget of 100 seconds. A local git call that gives no answer reports `resolver-unavailable`. When the fetch fails or times out, `/implement`, `/code-review` and `/bug-analysis` use the best base they have and print a warning. Known limit: `/resolve` uses that base without a warning. When no usable base exists, for example in a shallow clone without the base history, `/implement` stops, and `/code-review` and `/bug-analysis` stop on a full-range run. Each names the cause and a fix. `/resolve` takes its branch diff from the Git agent's `validate-branch`, which returns BLOCKED in that case. A normal `/implement` run fetches the base branch once, and a re-validation that you ask for can add one more fetch. A base branch name is checked against a stricter allowed set and against git's own name rules, so a name outside the set, or one that git refuses, stops the run, and the refusal message states the set. In `/code-review` multi-worktree mode, a rejected base blocks only that worktree. `/code-review` and `/bug-analysis` use the stored review head of an incremental run only when it is a commit ID of 40 or 64 lowercase hex digits. Any other value takes the full range. A failed patch write in `/code-review` stops the run. Run `devflow init` after you update, to install the script and the updated commands.
 - **Code, Fix and Refactor check the staged diff of every file they commit for secrets or tokens in logs or debug output** ([#584](https://github.com/dean0x/devflow/issues/584)). Each of these agents makes the check before each commit. The check runs at every level, wherever `/resolve`, `/implement`, `/debug`, `/dynamic-build` (and dynamic workflows that spawn them) or ambient mode spawn these agents. Run `devflow init` to install the updated agents.
 
 ---
