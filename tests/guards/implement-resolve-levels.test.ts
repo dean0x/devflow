@@ -21,11 +21,7 @@
  *   b. The data flow: `GATE_LEVEL` in the Produces and Requires lines that carry it.
  *   c. The fail-closed bullet: no row applied, the level kept, and the Phase 6 Validate prompt still carries it.
  *   d. The reference grammar: title, headings, header, closed phase set, cell grammar (a never-skip phase takes no
- *      `skip`, and a phase with no spawn takes only `-`) and Rules bullets, and the decided rows and bullets. The doc
- *      sites (the `devflow gates` text, the init hints, README.md, docs/cli-reference.md and docs/commands.md) state
- *      the effect of each shipped row, and none keeps a retired "no rows" claim. The check proves each site carries
- *      the effect phrase once. It does not prove which command or which level the phrase names: a site that covers
- *      both commands and names one satisfies the check for both, and a line that names only `lean` passes.
+ *      `skip`, and a phase with no spawn takes only `-`) and Rules bullets, and the decided rows and bullets.
  *   e. Row safety, a tripwire: protected phases, never-skip phases, floor controls, dispositions and actions no row
  *      may carry.
  *   f. `full` reads nothing: the reference path appears only inside the block, and no Validate fence of
@@ -33,30 +29,28 @@
  *   g. The report lines that name the level.
  *   h. The two `/resolve` routes that skip phases, the numbered principles and the edge row that reports an empty parse.
  *   i. What a skipped Polish phase leaves alone: the branch diff definition and the readers of the Polish output in
- *      both builds of both commands, and the three commands that keep Polish and read no level.
- * The spawn fences of both commands are pinned in `implement-resolve-full-fences.test.ts`.
+ *      both builds of both commands.
+ * The spawn fences of both commands are pinned in `implement-resolve-full-fences.test.ts`. The doc sites that state the
+ * effect of each shipped row are checked in `implement-resolve-level-docs.test.ts`. The three commands that keep Polish
+ * and read no level are checked in `implement-resolve-level-keepers.test.ts`. The three guards share
+ * `level-guard-helpers.ts`.
  *
- * The reference arms (d, e) read the two references, and the doc-site check of arm d reads the docs. The command arms
- * (a, b, c, f, g, h, i) read the compiled commands.
+ * The reference arms (d, e) read the two references. The command arms (a, b, c, f, g, h, i) read the compiled commands.
  */
 
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import * as path from 'path'
 
-import { GATE_LEVEL_HINTS } from '../../src/cli/commands/gate-level-prompts.js'
-import { GATE_LEVEL_EFFECT } from '../../src/cli/commands/gates.js'
-import { ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, escapeRe, isAgentBlock, parseFences, readAgentReference, requireDistFile, resolveAgentSource, resolveLearningOffSource, sectionBetween, tableRows } from '../helpers.js'
+import { ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, isAgentBlock, parseFences, requireDistFile, resolveAgentSource, resolveLearningOffSource, sectionBetween, tableRows } from '../helpers.js'
+import { DECIDED_ROWS, OPEN, POLISH_SPAWN, REFS, RULES_INTRO, TABLE_SEPARATOR, countOf, parseRef, referenceRows, sectionOf, seed, tableLines, tableRowLines, withRows, type LevelCmd, type ParsedRef } from './level-guard-helpers.js'
 
 // ---------------------------------------------------------------------------
 // The decided text, written by hand from the issue and the gate decisions
 // ---------------------------------------------------------------------------
 
 const LEVEL_DIR = 'skills/devflow:agent-references/references/commands'
-const OPEN = '**Gate level.**'
 const TABLE_HEADER = '| Phase | standard | lean |'
-const TABLE_SEPARATOR = '|-------|----------|------|'
-const RULES_INTRO = 'An `apply:` cell names one bullet of this section. At least one row names each bullet.'
 
 const GRAMMAR_CELL = "- **Cell:** `-` runs the phase as written; `skip`, alone, skips it; `apply: <name>` applies the `## Rules` bullet `<name>`; `pass level` adds the line `GATE_LEVEL: {GATE_LEVEL}` to every spawn prompt of the phase. A phase with no spawn takes only `-`. Join `apply:` and `pass level` with `; `. Each `apply:` names exactly one bullet. Any other cell is malformed."
 const GRAMMAR_RULES_BULLET = '- **Rules bullet:** a Rules bullet opens `- **<name>:**`.'
@@ -74,7 +68,7 @@ const RESOLVE_CONDITION = 'When any is `standard` or `lean`, once per run'
 
 /** What one command's block, reference and neighbours must be. */
 interface LevelSpec {
-  readonly cmd: 'implement' | 'resolve'
+  readonly cmd: LevelCmd
   /** The reference file name and the title it opens with. */
   readonly refFile: string
   readonly title: string
@@ -149,7 +143,7 @@ const IMPLEMENT: LevelSpec = {
     { site: 'Phase 3', kind: 'Requires', start: '### Phase 3: Polish', end: '### Phase 4:' },
     { site: 'Phase 12', kind: 'Requires', start: '### Phase 12: Report', end: null },
   ],
-  expectedRows: ['| 3 Polish | skip | skip |'],
+  expectedRows: DECIDED_ROWS.implement,
   expectedBullets: [],
 }
 
@@ -192,7 +186,7 @@ const RESOLVE: LevelSpec = {
     { site: 'Phase 6', kind: 'Requires', start: '### Phase 6: Polish', end: '### Phase 7:' },
     { site: 'Phase 10', kind: 'Requires', start: '### Phase 10:', end: null },
   ],
-  expectedRows: ['| 6 Polish | skip | skip |'],
+  expectedRows: DECIDED_ROWS.resolve,
   expectedBullets: [],
 }
 
@@ -212,8 +206,6 @@ const EDGE_EMPTY_PARSE_HANDLING = 'Report "No issues to resolve"'
 // ---------------------------------------------------------------------------
 // Readers
 // ---------------------------------------------------------------------------
-
-const countOf = (text: string, needle: string): number => text.split(needle).length - 1
 
 /** The names on a section's `**Produces:**` or `**Requires:**` line, parentheticals dropped. */
 function dataFlowNames(section: string | null, kind: 'Produces' | 'Requires'): string[] {
@@ -361,37 +353,6 @@ export function collectFailClosedDefects(body: string, spec: LevelSpec, validate
 // ---------------------------------------------------------------------------
 // d. The reference grammar
 // ---------------------------------------------------------------------------
-
-interface RefSection { readonly heading: string; readonly lines: readonly string[] }
-interface ParsedRef { readonly title: string; readonly preamble: readonly string[]; readonly sections: readonly RefSection[] }
-
-/** A reference as its title line, the text before its first heading and its `## ` sections, blank lines dropped. */
-function parseRef(ref: string): ParsedRef {
-  const lines = ref.split('\n')
-  const sections: Array<{ heading: string; lines: string[] }> = []
-  const preamble: string[] = []
-  for (const line of lines.slice(1)) {
-    if (line.startsWith('## ')) { sections.push({ heading: line, lines: [] }); continue }
-    if (line.trim() === '') continue
-    const current = sections[sections.length - 1]
-    if (current === undefined) preamble.push(line)
-    else current.lines.push(line)
-  }
-  return { title: lines[0] ?? '', preamble, sections }
-}
-
-const sectionOf = (parsed: ParsedRef, heading: string): RefSection | undefined => parsed.sections.find(s => s.heading === heading)
-
-/** The table lines of the `## Phases` section: the header, the separator, then the rows. */
-const tableLines = (parsed: ParsedRef): string[] => (sectionOf(parsed, '## Phases')?.lines ?? []).filter(line => line.startsWith('|'))
-
-/** The row lines of the table, header and separator dropped. */
-const tableRowLines = (parsed: ParsedRef): string[] => tableLines(parsed).slice(2)
-
-/** The rows of a reference, header and separator dropped. */
-export function referenceRows(ref: string): string[] {
-  return tableRowLines(parseRef(ref))
-}
 
 /** One row of the table, parsed once for the grammar check and the row-safety check. */
 interface ParsedRow {
@@ -593,69 +554,6 @@ export function collectDecidedRowDefects(ref: string, spec: LevelSpec): string[]
     ...surplus(rows, spec.expectedRows).map(row => `the ${spec.cmd} table holds the undecided row ${row}`),
     ...surplus(spec.expectedBullets, bullets).map(bullet => `the ${spec.cmd} Rules section lacks the decided bullet ${bullet}`),
     ...surplus(bullets, spec.expectedBullets).map(bullet => `the ${spec.cmd} Rules section holds the undecided bullet ${bullet}`),
-  ]
-}
-
-/** The clauses that say the references hold no rows. No doc site keeps one once any table has a row. */
-const RETIRED_CLAIMS = ['no phase rules yet', 'no rows yet'] as const
-
-/** What a doc site says when it states that Polish is skipped: "skip Polish", "skips Polish" or "no Polish". */
-const POLISH_SKIP = /\b(?:skips?|no) Polish\b/
-
-/**
- * What a doc site must say for each shipped row, keyed by `${cmd}:` plus the full row line. A change to one cell is a new
- * key, so it sends someone back to the docs. A row with no entry here is reported.
- */
-const ROW_EFFECTS: ReadonlyMap<string, RegExp> = new Map([
-  ['implement:| 3 Polish | skip | skip |', POLISH_SKIP],
-  ['resolve:| 6 Polish | skip | skip |', POLISH_SKIP],
-])
-
-/** One text that states what the levels do, named as a defect names it, with the commands whose rows it covers. */
-interface DocSite { readonly label: string; readonly text: string; readonly cmds: ReadonlyArray<LevelSpec['cmd']> }
-
-/** The rows that the reference of one command holds, as the table lists them. */
-interface ShippedRows { readonly cmd: LevelSpec['cmd']; readonly rows: readonly string[] }
-
-/** How many times `re` matches `text`. The count rebuilds `re` as global, so it does not depend on the flags of `re`. */
-const matchCount = (text: string, re: RegExp): number => [...text.matchAll(new RegExp(re.source, `${re.flags.replace('g', '')}g`))].length
-
-/** Check 1 of the doc sites: a shipped row with no entry in `effects`. */
-function collectUnregisteredRowDefects(shipped: readonly ShippedRows[], effects: ReadonlyMap<string, RegExp>): string[] {
-  return shipped.flatMap(({ cmd, rows }) => rows.filter(row => !effects.has(`${cmd}:${row}`)).map(row => `the ${cmd} row ${row} has no ROW_EFFECTS entry`))
-}
-
-/** Check 2 of the doc sites: a retired claim at `site`, reported once any table has a row. `withRow` names the commands whose table has one. */
-function collectRetiredClaimDefects(site: DocSite, withRow: readonly string[]): string[] {
-  if (withRow.length === 0) return []
-  return RETIRED_CLAIMS.filter(claim => site.text.includes(claim)).map(claim => `a table has a row (${withRow.join(', ')}), but ${site.label} still says "${claim}"`)
-}
-
-/** Check 3 of the doc sites: `site` states the effect of each shipped row of its own commands exactly once. A row with no entry is check 1's to report. */
-function collectEffectCountDefects(site: DocSite, shipped: readonly ShippedRows[], effects: ReadonlyMap<string, RegExp>): string[] {
-  return shipped.filter(({ cmd }) => site.cmds.includes(cmd)).flatMap(({ cmd, rows }) => rows.flatMap(row => {
-    const effect = effects.get(`${cmd}:${row}`)
-    if (effect === undefined) return []
-    const times = matchCount(site.text, effect)
-    if (times === 0) return [`${site.label} does not state the effect of the ${cmd} row ${row}: it must match ${effect}`]
-    return times > 1 ? [`${site.label} states the effect of the ${cmd} row ${row} ${times} times, expected once`] : []
-  }))
-}
-
-/**
- * TP-6: every shipped row has an entry in `effects`, and each site that covers the command of a shipped row states the
- * effect of that row exactly once. Once any table has a row, no site keeps a retired claim. While no table has a row, no
- * site owes an effect and none is barred a retired claim. The match is on a phrase: it does not tell which command the
- * phrase names, so a site that covers both commands and names one satisfies the check for both. It does not tell which
- * level the phrase names either, so a README line that names only `lean` passes.
- * The defects come in this order: the unregistered rows, then for each site its retired claims and its effect counts.
- */
-export function collectDocSiteDefects(sites: readonly DocSite[], refs: Readonly<Record<string, string>>, effects: ReadonlyMap<string, RegExp> = ROW_EFFECTS): string[] {
-  const shipped = SPECS.map(spec => ({ cmd: spec.cmd, rows: referenceRows(refs[spec.cmd]) }))
-  const withRow = shipped.filter(({ rows }) => rows.length > 0).map(({ cmd }) => cmd)
-  return [
-    ...collectUnregisteredRowDefects(shipped, effects),
-    ...sites.flatMap(site => [...collectRetiredClaimDefects(site, withRow), ...collectEffectCountDefects(site, shipped, effects)]),
   ]
 }
 
@@ -898,9 +796,6 @@ export function collectCutRouteDefects(body: string): string[] {
 
 /** The sentence that defines `{branch_diff}`. It opens so, whatever base name the rest of the sentence uses. */
 const BRANCH_DIFF_DEFINITION = '`{branch_diff}` is the output of'
-/** How a command writes a Polish spawn: the `subagent_type` argument of a prose or block call, or the `agentType` option of a dynamic-build call. */
-const POLISH_MARKERS = ['subagent_type="Polish"', 'agentType: "Polish"'] as const
-const POLISH_SPAWN = `Agent(${POLISH_MARKERS[0]}`
 /** The Polish output that the skipped phase sets to `SKIPPED`, per command. */
 const POLISH_OUTPUT_NAMES: Readonly<Record<LevelSpec['cmd'], { readonly name: string; readonly from: string }>> = {
   implement: { name: 'POLISH_OUTPUT', from: '4' },
@@ -962,58 +857,6 @@ export function collectPolishSkipDefects(body: string, spec: LevelSpec): string[
   }
 }
 
-/** A command that keeps Polish at every level and reads no level: how many times it spawns Polish. */
-interface KeeperSpec { readonly cmd: string; readonly spawns: number }
-const KEEPERS: readonly KeeperSpec[] = [
-  { cmd: 'self-review', spawns: 1 },
-  { cmd: 'debug', spawns: 1 },
-  { cmd: 'dynamic-build', spawns: 2 },
-]
-const POLISH_MARKER = new RegExp(POLISH_MARKERS.map(escapeRe).join('|'))
-const polishSpawnCount = (body: string): number => POLISH_MARKERS.reduce((total, marker) => total + countOf(body, marker), 0)
-const AGENT_CALL = /\bagent\(/i
-/**
- * How many lines above its marker line a spawn call may open. A dynamic-build call opens on its marker line, but a probe
- * that puts a `GATE_LEVEL:` line inside the prompt moves `agent(` two lines up, and that is the longest shape here. The
- * bound is larger, so a prompt of several more lines still starts at its call.
- */
-const SPAWN_CALL_LOOKBACK = 12
-
-/** The line where the spawn call of the marker line `at` opens: the nearest `agent(` within the look-back, else `at`. */
-function spawnCallStart(lines: readonly string[], at: number): number {
-  for (let from = at; from >= Math.max(0, at - SPAWN_CALL_LOOKBACK); from--) if (AGENT_CALL.test(lines[from])) return from
-  return at
-}
-
-/**
- * The text of each Polish spawn: the line that holds the spawn marker. A call that opens on an earlier line (see
- * `SPAWN_CALL_LOOKBACK`) starts there, and a block spawn (a marker line that ends `):`) runs to the next blank line or fence.
- */
-function polishSpawnTexts(body: string): string[] {
-  const lines = body.split('\n')
-  const out: string[] = []
-  lines.forEach((line, i) => {
-    if (!POLISH_MARKER.test(line)) return
-    const from = spawnCallStart(lines, i)
-    let to = i
-    if (line.trimEnd().endsWith('):')) while (to + 1 < lines.length && lines[to + 1].trim() !== '' && !lines[to + 1].startsWith('```')) to++
-    out.push(lines.slice(from, to + 1).join('\n'))
-  })
-  return out
-}
-
-/** TP-5: the command spawns Polish as often as it does today, names no level reference and puts no `GATE_LEVEL:` line in a Polish spawn. */
-export function collectPolishKeeperDefects(body: string, keeper: KeeperSpec): string[] {
-  const out: string[] = []
-  const spawns = polishSpawnCount(body)
-  if (spawns !== keeper.spawns) out.push(`${keeper.cmd} spawns Polish ${spawns} times, expected ${keeper.spawns}`)
-  if (body.includes('-levels.md')) out.push(`${keeper.cmd} names a level reference`)
-  polishSpawnTexts(body).forEach((spawn, i) => {
-    if (/\bGATE_LEVEL\s*:/.test(spawn)) out.push(`${keeper.cmd}: Polish spawn ${i + 1} carries a GATE_LEVEL: line`)
-  })
-  return out
-}
-
 // ---------------------------------------------------------------------------
 // Corpus
 // ---------------------------------------------------------------------------
@@ -1029,64 +872,11 @@ const BUILDS: readonly Build[] = SPECS.flatMap(spec => {
   ]
 })
 const bodyOf = (spec: LevelSpec): string => BUILDS.find(b => b.spec === spec)?.body ?? ''
-const REFS: Readonly<Record<string, string>> = {
-  implement: readAgentReference('commands/implement-levels.md'),
-  resolve: readAgentReference('commands/resolve-levels.md'),
-}
 const SOURCES: Readonly<Record<string, string>> = {
   implement: readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'implement.mds'), 'utf-8'),
   resolve: readFileSync(path.join(ROOT, 'src', 'assets', 'commands', 'resolve.mds'), 'utf-8'),
 }
 const VALIDATE = resolveAgentSource('validate').content
-
-interface KeeperBuild { readonly label: string; readonly keeper: KeeperSpec; readonly body: string }
-const KEEPER_BUILDS: readonly KeeperBuild[] = KEEPERS.flatMap(keeper => {
-  const off = resolveLearningOffSource('commands', keeper.cmd)
-  if (off === null) throw new Error(`dist/learning-off/commands/${keeper.cmd}.md is absent: run \`npm run build:mds\``)
-  return [
-    { label: `${keeper.cmd}, learning on`, keeper, body: requireDistFile(`${keeper.cmd}.md`) },
-    { label: `${keeper.cmd}, learning off`, keeper, body: off },
-  ]
-})
-
-/** The one paragraph of a doc that opens with `opener`. A missing or repeated paragraph throws at import, so the guard never skips. */
-function paragraphOf(file: string, text: string, opener: string): string {
-  const found = text.split('\n\n').filter(paragraph => paragraph.startsWith(opener))
-  if (found.length !== 1) throw new Error(`${file} holds ${found.length} paragraphs that open "${opener}", expected 1`)
-  return found[0]
-}
-
-/** The `## ` section of a doc, from its heading to the next `## ` heading. A missing section throws at import, so the guard never skips. */
-function sectionOfDoc(file: string, text: string, heading: string): string {
-  const from = text.indexOf(`\n${heading}\n`)
-  if (from === -1) throw new Error(`${file} has no "${heading}" section`)
-  const next = text.indexOf('\n## ', from + heading.length + 2)
-  return text.slice(from + 1, next === -1 ? undefined : next)
-}
-
-/** A doc site as the product carries it, with the length below which the read has surely failed. */
-interface ReadSite extends DocSite { readonly min: number }
-const README_TEXT = readFileSync(path.join(ROOT, 'README.md'), 'utf-8')
-const CLI_REFERENCE_TEXT = readFileSync(path.join(ROOT, 'docs', 'cli-reference.md'), 'utf-8')
-const COMMANDS_DOC_TEXT = readFileSync(path.join(ROOT, 'docs', 'commands.md'), 'utf-8')
-const BOTH_COMMANDS: DocSite['cmds'] = ['implement', 'resolve']
-/** The texts that say what a level does to /implement and /resolve. Only the README, cli-reference and commands doc paragraphs and sections that name the level are read, so a "no Polish" elsewhere in a file cannot satisfy the check. */
-const DOC_SITES: readonly ReadSite[] = [
-  { label: 'the devflow gates text', text: GATE_LEVEL_EFFECT, cmds: BOTH_COMMANDS, min: 150 },
-  { label: 'the standard init hint', text: GATE_LEVEL_HINTS.standard, cmds: BOTH_COMMANDS, min: 40 },
-  { label: 'the lean init hint', text: GATE_LEVEL_HINTS.lean, cmds: BOTH_COMMANDS, min: 40 },
-  { label: 'the README.md Gate level paragraph', text: paragraphOf('README.md', README_TEXT, OPEN), cmds: BOTH_COMMANDS, min: 500 },
-  { label: 'the docs/cli-reference.md What reads it paragraph', text: paragraphOf('docs/cli-reference.md', CLI_REFERENCE_TEXT, '**What reads it.**'), cmds: BOTH_COMMANDS, min: 500 },
-  { label: 'the docs/commands.md /implement section', text: sectionOfDoc('docs/commands.md', COMMANDS_DOC_TEXT, '## /implement'), cmds: ['implement'], min: 500 },
-  { label: 'the docs/commands.md /resolve section', text: sectionOfDoc('docs/commands.md', COMMANDS_DOC_TEXT, '## /resolve'), cmds: ['resolve'], min: 500 },
-]
-
-/** Replace `from` with `to` in `body`, failing the test when the seed did not land. */
-function seed(body: string, from: string | RegExp, to: string): string {
-  const next = typeof from === 'string' ? body.replace(from, () => to) : body.replace(from, to)
-  expect(next, `the seed ${String(from).slice(0, 60)} must change the text`).not.toBe(body)
-  return next
-}
 
 /** Replace `from` with `to` inside the section between two anchors only, and splice the section back. */
 function seedIn(body: string, start: string, end: string | null, from: string | RegExp, to: string): string {
@@ -1095,25 +885,6 @@ function seedIn(body: string, start: string, end: string | null, from: string | 
   const text = section as string
   const at = body.indexOf(text)
   return body.slice(0, at) + seed(text, from, to) + body.slice(at + text.length)
-}
-
-/** The table rows after the separator, and the Rules bullets after the Rules intro: what `withRows` replaces. */
-const TABLE_ROWS = new RegExp(`^${escapeRe(TABLE_SEPARATOR)}\\n(?:\\|.*\\n)*`, 'm')
-const RULES_BULLETS = new RegExp(`${escapeRe(RULES_INTRO)}(?:\\n+- .*)*`)
-
-/**
- * The reference with exactly these table rows and exactly these Rules bullets: it replaces the rows and bullets it holds,
- * so each probe states the whole table it checks. A probe that needs the shipped rows plus one more writes
- * `withRows(ref, [...spec.expectedRows, extra])`. It does not use `seed`, which fails when nothing changes, because a
- * probe may state the rows that the reference already holds. The existence checks keep it from going vacuous. The
- * replacers are functions, so a `$` in a probe stays literal.
- */
-function withRows(ref: string, rows: readonly string[], bullets: readonly string[] = []): string {
-  expect(ref, 'the reference holds the table separator').toContain(TABLE_SEPARATOR)
-  expect(ref, 'the reference holds the Rules intro').toContain(RULES_INTRO)
-  return ref
-    .replace(TABLE_ROWS, () => `${TABLE_SEPARATOR}\n${rows.map(row => `${row}\n`).join('')}`)
-    .replace(RULES_BULLETS, () => (bullets.length === 0 ? RULES_INTRO : `${RULES_INTRO}\n\n${bullets.join('\n')}`))
 }
 
 /** The row-safety defects of a reference whose one row applies the Rules bullet `line`. A line that does not open `- **<name>:**` gets no row. `phase` is the row's phase cell. */
@@ -1156,8 +927,6 @@ describe('the corpus is real', () => {
       expect(SOURCES[spec.cmd].length, `${spec.cmd}: the command source is empty`).toBeGreaterThan(5000)
     }
     expect(VALIDATE.length, 'the Validate agent is empty').toBeGreaterThan(1000)
-    for (const { label, text, min } of DOC_SITES) expect(text.length, `${label}: nothing read`).toBeGreaterThan(min)
-    for (const { label, body } of KEEPER_BUILDS) expect(body.length, `${label}: nothing read`).toBeGreaterThan(5000)
   })
 })
 
@@ -1309,125 +1078,6 @@ describe('the level references hold the fixed grammar and the decided rows (AC-5
     expect(collectLevelReferenceDefects(ref, spec, body)).toEqual([])
     expect(collectRowSafetyDefects(ref, spec, body)).toEqual([])
     expect(referenceRows(ref)).toEqual(rows)
-  })
-})
-
-describe('the doc sites state the effect of each shipped row and keep no retired claim (TP-6)', () => {
-  /** Test-only sites: the probes do not depend on what the real docs say, so they hold before and after the rows ship. */
-  const effect = 'At standard and lean they skip Polish, and full keeps it.'
-  const site = (text: string, cmds: DocSite['cmds'] = BOTH_COMMANDS): DocSite => ({ label: 'the probe site', text, cmds })
-  const none = { implement: withRows(REFS.implement, []), resolve: withRows(REFS.resolve, []) }
-  const both = { implement: withRows(REFS.implement, ['| 3 Polish | skip | skip |']), resolve: withRows(REFS.resolve, ['| 6 Polish | skip | skip |']) }
-  const onlyResolve = { implement: none.implement, resolve: both.resolve }
-
-  it('the sites are the registered ones, each read from the product, and the shipped tables leave no defect', () => {
-    expect(DOC_SITES.map(s => `${s.label}: ${s.cmds.join(', ')}`)).toEqual([
-      'the devflow gates text: implement, resolve',
-      'the standard init hint: implement, resolve',
-      'the lean init hint: implement, resolve',
-      'the README.md Gate level paragraph: implement, resolve',
-      'the docs/cli-reference.md What reads it paragraph: implement, resolve',
-      'the docs/commands.md /implement section: implement',
-      'the docs/commands.md /resolve section: resolve',
-    ])
-    expect(collectDocSiteDefects(DOC_SITES, REFS)).toEqual([])
-  })
-
-  it('every ROW_EFFECTS key is a command and a row line, and POLISH_SKIP reads the three wordings of a skip', () => {
-    for (const key of ROW_EFFECTS.keys()) expect(key, key).toMatch(/^(?:implement|resolve):\| \d+[a-z]? \S.* \| \S.* \| \S.* \|$/)
-    for (const text of ['they skip Polish', 'it skips Polish', 'and no Polish (the default)']) expect(POLISH_SKIP.test(text), text).toBe(true)
-    for (const text of ['Polish is skipped', 'keeps Polish', 'the full plan shape and Polish', 'noPolish']) expect(POLISH_SKIP.test(text), text).toBe(false)
-  })
-
-  it('known-bad probes (test-only sites): while no table has a row, no effect is owed and a retired claim is allowed', () => {
-    expect(collectDocSiteDefects([site('Nothing about the levels.')], none)).toEqual([])
-    expect(collectDocSiteDefects([site(RETIRED_CLAIMS.join(' and '))], none)).toEqual([])
-    expect(collectDocSiteDefects([site(effect)], none), 'an effect with no row to state').toEqual([])
-  })
-
-  it('known-bad probes (test-only sites): a site that states the effect once is clean, and a site without it, or with it twice, is reported', () => {
-    expect(collectDocSiteDefects([site(effect)], both)).toEqual([])
-    expect(collectDocSiteDefects([site('Nothing about Polish here.')], both)).toEqual([
-      `the probe site does not state the effect of the implement row | 3 Polish | skip | skip |: it must match ${POLISH_SKIP}`,
-      `the probe site does not state the effect of the resolve row | 6 Polish | skip | skip |: it must match ${POLISH_SKIP}`,
-    ])
-    expect(collectDocSiteDefects([site(`${effect} ${effect}`)], both)).toEqual([
-      'the probe site states the effect of the implement row | 3 Polish | skip | skip | 2 times, expected once',
-      'the probe site states the effect of the resolve row | 6 Polish | skip | skip | 2 times, expected once',
-    ])
-  })
-
-  it('known-bad probes (test-only sites): a site owes the effect of the rows of its own commands only', () => {
-    expect(collectDocSiteDefects([site('No effect here.', ['implement'])], onlyResolve), 'an /implement site while only /resolve has a row').toEqual([])
-    expect(collectDocSiteDefects([site('No effect here.', ['resolve'])], onlyResolve)).toEqual([
-      `the probe site does not state the effect of the resolve row | 6 Polish | skip | skip |: it must match ${POLISH_SKIP}`,
-    ])
-    expect(collectDocSiteDefects([site(effect, ['resolve'])], onlyResolve)).toEqual([])
-  })
-
-  it('known-bad probes (test-only sites): once any table has a row, each retired claim at a site is reported', () => {
-    for (const claim of RETIRED_CLAIMS) {
-      expect(collectDocSiteDefects([site(`${effect} The references hold ${claim}.`)], both), claim).toEqual([`a table has a row (implement, resolve), but the probe site still says "${claim}"`])
-      expect(collectDocSiteDefects([site(`${effect} ${claim}`, ['implement'])], onlyResolve), `${claim}, a site of the command with no row`).toEqual([`a table has a row (resolve), but the probe site still says "${claim}"`])
-    }
-  })
-
-  it('known-bad probes (test-only sites): a shipped row with no ROW_EFFECTS entry is reported, and one changed cell is a new row', () => {
-    const unregistered = withRows(REFS.implement, ['| 3 Polish | skip | skip |', '| 4 Self-Review | pass level | - |'])
-    expect(collectDocSiteDefects([site(effect)], { ...both, implement: unregistered })).toEqual(['the implement row | 4 Self-Review | pass level | - | has no ROW_EFFECTS entry'])
-    const changed = withRows(REFS.implement, ['| 3 Polish | skip | - |'])
-    expect(collectDocSiteDefects([site(effect)], { ...both, implement: changed })).toEqual(['the implement row | 3 Polish | skip | - | has no ROW_EFFECTS entry'])
-    const other = new Map([['implement:| 3 Polish | skip | skip |', /\bleaves out Polish\b/]])
-    expect(collectDocSiteDefects([site(effect, ['implement'])], both, other), 'a registered effect that the site lacks').toEqual([
-      'the resolve row | 6 Polish | skip | skip | has no ROW_EFFECTS entry',
-      'the probe site does not state the effect of the implement row | 3 Polish | skip | skip |: it must match /\\bleaves out Polish\\b/',
-    ])
-  })
-
-  // The probes over the real sites need the rows to ship, so they ride with them. The pin test below fixes `shippedRows`,
-  // so an empty `expectedRows` fails there instead of passing on an empty loop.
-  const shippedRows = SPECS.flatMap(spec => spec.expectedRows.map(row => ({ cmd: spec.cmd, row })))
-  const withRowCmds = SPECS.filter(spec => spec.expectedRows.length > 0).map(spec => spec.cmd)
-
-  it('known-bad probes (real sites): the decided rows are the ones the probes loop over', () => {
-    expect(shippedRows.map(({ cmd, row }) => `${cmd}:${row}`)).toEqual(['implement:| 3 Polish | skip | skip |', 'resolve:| 6 Polish | skip | skip |'])
-    expect(withRowCmds).toEqual(['implement', 'resolve'])
-  })
-
-  it('known-bad probes (real sites): a real site with its effect phrase taken out is reported for every shipped row it covers', () => {
-    const covered = new Set<string>()
-    for (const real of DOC_SITES) {
-      const owed = shippedRows.filter(({ cmd }) => real.cmds.includes(cmd))
-      expect(owed.length, `${real.label}: no shipped row to state`).toBeGreaterThan(0)
-      const without: DocSite = { ...real, text: seed(real.text, POLISH_SKIP, 'runs Polish') }
-      expect(collectDocSiteDefects([without], REFS), real.label).toEqual(
-        owed.map(({ cmd, row }) => `${real.label} does not state the effect of the ${cmd} row ${row}: it must match ${POLISH_SKIP}`),
-      )
-      for (const { cmd, row } of owed) covered.add(`${cmd}:${row}`)
-    }
-    expect(covered.size, 'every shipped row was probed at a real site').toBe(shippedRows.length)
-  })
-
-  it('known-bad probes (real sites): a retired claim put back at any real site is reported', () => {
-    for (const real of DOC_SITES) {
-      for (const claim of RETIRED_CLAIMS) {
-        const putBack: DocSite = { ...real, text: `${real.text} The references hold ${claim}.` }
-        expect(collectDocSiteDefects([putBack], REFS), `${real.label}: ${claim}`).toEqual([`a table has a row (${withRowCmds.join(', ')}), but ${real.label} still says "${claim}"`])
-      }
-    }
-  })
-
-  it('known-bad probes (real sites): an unregistered row or one changed cell in a shipped table is reported against the real sites', () => {
-    const extra: Readonly<Record<string, string>> = { implement: '| 4 Self-Review | pass level | - |', resolve: '| 2 Global Triage | pass level | - |' }
-    for (const { cmd, row } of shippedRows) {
-      const rows = SPECS.find(spec => spec.cmd === cmd)?.expectedRows ?? []
-      const added = withRows(REFS[cmd], [...rows, extra[cmd]])
-      expect(collectDocSiteDefects(DOC_SITES, { ...REFS, [cmd]: added }), `${cmd}: an unregistered row`).toEqual([`the ${cmd} row ${extra[cmd]} has no ROW_EFFECTS entry`])
-      const changed = row.replace(/ skip \|$/, ' - |')
-      expect(changed, `${cmd}: the cell change landed`).not.toBe(row)
-      const edited = withRows(REFS[cmd], rows.map(each => (each === row ? changed : each)))
-      expect(collectDocSiteDefects(DOC_SITES, { ...REFS, [cmd]: edited }), `${cmd}: one changed cell`).toEqual([`the ${cmd} row ${changed} has no ROW_EFFECTS entry`])
-    }
   })
 })
 
@@ -1920,38 +1570,5 @@ describe('a skipped Polish phase leaves the branch diff and the readers of its o
     }
     expect(dataFlowNames(phaseSection(body, '6'), 'Produces'), 'Phase 6 produces the output that no later phase reads').toEqual(['POLISH_RESULT'])
     expect(collectPolishSkipDefects(seed(body, '\n### Phase 7: ', '\n### Step 7: '), spec), 'a command without the Phase 7 heading').toEqual(['no "### Phase 7:" heading'])
-  })
-})
-
-describe('/self-review, /debug and /dynamic-build keep Polish and read no level (TP-5)', () => {
-  it('the commands that keep Polish spawn it 1, 1 and 2 times', () => {
-    expect(KEEPERS.map(k => `${k.cmd}: ${k.spawns}`)).toEqual(['self-review: 1', 'debug: 1', 'dynamic-build: 2'])
-  })
-
-  it.each(KEEPER_BUILDS)('$label: Polish is spawned as often as today, no level reference is named and no Polish spawn carries a GATE_LEVEL: line', ({ keeper, body }) => {
-    expect(collectPolishKeeperDefects(body, keeper)).toEqual([])
-  })
-
-  /** A level line put into each Polish spawn of the command: into the prompt of a block, onto the line of a prose spawn, or onto its own line inside a call. */
-  const LEVEL_LINE_SEEDS: Readonly<Record<string, { readonly from: string; readonly to: string }>> = {
-    'self-review': { from: 'Polish and refine the code for clarity and consistency while preserving functionality.', to: 'GATE_LEVEL: {GATE_LEVEL}\nPolish and refine the code for clarity and consistency while preserving functionality.' },
-    'debug': { from: 'Agent(subagent_type="Polish")', to: 'Agent(subagent_type="Polish") with GATE_LEVEL: {GATE_LEVEL}' },
-    'dynamic-build': { from: 'Polish and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`', to: 'Polish and reduce complexity of recent changes on branch ${BRANCH}.\nGATE_LEVEL: ${GATE_LEVEL}\nCommit any improvements.`' },
-  }
-
-  it.each(KEEPER_BUILDS)('$label: known-bad probes: Polish removed, a spare Polish spawn, a level line in a spawn and a level reference are each reported', ({ keeper, body }) => {
-    const defects = (text: string): string[] => collectPolishKeeperDefects(text, keeper)
-    const removed = POLISH_MARKERS.reduce((text, marker) => text.split(marker).join(marker.replace('Polish', 'Harden')), body)
-    expect(removed, 'the removal landed').not.toBe(body)
-    expect(defects(removed), 'Polish removed').toEqual([`${keeper.cmd} spawns Polish 0 times, expected ${keeper.spawns}`])
-    expect(defects(`${body}\n${POLISH_SPAWN})\n`), 'a spare Polish spawn').toEqual([`${keeper.cmd} spawns Polish ${keeper.spawns + 1} times, expected ${keeper.spawns}`])
-    const { from, to } = LEVEL_LINE_SEEDS[keeper.cmd]
-    expect(countOf(body, from), `the level line seed lands in each Polish spawn of ${keeper.cmd}`).toBe(keeper.spawns)
-    const leveled = body.split(from).join(to)
-    expect(defects(leveled), 'a GATE_LEVEL: line in each Polish spawn').toEqual(Array.from({ length: keeper.spawns }, (_, i) => `${keeper.cmd}: Polish spawn ${i + 1} carries a GATE_LEVEL: line`))
-    expect(defects(`${body}\n\nGATE_LEVEL: {GATE_LEVEL}\n`), 'a level line outside every Polish spawn').toEqual([])
-    for (const file of ['implement-levels.md', 'resolve-levels.md', 'plan-levels.md', 'code-review-levels.md']) {
-      expect(defects(`${body}\nRead the ${file} reference.\n`), file).toEqual([`${keeper.cmd} names a level reference`])
-    }
   })
 })
