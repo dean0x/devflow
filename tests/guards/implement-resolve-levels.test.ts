@@ -32,8 +32,8 @@
  *      `/resolve` names the level.
  *   g. The report lines that name the level.
  *   h. The two `/resolve` routes that skip phases, the numbered principles and the edge row that reports an empty parse.
- *   i. What a skipped Polish phase leaves alone: the branch diff definition and the readers of the Polish output in
- *      both builds of both commands.
+ *   i. What a skipped Polish or Harden phase leaves alone: the branch diff definition, the output of each skippable
+ *      phase (`SKIPPABLE_OUTPUTS`) and the readers of that output in both builds of the commands that skip it.
  * The spawn fences of both commands are pinned in `implement-resolve-full-fences.test.ts`. The doc sites that state the
  * effect of each shipped row are checked in `implement-resolve-level-docs.test.ts`. The three commands that keep Polish
  * and read no level are checked in `implement-resolve-level-keepers.test.ts`. The three guards share
@@ -838,15 +838,23 @@ export function collectCutRouteDefects(body: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// i. What a skipped Polish phase leaves alone
+// i. What a skipped Polish or Harden phase leaves alone
 // ---------------------------------------------------------------------------
 
 /** The sentence that defines `{branch_diff}`. It opens so, whatever base name the rest of the sentence uses. */
 const BRANCH_DIFF_DEFINITION = '`{branch_diff}` is the output of'
-/** The Polish output that the skipped phase sets to `SKIPPED`, per command. */
-const POLISH_OUTPUT_NAMES: Readonly<Record<LevelSpec['cmd'], { readonly name: string; readonly from: string }>> = {
-  implement: { name: 'POLISH_OUTPUT', from: '4' },
-  resolve: { name: 'POLISH_RESULT', from: '7' },
+/** The phases that a level row may skip and whose output no later phase may read. */
+type SkippablePhase = 'Polish' | 'Harden'
+/** The output that a skipped phase sets to `SKIPPED`: the name on the `**Produces:**` line of phase `produces`, and the first phase `from` that no `**Requires:**` line may name it. */
+interface SkippedOutput { readonly name: string; readonly produces: string; readonly from: string }
+const HARDEN_OUTPUT = 'HARDEN_OUTPUT'
+/** Per command, each skippable phase and its output. A phase joins the table in the change that lets a row skip it. */
+const SKIPPABLE_OUTPUTS: Readonly<Record<LevelCmd, Readonly<Partial<Record<SkippablePhase, SkippedOutput>>>>> = {
+  implement: {
+    Polish: { name: 'POLISH_OUTPUT', produces: '3', from: '4' },
+    Harden: { name: HARDEN_OUTPUT, produces: '4', from: '5' },
+  },
+  resolve: { Polish: { name: 'POLISH_RESULT', produces: '6', from: '7' } },
 }
 
 /** The text without its code fences. */
@@ -854,7 +862,7 @@ const outsideFences = (text: string): string => text.replace(/```[^\n]*\n[\s\S]*
 
 /**
  * The phases from `from` on whose Requires line names `name`, or null when the command has no `from` heading. A skipped
- * Polish phase sets its output to `SKIPPED`, so no later phase may read it.
+ * phase sets its output to `SKIPPED`, so no later phase may read it.
  */
 function readersFrom(body: string, from: string, name: string): string[] | null {
   const numbers = phaseNumbers(body)
@@ -888,20 +896,32 @@ export function collectImplementPolishInputDefects(body: string): string[] {
   return [branchDiffDefinitionDefect(body), hardenInputDefect(body)].flatMap(defect => defect ?? [])
 }
 
-/** TP-3: no Requires line after the Polish phase names its output, because a skipped phase gives it no value. */
-export function collectPolishOutputReaderDefects(body: string, spec: LevelSpec): string[] {
-  const { name, from } = POLISH_OUTPUT_NAMES[spec.cmd]
+/**
+ * TP-3 and #482: the output of a skippable phase stays whole. The phase `produces` it alone, and no `**Requires:**` line
+ * after the phase names it, because a skipped phase gives it no value. No defect when the command does not skip that phase.
+ */
+function skippedOutputDefects(body: string, spec: LevelSpec, phase: SkippablePhase): string[] {
+  const output = SKIPPABLE_OUTPUTS[spec.cmd][phase]
+  if (output === undefined) return []
+  const { name, produces, from } = output
   const readers = readersFrom(body, from, name)
   if (readers === null) return [`no "### Phase ${from}:" heading`]
-  return readers.map(num => `Phase ${num} Requires names ${name}, which a skipped Polish phase sets to SKIPPED`)
+  const produced = dataFlowNames(phaseSection(body, produces), 'Produces')
+  const producer = produced.length === 1 && produced[0] === name ? [] : [`Phase ${produces} Produces ${produced.join(', ') || 'nothing'}, expected ${name}`]
+  return [...producer, ...readers.map(num => `Phase ${num} Requires names ${name}, which a skipped ${phase} phase sets to SKIPPED`)]
 }
 
 /** TP-3: the inputs and outputs of the Polish phase that a skip must leave whole, in one compiled build. */
 export function collectPolishSkipDefects(body: string, spec: LevelSpec): string[] {
   switch (spec.cmd) {
-    case 'implement': return [...collectImplementPolishInputDefects(body), ...collectPolishOutputReaderDefects(body, spec)]
-    case 'resolve': return collectPolishOutputReaderDefects(body, spec)
+    case 'implement': return [...collectImplementPolishInputDefects(body), ...skippedOutputDefects(body, spec, 'Polish')]
+    case 'resolve': return skippedOutputDefects(body, spec, 'Polish')
   }
+}
+
+/** #482: the output of the Harden phase that a `harden-scope` skip must leave whole, in one compiled build. Only `/implement` skips Harden. */
+export function collectHardenSkipDefects(body: string, spec: LevelSpec): string[] {
+  return skippedOutputDefects(body, spec, 'Harden')
 }
 
 // ---------------------------------------------------------------------------
@@ -1693,22 +1713,22 @@ describe('the /resolve routes that skip phases pass no pushing phase (A1)', () =
 })
 
 // ---------------------------------------------------------------------------
-// i. What a skipped Polish phase leaves alone
+// i. What a skipped Polish or Harden phase leaves alone
 // ---------------------------------------------------------------------------
+
+/** The heading that follows Phase `num`, so a probe seeds inside that phase only. */
+const nextPhaseHeading = (body: string, num: string): string | null => {
+  const numbers = phaseNumbers(body)
+  const next = numbers[numbers.indexOf(num) + 1]
+  return next === undefined ? null : `### Phase ${next}:`
+}
+/** The Requires line of Phase `num` with `name` added. */
+const withReader = (body: string, num: string, name: string): string => seedIn(body, `### Phase ${num}:`, nextPhaseHeading(body, num), /^\*\*Requires:\*\* .+$/m, `$&, ${name}`)
 
 describe('a skipped Polish phase leaves the branch diff and the readers of its output alone (TP-3)', () => {
   it.each(BUILDS)('$label: the branch diff is defined once before the Polish fence, Harden takes it, and no later phase reads the Polish output', ({ spec, body }) => {
     expect(collectPolishSkipDefects(body, spec)).toEqual([])
   })
-
-  /** The heading that follows Phase `num`, so a probe seeds inside that phase only. */
-  const nextPhaseHeading = (body: string, num: string): string | null => {
-    const numbers = phaseNumbers(body)
-    const next = numbers[numbers.indexOf(num) + 1]
-    return next === undefined ? null : `### Phase ${next}:`
-  }
-  /** The Requires line of Phase `num` with `name` added. */
-  const withReader = (body: string, num: string, name: string): string => seedIn(body, `### Phase ${num}:`, nextPhaseHeading(body, num), /^\*\*Requires:\*\* .+$/m, `$&, ${name}`)
 
   it.each(BUILDS.filter(b => b.spec === IMPLEMENT))('$label: known-bad probes (/implement): a branch diff definition that is gone, moved or repeated, and a Harden prompt without the diff, are each reported', ({ spec, body }) => {
     const defects = (text: string): string[] => collectPolishSkipDefects(text, spec)
@@ -1745,5 +1765,29 @@ describe('a skipped Polish phase leaves the branch diff and the readers of its o
     }
     expect(dataFlowNames(phaseSection(body, '6'), 'Produces'), 'Phase 6 produces the output that no later phase reads').toEqual(['POLISH_RESULT'])
     expect(collectPolishSkipDefects(seed(body, '\n### Phase 7: ', '\n### Step 7: '), spec), 'a command without the Phase 7 heading').toEqual(['no "### Phase 7:" heading'])
+  })
+})
+
+describe('a skipped Harden phase leaves the readers of its output alone (#482)', () => {
+  const implementBuilds = BUILDS.filter(b => b.spec === IMPLEMENT)
+
+  it.each(implementBuilds)('$label: Phase 4 produces HARDEN_OUTPUT, the harden-scope bullet names it, and no later phase reads it', ({ spec, body }) => {
+    expect(collectHardenSkipDefects(body, spec)).toEqual([])
+    expect(dataFlowNames(phaseSection(body, '4'), 'Produces'), 'Phase 4 produces the output that no later phase reads').toEqual([HARDEN_OUTPUT])
+    expect(HARDEN_SCOPE, 'the bullet sets the output that the guard watches').toContain(`\`${HARDEN_OUTPUT}\` reads \`SKIPPED\``)
+  })
+
+  it.each(implementBuilds)('$label: known-bad probes (/implement): HARDEN_OUTPUT on the Requires line of any phase from Phase 5 on, a renamed or missing Phase 4 output and a missing Phase 5 are each reported', ({ spec, body }) => {
+    // Phase 5 is the first reader, Phase 6 is the Validate phase, and Phase 12 is the last phase of the command.
+    for (const num of ['5', '6', '12']) {
+      const seeded = withReader(body, num, HARDEN_OUTPUT)
+      expect(collectHardenSkipDefects(seeded, spec), `Phase ${num}`).toEqual([`Phase ${num} Requires names ${HARDEN_OUTPUT}, which a skipped Harden phase sets to SKIPPED`])
+      expect(collectPolishSkipDefects(seeded, spec), `Phase ${num}: the Polish arm reads the Polish output only`).toEqual([])
+    }
+    const renamed = seedIn(body, '### Phase 4:', '### Phase 5:', `**Produces:** ${HARDEN_OUTPUT}`, '**Produces:** HARDEN_RESULT')
+    expect(collectHardenSkipDefects(renamed, spec), 'the Phase 4 output renamed').toEqual([`Phase 4 Produces HARDEN_RESULT, expected ${HARDEN_OUTPUT}`])
+    const dropped = seedIn(body, '### Phase 4:', '### Phase 5:', /^\*\*Produces:\*\* .+\n/m, '')
+    expect(collectHardenSkipDefects(dropped, spec), 'the Phase 4 Produces line removed').toEqual([`Phase 4 Produces nothing, expected ${HARDEN_OUTPUT}`])
+    expect(collectHardenSkipDefects(seed(body, '\n### Phase 5: ', '\n### Step 5: '), spec), 'a command without the Phase 5 heading').toEqual(['no "### Phase 5:" heading'])
   })
 })
