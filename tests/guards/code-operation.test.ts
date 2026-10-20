@@ -34,7 +34,7 @@ import * as path from 'path'
 
 import {
   CODE_AGENT_TYPES, CODE_MODES, CODE_OPERATIONS, codeSlugOf, collectCodeSpawnSites,
-  requireDistFile, requireDistFiles, resolveAgentSource,
+  requireDistFile, requireDistFiles, resolveAgentSource, resolveLearningOffSource,
 } from '../helpers.js'
 import type { CodeSpawnSite } from '../helpers.js'
 
@@ -386,14 +386,39 @@ const PR_ONLY_PHRASES: readonly string[] = [
   'PR_DESCRIPTION_GUIDANCE', '## Related Issues', 'D11 scrub', 'gh pr create', 'Create PR', 'PR (if created)',
 ]
 
-/** Named collector: how a Code body falls short of "opens no PR, and stays under its size ceiling". */
+/** The words of the quality-gates P0 Security line that Harden loads; the Code-family commit check repeats them verbatim. */
+const DEBUG_OUTPUT_PHRASE = 'no secrets or tokens in logs or debug output'
+
+/** The sentence each Code-family body carries on its commit line, ahead of the scan block. */
+const COMMIT_CHECK = `Before you commit, check your diff: ${DEBUG_OUTPUT_PHRASE}.`
+
+const COMMIT_MARKER = '**Commit and push**'
+const SCAN_MARKER = '**Security scan (conditional):**'
+
+/**
+ * Named collector: how a Code body falls short of "opens no PR, checks its diff before it commits, and stays
+ * under its size ceiling". The placement rule runs only when the marker and the check are both present, so a
+ * lost marker or a lost check is one defect and not two. The count rule is separate: a second copy is one defect.
+ */
 export function collectCodeBodyDefects(body: string, ceiling: number): string[] {
   const out: string[] = []
   for (const phrase of PR_ONLY_PHRASES) if (body.includes(phrase)) out.push(`the Code body names "${phrase}"`)
   const bytes = Buffer.byteLength(body)
   if (bytes > ceiling) out.push(`the Code body is ${bytes} bytes, ceiling ${ceiling}`)
-  for (const kept of ['**Commit and push**', '**Security scan (conditional):**']) {
+  for (const kept of [COMMIT_MARKER, SCAN_MARKER, COMMIT_CHECK]) {
     if (!body.includes(kept)) out.push(`the Code body lost "${kept}"`)
+  }
+  const copies = body.split(COMMIT_CHECK).length - 1
+  if (copies > 1) out.push(`the Code body carries the diff check ${copies} times`)
+  const markerAt = body.indexOf(COMMIT_MARKER)
+  const checkAt = body.indexOf(COMMIT_CHECK)
+  if (markerAt !== -1 && checkAt !== -1) {
+    const lineEnd = body.indexOf('\n', markerAt)
+    const markerLine = body.slice(markerAt, lineEnd === -1 ? body.length : lineEnd)
+    const scanAt = body.indexOf(SCAN_MARKER)
+    if (!markerLine.includes(COMMIT_CHECK) || (scanAt !== -1 && checkAt > scanAt)) {
+      out.push('the diff check is not on the Commit and push line ahead of the security scan')
+    }
   }
   return out
 }
@@ -401,11 +426,30 @@ export function collectCodeBodyDefects(body: string, ceiling: number): string[] 
 describe('no Code variant opens a PR and each body stays under its ceiling (D-PR-BY-GIT, D-CODE-VARIANTS)', () => {
   const body = (agentType: string): string => resolveAgentSource(codeSlugOf(agentType)).content
 
-  it('each compiled body names no PR-opening text, keeps commit-and-push and the scan, and fits its ceiling', () => {
+  it('each compiled body names no PR-opening text, keeps commit-and-push and the scan, checks its diff once before it commits, and fits its ceiling', () => {
     for (const agentType of CODE_AGENT_TYPES) {
       expect(Buffer.byteLength(body(agentType)), `${agentType}: the body is empty — the guard would pass vacuously`).toBeGreaterThan(4_000)
       expect(collectCodeBodyDefects(body(agentType), BODY_CEILINGS[agentType]), agentType).toEqual([])
     }
+  })
+
+  it('each learning-off body holds the same rules under the same ceiling', () => {
+    for (const agentType of CODE_AGENT_TYPES) {
+      const slug = codeSlugOf(agentType)
+      const off = resolveLearningOffSource('agents', slug)
+      expect(off, `dist/learning-off/agents/${slug}.md is absent — run \`npm run build\` first`).not.toBeNull()
+      expect(Buffer.byteLength(off!), `${agentType}: the learning-off body is empty — the guard would pass vacuously`).toBeGreaterThan(4_000)
+      expect(collectCodeBodyDefects(off!, BODY_CEILINGS[agentType]), `${agentType} (learning off)`).toEqual([])
+    }
+  })
+
+  it('the diff check repeats, word for word, the secrets-and-tokens words of the Security line that Harden loads', () => {
+    const skill = readFileSync(path.join(ROOT, 'src', 'assets', 'skills', 'quality-gates', 'SKILL.md'), 'utf-8').split('\n')
+    const heading = skill.indexOf('### P0 - Security')
+    expect(heading, 'the quality-gates skill lost its P0 Security heading').toBeGreaterThanOrEqual(0)
+    const securityLine = skill.slice(heading + 1).find(line => line.trim() !== '')
+    expect(securityLine, 'the P0 Security heading has no line under it').toBeDefined()
+    expect(securityLine).toContain(DEBUG_OUTPUT_PHRASE)
   })
 
   it('the variants are ordered by what their modes need: Refactor < Fix < Code', () => {
@@ -424,5 +468,19 @@ describe('no Code variant opens a PR and each body stays under its ceiling (D-PR
       .toEqual(['the Code body lost "**Commit and push**"'])
     const bytes = Buffer.byteLength(real)
     expect(collectCodeBodyDefects(real, bytes - 1)).toEqual([`the Code body is ${bytes} bytes, ceiling ${bytes - 1}`])
+  })
+
+  it('known-bad probe: a removed, doubled or misplaced diff check is each reported for that reason alone', () => {
+    const real = body('Fix')
+    expect(collectCodeBodyDefects(real, BODY_CEILINGS['Fix']), 'the real body is clean, so each seed fails for its own reason').toEqual([])
+    const roomy = BODY_CEILINGS['Fix'] + 1_000
+    const removed = real.replace(` ${COMMIT_CHECK}`, '')
+    expect(removed, 'the seed must land').not.toBe(real)
+    expect(collectCodeBodyDefects(removed, roomy)).toEqual([`the Code body lost "${COMMIT_CHECK}"`])
+    const doubled = real.replace(COMMIT_CHECK, `${COMMIT_CHECK} ${COMMIT_CHECK}`)
+    expect(doubled, 'the seed must land').not.toBe(real)
+    expect(collectCodeBodyDefects(doubled, roomy)).toEqual(['the Code body carries the diff check 2 times'])
+    const moved = `${removed}\n${COMMIT_CHECK}\n`
+    expect(collectCodeBodyDefects(moved, roomy)).toEqual(['the diff check is not on the Commit and push line ahead of the security scan'])
   })
 })
