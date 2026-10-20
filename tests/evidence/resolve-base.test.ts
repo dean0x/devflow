@@ -18,7 +18,7 @@
  *         promisor setting or shallow file appears.
  *   AC-12/13/14 live in resolve-base-process.test.ts (argv, environment, process group).
  *
- * Scenario letters used by the tables below (the local rule, section 7.2 of the plan):
+ * Scenario letters used by the tables below (the local rule):
  *   A fresh         local base and origin base are the same commit
  *   B stale         the branch was cut from origin's tip while the local base stayed behind
  *   C diverged      the local base and origin each hold commits the other lacks
@@ -109,7 +109,7 @@ const HEX_C = 'c'.repeat(40)
 // The pure parts: grammar, name class, argv, selection
 // ---------------------------------------------------------------------------
 
-/** The plan's REASON to NOTE table: the one written copy the script is held to. */
+/** Mirrors REASON_NOTES in the script; the grammar test below fails when the two differ. */
 const NOTE_TABLE: Readonly<Record<Note, readonly Reason[]>> = {
   none: ['fresh', 'kept-local-ahead', 'no-remote-branch'],
   info: ['fork-origin', 'no-origin'],
@@ -425,35 +425,44 @@ function buildScenario(kind: Kind, base: string, o: { keepCachedRef?: boolean } 
   if (kind !== 'origin-absent' && base !== 'main') g('branch', '-q', base, `origin/${base}`)
   shas.M0 = g('rev-parse', kind === 'origin-absent' ? 'origin/main' : `origin/${base}`)
 
-  if (kind === 'fresh') {
-    shas.F1 = cut(base)
-    return { w, base, feat: 'feat', shas, want: { local: wanted('origin', 'fresh', shas.M0), pr: wanted('origin', 'fresh', shas.M0) } }
+  switch (kind) {
+    case 'fresh': {
+      shas.F1 = cut(base)
+      return { w, base, feat: 'feat', shas, want: { local: wanted('origin', 'fresh', shas.M0), pr: wanted('origin', 'fresh', shas.M0) } }
+    }
+    case 'stale': {
+      shas.M1 = advanceOrigin(w, 'm1.txt', base)
+      shas.M2 = advanceOrigin(w, 'm2.txt', base)
+      g('fetch', '-q', 'origin')
+      shas.F1 = cut(`origin/${base}`)
+      if (o.keepCachedRef !== true) g('update-ref', '-d', `refs/remotes/origin/${base}`)
+      return { w, base, feat: 'feat', shas, want: { local: wanted('origin', 'fresh', shas.M2), pr: wanted('origin', 'fresh', shas.M2) } }
+    }
+    case 'diverged':
+    case 'local-ahead': {
+      g('checkout', '-q', base)
+      shas.L1 = commitFile(w.work, w.home, 'local.txt')
+      shas.F1 = cut(base)
+      if (kind === 'diverged') shas.M1 = advanceOrigin(w, 'm1.txt', base)
+      return { w, base, feat: 'feat', shas, want: { local: wanted('local', 'kept-local-ahead', shas.L1), pr: wanted('origin', 'fresh', shas.M0) } }
+    }
+    case 'local-absent': {
+      shas.F1 = cut(`origin/${base}`)
+      g('branch', '-q', '-D', base)
+      return { w, base, feat: 'feat', shas, want: { local: wanted('origin', 'fresh', shas.M0), pr: wanted('origin', 'fresh', shas.M0) } }
+    }
+    case 'origin-absent': {
+      g('checkout', '-q', '-b', base, 'origin/main')
+      shas.S1 = commitFile(w.work, w.home, 'stack.txt')
+      shas.F1 = cut(base)
+      const f = (): Want => wanted('local', 'no-remote-branch', shas.S1, 'failed')
+      return { w, base, feat: 'feat', shas, want: { local: f(), pr: f() } }
+    }
+    default: {
+      const unhandled: never = kind
+      throw new Error(`scenario kind without a world: ${String(unhandled)}`)
+    }
   }
-  if (kind === 'stale') {
-    shas.M1 = advanceOrigin(w, 'm1.txt', base)
-    shas.M2 = advanceOrigin(w, 'm2.txt', base)
-    g('fetch', '-q', 'origin')
-    shas.F1 = cut(`origin/${base}`)
-    if (o.keepCachedRef !== true) g('update-ref', '-d', `refs/remotes/origin/${base}`)
-    return { w, base, feat: 'feat', shas, want: { local: wanted('origin', 'fresh', shas.M2), pr: wanted('origin', 'fresh', shas.M2) } }
-  }
-  if (kind === 'diverged' || kind === 'local-ahead') {
-    g('checkout', '-q', base)
-    shas.L1 = commitFile(w.work, w.home, 'local.txt')
-    shas.F1 = cut(base)
-    if (kind === 'diverged') shas.M1 = advanceOrigin(w, 'm1.txt', base)
-    return { w, base, feat: 'feat', shas, want: { local: wanted('local', 'kept-local-ahead', shas.L1), pr: wanted('origin', 'fresh', shas.M0) } }
-  }
-  if (kind === 'local-absent') {
-    shas.F1 = cut(`origin/${base}`)
-    g('branch', '-q', '-D', base)
-    return { w, base, feat: 'feat', shas, want: { local: wanted('origin', 'fresh', shas.M0), pr: wanted('origin', 'fresh', shas.M0) } }
-  }
-  g('checkout', '-q', '-b', base, 'origin/main')
-  shas.S1 = commitFile(w.work, w.home, 'stack.txt')
-  shas.F1 = cut(base)
-  const f = (): Want => wanted('local', 'no-remote-branch', shas.S1, 'failed')
-  return { w, base, feat: 'feat', shas, want: { local: f(), pr: f() } }
 }
 
 interface Run { readonly line: string; readonly f: Readonly<Record<string, string>> }
@@ -543,15 +552,35 @@ describe('the script under process.execPath (AC-6, AC-7)', SPAWN_BUDGET, () => {
       .toEqual({ stdout: `${RB.FALLBACK_LINE}\n`, stderr: '', status: 0 })
   })
 
-  it('sets exit 3 and writes nothing to stderr when stdout cannot be opened', () => {
+  /**
+   * Runs the script on its usage path, which makes no git call, with a preload that breaks the
+   * stdout write in one way, so the only failure in the run is the stdout one.
+   */
+  function runWithStdoutFault(preloadSource: string): { stderr: string; status: number | null } {
     const dir = fs.mkdtempSync(path.join(tmp, 'no-stdout-'))
-    const preload = path.join(dir, 'stdout-unavailable.cjs')
-    fs.writeFileSync(preload, "Object.defineProperty(process, 'stdout', { configurable: true, get() { throw new Error('stdout unavailable') } })\n")
-    // the usage path makes no git call, so the only failure is the stdout one
+    const preload = path.join(dir, 'stdout-fault.cjs')
+    fs.writeFileSync(preload, preloadSource)
     const r = spawnSync(process.execPath, ['--require', preload, RESOLVE_BASE_SCRIPT, 'local'], {
       cwd: dir, env: scopedEnv(dir), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: SUBPROCESS_TIMEOUT_MS,
     })
-    expect({ stderr: r.stderr, status: r.status }).toEqual({ stderr: '', status: 3 })
+    return { stderr: r.stderr ?? '', status: r.status }
+  }
+
+  it('sets exit 3 and writes nothing to stderr when stdout cannot be opened', () => {
+    const r = runWithStdoutFault("Object.defineProperty(process, 'stdout', { configurable: true, get() { throw new Error('stdout unavailable') } })\n")
+    expect(r).toEqual({ stderr: '', status: 3 })
+  })
+
+  it('sets exit 3 and writes nothing to stderr when the stdout write calls back with an error', () => {
+    const r = runWithStdoutFault([
+      'process.stdout.write = (chunk, ...rest) => {',
+      "  const done = rest.find(a => typeof a === 'function')",
+      "  if (typeof done === 'function') process.nextTick(done, new Error('stdout write failed'))",
+      '  return true',
+      '}',
+      '',
+    ].join('\n'))
+    expect(r).toEqual({ stderr: '', status: 3 })
   })
 })
 
