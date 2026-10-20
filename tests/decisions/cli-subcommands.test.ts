@@ -77,6 +77,7 @@ import {
   makeV2LedgerRow,
   makeV2LogRow,
   PROJECT_PATHS,
+  pathWithFailingGit,
   requireCurationStore,
   seedCurationTree,
   snapshotTree,
@@ -258,16 +259,6 @@ function trackInGit(dir: string, rel: string): void {
   if (!fs.existsSync(file)) fs.writeFileSync(file, 'content of the repository\n');
   initGitRepo(dir);
   git(dir, ['add', '-f', '--', rel]);
-}
-
-/** A PATH that holds a `git` which always exits non-zero, and nothing else. */
-function pathWithFailingGit(dir: string): string {
-  const bin = path.join(dir, 'failing-git-bin');
-  fs.mkdirSync(bin, { recursive: true });
-  const failing = ['/usr/bin/false', '/bin/false'].find(candidate => fs.existsSync(candidate));
-  if (failing === undefined) throw new Error('no false program on this machine');
-  fs.symlinkSync(failing, path.join(bin, 'git'));
-  return bin;
 }
 
 let root: string;
@@ -1050,6 +1041,20 @@ describe('curation --enable/--disable: the curation switch and the folder move (
       expect(queueIn(old)).toEqual([false, false, false]);
       expect(queueFilesPresent(root)).toEqual([false, false, false]);
     });
+
+    it('--disable with a queue file of the old folder tracked leaves every file as it is, though no move was tried', async () => {
+      const old = seedOldFolder(root, true);
+      trackInGit(root, '.devflow/learning/.pending-turns.jsonl');
+      const before = snapshotTree(path.join(root, '.devflow'));
+
+      const run = await runCuration(['--disable']);
+
+      expect(readSwitchKeys(devflowDir)).toEqual({ curation: false, learning: false });
+      expect(snapshotTree(path.join(root, '.devflow'))).toEqual(before);
+      expect(queueIn(old)).toEqual([true, true, true]);
+      expect(run.warn).toContain(MOVE_SKIP_NOTICE.tracked);
+      expect(run.exitCode).toBe(0);
+    });
   });
 
   describe('with matching installed scripts the toggle moves the folder, with no wait', () => {
@@ -1126,6 +1131,72 @@ describe('curation --enable/--disable: the curation switch and the folder move (
       expect(fs.existsSync(old)).toBe(true);
       expect(fs.existsSync(NEW())).toBe(false);
       expect(snapshotTree(path.join(root, '.devflow'))).toEqual(before);
+    });
+
+    it.each(['tracked', 'unknown'] as const)('--disable after a move skipped for the reason %s leaves every file as it is, warns with the fixed notice, and still records the switch', async (reason) => {
+      const old = seedOldFolder(root);
+      fs.mkdirSync(NEW(), { recursive: true });
+      seedQueue(root);
+      if (reason === 'tracked') trackInGit(root, '.devflow/learning/.pending-turns.jsonl');
+      else {
+        initGitRepo(root);
+        vi.stubEnv('PATH', pathWithFailingGit(devflowDir));
+      }
+      const before = snapshotTree(path.join(root, '.devflow'));
+
+      const run = await runCuration(['--disable']);
+
+      expect(readSwitchKeys(devflowDir)).toEqual({ curation: false, learning: false });
+      expect(snapshotTree(path.join(root, '.devflow'))).toEqual(before);
+      expect(fs.existsSync(path.join(old, '.pending-turns.jsonl'))).toBe(true);
+      expect(queueFilesPresent(root)).toEqual([true, true, true]);
+      expect(run.warn).toContain(MOVE_SKIP_NOTICE[reason]);
+      expect(run.exitCode).toBe(0);
+      expect(run.success).toBe('Curation disabled in every project');
+    });
+
+    it('--disable with a queue file of the new folder tracked, and no old folder, leaves both folders and the backups as they are', async () => {
+      fs.mkdirSync(NEW(), { recursive: true });
+      seedQueue(root);
+      const backup = seedBackup(root);
+      trackInGit(root, '.devflow/curation/.pending-turns.jsonl');
+      const before = snapshotTree(path.join(root, '.devflow'));
+
+      const run = await runCuration(['--disable']);
+
+      expect(readSwitchKeys(devflowDir)).toEqual({ curation: false, learning: false });
+      expect(snapshotTree(path.join(root, '.devflow'))).toEqual(before);
+      expect(backupPendingPresent(backup)).toEqual([true, true, true, true]);
+      expect(run.warn).toContain(MOVE_SKIP_NOTICE.tracked);
+      expect(run.exitCode).toBe(0);
+    });
+
+    it('--disable with a queue file of a backup folder tracked leaves the live queue and the backups as they are', async () => {
+      fs.mkdirSync(NEW(), { recursive: true });
+      seedQueue(root);
+      const backup = seedBackup(root);
+      trackInGit(root, `.devflow/${BACKUP_NAME}/.pending-turns.jsonl`);
+      const before = snapshotTree(path.join(root, '.devflow'));
+
+      const run = await runCuration(['--disable']);
+
+      expect(snapshotTree(path.join(root, '.devflow'))).toEqual(before);
+      expect(queueFilesPresent(root)).toEqual([true, true, true]);
+      expect(backupPendingPresent(backup)).toEqual([true, true, true, true]);
+      expect(run.warn).toContain(MOVE_SKIP_NOTICE.tracked);
+    });
+
+    it('--disable in a repository that tracks nothing in the data folders moves the folder and drains the queue', async () => {
+      initGitRepo(root, { 'README.md': 'content of the repository\n' });
+      const old = seedOldFolder(root);
+
+      const run = await runCuration(['--disable']);
+
+      expect(fs.existsSync(old)).toBe(false);
+      expect(queueIn(NEW())).toEqual([false, false, false]);
+      expect(fs.existsSync(path.join(NEW(), 'decisions-ledger.jsonl'))).toBe(true);
+      expect(run.warn).toBe('');
+      expect(run.success).toBe('Curation disabled in every project');
     });
 
     it('a refused move (the old folder is a link) is reported as a warning, never a failure', async () => {

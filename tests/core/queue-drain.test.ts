@@ -14,6 +14,7 @@ import * as path from 'path';
 import { drainCurationQueue, drainDisabledCurationQueue } from '../../src/core/curation-queue-cleanup.js';
 import { loadCurationMove, type CurationMoveLoad } from '../../src/core/curation-move.js';
 import { drainMemoryQueue } from '../../src/cli/commands/memory.js';
+import { git, initGitRepo, pathWithFailingGit, snapshotTree } from '../decisions/curation-fixtures.js';
 
 const KEEP = 'a file outside the project, which no drain may delete\n';
 
@@ -331,9 +332,99 @@ describe('drainDisabledCurationQueue also drains the pending rows of the backups
       expect(await drainDisabledCurationQueue(root)).toEqual({ drained: true });
     });
 
-    it('a root that is not absolute: the list is refused without a link, and the answer is a warning, not a throw', async () => {
+    it('a root that is not absolute: the tracked-folder check cannot answer, so nothing is deleted and the answer is a skip, not a throw', async () => {
       const result = await drainDisabledCurationQueue('relative/path');
-      expect(result).toEqual({ drained: true, warning: expect.stringMatching(/absolute/) });
+      expect(result).toEqual({ drained: false, skipped: 'unknown' });
     });
+  });
+});
+
+describe('drainDisabledCurationQueue leaves a project alone when git tracks a data folder or does not answer', () => {
+  const STAMP = '20261017T020304Z';
+  const FILES = ['.pending-turns.jsonl', '.pending-turns.processing', '.pending-turns.owner'] as const;
+  const oldDir = (): string => path.join(root, '.devflow', 'learning');
+  const newDir = (): string => path.join(root, '.devflow', 'curation');
+  const backupDir = (): string => path.join(root, '.devflow', `learning.backup-${STAMP}-00000001`);
+  const devflowTree = (): Map<string, string> => snapshotTree(path.join(root, '.devflow'));
+
+  /** Queue files in the old folder, the new folder and a backup folder. */
+  async function seedEveryFolder(): Promise<void> {
+    for (const dir of [oldDir(), newDir(), backupDir()]) await seed(dir, FILES);
+  }
+
+  const TRACKED_PATHS = [
+    ['a queue file of the old folder', '.devflow/learning/.pending-turns.jsonl'],
+    ['a ledger file of the old folder', '.devflow/learning/decisions-ledger.jsonl'],
+    ['a queue file of the new folder', '.devflow/curation/.pending-turns.jsonl'],
+    ['a queue file of a backup folder', `.devflow/learning.backup-${STAMP}-00000001/.pending-turns.jsonl`],
+  ] as const;
+
+  it.each(TRACKED_PATHS)('git tracks %s: nothing is deleted in either folder or any backup, and the answer is a tracked skip', async (_name, tracked) => {
+    initGitRepo(root);
+    await seedEveryFolder();
+    await seed(oldDir(), ['decisions-ledger.jsonl']);
+    git(root, ['add', '-f', '--', tracked]);
+    const before = devflowTree();
+
+    const result = await drainDisabledCurationQueue(root);
+
+    expect(result).toEqual({ drained: false, skipped: 'tracked' });
+    expect(devflowTree()).toEqual(before);
+  });
+
+  it('git tracks a file that is only staged: the same skip', async () => {
+    initGitRepo(root);
+    await seedEveryFolder();
+    git(root, ['add', '-f', '--', '.devflow/curation/.pending-turns.processing']);
+    const before = devflowTree();
+
+    expect(await drainDisabledCurationQueue(root)).toEqual({ drained: false, skipped: 'tracked' });
+    expect(devflowTree()).toEqual(before);
+  });
+
+  it('a .git entry stands and git does not answer: nothing is deleted, and the answer is an unknown skip', async () => {
+    initGitRepo(root);
+    await seedEveryFolder();
+    const before = devflowTree();
+    vi.stubEnv('PATH', pathWithFailingGit(tmp));
+
+    expect(await drainDisabledCurationQueue(root)).toEqual({ drained: false, skipped: 'unknown' });
+    expect(devflowTree()).toEqual(before);
+  });
+
+  it('a check that cannot be loaded cannot answer: nothing is deleted, and the answer is an unknown skip', async () => {
+    await seedEveryFolder();
+    const before = devflowTree();
+
+    const result = await drainDisabledCurationQueue(
+      root,
+      loadCurationMove,
+      () => ({ ok: false, error: { kind: 'not-found', path: '/pkg/tracked-areas.cjs' } }),
+    );
+
+    expect(result).toEqual({ drained: false, skipped: 'unknown' });
+    expect(devflowTree()).toEqual(before);
+  });
+
+  it('a repository that tracks nothing in the data folders drains every folder and backup, and keeps the tracked files elsewhere', async () => {
+    initGitRepo(root, { 'README.md': 'content of the repository\n', '.devflow/notes.md': 'a tracked note\n' });
+    await seedEveryFolder();
+
+    expect(await drainDisabledCurationQueue(root)).toEqual({ drained: true });
+
+    for (const dir of [oldDir(), newDir(), backupDir()]) {
+      expect(await present(dir, ['.pending-turns.jsonl', '.pending-turns.processing'])).toEqual([false, false]);
+    }
+    expect(await present(root, ['README.md', '.devflow/notes.md'])).toEqual([true, true]);
+  });
+
+  it('a project with no .git entry drains as usual and makes no git call', async () => {
+    await seedEveryFolder();
+    vi.stubEnv('PATH', pathWithFailingGit(tmp));
+
+    expect(await drainDisabledCurationQueue(root)).toEqual({ drained: true });
+
+    expect(await present(oldDir(), ['.pending-turns.jsonl', '.pending-turns.processing'])).toEqual([false, false]);
+    expect(await present(newDir(), ['.pending-turns.jsonl', '.pending-turns.processing'])).toEqual([false, false]);
   });
 });

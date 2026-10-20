@@ -56,7 +56,7 @@ import { convergeFlagsIntoSettings, countActiveFlags, readViewMode, type FlagsRe
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
 import { writeManagedConfig, readConfigIfPresent, DEFAULT_CONFIG, type FeatureConfig, type ManagedConfigWriteError } from '../../core/feature-config.js';
-import { drainDisabledCurationQueue } from '../../core/curation-queue-cleanup.js';
+import { drainDisabledCurationQueue, formatCurationNotDrained, type DisabledCurationDrain } from '../../core/curation-queue-cleanup.js';
 import { formatRefusedDrain, type QueueDrain } from '../../core/queue-drain.js';
 import { removeManagedDenyList, describeManagedDenyRemoval } from './security.js';
 import { resolveInitSeed, applyCliToggles, resolveResetGatedInputs, resolvePluginsToInstall } from './init-seed.js';
@@ -741,7 +741,7 @@ export async function lookupDrainLedgerRoot(
 /** The queue drains `drainDisabledFeatureQueues` performs — injected for tests. */
 export interface DisabledQueueDrainIO {
   drainMemoryQueue(projectRoot: string): Promise<QueueDrain>;
-  drainCurationQueue(ledgerRoot: string): Promise<QueueDrain>;
+  drainCurationQueue(ledgerRoot: string): Promise<DisabledCurationDrain>;
 }
 
 /**
@@ -765,8 +765,10 @@ export interface DisabledQueueDrainIO {
  * lookupOwnLedgerRoot), which in a linked worktree is the main checkout.
  *
  * Returns one warning for each drain refused because a folder on the way to its
- * queue is a symbolic link (D-CLI-NO-SYMLINK), and one for a curation drain that
- * could not list the backups (the live queue is drained then); the caller prints them.
+ * queue is a symbolic link (D-CLI-NO-SYMLINK), one for a curation drain that
+ * could not list the backups (the live queue is drained then), and one for a curation
+ * drain that left the project alone because git tracks a data folder or did not answer
+ * (the fixed notice of a skipped move); the caller prints them.
  */
 export async function drainDisabledFeatureQueues(
   opts: {
@@ -786,7 +788,7 @@ export async function drainDisabledFeatureQueues(
   }
   if (!opts.curationEnabled && opts.ledgerRoot !== null) {
     const curation = await io.drainCurationQueue(opts.ledgerRoot);
-    if (!curation.drained) refused.push(formatRefusedDrain('curation', curation.linkedFolder));
+    if (!curation.drained) refused.push(formatCurationNotDrained(curation));
     else if (curation.warning !== undefined) refused.push(curation.warning);
   }
   return refused;

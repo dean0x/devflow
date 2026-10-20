@@ -230,6 +230,16 @@ export function initGitRepo(dir: string, files: Readonly<Record<string, string>>
   return git(dir, ['rev-parse', 'HEAD']);
 }
 
+/** A PATH that holds a `git` which always exits non-zero, and nothing else; the program is linked under `dir`. */
+export function pathWithFailingGit(dir: string): string {
+  const bin = path.join(dir, 'failing-git-bin');
+  fs.mkdirSync(bin, { recursive: true });
+  const failing = ['/usr/bin/false', '/bin/false'].find(candidate => fs.existsSync(candidate));
+  if (failing === undefined) throw new Error('no false program on this machine');
+  fs.symlinkSync(failing, path.join(bin, 'git'));
+  return bin;
+}
+
 // ---------------------------------------------------------------------------
 // json-helper.cjs
 // ---------------------------------------------------------------------------
