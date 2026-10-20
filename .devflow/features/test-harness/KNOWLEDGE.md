@@ -33,7 +33,7 @@ updated: 2026-10-17
 - **KB-AP-8** A CLI-spawning test that times the spawn but leaves `it()` on vitest's default timeout reintroduces the flake one level up.
 - **KB-AP-9** Fixtures are built from real runtime shapes, never invented; a stand-in name for a registry entry must be deliberately unregisterable.
 - **KB-AP-10** `agent-name-guards.test.ts` (GAP-5) sweeps `.devflow/features/**` for two retired role-noun spellings with no trailing boundary, even in prose: paraphrase them in a KB.
-- **KB-AP-11** `collectFreshBaseDefects` also names an unrelated one-argument collector in `tests/evidence/implement-flow.test.ts`: never import or merge the two.
+- **KB-AP-11** /implement's one-argument fresh-base collector is `collectImplementFreshBaseDefects` in `tests/evidence/implement-flow.test.ts`: never rename it to the shared name or merge the two.
 
 ## Overview
 
