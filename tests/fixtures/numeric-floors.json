@@ -454,27 +454,27 @@
     },
     {
       "id": "code-body-max",
-      "ceiling": 10737,
-      "pattern": "const CODE_BODY_MAX_BYTES = 10_737",
+      "ceiling": 10735,
+      "pattern": "const CODE_BODY_MAX_BYTES = 10_735",
       "occurrences": 1,
       "sourceFile": "tests/guards/code-operation.test.ts",
-      "description": "D-CODE-VARIANTS and D-PR-BY-GIT: the compiled Code agent body, dist/agents/code.md, in bytes. It was 24,851 while one Code agent held all seven modes and also opened the PR; the Git agent's ensure-pr-ready reference owns the PR text (16,449), and the three variants split the modes, so Code keeps implement and issue-fix and measures 10,737, the ceiling. It was 11,155 after D-COMPLIANCE-INJECT moved the compliance step and input (525) out of the body into the command's directive; #452 then added the read-once and quiet-output rules and cut duplicate rules (418 net). The guard also holds the body free of every PR-opening phrase and keeps commit-and-push and the security scan (D-SCAN-IN-CODE). May be lowered, never raised: a later addition funds itself with a cut."
+      "description": "D-CODE-VARIANTS and D-PR-BY-GIT: the compiled Code agent body, dist/agents/code.md, in bytes. It was 24,851 while one Code agent held all seven modes and also opened the PR; the Git agent's ensure-pr-ready reference owns the PR text (16,449), and the three variants split the modes, so Code keeps implement and issue-fix and measures 10,735, the ceiling. It was 11,155 after D-COMPLIANCE-INJECT moved the compliance step and input (525) out of the body into the command's directive; #452 then added the read-once and quiet-output rules and cut duplicate rules (418 net). The commit step then gained the check of the diff for secrets or tokens in logs or debug output, paid by condensing the Output lead-in and the commit-only note in the same file (net 2 lower, from 10,737). The guard also holds the body free of every PR-opening phrase and keeps commit-and-push, the diff check once on the commit line, and the security scan (D-SCAN-IN-CODE). May be lowered, never raised: a later addition funds itself with a cut."
     },
     {
       "id": "fix-body-max",
-      "ceiling": 8504,
-      "pattern": "const FIX_BODY_MAX_BYTES = 8_504",
+      "ceiling": 8479,
+      "pattern": "const FIX_BODY_MAX_BYTES = 8_479",
       "occurrences": 1,
       "sourceFile": "tests/guards/code-operation.test.ts",
-      "description": "D-CODE-VARIANTS: the compiled Fix agent body, dist/agents/fix.md, in bytes. It carries the four gate-failure fix modes (validation-fix, alignment-fix, qa-fix, ci-fix), the commit step with the security scan and the shared Running commands, Principles, Output and Boundaries text, and measures 8,504, the ceiling (it was 8,634 after D-COMPLIANCE-INJECT moved the compliance step and input, 525, out of the body into the command's directive, and 8,624 after the agent rename in #467; #452 then added the read-once and quiet-output rules and cut duplicate rules, 120 net). The guard also holds the body free of every PR-opening phrase. May be lowered, never raised: a later addition funds itself with a cut."
+      "description": "D-CODE-VARIANTS: the compiled Fix agent body, dist/agents/fix.md, in bytes. It carries the four gate-failure fix modes (validation-fix, alignment-fix, qa-fix, ci-fix), the commit step with the security scan and the shared Running commands, Principles, Output and Boundaries text, and measures 8,479, the ceiling (it was 8,634 after D-COMPLIANCE-INJECT moved the compliance step and input, 525, out of the body into the command's directive, and 8,624 after the agent rename in #467; #452 then added the read-once and quiet-output rules and cut duplicate rules, 120 net; it measured 8,481 before the commit step gained the check of the diff for secrets or tokens in logs or debug output, paid by condensing the Output lead-in and the commit-only note in the same file, net 2 lower). The guard also holds the body free of every PR-opening phrase and keeps the diff check once on the commit line. May be lowered, never raised: a later addition funds itself with a cut."
     },
     {
       "id": "refactor-body-max",
-      "ceiling": 6412,
-      "pattern": "const REFACTOR_BODY_MAX_BYTES = 6_412",
+      "ceiling": 6410,
+      "pattern": "const REFACTOR_BODY_MAX_BYTES = 6_410",
       "occurrences": 1,
       "sourceFile": "tests/guards/code-operation.test.ts",
-      "description": "D-CODE-VARIANTS: the compiled Refactor agent body, dist/agents/refactor.md, in bytes. It carries the one edit mode, the commit step with the security scan and the shared Running commands, Principles, Output and Boundaries text, and measures 6,412, the ceiling (it was 6,532 after the rename to Refactor and its routing note added 24 bytes; #452 then added the read-once and quiet-output rules and cut duplicate rules, 120 net). The guard also holds the body free of every PR-opening phrase. May be lowered, never raised: a later addition funds itself with a cut."
+      "description": "D-CODE-VARIANTS: the compiled Refactor agent body, dist/agents/refactor.md, in bytes. It carries the one edit mode, the commit step with the security scan and the shared Running commands, Principles, Output and Boundaries text, and measures 6,410, the ceiling (it was 6,532 after the rename to Refactor and its routing note added 24 bytes; #452 then added the read-once and quiet-output rules and cut duplicate rules, 120 net; the commit step then gained the check of the diff for secrets or tokens in logs or debug output, paid by condensing the Output lead-in and the commit-only note in the same file, net 2 lower, from 6,412). The guard also holds the body free of every PR-opening phrase and keeps the diff check once on the commit line. May be lowered, never raised: a later addition funds itself with a cut."
     },
     {
       "id": "synthesize-body-max",
