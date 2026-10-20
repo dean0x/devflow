@@ -193,8 +193,8 @@ detect_refresh_failing() {
   fi
 }
 
-# D-HOOKS-NO-SYMLINK (git-marker): the working memory, the batches State C counts
-# and the pre-compact backup are all read into the session, so each is read only
+# D-HOOKS-NO-SYMLINK (git-marker): the working memory and the batches State C counts
+# are read into the session, so each is read only
 # where no symbolic link sits on its path; a file a link leads to is treated as
 # absent, and its refusal logged once.
 MEMORY_PRESENT=""
@@ -306,46 +306,6 @@ ${REFRESH_FAILING}"
   fi
 else
   dbg "MEMORY_FILE not found: $MEMORY_FILE"
-fi
-
-# --- PRE-COMPACT snapshot recovery (orthogonal to memory refresh, still valuable) ---
-# Re-inject compaction snapshot when it's more recent than the memory file (compact overwrote
-# WORKING-MEMORY.md with a summary, but the pre-compact snapshot may have richer context).
-BACKUP_FILE="$MEMORY_DIR/backup.json"
-if df_file_below "$PROJECT_ROOT" "$BACKUP_FILE"; then
-  # Under set -e a failed read would end the hook before it prints the working
-  # memory built above, so a backup that does not parse is read as no snapshot,
-  # like an absent one, discarding what jq printed before it failed. The read
-  # below runs only once this one has parsed the whole file.
-  BACKUP_MEMORY=$(json_field_file "$BACKUP_FILE" "memory_snapshot" "") || BACKUP_MEMORY=""
-  if [ -n "$BACKUP_MEMORY" ]; then
-    BACKUP_TS=$(json_field_file "$BACKUP_FILE" "timestamp" "")
-    BACKUP_EPOCH=0
-    if [ -n "$BACKUP_TS" ]; then
-      BACKUP_EPOCH=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$BACKUP_TS" +%s 2>/dev/null \
-        || date -d "$BACKUP_TS" +%s 2>/dev/null \
-        || echo "0")
-    fi
-    FILE_MTIME_CK=0
-    if [ -n "$MEMORY_PRESENT" ]; then
-      FILE_MTIME_CK=$(get_mtime "$MEMORY_FILE" 2>/dev/null || echo "0")
-    fi
-    if [ "$BACKUP_EPOCH" -gt "$FILE_MTIME_CK" ]; then
-      dbg "Compact recovery available: BACKUP_TS=$BACKUP_TS"
-      COMPACT_NOTE="
---- PRE-COMPACT SNAPSHOT ($BACKUP_TS) ---
-Context was compacted. This snapshot may contain decisions or progress not yet in working memory.
-
-$BACKUP_MEMORY
-"
-      if [ -n "$CONTEXT" ]; then
-        CONTEXT="${CONTEXT}
-${COMPACT_NOTE}"
-      else
-        CONTEXT="$COMPACT_NOTE"
-      fi
-    fi
-  fi
 fi
 
 # --- One-time worker notice ---

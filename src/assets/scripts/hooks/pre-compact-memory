@@ -112,27 +112,18 @@ if cd "$CWD" 2>/dev/null && git rev-parse --git-dir >/dev/null 2>&1; then
   dbg "GIT_BRANCH=$GIT_BRANCH HEAD=$GIT_HEAD_SHA"
 fi
 
-# Snapshot current WORKING-MEMORY.md (preserves session context through compaction).
-# The snapshot goes into the backup the next session start injects, so a working
-# memory a symbolic link leads to is treated as absent (D-HOOKS-NO-SYMLINK).
-MEMORY_SNAPSHOT=""
-if df_file_below "$PROJECT_ROOT" "$MEMORY_DIR/WORKING-MEMORY.md"; then
-  MEMORY_SNAPSHOT=$(head -c 65536 "$MEMORY_DIR/WORKING-MEMORY.md")
-  dbg "MEMORY_SNAPSHOT_LENGTH=${#MEMORY_SNAPSHOT}"
-fi
-
 # Write backup JSON
 # D-BACKUP-RENAME: the backup is written whole into a copy beside it, then
 # renamed over it; it is never truncated and refilled in place. Reason:
-# session-start-memory reads it twice, and a read landing between a truncate
-# and the write that refills it would meet a partial file; a rename hands every
-# read either the previous backup or the new one. SEC-2: the copy is created
+# a read landing between a truncate and the write that refills it would meet a
+# partial file; a rename hands every read either the previous backup or the new
+# one. SEC-2: the copy is created
 # under umask 077, and only where nothing stands at its name: builtin tests come
 # first, so an entry already there, a link to a FIFO or a device included, is
 # never opened (noclobber alone would open one, as no regular file stands there),
 # and noclobber then makes the create itself exclusive. The rename gives the
-# backup the copy's inode and mode, so the backup, which holds the working
-# memory, is 0600 whatever the caller's umask (as in queue-append). A write or
+# backup the copy's inode and mode, so the Git-state backup is 0600 whatever
+# the caller's umask (as in queue-append). A write or
 # rename that fails removes whatever holds the copy's name and keeps the
 # previous backup; the bootstrap below still runs.
 #
@@ -157,7 +148,6 @@ elif [ ! -e "$BACKUP_TMP" ] && [ ! -L "$BACKUP_TMP" ] && (umask 077 && set -o no
     --arg status "$GIT_STATUS" \
     --arg log "$GIT_LOG" \
     --arg diff "$GIT_DIFF_STAT" \
-    --arg memory "$MEMORY_SNAPSHOT" \
     > "$BACKUP_TMP") && mv "$BACKUP_TMP" "$BACKUP_FILE"; then
   log "Wrote backup: $BACKUP_FILE"
   dbg "Wrote backup: $BACKUP_FILE"
