@@ -672,14 +672,20 @@ function moveJournalPathOrNull(root) {
 /**
  * Remove a machine-side journal whose old folder is gone: it has no set left to
  * finish. Only a regular file is removed, never a link or any other entry, and nothing
- * is followed.
+ * is followed. It never throws: a journal that cannot be removed (EACCES, EPERM, EROFS
+ * on the machine directory) stays, and the writer goes on, because the journal holds
+ * no writer once its old folder is gone. A later write tries again.
  *
  * @param {string} journal
  */
 function dropStaleMoveJournal(journal) {
-  const stat = lstatOrNull(journal);
-  if (stat === null || !stat.isFile()) return;
-  removeIfPresent(journal);
+  try {
+    const stat = lstatOrNull(journal);
+    if (stat === null || !stat.isFile()) return;
+    removeIfPresent(journal);
+  } catch {
+    // Best effort only: see the note above.
+  }
 }
 
 /**

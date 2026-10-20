@@ -866,13 +866,30 @@ function newFolderHasData(ctx) {
  */
 
 /**
- * The steps of a journal file, or null when the file is not a journal this module
- * wrote: unreadable, not JSON, or naming anything but a set member and a displaced
- * name of that member. A journal is trusted only that far, and only the machine-side
- * file is ever read: the folders can hold a file a repository committed.
+ * What identifies a folder across passes: the device and inode that lstat reports. A
+ * folder that was deleted and made again is another folder, whatever its name.
+ *
+ * @typedef {{ dev: number, ino: number }} FolderIdentity
+ */
+
+/** @param {import('fs').Stats} stat @returns {FolderIdentity} */
+const folderIdentity = stat => ({ dev: stat.dev, ino: stat.ino });
+
+/** True when `identity` is the identity of the folder `stat` describes. */
+const isSameFolder = (identity, stat) => stat !== null && identity.dev === stat.dev && identity.ino === stat.ino;
+
+/** True for a number that a journal can hold as a device or inode: a finite, non-negative number. */
+const isIdentityNumber = value => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+
+/**
+ * The steps of a journal file and the identity of the old folder it was planned for, or
+ * null when the file is not a journal this module wrote: unreadable, not JSON, naming
+ * anything but a set member and a displaced name of that member, or with no folder
+ * identity. A journal is trusted only that far, and only the machine-side file is ever
+ * read: the folders can hold a file a repository committed.
  *
  * @param {string} file
- * @returns {MoveStep[]|null}
+ * @returns {{ steps: MoveStep[], oldDir: FolderIdentity }|null}
  */
 function readMoveJournal(file) {
   const text = readTextUnlinked(file, { maxBytes: MOVE_JOURNAL_MAX_BYTES });
@@ -885,6 +902,7 @@ function readMoveJournal(file) {
   }
   if (!isPlainObject(parsed) || parsed.version !== 1 || !Array.isArray(parsed.steps)) return null;
   if (parsed.steps.length > SET_MEMBERS.length * 2) return null;
+  if (!isPlainObject(parsed.oldDir) || !isIdentityNumber(parsed.oldDir.dev) || !isIdentityNumber(parsed.oldDir.ino)) return null;
   const steps = [];
   for (const step of parsed.steps) {
     if (!isPlainObject(step)) return null;
@@ -895,7 +913,29 @@ function readMoveJournal(file) {
       steps.push({ op: 'displace', name: step.name, to: step.to });
     } else return null;
   }
-  return steps;
+  return { steps, oldDir: { dev: parsed.oldDir.dev, ino: parsed.oldDir.ino } };
+}
+
+/**
+ * Drop a machine-side journal that was planned for an old folder other than the one that
+ * stands now. The journal lives in the machine directory and the old folder can be
+ * deleted and made again (a downgrade that starts a new one, a manual delete), so a
+ * journal that outlives its folder would replay its steps against another folder's files
+ * and move the live set into the backup. A journal that cannot be read is left for
+ * curationMoveSetWithJournal, which removes it with its own note. Only a regular file is
+ * removed, never a link.
+ *
+ * @param {{ oldDir: string, journal: string }} ctx
+ * @returns {string[]} one note when a journal was dropped, else none
+ * @throws on an I/O failure
+ */
+function curationMoveDropStaleJournal(ctx) {
+  const stat = lstatOrNull(ctx.journal);
+  if (stat === null || !stat.isFile()) return [];
+  const journal = readMoveJournal(ctx.journal);
+  if (journal === null || isSameFolder(journal.oldDir, lstatOrNull(ctx.oldDir))) return [];
+  removeIfPresent(ctx.journal);
+  return [`dropped a move journal that was planned for an earlier ${path.basename(ctx.oldDir)} folder; the move decides afresh`];
 }
 
 /**
@@ -929,8 +969,9 @@ function applyMoveStep(ctx, step) {
  * first displaced into the old folder under a displaced name, never overwritten; then
  * the members are renamed in, in the fixed order: log, archive, history, and the
  * ledger last. The plan is written first to the root's journal in the machine
- * directory, `ctx.journal` (mode 0600, created exclusively, never through a link), and
- * the journal is removed once the set is complete. Only that file is a journal: one in
+ * directory, `ctx.journal` (mode 0600, created exclusively, never through a link), with
+ * the identity (device and inode) of the old folder it was planned for, and the journal
+ * is removed once the set is complete. Only that file is a journal: one in
  * the old folder is repository content and is never read. If a journal exists when the
  * op starts, the op completes each listed step whose source still exists and whose
  * target does not, and does not decide the winner again. An error before the first
@@ -946,7 +987,8 @@ function curationMoveSetWithJournal(ctx) {
   const journal = ctx.journal;
   let steps = null;
   if (lstatOrNull(journal) !== null) {
-    steps = readMoveJournal(journal);
+    const recorded = readMoveJournal(journal);
+    steps = recorded === null ? null : recorded.steps;
     if (steps === null) {
       removeIfPresent(journal);
       notes.push('removed an unreadable move journal; no rename had been recorded');
@@ -965,7 +1007,7 @@ function curationMoveSetWithJournal(ctx) {
     ];
     if (steps.length === 0) return { notes };
     try {
-      writeNewPrivateFile(journal, JSON.stringify({ version: 1, steps }));
+      writeNewPrivateFile(journal, JSON.stringify({ version: 1, oldDir: folderIdentity(fs.lstatSync(ctx.oldDir)), steps }));
     } catch (err) {
       removeIfPresent(journal);
       throw err;
@@ -1270,10 +1312,11 @@ function locksAfter(held, ctx, result) {
  * With the new folder absent the whole folder is renamed. With it present: if its
  * observation log has data it wins and the old folder becomes the backup whole;
  * otherwise the old ledger set moves in (curationMoveSetWithJournal), and the old
- * folder becomes the backup with what is left. Only the machine-side journal can
- * override the winner rule. Either way the pending queue (and a
- * stale claim's batch) merges into the winner's queue and the rendered files are
- * rebuilt. A fresh claim in either folder is busy too, with the reason `claim`: it can
+ * folder becomes the backup with what is left. Only a machine-side journal of this very
+ * old folder can override the winner rule: a journal planned for an old folder that has
+ * been replaced is dropped first (curationMoveDropStaleJournal). Either way the pending
+ * queue (and a stale claim's batch) merges into the winner's queue and the rendered
+ * files are rebuilt. A fresh claim in either folder is busy too, with the reason `claim`: it can
  * last as long as CLAIM_STALE_SECS, so the caller may stop asking until its next session
  * start. A folder that changed is busy with no reason, and the next event asks again.
  *
@@ -1297,7 +1340,7 @@ function movePass(ctx, { newExisted }) {
     };
   }
 
-  const notes = [];
+  const notes = curationMoveDropStaleJournal(ctx);
   const journalPresent = lstatOrNull(ctx.journal) !== null;
   const keptNew = !journalPresent && newFolderHasData(ctx);
   if (!keptNew) notes.push(...curationMoveSetWithJournal(ctx).notes);

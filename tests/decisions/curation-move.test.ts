@@ -1178,6 +1178,72 @@ describe('moveLedger — an interrupted set move resumes from its journal (TP-40
     expect(isLink(moveJournalFile())).toBe(true);
     expect(read(outside)).toBe('keep me\n');
   });
+
+  it('a stale journal that cannot be removed does not stop the store write: it goes on, the lock is released and the journal stays', () => {
+    failAfterSetRenames(2);
+    expect(failure().kind).toBe('io-error');
+    vi.restoreAllMocks();
+    fs.rmSync(site.oldDir, { recursive: true });
+    failCall('unlinkSync', 'EACCES', ([file]) => String(file) === moveJournalFile());
+    let ran = false;
+
+    const write = store.withDecisionsLock('put-observation', site.root, () => { ran = true; return { ok: true, value: null }; });
+
+    expect(write.ok).toBe(true);
+    expect(ran).toBe(true);
+    expect(exists(moveJournalFile())).toBe(true);
+    expect(names(site.newDir).filter(entry => entry.endsWith('.lock'))).toEqual([]);
+
+    vi.restoreAllMocks();
+    expect(store.withDecisionsLock('put-observation', site.root, () => ({ ok: true, value: null })).ok).toBe(true);
+    expect(exists(moveJournalFile())).toBe(false);
+  });
+
+  describe('a journal of an old folder that is gone, with a new old folder in its place', () => {
+    /** A move that stopped after two renames, then the old folder deleted and a later one made, and a live write in the new folder. */
+    function staleJournalSetup(): void {
+      failAfterSetRenames(2);
+      expect(failure().kind).toBe('io-error');
+      vi.restoreAllMocks();
+      expect(exists(moveJournalFile())).toBe(true);
+      fs.rmSync(site.oldDir, { recursive: true });
+      seedOld(ledgerSet('later'));
+      fs.writeFileSync(path.join(site.newDir, LOG), ledgerSet('live')[LOG]);
+    }
+
+    it('is dropped with one note, and the move decides afresh: the new folder\'s log has data, so it wins', () => {
+      staleJournalSetup();
+
+      const value = movedValue();
+
+      expect(value.mode).toBe('kept-new');
+      expect(read(path.join(site.newDir, LOG))).toBe(ledgerSet('live')[LOG]);
+      const backup = backupOf(value);
+      expect(read(path.join(backup, LEDGER))).toBe(ledgerSet('later')[LEDGER]);
+      expect(names(backup).filter(name => name.startsWith(`${LOG}.displaced-`) && read(path.join(backup, name)) === ledgerSet('live')[LOG])).toEqual([]);
+      expect(value.notes.filter(note => /journal/.test(note) && /dropped/.test(note))).toHaveLength(1);
+      expect(exists(moveJournalFile())).toBe(false);
+    });
+
+    it('is dropped once, and the next pass has nothing left to drop', () => {
+      staleJournalSetup();
+      movedValue();
+      seedOld(ledgerSet('again'));
+      const value = movedValue();
+      expect(value.notes.filter(note => /journal/.test(note))).toEqual([]);
+    });
+
+    it('a journal of the same old folder still resumes, whatever else changed in the folder', () => {
+      failAfterSetRenames(2);
+      expect(failure().kind).toBe('io-error');
+      vi.restoreAllMocks();
+      fs.writeFileSync(path.join(site.oldDir, 'notes.txt'), 'added while the move was stopped\n');
+      const value = movedValue();
+      expect(value.mode).toBe('moved-in');
+      expect(value.notes.filter(note => /dropped/.test(note))).toEqual([]);
+      for (const [name, content] of Object.entries(ledgerSet('old'))) expect(read(path.join(site.newDir, name)), name).toBe(content);
+    });
+  });
 });
 
 describe('moveLedger — a journal in the repository\'s old folder is never read', () => {
