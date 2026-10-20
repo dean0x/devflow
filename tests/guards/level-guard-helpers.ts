@@ -81,6 +81,15 @@ export function referenceRows(ref: string): string[] {
   return tableRowLines(parseRef(ref))
 }
 
+/** The level columns of a row, as the cell index that each one reads: a row is its phase cell, then the standard cell, then the lean cell. The one statement of the column layout. */
+export const LEVEL_CELL_INDEX = { standard: 1, lean: 2 } as const
+export type LevelColumn = keyof typeof LEVEL_CELL_INDEX
+/** The level columns, in cell order. */
+export const LEVELS = Object.keys(LEVEL_CELL_INDEX) as readonly LevelColumn[]
+
+/** The cell of the row `row` for `level`; undefined when the line is not a row. */
+export const levelCell = (row: string, level: LevelColumn): string | undefined => rowCells(row)?.[LEVEL_CELL_INDEX[level]]
+
 // ---------------------------------------------------------------------------
 // Probes
 // ---------------------------------------------------------------------------
@@ -90,6 +99,12 @@ export function seed(body: string, from: string | RegExp, to: string): string {
   const next = typeof from === 'string' ? body.replace(from, () => to) : body.replace(from, to)
   expect(next, `the seed ${String(from).slice(0, 60)} must change the text`).not.toBe(body)
   return next
+}
+
+/** `seed`, once the text holds exactly one `from`: `seed` changes the first copy only, so a probe on a repeated text may change another place than the one it means to. A probe on a shipped reference uses this one. */
+export function seedOnce(body: string, from: string, to: string): string {
+  expect(countOf(body, from), `"${from.slice(0, 60)}" must occur once`).toBe(1)
+  return seed(body, from, to)
 }
 
 /** The table rows after the separator, and the Rules bullets after the Rules intro: what `withRows` replaces. */

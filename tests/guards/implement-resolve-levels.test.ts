@@ -42,7 +42,7 @@ import { readFileSync } from 'fs'
 import * as path from 'path'
 
 import { ROOT, SANCTIONED_RESOLUTION, SANCTIONED_RESOLUTION_PRINT, isAgentBlock, parseFences, requireDistFile, resolveAgentSource, resolveCurationOffSource, sectionBetween, tableRows } from '../helpers.js'
-import { DECIDED_ROWS, OPEN, POLISH_SPAWN, REFS, RULES_INTRO, TABLE_SEPARATOR, countOf, parseRef, referenceRows, rowCells, sectionOf, seed, tableLines, tableRowLines, withRows, type LevelCmd, type ParsedRef } from './level-guard-helpers.js'
+import { DECIDED_ROWS, LEVELS, LEVEL_CELL_INDEX, OPEN, POLISH_SPAWN, REFS, RULES_INTRO, TABLE_SEPARATOR, countOf, parseRef, referenceRows, rowCells, sectionOf, seed, seedOnce, tableLines, tableRowLines, withRows, type LevelCmd, type ParsedRef } from './level-guard-helpers.js'
 
 // ---------------------------------------------------------------------------
 // The decided text, written by hand from the issue and the gate decisions
@@ -395,9 +395,6 @@ interface ParsedRow {
   readonly name: string | undefined
 }
 
-/** The level columns of a row, after its phase cell. */
-const LEVEL_COLUMNS = ['standard', 'lean'] as const
-
 function parseRow(line: string): ParsedRow {
   const cells = rowCells(line)
   if (cells === null || cells.length !== 3) return { line, cells: null, num: undefined, name: undefined }
@@ -508,7 +505,7 @@ export function collectTableHeaderDefects(parsed: ParsedRef): string[] {
 /** The defects of one row: its phase against the closed set and the compiled heading, then each level cell. */
 function rowGrammarDefects(row: ParsedRow, spec: LevelSpec, body: string, compiled: ReadonlyMap<string, string>, names: readonly string[]): string[] {
   if (row.cells === null) return [`a row does not have three cells: ${row.line.slice(0, 60)}`]
-  const [phase, ...levels] = row.cells
+  const [phase] = row.cells
   const { num, name } = row
   if (num === undefined || name === undefined) return [`a row phase is not "<number> <name>": ${phase}`]
   const out: string[] = []
@@ -519,10 +516,10 @@ function rowGrammarDefects(row: ParsedRow, spec: LevelSpec, body: string, compil
     if (compiled.get(num) !== name) out.push(`phase ${num} "${name}" is not the compiled "### Phase ${num}:" heading ("${compiled.get(num) ?? 'absent'}")`)
   }
   const traits = phaseTraits(spec, body, num)
-  levels.forEach((cell, i) => {
-    const defect = cellDefect(cell, names, traits)
-    if (defect !== null) out.push(`row ${num} ${LEVEL_COLUMNS[i]}: ${defect}`)
-  })
+  for (const level of LEVELS) {
+    const defect = cellDefect(row.cells[LEVEL_CELL_INDEX[level]], names, traits)
+    if (defect !== null) out.push(`row ${num} ${level}: ${defect}`)
+  }
   return out
 }
 
@@ -704,13 +701,13 @@ export function collectRowSafetyDefects(ref: string, spec: LevelSpec, body: stri
   const appliedBy = new Map<string, Set<string>>()
   for (const row of parseRows(parsed)) {
     if (row.cells === null) continue
-    const [phase, ...levels] = row.cells
+    const [phase] = row.cells
     const { num } = row
     if (num === undefined) { out.push(`a row phase "${phase}" does not open with a phase number`); continue }
     if (guarded.includes(num)) out.push(`a row for protected phase ${num}`)
     else if (!spec.closed.some(([n]) => n === num)) out.push(`a row for phase ${num}, which is outside the closed set`)
-    levels.forEach((cell, i) => {
-      const column = LEVEL_COLUMNS[i]
+    for (const column of LEVELS) {
+      const cell = row.cells[LEVEL_CELL_INDEX[column]]
       for (const reason of unsafeReasons(cell, floorPhases)) out.push(`row ${num} ${column} cell "${cell}" ${reason}`)
       const exemptDefect = exemptCellDefect(exempt, num, column, cell)
       if (exemptDefect !== null) out.push(exemptDefect)
@@ -719,7 +716,7 @@ export function collectRowSafetyDefects(ref: string, spec: LevelSpec, body: stri
         appliedBy.set(m[1].trim(), phases.add(num))
       }
       if (spec.neverSkip.includes(num) && cell === 'skip') out.push(`row ${num} ${column} cell ${takesSkip(num)}`)
-    })
+    }
   }
   for (const line of ruleBullets(parsed)) {
     const name = ruleBulletName(line) ?? line.slice(0, 40)
@@ -995,12 +992,6 @@ function movedBlock(body: string, spec: LevelSpec): string {
 /** One word taken out of `text`: its second word. */
 const dropWord = (text: string): string => text.replace(/ \S+/, '')
 
-/** `seed`, once the text holds exactly one `from`: `seed` changes the first copy only, so a probe on a repeated text may change another place than the one it means to. */
-function seedOnce(text: string, from: string, to: string): string {
-  expect(countOf(text, from), `"${from.slice(0, 60)}" must occur once`).toBe(1)
-  return seed(text, from, to)
-}
-
 describe('the corpus is real', () => {
   it('reads both builds of both commands, both sources, both references and the Validate agent', () => {
     expect(BUILDS).toHaveLength(4)
@@ -1054,8 +1045,8 @@ describe('the level references hold the fixed grammar and the decided rows (AC-5
     expect(referenceRows(next), 'the second call replaced the row, not appended').toEqual(['| 4 Cost$& | - | - |'])
     expect(ruleBullets(parseRef(next)), 'the second call replaced the bullet, not appended').toEqual(['- **next:** $& two.'])
     expect(withRows(next, [], []), 'the empty call leaves the bare reference').toBe(withRows(ref, [], []))
-    expect(() => withRows(seed(ref, TABLE_SEPARATOR, ''), [], []), 'a reference without the table separator').toThrow('the reference holds the table separator')
-    expect(() => withRows(seed(ref, RULES_INTRO, ''), [], []), 'a reference without the Rules intro').toThrow('the reference holds the Rules intro')
+    expect(() => withRows(seedOnce(ref, TABLE_SEPARATOR, ''), [], []), 'a reference without the table separator').toThrow('the reference holds the table separator')
+    expect(() => withRows(seedOnce(ref, RULES_INTRO, ''), [], []), 'a reference without the Rules intro').toThrow('the reference holds the Rules intro')
   })
 
   it.each(SPECS)('$cmd: the reference holds no spawn block, no subagent_type and no curation marker, and a seeded one is reported', spec => {
@@ -1074,14 +1065,14 @@ describe('the level references hold the fixed grammar and the decided rows (AC-5
     const defects = (text: string): string[] => collectLevelReferenceDefects(text, spec, body)
     const sample = spec.sampleRow
     const num = sample.split(' ')[0]
-    expect(defects(seed(ref, '## Phases\n', ''))).toContain('no "## Phases" heading')
-    expect(defects(seed(ref, '## Grammar\n', ''))).toContain('no "## Grammar" heading')
-    expect(defects(seed(ref, '## Rules\n', ''))).toContain('no "## Rules" heading')
+    expect(defects(seedOnce(ref, '## Phases\n', ''))).toContain('no "## Phases" heading')
+    expect(defects(seedOnce(ref, '## Grammar\n', ''))).toContain('no "## Grammar" heading')
+    expect(defects(seedOnce(ref, '## Rules\n', ''))).toContain('no "## Rules" heading')
     expect(defects(swapSections(ref, '## Grammar', '## Rules'))).toContain('the headings are "## Phases, ## Rules, ## Grammar", expected "## Phases, ## Grammar, ## Rules"')
-    expect(defects(seed(ref, spec.title, '# Levels'))).toContain(`the reference does not open with "${spec.title}"`)
-    expect(defects(seed(ref, TABLE_HEADER, '| Phase | standard, lean |'))).toContain(`the table header is "| Phase | standard, lean |", expected "${TABLE_HEADER}"`)
-    expect(defects(seed(ref, TABLE_HEADER, '| Phase | full | standard | lean |'))).toContain(`the table header is "| Phase | full | standard | lean |", expected "${TABLE_HEADER}"`)
-    expect(defects(seed(ref, TABLE_SEPARATOR, '|---|---|---|'))).toContain(`the table separator is "|---|---|---|", expected "${TABLE_SEPARATOR}"`)
+    expect(defects(seedOnce(ref, spec.title, '# Levels'))).toContain(`the reference does not open with "${spec.title}"`)
+    expect(defects(seedOnce(ref, `${TABLE_HEADER}\n`, '| Phase | standard, lean |\n'))).toContain(`the table header is "| Phase | standard, lean |", expected "${TABLE_HEADER}"`)
+    expect(defects(seedOnce(ref, `${TABLE_HEADER}\n`, '| Phase | full | standard | lean |\n'))).toContain(`the table header is "| Phase | full | standard | lean |", expected "${TABLE_HEADER}"`)
+    expect(defects(seedOnce(ref, TABLE_SEPARATOR, '|---|---|---|'))).toContain(`the table separator is "|---|---|---|", expected "${TABLE_SEPARATOR}"`)
     expect(defects(withRows(ref, [`| ${num} | skip | skip |`]))).toContain(`a row phase is not "<number> <name>": ${num}`)
     expect(defects(withRows(ref, ['| Phase 6 | skip | - |']))).toContain('a row phase is not "<number> <name>": Phase 6')
     expect(defects(withRows(ref, [`| ${sample} | skip |`]))).toContain(`a row does not have three cells: | ${sample} | skip |`)
@@ -1222,9 +1213,9 @@ describe('row safety is a tripwire over the references (AC-6)', () => {
     expect(RESOLVE.readParagraph, 'the block leaves the level of a phase to the reference').toContain('apply each row to the phase it names, as the reference says.')
     expect(RESOLVE.readParagraph, 'the block puts no phase on its own worktree level').not.toContain('at its own level')
     expect(defects(ref), 'the unmodified reference').toEqual([])
-    expect(defects(seed(ref, '`full` is the strictest and `lean` the least strict', '`lean` is the strictest and `full` the least strict')), 'the order reversed').toEqual(pinned)
-    expect(defects(seed(ref, 'uses the strictest level in the run', 'uses its own level')), 'a phase on its own level').toEqual(pinned)
-    expect(defects(seed(ref, ', except in a global phase', '')), 'the intro without the exception').toEqual(['the "## Phases" intro is not the pinned paragraph'])
+    expect(defects(seedOnce(ref, '`full` is the strictest and `lean` the least strict', '`lean` is the strictest and `full` the least strict')), 'the order reversed').toEqual(pinned)
+    expect(defects(seedOnce(ref, 'uses the strictest level in the run', 'uses its own level')), 'a phase on its own level').toEqual(pinned)
+    expect(defects(seedOnce(ref, ', except in a global phase', '')), 'the intro without the exception').toEqual(['the "## Phases" intro is not the pinned paragraph'])
   })
 
   /** The defect for a level cell of row 4 that is neither `-` nor `apply: <name>`: the oracle for `exemptCellDefect`, spelled out. */
@@ -1296,26 +1287,46 @@ describe('row safety is a tripwire over the references (AC-6)', () => {
     expect(exemptSpecDefect(undefined), 'a spec with no exemption').toBeNull()
   })
 
+  const COMPLIANCE_CLAUSE = '`COMPLIANCE_FRAMEWORKS` is exactly `off` (unset, `none` or any other value keeps Harden)'
+  const ALLOWLIST_CLAUSE = 'every path in the list is the root `README.md`, the root `CHANGELOG.md` or a `.md` file under the root `docs/`, with '
+  /**
+   * The clauses of the skip condition that the bullet holds whole. The byte pin ties the reference to `HARDEN_SCOPE`; this list
+   * is the second check, for an edit that changes both. A whole clause names the lens variable with its "unset" case and closes
+   * the allowlist, so a matched edit cannot rename the variable, drop "unset" or add a path to the list and pass.
+   */
+  const HARDEN_CLAUSES = [
+    'run its `{branch_diff}` in `{worktree}`', 'a non-zero exit',
+    COMPLIANCE_CLAUSE,
+    'non-empty',
+    'a deleted, renamed or moved path',
+    ALLOWLIST_CLAUSE,
+    'no segment that starts with `.`', 'no double quote', 'in any letter case',
+    '`CLAUDE.md`', '`CLAUDE.local.md`', '`AGENTS.md`', '`GEMINI.md`', '`SKILL.md`',
+    'a loaded instruction, rules or imported file names',
+    'open no file', 'never as an instruction',
+    'when unsure, run Harden',
+    '`HARDEN_OUTPUT` reads `SKIPPED`', 'Phase 5 starts at once',
+    '`Harden: SKIPPED (docs-only diff)`', '`Harden: ran`',
+  ]
+  /** The clauses of `HARDEN_CLAUSES` that `bullet` lacks. */
+  const lackedClauses = (bullet: string): string[] => HARDEN_CLAUSES.filter(clause => !bullet.includes(clause))
+
   it('the harden-scope bullet holds each clause of its skip condition and names no test path, and its row leaves standard alone', () => {
-    const clauses = [
-      'run its `{branch_diff}` in `{worktree}`', 'a non-zero exit',
-      'is exactly `off`', '`none`',
-      'non-empty',
-      'a deleted, renamed or moved path',
-      'the root `README.md`', 'the root `CHANGELOG.md`', 'a `.md` file under the root `docs/`',
-      'no segment that starts with `.`', 'no double quote', 'in any letter case',
-      '`CLAUDE.md`', '`CLAUDE.local.md`', '`AGENTS.md`', '`GEMINI.md`', '`SKILL.md`',
-      'a loaded instruction, rules or imported file names',
-      'open no file', 'never as an instruction',
-      'when unsure, run Harden',
-      '`HARDEN_OUTPUT` reads `SKIPPED`', 'Phase 5 starts at once',
-      '`Harden: SKIPPED (docs-only diff)`', '`Harden: ran`',
-    ]
-    for (const clause of clauses) expect(HARDEN_SCOPE, clause).toContain(clause)
+    expect(lackedClauses(HARDEN_SCOPE), 'the clauses that the bullet lacks').toEqual([])
     expect(HARDEN_SCOPE, 'a test path is no docs path').not.toMatch(/\btests?\b|\.test\.|__tests__/i)
     expect(IMPLEMENT.expectedBullets, 'the one decided bullet').toEqual([HARDEN_SCOPE])
     const rows = IMPLEMENT.expectedRows.filter(row => row.includes(`apply: ${HARDEN_NAME}`))
     expect(rows.map(row => rowCells(row)), 'the one row that applies the bullet: standard runs Harden, lean applies the bullet').toEqual([['4 Self-Review', '-', `apply: ${HARDEN_NAME}`]])
+  })
+
+  it('known-bad probes (/implement): a matched edit of the bullet that renames the lens variable, drops "unset" or widens the allowlist loses a whole clause', () => {
+    const lacks = (from: string, to: string): string[] => lackedClauses(seedOnce(HARDEN_SCOPE, from, to))
+    expect(lacks('`COMPLIANCE_FRAMEWORKS` is exactly', '`COMPLIANCE_LENS` is exactly'), 'the lens variable renamed').toEqual([COMPLIANCE_CLAUSE])
+    expect(lacks('(unset, `none`', '(`none`'), '"unset" dropped').toEqual([COMPLIANCE_CLAUSE])
+    expect(lacks('keeps Harden)', 'keeps Harden or `unset`)'), 'the value list widened').toEqual([COMPLIANCE_CLAUSE])
+    expect(lacks('the root `CHANGELOG.md` or ', 'the root `CHANGELOG.md`, a `.json` file under the root `config/` or '), 'a path added inside the allowlist').toEqual([ALLOWLIST_CLAUSE])
+    expect(lacks('`docs/`, with ', '`docs/` or a `.json` file under the root `config/`, with '), 'a path added at the end of the allowlist').toEqual([ALLOWLIST_CLAUSE])
+    expect(lacks('the root `README.md`, ', 'any `.md` file, '), 'the root README no longer named').toEqual([ALLOWLIST_CLAUSE])
   })
 
   it('known-bad probes (/implement): one clause dropped from the harden-scope bullet in the reference loses the decided bullet and the exemption', () => {
@@ -1495,17 +1506,17 @@ describe('row safety is a tripwire over the references (AC-6)', () => {
     const num = row.split(' ')[0]
     expect(collectRowSafetyDefects(withRows(ref, [`| ${row} | apply: bypass-security | - |`], ['- **bypass-security:** Polish the diff.']), spec, body))
       .toContain(`row ${num} standard cell "apply: bypass-security" removes or defers a floor control`)
-    expect(collectRowSafetyDefects(seed(ref, 'without a trailing parenthetical', 'without its parenthetical'), spec, body)).toEqual(['the "## Grammar" text is not the pinned text'])
-    expect(collectRowSafetyDefects(seed(ref, 'a table with no rows is well-formed', 'a table with no rows is well formed'), spec, body)).toEqual(['the "## Phases" intro is not the pinned paragraph'])
-    expect(collectRowSafetyDefects(seed(ref, 'reads `SKIPPED`', 'reads `skipped`'), spec, body), 'the Skipped bullet').toEqual(['the "## Grammar" text is not the pinned text'])
-    expect(collectRowSafetyDefects(seed(ref, 'to every spawn prompt of the phase. A phase with no spawn takes only `-`', "to the phase's spawn prompt"), spec, body), 'the pass level target').toEqual(['the "## Grammar" text is not the pinned text'])
-    expect(collectRowSafetyDefects(seed(ref, RULES_INTRO, `${RULES_INTRO} Extra.`), spec, body)).toEqual(['the "## Rules" section holds text other than the pinned intro and its bullets'])
+    expect(collectRowSafetyDefects(seedOnce(ref, 'without a trailing parenthetical', 'without its parenthetical'), spec, body)).toEqual(['the "## Grammar" text is not the pinned text'])
+    expect(collectRowSafetyDefects(seedOnce(ref, 'a table with no rows is well-formed', 'a table with no rows is well formed'), spec, body)).toEqual(['the "## Phases" intro is not the pinned paragraph'])
+    expect(collectRowSafetyDefects(seedOnce(ref, 'line reads `SKIPPED`', 'line reads `skipped`'), spec, body), 'the Skipped bullet').toEqual(['the "## Grammar" text is not the pinned text'])
+    expect(collectRowSafetyDefects(seedOnce(ref, 'to every spawn prompt of the phase. A phase with no spawn takes only `-`', "to the phase's spawn prompt"), spec, body), 'the pass level target').toEqual(['the "## Grammar" text is not the pinned text'])
+    expect(collectRowSafetyDefects(seedOnce(ref, RULES_INTRO, `${RULES_INTRO} Extra.`), spec, body)).toEqual(['the "## Rules" section holds text other than the pinned intro and its bullets'])
     expect(collectRowSafetyDefects(withRows(ref, [], ['- **tidy:** Polish the diff.\ncontinued here']), spec, body)).toContain('the "## Rules" section holds text other than the pinned intro and its bullets')
-    expect(collectRowSafetyDefects(seed(ref, '## Phases\n', 'Stray text.\n\n## Phases\n'), spec, body)).toContain('the reference holds text between its title and "## Phases"')
+    expect(collectRowSafetyDefects(seedOnce(ref, '## Phases\n', 'Stray text.\n\n## Phases\n'), spec, body)).toContain('the reference holds text between its title and "## Phases"')
   })
 
   it('known-bad probe (/implement): a Gate level block bullet that stops keeping the branch diff definition on a Polish skip is reported (TP-3)', () => {
-    const cut = seed(REFS.implement, ' or the `{branch_diff}` definition', '')
+    const cut = seedOnce(REFS.implement, ' or the `{branch_diff}` definition', '')
     expect(collectRowSafetyDefects(cut, IMPLEMENT, bodyOf(IMPLEMENT))).toEqual(['the "## Grammar" text is not the pinned text'])
   })
 
