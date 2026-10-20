@@ -381,7 +381,7 @@ describe('json-helper.js operations', () => {
       // Only the move op loads the move module, which then builds on the store.
       const home = path.join(probeDir, 'home');
       fs.mkdirSync(home);
-      expect(curationModulesLoadedBy(['move-ledger', probeDir, LEGACY_NAMES.folder, CURATION_DIR_NAME], '', { ...process.env, HOME: home })).toEqual([
+      expect(curationModulesLoadedBy(['move-ledger', probeDir], '', { ...process.env, HOME: home })).toEqual([
         'curation-move.cjs', 'curation-store.cjs', 'mkdir-lock.cjs', 'project-paths.cjs',
       ]);
     } finally {
@@ -5960,7 +5960,7 @@ describe('curation-move: the shim that moves the old ledger folder (#529)', { ti
       expect(logLines()).toHaveLength(1);
     });
 
-    it('passes the root and the two folder names to node as arguments, and the scripts under set -e go on', () => {
+    it('passes only the root to node as an argument, and the scripts under set -e go on', () => {
       seedOld(root);
       const nodeLog = path.join(base, 'node.log');
       const shimDir = path.join(base, 'shim');
@@ -5970,7 +5970,7 @@ describe('curation-move: the shim that moves the old ledger folder (#529)', { ti
       const res = run('set -e; df_curation_move "$ROOT"; echo after', { PATH: `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}` });
 
       expect(res.stdout).toBe('after\n');
-      expect(fs.readFileSync(nodeLog, 'utf-8')).toBe(`${path.join(HOOKS_DIR, 'json-helper.cjs')}|move-ledger|${root}|${OLD}|${NEW}|`);
+      expect(fs.readFileSync(nodeLog, 'utf-8')).toBe(`${path.join(HOOKS_DIR, 'json-helper.cjs')}|move-ledger|${root}|`);
     });
 
     it('TP-15: a new folder with a non-empty log wins, and the one log line names the backup folder', () => {

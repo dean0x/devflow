@@ -68,8 +68,6 @@ function options(overrides: Partial<ProjectLedgerMoveOptions> = {}): ProjectLedg
     ownLedgerRoot: null,
     homeDir: HOME,
     machineDir: MACHINE,
-    oldName: OLD,
-    newName: NEW,
     ...overrides,
   };
 }
@@ -229,11 +227,11 @@ describe('moveProjectLedgers: the targets', () => {
 });
 
 describe('moveProjectLedgers: what each project asks of the store', () => {
-  it('passes the two names, the machine directory, the home directory and the clock to the move', async () => {
+  it('passes the machine directory, the home directory and the clock to the move, and no folder name', async () => {
     const { io, rec } = fakeIO();
     await moveProjectLedgers(options({ projectRoots: ['/w/a'] }), io);
     expect(rec.moveArgs).toEqual([
-      { root: '/w/a', opts: { oldName: OLD, newName: NEW, machineDir: MACHINE, homeDir: HOME, now: NOW } },
+      { root: '/w/a', opts: { machineDir: MACHINE, homeDir: HOME, now: NOW } },
     ]);
   });
 
@@ -246,7 +244,7 @@ describe('moveProjectLedgers: what each project asks of the store', () => {
     });
     await moveProjectLedgers(options({ projectRoots: ['/w/with-backup', '/w/no-backup'] }), io);
     expect(rec.order).toEqual(['move:/w/with-backup', 'move:/w/no-backup', 'sweep:/w/with-backup']);
-    expect(rec.sweepArgs[0].opts).toEqual({ oldName: OLD, newName: NEW, machineDir: MACHINE, homeDir: HOME, now: NOW });
+    expect(rec.sweepArgs[0].opts).toEqual({ machineDir: MACHINE, homeDir: HOME, now: NOW });
   });
 
   it('sweeps a backup an earlier run left, even when this run has nothing to move', async () => {
@@ -446,22 +444,6 @@ describe('moveProjectLedgers: the bound and the arguments', () => {
     expect(report.outcomes).toHaveLength(50);
   });
 
-  it.each([
-    ['equal names', { oldName: 'curation', newName: 'curation' }],
-    ['an empty old name', { oldName: '', newName: 'curation' }],
-    ['an empty new name', { oldName: 'learning', newName: '' }],
-    ['a name with a path separator', { oldName: 'learning', newName: 'a/b' }],
-    ['a dot name', { oldName: '.', newName: 'curation' }],
-    ['a dot-dot name', { oldName: 'learning', newName: '..' }],
-  ])('refuses %s and calls nothing', async (_label, names) => {
-    const { io, rec } = fakeIO();
-    const result = await moveProjectLedgers(options({ projectRoots: ['/w/a'], ...names }), io);
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.kind).toBe('invalid-input');
-    expect(rec.order).toEqual([]);
-    expect(rec.physicalAsked).toEqual([]);
-  });
-
   it('refuses a relative home directory or machine directory', async () => {
     const { io, rec } = fakeIO();
     const relativeHome = await moveProjectLedgers(options({ homeDir: 'home/dean' }), io);
@@ -485,14 +467,14 @@ describe('moveProjectLedgers: the bound and the arguments', () => {
 // ---------------------------------------------------------------------------
 
 describe('moveLedgerRoot: the move one root gets from configure and the toggles', () => {
-  const names = { homeDir: HOME, machineDir: MACHINE, oldName: OLD, newName: NEW };
+  const names = { homeDir: HOME, machineDir: MACHINE };
 
   it('asks the store once for that root and reports the outcome', async () => {
     const { io, rec } = fakeIO({ moves: { '/w/a': ok(MOVED) } });
     const outcome = await moveLedgerRoot('/w/a', names, io);
     expect(outcome).toMatchObject({ kind: 'moved', root: '/w/a', mode: 'whole-folder' });
     expect(rec.order).toEqual(['move:/w/a']);
-    expect(rec.moveArgs[0].opts).toEqual({ oldName: OLD, newName: NEW, machineDir: MACHINE, homeDir: HOME, now: NOW });
+    expect(rec.moveArgs[0].opts).toEqual({ machineDir: MACHINE, homeDir: HOME, now: NOW });
   });
 
   it('reports a busy lock as busy, with no wait and no sweep', async () => {
@@ -514,9 +496,10 @@ describe('moveLedgerRoot: the move one root gets from configure and the toggles'
     expect(await moveLedgerRoot('/w/a', names, io)).toEqual({ kind: 'error', root: '/w/a', message: 'boom' });
   });
 
-  it('refuses bad names and calls nothing', async () => {
+  it('refuses a relative home directory or machine directory and calls nothing', async () => {
     const { io, rec } = fakeIO();
-    expect(await moveLedgerRoot('/w/a', { ...names, newName: OLD }, io)).toMatchObject({ kind: 'error', root: '/w/a' });
+    expect(await moveLedgerRoot('/w/a', { ...names, homeDir: 'home/dean' }, io)).toMatchObject({ kind: 'error', root: '/w/a' });
+    expect(await moveLedgerRoot('/w/a', { ...names, machineDir: '.devflow' }, io)).toMatchObject({ kind: 'error', root: '/w/a' });
     expect(rec.order).toEqual([]);
   });
 
@@ -687,7 +670,7 @@ describe('runInitCurationMove: the lines and the notice init prints', () => {
 
   it('turns bad options into one line and does not throw', async () => {
     const { io, rec } = fakeIO();
-    const report = await runInitCurationMove(options({ newName: OLD }), { ledger: io, tuning: quietTuning });
+    const report = await runInitCurationMove(options({ homeDir: 'home/dean' }), { ledger: io, tuning: quietTuning });
     expect(report.lines).toHaveLength(1);
     expect(report.notice).toBeNull();
     expect(rec.order).toEqual([]);
@@ -747,7 +730,7 @@ describe('moveProjectLedgers with the real store: init and a session start meet 
     };
     const started = Date.now();
     const result = await moveProjectLedgers(
-      { projectRoots: [spelling], ownLedgerRoot: null, homeDir: home, machineDir: machine, oldName: OLD, newName: NEW },
+      { projectRoots: [spelling], ownLedgerRoot: null, homeDir: home, machineDir: machine },
       io,
     );
     expect(Date.now() - started).toBeLessThan(2000);
@@ -759,14 +742,14 @@ describe('moveProjectLedgers with the real store: init and a session start meet 
     // With the lock released, the same init moves it, and a second pass is a no-op.
     await fs.rmdir(lockDir);
     const moved = await moveProjectLedgers(
-      { projectRoots: [spelling, repo], ownLedgerRoot: null, homeDir: home, machineDir: machine, oldName: OLD, newName: NEW },
+      { projectRoots: [spelling, repo], ownLedgerRoot: null, homeDir: home, machineDir: machine },
       io,
     );
     expect(reportOf(moved).outcomes.map(o => o.kind)).toEqual(['moved']);
     expect(await fs.readFile(path.join(repo, '.devflow', 'curation', 'decisions-ledger.jsonl'), 'utf-8')).toBe('{"anchor_id":"ADR-001"}\n');
     await expect(fs.stat(path.join(repo, '.devflow', 'learning'))).rejects.toMatchObject({ code: 'ENOENT' });
     const again = await moveProjectLedgers(
-      { projectRoots: [spelling, repo], ownLedgerRoot: null, homeDir: home, machineDir: machine, oldName: OLD, newName: NEW },
+      { projectRoots: [spelling, repo], ownLedgerRoot: null, homeDir: home, machineDir: machine },
       io,
     );
     expect(reportOf(again).outcomes.map(o => o.kind)).toEqual(['unchanged']);

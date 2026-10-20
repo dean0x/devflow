@@ -24,8 +24,8 @@
 #      A second argument `retry` (session start) removes the marker first, so a
 #      refusal is looked at again once per session; that removal forks only when a
 #      marker exists.
-#   4. Fork node once, with the root and the two folder names as argv words (no path
-#      is ever part of the script text). The op answers on its first line:
+#   4. Fork node once, with the root as one argv word (no path is ever part of the
+#      script text); the op knows the two folder names itself. The op answers on its first line:
 #        moved <mode>   one log line (the mode, then the backup folder and the notes
 #                       the op reports, when any);
 #        busy           nothing: no log line and no marker, the next event retries;
@@ -149,7 +149,7 @@ df_curation_move() {
 
   # 4. The one fork. 2>&1 so a refusal's message reaches the log line.
   _helper="${BASH_SOURCE[0]%/*}/json-helper.cjs"
-  _out=$(node "$_helper" move-ledger "$_root" "$DF_CM_OLD_FOLDER" "$DF_CM_NEW_FOLDER" 2>&1) || _rc=$?
+  _out=$(node "$_helper" move-ledger "$_root" 2>&1) || _rc=$?
   df_curation_move_plain "${_out%%$'\n'*}"
   _first="$DF_CURATION_MOVE_PLAIN"
 

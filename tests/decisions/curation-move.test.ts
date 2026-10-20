@@ -3,9 +3,10 @@
 // The one-time ledger move: moveLedger renames a project's old ledger folder to
 // the new name, or merges it into a new folder that already exists, and
 // sweepLedgerBackups merges what is left in the backup the move leaves behind.
-// Both live in the move module (hooks/lib/curation-move.cjs) and take the
-// folder names as arguments, so nothing here depends on the path helpers' current
-// folder. Every test builds its own project and its own machine directory in a
+// Both live in the move module (hooks/lib/curation-move.cjs). They take no folder
+// names: the old and new folders are the two names the path helpers hold, and the
+// journal, the backup prefix, the tuning file and the locks stand on the same pair.
+// Every test builds its own project and its own machine directory in a
 // temp tree: nothing reads or writes the real HOME or a real project.
 //
 // A "crash" is simulated by making one fs call fail, the way an I/O error would
@@ -30,8 +31,6 @@ import {
 type Res<T> = { ok: true; value: T } | { ok: false; error: { kind: string; message: string } };
 
 interface MoveOpts {
-  oldName?: string;
-  newName?: string;
   machineDir?: string;
   homeDir?: string;
   now?: number;
@@ -123,9 +122,9 @@ afterEach(() => {
   fs.rmSync(site.tmp, { recursive: true, force: true });
 });
 
-/** The options a move takes: the site's names and directories, plus overrides. */
+/** The options a move takes: the site's directories, plus overrides. */
 function opts(extra: MoveOpts = {}): MoveOpts {
-  return { oldName: OLD, newName: NEW, machineDir: site.machineDir, homeDir: site.home, ...extra };
+  return { machineDir: site.machineDir, homeDir: site.home, ...extra };
 }
 
 function move(extra: MoveOpts = {}): Res<MoveValue> {
@@ -280,15 +279,79 @@ describe('moveLedger — entry and probe', () => {
     expect(snapshotTree(site.root)).toEqual(before);
   });
 
-  it('refuses a folder name that is not one plain name, so no argument can leave .devflow', () => {
+  it('takes both folder names from the path helpers: names in the options redirect nothing', () => {
     seedOld(ledgerSet('one'));
-    for (const newName of ['', '..', '.', 'a/b', '../x', '-rf', 'a\0b']) {
-      const result = move({ newName });
-      expect(result.ok).toBe(false);
-      expect(!result.ok && result.error.kind).toBe('invalid-input');
+    const result = mover.moveLedger(site.root, { ...opts(), oldName: NEW, newName: '../x' } as MoveOpts);
+    expect(result).toMatchObject({ ok: true, value: { state: 'moved', mode: 'whole-folder' } });
+    expect(exists(site.oldDir)).toBe(false);
+    expect(exists(site.newDir)).toBe(true);
+    expect(exists(path.join(site.root, 'x'))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The setup both ops share (no machine directory, a refused root)
+// ---------------------------------------------------------------------------
+
+describe('both ops: the shared setup answers the same errors, each prefixed with its own op name', () => {
+  /** A machine where no home directory is known: no HOME, and no passwd entry. */
+  function withoutHome(): void {
+    vi.stubEnv('HOME', '');
+    vi.spyOn(nodeRequire('os') as typeof os, 'homedir').mockReturnValue('');
+  }
+
+  it.each([
+    ['moveLedger', 'move-ledger', () => mover.moveLedger(site.root, {})],
+    ['sweepLedgerBackups', 'sweep-backups', () => mover.sweepLedgerBackups(site.root, {})],
+  ])('%s with no home directory answers an io-error and creates nothing', (_name, opName, run) => {
+    seedOld(ledgerSet('one'));
+    const before = snapshotTree(site.root);
+    withoutHome();
+    expect(run()).toEqual({
+      ok: false,
+      error: { kind: 'io-error', message: `${opName}: no home directory is set, so the machine directory is unknown` },
+    });
+    expect(snapshotTree(site.root)).toEqual(before);
+  });
+
+  it.each([
+    ['moveLedger', 'move-ledger', (root: string) => mover.moveLedger(root, opts())],
+    ['sweepLedgerBackups', 'sweep-backups', (root: string) => mover.sweepLedgerBackups(root, opts())],
+  ])('%s refuses a relative root, a root that is a link and a missing root, in a message that starts with its op name', (_name, opName, run) => {
+    seedOld(ledgerSet('one'));
+    const alias = path.join(site.tmp, 'alias');
+    fs.symlinkSync(site.root, alias);
+    for (const root of ['relative/project', alias, path.join(site.tmp, 'missing')]) {
+      const result = run(root);
+      expect(result.ok, root).toBe(false);
+      expect(!result.ok && result.error.kind, root).toBe('refused');
+      expect(!result.ok && result.error.message, root).toMatch(new RegExp(`^${opName}: .*; nothing was changed$`));
     }
-    expect(move({ oldName: NEW, newName: NEW }).ok).toBe(false);
-    expect(exists(site.newDir)).toBe(false);
+  });
+
+  it.each([
+    ['moveLedger', 'move-ledger', () => mover.moveLedger(site.root, opts())],
+    ['sweepLedgerBackups', 'sweep-backups', () => mover.sweepLedgerBackups(site.root, opts())],
+  ])('%s turns a failing file system call into an io-error that starts with its op name', (_name, opName, run) => {
+    seedOld(ledgerSet('one'));
+    seed(site.newDir, {});
+    seed(path.join(site.devflow, 'learning.backup-20261017T020304Z-0a1b2c3d'), { [QUEUE]: turns(1, 2) });
+    vi.spyOn(nodeFs, 'readdirSync').mockImplementation(() => {
+      throw Object.assign(new Error('boom'), { code: 'EIO' });
+    });
+    expect(run()).toEqual({ ok: false, error: { kind: 'io-error', message: `${opName}: EIO: boom` } });
+  });
+
+  it('backupPendingRows refuses a relative root and maps a failing read the same way, under its own op name', () => {
+    expect(mover.backupPendingRows('relative/project')).toEqual({
+      ok: false,
+      error: { kind: 'refused', message: 'backup-rows: the ledger root must be an absolute path' },
+    });
+    seed(site.devflow, {});
+    vi.spyOn(nodeFs, 'readdirSync').mockImplementation(() => {
+      throw Object.assign(new Error('boom'), { code: 'EIO' });
+    });
+    expect(mover.backupPendingRows(site.root)).toEqual({ ok: false, error: { kind: 'io-error', message: 'backup-rows: EIO: boom' } });
   });
 });
 
@@ -1591,9 +1654,9 @@ function runMoveLedger(args: readonly string[], cwd: string = site.tmp): { code:
 }
 
 describe('json-helper move-ledger (TP-36, argument half)', () => {
-  it('moves the folder named by its arguments and prints the state', () => {
+  it('moves the root\'s old folder and prints the state', () => {
     seedOld(ledgerSet('one'));
-    const run = runMoveLedger([site.root, OLD, NEW]);
+    const run = runMoveLedger([site.root]);
     expect(run).toEqual({ code: 0, stdout: 'moved whole-folder\nnote moved learning to curation\n', stderr: '' });
     expect(exists(site.oldDir)).toBe(false);
     expect(names(site.newDir)).toEqual([...Object.keys(ledgerSet('one')), 'decisions.md', 'index.md', 'pitfalls.md'].sort());
@@ -1601,7 +1664,7 @@ describe('json-helper move-ledger (TP-36, argument half)', () => {
 
   it('prints none when there is no old folder, and creates nothing', () => {
     fs.mkdirSync(site.devflow);
-    expect(runMoveLedger([site.root, OLD, NEW])).toEqual({ code: 0, stdout: 'none\n', stderr: '' });
+    expect(runMoveLedger([site.root])).toEqual({ code: 0, stdout: 'none\n', stderr: '' });
     expect(exists(site.machineDir)).toBe(false);
   });
 
@@ -1609,14 +1672,14 @@ describe('json-helper move-ledger (TP-36, argument half)', () => {
     seedOld(ledgerSet('one'));
     fs.mkdirSync(site.machineDir);
     holdLock(moveLockDir());
-    expect(runMoveLedger([site.root, OLD, NEW])).toEqual({ code: 0, stdout: 'busy\n', stderr: '' });
+    expect(runMoveLedger([site.root])).toEqual({ code: 0, stdout: 'busy\n', stderr: '' });
     expect(exists(site.oldDir)).toBe(true);
   });
 
   it('prints the backup name and a note for each note when a merge made a backup', () => {
     seedOld(ledgerSet('old'));
     seedNew(ledgerSet('new'));
-    const run = runMoveLedger([site.root, OLD, NEW]);
+    const run = runMoveLedger([site.root]);
     expect(run.code).toBe(0);
     expect(run.stderr).toBe('');
     const lines = run.stdout.split('\n').filter(Boolean);
@@ -1629,7 +1692,7 @@ describe('json-helper move-ledger (TP-36, argument half)', () => {
   it('does not send the claim heartbeat: a stale claim in the working directory stays stale', () => {
     seedOld({ ...ledgerSet('one'), [CLAIM]: turns(1, 3), [OWNER]: 'owner' });
     age(path.join(site.oldDir, CLAIM), 20 * 60 * 1000);
-    const run = runMoveLedger([site.root, OLD, NEW], site.root);
+    const run = runMoveLedger([site.root], site.root);
     expect(run.code).toBe(0);
     expect(run.stdout.split('\n')[0]).toBe('moved whole-folder');
   });
@@ -1638,7 +1701,7 @@ describe('json-helper move-ledger (TP-36, argument half)', () => {
     const hostile = path.join(site.tmp, 'p $(touch injected-sub) `touch injected-tick` "q" \'s\' ; touch injected-semi');
     fs.mkdirSync(path.join(hostile, '.devflow', OLD), { recursive: true });
     fs.writeFileSync(path.join(hostile, '.devflow', OLD, LOG), toJsonl([makeV2LogRow()]));
-    const run = runMoveLedger([hostile, OLD, NEW]);
+    const run = runMoveLedger([hostile]);
     expect(run.code).toBe(0);
     expect(run.stdout.split('\n')[0]).toBe('moved whole-folder');
     expect(exists(path.join(hostile, '.devflow', OLD))).toBe(false);
@@ -1649,28 +1712,25 @@ describe('json-helper move-ledger (TP-36, argument half)', () => {
     }
   });
 
-  it('refuses a wrong argument count with a usage line and changes nothing', () => {
+  it('refuses a wrong argument count, names included, with a usage line and changes nothing', () => {
     seedOld(ledgerSet('one'));
     const before = snapshotTree(site.root);
-    for (const args of [[], [site.root], [site.root, OLD], [site.root, OLD, NEW, 'extra']]) {
+    for (const args of [[], [site.root, OLD, NEW], [site.root, 'other', 'names'], [site.root, '../learning', NEW], [site.root, 'extra']]) {
       const run = runMoveLedger(args);
-      expect(run.code).toBe(1);
+      expect(run.code, args.join(' ')).toBe(1);
       expect(run.stdout).toBe('');
-      expect(run.stderr).toMatch(/^move-ledger: usage: move-ledger <root> <old-folder> <new-folder>/);
+      expect(run.stderr).toMatch(/^move-ledger: usage: move-ledger <root> \(the root is an absolute path\)/);
     }
     expect(snapshotTree(site.root)).toEqual(before);
   });
 
-  it('refuses a relative root and a folder name with a separator, exit 1, changing nothing', () => {
+  it('refuses a relative root, exit 1, changing nothing', () => {
     seedOld(ledgerSet('one'));
     const before = snapshotTree(site.root);
-    const relative = runMoveLedger(['project', OLD, NEW]);
+    const relative = runMoveLedger(['project']);
     expect(relative.code).toBe(1);
     expect(relative.stdout).toBe('');
     expect(relative.stderr).not.toBe('');
-    const separator = runMoveLedger([site.root, '../learning', NEW]);
-    expect(separator.code).toBe(1);
-    expect(separator.stderr).not.toBe('');
     expect(snapshotTree(site.root)).toEqual(before);
   });
 });
@@ -1744,7 +1804,7 @@ describe('json-helper move-ledger — a name read from the repository is one cle
   it('a refusal on stderr is one clean line', () => {
     seedOld(ledgerSet('one'));
     fs.symlinkSync(outsideFile(), path.join(site.oldDir, `${HOSTILE}.txt`));
-    const run = runMoveLedger([site.root, OLD, NEW]);
+    const run = runMoveLedger([site.root]);
     expect(run.code).toBe(1);
     expect(run.stdout).toBe('');
     expectOneCleanLine(run.stderr.replace(/\n$/, ''), 'stderr');
@@ -1754,7 +1814,7 @@ describe('json-helper move-ledger — a name read from the repository is one cle
     seedOld(ledgerSet('old'));
     seedNew({ [LOG]: '' });
     fs.writeFileSync(path.join(site.oldDir, `${HOSTILE}.txt`), 'mine\n');
-    const run = runMoveLedger([site.root, OLD, NEW]);
+    const run = runMoveLedger([site.root]);
     expect(run.code).toBe(0);
     const lines = run.stdout.replace(/\n$/, '').split('\n');
     for (const line of lines) {

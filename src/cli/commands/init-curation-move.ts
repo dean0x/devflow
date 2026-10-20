@@ -47,9 +47,6 @@ import type {
 /** At most this many projects are probed or moved at once (the migration runner's pool). */
 export const MOVE_POOL_LIMIT = 16;
 
-/** The folder-name rule the store applies: a plain name of at most 64 characters. */
-const FOLDER_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-
 /** The most code points of one name, message or line the step echoes. A path of 4096 bytes fits. */
 const MAX_MOVE_TEXT = 4096;
 
@@ -75,10 +72,6 @@ export interface ProjectLedgerMoveOptions {
   readonly homeDir: string;
   /** The machine directory (`~/.devflow`), which holds the move lock; never a target. Absolute. */
   readonly machineDir: string;
-  /** The old folder name under `.devflow`. */
-  readonly oldName: string;
-  /** The new folder name under `.devflow`. */
-  readonly newName: string;
 }
 
 /** The I/O the step uses. Every member is total: it answers a value and does not throw. */
@@ -154,7 +147,7 @@ export type ProjectLedgerMoveResult =
 
 /**
  * Move every target project's ledger folder to the new name. Answers an error only
- * for options that cannot be right (the same checks the store makes, made once, so a
+ * for options that cannot be right (the two directories must be absolute paths, so a
  * bad call changes nothing); every per-project failure is an outcome in the report.
  */
 export async function moveProjectLedgers(
@@ -184,9 +177,6 @@ export async function moveProjectLedgers(
 }
 
 function checkOptions(opts: SharedMoveOptions): string | null {
-  if (!FOLDER_NAME_RE.test(opts.oldName) || !FOLDER_NAME_RE.test(opts.newName) || opts.oldName === opts.newName) {
-    return 'the old and new folder names must be two different plain names';
-  }
   if (!path.isAbsolute(opts.homeDir) || !path.isAbsolute(opts.machineDir)) {
     return 'the home directory and the machine directory must be absolute paths';
   }
@@ -240,8 +230,8 @@ async function physicalOf(target: string, io: ProjectLedgerMoveIO): Promise<stri
   }
 }
 
-/** The options one root's move needs: the names and the two directories the store refuses. */
-export type SharedMoveOptions = Pick<ProjectLedgerMoveOptions, 'homeDir' | 'machineDir' | 'oldName' | 'newName'>;
+/** The options one root's move needs: the two directories the store refuses as a root. */
+export type SharedMoveOptions = Pick<ProjectLedgerMoveOptions, 'homeDir' | 'machineDir'>;
 
 /** The I/O one root's move needs. */
 export type SharedMoveIO = Pick<ProjectLedgerMoveIO, 'readdir' | 'store' | 'now'>;
@@ -260,8 +250,6 @@ export async function moveLedgerRoot(root: string, opts: SharedMoveOptions, io: 
 /** Move one project's ledger folder, then sweep its backups when one exists. */
 async function moveOne(root: string, opts: SharedMoveOptions, io: SharedMoveIO): Promise<ProjectMoveOutcome> {
   const storeOpts = (): LedgerMoveOptions => ({
-    oldName: opts.oldName,
-    newName: opts.newName,
     machineDir: opts.machineDir,
     homeDir: opts.homeDir,
     now: io.now(),

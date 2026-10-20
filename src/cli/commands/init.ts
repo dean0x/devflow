@@ -9,7 +9,6 @@ import { getGitRoot } from '../../core/git.js';
 import { isSameLocation, withoutHomeRoots } from '../../core/same-location.js';
 import { pruneHookLogDirs, MAX_HOOK_LOG_DIRS, type LogDirPruneReport } from '../../core/hook-log-dirs.js';
 import { getLedgerRoot } from '../../core/ledger-root.js';
-import { CURATION_DIR_NAME, LEGACY_NAMES } from '../../core/project-paths.js';
 import { formatCurationStoreUnavailable } from '../../core/curation-store.js';
 import { loadCurationMove } from '../../core/curation-move.js';
 import { describeMoveText, runInitCurationMove, type InitCurationMoveReport } from './init-curation-move.js';
@@ -679,8 +678,6 @@ export async function moveCurationData(opts: {
       ownLedgerRoot: opts.gitRoot === null ? null : await getLedgerRoot(),
       homeDir: opts.homeDir,
       machineDir: opts.devflowDir,
-      oldName: LEGACY_NAMES.folder,
-      newName: CURATION_DIR_NAME,
     },
     {
       ledger: loaded.ok ? realProjectLedgerMoveIO(loaded.value) : { unavailable: formatCurationStoreUnavailable(loaded.error) },

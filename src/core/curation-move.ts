@@ -18,12 +18,11 @@ import type { CurationStoreResult } from './curation-store.js';
 /** The move module, relative to src/assets/scripts/ (and ~/.devflow/scripts/). */
 export const CURATION_MOVE_SCRIPT_NAME = join('hooks', 'lib', 'curation-move.cjs');
 
-/** The names and directories a ledger move takes; the last three default to the machine's own. */
+/**
+ * The directories and the clock a ledger move takes; each defaults to the machine's own.
+ * No folder names: the old and the new folder are the two names the path helpers hold.
+ */
 export interface LedgerMoveOptions {
-  /** The old folder name under `.devflow`. */
-  readonly oldName: string;
-  /** The new folder name under `.devflow`; a plain name different from `oldName`. */
-  readonly newName: string;
   /** The machine directory that holds the move lock; default `$HOME/.devflow`. */
   readonly machineDir?: string;
   /** The home directory the root may not be; default `$HOME`. */
@@ -72,12 +71,12 @@ export interface LedgerBackupRows {
 export interface CurationMoveModule {
   /**
    * Move the old ledger folder to the new name, once, or merge it into a new folder
-   * that already exists. Never waits on a lock. Error kinds: `invalid-input`, `refused`
-   * (the root or a link among the set is unsafe; nothing was changed), `io-error`.
+   * that already exists. Never waits on a lock. Error kinds: `refused` (the root or a
+   * link among the set is unsafe; nothing was changed), `io-error`.
    */
-  moveLedger(root: string, opts: LedgerMoveOptions): CurationStoreResult<LedgerMoveOutcome>;
+  moveLedger(root: string, opts?: LedgerMoveOptions): CurationStoreResult<LedgerMoveOutcome>;
   /** Merge what the backups a move left hold into the new folder's pending queue; same error kinds as `moveLedger`. */
-  sweepLedgerBackups(root: string, opts: LedgerMoveOptions): CurationStoreResult<LedgerSweepOutcome>;
+  sweepLedgerBackups(root: string, opts?: LedgerMoveOptions): CurationStoreResult<LedgerSweepOutcome>;
   /**
    * The backup folders under `.devflow`, in name order, each with the count of rows its pending, processing,
    * private and overflow files still hold (swept files count for nothing). Read-only: takes no lock, writes

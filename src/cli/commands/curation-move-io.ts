@@ -14,7 +14,6 @@ import { promises as fs } from 'fs';
 import * as os from 'os';
 import { getDevFlowDirectory } from '../../targets/claude-code/claude-paths.js';
 import { LEDGER_ROOT_TIMEOUT_MS, lookupLedgerRoot } from '../../core/ledger-root.js';
-import { CURATION_DIR_NAME, LEGACY_NAMES } from '../../core/project-paths.js';
 import { formatCurationStoreUnavailable } from '../../core/curation-store.js';
 import { loadCurationMove, type CurationMoveModule } from '../../core/curation-move.js';
 import {
@@ -96,8 +95,8 @@ export type SharedMoveResult =
 
 /**
  * The one move that configure and the toggles run for a project: the package's own
- * store, the real machine and home directories, the current names, every lock taken
- * with no wait. Never throws.
+ * move module, the real machine and home directories, every lock taken with no wait.
+ * Never throws.
  */
 export async function runSharedMove(root: string): Promise<SharedMoveResult> {
   const loaded = loadCurationMove();
@@ -106,7 +105,7 @@ export async function runSharedMove(root: string): Promise<SharedMoveResult> {
   }
   return moveLedgerRoot(
     root,
-    { homeDir: os.homedir(), machineDir: getDevFlowDirectory(), oldName: LEGACY_NAMES.folder, newName: CURATION_DIR_NAME },
+    { homeDir: os.homedir(), machineDir: getDevFlowDirectory() },
     realProjectLedgerMoveIO(loaded.value),
   );
 }

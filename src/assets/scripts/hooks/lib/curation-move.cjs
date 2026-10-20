@@ -27,6 +27,7 @@ const path = require('path');
 
 const {
   LEGACY_NAMES,
+  CURATION_DIR_NAME,
   CURATION_TUNING_FILE_NAME,
   getCurationPendingTurnsPath,
   getCurationPendingTurnsProcessingPath,
@@ -65,12 +66,12 @@ const {
 // ---------------------------------------------------------------------------
 // The one-time ledger move
 // ---------------------------------------------------------------------------
-
 //
 // moveLedger renames a project's old ledger folder to the new name once, or, when
-// the new folder already exists, merges the old one into it. The two folder names
-// are arguments, so the move does not depend on which folder the path helpers name.
-// The move takes its locks without waiting, because a hook that waited on a crashed
+// the new folder already exists, merges the old one into it. The two folders are the
+// two names the path helpers hold (LEGACY_NAMES.folder and CURATION_DIR_NAME): no
+// caller names them, because the journal, the backup prefix, the tuning file and the
+// locks all stand on that one pair. The move takes its locks without waiting, because a hook that waited on a crashed
 // mover would stall every event; it never copies (a failed rename is an error, never
 // a fallback to a copy); and it moves no ledger row across the two folders: a losing
 // set goes to the backup whole.
@@ -155,28 +156,35 @@ function queueFormOf(name) {
   return QUEUE_FORMS.find(entry => entry.re.test(name)) || null;
 }
 
-/** True for a folder name the move accepts: one plain name, never a path. */
-const isFolderName = name => typeof name === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(name);
+/** The op names that start every message an op answers. */
+const MOVE_OP = 'move-ledger';
+const SWEEP_OP = 'sweep-backups';
+const ROWS_OP = 'backup-rows';
+
+/** True for a ledger root the ops accept before they look at the disk: a non-empty absolute path with no NUL. */
+const isAbsoluteRoot = root => typeof root === 'string' && root !== '' && !root.includes('\0') && path.isAbsolute(root);
 
 /**
- * The error Result of a move that was refused before it changed anything.
+ * The error Result of an op that was refused before it changed anything.
  *
+ * @param {string} opName - the op, which starts the message
  * @param {string} message
  */
-function moveRefused(message) {
-  return { ok: false, error: { kind: 'refused', message: `move-ledger: ${message}; nothing was changed` } };
+function moveRefused(opName, message) {
+  return { ok: false, error: { kind: 'refused', message: `${opName}: ${message}; nothing was changed` } };
 }
 
 /**
- * The error Result of an I/O failure during a move, or a rethrow for anything else.
+ * The error Result of an I/O failure during an op, or a rethrow for anything else.
  * A failure that carries an fs error code is an expected outcome the caller reports;
  * one without a code is a broken invariant and reaches the caller as a throw.
  *
+ * @param {string} opName - the op, which starts the message
  * @param {unknown} err
  */
-function moveIoFailure(err) {
+function moveIoFailure(opName, err) {
   if (!err || typeof err.code !== 'string') throw err;
-  return { ok: false, error: { kind: 'io-error', message: `move-ledger: ${err.code}: ${err.message}` } };
+  return { ok: false, error: { kind: 'io-error', message: `${opName}: ${err.code}: ${err.message}` } };
 }
 
 /**
@@ -226,52 +234,51 @@ function moveEntryProblem(file, { lock = false } = {}) {
  * it is an unknown entry.
  * Nothing is created and nothing is locked here.
  *
+ * @param {string} opName - the op, which starts every message
  * @param {unknown} root
- * @param {{ oldName: string, newName: string, machineDir: string, homeDir: string|null }} names
+ * @param {{ machineDir: string, homeDir: string|null }} dirs
  * @returns {{ ok: true, value: { realRoot: string } } | { ok: false, error: { kind: 'refused', message: string } }}
  */
-function curationMoveRefusal(root, { oldName, newName, machineDir, homeDir }) {
-  if (typeof root !== 'string' || root === '' || root.includes('\0') || !path.isAbsolute(root)) {
-    return moveRefused('the ledger root must be an absolute path');
-  }
+function curationMoveRefusal(opName, root, { machineDir, homeDir }) {
+  if (!isAbsoluteRoot(root)) return moveRefused(opName, 'the ledger root must be an absolute path');
   const rootPath = path.resolve(root);
   const rootStat = lstatOrNull(rootPath);
   if (rootStat === null || !(rootStat.isDirectory() || rootStat.isSymbolicLink())) {
-    return moveRefused(`${rootPath} is not a directory`);
+    return moveRefused(opName, `${rootPath} is not a directory`);
   }
-  if (rootStat.isSymbolicLink()) return moveRefused(`the ledger root ${rootPath} is a symbolic link`);
+  if (rootStat.isSymbolicLink()) return moveRefused(opName, `the ledger root ${rootPath} is a symbolic link`);
   const realRoot = fs.realpathSync(rootPath);
-  if (homeDir && physicalPath(homeDir) === realRoot) return moveRefused('the ledger root is the home directory');
-  if (physicalPath(machineDir) === realRoot) return moveRefused('the ledger root is the machine directory');
+  if (homeDir && physicalPath(homeDir) === realRoot) return moveRefused(opName, 'the ledger root is the home directory');
+  if (physicalPath(machineDir) === realRoot) return moveRefused(opName, 'the ledger root is the machine directory');
 
   const devflowDir = path.join(rootPath, '.devflow');
-  const oldDir = path.join(devflowDir, oldName);
-  const newDir = path.join(devflowDir, newName);
+  const oldDir = path.join(devflowDir, LEGACY_NAMES.folder);
+  const newDir = path.join(devflowDir, CURATION_DIR_NAME);
   const dirs = [];
   for (const dir of [devflowDir, oldDir, newDir]) {
     const stat = lstatOrNull(dir);
     if (stat === null) continue;
-    if (stat.isSymbolicLink()) return moveRefused(`${dir} is a symbolic link`);
-    if (!stat.isDirectory()) return moveRefused(`${dir} is not a directory`);
+    if (stat.isSymbolicLink()) return moveRefused(opName, `${dir} is a symbolic link`);
+    if (!stat.isDirectory()) return moveRefused(opName, `${dir} is not a directory`);
     dirs.push(dir);
   }
 
   const lockProblem = moveEntryProblem(curationMoveLockDir(machineDir, realRoot), { lock: true });
-  if (lockProblem !== null) return moveRefused(lockProblem);
+  if (lockProblem !== null) return moveRefused(opName, lockProblem);
   const journal = curationMoveJournalPath(machineDir, realRoot);
   const journalStat = lstatOrNull(journal);
-  if (journalStat !== null && !journalStat.isFile()) return moveRefused(`${journal} is not a regular file`);
+  if (journalStat !== null && !journalStat.isFile()) return moveRefused(opName, `${journal} is not a regular file`);
 
   const wholeFolder = dirs.includes(oldDir) && !dirs.includes(newDir);
   for (const dir of dirs.filter(d => d !== devflowDir)) {
     const entries = fs.readdirSync(dir);
-    if (entries.length > MOVE_MAX_ENTRIES) return moveRefused(`${dir} holds more than ${MOVE_MAX_ENTRIES} entries`);
+    if (entries.length > MOVE_MAX_ENTRIES) return moveRefused(opName, `${dir} holds more than ${MOVE_MAX_ENTRIES} entries`);
     for (const entry of entries) {
       const checked = (wholeFolder && dir === oldDir) || MOVE_KNOWN_NAMES.has(entry)
         || RECOVERY_FILE_RE.test(entry) || queueFormOf(entry) !== null || DISPLACED_RES.some(re => re.test(entry));
       if (!checked) continue;
       const problem = moveEntryProblem(path.join(dir, entry), { lock: entry === STORE_LOCK_NAME || entry === QUEUE_LOCK_NAME });
-      if (problem !== null) return moveRefused(problem);
+      if (problem !== null) return moveRefused(opName, problem);
     }
   }
   return { ok: true, value: { realRoot } };
@@ -339,7 +346,7 @@ function relocateLocks(held, from, to) {
 function curationMoveWhole(ctx) {
   const stray = fs.readdirSync(ctx.oldDir).filter(name => queueFormOf(name) !== null);
   if (stray.length > 0) {
-    return moveRefused(`${path.basename(ctx.oldDir)} holds ${stray.join(', ')}, which must not move into the live folder`);
+    return moveRefused(MOVE_OP, `${path.basename(ctx.oldDir)} holds ${stray.join(', ')}, which must not move into the live folder`);
   }
   const tuningFrom = path.join(ctx.oldDir, LEGACY_NAMES.tuningFile);
   const tuningTo = path.join(ctx.oldDir, CURATION_TUNING_FILE_NAME);
@@ -828,39 +835,64 @@ function curationMoveFinish(ctx, { whole }) {
  * copy nothing: the old folder stays whole.
  *
  * @param {unknown} root - the ledger root, an absolute path
- * @param {{ oldName: string, newName: string, machineDir?: string, homeDir?: string, now?: number }} opts
- *   oldName, newName: the two folder names under `.devflow`; machineDir: the machine
- *   root (default `$HOME/.devflow`); homeDir: the home directory (default `$HOME`);
- *   now: epoch ms (default Date.now())
+ * @param {{ machineDir?: string, homeDir?: string, now?: number }} [options]
+ *   machineDir: the machine root (default `$HOME/.devflow`); homeDir: the home directory
+ *   (default `$HOME`); now: epoch ms (default Date.now())
  * Every message and note is one line with no control character (scrubMoveResult).
  *
  * @returns {{ ok: true, value: { state: 'none'|'busy', notes: string[] }
  *   | { state: 'moved', mode: 'whole-folder'|'kept-new'|'moved-in', backup: string|null, rendered: boolean, notes: string[] } }
- *   | { ok: false, error: { kind: 'invalid-input'|'refused'|'io-error', message: string } }}
+ *   | { ok: false, error: { kind: 'refused'|'io-error', message: string } }}
  */
 function moveLedger(root, options = {}) {
   return scrubMoveResult(moveLedgerUnscrubbed(root, options));
 }
 
-/** moveLedger before its messages and notes are made single-line. */
-function moveLedgerUnscrubbed(root, { oldName, newName, machineDir, homeDir, now = Date.now() } = {}) {
-  if (!isFolderName(oldName) || !isFolderName(newName) || oldName === newName) {
-    return { ok: false, error: { kind: 'invalid-input', message: 'move-ledger: the old and new folder names must be two different plain names' } };
-  }
+/**
+ * The setup both ops share, before either reads or changes anything: the machine
+ * directory, the checks on the ledger root (curationMoveRefusal) and the context the
+ * pass runs on. The old and new folders are the two names the path helpers hold. An
+ * unknown machine directory answers an `io-error`, a refused root a `refused`, and an
+ * I/O failure in the checks an `io-error`, each starting with `opName`.
+ *
+ * @param {string} opName - the op, which starts every message
+ * @param {unknown} root - the ledger root, an absolute path
+ * @param {{ machineDir?: string, homeDir?: string, now?: number }} [options]
+ * @returns {{ ok: true, value: { root: string, realRoot: string, devflowDir: string, oldDir: string,
+ *   newDir: string, machineDir: string, journal: string, now: number } }
+ *   | { ok: false, error: { kind: 'refused'|'io-error', message: string } }}
+ */
+function moveContext(opName, root, { machineDir, homeDir, now = Date.now() } = {}) {
   const home = homeDir === undefined ? homeDirOrNull() : homeDir;
   const machine = machineDir === undefined ? (home === null ? null : path.join(home, '.devflow')) : machineDir;
   if (machine === null) {
-    return { ok: false, error: { kind: 'io-error', message: 'move-ledger: no home directory is set, so the machine directory is unknown' } };
+    return { ok: false, error: { kind: 'io-error', message: `${opName}: no home directory is set, so the machine directory is unknown` } };
   }
   try {
-    const refusal = curationMoveRefusal(root, { oldName, newName, machineDir: machine, homeDir: home });
+    const refusal = curationMoveRefusal(opName, root, { machineDir: machine, homeDir: home });
     if (!refusal.ok) return refusal;
     const { realRoot } = refusal.value;
     const devflowDir = path.join(path.resolve(root), '.devflow');
-    const ctx = {
-      root: path.resolve(root), devflowDir, oldDir: path.join(devflowDir, oldName), newDir: path.join(devflowDir, newName),
-      machineDir: machine, journal: curationMoveJournalPath(machine, realRoot), now,
+    return {
+      ok: true,
+      value: {
+        root: path.resolve(root), realRoot, devflowDir,
+        oldDir: path.join(devflowDir, LEGACY_NAMES.folder), newDir: path.join(devflowDir, CURATION_DIR_NAME),
+        machineDir: machine, journal: curationMoveJournalPath(machine, realRoot), now,
+      },
     };
+  } catch (err) {
+    return moveIoFailure(opName, err);
+  }
+}
+
+/** moveLedger before its messages and notes are made single-line. */
+function moveLedgerUnscrubbed(root, options = {}) {
+  const opened = moveContext(MOVE_OP, root, options);
+  if (!opened.ok) return opened;
+  const ctx = opened.value;
+  const { machineDir: machine, realRoot } = ctx;
+  try {
     if (lstatOrNull(ctx.oldDir) === null) return { ok: true, value: { state: 'none', notes: dropStaleMoveJournal(ctx.journal) } };
 
     fs.mkdirSync(machine, { recursive: true, mode: 0o700 });
@@ -892,7 +924,7 @@ function moveLedgerUnscrubbed(root, { oldName, newName, machineDir, homeDir, now
       curationMoveReleaseAll(locksAfter(taken.held, ctx, result));
     }
   } catch (err) {
-    return moveIoFailure(err);
+    return moveIoFailure(MOVE_OP, err);
   }
 }
 
@@ -989,43 +1021,35 @@ function claimIsFresh(file, now) {
  * backup it answers `none`.
  *
  * @param {unknown} root - the ledger root, an absolute path
- * @param {{ oldName: string, newName: string, machineDir?: string, homeDir?: string, now?: number }} opts
+ * @param {{ machineDir?: string, homeDir?: string, now?: number }} [options]
  * Every message and note is one line with no control character (scrubMoveResult).
  *
  * @returns {{ ok: true, value: { state: 'none'|'busy'|'swept', files: number, merged: number, overflowed: number, notes: string[] } }
- *   | { ok: false, error: { kind: 'invalid-input'|'refused'|'io-error', message: string } }}
+ *   | { ok: false, error: { kind: 'refused'|'io-error', message: string } }}
  */
 function sweepLedgerBackups(root, options = {}) {
   return scrubMoveResult(sweepLedgerBackupsUnscrubbed(root, options));
 }
 
 /** sweepLedgerBackups before its messages and notes are made single-line. */
-function sweepLedgerBackupsUnscrubbed(root, { oldName, newName, machineDir, homeDir, now = Date.now() } = {}) {
+function sweepLedgerBackupsUnscrubbed(root, options = {}) {
   const idle = state => ({ ok: true, value: { state, files: 0, merged: 0, overflowed: 0, notes: [] } });
-  if (!isFolderName(oldName) || !isFolderName(newName) || oldName === newName) {
-    return { ok: false, error: { kind: 'invalid-input', message: 'sweep-backups: the old and new folder names must be two different plain names' } };
-  }
-  const home = homeDir === undefined ? homeDirOrNull() : homeDir;
-  const machine = machineDir === undefined ? (home === null ? null : path.join(home, '.devflow')) : machineDir;
-  if (machine === null) {
-    return { ok: false, error: { kind: 'io-error', message: 'sweep-backups: no home directory is set, so the machine directory is unknown' } };
-  }
+  const opened = moveContext(SWEEP_OP, root, options);
+  if (!opened.ok) return opened;
+  const ctx = opened.value;
+  const { devflowDir } = ctx;
   try {
-    const refusal = curationMoveRefusal(root, { oldName, newName, machineDir: machine, homeDir: home });
-    if (!refusal.ok) return refusal;
-    const devflowDir = path.join(path.resolve(root), '.devflow');
-    const ctx = { root: path.resolve(root), devflowDir, newDir: path.join(devflowDir, newName), machineDir: machine, now };
     if (lstatOrNull(ctx.newDir) === null) return idle('none');
     const backups = fs.readdirSync(devflowDir).filter(name => name.startsWith(LEGACY_NAMES.backupPrefix)).sort().slice(0, MOVE_MAX_BACKUPS);
     if (backups.length === 0) return idle('none');
     for (const name of backups) {
       const problem = backupProblem(path.join(devflowDir, name));
-      if (problem !== null) return moveRefused(problem);
+      if (problem !== null) return moveRefused(SWEEP_OP, problem);
     }
 
-    fs.mkdirSync(machine, { recursive: true, mode: 0o700 });
+    fs.mkdirSync(ctx.machineDir, { recursive: true, mode: 0o700 });
     const taken = curationMoveLockAll([
-      { name: 'move', dir: curationMoveLockDir(machine, refusal.value.realRoot), staleMs: MOVE_LOCK_STALE_MS },
+      { name: 'move', dir: curationMoveLockDir(ctx.machineDir, ctx.realRoot), staleMs: MOVE_LOCK_STALE_MS },
       { name: 'new-queue', dir: path.join(ctx.newDir, QUEUE_LOCK_NAME), staleMs: QUEUE_LOCK_STALE_MS },
     ]);
     if (taken.busy !== null) return idle('busy');
@@ -1043,7 +1067,7 @@ function sweepLedgerBackupsUnscrubbed(root, { oldName, newName, machineDir, home
       curationMoveReleaseAll(taken.held);
     }
   } catch (err) {
-    return moveIoFailure(err);
+    return moveIoFailure(SWEEP_OP, err);
   }
 }
 
@@ -1085,8 +1109,8 @@ function holdsPendingRows(name) {
  *   | { ok: false, error: { kind: 'refused'|'io-error', message: string } }}
  */
 function backupPendingRows(root) {
-  if (typeof root !== 'string' || root === '' || root.includes('\0') || !path.isAbsolute(root)) {
-    return { ok: false, error: { kind: 'refused', message: 'backup-rows: the ledger root must be an absolute path' } };
+  if (!isAbsoluteRoot(root)) {
+    return { ok: false, error: { kind: 'refused', message: `${ROWS_OP}: the ledger root must be an absolute path` } };
   }
   try {
     const devflowDir = path.join(path.resolve(root), '.devflow');
@@ -1108,8 +1132,7 @@ function backupPendingRows(root) {
     }
     return { ok: true, value: { backups } };
   } catch (err) {
-    if (!err || typeof err.code !== 'string') throw err;
-    return { ok: false, error: { kind: 'io-error', message: singleLine(`backup-rows: ${err.code}: ${err.message}`) } };
+    return scrubMoveResult(moveIoFailure(ROWS_OP, err));
   }
 }
 
