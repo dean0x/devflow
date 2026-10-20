@@ -989,6 +989,107 @@ describe('the move-lock family (installArtifactPaths and resolveInstallArtifactP
   });
 });
 
+// The move's journal is a regular file `.curation-move-<16 hex>.journal` beside the lock,
+// written only while a set move is unfinished. A crash leaves it behind, so the artifact
+// list names it by exact shape too. A link, a directory or a near miss stays.
+
+describe('the move-journal family (installArtifactPaths and resolveInstallArtifactPaths)', () => {
+  let tmpDir: string;
+  const journalName = (hex: string): string => `.curation-move-${hex}.journal`;
+  const HEX = '0123456789abcdef';
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-movejournal-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('declares the journal family as a file prefix entry, and it is not user content', () => {
+    const entry = installArtifactPaths(tmpDir).find(e => e.relPath === '.curation-move-' && e.isDir !== true);
+    expect(entry, 'the move journal must be an install artifact').toBeDefined();
+    expect(entry?.isPrefix).toBe(true);
+    expect(userContentPaths(tmpDir).map(e => e.relPath).filter(r => r.startsWith('.curation-move-'))).toEqual([]);
+  });
+
+  it('the journal name the store builds has the shape the artifact list matches', async () => {
+    const loaded = loadCurationStore();
+    if (!loaded.ok) throw new Error('the store must load');
+    const store = loaded.value as unknown as { curationMoveJournalPath(machineDir: string, realRoot: string): string };
+    const built = store.curationMoveJournalPath(tmpDir, '/some/ledger/root');
+    expect(path.dirname(built)).toBe(tmpDir);
+    await fs.writeFile(built, '{}', 'utf-8');
+    expect((await resolveInstallArtifactPaths(tmpDir)).map(e => e.relPath)).toContain(path.basename(built));
+  });
+
+  it('expands to each regular journal file of exactly the shape, and to nothing else', async () => {
+    await fs.writeFile(path.join(tmpDir, journalName(HEX)), '{}', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, journalName('fedcba9876543210')), '{}', 'utf-8');
+    const nearMisses = [
+      journalName('0123456789abcde'),       // fifteen characters
+      journalName('0123456789abcdef0'),     // seventeen characters
+      journalName('AAAAAAAAAAAAAAAA'),      // upper case
+      journalName('0123456789abcdeg'),      // not hex
+      `.curation-move-${HEX}.journal.bak`,  // a suffix after the journal suffix
+      `curation-move-${HEX}.journal`,       // no leading dot
+      `..curation-move-${HEX}.journal`,
+      `.curation-move-${HEX}.journalx`,
+      '.curation-move.journal',             // the name a repository can plant in an old folder
+      '.curation-move-',
+    ];
+    for (const name of nearMisses) await fs.writeFile(path.join(tmpDir, name), '{}', 'utf-8');
+
+    const resolved = (await resolveInstallArtifactPaths(tmpDir)).map(e => e.relPath);
+
+    expect(resolved).toContain(journalName(HEX));
+    expect(resolved).toContain(journalName('fedcba9876543210'));
+    for (const name of nearMisses) expect(resolved, name).not.toContain(name);
+  });
+
+  it('leaves a link and a directory that are named like a journal', async () => {
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-movejournal-outside-'));
+    try {
+      await fs.writeFile(path.join(outside, 'precious'), 'keep', 'utf-8');
+      await fs.symlink(path.join(outside, 'precious'), path.join(tmpDir, journalName(HEX)));
+      await fs.mkdir(path.join(tmpDir, journalName('fedcba9876543210')));
+
+      const resolved = (await resolveInstallArtifactPaths(tmpDir)).map(e => e.relPath);
+      expect(resolved).not.toContain(journalName(HEX));
+      expect(resolved).not.toContain(journalName('fedcba9876543210'));
+
+      await removeDevFlowInstallArtifacts(tmpDir, false);
+      expect(await fs.readFile(path.join(outside, 'precious'), 'utf-8')).toBe('keep');
+      await expect(fs.lstat(path.join(tmpDir, journalName(HEX)))).resolves.toBeDefined();
+      await expect(fs.lstat(path.join(tmpDir, journalName('fedcba9876543210')))).resolves.toBeDefined();
+    } finally {
+      await fs.rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('an artifacts-only removal takes a journal and leaves user content', async () => {
+    const journal = path.join(tmpDir, journalName(HEX));
+    await fs.writeFile(journal, '{"version":1,"steps":[]}', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, 'tracker.md'), 'user content', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, 'curation.json'), '{}', 'utf-8');
+
+    await removeDevFlowInstallArtifacts(tmpDir, false);
+
+    await expect(fs.lstat(journal)).rejects.toThrow();
+    expect(await fs.readFile(path.join(tmpDir, 'tracker.md'), 'utf-8')).toBe('user content');
+    expect(await fs.readFile(path.join(tmpDir, 'curation.json'), 'utf-8')).toBe('{}');
+  });
+
+  it('the dry-run preview names a journal it is about to remove', async () => {
+    const journal = path.join(tmpDir, journalName(HEX));
+    await fs.writeFile(journal, '{}', 'utf-8');
+    const claudeDir = path.join(tmpDir, 'claude-home');
+    await fs.mkdir(claudeDir, { recursive: true });
+
+    expect(await enumerateDryRunExtras(claudeDir, tmpDir)).toContain(journal);
+  });
+});
+
 describe('uninstall and the curation data (#529, TP-11)', () => {
   let tmpDir: string;
 

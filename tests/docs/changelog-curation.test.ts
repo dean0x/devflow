@@ -104,7 +104,7 @@ const CHECKLIST: ReadonlyArray<{ readonly item: string; readonly patterns: reado
   { item: 'backup delete step', patterns: [/Delete a backup folder only when `devflow curation --status` shows 0 pending rows/] },
   { item: 'backup deletion rule', patterns: [/No devflow command deletes a backup, except `devflow uninstall`/, /after you confirm/, /`devflow curation --reset` and `devflow curation --clear` leave the backup in place/] },
   { item: 'status counts backup rows', patterns: [/`Backup:` line/, /pending rows/] },
-  { item: 'queue cap', patterns: [/never takes a pending queue above 200 lines/, /overflow files/, /Status counts them as pending rows/, /newest 100 lines/] },
+  { item: 'queue cap', patterns: [/fills a pending queue up to 100 lines and no further/, /never causes a trim/, /overflow files/, /Status counts them as pending rows/, /newest 100 lines/] },
   { item: 'busy outcome', patterns: [/Busy:/, /Wait a moment, then run the command again/] },
   { item: 'refused outcome', patterns: [/Refused:/, /Remove the cause/] },
   { item: 'pointer outcome', patterns: [/Not yet moved:/, /do not read the old folder/] },
@@ -255,7 +255,7 @@ describe('CHANGELOG guard is live (seeded known-bad input)', () => {
   it('fails when a listed item is removed', () => {
     const entry = entryOf(releaseSections(CHANGELOG).find(section => entryOf(section) !== null) ?? { label: '', text: '' }) ?? '';
     expect(missingItems(entry)).toEqual([]);
-    expect(missingItems(entry.replace('never takes a pending queue above 200 lines', 'takes a queue'))).toContain('queue cap');
+    expect(missingItems(entry.replace('fills a pending queue up to 100 lines and no further', 'takes a queue'))).toContain('queue cap');
     expect(missingItems(entry.replace('Mixed-version teams', 'Teams'))).toContain('mixed-version advice');
     expect(missingItems(entry.replace('both `features.curation` and `features.learning`', 'one key'))).toContain('manifest heal');
     expect(missingItems('')).toHaveLength(CHECKLIST.length);

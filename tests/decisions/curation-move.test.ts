@@ -54,7 +54,9 @@ interface Store {
   sweepLedgerBackups(root: string, opts: MoveOpts): Res<SweepValue>;
   curationMoveLockKey(realRoot: string): string;
   withDecisionsLock(opName: string, root: string, fn: () => Res<null>): Res<null>;
+  backupPendingRows(root: string): Res<{ backups: Array<{ name: string; pendingRows: number }> }>;
   CLAIM_STALE_SECS: number;
+  QUEUE_MERGE_CAP_LINES: number;
 }
 
 const nodeRequire = createRequire(import.meta.url);
@@ -105,10 +107,13 @@ beforeEach(() => {
     oldDir: path.join(devflow, OLD),
     newDir: path.join(devflow, NEW),
   };
+  // The store's write guard finds the machine-side move journal under $HOME/.devflow.
+  vi.stubEnv('HOME', home);
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   fs.rmSync(site.tmp, { recursive: true, force: true });
 });
 
@@ -213,6 +218,13 @@ function ledgerSet(tag: string): Record<string, string> {
 /** The lock directory the move takes under the machine directory. */
 const moveLockDir = (): string =>
   path.join(site.machineDir, `.curation-move-${store.curationMoveLockKey(fs.realpathSync(site.root))}.lock`);
+
+/**
+ * The machine-side journal of an unfinished set move: next to the move lock, keyed
+ * the same way. A journal in the repository's old folder is never this file.
+ */
+const moveJournalFile = (): string =>
+  path.join(site.machineDir, `.curation-move-${store.curationMoveLockKey(fs.realpathSync(site.root))}.journal`);
 
 /** Hold a lock directory, optionally aged so it counts as abandoned. */
 function holdLock(dir: string, ageMs = 0): void {
@@ -758,6 +770,7 @@ describe('moveLedger — the old set moves in when the new folder has no log dat
 
   it('leaves no journal behind once the set is complete', () => {
     const value = movedValue();
+    expect(exists(moveJournalFile())).toBe(false);
     expect(exists(path.join(site.newDir, JOURNAL))).toBe(false);
     expect(exists(path.join(backupOf(value), JOURNAL))).toBe(false);
   });
@@ -792,21 +805,24 @@ describe('moveLedger — an interrupted set move resumes from its journal (TP-40
     seedNew(newSet());
   });
 
-  it('writes the journal at mode 0600 before the first rename, listing displacements then moves', () => {
+  it('writes the journal in the machine directory at mode 0600 before the first rename, listing displacements then moves', () => {
     failAfterSetRenames(0);
     expect(failure().kind).toBe('io-error');
     // An error before the first rename removes the journal, so read it at the first rename instead.
     vi.restoreAllMocks();
     const real = nodeFs.renameSync;
-    let seen: { text: string; mode: number } | null = null;
+    let seen: { text: string; mode: number; inOldFolder: boolean } | null = null;
     vi.spyOn(nodeFs, 'renameSync').mockImplementation((from, to) => {
-      const journal = path.join(site.oldDir, JOURNAL);
-      if (seen === null && exists(journal)) seen = { text: read(journal), mode: mode(journal) };
+      const journal = moveJournalFile();
+      if (seen === null && exists(journal)) {
+        seen = { text: read(journal), mode: mode(journal), inOldFolder: exists(path.join(site.oldDir, JOURNAL)) };
+      }
       return real(from, to);
     });
     movedValue();
     expect(seen).not.toBeNull();
     expect(seen!.mode).toBe(0o600);
+    expect(seen!.inOldFolder, 'the old folder never holds a journal').toBe(false);
     const steps = (JSON.parse(seen!.text) as { steps: Array<{ op: string; name: string }> }).steps;
     expect(steps.map(step => `${step.op}:${step.name}`)).toEqual([
       ...SET.map(name => `displace:${name}`),
@@ -818,6 +834,7 @@ describe('moveLedger — an interrupted set move resumes from its journal (TP-40
     failAfterSetRenames(0);
     const before = snapshotTree(site.devflow);
     expect(failure().kind).toBe('io-error');
+    expect(exists(moveJournalFile())).toBe(false);
     expect(exists(path.join(site.oldDir, JOURNAL))).toBe(false);
     expect(snapshotTree(site.devflow)).toEqual(before);
   });
@@ -827,7 +844,8 @@ describe('moveLedger — an interrupted set move resumes from its journal (TP-40
     expect(failure().kind).toBe('io-error');
     vi.restoreAllMocks();
 
-    expect(exists(path.join(site.oldDir, JOURNAL))).toBe(true);
+    expect(exists(moveJournalFile())).toBe(true);
+    expect(exists(path.join(site.oldDir, JOURNAL))).toBe(false);
     const write = store.withDecisionsLock('put-observation', site.root, () => ({ ok: true, value: null }));
     expect(write.ok).toBe(false);
     expect(!write.ok && write.error.kind).toBe('busy');
@@ -843,6 +861,7 @@ describe('moveLedger — an interrupted set move resumes from its journal (TP-40
       const displaced = names(backup).filter(entry => entry.startsWith(`${name}.displaced-`));
       expect(displaced.map(entry => read(path.join(backup, entry))), name).toEqual([content]);
     }
+    expect(exists(moveJournalFile())).toBe(false);
     expect(exists(path.join(backup, JOURNAL))).toBe(false);
     expect(exists(path.join(site.newDir, JOURNAL))).toBe(false);
     const after = store.withDecisionsLock('put-observation', site.root, () => ({ ok: true, value: null }));
@@ -853,7 +872,8 @@ describe('moveLedger — an interrupted set move resumes from its journal (TP-40
     // The writer finds no journal, then waits on the lock while a move starts and
     // stops after its first rename: the journal appears just before the lock is taken.
     const lockDir = path.join(site.newDir, '.decisions.lock');
-    const journal = path.join(site.oldDir, JOURNAL);
+    const journal = moveJournalFile();
+    fs.mkdirSync(site.machineDir, { recursive: true });
     const real = nodeFs.mkdirSync;
     vi.spyOn(nodeFs, 'mkdirSync').mockImplementation(((target: fs.PathLike, opts?: fs.MakeDirectoryOptions) => {
       if (String(target) === lockDir && !exists(journal)) fs.writeFileSync(journal, '{"version":1,"steps":[]}');
@@ -878,22 +898,103 @@ describe('moveLedger — an interrupted set move resumes from its journal (TP-40
   });
 
   it('a journal that cannot be read is removed and the move decides afresh', () => {
-    fs.writeFileSync(path.join(site.oldDir, JOURNAL), '');
+    fs.mkdirSync(site.machineDir, { recursive: true });
+    fs.writeFileSync(moveJournalFile(), '');
     const value = movedValue();
     expect(value.mode).toBe('moved-in');
-    expect(read(path.join(site.newDir, LEDGER))).toBe(ledgerSet('old')[LEDGER]);
-    expect(value.notes.join('\n')).toMatch(/journal/);
+    for (const [name, content] of Object.entries(ledgerSet('old'))) {
+      expect(read(path.join(site.newDir, name)), name).toBe(content);
+    }
+    expect(exists(moveJournalFile())).toBe(false);
+    expect(value.notes).toContain('removed an unreadable move journal; no rename had been recorded');
   });
 
-  it('a journal that names anything but set members is not followed', () => {
+  it('a journal that names anything but set members is not followed, is removed, and the move decides afresh', () => {
     const outside = outsideFile('victim.txt', 'keep me\n');
-    fs.writeFileSync(path.join(site.oldDir, JOURNAL), JSON.stringify({
+    fs.mkdirSync(site.machineDir, { recursive: true });
+    fs.writeFileSync(moveJournalFile(), JSON.stringify({
       version: 1,
       steps: [{ op: 'move', name: '../../../victim.txt' }, { op: 'displace', name: LEDGER, to: path.join(site.tmp, 'elsewhere') }],
     }));
-    movedValue();
+    const value = movedValue();
     expect(read(outside)).toBe('keep me\n');
     expect(exists(path.join(site.tmp, 'elsewhere'))).toBe(false);
+    expect(exists(moveJournalFile())).toBe(false);
+    expect(value.mode).toBe('moved-in');
+    for (const [name, content] of Object.entries(ledgerSet('old'))) {
+      expect(read(path.join(site.newDir, name)), name).toBe(content);
+    }
+    expect(value.notes).toContain('removed an unreadable move journal; no rename had been recorded');
+  });
+
+  it('a journal that is a link, or is not a regular file, refuses the move and changes nothing', () => {
+    const outside = outsideFile('journal-target.txt', 'keep me\n');
+    fs.mkdirSync(site.machineDir, { recursive: true });
+    fs.symlinkSync(outside, moveJournalFile());
+    const before = snapshotTree(site.root);
+    const error = failure();
+    expect(error.kind).toBe('refused');
+    expect(error.message).toMatch(/\.journal is not a regular file/);
+    expect(snapshotTree(site.root)).toEqual(before);
+    expect(read(outside)).toBe('keep me\n');
+
+    fs.rmSync(moveJournalFile());
+    fs.mkdirSync(moveJournalFile());
+    expect(failure().kind).toBe('refused');
+    expect(snapshotTree(site.root)).toEqual(before);
+  });
+
+  it('a whole-folder move drops a journal that an earlier pass left, so store writes are not stuck busy', () => {
+    fs.rmSync(site.newDir, { recursive: true });
+    fs.mkdirSync(site.machineDir, { recursive: true });
+    fs.writeFileSync(moveJournalFile(), '{"version":1,"steps":[]}');
+    expect(movedValue().mode).toBe('whole-folder');
+    expect(exists(moveJournalFile())).toBe(false);
+    expect(store.withDecisionsLock('put-observation', site.root, () => ({ ok: true, value: null })).ok).toBe(true);
+  });
+});
+
+describe('moveLedger — a journal in the repository\'s old folder is never read', () => {
+  /** A journal that looks valid and would, if followed, displace the new folder's set and move the old one in. */
+  const lookalike = (): string => JSON.stringify({
+    version: 1,
+    steps: [
+      ...SET.map(name => ({ op: 'displace', name, to: `${name}.displaced-20261001T000000Z-deadbeef` })),
+      ...SET.map(name => ({ op: 'move', name })),
+    ],
+  });
+
+  it('the new folder with data wins, byte-identical, and nothing is displaced', () => {
+    seedOld({ ...ledgerSet('old'), [JOURNAL]: lookalike() });
+    seedNew(ledgerSet('new'));
+    const before = Object.fromEntries(SET.map(name => [name, read(path.join(site.newDir, name))]));
+
+    const value = movedValue();
+
+    expect(value.mode).toBe('kept-new');
+    for (const [name, content] of Object.entries(before)) expect(read(path.join(site.newDir, name)), name).toBe(content);
+    const backup = backupOf(value);
+    expect(names(backup).filter(name => name.includes('.displaced-'))).toEqual([]);
+    expect(names(site.newDir).filter(name => name.includes('.displaced-'))).toEqual([]);
+    expect(read(path.join(backup, LEDGER))).toBe(ledgerSet('old')[LEDGER]);
+    expect(read(path.join(backup, JOURNAL))).toBe(lookalike());
+    expect(value.notes.join('\n')).toMatch(/left in the backup, not moved: .*\.curation-move\.journal/);
+    expect(exists(moveJournalFile())).toBe(false);
+  });
+
+  it('is no reason for a store write to be busy', () => {
+    seedOld({ ...ledgerSet('old'), [JOURNAL]: lookalike() });
+    seedNew(ledgerSet('new'));
+    expect(store.withDecisionsLock('put-observation', site.root, () => ({ ok: true, value: null })).ok).toBe(true);
+  });
+
+  it('does not decide what moves when the new folder has no log data: the move plans its own steps', () => {
+    seedOld({ ...ledgerSet('old'), [JOURNAL]: JSON.stringify({ version: 1, steps: [{ op: 'move', name: LEDGER }] }) });
+    seedNew({ [LOG]: '' });
+    const value = movedValue();
+    expect(value.mode).toBe('moved-in');
+    for (const [name, content] of Object.entries(ledgerSet('old'))) expect(read(path.join(site.newDir, name)), name).toBe(content);
+    expect(exists(path.join(backupOf(value), JOURNAL))).toBe(true);
   });
 });
 
@@ -1141,22 +1242,82 @@ describe('the queue rule — a crash, an append, a rerun (TP-32)', () => {
   });
 });
 
-describe('the queue rule — the 200-line cap (overflow)', () => {
-  it('appends only up to 200 lines and keeps the rest in an overflow file in the backup, dropping no row', () => {
-    seedKeptNew(turns(1, 11), turns(100, 295));
+/** The queue rows `from` .. `to - 1`, as the lines of a queue file. */
+const rows = (from: number, to: number): string[] => Array.from({ length: to - from }, (_, i) => turn(from + i));
+
+/** The hooks directory: the shared capture helper `queue-append` lives there. */
+const HOOKS_DIR = path.dirname(path.dirname(CURATION_STORE));
+
+/**
+ * One capture through the real hook helper: `queue_append_row`, sourced with the chain
+ * it needs, appends one row to `queue` and runs the trim when the file is past 200 lines.
+ */
+function captureThroughHook(queue: string, content: string, ts: number): void {
+  const source = ['json-parse', 'get-mtime', 'curation-lock', 'queue-append']
+    .map(name => `source "${path.join(HOOKS_DIR, name)}"`).join('\n');
+  const script = `set -e\nlog() { :; }\ndbg() { :; }\n${source}\nqueue_append_row "$1" "$2" user "$3" "$4"\n`;
+  const run = spawnSync('bash', ['-c', script, 'bash', site.root, queue, content, String(ts)], {
+    env: { ...process.env, HOME: site.home },
+    encoding: 'utf8',
+    timeout: 60_000,
+  });
+  if (run.error || run.status !== 0) throw new Error(`the capture failed: ${run.error?.message ?? run.stderr}`);
+}
+
+describe('the queue rule — the merge cap (the size a capture trim keeps)', () => {
+  it('equals the number of lines the capture trim keeps, and the trim still starts above 200', () => {
+    const queueAppend = read(path.join(HOOKS_DIR, 'queue-append'));
+    const keep = /tail -(\d+) "\$_qar_file"/.exec(queueAppend);
+    expect(keep, 'queue-append keeps the newest lines with tail').not.toBeNull();
+    expect(store.QUEUE_MERGE_CAP_LINES).toBe(Number(keep?.[1]));
+    const triggers = [...queueAppend.matchAll(/"\$_qar_lines" -gt (\d+)/g)].map(match => Number(match[1]));
+    expect(triggers).toEqual([200, 200]);
+  });
+
+  it('fills the pending queue to 100 lines and keeps the rest in an overflow file in the backup, dropping no row', () => {
+    seedKeptNew(turns(1, 11), turns(100, 195));
     const value = movedValue();
     const queue = linesOf(path.join(site.newDir, QUEUE));
-    expect(queue).toHaveLength(200);
-    expect(queue.slice(195)).toEqual([1, 2, 3, 4, 5].map(turn));
+    expect(queue).toHaveLength(100);
+    expect(queue.slice(95)).toEqual(rows(1, 6));
     const backup = backupOf(value);
     const overflow = matching(backup, OVERFLOW_RE);
     expect(overflow).toHaveLength(1);
-    expect(linesOf(path.join(backup, overflow[0]))).toEqual([6, 7, 8, 9, 10].map(turn));
+    expect(linesOf(path.join(backup, overflow[0]))).toEqual(rows(6, 11));
     expect(mode(path.join(backup, overflow[0]))).toBe(0o600);
   });
 
+  it('60 pending rows and 150 old rows: 100 stay pending, the rest are counted overflow, and a capture after the move loses no merged row', () => {
+    seedKeptNew(turns(1, 151), turns(1000, 1060));
+    const value = movedValue();
+    const queue = linesOf(path.join(site.newDir, QUEUE));
+    expect(queue).toEqual([...rows(1000, 1060), ...rows(1, 41)]);
+
+    const backup = backupOf(value);
+    const overflow = matching(backup, OVERFLOW_RE);
+    expect(overflow).toHaveLength(1);
+    expect(linesOf(path.join(backup, overflow[0]))).toEqual(rows(41, 151));
+    const status = store.backupPendingRows(site.root);
+    expect(status.ok && status.value.backups).toEqual([{ name: value.backup, pendingRows: 110 }]);
+
+    captureThroughHook(path.join(site.newDir, QUEUE), 'after the move', 5000);
+
+    const after = linesOf(path.join(site.newDir, QUEUE));
+    expect(after, 'the capture is appended and no trim runs').toHaveLength(101);
+    expect(after.slice(0, 100)).toEqual(queue);
+    expect(JSON.parse(after[100])).toMatchObject({ role: 'user', content: 'after the move', ts: 5000 });
+  });
+
+  it('a pending queue at or above the cap receives no row: every old row goes to the overflow file', () => {
+    seedKeptNew(turns(1, 11), turns(100, 250));
+    const value = movedValue();
+    expect(linesOf(path.join(site.newDir, QUEUE))).toEqual(rows(100, 250));
+    const backup = backupOf(value);
+    expect(linesOf(path.join(backup, matching(backup, OVERFLOW_RE)[0]))).toEqual(rows(1, 11));
+  });
+
   it('a later sweep merges the overflow file once the queue has room, and only once', () => {
-    seedKeptNew(turns(1, 11), turns(100, 295));
+    seedKeptNew(turns(1, 11), turns(100, 195));
     const backup = backupOf(movedValue());
     const overflow = matching(backup, OVERFLOW_RE)[0];
 
@@ -1164,30 +1325,96 @@ describe('the queue rule — the 200-line cap (overflow)', () => {
     expect(blocked.ok && blocked.value.merged).toBe(0);
     expect(exists(path.join(backup, overflow))).toBe(true);
 
-    fs.writeFileSync(path.join(site.newDir, QUEUE), turns(100, 200));
+    fs.writeFileSync(path.join(site.newDir, QUEUE), turns(100, 190));
     const swept = store.sweepLedgerBackups(site.root, opts());
     expect(swept.ok && swept.value.merged).toBe(5);
-    expect(linesOf(path.join(site.newDir, QUEUE)).slice(100)).toEqual([6, 7, 8, 9, 10].map(turn));
+    expect(linesOf(path.join(site.newDir, QUEUE)).slice(90)).toEqual(rows(6, 11));
     expect(exists(path.join(backup, overflow))).toBe(false);
 
     const again = store.sweepLedgerBackups(site.root, opts());
     expect(again.ok && again.value.merged).toBe(0);
-    expect(linesOf(path.join(site.newDir, QUEUE))).toHaveLength(105);
+    expect(linesOf(path.join(site.newDir, QUEUE))).toHaveLength(95);
   });
 
   it('puts the lines that still do not fit into a new overflow file and sweeps the old one', () => {
-    seedKeptNew(turns(1, 11), turns(100, 295));
+    seedKeptNew(turns(1, 11), turns(100, 195));
     const backup = backupOf(movedValue());
     const first = matching(backup, OVERFLOW_RE)[0];
-    fs.writeFileSync(path.join(site.newDir, QUEUE), turns(100, 297));
+    fs.writeFileSync(path.join(site.newDir, QUEUE), turns(100, 197));
     const swept = store.sweepLedgerBackups(site.root, opts());
     expect(swept.ok && swept.value.merged).toBe(3);
     expect(swept.ok && swept.value.overflowed).toBe(2);
-    expect(linesOf(path.join(site.newDir, QUEUE))).toHaveLength(200);
+    expect(linesOf(path.join(site.newDir, QUEUE))).toHaveLength(100);
     expect(exists(path.join(backup, first))).toBe(false);
     const rest = matching(backup, OVERFLOW_RE);
     expect(rest).toHaveLength(1);
-    expect(linesOf(path.join(backup, rest[0]))).toEqual([9, 10].map(turn));
+    expect(linesOf(path.join(backup, rest[0]))).toEqual(rows(9, 11));
+  });
+
+  it('an init backup sweep of overflow files fills the queue to 100, counts the rest, and a capture after it loses no row', () => {
+    seedNew({ ...ledgerSet('new'), [QUEUE]: turns(2000, 2090) });
+    const backup = path.join(site.devflow, 'learning.backup-20261001T000000Z-abcdef12');
+    seed(backup, { '.pending-turns.jsonl.overflow-20261001T000000Z-deadbeef': turns(1, 51) });
+
+    const swept = store.sweepLedgerBackups(site.root, opts());
+    expect(swept.ok && swept.value.merged).toBe(10);
+    expect(swept.ok && swept.value.overflowed).toBe(40);
+    const queue = linesOf(path.join(site.newDir, QUEUE));
+    expect(queue).toEqual([...rows(2000, 2090), ...rows(1, 11)]);
+    const rest = matching(backup, OVERFLOW_RE);
+    expect(rest).toHaveLength(1);
+    expect(linesOf(path.join(backup, rest[0]))).toEqual(rows(11, 51));
+    const status = store.backupPendingRows(site.root);
+    expect(status.ok && status.value.backups).toEqual([{ name: path.basename(backup), pendingRows: 40 }]);
+
+    captureThroughHook(path.join(site.newDir, QUEUE), 'after the sweep', 6000);
+
+    const after = linesOf(path.join(site.newDir, QUEUE));
+    expect(after).toHaveLength(101);
+    expect(after.slice(0, 100)).toEqual(queue);
+  });
+
+  it('counts the pending queue again before each append: a capture that lands during the merge counts against the cap', () => {
+    seedKeptNew(turns(1, 41), turns(1000, 1050));
+    const real = nodeFs.openSync as (...args: unknown[]) => number;
+    let landed = false;
+    vi.spyOn(nodeFs, 'openSync').mockImplementation(((file: fs.PathLike, ...rest: unknown[]) => {
+      const flags = rest[0];
+      if (!landed && String(file) === path.join(site.newDir, QUEUE) && typeof flags === 'number' && (flags & fs.constants.O_APPEND) !== 0) {
+        landed = true;
+        // The first append is about to run. Rows reach the private file (the next step's input) and the live queue (captures).
+        for (const [target, text] of [
+          [path.join(site.oldDir, matching(site.oldDir, PRIVATE_RE)[0]), turns(41, 71)],
+          [path.join(site.newDir, QUEUE), turns(2000, 2008)],
+        ] as const) {
+          const fd = real(target, 'a');
+          fs.writeSync(fd, text);
+          fs.closeSync(fd);
+        }
+      }
+      return real(file, ...rest);
+    }) as never);
+    const value = movedValue();
+    expect(landed).toBe(true);
+    const queue = linesOf(path.join(site.newDir, QUEUE));
+    expect(queue).toHaveLength(100);
+    expect(queue.slice(50, 58)).toEqual(rows(2000, 2008));
+    expect(queue.slice(98)).toEqual(rows(41, 43));
+    const backup = backupOf(value);
+    const overflow = matching(backup, OVERFLOW_RE).flatMap(name => linesOf(path.join(backup, name)));
+    expect(overflow).toEqual(rows(43, 71));
+  });
+
+  it('reads the target\'s processing file once for each queue file it merges', () => {
+    seedKeptNew(turns(1, 4), turns(10, 11));
+    fs.writeFileSync(path.join(site.newDir, CLAIM), turns(50, 52));
+    age(path.join(site.newDir, CLAIM), (store.CLAIM_STALE_SECS + 100) * 1000);
+    const opens = vi.spyOn(nodeFs, 'openSync');
+    const value = movedValue();
+    const claimReads = opens.mock.calls.filter(([file]) => String(file) === path.join(site.newDir, CLAIM));
+    expect(claimReads).toHaveLength(1);
+    expect(linesOf(path.join(site.newDir, QUEUE))).toEqual([turn(10), turn(1), turn(2), turn(3)]);
+    expect(matching(backupOf(value), SWEPT_RE)).toHaveLength(1);
   });
 });
 

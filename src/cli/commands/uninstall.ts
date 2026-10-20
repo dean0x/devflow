@@ -653,6 +653,11 @@ export interface InstallArtifactEntry {
    * matching name is left alone, whatever it points at.
    */
   realDirOnly?: boolean;
+  /**
+   * For a prefix entry: the child must be a regular file. A link or a directory with a
+   * matching name is left alone, whatever it points at.
+   */
+  realFileOnly?: boolean;
 }
 
 /**
@@ -663,10 +668,28 @@ export interface InstallArtifactEntry {
 const CURATION_MOVE_LOCK_PREFIX = '.curation-move-';
 const CURATION_MOVE_LOCK_SHAPE = /^\.curation-move-[0-9a-f]{16}\.lock$/;
 
+/**
+ * The curation move's journal, one regular file per ledger root, beside the lock:
+ * `.curation-move-<16 lowercase hex>.journal`, with the same key as the lock. It exists
+ * only while a set move is unfinished, and a crash leaves it behind. A file named
+ * `.curation-move.journal` inside a project's old ledger folder is no journal of the
+ * move and is not matched here.
+ */
+const CURATION_MOVE_JOURNAL_SHAPE = /^\.curation-move-[0-9a-f]{16}\.journal$/;
+
 /** Whether `child` of `devflowDir` is a real directory (a link is not followed). */
 async function isRealDirectory(devflowDir: string, child: string): Promise<boolean> {
   try {
     return (await fs.lstat(path.join(devflowDir, child))).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/** Whether `child` of `devflowDir` is a regular file (a link is not followed). */
+async function isRegularFile(devflowDir: string, child: string): Promise<boolean> {
+  try {
+    return (await fs.lstat(path.join(devflowDir, child))).isFile();
   } catch {
     return false;
   }
@@ -703,6 +726,7 @@ export async function resolveInstallArtifactPaths(
       if (!child.startsWith(entry.relPath)) continue;
       if (entry.shape !== undefined && !entry.shape.test(child)) continue;
       if (entry.realDirOnly === true && !(await isRealDirectory(devflowDir, child))) continue;
+      if (entry.realFileOnly === true && !(await isRegularFile(devflowDir, child))) continue;
       resolved.push({ relPath: child, isDir: entry.isDir });
     }
   }
@@ -777,6 +801,9 @@ export function installArtifactPaths(devflowDir: string): ReadonlyArray<InstallA
     // Only a real directory of exactly that shape goes; the move's skip markers sit under
     // logs/ and go with it.
     { relPath: CURATION_MOVE_LOCK_PREFIX, isPrefix: true, isDir: true, shape: CURATION_MOVE_LOCK_SHAPE, realDirOnly: true },
+    // The move's journal beside it. A crash between two renames of the ledger set leaves
+    // one behind. Only a regular file of exactly that shape goes.
+    { relPath: CURATION_MOVE_LOCK_PREFIX, isPrefix: true, shape: CURATION_MOVE_JOURNAL_SHAPE, realFileOnly: true },
     // per-project hook logs (logs/{project-slug}/) AND global logs — remove the
     // whole logs/ tree; covers proxy.log, debug logs, and any project-slug dirs.
     { relPath: 'logs', isDir: true },

@@ -88,11 +88,13 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
   Until then, a later init can still merge the rows.
 
 **The queue cap:**
-- A merge never takes a pending queue above 200 lines.
+- A merge fills a pending queue up to 100 lines and no further.
+  A capture trim keeps the newest 100 lines and starts only above 200 lines, so a merge never causes a trim.
 - Rows that do not fit wait in overflow files in the backup. A later init merges them as room appears.
   Status counts them as pending rows, so the delete step waits for zero pending rows.
-- The move itself drops no row. A full queue that receives a capture is trimmed to its newest 100 lines.
-  This is the rule from before, and the move does not cause it.
+- The move drops no row, and it never causes a trim.
+  A queue that holds more than 200 lines is still trimmed to its newest 100 lines when a capture arrives.
+  This is the rule from before 3.8.0, and the move does not change it.
 - `devflow init` drains the queue of a project where curation is off, as it did before 3.8.0.
 
 **Outcomes that need action:**
