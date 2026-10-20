@@ -1336,6 +1336,7 @@ describe('moveLedger — claims in the per-entry case (TP-31)', () => {
 const PRIVATE_RE = /^\.pending-turns\.jsonl\.merging-\d{8}T\d{6}Z-[0-9a-f]{8}$/;
 const SWEPT_RE = /^\.pending-turns\.jsonl\.swept-\d{8}T\d{6}Z-[0-9a-f]{8}$/;
 const OVERFLOW_RE = /^\.pending-turns\.jsonl\.overflow-\d{8}T\d{6}Z-[0-9a-f]{8}$/;
+const TRACKED_QUEUE_RE = /^\.pending-turns\.jsonl\.tracked-\d{8}T\d{6}Z-[0-9a-f]{8}$/;
 const REJECTED = '.pending-turns.rejected.jsonl';
 
 /** Files of `dir` whose names match `pattern`, sorted. */
@@ -1920,7 +1921,7 @@ describe('the queue rule — a queue file that git tracks is not merged', () => 
 
   const newQueue = (): string[] => linesOf(path.join(site.newDir, QUEUE));
 
-  it('skips a committed pending queue in the old folder: it stays in the backup under its name and a note counts it', () => {
+  it('parks a committed pending queue of the old folder in the backup under a name no queue form matches, and a note counts it', () => {
     seedKeptNew(turns(1, 4), turns(10, 11));
     commitInRepo(TRACKED_OLD_QUEUE);
 
@@ -1928,12 +1929,35 @@ describe('the queue rule — a queue file that git tracks is not merged', () => 
 
     expect(newQueue()).toEqual([turn(10)]);
     const backup = backupOf(value);
-    expect(read(path.join(backup, QUEUE))).toBe(turns(1, 4));
+    expect(exists(path.join(backup, QUEUE))).toBe(false);
+    const parked = matching(backup, TRACKED_QUEUE_RE);
+    expect(parked).toHaveLength(1);
+    expect(read(path.join(backup, parked[0]))).toBe(turns(1, 4));
     expect(matching(backup, SWEPT_RE)).toEqual([]);
     expect(matching(backup, PRIVATE_RE)).toEqual([]);
     const notes = value.notes.filter(note => /tracked by git/.test(note));
     expect(notes).toHaveLength(1);
-    expect(notes[0]).toMatch(/^1 queue file tracked by git stayed in learning, not merged: \.pending-turns\.jsonl$/);
+    expect(notes[0]).toBe(`1 queue file tracked by git stayed in learning, not merged, now named: ${parked[0]}`);
+  });
+
+  it('a tracked queue file that the move parked is inert: after the user commits the deletion, a sweep merges nothing, status counts no row and the drain lists nothing', () => {
+    seedKeptNew(turns(1, 4), turns(10, 11));
+    commitInRepo(TRACKED_OLD_QUEUE);
+    const backup = backupOf(movedValue());
+    const parked = matching(backup, TRACKED_QUEUE_RE);
+    expect(parked).toHaveLength(1);
+    expect(mover.backupPendingRows(site.root)).toMatchObject({ ok: true, value: { backups: [{ pendingRows: 0 }] } });
+
+    git(site.root, ['commit', '-q', '-a', '-m', 'remove the supplied queue']);
+    expect(git(site.root, ['ls-files', '--', '.devflow'])).not.toContain(QUEUE);
+
+    const sweep = mover.sweepLedgerBackups(site.root, opts());
+    expect(sweep.ok && sweep.value.merged).toBe(0);
+    expect(newQueue()).toEqual([turn(10)]);
+    expect(mover.backupPendingRows(site.root)).toMatchObject({ ok: true, value: { backups: [{ pendingRows: 0 }] } });
+    const drain = (mover as unknown as { backupQueueFiles(root: string): Res<{ files: string[] }> }).backupQueueFiles(site.root);
+    expect(drain).toEqual({ ok: true, value: { files: [] } });
+    expect(read(path.join(backup, parked[0]))).toBe(turns(1, 4));
   });
 
   it('skips a tracked overflow or private file but merges an untracked one beside it', () => {
@@ -1948,7 +1972,11 @@ describe('the queue rule — a queue file that git tracks is not merged', () => 
     const value = movedValue();
 
     expect(newQueue()).toEqual([turn(5), turn(6)]);
-    expect(read(path.join(backupOf(value), tracked))).toBe(turns(1, 3));
+    const backup = backupOf(value);
+    expect(exists(path.join(backup, tracked))).toBe(false);
+    const parked = matching(backup, new RegExp(`^${tracked.replace(/\./g, '\\.')}\\.tracked-\\d{8}T\\d{6}Z-[0-9a-f]{8}$`));
+    expect(parked).toHaveLength(1);
+    expect(read(path.join(backup, parked[0]))).toBe(turns(1, 3));
     expect(value.notes.some(note => note.includes(tracked))).toBe(true);
   });
 
@@ -2032,6 +2060,78 @@ describe('the queue rule — a queue file that git tracks is not merged', () => 
     expect(gitCalls(calls)).toEqual([]);
   });
 
+  describe('the whole-folder case', () => {
+    const seedWhole = (): void => seedOld({ ...ledgerSet('old'), [QUEUE]: turns(1, 3), 'learning.json': 'tuning\n' });
+
+    it('takes the per-entry path when the old folder holds a tracked queue file: the file does not reach the live folder', () => {
+      seedWhole();
+      commitInRepo(TRACKED_OLD_QUEUE);
+      expect(exists(site.newDir)).toBe(false);
+
+      const value = movedValue();
+
+      expect(value.mode).toBe('moved-in');
+      for (const [name, content] of Object.entries(ledgerSet('old'))) expect(read(path.join(site.newDir, name)), name).toBe(content);
+      expect(read(path.join(site.newDir, 'curation.json'))).toBe('tuning\n');
+      expect(exists(path.join(site.newDir, QUEUE))).toBe(false);
+      expect(matching(site.newDir, TRACKED_QUEUE_RE)).toEqual([]);
+      const backup = backupOf(value);
+      const parked = matching(backup, TRACKED_QUEUE_RE);
+      expect(parked).toHaveLength(1);
+      expect(read(path.join(backup, parked[0]))).toBe(turns(1, 3));
+      expect(value.notes.filter(note => /tracked by git/.test(note))).toHaveLength(1);
+      expect(exists(moveLockDir())).toBe(false);
+    });
+
+    it('also takes the per-entry path for a tracked claim file', () => {
+      seedOld({ ...ledgerSet('old') });
+      fs.writeFileSync(path.join(site.oldDir, CLAIM), turns(1, 3));
+      age(path.join(site.oldDir, CLAIM), 20 * 60 * 1000);
+      commitInRepo(`.devflow/${OLD}/${CLAIM}`);
+
+      const value = movedValue();
+
+      expect(value.mode).toBe('moved-in');
+      expect(exists(path.join(site.newDir, CLAIM))).toBe(false);
+      expect(matching(backupOf(value), new RegExp(`^${CLAIM.replace(/\./g, '\\.')}\\.tracked-`))).toHaveLength(1);
+    });
+
+    it('still renames the whole folder when git tracks other files but not the queue, and for a project that is no repository', () => {
+      seedWhole();
+      commitInRepo('README.txt');
+      expect(movedValue().mode).toBe('whole-folder');
+      expect(read(path.join(site.newDir, QUEUE))).toBe(turns(1, 3));
+
+      fs.rmSync(site.root, { recursive: true, force: true });
+      fs.mkdirSync(site.root);
+      seedWhole();
+      expect(movedValue().mode).toBe('whole-folder');
+    });
+
+    it('asks git only when the old folder holds a queue file', () => {
+      seedOld(ledgerSet('old'));
+      const calls = vi.spyOn(nodeChildProcess, 'spawnSync');
+      expect(movedValue().mode).toBe('whole-folder');
+      expect(gitCalls(calls)).toEqual([]);
+    });
+
+    it('fails closed when git cannot say what it tracks: the per-entry path keeps the queue out of the live folder', () => {
+      seedWhole();
+      const real = nodeChildProcess.spawnSync;
+      vi.spyOn(nodeChildProcess, 'spawnSync').mockImplementation(((command: string, ...rest: unknown[]) => {
+        if (command === 'git') return { pid: 0, output: [], stdout: '', stderr: 'fatal: something else\n', signal: null, error: undefined, status: 1 };
+        return (real as (...a: unknown[]) => unknown)(command, ...rest);
+      }) as never);
+
+      const value = movedValue();
+
+      expect(value.mode).toBe('moved-in');
+      expect(exists(path.join(site.newDir, QUEUE))).toBe(false);
+      expect(read(path.join(backupOf(value), QUEUE))).toBe(turns(1, 3));
+      expect(value.notes.some(note => /could not tell/.test(note))).toBe(true);
+    });
+  });
+
   it('the backup sweep skips a file git tracks under the old folder\'s name, merges the rest, and asks git once', () => {
     seedNew({ [LOG]: '' });
     const first = path.join(site.devflow, 'learning.backup-20261001T000001Z-00000001');
@@ -2048,7 +2148,10 @@ describe('the queue rule — a queue file that git tracks is not merged', () => 
     expect(gitCalls(calls)).toHaveLength(1);
     expect(result.ok && result.value.merged).toBe(2);
     expect(newQueue()).toEqual([turn(5), turn(6)]);
-    expect(read(path.join(first, QUEUE))).toBe(turns(1, 3));
+    expect(exists(path.join(first, QUEUE))).toBe(false);
+    const parked = matching(first, TRACKED_QUEUE_RE);
+    expect(parked).toHaveLength(1);
+    expect(read(path.join(first, parked[0]))).toBe(turns(1, 3));
     expect(result.ok && result.value.notes.filter(note => /tracked by git/.test(note))).toHaveLength(1);
   });
 });
@@ -2077,7 +2180,10 @@ describe('moveEntryClass — one sample name per class', () => {
     ['displaced', `${LOG}.displaced-${TAIL}`], ['displaced', `${LEDGER}.displaced-${TAIL}`],
     ['rendered', 'decisions.md'], ['rendered', 'pitfalls.md'], ['rendered', 'index.md'],
     ['journal', JOURNAL],
+    ['tracked', `${QUEUE}.tracked-${TAIL}`], ['tracked', `${CLAIM}.tracked-${TAIL}`],
+    ['tracked', `${QUEUE}.overflow-${TAIL}.tracked-${TAIL}`], ['tracked', `${QUEUE}.merging-${TAIL}.tracked-${TAIL}`],
     ['unknown', 'notes.txt'], ['unknown', `${QUEUE}.merging-not-a-stamp`], ['unknown', `${LOG}.displaced-`],
+    ['unknown', `${QUEUE}.tracked-not-a-stamp`], ['unknown', `${LOG}.tracked-${TAIL}`],
     ['unknown', `${JOURNAL}.bak`], ['unknown', '.decisions.lock.old'], ['unknown', `${LOG}.bak`],
   ];
 
@@ -2103,6 +2209,7 @@ describe('the link refusal covers every class a move path renames', () => {
     ['displaced', `${LOG}.displaced-${TAIL}`, false],
     ['rendered', 'decisions.md', false],
     ['journal', JOURNAL, false],
+    ['tracked', `${QUEUE}.tracked-${TAIL}`, false],
     ['unknown', 'notes.txt', false],
   ];
 

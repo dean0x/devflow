@@ -104,7 +104,9 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
 - An init merges rows from at most 50 backup folders in one run. It passes over a folder that holds no pending rows,
   so a later folder is reached when the earlier ones are done.
 - A queue file that git tracks is never merged, because the repository supplied it.
-  It stays in the old folder or the backup under its own name, and a note says how many files stayed.
+  The move does not carry it into the new folder, not even in a whole-folder move.
+  The pass that finds it renames it in the backup to `<name>.tracked-<stamp>-<8 hex>`, and a note says how many files stayed and under what names.
+  No later init, status count or drain reads that file, so it stays inert also after you commit its deletion.
   If git is missing, times out or fails, the move merges nothing from that folder and says so. A later init tries again.
 
 **The queue cap:**

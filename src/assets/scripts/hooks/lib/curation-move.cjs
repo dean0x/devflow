@@ -162,6 +162,16 @@ function queueFormOf(name) {
   return QUEUE_FORMS.find(entry => entry.re.test(name)) || null;
 }
 
+/**
+ * The name a tracked queue file takes when a pass finds that git tracks it: the file's own
+ * name and `.tracked-<stamp>-<hex>`. The name is none of the queue forms, so no sweep,
+ * status count or drain ever reads it again. It stays in the folder, which becomes the
+ * backup, as the repository's content.
+ */
+const TRACKED_NAME_RE = new RegExp(
+  `^(?:${escapeRegExp(QUEUE_NAME)}|${escapeRegExp(CLAIM_NAME)})(?:\\.(?:merging|overflow)-${MOVE_UNIQUE_TAIL_RE})?\\.tracked-${MOVE_UNIQUE_TAIL_RE}$`,
+);
+
 /** Names of the files the renderer writes: the move never carries them, the new folder rebuilds its own. */
 const RENDERED_NAMES = new Set([getDecisionsFilePath, getPitfallsFilePath, getDecisionsIndexPath].map(nameOfHelper));
 
@@ -177,6 +187,7 @@ const ENTRY = Object.freeze({
   LOCK: 'lock',
   RECOVERY: 'recovery',
   QUEUE_FORM: 'queue-form',
+  TRACKED: 'tracked',
   DISPLACED: 'displaced',
   RENDERED: 'rendered',
   JOURNAL: 'journal',
@@ -195,6 +206,9 @@ const ENTRY = Object.freeze({
  * folder). A rendered file, a journal-named file and an unknown entry are never read
  * or renamed: a link among them never refuses a move.
  *
+ * A tracked entry (a queue file that git tracks, renamed by the pass that found it) is
+ * never read or renamed again, so it is not link-checked; it stays in the backup.
+ *
  * leftBehind: the entry stays in the backup, and one note lists it.
  */
 const MOVE_ENTRY_CLASSES = Object.freeze({
@@ -204,6 +218,7 @@ const MOVE_ENTRY_CLASSES = Object.freeze({
   [ENTRY.LOCK]: Object.freeze({ linkChecked: true, leftBehind: false }),
   [ENTRY.RECOVERY]: Object.freeze({ linkChecked: true, leftBehind: false }),
   [ENTRY.QUEUE_FORM]: Object.freeze({ linkChecked: true, leftBehind: false }),
+  [ENTRY.TRACKED]: Object.freeze({ linkChecked: false, leftBehind: true }),
   [ENTRY.DISPLACED]: Object.freeze({ linkChecked: true, leftBehind: false }),
   [ENTRY.RENDERED]: Object.freeze({ linkChecked: false, leftBehind: false }),
   [ENTRY.JOURNAL]: Object.freeze({ linkChecked: false, leftBehind: true }),
@@ -225,6 +240,7 @@ function moveEntryClass(name) {
   if (name === STORE_LOCK_NAME || name === QUEUE_LOCK_NAME) return ENTRY.LOCK;
   if (RECOVERY_FILE_RE.test(name)) return ENTRY.RECOVERY;
   if (queueFormOf(name) !== null) return ENTRY.QUEUE_FORM;
+  if (TRACKED_NAME_RE.test(name)) return ENTRY.TRACKED;
   if (DISPLACED_RES.some(re => re.test(name))) return ENTRY.DISPLACED;
   if (RENDERED_NAMES.has(name)) return ENTRY.RENDERED;
   if (name === OLD_FOLDER_JOURNAL_NAME) return ENTRY.JOURNAL;
@@ -418,7 +434,8 @@ function relocateLocks(held, from, to) {
  * applies: one rename(2) carries the whole folder, its locks included. A private,
  * swept or overflow queue file sitting directly in the old folder refuses the move,
  * because the rename would carry it into the live folder, where no sweep reads it. A
- * file named like a journal never gets here: moveLedger takes the per-entry path for it.
+ * file named like a journal, or a queue file that git tracks (or may track), never gets
+ * here: moveLedger takes the per-entry path for it (oldFolderNeedsEntryPath).
  *
  * @param {{ oldDir: string, newDir: string }} ctx
  * @returns {{ ok: true, value: { notes: string[] } } | { ok: false, error: { kind: string, message: string } }}
@@ -720,6 +737,26 @@ function mergeQueueFile(ctx, file, targetDir) {
 }
 
 /**
+ * Take a queue file that git tracks out of every queue form: rename it, with no replace,
+ * to `<name>.tracked-<stamp>-<hex>` (TRACKED_NAME_RE) in the same folder. The pass that
+ * finds the file decides once. Without the rename, the file stays under a queue name, and
+ * the index entry that made it tracked goes when the user commits the deletion that the
+ * move caused: a later sweep would then merge the repository's rows. A path that is not a
+ * regular file is left as it is.
+ *
+ * @param {{ now: number }} ctx
+ * @param {string} file
+ * @returns {string} the new name of the file, or its own name when it was left as it is
+ */
+function parkTrackedQueueFile(ctx, file) {
+  const stat = lstatOrNull(file);
+  if (stat === null || !stat.isFile()) return path.basename(file);
+  const parked = `${path.basename(file)}.tracked-${uniqueTail(ctx.now)}`;
+  renameNoReplace(file, path.join(path.dirname(file), parked));
+  return parked;
+}
+
+/**
  * The queue rule: merge a folder's pending queue (and, for a stale claim, its
  * processing batch) into the target folder's pending queue.
  *
@@ -729,14 +766,16 @@ function mergeQueueFile(ctx, file, targetDir) {
  * create a fresh queue that the next run catches, and the private file goes through
  * mergeQueueFile. With `overflow` set, overflow files are merged too.
  *
- * A queue file that git tracks is never merged: the repository supplied it. It stays in
- * the folder under its own name, and one note counts it. The index is read once per pass
- * (ctx.git) and a file counts as tracked under the folder's own name or under
- * the old folder's name, because a backup is the old folder renamed. When git cannot say
- * what it tracks (not installed, a timeout, a failure), nothing from the folder is merged
- * and one note says why: the files stay, and the next pass asks again. A folder outside a
- * git working tree has no tracked file. A finding is noted once for the pass, so the sweep
- * of the backup that a merge just made does not repeat the merge's notes.
+ * A queue file that git tracks is never merged: the repository supplied it. The pass that
+ * finds it renames it, with no replace, to a name that no queue form matches
+ * (parkTrackedQueueFile), so no later pass, status count or drain reads it, and one note
+ * lists the new names. The index is read once per pass (ctx.git) and a file counts as
+ * tracked under the folder's own name or under the old folder's name, because a backup is
+ * the old folder renamed. When git cannot say what it tracks (not installed, a timeout, a
+ * failure), nothing from the folder is merged and one note says why: the files stay as
+ * they are, and the next pass asks again. A folder outside a git working tree has no
+ * tracked file. A finding is noted once for the pass, so the sweep of the backup that a
+ * merge just made does not repeat the merge's notes.
  *
  * @param {{ now: number, git: GitLookup }} ctx
  * @param {{ dir: string, targetDir: string, bases: string[], overflow?: boolean }} opts
@@ -750,8 +789,8 @@ function curationMoveMergeQueue(ctx, { dir, targetDir, bases, overflow = false }
   const tracked = [];
   let unknown = null;
   // A queue file a repository committed is content the repository supplied, not rows a
-  // capture hook wrote: it stays where it is. When git cannot say which files it tracks,
-  // nothing from this folder is merged, and a later pass asks again.
+  // capture hook wrote: it is parked under a name no queue form matches. When git cannot
+  // say which files it tracks, nothing from this folder is merged, and a later pass asks again.
   const mayMerge = name => {
     if (unknown !== null) return false;
     const answer = ctx.git.files();
@@ -760,7 +799,7 @@ function curationMoveMergeQueue(ctx, { dir, targetDir, bases, overflow = false }
       return false;
     }
     if (!isTrackedQueueFile(answer.tracked, dirName, name)) return true;
-    tracked.push(name);
+    tracked.push({ name, parked: parkTrackedQueueFile(ctx, path.join(dir, name)) });
     return false;
   };
   const take = file => {
@@ -788,10 +827,10 @@ function curationMoveMergeQueue(ctx, { dir, targetDir, bases, overflow = false }
   if (unknown !== null && ctx.git.firstReport('unknown')) {
     total.notes.push(`queue files in ${dirName} were not merged: git could not tell which of them it tracks (${unknown}); they stay for the next pass`);
   }
-  const held = tracked.filter(name => ctx.git.firstReport(`tracked:${name}`));
+  const held = tracked.filter(({ name }) => ctx.git.firstReport(`tracked:${name}`));
   if (held.length > 0) {
-    const shown = held.slice(0, MOVE_MAX_NAMES_LISTED).join(', ');
-    total.notes.push(`${held.length} queue ${held.length === 1 ? 'file' : 'files'} tracked by git stayed in ${dirName}, not merged: ${shown}${held.length > MOVE_MAX_NAMES_LISTED ? ', ...' : ''}`);
+    const shown = held.slice(0, MOVE_MAX_NAMES_LISTED).map(({ parked }) => parked).join(', ');
+    total.notes.push(`${held.length} queue ${held.length === 1 ? 'file' : 'files'} tracked by git stayed in ${dirName}, not merged, now named: ${shown}${held.length > MOVE_MAX_NAMES_LISTED ? ', ...' : ''}`);
   }
   return total;
 }
@@ -1057,8 +1096,9 @@ function curationMoveFinish(ctx, { whole }) {
  * move lock, the old folder's store lock and queue lock, and, when the new folder
  * exists, its two. Any busy lock releases what was taken and answers `busy`; a fresh
  * claim in either folder answers `busy` with the reason `claim`. With the new folder absent the whole folder is
- * renamed (curationMoveWhole), unless the old folder holds a file named like a journal:
- * then an empty new folder is made and the pass takes the per-entry path. Errors
+ * renamed (curationMoveWhole), unless the old folder holds a file named like a journal
+ * or a queue file that git tracks (oldFolderNeedsEntryPath): then an empty new folder is
+ * made and the pass takes the per-entry path. Errors
  * (EXDEV, EBUSY, EACCES, EROFS, any other I/O failure) answer an `io-error` Result and
  * copy nothing: the old folder stays whole.
  *
@@ -1152,7 +1192,7 @@ function moveLedgerUnscrubbed(root, options = {}) {
 
     fs.mkdirSync(machine, { recursive: true, mode: 0o700 });
     let newExisted = lstatOrNull(ctx.newDir) !== null;
-    if (!newExisted && lstatOrNull(path.join(ctx.oldDir, OLD_FOLDER_JOURNAL_NAME)) !== null) {
+    if (!newExisted && oldFolderNeedsEntryPath(ctx)) {
       // The one rename of the whole-folder case would carry that file into the live folder.
       // An empty new folder puts the pass on the per-entry path, where the file stays in the
       // backup. A busy or failed pass leaves the empty folder, and the next pass takes the
@@ -1181,6 +1221,29 @@ function moveLedgerUnscrubbed(root, options = {}) {
   } catch (err) {
     return moveIoFailure(MOVE_OP, err);
   }
+}
+
+/**
+ * True when the old folder must not be renamed whole, because the one rename would carry
+ * something into the live folder that must stay in the backup: a file named like a
+ * journal (repository content, never read), or a queue file that git tracks (the
+ * repository supplied it, so no merge takes it). When the old folder holds a pending or
+ * processing queue file and git cannot say what it tracks, it fails closed as the merge
+ * does: the per-entry path then merges nothing and says why. The index is asked only when
+ * such a queue file is there, and once per pass (ctx.git).
+ *
+ * @param {{ oldDir: string, git: GitLookup }} ctx
+ * @returns {boolean}
+ */
+function oldFolderNeedsEntryPath(ctx) {
+  if (lstatOrNull(path.join(ctx.oldDir, OLD_FOLDER_JOURNAL_NAME)) !== null) return true;
+  const queueFiles = [QUEUE_NAME, CLAIM_NAME].filter(name => {
+    const stat = lstatOrNull(path.join(ctx.oldDir, name));
+    return stat !== null && stat.isFile();
+  });
+  if (queueFiles.length === 0) return false;
+  const answer = ctx.git.files();
+  return !answer.ok || queueFiles.some(name => isTrackedQueueFile(answer.tracked, path.basename(ctx.oldDir), name));
 }
 
 /**
