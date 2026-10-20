@@ -135,7 +135,7 @@ devflow/
 │                   ├── project-paths.cjs   # Project slug + path resolution
 │                   ├── render-decisions.cjs # Renders decisions.md, pitfalls.md and index.md from the ledger (render / --check CLI)
 │                   ├── safe-path.cjs       # Path safety validation
-│                   └── tracked-areas.cjs   # Leaf: does git track any entry under the data folders `.devflow/learning` and `.devflow/curation`? One bounded `git ls-files` call; the move asks it first
+│                   └── tracked-areas.cjs   # Leaf: does git track any entry under the data folders `.devflow/learning/` and `.devflow/curation/`? One bounded `git ls-files` call; the move asks it first
 ├── scripts/                          # Dev tooling
 │   ├── build-mds.ts                  # MDS compiler: command hosts → dist/commands/*.md, agent generator hosts → dist/agents/*.md, reference modules → dist/skills/git/references/**
 │   ├── bump-version.ts               # Version bump script
