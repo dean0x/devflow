@@ -35,6 +35,10 @@
  *     every answer but the literal `true`. Its argv behaviour per setting is
  *     pinned in tests/hud-git-fsmonitor.test.ts.
  *
+ * Words that tell the user which commands to run are not calls. Two phrases of the
+ * notice for a skipped ledger move are listed in NOTICE_COMMAND_PHRASES, and a match
+ * that stands at exactly one of them is skipped. devflow never runs these commands.
+ *
  * What a green run does NOT prove
  * -------------------------------
  * The matcher reads calls as they are spelled. An argv assembled at run time
@@ -122,6 +126,20 @@ const SHELL_COMMENT = /^\s*#/;
 const JS_COMMENT = /^\s*(?:\*|\/\/|\/\*)/;
 
 /**
+ * The phrases of the skipped-move notice that name a command for the user to run. The
+ * notice is printed, never executed, so a match at one of these is prose.
+ */
+const NOTICE_COMMAND_PHRASES: readonly string[] = [
+  'run `git ls-files .devflow`',
+  'with `git rm --cached`',
+];
+
+/** True when the `git` at `gitIndex` is the one inside a phrase of NOTICE_COMMAND_PHRASES. */
+function insideNoticeCommandPhrase(content: string, gitIndex: number): boolean {
+  return NOTICE_COMMAND_PHRASES.some(phrase => content.startsWith(phrase, gitIndex - phrase.indexOf('git')));
+}
+
+/**
  * Names of the wrappers in `entry` that guard their calls: those that prepend
  * the override, and — in the carve-out file only, and only while it defines the
  * classifier itself — those that prepend the classifier's answer.
@@ -148,12 +166,14 @@ function findUnguardedIndexReads(corpus: readonly CorpusEntry[]): UnguardedRead[
     if (SHELL_FILE(entry.path)) {
       for (const m of content.matchAll(SHELL_CALL)) {
         if (onCommentLine(content, m.index, SHELL_COMMENT)) continue;
+        if (insideNoticeCommandPhrase(content, m.index)) continue;
         if (!SHELL_OVERRIDE.test(m[1])) report(m.index, m[0]);
       }
       continue;
     }
     for (const m of content.matchAll(JS_COMMAND_STRING)) {
       if (onCommentLine(content, m.index, JS_COMMENT)) continue;
+      if (insideNoticeCommandPhrase(content, m.index + m[0].indexOf('git'))) continue;
       if (!SHELL_OVERRIDE.test(m[2])) report(m.index, m[0]);
     }
     const wrappers = guardedWrappers(entry);
@@ -244,6 +264,8 @@ describe('no-fsmonitor-index-read guard: seeded probes', () => {
     { name: 'a git-named wrapper call', entry: { path: 'src/hud/x.ts', content: "await gitExec(['diff', '--shortstat', base], cwd);" } },
     { name: 'a wrapper call across lines', entry: { path: JS, content: "runGit(exec, root,\n  ['add', '--', file], MAX);" } },
     { name: 'a command string', entry: { path: 'src/core/x.ts', content: "execSync('git commit -m x');" } },
+    { name: 'a shell call after the words of a notice', entry: { path: SH, content: "N='run `git ls-files .devflow`'; git ls-files -z\n" } },
+    { name: 'a notice phrase with other arguments', entry: { path: SH, content: "N='run `git ls-files .devflow --others`'\n" } },
     {
       name: 'a call through an unguarded wrapper',
       entry: { path: JS, content: "function git(io, args) {\n  return run(io, 'git', [...args]);\n}\ngit(io, ['status']);" },
@@ -276,6 +298,14 @@ describe('no-fsmonitor-index-read guard: seeded probes', () => {
       { path: 'src/cli/x.ts', content: "const ACTIONS = ['enable', 'disable', 'status'];\nexecFileSync('sudo', ['rm', p]);" },
     ];
     expect(findUnguardedIndexReads(clean)).toEqual([]);
+  });
+
+  it('does not report the words of a notice that name a command for the user to run', () => {
+    const notice = 'To find them, run `git ls-files .devflow`. Untrack them with `git rm --cached`, and delete them.';
+    expect(findUnguardedIndexReads([
+      { path: SH, content: `MOVE_SKIP_SECTION='${notice}'\n` },
+      { path: 'src/core/x.ts', content: `const T = '${notice}';\nconst U =\n  \`${notice}\`;` },
+    ])).toEqual([]);
   });
 
   const CARVE_OUT = [
