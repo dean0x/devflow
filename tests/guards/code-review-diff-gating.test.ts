@@ -298,16 +298,16 @@ export function collectPrincipleDefects(body: string): string[] {
   for (const n of [1, 3]) {
     const p = line(n)
     if (p === '') { out.push(`principle ${n} is missing`); continue }
-    if (!/redirect-only/.test(p) || !/print nothing/.test(p)) out.push(`principle ${n} does not say redirect-only writes print nothing`)
+    if (!/\bwrites print nothing\b/.test(p)) out.push(`principle ${n} does not say its writes print nothing`)
   }
   const p1 = line(1)
   for (const probe of ['git worktree list', 'branch --show-current', 'cat-file -t', 'rev-parse']) {
     if (!p1.includes(probe)) out.push(`principle 1 does not name the Phase 0 probe ${probe}`)
   }
-  if (/ls-files/.test(p1)) out.push('principle 1 still names the tracked-file probe')
+  if (/ls-files/.test(p1)) out.push('principle 1 names the tracked-file probe ls-files')
   if (!/bounded Phase 1 path listing/.test(p1)) out.push('principle 1 does not name the bounded path listing')
   if (!/`diff\.patch`/.test(p1) || !/`diff-\{focus\}\.patch`/.test(p1)) out.push('principle 1 does not name the patch writes')
-  if (!/redirect-only writes \(`diff\.patch`, `diff-\{focus\}\.patch`, the marker\)/.test(p1)) out.push('principle 1 does not name the marker among the redirect-only writes')
+  if (!/the writes \(`diff\.patch`, `diff-\{focus\}\.patch`, the marker and its `mkdir -p`\)/.test(p1)) out.push('principle 1 does not name the marker and its `mkdir -p` among the writes')
   if (!/exceptions? named in Principle 1/.test(line(3))) out.push('principle 3 does not point at the exceptions of Principle 1')
   return out
 }
@@ -364,25 +364,28 @@ export function collectDocsOfBehaviourDefects(body: string): string[] {
   return out
 }
 
-/** The start of the range rule: it covers a diff review with no DIFF_FILE and names the hex commit the range starts with. */
-const RANGE_RULE_START = 'A diff review with no `DIFF_FILE` reviews only a `DIFF_RANGE` that starts with a 40 or 64 lowercase hex commit'
+/** With a DIFF_FILE the patch file is the review, so the range is for information. */
+const RANGE_INFO_CLAUSE = 'With a `DIFF_FILE` it is for information only.'
+
+/** The start of the range rule: with no DIFF_FILE only `{sha}...HEAD` is reviewed, `{sha}` being 40 or 64 lowercase hex. */
+const RANGE_RULE_START = 'Without one, review only `{sha}...HEAD` with `{sha}` 40 or 64 lowercase hex, '
 
 /**
- * A diff review with no DIFF_FILE reviews only a range that starts with a 40 or 64 lowercase hex commit, and returns
- * `reviewed: false` when there is none, when `git cat-file -t {sha}` does not print `commit`, or when
- * `git diff {DIFF_RANGE}` exits non-zero. The rule sits in the DIFF_RANGE bullet alone: a review with a DIFF_FILE, and
- * a review with no diff, take no part in it.
+ * With a DIFF_FILE the range is for information only. With no DIFF_FILE only `{sha}...HEAD` is reviewed, `{sha}`
+ * being 40 or 64 lowercase hex that `git cat-file -t {sha}` reports as `commit`, and `git diff {DIFF_RANGE}` must
+ * exit 0; any other range, or none, returns `reviewed: false`. The rule sits in the DIFF_RANGE bullet alone: a review
+ * with a DIFF_FILE, and a review with no diff, take no part in it.
  */
 function collectRangeRuleDefects(review: string, rangeBullet: string, fileBullet: string | null): string[] {
   const out: string[] = []
+  if (!rangeBullet.includes(RANGE_INFO_CLAUSE)) out.push('the DIFF_RANGE bullet does not mark the range information only for a review with a DIFF_FILE')
   const at = rangeBullet.indexOf(RANGE_RULE_START)
-  if (at === -1) out.push('the DIFF_RANGE bullet does not limit a diff review with no DIFF_FILE to a range that starts with a 40 or 64 lowercase hex commit')
+  if (at === -1) out.push('the DIFF_RANGE bullet does not limit a review with no DIFF_FILE to `{sha}...HEAD` with a 40 or 64 lowercase hex `{sha}`')
   else {
     const rule = rangeBullet.slice(at)
-    if (!/\bwith none\b/.test(rule)) out.push('the DIFF_RANGE rule does not cover a missing range')
-    if (!rule.includes('`git cat-file -t {sha}` does not print `commit`')) out.push('the DIFF_RANGE rule does not check that `git cat-file -t {sha}` prints `commit`')
-    if (!rule.includes('`git diff {DIFF_RANGE}` exits non-zero')) out.push('the DIFF_RANGE rule does not report a non-zero exit of `git diff {DIFF_RANGE}`')
-    if (!/it returns `reviewed: false`\.$/.test(rule)) out.push('the DIFF_RANGE rule does not end in the result `reviewed: false`')
+    if (!rule.includes('`git cat-file -t {sha}` printing `commit`')) out.push('the DIFF_RANGE rule does not check that `git cat-file -t {sha}` prints `commit`')
+    if (!rule.includes('`git diff {DIFF_RANGE}` exiting 0')) out.push('the DIFF_RANGE rule does not require `git diff {DIFF_RANGE}` to exit 0')
+    if (!/; else return `reviewed: false`\.$/.test(rule)) out.push('the DIFF_RANGE rule does not return `reviewed: false` for any other range or none')
   }
   if (fileBullet !== null && fileBullet.includes('reviewed: false')) out.push('the DIFF_FILE bullet carries the range rule; a review with a DIFF_FILE is unaffected')
   const outside = (review.match(/reviewed: false/g) ?? []).length - (rangeBullet.match(/reviewed: false/g) ?? []).length - (fileBullet?.match(/reviewed: false/g) ?? []).length
@@ -403,10 +406,7 @@ export function collectReviewAgentDefects(review: string): string[] {
   }
   const range = /^- \*\*DIFF_RANGE\*\* \(optional\): [^\n]*$/m.exec(review)
   if (range === null) out.push('review.md Input does not declare DIFF_RANGE')
-  else {
-    if (!/information only/.test(range[0])) out.push('DIFF_RANGE is not marked information only')
-    out.push(...collectRangeRuleDefects(review, range[0], file === null ? null : file[0]))
-  }
+  else out.push(...collectRangeRuleDefects(review, range[0], file === null ? null : file[0]))
   const identify = review.match(/^\d+\. \*\*Identify changed lines\*\*[^\n]*$/gm) ?? []
   if (identify.length === 0) out.push('no Identify changed lines responsibility')
   for (const line of identify) if (!line.includes('`DIFF_FILE`')) out.push(`Identify changed lines does not read DIFF_FILE: ${line.slice(0, 60)}`)
@@ -710,9 +710,10 @@ describe('review.md reads DIFF_FILE and verifies with ranged reads (AC-308)', ()
       .toMatch(/Identify changed lines does not read DIFF_FILE/)
   })
 
-  describe('a diff review with no DIFF_FILE reviews only a range that starts with a resolved hex commit, else it reports that it did not review', () => {
+  describe('with a DIFF_FILE the range is for information only; with none, only `{sha}...HEAD` is reviewed, else the review reports that it did not review', () => {
     const review = REVIEW_VARIANTS[0].body
-    const rule = 'A diff review with no `DIFF_FILE` reviews only a `DIFF_RANGE` that starts with a 40 or 64 lowercase hex commit; with none, or when `git cat-file -t {sha}` does not print `commit` or `git diff {DIFF_RANGE}` exits non-zero, it returns `reviewed: false`.'
+    const LIMIT = 'the DIFF_RANGE bullet does not limit a review with no DIFF_FILE to `{sha}...HEAD` with a 40 or 64 lowercase hex `{sha}`'
+    const rule = 'With a `DIFF_FILE` it is for information only. Without one, review only `{sha}...HEAD` with `{sha}` 40 or 64 lowercase hex, `git cat-file -t {sha}` printing `commit` and `git diff {DIFF_RANGE}` exiting 0; else return `reviewed: false`.'
 
     it.each(REVIEW_VARIANTS)('$label: the DIFF_RANGE bullet states the whole rule on its one line', ({ body }) => {
       const bullet = /^- \*\*DIFF_RANGE\*\* \(optional\): [^\n]*$/m.exec(body)
@@ -721,22 +722,38 @@ describe('review.md reads DIFF_FILE and verifies with ranged reads (AC-308)', ()
       expect(collectReviewAgentDefects(body)).toEqual([])
     })
 
-    it('a spawn that receives no usable range reports that it did not review: the missing-range clause is required', () => {
-      expect(collectReviewAgentDefects(seed(review, '; with none, or when', '; when')))
-        .toContain('the DIFF_RANGE rule does not cover a missing range')
+    it('a review with a DIFF_FILE takes the range for information only: the clause is required', () => {
+      expect(collectReviewAgentDefects(seed(review, ' With a `DIFF_FILE` it is for information only.', '')))
+        .toContain('the DIFF_RANGE bullet does not mark the range information only for a review with a DIFF_FILE')
+      expect(collectReviewAgentDefects(seed(review, 'it is for information only', 'it is binding')))
+        .toContain('the DIFF_RANGE bullet does not mark the range information only for a review with a DIFF_FILE')
+    })
+
+    it('a spawn that receives no usable range reports that it did not review: the else clause is required', () => {
+      expect(collectReviewAgentDefects(seed(review, '; else return', '; return')))
+        .toContain('the DIFF_RANGE rule does not return `reviewed: false` for any other range or none')
       expect(collectReviewAgentDefects(seed(review, rule, 'A diff review reviews the `DIFF_RANGE`.')))
-        .toContain('the DIFF_RANGE bullet does not limit a diff review with no DIFF_FILE to a range that starts with a 40 or 64 lowercase hex commit')
-      expect(collectReviewAgentDefects(seed(review, 'starts with a 40 or 64 lowercase hex commit', 'starts with a commit')))
-        .toContain('the DIFF_RANGE bullet does not limit a diff review with no DIFF_FILE to a range that starts with a 40 or 64 lowercase hex commit')
+        .toContain(LIMIT)
+    })
+
+    it('the whole range shape is held: a start-only shape, a right side other than HEAD and text after HEAD are each reported', () => {
+      expect(collectReviewAgentDefects(seed(review, '`{sha}...HEAD` with `{sha}` 40 or 64 lowercase hex', 'a range that starts with a 40 or 64 lowercase hex commit')))
+        .toContain(LIMIT)
+      expect(collectReviewAgentDefects(seed(review, '`{sha}...HEAD` with', '`{sha}...{ref}` with')))
+        .toContain(LIMIT)
+      expect(collectReviewAgentDefects(seed(review, '`{sha}...HEAD` with', '`{sha}...HEAD` and any text after it, with')))
+        .toContain(LIMIT)
+      expect(collectReviewAgentDefects(seed(review, '`{sha}...HEAD` with', '`{sha}` with')))
+        .toContain(LIMIT)
     })
 
     it('a range that names no commit, or whose diff exits non-zero, reports that it did not review: both clauses are required', () => {
-      expect(collectReviewAgentDefects(seed(review, ' or when `git cat-file -t {sha}` does not print `commit`', '')))
+      expect(collectReviewAgentDefects(seed(review, ' `git cat-file -t {sha}` printing `commit` and', '')))
         .toContain('the DIFF_RANGE rule does not check that `git cat-file -t {sha}` prints `commit`')
-      expect(collectReviewAgentDefects(seed(review, 'does not print `commit` or `git diff {DIFF_RANGE}` exits non-zero', 'does not print `commit`')))
-        .toContain('the DIFF_RANGE rule does not report a non-zero exit of `git diff {DIFF_RANGE}`')
-      expect(collectReviewAgentDefects(seed(review, 'it returns `reviewed: false`.', 'it carries on.')))
-        .toContain('the DIFF_RANGE rule does not end in the result `reviewed: false`')
+      expect(collectReviewAgentDefects(seed(review, ' and `git diff {DIFF_RANGE}` exiting 0', '')))
+        .toContain('the DIFF_RANGE rule does not require `git diff {DIFF_RANGE}` to exit 0')
+      expect(collectReviewAgentDefects(seed(review, 'else return `reviewed: false`.', 'else carry on.')))
+        .toContain('the DIFF_RANGE rule does not return `reviewed: false` for any other range or none')
     })
 
     it('a review with a DIFF_FILE, or with no diff, keeps its spawns unchanged: the rule sits in the DIFF_RANGE bullet alone', () => {
@@ -745,8 +762,8 @@ describe('review.md reads DIFF_FILE and verifies with ranged reads (AC-308)', ()
         .toContain('the DIFF_FILE bullet carries the range rule; a review with a DIFF_FILE is unaffected')
       expect(collectReviewAgentDefects(`${review}\nWith no diff to review it returns \`reviewed: false\`.\n`))
         .toContain('`reviewed: false` appears outside the DIFF_RANGE bullet; a review with no diff is unaffected')
-      expect(collectReviewAgentDefects(seed(review, 'A diff review with no `DIFF_FILE` reviews only', 'A review reviews only')))
-        .toContain('the DIFF_RANGE bullet does not limit a diff review with no DIFF_FILE to a range that starts with a 40 or 64 lowercase hex commit')
+      expect(collectReviewAgentDefects(seed(review, 'Without one, review only', 'Review only')))
+        .toContain(LIMIT)
     })
   })
 
@@ -869,7 +886,7 @@ describe('the stored review head sits under the git directory and is checked as 
       .toContain('Step 0d lost the reachability check or the incremental range')
   })
 
-  it('known-bad probes: a marker read from the docs tree, an unnamed git directory or a kept tracked-file check is reported', () => {
+  it('known-bad probes: a marker read from the docs tree, an unnamed git directory or a tracked-file check is reported', () => {
     expect(collectStoredHeadDefects(seed(ON, READ + GD, '`{worktree}/.devflow/docs/reviews/{branch-slug}/.last-review-head`'), REVIEW_RANGE))
       .toEqual(expect.arrayContaining(['the stored review head is not read under the absolute git directory', 'the review head marker sits in the docs tree']))
     expect(collectStoredHeadDefects(seed(ON, GD, ''), REVIEW_RANGE))
@@ -877,7 +894,7 @@ describe('the stored review head sits under the git directory and is checked as 
     expect(collectStoredHeadDefects(seed(ON, '`{gd}/devflow/reviews/', '`{gd}/reviews/'), REVIEW_RANGE))
       .toContain('the stored review head is not read under the absolute git directory')
     expect(collectStoredHeadDefects(seed(ON, CHECK, `${CHECK}\n     - The review head counts only when \`git -C "{worktree}" ls-files --error-unmatch -- .last-review-head\` exits 1.`), REVIEW_RANGE))
-      .toContain('Step 0d keeps a tracked-file check of the review head')
+      .toContain('Step 0d checks the review head with the tracked-file probe ls-files')
   })
 
   it('known-bad probes: a marker write that is split, kept in the docs tree, missing or allowed to stop the run is reported', () => {
@@ -954,21 +971,23 @@ describe('the main thread never prints or reads diff contents (AC-320, AC-326)',
     expect(collectGitDiffDefects(`${ON}\ngit diff --stat {DIFF_RANGE}\n`)).toHaveLength(1)
   })
 
-  it.each(VARIANTS)('$label: Principles 1 and 3 name the exceptions, and redirect-only writes print nothing', ({ body }) => {
+  it.each(VARIANTS)('$label: Principles 1 and 3 name the exceptions, and their writes print nothing', ({ body }) => {
     expect(collectPrincipleDefects(body)).toEqual([])
   })
 
   it('known-bad probes: a Principle that claims no git, or drops the print-nothing statement, is reported', () => {
     expect(collectPrincipleDefects(seed(ON, /^1\. \*\*Orchestration only\*\*.*$/m, "1. **Orchestration only** - Command spawns agents, doesn't do git/review work itself")).join('\n'))
-      .toMatch(/principle 1 does not say redirect-only writes print nothing/)
+      .toMatch(/principle 1 does not say its writes print nothing/)
     expect(collectPrincipleDefects(seed(ON, /^3\. \*\*Git agent for git work\*\*.*$/m, '3. **Git agent for git work** - All git operations go through Git agent')).join('\n'))
-      .toMatch(/principle 3 does not say redirect-only writes print nothing/)
+      .toMatch(/principle 3 does not say its writes print nothing/)
     expect(collectPrincipleDefects(seed(ON, 'bounded Phase 1 path listing', 'Phase 1 listing')))
       .toContain('principle 1 does not name the bounded path listing')
     expect(collectPrincipleDefects(seed(ON, '`git -C ... rev-parse`', '`git -C ... ls-files`')))
-      .toEqual(['principle 1 does not name the Phase 0 probe rev-parse', 'principle 1 still names the tracked-file probe'])
-    expect(collectPrincipleDefects(seed(ON, ', the marker)', ')')))
-      .toContain('principle 1 does not name the marker among the redirect-only writes')
+      .toEqual(['principle 1 does not name the Phase 0 probe rev-parse', 'principle 1 names the tracked-file probe ls-files'])
+    expect(collectPrincipleDefects(seed(ON, ', the marker and its `mkdir -p`)', ')')))
+      .toContain('principle 1 does not name the marker and its `mkdir -p` among the writes')
+    expect(collectPrincipleDefects(seed(ON, ' and its `mkdir -p`', '')))
+      .toContain('principle 1 does not name the marker and its `mkdir -p` among the writes')
   })
 
   it('the orchestrator charter still carries its ad-hoc rule: the command states its own exceptions instead of amending it', () => {

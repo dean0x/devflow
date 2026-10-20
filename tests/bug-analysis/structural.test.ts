@@ -309,7 +309,7 @@ describe('bug-analysis.md — the stored analysis head sits under the git direct
     expect(collectStoredHeadDefects(seed('`{gd}/devflow/bug-analysis/', '`{gd}/bug-analysis/'), ANALYSIS_RANGE))
       .toContain('the stored analysis head is not read under the absolute git directory');
     expect(collectStoredHeadDefects(seed(CHECK, `${CHECK}\n     - The analysis head counts only when \`git -C "{worktree}" ls-files --error-unmatch -- .last-analysis-head\` exits 1.`), ANALYSIS_RANGE))
-      .toContain('Step 2a keeps a tracked-file check of the analysis head');
+      .toContain('Step 2a checks the analysis head with the tracked-file probe ls-files');
   });
 
   it('known-bad probes: a marker write that is split, kept in the docs tree, missing or allowed to stop the run is reported', () => {

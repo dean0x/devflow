@@ -2115,7 +2115,7 @@ export function collectFreshBaseDefects(body: string, shape: DiffRangeShape, par
 /**
  * The stored head: read from `{gd}/devflow/{dir}/{branch-slug}/{marker}`, where `{gd}` is what `rev-parse
  * --absolute-git-dir` prints, and written there in one Bash call that a failed write never stops; no path
- * of the marker sits in the docs tree and no tracked-file check remains. The head is checked as a commit
+ * of the marker sits in the docs tree and the head has no tracked-file probe. The head is checked as a commit
  * ID (exactly 40 or 64 lowercase hex) and `cat-file -t` must print `commit`, before any git command or
  * `DIFF_RANGE` takes it.
  */
@@ -2136,7 +2136,7 @@ export function collectStoredHeadDefects(body: string, shape: DiffRangeShape): s
   if (read.length !== 1 || !read[0].includes(readPath)) out.push(`the stored ${shape.head} head is not read under the absolute git directory`)
   else if (!read[0].includes(`\`{gd}\` being what \`git -C "{worktree}" rev-parse --absolute-git-dir\` prints:`)) out.push(`${shape.step} does not say what {gd} is`)
   if (new RegExp(`\\.devflow/docs/[^\\s\`"]*${escapeRe(shape.marker)}`).test(body)) out.push(`the ${shape.head} head marker sits in the docs tree`)
-  if (/ls-files/.test(s)) out.push(`${shape.step} keeps a tracked-file check of the ${shape.head} head`)
+  if (/ls-files/.test(s)) out.push(`${shape.step} checks the ${shape.head} head with the tracked-file probe ls-files`)
   const writes = body.split('\n').filter(l => l.includes(shape.marker) && l.includes('rev-parse HEAD'))
   if (writes.length !== 1) out.push(`the ${shape.head} head is written ${writes.length} times, expected once`)
   else {

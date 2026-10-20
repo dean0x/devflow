@@ -469,8 +469,8 @@ Per worktree, after successful completion:
 
 ## Principles
 
-1. **Orchestration only** - Command spawns agents, doesn't do git/review work itself. The exceptions are the read-only Phase 0 probes (`git worktree list`, `git -C ... branch --show-current`, `git -C ... cat-file -t`, `git -C ... rev-parse`), the bounded Phase 1 path listing and the redirect-only writes (`diff.patch`, `diff-{focus}.patch`, the marker). Redirect-only writes print nothing
+1. **Orchestration only** - Command spawns agents, doesn't do git/review work itself. The exceptions are the read-only Phase 0 probes (`git worktree list`, `git -C ... branch --show-current`, `git -C ... cat-file -t`, `git -C ... rev-parse`), the bounded Phase 1 path listing and the writes (`diff.patch`, `diff-{focus}.patch`, the marker and its `mkdir -p`). These writes print nothing
 2. **Parallel, not background** - Multiple agents in one message, but `run_in_background=false` so phases complete before proceeding
-3. **Git agent for git work** - All git operations go through Git agent, except the exceptions named in Principle 1; redirect-only writes print nothing
+3. **Git agent for git work** - All git operations go through Git agent, except the exceptions named in Principle 1; its writes print nothing
 4. **Honest reporting** - Display agent outputs directly
 5. **Incremental by default** - Only review new changes unless `--full` specified

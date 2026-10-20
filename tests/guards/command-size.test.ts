@@ -30,8 +30,8 @@ type Build = 'on' | 'off'
 const COMMAND_MAX_BYTES: ReadonlyArray<readonly [string, Build, number]> = [
   ['bug-analysis', 'on', 24_644],
   ['bug-analysis', 'off', 20_734],
-  ['code-review', 'on', 34_901],
-  ['code-review', 'off', 32_156],
+  ['code-review', 'on', 34_888],
+  ['code-review', 'off', 32_143],
   ['debug', 'on', 19_885],
   ['debug', 'off', 16_966],
   ['dynamic-build', 'on', 106_869],
