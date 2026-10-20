@@ -262,7 +262,7 @@ describe('the old ledger folder: the pointer and the refused line, only in the e
   const oldDir = (): string => path.join(root, '.devflow', 'learning');
   const newDir = (): string => path.join(root, '.devflow', 'curation');
   const markerPath = (): string => getCurationMoveMarkerPath(home, root);
-  const POINTER = 'Curation: open Claude Code in this project once, or run devflow init';
+  const POINTER = 'Curation: run devflow init, or open Claude Code in this project after it';
   const REFUSED = 'Curation: move refused, see the hook log';
 
   beforeEach(() => {

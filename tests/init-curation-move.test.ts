@@ -32,7 +32,7 @@ import {
 } from '../src/cli/commands/curation-move-step.js';
 import { loadCurationMove } from '../src/core/curation-move.js';
 import { LEDGER_ROOT_TIMEOUT_MS, type LedgerRootLookup } from '../src/core/ledger-root.js';
-import { realProjectLedgerMoveIO } from '../src/cli/commands/curation-move-io.js';
+import { realGlobalTuningMoveIO, realProjectLedgerMoveIO } from '../src/cli/commands/curation-move-io.js';
 import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
 import { PROJECT_PATHS } from './decisions/curation-fixtures.js';
 import type { CurationStoreResult } from '../src/core/curation-store.js';
@@ -614,6 +614,42 @@ describe('moveGlobalTuningFile (TP-14)', () => {
     expect(report.outcome).toEqual({ kind: 'left-alone' });
     expect(report.lines).toHaveLength(1);
     expect(calls).toEqual([]);
+  });
+
+  it('says that the settings in a left-alone file no longer apply, and where to copy them', async () => {
+    const { io } = fakeTuning({ [OLD_FILE]: 'other' });
+    const report = await moveGlobalTuningFile(MACHINE, io);
+    expect(report.lines).toEqual([
+      `The global tuning file ${OLD_FILE} is not a regular file. It was not renamed to curation.json, ` +
+        'so its settings no longer apply. Copy them into curation.json.',
+    ]);
+  });
+
+  describe('with a linked learning.json on the real file system', () => {
+    let machine: string;
+
+    afterEach(async () => {
+      await fs.rm(machine, { recursive: true, force: true });
+    });
+
+    it('gives the settings line, follows no link and leaves the link and its target as they were', async () => {
+      machine = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'df-move-tuning-link-')));
+      const target = path.join(machine, 'elsewhere.json');
+      const link = path.join(machine, 'learning.json');
+      await fs.writeFile(target, '{"model":"opus"}\n');
+      await fs.symlink(target, link);
+
+      const report = await moveGlobalTuningFile(machine, realGlobalTuningMoveIO());
+
+      expect(report.outcome).toEqual({ kind: 'left-alone' });
+      expect(report.lines).toHaveLength(1);
+      expect(report.lines[0]).toContain('its settings no longer apply');
+      expect(report.lines[0]).toContain('Copy them into curation.json.');
+      expect((await fs.lstat(link)).isSymbolicLink()).toBe(true);
+      expect(await fs.readlink(link)).toBe(target);
+      expect(await fs.readFile(target, 'utf-8')).toBe('{"model":"opus"}\n');
+      await expect(fs.lstat(path.join(machine, 'curation.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+    });
   });
 
   it('reports a failed rename as one line that says the next init tries again', async () => {

@@ -207,7 +207,7 @@ describe('CHANGELOG curation rename entry', () => {
     expect(curation).toContain("Another run is moving this project's curation data.");
     for (const quoted of [
       'Curation: move refused, see the hook log',
-      'Curation: open Claude Code in this project once, or run devflow init',
+      'Curation: run devflow init, or open Claude Code in this project after it',
     ]) {
       expect(entry).toContain(quoted);
       expect(notice).toContain(quoted.replace(/^Curation: /, ''));

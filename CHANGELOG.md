@@ -118,7 +118,7 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
   The HUD and `devflow curation --status` print `Curation: move refused, see the hook log`.
   Remove the cause, then run `devflow init` or start a new session.
 - Not yet moved: `devflow curation --status`, `--list`, `--show` and the HUD print
-  `Curation: open Claude Code in this project once, or run devflow init`.
+  `Curation: run devflow init, or open Claude Code in this project after it`.
   They do not read the old folder.
 - Failed: init prints `Ledger move failed for <root>` and copies nothing. The next init tries again.
 - Skipped: git did not name the project's repository within one second, for example on a hung mount.

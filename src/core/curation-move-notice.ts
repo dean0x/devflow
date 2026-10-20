@@ -55,7 +55,7 @@ export function gatherMoveNotice(ledgerRoot: string, home: string): CurationMove
 }
 
 const MOVE_NOTICE_TEXT: Readonly<Record<CurationMoveNotice, string>> = {
-  pointer: 'open Claude Code in this project once, or run devflow init',
+  pointer: 'run devflow init, or open Claude Code in this project after it',
   refused: 'move refused, see the hook log',
 };
 

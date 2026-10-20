@@ -412,7 +412,7 @@ export interface GlobalTuningMoveReport {
  * renamed; with both present the new name wins, the old file stays and one line says
  * so; with no old file there is nothing to do. The rename never replaces a file, so
  * two inits at once cannot lose the new one. A link or another non-file under the old
- * name is left alone.
+ * name is left alone, never followed; one line says its settings no longer apply.
  */
 export async function moveGlobalTuningFile(machineDir: string, io: GlobalTuningMoveIO): Promise<GlobalTuningMoveReport> {
   const oldPath = path.join(machineDir, LEGACY_NAMES.tuningFile);
@@ -427,7 +427,8 @@ export async function moveGlobalTuningFile(machineDir: string, io: GlobalTuningM
   }
   if (oldKind === 'other') {
     return done({ kind: 'left-alone' },
-      `The global tuning file ${oldPath} is not a regular file, so it was not renamed to ${CURATION_TUNING_FILE_NAME}.`);
+      `The global tuning file ${oldPath} is not a regular file. It was not renamed to ${CURATION_TUNING_FILE_NAME}, ` +
+        `so its settings no longer apply. Copy them into ${CURATION_TUNING_FILE_NAME}.`);
   }
 
   const newKind = await probeKind(newPath, io);

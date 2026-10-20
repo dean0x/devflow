@@ -88,7 +88,7 @@ describe('gatherMoveNotice', () => {
 
 describe('formatMoveNotice', () => {
   it('prints the pointer and the refused line, each on one line that starts "Curation: "', () => {
-    expect(formatMoveNotice('pointer')).toBe('Curation: open Claude Code in this project once, or run devflow init');
+    expect(formatMoveNotice('pointer')).toBe('Curation: run devflow init, or open Claude Code in this project after it');
     expect(formatMoveNotice('refused')).toBe('Curation: move refused, see the hook log');
   });
 });

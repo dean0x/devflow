@@ -1198,7 +1198,7 @@ describe('curation --configure with the old folder present (#529)', () => {
 // for this root. They never open the old ledger and never move it.
 // ---------------------------------------------------------------------------
 
-const POINTER = 'Curation: open Claude Code in this project once, or run devflow init';
+const POINTER = 'Curation: run devflow init, or open Claude Code in this project after it';
 const REFUSED = 'Curation: move refused, see the hook log';
 
 /** The refusal marker the shell writes for `dir` under the (test) home. */
