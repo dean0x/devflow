@@ -603,7 +603,6 @@ describe('moveLedger — whole folder (TP-7 index half)', () => {
     ['a swept queue file', '.pending-turns.jsonl.swept-20261016T120000Z-1a2b3c4d'],
     ['an overflow queue file', '.pending-turns.jsonl.overflow-20261016T120000Z-1a2b3c4d'],
     ['a private claim file', '.pending-turns.processing.merging-20261016T120000Z-1a2b3c4d'],
-    ['a move journal', '.curation-move.journal'],
   ])('refuses with nothing renamed while %s sits directly in the old folder', (_label, name) => {
     seedOld({ ...ledgerSet('one'), [name]: turns(1, 2), 'learning.json': 'x\n' });
     const before = snapshotTree(site.root);
@@ -952,6 +951,48 @@ describe('moveLedger — an interrupted set move resumes from its journal (TP-40
     expect(exists(moveJournalFile())).toBe(false);
     expect(store.withDecisionsLock('put-observation', site.root, () => ({ ok: true, value: null })).ok).toBe(true);
   });
+
+  it('a journal counts only while the old folder exists: with it gone, the next store write removes the journal and goes on', () => {
+    failAfterSetRenames(2);
+    expect(failure().kind).toBe('io-error');
+    vi.restoreAllMocks();
+    expect(exists(moveJournalFile())).toBe(true);
+    fs.rmSync(site.oldDir, { recursive: true });
+
+    const write = store.withDecisionsLock('put-observation', site.root, () => ({ ok: true, value: null }));
+
+    expect(write.ok).toBe(true);
+    expect(exists(moveJournalFile())).toBe(false);
+  });
+
+  it('a move finds the same stale journal: it removes it, says so once, and answers none', () => {
+    failAfterSetRenames(2);
+    expect(failure().kind).toBe('io-error');
+    vi.restoreAllMocks();
+    fs.rmSync(site.oldDir, { recursive: true });
+
+    const result = move();
+
+    expect(result).toEqual({
+      ok: true,
+      value: { state: 'none', notes: ['removed a move journal that no old folder was left to finish'] },
+    });
+    expect(exists(moveJournalFile())).toBe(false);
+    expect(move()).toEqual({ ok: true, value: { state: 'none', notes: [] } });
+  });
+
+  it('a stale journal that is a link is not followed or removed, and the write goes on', () => {
+    const outside = outsideFile('journal-target.txt', 'keep me\n');
+    fs.mkdirSync(site.machineDir, { recursive: true });
+    fs.symlinkSync(outside, moveJournalFile());
+    fs.rmSync(site.oldDir, { recursive: true });
+
+    const write = store.withDecisionsLock('put-observation', site.root, () => ({ ok: true, value: null }));
+
+    expect(write.ok).toBe(true);
+    expect(isLink(moveJournalFile())).toBe(true);
+    expect(read(outside)).toBe('keep me\n');
+  });
 });
 
 describe('moveLedger — a journal in the repository\'s old folder is never read', () => {
@@ -979,6 +1020,24 @@ describe('moveLedger — a journal in the repository\'s old folder is never read
     expect(read(path.join(backup, LEDGER))).toBe(ledgerSet('old')[LEDGER]);
     expect(read(path.join(backup, JOURNAL))).toBe(lookalike());
     expect(value.notes.join('\n')).toMatch(/left in the backup, not moved: .*\.curation-move\.journal/);
+    expect(exists(moveJournalFile())).toBe(false);
+  });
+
+  it('does not refuse a whole-folder move: the set moves in, and the file stays in the backup, out of the live folder', () => {
+    seedOld({ ...ledgerSet('old'), [QUEUE]: turns(1, 3), 'learning.json': 'tuning\n', [JOURNAL]: lookalike() });
+    expect(exists(site.newDir)).toBe(false);
+
+    const value = movedValue();
+
+    expect(value.mode).toBe('moved-in');
+    const backup = backupOf(value);
+    for (const [name, content] of Object.entries(ledgerSet('old'))) expect(read(path.join(site.newDir, name)), name).toBe(content);
+    expect(linesOf(path.join(site.newDir, QUEUE))).toEqual([turn(1), turn(2)]);
+    expect(read(path.join(site.newDir, 'curation.json'))).toBe('tuning\n');
+    expect(exists(path.join(site.newDir, JOURNAL))).toBe(false);
+    expect(read(path.join(backup, JOURNAL))).toBe(lookalike());
+    expect(value.notes.join('\n')).toMatch(/left in the backup, not moved: .*\.curation-move\.journal/);
+    expect(exists(moveLockDir())).toBe(false);
     expect(exists(moveJournalFile())).toBe(false);
   });
 

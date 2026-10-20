@@ -656,7 +656,8 @@ function isResult(value) {
  * lock, see moveLedger) makes every writer answer `busy` without taking the lock, so no
  * write lands between two renames of the move's ledger set. The journal is checked
  * again once the lock is held: a move can start, and stop part way through the set,
- * while the writer waits for the lock. Only the machine-side file counts: a file in the
+ * while the writer waits for the lock. Only the machine-side file counts, and only
+ * while the old folder it belongs to exists (moveJournalHoldsWriters): a file in the
  * repository's old folder is repository content and is never read. With no home
  * directory no move can have started (moveLedger refuses without a machine directory),
  * so there is no journal to find and the writer goes on.
@@ -680,7 +681,8 @@ function withDecisionsLock(opName, root, fn, { timeoutMs = LOCK_ACQUIRE_TIMEOUT_
   const linked = linkedCurationFolder(root);
   if (linked !== null) return linkedFolder(opName, linked);
   const journal = moveJournalPathOrNull(root);
-  if (journal !== null && lstatOrNull(journal) !== null) return unfinishedMove(opName, journal);
+  const oldFolder = path.join(root, '.devflow', LEGACY_NAMES.folder);
+  if (journal !== null && moveJournalHoldsWriters(journal, oldFolder)) return unfinishedMove(opName, journal);
   if (!hasCurationDir(root)) return noCurationDir(opName, root);
   const lockDir = getDecisionsLockDir(root);
   let acquired;
@@ -695,7 +697,7 @@ function withDecisionsLock(opName, root, fn, { timeoutMs = LOCK_ACQUIRE_TIMEOUT_
     return { ok: false, error: { kind: 'busy', message: `${opName}: timeout acquiring lock at ${lockDir}` } };
   }
   try {
-    if (journal !== null && lstatOrNull(journal) !== null) return unfinishedMove(opName, journal);
+    if (journal !== null && moveJournalHoldsWriters(journal, oldFolder)) return unfinishedMove(opName, journal);
     const result = fn();
     if (!isResult(result)) {
       throw new TypeError(`${opName}: the locked body must return a Result ({ ok: true, value } or { ok: false, error })`);
@@ -1699,7 +1701,9 @@ const MOVE_JOURNAL_SUFFIX = '.journal';
 /**
  * The name a journal would have inside the old folder. The move never writes one
  * there and never reads one: a file of this name is repository content, an unknown
- * entry that stays in the backup.
+ * entry that stays in the backup. It never refuses a move, and it never steers one;
+ * it only takes a move that would rename the whole folder onto the per-entry path,
+ * so that the file stays in a backup and does not reach the live folder.
  */
 const OLD_FOLDER_JOURNAL_NAME = '.curation-move.journal';
 
@@ -1832,6 +1836,37 @@ function moveJournalPathOrNull(root) {
   const home = homeDirOrNull();
   if (home === null) return null;
   return curationMoveJournalPath(path.join(home, '.devflow'), physicalPath(path.resolve(root)));
+}
+
+/**
+ * Remove a machine-side journal whose old folder is gone: it has no set left to
+ * finish. Only a regular file is removed, never a link or any other entry, and nothing
+ * is followed.
+ *
+ * @param {string} journal
+ * @returns {string[]} one note when a journal was removed, else none
+ */
+function dropStaleMoveJournal(journal) {
+  const stat = lstatOrNull(journal);
+  if (stat === null || !stat.isFile()) return [];
+  removeIfPresent(journal);
+  return ['removed a move journal that no old folder was left to finish'];
+}
+
+/**
+ * Whether the journal at `journal` holds store writers off: it exists and the old
+ * folder it belongs to still exists. A journal whose old folder is gone is stale and is
+ * dropped (dropStaleMoveJournal), and the writer goes on.
+ *
+ * @param {string} journal
+ * @param {string} oldFolder
+ * @returns {boolean}
+ */
+function moveJournalHoldsWriters(journal, oldFolder) {
+  if (lstatOrNull(journal) === null) return false;
+  if (lstatOrNull(oldFolder) !== null) return true;
+  dropStaleMoveJournal(journal);
+  return false;
 }
 
 /**
@@ -1990,16 +2025,16 @@ function relocateLocks(held, from, to) {
  * between the two renames leaves only a renamed tuning file, and a rerun renames just
  * the folder; a `curation.json` already there stays the tuning file. No per-entry rule
  * applies: one rename(2) carries the whole folder, its locks included. A private,
- * swept or overflow queue file, or a file named like a journal, sitting directly in
- * the old folder refuses the move, because the rename would carry it into the live
- * folder, where no sweep reads it.
+ * swept or overflow queue file sitting directly in the old folder refuses the move,
+ * because the rename would carry it into the live folder, where no sweep reads it. A
+ * file named like a journal never gets here: moveLedger takes the per-entry path for it.
  *
  * @param {{ oldDir: string, newDir: string }} ctx
  * @returns {{ ok: true, value: { notes: string[] } } | { ok: false, error: { kind: string, message: string } }}
  * @throws on an I/O failure
  */
 function curationMoveWhole(ctx) {
-  const stray = fs.readdirSync(ctx.oldDir).filter(name => queueFormOf(name) !== null || name === OLD_FOLDER_JOURNAL_NAME);
+  const stray = fs.readdirSync(ctx.oldDir).filter(name => queueFormOf(name) !== null);
   if (stray.length > 0) {
     return moveRefused(`${path.basename(ctx.oldDir)} holds ${stray.join(', ')}, which must not move into the live folder`);
   }
@@ -2478,13 +2513,16 @@ function curationMoveFinish(ctx, { whole }) {
  * Move a project's old ledger folder to the new name, once.
  *
  * The root must be a real ledger root (curationMoveRefusal). With no old folder the
- * answer is `none` and nothing is locked or created. Otherwise the machine directory
- * is made if absent, and every lock the pass needs is taken with no wait: the move
- * lock, the old folder's store lock and queue lock, and, when the new folder exists,
- * its two. Any busy lock releases what was taken and answers `busy`; a fresh claim in
- * either folder is busy too. With the new folder absent the whole folder is renamed
- * (curationMoveWhole). Errors (EXDEV, EBUSY, EACCES, EROFS, any other I/O failure)
- * answer an `io-error` Result and copy nothing: the old folder stays whole.
+ * answer is `none` and nothing is locked or created; a journal that is left in the
+ * machine directory is stale then and is removed, with one note. Otherwise the machine
+ * directory is made if absent, and every lock the pass needs is taken with no wait: the
+ * move lock, the old folder's store lock and queue lock, and, when the new folder
+ * exists, its two. Any busy lock releases what was taken and answers `busy`; a fresh
+ * claim in either folder is busy too. With the new folder absent the whole folder is
+ * renamed (curationMoveWhole), unless the old folder holds a file named like a journal:
+ * then an empty new folder is made and the pass takes the per-entry path. Errors
+ * (EXDEV, EBUSY, EACCES, EROFS, any other I/O failure) answer an `io-error` Result and
+ * copy nothing: the old folder stays whole.
  *
  * @param {unknown} root - the ledger root, an absolute path
  * @param {{ oldName: string, newName: string, machineDir?: string, homeDir?: string, now?: number }} opts
@@ -2513,10 +2551,18 @@ function moveLedger(root, { oldName, newName, machineDir, homeDir, now = Date.no
       root: path.resolve(root), devflowDir, oldDir: path.join(devflowDir, oldName), newDir: path.join(devflowDir, newName),
       machineDir: machine, journal: curationMoveJournalPath(machine, realRoot), now,
     };
-    if (lstatOrNull(ctx.oldDir) === null) return { ok: true, value: { state: 'none', notes: [] } };
+    if (lstatOrNull(ctx.oldDir) === null) return { ok: true, value: { state: 'none', notes: dropStaleMoveJournal(ctx.journal) } };
 
     fs.mkdirSync(machine, { recursive: true, mode: 0o700 });
-    const newExisted = lstatOrNull(ctx.newDir) !== null;
+    let newExisted = lstatOrNull(ctx.newDir) !== null;
+    if (!newExisted && lstatOrNull(path.join(ctx.oldDir, OLD_FOLDER_JOURNAL_NAME)) !== null) {
+      // The one rename of the whole-folder case would carry that file into the live folder.
+      // An empty new folder puts the pass on the per-entry path, where the file stays in the
+      // backup. A busy or failed pass leaves the empty folder, and the next pass takes the
+      // same path to the same result.
+      fs.mkdirSync(ctx.newDir, { recursive: true });
+      newExisted = true;
+    }
     const specs = [
       { name: 'move', dir: curationMoveLockDir(machine, realRoot), staleMs: MOVE_LOCK_STALE_MS },
       { name: 'old-store', dir: path.join(ctx.oldDir, STORE_LOCK_NAME), staleMs: LOCK_STALE_MS },
