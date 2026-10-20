@@ -122,7 +122,7 @@ const IMPLEMENT: LevelSpec = {
     GRAMMAR_CELL,
     GRAMMAR_RULES_BULLET,
     GRAMMAR_SKIPPED,
-    '- **Gate level block:** the command reads this file at the start of Phase 3, before the Polish spawn. A `3 Polish` row with `skip` skips the Polish spawn, never that block.',
+    '- **Gate level block:** the command reads this file at the start of Phase 3, before the Polish spawn. A `3 Polish` row with `skip` skips the Polish spawn, never that block or the `{branch_diff}` definition.',
     "- **Scope:** a row changes only its own phase's spawns and prompts. It adds no shell command, file write, push or GitHub action. It removes no security check, except that a `4 Self-Review` row may skip Harden. It keeps Validate, the CI gate, the evidence claims and the compliance directive. An enabled compliance lens keeps Harden.",
     '- **Malformed:** no `## Phases` heading, no `| Phase | standard | lean |` header, or a row that breaks this grammar. Then the command applies no row.',
   ],
@@ -147,7 +147,7 @@ const IMPLEMENT: LevelSpec = {
     { site: 'Phase 3', kind: 'Requires', start: '### Phase 3: Polish', end: '### Phase 4:' },
     { site: 'Phase 12', kind: 'Requires', start: '### Phase 12: Report', end: null },
   ],
-  expectedRows: [],
+  expectedRows: ['| 3 Polish | skip | skip |'],
   expectedBullets: [],
 }
 
@@ -189,7 +189,7 @@ const RESOLVE: LevelSpec = {
     { site: 'Phase 5', kind: 'Requires', start: '### Phase 5:', end: '### Phase 6:' },
     { site: 'Phase 10', kind: 'Requires', start: '### Phase 10:', end: null },
   ],
-  expectedRows: [],
+  expectedRows: ['| 6 Polish | skip | skip |'],
   expectedBullets: [],
 }
 
@@ -1332,6 +1332,58 @@ describe('the doc sites state the effect of each shipped row and keep no retired
       'the probe site does not state the effect of the implement row | 3 Polish | skip | skip |: it must match /\\bleaves out Polish\\b/',
     ])
   })
+
+  // The probes over the real sites need the rows to ship, so they ride with them. Each one loops over the decided rows and
+  // counts what it covered, so an empty `expectedRows` fails here instead of passing on an empty loop.
+  const shippedRows = SPECS.flatMap(spec => spec.expectedRows.map(row => ({ cmd: spec.cmd, row })))
+  const withRowCmds = SPECS.filter(spec => spec.expectedRows.length > 0).map(spec => spec.cmd)
+
+  it('known-bad probes (real sites): the decided rows are the ones the probes loop over', () => {
+    expect(shippedRows.map(({ cmd, row }) => `${cmd}:${row}`)).toEqual(['implement:| 3 Polish | skip | skip |', 'resolve:| 6 Polish | skip | skip |'])
+    expect(withRowCmds).toEqual(['implement', 'resolve'])
+  })
+
+  it('known-bad probes (real sites): a real site with its effect phrase taken out is reported for every shipped row it covers', () => {
+    const covered = new Set<string>()
+    for (const real of DOC_SITES) {
+      const owed = shippedRows.filter(({ cmd }) => real.cmds.includes(cmd))
+      expect(owed.length, `${real.label}: no shipped row to state`).toBeGreaterThan(0)
+      const without: DocSite = { ...real, text: seed(real.text, POLISH_SKIP, 'runs Polish') }
+      expect(collectDocSiteDefects([without], REFS), real.label).toEqual(
+        owed.map(({ cmd, row }) => `${real.label} does not state the effect of the ${cmd} row ${row}: it must match ${POLISH_SKIP}`),
+      )
+      for (const { cmd, row } of owed) covered.add(`${cmd}:${row}`)
+    }
+    expect(covered.size, 'every shipped row was probed at a real site').toBe(shippedRows.length)
+  })
+
+  it('known-bad probes (real sites): a retired claim put back at any real site is reported', () => {
+    let probed = 0
+    for (const real of DOC_SITES) {
+      for (const claim of RETIRED_CLAIMS) {
+        probed += 1
+        const putBack: DocSite = { ...real, text: `${real.text} The references hold ${claim}.` }
+        expect(collectDocSiteDefects([putBack], REFS), `${real.label}: ${claim}`).toEqual([`a table has a row (${withRowCmds.join(', ')}), but ${real.label} still says "${claim}"`])
+      }
+    }
+    expect(probed, 'every real site was probed for every retired claim').toBe(DOC_SITES.length * RETIRED_CLAIMS.length)
+  })
+
+  it('known-bad probes (real sites): an unregistered row or one changed cell in a shipped table is reported against the real sites', () => {
+    const extra: Readonly<Record<string, string>> = { implement: '| 4 Self-Review | pass level | - |', resolve: '| 2 Global Triage | pass level | - |' }
+    let probed = 0
+    for (const { cmd, row } of shippedRows) {
+      probed += 1
+      const rows = SPECS.find(spec => spec.cmd === cmd)?.expectedRows ?? []
+      const added = withRows(REFS[cmd], [...rows, extra[cmd]])
+      expect(collectDocSiteDefects(DOC_SITES, { ...REFS, [cmd]: added }), `${cmd}: an unregistered row`).toEqual([`the ${cmd} row ${extra[cmd]} has no ROW_EFFECTS entry`])
+      const changed = row.replace(/ skip \|$/, ' - |')
+      expect(changed, `${cmd}: the cell change landed`).not.toBe(row)
+      const edited = withRows(REFS[cmd], rows.map(each => (each === row ? changed : each)))
+      expect(collectDocSiteDefects(DOC_SITES, { ...REFS, [cmd]: edited }), `${cmd}: one changed cell`).toEqual([`the ${cmd} row ${changed} has no ROW_EFFECTS entry`])
+    }
+    expect(probed, 'every shipped row was probed').toBe(shippedRows.length)
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -1545,6 +1597,11 @@ describe('row safety is a tripwire over the references (AC-6)', () => {
     expect(collectRowSafetyDefects(seed(ref, RULES_INTRO, `${RULES_INTRO} Extra.`), spec, body)).toEqual(['the "## Rules" section holds text other than the pinned intro and its bullets'])
     expect(collectRowSafetyDefects(withRows(ref, [], ['- **tidy:** Polish the diff.\ncontinued here']), spec, body)).toContain('the "## Rules" section holds text other than the pinned intro and its bullets')
     expect(collectRowSafetyDefects(seed(ref, '## Phases\n', 'Stray text.\n\n## Phases\n'), spec, body)).toContain('the reference holds text between its title and "## Phases"')
+  })
+
+  it('known-bad probe (/implement): a Gate level block bullet that stops keeping the branch diff definition on a Polish skip is reported (AC-3)', () => {
+    const cut = seed(REFS.implement, ' or the `{branch_diff}` definition', '')
+    expect(collectRowSafetyDefects(cut, IMPLEMENT, bodyOf(IMPLEMENT))).toEqual(['the "## Grammar" text is not the pinned text'])
   })
 
   it('known-bad probes: a phase added to the command is protected by default, and a phase renamed in the closed set is reported', () => {
