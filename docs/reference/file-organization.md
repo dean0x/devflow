@@ -29,6 +29,7 @@ devflow/
 │   │   ├── claude-md-audit.ts        # Typed seam onto scripts/claude-md-audit.cjs: roots, the one init note, the stamp write (lstat-checked)
 │   │   ├── manifest.ts               # Manifest read/write
 │   │   ├── migrations.ts             # Run-once migration registry (2.x entries only; first: canonicalise-agent-keys-v1)
+│   │   ├── pool.ts                   # pooled: bounded concurrency over an array, settled in input order
 │   │   ├── git.ts                    # getGitRoot
 │   │   ├── project-paths.ts          # Per-project .devflow/ path construction
 │   │   ├── curation-store.ts         # Typed seam onto hooks/lib/curation-store.cjs, the store `devflow curation` runs

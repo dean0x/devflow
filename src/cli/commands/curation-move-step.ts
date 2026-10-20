@@ -36,7 +36,7 @@
  */
 
 import * as path from 'path';
-import { pooled } from '../../core/migrations.js';
+import { pooled } from '../../core/pool.js';
 import { describeEchoedValue } from '../../core/echo-value.js';
 import type { LedgerRootLookup } from '../../core/ledger-root.js';
 import { CURATION_DIR_NAME, CURATION_TUNING_FILE_NAME, LEGACY_NAMES, getGlobalCurateTuningConfigPath } from '../../core/project-paths.js';
