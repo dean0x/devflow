@@ -37,7 +37,7 @@ If `FEATURE_KNOWLEDGE` is provided (Rules bullets and the KB path, no heading in
 Does the code work? Happy path, edge cases (null, empty, boundary), no race conditions.
 
 ### P0 - Security
-Any vulnerabilities? No injection, input validated, no hardcoded secrets, auth checked.
+Any vulnerabilities? No injection, input validated, no hardcoded secrets, no secrets or tokens in logs or debug output, auth checked.
 
 ### P1 - Complexity
 Understandable in 5 minutes? Functions < 50 lines, nesting < 4 levels, no magic numbers.

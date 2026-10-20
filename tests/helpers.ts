@@ -248,6 +248,11 @@ export function loadFile(relPath: string): string {
   return readFileSync(path.join(ROOT, relPath), 'utf8')
 }
 
+/** The text with every regex metacharacter escaped, so `new RegExp(escapeRe(text))` matches `text` literally. */
+export function escapeRe(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\/-]/g, '\\$&')
+}
+
 // ── Isolated MDS builds ──────────────────────────────────────────────────────
 //
 // A test that needs compiled artifacts must never get them by rebuilding the

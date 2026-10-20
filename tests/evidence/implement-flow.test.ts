@@ -1023,7 +1023,7 @@ describe('#421 AC-3: no Validate inside the alignment loop, the QA loop or on a 
     expect(collectLoopValidateDefects(qa)).toEqual([`${H.p7}: 1 Validate spawn(s) inside the phase`])
     const fixed = md.replace('starts no Validate of its own', 'spawns the Validate agent')
     expect(collectLoopValidateDefects(fixed)).toContain('Phase 4 does not say a FIXED status starts no Validate')
-    const refire = md.replace('After Polish agent completes, spawn Harden agent', 'After Polish agent completes, spawn Harden agent')
+    const refire = md
       .replace('**If PASS or FIXED:** continue to Phase 5.', `If Harden agent made changes (status: FIXED), spawn Validate agent:\n${validate}\n**If PASS or FIXED:** continue to Phase 5.`)
     expect(refire, 'the seed must land').not.toBe(md)
     expect(collectLoopValidateDefects(refire).some(d => d.includes('Validate spawn(s) inside the phase'))).toBe(true)
@@ -1397,7 +1397,7 @@ function collectPointerDefects(md: string, revalidate: string = revalidateRefere
   need('the Evidence-claims definition does not name Phase 6 and Phase 8', md.includes('`gate:validate` — after a Phase 6 or Phase 8 PASS.'))
   need('the TP claims are not tied to Phase 7', md.includes('`TP-<n>` — after every Phase 7 run'))
   need('the Test spawn does not point at Phase 6\'s claims', md.includes('append its TP claims (Phase 6\'s **Evidence claims**)'))
-  need('the continuation path names no order', revalidate.includes('**Run Phases 3-8** — Polish, Self-Review, Alignment, the one full Validate, QA Testing and the conditional Re-Validate'))
+  need('the continuation path names no order', revalidate.includes('**Run Phases 3-8** — Polish (at `full`), Self-Review, Alignment, the one full Validate, QA Testing and the conditional Re-Validate'))
   need('the diagram lacks the Phase 6 Validate', md.includes('├─ Phase 6: Validate (the one full-suite slot)'))
   need('the diagram lacks the Phase 8 Re-Validate', md.includes('├─ Phase 8: Re-Validate (only if a qa-fix committed)'))
   need('the Orchestration-only principle does not name the Phase 10 push and the ci-wait call', /\*\*Orchestration only\*\*[^\n]*Phase 10[^\n]*push[^\n]*ci-wait call/.test(md))

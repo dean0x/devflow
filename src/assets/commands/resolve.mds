@@ -236,7 +236,7 @@ Collect every decision and pitfall the Triage agent's Reasoning columns state, i
 If FIX_NOW list is empty: skip to Phase 5, then run Phases 9, 9b, 9c and 10.
 
 Otherwise, batch FIX_NOW issues for Code agent execution. **DUPLICATE issues are never dispatched** — they inherit the primary's outcome:
-- **Same-file issues** → one batch (one Code agent per file, sequential for same-file pairs)
+- **Same-file issues** → one batch (one Code agent per file)
 - **Distinct-file issues** → parallel Code agents
 - **Max 5 issues per batch** — chunk large sets
 
@@ -291,7 +291,7 @@ Use the template from the Output Artifact section below.
 ### Phase 6: Polish
 
 **Produces:** POLISH_RESULT
-**Requires:** CODE_AGENT_RESULTS
+**Requires:** CODE_AGENT_RESULTS, GATE_LEVEL
 
 If any fixes were made, spawn Polish agent to refine the changed code:
 

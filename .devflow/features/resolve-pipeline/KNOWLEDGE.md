@@ -5,7 +5,7 @@ description: "Use when changing /resolve triage, DUPLICATE collapsing, Code-fami
 category: architecture
 directories: [src/assets/commands/resolve.mds, src/assets/agents/triage.mds, src/assets/agents/code.mds, src/assets/agents/fix.mds, src/assets/agents/refactor.mds, src/assets/agents/_partials/_code.mds, src/assets/commands/implement.mds, src/core/plugins.ts, src/assets/commands/code-review.mds, src/assets/scripts/resolve-base.cjs, src/assets/mds/git/]
 created: 2026-07-08
-updated: 2026-10-17
+updated: 2026-10-20
 ---
 
 # Resolve Pipeline (Triage → Fix → Verify)
@@ -49,7 +49,7 @@ updated: 2026-10-17
 
 ## Overview
 
-`/resolve` keeps judgment apart from execution, so no agent grades its own homework: a dedicated Triage agent (opus) classifies every review issue before any Code agent touches code. The point is **separation of judgment from execution**: Triage assigns verdicts by blast radius, the Code agent fixes only what it is told (`OPERATION: issue-fix`), and a Validate agent (haiku) verifies before any commit reaches the remote. This split replaced a single `Resolver` agent, which `devflow init` prunes.
+`/resolve` keeps judgment apart from execution, so no agent grades its own homework: a dedicated Triage agent (opus) classifies every review issue before any Code agent touches code. Triage assigns verdicts by blast radius, the Code agent fixes only what it is told (`OPERATION: issue-fix`), and a Validate agent (haiku) verifies before any commit reaches the remote. This split replaced a single `Resolver` agent, which `devflow init` prunes.
 
 A traceability layer (Phases 1b, 9b, 9c) fetches external review threads, resolves them after the push and checks merge readiness. A seventh verdict, **DUPLICATE**, plus a pre-pass that collapses same-defect issues before the matrix, de-skews the `fp_ratio` convergence formula and prevents duplicate debt tickets without changing the code-review.mds parser.
 
@@ -82,7 +82,7 @@ Phase 2   One global Triage agent → verdict ledger, one verdict per issue; dup
 Phase 3   Batch FIX_NOW (same-file sequential, distinct-file parallel in one message, max 5 per batch; KB-INV-11); DUPLICATEs never dispatched
 Phase 4   Code × N (issue-fix, PUSH: false) → CODE_AGENT_RESULTS
 Phase 5   Write resolution-summary.md, Tracked = "(pending)"  ← compaction safety
-Phase 6   Polish (only if fixes were made)
+Phase 6   Polish (only if fixes were made, and only at `full`)
 Phase 7   Validate gate + Fix validation-fix loop + push
 Phase 8   CI Status Gate [skipped if no fixes, Phase 7 FAILED or fork_no_push]: push, ci-wait.cjs, Fix
           ci-fix on FAILING (at most 3 waits + 2 fixes per worktree)
@@ -104,9 +104,9 @@ An empty FIX_NOW list skips Phases 3-4 and 6-8 but still writes the summary and 
 
 **`RESOLUTION_TS`** is minted once per run in Step 0d. Phase 5 writes it as the summary's `**Date**:` and 9b-2 passes it, so the local file and the posted dedup marker agree; a retry of this run stays deduplicated while the next /resolve on the same PR posts.
 
-**Settings and decisions**: `resolve.mds` alias-imports `_partials/_settings.mds` and expands `settings_resolve()` once in Step 0d, ahead of the decisions load, publication gate and compliance lens. Those partials import nothing from it and refer to "the line resolved above", so `REVIEW_PUBLICATION`, `COMPLIANCE_FRAMEWORKS` and `GATE_LEVEL` are still read per worktree. `compliance_inject()` builds each worktree's `COMPLIANCE_DIRECTIVE` from `COMPLIANCE_FRAMEWORKS`, which never reaches an agent (KB-INV-13). `DECISIONS_CONTEXT` (KB-INV-12): `decisions_load()` Step 2 has the main model copy the index lines that touch the work, one shared slice for sibling spawns; it exists only in the learning-on build (`decisions_gate()` sets `(none)` under `LEARNING=off`).
+**Settings and decisions**: `resolve.mds` alias-imports `_partials/_settings.mds` and expands `settings_resolve()` once in Step 0d, ahead of the decisions load, publication gate and compliance lens. Those partials import nothing from it and refer to "the line resolved above", so `REVIEW_PUBLICATION`, `COMPLIANCE_FRAMEWORKS` and `GATE_LEVEL` are still read per worktree. `compliance_inject()` builds each worktree's `COMPLIANCE_DIRECTIVE` (KB-INV-13). `DECISIONS_CONTEXT` (KB-INV-12): `decisions_load()` Step 2 has the main model copy the index lines that touch the work, one shared slice for sibling spawns; it exists only in the learning-on build (`decisions_gate()` sets `(none)` under `LEARNING=off`).
 
-**Gate level** (KB-INV-17): the settings line carries `GATE_LEVEL`, kept per worktree. Step 0d's `**Gate level.**` block reads `resolve-levels.md` once per run when any worktree is `standard` or `lean`, and applies each row to the phase it names: a worktree reads the column of its own level, except in a global phase; at `full` everywhere nothing is read. The reference holds the fixed grammar and no rows yet, so a read changes nothing. The grammar gives a phase with no spawn (Batch FIX_NOW) only `-`. A skipped phase does not stop the run, and its `**Produces:**` names read `SKIPPED`. Global Triage, one spawn for all worktrees, is the global phase: it takes the cell of the strictest level in the run (`full` strictest, then `standard`, `lean`) and at `full` runs as written. Phase 10 shows `**Gate level**: {GATE_LEVEL, with any level note}` after `Total Issues`, and Phase 5 writes `**Gate level**: {GATE_LEVEL}` into each worktree's summary header after `**Command**: /resolve`; the convergence parser reads neither. /implement has the matching block at the start of Phase 3.
+**Gate level** (KB-INV-17): the settings line carries `GATE_LEVEL` per worktree. Step 0d's `**Gate level.**` block reads `resolve-levels.md` once per run when any worktree is `standard` or `lean`, and applies each row to the phase it names: a worktree reads the column of its own level, but Global Triage, one spawn for all worktrees, takes the cell of the strictest level in the run (`full` strictest, then `standard`, `lean`). The reference holds the fixed grammar and one row, `| 6 Polish | skip | skip |`, so Phase 6 Polish runs at `full` only (its cleanup is one bullet of `rules/quality.md`). The grammar bars `skip` on the phases KB-INV-17 names (no row leaves a FIX_NOW security finding unfixed, a FIX_SEPARATE item unticketed or the CI gate dropped) and gives a spawnless phase (Batch FIX_NOW) only `-`. A skipped phase does not stop the run; its `**Produces:**` names read `SKIPPED` (nothing later reads `POLISH_RESULT`). Phase 10 shows `**Gate level**: {GATE_LEVEL, with any level note}` after `Total Issues`; Phase 5 writes `**Gate level**: {GATE_LEVEL}` into each worktree's summary header after `**Command**: /resolve`; the convergence parser reads neither. /implement has the matching block at the start of Phase 3.
 
 ### Review Directory Targeting
 
