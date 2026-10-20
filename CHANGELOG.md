@@ -185,11 +185,11 @@ Do the step below after you update.
 **What you must do:**
 - Run `devflow init` after you update. A full init installs `resolve-base.cjs` and the updated commands.
 
-**New stops:**
+**Stops:**
 - `/implement` stops when no usable base exists, for example in a shallow clone without the base history. `/code-review` and `/bug-analysis` stop in that case on a full-range run. The message names the cause and the fix: `git fetch --unshallow`, `git fetch origin <base>`, or a re-run (and `devflow init` if the re-run repeats the stop).
 - The same three commands stop on a base branch name outside the allowed set, or one that git refuses. The message states the set.
 - In `/code-review` multi-worktree mode, a rejected base blocks only that worktree.
-- `/code-review` and `/bug-analysis` stop when the branch name, with `/` replaced by `-`, holds characters outside ASCII letters, digits and `._-`, or is longer than 200 characters. The message states the allowed characters. In `/code-review` multi-worktree mode, this blocks only that worktree.
+- `/code-review` and `/bug-analysis` stop when the branch name does not fit the allowed characters and length. The message states the allowed characters. In `/code-review` multi-worktree mode, this blocks only that worktree.
 - The Git agent's `validate-branch` returns BLOCKED in the same cases. `/resolve` takes its branch diff from it.
 - The Git agent's `ensure-pr-ready` stops only on a base name outside the allowed set, or one that git refuses. For any other base stop it prints `TRACEABILITY: DEGRADED (base {REASON}; fix: {fix})` and goes on.
 
@@ -199,7 +199,7 @@ Do the step below after you update.
 - The `/dynamic-build` wave PR step runs `ensure-pr-ready` with no base ref, so that step makes this call.
 
 **Stale-install window:**
-- Until you run `devflow init`, the installed commands and Git agent do not call the resolver, so the new stops do not apply.
+- Until you run `devflow init`, the installed commands and Git agent do not call the resolver.
 
 **Known limits:**
 - A fetch that stops at its 45-second bound can leave a `refs/remotes/origin/<name>.lock` file in the git directory. Later runs then report `fetch-failed` until you delete the file.
@@ -299,10 +299,15 @@ Do the step below after you update.
   - Each of these agents checks the staged diff of every file it commits.
     The check runs at every level, wherever `/resolve`, `/implement`, `/debug`, `/dynamic-build` (and dynamic workflows that spawn them) or ambient mode spawn these agents.
     Run `devflow init` to install the updated agents.
+- **`/implement`, `/code-review`, `/bug-analysis` and `/resolve` check branch names against an allowed set** ([#495](https://github.com/dean0x/devflow/issues/495)).
+  - A base branch name outside the allowed set, or one that git refuses, stops the run. The message states the set.
+    In `/code-review` multi-worktree mode, a rejected base blocks only that worktree.
+  - An incremental `/code-review` or `/bug-analysis` run takes the full range when it cannot use the stored review head.
+    A failed patch write in `/code-review` stops the run.
 
 ### Fixed
 
-- **`/implement`, `/code-review`, `/bug-analysis` and `/resolve` use a fresh base for branch diffs, and check branch names against an allowed set** ([#495](https://github.com/dean0x/devflow/issues/495)).
+- **`/implement`, `/code-review`, `/bug-analysis` and `/resolve` use a fresh base for branch diffs** ([#495](https://github.com/dean0x/devflow/issues/495)).
   - A new script, `resolve-base.cjs`, makes at most one fetch of the base branch, picks the base by one stated rule and prints one status line.
     The fetch updates only the remote-tracking ref of the base branch, and credential prompts are off for it.
     The branch diff starts at the fork point of that base and `HEAD`.
@@ -314,10 +319,6 @@ Do the step below after you update.
   - When no usable base exists, for example in a shallow clone without the base history, `/implement` stops, and `/code-review` and `/bug-analysis` stop on a full-range run.
     Each names the cause and a fix.
     `/resolve` takes its branch diff from the Git agent's `validate-branch`, which returns BLOCKED in that case.
-  - A base branch name outside the allowed set, or one that git refuses, stops the run. The message states the set.
-    In `/code-review` multi-worktree mode, a rejected base blocks only that worktree.
-  - An incremental `/code-review` or `/bug-analysis` run takes the full range when it cannot use the stored review head.
-    A failed patch write in `/code-review` stops the run.
   - Run `devflow init` after you update, to install the script and the updated commands.
 
 ---
