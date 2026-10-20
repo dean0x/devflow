@@ -24,6 +24,11 @@
  * a reader can find them. The released CHANGELOG sections and the 3.8.0 upgrade
  * section are exempt by their headings (SECTION_EXEMPTIONS).
  *
+ * When dist/ exists, the guard also reads the built output. Each built file is read as a
+ * copy of its source file (dist/core/x.js and x.d.ts of src/core/x.ts, a built command or
+ * agent of its .mds host, a built reference of its module), so an entry whose `path` covers
+ * the source file covers the same text in the build. No entry names a dist path.
+ *
  * The titles of the tests under tests/ are read by a second guard, with its own allowlist
  * (TEST_TITLE_ALLOWLIST) at the end of this file.
  */
@@ -102,12 +107,13 @@ export const FEATURE_WORD_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
 
   // ── Migration: the legacy names the move reads, and the shim that probes them ──
   {
-    path: /^(?:src\/(?:core\/project-paths\.ts|assets\/scripts\/hooks\/lib\/project-paths\.cjs)|dist\/core\/project-paths\.d\.ts)$/,
+    path: /^src\/(?:core\/project-paths\.ts|assets\/scripts\/hooks\/lib\/project-paths\.cjs)$/,
     pattern: /(?:folder|backupPrefix|tuningFile): (['"])learning(?:\.backup-|\.json)?\1[,;]/,
     reason:
       'The LEGACY_NAMES block holds the pre-rename folder, backup prefix and tuning file. The ' +
       'move reads them to find old data. The TypeScript and CJS copies list the same names. ' +
-      'The compiled declaration in dist/ holds them too, with double quotes and a semicolon.',
+      'The compiled declaration in dist/ holds them too, with double quotes and a semicolon; ' +
+      'the dist scan reads it as a copy of the TypeScript source.',
   },
   {
     path: `${HOOKS}curation-move`,
@@ -183,7 +189,7 @@ export const FEATURE_WORD_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
   },
   {
     path: 'src/core/curation-variants.ts',
-    pattern: /'dist\/learning-off'|<!--\\s\*learning\\s\*:|retired learning marker/,
+    pattern: /(['"])dist\/learning-off\1|<!--\\s\*learning\\s\*:|retired learning marker/,
     reason:
       'The build prunes the retired output folder and refuses the retired prompt marker, and ' +
       'both must name the old spelling to find it (LEGACY_OFF_OUTPUT_DIR and the marker rule).',

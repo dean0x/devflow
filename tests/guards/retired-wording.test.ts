@@ -47,6 +47,7 @@ import {
   type SectionExemption,
 } from '../fixtures/feature-word-allowlist.js';
 import { LEGACY_NAMES } from '../../src/core/project-paths.js';
+import { MCP_CONTRACT_MODULE, VARIANT_MODULES } from '../../src/core/mds-variants.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 
@@ -1092,6 +1093,103 @@ const trackedFilesOutsideTests = (): ScannedFile[] => trackedFiles(relPath => !r
 const trackedTestSources = (): ScannedFile[] =>
   trackedFiles(relPath => relPath.startsWith('tests/') && relPath.endsWith('.ts'));
 
+// ---------------------------------------------------------------------------
+// The DIST scan. dist/ is git-ignored, so the tracked-file scan above never sees the
+// built output. When dist/ exists, every built text file is read as a copy of the
+// source file it is built from, and a hit passes only when an entry that covers THAT
+// source file matches the line. A built copy of an allowed line passes; any other use
+// of the word in the build is a leftover in the source. A built file with no source
+// file is itself a violation.
+//
+// The build maps source to output in three ways:
+//   tsc            src/<x>.ts                        -> dist/<x>.js, <x>.d.ts and their .map files
+//   command/agent  src/assets/{commands,agents}/<n>.mds -> dist/{,curation-off/}{commands,agents}/<n>.md
+//   references     the module of VARIANT_MODULES / MCP_CONTRACT_MODULE -> dist/skills/git/references/**
+// ---------------------------------------------------------------------------
+
+const DIST_DIR = 'dist';
+const REFERENCES_PREFIX = 'dist/skills/git/references/';
+const MAX_DIST_DEPTH = 12;
+const MAX_DIST_FILES = 5000;
+
+const COMPILED_TS = /^dist\/(.+?)(?:\.d\.ts\.map|\.d\.ts|\.js\.map|\.js)$/;
+const BUILT_HOST = /^dist\/(?:curation-off\/)?(commands|agents)\/([^/]+)\.md$/;
+
+/** The source file that the build makes `distRel` from, or null when none is known. */
+function distSourceOf(distRel: string): string | null {
+  const compiled = COMPILED_TS.exec(distRel);
+  if (compiled !== null) {
+    const source = `src/${compiled[1]}.ts`;
+    return existsSync(path.join(ROOT, source)) ? source : null;
+  }
+
+  const host = BUILT_HOST.exec(distRel);
+  if (host !== null) {
+    const source = `src/assets/${host[1]}/${host[2]}.mds`;
+    return existsSync(path.join(ROOT, source)) ? source : null;
+  }
+
+  if (distRel.startsWith(REFERENCES_PREFIX) && distRel.endsWith('.md')) {
+    const rel = distRel.slice(REFERENCES_PREFIX.length);
+    for (const module of [...VARIANT_MODULES, MCP_CONTRACT_MODULE]) {
+      const dir = module.subdir === '' ? '' : `${module.subdir}/`;
+      const covers = module.kind === 'fanout'
+        ? rel.startsWith(dir) && !rel.slice(dir.length).includes('/')
+        : (module.ops as readonly string[]).some(op => rel === `${dir}${op}.md`);
+      if (covers) return module.source;
+    }
+  }
+  return null;
+}
+
+/**
+ * The same collector as the tracked scan, run over built files. Each file is scanned as
+ * its source file, and a violation names the built file. Entries and sections that
+ * cover nothing here are not reported: the tracked scan owns that check.
+ */
+function scanDistForFeatureWord(
+  files: ReadonlyArray<ScannedFile>,
+  allowlist: ReadonlyArray<AllowlistEntry>,
+): string[] {
+  const violations: string[] = [];
+  for (const { relPath, content } of files) {
+    if (FEATURE_WORD.test(relPath)) violations.push(`${relPath}: the file path carries the feature word`);
+    const source = distSourceOf(relPath);
+    if (source === null) {
+      if (FEATURE_WORD.test(content)) violations.push(`${relPath}: no source file is known for this built file`);
+      continue;
+    }
+    const report = scanForFeatureWord([{ relPath: source, content }], allowlist, []);
+    for (const violation of report.violations) {
+      if (violation.startsWith(`${source}: `)) continue; // the source path, not the built one
+      violations.push(`${relPath} (built from ${source}) line ${violation.slice(source.length + 1).trim()}`);
+    }
+  }
+  return violations;
+}
+
+/** Every built text file under dist/, or null when dist/ is absent. Bounded in depth and count. */
+function distFiles(): ScannedFile[] | null {
+  const root = path.join(ROOT, DIST_DIR);
+  if (!existsSync(root)) return null;
+  const files: ScannedFile[] = [];
+  const walk = (dir: string, rel: string, depth: number): void => {
+    if (depth > MAX_DIST_DEPTH) return;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (files.length >= MAX_DIST_FILES) return;
+      const entryRel = `${rel}/${entry.name}`;
+      if (entry.isDirectory()) {
+        walk(path.join(dir, entry.name), entryRel, depth + 1);
+      } else if (entry.isFile()) {
+        const bytes = readFileSync(path.join(dir, entry.name));
+        if (!bytes.includes(0)) files.push({ relPath: entryRel, content: bytes.toString('utf-8') });
+      }
+    }
+  };
+  walk(root, DIST_DIR, 0);
+  return files;
+}
+
 const wordsIn = (text: string): number => text.trim().split(/\s+/).length;
 
 describe('feature-word guard — the old feature word stays out of the tree (AC-1)', () => {
@@ -1174,23 +1272,6 @@ describe('feature-word guard — non-vacuity probes (the same collector as the g
       .toHaveLength(1);
   });
 
-  it('the compiled declaration of the legacy names is covered, in the form the compiler emits', () => {
-    const declaration = 'dist/core/project-paths.d.ts';
-    const emitted = Object.entries(LEGACY_NAMES).map(([key, value]) => `    ${key}: ${JSON.stringify(value)};`);
-    expect(emitted).toHaveLength(3);
-    for (const line of emitted) {
-      expect(scan([{ relPath: declaration, content: `${line}\n` }]).violations, line).toEqual([]);
-    }
-  });
-
-  it('the compiled declaration covers only its own text: a second use or another file still fails', () => {
-    const declaration = 'dist/core/project-paths.d.ts';
-    const line = '    backupPrefix: "learning.backup-";';
-    expect(scan([{ relPath: declaration, content: `${line} // the learning feature\n` }]).violations).toHaveLength(1);
-    expect(scan([{ relPath: declaration, content: '    other: "learning";\n' }]).violations).toHaveLength(1);
-    expect(scan([{ relPath: 'dist/core/other.d.ts', content: `${line}\n` }]).violations).toHaveLength(1);
-  });
-
   it('a stale entry fails: an entry that covers no hit is reported', () => {
     const stale: AllowlistEntry = {
       path: 'src/nowhere.ts',
@@ -1246,6 +1327,86 @@ describe('feature-word guard — non-vacuity probes (the same collector as the g
     it('a hit in [Unreleased] outside the upgrade section fails', () => {
       expect(changelog('## [Unreleased]\n\n### Added\n\n- a learning note\n').violations).toHaveLength(1);
     });
+  });
+});
+
+const builtFiles = distFiles();
+
+describe.skipIf(builtFiles === null)('feature-word guard — the built output in dist/ (AC-1)', () => {
+  // CI builds before it tests. A machine without dist/ skips this block: run `npm run build`.
+  const built = builtFiles ?? [];
+  const violations = scanDistForFeatureWord(built, FEATURE_WORD_ALLOWLIST);
+
+  it('reads the compiled code, the built commands and agents, and the built references (non-vacuity)', () => {
+    expect(built.length, 'the dist scan reached almost no files').toBeGreaterThan(100);
+    for (const prefix of ['dist/core/', 'dist/cli/', 'dist/commands/', 'dist/agents/', 'dist/curation-off/', REFERENCES_PREFIX]) {
+      expect(built.some(file => file.relPath.startsWith(prefix)), `${prefix} is not in the dist scan`).toBe(true);
+    }
+  });
+
+  it('every built file has a known source file', () => {
+    const orphans = built
+      .filter(file => distSourceOf(file.relPath) === null && !file.relPath.endsWith('.map'))
+      .map(file => file.relPath);
+    expect(orphans, `built files with no mapped source:\n  ${orphans.join('\n  ')}`).toEqual([]);
+  });
+
+  it('every use of the old feature word in the build is a copy of an allowed source line', () => {
+    expect(
+      violations,
+      `the old feature word is in the build. Rename it in the source, or add an allowlist entry:\n  ${violations.join('\n  ')}`,
+    ).toEqual([]);
+  });
+});
+
+describe('feature-word guard — dist mapping and probes (the same collector as the dist scan)', () => {
+  const scanDist = (relPath: string, content: string): string[] =>
+    scanDistForFeatureWord([{ relPath, content }], FEATURE_WORD_ALLOWLIST);
+
+  it('maps built files to their sources', () => {
+    expect(distSourceOf('dist/core/project-paths.d.ts')).toBe('src/core/project-paths.ts');
+    expect(distSourceOf('dist/core/project-paths.js.map')).toBe('src/core/project-paths.ts');
+    expect(distSourceOf('dist/cli/commands/init.js')).toBe('src/cli/commands/init.ts');
+    expect(distSourceOf('dist/commands/implement.md')).toBe('src/assets/commands/implement.mds');
+    expect(distSourceOf('dist/curation-off/agents/code.md')).toBe('src/assets/agents/code.mds');
+    expect(distSourceOf('dist/skills/git/references/decision-markers.md')).toBe('src/assets/mds/git/_references.mds');
+    expect(distSourceOf('dist/skills/git/references/pr/create.md')).toBe('src/assets/mds/git/_pr.mds');
+    expect(distSourceOf('dist/skills/git/references/tracker/_mcp.md')).toBe('src/assets/mds/tracker/_mcp.mds');
+    expect(distSourceOf('dist/core/not-a-real-module.js')).toBeNull();
+    expect(distSourceOf('dist/stray.txt')).toBeNull();
+  });
+
+  it('a built copy of an allowed source line passes, in the form the compiler emits', () => {
+    const emitted = Object.entries(LEGACY_NAMES).map(([key, value]) => `    ${key}: ${JSON.stringify(value)};`);
+    expect(emitted).toHaveLength(3);
+    for (const line of emitted) {
+      expect(scanDist('dist/core/project-paths.d.ts', `${line}\n`), line).toEqual([]);
+    }
+    expect(scanDist('dist/core/curation-variants.d.ts', 'export declare const LEGACY_OFF_OUTPUT_DIR = "dist/learning-off";\n'))
+      .toEqual([]);
+    expect(scanDist('dist/core/curation-variants.js', "export const LEGACY_OFF_OUTPUT_DIR = 'dist/learning-off';\n"))
+      .toEqual([]);
+  });
+
+  it('a built line that is not a copy of an allowed source line fails', () => {
+    const planted = scanDist('dist/core/project-paths.js', "    folder: 'learning',\n    other: 'the learning feature',\n");
+    expect(planted).toHaveLength(1);
+    expect(planted[0]).toContain('dist/core/project-paths.js');
+    expect(scanDist('dist/core/curation-store.js', 'export const learningCounts = 1;\n')).toHaveLength(1);
+    expect(scanDist('dist/commands/implement.md', 'Run the learning step.\n')).toHaveLength(1);
+  });
+
+  it('an allowed line covers only its own source file: the same line in another built file fails', () => {
+    const line = '    backupPrefix: "learning.backup-";';
+    expect(scanDist('dist/core/other.d.ts', `${line}\n`)).toHaveLength(1);
+    expect(scanDist('dist/core/project-paths.d.ts', `${line} // the learning feature\n`)).toHaveLength(1);
+    expect(scanDist('dist/core/project-paths.d.ts', '    other: "learning";\n')).toHaveLength(1);
+  });
+
+  it('a built file with no source file, or a path that carries the word, fails', () => {
+    expect(scanDist('dist/core/ghost.js', 'export const learning = 1;\n')).toHaveLength(1);
+    expect(scanDist('dist/core/learning-store.js', 'export {};\n')).toHaveLength(1);
+    expect(scanDist('dist/core/ghost.js', 'export {};\n')).toEqual([]);
   });
 });
 
