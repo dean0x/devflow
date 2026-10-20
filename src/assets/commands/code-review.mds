@@ -110,7 +110,7 @@ For each worktree:
 2. Check if `{worktree}/.devflow/docs/reviews/{branch-slug}/.last-review-head` exists:
    - **If yes AND `--full` NOT set:**
      - The review head counts only when `git -C "{worktree}/.devflow/docs/reviews/{branch-slug}" ls-files --error-unmatch -- .last-review-head >/dev/null 2>&1` exits 1; any other exit takes the full-range path.
-     - Read the SHA from the file. The stored review head is checked as a commit ID: use it only when it is exactly 40 or 64 lowercase hex, else take the full-range path
+     - The stored review head is checked as a commit ID: use it only when it is exactly 40 or 64 lowercase hex, else take the full-range path
      - Verify reachable: `git -C "{worktree}" cat-file -t {sha}` (if unreachable, take the full-range path)
      - Check if SHA == current HEAD → if so, skip review: "No new commits since last review. Use --full for a full re-review."
      - Set `DIFF_RANGE` to `{last-review-sha}...HEAD`
@@ -425,7 +425,7 @@ Per worktree, after successful completion:
 ## Architecture
 
 ```
-/code-review (orchestrator - spawns agents only)
+/code-review
 │
 ├─ Phase 0: Worktree Discovery & Pre-flight, Steps 0a-0f (Git agent per worktree, parallel)
 │  ├─ Step 0b: Resolve the compliance lens and gate level

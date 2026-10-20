@@ -370,9 +370,7 @@ Focus discipline: ${focus}. Return: {"focus": "${focus}", "reviewed": true, "fil
     return { survivingFindings: [], fixedFindings: [], coverageGaps };
   }
 
-  // Adversarial verification — bounded 2-3 agent panel, majority-survives
-  // Panel asks perspective-diverse questions over the WHOLE finding set (not one agent per finding).
-  // A finding survives if >50% of panel agents CONFIRM it.
+  // Adversarial panel over the WHOLE finding set (not one agent per finding): >50% CONFIRMED survives
   const VERIFY_PANEL = 3;
   const panels = await parallel(
     Array.from({ length: VERIFY_PANEL }, (_, lens) => () =>
@@ -394,16 +392,13 @@ ${JSON.stringify(allFindings.map((f, i) => ({ index: i, description: f.descripti
     panels.filter(p => (p.verdicts || []).find(v => v.index === i)?.verdict === "CONFIRMED").length > VERIFY_PANEL / 2
   );
 
-  // No confirmed findings — coverageGaps carry forward and block PASS downstream; also eliminates the empty-batch parallel() path
+  // No confirmed findings: coverageGaps carry forward and block PASS downstream
   if (confirmedFindings.length === 0) {
     return { survivingFindings: [], fixedFindings: [], coverageGaps };
   }
 
-  // Batched fix Code agents — one file per set of sub-batches; max 5 findings per sub-batch.
-  // Sub-batches for the SAME file run sequentially (never two Code agents editing the same file concurrently —
-  // concurrent same-file edits cause index contention and lost fixes).
-  // Sub-batches for DISTINCT files run in parallel (different code areas — safe per concurrency doctrine).
-  // A finding with no file field gets its own singleton group (unknown scope — never mix with known files).
+  // Sub-batches (max 5 findings): same file in sequence, distinct files in parallel.
+  // A finding with no file is a singleton group.
   const MAX_BATCH = 5;  // max 5 findings per sub-batch
   const fileGroups = {};
   for (let fi = 0; fi < confirmedFindings.length; fi++) {
@@ -413,9 +408,7 @@ ${JSON.stringify(allFindings.map((f, i) => ({ index: i, description: f.descripti
     fileGroups[key].push(f);
   }
 
-  // One entry per distinct file; each entry runs its sub-batches sequentially.
-  // Distinct-file groups are paced in chunks of FIX_CHUNK — same pacing bar as the Review spawn
-  // path — to avoid launching all Code agents at once on a large branch (reliability: explicit bound).
+  // One entry per file; FIX_CHUNK chunks bound concurrent Code agents
   const FIX_CHUNK = 5;
   // issue-fix SCOPE per finding: CRITICAL or HIGH takes the Careful protocol (failing regression test first); anything else is Standard.
   const CAREFUL_SEVERITIES = new Set(["critical", "high"]);

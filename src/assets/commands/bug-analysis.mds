@@ -70,7 +70,7 @@ If `pr_number` is absent, set `PR_DESCRIPTION` to `(none)`.
 1. Check `{worktree}/.devflow/docs/bug-analysis/{branch-slug}/.last-analysis-head`:
    - **If exists AND `--full` NOT set:**
      - The analysis head counts only when `git -C "{worktree}/.devflow/docs/bug-analysis/{branch-slug}" ls-files --error-unmatch -- .last-analysis-head >/dev/null 2>&1` exits 1; any other exit takes the full-range path.
-     - Read the SHA from the file. The stored analysis head is checked as a commit ID: use it only when it is exactly 40 or 64 lowercase hex, else take the full-range path
+     - The stored analysis head is checked as a commit ID: use it only when it is exactly 40 or 64 lowercase hex, else take the full-range path
      - Verify reachable: `git cat-file -t {sha}` — if exit code non-zero (rebase invalidated SHA), take the full-range path
      - If SHA == current HEAD → "No new commits since last analysis. Use --full for a full re-analysis." Stop.
      - Set `DIFF_RANGE` to `{sha}...HEAD`

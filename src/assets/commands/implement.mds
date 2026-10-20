@@ -553,7 +553,7 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 ## Architecture
 
 ```
-/implement (orchestrator - spawns agents only)
+/implement
 │
 ├─ Phase 1: Setup
 ├─ Phase 2: Implement
@@ -573,14 +573,11 @@ If Phase 1 recorded an evidence exception, show its `## Evidence Exceptions` lin
 
 ## Principles
 
-1. **Orchestration only** - Command spawns agents, never does work itself; the inline calls are the bounded plumbing the charter allows: the fresh base step's resolver calls (Phase 1, re-validation), the Phase 10 and 11 pushes, the Phase 10 ci-wait call, the Phase 11 evidence publish call and the evidence script checks
+1. **Orchestration only** - Command spawns agents, never does work itself (no tests, builds or fixes); "Spawn X" means call the Agent tool; the inline calls are the bounded plumbing the charter allows: the fresh base step's resolver calls (Phase 1, re-validation), the Phase 10 and 11 pushes, the Phase 10 ci-wait call, the Phase 11 evidence publish call and the evidence script checks
 2. **Honest reporting** - Display agent outputs directly
-3. **Strict delegation** - Never perform agent work in main session. "Spawn X" means call Agent tool with X, not do X's work yourself
-4. **Validate agent owns validation** - Never run tests or builds in main session
-5. **Fix agent owns fixes** - Never implement fixes in main session
-6. **Loop limits** - Max 2 validation retries, max 2 alignment fix iterations, max 2 QA retries before escalating to user; the CI gate allows at most 3 waits and 2 fixes
-7. **CI awareness** - CI status is checked before merge; test-plan evidence (Phase 11) is recorded under every strategy
+3. **Loop limits** - Max 2 validation retries, max 2 alignment fix iterations, max 2 QA retries before escalating to user; the CI gate allows at most 3 waits and 2 fixes
+4. **CI awareness** - CI status is checked before merge; test-plan evidence (Phase 11) is recorded under every strategy
 
 ## Error Handling
 
-If any agent fails, report the phase, agent type, and error. Offer options: retry phase, investigate systematically, or escalate to user.
+If any agent fails, report the phase, agent type and error. Offer: retry the phase, investigate, or escalate to user.
