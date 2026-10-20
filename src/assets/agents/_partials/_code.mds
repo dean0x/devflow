@@ -6,8 +6,10 @@ so the build skips it and it reaches an artifact only through the hosts that imp
 D-CODE-VARIANTS: a spawn runs exactly one mode, so one agent for every mode would pay for every
 mode's text and skills on every spawn. Each host carries its own mode sections, its own `OPERATION:`
 line and its own preload (D-CODE-PRELOADS); what every mode needs is written once here. The
-security-scan block lives in `commit_push()`, so every variant keeps it, and the Running
-commands block lives in `tail()`, so the three carry one byte-identical copy.
+Commit and push line lives in `commit_push()`. It ends with one check of the staged diff of every
+committed file for secrets or tokens in debug output, and the security-scan block follows it, so
+every variant keeps both. The Running commands block lives in `tail()`, so the three carry one
+byte-identical copy.
 
 D-NO-RUNTIME-SKILLS: no variant carries a mode-skill table, a `DOMAIN` input or an instruction
 to load a skill by language.

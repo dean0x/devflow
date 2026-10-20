@@ -361,8 +361,9 @@ describe('each variant states the mode contract it owns (D-CODE-OPERATION-MODES,
 //
 // The Git agent's ensure-pr-ready opens the PR under every strategy, so no Code body carries PR text:
 // no input, no paste gate, no D11 PR-body paragraph, no mode. What each keeps is the commit and push of its
-// commit step and the security-scan block (D-SCAN-IN-CODE). The compiled body of each variant is held under
-// its ceiling, registered in tests/fixtures/numeric-floors.json as `code-body-max`, `fix-body-max` and
+// commit step, one check of the staged diff of every committed file for secrets or tokens in debug output on
+// that line ahead of the security-scan block, and the block itself (D-SCAN-IN-CODE). The compiled body of each
+// variant is held under its ceiling, registered in tests/fixtures/numeric-floors.json as `code-body-max`, `fix-body-max` and
 // `refactor-body-max`: lowered by a pass that cut the artifact, never raised to fit one that grew.
 
 /** The compiled Code agent body, in bytes. Registered as `code-body-max`; lowered, never raised. */
@@ -395,10 +396,27 @@ const COMMIT_CHECK = `Before you commit, check the staged diff of every file you
 const COMMIT_MARKER = '**Commit and push**'
 const SCAN_MARKER = '**Security scan (conditional):**'
 
+const MISPLACED_CHECK_DEFECT = 'the diff check is not on the Commit and push line ahead of the security scan'
+
 /**
- * Named collector: how a Code body falls short of "opens no PR, checks its diff before it commits, and stays
- * under its size ceiling". The placement rule runs only when the marker and the check are both present, so a
- * lost marker or a lost check is one defect and not two. The count rule is separate: a second copy is one defect.
+ * The placement defect, or null: the diff check sits on the Commit and push line, ahead of the scan block. It
+ * judges placement only when the marker and the check are both present, so a lost marker or a lost check is
+ * one defect and not two.
+ */
+function diffCheckPlacementDefect(body: string): string | null {
+  const markerAt = body.indexOf(COMMIT_MARKER)
+  const checkAt = body.indexOf(COMMIT_CHECK)
+  if (markerAt === -1 || checkAt === -1) return null
+  const lineEnd = body.indexOf('\n', markerAt)
+  const markerLine = body.slice(markerAt, lineEnd === -1 ? body.length : lineEnd)
+  if (!markerLine.includes(COMMIT_CHECK)) return MISPLACED_CHECK_DEFECT
+  const scanAt = body.indexOf(SCAN_MARKER)
+  return scanAt !== -1 && checkAt > scanAt ? MISPLACED_CHECK_DEFECT : null
+}
+
+/**
+ * Named collector: how a Code body falls short of "opens no PR, checks its staged diff before it commits, and
+ * stays under its size ceiling". The count rule is separate from the placement rule: a second copy is one defect.
  */
 export function collectCodeBodyDefects(body: string, ceiling: number): string[] {
   const out: string[] = []
@@ -410,20 +428,12 @@ export function collectCodeBodyDefects(body: string, ceiling: number): string[] 
   }
   const copies = body.split(COMMIT_CHECK).length - 1
   if (copies > 1) out.push(`the Code body carries the diff check ${copies} times`)
-  const markerAt = body.indexOf(COMMIT_MARKER)
-  const checkAt = body.indexOf(COMMIT_CHECK)
-  if (markerAt !== -1 && checkAt !== -1) {
-    const lineEnd = body.indexOf('\n', markerAt)
-    const markerLine = body.slice(markerAt, lineEnd === -1 ? body.length : lineEnd)
-    const scanAt = body.indexOf(SCAN_MARKER)
-    if (!markerLine.includes(COMMIT_CHECK) || (scanAt !== -1 && checkAt > scanAt)) {
-      out.push('the diff check is not on the Commit and push line ahead of the security scan')
-    }
-  }
+  const misplaced = diffCheckPlacementDefect(body)
+  if (misplaced !== null) out.push(misplaced)
   return out
 }
 
-describe('no Code variant opens a PR and each body stays under its ceiling (D-PR-BY-GIT, D-CODE-VARIANTS)', () => {
+describe('no Code variant opens a PR, each body checks its staged diff once before it commits, and each stays under its ceiling (D-PR-BY-GIT, D-CODE-VARIANTS)', () => {
   const body = (agentType: string): string => resolveAgentSource(codeSlugOf(agentType)).content
 
   it('each compiled body names no PR-opening text, keeps commit-and-push and the scan, checks its diff once before it commits, and fits its ceiling', () => {
@@ -482,7 +492,14 @@ describe('no Code variant opens a PR and each body stays under its ceiling (D-PR
     expect(collectCodeBodyDefects(doubled, roomy)).toEqual(['the Code body carries the diff check 2 times'])
     const moved = `${removed}\n${COMMIT_CHECK}\n`
     expect(collectCodeBodyDefects(moved, roomy)).toEqual(['the diff check is not on the Commit and push line ahead of the security scan'])
-    const scanFirst = `${SCAN_MARKER}\n${real}`
+    const lines = real.split('\n')
+    const commitLine = lines.findIndex(line => line.includes(COMMIT_MARKER))
+    const scanLine = lines.findIndex(line => line.includes(SCAN_MARKER))
+    expect(commitLine, 'the real body has a Commit and push line').toBeGreaterThanOrEqual(0)
+    expect(scanLine, 'the real scan line follows the Commit and push line').toBeGreaterThan(commitLine)
+    const scanFirst = [...lines.slice(0, commitLine), lines[scanLine], ...lines.slice(commitLine, scanLine), ...lines.slice(scanLine + 1)].join('\n')
+    expect(scanFirst, 'the seed must land').not.toBe(real)
+    expect(scanFirst.indexOf(SCAN_MARKER), 'the seed puts the real scan line above the Commit and push line').toBeLessThan(scanFirst.indexOf(COMMIT_MARKER))
     expect(collectCodeBodyDefects(scanFirst, roomy)).toEqual(['the diff check is not on the Commit and push line ahead of the security scan'])
   })
 })
