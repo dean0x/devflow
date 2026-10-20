@@ -53,13 +53,18 @@ import {
   collectOrderViolations,
   ensurePrReadyReference,
   isAgentBlock,
+  JUDGE_BY_READING,
+  NAME_FILE_TRAP,
   parseFences,
   readAgentReference,
   requireDistFile,
   resolveAgentSource,
   resolveCurationOffSource,
   ROOT,
+  SHELL_WRITE_PROBES,
+  WRITE_FAILURE,
   walkFiles,
+  countShellWritesIntoF,
   type OrderRule,
 } from '../helpers.js'
 import { PROJECT_CONFIG_LIB, SETTINGS_SCRIPT, scopedEnv } from '../evidence-policy/scripted-shim.js'
@@ -1261,12 +1266,6 @@ const REVALIDATE_FORK_POINT = 'from `BASE_REF`, the fork point'
 const RESOLVER_FIX = 're-run; if it repeats, run devflow init'
 /** The captured `BASE_BRANCH` is checked again by reference, not by a second copy of the class. */
 const CAPTURED_CHECK = 'stop unless it passes the setup check'
-/** The clause after the class in each base source: the match is judged by reading and the value never reaches a command. */
-const JUDGE_BY_READING = '(judge the match by reading; never pass the value to a command)'
-/** The sentence after every Write step: a failed Write is a missing value and never a shell write. */
-const WRITE_FAILURE = 'If the Write tool fails, treat the value as missing; never write it with a shell command.'
-/** How each resolver call starts: bind the name file and arm the one trap that removes it with a flagless rm. */
-const NAME_FILE_TRAP = 'F="{name file}"; trap \'rm -- "$F"\' EXIT;'
 
 /** Named collector: where the base ref reaches a shell line with no check, in Setup, after the capture and in the re-validation path that can skip Setup. */
 function collectBaseBranchGuardDefects(md: string, revalidate: string = revalidateReference()): string[] {
@@ -1275,7 +1274,7 @@ function collectBaseBranchGuardDefects(md: string, revalidate: string = revalida
   const record = md.split('\n').find(l => l.startsWith('Record the current branch name as `BASE_BRANCH`'))
   if (!guarded(record)) out.push(`Phase 1 records BASE_BRANCH without stopping the run unless it matches \`${BASE_BRANCH_PATTERN}\``)
   else if (md.indexOf(record!) > md.indexOf('OPERATION: setup-task')) out.push('the BASE_BRANCH guard comes after the setup-task spawn')
-  else if (!record!.includes(`\`${BASE_BRANCH_PATTERN}\` ${JUDGE_BY_READING}`)) out.push('Phase 1 does not say that the match is judged by reading, never by passing the value to a command')
+  else if (!record!.includes(`\`${BASE_BRANCH_PATTERN}\` (${JUDGE_BY_READING})`)) out.push('Phase 1 does not say that the match is judged by reading, never by passing the value to a command')
   const captured = md.split('\n').find(l => l.startsWith('- `BASE_BRANCH`: Branch this feature was created from'))
   if (captured === undefined || !captured.includes(CAPTURED_CHECK)) out.push('the captured BASE_BRANCH is not checked again by the setup check before the base resolves')
   const rerecord = revalidate.split('\n').find(l => l.startsWith('3. **Record BASE_BRANCH**'))
@@ -1285,7 +1284,7 @@ function collectBaseBranchGuardDefects(md: string, revalidate: string = revalida
   else if (rerecord!.indexOf(BASE_BRANCH_PATTERN) > rerecord!.indexOf(REVALIDATE_BRANCH_DIFF)) out.push('the re-validation guard comes after the branch diff')
   else if (!rerecord!.includes('baseRefName')) out.push('the re-validation path does not say where BASE_BRANCH comes from when Phase 1 is skipped')
   else if (!rerecord!.includes('never the name')) out.push('the re-validation stop line does not say that it never writes the name')
-  else if (!rerecord!.includes(`\`${BASE_BRANCH_PATTERN}\` ${JUDGE_BY_READING}`)) out.push('the re-validation path does not say that the match is judged by reading, never by passing the value to a command')
+  else if (!rerecord!.includes(`\`${BASE_BRANCH_PATTERN}\` (${JUDGE_BY_READING})`)) out.push('the re-validation path does not say that the match is judged by reading, never by passing the value to a command')
   const call = revalidate.split('\n').find(l => l.includes(RESOLVER))
   const spans = (call ?? '').match(/`[^`]*resolve-base\.cjs[^`]*`/g) ?? []
   const prSpan = spans.find(s => s.includes(' pr '))
@@ -1351,7 +1350,7 @@ describe('#452: BASE_BRANCH is checked before it reaches a shell line', () => {
     const unchecked = md.replace(`; ${CAPTURED_CHECK}`, '')
     expect(unchecked, 'the seed must land').not.toBe(md)
     expect(collectBaseBranchGuardDefects(unchecked)).toEqual(['the captured BASE_BRANCH is not checked again by the setup check before the base resolves'])
-    const unread = md.replace(record, () => record.replace(` ${JUDGE_BY_READING}`, ''))
+    const unread = md.replace(record, () => record.replace(` (${JUDGE_BY_READING})`, ''))
     expect(unread, 'the seed must land').not.toBe(md)
     expect(collectBaseBranchGuardDefects(unread)).toEqual(['Phase 1 does not say that the match is judged by reading, never by passing the value to a command'])
 
@@ -1375,7 +1374,7 @@ describe('#452: BASE_BRANCH is checked before it reaches a shell line', () => {
     expect(namesIt, 'the seed must land').not.toBe(rerecord)
     expect(collectBaseBranchGuardDefects(md, reval.replace(rerecord, () => namesIt))).toEqual(['the re-validation stop line does not say that it never writes the name'])
     expect(collectBaseBranchGuardDefects(md, reval.replace(rerecord, ''))).toEqual([lostReval])
-    const unreadReval = rerecord.replace(` ${JUDGE_BY_READING}`, '')
+    const unreadReval = rerecord.replace(` (${JUDGE_BY_READING})`, '')
     expect(unreadReval, 'the seed must land').not.toBe(rerecord)
     expect(collectBaseBranchGuardDefects(md, reval.replace(rerecord, () => unreadReval))).toEqual(['the re-validation path does not say that the match is judged by reading, never by passing the value to a command'])
 
@@ -1434,7 +1433,7 @@ function collectRevalidateNameFileDefects(revalidate: string): string[] {
   need('a gh failure that shows no PR takes the default branch by for-each-ref, then main, then master, before any stop line', chainAt.every((at, n) => at >= 0 && (n === 0 || at > chainAt[n - 1])) && chainAt[chainAt.length - 1] < step.indexOf('Stop the run'))
   need('the default branch is read with for-each-ref, never by symbolic-ref, abbrev-ref or a pipe', !/symbolic-ref|abbrev-ref|\| *sed/.test(step))
   need('a given or literal name is written with the Write tool after a Read, and a failed Write is a missing value', step.includes('written with the Write tool after a Read of the file') && step.includes(WRITE_FAILURE))
-  need('only the two reads redirect into the name file', step.split('> "$F"').length - 1 === 2)
+  need('only the two reads redirect into the name file', countShellWritesIntoF(step) === 2)
   need('the name file is read with the Read tool', step.includes('Read `{name file}` with the Read tool: its one line is the name.'))
   need('a gh failure that shows no missing PR, or an empty file, stops the run after removing the name file', step.includes(REVALIDATE_STOP_ON_GH))
   need('a name outside the class stops the run after removing the name file', step.includes(REVALIDATE_STOP_ON_CLASS))
@@ -1468,6 +1467,9 @@ describe('#561: the re-validation base step passes the name through a file', () 
     expect(collectRevalidateNameFileDefects(seeded(REVALIDATE_STOP_ON_GH, 'Stop the run if gh failed.'))).toEqual(['a gh failure that shows no missing PR, or an empty file, stops the run after removing the name file'])
     expect(collectRevalidateNameFileDefects(seeded(REVALIDATE_STOP_ON_CLASS, 'Stop the run unless the name matches'))).toEqual(['a name outside the class stops the run after removing the name file'])
     expect(collectRevalidateNameFileDefects(seeded(' Read `{name file}` with the Read tool', ' printf "%s" "{BASE_BRANCH}" > "$F"; Read `{name file}` with the Read tool'))).toEqual(['only the two reads redirect into the name file'])
+    for (const [spelling, shellWrite] of SHELL_WRITE_PROBES) {
+      expect(collectRevalidateNameFileDefects(seeded(' Read `{name file}` with the Read tool', ` ${shellWrite}; Read \`{name file}\` with the Read tool`)), spelling).toEqual(['only the two reads redirect into the name file'])
+    }
     expect(collectRevalidateNameFileDefects(seeded(' when gh returned a PR, else ', ' always, then '))).toEqual(['one pr-mode call runs when gh returned a PR, else one local-mode call, each reading the name file'])
     expect(collectRevalidateNameFileDefects(revalidateReference().replace('3. **Record BASE_BRANCH**', '3. **Base**'))).toEqual(['no re-validation base step'])
   })

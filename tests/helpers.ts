@@ -1988,6 +1988,44 @@ const NAME_CLASS_COPY_RE = /\^[^`\s]*\[(?=[^\]`]*\+)(?=[^\]`]*@)(?=[^\]`]*,)(?=[
  */
 export const FLAGGED_RM = /\brm\s+-{1,2}[A-Za-z]/
 
+/** How each resolver call starts: bind the name file and arm the one trap that removes it with a flagless rm. */
+export const NAME_FILE_TRAP = 'F="{name file}"; trap \'rm -- "$F"\' EXIT;'
+
+/** The clause after each base-name class: the match is judged by reading and the value never reaches a command. A use site adds its own parentheses or punctuation. */
+export const JUDGE_BY_READING = 'judge the match by reading; never pass the value to a command'
+
+/** The sentence after every Write step: a failed Write is a missing value and never a shell write. */
+export const WRITE_FAILURE = 'If the Write tool fails, treat the value as missing; never write it with a shell command.'
+
+/**
+ * A shell write into the name or title file `$F`: a `>` or `>>` redirect, spaced or not, quoted or not, or a `tee`
+ * with any flags that names it. A `<` read and a longer variable such as `$FILE` are not one.
+ */
+const SHELL_WRITE_INTO_F = /(?:>>?\s*|\btee\b(?:\s+-\S+)*\s+)"?\$(?:\{F\}|F(?!\w))/g
+
+/** How many shell writes into `$F` a text holds. */
+export function countShellWritesIntoF(text: string): number {
+  return [...text.matchAll(SHELL_WRITE_INTO_F)].length
+}
+
+/** One known-bad shell write of a value into `$F` for each spelling `countShellWritesIntoF` counts: a probe seeded into a prompt must be reported. */
+export const SHELL_WRITE_PROBES: ReadonlyArray<readonly [label: string, command: string]> = [
+  ['spaced and quoted redirect', 'printf \'%s\' "{value}" > "$F"'],
+  ['unspaced redirect', 'printf \'%s\' "{value}" >"$F"'],
+  ['unquoted redirect', 'printf \'%s\' "{value}" > $F'],
+  ['unspaced and unquoted redirect', 'printf \'%s\' "{value}" >$F'],
+  ['append redirect', 'printf \'%s\' "{value}" >> "$F"'],
+  ['tee', 'printf \'%s\' "{value}" | tee "$F"'],
+  ['tee with a flag', 'printf \'%s\' "{value}" | tee -a "$F"'],
+]
+
+/** `text` with the one occurrence of `from` replaced by `to`; it throws unless there is exactly one, so no seed is inert. */
+export function seedOnce(text: string, from: string, to: string): string {
+  const first = text.indexOf(from)
+  if (first === -1 || text.indexOf(from, first + from.length) !== -1) throw new Error(`seedOnce: expected exactly one "${from.slice(0, 80)}" — the seed is inert`)
+  return text.slice(0, first) + to + text.slice(first + from.length)
+}
+
 /** Every copy of the base-name check in a text, exact or widened. */
 export function findNameClassCopies(text: string): string[] {
   return [...text.matchAll(NAME_CLASS_COPY_RE)].map(m => m[0])

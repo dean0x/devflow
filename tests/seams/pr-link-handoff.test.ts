@@ -2,7 +2,7 @@ import { describe, it, expect, afterAll } from 'vitest'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
-import { ROOT, buildCommittedTree, cleanupCommittedTree, collectCodeSpawnSites, collectOrderViolations, ensurePrReadyReference, gitOperationReferenceCorpus, requireDistFile, walkFiles } from '../helpers.js'
+import { ROOT, buildCommittedTree, cleanupCommittedTree, collectCodeSpawnSites, collectOrderViolations, ensurePrReadyReference, gitOperationReferenceCorpus, JUDGE_BY_READING, requireDistFile, walkFiles, WRITE_FAILURE } from '../helpers.js'
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
 
 /** The generated `devflow:git` reference tree — the providers' own mechanics. */
@@ -1022,11 +1022,11 @@ describe('ensure-pr-ready opens the PR (D-LINK-VERBATIM, D-COMMIT-EXPLICIT, D-PR
     need('the degraded line is the redaction one', ref.includes('plus the literal line `TRACEABILITY: DEGRADED (redaction unavailable)`'))
     need('the raw body is never posted', ref.includes('Never post `$DEVFLOW_BODY_RAW`.'))
     need('a given base is checked by reading, written to a fresh temp file with the Write tool and read back, and an empty file opens no PR',
-      ref.includes('When `BASE_BRANCH` is given, check it first against the step-5a name check (judge the match by reading; never pass the value to a command).') &&
+      ref.includes(`When \`BASE_BRANCH\` is given, check it first against the step-5a name check (${JUDGE_BY_READING}).`) &&
       ref.includes('Read that file, Write `BASE_BRANCH` to it with the Write tool, and Read it back.') &&
       ref.includes('An empty file ends with Status BLOCKED and no PR, after `rm -- "{name file}"`.'))
     // The 4a base, the 4c title and the 5a name each have a Write step.
-    need('a failed Write is a missing value, never a shell write', ref.split('If the Write tool fails, treat the value as missing; never write it with a shell command.').length - 1 >= 3)
+    need('a failed Write is a missing value, never a shell write', ref.split(WRITE_FAILURE).length - 1 >= 3)
     need('the base reaches gh pr create only from the name file', ref.includes('`test -s "$F" && gh pr create … --base="$(cat -- "$F")"`') && (ref.match(/gh pr create[^\n`]*--base\S*/g) ?? []).every(call => call.endsWith('--base="$(cat')))
     need('the name file is removed after the last create attempt, so a scrubber failure still opens the PR with the given base',
       ref.includes('in that same shell and after the last create attempt, `rm -- "$F"`, which runs on every path'))
@@ -1052,7 +1052,7 @@ describe('ensure-pr-ready opens the PR (D-LINK-VERBATIM, D-COMMIT-EXPLICIT, D-PR
       { from: 'plus the literal line `TRACEABILITY: DEGRADED (redaction unavailable)`', to: 'plus a warning', expected: 'the degraded line is the redaction one' },
       { from: '--base="$(cat -- "$F")"', to: '--base "$BASE_BRANCH"', expected: 'the base reaches gh pr create only from the name file' },
       { from: 'Read that file, Write `BASE_BRANCH` to it with the Write tool, and Read it back.', to: 'Run `printf "%s" "$BASE_BRANCH" > "$F"`.', expected: 'a given base is checked by reading, written to a fresh temp file with the Write tool and read back, and an empty file opens no PR' },
-      { from: 'If the Write tool fails, treat the value as missing; never write it with a shell command.', to: 'If the Write tool fails, write it with a shell command.', expected: 'a failed Write is a missing value, never a shell write' },
+      { from: WRITE_FAILURE, to: 'If the Write tool fails, write it with a shell command.', expected: 'a failed Write is a missing value, never a shell write' },
       { from: 'after the last create attempt, `rm -- "$F"`', to: 'after the first create attempt, `rm -- "$F"`', expected: 'the name file is removed after the last create attempt, so a scrubber failure still opens the PR with the given base' },
       { from: 'and no second EXIT trap is armed', to: 'and a second EXIT trap is armed', expected: 'the D11 trap is unchanged and no second exit trap is armed for the base' },
       { from: '`ISSUE_PR_LINK` (optional), ', to: '', expected: 'the Input line does not declare ISSUE_PR_LINK as optional' },

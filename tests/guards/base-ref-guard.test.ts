@@ -56,6 +56,7 @@ import * as path from 'path'
 import {
   FLAGGED_RM,
   MIN_COMPILED_PROMPTS,
+  NAME_FILE_TRAP,
   ROOT,
   collectStaleOutputs,
   compiledPrompts,
@@ -68,6 +69,7 @@ import {
   requireDistFiles,
   resolveAllAgents,
   resolveCurationOffSource,
+  seedOnce,
 } from '../helpers.js'
 import { RESOLVE_BASE_SCRIPT } from '../evidence/seam.js'
 
@@ -707,20 +709,13 @@ function reviewRangeFindings(p: Prompt): Unmet[] {
 
 const CALL_SEED = (rest: string, script: string = SCRIPT_REF): string => `node "${script}" ${rest}`
 /** What a resolver call span holds before the script: the name file bound and removed by a plain-rm trap, the worktree and the cross value. */
-const CALL_PREFIX = `F="{name file}"; trap 'rm -- "$F"' EXIT; cd "{worktree}" && X=false && `
+const CALL_PREFIX = `${NAME_FILE_TRAP} cd "{worktree}" && X=false && `
 /** A resolver call as the Git ops and the re-validation reference write it. */
 const callOf = (rest: string, prefix: string = CALL_PREFIX, script: string = SCRIPT_REF): string => `${prefix}${CALL_SEED(rest, script)}`
 const PR_REST = 'pr --name-stdin --cross "${X}" < "$F"; echo "exit=$?"'
 const LOCAL_REST = 'local --name-stdin < "$F"; echo "exit=$?"'
 const CHECK_SEED = `Stop the run unless it matches \`${STRICT}\`, telling the user it allows ASCII letters, digits and \`._/+@,#-\`, at most 200; no leading \`-\` or \`#\`, no \`origin/\` prefix, no \`..\`.`
 const STALE_CHECK_SEED = 'Stop the run unless it matches `^[A-Za-z0-9._/+@,#-]{1,200}$`, telling the user it allows only ASCII letters, digits and `._/+@,#-`, at most 200.'
-
-/** `text` with the one occurrence of `from` replaced by `to`; it throws unless there is exactly one, so no seed is inert. */
-function withOnce(text: string, from: string, to: string): string {
-  const first = text.indexOf(from)
-  if (first === -1 || text.indexOf(from, first + from.length) !== -1) throw new Error(`withOnce: expected exactly one "${from.slice(0, 80)}"`)
-  return text.slice(0, first) + to + text.slice(first + from.length)
-}
 
 const BUILT_TICKET_COMMAND = requireDistFile('dynamic-build.md')
 const SCOPE_DEFINITION_TAIL = `${SCOPE_TAIL}\`;`
@@ -846,7 +841,7 @@ const REQUIREMENTS: readonly Requirement[] = [
     probe: {
       file: 'commands/dynamic-build.md',
       anchor: 'Review call',
-      bad: withOnce(BUILT_TICKET_COMMAND, REVIEW_RANGE_SEEDS[0][1], REVIEW_RANGE_SEEDS[0][2]),
+      bad: seedOnce(BUILT_TICKET_COMMAND, REVIEW_RANGE_SEEDS[0][1], REVIEW_RANGE_SEEDS[0][2]),
       good: BUILT_TICKET_COMMAND,
     },
   },
@@ -1201,13 +1196,13 @@ describe('known-bad probes: each collector reports the seeded bad text and passe
     it.each(REVIEW_RANGE_SEEDS)('%s', (_label, from, to, detail) => {
       for (const p of variants) {
         expect(from, `${p.arm}: the seed replaces itself`).not.toBe(to)
-        expect(details({ ...p, text: withOnce(p.text, from, to) }), p.arm).toContain(detail)
+        expect(details({ ...p, text: seedOnce(p.text, from, to) }), p.arm).toContain(detail)
       }
     })
 
     it('a seeded defect is reported by the requirement, with the rule name, on top of the corpus findings', () => {
       const [, from, to] = REVIEW_RANGE_SEEDS[0]
-      const found = variants.flatMap(p => collectRequirements({ ...p, text: withOnce(p.text, from, to) }))
+      const found = variants.flatMap(p => collectRequirements({ ...p, text: seedOnce(p.text, from, to) }))
       expect(found.map(f => f.rule)).toEqual(['review-range', 'review-range'])
       expect(found.map(f => f.arm).sort()).toEqual(['off', 'on'])
     })

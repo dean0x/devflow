@@ -27,7 +27,7 @@ import {
   VARIANT_MODULES,
   operationReferenceRel,
 } from '../src/core/mds-variants.js';
-import { ROOT, resolveAgentSource, resolveAllAgents, gitAgentSinkCorpus, gitOperationReferenceCorpus, extractOpSectionFromCorpus, collectUnfencedH2, loadFile, requireDistFile, walkFiles, isPrHostEntryPath, type CorpusEntry } from './helpers.js';
+import { ROOT, resolveAgentSource, resolveAllAgents, gitAgentSinkCorpus, gitOperationReferenceCorpus, extractOpSectionFromCorpus, collectUnfencedH2, loadFile, requireDistFile, walkFiles, isPrHostEntryPath, NAME_FILE_TRAP, WRITE_FAILURE, JUDGE_BY_READING, SHELL_WRITE_PROBES, countShellWritesIntoF, type CorpusEntry } from './helpers.js';
 import { RESOLVE_BASE_SCRIPT } from './evidence/seam.js';
 
 /**
@@ -3263,16 +3263,10 @@ describe('git agent: text moved out of the always-loaded agent still reaches its
 
 const BASE_RESOLVER = createRequire(import.meta.url)(RESOLVE_BASE_SCRIPT) as { readonly STRICT_NAME_RE: RegExp };
 const BASE_CHECK = `\`${BASE_RESOLVER.STRICT_NAME_RE.source}\``;
-/** Every call that binds a name or title file arms this trap: a flagless rm removes the file on each exit. */
-const NAME_FILE_BIND = 'F="{name file}"; trap \'rm -- "$F"\' EXIT;';
 /** The resolver call: pr mode, the name read on stdin from the file, the exit status echoed. */
 const PR_MODE_CALL = 'node "$HOME/.devflow/scripts/resolve-base.cjs" pr --name-stdin --cross "${X}" < "$F"; echo "exit=$?"';
 /** What both ops run in one Bash call: bind the name file with its trap, read the cross flag, run the resolver. */
-const PR_RESOLVER_RUN = `${NAME_FILE_BIND} cd "{worktree}" && X=<isCrossRepository, else false> && ${PR_MODE_CALL}`;
-/** The sentence after every Write step: a failed Write is a missing value and never a shell write. */
-const WRITE_FAILURE = 'If the Write tool fails, treat the value as missing; never write it with a shell command.';
-/** The clause that follows each name class and the title deny-list: the match is judged by reading. */
-const JUDGE_BY_READING = 'judge the match by reading; never pass the value to a command';
+const PR_RESOLVER_RUN = `${NAME_FILE_TRAP} cd "{worktree}" && X=<isCrossRepository, else false> && ${PR_MODE_CALL}`;
 /** The one Bash call that opens ensure-pr-ready step 5: the cross flag to stdout, the PR base name to a fresh file. */
 const ENSURE_PRODUCER = 'cd "{worktree}" && F="$(mktemp)" && echo "F=$F" && gh pr view --json isCrossRepository --jq .isCrossRepository; gh pr view --json baseRefName --jq .baseRefName > "$F"; echo "gh=$?"';
 /** The one Bash call that opens validate-branch step 6: the PR details to stdout, the PR base name to a fresh file. */
@@ -3345,7 +3339,7 @@ type FilePart = readonly [label: string, what: string, text: string];
 
 /** Steps 4a, 4c and 5a of ensure-pr-ready: the base name, the base and the title each reach `gh` and the resolver through a file. */
 const ENSURE_FILE_PARTS: readonly FilePart[] = [
-  ['4a', '4a checks a given BASE_BRANCH by reading, before it runs any command', 'When `BASE_BRANCH` is given, check it first against the step-5a name check (judge the match by reading; never pass the value to a command). A mismatch ends with Status BLOCKED and no PR, naming only the allowed set.'],
+  ['4a', '4a checks a given BASE_BRANCH by reading, before it runs any command', `When \`BASE_BRANCH\` is given, check it first against the step-5a name check (${JUDGE_BY_READING}). A mismatch ends with Status BLOCKED and no PR, naming only the allowed set.`],
   ['4a', '4a writes a given BASE_BRANCH to a fresh temp file with the Write tool after a Read, and reads it back', 'Then run `F="$(mktemp)" && echo "F=$F"`, Read that file, Write `BASE_BRANCH` to it with the Write tool, and Read it back.'],
   ['4a', '4a treats a failed Write as a missing value', WRITE_FAILURE],
   ['4a', '4a opens no PR when the name file reads back empty, and removes it', 'An empty file ends with Status BLOCKED and no PR, after `rm -- "{name file}"`.'],
@@ -3403,8 +3397,8 @@ function collectEnsurePrReadyBaseDefects(section: string): string[] {
     ['5a keeps the name off every command line: the resolver reads it from the file on stdin', resolve.includes('< "$F"') && !/\$\{B\}|\bB=|\{BASE_BRANCH\}|\{base_branch\}/.test(a)],
     ['4a hands the base to gh pr create only from the name file', (step4a.match(/--base\S*/g) ?? []).length > 0 && (step4a.match(/--base\S*/g) ?? []).every(flag => flag === '--base="$(cat')],
     ['4a arms no second exit trap', !step4a.includes("trap '")],
-    ['5a fills the name file only by its two reads and the Write tool: no shell write of the value', a.split('> "$F"').length - 1 === 2],
-    ['4a and 4c fill their files only with the Write tool: no shell redirect into the file', !step4a.includes('> "$F"') && !step4c.includes('> "$F"')],
+    ['5a fills the name file only by its two reads and the Write tool: no shell write of the value', countShellWritesIntoF(a) === 2],
+    ['4a and 4c fill their files only with the Write tool: no shell redirect into the file', countShellWritesIntoF(step4a) === 0 && countShellWritesIntoF(step4c) === 0],
     ['a failed scrub still creates the PR, and the name file stays until the last create attempt', section.includes('**On scrubber failure** (non-zero exit or script missing): still create the PR') && step4a.includes('after the last create attempt')],
     ['4c hands the title to gh pr edit only from the title file', (step4c.match(/--title\S*/g) ?? []).length > 0 && (step4c.match(/--title\S*/g) ?? []).every(flag => flag === '--title="$(cat')],
     ...ENSURE_FILE_PARTS.map(([label, what, text]): readonly [string, boolean] => [what, scope[label].includes(text)]),
@@ -3426,7 +3420,7 @@ function collectValidateBranchBaseDefects(section: string): string[] {
   return failed([
     ['step 6 carries the exact base-name check, judged by reading', step6.includes(`${BASE_CHECK}`) && step6.includes(`; ${JUDGE_BY_READING}.`)],
     ['step 6 returns BLOCKED with the allowed set on a refused name', /BLOCKED with that allowed set, never the name/.test(step6)],
-    ['step 6 fills the name file only by its two reads and the Write tool: no shell write of the value', step6.split('> "$F"').length - 1 === 2],
+    ['step 6 fills the name file only by its two reads and the Write tool: no shell write of the value', countShellWritesIntoF(step6) === 2],
     ['step 6 reads the cross flag from isCrossRepository', step6.includes('--json isCrossRepository,') && step6.includes('X=<isCrossRepository, else false>')],
     ['step 6 runs the pr-mode call', step6.includes(PR_RESOLVER_RUN)],
     ['step 6 keeps the name off every command line: the resolver reads it from the file on stdin', step6.includes('< "$F"') && !/\$\{B\}|\bB=|\{BASE_BRANCH\}|\{base_branch\}/.test(step6)],
@@ -3525,23 +3519,30 @@ describe('git agent: PR ops use a fresh base for branch diffs (#495)', () => {
     }
   });
 
-  it('known-bad probes: a shell write of the name, the base or the title into its file is reported', () => {
+  it('known-bad probes: a shell write of the name, the base or the title into its file is reported, in every spelling', () => {
     const ensure = ensureSection();
-    const shellWrite = 'printf \'%s\' "{value}" > "$F"';
-    const seeds: ReadonlyArray<readonly [string, string, string]> = [
-      ['Write a given or literal name to the file with the Write tool, after a Read of it.', `Write a given or literal name to the file with \`${shellWrite}\`.`, '5a fills the name file only by its two reads and the Write tool: no shell write of the value'],
-      ['Read that file, Write `BASE_BRANCH` to it with the Write tool, and Read it back.', `Read that file, then run \`${shellWrite}\`, and Read it back.`, '4a and 4c fill their files only with the Write tool: no shell redirect into the file'],
-      ['Read that file, and Write the title to it with the Write tool.', `Read that file, then run \`${shellWrite}\`.`, '4a and 4c fill their files only with the Write tool: no shell redirect into the file'],
-    ];
-    for (const [from, to, what] of seeds) {
-      const seeded = ensure.replace(from, () => to);
-      expect(seeded, 'the seed must land').not.toBe(ensure);
-      expect(collectEnsurePrReadyBaseDefects(seeded)).toContain(what);
-    }
     const validate = validateSection();
-    const written = validate.replace('written with the Write tool after a Read of the file', () => `written with \`${shellWrite}\``);
-    expect(written, 'the seed must land').not.toBe(validate);
-    expect(collectValidateBranchBaseDefects(written)).toContain('step 6 fills the name file only by its two reads and the Write tool: no shell write of the value');
+    for (const [spelling, shellWrite] of SHELL_WRITE_PROBES) {
+      const seeds: ReadonlyArray<readonly [string, string, string]> = [
+        ['Write a given or literal name to the file with the Write tool, after a Read of it.', `Write a given or literal name to the file with \`${shellWrite}\`.`, '5a fills the name file only by its two reads and the Write tool: no shell write of the value'],
+        ['Read that file, Write `BASE_BRANCH` to it with the Write tool, and Read it back.', `Read that file, then run \`${shellWrite}\`, and Read it back.`, '4a and 4c fill their files only with the Write tool: no shell redirect into the file'],
+        ['Read that file, and Write the title to it with the Write tool.', `Read that file, then run \`${shellWrite}\`.`, '4a and 4c fill their files only with the Write tool: no shell redirect into the file'],
+      ];
+      for (const [from, to, what] of seeds) {
+        const seeded = ensure.replace(from, () => to);
+        expect(seeded, 'the seed must land').not.toBe(ensure);
+        expect(collectEnsurePrReadyBaseDefects(seeded), `${spelling}: ${what}`).toContain(what);
+      }
+      const written = validate.replace('written with the Write tool after a Read of the file', () => `written with \`${shellWrite}\``);
+      expect(written, 'the seed must land').not.toBe(validate);
+      expect(collectValidateBranchBaseDefects(written), `${spelling}: step 6`).toContain('step 6 fills the name file only by its two reads and the Write tool: no shell write of the value');
+    }
+  });
+
+  it('a read from the name file and a longer variable are not shell writes', () => {
+    expect(countShellWritesIntoF('node resolve-base.cjs pr --name-stdin < "$F"; echo "$FILE" > "$FILE"; cat -- "$F" | wc -c')).toBe(0);
+    expect(countShellWritesIntoF('gh pr view --json baseRefName --jq .baseRefName > "$F"; echo "gh=$?"')).toBe(1);
+    expect(countShellWritesIntoF('x >"${F}" && y | tee -a $F')).toBe(2);
   });
 
   it('known-bad probes: a base or title that reaches gh as command text, and a second exit trap, are each reported', () => {
