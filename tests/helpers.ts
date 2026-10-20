@@ -1979,6 +1979,13 @@ function collectFullRangeDefects(body: string, shape: DiffRangeShape): string[] 
  */
 const NAME_CLASS_COPY_RE = /\^[^`\s]*\[(?=[^\]`]*\+)(?=[^\]`]*@)(?=[^\]`]*,)(?=[^\]`]*#)[^\]`]*\][^`\s]*\$/g
 
+/**
+ * A flagged `rm`: `rm -f`, `rm -rf`, `rm --force`, in any spacing. The plain `rm --` form is not one. Prompt text
+ * removes a file with the plain form only, because a permission layer refuses the flagged forms. Test files import
+ * this one pattern, so the sink guard and the base-ref guard judge a removal the same way.
+ */
+export const FLAGGED_RM = /\brm\s+-{1,2}[A-Za-z]/
+
 /** Every copy of the base-name check in a text, exact or widened. */
 export function findNameClassCopies(text: string): string[] {
   return [...text.matchAll(NAME_CLASS_COPY_RE)].map(m => m[0])

@@ -3372,7 +3372,7 @@ const VALIDATE_FILE_PARTS: readonly FilePart[] = [
   ['6', 'step 6 reads the PR details and writes the base name to a fresh temp file in one Bash call, with gh= echoed', `\`${VALIDATE_PRODUCER}\``],
   ['6', 'step 6 takes the default branch only when gh failed and its output shows that no PR applies', 'If no PR exists (`gh` failed and its output shows that no PR applies)'],
   ['6', 'step 6 writes a literal default branch with the Write tool after a Read', 'written with the Write tool after a Read of the file'],
-  ['6', 'step 6 treats a failed Write as a missing value', WRITE_FAILURE.slice(0, -1)],
+  ['6', 'step 6 treats a failed Write as a missing value', WRITE_FAILURE],
   ['6', 'step 6 reads the name file with the Read tool', 'Read `{name file}` with the Read tool: its one line is `base_branch`'],
   ['6', 'step 6 returns BLOCKED, removing the name file and skipping step 7, when the base cannot be determined', 'If `base_branch` cannot be determined (`gh` failed and its output does not show that no PR applies, or the file is empty after every fallback): run `rm -- "{name file}"`, return BLOCKED, never an empty `### Diff Scope`; skip step 7'],
   ['6', 'step 6 judges the name by reading, and a mismatch removes the name file, returns BLOCKED and skips step 7', `${JUDGE_BY_READING}. On a mismatch run \`rm -- "{name file}"\`, return BLOCKED with that allowed set, never the name; skip step 7`],
