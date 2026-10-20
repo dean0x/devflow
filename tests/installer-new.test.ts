@@ -22,7 +22,7 @@ import type { PluginDefinition } from '../src/core/plugins.js';
 import { agentsDir, compiledAgentsDir, type AgentSourceDirs } from '../src/core/assets.js';
 import { resolveAgentSource, splitFrontmatter } from './helpers.js';
 import { RESOLVER_SCRIPT, SETTINGS_SCRIPT, buildScriptedShim, createFakeBin, runResolver } from './evidence-policy/scripted-shim.js';
-import { RESOLVE_BASE_SCRIPT } from './evidence/seam.js';
+import { RESOLVE_BASE_SCRIPT, SUBPROCESS_TIMEOUT_MS } from './evidence/seam.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -186,7 +186,7 @@ describe('composeScripts', () => {
     expect(lines[0]).toMatch(OUTPUT_LINE_RE);
     // Budget: a directory copy plus a node + bash-fake spawn — well under 5 s alone,
     // but spawns slow to seconds under full-suite load (same as the resolver suite).
-  }, 20_000);
+  }, SUBPROCESS_TIMEOUT_MS);
 
   it('copies resolve-base.cjs to the top level, and the INSTALLED copy runs under the composed {"type":"module"} package (install path pin)', async () => {
     // A verbatim copy with no sibling to load, so no installer code exists to pin — and
@@ -216,7 +216,7 @@ describe('composeScripts', () => {
     // The grammar comes from the package copy — the single authority for it.
     const { LINE_RE } = createRequire(import.meta.url)(RESOLVE_BASE_SCRIPT) as { LINE_RE: RegExp };
     expect(run.stdout.trimEnd()).toMatch(LINE_RE);
-  }, 20_000);
+  }, SUBPROCESS_TIMEOUT_MS);
 
   it('copies resolve-settings.cjs to the top level and lib/project-config.cjs beside it, and the INSTALLED settings resolver loads its parser (install path pin)', async () => {
     // Both resolvers require ./lib/project-config.cjs through __dirname, so the
@@ -242,7 +242,7 @@ describe('composeScripts', () => {
     expect(lines, 'exactly one \\n-terminated line').toHaveLength(2);
     const { SETTINGS_LINE_RE } = createRequire(import.meta.url)(SETTINGS_SCRIPT) as { SETTINGS_LINE_RE: RegExp };
     expect(lines[0]).toMatch(SETTINGS_LINE_RE);
-  }, 20_000);
+  }, SUBPROCESS_TIMEOUT_MS);
 
   it('copies pr-evidence.cjs and verify-evidence.cjs to the top level, and the INSTALLED verify-evidence.cjs loads its sibling under the composed {"type":"module"} package (install path pin)', async () => {
     // verify-evidence.cjs requires pr-evidence.cjs through __dirname, so the pair
@@ -273,7 +273,7 @@ describe('composeScripts', () => {
       MARKERS: { BLOCK_START: string; BLOCK_END: string };
     };
     expect(run.stdout).toBe(`${[MARKERS.BLOCK_START, '## Test Plan', tp, MARKERS.BLOCK_END].join('\n')}\n`);
-  }, 20_000);
+  }, SUBPROCESS_TIMEOUT_MS);
 });
 
 // ---------------------------------------------------------------------------
