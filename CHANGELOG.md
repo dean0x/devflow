@@ -11,11 +11,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The learning feature is now called curation ([#529](https://github.com/dean0x/devflow/issues/529)).
 This is a breaking change. It releases as a minor version (3.8.0).
-Devflow keeps no alias for any old name. Read the steps that you must do by hand.
+Devflow keeps no alias for the old command and the old init flags. The old switch keys stay readable, as the table shows. Read the steps that you must do by hand.
 
 **Superseding statement for 3.6.0:** The 3.6.0 notes say that `devflow learning`, `features.learning`,
 `.devflow/learning/` and the learning ops do not change. That statement is no longer true.
 This release changes all of them. The 3.6.0 text stays as released.
+
+**What you must do:**
+- Run `devflow init` after you update.
+- Replace `devflow learning` and the old init flags in your scripts.
+- Delete each backup folder after `devflow curation --status` shows 0 pending rows for it.
+  A backup made on re-upgrade can hold the only copy of entries that 3.7 wrote. Check them before you delete it.
+- Delete the leftover `.devflow/learning/` folder in each linked worktree whose main checkout has a `.devflow/` folder
+  and is not your home folder.
+  A worktree whose main checkout has no `.devflow/` folder, or is your home folder, keeps a live ledger.
+  That ledger moves like any project.
+- Run `devflow curation --enable` if the machine switch is off and you want it on.
 
 **Renamed names:**
 
@@ -61,7 +72,9 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
   The `--status` commands of curation, memory, knowledge and gates write nothing.
 
 **Upgrade, downgrade and re-upgrade:**
-- Upgrade: run `devflow init`. Until you do, the installed hooks and prompts are still the old version.
+- Upgrade: run `devflow init` (a full init, not `--hud-only`). Until you do, the installed prompts and agents are still the old version.
+  `devflow init --hud-only` and a plugin-only update install the new hooks and settings script, but not the new prompts.
+  The old prompts do not accept the `CURATION=` field, so they use their fail-closed settings until you run a full `devflow init`.
 - Downgrade to 3.7: 3.7 does not read `.devflow/curation/`. It starts a new empty ledger in `.devflow/learning/`.
   Your moved data stays in `.devflow/curation/`. The mirror key `features.learning` keeps a 3.8 opt-out in force.
 - Re-upgrade to 3.8: the next init or session start finds both folders and applies the rule above.
@@ -159,17 +172,6 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
   A 3.8 install reads both keys and narrows when either key is `false`.
 - Keep the old key in committed files, or set both keys, until every team member runs 3.8.
 
-**What you must do:**
-- Run `devflow init` after you update.
-- Replace `devflow learning` and the old init flags in your scripts.
-- Delete each backup folder after `devflow curation --status` shows 0 pending rows for it.
-  A backup made on re-upgrade can hold the only copy of entries that 3.7 wrote. Check them before you delete it.
-- Delete the leftover `.devflow/learning/` folder in each linked worktree whose main checkout has a `.devflow/` folder
-  and is not your home folder.
-  A worktree whose main checkout has no `.devflow/` folder, or is your home folder, keeps a live ledger.
-  That ledger moves like any project.
-- Run `devflow curation --enable` if the machine switch is off and you want it on.
-
 ### Upgrade notes — Lint pack
 
 **Stale-install window:**
@@ -183,11 +185,11 @@ Do the step below after you update.
 **What you must do:**
 - Run `devflow init` after you update. A full init installs `resolve-base.cjs` and the updated commands.
 
-**New stops:**
+**Stops:**
 - `/implement` stops when no usable base exists, for example in a shallow clone without the base history. `/code-review` and `/bug-analysis` stop in that case on a full-range run. The message names the cause and the fix: `git fetch --unshallow`, `git fetch origin <base>`, or a re-run (and `devflow init` if the re-run repeats the stop).
 - The same three commands stop on a base branch name outside the allowed set, or one that git refuses. The message states the set.
 - In `/code-review` multi-worktree mode, a rejected base blocks only that worktree.
-- `/code-review` and `/bug-analysis` stop when the branch name, with `/` replaced by `-`, holds characters outside ASCII letters, digits and `._-`, or is longer than 200 characters. The message states the allowed characters. In `/code-review` multi-worktree mode, this blocks only that worktree.
+- `/code-review` and `/bug-analysis` stop when the branch name does not fit the allowed characters and length. The message states the allowed characters. In `/code-review` multi-worktree mode, this blocks only that worktree.
 - The Git agent's `validate-branch` returns BLOCKED in the same cases. `/resolve` takes its branch diff from it.
 - The Git agent's `ensure-pr-ready` stops only on a base name outside the allowed set, or one that git refuses. For any other base stop it prints `TRACEABILITY: DEGRADED (base {REASON}; fix: {fix})` and goes on.
 
@@ -197,7 +199,7 @@ Do the step below after you update.
 - The `/dynamic-build` wave PR step runs `ensure-pr-ready` with no base ref, so that step makes this call.
 
 **Stale-install window:**
-- Until you run `devflow init`, the installed commands and Git agent do not call the resolver, so the new stops do not apply.
+- Until you run `devflow init`, the installed commands and Git agent do not call the resolver.
 
 **Known limits:**
 - A fetch that stops at its 45-second bound can leave a `refs/remotes/origin/<name>.lock` file in the git directory. Later runs then report `fetch-failed` until you delete the file.
@@ -220,18 +222,104 @@ Do the step below after you update.
 
 ### Added
 
-- **`devflow init` asks for the gate level** ([#543](https://github.com/dean0x/devflow/issues/543)). Before, only `devflow gates --set <level>` set the machine gate level, so a user who ran `init` did not learn that the level exists. An interactive `init` now asks for it: `full`, `standard` or `lean`, each with a one-line effect. On a first install the prompt starts on `standard`. On a re-init it shows the current value and starts on it, so Enter keeps a valid level. A malformed or `null` stored value starts the prompt on `full`, and accepting it writes `full` in its place; the machine level that applies does not change. `devflow init --gate-level <full|standard|lean>` sets the machine level with no prompt, in an interactive or a non-interactive run. A bad value, or no value, exits 1 before `init` writes anything and names the valid levels; the flag cannot be combined with `--hud-only`. `devflow init --recommended` and a non-interactive `init` show no prompt and keep the stored value. The Recommended settings note has a `Gate level:` row. The summary at the end of `init` shows the level that is now set, and adds `(was X)` when the run changes the machine level that applies. `init` writes the same machine default as `devflow gates --set`, and a personal `gateLevel` in a repository's `.devflow/config.json` still wins there. If `~/.devflow/manifest.json` is valid JSON with a `features` object that devflow rejects (a field is missing or mistyped, or a byte-order mark leads), a promptless `init` and `init --hud-only` keep the gate level stored in it, as it is stored, and warn that they kept the level while they replaced the file. When the prompt runs, your answer is the level, and accepting a malformed or `null` value writes `full`. If the manifest is corrupt, is not JSON, has no `features` object, or is over 1 MiB and also one that devflow rejects, `init` cannot read the level. The prompt shows `Current setting: unknown` and starts on `standard`. A promptless `init` or `init --hud-only` records no level and warns that `standard` applies and that `devflow gates --set <level>` sets it again. `devflow gates --status` words its manifest warning for each case. `devflow init --reset` still removes the stored level, and over a rejected manifest the summary names the level it removed, as in `(was full)`. A bare `devflow gates --set` now names the levels in its error, as `devflow init --gate-level` does.
-- **A lint pack template, and a lean lint pack in Validate** ([#475](https://github.com/dean0x/devflow/issues/475)). The package ships a template in `templates/lint-pack/`: a script, an example config and a README. You copy it into your repository and own the copy. devflow does not install, update or run the template itself. At `lean`, Phase 6 of `/implement` has Validate run your root `lint-pack` script last, after the build, typecheck, lint and test commands pass. Validate finds it as a `package.json` script, else as a `Makefile` target. The script reads the lines the branch changed. It finds a removed flag that a doc still names, a plan ID or a tombstone phrase in new text, and an oversized function (through your own linter). A match fails validation and reaches Fix as a file and line reference. Fix does not edit the lint pack, its config, its build-file entry or any `.gitattributes` to clear a match. Fix does not silence the linter to clear a match, with a disable comment or a linter-config change. It reports the match under Blockers. A pack error does not change the validation result. A git older than 2.30, a config that the script cannot read, a linter that did not run and a run that a timeout stops are pack errors, never a clean run. A pack error reads `UNVERIFIED` in the `/implement` final report and in the Testing part of the PR body. The pack also prints a `pack-changed` line for a changed build-file line in the compared range that names `lint-pack` or `BASE`, a `pack-dirty` line for an uncommitted change to a pack file, and the base it compared. Known limit: the pack prints the base it compared (`base <sha>`), but Validate does not check that base yet, and issue #537 adds that check. If the project has no `lint-pack` script or target, Validate prints one "not configured" line. The re-validation that you ask `/implement` for runs the pack. The re-validation after QA fixes, `/resolve`, `/self-review`, `/release` and `/dynamic-build` do not run it, and no level below `lean` runs it. To clear a match that you judge false, add an allow glob to `.lint-pack.conf`, commit it, and ask `/implement` to re-validate.
+- **`devflow init` asks for the gate level** ([#543](https://github.com/dean0x/devflow/issues/543), [#507](https://github.com/dean0x/devflow/issues/507)).
+  - `devflow gates --set <level>` and `devflow init` set the machine gate level, so a user who runs `init` learns that the level exists.
+    An interactive `init` asks for it: `full`, `standard` or `lean`, each with a one-line effect.
+    On a first install the prompt starts on `standard`.
+    On a re-init it shows the current value and starts on it, so Enter keeps a valid level.
+    A malformed or `null` stored value starts the prompt on `full`, and if you accept it, init writes `full` in its place. The machine level that applies does not change.
+  - `devflow init --gate-level <full|standard|lean>` sets the machine level with no prompt, in an interactive or a non-interactive run.
+    A bad value, or no value, exits 1 before `init` writes anything and names the valid levels. The flag cannot be combined with `--hud-only`.
+    `devflow init --recommended` and a non-interactive `init` show no prompt and keep the stored value.
+  - The Recommended settings note has a `Gate level:` row.
+    The summary at the end of `init` shows the level that is set, and adds `(was X)` when the run changes the machine level that applies.
+    `init` writes the same machine default as `devflow gates --set`, and a personal `gateLevel` in a repository's `.devflow/config.json` still wins there.
+  - If `~/.devflow/manifest.json` is valid JSON with a `features` object that devflow rejects (a field is missing or mistyped, or a byte-order mark leads), a promptless `init` and `init --hud-only` keep the gate level stored in it, as it is stored, and warn that they kept the level while they replaced the file.
+    When the prompt runs, your answer is the level. If you accept a malformed or `null` value, init writes `full`.
+  - If the manifest is corrupt, is not JSON, has no `features` object, or is over 1 MiB and also one that devflow rejects, `init` cannot read the level.
+    The prompt shows `Current setting: unknown` and starts on `standard`.
+    A promptless `init` or `init --hud-only` records no level and warns that `standard` applies and that `devflow gates --set <level>` sets it again.
+    `devflow gates --status` words its manifest warning for each case.
+  - `devflow init --reset` removes the stored level, and over a rejected manifest the summary names the level it removed, as in `(was full)`.
+    A bare `devflow gates --set` names the levels in its error, as `devflow init --gate-level` does.
+- **A lint pack template, and a lean lint pack in Validate** ([#475](https://github.com/dean0x/devflow/issues/475)).
+  - The package ships a template in `templates/lint-pack/`: a script, an example config and a README.
+    You copy it into your repository and own the copy.
+    devflow does not install, update or run the template itself.
+  - At `lean`, Phase 6 of `/implement` has Validate run your root `lint-pack` script last, after the build, typecheck, lint and test commands pass.
+    Validate finds it as a `package.json` script, else as a `Makefile` target.
+    The script reads the lines the branch changed.
+    It finds a removed flag that a doc still names, a plan ID or a tombstone phrase in new text, and an oversized function (through your own linter).
+    A match fails validation and reaches Fix as a file and line reference.
+  - Fix does not edit the lint pack, its config, its build-file entry or any `.gitattributes` to clear a match.
+    Fix does not silence the linter to clear a match, with a disable comment or a linter-config change.
+    It reports the match under Blockers.
+    To clear a match that you judge false, add an allow glob to `.lint-pack.conf`, commit it, and ask `/implement` to re-validate.
+  - A pack error does not change the validation result.
+    A git older than 2.30, a config that the script cannot read, a linter that did not run and a run that a timeout stops are pack errors, never a clean run.
+    A pack error reads `UNVERIFIED` in the `/implement` final report and in the Testing part of the PR body.
+    The pack also prints a `pack-changed` line for a changed build-file line in the compared range that names `lint-pack` or `BASE`, a `pack-dirty` line for an uncommitted change to a pack file, and the base it compared.
+    Known limit: the pack prints the base it compared (`base <sha>`), but Validate does not check that base yet, and issue [#537](https://github.com/dean0x/devflow/issues/537) adds that check.
+    If the project has no `lint-pack` script or target, Validate prints one "not configured" line.
+  - The re-validation that you ask `/implement` for runs the pack.
+    The re-validation after QA fixes, `/resolve`, `/self-review`, `/release` and `/dynamic-build` do not run it, and no level below `lean` runs it.
 
 ### Changed
 
-- **`/implement` and `/resolve` skip Polish at `standard` and `lean`** ([#481](https://github.com/dean0x/devflow/issues/481)). At `standard` and `lean`, `/implement` skips Phase 3 Polish, and `/resolve` skips Phase 6 Polish in each worktree at that level. At `full`, both spawn Polish as before. `/self-review`, `/debug` and `/dynamic-build` keep Polish at every level and read no level. Harden still reads the whole branch diff, and Validate does not depend on Polish. The quality rule gains one bullet that holds a subset of Polish's cleanup list: leftover debug statements, unused imports, unnecessary variables used once right after assignment, nested ternaries, checks the types enforce and catches around code that cannot throw. The bullet cuts debug statements everywhere, but it keeps checks and catches at a trust boundary or a fail-closed path. The Code agent applies it while it writes. At `full` and `standard`, `/code-review` can report these items. `devflow gates`, the `devflow init` level hints, the README, `docs/cli-reference.md` and `docs/commands.md` state the new effect. Accepted risk: at `standard` and `lean`, no `/implement` agent grades naming and consistency, and Harden reports both as `SKIP (Polish agent)`. No rule now holds two other Polish items: language-behavior tests and verbose names. Harden's test pillar partly covers language-behavior tests. At `standard` and `lean`, `/resolve` skips Polish and never spawns Harden, so debug statements in its fixes that hold no secret or token get no later pass beyond the quality rule and the review. At `lean`, `/code-review` does not report the cleanup items. Ticket [#568](https://github.com/dean0x/devflow/issues/568) tracks the Harden wording. Run `devflow gates --set full` to keep Polish.
-- **`/implement` and `/resolve` read the gate level** ([#480](https://github.com/dean0x/devflow/issues/480)). At `standard` and `lean`, each command reads its level reference one time for each run. At `full`, it reads no reference. `/implement` reads it at the start of Phase 3. `/resolve` reads it in Step 0d when any worktree is at `standard` or `lean`. The references hold the phase rows, and the [#481](https://github.com/dean0x/devflow/issues/481) entry lists the first two. The `/implement` report and the `/resolve` display name the level at every level. `/resolve` also names it in `resolution-summary.md`. If a reference cannot be read, the command says `level reference unreadable: no level rows applied`. It applies no row and keeps the level, so at `lean` the lint pack still runs. No level removes Validate, the CI gate, the evidence claims, the Verification Gate or the compliance directive. No level changes the Triage security gate or the ESCALATED route. `devflow gates` says that `/implement` and `/resolve` read the level.
+- **`/implement` and `/resolve` skip Polish at `standard` and `lean`** ([#481](https://github.com/dean0x/devflow/issues/481)).
+  - At `standard` and `lean`, `/implement` skips Phase 3 Polish, and `/resolve` skips Phase 6 Polish in each worktree at that level.
+    At `full`, both spawn Polish.
+    `/self-review`, `/debug` and `/dynamic-build` keep Polish at every level and read no level.
+    Harden still reads the whole branch diff, and Validate does not depend on Polish.
+  - The quality rule has one bullet that holds a subset of Polish's cleanup list: leftover debug statements, unused imports, unnecessary variables used once right after assignment, nested ternaries, checks the types enforce and catches around code that cannot throw.
+    The bullet cuts debug statements everywhere, but it keeps checks and catches at a trust boundary or a fail-closed path.
+    The Code agent applies it while it writes.
+    At `full` and `standard`, `/code-review` can report these items.
+    `devflow gates`, the `devflow init` level hints, the README, `docs/cli-reference.md` and `docs/commands.md` state the effect.
+  - Accepted risk: at `standard` and `lean`, no `/implement` agent grades naming and consistency, and Harden reports both as `SKIP (Polish agent)`.
+    No rule holds two other Polish items: language-behavior tests and verbose names.
+    Harden's test pillar partly covers language-behavior tests.
+  - At `standard` and `lean`, `/resolve` skips Polish and never spawns Harden, so debug statements in its fixes that hold no secret or token get no later pass beyond the quality rule and the review.
+    At `lean`, `/code-review` does not report the cleanup items.
+    Ticket [#568](https://github.com/dean0x/devflow/issues/568) tracks the Harden wording.
+    Run `devflow gates --set full` to keep Polish.
+- **`/implement` and `/resolve` read the gate level** ([#480](https://github.com/dean0x/devflow/issues/480)).
+  - At `standard` and `lean`, each command reads its level reference one time for each run. At `full`, it reads no reference.
+    `/implement` reads it at the start of Phase 3.
+    `/resolve` reads it in Step 0d when any worktree is at `standard` or `lean`.
+    The references hold the phase rows, and the [#481](https://github.com/dean0x/devflow/issues/481) entry lists the rows that this release adds.
+  - The `/implement` report and the `/resolve` display name the level at every level.
+    `/resolve` also names it in `resolution-summary.md`.
+    `devflow gates` says that `/implement` and `/resolve` read the level.
+  - If a reference cannot be read, the command says `level reference unreadable: no level rows applied`.
+    It applies no row and keeps the level, so at `lean` the lint pack still runs.
+  - No level removes Validate, the CI gate, the evidence claims, the Verification Gate or the compliance directive.
+    No level changes the Triage security gate or the ESCALATED route.
+- **Code, Fix and Refactor check the staged diff for secrets or tokens in logs or debug output before each commit** ([#584](https://github.com/dean0x/devflow/issues/584)).
+  - Each of these agents checks the staged diff of every file it commits.
+    The check runs at every level, wherever `/resolve`, `/implement`, `/debug`, `/dynamic-build` (and dynamic workflows that spawn them) or ambient mode spawn these agents.
+    Run `devflow init` to install the updated agents.
+- **`/implement`, `/code-review`, `/bug-analysis` and `/resolve` check branch names against an allowed set** ([#495](https://github.com/dean0x/devflow/issues/495)).
+  - A base branch name outside the allowed set, or one that git refuses, stops the run. The message states the set.
+    In `/code-review` multi-worktree mode, a rejected base blocks only that worktree.
+  - An incremental `/code-review` or `/bug-analysis` run takes the full range when it cannot use the stored review head.
+    A failed patch write in `/code-review` stops the run.
 
 ### Fixed
 
-- **`/implement`, `/code-review`, `/bug-analysis` and `/resolve` use a fresh base for branch diffs, and branch-name validation is tighter** ([#495](https://github.com/dean0x/devflow/issues/495)). A new script, `resolve-base.cjs`, makes at most one fetch of the base branch, picks the base by one stated rule and prints one status line. The fetch updates only the remote-tracking ref of the base branch, and credential prompts are off for it. The branch diff starts at the fork point of that base and `HEAD`. The fetch stops after 45 seconds, each local git call stops after 30 seconds, and one run has a budget of 100 seconds. A local git call that gives no answer reports `resolver-unavailable`. When the fetch fails or times out, `/implement`, `/code-review` and `/bug-analysis` use the best base they have and print a warning. Known limit: `/resolve` uses that base without a warning. When no usable base exists, for example in a shallow clone without the base history, `/implement` stops, and `/code-review` and `/bug-analysis` stop on a full-range run. Each names the cause and a fix. `/resolve` takes its branch diff from the Git agent's `validate-branch`, which returns BLOCKED in that case. A normal `/implement` run fetches the base branch once, and a re-validation that you ask for can add one more fetch. A base branch name is checked against a stricter allowed set and against git's own name rules, so a name outside the set, or one that git refuses, stops the run, and the refusal message states the set. In `/code-review` multi-worktree mode, a rejected base blocks only that worktree. `/code-review` and `/bug-analysis` use the stored review head of an incremental run only when it is a commit ID of 40 or 64 lowercase hex digits. Any other value takes the full range. A tracked review-head file is ignored, and the review takes the full range. A failed patch write in `/code-review` stops the run. Run `devflow init` after you update, to install the script and the updated commands.
-- **Code, Fix and Refactor check the staged diff of every file they commit for secrets or tokens in logs or debug output** ([#584](https://github.com/dean0x/devflow/issues/584)). Each of these agents makes the check before each commit. The check runs at every level, wherever `/resolve`, `/implement`, `/debug`, `/dynamic-build` (and dynamic workflows that spawn them) or ambient mode spawn these agents. Run `devflow init` to install the updated agents.
+- **`/implement`, `/code-review`, `/bug-analysis` and `/resolve` use a fresh base for branch diffs** ([#495](https://github.com/dean0x/devflow/issues/495)).
+  - A new script, `resolve-base.cjs`, makes at most one fetch of the base branch, picks the base by one stated rule and prints one status line.
+    The fetch updates only the remote-tracking ref of the base branch, and credential prompts are off for it.
+    The branch diff starts at the fork point of that base and `HEAD`.
+  - The fetch stops after 45 seconds, each local git call stops after 30 seconds, and one run has a budget of 100 seconds.
+    A local git call that gives no answer reports `resolver-unavailable`.
+    A normal `/implement` run fetches the base branch once, and a re-validation that you ask for can add one more fetch.
+  - When the fetch fails or times out, `/implement`, `/code-review` and `/bug-analysis` use the best base they have and print a warning.
+    Known limit: `/resolve` uses that base without a warning.
+  - When no usable base exists, for example in a shallow clone without the base history, `/implement` stops, and `/code-review` and `/bug-analysis` stop on a full-range run.
+    Each names the cause and a fix.
+    `/resolve` takes its branch diff from the Git agent's `validate-branch`, which returns BLOCKED in that case.
+  - Run `devflow init` after you update, to install the script and the updated commands.
 
 ---
 
@@ -1981,7 +2069,7 @@ devflow init
 
 ---
 
-[Unreleased]: https://github.com/dean0x/devflow/compare/v3.7.0...HEAD
+[Unreleased]: https://github.com/dean0x/devflow/compare/v3.8.0...HEAD
 [3.7.0]: https://github.com/dean0x/devflow/compare/v3.6.0...v3.7.0
 [3.6.0]: https://github.com/dean0x/devflow/compare/v3.5.0...v3.6.0
 [3.5.0]: https://github.com/dean0x/devflow/compare/v3.4.0...v3.5.0
