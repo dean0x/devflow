@@ -391,6 +391,125 @@ describe('queue_append_both', () => {
 });
 
 // ---------------------------------------------------------------------------
+// One capture hook makes both appends in one process. The queue files are 0600
+// whatever the caller umask, and that umask is not changed for the rest of the
+// hook, so a folder the second append makes has the mode the caller's umask gives.
+// The row is built once, however many queues take it.
+// ---------------------------------------------------------------------------
+
+describe('queue_append_both: one row build, and the caller umask kept', () => {
+  const writeFakeExecutable = useWarmFakeExecutables();
+  let tmpDir: string;
+  let root: string;
+  let memory: string;
+  let curation: string;
+  let forkLog: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'queue-append-umask-'));
+    root = path.join(tmpDir, 'repo');
+    memory = path.join(root, '.devflow', 'memory', '.pending-turns.jsonl');
+    curation = path.join(root, '.devflow', 'curation', '.pending-turns.jsonl');
+    forkLog = path.join(tmpDir, 'forks.log');
+    const shimDir = path.join(tmpDir, 'shim');
+    fs.mkdirSync(root);
+    fs.mkdirSync(shimDir);
+    for (const name of ['node', 'jq']) {
+      const real = resolveOnPath(name, process.env.PATH ?? '/usr/bin:/bin');
+      if (real === undefined) continue;
+      writeFakeExecutable(path.join(shimDir, name), `#!/bin/bash\necho ${name} >> "${forkLog}"\nexec "${real}" "$@"\n`);
+    }
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  const shimEnv = (): NodeJS.ProcessEnv => ({
+    ...process.env,
+    PATH: `${path.join(tmpDir, 'shim')}:${process.env.PATH ?? '/usr/bin:/bin'}`,
+  });
+  const forks = (): string[] => (fs.existsSync(forkLog) ? fs.readFileSync(forkLog, 'utf-8').trim().split('\n').filter(Boolean) : []);
+  const modeOf = (file: string): string => (fs.statSync(file).mode & 0o777).toString(8);
+  /** Both appends in one process, then the umask the process ends with. */
+  const both = (setup: string, flags = '"true" "true"', env?: NodeJS.ProcessEnv): { stdout: string; stderr: string; exitCode: number } =>
+    runWithQueueAppend(
+      `${setup}\nqueue_append_both "${root}" "${memory}" "${root}" "${curation}" ${flags} "user" "we chose X over Y" "5"\numask`,
+      env,
+    );
+
+  it('memory then curation in one process: the curation folder gets the mode of a mkdir under the caller umask, and both queues are 0600', () => {
+    const { exitCode, stderr } = both('umask 022');
+
+    expect(exitCode, stderr).toBe(0);
+    expect(modeOf(path.join(root, '.devflow', 'curation')), 'the curation folder').toBe('755');
+    expect(modeOf(path.join(root, '.devflow', 'memory')), 'the memory folder').toBe('755');
+    expect(modeOf(memory)).toBe('600');
+    expect(modeOf(curation)).toBe('600');
+  });
+
+  it('a stricter caller umask is the one the folders take, and the queues stay 0600', () => {
+    const { exitCode, stderr } = both('umask 027');
+
+    expect(exitCode, stderr).toBe(0);
+    expect(modeOf(path.join(root, '.devflow', 'curation'))).toBe('750');
+    expect(modeOf(memory)).toBe('600');
+    expect(modeOf(curation)).toBe('600');
+  });
+
+  it('the caller umask is back when the call returns', () => {
+    for (const mask of ['022', '027']) {
+      const { exitCode, stderr, stdout } = both(`umask ${mask}`);
+
+      expect(exitCode, stderr).toBe(0);
+      expect(stdout.trim(), `umask ${mask}`).toBe(`0${mask}`);
+      fs.rmSync(path.join(root, '.devflow'), { recursive: true, force: true });
+    }
+  });
+
+  it('two single appends keep the caller umask too: the second folder is made under it', () => {
+    const { exitCode, stderr, stdout } = runWithQueueAppend(`
+      umask 022
+      queue_append_row "${root}" "${memory}" "user" "one" "1"
+      queue_append_row "${root}" "${curation}" "user" "two" "2"
+      umask
+    `);
+
+    expect(exitCode, stderr).toBe(0);
+    expect(stdout.trim()).toBe('0022');
+    expect(modeOf(path.join(root, '.devflow', 'curation'))).toBe('755');
+    expect(modeOf(curation)).toBe('600');
+  });
+
+  for (const backend of [{ name: 'jq', noJq: false, tool: 'jq' }, { name: 'node fallback', noJq: true, tool: 'node' }]) {
+    describe(`${backend.name} backend`, () => {
+      const setup = backend.noJq ? '_HAS_JQ=false' : '';
+
+      it('both queues on: both get the identical line, and the row is built by one process', () => {
+        const { exitCode, stderr } = both(setup, '"true" "true"', shimEnv());
+
+        expect(exitCode, stderr).toBe(0);
+        const memoryText = fs.readFileSync(memory, 'utf-8');
+        expect(memoryText).toBe(fs.readFileSync(curation, 'utf-8'));
+        expect(memoryText.split('\n')).toHaveLength(2);
+        expect(JSON.parse(memoryText)).toEqual({ role: 'user', content: 'we chose X over Y', ts: 5 });
+        expect(forks()).toEqual([backend.tool]);
+      });
+
+      it('one queue on: one build; neither on: no build and no file', () => {
+        expect(both(setup, '"false" "true"', shimEnv()).exitCode).toBe(0);
+        expect(forks()).toEqual([backend.tool]);
+        expect(fs.existsSync(memory)).toBe(false);
+
+        fs.rmSync(forkLog, { force: true });
+        expect(both(setup, '"false" "false"', shimEnv()).exitCode).toBe(0);
+        expect(forks()).toEqual([]);
+      });
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // D-HOOKS-NO-SYMLINK (git-marker): a queue under a project's .devflow/ is
 // appended only when neither it nor a folder between its root and it is a link.
 // ---------------------------------------------------------------------------
@@ -722,6 +841,25 @@ describe('queue_append_row: the ledger folder follows the creator rule', () => {
     expect(exitCode, stderr).toBe(0);
     expect(readJsonl(newQueue)).toEqual([row]);
     expect(fs.existsSync(path.join(devflow, 'learning')), 'the old folder stays gone').toBe(false);
+  });
+
+  it('the new folder made after the old one moved is created under the caller umask, which is back when the call returns', () => {
+    fs.mkdirSync(path.dirname(oldQueue), { recursive: true });
+    fs.writeFileSync(oldQueue, '', { mode: 0o600 });
+
+    const { exitCode, stderr, stdout } = runWithQueueAppend(`
+      umask 022
+      eval "_probed_$(declare -f df_ledger_queue)"
+      df_ledger_queue() { _probed_df_ledger_queue "$@"; rm -rf "${path.join(devflow, 'learning')}"; }
+      queue_append_row "${root}" "${newQueue}" "user" "we chose X over Y" "1"
+      umask
+    `);
+
+    expect(exitCode, stderr).toBe(0);
+    expect(stdout.trim()).toBe('0022');
+    expect(readJsonl(newQueue)).toEqual([row]);
+    expect((fs.statSync(path.dirname(newQueue)).mode & 0o777).toString(8)).toBe('755');
+    expect((fs.statSync(newQueue).mode & 0o777).toString(8)).toBe('600');
   });
 
   it('the memory queue is not redirected, whichever ledger folder exists', () => {
