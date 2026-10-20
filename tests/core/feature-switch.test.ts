@@ -415,6 +415,62 @@ describe('readMachineFeature / writeMachineFeature (I/O)', () => {
       expect(typeof features.curation).toBe('boolean');
     });
 
+    describe('a lock taken from the toggle before its write', () => {
+      /** Another caller takes the path from the holder: its directory is made before the holder's is moved away. */
+      const takeLockFromHolder = async (): Promise<void> => {
+        await fs.mkdir(`${lockDir()}.other`);
+        await fs.rename(lockDir(), `${lockDir()}.gone`);
+        await fs.rename(`${lockDir()}.other`, lockDir());
+        await fs.rmdir(`${lockDir()}.gone`);
+      };
+
+      it('takes the lock again and writes once it holds a lock of its own', async () => {
+        await writeManifest(enabledBody());
+        const realReadFile = fs.readFile.bind(fs);
+        let reads = 0;
+        vi.spyOn(fs, 'readFile').mockImplementation((async (...args: Parameters<typeof fs.readFile>) => {
+          const content = await realReadFile(...args);
+          if (String(args[0]) === manifestPath() && ++reads === 1) {
+            await takeLockFromHolder();
+            // The other caller is done soon.
+            setTimeout(() => { void fs.rmdir(lockDir()).catch(() => undefined); }, 60);
+          }
+          return content;
+        }) as typeof fs.readFile);
+
+        expect(await writeMachineFeature(devflowDir, 'curation', false)).toEqual({ ok: true, value: undefined });
+
+        expect(reads, 'the first try read, lost the lock and did not write; the second try read again').toBe(2);
+        expect((await readRaw()).features).toEqual({ curation: false, learning: false });
+        expect(await exists(lockDir())).toBe(false);
+      });
+
+      it('retries a bounded number of times, then writes without the lock rather than refuse the switch', async () => {
+        await writeManifest(enabledBody());
+        const realReadFile = fs.readFile.bind(fs);
+        let reads = 0;
+        let taken = 0;
+        vi.spyOn(fs, 'readFile').mockImplementation((async (...args: Parameters<typeof fs.readFile>) => {
+          const content = await realReadFile(...args);
+          if (String(args[0]) === manifestPath()) {
+            reads += 1;
+            if (await exists(lockDir())) {
+              taken += 1;
+              await takeLockFromHolder();
+              await fs.rmdir(lockDir());
+            }
+          }
+          return content;
+        }) as typeof fs.readFile);
+
+        expect(await writeMachineFeature(devflowDir, 'curation', false)).toEqual({ ok: true, value: undefined });
+
+        expect(taken, 'the lock is taken from the holder on each locked try').toBe(3);
+        expect(reads, 'three locked tries, then one without the lock').toBe(4);
+        expect((await readRaw()).features).toEqual({ curation: false, learning: false });
+      });
+    });
+
     it('goes ahead without the lock when the wait ends and the lock cannot be broken', async () => {
       await writeManifest(enabledBody());
       // A stale lock whose directory cannot be moved: the wait runs out.

@@ -164,6 +164,92 @@ describe('manifest lock', () => {
     expect(await exists(lockDir)).toBe(false);
   });
 
+  describe('a holder can tell that its lock directory is still the one it made', () => {
+    it('stillHeld is true while the lock is held and false once it is released', async () => {
+      const lock = await acquireManifestLock(devflowDir, { timeoutMs: 0 });
+      if (!lock.ok) throw new Error('lock not taken');
+      expect(await lock.value.stillHeld()).toBe(true);
+      await lock.value.release();
+      expect(await lock.value.stillHeld()).toBe(false);
+    });
+
+    it('stillHeld is false when the lock directory is gone, and when another directory stands at the path', async () => {
+      const lock = await acquireManifestLock(devflowDir, { timeoutMs: 0 });
+      if (!lock.ok) throw new Error('lock not taken');
+      await fs.rmdir(lockDir);
+      expect(await lock.value.stillHeld()).toBe(false);
+      await fs.mkdir(lockDir);
+      expect(await lock.value.stillHeld()).toBe(false);
+    });
+
+    it('withManifestLock hands its work the same check', async () => {
+      const seen: boolean[] = [];
+      await withManifestLock(devflowDir, { timeoutMs: 0 }, async (lock) => {
+        seen.push(await lock.stillHeld());
+        await fs.rmdir(lockDir);
+        seen.push(await lock.stillHeld());
+      });
+      expect(seen).toEqual([true, false]);
+    });
+
+    it('three callers: B moves the live lock of A, C takes the free path, B gives the lock back. A is told it lost it, C holds, and A\'s release leaves C\'s lock', async () => {
+      // A dead lock is on the path. A and B both judge it stale. A breaks it and takes
+      // a fresh lock. B then moves A's fresh lock away (it had judged the dead one).
+      // While the path is empty, C takes it. B finds the moved lock fresh and gives it
+      // back, and the path is C's: B removes A's directory.
+      await fs.mkdir(lockDir);
+      await makeStale(lockDir);
+
+      const realRename = fs.rename.bind(fs);
+      const realStat = fs.stat.bind(fs);
+      let arrived = 0;
+      let bothArrived!: () => void;
+      const bothJudgedStale = new Promise<void>((resolve) => { bothArrived = resolve; });
+      let aHolds!: () => void;
+      const aHasLock = new Promise<void>((resolve) => { aHolds = resolve; });
+      let aTookLock = false;
+      let c: Awaited<ReturnType<typeof acquireManifestLock>> | undefined;
+      vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+        if (String(from) !== lockDir) return realRename(from, to);
+        arrived += 1;
+        const position = arrived;
+        if (arrived === 2) bothArrived();
+        await bothJudgedStale;
+        if (position === 2) await aHasLock;
+        return realRename(from, to);
+      });
+      // B has just moved A's lock, and its next call is the age check of the moved
+      // directory. The path is empty at that point, and C takes it.
+      vi.spyOn(fs, 'stat').mockImplementation((async (...args: Parameters<typeof fs.stat>) => {
+        if (aTookLock && c === undefined && String(args[0]).startsWith(`${lockDir}.stale-`)) {
+          c = await acquireManifestLock(devflowDir, { timeoutMs: 0 });
+        }
+        return realStat(...args);
+      }) as typeof fs.stat);
+
+      const callerA = acquireManifestLock(devflowDir, { timeoutMs: 0 }).then((result) => {
+        if (result.ok) { aTookLock = true; aHolds(); }
+        return result;
+      });
+      const callerB = acquireManifestLock(devflowDir, { timeoutMs: 0 });
+      const [a, b] = await Promise.all([callerA, callerB]);
+
+      expect(a.ok).toBe(true);
+      expect(b).toEqual({ ok: false, error: 'not-acquired' });
+      expect(arrived).toBe(2);
+      if (!a.ok || c === undefined || !c.ok) throw new Error('the sequence did not run');
+
+      expect(await a.value.stillHeld(), 'A lost its directory to B and C').toBe(false);
+      expect(await c.value.stillHeld(), 'C holds the path').toBe(true);
+      await a.value.release();
+      expect(await exists(lockDir), 'A\'s release does not remove the lock C holds').toBe(true);
+      expect(await c.value.stillHeld()).toBe(true);
+      await c.value.release();
+      expect(await exists(lockDir)).toBe(false);
+      expect(await leftovers()).toEqual([]);
+    });
+  });
+
   it('withManifestLock runs its work while holding the lock and releases it after', async () => {
     let heldDuring = false;
     const result = await withManifestLock(devflowDir, { timeoutMs: 0 }, async () => {

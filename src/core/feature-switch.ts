@@ -1,7 +1,7 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
-import { withManifestLock } from './manifest-lock.js';
+import { MANIFEST_LOCK_WAIT_MS, withManifestLock } from './manifest-lock.js';
 
 /**
  * The features that are switched on or off for the WHOLE MACHINE, and that a
@@ -260,26 +260,64 @@ export async function readOptInFeature(devflowDir: string, feature: OptInMachine
  * bounded, and longer than the stale age, so a lock left by a dead process is broken
  * inside it. A lock that is still not taken after that wait cannot be broken, and
  * the lock then protects nothing: the toggle goes ahead without it rather than refuse
- * an explicit switch.
+ * an explicit switch. Just before its write the toggle checks that the lock directory is
+ * still its own; when another caller took it, the toggle takes the lock again, at most
+ * {@link MANIFEST_LOCK_ATTEMPTS} times and within the same wait, and then goes ahead
+ * without it.
  */
 export async function writeMachineFeature(
   devflowDir: string,
   feature: MachineFeature | OptInMachineFeature,
   enabled: boolean,
 ): Promise<Result<void, MachineFeatureWriteError>> {
-  const locked = await withManifestLock(devflowDir, {}, () => recordMachineFeature(devflowDir, feature, enabled));
-  return locked.ok ? locked.value : recordMachineFeature(devflowDir, feature, enabled);
+  const deadline = Date.now() + MANIFEST_LOCK_WAIT_MS;
+  for (let attempt = 0; attempt < MANIFEST_LOCK_ATTEMPTS; attempt++) {
+    const timeoutMs = Math.max(0, deadline - Date.now());
+    const locked = await withManifestLock(devflowDir, { timeoutMs }, (lock) => recordMachineFeature(devflowDir, feature, enabled, lock.stillHeld));
+    if (!locked.ok) break;
+    if (locked.value !== LOCK_LOST) return locked.value;
+  }
+  return recordMachineFeature(devflowDir, feature, enabled);
 }
 
+/**
+ * How many times a toggle takes the lock when it finds, just before its write, that
+ * another caller took the lock directory from it (manifest-lock.ts). The tries share
+ * the one wait, {@link MANIFEST_LOCK_WAIT_MS}. After them the toggle goes ahead without
+ * the lock, as it does when the wait ends.
+ */
+const MANIFEST_LOCK_ATTEMPTS = 3;
+
+/** `recordMachineFeature` did not write: the lock was taken from this toggle first. */
+const LOCK_LOST = 'lock-lost';
+
+/**
+ * Read the manifest and write the switch. With `stillHeld` (a toggle under the lock),
+ * the write is preceded by that check, and the answer is {@link LOCK_LOST}, with nothing
+ * written, when the lock directory is no longer the toggle's own.
+ */
 async function recordMachineFeature(
   devflowDir: string,
   feature: MachineFeature | OptInMachineFeature,
   enabled: boolean,
-): Promise<Result<void, MachineFeatureWriteError>> {
+): Promise<Result<void, MachineFeatureWriteError>>;
+async function recordMachineFeature(
+  devflowDir: string,
+  feature: MachineFeature | OptInMachineFeature,
+  enabled: boolean,
+  stillHeld: () => Promise<boolean>,
+): Promise<Result<void, MachineFeatureWriteError> | typeof LOCK_LOST>;
+async function recordMachineFeature(
+  devflowDir: string,
+  feature: MachineFeature | OptInMachineFeature,
+  enabled: boolean,
+  stillHeld?: () => Promise<boolean>,
+): Promise<Result<void, MachineFeatureWriteError> | typeof LOCK_LOST> {
   const raw = await readRawManifest(devflowDir);
   if (isMachineFeatureRecorded(raw, feature, enabled)) return { ok: true, value: undefined };
   const next = setMachineFeature(raw, feature, enabled, new Date().toISOString());
   if (next === null) return { ok: false, error: 'not-installed' };
+  if (stillHeld !== undefined && !(await stillHeld())) return LOCK_LOST;
   await writeFileAtomicExclusive(path.join(devflowDir, 'manifest.json'), JSON.stringify(next, null, 2) + '\n');
   return { ok: true, value: undefined };
 }

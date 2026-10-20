@@ -1090,6 +1090,122 @@ describe('the move-journal family (installArtifactPaths and resolveInstallArtifa
   });
 });
 
+// The manifest lock (`manifest.json.lock`, a directory) is machine state the toggles and the
+// heal take. A holder that dies inside its critical section leaves it behind, and a break
+// whose cleanup failed leaves `manifest.json.lock.stale-<pid>-<12 hex>`. The artifact list
+// names both by exact shape. A link, a file or a near miss stays.
+
+describe('the manifest-lock family (installArtifactPaths and resolveInstallArtifactPaths)', () => {
+  let tmpDir: string;
+  const STALE = 'manifest.json.lock.stale-4242-0123456789ab';
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-manifestlock-'));
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('declares the lock family as a real-directory entry, and it is not user content', () => {
+    const entry = installArtifactPaths(tmpDir).find(e => e.relPath === 'manifest.json.lock');
+    expect(entry, 'the manifest lock must be an install artifact').toBeDefined();
+    expect(entry?.isPrefix).toBe(true);
+    expect(entry?.isDir).toBe(true);
+    expect(entry?.realDirOnly).toBe(true);
+    expect(userContentPaths(tmpDir).map(e => e.relPath).filter(r => r.startsWith('manifest.json'))).toEqual([]);
+  });
+
+  it('expands to the lock directory and to each stale directory of exactly the shape, and to nothing else', async () => {
+    await fs.mkdir(path.join(tmpDir, 'manifest.json.lock'));
+    await fs.mkdir(path.join(tmpDir, STALE));
+    await fs.mkdir(path.join(tmpDir, 'manifest.json.lock.stale-7-fedcba987654'));
+    const nearMisses = [
+      'manifest.json.lock.stale-',
+      'manifest.json.lock.stale-abc-0123456789ab',   // a pid that is not digits
+      'manifest.json.lock.stale-42-0123456789a',     // eleven characters
+      'manifest.json.lock.stale-42-0123456789abc',   // thirteen characters
+      'manifest.json.lock.stale-42-0123456789AB',    // upper case
+      'manifest.json.lock.stale-42-0123456789ab.bak',
+      'manifest.json.lockx',
+      'manifest.json.lock.bak',
+      'manifest.json.locks',
+      'x.manifest.json.lock',
+    ];
+    for (const name of nearMisses) await fs.mkdir(path.join(tmpDir, name));
+
+    const resolved = (await resolveInstallArtifactPaths(tmpDir)).map(e => e.relPath);
+
+    expect(resolved).toContain('manifest.json.lock');
+    expect(resolved).toContain(STALE);
+    expect(resolved).toContain('manifest.json.lock.stale-7-fedcba987654');
+    for (const name of nearMisses) expect(resolved, name).not.toContain(name);
+  });
+
+  it('a stale directory that the lock module leaves behind has the shape the list matches', async () => {
+    const { acquireManifestLock, getManifestLockPath, MANIFEST_LOCK_STALE_MS } = await import('../src/core/manifest-lock.js');
+    const lockDir = getManifestLockPath(tmpDir);
+    await fs.mkdir(lockDir);
+    const old = new Date(Date.now() - 10 * MANIFEST_LOCK_STALE_MS);
+    await fs.utimes(lockDir, old, old);
+    // The break moves the dead lock aside and removes it. Fail the remove, so the moved directory stays.
+    vi.spyOn(fs, 'rm').mockRejectedValue(new Error('not permitted'));
+    const lock = await acquireManifestLock(tmpDir, { timeoutMs: 0 });
+    expect(lock.ok).toBe(true);
+    vi.restoreAllMocks();
+    if (lock.ok) await lock.value.release();
+
+    const left = (await fs.readdir(tmpDir)).filter(name => name.startsWith('manifest.json.lock.stale-'));
+    expect(left).toHaveLength(1);
+    expect((await resolveInstallArtifactPaths(tmpDir)).map(e => e.relPath)).toContain(left[0]);
+  });
+
+  it('leaves a link and a file that are named like the lock, and the file the link names', async () => {
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-manifestlock-outside-'));
+    try {
+      await fs.writeFile(path.join(outside, 'precious'), 'keep', 'utf-8');
+      await fs.symlink(outside, path.join(tmpDir, 'manifest.json.lock'));
+      await fs.writeFile(path.join(tmpDir, STALE), 'a file', 'utf-8');
+
+      const resolved = (await resolveInstallArtifactPaths(tmpDir)).map(e => e.relPath);
+      expect(resolved).not.toContain('manifest.json.lock');
+      expect(resolved).not.toContain(STALE);
+
+      await removeDevFlowInstallArtifacts(tmpDir, false);
+      expect(await fs.readFile(path.join(outside, 'precious'), 'utf-8')).toBe('keep');
+      await expect(fs.lstat(path.join(tmpDir, 'manifest.json.lock'))).resolves.toBeDefined();
+      await expect(fs.lstat(path.join(tmpDir, STALE))).resolves.toBeDefined();
+    } finally {
+      await fs.rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('an artifacts-only removal takes the manifest, the lock directory and a stale one, and leaves user content', async () => {
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), '{}', 'utf-8');
+    await fs.mkdir(path.join(tmpDir, 'manifest.json.lock'));
+    await fs.mkdir(path.join(tmpDir, STALE));
+    await fs.writeFile(path.join(tmpDir, STALE, 'owner'), 'dead', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, 'tracker.md'), 'user content', 'utf-8');
+
+    await removeDevFlowInstallArtifacts(tmpDir, false);
+
+    await expect(fs.lstat(path.join(tmpDir, 'manifest.json'))).rejects.toThrow();
+    await expect(fs.lstat(path.join(tmpDir, 'manifest.json.lock'))).rejects.toThrow();
+    await expect(fs.lstat(path.join(tmpDir, STALE))).rejects.toThrow();
+    expect(await fs.readFile(path.join(tmpDir, 'tracker.md'), 'utf-8')).toBe('user content');
+  });
+
+  it('the dry-run preview names a lock it is about to remove', async () => {
+    const lock = path.join(tmpDir, 'manifest.json.lock');
+    await fs.mkdir(lock);
+    const claudeDir = path.join(tmpDir, 'claude-home');
+    await fs.mkdir(claudeDir, { recursive: true });
+
+    expect(await enumerateDryRunExtras(claudeDir, tmpDir)).toContain(lock);
+  });
+});
+
 describe('uninstall and the curation data (#529, TP-11)', () => {
   let tmpDir: string;
 

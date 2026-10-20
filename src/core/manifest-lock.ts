@@ -1,11 +1,17 @@
 /**
  * @file manifest-lock.ts
  *
- * A mkdir lock for `<devflowDir>/manifest.json`. Two writers read the manifest, decide
- * and write it back: the toggle write (`writeMachineFeature`) and the read heal
- * (`readManifest`). Without a lock, a heal that parsed the file before a `--disable`
- * landed writes its stale snapshot over the disable, after the toggle reported
- * success. Both writers take this lock around their read and their write.
+ * A mkdir lock for `<devflowDir>/manifest.json`. It covers two writers, which read the
+ * manifest, decide and write it back: the toggle write of the `memory`, `curation`,
+ * `knowledge` and `behavior` switches (`writeMachineFeature`) and the read heal
+ * (`readManifest`). Without a lock, a heal that parsed the file
+ * before a `--disable` landed writes its stale snapshot over the disable, after the
+ * toggle reported success. Both writers take this lock around their read and their write.
+ *
+ * Every other writer of the manifest takes no lock: `syncManifestFeature` (the `hud`,
+ * `security`, `proxy` and `tracker` toggles), the `flags` and `rules` writes, the gate
+ * level writer and init. Such a write can still overwrite a toggle that lands between its
+ * read and its write. That gap is older than this lock and is tracked in issue #587.
  *
  * The lock is a directory beside the manifest. `mkdir` is atomic, so one caller makes
  * it and every other caller sees EEXIST. A holder that died leaves the directory
@@ -18,6 +24,16 @@
  * a lock in two steps. The waiter renames the directory to a unique name, so only one
  * waiter can move it, and then checks that the directory it moved really was stale.
  * A waiter that moved a fresh lock gives it back and counts the lock as busy.
+ *
+ * The give-back leaves a short time in which the live holder's directory is not at the
+ * path, and a third caller can make a directory there. So a holder records the identity
+ * (device and inode) of the directory it made, and `stillHeld()` tells it whether that
+ * directory is still the one at the path. A holder calls it just before its write. When
+ * it answers false, the holder does not write: the heal skips, and the toggle takes the
+ * lock again. A release removes the directory only while it is still the holder's own.
+ * The check narrows the window to the time between the check and the write itself; a
+ * directory lock cannot close it. A fourth caller that makes a directory which reuses the
+ * freed inode number of the first holder's directory would also pass the check.
  */
 
 import { promises as fs } from 'fs';
@@ -28,6 +44,12 @@ type Result<T, E> = { ok: true; value: T } | { ok: false; error: E };
 
 /** The lock directory's name, in the machine directory beside `manifest.json`. */
 export const MANIFEST_LOCK_NAME = 'manifest.json.lock';
+
+/**
+ * What a stale break adds to the lock's name for the directory it moves aside:
+ * `manifest.json.lock.stale-<pid>-<12 lowercase hex>`. A break whose removal failed leaves one.
+ */
+export const MANIFEST_LOCK_STALE_MARK = '.stale-';
 
 /**
  * Age after which a lock directory counts as left behind by a dead holder. The
@@ -48,8 +70,25 @@ const POLL_MS = 25;
 export type ManifestLockError = 'not-acquired';
 
 export interface ManifestLock {
-  /** Remove the lock directory. Safe to call again, and when the lock is already gone. */
+  /**
+   * True while the directory at the lock path is the one this holder made. A holder
+   * calls it just before its write, and does not write when it answers false.
+   */
+  readonly stillHeld: () => Promise<boolean>;
+  /**
+   * Remove the lock directory, only while it is the one this holder made. Safe to call
+   * again, and when the lock is already gone.
+   */
   readonly release: () => Promise<void>;
+}
+
+/** What a holder asks of its lock while it works. */
+export type ManifestLockCheck = Pick<ManifestLock, 'stillHeld'>;
+
+/** The device and inode of a lock directory: the identity of one directory, which a rename keeps. */
+interface DirectoryIdentity {
+  readonly dev: bigint;
+  readonly ino: bigint;
 }
 
 export interface ManifestLockOptions {
@@ -72,14 +111,30 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** `made`: this call made the directory. `exists`: another caller has it. `unusable`: the folder cannot hold it. */
-async function makeLockDir(lockDir: string): Promise<'made' | 'exists' | 'unusable'> {
+/** `made`: this call made the directory, with its identity. `exists`: another caller has it, or it was taken away at once. `unusable`: the folder cannot hold it. */
+async function makeLockDir(lockDir: string): Promise<{ readonly made: DirectoryIdentity } | 'exists' | 'unusable'> {
   try {
     await fs.mkdir(lockDir, { recursive: false });
-    return 'made';
   } catch (err) {
     return errorCode(err) === 'EEXIST' ? 'exists' : 'unusable';
   }
+  const identity = await identityOf(lockDir);
+  return identity === null ? 'exists' : { made: identity };
+}
+
+/** The identity of the directory at `lockDir`, or null when nothing, or something that is not a directory, is there. */
+async function identityOf(lockDir: string): Promise<DirectoryIdentity | null> {
+  try {
+    const stat = await fs.lstat(lockDir, { bigint: true });
+    return stat.isDirectory() ? { dev: stat.dev, ino: stat.ino } : null;
+  } catch {
+    return null;
+  }
+}
+
+async function isSameDirectory(lockDir: string, identity: DirectoryIdentity): Promise<boolean> {
+  const now = await identityOf(lockDir);
+  return now !== null && now.dev === identity.dev && now.ino === identity.ino;
 }
 
 async function removeQuietly(dir: string): Promise<void> {
@@ -109,7 +164,7 @@ async function breakStaleLock(lockDir: string, staleMs: number): Promise<boolean
     return errorCode(err) === 'ENOENT';
   }
 
-  const moved = `${lockDir}.stale-${process.pid}-${randomBytes(6).toString('hex')}`;
+  const moved = `${lockDir}${MANIFEST_LOCK_STALE_MARK}${process.pid}-${randomBytes(6).toString('hex')}`;
   try {
     await fs.rename(lockDir, moved);
   } catch (err) {
@@ -129,8 +184,8 @@ async function breakStaleLock(lockDir: string, staleMs: number): Promise<boolean
   }
 
   // A live holder took the lock between the age check and the rename. Give it back,
-  // unless the path was taken again meanwhile; then the moved copy is a lock nobody
-  // can name any more and is removed.
+  // unless the path was taken again meanwhile; then the moved copy is removed, and its
+  // holder finds out through `stillHeld` that its directory is not at the path any more.
   try {
     await fs.lstat(lockDir);
     await removeQuietly(moved);
@@ -145,13 +200,13 @@ async function breakStaleLock(lockDir: string, staleMs: number): Promise<boolean
 }
 
 /** One try: make the lock, or break a stale one and make it once more. */
-async function tryOnce(lockDir: string, staleMs: number): Promise<'held' | 'busy' | 'unusable'> {
+async function tryOnce(lockDir: string, staleMs: number): Promise<DirectoryIdentity | 'busy' | 'unusable'> {
   const first = await makeLockDir(lockDir);
-  if (first === 'made') return 'held';
+  if (typeof first === 'object') return first.made;
   if (first === 'unusable') return 'unusable';
   if (!(await breakStaleLock(lockDir, staleMs))) return 'busy';
   const second = await makeLockDir(lockDir);
-  if (second === 'made') return 'held';
+  if (typeof second === 'object') return second.made;
   return second === 'exists' ? 'busy' : 'unusable';
 }
 
@@ -173,11 +228,13 @@ export async function acquireManifestLock(
 
   for (let attempt = 0; attempt < tries; attempt++) {
     const outcome = await tryOnce(lockDir, staleMs);
-    if (outcome === 'held') {
+    if (typeof outcome === 'object') {
       return {
         ok: true,
         value: {
+          stillHeld: () => isSameDirectory(lockDir, outcome),
           release: async () => {
+            if (!(await isSameDirectory(lockDir, outcome))) return;
             try { await fs.rmdir(lockDir); } catch { /* already released */ }
           },
         },
@@ -192,17 +249,17 @@ export async function acquireManifestLock(
 /**
  * Run `work` while holding the manifest lock, and release it after, whether `work`
  * returns or throws (a throw goes on to the caller). `work` does not run when the lock
- * is not acquired.
+ * is not acquired. `work` gets the holder's `stillHeld` check, to call just before it writes.
  */
 export async function withManifestLock<T>(
   devflowDir: string,
   options: ManifestLockOptions,
-  work: () => Promise<T>,
+  work: (lock: ManifestLockCheck) => Promise<T>,
 ): Promise<Result<T, ManifestLockError>> {
   const lock = await acquireManifestLock(devflowDir, options);
   if (!lock.ok) return lock;
   try {
-    return { ok: true, value: await work() };
+    return { ok: true, value: await work({ stillHeld: lock.value.stillHeld }) };
   } finally {
     await lock.value.release();
   }

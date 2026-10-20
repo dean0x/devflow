@@ -322,6 +322,40 @@ describe('readManifest', () => {
         expect(onDisk.learning).toBe(false);
       });
 
+      it('a heal whose lock directory was replaced before its write skips the write, and the next read heals', async () => {
+        const body = rawOf({ curation: false, learning: true });
+        await fs.writeFile(manifestFile(), body, 'utf-8');
+        const lockDir = getManifestLockPath(tmpDir);
+
+        // The first read is the heal's parse; the second is its check under the lock.
+        // After the second, another caller takes the path: a new directory is made
+        // before the heal's own is moved away, so the two never share an inode.
+        const realReadFile = fs.readFile.bind(fs);
+        let reads = 0;
+        vi.spyOn(fs, 'readFile').mockImplementation((async (...args: Parameters<typeof fs.readFile>) => {
+          const content = await realReadFile(...args);
+          if (String(args[0]) === manifestFile() && ++reads === 2) {
+            await fs.mkdir(`${lockDir}.other`);
+            await fs.rename(lockDir, `${lockDir}.gone`);
+            await fs.rename(`${lockDir}.other`, lockDir);
+            await fs.rmdir(`${lockDir}.gone`);
+          }
+          return content;
+        }) as typeof fs.readFile);
+
+        expect((await readManifest(tmpDir))!.features.curation, 'the read still answers the resolved switch').toBe(false);
+        expect(reads).toBe(2);
+        expect(await fs.readFile(manifestFile(), 'utf-8'), 'the heal wrote nothing').toBe(body);
+        expect((await fs.stat(lockDir)).isDirectory(), 'the lock of the other caller stands').toBe(true);
+
+        vi.restoreAllMocks();
+        await fs.rmdir(lockDir);
+        await readManifest(tmpDir);
+        const healed = await featuresOnDisk();
+        expect(healed.curation).toBe(false);
+        expect(healed.learning).toBe(false);
+      });
+
       it('a read that skipped the heal leaves the next read to heal it, once', async () => {
         const body = rawOf({ curation: false, learning: true });
         await fs.writeFile(manifestFile(), body, 'utf-8');

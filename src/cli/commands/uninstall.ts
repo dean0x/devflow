@@ -42,6 +42,7 @@ import { stripFlags } from '../../core/flags.js';
 import { stripDevflowTeammateModeFromJson } from '../../core/teammate-mode-cleanup.js';
 import { getPackageRoot, isContainedIn } from '../../core/paths.js';
 import { firstSymbolicLink } from '../../core/linked-path.js';
+import { MANIFEST_LOCK_NAME, MANIFEST_LOCK_STALE_MARK } from '../../core/manifest-lock.js';
 import { CURATION_TUNING_FILE_NAME, LEGACY_NAMES, MOVE_JOURNAL_SUFFIX, MOVE_LOCK_PREFIX, MOVE_LOCK_SUFFIX } from '../../core/project-paths.js';
 import { restampInstalledCommands } from '../../targets/claude-code/language-stamp.js';
 import { installCommandsAndAgents } from '../../targets/claude-code/installer.js';
@@ -687,6 +688,16 @@ const CURATION_MOVE_LOCK_SHAPE = moveFileShape(MOVE_LOCK_SUFFIX);
  */
 const CURATION_MOVE_JOURNAL_SHAPE = moveFileShape(MOVE_JOURNAL_SUFFIX);
 
+/**
+ * The manifest lock, a directory in the machine directory (manifest-lock.ts), and the
+ * directory a stale break moves aside: `manifest.json.lock` and
+ * `manifest.json.lock.stale-<digits>-<12 lowercase hex>`. A holder that dies in its
+ * critical section leaves the first, a break whose removal failed leaves the second.
+ */
+const MANIFEST_LOCK_SHAPE = new RegExp(
+  `^${escapeRegExp(MANIFEST_LOCK_NAME)}(?:${escapeRegExp(MANIFEST_LOCK_STALE_MARK)}[0-9]+-[0-9a-f]{12})?$`,
+);
+
 /** Whether `child` of `devflowDir` is a real directory (a link is not followed). */
 async function isRealDirectory(devflowDir: string, child: string): Promise<boolean> {
   try {
@@ -814,6 +825,10 @@ export function installArtifactPaths(devflowDir: string): ReadonlyArray<InstallA
     // The move's journal beside it. A crash between two renames of the ledger set leaves
     // one behind. Only a regular file of exactly that shape goes.
     { relPath: MOVE_LOCK_PREFIX, isPrefix: true, shape: CURATION_MOVE_JOURNAL_SHAPE, realFileOnly: true },
+    // The manifest lock, and the directory a stale break moved aside. A crash inside the
+    // critical section leaves the first; a failed cleanup leaves the second, whose name
+    // carries a pid and a random suffix. Only a real directory of exactly that shape goes.
+    { relPath: MANIFEST_LOCK_NAME, isPrefix: true, isDir: true, shape: MANIFEST_LOCK_SHAPE, realDirOnly: true },
     // per-project hook logs (logs/{project-slug}/) AND global logs — remove the
     // whole logs/ tree; covers proxy.log, debug logs, and any project-slug dirs.
     { relPath: 'logs', isDir: true },

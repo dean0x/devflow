@@ -359,9 +359,10 @@ export async function readManifest(
       try {
         // No wait: a held lock means a toggle is writing, and the next read heals.
         // Under the lock the write goes ahead only while the file still holds the
-        // bytes parsed above; any other writer's result stands.
-        await withManifestLock(devflowDir, { timeoutMs: 0 }, async () => {
-          if ((await fs.readFile(manifestPath, 'utf-8')) === content) {
+        // bytes parsed above and the lock directory is still this heal's own; any
+        // other writer's result stands, and a skipped heal is made by the next read.
+        await withManifestLock(devflowDir, { timeoutMs: 0 }, async (lock) => {
+          if ((await fs.readFile(manifestPath, 'utf-8')) === content && (await lock.stillHeld())) {
             await writeManifest(devflowDir, manifest);
           }
         });
