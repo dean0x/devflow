@@ -3397,7 +3397,7 @@ function collectEnsurePrReadyBaseDefects(section: string): string[] {
     ['4a arms no second exit trap', !step4a.includes("trap '")],
     ['5a fills the name file only by its two reads and the Write tool: no shell write of the value', countShellWritesIntoF(a) === 2],
     ['4a and 4c fill their files only with the Write tool: no shell redirect into the file', countShellWritesIntoF(step4a) === 0 && countShellWritesIntoF(step4c) === 0],
-    ['a failed scrub still creates the PR, and the name file stays until the last create attempt', section.includes('**On scrubber failure** (non-zero exit or script missing): still create the PR') && step4a.includes('after the last create attempt')],
+    ['a failed scrub creates the PR, and the name file stays until the last create attempt', section.includes('**On scrubber failure** (non-zero exit or script missing): still create the PR') && step4a.includes('after the last create attempt')],
     ['4c hands the title to gh pr edit only from the title file', (step4c.match(/--title\S*/g) ?? []).length > 0 && (step4c.match(/--title\S*/g) ?? []).every(flag => flag === '--title="$(cat')],
     ...ENSURE_FILE_PARTS.map(([label, what, text]): readonly [string, boolean] => [what, scope[label].includes(text)]),
     ['the Input lists BASE_REF as optional', section.includes('`BASE_BRANCH` (optional), `BASE_REF` (optional)')],
@@ -3560,7 +3560,7 @@ describe('git agent: PR ops use a fresh base for branch diffs (#495)', () => {
 
   it('known-bad probes: a scrubber failure that skips the PR, or a name file removed before the last create attempt, is reported', () => {
     const ensure = ensureSection();
-    const scrub = 'a failed scrub still creates the PR, and the name file stays until the last create attempt';
+    const scrub = 'a failed scrub creates the PR, and the name file stays until the last create attempt';
     const failedScrub = ensure.replace('**On scrubber failure** (non-zero exit or script missing): still create the PR', '**On scrubber failure** (non-zero exit or script missing): create no PR');
     expect(failedScrub, 'the seed must land').not.toBe(ensure);
     expect(collectEnsurePrReadyBaseDefects(failedScrub)).toEqual([scrub]);
