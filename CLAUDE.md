@@ -17,7 +17,7 @@ Registry-driven CLI tool with 21 plugins (12 core + 9 optional). Plugins are ent
 Invariants:
 
 1. LLM-vs-plumbing: the LLM does all detection, matching and curation. Shell and TypeScript hold no detection or judgment logic.
-2. Read and write curation data only through the curation ops. Never edit those files.
+2. Read and write curation data only through the curation ops. Never edit those files. Never read the old `.devflow/learning/` folder as a ledger. Only move it.
 3. Ledger IDs are machine-local. Committed and posted text states a decision in words, never by ID.
 4. One install per machine, no install scope. `DEVFLOW_DIR` is ignored. `init --scope local` exits 1.
 5. devflow never writes `project.json` or `policy.json`. The team commits them.
@@ -58,6 +58,7 @@ Invariants:
 40. A refusal reports `TRACEABILITY: DEGRADED (<reason>)`. On Linear, post the back-link with the dedup warning.
 41. `tracker --set` changes only the machine default.
 42. The Tracker agent claims first, then writes its conventions file once or not at all, scrub-gated.
+43. The manifest keeps the curation switch in `curation` and `learning`. Every write sets both. False wins.
 
 Descriptions of these rules: `docs/reference/architecture.md`. The rules here bind; the doc explains them.
 
@@ -89,7 +90,7 @@ node dist/cli.js init --plugin=code-review       # Single plugin
 /code-review
 ```
 
-**Build commands**: `npm run build` (full — TypeScript + MDS), `npm run build:cli` (TypeScript only — **does not produce installable agents**; a generator host stays uncompiled and the installer has nothing in `dist/agents/` to prefer), `npm run build:mds` (compile every MDS host: command hosts in `src/assets/commands/` → `dist/commands/`, agent generator hosts in `src/assets/agents/` → `dist/agents/`, reference modules in `src/assets/mds/` → `dist/skills/git/references/`), `npm run test:golden:update -- <target>` (`git-agent` regenerates the Git-agent golden in a fixture-only commit; `github-status-lines` refuses without `--unfreeze`; `install-snapshot` rewrites the install-snapshot and hook-matrix goldens from the built CLI)
+**Build commands**: `npm run build` (full — TypeScript + MDS), `npm run build:cli` (TypeScript only — **does not produce installable agents**; a generator host stays uncompiled and the installer has nothing in `dist/agents/` to prefer), `npm run build:mds` (every MDS host, to the `dist/` paths above), `npm run test:golden:update -- <target>` (`git-agent` regenerates the Git-agent golden in a fixture-only commit; `github-status-lines` refuses without `--unfreeze`; `install-snapshot` rewrites the install-snapshot and hook-matrix goldens from the built CLI)
 
 The host and partial rosters are named in `tests/fixtures/mds-manifest.ts` rather than counted, and the build's own printed counts are asserted against it.
 

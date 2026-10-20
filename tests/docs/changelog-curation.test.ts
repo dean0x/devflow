@@ -304,6 +304,30 @@ describe('CHANGELOG curation rename entry: the points a reader acts on', () => {
   })
 })
 
+describe('CHANGELOG curation rename entry: the backup delete step', () => {
+  const entry = currentEntry()
+  const warning = 'A backup made on re-upgrade can hold the only copy of entries that 3.7 wrote. Check them before you delete it.'
+
+  it('warns, at each delete step, that a backup can hold the only copy of 3.7 entries', () => {
+    expect(blockOf(entry, '**The backup:**')).toContain(warning)
+    expect(blockOf(entry, '**What you must do:**')).toContain(warning)
+  })
+
+  it('names whose backups uninstall removes: the project at the git root of the current directory', () => {
+    const block = blockOf(entry, '**The backup:**')
+    expect(block).toContain(
+      'No devflow command deletes a backup, except `devflow uninstall`. '
+      + "Uninstall removes the backups of the project at the git root of your current directory, with that project's data, after you confirm.",
+    )
+    expect(block).not.toContain('It removes the backup with the project data')
+  })
+
+  it('the scope it states is the one uninstall applies', () => {
+    const uninstall = readFileSync(path.join(ROOT, 'src/cli/commands/uninstall.ts'), 'utf8')
+    expect(uninstall).toContain('getGitRoot(process.cwd())')
+  })
+})
+
 describe('CHANGELOG guard is live (seeded known-bad input)', () => {
   it('fails on an entry below 3.8.0', () => {
     const lowered = CHANGELOG

@@ -152,6 +152,48 @@ describe('the curation move and switch paragraphs state the same rules', () => {
   });
 });
 
+describe('the docs name whose backups uninstall removes', () => {
+  const scope = 'removes the backups of the project at the git root of the current directory';
+
+  it('says it in architecture.md and hooks.md', () => {
+    for (const text of [
+      lineStarting(ARCHITECTURE_LINES, '**Curation data move**'),
+      lineStarting(HOOKS_LINES, 'When a project already has both folders'),
+    ]) {
+      expect(text).toContain(scope);
+      expect(text).not.toContain('removes it with the project data');
+      expect(text).not.toContain('It removes the backup with the project data');
+    }
+  });
+});
+
+describe('CLAUDE.md names the two rules that architecture.md describes', () => {
+  const dataMove = lineStarting(ARCHITECTURE_LINES, '**Curation data move**');
+  const switchRule = lineStarting(ARCHITECTURE_LINES, '**Curation switch**');
+  const invariants = CLAUDE_MD.split('\n').filter(line => /^\d+\. /.test(line));
+
+  it('numbers the invariants one to n with no gap', () => {
+    expect(invariants.map(line => Number.parseInt(line, 10))).toEqual(invariants.map((_line, index) => index + 1));
+    expect(invariants.length).toBeGreaterThanOrEqual(43);
+  });
+
+  it('the old folder is only moved, never read as a ledger', () => {
+    expect(invariants[1]).toContain('Never read the old `.devflow/learning/` folder as a ledger. Only move it.');
+    expect(dataMove).toContain('nothing reads the old folder as a ledger');
+  });
+
+  it('the manifest keeps the switch under both keys, every write sets both, and false wins', () => {
+    expect(invariants[42]).toBe('43. The manifest keeps the curation switch in `curation` and `learning`. Every write sets both. False wins.');
+    expect(switchRule).toContain('under two keys, `features.curation` and its pre-rename copy `features.learning`');
+    expect(switchRule).toContain('Every write sets both to the same value');
+    expect(switchRule).toContain('A `false` in either key wins');
+  });
+
+  it('describes the build command by its output paths', () => {
+    expect(CLAUDE_MD).toContain('`npm run build:mds` (every MDS host, to the `dist/` paths above)');
+  });
+});
+
 describe('the manifest heal that the docs describe holds in code', () => {
   const unhealed = JSON.stringify({
     version: '3.7.0', plugins: [], scope: 'user', installedAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',

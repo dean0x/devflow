@@ -293,6 +293,20 @@ export const FEATURE_WORD_ALLOWLIST: ReadonlyArray<AllowlistEntry> = [
     reason: 'The sentence states the former name once, to tie the old folder and file names to it.',
   },
   {
+    path: 'CLAUDE.md',
+    pattern: /Never read the old `\.devflow\/learning\/` folder as a ledger/,
+    reason:
+      'The invariant names the pre-rename ledger folder to say that devflow only moves it ' +
+      'and never reads it as a ledger.',
+  },
+  {
+    path: 'CLAUDE.md',
+    pattern: /`curation` and `learning`\. Every write sets both/,
+    reason:
+      'The invariant names the manifest switch under its current key and its pre-rename ' +
+      'mirror key, which every write sets together.',
+  },
+  {
     path: /^\.devflow\/features\/curation-capture-system-store\/KNOWLEDGE\.md$/,
     pattern: /`area:learning`/,
     reason:

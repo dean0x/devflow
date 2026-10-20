@@ -87,7 +87,8 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
 **The backup:**
 - Where: `.devflow/learning.backup-<stamp>-<8 hex>` in the project, one folder for each move.
   A move makes a backup only where a project had both folders.
-- No devflow command deletes a backup, except `devflow uninstall`. It removes the backup with the project data, after you confirm.
+- No devflow command deletes a backup, except `devflow uninstall`.
+  Uninstall removes the backups of the project at the git root of your current directory, with that project's data, after you confirm.
   `devflow curation --reset` and `devflow curation --clear` leave the backup in place.
 - A disable drains the queue files in the backups. `devflow curation --disable`, and `devflow init` with curation switched off,
   remove the queue, claim, private and overflow files in each backup folder (at most 500 folders, and 200 files in each).
@@ -99,6 +100,7 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
   For the first 50 folders it prints one line each. One more line counts the folders after the first 50 and their pending rows.
 - Delete a backup folder only when `devflow curation --status` shows 0 pending rows for it.
   Until then, a later init can still merge the rows.
+  A backup made on re-upgrade can hold the only copy of entries that 3.7 wrote. Check them before you delete it.
 - An init merges rows from at most 50 backup folders in one run. It passes over a folder that holds no pending rows,
   so a later folder is reached when the earlier ones are done.
 - A queue file that git tracks is never merged, because the repository supplied it.
@@ -156,6 +158,7 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
 - Run `devflow init` after you update.
 - Replace `devflow learning` and the old init flags in your scripts.
 - Delete each backup folder after `devflow curation --status` shows 0 pending rows for it.
+  A backup made on re-upgrade can hold the only copy of entries that 3.7 wrote. Check them before you delete it.
 - Delete the leftover `.devflow/learning/` folder in each linked worktree whose main checkout has a `.devflow/` folder
   and is not your home folder.
   A worktree whose main checkout has no `.devflow/` folder, or is your home folder, keeps a live ledger.
