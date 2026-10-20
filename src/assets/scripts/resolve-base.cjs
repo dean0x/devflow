@@ -61,7 +61,10 @@
 //     FETCH_HEAD, follows no tags, and carries no --filter or --depth. The
 //     repository's hook, fsmonitor and upload-pack settings do not apply to it. An HTTP
 //     transfer under 1 byte/s for FETCH_STALL_SECONDS ends by itself (http.lowSpeedLimit and
-//     http.lowSpeedTime). Credential prompts are off: GIT_TERMINAL_PROMPT is 0, GIT_ASKPASS
+//     http.lowSpeedTime). The caller's GIT_HTTP_LOW_SPEED_LIMIT and GIT_HTTP_LOW_SPEED_TIME
+//     variables and a URL-specific http.<url>.lowSpeedLimit or http.<url>.lowSpeedTime key
+//     take precedence over these two options, and an SSH transfer has no such bound.
+//     Credential prompts are off: GIT_TERMINAL_PROMPT is 0, GIT_ASKPASS
 //     and SSH_ASKPASS are empty, so git runs no askpass program, and the default SSH command
 //     carries BatchMode=yes.
 //     BatchMode and ConnectTimeout are added only when no SSH command is configured
@@ -74,7 +77,7 @@
 //     until the user deletes it. This is rare: git holds the lock only for the short ref
 //     update at the end of the fetch. The fetch runs in its own session. If the resolver is
 //     interrupted before its timer fires, the stall bound in the argv still ends an HTTP
-//     fetch that gets no answer.
+//     fetch that gets no answer, where the precedence above leaves it in force.
 //   - One run budget, RUN_BUDGET_MS, stays below the 120 s Bash tool limit. Each call takes
 //     the smaller of its own bound and the time left in the budget. A local call with no
 //     time left is not started and gives resolver-unavailable; the fetch with no time left
