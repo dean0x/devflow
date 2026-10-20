@@ -900,6 +900,11 @@ function collectProcessDefects(source: string): string[] {
 describe.skipIf(!POSIX)('the name on standard input, through the real script', SPAWN_BUDGET, () => {
   interface Outcome { readonly stdout: string; readonly stderr: string; readonly status: number | null }
 
+  // one fixture repository for every case here: the script only reads it, so the cases share it
+  let shared: World
+  beforeAll(() => { shared = newWorld() }, SUBPROCESS_TIMEOUT_MS)
+  afterAll(() => { fs.rmSync(shared.root, { recursive: true, force: true }) })
+
   /** Start the script with its standard input opened on a file (the carrier the prompts use). */
   function runWithFile(w: World, args: readonly string[], content: string | Buffer): Outcome {
     const file = path.join(w.root, `name-${fs.readdirSync(w.root).length}.txt`)
@@ -922,7 +927,7 @@ describe.skipIf(!POSIX)('the name on standard input, through the real script', S
   const stopLine = (reason: string): string => `BASE_REF=none TIP=none FETCH=skipped REASON=${reason} NOTE=stop\n`
 
   it('reads a name file on standard input and prints one conforming line, exit 0, nothing on stderr', () => {
-    const w = newWorld()
+    const w = shared
     const want = `BASE_REF=${w.m0} TIP=origin FETCH=ok REASON=fresh NOTE=none\n`
     for (const content of ['main\n', 'main\r\n', 'main']) {
       for (const mode of ['pr', 'local']) {
@@ -934,7 +939,7 @@ describe.skipIf(!POSIX)('the name on standard input, through the real script', S
   })
 
   it('gives the same line from a pipe, and honours --cross', () => {
-    const w = newWorld()
+    const w = shared
     const viaPipe = runWithStdio(w, ['pr', '--name-stdin'], 'pipe', 'main\n')
     expect(viaPipe).toEqual({ stdout: `BASE_REF=${w.m0} TIP=origin FETCH=ok REASON=fresh NOTE=none\n`, stderr: '', status: 0 })
     const cross = runWithFile(w, ['pr', '--name-stdin', '--cross', 'true'], 'main\n')
@@ -942,7 +947,7 @@ describe.skipIf(!POSIX)('the name on standard input, through the real script', S
   })
 
   it('gives resolver-unavailable for empty input, a null device and a descriptor that cannot be read', () => {
-    const w = newWorld()
+    const w = shared
     expect(runWithFile(w, ['pr', '--name-stdin'], '')).toEqual({ stdout: stopLine('resolver-unavailable'), stderr: '', status: 0 })
     expect(runWithStdio(w, ['pr', '--name-stdin'], 'ignore')).toEqual({ stdout: stopLine('resolver-unavailable'), stderr: '', status: 0 })
     const dir = fs.openSync(w.root, 'r')
@@ -954,7 +959,7 @@ describe.skipIf(!POSIX)('the name on standard input, through the real script', S
   })
 
   it('gives invalid-name for input over the cap, NUL, CR, non-ASCII bytes and a second line', () => {
-    const w = newWorld()
+    const w = shared
     const bad: Array<string | Buffer> = ['a'.repeat(257), 'main\n' + 'x'.repeat(400), 'ma\0in\n', 'ma\rin\n', Buffer.from('mäin\n'), 'main\nmain\n', ' main\n', '\n']
     for (const content of bad) {
       const r = runWithFile(w, ['pr', '--name-stdin'], content)
@@ -963,7 +968,7 @@ describe.skipIf(!POSIX)('the name on standard input, through the real script', S
   })
 
   it('gives usage for a positional name next to --name-stdin, and reads nothing from a descriptor that would fail', () => {
-    const w = newWorld()
+    const w = shared
     const dir = fs.openSync(w.root, 'r')
     try {
       for (const args of [['pr', 'main', '--name-stdin'], ['pr', '--name-stdin', 'main'], ['pr', 'main', '--cross', 'true', '--name-stdin']]) {
@@ -990,21 +995,21 @@ describe.skipIf(!POSIX)('the name on standard input, through the real script', S
   }
 
   it('the argument form never reads standard input: it ends while standard input stays open and silent', async () => {
-    const w = newWorld()
+    const w = shared
     const r = await endsWithOpenStdin(w, ['pr', 'main'])
     expect(r.ended, 'the script waited for input it must not read').toBe(true)
     expect(r.stdout).toBe(`BASE_REF=${w.m0} TIP=origin FETCH=ok REASON=fresh NOTE=none\n`)
   })
 
   it('a usage stop never reads standard input either', async () => {
-    const w = newWorld()
+    const w = shared
     const r = await endsWithOpenStdin(w, ['pr', 'main', '--name-stdin'])
     expect(r.ended).toBe(true)
     expect(r.stdout).toBe(stopLine('usage'))
   })
 
   it('never writes the name to stdout or stderr, whatever the outcome', () => {
-    const w = newWorld()
+    const w = shared
     const names: Array<string | Buffer> = [
       'zz-unknown-branch\n',        // admitted, no such branch: no-ref
       'zz-unknown-branch.lock\n',   // refused by check-ref-format
