@@ -23,6 +23,7 @@ import { spawnSync } from 'child_process';
 import {
   GIT_ENV, JSON_HELPER, CURATION_STORE, CURATION_MOVE, PROJECT_PATHS, git, makeV2LedgerRow, makeV2LogRow, toJsonl,
 } from './curation-fixtures.js';
+import { HOOK_RUN_ALLOWANCE_MS, NODE_EXEC_STALL_MS } from '../shell-hooks-helpers.js';
 
 // ---------------------------------------------------------------------------
 // The move module's surface, and the store's guard, as the tests call them
@@ -2465,7 +2466,8 @@ function runMoveLedger(args: readonly string[], cwd: string = site.tmp): { code:
   return { code: run.status ?? 1, stdout: run.stdout ?? '', stderr: run.stderr ?? '' };
 }
 
-describe('json-helper move-ledger (TP-36, argument half)', () => {
+// The first node exec after the fork-heavy tests above waits for the system's policy daemon.
+describe('json-helper move-ledger (TP-36, argument half)', { timeout: HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS }, () => {
   it('moves the root\'s old folder and prints the state', () => {
     seedOld(ledgerSet('one'));
     const run = runMoveLedger([site.root]);
