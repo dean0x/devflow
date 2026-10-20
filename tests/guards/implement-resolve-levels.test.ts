@@ -651,8 +651,11 @@ function removesFloorControl(text: string, floorPhases: readonly string[], waive
   return verbAndFloor || new RegExp(`(?:${NEGATION})${NEAR}(?:${floor})|(?:${floor})${NEAR}(?:${NEGATION})`, 'i').test(text)
 }
 
-/** Why one cell or one Rules bullet is unsafe, as phrases. The match is case-insensitive and on word boundaries. `floorPhases` are the phase numbers that no row may skip. `triage` is true for a bullet that a row of a Triage phase applies. `waived` are the floor names that the removal-verb arm leaves out (see `removesFloorControl`). */
-function unsafeReasons(text: string, floorPhases: readonly string[], triage = false, waived: readonly string[] = []): string[] {
+/** The optional inputs of `unsafeReasons`. `triage` is true for a bullet that a row of a Triage phase applies. `waived` are the floor names that the removal-verb arm leaves out (see `removesFloorControl`). */
+interface UnsafeOptions { readonly triage?: boolean; readonly waived?: readonly string[] }
+
+/** Why one cell or one Rules bullet is unsafe, as phrases. The match is case-insensitive and on word boundaries. `floorPhases` are the phase numbers that no row may skip. */
+function unsafeReasons(text: string, floorPhases: readonly string[], { triage = false, waived = [] }: UnsafeOptions = {}): string[] {
   const out: string[] = []
   if (removesFloorControl(text, floorPhases, waived)) out.push('removes or defers a floor control')
   if (SECURITY.test(text) && DISPOSITION.test(text)) out.push('routes a security finding to a disposition')
@@ -661,6 +664,18 @@ function unsafeReasons(text: string, floorPhases: readonly string[], triage = fa
   if (ACTION.test(text)) out.push('adds a shell, write, push or GitHub action')
   return out
 }
+
+/** What is wrong with the exemption of a spec, or null: the floor name it waives must be a name from `FLOOR_NAMES`, or the waiver does nothing. The collector does not check it: one test checks each spec. */
+const exemptSpecDefect = (exempt: ExemptRemoval | undefined): string | null =>
+  exempt === undefined || (FLOOR_NAMES as readonly string[]).includes(exempt.floorName) ? null : `the spec waives "${exempt.floorName}", which is no floor name`
+
+/** The defect for a level cell of the exempt phase other than `-` or `apply: <name>`; null for any other cell and any other phase. */
+const exemptCellDefect = (exempt: ExemptRemoval | undefined, num: string, column: string, cell: string): string | null =>
+  exempt === undefined || num !== exempt.phase || cell === '-' || cell === `apply: ${exempt.name}` ? null : `row ${num} ${column} cell "${cell}" is neither - nor apply: ${exempt.name}`
+
+/** The floor names that the removal-verb arm leaves out for one Rules bullet: the exempt one when the name, the line and the one applying phase all match, else none. `phases` are the phases whose rows apply the bullet. */
+const waivedFor = (exempt: ExemptRemoval | undefined, name: string, line: string, phases: ReadonlySet<string> | undefined): string[] =>
+  exempt !== undefined && name === exempt.name && line === exempt.line && phases?.size === 1 && phases.has(exempt.phase) ? [exempt.floorName] : []
 
 /**
  * AC-6: a tripwire, not a guarantee. It catches the known unsafe words, not every unsafe meaning. The `## Phases` intro,
@@ -681,7 +696,6 @@ export function collectRowSafetyDefects(ref: string, spec: LevelSpec, body: stri
   const out: string[] = []
   const parsed = parseRef(ref)
   const exempt = spec.exemptRemoval
-  if (exempt !== undefined) expect(FLOOR_NAMES as readonly string[], `the spec waives "${exempt.floorName}", which is no floor name`).toContain(exempt.floorName)
   if (parsed.preamble.length > 0) out.push('the reference holds text between its title and "## Phases"')
   const prose = (sectionOf(parsed, '## Phases')?.lines ?? []).filter(line => !line.startsWith('|'))
   if (prose.join('\n') !== spec.intro) out.push('the "## Phases" intro is not the pinned paragraph')
@@ -702,7 +716,8 @@ export function collectRowSafetyDefects(ref: string, spec: LevelSpec, body: stri
     levels.forEach((cell, i) => {
       const column = LEVEL_COLUMNS[i]
       for (const reason of unsafeReasons(cell, floorPhases)) out.push(`row ${num} ${column} cell "${cell}" ${reason}`)
-      if (exempt !== undefined && num === exempt.phase && cell !== '-' && cell !== `apply: ${exempt.name}`) out.push(`row ${num} ${column} cell "${cell}" is neither - nor apply: ${exempt.name}`)
+      const exemptDefect = exemptCellDefect(exempt, num, column, cell)
+      if (exemptDefect !== null) out.push(exemptDefect)
       for (const m of cell.matchAll(/apply: ([^;]+)/g)) {
         const phases = appliedBy.get(m[1].trim()) ?? new Set<string>()
         appliedBy.set(m[1].trim(), phases.add(num))
@@ -714,8 +729,7 @@ export function collectRowSafetyDefects(ref: string, spec: LevelSpec, body: stri
     const name = ruleBulletName(line) ?? line.slice(0, 40)
     const phases = appliedBy.get(name)
     const inTriage = [...(phases ?? [])].some(n => spec.triage.includes(n))
-    const exempted = exempt !== undefined && name === exempt.name && line === exempt.line && phases?.size === 1 && phases.has(exempt.phase)
-    for (const reason of unsafeReasons(line, floorPhases, inTriage, exempted ? [exempt.floorName] : [])) out.push(`Rules bullet "${name}" ${reason}`)
+    for (const reason of unsafeReasons(line, floorPhases, { triage: inTriage, waived: waivedFor(exempt, name, line, phases) })) out.push(`Rules bullet "${name}" ${reason}`)
     if (phases === undefined) out.push(`Rules bullet "${name}" is named by no row`)
   }
   return out
@@ -1249,8 +1263,8 @@ describe('row safety is a tripwire over the references (AC-6)', () => {
     const neither = (column: string, cell: string, name: string = HARDEN_NAME): string => `row 4 ${column} cell "${cell}" is neither - nor apply: ${name}`
     // The bullet trips the removal-verb arm and nothing else, so the waiver of Harden clears it whole.
     expect(unsafeReasons(HARDEN_SCOPE, floorPhases), 'without the waiver').toEqual([FLOOR_REASON])
-    expect(unsafeReasons(HARDEN_SCOPE, floorPhases, false, ['Harden']), 'with the waiver of Harden').toEqual([])
-    expect(unsafeReasons(HARDEN_SCOPE, floorPhases, false, ['Validate']), 'the waiver of another floor name').toEqual([FLOOR_REASON])
+    expect(unsafeReasons(HARDEN_SCOPE, floorPhases, { waived: ['Harden'] }), 'with the waiver of Harden').toEqual([])
+    expect(unsafeReasons(HARDEN_SCOPE, floorPhases, { waived: ['Validate'] }), 'the waiver of another floor name').toEqual([FLOOR_REASON])
     expect(run(IMPLEMENT, [row], [HARDEN_SCOPE]), 'the bullet, its row and the spec that carries the exemption').toEqual([])
     expect(run({ ...IMPLEMENT, exemptRemoval: undefined }, [row], [HARDEN_SCOPE]), 'the same rows under a spec with no exemption').toEqual([floor])
     // Only Harden is waived, and only from the verb arm: an action word, a negation and another floor name still count.
@@ -1258,7 +1272,7 @@ describe('row safety is a tripwire over the references (AC-6)', () => {
     const exemptingLine = (line: string): LevelSpec => ({ ...IMPLEMENT, expectedBullets: [line], exemptRemoval: { ...HARDEN_EXEMPTION, line } })
     for (const [tail, reason] of [['Run git status.', ACTION_REASON], ['Harden does not run.', FLOOR_REASON], ['Skip Validate.', FLOOR_REASON]] as const) {
       const line = withTail(tail)
-      expect(unsafeReasons(line, floorPhases, false, ['Harden']), `${tail} (the waiver of Harden)`).toEqual([reason])
+      expect(unsafeReasons(line, floorPhases, { waived: ['Harden'] }), `${tail} (the waiver of Harden)`).toEqual([reason])
       expect(run(exemptingLine(line), [row], [line]), `${tail} (a spec that exempts that exact line)`).toEqual([`Rules bullet "${HARDEN_NAME}" ${reason}`])
     }
     // Each condition alone, with the other three held: the name, the line, the one phase, and the bullet being applied at all.
@@ -1277,8 +1291,12 @@ describe('row safety is a tripwire over the references (AC-6)', () => {
     const resolveRows = [`| 6 Polish | apply: ${HARDEN_NAME} | - |`]
     expect(collectRowSafetyDefects(withRows(REFS.resolve, resolveRows, [HARDEN_SCOPE]), RESOLVE, resolveBody), '/resolve with no exemption').toEqual([floor])
     expect(collectRowSafetyDefects(withRows(REFS.resolve, resolveRows, [HARDEN_SCOPE]), { ...RESOLVE, exemptRemoval: HARDEN_EXEMPTION }, resolveBody), '/resolve with the exemption of phase 4, applied by phase 6').toEqual([floor])
-    // The spec waives a name from FLOOR_NAMES: a name that is none is a spec error, not a silent no-op.
-    expect(() => run({ ...IMPLEMENT, exemptRemoval: { ...HARDEN_EXEMPTION, floorName: 'Polish' } }, [row], [HARDEN_SCOPE])).toThrow('the spec waives "Polish", which is no floor name')
+  })
+
+  it('the exemption of each spec waives a floor name, and a name that is none is reported', () => {
+    for (const spec of SPECS) expect(exemptSpecDefect(spec.exemptRemoval), `${spec.cmd}: the spec`).toBeNull()
+    expect(exemptSpecDefect({ ...HARDEN_EXEMPTION, floorName: 'Polish' }), 'a name that is no floor name').toBe('the spec waives "Polish", which is no floor name')
+    expect(exemptSpecDefect(undefined), 'a spec with no exemption').toBeNull()
   })
 
   it('the harden-scope bullet holds each clause of its skip condition and names no test path, and its row leaves standard alone', () => {
