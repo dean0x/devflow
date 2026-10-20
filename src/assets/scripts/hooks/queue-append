@@ -9,8 +9,9 @@
 # Source-order requirement: source json-parse (for _HAS_JQ) and curation-lock (for
 # curation_lock_acquire/curation_lock_release, which itself requires get-mtime) BEFORE
 # calling queue_append_row or queue_append_both, and define log/dbg. This file
-# sources its sibling git-marker itself, for df_no_symlink_below. Sourcing it only
-# defines functions -- no side effects until they are called.
+# sources its siblings git-marker (for df_no_symlink_below) and curation-move (for the
+# ledger folder's names, df_curation_move_names) itself. Sourcing it only defines
+# functions -- no side effects until they are called.
 #
 # queue_append_row <root> <queue_file> <role> <content> <ts>
 #   Appends one JSONL row {role, content, ts} to <queue_file>, which lies below
@@ -100,11 +101,15 @@
 
 # queue_append_row checks its queue with df_no_symlink_below, so this helper sources
 # git-marker itself rather than trusting every caller to have done so first. One that
-# failed to source is a command not found: the refusing branch, so nothing is written.
+# is missing is a command not found: the refusing branch, so nothing is written.
 # The ledger folder's names come from the move shim (df_curation_move_names), sourced
 # the same way and refused the same way.
-source "${BASH_SOURCE[0]%/*}/git-marker" 2>/dev/null || true
-source "${BASH_SOURCE[0]%/*}/curation-move" 2>/dev/null || true
+#
+# Each source is guarded by a builtin readability test, because bash 3.2 under `set -e`
+# ends the shell at a `source` of a missing file, even inside `|| true`. Without the test
+# the refusing branch would never run, and the capture hooks would stop here.
+[ -r "${BASH_SOURCE[0]%/*}/git-marker" ] && source "${BASH_SOURCE[0]%/*}/git-marker" 2>/dev/null || true
+[ -r "${BASH_SOURCE[0]%/*}/curation-move" ] && source "${BASH_SOURCE[0]%/*}/curation-move" 2>/dev/null || true
 
 # The caller's umask, read once per process. A queue is created 0600, so the append
 # runs under umask 077 -- and the rest of the hook must run under the umask its parent
@@ -157,7 +162,7 @@ _qar_append() {
 
   # The names the creator rule below needs. A shim that failed to source is a command
   # not found, so nothing is appended: no queue is written without them.
-  if ! df_curation_move_names; then
+  if ! df_curation_move_names 2>/dev/null; then
     log "Queue skipped: the ledger folder names are unavailable; nothing written"
     return 1
   fi

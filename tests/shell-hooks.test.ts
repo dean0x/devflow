@@ -6539,4 +6539,105 @@ describe('TP-9: the hooks move the old ledger folder before any creator makes th
       expect(fs.existsSync(path.join(main, '.devflow', OLD)), 'no old folder is made again').toBe(false);
     });
   });
+
+  // macOS /bin/bash 3.2 ends a `set -e` shell when `source` fails on a missing file, even
+  // inside `|| true`, `if` or an outer `|| { ...; exit 1; }`. A broken install without the
+  // shim must still cost a hook no more than the move and the creator step: the hook exits
+  // 0, does its other work, and no creator makes a ledger folder beside the old one.
+  describe('a missing curation-move shim stops no hook (bash 3.2 under set -e)', () => {
+    const BASH = '/bin/bash';
+    const GATE = { version: '2.0.0', features: { learning: true, curation: true, memory: true } };
+
+    /** A copy of the scripts folder without the shim, and its hooks folder. */
+    const hooksWithoutShim = (): string => {
+      const scripts = path.join(base, 'scripts-no-shim');
+      fs.cpSync(path.dirname(HOOKS_DIR), scripts, { recursive: true });
+      fs.rmSync(path.join(scripts, 'hooks', 'curation-move'));
+      return path.join(scripts, 'hooks');
+    };
+    const env = (): NodeJS.ProcessEnv => ({ ...process.env, HOME: homeDir });
+    const runHookNoShim = (name: string, input: object): { stdout: string; stderr: string; status: number | null } => {
+      const res = spawnSync(BASH, [path.join(hooksWithoutShim(), name)], { encoding: 'utf-8', input: JSON.stringify(input), env: env() });
+      return { stdout: res.stdout, stderr: res.stderr, status: res.status };
+    };
+    /** Source `file` of the shim-less hooks folder under `set -e`, then run `after`. */
+    const sourceNoShim = (file: string, args: string, after: string): { stdout: string; stderr: string; status: number | null } => {
+      const hooks = hooksWithoutShim();
+      const script = `set -e; log() { echo "log: $1" >&2; }; dbg() { :; }; source "${hooks}/json-parse"; source "${hooks}/get-mtime"; source "${hooks}/curation-lock"; source "${hooks}/${file}" ${args}; ${after}`;
+      const res = spawnSync(BASH, ['-c', script], { encoding: 'utf-8', env: env() });
+      return { stdout: res.stdout, stderr: res.stderr, status: res.status };
+    };
+    /** Every hook log line written under the machine folder. */
+    const hookLogs = (): string => {
+      const lines: string[] = [];
+      const walk = (dir: string): void => {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          if (entry.isDirectory()) walk(path.join(dir, entry.name));
+          else if (entry.isFile()) lines.push(fs.readFileSync(path.join(dir, entry.name), 'utf-8'));
+        }
+      };
+      walk(path.join(homeDir, '.devflow', 'logs'));
+      return lines.join('\n');
+    };
+    const oldFolderIntact = (): void => {
+      expect(fs.readFileSync(path.join(main, '.devflow', OLD, 'notes.txt'), 'utf-8'), 'the old folder is as it was').toBe('kept\n');
+      expect(rowsOf(path.join(main, '.devflow', OLD, QUEUE)), 'no row is added to the old queue').toEqual([SEED_ROW]);
+      expect(fs.existsSync(path.join(main, '.devflow', NEW)), 'no creator makes a ledger folder beside the old one').toBe(false);
+    };
+
+    beforeEach(() => {
+      fs.writeFileSync(path.join(homeDir, '.devflow', 'manifest.json'), JSON.stringify(GATE));
+    });
+
+    it('non-vacuity: the copy has no shim, and bash 3.2 ends a set -e shell at a source of a missing file', () => {
+      expect(fs.existsSync(path.join(hooksWithoutShim(), 'curation-move'))).toBe(false);
+      const res = spawnSync(BASH, ['-c', 'set -e; source ./missing-shim 2>/dev/null || true; echo after'], { encoding: 'utf-8', cwd: base });
+      expect({ stdout: res.stdout, status: res.status }, 'this is the fault the guard avoids').toEqual({ stdout: '', status: 1 });
+    });
+
+    it('queue-append sourced under set -e: it sources, and an append is refused and logged, not an exit', () => {
+      const res = sourceNoShim('queue-append', '', `queue_append_row "${main}" "${path.join(main, '.devflow', 'memory', QUEUE)}" user hi 1; echo after`);
+
+      expect(res.status, res.stderr).toBe(0);
+      expect(res.stdout).toBe('after\n');
+      expect(res.stderr, 'the documented refusal ran').toContain('Queue skipped: the ledger folder names are unavailable; nothing written');
+      expect(fs.existsSync(path.join(main, '.devflow', 'memory', QUEUE)), 'nothing is written without the names').toBe(false);
+      oldFolderIntact();
+    });
+
+    it('ensure-devflow-init sourced under set -e: it scaffolds the memory folders, and makes no ledger folder', () => {
+      const res = sourceNoShim('ensure-devflow-init', `"${main}"`, 'echo after');
+
+      expect({ stdout: res.stdout, status: res.status }, res.stderr).toEqual({ stdout: 'after\n', status: 0 });
+      for (const folder of ['memory', 'features', 'docs']) expect(fs.existsSync(path.join(main, '.devflow', folder)), folder).toBe(true);
+      oldFolderIntact();
+    });
+
+    it('session-start-context: exits 0, still does its other work, and curation is skipped', () => {
+      const res = runHookNoShim('session-start-context', { cwd: main, source: 'startup' });
+
+      expect(res.status, res.stderr).toBe(0);
+      expect(res.stderr).not.toContain('failed to source');
+      expect(hookLogs(), 'the hook went on past the shim and said why curation is skipped').toContain('Curation skipped: the ledger folder names are unavailable');
+      expect(fs.existsSync(path.join(main, '.devflow', '.root-gitignore-configured-v6')), 'the gitignore step still ran').toBe(true);
+      expect(res.stdout, 'no curation directive without a ledger folder name').not.toContain('CURATION MAINTENANCE');
+      oldFolderIntact();
+    });
+
+    const CAPTURES: ReadonlyArray<readonly [string, () => object]> = [
+      ['capture-prompt', () => ({ cwd: main, prompt: 'we chose X over Y' })],
+      ['capture-turn', () => ({ cwd: main, session_id: 't', last_assistant_message: 'a response' })],
+      ['capture-question', () => ({ cwd: main, session_id: 't', tool_name: 'AskUserQuestion', tool_input: { questions: [{ question: 'Q?' }] }, tool_response: { answers: { 'Q?': 'A' } } })],
+    ];
+    for (const [name, input] of CAPTURES) {
+      it(`${name}: exits 0, and writes no row and no ledger folder`, () => {
+        const res = runHookNoShim(name, input());
+
+        expect({ status: res.status, stderr: res.stderr }).toEqual({ status: 0, stderr: '' });
+        expect(hookLogs(), 'the hook reached the append and took the documented refusal').toContain('Queue skipped: the ledger folder names are unavailable; nothing written');
+        expect(fs.existsSync(path.join(main, '.devflow', 'memory', QUEUE)), 'no memory row without the names').toBe(false);
+        oldFolderIntact();
+      });
+    }
+  });
 });

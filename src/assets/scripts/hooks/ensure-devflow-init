@@ -3,7 +3,9 @@
 # ignores .devflow/. Called from capture-prompt, capture-turn, capture-question,
 # memory-worker, and pre-compact-memory. Idempotent.
 # Returns non-zero, having written nothing, outside a git project, at HOME, or when
-# .devflow is a symbolic link.
+# .devflow is a symbolic link. Also non-zero when it is given no root, when the ledger
+# folder check fails (df_ledger_folder), and when the scaffold folders cannot be made.
+# A missing curation-move shim is no failure: the ledger folder step is skipped.
 # Usage: source ensure-devflow-init "$CWD"
 
 [ -z "$1" ] && return 1
@@ -27,9 +29,11 @@ _EDI_LEDGER="${DF_LEDGER_ROOT:-$_EDI_ROOT}"
 # non-zero return as "stop" (`|| exit 0`), so memory and curation stop together
 # in a non-git directory. ensure-root-gitignore itself stays ungated: it is a
 # pure writer its parity suite runs in plain directories, and both of
-# its callers now decide before reaching it. A helper that failed to source is a
-# command not found — the refusing branch, so the failure mode writes nothing.
-source "$_EDI_DIR/git-marker" 2>/dev/null || true
+# its callers now decide before reaching it. A helper that is missing is a
+# command not found — the refusing branch, so the failure mode writes nothing. Each
+# source is guarded by a builtin readability test: bash 3.2 under `set -e` ends the
+# shell at a `source` of a missing file, even inside `|| true`.
+[ -r "$_EDI_DIR/git-marker" ] && source "$_EDI_DIR/git-marker" 2>/dev/null || true
 df_is_project_root "$_EDI_ROOT" 2>/dev/null || return 1
 
 _DEVFLOW_DIR="$_EDI_ROOT/.devflow"
@@ -49,8 +53,9 @@ fi
 # before anything below reads or creates the ledger folder, on the LEDGER root (the
 # main worktree's, in a linked worktree), and whether or not the curation switch is
 # on. A move another process holds, or a refused one, leaves the old folder where it
-# is; the creator rule below then takes the old folder as the ledger folder.
-source "$_EDI_DIR/curation-move" 2>/dev/null || true
+# is; the creator rule below then takes the old folder as the ledger folder. A shim that
+# is missing skips the move, and the ledger folder step below.
+[ -r "$_EDI_DIR/curation-move" ] && source "$_EDI_DIR/curation-move" 2>/dev/null || true
 df_curation_move "$_EDI_LEDGER" 2>/dev/null || true
 
 # curation/ is scaffolded only where the ledger lives. In a linked worktree whose
@@ -63,10 +68,14 @@ df_curation_move "$_EDI_LEDGER" 2>/dev/null || true
 # (df_curation_move_names), the one shell place that holds them. Either name satisfies
 # the fast path below, so a root whose old folder is still there (held, refused or not
 # yet tried) forks no mkdir.
-df_curation_move_names || return 1
-df_ledger_folder "$_DEVFLOW_DIR" "$DF_CM_OLD_FOLDER" "$DF_CM_NEW_FOLDER" || return 1
-_EDI_CURATION="$DF_LEDGER_FOLDER"
-[ "$_EDI_LEDGER" = "$_EDI_ROOT" ] || _EDI_CURATION=""
+# Without the shim there are no names, and this step has no ledger folder to check or
+# make: the rest of the scaffold goes on.
+_EDI_CURATION=""
+if df_curation_move_names 2>/dev/null; then
+  df_ledger_folder "$_DEVFLOW_DIR" "$DF_CM_OLD_FOLDER" "$DF_CM_NEW_FOLDER" || return 1
+  _EDI_CURATION="$DF_LEDGER_FOLDER"
+  [ "$_EDI_LEDGER" = "$_EDI_ROOT" ] || _EDI_CURATION=""
+fi
 
 # Fast-path: if all subdirectories already exist, skip mkdir and gitignore setup.
 # The marker is the CURRENT carve-out version (D-GITIGNORE-V6), bumped with both
@@ -87,9 +96,9 @@ mkdir -p \
   "$_DEVFLOW_DIR/docs" \
   2>/dev/null || return 1
 
-# A ledger folder that could not be made (a link on its path, a failed mkdir) leaves
-# the memory scaffold as it is: the capture hooks refuse its queue, and the next event
-# looks again.
+# A ledger folder that could not be made leaves the memory scaffold as it is, and the
+# next event looks again. A link on its path makes the capture hooks refuse its queue;
+# after a failed mkdir, the append makes the folder again, as its creator.
 if [ -n "$_EDI_CURATION" ]; then
   df_make_ledger_folder "$_EDI_ROOT" "$_DEVFLOW_DIR" "$DF_CM_OLD_FOLDER" "$DF_CM_NEW_FOLDER" || true
 fi

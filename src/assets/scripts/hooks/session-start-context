@@ -223,11 +223,18 @@ esac
 PROJECT_DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
 LEDGER_DEVFLOW_DIR="$LEDGER_ROOT/.devflow"
 # The ledger folder's names come from the move shim (curation-move), the one shell place
-# that holds them. Sourcing it only defines functions. Without it the hook cannot name
-# the folder, so it stops, as it does for a queue-append that failed to source.
-source "$SCRIPT_DIR/curation-move" || { echo "session-start-context: failed to source curation-move" >&2; exit 1; }
-df_curation_move_names
+# that holds them. Sourcing it only defines functions. The source is guarded by a builtin
+# readability test, because bash 3.2 ends a `set -e` shell at a `source` of a missing file,
+# even inside `|| true`. Without the shim the hook cannot name the folder: the move and the
+# curation sections are skipped, and every other section runs.
+[ -r "$SCRIPT_DIR/curation-move" ] && source "$SCRIPT_DIR/curation-move" 2>/dev/null || true
+CURATION_NAMES_OK="true"
+df_curation_move_names 2>/dev/null || CURATION_NAMES_OK=""
 CURATION_DIR="$LEDGER_DEVFLOW_DIR/$DF_CM_NEW_FOLDER"
+if [ -z "$CURATION_NAMES_OK" ]; then
+  CURATION_DIR=""
+  log "Curation skipped: the ledger folder names are unavailable (curation-move is missing)"
+fi
 
 # --- Curation gate: the machine switch, narrowed by this checkout ---
 # D-FEATURES-NARROW-ONLY (see queue-append): ~/.devflow/manifest.json's
@@ -240,8 +247,10 @@ CURATION_DIR="$LEDGER_DEVFLOW_DIR/$DF_CM_NEW_FOLDER"
 source "$SCRIPT_DIR/queue-append" || { echo "session-start-context: failed to source queue-append" >&2; exit 1; }
 queue_read_gates "$TRACKER_DEVFLOW_DIR/manifest.json" "$PROJECT_ROOT"
 CURATION_ENABLED="$_QG_CURATION"
-# Curation is project work: off outside a git project (D-HOOKS-GIT-ONLY above).
+# Curation is project work: off outside a git project (D-HOOKS-GIT-ONLY above), and off
+# where the ledger folder has no name.
 [ -n "$PROJECT_OK" ] || CURATION_ENABLED="false"
+[ -n "$CURATION_NAMES_OK" ] || CURATION_ENABLED="false"
 
 # --- The one-time ledger folder move (curation-move) ---
 # The old learning/ folder moves to curation/ here, at every session start, resume,
