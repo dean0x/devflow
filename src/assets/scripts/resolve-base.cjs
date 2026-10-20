@@ -16,19 +16,23 @@
 //     --name-stdin  the base branch name is read from standard input (see below)
 //     --cross       true for a cross-repository PR: no fetch, the local tip, REASON fork-origin
 //   node resolve-base.cjs <local|pr> <name> [--cross <true|false>]
-//     The same run with the name as an argument, for in-process callers such as tests. This
-//     form never reads standard input. A positional name next to --name-stdin gives REASON
-//     usage, and nothing is read.
+//     The same run with the name as an argument. This form is for in-process tests only: no
+//     prompt uses it, and tests/guards/base-ref-guard.test.ts forbids it in prompts. A follow-up
+//     issue tracks its removal. This form never reads standard input. A positional name next to
+//     --name-stdin gives REASON usage, and nothing is read.
 //
 // Standard input (--name-stdin): the name is one line of standard input, from a file or a
-// pipe. Exactly one trailing LF or CRLF is removed, and nothing else is trimmed. At most 256
-// bytes are read, in a loop of repeated reads of descriptor 0 that stops one byte past the
-// cap, so a name is never cut short. A terminal is never read. Empty, unreadable or terminal
-// input gives REASON resolver-unavailable. Input over the cap, or holding a NUL, a CR, a
-// non-ASCII byte or a second line, gives REASON invalid-name. A non-blocking descriptor with
-// no input yet is waited for inside RUN_BUDGET_MS. A read of a blocking pipe returns only when
-// input arrives or the writer closes the pipe, and RUN_BUDGET_MS does not bound that read, so
-// a caller passes a file (`< "$F"`) or a pipe whose writer ends. No new REASON exists.
+// pipe. Exactly one trailing LF or CRLF is removed, and nothing else is trimmed. A name is at
+// most 256 bytes. The loop makes repeated reads of descriptor 0 and reads up to 257 bytes: the
+// one byte past the cap tells an over-long input from a name at the cap, so a name is never cut
+// short. A terminal is never read. Empty input (zero bytes), unreadable input and terminal input
+// give REASON resolver-unavailable. A lone line end leaves an empty name, which the strict class
+// refuses with REASON invalid-name. Input over the cap, or holding a NUL, a CR, a non-ASCII byte
+// or a second line, also gives REASON invalid-name. A non-blocking descriptor with no input yet
+// is waited for inside RUN_BUDGET_MS. A read of a blocking pipe returns only when input arrives
+// or the writer closes the pipe, and RUN_BUDGET_MS does not bound that read, so a caller passes
+// a file (`< "$F"`) or a pipe whose writer ends. Every stdin error maps to a REASON in
+// REASON_NOTES.
 //
 // stdout is exactly one line, ending in a newline, exit 0 on every handled path:
 //   BASE_REF=<40hex|64hex|none> TIP=<origin|local|none> FETCH=<ok|failed|skipped> REASON=<code> NOTE=<none|info|degraded|stop>
@@ -811,18 +815,53 @@ const STDIN_UNAVAILABLE = Object.freeze({ kind: 'refused', reason: 'resolver-una
 const STDIN_INVALID = Object.freeze({ kind: 'refused', reason: 'invalid-name' });
 
 /**
+ * After a failed read, decide whether the loop may read again, and wait first when it may. Only
+ * an EAGAIN (a non-blocking descriptor with no input yet) is waited for. The wait count and the
+ * run deadline each end the wait, and a wait that throws ends it too. One wait sleeps at most
+ * STDIN_WAIT_MS and never past the deadline.
+ *
+ * @param {Context} ctx
+ * @param {unknown} err  what the failed read threw
+ * @param {number} waits  the waits made so far in this read of the name
+ * @returns {boolean} true when one wait ran and the loop reads again; false when the read is over
+ */
+function waitAfterFailedRead(ctx, err, waits) {
+  const code = err !== null && typeof err === 'object' ? /** @type {{ code?: unknown }} */ (err).code : undefined;
+  const left = ctx.deadline - ctx.now();
+  if (code !== 'EAGAIN' || waits >= STDIN_MAX_WAITS || !(left > 0)) return false;
+  try {
+    ctx.stdin.wait(Math.max(1, Math.min(STDIN_WAIT_MS, Math.floor(left))));
+  } catch (_) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Remove exactly one trailing LF or CRLF; nothing else is trimmed.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function withoutLineEnd(text) {
+  if (text.endsWith('\r\n')) return text.slice(0, -2);
+  return text.endsWith('\n') ? text.slice(0, -1) : text;
+}
+
+/**
  * Read the base name from descriptor 0: one bounded loop, no throw. A terminal is refused
  * without a read. The loop asks for at most STDIN_CAP_BYTES + 1 bytes in all, so input over the
- * cap is told from input at it and is never cut short. A read that fails with EAGAIN (a
- * non-blocking descriptor with no input yet) waits and reads again, and every wait counts
- * inside the run budget. Each pass takes at least one byte, ends the loop, or spends one of
- * the STDIN_MAX_WAITS waits, so the loop has a fixed upper bound. One read of a blocking pipe
- * returns only when input arrives or the writer closes the pipe; the callers pass a file.
+ * cap is told from input at it and is never cut short. A read that fails with EAGAIN waits and
+ * reads again (waitAfterFailedRead), and every wait counts inside the run budget. Each pass takes
+ * at least one byte, ends the loop, or spends one of the STDIN_MAX_WAITS waits, so the loop has a
+ * fixed upper bound. One read of a blocking pipe returns only when input arrives or the writer
+ * closes the pipe; the callers pass a file.
  *
  * Empty input and an unreadable descriptor give resolver-unavailable. Input over the cap gives
- * invalid-name. Exactly one trailing LF or CRLF is removed and nothing is trimmed. The bytes
- * are decoded one byte to one character, so any byte outside the strict class (a NUL, a CR,
- * a byte of 0x80 or more, a second line) reaches the class check as a character it refuses.
+ * invalid-name. Exactly one trailing LF or CRLF is removed (withoutLineEnd) and nothing is
+ * trimmed. The bytes are decoded one byte to one character, so any byte outside the strict class
+ * (a NUL, a CR, a byte of 0x80 or more, a second line) reaches the class check as a character it
+ * refuses.
  *
  * @param {Context} ctx
  * @returns {StdinName}
@@ -846,15 +885,8 @@ function readNameFromStdin(ctx) {
     try {
       got = port.read(buf, total, limit - total);
     } catch (err) {
-      const code = err !== null && typeof err === 'object' ? /** @type {{ code?: unknown }} */ (err).code : undefined;
-      const left = ctx.deadline - ctx.now();
-      if (code !== 'EAGAIN' || waits >= STDIN_MAX_WAITS || !(left > 0)) return STDIN_UNAVAILABLE;
+      if (!waitAfterFailedRead(ctx, err, waits)) return STDIN_UNAVAILABLE;
       waits += 1;
-      try {
-        port.wait(Math.max(1, Math.min(STDIN_WAIT_MS, Math.floor(left))));
-      } catch (_) {
-        return STDIN_UNAVAILABLE;
-      }
       continue;
     }
     if (!Number.isInteger(got) || got < 0 || got > limit - total) return STDIN_UNAVAILABLE;
@@ -864,9 +896,7 @@ function readNameFromStdin(ctx) {
   if (total === 0) return STDIN_UNAVAILABLE;
   if (total > STDIN_CAP_BYTES) return STDIN_INVALID;
 
-  const text = buf.toString('latin1', 0, total);
-  if (text.endsWith('\r\n')) return { kind: 'ok', name: text.slice(0, -2) };
-  return { kind: 'ok', name: text.endsWith('\n') ? text.slice(0, -1) : text };
+  return { kind: 'ok', name: withoutLineEnd(buf.toString('latin1', 0, total)) };
 }
 
 // ---------------------------------------------------------------------------
