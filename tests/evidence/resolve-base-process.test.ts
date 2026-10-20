@@ -902,7 +902,13 @@ describe.skipIf(!POSIX)('the name on standard input, through the real script', S
 
   // one fixture repository for every case here: the script only reads it, so the cases share it
   let shared: World
-  beforeAll(() => { shared = newWorld() }, SUBPROCESS_TIMEOUT_MS)
+  beforeAll(() => {
+    shared = newWorld()
+    // macOS can hold the next launch of node for many seconds, before it runs a line, while its
+    // security daemons settle after the files the earlier groups wrote: launch node once here, so
+    // no case's budget absorbs the wait
+    spawnSync(process.execPath, ['--version'], { cwd: shared.root, env: scopedEnv(shared.home), stdio: 'ignore', timeout: SUBPROCESS_TIMEOUT_MS })
+  }, SUBPROCESS_TIMEOUT_MS)
   afterAll(() => { fs.rmSync(shared.root, { recursive: true, force: true }) })
 
   /** Start the script with its standard input opened on a file (the carrier the prompts use). */
