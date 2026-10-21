@@ -7,11 +7,10 @@
  * process state, so the init step (src/cli/commands/curation-move-step.ts) and the
  * notice module (src/core/curation-move-notice.ts) can both import it.
  *
- * The words hold nothing from the repository. The session start hook
- * (src/assets/scripts/hooks/session-start-context) holds the same words;
- * tests/shell-hooks.test.ts requires the two to agree. The two commands the notice
- * tells the user to run are listed in NOTICE_COMMAND_PHRASES in
- * tests/guards/no-fsmonitor-index-read.test.ts, which holds both copies to them.
+ * The words hold nothing from the repository. The two commands the notice tells the
+ * user to run are listed in NOTICE_COMMAND_PHRASES in
+ * tests/guards/no-fsmonitor-index-read.test.ts, which holds this file to them. The
+ * notice of a paused area is in src/core/area-pause-notice.ts.
  */
 
 import { CURATION_DIR_NAME, LEGACY_NAMES } from './project-paths.js';
