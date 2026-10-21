@@ -54,9 +54,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`/resolve` adds only triaged items to the tech debt backlog** ([#630](https://github.com/dean0x/devflow/issues/630)).
   - Under GitHub, Linear and Jira, the `manage-debt` operation takes backlog items only from the `## Fix Separately` and `## Deferred to Tech Debt` sections of `resolution-summary.md`.
-    It no longer adds pre-existing issues from the review reports.
   - If `resolution-summary.md` is missing, the operation returns `TRACEABILITY: DEGRADED (resolution summary missing)` and leaves the backlog unchanged.
-  - Run `devflow init` after you update. Until you do, the installed references still add pre-existing issues from the review reports.
+  - Run `devflow init` after you update.
 
 ---
 
