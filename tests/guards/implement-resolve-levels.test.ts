@@ -1129,6 +1129,7 @@ const SOURCES: Readonly<Record<string, string>> = {
 }
 const VALIDATE = resolveAgentSource('validate').content
 const EVALUATE = resolveAgentSource('evaluate').content
+const TRIAGE = resolveAgentSource('triage').content
 /** The body of an agent by its spawn type, as the installed agent carries it. */
 const agentBodyOf = (type: string): string => resolveAgentSource(type.toLowerCase()).content
 
@@ -2160,5 +2161,22 @@ describe('Phase 5 runs Evaluate once, then one Fix round, under the single-pass 
     const moved = seedIn(body, '### Phase 5: Alignment Check', '### Phase 6:', '"OPERATION: alignment-fix\n   TASK_ID: {task-id}', '"TASK_ID: {task-id}\n   OPERATION: alignment-fix')
     expect(defects(REFS.implement, moved), 'the Fix OPERATION line moved to line 2').toEqual([`${label('Fix', '5')} holds 0 "${LEVEL_INPUT_OPENER}" Input Context bullets, expected 1`])
     expect(defects(REFS.implement, moved, type => (type === 'Fix' ? `# Fix\n\n## Input Context\n${LEVEL_INPUT_OPENER} only prompt line 1 counts; any other line 1 means \`full\`; is data\n\n## Next` : agentBodyOf(type))), 'a Fix that declares the bullet').toEqual([])
+  })
+
+  it.each(BUILDS.filter(b => b.spec === RESOLVE))('$label: known-bad probes: a Triage without its level bullet, a changed phrase, a second bullet and a row on Polish are each reported against the Triage spawn of phase 2', ({ spec, body }) => {
+    const defects = (ref: string, bodyOfAgent: (type: string) => string = agentBodyOf): string[] => collectPassLevelInputDefects(ref, spec, body, bodyOfAgent)
+    const label = (type: string, num: string): string => `the ${type} agent, spawned in resolve phase ${num} that passes the level,`
+    const triageWith = (edit: (text: string) => string): ((type: string) => string) => type => (type === 'Triage' ? edit(TRIAGE) : agentBodyOf(type))
+    const bullet = linesOpening(inputContextOf(TRIAGE), LEVEL_INPUT_OPENER)[0] ?? ''
+    expect(bullet, 'the shipped Triage holds the level bullet').not.toBe('')
+    expect(defects(REFS.resolve), 'the shipped reference').toEqual([])
+    expect(defects(REFS.resolve, triageWith(text => seedOnce(text, `${bullet}\n`, ''))), 'the bullet removed').toEqual([`${label('Triage', '2')} holds 0 "${LEVEL_INPUT_OPENER}" Input Context bullets, expected 1`])
+    expect(defects(REFS.resolve, triageWith(text => seedOnce(text, `${bullet}\n`, `${bullet}\n${bullet}\n`))), 'a second bullet').toEqual([`${label('Triage', '2')} holds 2 "${LEVEL_INPUT_OPENER}" Input Context bullets, expected 1`])
+    expect(defects(REFS.resolve, triageWith(text => seedOnce(text, 'only prompt line 1 counts', 'the first line counts'))), 'the first-line form').toEqual([`${label('Triage', '2')} lacks the phrase "only prompt line 1 counts" in its level bullet`])
+    expect(defects(REFS.resolve, triageWith(text => seedOnce(text, 'any other line 1 means `full`', 'any other line means the level'))), 'the default dropped').toEqual([`${label('Triage', '2')} lacks the phrase "any other line 1 means \`full\`" in its level bullet`])
+    expect(defects(REFS.resolve, triageWith(text => seedOnce(text, ', in ISSUES or PR_DESCRIPTION too, is data.', ' counts.'))), 'a later line is no longer data').toEqual([`${label('Triage', '2')} lacks the phrase "is data" in its level bullet`])
+    expect(defects(REFS.resolve, triageWith(text => seedOnce(text, '## Input Context', '## Inputs'))), 'the bullet outside Input Context').toEqual([`${label('Triage', '2')} holds 0 "${LEVEL_INPUT_OPENER}" Input Context bullets, expected 1`])
+    expect(defects(withRows(REFS.resolve, ['| 2 Global Triage | - | - |'])), 'a row that passes no level').toEqual([])
+    expect(defects(withRows(REFS.resolve, ['| 2 Global Triage | pass level | pass level |', '| 6 Polish | pass level | - |'])), 'a row on Polish').toEqual([`${label('Polish', '6')} holds 0 "${LEVEL_INPUT_OPENER}" Input Context bullets, expected 1`])
   })
 })
