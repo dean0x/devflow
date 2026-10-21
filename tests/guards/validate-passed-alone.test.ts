@@ -25,7 +25,7 @@ import { ROOT, SANCTIONED_RESOLUTION, readAgentReference, resolveAgentSource, se
 
 const REFERENCE_REL = 'validate/passed-alone.md'
 
-/** The first words of the trigger sentence, which every other body clause follows in one paragraph. */
+/** The first words of the trigger sentence, which the rest of the rule follows in one paragraph. */
 const TRIGGER = 'After a failed Test row, re-run each of its first 20 failed test files alone, once,'
 
 /** The lead of the Read line. "First" puts the Read before any re-run, so no path from the log reaches a command unchecked. */
@@ -49,9 +49,9 @@ const SKILL_ROW = `| \`${REFERENCE_REL}\` | Validate | A Test row failed |`
 
 /** What the body must say inside `## Validation Order`, before the Running commands block: one clause each. */
 const BODY_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]> = [
+  ['the full run uses the quiet form where the project command runs that tool', "Use the quiet form where the project's command runs that tool."],
   ['the trigger and the bound of 20 files', TRIGGER],
-  ['the re-run is verbose', ' verbose, 120 s max'],
-  ['the time limit of 120 s', '120 s max'],
+  ['the re-run is verbose and limited to 120 s', ' verbose, 120 s max'],
   ['the re-run is never the suite', 'never the suite'],
   ['the re-run is the one exception to the never-re-run rule', 'this is the one exception to the never-re-run rule under Running commands.'],
   ['the Read of the reference through the sanctioned directory line', READ_LINE],
@@ -86,6 +86,7 @@ const REFERENCE_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]>
   ['the body decides each label', "The body's rules decide each label"],
   ['only a run given a BASE_SHA labels files', 'Only a run given a BASE_SHA labels files'],
   ['any other run gives failure detail only and every failure is REAL', 'in any other run the re-runs give failure detail only, and every failure is REAL.'],
+  ['step 1, which the cause step cites, is the failed-files step', '1. **Failed files.** '],
   ['the failed files come from the whole log', "Grep the full run's log, not only its tail"],
   ['the failed files, their count and their causes are read in one Grep', 'Do this in one Grep.'],
   ['the runner count of failed files is read', "the runner's count of failed files"],
@@ -110,7 +111,6 @@ const REFERENCE_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]>
   ['the path rule: letters, digits and a short set of marks, no leading dash, no parent segment', PATH_RULE],
   ['no path starts with a dash', 'does not start with `-`'],
   ['no path has a parent segment', 'has no `..` segment'],
-  ['the tracked-path check', '`git ls-files --full-name --error-unmatch --'],
   ['one tracked-path call covers the accepted paths', "Then run one `git ls-files --full-name --error-unmatch -- '<path>' …` call for the accepted paths"],
   ['each accepted path is single-quoted', 'for the accepted paths, each single-quoted'],
   ['a path the tracked-path check does not list is not re-run and is REAL', 'a path it does not list is not re-run and is REAL.'],

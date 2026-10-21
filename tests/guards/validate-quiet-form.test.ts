@@ -1,20 +1,19 @@
 /**
- * D-VALIDATE-QUIET-FORM (#427): the Validate agent prefers a tool's quiet output form, and re-runs
- * each failed test file alone, verbosely.
+ * D-VALIDATE-QUIET-FORM: the Validate agent prefers a tool's quiet output form, and re-runs each
+ * failed test file alone, verbosely.
  *
  * A passing run's log is read by nobody, and a failing one is read through `tail`, so the quiet form
  * of a build, typecheck or test command saves the output tokens without losing the verdict. The
- * "Validation Order" table in `validate.md` gains a Quiet form column, and one sentence after it
- * states the per-file re-run rule: after a failed Test row, re-run each of its first 20 failed test
- * files alone, once, verbose, never the suite. That sentence is the stated exception to the
- * never-re-run rule in the shared `## Running commands` block, so it sits outside the block, which
- * this change leaves byte-identical in the Code, Fix, Refactor, Validate and Test agents
- * (`tests/guards/running-commands-parity.test.ts` owns the bytes; the arm here asserts the quiet form
- * never entered it).
+ * "Validation Order" table in `validate.md` has a Quiet form column. The fallback sentence states the
+ * re-run: after a failed Test row, re-run each of its first 20 failed test files alone, once,
+ * verbose, never the suite. It is the stated exception to the never-re-run rule in the shared
+ * `## Running commands` block, so it sits outside the block. The block is byte-identical in the Code,
+ * Fix, Refactor, Validate and Test agents (`tests/guards/running-commands-parity.test.ts` owns the
+ * bytes; the arm here asserts that neither the quiet form nor the fallback sentence is in it).
  *
- * The five language rules (`typescript`, `python`, `go`, `java`, `rust`) each gain exactly one
- * quiet-form bullet with their `paths` frontmatter untouched; `react` names no test runner and gains
- * none. Each arm runs through a named collector with a known-bad probe over the same collector.
+ * The five language rules (`typescript`, `python`, `go`, `java`, `rust`) each carry exactly one
+ * quiet-form bullet with their `paths` frontmatter untouched; `react` names no test runner and
+ * carries none. Each arm runs through a named collector with a known-bad probe over the same collector.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -85,7 +84,7 @@ export function collectBlockIntrusions(body: string): string[] {
 }
 
 describe('the Validation Order table has a Quiet form column and a fallback sentence (D-VALIDATE-QUIET-FORM)', () => {
-  it('validate.md lists the quiet forms, a Lint row of none, and the per-file re-run rule before the block', () => {
+  it('validate.md lists the quiet forms, a Lint row of none, and the fallback sentence before the block', () => {
     const body = resolveAgentSource('validate').content
     expect(body.length, 'nothing read').toBeGreaterThan(3000)
     expect(collectTableDefects(body)).toEqual([])
@@ -125,7 +124,7 @@ describe('the Validation Order table has a Quiet form column and a fallback sent
 // The language rules
 // ---------------------------------------------------------------------------
 
-/** The five rules that gain one bullet, with the `paths` frontmatter each keeps and the forms it names. */
+/** The five rules that carry one bullet, with the `paths` frontmatter each keeps and the forms it names. */
 const RULES: ReadonlyArray<{ readonly name: string; readonly paths: string; readonly forms: readonly string[] }> = [
   { name: 'typescript', paths: 'paths: ["**/*.ts", "**/*.tsx"]', forms: ['vitest run --reporter=dot', 'jest --silent', 'tsc --pretty false'] },
   { name: 'python', paths: 'paths: ["**/*.py"]', forms: ['pytest -q'] },
@@ -146,7 +145,7 @@ export function collectRuleDefects(name: string, text: string, paths: string, fo
   return out
 }
 
-describe('five language rules gain one quiet-form bullet each, and react gains none (D-VALIDATE-QUIET-FORM)', () => {
+describe('five language rules carry one quiet-form bullet each, and react carries none (D-VALIDATE-QUIET-FORM)', () => {
   it('typescript, python, go, java and rust carry exactly one bullet and keep their paths frontmatter', () => {
     expect(RULES.length).toBe(5)
     for (const { name, paths, forms } of RULES) {
