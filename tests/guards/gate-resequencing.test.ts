@@ -34,7 +34,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import * as path from 'path'
 
-import { ROOT, isAgentBlock, parseFences, requireDistFile, resolveAgentSource, resolveCurationOffSource } from '../helpers.js'
+import { PR_ONLY_KEYS, ROOT, isAgentBlock, parseFences, requireDistFile, resolveAgentSource, resolveCurationOffSource } from '../helpers.js'
 
 const skill = (rel: string): string => readFileSync(path.join(ROOT, 'src', 'assets', 'skills', 'quality-gates', rel), 'utf-8')
 
@@ -309,9 +309,7 @@ describe('D-CI-WAIT-INLINE (#421): /resolve no longer claims a single push path'
 // D-EVALUATE-NO-PR-INPUT (#483)
 // ---------------------------------------------------------------------------
 
-/** The keys only the PR-opening Git spawn takes; the same three as `PR_ONLY_KEYS` in tests/seams/pr-link-handoff.test.ts. */
-const PR_KEYS = ['ISSUE_NUMBER', 'ISSUE_PR_LINK', 'PR_EXCEPTIONS'] as const
-const PR_KEY_LINE = new RegExp(`^[ \\t]*"?(?:${PR_KEYS.join('|')}): `)
+const PR_KEY_LINE = new RegExp(`^[ \\t]*"?(?:${PR_ONLY_KEYS.join('|')}): `)
 const PR_WORD = /\bPR\b|PR_/
 const PULL_REQUEST = /pull request/i
 

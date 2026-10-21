@@ -521,6 +521,9 @@ export const CODE_MODES: readonly string[] = Object.values(CODE_OPERATIONS).flat
 /** The slug (`devflow agents` key and file basename) of a Code-family agent type: `Fix` is `fix`. */
 export const codeSlugOf = (agentType: string): string => agentType.toLowerCase()
 
+/** The keys only the PR-opening Git spawn takes. A Code or Evaluate spawn carrying one is a PR input with no PR to open: tests/seams/pr-link-handoff.test.ts and tests/guards/gate-resequencing.test.ts each scan for them. */
+export const PR_ONLY_KEYS = ['ISSUE_NUMBER', 'ISSUE_PR_LINK', 'PR_EXCEPTIONS'] as const
+
 /**
  * The agent types a command may spawn although devflow ships no agent file for them: Claude Code's own
  * built-ins. `Plan` is the one: /plan's planning spawn uses it. The set is CLOSED: a new entry needs a
