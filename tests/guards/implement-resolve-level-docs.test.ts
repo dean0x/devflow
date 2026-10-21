@@ -41,6 +41,9 @@ const RETIRED_CLAIMS = ['no phase rules yet', 'no rows yet'] as const
 /** What a doc site says when it states that Polish is skipped: "skip Polish", "skips Polish" or "no Polish". */
 const POLISH_SKIP = /\b(?:skips?|no) Polish\b/
 
+/** What a doc site says when it states the severity tiers of the `2 Global Triage` row: "applies severity tiers" or "severity tiers in /resolve". Case matters, and a hyphenated file name does not count. */
+const SEVERITY_TIERS = /\bseverity tiers?\b/
+
 /** What a doc site says when it states the lean Harden skip: "skip Harden on a docs-only diff" or "skips Harden on a docs-only diff". */
 const HARDEN_DOCS_SKIP = /\bskips? Harden on a docs-only diff\b/
 
@@ -61,6 +64,7 @@ const ROW_EFFECTS: ReadonlyMap<string, RegExp> = new Map([
   ['implement:| 3 Polish | skip | skip |', POLISH_SKIP],
   ['implement:| 4 Self-Review | - | apply: harden-scope |', HARDEN_DOCS_SKIP],
   ['implement:| 5 Alignment Check | pass level; apply: single-pass | pass level; apply: single-pass |', EVALUATE_SINGLE_PASS],
+  ['resolve:| 2 Global Triage | pass level | pass level |', SEVERITY_TIERS],
   ['resolve:| 6 Polish | skip | skip |', POLISH_SKIP],
 ])
 
@@ -320,6 +324,11 @@ describe('the doc sites state the effect of each shipped row and keep no retired
     for (const text of ['one Evaluate run', 'Evaluate passes once', 'one evaluate pass', 'oneEvaluate pass']) expect(EVALUATE_SINGLE_PASS.test(text), text).toBe(false)
   })
 
+  it('SEVERITY_TIERS reads "severity tiers", and nothing less', () => {
+    for (const text of ['applies severity tiers', 'severity tiers in /resolve', 'one severity tier']) expect(SEVERITY_TIERS.test(text), text).toBe(true)
+    for (const text of ['severity-tiers.md', 'Severity tiers', 'severity tiered', 'noseverity tiers']) expect(SEVERITY_TIERS.test(text), text).toBe(false)
+  })
+
   it('HARDEN_DOCS_SKIP reads a skip of Harden on a docs-only diff, and nothing less', () => {
     for (const text of ['skips Harden on a docs-only diff', 'skip Harden on a docs-only diff', 'lean skips Harden on a docs-only diff.']) expect(HARDEN_DOCS_SKIP.test(text), text).toBe(true)
     for (const text of ['SKIPPED on a docs-only diff', 'skips Harden', 'runs Harden on a docs-only diff', 'skips Harden on a docs only diff']) expect(HARDEN_DOCS_SKIP.test(text), text).toBe(false)
@@ -475,6 +484,7 @@ describe('the doc sites state the effect of each shipped row and keep no retired
       'implement:| 3 Polish | skip | skip |',
       'implement:| 4 Self-Review | - | apply: harden-scope |',
       'implement:| 5 Alignment Check | pass level; apply: single-pass | pass level; apply: single-pass |',
+      'resolve:| 2 Global Triage | pass level | pass level |',
       'resolve:| 6 Polish | skip | skip |',
     ])
     expect(withRowCmds).toEqual(['implement', 'resolve'])

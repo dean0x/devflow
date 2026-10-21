@@ -65,8 +65,8 @@ export const GATE_LEVEL_SELECT_MESSAGE = 'Gate level for this machine';
  */
 export const GATE_LEVEL_HINTS: Readonly<Record<GateLevel, string>> = Object.freeze({
   full: 'the most checking: every review focus, the full planning shape and Polish',
-  standard: 'fewer review focuses and planning agents, no Polish in /implement and /resolve, and one Evaluate pass in /implement (the default)',
-  lean: 'the least checking, and no Polish in /implement and /resolve; /implement also runs one Evaluate pass, has Validate run the project lint pack, and skips Harden on a docs-only diff',
+  standard: 'fewer review focuses and planning agents, no Polish in /implement and /resolve, severity tiers in /resolve, and one Evaluate pass in /implement (the default)',
+  lean: 'the least checking, and no Polish in /implement and /resolve; /resolve also applies severity tiers; /implement also runs one Evaluate pass, has Validate run the project lint pack, and skips Harden on a docs-only diff',
 });
 
 /** Build clack select options for the gate level list, most to least checking. */
@@ -76,7 +76,7 @@ export function gateLevelChoices(): Array<{ value: GateLevel; label: string; hin
 
 /**
  * Format a padded level catalogue suitable for a clack note body.
- * Produces: `  standard  fewer review focuses and planning agents, no Polish in /implement and /resolve, and one Evaluate pass in /implement (the default)`
+ * Produces: `  standard  fewer review focuses and planning agents, no Polish in /implement and /resolve, severity tiers in /resolve, and one Evaluate pass in /implement (the default)`
  */
 export function formatGateLevelCatalogue(): string {
   const width = Math.max(...GATE_LEVELS.map(level => level.length));
