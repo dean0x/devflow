@@ -69,6 +69,7 @@ import {
   mcpContractIsGenerated,
 } from '../../src/core/mds-variants.js';
 import {
+  FLAGGED_RM,
   ROOT,
   gitAgentSinkCorpus,
   resolveAgentSource,
@@ -683,9 +684,6 @@ const D11_STAGING_FILES: readonly string[] = [
   '"$DEVFLOW_NOTES_RAW"',
   '"$DEVFLOW_NOTES"',
 ];
-
-/** A flagged `rm` — `rm -f`, `rm -rf`, `rm --force`, in any spacing. */
-const FLAGGED_RM = /\brm\s+-{1,2}[A-Za-z]/;
 
 /**
  * The always-loaded agent's removal line, fail-loud.

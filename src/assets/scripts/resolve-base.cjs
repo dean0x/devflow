@@ -8,13 +8,31 @@
 // beside ci-wait.cjs under ~/.devflow/scripts/.
 //
 // Usage, from the worktree (the caller changes into it first):
+//   node resolve-base.cjs <local|pr> --name-stdin [--cross <true|false>] < name-file
+//     local         the no-PR rule: origin's tip is chosen only when the local fork point
+//                   is an ancestor of origin's fork point
+//     pr            the PR rule: origin's tip whenever it resolves (fresh, or cached after a
+//                   failed fetch), otherwise the local tip
+//     --name-stdin  the base branch name is read from standard input (see below)
+//     --cross       true for a cross-repository PR: no fetch, the local tip, REASON fork-origin
 //   node resolve-base.cjs <local|pr> <name> [--cross <true|false>]
-//     local    the pre-PR rule: origin's tip is chosen only when the local fork point
-//              is an ancestor of origin's fork point
-//     pr       the PR rule: origin's tip whenever it resolves (fresh, or cached after a
-//              failed fetch), otherwise the local tip
-//     <name>   the base branch, passed in double quotes
-//     --cross  true for a cross-repository PR: no fetch, the local tip, REASON fork-origin
+//     The same run with the name as an argument. This form is for in-process tests only: no
+//     prompt uses it, and tests/guards/base-ref-guard.test.ts forbids it in prompts. A follow-up
+//     issue tracks its removal. This form never reads standard input. A positional name next to
+//     --name-stdin gives REASON usage, and nothing is read.
+//
+// Standard input (--name-stdin): the name is one line of standard input, from a file or a
+// pipe. Exactly one trailing LF or CRLF is removed, and nothing else is trimmed. A name is at
+// most 256 bytes. The loop makes repeated reads of descriptor 0 and reads up to 257 bytes: the
+// one byte past the cap tells an over-long input from a name at the cap, so a name is never cut
+// short. A terminal is never read. Empty input (zero bytes), unreadable input and terminal input
+// give REASON resolver-unavailable. A lone line end leaves an empty name, which the strict class
+// refuses with REASON invalid-name. Input over the cap, or holding a NUL, a CR, a non-ASCII byte
+// or a second line, also gives REASON invalid-name. A non-blocking descriptor with no input yet
+// is waited for inside RUN_BUDGET_MS. A read of a blocking pipe returns only when input arrives
+// or the writer closes the pipe, and RUN_BUDGET_MS does not bound that read, so a caller passes
+// a file (`< "$F"`) or a pipe whose writer ends. Every stdin error maps to a REASON in
+// REASON_NOTES.
 //
 // stdout is exactly one line, ending in a newline, exit 0 on every handled path:
 //   BASE_REF=<40hex|64hex|none> TIP=<origin|local|none> FETCH=<ok|failed|skipped> REASON=<code> NOTE=<none|info|degraded|stop>
@@ -31,16 +49,17 @@
 // be written, the script exits 3 with nothing on stderr; every other path exits 0 with
 // one line.
 //
-// Check order: the strict name class (STRICT_NAME_RE), then `git check-ref-format`, then
+// Check order: the read of the name (--name-stdin only), then the strict name class
+// (STRICT_NAME_RE), then `git check-ref-format`, then
 // the origin URL, then the cross-repository flag, then the fetch (after the read of
 // core.sshCommand), then the tip of each ref, then the merge base of each tip with HEAD,
-// then the ancestry check (the pre-PR rule only), then the choice of tip, then the
+// then the ancestry check (the no-PR rule only), then the choice of tip, then the
 // verification of BASE_REF. A name that fails either name check makes no further git call.
 //
 // Design constraints (binding):
 //   - Plumbing: every decision here is a fixed comparison of git answers. The ancestry
 //     checks are deterministic, and the keep-local policy is a rule, not a judgement.
-//   - Keep-local policy: in the pre-PR rule a local base that holds commits origin lacks
+//   - Keep-local policy: in the no-PR rule a local base that holds commits origin lacks
 //     (local-ahead or diverged) stays the base. The branch was cut from it, so those
 //     commits are the branch's own context. Only a local fork point that is an ancestor
 //     of origin's moves the base to origin.
@@ -88,6 +107,8 @@
 //     non-zero and reads as fetch-failed.
 //   - Every subprocess is `git`, started with an argv array and `shell: false`, stdin
 //     ignored, a timeout and a maxBuffer. Every git call carries `-c core.fsmonitor=false`.
+//     The script's own standard input is read only for --name-stdin, and only by the bounded
+//     loop in readNameFromStdin.
 //   - Nothing here calls process.exit(); the boundary sets process.exitCode.
 //   - Helpers (the fetch, the ancestry check, the commit check, the child environment)
 //     follow verify-evidence.cjs and resolve-evidence-policy.cjs. They are copied, not
@@ -96,6 +117,8 @@
 'use strict';
 
 const childProcess = require('child_process');
+const fs = require('fs');
+const tty = require('tty');
 
 // ---------------------------------------------------------------------------
 // Closed vocabularies and bounds
@@ -170,6 +193,18 @@ const LOCAL_TIMEOUT_MS = 30000;
  * limit, and 100 s leaves the rest for the launch of node.
  */
 const RUN_BUDGET_MS = 100000;
+/**
+ * The most bytes of a name read from standard input. The strict class admits 200, and the rest
+ * is room for the line end. One byte more than this is read, to tell a name at the cap from
+ * input over it.
+ */
+const STDIN_CAP_BYTES = 256;
+/** How long one wait for input sleeps when descriptor 0 has no input yet. */
+const STDIN_WAIT_MS = 10;
+/** The most waits in one read of standard input; their total never passes RUN_BUDGET_MS. */
+const STDIN_MAX_WAITS = RUN_BUDGET_MS / STDIN_WAIT_MS;
+/** What Atomics.wait sleeps on: nothing notifies it, so each wait runs its full time. */
+const STDIN_WAIT_CELL = new Int32Array(new SharedArrayBuffer(4));
 /** rev-parse, merge-base and config print one short line. */
 const LINE_MAX_BUFFER = 4096;
 /** The fetch's stderr is read for one phrase and discarded. */
@@ -193,12 +228,19 @@ function isStrictName(name) {
 }
 
 /**
- * @typedef {{ kind: 'ok', mode: 'local' | 'pr', name: string, cross: boolean } | { kind: 'usage' }} ParsedArgs
+ * @typedef {{ kind: 'ok', mode: 'local' | 'pr', name: string, cross: boolean }
+ *   | { kind: 'stdin', mode: 'local' | 'pr', cross: boolean }
+ *   | { kind: 'usage' }} ParsedArgs
  */
 
+/** The one argument that takes the name from standard input; it stands where the name would. */
+const STDIN_FLAG = '--name-stdin';
+
 /**
- * `<local|pr> <name> [--cross <true|false>]`. The name is any string here: the later
- * checks decide about it, and a usage result never carries it.
+ * `<local|pr> --name-stdin [--cross <true|false>]` (the name comes from standard input) or
+ * `<local|pr> <name> [--cross <true|false>]`. The name is any string here: the later checks
+ * decide about it, and a usage result never carries it. `--name-stdin` is read only at the
+ * name slot, so a positional name next to it is a usage result.
  *
  * @param {readonly string[]} args  argv without the node binary and the script path
  * @returns {ParsedArgs}
@@ -212,6 +254,7 @@ function parseArgs(args) {
     if (args[2] !== '--cross' || (args[3] !== 'true' && args[3] !== 'false')) return { kind: 'usage' };
     cross = args[3] === 'true';
   }
+  if (args[1] === STDIN_FLAG) return { kind: 'stdin', mode, cross };
   return { kind: 'ok', mode, name: String(args[1]), cross };
 }
 
@@ -281,7 +324,7 @@ function stopWith(reason, fetch = 'skipped') {
 
 /**
  * The fork points of both refs, or null when a ref is absent or has no fork point. Both the
- * ancestry question and the pre-PR choice need them.
+ * ancestry question and the no-PR choice need them.
  *
  * @param {Side | null} local
  * @param {Side | null} remote
@@ -353,9 +396,11 @@ function successReason(f, tip) {
 /**
  * @typedef {{ status: number | null, stdout?: unknown, stderr?: unknown, error?: { code?: unknown } | null, pid?: number }} RawResult
  * @typedef {(file: string, args: string[], opts: Record<string, unknown>) => RawResult} SpawnFn
+ * @typedef {{ isatty: () => boolean, read: (buf: Buffer, offset: number, length: number) => number, wait: (ms: number) => void }} StdinPort
  * @typedef {{ spawn: SpawnFn, env: NodeJS.ProcessEnv, parentEnv: NodeJS.ProcessEnv, cwd: string, fetchTimeoutMs: number, platform: string,
- *   now: () => number, deadline: number }} Context
+ *   now: () => number, deadline: number, stdin: StdinPort }} Context
  *   fetchTimeoutMs: the bound of the fetch. now: a monotonic clock in ms. deadline: the end of the run budget on that clock.
+ *   stdin: descriptor 0, as three operations: the terminal check, one read (which throws with a code, EAGAIN among them), one wait.
  * @typedef {{ ok: boolean, answered: boolean, status: number | null, errorCode: string | null, stdout: string, stderr: string, pid: number }} CallResult
  * @typedef {{ env: NodeJS.ProcessEnv, timeoutMs: number, maxBuffer: number, grouped: boolean }} CallOptions
  *   grouped: run as the leader of its own process group, killed with SIGKILL on a timeout
@@ -395,6 +440,31 @@ function childEnv(base) {
   });
 }
 
+/**
+ * Descriptor 0 itself: never /dev/stdin and never the size that fstat reports, because a pipe
+ * or a socket reports only what is buffered so far. The read takes the current file position.
+ *
+ * @type {StdinPort}
+ */
+const DEFAULT_STDIN = Object.freeze({
+  isatty: () => tty.isatty(0),
+  read: (buf, offset, length) => fs.readSync(0, buf, offset, length, null),
+  wait: ms => { Atomics.wait(STDIN_WAIT_CELL, 0, 0, ms); },
+});
+
+/**
+ * @param {unknown} injected  a test's replacement of any of the three operations
+ * @returns {StdinPort}
+ */
+function stdinPortOf(injected) {
+  const d = /** @type {Partial<StdinPort>} */ (injected !== null && typeof injected === 'object' ? injected : {});
+  return {
+    isatty: typeof d.isatty === 'function' ? d.isatty : DEFAULT_STDIN.isatty,
+    read: typeof d.read === 'function' ? d.read : DEFAULT_STDIN.read,
+    wait: typeof d.wait === 'function' ? d.wait : DEFAULT_STDIN.wait,
+  };
+}
+
 /** @returns {number} milliseconds on a clock that never goes back */
 function monotonicMs() {
   const [seconds, nanoseconds] = process.hrtime();
@@ -402,7 +472,7 @@ function monotonicMs() {
 }
 
 /**
- * @param {{ spawn?: unknown, env?: unknown, cwd?: unknown, fetchTimeoutMs?: unknown, platform?: unknown, now?: unknown }} [deps]
+ * @param {{ spawn?: unknown, env?: unknown, cwd?: unknown, fetchTimeoutMs?: unknown, platform?: unknown, now?: unknown, stdin?: unknown }} [deps]
  * @returns {Context}
  */
 function makeContext(deps) {
@@ -419,6 +489,7 @@ function makeContext(deps) {
     platform: typeof d.platform === 'string' ? d.platform : process.platform,
     now,
     deadline: now() + RUN_BUDGET_MS,
+    stdin: stdinPortOf(d.stdin),
   };
 }
 
@@ -713,7 +784,7 @@ function sidesOf(ctx, name, readRemote) {
 }
 
 /**
- * Whether the local fork point is an ancestor of origin's. Asked only in the pre-PR rule,
+ * Whether the local fork point is an ancestor of origin's. Asked only in the no-PR rule,
  * and only when both sides have a fork point; null otherwise.
  *
  * @param {Context} ctx
@@ -731,6 +802,104 @@ function localBehindOf(ctx, mode, local, remote) {
 }
 
 // ---------------------------------------------------------------------------
+// The name on standard input
+// ---------------------------------------------------------------------------
+
+/**
+ * @typedef {{ kind: 'ok', name: string } | { kind: 'refused', reason: 'invalid-name' | 'resolver-unavailable' }} StdinName
+ */
+
+/** @type {StdinName} */
+const STDIN_UNAVAILABLE = Object.freeze({ kind: 'refused', reason: 'resolver-unavailable' });
+/** @type {StdinName} */
+const STDIN_INVALID = Object.freeze({ kind: 'refused', reason: 'invalid-name' });
+
+/**
+ * After a failed read, decide whether the loop may read again, and wait first when it may. Only
+ * an EAGAIN (a non-blocking descriptor with no input yet) is waited for. The wait count and the
+ * run deadline each end the wait, and a wait that throws ends it too. One wait sleeps at most
+ * STDIN_WAIT_MS and never past the deadline.
+ *
+ * @param {Context} ctx
+ * @param {unknown} err  what the failed read threw
+ * @param {number} waits  the waits made so far in this read of the name
+ * @returns {boolean} true when one wait ran and the loop reads again; false when the read is over
+ */
+function waitAfterFailedRead(ctx, err, waits) {
+  const code = err !== null && typeof err === 'object' ? /** @type {{ code?: unknown }} */ (err).code : undefined;
+  const left = ctx.deadline - ctx.now();
+  if (code !== 'EAGAIN' || waits >= STDIN_MAX_WAITS || !(left > 0)) return false;
+  try {
+    ctx.stdin.wait(Math.max(1, Math.min(STDIN_WAIT_MS, Math.floor(left))));
+  } catch (_) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Remove exactly one trailing LF or CRLF; nothing else is trimmed.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function withoutLineEnd(text) {
+  if (text.endsWith('\r\n')) return text.slice(0, -2);
+  return text.endsWith('\n') ? text.slice(0, -1) : text;
+}
+
+/**
+ * Read the base name from descriptor 0: one bounded loop, no throw. A terminal is refused
+ * without a read. The loop asks for at most STDIN_CAP_BYTES + 1 bytes in all, so input over the
+ * cap is told from input at it and is never cut short. A read that fails with EAGAIN waits and
+ * reads again (waitAfterFailedRead), and every wait counts inside the run budget. Each pass takes
+ * at least one byte, ends the loop, or spends one of the STDIN_MAX_WAITS waits, so the loop has a
+ * fixed upper bound. One read of a blocking pipe returns only when input arrives or the writer
+ * closes the pipe; the callers pass a file.
+ *
+ * Empty input and an unreadable descriptor give resolver-unavailable. Input over the cap gives
+ * invalid-name. Exactly one trailing LF or CRLF is removed (withoutLineEnd) and nothing is
+ * trimmed. The bytes are decoded one byte to one character, so any byte outside the strict class
+ * (a NUL, a CR, a byte of 0x80 or more, a second line) reaches the class check as a character it
+ * refuses.
+ *
+ * @param {Context} ctx
+ * @returns {StdinName}
+ */
+function readNameFromStdin(ctx) {
+  const port = ctx.stdin;
+  let terminal;
+  try {
+    terminal = port.isatty();
+  } catch (_) {
+    return STDIN_UNAVAILABLE;
+  }
+  if (terminal !== false) return STDIN_UNAVAILABLE;
+
+  const limit = STDIN_CAP_BYTES + 1;
+  const buf = Buffer.alloc(limit);
+  let total = 0;
+  let waits = 0;
+  while (total < limit) {
+    let got;
+    try {
+      got = port.read(buf, total, limit - total);
+    } catch (err) {
+      if (!waitAfterFailedRead(ctx, err, waits)) return STDIN_UNAVAILABLE;
+      waits += 1;
+      continue;
+    }
+    if (!Number.isInteger(got) || got < 0 || got > limit - total) return STDIN_UNAVAILABLE;
+    if (got === 0) break;
+    total += got;
+  }
+  if (total === 0) return STDIN_UNAVAILABLE;
+  if (total > STDIN_CAP_BYTES) return STDIN_INVALID;
+
+  return { kind: 'ok', name: withoutLineEnd(buf.toString('latin1', 0, total)) };
+}
+
+// ---------------------------------------------------------------------------
 // resolveBase
 // ---------------------------------------------------------------------------
 
@@ -743,7 +912,7 @@ function localBehindOf(ctx, mode, local, remote) {
  * the header states. Every path returns a Selection. A local git call that gives no answer is
  * resolver-unavailable at every call site; the fetch has its own outcomes (fetch-failed,
  * timeout, no-remote-branch). An answered call that cannot be used maps by its call site, as
- * the header states. The ancestry check runs only in the pre-PR rule.
+ * the header states. The ancestry check runs only in the no-PR rule.
  *
  * @param {Request} req
  * @param {Context} ctx
@@ -788,8 +957,26 @@ function resolveBase(req, ctx) {
 
 /**
  * @typedef {{ spawn?: SpawnFn, env?: NodeJS.ProcessEnv, cwd?: string, fetchTimeoutMs?: number, platform?: string,
- *   now?: () => number, formatLine?: (r: Selection) => string }} MainDeps  injected by tests only
+ *   now?: () => number, stdin?: Partial<StdinPort>, formatLine?: (r: Selection) => string }} MainDeps  injected by tests only
  */
+
+/**
+ * The selection for parsed arguments. A usage result makes no call and reads nothing. The
+ * argument form never reads standard input. The standard-input form reads the name first, and
+ * a refused read stops here, before any git call.
+ *
+ * @param {ParsedArgs} parsed
+ * @param {MainDeps} deps
+ * @returns {Selection}
+ */
+function selectionFor(parsed, deps) {
+  if (parsed.kind === 'usage') return stopWith('usage');
+  const ctx = makeContext(deps);
+  if (parsed.kind === 'ok') return resolveBase({ mode: parsed.mode, name: parsed.name, cross: parsed.cross }, ctx);
+  const read = readNameFromStdin(ctx);
+  if (read.kind === 'refused') return stopWith(read.reason);
+  return resolveBase({ mode: parsed.mode, name: read.name, cross: parsed.cross }, ctx);
+}
 
 /**
  * @param {readonly string[]} argv  process.argv
@@ -800,10 +987,7 @@ function main(argv, deps) {
   const d = deps || {};
   let line = FALLBACK_LINE;
   try {
-    const parsed = parseArgs(Array.isArray(argv) ? argv.slice(2) : []);
-    const selection = parsed.kind === 'usage'
-      ? stopWith('usage')
-      : resolveBase({ mode: parsed.mode, name: parsed.name, cross: parsed.cross }, makeContext(d));
+    const selection = selectionFor(parseArgs(Array.isArray(argv) ? argv.slice(2) : []), d);
     const compose = typeof d.formatLine === 'function' ? d.formatLine : formatLine;
     const composed = compose(selection);
     if (checkLine(composed)) line = composed;

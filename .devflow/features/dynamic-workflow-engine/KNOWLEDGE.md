@@ -14,10 +14,11 @@ directories:
   - src/assets/commands/_partials/_plan_contract.mds
   - src/assets/commands/_partials/_factory.mds
   - src/assets/commands/_partials/_ticket_template.mds
+  - src/assets/agents/review.mds
   - dist/commands
   - tests/dynamic
 created: 2026-07-07
-updated: 2026-10-13
+updated: 2026-10-21
 ---
 
 # Dynamic Workflow Engine
@@ -27,7 +28,7 @@ updated: 2026-10-13
 - **KB-INV-1** Only the Code family writes code: every implementation, review fix, Gate 2 fix, validation fix and merge-conflict resolution is a Code or Fix spawn whose prompt opens with `OPERATION: <mode>`; Code takes `implement` and `issue-fix`, Fix takes `validation-fix`, `alignment-fix` and `qa-fix`.
 - **KB-INV-2** Gate 1 runs Polish, then Harden, then Validate (last, unconditional), at exactly two points per ticket: after the implement bundle and as the final gate after the review pass. Never inside the pass or after individual fixes; no code merges before it.
 - **KB-INV-3** Gate 2 (one Evaluate agent with two lenses, plus Test) fires once, at implementation acceptance before the review pass. A failure is fix-and-continue, recorded `FAIL-FIXED` and never re-evaluated; a ticket carrying `FAIL-FIXED` reports UNVERIFIED, never PASS.
-- **KB-INV-4** The review pass runs exactly once per ticket over the full branch diff, with no base SHA and no delta re-review. Budget scales roster size and verification votes, never the number of passes.
+- **KB-INV-4** The review pass runs exactly once per ticket over the full branch diff, from the commit the ticket branch was forked from (`BASE_SHA`) to HEAD, with no delta re-review. Budget scales roster size and verification votes, never the number of passes.
 - **KB-INV-5** Findings are adversarially verified (majority survives) before any fix. A chunk is FIXED only when `status === "fixed"`, `commitShas` is non-empty and `unresolved` is empty; otherwise the whole chunk stays in `survivingFindings`.
 - **KB-INV-6** Nothing merges to main or master: all merges target the integration branch and the user merges to main. The workflow never opens a PR except the wave PR (see the waves KB).
 - **KB-INV-7** No unauthorized tracker or remote side-effects: sub-agents create, comment on or push nothing the ticket, plan or user did not authorize, whichever tracker is resolved. Proposed follow-ups go in the run report.
@@ -39,6 +40,7 @@ updated: 2026-10-13
 - **KB-INV-13** A ticket works on the branch its `setup-task` created and reported, verbatim in every phase and the merge. The engine mints no name; a missing branch stops the ticket (`branch-missing`).
 - **KB-INV-14** Only the Validate agent runs the full test suite, once per HEAD; Code runs its affected tests, Polish and Evaluate run no build, test or lint command.
 - **KB-INV-15** Builds and tests run in the foreground under an explicit Bash `timeout`; never background and poll. A prompt names "your Running commands block", never copies it.
+- **KB-INV-16** `BASE_SHA` binds only from the setup spawn's `baseSha` when it is a 40 or 64 lowercase hex value, else `"(none)"`, and `"(none)"` stops the ticket `ESCALATED` `base-missing` before `phase("implement"`. Every Review spawn (focus, retry, panel) carries `DIFF_RANGE: ${BASE_SHA}...HEAD` on its own line.
 - **KB-AP-1** A dead Review agent (null, thrown, guard string or `reviewed !== true`) is a coverage gap that blocks PASS, never a clean pass; `filter(Boolean)` is crash-safety only.
 - **KB-AP-2** One `agent()` call per Review focus, spawned in staggered chunks: never batch focuses into one call or fire the whole roster at once (429 batch death).
 - **KB-AP-3** Never hand one Code agent an unbounded finding list or run two Code agents on the same file at once: group by file, sub-batch, same file sequential.
@@ -46,6 +48,7 @@ updated: 2026-10-13
 - **KB-AP-5** Never re-add `--dry-run` to dynamic-build, dynamic-plan or dynamic-tickets; it belongs to dynamic-profile only.
 - **KB-AP-6** Never reuse the `node --check` scratch path: it is run-unique, `/tmp/df-wf-check-<meta.name>-<epoch-seconds>.js`, and `node --check` catches syntax errors only.
 - **KB-AP-7** Never accept a criterion that is vague, implementation-coupled or untestable, and always include a negative criterion per ticket: Gate 2 has no other source of truth.
+- **KB-AP-8** Never send a diff Review spawn without a usable `DIFF_RANGE`: the Review agent with no `DIFF_FILE` reviews only `{sha}...HEAD`, with `{sha}` 40 or 64 lowercase hex that `git cat-file -t` reports as `commit` and `git diff {DIFF_RANGE}` exiting 0, else it returns `reviewed: false`, which is a dead agent and a coverage gap.
 
 ## Overview
 
@@ -98,8 +101,8 @@ Partials declare no `output-dir:`; hosts declare it as the last frontmatter key 
 Pre-authoring step 0 resolves the evidence policy and authors `issueRequired` and `applyConventions` into the script (only an explicit "false" turns either off; absent or unrecognised fails closed), and step 0b authors `complianceFrameworks` (any value outside the framework-list grammar means no lens). The script derives `COMPLIANCE_DIRECTIVE` from it, empty when the lens is off, and every Code and Fix prompt carries it (no agent takes a compliance input). `meta.phases` is `setup, implement, gate1, gate2, review, gate1-final, report`.
 
 ```
-setup (Git setup-task: branch, issueId, prLinkLine)
-  -> stops, in order: ticket-link-missing, branch-missing
+setup (Git setup-task: branch, issueId, prLinkLine, baseSha)
+  -> stops, in order: ticket-link-missing, branch-missing, base-missing
   -> implement (Code: task + plan + DECISIONS_CONTEXT + COMPLIANCE_DIRECTIVE)
   -> gate1 #1  (Polish -> Harden -> Validate; Validate FAIL -> Fix validation-fix, up to 2, each re-validated)
   -> gate2     (Evaluate + Test, ONCE, before review; fix-and-continue -> FAIL-FIXED)
@@ -108,7 +111,7 @@ setup (Git setup-task: branch, issueId, prLinkLine)
   -> report    (Synthesize)
 ```
 
-**Setup.** `OPERATION: setup-task` returns `branch`, `issueId` and `prLinkLine` under its `Return:` JSON contract. `BRANCH` is `setup.branch` as reported, never a name the workflow synthesizes. `ISSUE_NUMBER` is the Issue ID only when it matches `ISSUE_ID_SHAPE` (a bare number or a KEY-number; anything else, "none" included, is no capture, so the stop fails closed), and `ISSUE_PR_LINK` is `prLinkLine` or `"(none)"`; neither reaches a Code spawn (Code opens no PR), and the link rides only on the ticket's result as `issuePrLink` for the wave PR's related line. Two `ESCALATED` stops sit before implement: `ticket-link-missing` (issues required but no Issue ID captured; the workflow cannot ask, so it never records an exception) then `branch-missing` (the branch is absent or `(none)`; a correctness stop, not a shape gate on the name).
+**Setup.** `OPERATION: setup-task` returns `branch`, `issueId`, `prLinkLine` and `baseSha` (the `git rev-parse HEAD` value taken before the branch step) under its `Return:` JSON contract. `BRANCH` is `setup.branch` as reported, never a name the workflow synthesizes. `ISSUE_NUMBER` is the Issue ID only when it matches `ISSUE_ID_SHAPE` (a bare number or a KEY-number; anything else, "none" included, is no capture, so the stop fails closed), and `ISSUE_PR_LINK` is `prLinkLine` or `"(none)"`; neither reaches a Code spawn (Code opens no PR), and the link rides only on the ticket's result as `issuePrLink` for the wave PR's related line. `BASE_SHA` is `setup.baseSha` only when it matches 40 or 64 lowercase hex, else `"(none)"`; a name, a revision such as `HEAD`, an uppercase or wrong-length value is no base. These `ESCALATED` stops sit before implement, in this order: `ticket-link-missing` (issues required but no Issue ID captured; the workflow cannot ask, so it never records an exception), `branch-missing` (the branch is absent or `(none)`; a correctness stop, not a shape gate on the name), then `base-missing` (`BASE_SHA` is `"(none)"`; every review range starts at that commit, so there is nothing to review from). Each stop returns before the `implement` phase spawns anything.
 
 **Gate 1** is order-load-bearing: Polish, then Harden, then Validate. Harden returns `PASS | FIXED | BLOCKED`; BLOCKED, or a missing or unrecognised status counted as BLOCKED, stops the pass as `harden-blocked` and Validate does not run on code Harden could not accept. Validate runs last and unconditionally, one full run over the HEAD the two left, so it covers their commits whether or not Harden changed code. A FAIL gets up to two Fix `validation-fix` attempts, each followed by a Validate re-run, and the loop carries each recheck's latest failure details into the next attempt (`failureDetails = recheck?.details || failureDetails`) in both Gate 1 #1 and Gate 1 #2; still failing means `validation-exhausted`. Gate 1 holds no Evaluate or Test agent. A Gate 1 #1 escalation returns `ESCALATED` before Gate 2, so Gate 2 and the review pass never run on a broken or unfinished build; a Gate 1 #2 escalation lands in the final result's escalations. Depth scales to change size and budget. Gate 1 runs exactly twice per ticket and never inside the review pass, where fix Code agents self-verify their own builds.
 
@@ -122,7 +125,7 @@ setup (Git setup-task: branch, issueId, prLinkLine)
 
 The pass runs exactly once per ticket; budget scales roster size and verification votes, never pass count.
 
-1. **Scope**: the entire branch diff from the base branch to HEAD. No base SHA is tracked; Review agents compute the merge-base with the default branch at review time. Full branch, no delta scoping.
+1. **Scope**: the entire branch diff, from the commit the ticket branch was forked from to HEAD. The script builds `reviewScope` once, `Review the full branch diff on branch ${BRANCH}.` followed by `DIFF_RANGE: ${BASE_SHA}...HEAD` on its own line, and every Review spawn carries it: each focus spawn, its retry and each verification panel lens (the panel prompt states the same `DIFF_RANGE` line). The Review agent takes `DIFF_RANGE` as information and as the range for any extra git read; with no `DIFF_FILE` it reviews only `{sha}...HEAD`, with `{sha}` 40 or 64 lowercase hex, and returns `reviewed: false` for any other range or none, when `git cat-file -t {sha}` does not print `commit`, or when `git diff {DIFF_RANGE}` exits non-zero. Full branch, no delta scoping. `_engine.mds` states the same source on its one `**Review scope:**` line and lists `base-missing` among the escalation types.
 2. Spawn Review agents in staggered chunks (`chunkSize` in the script; `review_pass()` states the 4-6 band), sequential groups of parallel spawns, to avoid 429 batch death. The full roster is preserved, only paced.
 3. The core focuses always run (security, architecture, performance, complexity, consistency, regression, testing, reliability); focuses for detected file types are added. **The roster is not diff-class gated.** `/dynamic-build` sits outside `/code-review`'s diff-class work: `review_pass()` and the inline script spawn every focus and drop none, with no reduced docs-only, tests-only or lockfile-only set, no language-focus suppression and no diff file or installed-language stamp.
 4. **Dead-Review-agent handling**: a result is dead if null, thrown, a guard string, or `reviewed !== true`. Retry once sequentially; if still dead, record it in `coverageGaps`. Gaps block the PASS verdict downstream and do not block the early exit (which triggers on zero findings alone).
@@ -217,7 +220,11 @@ A criterion is not acceptable if vague ("the feature should work correctly"), im
 
 ### KB-INV-13: the per-ticket branch is whatever setup-task reports
 
-Each ticket's `setup-task` spawn creates the branch and reports it under its `### Branch` block (the `- **Branch name**:` line). The workflow binds `BRANCH` from that value for every later phase and the merge; neither the SINGLE-mode script nor the wave loop names a branch, and no `args.branch` override is read (setup-task's Input takes no requested name). Branching happens off integration HEAD at the moment the ticket becomes ready, not at wave start. When setup-task reports none, the workflow stops the ticket before implementing (`verdict: "ESCALATED"`, `escalations: [{ type: "branch-missing", description: "setup-task reported no branch name - check its Output, then re-run" }]`) rather than guess or fall back to a synthesized name (`tests/dynamic/wave-flow.test.ts` holds the binding and both stops).
+Each ticket's `setup-task` spawn creates the branch and reports it under its `### Branch` block (the `- **Branch name**:` line). The workflow binds `BRANCH` from that value for every later phase and the merge; neither the SINGLE-mode script nor the wave loop names a branch, and no `args.branch` override is read (setup-task's Input takes no requested name). Branching happens off integration HEAD at the moment the ticket becomes ready, not at wave start. When setup-task reports none, the workflow stops the ticket before implementing (`verdict: "ESCALATED"`, `escalations: [{ type: "branch-missing", description: "setup-task reported no branch name - check its Output, then re-run" }]`) rather than guess or fall back to a synthesized name (`tests/dynamic/wave-flow.test.ts` holds the binding and the stops).
+
+### KB-INV-16, KB-AP-8: the review range comes from the setup spawn, and the Review agent re-checks it
+
+The base commit is read once, by the setup spawn, before it creates the branch, and the workflow validates only its shape (40 or 64 lowercase hex). The Review agent validates the rest: the range must be `{sha}...HEAD`, `git cat-file -t` must report a commit and `git diff {DIFF_RANGE}` must exit 0, otherwise it returns `reviewed: false`. A bad range therefore reaches the workflow as a dead Review agent: the retry carries the same `reviewScope`, fails the same way, and the focus lands in `coverageGaps`, which blocks PASS. A Review spawn added without `reviewScope` (or without the `DIFF_RANGE` line) fails the same way for every focus. The rule applies only to a diff review with no `DIFF_FILE`; a review given a patch file is untouched, and `reviewed: false` appears nowhere else in the agent body.
 
 ## Key Files
 
@@ -228,7 +235,8 @@ Each ticket's `setup-task` spawn creates the branch and reports it under its `##
 - `src/assets/commands/_partials/_factory.mds` and `_ticket_template.mds`: the ticket-factory stages and the canonical ticket body.
 - `src/assets/commands/dynamic-build.mds`: the build command with inline SINGLE and WAVE workflow scripts; `dist/commands/dynamic-build.md` is the compiled artifact the suite pins.
 - `src/assets/agents/code.mds`, `fix.mds`, `refactor.mds` (generator hosts importing the shared `_partials/_code.mds`, compiled to `dist/agents/`), `validate.md`, `test.md`: each carries the `## Running commands` block and its `**Gate ownership:**` row.
-- `tests/dynamic/wave-flow.test.ts`: executes the shipped SINGLE script with stub agents (branch binding, both ESCALATED stops, verdict arms).
+- `tests/dynamic/wave-flow.test.ts`: executes the shipped SINGLE script with stub agents (branch binding, the ESCALATED stops including every `BASE_SHA` case the base table holds, verdict arms).
+- `src/assets/agents/review.mds`: the Review agent; its `DIFF_RANGE` input bullet carries the range rule (`reviewed: false` without a usable hex-commit range). `tests/guards/code-review-diff-gating.test.ts` pins that rule's wording and `tests/dynamic/wave-flow.test.ts` pins that every review spawn takes its range from the setup-reported commit and that the prose states the same source.
 - `tests/guards/running-commands-parity.test.ts`, `tests/guards/gate-ownership.test.ts`, `tests/guards/spawn-no-hardcoded-model.test.ts`: the block, the gate rows and the no-`model=` rule.
 
 ## Related
