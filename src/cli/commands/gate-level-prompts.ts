@@ -58,12 +58,14 @@ export const GATE_LEVEL_SELECT_MESSAGE = 'Gate level for this machine';
  * GATE_LEVEL_EFFECT alone. One test pins the exact text of both tables, so a change to
  * either fails it until you check the other table and update the pin; further rows check
  * the clauses the two tables share (the lint pack level, the levels that run fewer review
- * focuses and the levels that skip Polish).
+ * focuses and the levels that skip Polish). The clause that lean skips Harden on a
+ * docs-only diff has no facet row in `tests/gate-level-prompts.test.ts`: the docs guard
+ * checks it at each doc site, against the row in the /implement level reference.
  */
 export const GATE_LEVEL_HINTS: Readonly<Record<GateLevel, string>> = Object.freeze({
   full: 'the most checking: every review focus, the full planning shape and Polish',
   standard: 'fewer review focuses and planning agents, and no Polish in /implement and /resolve (the default)',
-  lean: 'the least checking, and no Polish in /implement and /resolve; /implement also has Validate run the project lint pack',
+  lean: 'the least checking, and no Polish in /implement and /resolve; /implement also has Validate run the project lint pack, and skips Harden on a docs-only diff',
 });
 
 /** Build clack select options for the gate level list, most to least checking. */
