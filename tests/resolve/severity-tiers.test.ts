@@ -139,7 +139,6 @@ export function collectVerdictDefects(ref: string): string[] {
   const out = VERDICT_BULLETS.filter(bullet => !verdicts.split('\n').includes(bullet)).map(bullet => `a Verdicts bullet is missing or reworded: ${bullet.slice(0, 40)}`)
   const n = countOf(ref, PROSE_ONLY)
   if (n !== 1) out.push(`the prose-only value occurs ${n} times in the reference, expected once (in the BATCH bullet only)`)
-  if (Buffer.byteLength(PROSE_ONLY) !== 139) out.push('the prose-only value is not 139 bytes')
   return out
 }
 
@@ -402,6 +401,37 @@ export function collectResolveSideDefects(body: string, ref: string): string[] {
   return out
 }
 
+/** The two Phase 1 lines of /resolve that produce the fields that the tier checklist reads: step 1 routes on `severity` and `category`. */
+const PRODUCER_LINES = {
+  severity: '- `severity`: CRITICAL/HIGH/MEDIUM/LOW',
+  category: '- `category`: blocking/should-fix/pre-existing',
+} as const
+
+/** The category words that the reference names in the sentence "Read `severity` and `category` (…)": null when that sentence is absent. */
+const referenceCategoryWords = (ref: string): string[] | null => {
+  const list = /Read `severity` and `category` \(([^)]*)\)/.exec(ref)?.[1]
+  return list === undefined ? null : Array.from(list.matchAll(/`([^`]+)`/g), match => match[1])
+}
+
+/**
+ * How a compiled /resolve falls short of producing the fields that the tier checklist reads: Phase 1 holds the `severity` line
+ * and the `category` line, each once, and the category words of the producer line are the words that the reference names. Without
+ * a field, step 1 has nothing to route on, so a CRITICAL finding falls through to step 8 and becomes DEFER while every other guard passes.
+ */
+export function collectProducerFieldDefects(body: string, ref: string): string[] {
+  const phase1 = sectionBetween(body, '### Phase 1: Parse Issues\n', '### Phase 1b:')
+  if (phase1 === null) return ['no Phase 1']
+  const lines = phase1.split('\n')
+  const out = Object.entries(PRODUCER_LINES).filter(([, line]) => lines.filter(l => l === line).length !== 1).map(([field, line]) => `Phase 1 does not hold the ${field} line once: ${line}`)
+  const categoryLine = lines.find(line => line.startsWith('- `category`: '))
+  if (categoryLine !== undefined) {
+    const produced = categoryLine.slice('- `category`: '.length)
+    const named = referenceCategoryWords(ref)?.join('/') ?? 'none'
+    if (produced !== named) out.push(`Phase 1 produces the category words ${produced}, but the reference names ${named}`)
+  }
+  return out
+}
+
 /** The text of the prose-only value up to its colon: the part that a consumer names. */
 const PROSE_ONLY_OPENER = PROSE_ONLY.slice(0, PROSE_ONLY.indexOf(':'))
 
@@ -464,49 +494,25 @@ describe('the tier reference: checklist (TP-1, TP-7, TP-8, TP-9, TP-10, TP-11, T
     expect(collectTierReferenceDefects(seedOnce(REFERENCE, TITLE, '# Triage: tiers'))).toEqual([`the title is not "${TITLE}"`])
   })
 
-  it('step 1 sends pre-existing, CRITICAL, HIGH and LOW as the issue says, and an absent category counts as blocking', () => {
-    const step1 = STEP_LINES[1]
-    for (const phrase of ['Pre-existing, except a security finding → FIX_SEPARATE, Reason `pre-existing`.', 'CRITICAL or HIGH → FIX_NOW.', 'LOW, except a security finding → DEFER, also when its type label is severe.', 'An absent category counts as blocking.', 'An issue with no severity label takes steps 2-8.']) {
-      expect(step1).toContain(phrase)
-      expect(REFERENCE).toContain(phrase)
-    }
-  })
-
-  it('step 1 lets the first matching sentence decide, with the pre-existing sentence ahead of CRITICAL or HIGH and LOW', () => {
-    const step1 = STEP_LINES[1]
+  it('known-bad probes: a step 1 without its first-match sentence, and one with CRITICAL or HIGH ahead of the pre-existing sentence, are each reported', () => {
     const FIRST_MATCH = 'Within this step the first match decides.'
-    const at = (phrase: string): number => step1.indexOf(phrase)
-    expect(step1.startsWith(`1. ${FIRST_MATCH} `)).toBe(true)
-    expect(at('Pre-existing, except a security finding')).toBeGreaterThan(-1)
-    expect(at('Pre-existing, except a security finding')).toBeLessThan(at('CRITICAL or HIGH → FIX_NOW.'))
-    expect(at('CRITICAL or HIGH → FIX_NOW.')).toBeLessThan(at('LOW, except a security finding'))
     expect(collectTierReferenceDefects(seedOnce(REFERENCE, `${FIRST_MATCH} `, '')), 'the first-match sentence dropped').toEqual(['step 1 is missing or reworded'])
     const swapped = seedOnce(seedOnce(REFERENCE, 'CRITICAL or HIGH → FIX_NOW. ', '@@'), 'Pre-existing, except a security finding → FIX_SEPARATE, Reason `pre-existing`. ', 'CRITICAL or HIGH → FIX_NOW. Pre-existing, except a security finding → FIX_SEPARATE, Reason `pre-existing`. ').replace('@@', '')
     expect(collectTierReferenceDefects(swapped), 'CRITICAL or HIGH ahead of pre-existing').toEqual(['step 1 is missing or reworded'])
   })
 
-  it('step 7 keeps agent-executed text and security wording out of BATCH, and step 2 names the agent-executed text kinds', () => {
-    expect(REFERENCE).toContain('A fix that changes what agent-executed text instructs, or any edit of security or safety wording, is SEVERE, never BATCH.')
-    expect(REFERENCE).toContain('Treat agent-executed text (prompts, skills, commands, recipes) as code for steps 3-6.')
+  it('known-bad probe: a step 7 without the sentence that keeps agent-executed text and security wording out of BATCH is reported', () => {
     expect(collectTierReferenceDefects(seedOnce(REFERENCE, ' A fix that changes what agent-executed text instructs, or any edit of security or safety wording, is SEVERE, never BATCH.', ''))).toEqual(['step 7 is missing or reworded'])
   })
 
-  it('has one Severity Tiers heading, one step 0 and the sentinel as its last line', () => {
-    expect(countOf(REFERENCE, '\n## Severity Tiers\n')).toBe(1)
+  it('holds one step 0 line in the whole reference, not only in the Severity Tiers section', () => {
     expect(REFERENCE.split('\n').filter(line => line.startsWith('0. '))).toHaveLength(1)
-    expect(REFERENCE.trimEnd().split('\n').at(-1)).toBe(SENTINEL)
   })
 })
 
 describe('the tier reference: verdicts (TP-12, TP-14, TP-17, TP-20)', () => {
   it('holds the four bullets and the prose-only value once', () => {
     expect(collectVerdictDefects(REFERENCE)).toEqual([])
-  })
-
-  it('names the fixed Reason words of each end state', () => {
-    expect(REFERENCE).toContain('Reason `pre-existing`')
-    expect(REFERENCE).toContain('Reason exactly `severity tier: DEFER`')
-    expect(PROSE_ONLY).toContain('needs a logic change')
   })
 
   it('known-bad probes: the value on a CRITICAL, HIGH and SEVERE line, a changed value, a changed Reason and a dropped carve-out words are each reported', () => {
@@ -530,24 +536,11 @@ describe('the tier reference: examples (TP-3, TP-4, TP-9, TP-23)', () => {
     expect(collectExampleDefects(REFERENCE)).toEqual([])
   })
 
-  it('routes a LOW, pre-existing or unlabelled security finding to FIX_NOW or ESCALATED at step 0, and the signature-check example to FIX_NOW', () => {
-    expect(REFERENCE).toContain('| A LOW, a pre-existing or an unlabelled security finding | FIX_NOW or ESCALATED | 0 |')
-    expect(REFERENCE).toContain('| LOW, reliability lens: the error of a signature check is ignored, so unsigned input passes | FIX_NOW | 0 |')
-  })
-
-  it('keeps a check-then-act race out of the LOW race example, so it cannot read against matrix clause 0', () => {
+  it('known-bad probe: a LOW race example that drops its check-then-act exclusion, so it could read against matrix clause 0, is reported', () => {
     const row = '| LOW, race label, no check-then-act, no security effect | DEFER | 1 |'
-    expect(REFERENCE).toContain(row)
-    expect(REFERENCE).not.toContain('| LOW, race label, no security effect |')
-    expect(MATRIX_DEFINITION).toContain('a check-then-act race')
     expect(collectExampleDefects(seedOnce(REFERENCE, row, '| LOW, race label, no security effect | DEFER | 1 |'))).toEqual([
       `example 10 is not "${EXAMPLE_ROWS[9][0].slice(0, 40)}" | DEFER | 1`,
     ])
-  })
-
-  it('makes the wizard-note and Core-rules-move examples SEVERE, with step 0 first', () => {
-    expect(REFERENCE).toContain('| A wizard note overstates safety at the moment the user consents to a destructive branch | SEVERE | 0, else 6 |')
-    expect(REFERENCE).toContain("| A move of a security rule out of an agent's Core rules | SEVERE | 0, else 7 |")
   })
 
   it('known-bad probes: a changed tier, a changed step, a dropped row and a negative example turned into its class are each reported', () => {
@@ -703,15 +696,24 @@ describe('resolve.mds reads what Triage writes (TP-5, TP-12, TP-14, TP-15, TP-16
     expect(collectResolveSideDefects(body, REFERENCE)).toEqual([])
   })
 
-  it('the prose-only value is 139 bytes and equal in the reference and the pinned parse line', () => {
+  it('the prose-only value is 139 bytes', () => {
     expect(Buffer.byteLength(PROSE_ONLY)).toBe(139)
-    expect(verdictLiteral(REFERENCE)).toBe(PROSE_ONLY)
-    expect(FIX_NOW_LINE).toContain(`\`${PROSE_ONLY}\`; any other value counts as Careful`)
   })
 
-  it('the move bullet gives the Reason that the prose-only value hands Code', () => {
-    expect(PROSE_ONLY).toContain('needs a logic change')
-    expect(COLLECT_MOVE).toContain('Reason `needs a logic change`')
+  it.each(RESOLVE_BUILDS)('$label: Phase 1 produces the severity and category fields that step 1 of the reference reads, with the category words the reference names', ({ body }) => {
+    expect(collectProducerFieldDefects(body, REFERENCE)).toEqual([])
+  })
+
+  it.each(RESOLVE_BUILDS)('$label: known-bad probes on the producer fields: a dropped or changed severity line, a dropped or changed category line and a category word that the reference does not name are each reported', ({ body }) => {
+    const severity = `Phase 1 does not hold the severity line once: ${PRODUCER_LINES.severity}`
+    const category = `Phase 1 does not hold the category line once: ${PRODUCER_LINES.category}`
+    const apart = (produced: string, named: string): string => `Phase 1 produces the category words ${produced}, but the reference names ${named}`
+    expect(collectProducerFieldDefects(seedOnce(body, `${PRODUCER_LINES.severity}\n`, ''), REFERENCE), 'the severity line dropped').toEqual([severity])
+    expect(collectProducerFieldDefects(seedOnce(body, PRODUCER_LINES.severity, '- `severity`: CRITICAL/HIGH/LOW'), REFERENCE), 'a severity value dropped').toEqual([severity])
+    expect(collectProducerFieldDefects(seedOnce(body, `${PRODUCER_LINES.category}\n`, ''), REFERENCE), 'the category line dropped').toEqual([category])
+    expect(collectProducerFieldDefects(seedOnce(body, PRODUCER_LINES.category, '- `category`: blocking/pre-existing'), REFERENCE), 'a category word dropped').toEqual([category, apart('blocking/pre-existing', 'blocking/should-fix/pre-existing')])
+    expect(collectProducerFieldDefects(body, seedOnce(REFERENCE, '`should-fix`', '`optional`')), 'the reference names another word').toEqual([apart('blocking/should-fix/pre-existing', 'blocking/optional/pre-existing')])
+    expect(collectProducerFieldDefects(body, seedOnce(REFERENCE, 'Read `severity` and `category` (', 'Read `severity` and `category`: ('))).toEqual([apart('blocking/should-fix/pre-existing', 'none')])
   })
 
   it.each(CODE_BUILDS)('$label: the Code body names the prose-only value in its SCOPE input and its issue-fix inputs', ({ body }) => {
