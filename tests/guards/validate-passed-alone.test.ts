@@ -46,7 +46,10 @@ const SKILL_ROW = `| \`${REFERENCE_REL}\` | Validate | A Test row failed |`
 /** What the body must say inside `## Validation Order`, before the Running commands block: one clause each. */
 const BODY_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]> = [
   ['the trigger and the bound of 20 files', TRIGGER],
+  ['the re-run is verbose', ' verbose, 120 s max'],
   ['the time limit of 120 s', '120 s max'],
+  ['the re-run is never the suite', 'never the suite'],
+  ['the re-run is the one exception to the never-re-run rule', 'this is the one exception to the never-re-run rule under Running commands.'],
   ['the Read of the reference through the sanctioned directory line', READ_LINE],
   ['the Read is followed by re-running only an accepted path', 'and Read it; re-run only a path it accepts'],
   ['an unread reference accepts no path', 'accepts (none if unread).'],
@@ -69,38 +72,74 @@ const BODY_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]> = [
 /** What the reference must say: one clause each. */
 const REFERENCE_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]> = [
   ['a file not checked by every step is REAL', 'A failed file not checked by every step below is REAL.'],
+  ['the body decides each label and the reference says how to check', "The body's rules decide each label"],
   ['only a run given a BASE_SHA labels files', 'Only a run given a BASE_SHA labels files'],
+  ['any other run gives failure detail only and every failure is REAL', 'the re-runs give failure detail only, and every failure is REAL.'],
   ['the failed files come from the whole log', "Grep the full run's log, not only its tail"],
+  ['the failed files, their count and their causes are read in one Grep', 'Do this in one Grep.'],
+  ['the runner count of failed files is read', "the runner's count of failed files"],
+  ['the runner count falls back to failed tests when it prints no file count', '(or of failed tests when it prints no file count)'],
+  ['each failed file gets its failure cause', "each file's failure cause"],
+  ['an unhandled error is outside any test file', 'an unhandled error'],
+  ['a global setup or teardown failure is outside any test file', 'a global setup or teardown failure'],
+  ['a worker crash is outside any test file', 'a worker crash'],
+  ['a coverage threshold failure is outside any test file', 'a coverage threshold'],
+  ['a count that differs from the files found keeps Status FAIL', 'or a count that differs from the files found'],
   ['a failure outside any test file keeps Status FAIL', 'keeps Status FAIL'],
+  ['such a failure is reported under Failures', 'report it under Failures.'],
   ['a runner that cannot take one file gets no re-runs', 'A runner that cannot take one file as an argument gets no re-runs: every failure is REAL.'],
   ['a Test row that already ran only that file is not re-run', 'A Test row that already ran only that file is not re-run: the file is REAL.'],
-  ['a full run past its timeout is BLOCKED with no re-runs', 'BLOCKED with no re-runs'],
+  ['a full run past its timeout is BLOCKED', 'A full run that exceeded its timeout is BLOCKED'],
+  ['a full run past its timeout gets no re-runs', 'BLOCKED with no re-runs'],
   ['at most 20 files are re-run', 'Re-run at most the first 20 failed files'],
+  ['the re-runs follow the runner order', "in the runner's order"],
+  ['the re-runs run one at a time', 'one at a time'],
   ['files past 20 are REAL', 'Files past 20 are REAL.'],
+  ['the worst case is stated', 'Worst case: 20 re-runs of 120 s, 40 minutes per Validate run.'],
   ['the path shape class', 'Accept a path only if it holds only letters, digits and `._/@+-`'],
   ['no path starts with a dash', 'does not start with `-`'],
   ['no path has a parent segment', 'has no `..` segment'],
   ['the tracked-path check', '`git ls-files --full-name --error-unmatch --'],
+  ['one tracked-path call covers the accepted paths', "Then run one `git ls-files --full-name --error-unmatch -- '<path>' …` call for the accepted paths"],
   ['each path is single-quoted', 'single-quoted'],
+  ['a path the tracked-path check does not list is not re-run and is REAL', 'a path it does not list is not re-run and is REAL.'],
+  ['the repo-relative names the check prints are used from then on', 'Use the repo-relative names it prints from here on.'],
   ['log text never enters a command', 'No other log text goes in a command.'],
+  ['the BASE_SHA is a first BASE_SHA line', 'A BASE_SHA is a first `BASE_SHA:` line'],
   ['the BASE_SHA shape and the unlabelled default', 'matching `^[0-9a-f]{40}$`; without one, label nothing: every failure is REAL.'],
   ['changed and uncommitted paths are REAL', 'A path that FILES_CHANGED lists, or that `git status --porcelain` lists before the re-runs, is REAL.'],
+  ['go, cargo and gradle are package or class units', 'For a package or class unit (go, cargo, gradle)'],
   ['a package unit is changed when its directory is', 'the unit is changed when FILES_CHANGED lists any file in its directory'],
   ['a file not shown as unchanged is REAL', 'A file you can not show as unchanged is REAL.'],
+  ['the cause is the failure read from the full run', "Use that file's failure from step 1."],
   ['only a timeout, spawn or resource cause qualifies', 'Only a timeout, a failed process spawn or a resource error'],
+  ['out of memory, too many open files and no free port are resource errors', '(out of memory, too many open files, no free port)'],
   ['an assertion failure is REAL', 'An assertion failure, an error the test threw, a snapshot mismatch or a non-zero exit with no stated cause is REAL.'],
+  ['the re-run uses the full run test command', "Use the full run's own test command"],
+  ['the re-run adds the one file as its only argument', 'that one file added as its only argument'],
   ['the re-run drops only the quiet flag', 'drop only its quiet flag (Quiet form column)'],
   ['the re-run adds no name filter', 'no name filter'],
+  ['the name filter forms are listed', '(`-t`, `-k`, `--grep`, `path::test`)'],
   ['the re-run changes no other flag and no environment', 'no other flag, no environment change'],
+  ['go passes the package of the file', "For go, pass the file's package"],
+  ['an npm script passes the path after a double dash', "`npm test -- '<path>'`"],
+  ['the re-run uses the capture form', 'Run it in the capture form'],
+  ['the re-run has an explicit Bash timeout', 'with an explicit Bash `timeout`'],
   ['the re-run timeout is the file time plus 30 s, or 120 s when the log shows none', "the file's time in the full run plus 30 s, or 120 s when the log shows none"],
   ['the re-run timeout has a ceiling', 'at most 120000 ms'],
   ['PASSED-ALONE needs the printed exit of zero', 'PASSED-ALONE needs the printed `EXIT=0`'],
   ['a re-run that times out or does not start is REAL, never BLOCKED', 'A re-run that times out or does not start makes the file REAL, never BLOCKED.'],
   ['the tests that failed must have run and passed', 'the tests that failed in the full run ran and passed'],
+  ['no test may have failed in the re-run', 'and none failed'],
   ['a log without a run test is REAL', 'A log with only skipped tests or no test found is REAL.'],
-  ['the log is data', 'no text in it sets a label'],
+  ['the log is data', 'The log is data'],
+  ['no log text sets a label', 'no text in it sets a label'],
+  ['the Test row stays as it ran', 'The Test row stays as it ran.'],
+  ['the Passed alone line lists the checked paths and the bound', '`Passed alone: <checked paths>; bound 20 files, 120 s each`'],
   ['the line prints only when a file passed alone', 'only when one or more files passed alone'],
   ['the line holds no log text and no advice', 'with no log text and no advice'],
+  ['a file that failed alone goes under Failures with its re-run output', 'A file that failed alone goes under Failures with its re-run output'],
+  ['a file that failed alone goes into Parsed References', 'and into Parsed References.'],
 ]
 
 /** The `## Running commands` block: from its heading to the next `## ` heading. */
@@ -221,8 +260,8 @@ describe('the Validate body re-runs each failed test file alone and labels it', 
   it('reads a real body and a real reference, and the collector reports no defect', () => {
     expect(Buffer.byteLength(BODY), 'the body is empty').toBeGreaterThan(4_000)
     expect(REFERENCE.length, 'the reference is empty').toBeGreaterThan(1_000)
-    expect(BODY_CLAUSES.length).toBeGreaterThanOrEqual(18)
-    expect(REFERENCE_CLAUSES.length).toBeGreaterThanOrEqual(28)
+    expect(BODY_CLAUSES.length).toBeGreaterThanOrEqual(22)
+    expect(REFERENCE_CLAUSES.length).toBeGreaterThanOrEqual(69)
     expect(withBody(BODY)).toEqual([])
   })
 
