@@ -1429,3 +1429,212 @@ describe('the marker-neutralisation bullet keeps its own indent in every module'
     ).toContain('jira: the containment bullet is absent');
   });
 });
+
+// ---------------------------------------------------------------------------
+// manage-debt item sources
+// ---------------------------------------------------------------------------
+//
+// `manage-debt` adds backlog items only from the two `resolution-summary.md`
+// sections that carry the Triage verdicts FIX_SEPARATE and TECH_DEBT. The rule is
+// authored once, in `manage_debt_contract` in `_ops.mds`, and expands at the top
+// of every provider reference. Each provider keeps its own step 3, so the three
+// step-3 blocks are pinned here as an ALLOWLIST: the lead line plus the two
+// bullets, identical across providers. A deny-list of removed wording would miss
+// the next new source, and an absence check on "review report" would fail on the
+// rule sentence itself.
+
+const MANAGE_DEBT_OPS_SOURCE = 'src/assets/mds/git/_ops.mds';
+const MANAGE_DEBT_STEP_THREE_LEAD = '3. Extract items to add:';
+const MANAGE_DEBT_VERDICTS: readonly string[] = ['FIX_SEPARATE', 'TECH_DEBT'];
+
+/** The step-3 block every provider reference carries: the lead line and the two triaged bullets. */
+const MANAGE_DEBT_STEP_THREE = [
+  MANAGE_DEBT_STEP_THREE_LEAD,
+  '   - `## Fix Separately` entries from `{REVIEW_DIR}/resolution-summary.md` (FIX_SEPARATE from Triage agent)',
+  '   - `## Deferred to Tech Debt` entries from `{REVIEW_DIR}/resolution-summary.md` (TECH_DEBT from Triage agent)',
+].join('\n');
+
+/** The item-source rule, as the shared contract states it and every reference expands it. */
+const MANAGE_DEBT_RULE =
+  'Update tech debt backlog. Add only rows of `## Fix Separately` (FIX_SEPARATE) and ' +
+  '`## Deferred to Tech Debt` (TECH_DEBT) in `{REVIEW_DIR}/resolution-summary.md`; a section ends at ' +
+  'the next heading; a missing file or empty section adds none. Never add an item that also has a row ' +
+  'in `## Escalations`, `## Blocked` or `## Fixed Issues`. Read no review report: in `{REVIEW_DIR}`, ' +
+  'read only `resolution-summary.md`.';
+
+/** One file the item-source collector reads: a compiled reference or a provider source. */
+interface ManageDebtFile {
+  readonly label: string;
+  readonly text: string;
+  readonly kind: 'reference' | 'source';
+}
+
+/**
+ * The lines from the exact step-3 lead line up to, but not including, the first later line that
+ * starts step 4. Null when the lead line is missing.
+ */
+export function stepThree(text: string): string | null {
+  const lines = text.split('\n');
+  const start = lines.indexOf(MANAGE_DEBT_STEP_THREE_LEAD);
+  if (start === -1) return null;
+  const rest = lines.slice(start + 1);
+  const next = rest.findIndex(line => /^4\. /.test(line));
+  return [lines[start], ...(next === -1 ? rest : rest.slice(0, next))].join('\n');
+}
+
+/** Named collector: item-source drift in the compiled references and the provider sources. */
+export function collectManageDebtSourceDrift(files: readonly ManageDebtFile[]): string[] {
+  const drift: string[] = [];
+  const blocks = new Set<string>();
+  for (const { label, text, kind } of files) {
+    const occurrences = text.split(MANAGE_DEBT_RULE).length - 1;
+    if (kind === 'source') {
+      if (occurrences > 0) drift.push(`${label}: a provider source restates the item-source rule`);
+      continue;
+    }
+    const block = stepThree(text);
+    if (block === null) {
+      drift.push(`${label}: step 3 is absent`);
+    } else {
+      blocks.add(block);
+      if (block !== MANAGE_DEBT_STEP_THREE) {
+        drift.push(`${label}: step 3 lists a source other than the two triaged sections`);
+      }
+    }
+    if (occurrences === 0) drift.push(`${label}: the item-source rule is absent`);
+    if (occurrences !== 1) drift.push(`${label}: the item-source rule does not occur exactly once`);
+  }
+  if (blocks.size > 1) drift.push('the step 3 blocks differ across providers');
+  return drift;
+}
+
+/** Named collector: a verdict that the operations row or the contract does not name. */
+export function collectRowVerdictDrift(row: string, contract: string): string[] {
+  const drift: string[] = [];
+  for (const [label, text] of [['row', row], ['contract', contract]] as const) {
+    for (const verdict of MANAGE_DEBT_VERDICTS) {
+      if (!text.includes(verdict)) drift.push(`${label}: names no ${verdict}`);
+    }
+  }
+  return drift;
+}
+
+/** The `manage-debt` line of the Git agent operations table. */
+function manageDebtRow(): string {
+  const row = resolveAgentSource('git').content
+    .split('\n')
+    .find(line => line.startsWith('| `manage-debt` |'));
+  if (row === undefined) {
+    throw new Error('the Git agent has no `manage-debt` row in its operations table');
+  }
+  return row;
+}
+
+/** The `manage_debt_contract` define of the shared operations module, up to its `@end`. */
+function manageDebtContract(): string {
+  const source = readSource(MANAGE_DEBT_OPS_SOURCE);
+  const start = source.indexOf('@define manage_debt_contract():');
+  const end = start === -1 ? -1 : source.indexOf('\n@end', start);
+  if (start === -1 || end === -1) {
+    throw new Error(`${MANAGE_DEBT_OPS_SOURCE} has no closed manage_debt_contract define`);
+  }
+  return source.slice(start, end);
+}
+
+describe('manage-debt item sources', () => {
+  const references: ManageDebtFile[] = PROVIDERS.map(p => ({
+    label: `${p.subdir}/manage-debt.md`,
+    text: readGenerated(`${p.subdir}/manage-debt.md`),
+    kind: 'reference',
+  }));
+  const sources: ManageDebtFile[] = PROVIDERS.map(p => ({
+    label: p.source,
+    text: readSource(p.source),
+    kind: 'source',
+  }));
+
+  it("every provider's manage-debt reference lists exactly the two triaged sections in step 3 and carries the item-source rule once", () => {
+    expect(PROVIDERS.length, 'no registered provider, so the scan below would read nothing').toBeGreaterThan(0);
+    const drift = collectManageDebtSourceDrift(references);
+    expect(
+      drift,
+      `the manage-debt item sources drifted:\n  ${drift.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('no provider source restates the item-source rule', () => {
+    const drift = collectManageDebtSourceDrift(sources);
+    expect(
+      drift,
+      `the rule has one owner, the shared contract:\n  ${drift.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it("the Git agent's manage-debt row and the contract name the same two verdicts", () => {
+    const drift = collectRowVerdictDrift(manageDebtRow(), manageDebtContract());
+    expect(
+      drift,
+      `the row and the contract must each name FIX_SEPARATE and TECH_DEBT:\n  ${drift.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('known-bad probe: each invented drift is reported', () => {
+    const row = manageDebtRow();
+    const contract = manageDebtContract();
+    expect(
+      collectManageDebtSourceDrift([...references, ...sources]),
+      'the collector must be silent on the shipped tree, or the probes below prove nothing',
+    ).toEqual([]);
+    expect(
+      collectRowVerdictDrift(row, contract),
+      'the row collector must be silent on the shipped tree, or the probes below prove nothing',
+    ).toEqual([]);
+
+    const github = references.find(f => f.label.startsWith('tracker/github/'));
+    const jira = references.find(f => f.label.startsWith('tracker/jira/'));
+    const githubSource = sources.find(f => f.label.includes('_github.mds'));
+    if (github === undefined || jira === undefined || githubSource === undefined) {
+      throw new Error('the GitHub or Jira provider is not registered, so a probe has no file to change');
+    }
+    const swap = (file: ManageDebtFile, text: string): ManageDebtFile[] => {
+      expect(text, `the change to ${file.label} was a no-op, so the probe cannot be shown live`).not.toBe(file.text);
+      return references.map(f => (f.label === file.label ? { ...f, text } : f));
+    };
+
+    const invented = '   - Entries from `{REVIEW_DIR}/other.md`';
+    const extraBullet = collectManageDebtSourceDrift(
+      swap(github, github.text.replace(MANAGE_DEBT_STEP_THREE, `${MANAGE_DEBT_STEP_THREE}\n${invented}`)),
+    );
+    expect(extraBullet, 'an invented third bullet must be reported for its provider')
+      .toContain(`${github.label}: step 3 lists a source other than the two triaged sections`);
+    expect(extraBullet, 'an invented third bullet must break identity across providers')
+      .toContain('the step 3 blocks differ across providers');
+
+    expect(
+      collectManageDebtSourceDrift(swap(jira, jira.text.replace(MANAGE_DEBT_RULE, ''))),
+      'a reference without the rule sentence must be reported',
+    ).toContain(`${jira.label}: the item-source rule is absent`);
+
+    expect(
+      collectRowVerdictDrift('| `manage-debt` | Update the backlog |', contract),
+      'a row that names neither verdict must be reported',
+    ).toEqual(['row: names no FIX_SEPARATE', 'row: names no TECH_DEBT']);
+
+    expect(
+      collectRowVerdictDrift(row, contract.split('FIX_SEPARATE').join('')),
+      'a contract without the FIX_SEPARATE name must be reported',
+    ).toEqual(['contract: names no FIX_SEPARATE']);
+
+    expect(
+      collectManageDebtSourceDrift(swap(github, github.text.replace(`${MANAGE_DEBT_STEP_THREE_LEAD}\n`, ''))),
+      'a reference without the step-3 lead line must be reported',
+    ).toContain(`${github.label}: step 3 is absent`);
+
+    expect(
+      collectManageDebtSourceDrift(
+        sources.map(f => (f.label === githubSource.label ? { ...f, text: `${f.text}\n${MANAGE_DEBT_RULE}` } : f)),
+      ),
+      'a provider source that restates the rule must be reported',
+    ).toContain(`${githubSource.label}: a provider source restates the item-source rule`);
+  });
+});

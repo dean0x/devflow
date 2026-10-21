@@ -50,6 +50,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Residual risk: at `standard` and `lean`, nothing checks the one Fix round against the criteria again. Phase 6 Validate and Phase 7 QA cover behaviour. A non-behavioural criterion or the removal of unrequested code has no later check before the PR opens.
   - Known limit: no CI test checks where the level line lands in a spawn prompt at run time.
 
+### Fixed
+
+- **`manage-debt` adds only triaged items to the tech debt backlog** ([#630](https://github.com/dean0x/devflow/issues/630)).
+  - Under GitHub, Linear and Jira, backlog items come only from the `## Fix Separately` and `## Deferred to Tech Debt` sections of `resolution-summary.md`.
+
 ---
 
 ## [3.8.0] - 2026-10-21

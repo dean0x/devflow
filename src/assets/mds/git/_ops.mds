@@ -204,7 +204,7 @@ Each issue in the batch is wrapped individually in its own `<untrusted-issue-bod
 @end
 
 @define manage_debt_contract():
-Update tech debt backlog with deferred issues from resolution and pre-existing issues from code review.
+Update tech debt backlog. Add only rows of `## Fix Separately` (FIX_SEPARATE) and `## Deferred to Tech Debt` (TECH_DEBT) in `{REVIEW_DIR}/resolution-summary.md`; a section ends at the next heading; a missing file or empty section adds none. Never add an item that also has a row in `## Escalations`, `## Blocked` or `## Fixed Issues`. Read no review report: in `{REVIEW_DIR}`, read only `resolution-summary.md`.
 
 **Input:** `REVIEW_DIR`, `TIMESTAMP`, `WORKTREE_PATH` (optional)
 

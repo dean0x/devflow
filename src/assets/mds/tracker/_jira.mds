@@ -180,7 +180,6 @@ Load when the resolved tracker provider is `jira` and the operation is `manage-d
 3. Extract items to add:
    - `## Fix Separately` entries from `{REVIEW_DIR}/resolution-summary.md` (FIX_SEPARATE from Triage agent)
    - `## Deferred to Tech Debt` entries from `{REVIEW_DIR}/resolution-summary.md` (TECH_DEBT from Triage agent)
-   - Pre-existing issues (Category 3) from review reports
 4. Deduplicate against existing items using semantic matching.
 5. Remove items that have been fixed (verify in codebase).
 6. Compose the updated description and post it through the gate in `### Posting gate` below, using the *update description* capability.
