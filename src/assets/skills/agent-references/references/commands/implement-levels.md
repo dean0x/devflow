@@ -12,7 +12,7 @@ At `standard` and `lean`, a row sets its phase at that level. A phase with no ro
 ## Grammar
 
 - **Phase:** `3 Polish`, `4 Self-Review` or `5 Alignment Check`: the number and the text after `### Phase N: ` in the command, without a trailing parenthetical. Any other phase, or a name that does not match its number's heading by this rule, is malformed.
-- **Cell:** `-` runs the phase as written; `skip`, alone, skips it; `apply: <name>` applies the `## Rules` bullet `<name>`; `pass level` adds the line `GATE_LEVEL: {GATE_LEVEL}` to every spawn prompt of the phase. A phase with no spawn takes only `-`. Join `apply:` and `pass level` with `; `. Each `apply:` names exactly one bullet. Any other cell is malformed.
+- **Cell:** `-` runs the phase as written; `skip`, alone, skips it; `apply: <name>` applies the `## Rules` bullet `<name>`; `pass level` puts the line `GATE_LEVEL: {GATE_LEVEL}` first in every spawn prompt of the phase, right after a leading `OPERATION:` line. A phase with no spawn takes only `-`. Join `apply:` and `pass level` with `; `. Each `apply:` names exactly one bullet. Any other cell is malformed.
 - **Rules bullet:** a Rules bullet opens `- **<name>:**`.
 - **Skipped:** a skipped phase does not stop the run, and the next phase starts as written. Each name on its `**Produces:**` line reads `SKIPPED`, and a report shows `SKIPPED`.
 - **Note:** a Rules bullet may set one report note, `<agent>: ran` or `<agent>: SKIPPED (<reason>)`, where `<reason>` is fixed words from that bullet, never a path name or report text. The command shows the note with the level note.

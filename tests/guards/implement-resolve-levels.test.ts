@@ -51,7 +51,7 @@ import { DECIDED_ROWS, LEVELS, LEVEL_CELL_INDEX, OPEN, POLISH_SPAWN, REFS, RULES
 const LEVEL_DIR = 'skills/devflow:agent-references/references/commands'
 const TABLE_HEADER = '| Phase | standard | lean |'
 
-const GRAMMAR_CELL = "- **Cell:** `-` runs the phase as written; `skip`, alone, skips it; `apply: <name>` applies the `## Rules` bullet `<name>`; `pass level` adds the line `GATE_LEVEL: {GATE_LEVEL}` to every spawn prompt of the phase. A phase with no spawn takes only `-`. Join `apply:` and `pass level` with `; `. Each `apply:` names exactly one bullet. Any other cell is malformed."
+const GRAMMAR_CELL = "- **Cell:** `-` runs the phase as written; `skip`, alone, skips it; `apply: <name>` applies the `## Rules` bullet `<name>`; `pass level` puts the line `GATE_LEVEL: {GATE_LEVEL}` first in every spawn prompt of the phase, right after a leading `OPERATION:` line. A phase with no spawn takes only `-`. Join `apply:` and `pass level` with `; `. Each `apply:` names exactly one bullet. Any other cell is malformed."
 const GRAMMAR_RULES_BULLET = '- **Rules bullet:** a Rules bullet opens `- **<name>:**`.'
 const GRAMMAR_SKIPPED = '- **Skipped:** a skipped phase does not stop the run, and the next phase starts as written. Each name on its `**Produces:**` line reads `SKIPPED`, and a report shows `SKIPPED`.'
 const GRAMMAR_NOTE = '- **Note:** a Rules bullet may set one report note, `<agent>: ran` or `<agent>: SKIPPED (<reason>)`, where `<reason>` is fixed words from that bullet, never a path name or report text. The command shows the note with the level note.'
@@ -1509,7 +1509,8 @@ describe('row safety is a tripwire over the references (AC-6)', () => {
     expect(collectRowSafetyDefects(seedOnce(ref, 'without a trailing parenthetical', 'without its parenthetical'), spec, body)).toEqual(['the "## Grammar" text is not the pinned text'])
     expect(collectRowSafetyDefects(seedOnce(ref, 'a table with no rows is well-formed', 'a table with no rows is well formed'), spec, body)).toEqual(['the "## Phases" intro is not the pinned paragraph'])
     expect(collectRowSafetyDefects(seedOnce(ref, 'line reads `SKIPPED`', 'line reads `skipped`'), spec, body), 'the Skipped bullet').toEqual(['the "## Grammar" text is not the pinned text'])
-    expect(collectRowSafetyDefects(seedOnce(ref, 'to every spawn prompt of the phase. A phase with no spawn takes only `-`', "to the phase's spawn prompt"), spec, body), 'the pass level target').toEqual(['the "## Grammar" text is not the pinned text'])
+    expect(collectRowSafetyDefects(seedOnce(ref, 'puts the line `GATE_LEVEL: {GATE_LEVEL}` first in every spawn prompt of the phase, right after a leading `OPERATION:` line.', 'adds the line `GATE_LEVEL: {GATE_LEVEL}` to every spawn prompt of the phase.'), spec, body), 'the old pass level wording').toEqual(['the "## Grammar" text is not the pinned text'])
+    expect(collectRowSafetyDefects(seedOnce(ref, ' first in every spawn prompt of the phase, right after a leading `OPERATION:` line.', ' first in every spawn prompt of the phase.'), spec, body), 'the placement clause').toEqual(['the "## Grammar" text is not the pinned text'])
     expect(collectRowSafetyDefects(seedOnce(ref, RULES_INTRO, `${RULES_INTRO} Extra.`), spec, body)).toEqual(['the "## Rules" section holds text other than the pinned intro and its bullets'])
     expect(collectRowSafetyDefects(withRows(ref, [], ['- **tidy:** Polish the diff.\ncontinued here']), spec, body)).toContain('the "## Rules" section holds text other than the pinned intro and its bullets')
     expect(collectRowSafetyDefects(seedOnce(ref, '## Phases\n', 'Stray text.\n\n## Phases\n'), spec, body)).toContain('the reference holds text between its title and "## Phases"')
