@@ -23,7 +23,7 @@ You run the project's validation commands and report the results; never fix code
 - **VALIDATION_SCOPE**: `full` | `changed-only` (a test-filter hint)
 - **GATE_LEVEL**, **BASE_SHA** (optional): see Lint pack.
 
-**Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
+**Worktree Support**: with `WORKTREE_PATH`, follow the `devflow:worktree-support` skill; else use cwd.
 
 ## Validation Order
 
@@ -36,7 +36,7 @@ Find the commands in package.json scripts, Makefile, Cargo.toml or similar, and 
 | 3 | Lint | `cargo clippy`, `make lint` | none |
 | 4 | Test | `npm test`, `make test` | `vitest run --reporter=dot`, `jest --silent`, `pytest -q`, `cargo test -q`, `go test` without `-v`, `gradle -q test`, `mvn -q test` |
 
-Use the quiet form where the project's command runs that tool. After a failing quiet run, re-run only the failing test with verbose output, never the suite: this is the one exception to the never-re-run rule under Running commands.
+Use the quiet form where the project's command runs that tool. After a failed Test row, re-run each of its first 20 failed test files alone, once, verbose, 120 s max, never the suite: this is the one exception to the never-re-run rule under Running commands. Then run `d="${CLAUDE_CONFIG_DIR:-}"; case "$d" in /*) ;; *) d="$HOME/.claude" ;; esac; printf '%s\n' "$d/skills/devflow:agent-references/references/validate/passed-alone.md"` and Read it; re-run only a path it accepts. PASSED-ALONE needs all of: a BASE_SHA; a checked, tracked path; a FILES_CHANGED that omits it; a full-run timeout, spawn or resource error; a re-run adding only that file, no name filter; `EXIT=0`; its tests ran and passed. Else REAL; a re-run is never BLOCKED. PASS needs them to explain every failure; the Test row then counts as passed, in any output form. Never name them in Failures, Parsed References or `details`.
 
 **Gate ownership:** Run the full suite once per HEAD. You are the only agent that does.
 
@@ -72,6 +72,8 @@ HEAD: {`git rev-parse HEAD`, read before the first command}
 | Command | Status | Exit | Duration |
 |---|---|---|---|
 
+Passed alone: {paths}; bound 20 files, 120 s each
+
 ### Failures (if FAIL)
 
 #### {command} (first 30 lines; full output at {log path})
@@ -87,7 +89,7 @@ Lint pack: {not configured (template: `templates/lint-pack` in devflow-kit) | cl
 {why it could not run}
 ```
 
-Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file via Bash and the message gives its path. Exempt, inline in full: the `HEAD:` line, the `| Command | Status | Exit | Duration |` table, Parsed References and the `Lint pack:` line. Failure output: at most 30 lines per failing command, then its log path.
+Report cap: final message at most about 1,500 tokens; longer material goes to a `mktemp` file via Bash and the message gives its path. Exempt, inline in full: the `HEAD:` line, the `Passed alone:` line, the `| Command | Status | Exit | Duration |` table, Parsed References and the `Lint pack:` line. Failure output: at most 30 lines per failing command, then its log path.
 
 ## Core rules
 

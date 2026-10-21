@@ -1,12 +1,12 @@
 /**
- * D-VALIDATE-QUIET-FORM (#427): the Validate agent prefers a tool's quiet output form, and only the
- * failing test is re-run verbosely.
+ * D-VALIDATE-QUIET-FORM (#427): the Validate agent prefers a tool's quiet output form, and re-runs
+ * each failed test file alone, verbosely.
  *
  * A passing run's log is read by nobody, and a failing one is read through `tail`, so the quiet form
  * of a build, typecheck or test command saves the output tokens without losing the verdict. The
  * "Validation Order" table in `validate.md` gains a Quiet form column, and one sentence after it
- * states the fallback: after a failing quiet run, re-run only the failing test with verbose output,
- * never the suite. That sentence is the stated exception to the never-re-run rule in the shared
+ * states the per-file re-run rule: after a failed Test row, re-run each of its first 20 failed test
+ * files alone, once, verbose, never the suite. That sentence is the stated exception to the never-re-run rule in the shared
  * `## Running commands` block, so it sits outside the block, which this change leaves byte-identical
  * in the Code, Fix, Refactor, Validate and Test agents (`tests/guards/running-commands-parity.test.ts` owns the
  * bytes; the arm here asserts the quiet form never entered it).
@@ -23,7 +23,7 @@ import * as path from 'path'
 import { ROOT, collectUnfencedH2, resolveAgentSource } from '../helpers.js'
 
 const BLOCK_HEADING = '## Running commands'
-const FALLBACK = "After a failing quiet run, re-run only the failing test with verbose output, never the suite: this is the one exception to the never-re-run rule under Running commands."
+const FALLBACK = "After a failed Test row, re-run each of its first 20 failed test files alone, once, verbose, 120 s max, never the suite: this is the one exception to the never-re-run rule under Running commands."
 
 /** The Validation Order table, row by row, as trimmed cells. */
 export function tableRows(body: string): string[][] {
@@ -79,12 +79,12 @@ export function collectBlockIntrusions(body: string): string[] {
   const out: string[] = []
   if (/Quiet form/.test(block)) out.push('the block names the Quiet form column')
   if (block.split('\n').some(l => l.startsWith('|'))) out.push('the block carries a table row')
-  if (/failing quiet run/.test(block)) out.push('the block carries the fallback sentence')
+  if (/failed Test row/.test(block)) out.push('the block carries the fallback sentence')
   return out
 }
 
 describe('the Validation Order table has a Quiet form column and a fallback sentence (D-VALIDATE-QUIET-FORM)', () => {
-  it('validate.md lists the quiet forms, a Lint row of none, and the one-failing-test fallback before the block', () => {
+  it('validate.md lists the quiet forms, a Lint row of none, and the per-file re-run rule before the block', () => {
     const body = resolveAgentSource('validate').content
     expect(body.length, 'nothing read').toBeGreaterThan(3000)
     expect(collectTableDefects(body)).toEqual([])
