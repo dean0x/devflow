@@ -16,7 +16,7 @@
  * probe. Every reader reads BUILT artifacts.
  */
 
-import { describe, it, expect, afterAll } from 'vitest'
+import { describe, it, expect, afterAll, beforeAll } from 'vitest'
 import { createRequire } from 'module'
 import * as fs from 'fs'
 import { readFileSync } from 'fs'
@@ -24,8 +24,8 @@ import * as path from 'path'
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
 import { extractOpSectionFromCorpus, gitOperationReferenceCorpus, prHostRel } from '../helpers.js'
-import { cleanShimRoots, runScript, SHIM_HEAD, type ScriptRun, type ShimScenario } from './pr-shim.js'
-import { PR_EVIDENCE_SCRIPT, VERIFY_EVIDENCE_SCRIPT } from './seam.js'
+import { cleanShimRoots, runScript, SHIM_HEAD, warmGhShim, type ScriptRun, type ShimScenario } from './pr-shim.js'
+import { PR_EVIDENCE_SCRIPT, SUBPROCESS_TIMEOUT_MS, VERIFY_EVIDENCE_SCRIPT } from './seam.js'
 
 interface ReadinessBlock {
   pr: number
@@ -57,6 +57,7 @@ const OP = 'check-merge-readiness'
 const SPAWN_BUDGET = { timeout: 120_000 } as const
 const EM = '—'
 
+beforeAll(warmGhShim, SUBPROCESS_TIMEOUT_MS)
 afterAll(cleanShimRoots)
 
 // ---------------------------------------------------------------------------

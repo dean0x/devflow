@@ -89,7 +89,7 @@ A pipeline's exit status swallows a scrubber crash (fail-open). Chain with `&&` 
 | `associate-release` | Add shipped issues to the release marker (never replace) |
 | `ensure-traceable-issue` | Create or enrich a tracker issue from the D3 template (D5) |
 | `post-wave-report` | Post wave completion summary as a tracking-issue comment (marker-deduped) |
-| `update-pr-evidence` | Test-plan block + SHA-keyed evidence comment (append-only) |
+| `update-pr-evidence` | Test-plan block + evidence comment (edited in place) |
 
 **Decision Marker Legend:**
 
