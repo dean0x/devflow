@@ -123,11 +123,13 @@ const DEADLINE_MS = 90000;
 /**
  * D-PUBLISH-BOUNDS: `publish` runs `verify` under the deadline above, then its writes
  * under a deadline of their own and a gh budget of their own. The writes are at most
- * seven calls: two body reads (the compare-and-swap), a body edit and one retry, one
- * read-back, a comment and one retry. A scrub is bounded by its own timeout, not by
- * the deadline, so one that starts just before the writes' deadline can end up to
- * REDACT_TIMEOUT_MS after it. The worst case is 90 s + 60 s + 20 s; the caller's
- * 180 s Bash timeout covers it with room for node's startup.
+ * eight calls: two body reads (the compare-and-swap), a body edit and one retry, one
+ * read-back, then the comment. A new comment is a post and one retry (seven in all).
+ * An edit of the viewer's own comment is the edit, one retry and one read of the
+ * comment (eight in all). A scrub is bounded by its own timeout, not by the deadline,
+ * so one that starts just before the writes' deadline can end up to REDACT_TIMEOUT_MS
+ * after it. The worst case is 90 s + 60 s + 20 s; the caller's 180 s Bash timeout
+ * covers it with room for node's startup.
  */
 const PUBLISH_DEADLINE_MS = 60000;
 const PUBLISH_GH_CALLS = 8;
@@ -151,6 +153,8 @@ const PR_VIEW_MAX_BUFFER = 64 * 1024 * 1024;
 const RUN_LIST_MAX_BUFFER = 1024 * 1024;
 const RUN_VIEW_MAX_BUFFER = 65536;
 const LINE_MAX_BUFFER = 4096;
+/** A comment read back as a JSON string: 65,536 characters, each escaped to six, fit. */
+const COMMENT_READ_MAX_BUFFER = 8 * 65536;
 /** `gh pr checks` and the thread-count GraphQL answer: a thousand rows of names fit. */
 const READINESS_MAX_BUFFER = 4 * 1024 * 1024;
 const READINESS_MAX_CHECKS = 1000;
@@ -173,6 +177,14 @@ const PR_FIELDS = 'body,comments,reviews,author,headRefOid,baseRefOid,isCrossRep
 const PR_RE = /^[1-9][0-9]{0,9}$/;
 const SHA40_RE = /^[0-9a-f]{40}$/;
 
+/**
+ * A pull-request comment's url, anchored: the pull number, then the numeric id in the
+ * fragment. The host is not pinned (GitHub Enterprise Server hosts work). There is no
+ * `m` flag, so `$` is the end of the string and a trailing newline is refused.
+ */
+const COMMENT_URL_RE = /^https:\/\/[^/\s?#]+\/[^/\s?#]+\/[^/\s?#]+\/pull\/([1-9][0-9]{0,9})#issuecomment-([1-9][0-9]{0,19})$/;
+/** A comment id as a string of digits: up to 20, so an id beyond 2^53 stays exact. */
+const COMMENT_ID_RE = /^[1-9][0-9]{0,19}$/;
 /** A review state that decides a login's position on the PR (D6). */
 const DECISIVE_REVIEW_STATES = new Set(['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED']);
 
@@ -215,7 +227,8 @@ const USAGE = [
  *   summary, never input bytes. `ghCap` replaces CAPS.GH_CALLS for a stage that
  *   carries a budget of its own (`publish`'s writes).
  *
- * @typedef {{ login: string, association: string, body: string, viewerDidAuthor: boolean }} PrComment
+ * @typedef {{ login: string, association: string, body: string, viewerDidAuthor: boolean, commentId: string }} PrComment
+ *   `commentId` is the comment's numeric id as digits, or '' when its url did not parse.
  * @typedef {{ login: string, association: string, state: string }} PrReview
  * @typedef {{ number: number, head: string, base: string, body: string, author: string,
  *   isCrossRepository: boolean | undefined, comments: readonly PrComment[],
@@ -625,6 +638,19 @@ function loginArg(login) {
   return login;
 }
 
+/**
+ * Assert a comment id before it reaches gh's argv (an API path segment):
+ * COMMENT_ID_RE, so no `/`, `..`, `?` or option can ride on PR data. commentIdOf
+ * only ever yields such ids; this is that precondition held at the sink.
+ *
+ * @param {string} id
+ * @returns {string}
+ */
+function commentIdArg(id) {
+  if (typeof id !== 'string' || !COMMENT_ID_RE.test(id)) throw new Error('verify-evidence: unchecked comment id');
+  return id;
+}
+
 // ---------------------------------------------------------------------------
 // The PR (one gh pr view)
 // ---------------------------------------------------------------------------
@@ -644,6 +670,21 @@ function obj(v) {
 function loginOf(author) {
   const login = obj(author).login;
   return typeof login === 'string' && login.length <= 100 ? login : '';
+}
+
+/**
+ * The numeric id of a PR comment, read from its url, as the digits themselves:
+ * never Number(), so an id beyond 2^53 stays exact. '' unless the url is a bounded
+ * string of the anchored pull-comment form AND names the PR that was read.
+ *
+ * @param {unknown} url
+ * @param {number} pr
+ * @returns {string}
+ */
+function commentIdOf(url, pr) {
+  if (typeof url !== 'string' || url.length > MAX_URL_CHARS) return '';
+  const m = COMMENT_URL_RE.exec(url);
+  return m !== null && m[1] === String(pr) ? m[2] : '';
 }
 
 /**
@@ -671,6 +712,7 @@ function parsePrJson(json, pr) {
       association: typeof x.authorAssociation === 'string' ? x.authorAssociation : '',
       body: typeof x.body === 'string' ? x.body : '',
       viewerDidAuthor: x.viewerDidAuthor === true,
+      commentId: commentIdOf(x.url, pr),
     });
   });
   const reviews = o.reviews.slice(-CAPS.REVIEWS).map(r => {
@@ -749,6 +791,38 @@ function viewerLogin(pr) {
  */
 function markerComments(pr) {
   return pr.comments.filter(c => PE.MARKERS.EVIDENCE_RE.test(firstLine(c.body))).reverse();
+}
+
+/**
+ * @typedef {{ id: string, marker: string, editable: boolean }} EditTarget
+ *   `id` is the comment's id ('' when unreadable); `marker` is its first line;
+ *   `editable` is false when a later comment from another login is itself an
+ *   evidence marker.
+ */
+
+/**
+ * The comment a publish would edit in place: the viewer's NEWEST comment whose first
+ * line starts with the evidence head prefix, whatever its key. "The viewer's" is the
+ * server-asserted `viewerDidAuthor` flag, so only an own comment is ever a target
+ * (never another login's comment, such as a maintainer's or a bot's). A malformed own
+ * comment (the prefix alone) is a valid target, so an edit repairs it.
+ *
+ * `editable` guards the trust order: verify trusts the newest evidence comment by
+ * list position, and an edit keeps its old position, so editing is safe only when
+ * no strict marker comment from another login comes after the target. A later
+ * prefix-only comment from another login is not a record and does not block. The
+ * strict trust functions (markerComments, resolveTrust, findTrustedRecord) stay as
+ * they are.
+ *
+ * @param {{ comments: readonly PrComment[] }} pr  chronological, newest last
+ * @returns {EditTarget | null}
+ */
+function editTarget(pr) {
+  const at = pr.comments.findLastIndex(c => c.viewerDidAuthor && firstLine(c.body).startsWith(PE.MARKERS.EVIDENCE_HEAD_PREFIX));
+  if (at === -1) return null;
+  const c = pr.comments[at];
+  const editable = !pr.comments.slice(at + 1).some(x => !x.viewerDidAuthor && PE.MARKERS.EVIDENCE_RE.test(firstLine(x.body)));
+  return Object.freeze({ id: c.commentId, marker: firstLine(c.body), editable });
 }
 
 /**
@@ -1437,22 +1511,24 @@ function bodyUpdate(io, plan, ev, body) {
 
 /**
  * The comment (D-VERIFY-PUBLICATION) and whether it is already posted: only the
- * viewer's own comment whose first line is this exact marker (head and key)
- * counts, so a spoofed marker never suppresses a post. `off`, or nothing to
- * record, is no comment (`n/a`). Null when it fails to render.
+ * viewer's own NEWEST evidence comment (the edit target) whose first line is this
+ * exact marker (head and key) counts, so a spoofed marker never suppresses a post
+ * and an older exact match behind a newer own comment of another key reads `no`
+ * (the newer one is what a publish edits). `off`, or nothing to record, is no
+ * comment (`n/a`). Null when it fails to render.
  *
  * @param {{ tps: readonly any[] }} plan
  * @param {any} ev
  * @param {'full' | 'off' | 'stub'} mode
- * @param {PrFacts} pr
+ * @param {EditTarget | null} target
  * @returns {{ text: string, posted: 'yes' | 'no' | 'n/a' } | null}
  */
-function commentUpdate(plan, ev, mode, pr) {
+function commentUpdate(plan, ev, mode, target) {
   if (mode === 'off' || (ev.records.length === 0 && ev.exceptions.length === 0)) return { text: '', posted: 'n/a' };
   const rendered = PE.render(plan, ev, mode);
   if (!rendered.ok) return null;
   const marker = firstLine(rendered.value.text);
-  const posted = pr.comments.some(c => c.viewerDidAuthor && firstLine(c.body) === marker) ? 'yes' : 'no';
+  const posted = target !== null && target.marker === marker ? 'yes' : 'no';
   return { text: rendered.value.text, posted };
 }
 
@@ -1492,24 +1568,43 @@ function writeOutputs(args, body, blockText, commentText, staleText) {
 }
 
 /**
+ * @typedef {{ outcome: Outcome, target: EditTarget | null }} VerifyPass
+ *   The verify result and the viewer's edit target from the same PR snapshot (null on
+ *   every refusal). The target stays in memory: it never reaches stdout, a flag or a file.
+ */
+
+/**
+ * @param {Io} io
+ * @param {number} code
+ * @param {string} reason  a fixed phrase from this file, never input bytes
+ * @returns {VerifyPass}
+ */
+function refusedPass(io, code, reason) {
+  return { outcome: refuse(io, code, reason), target: null };
+}
+
+/**
+ * One verify pass: the Outcome the `verify` subcommand prints, and the edit target
+ * the same snapshot gave. `posted` in the EVIDENCE line is taken from that target.
+ *
  * @param {Io} io
  * @param {Extract<ParsedArgs, { kind: 'verify' }>} args
  * @param {MainDeps} deps
- * @returns {Outcome}
+ * @returns {VerifyPass}
  */
-function runVerify(io, args, deps) {
+function verifyPass(io, args, deps) {
   // Inputs first: an unusable evidence file or state directory decides before any call.
   /** @type {EvidenceInput | null} */
   let evidence = null;
   if (args.evidence !== null) {
     evidence = loadEvidence(args.evidence);
-    if (evidence === null) return refuse(io, EXIT_CODES.INPUT_UNUSABLE, 'evidence file unusable');
+    if (evidence === null) return refusedPass(io, EXIT_CODES.INPUT_UNUSABLE, 'evidence file unusable');
     if (evidence.malformed > 0) io.notes.add('malformed-claims');
   }
-  if (args.state !== null && !isRealDirectory(args.state)) return refuse(io, EXIT_CODES.INPUT_UNUSABLE, 'state directory unusable');
+  if (args.state !== null && !isRealDirectory(args.state)) return refusedPass(io, EXIT_CODES.INPUT_UNUSABLE, 'state directory unusable');
 
   const pr = parsePrJson(prView(io, args.pr, PR_FIELDS), args.pr);
-  if (pr === null) return refuse(io, EXIT_CODES.REMOTE_FAILURE, 'the PR could not be read');
+  if (pr === null) return refusedPass(io, EXIT_CODES.REMOTE_FAILURE, 'the PR could not be read');
 
   const trust = resolveTrust(io, pr, args.approval);
   const record = findTrustedRecord(pr, trust);
@@ -1520,12 +1615,12 @@ function runVerify(io, args, deps) {
   // trusted record's.
   const fromFile = evidence !== null && evidence.plan !== null;
   const plan = fromFile ? /** @type {any} */ (evidence).plan : bodyPlan(pr.body);
-  if (plan === null) return refuse(io, EXIT_CODES.INPUT_UNUSABLE, 'the PR body test-plan block cannot serve as the plan');
+  if (plan === null) return refusedPass(io, EXIT_CODES.INPUT_UNUSABLE, 'the PR body test-plan block cannot serve as the plan');
   if (!fromFile && !coversRecord(plan, record)) {
-    return refuse(io, EXIT_CODES.INPUT_UNUSABLE, 'the PR body test-plan block drops a TP the trusted record carries');
+    return refusedPass(io, EXIT_CODES.INPUT_UNUSABLE, 'the PR body test-plan block drops a TP the trusted record carries');
   }
   const inputs = tpInputs(plan, evidence, record, fromFile);
-  if (inputs === null) return refuse(io, EXIT_CODES.OUTPUT_GATE_REFUSED, 'a TP line failed its grammar');
+  if (inputs === null) return refusedPass(io, EXIT_CODES.OUTPUT_GATE_REFUSED, 'a TP line failed its grammar');
 
   const repo = prepareRepo(io, pr);
   /** @type {RunMemo} */
@@ -1539,7 +1634,7 @@ function runVerify(io, args, deps) {
     : record.kind === 'record' ? record.exceptions : [];
   const key = PE.dedupeKey({ records, exceptions }, sha256);
   const tally = PE.tally(records.map(r => r.state));
-  if (!key.ok || !tally.ok) return refuse(io, EXIT_CODES.OUTPUT_GATE_REFUSED, 'the records failed their grammar');
+  if (!key.ok || !tally.ok) return refusedPass(io, EXIT_CODES.OUTPUT_GATE_REFUSED, 'the records failed their grammar');
 
   const mode = publicationMode(args.publication);
   const ev = {
@@ -1550,8 +1645,9 @@ function runVerify(io, args, deps) {
     exceptions,
   };
   const body = bodyUpdate(io, plan, ev, pr.body);
-  const comment = commentUpdate(plan, ev, mode, pr);
-  if (body === null || comment === null) return refuse(io, EXIT_CODES.OUTPUT_GATE_REFUSED, 'the block or the comment failed to render');
+  const target = editTarget(pr);
+  const comment = commentUpdate(plan, ev, mode, target);
+  if (body === null || comment === null) return refusedPass(io, EXIT_CODES.OUTPUT_GATE_REFUSED, 'the block or the comment failed to render');
 
   const line = gateEvidenceLine(deps, {
     pr: pr.number,
@@ -1565,12 +1661,22 @@ function runVerify(io, args, deps) {
     posted: comment.posted,
     body: body.changed ? 'changed' : 'same',
   }, plan.tps.length);
-  if (line === null) return refuse(io, EXIT_CODES.OUTPUT_GATE_REFUSED, 'the EVIDENCE line failed its gate');
+  if (line === null) return refusedPass(io, EXIT_CODES.OUTPUT_GATE_REFUSED, 'the EVIDENCE line failed its gate');
 
   if (!writeOutputs(args, pr.body, body.blockText, comment.text, staleOutText(inputs, records))) {
-    return refuse(io, EXIT_CODES.WRITE_FAILED, 'an output file could not be written');
+    return refusedPass(io, EXIT_CODES.WRITE_FAILED, 'an output file could not be written');
   }
-  return { code: EXIT_CODES.OK, stdout: line + '\n' };
+  return { outcome: { code: EXIT_CODES.OK, stdout: line + '\n' }, target };
+}
+
+/**
+ * @param {Io} io
+ * @param {Extract<ParsedArgs, { kind: 'verify' }>} args
+ * @param {MainDeps} deps
+ * @returns {Outcome}
+ */
+function runVerify(io, args, deps) {
+  return verifyPass(io, args, deps).outcome;
 }
 
 /**
@@ -1755,7 +1861,7 @@ const EVIDENCE_UNAVAILABLE_LINE = 'TRACEABILITY: DEGRADED (evidence unavailable)
  */
 
 const BODY_STATUSES = Object.freeze(['EDITED', 'UNCHANGED', 'SKIPPED']);
-const COMMENT_STATUSES = Object.freeze(['POSTED', 'SKIPPED', 'OFF']);
+const COMMENT_STATUSES = Object.freeze(['POSTED', 'SKIPPED', 'OFF', 'EDITED']);
 
 /**
  * @param {string} status
@@ -1901,6 +2007,18 @@ function ghWrite(io, args) {
 }
 
 /**
+ * The DEGRADED part for a gh write that failed: the 5xx phrase after a server error,
+ * else the phrase of the failed step. It runs no gh call.
+ *
+ * @param {{ ok: boolean, serverError: boolean }} result  what ghWrite returned
+ * @param {string} reason  a fixed phrase from this file
+ * @returns {Part}
+ */
+function writeFailedPart(result, reason) {
+  return degradedPart(result.serverError ? '5xx on update-pr-evidence' : reason);
+}
+
+/**
  * The context for the writes: a gh budget and a deadline of their own, the same
  * notes. The throttle flag carries over, so a rate limit that verify hit stops the
  * writes too.
@@ -1938,38 +2056,77 @@ function publishBody(io, pr, fields, files) {
   if (outcome === 'conflict') return okPart('SKIPPED');
   if (outcome !== 'ok' && outcome !== 'resplice') return degradedPart('splice ' + outcome);
   const edit = ghWrite(io, ['pr', 'edit', String(pr), '--body-file', files.body]);
-  if (!edit.ok) return degradedPart(edit.serverError ? '5xx on update-pr-evidence' : 'gh pr edit failed');
+  if (!edit.ok) return writeFailedPart(edit, 'gh pr edit failed');
   const back = runReadback(io, { kind: 'readback', pr, expect: files.body });
   return back.code === EXIT_CODES.OK && back.stdout === 'READBACK ok\n' ? okPart('EDITED') : degradedPart('body read-back mismatch');
 }
 
 /**
- * The comment half: the append-only evidence comment, scrubbed (D11) and re-measured
- * after the scrub, posted once. An already-posted comment is never touched.
+ * Whether the comment just edited now reads back as the scrubbed text: one GET of it
+ * as a JSON string, compared after one trailing newline is normalised on each side.
+ * The edit itself runs silent, so this is the only read of the comment. Any failure
+ * to read or parse is "no". Neither the comment nor gh's stderr is printed.
+ *
+ * @param {Io} io  the write-stage context
+ * @param {string} id  a comment id commentIdOf produced
+ * @param {string} expected  the scrubbed comment text (never the unscrubbed file)
+ * @returns {boolean}
+ */
+function commentReadsBack(io, id, expected) {
+  const r = gh(io, ['api', 'repos/{owner}/{repo}/issues/comments/' + commentIdArg(id), '--jq', '.body | @json'], COMMENT_READ_MAX_BUFFER);
+  if (!r.ok) return false;
+  try {
+    const body = JSON.parse(stripOneNewline(r.stdout.toString('utf8')));
+    return typeof body === 'string' && stripOneNewline(body) === stripOneNewline(expected);
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * The comment half: the evidence comment, scrubbed (D11) and re-measured after the
+ * scrub. When the viewer's own evidence comment is a safe target (no strict marker
+ * from another login follows it), that comment is edited in place (one PATCH of the
+ * scrubbed file) and read back against it. Otherwise a new comment is posted once.
+ * A comment that already carries this head and key is skipped. An own target with no
+ * readable id is DEGRADED before the scrub, with no write. A failed edit or
+ * read-back is a DEGRADED result and never falls back to a post. Nothing is deleted.
  *
  * @param {Io} io  the write-stage context
  * @param {number} pr
  * @param {{ posted: string }} fields  the EVIDENCE line's fields
  * @param {{ commentRaw: string, comment: string }} files
+ * @param {EditTarget | null} target  the viewer's newest evidence comment in the snapshot
+ *   verify read, or null when there is none
  * @returns {Part}
  */
-function publishComment(io, pr, fields, files) {
+function publishComment(io, pr, fields, files, target) {
   if (fields.posted === 'yes') return okPart('SKIPPED');
   if (fields.posted === 'n/a') return okPart('OFF');
+  const edit = target !== null && target.editable;
+  if (edit && target.id === '') return degradedPart('comment id unreadable');
   if (!scrub(io, files.commentRaw, files.comment)) return degradedPart('redaction unavailable');
   const text = readTextFile(files.comment);
   if (text === null || text === '') return degradedPart('redaction unavailable');
   if (text.length > COMMENT_POST_MAX_CHARS) return degradedPart('comment over size cap');
+  if (edit) {
+    const patch = ghWrite(io, ['api', '--method', 'PATCH',
+      'repos/{owner}/{repo}/issues/comments/' + commentIdArg(target.id),
+      '-F', 'body=@' + files.comment, '--silent']);
+    if (!patch.ok) return writeFailedPart(patch, 'comment edit failed');
+    return commentReadsBack(io, target.id, text) ? okPart('EDITED') : degradedPart('comment read-back mismatch');
+  }
   const post = ghWrite(io, ['pr', 'comment', String(pr), '--body-file', files.comment]);
-  if (post.ok) return okPart('POSTED');
-  return degradedPart(post.serverError ? '5xx on update-pr-evidence' : 'gh pr comment failed');
+  return post.ok ? okPart('POSTED') : writeFailedPart(post, 'gh pr comment failed');
 }
 
 /**
  * The whole update-pr-evidence operation, in the order the operation always had:
  * verify; only on `body:changed` scrub, splice, `gh pr edit`, read back; only on
- * `posted:no` scrub and `gh pr comment`. The work files live in one private directory
- * this call makes and removes.
+ * `posted:no` scrub, then edit the viewer's own evidence comment in place and read it
+ * back, or post a new one when there is none to edit or a newer evidence comment from
+ * another login follows it. The work files live in one private directory this call
+ * makes and removes.
  *
  * @param {Io} io
  * @param {Extract<ParsedArgs, { kind: 'publish' }>} args
@@ -2000,18 +2157,18 @@ function runPublish(io, args, deps) {
       commentRaw: file('comment.raw'),
       comment: file('comment'),
     };
-    const verified = runVerify(io, {
+    const verified = verifyPass(io, {
       kind: 'verify', pr: args.pr, publication: args.publication, evidence: args.evidence, state,
       blockOut: files.notesRaw, commentOut: files.commentRaw, staleOut: null, approval: false,
     }, deps);
-    if (verified.code !== EXIT_CODES.OK) return evidenceUnavailable(io, 'verify did not answer');
-    const line = stripOneNewline(verified.stdout);
+    if (verified.outcome.code !== EXIT_CODES.OK) return evidenceUnavailable(io, 'verify did not answer');
+    const line = stripOneNewline(verified.outcome.stdout);
     const parsed = PE.parseEvidenceLine(line);
     if (!parsed.ok || parsed.value.pr !== args.pr) return evidenceUnavailable(io, 'verify answered something else');
 
     const stage = writeStageIo(io);
     const body = publishBody(stage, args.pr, parsed.value, files);
-    const comment = publishComment(stage, args.pr, parsed.value, files);
+    const comment = publishComment(stage, args.pr, parsed.value, files, verified.target);
     return { code: EXIT_CODES.OK, stdout: renderPublishBlock(line, body, comment) };
   } finally {
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* the OS clears its temp directory */ }
@@ -2536,4 +2693,6 @@ module.exports = Object.freeze({
   parsePublishBlock,
   renderReadinessBlock,
   parseReadinessBlock,
+  commentIdOf,
+  editTarget,
 });

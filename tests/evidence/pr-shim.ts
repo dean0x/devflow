@@ -5,9 +5,12 @@
  * (update-pr-evidence) and `readiness` (check-merge-readiness). It is a helper, not
  * a suite, so the suites that use it never import one another.
  *
- * The fake is a node script placed first on PATH. It keeps one PR in a JSON state
- * file, so a write (`pr edit`, `pr comment`) changes what the next read (`pr view`)
- * answers, and it logs every invocation with the bytes of any `--body-file` at the
+ * The fake is a node script placed first on PATH. One copy serves every run of a test
+ * file: it sits in a shared bin directory, made on first use, warmed by `warmGhShim`
+ * and removed by `cleanShimRoots`. Each run keeps its own state and log files, which
+ * the fake finds through `GH_SHIM_STATE` and `GH_SHIM_LOG`. The state holds one PR as
+ * JSON, so a write (`pr edit`, `pr comment`) changes what the next read (`pr view`)
+ * answers, and the log has every invocation with the bytes of any `--body-file` at the
  * moment gh was called — the script deletes its work files when it exits. An argv it
  * does not script exits 97, so a script that invents a call fails in the log instead
  * of being fed a plausible answer.
@@ -19,6 +22,20 @@
  *   editStores what `pr edit` stores instead of the file it was given (a read-back
  *              that differs)
  *   noPr       every `pr view` answers "Could not resolve to a PullRequest"
+ *   heads      the head each `pr view` that asks for `headRefOid` answers, in order; the
+ *              last one repeats (a push between two runs). A read of `body` alone takes none
+ *   commentEditStores  what a comment edit (`api --method PATCH`) stores instead of the
+ *              file it was given (a comment read-back that differs)
+ *   commentEditTrimsNewline  the comment edit stores the file with one trailing newline cut
+ *   commentReadBack  the exact stdout the comment read-back answers instead of the stored
+ *              body as a JSON string (an answer that does not parse, or is not a string)
+ *
+ * Comments carry a pull-comment `url` (`.../pull/7#issuecomment-<n>`, n from 1001 in the
+ * order they are seeded and posted) unless a scenario seeds one, `''` included. The comment
+ * edit and its read-back are scripted for one argv shape each, as are the GraphQL thread
+ * count and the repository `html_url` (`https://github.com/o/r`); any other `api` argv exits 97.
+ * An edit answers with a JSON body of at least 8 KiB unless it runs `--silent`, so a write
+ * buffer that is too small shows. `pr comment`, `pr edit` and the comment edit are the writes.
  */
 
 import { spawnSync } from 'child_process'
@@ -27,11 +44,13 @@ import * as os from 'os'
 import * as path from 'path'
 
 import { scopedEnv } from '../evidence-policy/scripted-shim.js'
-import { VERIFY_EVIDENCE_SCRIPT } from './seam.js'
+import { SUBPROCESS_TIMEOUT_MS, VERIFY_EVIDENCE_SCRIPT } from './seam.js'
 
 export const SHIM_HEAD = 'c'.repeat(40)
 export const SHIM_BASE = 'b'.repeat(40)
 export const SHIM_PR = 7
+/** The url prefix of every comment the fake seeds or posts; the id follows `issuecomment-`. */
+export const COMMENT_URL = 'https://github.com/o/r/pull/7#issuecomment-'
 
 export interface ShimFailure {
   /** An argv prefix, e.g. ['pr', 'edit']. */
@@ -46,6 +65,8 @@ export interface ShimComment {
   readonly authorAssociation: string
   readonly body: string
   readonly viewerDidAuthor: boolean
+  /** Absent gets the next pull-comment url; an own value (`''` too) is kept as given. */
+  readonly url?: string
 }
 
 export interface ShimScenario {
@@ -54,6 +75,10 @@ export interface ShimScenario {
   readonly comments?: readonly ShimComment[]
   readonly failures?: readonly ShimFailure[]
   readonly editStores?: string
+  readonly commentEditStores?: string
+  readonly commentEditTrimsNewline?: boolean
+  readonly commentReadBack?: string
+  readonly heads?: readonly string[]
   readonly noPr?: boolean
   /** `reviewDecision` answer: a string, or null for "no rule asks for a review". */
   readonly reviewDecision?: string | null
@@ -87,6 +112,7 @@ const SHIM_SOURCE = String.raw`#!/usr/bin/env node
 'use strict'
 const fs = require('fs')
 const args = process.argv.slice(2)
+if (args[0] === '--warm') process.exit(0)
 const statePath = process.env.GH_SHIM_STATE
 const logPath = process.env.GH_SHIM_LOG
 const state = JSON.parse(fs.readFileSync(statePath, 'utf8'))
@@ -94,6 +120,16 @@ const save = () => fs.writeFileSync(statePath, JSON.stringify(state))
 const log = extra => fs.appendFileSync(logPath, JSON.stringify(Object.assign({ args }, extra || {})) + '\n')
 const out = value => { process.stdout.write(typeof value === 'string' ? value : JSON.stringify(value)) }
 const stop = (stderr, code) => { process.stderr.write(stderr); process.exit(code === undefined ? 1 : code) }
+const COMMENT_URL = ${JSON.stringify(COMMENT_URL)}
+const COMMENT_PATH_RE = /^repos\/\{owner\}\/\{repo\}\/issues\/comments\/([0-9]+)$/
+const commentById = id => state.pr.comments.find(c => typeof c.url === 'string' && c.url.endsWith('#issuecomment-' + id))
+const unscripted = () => { log({ unscripted: true }); stop('gh shim: unscripted argv\n', 97) }
+const isCommentPatchArgv = () => {
+  // gh api --method PATCH repos/{owner}/{repo}/issues/comments/<id> -F body=@<file> [--silent]
+  const rest = args.slice(4)
+  return args[2] === 'PATCH' && COMMENT_PATH_RE.test(args[3] || '') && rest[0] === '-F' && /^body=@.+/.test(rest[1] || '') &&
+    (rest.length === 2 || (rest.length === 3 && rest[2] === '--silent'))
+}
 const bodyFile = () => { const i = args.indexOf('--body-file'); return i === -1 ? undefined : fs.readFileSync(args[i + 1], 'utf8') }
 
 for (const f of state.failures || []) {
@@ -118,6 +154,12 @@ if (a === 'pr' && b === 'view') {
     if (state.bodies && state.bodies[i] !== undefined) body = state.bodies[i]
     save()
   }
+  if (fields.includes('headRefOid') && state.heads && state.heads.length > 0) {
+    const h = state.headReads || 0
+    state.headReads = h + 1
+    pr.headRefOid = state.heads[Math.min(h, state.heads.length - 1)]
+    save()
+  }
   const all = {
     number: pr.number, headRefOid: pr.headRefOid, baseRefOid: pr.baseRefOid, body,
     author: { login: pr.author }, comments: pr.comments, reviews: pr.reviews,
@@ -138,7 +180,9 @@ if (a === 'pr' && b === 'edit') {
 if (a === 'pr' && b === 'comment') {
   const file = bodyFile()
   log({ file })
-  state.pr.comments.push({ author: { login: state.viewer }, authorAssociation: 'OWNER', body: file, viewerDidAuthor: true })
+  const id = state.nextCommentId
+  state.nextCommentId = id + 1
+  state.pr.comments.push({ author: { login: state.viewer }, authorAssociation: 'OWNER', body: file, viewerDidAuthor: true, url: COMMENT_URL + id })
   save()
   process.exit(0)
 }
@@ -154,20 +198,92 @@ if (a === 'api' && b === 'graphql') {
   out({ data: { repository: { pullRequest: { reviewThreads: state.threads } } } })
   process.exit(0)
 }
-log({ unscripted: true })
-stop('gh shim: unscripted argv\n', 97)
+if (a === 'api' && b === '--method') {
+  if (!isCommentPatchArgv()) unscripted()
+  const rest = args.slice(4)
+  const id = COMMENT_PATH_RE.exec(args[3])[1]
+  const file = fs.readFileSync(rest[1].slice(6), 'utf8')
+  log({ file })
+  const target = commentById(id)
+  if (target === undefined) stop('gh: Not Found (HTTP 404)\n')
+  const stored = state.commentEditStores !== undefined ? state.commentEditStores : file
+  target.body = state.commentEditTrimsNewline ? stored.replace(/\r?\n$/, '') : stored
+  save()
+  if (rest.length === 2) out({ id, body: target.body, padding: 'x'.repeat(8192) })
+  process.exit(0)
+}
+if (a === 'api' && COMMENT_PATH_RE.test(b || '')) {
+  // gh api repos/{owner}/{repo}/issues/comments/<id> --jq '.body | @json'
+  if (!(args.length === 4 && args[2] === '--jq' && args[3] === '.body | @json')) unscripted()
+  log()
+  const target = commentById(COMMENT_PATH_RE.exec(b)[1])
+  if (target === undefined) stop('gh: Not Found (HTTP 404)\n')
+  out(state.commentReadBack !== undefined ? state.commentReadBack : JSON.stringify(target.body) + '\n')
+  process.exit(0)
+}
+if (a === 'api' && b === 'repos/{owner}/{repo}') {
+  if (!(args.length === 4 && args[2] === '--jq' && args[3] === '.html_url')) unscripted()
+  log()
+  out('https://github.com/o/r\n')
+  process.exit(0)
+}
+unscripted()
 `
 
-/** Build the fake under `root` for one scenario. `root` is owned by the test. */
+/** Every directory this file made: the scenario roots and the shared bin root. */
+const roots: string[] = []
+let sharedBinDir: string | undefined
+
+/**
+ * The directory holding the one `gh` fake of this test file. It is written on first use and
+ * never again: on macOS the first exec of a new executable can stall after a fork-heavy run,
+ * so a fake per run would pay that stall per run.
+ */
+function sharedShimDir(): string {
+  if (sharedBinDir === undefined) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-shim-bin-'))
+    roots.push(root)
+    const dir = path.join(root, 'bin')
+    fs.mkdirSync(dir)
+    fs.writeFileSync(path.join(dir, 'gh'), SHIM_SOURCE, { mode: 0o755 })
+    sharedBinDir = dir
+  }
+  return sharedBinDir
+}
+
+/**
+ * Pay the first-exec cost of the fake and of `node` once, up front. Call it from the suite's
+ * beforeAll, with the subprocess timeout as the hook's.
+ */
+export function warmGhShim(): void {
+  const dir = sharedShimDir()
+  const home = path.dirname(dir)
+  const launch = (file: string, args: readonly string[]): void => {
+    spawnSync(file, [...args], { cwd: home, env: scopedEnv(home), stdio: 'ignore', timeout: SUBPROCESS_TIMEOUT_MS })
+  }
+  launch(process.execPath, ['--version'])
+  launch(path.join(dir, 'gh'), ['--warm'])
+}
+
+/** Remove every scenario root and the shared bin this file made. Call it from the suite's afterAll. */
+export function cleanShimRoots(): void {
+  for (const r of roots.splice(0)) fs.rmSync(r, { recursive: true, force: true })
+  sharedBinDir = undefined
+}
+
+/**
+ * Build one scenario's state and log under `root`, which the test owns, and point at the
+ * shared fake. Nothing a run writes is shared with another run.
+ */
 export function createGhShim(root: string, scenario: ShimScenario = {}): GhShim {
-  const dir = path.join(root, 'bin')
-  fs.mkdirSync(dir, { recursive: true })
-  const bin = path.join(dir, 'gh')
-  fs.writeFileSync(bin, SHIM_SOURCE, { mode: 0o755 })
+  const dir = sharedShimDir()
   const statePath = path.join(root, 'gh-state.json')
   const logPath = path.join(root, 'gh-calls.jsonl')
   fs.writeFileSync(logPath, '')
   const viewer = scenario.viewer ?? 'devflow-bot'
+  let nextCommentId = 1001
+  const comments = (scenario.comments ?? []).map(c =>
+    c.url !== undefined ? { ...c } : { ...c, url: `${COMMENT_URL}${nextCommentId++}` })
   const state = {
     pr: {
       number: SHIM_PR,
@@ -175,12 +291,18 @@ export function createGhShim(root: string, scenario: ShimScenario = {}): GhShim 
       baseRefOid: SHIM_BASE,
       body: scenario.body ?? 'Adds the thing.\n\n## Summary\nA summary.\n',
       author: scenario.author ?? 'alice',
-      comments: [...(scenario.comments ?? [])],
+      comments,
       reviews: [...(scenario.reviews ?? [])],
     },
     bodies: scenario.bodies,
     failures: scenario.failures?.map(f => ({ ...f })),
     editStores: scenario.editStores,
+    commentEditStores: scenario.commentEditStores,
+    commentEditTrimsNewline: scenario.commentEditTrimsNewline,
+    commentReadBack: scenario.commentReadBack,
+    heads: scenario.heads,
+    headReads: 0,
+    nextCommentId,
     noPr: scenario.noPr ?? false,
     reviewDecision: scenario.reviewDecision,
     checks: scenario.checks,
@@ -205,8 +327,11 @@ export function createGhShim(root: string, scenario: ShimScenario = {}): GhShim 
 const SCRIPTS_COPIED = ['verify-evidence.cjs', 'pr-evidence.cjs', 'ci-wait.cjs'] as const
 const SCRIPTS_SOURCE = path.dirname(VERIFY_EVIDENCE_SCRIPT)
 
-/** `half` is a scrubber that writes its output and then exits 1 — a crash after the copy. */
-export type Redact = 'real' | 'fails' | 'half' | 'missing'
+/**
+ * `half` is a scrubber that writes its output and then exits 1 — a crash after the copy.
+ * `grow` copies its input, appends 70,000 characters and exits 0 — redaction that grew the text.
+ */
+export type Redact = 'real' | 'fails' | 'half' | 'grow' | 'missing'
 
 export interface RunOptions {
   readonly scenario?: ShimScenario
@@ -225,24 +350,23 @@ export interface ScriptRun {
   readonly stderr: string
   /** The gh calls this run made. */
   readonly calls: readonly ShimCall[]
-  /** The gh writes among them: `pr edit` and `pr comment`. */
+  /** The gh writes among them: `pr edit`, `pr comment` and the comment edit (`api --method`). */
   readonly writes: readonly ShimCall[]
   /** What is left in the run's TMPDIR afterwards. */
   readonly leftovers: readonly string[]
-  readonly pr: { body: string; comments: Array<{ body: string }> }
+  readonly pr: { body: string; comments: Array<{ body: string; url?: string }> }
 }
 
-const roots: string[] = []
-
-/** Remove every scenario root this file made. Call it from the suite's afterAll. */
-export function cleanShimRoots(): void {
-  for (const r of roots.splice(0)) fs.rmSync(r, { recursive: true, force: true })
+/** The gh calls that change the PR: `pr edit`, `pr comment` and the comment edit (`api --method`). */
+const isWrite = (call: ShimCall): boolean => {
+  const [a, b] = call.args
+  return (a === 'pr' && (b === 'edit' || b === 'comment')) || (a === 'api' && b === '--method')
 }
 
 /**
  * Lay out one scenario under a fresh root — a copy of the scripts beside a scrubber
- * of the chosen kind, a working directory, the gh fake first on PATH, an own TMPDIR —
- * and run the script `runs` times over the same fake PR.
+ * of the chosen kind, a working directory, the shared gh fake first on PATH with a state
+ * and log of its own, an own TMPDIR — and run the script `runs` times over the same fake PR.
  */
 export function runScript(options: RunOptions, runs = 1): ScriptRun[] {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-script-test-'))
@@ -261,6 +385,9 @@ export function runScript(options: RunOptions, runs = 1): ScriptRun[] {
   if (redact === 'real') fs.copyFileSync(path.join(SCRIPTS_SOURCE, 'redact-secrets.cjs'), scrubber)
   if (redact === 'fails') fs.writeFileSync(scrubber, 'process.exitCode = 1\n')
   if (redact === 'half') fs.writeFileSync(scrubber, "require('fs').copyFileSync(process.argv[2], process.argv[3])\nprocess.exitCode = 1\n")
+  if (redact === 'grow') {
+    fs.writeFileSync(scrubber, "const fs = require('fs')\nfs.writeFileSync(process.argv[3], fs.readFileSync(process.argv[2], 'utf8') + 'x'.repeat(70000))\n")
+  }
   for (const [rel, content] of Object.entries(options.files ?? {})) fs.writeFileSync(path.join(work, rel), content)
 
   const shim = createGhShim(root, options.scenario)
@@ -279,7 +406,7 @@ export function runScript(options: RunOptions, runs = 1): ScriptRun[] {
       stdout: r.stdout,
       stderr: r.stderr,
       calls,
-      writes: calls.filter(c => c.args[0] === 'pr' && (c.args[1] === 'edit' || c.args[1] === 'comment')),
+      writes: calls.filter(isWrite),
       leftovers: fs.readdirSync(tmp),
       pr: shim.state().pr,
     })

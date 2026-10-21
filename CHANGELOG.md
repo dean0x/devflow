@@ -50,6 +50,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Residual risk: at `standard` and `lean`, nothing checks the one Fix round against the criteria again. Phase 6 Validate and Phase 7 QA cover behaviour. A non-behavioural criterion or the removal of unrequested code has no later check before the PR opens.
   - Known limit: no CI test checks where the level line lands in a spawn prompt at run time.
 
+### Fixed
+
+- **The evidence comment is edited in place** ([#504](https://github.com/dean0x/devflow/issues/504)).
+  - A PR keeps one evidence comment across pushes.
+    `update-pr-evidence` edits your own evidence comment in place for each new head.
+  - It posts a new comment only when you have none, or when an evidence comment from another user is newer.
+  - After the edit, it reads the comment back and prints `**Comment**: EDITED`.
+    If the text read back differs or cannot be read, it prints `TRACEABILITY: DEGRADED (comment read-back mismatch)`.
+  - A refused edit prints `DEGRADED (comment edit failed)`.
+    An own comment with no readable id prints `DEGRADED (comment id unreadable)`.
+    A failed edit never falls back to a new post.
+
 ---
 
 ## [3.8.0] - 2026-10-21
