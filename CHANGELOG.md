@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Upgrade notes — Severity tiers by level
 
 **What changes:**
-- At `standard`, the default, and at `lean`, `/resolve` no longer fixes every finding that the matrix sends to FIX_NOW. Triage sorts each kept item into a severity tier. `full` is unchanged.
+- At `standard`, the default, and at `lean`, `/resolve` no longer fixes every finding that the matrix sends to FIX_NOW. Triage sorts each kept item into a severity tier. `full` keeps today's triage and fixes. At every level, each issue cell in `resolution-summary.md` starts with its severity in brackets.
   - CRITICAL, HIGH and severe MEDIUM findings in the branch's own code stay FIX_NOW.
   - A prose-only MEDIUM finding is fixed with text edits alone. If Code must change logic to fix it, Code leaves it unedited and the item goes to Fix Separately.
   - Lower MEDIUM and LOW findings go to Fix Separately. One backlog issue records them.
@@ -38,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Triage judges a security finding by its label and also by the defect that it reads in the code, at every severity. A security control that fails open or is weakened, and a false security or safety claim, count as security at every severity.
   - A prose-only fix goes to Code `issue-fix` with the Risk Tier `Standard, prose only`. No new agent is spawned. If Code leaves an item unedited for a logic change, `/resolve` records it as Fix Separately with the Reason `needs a logic change`.
   - A DEFER item goes to Fix Separately with the Reason `severity tier: DEFER`. The manage-debt step puts the items of one run in one shared backlog issue.
-  - Each issue cell in `resolution-summary.md` starts with its severity in brackets when the issue has one, for example `[HIGH]`. The `**Gate level**` header can carry a level note.
+  - At every level, each issue cell in `resolution-summary.md` starts with its severity in brackets when the issue has one, for example `[HIGH]`. The `**Gate level**` header can carry a level note.
   - The gate level hints, the effect text of `devflow gates`, `README.md`, `docs/cli-reference.md` and `docs/commands.md` name the tiers.
   - Residual risk: the tiers rest on the Triage classification, and no live test checks it. The guards pin the text that the agents read. A finding that Triage ranks too low waits in the backlog issue until a later review brings it back.
 - **The level references state that a waiting phase starts at once** ([#600](https://github.com/dean0x/devflow/issues/600)).
