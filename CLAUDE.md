@@ -59,6 +59,7 @@ Invariants:
 41. `tracker --set` changes only the machine default.
 42. The Tracker agent claims first, then writes its conventions file once or not at all, scrub-gated.
 43. The manifest keeps the curation switch in `curation` and `learning`. Every write sets both. False wins.
+44. When git tracks the curation or memory folder, or does not answer, that feature reads and writes no file there.
 
 Descriptions of these rules: `docs/reference/architecture.md`. The rules here bind; the doc explains them.
 
@@ -76,8 +77,6 @@ vim src/assets/rules/security.md            # Rules
 
 # 2. Build
 # Skills, rules, and hand-authored agents: no build step — edits take effect on next install
-# Commands (.mds sources) → dist/commands/; agent generator hosts (.mds) → dist/agents/;
-# reference modules (src/assets/mds/**.mds) → dist/skills/git/references/
 npm run build:mds
 # Full build (TypeScript + MDS):
 npm run build
