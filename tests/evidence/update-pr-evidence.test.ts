@@ -30,7 +30,7 @@ import * as path from 'path'
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
 import { extractOpSectionFromCorpus, gitOperationReferenceCorpus, prHostRel } from '../helpers.js'
-import { cleanShimRoots, runScript, SHIM_HEAD, SHIM_PR, type Redact, type ScriptRun, type ShimCall, type ShimScenario } from './pr-shim.js'
+import { cleanShimRoots, runScript, SHIM_HEAD, SHIM_PR, type Redact, type ScriptRun, type ShimCall, type ShimComment, type ShimScenario } from './pr-shim.js'
 import { PR_EVIDENCE_SCRIPT, VERIFY_EVIDENCE_SCRIPT, CI_WAIT_SCRIPT } from './seam.js'
 
 interface EvidenceFields {
@@ -445,6 +445,11 @@ describe('AC-5: the contract opens the reference, and its statuses are the scrip
     expect(collectContractDefects(section)).toEqual([])
   })
 
+  it('the comment statuses are POSTED, SKIPPED, OFF and EDITED, and the contract line lists them in that order', () => {
+    expect(VE.COMMENT_STATUSES).toEqual(['POSTED', 'SKIPPED', 'OFF', 'EDITED'])
+    expect(section).toContain('**Comment**: POSTED | SKIPPED | OFF | EDITED | DEGRADED ({reason})')
+  })
+
   it('known-bad probe: an Input the design keeps out, a status nothing prints and a status the contract lacks are reported', () => {
     const seeded = section
       .replace(INPUT_LINE, `${INPUT_LINE}, \`PR_EXCEPTIONS\``)
@@ -500,6 +505,43 @@ function runOnce(options: RunOptions = {}): ScriptRun {
 const verbs = (calls: readonly ShimCall[]): string[] => calls.map(c => c.args.slice(0, 2).join(' '))
 const STATUS_RE = /^\*\*Body\*\*: (.+) · \*\*Comment\*\*: (.+)$/m
 
+const MARKER_OPEN = String(PE.MARKERS.EVIDENCE_OPEN)
+const STRICT_MARKER = PE.MARKERS.EVIDENCE_RE as RegExp
+const H1 = 'a'.repeat(40)
+const H2 = 'd'.repeat(40)
+const [KEY_A, KEY_B, KEY_C] = ['a', 'b', 'c'].map(ch => ch.repeat(12))
+const markerLine = (head: string, key: string): string => `${MARKER_OPEN} head:${head} key:${key} -->`
+/** A comment of the viewer (the login the fake posts as). */
+const ownComment = (body: string, over: Partial<ShimComment> = {}): ShimComment =>
+  ({ author: { login: 'devflow-bot' }, authorAssociation: 'OWNER', body, viewerDidAuthor: true, ...over })
+/** A comment of another login. The association is NONE, so the script makes no permission lookup for it. */
+const foreignComment = (body: string, over: Partial<ShimComment> = {}): ShimComment =>
+  ({ author: { login: 'mallory' }, authorAssociation: 'NONE', body, viewerDidAuthor: false, ...over })
+/** An evidence comment of the viewer from an earlier head, with a key the current plan never has. */
+const olderOwn = (head = SHIM_HEAD, key = KEY_A): ShimComment => ownComment(`${markerLine(head, key)}\nOlder evidence text.\n`)
+
+const patchCalls = (calls: readonly ShimCall[]): ShimCall[] => calls.filter(c => c.args[0] === 'api' && c.args[1] === '--method')
+const readBackCalls = (calls: readonly ShimCall[]): ShimCall[] => calls.filter(c => c.args[0] === 'api' && c.args.includes('.body | @json'))
+const commentPart = (r: ScriptRun): PartLike | undefined => VE.parsePublishBlock(r.stdout)?.comment
+const commentBodies = (r: ScriptRun): string[] => r.pr.comments.map(c => c.body)
+const firstLineOf = (text: string): string => text.split('\n')[0]
+const PATCH_PATH = (id: string): string => `repos/{owner}/{repo}/issues/comments/${id}`
+
+const BODY_GATE = "if (!scrub(io, files.notesRaw, files.notes)) return degradedPart('redaction unavailable');"
+const COMMENT_GATE = "if (!scrub(io, files.commentRaw, files.comment)) return degradedPart('redaction unavailable');"
+
+/**
+ * A known-bad probe for the run: both scrub gates cut. The call stays and only its exit-code gate goes,
+ * so the scrubber's output file exists, as it does after a real crash.
+ */
+function cutGates(source: string): string {
+  expect(source, 'both gate lines must exist to be cut').toContain(BODY_GATE)
+  expect(source).toContain(COMMENT_GATE)
+  return source
+    .replace(BODY_GATE, 'scrub(io, files.notesRaw, files.notes);')
+    .replace(COMMENT_GATE, 'scrub(io, files.commentRaw, files.comment);')
+}
+
 describe('AC-203: publish prints the exact block, scrubs before it posts, and writes only behind a good scrub', () => {
   it('1. a plan with nothing posted yet: the block is edited in, read back, and the comment is posted', SPAWN_BUDGET, () => {
     const r = runOnce()
@@ -548,6 +590,12 @@ describe('AC-203: publish prints the exact block, scrubs before it posts, and wr
     expect(block?.body.status).toBe('EDITED')
     expect(block?.comment.status).toBe('OFF')
     expect(verbs(r.writes)).toEqual(['pr edit'])
+
+    const own = olderOwn()
+    const withOwn = runOnce({ scenario: { comments: [own] }, args: ['publish', '--pr', '7', '--evidence', 'evidence.md', '--publication', 'off'] })
+    expect(commentPart(withOwn)?.status, withOwn.stdout).toBe('OFF')
+    expect(verbs(withOwn.writes), 'off writes no comment, edit or post').toEqual(['pr edit'])
+    expect(commentBodies(withOwn)).toEqual([own.body])
   })
 
   it('5. a body edited under the run is a concurrent edit: SKIPPED, no edit, a TRACEABILITY line, the comment still posts', SPAWN_BUDGET, () => {
@@ -571,6 +619,12 @@ describe('AC-203: publish prints the exact block, scrubs before it posts, and wr
     expect(r.stdout.match(/TRACEABILITY: DEGRADED \(redaction unavailable\)/g)).toHaveLength(1)
     expect(r.pr.body, 'the PR is untouched').toBe('Adds the thing.\n\n## Summary\nA summary.\n')
     expect(r.pr.comments).toEqual([])
+
+    const own = olderOwn()
+    const edit = runOnce({ redact: 'fails', scenario: { comments: [own] } })
+    expect(commentPart(edit)).toEqual({ status: 'DEGRADED', reason: 'redaction unavailable' })
+    expect(edit.writes, 'no edit after a failed scrub either').toEqual([])
+    expect(commentBodies(edit)).toEqual([own.body])
   })
 
   it('7. a scrubber that is not there is the same: no gh write', SPAWN_BUDGET, () => {
@@ -664,20 +718,238 @@ describe('AC-203: publish prints the exact block, scrubs before it posts, and wr
     expect(held.writes, 'the output file exists, but the exit code decides').toEqual([])
     expect(VE.parsePublishBlock(held.stdout)?.comment.reason).toBe('redaction unavailable')
 
-    const bodyGate = "if (!scrub(io, files.notesRaw, files.notes)) return degradedPart('redaction unavailable');"
-    const commentGate = "if (!scrub(io, files.commentRaw, files.comment)) return degradedPart('redaction unavailable');"
-    const cut = runOnce({
-      redact: 'half',
-      mutate: source => {
-        expect(source, 'both gate lines must exist to be cut').toContain(bodyGate)
-        expect(source).toContain(commentGate)
-        // The call stays and only its exit-code gate goes: the scrubber's output file exists, as it does after a real crash.
-        return source
-          .replace(bodyGate, 'scrub(io, files.notesRaw, files.notes);')
-          .replace(commentGate, 'scrub(io, files.commentRaw, files.comment);')
+    const cut = runOnce({ redact: 'half', mutate: cutGates })
+    expect(verbs(cut.writes), 'with the gates cut the half-scrubbed files ARE posted: the guard above can go red').toEqual(['pr edit', 'pr comment'])
+  })
+
+  it('16b. the same with an evidence comment of the viewer: a half-scrubbed comment is not edited in; cut the gates and it is', SPAWN_BUDGET, () => {
+    const own = olderOwn()
+    const held = runOnce({ redact: 'half', scenario: { comments: [own] } })
+    expect(held.code, held.stderr).toBe(0)
+    expect(held.writes, 'the output file exists, but the exit code decides').toEqual([])
+    expect(commentPart(held)?.reason).toBe('redaction unavailable')
+    expect(commentBodies(held)).toEqual([own.body])
+
+    const cut = runOnce({ redact: 'half', scenario: { comments: [own] }, mutate: cutGates })
+    expect(verbs(cut.writes), 'with the gates cut the half-scrubbed comment IS edited in: the guard above can go red').toEqual(['pr edit', 'api --method'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 4b. The viewer's own evidence comment is edited in place, never doubled
+// ---------------------------------------------------------------------------
+
+/** The marker a publish of the default plan prints at the shim's head — learned from one run, then kept. */
+let learnedMarker: string | undefined
+function currentMarker(): string {
+  learnedMarker ??= firstLineOf(runOnce().pr.comments[0].body)
+  return learnedMarker
+}
+
+describe('the viewer\'s own evidence comment is edited in place, never doubled', () => {
+  it('17. a second head edits the one comment (same id, no new post); the same head again writes nothing', SPAWN_BUDGET, () => {
+    const [first, second, third] = runPublish({ scenario: { heads: [H1, H2, H2] } }, 3)
+    expect(commentPart(first)).toEqual({ status: 'POSTED', reason: null })
+    expect(first.pr.comments).toHaveLength(1)
+    const url = first.pr.comments[0].url ?? ''
+    expect(url).toMatch(/#issuecomment-1001$/)
+    expect(firstLineOf(first.pr.comments[0].body)).toContain(`head:${H1}`)
+
+    expect(second.code, second.stderr).toBe(0)
+    expect(commentPart(second)).toEqual({ status: 'EDITED', reason: null })
+    expect(second.stdout, 'a clean edit prints no TRACEABILITY line').not.toContain('TRACEABILITY')
+    expect(second.writes.filter(w => w.args[0] === 'pr' && w.args[1] === 'comment'), 'no new post').toEqual([])
+    const patches = patchCalls(second.calls)
+    expect(patches).toHaveLength(1)
+    expect(patches[0].args.slice(0, 5)).toEqual(['api', '--method', 'PATCH', PATCH_PATH('1001'), '-F'])
+    expect(patches[0].args[5]).toMatch(/^body=@.+/)
+    expect(patches[0].args.slice(6)).toEqual(['--silent'])
+    expect(readBackCalls(second.calls), 'one read of the edited comment').toHaveLength(1)
+    expect(second.pr.comments).toHaveLength(1)
+    expect(second.pr.comments[0].url).toBe(url)
+    expect(firstLineOf(second.pr.comments[0].body)).toContain(`head:${H2}`)
+
+    expect(third.code, third.stderr).toBe(0)
+    expect(commentPart(third)).toEqual({ status: 'SKIPPED', reason: null })
+    expect(third.writes, 'the same head and key again').toEqual([])
+    expect(third.stdout).toContain(' posted:yes ')
+  })
+
+  it('18. of two own matches the newest is edited; the older one and a newer lookalike of another login stay byte for byte', SPAWN_BUDGET, () => {
+    const older = olderOwn(H1, KEY_A)
+    const newest = olderOwn(H1, KEY_B)
+    const lookalike = foreignComment(`${MARKER_OPEN} head:\nA lookalike with no key.\n`)
+    expect(STRICT_MARKER.test(firstLineOf(lookalike.body)), 'the lookalike is not a strict marker').toBe(false)
+    const r = runOnce({ scenario: { comments: [older, newest, lookalike] } })
+    expect(r.code, r.stderr).toBe(0)
+    expect(commentPart(r)).toEqual({ status: 'EDITED', reason: null })
+    expect(patchCalls(r.calls).map(c => c.args[3])).toEqual([PATCH_PATH('1002')])
+    expect(verbs(r.writes), 'one body edit, one comment edit, no post').toEqual(['pr edit', 'api --method'])
+    const bodies = commentBodies(r)
+    expect(bodies).toHaveLength(3)
+    expect(bodies[0]).toBe(older.body)
+    expect(bodies[2]).toBe(lookalike.body)
+    expect(firstLineOf(bodies[1])).toContain(`head:${SHIM_HEAD}`)
+    expect(JSON.stringify(r.calls), 'nothing is deleted').not.toContain('DELETE')
+  })
+
+  it('19. a strict marker of another login after the own comment, or with none of the viewer\'s: a new comment is posted and the others stay', SPAWN_BUDGET, () => {
+    const own = olderOwn(H1, KEY_A)
+    const theirs = foreignComment(`${markerLine(H1, KEY_B)}\nTheir evidence text.\n`)
+    expect(STRICT_MARKER.test(firstLineOf(theirs.body)), 'theirs is a strict marker').toBe(true)
+
+    const after = runOnce({ scenario: { comments: [own, theirs] } })
+    expect(commentPart(after)).toEqual({ status: 'POSTED', reason: null })
+    expect(verbs(after.writes)).toEqual(['pr edit', 'pr comment'])
+    expect(patchCalls(after.calls)).toEqual([])
+    expect(commentBodies(after).slice(0, 2)).toEqual([own.body, theirs.body])
+    expect(after.pr.comments).toHaveLength(3)
+    expect(firstLineOf(after.pr.comments[2].body)).toContain(`head:${SHIM_HEAD}`)
+
+    const alone = runOnce({ scenario: { comments: [theirs] } })
+    expect(commentPart(alone)).toEqual({ status: 'POSTED', reason: null })
+    expect(patchCalls(alone.calls)).toEqual([])
+    expect(alone.pr.comments).toHaveLength(2)
+    expect(commentBodies(alone)[0]).toBe(theirs.body)
+  })
+
+  it('20. a changed key at the same head edits the newer own comment, an older exact match stays, and a 20-digit id reaches the path whole', SPAWN_BUDGET, () => {
+    const exact = ownComment(`${currentMarker()}\nAn earlier copy of this exact evidence.\n`)
+    const bigId = '12345678901234567890'
+    const newer = { ...olderOwn(SHIM_HEAD, KEY_C), url: `https://github.com/o/r/pull/7#issuecomment-${bigId}` }
+    const r = runOnce({ scenario: { comments: [exact, newer] } })
+    expect(r.code, r.stderr).toBe(0)
+    expect(r.stdout, 'the newer comment is not this evidence, so it is not skipped').toContain(' posted:no ')
+    expect(commentPart(r)).toEqual({ status: 'EDITED', reason: null })
+    expect(patchCalls(r.calls).map(c => c.args[3])).toEqual([PATCH_PATH(bigId)])
+    expect(commentBodies(r)[0]).toBe(exact.body)
+    expect(firstLineOf(commentBodies(r)[1])).toBe(currentMarker())
+    expect(r.pr.comments[1].url).toBe(newer.url)
+  })
+
+  it('21. a malformed own comment (the prefix alone) is repaired by the edit', SPAWN_BUDGET, () => {
+    const broken = ownComment(`${MARKER_OPEN} head:oops\nHalf a marker.\n`)
+    const r = runOnce({ scenario: { comments: [broken] } })
+    expect(commentPart(r)).toEqual({ status: 'EDITED', reason: null })
+    expect(r.pr.comments).toHaveLength(1)
+    expect(STRICT_MARKER.test(firstLineOf(r.pr.comments[0].body)), 'the first line is a marker now').toBe(true)
+    expect(patchCalls(r.calls).map(c => c.args[3])).toEqual([PATCH_PATH('1001')])
+  })
+
+  it('22. an own comment whose url holds no id is DEGRADED (comment id unreadable): no edit, no post', SPAWN_BUDGET, () => {
+    const own = { ...olderOwn(), url: '' }
+    const r = runOnce({ scenario: { comments: [own] } })
+    expect(r.code, r.stderr).toBe(0)
+    expect(commentPart(r)).toEqual({ status: 'DEGRADED', reason: 'comment id unreadable' })
+    expect(r.stdout).toContain('TRACEABILITY: DEGRADED (comment id unreadable)')
+    expect(verbs(r.writes), 'the body is still written; the comment is not').toEqual(['pr edit'])
+    expect(commentBodies(r)).toEqual([own.body])
+  })
+
+  it('23. a comment that does not read back as written, or cannot be read, is DEGRADED (comment read-back mismatch), never EDITED', SPAWN_BUDGET, () => {
+    const mismatch = runOnce({ scenario: { comments: [olderOwn()], commentEditStores: 'Somebody else rewrote the comment.\n' } })
+    expect(commentPart(mismatch)).toEqual({ status: 'DEGRADED', reason: 'comment read-back mismatch' })
+    expect(mismatch.stdout).toContain('TRACEABILITY: DEGRADED (comment read-back mismatch)')
+    expect(verbs(mismatch.writes), 'no fallback post').toEqual(['pr edit', 'api --method'])
+
+    const unreadable = runOnce({
+      scenario: {
+        comments: [olderOwn()],
+        failures: [{ match: ['api', PATCH_PATH('1001')], times: 5, stderr: 'gh: Bad Gateway (HTTP 502)\n' }],
       },
     })
-    expect(verbs(cut.writes), 'with the gates cut the half-scrubbed files ARE posted: the guard above can go red').toEqual(['pr edit', 'pr comment'])
+    expect(commentPart(unreadable)).toEqual({ status: 'DEGRADED', reason: 'comment read-back mismatch' })
+    expect(readBackCalls(unreadable.calls), 'the read is tried once').toHaveLength(1)
+    expect(verbs(unreadable.writes)).toEqual(['pr edit', 'api --method'])
+  })
+
+  it('24. a 4xx on the edit is not retried: DEGRADED (comment edit failed), no read-back, no post', SPAWN_BUDGET, () => {
+    for (const stderr of ['gh: Forbidden (HTTP 403)\n', 'gh: Not Found (HTTP 404)\n']) {
+      const r = runOnce({ scenario: { comments: [olderOwn()], failures: [{ match: ['api', '--method', 'PATCH'], times: 5, stderr }] } })
+      expect(commentPart(r), stderr).toEqual({ status: 'DEGRADED', reason: 'comment edit failed' })
+      expect(patchCalls(r.calls), stderr).toHaveLength(1)
+      expect(readBackCalls(r.calls), stderr).toEqual([])
+      expect(verbs(r.writes), stderr).toEqual(['pr edit', 'api --method'])
+    }
+  })
+
+  it('25. two 5xx on the edit stop at two calls: DEGRADED (5xx on update-pr-evidence), no read-back', SPAWN_BUDGET, () => {
+    const r = runOnce({
+      scenario: { comments: [olderOwn()], failures: [{ match: ['api', '--method', 'PATCH'], times: 9, stderr: 'gh: Bad Gateway (HTTP 502)\n' }] },
+    })
+    expect(commentPart(r)).toEqual({ status: 'DEGRADED', reason: '5xx on update-pr-evidence' })
+    expect(patchCalls(r.calls)).toHaveLength(2)
+    expect(readBackCalls(r.calls)).toEqual([])
+    expect(r.stdout).toContain('TRACEABILITY: DEGRADED (5xx on update-pr-evidence)')
+  })
+
+  it('26. body and comment both retried once use exactly eight write-stage gh calls', SPAWN_BUDGET, () => {
+    const base = 'Adds the thing.\n\n## Summary\nA summary.\n'
+    const other = `${base}\nEdited once.\n`
+    const r = runOnce({
+      scenario: {
+        body: base,
+        // verify reads the first; the splice reads the second, finds the body moved, and reads again.
+        bodies: [base, other, other],
+        comments: [olderOwn()],
+        failures: [
+          { match: ['pr', 'edit'], times: 1, stderr: 'gh: Bad Gateway (HTTP 502)\n' },
+          { match: ['api', '--method', 'PATCH'], times: 1, stderr: 'gh: Bad Gateway (HTTP 502)\n' },
+        ],
+      },
+    })
+    expect(r.code, r.stderr).toBe(0)
+    const block = VE.parsePublishBlock(r.stdout)
+    expect(block?.body.status, r.stdout).toBe('EDITED')
+    expect(block?.comment.status, r.stdout).toBe('EDITED')
+    const stage = r.calls.slice(1)
+    expect(stage, 'two body reads, two edits, one body read-back, two comment edits, one comment read-back').toHaveLength(8)
+    const firstEdit = stage.findIndex(c => c.args[0] === 'pr' && c.args[1] === 'edit')
+    const readsBefore = stage.slice(0, firstEdit)
+    expect(readsBefore.map(c => c.args.slice(0, 2).join(' '))).toEqual(['pr view', 'pr view'])
+    for (const c of readsBefore) expect(c.args[c.args.indexOf('--json') + 1]).toBe('body')
+    expect(stage.filter(c => c.args[0] === 'pr' && c.args[1] === 'edit')).toHaveLength(2)
+    expect(patchCalls(stage)).toHaveLength(2)
+    expect(readBackCalls(stage)).toHaveLength(1)
+  })
+
+  it('27. the edit runs silent: with the flag cut, the answer overflows the write buffer and the edit reads as failed', SPAWN_BUDGET, () => {
+    const silent = ", '--silent']"
+    const r = runOnce({
+      scenario: { comments: [olderOwn()] },
+      mutate: source => {
+        expect(source.split(silent), 'the flag must appear once to be cut').toHaveLength(2)
+        return source.replace(silent, ']')
+      },
+    })
+    expect(firstLineOf(r.pr.comments[0].body), 'the fake did store the edit').toContain(`head:${SHIM_HEAD}`)
+    expect(commentPart(r)).toEqual({ status: 'DEGRADED', reason: 'comment edit failed' })
+    expect(patchCalls(r.calls)).toHaveLength(1)
+  })
+
+  it('28. full publication edits the comment to carry the scenario table, and a comment over 4,096 bytes reads back equal', SPAWN_BUDGET, () => {
+    const tps = Array.from({ length: 100 }, (_, i) => tpLine(i + 1, `Scenario ${i + 1} of the plan`))
+    const r = runOnce({
+      tps,
+      scenario: { comments: [olderOwn()] },
+      args: ['publish', '--pr', '7', '--evidence', 'evidence.md', '--publication', 'full'],
+    })
+    expect(r.code, r.stderr).toBe(0)
+    expect(commentPart(r), r.stdout).toEqual({ status: 'EDITED', reason: null })
+    expect(r.stdout).not.toContain('TRACEABILITY')
+    const text = r.pr.comments[0].body
+    expect(text).toContain('| TP |')
+    expect(Buffer.byteLength(text), 'larger than the line buffer the writes use').toBeGreaterThan(4096)
+    expect(readBackCalls(r.calls)).toHaveLength(1)
+  })
+
+  it('29. a comment that redaction grows past the cap is not edited in', SPAWN_BUDGET, () => {
+    const own = olderOwn()
+    const r = runOnce({ redact: 'grow', scenario: { comments: [own] } })
+    expect(commentPart(r)).toEqual({ status: 'DEGRADED', reason: 'comment over size cap' })
+    expect(r.stdout).toContain('TRACEABILITY: DEGRADED (comment over size cap)')
+    expect(patchCalls(r.calls)).toEqual([])
+    expect(commentBodies(r)).toEqual([own.body])
   })
 })
 
@@ -713,6 +985,19 @@ describe('the boundary prints a publish block only when it parses back to itself
     expect(VE.settleOutcome({ code: 2, stdout: 'TRACEABILITY: DEGRADED (evidence unavailable)\n' })).toEqual({ code: 2, stdout: 'TRACEABILITY: DEGRADED (evidence unavailable)\n' })
   })
 
+  it('accepts EDITED and each comment DEGRADED reason the edit path prints', () => {
+    const comments: PartLike[] = [
+      { status: 'EDITED', reason: null },
+      ...['comment id unreadable', 'comment edit failed', 'comment read-back mismatch', '5xx on update-pr-evidence']
+        .map(reason => ({ status: 'DEGRADED', reason })),
+    ]
+    for (const comment of comments) {
+      const block = VE.renderPublishBlock(evidenceLine.ok ? evidenceLine.value : '', { status: 'EDITED', reason: null }, comment)
+      expect(VE.parsePublishBlock(block), block).not.toBeNull()
+      expect(VE.settleOutcome({ code: 0, stdout: block }), block).toEqual({ code: 0, stdout: block })
+    }
+  })
+
   it('a degraded half earns its TRACEABILITY line, and only that line', () => {
     const degraded = VE.renderPublishBlock(
       evidenceLine.ok ? evidenceLine.value : '',
@@ -733,33 +1018,80 @@ describe('the boundary prints a publish block only when it parses back to itself
 // 5. Source order: no gh write is reachable before the scrub that gates it
 // ---------------------------------------------------------------------------
 
-/** Named collector: the gh write calls in the script that are not preceded, in their function, by a scrub. */
-export function collectUngatedWrites(source: string): string[] {
-  const out: string[] = []
-  const fns = [...source.matchAll(/^function (\w+)\([^)]*\) \{\n([\s\S]*?)\n\}\n/gm)]
-  for (const m of fns) {
-    const body = m[2]
-    const write = /ghWrite\(io, \['pr', '(edit|comment)'/.exec(body)
-    if (write === null) continue
-    const scrub = body.indexOf('scrub(io,')
-    if (scrub === -1 || scrub > write.index) out.push(`${m[1]}: gh pr ${write[1]} without a scrub before it`)
+/** Every gh write the script spells: `ghWrite(io, ['pr', 'edit' | 'comment' ...` and the comment edit's `['api', '--method' ...`. */
+const GH_WRITE_RE = /ghWrite\(io, \['(pr|api)', '(edit|comment|--method)'/g
+const TOP_LEVEL_FUNCTION_RE = /^function (\w+)\([^)]*\) \{\n([\s\S]*?)\n\}\n/gm
+
+/** Named collector: each function that writes to gh, with its writes in source order (`pr edit`, `api --method`, `pr comment`). */
+export function collectWritesByFunction(source: string): Record<string, string[]> {
+  const out: Record<string, string[]> = {}
+  for (const m of source.matchAll(TOP_LEVEL_FUNCTION_RE)) {
+    const writes = [...m[2].matchAll(GH_WRITE_RE)].map(w => `${w[1]} ${w[2]}`)
+    if (writes.length > 0) out[m[1]] = writes
   }
   return out
 }
 
+/** Named collector: the gh write calls in the script that are not preceded, in their function, by a scrub. */
+export function collectUngatedWrites(source: string): string[] {
+  const out: string[] = []
+  for (const m of source.matchAll(TOP_LEVEL_FUNCTION_RE)) {
+    const scrub = m[2].indexOf('scrub(io,')
+    for (const write of m[2].matchAll(GH_WRITE_RE)) {
+      if (scrub === -1 || scrub > (write.index ?? 0)) out.push(`${m[1]}: gh ${write[1]} ${write[2]} without a scrub before it`)
+    }
+  }
+  return out
+}
+
+/** The text of the top-level function `name`, without its signature line; '' when absent. */
+function functionBodyOf(source: string, name: string): string {
+  for (const m of source.matchAll(TOP_LEVEL_FUNCTION_RE)) if (m[1] === name) return m[2]
+  return ''
+}
+
 describe('the script\'s source: each gh write follows its scrub', () => {
   const source = fs.readFileSync(VERIFY_EVIDENCE_SCRIPT, 'utf-8')
+  const POST_LINE = "  const post = ghWrite(io, ['pr', 'comment'"
 
   it('publishBody and publishComment scrub before they write', () => {
-    expect(source.match(/ghWrite\(io, \['pr', '(?:edit|comment)'/g), 'the corpus must hold both writes').toHaveLength(2)
+    expect(source.match(GH_WRITE_RE), 'the corpus must hold the three writes').toHaveLength(3)
+    expect(source.match(/ghWrite\(io, \[/g), 'every ghWrite call is one the scan reads').toHaveLength(3)
     expect(collectUngatedWrites(source)).toEqual([])
   })
 
-  it('known-bad probe: a write with the scrub moved after it is reported', () => {
-    const seeded = source.replace(
-      "  if (!scrub(io, files.commentRaw, files.comment)) return degradedPart('redaction unavailable');\n", '')
+  it('publishBody holds the body edit; publishComment holds the comment edit and the comment post', () => {
+    expect(collectWritesByFunction(source)).toEqual({
+      publishBody: ['pr edit'],
+      publishComment: ['api --method', 'pr comment'],
+    })
+  })
+
+  it('the comment edit sits after the scrub gate and after the size-cap re-check', () => {
+    const comment = functionBodyOf(source, 'publishComment')
+    const gate = comment.indexOf(COMMENT_GATE)
+    const cap = comment.indexOf('text.length > COMMENT_POST_MAX_CHARS')
+    const patch = comment.indexOf("'--method', 'PATCH'")
+    expect(gate, 'the gate line').toBeGreaterThanOrEqual(0)
+    expect(cap, 'the cap check').toBeGreaterThan(gate)
+    expect(patch, 'the edit').toBeGreaterThan(cap)
+    expect(comment.split(COMMENT_GATE), 'one gate line in the function').toHaveLength(2)
+  })
+
+  it('known-bad probe: a write with the scrub cut is reported', () => {
+    const seeded = source.replace(`  ${COMMENT_GATE}\n`, '')
     expect(seeded, 'the seed must land').not.toBe(source)
-    expect(collectUngatedWrites(seeded)).toEqual(['publishComment: gh pr comment without a scrub before it'])
+    expect(collectUngatedWrites(seeded)).toEqual([
+      'publishComment: gh api --method without a scrub before it',
+      'publishComment: gh pr comment without a scrub before it',
+    ])
+  })
+
+  it('known-bad probe: the scrub moved to between the edit and the post is reported for the edit only', () => {
+    expect(source, 'the post line must exist').toContain(POST_LINE)
+    const seeded = source.replace(`  ${COMMENT_GATE}\n`, '').replace(POST_LINE, `  ${COMMENT_GATE}\n${POST_LINE}`)
+    expect(seeded, 'the seed must land').not.toBe(source)
+    expect(collectUngatedWrites(seeded)).toEqual(['publishComment: gh api --method without a scrub before it'])
   })
 
   it('the ci-wait script is the one the readiness classifier shares', () => {

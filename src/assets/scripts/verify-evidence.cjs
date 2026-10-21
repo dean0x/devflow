@@ -123,11 +123,13 @@ const DEADLINE_MS = 90000;
 /**
  * D-PUBLISH-BOUNDS: `publish` runs `verify` under the deadline above, then its writes
  * under a deadline of their own and a gh budget of their own. The writes are at most
- * seven calls: two body reads (the compare-and-swap), a body edit and one retry, one
- * read-back, a comment and one retry. A scrub is bounded by its own timeout, not by
- * the deadline, so one that starts just before the writes' deadline can end up to
- * REDACT_TIMEOUT_MS after it. The worst case is 90 s + 60 s + 20 s; the caller's
- * 180 s Bash timeout covers it with room for node's startup.
+ * eight calls: two body reads (the compare-and-swap), a body edit and one retry, one
+ * read-back, then the comment. A new comment is a post and one retry (seven in all).
+ * An edit of the viewer's own comment is the edit, one retry and one read of the
+ * comment (eight in all). A scrub is bounded by its own timeout, not by the deadline,
+ * so one that starts just before the writes' deadline can end up to REDACT_TIMEOUT_MS
+ * after it. The worst case is 90 s + 60 s + 20 s; the caller's 180 s Bash timeout
+ * covers it with room for node's startup.
  */
 const PUBLISH_DEADLINE_MS = 60000;
 const PUBLISH_GH_CALLS = 8;
@@ -151,6 +153,8 @@ const PR_VIEW_MAX_BUFFER = 64 * 1024 * 1024;
 const RUN_LIST_MAX_BUFFER = 1024 * 1024;
 const RUN_VIEW_MAX_BUFFER = 65536;
 const LINE_MAX_BUFFER = 4096;
+/** A comment read back as a JSON string: 65,536 characters, each escaped to six, fit. */
+const COMMENT_READ_MAX_BUFFER = 8 * 65536;
 /** `gh pr checks` and the thread-count GraphQL answer: a thousand rows of names fit. */
 const READINESS_MAX_BUFFER = 4 * 1024 * 1024;
 const READINESS_MAX_CHECKS = 1000;
@@ -1864,7 +1868,7 @@ const EVIDENCE_UNAVAILABLE_LINE = 'TRACEABILITY: DEGRADED (evidence unavailable)
  */
 
 const BODY_STATUSES = Object.freeze(['EDITED', 'UNCHANGED', 'SKIPPED']);
-const COMMENT_STATUSES = Object.freeze(['POSTED', 'SKIPPED', 'OFF']);
+const COMMENT_STATUSES = Object.freeze(['POSTED', 'SKIPPED', 'OFF', 'EDITED']);
 
 /**
  * @param {string} status
@@ -2053,8 +2057,34 @@ function publishBody(io, pr, fields, files) {
 }
 
 /**
- * The comment half: the append-only evidence comment, scrubbed (D11) and re-measured
- * after the scrub, posted once. An already-posted comment is never touched.
+ * Whether the comment just edited now reads back as the scrubbed text: one GET of it
+ * as a JSON string, compared after one trailing newline is normalised on each side.
+ * The edit itself runs silent, so this is the only read of the comment. Any failure
+ * to read or parse is "no". Neither the comment nor gh's stderr is printed.
+ *
+ * @param {Io} io  the write-stage context
+ * @param {string} id  a comment id commentIdOf produced
+ * @param {string} expected  the scrubbed comment text (never the unscrubbed file)
+ * @returns {boolean}
+ */
+function commentReadsBack(io, id, expected) {
+  const r = gh(io, ['api', 'repos/{owner}/{repo}/issues/comments/' + commentIdArg(id), '--jq', '.body | @json'], COMMENT_READ_MAX_BUFFER);
+  if (!r.ok) return false;
+  try {
+    const body = JSON.parse(stripOneNewline(r.stdout.toString('utf8')));
+    return typeof body === 'string' && stripOneNewline(body) === stripOneNewline(expected);
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * The comment half: the evidence comment, scrubbed (D11) and re-measured after the
+ * scrub. When the viewer's own evidence comment is a safe target (no strict marker
+ * from another login follows it), that comment is edited in place (one PATCH of the
+ * scrubbed file) and read back against it. Otherwise a new comment is posted once.
+ * A comment that already carries this head and key is skipped. A failed edit or
+ * read-back is a DEGRADED result and never falls back to a post. Nothing is deleted.
  *
  * @param {Io} io  the write-stage context
  * @param {number} pr
@@ -2067,10 +2097,19 @@ function publishBody(io, pr, fields, files) {
 function publishComment(io, pr, fields, files, target) {
   if (fields.posted === 'yes') return okPart('SKIPPED');
   if (fields.posted === 'n/a') return okPart('OFF');
+  const edit = target !== null && target.editable;
+  if (edit && target.id === '') return degradedPart('comment id unreadable');
   if (!scrub(io, files.commentRaw, files.comment)) return degradedPart('redaction unavailable');
   const text = readTextFile(files.comment);
   if (text === null || text === '') return degradedPart('redaction unavailable');
   if (text.length > COMMENT_POST_MAX_CHARS) return degradedPart('comment over size cap');
+  if (edit) {
+    const patch = ghWrite(io, ['api', '--method', 'PATCH',
+      'repos/{owner}/{repo}/issues/comments/' + commentIdArg(target.id),
+      '-F', 'body=@' + files.comment, '--silent']);
+    if (!patch.ok) return degradedPart(patch.serverError ? '5xx on update-pr-evidence' : 'comment edit failed');
+    return commentReadsBack(io, target.id, text) ? okPart('EDITED') : degradedPart('comment read-back mismatch');
+  }
   const post = ghWrite(io, ['pr', 'comment', String(pr), '--body-file', files.comment]);
   if (post.ok) return okPart('POSTED');
   return degradedPart(post.serverError ? '5xx on update-pr-evidence' : 'gh pr comment failed');
@@ -2079,8 +2118,9 @@ function publishComment(io, pr, fields, files, target) {
 /**
  * The whole update-pr-evidence operation, in the order the operation always had:
  * verify; only on `body:changed` scrub, splice, `gh pr edit`, read back; only on
- * `posted:no` scrub and `gh pr comment`. The work files live in one private directory
- * this call makes and removes.
+ * `posted:no` scrub, then edit the viewer's own evidence comment in place and read it
+ * back, or post a new one when there is none to edit. The work files live in one
+ * private directory this call makes and removes.
  *
  * @param {Io} io
  * @param {Extract<ParsedArgs, { kind: 'publish' }>} args

@@ -2324,6 +2324,35 @@ describe('source guards (verify-evidence.cjs)', () => {
     expect(SOURCE.indexOf('function commentIdArg(')).toBeGreaterThan(SOURCE.indexOf('function loginArg('))
   })
 
+  it('every comments-path line holds commentIdArg(), so no unchecked id reaches the path', () => {
+    const lines = (src: string): string[] => codeLines(src).filter(l => l.includes('/issues/comments/'))
+    expect(lines(SOURCE).length, 'the edit and its read-back must be in the corpus').toBeGreaterThanOrEqual(2)
+    expect(lines(SOURCE).filter(l => !l.includes('commentIdArg('))).toEqual([])
+    expect(lines(`${SOURCE}\n  gh(io, ['api', 'repos/{owner}/{repo}/issues/comments/' + id], 1)\n`).filter(l => !l.includes('commentIdArg('))).toHaveLength(1)
+  })
+
+  it('the comment is never deleted: no DELETE word and no -X flag in the code', () => {
+    const collect = (src: string): string[] => codeLines(src).filter(l => /\bDELETE\b/.test(l) || l.includes("'-X'"))
+    expect(codeLines(SOURCE).length).toBeGreaterThan(1000)
+    expect(collect(SOURCE)).toEqual([])
+    expect(collect(`${SOURCE}\n  ghWrite(io, ['api', '--method', 'DELETE', 'x']);\n`)).toHaveLength(1)
+    expect(collect(`${SOURCE}\n  ghWrite(io, ['api', '-X', 'PUT', 'x']);\n`)).toHaveLength(1)
+  })
+
+  it('--method appears once and is PATCH; the edit sends the body file and nothing else, silent', () => {
+    const methods = (src: string): string[] => [...codeLines(src).join('\n').matchAll(/'--method', '(\w+)'/g)].map(m => m[1])
+    expect(methods(SOURCE)).toEqual(['PATCH'])
+    expect(methods(`${SOURCE}\n  ghWrite(io, ['api', '--method', 'DELETE', 'x']);\n`)).toEqual(['PATCH', 'DELETE'])
+    const edit = functionSource(SOURCE, 'publishComment')
+    expect(edit.length, 'publishComment must be in the corpus').toBeGreaterThan(200)
+    expect(edit).toContain("'-F', 'body=@' + files.comment, '--silent']")
+    const fields = (src: string): string[] => [...functionSource(src, 'publishComment').matchAll(/'-[fF]'/g)].map(m => m[0])
+    expect(fields(SOURCE)).toEqual(["'-F'"])
+    const seeded = SOURCE.replace("'--silent']", "'-f', 'x=y', '--silent']")
+    expect(seeded, 'the seed must land').not.toBe(SOURCE)
+    expect(fields(seeded)).toHaveLength(2)
+  })
+
   it('parsePrJson keeps a comment\'s id, never its url, and takes it from commentIdOf', () => {
     expect(SOURCE).toContain('commentId: commentIdOf(x.url, pr)')
     expect(SOURCE).toContain('login: string, association: string, body: string, viewerDidAuthor: boolean, commentId: string')
