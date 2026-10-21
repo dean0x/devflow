@@ -49,14 +49,14 @@ const INTRO_SENTENCES: ReadonlyArray<readonly [string, string]> = [
   ['narrow-only', 'The tiers only narrow. They re-route only a group primary that the matrix sent to FIX_NOW and that is no security finding, and they never promote another verdict.'],
   ['highest-tier', 'A duplicate group takes the highest tier of any member, in the order CRITICAL or HIGH, SEVERE, BATCH, DEFER, pre-existing.'],
   ['severity and category', 'Read `severity` and `category` (`blocking`, `should-fix` or `pre-existing`) from each issue.'],
-  ['defect not lens', 'Judge the defect, not the review lens.'],
+  ['defect not lens', 'Judge the defect, not only the review lens.'],
   ['first match', 'Apply the steps in order; the first that matches decides.'],
 ]
 
 /** Steps 0 to 8 as the lines of the reference, in order. */
 const STEP_LINES: readonly string[] = [
   '0. A security finding keeps its matrix verdict, FIX_NOW or ESCALATED, at every severity: LOW, unlabelled, pre-existing or in a duplicate group. It never takes the prose-only value. Judge security by the defect read in the code, not only by its type or severity label: a security control that fails open or is weakened, or a false security or safety claim, is a security finding at every severity. ESCALATED, FALSE_POSITIVE, BY_DESIGN, FIX_SEPARATE, TECH_DEBT and DUPLICATE verdicts never change.',
-  '1. Pre-existing, except a security finding → FIX_SEPARATE, Reason `pre-existing`. CRITICAL or HIGH → FIX_NOW. LOW, except a security finding → DEFER, also when its type label is severe. An absent category counts as blocking. An issue with no severity label takes steps 2-8. Steps 2-8 apply to MEDIUM.',
+  '1. Within this step the first match decides. Pre-existing, except a security finding → FIX_SEPARATE, Reason `pre-existing`. CRITICAL or HIGH → FIX_NOW. LOW, except a security finding → DEFER, also when its type label is severe. An absent category counts as blocking. An issue with no severity label takes steps 2-8. Steps 2-8 apply to MEDIUM.',
   '2. Treat agent-executed text (prompts, skills, commands, recipes) as code for steps 3-6.',
   '3. A reachable input gives wrong output or state; a fix landed on one path but not on its sibling; or something is called or read that nothing produces → SEVERE.',
   '4. A check fails open or swallows an error; or a wait, loop or write on a shipped path with external input, network I/O or user state has no bound or no atomicity → SEVERE.',
@@ -86,7 +86,7 @@ const EXAMPLE_ROWS: ReadonlyArray<readonly [string, string, string]> = [
   ['A LOW, a pre-existing or an unlabelled security finding', 'FIX_NOW or ESCALATED', '0'],
   ['LOW, reliability lens: the error of a signature check is ignored, so unsigned input passes', 'FIX_NOW', '0'],
   ["A move of a security rule out of an agent's Core rules", 'SEVERE', '0, else 7'],
-  ['LOW, race label, no security effect', 'DEFER', '1'],
+  ['LOW, race label, no check-then-act, no security effect', 'DEFER', '1'],
 ]
 
 /** One positive and one negative example for each class that the issue names. A negative example is a finding that looks like the class and is not. */
@@ -410,6 +410,7 @@ describe('the tier reference: checklist (TP-1, TP-7, TP-8, TP-9, TP-10, TP-11, T
     expect(collectTierReferenceDefects(seedOnce(REFERENCE, INTRO_SENTENCES[0][1], ''))).toEqual(['the intro lacks the pre-pass sentence'])
     expect(collectTierReferenceDefects(seedOnce(REFERENCE, INTRO_SENTENCES[2][1], ''))).toEqual(['the intro lacks the highest-tier sentence'])
     expect(collectTierReferenceDefects(seedOnce(REFERENCE, INTRO_SENTENCES[4][1], ''))).toEqual(['the intro lacks the defect not lens sentence'])
+    expect(collectTierReferenceDefects(seedOnce(REFERENCE, INTRO_SENTENCES[4][1], 'Judge the defect, not the review lens.')), 'the unqualified lens sentence').toEqual(['the intro lacks the defect not lens sentence'])
     expect(collectTierReferenceDefects(seedOnce(REFERENCE, 'The tiers only narrow.', 'The tiers may promote.'))).toEqual(['the intro lacks the narrow-only sentence'])
     const swapped = seed(seed(REFERENCE, STEP_LINES[3], '@@'), STEP_LINES[4], STEP_LINES[3]).replace('@@', STEP_LINES[4])
     expect(collectTierReferenceDefects(swapped), 'steps 3 and 4 in each other\'s place').toEqual(['step 4 comes before step 3'])
@@ -437,6 +438,19 @@ describe('the tier reference: checklist (TP-1, TP-7, TP-8, TP-9, TP-10, TP-11, T
       expect(step1).toContain(phrase)
       expect(REFERENCE).toContain(phrase)
     }
+  })
+
+  it('step 1 lets the first matching sentence decide, with the pre-existing sentence ahead of CRITICAL or HIGH and LOW', () => {
+    const step1 = STEP_LINES[1]
+    const FIRST_MATCH = 'Within this step the first match decides.'
+    const at = (phrase: string): number => step1.indexOf(phrase)
+    expect(step1.startsWith(`1. ${FIRST_MATCH} `)).toBe(true)
+    expect(at('Pre-existing, except a security finding')).toBeGreaterThan(-1)
+    expect(at('Pre-existing, except a security finding')).toBeLessThan(at('CRITICAL or HIGH → FIX_NOW.'))
+    expect(at('CRITICAL or HIGH → FIX_NOW.')).toBeLessThan(at('LOW, except a security finding'))
+    expect(collectTierReferenceDefects(seedOnce(REFERENCE, `${FIRST_MATCH} `, '')), 'the first-match sentence dropped').toEqual(['step 1 is missing or reworded'])
+    const swapped = seedOnce(seedOnce(REFERENCE, 'CRITICAL or HIGH → FIX_NOW. ', '@@'), 'Pre-existing, except a security finding → FIX_SEPARATE, Reason `pre-existing`. ', 'CRITICAL or HIGH → FIX_NOW. Pre-existing, except a security finding → FIX_SEPARATE, Reason `pre-existing`. ').replace('@@', '')
+    expect(collectTierReferenceDefects(swapped), 'CRITICAL or HIGH ahead of pre-existing').toEqual(['step 1 is missing or reworded'])
   })
 
   it('step 7 keeps agent-executed text and security wording out of BATCH, and step 2 names the agent-executed text kinds', () => {
@@ -487,6 +501,16 @@ describe('the tier reference: examples (TP-3, TP-4, TP-9, TP-23)', () => {
   it('routes a LOW, pre-existing or unlabelled security finding to FIX_NOW or ESCALATED at step 0, and the signature-check example to FIX_NOW', () => {
     expect(REFERENCE).toContain('| A LOW, a pre-existing or an unlabelled security finding | FIX_NOW or ESCALATED | 0 |')
     expect(REFERENCE).toContain('| LOW, reliability lens: the error of a signature check is ignored, so unsigned input passes | FIX_NOW | 0 |')
+  })
+
+  it('keeps a check-then-act race out of the LOW race example, so it cannot read against matrix clause 0', () => {
+    const row = '| LOW, race label, no check-then-act, no security effect | DEFER | 1 |'
+    expect(REFERENCE).toContain(row)
+    expect(REFERENCE).not.toContain('| LOW, race label, no security effect |')
+    expect(MATRIX_DEFINITION).toContain('a check-then-act race')
+    expect(collectExampleDefects(seedOnce(REFERENCE, row, '| LOW, race label, no security effect | DEFER | 1 |'))).toEqual([
+      `example 10 is not "${EXAMPLE_ROWS[9][0].slice(0, 40)}" | DEFER | 1`,
+    ])
   })
 
   it('makes the wizard-note and Core-rules-move examples SEVERE, with step 0 first', () => {

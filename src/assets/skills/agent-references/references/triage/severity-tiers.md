@@ -1,13 +1,13 @@
 # Triage: severity tiers at standard and lean
 
-Read by Triage when prompt line 1 is `GATE_LEVEL: standard` or `GATE_LEVEL: lean`. Apply this file whole or not at all.
+Apply this file whole or not at all.
 
 ## Severity Tiers
 
-Run the duplicate pre-pass, matrix clauses 0-5 and the catch-all first, as written: FALSE_POSITIVE and BY_DESIGN keep their evidence rules for every item. The tiers only narrow. They re-route only a group primary that the matrix sent to FIX_NOW and that is no security finding, and they never promote another verdict. A duplicate group takes the highest tier of any member, in the order CRITICAL or HIGH, SEVERE, BATCH, DEFER, pre-existing. Read `severity` and `category` (`blocking`, `should-fix` or `pre-existing`) from each issue. Judge the defect, not the review lens. Apply the steps in order; the first that matches decides.
+Run the duplicate pre-pass, matrix clauses 0-5 and the catch-all first, as written: FALSE_POSITIVE and BY_DESIGN keep their evidence rules for every item. The tiers only narrow. They re-route only a group primary that the matrix sent to FIX_NOW and that is no security finding, and they never promote another verdict. A duplicate group takes the highest tier of any member, in the order CRITICAL or HIGH, SEVERE, BATCH, DEFER, pre-existing. Read `severity` and `category` (`blocking`, `should-fix` or `pre-existing`) from each issue. Judge the defect, not only the review lens. Apply the steps in order; the first that matches decides.
 
 0. A security finding keeps its matrix verdict, FIX_NOW or ESCALATED, at every severity: LOW, unlabelled, pre-existing or in a duplicate group. It never takes the prose-only value. Judge security by the defect read in the code, not only by its type or severity label: a security control that fails open or is weakened, or a false security or safety claim, is a security finding at every severity. ESCALATED, FALSE_POSITIVE, BY_DESIGN, FIX_SEPARATE, TECH_DEBT and DUPLICATE verdicts never change.
-1. Pre-existing, except a security finding → FIX_SEPARATE, Reason `pre-existing`. CRITICAL or HIGH → FIX_NOW. LOW, except a security finding → DEFER, also when its type label is severe. An absent category counts as blocking. An issue with no severity label takes steps 2-8. Steps 2-8 apply to MEDIUM.
+1. Within this step the first match decides. Pre-existing, except a security finding → FIX_SEPARATE, Reason `pre-existing`. CRITICAL or HIGH → FIX_NOW. LOW, except a security finding → DEFER, also when its type label is severe. An absent category counts as blocking. An issue with no severity label takes steps 2-8. Steps 2-8 apply to MEDIUM.
 2. Treat agent-executed text (prompts, skills, commands, recipes) as code for steps 3-6.
 3. A reachable input gives wrong output or state; a fix landed on one path but not on its sibling; or something is called or read that nothing produces → SEVERE.
 4. A check fails open or swallows an error; or a wait, loop or write on a shipped path with external input, network I/O or user state has no bound or no atomicity → SEVERE.
@@ -38,6 +38,6 @@ Tie-break: if the defect changes runtime behaviour or security, or changes instr
 | A LOW, a pre-existing or an unlabelled security finding | FIX_NOW or ESCALATED | 0 |
 | LOW, reliability lens: the error of a signature check is ignored, so unsigned input passes | FIX_NOW | 0 |
 | A move of a security rule out of an agent's Core rules | SEVERE | 0, else 7 |
-| LOW, race label, no security effect | DEFER | 1 |
+| LOW, race label, no check-then-act, no security effect | DEFER | 1 |
 
 End of checklist.

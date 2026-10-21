@@ -526,11 +526,27 @@
     },
     {
       "id": "triage-tiers-ref-max",
-      "ceiling": 4579,
-      "pattern": "const TRIAGE_TIERS_REF_MAX_BYTES = 4_579",
+      "ceiling": 4562,
+      "pattern": "const TRIAGE_TIERS_REF_MAX_BYTES = 4_562",
       "occurrences": 1,
       "sourceFile": "tests/guards/agent-references.test.ts",
-      "description": "references/triage/severity-tiers.md of the agent-references skill, in bytes. The Triage agent reads it whole, once per run, at the standard level (the default) or lean, so it is standing context on the default path of /resolve. Measured 4,579 when #484 added it, with no headroom. May be LOWERED, never raised."
+      "description": "references/triage/severity-tiers.md of the agent-references skill, in bytes. The Triage agent reads it whole, once per run, at the standard level (the default) or lean, so it is standing context on the default path of /resolve. Measured 4,579 when #484 added it and 4,562 after the review fixes of #484 (the redundant first sentence cut, the first-match rule of step 1 and the check-then-act race example added), with no headroom. May be LOWERED, never raised."
+    },
+    {
+      "id": "triage-body-max",
+      "ceiling": 11813,
+      "pattern": "const TRIAGE_BODY_MAX_BYTES = 11_813",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/agent-references.test.ts",
+      "description": "The Triage agent body of the curation-on build, dist/agents/triage.md, in bytes. It loads on every spawn at every level, including full, where the Gate Level section skips itself. #484 added the GATE_LEVEL bullet and the Gate Level section to a body of 10,516 bytes; the pinned phrases of both stay, and the narrow-only restatement that the tier reference already holds was cut. Measured 11,813 after the review fixes of #484, with no headroom. May be LOWERED, never raised: text that only standard and lean need goes to references/triage/severity-tiers.md, which loads only then."
+    },
+    {
+      "id": "triage-body-curation-off-max",
+      "ceiling": 11029,
+      "pattern": "const TRIAGE_BODY_CURATION_OFF_MAX_BYTES = 11_029",
+      "occurrences": 1,
+      "sourceFile": "tests/guards/agent-references.test.ts",
+      "description": "The Triage agent body of the curation-off build, dist/curation-off/agents/triage.md, in bytes. It was 9,732 bytes before #484 added the GATE_LEVEL bullet and the Gate Level section. Measured 11,029 after the review fixes of #484, with no headroom. May be LOWERED, never raised: text that only standard and lean need goes to references/triage/severity-tiers.md, which loads only then."
     },
     {
       "id": "curate-body-max",
