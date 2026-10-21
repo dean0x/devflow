@@ -133,18 +133,23 @@ async function ledgerPresent(ledgerPath: string): Promise<boolean> {
  * are zero, a skip notice only when a count is above zero.
  *
  * The ledger is read only where git tracks nothing in the curation folders: when it
- * stands, the tracked-areas check asks git, bounded by the same budget, and any answer
- * other than `untracked` (git tracks files there, git did not answer, or the budget ran
- * out) gives no counts and no notice. A project with no ledger makes no git call here.
+ * stands, the tracked-areas check asks git, and any answer other than `untracked` (git
+ * tracks files there, git did not answer, or the budget ran out) gives no counts and no
+ * notice. A project with no ledger makes no git call here. The root lookup and the check
+ * share one LEDGER_ROOT_TIMEOUT_MS deadline: the check gets what the lookup left, and when
+ * nothing is left it does not run and the answer is no counts.
  */
 export async function gatherLedgerCurationCounts(
   cwd: string,
   options: Pick<LedgerRootOptions, 'home'> = {},
 ): Promise<CurationCountsData | null> {
+  const deadline = Date.now() + LEDGER_ROOT_TIMEOUT_MS;
   const root = await getLedgerRoot(cwd, { ...options, timeoutMs: LEDGER_ROOT_TIMEOUT_MS });
   const ledgerRoot = root ?? cwd;
   if (await ledgerPresent(getDecisionsLedgerPath(ledgerRoot))) {
-    const { answer } = await probeTrackedArea(ledgerRoot, 'curation', { timeoutMs: LEDGER_ROOT_TIMEOUT_MS });
+    const timeLeftMs = deadline - Date.now();
+    if (timeLeftMs <= 0) return null;
+    const { answer } = await probeTrackedArea(ledgerRoot, 'curation', { timeoutMs: timeLeftMs });
     if (answer !== 'untracked') return null;
   }
   const counts = gatherCurationCounts(ledgerRoot);

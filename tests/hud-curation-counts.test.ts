@@ -18,13 +18,18 @@ import { stripAnsi } from '../src/hud/colors.js';
 import type { CurationCountsData, GatherContext } from '../src/hud/types.js';
 import { curationMoveMarkerKey } from '../src/core/project-paths.js';
 import { getCurationMoveMarkerPath } from '../src/core/curation-move-notice.js';
-import { LEDGER_ROOT_TIMEOUT_MS } from '../src/core/ledger-root.js';
+import { getLedgerRoot, LEDGER_ROOT_TIMEOUT_MS } from '../src/core/ledger-root.js';
 import { probeTrackedArea } from '../src/core/tracked-areas.js';
 import { pathWithFailingGit } from './decisions/curation-fixtures.js';
 
 vi.mock('../src/core/tracked-areas.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/core/tracked-areas.js')>();
   return { ...actual, probeTrackedArea: vi.fn(actual.probeTrackedArea) };
+});
+
+vi.mock('../src/core/ledger-root.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/core/ledger-root.js')>();
+  return { ...actual, getLedgerRoot: vi.fn(actual.getLedgerRoot) };
 });
 
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -263,7 +268,7 @@ describe('gatherLedgerCurationCounts resolves the ledger root like the hooks', {
 });
 
 // The ledger is counted only where git tracks nothing in the curation folders. The check asks
-// git once, only when the ledger stands, and bounds it by the HUD's one-second budget.
+// git once, only when the ledger stands, and shares the HUD's one-second budget with the root lookup.
 describe('gatherLedgerCurationCounts where git tracks files in the curation folders or does not answer (TP-41, TP-42)', { timeout: 30_000 }, () => {
   let base: string;
   let root: string;
@@ -335,12 +340,50 @@ describe('gatherLedgerCurationCounts where git tracks files in the curation fold
     expect(probeTrackedArea).not.toHaveBeenCalled();
   });
 
-  it('asks the check once, with the HUD budget, when the ledger stands', async () => {
+  it('asks the check once, within the HUD budget, when the ledger stands', async () => {
     seedLedger();
 
     expect(await gatherLedgerCurationCounts(root, { home })).toEqual({ decisions: 1, pitfalls: 1 });
     expect(probeTrackedArea).toHaveBeenCalledTimes(1);
-    expect(probeTrackedArea).toHaveBeenCalledWith(root, 'curation', { timeoutMs: LEDGER_ROOT_TIMEOUT_MS });
+    const [calledRoot, area, options] = vi.mocked(probeTrackedArea).mock.calls[0];
+    expect([calledRoot, area]).toEqual([root, 'curation']);
+    expect(options?.timeoutMs).toBeGreaterThan(0);
+    expect(options?.timeoutMs).toBeLessThanOrEqual(LEDGER_ROOT_TIMEOUT_MS);
+  });
+
+  // The root lookup and the area check share one budget, so a slow lookup never lets the two
+  // waits add up past the HUD's overall limit. A fake clock stands in for the slow lookup.
+  describe('when the root lookup has used part of the budget', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    const slowLookup = (usedMs: number): void => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.mocked(getLedgerRoot).mockImplementationOnce(async (cwd, options) => {
+        const lookedUp = await vi.importActual<typeof import('../src/core/ledger-root.js')>('../src/core/ledger-root.js')
+          .then((actual) => actual.getLedgerRoot(cwd, options));
+        vi.advanceTimersByTime(usedMs);
+        return lookedUp;
+      });
+    };
+
+    it('gives the check only what is left of the budget', async () => {
+      seedLedger();
+      slowLookup(600);
+
+      expect(await gatherLedgerCurationCounts(root, { home })).toEqual({ decisions: 1, pitfalls: 1 });
+      expect(probeTrackedArea).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(probeTrackedArea).mock.calls[0][2]?.timeoutMs).toBeLessThanOrEqual(LEDGER_ROOT_TIMEOUT_MS - 600);
+    });
+
+    it('skips the check and shows no counts once the lookup has used the whole budget', async () => {
+      seedLedger();
+      slowLookup(LEDGER_ROOT_TIMEOUT_MS);
+
+      expect(await gatherLedgerCurationCounts(root, { home })).toBeNull();
+      expect(probeTrackedArea).not.toHaveBeenCalled();
+    });
   });
 
   it('cuts a git that hangs at the one-second budget and shows no counts', async () => {
