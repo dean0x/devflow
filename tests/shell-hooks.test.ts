@@ -10,7 +10,6 @@ import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
 import { buildRoutingConfigJson } from '../src/core/proxy-state.js';
 import { CURATION_DIR_NAME, LEGACY_NAMES, curationMoveMarkerKey } from '../src/core/project-paths.js';
 import { getCurationMoveMarkerPath } from '../src/core/curation-move-notice.js';
-import { MOVE_SKIP_NOTICE } from '../src/core/curation-move-skip.js';
 import { AREA_PAUSE_NOTICE } from '../src/core/area-pause-notice.js';
 import {
   PROJECT_PATHS, git, makeV2LedgerRow, makeV2LogRow, pathWithFailingGit, snapshotTree, toJsonl, trackInGit,
@@ -6959,14 +6958,6 @@ describe('session-start-context: the notice of a skipped move', { timeout: GIT_F
 
     expect(res.exitCode, res.stderr).toBe(0);
     expect(res.stdout).not.toContain('did not move the curation data');
-  });
-
-  it.each(['tracked', 'unknown'] as const)('holds the words of the %s notice as the one single-quoted assignment of its arm, with nothing interpolated', (reason) => {
-    const hook = fs.readFileSync(SESSION_CONTEXT, 'utf-8');
-    const notice = MOVE_SKIP_NOTICE[reason];
-    expect(notice).not.toContain("'");
-    const escaped = notice.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    expect(hook).toMatch(new RegExp(`\\n  ${reason}\\)\\n    MOVE_SKIP_SECTION='[^']*${escaped}'\\n`));
   });
 
   it.each(['tracked', 'unknown'] as const)('holds the words of the curation pause notice for %s as the one single-quoted assignment of its arm, with nothing interpolated', (reason) => {

@@ -362,7 +362,7 @@ describe('no-fsmonitor-index-read guard: seeded probes', () => {
   it('does not report the words of a notice that name a command for the user to run, in the files that hold the notice', () => {
     const notice = 'To find them, run `git ls-files .devflow`. Untrack them with `git rm --cached <file>`, and delete them.';
     expect(findUnguardedIndexReads([
-      { path: NOTICE_SHELL_FILE, content: `MOVE_SKIP_SECTION='Devflow notice: ${notice}'\n` },
+      { path: NOTICE_SHELL_FILE, content: `AREA_PAUSE_MESSAGE='Devflow curation is paused: ${notice}'\n` },
       { path: NOTICE_MEMORY_SHELL_FILE, content: `AREA_PAUSE_MESSAGE='Devflow memory is paused: ${notice}'\n` },
       { path: NOTICE_TS_FILE, content: `const T = '${notice}';\nconst U =\n  \`${notice}\`;` },
       { path: AREA_PAUSE_TS_FILE, content: `const T = '${notice}';\nconst U =\n  \`${notice}\`;` },

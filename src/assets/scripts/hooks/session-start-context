@@ -26,11 +26,11 @@
 # Section 4: Legacy install notice — one line when this repository still carries
 # a retired project-local devflow install (its .claude/settings.json registers
 # devflow hooks), pointing at `devflow uninstall --scope local`.
-# Section 4b: Curation move skipped notice — one fixed line when the one-time move of
+# Section 4b: Curation pause notice — one fixed systemMessage when the one-time move of
 # the old ledger folder left the project alone because git tracks files in a curation
-# data folder (`tracked`) or did not answer (`unknown`); the `curation-move` shim sets
-# DF_CURATION_MOVE_SKIPPED, and on a session that starts, resumes or is cleared the line
-# tells the main model to tell the user once.
+# data folder (`tracked`) or did not answer (`unknown`) while curation is on; the
+# `curation-move` shim sets DF_CURATION_MOVE_SKIPPED, and on a session that starts,
+# resumes or is cleared the message tells the user why curation is paused.
 # Section 5: Compaction resume directive — on a `compact` SessionStart, one fixed
 # line telling the model to re-read the devflow command it was running from the
 # phase in progress (D-COMPACT-RESUME-DIRECTIVE).
@@ -276,7 +276,7 @@ CURATION_ENABLED="$_QG_CURATION"
 # root is looked at once per session. A held, refused or skipped move leaves the old
 # folder in place. A skipped move (git tracks files in a data folder or a backup folder,
 # or git did not answer) sets DF_CURATION_MOVE_SKIPPED to `tracked` or `unknown`, and
-# Section 4b tells the user.
+# the curation area check below pauses curation on it.
 DF_CURATION_MOVE_SKIPPED=""
 if [ -n "$PROJECT_OK" ]; then
   df_curation_move "$LEDGER_ROOT" retry 2>/dev/null || true
@@ -915,50 +915,20 @@ ${LEGACY_SECTION}"
   fi
 fi
 
-# --- Section 4b: Curation pause and move skipped notices ---
+# --- Section 4b: Curation pause notice ---
 # The move of the old curation folder leaves a project alone when git tracks files in
 # a curation data folder, or when git does not answer (curation-move sets
 # DF_CURATION_MOVE_SKIPPED at the call above, and the line before that call empties it).
-# The user cannot see the hook log, so one fixed line goes into the context on a session
-# that starts, resumes or is cleared, and the model tells the user once per such session.
-# Each line is a constant: a single-quoted string that interpolates nothing, so no
-# repository content reaches the model through it. Its words are MOVE_SKIP_NOTICE in
-# src/core/curation-move-skip.ts (tests/shell-hooks.test.ts holds the two equal). A
-# compaction repeats nothing.
-#
-# While curation is on, the same answer pauses it (the curation area check above), and
-# the pause notice replaces the move-skip line: it says why curation reads and writes
+# While curation is on, the same answer pauses it (the curation area check above). The
+# user cannot see the hook log, so the pause notice says why curation reads and writes
 # nothing, and what to do. It is not model context. It goes to the user as a systemMessage
 # (AREA_PAUSE_MESSAGE, joined to the envelope at the end), on a session that starts,
-# resumes or is cleared, and a compaction repeats nothing. It is a constant too. Its
-# words are AREA_PAUSE_NOTICE.curation in src/core/area-pause-notice.ts (tests/shell-hooks.test.ts
-# holds the two equal).
-MOVE_SKIP_SECTION=""
-case "${DF_CURATION_MOVE_SKIPPED:-}" in
-  tracked)
-    MOVE_SKIP_SECTION='Devflow notice: tell the user once, in one short message alongside your answer: devflow did not move the curation data of this project from .devflow/learning/ to .devflow/curation/, because git tracks files in a curation data folder. To find them, run `git ls-files .devflow`. Untrack them with `git rm --cached <file>`, and delete them if you did not make them. Run these commands in the checkout that holds these folders.'
-    ;;
-  unknown)
-    MOVE_SKIP_SECTION='Devflow notice: tell the user once, in one short message alongside your answer: devflow did not move the curation data of this project from .devflow/learning/ to .devflow/curation/, because git did not answer. The move runs again at the next session start or the next init. If this notice stays, check that git runs in this project.'
-    ;;
-esac
-# With curation switched off, devflow shows no curation text at session start: the move
-# still runs, and its skip is told to the user by `devflow init`, not here.
-if [ -n "$AREA_PAUSE_REASON" ] || [ "$CURATION_ENABLED" != "true" ]; then MOVE_SKIP_SECTION=""; fi
-if [ -n "$MOVE_SKIP_SECTION" ]; then
-  case "$SESSION_SOURCE" in
-    startup|resume|clear)
-      dbg "curation move skipped notice emitted"
-      if [ -n "$CONTEXT" ]; then
-        CONTEXT="${CONTEXT}
-
-${MOVE_SKIP_SECTION}"
-      else
-        CONTEXT="$MOVE_SKIP_SECTION"
-      fi
-      ;;
-  esac
-fi
+# resumes or is cleared, and a compaction repeats nothing. It is a constant: a
+# single-quoted string that interpolates nothing, so no repository content reaches the
+# user through it. Its words are AREA_PAUSE_NOTICE.curation in src/core/area-pause-notice.ts
+# (tests/shell-hooks.test.ts holds the two equal). With curation switched off, devflow
+# shows no curation text at session start: the move still runs, and its skip is told to
+# the user by `devflow init`, not here.
 AREA_PAUSE_MESSAGE=""
 case "$AREA_PAUSE_REASON" in
   tracked)
