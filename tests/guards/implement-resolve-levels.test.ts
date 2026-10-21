@@ -58,7 +58,9 @@ const TABLE_HEADER = '| Phase | standard | lean |'
 const GRAMMAR_CELL = "- **Cell:** `-` runs the phase as written; `skip`, alone, skips it; `apply: <name>` applies the `## Rules` bullet `<name>`; `pass level` puts the line `GATE_LEVEL: {GATE_LEVEL}` first in every spawn prompt of the phase, right after a leading `OPERATION:` line. A phase with no spawn takes only `-`. Join `apply:` and `pass level` with `; `. Each `apply:` names exactly one bullet. Any other cell is malformed."
 const GRAMMAR_RULES_BULLET = '- **Rules bullet:** a Rules bullet opens `- **<name>:**`.'
 const GRAMMAR_SKIPPED = '- **Skipped:** a skipped phase does not stop the run, and the next phase starts as written. Each name on its `**Produces:**` line reads `SKIPPED`, and a report shows `SKIPPED`.'
-const GRAMMAR_NOTE = '- **Note:** a Rules bullet may set one report note, `<agent>: ran` or `<agent>: SKIPPED (<reason>)`, where `<reason>` is fixed words from that bullet, never a path name or report text. The command shows the note with the level note.'
+/** The words of the Note bullet that open the channel for a Produces value; the pin and the probe that drops them share the one text. */
+const GRAMMAR_NOTE_VALUE = ", or its own phase's `**Produces:**` value"
+const GRAMMAR_NOTE = `- **Note:** a Rules bullet may set one report note, \`<agent>: ran\` or \`<agent>: SKIPPED (<reason>)\`${GRAMMAR_NOTE_VALUE}, in fixed words from that bullet, never a path name or report text. The command shows the note with the level note.`
 const FLOOR_FIRST = 'No row or rule overrides the next two lines.'
 /** The fail-closed wording, in the pieces that the bullet, its needles and the probes share. */
 const NO_HEADING = 'has no `## Phases` heading with the `| Phase | standard | lean |` header'
@@ -1505,6 +1507,8 @@ describe('row safety is a tripwire over the references (AC-6)', () => {
     const pinned = ['the "## Grammar" text is not the pinned text']
     expect(collectRowSafetyDefects(ref, IMPLEMENT, body), 'the unmodified reference').toEqual([])
     expect(collectRowSafetyDefects(seedOnce(ref, ', never a path name or report text', ''), IMPLEMENT, body), 'the Note without its fixed-words rule').toEqual(pinned)
+    expect(collectRowSafetyDefects(seedOnce(ref, GRAMMAR_NOTE_VALUE, ''), IMPLEMENT, body), 'the Note without its Produces-value channel').toEqual(pinned)
+    expect(collectRowSafetyDefects(seedOnce(ref, GRAMMAR_NOTE_VALUE, ", or its own phase's `**Produces:**` value from the report"), IMPLEMENT, body), 'the Note channel that takes report text').toEqual(pinned)
     expect(collectRowSafetyDefects(seedOnce(ref, ', only through the Rules bullet `harden-scope`', ''), IMPLEMENT, body), 'the Scope sentence without its one route').toEqual(pinned)
     expect(collectRowSafetyDefects(seedOnce(ref, GRAMMAR_NOTE + '\n', ''), IMPLEMENT, body), 'the Note bullet gone').toEqual(pinned)
   })
@@ -2026,6 +2030,12 @@ describe('Phase 5 runs Evaluate once, then one Fix round, under the single-pass 
     }
     expect(collectSinglePassDefects(ref([ROW], [seedOnce(SINGLE_PASS, 'exactly `MISALIGNED', 'exactly `ALIGNED')])), 'the fixed words changed').toEqual([`the ${SINGLE_PASS_NAME} bullet does not hold "${SINGLE_PASS_CLAUSES[2]}" exactly once`])
     expect(collectSinglePassDefects(ref([ROW], [seedOnce(SINGLE_PASS, 'FAILED, BLOCKED or anything else', 'FAILED or BLOCKED')])), 'the other-report route narrowed').toEqual([`the ${SINGLE_PASS_NAME} bullet does not hold "${SINGLE_PASS_CLAUSES[3]}" exactly once`])
+    const reportText = seedOnce(SINGLE_PASS, 'to exactly `MISALIGNED (fixed once, not re-checked)`', 'to the Fix report')
+    expect(collectSinglePassDefects(ref([ROW], [reportText])), 'the Produces value set to report text').toEqual([`the ${SINGLE_PASS_NAME} bullet does not hold "${SINGLE_PASS_CLAUSES[2]}" exactly once`])
+    expect(collectDecidedRowDefects(seedOnce(REFS.implement, SINGLE_PASS, reportText), IMPLEMENT), 'the Produces value set to report text: the decided bullet').toEqual([
+      `the implement Rules section lacks the decided bullet ${SINGLE_PASS}`,
+      `the implement Rules section holds the undecided bullet ${reportText}`,
+    ])
   })
 
   it.each(implementBuilds)('$label: the decided row and bullet pass the grammar, decided-row and row-safety checks of the real reference', ({ spec, body }) => {
