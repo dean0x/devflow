@@ -81,7 +81,7 @@ const REFERENCE_CLAUSES: ReadonlyArray<readonly [label: string, clause: string]>
   ['no path has a parent segment', 'has no `..` segment'],
   ['the tracked-path check', '`git ls-files --full-name --error-unmatch --'],
   ['each path is single-quoted', 'single-quoted'],
-  ['log text never enters a command', 'Never paste log text into a command.'],
+  ['log text never enters a command', 'No other log text goes in a command.'],
   ['the BASE_SHA shape and the unlabelled default', 'matching `^[0-9a-f]{40}$`; without one, label nothing: every failure is REAL.'],
   ['changed and uncommitted paths are REAL', 'A path that FILES_CHANGED lists, or that `git status --porcelain` lists before the re-runs, is REAL.'],
   ['a package unit is changed when its directory is', 'the unit is changed when FILES_CHANGED lists any file in its directory'],
