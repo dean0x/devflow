@@ -498,12 +498,30 @@ export interface InitCurationMoveIO {
   readonly tuning: GlobalTuningMoveIO;
 }
 
+/** A project the move left alone: its ledger root, and the reason whose fixed notice is in the report's lines. */
+export interface LeftAloneProject {
+  readonly root: string;
+  readonly reason: MoveSkipReason;
+}
+
 export interface InitCurationMoveReport {
   /** The lines init prints, in order: the tuning file first, then one for each project that did not move cleanly. */
   readonly lines: readonly string[];
   /** The move notice, printed once per run: set only when at least one project moved. */
   readonly notice: string | null;
   readonly movedCount: number;
+  /** The projects the move left alone, in target order. */
+  readonly leftAlone: readonly LeftAloneProject[];
+}
+
+/**
+ * The reason whose fixed notice the report's lines carry for the project at ledger root
+ * `root`, or null when they carry none. A caller that prints a second line about the same
+ * project passes it to {@link formatCurationNotDrained}, so the notice is printed once.
+ */
+export function shownSkipAt(report: Pick<InitCurationMoveReport, 'leftAlone'>, root: string | null): MoveSkipReason | null {
+  if (root === null) return null;
+  return report.leftAlone.find(project => project.root === root)?.reason ?? null;
 }
 
 /** The notice init prints once when a project moved. */
@@ -529,20 +547,22 @@ export async function runInitCurationMove(
     lines.push(`The global tuning file was not renamed: ${describeFailure(error)}.`);
   }
   let movedCount = 0;
+  let leftAlone: readonly LeftAloneProject[] = [];
   if ('unavailable' in io.ledger) {
     lines.push(`The ledger move did not run: ${io.ledger.unavailable}. The next init tries again.`);
-    return { lines, notice: null, movedCount };
+    return { lines, notice: null, movedCount, leftAlone };
   }
   try {
     const result = await moveProjectLedgers(opts, io.ledger);
     if (result.ok) {
       lines.push(...result.value.lines);
       movedCount = result.value.movedCount;
+      leftAlone = result.value.outcomes.flatMap(outcome => outcome.kind === 'left-alone' ? [{ root: outcome.root, reason: outcome.reason }] : []);
     } else {
       lines.push(`The ledger move did not run: ${result.error.message}.`);
     }
   } catch (error) {
     lines.push(`The ledger move did not run: ${describeMoveText(describeFailure(error))}.`);
   }
-  return { lines, notice: movedCount > 0 ? moveNotice(movedCount) : null, movedCount };
+  return { lines, notice: movedCount > 0 ? moveNotice(movedCount) : null, movedCount, leftAlone };
 }

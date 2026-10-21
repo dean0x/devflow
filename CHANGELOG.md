@@ -150,7 +150,8 @@ the `decisions-*.jsonl` files, the `apply-decisions` skill, the learn-convention
   `devflow curation --status`, `--list` and `--show` print the whole notice. The HUD and these commands print the skip also when `.devflow/curation/` exists.
   While the old folder is there, `--restore`, `--clear`, `--reset` and `--configure` (project scope) print the notice, change nothing and exit 1.
   `--enable` and `--disable` print the notice as a warning, and their exit code does not change.
-  `--disable`, `--clear` and an init with curation off delete no queue file in these cases. `--disable` and `--clear` print the notice once.
+  `--disable`, `--clear` and an init with curation off delete no queue file in these cases, and each prints the notice once.
+  When init has printed the notice in its `Ledger move skipped for <root>` line, its drain adds only `The curation queue was not drained.`
   When git tracks files, the notice tells you to run `git ls-files .devflow`, and then `git rm --cached <file>`, in the checkout that holds the folders.
   When git does not answer, the notice tells you to check that git runs in the project. The move runs again at the next session start or the next init.
   A session start runs the check again in both cases.

@@ -294,6 +294,30 @@ describe('drainDisabledFeatureQueues (D-INIT-DRAIN-AFTER-SWITCH)', () => {
     expect(refused).toEqual([expect.stringContaining(MOVE_SKIP_NOTICE.tracked)]);
   });
 
+  it.each(['tracked', 'unknown'] as const)('prints only the short sentence when the move step has just printed the %s notice', async (reason) => {
+    const io: DisabledQueueDrainIO = {
+      drainMemoryQueue: async () => ({ drained: true }),
+      drainCurationQueue: async () => ({ drained: false, skipped: reason }),
+    };
+    const refused = await drainDisabledFeatureQueues(
+      { gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: false, curationEnabled: false, manifestWritten: true, shownSkip: reason },
+      io,
+    );
+    expect(refused).toEqual(['The curation queue was not drained.']);
+  });
+
+  it('prints the whole notice when the move step printed the notice of another reason', async () => {
+    const io: DisabledQueueDrainIO = {
+      drainMemoryQueue: async () => ({ drained: true }),
+      drainCurationQueue: async () => ({ drained: false, skipped: 'tracked' }),
+    };
+    const refused = await drainDisabledFeatureQueues(
+      { gitRoot: ROOT, ledgerRoot: ROOT, memoryEnabled: false, curationEnabled: false, manifestWritten: true, shownSkip: 'unknown' },
+      io,
+    );
+    expect(refused).toEqual([`The curation queue was not drained. ${MOVE_SKIP_NOTICE.tracked}`]);
+  });
+
   describe.each(['tracked', 'unknown'] as const)('with the real drains: the tracked-folder check answers %s', (reason) => {
     it('curation off deletes no curation file, returns the fixed notice, and still drains the memory queue', async () => {
       const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-init-drain-skip-'));

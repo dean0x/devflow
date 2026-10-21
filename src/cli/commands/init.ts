@@ -10,8 +10,8 @@ import { isSameLocation, withoutHomeRoots } from '../../core/same-location.js';
 import { pruneHookLogDirs, MAX_HOOK_LOG_DIRS, type LogDirPruneReport } from '../../core/hook-log-dirs.js';
 import { LEDGER_ROOT_TIMEOUT_MS, lookupLedgerRoot } from '../../core/ledger-root.js';
 import { formatCurationStoreUnavailable } from '../../core/curation-store.js';
-import { loadCurationMove } from '../../core/curation-move.js';
-import { describeMoveText, describeOutcome, runInitCurationMove, type InitCurationMoveReport } from './curation-move-step.js';
+import { loadCurationMove, type MoveSkipReason } from '../../core/curation-move.js';
+import { describeMoveText, describeOutcome, runInitCurationMove, shownSkipAt, type InitCurationMoveReport } from './curation-move-step.js';
 import { realGlobalTuningMoveIO, realProjectLedgerMoveIO } from './curation-move-io.js';
 import { describeEchoedValue } from '../../core/echo-value.js';
 import { installViaFileCopy, composeScripts, type InstallReport } from '../../targets/claude-code/installer.js';
@@ -768,7 +768,9 @@ export interface DisabledQueueDrainIO {
  * queue is a symbolic link (D-CLI-NO-SYMLINK), one for a curation drain that
  * could not list the backups (the live queue is drained then), and one for a curation
  * drain that left the project alone because git tracks a data folder or did not answer
- * (the fixed notice of a skipped move); the caller prints them.
+ * (the fixed notice of a skipped move); the caller prints them. When the move step has
+ * printed that notice for the ledger root (`shownSkip`, its reason), the drain's line
+ * does not repeat it.
  */
 export async function drainDisabledFeatureQueues(
   opts: {
@@ -777,6 +779,7 @@ export async function drainDisabledFeatureQueues(
     memoryEnabled: boolean;
     curationEnabled: boolean;
     manifestWritten: boolean;
+    shownSkip?: MoveSkipReason | null;
   },
   io: DisabledQueueDrainIO = { drainMemoryQueue, drainCurationQueue: drainDisabledCurationQueue },
 ): Promise<readonly string[]> {
@@ -788,7 +791,7 @@ export async function drainDisabledFeatureQueues(
   }
   if (!opts.curationEnabled && opts.ledgerRoot !== null) {
     const curation = await io.drainCurationQueue(opts.ledgerRoot);
-    if (!curation.drained) refused.push(formatCurationNotDrained(curation));
+    if (!curation.drained) refused.push(formatCurationNotDrained(curation, opts.shownSkip ?? null));
     else if (curation.warning !== undefined) refused.push(curation.warning);
   }
   return refused;
@@ -2948,6 +2951,7 @@ export const initCommand = new Command('init')
       memoryEnabled,
       curationEnabled,
       manifestWritten: trackerLifecycle.manifestWritten,
+      shownSkip: shownSkipAt(curationMove, drainRoot.ledgerRoot),
     });
     for (const line of refusedDrains) p.log.warn(line);
 

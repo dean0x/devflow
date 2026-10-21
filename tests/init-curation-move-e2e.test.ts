@@ -17,6 +17,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { requireBuiltCli, sandboxEnv } from './helpers.js';
 import { trackInGit } from './decisions/curation-fixtures.js';
+import { MOVE_SKIP_NOTICE } from '../src/core/curation-move-skip.js';
 
 const CLI = requireBuiltCli();
 const SUBPROCESS_TIMEOUT_MS = 60_000;
@@ -165,6 +166,18 @@ describe('init moves the project ledger folder (TP-7, TP-8, TP-14)', () => {
     expect(await exists(path.join(backup, '.pending-turns.jsonl.swept-20261017T020304Z-ab12cd34')), 'nothing is renamed in the backup').toBe(false);
     expect(await exists(path.join(newDir(), '.pending-turns.jsonl')), 'no row reaches the new queue').toBe(false);
     expect(await fs.readFile(path.join(newDir(), LEDGER_FILE), 'utf-8')).toBe(LEDGER);
+  });
+
+  it('prints the skip notice once when curation is off and git tracks a data folder', { timeout: MULTI_RUN_TIMEOUT_MS }, async () => {
+    await seedOldFolder();
+    trackInGit(repo, path.relative(repo, path.join(oldDir(), LEDGER_FILE)));
+
+    const out = runInit(repo, '--no-curation');
+
+    expect(out).toContain(`Ledger move skipped for ${repo}`);
+    expect(out).toContain('The curation queue was not drained.');
+    expect(out.split(MOVE_SKIP_NOTICE.tracked).length - 1, 'one notice').toBe(1);
+    expect(await exists(path.join(oldDir(), '.pending-turns.jsonl')), 'the queue file stays').toBe(true);
   });
 
   it('refuses a linked old folder, names the root, exits 0 and touches nothing it points at (TP-27)', { timeout: MULTI_RUN_TIMEOUT_MS }, async () => {

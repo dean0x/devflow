@@ -20,6 +20,7 @@ import {
   describeOutcome,
   describeMoveText,
   moveNotice,
+  shownSkipAt,
   MOVE_POOL_LIMIT,
   type GlobalTuningMoveIO,
   type RenameIfAbsentResult,
@@ -747,7 +748,7 @@ describe('runInitCurationMove: the lines and the notice init prints', () => {
   it('prints nothing when nothing moved', async () => {
     const { io } = fakeIO();
     const report = await runInitCurationMove(options({ projectRoots: ['/w/a'] }), { ledger: io, tuning: quietTuning });
-    expect(report).toEqual({ lines: [], notice: null, movedCount: 0 });
+    expect(report).toEqual({ lines: [], notice: null, movedCount: 0, leftAlone: [] });
   });
 
   it('prints the move notice once, however many projects moved', async () => {
@@ -759,6 +760,17 @@ describe('runInitCurationMove: the lines and the notice init prints', () => {
     expect(report.notice).toContain('.devflow/learning/');
     expect(report.notice).toContain('.devflow/curation/');
     expect(report.lines).toEqual([]);
+  });
+
+  it('lists each project the move left alone by its ledger root and reason, and shownSkipAt answers for one root', async () => {
+    const { io } = fakeIO({ moves: { '/w/a': ok(SKIPPED_TRACKED), '/w/b': ok(MOVED), '/w/c': ok(SKIPPED_UNKNOWN) } });
+    const report = await runInitCurationMove(options({ projectRoots: ['/w/a', '/w/b', '/w/c'] }), { ledger: io, tuning: quietTuning });
+    expect(report.leftAlone).toEqual([{ root: '/w/a', reason: 'tracked' }, { root: '/w/c', reason: 'unknown' }]);
+    expect(shownSkipAt(report, '/w/a')).toBe('tracked');
+    expect(shownSkipAt(report, '/w/c')).toBe('unknown');
+    expect(shownSkipAt(report, '/w/b'), 'a project that moved printed no notice').toBeNull();
+    expect(shownSkipAt(report, '/w/other'), 'a root the step did not see').toBeNull();
+    expect(shownSkipAt(report, null)).toBeNull();
   });
 
   it('prints the line for a project whose lookup timed out, and no notice', async () => {
