@@ -10,6 +10,9 @@ it, so the merged step list is one list in one file:
 
 - `fetch_issue_step_1`, `fetch_issues_batch_step_1` and `fetch_issues_batch_step_5` are
   the steps the fetch operations run before and after the provider's own;
+- `manage_debt_step_3` is the step of `manage-debt` that names the two
+  `resolution-summary.md` sections its items come from, so no provider can list a
+  different source;
 - `create_release_steps` is the release-host half of `create-release`. It carries
   `gh release create`; the transport guards of the tool-call providers allow that one host
   shape in that one operation and no other (`HOST_TRANSPORT_ALLOWANCE` in their module tests);
@@ -38,6 +41,12 @@ it, so the merged step list is one list in one file:
 
 @define fetch_issues_batch_step_5():
 5. A null alias in the GraphQL response (issue does not exist, or no access) is DROPPED from the batch — a null alias is never a batch-level failure and never aborts the remaining issues. Report the dropped references in Output as `NOT_FOUND ({refs})`, outside the containment markers, alongside any `TRUNCATED` note; the two counts stay disjoint — `TRUNCATED ({n} not processed)` counts only references beyond the first 50, and the batch renders the successfully fetched issues only. Comments are intentionally not fetched in batch mode; only the single-issue operation fetches comments.
+@end
+
+@define manage_debt_step_3():
+3. Extract items to add:
+   - `## Fix Separately` entries from `{REVIEW_DIR}/resolution-summary.md` (FIX_SEPARATE from Triage agent)
+   - `## Deferred to Tech Debt` entries from `{REVIEW_DIR}/resolution-summary.md` (TECH_DEBT from Triage agent)
 @end
 
 @define create_release_steps():
@@ -144,6 +153,7 @@ Step 4b publishes its section only through this: find the open PR with `gh pr li
 @export fetch_issue_step_1
 @export fetch_issues_batch_step_1
 @export fetch_issues_batch_step_5
+@export manage_debt_step_3
 @export create_release_steps
 @export shipped_issues_step_0
 @export shipped_issues_loop
