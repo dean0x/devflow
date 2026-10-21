@@ -79,7 +79,7 @@ For each worktree:
 2. **If `--review {timestamp}` provided:** use that specific directory (not supported in multi-worktree mode)
 3. **Otherwise:** sort directories by name descending (timestamps are naturally sortable), scan the 10 most recent directories only. Select the first that contains `review-summary.md` (complete review)
 4. **If latest directory already has `resolution-summary.md`:** the review is resolved — check bug-analysis fallback (step 5b).
-5. **Legacy fallback:** if no timestamped subdirectories exist but flat `*.md` files do in `{worktree}/.devflow/docs/reviews/{branch-slug}/`, read them directly (backwards compatible).
+5. **Legacy fallback:** if no timestamped subdirectories exist but flat `*.md` files do in `{worktree}/.devflow/docs/reviews/{branch-slug}/`, read them directly.
 
 **5b. Bug analysis fallback** — if no qualifying review directory found (no reviews exist, or all resolved):
 - List directories in `{worktree}/.devflow/docs/bug-analysis/{branch-slug}/`
@@ -216,6 +216,8 @@ Wait for Triage agent to complete before proceeding. Parse verdict ledger from T
 - **TECH_DEBT**: Architectural overhaul only — LAST RESORT
 - **DUPLICATE**: Collapsed duplicate issue — carries `duplicate_of: <primary-id>` referencing the non-DUPLICATE primary; inherits the primary's outcome
 
+A ledger `### Summary` line `- Tiers: not applied (…)` is the level note.
+
 <!-- curation:on -->
 Collect every decision and pitfall the Triage agent's Reasoning columns state, in its words — the resolution summary is posted, so it never carries an ADR/PF ID.
 
@@ -274,7 +276,7 @@ Spawn distinct-file batch Code agents **in a single message** (parallel). Sequen
 Collect from each Code agent:
 - `{status, commitShas, unresolved}` per batch
 - `## Verification` block (commands run + results)
-- An unresolved prose-only issue → FIX_SEPARATE in TRIAGE_RESULTS, Reason `needs a logic change`; other unresolved issues stay Blocked
+- An unresolved prose-only issue that Code names as needing a logic change, and whose type is not `security` → FIX_SEPARATE in TRIAGE_RESULTS, Reason `needs a logic change`; every other unresolved issue stays Blocked
 
 ### Phase 5: Write resolution-summary.md
 
@@ -605,7 +607,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 ├─ Phase 8: CI Status Gate (conditional)
 ├─ Phase 9: Git agent (manage-debt) — FIX_SEPARATE + TECH_DEBT → backfill Tracked={ISSUE_REF} (or TRACEABILITY: DEGRADED on failure)
 │
-├─ Phase 9b: Thread resolution + resolution comment
+├─ Phase 9b: 9b-0 Test agent (stale TPs), 9b-1/9b-2 Git agent (threads, resolution comment)
 │  └─ Step 9b-3: verify-evidence.cjs publish (inline, no Git spawn) — only when the head moved
 │
 ├─ Phase 9c: verify-evidence.cjs readiness (inline, no Git spawn) — non-author approval required, report-only
@@ -626,7 +628,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 | `EVIDENCE_POLICY` is `standard` | Phases 1b and 9b-step-1 are skipped; post-resolution-summary (Phase 9b step 2) still runs if a PR is known |
 | `REQUIRE_NON_AUTHOR_APPROVAL` is `false` | Phase 9c is skipped and reported as SKIPPED |
 | `reviewPublication: off` | Git agent skips posting the resolution comment (OFF) — except that, only when `EVIDENCE_POLICY` is `required`, Step 0d passes `stub` and a counts-only STUB comment posts |
-| Fork PR this run cannot push to (no maintainer edits, no push access of its own) | validate-branch emits `TRACEABILITY: DEGRADED (cannot push to fork)` → `fork_no_push`: Phase 7 skips the push, Phase 8 is skipped, 9b-1 records FIXED threads as DEGRADED instead of citing unpushed commits; 9b-2 still posts the resolution comment; the head did not move, so 9b-0 and 9b-3 are skipped |
+| Fork PR this run cannot push to | `TRACEABILITY: DEGRADED (cannot push to fork)` → `fork_no_push`: no push in Phase 7, Phase 8 skipped, 9b-1 records FIXED threads as DEGRADED, 9b-2 still posts; the head did not move, so 9b-0 and 9b-3 are skipped |
 | The PR has no trusted evidence record | 9b-0 finds no vouched-for stale line, so no Test agent runs; 9b-3 still refreshes the block and comment, every TP without a claim reading `UNVERIFIED` |
 | A CI run behind a claim has expired (~90 days) | The TP reads `INDETERMINATE` — never verified, never failed — until a claim at a newer SHA settles it |
 
@@ -634,7 +636,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 
 1. **Orchestration only** - Command spawns agents, doesn't do git/resolve work itself
 2. **Git agent for git work** - All git operations go through Git agent; inline scripts are plumbing
-3. **Traceability-aware** - Policy-gated ops (thread fetch/resolve, merge readiness) are skipped cleanly when the evidence policy does not ask for them; resolution comment (Phase 9b-2) is always-on; test-plan evidence is re-verified (≤1 Test agent) and refreshed only when this run moved the head (Steps 9b-0, 9b-3)
+3. **Traceability-aware** - Policy-gated ops are skipped cleanly when the evidence policy does not ask for them; resolution comment (Phase 9b-2) is always-on; test-plan evidence is re-verified (≤1 Test agent) and refreshed only when this run moved the head (Steps 9b-0, 9b-3)
 
 ## Output Artifact
 

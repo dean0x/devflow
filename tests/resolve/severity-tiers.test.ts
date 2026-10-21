@@ -322,8 +322,10 @@ const PHASE_3_BULLETS = [
 const ROUTE_EMPTY = 'If FIX_NOW list is empty: skip to Phase 5, then run Phases 9, 9b, 9c and 10.'
 const COLLECT_STATUS = '- `{status, commitShas, unresolved}` per batch'
 const COLLECT_VERIFICATION = '- `## Verification` block (commands run + results)'
-/** The Phase 4 collect bullet: only a prose-only issue that Code left unresolved moves to the backlog path. */
-const COLLECT_MOVE = '- An unresolved prose-only issue → FIX_SEPARATE in TRIAGE_RESULTS, Reason `needs a logic change`; other unresolved issues stay Blocked'
+/** The Phase 4 collect bullet: only a prose-only issue that Code names as needing a logic change, and that is no `security` type, moves to the backlog path. */
+const COLLECT_MOVE = '- An unresolved prose-only issue that Code names as needing a logic change, and whose type is not `security` → FIX_SEPARATE in TRIAGE_RESULTS, Reason `needs a logic change`; every other unresolved issue stays Blocked'
+/** The Phase 2 clause that shows a degraded tier run: Triage's Summary line is the level note. */
+const TIERS_NOTE = 'A ledger `### Summary` line `- Tiers: not applied (…)` is the level note.'
 const SEVERITY_SENTENCE = 'Open each Issue cell with its severity in brackets when it has one, as `[HIGH]`.'
 const DUPLICATE_PARAGRAPH_OPENER = 'DUPLICATE issues are listed **only** in `## Duplicates`'
 const TEMPLATE_LINE = 'Use the template from the Output Artifact section below.'
@@ -343,8 +345,9 @@ const verdictLiteral = (ref: string): string | null => {
 
 /**
  * How a compiled /resolve falls short of the Triage reference, outside the curation arms: the parse line carries the
- * prose-only value once and equal to the Verdicts value, Phase 3 keeps its three bullets and no Refactor spawn exists, the
- * Phase 4 collect list moves only an unresolved prose-only issue, Phase 5 opens the Issue cell with the severity, the empty
+ * prose-only value once and equal to the Verdicts value, Phase 2 makes Triage's not-applied Tiers line the level note, Phase 3
+ * keeps its three bullets and no Refactor spawn exists, the Phase 4 collect list moves only an unresolved prose-only issue that
+ * Code names as needing a logic change and that is no security type, Phase 5 opens the Issue cell with the severity, the empty
  * route, the Phase 7 SKIPPED line, the Phase 9 gate and backfill and the summary headings stay as they were, and the summary
  * header names the level with any level note.
  */
@@ -359,6 +362,9 @@ export function collectResolveSideDefects(body: string, ref: string): string[] {
   const n = countOf(body, PROSE_ONLY)
   if (n !== 1) out.push(`the prose-only value occurs ${n} times in the command, expected once (in the parse line)`)
   if (body.includes('subagent_type="Refactor"') || body.includes('agentType: "Refactor"')) out.push('the command spawns a Refactor agent')
+
+  const phase2 = sectionBetween(body, '### Phase 2: Global Triage\n', '### Phase 3:')
+  if (phase2 === null || countOf(phase2, TIERS_NOTE) !== 1) out.push('Phase 2 lacks the line that makes the Tiers: not applied Summary line the level note')
 
   const phase3 = sectionBetween(body, '### Phase 3: Batch FIX_NOW Issues\n', '### Phase 4:')
   if (phase3 === null) out.push('no Phase 3')
@@ -718,7 +724,15 @@ describe('resolve.mds reads what Triage writes (TP-5, TP-12, TP-14, TP-15, TP-16
     expect(collectResolveSideDefects(seedOnce(body, `${COLLECT_VERIFICATION}\n${COLLECT_MOVE}`, `${COLLECT_MOVE}\n${COLLECT_VERIFICATION}`), REFERENCE), 'the move bullet first').toEqual([list])
     expect(collectResolveSideDefects(seedOnce(body, 'Reason `needs a logic change`;', 'Reason `deferred`;'), REFERENCE), 'a changed Reason').toEqual([list])
     expect(collectResolveSideDefects(seedOnce(body, 'An unresolved prose-only issue', 'An unresolved issue'), REFERENCE), 'a move for every unresolved issue').toEqual([list])
-    expect(collectResolveSideDefects(seedOnce(body, '; other unresolved issues stay Blocked', ''), REFERENCE), 'the Blocked rule dropped').toEqual([list])
+    expect(collectResolveSideDefects(seedOnce(body, ' that Code names as needing a logic change', ''), REFERENCE), 'a move for an item that Code did not name').toEqual([list])
+    expect(collectResolveSideDefects(seedOnce(body, ', and whose type is not `security`', ''), REFERENCE), 'a move for a security type').toEqual([list])
+    expect(collectResolveSideDefects(seedOnce(body, '; every other unresolved issue stays Blocked', ''), REFERENCE), 'the Blocked rule dropped').toEqual([list])
+  })
+
+  it.each(RESOLVE_BUILDS)('$label: known-bad probe on Phase 2: a dropped or reworded Tiers level-note clause is reported', ({ body }) => {
+    const lacks = 'Phase 2 lacks the line that makes the Tiers: not applied Summary line the level note'
+    expect(collectResolveSideDefects(seedOnce(body, `${TIERS_NOTE}\n\n`, ''), REFERENCE), 'the clause dropped').toEqual([lacks])
+    expect(collectResolveSideDefects(seedOnce(body, 'is the level note.', 'is a note.'), REFERENCE), 'the clause reworded').toEqual([lacks])
   })
 
   it.each(RESOLVE_BUILDS)('$label: known-bad probes on Phase 5: a dropped severity sentence and one placed after the template line are each reported', ({ body }) => {
