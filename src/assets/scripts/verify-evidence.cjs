@@ -1571,24 +1571,43 @@ function writeOutputs(args, body, blockText, commentText, staleText) {
 }
 
 /**
+ * @typedef {{ outcome: Outcome, target: EditTarget | null }} VerifyPass
+ *   The verify result and the viewer's edit target from the same PR snapshot (null on
+ *   every refusal). The target stays in memory: it never reaches stdout, a flag or a file.
+ */
+
+/**
+ * @param {Io} io
+ * @param {number} code
+ * @param {string} reason  a fixed phrase from this file, never input bytes
+ * @returns {VerifyPass}
+ */
+function refusedPass(io, code, reason) {
+  return { outcome: refuse(io, code, reason), target: null };
+}
+
+/**
+ * One verify pass: the Outcome the `verify` subcommand prints, and the edit target
+ * the same snapshot gave. `posted` in the EVIDENCE line is taken from that target.
+ *
  * @param {Io} io
  * @param {Extract<ParsedArgs, { kind: 'verify' }>} args
  * @param {MainDeps} deps
- * @returns {Outcome}
+ * @returns {VerifyPass}
  */
-function runVerify(io, args, deps) {
+function verifyPass(io, args, deps) {
   // Inputs first: an unusable evidence file or state directory decides before any call.
   /** @type {EvidenceInput | null} */
   let evidence = null;
   if (args.evidence !== null) {
     evidence = loadEvidence(args.evidence);
-    if (evidence === null) return refuse(io, EXIT_CODES.INPUT_UNUSABLE, 'evidence file unusable');
+    if (evidence === null) return refusedPass(io, EXIT_CODES.INPUT_UNUSABLE, 'evidence file unusable');
     if (evidence.malformed > 0) io.notes.add('malformed-claims');
   }
-  if (args.state !== null && !isRealDirectory(args.state)) return refuse(io, EXIT_CODES.INPUT_UNUSABLE, 'state directory unusable');
+  if (args.state !== null && !isRealDirectory(args.state)) return refusedPass(io, EXIT_CODES.INPUT_UNUSABLE, 'state directory unusable');
 
   const pr = parsePrJson(prView(io, args.pr, PR_FIELDS), args.pr);
-  if (pr === null) return refuse(io, EXIT_CODES.REMOTE_FAILURE, 'the PR could not be read');
+  if (pr === null) return refusedPass(io, EXIT_CODES.REMOTE_FAILURE, 'the PR could not be read');
 
   const trust = resolveTrust(io, pr, args.approval);
   const record = findTrustedRecord(pr, trust);
@@ -1599,12 +1618,12 @@ function runVerify(io, args, deps) {
   // trusted record's.
   const fromFile = evidence !== null && evidence.plan !== null;
   const plan = fromFile ? /** @type {any} */ (evidence).plan : bodyPlan(pr.body);
-  if (plan === null) return refuse(io, EXIT_CODES.INPUT_UNUSABLE, 'the PR body test-plan block cannot serve as the plan');
+  if (plan === null) return refusedPass(io, EXIT_CODES.INPUT_UNUSABLE, 'the PR body test-plan block cannot serve as the plan');
   if (!fromFile && !coversRecord(plan, record)) {
-    return refuse(io, EXIT_CODES.INPUT_UNUSABLE, 'the PR body test-plan block drops a TP the trusted record carries');
+    return refusedPass(io, EXIT_CODES.INPUT_UNUSABLE, 'the PR body test-plan block drops a TP the trusted record carries');
   }
   const inputs = tpInputs(plan, evidence, record, fromFile);
-  if (inputs === null) return refuse(io, EXIT_CODES.OUTPUT_GATE_REFUSED, 'a TP line failed its grammar');
+  if (inputs === null) return refusedPass(io, EXIT_CODES.OUTPUT_GATE_REFUSED, 'a TP line failed its grammar');
 
   const repo = prepareRepo(io, pr);
   /** @type {RunMemo} */
@@ -1618,7 +1637,7 @@ function runVerify(io, args, deps) {
     : record.kind === 'record' ? record.exceptions : [];
   const key = PE.dedupeKey({ records, exceptions }, sha256);
   const tally = PE.tally(records.map(r => r.state));
-  if (!key.ok || !tally.ok) return refuse(io, EXIT_CODES.OUTPUT_GATE_REFUSED, 'the records failed their grammar');
+  if (!key.ok || !tally.ok) return refusedPass(io, EXIT_CODES.OUTPUT_GATE_REFUSED, 'the records failed their grammar');
 
   const mode = publicationMode(args.publication);
   const ev = {
@@ -1629,8 +1648,9 @@ function runVerify(io, args, deps) {
     exceptions,
   };
   const body = bodyUpdate(io, plan, ev, pr.body);
-  const comment = commentUpdate(plan, ev, mode, editTarget(pr));
-  if (body === null || comment === null) return refuse(io, EXIT_CODES.OUTPUT_GATE_REFUSED, 'the block or the comment failed to render');
+  const target = editTarget(pr);
+  const comment = commentUpdate(plan, ev, mode, target);
+  if (body === null || comment === null) return refusedPass(io, EXIT_CODES.OUTPUT_GATE_REFUSED, 'the block or the comment failed to render');
 
   const line = gateEvidenceLine(deps, {
     pr: pr.number,
@@ -1644,12 +1664,22 @@ function runVerify(io, args, deps) {
     posted: comment.posted,
     body: body.changed ? 'changed' : 'same',
   }, plan.tps.length);
-  if (line === null) return refuse(io, EXIT_CODES.OUTPUT_GATE_REFUSED, 'the EVIDENCE line failed its gate');
+  if (line === null) return refusedPass(io, EXIT_CODES.OUTPUT_GATE_REFUSED, 'the EVIDENCE line failed its gate');
 
   if (!writeOutputs(args, pr.body, body.blockText, comment.text, staleOutText(inputs, records))) {
-    return refuse(io, EXIT_CODES.WRITE_FAILED, 'an output file could not be written');
+    return refusedPass(io, EXIT_CODES.WRITE_FAILED, 'an output file could not be written');
   }
-  return { code: EXIT_CODES.OK, stdout: line + '\n' };
+  return { outcome: { code: EXIT_CODES.OK, stdout: line + '\n' }, target };
+}
+
+/**
+ * @param {Io} io
+ * @param {Extract<ParsedArgs, { kind: 'verify' }>} args
+ * @param {MainDeps} deps
+ * @returns {Outcome}
+ */
+function runVerify(io, args, deps) {
+  return verifyPass(io, args, deps).outcome;
 }
 
 /**
@@ -2030,9 +2060,11 @@ function publishBody(io, pr, fields, files) {
  * @param {number} pr
  * @param {{ posted: string }} fields  the EVIDENCE line's fields
  * @param {{ commentRaw: string, comment: string }} files
+ * @param {EditTarget | null} target  the viewer's newest evidence comment in the snapshot
+ *   verify read, or null when there is none
  * @returns {Part}
  */
-function publishComment(io, pr, fields, files) {
+function publishComment(io, pr, fields, files, target) {
   if (fields.posted === 'yes') return okPart('SKIPPED');
   if (fields.posted === 'n/a') return okPart('OFF');
   if (!scrub(io, files.commentRaw, files.comment)) return degradedPart('redaction unavailable');
@@ -2079,18 +2111,18 @@ function runPublish(io, args, deps) {
       commentRaw: file('comment.raw'),
       comment: file('comment'),
     };
-    const verified = runVerify(io, {
+    const verified = verifyPass(io, {
       kind: 'verify', pr: args.pr, publication: args.publication, evidence: args.evidence, state,
       blockOut: files.notesRaw, commentOut: files.commentRaw, staleOut: null, approval: false,
     }, deps);
-    if (verified.code !== EXIT_CODES.OK) return evidenceUnavailable(io, 'verify did not answer');
-    const line = stripOneNewline(verified.stdout);
+    if (verified.outcome.code !== EXIT_CODES.OK) return evidenceUnavailable(io, 'verify did not answer');
+    const line = stripOneNewline(verified.outcome.stdout);
     const parsed = PE.parseEvidenceLine(line);
     if (!parsed.ok || parsed.value.pr !== args.pr) return evidenceUnavailable(io, 'verify answered something else');
 
     const stage = writeStageIo(io);
     const body = publishBody(stage, args.pr, parsed.value, files);
-    const comment = publishComment(stage, args.pr, parsed.value, files);
+    const comment = publishComment(stage, args.pr, parsed.value, files, verified.target);
     return { code: EXIT_CODES.OK, stdout: renderPublishBlock(line, body, comment) };
   } finally {
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* the OS clears its temp directory */ }
