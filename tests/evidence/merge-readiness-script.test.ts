@@ -74,7 +74,7 @@ function exceptionRecord(): string {
 }
 
 const RECORD_COMMENT = { author: { login: 'devflow-bot' }, authorAssociation: 'OWNER', body: exceptionRecord(), viewerDidAuthor: true }
-const PASSING = [{ name: 'unit', state: 'SUCCESS', bucket: 'pass' }, { name: 'lint', state: 'SUCCESS', bucket: 'pass' }]
+const PASSING = [{ name: 'unit', state: 'SUCCESS', bucket: 'pass', workflow: 'CI' }, { name: 'lint', state: 'SUCCESS', bucket: 'pass', workflow: 'CI' }]
 const RESOLVED = { totalCount: 2, nodes: [{ isResolved: true }, { isResolved: true }] }
 
 /** Everything green, so each scenario spoils exactly one thing. */
@@ -141,11 +141,11 @@ describe('AC-204: readiness prints the contract block and reads without writing'
     expect(block(odd).decision).toBe('unrecognised')
   })
 
-  it('5. CI: failing names the checks, pending is its own arm, no checks reported is NO_CI and can be READY', SPAWN_BUDGET, () => {
-    const failing = run(green({ checks: [...PASSING, { name: 'e2e (linux)', state: 'FAILURE', bucket: 'fail' }] }))
+  it('5. CI: failing names the checks, pending is its own arm, external checks alone are unknown, no checks reported is NO_CI and can be READY', SPAWN_BUDGET, () => {
+    const failing = run(green({ checks: [...PASSING, { name: 'e2e (linux)', state: 'FAILURE', bucket: 'fail', workflow: 'CI' }] }))
     expect(status(failing)).toBe('NOT_READY (CI failing: e2e (linux))')
     expect(block(failing).ci).toBe('FAILING')
-    const pending = run(green({ checks: [...PASSING, { name: 'e2e', state: 'PENDING', bucket: 'pending' }], checksExit: 8 }))
+    const pending = run(green({ checks: [...PASSING, { name: 'e2e', state: 'PENDING', bucket: 'pending', workflow: 'CI' }], checksExit: 8 }))
     expect(pending.code, pending.stderr).toBe(0)
     expect(status(pending)).toBe('NOT_READY (CI pending)')
     const none = run(green({ checks: undefined }))
@@ -154,6 +154,12 @@ describe('AC-204: readiness prints the contract block and reads without writing'
     const unrecognised = run(green({ checks: [...PASSING, { name: 'odd', state: 'X', bucket: 'neutral' }] }))
     expect(block(unrecognised).ci).toBe('INDETERMINATE')
     expect(status(unrecognised)).toBe('NOT_READY (status unknown)')
+    // A pass from an external check (workflow empty or absent) is no proof that the repository's workflow ran.
+    for (const checks of [[{ name: 'snyk', state: 'SUCCESS', bucket: 'pass', workflow: '' }], [{ name: 'snyk', state: 'SUCCESS', bucket: 'pass' }]]) {
+      const external = run(green({ checks }))
+      expect(block(external).ci).toBe('INDETERMINATE')
+      expect(status(external)).toBe('NOT_READY (status unknown)')
+    }
   })
 
   it('6. a hostile check name reaches stdout only sanitized', SPAWN_BUDGET, () => {

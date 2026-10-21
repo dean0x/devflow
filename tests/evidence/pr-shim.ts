@@ -83,7 +83,7 @@ export interface ShimScenario {
   /** `reviewDecision` answer: a string, or null for "no rule asks for a review". */
   readonly reviewDecision?: string | null
   /** `pr checks` rows; absent answers "no checks reported". */
-  readonly checks?: ReadonlyArray<{ readonly name: string; readonly state: string; readonly bucket: string }>
+  readonly checks?: ReadonlyArray<{ readonly name: string; readonly state: string; readonly bucket: string; readonly workflow?: string }>
   readonly checksExit?: number
   /** The GraphQL thread answer's `reviewThreads`. Absent answers an unscripted failure. */
   readonly threads?: { readonly totalCount: number; readonly nodes: ReadonlyArray<{ readonly isResolved: unknown }> }

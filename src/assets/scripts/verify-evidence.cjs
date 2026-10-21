@@ -2375,15 +2375,16 @@ function readThreads(io, pr) {
 /**
  * D-READINESS-CLASSIFIER: the CI status, by check-ci-status's fetch (exit 0 or 8 is a
  * result; "no checks reported" or `[]` is NO_CI; any other failure is INDETERMINATE)
- * and ci-wait's classifier over `bucket`. Failing names are sanitized and bounded by
- * ci-wait's own formatter.
+ * and ci-wait's classifier over `bucket` and `workflow`: a pass needs one GitHub
+ * Actions job, so external checks alone read INDETERMINATE. Failing names are
+ * sanitized and bounded by ci-wait's own formatter.
  *
  * @param {Io} io
  * @param {number} pr
  * @returns {{ status: string, failing: string }}
  */
 function readCi(io, pr) {
-  const r = gh(io, ['pr', 'checks', String(pr), '--json', 'name,state,bucket'], READINESS_MAX_BUFFER);
+  const r = gh(io, ['pr', 'checks', String(pr), '--json', 'name,state,bucket,workflow'], READINESS_MAX_BUFFER);
   const indeterminate = { status: 'INDETERMINATE', failing: '-' };
   if (!answered(r)) return indeterminate;
   if (r.status !== 0 && r.status !== 8) {
@@ -2397,7 +2398,7 @@ function readCi(io, pr) {
   for (const row of rows) {
     const x = obj(row);
     if (typeof x.name !== 'string' || typeof x.bucket !== 'string') return indeterminate;
-    checks.push({ name: x.name, bucket: x.bucket });
+    checks.push({ name: x.name, bucket: x.bucket, workflow: typeof x.workflow === 'string' ? x.workflow : '' });
   }
   const c = CW.classifyChecks(checks);
   return { status: c.status, failing: CW.formatNames(c.failing) };
