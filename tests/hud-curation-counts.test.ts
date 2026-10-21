@@ -3,7 +3,7 @@
 // Validates active-row counting from decisions-ledger.jsonl, inactive-status
 // exclusion, and graceful fallback when the ledger is missing or unreadable.
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createRequire } from 'node:module';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -18,6 +18,8 @@ import { stripAnsi } from '../src/hud/colors.js';
 import type { CurationCountsData, GatherContext } from '../src/hud/types.js';
 import { curationMoveMarkerKey } from '../src/core/project-paths.js';
 import { getCurationMoveMarkerPath } from '../src/core/curation-move-notice.js';
+import { LEDGER_ROOT_TIMEOUT_MS } from '../src/core/ledger-root.js';
+import { pathWithFailingGit } from './decisions/curation-fixtures.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const require = createRequire(import.meta.url);
@@ -251,6 +253,124 @@ describe('gatherLedgerCurationCounts resolves the ledger root like the hooks', {
 
   it('outside a git repository counts the cwd\'s ledger (the prior behaviour)', async () => {
     expect(await gatherLedgerCurationCounts(outside, { home: main })).toEqual({ decisions: 1, pitfalls: 0 });
+  });
+});
+
+// The ledger is counted only where git tracks nothing in the curation folders. The check asks
+// git once, only when the ledger stands, and bounds it by the HUD's one-second budget.
+describe('gatherLedgerCurationCounts where git tracks files in the curation folders or does not answer (TP-41, TP-42)', { timeout: 30_000 }, () => {
+  let base: string;
+  let root: string;
+  let home: string;
+  let bin: string;
+  let gitLog: string;
+  const ledgerRel = path.join('.devflow', 'curation', 'decisions-ledger.jsonl');
+
+  /** The real git, found before any PATH change. */
+  const realGit = execSync('command -v git', { encoding: 'utf-8' }).trim();
+
+  /** A `git` ahead of the real one on PATH: it records its arguments, and `hang` makes `ls-files` wait. */
+  function shimGit(hang: boolean): void {
+    fs.mkdirSync(bin, { recursive: true });
+    fs.writeFileSync(path.join(bin, 'git'), [
+      '#!/bin/sh',
+      `echo "$@" >> "${gitLog}"`,
+      ...(hang ? ['case " $* " in *" ls-files "*) exec sleep 30;; esac'] : []),
+      `exec "${realGit}" "$@"`,
+      '',
+    ].join('\n'), { mode: 0o755 });
+    vi.stubEnv('PATH', `${bin}${path.delimiter}${process.env.PATH ?? ''}`);
+  }
+
+  const lsFilesCalls = (): number =>
+    (fs.existsSync(gitLog) ? fs.readFileSync(gitLog, 'utf-8') : '').split('\n').filter(line => line.includes('ls-files')).length;
+
+  const seedLedger = (): void => {
+    fs.mkdirSync(path.join(root, '.devflow', 'curation'), { recursive: true });
+    fs.writeFileSync(path.join(root, ledgerRel), [makeRow('decision'), makeRow('pitfall')].join('\n') + '\n');
+  };
+
+  beforeEach(() => {
+    base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hud-tracked-area-')));
+    root = path.join(base, 'project');
+    home = path.join(base, 'home');
+    bin = path.join(base, 'shim-bin');
+    gitLog = path.join(base, 'git-calls.log');
+    fs.mkdirSync(root);
+    fs.mkdirSync(path.join(home, '.devflow', 'logs'), { recursive: true });
+    execSync('git init -q', { cwd: root, stdio: 'pipe' });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+
+  it('counts the ledger of a repository that tracks nothing in the curation folders', async () => {
+    seedLedger();
+
+    expect(await gatherLedgerCurationCounts(root, { home })).toEqual({ decisions: 1, pitfalls: 1 });
+  });
+
+  it.each([
+    ['the curation folder', path.join('.devflow', 'curation', 'decisions-log.jsonl')],
+    ['the old ledger folder', path.join('.devflow', 'learning', 'decisions-ledger.jsonl')],
+    ['a backup folder', path.join('.devflow', 'learning.backup-20261017T020304Z-ab12cd34', '.pending-turns.jsonl')],
+  ])('shows no counts when git tracks a file of %s', async (_name, tracked) => {
+    seedLedger();
+    fs.mkdirSync(path.dirname(path.join(root, tracked)), { recursive: true });
+    fs.writeFileSync(path.join(root, tracked), 'content of the repository\n');
+    execSync(`git add -f -- "${tracked}"`, { cwd: root, stdio: 'pipe' });
+
+    expect(await gatherLedgerCurationCounts(root, { home })).toBeNull();
+  });
+
+  it('shows no counts and no move notice when git tracks the old folder beside the new ledger', async () => {
+    seedLedger();
+    fs.mkdirSync(path.join(root, '.devflow', 'learning'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.devflow', 'learning', 'decisions-ledger.jsonl'), 'content of the repository\n');
+    execSync('git add -f -- .devflow/learning/decisions-ledger.jsonl', { cwd: root, stdio: 'pipe' });
+    fs.writeFileSync(getCurationMoveMarkerPath(home, root, 'tracked'), '');
+
+    expect(await gatherLedgerCurationCounts(root, { home })).toBeNull();
+  });
+
+  it('shows no counts when a .git entry stands and git does not answer', async () => {
+    seedLedger();
+    vi.stubEnv('PATH', pathWithFailingGit(base));
+
+    expect(await gatherLedgerCurationCounts(root, { home })).toBeNull();
+  });
+
+  it('makes no git call about the area when the ledger file is absent', async () => {
+    shimGit(false);
+    fs.mkdirSync(path.join(root, '.devflow', 'curation'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.devflow', 'curation', 'curation.json'), '{}\n');
+    execSync('git add -f -- .devflow/curation/curation.json', { cwd: root, stdio: 'pipe' });
+
+    expect(await gatherLedgerCurationCounts(root, { home })).toBeNull();
+    expect(lsFilesCalls()).toBe(0);
+  });
+
+  it('asks git once when the ledger stands', async () => {
+    shimGit(false);
+    seedLedger();
+
+    expect(await gatherLedgerCurationCounts(root, { home })).toEqual({ decisions: 1, pitfalls: 1 });
+    expect(lsFilesCalls()).toBe(1);
+  });
+
+  it('cuts a git that hangs at the one-second budget and shows no counts', async () => {
+    shimGit(true);
+    seedLedger();
+
+    const started = Date.now();
+    const data = await gatherLedgerCurationCounts(root, { home });
+    const elapsed = Date.now() - started;
+
+    expect(data).toBeNull();
+    expect(lsFilesCalls()).toBe(1);
+    expect(elapsed, 'the check is cut at its budget, not left to hang').toBeLessThan(LEDGER_ROOT_TIMEOUT_MS * 3);
   });
 });
 
