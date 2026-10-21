@@ -26,6 +26,7 @@ import { answersVersion, resolveOnPath, runHook } from './shell-hooks-helpers.js
 
 const HOOKS_DIR = path.resolve(__dirname, '..', 'src', 'assets', 'scripts', 'hooks');
 const PRE_COMPACT_HOOK = path.join(HOOKS_DIR, 'pre-compact-memory');
+const SESSION_START_HOOK = path.join(HOOKS_DIR, 'session-start-memory');
 const BACKGROUND_UPDATER = path.join(HOOKS_DIR, 'background-memory-update');
 /** Each case spawns a full hook plus several git calls; slow under a loaded suite. */
 const HOOK_TIMEOUT_MS = 30_000;
@@ -112,6 +113,26 @@ describe('D-NO-FSMONITOR: index reads never run the repository\'s fsmonitor hook
     expect(fs.existsSync(sb.marker), 'pre-compact-memory ran the fsmonitor hook').toBe(false);
     expect(backup.git.status).toContain('untracked-probe.txt');
     expect(backup.git.diff_stat).toContain('tracked.txt');
+
+    expectUnguardedReadRunsHook(sb);
+  }, HOOK_TIMEOUT_MS);
+
+  // Every memory hook asks whether git tracks files in the memory folder (`git ls-files`) before
+  // it touches the folder. That listing reads the index too: pre-compact-memory asks through the
+  // node leaf, the worker's run below through the shell twin, and the session start here through
+  // the node leaf again.
+  it('session-start-memory asks whether git tracks the memory folder, and its working memory still reaches the context, without running the hook', () => {
+    const memoryDir = path.join(sb.repo, '.devflow', 'memory');
+    fs.mkdirSync(memoryDir, { recursive: true });
+    fs.writeFileSync(path.join(memoryDir, 'WORKING-MEMORY.md'), '## Now\n- FSMONITOR-CANARY\n');
+    const run = runHook(SESSION_START_HOOK, { cwd: sb.repo, source: 'startup' }, sb.home, {
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: '/dev/null',
+    });
+    expect(run.exitCode, run.stderr).toBe(0);
+
+    expect(fs.existsSync(sb.marker), 'session-start-memory ran the fsmonitor hook').toBe(false);
+    expect(JSON.parse(run.stdout).hookSpecificOutput.additionalContext).toContain('FSMONITOR-CANARY');
 
     expectUnguardedReadRunsHook(sb);
   }, HOOK_TIMEOUT_MS);

@@ -317,11 +317,11 @@ describe('json-helper.js operations', () => {
       }
     });
 
-    it('session-start-memory passes exactly the context and the message, both quoted variables', () => {
+    it('session-start-memory passes exactly the context and the message, both quoted variables, at each of its two output sites (the paused area and the run)', () => {
       const source = fs.readFileSync(path.join(HOOKS_DIR, 'session-start-memory'), 'utf-8');
       const sites = source.split('\n').filter(line => /^\s*json_session_output\b/.test(line));
-      expect(sites).toHaveLength(1);
-      expect(sites[0].trim()).toBe('json_session_output "$CONTEXT" "$SYSTEM_MESSAGE"');
+      expect(sites).toHaveLength(2);
+      for (const site of sites) expect(site.trim()).toBe('json_session_output "$CONTEXT" "$SYSTEM_MESSAGE"');
     });
 
     it('session-start-context passes the message as the second argument and never inside the context', () => {
@@ -6979,6 +6979,23 @@ describe('session-start-context: the notice of a skipped move', { timeout: GIT_F
   )('the %s notice for %s holds no path, count or git output: fixed words, and the two commands to run when git tracks files', (_area, reason, notice) => {
     expect(notice).not.toMatch(/[/\\]|\d/);
     expect(notice.match(/`[^`]*`/g) ?? []).toEqual(reason === 'tracked' ? ['`git ls-files .devflow`', '`git rm --cached <file>`'] : []);
+  });
+});
+
+describe('session-start-memory: the notice of a paused memory area', () => {
+  const SESSION_MEMORY = path.join(HOOKS_DIR, 'session-start-memory');
+
+  it.each(['tracked', 'unknown'] as const)('holds the words of the memory pause notice for %s as the one single-quoted assignment of its arm, with nothing interpolated', (reason) => {
+    const hook = fs.readFileSync(SESSION_MEMORY, 'utf-8');
+    const notice = AREA_PAUSE_NOTICE.memory[reason];
+    expect(notice).not.toContain("'");
+    const escaped = notice.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    expect(hook).toMatch(new RegExp(`\\n    ${reason}\\)\\n      AREA_PAUSE_MESSAGE='${escaped}'\\n`));
+  });
+
+  it('assigns the message words in those two arms only', () => {
+    const hook = fs.readFileSync(SESSION_MEMORY, 'utf-8');
+    expect(hook.match(/AREA_PAUSE_MESSAGE='/g)).toHaveLength(2);
   });
 });
 

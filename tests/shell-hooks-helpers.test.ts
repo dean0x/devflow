@@ -684,9 +684,14 @@ describe('memory-permission: the one-time notice', () => {
   });
   afterEach(() => { fs.rmSync(root, { recursive: true, force: true }); });
 
-  /** Run `body` with `$MEM`, `$ROOT` and `$LOGF` set, and a log() that appends to the log file. */
-  const run = (body: string) => {
-    const result = inHook(`MEM="$1"; ROOT="$2"; LOGF="$3"; log() { printf '%s\\n' "$1" >> "$LOGF"; }\n${body}`, [memory, root, logFile]);
+  /**
+   * Run `body` with `$MEM`, `$ROOT` and `$LOGF` set, and a log() that appends to the log file.
+   * The memory area reads `untracked`, as it does in a worker whose area check passed;
+   * `area` sets it to another word, or leaves it unset with `null`.
+   */
+  const run = (body: string, area: string | null = 'untracked') => {
+    const prelude = area === null ? '' : `DF_TRACKED_AREA_MEMORY='${area}'; `;
+    const result = inHook(`${prelude}MEM="$1"; ROOT="$2"; LOGF="$3"; log() { printf '%s\\n' "$1" >> "$LOGF"; }\n${body}`, [memory, root, logFile]);
     expect(result.stderr, 'nothing on stderr').toBe('');
     expect(result.status, result.stderr).toBe(0);
     return result.stdout;
@@ -852,7 +857,7 @@ describe('memory-permission: the one-time notice', () => {
     makeFifo(pending('path'));
     try {
       const result = spawnSync('bash', [
-        '-e', '-c', 'source "$1"; source "$2"; source "$3"; memory_notice_write "$4" "$5" path; echo done',
+        '-e', '-c', 'source "$1"; source "$2"; source "$3"; DF_TRACKED_AREA_MEMORY=untracked; memory_notice_write "$4" "$5" path; echo done',
         '_', path.join(HOOKS_DIR, 'resolve-project-root'), path.join(HOOKS_DIR, 'json-parse'), PERMISSION_HELPER, memory, root,
       ], { encoding: 'utf8', timeout: FIFO_RUN_BOUND_MS });
 
@@ -886,5 +891,19 @@ describe('memory-permission: the one-time notice', () => {
     fs.rmSync(memory, { recursive: true });
     run('memory_notice_write "$MEM" "$ROOT" path\nmemory_denied_seen "$MEM" "$ROOT"\nmemory_notice_clear "$MEM" "$ROOT" path');
     expect(fs.existsSync(memory)).toBe(false);
+  });
+
+  // The memory area answer is the gate: git tracks files in the memory folder, git did not
+  // answer, or nothing asked. Only `untracked` lets the worker leave a notice or a marker.
+  describe.each<readonly [string, string | null]>([
+    ['tracked', 'tracked'],
+    ['unknown', 'unknown'],
+    ['unset', null],
+    ['an unrecognised word', 'maybe'],
+  ])('the memory area reads %s', (_name, area) => {
+    it('leaves no notice and no denied-run marker, however often the worker asks', () => {
+      run('memory_notice_write "$MEM" "$ROOT" path\nmemory_notice_write "$MEM" "$ROOT" denied\nmemory_denied_seen "$MEM" "$ROOT"\nmemory_denied_seen "$MEM" "$ROOT"', area);
+      expect(fs.readdirSync(memory)).toEqual([]);
+    });
   });
 });

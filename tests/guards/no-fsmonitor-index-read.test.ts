@@ -139,13 +139,14 @@ const NOTICE_COMMAND_PHRASES: readonly string[] = [
 ];
 
 /**
- * The files that hold a notice: the TypeScript copies and the session start hook's. The
- * only files where the phrases are prose.
+ * The files that hold a notice: the TypeScript copies and the two session start hooks'
+ * (curation and memory). The only files where the phrases are prose.
  */
 const NOTICE_TS_FILE = 'src/core/curation-move-skip.ts';
 const AREA_PAUSE_TS_FILE = 'src/core/area-pause-notice.ts';
 const NOTICE_SHELL_FILE = 'src/assets/scripts/hooks/session-start-context';
-const NOTICE_FILES: readonly string[] = [NOTICE_TS_FILE, AREA_PAUSE_TS_FILE, NOTICE_SHELL_FILE];
+const NOTICE_MEMORY_SHELL_FILE = 'src/assets/scripts/hooks/session-start-memory';
+const NOTICE_FILES: readonly string[] = [NOTICE_TS_FILE, AREA_PAUSE_TS_FILE, NOTICE_SHELL_FILE, NOTICE_MEMORY_SHELL_FILE];
 
 /**
  * True when `index` stands inside a single-quoted span of its shell line. A scan from the
@@ -316,6 +317,7 @@ describe('no-fsmonitor-index-read guard: seeded probes', () => {
     { name: 'a wrapper call across lines', entry: { path: JS, content: "runGit(exec, root,\n  ['add', '--', file], MAX);" } },
     { name: 'a command string', entry: { path: 'src/core/x.ts', content: "execSync('git commit -m x');" } },
     { name: 'a shell call after the words of a notice', entry: { path: NOTICE_SHELL_FILE, content: "N='run `git ls-files .devflow`'; git ls-files -z\n" } },
+    { name: 'a shell call after the words of the memory notice', entry: { path: NOTICE_MEMORY_SHELL_FILE, content: "N='run `git ls-files .devflow`'; git ls-files -z\n" } },
     { name: 'a notice phrase with other arguments', entry: { path: NOTICE_SHELL_FILE, content: "N='run `git ls-files .devflow --others`'\n" } },
     { name: 'a notice phrase in double quotes in a shell file', entry: { path: NOTICE_SHELL_FILE, content: 'N="run `git ls-files .devflow`"\n' } },
     { name: 'a notice phrase outside any quotes in a shell file', entry: { path: NOTICE_SHELL_FILE, content: 'echo run `git ls-files .devflow`\n' } },
@@ -361,6 +363,7 @@ describe('no-fsmonitor-index-read guard: seeded probes', () => {
     const notice = 'To find them, run `git ls-files .devflow`. Untrack them with `git rm --cached <file>`, and delete them.';
     expect(findUnguardedIndexReads([
       { path: NOTICE_SHELL_FILE, content: `MOVE_SKIP_SECTION='Devflow notice: ${notice}'\n` },
+      { path: NOTICE_MEMORY_SHELL_FILE, content: `AREA_PAUSE_MESSAGE='Devflow memory is paused: ${notice}'\n` },
       { path: NOTICE_TS_FILE, content: `const T = '${notice}';\nconst U =\n  \`${notice}\`;` },
       { path: AREA_PAUSE_TS_FILE, content: `const T = '${notice}';\nconst U =\n  \`${notice}\`;` },
     ])).toEqual([]);

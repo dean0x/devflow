@@ -1,7 +1,7 @@
 /**
  * The memory worker writes exactly one `Run:` line per run, from the worker process only.
  *
- * The worker starts subshells (the probe's watchdog, the claude spawn, the main watchdog)
+ * The worker starts subshells (the probes' watchdogs, the claude spawn, the main watchdog)
  * while its exit trap is set. A subshell that a signal reaches before it has reset the
  * trap runs that trap. The trap acts only in the shell whose real PID is the worker's, so
  * such a subshell writes no `Run:` line and releases no lock. The worker also cancels each
@@ -42,8 +42,8 @@ describe('the memory worker writes one Run line per run', () => {
     const other = killIndexes.filter(i => !cancel.test(code[i]) && !group.test(code[i]));
 
     expect(other.map(i => code[i]), 'no kill other than the two forms above').toEqual([]);
-    expect(cancels.length, 'the two watchdog cancels').toBe(2);
-    expect(groups.length, 'two group signals in each of the two watchdogs').toBe(4);
+    expect(cancels.length, 'the three watchdog cancels').toBe(3);
+    expect(groups.length, 'two group signals in each of the two long watchdogs, one in the area probe').toBe(5);
     for (const i of groups) {
       expect(code[i - 1], `the group signal "${code[i].trim()}" follows a sleep`).toMatch(/^\s*sleep\s/);
     }

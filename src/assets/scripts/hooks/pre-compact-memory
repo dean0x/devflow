@@ -63,6 +63,17 @@ if [ "$_QG_MEMORY" != "true" ]; then
   exit 0
 fi
 
+# Memory area check: while git tracks files in the memory folder of this checkout, or a
+# `.git` entry stands and git does not answer, the memory area is paused, and this hook
+# makes no folder, writes no backup and bootstraps no working memory. The check asks once,
+# in node mode, so a git that hangs is cut (queue_tracked_area), at the project root.
+queue_tracked_area "$PROJECT_ROOT" memory node
+if [ "${DF_TRACKED_AREA_MEMORY:-unknown}" != "untracked" ]; then
+  log "Memory paused: git tracks files in the memory folder, or did not answer; no backup or working memory written"
+  dbg "EXIT: memory area paused"
+  exit 0
+fi
+
 # Auto-create .devflow/ and ensure .gitignore entries (idempotent after first run)
 source "$SCRIPT_DIR/ensure-devflow-init" "$CWD" || exit 0
 
