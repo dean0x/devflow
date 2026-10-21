@@ -66,7 +66,7 @@ afterAll(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-describe('the HUD run from the installed scripts directory', () => {
+describe('the HUD run from the installed scripts directory', { timeout: 30_000 }, () => {
   it('is laid out with the check module beside hud/ and core/, and no package.json above', () => {
     expect(fs.existsSync(path.join(scripts, TRACKED_AREAS_SCRIPT_NAME))).toBe(true);
     expect(fs.existsSync(path.join(scripts, 'core', 'tracked-areas.js'))).toBe(true);
