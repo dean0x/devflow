@@ -30,8 +30,8 @@ import * as path from 'path'
 
 import { compiledSkillRefsDir } from '../../src/core/assets.js'
 import { extractOpSectionFromCorpus, gitOperationReferenceCorpus, prHostRel } from '../helpers.js'
-import { cleanShimRoots, runScript, SHIM_HEAD, SHIM_PR, type Redact, type ScriptRun, type ShimCall, type ShimComment, type ShimScenario } from './pr-shim.js'
-import { PR_EVIDENCE_SCRIPT, VERIFY_EVIDENCE_SCRIPT, CI_WAIT_SCRIPT } from './seam.js'
+import { cleanShimRoots, COMMENT_URL, runScript, SHIM_HEAD, SHIM_PR, type Redact, type ScriptRun, type ShimCall, type ShimComment, type ShimScenario } from './pr-shim.js'
+import { PR_EVIDENCE_SCRIPT, VERIFY_EVIDENCE_SCRIPT, CI_WAIT_SCRIPT, TOP_LEVEL_FUNCTION_RE, functionBodyOf, markerLine } from './seam.js'
 
 interface EvidenceFields {
   pr: number
@@ -510,14 +510,13 @@ const STRICT_MARKER = PE.MARKERS.EVIDENCE_RE as RegExp
 const H1 = 'a'.repeat(40)
 const H2 = 'd'.repeat(40)
 const [KEY_A, KEY_B, KEY_C] = ['a', 'b', 'c'].map(ch => ch.repeat(12))
-const markerLine = (head: string, key: string): string => `${MARKER_OPEN} head:${head} key:${key} -->`
 /** A comment of the viewer (the login the fake posts as). */
 const ownComment = (body: string, over: Partial<ShimComment> = {}): ShimComment =>
   ({ author: { login: 'devflow-bot' }, authorAssociation: 'OWNER', body, viewerDidAuthor: true, ...over })
 /** A comment of another login. The association is NONE, so the script makes no permission lookup for it. */
 const foreignComment = (body: string, over: Partial<ShimComment> = {}): ShimComment =>
   ({ author: { login: 'mallory' }, authorAssociation: 'NONE', body, viewerDidAuthor: false, ...over })
-/** An evidence comment of the viewer from an earlier head, with a key the current plan never has. */
+/** An evidence comment of the viewer, at the shim's head unless `head` is given, with a key the current plan never has. */
 const olderOwn = (head = SHIM_HEAD, key = KEY_A): ShimComment => ownComment(`${markerLine(head, key)}\nOlder evidence text.\n`)
 
 const patchCalls = (calls: readonly ShimCall[]): ShimCall[] => calls.filter(c => c.args[0] === 'api' && c.args[1] === '--method')
@@ -816,7 +815,7 @@ describe('the viewer\'s own evidence comment is edited in place, never doubled',
   it('20. a changed key at the same head edits the newer own comment, an older exact match stays, and a 20-digit id reaches the path whole', SPAWN_BUDGET, () => {
     const exact = ownComment(`${currentMarker()}\nAn earlier copy of this exact evidence.\n`)
     const bigId = '12345678901234567890'
-    const newer = { ...olderOwn(SHIM_HEAD, KEY_C), url: `https://github.com/o/r/pull/7#issuecomment-${bigId}` }
+    const newer = { ...olderOwn(SHIM_HEAD, KEY_C), url: `${COMMENT_URL}${bigId}` }
     const r = runOnce({ scenario: { comments: [exact, newer] } })
     expect(r.code, r.stderr).toBe(0)
     expect(r.stdout, 'the newer comment is not this evidence, so it is not skipped').toContain(' posted:no ')
@@ -1032,7 +1031,6 @@ describe('the boundary prints a publish block only when it parses back to itself
 
 /** Every gh write the script spells: `ghWrite(io, ['pr', 'edit' | 'comment' ...` and the comment edit's `['api', '--method' ...`. */
 const GH_WRITE_RE = /ghWrite\(io, \['(pr|api)', '(edit|comment|--method)'/g
-const TOP_LEVEL_FUNCTION_RE = /^function (\w+)\([^)]*\) \{\n([\s\S]*?)\n\}\n/gm
 
 /** Named collector: each function that writes to gh, with its writes in source order (`pr edit`, `api --method`, `pr comment`). */
 export function collectWritesByFunction(source: string): Record<string, string[]> {
@@ -1054,12 +1052,6 @@ export function collectUngatedWrites(source: string): string[] {
     }
   }
   return out
-}
-
-/** The text of the top-level function `name`, without its signature line; '' when absent. */
-function functionBodyOf(source: string, name: string): string {
-  for (const m of source.matchAll(TOP_LEVEL_FUNCTION_RE)) if (m[1] === name) return m[2]
-  return ''
 }
 
 describe('the script\'s source: each gh write follows its scrub', () => {

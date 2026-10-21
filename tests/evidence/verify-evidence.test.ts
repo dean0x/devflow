@@ -32,7 +32,7 @@ import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 
-import { PR_EVIDENCE_SCRIPT, VERIFY_EVIDENCE_SCRIPT } from './seam.js'
+import { PR_EVIDENCE_SCRIPT, VERIFY_EVIDENCE_SCRIPT, functionBodyOf, markerLine } from './seam.js'
 import {
   type ExecFn,
   type ExecResult,
@@ -1690,7 +1690,6 @@ describe('commentIdOf — the comment id is parsed once, at the boundary', () =>
 
 describe('editTarget — the viewer\'s newest evidence comment, and whether editing it is safe', () => {
   const key = 'a'.repeat(12)
-  const markerLine = (head = HEAD, k = key): string => `${PE.MARKERS.EVIDENCE_OPEN} head:${head} key:${k} -->`
   const comment = (o: Partial<FactsComment> & { readonly body: string }): FactsComment => ({
     login: 'mallory', association: 'NONE', viewerDidAuthor: false, commentId: '', ...o,
   })
@@ -1700,66 +1699,66 @@ describe('editTarget — the viewer\'s newest evidence comment, and whether edit
 
   it('is null with no comment and with only another login\'s evidence comment', () => {
     expect(target()).toBeNull()
-    expect(target(foreign(`${markerLine()}\nbody`))).toBeNull()
+    expect(target(foreign(`${markerLine(HEAD, key)}\nbody`))).toBeNull()
     expect(target(own('a plain comment'))).toBeNull()
   })
 
   it('takes the viewer\'s comment whatever its head and key, with its id and its marker line', () => {
     const line = markerLine(OLD, 'b'.repeat(12))
     expect(target(own(`${line}\nrecords`, '1001'))).toEqual({ id: '1001', marker: line, editable: true })
-    expect(VE.editTarget({ comments: [own(`${markerLine()}\n`, '')] })).toMatchObject({ id: '' })
+    expect(VE.editTarget({ comments: [own(`${markerLine(HEAD, key)}\n`, '')] })).toMatchObject({ id: '' })
   })
 
   it('matches the head prefix on the first line only, and exactly', () => {
     const open = PE.MARKERS.EVIDENCE_OPEN
     expect(target(own(`${open} key:${key} -->\nbody`))).toBeNull()
-    expect(target(own(`intro\n${markerLine()}`))).toBeNull()
+    expect(target(own(`intro\n${markerLine(HEAD, key)}`))).toBeNull()
     expect(target(own(`${open} head -->`))).toBeNull()
     expect(target(own(`${open}  head:${HEAD}`))).toBeNull()
-    expect(target(own(` ${markerLine()}`))).toBeNull()
+    expect(target(own(` ${markerLine(HEAD, key)}`))).toBeNull()
     expect(target(own(`${open} head:`))).toMatchObject({ marker: `${open} head:` })
-    expect(target(own(`${markerLine()}\r\nbody`))).toMatchObject({ marker: markerLine() })
+    expect(target(own(`${markerLine(HEAD, key)}\r\nbody`))).toMatchObject({ marker: markerLine(HEAD, key) })
   })
 
   it('every line the strict marker grammar accepts is a target', () => {
-    for (const line of [markerLine(), markerLine(OLD, '0'.repeat(12)), markerLine(BASE, 'f'.repeat(12))]) {
+    for (const line of [markerLine(HEAD, key), markerLine(OLD, '0'.repeat(12)), markerLine(BASE, 'f'.repeat(12))]) {
       expect(PE.MARKERS.EVIDENCE_RE.test(line)).toBe(true)
       expect(target(own(line))).toMatchObject({ marker: line })
     }
   })
 
   it('the newest of two viewer matches wins', () => {
-    const older = markerLine(OLD)
-    const newer = markerLine(HEAD)
+    const older = markerLine(OLD, key)
+    const newer = markerLine(HEAD, key)
     expect(target(own(older, '1001'), own(newer, '1002'))).toEqual({ id: '1002', marker: newer, editable: true })
     expect(target(own(newer, '1002'), own('a note'), own(older, '1003'))).toMatchObject({ id: '1003', marker: older })
   })
 
   it('is not editable when a strict evidence marker from another login comes after it', () => {
-    expect(target(own(markerLine(OLD), '1001'), foreign(markerLine(HEAD)))).toEqual({ id: '1001', marker: markerLine(OLD), editable: false })
-    expect(target(own(markerLine(OLD), '1001'), foreign('a note'), foreign(`${markerLine(HEAD)}\nbody`))).toMatchObject({ editable: false })
+    expect(target(own(markerLine(OLD, key), '1001'), foreign(markerLine(HEAD, key)))).toEqual({ id: '1001', marker: markerLine(OLD, key), editable: false })
+    expect(target(own(markerLine(OLD, key), '1001'), foreign('a note'), foreign(`${markerLine(HEAD, key)}\nbody`))).toMatchObject({ editable: false })
   })
 
   it('stays editable when only a prefix-only comment from another login comes after it (not a record)', () => {
     const open = PE.MARKERS.EVIDENCE_OPEN
-    expect(target(own(markerLine(OLD), '1001'), foreign(`${open} head:${HEAD}`))).toMatchObject({ editable: true })
-    expect(target(own(markerLine(OLD), '1001'), foreign(`${markerLine(HEAD)} trailing`))).toMatchObject({ editable: true })
-    expect(target(own(markerLine(OLD), '1001'), foreign(`intro\n${markerLine(HEAD)}`))).toMatchObject({ editable: true })
+    expect(target(own(markerLine(OLD, key), '1001'), foreign(`${open} head:${HEAD}`))).toMatchObject({ editable: true })
+    expect(target(own(markerLine(OLD, key), '1001'), foreign(`${markerLine(HEAD, key)} trailing`))).toMatchObject({ editable: true })
+    expect(target(own(markerLine(OLD, key), '1001'), foreign(`intro\n${markerLine(HEAD, key)}`))).toMatchObject({ editable: true })
   })
 
   it('stays editable when the other login\'s strict marker comes before it', () => {
-    expect(target(foreign(markerLine(HEAD)), own(markerLine(OLD), '1001'))).toMatchObject({ id: '1001', editable: true })
+    expect(target(foreign(markerLine(HEAD, key)), own(markerLine(OLD, key), '1001'))).toMatchObject({ id: '1001', editable: true })
   })
 
   it('a viewer comment after the target never blocks it', () => {
-    expect(target(own(markerLine(OLD), '1001'), own('a note', '1002'))).toMatchObject({ id: '1001', editable: true })
+    expect(target(own(markerLine(OLD, key), '1001'), own('a note', '1002'))).toMatchObject({ id: '1001', editable: true })
   })
 
   it('a malformed own comment (the prefix alone) is a valid target, so an edit repairs it', () => {
     const open = PE.MARKERS.EVIDENCE_OPEN
     const bad = `${open} head:nothex key:zz -->`
     expect(PE.MARKERS.EVIDENCE_RE.test(bad)).toBe(false)
-    expect(target(own(markerLine(OLD), '1001'), own(`${bad}\ngarbled`, '1002'))).toEqual({ id: '1002', marker: bad, editable: true })
+    expect(target(own(markerLine(OLD, key), '1001'), own(`${bad}\ngarbled`, '1002'))).toEqual({ id: '1002', marker: bad, editable: true })
   })
 })
 
@@ -2232,14 +2231,6 @@ function codeLines(source: string): string[] {
   return source.split('\n').map(l => (/^\s*(\*|\/\/|\/\*)/.test(l) ? '' : l))
 }
 
-/** The text of `function name(...) { ... }`, up to the closing brace at column 0; '' when absent. */
-function functionSource(source: string, name: string): string {
-  const start = source.indexOf(`function ${name}(`)
-  if (start === -1) return ''
-  const end = source.indexOf('\n}\n', start)
-  return end === -1 ? '' : source.slice(start, end + 2)
-}
-
 /**
  * Every way to reach a shell or a second spawn path: `shell: true`, exec/execSync,
  * execFile/execFileSync, and any child_process.spawnSync beyond the one production
@@ -2321,7 +2312,6 @@ describe('source guards (verify-evidence.cjs)', () => {
     expect(gate, 'commentIdArg must sit next to loginArg').not.toBeNull()
     expect(gate?.[0]).toContain('COMMENT_ID_RE.test(id)')
     expect(gate?.[0]).toContain("throw new Error('verify-evidence: unchecked comment id')")
-    expect(SOURCE.indexOf('function commentIdArg(')).toBeGreaterThan(SOURCE.indexOf('function loginArg('))
   })
 
   it('every comments-path line holds commentIdArg(), so no unchecked id reaches the path', () => {
@@ -2343,31 +2333,33 @@ describe('source guards (verify-evidence.cjs)', () => {
     const methods = (src: string): string[] => [...codeLines(src).join('\n').matchAll(/'--method', '(\w+)'/g)].map(m => m[1])
     expect(methods(SOURCE)).toEqual(['PATCH'])
     expect(methods(`${SOURCE}\n  ghWrite(io, ['api', '--method', 'DELETE', 'x']);\n`)).toEqual(['PATCH', 'DELETE'])
-    const edit = functionSource(SOURCE, 'publishComment')
+    const edit = functionBodyOf(SOURCE, 'publishComment')
     expect(edit.length, 'publishComment must be in the corpus').toBeGreaterThan(200)
     expect(edit).toContain("'-F', 'body=@' + files.comment, '--silent']")
-    const fields = (src: string): string[] => [...functionSource(src, 'publishComment').matchAll(/'-[fF]'/g)].map(m => m[0])
+    const fields = (src: string): string[] => [...functionBodyOf(src, 'publishComment').matchAll(/'-[fF]'/g)].map(m => m[0])
     expect(fields(SOURCE)).toEqual(["'-F'"])
     const seeded = SOURCE.replace("'--silent']", "'-f', 'x=y', '--silent']")
     expect(seeded, 'the seed must land').not.toBe(SOURCE)
     expect(fields(seeded)).toHaveLength(2)
   })
 
-  it('parsePrJson keeps a comment\'s id, never its url, and takes it from commentIdOf', () => {
-    expect(SOURCE).toContain('commentId: commentIdOf(x.url, pr)')
-    expect(SOURCE).toContain('login: string, association: string, body: string, viewerDidAuthor: boolean, commentId: string')
+  it('parsePrJson builds each comment with an id from commentIdOf and with no url', () => {
+    const parse = functionBodyOf(SOURCE, 'parsePrJson')
+    expect(parse.length, 'parsePrJson must be in the corpus').toBeGreaterThan(200)
+    expect(parse).toContain('commentId: commentIdOf(x.url, pr)')
+    expect(parse).not.toMatch(/\burl:/)
   })
 
   it('the head prefix is read from pr-evidence MARKERS, never rebuilt here, and the strict trust functions never name it', () => {
     const named = (src: string): string[] => codeLines(src).filter(l => l.includes('EVIDENCE_HEAD_PREFIX'))
     const rebuilt = (src: string): string[] => codeLines(src).filter(l => l.includes("' head:'"))
-    expect(functionSource(SOURCE, 'editTarget')).toContain('startsWith(PE.MARKERS.EVIDENCE_HEAD_PREFIX)')
+    expect(functionBodyOf(SOURCE, 'editTarget')).toContain('startsWith(PE.MARKERS.EVIDENCE_HEAD_PREFIX)')
     expect(named(SOURCE), 'editTarget is the one reader').toHaveLength(1)
     expect(rebuilt(SOURCE)).toEqual([])
     expect(rebuilt(`${SOURCE}\nconst h = PE.MARKERS.EVIDENCE_OPEN + ' head:';\n`)).toHaveLength(1)
     const strict = ['markerComments', 'resolveTrust', 'findTrustedRecord']
-    const namers = (src: string): string[] => strict.filter(name => functionSource(src, name).includes('EVIDENCE_HEAD_PREFIX'))
-    for (const name of strict) expect(functionSource(SOURCE, name).length, `${name} must be in the corpus`).toBeGreaterThan(80)
+    const namers = (src: string): string[] => strict.filter(name => functionBodyOf(src, name).includes('EVIDENCE_HEAD_PREFIX'))
+    for (const name of strict) expect(functionBodyOf(SOURCE, name).length, `${name} must be in the corpus`).toBeGreaterThan(80)
     expect(namers(SOURCE)).toEqual([])
     const probe = SOURCE.replace('function markerComments(pr) {', 'function markerComments(pr) {\n  const p = PE.MARKERS.EVIDENCE_HEAD_PREFIX;')
     expect(probe, 'the seed must land').not.toBe(SOURCE)
@@ -2377,13 +2369,13 @@ describe('source guards (verify-evidence.cjs)', () => {
   it('the failed-write reason is picked in one helper that runs no gh call, and the three writes use it', () => {
     const phrase = "'5xx on update-pr-evidence'"
     const spelled = (src: string): string[] => codeLines(src).filter(l => l.includes(phrase))
-    const helper = functionSource(SOURCE, 'writeFailedPart')
+    const helper = functionBodyOf(SOURCE, 'writeFailedPart')
     expect(helper.length, 'writeFailedPart must be in the corpus').toBeGreaterThan(40)
     expect(helper).toContain(phrase)
     expect(helper).not.toMatch(/\bgh(?:Write)?\(/)
     expect(spelled(SOURCE)).toHaveLength(1)
-    expect(functionSource(SOURCE, 'publishBody').match(/writeFailedPart\(/g)).toHaveLength(1)
-    expect(functionSource(SOURCE, 'publishComment').match(/writeFailedPart\(/g)).toHaveLength(2)
+    expect(functionBodyOf(SOURCE, 'publishBody').match(/writeFailedPart\(/g)).toHaveLength(1)
+    expect(functionBodyOf(SOURCE, 'publishComment').match(/writeFailedPart\(/g)).toHaveLength(2)
     expect(spelled(`${SOURCE}\n  return degradedPart(r.serverError ? ${phrase} : 'x');\n`)).toHaveLength(2)
   })
 

@@ -26,7 +26,8 @@
  *
  * Comments carry a pull-comment `url` (`.../pull/7#issuecomment-<n>`, n from 1001 in the
  * order they are seeded and posted) unless a scenario seeds one, `''` included. The comment
- * edit and its read-back are scripted for one argv shape each; any other `api` argv exits 97.
+ * edit and its read-back are scripted for one argv shape each, as are the GraphQL thread
+ * count and the repository `html_url` (`https://github.com/o/r`); any other `api` argv exits 97.
  * An edit answers with a JSON body of at least 8 KiB unless it runs `--silent`, so a write
  * buffer that is too small shows. `pr comment`, `pr edit` and the comment edit are the writes.
  */
@@ -110,7 +111,7 @@ const save = () => fs.writeFileSync(statePath, JSON.stringify(state))
 const log = extra => fs.appendFileSync(logPath, JSON.stringify(Object.assign({ args }, extra || {})) + '\n')
 const out = value => { process.stdout.write(typeof value === 'string' ? value : JSON.stringify(value)) }
 const stop = (stderr, code) => { process.stderr.write(stderr); process.exit(code === undefined ? 1 : code) }
-const COMMENT_URL = 'https://github.com/o/r/pull/7#issuecomment-'
+const COMMENT_URL = ${JSON.stringify(COMMENT_URL)}
 const COMMENT_PATH_RE = /^repos\/\{owner\}\/\{repo\}\/issues\/comments\/([0-9]+)$/
 const commentById = id => state.pr.comments.find(c => typeof c.url === 'string' && c.url.endsWith('#issuecomment-' + id))
 const unscripted = () => { log({ unscripted: true }); stop('gh shim: unscripted argv\n', 97) }
